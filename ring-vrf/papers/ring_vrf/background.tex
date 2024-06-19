@@ -1,0 +1,223 @@
+\newcommand{\com}{\mathsf{Com}}
+\newcommand{\open}{\mathsf{Open}}
+\newcommand{\commit}{\mathsf{Commit}}
+\newcommand{\NARK}{\mathsf{NARK}}
+\section{Preliminaries} %It is better name because this section contains information that helps reader to understand the later sections better
+\label{sec:background}
+
+We  give definitions of some  primitives that help us to construct our protocols.
+
+% underlying both Chaum-Pedersen DLEQ proofs and pairing based zkSNARKs.
+
+% As our ring VRF is built by composing them,
+% We briefly recall the primitives and security assumptions underlying
+% both Chaum-Pedersen DLEQ proofs and pairing based zkSNARKs.
+
+
+%\subsection{Elliptic curves}
+%\label{sec:ec_background}
+%
+%% As our ring VRF is built by composing them, 
+%% We briefly recall the primitives and security assumptions underlying
+%% both Chaum-Pedersen DLEQ proofs and pairing based zkSNARKs. 
+%
+%We obey mathematical and cryptographic implementation convention by 
+%adopting additive notation for elliptic curve  scalar multiplications and 
+%multiplicative notation for pairing target groups.
+%
+%All objects implicitly depend on a security parameter \secparam.
+%All protocols therefore have an implicit parameter generation algorithm,
+%which output their hash functions, elliptic curves, and some independent base points on the elliptic curves.
+%
+%We need an elliptic curve $\ecE$ over a field of characteristic $q$,
+%equipped with a type III pairing $e : \grE_1 \times \grE_2 \to \grE_T$,
+%where the groups  $\grE_1 \le \ecE[\F_q]$, $\grE_2 \le \ecE[\F_{q^2}]$, and
+%$\grE_T \le \F^*_{q^{12}}$ all have prime order $p \approx 2^{2\secparam}$. 
+%Let $\gone$ and $\gtwo$ be the generators of $\grE_1$ and $\grE_2$, respectively. 
+%
+%We write $\grE$ when discussing the Chaum-Pedersen DLEQ proofs, which do
+%not employ pairings, but $\grE$ always denotes $\grE_1$ eventually.
+%We avoid pairing unfriendly assumptions like DDH of course, but really
+%we employ the algebraic group model (AGM) throughout.
+%
+%We sweep cofactor concerns under the rug when discussing Groth16,
+%where pairings libraries have traditionally enforced group membership in
+%$\grE_1$ or $\grE_2$ during deserialization.  We explicitly multiply by the
+%effective cofactor $h$ when doing Chaum-Pedersen DLEQ proofs though, as not
+%doing so risks miss-reading by implementers.  Yet, this becomes redundant
+%if deserialization proves group membership, meaning $h=1$.
+%
+%We also let $\ecJ$ denote a ZCash Sapling style ``JubJub'' Edwards curve
+%over $\F_p$, with a distinguished subgroup $\grJ$ of prime order $p_\grJ$,
+%so that SNARKs on $\ecE$ prove $\grJ$ arithmetic relatively cheaply.
+%Aside from Jubjub, we optionally want a ``sister'' Edwards curve $\ecEsis$,
+%with a subgroup $\grE'$ of the same order $p$ as $\grE_1$,
+% but which lacks any pairing.
+%
+%We let $H_p : \{0,1\}^* \to \F_p$ and $H_{\grEsis} : \{0,1\}^* \to \grEsis$
+%denote a hash-to-field and a hash-to-curve with ranges $\F_p$ and $\grEsis$, respectively.  
+%We only ever hash-to-$\ecEsis$ because hash-to-$\grE_1$ create a miss-use
+%footgun for privacy.  Also hash-to-$\ecEsis$ is faster.
+%We let $\Hout$ denote the hash to the VRF output space,
+% usually an extensible output function like Shake128.
+%We model all hashes as random oracles.
+%
+%All our security proofs ignore these underlying elliptic curve concerns,
+%so $\grE_1 = \grEsis$ and cofactors are ignored. DDH is hard in $\grE_1$ and $\grJ$.
+%AGM is used for $\ecE$ in Groth16 sections, or wherever is convenient. 
+
+%\eprint{\subsection{Non-Interactive Zero-Knowledge}}{}
+%\label{subsec:zkp_background}
+
+% refs.
+% https://people.csail.mit.edu/silvio/Selected%20Scientific%20Papers/Zero%20Knowledge/Noninteractive_Zero-Knowkedge.pdf
+%   Alright but kinda poorly phrases
+% https://inst.eecs.berkeley.edu/~cs276/fa20/notes/Multiple%20NIZK%20from%20general%20assumptions.pdf
+%   Addresses the ZK definitions better
+% 
+
+We let $ (\rel, z) $ denote the output of a relation generator $ \mathfrak{R}(1^\secparam) $. $ \rel $ is a polynomial time decidable relation and $ z $ is an auxiliary input. For $ (x; \omega) \in \rel $, we call that $x$ is the statement and $ \omega $ is the witness.
+%All non-interactive zero-knowledge proof systems have some setup procedure
+%$\mathtt{Setup}$ that takes some implicit parameters and some ``circuit''
+%description of \rel, and may produces a structured reference string (SRS).
+%We discuss SRSes and their toxic waste in \S\ref{sec:rvrf_cont} but
+%SRSes remain implicit in our notation.
+A non-interactive zero-knowledge system for $\rel$ ($ \NIZK_\rel $)  consists of the following algorithms:
+\begin{itemize}
+	\item $\NIZK_\rel.\Setup(1^{\lambda}) \rightarrow (\crs_\rel, \tw_\rel, \pp_\rel):$  It  outputs a common reference string $ \crs_\rel $, a trapdoor $ \tw_\rel $ and a l public parameters $\pp_\rel$ with respect to $ \rel $. 
+	\item $\NIZK_\rel.\Prove(\crs_\rel, \pp_\rel, x; \omega) \rightarrow \pi:$ It creates a proof $\pi$ for  $(x; \omega) \in \rel$. 
+	\item $\NIZK_\rel.\Verify(\crs_\rel, \pp_\rel, x; \pi)$ returns either 1 (verified) of 0 (not verified).
+	\item $ \NIZK_\rel.\Simulate(\tw_\rel, \pp_\rel, x) \rightarrow \pi$ returns a proof $ \pi $.
+\end{itemize}	
+%We note that $ \Prove $ and $ \Verify $ algorithms have $ \rel $ as an input even though we do not explicitly specify it. 
+$ \NIZK $ satisfies the following:
+
+%We always describe circuits as languages $\lang$ and write $\NIZK_\lang$ for two reasons: 
+%All SNARK circuits have many logic wires in \rel other than
+%the public input wires $x$ and the secret input witness wires $\omega$.
+%An existential quantifiers $\exists$ more clearly distinguishs
+%public inputs $x$ from secret input witnesses $\omega$ than tuple position.
+%We also benefited from language in the preceding informal exposition,
+% which did not always require specifying $\omega$.
+
+\begin{definition}\label{def:nizk_completeness}[Perfect Completeness]
+	We say $\NIZK_\rel$ has perfect completeness if $ \forall \secparam, \rel $ generated by $  \mathfrak{R} $ and $ \forall (x;\omega) \in \rel $,  $\Pr[\NIZK_\rel.\Verify(\crs_\rel,  \pp_\rel, x, \pi) \rightarrow 1|\NIZK_\rel.\Setup(1^{\lambda}) \rightarrow (\crs_\rel, \tw_\rel, \pp_\rel), \pi \leftarrow \NIZK_\rel.\Prove(\crs_\rel, \pp_\rel, x; \omega) ] = 1 $.  % with high probability
+\end{definition}
+
+\def\advV{\ensuremath{V^*}\xspace} % Why not use \adv here?
+
+\begin{definition}\label{def:nizk_zero_knowledge}[Perfect Zero-Knowledge]
+	We say $\NIZK_\rel$ is {\em perfect zero-knowledge} if $ \forall \secparam, (\rel,z) $ generated by $  \mathfrak{R} $ and $ \forall (x;\omega) \in \rel $ and all adversaries $ \adv $ the following holds given that  $ (\crs_\rel, \tw_\rel, \pp_\rel) \leftarrow \NIZK_\rel.\Setup (1^{\lambda})$:
+	\allowbreak
+	\doublecolumn{\begin{align*}
+		\Pr[& \adv(\crs_\rel,  \pp_\rel, z, \pi,\rel) = 1 \ | \ (\crs_\rel, \tw_\rel,  \pp_\rel) \leftarrow \NIZK_\rel.\Setup (1^{\lambda}),  \\\nonumber
+		& \pi \leftarrow \NIZK_\rel.\Prove (\crs_\rel, \pp_\rel, x;\omega)]\\
+		=\Pr[& \adv(\crs_\rel,  \pp_\rel, z, \pi,\rel) = 1 \ | \ (\crs_\rel, \tw,  \pp_\rel) \leftarrow \NIZK_\rel.\Setup (1^{\lambda}), \\\nonumber
+		&  \pi \leftarrow \NIZK_\rel.\Simulate (\tw_\rel,  \pp_\rel, x)]
+	\end{align*}
+}{
+\begin{footnotesize}
+\begin{align*}
+	\Pr[& \adv(\crs_\rel, \pp_\rel, z, \pi,\rel) = 1 \ |  \pi \leftarrow \NIZK_\rel.\Prove (\crs_\rel,  \pp_\rel, x; \omega)]\\
+	=\Pr[& \adv(\crs_\rel,  \pp_\rel, z, \pi,\rel) = 1 \ |    \pi \leftarrow \NIZK_\rel.\Simulate (\tw_\rel,  \pp_\rel, x)]
+\end{align*}
+\end{footnotesize}}
+	
+\end{definition}
+
+\def\advP{\ensuremath{P^*}\xspace} % Why not use \adv here?
+
+\begin{definition}\label{def:nizk_knowledge_sound}[Knowledge Soundness]
+	We say $\NIZK_\rel$ is {knowledge sound}  if %for all $ (\rel,z)  $ outputted by $ \mathfrak{R} $ if
+	for any non-uniform PPT adversary \adv there exists a PPT extractor $ \Extract $
+	such that
+	\begin{footnotesize}
+	\begin{align}
+		&\Pr[\NIZK_\rel.\Verify(\crs_\rel, \pp_\rel, x,\pi) = 1 \wedge  (x;\omega) \notin \rel | (\rel,z) \leftarrow \mathfrak{R},   \nonumber \\
+		&(\crs_\rel,\tw_\rel,  \pp_\rel) \leftarrow \NIZK_\rel.\Setup(1^{\lambda}), ((x,\pi);\omega)\leftarrow (\adv||\Extract)(\rel, z, \crs_\rel,  \pp_\rel)] =  \negl(\secparam) \nonumber
+	\end{align}
+\end{footnotesize}
+	\noindent where $ (o_A;o_B)\leftarrow A||B(input) $ denote the algorithms that run on the same input and $ B $ has access to the random coins of $ A $.
+\end{definition}
+
+\noindent In our NIZK definition above the corresponding algorithms have more parameters that generally needed. 
+This statement refers to the fact that not all $\crs_\rel$, $\pp_\rel$ or $\tw_\rel$ may be needed by a $\NIZK_\rel$ algorithm for a given $\rel$. 
+In the rest of the work, we adhere to the convention that when instantiating the general $\NIZK_\rel$ api for a specific $\rel$, for simplicity, 
+we will leave out the parameters which in that particular instantiation are the empty set. We do this in order to aggregate in one definition 
+the different types of NIZK that we need and use in this work. Indeed, in case of the non-interactive version of a Sigma protocol, we have 
+that $\crs_\rel = \emptyset$ and $\pp_\rel = \emptyset$. For a $\NIZK_\rel$ such as Groth16~\cite{Groth16}, $\pp_\rel  = \emptyset$. 
+However, for our particular instantiation of $\NIZK_\rel$ in Section~\ref{subsec:rvrf_faster} with $\rel$ defined in Section~\ref{sec:rvrf_cont}, the $\NIZK_\rel.\Setup$ outputs 
+all three parameters $\crs_\rel$, $\tw_\rel$, $\pp_\rel$. Thus our definition allows for maximum flexibility. Finally, for each of our instantiations, we consider only benign 
+auxiliary inputs as defined in~\cite{bening_auxiliary}. 
+
+\begin{definition}[Non-interactive knowledge of arguments (NARK)] $ \NARK_\rel $ for a relation $ \rel $ consists of the same algorithms in $ \NIZK $ but satisfies only completeness (Definition \ref{def:nizk_completeness}) and knowledge soundness (Definition \ref{def:nizk_knowledge_sound}).
+\end{definition}
+%Our zero-knowledge continuations in \S\ref{sec:rvrf_cont} demand
+%rerandomizing existing zkSNARKs, which only Groth16 supports \cite{Groth16}.
+%We therefore introduce some details of Groth16 \cite{Groth16} there,
+%when we tamper with Groth16's SRS and $\mathtt{Setup}$ to create zero-knowledge continuations. 
+% TODO: Do we describe Groth16 \cite{Groth16} enough?
+
+% In this, we exploit several arguments given by \cite{RandomizationGroth16},
+% but for now we recall that \cite{RandomizationGroth16} proves that Groth16
+% satisfies: % white-box weak simulation-extractablity .
+%
+% \begin{definition}\label{def:nizk_weak_simulation_extractable}
+	% We say $\NIZK_\rel$ is {\em white-box weak simulation-extractable} if
+	% for any non-uniform PPT adversary \advP with oracle access to \Simulate
+	% who outputs a statement $x \in \lang$ and proof $\pi$,
+	% there exists a PPT extractor algorithm $\Extract$ that white-box observes $\advP$ and
+	% if \advP never queried $x$ and $\Verify(x,\pi)$ holds
+	% then $\Extract$ returns an $\omega$ for which $(x; \omega) \in \rel$
+	% (see \cite[Def. 7, \S 2.3, pap. 29]{RandomizationGroth16}).
+	% \end{definition}
+
+% TODO: AGM and Groth16 here?
+
+
+%
+%\subsection{Universal Composability (UC) Model}
+%\label{subsec:uc_background}
+%We define the security of ring VRFs in the UC model \cite{canetti1,canetti2}. In a nutshell, Canetti \cite{canetti1,canetti2} defines the UC model as follows:
+%
+%A protocol $ \phi $ in the UC model is an execution between distributed interactive Turing machines (ITM). Each ITM has a storage to collect the incoming messages from other ITMs, adversary \adv or the environment $ \env $. $ \env $ is an entity to represent the external world outside of the protocol execution.  The environment $ \env $ initiates ITM instances (ITIs) and the adversary \adv with arbitrary inputs and then terminates them to collect the outputs.
+%% An ITM that is initiated by $ \env $ is called ITM instance (ITI). 
+%We identify an ITI with its session identity $ \sid $ and its ITM's identifier $ \pid $. In this paper, when we call an entity as a party in the UC model we mean an ITI with the identifier $ (\sid, \pid) $.
+%
+%We define the ideal world where there exists an ideal functionality $ \mathcal{F} $ and the real world where a protocol $ \phi $ is run as follows:
+%
+%\paragraph{Real world:} $ \env $ initiates ITMs and \adv to run the protocol instance with some input $ z \in \{0,1\}^* $  and a security parameter $ \secparam $. After $ \env $ terminates the protocol instance, we denote the output of the real world by the random variable $ \mathsf{EXEC}(\secparam, z)_{\phi, \adv, \env} \in \{0,1\} $. Let $ \mathsf{EXEC}_{\phi, \adv, \env} $ denote the ensemble $ \{\mathsf{EXEC}(\secparam, z)_{\phi, \adv, \env} \}_{z \in \{0,1\}^*} $.
+%
+%\paragraph{Ideal world:} $ \env $ initiates ITMs and a simulator $ \simulator $ to contact with the ideal functionality $ \mathcal{F} $ with some input $ z \in \{0,1\}^* $  and a security parameter $ \secparam $. $ \mathcal{F} $ is trusted meaning that it cannot be corrupted.
+%$ \simulator $ forwards all messages forwarded by $ \env $ to $ \mathcal{F} $. The output of execution with $ \mathcal{F} $ is denoted by a random variable $ \mathsf{EXEC}(\secparam, z)_{\mathcal{F},\simulator, \env} \in \{0,1\}$.  Let $ \mathsf{EXEC}_{\mathcal{F},\simulator, \env} $ denote the ensemble $ \{\mathsf{EXEC}(\secparam, z)_{\mathcal{F}, \simulator, \env} \}_{z \in \{0,1\}^*} $.
+%
+%%TODO: \secparam should likely be implicit, especially since it appears in both worlds.
+%
+%\begin{definition}[UC-Security of $ \phi $] \label{def:uc}
+%	Given a real world protocol $ \phi $ and an ideal functionality $ \mathcal{F} $ for the protocol $ \phi $, we say $ \phi $ is UC-secure i.e., $ \phi $ UC-realizes $ \mathcal{F} $, if for all PPT adversaries \adv,  there exists a simulator $ \simulator  $ such that for any environment $ \env $,
+%	$\mathsf{EXEC}_{\phi, \adv, \env}$ is indistinguishable from $\mathsf{EXEC}_{\mathcal{F},\simulator, \env}$.
+%\end{definition}
+
+
+
+%\begin{definition}[UC-Security of $ \phi $ in the hybrid world]
+%	Given a real world protocol $ \phi $ which runs some (polynomially many) functionalities $ \{\mathcal{F}_1, \mathcal{F}_2, \ldots, \mathcal{F}_k\} $ in the ideal world and an ideal functionality $ \mathcal{F} $ for the protocol $ \phi $, we call that $ \phi $ is UC-secure in the hybrid model $ \{\mathcal{F}_1, \mathcal{F}_2, \ldots, \mathcal{F}_k\} $ if $ \phi $ UC-realizes $ \mathcal{F} $ if for all PPT adversaries \adv, there exists a simulator $ \simulator  $ such that for any environment $ \env $,
+%	$\mathsf{EXEC}_{\phi, \adv, \env}$ is indistinguishable from $\mathsf{EXEC}_{\mathcal{F},\simulator, \env}$.
+%\end{definition}
+
+% REMARKS:  Removed excessive notation $\approx$.
+
+\begin{definition}[Commitment Scheme]
+	$ \com $ consists of the algorithms:
+	\begin{itemize}
+		\item $ \com.\commit(x) \mapsto c,r$ outputs a commitment $ c $ to $ x $ and  an opening $ r $.
+		\item $ \com.\open(c;x,r)  \mapsto x'$ opens the commitment $ c $ with the openings $ x,r$ to $ x' $. 
+	\end{itemize}
+\end{definition}
+
+If $ \com $ is a deterministic commitment scheme, we ignore $ r $.
+
+
+
+
+

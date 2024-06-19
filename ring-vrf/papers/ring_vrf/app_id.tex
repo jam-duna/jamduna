@@ -1,0 +1,205 @@
+\section{Application: Identity}
+\label{sec:app_identity}
+
+Ring VRFs yield anonymous identity systems:
+After a user and service establish a secure channel and
+the server authenticates itself with certificates, then
+the user authenticates themselves by providing an anonymous
+VRF signature with input \msg being the service's identity,
+thus creating an pseudonymous identified session with
+a pseudonym unlinkable from other contexts.
+
+We expand this identified session workflow with an extra
+update operation suitable for our ring VRF's amortized prover.
+We discuss only \pifast here but all techniques apply to \pisk and \pipk similarly. 
+
+\begin{itemize}
+\item {\em Register} --
+ Adds users' public key commitments into some \ring,
+ after verifying the user does not currently exist in \ring.
+\item {\em Update} --
+ User agents regenerate their stored SNARK $(\pk,\pifast^\inner)$ using
+ $\SpecialG.\Preprove( (\sk_1,\sk_2,\openring); (\sk,\comring) )$
+ each time \ring changes, perhaps even receiving \comring and \openring
+ from some ring management service.
+\item {\em Identify} --
+ Our user agent first opens a standard TLS connection to a server \msg,
+ both checking the server's name is \msg and checking certificate
+ transparency logs, and then computes the shared session id \aux.
+ Our user agent computes the user's identity
+  $\mathtt{id} = \PedVRF.\Eval(\sk,\msg)$ on the server id \msg,
+ Our user agent next rerandomizes \pifast, \compk, and \openpk using
+ $\SpecialG.\Reprove( \pk, \pifast^\inner )$, computes
+  $\sigma = \PedVRF.\Sign(\sk,\openpk,\msg,\aux \doubleplus \compk \doubleplus \pifast)$,
+ and finally sends the server their ring VRF signature $(\compk,\pifast,\sigma)$
+ % $\rVRF.\rSign(\sk,\openring,\msg,\aux)$ % $ = (\compk,\pifast,\sigma)$.
+\item {\em Verify} -- 
+ After receiving $(\compk,\pifast,\sigma)$ in channel \aux,
+ the server named \msg checks $\SpecialG.\Verify( \comring, (\compk,\pifast) )$,
+ checks the VRF signature, and obtains the user's identity $\mathtt{id}$, ala \\
+ $\mathtt{id} = \PedVRF.\Verify(\compk,\msg,\aux \doubleplus \compk \doubleplus \pifast,\sigma)$.
+\end{itemize}
+
+
+\subsection{Browsers}
+
+We must not link users' identities at different web sites, so user agents
+should carefully limit cross site resource loading, referrer information, etc.
+User agents could always load purely static resources, without metadata
+like cookies or referrer information.
+% especially purely content addressable resources.
+At least Tor browser already takes cross site resource concerns seriously,
+while Safari and Brave may limit invasive cross site resources too.
+% In any case, one could always specify rules against cross site privacy invasions
+% whenever writing ring VRF browser specifications.
+
+We somewhat trust the CAs and CT log system with users' identities in
+the above protocol, in that users could login to a site with fraudulent
+credentials.  We think cross site restrictions limit this attack vector.
+If stronger defenses are desired then instead of \msg being the site name,
+\msg could be a public ``root'' key for the specific site, which then
+also certifies its TLS certificate.  Ideally its secret key remains air gaped.
+
+
+\subsection{AML/KYC}
+\label{subsec:AML_KYC}
+
+We shall not discuss AML/KYC in detail, because the entire field lacks
+clear goals, and thus winds up being ineffective
+ \cite{doi:10.1080/25741292.2020.1725366}.
+% https://www.tandfonline.com/doi/full/10.1080/25741292.2020.1725366
+% via https://twitter.com/ronaldpol/status/1491548352189587460
+We do however observe that AML/KYC typically conflicts with security
+and privacy laws like GDPR.  As a compromise between these regulations,
+one needs a compliance party who know users' identities,
+ while another separate service party knows the users' activities.
+We propose a safer and more efficient solution:
+
+Instead our compliance party becomes an identity issuer who maintains
+a public \ring, and privately knows the users behind each public key.
+As above, identity systems could employ \ring freely for diverse purposes.
+If later asked or subpoenaed, users could prove their relevant identities
+to investigators, or maybe prove which services they use and do not use. 
+
+Interestingly \PedVRF could run ``backwards'' like
+ $H_{\grE'}(\msg) \ne \sk^{-1} \, \PreOut$
+to show a ring VRF output associated to $\PreOut$
+does not belong to the user, without revealing the users'
+identity $\Hout(\msg, \sk \, H_{\grE'}(\msg))$ to investigators. 
+
+Our applications mostly ignore key multiplicity. 
+AML/KYC demands suspects prove non-involvement using ring VRFs.
+
+\begin{definition}\label{def:rvrf_exculpability}
+We say \rVRF is {\em exculpatory} if we have an efficient algorithm
+for equivalence of public keys, but a PPT adversary \adv cannot
+find non-equivalent public keys $\pk_0,\pk_1$ with colliding VRF outputs.
+% (perfectly or computationally)
+% (either ever or with advantage negligible advantage in $\secparam$)
+\end{definition}
+
+A priori, our JubJub representations $\sk_0 \genJ_0 + \sk_1 \genJ_1$
+used in \S\ref{subsec:rvrf_faster} and \S\ref{subsec:rvrf_side_channel}
+costs us exculpability from Definition \ref{def:rvrf_exculpability}.
+% Ad hoc rings ...
+% Rings used for AML/KYC would be maintained by an authority and require
+% some registration procedure, using government issued identity documents.
+
+There is however a natural {\em exculpable public key} flavor $(\pk,\sigma)$,
+in which
+ $\sigma = \Sign(\sk, \CommitRing(\{ \pk \},\pk).\openring, \mathtt{ring\_name}, \mathtt{""})$.
+The singleton ring $\{ \pk \}$ ensure that 
+$\rVerify(\CommitRing(\{\pk\}), \mathtt{ring\_name}, \mathtt{""}, \sigma)$
+uniquely determines the secret key, so exculpability holds
+ if joining the ring requires $(\pk,\sigma)$.
+
+% \begin{proposition}
+% \end{proposition}
+
+
+\subsection{Moderation}
+\label{subsec:moderation}
+
+All discussion or collaboration sites have behavioral guidelines and
+moderation rules that deeply impact their culture and collective values.
+
+Our ring VRFs enables a simple blacklisting operation:
+If a user misbehaves, then sites could blacklist or otherwise penalizes
+their site local identity $\mathtt{id}$.
+As $\mathtt{id}$ remains unlinked from other sites, we avoid thorny
+questions about how such penalties impact the user elsewhere, and thus
+can assess and dispense justice more precisely. 
+
+At the same time, there exist sites who must forget users' histories
+eventually, like under some ``right to be forgotten'' principle, either
+GDPR compliance or an ethical principle of social mistakes being ephemeral.
+
+We obtain ephemeral identities if \msg consists of the site name plus
+the current year and month, or some other approximate date.
+In this way, users have only one stable $\mathtt{id}$ within the
+approximate date range, but they obtain fresh $\mathtt{id}$s merely
+by waiting until the next month.
+
+We could adjust \PedVRF to simultaneously prove multiple VRF input-output
+pairs $(\msg_j,\mathtt{id}_j)$.
+As in \cite{PrivacyPass}, we merely delinearize \In and \PreOut in
+\rSign and \rVerify like:
+\begin{align*}
+x &= H(\msg_j,\mathtt{id}_j,\ldots,\msg_j,\mathtt{id}_j) \\
+\In &= \sum_j H_p(x,j) \, \In_j \\
+\PreOut &= \sum_j H_p(x,j) \, \PreOut_j \\
+\end{align*}
+
+As doing so links these pairs together,
+we could link together two or more ephemeral identities like this
+to obtain a semi-permanent identity with user controlled revocation:
+As login, our site demands two linked input-output pairs given by
+ $\msg_1 = \mathtt{site\_name} \doubleplus \mathtt{current\_month}$ and
+ $\msg_2 = \mathtt{site\_name} \doubleplus \mathtt{registration\_month}$,
+so users could have multiple active pseudo-nyms given by $\mathtt{id}_2$,
+but only one active pseudo-nym per month, enforced by deduplicating
+ $\mathtt{id}_1$, which still prevents spam and abuse.
+
+If instead our site associates pseudo-nyms to their most recently seen
+$\mathtt{id}_1$, then we could link adjacent months, meaning $\msg_j$
+is defined by the $j$th previous month, until reaching a previously used $\mathtt{id}_1$.
+In this model, pseudo-nyms could be abandoned and replaced, but
+abandoned pseudo-nyms cannot then be reclaimed without linking intervening dates.
+Although more costly, sites could permanently bans a few problematic
+users via the inequality proofs described in \S\ref{subsec:AML_KYC} too.
+
+In these ways, sites encode important aspects of their moderation rules
+into the ring VRF inputs they demand.  
+% We expect this makes sites' values and culture more uniform, predictable, and transparent.
+
+
+\subsection{Reduced pairings}
+\label{sec:reduced_pairings}
+
+At a high level, we distinguish moderation-like applications discussed
+above, which resemble classic identity applications like AML/KYC, from
+rate limiting applications discussed in the next section. 
+%
+In moderation-like applications, ring VRF outputs become long-term
+stable identities, so users typically reidentify themselves many times
+to the same sites, reusing the exact same \msg.
+
+As an optimization, our zero-knowledge continuation could reuse the
+same \compk and \pifast for the same \msg, so that verifiers could
+memoize their verifications of \pifast.  We spend most verifier time
+checking the Groth16 pairing equation, so this saves considerable CPU time. % assuming our cache wind up fast enough.
+
+As a concrete example, our coefficients $r_1,r_2,b$ used for
+rerandomization in \S\ref{sec:rvrf_cont} could be chosen
+deterministically like $r_1,r_2,b \leftarrow H(\sk,\msg)$.
+In this way, each (helpful) user's $\mathtt{id}$ has a unique \pifast,
+which verifiers could memoize by storing
+ $(\mathtt{id},H(\compk \doubleplus \pifast),\mathtt{dates})$
+after their first verification, but then skipping the Groth16 check
+ after merely rechecking the hash $H(\compk \doubleplus \pifast)$.
+
+We could risk denial-of-service attacks by users who vary $r_1,r_2,b$ 
+randomly however.  We therefore suggest $\mathtt{dates}$ record the last
+several previous dates when $H(\compk \doubleplus \pifast)$ changed.
+We rate limit or verify more lazily users with many nearby login dates
+

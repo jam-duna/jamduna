@@ -1,0 +1,131 @@
+\section{Ring updates}
+\label{sec:ring_updates}
+
+% We discussed \pifast, or \pisk and \pipk, representing public keys
+%  in $\grE$ in $\grJ$ already,
+% % along with circuit implementation details of $\PedVRF.\{ \CommitKey, \OpenKey \}$,
+% but otherwise mostly treated the ring commitment scheme
+% $\rVRF.\{ \CommitRing, \OpenRing \}$ like a black box.
+
+We now discuss the performance of \pifast.
+Although our $\rVRF.\rSign$ runs fast, all users should update their
+stored zkSNARK \pifast every time \ring changes, % which requires reproving \OpenRing.
+but zero knowledge continuations help here too.
+
+
+\subsection{Merkle trees} % {Poseidon}
+
+Our $\rVRF.\{ \CommitRing, \OpenRing \}$ could implement a Merkle tree
+using a zkSNARK friendly hash function like Poseidon \cite{poseidon},
+giving $O(\log |\ring|)$ prover time.
+%
+At least one Poseidon \cite{poseidon} provides arity four with only
+600 R1CS constraints.  We need roughly 700 R1CS constraints for each
+fixed based scalar multiplication too, so the flavor of \pifast costs
+under 12k R1CS constraints for a ring with four billion people.
+
+% TODO: Arity 9 for 300 constraints?   % \cite{Groth16} vs plookup \cite{plookup}.
+
+
+\subsection{Side channels}
+\label{subsec:rvrf_side_channel}
+
+In \pifast, one might dislike processing secret key material inside
+the Groth16 prover for \pifast.
+Adversaries could trigger \pifast recomputation only by updating the ring,
+but this still presents a side channel risk.
+
+If concerned, one could address this via a second zk continuation that
+splits \pifast into a Groth16 \pisk and a Groth16 or KZG \pipk for two
+respective languages:
+%
+$$ \Lpk^\inner = \Setst{ J_\pk, \comring }{
+	\exists \openring \textrm{\ s.t.\ }
+	J_\pk = \eprint{\rVRF.}{}\OpenRing(\comring,\openring)
+} \mathcomma \eprint{\quad\textrm{and}}{} $$ 
+%
+$$ \Lsk^\inner = \Setst{ \sk_0 + \sk_1 2^{128}, J_\pk }{ 
+	\exists d \textrm{\ s.t.\ }
+	% 0 < \sk_0,\sk_1 < 2^{128} \textrm{\ and\ } 
+	J_\pk = \sk_0 \genJ_0 + \sk_1 \genJ_1 + d \genJ_2
+} \mathperiod $$
+
+We now prove \pisk only once {\it ever} during secret key generation,
+which largely eliminates any side channel risks.
+We do ask verifiers compute more pairings, but nobody cares when
+the VRF verifiers are few in number or institutional,
+as in many applications.
+We also ask provers rerandomize both \pisk and \pipk, but this costs relatively little.
+Assuming \pipk is Groth16 then we need a proof-of-knowledge for the desired structure of $J_\pk$ too.
+All totaled this almost doubles the size and complexity of our ring VRF signature.
+
+There is no ``arrow of time'' among zk continuations per se, but
+as \pisk bridges between the \PedVRF and \pipk,
+one might consider the \pisk-to-\pipk continuation to be ``time reversed'',
+ in that the ``middle'' continuation is proved first.
+
+
+\subsection{Polynomial commitments}
+\label{subsec:rvrf_caulk}
+
+As \pipk became rather simple, % in \S\ref{subsec:rvrf_side_channel},
+there exists an alternative formulation:  
+\comring could be a KZG polynomial commitment \cite{KZG} to users' $J_\pk$s,
+while \pipk itself becomes an opening at a secret location, like
+Caulk+ \cite{caulk+} or Caulk \cite{caulk}.
+We benefit from faster ring updates this way, but pay in
+ increased verifier time and increased marginal prover time.
+
+
+\subsection{Append only rings}
+
+\newcommand\pichain{\ensuremath{\pi_{\mathtt{chain}}}\xspace}
+
+As a slight variation,
+we could build \ring using append only structures like some blockchains,
+in which case we should split $\rVRF.\OpenRing$ differently between
+an inner ring block or epoch proof $\baseL_{\mathtt{block}}$,
+ which we only prove once like \pisk above, and
+a chain state proof $\baseL_{\mathtt{chain}}$,
+ which extends this inner ring to the growing blockchain.
+Now our inner SNARKs pass a $\mathtt{blk}$ parameter, which 
+our zero-knowledge continuation transforms into a opaque commitment
+$\mathtt{comblk}$, thereby requiring a proof-of-knowledge.
+%
+$$ \baseL_{\mathtt{chain}}^\inner = \Setst{ \mathtt{blk}, \mathtt{chain} }{
+	\mathtt{blk} \in \mathtt{chain}
+} \mathcomma \quad\textrm{and} $$ 
+%
+$$ \baseL_{\mathtt{block}}^\inner = \Setst{ \sk_0 + \sk_1 2^{128}, \mathtt{blk} }{
+	\eprint{\exists d,\openring \textrm{\ s.t.\ }}{}
+	\genfrac{}{}{0pt}{}{ \OpenRing(\mathtt{blk},\openring) }{ \,\, = \sk_0 \genJ_0 + \sk_1 \genJ_1 + d \genJ_2 }
+} \mathperiod $$  
+%
+We suggest appending $\mathtt{blk}$ to a polynomial commitment using
+\cite{aSVC}, which then $\baseL_{\mathtt{chain}}$ blind opens
+via Caulk+ \cite{caulk+} as above.
+
+
+\subsection{Expiration and revocation}
+
+We expect expiration and revocation would be required for append only
+rings like blockchains, or say a zero-knowledge proof of a certificate.
+% proof-of-personhood parties \cite{pop2008,pop2017}
+
+For expiry, we suggest \pisk or $\baseL_{\mathtt{block}}$ commit to
+the expiration date alongside the secret key in their $X$, and
+then \pipk or $\baseL_{\mathtt{chain}}$ enforce expiration, but
+ really even \PedVRF could enforce expiration.
+
+A revocation list could be enforced by a non-membership proof in
+\pipk or $\baseL_{\mathtt{chain}}$.
+We expect a revocation list updates only rarely compared with \ring
+itself though, which makes doing this non-membership proof inside some
+separate zero-knowledge continuation tempting too.
+A deployment faces should make this choice carefully.
+
+% We already trust an authority with issuing certificates, so we trust them with managing the revocation list too.  
+% As such, our revocation list non-membership proofs merely requires proving adjacency of the revoked public keys lexicographically before and after our own public key.
+% If the revocation list requires secrecy, then VRFs could hide its ordering,
+% similarly to NSEC5 \cite{nsec5}.
+

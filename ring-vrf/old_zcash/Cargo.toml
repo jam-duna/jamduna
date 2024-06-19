@@ -1,0 +1,73 @@
+[package]
+name = "ring-vrf"
+version = "0.0.1"
+description = "Ring VRF implementation using zkSNARKs."
+authors = ["Sergey Vasilyev <swasilyev@gmail.com>", "Jeff Burdges <jeff@web3.foundation>", "Wei Tang <hi@that.world>"]
+edition = "2018"
+license = "MIT"
+
+[dependencies]
+ff = "0.8"
+group = "0.8"
+pairing = "0.18"
+jubjub = "0.5.1"
+bls12_381 = "0.3.1"
+# bellman = { git = "https://github.com/w3f/bellman.git", branch="pub-multiexp", version = "0.8", default-features = false, features = ["groth16"] }
+bellman = { git = "https://github.com/w3f/bellman.git", branch = "neptune-bis", version = "0.8", default-features = false, features = ["groth16"] }
+zcash_primitives = "0.5"
+zcash_proofs = "0.5"
+
+neptune = { git = "https://github.com/w3f/neptune", branch = "librustzcash-bis" }
+typenum = "1.11.2"
+
+[patch.crates-io]
+bellman = { git = "https://github.com/w3f/bellman.git", branch="neptune-bis" }
+
+[dependencies.arrayref]
+version = "0.3.5"
+default-features = false
+
+[dependencies.arrayvec]
+version = "0.5.1"
+default-features = false
+
+[dependencies.digest] 
+version = "0.8"
+default-features = false
+
+# [dependencies.subtle]
+# version = "2.2.1"
+# default-features = false
+
+[dependencies.merlin] 
+version = "2.0"
+# features = ["debug-transcript"]
+default-features = false
+
+[dependencies.rand_core]
+version = "0.5.1"
+# default-features = false
+
+[dependencies.rand_chacha]
+version = "0.2" # ?
+default-features = false
+optional = true
+
+[dependencies.lazy_static]
+version = "1.4"
+default-features = false
+
+[dependencies.zeroize]
+version = "1.0.0"
+default-features = false
+features = ["zeroize_derive"]
+
+[dev-dependencies]
+rand_xorshift = "0.2"
+rand_chacha = "0.2"
+ark-std = { git = "https://github.com/arkworks-rs/utils" }
+
+[features]
+default = ["rand_chacha"] # "std", 
+
+
