@@ -13,6 +13,49 @@ import (
 	"unsafe"
 )
 
+
+
+const (
+   // length of secret key seed.
+   SEED_SERIALIZED_SIZE = 32;
+   // length of secret key seed.
+   SECRET_SERIALIZED_SIZE = 32;
+   // length of serialized public key.
+   PUBLIC_SERIALIZED_SIZE = 33;
+   // length of serialized signature.
+   SIGNATURE_SERIALIZED_SIZE = 65
+   // length of serialized pre-output.
+   PREOUT_SERIALIZED_SIZE = 33
+)
+
+
+type SecretKey = [SECRET_SERIALIZED_SIZE]byte
+type PublicKey = [PUBLIC_SERIALIZED_SIZE]byte
+type Seed = [SEED_SERIALIZED_SIZE]byte
+type Signature = [SIGNATURE_SERIALIZED_SIZE]byte
+
+func GenerateKey() (SecretKey, PublicKey) {
+   var sk SecretKey
+   var pk PublicKey
+   return  sk, pk
+}
+
+func RingVRFSignSimple(secret SecretKey, sassafrasTicketSeal, message, ticketVRFInput []byte) ([]byte, []byte) {
+     signature := []byte{}
+     output := []byte{}
+     return signature, output
+}
+
+func RingVRFVerifySimple(ticketVRFInput, extra, signature []byte) error {
+     return nil
+}
+
+func RingVRFSignedOutput(signature []byte) []byte {
+     output := []byte{}
+     return output
+}
+
+
 func RingVRFSign(secret, domain, message, transcript []byte) ([]byte, error) {
 	secretPtr := (*C.char)(unsafe.Pointer(&secret[0]))
 	domainPtr := (*C.char)(unsafe.Pointer(&domain[0]))
