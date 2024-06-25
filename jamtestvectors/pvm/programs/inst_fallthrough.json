@@ -1,0 +1,46 @@
+{
+  "name": "inst_fallthrough",
+  "initial-regs": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "initial-pc": 0,
+  "initial-page-map": [],
+  "initial-memory": [],
+  "code": [
+    0,
+    0,
+    1,
+    17,
+    255
+  ],
+  "expected-status": "trap",
+  "expected-regs": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "expected-pc": 1,
+  "expected-memory": []
+}

@@ -1,0 +1,48 @@
+{
+  "name": "inst_shift_logical_left",
+  "initial-regs": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2147483765,
+    3,
+    0,
+    0,
+    0,
+    0
+  ],
+  "initial-pc": 0,
+  "initial-page-map": [],
+  "initial-memory": [],
+  "code": [
+    0,
+    0,
+    3,
+    55,
+    121,
+    8,
+    249
+  ],
+  "expected-status": "trap",
+  "expected-regs": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2147483765,
+    3,
+    936,
+    0,
+    0,
+    0
+  ],
+  "expected-pc": 3,
+  "expected-memory": []
+}

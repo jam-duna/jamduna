@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// BlockHeader 
+// BlockHeader
 type BlockHeader struct {
 	ParentHash       common.Hash       `json:"parentHash"`       // H_p
 	ParentStateRoot  common.Hash       `json:"priorStateRoot"`   // H_r
@@ -63,13 +63,13 @@ func computeHash(data []byte) []byte {
 
 // Hash returns the hash of the block in unsigned form.
 func (b *BlockHeader) Hash() common.Hash {
-	data := b.BytesWithoutSig() 
+	data := b.BytesWithoutSig()
 	return common.BytesToHash(computeHash(data))
 }
 
 // BytesWithoutSig returns the bytes of a block without signature.
 func (b *BlockHeader) BytesWithoutSig() []byte {
-        enc := []byte{} // TODO
+	enc := []byte{} // TODO
 	return enc
 }
 
@@ -88,5 +88,3 @@ func (b *BlockHeader) Number() uint64 {
 func (b *BlockHeader) Encode() ([]byte, error) {
 	return b.BytesWithoutSig(), nil
 }
-
-

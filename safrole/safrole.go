@@ -2,9 +2,9 @@ package safrole
 
 import (
 	"fmt"
-	"math/big"
 	ring_vrf "github.com/colorfulnotion/jam/ring-vrf"
 	"github.com/ethereum/go-ethereum/common"
+	"math/big"
 )
 
 type Safrole struct {
@@ -41,8 +41,7 @@ func (s *Safrole) ticketSealVRFInput(targetEpochRandomness common.Hash, attempt 
 	return append(append([]byte(sassafrasTicketSeal), targetEpochRandomness.Bytes()...), attempt)
 }
 
-
-func (s *Safrole) computeTicketIDSecretKey(secret []byte, targetEpochRandomness common.Hash, attempt byte) ([]byte, []byte) {
+func (s *Safrole) computeTicketIDSecretKey(secret [32]byte, targetEpochRandomness common.Hash, attempt byte) ([]byte, []byte) {
 	ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, attempt)
 	message := []byte{}
 	signature, ticketID := ring_vrf.RingVRFSignSimple(secret, sassafrasTicketSeal, message, ticketVRFInput)
@@ -50,10 +49,9 @@ func (s *Safrole) computeTicketIDSecretKey(secret []byte, targetEpochRandomness 
 }
 
 func (s *Safrole) validTicket(ticketID common.Hash) bool {
-    T := new(big.Int).SetUint64(RedundancyFactor * EpochNumSlots / (NumAttempts * NumValidators))
-    return ticketID.Big().Cmp(T) < 0
+	T := new(big.Int).SetUint64(RedundancyFactor * EpochNumSlots / (NumAttempts * NumValidators))
+	return ticketID.Big().Cmp(T) < 0
 }
-
 
 func (s *Safrole) validateTicket(ticketID common.Hash, targetEpochRandomness common.Hash, envelope *TicketEnvelope) error {
 	ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, envelope.Attempt)

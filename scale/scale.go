@@ -1,114 +1,105 @@
+// Copyright 2021 ChainSafe Systems (ON)
+// SPDX-License-Identifier: LGPL-3.0-only
+
 package scale
 
 import (
-	"bytes"
-	//"errors"
+	"fmt"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
 )
 
-// EncodeEmpty encodes an empty sequence
-func EncodeEmpty() []byte {
-	return []byte{}
+// package level cache for fieldScaleIndicies
+var cache = &fieldScaleIndicesCache{
+	cache: make(map[string]fieldScaleIndices),
 }
 
-// EncodeOctetSequence encodes an octet sequence as itself
-func EncodeOctetSequence(x []byte) []byte {
-	return x
+// fieldScaleIndex is used to map field index to scale index
+type fieldScaleIndex struct {
+	fieldIndex int
+	scaleIndex *int
+}
+type fieldScaleIndices []fieldScaleIndex
+
+// fieldScaleIndicesCache stores the order of the fields per struct
+type fieldScaleIndicesCache struct {
+	cache map[string]fieldScaleIndices
+	sync.RWMutex
 }
 
-// EncodeTuple encodes anonymous tuples by concatenating their encoded elements
-func EncodeTuple(elements ...[]byte) []byte {
-	return bytes.Join(elements, []byte{})
-}
-
-// EncodeInteger encodes a natural number
-func EncodeInteger(x uint64) []byte {
-	if x == 0 {
-		return []byte{0}
-	}
-	result := []byte{}
-	for x > 0 {
-		result = append(result, byte(x%256))
-		x /= 256
-	}
-	return result
-}
-
-// EncodeGeneralInteger encodes natural numbers of up to 2^64 - 1
-func EncodeGeneralInteger(x uint64) ([]byte, error) {
-	if x < 1<<7 {
-		return EncodeInteger(x), nil
-	} else if x < 1<<14 {
-		return []byte{byte(0x80 | (x >> 8)), byte(x & 0xFF)}, nil
-	} else if x < 1<<29 {
-		return []byte{
-			byte(0xC0 | (x >> 24)),
-			byte((x >> 16) & 0xFF),
-			byte((x >> 8) & 0xFF),
-			byte(x & 0xFF),
-		}, nil
-	} else {
-		return []byte{
-			byte(0xE0 | (x >> 56)),
-			byte((x >> 48) & 0xFF),
-			byte((x >> 40) & 0xFF),
-			byte((x >> 32) & 0xFF),
-			byte((x >> 24) & 0xFF),
-			byte((x >> 16) & 0xFF),
-			byte((x >> 8) & 0xFF),
-			byte(x & 0xFF),
-		}, nil
-	}
-}
-
-// EncodeSequence encodes a sequence
-func EncodeSequence(seq [][]byte) []byte {
-	result := []byte{}
-	for _, elem := range seq {
-		result = append(result, EncodeOctetSequence(elem)...)
-	}
-	return result
-}
-
-// EncodeDiscriminated encodes a value with a discriminator
-func EncodeDiscriminated(value []byte) []byte {
-	length := EncodeInteger(uint64(len(value)))
-	return append(length, value...)
-}
-
-// EncodeBitSequence encodes a bit sequence
-func EncodeBitSequence(bits []bool) []byte {
-	length := EncodeInteger(uint64(len(bits)))
-	byteCount := (len(bits) + 7) / 8
-	result := make([]byte, byteCount+1)
-	result[0] = byte(len(bits) % 8)
-	for i, bit := range bits {
-		if bit {
-			result[1+(i/8)] |= 1 << (7 - (i % 8))
+func (fsic *fieldScaleIndicesCache) fieldScaleIndices(in interface{}) (
+	v reflect.Value, indices fieldScaleIndices, err error) {
+	t := reflect.TypeOf(in)
+	v = reflect.ValueOf(in)
+	key := fmt.Sprintf("%s.%s", t.PkgPath(), t.Name())
+	if key != "." {
+		var ok bool
+		fsic.RLock()
+		indices, ok = fsic.cache[key]
+		fsic.RUnlock()
+		if ok {
+			return
 		}
 	}
-	return append(length, result...)
-}
 
-// EncodeDictionary encodes a dictionary
-func EncodeDictionary(dict map[uint64][]byte) []byte {
-	result := []byte{}
-	for key, value := range dict {
-		keyEncoded := EncodeInteger(key)
-		valueEncoded := EncodeOctetSequence(value)
-		result = append(result, EncodeTuple(keyEncoded, valueEncoded)...)
+	if !v.IsValid() {
+		err = fmt.Errorf("inputted value is not valid: %v", v)
+		return
 	}
-	return result
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("scale")
+		switch strings.TrimSpace(tag) {
+		case "":
+			indices = append(indices, fieldScaleIndex{
+				fieldIndex: i,
+			})
+		case "-":
+			// ignore this field
+			continue
+		default:
+			scaleIndex, indexErr := strconv.Atoi(tag)
+			if indexErr != nil {
+				err = fmt.Errorf("%w: %v", ErrInvalidScaleIndex, indexErr)
+				return
+			}
+			indices = append(indices, fieldScaleIndex{
+				fieldIndex: i,
+				scaleIndex: &scaleIndex,
+			})
+		}
+	}
+
+	sort.Slice(indices[:], func(i, j int) bool {
+		switch {
+		case indices[i].scaleIndex == nil && indices[j].scaleIndex != nil:
+			return false
+		case indices[i].scaleIndex != nil && indices[j].scaleIndex == nil:
+			return true
+		case indices[i].scaleIndex == nil && indices[j].scaleIndex == nil:
+			return indices[i].fieldIndex < indices[j].fieldIndex
+		case indices[i].scaleIndex != nil && indices[j].scaleIndex != nil:
+			return *indices[i].scaleIndex < *indices[j].scaleIndex
+		}
+		return false
+	})
+
+	if key != "." {
+		fsic.Lock()
+		fsic.cache[key] = indices
+		fsic.Unlock()
+	}
+	return
 }
 
-// EncodeBlock serializes a block as defined in the spec
-func EncodeBlock(h, etr, er []byte, t, lv []uint64, tu, cu [][]byte, c map[uint64][]byte) []byte {
-	eh := EncodeTuple(h)
-	etrEncoded := EncodeTuple(etr)
-	erEncoded := EncodeTuple(er)
-	ev := EncodeTuple(EncodeSequence(tu))
-	ep := EncodeDictionary(c)
-
-	// Building the block B as a tuple
-	b := EncodeTuple(eh, etrEncoded, erEncoded, ev, ep)
-	return b
+func reverseBytes(a []byte) []byte {
+	for i := len(a)/2 - 1; i >= 0; i-- {
+		opp := len(a) - 1 - i
+		a[i], a[opp] = a[opp], a[i]
+	}
+	return a
 }

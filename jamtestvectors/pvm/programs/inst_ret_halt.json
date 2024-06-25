@@ -1,0 +1,47 @@
+{
+  "name": "inst_ret_halt",
+  "initial-regs": [
+    4294901760,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "initial-pc": 0,
+  "initial-page-map": [],
+  "initial-memory": [],
+  "code": [
+    0,
+    0,
+    2,
+    19,
+    0,
+    253
+  ],
+  "expected-status": "halt",
+  "expected-regs": [
+    4294901760,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "expected-pc": 0,
+  "expected-memory": []
+}
