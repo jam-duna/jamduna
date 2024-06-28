@@ -10,7 +10,7 @@ import (
 // JAMEnvironment defines the interface for host calls
 type JAMEnvironment interface {
 	// A.6 pg 38
-	InvokeHostCall(opcode byte, operands []uint32, vm *VM) (bool, error)
+	InvokeHostCall(opcode byte, operands []byte, vm *VM) (bool, error)
 	// B.2 pg 39
 	IsAuthorized(p, c byte) (byte, error) // Is-Authorized invocation
 	// B.3 pg 39
