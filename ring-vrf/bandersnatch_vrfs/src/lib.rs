@@ -13,8 +13,10 @@ use ark_ec::{
     // hashing::{HashToCurveError, curve_maps, map_to_curve_hasher::MapToCurveBasedHasher, HashToCurve},
 };
 use ark_std::vec::Vec;   // io::{Read, Write}
+use ark_std::iter;
+use ring::{KZG};
 
-pub use ark_serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError, Compress};
+pub use ark_serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError, Compress, Validate};
 
 #[cfg(not(feature = "substrate-curves"))]
 mod curves {
@@ -37,7 +39,7 @@ pub use dleq_vrf::{
     error::{SignatureResult, SignatureError},
     vrf::{self, IntoVrfInput},
     EcVrfSecret,EcVrfSigner,EcVrfVerifier,
-    VrfSignature,VrfSignatureVec,
+    VrfSignatureVec,
     scale,
 };
 
@@ -162,6 +164,7 @@ impl scale::ArkScaleMaxEncodedLen for RingVrfProof {
 // TODO: Sergey, should this be #[derive(Debug,Clone)] ?
 pub struct RingVerifier<'a>(pub &'a ring::RingVerifier);
 
+//TODO. need a way to Initialize this from signature
 pub type RingVrfSignature<const N: usize> = dleq_vrf::VrfSignature<RingVrfProof,N>;
 
 impl EcVrfVerifier for RingVerifier<'_> {
@@ -237,6 +240,265 @@ impl<'a> RingProver<'a> {
     }
 }
 
+fn ring_test_init_with_pks(pks: Vec<PublicKey>, target_pk: PublicKey) -> (ring::RingProver, ring::RingVerifier) {
+    // Ensure pks is not empty
+    if pks.is_empty() {
+        panic!("The list of public keys cannot be empty.");
+    }
+
+    let kzg = KZG::testing_kzg_setup([0; 32], 2u32.pow(10));
+    let keyset_size = pks.len();
+
+    // Ensure there are no more public keys than the max keyset size
+    if keyset_size > kzg.max_keyset_size() {
+        panic!("The number of public keys exceeds the maximum keyset size.");
+    }
+
+    // Convert target public key to bytes for comparison
+    let mut target_pk_bytes = vec![];
+    target_pk.serialize(&mut target_pk_bytes).unwrap();
+
+    // Find the index of the target public key
+    let secret_key_idx = match pks.iter().position(|pk| {
+        let mut pk_bytes = vec![];
+        pk.serialize(&mut pk_bytes).unwrap();
+        pk_bytes == target_pk_bytes
+    }) {
+        Some(idx) => idx,
+        None => panic!("The target public key is not in the list of public keys."),
+    };
+
+    // Convert public keys to the format expected by the prover and verifier
+    let converted_pks: Vec<_> = pks.iter().map(|pk| pk.0.into()).collect();
+
+    let prover_key = kzg.prover_key(converted_pks.clone());
+    let ring_prover = kzg.init_ring_prover(prover_key, secret_key_idx);
+
+    let verifier_key = kzg.verifier_key(converted_pks);
+    let ring_verifier = kzg.init_ring_verifier(verifier_key);
+
+    (ring_prover, ring_verifier)
+}
+
+
+// Extern "C" functions
+#[no_mangle]
+pub extern "C" fn ring_vrf_sign_c_pks(
+    secret: *const u8,
+    domain: *const u8,
+    domain_len: usize,
+    message: *const u8,
+    message_len: usize,
+    transcript: *const u8,
+    transcript_len: usize,
+    pks_ptr: *const u8,
+    pks_len: usize,
+    signature: *mut u8,
+    signature_len: usize
+) -> usize {
+    // Deserialize the secret key
+    let secret_slice = unsafe { std::slice::from_raw_parts(secret, 32) };
+    let secret_array: &[u8; 32] = match secret_slice.try_into() {
+        Ok(arr) => arr,
+        Err(_) => return 7,
+    };
+    let secret_key = SecretKey::from_seed(secret_array);
+
+    // Derive the public key from the secret key
+    let derived_pubkey = secret_key.as_publickey();
+
+    // Deserialize the public keys
+    let pks_slice = unsafe { std::slice::from_raw_parts(pks_ptr, pks_len) };
+    let pks: Vec<PublicKey> = pks_slice
+        .chunks(33) // Assuming each public key is 33 bytes
+        .map(|chunk| PublicKey::deserialize(chunk).expect("Invalid public key"))
+        .collect();
+
+    if pks.is_empty() {
+        return 8; // Error code for empty public keys list
+    }
+
+    // Ensure there are no more public keys than the max keyset size
+    let kzg = KZG::testing_kzg_setup([0; 32], 2u32.pow(10));
+    let keyset_size = pks.len();
+
+    if keyset_size > kzg.max_keyset_size() {
+        return 9; // Error code for exceeding keyset size
+    }
+
+    // Find the index of the derived public key
+    let mut derived_pubkey_bytes = vec![];
+    derived_pubkey.serialize(&mut derived_pubkey_bytes).unwrap();
+
+    let secret_key_idx = match pks.iter().position(|pk| {
+        let mut pk_bytes = vec![];
+        pk.serialize(&mut pk_bytes).unwrap();
+        pk_bytes == derived_pubkey_bytes
+    }) {
+        Some(idx) => idx,
+        None => return 12, // Error code for public key not found
+    };
+    println!("signer index: {}", secret_key_idx);
+
+    // Convert public keys to the format expected by the prover and verifier
+    let converted_pks: Vec<_> = pks.iter().map(|pk| pk.0.into()).collect();
+
+    // Create the Message structure
+    let domain_slice = unsafe { std::slice::from_raw_parts(domain, domain_len) };
+    let message_slice = unsafe { std::slice::from_raw_parts(message, message_len) };
+    let input = Message {
+        domain: domain_slice,
+        message: message_slice,
+    }.into_vrf_input();
+
+    // Compute VrfInOut
+    let io = secret_key.vrf_inout(input.clone());
+
+    // Create the transcript
+    let transcript_slice = unsafe { std::slice::from_raw_parts(transcript, transcript_len) };
+
+    // Initialize ring prover with provided public keys
+    let prover_key = kzg.prover_key(converted_pks.clone());
+    let ring_prover = kzg.init_ring_prover(prover_key, secret_key_idx);
+    let ring_prover = RingProver {
+        ring_prover: &ring_prover,
+        secret: &secret_key,
+    };
+
+    // Sign the input and get the signature
+    let signature_obj: RingVrfSignature<1> = ring_prover.sign_ring_vrf(transcript_slice, &[io]);
+
+    // Serialize the signature
+    let mut serialized_signature = vec![];
+    if signature_obj.proof.dleq_proof.serialize(&mut serialized_signature).is_err() {
+        return 10; // Error code for serialization failure
+    }
+
+    if serialized_signature.len() > signature_len {
+        return 11; // Error code for insufficient signature buffer length
+    }
+
+    unsafe {
+        std::ptr::copy_nonoverlapping(serialized_signature.as_ptr(), signature, serialized_signature.len());
+    }
+
+    // Initialize ring verifier with provided public keys
+    let verifier_key = kzg.verifier_key(converted_pks);
+    let ring_verifier = kzg.init_ring_verifier(verifier_key);
+    let result = RingVerifier(&ring_verifier)
+        .verify_ring_vrf(transcript_slice, iter::once(input), &signature_obj);
+
+    if result.is_ok() {
+        0 // Success
+    } else {
+        1 // Verification failed
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ring_vrf_verify_c_pks(
+    domain: *const u8,
+    domain_len: usize,
+    message: *const u8,
+    message_len: usize,
+    transcript: *const u8,
+    transcript_len: usize,
+    pks_ptr: *const u8,
+    pks_len: usize,
+    signature_ptr: *const u8,
+    signature_len: usize
+) -> usize {
+    println!("Received domain_len: {}", domain_len);
+    println!("Received message_len: {}", message_len);
+    println!("Received transcript_len: {}", transcript_len);
+    println!("Received pks_len: {}", pks_len);
+    println!("Received signature_len: {}", signature_len);
+
+    // Deserialize the public keys
+    let pks_slice = unsafe { std::slice::from_raw_parts(pks_ptr, pks_len) };
+    println!("Public keys slice: {:?}", pks_slice);
+
+    let pks: Vec<PublicKey> = match pks_slice
+        .chunks(33) // Assuming each public key is 33 bytes
+        .map(|chunk| {
+            println!("Deserializing public key chunk: {:?}", chunk);
+            PublicKey::deserialize(chunk)
+        })
+        .collect::<Result<Vec<_>, _>>() {
+        Ok(keys) => keys,
+        Err(e) => {
+            eprintln!("Error deserializing public key: {:?}", e);
+            return 10; // Error code for invalid public key
+        }
+    };
+
+    if pks.is_empty() {
+        eprintln!("Error: Public keys list is empty");
+        return 8; // Error code for empty public keys list
+    }
+
+    // Ensure there are no more public keys than the max keyset size
+    let kzg = KZG::testing_kzg_setup([0; 32], 2u32.pow(10));
+    let keyset_size = pks.len();
+
+    if keyset_size > kzg.max_keyset_size() {
+        eprintln!("Error: Number of public keys exceeds the maximum keyset size");
+        return 9; // Error code for exceeding keyset size
+    }
+
+    // Convert public keys to the format expected by the prover and verifier
+    let converted_pks: Vec<_> = pks.iter().map(|pk| pk.0.into()).collect();
+    println!("Converted public keys: {:?}", converted_pks);
+
+    // Create the Message structure
+    let domain_slice = unsafe { std::slice::from_raw_parts(domain, domain_len) };
+    let message_slice = unsafe { std::slice::from_raw_parts(message, message_len) };
+    println!("Domain slice: {:?}", domain_slice);
+    println!("Message slice: {:?}", message_slice);
+
+    let input = Message {
+        domain: domain_slice,
+        message: message_slice,
+    }.into_vrf_input();
+
+    // Create the transcript
+    let transcript_slice = unsafe { std::slice::from_raw_parts(transcript, transcript_len) };
+    println!("Transcript slice: {:?}", transcript_slice);
+
+    // Deserialize the signature
+    let signature_slice = unsafe { std::slice::from_raw_parts(signature_ptr, signature_len) };
+    println!("Signature slice: {:?}", signature_slice);
+
+    //TODO: how reconstruct signature_obj properly 
+    let signature_obj: RingVrfSignature<1> = match RingVrfSignature::deserialize_with_mode(signature_slice, Compress::Yes, Validate::Yes) {
+        Ok(sig) => sig,
+        Err(e) => {
+            eprintln!("Error: Invalid signature: {:?}", e);
+            return 10; // Error code for invalid signature
+        }
+    };
+    println!("Deserialized signature: {:?}", signature_obj);
+
+    // Initialize ring verifier with provided public keys
+    let verifier_key = kzg.verifier_key(converted_pks);
+    let ring_verifier = kzg.init_ring_verifier(verifier_key);
+
+    // Verify the signature using the ring verifier
+    let result = RingVerifier(&ring_verifier)
+        .verify_ring_vrf(transcript_slice, iter::once(input), &signature_obj);
+
+    match result {
+        Ok(_) => {
+            println!("Signature verification succeeded");
+            0 // Success
+        },
+        Err(e) => {
+            eprintln!("Error: Verification failed: {:?}", e);
+            1 // Verification failed
+        }
+    }
+}
+
 // Extern "C" functions
 #[no_mangle]
 pub extern "C" fn ring_vrf_sign_c(
@@ -251,7 +513,7 @@ pub extern "C" fn ring_vrf_sign_c(
     signature_len: usize
 ) -> usize {
     use rand_core::RngCore;
-    use core::iter;
+    //use core::iter;
     //use ark_serialize::CanonicalSerialize;
     // Deserialize the secret key
     let secret_slice = unsafe { std::slice::from_raw_parts(secret, 32) };
@@ -277,12 +539,12 @@ pub extern "C" fn ring_vrf_sign_c(
     // Create the transcript
     let transcript_slice = unsafe { std::slice::from_raw_parts(transcript, transcript_len) };
 
-    // Initialize ring prover 
+    // Initialize ring prover
     use ark_std::UniformRand;
-    
+
     let kzg = ring::KZG::testing_kzg_setup([0; 32], 2u32.pow(10));
     let keyset_size = kzg.max_keyset_size();
-    
+
     let mut rng = rand_core::OsRng;
     let mut l = [0u8; 8];
     rng.fill_bytes(&mut l);
@@ -294,7 +556,7 @@ pub extern "C" fn ring_vrf_sign_c(
     let pk: PublicKey = secret_key.to_public();
     let secret_key_idx = keyset_size / 2;
     pks[secret_key_idx] = pk.0.into();
-    
+
     let prover_key = kzg.prover_key(pks.clone());
     let ring_prover = kzg.init_ring_prover(prover_key, secret_key_idx);
 
@@ -304,7 +566,7 @@ pub extern "C" fn ring_vrf_sign_c(
     };
     // Sign the input and get the signature
     let signature_obj: RingVrfSignature<1> = ring_prover.sign_ring_vrf(transcript_slice, &[io]);
-    
+
     // Serialize the signature in signature_obj
     let mut serialized_signature = vec![];
     if signature_obj.proof.dleq_proof.serialize(&mut serialized_signature).is_err() {
@@ -318,7 +580,7 @@ pub extern "C" fn ring_vrf_sign_c(
     unsafe {
         std::ptr::copy_nonoverlapping(serialized_signature.as_ptr(), signature, serialized_signature.len());
     }
-    
+
     let kzg = ring::KZG::testing_kzg_setup([0; 32], 2u32.pow(10));
     let verifier_key = kzg.verifier_key(pks);
     let ring_verifier = kzg.init_ring_verifier(verifier_key);
@@ -348,6 +610,42 @@ pub extern "C" fn ring_vrf_verify_c(
 ) -> u8 {
     // stub
     0
+}
+
+#[no_mangle]
+pub extern "C" fn ring_vrf_public_key(
+    secret: *const u8,
+    pubkey: *mut u8,
+    pubkey_len: usize
+) -> usize {
+    //use ark_serialize::CanonicalSerialize;
+
+    // Deserialize the secret key
+    let secret_slice = unsafe { std::slice::from_raw_parts(secret, 32) };
+    let secret_array: &[u8; 32] = match secret_slice.try_into() {
+        Ok(arr) => arr,
+        Err(_) => return 1,
+    };
+
+    let secret_key = SecretKey::from_seed(secret_array);
+
+    // Generate the public key
+    let public_key = secret_key.to_public();
+    let mut serialized_pubkey = vec![0u8; PUBLIC_KEY_LENGTH];
+    public_key.serialize_compressed(serialized_pubkey.as_mut_slice())
+        .expect("Serialization failed");
+
+    // Check if the provided buffer is large enough
+    if serialized_pubkey.len() > pubkey_len {
+        return 2;
+    }
+
+    // Copy the serialized public key to the provided buffer
+    unsafe {
+        std::ptr::copy_nonoverlapping(serialized_pubkey.as_ptr(), pubkey, serialized_pubkey.len());
+    }
+
+    0 // Success
 }
 
 #[cfg(all(test, feature = "getrandom"))]
@@ -387,7 +685,7 @@ mod tests {
         let signature: ThinVrfSignature<1> = secret.sign_thin_vrf(transcript.clone(), &[io.clone()]);
 
         let result = public.verify_thin_vrf(transcript, iter::once(input), &signature);
-        
+
         assert!(result.is_ok());
         let io2 = result.unwrap();
         assert_eq!(io2[0].preoutput, io.preoutput);
@@ -400,10 +698,10 @@ mod tests {
         let keyset_size = kzg.max_keyset_size();
 
         let mut rng = rand_core::OsRng;
-	let mut l = [0u8; 8];
-	rng.fill_bytes(&mut l);
-	let keyset_size = usize::from_le_bytes(l) % keyset_size;
-        
+        let mut l = [0u8; 8];
+        rng.fill_bytes(&mut l);
+        let keyset_size = usize::from_le_bytes(l) % keyset_size;
+
         // Gen a bunch of random public keys
         let mut pks: Vec<_> = (0..keyset_size).map(|_| Jubjub::rand(&mut rng)).collect();
         // Just select one index for the actual key we are for signing
@@ -423,18 +721,18 @@ mod tests {
     fn ring_sign_verify() {
         let secret = & SecretKey::from_seed(&[0; 32]);
         let (ring_prover, ring_verifier) = ring_test_init(secret.to_public());
-        
+
         let input = Message {
             domain: b"domain",
             message: b"message",
         }.into_vrf_input();
         let io = secret.vrf_inout(input.clone());
         let transcript: &[u8] = b"Meow";  // Transcript::new_labeled(b"label");
-        
+
         let signature: RingVrfSignature<1> = RingProver {
             ring_prover: &ring_prover, secret,
         }.sign_ring_vrf(transcript, &[io]);
-        
+
         // TODO: serialize signature
 
         let result = RingVerifier(&ring_verifier)
