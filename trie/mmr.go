@@ -1,6 +1,8 @@
 package trie
 
-// "errors"
+import (
+	"github.com/ethereum/go-ethereum/common"
+)
 
 // MerkleMountainRange represents the MMR structure
 type MerkleMountainRange struct {
@@ -34,14 +36,14 @@ func (mmr *MerkleMountainRange) rebalance() {
 }
 
 // Root returns the root hash of the MMR
-func (mmr *MerkleMountainRange) Root() []byte {
+func (mmr *MerkleMountainRange) Root() common.Hash {
 	if len(mmr.peaks) == 0 {
-		return nil
+		return common.BytesToHash([]byte{})
 	}
 	combined := mmr.peaks[0]
 	for i := 1; i < len(mmr.peaks); i++ {
 		combined = append(combined, mmr.peaks[i]...)
 		combined = bhash(combined)
 	}
-	return combined
+	return common.BytesToHash(combined)
 }

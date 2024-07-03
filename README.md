@@ -17,7 +17,7 @@ Assuming we succeed at passing Milestone 1, we request Polkadot Fellowship candi
 
 ## Libraries used
 
-* Bandersnatch [ring-vrf](https://github.com/w3f/ring-vrf) in `ring-vrf`
+* [bandersnatch-vrfs-spec](https://github.com/davxy/bandersnatch-vrfs-spec) in `crypto`
 
 
 

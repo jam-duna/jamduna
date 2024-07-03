@@ -189,6 +189,10 @@ func NewVM(code []byte, initialRegs []uint32, initialPC int, pagemap []PageMap, 
 	return vm
 }
 
+func NewVMFromCode(code []byte) *VM {
+	return NewVM(code, []uint32{}, 0, []PageMap{}, []Page{})
+}
+
 // Execute runs the program until it terminates
 func (vm *VM) Execute() error {
 	for !vm.terminated {

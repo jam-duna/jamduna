@@ -4,6 +4,7 @@ import (
 	"errors"
 	"hash"
 
+	"github.com/ethereum/go-ethereum/common"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -70,6 +71,10 @@ func createHash() hash.Hash {
 	return h
 }
 
+func (t *MerkleTree) GetProof(index int) ([][]byte, error) {
+	return [][]byte{}, nil
+}
+
 func (t *MerkleTree) Trace(index int, data [][]byte) ([][]byte, error) {
 	if index < 0 || index >= len(data) {
 		return nil, errors.New("index out of bounds")
@@ -81,6 +86,14 @@ func (t *MerkleTree) Trace(index int, data [][]byte) ([][]byte, error) {
 	var tracePath [][]byte
 	t.trace(t.Root, index, len(data), &tracePath)
 	return tracePath, nil
+}
+
+func (t *MerkleTree) AddData(data []byte) {
+	return
+}
+
+func (t *MerkleTree) GetRoot() common.Hash {
+	return common.Hash{}
 }
 
 func (t *MerkleTree) trace(node *Node, index, total int, tracePath *[][]byte) {
