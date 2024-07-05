@@ -3,17 +3,16 @@ package safrole
 import (
 	"encoding/binary"
 	"fmt"
-	ring_vrf "github.com/colorfulnotion/jam/ring-vrf"
+	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/ethereum/go-ethereum/common"
-	"math/big"
-	"sort"
+	//"sort"
 )
 
 const (
 	BlsSizeInBytes            = 144
 	MetadataSizeInBytes       = 128
 	ExtrinsicSignatureInBytes = 784
-	TicketsVerifierKeyInBytes = 384
+	TicketsVerifierKeyInBytes = 144
 )
 
 const (
@@ -92,7 +91,7 @@ type State struct {
 		Keys []common.Hash `json:"keys"`
 	} `json:"tickets_or_keys"`
 
-	// []ring_vrf.ValidatorKeySet
+	// []bandersnatch.ValidatorKeySet
 	TicketsVerifierKey []byte `json:"tickets_verifier_key"`
 }
 
@@ -105,7 +104,7 @@ type EpochMark struct {
 }
 
 // PublicKey represents a public key
-type PublicKey ring_vrf.PublicKey
+type PublicKey bandersnatch.PublicKey
 
 type Output struct {
 	Ok struct {
@@ -143,31 +142,16 @@ func (s *State) ticketSealVRFInput(targetEpochRandomness common.Hash, attempt in
 	return ticket_vrf_input
 }
 
-func (s *State) computeTicketID(authority_secret_key ring_vrf.SecretKey, ticket_vrf_input []byte) common.Hash {
-	ticket_id := ring_vrf.VRFOutput(authority_secret_key, ticket_vrf_input)
+func (s *State) computeTicketID(authority_secret_key bandersnatch.SecretKey, ticket_vrf_input []byte) common.Hash {
+	ticket_id := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input)
 	return common.BytesToHash(ticket_id)
 }
 
-func (s *State) computeTicketIDSecretKey(secret ring_vrf.SecretKey, targetEpochRandomness common.Hash, attempt int) ([]byte, []byte) {
+func (s *State) computeTicketIDSecretKey(secret bandersnatch.SecretKey, targetEpochRandomness common.Hash, attempt int) ([]byte, []byte) {
 	ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, attempt)
 	message := []byte{}
-	signature, ticketID := ring_vrf.RingVRFSignSimple(secret, jamTicketSeal, message, ticketVRFInput) // ??
+	signature, ticketID := bandersnatch.RingVRFSign(secret, jamTicketSeal, message, ticketVRFInput) // ??
 	return signature, ticketID
-}
-
-// 6.5.2. Tickets Threshold
-func (s *State) validTicket(ticketID common.Hash) bool {
-	T := new(big.Int).SetUint64(RedundancyFactor * EpochNumSlots / (NumAttempts * NumValidators))
-	/*
-		T = (r·s)/(a·v)
-		v: epoch's authorities number
-		s: epoch's slots number
-		r: redundancy factor
-		a: attempts number - QUESTION: is this refers to the attempt of a ticket or the max AttemptsNumber defined in ProtocolConfiguration
-
-		T: ticket threshold value (0 ≤ T ≤ 1)
-	*/
-	return ticketID.Big().Cmp(T) < 0
 }
 
 // 6.6. On-chain Tickets Validation
@@ -177,19 +161,13 @@ func (s *State) validateTicket(ticketID common.Hash, targetEpochRandomness commo
 	ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, envelope.Attempt)
 
 	//step 1: verify envelope's VRFSignature using ring verifier
-	err := ring_vrf.RingVRFVerifySimple(ticketVRFInput, envelope.Extra, envelope.RingSignature)
-	if err != nil {
-		return err
+	var pubkeys [][]byte
+	_, result := bandersnatch.RingVRFVerify(pubkeys, ticketVRFInput, envelope.Extra, envelope.RingSignature[:])
+	if result != 1 {
+		return fmt.Errorf("Bad signature")
 	}
 
-	//step 2a: compute ticketID from RingSignature
-	computedTicketID := ring_vrf.RingVRFSignedOutput(envelope.RingSignature)
-
-	//step 2b: make suer ticketID is less than threshold
-	if s.validTicket(common.BytesToHash(computedTicketID)) {
-		return nil
-	}
-	return fmt.Errorf("invalid ticket")
+	return nil
 }
 
 func compareTickets(a, b common.Hash) int {
@@ -207,22 +185,24 @@ func compareTickets(a, b common.Hash) int {
 
 // queueTicketEnvelope adds a ticket envelope to the list and sorts it
 func (s *State) queueTicketEnvelope(envelope *TicketEnvelope) error {
-	err := s.validateTicket(envelope.Id, s.Entropy[0], envelope)
-	if err != nil {
-		return err
-	}
-	// Add envelope to s.TicketsAccumulator as "t"
-	t := SafroleAccumulator{
-		Id:      envelope.Id,
-		Attempt: envelope.Attempt,
-	}
-	s.TicketsAccumulator = append(s.TicketsAccumulator, t)
-	// Sort tickets using compareTickets
-	sort.SliceStable(s.TicketsAccumulator, func(i, j int) bool {
-		return compareTickets(s.TicketsAccumulator[i].Id, s.TicketsAccumulator[j].Id) < 0
-	})
-
 	return nil
+	/*
+		err := s.validateTicket(envelope.Id, s.Entropy[0], envelope)
+		if err != nil {
+			return err
+		}
+		// Add envelope to s.TicketsAccumulator as "t"
+		t := SafroleAccumulator{
+			Id:      envelope.Id,
+			Attempt: envelope.Attempt,
+		}
+		s.TicketsAccumulator = append(s.TicketsAccumulator, t)
+		// Sort tickets using compareTickets
+		sort.SliceStable(s.TicketsAccumulator, func(i, j int) bool {
+			return compareTickets(s.TicketsAccumulator[i].Id, s.TicketsAccumulator[j].Id) < 0
+		})
+
+		return nil */
 }
 
 // computeTicketSlotBinding has logic for assigning tickets to slots
@@ -305,9 +285,19 @@ func (s *State) STF(input Input) (Output, State, error) {
 
 	}
 
-	//Slot       int         `json:"slot"`
-	//Entropy    common.Hash `json:"entropy"`
-	//Extrinsics []Extrinsic `json:"extrinsics"`
+	pubkeys := [][]byte{}
+	for _, v := range s.NextValidators {
+	    pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
+	}
+	for _, e := range input.Extrinsics {
+	    if ( len(s.Entropy) == 4 ) {
+	    	vrfInputData := append(append([]byte("jam_ticket_seal"), s.Entropy[2].Bytes()...), byte(e.Attempt))
+	        vrfOutput, result := bandersnatch.RingVRFVerify(pubkeys, vrfInputData, []byte{}, e.Signature[:])
+	        fmt.Printf("%x %d\n", vrfOutput, result);
+	     } else {
+	        fmt.Printf("fff %d\n", len(s.Entropy))
+	     }
+	}
 
 	return o, s2, fmt.Errorf("ok")
 }

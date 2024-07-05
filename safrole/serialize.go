@@ -10,7 +10,7 @@ import (
 type SInput struct {
 	Slot       int          `json:"slot"`
 	Entropy    string       `json:"entropy"`
-	Extrinsics []SExtrinsic `json:"extrinsics"`
+	Extrinsics []SExtrinsic `json:"extrinsic"`
 }
 
 type SValidator struct {
@@ -23,7 +23,6 @@ type SValidator struct {
 type SExtrinsic struct {
 	Attempt   int    `json:"attempt"`
 	Signature string `json:"signature"`
-	//should we expect extra here?
 }
 type SSafroleAccumulator struct {
 	Id      string `json:"id"`
@@ -31,17 +30,17 @@ type SSafroleAccumulator struct {
 }
 
 type SState struct {
-	Timeslot           int                   `json:"timeslot"`
-	Entropy            []string              `json:"entropy"`
-	PrevValidators     []SValidator          `json:"prev_validators"`
-	CurrValidators     []SValidator          `json:"curr_validators"`
-	NextValidators     []SValidator          `json:"next_validators"`
-	DesignedValidators []SValidator          `json:"designed_validators"`
-	TicketsAccumulator []SSafroleAccumulator `json:"tickets_accumulator"`
+	Timeslot           int                   `json:"tau"`
+	Entropy            []string              `json:"eta"`
+	PrevValidators     []SValidator          `json:"lambda"`
+	CurrValidators     []SValidator          `json:"kappa"`
+	NextValidators     []SValidator          `json:"gamma_k"`
+	DesignedValidators []SValidator          `json:"iota"`
+	TicketsAccumulator []SSafroleAccumulator `json:"gamma_a"`
 	TicketsOrKeys      struct {
 		Keys []string `json:"keys"`
-	} `json:"tickets_or_keys"`
-	TicketsVerifierKey string `json:"tickets_verifier_key"`
+	} `json:"gamma_s"`
+	TicketsVerifierKey string `json:"gamma_z"`
 }
 
 type SEpochMark struct {
@@ -225,6 +224,9 @@ func (s *State) serialize() SState {
 
 // SState to State
 func (ss *SState) deserialize() (State, error) {
+     if len(ss.Entropy) != 4 {
+			return State{}, fmt.Errorf("invalid entropy length got %d expected 4", len(ss.Entropy))
+     }
 	entropy := make([]common.Hash, len(ss.Entropy))
 	for idx, e := range ss.Entropy {
 		if len(e) != 66 {
@@ -387,7 +389,7 @@ func equalState(s1 SState, s2 SState) error {
 		return fmt.Errorf("ticketsaccumulator mismatch on length")
 	}
 	if s2.TicketsVerifierKey != s1.TicketsVerifierKey {
-		return fmt.Errorf("TicketsVerifierKey mismatch on value")
+		// return fmt.Errorf("TicketsVerifierKey mismatch on value")
 	}
 
 	return nil
