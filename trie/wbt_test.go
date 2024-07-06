@@ -1,33 +1,49 @@
 package trie
 
 import (
-	"encoding/hex"
 	"testing"
 )
 
-// Test function
-func TestBalancedMerkleTree(t *testing.T) {
-	data := [][]byte{
-		[]byte("a"),
-		[]byte("b"),
-		[]byte("c"),
-		[]byte("d"),
+func TestWellBalancedTree(t *testing.T) {
+	tree := NewWellBalancedTree()
+
+	data1 := []byte("data1")
+	data2 := []byte("data2")
+	data3 := []byte("data3")
+	data4 := []byte("data4")
+
+	tree.Insert(data1)
+	tree.Insert(data2)
+	tree.Insert(data3)
+	tree.Insert(data4)
+
+	rootHash := tree.RootHash()
+	t.Logf("rootHash=%x\n", rootHash)
+	if len(rootHash) != 32 {
+		t.Fatalf("unexpected root hash length: got %d, want 32", len(rootHash))
 	}
-	tree := NewBalancedMerkleTree(data)
-	tracePath, err := tree.Trace(2, data)
+
+	hash3 := computeHash(data3)
+
+	// Test Trace
+	tracePath, err := tree.Trace(hash3)
 	if err != nil {
-		t.Fatalf("Failed to trace: %v", err)
+		t.Fatalf("Trace error: %v", err)
+	}
+	t.Logf("Trace path: %x\n", tracePath)
+
+	// Test VerifyProof
+	if !tree.VerifyProof(hash3, data3, tracePath) {
+		t.Errorf("Proof verification failed for key '%x'", hash3)
+	} else {
+		t.Logf("Proof verification succeeded for key '%x'", hash3)
 	}
 
-	expectedHashes := []string{
-		"expected_hash_1",
-		"expected_hash_2",
-	}
-
-	for i, hash := range tracePath {
-		encodedHash := hex.EncodeToString(hash)
-		if encodedHash != expectedHashes[i] {
-			t.Errorf("Trace path hash mismatch at index %d: got %s, want %s", i, encodedHash, expectedHashes[i])
-		}
+	// Test failed verification
+	hash1 := computeHash(data1)
+	if tree.VerifyProof(hash1, data3, tracePath) {
+		t.Errorf("Proof verification should have failed for mismatched data")
+	} else {
+		t.Logf("Proof verification correctly failed for mismatched data")
 	}
 }

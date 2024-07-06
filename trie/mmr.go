@@ -31,7 +31,7 @@ func (mmr *MerkleMountainRange) rebalance() {
 		}
 		combined := append(mmr.peaks[n-2], mmr.peaks[n-1]...)
 		mmr.peaks = mmr.peaks[:n-2]
-		mmr.peaks = append(mmr.peaks, bhash(combined))
+		mmr.peaks = append(mmr.peaks, computeHash(combined))
 	}
 }
 
@@ -43,7 +43,7 @@ func (mmr *MerkleMountainRange) Root() common.Hash {
 	combined := mmr.peaks[0]
 	for i := 1; i < len(mmr.peaks); i++ {
 		combined = append(combined, mmr.peaks[i]...)
-		combined = bhash(combined)
+		combined = computeHash(combined)
 	}
 	return common.BytesToHash(combined)
 }
