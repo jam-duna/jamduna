@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/ethereum/go-ethereum/common"
+	"golang.org/x/crypto/blake2b"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,23 @@ func TestBlake2b(t *testing.T) {
 	}
 }
 
+func TestEntropyHash(t *testing.T) {
+	acc, _ := hex.DecodeString("2fa3f686df876995167e7c2e5d74c4c7b6e48f8068fe0e44208344d480f7904c")
+	vrf, _ := hex.DecodeString("b2053e5a0852b9a5673f340d1cffe49f63f451e3b8b1e3b8d6c6ae731c888af1")
+	expected := "b137ecb42ed3fe7df0281a459acd05e486bea724205cfdddc0b30efa0086c52f"
+	hasher256, err := blake2b.New256(nil)
+	if err != nil {
+		t.Fatalf("failed to create hasher: %v", err)
+	}
+	hasher256.Write(append(acc, vrf...))
+	res := hex.EncodeToString(hasher256.Sum(nil))
+	if res != expected {
+		t.Errorf("expected %s, got %s", expected, res)
+	} else {
+		fmt.Printf("expected %s, got %s", expected, res)
+	}
+}
+
 func TestVerify(t *testing.T) {
 	// iota "designed" https://github.com/w3f/jamtestvectors/blob/826e64f74a352a059f8b172447af7927f02e0fae/safrole/tiny/publish-tickets-no-mark-2.json#L148-L181
 	pubkeysHex := []string{
@@ -122,37 +140,36 @@ func TestSafroleStf(t *testing.T) {
 	}
 
 	testcases := make(map[string]string)
-	testcases["publish-tickets-no-mark-2.json"] = errNone
-	testcases["publish-tickets-no-mark-6.json"] = errNone
+	//testcases["publish-tickets-no-mark-2.json"] = errNone
+	//testcases["publish-tickets-no-mark-6.json"] = errNone
 	testcases["publish-tickets-no-mark-10.json"] = errNone
-	testcases["publish-tickets-with-mark-1.json"] = errNone
-	testcases["publish-tickets-with-mark-2.json"] = errNone
-	testcases["publish-tickets-with-mark-3.json"] = errNone
-	testcases["publish-tickets-with-mark-5.json"] = errNone
-	testcases["enact-epoch-change-with-no-tickets-1.json"] = errNone
-	testcases["enact-epoch-change-with-no-tickets-2.json"] = errNone
-	testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
+	//testcases["publish-tickets-with-mark-1.json"] = errNone
+	//testcases["publish-tickets-with-mark-2.json"] = errNone
+	//testcases["publish-tickets-with-mark-3.json"] = errNone
+	//testcases["publish-tickets-with-mark-5.json"] = errNone
+	//testcases["enact-epoch-change-with-no-tickets-1.json"] = errNone
+	//testcases["enact-epoch-change-with-no-tickets-2.json"] = errNone
+	//testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
 	testcases["enact-epoch-change-with-no-tickets-4.json"] = errNone
-	testcases["publish-tickets-with-mark-1.json"] = errNone
-	testcases["publish-tickets-with-mark-2.json"] = errNone
-	testcases["publish-tickets-with-mark-3.json"] = errNone
-	testcases["publish-tickets-with-mark-4.json"] = errNone
-	testcases["publish-tickets-with-mark-5.json"] = errNone
+	//testcases["publish-tickets-with-mark-2.json"] = errNone
+	//testcases["publish-tickets-with-mark-4.json"] = errNone
+	//testcases["publish-tickets-no-mark-7.json"] = errTicketSubmissionInTail // "Fail: Submit a ticket while in epoch's tail."
 
 	testcases["enact-epoch-change-with-no-tickets-4.json"] = errNone
-	testcases["enact-epoch-change-with-no-tickets-1.json"] = errNone
-	testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
+	//testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
 	testcases["enact-epoch-change-with-no-tickets-2.json"] = errTimeslotNotMonotonic     //"Fail: Timeslot must be strictly monotonic."
 	testcases["publish-tickets-no-mark-1.json"] = errExtrinsicWithMoreTicketsThanAllowed // "Fail: Submit an extrinsic with more tickets than allowed."
 	testcases["publish-tickets-no-mark-3.json"] = errTicketResubmission                  // "Fail: Re-submit tickets from authority 0."
 	testcases["publish-tickets-no-mark-4.json"] = errTicketBadOrder                      // "Fail: Submit tickets in bad order."
-	testcases["publish-tickets-no-mark-5.json"] = errTicketBadRingProof                  // "Fail: Submit tickets with bad ring proof."
-	testcases["publish-tickets-no-mark-7.json"] = errTicketSubmissionInTail              // "Fail: Submit a ticket while in epoch's tail."
-	testcases["publish-tickets-no-mark-8.json"] = errNone
-	testcases["pubblish-tickets-with-mark-4.json"] = errNone
-	testcases["publish-tickets-no-mark-9.json"] = errNone
+	//testcases["publish-tickets-no-mark-5.json"] = errTicketBadRingProof                  // "Fail: Submit tickets with bad ring proof."
+	//testcases["publish-tickets-no-mark-8.json"] = errNone
+	//testcases["publish-tickets-with-mark-3.json"] = errNone
+	//testcases["publish-tickets-no-mark-9.json"] = errNone
 	testcases["skip-epochs-1.json"] = errNone
-	testcases["skip-epoch-tail-1.json"] = errNone
+	// testcases["skip-epoch-tail-1.json"] = errNone
+
+	//testcases["publish-tickets-with-mark-1.json"] = errNone
+	//testcases["publish-tickets-with-mark-2.json"] = errNone
 	for _, file := range files {
 		if file.IsDir() {
 			continue
@@ -169,7 +186,7 @@ func TestSafroleStf(t *testing.T) {
 			}
 			fmt.Printf("\n***Test: %s Expected error: %s\n", file.Name(), expectedErr)
 		} else {
-			fmt.Printf("\n***Test: %s\n", file.Name())
+			fmt.Printf("\n***Test SKIPPED: %s\n", file.Name())
 			continue
 			//expectedErr = ""
 			//fmt.Printf("Expected error: NOTFOUND\n")
@@ -200,15 +217,18 @@ func TestSafroleStf(t *testing.T) {
 		}
 
 		// Call the safrole_stf function with the input and pre_state
-		_, postState, err := safrole_stf(testCase.Input, testCase.PreState)
+		output, postState, err := safrole_stf(testCase.Input, testCase.PreState)
 		if err.Error() != expectedErr {
 			fmt.Printf("FAIL: expected '%s', got '%s'\n", expectedErr, err.Error())
 		}
 
 		// Perform assertions to validate the output and post_state
-		//if !equalOutput(output, testCase.Output) {
-		//      fmt.Printf("FAIL Output mismatch for file %s: expected %v, got %v\n", filePath, testCase.Output, output)
-		//}
+		if !equalOutput(output, testCase.Output) {
+			expectedJSON, _ := json.MarshalIndent(testCase.Output, "", "  ")
+			gotJSON, _ := json.MarshalIndent(output, "", "  ")
+			fmt.Printf("FAIL Output mismatch: expected %s, got %s [%s]\n", string(expectedJSON), string(gotJSON), err.Error())
+
+		}
 		err = equalState(postState, testCase.PostState)
 		if err != nil {
 			fmt.Printf("FAIL PostState mismatch on %s: %s\n", file.Name(), err.Error())

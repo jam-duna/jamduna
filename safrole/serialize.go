@@ -1,6 +1,9 @@
 package safrole
 
 import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -49,9 +52,9 @@ type SEpochMark struct {
 }
 
 type SOutput struct {
-	Ok struct {
-		EpochMark   SEpochMark            `json:"epoch_mark"`
-		TicketsMark []SSafroleAccumulator `json:"tickets_mark"`
+	Ok *struct {
+		EpochMark   *SEpochMark            `json:"epoch_mark"`
+		TicketsMark []*SSafroleAccumulator `json:"tickets_mark"`
 	} `json:"ok"`
 }
 
@@ -224,9 +227,9 @@ func (s *State) serialize() SState {
 
 // SState to State
 func (ss *SState) deserialize() (State, error) {
-     if len(ss.Entropy) != 4 {
-			return State{}, fmt.Errorf("invalid entropy length got %d expected 4", len(ss.Entropy))
-     }
+	if len(ss.Entropy) != 4 {
+		return State{}, fmt.Errorf("invalid entropy length got %d expected 4", len(ss.Entropy))
+	}
 	entropy := make([]common.Hash, len(ss.Entropy))
 	for idx, e := range ss.Entropy {
 		if len(e) != 66 {
@@ -311,65 +314,141 @@ func (ss *SState) deserialize() (State, error) {
 }
 
 // Serialize function for Output
+
+// Serialize function for Output
 func (o *Output) serialize() SOutput {
-	epochMark := SEpochMark{
-		Entropy: common.Bytes2Hex(o.Ok.EpochMark.Entropy),
+	var epochMark *SEpochMark
+	var ticketsMark []*SSafroleAccumulator
+
+	if o.Ok != nil {
+		if o.Ok.EpochMark != nil {
+			epochMark = &SEpochMark{
+				Entropy: o.Ok.EpochMark.Entropy.Hex(),
+			}
+
+			for _, validator := range o.Ok.EpochMark.Validators {
+				epochMark.Validators = append(epochMark.Validators, validator.Hex())
+			}
+		}
+
+		if o.Ok.TicketsMark != nil {
+			tm := make([]*SSafroleAccumulator, len(o.Ok.TicketsMark))
+			for i, ticket := range o.Ok.TicketsMark {
+				tm[i] = &SSafroleAccumulator{
+					Id:      ticket.Id.String(),
+					Attempt: ticket.Attempt,
+				}
+			}
+			ticketsMark = tm
+		}
+		return SOutput{
+			Ok: &struct {
+				EpochMark   *SEpochMark            `json:"epoch_mark"`
+				TicketsMark []*SSafroleAccumulator `json:"tickets_mark"`
+			}{
+				EpochMark:   epochMark,
+				TicketsMark: ticketsMark,
+			},
+		}
+	} else {
+		return SOutput{
+			Ok: nil,
+		}
+
 	}
 
-	for _, validator := range o.Ok.EpochMark.Validators {
-		epochMark.Validators = append(epochMark.Validators, common.Bytes2Hex(validator))
-	}
-
-	ticketsMark := make([]SSafroleAccumulator, len(o.Ok.TicketsMark))
-	for i, ticket := range o.Ok.TicketsMark {
-		ticketsMark[i] = ticket.serialize()
-	}
-
-	return SOutput{
-		Ok: struct {
-			EpochMark   SEpochMark            `json:"epoch_mark"`
-			TicketsMark []SSafroleAccumulator `json:"tickets_mark"`
-		}{
-			EpochMark:   epochMark,
-			TicketsMark: ticketsMark,
-		},
-	}
 }
 
 // Deserialize function for SOutput
 func (so *SOutput) deserialize() (Output, error) {
-	entropy, _ := hexutil.Decode(so.Ok.EpochMark.Entropy)
-	validators := make([][]byte, len(so.Ok.EpochMark.Validators))
-	for i, validator := range so.Ok.EpochMark.Validators {
-		decoded, _ := hexutil.Decode(validator)
-		validators[i] = decoded
-	}
+	var output Output
 
-	ticketsMark := make([]SafroleAccumulator, len(so.Ok.TicketsMark))
-	for i, ticket := range so.Ok.TicketsMark {
-		accumulator, err := ticket.deserialize()
-		if err != nil {
-			return Output{}, err
-		}
-		ticketsMark[i] = accumulator
-	}
+	if so.Ok != nil {
+		var epochMark *EpochMark
+		var ticketsMark []*SafroleAccumulator
 
-	return Output{
-		Ok: struct {
-			EpochMark   EpochMark            `json:"epoch_mark"`
-			TicketsMark []SafroleAccumulator `json:"tickets_mark"`
-		}{
-			EpochMark: EpochMark{
-				Entropy:    entropy,
+		if so.Ok.EpochMark != nil {
+			entropy, err := hex.DecodeString(so.Ok.EpochMark.Entropy)
+			if err != nil {
+				return Output{}, err
+			}
+
+			validators := make([]common.Hash, len(so.Ok.EpochMark.Validators))
+			for i, validator := range so.Ok.EpochMark.Validators {
+				decoded, err := hex.DecodeString(validator)
+				if err != nil {
+					return Output{}, err
+				}
+				validators[i] = common.BytesToHash(decoded)
+			}
+
+			epochMark = &EpochMark{
+				Entropy:    common.BytesToHash(entropy),
 				Validators: validators,
-			},
+			}
+		}
+
+		if so.Ok.TicketsMark != nil {
+			tm := make([]*SafroleAccumulator, len(so.Ok.TicketsMark))
+			for i, ticket := range so.Ok.TicketsMark {
+				id, _ := hex.DecodeString(ticket.Id)
+				tm[i] = &SafroleAccumulator{
+					Id:      common.BytesToHash(id),
+					Attempt: ticket.Attempt,
+				}
+			}
+			ticketsMark = tm
+		}
+
+		output.Ok = &struct {
+			EpochMark   *EpochMark            `json:"epoch_mark"`
+			TicketsMark []*SafroleAccumulator `json:"tickets_mark"`
+		}{
+			EpochMark:   epochMark,
 			TicketsMark: ticketsMark,
-		},
-	}, nil
+		}
+	}
+
+	return output, nil
 }
 
 func equalOutput(o1 SOutput, o2 SOutput) bool {
-	// TODO
+	o1JSON, _ := json.MarshalIndent(o1, "", "  ")
+	o2JSON, _ := json.MarshalIndent(o2, "", "  ")
+	if !bytes.Equal(o1JSON, o2JSON) {
+		return false
+	}
+	return true
+}
+
+// Implement the equalEpochMark function
+func equalEpochMark(e1, e2 SEpochMark) bool {
+	return e1.Entropy == e2.Entropy && compareStringSlices(e1.Validators, e2.Validators)
+}
+
+// Implement the equalTicketsMark function
+func equalTicketsMark(t1, t2 []SSafroleAccumulator) bool {
+	if len(t1) != len(t2) {
+		return false
+	}
+	for i := range t1 {
+		if t1[i] != t2[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Helper function to compare two slices of strings
+func compareStringSlices(s1, s2 []string) bool {
+	if len(s1) != len(s2) {
+		return false
+	}
+	for i := range s1 {
+		if s1[i] != s2[i] {
+			return false
+		}
+	}
 	return true
 }
 
@@ -386,8 +465,15 @@ func equalState(s1 SState, s2 SState) error {
 		}
 	}
 	if len(s2.TicketsAccumulator) != len(s1.TicketsAccumulator) {
-		return fmt.Errorf("ticketsaccumulator mismatch on length")
+		return fmt.Errorf("ticketsaccumulator mismatch on length s2 has %d, s1 has %d", len(s2.TicketsAccumulator), len(s1.TicketsAccumulator))
 	}
+	for i, t2 := range s2.TicketsAccumulator {
+		t1 := s1.TicketsAccumulator[i]
+		if t1.Id != t2.Id {
+			return fmt.Errorf("ticketsaccumulator mismatch on item %d: s2 has %s, s1 has %s", i, t1.Id, t2.Id)
+		}
+	}
+
 	if s2.TicketsVerifierKey != s1.TicketsVerifierKey {
 		// return fmt.Errorf("TicketsVerifierKey mismatch on value")
 	}

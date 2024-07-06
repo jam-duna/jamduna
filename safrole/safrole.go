@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/ethereum/go-ethereum/common"
-	//"sort"
+	"golang.org/x/crypto/blake2b"
+	"sort"
 )
 
 const (
@@ -19,16 +20,14 @@ const (
 	// tiny (NOTE: large is 600 + 1023, should use ProtocolConfiguration)
 	EpochNumSlots = 12
 	NumValidators = 6
-
-	RedundancyFactor = 1
-	NumAttempts      = 100
+	NumAttempts   = 2
+	Y             = 10
 )
 
 // 6.1 protocol configuration
 type ProtocolConfiguration struct {
-	EpochNumSlots    uint32 // number of slots for each epoch (The "v")
-	NumAttempts      uint8  // maximum number of tickets each authority can submit ("")
-	RedundancyFactor uint8  // expected ratio between epoch slots and valid tickets
+	EpochNumSlots uint32 // number of slots for each epoch (The "v")
+	NumAttempts   uint8  // maximum number of tickets each authority can submit ("")
 }
 
 type Input struct {
@@ -98,18 +97,18 @@ type State struct {
 // EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch
 type EpochMark struct {
 	// Randomness accumulator snapshot
-	Entropy []byte `json:"entropy"`
+	Entropy common.Hash `json:"entropy"`
 	// List of authorities scheduled for next epoch -- could be []PublicKey
-	Validators [][]byte `json:"validators"`
+	Validators []common.Hash `json:"validators"`
 }
 
 // PublicKey represents a public key
 type PublicKey bandersnatch.PublicKey
 
 type Output struct {
-	Ok struct {
-		EpochMark   EpochMark            `json:"epoch_mark"`
-		TicketsMark []SafroleAccumulator `json:"tickets_mark"`
+	Ok *struct {
+		EpochMark   *EpochMark            `json:"epoch_mark"`
+		TicketsMark []*SafroleAccumulator `json:"tickets_mark"`
 	} `json:"ok"`
 }
 
@@ -197,29 +196,20 @@ func (s *State) queueTicketEnvelope(envelope *TicketEnvelope) error {
 			Attempt: envelope.Attempt,
 		}
 		s.TicketsAccumulator = append(s.TicketsAccumulator, t)
-		// Sort tickets using compareTickets
-		sort.SliceStable(s.TicketsAccumulator, func(i, j int) bool {
-			return compareTickets(s.TicketsAccumulator[i].Id, s.TicketsAccumulator[j].Id) < 0
-		})
 
 		return nil */
 }
 
 // computeTicketSlotBinding has logic for assigning tickets to slots
-func (s *State) computeTicketSlotBinding() {
+func (s *State) computeTicketSlotBinding(inp []SafroleAccumulator) []*SafroleAccumulator {
 	i := 0
-	tickets := make([]SafroleAccumulator, 0, EpochNumSlots)
+	tickets := make([]*SafroleAccumulator, 0, EpochNumSlots)
 	for i < len(s.TicketsAccumulator)/2 {
-		tickets = append(tickets, s.TicketsAccumulator[i])
-		tickets = append(tickets, s.TicketsAccumulator[EpochNumSlots-1-i])
+		tickets = append(tickets, &inp[i])
+		tickets = append(tickets, &inp[EpochNumSlots-1-i])
 		i++
 	}
-	//s.OrderedTickets = tickets
-	//if len(s.OrderedTickets) < EpochNumSlots {
-	// orphan block - where not all slots are filled with Fallback
-	// 6.8.2 Slot Claim - Secondary Method
-	//}
-	fmt.Printf("%d Tickets\n", len(tickets))
+	return tickets
 }
 
 //validate claim
@@ -261,43 +251,106 @@ func (s *State) validateExtrinsic(e Extrinsic) (*TicketEnvelope, error) {
 func (s *State) STF(input Input) (Output, State, error) {
 
 	s2 := copyState(*s)
-	o := Output{}
-	if input.Slot <= s2.Timeslot {
-		return o, s2, fmt.Errorf(errTimeslotNotMonotonic)
+	o := &Output{
+		Ok: nil,
 	}
-	s2.Timeslot = input.Slot
+	ok := &struct {
+		EpochMark   *EpochMark            `json:"epoch_mark"`
+		TicketsMark []*SafroleAccumulator `json:"tickets_mark"`
+	}{
+		EpochMark:   nil,
+		TicketsMark: nil,
+	}
+	if input.Slot <= s.Timeslot {
+		return *o, s2, fmt.Errorf(errTimeslotNotMonotonic)
+	}
 
-	/* TODO: detect invalid transition
-	epoch change signal - observed in first block of a new epoch?
-	epoch ticket signal - observed is first block in epoch TAIL?
-	slot claim info - observed in second to last entry of every block?
-	seal - block signature. observed in last entry of every block?
-	*/
-
-	for _, e := range input.Extrinsics {
-		env, err := s.validateExtrinsic(e)
-		if err != nil {
-			fmt.Printf("Invalid extrinsic %v", e)
-			continue
-		}
-
-		err = s.queueTicketEnvelope(env)
-
+	// tally existing ticketIDs
+	ticketIDs := make(map[common.Hash]int)
+	for i, a := range s.TicketsAccumulator {
+		fmt.Printf("ticketID? %d => %s\n", i, a.Id.String())
+		ticketIDs[a.Id] = a.Attempt
 	}
 
 	pubkeys := [][]byte{}
 	for _, v := range s.NextValidators {
-	    pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
+		pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
 	}
+	// Process Extrinsic Tickets
+	fmt.Printf("Input Slot: %d Y = %d\n", input.Slot, Y)
 	for _, e := range input.Extrinsics {
-	    if ( len(s.Entropy) == 4 ) {
-	    	vrfInputData := append(append([]byte("jam_ticket_seal"), s.Entropy[2].Bytes()...), byte(e.Attempt))
-	        vrfOutput, result := bandersnatch.RingVRFVerify(pubkeys, vrfInputData, []byte{}, e.Signature[:])
-	        fmt.Printf("%x %d\n", vrfOutput, result);
-	     } else {
-	        fmt.Printf("fff %d\n", len(s.Entropy))
-	     }
+		if input.Slot >= Y {
+			return *o, s2, fmt.Errorf(errTicketSubmissionInTail)
+		}
+		if len(s.Entropy) == 4 {
+			vrfInputData := append(append([]byte("jam_ticket_seal"), s.Entropy[2].Bytes()...), byte(e.Attempt))
+			vrfOutput, result := bandersnatch.RingVRFVerify(pubkeys, vrfInputData, []byte{}, e.Signature[:])
+			if result == 0 {
+				return *o, s2, fmt.Errorf(errTicketBadRingProof)
+			}
+			_, exists := ticketIDs[common.BytesToHash(vrfOutput)]
+			if exists {
+				return *o, s2, fmt.Errorf(errTicketResubmission)
+			}
+			newa := SafroleAccumulator{
+				Id:      common.BytesToHash(vrfOutput),
+				Attempt: e.Attempt,
+			}
+			s2.TicketsAccumulator = append(s2.TicketsAccumulator, newa)
+			fmt.Printf("added Ticket ID %x (%d)\n", vrfOutput, result)
+		}
+	}
+	// Sort tickets using compareTickets
+	sort.SliceStable(s2.TicketsAccumulator, func(i, j int) bool {
+		return compareTickets(s2.TicketsAccumulator[i].Id, s2.TicketsAccumulator[j].Id) < 0
+	})
+	fmt.Printf("Sorted Tickets:\n")
+	for i, t := range s2.TicketsAccumulator {
+		fmt.Printf(" %d: %s\n", i, t.Id)
+	}
+	// Drop useless tickets
+	if len(s2.TicketsAccumulator) > EpochNumSlots {
+		s2.TicketsAccumulator = s2.TicketsAccumulator[0:EpochNumSlots]
 	}
 
-	return o, s2, fmt.Errorf("ok")
+	// the last slot in the Epoch, with a full set of tickets
+	if len(s2.TicketsAccumulator) == EpochNumSlots && input.Slot == EpochNumSlots-1 {
+		ok.TicketsMark = s.computeTicketSlotBinding(s2.TicketsAccumulator)
+	}
+	fmt.Printf(" -- %d %d %d \n", input.Slot, EpochNumSlots, input.Slot%EpochNumSlots)
+	// adjust entropy
+	hasher256, err := blake2b.New256(nil)
+	if err != nil {
+		return *o, s2, err
+	}
+	hasher256.Write(append(s.Entropy[0].Bytes(), input.Entropy.Bytes()...))
+	res := hasher256.Sum(nil)
+
+	if input.Slot%EpochNumSlots == 0 {
+		// New Epoch
+		v := make([]common.Hash, NumValidators)
+		for i, x := range s.DesignedValidators {
+			v[i] = x.Bandersnatch
+			fmt.Printf(" !! %d %x\n", i, v[i])
+		}
+		ok.EpochMark = &EpochMark{
+			Entropy:    s.Entropy[0],
+			Validators: v,
+		}
+		s2.Entropy[1] = s.Entropy[0]
+		s2.Entropy[2] = s.Entropy[1]
+		s2.Entropy[3] = s.Entropy[2]
+		s2.Entropy[0] = common.BytesToHash(res)
+		s2.TicketsAccumulator = s2.TicketsAccumulator[0:0]
+	} else {
+		// Epoch in progress
+		s2.Entropy[0] = common.BytesToHash(res)
+		s2.Entropy[1] = s.Entropy[1]
+		s2.Entropy[2] = s.Entropy[2]
+		s2.Entropy[3] = s.Entropy[3]
+	}
+
+	s2.Timeslot = input.Slot
+	o.Ok = ok
+	return *o, s2, fmt.Errorf(errNone)
 }
