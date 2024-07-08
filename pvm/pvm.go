@@ -7,7 +7,12 @@ import (
 )
 
 const (
-	regSize = 13
+	regSize  = 13
+	numCores = 341
+	W_C      = 642
+	W_S      = 6
+	M        = 128
+	V        = 1023
 )
 
 // PageMap
@@ -25,12 +30,13 @@ type Page struct {
 
 type VM struct {
 	code       []byte
-	pc         int // Program counter
+	pc         uint32 // Program counter
 	terminated bool
 	hostCall   bool
 	ram        []byte
 	register   []uint32
-	hostEnv    JAMEnvironment
+	ξ          uint64
+	hostenv    *HostEnv
 }
 
 type Program struct {
@@ -85,7 +91,6 @@ const (
 	LOAD_IND_I16      = 33
 	LOAD_IND_U32      = 1
 	ADD_IMM           = 2
-	SUB_IMM           = 102
 	AND_IMM           = 18
 	XOR_IMM           = 31
 	OR_IMM            = 49
@@ -133,6 +138,29 @@ const (
 	CMOV_NZ     = 84
 	CMOV_IMM_IZ = 85 // not in the paper
 
+	ASSIGN            = 98
+	NEW               = 99
+	GAS               = 100
+	LOOKUP            = 101
+	READ              = 102
+	WRITE             = 103
+	INFO              = 104
+	EMPOWER           = 105
+	DESIGNATE         = 106
+	CHECKPOINT        = 107
+	UPGRADE           = 108
+	TRANSFER          = 109
+	QUIT              = 110
+	SOLICIT           = 111
+	FORGET            = 112
+	HISTORICAL_LOOKUP = 114
+	IMPORT            = 115
+	EXPORT            = 116
+	MACHINE           = 117
+	PEEK              = 118
+	POKE              = 119
+	INVOKE            = 220
+	EXPUNGE           = 221
 )
 
 const (
@@ -159,6 +187,8 @@ const (
 )
 
 func parseProgram(p []byte) *Program {
+
+	fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], p[2])
 	return &Program{
 		JSize: int(p[0]),
 		Z:     int(p[1]),
@@ -171,7 +201,10 @@ func parseProgram(p []byte) *Program {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(code []byte, initialRegs []uint32, initialPC int, pagemap []PageMap, pages []Page) *VM {
+func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page) *VM {
+	if len(code) == 0 {
+		panic("NO CODE\n")
+	}
 	p := parseProgram(code)
 	fmt.Printf("Code: %v K: %v\n", p.Code, p.K)
 	vm := &VM{
@@ -189,8 +222,8 @@ func NewVM(code []byte, initialRegs []uint32, initialPC int, pagemap []PageMap, 
 	return vm
 }
 
-func NewVMFromCode(code []byte) *VM {
-	return NewVM(code, []uint32{}, 0, []PageMap{}, []Page{})
+func NewVMFromCode(code []byte, i uint32) *VM {
+	return NewVM(code, []uint32{}, i, []PageMap{}, []Page{})
 }
 
 // Execute runs the program until it terminates
@@ -205,15 +238,15 @@ func (vm *VM) Execute() error {
 
 // step performs a single step in the PVM
 func (vm *VM) step() error {
-	if vm.pc < 0 || vm.pc >= len(vm.code) {
+	if vm.pc >= uint32(len(vm.code)) {
 		return errors.New("program counter out of bounds")
 	}
 
 	instr := vm.code[vm.pc]
 	opcode := instr
 	x := vm.pc + 4
-	if x > len(vm.code) {
-		x = len(vm.code)
+	if x > uint32(len(vm.code)) {
+		x = uint32(len(vm.code))
 	}
 	operands := vm.code[vm.pc+1:]
 	fmt.Printf("%d opcode %d - operands: %v\n", vm.pc, opcode, operands)
@@ -222,78 +255,151 @@ func (vm *VM) step() error {
 		fmt.Printf("TERMINATED\n")
 		vm.terminated = true
 	case JUMP:
-		if err := vm.branch(operands, 0); err != nil {
-			return err
-		}
+		errCode := vm.branch(operands, 0)
+		vm.writeRegister(0, errCode)
 	case LOAD_IMM_JUMP:
-		if err := vm.loadImmJump(operands); err != nil {
-			return err
-		}
+		errCode := vm.loadImmJump(operands)
+		vm.writeRegister(0, errCode)
 	case LOAD_IMM_JUMP_IND:
-		if err := vm.loadImmJumpInd(operands); err != nil {
-			return err
-		}
+		errCode := vm.loadImmJumpInd(operands)
+		vm.writeRegister(0, errCode)
 	case BRANCH_EQ, BRANCH_NE, BRANCH_LT_S, BRANCH_GE_U, BRANCH_GE_S:
-		if err := vm.branchReg(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.branchReg(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:
-		if err := vm.branchCond(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.branchCond(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case ECALL:
-		if err := vm.ecall(operands); err != nil {
-			return err
-		}
+		errCode := vm.ecall(operands)
+		vm.writeRegister(0, errCode)
 	case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32:
-		if err := vm.storeImm(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.storeImm(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case LOAD_IMM:
-		if err := vm.loadImm(operands); err != nil {
-			return err
-		}
+		errCode := vm.loadImm(operands)
+		vm.writeRegister(0, errCode)
 	case LOAD_U8, LOAD_U16, LOAD_U32:
-		if err := vm.load(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.load(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case STORE_U8, STORE_U16, STORE_U32:
-		if err := vm.store(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.store(opcode, operands)
+		vm.writeRegister(0, errCode)
+
 	case STORE_IMM_IND_U8, STORE_IMM_IND_U16, STORE_IMM_IND_U32:
-		if err := vm.storeImmInd(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.storeImmInd(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case STORE_IND_U8, STORE_IND_U16, STORE_IND_U32:
-		if err := vm.storeInd(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.storeInd(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case LOAD_IND_U8, LOAD_IND_I8, LOAD_IND_U16, LOAD_IND_I16, LOAD_IND_U32:
-		if err := vm.loadInd(opcode, operands); err != nil {
-			return err
-		}
-	case ADD_IMM, SUB_IMM, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, MUL_UPPER_S_S_IMM, MUL_UPPER_U_U_IMM, SET_LT_U_IMM, SET_LT_S_IMM:
-		fmt.Printf("XXXXXX\n")
-		if err := vm.aluImm(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.loadInd(opcode, operands)
+		vm.writeRegister(0, errCode)
+	case ADD_IMM, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, MUL_UPPER_S_S_IMM, MUL_UPPER_U_U_IMM, SET_LT_U_IMM, SET_LT_S_IMM:
+		errCode := vm.aluImm(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case SHLO_R_IMM, SHLO_L_IMM, SHAR_R_IMM, NEG_ADD_IMM, SET_GT_U_IMM, SET_GT_S_IMM, SHLO_R_IMM_ALT, SHLO_L_IMM_ALT, SHAR_L_IMM_ALT:
-		if err := vm.shiftImm(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.shiftImm(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case ADD_REG, SUB_REG, AND_REG, XOR_REG, OR_REG, MUL_REG, MUL_UPPER_S_S_REG, MUL_UPPER_U_U_REG, MUL_UPPER_S_U_REG, DIV_U, DIV_S, REM_U, REM_S, CMOV_IZ, CMOV_NZ, SHLO_L, SHLO_R, SHAR_R, SET_LT_U, SET_LT_S:
-		if err := vm.aluReg(opcode, operands); err != nil {
-			return err
-		}
+		errCode := vm.aluReg(opcode, operands)
+		vm.writeRegister(0, errCode)
 	case MOVE_REG:
-		if err := vm.moveReg(operands); err != nil {
-			return err
-		}
+		errCode := vm.moveReg(operands)
+		vm.writeRegister(0, errCode)
 	case SBRK:
-		if err := vm.sbrk(operands); err != nil {
-			return err
-		}
+		vm.sbrk(operands)
+		break
+	case ASSIGN:
+		errCode := vm.hostAssign()
+		vm.writeRegister(0, errCode)
+		break
+	case NEW:
+		errCode := vm.hostNew()
+		vm.writeRegister(0, errCode)
+		break
+	case GAS:
+		errCode := vm.hostGas()
+		vm.writeRegister(0, errCode)
+		break
+	case LOOKUP:
+		errCode := vm.hostLookup()
+		vm.writeRegister(0, errCode)
+		break
+	case READ:
+		errCode := vm.hostRead()
+		vm.writeRegister(0, errCode)
+		break
+	case WRITE:
+		errCode := vm.hostWrite()
+		vm.writeRegister(0, errCode)
+		break
+	case INFO:
+		errCode := vm.hostInfo()
+		vm.writeRegister(0, errCode)
+		break
+	case EMPOWER:
+		errCode := vm.hostEmpower()
+		vm.writeRegister(0, errCode)
+		break
+	case DESIGNATE:
+		errCode := vm.hostDesignate()
+		vm.writeRegister(0, errCode)
+		break
+	case CHECKPOINT:
+		errCode := vm.hostCheckpoint()
+		vm.writeRegister(0, errCode)
+		break
+	case UPGRADE:
+		errCode := vm.hostUpgrade()
+		vm.writeRegister(0, errCode)
+		break
+	case TRANSFER:
+		errCode := vm.hostTransfer()
+		vm.writeRegister(0, errCode)
+		break
+	case QUIT:
+		errCode := vm.hostQuit()
+		vm.writeRegister(0, errCode)
+		break
+	case SOLICIT:
+		errCode := vm.hostSolicit()
+		vm.writeRegister(0, errCode)
+		break
+	case FORGET:
+		errCode := vm.hostForget()
+		vm.writeRegister(0, errCode)
+		break
+	case HISTORICAL_LOOKUP:
+		errCode := vm.hostHistoricalLookup(0) // TODO: figure out t
+		vm.writeRegister(0, errCode)
+		break
+	case IMPORT:
+		errCode := vm.hostImport()
+		vm.writeRegister(0, errCode)
+		break
+	case EXPORT:
+		errCode, _ := vm.hostExport(0) // TODO: figure out pi input and export item output
+		vm.writeRegister(0, errCode)
+		break
+	case MACHINE:
+		errCode := vm.hostMachine()
+		vm.writeRegister(0, errCode)
+		break
+	case PEEK:
+		errCode := vm.hostPeek()
+		vm.writeRegister(0, errCode)
+		break
+	case POKE:
+		errCode := vm.hostPoke()
+		vm.writeRegister(0, errCode)
+		break
+	case INVOKE:
+		errCode := vm.hostInvoke()
+		vm.writeRegister(0, errCode)
+		break
+	case EXPUNGE:
+		errCode := vm.hostExpunge()
+		vm.writeRegister(0, errCode)
 		break
 	default:
 		vm.terminated = true
@@ -312,189 +418,161 @@ func (vm *VM) step() error {
 		}*/
 	}
 
-	vm.pc += 1 + skip(opcode)
+	vm.pc += 1 + uint32(skip(opcode))
 	return nil
 }
 
 // handleHostCall handles host-call instructions
-func (vm *VM) handleHostCall(opcode byte, operands []byte) (bool, error) {
-	if vm.hostEnv == nil {
-		return false, errors.New("no host environment configured")
+func (vm *VM) handleHostCall(opcode byte, operands []byte) (bool, uint32) {
+	if vm.hostenv == nil {
+		return false, HUH
 	}
-	return vm.hostEnv.InvokeHostCall(opcode, operands, vm)
+	// TODO: vm.hostenv.InvokeHostCall(opcode, operands, vm)
+	return false, OOB
 }
 
 // skip calculates the skip distance based on the opcode
-func skip(opcode byte) int {
+func skip(opcode byte) uint32 {
 	switch opcode {
 	case JUMP, LOAD_IMM_JUMP, LOAD_IMM_JUMP_IND:
-		return 1
+		return uint32(1)
 	case BRANCH_EQ, BRANCH_NE, BRANCH_GE_U, BRANCH_GE_S, BRANCH_LT_U, BRANCH_LT_S:
-		return 2
+		return uint32(2)
 	case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:
-		return 3
+		return uint32(3)
 	default:
-		return 0
+		return uint32(0)
 	}
 }
 
 // Implement additional functions for RAM and register access as per the specification
-func (vm *VM) readRAM(address uint32) (byte, error) {
+func (vm *VM) readRAM(address uint32) (byte, uint32) {
 	if address < 0 || address >= uint32(len(vm.ram)) {
-		return 0, errors.New("RAM access out of bounds")
+		return 0, OOB
 	}
-	return vm.ram[address], nil
+	return vm.ram[address], OK
 }
 
-func (vm *VM) readRAMBytes(address uint32, numBytes int) ([]byte, error) {
-	return vm.ram[address:(address + uint32(numBytes))], nil
+func (vm *VM) readRAMBytes(address uint32, numBytes int) ([]byte, uint32) {
+	if address >= uint32(len(vm.ram)) {
+		return []byte{}, OOB
+	}
+	return vm.ram[address:(address + uint32(numBytes))], OK
 }
 
-func (vm *VM) writeRAMBytes(address uint32, value []byte) error {
+func (vm *VM) writeRAMBytes(address uint32, value []byte) uint32 {
 	if address < 0 || address >= uint32(len(vm.ram)) {
-		return errors.New("RAM access out of bounds")
+		return OOB
 	}
 	for i, b := range value {
 		vm.ram[address+uint32(i)] = b
 	}
-	return nil
+	return OK
 }
-func (vm *VM) writeRAM(address int, value byte) error {
-	if address < 0 || address >= len(vm.ram) {
-		return errors.New("RAM access out of bounds")
+func (vm *VM) writeRAM(address uint32, value byte) uint32 {
+	if address < 0 || address >= uint32(len(vm.ram)) {
+		return OOB
 	}
 	vm.ram[address] = value
-	return nil
+	return OK
 }
 
-func (vm *VM) readRegister(index int) (uint32, error) {
+func (vm *VM) readRegister(index int) (uint32, uint32) {
 	if index < 0 || index >= len(vm.register) {
-
-		return 0, errors.New("Register access out of bounds")
+		return 0, OOB
 	}
 	fmt.Printf(" REGISTERS %v (index=%d => %d)\n", vm.register, index, vm.register[index])
-	return vm.register[index], nil
+	return vm.register[index], OK
 }
 
-func (vm *VM) writeRegister(index int, value uint32) error {
+func (vm *VM) writeRegister(index int, value uint32) uint32 {
 	if index < 0 || index >= len(vm.register) {
-		return errors.New("Register access out of bounds")
+		return OOB
 	}
 	vm.register[index] = value
-	return nil
+	return OK
 }
 
 // Implement the dynamic jump logic
-func (vm *VM) dynamicJump(operands []byte) error {
+func (vm *VM) dynamicJump(operands []byte) uint32 {
 	if len(operands) != 1 {
-		return errors.New("invalid operand length for dynamic jump")
+		return OOB
 	}
 	a := int(operands[0])
 	const ZA = 4
 
 	if a == 0 || a > 0x7FFFFFFF {
-		return errors.New("dynamic jump address out of bounds")
+		return OOB
 	}
 
-	targetIndex := a/ZA - 1
-	if targetIndex < 0 || targetIndex >= len(vm.code) {
-		return errors.New("dynamic jump target index out of bounds")
+	targetIndex := uint32(a/ZA - 1)
+	if targetIndex >= uint32(len(vm.code)) {
+		return OOB
 	}
 
 	vm.pc = targetIndex
-	return nil
+	return OK
 }
 
 // Implement ecall logic
-func (vm *VM) ecall(operands []byte) error {
+func (vm *VM) ecall(operands []byte) uint32 {
 	// Implement ecall logic here
-	return nil
+	return OOB
 }
 
 // Implement storeImm logic
-func (vm *VM) storeImm(opcode byte, operands []byte) error {
-	address := int(operands[0])
-	value := operands[1]
+func (vm *VM) storeImm(opcode byte, operands []byte) uint32 {
+	address := get_elided_uint32(operands[0:3])
+	value := operands[4]
 
 	switch opcode {
 	case STORE_IMM_U8:
-		if err := vm.writeRAM(address, value); err != nil {
-			return err
-		}
+		return vm.writeRAM(address, value)
 	case STORE_IMM_U16:
-		if len(operands) < 3 {
-			return errors.New("invalid operand length for store immediate u16")
-		}
-		value2 := operands[2]
-		if err := vm.writeRAM(address, value); err != nil {
-			return err
-		}
-		if err := vm.writeRAM(address+1, value2); err != nil {
-			return err
-		}
+		return vm.writeRAMBytes(address, operands[2:3])
 	case STORE_IMM_U32:
-		if len(operands) < 5 {
-			return errors.New("invalid operand length for store immediate u32")
-		}
-		value2 := operands[2]
-		value3 := operands[3]
-		value4 := operands[4]
-		if err := vm.writeRAM(address, value); err != nil {
-			return err
-		}
-		if err := vm.writeRAM(address+1, value2); err != nil {
-			return err
-		}
-		if err := vm.writeRAM(address+2, value3); err != nil {
-			return err
-		}
-		if err := vm.writeRAM(address+3, value4); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unknown store immediate opcode: %d", opcode)
+		return vm.writeRAMBytes(address, operands[2:5])
 	}
 
-	return nil
+	return OOB
 }
 
 // load_imm (opcode 4)
-func (vm *VM) loadImm(operands []byte) error {
+func (vm *VM) loadImm(operands []byte) uint32 {
 	registerIndex := int(operands[0])
 	immediate := get_elided_uint32(operands[1:])
 	return vm.writeRegister(registerIndex, immediate)
 }
 
 // LOAD_U8, LOAD_U16, LOAD_U32
-func (vm *VM) load(opcode byte, operands []byte) error {
+func (vm *VM) load(opcode byte, operands []byte) uint32 {
 	registerIndex := int(operands[0])
 	address := get_elided_uint32(operands[1:])
 
 	switch opcode {
 	case LOAD_U8:
-		value, err := vm.readRAM(address)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAM(address)
+		if errCode != OK {
+			return errCode
 		}
 		fmt.Printf(" LOAD_u8: %d %v\n", address, value)
 		return vm.writeRegister(registerIndex, uint32(value))
 	case LOAD_U16:
-		value, err := vm.readRAMBytes(address, 2)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAMBytes(address, 2)
+		if errCode != OK {
+			return errCode
 		}
 		fmt.Printf(" LOAD_u16: %d %v\n", address, value)
 		return vm.writeRegister(registerIndex, uint32(binary.BigEndian.Uint16(value)))
 	case LOAD_U32:
-		value, err := vm.readRAMBytes(address, 4)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAMBytes(address, 4)
+		if errCode != OK {
+			return errCode
 		}
 		fmt.Printf(" LOAD_u32: %d %v\n", address, value)
 		return vm.writeRegister(registerIndex, uint32(binary.BigEndian.Uint32(value)))
-	default:
-		return fmt.Errorf("unknown load opcode: %d", opcode)
 	}
+	return OK
 }
 
 func get_elided_uint32(o []byte) uint32 {
@@ -529,12 +607,11 @@ func get_elided_int32(o []byte) int32 {
 }
 
 // STORE_U8, STORE_U16, STORE_U32
-func (vm *VM) store(opcode byte, operands []byte) error {
+func (vm *VM) store(opcode byte, operands []byte) uint32 {
 	registerIndex := int(operands[0])
-
-	value, err := vm.readRegister(registerIndex)
-	if err != nil {
-		return err
+	value, errCode := vm.readRegister(registerIndex)
+	if errCode != OK {
+		return errCode
 	}
 
 	address := get_elided_uint32(operands[1:])
@@ -547,24 +624,18 @@ func (vm *VM) store(opcode byte, operands []byte) error {
 		b16 := make([]byte, 2)
 		binary.BigEndian.PutUint16(b16, uint16(value&0xFFFF))
 		fmt.Printf(" STORE_U16: %d %v\n", address, b16)
-		if err := vm.writeRAMBytes(address, b16); err != nil {
-			return err
-		}
+		return vm.writeRAMBytes(address, b16)
 	case STORE_U32:
 		b32 := make([]byte, 4)
 		binary.BigEndian.PutUint32(b32, value)
 		fmt.Printf(" STORE_U32: %d %v\n", address, b32)
-		if err := vm.writeRAMBytes(address, b32); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unknown store opcode: %d", opcode)
+		return vm.writeRAMBytes(address, b32)
 	}
-	return nil
+	return OOB
 }
 
 // storeImmInd implements STORE_IMM_{U8, U16, U32}
-func (vm *VM) storeImmInd(opcode byte, operands []byte) error {
+func (vm *VM) storeImmInd(opcode byte, operands []byte) uint32 {
 	lX := int(operands[1])
 	address := get_elided_uint32(operands[1:(1 + lX)])
 	immediate := get_elided_uint32(operands[1+lX:])
@@ -581,51 +652,50 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) error {
 		b32 := make([]byte, 2)
 		binary.BigEndian.PutUint32(b32, immediate)
 		return vm.writeRAMBytes(address, b32)
-	default:
-		return fmt.Errorf("unknown store immediate indirect opcode: %d", opcode)
 	}
+	return OOB
 }
 
 // Implement loadImmJump logic
-func (vm *VM) loadImmJump(operands []byte) error {
+func (vm *VM) loadImmJump(operands []byte) uint32 {
 	condition := operands[0]
-	target := int(operands[1])
+	target := uint32(operands[1])
 
 	if condition != 0 {
-		if target < 0 || target >= len(vm.code) {
-			return errors.New("load immediate jump target out of bounds")
+		if target < 0 || target >= uint32(len(vm.code)) {
+			return OOB
 		}
 		vm.pc = target
 	}
-	return nil
+	return OK
 }
 
 // Implement loadImmJumpInd logic
-func (vm *VM) loadImmJumpInd(operands []byte) error {
+func (vm *VM) loadImmJumpInd(operands []byte) uint32 {
 	index := int(operands[0])
-	offset := int(operands[1])
+	offset := uint32(operands[1])
 
-	address, err := vm.readRegister(index)
-	if err != nil {
-		return err
+	address, errCode := vm.readRegister(index)
+	if errCode != OK {
+		return errCode
 	}
 
-	target := int(address) + offset
-	if target < 0 || target >= len(vm.code) {
-		return errors.New("load immediate jump target out of bounds")
+	target := uint32(address + offset)
+	if target >= uint32(len(vm.code)) {
+		return OOB
 	}
 
 	vm.pc = target
-	return nil
+	return OK
 }
 
 // move_reg (opcode 82)
-func (vm *VM) moveReg(operands []byte) error {
+func (vm *VM) moveReg(operands []byte) uint32 {
 
 	destIndex, srcIndex := splitRegister(operands[0])
-	value, err := vm.readRegister(srcIndex)
-	if err != nil {
-		return err
+	value, errCode := vm.readRegister(srcIndex)
+	if errCode != OK {
+		return errCode
 	}
 	fmt.Printf(" moveReg r[%d]=r[%d]=%d\n", destIndex, srcIndex, value)
 	return vm.writeRegister(destIndex, value)
@@ -643,176 +713,126 @@ func (vm *VM) sbrk(operands []byte) error {
 }
 
 // TODO: Implement branch logic
-func (vm *VM) branch(operands []byte, currentPc int) error {
+func (vm *VM) branch(operands []byte, currentPc uint32) uint32 {
 	if len(operands) != 2 {
-		return errors.New("invalid operand length for branch")
+		return OOB
 	}
 	condition := operands[0]
-	target := int(operands[1])
+	target := uint32(operands[1])
 
 	// Implement the condition checking and branch logic here
 	if condition != 0 {
-		if target < 0 || target >= len(vm.code) {
-			return errors.New("branch target out of bounds")
+		if target >= uint32(len(vm.code)) {
+			return OOB
 		}
 		vm.pc = target
 	} else {
 		vm.pc = currentPc
 	}
 
-	return nil
+	return OK
 }
 
-func (vm *VM) branchCond(opcode byte, operands []byte) error {
+func (vm *VM) branchCond(opcode byte, operands []byte) uint32 {
 	registerIndex := int(operands[0])
 	immediate := operands[1]
-	target := int(operands[2])
+	target := uint32(operands[2])
 
-	value, err := vm.readRegister(registerIndex)
-	if err != nil {
-		return err
+	value, errCode := vm.readRegister(registerIndex)
+	if errCode != OK {
+		return errCode
+	}
+	if target >= uint32(len(vm.code)) {
+		return OOB
 	}
 	switch opcode {
 	case BRANCH_EQ_IMM:
 		if byte(value) == immediate {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_NE_IMM:
 		if byte(value) != immediate {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_LT_U_IMM:
 		if uint(value) < uint(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_LT_S_IMM:
 		if int(value) < int(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_LE_U_IMM:
 		if uint(value) <= uint(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_LE_S_IMM:
 		if int(value) <= int(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_GE_U_IMM:
 		if uint(value) >= uint(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_GE_S_IMM:
 		if int(value) >= int(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_GT_U_IMM:
 		if uint(value) > uint(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	case BRANCH_GT_S_IMM:
 		if int(value) > int(immediate) {
-			if target < 0 || target >= len(vm.code) {
-				return errors.New("branch target out of bounds")
-			}
 			vm.pc = target
 		}
 	}
-	return nil
+	return OK
 
 }
 
-func (vm *VM) storeInd(opcode byte, operands []byte) error {
+func (vm *VM) storeInd(opcode byte, operands []byte) uint32 {
 	registerIndex := int(operands[0])
-	offset := int(operands[1])
-	value := operands[2]
-
-	address, err := vm.readRegister(registerIndex)
-	if err != nil {
-		return err
+	offset := uint32(operands[1])
+	address, errCode := vm.readRegister(registerIndex)
+	if errCode != OK {
+		return OOB
 	}
 
 	switch opcode {
 	case STORE_IND_U8:
-		return vm.writeRAM(int(address)+offset, value)
+		return vm.writeRAMBytes(address+offset, operands[2:2])
 	case STORE_IND_U16:
-		if len(operands) < 4 {
-			return errors.New("invalid operand length for store indirect u16")
-		}
-		value2 := operands[3]
-		if err := vm.writeRAM(int(address)+offset, value); err != nil {
-			return err
-		}
-		return vm.writeRAM(int(address)+offset+1, value2)
+		return vm.writeRAMBytes(address+offset, operands[2:3])
 	case STORE_IND_U32:
-		if len(operands) < 5 {
-			return errors.New("invalid operand length for store indirect u32")
-		}
-		value2 := operands[3]
-		value3 := operands[4]
-		if err := vm.writeRAM(int(address)+offset, value); err != nil {
-			return err
-		}
-		if err := vm.writeRAM(int(address)+offset+1, value2); err != nil {
-			return err
-		}
-		if err := vm.writeRAM(int(address)+offset+2, value3); err != nil {
-			return err
-		}
-		return vm.writeRAM(int(address)+offset+3, value3)
+		return vm.writeRAMBytes(address+offset, operands[2:5])
 	default:
-		return fmt.Errorf("unknown store indirect opcode: %d", opcode)
+		return OOB
 	}
+
 }
 
 // Implement loadInd logic
-func (vm *VM) loadInd(opcode byte, operands []byte) error {
+func (vm *VM) loadInd(opcode byte, operands []byte) uint32 {
 	destRegisterIndex, registerIndexB := splitRegister(operands[0])
-
-	wB, err := vm.readRegister(registerIndexB)
-	if err != nil {
-		return err
+	wB, errCode := vm.readRegister(registerIndexB)
+	if errCode != OK {
+		return errCode
 	}
 	immediate := get_elided_uint32(operands[1:])
 
 	address := wB + immediate
 	switch opcode {
 	case LOAD_IND_U8:
-		value, err := vm.readRAM(address)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAM(address)
+		if errCode != OK {
+			return errCode
 		}
 		return vm.writeRegister(destRegisterIndex, uint32(value))
 	case LOAD_IND_I8:
-		value, err := vm.readRAM(address)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAM(address)
+		if errCode != OK {
+			return errCode
 		}
 		v := int(value)
 		if v > 127 {
@@ -820,26 +840,26 @@ func (vm *VM) loadInd(opcode byte, operands []byte) error {
 		}
 		return vm.writeRegister(destRegisterIndex, uint32(v))
 	case LOAD_IND_U16:
-		value, err := vm.readRAMBytes(address, 2)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAMBytes(address, 2)
+		if errCode != OK {
+			return errCode
+
 		}
 		return vm.writeRegister(destRegisterIndex, uint32(binary.BigEndian.Uint16(value)))
 	case LOAD_IND_I16:
-		value, err := vm.readRAMBytes(address, 2)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAMBytes(address, 2)
+		if errCode != OK {
+			return errCode
 		}
 		return vm.writeRegister(destRegisterIndex, uint32(binary.BigEndian.Uint16(value)))
 	case LOAD_IND_U32:
-		value, err := vm.readRAMBytes(address, 4)
-		if err != nil {
-			return err
+		value, errCode := vm.readRAMBytes(address, 4)
+		if errCode != OK {
+			return errCode
 		}
 		return vm.writeRegister(destRegisterIndex, uint32(binary.BigEndian.Uint32(value)))
-	default:
-		return fmt.Errorf("unknown load indirect opcode: %d", opcode)
 	}
+	return OOB
 }
 
 func splitRegister(operand byte) (int, int) {
@@ -849,22 +869,22 @@ func splitRegister(operand byte) (int, int) {
 }
 
 // Implement ALU operations with immediate values
-func (vm *VM) aluImm(opcode byte, operands []byte) error {
+func (vm *VM) aluImm(opcode byte, operands []byte) uint32 {
 	registerIndexD, registerIndexA := splitRegister(operands[0])
 	immediate := get_elided_uint32(operands[1:])
 	fmt.Printf("a=%d d=%d immediate=%d\n", registerIndexA, registerIndexD, immediate)
 
-	valueA, err := vm.readRegister(registerIndexA)
-	if err != nil {
-		return err
+	valueA, errCode := vm.readRegister(registerIndexA)
+	if errCode != OK {
+		return errCode
 	}
 
 	var result uint32
 	switch opcode {
 	case ADD_IMM:
 		result = valueA + immediate
-	case SUB_IMM:
-		result = valueA - immediate
+	//case SUB_IMM:
+	//	result = valueA - immediate
 	case AND_IMM:
 		result = valueA & immediate
 	case XOR_IMM:
@@ -891,19 +911,19 @@ func (vm *VM) aluImm(opcode byte, operands []byte) error {
 			result = 0
 		}
 	default:
-		return fmt.Errorf("unknown ALU immediate opcode: %d", opcode)
+		return OOB
 	}
 	return vm.writeRegister(registerIndexD, result)
 }
 
 // Implement shift operations with immediate values
-func (vm *VM) shiftImm(opcode byte, operands []byte) error {
+func (vm *VM) shiftImm(opcode byte, operands []byte) uint32 {
 	registerIndexB, registerIndexA := splitRegister(operands[0])
 	immediate := get_elided_uint32(operands[1:])
 
-	valueA, err := vm.readRegister(registerIndexA)
-	if err != nil {
-		return err
+	valueA, errCode := vm.readRegister(registerIndexA)
+	if errCode != OK {
+		return errCode
 	}
 	var result uint32
 	switch opcode {
@@ -945,28 +965,28 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) error {
 		result = immediate << valueA
 		fmt.Printf(" SHLO_L_IMM_ALT %d << %d = %d\n", immediate, valueA, result)
 	default:
-		return fmt.Errorf("unknown shift immediate opcode: %d", opcode)
+		return OOB
 	}
 	fmt.Printf(" shiftImm r[%d]=%d immediate=%d r[%d]=%d\n", registerIndexA, valueA, immediate, registerIndexB, result)
 	return vm.writeRegister(registerIndexB, result)
 }
 
 // Implement branch logic for two registers and one offset
-func (vm *VM) branchReg(opcode byte, operands []byte) error {
+func (vm *VM) branchReg(opcode byte, operands []byte) uint32 {
 	if len(operands) != 3 {
-		return errors.New("invalid operand length for branch with registers")
+		return OOB
 	}
 	registerIndexA := int(operands[0])
 	registerIndexB := int(operands[1])
-	offset := int(operands[2])
+	offset := uint32(operands[2])
 
-	valueA, err := vm.readRegister(registerIndexA)
-	if err != nil {
-		return err
+	valueA, errCode := vm.readRegister(registerIndexA)
+	if errCode != OK {
+		return errCode
 	}
-	valueB, err := vm.readRegister(registerIndexB)
-	if err != nil {
-		return err
+	valueB, errCode := vm.readRegister(registerIndexB)
+	if errCode != OK {
+		return errCode
 	}
 
 	switch opcode {
@@ -995,24 +1015,24 @@ func (vm *VM) branchReg(opcode byte, operands []byte) error {
 			vm.pc += offset
 		}
 	default:
-		return fmt.Errorf("unknown branch opcode: %d", opcode)
+		return OOB
 	}
 
-	return nil
+	return OK
 }
 
 // Implement ALU operations with register values
-func (vm *VM) aluReg(opcode byte, operands []byte) error {
+func (vm *VM) aluReg(opcode byte, operands []byte) uint32 {
 
-	registerIndexD, registerIndexA := splitRegister(operands[0]) // 0x79
-	registerIndexB := int(operands[1])
-	valueA, err := vm.readRegister(registerIndexA)
-	if err != nil {
-		return err
+	registerIndexB, registerIndexA := splitRegister(operands[0]) // 0x79
+	registerIndexD := int(operands[1])
+	valueA, errCode := vm.readRegister(registerIndexA)
+	if errCode != OK {
+		return errCode
 	}
-	valueB, err := vm.readRegister(registerIndexB)
-	if err != nil {
-		return err
+	valueB, errCode := vm.readRegister(registerIndexB)
+	if errCode != OK {
+		return errCode
 	}
 
 	var result uint32
@@ -1020,7 +1040,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) error {
 	case ADD_REG:
 		result = valueA + valueB
 	case SUB_REG:
-		result = valueA - valueB
+		result = valueB - valueA
 	case AND_REG:
 		result = valueA & valueB
 	case XOR_REG:
@@ -1058,7 +1078,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) error {
 		if valueB == 0 {
 			result = valueA
 		} else if valueA == 0x80 && valueB == 0xFF {
-			return errors.New("overflow in signed remainder")
+			return OOB
 		} else {
 			result = uint32(int32(valueA) % int32(valueB))
 		}
@@ -1096,7 +1116,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) error {
 		mask := int32((1<<valueB)-1) << (32 - valueB)
 		result |= uint32(mask)
 	default:
-		return fmt.Errorf("unknown ALU register opcode: %d", opcode)
+		return OOB // unknown ALU register
 	}
 
 	fmt.Printf(" aluReg - rA[%d]=%d  regB[%d]=%d regD[%d]=%d\n", registerIndexA, valueA, registerIndexB, valueB, registerIndexD, result)

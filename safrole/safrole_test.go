@@ -140,36 +140,36 @@ func TestSafroleStf(t *testing.T) {
 	}
 
 	testcases := make(map[string]string)
-	//testcases["publish-tickets-no-mark-2.json"] = errNone
-	//testcases["publish-tickets-no-mark-6.json"] = errNone
+	testcases["publish-tickets-no-mark-2.json"] = errNone
+	testcases["publish-tickets-no-mark-6.json"] = errNone
 	testcases["publish-tickets-no-mark-10.json"] = errNone
-	//testcases["publish-tickets-with-mark-1.json"] = errNone
-	//testcases["publish-tickets-with-mark-2.json"] = errNone
-	//testcases["publish-tickets-with-mark-3.json"] = errNone
-	//testcases["publish-tickets-with-mark-5.json"] = errNone
-	//testcases["enact-epoch-change-with-no-tickets-1.json"] = errNone
-	//testcases["enact-epoch-change-with-no-tickets-2.json"] = errNone
-	//testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
+	testcases["publish-tickets-with-mark-1.json"] = errNone
+	testcases["publish-tickets-with-mark-2.json"] = errNone
+	testcases["publish-tickets-with-mark-3.json"] = errNone
+	testcases["publish-tickets-with-mark-5.json"] = errNone
+	testcases["enact-epoch-change-with-no-tickets-1.json"] = errNone
+	testcases["enact-epoch-change-with-no-tickets-2.json"] = errNone
+	testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
 	testcases["enact-epoch-change-with-no-tickets-4.json"] = errNone
-	//testcases["publish-tickets-with-mark-2.json"] = errNone
-	//testcases["publish-tickets-with-mark-4.json"] = errNone
-	//testcases["publish-tickets-no-mark-7.json"] = errTicketSubmissionInTail // "Fail: Submit a ticket while in epoch's tail."
+	testcases["publish-tickets-with-mark-2.json"] = errNone
+	testcases["publish-tickets-with-mark-4.json"] = errNone
+	testcases["publish-tickets-no-mark-7.json"] = errTicketSubmissionInTail // "Fail: Submit a ticket while in epoch's tail."
 
 	testcases["enact-epoch-change-with-no-tickets-4.json"] = errNone
-	//testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
+	testcases["enact-epoch-change-with-no-tickets-3.json"] = errNone
 	testcases["enact-epoch-change-with-no-tickets-2.json"] = errTimeslotNotMonotonic     //"Fail: Timeslot must be strictly monotonic."
 	testcases["publish-tickets-no-mark-1.json"] = errExtrinsicWithMoreTicketsThanAllowed // "Fail: Submit an extrinsic with more tickets than allowed."
 	testcases["publish-tickets-no-mark-3.json"] = errTicketResubmission                  // "Fail: Re-submit tickets from authority 0."
 	testcases["publish-tickets-no-mark-4.json"] = errTicketBadOrder                      // "Fail: Submit tickets in bad order."
-	//testcases["publish-tickets-no-mark-5.json"] = errTicketBadRingProof                  // "Fail: Submit tickets with bad ring proof."
-	//testcases["publish-tickets-no-mark-8.json"] = errNone
-	//testcases["publish-tickets-with-mark-3.json"] = errNone
-	//testcases["publish-tickets-no-mark-9.json"] = errNone
+	testcases["publish-tickets-no-mark-5.json"] = errTicketBadRingProof                  // "Fail: Submit tickets with bad ring proof."
+	testcases["publish-tickets-no-mark-8.json"] = errNone
+	testcases["publish-tickets-with-mark-3.json"] = errNone
+	testcases["publish-tickets-no-mark-9.json"] = errNone
 	testcases["skip-epochs-1.json"] = errNone
-	// testcases["skip-epoch-tail-1.json"] = errNone
+	testcases["skip-epoch-tail-1.json"] = errNone
 
-	//testcases["publish-tickets-with-mark-1.json"] = errNone
-	//testcases["publish-tickets-with-mark-2.json"] = errNone
+	testcases["publish-tickets-with-mark-1.json"] = errNone
+	testcases["publish-tickets-with-mark-2.json"] = errNone
 	for _, file := range files {
 		if file.IsDir() {
 			continue

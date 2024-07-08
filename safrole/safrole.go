@@ -277,7 +277,8 @@ func (s *State) STF(input Input) (Output, State, error) {
 		pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
 	}
 	// Process Extrinsic Tickets
-	fmt.Printf("Input Slot: %d Y = %d\n", input.Slot, Y)
+	fmt.Printf("Current Slot: %d => Input Slot: %d \n", s.Timeslot, input.Slot)
+	newTickets := []SafroleAccumulator{}
 	for _, e := range input.Extrinsics {
 		if input.Slot >= Y {
 			return *o, s2, fmt.Errorf(errTicketSubmissionInTail)
@@ -290,15 +291,25 @@ func (s *State) STF(input Input) (Output, State, error) {
 			}
 			_, exists := ticketIDs[common.BytesToHash(vrfOutput)]
 			if exists {
+				fmt.Printf("DETECTED Resubmit %x\n", vrfOutput)
 				return *o, s2, fmt.Errorf(errTicketResubmission)
+			}
+			if e.Attempt >= NumAttempts {
+				return *o, s2, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
 			}
 			newa := SafroleAccumulator{
 				Id:      common.BytesToHash(vrfOutput),
 				Attempt: e.Attempt,
 			}
-			s2.TicketsAccumulator = append(s2.TicketsAccumulator, newa)
+			if len(newTickets) > 0 && compareTickets(newa.Id, newTickets[len(newTickets)-1].Id) < 0 {
+				return *o, s2, fmt.Errorf(errTicketBadOrder)
+			}
+			newTickets = append(newTickets, newa)
 			fmt.Printf("added Ticket ID %x (%d)\n", vrfOutput, result)
 		}
+	}
+	for _, newa := range newTickets {
+		s2.TicketsAccumulator = append(s2.TicketsAccumulator, newa)
 	}
 	// Sort tickets using compareTickets
 	sort.SliceStable(s2.TicketsAccumulator, func(i, j int) bool {

@@ -13,10 +13,10 @@ import (
 type TestCase struct {
 	Name           string        `json:"name"`
 	InitialRegs    []uint32      `json:"initial-regs"`
-	InitialPC      int           `json:"initial-pc"`
+	InitialPC      uint32        `json:"initial-pc"`
 	InitialPageMap []PageMap     `json:"initial-page-map"`
 	InitialMemory  []Page        `json:"initial-memory"`
-	Code           []byte        `json:"code"`
+	Code           []byte        `json:"program"`
 	ExpectedStatus string        `json:"expected-status"`
 	ExpectedRegs   []uint32      `json:"expected-regs"`
 	ExpectedPC     int           `json:"expected-pc"`

@@ -43,39 +43,7 @@ QUESTION: Basically the same as the above -- if we have no way of recovering tha
 
 
 
-# 3. publish-tickets-no-mark-4.json Expected error: Fail: Submit tickets in bad order.
-
-```
-ticketID? 0 => 0x09a696b142112c0af1cd2b5f91726f2c050112078e3ef733198c5f43daa20d2b
-ticketID? 1 => 0x3a5d10abc80dda33fe3f40b3bb2e3eefd3e97dda3d617a860c9d94eb70b832ad
-ticketID? 2 => 0x5d91e5951d2b62c424b767220498e6d64280fc84ffb16951d93a00c009341498
-ticketID? 3 => 0xf28c553c54ea497bb39e20344e7a687523d06390bb8a24a919183599e584e813
-Input Slot: 2 Y = 10
-added Ticket ID 1ec38833e785b52adca8c791f8bf479c8cae805c93ce1ed245b32b273e3c9322 (1)
-added Ticket ID 0b07226e17e82a9e447dd914d3a072fff7015c9f58681f7f5f4213487259891f (1)
-Sorted -- result:
- 0: 0x09a696b142112c0af1cd2b5f91726f2c050112078e3ef733198c5f43daa20d2b
- 1: 0x0b07226e17e82a9e447dd914d3a072fff7015c9f58681f7f5f4213487259891f
- 2: 0x1ec38833e785b52adca8c791f8bf479c8cae805c93ce1ed245b32b273e3c9322
- 3: 0x3a5d10abc80dda33fe3f40b3bb2e3eefd3e97dda3d617a860c9d94eb70b832ad
- 4: 0x5d91e5951d2b62c424b767220498e6d64280fc84ffb16951d93a00c009341498
- 5: 0xf28c553c54ea497bb39e20344e7a687523d06390bb8a24a919183599e584e813
- -- 2 12 2 
-FAIL: expected 'Fail: Submit tickets in bad order.', got 'ok'
-FAIL Output mismatch: expected {
-  "ok": null
-}, got {
-  "ok": {
-    "epoch_mark": null,
-    "tickets_mark": null
-  }
-} [ok]
-FAIL PostState mismatch on publish-tickets-no-mark-4.json: timeslot mismatch expected 1, got 2
-```
-
-QUESTION: How are we supposed to know that the tickets are in "Bad Order"?
-
-# 4. enact-epoch-change-with-no-tickets-4.json Expected error: ok
+# 3. enact-epoch-change-with-no-tickets-4.json Expected error: ok
 
 Input Slot: 15 Y = 10
 Sorted -- result:
@@ -105,7 +73,7 @@ FAIL PostState mismatch on enact-epoch-change-with-no-tickets-4.json: entropy mi
 
 
 
-# 5. skip-epochs-1.json Expected error: ok
+# 4. skip-epochs-1.json Expected error: ok
 
 ```
 ticketID? 0 => 0x11da6d1f761ddf9bdb4c9d6e5303ebd41f61858d0a5647a1a7bfe089bf921be9
