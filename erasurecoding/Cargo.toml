@@ -1,0 +1,30 @@
+[package]
+name = "erasure-coding"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+
+[dependencies]
+blake2b_simd = { version = "1", default-features = false }
+bounded-collections = { version = "0.1.9", default-features = false }
+reed-solomon = { package = "reed-solomon-simd", git = "https://github.com/ordian/reed-solomon-simd", branch = "simd-feature", default-features = false }
+scale = { package = "parity-scale-codec", version = "3.6.9", default-features = false,  features = ["derive"] }
+thiserror = { version = "1.0.56", default-features = false }
+
+[features]
+default = ["simd"]
+simd = ["reed-solomon/simd"]
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[dev-dependencies]
+criterion = { version = "0.5.1", default-features = false, features = ["cargo_bench_support"] }
+quickcheck = { version = "1.0.3", default-features = false }
+rand = { version = "0.8.4", features = [ "small_rng"] }
+
+[[bench]]
+name = "all"
+harness = false
