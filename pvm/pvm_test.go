@@ -56,6 +56,127 @@ func TestPVM(t *testing.T) {
 	// Directory containing the JSON files
 	dir := "../jamtestvectors/pvm/programs"
 
+	// input the file that you want to check
+	// targetFiles := []string{
+	// 	"inst_trap.json",
+	// 	"inst_add.json",
+	// 	"inst_add_imm.json",
+	// 	"inst_add_with_overflow.json",
+	// 	"inst_and.json",
+	// 	"inst_and_imm.json",
+
+	// 	"inst_cmov_if_zero_imm_nok.json",
+	// 	"inst_cmov_if_zero_imm_ok.json",
+	// 	"inst_cmov_if_zero_nok.json",
+	// 	"inst_cmov_if_zero_ok.json",
+
+	// 	"inst_div_signed.json",
+	// 	"inst_div_signed_by_zero.json",
+	// 	"inst_div_signed_with_overflow.json",
+	// 	"inst_div_unsigned.json",
+	// 	"inst_div_unsigned_by_zero.json",
+	// 	"inst_div_unsigned_with_overflow.json",
+
+	// 	"inst_jump.json",
+
+	// 	"inst_mul.json",
+	// 	"inst_mul_imm.json",
+
+	// 	"inst_or.json",
+	// 	"inst_or_imm.json",
+	// 	"inst_sub.json",
+	// 	"inst_sub_imm.json",
+	// 	"inst_sub_with_overflow.json",
+	// 	"inst_xor.json",
+	// 	"inst_xor_imm.json",
+
+	// 	"inst_load_imm.json",
+	// 	"inst_load_u8.json",
+	// 	"inst_load_u8_trap.json",
+
+	// 	"inst_move_reg.json",
+	// 	"inst_negate_and_add_imm.json",
+
+	// 	"inst_rem_signed.json",
+	// 	"inst_rem_signed_by_zero.json",
+	// 	"inst_rem_signed_with_overflow.json",
+	// 	"inst_rem_unsigned.json",
+	// 	"inst_rem_unsigned_by_zero.json",
+	// 	"inst_rem_unsigned_with_overflow.json",
+
+	// 	"inst_set_greater_than_unsigned_imm_0.json",
+	// 	"inst_set_greater_than_unsigned_imm_1.json",
+
+	// 	"inst_set_less_than_signed_0.json",
+	// 	"inst_set_less_than_signed_1.json",
+	// 	"inst_set_less_than_signed_imm_0.json",
+	// 	"inst_set_less_than_signed_imm_1.json",
+	// 	"inst_set_less_than_unsigned_0.json",
+	// 	"inst_set_less_than_unsigned_1.json",
+	// 	"inst_set_less_than_unsigned_imm_0.json",
+	// 	"inst_set_less_than_unsigned_imm_1.json",
+
+	// 	"inst_set_greater_than_signed_imm_0.json",
+	// 	"inst_set_greater_than_signed_imm_1.json",
+
+	// 	"inst_shift_arithmetic_right.json",
+	// 	"inst_shift_arithmetic_right_imm.json",
+	// 	"inst_shift_arithmetic_right_imm_alt.json",
+	// 	"inst_shift_arithmetic_right_with_overflow.json",
+
+	// 	"inst_shift_logical_left.json",
+	// 	"inst_shift_logical_left_imm.json",
+	// 	"inst_shift_logical_left_imm_alt.json",
+	// 	"inst_shift_logical_left_with_overflow.json",
+	// 	"inst_shift_logical_right.json",
+	// 	"inst_shift_logical_right_imm.json",
+	// 	"inst_shift_logical_right_imm_alt.json",
+	// 	"inst_shift_logical_right_with_overflow.json",
+
+	// 	"inst_store_u8.json",
+	// 	"inst_store_u8_trap_inaccessible.json",
+	// 	"inst_store_u8_trap_read_only.json",
+	// 	"inst_store_u16.json",
+	// 	"inst_store_u32.json",
+
+	// 	"inst_branch_eq_imm_nok.json",
+	// 	"inst_branch_eq_imm_ok.json",
+	// 	"inst_branch_greater_or_equal_signed_imm_ok.json",
+	// 	"inst_branch_greater_or_equal_signed_imm_nok.json",
+	// 	"inst_branch_greater_or_equal_unsigned_imm_ok.json",
+	// 	"inst_branch_greater_or_equal_unsigned_imm_nok.json",
+	// 	"inst_branch_greater_signed_imm_nok.json",
+	// 	"inst_branch_greater_signed_imm_ok.json",
+	// 	"inst_branch_greater_unsigned_imm_nok.json",
+	// 	"inst_branch_greater_unsigned_imm_ok.json",
+	// 	"inst_branch_less_or_equal_signed_imm_nok.json",
+	// 	"inst_branch_less_or_equal_signed_imm_ok.json",
+	// 	"inst_branch_less_or_equal_unsigned_imm_nok.json",
+	// 	"inst_branch_less_or_equal_unsigned_imm_ok.json",
+	// 	"inst_branch_less_signed_imm_nok.json",
+	// 	"inst_branch_less_signed_imm_ok.json",
+	// 	"inst_branch_less_unsigned_imm_nok.json",
+	// 	"inst_branch_less_unsigned_imm_ok.json",
+	// 	"inst_branch_not_eq_imm_ok.json",
+	// 	"inst_branch_not_eq_imm_nok.json",
+
+	// 	"inst_branch_eq_nok.json",
+	// 	"inst_branch_eq_ok.json",
+	// 	"inst_branch_not_eq_nok.json",
+	// 	"inst_branch_not_eq_ok.json",
+	// 	"inst_branch_less_unsigned_nok.json",
+	// 	"inst_branch_less_unsigned_ok.json",
+	// 	"inst_branch_less_signed_nok.json",
+	// 	"inst_branch_less_signed_ok.json",
+	// 	"inst_branch_greater_or_equal_signed_nok.json",
+	// 	"inst_branch_greater_or_equal_signed_ok.json",
+	// 	"inst_branch_greater_or_equal_unsigned_nok.json",
+	// 	"inst_branch_greater_or_equal_unsigned_ok.json",
+
+	// "inst_ret_halt.json",
+	// "inst_ret_invalid.json",
+	// }
+
 	// Read all files in the directory
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
@@ -71,6 +192,11 @@ func TestPVM(t *testing.T) {
 			continue
 		}
 
+		// Check if the file is in the targetFiles list
+		// if !contains(targetFiles, file.Name()) {
+		// 	continue
+		// }
+
 		filePath := filepath.Join(dir, file.Name())
 		data, err := ioutil.ReadFile(filePath)
 		if err != nil {
@@ -84,11 +210,22 @@ func TestPVM(t *testing.T) {
 		}
 
 		fmt.Printf("\n\n** Test %d: %s **\n", i, file.Name())
+
 		err = pvm_test(t, testCase)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
 	}
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 // Helper function to compare two integer slices
