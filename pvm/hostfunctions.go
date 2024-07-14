@@ -140,7 +140,7 @@ func (vm *VM) hostEmpower() uint32 {
 	a, _ := vm.readRegister(1)
 	v, _ := vm.readRegister(0)
 	// Set (x'p)_m, (x'p)_a, (x'p)_v
-	vm.hostenv.empower(m, a, v)
+	vm.hostenv.Empower(m, a, v)
 	return OK
 }
 
@@ -153,7 +153,7 @@ func (vm *VM) hostAssign() uint32 {
 	o, _ := vm.readRegister(1)
 	Q := 1
 	c, _ := vm.readRAMBytes(o, 32*Q)
-	vm.hostenv.assign(c)
+	vm.hostenv.Assign(c)
 	return OK
 }
 
@@ -164,7 +164,7 @@ func (vm *VM) hostDesignate() uint32 {
 	if errCode == OOB {
 		return OOB
 	}
-	return vm.hostenv.designate(v)
+	return vm.hostenv.Designate(v)
 }
 
 // Checkpoint gets Gas-remaining
@@ -227,7 +227,7 @@ func (vm *VM) hostTransfer() uint32 {
 	if errCode == OOB {
 		return OOB
 	}
-	return vm.hostenv.addTransfer(m, a, g, d)
+	return vm.hostenv.AddTransfer(m, a, g, d)
 }
 
 // Gas Service
@@ -257,7 +257,7 @@ func (vm *VM) hostInvoke() uint32 {
 	o, _ := vm.readRegister(1)
 	gasBytes, _ := vm.readRAMBytes(o, 8)
 	registerBytes, _ := vm.readRAMBytes(o, 8+13*4)
-	m, ok := vm.hostenv.getVM(n)
+	m, ok := vm.hostenv.GetVM(n)
 	if !ok {
 		return WHO
 	}
@@ -277,7 +277,7 @@ func (vm *VM) hostLookup() uint32 {
 	// TODO: OOB for ho+..32
 	h0, _ := vm.readRAMBytes(ho, 32)
 	h := bhash(h0)
-	v, vLength, ok := vm.hostenv.readServicePreimage(s, h)
+	v, vLength, ok := vm.hostenv.ReadServicePreimage(s, h)
 	if !ok {
 		return NONE
 	}
@@ -309,7 +309,7 @@ func (vm *VM) hostRead() uint32 {
 	vBytes, _ := vm.readRAMBytes(ko, int(kz))
 	k := bhash(append(sbytes, vBytes...))
 
-	v, vLength, ok := vm.hostenv.readServiceBytes(s, k)
+	v, vLength, ok := vm.hostenv.ReadServiceBytes(s, k)
 	if !ok {
 		return NONE
 	}
@@ -333,10 +333,10 @@ func (vm *VM) hostWrite() uint32 {
 	sbytes := uint32ToBytes(s)
 	k := bhash(append(sbytes, h...))
 	if vz == 0 {
-		vm.hostenv.deleteKey(k)
+		vm.hostenv.DeleteKey(k)
 	} else {
 		v, _ := vm.readRAMBytes(vo, int(vz))
-		l := vm.hostenv.writeServiceKey(s, k, v)
+		l := vm.hostenv.WriteServiceKey(s, k, v)
 		return l
 	}
 	return OK
@@ -351,11 +351,11 @@ func (vm *VM) hostSolicit() uint32 {
 		return errCode
 	}
 	h := common.BytesToHash(hBytes)
-	y, errCode := vm.hostenv.getPreimage(h, z)
+	y, errCode := vm.hostenv.GetPreimage(h, z)
 	if errCode == OK {
-		return vm.hostenv.requestPreimage2(h, z, y)
+		return vm.hostenv.RequestPreimage2(h, z, y)
 	}
-	return vm.hostenv.requestPreimage(h, z)
+	return vm.hostenv.RequestPreimage(h, z)
 
 }
 
@@ -368,7 +368,7 @@ func (vm *VM) hostForget() uint32 {
 		return errCode
 	}
 	h := common.BytesToHash(hBytes)
-	errCode = vm.hostenv.forgetPreimage(h, z)
+	errCode = vm.hostenv.ForgetPreimage(h, z)
 	return errCode
 }
 
@@ -384,7 +384,7 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint32 {
 		return errCode
 	}
 	h := bhash(hBytes)
-	v, vLength, ok := vm.hostenv.historicalLookup(s, t, h)
+	v, vLength, ok := vm.hostenv.HistoricalLookup(s, t, h)
 	if !ok {
 		return NONE
 	}
@@ -400,7 +400,7 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint32 {
 func (vm *VM) hostImport() uint32 {
 	i, _ := vm.readRegister(0)
 	o, _ := vm.readRegister(1)
-	v, errCode := vm.hostenv.getImportItem(i)
+	v, errCode := vm.hostenv.GetImportItem(i)
 	if errCode == NONE {
 		return errCode
 	}
@@ -423,7 +423,7 @@ func (vm *VM) hostExport(pi uint32) (uint32, []byte) {
 	}
 	// if len(e) >= WX return FULL
 	// where ... const W_X = 1024
-	errCode = vm.hostenv.exportSegment(x)
+	errCode = vm.hostenv.ExportSegment(x)
 
 	return errCode, x
 }
@@ -438,7 +438,7 @@ func (vm *VM) hostMachine() uint32 {
 	if errCode != OK {
 		return errCode
 	}
-	n := vm.hostenv.createVM(p, i)
+	n := vm.hostenv.CreateVM(p, i)
 	return n
 }
 
@@ -447,7 +447,7 @@ func (vm *VM) hostPeek() uint32 {
 	a, _ := vm.readRegister(1)
 	b, _ := vm.readRegister(2)
 	l, _ := vm.readRegister(3)
-	m, ok := vm.hostenv.getVM(n)
+	m, ok := vm.hostenv.GetVM(n)
 	if !ok {
 		return WHO
 	}
@@ -469,7 +469,7 @@ func (vm *VM) hostPoke() uint32 {
 	a, _ := vm.readRegister(1)
 	b, _ := vm.readRegister(2)
 	l, _ := vm.readRegister(3)
-	m, ok := vm.hostenv.getVM(n)
+	m, ok := vm.hostenv.GetVM(n)
 	if !ok {
 		return WHO
 	}
@@ -486,7 +486,7 @@ func (vm *VM) hostPoke() uint32 {
 
 func (vm *VM) hostExpunge() uint32 {
 	n, _ := vm.readRegister(0)
-	if vm.hostenv.expungeVM(n) {
+	if vm.hostenv.ExpungeVM(n) {
 		return OK
 	}
 	return WHO

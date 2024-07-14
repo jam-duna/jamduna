@@ -40,7 +40,7 @@ type VM struct {
 	ram        []byte
 	register   []uint32
 	ξ          uint64
-	hostenv    *HostEnv
+	hostenv    HostEnv
 }
 
 type Program struct {
