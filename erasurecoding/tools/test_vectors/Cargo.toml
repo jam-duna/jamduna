@@ -6,6 +6,7 @@ license = "Apache-2.0"
 
 
 [dependencies]
+hex = "0.4"
 blake2b_simd = { version = "1", default-features = false }
 erasure-coding = { path = "../.." }
 serde_json = { version = "1.0" }
@@ -18,3 +19,6 @@ jsonschema = { version = "0.18" }
 [profile.dev]
 panic = "abort"
 opt-level = 1
+
+[lib]
+crate-type = ["cdylib"]

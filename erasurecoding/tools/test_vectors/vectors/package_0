@@ -1,0 +1,15 @@
+{
+  "data": "",
+  "work_package": {
+    "chunks": [],
+    "chunks_root": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  },
+  "segment": {
+    "segments": [],
+    "segments_root": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  },
+  "page_proof": {
+    "page_proofs": [],
+    "segments_root": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  }
+}
