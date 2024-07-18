@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
 
 	"bytes"
 	//"encoding/hex"
@@ -17,62 +18,105 @@ import (
 
 // Define the structure for the JSON data
 type TestCase struct {
-	Data     string   `json:"data"`
-	Chunks   []string `json:"chunks"`
-	Segments []struct {
-		Subshards []string `json:"subshards"`
-	} `json:"segments"`
+	Data        string `json:"data"`
+	WorkPackage struct {
+		Chunks     []string `json:"chunks"`
+		ChunksRoot string   `json:"chunks_root"`
+	} `json:"work_package"`
+	Segment struct {
+		Segments []struct {
+			SegmentEC []string `json:"segment_ec"`
+		} `json:"segments"`
+	} `json:"segment"`
+}
+
+func readTestVector(jsonFilePath string) ([]byte, []byte, error) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	fullPath := filepath.Join(currentDir, jsonFilePath)
+
+	jsonData, err := ioutil.ReadFile(fullPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var jsonOutput TestCase
+	err = json.Unmarshal(jsonData, &jsonOutput)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	data, err := base64.StdEncoding.DecodeString(jsonOutput.Data)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var flattenedSubshards []byte
+	for _, segment := range jsonOutput.Segment.Segments {
+		for _, subshardBase64 := range segment.SegmentEC {
+			subshard, err := base64.StdEncoding.DecodeString(subshardBase64)
+			if err != nil {
+				return nil, nil, err
+			}
+			flattenedSubshards = append(flattenedSubshards, subshard...)
+		}
+	}
+
+	return data, flattenedSubshards, nil
 }
 
 func test_encode_decode(t *testing.T, size uint32) error {
-            // Generate random byte array of the specified size
-            original := make([]byte, size)
-            _, err := rand.Read(original)
-            if err != nil {
-                t.Fatalf("Error generating random bytes: %v", err)
-            }
+	// Generate random byte array of the specified size
+	original := make([]byte, size)
+	_, err := rand.Read(original)
+	if err != nil {
+		t.Fatalf("Error generating random bytes: %v", err)
+	}
 
-            encodedOutput, err0 := Encode(original)
-            if err0 != nil {
-                t.Fatalf("Error in Encode: %v", err0)
-            }
+	encodedOutput, err0 := Encode(original)
+	if err0 != nil {
+		t.Fatalf("Error in Encode: %v", err0)
+	}
 
-            decodedOutput, err2 := Decode(uint32(len(original)), encodedOutput)
-            if err2 != nil {
-                t.Fatalf("Error in Decode: %v", err2)
-            }
+	decodedOutput, err2 := Decode(uint32(len(original)), encodedOutput)
+	if err2 != nil {
+		t.Fatalf("Error in Decode: %v", err2)
+	}
+	fmt.Printf("Encoded output size %d\n", len(encodedOutput))
 
-            // Check if the decoded output matches the original input
-            if bytes.Equal(original, decodedOutput) {
-	       fmt.Printf("Decoded output matches the original input for size %d\n", size)
-	       return nil
-            } else {
-                t.Fatalf("Decoded output does not match the original input for size %d", size)
-            }
-	    return nil
+	// Check if the decoded output matches the original input
+	if bytes.Equal(original, decodedOutput) {
+		fmt.Printf("Decoded output matches the original input for size %d\n", size)
+		return nil
+	} else {
+		t.Fatalf("Decoded output does not match the original input for size %d", size)
+	}
+	return nil
 }
 
 func TestEC(t *testing.T) {
-    sizes := []uint32{
-        1, 32, 684,     // one subshard point only
-        //4096,    // FAILS : one page only for subshard
-        4104,    // one page padded
-        15000,   // unaligned padded 4 pages
-        21824,   // min size with full 64 byte aligned chunk.
-        21888,   // aligned full parallelized subshards.
-        100000, // larger
-        200000, // larger 2
-    }
-
-    rand.Seed(time.Now().UnixNano())
-    		       for _, size := range sizes {
-    	err := test_encode_decode(t, size)
-	if err != nil {
-	   t.Fatalf("ERR %v", err)
+	sizes := []uint32{
+		1, 32, 684, // one subshard point only
+		4096,   // one page only for subshard
+		4104,   // one page padded
+		15000,  // unaligned padded 4 pages
+		21824,  // min size with full 64 byte aligned chunk.
+		21888,  // aligned full parallelized subshards.
+		100000, // larger
+		200000, // larger 2
 	}
-    }
-}
 
+	rand.Seed(time.Now().UnixNano())
+	for _, size := range sizes {
+		err := test_encode_decode(t, size)
+		if err != nil {
+			t.Fatalf("ERR %v", err)
+		}
+	}
+}
 
 func TestErasureCoding(t *testing.T) {
 	// Directory containing jamtestvectors JSON files
@@ -90,64 +134,64 @@ func TestErasureCoding(t *testing.T) {
 		}
 
 		filePath := filepath.Join(dir, file.Name())
-		data, err := ioutil.ReadFile(filePath)
+		//TODO: skip file package_0.json for now
+		// if file.Name() == "package_0" {
+		// 	continue
+		// }
+		data, subshards, err := readTestVector(filePath)
 		if err != nil {
-			t.Fatalf("Failed to read file %s: %v", filePath, err)
+			t.Fatalf("Failed to read test vector: %v", err)
 		}
 
-		var testCase TestCase
-		err = json.Unmarshal(data, &testCase)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+		fmt.Printf("Testing %s\n", file.Name())
+
+		encodedOutput, err0 := Encode(data)
+		if err0 != nil {
+			t.Fatalf("Error in Encode: %v", err0)
 		}
 
-		// Decode the base64-encoded data
-		_, err = base64.StdEncoding.DecodeString(testCase.Data)
-		if err != nil {
-			t.Fatalf("Failed to decode base64 data from file %s: %v", filePath, err)
+		// Check if the encoded output matches the expected output
+		if equalBytes(encodedOutput, subshards) {
+			fmt.Printf("Encoded output matches the expected output for %s\n", file.Name())
+		} else {
+			t.Fatalf("Encoded output does not match the expected output for %s", file.Name())
 		}
 
-		//fmt.Printf("%x\n", decodedData)
-		/*// Check that the number of chunks matches
-		if len(chunks) != len(testCase.Chunks) {
-			t.Errorf("Chunk count mismatch for file %s: expected %d, got %d", filePath, len(testCase.Chunks), len(chunks))
+		decodedOutput, err1 := Decode(uint32(len(data)), subshards)
+		if err1 != nil {
+			t.Fatalf("Error in Decode: %v", err1)
 		}
 
-		// Check that each chunk matches the expected value
-		for i, chunk := range chunks {
-			expectedChunk, err := base64.StdEncoding.DecodeString(testCase.Chunks[i])
-			if err != nil {
-				t.Fatalf("Failed to decode base64 chunk from file %s: %v", filePath, err)
-			}
-			if !equalBytes(chunk, expectedChunk) {
-				t.Errorf("Chunk mismatch for file %s at index %d: expected %v, got %v", filePath, i, expectedChunk, chunk)
-			}
+		// Check if the decoded output matches the original input
+		if equalBytes(data, decodedOutput) {
+			fmt.Printf("Decoded output matches the original input for %s\n", file.Name())
+		} else {
+			t.Fatalf("Decoded output does not match the original input for %s", file.Name())
 		}
-
-		// Subshard the data
-		subshards, err := Subshard(decodedData)
-		if err != nil {
-			t.Fatalf("Failed to subshard data from file %s: %v", filePath, err)
-		}
-
-		// Check that the number of subshards matches
-		for j, segment := range testCase.Segments {
-			if len(subshards) != len(segment.Subshards) {
-				t.Errorf("Subshard count mismatch for file %s, segment %d: expected %d, got %d", filePath, j, len(segment.Subshards), len(subshards))
-			}
-
-			// Check that each subshard matches the expected value
-			for k, subshard := range subshards {
-				expectedSubshard, err := base64.StdEncoding.DecodeString(segment.Subshards[k])
-				if err != nil {
-					t.Fatalf("Failed to decode base64 subshard from file %s: %v", filePath, err)
-				}
-				if !equalBytes(subshard, expectedSubshard) {
-					t.Errorf("Subshard mismatch for file %s at segment %d, index %d: expected %v, got %v", filePath, j, k, expectedSubshard, subshard)
-				}
-			}
-		}*/
 	}
+}
+
+func TestJsonSave(t *testing.T) {
+
+	// Generate random byte array of the specified size
+	original := make([]byte, 4096)
+	_, err := rand.Read(original)
+	if err != nil {
+		t.Fatalf("Error generating random bytes: %v", err)
+	}
+
+	encodedOutput, err0 := Encode(original)
+	if err0 != nil {
+		t.Fatalf("Error in Encode: %v", err0)
+	}
+	fmt.Printf("Encoded output size %d\n", len(encodedOutput))
+	encodedArray := GetSubshards(encodedOutput)
+	fmt.Printf("Shape of encodedArray: %d, %d, %d\n", len(encodedArray), len(encodedArray[0]), len(encodedArray[0][0]))
+	err = ConvertToJSON(original, encodedArray)
+	if err != nil {
+		t.Fatalf("Error in ConvertToJSON: %v", err)
+	}
+
 }
 
 // Helper function to compare two byte slices

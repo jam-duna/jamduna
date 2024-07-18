@@ -459,7 +459,6 @@ pub extern "C" fn decode_segment(
     }
 }
 
-// Function to encode segments
 #[no_mangle]
 pub extern "C" fn encode_segments(
     input: *const u8,
@@ -468,14 +467,17 @@ pub extern "C" fn encode_segments(
     output_len: usize,
 ) -> c_int {
     if input.is_null() || output.is_null() {
+        println!("Null pointer error");
         return -1; // Null pointer error
     }
 
     let input_slice = unsafe { std::slice::from_raw_parts(input, input_len) };
     let output_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
 
+
     // Assuming encode functionality involves segmenting the data
     let segments_chunks = build_segments(input_slice);
+    
     let mut encoder = erasure_coding::SubShardEncoder::new().unwrap();
 
     // Convert segment_chunks to an iterator and flatten the chunks
@@ -503,6 +505,7 @@ pub extern "C" fn encode_segments(
     output_slice.copy_from_slice(&encoded_data);
     return encoded_data.len() as c_int;
 }
+
 
 #[cfg(test)]
 mod tests {
