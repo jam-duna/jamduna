@@ -1,9 +1,9 @@
-package corejam
+package node
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"errors"
+	//"crypto/sha256"
+	//"errors"
 	"fmt"
 	"math/big"
 
@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+/*
 // AvailabilitySpecifier creates an availability specifier.
 func AvailabilitySpecifier(packageHash common.Hash, octetSequence []byte, workPackage WorkPackage, mt trie.MerkleTree) common.Hash {
 	// Add the work package data to the Merkle tree
@@ -45,7 +46,7 @@ func PagedProofs(segments []common.Hash, mt trie.MerkleTree) ([][][]byte, error)
 	}
 	return proofs, nil
 }
-
+*/
 // isValidSegmentTreeRoot is a placeholder for checking the validity of a segment-tree root.
 func isValidSegmentTreeRoot(root common.Hash) bool {
 	// Add the logic to validate the segment-tree root
@@ -65,16 +66,9 @@ func IsAuthorizedPVM(workPackage WorkPackage) (bool, error) {
 	// Ensure that all preimage data referenced as commitments of extrinsic segments can be fetched
 
 	// For demonstration, let's assume these checks are passed
-	// In a real implementation, you would add the necessary logic here
-	for _, workItem := range workPackage.WorkItems {
-		if !isValidSegmentTreeRoot(workItem.Manifest.SegmentsTreeRoot) {
-			return false, errors.New("invalid segment-tree root")
-		}
+	//for _, workItem := range workPackage.WorkItems {
 
-		if !canFetchPreimageData(workItem.Manifest.DataSegments) {
-			return false, errors.New("cannot fetch preimage data")
-		}
-	}
+	//}
 
 	return true, nil
 }
@@ -102,7 +96,7 @@ func Accumulate(serviceIndex int, state AccumulationState) (AccumulationState, e
 
 	// Call the virtual machine
 	code := []byte{}
-	vm := pvm.NewVMFromCode(code)
+	vm := pvm.NewVMFromCode(code, 0)
 	err := vm.Execute()
 	if err != nil {
 		return AccumulationState{}, err
@@ -178,8 +172,8 @@ func CalculateGasAttributable(
 
 	for serviceIndex, reports := range workReports {
 		var gasSum float64
-		for _, report := range reports {
-			gasSum += float64(report.TotalSize) // assuming TotalSize is the field representing gas for each work report
+		for range reports {
+			gasSum += 1 // TODO
 		}
 		serviceGasTotals[serviceIndex] = gasSum
 	}
@@ -226,7 +220,7 @@ func ProcessWorkResults(workPackage WorkPackage) (string, error) {
 	}
 	// TODO
 	code := []byte{}
-	pvm := pvm.NewVMFromCode(code)
+	pvm := pvm.NewVMFromCode(code, 0)
 	var results []string
 	for _, workItem := range workPackage.WorkItems {
 		refinedResult, err := RefinePVM(pvm, workPackage, workItem)

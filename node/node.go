@@ -5,17 +5,18 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
-	"encoding/binary"
+	//"encoding/binary"
+	"encoding/json"
 	//"crypto/elliptic"
 	//"crypto/ecdsa"
 	//"crypto/x509"
 	//"crypto/x509/pkix"
 	//"encoding/pem"
 	"fmt"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/quic-go/quic-go"
 	"golang.org/x/crypto/blake2b"
-	"github.com/colorfulnotion/jam/pvm"
 	"log"
 	"math/big"
 	"sync"
@@ -35,13 +36,18 @@ const (
 	nodePrefix = "node"
 )
 
+type QuicMessage struct {
+	MsgType string `json:"msgType"`
+	Payload string `json:"payload"`
+}
+
 type Node struct {
 	id     int
 	store  *StateDBStorage
 	server quic.Listener
 	peers  []string
 	mutex  sync.Mutex
-	VMs map[uint32]*pvm.VM
+	VMs    map[uint32]*pvm.VM
 }
 
 func newNode(id int, peers []string) (*Node, error) {
@@ -110,28 +116,213 @@ func (n *Node) handleConnection(conn quic.Connection) {
 func (n *Node) handleStream(stream quic.Stream) {
 	defer stream.Close()
 
-	var key common.Hash
-	err := binary.Read(stream, binary.LittleEndian, &key)
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(stream)
+	var msg QuicMessage
+	err := json.Unmarshal(buf.Bytes(), &msg)
 	if err != nil {
-		log.Println("Failed to read key:", err)
+		log.Println("Failed to unmarshal QuicMessage:", err)
 		return
 	}
 
-	value, err := n.store.ReadKV(key)
+	var response interface{}
+	switch msg.MsgType {
+	case "ImportDAQuery":
+		var query ImportDAQuery
+		err := json.Unmarshal([]byte(msg.Payload), &query)
+		if err != nil {
+			log.Println("Failed to unmarshal ImportDAQuery:", err)
+			return
+		}
+		response = ImportDAResponse{Data: [][]byte{[]byte("dummy data")}, Proof: BMTProof{}}
+	case "AuditDAQuery":
+		var query AuditDAQuery
+		err := json.Unmarshal([]byte(msg.Payload), &query)
+		if err != nil {
+			log.Println("Failed to unmarshal AuditDAQuery:", err)
+			return
+		}
+		response = AuditDAResponse{Data: []byte("dummy data"), Proof: BMTProof{}}
+	case "ImportDAReconstructQuery":
+		var query ImportDAReconstructQuery
+		err := json.Unmarshal([]byte(msg.Payload), &query)
+		if err != nil {
+			log.Println("Failed to unmarshal ImportDAReconstructQuery:", err)
+			return
+		}
+		response = ImportDAReconstructResponse{Data: []byte("dummy data")}
+	case "Ticket":
+		var ticket Ticket
+		err := json.Unmarshal([]byte(msg.Payload), &ticket)
+		if err != nil {
+			log.Println("Failed to unmarshal Ticket:", err)
+			return
+		}
+		err = processTicket(ticket)
+	case "Guarantee":
+		var guarantee Guarantee
+		err := json.Unmarshal([]byte(msg.Payload), &guarantee)
+		if err != nil {
+			log.Println("Failed to unmarshal Guarantee:", err)
+			return
+		}
+		err = processGuarantee(guarantee)
+	case "Assurance":
+		var assurance Assurance
+		err := json.Unmarshal([]byte(msg.Payload), &assurance)
+		if err != nil {
+			log.Println("Failed to unmarshal Assurance:", err)
+			return
+		}
+		err = processAssurance(assurance)
+	case "Disputes":
+		var disputes Disputes
+		err := json.Unmarshal([]byte(msg.Payload), &disputes)
+		if err != nil {
+			log.Println("Failed to unmarshal Disputes:", err)
+			return
+		}
+		err = processDisputes(disputes)
+	case "PreimageLookup":
+		var preimageLookup PreimageLookup
+		err := json.Unmarshal([]byte(msg.Payload), &preimageLookup)
+		if err != nil {
+			log.Println("Failed to unmarshal PreimageLookup:", err)
+			return
+		}
+		err = processPreimageLookup(preimageLookup)
+	case "Block":
+		var block Block
+		err := json.Unmarshal([]byte(msg.Payload), &block)
+		if err != nil {
+			log.Println("Failed to unmarshal Block:", err)
+			return
+		}
+		err = processBlock(block)
+	case "Announcement":
+		var announcement Announcement
+		err := json.Unmarshal([]byte(msg.Payload), &announcement)
+		if err != nil {
+			log.Println("Failed to unmarshal Announcement:", err)
+			return
+		}
+		err = processAnnouncement(announcement)
+	case "WorkPackage":
+		var workPackage WorkPackage
+		err := json.Unmarshal([]byte(msg.Payload), &workPackage)
+		if err != nil {
+			log.Println("Failed to unmarshal WorkPackage:", err)
+			return
+		}
+		err = processWorkPackage(workPackage)
+	default:
+		response = "OK"
+	}
+
 	if err != nil {
-		log.Println("Failed to read value:", err)
+		response = 1 // Error
+	} else {
+		response = 0 // Success
+	}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		log.Println("Failed to marshal response:", err)
 		return
 	}
 
-	_, err = stream.Write(value)
+	_, err = stream.Write(responseData)
 	if err != nil {
-		log.Println("Failed to write value:", err)
+		log.Println("Failed to write response:", err)
 		return
 	}
 }
 
-func (n *Node) makeRequest(peerAddr string, key common.Hash) ([]byte, error) {
-	conn, err := quic.DialAddr(context.Background(), peerAddr, generateTLSConfig(), nil)
+func processTicket(ticket Ticket) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func processGuarantee(guarantee Guarantee) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func processAssurance(assurance Assurance) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func processDisputes(disputes Disputes) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func processPreimageLookup(preimageLookup PreimageLookup) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func processBlock(block Block) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func processAnnouncement(announcement Announcement) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func processWorkPackage(workPackage WorkPackage) error {
+	// Add your logic here
+	return nil // Success
+}
+
+func (n *Node) makeRequest(peerAddr string, obj interface{}) ([]byte, error) {
+	msgType := ""
+	switch obj.(type) {
+	case ImportDAQuery:
+		msgType = "ImportDAQuery"
+	case AuditDAQuery:
+		msgType = "AuditDAQuery"
+	case ImportDAReconstructQuery:
+		msgType = "ImportDAReconstructQuery"
+	case Ticket:
+		msgType = "Ticket"
+	case Guarantee:
+		msgType = "Guarantee"
+	case Assurance:
+		msgType = "Assurance"
+	case Disputes:
+		msgType = "Disputes"
+	case PreimageLookup:
+		msgType = "PreimageLookup"
+	case Block:
+		msgType = "Block"
+	case Announcement:
+		msgType = "Announcement"
+	case WorkPackage:
+		msgType = "WorkPackage"
+	default:
+		return nil, fmt.Errorf("unsupported type")
+	}
+
+	payload, err := json.Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+
+	quicMessage := QuicMessage{
+		MsgType: msgType,
+		Payload: string(payload),
+	}
+
+	messageData, err := json.Marshal(quicMessage)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := quic.DialAddr(context.Background(), peerAddr, generateTLSConfig(), generateQuicConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +334,7 @@ func (n *Node) makeRequest(peerAddr string, key common.Hash) ([]byte, error) {
 	}
 	defer stream.Close()
 
-	err = binary.Write(stream, binary.LittleEndian, key)
+	_, err = stream.Write(messageData)
 	if err != nil {
 		return nil, err
 	}
@@ -161,21 +352,114 @@ func (n *Node) runClient() {
 			continue
 		}
 
-		keyIndex, _ := rand.Int(rand.Reader, big.NewInt(numKeys))
-		key := common.BytesToHash([]byte(fmt.Sprintf("%d", keyIndex.Int64()+1)))
+		obj := generateRandomObject()
 
-		value, err := n.makeRequest(n.peers[peerIndex.Int64()], key)
+		value, err := n.makeRequest(n.peers[peerIndex.Int64()], obj)
 		if err != nil {
 			log.Println("Client request error:", err)
 			continue
 		}
 
-		n.mutex.Lock()
-		err = n.store.WriteKV(key, value)
-		n.mutex.Unlock()
-		if err != nil {
-			log.Println("Failed to write key-value pair:", err)
+		// For demonstration purposes, we just log the response
+		log.Printf("Received response: %s\n", string(value))
+	}
+}
+
+func generateRandomObject() interface{} {
+	types := []string{
+		"ImportDAQuery", "AuditDAQuery", "ImportDAReconstructQuery", "Ticket",
+		"Guarantee", "Assurance", "Disputes", "PreimageLookup", "Block",
+		"Announcement", "WorkPackage",
+	}
+
+	randomIndex, _ := rand.Int(rand.Reader, big.NewInt(int64(len(types))))
+	selectedType := types[randomIndex.Int64()]
+
+	switch selectedType {
+	case "ImportDAQuery":
+		return ImportDAQuery{
+			SegmentRoot:    bhash([]byte("segment_root")),
+			SegmentIndex:   0,
+			ProofRequested: true,
 		}
+	case "AuditDAQuery":
+		return AuditDAQuery{
+			SegmentRoot:    bhash([]byte("segment_root")),
+			Index:          0,
+			ProofRequested: true,
+		}
+	case "ImportDAReconstructQuery":
+		return ImportDAReconstructQuery{
+			SegmentRoot: bhash([]byte("segment_root")),
+		}
+	case "Ticket":
+		var signature [ExtrinsicSignatureInBytes]byte
+		copy(signature[:], "signature")
+		return Ticket{
+			Attempt:   1,
+			Signature: signature,
+		}
+	case "Guarantee":
+		return Guarantee{
+			WorkReport:  WorkReport{},
+			TimeSlot:    1,
+			Credentials: []GuaranteeCredential{},
+		}
+	case "Assurance":
+		return Assurance{
+			ParentHash:     bhash([]byte("parent_hash")),
+			Bitstring:      []byte("bitstring"),
+			ValidatorIndex: 1,
+			Signature:      Ed25519Signature{},
+		}
+	case "Disputes":
+		return Disputes{
+			Verdicts: []Verdict{
+				{WorkReportHash: bhash([]byte("work_report_hash")), Epoch: 1},
+			},
+			Culprits: []Culprit{
+				{R: PublicKey{}, K: PublicKey{}, Signature: Ed25519Signature{}},
+			},
+			Faults: []Fault{
+				{R: PublicKey{}, K: PublicKey{}, V: PublicKey{}, Signature: Ed25519Signature{}},
+			},
+		}
+	case "PreimageLookup":
+		return PreimageLookup{
+			ServiceIndex: 0,
+			Data:         []byte("lookup"),
+		}
+	case "Block":
+		return Block{
+			Header: Header{
+				ParentHash:     bhash([]byte("parent_hash")),
+				PriorStateRoot: bhash([]byte("prior_state_root")),
+				ExtrinsicHash:  bhash([]byte("extrinsic_hash")),
+				TimeSlot:       0,
+				EpochMark:      &EpochMark{},
+				//WinningTickets:    &SafroleAccumulator{},
+				JudgementsMarkers: &JudgementMarker{},
+				BlockAuthorKey:    0,
+				VRFSignature:      []byte("vrf_signature"),
+				BlockSeal:         []byte("block_seal"),
+			},
+			Extrinsic: Extrinsic{},
+		}
+	case "Announcement":
+		return Announcement{
+			Signature: Ed25519Signature{},
+		}
+	case "WorkPackage":
+		return WorkPackage{
+			AuthorizationToken: []byte("exampleToken"),
+			ServiceIndex:       0,
+			AuthorizationCode:  bhash([]byte("authorization_code")),
+			ParamBlob:          []byte("param_blob"),
+			Context:            []byte("context"),
+			WorkItems:          []WorkItem{},
+		}
+	default:
+		return nil
 	}
 }
 

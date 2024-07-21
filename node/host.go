@@ -1,8 +1,8 @@
 package node
 
 import (
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/colorfulnotion/jam/pvm"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type HostEnv struct {
@@ -10,7 +10,6 @@ type HostEnv struct {
 }
 
 const OK uint32 = 0
-
 
 // Service Management
 func (node *Node) NewService(c []byte, l, b uint32, g, m uint64) uint32 {
@@ -126,5 +125,3 @@ func (node *Node) Empower(m uint32, a uint32, v uint32) uint32 {
 func (node *Node) Assign(c []byte) uint32 {
 	return OK
 }
-
-
