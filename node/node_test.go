@@ -2,7 +2,7 @@ package node
 
 import (
 	"fmt"
-	"sync"
+	//"sync"
 	"testing"
 )
 
@@ -20,14 +20,7 @@ func TestNodes(t *testing.T) {
 		}
 		nodes[i] = node
 	}
-
-	var wg sync.WaitGroup
-	for _, node := range nodes {
-		wg.Add(1)
-		go func(n *Node) {
-			defer wg.Done()
-			n.runClient()
-		}(node)
+	for {
 	}
-	wg.Wait()
+
 }
