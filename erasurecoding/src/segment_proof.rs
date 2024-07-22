@@ -21,7 +21,8 @@ impl SegmentIndex {
 /// Size of stored page proof.
 /// TODO @cheme distributed is defined to be half of this, not too sure.
 /// Note that we store both distributed data and middle nodes.
-pub const PAGE_PROOF_SEGMENT_SIZE: usize = PAGE_PROOF_SEGMENT_HASHES * HASH_LEN * 2;
+/// ///@shawn do some modification here
+pub const PAGE_PROOF_SEGMENT_SIZE: usize = 4104;
 
 // half proof are cache of middle nodes
 pub const PAGE_PROOF_SEGMENT_HASHES_SIZE: usize = PAGE_PROOF_SEGMENT_SIZE / 2;

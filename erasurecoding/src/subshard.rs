@@ -15,7 +15,8 @@ use std::{
 };
 
 /// Fix segment size.
-pub const SEGMENT_SIZE: usize = 4096;
+/// ///@shawn do some modification here
+pub const SEGMENT_SIZE: usize = 4104;
 
 const SUBSHARD_PER_SEGMENT: usize = ((SEGMENT_SIZE - 1) / SUBSHARD_SIZE) + 1;
 
@@ -602,8 +603,8 @@ fn ori_chunk_to_data(
 	shards: &BTreeMap<usize, &[u8]>,
 	start_data: usize,
 	data_len: Option<usize>,
-) -> Option<[u8; 4096]> {
-	let mut data = [0u8; 4096];
+) -> Option<[u8; 4104]> {
+	let mut data = [0u8; 4104];
 
 	let mut i_data = 0;
 	let (mut full_i, mut shard_i, mut shard_a) = data_index_to_chunk_index(start_data);
