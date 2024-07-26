@@ -16,13 +16,13 @@ func TestBandersnatch(t *testing.T) {
 		"f16e5352840afb47e206b5c89f560f2611835855cf2e6ebad1acc9520a72591d",
 	}
 
-	var pubkeys [][]byte
+	var ringset []PublicKey
 	for _, hexStr := range pubkeysHex {
 		bytes, err := hex.DecodeString(hexStr)
 		if err != nil {
 			t.Fatalf("Error decoding hex string: %v", err)
 		}
-		pubkeys = append(pubkeys, bytes)
+		ringset = append(ringset, PublicKey(bytes))
 	}
 
 	decodedHex, _ := hex.DecodeString("bb30a42c1e62f0afda5f0a4e8a562f7a13a24cea00ee81917b86b89e801314aa")
@@ -34,7 +34,8 @@ func TestBandersnatch(t *testing.T) {
 		t.Fatalf("Error decoding signature: %v", err)
 	}
 
-	vrfOutput, result := RingVRFVerify(pubkeys, vrfInputData, auxData, signatureBytes)
+	ringsetBytes := InitRingSet(ringset)
+	vrfOutput, result := RingVRFVerify(ringsetBytes, vrfInputData, auxData, signatureBytes)
 	fmt.Printf("Verification result: %d\n", result)
 	fmt.Printf("VRF output hash: %s\n", hex.EncodeToString(vrfOutput))
 
