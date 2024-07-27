@@ -2,13 +2,14 @@ package bandersnatch
 
 /*
 #cgo LDFLAGS: -L target/release -lbandersnatch
-#include "bandersnatch.h"
+#include <stdlib.h>
+#include <bandersnatch.h>
 */
 import "C"
 import (
-	//"fmt"
-	"unsafe"
 	"errors"
+	"fmt"
+	"unsafe"
 )
 
 type SecretKey []byte
@@ -16,113 +17,150 @@ type PublicKey []byte
 
 const (
 	RingSignatureLen = 784
-	IETFSignatureLen = 123 // TODO: what's the size of this
+	IETFSignatureLen = 96
+	VRFOutputLen     = 32
 )
 
-func GenerateKeyFromSeed(seed []byte) (PublicKey, SecretKey){
-	//call bandersnatch::Secret::from_seed() to generate key
-	pub := PublicKey{}  // Initialize an empty PublicKey
-	sk := SecretKey{}   // Initialize an empty SecretKey
-	return pub, sk
+func GetPublicKey(seed SecretKey) (PublicKey, error) {
+	pubKey := make([]byte, 32) // Adjust size as necessary
+	C.get_public_key(
+		(*C.uchar)(unsafe.Pointer(&seed[0])),
+		C.size_t(len(seed)),
+		(*C.uchar)(unsafe.Pointer(&pubKey[0])),
+		C.size_t(len(pubKey)),
+	)
+	return pubKey, nil
 }
 
-func InitRingSet(ringset []PublicKey) (ringsetBytes []byte){
+func InitRingSet(ringset []PublicKey) (ringsetBytes []byte) {
 	// Flatten pubkeys into a single byte slice
-    for _, pubkey := range ringset {
-        ringsetBytes = append(ringsetBytes, pubkey...)
-    }
+	for _, pubkey := range ringset {
+		ringsetBytes = append(ringsetBytes, pubkey...)
+	}
 	return ringsetBytes
 }
 
-//Return vrfOutput given SecretKey & vrfInputData
-func VRFOutput(authority_secret_key SecretKey, vrfInputData []byte) ([]byte, error){
-	return []byte{}, nil
+// Anonymous Ring VRF
+// RingVRFSign is Used for tickets submission to sign ticket anonymously. Output and Ring Proof bundled together (as per section 2.2)
+func RingVrfSign(seed, ringSet, vrfInputData, auxData []byte, proverIdx int) ([]byte, []byte, error) {
+	sig := make([]byte, RingSignatureLen) // 784 bytes
+	vrfOutput := make([]byte, 32)
+	C.ring_vrf_sign(
+		(*C.uchar)(unsafe.Pointer(&seed[0])),
+		C.size_t(len(seed)),
+		(*C.uchar)(unsafe.Pointer(&ringSet[0])),
+		C.size_t(len(ringSet)),
+		C.size_t(proverIdx),
+		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
+		C.size_t(len(vrfInputData)),
+		(*C.uchar)(unsafe.Pointer(&auxData[0])),
+		C.size_t(len(auxData)),
+		(*C.uchar)(unsafe.Pointer(&sig[0])),
+		C.size_t(len(sig)),
+		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
+		C.size_t(len(vrfOutput)),
+	)
+	return sig, vrfOutput, nil
 }
 
-//Return vrfOutput given valid
-func VRFSignedOutput(VRFSignature []byte) ([]byte, error) {
-	vrfOutput := make([]byte, 32)
-	if (len(VRFSignature) == RingSignatureLen){
-		//let signature = match RingVrfSignature::deserialize_compressed(signature)
-		//vrfOutput = signature.output.hash()[..32].try_into().unwrap();
-	}else if (len(VRFSignature) == IETFSignatureLen){
-		//let signature = match IetfVrfSignature::deserialize_compressed(signature)
-		//vrfOutput = signature.output.hash()[..32].try_into().unwrap();
-	}else{
-		return nil, errors.New("invalid signature length")
+// RingVRFVerify is Used for tickets verification, and returns vrfOutput on success
+func RingVrfVerify(pubKeys, signature, vrfInputData, auxData []byte) ([]byte, error) {
+	vrfOutput := make([]byte, VRFOutputLen)
+	auxDataL := C.size_t(len(auxData))
+	auxDataF := auxData
+	if len(auxData) == 0 {
+		auxDataF = []byte{1}
+		auxDataL = C.uint64_t(0)
+	}
+
+	result := C.ring_vrf_verify(
+		(*C.uchar)(unsafe.Pointer(&pubKeys[0])),
+		C.size_t(len(pubKeys)),
+		(*C.uchar)(unsafe.Pointer(&signature[0])),
+		C.size_t(len(signature)),
+		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
+		C.size_t(len(vrfInputData)),
+		(*C.uchar)(unsafe.Pointer(&auxDataF[0])),
+		C.size_t(auxDataL),
+		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
+		C.size_t(len(vrfOutput)),
+	)
+	if result != 1 {
+		return nil, fmt.Errorf("verification failed")
 	}
 	return vrfOutput, nil
 }
 
-
-// Anonymous VRF (aka ring vrf)
-
-/**
-Source: ring_vrf_verify
-Used for tickets verification.
-RingVRFVerify calls the external Rust function to verify the VRF signature and returns vrfOutput on success
-*/
-func RingVRFVerify(ringsetBytes []byte , vrfInputData, auxData, signature []byte) ([]byte, int) {
-
-    // Allocate memory for the VRF output hash
-    vrfOutput := make([]byte, 32)
-
-    auxDataL := C.uint64_t(len(auxData))
-    auxDataF := auxData
-    if len(auxData) == 0 {
-        auxDataF = []byte{1}
-        auxDataL = C.uint64_t(0)
-    }
-
-    // Call the Rust function
-    res := C.ring_vrf_verify_external(
-        (*C.uint8_t)(unsafe.Pointer(&ringsetBytes[0])),
-        C.uint64_t(len(ringsetBytes)),
-        (*C.uint8_t)(unsafe.Pointer(&signature[0])),
-        C.uint64_t(len(signature)),
-        (*C.uint8_t)(unsafe.Pointer(&vrfInputData[0])),
-        C.uint64_t(len(vrfInputData)),
-        (*C.uint8_t)(unsafe.Pointer(&auxDataF[0])),
-        C.uint64_t(auxDataL),
-        (*C.uint8_t)(unsafe.Pointer(&vrfOutput[0])),
-    )
-
-    return vrfOutput, int(res)
-}
-
-
-/**
-Source: ring_vrf_sign
-Used for tickets submission.
-RingVRFSign calls the external Rust function to sign ticket anonymously. Output and Ring Proof bundled together (as per section 2.2)
-*/
-func RingVRFSign(ringsetBytes, authority_secret_key SecretKey, vrfInputData, auxData []byte) ([]byte, error) {
-	//ring_signature := C.ring_vrf_sign_external(ringsetBytes, ringsetBytesL, authority_secret_key, authority_secret_key_L, vrfInputData, vrfInputDataL, auxData, auxDataL)
-	return []byte{}, nil
-}
-
-
-// Non Anonymous VRF (aka IETF VRF)
-
-/**
-Source: ietf_vrf_verify
-Used for ticket claim verification during block import.
-returns vrfOutput on success
-*/
-func IETFVRFVerify(authority_public_key PublicKey, vrfInputData, auxData, signature []byte) ([]byte, int){
-	// Allocate memory for the VRF output hash
+// Non Anonymous IETF VRF
+// IetfVrfSign is Used for ticket claiming during block production.
+func IetfVrfSign(seed, vrfInputData, auxData []byte) ([]byte, []byte, error) {
+	sig := make([]byte, IETFSignatureLen) // 96 bytes
 	vrfOutput := make([]byte, 32)
-	res := 0
-	//NOTE. this external func should use PublicKey directly instead of index
-	//res := C.ietf_vrf_verify_external(authority_public_key, authority_public_key_L, vrfInputData, vrfInputDataL, auxData, auxDataL, signature, signatureL)
-	return vrfOutput, int(res)
+	C.ietf_vrf_sign(
+		(*C.uchar)(unsafe.Pointer(&seed[0])),
+		C.size_t(len(seed)),
+		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
+		C.size_t(len(vrfInputData)),
+		(*C.uchar)(unsafe.Pointer(&auxData[0])),
+		C.size_t(len(auxData)),
+		(*C.uchar)(unsafe.Pointer(&sig[0])),
+		C.size_t(len(sig)),
+		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
+		C.size_t(len(vrfOutput)),
+	)
+	return sig, vrfOutput, nil
 }
 
-/**
-Source: ietf_vrf_sign
-Used for ticket claiming during block production.
-*/
-func IETFVRFSign(authority_secret_key SecretKey, vrfInputData, auxData []byte) ([]byte, error){
-	//ietf_signature := C.ietf_vrf_sign_external(authority_secret_key,authority_secret_key_L, vrfInputData, vrfInputDataL, auxData, auxDataL)
-	return []byte{}, nil
+// IetfVrfVerifyAndGenerateVrfOutput is Used for ticket claim verification during block import
+// returns vrfOutput on success
+// NOTE: this external func should use PublicKey directly instead of index
+func IetfVrfVerify(ringSet, signature, vrfInputData, auxData []byte, signerKeyIndex int) ([]byte, error) {
+	vrfOutput := make([]byte, VRFOutputLen)
+	result := C.ietf_vrf_verify(
+		(*C.uchar)(unsafe.Pointer(&ringSet[0])),
+		C.size_t(len(ringSet)),
+		(*C.uchar)(unsafe.Pointer(&signature[0])),
+		C.size_t(len(signature)),
+		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
+		C.size_t(len(vrfInputData)),
+		(*C.uchar)(unsafe.Pointer(&auxData[0])),
+		C.size_t(len(auxData)),
+		C.size_t(signerKeyIndex),
+		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
+		C.size_t(len(vrfOutput)),
+	)
+	if result != 1 {
+		return nil, fmt.Errorf("verification failed")
+	}
+	return vrfOutput, nil
+}
+
+// Return vrfOutput given valid signature -- inputs are different though so probably not necessary?
+func VRFSignedOutput(signature []byte) ([]byte, error) {
+	vrfOutput := make([]byte, 32)
+	if len(signature) == RingSignatureLen {
+		result := C.get_ring_vrf_output(
+			(*C.uchar)(unsafe.Pointer(&signature[0])),
+			C.size_t(len(signature)),
+			(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
+			C.size_t(len(vrfOutput)),
+		)
+		if result != 1 {
+			return nil, fmt.Errorf("failed to get Ring VRF output")
+		}
+		return vrfOutput, nil
+	} else if len(signature) == IETFSignatureLen {
+		result := C.get_ietf_vrf_output(
+			(*C.uchar)(unsafe.Pointer(&signature[0])),
+			C.size_t(len(signature)),
+			(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
+			C.size_t(len(vrfOutput)),
+		)
+		if result != 1 {
+			return nil, fmt.Errorf("failed to get IETF VRF output")
+		}
+	} else {
+		return nil, errors.New("invalid signature length")
+	}
+	return vrfOutput, nil
 }

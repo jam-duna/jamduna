@@ -1,10 +1,115 @@
 package bandersnatch
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"testing"
 )
+
+func TestVRFOperations(t *testing.T) {
+	// Generate 6 different seeds
+	seeds := make([][]byte, 6)
+	for i := 0; i < 6; i++ {
+		seeds[i] = make([]byte, 32)
+		for j := 0; j < 32; j++ {
+			seeds[i][j] = byte(i*32 + j)
+		}
+	}
+
+	// Get public keys for each seed
+	pubKeys := make([][]byte, 6)
+	for i, seed := range seeds {
+		pubKey, err := GetPublicKey(seed)
+		if err != nil {
+			t.Fatalf("GetPublicKey failed: %v", err)
+		}
+		pubKeys[i] = pubKey
+		//fmt.Printf("TestVRFOperations Public Key %d: %x\n", i, pubKey)
+	}
+
+	// Create a ring set by concatenating all public keys
+	var ringSet []byte
+	for _, pubKey := range pubKeys {
+		ringSet = append(ringSet, pubKey...)
+	}
+
+	// Example data to be signed
+	vrfInputData := []byte("example input data")
+	auxData := []byte("example aux data")
+
+	// Use the third seed to sign the data with IETF VRF
+	proverIdx := 2
+	signature, ietfvrfOutput, err := IetfVrfSign(seeds[proverIdx], vrfInputData, auxData)
+	if err != nil {
+		t.Fatalf("IetfVrfSign: %v", err)
+	}
+	fmt.Printf("TestVRFOperations IetfVrfSign -- VRFOutput: %x Signature: %x (%d bytes)\n", ietfvrfOutput, signature, len(signature))
+
+	ietfRecoveredVRFOutput, err := VRFSignedOutput(signature)
+	if err != nil {
+		t.Fatalf("VRFSignedOutput (IETF): %v", err)
+	}
+	fmt.Printf("TestVRFOperations Ietf Recovered VRFOutput: %x\n", ietfRecoveredVRFOutput)
+
+	// Verify the IETF VRF signature
+	vrfOutput, err := IetfVrfVerify(ringSet, signature, vrfInputData, auxData, proverIdx)
+	if err != nil {
+		t.Fatalf("IetfVrfVerify failed: %v", err)
+	}
+	fmt.Printf("TestVRFOperations IETF VRF Output: %x (%d bytes) [VERIFIED sigature]\n", vrfOutput, len(vrfOutput))
+
+	// Check that ietfRecoveredVRFOutput, ietfvrfOutput, and vrfOutput are identical
+	if !bytes.Equal(ietfRecoveredVRFOutput, ietfvrfOutput) {
+		t.Fatalf("ietfRecoveredVRFOutput and ietfvrfOutput are not identical")
+	}
+	if !bytes.Equal(ietfRecoveredVRFOutput, vrfOutput) {
+		t.Fatalf("ietfRecoveredVRFOutput and vrfOutput are not identical")
+	}
+	if !bytes.Equal(ietfvrfOutput, vrfOutput) {
+		t.Fatalf("ietfvrfOutput and vrfOutput are not identical")
+	}
+	fmt.Printf("IETF VRF Outputs MATCH!\n")
+
+	// Sign the data with Ring VRF
+	ringSignature, ringvrfOutput, err := RingVrfSign(seeds[proverIdx], ringSet, vrfInputData, auxData, proverIdx)
+	if err != nil {
+		t.Fatalf("RingVrfSign failed: %v", err)
+	}
+	fmt.Printf("TestVRFOperations RingVrfSign -- VRFOutput: %x Signature: %x (%d bytes)\n", ringvrfOutput, ringSignature, len(ringSignature))
+
+	ringRecoveredVRFOutput, err := VRFSignedOutput(ringSignature)
+	if err != nil {
+		t.Fatalf("VRFSignedOutput (Ring): %v", err)
+	}
+	fmt.Printf("TestVRFOperations Ring Recovered VRFOutput: %x\n", ringRecoveredVRFOutput)
+
+	// Verify the Ring VRF signature
+	ringVrfOutput, err := RingVrfVerify(ringSet, ringSignature, vrfInputData, auxData)
+	if err != nil {
+		t.Fatalf("RingVrfVerify failed: %v", err)
+	}
+	fmt.Printf("TestVRFOperations Ring VRF Output: %x\n", ringVrfOutput)
+
+	// Check that ringvrfOutput, ringRecoveredVRFOutput, and ringVrfOutput are identical
+	if !bytes.Equal(ringRecoveredVRFOutput, ringvrfOutput) {
+		t.Fatalf("ringRecoveredVRFOutput and ringvrfOutput are not identical")
+	}
+	if !bytes.Equal(ringRecoveredVRFOutput, ringVrfOutput) {
+		t.Fatalf("ringRecoveredVRFOutput and ringVrfOutput are not identical")
+	}
+	if !bytes.Equal(ringvrfOutput, ringVrfOutput) {
+		t.Fatalf("ringvrfOutput and ringVrfOutput are not identical")
+	}
+	fmt.Printf("Ring VRF Outputs MATCH!\n")
+
+	// FINAL CHECK
+	if !bytes.Equal(ietfvrfOutput, ringVrfOutput) {
+		t.Fatalf("ietfvrfOutput and ringVrfOutput are not identical")
+	}
+	fmt.Printf("IETF + Ring VRF Outputs MATCH!\n")
+
+}
 
 func TestBandersnatch(t *testing.T) {
 	pubkeysHex := []string{
@@ -35,11 +140,9 @@ func TestBandersnatch(t *testing.T) {
 	}
 
 	ringsetBytes := InitRingSet(ringset)
-	vrfOutput, result := RingVRFVerify(ringsetBytes, vrfInputData, auxData, signatureBytes)
-	fmt.Printf("Verification result: %d\n", result)
-	fmt.Printf("VRF output hash: %s\n", hex.EncodeToString(vrfOutput))
-
-	if result != 1 {
-		//t.Fatalf("Test failed, expected result to be 1, got %d", result)
+	ringVrfOutput, err := RingVrfVerify(ringsetBytes, signatureBytes, vrfInputData, auxData)
+	if err != nil {
+		t.Fatalf("RingVrfVerify Error: %v", err)
 	}
+	fmt.Printf("TestBandersnatch RingVRFOutput: %s (%d bytes)\n", hex.EncodeToString(ringVrfOutput), len(ringVrfOutput))
 }
