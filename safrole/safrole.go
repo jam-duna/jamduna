@@ -141,32 +141,65 @@ func (s *State) ticketSealVRFInput(targetEpochRandomness common.Hash, attempt in
 	return ticket_vrf_input
 }
 
-func (s *State) computeTicketID(authority_secret_key bandersnatch.SecretKey, ticket_vrf_input []byte) common.Hash {
-	ticket_id := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input)
-	return common.BytesToHash(ticket_id)
+func (s *State) computeTicketID(authority_secret_key bandersnatch.PrivateKey, ticket_vrf_input []byte) (common.Hash, error) {
+	//ticket_id := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input)
+	auxData := []byte{}
+	ticket_id, err := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input, auxData)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("signTicket failed")
+	}
+	return common.BytesToHash(ticket_id), nil
 }
 
-func (s *State) computeTicketIDSecretKey(secret bandersnatch.SecretKey, targetEpochRandomness common.Hash, attempt int) ([]byte, []byte) {
-	ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, attempt)
-	message := []byte{}
-	signature, ticketID := bandersnatch.RingVRFSign(secret, jamTicketSeal, message, ticketVRFInput) // ??
-	return signature, ticketID
+func (s *State) getRingSet(phase string) (ringsetBytes []byte){
+	var validatorSet []Validator
+	// 4 authorities[pre, curr, next, designed]
+	switch phase {
+	case "Pre": //N-1
+		validatorSet = s.PrevValidators
+	case "Curr": //N
+		validatorSet = s.CurrValidators
+	case "Next": //N+1
+		validatorSet = s.NextValidators
+	case "Designed": //N+2
+		validatorSet = s.DesignedValidators
+	}
+	pubkeys := []bandersnatch.PublicKey{}
+	for _, v := range validatorSet {
+		pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
+	}
+	ringsetBytes = bandersnatch.InitRingSet(pubkeys)
+	return ringsetBytes
+}
+
+func (s *State) generateTicket(secret bandersnatch.PrivateKey, targetEpochRandomness common.Hash, attempt int) ([]byte, []byte, error) {
+	ticket_vrf_input := s.ticketSealVRFInput(targetEpochRandomness, attempt)
+	auxData := []byte{}
+	//RingVrfSign(privateKey, ringsetBytes, vrfInputData, auxData []byte)
+	//During epoch N, each authority scheduled for epoch N+2 constructs a set of tickets which may be eligible (6.5.2) for on-chain submission.
+	ringsetBytes := s.getRingSet("Designed")
+	signature, ticketID, err := bandersnatch.RingVrfSign(secret, ringsetBytes, ticket_vrf_input, auxData) // ??
+	if err != nil {
+		return signature, ticketID, fmt.Errorf("signTicket failed")
+	}
+	return signature, ticketID, nil
 }
 
 // 6.6. On-chain Tickets Validation
-func (s *State) validateTicket(ticketID common.Hash, targetEpochRandomness common.Hash, envelope *TicketEnvelope) error {
+func (s *State) validateTicket(ticketID common.Hash, targetEpochRandomness common.Hash, envelope *TicketEnvelope) (common.Hash, error) {
 
 	//step 0: derive ticketVRFInput
 	ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, envelope.Attempt)
 
 	//step 1: verify envelope's VRFSignature using ring verifier
-	var pubkeys [][]byte
-	_, result := bandersnatch.RingVRFVerify(pubkeys, ticketVRFInput, envelope.Extra, envelope.RingSignature[:])
-	if result != 1 {
-		return fmt.Errorf("Bad signature")
+	//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
+	ringsetBytes := s.getRingSet("Designed")
+	ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, envelope.RingSignature[:], ticketVRFInput, envelope.Extra)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("Bad signature")
 	}
 
-	return nil
+	return common.BytesToHash(ticket_id), nil
 }
 
 func compareTickets(a, b common.Hash) int {
@@ -272,10 +305,13 @@ func (s *State) STF(input Input) (Output, State, error) {
 		ticketIDs[a.Id] = a.Attempt
 	}
 
-	pubkeys := [][]byte{}
+	/*
+	pubkeys := []bandersnatch.PublicKey{}
 	for _, v := range s.NextValidators {
 		pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
 	}
+	*/
+	ringsetBytes := s.getRingSet("Designed")
 	// Process Extrinsic Tickets
 	fmt.Printf("Current Slot: %d => Input Slot: %d \n", s.Timeslot, input.Slot)
 	newTickets := []SafroleAccumulator{}
@@ -285,8 +321,8 @@ func (s *State) STF(input Input) (Output, State, error) {
 		}
 		if len(s.Entropy) == 4 {
 			vrfInputData := append(append([]byte("jam_ticket_seal"), s.Entropy[2].Bytes()...), byte(e.Attempt))
-			vrfOutput, result := bandersnatch.RingVRFVerify(pubkeys, vrfInputData, []byte{}, e.Signature[:])
-			if result == 0 {
+			vrfOutput, err := bandersnatch.RingVrfVerify(ringsetBytes, e.Signature[:], vrfInputData, []byte{})
+			if err != nil {
 				return *o, s2, fmt.Errorf(errTicketBadRingProof)
 			}
 			_, exists := ticketIDs[common.BytesToHash(vrfOutput)]
@@ -305,7 +341,7 @@ func (s *State) STF(input Input) (Output, State, error) {
 				return *o, s2, fmt.Errorf(errTicketBadOrder)
 			}
 			newTickets = append(newTickets, newa)
-			fmt.Printf("added Ticket ID %x (%d)\n", vrfOutput, result)
+			fmt.Printf("added Ticket ID %x\n", vrfOutput)
 		}
 	}
 	for _, newa := range newTickets {

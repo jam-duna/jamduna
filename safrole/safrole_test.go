@@ -100,7 +100,7 @@ func TestVerify(t *testing.T) {
 		"f16e5352840afb47e206b5c89f560f2611835855cf2e6ebad1acc9520a72591d",
 	}
 
-	var pubkeys [][]byte
+	var pubkeys []bandersnatch.PublicKey
 	for _, hexStr := range pubkeysHex {
 		bytes, err := hex.DecodeString(hexStr)
 		if err != nil {
@@ -109,6 +109,7 @@ func TestVerify(t *testing.T) {
 		pubkeys = append(pubkeys, bytes)
 	}
 
+	ringsetBytes := bandersnatch.InitRingSet(pubkeys)
 	decodedHex, _ := hex.DecodeString("bb30a42c1e62f0afda5f0a4e8a562f7a13a24cea00ee81917b86b89e801314aa")
 	vrfInputData := append(append([]byte("jam_ticket_seal"), decodedHex...), byte(1))
 
@@ -118,12 +119,13 @@ func TestVerify(t *testing.T) {
 		t.Fatalf("Error decoding signature: %v", err)
 	}
 
-	vrfOutput, result := bandersnatch.RingVRFVerify(pubkeys, vrfInputData, []byte{}, signatureBytes)
-	fmt.Printf("Verification result: %d\n", result)
-	fmt.Printf("VRF output hash: %s\n", hex.EncodeToString(vrfOutput))
+	//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
+	auxData := []byte{}
+	vrfOutput, err := bandersnatch.RingVrfVerify(ringsetBytes, signatureBytes, vrfInputData, auxData)
+	fmt.Printf("VRF output hash: %x\n", vrfOutput)
 
-	if result != 1 {
-		t.Fatalf("Test failed, expected result to be 1, got %d", result)
+	if err != nil {
+		t.Fatalf("Test failed, got err %v", err)
 	}
 
 }
