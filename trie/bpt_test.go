@@ -3,9 +3,11 @@ package trie
 import (
 	"encoding/hex"
 	"encoding/json"
-	"io/ioutil"
-	"testing"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"testing"
+	"time"
 )
 
 // TestVector represents a test case in the JSON file
@@ -13,7 +15,6 @@ type TestVector struct {
 	Input  map[string]string `json:"input"`
 	Output string            `json:"output"`
 }
-
 
 func hexToBytes(hexStr string) ([]byte, error) {
 	return hex.DecodeString(hexStr)
@@ -27,62 +28,22 @@ func hex2Bytes(hexStr string) []byte {
 	return bytes
 }
 
-
-// TestNewMerkleTree tests the creation of a new Merkle tree
-func TestNewMerkleTreeInit(t *testing.T) {
-	t.Skip()
-	input := [][2][]byte{
-		{hex2Bytes("f2a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), []byte("value_b")},
-		{hex2Bytes("f3a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), []byte("value_c")},
-	}
-
-	tree := NewMerkleTree(input)
-	rootHash := tree.GetRootHash()
-	extract_data := tree.extractData(tree.Root, 0)
-	fmt.Printf("rootHash=%x, extract_data=%x\n", rootHash, extract_data)
-	tree.printTree(tree.Root, 0)
-	if tree.Root == nil {
-		t.Error("Expected a valid tree with a root, got nil")
-	}
-}
-
-func TestGetValue(t *testing.T) {
-	t.Skip()
-	data := [][2][]byte{
-		{[]byte("a"), []byte("value_a")},
-		{hex2Bytes("f2a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), []byte("value_b")},
-		{hex2Bytes("f3a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), []byte("value_c")},
-	}
-
-    tree := NewMerkleTree(data)
-	extracted_data := tree.extractData(tree.Root, 0)
-	fmt.Printf("(after insert; Len=%v) extracted_data=%x\n", len(extracted_data), extracted_data)
-
-    value, err := tree.Get(hex2Bytes("f3a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"))
-
-    if err != nil {
-        t.Errorf("Unexpected error: %v", err)
-    }
-
-    if !compareBytes(value, []byte("value_c")) {
-        t.Errorf("Expected value 'value_c', got %s", value)
-    }
-
-    t.Logf("Retrieved value: %s\n", value)
-}
-
 // TestTrace tests the tracing functionality in the Merkle tree
 func TestTrace(t *testing.T) {
-	t.Skip()
+	// t.Skip()
 	data := [][2][]byte{
-		{[]byte("a"), []byte("value_a")},
-		{[]byte("b"), []byte("value_b")},
-		{[]byte("c"), []byte("value_c")},
-		{[]byte("d"), []byte("value_d")},
+		{hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"), hex2Bytes("bb11c256876fe10442213dd78714793394d2016134c28a64eb27376ddc147fc6044df72bdea44d9ec66a3ea1e6d523f7de71db1d05a980e001e9fa")},
+		{hex2Bytes("df08871e8a54fde4834d83851469e635713615ab1037128df138a6cd223f1242"), hex2Bytes("b8bded4e1c")},
+		{hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e7"), hex2Bytes("e46ddd41a5960807d528f5d9282568e622a023b94b72cb63f0353baff189257d")},
+		{hex2Bytes("3e7d409b9037b1fd870120de92ebb7285219ce4526c54701b888c5a13995f73c"), hex2Bytes("9bc5d0")},
 	}
 
-	tree := NewMerkleTree(data)
-	trace, err := tree.Trace([]byte("b"))
+	tree := NewMerkleTree(nil)
+
+	for _, item := range data {
+		tree.Insert(item[0], item[1])
+	}
+	trace, err := tree.Trace(hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"))
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -97,7 +58,7 @@ func TestTrace(t *testing.T) {
 
 func TestMerkleTree(t *testing.T) {
 	// Read the JSON file
-	t.Skip()
+	//t.Skip()
 	filePath := "../jamtestvectors/trie/trie.json"
 	data, err := ioutil.ReadFile(filePath)
 	if err != nil {
@@ -114,9 +75,6 @@ func TestMerkleTree(t *testing.T) {
 	// Run each test case
 	for i, testCase := range testVectors {
 		// Create the Merkle Tree input from the test case
-		if (i != 6) {
-			continue
-		}
 		fmt.Printf("testCase %d: %v\n", i, testCase)
 		var input [][2][]byte
 		for k, v := range testCase.Input {
@@ -128,11 +86,12 @@ func TestMerkleTree(t *testing.T) {
 		fmt.Printf("input=%x (len=%v)\n", input, len(input))
 
 		isSerialized := true
-
 		var rootHash []byte
+
+		// Create an empty Merkle Tree
+		tree := NewMerkleTree(nil)
+
 		if isSerialized {
-			// Create an empty Merkle Tree
-			tree := NewMerkleTree(nil)
 			fmt.Printf("initial rootHash:%x \n", tree.GetRootHash())
 			// Insert key-value pairs one by one
 			index := 0
@@ -140,9 +99,8 @@ func TestMerkleTree(t *testing.T) {
 				fmt.Printf("insert#%d, k=%v, v=%v\n", index, k, v)
 				key, _ := hex.DecodeString(k)
 				value, _ := hex.DecodeString(v)
-				//tree.Insert2(key, value)
 				tree.Insert(key, value)
-				tree.printTree(tree.Root, 0)
+				//tree.printTree(tree.Root, 0)
 				index++
 			}
 			rootHash = tree.GetRootHash()
@@ -150,10 +108,206 @@ func TestMerkleTree(t *testing.T) {
 			// Test 1: insert all at once
 			tree := NewMerkleTree(input)
 			rootHash = tree.GetRootHash()
-			extract_data := tree.extractData(tree.Root, 0)
-			fmt.Printf("[%v] extract_data=%x\n", i, extract_data)
-			tree.printTree(tree.Root, 0)
+			//tree.printTree(tree.Root, 0)
 		}
+		// Compare the computed root hash with the expected output
+		expectedHash, _ := hex.DecodeString(testCase.Output)
+		if !compareBytes(rootHash, expectedHash) {
+			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, hex.EncodeToString(rootHash), testCase.Output)
+		} else {
+			t.Logf("Test case %d: Vector OK, rootHash=%x", i, expectedHash)
+		}
+
+		// Test Valid Proof for each key from the test case
+		for k, v := range testCase.Input {
+			key, _ := hex.DecodeString(k)
+			value, _ := hex.DecodeString(v)
+			// Get the proof path for the key
+			path, err := tree.Trace(key)
+			fmt.Printf("Proof path for key %x: \n", key)
+			for i, p := range path {
+				fmt.Printf("  Node %d: %x\n", i, p)
+			}
+			if err != nil {
+				t.Errorf("Unable to generate Proof for key [%x].Err %v\n", key, err)
+			}
+
+			// Test Valid Proof
+			if tree.Verify(key, value, expectedHash, path) {
+				fmt.Printf("Proof for key [%x] is valid.\n", key)
+			} else {
+				t.Errorf("Proof for key [%x] is invalid.\n", key)
+			}
+
+			// Test Get
+			getValue, getErr := tree.Get(key)
+			if getErr != nil {
+				t.Errorf("Key: %x not found, error: %s\n", key, getErr)
+			} else {
+				fmt.Printf("Key: %x, Value: %x\n", key, getValue)
+			}
+		}
+	}
+}
+
+func TestBPTProof(t *testing.T) {
+	data := [][2][]byte{
+		{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
+		{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
+		{hex2Bytes("a3dc3bed1b0727caf428961bed11c9998ae2476d8a97fad203171b628363d9a2"), hex2Bytes("8a0dafa9d6ae6177")},
+		{hex2Bytes("15207c233b055f921701fc62b41a440d01dfa488016a97cc653a84afb5f94fd5"), hex2Bytes("157b6c821169dacabcf26690df")},
+		{hex2Bytes("b05ff8a05bb23c0d7b177d47ce466ee58fd55c6a0351a3040cf3cbf5225aab19"), hex2Bytes("6a208734106f38b73880684b")},
+	}
+
+	// Create an empty Merkle Tree
+	tree := NewMerkleTree(nil)
+	fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
+
+	// Insert key-value pairs one by one
+	for index, kv := range data {
+		key := kv[0]
+		value := kv[1]
+		fmt.Printf("insert#%d, key=%x, value=%s\n", index, key, value)
+		tree.Insert(key, value)
+	}
+	tree.printTree(tree.Root, 0)
+
+	wrongKey := hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522ff")
+	_, err := tree.Trace(wrongKey)
+	if err == nil {
+		t.Errorf("Proof should not exist non arbitrary key [%x].\n", wrongKey)
+	}
+
+	key := hex2Bytes("b05ff8a05bb23c0d7b177d47ce466ee58fd55c6a0351a3040cf3cbf5225aab19")
+	path, err := tree.Trace(key)
+	fmt.Printf("Proof path for key %x: \n", key)
+	for i, p := range path {
+		fmt.Printf("  Node %d: %x\n", i, p)
+	}
+	if err != nil {
+		t.Errorf("Unable to generate Proof for key [%x].Err %v\n", key, err)
+	}
+
+	// Test Valid Proof
+	value := hex2Bytes("6a208734106f38b73880684b")
+	if tree.Verify(key, value, tree.GetRootHash(), path) {
+		fmt.Printf("Proof for key [%x] is valid.\n", key)
+	} else {
+		t.Errorf("Proof for key [%x] is invalid.\n", key)
+	}
+
+	// Test Invalid Proof
+	invalidValue := []byte("invalid")
+	if tree.Verify(key, invalidValue, tree.GetRootHash(), path) {
+		t.Errorf("Proof for key [%x] with invalid value is valid.\n", invalidValue)
+	} else {
+		fmt.Printf("Proof for key [%x] with invalid value is invalid.\n", invalidValue)
+	}
+}
+
+func TestGet(t *testing.T) {
+	data := [][2][]byte{
+		{hex2Bytes("3dbc5f775f6156957139100c343bb5ae6589af7398db694ab6c60630a9ed0fcd"), hex2Bytes("bb11c256876fe10442213dd78714793394d2016134c28a64eb27376ddc147fc6044df72bdea44d9ec66a3ea1e6d523f7de71db1d05a980e001e9fa")},
+		{hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"), hex2Bytes("b8bded4e1c")},
+		{hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e7"), hex2Bytes("e46ddd41a5960807d528f5d9282568e622a023b94b72cb63f0353baff189257d")},
+	}
+
+	// Create an empty Merkle Tree
+	tree := NewMerkleTree(nil)
+	fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
+
+	// Insert key-value pairs one by one
+	for index, kv := range data {
+		key := kv[0]
+		value := kv[1]
+		fmt.Printf("insert#%d, key=%x, value=%x\n", index, key, value)
+		tree.Insert(key, value)
+	}
+
+	keys := [][]byte{
+		hex2Bytes("3dbc5f775f6156957139100c343bb5ae6589af7398db694ab6c60630a9ed0fcd"),
+		hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"),
+		hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e7"),
+	}
+	validKeys := [][]byte{
+		hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e6"), // The invalid Key
+	}
+	for _, key := range keys {
+		value, err := tree.Get(key)
+		if err != nil {
+			t.Errorf("Key: %x not found, error: %s\n", key, err)
+		} else {
+			fmt.Printf("Key: %x, Value: %x\n", key, value)
+		}
+	}
+
+	for _, key := range validKeys {
+		value, err := tree.Get(key)
+		if err != nil {
+			fmt.Printf("Key: %x not found, error: %s\n", key, err)
+		} else {
+			t.Errorf("Key: %x, Value: %x\n", key, value)
+		}
+	}
+}
+
+func TestModify(t *testing.T) {
+	filePath := "../jamtestvectors/trie/trie.json"
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read JSON file: %v", err)
+	}
+
+	// Parse the JSON file
+	var testVectors []TestVector
+	err = json.Unmarshal(data, &testVectors)
+	if err != nil {
+		t.Fatalf("Failed to parse JSON file: %v", err)
+	}
+
+	// Run each test case
+	for i, testCase := range testVectors {
+		// Create the Merkle Tree input from the test case
+		fmt.Printf("testCase %d: %v\n", i, testCase)
+		var input [][2][]byte
+		for k, v := range testCase.Input {
+			key, _ := hex.DecodeString(k)
+			value, _ := hex.DecodeString(v)
+			input = append(input, [2][]byte{key, value})
+		}
+		// fmt.Printf("input=%x (len=%v)\n", input, len(input))
+
+		var rootHash []byte
+
+		// Create an empty Merkle Tree
+		tree := NewMerkleTree(nil)
+
+		// fmt.Printf("initial rootHash:%x \n", tree.GetRootHash())
+		// Insert key-value pairs one by one
+		index := 0
+		rand.Seed(time.Now().UnixNano())
+		for k, v := range testCase.Input {
+			// fmt.Printf("insert#%d, k=%v, v=%v\n", index, k, v)
+			key, _ := hex.DecodeString(k)
+			value, _ := hex.DecodeString(v)
+			tree.Insert(key, value)
+			randomValue := make([]byte, len(v))
+			rand.Read(randomValue)
+			// fmt.Printf("insert#%d, key=%x, randomValue=%x\n", index, key, randomValue)
+			tree.Insert(key, randomValue)
+			index++
+		}
+
+		index = 0
+		for k, v := range testCase.Input {
+			// fmt.Printf("insert#%d, k=%v, v=%v\n", index, k, v)
+			key, _ := hex.DecodeString(k)
+			value, _ := hex.DecodeString(v)
+			tree.Insert(key, value)
+			//tree.printTree(tree.Root, 0)
+			index++
+		}
+		rootHash = tree.GetRootHash()
 
 		// Compare the computed root hash with the expected output
 		expectedHash, _ := hex.DecodeString(testCase.Output)
@@ -163,4 +317,56 @@ func TestMerkleTree(t *testing.T) {
 			t.Logf("Test case %d: Vector OK, rootHash=%x", i, expectedHash)
 		}
 	}
+
 }
+
+// TestDelete tests the deletion of key-value pairs from the Merkle tree
+// func TestDelete(t *testing.T) {
+// 	// Test data
+// 	data := [][2][]byte{
+// 		{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
+// 		{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
+// 		{hex2Bytes("a3dc3bed1b0727caf428961bed11c9998ae2476d8a97fad203171b628363d9a2"), hex2Bytes("8a0dafa9d6ae6177")},
+// 		{hex2Bytes("15207c233b055f921701fc62b41a440d01dfa488016a97cc653a84afb5f94fd5"), hex2Bytes("157b6c821169dacabcf26690df")},
+// 		{hex2Bytes("b05ff8a05bb23c0d7b177d47ce466ee58fd55c6a0351a3040cf3cbf5225aab19"), hex2Bytes("6a208734106f38b73880684b")},
+// 	}
+
+// 	// Create a new Merkle Tree
+// 	tree := NewMerkleTree(nil)
+
+// 	// Record root hashes after each insertion
+// 	var rootHashes [][]byte
+
+// 	for _, kv := range data {
+// 		tree.Insert(kv[0], kv[1])
+// 		rootHash := tree.GetRootHash()
+// 		rootHashes = append(rootHashes, rootHash)
+// 		fmt.Printf("Inserted key: %x, value: %x, RootHash: %x\n", kv[0], kv[1], rootHash)
+// 		fmt.Printf("--------------------------------------------\n")
+// 		tree.printTree(tree.Root, 0)
+// 		fmt.Printf("--------------------------------------------\n")
+// 	}
+
+// 	// Check root hashes after each deletion in reverse order
+// 	for i := len(data) - 1; i >= 0; i-- {
+// 		kv := data[i]
+// 		err := tree.Delete(kv[0])
+// 		if err != nil {
+// 			t.Fatalf("Failed to delete key: %x, error: %v", kv[0], err)
+// 		}
+// 		rootHash := tree.GetRootHash()
+// 		expectedRootHash := make([]byte, 32)
+// 		if i > 0 {
+// 			expectedRootHash = rootHashes[i-1]
+// 		}
+// 		fmt.Printf("Deleted key: %x, RootHash after deletion: %x\n", kv[0], rootHash)
+
+// 		fmt.Printf("--------------------------------------------\n")
+// 		tree.printTree(tree.Root, 0)
+// 		fmt.Printf("--------------------------------------------\n")
+
+// 		if !compareBytes(rootHash, expectedRootHash) {
+// 			t.Fatalf("RootHash mismatch after deleting key: %x. Got: %x, Expected: %x", kv[0], rootHash, expectedRootHash)
+// 		}
+// 	}
+// }

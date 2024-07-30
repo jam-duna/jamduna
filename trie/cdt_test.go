@@ -1,107 +1,197 @@
 package trie
 
 import (
-	"bytes"
+	"encoding/hex"
+	"fmt"
 	"testing"
 )
 
-// TestCDMerkleTree tests the Merkle Tree implementation
 func TestCDMerkleTree(t *testing.T) {
 	leaves := [][]byte{
-		computeHash([]byte("leaf1")),
-		computeHash([]byte("leaf2")),
-		computeHash([]byte("leaf3")),
+		[]byte("leaf1"),
+		[]byte("leaf2"),
+		[]byte("leaf3"),
+		[]byte("leaf4"),
+		[]byte("leaf5"),
 	}
 
-	tree, err := NewCDMerkleTree(leaves)
-	if err != nil {
-		t.Fatalf("failed to create Merkle Tree: %v", err)
+	// Create the Merkle tree
+	tree := NewCDMerkleTree(leaves)
+
+	// Verify the tree structure and hash values
+	if tree.root == nil {
+		t.Fatal("Expected root to be non-nil")
+	} else {
+		fmt.Printf("Root: %x\n", tree.root.Hash)
 	}
+	tree.PrintTree()
 
-	// Calculate expected root hash
-	H1 := computeHash([]byte("leaf1"))
-	H2 := computeHash([]byte("leaf2"))
-	H3 := computeHash([]byte("leaf3"))
-	H4 := EMPTYHASH
-
-	L1 := computeHash(append(H1, H2...))
-	L2 := computeHash(append(H3, H4...))
-	expectedRoot := computeHash(append(L1, L2...))
-
-	// Log hashes for verification
-	t.Logf("H1: %x\n", H1)
-	t.Logf("H2: %x\n", H2)
-	t.Logf("H3: %x\n", H3)
-	t.Logf("H4: %x\n", H4)
-	t.Logf("L1: %x\n", L1)
-	t.Logf("L2: %x\n", L2)
-	t.Logf("expectedRoot: %x\n", expectedRoot)
-	t.Logf("tree.Root(): %x\n", tree.Root())
-
-	if !bytes.Equal(tree.Root().Bytes(), expectedRoot) {
-		t.Fatalf("unexpected root hash: got %x, want %x", tree.Root(), expectedRoot)
-	}
-
-	justification, err := tree.Justify(2)
-	if err != nil {
-		t.Fatalf("failed to get justification: %v", err)
-	}
-	if len(justification) != tree.depth {
-		t.Fatalf("unexpected justification length: got %d, want %d", len(justification), tree.depth)
-	}
-
-	// Verify justification
-	leafHash := leaves[2]
-	recomputedRoot := verifyJustification(leafHash, 2, justification)
-	if !bytes.Equal(recomputedRoot, expectedRoot) {
-		t.Fatalf("justification verification failed: got %x, want %x", recomputedRoot, expectedRoot)
-	}else{
-		t.Logf("VERIFIED. leafHash=%x, justification=%x\n", leafHash, justification)
-	}
 }
 
-func TestCDMerkleTreeWithPadding(t *testing.T) {
+func TestJustify(t *testing.T) {
 	leaves := [][]byte{
-		computeHash([]byte("leaf1")),
-		computeHash([]byte("leaf2")),
-		computeHash([]byte("leaf3")),
+		[]byte("leaf1"),
+		[]byte("leaf2"),
+		[]byte("leaf3"),
 	}
 
-	tree, err := NewCDMerkleTree(leaves)
-	if err != nil {
-		t.Fatalf("failed to create Merkle Tree: %v", err)
-	}
+	// Create the Merkle tree
+	tree := NewCDMerkleTree(leaves)
 
-	powerOfTwoSize := 4 // Next power of two for 3 leaves
-	expectedLeavesCount := powerOfTwoSize
-	if len(tree.leaves) != expectedLeavesCount {
-		t.Fatalf("unexpected number of leaves: got %d, want %d", len(tree.leaves), expectedLeavesCount)
-	}
+	// Test justification for each leaf
+	for i, leaf := range leaves {
+		justification, err := tree.Justify(i)
+		if err != nil {
+			t.Fatalf("Error justifying leaf %d: %v", i, err)
+		}
 
-	root := tree.Root()
-	if root == BytesToHash(EMPTYHASH) {
-		t.Fatalf("unexpected nil root hash")
+		leafHash := computeLeaf(leaf)
+		computedRoot := verifyJustification(leafHash, i, justification)
+
+		if !compareBytes(computedRoot, tree.Root()) {
+			t.Errorf("Justification failed for leaf %d: expected root %s, got %s", i, hex.EncodeToString(tree.Root()), hex.EncodeToString(computedRoot))
+		} else {
+			t.Logf("Justification verified for leaf %d", i)
+		}
 	}
 }
 
 func TestJustifyX(t *testing.T) {
 	leaves := [][]byte{
-		computeHash([]byte("leaf1")),
-		computeHash([]byte("leaf2")),
-		computeHash([]byte("leaf3")),
-		computeHash([]byte("leaf4")),
+		[]byte("leaf1"),
+		[]byte("leaf2"),
+		[]byte("leaf3"),
 	}
 
-	tree, err := NewCDMerkleTree(leaves)
+	// Create the Merkle tree
+	tree := NewCDMerkleTree(leaves)
+	tree.PrintTree()
+
+	// Define the index and size x
+	index := 1
+	x := 2
+
+	// Get the justification
+	justification, err := tree.JustifyX(index, x)
 	if err != nil {
-		t.Fatalf("failed to create Merkle Tree: %v", err)
+		t.Fatalf("JustifyX returned an error: %v", err)
 	}
 
-	justification, err := tree.JustifyX(2, 2)
-	if err != nil {
-		t.Fatalf("failed to get justification: %v", err)
+	// Verify the length of the justification
+	if len(justification) != x {
+		t.Fatalf("JustifyX returned %d elements, expected %d", len(justification), x)
 	}
-	if len(justification) != 2 {
-		t.Fatalf("unexpected justification length: got %d, want %d", len(justification), 2)
+
+	// Expected justification values (this may need to be adjusted based on your actual tree structure)
+	expectedJustification := [][]byte{
+		tree.leaves[0].Hash,
+		computeNode(append(tree.leaves[2].Hash, make([]byte, 32)...)), // Assuming the padding is a zero hash
+	}
+
+	// Verify the justification values
+	for i, expectedHash := range expectedJustification {
+		if !compareBytes(justification[i], expectedHash) {
+			t.Errorf("JustifyX element %d hash mismatch: expected %x, got %x", i, expectedHash, justification[i])
+		} else {
+			fmt.Printf("JustifyX element %d hash verified: %x\n", i, justification[i])
+		}
+	}
+}
+
+func TestVerifyJustification(t *testing.T) {
+	leaves := [][]byte{
+		[]byte("leaf1"),
+		[]byte("leaf2"),
+		[]byte("leaf3"),
+	}
+
+	// Build Merkle Tree
+	tree := NewCDMerkleTree(leaves)
+	tree.PrintTree()
+
+	// Choose a leaf to verify
+	index := 1 // Choose leaf2
+	leafHash := computeLeaf(leaves[index])
+
+	// Get justification
+	justification, err := tree.Justify(index)
+	if err != nil {
+		t.Fatalf("Failed to get justification: %v", err)
+	}
+
+	// Verify justification
+	computedRoot := verifyJustification(leafHash, index, justification)
+	expectedRoot := tree.Root()
+
+	if !compareBytes(computedRoot, expectedRoot) {
+		t.Errorf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
+	} else {
+		fmt.Printf("Root hash verified: %x\n", computedRoot)
+	}
+}
+
+func TestVerifyJustifyX(t *testing.T) {
+	// Initialize the tree with some values
+	leaves := [][]byte{
+		[]byte("leaf1"),
+		[]byte("leaf2"),
+		[]byte("leaf3"),
+		[]byte("leaf4"),
+	}
+
+	// Build Merkle Tree
+	tree := NewCDMerkleTree(leaves)
+	tree.PrintTree()
+
+	// Index of the leaf to justify
+	index := 2 // leaf3
+	leafHash := computeLeaf([]byte("leaf3"))
+
+	// Get justification for the leaf
+	x := 3 // The depth of the tree or less
+	justification, err := tree.JustifyX(index, x)
+	if err != nil {
+		t.Fatalf("JustifyX failed: %v", err)
+	}
+
+	// Verify the justification
+	computedRoot := verifyJustifyX(leafHash, index, justification, x)
+	expectedRoot := tree.Root()
+
+	if !compareBytes(computedRoot, expectedRoot) {
+		t.Errorf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
+	} else {
+		fmt.Printf("Root hash verified: %x\n", computedRoot)
+	}
+}
+
+func TestCDTGet(t *testing.T) {
+	leaves := [][]byte{
+		[]byte("leaf1"),
+		[]byte("leaf2"),
+		[]byte("leaf3"),
+		[]byte("leaf4"),
+	}
+	// Build Merkle Tree
+	tree := NewCDMerkleTree(leaves)
+	tree.PrintTree()
+	for i := 0; i <= len(leaves); i++ {
+		{
+			if i < len(leaves) {
+				leaf, err := tree.Get(i)
+				if err == nil {
+					fmt.Printf("Get %d: %s\n", i, string(leaf))
+				} else {
+					t.Errorf("Get %d should be Error: %v\n", i, err)
+				}
+			} else {
+				_, err := tree.Get(i)
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else {
+					t.Errorf("Get %d should be Error: %v\n", i, err)
+				}
+			}
+		}
 	}
 }

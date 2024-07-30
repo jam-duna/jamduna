@@ -3,13 +3,14 @@ package trie
 import (
 	//"errors"
 	//"math"
-    "hash"
+	"hash"
+
+	"github.com/ethereum/go-ethereum/common"
 	"golang.org/x/crypto/blake2b"
-    "github.com/ethereum/go-ethereum/common"
 )
 
 func BytesToHash(data []byte) common.Hash {
-    return common.BytesToHash(data[:])
+	return common.BytesToHash(data[:])
 }
 
 func createHash() hash.Hash {
@@ -18,6 +19,7 @@ func createHash() hash.Hash {
 }
 
 var EMPTYHASH = make([]byte, 32)
+
 // compareHashes compares two byte slices for equality
 func compareBytes(a, b []byte) bool {
 	if len(a) != len(b) {
@@ -34,6 +36,22 @@ func compareBytes(a, b []byte) bool {
 // computeHash hashes the data using Blake2b-256
 func computeHash(data []byte) []byte {
 	h, _ := blake2b.New256(nil)
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+// computeNode hashes the data with $node on WBT, CDT using Blake2b-256
+func computeNode(data []byte) []byte {
+	h, _ := blake2b.New256(nil)
+	h.Write([]byte("node"))
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+// computeLeaf hashes the data with $leaf on CDT using Blake2b-256
+func computeLeaf(data []byte) []byte {
+	h, _ := blake2b.New256(nil)
+	h.Write([]byte("leaf"))
 	h.Write(data)
 	return h.Sum(nil)
 }

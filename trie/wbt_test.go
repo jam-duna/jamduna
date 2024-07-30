@@ -1,49 +1,145 @@
 package trie
 
 import (
+	"encoding/hex"
+	"fmt"
 	"testing"
 )
 
-func TestWellBalancedTree(t *testing.T) {
-	tree := NewWellBalancedTree()
-
-	data1 := []byte("data1")
-	data2 := []byte("data2")
-	data3 := []byte("data3")
-	data4 := []byte("data4")
-
-	tree.Insert(data1)
-	tree.Insert(data2)
-	tree.Insert(data3)
-	tree.Insert(data4)
-
-	rootHash := tree.RootHash()
-	t.Logf("rootHash=%x\n", rootHash)
-	if len(rootHash) != 32 {
-		t.Fatalf("unexpected root hash length: got %d, want 32", len(rootHash))
+// TestWellBalancedTree tests the MerkleB method of the WellBalancedTree
+func TestWBMerkleTree(t *testing.T) {
+	values := [][]byte{
+		[]byte("a"),
+		[]byte("b"),
+		[]byte("c"),
+		[]byte("d"),
+		[]byte("e"),
+		[]byte("f"),
 	}
-
-	hash3 := computeHash(data3)
-
-	// Test Trace
-	tracePath, err := tree.Trace(hash3)
-	if err != nil {
-		t.Fatalf("Trace error: %v", err)
+	tree := NewWellBalancedTree(values)
+	// Print the tree structure
+	tree.PrintTree()
+	if tree.Root() == nil {
+		t.Errorf("Root is nil")
 	}
-	t.Logf("Trace path: %x\n", tracePath)
+}
 
-	// Test VerifyProof
-	if !tree.VerifyProof(hash3, data3, tracePath) {
-		t.Errorf("Proof verification failed for key '%x'", hash3)
+func TestWBTProof(t *testing.T) {
+	values := [][]byte{
+		[]byte("a"),
+		[]byte("b"),
+		[]byte("c"),
+		[]byte("d"),
+		[]byte("e"),
+		[]byte("f"),
+		[]byte("g"),
+		[]byte("h"),
+		[]byte("i"),
+		[]byte("j"),
+		[]byte("k"),
+	}
+	tree := NewWellBalancedTree(values)
+
+	fmt.Printf("Root: %s\n", hex.EncodeToString(tree.Root()))
+	fmt.Printf("Total leaves: %d\n", len(tree.leaves))
+
+	// Print the tree structure
+	tree.PrintTree()
+
+	value := []byte("e")
+	path, found := tree.Trace(value)
+	if found {
+		fmt.Printf("Proof path for value '%s':\n", value)
+		for _, p := range path {
+			fmt.Println(hex.EncodeToString(p[0]))
+		}
+		if Verify(tree.Root(), value, path) {
+			fmt.Printf("Verification: %v\n", true)
+		} else {
+			t.Errorf("Proof for key [%s] is invalid.\n", value)
+		}
 	} else {
-		t.Logf("Proof verification succeeded for key '%x'", hash3)
+		fmt.Printf("Value '%s' not found in the tree.\n", value)
+	}
+}
+
+func TestWBTGet(t *testing.T) {
+	values := [][]byte{
+		[]byte("a"),
+		[]byte("b"),
+		[]byte("c"),
+		[]byte("d"),
+		[]byte("e"),
+		[]byte("f"),
+		[]byte("g"),
+		[]byte("h"),
+		[]byte("i"),
+		[]byte("j"),
+		[]byte("k"),
+	}
+	tree := NewWellBalancedTree(values)
+
+	fmt.Printf("Root: %s\n", hex.EncodeToString(tree.Root()))
+	fmt.Printf("Total leaves: %d\n", len(tree.leaves))
+
+	// Print the tree structure
+	tree.PrintTree()
+
+	// Test Get
+	for i := 0; i <= len(values); i++ {
+		{
+			if i < len(values) {
+				leaf, err := tree.Get(i)
+				if err == nil {
+					fmt.Printf("Get [%d]: %s\n", i, string(leaf))
+				} else {
+					t.Errorf("Get [%d] should be Error: %v\n", i, err)
+				}
+			} else {
+				_, err := tree.Get(i)
+				if err != nil {
+					fmt.Printf("Get [%d]: %v\n", i, err)
+				} else {
+					t.Errorf("Get [%d] should be Error: %v\n", i, err)
+				}
+			}
+		}
+	}
+}
+
+func TestTraceByIndex(t *testing.T) {
+	values := [][]byte{
+		[]byte("leaf1"),
+		[]byte("leaf2"),
+		[]byte("leaf3"),
+		[]byte("leaf4"),
 	}
 
-	// Test failed verification
-	hash1 := computeHash(data1)
-	if tree.VerifyProof(hash1, data3, tracePath) {
-		t.Errorf("Proof verification should have failed for mismatched data")
-	} else {
-		t.Logf("Proof verification correctly failed for mismatched data")
+	// Build a well-balanced tree
+	wbt := NewWellBalancedTree(values)
+	wbt.PrintTree()
+
+	// Test tracing by index
+	for i := 0; i < len(values); i++ {
+		leafHash := computeNode(values[i])
+		path, found, err := wbt.TraceByIndex(i)
+
+		if err != nil {
+			t.Fatalf("Error tracing index %d: %v", i, err)
+		}
+		if !found {
+			t.Fatalf("Node not found for index %d", i)
+		}
+
+		if VerifyByIndex(wbt.Root(), leafHash, path) {
+			fmt.Printf("Verification succeeded for index %d\n", i)
+		} else {
+			t.Fatalf("Verification failed for index %d", i)
+		}
+
+		fmt.Printf("Proof path for index %d:\n", i)
+		for _, p := range path {
+			fmt.Printf("  Sibling Hash: %s, Direction: %s\n", hex.EncodeToString(p[0]), p[1])
+		}
 	}
 }
