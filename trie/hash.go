@@ -5,7 +5,7 @@ import (
 	//"math"
 	"hash"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/colorfulnotion/jam/common"
 	"golang.org/x/crypto/blake2b"
 )
 

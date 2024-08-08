@@ -12,6 +12,7 @@ import (
 )
 
 const test_leveldb_path = ""
+
 // TestVector represents a test case in the JSON file
 type TestVector struct {
 	Input  map[string]string `json:"input"`
@@ -40,7 +41,8 @@ func TestTrace(t *testing.T) {
 		{hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e7"), hex2Bytes("e46ddd41a5960807d528f5d9282568e622a023b94b72cb63f0353baff189257d")},
 		{hex2Bytes("3e7d409b9037b1fd870120de92ebb7285219ce4526c54701b888c5a13995f73c"), hex2Bytes("9bc5d0")},
 	}
-	tree := NewMerkleTree(nil)
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
 
 	for _, item := range data {
 		tree.Insert(item[0], item[1])
@@ -93,7 +95,8 @@ func TestMerkleTree(t *testing.T) {
 		// os.Mkdir(dbPath, 0755)
 
 		// Create an empty Merkle Tree
-		tree := NewMerkleTree(nil)
+		test_db, _ := initLevelDB()
+		tree := NewMerkleTree(nil, test_db)
 
 		if isSerialized {
 			// Insert key-value pairs one by one
@@ -102,10 +105,6 @@ func TestMerkleTree(t *testing.T) {
 				value, _ := hex.DecodeString(v)
 				tree.Insert(key, value)
 			}
-			rootHash = tree.GetRootHash()
-		} else {
-			// Test 1: insert all at once
-			tree = NewMerkleTree(input)
 			rootHash = tree.GetRootHash()
 		}
 
@@ -161,7 +160,8 @@ func TestBPTProof(t *testing.T) {
 	exceptedRootHash := hex2Bytes("b9c99f66e5784879a178795b63ae178f8a49ee113652a122cd4b3b2a321418c1")
 	// Create an empty Merkle Tree
 	//level_db_path := "../leveldb/BPT"
-	tree := NewMerkleTree(nil, test_leveldb_path)
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
 	fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
 
 	// Insert key-value pairs one by one
@@ -217,7 +217,8 @@ func TestGet(t *testing.T) {
 	}
 
 	// Create an empty Merkle Tree
-	tree := NewMerkleTree(nil)
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
 	fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
 
 	// Insert key-value pairs one by one
@@ -285,7 +286,8 @@ func TestModify(t *testing.T) {
 		var rootHash []byte
 
 		// Create an empty Merkle Tree
-		tree := NewMerkleTree(nil)
+		test_db, _ := initLevelDB()
+		tree := NewMerkleTree(nil, test_db)
 
 		// fmt.Printf("initial rootHash:%x \n", tree.GetRootHash())
 		// Insert key-value pairs one by one
@@ -337,7 +339,8 @@ func TestDelete(t *testing.T) {
 	}
 
 	// Create a new Merkle Tree
-	tree := NewMerkleTree(nil)
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
 
 	// Record root hashes after each insertion
 	var rootHashes [][]byte
@@ -387,7 +390,8 @@ func TestStateKey(t *testing.T) {
 
 	//level_db_path := "../leveldb/BPT"
 	// Create a new Merkle Tree
-	tree := NewMerkleTree(nil, test_leveldb_path)
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
 	// Insert key-value pairs one by one
 	for _, kv := range data {
 		value := kv[1]
@@ -424,7 +428,8 @@ func TestInitial(t *testing.T) {
 	}
 
 	// Build the initial tree and insert the data
-	tree := NewMerkleTree(nil)
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
 	for _, item := range data {
 		tree.Insert(item[0], item[1])
 	}

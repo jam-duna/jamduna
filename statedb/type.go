@@ -1,13 +1,16 @@
-package node
+package statedb
 
 import (
-	//"crypto/ed25519"
 	"github.com/colorfulnotion/jam/common"
 )
 
 type Ed25519Signature []byte
 type PublicKey []byte
 type BMTProof []common.Hash
+
+const (
+	JamCommonEra = 1704100800 //1200 UTC on January 1, 2024
+)
 
 const (
 	validatorCount = 1023
@@ -20,11 +23,13 @@ const (
 
 /*
 Section 6.7 - Equation 73.  Ticket Extrinsic is a *sequence* of proofs of valid tickets, each of which is a tuple of an entry index (a natural number less than N) and a proof of ticket validity.
-*/
+
+As defined in safrole
 type Ticket struct {
 	Attempt   int                             `json:"attempt"`
 	Signature [ExtrinsicSignatureInBytes]byte `json:"signature"`
 }
+*/
 
 /*
 11.1.1. Work Report. See Equation 117. A work-report, of the set W, is defined as a tuple of:
@@ -170,55 +175,10 @@ type Fault struct {
 	Signature Ed25519Signature `json:"signature"`
 }
 
-/*
-type Block struct {
-	Header    Header    `json:"h"`
-	Extrinsic Extrinsic `json:"e"`
-}
-
-type JudgementMarker struct {
-}
-
 type SafroleAccumulator struct {
 	Id      common.Hash `json:"id"`
 	Attempt int         `json:"attempt"`
 }
-
-// EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch
-type EpochMark struct {
-	// Randomness accumulator snapshot
-	Entropy common.Hash `json:"entropy"`
-	// List of authorities scheduled for next epoch -- could be []PublicKey
-	Validators []common.Hash `json:"validators"`
-}
-
-type Header struct {
-	// H_p
-	ParentHash common.Hash `json:"parent_hash"`
-	// H_r
-	PriorStateRoot common.Hash `json:"prior_state_root"`
-	// H_x
-	ExtrinsicHash common.Hash `json:"extrinsic_hash"`
-	// H_t
-	TimeSlot uint32 `json:"timeslot"`
-	// H_e
-	EpochMark *EpochMark `json:"epoch_mark"`
-	// H_w
-	WinningTickets []*SafroleAccumulator `json:"winning_tickets"`
-	// H_j
-	JudgementsMarkers *JudgementMarker `json:"judgements_markets"`
-	// H_k
-	BlockAuthorKey uint32 `json:"block_author_key"`
-	// H_v
-	VRFSignature []byte `json:"vrf_signature"`
-	// H_s
-	BlockSeal []byte `json:"block_seal"`
-}
-
-type Extrinsic struct {
-}
-
-*/
 
 /*
 Section 12.1. Preimage Integration. Prior to accumulation, we must first integrate all preimages provided in the lookup extrinsic. The lookup extrinsic is a sequence of pairs of service indices and data. These pairs must be ordered and without duplicates (equation 154 requires this). The data must have been solicited by a service but not yet be provided.  See equations 153-155.
@@ -402,14 +362,4 @@ type ServiceAccumulation struct {
 type GasAttributable struct {
 	ServiceIndex int     `json:"service_index"`
 	Gas          float64 `json:"gas"`
-}
-
-type Ping struct {
-	Sender  string `json:"sender"`
-	Message []byte `json:"message"`
-}
-
-type Pong struct {
-	Sender   string `json:"sender"`
-	Response []byte `json:"response"`
 }

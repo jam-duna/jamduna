@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/trie"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 /*

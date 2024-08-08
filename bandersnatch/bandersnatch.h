@@ -63,6 +63,13 @@ void ring_vrf_sign(
     */
 );
 
+void get_ring_commitment(
+    const unsigned char* ring_set_bytes,
+    size_t ring_set_len,
+    unsigned char* commitment,
+    size_t commitment_len
+);
+
 int ring_vrf_verify(
     const unsigned char* pubkeys_bytes,
     size_t pubkeys_length,
@@ -89,6 +96,8 @@ int get_ring_vrf_output(
     unsigned char* vrf_output,
     size_t vrf_output_len
 );
+
+
 
 #ifdef __cplusplus
 }

@@ -158,6 +158,7 @@ impl Verifier {
         let pts: Vec<_> = ring.iter().map(|pk| pk.0).collect();
         let verifier_key = ring_context().verifier_key(&pts);
         let commitment = verifier_key.commitment();
+
         Self { ring, commitment }
     }
 
@@ -315,7 +316,7 @@ pub extern "C" fn get_public_key(
 
     // Convert the public key bytes to a hex string
     let pk_hex = hex::encode(&pk_bytes);
-    println!("Public Key(hex): {}", pk_hex);
+    //println!("Public Key(hex): {}", pk_hex);
 
     // Ensure the provided buffer is large enough to hold the public key bytes
     if pub_key_len < pk_bytes.len() {
@@ -368,7 +369,7 @@ pub extern "C" fn get_private_key(
 
     // Convert the priv key bytes to a hex string
     let priv_hex = hex::encode(&secret_bytes_vec);
-    println!("Priv Key(hex): {}", priv_hex);
+    //println!("Priv Key(hex): {}", priv_hex);
 
     // Ensure the provided buffer is large enough to hold the secret bytes
     if secret_len < secret_bytes_vec.len() {
@@ -590,7 +591,7 @@ pub extern "C" fn ring_vrf_sign(
             return;
         }
     };
-    println!("derived_public_key {:?} idx:{:?}", derived_public_key, derived_prover_idx);
+    //println!("derived_public_key {:?} idx:{:?}", derived_public_key, derived_prover_idx);
 
     // Create the Prover instance
     let prover = Prover {
@@ -735,6 +736,57 @@ fn ietf_vrf_verify_iml(
 
     println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
     Ok(vrf_output_hash)
+}
+
+#[no_mangle]
+pub extern "C" fn get_ring_commitment(
+    ring_set_bytes: *const c_uchar,
+    ring_set_len: usize,
+    commitment: *mut c_uchar,
+    commitment_len: usize,
+) {
+    use std::slice;
+    use std::ptr;
+    use ark_serialize::CanonicalDeserialize;
+
+    // Deserialize the ring set from the provided bytes
+    let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
+    let mut ring_set: Vec<Public> = Vec::new();
+    for i in 0..(ring_set_len / 32) {
+        let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
+        let public_key = match Public::deserialize_compressed(pubkey_bytes) {
+            Ok(public_key) => public_key,
+            Err(e) => {
+                eprintln!("Failed to deserialize public key: {}", e);
+                return;
+            }
+        };
+        ring_set.push(public_key);
+    }
+
+    // Create the Verifier instance
+    let verifier = Verifier::new(ring_set);
+
+    // Get the commitment from the verifier
+    let mut commitment_bytes = Vec::new();
+    match verifier.commitment.serialize_compressed(&mut commitment_bytes){
+        Ok(_) => (),
+        Err(e) => {
+            eprintln!("Failed to serialize commitment: {}", e);
+            return;
+        }
+    }
+    //println!("Verifier commitment: {:?}", hex::encode(&commitment_bytes));
+    // Ensure the provided buffer is large enough to hold the commitment
+    if commitment_len < commitment_bytes.len() {
+        eprintln!("Provided buffer is too small for the commitment");
+        return;
+    }
+
+    // Copy the commitment bytes into the provided buffer
+    unsafe {
+        ptr::copy_nonoverlapping(commitment_bytes.as_ptr(), commitment, commitment_len);
+    }
 }
 
 #[no_mangle]
@@ -1057,7 +1109,6 @@ mod tests {
             private_keys[prover_idx].len(),
             ring_set_bytes.as_ptr(),
             ring_set_bytes.len(),
-            prover_idx,
             vrf_input_data.as_ptr(),
             vrf_input_data.len(),
             aux_data.as_ptr(),
@@ -1143,5 +1194,78 @@ mod tests {
         }
 
         assert_eq!(pub_key_bytes, regenerated_pub_key_bytes, "Public keys do not match");
+    }
+
+    #[test]
+    fn test_ring_commitment() {
+        // Step 1: Generate RING_SIZE private keys
+        let mut seeds: Vec<[u8; SEED_SIZE]> = Vec::new();
+        for _i in 0..RING_SIZE {
+            let mut seed = [0u8; SEED_SIZE];
+            for (i, byte) in seed.iter_mut().enumerate() {
+                *byte = i as u8;
+            }
+            seeds.push(seed);
+        }
+
+        let mut public_keys: Vec<Public> = Vec::new();
+        let mut private_keys: Vec<[u8; SECRET_SIZE]> = Vec::new();
+        for seed in &seeds {
+            // Allocate buffers for public key and secret
+            let mut pub_key_bytes = vec![0u8; 32];
+            let mut secret_bytes = vec![0u8; SECRET_SIZE];
+
+            // Generate public key from the seed
+            get_public_key(
+                seed.as_ptr(),
+                seed.len(),
+                pub_key_bytes.as_mut_ptr(),
+                pub_key_bytes.len(),
+            );
+
+            // Generate private key from the seed
+            get_private_key(
+                seed.as_ptr(),
+                seed.len(),
+                secret_bytes.as_mut_ptr(),
+                secret_bytes.len(),
+            );
+
+            // Deserialize public key
+            let public_key = match Public::deserialize_compressed(&pub_key_bytes[..]) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    eprintln!("Failed to deserialize public key: {}", e);
+                    return;
+                }
+            };
+            public_keys.push(public_key);
+
+            let mut private_key_array = [0u8; SECRET_SIZE];
+            private_key_array.copy_from_slice(&secret_bytes);
+            private_keys.push(private_key_array);
+        }
+
+        // Serialize the public keys
+        let mut ring_set_bytes: Vec<u8> = Vec::new();
+        for pk in &public_keys {
+            let mut pk_bytes = Vec::new();
+            if let Err(e) = pk.serialize_compressed(&mut pk_bytes) {
+                eprintln!("Failed to serialize public key: {}", e);
+                return;
+            }
+            ring_set_bytes.extend(pk_bytes);
+        }
+
+        // Get the commitment from the verifier
+        let mut commitment = vec![0u8; 144];
+        get_ring_commitment(
+            ring_set_bytes.as_ptr(),
+            ring_set_bytes.len(),
+            commitment.as_mut_ptr(),
+            commitment.len(),
+        );
+
+        println!("Commitment: {:?}", hex::encode(&commitment));
     }
 }

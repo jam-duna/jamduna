@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -68,22 +70,23 @@ Hash(hash of value that's >= 32bytes) => value
 type MerkleTree struct {
 	Root *Node
 	// levelDBMap map[string][]byte // <>
-	db *leveldb.DB
+	db *storage.StateDBStorage
 }
 
 // NewMerkleTree creates a new Merkle Tree from the provided data
-func initLevelDB(optionalPath ...string) (*leveldb.DB, error) {
+func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 	path := "/tmp/log/leveldb/bpt"
 	if len(optionalPath) > 0 {
 		path = optionalPath[0]
 	}
-	db, err := leveldb.OpenFile(path, nil)
+	stateDBStorage, err := storage.NewStateDBStorage(path)
+	//db, err := leveldb.OpenFile(path, nil)
 	fmt.Printf("Initailized levelDB at: %s\n", path)
-	return db, err
+	return stateDBStorage, err
 }
 
 // NewMerkleTree creates a new Merkle Tree from the provided data
-func NewMerkleTree(data [][2][]byte, optionalPath ...string) *MerkleTree {
+func NewMerkleTreeWithPath(data [][2][]byte, optionalPath ...string) *MerkleTree {
 	path := "/tmp/log/leveldb/bpt"
 	if len(optionalPath) > 0 {
 		path = optionalPath[0]
@@ -92,6 +95,14 @@ func NewMerkleTree(data [][2][]byte, optionalPath ...string) *MerkleTree {
 	if err != nil {
 		fmt.Printf("levelDB ERR: %v", err)
 	}
+	if data == nil || len(data) == 0 {
+		return &MerkleTree{Root: nil, db: db}
+	}
+	root := buildMerkleTree(data, 0)
+	return &MerkleTree{Root: root, db: db}
+}
+
+func NewMerkleTree(data [][2][]byte, db *storage.StateDBStorage) *MerkleTree {
 	if data == nil || len(data) == 0 {
 		return &MerkleTree{Root: nil, db: db}
 	}
@@ -204,6 +215,13 @@ func bit(k []byte, i int) bool {
 	return (b & mask) != 0        // return set (1) or not (0)
 }
 
+func (t *MerkleTree) GetRoot() common.Hash {
+	if t.Root == nil {
+		return common.BytesToHash(make([]byte, 32))
+	}
+	return common.BytesToHash(t.Root.Hash)
+}
+
 // GetRootHash returns the root hash of the Merkle Tree
 func (t *MerkleTree) GetRootHash() []byte {
 	if t.Root == nil {
@@ -212,7 +230,7 @@ func (t *MerkleTree) GetRootHash() []byte {
 	return t.Root.Hash
 }
 
-func InitMerkleTreeFromHash(root []byte, db *leveldb.DB) (*MerkleTree, error) {
+func InitMerkleTreeFromHash(root []byte, db *storage.StateDBStorage) (*MerkleTree, error) {
 	tree := &MerkleTree{Root: nil, db: db}
 	rootNode, err := tree.levelDBGetBranch(root)
 	if err != nil {
@@ -304,8 +322,8 @@ func (t *MerkleTree) levelDBSet(k, v []byte) error {
 		return fmt.Errorf("database is not initialized")
 	}
 	key := k
-	err := t.db.Put(key, v, nil)
-	//err := t.db.Put(k, v, nil)
+	//err := t.db.Put(key, v, nil)
+	err := t.db.WriteKV(common.BytesToHash(key), v)
 	if err != nil {
 		return fmt.Errorf("failed to set key %s: %v", key, err)
 	}
@@ -317,8 +335,8 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, error) {
 	if t.db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
-	value, err := t.db.Get(k, nil)
 	//value, err := t.db.Get(k, nil)
+	value, err := t.db.ReadKV(common.BytesToHash(k))
 	if err != nil {
 		if err == leveldb.ErrNotFound {
 			return nil, fmt.Errorf("key not found: %s", k)
@@ -329,7 +347,8 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, error) {
 }
 
 func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
-	value, _ := t.db.Get([]byte(nodeHash), nil)
+	//value, _ := t.db.Get([]byte(nodeHash), nil)
+	value, _ := t.db.ReadKV(common.BytesToHash(nodeHash))
 	zeroHash := make([]byte, 32)
 	if compareBytes(nodeHash, zeroHash) || value == nil {
 		return &Node{
@@ -338,7 +357,8 @@ func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
 	}
 	leafKey, _ := t.levelDBGetLeaf(nodeHash)
 	if leafKey != nil {
-		leafValue, _ := t.db.Get([]byte(append(nodeHash, leafKey...)), nil)
+		leafValue, _ := t.db.ReadKV(common.BytesToHash([]byte(append(nodeHash, leafKey...))))
+		//leafValue, _ := t.db.Get([]byte(append(nodeHash, leafKey...)), nil)
 		return &Node{
 			Hash: nodeHash,
 			Key:  leafValue,
@@ -798,11 +818,11 @@ func (t *MerkleTree) Delete(key []byte) error {
 
 	// Remove the node from levelDB
 	nodeHash := computeHash(leaf(key, value))
-	t.db.Delete(nodeHash, nil)
-	t.Close()
+	t.db.DeleteK(common.BytesToHash(nodeHash))
+	//t.Close()
 
 	// Rebuild the tree without the deleted node
-	tree := NewMerkleTree(nil)
+	tree := NewMerkleTree(nil, t.db)
 	for _, kv := range remainingNodes {
 		tree.Insert(kv[0], kv[1])
 	}

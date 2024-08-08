@@ -1,8 +1,8 @@
 package node
 
 import (
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type HostEnv struct {

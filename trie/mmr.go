@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/colorfulnotion/jam/common"
 )
 
 // Node represents a node in the Merkle Tree

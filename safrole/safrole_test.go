@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/colorfulnotion/jam/common"
+
 	"golang.org/x/crypto/blake2b"
 	"io/ioutil"
 	"path/filepath"
@@ -40,31 +41,11 @@ func safrole_stf(sinput SInput, spreState SState) (SOutput, SState, error) {
 	return output.serialize(), postState.serialize(), err
 }
 
-// Function to copy a State struct
-func copyState(original State) State {
-	// Convert to JSON
-	originalJSON, err := json.Marshal(original)
-	if err != nil {
-		panic(err) // Handle error as needed
-	}
-
-	// Create a new State struct
-	var copied State
-
-	// Convert from JSON to struct
-	err = json.Unmarshal(originalJSON, &copied)
-	if err != nil {
-		panic(err) // Handle error as needed
-	}
-
-	return copied
-}
-
 func TestBlake2b(t *testing.T) {
 	// blake2AsHex("data goes here") -> "0xce73267ed8316b4350672f32ba49af86a7ae7af1267beb868a27f3fda03c044a"
 	expectedHash := common.HexToHash("0xce73267ed8316b4350672f32ba49af86a7ae7af1267beb868a27f3fda03c044a")
 	data := "data goes here"
-	actualHash := blake2AsHex([]byte(data))
+	actualHash := common.Blake2AsHex([]byte(data))
 	if actualHash != expectedHash {
 		t.Errorf("Hash mismatch: expected %s, got %s", expectedHash.Hex(), actualHash.Hex())
 	} else {

@@ -21,7 +21,7 @@ TicketsBodies ::= SEQUENCE (SIZE(epoch-length)) OF TicketBody
 -- Define enumerations
 TicketsOrKeys ::= CHOICE {
     tickets TicketsBodies,
-    keys EpochKeys 
+    keys EpochKeys
 }
 
 -- Define structures

@@ -5,7 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum/go-ethereum/common"
+	//github.com/ethereum/go-ethereum/common"
+	"github.com/colorfulnotion/jam/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
@@ -32,6 +33,11 @@ type SSafroleAccumulator struct {
 	Attempt int    `json:"attempt"`
 }
 
+type STicketsOrKeys struct {
+	Tickets []STicketBody `json:"tickets,omitempty"`
+	Keys    []string      `json:"keys,omitempty"`
+}
+
 type SState struct {
 	Timeslot           int                   `json:"tau"`
 	Entropy            []string              `json:"eta"`
@@ -40,10 +46,8 @@ type SState struct {
 	NextValidators     []SValidator          `json:"gamma_k"`
 	DesignedValidators []SValidator          `json:"iota"`
 	TicketsAccumulator []SSafroleAccumulator `json:"gamma_a"`
-	TicketsOrKeys      struct {
-		Keys []string `json:"keys"`
-	} `json:"gamma_s"`
-	TicketsVerifierKey string `json:"gamma_z"`
+	TicketsOrKeys      STicketsOrKeys        `json:"gamma_s"`
+	TicketsVerifierKey string                `json:"gamma_z"`
 }
 
 type SEpochMark struct {
@@ -156,23 +160,32 @@ func (si *SInput) deserialize() (Input, error) {
 }
 
 // SafroleAccumulator to SSafroleAccumulator
-func (sa *SafroleAccumulator) serialize() SSafroleAccumulator {
+func (sa *TicketBody) serialize() SSafroleAccumulator {
 	return SSafroleAccumulator{
 		Id:      sa.Id.Hex(),
-		Attempt: sa.Attempt,
+		Attempt: int(sa.Attempt),
 	}
 }
 
 // SSafroleAccumulator to SafroleAccumulator
-func (ssa *SSafroleAccumulator) deserialize() (SafroleAccumulator, error) {
-	return SafroleAccumulator{
+func (ssa *SSafroleAccumulator) deserialize() (TicketBody, error) {
+	return TicketBody{
 		Id:      common.HexToHash(ssa.Id),
-		Attempt: ssa.Attempt,
+		Attempt: uint8(ssa.Attempt),
 	}, nil
 }
 
+type STicketBody struct {
+	Id      string `json:"id"`
+	Attempt uint8  `json:"attempt"`
+}
+
+func (s *SafroleState) Serialize() SState {
+	return s.serialize()
+}
+
 // State to SState
-func (s *State) serialize() SState {
+func (s *SafroleState) serialize() SState {
 	entropy := make([]string, len(s.Entropy))
 	for idx, e := range s.Entropy {
 		entropy[idx] = e.Hex()
@@ -203,6 +216,14 @@ func (s *State) serialize() SState {
 		ticketsAccumulator[idx] = accumulator.serialize()
 	}
 
+	tickets := make([]STicketBody, len(s.TicketsOrKeys.Tickets))
+	for idx, ticket := range s.TicketsOrKeys.Tickets {
+		tickets[idx] = STicketBody{
+			Id:      ticket.Id.Hex(),
+			Attempt: ticket.Attempt,
+		}
+	}
+
 	keys := make([]string, len(s.TicketsOrKeys.Keys))
 	for idx, key := range s.TicketsOrKeys.Keys {
 		keys[idx] = key.Hex()
@@ -216,24 +237,110 @@ func (s *State) serialize() SState {
 		NextValidators:     nextValidators,
 		DesignedValidators: designedValidators,
 		TicketsAccumulator: ticketsAccumulator,
-		TicketsOrKeys: struct {
-			Keys []string `json:"keys"`
-		}{
-			Keys: keys,
+		TicketsOrKeys: STicketsOrKeys{
+			Tickets: tickets,
+			Keys:    keys,
 		},
 		TicketsVerifierKey: common.Bytes2Hex(s.TicketsVerifierKey),
 	}
 }
 
 // SState to State
-func (ss *SState) deserialize() (State, error) {
+// func (ss *SState) deserialize() (SafroleState, error) {
+// 	if len(ss.Entropy) != 4 {
+// 		return SafroleState{}, fmt.Errorf("invalid entropy length got %d expected 4", len(ss.Entropy))
+// 	}
+// 	entropy := make([]common.Hash, len(ss.Entropy))
+// 	for idx, e := range ss.Entropy {
+// 		if len(e) != 66 {
+// 			return SafroleState{}, fmt.Errorf("invalid entropy length got %d expected 66", len(e))
+// 		}
+// 		entropy[idx] = common.HexToHash(e)
+// 	}
+//
+// 	prevValidators := make([]Validator, len(ss.PrevValidators))
+// 	for idx, sValidator := range ss.PrevValidators {
+// 		validator, err := sValidator.deserialize()
+// 		if err != nil {
+// 			return SafroleState{}, err
+// 		}
+// 		prevValidators[idx] = validator
+// 	}
+//
+// 	currValidators := make([]Validator, len(ss.CurrValidators))
+// 	for idx, sValidator := range ss.CurrValidators {
+// 		validator, err := sValidator.deserialize()
+// 		if err != nil {
+// 			return SafroleState{}, err
+// 		}
+// 		currValidators[idx] = validator
+// 	}
+//
+// 	nextValidators := make([]Validator, len(ss.NextValidators))
+// 	for idx, sValidator := range ss.NextValidators {
+// 		validator, err := sValidator.deserialize()
+// 		if err != nil {
+// 			return SafroleState{}, err
+// 		}
+// 		nextValidators[idx] = validator
+// 	}
+//
+// 	designedValidators := make([]Validator, len(ss.DesignedValidators))
+// 	for idx, sValidator := range ss.DesignedValidators {
+// 		validator, err := sValidator.deserialize()
+// 		if err != nil {
+// 			return SafroleState{}, err
+// 		}
+// 		designedValidators[idx] = validator
+// 	}
+//
+// 	ticketsAccumulator := make([]SafroleAccumulator, len(ss.TicketsAccumulator))
+// 	for idx, sAccumulator := range ss.TicketsAccumulator {
+// 		accumulator, err := sAccumulator.deserialize()
+// 		if err != nil {
+// 			return SafroleState{}, err
+// 		}
+// 		ticketsAccumulator[idx] = accumulator
+// 	}
+//
+// 	keys := make([]common.Hash, len(ss.TicketsOrKeys.Keys))
+// 	for idx, key := range ss.TicketsOrKeys.Keys {
+// 		if len(key) != 66 {
+// 			return SafroleState{}, fmt.Errorf("invalid key length - got %d expected %d", len(key), 66)
+// 		}
+// 		keys[idx] = common.HexToHash(key)
+// 	}
+//
+// 	ticketsVerifierKey, _ := hexutil.Decode(ss.TicketsVerifierKey)
+// 	if len(ticketsVerifierKey) != TicketsVerifierKeyInBytes {
+// 		return SafroleState{}, fmt.Errorf("invalid tickets verifier key length - got %d expected %d", len(ticketsVerifierKey), TicketsVerifierKeyInBytes)
+// 	}
+//
+// 	return SafroleState{
+// 		Timeslot:           ss.Timeslot,
+// 		Entropy:            entropy,
+// 		PrevValidators:     prevValidators,
+// 		CurrValidators:     currValidators,
+// 		NextValidators:     nextValidators,
+// 		DesignedValidators: designedValidators,
+// 		TicketsAccumulator: ticketsAccumulator,
+// 		TicketsOrKeys: struct {
+// 			Keys []common.Hash `json:"keys"`
+// 		}{
+// 			Keys: keys,
+// 		},
+// 		TicketsVerifierKey: ticketsVerifierKey,
+// 	}, nil
+// }
+
+func (ss *SState) deserialize() (SafroleState, error) {
 	if len(ss.Entropy) != 4 {
-		return State{}, fmt.Errorf("invalid entropy length got %d expected 4", len(ss.Entropy))
+		return SafroleState{}, fmt.Errorf("invalid entropy length got %d expected 4", len(ss.Entropy))
 	}
 	entropy := make([]common.Hash, len(ss.Entropy))
 	for idx, e := range ss.Entropy {
 		if len(e) != 66 {
-			return State{}, fmt.Errorf("invalid entropy length got %d expected 66", len(e))
+			return SafroleState{}, fmt.Errorf("invalid entropy length got %d expected 66", len(e))
 		}
 		entropy[idx] = common.HexToHash(e)
 	}
@@ -242,7 +349,7 @@ func (ss *SState) deserialize() (State, error) {
 	for idx, sValidator := range ss.PrevValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
-			return State{}, err
+			return SafroleState{}, err
 		}
 		prevValidators[idx] = validator
 	}
@@ -251,7 +358,7 @@ func (ss *SState) deserialize() (State, error) {
 	for idx, sValidator := range ss.CurrValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
-			return State{}, err
+			return SafroleState{}, err
 		}
 		currValidators[idx] = validator
 	}
@@ -260,7 +367,7 @@ func (ss *SState) deserialize() (State, error) {
 	for idx, sValidator := range ss.NextValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
-			return State{}, err
+			return SafroleState{}, err
 		}
 		nextValidators[idx] = validator
 	}
@@ -269,34 +376,45 @@ func (ss *SState) deserialize() (State, error) {
 	for idx, sValidator := range ss.DesignedValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
-			return State{}, err
+			return SafroleState{}, err
 		}
 		designedValidators[idx] = validator
 	}
 
-	ticketsAccumulator := make([]SafroleAccumulator, len(ss.TicketsAccumulator))
+	ticketsAccumulator := make([]TicketBody, len(ss.TicketsAccumulator))
 	for idx, sAccumulator := range ss.TicketsAccumulator {
 		accumulator, err := sAccumulator.deserialize()
 		if err != nil {
-			return State{}, err
+			return SafroleState{}, err
 		}
 		ticketsAccumulator[idx] = accumulator
+	}
+
+	tickets := make([]*TicketBody, len(ss.TicketsOrKeys.Tickets))
+	for idx, sTicket := range ss.TicketsOrKeys.Tickets {
+		if len(sTicket.Id) != 66 {
+			return SafroleState{}, fmt.Errorf("invalid ticket id length - got %d expected %d", len(sTicket.Id), 66)
+		}
+		tickets[idx] = &TicketBody{
+			Id:      common.HexToHash(sTicket.Id),
+			Attempt: sTicket.Attempt,
+		}
 	}
 
 	keys := make([]common.Hash, len(ss.TicketsOrKeys.Keys))
 	for idx, key := range ss.TicketsOrKeys.Keys {
 		if len(key) != 66 {
-			return State{}, fmt.Errorf("invalid key length - got %d expected %d", len(key), 66)
+			return SafroleState{}, fmt.Errorf("invalid key length - got %d expected %d", len(key), 66)
 		}
 		keys[idx] = common.HexToHash(key)
 	}
 
 	ticketsVerifierKey, _ := hexutil.Decode(ss.TicketsVerifierKey)
 	if len(ticketsVerifierKey) != TicketsVerifierKeyInBytes {
-		return State{}, fmt.Errorf("invalid tickets verifier key length - got %d expected %d", len(ticketsVerifierKey), TicketsVerifierKeyInBytes)
+		return SafroleState{}, fmt.Errorf("invalid tickets verifier key length - got %d expected %d", len(ticketsVerifierKey), TicketsVerifierKeyInBytes)
 	}
 
-	return State{
+	return SafroleState{
 		Timeslot:           ss.Timeslot,
 		Entropy:            entropy,
 		PrevValidators:     prevValidators,
@@ -304,10 +422,9 @@ func (ss *SState) deserialize() (State, error) {
 		NextValidators:     nextValidators,
 		DesignedValidators: designedValidators,
 		TicketsAccumulator: ticketsAccumulator,
-		TicketsOrKeys: struct {
-			Keys []common.Hash `json:"keys"`
-		}{
-			Keys: keys,
+		TicketsOrKeys: TicketsOrKeys{
+			Tickets: tickets,
+			Keys:    keys,
 		},
 		TicketsVerifierKey: ticketsVerifierKey,
 	}, nil
@@ -336,7 +453,7 @@ func (o *Output) serialize() SOutput {
 			for i, ticket := range o.Ok.TicketsMark {
 				tm[i] = &SSafroleAccumulator{
 					Id:      ticket.Id.String(),
-					Attempt: ticket.Attempt,
+					Attempt: int(ticket.Attempt),
 				}
 			}
 			ticketsMark = tm
@@ -365,7 +482,7 @@ func (so *SOutput) deserialize() (Output, error) {
 
 	if so.Ok != nil {
 		var epochMark *EpochMark
-		var ticketsMark []*SafroleAccumulator
+		var ticketsMark []*TicketBody
 
 		if so.Ok.EpochMark != nil {
 			entropy, err := hex.DecodeString(so.Ok.EpochMark.Entropy)
@@ -389,20 +506,20 @@ func (so *SOutput) deserialize() (Output, error) {
 		}
 
 		if so.Ok.TicketsMark != nil {
-			tm := make([]*SafroleAccumulator, len(so.Ok.TicketsMark))
+			tm := make([]*TicketBody, len(so.Ok.TicketsMark))
 			for i, ticket := range so.Ok.TicketsMark {
 				id, _ := hex.DecodeString(ticket.Id)
-				tm[i] = &SafroleAccumulator{
+				tm[i] = &TicketBody{
 					Id:      common.BytesToHash(id),
-					Attempt: ticket.Attempt,
+					Attempt: uint8(ticket.Attempt),
 				}
 			}
 			ticketsMark = tm
 		}
 
 		output.Ok = &struct {
-			EpochMark   *EpochMark            `json:"epoch_mark"`
-			TicketsMark []*SafroleAccumulator `json:"tickets_mark"`
+			EpochMark   *EpochMark    `json:"epoch_mark"`
+			TicketsMark []*TicketBody `json:"tickets_mark"`
 		}{
 			EpochMark:   epochMark,
 			TicketsMark: ticketsMark,

@@ -30,18 +30,24 @@ func TestVRFOperations(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
-		pubKey, err := GetPublicKey(seeds[i])
+		/*
+			pubKey, err := GetPublicKey(seeds[i])
+			if err != nil {
+				t.Fatalf("GetPublicKey failed: %v", err)
+			}
+			privateKey, err := GetPrivateKey(seeds[i])
+			if err != nil {
+				t.Fatalf("GetPrivateKey failed: %v", err)
+			}
+		*/
+		banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
 		if err != nil {
-			t.Fatalf("GetPublicKey failed: %v", err)
+			t.Fatalf("InitBanderSnatchKey failed: %v", err)
 		}
-		privateKey, err := GetPrivateKey(seeds[i])
-		if err != nil {
-			t.Fatalf("GetPrivateKey failed: %v", err)
-		}
-		pubKeys[i] = pubKey
-		privateKeys[i] = privateKey
-		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, hex.EncodeToString(pubKey))
-		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, hex.EncodeToString(privateKey))
+		pubKeys[i] = banderSnatch_pub
+		privateKeys[i] = banderSnatch_priv
+		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, hex.EncodeToString(banderSnatch_pub))
+		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, hex.EncodeToString(banderSnatch_priv))
 	}
 
 	// Create a ring set by concatenating all public keys
@@ -166,18 +172,14 @@ func TestVRFOperationsSimulation(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
-		pubKey, err := GetPublicKey(seeds[i])
+		banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
 		if err != nil {
-			t.Fatalf("GetPublicKey failed: %v", err)
+			t.Fatalf("InitBanderSnatchKey failed: %v", err)
 		}
-		privateKey, err := GetPrivateKey(seeds[i])
-		if err != nil {
-			t.Fatalf("GetPrivateKey failed: %v", err)
-		}
-		pubKeys[i] = pubKey
-		privateKeys[i] = privateKey
-		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, hex.EncodeToString(pubKey))
-		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, hex.EncodeToString(privateKey))
+		pubKeys[i] = banderSnatch_pub
+		privateKeys[i] = banderSnatch_priv
+		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, hex.EncodeToString(banderSnatch_pub))
+		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, hex.EncodeToString(banderSnatch_priv))
 	}
 
 	// Create a ring set by concatenating all public keys
@@ -326,4 +328,46 @@ func TestVRFOperationsSimulation(t *testing.T) {
 		}
 		fmt.Println("IETF + Ring VRF Outputs MATCH!")
 	}
+}
+
+func TestRingCommitment(t *testing.T) {
+	// Generate 6 different random seeds
+	fmt.Println("TestRingCommitment: Generating 6 random seeds")
+	seeds := make([][]byte, 6)
+	pubKeys := make([][]byte, 6)
+	privateKeys := make([][]byte, 6)
+	for i := 0; i < 6; i++ {
+		seeds[i] = generateRandomSeed()
+		fmt.Printf("TestRingCommitment seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
+		pubKey, err := getPublicKey(seeds[i])
+		if err != nil {
+			t.Fatalf("GetPublicKey failed: %v", err)
+		}
+		privateKey, err := getPrivateKey(seeds[i])
+		if err != nil {
+			t.Fatalf("GetPrivateKey failed: %v", err)
+		}
+		pubKeys[i] = pubKey
+		privateKeys[i] = privateKey
+		//fmt.Printf("TestRingCommitment Public Key %d: %s\n", i, hex.EncodeToString(pubKey))
+		//fmt.Printf("TestRingCommitment Private Key %d: %s\n", i, hex.EncodeToString(privateKey))
+	}
+
+	// Create a ring set by concatenating all public keys
+	extraByte := []byte{0x11, 0x12, 0x13}
+	ringSet := []byte{}
+	for _, pubKey := range pubKeys {
+		ringSet = append(ringSet, pubKey...)
+	}
+	invalidRingSet := append(extraByte, ringSet...)
+	ringCommitment, err := GetRingCommitment(ringSet)
+	if err != nil {
+		t.Fatalf("RingCommitment failed: %v", err)
+	}
+	inValidRingCommitment, err := GetRingCommitment(invalidRingSet)
+	if err == nil {
+		t.Fatalf("invalidRingSet(len=%v) should fail RingCommitment %v\n", len(inValidRingCommitment), inValidRingCommitment)
+	}
+	fmt.Printf("TestRingCommitment Ring Commitment: %x\n", ringCommitment)
+
 }
