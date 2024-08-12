@@ -15,7 +15,6 @@ import (
 // GenesisConfig is the key data "genesis" structure loaded and saved at the start of every binary run
 type GenesisConfig struct {
 	Epoch0Timestamp uint64
-	StartTimeslot   uint32
 	Authorities     []Validator
 }
 
@@ -38,15 +37,7 @@ func computeJCETime(unixTimestamp int64) uint32 {
 
 func ComputeCurrentJCETime() uint32 {
 	currentTime := time.Now().Unix()
-	return computeJCETime(currentTime)
-}
-
-func RoundUpToNextEpoch(currCJE uint32) uint32 {
-	_, currentPhase := EpochAndPhase(currCJE)
-	if currentPhase == 0 {
-		return currCJE
-	}
-	return ((currCJE / EpochNumSlots) + 1) * EpochNumSlots
+	return uint32(currentTime) // computeJCETime(currentTime)
 }
 
 // Function to convert JCETime back to the original Unix timestamp
@@ -59,30 +50,10 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 	return originalTime.Unix()
 }
 
-func getCurrentTimestampRoundedToMinutes(delay uint64) uint64 {
-	now := time.Now()
-	rounded := now.Round(time.Minute)
-	return uint64(rounded.Unix()) + delay
-}
-
-// Function to get the current timestamp rounded up to the nearest JCE time with phase = 0 and add a delay in seconds
-func getCurrentTimestampRoundedToJCE(delay uint64) uint64 {
-	now := time.Now().Unix()
-	currCJE := computeJCETime(now + int64(delay))
-	roundedCJE := RoundUpToNextEpoch(currCJE)
-	roundedUnix := JCETimeToUnixTimestamp(roundedCJE)
-	return uint64(roundedUnix)
-}
-
-const genesis_delay = 0
-
 func NewGenesisConfig(validators []Validator) GenesisConfig {
-	epoch0Timestamp := getCurrentTimestampRoundedToJCE(genesis_delay)
-	rawEpoch0JCE := computeJCETime(int64(epoch0Timestamp))
-
+	now := time.Now().Unix()
 	return GenesisConfig{
-		Epoch0Timestamp: epoch0Timestamp,
-		StartTimeslot:   rawEpoch0JCE,
+		Epoch0Timestamp: uint64(6 * ((now + 12) / 6)),
 		Authorities:     validators,
 	}
 }
@@ -100,7 +71,6 @@ func writeGenesisConfig(filePath string, config *GenesisAuthorities) error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 

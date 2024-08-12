@@ -45,35 +45,48 @@ const (
 )
 
 type QuicMessage struct {
-	Id      int
+	Id      uint32
 	MsgType string `json:"msgType"`
 	Payload string `json:"payload"`
 }
 
 type NodeInfo struct {
-	PeerID     int               `json:"peer_id"`
+	PeerID     uint32            `json:"peer_id"`
 	PeerAddr   string            `json:"peer_addr"`
 	RemoteAddr string            `json:"remote_addr"`
 	Validator  safrole.Validator `json:"validator"`
 }
 
 type Node struct {
-	id         int
+	id         uint32
 	credential safrole.ValidatorSecret
 	server     quic.Listener
 	peers      []string
 	peersInfo  map[string]NodeInfo //<ed25519> -> NodeInfo
 	//peersAddr  	 map[string]string
-	tlsConfig    *tls.Config
-	mutex        sync.Mutex
-	VMs          map[uint32]*pvm.VM
-	connections  map[string]quic.Connection
-	streams      map[string]quic.Stream
-	store        *storage.StateDBStorage /// where to put this?
+	tlsConfig   *tls.Config
+	mutex       sync.Mutex
+	VMs         map[uint32]*pvm.VM
+	connections map[string]quic.Connection
+	streams     map[string]quic.Stream
+	store       *storage.StateDBStorage /// where to put this?
+
+	// holds a map of the blockhash to the stateDB
+	statedbMap map[common.Hash]*statedb.StateDB
+	// holds the tip
 	statedb      *statedb.StateDB
 	connectionMu sync.Mutex
 	messageChan  chan statedb.Message
 }
+
+/*
+A Tip StateDB is held in the node structure
+When a block comes in, we validate whether the block identified by parenthash and its extrinsics gets to this block.
+  if it does, we put it into map[blockHash]*StateDB
+  if its the latest timeslot, we update the tip
+When a block is authored, we take the latest block identified by some parenthash and its extrinsics and get a new block.
+  we update the tip
+*/
 
 func generateSeedSet(ringSize int) ([][]byte, error) {
 
@@ -133,15 +146,17 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 
 func (n *Node) setValidatorCredential(credential safrole.ValidatorSecret) {
 	n.credential = credential
-	jsonData, err := json.Marshal(credential)
-	if err != nil {
-		fmt.Printf("Error marshaling JSON: %v\n", err)
-		return
+	if false {
+		jsonData, err := json.Marshal(credential)
+		if err != nil {
+			fmt.Printf("Error marshaling JSON: %v\n", err)
+			return
+		}
+		fmt.Printf("[N%v] credential %s\n", n.id, jsonData)
 	}
-	fmt.Printf("[N%v] credential %s\n", n.id, jsonData)
 }
 
-func newNode(id int, credential safrole.ValidatorSecret, genesisConfig *safrole.GenesisConfig, peers []string, peerList map[string]NodeInfo) (*Node, error) {
+func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safrole.GenesisConfig, peers []string, peerList map[string]NodeInfo) (*Node, error) {
 	path := fmt.Sprintf("/tmp/log/testdb%d", id)
 	store, err := storage.NewStateDBStorage(path)
 	if err != nil {
@@ -201,7 +216,7 @@ func newNode(id int, credential safrole.ValidatorSecret, genesisConfig *safrole.
 	}
 
 	addr := fmt.Sprintf(quicAddr, 9000+id)
-	fmt.Printf("[N%v] OPENING %s\n", id, addr)
+	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
 	listener, err := quic.ListenAddr(addr, tlsConfig, generateQuicConfig())
 
 	if err != nil {
@@ -222,13 +237,15 @@ func newNode(id int, credential safrole.ValidatorSecret, genesisConfig *safrole.
 		connections: make(map[string]quic.Connection),
 		streams:     make(map[string]quic.Stream),
 		messageChan: messageChan,
+		statedbMap:  make(map[common.Hash]*statedb.StateDB),
 	}
-	_, _statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
+
+	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
 	if err == nil {
 		_statedb.SetID(id)
 		_statedb.SetCredential(credential)
 		_statedb.OpenMsgChannel(messageChan)
-		node.statedb = _statedb
+		node.addStateDB(_statedb)
 	}
 
 	node.setValidatorCredential(credential)
@@ -256,7 +273,7 @@ func (n *Node) getState() *statedb.StateDB {
 	return n.statedb
 }
 
-func (n *Node) getPeerIndex(identifier string) (int, error) {
+func (n *Node) getPeerIndex(identifier string) (uint32, error) {
 	peer, exist := n.peersInfo[identifier]
 	if exist {
 		return peer.PeerID, nil
@@ -273,6 +290,39 @@ func (n *Node) getPeerAddr(identifier string) (string, error) {
 	}
 	fmt.Printf("getPeerAddr not found %v\n", identifier)
 	return "", fmt.Errorf("peer not found")
+}
+
+func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
+	if n.statedb == nil || n.statedb.GetBlock() == nil {
+		var blkHash common.Hash
+		if _statedb.GetBlock() != nil {
+			blkHash = _statedb.GetBlock().Hash()
+			if n.id == 0 {
+				fmt.Printf("[N%d] addStateDB1 [%v] %v\n", n.id, blkHash, _statedb.String())
+			}
+		} else {
+			// fmt.Printf("[N%d] addStateDB0 [%v] %v\n", n.id, blkHash, _statedb.String())
+		}
+		n.statedb = _statedb
+		n.statedbMap[blkHash] = _statedb
+		return nil
+	}
+	if _statedb.GetBlock() == nil {
+		fmt.Printf("addStateDB: NO BLOCK!!! %v\n", _statedb)
+		panic(0)
+	}
+	if n.statedb.GetBlock() == nil {
+		fmt.Printf("node statedb: NO BLOCK!!! %v\n", n.statedb)
+		panic(0)
+	}
+	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() {
+		if n.id == 0 {
+			fmt.Printf("Incoming addStateDB: %d > %d [blockhash = %v]\n", _statedb.GetBlock().TimeSlot(), n.statedb.GetBlock().TimeSlot(), _statedb.GetBlock().Hash())
+		}
+		n.statedb = _statedb
+		n.statedbMap[_statedb.GetBlock().Hash()] = _statedb
+	}
+	return nil
 }
 
 func (n *Node) getIdentifier() string {
@@ -309,7 +359,7 @@ func (n *Node) runServer() {
 func (n *Node) handleConnection(conn quic.Connection) {
 	peerAddr := conn.RemoteAddr().String()
 
-	fmt.Printf("[N%v] handleConnection. peerAddr=%v\n", n.id, peerAddr)
+	//fmt.Printf("[N%v] handleConnection. peerAddr=%v\n", n.id, peerAddr)
 
 	n.connectionMu.Lock()
 	n.connections[peerAddr] = conn
@@ -323,7 +373,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			}
 			fmt.Printf("handleConnection: Accept stream error: %v\n", err)
 		}
-		fmt.Printf("[N%v] AcceptStream. peerAddr=%v\n", n.id, peerAddr)
+		//fmt.Printf("[N%v] AcceptStream. peerAddr=%v\n", n.id, peerAddr)
 		n.handleStream(peerAddr, stream)
 	}
 }
@@ -352,28 +402,10 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		return
 	}
 
-	fmt.Printf(" -- [N%v] handleStream Read From N%v (msgType=%v)\n", n.id, msg.Id, msg.MsgType)
+	//fmt.Printf(" -- [N%v] handleStream Read From N%v (msgType=%v)\n", n.id, msg.Id, msg.MsgType)
 	response := []byte("1")
 	ok := []byte("0")
 	switch msg.MsgType {
-	case "Ping":
-		var ping Ping
-		err := json.Unmarshal([]byte(msg.Payload), &ping)
-		if err == nil {
-			err = n.processPing(ping)
-			if err == nil {
-				response = ok
-			}
-		}
-	case "Pong":
-		var pong Pong
-		err := json.Unmarshal([]byte(msg.Payload), &pong)
-		if err == nil {
-			err = n.processPong(pong)
-			if err == nil {
-				response = ok
-			}
-		}
 	case "ImportDAQuery":
 		var query ImportDAQuery
 		err := json.Unmarshal([]byte(msg.Payload), &query)
@@ -408,7 +440,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		var ticket *safrole.Ticket
 		err := json.Unmarshal([]byte(msg.Payload), &ticket)
 		if err == nil {
-			err = n.processTicket(ticket)
+			err = n.processTicket(*ticket)
 			if err == nil {
 				response = ok
 			}
@@ -508,7 +540,7 @@ func (n *Node) makeRequest(peerIdentifier string, obj interface{}) ([]byte, erro
 	if msgType == "unknown" {
 		return nil, fmt.Errorf("unsupported type")
 	}
-	fmt.Printf("[N%v] makeRequest %v to [N%v]\n", n.id, msgType, peerID)
+	//fmt.Printf("[N%v] makeRequest %v to [N%v]\n", n.id, msgType, peerID)
 	n.connectionMu.Lock()
 	conn, exists := n.connections[peerAddr]
 	if !exists {
@@ -573,7 +605,7 @@ func (n *Node) makeRequest(peerIdentifier string, obj interface{}) ([]byte, erro
 		return nil, err
 	}
 
-	fmt.Printf(" -- [N%v] makeRequest WRITE %s => N%v\n", n.id, msgType, peerID)
+	//fmt.Printf(" -- [N%v] makeRequest WRITE %s => N%v\n", n.id, msgType, peerID)
 
 	// Read the response from the stream with an expandable buffer
 	var buffer bytes.Buffer
@@ -589,8 +621,8 @@ func (n *Node) makeRequest(peerIdentifier string, obj interface{}) ([]byte, erro
 			return nil, err
 		}
 	}
-	fmt.Printf("-- [N%v] makeRequest READ RESPONSE %d bytes from N%v\n", n.id, buffer.Len(), peerID)
-	fmt.Printf(" -- [N%v] makeRequest WRITE %s => N%v\n", n.id, msgType, peerID)
+	//fmt.Printf("-- [N%v] makeRequest READ RESPONSE %d bytes from N%v\n", n.id, buffer.Len(), peerID)
+	//fmt.Printf(" -- [N%v] makeRequest WRITE %s => N%v\n", n.id, msgType, peerID)
 	stream.Close()
 	return nil, nil
 }
@@ -602,7 +634,7 @@ func isTimeoutError(err error) bool {
 }
 
 // should process ticket being moved to safrole
-func (n *Node) processTicket(ticket *safrole.Ticket) error {
+func (n *Node) processTicket(ticket safrole.Ticket) error {
 	s := n.getState()
 	s.ProcessIncomingTicket(ticket)
 	return nil // Success
@@ -628,31 +660,32 @@ func (n *Node) processPreimageLookup(preimageLookup PreimageLookup) error {
 	return nil // Success
 }
 
+func (n *Node) dumpstatedbmap() {
+	for hash, statedb := range n.statedbMap {
+		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHash, statedb.BlockHash, statedb.StateRoot)
+	}
+}
+
 func (n *Node) processBlock(blk *statedb.Block) error {
-	s := n.getState()
-	s.ProcessIncomingBlock(blk)
-	//fmt.Printf("[N%v] processBlock %v\n", n.id, blk)
-	return nil // Success
-}
-
-func (n *Node) processPing(ping Ping) (err error) {
-	peerIndex, _ := n.getPeerIndex(ping.Sender)
-	fmt.Printf("[N%v] processPing N%v %s\n", n.id, peerIndex, ping.Message)
-	rspMsg := fmt.Sprintf("N%v Received N%v Ping message", n.id, peerIndex)
-	pong := Pong{
-		Sender:   n.getIdentifier(),
-		Response: []byte(rspMsg),
+	prevstatedb, ok := n.statedbMap[blk.ParentHash()]
+	if !ok {
+		fmt.Printf("[N%d] NO STATEDB %v\n", n.id, blk.ParentHash())
+		n.dumpstatedbmap()
+		panic(0)
+		return fmt.Errorf("Unknown parenthash %x\n", blk.ParentHash())
 	}
 
-	_, err = n.makeRequest(ping.Sender, pong)
+	s := prevstatedb.Copy() // n.getState()
+
+	err := s.ProcessIncomingBlock(blk)
 	if err != nil {
-		fmt.Printf("Error sending Pong: N%v\n", err)
+		return err
 	}
-	return err // Success
-}
-
-func (n *Node) processPong(pong Pong) error {
-	fmt.Printf("[N%v] processPong %s - acknowledge\n", n.id, pong.Response)
+	// if we made it, store it in recent state
+	n.addStateDB(s)
+	if n.id == 0 {
+		fmt.Printf("[N%v] processBlock FINISHED %v<-%v  STATE (%v<-%v)\n", n.id, blk.ParentHash(), blk.Hash(), s.ParentHash, s.BlockHash)
+	}
 	return nil // Success
 }
 
@@ -667,6 +700,7 @@ func (n *Node) processWorkPackage(workPackage WorkPackage) error {
 }
 
 func getMessageType(obj interface{}) string {
+
 	switch obj.(type) {
 	case ImportDAQuery:
 		return "ImportDAQuery"
@@ -682,10 +716,6 @@ func getMessageType(obj interface{}) string {
 		return "Disputes"
 	case PreimageLookup:
 		return "PreimageLookup"
-	case Ping:
-		return "Ping"
-	case Pong:
-		return "Pong"
 	case safrole.Ticket:
 		return "Ticket"
 	case statedb.Block:
@@ -706,52 +736,16 @@ func (n *Node) runClient() {
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
 
-	ticker_outgoing := time.NewTicker(TickTime * time.Millisecond)
-	defer ticker_outgoing.Stop()
-
 	for {
 		select {
 		case <-ticker_pulse.C:
-			n.statedb.ProcessState()
-			/*
-				currJCE := safrole.ComputeCurrentJCETime()
-				fmt.Printf("[N%v] currJCE at %v\n", n.id, currJCE)
+			newBlock, newStateDB := n.statedb.ProcessState()
+			if newStateDB != nil {
+				n.addStateDB(newStateDB)
+				n.broadcast(*newBlock)
+				fmt.Printf("[N%d] BLOCK BROADCASTED: %v\n", n.id, newBlock.String())
+			}
 
-				// Generate a random message
-				fmt.Printf("[N%v] lifecheck at %s\n", n.id, time.Now().Format(time.RFC3339))
-				message := n.generateRandomObject()
-				fmt.Printf("[N%v] Generated message: %v\n", n.id, message)
-
-				// Loop through each peer and send the message using makeRequest
-				for _, peer := range n.peersInfo {
-					peerIdentifier := peer.Validator.Ed25519.String()
-					if peer.PeerID == n.id {
-						continue
-					}
-					//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
-					_, err := n.makeRequest(peerIdentifier, message)
-					if err != nil {
-						fmt.Printf("runClient request error: %v\n", err)
-						continue
-					}
-				}
-			*/
-		case <-ticker_outgoing.C:
-			//messages := n.statedb.GetOutgoingMessages()
-			/*
-				for _, peer := range n.peersInfo {
-					peerIdentifier := peer.Validator.Ed25519.String()
-					if peer.PeerID == n.id {
-						continue
-					}
-					//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
-					_, err := n.makeRequest(peerIdentifier, message)
-					if err != nil {
-						fmt.Printf("runClient request error: %v\n", err)
-						continue
-					}
-				}
-			*/
 		case msg := <-n.messageChan:
 			n.processOutgoingMessage(msg)
 		}
@@ -759,7 +753,6 @@ func (n *Node) runClient() {
 }
 
 func (n *Node) processOutgoingMessage(msg statedb.Message) {
-	// Normalize message type to handle case insensitivity
 	msgType := msg.MsgType
 
 	// Unmarshal the payload to the appropriate type
@@ -776,7 +769,7 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 			fmt.Printf("Error unmarshaling Ticket: %v\n", err)
 			return
 		}
-		fmt.Printf("[N%v] Outgoing Ticket: %+v\n", n.id, ticket.TicketID())
+		//fmt.Printf("[N%v] Outgoing Ticket: %+v\n", n.id, ticket.TicketID())
 		n.broadcast(ticket)
 	case "Block":
 		var blk statedb.Block
@@ -790,7 +783,7 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 			fmt.Printf("Error unmarshaling Ticket: %v\n", err)
 			return
 		}
-		fmt.Printf("[N%v] Outgoing Block: %+v\n", n.id, blk.Hash())
+		//fmt.Printf("[N%v] Outgoing Block: %+v\n", n.id, blk.Hash())
 		n.broadcast(blk)
 	default:
 		fmt.Printf("[N%v] Unhandled message type: %v\n", n.id, msg.MsgType)
@@ -799,90 +792,4 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 
 func generateObject() interface{} {
 	return nil
-}
-
-func (n *Node) generateRandomObject() interface{} {
-	types := []string{
-		//"ImportDAQuery", "AuditDAQuery", "ImportDAReconstructQuery", "Ticket", "Guarantee", "Assurance", "Disputes", "PreimageLookup", "Block", "Announcement", "WorkPackage",
-		"Ping", //"Pong",
-	}
-
-	randomIndex, _ := rand.Int(rand.Reader, big.NewInt(int64(len(types))))
-	selectedType := types[randomIndex.Int64()]
-
-	switch selectedType {
-	case "ImportDAQuery":
-		return ImportDAQuery{
-			SegmentRoot:    bhash([]byte("segment_root")),
-			SegmentIndex:   0,
-			ProofRequested: true,
-		}
-	case "AuditDAQuery":
-		return AuditDAQuery{
-			SegmentRoot:    bhash([]byte("segment_root")),
-			Index:          0,
-			ProofRequested: true,
-		}
-	case "ImportDAReconstructQuery":
-		return ImportDAReconstructQuery{
-			SegmentRoot: bhash([]byte("segment_root")),
-		}
-	case "Guarantee":
-		return Guarantee{
-			WorkReport:  WorkReport{},
-			TimeSlot:    1,
-			Credentials: []GuaranteeCredential{},
-		}
-	case "Assurance":
-		return Assurance{
-			ParentHash:     bhash([]byte("parent_hash")),
-			Bitstring:      []byte("bitstring"),
-			ValidatorIndex: 1,
-			Signature:      Ed25519Signature{},
-		}
-	case "Disputes":
-		return Disputes{
-			Verdicts: []Verdict{
-				{WorkReportHash: bhash([]byte("work_report_hash")), Epoch: 1},
-			},
-			Culprits: []Culprit{
-				{R: PublicKey{}, K: PublicKey{}, Signature: Ed25519Signature{}},
-			},
-			Faults: []Fault{
-				{R: PublicKey{}, K: PublicKey{}, V: PublicKey{}, Signature: Ed25519Signature{}},
-			},
-		}
-	case "PreimageLookup":
-		return PreimageLookup{
-			ServiceIndex: 0,
-			Data:         []byte("lookup"),
-		}
-	case "Announcement":
-		return Announcement{
-			Signature: Ed25519Signature{},
-		}
-	case "WorkPackage":
-		return WorkPackage{
-			AuthorizationToken: []byte("exampleToken"),
-			ServiceIndex:       0,
-			AuthorizationCode:  bhash([]byte("authorization_code")),
-			ParamBlob:          []byte("param_blob"),
-			Context:            []byte("context"),
-			WorkItems:          []WorkItem{},
-		}
-	case "Ping":
-		msg := fmt.Sprintf("PINGGGG @ %s!!!", time.Now().Format(time.RFC3339))
-		return Ping{
-			Sender:  n.getIdentifier(),
-			Message: []byte(msg),
-		}
-	case "Pong":
-		msg := fmt.Sprintf("PONGGGG @ %s!!!", time.Now().Format(time.RFC3339))
-		return Pong{
-			Sender:   n.getIdentifier(),
-			Response: []byte(msg),
-		}
-	default:
-		return nil
-	}
 }

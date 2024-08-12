@@ -46,10 +46,11 @@ const (
 
 const (
 	// tiny (NOTE: large is 600 + 1023, should use ProtocolConfiguration)
-	EpochNumSlots = 12
-	NumValidators = 6
-	NumAttempts   = 2
-	EpochTail     = 10 //Y
+	SecondsPerSlot = 6
+	EpochNumSlots  = 10
+	NumValidators  = 6
+	NumAttempts    = 2
+	EpochTail      = 10 //Y
 )
 
 type SafroleHeader struct {
@@ -336,8 +337,9 @@ var (
 )
 
 type SafroleState struct {
-	EpochFirstSlot uint32
-	Epoch          uint32
+	Id             uint32 `json:"Id"`
+	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
+	Epoch          uint32 `json:"epoch"`
 
 	TimeStamp   int `json:"timestamp"`
 	Timeslot    int `json:"timeslot"`
@@ -368,7 +370,8 @@ type SafroleState struct {
 
 func NewSafroleState() *SafroleState {
 	return &SafroleState{
-		Timeslot:           0,
+		Id:                 99999,
+		Timeslot:           int(ComputeCurrentJCETime()),
 		BlockNumber:        0,
 		Entropy:            make([]common.Hash, 4),
 		PrevValidators:     []Validator{},
@@ -422,6 +425,15 @@ func VerifyWinningMarker(winning_marker []*TicketBody, expected_marker []*Ticket
 	}
 
 	return true, nil
+}
+
+func (s *SafroleState) InTicketAccumulator(ticketID common.Hash) bool {
+	for _, t := range s.NextEpochTicketsAccumulator {
+		if t.Id == ticketID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SafroleState) GenerateWinningMarker() ([]*TicketBody, error) {
@@ -495,9 +507,10 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed []byte) (ValidatorSecre
 
 // 6.4.1 Startup parameters
 func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState) {
-	s = new(SafroleState)
-	s.EpochFirstSlot = genesisConfig.StartTimeslot
-	s.Timeslot = 0
+	s = &SafroleState{}
+
+	s.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
+	s.Timeslot = int(s.EpochFirstSlot)
 	validators := genesisConfig.Authorities
 	vB := []byte{}
 	for _, v := range validators {
@@ -508,6 +521,7 @@ func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState) {
 	s.NextValidators = validators
 	s.DesignedValidators = validators
 
+	s.BlockNumber = 0
 	/*
 		The on-chain randomness is initialized after the genesis block construction.
 		The first buffer entry is set as the Blake2b hash of the genesis block,
@@ -519,7 +533,6 @@ func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState) {
 	s.Entropy[1] = common.BytesToHash(common.ComputeHash(s.Entropy[0].Bytes())) //BLAKE2B of Current
 	s.Entropy[2] = common.BytesToHash(common.ComputeHash(s.Entropy[1].Bytes())) //BLAKE2B of EpochN1
 	s.Entropy[3] = common.BytesToHash(common.ComputeHash(s.Entropy[2].Bytes())) //BLAKE2B of EpochN2
-
 	return s
 }
 
@@ -529,16 +542,21 @@ type ClaimData struct {
 	RandomnessSource []byte `json:"randomness_source"`
 }
 
-func EpochAndPhase(currCJE uint32) (currentEpoch, currentPhase uint32) {
-	currentEpoch = currCJE / EpochNumSlots
-	currentPhase = currCJE % EpochNumSlots
+func (s *SafroleState) EpochAndPhase(currCJE uint32) (currentEpoch int32, currentPhase uint32) {
+	if currCJE < s.EpochFirstSlot {
+		currentEpoch = -1
+		currentPhase = 0
+		return
+	}
+	currentEpoch = int32((currCJE - s.EpochFirstSlot) / (SecondsPerSlot * EpochNumSlots)) // eg. / 60
+	currentPhase = ((currCJE - s.EpochFirstSlot) % (SecondsPerSlot * EpochNumSlots)) / SecondsPerSlot
 	return
 }
 
 // used for detecting epoch marker
 func (s *SafroleState) IsFirstEpochPhase(currCJE uint32) bool {
-	prevEpoch, _ := EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, _ := EpochAndPhase(currCJE)
+	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	currEpoch, _ := s.EpochAndPhase(currCJE)
 	if currEpoch > prevEpoch {
 		return true
 	}
@@ -547,8 +565,8 @@ func (s *SafroleState) IsFirstEpochPhase(currCJE uint32) bool {
 
 // used for detecting the end of submission period
 func (s *SafroleState) IsTicketSubmissionCloses(currCJE uint32) bool {
-	//prevEpoch, _ := EpochAndPhase(uint32(s.Timeslot))
-	_, currPhase := EpochAndPhase(currCJE)
+	//prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	_, currPhase := s.EpochAndPhase(currCJE)
 	if currPhase >= EpochTail {
 		return true
 	}
@@ -986,7 +1004,7 @@ func (s *SafroleState) GetFallbackValidator(slot_index uint32) common.Hash {
 func (s *SafroleState) GetPrimaryWinningTicket(slot_index uint32) common.Hash {
 	t_or_k := s.TicketsOrKeys
 	winning_tickets := t_or_k.Tickets
-	_, currPhase := EpochAndPhase(slot_index)
+	_, currPhase := s.EpochAndPhase(slot_index)
 	selected_ticket := winning_tickets[currPhase]
 	return selected_ticket.Id
 }
@@ -1015,7 +1033,7 @@ func (s *SafroleState) CheckEpochType() string {
 }
 
 func (s *SafroleState) GetBindedAttempt(targetJCE uint32) (int, error) {
-	_, currPhase := EpochAndPhase(targetJCE)
+	_, currPhase := s.EpochAndPhase(targetJCE)
 	t_or_k := s.TicketsOrKeys
 	if len(t_or_k.Tickets) == EpochNumSlots {
 		winning_ticket := t_or_k.Tickets[currPhase]
@@ -1025,34 +1043,44 @@ func (s *SafroleState) GetBindedAttempt(targetJCE uint32) (int, error) {
 }
 
 func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub common.Hash, ticketIDs []common.Hash) bool {
-	currEpoch, currPhase := EpochAndPhase(slot_index)
-	//TicketsOrKeys
-	t_or_k := s.TicketsOrKeys
-	if len(t_or_k.Tickets) == EpochNumSlots {
-		winning_ticket_id := s.GetPrimaryWinningTicket(slot_index)
-		for _, ticketID := range ticketIDs {
-			if ticketID == winning_ticket_id {
-				fmt.Printf("[AUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", currEpoch, currPhase, slot_index, bandersnatchPub)
-				return true
-			}
-		}
-		//full complement of E tickets
-		//TODO: where should we keep the info where s has signed the ticekts???
-	} else {
-		//fallback mode
-		fallback_validator := s.GetFallbackValidator(slot_index)
-		if fallback_validator == bandersnatchPub {
-			fmt.Printf("[AUTHORIZED] (%v, %v) slot_index=%v fallback validator=%v\n", currEpoch, currPhase, slot_index, bandersnatchPub)
-			return true
-		}
-	}
+	/*
+	   currEpoch, currPhase := s.EpochAndPhase(slot_index)
+	   //TicketsOrKeys
+	   t_or_k := s.TicketsOrKeys
+
+	   	if len(t_or_k.Tickets) == EpochNumSlots {
+	   		winning_ticket_id := s.GetPrimaryWinningTicket(slot_index)
+	   		for _, ticketID := range ticketIDs {
+	   			if ticketID == winning_ticket_id {
+	   				fmt.Printf("[AUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", currEpoch, currPhase, slot_index, bandersnatchPub)
+	   				return true
+	   			}
+	   		}
+	   		//full complement of E tickets
+	   		//TODO: where should we keep the info where s has signed the ticekts???
+	   	} else {
+
+	   		//fallback mode
+	   		fallback_validator := s.GetFallbackValidator(slot_index)
+	   		if fallback_validator == bandersnatchPub {
+	   			fmt.Printf("[AUTHORIZED] (%v, %v) slot_index=%v fallback validator=%v\n", currEpoch, currPhase, slot_index, bandersnatchPub)
+	   			return true
+	   		}
+	   	}
+	*/
 	return false
 }
 
 func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
-	prev := s.GetTimeSlot()
 	currJCE := ComputeCurrentJCETime()
-	if currJCE > uint32(prev) {
+	prevEpoch, prevPhase := s.EpochAndPhase(s.GetTimeSlot())
+	currEpoch, currPhase := s.EpochAndPhase(currJCE)
+	fmt.Printf("CheckTimeSlotReady PREV [%d] %d %d Curr [%d] %d %d\n",
+		s.GetTimeSlot(), prevEpoch, prevPhase,
+		currJCE, currEpoch, currPhase)
+	if currEpoch > prevEpoch {
+		return currJCE, true
+	} else if currEpoch == prevEpoch && currPhase > prevPhase {
 		return currJCE, true
 	}
 	return currJCE, false
@@ -1084,6 +1112,7 @@ func (s *SafroleState) validateExtrinsic(e Extrinsic) (*TicketEnvelope, error) {
 
 func cloneSafroleState(original SafroleState) SafroleState {
 	copied := SafroleState{
+		Id:                          original.Id,
 		EpochFirstSlot:              original.EpochFirstSlot,
 		Epoch:                       original.Epoch,
 		TimeStamp:                   original.TimeStamp,
@@ -1114,23 +1143,63 @@ func cloneSafroleState(original SafroleState) SafroleState {
 }
 
 // Function to copy a State struct
-func copyState(original SafroleState) SafroleState {
-	// Convert to JSON
-	originalJSON, err := json.Marshal(original)
-	if err != nil {
-		panic(err) // Handle error as needed
+func (original *SafroleState) Copy() *SafroleState {
+	// Create a new instance of SafroleState
+	copyState := &SafroleState{
+		Id:                          original.Id,
+		EpochFirstSlot:              original.EpochFirstSlot,
+		Epoch:                       original.Epoch,
+		TimeStamp:                   original.TimeStamp,
+		Timeslot:                    original.Timeslot,
+		BlockNumber:                 original.BlockNumber,
+		Entropy:                     make([]common.Hash, len(original.Entropy)),
+		PrevValidators:              make([]Validator, len(original.PrevValidators)),
+		CurrValidators:              make([]Validator, len(original.CurrValidators)),
+		NextValidators:              make([]Validator, len(original.NextValidators)),
+		DesignedValidators:          make([]Validator, len(original.DesignedValidators)),
+		NextEpochTicketsAccumulator: make([]TicketBody, len(original.NextEpochTicketsAccumulator)),
+		TicketsAccumulator:          make([]TicketBody, len(original.TicketsAccumulator)),
+		TicketsOrKeys:               original.TicketsOrKeys, // Assuming this has value semantics
+		TicketsVerifierKey:          make([]byte, len(original.TicketsVerifierKey)),
 	}
 
-	// Create a new State struct
-	var copied SafroleState
+	// Copy the Entropy slice
+	copy(copyState.Entropy, original.Entropy)
 
-	// Convert from JSON to struct
-	err = json.Unmarshal(originalJSON, &copied)
-	if err != nil {
-		panic(err) // Handle error as needed
+	// Copy the PrevValidators slice
+	for i, v := range original.PrevValidators {
+		copyState.PrevValidators[i] = v // Assuming Validator is a value type, or use v.Copy() if it's a pointer
 	}
 
-	return copied
+	// Copy the CurrValidators slice
+	for i, v := range original.CurrValidators {
+		copyState.CurrValidators[i] = v // Same assumption as above
+	}
+
+	// Copy the NextValidators slice
+	for i, v := range original.NextValidators {
+		copyState.NextValidators[i] = v // Same assumption as above
+	}
+
+	// Copy the DesignedValidators slice
+	for i, v := range original.DesignedValidators {
+		copyState.DesignedValidators[i] = v // Same assumption as above
+	}
+
+	// Copy the NextEpochTicketsAccumulator slice
+	for i, v := range original.NextEpochTicketsAccumulator {
+		copyState.NextEpochTicketsAccumulator[i] = v // Assuming TicketBody is a value type, or use v.Copy() if it's a pointer
+	}
+
+	// Copy the TicketsAccumulator slice
+	for i, v := range original.TicketsAccumulator {
+		copyState.TicketsAccumulator[i] = v // Same assumption as above
+	}
+
+	// Copy the TicketsVerifierKey slice
+	copy(copyState.TicketsVerifierKey, original.TicketsVerifierKey)
+
+	return copyState
 }
 
 func (s *SafroleState) AdvanceSafrole(targetJCE uint32) error {
@@ -1173,9 +1242,9 @@ func (s *SafroleState) AdvanceSafrole(targetJCE uint32) error {
 }
 
 // statefrole_stf is the function to be tested
-func (s *SafroleState) ApplyStateTransitionFromBlock(tickets []Ticket, targetJCE uint32, header SafroleHeader) (SafroleState, error) {
-	prevEpoch, prevPhase := EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, currPhase := EpochAndPhase(targetJCE)
+func (s *SafroleState) ApplyStateTransitionFromBlock(tickets []Ticket, targetJCE uint32, header SafroleHeader, id uint32) (SafroleState, error) {
+	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
+	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 
 	s2 := cloneSafroleState(*s)
 	if currEpoch <= prevEpoch && currPhase <= prevPhase {
@@ -1190,14 +1259,13 @@ func (s *SafroleState) ApplyStateTransitionFromBlock(tickets []Ticket, targetJCE
 	// tally existing ticketIDs
 	ticketIDs := make(map[common.Hash]uint8)
 	for i, a := range s.NextEpochTicketsAccumulator {
-		fmt.Printf("ticketID? %d => %s\n", i, a.Id.String())
+		fmt.Printf("[N%d] ticketID? %d => %s\n", s.Id, i, a.Id.String())
 		ticketIDs[a.Id] = a.Attempt
 	}
 
 	// Process Extrinsic Tickets
 	fmt.Printf("Current Slot: %d => Input Slot: %d \n", s.Timeslot, targetJCE)
 
-	newTickets := []TicketBody{}
 	for _, e := range tickets {
 		if currPhase >= EpochTail {
 			return s2, fmt.Errorf(errTicketSubmissionInTail)
@@ -1211,25 +1279,25 @@ func (s *SafroleState) ApplyStateTransitionFromBlock(tickets []Ticket, targetJCE
 			if err != nil {
 				return s2, fmt.Errorf(errTicketBadRingProof)
 			}
+
 			_, exists := ticketIDs[ticket_id]
 			if exists {
 				fmt.Printf("DETECTED Resubmit %v\n", ticket_id)
-				return s2, fmt.Errorf(errTicketResubmission)
+				continue // return s2, fmt.Errorf(errTicketResubmission)
 			}
+
 			newa := TicketBody{
 				Id:      ticket_id,
 				Attempt: uint8(e.Attempt),
 			}
-			if len(newTickets) > 0 && compareTickets(newa.Id, newTickets[len(newTickets)-1].Id) < 0 {
-				return s2, fmt.Errorf(errTicketBadOrder)
+			//			if len(newTickets) > 0 && compareTickets(newa.Id, newTickets[len(newTickets)-1].Id) < 0 {
+			//				return s2, fmt.Errorf(errTicketBadOrder)
+			//			}
+			s2.NextEpochTicketsAccumulator = append(s2.NextEpochTicketsAccumulator, newa)
+			if s.Id == 0 {
+				fmt.Printf("[N%d] added Ticket ID %v\n", id, ticket_id)
 			}
-			newTickets = append(newTickets, newa)
-			fmt.Printf("added Ticket ID %x\n", ticket_id)
 		}
-	}
-
-	for _, newa := range newTickets {
-		s2.NextEpochTicketsAccumulator = append(s2.NextEpochTicketsAccumulator, newa)
 	}
 
 	// Sort tickets using compareTickets
@@ -1267,7 +1335,7 @@ func (s *SafroleState) ApplyStateTransitionFromBlock(tickets []Ticket, targetJCE
 
 	fresh_randomness, err := s.GetFreshRandomness(header.VRFSignature)
 	if err != nil {
-		return s2, fmt.Errorf("Invalid VrfSig")
+		// return s2, fmt.Errorf("GetFreshRandomness %v", err)
 	}
 
 	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)
@@ -1293,14 +1361,15 @@ func (s *SafroleState) ApplyStateTransitionFromBlock(tickets []Ticket, targetJCE
 		s2.Entropy[3] = s.Entropy[3]
 	}
 
+	s2.BlockNumber = s.BlockNumber + 1
 	s2.Timeslot = int(targetJCE)
 	return s2, nil
 }
 
 // statefrole_stf is the function to be tested
-func (s *SafroleState) STF(input Input) (Output, SafroleState, error) {
+func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 
-	s2 := copyState(*s)
+	s2 := s.Copy()
 	o := &Output{
 		Ok: nil,
 	}

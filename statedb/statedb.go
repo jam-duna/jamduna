@@ -22,22 +22,22 @@ type Message struct {
 }
 
 type StateDB struct {
-	id              int
-	credential      safrole.ValidatorSecret
-	parentHash      common.Hash
-	blockHash       common.Hash
-	priorStateRoot  common.Hash
-	stateRoot       common.Hash
-	block           *Block
-	prevBlock       *Block
+	Id         uint32                `json:"id"`
+	Block      *Block                `json:"block"`
+	ParentHash common.Hash           `json:"parentHash"`
+	BlockHash  common.Hash           `json:"blockHash"`
+	StateRoot  common.Hash           `json:"stateRoot"`
+	Safrole    *safrole.SafroleState `json:"safrole"`
+
 	sdb             *storage.StateDBStorage
-	selfTickets     map[uint32][]common.Hash //keep track of its own tickets
-	knownTickets    map[common.Hash]int      //keep track of known tickets
-	queuedticket    map[common.Hash]*safrole.Ticket
+	credential      safrole.ValidatorSecret
 	trie            *trie.MerkleTree
-	safrole         *safrole.SafroleState
 	nodeMessageChan chan Message
-	ticketMutex     sync.Mutex
+
+	selfTickets  map[uint32][]common.Hash //keep track of its own tickets
+	knownTickets map[common.Hash]int      //keep track of known tickets
+	queuedticket map[common.Hash]safrole.Ticket
+	ticketMutex  sync.Mutex
 }
 
 // Function to send a message from StateDB to Node
@@ -50,7 +50,7 @@ func (sdb *StateDB) SendOutgoingMessage(msgType string, payload interface{}) {
 	sdb.nodeMessageChan <- msg
 }
 
-func (s *StateDB) AddTicketToQueue(t *safrole.Ticket) {
+func (s *StateDB) AddTicketToQueue(t safrole.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
 	s.queuedticket[t.TicketID()] = t
@@ -66,23 +66,32 @@ func (s *StateDB) CheckTicketExists(ticketID common.Hash) bool {
 	return exists
 }
 
-func (s *StateDB) ProcessIncomingBlock(b *Block) {
-	currEpoch, currPhase := safrole.EpochAndPhase(b.Header.TimeSlot)
-	fmt.Printf("[N%v] Receving Block %v. (Epoch,Phase) = (%v,%v) Slot=%v\n", s.id, b.Hash(), currEpoch, currPhase, b.Header.TimeSlot)
-	//TODO validate block
+func (s *StateDB) ProcessIncomingBlock(b *Block) error {
+	currEpoch, currPhase := s.Safrole.EpochAndPhase(b.Header.TimeSlot)
+	// TODO: validate block
 	is_validated := true
 	if is_validated {
+		// taking the parent, applying it
 		tickets := b.Tickets()
-		s.RemoveTicketFromQueue(tickets)
+		s.Block = b
 		s.ApplyStateTransitionFromBlock(context.Background(), b)
+		for _, ticket := range tickets {
+			s.RemoveTicket(&ticket)
+		}
+		if s.Id == 0 {
+			fmt.Printf("[N%v] ProcessIncomingBlock Block %v. (Epoch,Phase) = (%v,%v) Slot=%v STATEDB %s\n", s.Id, b.Hash(), currEpoch, currPhase, b.Header.TimeSlot, s.String())
+		}
+		return nil
 	}
+
+	return fmt.Errorf("ERROR in validating block")
 }
 
-func (s *StateDB) ProcessIncomingTicket(t *safrole.Ticket) {
+func (s *StateDB) ProcessIncomingTicket(t safrole.Ticket) {
 	//s.QueueTicketEnvelope(t)
 	//statedb.tickets[common.BytesToHash(ticket_id)] = t
 	sf := s.GetSafrole()
-	ticketID, err := sf.ValidateProposedTicket(t)
+	ticketID, err := sf.ValidateProposedTicket(&t)
 	if err != nil {
 		fmt.Printf("Invalid Ticket. Err=%v\n", err)
 		return
@@ -90,40 +99,33 @@ func (s *StateDB) ProcessIncomingTicket(t *safrole.Ticket) {
 	if s.CheckTicketExists(ticketID) {
 		return
 	}
-	fmt.Printf("[N%v] Adding ticketID=%v\n", s.id, ticketID)
+	fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v\n", s.Id, ticketID)
 	s.AddTicketToQueue(t)
 	s.knownTickets[ticketID] = t.Attempt
 }
 
-// Collect all tickets in the queue
-func (s *StateDB) GetTicketQueue() []safrole.Ticket {
+func (s *StateDB) RemoveTicket(t *safrole.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
+	delete(s.queuedticket, t.TicketID())
 
-	ticketQueue := make([]safrole.Ticket, 0, len(s.queuedticket))
-	for _, ticket := range s.queuedticket {
-		ticketQueue = append(ticketQueue, *ticket)
-	}
-
-	// Clear the queue
-	s.queuedticket = make(map[common.Hash]*safrole.Ticket)
-	return ticketQueue
-}
-
-// Remove tickets in the queue by ID
-func (s *StateDB) RemoveTicketFromQueue(tickets []safrole.Ticket) {
-	s.ticketMutex.Lock()
-	defer s.ticketMutex.Unlock()
-
-	for _, ticket := range tickets {
-		ticketID := ticket.TicketID()
-		delete(s.queuedticket, ticketID)
+	// Iterate through selfTickets epoch by epoch, to remove the ticket from the appropriate list -- TODO: remove old epochs
+	for epoch, ticketIDs := range s.selfTickets {
+		var newtickets []common.Hash
+		for _, h := range ticketIDs {
+			if h == t.TicketID() {
+			} else {
+				newtickets = append(newtickets, t.TicketID())
+				break
+			}
+		}
+		s.selfTickets[epoch] = newtickets
 	}
 }
 
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
-	statedb.queuedticket = make(map[common.Hash]*safrole.Ticket)
+	statedb.queuedticket = make(map[common.Hash]safrole.Ticket)
 	statedb.knownTickets = make(map[common.Hash]int)
 	statedb.selfTickets = make(map[uint32][]common.Hash)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
@@ -148,34 +150,16 @@ const (
 )
 
 // NewGenesisStateDB generates the first StateDB object and genesis block
-func NewGenesisStateDB(sdb *storage.StateDBStorage, c *safrole.GenesisConfig) (genesisBlk *Block, statedb *StateDB, err error) {
+func NewGenesisStateDB(sdb *storage.StateDBStorage, c *safrole.GenesisConfig) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
-		return genesisBlk, statedb, err
+		return statedb, err
 	}
-	//Genesis block is computed before safrole get initiated
-	genesisBlk, err = statedb.MakeGenesisBlock(context.Background())
 
-	/*
-		// testing decode and encode..
-		genesisBlk2, err := BlockFromBytes(genesisBlk.Bytes())
-		if err == nil {
-			fmt.Printf("Genesis Byte len=%v. %x\n", len(genesisBlk2.Bytes()), genesisBlk2.Bytes())
-			fmt.Printf("Genesis blkHash: %v\n", genesisBlk.Hash())
-			fmt.Printf("Genesis unsigned headerHash: %v\n", genesisBlk.Header.UnsignedHash())
-			fmt.Printf("Genesis Hash: %v\n", genesisBlk.Header.Hash())
-		}
-	*/
-
-	statedb.block = genesisBlk
-	statedb.safrole = safrole.InitGenesisState(c) // setting the safrole state so that block 1 can be produced
-	jsonData, err := json.Marshal(genesisBlk)
-	if err != nil {
-		fmt.Errorf("Error marshaling block to JSON: %v", err)
-	}
-	fmt.Printf("GenesisBlock JSON:\n%s\n", jsonData)
+	statedb.Block = nil
+	statedb.Safrole = safrole.InitGenesisState(c) // setting the safrole state so that block 1 can be produced
 	statedb.UpdateTrieState()
-	return genesisBlk, statedb, nil
+	return statedb, nil
 }
 
 func (s *StateDB) GetTrie() *trie.MerkleTree {
@@ -183,10 +167,10 @@ func (s *StateDB) GetTrie() *trie.MerkleTree {
 }
 
 func (s *StateDB) GetSafrole() *safrole.SafroleState {
-	return s.safrole
+	return s.Safrole
 }
 
-func (s *StateDB) UpdateTrieState() {
+func (s *StateDB) UpdateTrieState() common.Hash {
 	//γ ≡⎩γk, γz, γs, γa⎭
 	//γk :one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 	//γz :epoch’s root, a Bandersnatch ring root composed with the one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
@@ -209,23 +193,25 @@ func (s *StateDB) UpdateTrieState() {
 	t.SetState(C8, currEpochValidatorsEncode)
 	t.SetState(C9, priorEpochValidatorEncode)
 	t.SetState(C11, mostRecentBlockTimeSlotEncode)
+	return common.BytesToHash(t.GetRootHash())
 }
 
 func (s *StateDB) GetSafroleState() *safrole.SafroleState {
-	return s.safrole
+	return s.Safrole
 }
 
 func (s *StateDB) String() string {
-	if s != nil {
-		//return fmt.Sprintf("[parent %x]", s.parentHash)
+	enc, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
-	return fmt.Sprint("{}")
+	return string(enc)
 }
 
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
-	statedb.queuedticket = make(map[common.Hash]*safrole.Ticket)
+	statedb.queuedticket = make(map[common.Hash]safrole.Ticket)
 	statedb.knownTickets = make(map[common.Hash]int)
 	statedb.selfTickets = make(map[uint32][]common.Hash)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
@@ -235,7 +221,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	zeroHash := common.BytesToHash(b)
 	if bytes.Compare(blockHash.Bytes(), zeroHash.Bytes()) == 0 {
 		// genesis block situation
-		statedb.safrole = safrole.NewSafroleState()
+		statedb.Safrole = safrole.NewSafroleState()
 	} else {
 		encodedBlock, err := sdb.ReadKV(blockHash)
 		if err != nil {
@@ -249,63 +235,78 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 		if err := json.Unmarshal(encodedBlock, &block); err != nil {
 			return statedb, fmt.Errorf("[statedb:newStateDB] JSON decode error: %v", err)
 		}
-		statedb.block = &block
-		statedb.parentHash = block.Header.ParentHash
-		statedb.safrole = safrole.NewSafroleState() //TODO: DO entropy initiation
-		err = statedb.SetRootFromBlock(&block)
-		if err != nil {
-			return statedb, err
-		}
+		statedb.Block = &block
+		statedb.ParentHash = block.Header.ParentHash
+		statedb.Safrole = safrole.NewSafroleState() //TODO: DO entropy initiation
 	}
+
 	return statedb, nil
 }
 
-func (s *StateDB) SetRootFromBlock(block *Block) error {
-	s.priorStateRoot = block.Header.PriorStateRoot
-	return nil
-}
-
 // Copy generates a copy of the StateDB
-func (s *StateDB) Copy() (n *StateDB, err error) {
-	n = newEmptyStateDB(s.sdb)
-	n.block = s.block.StateCopy()
-	n.parentHash = s.parentHash
-	return n, nil
-}
-
-func NewStateDBFromBlock(ctx context.Context, sdb *storage.StateDBStorage, block *Block) (statedb *StateDB, err error) {
-	statedb = newEmptyStateDB(sdb)
-	statedb.block = block
-	statedb.parentHash = block.Header.ParentHash
-	err = statedb.SetRootFromBlock(block)
-	if err != nil {
-		return statedb, err
+func (s *StateDB) Copy() *StateDB {
+	// Create a new instance of StateDB
+	n := &StateDB{
+		Id:              s.Id,
+		Block:           s.Block.Copy(), // You might need to deep copy the Block if it's mutable
+		ParentHash:      s.ParentHash,
+		BlockHash:       s.BlockHash,
+		StateRoot:       s.StateRoot,
+		Safrole:         s.Safrole.Copy(), // Assuming SafroleState has a Copy method
+		sdb:             s.sdb,            // Again, consider deep copying if needed
+		credential:      s.credential,
+		trie:            s.trie,            // Deep copy if the MerkleTree is mutable
+		nodeMessageChan: s.nodeMessageChan, // Channels are reference types, consider whether to create a new channel
+		selfTickets:     make(map[uint32][]common.Hash),
+		knownTickets:    make(map[common.Hash]int),
+		queuedticket:    make(map[common.Hash]safrole.Ticket),
 	}
-	return statedb, err
+
+	// Copy maps
+	for k, v := range s.selfTickets {
+		n.selfTickets[k] = append([]common.Hash(nil), v...)
+	}
+
+	for k, v := range s.knownTickets {
+		n.knownTickets[k] = v
+	}
+
+	for k, v := range s.queuedticket {
+		t, _ := v.DeepCopy()
+		n.queuedticket[k] = t
+	}
+
+	return n
 }
 
-func (s *StateDB) ProcessState() {
-	genesisReady := s.safrole.CheckGenesisReady()
+func (s *StateDB) ProcessState() (*Block, *StateDB) {
+	genesisReady := s.Safrole.CheckGenesisReady()
 	if !genesisReady {
-		return
+		return nil, nil
 	}
-	currJCE, timeSlotReady := s.safrole.CheckTimeSlotReady()
+	currJCE, timeSlotReady := s.Safrole.CheckTimeSlotReady()
 	if timeSlotReady {
 		//fmt.Printf("[N%v] Ready to start!\n", s.id)
-		//Time to propose block if selected
-		isAuthorizedBlockBuilder := s.IsAuthorizedBlockBuilder(currJCE)
-		if isAuthorizedBlockBuilder {
-			fmt.Printf("[N%v] MakeBlock %v from %v\n", s.id, currJCE, s.GetBandersnatchPub())
-			//TODO: advance safrole here
-			s.ProcessSafroleAsAuthor(currJCE)
-		} else {
-			//waiting for block ... potentially submit ticket here
-		}
 		isAuthorizedTicketBuilder := s.IsAuthorizedTicketBuilder()
 		if isAuthorizedTicketBuilder {
 			s.GenerateTickets(currJCE)
 		}
+		// Time to propose block if selected
+		isAuthorizedBlockBuilder := s.IsAuthorizedBlockBuilder(currJCE)
+		if isAuthorizedBlockBuilder {
+			fmt.Printf("[N%v] MakeBlock from STATEDB %v\n", s.Id, s.String())
+			currEpoch, currPhase := s.Safrole.EpochAndPhase(currJCE)
+			// take the current stateDB + generate a new proposed Block and a new stateDB
+			proposedBlk, newStateDB, err := s.MakeBlock(context.Background(), currJCE)
+			if err == nil {
+				fmt.Printf("[N%v] Proposed %v (Epoch,Phase) = (%v,%v) Slot=%v Blk=%v\n", s.Id, proposedBlk.Hash(), currEpoch, currPhase, currJCE, proposedBlk)
+				return proposedBlk, newStateDB
+			}
+		} else {
+			//waiting for block ... potentially submit ticket here
+		}
 	}
+	return nil, nil
 }
 
 func (s *StateDB) SelfTicketCount(epoch uint32) int {
@@ -316,7 +317,7 @@ func (s *StateDB) SelfTicketCount(epoch uint32) int {
 	return len(tickets)
 }
 
-func (s *StateDB) AddSelfTicket(epoch uint32, t *safrole.Ticket) bool {
+func (s *StateDB) AddSelfTicket(epoch uint32, t safrole.Ticket) bool {
 	if s.selfTickets == nil {
 		s.selfTickets = make(map[uint32][]common.Hash)
 	}
@@ -331,11 +332,11 @@ func (s *StateDB) AddSelfTicket(epoch uint32, t *safrole.Ticket) bool {
 }
 
 // GetSelfTickets returns the self-tickets for a given epoch.
-func (s *StateDB) GetSelfTickets(epoch uint32) []common.Hash {
+func (s *StateDB) GetSelfTickets(epoch int32) []common.Hash {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
 
-	ticketIDs, ok := s.selfTickets[epoch]
+	ticketIDs, ok := s.selfTickets[uint32(epoch)]
 	if !ok {
 		return nil
 	}
@@ -344,35 +345,21 @@ func (s *StateDB) GetSelfTickets(epoch uint32) []common.Hash {
 
 func (s *StateDB) GenerateTickets(currJCE uint32) {
 	sf := s.GetSafrole()
-	currEpoch, currPhase := safrole.EpochAndPhase(currJCE)
+	currEpoch, currPhase := s.Safrole.EpochAndPhase(currJCE)
 	if currPhase >= safrole.EpochTail {
 		return
 	}
-	if s.SelfTicketCount(currEpoch) >= safrole.NumAttempts {
+	if s.SelfTicketCount(uint32(currEpoch)) >= safrole.NumAttempts {
 		return
 	}
-	fmt.Printf("[N%v] (Epoch,Phase) = (%v,%v) Generating Tickets!\n", s.id, currEpoch, currPhase)
+	fmt.Printf("[N%v] (Epoch,Phase) = (%v,%v) Generating Tickets!\n", s.Id, currEpoch, currPhase)
 	tickets := sf.GenerateTickets(s.GetBandersnatchSecret())
 	for _, ticket := range tickets {
-		if s.AddSelfTicket(currEpoch, &ticket) {
+		if s.AddSelfTicket(uint32(currEpoch), ticket) {
 			s.SendOutgoingMessage("Ticket", ticket)
-
 		}
 	}
 	// send tickets to neighbors
-}
-
-func (s *StateDB) ProcessSafroleAsAuthor(targetJCE uint32) {
-	//sf := s.GetSafrole()
-	//s.ApplyExtrinsic(context.Background()) // what shoulApplyExtrinsicd this do??
-	//sf.AdvanceSafrole(targetJCE)
-	currEpoch, currPhase := safrole.EpochAndPhase(targetJCE)
-	proposedBlk, err := s.MakeBlock(context.Background(), targetJCE)
-	if err == nil {
-		fmt.Printf("[N%v] Proposed %v (Epoch,Phase) = (%v,%v) Slot=%v Blk=%v\n", s.id, proposedBlk.Hash(), currEpoch, currPhase, targetJCE, proposedBlk)
-		s.SendOutgoingMessage("Block", proposedBlk)
-		s.ApplyStateTransitionFromBlock(context.Background(), proposedBlk)
-	}
 }
 
 func (s *StateDB) SetCredential(credential safrole.ValidatorSecret) {
@@ -383,8 +370,9 @@ func (s *StateDB) OpenMsgChannel(messageChan chan Message) {
 	s.nodeMessageChan = messageChan
 }
 
-func (s *StateDB) SetID(id int) {
-	s.id = id
+func (s *StateDB) SetID(id uint32) {
+	s.Id = id
+	s.Safrole.Id = id
 }
 
 func (s *StateDB) GetEd25519Pub() common.Hash {
@@ -408,8 +396,15 @@ func (s *StateDB) IsAuthorizedTicketBuilder() bool {
 func (s *StateDB) IsAuthorizedBlockBuilder(targetJCE uint32) bool {
 	sf := s.GetSafrole()
 	bandersnatchPub := s.GetBandersnatchPub()
-	//fmt.Printf("IsAuthorized caller: %v\n", bandersnatchPub)
-	targetEpoch, _ := safrole.EpochAndPhase(targetJCE)
+	targetEpoch, phase := s.Safrole.EpochAndPhase(targetJCE)
+	// round robin
+	if phase%NumValidators == s.Id {
+		fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
+		return true
+	} else {
+		return false
+	}
+
 	ticketIDs := s.GetSelfTickets(targetEpoch)
 	return sf.IsAuthorizedBuilder(targetJCE, bandersnatchPub, ticketIDs)
 }
@@ -422,60 +417,37 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *Block)
 	sf_header := blk.ConvertToSafroleHeader()
 	targetJCE := blk.TimeSlot()
 	sf := s.GetSafrole()
-	s2, err := sf.ApplyStateTransitionFromBlock(ticketExts, targetJCE, sf_header)
+	s2, err := sf.ApplyStateTransitionFromBlock(ticketExts, targetJCE, sf_header, s.Id)
 	if err != nil {
+		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", err)
+		panic(1)
 		return err
 	}
-	s.safrole = &s2
-	//s.prevblock = s.block
-	s.block = blk
-	t := s.GetTrie()
-	priorStateRoot := t.GetRoot()
-	s.priorStateRoot = priorStateRoot
-
-	s.UpdateTrieState()
+	s.Safrole = &s2
+	s.Block = blk
+	s.ParentHash = s.BlockHash
+	s.BlockHash = blk.Hash()
+	s.StateRoot = s.UpdateTrieState()
+	fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
 	return nil
 }
 
-func (s *StateDB) MakeGenesisBlock(ctx context.Context) (*Block, error) {
-	b := NewBlock()
-	h := NewBlockHeader()
-
-	mostRecentBlockTimeSlotEncode := common.EncodeUint64(0)
-
-	t := s.GetTrie()
-
-	t.SetState(C11, mostRecentBlockTimeSlotEncode)
-
-	// these flush operations compute new root chunkhashs / merkleroots
-	s.Flush(ctx, b.Header.TimeSlot)
-
-	priorStateRoot := t.GetRoot()
-
-	h.ParentHash = common.Hash{}
-	h.PriorStateRoot = priorStateRoot
-	b.Header = *h
-
-	return b, nil
+func (s *StateDB) GetBlock() *Block {
+	return s.Block
 }
 
 // make block generate block prior to state execution
-func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, err error) {
-	t := s.GetTrie()
+func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, newStateDB *StateDB, err error) {
 	sf := s.GetSafrole()
 	bandersnatchSecret := s.GetBandersnatchSecret()
 	needEpochMarker := sf.IsFirstEpochPhase(targetJCE)
 	needWinningMarker := sf.IsTicketSubmissionCloses(targetJCE)
-	//prevBlk := s.prevBlock.StateCopy() //TODO fix the copy func
 
-	//_, currPhase := EpochAndPhase(targetJCE)
-
-	prevBlk, _ := BlockFromBytes(s.prevBlock.Bytes())
 	b := NewBlock()
 	h := NewBlockHeader()
 	extrinsicData := NewExtrinsic()
-	h.ParentHash = prevBlk.Hash()
-	h.PriorStateRoot = t.GetRoot()
+	h.ParentHash = s.BlockHash
+	h.PriorStateRoot = s.StateRoot
 	h.TimeSlot = targetJCE
 	if needEpochMarker {
 		epochMarker := sf.GenerateEpochMarker()
@@ -490,35 +462,48 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, e
 		if err == nil {
 			h.WinningTicketsMark = winningMarker
 		}
-	}
-
-	// If there's new ticketID, add them into extrinsic
-	// Question: can we submit tickets at the exact tail end block?
-	if !needWinningMarker {
-		ext_t := s.GetTicketQueue()
-		if len(ext_t) > 0 {
-			fmt.Printf("targetJCE=%v Including tickets Len=%v\n", targetJCE, len(ext_t))
-			extrinsicData.Tickets = ext_t
+	} else {
+		// If there's new ticketID, add them into extrinsic
+		// Question: can we submit tickets at the exact tail end block?
+		extrinsicData.Tickets = make([]safrole.Ticket, 0)
+		for ticketID, ticket := range s.queuedticket {
+			t, err := ticket.DeepCopy()
+			if err != nil {
+				continue
+			}
+			if s.Safrole.InTicketAccumulator(ticketID) {
+			} else {
+				fmt.Printf("[N%d] GetTicketQueue %v => %v\n", s.Id, ticketID, t)
+				extrinsicData.Tickets = append(extrinsicData.Tickets, t)
+			}
 		}
+		s.queuedticket = make(map[common.Hash]safrole.Ticket)
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()
 	author_index, err := sf.GetAuthorIndex(s.GetBandersnatchPub(), "Curr")
 	if err != nil {
-		return bl, err
+		return bl, newStateDB, err
 	}
 	h.BlockAuthorKey = author_index
-	b.Header = *h
 	b.Extrinsic = extrinsicData
 
+	b.Header = *h
 	unsignHeaderHash := h.UnsignedHash()
+	newStateDB = s.Copy() // newEmptyStateDB(s.sdb)
+	newSafrole := s.Safrole.Copy()
+	newStateDB.Safrole = newSafrole
+	newStateDB.Block = b
+
+	newStateDB.ParentHash = b.Header.ParentHash
+	newStateDB.ApplyStateTransitionFromBlock(context.Background(), b)
 
 	//signing
 	epochType := sf.CheckEpochType()
 	if epochType == "fallback" {
 		blockseal, fresh_vrfSig, err := sf.SignFallBack(bandersnatchSecret, unsignHeaderHash)
 		if err != nil {
-			return bl, err
+			return bl, newStateDB, err
 		}
 		h.BlockSeal = blockseal
 		h.VRFSignature = fresh_vrfSig
@@ -526,12 +511,14 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, e
 		attempt, err := sf.GetBindedAttempt(targetJCE)
 		blockseal, fresh_vrfSig, err := sf.SignPrimary(bandersnatchSecret, unsignHeaderHash, attempt)
 		if err != nil {
-			return bl, err
+			return bl, newStateDB, err
 		}
 		h.BlockSeal = blockseal
 		h.VRFSignature = fresh_vrfSig
 	}
-	return b, nil
+	fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, b.String(), newStateDB.String())
+
+	return b, newStateDB, nil
 }
 
 // Flush calls each SMTs flush operation
@@ -542,18 +529,24 @@ func (s *StateDB) Flush(ctx context.Context, timeSlotIndex uint32) error {
 
 func ComputeCurrentJCETime(unixTimestamp int64) int64 {
 	currentTime := time.Now()
+	// this is unnecessary for PoC
 	return ComputeJCETime(currentTime.Unix())
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
 func ComputeJCETime(unixTimestamp int64) int64 {
-	// Define the start of the Jam Common Era
-	jceStart := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+	production := false
+	if production {
+		// Define the start of the Jam Common Era
+		jceStart := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
 
-	// Convert the Unix timestamp to a Time object
-	currentTime := time.Unix(unixTimestamp, 0).UTC()
+		// Convert the Unix timestamp to a Time object
+		currentTime := time.Unix(unixTimestamp, 0).UTC()
 
-	// Calculate the difference in seconds
-	diff := currentTime.Sub(jceStart)
-	return int64(diff.Seconds())
+		// Calculate the difference in seconds
+		diff := currentTime.Sub(jceStart)
+		return int64(diff.Seconds())
+	} else {
+		return unixTimestamp
+	}
 }

@@ -30,7 +30,7 @@ func TestNodes(t *testing.T) {
 	prettyJSON, _ := json.MarshalIndent(validators, "", "  ")
 	fmt.Printf("Validators (size:%v) %s\n", numNodes, prettyJSON)
 
-	for i := 0; i < numNodes; i++ {
+	for i := uint32(0); i < numNodes; i++ {
 		addr := fmt.Sprintf(quicAddr, 9000+i)
 		peers[i] = addr
 		ed25519Key := validators[i].Ed25519.String()
@@ -49,7 +49,7 @@ func TestNodes(t *testing.T) {
 	fmt.Printf("PeerList: %s\n", prettyPeerList)
 
 	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
+	for i := uint32(0); i < numNodes; i++ {
 		validatorSecret, err := safrole.InitValidatorSecret(seeds[i], seeds[i])
 		if err != nil {
 			t.Fatalf("Failed to init node %d: with secret %v", i, err)

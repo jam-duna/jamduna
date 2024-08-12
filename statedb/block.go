@@ -89,7 +89,10 @@ func NewBlock() *Block {
 }
 
 // StateCopy returns a state copy that is necessary for generating the next block
-func (b *Block) StateCopy() *Block {
+func (b *Block) Copy() *Block {
+	if b == nil {
+		return nil
+	}
 	c := NewBlock()
 
 	// Copy Header fields
@@ -254,6 +257,11 @@ func (b *Block) Hash() common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(blockBytes)
+}
+
+// Hash returns the hash of the block.
+func (b *Block) ParentHash() common.Hash {
+	return b.Header.ParentHash
 }
 
 func (b *Block) String() string {
