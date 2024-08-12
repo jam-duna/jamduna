@@ -1335,7 +1335,9 @@ func (s *SafroleState) ApplyStateTransitionFromBlock(tickets []Ticket, targetJCE
 
 	fresh_randomness, err := s.GetFreshRandomness(header.VRFSignature)
 	if err != nil {
-		// return s2, fmt.Errorf("GetFreshRandomness %v", err)
+		fmt.Printf("GetFreshRandomness ERR %v (len=%d)", err, len(header.VRFSignature))
+		panic(0)
+		return s2, fmt.Errorf("GetFreshRandomness %v", err)
 	}
 
 	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)

@@ -398,7 +398,7 @@ func (s *StateDB) IsAuthorizedBlockBuilder(targetJCE uint32) bool {
 	bandersnatchPub := s.GetBandersnatchPub()
 	targetEpoch, phase := s.Safrole.EpochAndPhase(targetJCE)
 	// round robin
-	if phase%NumValidators == s.Id {
+	if phase%safrole.NumValidators == s.Id {
 		fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
 		return true
 	} else {
@@ -488,15 +488,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, n
 	h.BlockAuthorKey = author_index
 	b.Extrinsic = extrinsicData
 
-	b.Header = *h
 	unsignHeaderHash := h.UnsignedHash()
-	newStateDB = s.Copy() // newEmptyStateDB(s.sdb)
-	newSafrole := s.Safrole.Copy()
-	newStateDB.Safrole = newSafrole
-	newStateDB.Block = b
-
-	newStateDB.ParentHash = b.Header.ParentHash
-	newStateDB.ApplyStateTransitionFromBlock(context.Background(), b)
 
 	//signing
 	epochType := sf.CheckEpochType()
@@ -518,6 +510,14 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, n
 	}
 	fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, b.String(), newStateDB.String())
 
+	b.Header = *h
+	newStateDB = s.Copy() // newEmptyStateDB(s.sdb)
+	newSafrole := s.Safrole.Copy()
+	newStateDB.Safrole = newSafrole
+	newStateDB.Block = b
+
+	newStateDB.ParentHash = b.Header.ParentHash
+	newStateDB.ApplyStateTransitionFromBlock(context.Background(), b)
 	return b, newStateDB, nil
 }
 
