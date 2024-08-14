@@ -212,6 +212,10 @@ func (b *Block) TimeSlot() uint32 {
 	return b.GetHeader().TimeSlot
 }
 
+func (b *Block) EpochMark() *safrole.EpochMark {
+	return b.GetHeader().EpochMark
+}
+
 // ConvertToSafroleHeader converts a statedb.BlockHeader to a safrole.SafroleHeader
 func (header *BlockHeader) ConvertToSafroleHeader() safrole.SafroleHeader {
 	return safrole.SafroleHeader{
@@ -256,7 +260,8 @@ func (b *Block) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.BytesToHash(blockBytes)
+	//
+	return common.BytesToHash(common.ComputeHash(blockBytes))
 }
 
 // Hash returns the hash of the block.

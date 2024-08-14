@@ -294,7 +294,6 @@ func (s *StateDB) ProcessState() (*Block, *StateDB) {
 		// Time to propose block if selected
 		isAuthorizedBlockBuilder := s.IsAuthorizedBlockBuilder(currJCE)
 		if isAuthorizedBlockBuilder {
-			fmt.Printf("[N%v] MakeBlock from STATEDB %v\n", s.Id, s.String())
 			currEpoch, currPhase := s.Safrole.EpochAndPhase(currJCE)
 			// take the current stateDB + generate a new proposed Block and a new stateDB
 			proposedBlk, newStateDB, err := s.MakeBlock(context.Background(), currJCE)
@@ -352,7 +351,7 @@ func (s *StateDB) GenerateTickets(currJCE uint32) {
 	if s.SelfTicketCount(uint32(currEpoch)) >= safrole.NumAttempts {
 		return
 	}
-	fmt.Printf("[N%v] (Epoch,Phase) = (%v,%v) Generating Tickets!\n", s.Id, currEpoch, currPhase)
+	fmt.Printf("[N%v] Generating Tickets for (Epoch,Phase) = (%v,%v) s.Entropy[2]=%v\n", s.Id, currEpoch, currPhase, s.Safrole.Entropy[2])
 	tickets := sf.GenerateTickets(s.GetBandersnatchSecret())
 	for _, ticket := range tickets {
 		if s.AddSelfTicket(uint32(currEpoch), ticket) {
@@ -416,6 +415,11 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *Block)
 	ticketExts := blk.Tickets()
 	sf_header := blk.ConvertToSafroleHeader()
 	targetJCE := blk.TimeSlot()
+	epochMark := blk.EpochMark()
+	if epochMark != nil {
+		s.knownTickets = make(map[common.Hash]int) //keep track of known tickets
+		s.queuedticket = make(map[common.Hash]safrole.Ticket)
+	}
 	sf := s.GetSafrole()
 	s2, err := sf.ApplyStateTransitionFromBlock(ticketExts, targetJCE, sf_header, s.Id)
 	if err != nil {
@@ -440,7 +444,7 @@ func (s *StateDB) GetBlock() *Block {
 func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, newStateDB *StateDB, err error) {
 	sf := s.GetSafrole()
 	bandersnatchSecret := s.GetBandersnatchSecret()
-	needEpochMarker := sf.IsFirstEpochPhase(targetJCE)
+	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IsTicketSubmissionCloses(targetJCE)
 
 	b := NewBlock()
@@ -449,11 +453,18 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, n
 	h.ParentHash = s.BlockHash
 	h.PriorStateRoot = s.StateRoot
 	h.TimeSlot = targetJCE
+
+	// TODO: we only need an epoch marker if we didn't get enough tickets
+	needEpochMarker := isNewEpoch && false
 	if needEpochMarker {
 		epochMarker := sf.GenerateEpochMarker()
 		//a tuple of the epoch randomness and a sequence of Bandersnatch keys defining the Bandersnatch valida- tor keys (kb) beginning in the next epoch
 		fmt.Printf("targetJCE=%v EpochMarker:%v\n", targetJCE, epochMarker)
 		h.EpochMark = epochMarker
+	}
+	if isNewEpoch {
+		h.WinningTicketsMark = make([]*safrole.TicketBody, 0) // clear out the tickets if its a new epoch
+		s.queuedticket = make(map[common.Hash]safrole.Ticket)
 	}
 	if needWinningMarker {
 		fmt.Printf("targetJCE=%v check WinningMarker\n", targetJCE)

@@ -71,7 +71,9 @@ type Node struct {
 	streams     map[string]quic.Stream
 	store       *storage.StateDBStorage /// where to put this?
 
-	// holds a map of the blockhash to the stateDB
+	// holds a map of the parenthash to the block
+	blockCache map[common.Hash]*statedb.Block
+	// holds a map of the hash to the stateDB
 	statedbMap map[common.Hash]*statedb.StateDB
 	// holds the tip
 	statedb      *statedb.StateDB
@@ -238,6 +240,7 @@ func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safro
 		streams:     make(map[string]quic.Stream),
 		messageChan: messageChan,
 		statedbMap:  make(map[common.Hash]*statedb.StateDB),
+		blockCache:  make(map[common.Hash]*statedb.Block),
 	}
 
 	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
@@ -297,11 +300,9 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		var blkHash common.Hash
 		if _statedb.GetBlock() != nil {
 			blkHash = _statedb.GetBlock().Hash()
-			if n.id == 0 {
-				fmt.Printf("[N%d] addStateDB1 [%v] %v\n", n.id, blkHash, _statedb.String())
-			}
+			fmt.Printf("[N%d] addStateDB1 [%v] %v\n", n.id, blkHash, _statedb.String())
 		} else {
-			// fmt.Printf("[N%d] addStateDB0 [%v] %v\n", n.id, blkHash, _statedb.String())
+			fmt.Printf("[N%d] addStateDB0 [%v] %v\n", n.id, blkHash, _statedb.String())
 		}
 		n.statedb = _statedb
 		n.statedbMap[blkHash] = _statedb
@@ -316,9 +317,7 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		panic(0)
 	}
 	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() {
-		if n.id == 0 {
-			fmt.Printf("Incoming addStateDB: %d > %d [blockhash = %v]\n", _statedb.GetBlock().TimeSlot(), n.statedb.GetBlock().TimeSlot(), _statedb.GetBlock().Hash())
-		}
+		fmt.Printf("[N%d] addStateDB TIP %v\n", n.id, _statedb.GetBlock().Hash())
 		n.statedb = _statedb
 		n.statedbMap[_statedb.GetBlock().Hash()] = _statedb
 	}
@@ -485,6 +484,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		var block *statedb.Block
 		err := json.Unmarshal([]byte(msg.Payload), &block)
 		if err == nil {
+			fmt.Printf(" -- [N%d] received block From N%d (%v <- %v)\n", n.id, msg.Id, block.ParentHash(), block.Hash())
 			err = n.processBlock(block)
 			if err == nil {
 				response = ok
@@ -669,21 +669,25 @@ func (n *Node) dumpstatedbmap() {
 func (n *Node) processBlock(blk *statedb.Block) error {
 	prevstatedb, ok := n.statedbMap[blk.ParentHash()]
 	if !ok {
-		fmt.Printf("[N%d] NO STATEDB %v\n", n.id, blk.ParentHash())
-		n.dumpstatedbmap()
-		panic(0)
-		return fmt.Errorf("Unknown parenthash %x\n", blk.ParentHash())
+		n.blockCache[blk.ParentHash()] = blk
+		fmt.Printf("[N%d] NO STATEDB, so added BLOCK to blockCache[%v] <= %v\n", n.id, blk.ParentHash(), blk.Hash())
+		//n.dumpstatedbmap()
+		return nil // fmt.Errorf("Unknown parenthash %x\n", blk.ParentHash())
 	}
 
 	s := prevstatedb.Copy() // n.getState()
 
 	err := s.ProcessIncomingBlock(blk)
 	if err != nil {
+		fmt.Printf("[N%d] ProcessIncomingBlock ERR %v\n", n.id, err)
+		panic(0)
 		return err
 	}
 	// if we made it, store it in recent state
 	n.addStateDB(s)
 	if n.id == 0 {
+		fmt.Printf("[N%v] processBlock FINISHED %v<-%v  STATE (%v<-%v)\n", n.id, blk.ParentHash(), blk.Hash(), s.ParentHash, s.BlockHash)
+	} else {
 		fmt.Printf("[N%v] processBlock FINISHED %v<-%v  STATE (%v<-%v)\n", n.id, blk.ParentHash(), blk.Hash(), s.ParentHash, s.BlockHash)
 	}
 	return nil // Success
