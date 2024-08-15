@@ -43,3 +43,19 @@ func (store *StateDBStorage) DeleteK(key common.Hash) error {
 func (store *StateDBStorage) Close() error {
 	return store.db.Close()
 }
+
+func (store *StateDBStorage) ReadRawK(key []byte) ([]byte, error) {
+	data, err := store.db.Get(key, nil)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (store *StateDBStorage) WriteRawKV(key []byte, value []byte) error {
+	return store.db.Put(key, value, nil)
+}
+
+func (store *StateDBStorage) DeleteRawK(key []byte) error {
+	return store.db.Delete(key, nil)
+}

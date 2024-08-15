@@ -289,14 +289,18 @@ type WorkItem struct {
 	// y: a payload blob
 	PayloadBlob []byte `json:"payload_blob"`
 	// g: a gas limit
-	GasLimit            int             `json:"gas_limit"`
-	ImportedSegments    []ImportSegment `json:"imported_segments"`
-	NewDataSegments     []common.Hash   `json:"new_data_segments"`
-	NumSegmentsExported uint32          `json:"num_segments_exported"`
+	GasLimit            int               `json:"gas_limit"`
+	ImportedSegments    []ImportSegment   `json:"imported_segments"`
+	NewData             []NewDataSegments `json:"new_data"` // shawn: not sure if this is correct
+	NumSegmentsExported uint32            `json:"num_segments_exported"`
 }
 type ImportSegment struct {
 	SegmentRoot  common.Hash `json:"segment_root"`
 	SegmentIndex uint32      `json:"segment_index"`
+}
+type NewDataSegments struct {
+	BlobHash      []common.Hash `json:"blob_hash"`
+	BlobHashIndex []uint32      `json:"blob_hash_index"`
 }
 
 /*
@@ -403,6 +407,24 @@ type GasAttributable struct {
 	ServiceIndex int     `json:"service_index"`
 	Gas          float64 `json:"gas"`
 }
+
+// -----Custom types for tiny QUIC experiment-----
+
+type DistributeECChunk struct {
+	SegmentRoot []byte `json:"segment_root"`
+	Data        []byte `json:"data"`
+}
+
+type ECChunkResponse struct {
+	SegmentRoot []byte `json:"segment_root"`
+	Data        []byte `json:"data"`
+}
+
+type ECChunkQuery struct {
+	SegmentRoot []byte `json:"segment_root"`
+}
+
+// ----------------------------------------------
 
 type Ping struct {
 	Sender  string `json:"sender"`

@@ -2,10 +2,13 @@ module github.com/colorfulnotion/jam
 
 go 1.21
 
+toolchain go1.22.5
+
 require (
 	github.com/ChainSafe/gossamer v0.9.0
 	github.com/ethereum/go-ethereum v1.14.5
 	github.com/google/go-cmp v0.6.0
+	github.com/klauspost/reedsolomon v1.12.3
 	github.com/quic-go/quic-go v0.38.2
 	github.com/stretchr/testify v1.8.4
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
@@ -19,6 +22,7 @@ require (
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/pprof v0.0.0-20230821062121-407c9e7a662f // indirect
 	github.com/holiman/uint256 v1.2.4 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/onsi/ginkgo/v2 v2.11.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/quic-go/qtls-go1-20 v0.3.3 // indirect

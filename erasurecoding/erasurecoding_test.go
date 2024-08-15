@@ -1,7 +1,6 @@
 package erasurecoding
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -109,47 +108,65 @@ func readTestVectorAtom(jsonFilePath string) ([]byte, []byte, error) {
 }
 
 func test_encode_decode(t *testing.T, size uint32) error {
+	fmt.Printf("\nTesting size %d\n", size)
 	// Generate random byte array of the specified size
-	//TODO:
 	original := make([]byte, size)
 	_, err := rand.Read(original)
 	if err != nil {
 		t.Fatalf("Error generating random bytes: %v", err)
 	}
+	fmt.Printf("Original data %x\n", original)
 
+	// Encode the original data
 	encodedOutput, err0 := Encode(original)
 	if err0 != nil {
 		t.Fatalf("Error in Encode: %v", err0)
 	}
+	fmt.Printf("Encoded output:\n")
+	print3DByteArray(encodedOutput)
 
 	// Pseudo availability of all subshards, randomly "erase" some subshards according to the availableCount value
-	available := make([]byte, 1026)
-	availableCount := 342 // number of available subshards
-	for i := 0; i < len(available); i++ {
-		if i < availableCount {
-			available[i] = 1
-		} else {
-			available[i] = 0
+	availability := make([][]bool, len(encodedOutput))
+	availableCount := K // number of available subshards per segment.
+	for i := 0; i < len(encodedOutput); i++ {
+		availability[i] = make([]bool, N)
+		for j := 0; j < N; j++ {
+			if j < N-availableCount {
+				availability[i][j] = false
+			} else {
+				availability[i][j] = true
+			}
+		}
+
+		// Shuffle the available subshards
+		rand.Shuffle(N, func(k, l int) {
+			availability[i][k], availability[i][l] = availability[i][l], availability[i][k]
+		})
+
+		// Erasure simulation
+		for j := 0; j < N; j++ {
+			if !availability[i][j] {
+				encodedOutput[i][j] = nil
+			}
 		}
 	}
-	rand.Shuffle(len(available), func(i, j int) {
-		available[i], available[j] = available[j], available[i]
-	})
-	fmt.Printf("Number of Available subshards: %d\nAvailability:%x\n", availableCount, available)
+	fmt.Printf("Erased output:\n")
+	print3DByteArray(encodedOutput)
 
-	decodedOutput, err2 := Decode(uint32(len(original)), encodedOutput, available)
+	decodedOutput, err2 := Decode(encodedOutput)
 	if err2 != nil {
 		t.Fatalf("Error in Decode: %v", err2)
 	}
-	fmt.Printf("Encoded output size %d\n", len(encodedOutput))
+	fmt.Printf("Decoded output %x\n", decodedOutput)
 
 	// Check if the decoded output matches the original input
-	if bytes.Equal(original, decodedOutput) {
-		fmt.Printf("Decoded output matches the original input for size %d\n", size)
-		return nil
-	} else {
-		t.Fatalf("Decoded output does not match the original input for size %d", size)
+	for i := 0; i < len(original); i++ {
+		if original[i] != decodedOutput[i] {
+			t.Fatalf("Decoded output does not match the original input for size %d", size)
+		}
 	}
+	fmt.Printf("Decoded output matches the original input for size %d\n", size)
+
 	return nil
 }
 
@@ -172,101 +189,6 @@ func TestEC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ERR %v", err)
 		}
-	}
-}
-
-// Use this function to test specific size of data and output as json file
-func TestJsonSave(t *testing.T) {
-
-	// Generate random byte array of the specified size
-
-	//fixed random seed for repeatability
-	rand.Seed(1000003)
-
-	original := make([]byte, 5000)
-	_, err := rand.Read(original)
-	if err != nil {
-		t.Fatalf("Error generating random bytes: %v", err)
-	}
-
-	encodedOutput, err0 := Encode(original)
-	if err0 != nil {
-		t.Fatalf("Error in Encode: %v", err0)
-	}
-	fmt.Printf("Encoded output size %d\n", len(encodedOutput))
-	encodedArray := GetSubshardsAtomic(encodedOutput, original)
-	fmt.Printf("Shape of encodedArray: %d, %d, %d\n", len(encodedArray), len(encodedArray[0]), len(encodedArray[0][0]))
-	err = ConvertToJSON(original, encodedArray, "codewords.json")
-	if err != nil {
-		t.Fatalf("Error in ConvertToJSON: %v", err)
-	}
-
-}
-
-// This function is used to test the encode and decode functions with the test vectors provided
-// Used to debug the encode and decode functions
-func TestErasureCodingDebug(t *testing.T) {
-	// Directory containing jamtestvectors JSON files
-	dir := "./"
-	file := "codewords.json"
-	filePath := filepath.Join(dir, file)
-	data, subshards, err := readTestVectorAtom(filePath)
-	if err != nil {
-		t.Fatalf("Failed to read test vector: %v", err)
-	}
-
-	fmt.Printf("Data:\n")
-	dataHex := hex.EncodeToString(data)
-	fmt.Println(dataHex)
-
-	subshardsHex := hex.EncodeToString(subshards)
-	for i := 0; i < len(subshardsHex); i += 24 {
-		end := i + 24
-		if end > len(subshardsHex) {
-			end = len(subshardsHex)
-		}
-		fmt.Println(subshardsHex[i:end])
-	}
-
-	encodedOutput, err0 := Encode(data)
-	if err0 != nil {
-		t.Fatalf("Error in Encode: %v", err0)
-	}
-
-	encodedHex := hex.EncodeToString(encodedOutput)
-	for i := 0; i < len(encodedHex); i += 24 {
-		end := i + 24
-		if end > len(encodedHex) {
-			end = len(encodedHex)
-		}
-		fmt.Println(encodedHex[i:end])
-	}
-
-	// ConvertToJSON(data, GetSubshards(encodedOutput), "codewords.json")
-
-	// Check if the encoded output matches the expected output
-	if equalBytes(encodedOutput, subshards) {
-		fmt.Printf("Encoded output matches the expected output for %s\n", file)
-	} else {
-		t.Fatalf("Encoded output does not match the expected output for %s", file)
-	}
-
-	// Pseudo availability of all subshards, i.e. all subshards are available
-	available := make([]byte, 1026)
-	for i := 0; i < 1026; i++ {
-		available[i] = 1
-	}
-
-	decodedOutput, err1 := Decode(uint32(len(data)), subshards, available)
-	if err1 != nil {
-		t.Fatalf("Error in Decode: %v", err1)
-	}
-
-	// Check if the decoded output matches the original input
-	if equalBytes(data, decodedOutput) {
-		fmt.Printf("Decoded output matches the original input for %s\n", file)
-	} else {
-		t.Fatalf("Decoded output does not match the original input for %s", file)
 	}
 }
 
@@ -297,147 +219,45 @@ func TestGenerateTestVectors(t *testing.T) {
 			t.Fatalf("Error in Encode: %v", err0)
 		}
 
-		encodedArray := GetSubshardsAtomic(encodedOutput, original)
-
 		//filename := fmt.Sprintf("package_%d.json", size)
 		filename := fmt.Sprintf("./vectors/atomic_testvectors/package_%d", size)
-		err = ConvertToJSON(original, encodedArray, filename)
+		err = ConvertToJSON(original, encodedOutput, filename)
 		if err != nil {
 			t.Fatalf("Error in ConvertToJSON: %v", err)
 		}
 	}
 }
 
-func TestGenerateTestVectors684(t *testing.T) {
-	//fixed random seed for repeatability
-	//colorfulnotion jam [99, 111, 108, 114, 102, 117, 110, 116, 105, 106, 97, 109]
-	seed := []int64{
-		99, 111, 108, 114, 102, 117, 110, 116, 105, 106, 97, 109,
-	}
-	size := 684
-	batch0 := make([]byte, size*6)
-	batch1 := make([]byte, size*6)
-	for i := 0; i < len(seed); i++ {
-		rand.Seed(seed[i])
-		original := make([]byte, size)
-		_, err := rand.Read(original)
-		if err != nil {
-			t.Fatalf("Error generating random bytes: %v", err)
-		}
-		if i < 6 {
-			copy(batch0[i*size:(i+1)*size], original)
-
-		} else {
-			copy(batch1[(i-6)*size:(i-5)*size], original)
-		}
-
-		encodedOutput, err0 := Encode(original)
-		if err0 != nil {
-			t.Fatalf("Error in Encode: %v", err0)
-		}
-
-		encodedArray := GetSubshardsAtomic(encodedOutput, original)
-
-		//filename := fmt.Sprintf("package_%d.json", size)
-		filename := fmt.Sprintf("./vectors/testvector_684/vector_%d", i)
-		err = ConvertToJSON(original, encodedArray, filename)
-		if err != nil {
-			t.Fatalf("Error in ConvertToJSON: %v", err)
-		}
-	}
-	encodedOutputBatch0, err0 := Encode(batch0)
-	if err0 != nil {
-		t.Fatalf("Error in Encode: %v", err0)
-	}
-	encodedArrayBatch0 := GetSubshardsAtomic(encodedOutputBatch0, batch0)
-	err := ConvertToJSON(batch0, encodedArrayBatch0, "./vectors/testvector_684/batch_0")
+// This function is used to test the Encode and Decode functions using the test vectors
+func TestTestVectors(t *testing.T) {
+	data, encoded, err := readTestVectorAtom("./vectors/old_vector/batch_1")
 	if err != nil {
-		t.Fatalf("Error in ConvertToJSON: %v", err)
+		t.Fatalf("Error reading test vector: %v", err)
 	}
-
-	encodedOutputBatch1, err0 := Encode(batch1)
-	if err0 != nil {
-		t.Fatalf("Error in Encode: %v", err0)
+	encodeddata := make([][][]byte, 1)
+	encodeddata[0] = make([][]byte, 1026)
+	for i := 0; i < 1026; i++ {
+		encodeddata[0][i] = make([]byte, 64)
+		copy(encodeddata[0][i], encoded[i*12:(i+1)*12])
 	}
-	encodedArrayBatch1 := GetSubshardsAtomic(encodedOutputBatch1, batch1)
-	err = ConvertToJSON(batch1, encodedArrayBatch1, "./vectors/testvector_684/batch_1")
-	if err != nil {
-		t.Fatalf("Error in ConvertToJSON: %v", err)
+	//decode
+	decodedOutput, err2 := Decode(encodeddata)
+	if err2 != nil {
+		t.Fatalf("Error in Decode: %v", err2)
 	}
-
-}
-
-// Use this function to test if the encoded output matches the expected output from the Test vector we generated
-func TestErasureCoding(t *testing.T) {
-	// Directory containing jamtestvectors JSON files
-	dir := "./vectors/testvector_684"
-
-	// Read all files in the directory
-	files, err := ioutil.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("Failed to read directory: %v", err)
-	}
-
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		filePath := filepath.Join(dir, file.Name())
-		data, subshards, err := readTestVectorAtom(filePath)
-		if err != nil {
-			t.Fatalf("Failed to read test vector: %v", err)
-		}
-
-		fmt.Printf("Testing %s\n", file.Name())
-
-		encodedOutput, err0 := Encode(data)
-		if err0 != nil {
-			t.Fatalf("Error in Encode: %v", err0)
-		}
-		//print out the encoded output length and subshards length and data length
-		fmt.Printf("Encoded output size %d\n", len(encodedOutput))
-		fmt.Printf("Subshards size %d\n", len(subshards))
-		fmt.Printf("Data size %d\n", len(data))
-
-		// Check if the encoded output matches the expected output
-		if equalBytes(encodedOutput, subshards) {
-			fmt.Printf("Encoded output matches the expected output for %s\n", file.Name())
-		} else {
-			t.Fatalf("Encoded output does not match the expected output for %s", file.Name())
-		}
-
-		// Pseudo availability of all subshards, i.e. all subshards are available
-		available := make([]byte, 1026)
-		for i := 0; i < 1026; i++ {
-			available[i] = 1
-		}
-
-		decodedOutput, err1 := Decode(uint32(len(data)), subshards, available)
-		if err1 != nil {
-			t.Fatalf("Error in Decode: %v", err1)
-		}
-
-		// Check if the decoded output matches the original input
-		if equalBytes(data, decodedOutput) {
-			fmt.Printf("Decoded output matches the original input for %s\n", file.Name())
-		} else {
-			t.Fatalf("Decoded output does not match the original input for %s", file.Name())
-		}
+	if !compareBytes(data, decodedOutput) {
+		t.Fatalf("Decoded output does not match the original input")
 	}
 }
 
-// Helper function to compare two byte slices
-func equalBytes(a, b []byte) bool {
+func compareBytes(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			fmt.Printf("Mismatch at index %d\n", i)
+	for i, v := range a {
+		if v != b[i] {
 			return false
 		}
-
 	}
 	return true
 }

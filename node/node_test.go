@@ -1,14 +1,19 @@
 package node
 
 import (
+	"bytes"
+	"crypto/rand"
 	"fmt"
+	"time"
+
 	//"sync"
 	"encoding/json"
-	"github.com/colorfulnotion/jam/safrole"
 	"testing"
+
+	"github.com/colorfulnotion/jam/safrole"
 )
 
-func TestNodes(t *testing.T) {
+func SetupQuicNetwork() (safrole.GenesisConfig, []string, map[string]NodeInfo, []safrole.ValidatorSecret, error) {
 	seeds, _ := generateSeedSet(numNodes)
 	fmt.Printf("seeds %x\n", seeds)
 
@@ -21,7 +26,7 @@ func TestNodes(t *testing.T) {
 		if err == nil {
 			validators[i] = validator
 		} else {
-			t.Fatalf("Failed to init validator %d: %v", i, err)
+			return safrole.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
 		}
 	}
 
@@ -44,25 +49,108 @@ func TestNodes(t *testing.T) {
 	// Print out peerList
 	prettyPeerList, err := json.MarshalIndent(peerList, "", "  ")
 	if err != nil {
-		t.Fatalf("Failed to marshal peerList: %v", err)
+		return safrole.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v", err)
 	}
 	fmt.Printf("PeerList: %s\n", prettyPeerList)
 
-	nodes := make([]*Node, numNodes)
-	for i := uint32(0); i < numNodes; i++ {
+	// Compute validator secrets
+	validatorSecrets := make([]safrole.ValidatorSecret, numNodes)
+	for i := 0; i < numNodes; i++ {
 		validatorSecret, err := safrole.InitValidatorSecret(seeds[i], seeds[i])
 		if err != nil {
-			t.Fatalf("Failed to init node %d: with secret %v", i, err)
+			return safrole.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
 		}
-		node, err := newNode(i, validatorSecret, &genesisConfig, peers, peerList)
+		validatorSecrets[i] = validatorSecret
+	}
+	return genesisConfig, peers, peerList, validatorSecrets, nil
+}
+
+func TestNodeSafrole(t *testing.T) {
+	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	if err != nil {
+		t.Fatalf("Error Seeting up nodes: %v\n", err)
+	}
+
+	nodes := make([]*Node, numNodes)
+	for i := 0; i < numNodes; i++ {
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag)
 		if err != nil {
-			t.Fatalf("Failed to create node %d: %v", i, err)
+			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
 		//node.state = safrole.ProcessGenesis(genesisAuthorities)
 		nodes[i] = node
 	}
-
 	for {
-		// Additional test logic or a simple blocking mechanism to keep the test running
+	}
+}
+
+func TestECRoundTrip(t *testing.T) {
+	// Define various data sizes to test
+	//try to do it separately test for each size
+	dataSizes := []int{1028, 23, 24, 25, 26, 27, 28, 29, 30, 31, 39, 1024}
+	// Initialize nodes
+	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	if err != nil {
+		t.Fatalf("Error setting up nodes: %v\n", err)
+	}
+
+	nodes := make([]*Node, numNodes)
+	for i := 0; i < numNodes; i++ {
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		if err != nil {
+			t.Fatalf("Failed to create node %d: %v\n", i, err)
+		}
+		nodes[i] = node
+	}
+	// Wait for nodes to be ready
+	fmt.Println("Waiting for nodes to be ready...")
+	time.Sleep(1 * time.Second)
+
+	senderNode := nodes[0]
+
+	for _, size := range dataSizes {
+		t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
+			// Generate random data of the specified size
+			data := make([]byte, size)
+			_, err := rand.Read(data)
+			if err != nil {
+				t.Fatalf("Failed to generate random data: %v", err)
+			}
+
+			blob_hash, err := senderNode.EncodeAndDistributeData(data)
+			if err != nil {
+				t.Fatalf("Failed to encode and distribute data: %v", err)
+			}
+			time.Sleep(500 * time.Millisecond)
+			reconstructData, err := senderNode.FetchAndReconstructData(blob_hash)
+			if err != nil {
+				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
+			}
+			time.Sleep(1000 * time.Millisecond)
+			fmt.Printf("Reconstructed data (size %d): %x\n", len(reconstructData), reconstructData)
+
+			// Compare the original data and the reconstructed data with bytes.Equal
+			if !bytes.Equal(data, reconstructData) {
+				t.Fatalf("Original data and reconstructed data are different for size %d", size)
+			} else {
+				fmt.Printf("roundtrip success for DataSize%d\n", size)
+			}
+		})
+	}
+}
+
+// ---------------------------- Helper Functions ----------------------------
+
+func print3DByteArray(arr [][][]byte) {
+	for i := range arr {
+		fmt.Printf("Segment %d:\n", i)
+		fmt.Println("----------------")
+		for j := range arr[i] {
+			for k := range arr[i][j] {
+				fmt.Printf("%02x ", arr[i][j][k])
+			}
+			fmt.Println()
+		}
+		fmt.Println("----------------")
 	}
 }

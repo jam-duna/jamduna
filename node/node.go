@@ -19,18 +19,19 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 
-	//"github.com/colorfulnotion/jam/statedb"
-
 	"log"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
 
+	"io"
+
+	"github.com/colorfulnotion/jam/erasurecoding"
 	"github.com/colorfulnotion/jam/safrole"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/quic-go/quic-go"
 	"golang.org/x/crypto/blake2b"
-	"io"
 )
 
 // Hash function using Blake2b
@@ -42,6 +43,12 @@ func bhash(data []byte) common.Hash {
 const (
 	numNodes = 6
 	quicAddr = "localhost:%d" // karura-internal.polkaholic.io:%d
+)
+
+const (
+	ValidatorFlag   = "VALIDATOR"
+	DAFlag          = "DA"
+	ValidatorDAFlag = "VALIDATOR&DA"
 )
 
 type QuicMessage struct {
@@ -79,6 +86,7 @@ type Node struct {
 	statedb      *statedb.StateDB
 	connectionMu sync.Mutex
 	messageChan  chan statedb.Message
+	nodeType     string
 }
 
 /*
@@ -158,7 +166,7 @@ func (n *Node) setValidatorCredential(credential safrole.ValidatorSecret) {
 	}
 }
 
-func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safrole.GenesisConfig, peers []string, peerList map[string]NodeInfo) (*Node, error) {
+func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safrole.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string) (*Node, error) {
 	path := fmt.Sprintf("/tmp/log/testdb%d", id)
 	store, err := storage.NewStateDBStorage(path)
 	if err != nil {
@@ -239,6 +247,7 @@ func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safro
 		connections: make(map[string]quic.Connection),
 		streams:     make(map[string]quic.Stream),
 		messageChan: messageChan,
+		nodeType:    nodeType,
 		statedbMap:  make(map[common.Hash]*statedb.StateDB),
 		blockCache:  make(map[common.Hash]*statedb.Block),
 	}
@@ -250,8 +259,8 @@ func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safro
 		_statedb.OpenMsgChannel(messageChan)
 		node.addStateDB(_statedb)
 	}
-
 	node.setValidatorCredential(credential)
+
 	go node.runServer()
 	go node.runClient()
 	return node, nil
@@ -272,6 +281,10 @@ func getConnKey(identifier string, incoming bool) string {
 	}
 }
 
+func (n *Node) GetNodeType() string {
+	return n.nodeType
+}
+
 func (n *Node) getState() *statedb.StateDB {
 	return n.statedb
 }
@@ -282,6 +295,15 @@ func (n *Node) getPeerIndex(identifier string) (uint32, error) {
 		return peer.PeerID, nil
 	}
 	return 0, fmt.Errorf("peer not found")
+}
+
+func (n *Node) getPeerByIndex(peerIdx uint32) (string, error) {
+	for _, peer := range n.peersInfo {
+		if peer.PeerID == peerIdx {
+			return peer.Validator.Ed25519.String(), nil
+		}
+	}
+	return "", fmt.Errorf("peer not found")
 }
 
 func (n *Node) getPeerAddr(identifier string) (string, error) {
@@ -508,6 +530,40 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 				response = ok
 			}
 		}
+	// -----Custom messages for tiny QUIC experiment-----
+
+	case "DistributeECChunk":
+		var chunk DistributeECChunk
+		err := json.Unmarshal([]byte(msg.Payload), &chunk)
+		if err == nil {
+			err = n.processDistributeECChunk(chunk)
+			if err == nil {
+				response = ok
+			}
+		}
+
+	// case "ECChunkResponse":
+	// 	var chunk ECChunkResponse
+	// 	err := json.Unmarshal([]byte(msg.Payload), &chunk)
+	// 	if err == nil {
+	// 		err = n.processECChunkResponse(chunk)
+	// 		if err == nil {
+	// 			response = ok
+	// 		}
+	// 	}
+
+	case "ECChunkQuery":
+		var query ECChunkQuery
+		err := json.Unmarshal([]byte(msg.Payload), &query)
+		if err == nil {
+			r, err := n.processECChunkQuery(query)
+			if err == nil {
+				serializedR, err := json.Marshal(r)
+				if err == nil {
+					response = serializedR
+				}
+			}
+		}
 	}
 
 	_, err = stream.Write(response)
@@ -624,7 +680,7 @@ func (n *Node) makeRequest(peerIdentifier string, obj interface{}) ([]byte, erro
 	//fmt.Printf("-- [N%v] makeRequest READ RESPONSE %d bytes from N%v\n", n.id, buffer.Len(), peerID)
 	//fmt.Printf(" -- [N%v] makeRequest WRITE %s => N%v\n", n.id, msgType, peerID)
 	stream.Close()
-	return nil, nil
+	return buffer.Bytes(), nil
 }
 
 // Helper function to determine if the error is a timeout error
@@ -703,6 +759,249 @@ func (n *Node) processWorkPackage(workPackage WorkPackage) error {
 	return nil // Success
 }
 
+// -----Custom methods for tiny QUIC EC experiment-----
+
+func (n *Node) processDistributeECChunk(chunk DistributeECChunk) error {
+	// Serialize the chunk
+	serialized, err := json.Marshal(chunk)
+	if err != nil {
+		return err
+	}
+	// Save the chunk to the local storage
+	key := fmt.Sprintf("DA-%d", chunk.SegmentRoot)
+	err = n.store.WriteRawKV([]byte(key), serialized)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (n *Node) processECChunkQuery(ecChunkQuery ECChunkQuery) (ECChunkResponse, error) {
+	key := fmt.Sprintf("DA-%d", ecChunkQuery.SegmentRoot)
+	// fmt.Printf("[N%v] processECChunkQuery key=%s\n", n.id, key)
+	data, err := n.store.ReadRawK([]byte(key))
+	if err != nil {
+		return ECChunkResponse{}, err
+	}
+	// Deserialize the chunk
+	var chunk ECChunkResponse
+	err = json.Unmarshal(data, &chunk)
+	if err != nil {
+		return ECChunkResponse{}, err
+	}
+	return chunk, nil
+}
+
+func (n *Node) encode(data []byte) ([][][]byte, error) {
+	// Load the file and encode them into segments of chunks. (3D byte array)
+
+	// encode the data
+	encoded_data, err := erasurecoding.Encode(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// return the encoded data
+	return encoded_data, nil
+}
+
+func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte) ([]DistributeECChunk, error) {
+	// TODO: Pack the chunks into DistributeECChunk objects
+	chunks := make([]DistributeECChunk, 0)
+	for i := range segments {
+		for j := range segments[i] {
+			// Pack the DistributeECChunk object
+			// TODO: Modify this as needed.
+			chunk := DistributeECChunk{
+				SegmentRoot: segmentRoots[i],
+				Data:        segments[i][j],
+			}
+			chunks = append(chunks, chunk)
+		}
+	}
+	// Return the DistributeECChunk objects
+	return chunks, nil
+}
+
+func encodeBlobMeta(segmentRootsFlattened []byte, originalLength int) []byte {
+	// Serialize the original byte length as a 4-byte slice
+	lengthBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(lengthBytes, uint32(originalLength))
+
+	// Combine the length bytes with the segment roots
+	encodedBytes := append(lengthBytes, segmentRootsFlattened...)
+	return encodedBytes
+}
+
+func decodeBlobMeta(value []byte) (int, []byte, error) {
+	if len(value) < 4 {
+		return 0, nil, fmt.Errorf("value is too short to contain a valid length")
+	}
+
+	// Extract the first 4 bytes to get the original length
+	originalLength := int(binary.BigEndian.Uint32(value[:4]))
+
+	// The rest of the value is the segment roots
+	segmentRootsFlattened := value[4:]
+
+	return originalLength, segmentRootsFlattened, nil
+}
+
+func (n *Node) EncodeAndDistributeData(data []byte) (common.Hash, error) {
+	// Load the file and encode them into segments of chunks
+	segments, err := n.encode(data)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	// Build segment roots
+	segmentRoots := make([][]byte, 0)
+	for i := range segments {
+		leaves := segments[i]
+		tree := trie.NewCDMerkleTree(leaves)
+		segmentRoots = append(segmentRoots, tree.Root())
+	}
+
+	blob_hash := bhash(data)
+	segmentRootsFlattened := make([]byte, 0)
+	for i := range segmentRoots {
+		segmentRootsFlattened = append(segmentRootsFlattened, segmentRoots[i]...)
+	}
+	/// storer needs to know the size of original byte in order to eliminate any segment padding
+	blob_meta := encodeBlobMeta(segmentRootsFlattened, len(data))
+	n.store.WriteKV(blob_hash, blob_meta)
+
+	// Pack the chunks into DistributeECChunk objects
+	ecChunks, err := n.packChunks(segments, segmentRoots)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	// Send the DistributeECChunk object to a random K peers
+	for i, ecChunk := range ecChunks {
+
+		peerIdx := uint32(i % numNodes)
+
+		if peerIdx == n.id {
+			n.processDistributeECChunk(ecChunk)
+		}
+
+		peerIdentifier, err := n.getPeerByIndex(peerIdx)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		// fmt.Println("making request from node", 0, "to", peerIdentifier)
+		response, err := n.makeRequest(peerIdentifier, ecChunk)
+		if err != nil {
+			fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
+			continue
+		}
+		_ = response
+
+		// Wait for nodes to process the request
+		// time.Sleep(100 * time.Millisecond)
+	}
+
+	return blob_hash, nil
+}
+
+func (n *Node) FetchAndReconstructData(blob_hash common.Hash) ([]byte, error) {
+	blob_meta, err := n.store.ReadKV(blob_hash)
+	if err != nil {
+		return nil, err
+	}
+	originalLength, segmentRootsFlattened, _ := decodeBlobMeta(blob_meta)
+	segmentRoots := make([][]byte, 0)
+	for i := 0; i < len(segmentRootsFlattened); i += 32 {
+		segmentRoots = append(segmentRoots, segmentRootsFlattened[i:i+32])
+	}
+
+	// Fetch the chunks from peers
+	decoderInputSegments := make([][][]byte, 0)
+	for i, segmentRoot := range segmentRoots {
+		_ = i
+		ecChunkResponses := make([]ECChunkResponse, 0)
+		fetchedChunks := 0
+		for j := 0; j < numNodes; j++ {
+			peerIdentifier, err := n.getPeerByIndex(uint32(j))
+			if err != nil {
+				return nil, err
+			}
+			ecChunkQuery := ECChunkQuery{
+				SegmentRoot: segmentRoot,
+			}
+			/*
+				if peerIdentifier == n.getIdentifier() {
+					// Fetch the chunk from local storage
+					ecChunkResponse, err := n.processECChunkQuery(ecChunkQuery)
+					if err != nil {
+						return nil, err
+					}
+
+					ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
+
+					fetchedChunks++
+					if fetchedChunks >= erasurecoding.K {
+						break
+					}
+					continue
+				}
+			*/
+			response, err := n.makeRequest(peerIdentifier, ecChunkQuery)
+			if err != nil {
+				fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
+				ecChunkResponses = append(ecChunkResponses, ECChunkResponse{})
+			}
+			var ecChunkResponse ECChunkResponse
+			err = json.Unmarshal(response, &ecChunkResponse)
+			if err != nil {
+				return nil, err
+			}
+			ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
+
+			fetchedChunks++
+			if fetchedChunks >= erasurecoding.K {
+				break
+			}
+		}
+
+		// debug
+		fmt.Printf("Fetched %d chunks\n", fetchedChunks)
+		for j := 0; j < fetchedChunks; j++ {
+			fmt.Printf("Chunk %d: %x\n", j, ecChunkResponses[j])
+		}
+
+		// build decoder input
+		_ = decoderInputSegments
+		decoderInputSegment := make([][]byte, 0)
+		for j := 0; j < erasurecoding.N; j++ {
+			if j >= len(ecChunkResponses) {
+				decoderInputSegment = append(decoderInputSegment, nil)
+				continue
+			}
+			if len(ecChunkResponses[j].Data) == 0 {
+				decoderInputSegment = append(decoderInputSegment, nil)
+				continue
+			}
+			decoderInputSegment = append(decoderInputSegment, ecChunkResponses[j].Data)
+		}
+		decoderInputSegments = append(decoderInputSegments, decoderInputSegment)
+	}
+
+	// Reconstruct the data
+	reconstructedData, err := erasurecoding.Decode(decoderInputSegments)
+	if err != nil {
+		return nil, err
+	}
+
+	// Trim any padding using the original length
+	if len(reconstructedData) > originalLength {
+		reconstructedData = reconstructedData[:originalLength]
+	}
+
+	return reconstructedData, nil
+}
+
 func getMessageType(obj interface{}) string {
 
 	switch obj.(type) {
@@ -728,6 +1027,10 @@ func getMessageType(obj interface{}) string {
 		return "Announcement"
 	case WorkPackage:
 		return "WorkPackage"
+	case DistributeECChunk:
+		return "DistributeECChunk"
+	case ECChunkQuery:
+		return "ECChunkQuery"
 	default:
 		return "unknown"
 	}
@@ -743,6 +1046,9 @@ func (n *Node) runClient() {
 	for {
 		select {
 		case <-ticker_pulse.C:
+			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
+				return
+			}
 			newBlock, newStateDB := n.statedb.ProcessState()
 			if newStateDB != nil {
 				n.addStateDB(newStateDB)
