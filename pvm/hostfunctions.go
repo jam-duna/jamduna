@@ -5,15 +5,46 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/scale"
-	"github.com/ethereum/go-ethereum/common"
-	"golang.org/x/crypto/blake2b"
 )
 
-// Hash function using Blake2b
-func bhash(data []byte) common.Hash {
-	hash := blake2b.Sum256(data)
-	return common.BytesToHash(hash[:])
+// Appendix B - Host function
+const (
+	GAS               = 0
+	LOOKUP            = 1
+	READ              = 2
+	WRITE             = 3
+	INFO              = 4
+	EMPOWER           = 5
+	ASSIGN            = 6
+	DESIGNATE         = 7
+	CHECKPOINT        = 8
+	NEW               = 9
+	UPGRADE           = 10
+	TRANSFER          = 11
+	QUIT              = 12
+	SOLICIT           = 13
+	FORGET            = 14
+	HISTORICAL_LOOKUP = 15
+	IMPORT            = 16
+	EXPORT            = 17
+	MACHINE           = 18
+	PEEK              = 19
+	POKE              = 20
+	INVOKE            = 21
+	EXPUNGE           = 22
+)
+
+// false byte
+func falseBytes(data []byte) []byte {
+	result := make([]byte, len(data))
+	for i := 0; i < len(data); i++ {
+		result[i] = 0xFF - data[i]
+		// result[i] = ^data[i]
+	}
+	return result
 }
 
 func (vm *VM) IsAuthorized(p, c byte) (uint32, error) {
@@ -25,16 +56,107 @@ func (vm *VM) IsAuthorized(p, c byte) (uint32, error) {
 	return OK, nil
 }
 
-func (vm *VM) InvokeHostCall(opcode byte, operands []byte) (bool, error) {
+// func (vm *VM) InvokeHostCall(opcode byte, operands []byte) (bool, error) {
+func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	// Implement the logic for handling host calls
 	// Return true if the call results in a halt condition, otherwise false
-	switch opcode {
-	case 0xFF: // Example opcode for a host call
-		// Perform the host call logic
-		return true, nil // Return true to indicate a halt condition
-	// Add more cases for different host call opcodes here...
+	// host_fn := int(opcode)
+	fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
+	switch host_fn {
+	case GAS:
+		vm.hostGas()
+		return true, nil
+
+	case LOOKUP:
+		vm.hostLookup()
+		return true, nil
+
+	case READ:
+		vm.hostRead()
+		return true, nil
+
+	case WRITE:
+		vm.hostWrite()
+		return true, nil
+
+	case INFO:
+		vm.hostInfo()
+		return true, nil
+
+	case EMPOWER:
+		vm.hostEmpower()
+		return true, nil
+
+	case ASSIGN:
+		vm.hostAssign()
+		return true, nil
+
+	case DESIGNATE:
+		vm.hostDesignate()
+		return true, nil
+
+	case CHECKPOINT:
+		vm.hostCheckpoint()
+		return true, nil
+
+	case NEW:
+		vm.hostNew()
+		return true, nil
+
+	case UPGRADE:
+		vm.hostUpgrade()
+		return true, nil
+
+	case TRANSFER:
+		vm.hostTransfer()
+		return true, nil
+
+	case QUIT:
+		vm.hostQuit()
+		return true, nil
+
+	case SOLICIT:
+		vm.hostSolicit()
+		return true, nil
+
+	case FORGET:
+		vm.hostForget()
+		return true, nil
+
+	case HISTORICAL_LOOKUP:
+		vm.hostHistoricalLookup(0)
+		return true, nil
+
+	case IMPORT:
+		vm.hostImport()
+		return true, nil
+
+	case EXPORT:
+		vm.hostExport(0)
+		return true, nil
+
+	case MACHINE:
+		vm.hostMachine()
+		return true, nil
+
+	case PEEK:
+		vm.hostPeek()
+		return true, nil
+
+	case POKE:
+		vm.hostPoke()
+		return true, nil
+
+	case INVOKE:
+		vm.hostInvoke()
+		return true, nil
+
+	case EXPUNGE:
+		vm.hostExpunge()
+		return true, nil
+
 	default:
-		return false, fmt.Errorf("unknown host call opcode: %d", opcode)
+		return false, fmt.Errorf("unknown host call: %d\n", host_fn)
 	}
 }
 
@@ -273,21 +395,32 @@ func (vm *VM) hostLookup() uint32 {
 	ho, _ := vm.readRegister(1)
 	bo, _ := vm.readRegister(2)
 	bz, _ := vm.readRegister(3)
-
-	// TODO: OOB for ho+..32
-	h0, _ := vm.readRAMBytes(ho, 32)
-	h := bhash(h0)
+	k_bytes, err_k := vm.readRAMBytes(ho, 32)
+	if err_k == OOB {
+		vm.writeRegister(0, OOB)
+		return OOB
+	}
+	h := common.Blake2Hash(k_bytes)
 	v, vLength, ok := vm.hostenv.ReadServicePreimage(s, h)
 	if !ok {
+		fmt.Println("v is empty")
+		vm.writeRegister(0, NONE)
 		return NONE
 	}
+
 	l := vLength
-	if l > bz {
+	if bz < l {
 		l = bz
 	}
-	// copy v to bo ... vLength
 	vm.writeRAMBytes(bo, v[:l])
-	return vLength
+
+	if len(h) != 0 {
+		vm.writeRegister(0, vLength)
+		return vLength
+	} else {
+		vm.writeRegister(0, OOB)
+		return OOB
+	}
 }
 
 func uint32ToBytes(s uint32) []byte {
@@ -298,65 +431,141 @@ func uint32ToBytes(s uint32) []byte {
 
 // Read Storage
 func (vm *VM) hostRead() uint32 {
+	// Assume that all ram can be read and written
 	s, _ := vm.readRegister(0)
 	ko, _ := vm.readRegister(1)
 	kz, _ := vm.readRegister(2)
 	bo, _ := vm.readRegister(3)
 	bz, _ := vm.readRegister(4)
-	// TODO: return OOB
-	sbytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sbytes, s)
-	vBytes, _ := vm.readRAMBytes(ko, int(kz))
-	k := bhash(append(sbytes, vBytes...))
-
-	v, vLength, ok := vm.hostenv.ReadServiceBytes(s, k)
+	sbytes := uint32ToBytes(s)
+	k_bytes, err_k := vm.readRAMBytes(ko, int(kz))
+	if err_k == OOB {
+		fmt.Println("Read RAM Error")
+		vm.writeRegister(0, OOB)
+		return OOB
+	}
+	k := common.Blake2Hash(append(sbytes, k_bytes...))
+	v, vLength, ok := vm.hostenv.ReadServicePreimage(s, k)
 	if !ok {
+		fmt.Println("v is empty")
+		vm.writeRegister(0, NONE)
 		return NONE
 	}
+
 	l := vLength
 	if bz < l {
 		l = bz
 	}
 	vm.writeRAMBytes(bo, v[:l])
-	return uint32(vLength)
+
+	if len(k) != 0 {
+		vm.writeRegister(0, vLength)
+		return vLength
+	} else {
+		vm.writeRegister(0, OOB)
+		return OOB
+	}
 }
 
 // Write Storage
 func (vm *VM) hostWrite() uint32 {
-	s, _ := vm.readRegister(0)
-	ko, _ := vm.readRegister(1)
-	kz, _ := vm.readRegister(2)
-	vo, _ := vm.readRegister(3)
-	vz, _ := vm.readRegister(4)
-	//  TODO: return OOB
-	h, _ := vm.readRAMBytes(ko, int(kz))
-	sbytes := uint32ToBytes(s)
-	k := bhash(append(sbytes, h...))
-	if vz == 0 {
-		vm.hostenv.DeleteKey(k)
-	} else {
-		v, _ := vm.readRAMBytes(vo, int(vz))
-		l := vm.hostenv.WriteServiceKey(s, k, v)
-		return l
+	// Assume that all ram can be read and written
+	// Got storage of bold S(service account in GP) by setting s = 0, k = k(from RAM)
+	s := uint32(0)
+	ko, _ := vm.readRegister(0)
+	kz, _ := vm.readRegister(1)
+	vo, _ := vm.readRegister(2)
+	vz, _ := vm.readRegister(3)
+	k_byte, err_k := vm.readRAMBytes(ko, int(kz))
+	if err_k == OOB {
+		fmt.Println("Read RAM Error")
+		vm.writeRegister(0, OOB)
+		return OOB
 	}
-	return OK
+	sbytes := uint32ToBytes(s)
+	k := common.Blake2Hash(append(sbytes, k_byte...))
+	_, l, _ := vm.hostenv.ReadServicePreimage(s, k) // get bold s in GP
+	if l == 0 {
+		l = NONE
+	}
+
+	// check balance a_t <= a_b
+	service_data, _, _ := vm.hostenv.ReadServiceBytes(s)
+	a_b_byte := service_data[len(service_data)-36 : len(service_data)-24]
+	a_l_byte := service_data[len(service_data)-12 : len(service_data)-4]
+	a_i_byte := service_data[len(service_data)-4:]
+	a_b := binary.LittleEndian.Uint64(a_b_byte)
+	a_l := binary.LittleEndian.Uint64(a_l_byte)
+	a_i := binary.LittleEndian.Uint64(a_i_byte)
+	a_t := 10 + 1*a_i + 100*a_l
+
+	if a_t <= a_b {
+		vm.writeRegister(0, uint32(l))
+		// adjust S
+		if vz == 0 {
+			vm.hostenv.DeleteKey(k)
+		} else {
+			v, _ := vm.readRAMBytes(vo, int(vz))
+			vm.hostenv.WriteServicePreimage(s, k, v)
+		}
+		vm.writeRegister(0, l)
+		return l
+	} else if a_t > a_b {
+		vm.writeRegister(0, FULL)
+		return FULL
+	} else {
+		vm.writeRegister(0, OOB)
+		return OOB
+	}
 }
 
 // Solicit preimage
 func (vm *VM) hostSolicit() uint32 {
-	o, _ := vm.readRegister(1)
-	z, _ := vm.readRegister(2)
-	hBytes, errCode := vm.readRAMBytes(o, 32)
-	if errCode == OOB {
-		return errCode
+	// Got l of X_s by setting s = 1, z = z(from RAM)
+	s := uint32(1)
+	o, _ := vm.readRegister(0)
+	z, _ := vm.readRegister(1)
+	hBytes, err_h := vm.readRAMBytes(o, 32)
+	if err_h == OOB {
+		fmt.Println("Read RAM Error")
+		vm.writeRegister(0, OOB)
+		return OOB
 	}
-	h := common.BytesToHash(hBytes)
-	y, errCode := vm.hostenv.GetPreimage(h, z)
-	if errCode == OK {
-		return vm.hostenv.RequestPreimage2(h, z, y)
-	}
-	return vm.hostenv.RequestPreimage(h, z)
 
+	// check balance a_t <= a_b
+
+	service_data, _, _ := vm.hostenv.ReadServiceBytes(s) // read service account(X_s) where service index = 1
+	a_b_byte := service_data[len(service_data)-36 : len(service_data)-28]
+	a_l_byte := service_data[len(service_data)-12 : len(service_data)-4]
+	a_i_byte := service_data[len(service_data)-4:]
+	a_b := binary.LittleEndian.Uint64(a_b_byte)
+	a_l := binary.LittleEndian.Uint64(a_l_byte)
+	a_i := binary.LittleEndian.Uint32(a_i_byte)
+	a_t := 10 + uint64(1*a_i) + 100*a_l
+	if a_b < a_t {
+		fmt.Println("a_b < a_t")
+		vm.writeRegister(0, FULL)
+		return FULL
+	}
+
+	hBytes = falseBytes(hBytes[4:])
+	lbytes := uint32ToBytes(z)
+	key := append(lbytes, hBytes...) //GP(292)
+	h := common.BytesToHash(key)
+
+	X_s_l, _, err_X_s_l := vm.hostenv.ReadServicePreimage(s, h)
+	if err_X_s_l == false {
+		vm.hostenv.WriteServicePreimage(s, h, []byte{})
+		vm.writeRegister(0, OK)
+		return OK
+	} else if X_s_l[0] == 2 { // [x, y]
+		vm.hostenv.WriteServicePreimage(s, h, append(X_s_l, []byte{10, 0, 0, 0}...)) // Randomly insert t = 10 in l
+		vm.writeRegister(0, OK)
+		return OK
+	} else {
+		vm.writeRegister(0, HUH)
+		return HUH
+	}
 }
 
 // Forget preimage
@@ -365,6 +574,7 @@ func (vm *VM) hostForget() uint32 {
 	z, _ := vm.readRegister(1)
 	hBytes, errCode := vm.readRAMBytes(o, 32)
 	if errCode == OOB {
+		fmt.Println("Read RAM Error")
 		return errCode
 	}
 	h := common.BytesToHash(hBytes)
@@ -374,6 +584,7 @@ func (vm *VM) hostForget() uint32 {
 
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
 func (vm *VM) hostHistoricalLookup(t uint32) uint32 {
+	// take a service s (from \omega_0 ),
 	s, _ := vm.readRegister(0)
 	ho, _ := vm.readRegister(1)
 	bo, _ := vm.readRegister(2)
@@ -381,51 +592,114 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint32 {
 
 	hBytes, errCode := vm.readRAMBytes(ho, 32)
 	if errCode == OOB {
+		fmt.Println("Read RAM Error")
+		vm.writeRegister(0, OOB)
 		return errCode
 	}
-	h := bhash(hBytes)
+	h := common.Blake2Hash(hBytes)
+	fmt.Println(h)
 	v, vLength, ok := vm.hostenv.HistoricalLookup(s, t, h)
 	if !ok {
+		vm.writeRegister(0, NONE)
 		return NONE
 	}
-	l := vLength
-	if bz < l {
-		l = bz
+
+	if vLength != 0 {
+		l := vLength
+		if bz < l {
+			l = bz
+		}
+		vm.writeRAMBytes(bo, v[:l])
+		vm.writeRegister(0, vLength)
+		fmt.Println(v[:l])
+		return vLength
+	} else {
+		vm.writeRegister(0, NONE)
+		return NONE
 	}
-	vm.writeRAMBytes(bo, v[:l])
-	return vLength
 }
 
 // Import Segment
 func (vm *VM) hostImport() uint32 {
-	i, _ := vm.readRegister(0)
-	o, _ := vm.readRegister(1)
-	v, errCode := vm.hostenv.GetImportItem(i)
-	if errCode == NONE {
-		return errCode
+	// import  - which copies  a specific i  (e.g. holding the bytes "9") into RAM from "ImportDA" to be "accumulated"
+	iBytes := bytes.Repeat([]byte{9}, 9) // RAM holding the bytes "9"
+	// v, errCode := vm.hostenv.GetImportItem(i)
+	// if errCode == NONE {
+	// 	return errCode
+	// }
+
+	omega_0, _ := vm.readRegister(0)
+
+	var v_Bytes []byte
+	if omega_0 < uint32(len(iBytes)) {
+		v_Bytes = iBytes
+	} else {
+		v_Bytes = nil
 	}
 
-	errCode = vm.writeRAMBytes(o, v[:])
-	if errCode == OOB {
-		return errCode
+	o, _ := vm.readRegister(1)
+	l, _ := vm.readRegister(2)
+	if l > (W_C * W_S) {
+		l = W_C * W_S
 	}
-	return OK
+
+	if len(v_Bytes) != 0 {
+		errCode := vm.writeRAMBytes(o, v_Bytes[:])
+		if errCode == OOB {
+			vm.writeRegister(0, OOB)
+			return errCode
+		}
+		vm.writeRegister(0, OK)
+		return OK
+	} else {
+		vm.writeRegister(0, NONE)
+		return NONE
+	}
 }
 
 // Export segment host-call
-func (vm *VM) hostExport(pi uint32) (uint32, []byte) {
+func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
+	// (b) export  - which appends "z" items of size W_S from a section of RAM (e.g. holding the bytes "9") into e
 	p, _ := vm.readRegister(0)
 	z, _ := vm.readRegister(1)
-
-	x, errCode := vm.readRAMBytes(p, int(z*W_S))
-	if errCode == OOB {
-		return OOB, []byte{}
+	if z > (W_C * W_S) {
+		z = W_C * W_S
 	}
+	e := make([][]byte, z)
+	for i := uint32(0); i < z; i += 1 {
+		// chunk, errCode := vm.readRAMBytes(p+i*W_S, W_S)
+		// if errCode == OOB {
+		// 	vm.writeRegister(0, OOB)
+		// 	return FULL, [][]byte{}
+		// }
+		chunk := bytes.Repeat([]byte{9}, W_S) // RAM holding the bytes "9"
+		e[i] = chunk
+	}
+
+	x, errCode := vm.readRAMBytes(p, int(z))
+	if errCode == OOB {
+		vm.writeRegister(0, OOB)
+		return OOB, e
+	}
+
+	// apply eq(187) zero-padding function
+	length := (W_C * W_S) - (((z + (W_C*W_S - 1)) % (W_C * W_S)) + 1)
+	byteSequence := make([]byte, length)
+	x = append(x, byteSequence...)
+
 	// if len(e) >= WX return FULL
 	// where ... const W_X = 1024
-	errCode = vm.hostenv.ExportSegment(x)
 
-	return errCode, x
+	sigma := uint32(0)                // Assume sigma=0
+	if sigma+uint32(len(e)) >= 1024 { // W_X
+		vm.writeRegister(0, FULL)
+		return FULL, e
+	} else {
+		vm.writeRegister(0, sigma+uint32(len(e)))
+		e = append(e, x)
+		// errCode = vm.hostenv.ExportSegment(x)
+		return OK, e
+	}
 }
 
 // Not sure but this is running a machine at instruction i? using bytes from po to pz

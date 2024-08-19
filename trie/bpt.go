@@ -13,9 +13,8 @@ import (
 
 // Node represents a node in the Merkle Tree
 type Node struct {
-	Hash []byte
-	Key  []byte
-	// Value []byte
+	Hash  []byte
+	Key   []byte
 	Left  *Node
 	Right *Node
 }
@@ -83,6 +82,10 @@ func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 	//db, err := leveldb.OpenFile(path, nil)
 	fmt.Printf("Initailized levelDB at: %s\n", path)
 	return stateDBStorage, err
+}
+
+func InitLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
+    return initLevelDB(optionalPath...)
 }
 
 // NewMerkleTree creates a new Merkle Tree from the provided data

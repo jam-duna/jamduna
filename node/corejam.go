@@ -74,13 +74,13 @@ func IsAuthorizedPVM(workPackage WorkPackage) (bool, error) {
 }
 
 // RefinePVM performs the refine PVM function.
-func RefinePVM(pvm *pvm.VM, workPackage WorkPackage, workItem WorkItem) (string, error) {
+func (n *Node) RefinePVM(pvm *pvm.VM, workPackage WorkPackage, workItem WorkItem) (string, error) {
 	// For demonstration, simply return "refined_result"
 	return "refined_result", nil
 }
 
 // Accumulate function performs the accumulation of a single service.
-func Accumulate(serviceIndex int, state AccumulationState) (AccumulationState, error) {
+func (n *Node) Accumulate(serviceIndex int, state AccumulationState) (AccumulationState, error) {
 	// Wrangle results for the service (simplified for demonstration)
 	wrangledResults := state.WorkReports // Assuming wrangled results are the work reports
 
@@ -96,7 +96,7 @@ func Accumulate(serviceIndex int, state AccumulationState) (AccumulationState, e
 
 	// Call the virtual machine
 	code := []byte{}
-	vm := pvm.NewVMFromCode(code, 0)
+	vm := pvm.NewVMFromCode(code, 0, n.NewNodeHostEnv())
 	err := vm.Execute()
 	if err != nil {
 		return AccumulationState{}, err
@@ -209,7 +209,7 @@ func BeefyRoot(serviceAccumulations []ServiceAccumulation, mmr trie.MerkleMounta
 }
 
 // ProcessWorkResults processes the work results using the PVM.
-func ProcessWorkResults(workPackage WorkPackage) (string, error) {
+func (n *Node) ProcessWorkResults(workPackage WorkPackage) (string, error) {
 	isAuthorized, err := IsAuthorizedPVM(workPackage)
 	if err != nil {
 		return "", err
@@ -220,10 +220,10 @@ func ProcessWorkResults(workPackage WorkPackage) (string, error) {
 	}
 	// TODO
 	code := []byte{}
-	pvm := pvm.NewVMFromCode(code, 0)
+	pvm := pvm.NewVMFromCode(code, 0, n.NewNodeHostEnv())
 	var results []string
 	for _, workItem := range workPackage.WorkItems {
-		refinedResult, err := RefinePVM(pvm, workPackage, workItem)
+		refinedResult, err := n.RefinePVM(pvm, workPackage, workItem)
 		if err != nil {
 			return "", err
 		}

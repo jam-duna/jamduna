@@ -380,39 +380,50 @@ func TestDelete(t *testing.T) {
 	tree.Close()
 }
 
-// TestStateKey tests the state key generation
 func TestStateKey(t *testing.T) {
 	// Test data
-	data := [][2][]byte{
-		{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
-		{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
-	}
+	// data := [][2][]byte{
+	// 	{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
+	// 	{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
+	// }
 
 	//level_db_path := "../leveldb/BPT"
 	// Create a new Merkle Tree
+	// tree := NewMerkleTree(nil, test_leveldb_path)
+
 	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	rootHash, tree, err := Initial_bpt(test_db)
+	if err != nil {
+		t.Errorf("Failed to initial BPT %v", err)
+	}
+	// defer tree.Close()
+	fmt.Printf("Root Hash=%x \n", rootHash)
 	// Insert key-value pairs one by one
-	for _, kv := range data {
-		value := kv[1]
-		tree.SetService(255, 100, value)
-	}
-	tree.printTree(tree.Root, 0)
+	// for _, kv := range data {
+	// 	value := kv[1]
+	// 	tree.SetService(255, 100, value)
+	// }
+	// // tree.printTree(tree.Root, 0)
 
-	for _, kv := range data {
-		key := kv[0]
-		value := kv[1]
-		tree.SetPreImage(126, key, value)
-	}
-	tree.printTree(tree.Root, 0)
-	value, err := tree.GetService(255, 100)
-	fmt.Printf("getService value=%x, err=%v\n", value, err)
+	// for _, kv := range data {
+	// 	key := kv[0]
+	// 	value := kv[1]
+	// 	tree.SetPreImage(126, key, value)
+	// }
+	// tree.printTree(tree.Root, 0)
 
-	for _, kv := range data {
-		key := kv[0]
-		value, err = tree.GetPreImage(126, key)
-		fmt.Printf("getService value=%x, err=%v\n", value, err)
-	}
+	// Get the root hash of the tree
+	// rootHash := tree.GetRootHash()
+
+	value, err := tree.GetPreImage(0, hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7"))
+	fmt.Printf("get value=%x, err=%v\n", value, err)
+
+	// for _, kv := range data {
+	// 	key := kv[0]
+	// 	value, err := tree.GetPreImage(126, key)
+	// 	fmt.Printf("getService value=%x, err=%v\n", value, err)
+	// }
+	tree.printTree(tree.Root, 0)
 	tree.Close()
 }
 

@@ -1,7 +1,7 @@
 package pvm
 
 import (
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/colorfulnotion/jam/common"
 )
 
 type HostEnv interface {
@@ -11,9 +11,10 @@ type HostEnv interface {
 	AddTransfer(m []byte, a, g uint64, d uint32) uint32
 
 	// Service Data Managemrnt
-	ReadServiceBytes(s uint32, k common.Hash) ([]byte, uint32, bool)
-	ReadServicePreimage(s uint32, h common.Hash) ([]byte, uint32, bool)
-	WriteServiceKey(s uint32, k common.Hash, v []byte) uint32
+	ReadServiceBytes(s uint32) ([]byte, uint32, bool)                   // GP(229)
+	WriteServiceBytes(s uint32, v []byte) bool                          // GP(229)
+	ReadServicePreimage(s uint32, h common.Hash) ([]byte, uint32, bool) // GP(229)
+	WriteServicePreimage(s uint32, k common.Hash, v []byte) bool        // GP(229)
 
 	// Preimage/DA
 	GetPreimage(k common.Hash, z uint32) (uint32, uint32)

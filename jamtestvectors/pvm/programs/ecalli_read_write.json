@@ -1,0 +1,66 @@
+{
+    "name": "inst_ecalli_read_write",
+    "initial-regs": [
+      0,
+      131072,
+      4,
+      131072,
+      10,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "initial-pc": 0,
+    "initial-page-map": [
+      {
+        "address": 131072,
+        "length": 4096,
+        "is-writable": true
+      }
+    ],
+    "initial-memory": [
+      {
+        "address": 131072,
+        "contents": [18,52,86,120]
+      }
+    ],
+    "initial-gas": 10000,
+    "program": [
+      0,
+      0,
+      4,
+      78,
+      2,
+      78,
+      3,
+      245
+    ],
+    "expected-regs": [
+      5,
+      131072,
+      4,
+      131072,
+      10,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "expected-memory": [
+      {
+        "address": 131072,
+        "contents": [18,52,86,120
+        ]
+      }
+    ],
+    "expected-gas": 9996
+  }

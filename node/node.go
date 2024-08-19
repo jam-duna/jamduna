@@ -289,6 +289,11 @@ func (n *Node) getState() *statedb.StateDB {
 	return n.statedb
 }
 
+func (n *Node) getTrie() *trie.MerkleTree {
+	s := n.getState()
+	return s.GetTrie()
+}
+
 func (n *Node) getPeerIndex(identifier string) (uint32, error) {
 	peer, exist := n.peersInfo[identifier]
 	if exist {

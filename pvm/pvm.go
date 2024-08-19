@@ -11,6 +11,7 @@ const (
 	numCores = 341
 	W_C      = 642
 	W_S      = 6
+	W_X      = 1024
 	M        = 128
 	V        = 1023
 )
@@ -29,18 +30,21 @@ type Page struct {
 }
 
 type VM struct {
-	JSize      int
-	Z          int
-	J          []byte
-	code       []byte
-	bitmask    string // K in paper
-	pc         uint32 // Program counter
-	terminated bool
-	hostCall   bool
-	ram        []byte
-	register   []uint32
-	ξ          uint64
-	hostenv    HostEnv
+	JSize               int
+	Z                   int
+	J                   []byte
+	code                []byte
+	bitmask             string // K in GP
+	pc                  uint32 // Program counter
+	terminated          bool
+	hostCall            bool   // ̵h in GP
+	host_func_id        uint32 // h in GP
+	ram                 []byte
+	register            []uint32
+	ξ                   uint64
+	hostenv             HostEnv
+	writable_ram_start  uint32
+	writable_ram_length uint32
 }
 
 type Program struct {
@@ -53,40 +57,73 @@ type Program struct {
 	K []string
 }
 
-// Define opcodes and instructions
+// Appendix A - Instuctions
+
+// A.5.1. Instructions without Arguments.
 const (
-	TRAP              = 0
-	FALLTHROUGH       = 17
-	ADD_REG           = 8
-	ECALL             = 78
-	STORE_IMM_U8      = 62
-	STORE_IMM_U16     = 79
-	STORE_IMM_U32     = 38
-	JUMP              = 5
-	JUMP_IND          = 19
-	LOAD_IMM          = 4
-	LOAD_U8           = 60
-	LOAD_U16          = 76
-	LOAD_U32          = 10
-	STORE_U8          = 71
-	STORE_U16         = 69
-	STORE_U32         = 22
+	TRAP        = 0
+	FALLTHROUGH = 17
+)
+
+// A.5.2. Instructions with Arguments of One Immediate.
+const (
+	ECALLI = 78
+)
+
+// A.5.3. Instructions with Arguments of Two Immediates.
+const (
+	STORE_IMM_U8  = 62
+	STORE_IMM_U16 = 79
+	STORE_IMM_U32 = 38
+)
+
+// A.5.4. Instructions with Arguments of One Offset.
+const (
+	JUMP = 5
+)
+
+// A.5.5. Instructions with Arguments of One Register & One Immediate.
+const (
+	JUMP_IND  = 19
+	LOAD_IMM  = 4
+	LOAD_U8   = 60
+	LOAD_U16  = 76
+	LOAD_U32  = 10
+	STORE_U8  = 71
+	STORE_U16 = 69
+	STORE_U32 = 22
+)
+
+// A.5.6. Instructions with Arguments of One Register & Two Immediates.
+const (
 	STORE_IMM_IND_U8  = 26
 	STORE_IMM_IND_U16 = 54
 	STORE_IMM_IND_U32 = 13
-	LOAD_IMM_JUMP     = 6
-	BRANCH_EQ_IMM     = 7
-	BRANCH_NE_IMM     = 15
-	BRANCH_LT_U_IMM   = 44
-	BRANCH_LE_U_IMM   = 59
-	BRANCH_GE_U_IMM   = 52
-	BRANCH_GT_U_IMM   = 50
-	BRANCH_LT_S_IMM   = 32
-	BRANCH_LE_S_IMM   = 46
-	BRANCH_GE_S_IMM   = 45
-	BRANCH_GT_S_IMM   = 53
-	MOVE_REG          = 82
-	SBRK              = 87
+)
+
+// A.5.7. Instructions with Arguments of One Register, One Immediate and One Offset.
+const (
+	LOAD_IMM_JUMP   = 6
+	BRANCH_EQ_IMM   = 7
+	BRANCH_NE_IMM   = 15
+	BRANCH_LT_U_IMM = 44
+	BRANCH_LE_U_IMM = 59
+	BRANCH_GE_U_IMM = 52
+	BRANCH_GT_U_IMM = 50
+	BRANCH_LT_S_IMM = 32
+	BRANCH_LE_S_IMM = 46
+	BRANCH_GE_S_IMM = 45
+	BRANCH_GT_S_IMM = 53
+)
+
+// A.5.8. Instructions with Arguments of Two Registers.
+const (
+	MOVE_REG = 82
+	SBRK     = 87
+)
+
+// A.5.9. Instructions with Arguments of Two Registers & One Immediate.
+const (
 	STORE_IND_U8      = 16
 	STORE_IND_U16     = 29
 	STORE_IND_U32     = 3
@@ -113,12 +150,28 @@ const (
 	SHLO_R_IMM_ALT    = 72
 	SHLO_L_IMM_ALT    = 75
 	SHAR_L_IMM_ALT    = 80
-	BRANCH_EQ         = 24
-	BRANCH_NE         = 30
-	BRANCH_LT_U       = 47
-	BRANCH_LT_S       = 48
-	BRANCH_GE_U       = 41
-	BRANCH_GE_S       = 43
+	CMOV_IMM_IZ       = 85 //added base on 2024/7/1 GP
+	CMOV_IMM_NZ       = 86 //added base on 2024/7/1 GP
+)
+
+// A.5.10. Instructions with Arguments of Two Registers & One Offset.
+const (
+	BRANCH_EQ   = 24
+	BRANCH_NE   = 30
+	BRANCH_LT_U = 47
+	BRANCH_LT_S = 48
+	BRANCH_GE_U = 41
+	BRANCH_GE_S = 43
+)
+
+// A.5.11. Instruction with Arguments of Two Registers and Two Immediates.
+const (
+	LOAD_IMM_JUMP_IND = 42
+)
+
+// A.5.12. Instructions with Arguments of Three Registers.
+const (
+	ADD_REG           = 8
 	SUB_REG           = 20
 	AND_REG           = 23
 	XOR_REG           = 28
@@ -131,42 +184,13 @@ const (
 	DIV_S             = 64
 	REM_U             = 73
 	REM_S             = 70
-	LOAD_IMM_JUMP_IND = 42
-
-	SET_LT_U = 36
-	SET_LT_S = 58
-	SHLO_L   = 55
-	SHLO_R   = 51
-	SHAR_R   = 77
-
-	CMOV_IZ     = 83
-	CMOV_NZ     = 84
-	CMOV_IMM_IZ = 85 //added base on 2024/7/1 graypaper
-	CMOV_IMM_NZ = 86 //added base on 2024/7/1 graypaper
-
-	ASSIGN            = 98
-	NEW               = 99
-	GAS               = 100
-	LOOKUP            = 101
-	READ              = 102
-	WRITE             = 103
-	INFO              = 104
-	EMPOWER           = 105
-	DESIGNATE         = 106
-	CHECKPOINT        = 107
-	UPGRADE           = 108
-	TRANSFER          = 109
-	QUIT              = 110
-	SOLICIT           = 111
-	FORGET            = 112
-	HISTORICAL_LOOKUP = 114
-	IMPORT            = 115
-	EXPORT            = 116
-	MACHINE           = 117
-	PEEK              = 118
-	POKE              = 119
-	INVOKE            = 220
-	EXPUNGE           = 221
+	SET_LT_U          = 36
+	SET_LT_S          = 58
+	SHLO_L            = 55
+	SHLO_R            = 51
+	SHAR_R            = 77
+	CMOV_IZ           = 83
+	CMOV_NZ           = 84
 )
 
 // Termination Instructions
@@ -248,12 +272,13 @@ func parseProgram(p []byte) *Program {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page) *VM {
+func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV HostEnv) *VM {
 	if len(code) == 0 {
 		panic("NO CODE\n")
 	}
 	p := parseProgram(code)
 	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
+	fmt.Println("================================================================")
 	vm := &VM{
 		JSize:    p.JSize,
 		Z:        p.Z,
@@ -263,6 +288,7 @@ func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMa
 		register: make([]uint32, regSize),
 		pc:       initialPC,
 		ram:      make([]byte, 4096*64),
+		hostenv:  hostENV, //check if we need this
 	}
 	for _, pg := range pages {
 		for i, b := range pg.Contents {
@@ -273,8 +299,30 @@ func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMa
 	return vm
 }
 
-func NewVMFromCode(code []byte, i uint32) *VM {
-	return NewVM(code, []uint32{}, i, []PageMap{}, []Page{})
+func NewVMFromCode(code []byte, i uint32, hostENV HostEnv) *VM {
+	return NewVM(code, []uint32{}, i, []PageMap{}, []Page{}, hostENV)
+}
+
+// for hostfuntion test
+func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, hostENV HostEnv) *VM {
+
+	vm := &VM{
+		register: make([]uint32, regSize),
+		ram:      make([]byte, 4096*64),
+		//hostenv:  &MockHostEnv{db: db},
+		hostenv: hostENV,
+	}
+	for _, pg := range pages {
+		for i, b := range pg.Contents {
+			vm.ram[pg.Address+uint32(i)] = b
+		}
+	}
+	if pagemap[0].IsWritable {
+		vm.writable_ram_start = uint32(pagemap[0].Address)
+		vm.writable_ram_length = uint32(pagemap[0].Length)
+	}
+	copy(vm.register, initialRegs)
+	return vm
 }
 
 // Execute runs the program until it terminates
@@ -283,9 +331,16 @@ func (vm *VM) Execute() error {
 		if err := vm.step(); err != nil {
 			return err
 		}
-		fmt.Println("last pc: ", vm.pc)
+		// host call invocation
+		if vm.hostCall {
+			fmt.Println("Invocate Host Funtion: ", vm.host_func_id)
+			vm.InvokeHostCall(int(vm.host_func_id))
+			vm.hostCall = false
+			vm.terminated = false
+		}
+		fmt.Println("-----------------------------------------------------------------------")
 	}
-
+	fmt.Println("last pc: ", vm.pc)
 	return nil
 }
 
@@ -326,9 +381,13 @@ func (vm *VM) step() error {
 	case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:
 		errCode := vm.branchCond(opcode, operands)
 		vm.writeRegister(0, errCode)
-	case ECALL:
-		errCode := vm.ecall(operands)
+	case ECALLI:
+		errCode := vm.ecalli(operands)
 		vm.writeRegister(0, errCode)
+		vm.pc += 1 + len_operands
+
+		fmt.Printf("TERMINATED\n")
+		vm.terminated = true
 	case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32:
 		errCode := vm.storeImm(opcode, operands)
 		vm.writeRegister(0, errCode)
@@ -380,98 +439,6 @@ func (vm *VM) step() error {
 		vm.pc += 1 + len_operands
 	case SBRK:
 		vm.sbrk(operands)
-		break
-	case ASSIGN:
-		errCode := vm.hostAssign()
-		vm.writeRegister(0, errCode)
-		break
-	case NEW:
-		errCode := vm.hostNew()
-		vm.writeRegister(0, errCode)
-		break
-	case GAS:
-		errCode := vm.hostGas()
-		vm.writeRegister(0, errCode)
-		break
-	case LOOKUP:
-		errCode := vm.hostLookup()
-		vm.writeRegister(0, errCode)
-		break
-	case READ:
-		errCode := vm.hostRead()
-		vm.writeRegister(0, errCode)
-		break
-	case WRITE:
-		errCode := vm.hostWrite()
-		vm.writeRegister(0, errCode)
-		break
-	case INFO:
-		errCode := vm.hostInfo()
-		vm.writeRegister(0, errCode)
-		break
-	case EMPOWER:
-		errCode := vm.hostEmpower()
-		vm.writeRegister(0, errCode)
-		break
-	case DESIGNATE:
-		errCode := vm.hostDesignate()
-		vm.writeRegister(0, errCode)
-		break
-	case CHECKPOINT:
-		errCode := vm.hostCheckpoint()
-		vm.writeRegister(0, errCode)
-		break
-	case UPGRADE:
-		errCode := vm.hostUpgrade()
-		vm.writeRegister(0, errCode)
-		break
-	case TRANSFER:
-		errCode := vm.hostTransfer()
-		vm.writeRegister(0, errCode)
-		break
-	case QUIT:
-		errCode := vm.hostQuit()
-		vm.writeRegister(0, errCode)
-		break
-	case SOLICIT:
-		errCode := vm.hostSolicit()
-		vm.writeRegister(0, errCode)
-		break
-	case FORGET:
-		errCode := vm.hostForget()
-		vm.writeRegister(0, errCode)
-		break
-	case HISTORICAL_LOOKUP:
-		errCode := vm.hostHistoricalLookup(0) // TODO: figure out t
-		vm.writeRegister(0, errCode)
-		break
-	case IMPORT:
-		errCode := vm.hostImport()
-		vm.writeRegister(0, errCode)
-		break
-	case EXPORT:
-		errCode, _ := vm.hostExport(0) // TODO: figure out pi input and export item output
-		vm.writeRegister(0, errCode)
-		break
-	case MACHINE:
-		errCode := vm.hostMachine()
-		vm.writeRegister(0, errCode)
-		break
-	case PEEK:
-		errCode := vm.hostPeek()
-		vm.writeRegister(0, errCode)
-		break
-	case POKE:
-		errCode := vm.hostPoke()
-		vm.writeRegister(0, errCode)
-		break
-	case INVOKE:
-		errCode := vm.hostInvoke()
-		vm.writeRegister(0, errCode)
-		break
-	case EXPUNGE:
-		errCode := vm.hostExpunge()
-		vm.writeRegister(0, errCode)
 		break
 	default:
 		vm.terminated = true
@@ -647,7 +614,7 @@ func (vm *VM) readRegister(index int) (uint32, uint32) {
 	if index < 0 || index >= len(vm.register) {
 		return 0, OOB
 	}
-	fmt.Printf(" REGISTERS %v (index=%d => %d)\n", vm.register, index, vm.register[index])
+	// fmt.Printf(" REGISTERS %v (index=%d => %d)\n", vm.register, index, vm.register[index])
 	return vm.register[index], OK
 }
 
@@ -682,9 +649,12 @@ func (vm *VM) dynamicJump(operands []byte) uint32 {
 }
 
 // Implement ecall logic
-func (vm *VM) ecall(operands []byte) uint32 {
-	// Implement ecall logic here
-	return OOB
+func (vm *VM) ecalli(operands []byte) uint32 {
+	// Implement ecalli logic here
+	immediate := get_elided_uint32(operands[0:])
+	vm.hostCall = true
+	vm.host_func_id = immediate
+	return HOST
 }
 
 // Implement storeImm logic
@@ -743,7 +713,7 @@ func (vm *VM) load(opcode byte, operands []byte) uint32 {
 }
 
 func get_elided_uint32(o []byte) uint32 {
-	/* paper:
+	/* GP:
 	Immediate arguments are encoded in little-endian format with the most-significant bit being the sign bit.
 	They may be compactly encoded by eliding more significant octets. Elided octets are assumed to be zero if the MSB of the value is zero, and 255 otherwise.
 	*/
@@ -889,7 +859,6 @@ func (vm *VM) moveReg(operands []byte) uint32 {
 	return vm.writeRegister(destIndex, value)
 }
 
-// TODO: Implement sbrk logic
 func (vm *VM) sbrk(operands []byte) error {
 	/*	srcIndex, destIndex := splitRegister(operands[0])
 
@@ -900,7 +869,6 @@ func (vm *VM) sbrk(operands []byte) error {
 	return nil
 }
 
-// TODO: Implement branch logic
 func (vm *VM) branch(operands []byte) uint32 {
 	if len(operands) != 2 {
 		return OOB

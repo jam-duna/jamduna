@@ -22,3 +22,7 @@ func Blake2AsHex(data []byte) Hash {
 	//return hex.EncodeToString(hash[:])
 	return BytesToHash(ComputeHash(data))
 }
+
+func Blake2Hash(data []byte) Hash {
+	return BytesToHash(ComputeHash(data))
+}

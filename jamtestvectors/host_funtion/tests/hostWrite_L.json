@@ -1,0 +1,55 @@
+{
+  "name": "hostWrite_L",
+  "initial-regs": [
+    131072,
+    4,
+    131072,
+    4,
+    10,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "initial-page-map": [
+    {
+      "address": 131072,
+      "length": 4096,
+      "is-writable": true
+    }
+  ],
+  "initial-memory": [
+    {
+      "address": 131072,
+      "contents": [18,52,86,120
+      ]
+    }
+  ],
+
+  "expected-regs": [
+    5,
+    131072,
+    4,
+    131072,
+    10,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "expected-memory": [
+    {
+      "address": 131072,
+      "contents": [18,52,86,120
+      ]
+    }
+  ]
+}
