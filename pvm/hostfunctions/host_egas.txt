@@ -1,0 +1,4 @@
+pub @main:
+    ecalli 0
+    trap
+
