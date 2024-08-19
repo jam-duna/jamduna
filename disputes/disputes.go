@@ -1,0 +1,613 @@
+package disputes
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"fmt"
+
+	"github.com/colorfulnotion/jam/common"
+)
+
+// tiny
+const CoreNum = 2
+const ValidatorNum = 6
+const E = 12
+
+// full
+// const CoreNum = 341
+// const ValidatorNum = 1026
+// const E = 600
+
+// ==========type definitions==========
+type PublicKey []byte
+
+// ========== Extrinsic Dispute=======
+type ExtrinsicDispute struct {
+	Verdict []Verdict `json:"verdicts"`
+	Culprit []Culprit `json:"culprits"`
+	Fault   []Fault   `json:"faults"`
+}
+
+type Vote struct {
+	Voting    bool   `json:"vote"`      // true for guilty, false for innocent
+	Index     uint16 `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
+	Signature []byte `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
+}
+
+type Verdict struct {
+	WorkReportHash []byte `json:"target"` // WorkReportHash (ByteArray32 in disputes.asn)
+	Epoch          uint32 `json:"age"`    // EpochIndex (U32 in disputes.asn)
+	Votes          []Vote `json:"votes"`  // DisputeJudgements
+}
+
+type Culprit struct {
+	WorkReportHash []byte    `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
+	Key            PublicKey `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
+	Signature      []byte    `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+}
+
+type Fault struct {
+	WorkReportHash []byte    `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
+	Voting         bool      `json:"vote"`      // vote (BOOLEAN in disputes.asn)
+	Key            PublicKey `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
+	Signature      []byte    `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+}
+
+// ==========Output=======
+type Output struct {
+	Ok *struct {
+		VerdictMark  [][]byte    `json:"verdict_mark"`  // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+		OffenderMark []PublicKey `json:"offender_mark"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+	} `json:"ok"`
+	Err string `json:"err"` // ErrorCode
+}
+
+type VerdictResult struct {
+	WorkReportHash []byte
+	PositveCount   int
+}
+
+// ==========State Dispute=======
+type Validator struct {
+	Ed25519      []byte `json:"ed25519"`
+	Bandersnatch []byte `json:"bandersnatch"`
+	Bls          []byte `json:"bls"`
+	Metadata     []byte `json:"metadata"`
+}
+
+type StateDispute struct {
+	Psi    Psi_state   `json:"psi"`    // Disputes
+	Rho    []Rho_state `json:"rho"`    // AvailabilityAssignments
+	Tau    uint32      `json:"tau"`    // EpochIndex
+	Kappa  []Validator `json:"kappa"`  // ValidatorSet
+	Lambda []Validator `json:"lambda"` // ValidatorSet
+}
+
+type Psi_state struct {
+	Psi_g [][]byte    `json:"psi_g"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_b [][]byte    `json:"psi_b"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_w [][]byte    `json:"psi_w"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_o []PublicKey `json:"psi_o"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+}
+
+type Rho_state struct {
+	DummyWorkReport []byte `json:"dummy-work-report"`
+	Timeout         uint32 `json:"timeout"`
+}
+
+//==========func==========
+
+func Dispute(input ExtrinsicDispute, preState StateDispute) (StateDispute, Output, error) {
+	// Implement the function logic here
+	// check the all input data are valid ,eq 98~106
+	//eq 99 check the signature of the verdicts
+	//eq 101 c: the key shouldn't be in old offenders set
+
+	for _, v := range input.Verdict {
+		err := checkSignature(v, preState)
+		if err != nil {
+			output := Output{
+				Err: err.Error(),
+				Ok:  nil,
+			}
+			return preState, output, err
+		}
+	}
+
+	for _, c := range input.Culprit {
+		err := checkIfKeyOffend(c.Key, preState)
+		if err != nil {
+			output := Output{
+				Err: err.Error(),
+				Ok:  nil,
+			}
+			return preState, output, err
+		}
+	}
+	//eq 102 f: the key shouldn't be in old offenders set
+	for _, f := range input.Fault {
+		err := checkIfKeyOffend(f.Key, preState)
+		if err != nil {
+			output := Output{
+				Err: err.Error(),
+				Ok:  nil,
+			}
+			return preState, output, err
+		}
+	}
+	//eq 103 v: v should index by the work report hash and no duplicates
+	err := checkVerdicts(input.Verdict)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+	}
+	//eq 104 c: should be index by key and no duplicates
+	err = checkCulprit(input.Culprit)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+	}
+	//eq 104 f: should be index by key and no duplicates
+	err = checkFault(input.Fault)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+	}
+	//eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
+	err = checkWorkReportHash(input.Verdict, preState.Psi.Psi_g, preState.Psi.Psi_b, preState.Psi.Psi_w)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+	}
+	//eq 106 v: the vote should be index by validator index and no duplicates
+	err = checkVote(input.Verdict)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+	}
+
+	//process the dispute
+	//eq 107, 108 r,v (r=> report, v=> sum of votes)
+	/* only have 3 cases
+	zero => bad
+	1/3 => wonky
+	2/3+1 => good
+	*/
+	result := verdict2result(input.Verdict)
+	//eq 111 clear old report in rho , dummy report and timeout
+	//eq 112~115 update the psi state
+	post_state, state_prime, output, err := processDispute(result, input.Culprit, input.Fault, preState)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+
+	}
+	//eq 109 if the Verdict is good, always have at least one fault
+	err = isFaultEnoughAndValid(state_prime, input.Fault)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+	}
+	//eq 110 if the Verdict is bad, always have at least two culprit
+	err = isCulpritEnoughAndValid(state_prime, input.Culprit)
+	if err != nil {
+		output := Output{
+			Err: err.Error(),
+			Ok:  nil,
+		}
+		return preState, output, err
+	}
+
+	return post_state, output, err
+}
+
+// eq 99
+func getPublicKey(K []Validator, Index uint32) PublicKey {
+	return K[Index].Ed25519
+}
+
+func checkSignature(v Verdict, pre_state StateDispute) error {
+	for i, vote := range v.Votes {
+		// check the signature
+		sign_message := []byte{}
+		if vote.Voting {
+			sign_message = append([]byte("jam_valid"), v.WorkReportHash...)
+		} else {
+			sign_message = append([]byte("jam_invalid"), v.WorkReportHash...)
+		}
+		if v.Epoch == pre_state.Tau/E {
+			// check the signature
+
+			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.Kappa, uint32(vote.Index))), sign_message, vote.Signature) {
+				return fmt.Errorf("Verdict Error: the signature of the voterId %v is invalid", vote.Index)
+			}
+
+		} else if v.Epoch == pre_state.Tau/E-1 {
+			// check the signature
+			// to do : ask davxy , here should be sign by lambda
+			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.Lambda, uint32(vote.Index))), sign_message, vote.Signature) {
+				return fmt.Errorf("Verdict Error: the signature of the voterId %v in verdict %v is invalid, validator %x", vote.Index, i, ed25519.PublicKey(getPublicKey(pre_state.Lambda, uint32(vote.Index))))
+			}
+		} else {
+			return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, pre_state.Tau/E)
+		}
+	}
+	return nil
+}
+
+// eq 101
+func checkIfKeyOffend(key PublicKey, pre_state StateDispute) error {
+	for _, k := range pre_state.Psi.Psi_o {
+		if bytes.Equal(k, key) {
+			//drop the key
+			return fmt.Errorf("Bad Key: the key %x shouldn't be in old offenders set", key)
+		}
+	}
+	// check if the key is in the validator set
+	for _, k := range pre_state.Kappa {
+		if bytes.Equal(k.Ed25519, key) {
+			return nil
+		}
+	}
+	for _, k := range pre_state.Lambda {
+		if bytes.Equal(k.Ed25519, key) {
+			return nil
+		}
+	}
+	return fmt.Errorf("Bad Key: the key %v shouldn't be in old offenders set", key)
+}
+
+// eq 103 v: v should index by the work report hash and no duplicates
+func checkVerdicts(v []Verdict) error {
+
+	for i, verdict := range v {
+		// check duplicate
+		for j, veverdict2 := range v {
+			if i == j {
+				continue
+			}
+			if bytes.Equal(veverdict2.WorkReportHash, verdict.WorkReportHash) {
+				return fmt.Errorf("Verdict Error: duplicate WorkReportHash %v in index %v", verdict.WorkReportHash, j)
+			}
+		}
+		// check index
+		if i == 0 {
+			continue
+		}
+		if bytes.Compare(v[i].WorkReportHash, v[i-1].WorkReportHash) < 0 {
+			return fmt.Errorf("Verdict Error: WorkReportHash %x should be bigger than %x", v[i].WorkReportHash, v[i-1].WorkReportHash)
+		}
+	}
+	return nil
+}
+
+// eq 104 c: should be index by key and no duplicates
+func checkCulprit(c []Culprit) error {
+	for i, culprit := range c {
+		//check culprit signature is valid
+		sign_message := append([]byte("jam_guarantee"), culprit.WorkReportHash...)
+		//verify the signature
+		if !ed25519.Verify(ed25519.PublicKey(culprit.Key), sign_message, culprit.Signature) {
+			return fmt.Errorf("Culprit Error: the signature of the culprit %v is invalid", culprit.Key)
+		}
+		// check duplicate
+		for j, c2 := range c {
+			if i == j {
+				continue
+			}
+			if bytes.Equal(c2.Key, culprit.Key) {
+				return fmt.Errorf("Culprit Error: duplicate key %x in index %v and %v", culprit.Key, i, j)
+			}
+		}
+		// check index
+		if i == 0 {
+			continue
+		}
+		if bytes.Compare(c[i].Key, c[i-1].Key) < 0 {
+			return fmt.Errorf("Culprit Error: key %x should be bigger than %x", c[i].Key, c[i-1].Key)
+		}
+	}
+	return nil
+}
+
+// eq 104 f: should be index by key and no duplicates
+func checkFault(f []Fault) error {
+	for i, fault := range f {
+		//check fault signature is valid
+		// jam_guarantee concat the work report hash
+		sign_message := []byte{}
+		if fault.Voting {
+			sign_message = append([]byte("jam_valid"), fault.WorkReportHash...)
+		} else {
+			sign_message = append([]byte("jam_invalid"), fault.WorkReportHash...)
+		}
+		//verify the signature
+		if !ed25519.Verify(ed25519.PublicKey(fault.Key), sign_message, fault.Signature) {
+			return fmt.Errorf("Fault Error: the signature of the fault %v is invalid", fault.Key)
+		}
+		// check duplicate
+		for j, f2 := range f {
+			if i == j {
+				continue
+			}
+			if bytes.Equal(f2.Key, fault.Key) {
+				return fmt.Errorf("Fault Error: duplicate key %v in index %v and %v", fault.Key, i, j)
+			}
+		}
+		// check index
+		if i == 0 {
+			continue
+		}
+		if bytes.Compare(f[i].Key, f[i-1].Key) < 0 {
+			return fmt.Errorf("Fault Error: key %x should be bigger than %x", f[i].Key, f[i-1].Key)
+		}
+	}
+	return nil
+}
+
+// eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
+func checkWorkReportHash(v []Verdict, psi_g [][]byte, psi_b [][]byte, psi_w [][]byte) error {
+	for _, verdict := range v {
+		if checkWorkReportHashInSet(verdict.WorkReportHash, psi_g) {
+			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_g", verdict.WorkReportHash)
+		}
+		if checkWorkReportHashInSet(verdict.WorkReportHash, psi_b) {
+			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_b", verdict.WorkReportHash)
+		}
+		if checkWorkReportHashInSet(verdict.WorkReportHash, psi_w) {
+			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_w", verdict.WorkReportHash)
+		}
+	}
+	return nil
+}
+func checkWorkReportHashInSet(hash []byte, set [][]byte) bool {
+	for _, h := range set {
+		if bytes.Equal(h, hash) {
+			return true
+		}
+	}
+	return false
+}
+
+func checkVote(v []Verdict) error {
+	for _, verdict := range v {
+		for i, vote := range verdict.Votes {
+			// check duplicate
+			for j, vote2 := range verdict.Votes {
+				if i == j {
+					continue
+				}
+				if vote2.Index == vote.Index {
+					return fmt.Errorf("Vote Error: duplicate index %v in index %v", vote.Index, j)
+				}
+			}
+			// check index
+			if i == 0 {
+				continue
+			}
+			if vote.Index < verdict.Votes[i-1].Index {
+				return fmt.Errorf("Vote Error: index %v should be bigger than %v", vote.Index, verdict.Votes[i-1].Index)
+			}
+		}
+	}
+	return nil
+}
+
+// process the dispute
+func verdict2result(v []Verdict) []VerdictResult {
+	var result []VerdictResult
+	for _, verdict := range v {
+		// count the vote
+		positiveCount := 0
+		for _, vote := range verdict.Votes {
+			if vote.Voting {
+				positiveCount++
+			}
+		}
+		result = append(result, VerdictResult{
+			WorkReportHash: verdict.WorkReportHash,
+			PositveCount:   positiveCount,
+		})
+		// for _, r := range result {
+		// 	fmt.Printf("WorkReportHash: %x, PositveCount: %v\n", r.WorkReportHash, r.PositveCount)
+		// }
+
+	}
+
+	return result
+}
+func sortSet(VerdictResult []VerdictResult, preState StateDispute) (StateDispute, StateDispute) {
+	post_state := preState
+	state_prime := StateDispute{}
+	for _, v := range VerdictResult {
+		if v.PositveCount == 0 {
+			//bad
+			post_state.Psi.Psi_b = append(post_state.Psi.Psi_b, v.WorkReportHash)
+			state_prime.Psi.Psi_b = append(state_prime.Psi.Psi_b, v.WorkReportHash)
+
+		} else if v.PositveCount == ValidatorNum/3 {
+			//wonky
+			post_state.Psi.Psi_w = append(post_state.Psi.Psi_w, v.WorkReportHash)
+			state_prime.Psi.Psi_w = append(state_prime.Psi.Psi_w, v.WorkReportHash)
+		} else if v.PositveCount == ValidatorNum*2/3+1 {
+			//good
+			post_state.Psi.Psi_g = append(post_state.Psi.Psi_g, v.WorkReportHash)
+			state_prime.Psi.Psi_g = append(state_prime.Psi.Psi_g, v.WorkReportHash)
+
+		}
+	}
+	post_state.Psi.Psi_b = sortByHash(post_state.Psi.Psi_b)
+	post_state.Psi.Psi_w = sortByHash(post_state.Psi.Psi_w)
+	post_state.Psi.Psi_g = sortByHash(post_state.Psi.Psi_g)
+	state_prime.Psi.Psi_b = sortByHash(state_prime.Psi.Psi_b)
+	state_prime.Psi.Psi_w = sortByHash(state_prime.Psi.Psi_w)
+	state_prime.Psi.Psi_g = sortByHash(state_prime.Psi.Psi_g)
+	return post_state, state_prime
+}
+
+func clearReportRho(preState StateDispute, V []VerdictResult) StateDispute {
+	post_state := preState
+	for i := range post_state.Rho {
+		rhoo := &post_state.Rho[i]
+		for _, h := range V {
+			wrHash := common.ComputeHash(rhoo.DummyWorkReport)
+			if bytes.Equal(wrHash, h.WorkReportHash) && h.PositveCount < ValidatorNum*2/3 {
+				// clear the old report
+				rhoo.DummyWorkReport = []byte{}
+				rhoo.Timeout = 0
+
+			}
+		}
+	}
+	return post_state
+}
+func updateOffender(preState StateDispute, c []Culprit, f []Fault) StateDispute {
+	post_state := preState
+	for _, c := range c {
+		post_state.Psi.Psi_o = append(post_state.Psi.Psi_o, c.Key)
+	}
+	for _, f := range f {
+		post_state.Psi.Psi_o = append(post_state.Psi.Psi_o, f.Key)
+
+	}
+	//sort the key
+	post_state.Psi.Psi_o = sortByKey(post_state.Psi.Psi_o)
+	return post_state
+}
+func processOutput(VerdictResult []VerdictResult, c []Culprit, f []Fault) Output {
+	//the Verdict mark is the Verdict PositveCount < ValidatorNum*2/3
+	//the Offender mark is the c and f key
+	var output Output
+	output.Ok = &struct {
+		VerdictMark  [][]byte    `json:"verdict_mark"`
+		OffenderMark []PublicKey `json:"offender_mark"`
+	}{}
+
+	for _, v := range VerdictResult {
+		if v.PositveCount < ValidatorNum*2/3 {
+			output.Ok.VerdictMark = append(output.Ok.VerdictMark, v.WorkReportHash)
+		}
+	}
+	for _, culprit := range c {
+		output.Ok.OffenderMark = append(output.Ok.OffenderMark, culprit.Key)
+	}
+	for _, fault := range f {
+		output.Ok.OffenderMark = append(output.Ok.OffenderMark, fault.Key)
+	}
+	if output.Ok.VerdictMark == nil {
+		output.Ok.VerdictMark = [][]byte{}
+	}
+	if output.Ok.OffenderMark == nil {
+		output.Ok.OffenderMark = []PublicKey{}
+	}
+	return output
+}
+func processDispute(VerdictResult []VerdictResult, c []Culprit, f []Fault, preState StateDispute) (StateDispute, StateDispute, Output, error) {
+	//eq 107, 108 r,v (r=> report, v=> sum of votes)
+	post_state := preState
+	post_state, state_prime := sortSet(VerdictResult, post_state)
+
+	//eq 109 if the Verdict is good, always have a least one fault
+	//eq 110 if the Verdict is bad, always have a least two culprit
+	Output := processOutput(VerdictResult, c, f)
+	//eq 111 clear old report in rho , dummy report and timeout
+	post_state = updateOffender(post_state, c, f)
+	post_state = clearReportRho(post_state, VerdictResult)
+
+	return post_state, state_prime, Output, nil
+}
+func sortByHash(set [][]byte) [][]byte {
+	for i := range set {
+		for j := range set {
+			if bytes.Compare(set[i], set[j]) < 0 {
+				set[i], set[j] = set[j], set[i]
+			}
+		}
+	}
+	return set
+}
+func sortByKey(set []PublicKey) []PublicKey {
+	for i := range set {
+		for j := range set {
+			if bytes.Compare(set[i], set[j]) < 0 {
+				set[i], set[j] = set[j], set[i]
+			}
+		}
+	}
+	return set
+}
+func isFaultEnoughAndValid(state_prime StateDispute, f []Fault) error {
+	counter := 0
+	for _, s := range state_prime.Psi.Psi_g {
+		for _, f := range f {
+			if bytes.Equal(s, f.WorkReportHash) {
+				counter++
+			}
+		}
+		if counter < 1 {
+			return fmt.Errorf("Fault Error: psi_g should have at least one fault work report hash")
+		}
+	}
+	found := false
+	for _, f := range f {
+		if f.Voting {
+			return fmt.Errorf("Fault Error: fault should be false, invalid key: %x", f.Key)
+		}
+		for _, s := range state_prime.Psi.Psi_g {
+			if bytes.Equal(s, f.WorkReportHash) {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("Fault Error: work report hash %x should be in good set", f.WorkReportHash)
+		}
+	}
+	return nil
+}
+func isCulpritEnoughAndValid(state_prime StateDispute, c []Culprit) error {
+	counter := 0
+	for _, s := range state_prime.Psi.Psi_b {
+		for _, c := range c {
+			if bytes.Equal(s, c.WorkReportHash) {
+				counter++
+			}
+		}
+
+		if counter < 2 {
+			return fmt.Errorf("Culprit Error: work report hash %x in psi_b should have at least two culprit", s)
+		}
+	}
+	found := false
+	for _, c := range c {
+		for _, s := range state_prime.Psi.Psi_b {
+			if bytes.Equal(s, c.WorkReportHash) {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("Culprit Error: work report hash %x should be in bad set", c.WorkReportHash)
+		}
+	}
+	return nil
+}
