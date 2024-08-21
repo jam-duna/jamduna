@@ -2,16 +2,15 @@ package statedb
 
 import (
 	//"github.com/ethereum/go-ethereum/crypto"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/safrole"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/trie"
-
-	//"github.com/colorfulnotion/jam/bandersnatch"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/safrole"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 	"sync"
 	"time"
 )
@@ -22,21 +21,20 @@ type Message struct {
 }
 
 type StateDB struct {
-	Id         uint32                `json:"id"`
-	Block      *Block                `json:"block"`
-	ParentHash common.Hash           `json:"parentHash"`
-	BlockHash  common.Hash           `json:"blockHash"`
-	StateRoot  common.Hash           `json:"stateRoot"`
-	Safrole    *safrole.SafroleState `json:"safrole"`
-
+	Id              uint32                `json:"id"`
+	Block           *types.Block          `json:"block"`
+	ParentHash      common.Hash           `json:"parentHash"`
+	BlockHash       common.Hash           `json:"blockHash"`
+	StateRoot       common.Hash           `json:"stateRoot"`
+	Safrole         *safrole.SafroleState `json:"safrole"`
 	sdb             *storage.StateDBStorage
-	credential      safrole.ValidatorSecret
+	credential      types.ValidatorSecret
 	trie            *trie.MerkleTree
 	nodeMessageChan chan Message
 
 	selfTickets  map[uint32][]common.Hash //keep track of its own tickets
 	knownTickets map[common.Hash]int      //keep track of known tickets
-	queuedticket map[common.Hash]safrole.Ticket
+	queuedticket map[common.Hash]types.Ticket
 	ticketMutex  sync.Mutex
 }
 
@@ -50,7 +48,7 @@ func (sdb *StateDB) SendOutgoingMessage(msgType string, payload interface{}) {
 	sdb.nodeMessageChan <- msg
 }
 
-func (s *StateDB) AddTicketToQueue(t safrole.Ticket) {
+func (s *StateDB) AddTicketToQueue(t types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
 	s.queuedticket[t.TicketID()] = t
@@ -66,7 +64,7 @@ func (s *StateDB) CheckTicketExists(ticketID common.Hash) bool {
 	return exists
 }
 
-func (s *StateDB) ProcessIncomingBlock(b *Block) error {
+func (s *StateDB) ProcessIncomingBlock(b *types.Block) error {
 	currEpoch, currPhase := s.Safrole.EpochAndPhase(b.Header.TimeSlot)
 	// TODO: validate block
 	is_validated := true
@@ -87,7 +85,7 @@ func (s *StateDB) ProcessIncomingBlock(b *Block) error {
 	return fmt.Errorf("ERROR in validating block")
 }
 
-func (s *StateDB) ProcessIncomingTicket(t safrole.Ticket) {
+func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	//s.QueueTicketEnvelope(t)
 	//statedb.tickets[common.BytesToHash(ticket_id)] = t
 	sf := s.GetSafrole()
@@ -99,12 +97,12 @@ func (s *StateDB) ProcessIncomingTicket(t safrole.Ticket) {
 	if s.CheckTicketExists(ticketID) {
 		return
 	}
-	fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v\n", s.Id, ticketID)
+	// fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v\n", s.Id, ticketID)
 	s.AddTicketToQueue(t)
 	s.knownTickets[ticketID] = t.Attempt
 }
 
-func (s *StateDB) RemoveTicket(t *safrole.Ticket) {
+func (s *StateDB) RemoveTicket(t *types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
 	delete(s.queuedticket, t.TicketID())
@@ -125,7 +123,7 @@ func (s *StateDB) RemoveTicket(t *safrole.Ticket) {
 
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
-	statedb.queuedticket = make(map[common.Hash]safrole.Ticket)
+	statedb.queuedticket = make(map[common.Hash]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]int)
 	statedb.selfTickets = make(map[uint32][]common.Hash)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
@@ -187,12 +185,26 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 
 	t := s.GetTrie()
 
+	// Disputes: C5, C10
+	/*
+	   d := s.GetDisputes()
+	   disputeState := d.GetDisputesBasicState()
+	   disputeStateEncode, _ := d.Bytes()
+	   t.SetState(C5, disputeStateEncode)
+	   // TODO: set C10
+	*/
+	// Safrole
 	t.SetState(C4, safroleStateEncode)
 	t.SetState(C6, entropyEncode)
 	t.SetState(C7, nextEpochValidatorsEncode)
 	t.SetState(C8, currEpochValidatorsEncode)
 	t.SetState(C9, priorEpochValidatorEncode)
 	t.SetState(C11, mostRecentBlockTimeSlotEncode)
+	// TODO: C1 = "CoreAuthPool"
+	// TODO: C2 = "AuthQueue"
+	// TODO: C3 = "RecentBlocks"
+	// TODO: C12 = "PrivilegedServiceIndices"
+	// TODO: C13 = "ActiveValidator"
 	return common.BytesToHash(t.GetRootHash())
 }
 
@@ -211,12 +223,12 @@ func (s *StateDB) String() string {
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
-	statedb.queuedticket = make(map[common.Hash]safrole.Ticket)
+	statedb.queuedticket = make(map[common.Hash]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]int)
 	statedb.selfTickets = make(map[uint32][]common.Hash)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 
-	block := Block{}
+	block := types.Block{}
 	b := make([]byte, 32)
 	zeroHash := common.BytesToHash(b)
 	if bytes.Compare(blockHash.Bytes(), zeroHash.Bytes()) == 0 {
@@ -259,7 +271,7 @@ func (s *StateDB) Copy() *StateDB {
 		nodeMessageChan: s.nodeMessageChan, // Channels are reference types, consider whether to create a new channel
 		selfTickets:     make(map[uint32][]common.Hash),
 		knownTickets:    make(map[common.Hash]int),
-		queuedticket:    make(map[common.Hash]safrole.Ticket),
+		queuedticket:    make(map[common.Hash]types.Ticket),
 	}
 
 	// Copy maps
@@ -279,7 +291,7 @@ func (s *StateDB) Copy() *StateDB {
 	return n
 }
 
-func (s *StateDB) ProcessState() (*Block, *StateDB) {
+func (s *StateDB) ProcessState() (*types.Block, *StateDB) {
 	genesisReady := s.Safrole.CheckGenesisReady()
 	if !genesisReady {
 		return nil, nil
@@ -316,7 +328,7 @@ func (s *StateDB) SelfTicketCount(epoch uint32) int {
 	return len(tickets)
 }
 
-func (s *StateDB) AddSelfTicket(epoch uint32, t safrole.Ticket) bool {
+func (s *StateDB) AddSelfTicket(epoch uint32, t types.Ticket) bool {
 	if s.selfTickets == nil {
 		s.selfTickets = make(map[uint32][]common.Hash)
 	}
@@ -361,7 +373,7 @@ func (s *StateDB) GenerateTickets(currJCE uint32) {
 	// send tickets to neighbors
 }
 
-func (s *StateDB) SetCredential(credential safrole.ValidatorSecret) {
+func (s *StateDB) SetCredential(credential types.ValidatorSecret) {
 	s.credential = credential
 }
 
@@ -408,20 +420,71 @@ func (s *StateDB) IsAuthorizedBlockBuilder(targetJCE uint32) bool {
 	return sf.IsAuthorizedBuilder(targetJCE, bandersnatchPub, ticketIDs)
 }
 
+func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup, targetJCE uint32, id uint32) error {
+	// bring together the queuedPreimages from solicit (from DA) and update stateDB (but not BPT) with the blobs
+	// solicit execution should have updated service state to "requested"
+	// some NODE process should then run erasure decoding to make it "available"
+	return nil
+}
+
+func (s *StateDB) ApplyStateTransitionGuarantees(guarantees []types.Guarantee, targetJCE uint32, id uint32) error {
+	// TODO: Guarantee
+	return nil
+}
+
+func (s *StateDB) ApplyStateTransitionAssurances(assurances []types.Assurance, targetJCE uint32, id uint32) error {
+	// TODO: In the same way that extrinsic Tickets are processed, Assurances are
+	return nil
+}
+
+func (s *StateDB) ApplyStateTransitionDisputes(disputes []types.Dispute, targetJCE uint32, id uint32) error {
+	// TODO
+	return nil
+}
+
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *Block) (err error) {
-	// TODO: implement the transition code here
-	ticketExts := blk.Tickets()
-	sf_header := blk.ConvertToSafroleHeader()
+func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.Block) (err error) {
 	targetJCE := blk.TimeSlot()
+
+	// Preimages
+	preimages := blk.PreImages()
+	err = s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
+	if err != nil {
+		return err
+	}
+
+	// Guarantees
+	guarantees := blk.Guarantees()
+	err = s.ApplyStateTransitionGuarantees(guarantees, targetJCE, s.Id)
+	if err != nil {
+		return err
+	}
+
+	// Assurances
+	assurances := blk.Assurances()
+	err = s.ApplyStateTransitionAssurances(assurances, targetJCE, s.Id)
+	if err != nil {
+		return err
+	}
+
+	// Disputes
+	disputes := blk.Disputes()
+	err = s.ApplyStateTransitionDisputes(disputes, targetJCE, s.Id)
+	if err != nil {
+		return err
+	}
+	// Safrole last
+	ticketExts := blk.Tickets()
+	//sf_header := blk.ConvertToSafroleHeader()
+	sf_header := blk.GetHeader()
 	epochMark := blk.EpochMark()
 	if epochMark != nil {
 		s.knownTickets = make(map[common.Hash]int) //keep track of known tickets
-		s.queuedticket = make(map[common.Hash]safrole.Ticket)
+		s.queuedticket = make(map[common.Hash]types.Ticket)
 	}
 	sf := s.GetSafrole()
-	s2, err := sf.ApplyStateTransitionFromBlock(ticketExts, targetJCE, sf_header, s.Id)
+	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header, s.Id)
 	if err != nil {
 		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", err)
 		panic(1)
@@ -436,25 +499,45 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *Block)
 	return nil
 }
 
-func (s *StateDB) GetBlock() *Block {
+func (s *StateDB) GetBlock() *types.Block {
 	return s.Block
 }
 
 // make block generate block prior to state execution
-func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, newStateDB *StateDB, err error) {
+func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Block, newStateDB *StateDB, err error) {
 	sf := s.GetSafrole()
 	bandersnatchSecret := s.GetBandersnatchSecret()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IsTicketSubmissionCloses(targetJCE)
 
-	b := NewBlock()
-	h := NewBlockHeader()
-	extrinsicData := NewExtrinsic()
+	b := types.NewBlock()
+	h := types.NewBlockHeader()
+	extrinsicData := types.NewExtrinsic()
 	h.ParentHash = s.BlockHash
 	h.PriorStateRoot = s.StateRoot
 	h.TimeSlot = targetJCE
 
-	// TODO: we only need an epoch marker if we didn't get enough tickets
+	// Extrinsic Data has 5 different Extrinsics
+	// E_P - Preimages
+	/*
+	   TODO: aggregate queuedPreimageLookups into extrinsicData.Preimages
+	*/
+	// E_G - Guarantees
+	/*
+	   TODO: aggregate queuedGuarantees into extrinsicData.Guarantees
+	*/
+	// E_A - Assurances
+	/*
+	   TODO: aggregate queuedAssurances into extrinsicData.Assurances
+	*/
+	// E_D - Disputes
+	/*
+			   TODO: aggregate queuedVerdicts/Culprits/Faults into extrinsicData.Disputes
+		   	d := s.GetDisputes()
+			needMarkerVerdicts := d.NeedsVerdictsMarker(targetJCE)
+			needMarkerOffenders := d.NeedsOffendersMarker(targetJCE)
+	*/
+
 	needEpochMarker := isNewEpoch && false
 	if needEpochMarker {
 		epochMarker := sf.GenerateEpochMarker()
@@ -463,8 +546,8 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, n
 		h.EpochMark = epochMarker
 	}
 	if isNewEpoch {
-		h.WinningTicketsMark = make([]*safrole.TicketBody, 0) // clear out the tickets if its a new epoch
-		s.queuedticket = make(map[common.Hash]safrole.Ticket)
+		h.WinningTicketsMark = make([]*types.TicketBody, 0) // clear out the tickets if its a new epoch
+		s.queuedticket = make(map[common.Hash]types.Ticket)
 	}
 	if needWinningMarker {
 		fmt.Printf("targetJCE=%v check WinningMarker\n", targetJCE)
@@ -476,7 +559,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, n
 	} else {
 		// If there's new ticketID, add them into extrinsic
 		// Question: can we submit tickets at the exact tail end block?
-		extrinsicData.Tickets = make([]safrole.Ticket, 0)
+		extrinsicData.Tickets = make([]types.Ticket, 0)
 		for ticketID, ticket := range s.queuedticket {
 			t, err := ticket.DeepCopy()
 			if err != nil {
@@ -484,11 +567,11 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, n
 			}
 			if s.Safrole.InTicketAccumulator(ticketID) {
 			} else {
-				fmt.Printf("[N%d] GetTicketQueue %v => %v\n", s.Id, ticketID, t)
+				// fmt.Printf("[N%d] GetTicketQueue %v => %v\n", s.Id, ticketID, t)
 				extrinsicData.Tickets = append(extrinsicData.Tickets, t)
 			}
 		}
-		s.queuedticket = make(map[common.Hash]safrole.Ticket)
+		s.queuedticket = make(map[common.Hash]types.Ticket)
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()
@@ -519,9 +602,9 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *Block, n
 		h.BlockSeal = blockseal
 		h.VRFSignature = fresh_vrfSig
 	}
-	fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, b.String(), newStateDB.String())
 
 	b.Header = *h
+	fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, b.Hash(), newStateDB.String())
 	newStateDB = s.Copy() // newEmptyStateDB(s.sdb)
 	newSafrole := s.Safrole.Copy()
 	newStateDB.Safrole = newSafrole

@@ -18,14 +18,15 @@ import (
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 
+	"io"
 	"log"
 	"math/big"
+	rand0 "math/rand"
 	"strings"
 	"sync"
 	"time"
-
-	"io"
 
 	"github.com/colorfulnotion/jam/erasurecoding"
 	"github.com/colorfulnotion/jam/safrole"
@@ -58,15 +59,15 @@ type QuicMessage struct {
 }
 
 type NodeInfo struct {
-	PeerID     uint32            `json:"peer_id"`
-	PeerAddr   string            `json:"peer_addr"`
-	RemoteAddr string            `json:"remote_addr"`
-	Validator  safrole.Validator `json:"validator"`
+	PeerID     uint32          `json:"peer_id"`
+	PeerAddr   string          `json:"peer_addr"`
+	RemoteAddr string          `json:"remote_addr"`
+	Validator  types.Validator `json:"validator"`
 }
 
 type Node struct {
 	id         uint32
-	credential safrole.ValidatorSecret
+	credential types.ValidatorSecret
 	server     quic.Listener
 	peers      []string
 	peersInfo  map[string]NodeInfo //<ed25519> -> NodeInfo
@@ -79,7 +80,8 @@ type Node struct {
 	store       *storage.StateDBStorage /// where to put this?
 
 	// holds a map of the parenthash to the block
-	blockCache map[common.Hash]*statedb.Block
+	blockCache map[common.Hash]*types.Block
+	blocks     map[common.Hash]*types.Block
 	// holds a map of the hash to the stateDB
 	statedbMap map[common.Hash]*statedb.StateDB
 	// holds the tip
@@ -154,7 +156,7 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 	return tls.X509KeyPair(certPEM, privKeyPEM)
 }
 
-func (n *Node) setValidatorCredential(credential safrole.ValidatorSecret) {
+func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	n.credential = credential
 	if false {
 		jsonData, err := json.Marshal(credential)
@@ -166,7 +168,7 @@ func (n *Node) setValidatorCredential(credential safrole.ValidatorSecret) {
 	}
 }
 
-func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safrole.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string) (*Node, error) {
+func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *safrole.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string) (*Node, error) {
 	path := fmt.Sprintf("/tmp/log/testdb%d", id)
 	store, err := storage.NewStateDBStorage(path)
 	if err != nil {
@@ -249,7 +251,7 @@ func newNode(id uint32, credential safrole.ValidatorSecret, genesisConfig *safro
 		messageChan: messageChan,
 		nodeType:    nodeType,
 		statedbMap:  make(map[common.Hash]*statedb.StateDB),
-		blockCache:  make(map[common.Hash]*statedb.Block),
+		blockCache:  make(map[common.Hash]*types.Block),
 	}
 
 	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
@@ -432,38 +434,50 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 	response := []byte("1")
 	ok := []byte("0")
 	switch msg.MsgType {
-	case "ImportDAQuery":
-		var query ImportDAQuery
+	case "BlockQuery":
+		var query types.BlockQuery
 		err := json.Unmarshal([]byte(msg.Payload), &query)
 		if err == nil {
-			r := ImportDAResponse{Data: [][]byte{[]byte("dummy data")}, Proof: BMTProof{}}
+			blk, found := n.blockCache[query.BlockHash]
+			if found {
+				serializedR, err := json.Marshal(blk)
+				if err == nil {
+					response = serializedR
+				}
+			}
+		}
+	case "ImportDAQuery":
+		var query types.ImportDAQuery
+		err := json.Unmarshal([]byte(msg.Payload), &query)
+		if err == nil {
+			r := types.ImportDAResponse{Data: [][]byte{[]byte("dummy data")}}
 			serializedR, err := json.Marshal(r)
 			if err == nil {
 				response = serializedR
 			}
 		}
 	case "AuditDAQuery":
-		var query AuditDAQuery
+		var query types.AuditDAQuery
 		err := json.Unmarshal([]byte(msg.Payload), &query)
 		if err == nil {
-			r := AuditDAResponse{Data: []byte("dummy data"), Proof: BMTProof{}}
+			r := types.AuditDAResponse{Data: []byte("dummy data")}
 			serializedR, err := json.Marshal(r)
 			if err == nil {
 				response = serializedR
 			}
 		}
 	case "ImportDAReconstructQuery":
-		var query ImportDAReconstructQuery
+		var query types.ImportDAReconstructQuery
 		err := json.Unmarshal([]byte(msg.Payload), &query)
 		if err == nil {
-			r := ImportDAReconstructResponse{Data: []byte("dummy data")}
+			r := types.ImportDAReconstructResponse{Data: []byte("dummy data")}
 			serializedR, err := json.Marshal(r)
 			if err == nil {
 				response = serializedR
 			}
 		}
 	case "Ticket":
-		var ticket *safrole.Ticket
+		var ticket *types.Ticket
 		err := json.Unmarshal([]byte(msg.Payload), &ticket)
 		if err == nil {
 			err = n.processTicket(*ticket)
@@ -472,7 +486,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 			}
 		}
 	case "Guarantee":
-		var guarantee Guarantee
+		var guarantee types.Guarantee
 		err := json.Unmarshal([]byte(msg.Payload), &guarantee)
 		if err == nil {
 			err = n.processGuarantee(guarantee)
@@ -481,7 +495,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 			}
 		}
 	case "Assurance":
-		var assurance Assurance
+		var assurance types.Assurance
 		err := json.Unmarshal([]byte(msg.Payload), &assurance)
 		if err == nil {
 			err = n.processAssurance(assurance)
@@ -489,8 +503,8 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 				response = ok
 			}
 		}
-	case "Disputes":
-		var disputes Disputes
+	case "Dispute":
+		var disputes types.Dispute
 		err := json.Unmarshal([]byte(msg.Payload), &disputes)
 		if err == nil {
 			err = n.processDisputes(disputes)
@@ -499,7 +513,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 			}
 		}
 	case "PreimageLookup":
-		var preimageLookup PreimageLookup
+		var preimageLookup types.PreimageLookup
 		err := json.Unmarshal([]byte(msg.Payload), &preimageLookup)
 		if err == nil {
 			err = n.processPreimageLookup(preimageLookup)
@@ -508,7 +522,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 			}
 		}
 	case "Block":
-		var block *statedb.Block
+		var block *types.Block
 		err := json.Unmarshal([]byte(msg.Payload), &block)
 		if err == nil {
 			fmt.Printf(" -- [N%d] received block From N%d (%v <- %v)\n", n.id, msg.Id, block.ParentHash(), block.Hash())
@@ -518,7 +532,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 			}
 		}
 	case "Announcement":
-		var announcement Announcement
+		var announcement types.Announcement
 		err := json.Unmarshal([]byte(msg.Payload), &announcement)
 		if err == nil {
 			err = n.processAnnouncement(announcement)
@@ -527,7 +541,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 			}
 		}
 	case "WorkPackage":
-		var workPackage WorkPackage
+		var workPackage types.WorkPackage
 		err := json.Unmarshal([]byte(msg.Payload), &workPackage)
 		if err == nil {
 			err = n.processWorkPackage(workPackage)
@@ -538,7 +552,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 	// -----Custom messages for tiny QUIC experiment-----
 
 	case "DistributeECChunk":
-		var chunk DistributeECChunk
+		var chunk types.DistributeECChunk
 		err := json.Unmarshal([]byte(msg.Payload), &chunk)
 		if err == nil {
 			err = n.processDistributeECChunk(chunk)
@@ -558,7 +572,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 	// 	}
 
 	case "ECChunkQuery":
-		var query ECChunkQuery
+		var query types.ECChunkQuery
 		err := json.Unmarshal([]byte(msg.Payload), &query)
 		if err == nil {
 			r, err := n.processECChunkQuery(query)
@@ -579,19 +593,24 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 	//stream.Close()
 }
 
-func (n *Node) broadcast(obj interface{}) {
+func (n *Node) broadcast(obj interface{}) []byte {
+	result := []byte{}
 	for _, peer := range n.peersInfo {
 		peerIdentifier := peer.Validator.Ed25519.String()
 		if peer.PeerID == n.id {
 			continue
 		}
 		//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
-		_, err := n.makeRequest(peerIdentifier, obj)
+		resp, err := n.makeRequest(peerIdentifier, obj)
 		if err != nil {
 			fmt.Printf("runClient request error: %v\n", err)
 			continue
 		}
+		if len(resp) > 0 {
+			result = resp
+		}
 	}
+	return result
 }
 
 func (n *Node) makeRequest(peerIdentifier string, obj interface{}) ([]byte, error) {
@@ -695,28 +714,28 @@ func isTimeoutError(err error) bool {
 }
 
 // should process ticket being moved to safrole
-func (n *Node) processTicket(ticket safrole.Ticket) error {
+func (n *Node) processTicket(ticket types.Ticket) error {
 	s := n.getState()
 	s.ProcessIncomingTicket(ticket)
 	return nil // Success
 }
 
-func (n *Node) processGuarantee(guarantee Guarantee) error {
+func (n *Node) processGuarantee(guarantee types.Guarantee) error {
 	// TODO: Store the lookup in a E_G aggregator
 	return nil // Success
 }
 
-func (n *Node) processAssurance(assurance Assurance) error {
+func (n *Node) processAssurance(assurance types.Assurance) error {
 	// TODO: Store the lookup in a E_A aggregator
 	return nil // Success
 }
 
-func (n *Node) processDisputes(disputes Disputes) error {
+func (n *Node) processDisputes(disputes types.Dispute) error {
 	// TODO: Store the lookup in a E_D aggregator
 	return nil // Success
 }
 
-func (n *Node) processPreimageLookup(preimageLookup PreimageLookup) error {
+func (n *Node) processPreimageLookup(preimageLookup types.PreimageLookup) error {
 	// TODO: Store the lookup in a E_P aggregator
 	return nil // Success
 }
@@ -725,48 +744,100 @@ func (n *Node) dumpstatedbmap() {
 	for hash, statedb := range n.statedbMap {
 		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHash, statedb.BlockHash, statedb.StateRoot)
 	}
+	for parenthash, blk := range n.blockCache {
+		fmt.Printf("dumpstatedbmap: block[%v] => %v\n", parenthash, blk.Hash())
+	}
 }
 
-func (n *Node) processBlock(blk *statedb.Block) error {
-	prevstatedb, ok := n.statedbMap[blk.ParentHash()]
-	if !ok {
-		n.blockCache[blk.ParentHash()] = blk
-		fmt.Printf("[N%d] NO STATEDB, so added BLOCK to blockCache[%v] <= %v\n", n.id, blk.ParentHash(), blk.Hash())
-		//n.dumpstatedbmap()
-		return nil // fmt.Errorf("Unknown parenthash %x\n", blk.ParentHash())
+func randomKey(m map[string]NodeInfo) string {
+	rand0.Seed(time.Now().UnixNano())
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
 	}
+	return keys[rand0.Intn(len(keys))]
+}
 
-	s := prevstatedb.Copy() // n.getState()
+func (n *Node) fetchBlock(blockHash common.Hash) *types.Block {
+	obj := types.BlockQuery{BlockHash: blockHash}
 
-	err := s.ProcessIncomingBlock(blk)
+	peer := n.peersInfo[randomKey(n.peersInfo)]
+	peerIdentifier := peer.Validator.Ed25519.String()
+	resp, err := n.makeRequest(peerIdentifier, obj)
 	if err != nil {
-		fmt.Printf("[N%d] ProcessIncomingBlock ERR %v\n", n.id, err)
-		panic(0)
-		return err
+		fmt.Printf("runClient request error: %v\n", err)
+		return nil
 	}
-	// if we made it, store it in recent state
-	n.addStateDB(s)
-	if n.id == 0 {
-		fmt.Printf("[N%v] processBlock FINISHED %v<-%v  STATE (%v<-%v)\n", n.id, blk.ParentHash(), blk.Hash(), s.ParentHash, s.BlockHash)
-	} else {
-		fmt.Printf("[N%v] processBlock FINISHED %v<-%v  STATE (%v<-%v)\n", n.id, blk.ParentHash(), blk.Hash(), s.ParentHash, s.BlockHash)
+	if len(resp) > 10 {
+		fmt.Printf("fetchBlock %s\n", string(resp))
+	}
+	return nil
+}
+
+func (n *Node) extendChain() error {
+
+	for {
+		blockhash := n.statedb.BlockHash
+		// find the NEXT block using the blockCache (blockCached is indexed by PARENT hash)
+		nextBlock, ok := n.blockCache[blockhash]
+		if ok {
+			// now APPLY the block to the tip
+			s := n.statedb.Copy()
+			err := s.ProcessIncomingBlock(nextBlock)
+			if err != nil {
+				return err
+			}
+			// EXTEND the tip of the chain
+			n.addStateDB(s)
+		} else {
+			// if there is no next block, we're done!
+			return nil
+		}
+		// repeat
+	}
+}
+
+// we arrive here when we receive a block from another node
+func (n *Node) processBlock(blk *types.Block) error {
+
+	// walk blk backwards, up to the tip, if possible -- but if encountering an unknown parenthash, immediately fetch the block.  Give up if we can't do anything
+	b := blk
+	n.blocks[b.Hash()] = blk
+	for {
+		parentBlock, ok := n.blocks[b.ParentHash()]
+		if !ok {
+			parentBlock = n.fetchBlock(b.ParentHash())
+			if parentBlock != nil {
+				n.blockCache[parentBlock.ParentHash()] = parentBlock
+				n.blocks[parentBlock.Hash()] = parentBlock
+			} else {
+				// no one knows about it, have to give up right now
+				return nil
+			}
+		}
+		b = parentBlock
+		if n.statedb.BlockHash == b.Hash() {
+			// we got to the tip, now extend the chain
+			n.extendChain()
+			return nil
+		}
 	}
 	return nil // Success
 }
 
-func (n *Node) processAnnouncement(announcement Announcement) error {
+func (n *Node) processAnnouncement(announcement types.Announcement) error {
 	// TODO: TBD
 	return nil // Success
 }
 
-func (n *Node) processWorkPackage(workPackage WorkPackage) error {
+func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 	// TODO: Incorporate WP chunks
 	return nil // Success
 }
 
 // -----Custom methods for tiny QUIC EC experiment-----
 
-func (n *Node) processDistributeECChunk(chunk DistributeECChunk) error {
+func (n *Node) processDistributeECChunk(chunk types.DistributeECChunk) error {
 	// Serialize the chunk
 	serialized, err := json.Marshal(chunk)
 	if err != nil {
@@ -781,18 +852,18 @@ func (n *Node) processDistributeECChunk(chunk DistributeECChunk) error {
 	return nil
 }
 
-func (n *Node) processECChunkQuery(ecChunkQuery ECChunkQuery) (ECChunkResponse, error) {
+func (n *Node) processECChunkQuery(ecChunkQuery types.ECChunkQuery) (types.ECChunkResponse, error) {
 	key := fmt.Sprintf("DA-%d", ecChunkQuery.SegmentRoot)
 	// fmt.Printf("[N%v] processECChunkQuery key=%s\n", n.id, key)
 	data, err := n.store.ReadRawK([]byte(key))
 	if err != nil {
-		return ECChunkResponse{}, err
+		return types.ECChunkResponse{}, err
 	}
 	// Deserialize the chunk
-	var chunk ECChunkResponse
+	var chunk types.ECChunkResponse
 	err = json.Unmarshal(data, &chunk)
 	if err != nil {
-		return ECChunkResponse{}, err
+		return types.ECChunkResponse{}, err
 	}
 	return chunk, nil
 }
@@ -810,14 +881,14 @@ func (n *Node) encode(data []byte) ([][][]byte, error) {
 	return encoded_data, nil
 }
 
-func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte) ([]DistributeECChunk, error) {
+func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte) ([]types.DistributeECChunk, error) {
 	// TODO: Pack the chunks into DistributeECChunk objects
-	chunks := make([]DistributeECChunk, 0)
+	chunks := make([]types.DistributeECChunk, 0)
 	for i := range segments {
 		for j := range segments[i] {
 			// Pack the DistributeECChunk object
 			// TODO: Modify this as needed.
-			chunk := DistributeECChunk{
+			chunk := types.DistributeECChunk{
 				SegmentRoot: segmentRoots[i],
 				Data:        segments[i][j],
 			}
@@ -925,14 +996,14 @@ func (n *Node) FetchAndReconstructData(blob_hash common.Hash) ([]byte, error) {
 	decoderInputSegments := make([][][]byte, 0)
 	for i, segmentRoot := range segmentRoots {
 		_ = i
-		ecChunkResponses := make([]ECChunkResponse, 0)
+		ecChunkResponses := make([]types.ECChunkResponse, 0)
 		fetchedChunks := 0
 		for j := 0; j < numNodes; j++ {
 			peerIdentifier, err := n.getPeerByIndex(uint32(j))
 			if err != nil {
 				return nil, err
 			}
-			ecChunkQuery := ECChunkQuery{
+			ecChunkQuery := types.ECChunkQuery{
 				SegmentRoot: segmentRoot,
 			}
 			/*
@@ -955,9 +1026,9 @@ func (n *Node) FetchAndReconstructData(blob_hash common.Hash) ([]byte, error) {
 			response, err := n.makeRequest(peerIdentifier, ecChunkQuery)
 			if err != nil {
 				fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
-				ecChunkResponses = append(ecChunkResponses, ECChunkResponse{})
+				ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 			}
-			var ecChunkResponse ECChunkResponse
+			var ecChunkResponse types.ECChunkResponse
 			err = json.Unmarshal(response, &ecChunkResponse)
 			if err != nil {
 				return nil, err
@@ -1010,31 +1081,33 @@ func (n *Node) FetchAndReconstructData(blob_hash common.Hash) ([]byte, error) {
 func getMessageType(obj interface{}) string {
 
 	switch obj.(type) {
-	case ImportDAQuery:
+	case types.ImportDAQuery:
 		return "ImportDAQuery"
-	case AuditDAQuery:
+	case types.BlockQuery:
+		return "BlockQuery"
+	case types.AuditDAQuery:
 		return "AuditDAQuery"
-	case ImportDAReconstructQuery:
+	case types.ImportDAReconstructQuery:
 		return "ImportDAReconstructQuery"
-	case Guarantee:
+	case types.Guarantee:
 		return "Guarantee"
-	case Assurance:
+	case types.Assurance:
 		return "Assurance"
-	case Disputes:
-		return "Disputes"
-	case PreimageLookup:
+	case types.Dispute:
+		return "Dispute"
+	case types.PreimageLookup:
 		return "PreimageLookup"
-	case safrole.Ticket:
+	case types.Ticket:
 		return "Ticket"
-	case statedb.Block:
+	case types.Block:
 		return "Block"
-	case Announcement:
+	case types.Announcement:
 		return "Announcement"
-	case WorkPackage:
+	case types.WorkPackage:
 		return "WorkPackage"
-	case DistributeECChunk:
+	case types.DistributeECChunk:
 		return "DistributeECChunk"
-	case ECChunkQuery:
+	case types.ECChunkQuery:
 		return "ECChunkQuery"
 	default:
 		return "unknown"
@@ -1073,7 +1146,7 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 	// Unmarshal the payload to the appropriate type
 	switch msgType {
 	case "Ticket":
-		var ticket safrole.Ticket
+		var ticket types.Ticket
 		payloadBytes, err := json.Marshal(msg.Payload)
 		if err != nil {
 			fmt.Printf("Error marshaling payload to JSON: %v\n", err)
@@ -1087,7 +1160,7 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 		//fmt.Printf("[N%v] Outgoing Ticket: %+v\n", n.id, ticket.TicketID())
 		n.broadcast(ticket)
 	case "Block":
-		var blk statedb.Block
+		var blk types.Block
 		payloadBytes, err := json.Marshal(msg.Payload)
 		if err != nil {
 			fmt.Printf("Error marshaling payload to JSON: %v\n", err)

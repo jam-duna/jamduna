@@ -7,6 +7,7 @@ import (
 	"fmt"
 	//github.com/ethereum/go-ethereum/common"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
@@ -78,11 +79,11 @@ func (se *SExtrinsic) deserialize() (Extrinsic, error) {
 	if err != nil {
 		return Extrinsic{}, fmt.Errorf("failed to decode signature: %w", err)
 	}
-	if len(signature) != ExtrinsicSignatureInBytes {
-		return Extrinsic{}, fmt.Errorf("invalid signature length, got %d expected %d", len(signature), ExtrinsicSignatureInBytes)
+	if len(signature) != types.ExtrinsicSignatureInBytes {
+		return Extrinsic{}, fmt.Errorf("invalid signature length, got %d expected %d", len(signature), types.ExtrinsicSignatureInBytes)
 	}
 
-	var sigArray [ExtrinsicSignatureInBytes]byte
+	var sigArray [types.ExtrinsicSignatureInBytes]byte
 	copy(sigArray[:], signature)
 
 	return Extrinsic{
@@ -91,36 +92,36 @@ func (se *SExtrinsic) deserialize() (Extrinsic, error) {
 	}, nil
 }
 
-// Validator to SValidator
-func (v *Validator) serialize() SValidator {
-	return SValidator{
-		Ed25519:      v.Ed25519.Hex(),
-		Bandersnatch: v.Bandersnatch.Hex(),
-		Bls:          hexutil.Encode(v.Bls[:]),
-		Metadata:     hexutil.Encode(v.Metadata[:]),
-	}
-}
+// // Validator to SValidator
+// func (v *types.Validator) serialize() SValidator {
+// 	return SValidator{
+// 		Ed25519:      v.Ed25519.Hex(),
+// 		Bandersnatch: v.Bandersnatch.Hex(),
+// 		Bls:          hexutil.Encode(v.Bls[:]),
+// 		Metadata:     hexutil.Encode(v.Metadata[:]),
+// 	}
+// }
 
 // SValidator to Validator
-func (sv *SValidator) deserialize() (Validator, error) {
+func (sv *SValidator) deserialize() (types.Validator, error) {
 	if len(sv.Ed25519) != 66 {
-		return Validator{}, fmt.Errorf("invalid ed25519 length, got %d expected %d", len(sv.Ed25519), 66)
+		return types.Validator{}, fmt.Errorf("invalid ed25519 length, got %d expected %d", len(sv.Ed25519), 66)
 	}
 	if len(sv.Bandersnatch) != 66 {
-		return Validator{}, fmt.Errorf("invalid bandersnatch length, got %d expected %d", len(sv.Bandersnatch), 66)
+		return types.Validator{}, fmt.Errorf("invalid bandersnatch length, got %d expected %d", len(sv.Bandersnatch), 66)
 	}
 	bls, _ := hexutil.Decode(sv.Bls)
-	if len(bls) > 0 && len(bls) != BlsSizeInBytes {
-		return Validator{}, fmt.Errorf("invalid bls length, got %d expected %d", len(bls), BlsSizeInBytes)
+	if len(bls) > 0 && len(bls) != types.BlsSizeInBytes {
+		return types.Validator{}, fmt.Errorf("invalid bls length, got %d expected %d", len(bls), types.BlsSizeInBytes)
 	}
 
-	var blsArray [BlsSizeInBytes]byte
+	var blsArray [types.BlsSizeInBytes]byte
 	copy(blsArray[:], sv.Bls)
 
-	var metadataArray [MetadataSizeInBytes]byte
+	var metadataArray [types.MetadataSizeInBytes]byte
 	copy(metadataArray[:], sv.Metadata)
 
-	return Validator{
+	return types.Validator{
 		Ed25519:      common.HexToHash(sv.Ed25519),
 		Bandersnatch: common.HexToHash(sv.Bandersnatch),
 		Bls:          blsArray,
@@ -159,17 +160,17 @@ func (si *SInput) deserialize() (Input, error) {
 	}, nil
 }
 
-// SafroleAccumulator to SSafroleAccumulator
-func (sa *TicketBody) serialize() SSafroleAccumulator {
-	return SSafroleAccumulator{
-		Id:      sa.Id.Hex(),
-		Attempt: int(sa.Attempt),
-	}
-}
+// // SafroleAccumulator to SSafroleAccumulator
+// func (sa *types.TicketBody) serialize() SSafroleAccumulator {
+// 	return SSafroleAccumulator{
+// 		Id:      sa.Id.Hex(),
+// 		Attempt: int(sa.Attempt),
+// 	}
+// }
 
 // SSafroleAccumulator to SafroleAccumulator
-func (ssa *SSafroleAccumulator) deserialize() (TicketBody, error) {
-	return TicketBody{
+func (ssa *SSafroleAccumulator) deserialize() (types.TicketBody, error) {
+	return types.TicketBody{
 		Id:      common.HexToHash(ssa.Id),
 		Attempt: uint8(ssa.Attempt),
 	}, nil
@@ -180,10 +181,13 @@ type STicketBody struct {
 	Attempt uint8  `json:"attempt"`
 }
 
+/*
 func (s *SafroleState) Serialize() SState {
 	return s.serialize()
 }
+*/
 
+/*
 // State to SState
 func (s *SafroleState) serialize() SState {
 	entropy := make([]string, len(s.Entropy))
@@ -244,6 +248,7 @@ func (s *SafroleState) serialize() SState {
 		TicketsVerifierKey: common.Bytes2Hex(s.TicketsVerifierKey),
 	}
 }
+*/
 
 // SState to State
 // func (ss *SState) deserialize() (SafroleState, error) {
@@ -345,7 +350,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		entropy[idx] = common.HexToHash(e)
 	}
 
-	prevValidators := make([]Validator, len(ss.PrevValidators))
+	prevValidators := make([]types.Validator, len(ss.PrevValidators))
 	for idx, sValidator := range ss.PrevValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
@@ -354,7 +359,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		prevValidators[idx] = validator
 	}
 
-	currValidators := make([]Validator, len(ss.CurrValidators))
+	currValidators := make([]types.Validator, len(ss.CurrValidators))
 	for idx, sValidator := range ss.CurrValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
@@ -363,7 +368,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		currValidators[idx] = validator
 	}
 
-	nextValidators := make([]Validator, len(ss.NextValidators))
+	nextValidators := make([]types.Validator, len(ss.NextValidators))
 	for idx, sValidator := range ss.NextValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
@@ -372,7 +377,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		nextValidators[idx] = validator
 	}
 
-	designedValidators := make([]Validator, len(ss.DesignedValidators))
+	designedValidators := make([]types.Validator, len(ss.DesignedValidators))
 	for idx, sValidator := range ss.DesignedValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
@@ -381,7 +386,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		designedValidators[idx] = validator
 	}
 
-	ticketsAccumulator := make([]TicketBody, len(ss.TicketsAccumulator))
+	ticketsAccumulator := make([]types.TicketBody, len(ss.TicketsAccumulator))
 	for idx, sAccumulator := range ss.TicketsAccumulator {
 		accumulator, err := sAccumulator.deserialize()
 		if err != nil {
@@ -390,12 +395,12 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		ticketsAccumulator[idx] = accumulator
 	}
 
-	tickets := make([]*TicketBody, len(ss.TicketsOrKeys.Tickets))
+	tickets := make([]*types.TicketBody, len(ss.TicketsOrKeys.Tickets))
 	for idx, sTicket := range ss.TicketsOrKeys.Tickets {
 		if len(sTicket.Id) != 66 {
 			return SafroleState{}, fmt.Errorf("invalid ticket id length - got %d expected %d", len(sTicket.Id), 66)
 		}
-		tickets[idx] = &TicketBody{
+		tickets[idx] = &types.TicketBody{
 			Id:      common.HexToHash(sTicket.Id),
 			Attempt: sTicket.Attempt,
 		}
@@ -410,8 +415,8 @@ func (ss *SState) deserialize() (SafroleState, error) {
 	}
 
 	ticketsVerifierKey, _ := hexutil.Decode(ss.TicketsVerifierKey)
-	if len(ticketsVerifierKey) != TicketsVerifierKeyInBytes {
-		return SafroleState{}, fmt.Errorf("invalid tickets verifier key length - got %d expected %d", len(ticketsVerifierKey), TicketsVerifierKeyInBytes)
+	if len(ticketsVerifierKey) != types.TicketsVerifierKeyInBytes {
+		return SafroleState{}, fmt.Errorf("invalid tickets verifier key length - got %d expected %d", len(ticketsVerifierKey), types.TicketsVerifierKeyInBytes)
 	}
 
 	return SafroleState{
@@ -481,8 +486,8 @@ func (so *SOutput) deserialize() (Output, error) {
 	var output Output
 
 	if so.Ok != nil {
-		var epochMark *EpochMark
-		var ticketsMark []*TicketBody
+		var epochMark *types.EpochMark
+		var ticketsMark []*types.TicketBody
 
 		if so.Ok.EpochMark != nil {
 			entropy, err := hex.DecodeString(so.Ok.EpochMark.Entropy)
@@ -499,17 +504,17 @@ func (so *SOutput) deserialize() (Output, error) {
 				validators[i] = common.BytesToHash(decoded)
 			}
 
-			epochMark = &EpochMark{
+			epochMark = &types.EpochMark{
 				Entropy:    common.BytesToHash(entropy),
 				Validators: validators,
 			}
 		}
 
 		if so.Ok.TicketsMark != nil {
-			tm := make([]*TicketBody, len(so.Ok.TicketsMark))
+			tm := make([]*types.TicketBody, len(so.Ok.TicketsMark))
 			for i, ticket := range so.Ok.TicketsMark {
 				id, _ := hex.DecodeString(ticket.Id)
-				tm[i] = &TicketBody{
+				tm[i] = &types.TicketBody{
 					Id:      common.BytesToHash(id),
 					Attempt: uint8(ticket.Attempt),
 				}
@@ -518,8 +523,8 @@ func (so *SOutput) deserialize() (Output, error) {
 		}
 
 		output.Ok = &struct {
-			EpochMark   *EpochMark    `json:"epoch_mark"`
-			TicketsMark []*TicketBody `json:"tickets_mark"`
+			EpochMark   *types.EpochMark    `json:"epoch_mark"`
+			TicketsMark []*types.TicketBody `json:"tickets_mark"`
 		}{
 			EpochMark:   epochMark,
 			TicketsMark: ticketsMark,

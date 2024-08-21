@@ -10,6 +10,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 )
 
 /*
@@ -60,7 +61,7 @@ func canFetchPreimageData(dataSegments []common.Hash) bool {
 }
 
 // IsAuthorizedPVM performs the is-authorized PVM function.
-func IsAuthorizedPVM(workPackage WorkPackage) (bool, error) {
+func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 	// Ensure the work-package warrants the needed core-time
 	// Ensure all segment-tree roots which form imported segment commitments are known and valid
 	// Ensure that all preimage data referenced as commitments of extrinsic segments can be fetched
@@ -74,13 +75,13 @@ func IsAuthorizedPVM(workPackage WorkPackage) (bool, error) {
 }
 
 // RefinePVM performs the refine PVM function.
-func (n *Node) RefinePVM(pvm *pvm.VM, workPackage WorkPackage, workItem WorkItem) (string, error) {
+func (n *Node) RefinePVM(pvm *pvm.VM, workPackage types.WorkPackage, workItem types.WorkItem) (string, error) {
 	// For demonstration, simply return "refined_result"
 	return "refined_result", nil
 }
 
 // Accumulate function performs the accumulation of a single service.
-func (n *Node) Accumulate(serviceIndex int, state AccumulationState) (AccumulationState, error) {
+func (n *Node) Accumulate(serviceIndex int, state types.AccumulationState) (types.AccumulationState, error) {
 	// Wrangle results for the service (simplified for demonstration)
 	wrangledResults := state.WorkReports // Assuming wrangled results are the work reports
 
@@ -88,7 +89,7 @@ func (n *Node) Accumulate(serviceIndex int, state AccumulationState) (Accumulati
 	// TODO: gasLimit := 1000
 
 	// Create the arguments for the VM invocation
-	args := AccumulationState{
+	args := types.AccumulationState{
 		ServiceIndices:    []int{serviceIndex},
 		WorkReports:       wrangledResults,
 		DeferredTransfers: state.DeferredTransfers,
@@ -99,7 +100,7 @@ func (n *Node) Accumulate(serviceIndex int, state AccumulationState) (Accumulati
 	vm := pvm.NewVMFromCode(code, 0, n.NewNodeHostEnv())
 	err := vm.Execute()
 	if err != nil {
-		return AccumulationState{}, err
+		return types.AccumulationState{}, err
 	}
 	newState := args
 
@@ -163,11 +164,11 @@ func GuarantorAssignment(validatorCount, coreCount, epochLength, rotationPeriod 
 
 // CalculateGasAttributable calculates the gas attributable for each service.
 func CalculateGasAttributable(
-	workReports map[int][]WorkReport, // workReports maps service index to their respective work reports
+	workReports map[int][]types.WorkReport, // workReports maps service index to their respective work reports
 	privilegedServices []int, // privilegedServices contains indices of privileged services
 	electiveAccumulationGas float64, // electiveAccumulationGas represents GA in the formula
-) []GasAttributable {
-	gasAttributable := []GasAttributable{}
+) []types.GasAttributable {
+	gasAttributable := []types.GasAttributable{}
 	serviceGasTotals := make(map[int]float64)
 
 	for serviceIndex, reports := range workReports {
@@ -191,7 +192,7 @@ func CalculateGasAttributable(
 
 	for serviceIndex, gasSum := range serviceGasTotals {
 		gas := gasSum + electiveAccumulationGas*(1-(gasSum/totalGasSum))
-		gasAttributable = append(gasAttributable, GasAttributable{
+		gasAttributable = append(gasAttributable, types.GasAttributable{
 			ServiceIndex: serviceIndex,
 			Gas:          gas,
 		})
@@ -201,7 +202,7 @@ func CalculateGasAttributable(
 }
 
 // BeefyRoot creates the Beefy root for the present block using service accumulations.
-func BeefyRoot(serviceAccumulations []ServiceAccumulation, mmr trie.MerkleMountainRange) common.Hash {
+func BeefyRoot(serviceAccumulations []types.ServiceAccumulation, mmr trie.MerkleMountainRange) common.Hash {
 	for _, accumulation := range serviceAccumulations {
 		mmr.Append(accumulation.Result.Bytes())
 	}
@@ -209,7 +210,7 @@ func BeefyRoot(serviceAccumulations []ServiceAccumulation, mmr trie.MerkleMounta
 }
 
 // ProcessWorkResults processes the work results using the PVM.
-func (n *Node) ProcessWorkResults(workPackage WorkPackage) (string, error) {
+func (n *Node) ProcessWorkResults(workPackage types.WorkPackage) (string, error) {
 	isAuthorized, err := IsAuthorizedPVM(workPackage)
 	if err != nil {
 		return "", err
@@ -235,21 +236,21 @@ func (n *Node) ProcessWorkResults(workPackage WorkPackage) (string, error) {
 }
 
 // Tally updates the statistics for validators based on their activities.
-func (sr *StatisticalReporter) Tally(validatorIndex int, activity string, count int) {
-	switch activity {
-	case "blocks":
-		sr.CurrentEpochStats[validatorIndex].BlocksProduced += count
-	case "tickets":
-		sr.CurrentEpochStats[validatorIndex].TicketsIntroduced += count
-	case "preimages":
-		sr.CurrentEpochStats[validatorIndex].PreimagesIntroduced += count
-	case "octets":
-		sr.CurrentEpochStats[validatorIndex].OctetsIntroduced += count
-	case "reports":
-		sr.CurrentEpochStats[validatorIndex].ReportsGuaranteed += count
-	case "assurances":
-		sr.CurrentEpochStats[validatorIndex].AvailabilityAssurances += count
-	default:
-		fmt.Println("Unknown activity:", activity)
-	}
-}
+// func (sr *StatisticalReporter) Tally(validatorIndex int, activity string, count int) {
+// 	switch activity {
+// 	case "blocks":
+// 		sr.CurrentEpochStats[validatorIndex].BlocksProduced += count
+// 	case "tickets":
+// 		sr.CurrentEpochStats[validatorIndex].TicketsIntroduced += count
+// 	case "preimages":
+// 		sr.CurrentEpochStats[validatorIndex].PreimagesIntroduced += count
+// 	case "octets":
+// 		sr.CurrentEpochStats[validatorIndex].OctetsIntroduced += count
+// 	case "reports":
+// 		sr.CurrentEpochStats[validatorIndex].ReportsGuaranteed += count
+// 	case "assurances":
+// 		sr.CurrentEpochStats[validatorIndex].AvailabilityAssurances += count
+// 	default:
+// 		fmt.Println("Unknown activity:", activity)
+// 	}
+// }

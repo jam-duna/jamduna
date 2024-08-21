@@ -1,9 +1,9 @@
 package trie
 
 import (
-	"github.com/colorfulnotion/jam/storage"
 	"encoding/hex"
 	"fmt"
+	"github.com/colorfulnotion/jam/storage"
 )
 
 func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {

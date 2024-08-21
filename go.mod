@@ -2,7 +2,7 @@ module github.com/colorfulnotion/jam
 
 go 1.21
 
-toolchain go1.22.5
+
 
 require (
 	github.com/ChainSafe/gossamer v0.9.0

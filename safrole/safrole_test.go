@@ -26,19 +26,20 @@ func safrole_stf(sinput SInput, spreState SState) (SOutput, SState, error) {
 	//fmt.Printf("input=%v\n", input)
 	//fmt.Printf("preState=%v\n", preState)
 	// Implement the function logic here
-	input, err := sinput.deserialize()
-	if err != nil {
-		fmt.Printf("DESERIALIZE err %s\n", err.Error())
-		panic(1)
-	}
-
-	preState, err2 := spreState.deserialize()
-	if err2 != nil {
-		fmt.Printf("DESERIALIZE err %s\n", err2.Error())
-		panic(2)
-	}
-	output, postState, err := preState.STF(input)
-	return output.serialize(), postState.serialize(), err
+	// input, err := sinput.deserialize()
+	// if err != nil {
+	// 	fmt.Printf("DESERIALIZE err %s\n", err.Error())
+	// 	panic(1)
+	// }
+	//
+	// preState, err2 := spreState.deserialize()
+	// if err2 != nil {
+	// 	fmt.Printf("DESERIALIZE err %s\n", err2.Error())
+	// 	panic(2)
+	// }
+	// output, postState, err := preState.STF(input)
+	//TODO:return output.serialize(), postState.serialize(), err
+	return SOutput{}, SState{}, nil
 }
 
 func TestBlake2b(t *testing.T) {

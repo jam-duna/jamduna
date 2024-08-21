@@ -4,19 +4,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/types"
+	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"log"
 	"path/filepath"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 type DisputeData struct {
-	Input     ExtrinsicDispute `json:"input"`
-	PreState  StateDispute     `json:"pre_state"`
-	Output    Output           `json:"output"`
-	PostState StateDispute     `json:"post_state"`
+	Input     types.Dispute `json:"input"`
+	PreState  StateDispute  `json:"pre_state"`
+	Output    Output        `json:"output"`
+	PostState StateDispute  `json:"post_state"`
 }
 type HexBytes []byte
 
@@ -246,12 +246,12 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	// Convert Input.Verdicts
 	for _, verdict := range rawDisputeData.Input.Disputes.Verdicts {
-		verdictStruct := Verdict{
+		verdictStruct := types.Verdict{
 			WorkReportHash: hexDecodeOrPanic(verdict.Target),
 			Epoch:          verdict.Age,
 		}
 		for _, vote := range verdict.Votes {
-			verdictStruct.Votes = append(verdictStruct.Votes, Vote{
+			verdictStruct.Votes = append(verdictStruct.Votes, types.Vote{
 				Voting:    vote.Vote,
 				Index:     vote.Index,
 				Signature: hexDecodeOrPanic(vote.Signature),
@@ -262,7 +262,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	// Convert Input.Culprits
 	for _, culprit := range rawDisputeData.Input.Disputes.Culprits {
-		disputeData.Input.Culprit = append(disputeData.Input.Culprit, Culprit{
+		disputeData.Input.Culprit = append(disputeData.Input.Culprit, types.Culprit{
 			WorkReportHash: hexDecodeOrPanic(culprit.Target),
 			Key:            hexDecodeOrPanic(culprit.Key),
 			Signature:      hexDecodeOrPanic(culprit.Signature),
@@ -271,7 +271,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	// Convert Input.Faults
 	for _, fault := range rawDisputeData.Input.Disputes.Faults {
-		disputeData.Input.Fault = append(disputeData.Input.Fault, Fault{
+		disputeData.Input.Fault = append(disputeData.Input.Fault, types.Fault{
 			WorkReportHash: hexDecodeOrPanic(fault.Target),
 			Voting:         fault.Vote,
 			Key:            hexDecodeOrPanic(fault.Key),
@@ -293,7 +293,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	}
 	disputeData.PreState.Tau = rawDisputeData.PreState.Tau
 	for _, kappa := range rawDisputeData.PreState.Kappa {
-		disputeData.PreState.Kappa = append(disputeData.PreState.Kappa, Validator{
+		disputeData.PreState.Kappa = append(disputeData.PreState.Kappa, types.Validator{
 			Ed25519:      hexDecodeOrPanic(kappa.Ed25519),
 			Bandersnatch: hexDecodeOrPanic(kappa.Bandersnatch),
 			Bls:          hexDecodeOrPanic(kappa.Bls),
@@ -303,7 +303,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	// Convert PreState.Lambda
 	for _, lambda := range rawDisputeData.PreState.Lambda {
-		disputeData.PreState.Lambda = append(disputeData.PreState.Lambda, Validator{
+		disputeData.PreState.Lambda = append(disputeData.PreState.Lambda, types.Validator{
 			Ed25519:      hexDecodeOrPanic(lambda.Ed25519),
 			Bandersnatch: hexDecodeOrPanic(lambda.Bandersnatch),
 			Bls:          hexDecodeOrPanic(lambda.Bls),
@@ -328,7 +328,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	disputeData.PostState.Tau = rawDisputeData.PostState.Tau
 
 	for _, kappa := range rawDisputeData.PostState.Kappa {
-		disputeData.PostState.Kappa = append(disputeData.PostState.Kappa, Validator{
+		disputeData.PostState.Kappa = append(disputeData.PostState.Kappa, types.Validator{
 			Ed25519:      hexDecodeOrPanic(kappa.Ed25519),
 			Bandersnatch: hexDecodeOrPanic(kappa.Bandersnatch),
 			Bls:          hexDecodeOrPanic(kappa.Bls),
@@ -349,8 +349,8 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	// Convert Output
 	if rawDisputeData.Output.Ok != nil {
 		disputeData.Output.Ok = &struct {
-			VerdictMark  [][]byte    `json:"verdict_mark"`
-			OffenderMark []PublicKey `json:"offender_mark"`
+			VerdictMark  [][]byte          `json:"verdict_mark"`
+			OffenderMark []types.PublicKey `json:"offender_mark"`
 		}{}
 		disputeData.Output.Ok.VerdictMark = convertHexStringsToBytes(rawDisputeData.Output.Ok.VerdictMark)
 		disputeData.Output.Ok.OffenderMark = convertHexStringsToPublicKeys(rawDisputeData.Output.Ok.OffenderMark)
@@ -368,7 +368,7 @@ func convertHexStringsToBytes(hexStrings []string) [][]byte {
 	return bytesArray
 }
 
-func convertHexStringsToPublicKeys(hexStrings []string) []PublicKey {
+func convertHexStringsToPublicKeys(hexStrings []string) []types.PublicKey {
 	publicKeys := make([]PublicKey, len(hexStrings))
 	for i, hexStr := range hexStrings {
 		publicKeys[i] = hexDecodeOrPanic(hexStr)

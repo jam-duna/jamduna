@@ -4,8 +4,11 @@ import (
 	//"fmt"
 	// "github.com/colorfulnotion/jam/scale"
 	//"encoding/binary"
+	"fmt"
+	"github.com/colorfulnotion/jam/bandersnatch"
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 
-	//"github.com/colorfulnotion/jam/common"
 	//"golang.org/x/crypto/blake2b"
 	"encoding/json"
 	"io/ioutil"
@@ -15,11 +18,11 @@ import (
 // GenesisConfig is the key data "genesis" structure loaded and saved at the start of every binary run
 type GenesisConfig struct {
 	Epoch0Timestamp uint64
-	Authorities     []Validator
+	Authorities     []types.Validator
 }
 
 type GenesisAuthorities struct {
-	Authorities []Validator
+	Authorities []types.Validator
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
@@ -50,7 +53,7 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 	return originalTime.Unix()
 }
 
-func NewGenesisConfig(validators []Validator) GenesisConfig {
+func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 	now := time.Now().Unix()
 	return GenesisConfig{
 		Epoch0Timestamp: uint64(6 * ((now + 12) / 6)),
@@ -89,4 +92,39 @@ func readGenesisConfig(filePath string) (*GenesisAuthorities, error) {
 		return nil, err
 	}
 	return &config, nil
+}
+
+func InitValidator(bandersnatch_seed, ed25519_seed []byte) (types.Validator, error) {
+	validator := types.Validator{}
+	banderSnatch_pub, _, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
+	if err != nil {
+		return validator, fmt.Errorf("Failed to init BanderSnatch Key")
+	}
+	ed25519_pub, _, err := bandersnatch.InitEd25519Key(ed25519_seed)
+	if err != nil {
+		return validator, fmt.Errorf("Failed to init Ed25519 Key")
+	}
+	validator.Ed25519 = common.BytesToHash(ed25519_pub)
+	validator.Bandersnatch = common.BytesToHash(banderSnatch_pub)
+	//fmt.Printf("validator %v\n", validator)
+	return validator, nil
+}
+
+func InitValidatorSecret(bandersnatch_seed, ed25519_seed []byte) (types.ValidatorSecret, error) {
+	validatorSecret := types.ValidatorSecret{}
+	banderSnatch_pub, banderSnatch_priv, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
+	if err != nil {
+		return validatorSecret, fmt.Errorf("Failed to init BanderSnatch Key")
+	}
+	ed25519_pub, ed25519_priv, err := bandersnatch.InitEd25519Key(ed25519_seed)
+	if err != nil {
+		return validatorSecret, fmt.Errorf("Failed to init Ed25519 Key")
+	}
+	validatorSecret.Ed25519Secret = ed25519_priv
+	validatorSecret.Ed25519Pub = common.BytesToHash(ed25519_pub)
+
+	validatorSecret.BandersnatchSecret = banderSnatch_priv
+	validatorSecret.BandersnatchPub = common.BytesToHash(banderSnatch_pub)
+	//fmt.Printf("validatorSecret %v\n", validatorSecret)
+	return validatorSecret, nil
 }

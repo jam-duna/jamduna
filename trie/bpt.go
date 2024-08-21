@@ -11,6 +11,9 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+// TODO: stanley to figure what this is
+type BMTProof []common.Hash
+
 // Node represents a node in the Merkle Tree
 type Node struct {
 	Hash  []byte
@@ -85,7 +88,7 @@ func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 }
 
 func InitLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
-    return initLevelDB(optionalPath...)
+	return initLevelDB(optionalPath...)
 }
 
 // NewMerkleTree creates a new Merkle Tree from the provided data

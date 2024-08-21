@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"fmt"
+	//"github.com/colorfulnotion/jam/bandersnatch"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // tiny
@@ -18,46 +20,11 @@ const E = 12
 // const ValidatorNum = 1026
 // const E = 600
 
-// ==========type definitions==========
-type PublicKey []byte
-
-// ========== Extrinsic Dispute=======
-type ExtrinsicDispute struct {
-	Verdict []Verdict `json:"verdicts"`
-	Culprit []Culprit `json:"culprits"`
-	Fault   []Fault   `json:"faults"`
-}
-
-type Vote struct {
-	Voting    bool   `json:"vote"`      // true for guilty, false for innocent
-	Index     uint16 `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
-	Signature []byte `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
-}
-
-type Verdict struct {
-	WorkReportHash []byte `json:"target"` // WorkReportHash (ByteArray32 in disputes.asn)
-	Epoch          uint32 `json:"age"`    // EpochIndex (U32 in disputes.asn)
-	Votes          []Vote `json:"votes"`  // DisputeJudgements
-}
-
-type Culprit struct {
-	WorkReportHash []byte    `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Key            PublicKey `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature      []byte    `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
-}
-
-type Fault struct {
-	WorkReportHash []byte    `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Voting         bool      `json:"vote"`      // vote (BOOLEAN in disputes.asn)
-	Key            PublicKey `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature      []byte    `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
-}
-
 // ==========Output=======
 type Output struct {
 	Ok *struct {
-		VerdictMark  [][]byte    `json:"verdict_mark"`  // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-		OffenderMark []PublicKey `json:"offender_mark"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+		VerdictMark  [][]byte          `json:"verdict_mark"`  // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+		OffenderMark []types.PublicKey `json:"offender_mark"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
 	} `json:"ok"`
 	Err string `json:"err"` // ErrorCode
 }
@@ -67,27 +34,19 @@ type VerdictResult struct {
 	PositveCount   int
 }
 
-// ==========State Dispute=======
-type Validator struct {
-	Ed25519      []byte `json:"ed25519"`
-	Bandersnatch []byte `json:"bandersnatch"`
-	Bls          []byte `json:"bls"`
-	Metadata     []byte `json:"metadata"`
-}
-
 type StateDispute struct {
-	Psi    Psi_state   `json:"psi"`    // Disputes
-	Rho    []Rho_state `json:"rho"`    // AvailabilityAssignments
-	Tau    uint32      `json:"tau"`    // EpochIndex
-	Kappa  []Validator `json:"kappa"`  // ValidatorSet
-	Lambda []Validator `json:"lambda"` // ValidatorSet
+	Psi    Psi_state         `json:"psi"`    // Disputes
+	Rho    []Rho_state       `json:"rho"`    // AvailabilityAssignments
+	Tau    uint32            `json:"tau"`    // EpochIndex
+	Kappa  []types.Validator `json:"kappa"`  // ValidatorSet
+	Lambda []types.Validator `json:"lambda"` // ValidatorSet
 }
 
 type Psi_state struct {
-	Psi_g [][]byte    `json:"psi_g"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_b [][]byte    `json:"psi_b"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_w [][]byte    `json:"psi_w"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_o []PublicKey `json:"psi_o"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+	Psi_g [][]byte          `json:"psi_g"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_b [][]byte          `json:"psi_b"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_w [][]byte          `json:"psi_w"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_o []types.PublicKey `json:"psi_o"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
 }
 
 type Rho_state struct {
@@ -97,7 +56,7 @@ type Rho_state struct {
 
 //==========func==========
 
-func Dispute(input ExtrinsicDispute, preState StateDispute) (StateDispute, Output, error) {
+func Dispute(input types.Dispute, preState StateDispute) (StateDispute, Output, error) {
 	// Implement the function logic here
 	// check the all input data are valid ,eq 98~106
 	//eq 99 check the signature of the verdicts
@@ -223,11 +182,11 @@ func Dispute(input ExtrinsicDispute, preState StateDispute) (StateDispute, Outpu
 }
 
 // eq 99
-func getPublicKey(K []Validator, Index uint32) PublicKey {
-	return K[Index].Ed25519
+func getPublicKey(K []types.Validator, Index uint32) types.PublicKey {
+	return K[Index].Ed25519.Bytes()
 }
 
-func checkSignature(v Verdict, pre_state StateDispute) error {
+func checkSignature(v types.Verdict, pre_state StateDispute) error {
 	for i, vote := range v.Votes {
 		// check the signature
 		sign_message := []byte{}
@@ -257,7 +216,7 @@ func checkSignature(v Verdict, pre_state StateDispute) error {
 }
 
 // eq 101
-func checkIfKeyOffend(key PublicKey, pre_state StateDispute) error {
+func checkIfKeyOffend(key types.PublicKey, pre_state StateDispute) error {
 	for _, k := range pre_state.Psi.Psi_o {
 		if bytes.Equal(k, key) {
 			//drop the key
@@ -266,12 +225,12 @@ func checkIfKeyOffend(key PublicKey, pre_state StateDispute) error {
 	}
 	// check if the key is in the validator set
 	for _, k := range pre_state.Kappa {
-		if bytes.Equal(k.Ed25519, key) {
+		if bytes.Equal(k.Ed25519.Bytes(), key) {
 			return nil
 		}
 	}
 	for _, k := range pre_state.Lambda {
-		if bytes.Equal(k.Ed25519, key) {
+		if bytes.Equal(k.Ed25519.Bytes(), key) {
 			return nil
 		}
 	}
@@ -279,7 +238,7 @@ func checkIfKeyOffend(key PublicKey, pre_state StateDispute) error {
 }
 
 // eq 103 v: v should index by the work report hash and no duplicates
-func checkVerdicts(v []Verdict) error {
+func checkVerdicts(v []types.Verdict) error {
 
 	for i, verdict := range v {
 		// check duplicate
@@ -303,7 +262,7 @@ func checkVerdicts(v []Verdict) error {
 }
 
 // eq 104 c: should be index by key and no duplicates
-func checkCulprit(c []Culprit) error {
+func checkCulprit(c []types.Culprit) error {
 	for i, culprit := range c {
 		//check culprit signature is valid
 		sign_message := append([]byte("jam_guarantee"), culprit.WorkReportHash...)
@@ -332,7 +291,7 @@ func checkCulprit(c []Culprit) error {
 }
 
 // eq 104 f: should be index by key and no duplicates
-func checkFault(f []Fault) error {
+func checkFault(f []types.Fault) error {
 	for i, fault := range f {
 		//check fault signature is valid
 		// jam_guarantee concat the work report hash
@@ -367,7 +326,7 @@ func checkFault(f []Fault) error {
 }
 
 // eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
-func checkWorkReportHash(v []Verdict, psi_g [][]byte, psi_b [][]byte, psi_w [][]byte) error {
+func checkWorkReportHash(v []types.Verdict, psi_g [][]byte, psi_b [][]byte, psi_w [][]byte) error {
 	for _, verdict := range v {
 		if checkWorkReportHashInSet(verdict.WorkReportHash, psi_g) {
 			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_g", verdict.WorkReportHash)
@@ -390,7 +349,7 @@ func checkWorkReportHashInSet(hash []byte, set [][]byte) bool {
 	return false
 }
 
-func checkVote(v []Verdict) error {
+func checkVote(v []types.Verdict) error {
 	for _, verdict := range v {
 		for i, vote := range verdict.Votes {
 			// check duplicate
@@ -415,7 +374,7 @@ func checkVote(v []Verdict) error {
 }
 
 // process the dispute
-func verdict2result(v []Verdict) []VerdictResult {
+func verdict2result(v []types.Verdict) []VerdictResult {
 	var result []VerdictResult
 	for _, verdict := range v {
 		// count the vote
@@ -482,7 +441,7 @@ func clearReportRho(preState StateDispute, V []VerdictResult) StateDispute {
 	}
 	return post_state
 }
-func updateOffender(preState StateDispute, c []Culprit, f []Fault) StateDispute {
+func updateOffender(preState StateDispute, c []types.Culprit, f []types.Fault) StateDispute {
 	post_state := preState
 	for _, c := range c {
 		post_state.Psi.Psi_o = append(post_state.Psi.Psi_o, c.Key)
@@ -495,13 +454,13 @@ func updateOffender(preState StateDispute, c []Culprit, f []Fault) StateDispute 
 	post_state.Psi.Psi_o = sortByKey(post_state.Psi.Psi_o)
 	return post_state
 }
-func processOutput(VerdictResult []VerdictResult, c []Culprit, f []Fault) Output {
+func processOutput(VerdictResult []VerdictResult, c []types.Culprit, f []types.Fault) Output {
 	//the Verdict mark is the Verdict PositveCount < ValidatorNum*2/3
 	//the Offender mark is the c and f key
 	var output Output
 	output.Ok = &struct {
-		VerdictMark  [][]byte    `json:"verdict_mark"`
-		OffenderMark []PublicKey `json:"offender_mark"`
+		VerdictMark  [][]byte          `json:"verdict_mark"`
+		OffenderMark []types.PublicKey `json:"offender_mark"`
 	}{}
 
 	for _, v := range VerdictResult {
@@ -519,11 +478,11 @@ func processOutput(VerdictResult []VerdictResult, c []Culprit, f []Fault) Output
 		output.Ok.VerdictMark = [][]byte{}
 	}
 	if output.Ok.OffenderMark == nil {
-		output.Ok.OffenderMark = []PublicKey{}
+		output.Ok.OffenderMark = []types.PublicKey{}
 	}
 	return output
 }
-func processDispute(VerdictResult []VerdictResult, c []Culprit, f []Fault, preState StateDispute) (StateDispute, StateDispute, Output, error) {
+func processDispute(VerdictResult []VerdictResult, c []types.Culprit, f []types.Fault, preState StateDispute) (StateDispute, StateDispute, Output, error) {
 	//eq 107, 108 r,v (r=> report, v=> sum of votes)
 	post_state := preState
 	post_state, state_prime := sortSet(VerdictResult, post_state)
@@ -547,7 +506,7 @@ func sortByHash(set [][]byte) [][]byte {
 	}
 	return set
 }
-func sortByKey(set []PublicKey) []PublicKey {
+func sortByKey(set []types.PublicKey) []types.PublicKey {
 	for i := range set {
 		for j := range set {
 			if bytes.Compare(set[i], set[j]) < 0 {
@@ -557,7 +516,7 @@ func sortByKey(set []PublicKey) []PublicKey {
 	}
 	return set
 }
-func isFaultEnoughAndValid(state_prime StateDispute, f []Fault) error {
+func isFaultEnoughAndValid(state_prime StateDispute, f []types.Fault) error {
 	counter := 0
 	for _, s := range state_prime.Psi.Psi_g {
 		for _, f := range f {
@@ -585,7 +544,7 @@ func isFaultEnoughAndValid(state_prime StateDispute, f []Fault) error {
 	}
 	return nil
 }
-func isCulpritEnoughAndValid(state_prime StateDispute, c []Culprit) error {
+func isCulpritEnoughAndValid(state_prime StateDispute, c []types.Culprit) error {
 	counter := 0
 	for _, s := range state_prime.Psi.Psi_b {
 		for _, c := range c {

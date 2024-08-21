@@ -11,16 +11,17 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/safrole"
+	"github.com/colorfulnotion/jam/types"
 )
 
-func SetupQuicNetwork() (safrole.GenesisConfig, []string, map[string]NodeInfo, []safrole.ValidatorSecret, error) {
+func SetupQuicNetwork() (safrole.GenesisConfig, []string, map[string]NodeInfo, []types.ValidatorSecret, error) {
 	seeds, _ := generateSeedSet(numNodes)
 	fmt.Printf("seeds %x\n", seeds)
 
 	peers := make([]string, numNodes)
 	peerList := make(map[string]NodeInfo)
 
-	validators := make([]safrole.Validator, numNodes)
+	validators := make([]types.Validator, numNodes)
 	for i := 0; i < numNodes; i++ {
 		validator, err := safrole.InitValidator(seeds[i], seeds[i])
 		if err == nil {
@@ -54,7 +55,7 @@ func SetupQuicNetwork() (safrole.GenesisConfig, []string, map[string]NodeInfo, [
 	fmt.Printf("PeerList: %s\n", prettyPeerList)
 
 	// Compute validator secrets
-	validatorSecrets := make([]safrole.ValidatorSecret, numNodes)
+	validatorSecrets := make([]types.ValidatorSecret, numNodes)
 	for i := 0; i < numNodes; i++ {
 		validatorSecret, err := safrole.InitValidatorSecret(seeds[i], seeds[i])
 		if err != nil {
