@@ -379,7 +379,7 @@ func (vm *VM) hostInvoke() uint32 {
 	o, _ := vm.readRegister(1)
 	gasBytes, _ := vm.readRAMBytes(o, 8)
 	registerBytes, _ := vm.readRAMBytes(o, 8+13*4)
-	m, ok := vm.hostenv.GetVM(n)
+	m, ok := vm.GetVM(n) // hostenv.
 	if !ok {
 		return WHO
 	}
@@ -721,7 +721,7 @@ func (vm *VM) hostPeek() uint32 {
 	a, _ := vm.readRegister(1)
 	b, _ := vm.readRegister(2)
 	l, _ := vm.readRegister(3)
-	m, ok := vm.hostenv.GetVM(n)
+	m, ok := vm.GetVM(n) // hostenv.
 	if !ok {
 		return WHO
 	}
@@ -738,12 +738,16 @@ func (vm *VM) hostPeek() uint32 {
 	return OK
 }
 
+func (vm *VM) GetVM(n uint32) (*VM, bool) {
+	return nil, false
+}
+
 func (vm *VM) hostPoke() uint32 {
 	n, _ := vm.readRegister(0)
 	a, _ := vm.readRegister(1)
 	b, _ := vm.readRegister(2)
 	l, _ := vm.readRegister(3)
-	m, ok := vm.hostenv.GetVM(n)
+	m, ok := vm.GetVM(n) // hostenv.
 	if !ok {
 		return WHO
 	}

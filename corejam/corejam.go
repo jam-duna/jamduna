@@ -1,4 +1,4 @@
-package node
+package corejam
 
 import (
 	"crypto/rand"
@@ -12,6 +12,85 @@ import (
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
+
+type CorejamState struct {
+	HostEnv types.HostEnv
+}
+
+func (n *CorejamState) ValidateProposedGuarantee(g *types.Guarantee) error {
+	return nil
+}
+
+func (n *CorejamState) ValidateProposedAssurance(a *types.Assurance) error {
+	return nil
+}
+
+func (original *CorejamState) Copy() *CorejamState {
+	// Create a new instance of CorejamState
+	copyState := &CorejamState{
+	}
+	return copyState
+}
+
+
+// RefinePVM performs the refine PVM function.
+func (n *CorejamState) RefinePVM(pvm *pvm.VM, workPackage types.WorkPackage, workItem types.WorkItem) (string, error) {
+	// For demonstration, simply return "refined_result"
+	return "refined_result", nil
+}
+
+// Accumulate function performs the accumulation of a single service.
+func (n *CorejamState) Accumulate(serviceIndex int, state types.AccumulationState) (types.AccumulationState, error) {
+	// Wrangle results for the service (simplified for demonstration)
+	wrangledResults := state.WorkReports // Assuming wrangled results are the work reports
+
+	// Calculate gas limit for the service
+	// TODO: gasLimit := 1000
+
+	// Create the arguments for the VM invocation
+	args := types.AccumulationState{
+		ServiceIndices:    []int{serviceIndex},
+		WorkReports:       wrangledResults,
+		DeferredTransfers: state.DeferredTransfers,
+	}
+
+	// Call the virtual machine
+	code := []byte{}
+	vm := pvm.NewVMFromCode(code, 0, n.HostEnv)
+	err := vm.Execute()
+	if err != nil {
+		return types.AccumulationState{}, err
+	}
+	newState := args
+
+	return newState, nil
+}
+
+// ProcessWorkResults processes the work results using the PVM.
+func (n *CorejamState) ProcessWorkResults(workPackage types.WorkPackage) (string, error) {
+	isAuthorized, err := IsAuthorizedPVM(workPackage)
+	if err != nil {
+		return "", err
+	}
+
+	if !isAuthorized {
+		return "error: not authorized", nil
+	}
+	// TODO
+	code := []byte{}
+	pvm := pvm.NewVMFromCode(code, 0, n.HostEnv) 
+	var results []string
+	for _, workItem := range workPackage.WorkItems {
+		refinedResult, err := n.RefinePVM(pvm, workPackage, workItem)
+		if err != nil {
+			return "", err
+		}
+		results = append(results, refinedResult)
+	}
+
+	// For demonstration, return the concatenated results
+	return fmt.Sprintf("results: %v", results), nil
+}
 
 /*
 // AvailabilitySpecifier creates an availability specifier.
@@ -72,39 +151,6 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 	//}
 
 	return true, nil
-}
-
-// RefinePVM performs the refine PVM function.
-func (n *Node) RefinePVM(pvm *pvm.VM, workPackage types.WorkPackage, workItem types.WorkItem) (string, error) {
-	// For demonstration, simply return "refined_result"
-	return "refined_result", nil
-}
-
-// Accumulate function performs the accumulation of a single service.
-func (n *Node) Accumulate(serviceIndex int, state types.AccumulationState) (types.AccumulationState, error) {
-	// Wrangle results for the service (simplified for demonstration)
-	wrangledResults := state.WorkReports // Assuming wrangled results are the work reports
-
-	// Calculate gas limit for the service
-	// TODO: gasLimit := 1000
-
-	// Create the arguments for the VM invocation
-	args := types.AccumulationState{
-		ServiceIndices:    []int{serviceIndex},
-		WorkReports:       wrangledResults,
-		DeferredTransfers: state.DeferredTransfers,
-	}
-
-	// Call the virtual machine
-	code := []byte{}
-	vm := pvm.NewVMFromCode(code, 0, n.NewNodeHostEnv())
-	err := vm.Execute()
-	if err != nil {
-		return types.AccumulationState{}, err
-	}
-	newState := args
-
-	return newState, nil
 }
 
 // FisherYatesShuffle shuffles a slice using the Fisher-Yates algorithm.
@@ -209,47 +255,22 @@ func BeefyRoot(serviceAccumulations []types.ServiceAccumulation, mmr trie.Merkle
 	return mmr.Root()
 }
 
-// ProcessWorkResults processes the work results using the PVM.
-func (n *Node) ProcessWorkResults(workPackage types.WorkPackage) (string, error) {
-	isAuthorized, err := IsAuthorizedPVM(workPackage)
-	if err != nil {
-		return "", err
-	}
-
-	if !isAuthorized {
-		return "error: not authorized", nil
-	}
-	// TODO
-	code := []byte{}
-	pvm := pvm.NewVMFromCode(code, 0, n.NewNodeHostEnv())
-	var results []string
-	for _, workItem := range workPackage.WorkItems {
-		refinedResult, err := n.RefinePVM(pvm, workPackage, workItem)
-		if err != nil {
-			return "", err
-		}
-		results = append(results, refinedResult)
-	}
-
-	// For demonstration, return the concatenated results
-	return fmt.Sprintf("results: %v", results), nil
-}
 
 // Tally updates the statistics for validators based on their activities.
-// func (sr *StatisticalReporter) Tally(validatorIndex int, activity string, count int) {
+// func (n *CorejamState) Tally(validatorIndex int, activity string, count int) {
 // 	switch activity {
 // 	case "blocks":
-// 		sr.CurrentEpochStats[validatorIndex].BlocksProduced += count
+// 		n.CurrentEpochStats[validatorIndex].BlocksProduced += count
 // 	case "tickets":
-// 		sr.CurrentEpochStats[validatorIndex].TicketsIntroduced += count
+// 		n.CurrentEpochStats[validatorIndex].TicketsIntroduced += count
 // 	case "preimages":
-// 		sr.CurrentEpochStats[validatorIndex].PreimagesIntroduced += count
+// 		n.CurrentEpochStats[validatorIndex].PreimagesIntroduced += count
 // 	case "octets":
-// 		sr.CurrentEpochStats[validatorIndex].OctetsIntroduced += count
+// 		n.CurrentEpochStats[validatorIndex].OctetsIntroduced += count
 // 	case "reports":
-// 		sr.CurrentEpochStats[validatorIndex].ReportsGuaranteed += count
+// 		n.CurrentEpochStats[validatorIndex].ReportsGuaranteed += count
 // 	case "assurances":
-// 		sr.CurrentEpochStats[validatorIndex].AvailabilityAssurances += count
+// 		n.CurrentEpochStats[validatorIndex].AvailabilityAssurances += count
 // 	default:
 // 		fmt.Println("Unknown activity:", activity)
 // 	}

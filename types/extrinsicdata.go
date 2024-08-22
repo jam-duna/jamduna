@@ -9,9 +9,9 @@ import (
 // T.P.G.A.D
 type ExtrinsicData struct {
 	Tickets    []Ticket         `json:"tickets"`
-	Preimages  []PreimageLookup `json:"preimages"`
+	PreimageLookups  []PreimageLookup `json:"preimage_lookups"`
 	Guarantees []Guarantee      `json:"guarantees"`
-	Assurances []Assurance      `json:"availabilities"`
+	Assurances []Assurance      `json:"assurances"`
 	Disputes   []Dispute        `json:"disputes"`
 }
 
@@ -38,4 +38,3 @@ func (e *ExtrinsicData) Hash() common.Hash {
 	return common.BytesToHash(common.ComputeHash(data))
 }
 
-// TODO:

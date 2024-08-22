@@ -25,6 +25,46 @@ type GenesisAuthorities struct {
 	Authorities []types.Validator
 }
 
+// 6.4.1 Startup parameters
+func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState, d *DisputeState) {
+	s = &SafroleState{}
+
+	s.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
+	s.Timeslot = int(s.EpochFirstSlot)
+	validators := genesisConfig.Authorities
+	vB := []byte{}
+	for _, v := range validators {
+		vB = append(vB, v.Bytes()...)
+	}
+	s.PrevValidators = validators
+	s.CurrValidators = validators
+	s.NextValidators = validators
+	s.DesignedValidators = validators
+
+	s.BlockNumber = 0
+	/*
+		The on-chain randomness is initialized after the genesis block construction.
+		The first buffer entry is set as the Blake2b hash of the genesis block,
+		each of the other entries is set as the Blake2b hash of the previous entry.
+	*/
+
+	s.Entropy = make([]common.Hash, types.EntropySize)
+	s.Entropy[0] = common.BytesToHash(common.ComputeHash(vB))                   //BLAKE2B hash of the genesis block#0
+	s.Entropy[1] = common.BytesToHash(common.ComputeHash(s.Entropy[0].Bytes())) //BLAKE2B of Current
+	s.Entropy[2] = common.BytesToHash(common.ComputeHash(s.Entropy[1].Bytes())) //BLAKE2B of EpochN1
+	s.Entropy[3] = common.BytesToHash(common.ComputeHash(s.Entropy[2].Bytes())) //BLAKE2B of EpochN2
+
+	
+	d = &DisputeState{}
+	d.Psi = Psi_state{}
+	d.Rho = make([]Rho_state, 0)
+	d.Tau = 0
+	d.Kappa = validators
+	d.Lambda = validators
+
+	return s, d
+}
+
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
 func computeJCETime(unixTimestamp int64) uint32 {
 	// Define the start of the Jam Common Era

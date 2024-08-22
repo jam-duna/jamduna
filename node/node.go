@@ -79,8 +79,10 @@ type Node struct {
 	streams     map[string]quic.Stream
 	store       *storage.StateDBStorage /// where to put this?
 
+	// holds a map of epoch to at most 2 tickets
+	selfTickets  map[uint32][]types.Ticket
+	
 	// holds a map of the parenthash to the block
-	blockCache map[common.Hash]*types.Block
 	blocks     map[common.Hash]*types.Block
 	// holds a map of the hash to the stateDB
 	statedbMap map[common.Hash]*statedb.StateDB
@@ -251,14 +253,13 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *safrole
 		messageChan: messageChan,
 		nodeType:    nodeType,
 		statedbMap:  make(map[common.Hash]*statedb.StateDB),
-		blockCache:  make(map[common.Hash]*types.Block),
+		blocks:      make(map[common.Hash]*types.Block),
+		selfTickets: make(map[uint32][]types.Ticket),
 	}
 
 	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
 	if err == nil {
 		_statedb.SetID(id)
-		_statedb.SetCredential(credential)
-		_statedb.OpenMsgChannel(messageChan)
 		node.addStateDB(_statedb)
 	}
 	node.setValidatorCredential(credential)
@@ -267,6 +268,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *safrole
 	go node.runClient()
 	return node, nil
 }
+
 
 func generateQuicConfig() *quic.Config {
 	return &quic.Config{
@@ -282,6 +284,42 @@ func getConnKey(identifier string, incoming bool) string {
 		return fmt.Sprintf("%v-out", identifier)
 	}
 }
+
+func (n *Node) generatedEpochTickets(epoch uint32) bool {
+	_, ok := n.selfTickets[epoch]
+	if !ok {
+		return false
+	}
+	return true
+}
+
+func (n *Node) GetBandersnatchSecret() []byte {
+	return n.credential.BandersnatchSecret
+}
+
+func (n *Node) generateEpochTickets(epoch uint32, isNextEpoch bool) {
+	sf := n.statedb.GetSafrole()
+	tickets := sf.GenerateTickets(n.GetBandersnatchSecret(), isNextEpoch)
+	fmt.Printf("[N%v] Generating Tickets for (Epoch,isNextEpoch) = (%v,%v)\n", n.id, epoch, isNextEpoch)
+	n.selfTickets[epoch] = tickets
+	for _, t := range tickets {
+		// send tickets to neighbors
+		n.broadcast(t)
+	}
+}
+
+func (n *Node) GenerateTickets(currJCE uint32) {
+	sf := n.statedb.GetSafrole()
+	currEpoch, currPhase := sf.EpochAndPhase(currJCE)
+	if currPhase >= safrole.EpochTail {
+		if n.generatedEpochTickets(uint32(currEpoch+1)) == false {
+			n.generateEpochTickets(uint32(currEpoch+1), true)
+		}
+	} else if n.generatedEpochTickets(uint32(currEpoch)) == false {
+		n.generateEpochTickets(uint32(currEpoch), false)
+	}
+}
+
 
 func (n *Node) GetNodeType() string {
 	return n.nodeType
@@ -329,9 +367,9 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		var blkHash common.Hash
 		if _statedb.GetBlock() != nil {
 			blkHash = _statedb.GetBlock().Hash()
-			fmt.Printf("[N%d] addStateDB1 [%v] %v\n", n.id, blkHash, _statedb.String())
+			fmt.Printf("[N%d] addStateDB1 [%v <- %v]\n", n.id, _statedb.ParentHash, _statedb.BlockHash)
 		} else {
-			fmt.Printf("[N%d] addStateDB0 [%v] %v\n", n.id, blkHash, _statedb.String())
+			fmt.Printf("[N%d] addStateDB0 [%v <- %v]\n", n.id, _statedb.ParentHash, _statedb.BlockHash)
 		}
 		n.statedb = _statedb
 		n.statedbMap[blkHash] = _statedb
@@ -438,10 +476,12 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		var query types.BlockQuery
 		err := json.Unmarshal([]byte(msg.Payload), &query)
 		if err == nil {
-			blk, found := n.blockCache[query.BlockHash]
+			blk, found := n.blocks[query.BlockHash]
+			fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id,  query.BlockHash, found)
 			if found {
 				serializedR, err := json.Marshal(blk)
 				if err == nil {
+					fmt.Printf("[N%d] Responded to BlockQuery %v with: %s\n", n.id, query.BlockHash, serializedR)
 					response = serializedR
 				}
 			}
@@ -713,26 +753,32 @@ func isTimeoutError(err error) bool {
 	return strings.Contains(err.Error(), "timeout")
 }
 
-// should process ticket being moved to safrole
 func (n *Node) processTicket(ticket types.Ticket) error {
+	// Store the ticket in the tip's queued tickets
 	s := n.getState()
 	s.ProcessIncomingTicket(ticket)
 	return nil // Success
 }
 
 func (n *Node) processGuarantee(guarantee types.Guarantee) error {
-	// TODO: Store the lookup in a E_G aggregator
+	// Store the guarantee in the tip's queued guarantee
+	s := n.getState()
+	s.ProcessIncomingGuarantee(guarantee)
 	return nil // Success
 }
 
 func (n *Node) processAssurance(assurance types.Assurance) error {
-	// TODO: Store the lookup in a E_A aggregator
+	// Store the assurance in the tip's queued assurance
+	s := n.getState()
+	s.ProcessIncomingAssurance(assurance)
 	return nil // Success
 }
 
-func (n *Node) processDisputes(disputes types.Dispute) error {
-	// TODO: Store the lookup in a E_D aggregator
-	return nil // Success
+func (n *Node) processDisputes(dispute types.Dispute) error {
+	// Store the dispute in the tip's queued disputes
+	s := n.getState()
+	s.ProcessIncomingDispute(dispute)
+	return nil
 }
 
 func (n *Node) processPreimageLookup(preimageLookup types.PreimageLookup) error {
@@ -744,8 +790,8 @@ func (n *Node) dumpstatedbmap() {
 	for hash, statedb := range n.statedbMap {
 		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHash, statedb.BlockHash, statedb.StateRoot)
 	}
-	for parenthash, blk := range n.blockCache {
-		fmt.Printf("dumpstatedbmap: block[%v] => %v\n", parenthash, blk.Hash())
+	for hash, blk := range n.blocks {
+		fmt.Printf("dumpstatedbmap: blocks[%v] => %v\n", hash, blk.Hash())
 	}
 }
 
@@ -758,42 +804,61 @@ func randomKey(m map[string]NodeInfo) string {
 	return keys[rand0.Intn(len(keys))]
 }
 
-func (n *Node) fetchBlock(blockHash common.Hash) *types.Block {
+func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 	obj := types.BlockQuery{BlockHash: blockHash}
 
-	peer := n.peersInfo[randomKey(n.peersInfo)]
+	randomPeer := randomKey(n.peersInfo)
+	peer := n.peersInfo[randomPeer]
 	peerIdentifier := peer.Validator.Ed25519.String()
 	resp, err := n.makeRequest(peerIdentifier, obj)
 	if err != nil {
 		fmt.Printf("runClient request error: %v\n", err)
-		return nil
+		return nil, nil
 	}
 	if len(resp) > 10 {
-		fmt.Printf("fetchBlock %s\n", string(resp))
+		blk, err := types.BlockFromBytes(resp)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("[N%d] fetchBlock(%v) %v<-%v [from %s]: %s\n", n.id, blockHash, blk.ParentHash(), blk.Hash(), randomPeer, blk.String())
+		n.blocks[blk.Hash()] = blk
+		return blk, nil
 	}
-	return nil
+	return nil, fmt.Errorf("fetchBlock - No response")
 }
 
+// given n.blocks, 1 or more of which can extend the tip, we advance the chain
 func (n *Node) extendChain() error {
-
+	parenthash := n.statedb.BlockHash
 	for {
-		blockhash := n.statedb.BlockHash
-		// find the NEXT block using the blockCache (blockCached is indexed by PARENT hash)
-		nextBlock, ok := n.blockCache[blockhash]
-		if ok {
-			// now APPLY the block to the tip
-			s := n.statedb.Copy()
-			err := s.ProcessIncomingBlock(nextBlock)
-			if err != nil {
-				return err
+	
+		ok := false;
+		for _, b := range n.blocks {
+			if b.ParentHash() == parenthash {
+				ok = true
+				nextBlock := b
+				fmt.Printf("[N%d] extendChain %v <- %v\n", n.id, parenthash, nextBlock.Hash()) 
+				// now APPLY the block to the tip
+				s := n.statedb.Copy()
+				err := s.ProcessIncomingBlock(nextBlock)
+				if err != nil {
+					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
+					return err
+				}
+				// EXTEND the tip of the chain
+				n.addStateDB(s)
+				parenthash = nextBlock.Hash()
+				fmt.Printf("[N%d] extendChain addstatedb parenthash=nextBlock.Hash()=%v: .... statedb TIP Now: s:%v<-%v which should match n.statedb %v<-%v\n", n.id, parenthash,
+					s.ParentHash, s.BlockHash, n.statedb.ParentHash, n.statedb.BlockHash)
+				break
 			}
-			// EXTEND the tip of the chain
-			n.addStateDB(s)
-		} else {
+		}
+		
+		if ok == false {
 			// if there is no next block, we're done!
+			fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parenthash);
 			return nil
 		}
-		// repeat
 	}
 }
 
@@ -804,24 +869,36 @@ func (n *Node) processBlock(blk *types.Block) error {
 	b := blk
 	n.blocks[b.Hash()] = blk
 	for {
-		parentBlock, ok := n.blocks[b.ParentHash()]
-		if !ok {
-			parentBlock = n.fetchBlock(b.ParentHash())
-			if parentBlock != nil {
-				n.blockCache[parentBlock.ParentHash()] = parentBlock
-				n.blocks[parentBlock.Hash()] = parentBlock
-			} else {
-				// no one knows about it, have to give up right now
-				return nil
+		if b.ParentHash() == (common.Hash{}) {
+			//fmt.Printf("[N%d] processBlock: hit genesis (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
+			break
+		} else if n.statedb != nil && b.ParentHash() == n.statedb.BlockHash {
+			fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
+			break
+		} else {
+			var err error 
+			parentBlock, ok := n.blocks[b.ParentHash()]
+			if !ok {
+				parentBlock, err = n.fetchBlock(b.ParentHash())
+				if err != nil {
+					// have to give up right now (could try again though!)
+					return err
+				}
+				// got the parent block, store it in the cache
+				if parentBlock.Hash() == blk.ParentHash() {
+					fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.ParentHash(), blk.Hash());
+					n.blocks[parentBlock.Hash()] = parentBlock
+				} else {
+					return nil
+				}
+				
 			}
-		}
-		b = parentBlock
-		if n.statedb.BlockHash == b.Hash() {
-			// we got to the tip, now extend the chain
-			n.extendChain()
-			return nil
+			b = parentBlock
 		}
 	}
+	
+	// we got to the tip, now extend the chain, moving the tip forward, applying blocks using blockcache
+	n.extendChain()
 	return nil // Success
 }
 
@@ -1127,13 +1204,15 @@ func (n *Node) runClient() {
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
-			newBlock, newStateDB := n.statedb.ProcessState()
+                 
+			newBlock, newStateDB := n.statedb.ProcessState(n.credential)
 			if newStateDB != nil {
+				// we authored a block
 				n.addStateDB(newStateDB)
+				n.blocks[newBlock.Hash()] = newBlock
 				n.broadcast(*newBlock)
-				fmt.Printf("[N%d] BLOCK BROADCASTED: %v\n", n.id, newBlock.String())
+				fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
 			}
-
 		case msg := <-n.messageChan:
 			n.processOutgoingMessage(msg)
 		}

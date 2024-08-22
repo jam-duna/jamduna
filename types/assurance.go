@@ -2,6 +2,8 @@ package types
 
 import (
 	"github.com/colorfulnotion/jam/common"
+	"encoding/json"
+	"fmt"
 )
 
 /*
@@ -24,4 +26,42 @@ type Assurance struct {
 	Bitstring      []byte           `json:"bitstring"`
 	ValidatorIndex int              `json:"validator_index"`
 	Signature      Ed25519Signature `json:"signature"`
+}
+
+func (a Assurance) DeepCopy() (Assurance, error) {
+	var copiedAssurance Assurance
+
+	// Serialize the original Assurance to JSON
+	data, err := json.Marshal(a)
+	if err != nil {
+		return copiedAssurance, err
+	}
+
+	// Deserialize the JSON back into a new Assurance instance
+	err = json.Unmarshal(data, &copiedAssurance)
+	if err != nil {
+		return copiedAssurance, err
+	}
+
+	return copiedAssurance, nil
+}
+
+// Bytes returns the bytes of the Assurance
+func (a *Assurance) Bytes() []byte {
+	enc, err := json.Marshal(a)
+	if err != nil {
+		// Handle the error according to your needs.
+		fmt.Println("Error marshaling JSON:", err)
+		return nil
+	}
+	return enc
+}
+
+func (a *Assurance) Hash() common.Hash {
+	data := a.Bytes()
+	if data == nil {
+		// Handle the error case
+		return common.Hash{}
+	}
+	return common.BytesToHash(common.ComputeHash(data))
 }

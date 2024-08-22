@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/colorfulnotion/jam/types"
 )
 
 const (
@@ -42,7 +43,7 @@ type VM struct {
 	ram                 []byte
 	register            []uint32
 	ξ                   uint64
-	hostenv             HostEnv
+	hostenv             types.HostEnv
 	writable_ram_start  uint32
 	writable_ram_length uint32
 }
@@ -272,7 +273,7 @@ func parseProgram(p []byte) *Program {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV HostEnv) *VM {
+func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv) *VM {
 	if len(code) == 0 {
 		panic("NO CODE\n")
 	}
@@ -299,12 +300,12 @@ func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMa
 	return vm
 }
 
-func NewVMFromCode(code []byte, i uint32, hostENV HostEnv) *VM {
+func NewVMFromCode(code []byte, i uint32, hostENV types.HostEnv) *VM {
 	return NewVM(code, []uint32{}, i, []PageMap{}, []Page{}, hostENV)
 }
 
 // for hostfuntion test
-func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, hostENV HostEnv) *VM {
+func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv) *VM {
 
 	vm := &VM{
 		register: make([]uint32, regSize),

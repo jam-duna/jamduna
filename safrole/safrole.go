@@ -21,7 +21,7 @@ const (
 
 const (
 	// tiny (NOTE: large is 600 + 1023, should use ProtocolConfiguration)
-	SecondsPerSlot = 6
+	SecondsPerSlot = 12
 	EpochNumSlots  = 10
 	NumValidators  = 6
 	NumAttempts    = 2
@@ -259,36 +259,6 @@ const (
 	errInvalidWinningMarker                = "Fail: Invalid winning marker"
 )
 
-// 6.4.1 Startup parameters
-func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState) {
-	s = &SafroleState{}
-
-	s.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
-	s.Timeslot = int(s.EpochFirstSlot)
-	validators := genesisConfig.Authorities
-	vB := []byte{}
-	for _, v := range validators {
-		vB = append(vB, v.Bytes()...)
-	}
-	s.PrevValidators = validators
-	s.CurrValidators = validators
-	s.NextValidators = validators
-	s.DesignedValidators = validators
-
-	s.BlockNumber = 0
-	/*
-		The on-chain randomness is initialized after the genesis block construction.
-		The first buffer entry is set as the Blake2b hash of the genesis block,
-		each of the other entries is set as the Blake2b hash of the previous entry.
-	*/
-
-	s.Entropy = make([]common.Hash, types.EntropySize)
-	s.Entropy[0] = common.BytesToHash(common.ComputeHash(vB))                   //BLAKE2B hash of the genesis block#0
-	s.Entropy[1] = common.BytesToHash(common.ComputeHash(s.Entropy[0].Bytes())) //BLAKE2B of Current
-	s.Entropy[2] = common.BytesToHash(common.ComputeHash(s.Entropy[1].Bytes())) //BLAKE2B of EpochN1
-	s.Entropy[3] = common.BytesToHash(common.ComputeHash(s.Entropy[2].Bytes())) //BLAKE2B of EpochN2
-	return s
-}
 
 type ClaimData struct {
 	Slot             uint32 `json:"slot"`
@@ -505,13 +475,17 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 	return ringsetBytes
 }
 
-func (s *SafroleState) GenerateTickets(secret bandersnatch.PrivateKey) []types.Ticket {
+func (s *SafroleState) GenerateTickets(secret bandersnatch.PrivateKey, isNextEpoch bool) []types.Ticket {
 	tickets := make([]types.Ticket, 0)
-	targetEpochRandomness := s.Entropy[2] // check eq 74
 	for attempt := 0; attempt < NumAttempts; attempt++ {
-		ticket, err := s.generateTicket(secret, targetEpochRandomness, attempt)
+		// We can GenerateTickets for the NEXT epoch based on s.Entropy[1], but the CURRENT epoch based on s.Entropy[2]
+		entropy := s.Entropy[2]
+		if isNextEpoch {
+			entropy = s.Entropy[1]
+		}
+		ticket, err := s.generateTicket(secret, entropy, attempt)
 		if err == nil {
-			fmt.Printf("[N%d] Generated ticket %d: %v\n", s.Id, attempt, targetEpochRandomness)
+			fmt.Printf("[N%d] Generated ticket %d: %v\n", s.Id, attempt, entropy)
 			tickets = append(tickets, ticket)
 		} else {
 			fmt.Printf("Error generating ticket for attempt %d: %v\n", attempt, err)
@@ -752,14 +726,6 @@ func (s *SafroleState) GetProposedTargetEpochRandomness() common.Hash {
 	return targetRandomness
 }
 
-func (s *SafroleState) GetRandomness() []common.Hash {
-	return s.Entropy
-}
-
-func (s *SafroleState) IsAuthorizedTicketBuilder(bandersnatchPub common.Hash) bool {
-	//TODO
-	return true
-}
 
 func (s *SafroleState) CheckEpochType() string {
 	t_or_k := s.TicketsOrKeys
@@ -945,7 +911,6 @@ func (s *SafroleState) AdvanceSafrole(targetJCE uint32) error {
 	if prevJCE < targetJCE {
 		return fmt.Errorf(errTimeslotNotMonotonic)
 	}
-	//currJCE := ComputeCurrentJCETime()
 	currEpochFirst := s.GetCurrEpochFirst()
 	nextEpochFirst := s.GetNextEpochFirst()
 	if currEpochFirst > targetJCE {
@@ -953,25 +918,15 @@ func (s *SafroleState) AdvanceSafrole(targetJCE uint32) error {
 		return fmt.Errorf(errEpochFirstSlotNotMet)
 	}
 
-	randomnessBuf := s.GetRandomness()
-	//TODO: how to get the claimData??
-	fresh_randomness := randomnessBuf[0]
-	//fresh_randomness := GetFreshRandomness(claim)
-	updated_randomness := s.ComputeCurrRandomness(fresh_randomness)
-
 	if targetJCE >= nextEpochFirst {
 		// New Epoch
-		s.Entropy[1] = randomnessBuf[0]
-		s.Entropy[2] = randomnessBuf[1]
-		s.Entropy[3] = randomnessBuf[2]
-		s.Entropy[0] = updated_randomness
-		//s.TicketsAccumulator = s.TicketsAccumulator[0:0]
+		s.Entropy[0] = s.ComputeCurrRandomness(s.Entropy[0])
+		s.Entropy[1] = s.Entropy[0]
+		s.Entropy[2] = s.Entropy[1]
+		s.Entropy[3] = s.Entropy[2]
 	} else {
 		// Epoch in progress
-		s.Entropy[0] = updated_randomness
-		//s.Entropy[1] = randomnessBuf[1]
-		//s.Entropy[2] = randomnessBuf[2]
-		//s.Entropy[3] = randomnessBuf[3]
+		s.Entropy[0] = s.ComputeCurrRandomness(s.Entropy[0])
 	}
 	if targetJCE > prevJCE {
 		s.Timeslot = int(targetJCE)
@@ -985,13 +940,8 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 
 	s2 := cloneSafroleState(*s)
-	if currEpoch <= prevEpoch && currPhase <= prevPhase {
-		return s2, fmt.Errorf(errTimeslotNotMonotonic)
-	}
-
-	if currEpoch != prevEpoch && currEpoch != prevEpoch+1 {
-		// epoch jumped ... not okay
-		return s2, fmt.Errorf(errTimeslotNotMonotonic)
+	if currEpoch < prevEpoch || ( currEpoch == prevEpoch && currPhase < prevPhase ) {
+		return s2, fmt.Errorf("%v - currEpoch %d prevEpoch %d  currPhase %d  prevPhase %d", errTimeslotNotMonotonic, currEpoch, prevEpoch, currPhase, prevPhase)
 	}
 
 	// tally existing ticketIDs

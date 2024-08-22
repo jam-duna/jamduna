@@ -1,22 +1,24 @@
-package disputes
+package safrole
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/colorfulnotion/jam/types"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"log"
 	"path/filepath"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
+	"github.com/stretchr/testify/assert"
 )
 
 type DisputeData struct {
 	Input     types.Dispute `json:"input"`
-	PreState  StateDispute  `json:"pre_state"`
+	PreState  DisputeState  `json:"pre_state"`
 	Output    Output        `json:"output"`
-	PostState StateDispute  `json:"post_state"`
+	PostState DisputeState  `json:"post_state"`
 }
 type HexBytes []byte
 
@@ -129,6 +131,38 @@ func TestDispute_Full(t *testing.T) {
 			fmt.Println("Err actual: ", output.Err)
 		}
 
+		fmt.Printf("Finish File Name: %s\n", file.Name())
+		fmt.Println("=====================================================")
+	}
+}
+
+func TestDispute_State(t *testing.T) {
+	filePath := "../jamtestvectors/disputes/full/progress_invalidates_avail_assignments-1.json"
+	disputeData, _ := ReadAndConvertJson(filePath)
+	disputeData.PreState.Disputes(disputeData.Input)
+	//test if the postState is equal to the expected postState
+	assert.Equal(t, disputeData.PostState, disputeData.PreState)
+	// test if the output is equal to the expected output
+}
+func TestDispute_State_Full(t *testing.T) {
+	dir_path := "../jamtestvectors/disputes/full/"
+	files, err := ioutil.ReadDir(dir_path)
+	if err != nil {
+		log.Fatalf("Failed to read directory: %v", err)
+	}
+	for _, file := range files {
+
+		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
+			continue
+		}
+		filePath := dir_path + file.Name()
+		fmt.Println("=====================================================")
+		fmt.Printf("Start File Name: %s\n", file.Name())
+		disputeData, _ := ReadAndConvertJson(filePath)
+		disputeData.PreState.Disputes(disputeData.Input)
+		//test if the postState is equal to the expected postState
+		assert.Equal(t, disputeData.PostState, disputeData.PreState)
+		// test if the output is equal to the expected output
 		fmt.Printf("Finish File Name: %s\n", file.Name())
 		fmt.Println("=====================================================")
 	}
@@ -247,7 +281,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	// Convert Input.Verdicts
 	for _, verdict := range rawDisputeData.Input.Disputes.Verdicts {
 		verdictStruct := types.Verdict{
-			WorkReportHash: hexDecodeOrPanic(verdict.Target),
+			WorkReportHash: common.BytesToHash(hexDecodeOrPanic(verdict.Target)),
 			Epoch:          verdict.Age,
 		}
 		for _, vote := range verdict.Votes {
@@ -294,20 +328,20 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	disputeData.PreState.Tau = rawDisputeData.PreState.Tau
 	for _, kappa := range rawDisputeData.PreState.Kappa {
 		disputeData.PreState.Kappa = append(disputeData.PreState.Kappa, types.Validator{
-			Ed25519:      hexDecodeOrPanic(kappa.Ed25519),
-			Bandersnatch: hexDecodeOrPanic(kappa.Bandersnatch),
-			Bls:          hexDecodeOrPanic(kappa.Bls),
-			Metadata:     hexDecodeOrPanic(kappa.Metadata),
+			Ed25519:      common.BytesToHash(hexDecodeOrPanic(kappa.Ed25519)),
+			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(kappa.Bandersnatch)),
+			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(kappa.Bls)); return arr }(),
+			Metadata:     func() [128]byte { var arr [128]byte; copy(arr[:], hexDecodeOrPanic(kappa.Metadata)); return arr }(),
 		})
 	}
 
 	// Convert PreState.Lambda
 	for _, lambda := range rawDisputeData.PreState.Lambda {
 		disputeData.PreState.Lambda = append(disputeData.PreState.Lambda, types.Validator{
-			Ed25519:      hexDecodeOrPanic(lambda.Ed25519),
-			Bandersnatch: hexDecodeOrPanic(lambda.Bandersnatch),
-			Bls:          hexDecodeOrPanic(lambda.Bls),
-			Metadata:     hexDecodeOrPanic(lambda.Metadata),
+			Ed25519:      common.BytesToHash(hexDecodeOrPanic(lambda.Ed25519)),
+			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(lambda.Bandersnatch)),
+			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(lambda.Bls)); return arr }(),
+			Metadata:     func() [128]byte { var arr [128]byte; copy(arr[:], hexDecodeOrPanic(lambda.Metadata)); return arr }(),
 		})
 	}
 
@@ -329,30 +363,34 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	for _, kappa := range rawDisputeData.PostState.Kappa {
 		disputeData.PostState.Kappa = append(disputeData.PostState.Kappa, types.Validator{
-			Ed25519:      hexDecodeOrPanic(kappa.Ed25519),
-			Bandersnatch: hexDecodeOrPanic(kappa.Bandersnatch),
-			Bls:          hexDecodeOrPanic(kappa.Bls),
-			Metadata:     hexDecodeOrPanic(kappa.Metadata),
+			Ed25519:      common.BytesToHash(hexDecodeOrPanic(kappa.Ed25519)),
+			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(kappa.Bandersnatch)),
+			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(kappa.Bls)); return arr }(),
+			Metadata:     func() [128]byte { var arr [128]byte; copy(arr[:], hexDecodeOrPanic(kappa.Metadata)); return arr }(),
 		})
 	}
 
 	// Convert PostState.Lambda
 	for _, lambda := range rawDisputeData.PostState.Lambda {
-		disputeData.PostState.Lambda = append(disputeData.PostState.Lambda, Validator{
-			Ed25519:      hexDecodeOrPanic(lambda.Ed25519),
-			Bandersnatch: hexDecodeOrPanic(lambda.Bandersnatch),
-			Bls:          hexDecodeOrPanic(lambda.Bls),
-			Metadata:     hexDecodeOrPanic(lambda.Metadata),
+		disputeData.PostState.Lambda = append(disputeData.PostState.Lambda, types.Validator{
+			Ed25519:      common.BytesToHash(hexDecodeOrPanic(lambda.Ed25519)),
+			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(lambda.Bandersnatch)),
+			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(lambda.Bls)); return arr }(),
+			Metadata:     func() [128]byte { var arr [128]byte; copy(arr[:], hexDecodeOrPanic(lambda.Metadata)); return arr }(),
 		})
 	}
 
 	// Convert Output
 	if rawDisputeData.Output.Ok != nil {
 		disputeData.Output.Ok = &struct {
-			VerdictMark  [][]byte          `json:"verdict_mark"`
+			VerdictMark  []common.Hash     `json:"verdict_mark"`
 			OffenderMark []types.PublicKey `json:"offender_mark"`
 		}{}
-		disputeData.Output.Ok.VerdictMark = convertHexStringsToBytes(rawDisputeData.Output.Ok.VerdictMark)
+		verdictMarks := make([]common.Hash, len(rawDisputeData.Output.Ok.VerdictMark))
+		for i, hexStr := range rawDisputeData.Output.Ok.VerdictMark {
+			verdictMarks[i] = common.BytesToHash(hexDecodeOrPanic(hexStr))
+		}
+		disputeData.Output.Ok.VerdictMark = verdictMarks
 		disputeData.Output.Ok.OffenderMark = convertHexStringsToPublicKeys(rawDisputeData.Output.Ok.OffenderMark)
 	}
 	disputeData.Output.Err = rawDisputeData.Output.Err
@@ -369,7 +407,7 @@ func convertHexStringsToBytes(hexStrings []string) [][]byte {
 }
 
 func convertHexStringsToPublicKeys(hexStrings []string) []types.PublicKey {
-	publicKeys := make([]PublicKey, len(hexStrings))
+	publicKeys := make([]types.PublicKey, len(hexStrings))
 	for i, hexStr := range hexStrings {
 		publicKeys[i] = hexDecodeOrPanic(hexStr)
 	}

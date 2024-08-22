@@ -1,7 +1,9 @@
 package types
 
 import (
-//"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/common"
+	"encoding/json"
+	"fmt"
 )
 
 /*
@@ -35,3 +37,42 @@ type GuaranteeCredential struct {
 	ValidatorIndex uint32           `json:"validator_index"`
 	Signature      Ed25519Signature `json:"signature"`
 }
+
+func (g Guarantee) DeepCopy() (Guarantee, error) {
+	var copiedGuarantee Guarantee
+
+	// Serialize the original Guarantee to JSON
+	data, err := json.Marshal(g)
+	if err != nil {
+		return copiedGuarantee, err
+	}
+
+	// Deserialize the JSON back into a new Guarantee instance
+	err = json.Unmarshal(data, &copiedGuarantee)
+	if err != nil {
+		return copiedGuarantee, err
+	}
+
+	return copiedGuarantee, nil
+}
+
+// Bytes returns the bytes of the Guarantee.
+func (g *Guarantee) Bytes() []byte {
+	enc, err := json.Marshal(g)
+	if err != nil {
+		// Handle the error according to your needs.
+		fmt.Println("Error marshaling JSON:", err)
+		return nil
+	}
+	return enc
+}
+
+func (g *Guarantee) Hash() common.Hash {
+	data := g.Bytes()
+	if data == nil {
+		// Handle the error case
+		return common.Hash{}
+	}
+	return common.BytesToHash(common.ComputeHash(data))
+}
+

@@ -156,9 +156,9 @@ func (b *Block) Tickets() []Ticket {
 	return extrinsicData.Tickets
 }
 
-func (b *Block) PreImages() []PreimageLookup {
+func (b *Block) PreimageLookups() []PreimageLookup {
 	extrinsicData := b.Extrinsic
-	return extrinsicData.Preimages
+	return extrinsicData.PreimageLookups
 }
 
 func (b *Block) Guarantees() []Guarantee {

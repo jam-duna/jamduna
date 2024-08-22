@@ -4,15 +4,18 @@ import (
 	//"github.com/ethereum/go-ethereum/crypto"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/corejam"
 	"github.com/colorfulnotion/jam/safrole"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
-	"sync"
-	"time"
 )
 
 type Message struct {
@@ -21,37 +24,60 @@ type Message struct {
 }
 
 type StateDB struct {
-	Id              uint32                `json:"id"`
-	Block           *types.Block          `json:"block"`
-	ParentHash      common.Hash           `json:"parentHash"`
-	BlockHash       common.Hash           `json:"blockHash"`
-	StateRoot       common.Hash           `json:"stateRoot"`
-	Safrole         *safrole.SafroleState `json:"safrole"`
+	Id              uint32                 `json:"id"`
+	Block           *types.Block           `json:"block"`
+	ParentHash      common.Hash            `json:"parentHash"`
+	BlockHash       common.Hash            `json:"blockHash"`
+	StateRoot       common.Hash            `json:"stateRoot"`
+	Safrole         *safrole.SafroleState  `json:"safrole"`
+	Corejam         *corejam.CorejamState  `json:"corejam"`
+	Dispute         *safrole.DisputeState `json:"dispute"`
 	sdb             *storage.StateDBStorage
-	credential      types.ValidatorSecret
 	trie            *trie.MerkleTree
-	nodeMessageChan chan Message
 
-	selfTickets  map[uint32][]common.Hash //keep track of its own tickets
-	knownTickets map[common.Hash]int      //keep track of known tickets
-	queuedticket map[common.Hash]types.Ticket
+	knownPreimageLookups map[common.Hash]int
+	queuedPreimageLookups map[common.Hash]types.PreimageLookup
+	preimageLookupsMutex  sync.Mutex
+	
+	knownGuarantees map[common.Hash]int
+	queuedGuarantees map[common.Hash]types.Guarantee
+	guaranteeMutex  sync.Mutex
+
+	knownAssurances map[common.Hash]int
+	queuedAssurances map[common.Hash]types.Assurance
+	assuranceMutex  sync.Mutex
+
+	knownDisputes map[common.Hash]int
+	queuedDisputes map[common.Hash]types.Dispute
+	disputeMutex  sync.Mutex
+
+	knownTickets map[common.Hash]int
+	queuedTickets map[common.Hash]types.Ticket
 	ticketMutex  sync.Mutex
-}
-
-// Function to send a message from StateDB to Node
-func (sdb *StateDB) SendOutgoingMessage(msgType string, payload interface{}) {
-	msg := Message{
-		MsgType: msgType,
-		Payload: payload,
-	}
-	//fmt.Printf("[N%v] SendOutgoingMessage msgType=%v\n", sdb.id, msgType)
-	sdb.nodeMessageChan <- msg
 }
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
-	s.queuedticket[t.TicketID()] = t
+	s.queuedTickets[t.TicketID()] = t
+}
+
+func (s *StateDB) AddDisputeToQueue(d types.Dispute) {
+	s.disputeMutex.Lock()
+	defer s.disputeMutex.Unlock()
+	s.queuedDisputes[d.Hash()] = d
+}
+
+func (s *StateDB) AddGuaranteeToQueue(g types.Guarantee) {
+	s.guaranteeMutex.Lock()
+	defer s.guaranteeMutex.Unlock()
+	s.queuedGuarantees[g.Hash()] = g
+}
+
+func (s *StateDB) AddAssuranceToQueue(a types.Assurance) {
+	s.assuranceMutex.Lock()
+	defer s.assuranceMutex.Unlock()
+	s.queuedAssurances[a.Hash()] = a
 }
 
 func (s *StateDB) CheckTicketExists(ticketID common.Hash) bool {
@@ -73,11 +99,12 @@ func (s *StateDB) ProcessIncomingBlock(b *types.Block) error {
 		tickets := b.Tickets()
 		s.Block = b
 		s.ApplyStateTransitionFromBlock(context.Background(), b)
+		// shawn apply the disputes state
 		for _, ticket := range tickets {
 			s.RemoveTicket(&ticket)
 		}
 		if s.Id == 0 {
-			fmt.Printf("[N%v] ProcessIncomingBlock Block %v. (Epoch,Phase) = (%v,%v) Slot=%v STATEDB %s\n", s.Id, b.Hash(), currEpoch, currPhase, b.Header.TimeSlot, s.String())
+			fmt.Printf("[N%v] ProcessIncomingBlock Block %v. (Epoch,Phase) = (%v,%v) Slot=%v\n", s.Id, b.Hash(), currEpoch, currPhase, b.Header.TimeSlot)
 		}
 		return nil
 	}
@@ -102,30 +129,63 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	s.knownTickets[ticketID] = t.Attempt
 }
 
+func (s *StateDB) ProcessIncomingDispute(d types.Dispute) {
+	// get the disputes state
+	disp := s.GetDisputes()
+	err := disp.ValidateProposedDispute(&d);
+	if err != nil {
+		fmt.Printf("Invalid dispute. Err=%v\n", err)
+		return
+	}
+	s.AddDisputeToQueue(d)
+}
+
+func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
+	// get the guarantee state
+	cj := s.GetCorejam()
+	err := cj.ValidateProposedGuarantee(&g);
+	if err != nil {
+		fmt.Printf("Invalid guarantee. Err=%v\n", err)
+		return
+	}
+	s.AddGuaranteeToQueue(g)
+}
+
+func (s *StateDB) ProcessIncomingAssurance(a types.Assurance) {
+	// get the assurances state
+	cj := s.GetCorejam()
+	err := cj.ValidateProposedAssurance(&a);
+	if err != nil {
+		fmt.Printf("Invalid guarantee. Err=%v\n", err)
+		return
+	}
+	s.AddAssuranceToQueue(a)
+}
+
 func (s *StateDB) RemoveTicket(t *types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
-	delete(s.queuedticket, t.TicketID())
+	delete(s.queuedTickets, t.TicketID())
+}
 
-	// Iterate through selfTickets epoch by epoch, to remove the ticket from the appropriate list -- TODO: remove old epochs
-	for epoch, ticketIDs := range s.selfTickets {
-		var newtickets []common.Hash
-		for _, h := range ticketIDs {
-			if h == t.TicketID() {
-			} else {
-				newtickets = append(newtickets, t.TicketID())
-				break
-			}
-		}
-		s.selfTickets[epoch] = newtickets
-	}
+func (s *StateDB) RemoveDispute(d *types.Dispute) {
+	s.disputeMutex.Lock()
+	defer s.disputeMutex.Unlock()
+	// delete(s.queuedDispute, d.Hash())
 }
 
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
-	statedb.queuedticket = make(map[common.Hash]types.Ticket)
+	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]int)
-	statedb.selfTickets = make(map[uint32][]common.Hash)
+	statedb.queuedDisputes = make(map[common.Hash]types.Dispute)
+	statedb.knownDisputes = make(map[common.Hash]int)
+	statedb.queuedGuarantees = make(map[common.Hash]types.Guarantee)
+	statedb.knownGuarantees = make(map[common.Hash]int)
+	statedb.queuedAssurances = make(map[common.Hash]types.Assurance)
+	statedb.knownAssurances = make(map[common.Hash]int)
+	statedb.queuedPreimageLookups = make(map[common.Hash]types.PreimageLookup)
+	statedb.knownPreimageLookups = make(map[common.Hash]int)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 	return statedb
 }
@@ -155,7 +215,10 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *safrole.GenesisConfig) (s
 	}
 
 	statedb.Block = nil
-	statedb.Safrole = safrole.InitGenesisState(c) // setting the safrole state so that block 1 can be produced
+	s, d := safrole.InitGenesisState(c)
+	statedb.Safrole = s // setting the safrole state so that block 1 can be produced
+	statedb.Dispute = d // setting the dispute state so that block 1 can be produced
+	statedb.Corejam = &corejam.CorejamState{} // .InitGenesisState(c) // setting the corejam state so that block 1 can be produced
 	statedb.UpdateTrieState()
 	return statedb, nil
 }
@@ -164,8 +227,37 @@ func (s *StateDB) GetTrie() *trie.MerkleTree {
 	return s.trie
 }
 
+func (s *StateDB) GetCorejam() *corejam.CorejamState {
+	return s.Corejam
+}
+
 func (s *StateDB) GetSafrole() *safrole.SafroleState {
 	return s.Safrole
+}
+
+func (s *StateDB) GetDisputes() *safrole.DisputeState {
+	return s.Dispute
+}
+
+// todo: implement this, not sure if this correct
+func (s *StateDB) GetDisputesState() {
+	//not sure if this is correct
+	t := s.GetTrie()
+	//TODO: deserialize the disputes state
+	disputeState := safrole.DisputeState{}
+	PsiBytes, err := t.GetState(C5)
+	disputeState.SetPsi(PsiBytes)
+	RhoBytes, err := t.GetState(C10)
+	disputeState.SetRho(RhoBytes)
+	tauByte, err := t.GetState(C11)
+	tau := binary.BigEndian.Uint32(tauByte) // not sure if this is big endian
+	disputeState.SetTau(tau)
+	disputeState.SetKappa(s.Safrole.CurrValidators)
+	disputeState.SetLambda(s.Safrole.PrevValidators)
+	if err != nil {
+		fmt.Println("Error getting disputes state", err)
+	}
+	s.Dispute = &disputeState
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -185,14 +277,20 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 
 	t := s.GetTrie()
 
+	// Corejam: PreimageLookups, Guarantees, Assurances
+	// cj := s.GetCorejam()
+	// TODO
+	
 	// Disputes: C5, C10
-	/*
-	   d := s.GetDisputes()
-	   disputeState := d.GetDisputesBasicState()
-	   disputeStateEncode, _ := d.Bytes()
-	   t.SetState(C5, disputeStateEncode)
-	   // TODO: set C10
-	*/
+	d := s.GetDisputes()
+	disputeState, err := d.GetPsiBytes()
+	if err != nil {
+		fmt.Println("Error getting disputes state", err)
+	}
+	t.SetState(C5, disputeState)
+	// TODO: set C10
+	// IMPORTANT:dispute only modifies the C10 dagger
+
 	// Safrole
 	t.SetState(C4, safroleStateEncode)
 	t.SetState(C6, entropyEncode)
@@ -223,9 +321,11 @@ func (s *StateDB) String() string {
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
-	statedb.queuedticket = make(map[common.Hash]types.Ticket)
+	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]int)
-	statedb.selfTickets = make(map[uint32][]common.Hash)
+	statedb.queuedDisputes = make(map[common.Hash]types.Dispute)
+	statedb.knownDisputes = make(map[common.Hash]int)
+
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 
 	block := types.Block{}
@@ -264,53 +364,67 @@ func (s *StateDB) Copy() *StateDB {
 		ParentHash:      s.ParentHash,
 		BlockHash:       s.BlockHash,
 		StateRoot:       s.StateRoot,
-		Safrole:         s.Safrole.Copy(), // Assuming SafroleState has a Copy method
-		sdb:             s.sdb,            // Again, consider deep copying if needed
-		credential:      s.credential,
+		Safrole:         s.Safrole.Copy(), // SafroleState has a Copy method
+		Dispute:        s.Dispute.Copy(), // DisputesState has a Copy method
+		Corejam:         s.Corejam.Copy(), // CorejamState has a Copy method
+		sdb:             s.sdb,            
 		trie:            s.trie,            // Deep copy if the MerkleTree is mutable
-		nodeMessageChan: s.nodeMessageChan, // Channels are reference types, consider whether to create a new channel
-		selfTickets:     make(map[uint32][]common.Hash),
 		knownTickets:    make(map[common.Hash]int),
-		queuedticket:    make(map[common.Hash]types.Ticket),
+		queuedTickets:   make(map[common.Hash]types.Ticket),
+		knownDisputes:    make(map[common.Hash]int),
+		queuedDisputes:   make(map[common.Hash]types.Dispute),
 	}
 
 	// Copy maps
-	for k, v := range s.selfTickets {
-		n.selfTickets[k] = append([]common.Hash(nil), v...)
-	}
-
 	for k, v := range s.knownTickets {
 		n.knownTickets[k] = v
 	}
 
-	for k, v := range s.queuedticket {
+	for k, v := range s.queuedTickets {
 		t, _ := v.DeepCopy()
-		n.queuedticket[k] = t
+		n.queuedTickets[k] = t
 	}
+
+	/*
+	   for k, v := range s.queuedDisputes {
+		t, _ := v.DeepCopy()
+		n.queuedDisputes[k] = t
+	for k, v := range s.knownDisputes {
+		t, _ := v.DeepCopy()
+		n.knownDisputes[k] = t
+	}
+	}
+	*/
 
 	return n
 }
 
-func (s *StateDB) ProcessState() (*types.Block, *StateDB) {
+func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, *StateDB) {
 	genesisReady := s.Safrole.CheckGenesisReady()
 	if !genesisReady {
 		return nil, nil
 	}
 	currJCE, timeSlotReady := s.Safrole.CheckTimeSlotReady()
 	if timeSlotReady {
-		//fmt.Printf("[N%v] Ready to start!\n", s.id)
-		isAuthorizedTicketBuilder := s.IsAuthorizedTicketBuilder()
-		if isAuthorizedTicketBuilder {
-			s.GenerateTickets(currJCE)
+		// Time to propose block if authorized
+		isAuthorizedBlockBuilder := false
+		//bandersnatchPub := credential.BandersnatchPub
+		_, phase := s.Safrole.EpochAndPhase(currJCE)
+		// round robin TEMPORARY
+		if phase%safrole.NumValidators == s.Id {
+			//fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
+			isAuthorizedBlockBuilder = true
 		}
-		// Time to propose block if selected
-		isAuthorizedBlockBuilder := s.IsAuthorizedBlockBuilder(currJCE)
+		
+		//sf := s.GetSafrole()
+		//ticketIDs := s.GetSelfTickets(targetEpoch)
+		//isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, credential, ticketIDs)
 		if isAuthorizedBlockBuilder {
 			currEpoch, currPhase := s.Safrole.EpochAndPhase(currJCE)
 			// take the current stateDB + generate a new proposed Block and a new stateDB
-			proposedBlk, newStateDB, err := s.MakeBlock(context.Background(), currJCE)
+			proposedBlk, newStateDB, err := s.MakeBlock(credential, currJCE)
 			if err == nil {
-				fmt.Printf("[N%v] Proposed %v (Epoch,Phase) = (%v,%v) Slot=%v Blk=%v\n", s.Id, proposedBlk.Hash(), currEpoch, currPhase, currJCE, proposedBlk)
+				fmt.Printf("[N%v] Proposed %v<-%v (Epoch,Phase) = (%v,%v) Slot=%v\n", s.Id, proposedBlk.ParentHash(), proposedBlk.Hash(), currEpoch, currPhase, currJCE)
 				return proposedBlk, newStateDB
 			}
 		} else {
@@ -320,104 +434,10 @@ func (s *StateDB) ProcessState() (*types.Block, *StateDB) {
 	return nil, nil
 }
 
-func (s *StateDB) SelfTicketCount(epoch uint32) int {
-	tickets, ok := s.selfTickets[epoch]
-	if !ok {
-		return 0
-	}
-	return len(tickets)
-}
-
-func (s *StateDB) AddSelfTicket(epoch uint32, t types.Ticket) bool {
-	if s.selfTickets == nil {
-		s.selfTickets = make(map[uint32][]common.Hash)
-	}
-	ticketCnt := s.SelfTicketCount(epoch)
-	if ticketCnt < safrole.NumAttempts {
-		ticketID := t.TicketID()
-		s.selfTickets[epoch] = append(s.selfTickets[epoch], ticketID)
-		s.AddTicketToQueue(t)
-		return true
-	}
-	return false
-}
-
-// GetSelfTickets returns the self-tickets for a given epoch.
-func (s *StateDB) GetSelfTickets(epoch int32) []common.Hash {
-	s.ticketMutex.Lock()
-	defer s.ticketMutex.Unlock()
-
-	ticketIDs, ok := s.selfTickets[uint32(epoch)]
-	if !ok {
-		return nil
-	}
-	return ticketIDs
-}
-
-func (s *StateDB) GenerateTickets(currJCE uint32) {
-	sf := s.GetSafrole()
-	currEpoch, currPhase := s.Safrole.EpochAndPhase(currJCE)
-	if currPhase >= safrole.EpochTail {
-		return
-	}
-	if s.SelfTicketCount(uint32(currEpoch)) >= safrole.NumAttempts {
-		return
-	}
-	fmt.Printf("[N%v] Generating Tickets for (Epoch,Phase) = (%v,%v) s.Entropy[2]=%v\n", s.Id, currEpoch, currPhase, s.Safrole.Entropy[2])
-	tickets := sf.GenerateTickets(s.GetBandersnatchSecret())
-	for _, ticket := range tickets {
-		if s.AddSelfTicket(uint32(currEpoch), ticket) {
-			s.SendOutgoingMessage("Ticket", ticket)
-		}
-	}
-	// send tickets to neighbors
-}
-
-func (s *StateDB) SetCredential(credential types.ValidatorSecret) {
-	s.credential = credential
-}
-
-func (s *StateDB) OpenMsgChannel(messageChan chan Message) {
-	s.nodeMessageChan = messageChan
-}
 
 func (s *StateDB) SetID(id uint32) {
 	s.Id = id
 	s.Safrole.Id = id
-}
-
-func (s *StateDB) GetEd25519Pub() common.Hash {
-	return s.credential.Ed25519Pub
-}
-
-func (s *StateDB) GetBandersnatchPub() common.Hash {
-	return s.credential.BandersnatchPub
-}
-
-func (s *StateDB) GetBandersnatchSecret() []byte {
-	return s.credential.BandersnatchSecret
-}
-
-func (s *StateDB) IsAuthorizedTicketBuilder() bool {
-	sf := s.GetSafrole()
-	bandersnatchPub := s.GetBandersnatchPub()
-	return sf.IsAuthorizedTicketBuilder(bandersnatchPub)
-}
-
-func (s *StateDB) IsAuthorizedBlockBuilder(targetJCE uint32) bool {
-	sf := s.GetSafrole()
-	bandersnatchPub := s.GetBandersnatchPub()
-	targetEpoch, phase := s.Safrole.EpochAndPhase(targetJCE)
-	// round robin
-	if phase%safrole.NumValidators == s.Id {
-		fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
-		return true
-	} else {
-		return false
-	}
-
-	ticketIDs := s.GetSelfTickets(targetEpoch)
-	return sf.IsAuthorizedBuilder(targetJCE, bandersnatchPub, ticketIDs)
 }
 
 func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup, targetJCE uint32, id uint32) error {
@@ -437,9 +457,35 @@ func (s *StateDB) ApplyStateTransitionAssurances(assurances []types.Assurance, t
 	return nil
 }
 
-func (s *StateDB) ApplyStateTransitionDisputes(disputes []types.Dispute, targetJCE uint32, id uint32) error {
+func (s *StateDB) ApplyStateTransitionDisputes(Disputes []types.Dispute, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, error) {
+	/*
+	s.GetDisputesState()
+	var VMark types.VerdictMarker
+	var OMark types.OffenderMarker
+	// apply the disputes
+	VMark, OMark, err := s.Dispute.Disputes(d)
+	if err != nil {
+		return types.VerdictMarker{}, types.OffenderMarker{}, err
+	}
+	(types.VerdictMarker, types.OffenderMarker, error)
+	// VMark, OMark, nil
+	*/
 	// TODO
-	return nil
+	var VMark types.VerdictMarker
+	var OMark types.OffenderMarker
+	s.GetDisputesState()
+	for _, dispute := range Disputes {
+		//get the dispute state
+		//apply the dispute
+		var err error
+		VMark, OMark, err = s.Dispute.Disputes(dispute)
+		if err != nil {
+			return types.VerdictMarker{}, types.OffenderMarker{}, err
+		}
+		//update the state
+	}
+	return VMark, OMark, nil
+
 }
 
 // given previous safrole, applt state transition using block
@@ -448,7 +494,7 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 	targetJCE := blk.TimeSlot()
 
 	// Preimages
-	preimages := blk.PreImages()
+	preimages := blk.PreimageLookups()
 	err = s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
 	if err != nil {
 		return err
@@ -470,7 +516,7 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 
 	// Disputes
 	disputes := blk.Disputes()
-	err = s.ApplyStateTransitionDisputes(disputes, targetJCE, s.Id)
+	_, _, err = s.ApplyStateTransitionDisputes(disputes, targetJCE, s.Id)
 	if err != nil {
 		return err
 	}
@@ -481,7 +527,7 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 	epochMark := blk.EpochMark()
 	if epochMark != nil {
 		s.knownTickets = make(map[common.Hash]int) //keep track of known tickets
-		s.queuedticket = make(map[common.Hash]types.Ticket)
+		s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 	sf := s.GetSafrole()
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header, s.Id)
@@ -504,9 +550,8 @@ func (s *StateDB) GetBlock() *types.Block {
 }
 
 // make block generate block prior to state execution
-func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Block, newStateDB *StateDB, err error) {
+func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) (bl *types.Block, newStateDB *StateDB, err error) {
 	sf := s.GetSafrole()
-	bandersnatchSecret := s.GetBandersnatchSecret()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IsTicketSubmissionCloses(targetJCE)
 
@@ -518,25 +563,68 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Bl
 	h.TimeSlot = targetJCE
 
 	// Extrinsic Data has 5 different Extrinsics
-	// E_P - Preimages
-	/*
-	   TODO: aggregate queuedPreimageLookups into extrinsicData.Preimages
-	*/
-	// E_G - Guarantees
-	/*
-	   TODO: aggregate queuedGuarantees into extrinsicData.Guarantees
-	*/
-	// E_A - Assurances
-	/*
-	   TODO: aggregate queuedAssurances into extrinsicData.Assurances
-	*/
-	// E_D - Disputes
-	/*
-			   TODO: aggregate queuedVerdicts/Culprits/Faults into extrinsicData.Disputes
-		   	d := s.GetDisputes()
-			needMarkerVerdicts := d.NeedsVerdictsMarker(targetJCE)
-			needMarkerOffenders := d.NeedsOffendersMarker(targetJCE)
-	*/
+	// cj := s.GetCorejam()
+
+	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
+	extrinsicData.PreimageLookups = make([]types.PreimageLookup, 0)
+	// TODO
+	for _, preimageLookup := range s.queuedPreimageLookups {
+		pl, err := preimageLookup.DeepCopy()
+		if err != nil {
+			continue
+		}
+		extrinsicData.PreimageLookups = append(extrinsicData.PreimageLookups, pl)
+	}
+	s.queuedAssurances = make(map[common.Hash]types.Assurance)
+
+	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
+	extrinsicData.Guarantees = make([]types.Guarantee, 0)
+	// TODO
+	for _, guarantee := range s.queuedGuarantees {
+		g, err := guarantee.DeepCopy()
+		if err != nil {
+			continue
+		}
+		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
+	}
+	s.queuedGuarantees = make(map[common.Hash]types.Guarantee)
+
+	// E_A - Assurances  aggregate queuedAssurances into extrinsicData.Assurances
+	extrinsicData.Assurances = make([]types.Assurance, 0)
+	// TODO
+	for _, assurance := range s.queuedAssurances {
+		a, err := assurance.DeepCopy()
+		if err != nil {
+			continue
+		}
+		extrinsicData.Assurances = append(extrinsicData.Assurances, a)
+	}
+	s.queuedAssurances = make(map[common.Hash]types.Assurance)
+
+
+	
+	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
+	d := s.GetDisputes()
+	needMarkerVerdicts := d.NeedsVerdictsMarker(targetJCE)
+	needMarkerOffenders := d.NeedsOffendersMarker(targetJCE)
+	if needMarkerVerdicts {
+		// TODO
+	}
+	if needMarkerOffenders {
+		// TODO
+	}
+	extrinsicData.Disputes = make([]types.Dispute, 0)
+	for _, dispute := range s.queuedDisputes {
+		d, err := dispute.DeepCopy()
+		if err != nil {
+			continue
+		}
+		extrinsicData.Disputes = append(extrinsicData.Disputes, d)
+	}
+	s.queuedDisputes = make(map[common.Hash]types.Dispute)
+
+
+
 
 	needEpochMarker := isNewEpoch && false
 	if needEpochMarker {
@@ -547,7 +635,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Bl
 	}
 	if isNewEpoch {
 		h.WinningTicketsMark = make([]*types.TicketBody, 0) // clear out the tickets if its a new epoch
-		s.queuedticket = make(map[common.Hash]types.Ticket)
+		s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 	if needWinningMarker {
 		fmt.Printf("targetJCE=%v check WinningMarker\n", targetJCE)
@@ -560,7 +648,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Bl
 		// If there's new ticketID, add them into extrinsic
 		// Question: can we submit tickets at the exact tail end block?
 		extrinsicData.Tickets = make([]types.Ticket, 0)
-		for ticketID, ticket := range s.queuedticket {
+		for ticketID, ticket := range s.queuedTickets {
 			t, err := ticket.DeepCopy()
 			if err != nil {
 				continue
@@ -571,11 +659,11 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Bl
 				extrinsicData.Tickets = append(extrinsicData.Tickets, t)
 			}
 		}
-		s.queuedticket = make(map[common.Hash]types.Ticket)
+		s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()
-	author_index, err := sf.GetAuthorIndex(s.GetBandersnatchPub(), "Curr")
+	author_index, err := sf.GetAuthorIndex(credential.BandersnatchPub, "Curr")
 	if err != nil {
 		return bl, newStateDB, err
 	}
@@ -587,7 +675,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Bl
 	//signing
 	epochType := sf.CheckEpochType()
 	if epochType == "fallback" {
-		blockseal, fresh_vrfSig, err := sf.SignFallBack(bandersnatchSecret, unsignHeaderHash)
+		blockseal, fresh_vrfSig, err := sf.SignFallBack(credential.BandersnatchSecret, unsignHeaderHash)
 		if err != nil {
 			return bl, newStateDB, err
 		}
@@ -595,7 +683,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, targetJCE uint32) (bl *types.Bl
 		h.VRFSignature = fresh_vrfSig
 	} else {
 		attempt, err := sf.GetBindedAttempt(targetJCE)
-		blockseal, fresh_vrfSig, err := sf.SignPrimary(bandersnatchSecret, unsignHeaderHash, attempt)
+		blockseal, fresh_vrfSig, err := sf.SignPrimary(credential.BandersnatchSecret, unsignHeaderHash, attempt)
 		if err != nil {
 			return bl, newStateDB, err
 		}

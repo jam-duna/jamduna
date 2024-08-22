@@ -1,4 +1,4 @@
-package pvm
+package types
 
 import (
 	"github.com/colorfulnotion/jam/common"
@@ -33,7 +33,7 @@ type HostEnv interface {
 
 	// VM Management
 	CreateVM(code []byte, i uint32) uint32
-	GetVM(n uint32) (*VM, bool)
+	//GetVM(n uint32) (*VM, bool)
 	ExpungeVM(n uint32) bool
 
 	// Privileged Services
