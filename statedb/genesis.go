@@ -1,18 +1,15 @@
-package safrole
+package statedb
 
 import (
-	//"fmt"
-	// "github.com/colorfulnotion/jam/scale"
-	//"encoding/binary"
 	"fmt"
-	"github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
 
-	//"golang.org/x/crypto/blake2b"
 	"encoding/json"
 	"io/ioutil"
 	"time"
+
+	"github.com/colorfulnotion/jam/bandersnatch"
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // GenesisConfig is the key data "genesis" structure loaded and saved at the start of every binary run
@@ -26,7 +23,7 @@ type GenesisAuthorities struct {
 }
 
 // 6.4.1 Startup parameters
-func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState, d *DisputeState) {
+func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState, j *JamState) {
 	s = &SafroleState{}
 
 	s.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
@@ -54,15 +51,14 @@ func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState, d *Dispute
 	s.Entropy[2] = common.BytesToHash(common.ComputeHash(s.Entropy[1].Bytes())) //BLAKE2B of EpochN1
 	s.Entropy[3] = common.BytesToHash(common.ComputeHash(s.Entropy[2].Bytes())) //BLAKE2B of EpochN2
 
-	
-	d = &DisputeState{}
-	d.Psi = Psi_state{}
-	d.Rho = make([]Rho_state, 0)
-	d.Tau = 0
-	d.Kappa = validators
-	d.Lambda = validators
+	j = &JamState{}
+	j.Psi = Psi_state{}
+	j.Rho = make([]Rho_state, 0)
+	j.Tau = 0
+	j.Kappa = validators
+	j.Lambda = validators
 
-	return s, d
+	return s, j
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4

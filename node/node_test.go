@@ -10,11 +10,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/colorfulnotion/jam/safrole"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
-func SetupQuicNetwork() (safrole.GenesisConfig, []string, map[string]NodeInfo, []types.ValidatorSecret, error) {
+func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, []types.ValidatorSecret, error) {
 	seeds, _ := generateSeedSet(numNodes)
 	fmt.Printf("seeds %x\n", seeds)
 
@@ -23,15 +23,15 @@ func SetupQuicNetwork() (safrole.GenesisConfig, []string, map[string]NodeInfo, [
 
 	validators := make([]types.Validator, numNodes)
 	for i := 0; i < numNodes; i++ {
-		validator, err := safrole.InitValidator(seeds[i], seeds[i])
+		validator, err := statedb.InitValidator(seeds[i], seeds[i])
 		if err == nil {
 			validators[i] = validator
 		} else {
-			return safrole.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
+			return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
 		}
 	}
 
-	genesisConfig := safrole.NewGenesisConfig(validators)
+	genesisConfig := statedb.NewGenesisConfig(validators)
 
 	prettyJSON, _ := json.MarshalIndent(validators, "", "  ")
 	fmt.Printf("Validators (size:%v) %s\n", numNodes, prettyJSON)
@@ -50,16 +50,16 @@ func SetupQuicNetwork() (safrole.GenesisConfig, []string, map[string]NodeInfo, [
 	// Print out peerList
 	prettyPeerList, err := json.MarshalIndent(peerList, "", "  ")
 	if err != nil {
-		return safrole.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v", err)
+		return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v", err)
 	}
 	fmt.Printf("PeerList: %s\n", prettyPeerList)
 
 	// Compute validator secrets
 	validatorSecrets := make([]types.ValidatorSecret, numNodes)
 	for i := 0; i < numNodes; i++ {
-		validatorSecret, err := safrole.InitValidatorSecret(seeds[i], seeds[i])
+		validatorSecret, err := statedb.InitValidatorSecret(seeds[i], seeds[i])
 		if err != nil {
-			return safrole.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
+			return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
 		}
 		validatorSecrets[i] = validatorSecret
 	}
@@ -78,7 +78,7 @@ func TestNodeSafrole(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
-		//node.state = safrole.ProcessGenesis(genesisAuthorities)
+		//node.state = statedb.ProcessGenesis(genesisAuthorities)
 		nodes[i] = node
 	}
 	for {

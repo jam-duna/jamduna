@@ -1,9 +1,9 @@
 package types
 
 import (
-	"github.com/colorfulnotion/jam/common"
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
 )
 
 type VerdictMarker struct {
@@ -51,7 +51,6 @@ type Vote struct {
 	Index     uint16 `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
 	Signature []byte `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
 }
-
 
 func (t Dispute) DeepCopy() (Dispute, error) {
 	var copiedDispute Dispute

@@ -1,9 +1,9 @@
 package types
 
 import (
-	"github.com/colorfulnotion/jam/common"
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
 )
 
 /*
@@ -75,4 +75,3 @@ func (g *Guarantee) Hash() common.Hash {
 	}
 	return common.BytesToHash(common.ComputeHash(data))
 }
-

@@ -1,4 +1,4 @@
-package safrole
+package statedb
 
 import (
 	"encoding/hex"
@@ -16,9 +16,9 @@ import (
 
 type DisputeData struct {
 	Input     types.Dispute `json:"input"`
-	PreState  DisputeState  `json:"pre_state"`
-	Output    Output        `json:"output"`
-	PostState DisputeState  `json:"post_state"`
+	PreState  JamState      `json:"pre_state"`
+	Output    DOutput       `json:"output"`
+	PostState JamState      `json:"post_state"`
 }
 type HexBytes []byte
 
@@ -63,12 +63,12 @@ func TestDispute(t *testing.T) {
 	//test if the postState is equal to the expected postState
 	assert.Equal(t, disputeData.PostState, postState)
 	// test if the output is equal to the expected output
-	assert.Equal(t, disputeData.Output.Ok, output.Ok)
+	assert.Equal(t, disputeData.Output.DOk, output.DOk)
 	_ = postState
 	fmt.Println("Err except: ", disputeData.Output.Err)
 	fmt.Println("Err actual: ", output.Err)
 	assert.Equal(t, disputeData.PostState, postState)
-	assert.Equal(t, disputeData.Output.Ok, output.Ok)
+	assert.Equal(t, disputeData.Output.DOk, output.DOk)
 	prettyPrint(postState)
 
 }
@@ -92,7 +92,7 @@ func TestDispute_Tiny(t *testing.T) {
 		}
 		postState, output, _ := Dispute(disputeData.Input, disputeData.PreState)
 		assert.Equal(t, disputeData.PostState, postState)
-		assert.Equal(t, disputeData.Output.Ok, output.Ok)
+		assert.Equal(t, disputeData.Output.DOk, output.DOk)
 		fmt.Println("Post State and Output match the expected values")
 		if disputeData.Output.Err != "" {
 			fmt.Println("Err except:", disputeData.Output.Err)
@@ -124,7 +124,7 @@ func TestDispute_Full(t *testing.T) {
 		postState, output, _ := Dispute(disputeData.Input, disputeData.PreState)
 
 		assert.Equal(t, disputeData.PostState, postState)
-		assert.Equal(t, disputeData.Output.Ok, output.Ok)
+		assert.Equal(t, disputeData.Output.DOk, output.DOk)
 		fmt.Println("Post State and Output match the expected values")
 		if disputeData.Output.Err != "" {
 			fmt.Println("Err except: ", disputeData.Output.Err)
@@ -238,7 +238,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 			}
 		} `json:"pre_state"`
 		Output struct {
-			Ok *struct {
+			DOk *struct {
 				VerdictMark  []string `json:"verdicts_mark"`
 				OffenderMark []string `json:"offenders_mark"`
 			} `json:"ok"`
@@ -381,17 +381,17 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	}
 
 	// Convert Output
-	if rawDisputeData.Output.Ok != nil {
-		disputeData.Output.Ok = &struct {
+	if rawDisputeData.Output.DOk != nil {
+		disputeData.Output.DOk = &struct {
 			VerdictMark  []common.Hash     `json:"verdict_mark"`
 			OffenderMark []types.PublicKey `json:"offender_mark"`
 		}{}
-		verdictMarks := make([]common.Hash, len(rawDisputeData.Output.Ok.VerdictMark))
-		for i, hexStr := range rawDisputeData.Output.Ok.VerdictMark {
+		verdictMarks := make([]common.Hash, len(rawDisputeData.Output.DOk.VerdictMark))
+		for i, hexStr := range rawDisputeData.Output.DOk.VerdictMark {
 			verdictMarks[i] = common.BytesToHash(hexDecodeOrPanic(hexStr))
 		}
-		disputeData.Output.Ok.VerdictMark = verdictMarks
-		disputeData.Output.Ok.OffenderMark = convertHexStringsToPublicKeys(rawDisputeData.Output.Ok.OffenderMark)
+		disputeData.Output.DOk.VerdictMark = verdictMarks
+		disputeData.Output.DOk.OffenderMark = convertHexStringsToPublicKeys(rawDisputeData.Output.DOk.OffenderMark)
 	}
 	disputeData.Output.Err = rawDisputeData.Output.Err
 

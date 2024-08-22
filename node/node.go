@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/erasurecoding"
-	"github.com/colorfulnotion/jam/safrole"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/quic-go/quic-go"
 	"golang.org/x/crypto/blake2b"
@@ -80,10 +79,10 @@ type Node struct {
 	store       *storage.StateDBStorage /// where to put this?
 
 	// holds a map of epoch to at most 2 tickets
-	selfTickets  map[uint32][]types.Ticket
-	
+	selfTickets map[uint32][]types.Ticket
+
 	// holds a map of the parenthash to the block
-	blocks     map[common.Hash]*types.Block
+	blocks map[common.Hash]*types.Block
 	// holds a map of the hash to the stateDB
 	statedbMap map[common.Hash]*statedb.StateDB
 	// holds the tip
@@ -170,7 +169,7 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *safrole.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string) (*Node, error) {
+func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string) (*Node, error) {
 	path := fmt.Sprintf("/tmp/log/testdb%d", id)
 	store, err := storage.NewStateDBStorage(path)
 	if err != nil {
@@ -269,7 +268,6 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *safrole
 	return node, nil
 }
 
-
 func generateQuicConfig() *quic.Config {
 	return &quic.Config{
 		Allow0RTT:       true,
@@ -311,7 +309,7 @@ func (n *Node) generateEpochTickets(epoch uint32, isNextEpoch bool) {
 func (n *Node) GenerateTickets(currJCE uint32) {
 	sf := n.statedb.GetSafrole()
 	currEpoch, currPhase := sf.EpochAndPhase(currJCE)
-	if currPhase >= safrole.EpochTail {
+	if currPhase >= statedb.EpochTail {
 		if n.generatedEpochTickets(uint32(currEpoch+1)) == false {
 			n.generateEpochTickets(uint32(currEpoch+1), true)
 		}
@@ -319,7 +317,6 @@ func (n *Node) GenerateTickets(currJCE uint32) {
 		n.generateEpochTickets(uint32(currEpoch), false)
 	}
 }
-
 
 func (n *Node) GetNodeType() string {
 	return n.nodeType
@@ -477,7 +474,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		err := json.Unmarshal([]byte(msg.Payload), &query)
 		if err == nil {
 			blk, found := n.blocks[query.BlockHash]
-			fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id,  query.BlockHash, found)
+			fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id, query.BlockHash, found)
 			if found {
 				serializedR, err := json.Marshal(blk)
 				if err == nil {
@@ -831,13 +828,13 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 func (n *Node) extendChain() error {
 	parenthash := n.statedb.BlockHash
 	for {
-	
-		ok := false;
+
+		ok := false
 		for _, b := range n.blocks {
 			if b.ParentHash() == parenthash {
 				ok = true
 				nextBlock := b
-				fmt.Printf("[N%d] extendChain %v <- %v\n", n.id, parenthash, nextBlock.Hash()) 
+				fmt.Printf("[N%d] extendChain %v <- %v\n", n.id, parenthash, nextBlock.Hash())
 				// now APPLY the block to the tip
 				s := n.statedb.Copy()
 				err := s.ProcessIncomingBlock(nextBlock)
@@ -853,10 +850,10 @@ func (n *Node) extendChain() error {
 				break
 			}
 		}
-		
+
 		if ok == false {
 			// if there is no next block, we're done!
-			fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parenthash);
+			fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parenthash)
 			return nil
 		}
 	}
@@ -876,7 +873,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 			fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else {
-			var err error 
+			var err error
 			parentBlock, ok := n.blocks[b.ParentHash()]
 			if !ok {
 				parentBlock, err = n.fetchBlock(b.ParentHash())
@@ -886,17 +883,17 @@ func (n *Node) processBlock(blk *types.Block) error {
 				}
 				// got the parent block, store it in the cache
 				if parentBlock.Hash() == blk.ParentHash() {
-					fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.ParentHash(), blk.Hash());
+					fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.ParentHash(), blk.Hash())
 					n.blocks[parentBlock.Hash()] = parentBlock
 				} else {
 					return nil
 				}
-				
+
 			}
 			b = parentBlock
 		}
 	}
-	
+
 	// we got to the tip, now extend the chain, moving the tip forward, applying blocks using blockcache
 	n.extendChain()
 	return nil // Success
@@ -1204,7 +1201,7 @@ func (n *Node) runClient() {
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
-                 
+
 			newBlock, newStateDB := n.statedb.ProcessState(n.credential)
 			if newStateDB != nil {
 				// we authored a block

@@ -1,22 +1,20 @@
-package safrole
+package statedb
 
 import (
 	"encoding/binary"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/types"
 
 	//"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
+
 	"github.com/colorfulnotion/jam/common"
 	"golang.org/x/crypto/blake2b"
-	"sort"
 	//"github.com/colorfulnotion/jam/trie"
-)
-
-const (
-	JamCommonEra = 1704100800 //1200 UTC on January 1, 2024
 )
 
 const (
@@ -40,34 +38,6 @@ type SafroleHeader struct {
 	BlockAuthorKey     uint16
 	VRFSignature       []byte
 	BlockSeal          []byte
-}
-
-// TicketsOrKeys represents the choice between tickets and keys
-type TicketsOrKeys struct {
-	Tickets []*types.TicketBody `json:"tickets,omitempty"`
-	Keys    []common.Hash       `json:"keys,omitempty"` //BandersnatchKey
-}
-
-/*
-//γ ≡⎩γk, γz, γs, γa⎭
-//γk :one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-//γz :epoch’s root, a Bandersnatch ring root composed with the one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-//γa :the ticket accumulator, a series of highest-scoring ticket identifiers to be used for the next epoch (epoch N+1)
-//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
-*/
-type SafroleBasicState struct {
-
-	// γk represents one Bandersnatch key of each of the next epoch’s validators (epoch N+1).
-	GammaK []types.Validator `json:"gamma_k"`
-
-	// γz represents the epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1).
-	GammaZ []byte `json:"gamma_z"`
-
-	// γs represents the current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of fallback mode, a series of E Bandersnatch keys (epoch N).
-	GammaS TicketsOrKeys `json:"gamma_s"`
-
-	// γa represents the ticket accumulator, a series of least-scoring ticket identifiers to be used for the next epoch (epoch N+1).
-	GammaA []types.TicketBody `json:"gamma_a"`
 }
 
 // 6.1 protocol configuration
@@ -258,7 +228,6 @@ const (
 	errNone                                = "ok"
 	errInvalidWinningMarker                = "Fail: Invalid winning marker"
 )
-
 
 type ClaimData struct {
 	Slot             uint32 `json:"slot"`
@@ -726,7 +695,6 @@ func (s *SafroleState) GetProposedTargetEpochRandomness() common.Hash {
 	return targetRandomness
 }
 
-
 func (s *SafroleState) CheckEpochType() string {
 	t_or_k := s.TicketsOrKeys
 	if len(t_or_k.Tickets) > 0 {
@@ -940,7 +908,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 
 	s2 := cloneSafroleState(*s)
-	if currEpoch < prevEpoch || ( currEpoch == prevEpoch && currPhase < prevPhase ) {
+	if currEpoch < prevEpoch || (currEpoch == prevEpoch && currPhase < prevPhase) {
 		return s2, fmt.Errorf("%v - currEpoch %d prevEpoch %d  currPhase %d  prevPhase %d", errTimeslotNotMonotonic, currEpoch, prevEpoch, currPhase, prevPhase)
 	}
 

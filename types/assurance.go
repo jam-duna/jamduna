@@ -1,9 +1,9 @@
 package types
 
 import (
-	"github.com/colorfulnotion/jam/common"
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
 )
 
 /*

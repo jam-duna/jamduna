@@ -27,11 +27,9 @@ func (n *CorejamState) ValidateProposedAssurance(a *types.Assurance) error {
 
 func (original *CorejamState) Copy() *CorejamState {
 	// Create a new instance of CorejamState
-	copyState := &CorejamState{
-	}
+	copyState := &CorejamState{}
 	return copyState
 }
-
 
 // RefinePVM performs the refine PVM function.
 func (n *CorejamState) RefinePVM(pvm *pvm.VM, workPackage types.WorkPackage, workItem types.WorkItem) (string, error) {
@@ -78,7 +76,7 @@ func (n *CorejamState) ProcessWorkResults(workPackage types.WorkPackage) (string
 	}
 	// TODO
 	code := []byte{}
-	pvm := pvm.NewVMFromCode(code, 0, n.HostEnv) 
+	pvm := pvm.NewVMFromCode(code, 0, n.HostEnv)
 	var results []string
 	for _, workItem := range workPackage.WorkItems {
 		refinedResult, err := n.RefinePVM(pvm, workPackage, workItem)
@@ -254,7 +252,6 @@ func BeefyRoot(serviceAccumulations []types.ServiceAccumulation, mmr trie.Merkle
 	}
 	return mmr.Root()
 }
-
 
 // Tally updates the statistics for validators based on their activities.
 // func (n *CorejamState) Tally(validatorIndex int, activity string, count int) {

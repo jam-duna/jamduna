@@ -1,17 +1,19 @@
-package safrole
+package statedb
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 
-	"golang.org/x/crypto/blake2b"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/blake2b"
 )
 
 type TestCase struct {

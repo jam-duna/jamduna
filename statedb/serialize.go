@@ -1,10 +1,11 @@
-package safrole
+package statedb
 
 import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
 	//github.com/ethereum/go-ethereum/common"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"

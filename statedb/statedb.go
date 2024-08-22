@@ -12,7 +12,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/corejam"
-	"github.com/colorfulnotion/jam/safrole"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -24,36 +23,36 @@ type Message struct {
 }
 
 type StateDB struct {
-	Id              uint32                 `json:"id"`
-	Block           *types.Block           `json:"block"`
-	ParentHash      common.Hash            `json:"parentHash"`
-	BlockHash       common.Hash            `json:"blockHash"`
-	StateRoot       common.Hash            `json:"stateRoot"`
-	Safrole         *safrole.SafroleState  `json:"safrole"`
-	Corejam         *corejam.CorejamState  `json:"corejam"`
-	Dispute         *safrole.DisputeState `json:"dispute"`
-	sdb             *storage.StateDBStorage
-	trie            *trie.MerkleTree
+	Id         uint32                `json:"id"`
+	Block      *types.Block          `json:"block"`
+	ParentHash common.Hash           `json:"parentHash"`
+	BlockHash  common.Hash           `json:"blockHash"`
+	StateRoot  common.Hash           `json:"stateRoot"`
+	Safrole    *SafroleState         `json:"safrole"`
+	Corejam    *corejam.CorejamState `json:"corejam"`
+	JamState   *JamState             `json:"Jamstate"`
+	sdb        *storage.StateDBStorage
+	trie       *trie.MerkleTree
 
-	knownPreimageLookups map[common.Hash]int
+	knownPreimageLookups  map[common.Hash]int
 	queuedPreimageLookups map[common.Hash]types.PreimageLookup
 	preimageLookupsMutex  sync.Mutex
-	
-	knownGuarantees map[common.Hash]int
+
+	knownGuarantees  map[common.Hash]int
 	queuedGuarantees map[common.Hash]types.Guarantee
-	guaranteeMutex  sync.Mutex
+	guaranteeMutex   sync.Mutex
 
-	knownAssurances map[common.Hash]int
+	knownAssurances  map[common.Hash]int
 	queuedAssurances map[common.Hash]types.Assurance
-	assuranceMutex  sync.Mutex
+	assuranceMutex   sync.Mutex
 
-	knownDisputes map[common.Hash]int
+	knownDisputes  map[common.Hash]int
 	queuedDisputes map[common.Hash]types.Dispute
-	disputeMutex  sync.Mutex
+	disputeMutex   sync.Mutex
 
-	knownTickets map[common.Hash]int
+	knownTickets  map[common.Hash]int
 	queuedTickets map[common.Hash]types.Ticket
-	ticketMutex  sync.Mutex
+	ticketMutex   sync.Mutex
 }
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
@@ -131,8 +130,8 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 
 func (s *StateDB) ProcessIncomingDispute(d types.Dispute) {
 	// get the disputes state
-	disp := s.GetDisputes()
-	err := disp.ValidateProposedDispute(&d);
+	disp := s.GetJamState()
+	err := disp.ValidateProposedDispute(&d)
 	if err != nil {
 		fmt.Printf("Invalid dispute. Err=%v\n", err)
 		return
@@ -143,7 +142,7 @@ func (s *StateDB) ProcessIncomingDispute(d types.Dispute) {
 func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
 	// get the guarantee state
 	cj := s.GetCorejam()
-	err := cj.ValidateProposedGuarantee(&g);
+	err := cj.ValidateProposedGuarantee(&g)
 	if err != nil {
 		fmt.Printf("Invalid guarantee. Err=%v\n", err)
 		return
@@ -154,7 +153,7 @@ func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
 func (s *StateDB) ProcessIncomingAssurance(a types.Assurance) {
 	// get the assurances state
 	cj := s.GetCorejam()
-	err := cj.ValidateProposedAssurance(&a);
+	err := cj.ValidateProposedAssurance(&a)
 	if err != nil {
 		fmt.Printf("Invalid guarantee. Err=%v\n", err)
 		return
@@ -208,16 +207,16 @@ const (
 )
 
 // NewGenesisStateDB generates the first StateDB object and genesis block
-func NewGenesisStateDB(sdb *storage.StateDBStorage, c *safrole.GenesisConfig) (statedb *StateDB, err error) {
+func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return statedb, err
 	}
 
 	statedb.Block = nil
-	s, d := safrole.InitGenesisState(c)
-	statedb.Safrole = s // setting the safrole state so that block 1 can be produced
-	statedb.Dispute = d // setting the dispute state so that block 1 can be produced
+	s, j := InitGenesisState(c)
+	statedb.Safrole = s                       // setting the safrole state so that block 1 can be produced
+	statedb.JamState = j                      // setting the dispute state so that block 1 can be produced
 	statedb.Corejam = &corejam.CorejamState{} // .InitGenesisState(c) // setting the corejam state so that block 1 can be produced
 	statedb.UpdateTrieState()
 	return statedb, nil
@@ -231,12 +230,12 @@ func (s *StateDB) GetCorejam() *corejam.CorejamState {
 	return s.Corejam
 }
 
-func (s *StateDB) GetSafrole() *safrole.SafroleState {
+func (s *StateDB) GetSafrole() *SafroleState {
 	return s.Safrole
 }
 
-func (s *StateDB) GetDisputes() *safrole.DisputeState {
-	return s.Dispute
+func (s *StateDB) GetJamState() *JamState {
+	return s.JamState
 }
 
 // todo: implement this, not sure if this correct
@@ -244,7 +243,7 @@ func (s *StateDB) GetDisputesState() {
 	//not sure if this is correct
 	t := s.GetTrie()
 	//TODO: deserialize the disputes state
-	disputeState := safrole.DisputeState{}
+	disputeState := JamState{}
 	PsiBytes, err := t.GetState(C5)
 	disputeState.SetPsi(PsiBytes)
 	RhoBytes, err := t.GetState(C10)
@@ -257,7 +256,7 @@ func (s *StateDB) GetDisputesState() {
 	if err != nil {
 		fmt.Println("Error getting disputes state", err)
 	}
-	s.Dispute = &disputeState
+	s.JamState = &disputeState
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -280,9 +279,9 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	// Corejam: PreimageLookups, Guarantees, Assurances
 	// cj := s.GetCorejam()
 	// TODO
-	
+
 	// Disputes: C5, C10
-	d := s.GetDisputes()
+	d := s.GetJamState()
 	disputeState, err := d.GetPsiBytes()
 	if err != nil {
 		fmt.Println("Error getting disputes state", err)
@@ -306,7 +305,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	return common.BytesToHash(t.GetRootHash())
 }
 
-func (s *StateDB) GetSafroleState() *safrole.SafroleState {
+func (s *StateDB) GetSafroleState() *SafroleState {
 	return s.Safrole
 }
 
@@ -333,7 +332,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	zeroHash := common.BytesToHash(b)
 	if bytes.Compare(blockHash.Bytes(), zeroHash.Bytes()) == 0 {
 		// genesis block situation
-		statedb.Safrole = safrole.NewSafroleState()
+		statedb.Safrole = NewSafroleState()
 	} else {
 		encodedBlock, err := sdb.ReadKV(blockHash)
 		if err != nil {
@@ -349,7 +348,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 		}
 		statedb.Block = &block
 		statedb.ParentHash = block.Header.ParentHash
-		statedb.Safrole = safrole.NewSafroleState() //TODO: DO entropy initiation
+		statedb.Safrole = NewSafroleState() //TODO: DO entropy initiation
 	}
 
 	return statedb, nil
@@ -359,20 +358,20 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 func (s *StateDB) Copy() *StateDB {
 	// Create a new instance of StateDB
 	n := &StateDB{
-		Id:              s.Id,
-		Block:           s.Block.Copy(), // You might need to deep copy the Block if it's mutable
-		ParentHash:      s.ParentHash,
-		BlockHash:       s.BlockHash,
-		StateRoot:       s.StateRoot,
-		Safrole:         s.Safrole.Copy(), // SafroleState has a Copy method
-		Dispute:        s.Dispute.Copy(), // DisputesState has a Copy method
-		Corejam:         s.Corejam.Copy(), // CorejamState has a Copy method
-		sdb:             s.sdb,            
-		trie:            s.trie,            // Deep copy if the MerkleTree is mutable
-		knownTickets:    make(map[common.Hash]int),
-		queuedTickets:   make(map[common.Hash]types.Ticket),
-		knownDisputes:    make(map[common.Hash]int),
-		queuedDisputes:   make(map[common.Hash]types.Dispute),
+		Id:             s.Id,
+		Block:          s.Block.Copy(), // You might need to deep copy the Block if it's mutable
+		ParentHash:     s.ParentHash,
+		BlockHash:      s.BlockHash,
+		StateRoot:      s.StateRoot,
+		Safrole:        s.Safrole.Copy(),  // SafroleState has a Copy method
+		JamState:       s.JamState.Copy(), // DisputesState has a Copy method
+		Corejam:        s.Corejam.Copy(),  // CorejamState has a Copy method
+		sdb:            s.sdb,
+		trie:           s.trie, // Deep copy if the MerkleTree is mutable
+		knownTickets:   make(map[common.Hash]int),
+		queuedTickets:  make(map[common.Hash]types.Ticket),
+		knownDisputes:  make(map[common.Hash]int),
+		queuedDisputes: make(map[common.Hash]types.Dispute),
 	}
 
 	// Copy maps
@@ -386,14 +385,14 @@ func (s *StateDB) Copy() *StateDB {
 	}
 
 	/*
-	   for k, v := range s.queuedDisputes {
-		t, _ := v.DeepCopy()
-		n.queuedDisputes[k] = t
-	for k, v := range s.knownDisputes {
-		t, _ := v.DeepCopy()
-		n.knownDisputes[k] = t
-	}
-	}
+		   for k, v := range s.queuedDisputes {
+			t, _ := v.DeepCopy()
+			n.queuedDisputes[k] = t
+		for k, v := range s.knownDisputes {
+			t, _ := v.DeepCopy()
+			n.knownDisputes[k] = t
+		}
+		}
 	*/
 
 	return n
@@ -411,11 +410,11 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, 
 		//bandersnatchPub := credential.BandersnatchPub
 		_, phase := s.Safrole.EpochAndPhase(currJCE)
 		// round robin TEMPORARY
-		if phase%safrole.NumValidators == s.Id {
+		if phase%NumValidators == s.Id {
 			//fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
 			isAuthorizedBlockBuilder = true
 		}
-		
+
 		//sf := s.GetSafrole()
 		//ticketIDs := s.GetSelfTickets(targetEpoch)
 		//isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, credential, ticketIDs)
@@ -433,7 +432,6 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, 
 	}
 	return nil, nil
 }
-
 
 func (s *StateDB) SetID(id uint32) {
 	s.Id = id
@@ -459,16 +457,16 @@ func (s *StateDB) ApplyStateTransitionAssurances(assurances []types.Assurance, t
 
 func (s *StateDB) ApplyStateTransitionDisputes(Disputes []types.Dispute, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, error) {
 	/*
-	s.GetDisputesState()
-	var VMark types.VerdictMarker
-	var OMark types.OffenderMarker
-	// apply the disputes
-	VMark, OMark, err := s.Dispute.Disputes(d)
-	if err != nil {
-		return types.VerdictMarker{}, types.OffenderMarker{}, err
-	}
-	(types.VerdictMarker, types.OffenderMarker, error)
-	// VMark, OMark, nil
+		s.GetDisputesState()
+		var VMark types.VerdictMarker
+		var OMark types.OffenderMarker
+		// apply the disputes
+		VMark, OMark, err := s.Dispute.Disputes(d)
+		if err != nil {
+			return types.VerdictMarker{}, types.OffenderMarker{}, err
+		}
+		(types.VerdictMarker, types.OffenderMarker, error)
+		// VMark, OMark, nil
 	*/
 	// TODO
 	var VMark types.VerdictMarker
@@ -478,7 +476,7 @@ func (s *StateDB) ApplyStateTransitionDisputes(Disputes []types.Dispute, targetJ
 		//get the dispute state
 		//apply the dispute
 		var err error
-		VMark, OMark, err = s.Dispute.Disputes(dispute)
+		VMark, OMark, err = s.JamState.Disputes(dispute)
 		if err != nil {
 			return types.VerdictMarker{}, types.OffenderMarker{}, err
 		}
@@ -601,10 +599,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	}
 	s.queuedAssurances = make(map[common.Hash]types.Assurance)
 
-
-	
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
-	d := s.GetDisputes()
+	d := s.GetJamState()
 	needMarkerVerdicts := d.NeedsVerdictsMarker(targetJCE)
 	needMarkerOffenders := d.NeedsOffendersMarker(targetJCE)
 	if needMarkerVerdicts {
@@ -622,9 +618,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		extrinsicData.Disputes = append(extrinsicData.Disputes, d)
 	}
 	s.queuedDisputes = make(map[common.Hash]types.Dispute)
-
-
-
 
 	needEpochMarker := isNewEpoch && false
 	if needEpochMarker {
@@ -707,12 +700,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 func (s *StateDB) Flush(ctx context.Context, timeSlotIndex uint32) error {
 	//log.Info(fmt.Sprintf("[statedb:Flush] Round %d updated epochRoot %x", statedb.proposedRound, statedb.epochStorage.GetRootChunkHash()))
 	return nil
-}
-
-func ComputeCurrentJCETime(unixTimestamp int64) int64 {
-	currentTime := time.Now()
-	// this is unnecessary for PoC
-	return ComputeJCETime(currentTime.Unix())
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4

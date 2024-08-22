@@ -1,9 +1,9 @@
 package types
 
 import (
-	"github.com/colorfulnotion/jam/common"
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
 )
 
 /*
@@ -16,7 +16,6 @@ type PreimageLookup struct {
 	ServiceIndex uint32 `json:"service_index"`
 	Data         []byte `json:"data"`
 }
-
 
 func (p PreimageLookup) DeepCopy() (PreimageLookup, error) {
 	var copiedPreimageLookup PreimageLookup
@@ -55,4 +54,3 @@ func (p *PreimageLookup) Hash() common.Hash {
 	}
 	return common.BytesToHash(common.ComputeHash(data))
 }
-
