@@ -23,42 +23,38 @@ type GenesisAuthorities struct {
 }
 
 // 6.4.1 Startup parameters
-func InitGenesisState(genesisConfig *GenesisConfig) (s *SafroleState, j *JamState) {
-	s = &SafroleState{}
+func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
+	j = NewJamState()
 
-	s.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
-	s.Timeslot = int(s.EpochFirstSlot)
+	j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
+	j.SafroleState.Timeslot = j.SafroleState.EpochFirstSlot
 	validators := genesisConfig.Authorities
 	vB := []byte{}
 	for _, v := range validators {
 		vB = append(vB, v.Bytes()...)
 	}
-	s.PrevValidators = validators
-	s.CurrValidators = validators
-	s.NextValidators = validators
-	s.DesignedValidators = validators
+	j.SafroleState.PrevValidators = validators
+	j.SafroleState.CurrValidators = validators
+	j.SafroleState.NextValidators = validators
+	j.SafroleState.DesignedValidators = validators
 
-	s.BlockNumber = 0
+	j.SafroleState.BlockNumber = 0
 	/*
 		The on-chain randomness is initialized after the genesis block construction.
 		The first buffer entry is set as the Blake2b hash of the genesis block,
 		each of the other entries is set as the Blake2b hash of the previous entry.
 	*/
 
-	s.Entropy = make([]common.Hash, types.EntropySize)
-	s.Entropy[0] = common.BytesToHash(common.ComputeHash(vB))                   //BLAKE2B hash of the genesis block#0
-	s.Entropy[1] = common.BytesToHash(common.ComputeHash(s.Entropy[0].Bytes())) //BLAKE2B of Current
-	s.Entropy[2] = common.BytesToHash(common.ComputeHash(s.Entropy[1].Bytes())) //BLAKE2B of EpochN1
-	s.Entropy[3] = common.BytesToHash(common.ComputeHash(s.Entropy[2].Bytes())) //BLAKE2B of EpochN2
+	j.SafroleState.Entropy = make([]common.Hash, types.EntropySize)
+	j.SafroleState.Entropy[0] = common.BytesToHash(common.ComputeHash(vB))                                //BLAKE2B hash of the genesis block#0
+	j.SafroleState.Entropy[1] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[0].Bytes())) //BLAKE2B of Current
+	j.SafroleState.Entropy[2] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[1].Bytes())) //BLAKE2B of EpochN1
+	j.SafroleState.Entropy[3] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[2].Bytes())) //BLAKE2B of EpochN2
 
-	j = &JamState{}
-	j.Psi = Psi_state{}
-	j.Rho = make([]Rho_state, 0)
-	j.Tau = 0
-	j.Kappa = validators
-	j.Lambda = validators
+	j.DisputesState = Psi_state{}
+	j.AvailabilityAssignments = make([]Rho_state, 0)
 
-	return s, j
+	return j
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4

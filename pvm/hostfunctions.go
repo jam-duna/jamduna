@@ -35,6 +35,8 @@ const (
 	POKE              = 20
 	INVOKE            = 21
 	EXPUNGE           = 22
+	EXTRINSIC         = 23
+	PAYLOAD           = 24
 )
 
 // false byte
@@ -153,6 +155,14 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	case EXPUNGE:
 		vm.hostExpunge()
+		return true, nil
+
+	case EXTRINSIC:
+		vm.hostExtrinsic()
+		return true, nil
+
+	case PAYLOAD:
+		vm.hostPayload()
 		return true, nil
 
 	default:
@@ -660,6 +670,56 @@ func (vm *VM) hostImport() uint32 {
 
 	if len(v_Bytes) != 0 {
 		errCode := vm.writeRAMBytes(o, v_Bytes[:])
+		if errCode == OOB {
+			vm.writeRegister(0, OOB)
+			return errCode
+		}
+		vm.writeRegister(0, OK)
+		return OK
+	} else {
+		vm.writeRegister(0, NONE)
+		return NONE
+	}
+}
+
+
+// Extrinsic
+func (vm *VM) hostExtrinsic() uint32 {
+
+	omega_0, _ := vm.readRegister(0)
+	var v_Bytes []byte
+	if omega_0 < uint32(len(vm.extrinsics)) {
+		v_Bytes = vm.extrinsics[omega_0]
+	} else {
+		v_Bytes = []byte{}
+	}
+
+	o, _ := vm.readRegister(1)
+	l, _ := vm.readRegister(2)
+
+	if len(v_Bytes) != 0 {
+		errCode := vm.writeRAMBytes(o, v_Bytes[:l])
+		if errCode == OOB {
+			vm.writeRegister(0, OOB)
+			return errCode
+		}
+		vm.writeRegister(0, OK)
+		return OK
+	} else {
+		vm.writeRegister(0, NONE)
+		return NONE
+	}
+}
+
+// Payload
+func (vm *VM) hostPayload() uint32 {
+
+	v_Bytes := vm.payload[:]
+	o, _ := vm.readRegister(0)
+	l, _ := vm.readRegister(1)
+
+	if len(v_Bytes) != 0 {
+		errCode := vm.writeRAMBytes(o, v_Bytes[:l])
 		if errCode == OOB {
 			vm.writeRegister(0, OOB)
 			return errCode

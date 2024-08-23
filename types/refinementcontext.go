@@ -21,6 +21,6 @@ type RefinementContext struct {
 	PosteriorBeefyRoot common.Hash `json:"posterior_beefy_root"`
 	LookupAnchor       common.Hash `json:"lookup_anchor"`
 	HeaderHash         common.Hash `json:"header_hash"`
-	Timeslot           int         `json:"timeslot"`
+	Timeslot           uint32      `json:"timeslot"`
 	Prerequisite       common.Hash `json:"prerequisite,omitempty"`
 }

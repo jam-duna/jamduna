@@ -1,6 +1,8 @@
 package types
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -29,4 +31,24 @@ type WorkPackage struct {
 	// $i$ - a sequence of work items
 
 	WorkItems []WorkItem `json:"work_items"`
+}
+
+// Bytes returns the bytes of the Assurance
+func (a *WorkPackage) Bytes() []byte {
+	enc, err := json.Marshal(a)
+	if err != nil {
+		// Handle the error according to your needs.
+		fmt.Println("Error marshaling JSON:", err)
+		return nil
+	}
+	return enc
+}
+
+func (a *WorkPackage) Hash() common.Hash {
+	data := a.Bytes()
+	if data == nil {
+		// Handle the error case
+		return common.Hash{}
+	}
+	return common.BytesToHash(common.ComputeHash(data))
 }

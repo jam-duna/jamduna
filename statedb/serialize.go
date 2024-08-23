@@ -14,7 +14,7 @@ import (
 
 // Define the structure for the JSON data
 type SInput struct {
-	Slot       int          `json:"slot"`
+	Slot       uint32       `json:"slot"`
 	Entropy    string       `json:"entropy"`
 	Extrinsics []SExtrinsic `json:"extrinsic"`
 }
@@ -137,7 +137,7 @@ func (i *Input) serialize() SInput {
 		extrinsics[idx] = extrinsic.serialize()
 	}
 	return SInput{
-		Slot:       i.Slot,
+		Slot:       uint32(i.Slot),
 		Entropy:    i.Entropy.Hex(),
 		Extrinsics: extrinsics,
 	}
@@ -421,7 +421,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 	}
 
 	return SafroleState{
-		Timeslot:           ss.Timeslot,
+		Timeslot:           uint32(ss.Timeslot),
 		Entropy:            entropy,
 		PrevValidators:     prevValidators,
 		CurrValidators:     currValidators,

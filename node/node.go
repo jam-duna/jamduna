@@ -65,7 +65,9 @@ type NodeInfo struct {
 }
 
 type Node struct {
-	id         uint32
+	id        uint32
+	coreIndex uint32
+
 	credential types.ValidatorSecret
 	server     quic.Listener
 	peers      []string
@@ -240,8 +242,8 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	messageChan := make(chan statedb.Message, 100)
 
 	node := &Node{
-		id: id,
-		//credential:  credential,
+		id:          id,
+		coreIndex:   id % 2, // TODO: NumCores
 		store:       store,
 		server:      *listener,
 		peers:       peers,
@@ -765,6 +767,7 @@ func (n *Node) processLookup(preimageLookup types.PreimageLookup) error {
 	return nil // Success
 }
 
+// Guarantees are sent by a validator working on a core receiving a work package and executing a refine operation
 func (n *Node) processGuarantee(guarantee types.Guarantee) error {
 	// Store the guarantee in the tip's queued guarantee
 	s := n.getState()
@@ -907,9 +910,107 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 	return nil // Success
 }
 
+func (n *Node) computeAssuranceBitstring() []byte {
+	// TODO
+	return []byte{1, 1}
+}
+
+func (n *Node) checkAssurance() error {
+	assurance := types.Assurance {
+		ParentHash: n.statedb.ParentHash,
+	  Bitstring:  n.computeAssuranceBitstring(),
+		ValidatorIndex: n.id,
+	//	Signature: signature,
+	}
+	h := common.ComputeHash(append(n.statedb.ParentHash.Bytes(), assurance.Bitstring...))
+	assuranceBytes := append([]byte(types.X_A), h...)
+	assurance.Signature = ed25519.Sign(n.credential.Ed25519Secret, assuranceBytes)
+	n.broadcast(assurance)
+	return nil
+}
+
 func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
-	// TODO: Incorporate WP chunks
-	return nil // Success
+
+	// Create a new PVM instance with mock code and execute it
+	results := []types.WorkResult{}
+	for _, workItem := range workPackage.WorkItems {
+		code, err := n.FetchAndReconstructData(workItem.CodeHash)
+		if err != nil {
+			return err
+		}
+		// TODO: statedb should follow HostEnv
+		vm := pvm.NewVMFromCode(code, 0, nil) // TODO: n.statedb
+		vm.SetExtrinsicsPayload(workItem.Extrinsics, workItem.PayloadBlob)
+		err = vm.Execute()
+		if err != nil {
+			return err
+		}
+
+		// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
+		result := types.WorkResult{
+			Service:                workItem.ServiceIdentifier,
+			CodeHash:               workItem.CodeHash,
+			PayloadHash:            common.Blake2Hash(workItem.PayloadBlob),
+			GasPrioritizationRatio: 0,
+			Output:                 []byte{}, // refinement_context
+			Error:                  "",
+		}
+		results = append(results, result)
+		for _, e := range vm.Exports {
+			h, err := n.EncodeAndDistributeData(e)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[N%d] EXPORTED ITEM %d => encoded in DA %v", h)
+		}
+	}
+
+	// Now create a WorkReport with AvailabilitySpecification and RefinementContext
+	availabilitySpec := types.AvailabilitySpecification{
+		WorkPackageHash: workPackage.Hash(),
+		BundleLength:    10,                           // ???
+		ErasureRoot:     common.HexToHash("0xdef456"), // TODO
+		SegmentRoot:     common.HexToHash("0x789abc"), // TODO
+	}
+
+	refinementContext := types.RefinementContext{
+		Anchor:             common.HexToHash("0x123abc"),          // TODO
+		PosteriorStateRoot: n.statedb.Block.Header.PriorStateRoot, // TODO
+		PosteriorBeefyRoot: common.HexToHash("0x"),                // SKIP
+		LookupAnchor:       n.statedb.ParentHash,                  // TODO
+		HeaderHash:         n.statedb.ParentHash,                  // TODO
+		Timeslot:           n.statedb.Block.Header.TimeSlot,
+		Prerequisite:       common.HexToHash("0x"), // SKIP
+	}
+
+	workReport := types.WorkReport{
+		AvailabilitySpec: availabilitySpec,
+		AuthorizerHash:   common.HexToHash("0x"), // SKIP
+		Core:             n.coreIndex,
+		//	Output:               result.Output,
+		RefinementContext:    refinementContext,
+		PackageSpecification: "mock_package_specification",
+		Results:              results,
+	}
+	// Sign the serialized WorkReport
+	signature := ed25519.Sign(n.credential.Ed25519Secret, append([]byte(types.X_G), common.ComputeHash(workReport.Bytes())...))
+
+	// Create a GuaranteeCredential with the signature and a mock validator index
+	credential := types.GuaranteeCredential{
+		ValidatorIndex: 0, // Mock validator index
+		Signature:      signature,
+	}
+
+	// Create a Guarantee with the WorkReport, TimeSlot, and Credentials
+	guarantee := types.Guarantee{
+		WorkReport:  workReport,
+		TimeSlot:    n.statedb.Block.TimeSlot(),
+		Credentials: []types.GuaranteeCredential{credential},
+	}
+	// This will be received by all validators
+	n.broadcast(guarantee)
+
+	return nil
 }
 
 // -----Custom methods for tiny QUIC EC experiment-----

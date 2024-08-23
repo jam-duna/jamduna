@@ -4,7 +4,6 @@ import (
 	//"github.com/ethereum/go-ethereum/crypto"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -28,7 +27,6 @@ type StateDB struct {
 	ParentHash common.Hash           `json:"parentHash"`
 	BlockHash  common.Hash           `json:"blockHash"`
 	StateRoot  common.Hash           `json:"stateRoot"`
-	Safrole    *SafroleState         `json:"safrole"`
 	Corejam    *corejam.CorejamState `json:"corejam"`
 	JamState   *JamState             `json:"Jamstate"`
 	sdb        *storage.StateDBStorage
@@ -106,7 +104,7 @@ func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
 }
 
 func (s *StateDB) ProcessIncomingBlock(b *types.Block) error {
-	currEpoch, currPhase := s.Safrole.EpochAndPhase(b.Header.TimeSlot)
+	currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(b.Header.TimeSlot)
 	// TODO: validate block
 	is_validated := true
 	if is_validated {
@@ -293,9 +291,9 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	}
 
 	statedb.Block = nil
-	s, j := InitGenesisState(c)
-	statedb.Safrole = s                       // setting the safrole state so that block 1 can be produced
-	statedb.JamState = j                      // setting the dispute state so that block 1 can be produced
+	j := InitGenesisState(c)
+	statedb.JamState = j // setting the dispute state so that block 1 can be produced
+	// setting the safrole state so that block 1 can be produced
 	statedb.Corejam = &corejam.CorejamState{} // .InitGenesisState(c) // setting the corejam state so that block 1 can be produced
 	statedb.UpdateTrieState()
 	return statedb, nil
@@ -310,7 +308,7 @@ func (s *StateDB) GetCorejam() *corejam.CorejamState {
 }
 
 func (s *StateDB) GetSafrole() *SafroleState {
-	return s.Safrole
+	return s.JamState.SafroleState
 }
 
 func (s *StateDB) GetJamState() *JamState {
@@ -325,6 +323,7 @@ func (s *StateDB) GetPvmState() *PvmState {
 
 // todo: implement this, not sure if this correct
 func (s *StateDB) GetDisputesState() {
+	/*
 	//not sure if this is correct
 	t := s.GetTrie()
 	//TODO: deserialize the disputes state
@@ -342,6 +341,7 @@ func (s *StateDB) GetDisputesState() {
 		fmt.Println("Error getting disputes state", err)
 	}
 	s.JamState = &disputeState
+	*/
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -351,6 +351,10 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	//γa :the ticket accumulator, a series of highest-scoring ticket identifiers to be used for the next epoch (epoch N+1)
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
 	sf := s.GetSafrole()
+	if sf == nil {
+		fmt.Printf("NO SAFROLE %v", s);
+		panic(222);
+	}
 	sb := sf.GetSafroleBasicState()
 	safroleStateEncode, _ := sb.Bytes()
 	entropyEncode := sf.EntropyToBytes()
@@ -390,8 +394,9 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	return common.BytesToHash(t.GetRootHash())
 }
 
+
 func (s *StateDB) GetSafroleState() *SafroleState {
-	return s.Safrole
+	return s.JamState.SafroleState
 }
 
 func (s *StateDB) String() string {
@@ -415,13 +420,14 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	statedb.knownDisputes = make(map[common.Hash]int)
 
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
+	statedb.JamState = NewJamState()
 
 	block := types.Block{}
 	b := make([]byte, 32)
 	zeroHash := common.BytesToHash(b)
 	if bytes.Compare(blockHash.Bytes(), zeroHash.Bytes()) == 0 {
 		// genesis block situation
-		statedb.Safrole = NewSafroleState()
+
 	} else {
 		encodedBlock, err := sdb.ReadKV(blockHash)
 		if err != nil {
@@ -437,7 +443,6 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 		}
 		statedb.Block = &block
 		statedb.ParentHash = block.Header.ParentHash
-		statedb.Safrole = NewSafroleState() //TODO: DO entropy initiation
 	}
 
 	return statedb, nil
@@ -452,7 +457,6 @@ func (s *StateDB) Copy() *StateDB {
 		ParentHash:     s.ParentHash,
 		BlockHash:      s.BlockHash,
 		StateRoot:      s.StateRoot,
-		Safrole:        s.Safrole.Copy(),  // SafroleState has a Copy method
 		JamState:       s.JamState.Copy(), // DisputesState has a Copy method
 		Corejam:        s.Corejam.Copy(),  // CorejamState has a Copy method
 		sdb:            s.sdb,
@@ -488,16 +492,16 @@ func (s *StateDB) Copy() *StateDB {
 }
 
 func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, *StateDB) {
-	genesisReady := s.Safrole.CheckGenesisReady()
+	genesisReady := s.JamState.SafroleState.CheckGenesisReady()
 	if !genesisReady {
 		return nil, nil
 	}
-	currJCE, timeSlotReady := s.Safrole.CheckTimeSlotReady()
+	currJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady()
 	if timeSlotReady {
 		// Time to propose block if authorized
 		isAuthorizedBlockBuilder := false
 		//bandersnatchPub := credential.BandersnatchPub
-		_, phase := s.Safrole.EpochAndPhase(currJCE)
+		_, phase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 		// round robin TEMPORARY
 		if phase%NumValidators == s.Id {
 			//fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
@@ -508,7 +512,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, 
 		//ticketIDs := s.GetSelfTickets(targetEpoch)
 		//isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, credential, ticketIDs)
 		if isAuthorizedBlockBuilder {
-			currEpoch, currPhase := s.Safrole.EpochAndPhase(currJCE)
+			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 			// take the current stateDB + generate a new proposed Block and a new stateDB
 			proposedBlk, newStateDB, err := s.MakeBlock(credential, currJCE)
 			if err == nil {
@@ -524,7 +528,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, 
 
 func (s *StateDB) SetID(id uint32) {
 	s.Id = id
-	s.Safrole.Id = id
+	s.JamState.SafroleState.Id = id
 }
 
 func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup, targetJCE uint32, id uint32) error {
@@ -576,7 +580,7 @@ func (s *StateDB) ApplyStateTransitionDisputes(Disputes []types.Dispute, targetJ
 	// TODO
 	var VMark types.VerdictMarker
 	var OMark types.OffenderMarker
-	s.GetDisputesState()
+	s.GetJamState()
 	for _, dispute := range Disputes {
 		//get the dispute state
 		//apply the dispute
@@ -639,7 +643,7 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 		panic(1)
 		return err
 	}
-	s.Safrole = &s2
+	s.JamState.SafroleState = &s2
 	s.Block = blk
 	s.ParentHash = s.BlockHash
 	s.BlockHash = blk.Hash()
@@ -752,7 +756,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			if err != nil {
 				continue
 			}
-			if s.Safrole.InTicketAccumulator(ticketID) {
+			if s.JamState.SafroleState.InTicketAccumulator(ticketID) {
 			} else {
 				// fmt.Printf("[N%d] GetTicketQueue %v => %v\n", s.Id, ticketID, t)
 				extrinsicData.Tickets = append(extrinsicData.Tickets, t)
@@ -793,8 +797,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	b.Header = *h
 	fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, b.Hash(), newStateDB.String())
 	newStateDB = s.Copy() // newEmptyStateDB(s.sdb)
-	newSafrole := s.Safrole.Copy()
-	newStateDB.Safrole = newSafrole
+	newStateDB.JamState = s.JamState.Copy()
 	newStateDB.Block = b
 
 	newStateDB.ParentHash = b.Header.ParentHash

@@ -47,7 +47,7 @@ type ProtocolConfiguration struct {
 }
 
 type Input struct {
-	Slot       int         `json:"slot"`
+	Slot       uint32      `json:"slot"`
 	Entropy    common.Hash `json:"entropy"`
 	Extrinsics []Extrinsic `json:"extrinsics"`
 }
@@ -108,9 +108,9 @@ type SafroleState struct {
 	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
 	Epoch          uint32 `json:"epoch"`
 
-	TimeStamp   int `json:"timestamp"`
-	Timeslot    int `json:"timeslot"`
-	BlockNumber int `json:"blockNumber"`
+	TimeStamp   int    `json:"timestamp"`
+	Timeslot    uint32 `json:"timeslot"`
+	BlockNumber int    `json:"blockNumber"`
 	// Entropy holds 4 32 byte
 	// Entropy[0] CURRENT randomness accumulator (see sec 6.10). randomness_buffer[0] = BLAKE2(CONCAT(randomness_buffer[0], fresh_randomness));
 	// where fresh_randomness = vrf_signed_output(claim.randomness_source)
@@ -138,7 +138,7 @@ type SafroleState struct {
 func NewSafroleState() *SafroleState {
 	return &SafroleState{
 		Id:                 99999,
-		Timeslot:           int(ComputeCurrentJCETime()),
+		Timeslot:           uint32(ComputeCurrentJCETime()),
 		BlockNumber:        0,
 		Entropy:            make([]common.Hash, 4),
 		PrevValidators:     []types.Validator{},
@@ -897,7 +897,7 @@ func (s *SafroleState) AdvanceSafrole(targetJCE uint32) error {
 		s.Entropy[0] = s.ComputeCurrRandomness(s.Entropy[0])
 	}
 	if targetJCE > prevJCE {
-		s.Timeslot = int(targetJCE)
+		s.Timeslot = targetJCE
 	}
 	return nil
 }
@@ -1015,7 +1015,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	}
 
 	s2.BlockNumber = s.BlockNumber + 1
-	s2.Timeslot = int(targetJCE)
+	s2.Timeslot = targetJCE
 	return s2, nil
 }
 

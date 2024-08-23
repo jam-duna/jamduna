@@ -51,6 +51,13 @@ type VM struct {
 	writable_ram_length uint32
 
 	// SOLICITS+FORGETS
+
+	extrinsics [][]byte
+	payload    []byte
+	Imports    [][]byte
+	// outputs
+	Exports [][]byte
+
 	Solicits []Solicit
 	Forgets  []Forgets
 	// EXPORTS
@@ -367,6 +374,13 @@ func (vm *VM) Execute() error {
 		fmt.Println("-----------------------------------------------------------------------")
 	}
 	fmt.Println("last pc: ", vm.pc)
+	return nil
+}
+
+// step performs a single step in the PVM
+func (vm *VM) SetExtrinsicsPayload(extrinsics [][]byte, payload []byte) error {
+	vm.extrinsics = extrinsics
+	vm.payload = payload
 	return nil
 }
 

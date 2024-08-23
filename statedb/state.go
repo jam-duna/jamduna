@@ -5,29 +5,32 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+	//what Saforles Contains
+	// entropy η eq 66
+	// The validator keys and metadata to be drawn from next ι eq 66
+	// The validator κeys and metadata currently active. κ eq 66
+	// The validator keys and metadata which were active in the prior epoch λ eq 66
+	// timeslot Tau
+
 type JamState struct {
-	Alpha  [types.C][types.O]common.Hash   `json:"alpha"`  // The core αuthorizations pool. α eq 85
-	Beta   [types.H]Beta_state             `json:"beta"`   // The core βeefy pool. β eq 81
-	Gamma  SafroleBasicState               `json:"gamma"`  // SafroleBasicState γ eq 48
-	Delta  map[uint32]types.ServiceAccount `json:"delta"`  // The (prior) state of the service accounts. δ eq 89
-	Eta    []common.Hash                   `json:"eta"`    // entropy η eq 66
-	Iota   []types.Validator               `json:"iota"`   // The validator keys and metadata to be drawn from next ι eq 66
-	Kappa  []types.Validator               `json:"kappa"`  // The validator κeys and metadata currently active. κ eq 66
-	Lambda []types.Validator               `json:"lambda"` // The validator keys and metadata which were active in the prior epoch λ eq 66
-	Rho    []Rho_state                     `json:"rho"`    // AvailabilityAssignments ρ eq 118
-	Tau    uint32                          `json:"tau"`    // timeslot
-	Phi    [types.C][types.Q]common.Hash   `json:"phi"`    // The authorization queue  φ eq 85
-	Psi    Psi_state                       `json:"psi"`    // Disputes ψ eq 97
-	Kai    Kai_state                       `json:"kai"`    // The privileged service indices. χ eq 96
-	Pi     [2][types.V]Pi_state            `json:"pi"`     // The validator statistics. π eq 171
+	AuthorizationsPool [types.TotalCores][types.MaxAuthorizationPoolItems]common.Hash `json:"alpha"` // The core αuthorizations pool. α eq 85
+	BeefyPool          [types.RecentHistorySize]Beta_state                            `json:"beta"`  // The core βeefy pool. β eq 81
+	SafroleStateGamma  SafroleBasicState                                              `json:"gamma"` // SafroleBasicState γ eq 48
+	SafroleState       *SafroleState                                                   `json:"safrole"`
+	PriorServiceAccountState map[uint32]types.ServiceAccount                                 `json:"delta"` // The (prior) state of the service accounts. δ eq 89
+	AvailabilityAssignments  []Rho_state                                                     `json:"rho"`   // AvailabilityAssignments ρ eq 118
+	AuthorizationQueue       [types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash `json:"phi"`   // The authorization queue  φ eq 85
+	DisputesState            Psi_state                                                       `json:"psi"`   // Disputes ψ eq 97
+	PrivilegedServiceIndices Kai_state                                                       `json:"kai"`   // The privileged service indices. χ eq 96
+	ValidatorStatistics      [2][types.TotalValidators]Pi_state                              `json:"pi"`    // The validator statistics. π eq 171
 }
 
 // types for Beta
 type Beta_state struct {
-	H common.Hash          `json:"h"`
-	B []common.Hash        `json:"b"`
-	S common.Hash          `json:"s"`
-	P [types.C]common.Hash `json:"p"`
+	H common.Hash                   `json:"h"`
+	B []common.Hash                 `json:"b"`
+	S common.Hash                   `json:"s"`
+	P [types.TotalCores]common.Hash `json:"p"`
 }
 
 // types for Psi
@@ -89,4 +92,38 @@ type Pi_state struct {
 	OctetsNumber       uint64 `json:"octets_number"`   //The total number of octets across all preimages introduced by the validator.
 	ReportNumber       uint64 `json:"report_number"`   //The number of reports guaranteed by the validator
 	AvailabilityNumber uint64 `json:"avalible_number"` //The number of availability assurances made by the validator
+}
+
+func NewJamState() *JamState {
+    return &JamState{
+        // Initializing slices and maps to avoid nil pointers
+        PriorServiceAccountState: make(map[uint32]types.ServiceAccount),
+        AvailabilityAssignments:  make([]Rho_state, 0),
+	    SafroleState:             NewSafroleState(),
+    }
+}
+
+// Function to copy a State struct
+func (original *JamState) Copy() *JamState {
+	// Create a new instance of JamState
+	copyState := &JamState{
+		DisputesState:           original.DisputesState,
+		AvailabilityAssignments: make([]Rho_state, len(original.AvailabilityAssignments)),
+		SafroleState:            original.SafroleState.Copy(),
+	}
+
+	// Copy the Rho
+	//copy(copyState.Rho_state original.Rho)
+
+	// Copy the PrevValidators slice
+	for i, v := range original.SafroleState.CurrValidators {
+		copyState.SafroleState.CurrValidators[i] = v
+	}
+
+	// Copy the NextValidators slice
+	for i, v := range original.SafroleState.PrevValidators {
+		copyState.SafroleState.PrevValidators[i] = v // Same assumption as above
+	}
+
+	return copyState
 }

@@ -23,6 +23,8 @@ type WorkItem struct {
 	CodeHash common.Hash `json:"code_hash"`
 	// y: a payload blob
 	PayloadBlob []byte `json:"payload_blob"`
+	// x: extrinsic
+	Extrinsics [][]byte `json:"extrinsic"`
 	// g: a gas limit
 	GasLimit            int               `json:"gas_limit"`
 	ImportedSegments    []ImportSegment   `json:"imported_segments"`

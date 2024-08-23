@@ -314,20 +314,20 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	}
 
 	// Convert PreState
-	disputeData.PreState.Psi.Psi_g = convertHexStringsToBytes(rawDisputeData.PreState.Psi.PsiG)
-	disputeData.PreState.Psi.Psi_b = convertHexStringsToBytes(rawDisputeData.PreState.Psi.PsiB)
-	disputeData.PreState.Psi.Psi_w = convertHexStringsToBytes(rawDisputeData.PreState.Psi.PsiW)
-	disputeData.PreState.Psi.Psi_o = convertHexStringsToPublicKeys(rawDisputeData.PreState.Psi.PsiO)
+	disputeData.PreState.DisputesState.Psi_g = convertHexStringsToBytes(rawDisputeData.PreState.Psi.PsiG)
+	disputeData.PreState.DisputesState.Psi_b = convertHexStringsToBytes(rawDisputeData.PreState.Psi.PsiB)
+	disputeData.PreState.DisputesState.Psi_w = convertHexStringsToBytes(rawDisputeData.PreState.Psi.PsiW)
+	disputeData.PreState.DisputesState.Psi_o = convertHexStringsToPublicKeys(rawDisputeData.PreState.Psi.PsiO)
 
 	for _, rho := range rawDisputeData.PreState.Rho {
-		disputeData.PreState.Rho = append(disputeData.PreState.Rho, Rho_state{
+		disputeData.PreState.AvailabilityAssignments = append(disputeData.PreState.AvailabilityAssignments, Rho_state{
 			DummyWorkReport: hexDecodeOrPanic(rho.DummyWorkReport),
 			Timeout:         rho.Timeout,
 		})
 	}
-	disputeData.PreState.Tau = rawDisputeData.PreState.Tau
+	disputeData.PreState.SafroleState.Timeslot = rawDisputeData.PreState.Tau
 	for _, kappa := range rawDisputeData.PreState.Kappa {
-		disputeData.PreState.Kappa = append(disputeData.PreState.Kappa, types.Validator{
+		disputeData.PreState.SafroleState.CurrValidators = append(disputeData.PreState.SafroleState.CurrValidators, types.Validator{
 			Ed25519:      common.BytesToHash(hexDecodeOrPanic(kappa.Ed25519)),
 			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(kappa.Bandersnatch)),
 			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(kappa.Bls)); return arr }(),
@@ -337,7 +337,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	// Convert PreState.Lambda
 	for _, lambda := range rawDisputeData.PreState.Lambda {
-		disputeData.PreState.Lambda = append(disputeData.PreState.Lambda, types.Validator{
+		disputeData.PreState.SafroleState.PrevValidators = append(disputeData.PreState.SafroleState.PrevValidators, types.Validator{
 			Ed25519:      common.BytesToHash(hexDecodeOrPanic(lambda.Ed25519)),
 			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(lambda.Bandersnatch)),
 			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(lambda.Bls)); return arr }(),
@@ -347,22 +347,22 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	// Convert PostState
 
-	disputeData.PostState.Psi.Psi_g = convertHexStringsToBytes(rawDisputeData.PostState.Psi.PsiG)
-	disputeData.PostState.Psi.Psi_b = convertHexStringsToBytes(rawDisputeData.PostState.Psi.PsiB)
-	disputeData.PostState.Psi.Psi_w = convertHexStringsToBytes(rawDisputeData.PostState.Psi.PsiW)
-	disputeData.PostState.Psi.Psi_o = convertHexStringsToPublicKeys(rawDisputeData.PostState.Psi.PsiO)
+	disputeData.PostState.DisputesState.Psi_g = convertHexStringsToBytes(rawDisputeData.PostState.Psi.PsiG)
+	disputeData.PostState.DisputesState.Psi_b = convertHexStringsToBytes(rawDisputeData.PostState.Psi.PsiB)
+	disputeData.PostState.DisputesState.Psi_w = convertHexStringsToBytes(rawDisputeData.PostState.Psi.PsiW)
+	disputeData.PostState.DisputesState.Psi_o = convertHexStringsToPublicKeys(rawDisputeData.PostState.Psi.PsiO)
 
 	for _, rho := range rawDisputeData.PostState.Rho {
-		disputeData.PostState.Rho = append(disputeData.PostState.Rho, Rho_state{
+		disputeData.PostState.AvailabilityAssignments = append(disputeData.PostState.AvailabilityAssignments, Rho_state{
 			DummyWorkReport: hexDecodeOrPanic(rho.DummyWorkReport),
 			Timeout:         rho.Timeout,
 		})
 	}
 
-	disputeData.PostState.Tau = rawDisputeData.PostState.Tau
+	disputeData.PostState.SafroleState.Timeslot = rawDisputeData.PostState.Tau
 
 	for _, kappa := range rawDisputeData.PostState.Kappa {
-		disputeData.PostState.Kappa = append(disputeData.PostState.Kappa, types.Validator{
+		disputeData.PostState.SafroleState.CurrValidators = append(disputeData.PostState.SafroleState.CurrValidators, types.Validator{
 			Ed25519:      common.BytesToHash(hexDecodeOrPanic(kappa.Ed25519)),
 			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(kappa.Bandersnatch)),
 			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(kappa.Bls)); return arr }(),
@@ -372,7 +372,7 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 
 	// Convert PostState.Lambda
 	for _, lambda := range rawDisputeData.PostState.Lambda {
-		disputeData.PostState.Lambda = append(disputeData.PostState.Lambda, types.Validator{
+		disputeData.PostState.SafroleState.PrevValidators = append(disputeData.PostState.SafroleState.PrevValidators, types.Validator{
 			Ed25519:      common.BytesToHash(hexDecodeOrPanic(lambda.Ed25519)),
 			Bandersnatch: common.BytesToHash(hexDecodeOrPanic(lambda.Bandersnatch)),
 			Bls:          func() [144]byte { var arr [144]byte; copy(arr[:], hexDecodeOrPanic(lambda.Bls)); return arr }(),

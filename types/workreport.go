@@ -1,6 +1,8 @@
 package types
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -17,9 +19,29 @@ import (
 type WorkReport struct {
 	AvailabilitySpec     AvailabilitySpecification `json:"availability"`
 	AuthorizerHash       common.Hash               `json:"authorizer_hash"`
-	Core                 int                       `json:"total_size"`
+	Core                 uint32                    `json:"total_size"`
 	Output               []byte                    `json:"output"`
 	RefinementContext    RefinementContext         `json:"refinement_context"`
 	PackageSpecification string                    `json:"package_specification"`
 	Results              []WorkResult              `json:"results"`
+}
+
+// Bytes returns the bytes of the Assurance
+func (a *WorkReport) Bytes() []byte {
+	enc, err := json.Marshal(a)
+	if err != nil {
+		// Handle the error according to your needs.
+		fmt.Println("Error marshaling JSON:", err)
+		return nil
+	}
+	return enc
+}
+
+func (a *WorkReport) Hash() common.Hash {
+	data := a.Bytes()
+	if data == nil {
+		// Handle the error case
+		return common.Hash{}
+	}
+	return common.BytesToHash(common.ComputeHash(data))
 }
