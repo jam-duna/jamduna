@@ -3,6 +3,7 @@ package trie
 import (
 	"encoding/hex"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/storage"
 )
 
@@ -131,40 +132,40 @@ func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {
 	}
 	// Insert service index, hash, storage value
 	for s, hexString := range service_account_storage {
-		service_account_storage_hash_byte, err := hex.DecodeString(hexString[0])
-		if err != nil {
-			fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
-		}
+		// service_account_storage_hash_byte, err := hex.DecodeString(hexString[0])
+		// if err != nil {
+		// 	fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
+		// }
 		service_account_storage_value_byte, err := hex.DecodeString(hexString[1])
 		if err != nil {
 			fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
 		}
-		tree.SetPreImage(uint32(s), service_account_storage_hash_byte, service_account_storage_value_byte)
+		tree.SetPreImageBlob(uint32(s), service_account_storage_value_byte)
 	}
 	// Insert service index, hash, primage value
 	for s, hexString := range service_account_preimage {
-		service_account_primage_hash_byte, err := hex.DecodeString(hexString[0])
-		if err != nil {
-			fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
-		}
+		// service_account_primage_hash_byte, err := hex.DecodeString(hexString[0])
+		// if err != nil {
+		// 	fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
+		// }
 		service_account_primage_value_byte, err := hex.DecodeString(hexString[1])
 		if err != nil {
 			fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
 		}
-		tree.SetPreImage(uint32(s), service_account_primage_hash_byte, service_account_primage_value_byte)
+		tree.SetPreImageBlob(uint32(s), service_account_primage_value_byte)
 	}
 
 	// Insert service index, (preimage_length, hash), timeslots
 	for s, hexString := range service_account_preimage_l {
-		service_account_primage_l_hash_byte, err := hex.DecodeString(hexString[0])
-		if err != nil {
-			fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
-		}
+		// service_account_primage_l_hash_byte, err := hex.DecodeString(hexString[0])
+		// if err != nil {
+		// 	fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
+		// }
 		service_account_primage_l_value_byte, err := hex.DecodeString(hexString[1])
 		if err != nil {
 			fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
 		}
-		tree.SetPreImage(uint32(s), service_account_primage_l_hash_byte, service_account_primage_l_value_byte)
+		tree.SetPreImageBlob(uint32(s), service_account_primage_l_value_byte)
 	}
 
 	// Get the root hash of the tree

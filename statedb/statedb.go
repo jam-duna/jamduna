@@ -34,7 +34,7 @@ type StateDB struct {
 	sdb        *storage.StateDBStorage
 	trie       *trie.MerkleTree
 
-	knownPreimageLookups  map[common.Hash]int
+	knownPreimageLookups  map[common.Hash]uint32
 	queuedPreimageLookups map[common.Hash]types.PreimageLookup
 	preimageLookupsMutex  sync.Mutex
 
@@ -61,6 +61,12 @@ func (s *StateDB) AddTicketToQueue(t types.Ticket) {
 	s.queuedTickets[t.TicketID()] = t
 }
 
+func (s *StateDB) AddLookupToQueue(l types.PreimageLookup) {
+	s.preimageLookupsMutex.Lock()
+	defer s.preimageLookupsMutex.Unlock()
+	s.queuedPreimageLookups[l.AccountPreimageHash()] = l
+}
+
 func (s *StateDB) AddDisputeToQueue(d types.Dispute) {
 	s.disputeMutex.Lock()
 	defer s.disputeMutex.Unlock()
@@ -83,9 +89,19 @@ func (s *StateDB) CheckTicketExists(ticketID common.Hash) bool {
 	if (ticketID == common.Hash{}) {
 		return true
 	}
+	s.preimageLookupsMutex.Lock()
+	defer s.preimageLookupsMutex.Unlock()
+	_, exists := s.knownTickets[ticketID]
+	return exists
+}
+
+func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
+	if (a_p == common.Hash{}) {
+		return true
+	}
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
-	_, exists := s.knownTickets[ticketID]
+	_, exists := s.knownPreimageLookups[a_p]
 	return exists
 }
 
@@ -96,11 +112,16 @@ func (s *StateDB) ProcessIncomingBlock(b *types.Block) error {
 	if is_validated {
 		// taking the parent, applying it
 		tickets := b.Tickets()
+		lookups := b.PreimageLookups()
 		s.Block = b
 		s.ApplyStateTransitionFromBlock(context.Background(), b)
 		// shawn apply the disputes state
 		for _, ticket := range tickets {
 			s.RemoveTicket(&ticket)
+		}
+
+		for _, l := range lookups {
+			s.RemoveLookup(&l)
 		}
 		if s.Id == 0 {
 			fmt.Printf("[N%v] ProcessIncomingBlock Block %v. (Epoch,Phase) = (%v,%v) Slot=%v\n", s.Id, b.Hash(), currEpoch, currPhase, b.Header.TimeSlot)
@@ -126,6 +147,23 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	// fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v\n", s.Id, ticketID)
 	s.AddTicketToQueue(t)
 	s.knownTickets[ticketID] = t.Attempt
+}
+
+func (s *StateDB) ProcessIncomingLookup(l types.PreimageLookup) {
+	//TODO: check existense of lookup and stick into map
+	//cj := s.GetPvmState()
+	fmt.Printf("[N%v] ProcessIncomingLookup -- Adding lookup: %v\n", s.Id, l.String())
+	account_preimage_hash, err := s.ValidateLookup(&l)
+	if err != nil {
+		fmt.Printf("Invalid Ticket. Err=%v\n", err)
+		return
+	}
+	if s.CheckLookupExists(account_preimage_hash) {
+		return
+	}
+	s.AddLookupToQueue(l)
+	sf := s.GetSafrole()
+	s.knownPreimageLookups[account_preimage_hash] = sf.GetTimeSlot() // hostForget has certain logic that will probably reference this field???
 }
 
 func (s *StateDB) ProcessIncomingDispute(d types.Dispute) {
@@ -173,6 +211,47 @@ func (s *StateDB) RemoveDispute(d *types.Dispute) {
 	// delete(s.queuedDispute, d.Hash())
 }
 
+func (s *StateDB) RemoveLookup(l *types.PreimageLookup) {
+	s.preimageLookupsMutex.Lock()
+	defer s.preimageLookupsMutex.Unlock()
+	delete(s.queuedPreimageLookups, l.AccountPreimageHash())
+}
+
+// EP Errors
+const (
+	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
+	errPreimageLookupNotEmpty = "Preimagelookup not empty"
+	errPreimageBlobSet        = "PreimageBlob already set"
+)
+
+func (s *StateDB) ValidateLookup(l *types.PreimageLookup) (common.Hash, error) {
+	// check 156 - E_p should be ordered by what????
+	// check 157 - (1) a_p not equal to P (2) a_l is empty
+	t := s.GetTrie()
+	a_p := l.AccountPreimageHash()
+	//a_l := l.AccountLookupHash()
+
+	preimage_blob, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash().Bytes())
+	//TODO: stanley to make sure we can check whether a key exist or not. err here is ambiguous here
+	if err == nil { // key found
+		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
+			//H(p) = p
+			return common.Hash{}, fmt.Errorf(errPreimageBlobSet)
+		}
+	}
+
+	//fmt.Printf("Validating E_p %v\n",l.String())
+	anchors, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash().Bytes(), l.BlobLength())
+	if err != nil {
+		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
+	}
+	if len(anchors) != 0 {
+		// non-empty anchor
+		return common.Hash{}, fmt.Errorf(errPreimageLookupNotEmpty)
+	}
+	return a_p, nil
+}
+
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
 	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
@@ -184,7 +263,7 @@ func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb.queuedAssurances = make(map[common.Hash]types.Assurance)
 	statedb.knownAssurances = make(map[common.Hash]int)
 	statedb.queuedPreimageLookups = make(map[common.Hash]types.PreimageLookup)
-	statedb.knownPreimageLookups = make(map[common.Hash]int)
+	statedb.knownPreimageLookups = make(map[common.Hash]uint32)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 	return statedb
 }
@@ -237,6 +316,12 @@ func (s *StateDB) GetSafrole() *SafroleState {
 func (s *StateDB) GetJamState() *JamState {
 	return s.JamState
 }
+
+/*
+func (s *StateDB) GetPvmState() *PvmState {
+	return s.Pvm
+}
+*/
 
 // todo: implement this, not sure if this correct
 func (s *StateDB) GetDisputesState() {
@@ -315,6 +400,10 @@ func (s *StateDB) String() string {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
 	return string(enc)
+}
+
+func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
+	return newStateDB(sdb, blockHash)
 }
 
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
@@ -439,9 +528,25 @@ func (s *StateDB) SetID(id uint32) {
 }
 
 func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup, targetJCE uint32, id uint32) error {
-	// bring together the queuedPreimages from solicit (from DA) and update stateDB (but not BPT) with the blobs
-	// solicit execution should have updated service state to "requested"
-	// some NODE process should then run erasure decoding to make it "available"
+
+	//TODO: (eq 156) need to make sure E_P is sorted. by what??
+	for _, l := range preimages {
+		// validate eq 157
+		_, err := s.ValidateLookup(&l)
+		if err != nil {
+			return err
+		}
+	}
+
+	// ready for state transisiton
+	t := s.GetTrie()
+	for _, l := range preimages {
+		// (eq 158)
+		// δ†[s]p[H(p)] = p
+		// δ†[s]l[H(p),∣p∣] = [τ′]
+		t.SetPreImageBlob(l.Service_Index(), l.Blob())
+		t.SetPreImageLookup(l.Service_Index(), l.BlobHash().Bytes(), l.BlobLength(), []uint32{targetJCE})
+	}
 	return nil
 }
 
@@ -573,8 +678,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		}
 		extrinsicData.PreimageLookups = append(extrinsicData.PreimageLookups, pl)
 	}
-	s.queuedAssurances = make(map[common.Hash]types.Assurance)
+	// TODO: need somekind of ordering eq 156
 
+	s.queuedAssurances = make(map[common.Hash]types.Assurance)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
 	// TODO

@@ -3,6 +3,7 @@ package common
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 )
 
 // encodeUint64 encodes a uint64 value into a byte slice in LittleEndian order
@@ -19,4 +20,9 @@ func DecodeUint64(data []byte) int {
 		return 0
 	}
 	return int(binary.LittleEndian.Uint64(data))
+}
+
+func ComputeCurrentJCETime() uint32 {
+	currentTime := time.Now().Unix()
+	return uint32(currentTime) // computeJCETime(currentTime)
 }

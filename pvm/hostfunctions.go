@@ -401,22 +401,17 @@ func (vm *VM) hostLookup() uint32 {
 		return OOB
 	}
 	h := common.Blake2Hash(k_bytes)
-	v, vLength, ok := vm.hostenv.ReadServicePreimage(s, h)
-	if !ok {
-		fmt.Println("v is empty")
-		vm.writeRegister(0, NONE)
-		return NONE
-	}
+	v := vm.hostenv.ReadServicePreimageBlob(s, h)
 
-	l := vLength
+	l := uint32(len(v))
 	if bz < l {
 		l = bz
 	}
 	vm.writeRAMBytes(bo, v[:l])
 
 	if len(h) != 0 {
-		vm.writeRegister(0, vLength)
-		return vLength
+		vm.writeRegister(0, l)
+		return l
 	} else {
 		vm.writeRegister(0, OOB)
 		return OOB
@@ -437,30 +432,24 @@ func (vm *VM) hostRead() uint32 {
 	kz, _ := vm.readRegister(2)
 	bo, _ := vm.readRegister(3)
 	bz, _ := vm.readRegister(4)
-	sbytes := uint32ToBytes(s)
-	k_bytes, err_k := vm.readRAMBytes(ko, int(kz))
+	k, err_k := vm.readRAMBytes(ko, int(kz)) // this is the raw key.
 	if err_k == OOB {
 		fmt.Println("Read RAM Error")
 		vm.writeRegister(0, OOB)
 		return OOB
 	}
-	k := common.Blake2Hash(append(sbytes, k_bytes...))
-	v, vLength, ok := vm.hostenv.ReadServicePreimage(s, k)
-	if !ok {
-		fmt.Println("v is empty")
-		vm.writeRegister(0, NONE)
-		return NONE
-	}
 
-	l := vLength
+	v := vm.hostenv.ReadServiceStorage(s, k)
+
+	l := uint32(len(v))
 	if bz < l {
 		l = bz
 	}
 	vm.writeRAMBytes(bo, v[:l])
 
 	if len(k) != 0 {
-		vm.writeRegister(0, vLength)
-		return vLength
+		vm.writeRegister(0, l)
+		return l
 	} else {
 		vm.writeRegister(0, OOB)
 		return OOB
@@ -476,24 +465,23 @@ func (vm *VM) hostWrite() uint32 {
 	kz, _ := vm.readRegister(1)
 	vo, _ := vm.readRegister(2)
 	vz, _ := vm.readRegister(3)
-	k_byte, err_k := vm.readRAMBytes(ko, int(kz))
+	k, err_k := vm.readRAMBytes(ko, int(kz))
 	if err_k == OOB {
 		fmt.Println("Read RAM Error")
 		vm.writeRegister(0, OOB)
 		return OOB
 	}
-	sbytes := uint32ToBytes(s)
-	k := common.Blake2Hash(append(sbytes, k_byte...))
-	_, l, _ := vm.hostenv.ReadServicePreimage(s, k) // get bold s in GP
+	S_s_k := vm.hostenv.ReadServiceStorage(s, k) // get bold s in GP
+	l := uint32(len(S_s_k))
 	if l == 0 {
 		l = NONE
 	}
 
 	// check balance a_t <= a_b
-	service_data, _, _ := vm.hostenv.ReadServiceBytes(s)
-	a_b_byte := service_data[len(service_data)-36 : len(service_data)-24]
-	a_l_byte := service_data[len(service_data)-12 : len(service_data)-4]
-	a_i_byte := service_data[len(service_data)-4:]
+	service_byte := vm.hostenv.ReadServiceBytes(s)
+	a_b_byte := service_byte[len(service_byte)-36 : len(service_byte)-24]
+	a_l_byte := service_byte[len(service_byte)-12 : len(service_byte)-4]
+	a_i_byte := service_byte[len(service_byte)-4:]
 	a_b := binary.LittleEndian.Uint64(a_b_byte)
 	a_l := binary.LittleEndian.Uint64(a_l_byte)
 	a_i := binary.LittleEndian.Uint64(a_i_byte)
@@ -503,10 +491,10 @@ func (vm *VM) hostWrite() uint32 {
 		vm.writeRegister(0, uint32(l))
 		// adjust S
 		if vz == 0 {
-			vm.hostenv.DeleteKey(k)
+			vm.hostenv.DeleteServiceStorageKey(s, k)
 		} else {
 			v, _ := vm.readRAMBytes(vo, int(vz))
-			vm.hostenv.WriteServicePreimage(s, k, v)
+			vm.hostenv.WriteServiceStorage(s, k, v)
 		}
 		vm.writeRegister(0, l)
 		return l
@@ -519,13 +507,19 @@ func (vm *VM) hostWrite() uint32 {
 	}
 }
 
+func (vm *VM) GetJCETime() uint32 {
+	//TODO: need access to state. Right now we are just using currJCE, which doesn't make sense
+	currJCE := common.ComputeCurrentJCETime()
+	return uint32(currJCE)
+}
+
 // Solicit preimage
 func (vm *VM) hostSolicit() uint32 {
 	// Got l of X_s by setting s = 1, z = z(from RAM)
-	s := uint32(1)
+	s := uint32(49) // s: serviceIndex
 	o, _ := vm.readRegister(0)
-	z, _ := vm.readRegister(1)
-	hBytes, err_h := vm.readRAMBytes(o, 32)
+	z, _ := vm.readRegister(1)              // z: blob_len
+	hBytes, err_h := vm.readRAMBytes(o, 32) // h: blobHash
 	if err_h == OOB {
 		fmt.Println("Read RAM Error")
 		vm.writeRegister(0, OOB)
@@ -533,34 +527,42 @@ func (vm *VM) hostSolicit() uint32 {
 	}
 
 	// check balance a_t <= a_b
-
-	service_data, _, _ := vm.hostenv.ReadServiceBytes(s) // read service account(X_s) where service index = 1
-	a_b_byte := service_data[len(service_data)-36 : len(service_data)-28]
-	a_l_byte := service_data[len(service_data)-12 : len(service_data)-4]
-	a_i_byte := service_data[len(service_data)-4:]
-	a_b := binary.LittleEndian.Uint64(a_b_byte)
-	a_l := binary.LittleEndian.Uint64(a_l_byte)
-	a_i := binary.LittleEndian.Uint32(a_i_byte)
-	a_t := 10 + uint64(1*a_i) + 100*a_l
-	if a_b < a_t {
-		fmt.Println("a_b < a_t")
-		vm.writeRegister(0, FULL)
-		return FULL
+	service_data := vm.hostenv.ReadServiceBytes(s) // read service account(X_s) where service index = 1
+	if len(service_data) > 0 {
+		a_b_byte := service_data[len(service_data)-36 : len(service_data)-28]
+		a_l_byte := service_data[len(service_data)-12 : len(service_data)-4]
+		a_i_byte := service_data[len(service_data)-4:]
+		a_b := binary.LittleEndian.Uint64(a_b_byte)
+		a_l := binary.LittleEndian.Uint64(a_l_byte)
+		a_i := binary.LittleEndian.Uint32(a_i_byte)
+		a_t := 10 + uint64(1*a_i) + 100*a_l
+		if a_b < a_t {
+			fmt.Println("a_b < a_t")
+			vm.writeRegister(0, FULL)
+			return FULL
+		}
 	}
 
-	hBytes = falseBytes(hBytes[4:])
-	lbytes := uint32ToBytes(z)
-	key := append(lbytes, hBytes...) //GP(292)
-	h := common.BytesToHash(key)
+	solicit := Solicit{
+		BlobHash: common.BytesToHash(hBytes),
+		Length:   z,
+	}
+	//hBytes = falseBytes(hBytes[4:])
+	//lbytes := uint32ToBytes(z)
+	//key := append(lbytes, hBytes...) //GP(292)
+	//h := common.BytesToHash(key)
 
-	X_s_l, _, err_X_s_l := vm.hostenv.ReadServicePreimage(s, h)
-	if err_X_s_l == false {
-		vm.hostenv.WriteServicePreimage(s, h, []byte{})
+	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, common.BytesToHash(hBytes), z)
+	if len(X_s_l) == 0 {
+		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
+		vm.Solicits = append(vm.Solicits, solicit)
+		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, []uint32{})
 		vm.writeRegister(0, OK)
 		return OK
 	} else if X_s_l[0] == 2 { // [x, y]
-		vm.hostenv.WriteServicePreimage(s, h, append(X_s_l, []byte{10, 0, 0, 0}...)) // Randomly insert t = 10 in l
-		vm.writeRegister(0, OK)
+		anchor_timeslot := vm.GetJCETime()
+		vm.Solicits = append(vm.Solicits, solicit)
+		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
 		return OK
 	} else {
 		vm.writeRegister(0, HUH)
@@ -570,15 +572,27 @@ func (vm *VM) hostSolicit() uint32 {
 
 // Forget preimage
 func (vm *VM) hostForget() uint32 {
+	// Unfinished
+	s := uint32(1) // s: serviceIndex
 	o, _ := vm.readRegister(0)
 	z, _ := vm.readRegister(1)
 	hBytes, errCode := vm.readRAMBytes(o, 32)
 	if errCode == OOB {
 		fmt.Println("Read RAM Error")
-		return errCode
+		return OOB
 	}
-	h := common.BytesToHash(hBytes)
-	errCode = vm.hostenv.ForgetPreimage(h, z)
+
+	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, common.BytesToHash(hBytes), z)
+	anchor_timeslot := vm.GetJCETime()
+	if len(X_s_l) == 0 || len(X_s_l) == 2 {
+
+	} else if len(X_s_l) == 1 {
+		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+	} else {
+		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+
+	}
+
 	return errCode
 }
 
@@ -598,8 +612,9 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint32 {
 	}
 	h := common.Blake2Hash(hBytes)
 	fmt.Println(h)
-	v, vLength, ok := vm.hostenv.HistoricalLookup(s, t, h)
-	if !ok {
+	v := vm.hostenv.HistoricalLookup(s, t, h)
+	vLength := uint32(len(v))
+	if vLength == 0 {
 		vm.writeRegister(0, NONE)
 		return NONE
 	}

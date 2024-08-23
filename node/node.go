@@ -553,7 +553,8 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		var preimageLookup types.PreimageLookup
 		err := json.Unmarshal([]byte(msg.Payload), &preimageLookup)
 		if err == nil {
-			err = n.processPreimageLookup(preimageLookup)
+			// err = n.processPreimageLookup(preimageLookup)
+			err = n.processLookup(preimageLookup)
 			if err == nil {
 				response = ok
 			}
@@ -757,6 +758,13 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	return nil // Success
 }
 
+func (n *Node) processLookup(preimageLookup types.PreimageLookup) error {
+	// TODO: Store the lookup in a E_P aggregator
+	s := n.getState()
+	s.ProcessIncomingLookup(preimageLookup)
+	return nil // Success
+}
+
 func (n *Node) processGuarantee(guarantee types.Guarantee) error {
 	// Store the guarantee in the tip's queued guarantee
 	s := n.getState()
@@ -776,11 +784,6 @@ func (n *Node) processDisputes(dispute types.Dispute) error {
 	s := n.getState()
 	s.ProcessIncomingDispute(dispute)
 	return nil
-}
-
-func (n *Node) processPreimageLookup(preimageLookup types.PreimageLookup) error {
-	// TODO: Store the lookup in a E_P aggregator
-	return nil // Success
 }
 
 func (n *Node) dumpstatedbmap() {

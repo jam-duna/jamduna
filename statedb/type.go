@@ -6,7 +6,6 @@ import (
 
 type Ed25519Signature []byte
 type PublicKey []byte
-type BMTProof []common.Hash
 
 const (
 	JamCommonEra = 1704100800 //1200 UTC on January 1, 2024

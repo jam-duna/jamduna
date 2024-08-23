@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -15,6 +17,7 @@ const (
 	W_X      = 1024
 	M        = 128
 	V        = 1023
+	D        = 28800
 )
 
 // PageMap
@@ -46,6 +49,20 @@ type VM struct {
 	hostenv             types.HostEnv
 	writable_ram_start  uint32
 	writable_ram_length uint32
+
+	// SOLICITS+FORGETS
+	Solicits []Solicit
+	Forgets  []Forgets
+	// EXPORTS
+
+}
+
+type Forgets struct {
+}
+
+type Solicit struct {
+	BlobHash common.Hash
+	Length   uint32
 }
 
 type Program struct {
@@ -304,6 +321,14 @@ func NewVMFromCode(code []byte, i uint32, hostENV types.HostEnv) *VM {
 	return NewVM(code, []uint32{}, i, []PageMap{}, []Page{}, hostENV)
 }
 
+func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
+	return &VM{
+		code:    code,
+		bitmask: bitmask,
+		hostenv: hostENV,
+	}
+}
+
 // for hostfuntion test
 func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv) *VM {
 
@@ -366,77 +391,95 @@ func (vm *VM) step() error {
 		vm.terminated = true
 	case JUMP:
 		errCode := vm.branch([]byte{1, operands[0]})
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 	case JUMP_IND:
 		vm.djump(operands)
-		//vm.writeRegister(0, errCode)
+		// vm.writeRegister(0, errCode)
 	case LOAD_IMM_JUMP:
 		errCode := vm.loadImmJump(operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 	case LOAD_IMM_JUMP_IND:
 		errCode := vm.loadImmJumpInd(operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 	case BRANCH_EQ, BRANCH_NE, BRANCH_LT_U, BRANCH_LT_S, BRANCH_GE_U, BRANCH_GE_S:
 		errCode := vm.branchReg(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 	case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:
 		errCode := vm.branchCond(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 	case ECALLI:
 		errCode := vm.ecalli(operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 
 		fmt.Printf("TERMINATED\n")
 		vm.terminated = true
 	case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32:
 		errCode := vm.storeImm(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case LOAD_IMM:
 		errCode := vm.loadImm(operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case LOAD_U8, LOAD_U16, LOAD_U32:
 		errCode := vm.load(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case STORE_U8, STORE_U16, STORE_U32:
 		errCode := vm.store(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case STORE_IMM_IND_U8, STORE_IMM_IND_U16, STORE_IMM_IND_U32:
 		errCode := vm.storeImmInd(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case STORE_IND_U8, STORE_IND_U16, STORE_IND_U32:
 		errCode := vm.storeInd(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case LOAD_IND_U8, LOAD_IND_I8, LOAD_IND_U16, LOAD_IND_I16, LOAD_IND_U32:
 		errCode := vm.loadInd(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case ADD_IMM, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, MUL_UPPER_S_S_IMM, MUL_UPPER_U_U_IMM, SET_LT_U_IMM, SET_LT_S_IMM:
 		errCode := vm.aluImm(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case CMOV_IMM_IZ, CMOV_IMM_NZ:
 		errCode := vm.cmovImm(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 
 	case SHLO_R_IMM, SHLO_L_IMM, SHAR_R_IMM, NEG_ADD_IMM, SET_GT_U_IMM, SET_GT_S_IMM, SHLO_R_IMM_ALT, SHLO_L_IMM_ALT, SHAR_L_IMM_ALT:
 		errCode := vm.shiftImm(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case ADD_REG, SUB_REG, AND_REG, XOR_REG, OR_REG, MUL_REG, MUL_UPPER_S_S_REG, MUL_UPPER_U_U_REG, MUL_UPPER_S_U_REG, DIV_U, DIV_S, REM_U, REM_S, CMOV_IZ, CMOV_NZ, SHLO_L, SHLO_R, SHAR_R, SET_LT_U, SET_LT_S:
 		errCode := vm.aluReg(opcode, operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case MOVE_REG:
 		errCode := vm.moveReg(operands)
-		vm.writeRegister(0, errCode)
+		fmt.Println("Error: ", errCode)
+		// vm.writeRegister(0, errCode)
 		vm.pc += 1 + len_operands
 	case SBRK:
 		vm.sbrk(operands)
@@ -473,6 +516,14 @@ func minInt(a, b int) int {
 func maxInt(a, b int) int {
 	if a > b {
 		return a
+	}
+	return b
+}
+
+func reverseBytes(b []byte) []byte {
+	n := len(b)
+	for i := 0; i < n/2; i++ {
+		b[i], b[n-1-i] = b[n-1-i], b[i]
 	}
 	return b
 }
@@ -660,16 +711,20 @@ func (vm *VM) ecalli(operands []byte) uint32 {
 
 // Implement storeImm logic
 func (vm *VM) storeImm(opcode byte, operands []byte) uint32 {
-	address := get_elided_uint32(operands[0:3])
-	value := operands[4]
+	lx := min(4, int(operands[0]))
+	// ly := min(4, max(0, len(operands) - lx -1))
+	address := get_elided_uint32(operands[1:(1 + lx)])
+	value := operands[(1 + lx):]
+	value = reverseBytes(value)
+	fmt.Printf("Set address %d, with value: %x\n", address, value)
 
 	switch opcode {
 	case STORE_IMM_U8:
-		return vm.writeRAM(address, value)
+		return vm.writeRAMBytes(address, value)
 	case STORE_IMM_U16:
-		return vm.writeRAMBytes(address, operands[2:3])
+		return vm.writeRAMBytes(address, value)
 	case STORE_IMM_U32:
-		return vm.writeRAMBytes(address, operands[2:5])
+		return vm.writeRAMBytes(address, value)
 	}
 
 	return OOB
@@ -808,7 +863,7 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) uint32 {
 		binary.BigEndian.PutUint16(b16, uint16(immediate&0xFFFF))
 		return vm.writeRAMBytes(address, b16)
 	case STORE_IMM_IND_U32:
-		b32 := make([]byte, 2)
+		b32 := make([]byte, 4)
 		binary.BigEndian.PutUint32(b32, immediate)
 		return vm.writeRAMBytes(address, b32)
 	}

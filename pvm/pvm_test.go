@@ -43,7 +43,7 @@ func hostfun_test(t *testing.T, hftc hostfun_TestCase) error {
 	// pvm.hostExport(0)
 	// pvm.hostImport()
 	// pvm.hostHistoricalLookup(10)
-	// pvm.hostSolicit()
+	pvm.hostSolicit()
 	// pvm.hostLookup()
 
 	// Check the registers
@@ -84,12 +84,12 @@ func TestHostfun(t *testing.T) {
 		// "hostRead_VLEN.json",
 		// "hostRead_NONE.json",
 		// "hostWrite_l.json",
-		// "hostLookup_OK.json",
+		// "hostLookup_VLEN.json",
 		// "hostLookup_NONE.json",
-		// "hostSolicit_OK.json",
+		"hostSolicit_OK.json",
 		// "hostSolicit_HUH.json",
 		// "hostHistoricalLookup_VLEN.json",
-		//"hostHistoricalLookup_NONE.json",
+		// "hostHistoricalLookup_NONE.json",
 		// "hostImport_OK.json",
 		// "hostImport_NONE.json",
 		// "hostExport_OK.json",

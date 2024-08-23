@@ -33,7 +33,161 @@ func (nh *NodeHostEnv) GetTrie() *trie.MerkleTree {
 	return nh.trie
 }
 
-// Service Management
+func (nh *NodeHostEnv) ReadServiceBytes(s uint32) []byte {
+	tree := nh.GetTrie()
+	value, err := tree.GetService(255, s)
+	if err != nil {
+		return nil
+	}
+	return value
+}
+
+func (nh *NodeHostEnv) WriteServiceBytes(s uint32, v []byte) {
+	tree := nh.GetTrie()
+	tree.SetService(255, s, v)
+}
+
+func (nh *NodeHostEnv) ReadServiceStorage(s uint32, storage_hash common.Hash) []byte {
+	tree := nh.GetTrie()
+	storage, err := tree.GetServiceStorage(s, storage_hash.Bytes())
+	if err != nil {
+		return nil
+	} else {
+		fmt.Printf("get value=%x, err=%v\n", storage, err)
+		return storage
+	}
+}
+
+func (nh *NodeHostEnv) WriteServiceStorage(s uint32, storage_hash common.Hash, storage []byte) {
+	tree := nh.GetTrie()
+	tree.SetServiceStorage(s, storage_hash.Bytes(), storage)
+}
+
+func (nh *NodeHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) []byte {
+	tree := nh.GetTrie()
+	blob, err := tree.GetPreImageBlob(s, blob_hash.Bytes())
+	if err != nil {
+		return nil
+	} else {
+		fmt.Printf("get value=%x, err=%v\n", blob, err)
+		return blob
+	}
+}
+
+func (nh *NodeHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) {
+	tree := nh.GetTrie()
+	tree.SetPreImageBlob(s, blob)
+}
+
+func (nh *NodeHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32) []uint32 {
+	tree := nh.GetTrie()
+	time_slots, err := tree.GetPreImageLookup(s, blob_hash.Bytes(), blob_length)
+	if err != nil {
+		return nil
+	} else {
+		fmt.Printf("get value=%x, err=%v\n", time_slots, err)
+		return time_slots
+	}
+}
+
+func (nh *NodeHostEnv) WriteServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
+	tree := nh.GetTrie()
+	tree.SetPreImageLookup(s, blob_hash.Bytes(), blob_length, time_slots)
+
+}
+
+/* Does this make sense?
+func (nh *NodeHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) bool {
+	t := nh.GetTrie()
+	t.SetPreImageBlob(s, blob)
+	return true
+}
+*/
+
+// HistoricalLookup, GetImportItem, ExportSegment
+func (nh *NodeHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Hash) []byte {
+	tree := nh.GetTrie()
+	rootHash := tree.GetRoot()
+	fmt.Printf("Root Hash=%v\n", rootHash)
+	blob, err_v := tree.GetPreImageBlob(s, blob_hash.Bytes())
+	if err_v != nil {
+		return nil
+	}
+
+	blob_length := uint32(len(blob))
+
+	//MK: william to fix & verify
+	//hbytes := falseBytes(h.Bytes()[4:])
+	//lbytes := uint32ToBytes(blob_length)
+	//key := append(lbytes, hbytes...)
+	//timeslots, err_t := tree.GetPreImageLookup(s, key)
+	timeslots, err_t := tree.GetPreImageLookup(s, blob_hash.Bytes(), blob_length)
+	if err_t != nil {
+		return nil
+	}
+
+	if timeslots[0] == 0 {
+		return nil
+	} else if len(timeslots) == (12 + 1) {
+		x := timeslots[0]
+		y := timeslots[1]
+		z := timeslots[2]
+		if (x <= t && t < y) || (z <= t) {
+			return blob
+		} else {
+			return nil
+		}
+	} else if len(timeslots) == (8 + 1) {
+		x := timeslots[0]
+		y := timeslots[1]
+		if x <= t && t < y {
+			return blob
+		} else {
+			return nil
+		}
+	} else {
+		x := timeslots[0]
+		if x <= t {
+			return blob
+		} else {
+			return nil
+		}
+	}
+}
+
+func (nh *NodeHostEnv) DeleteServiceStorageKey(s uint32, storage_hash common.Hash) error {
+	tree := nh.GetTrie()
+	err := tree.DeleteServiceStorage(s, storage_hash.Bytes())
+	if err != nil {
+		fmt.Printf("Failed to delete storage_hash: %x, error: %v", storage_hash.Bytes(), err)
+		return err
+	}
+	return nil
+}
+
+func (nh *NodeHostEnv) DeleteServicePreimageKey(s uint32, blob_hash common.Hash) error {
+	tree := nh.GetTrie()
+	err := tree.DeletePreImageBlob(s, blob_hash.Bytes())
+	if err != nil {
+		fmt.Printf("Failed to delete blob_hash: %x, error: %v", blob_hash.Bytes(), err)
+		return err
+	}
+	return nil
+}
+
+func (nh *NodeHostEnv) DeleteServicePreimageLookupKey(s uint32, blob_hash common.Hash, blob_length uint32) error {
+	tree := nh.GetTrie()
+
+	err := tree.DeletePreImageLookup(s, blob_hash.Bytes(), blob_length)
+	if err != nil {
+		fmt.Printf("Failed to delete blob_hash: %x, blob_lookup_len: %d, error: %v", blob_hash.Bytes(), blob_length, err)
+		return err
+	}
+	return nil
+}
+
+// Not used:
+
 func (nh *NodeHostEnv) NewService(c []byte, l, b uint32, g, m uint64) uint32 {
 	return OK
 }
@@ -44,111 +198,6 @@ func (nh *NodeHostEnv) UpgradeService(c []byte, g, m uint64) uint32 {
 
 func (nh *NodeHostEnv) AddTransfer(m []byte, a, g uint64, d uint32) uint32 {
 	return OK
-}
-
-// Service Data Management: ReadServiceBytes, ReadServicePreimage, WriteServiceKey
-func (nh *NodeHostEnv) ReadServiceBytes(s uint32) ([]byte, uint32, bool) {
-	t := nh.GetTrie()
-	value, err := t.GetService(255, s)
-	if err != nil {
-		return nil, 0, false
-	} else {
-		fmt.Printf("get Service Account value=%x, err=%v\n", value, err)
-	}
-	return value, uint32(len(value)), true
-}
-
-func (nh *NodeHostEnv) WriteServiceBytes(s uint32, v []byte) bool {
-	//
-	return true
-}
-
-func (nh *NodeHostEnv) ReadServicePreimage(s uint32, h common.Hash) ([]byte, uint32, bool) {
-	t := nh.GetTrie()
-	value, err := t.GetPreImage(s, h.Bytes())
-	if err != nil {
-		return nil, 0, false
-	} else {
-		fmt.Printf("get value=%x, err=%v\n", value, err)
-		return value, uint32(len(value)), true
-	}
-}
-
-func (nh *NodeHostEnv) WriteServiceKey(s uint32, k common.Hash, v []byte) uint32 {
-	t := nh.GetTrie()
-	t.SetService(255, s, v)
-	return OK
-}
-
-func (nh *NodeHostEnv) WriteServicePreimage(s uint32, k common.Hash, v []byte) bool {
-	t := nh.GetTrie()
-	t.SetPreImage(s, k.Bytes(), v)
-	return true
-}
-
-// Preimage: GetPreimage, RequestPreimage(2), ForgetPreimage
-func (nh *NodeHostEnv) GetPreimage(k common.Hash, z uint32) (uint32, uint32) {
-	return 0, OK
-}
-
-func (nh *NodeHostEnv) RequestPreimage2(h common.Hash, z uint32, y uint32) uint32 {
-	return OK
-}
-
-func (nh *NodeHostEnv) RequestPreimage(h common.Hash, z uint32) uint32 {
-	return OK
-}
-
-func (nh *NodeHostEnv) ForgetPreimage(h common.Hash, z uint32) uint32 {
-	return OK
-}
-
-// HistoricalLookup, GetImportItem, ExportSegment
-func (nh *NodeHostEnv) HistoricalLookup(s uint32, ts uint32, h common.Hash) ([]byte, uint32, bool) {
-	t := nh.GetTrie()
-	rootHash := t.GetRoot()
-	fmt.Printf("Root Hash=%v\n", rootHash)
-	value, err_v := t.GetPreImage(s, h.Bytes())
-	if err_v != nil {
-		return nil, 0, false
-	}
-
-	hbytes := falseBytes(h.Bytes()[4:])
-	lbytes := uint32ToBytes(uint32(len(value)))
-	key := append(lbytes, hbytes...)
-
-	timeslots, err_t := t.GetPreImage(s, key)
-	if err_t != nil {
-		return nil, 0, false
-	}
-
-	if timeslots[0] == 0 {
-		return nil, 0, false
-	} else if len(timeslots) == (12 + 1) {
-		x := binary.LittleEndian.Uint32(timeslots[1:5])
-		y := binary.LittleEndian.Uint32(timeslots[5:9])
-		z := binary.LittleEndian.Uint32(timeslots[9:13])
-		if (x <= ts && ts < y) || (z <= ts) {
-			return value, uint32(len(value)), true
-		} else {
-			return nil, 0, false
-		}
-	} else if len(timeslots) == (8 + 1) {
-		x := binary.LittleEndian.Uint32(timeslots[1:5])
-		y := binary.LittleEndian.Uint32(timeslots[5:9])
-		if x <= ts && ts < y {
-			return value, uint32(len(value)), true
-		} else {
-			return nil, 0, false
-		}
-	} else {
-		x := binary.LittleEndian.Uint32(timeslots[1:5])
-		if x <= ts {
-			return value, uint32(len(value)), true
-		} else {
-			return nil, 0, false
-		}
-	}
 }
 
 func (nh *NodeHostEnv) GetImportItem(i uint32) ([]byte, uint32) {

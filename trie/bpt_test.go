@@ -9,6 +9,8 @@ import (
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 const test_leveldb_path = ""
@@ -415,7 +417,7 @@ func TestStateKey(t *testing.T) {
 	// Get the root hash of the tree
 	// rootHash := tree.GetRootHash()
 
-	value, err := tree.GetPreImage(0, hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7"))
+	value, err := tree.GetPreImageBlob(0, hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7"))
 	fmt.Printf("get value=%x, err=%v\n", value, err)
 
 	// for _, kv := range data {
@@ -461,6 +463,144 @@ func TestInitial(t *testing.T) {
 	if !compareTrees(tree.Root, initialTree.Root) {
 		t.Error("The reconstructed tree does not match the initial tree")
 	}
+}
+
+// Test service
+func TestService(t *testing.T) {
+
+	// Build the initial tree and insert the data
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
+
+	tree.SetService(255, 42, []byte{1})
+	tree.SetService(255, 43, []byte{1, 2})
+	tree.SetService(255, 44, []byte{1, 2, 3})
+
+	tree.printTree(tree.Root, 0)
+
+	s1, _ := tree.GetService(255, 42)
+	s2, _ := tree.GetService(255, 43)
+	s3, _ := tree.GetService(255, 44)
+	s4, _ := tree.GetService(255, 45)
+
+	fmt.Println("s1:", s1)
+	fmt.Println("s2:", s2)
+	fmt.Println("s3:", s3)
+	fmt.Println("s4:", s4)
+}
+
+// Test PreImage_lookup
+func TestServicePreImage_lookup(t *testing.T) {
+
+	// Build the initial tree and insert the data
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
+
+	case_a := []byte{1}
+	case_b := []byte{1, 2}
+	case_c := []byte{1, 2, 3}
+
+	tree.SetPreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)), []uint32{100})
+	tree.SetPreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)), []uint32{100, 200})
+	tree.SetPreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)), []uint32{100, 200, 300})
+
+	tree.printTree(tree.Root, 0)
+
+	ts1, _ := tree.GetPreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)))
+	ts2, _ := tree.GetPreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)))
+	ts3, _ := tree.GetPreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)))
+	ts4, _ := tree.GetPreImageLookup(45, common.ComputeHash(case_c), uint32(len(case_c)))
+
+	fmt.Println("ts1:", ts1)
+	fmt.Println("ts2:", ts2)
+	fmt.Println("ts3:", ts3)
+	fmt.Println("ts4:", ts4)
+
+	_ = tree.DeletePreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)))
+	_ = tree.DeletePreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)))
+	_ = tree.DeletePreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)))
+
+	ts1, _ = tree.GetPreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)))
+	ts2, _ = tree.GetPreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)))
+	ts3, _ = tree.GetPreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)))
+
+	fmt.Println("ts1:", ts1)
+	fmt.Println("ts2:", ts2)
+	fmt.Println("ts3:", ts3)
+
+}
+
+// Test PreImage_blob
+func TestServicePreImage_blob(t *testing.T) {
+
+	// Build the initial tree and insert the data
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
+
+	tree.SetPreImageBlob(42, []byte{1})
+	tree.SetPreImageBlob(43, []byte{1, 2})
+	tree.SetPreImageBlob(44, []byte{1, 2, 3})
+
+	tree.printTree(tree.Root, 0)
+
+	blob1, _ := tree.GetPreImageBlob(42, common.ComputeHash([]byte{1}))
+	blob2, _ := tree.GetPreImageBlob(43, common.ComputeHash([]byte{1, 2}))
+	blob3, _ := tree.GetPreImageBlob(44, common.ComputeHash([]byte{1, 2, 3}))
+	blob4, _ := tree.GetPreImageBlob(45, common.ComputeHash([]byte{1, 2, 3}))
+
+	fmt.Println("blob1:", blob1)
+	fmt.Println("blob2:", blob2)
+	fmt.Println("blob3:", blob3)
+	fmt.Println("blob4:", blob4)
+
+	_ = tree.DeletePreImageBlob(42, common.ComputeHash([]byte{1}))
+	_ = tree.DeletePreImageBlob(43, common.ComputeHash([]byte{1, 2}))
+	_ = tree.DeletePreImageBlob(44, common.ComputeHash([]byte{1, 2, 3}))
+
+	blob1, _ = tree.GetPreImageBlob(42, common.ComputeHash([]byte{1}))
+	blob2, _ = tree.GetPreImageBlob(43, common.ComputeHash([]byte{1, 2}))
+	blob3, _ = tree.GetPreImageBlob(44, common.ComputeHash([]byte{1, 2, 3}))
+
+	fmt.Println("blob1:", blob1)
+	fmt.Println("blob2:", blob2)
+	fmt.Println("blob3:", blob3)
+
+}
+
+// Test Storage
+func TestServiceStorage(t *testing.T) {
+
+	// Build the initial tree and insert the data
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
+
+	tree.SetServiceStorage(42, common.ComputeHash([]byte{1}), []byte{1})
+	tree.SetServiceStorage(43, common.ComputeHash([]byte{1, 2}), []byte{1, 2})
+	tree.SetServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}), []byte{1, 2, 3})
+
+	tree.printTree(tree.Root, 0)
+
+	Storage1, _ := tree.GetServiceStorage(42, common.ComputeHash([]byte{1}))
+	Storage2, _ := tree.GetServiceStorage(43, common.ComputeHash([]byte{1, 2}))
+	Storage3, _ := tree.GetServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}))
+	Storage4, _ := tree.GetServiceStorage(45, common.ComputeHash([]byte{1, 2, 3}))
+
+	fmt.Println("Storage1", Storage1)
+	fmt.Println("Storage2", Storage2)
+	fmt.Println("Storage3", Storage3)
+	fmt.Println("Storage4", Storage4)
+
+	_ = tree.DeleteServiceStorage(42, common.ComputeHash([]byte{1}))
+	_ = tree.DeleteServiceStorage(43, common.ComputeHash([]byte{1, 2}))
+	_ = tree.DeleteServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}))
+
+	Storage1, _ = tree.GetServiceStorage(42, common.ComputeHash([]byte{1}))
+	Storage2, _ = tree.GetServiceStorage(43, common.ComputeHash([]byte{1, 2}))
+	Storage3, _ = tree.GetServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}))
+
+	fmt.Println("Storage1", Storage1)
+	fmt.Println("Storage2", Storage2)
+	fmt.Println("Storage3", Storage3)
 }
 
 // compareBytes compares two Tries

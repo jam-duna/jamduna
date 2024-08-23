@@ -478,40 +478,36 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	return t.Get(stateKey)
 }
 
-// PVM read
-func (t *MerkleTree) SetService(i uint32, s uint32, v []byte) {
+// EQ 290 - state-key constructor functions C
+func ComputeC_i(i uint8) common.Hash {
+	//i ∈ N_8 ↦ [i,0,0,...]
 	stateKey := make([]byte, 32)
-	stateKey[0] = 0xFF
-
-	number := uint16(s)
-	byteSlice := make([]byte, 2)
-	binary.BigEndian.PutUint16(byteSlice, number)
-	copy(stateKey[1:5], byteSlice)
-
-	t.Insert(stateKey, v)
+	stateKey[0] = byte(i)
+	return common.BytesToHash(stateKey)
 }
 
-func (t *MerkleTree) GetService(i uint32, s uint32) ([]byte, error) {
+func ComputeC_is(i uint8, s uint32) common.Hash {
+	//(i,s ∈ N_S) ↦ [i,n0,n1,n2,n3,0,0,...] where n = E4(s)
 	stateKey := make([]byte, 32)
-	stateKey[0] = 0xFF
-
-	number := uint16(s)
-	byteSlice := make([]byte, 2)
-	binary.BigEndian.PutUint16(byteSlice, number)
-	copy(stateKey[1:5], byteSlice)
-	fmt.Printf("Service Key: %x\n", stateKey)
-	return t.Get(stateKey)
+	stateKey[0] = i
+	byteSlice := make([]byte, 4)
+	binary.LittleEndian.PutUint32(byteSlice, s)
+	for i := 1; i < 5; i++ {
+		stateKey[i] = byteSlice[i-1]
+	}
+	return common.BytesToHash(stateKey)
 }
 
-// PVM read preimage
-func (t *MerkleTree) SetPreImage(s uint32, h []byte, v []byte) {
-	// Set the key for the state
+func ComputeC_sh(s uint32, h []byte) common.Hash {
+	//s: service_index
+	//h: hash_component (assumed to be exact 32bytes)
+	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
 	stateKey := make([]byte, 32)
-	sBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sBytes, s)
+	nBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
 
 	for i := 0; i < 4; i++ {
-		stateKey[2*i] = sBytes[i]
+		stateKey[2*i] = nBytes[i]
 		if i < len(h) {
 			stateKey[2*i+1] = h[i]
 		}
@@ -520,30 +516,209 @@ func (t *MerkleTree) SetPreImage(s uint32, h []byte, v []byte) {
 		if i < len(h) {
 			stateKey[i+4] = h[i]
 		}
+	}
+	return common.BytesToHash(stateKey)
+}
+
+func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
+	/*
+		∀(s ↦ a) ∈ δ ∶ C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i )
+		i: 255
+		s: service_index
+		ac: service_accout_code_hash
+		ab: service_accout_balance
+		ag: service_accout_accumulate_gas
+		am: service_accout_on_transfer_gas
+		al: see GP_0.35(95)
+		ai: see GP_0.35(95)
+
+		(i, s ∈ N S ) ↦ [i, n 0 ,n 1 ,n 2 ,n 3 , 0, 0, . . . ] where n = E 4 (s)
+	*/
+	service_account := ComputeC_is(i, s)
+	stateKey := service_account.Bytes()
+	t.Insert(stateKey, v)
+}
+
+func (t *MerkleTree) GetService(i uint8, s uint32) ([]byte, error) {
+	service_account := ComputeC_is(i, s)
+	stateKey := service_account.Bytes()
+	return t.Get(stateKey)
+}
+
+// set a_l (with timeslot if we have E_P). For GP_0.3.5(158)
+func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash []byte, blob_len uint32, time_slots []uint32) {
+
+	/*
+		∀(s ↦ a) ∈ δ, ( ⎧⎩ h, l ⎫⎭ ↦ t)∈ a l ∶ C(s, E 4 (l)⌢(¬h 4∶ )) ↦ E(↕[E 4 (x) ∣ x <− t])
+		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
+
+		s: service_index
+		h: blob_hash
+		l: blob_len
+		t: time_slots
+	*/
+
+	lBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
+	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
+	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
+	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	stateKey := account_lookuphash.Bytes()
+
+	/*
+		Follow GP_0.3.5(270, 273, 274, 276, 291)
+		Process State value(timeslots), covert []uint32 to []byte
+	*/
+	vBytes := []byte{}
+	if len(time_slots) > 0 {
+		time_slotsByte := make([]byte, len(time_slots)*4)
+
+		// Convert time slots into byte
+		for i, v := range time_slots {
+			binary.LittleEndian.PutUint32(time_slotsByte[i*4:(i+1)*4], v)
+		}
+		vBytes = append([]byte{uint8(len(time_slots))}, time_slotsByte...)
 	}
 	// Insert the value into the state
-	t.Insert(stateKey, v)
+	t.Insert(stateKey, vBytes)
 }
 
-func (t *MerkleTree) GetPreImage(s uint32, h []byte) ([]byte, error) {
-	// Compute the key for the state
-	stateKey := make([]byte, 32)
-	sBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sBytes, s)
+// lookup a_l .. returning time slot. For GP_0.3.5(157)
+func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash []byte, blob_len uint32) ([]uint32, error) {
 
-	for i := 0; i < 4; i++ {
-		stateKey[2*i] = sBytes[i]
-		if i < len(h) {
-			stateKey[2*i+1] = h[i]
+	lBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
+	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
+	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
+	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	stateKey := account_lookuphash.Bytes()
+
+	/*
+		Follow GP_0.3.5(270, 273, 274, 276, 291)
+		Process State value(timeslots), covert []uint32 to []byte
+	*/
+
+	vByte, err := t.Get(stateKey)
+	var time_slots []uint32
+
+	if vByte == nil {
+		time_slots = make([]uint32, 0)
+	} else {
+		vByte = vByte[1:]
+		time_slots = make([]uint32, (len(vByte) / 4))
+		for i := 0; i < len(time_slots); i++ {
+			time_slots[i] = binary.LittleEndian.Uint32(vByte[i*4 : (i+1)*4])
 		}
 	}
-	for i := 4; i < 28; i++ {
-		if i < len(h) {
-			stateKey[i+4] = h[i]
-		}
-	}
-	// Get the value from the state
+
+	return time_slots, err
+}
+
+// Delete PreImageLookup key(hash)
+func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash []byte, blob_len uint32) error {
+
+	lBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
+	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
+	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
+	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	stateKey := account_lookuphash.Bytes()
+
+	err := t.Delete(stateKey)
+
+	return err
+}
+
+func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storage []byte) {
+	/*
+		∀(s ↦ a) ∈ δ, (h ↦ v) ∈ a s ∶ C(s, h) ↦ v
+		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
+
+		s: service_index
+		h: storage_key from H(E4(s) ⌢ vk ⋅⋅⋅+k )
+		v: storage
+	*/
+
+	sBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(sBytes, s)           // E4(s)
+	h_and_v := append(sBytes, k...)                    //(E4(s) ⌢ vk ⋅⋅⋅+k )
+	storage_key := common.Blake2Hash(h_and_v).Bytes()  // H(E4(s) ⌢ vk ⋅⋅⋅+k )
+	account_storage_key := ComputeC_sh(s, storage_key) // C(s, (E4(l) ⌢ (¬h4:))
+	stateKey := account_storage_key.Bytes()
+
+	// Insert Stroage into trie
+	t.Insert(stateKey, storage)
+}
+
+func (t *MerkleTree) GetServiceStorage(s uint32, k []byte) ([]byte, error) {
+
+	sBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(sBytes, s)           // E4(s)
+	h_and_v := append(sBytes, k...)                    //(E4(s) ⌢ vk ⋅⋅⋅+k )
+	storage_key := common.Blake2Hash(h_and_v).Bytes()  // H(E4(s) ⌢ vk ⋅⋅⋅+k )
+	account_storage_key := ComputeC_sh(s, storage_key) // C(s, (E4(l) ⌢ (¬h4:))
+	stateKey := account_storage_key.Bytes()
+
+	// Get Storage from trie
 	return t.Get(stateKey)
+}
+
+// Delete Storage key(hash)
+func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) error {
+	/*
+		∀(s ↦ a) ∈ δ, (h ↦ v) ∈ a s ∶ C(s, h) ↦ v
+		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
+
+		s: service_index
+		h: storage_hash
+		v: storage
+	*/
+
+	sBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(sBytes, s)           // E4(s)
+	h_and_v := append(sBytes, k...)                    //(E4(s) ⌢ vk ⋅⋅⋅+k )
+	storage_key := common.Blake2Hash(h_and_v).Bytes()  // H(E4(s) ⌢ vk ⋅⋅⋅+k )
+	account_storage_key := ComputeC_sh(s, storage_key) // C(s, (E4(l) ⌢ (¬h4:))
+	stateKey := account_storage_key.Bytes()
+
+	err := t.Delete(stateKey)
+	return err
+}
+
+// Set PreImage Blob for GP_0.3.5(158)
+func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) {
+	/*
+		∀(s ↦ a) ∈ δ, (h ↦ p) ∈ a p ∶ C(s, h) ↦ p
+		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
+
+		s: service_index
+		h: blob_hash
+		p: blob
+	*/
+
+	blob_hash := common.ComputeHash(blob)
+	account_preimage_hash := ComputeC_sh(s, blob_hash)
+	stateKey := account_preimage_hash.Bytes()
+
+	// Insert Preimage Blob into trie
+	t.Insert(stateKey, blob)
+}
+
+func (t *MerkleTree) GetPreImageBlob(s uint32, blob_hash []byte) ([]byte, error) {
+
+	account_preimage_hash := ComputeC_sh(s, blob_hash)
+	stateKey := account_preimage_hash.Bytes()
+
+	// Get Preimage Blob from trie
+	return t.Get(stateKey)
+}
+
+// Delete PreImage Blob
+func (t *MerkleTree) DeletePreImageBlob(s uint32, blob_hash []byte) error {
+	account_preimage_hash := ComputeC_sh(s, blob_hash)
+	stateKey := account_preimage_hash.Bytes()
+	err := t.Delete(stateKey)
+	return err
 }
 
 // Insert fixed-length hashed key with value for the BPT
@@ -862,4 +1037,14 @@ func (t *MerkleTree) collectRemainingNodes(node *Node, deleteKey []byte, nodes *
 func isBranchNode(value []byte) bool {
 	// Implement logic to determine if a node is a branch node
 	return len(value) == 64 && value[0] != 0 && value[1] != 0
+}
+
+// Implement "¬"
+func falseBytes(data []byte) []byte {
+	result := make([]byte, len(data))
+	for i := 0; i < len(data); i++ {
+		result[i] = 0xFF - data[i]
+		// result[i] = ^data[i]
+	}
+	return result
 }

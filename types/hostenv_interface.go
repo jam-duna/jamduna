@@ -5,23 +5,39 @@ import (
 )
 
 type HostEnv interface {
+
+	// ∀(s ↦ a) ∈ δ
+	ReadServiceBytes(s uint32) []byte
+	WriteServiceBytes(s uint32, v []byte)
+
+	// ∀(s↦a)∈δ,(h↦v)∈as
+	ReadServiceStorage(s uint32, k []byte) []byte
+	WriteServiceStorage(s uint32, k []byte, storage []byte)
+
+	// ∀(s ↦ a) ∈ δ, (h ↦ p) ∈ a p ∶
+	ReadServicePreimageBlob(s uint32, blob_hash common.Hash) []byte
+	WriteServicePreimageBlob(s uint32, blob []byte)
+
+	// ∀(s ↦ a) ∈ δ, ( ⎧⎩ h, l ⎫⎭ ↦ t)∈ a l ∶ C(s, E 4 (l)⌢(¬h 4∶ )) ↦ E(↕[E 4 (x) ∣ x <− t])
+	ReadServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32) []uint32
+	WriteServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32)
+
+	// Delete key(hash)
+	DeleteServiceStorageKey(s uint32, k []byte) error
+	DeleteServicePreimageKey(s uint32, blob_hash common.Hash) error
+	DeleteServicePreimageLookupKey(s uint32, blob_hash common.Hash, blob_length uint32) error
+
+	// Λ∶(A, N T , H)→ Y? , GP_0.3.5(94)
+	HistoricalLookup(s uint32, t uint32, blob_hash common.Hash) []byte
+
+	// Below are not used:
+
 	// Service Management
 	NewService(c []byte, l, b uint32, g, m uint64) uint32
 	UpgradeService(c []byte, g, m uint64) uint32
 	AddTransfer(m []byte, a, g uint64, d uint32) uint32
 
-	// Service Data Managemrnt
-	ReadServiceBytes(s uint32) ([]byte, uint32, bool)                   // GP(229)
-	WriteServiceBytes(s uint32, v []byte) bool                          // GP(229)
-	ReadServicePreimage(s uint32, h common.Hash) ([]byte, uint32, bool) // GP(229)
-	WriteServicePreimage(s uint32, k common.Hash, v []byte) bool        // GP(229)
-
 	// Preimage/DA
-	GetPreimage(k common.Hash, z uint32) (uint32, uint32)
-	RequestPreimage2(h common.Hash, z uint32, y uint32) uint32
-	RequestPreimage(h common.Hash, z uint32) uint32
-	ForgetPreimage(h common.Hash, z uint32) uint32
-	HistoricalLookup(s uint32, t uint32, h common.Hash) ([]byte, uint32, bool)
 	GetImportItem(i uint32) ([]byte, uint32)
 	ExportSegment(x []byte) uint32
 

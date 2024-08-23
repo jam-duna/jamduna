@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
@@ -15,6 +16,84 @@ Section 12.1. Preimage Integration. Prior to accumulation, we must first integra
 type PreimageLookup struct {
 	ServiceIndex uint32 `json:"service_index"`
 	Data         []byte `json:"data"`
+}
+
+func (p *PreimageLookup) BlobHash() common.Hash {
+	return common.BytesToHash(common.ComputeHash(p.Data))
+}
+
+func (p *PreimageLookup) BlobLength() uint32 {
+	return uint32(len(p.Data))
+}
+
+func (p *PreimageLookup) Blob() []byte {
+	return p.Data
+}
+
+func (p *PreimageLookup) Service_Index() uint32 {
+	return p.ServiceIndex
+}
+
+func (p *PreimageLookup) String() string {
+	s := fmt.Sprint("ServiceIndex=%v, BlobHash=%v (Len:%v). a_l=%v, a_p=%v\n", p.Service_Index(), p.BlobHash(), p.BlobLength(), p.AccountLookupHash(), p.AccountPreimageHash())
+	return s
+}
+
+// A_l --- C(s, (E4(l) ⌢ (¬h4:))
+func (p *PreimageLookup) AccountLookupHash() common.Hash {
+	s := p.ServiceIndex
+	blob_hash := p.BlobHash().Bytes()
+	blob_len := p.BlobLength()
+	return ComputeAL(s, blob_hash, blob_len)
+}
+
+// A_p --- c(s, H(p))
+func (p *PreimageLookup) AccountPreimageHash() common.Hash {
+	s := p.ServiceIndex
+	blob_hash := p.BlobHash().Bytes()
+	return ComputeC_SH(s, blob_hash)
+}
+
+// EQ 290 - state-key constructor functions C(s,h)
+func ComputeC_SH(s uint32, h []byte) common.Hash {
+	//s: service_index
+	//h: hash_component (assumed to be exact 32bytes)
+	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
+	stateKey := make([]byte, 32)
+	nBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
+
+	for i := 0; i < 4; i++ {
+		stateKey[2*i] = nBytes[i]
+		if i < len(h) {
+			stateKey[2*i+1] = h[i]
+		}
+	}
+	for i := 4; i < 28; i++ {
+		if i < len(h) {
+			stateKey[i+4] = h[i]
+		}
+	}
+	return common.BytesToHash(stateKey)
+}
+
+func ComputeAL(s uint32, blob_hash []byte, blob_len uint32) common.Hash {
+	lBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
+	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
+	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
+	account_lookuphash := ComputeC_SH(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	return account_lookuphash
+}
+
+// Implement "¬"
+func falseBytes(data []byte) []byte {
+	result := make([]byte, len(data))
+	for i := 0; i < len(data); i++ {
+		result[i] = 0xFF - data[i]
+		// result[i] = ^data[i]
+	}
+	return result
 }
 
 func (p PreimageLookup) DeepCopy() (PreimageLookup, error) {
