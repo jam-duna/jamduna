@@ -500,29 +500,29 @@ func TestServicePreImage_lookup(t *testing.T) {
 	case_b := []byte{1, 2}
 	case_c := []byte{1, 2, 3}
 
-	tree.SetPreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)), []uint32{100})
-	tree.SetPreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)), []uint32{100, 200})
-	tree.SetPreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)), []uint32{100, 200, 300})
+	tree.SetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)), []uint32{100})
+	tree.SetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)), []uint32{100, 200})
+	tree.SetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)), []uint32{100, 200, 300})
 
 	tree.printTree(tree.Root, 0)
 
-	ts1, _ := tree.GetPreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)))
-	ts2, _ := tree.GetPreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)))
-	ts3, _ := tree.GetPreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)))
-	ts4, _ := tree.GetPreImageLookup(45, common.ComputeHash(case_c), uint32(len(case_c)))
+	ts1, _ := tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
+	ts2, _ := tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
+	ts3, _ := tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
+	ts4, _ := tree.GetPreImageLookup(45, common.Blake2Hash(case_c), uint32(len(case_c)))
 
 	fmt.Println("ts1:", ts1)
 	fmt.Println("ts2:", ts2)
 	fmt.Println("ts3:", ts3)
 	fmt.Println("ts4:", ts4)
 
-	_ = tree.DeletePreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)))
-	_ = tree.DeletePreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)))
-	_ = tree.DeletePreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)))
+	_ = tree.DeletePreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
+	_ = tree.DeletePreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
+	_ = tree.DeletePreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
 
-	ts1, _ = tree.GetPreImageLookup(42, common.ComputeHash(case_a), uint32(len(case_a)))
-	ts2, _ = tree.GetPreImageLookup(43, common.ComputeHash(case_b), uint32(len(case_b)))
-	ts3, _ = tree.GetPreImageLookup(44, common.ComputeHash(case_c), uint32(len(case_c)))
+	ts1, _ = tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
+	ts2, _ = tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
+	ts3, _ = tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
 
 	fmt.Println("ts1:", ts1)
 	fmt.Println("ts2:", ts2)

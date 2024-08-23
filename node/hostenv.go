@@ -47,9 +47,9 @@ func (nh *NodeHostEnv) WriteServiceBytes(s uint32, v []byte) {
 	tree.SetService(255, s, v)
 }
 
-func (nh *NodeHostEnv) ReadServiceStorage(s uint32, storage_hash common.Hash) []byte {
+func (nh *NodeHostEnv) ReadServiceStorage(s uint32, storage_hash []byte) []byte {
 	tree := nh.GetTrie()
-	storage, err := tree.GetServiceStorage(s, storage_hash.Bytes())
+	storage, err := tree.GetServiceStorage(s, storage_hash)
 	if err != nil {
 		return nil
 	} else {
@@ -58,9 +58,9 @@ func (nh *NodeHostEnv) ReadServiceStorage(s uint32, storage_hash common.Hash) []
 	}
 }
 
-func (nh *NodeHostEnv) WriteServiceStorage(s uint32, storage_hash common.Hash, storage []byte) {
+func (nh *NodeHostEnv) WriteServiceStorage(s uint32, storage_hash []byte, storage []byte) {
 	tree := nh.GetTrie()
-	tree.SetServiceStorage(s, storage_hash.Bytes(), storage)
+	tree.SetServiceStorage(s, storage_hash, storage)
 }
 
 func (nh *NodeHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) []byte {
@@ -81,7 +81,7 @@ func (nh *NodeHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) {
 
 func (nh *NodeHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32) []uint32 {
 	tree := nh.GetTrie()
-	time_slots, err := tree.GetPreImageLookup(s, blob_hash.Bytes(), blob_length)
+	time_slots, err := tree.GetPreImageLookup(s, blob_hash, blob_length)
 	if err != nil {
 		return nil
 	} else {
@@ -92,7 +92,7 @@ func (nh *NodeHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
 
 func (nh *NodeHostEnv) WriteServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
 	tree := nh.GetTrie()
-	tree.SetPreImageLookup(s, blob_hash.Bytes(), blob_length, time_slots)
+	tree.SetPreImageLookup(s, blob_hash, blob_length, time_slots)
 
 }
 
@@ -121,7 +121,7 @@ func (nh *NodeHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	//lbytes := uint32ToBytes(blob_length)
 	//key := append(lbytes, hbytes...)
 	//timeslots, err_t := tree.GetPreImageLookup(s, key)
-	timeslots, err_t := tree.GetPreImageLookup(s, blob_hash.Bytes(), blob_length)
+	timeslots, err_t := tree.GetPreImageLookup(s, blob_hash, blob_length)
 	if err_t != nil {
 		return nil
 	}
@@ -155,11 +155,11 @@ func (nh *NodeHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	}
 }
 
-func (nh *NodeHostEnv) DeleteServiceStorageKey(s uint32, storage_hash common.Hash) error {
+func (nh *NodeHostEnv) DeleteServiceStorageKey(s uint32, storage_hash []byte) error {
 	tree := nh.GetTrie()
-	err := tree.DeleteServiceStorage(s, storage_hash.Bytes())
+	err := tree.DeleteServiceStorage(s, storage_hash)
 	if err != nil {
-		fmt.Printf("Failed to delete storage_hash: %x, error: %v", storage_hash.Bytes(), err)
+		fmt.Printf("Failed to delete storage_hash: %x, error: %v", storage_hash, err)
 		return err
 	}
 	return nil
@@ -178,9 +178,9 @@ func (nh *NodeHostEnv) DeleteServicePreimageKey(s uint32, blob_hash common.Hash)
 func (nh *NodeHostEnv) DeleteServicePreimageLookupKey(s uint32, blob_hash common.Hash, blob_length uint32) error {
 	tree := nh.GetTrie()
 
-	err := tree.DeletePreImageLookup(s, blob_hash.Bytes(), blob_length)
+	err := tree.DeletePreImageLookup(s, blob_hash, blob_length)
 	if err != nil {
-		fmt.Printf("Failed to delete blob_hash: %x, blob_lookup_len: %d, error: %v", blob_hash.Bytes(), blob_length, err)
+		fmt.Printf("Failed to delete blob_hash: %v, blob_lookup_len: %d, error: %v", blob_hash, blob_length, err)
 		return err
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -35,7 +36,7 @@ func (p *PreimageLookup) Service_Index() uint32 {
 }
 
 func (p *PreimageLookup) String() string {
-	s := fmt.Sprint("ServiceIndex=%v, BlobHash=%v (Len:%v). a_l=%v, a_p=%v\n", p.Service_Index(), p.BlobHash(), p.BlobLength(), p.AccountLookupHash(), p.AccountPreimageHash())
+	s := fmt.Sprintf("ServiceIndex=%v, BlobHash=%v (Len:%v). a_l=%v, a_p=%v\n", p.Service_Index(), p.BlobHash(), p.BlobLength(), p.AccountLookupHash(), p.AccountPreimageHash())
 	return s
 }
 

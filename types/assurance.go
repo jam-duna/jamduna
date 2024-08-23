@@ -27,7 +27,7 @@ type Assurance struct {
 	ParentHash common.Hash `json:"parent_hash"`
 	// f - 1 means "available"
 	Bitstring      []byte           `json:"bitstring"`
-	ValidatorIndex uint32              `json:"validator_index"`
+	ValidatorIndex uint32           `json:"validator_index"`
 	Signature      Ed25519Signature `json:"signature"`
 }
 

@@ -126,7 +126,7 @@ func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	time_slots, err := tree.GetPreImageLookup(s, blob_hash.Bytes(), blob_length)
+	time_slots, err := tree.GetPreImageLookup(s, blob_hash, blob_length)
 	if err != nil {
 		return nil
 	} else {
@@ -144,7 +144,7 @@ func (mh *MockHostEnv) WriteServicePreimageLookup(s uint32, blob_hash common.Has
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	tree.SetPreImageLookup(s, blob_hash.Bytes(), blob_length, time_slots)
+	tree.SetPreImageLookup(s, blob_hash, blob_length, time_slots)
 
 }
 
@@ -169,7 +169,7 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	//lbytes := uint32ToBytes(blob_length)
 	//key := append(lbytes, hbytes...)
 	//timeslots, err_t := tree.GetPreImageLookup(s, key)
-	timeslots, err_t := tree.GetPreImageLookup(s, blob_hash.Bytes(), blob_length)
+	timeslots, err_t := tree.GetPreImageLookup(s, blob_hash, blob_length)
 	if err_t != nil {
 		return nil
 	}
@@ -246,9 +246,9 @@ func (mh *MockHostEnv) DeleteServicePreimageLookupKey(s uint32, blob_hash common
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = tree.DeletePreImageLookup(s, blob_hash.Bytes(), blob_length)
+	err = tree.DeletePreImageLookup(s, blob_hash, blob_length)
 	if err != nil {
-		log.Fatalf("Failed to delete blob_hash: %x, blob_lookup_len: %d, error: %v", blob_hash.Bytes(), blob_length, err)
+		log.Fatalf("Failed to delete blob_hash: %v, blob_lookup_len: %d, error: %v", blob_hash, blob_length, err)
 		return err
 	}
 	return nil

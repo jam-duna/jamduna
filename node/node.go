@@ -961,7 +961,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("[N%d] EXPORTED ITEM %d => encoded in DA %v", h)
+			fmt.Printf("[N%d] EXPORTED ITEM %d => encoded in DA %v", n.id, e, h)
 		}
 	}
 

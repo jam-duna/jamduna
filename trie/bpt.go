@@ -546,7 +546,7 @@ func (t *MerkleTree) GetService(i uint8, s uint32) ([]byte, error) {
 }
 
 // set a_l (with timeslot if we have E_P). For GP_0.3.5(158)
-func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash []byte, blob_len uint32, time_slots []uint32) {
+func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) {
 
 	/*
 		∀(s ↦ a) ∈ δ, ( ⎧⎩ h, l ⎫⎭ ↦ t)∈ a l ∶ C(s, E 4 (l)⌢(¬h 4∶ )) ↦ E(↕[E 4 (x) ∣ x <− t])
@@ -560,8 +560,9 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash []byte, blob_len uint
 
 	lBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
-	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
-	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
+	blob_h := blob_hash.Bytes()
+	_h4 := falseBytes(blob_h[4:])        			// (¬h4:)
+	l_and_h := append(lBytes, _h4...)         		// (E4(l) ⌢ (¬h4:)
 	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
 	stateKey := account_lookuphash.Bytes()
 
@@ -584,12 +585,13 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash []byte, blob_len uint
 }
 
 // lookup a_l .. returning time slot. For GP_0.3.5(157)
-func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash []byte, blob_len uint32) ([]uint32, error) {
+func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) ([]uint32, error) {
 
 	lBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
-	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
-	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
+	blob_h := blob_hash.Bytes()
+	_h4 := falseBytes(blob_h[4:])        			// (¬h4:)
+	l_and_h := append(lBytes, _h4...)         		// (E4(l) ⌢ (¬h4:)
 	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
 	stateKey := account_lookuphash.Bytes()
 
@@ -601,7 +603,7 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash []byte, blob_len uint
 	vByte, err := t.Get(stateKey)
 	var time_slots []uint32
 
-	if vByte == nil {
+	if len(vByte) == 0 {
 		time_slots = make([]uint32, 0)
 	} else {
 		vByte = vByte[1:]
@@ -610,17 +612,17 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash []byte, blob_len uint
 			time_slots[i] = binary.LittleEndian.Uint32(vByte[i*4 : (i+1)*4])
 		}
 	}
-
 	return time_slots, err
 }
 
 // Delete PreImageLookup key(hash)
-func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash []byte, blob_len uint32) error {
+func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) error {
 
 	lBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
-	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
-	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
+	blob_h := blob_hash.Bytes()
+	_h4 := falseBytes(blob_h[4:])        			// (¬h4:)
+	l_and_h := append(lBytes, _h4...)         		// (E4(l) ⌢ (¬h4:)
 	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
 	stateKey := account_lookuphash.Bytes()
 

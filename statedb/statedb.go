@@ -217,13 +217,13 @@ func (s *StateDB) RemoveLookup(l *types.PreimageLookup) {
 
 // EP Errors
 const (
+	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
 	errPreimageBlobSet        = "PreimageBlob already set"
 )
 
 func (s *StateDB) ValidateLookup(l *types.PreimageLookup) (common.Hash, error) {
-	// check 156 - E_p should be ordered by what????
 	// check 157 - (1) a_p not equal to P (2) a_l is empty
 	t := s.GetTrie()
 	a_p := l.AccountPreimageHash()
@@ -239,7 +239,7 @@ func (s *StateDB) ValidateLookup(l *types.PreimageLookup) (common.Hash, error) {
 	}
 
 	//fmt.Printf("Validating E_p %v\n",l.String())
-	anchors, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash().Bytes(), l.BlobLength())
+	anchors, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
@@ -534,6 +534,13 @@ func (s *StateDB) SetID(id uint32) {
 func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup, targetJCE uint32, id uint32) error {
 
 	//TODO: (eq 156) need to make sure E_P is sorted. by what??
+	// validate (eq 156)
+	for i := 1; i < len(preimages); i++ {
+		if preimages[i].ServiceIndex <= preimages[i-1].ServiceIndex {
+			return fmt.Errorf(errServiceIndices)
+		}
+	}
+
 	for _, l := range preimages {
 		// validate eq 157
 		_, err := s.ValidateLookup(&l)
@@ -549,7 +556,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
 		t.SetPreImageBlob(l.Service_Index(), l.Blob())
-		t.SetPreImageLookup(l.Service_Index(), l.BlobHash().Bytes(), l.BlobLength(), []uint32{targetJCE})
+		t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 	}
 	return nil
 }
@@ -683,6 +690,13 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		extrinsicData.PreimageLookups = append(extrinsicData.PreimageLookups, pl)
 	}
 	// TODO: need somekind of ordering eq 156
+	for i := 0; i < len(extrinsicData.PreimageLookups); i++ {
+		for j := 0; j < len(extrinsicData.PreimageLookups)-1; j++ {
+			if extrinsicData.PreimageLookups[j].ServiceIndex > extrinsicData.PreimageLookups[j+1].ServiceIndex {
+				extrinsicData.PreimageLookups[j], extrinsicData.PreimageLookups[j+1] = extrinsicData.PreimageLookups[j+1], extrinsicData.PreimageLookups[j]
+			}
+		}
+	}
 
 	s.queuedAssurances = make(map[common.Hash]types.Assurance)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees

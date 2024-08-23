@@ -573,6 +573,7 @@ func (vm *VM) hostSolicit() uint32 {
 		anchor_timeslot := vm.GetJCETime()
 		vm.Solicits = append(vm.Solicits, solicit)
 		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+		vm.writeRegister(0, OK)
 		return OK
 	} else {
 		vm.writeRegister(0, HUH)
@@ -582,7 +583,7 @@ func (vm *VM) hostSolicit() uint32 {
 
 // Forget preimage
 func (vm *VM) hostForget() uint32 {
-	// Unfinished
+
 	s := uint32(1) // s: serviceIndex
 	o, _ := vm.readRegister(0)
 	z, _ := vm.readRegister(1)
@@ -594,16 +595,24 @@ func (vm *VM) hostForget() uint32 {
 
 	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, common.BytesToHash(hBytes), z)
 	anchor_timeslot := vm.GetJCETime()
-	if len(X_s_l) == 0 || len(X_s_l) == 2 {
-
+	if len(X_s_l) == 0 || (len(X_s_l) == 2 && X_s_l[1] < (anchor_timeslot-D)) {
+		vm.hostenv.DeleteServicePreimageLookupKey(s, common.BytesToHash(hBytes), z)
+		vm.hostenv.DeleteServicePreimageKey(s, common.BytesToHash(hBytes))
+		vm.writeRegister(0, OK)
+		return OK
 	} else if len(X_s_l) == 1 {
 		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+		vm.writeRegister(0, OK)
+		return OK
+	} else if len(X_s_l) == 3 && X_s_l[1] < (anchor_timeslot-D) {
+		X_s_l[2] = uint32(anchor_timeslot)
+		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, X_s_l)
+		vm.writeRegister(0, OK)
+		return OK
 	} else {
-		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
-
+		vm.writeRegister(0, HUH)
+		return HUH
 	}
-
-	return errCode
 }
 
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage

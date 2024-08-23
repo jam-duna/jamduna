@@ -16,6 +16,7 @@ import (
 	"os"
 
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/pvm"
 
 	"github.com/colorfulnotion/jam/types"
 )
@@ -169,6 +170,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 	extrinsics := []string{"abcdef", "abcd", "cat", "dog"}
 	for _, s := range extrinsics {
 		data := []byte(s)
+		fmt.Println(data)
 		blob_hash, err := senderNode.EncodeAndDistributeData(data)
 		if err != nil {
 			t.Fatalf("Failed to encode and distribute data: %v", err)
@@ -186,15 +188,15 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		0,
 		74, // size of c
 		4, 0, 0, 64,
-		4, 1, 3,
-		38, 2, 0, 64, 67, 68, 126, 38,
-		38, 2, 4, 64, 135, 56, 26, 252,
-		38, 2, 8, 64, 144, 16, 235, 159,
-		38, 2, 12, 64, 137, 120, 30, 175,
-		38, 2, 16, 64, 50, 217, 223, 86,
-		38, 2, 20, 64, 186, 220, 205, 4,
-		38, 2, 24, 64, 50, 110, 141, 129,
-		38, 2, 28, 64, 53, 243, 87, 238,
+		4, 1, 6,
+		38, 2, 0, 64, 2, 140, 91, 117,
+		38, 2, 4, 64, 26, 184, 246, 11,
+		38, 2, 8, 64, 158, 6, 29, 62,
+		38, 2, 12, 64, 227, 25, 126, 23,
+		38, 2, 16, 64, 101, 37, 44, 137,
+		38, 2, 20, 64, 77, 169, 193, 149,
+		38, 2, 24, 64, 43, 144, 90, 219,
+		38, 2, 28, 64, 18, 98, 60, 158,
 		78, 13,
 		0,
 		145, 128, 128, 128, 128, 128, 128, 128, 128, 254, // bitmask
@@ -205,8 +207,9 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		//you can potentially call NewForceCreateVM() and initialize your vm, make sure you handle the reg properly
 		vm := pvm.NewVMFromCode(solict_program_code, 0, nodes[i].NewNodeHostEnv())
 		// NEW IDEA: hostSolicit will fill this array
-		lookups := vm.Solicits
+		// lookups = vm.Solicits
 		err := vm.Execute()
+		lookups := vm.Solicits
 		if err != nil {
 			fmt.Printf("VM Execute Err:%v/n", err)
 		}
@@ -252,6 +255,12 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		// THIS update a_p
 		nodes[i].statedb.ApplyStateTransitionFromBlock(ctx, b1)
 
+		// check whetere intergrate successfully
+		t := s.GetTrie()
+		data, _ := t.GetPreImageBlob(b1.Extrinsic.PreimageLookups[0].ServiceIndex, bhash(b1.Extrinsic.PreimageLookups[0].Data).Bytes())
+		ts, _ := t.GetPreImageLookup(b1.Extrinsic.PreimageLookups[0].ServiceIndex, bhash(b1.Extrinsic.PreimageLookups[0].Data), uint32(len(b1.Extrinsic.PreimageLookups[0].Data)))
+		fmt.Println("data:", data)
+		fmt.Println("ts:", ts)
 	}
 }
 
