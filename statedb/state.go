@@ -5,18 +5,18 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-	//what Saforles Contains
-	// entropy η eq 66
-	// The validator keys and metadata to be drawn from next ι eq 66
-	// The validator κeys and metadata currently active. κ eq 66
-	// The validator keys and metadata which were active in the prior epoch λ eq 66
-	// timeslot Tau
+//what Saforles Contains
+// entropy η eq 66
+// The validator keys and metadata to be drawn from next ι eq 66
+// The validator κeys and metadata currently active. κ eq 66
+// The validator keys and metadata which were active in the prior epoch λ eq 66
+// timeslot Tau
 
 type JamState struct {
-	AuthorizationsPool [types.TotalCores][types.MaxAuthorizationPoolItems]common.Hash `json:"alpha"` // The core αuthorizations pool. α eq 85
-	BeefyPool          [types.RecentHistorySize]Beta_state                            `json:"beta"`  // The core βeefy pool. β eq 81
-	SafroleStateGamma  SafroleBasicState                                              `json:"gamma"` // SafroleBasicState γ eq 48
-	SafroleState       *SafroleState                                                   `json:"safrole"`
+	AuthorizationsPool       [types.TotalCores][types.MaxAuthorizationPoolItems]common.Hash  `json:"alpha"` // The core αuthorizations pool. α eq 85
+	BeefyPool                [types.RecentHistorySize]Beta_state                             `json:"beta"`  // The core βeefy pool. β eq 81
+	SafroleStateGamma        SafroleBasicState                                               `json:"gamma"` // SafroleBasicState γ eq 48
+	SafroleState             *SafroleState                                                   `json:"safrole"`
 	PriorServiceAccountState map[uint32]types.ServiceAccount                                 `json:"delta"` // The (prior) state of the service accounts. δ eq 89
 	AvailabilityAssignments  []Rho_state                                                     `json:"rho"`   // AvailabilityAssignments ρ eq 118
 	AuthorizationQueue       [types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash `json:"phi"`   // The authorization queue  φ eq 85
@@ -95,12 +95,12 @@ type Pi_state struct {
 }
 
 func NewJamState() *JamState {
-    return &JamState{
-        // Initializing slices and maps to avoid nil pointers
-        PriorServiceAccountState: make(map[uint32]types.ServiceAccount),
-        AvailabilityAssignments:  make([]Rho_state, 0),
-	    SafroleState:             NewSafroleState(),
-    }
+	return &JamState{
+		// Initializing slices and maps to avoid nil pointers
+		PriorServiceAccountState: make(map[uint32]types.ServiceAccount),
+		AvailabilityAssignments:  make([]Rho_state, 0),
+		SafroleState:             NewSafroleState(),
+	}
 }
 
 // Function to copy a State struct

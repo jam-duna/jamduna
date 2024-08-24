@@ -56,10 +56,29 @@ func computeLeaf(data []byte) []byte {
 	return h.Sum(nil)
 }
 
+func ComputeLeaf(data []byte) []byte {
+	return computeLeaf(data)
+}
+
 func hashNodes(left, right *Node) []byte {
 	h, _ := blake2b.New256(nil)
 	h.Write([]byte("node"))
 	h.Write(left.Hash)
 	h.Write(right.Hash)
 	return h.Sum(nil)
+}
+
+
+// eq 187
+func PadToMultipleOfN(x []byte, n int) []byte {
+	if n <= 0 {
+		return x // If n is not positive, return the original slice
+	}
+	paddingSize := (n - (len(x) % n)) % n // Calculate how many zeros to add
+	if paddingSize == 0 {
+		return x // Already a multiple of n
+	}
+	padded := make([]byte, len(x)+paddingSize)
+	copy(padded, x) // Copy original slice to the new padded slice
+	return padded
 }

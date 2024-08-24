@@ -14,6 +14,8 @@ import (
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/colorfulnotion/jam/pvm"
+
 )
 
 type Message struct {
@@ -31,6 +33,9 @@ type StateDB struct {
 	JamState   *JamState             `json:"Jamstate"`
 	sdb        *storage.StateDBStorage
 	trie       *trie.MerkleTree
+
+	VMs 	   map[uint32]*pvm.VM
+	vmMutex    sync.Mutex
 
 	knownPreimageLookups  map[common.Hash]uint32
 	queuedPreimageLookups map[common.Hash]types.PreimageLookup
@@ -51,6 +56,7 @@ type StateDB struct {
 	knownTickets  map[common.Hash]int
 	queuedTickets map[common.Hash]types.Ticket
 	ticketMutex   sync.Mutex
+
 }
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
@@ -197,6 +203,10 @@ func (s *StateDB) ProcessIncomingAssurance(a types.Assurance) {
 	s.AddAssuranceToQueue(a)
 }
 
+func (s *StateDB) GetVMMutex() sync.Mutex {
+	return s.vmMutex
+}
+
 func (s *StateDB) RemoveTicket(t *types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
@@ -324,23 +334,23 @@ func (s *StateDB) GetPvmState() *PvmState {
 // todo: implement this, not sure if this correct
 func (s *StateDB) GetDisputesState() {
 	/*
-	//not sure if this is correct
-	t := s.GetTrie()
-	//TODO: deserialize the disputes state
-	disputeState := JamState{}
-	PsiBytes, err := t.GetState(C5)
-	disputeState.SetPsi(PsiBytes)
-	RhoBytes, err := t.GetState(C10)
-	disputeState.SetRho(RhoBytes)
-	tauByte, err := t.GetState(C11)
-	tau := binary.BigEndian.Uint32(tauByte) // not sure if this is big endian
-	disputeState.SetTau(tau)
-	disputeState.SetKappa(s.Safrole.CurrValidators)
-	disputeState.SetLambda(s.Safrole.PrevValidators)
-	if err != nil {
-		fmt.Println("Error getting disputes state", err)
-	}
-	s.JamState = &disputeState
+		//not sure if this is correct
+		t := s.GetTrie()
+		//TODO: deserialize the disputes state
+		disputeState := JamState{}
+		PsiBytes, err := t.GetState(C5)
+		disputeState.SetPsi(PsiBytes)
+		RhoBytes, err := t.GetState(C10)
+		disputeState.SetRho(RhoBytes)
+		tauByte, err := t.GetState(C11)
+		tau := binary.BigEndian.Uint32(tauByte) // not sure if this is big endian
+		disputeState.SetTau(tau)
+		disputeState.SetKappa(s.Safrole.CurrValidators)
+		disputeState.SetLambda(s.Safrole.PrevValidators)
+		if err != nil {
+			fmt.Println("Error getting disputes state", err)
+		}
+		s.JamState = &disputeState
 	*/
 }
 
@@ -352,8 +362,8 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
 	sf := s.GetSafrole()
 	if sf == nil {
-		fmt.Printf("NO SAFROLE %v", s);
-		panic(222);
+		fmt.Printf("NO SAFROLE %v", s)
+		panic(222)
 	}
 	sb := sf.GetSafroleBasicState()
 	safroleStateEncode, _ := sb.Bytes()
@@ -393,7 +403,6 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	// TODO: C13 = "ActiveValidator"
 	return common.BytesToHash(t.GetRootHash())
 }
-
 
 func (s *StateDB) GetSafroleState() *SafroleState {
 	return s.JamState.SafroleState
@@ -448,6 +457,11 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	return statedb, nil
 }
 
+func (s *StateDB) CopyTrieState(stateRoot common.Hash) (*trie.MerkleTree) {
+	t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), s.sdb)
+	return t
+}
+
 // Copy generates a copy of the StateDB
 func (s *StateDB) Copy() *StateDB {
 	// Create a new instance of StateDB
@@ -460,7 +474,7 @@ func (s *StateDB) Copy() *StateDB {
 		JamState:       s.JamState.Copy(), // DisputesState has a Copy method
 		Corejam:        s.Corejam.Copy(),  // CorejamState has a Copy method
 		sdb:            s.sdb,
-		trie:           s.trie, // Deep copy if the MerkleTree is mutable
+		trie:           s.CopyTrieState(s.StateRoot), // Deep copy if the MerkleTree is mutable
 		knownTickets:   make(map[common.Hash]int),
 		queuedTickets:  make(map[common.Hash]types.Ticket),
 		knownDisputes:  make(map[common.Hash]int),

@@ -7,30 +7,57 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/statedb"
 )
 
 const OK uint32 = 0
 
 type HostEnv struct {
-	VMs map[uint32]*pvm.VM
-}
-
-type NodeHostEnv struct {
-	trie *trie.MerkleTree
 	node *Node
+	statedb *statedb.StateDB
 }
 
-func (n *Node) NewNodeHostEnv() *NodeHostEnv {
-	trie_backend := n.getTrie()
-	return &NodeHostEnv{trie: trie_backend, node: n}
+//singleton
+type NodeHostEnv struct {
+	node *Node
+	statedb *statedb.StateDB
+	//flex    types.CustomeBackend
+}
+
+func (nh *NodeHostEnv) FlexBackend() interface{} {
+	return nh.statedb
+}
+
+func (nh *NodeHostEnv) GetEnvType() string {
+	return "NODE"
+}
+
+func (n *Node) NewNodeHostEnv(target_state *statedb.StateDB) *NodeHostEnv {
+	return &NodeHostEnv{node: n, statedb: target_state}
+}
+
+func (nh *NodeHostEnv) GetState() *statedb.StateDB {
+	return nh.statedb
+}
+
+func (nh *NodeHostEnv) GetTrie() *trie.MerkleTree {
+	return nh.GetState().GetTrie()
 }
 
 func (nh *NodeHostEnv) GetNode() *Node {
 	return nh.node
 }
 
-func (nh *NodeHostEnv) GetTrie() *trie.MerkleTree {
-	return nh.trie
+// GetTimeslot uses FlexBackend to get the StateDB and then calls GetSafrole
+func (nh *NodeHostEnv) GetTimeslot() uint32 {
+	// Type assert FlexBackend to *statedb.StateDB
+	if s, ok := nh.FlexBackend().(*statedb.StateDB); ok {
+		// Successfully casted to *statedb.StateDB
+		sf := s.GetSafrole()
+		return sf.GetTimeSlot()
+	}
+	// Handle the case where the assertion fails
+	panic("Unexpected type, not *statedb.StateDB")
 }
 
 func (nh *NodeHostEnv) ReadServiceBytes(s uint32) []byte {
@@ -47,9 +74,9 @@ func (nh *NodeHostEnv) WriteServiceBytes(s uint32, v []byte) {
 	tree.SetService(255, s, v)
 }
 
-func (nh *NodeHostEnv) ReadServiceStorage(s uint32, storage_hash []byte) []byte {
+func (nh *NodeHostEnv) ReadServiceStorage(s uint32, k []byte) []byte {
 	tree := nh.GetTrie()
-	storage, err := tree.GetServiceStorage(s, storage_hash)
+	storage, err := tree.GetServiceStorage(s, k)
 	if err != nil {
 		return nil
 	} else {
@@ -58,9 +85,9 @@ func (nh *NodeHostEnv) ReadServiceStorage(s uint32, storage_hash []byte) []byte 
 	}
 }
 
-func (nh *NodeHostEnv) WriteServiceStorage(s uint32, storage_hash []byte, storage []byte) {
+func (nh *NodeHostEnv) WriteServiceStorage(s uint32, k []byte, storage []byte) {
 	tree := nh.GetTrie()
-	tree.SetServiceStorage(s, storage_hash, storage)
+	tree.SetServiceStorage(s, k, storage)
 }
 
 func (nh *NodeHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) []byte {
@@ -116,11 +143,6 @@ func (nh *NodeHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 
 	blob_length := uint32(len(blob))
 
-	//MK: william to fix & verify
-	//hbytes := falseBytes(h.Bytes()[4:])
-	//lbytes := uint32ToBytes(blob_length)
-	//key := append(lbytes, hbytes...)
-	//timeslots, err_t := tree.GetPreImageLookup(s, key)
 	timeslots, err_t := tree.GetPreImageLookup(s, blob_hash, blob_length)
 	if err_t != nil {
 		return nil
@@ -155,11 +177,11 @@ func (nh *NodeHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	}
 }
 
-func (nh *NodeHostEnv) DeleteServiceStorageKey(s uint32, storage_hash []byte) error {
+func (nh *NodeHostEnv) DeleteServiceStorageKey(s uint32, k []byte) error {
 	tree := nh.GetTrie()
-	err := tree.DeleteServiceStorage(s, storage_hash)
+	err := tree.DeleteServiceStorage(s, k)
 	if err != nil {
-		fmt.Printf("Failed to delete storage_hash: %x, error: %v", storage_hash, err)
+		fmt.Printf("Failed to delete k: %x, error: %v", k, err)
 		return err
 	}
 	return nil
@@ -201,10 +223,12 @@ func (nh *NodeHostEnv) AddTransfer(m []byte, a, g uint64, d uint32) uint32 {
 }
 
 func (nh *NodeHostEnv) GetImportItem(i uint32) ([]byte, uint32) {
+	//TODO: william to add
 	return []byte{}, OK
 }
 
 func (nh *NodeHostEnv) ExportSegment(x []byte) uint32 {
+	//TODO: william to add
 	return OK
 }
 
@@ -233,43 +257,44 @@ func (nh *NodeHostEnv) DeleteKey(k common.Hash) error {
 
 // VM Management: CreateVM, GetVM, ExpungeVM
 func (nh *NodeHostEnv) CreateVM(code []byte, i uint32) uint32 {
-	return nh.GetNode().CreateVM(code, i)
-}
-
-func (nh *NodeHostEnv) GetVM(n uint32) (*pvm.VM, bool) {
-	return nh.GetNode().GetVM(n)
-}
-
-func (nh *NodeHostEnv) ExpungeVM(n uint32) bool {
-	return nh.GetNode().ExpungeVM(n)
-}
-
-func (node *Node) CreateVM(code []byte, i uint32) uint32 {
+	s := nh.GetState()
+	n := nh.GetNode()
 	maxN := uint32(0)
-	for n := range node.VMs {
+	for n := range s.VMs {
 		if n > maxN {
 			maxN = n
 		}
 	}
-	nh := &NodeHostEnv{trie: node.getTrie(), node: node}
-	node.VMs[maxN+1] = pvm.NewVMFromCode(code, i, nh)
+	vm := pvm.NewVMFromCode(code, i, &NodeHostEnv{statedb: s, node: n})
+	mu := s.GetVMMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	s.VMs[maxN+1] = vm
 	return maxN + 1
 }
 
-func (node *Node) GetVM(n uint32) (*pvm.VM, bool) {
-	vm, ok := node.VMs[n]
+func (nh *NodeHostEnv) GetVM(n uint32) (*pvm.VM, bool) {
+	s := nh.GetState()
+	mu := s.GetVMMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	vm, ok := s.VMs[n]
 	if !ok {
 		return nil, false
 	}
 	return vm, true
 }
 
-func (node *Node) ExpungeVM(n uint32) bool {
-	_, ok := node.VMs[n]
+func (nh *NodeHostEnv) ExpungeVM(n uint32) bool {
+	s := nh.GetState()
+	mu := s.GetVMMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	_, ok := s.VMs[n]
 	if !ok {
 		return false
 	}
-	node.VMs[n] = nil
+	s.VMs[n] = nil
 	return true
 }
 
@@ -284,15 +309,6 @@ func (nh *NodeHostEnv) Empower(m uint32, a uint32, v uint32) uint32 {
 
 func (nh *NodeHostEnv) Assign(c []byte) uint32 {
 	return OK
-}
-
-func falseBytes(data []byte) []byte {
-	result := make([]byte, len(data))
-	for i := 0; i < len(data); i++ {
-		result[i] = 0xFF - data[i]
-		// result[i] = ^data[i]
-	}
-	return result
 }
 
 func uint32ToBytes(s uint32) []byte {

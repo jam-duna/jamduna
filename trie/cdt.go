@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 //"golang.org/x/crypto/blake2b"
@@ -21,6 +23,17 @@ type CDTNode struct {
 type CDMerkleTree struct {
 	root   *CDTNode
 	leaves []*CDTNode
+}
+
+// Segment represents a segment of data
+type Segment struct {
+	Data []byte
+}
+
+// PagedProof represents a paged proof
+type PagedProof struct {
+	SegmentHashes [64]common.Hash
+	MerkleRoot    common.Hash
 }
 
 // NewCDMerkleTree creates a new constant-depth Merkle tree
@@ -119,6 +132,10 @@ func (tree *CDMerkleTree) Root() []byte {
 	return tree.root.Hash
 }
 
+func (tree *CDMerkleTree) RootHash() common.Hash {
+	return common.BytesToHash(tree.Root())
+}
+
 // Get returns the value of the leaf at the given index
 func (mt *CDMerkleTree) Get(index int) ([]byte, error) {
 	if index < 0 || index >= len(mt.leaves) {
@@ -168,6 +185,10 @@ func (mt *CDMerkleTree) JustifyX(index int, x int) ([][]byte, error) {
 	return justification, nil
 }
 
+func VerifyJustification(leafHash []byte, index int, justification [][]byte) []byte {
+	return verifyJustification(leafHash, index, justification)
+}
+
 // verifyJustification verifies the justification for a given index
 func verifyJustification(leafHash []byte, index int, justification [][]byte) []byte {
 	currentHash := leafHash
@@ -180,6 +201,10 @@ func verifyJustification(leafHash []byte, index int, justification [][]byte) []b
 		index /= 2
 	}
 	return currentHash
+}
+
+func VerifyJustifyX(leafHash []byte, index int, justification [][]byte, x int) []byte {
+	return verifyJustifyX(leafHash, index, justification, x)
 }
 
 // verifyJustifyX verifies the justification for a given index and size x
@@ -219,4 +244,61 @@ func findSibling(parent, node *CDTNode) *CDTNode {
 		return parent.Right
 	}
 	return parent.Left
+}
+
+// generatePageProof creates paged proofs from segments
+func generatePageProof(segments []Segment) []PagedProof {
+	var pagedProofs []PagedProof
+	var currentPageSegments []common.Hash
+
+	for _, segment := range segments {
+		data := segment.Data
+
+		// put the hash of the segment into the current page
+		currentPageSegments = append(currentPageSegments, common.Hash(computeLeaf(data)))
+
+		// if the current page is full, create a paged proof
+		if len(currentPageSegments) == 64 {
+			pagedProofs = append(pagedProofs, createPagedProof(currentPageSegments))
+			currentPageSegments = []common.Hash{}
+		}
+	}
+
+	// if there are remaining segments, create a paged proof
+	if len(currentPageSegments) > 0 {
+		for len(currentPageSegments) < 64 {
+			// append empty hashes to fill the page
+			currentPageSegments = append(currentPageSegments, common.Hash{})
+		}
+		pagedProofs = append(pagedProofs, createPagedProof(currentPageSegments))
+	}
+
+	return pagedProofs
+}
+
+// createPagedProof creates a paged proof
+func createPagedProof(segmentHashes []common.Hash) PagedProof {
+	var segmentHashesArray [64]common.Hash
+	copy(segmentHashesArray[:], segmentHashes)
+
+	merkleRoot := generateMerkleRoot(segmentHashes)
+
+	return PagedProof{
+		SegmentHashes: segmentHashesArray,
+		MerkleRoot:    merkleRoot,
+	}
+}
+
+// generates the Merkle root from the segment hashes
+func generateMerkleRoot(hashes []common.Hash) common.Hash {
+	// transform the hashes to byte slices
+	var hashBytes [][]byte
+	for _, hash := range hashes {
+		hashBytes = append(hashBytes, hash[:])
+	}
+
+	// create a new CDMerkleTree by the hashes
+	tree := NewCDMerkleTree(hashBytes)
+
+	return common.BytesToHash(tree.Root())
 }

@@ -75,7 +75,7 @@ type Node struct {
 	//peersAddr  	 map[string]string
 	tlsConfig   *tls.Config
 	mutex       sync.Mutex
-	VMs         map[uint32]*pvm.VM
+	//VMs         map[uint32]*pvm.VM
 	connections map[string]quic.Connection
 	streams     map[string]quic.Stream
 	store       *storage.StateDBStorage /// where to put this?
@@ -916,11 +916,11 @@ func (n *Node) computeAssuranceBitstring() []byte {
 }
 
 func (n *Node) checkAssurance() error {
-	assurance := types.Assurance {
-		ParentHash: n.statedb.ParentHash,
-	  Bitstring:  n.computeAssuranceBitstring(),
+	assurance := types.Assurance{
+		ParentHash:     n.statedb.ParentHash,
+		Bitstring:      n.computeAssuranceBitstring(),
 		ValidatorIndex: n.id,
-	//	Signature: signature,
+		//	Signature: signature,
 	}
 	h := common.ComputeHash(append(n.statedb.ParentHash.Bytes(), assurance.Bitstring...))
 	assuranceBytes := append([]byte(types.X_A), h...)
@@ -929,40 +929,129 @@ func (n *Node) checkAssurance() error {
 	return nil
 }
 
+/*
+M_B: WBT
+M : CDT
+
+C : Erasure-encoding fn
+
+b : the E(p,x,i,j)
+
+Data availability specifi- cation of the package (s)
+s : A(H(p),E(p,x,i,j),Ìe)
+
+H(p): packageHash
+p: package
+w: workItem
+x = [X(w)∣w <−pw]  "import segment data"
+i = [M(w)∣w <−pw]  "the extrinsic data"
+j = Merkle paths for the justifications
+s : all segments exported by all work-packages exporting a segment to be imported
+
+Ìe: sequence of results for each of the work-items
+
+WC: 684 (full) / (2) tiny
+WS: 6 	(full) / (6) tiny
+
+#: a function mapping over all items of a sequence (eq.11) [f(x0),f(x1),...] = f#([x0,x1,...])
+
+A: {H, Y, [G]} → S
+
+	(h, b, s) ↦ (h, l: |b|, u, e: M(s))
+
+where u = M_B([x̂ | x ∈ T[𝓫•, s•]])
+
+and 𝓫• = H#(C⟦|b|/W_c⟧(𝓟_wc(b)))  𝓟 here is Padding
+
+and s• = M#_B(T⟦C#_6⟧(s ⌢ P(s)))  P here is Page-Proof
+*/
+func (n *Node) getImportSegment(segmentRoot common.Hash, segmentIndex uint32) ([]byte, error) {
+	// TODO
+	return []byte{}, nil
+}
+
+func (n *Node) getImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
+	var imports [][]byte
+	for _, s := range importsegments {
+		importItem, err := n.getImportSegment(s.SegmentRoot, s.SegmentIndex)
+		if err != nil {
+			return imports, err
+		}
+		imports = append(imports, importItem)
+	}
+	return imports, nil
+}
+
+func (n *Node) getPVMStateDB() (*statedb.StateDB) {
+	// TODO: processWorkPackage should provide clear signal on which stateDB to work with. What is this signal?
+	// I don't think it should be the tip. workPackage probably requires somekind of blkhash or stateRoot?
+	target_statedb := n.statedb.Copy() // stub. need to figure out what to do here
+	return target_statedb
+}
+
 func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
+	targetStateDB := n.getPVMStateDB()
+
 	for _, workItem := range workPackage.WorkItems {
 		code, err := n.FetchAndReconstructData(workItem.CodeHash)
 		if err != nil {
 			return err
 		}
 		// TODO: statedb should follow HostEnv
-		vm := pvm.NewVMFromCode(code, 0, nil) // TODO: n.statedb
+		vm := pvm.NewVMFromCode(code, 0, n.NewNodeHostEnv(targetStateDB))
+		imports, err := n.getImportSegments(workItem.ImportedSegments)
+		if err != nil {
+			return err
+		}
+		vm.SetImports(imports)
 		vm.SetExtrinsicsPayload(workItem.Extrinsics, workItem.PayloadBlob)
 		err = vm.Execute()
 		if err != nil {
 			return err
 		}
 
-		// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
-		result := types.WorkResult{
-			Service:                workItem.ServiceIdentifier,
-			CodeHash:               workItem.CodeHash,
-			PayloadHash:            common.Blake2Hash(workItem.PayloadBlob),
-			GasPrioritizationRatio: 0,
-			Output:                 []byte{}, // refinement_context
-			Error:                  "",
-		}
-		results = append(results, result)
+		leaves := [][]byte{}
 		for _, e := range vm.Exports {
 			h, err := n.EncodeAndDistributeData(e)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("[N%d] EXPORTED ITEM %d => encoded in DA %v", n.id, e, h)
+			leaves = append(leaves, h.Bytes()) // h is the H(e) .. assuming e is wc*ws
+			// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
+			/*
+				result := types.WorkResult{
+					Service:                workItem.ServiceIdentifier,
+					CodeHash:               workItem.CodeHash,
+					PayloadHash:            common.Blake2Hash(workItem.PayloadBlob),
+					GasPrioritizationRatio: 0,
+					Output:                 []byte{}, // refinement_context
+					Error:                  "",
+				}
+			*/
+			//results = append(results, result)
+			//fmt.Printf("[N%d] EXPORTED ITEM %d => encoded in DA %v", n.id, e, h)
 		}
+
+		tree := trie.NewCDMerkleTree(leaves)
+
+		// Test justification for each leaf
+		for i, leaf := range leaves {
+			justification, err := tree.Justify(i)
+			if err != nil {
+				return fmt.Errorf("Error justifying leaf %d: %v\n", i, err)
+			}
+			leafHash := trie.ComputeLeaf(leaf)
+			computedRoot := trie.VerifyJustification(leafHash, i, justification)
+			if !common.CompareBytes(computedRoot, tree.Root()) {
+				return fmt.Errorf("Justification failed for leaf %d: expected root %s, got %s\n", i, tree.RootHash(), common.Hash(computedRoot))
+			} else {
+				fmt.Printf("Justification verified for leaf %d\n", i)
+			}
+		}
+
 	}
 
 	// Now create a WorkReport with AvailabilitySpecification and RefinementContext

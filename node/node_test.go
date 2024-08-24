@@ -15,8 +15,8 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/statedb"
 
 	"github.com/colorfulnotion/jam/types"
 )
@@ -205,7 +205,9 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 	// solicit code executes causes SDB writes for a_l USING: ReadServiceBytes, ReadServicePreimageLookup, WriteServicePreimageLookup
 	for i := 0; i < 1; i++ {
 		//you can potentially call NewForceCreateVM() and initialize your vm, make sure you handle the reg properly
-		vm := pvm.NewVMFromCode(solict_program_code, 0, nodes[i].NewNodeHostEnv())
+		poa_node := nodes[i]
+		target_statedb := poa_node.getPVMStateDB()
+		vm := pvm.NewVMFromCode(solict_program_code, 0, poa_node.NewNodeHostEnv(target_statedb))
 		// NEW IDEA: hostSolicit will fill this array
 		// lookups = vm.Solicits
 		err := vm.Execute()
@@ -218,7 +220,6 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		//stateDB.NewStateDB(nodes[0].storage)
 		//s := nodes[i].statedb.NewStateDB(nodes[0].storage)
 
-		poa_node := nodes[i]
 		s := poa_node.statedb
 		targetJCE := statedb.ComputeCurrentJCETime() + 120
 		b0, s2, err0 := s.MakeBlock(poa_node.credential, targetJCE)
@@ -323,7 +324,10 @@ func TestWorkGuarantee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
+
 	// Prepare a mock work package and work item
+	importedSegments := make([]types.ImportSegment, 0)
+	// TODO: write out some imported segments similar to the Extrinsics
 	workPackage := types.WorkPackage{
 		AuthorizationToken: []byte("0x"),
 		ServiceIndex:       1,
@@ -336,7 +340,7 @@ func TestWorkGuarantee(t *testing.T) {
 				CodeHash:            codeHash,
 				PayloadBlob:         []byte("0x00000010"),
 				GasLimit:            10000000,
-				ImportedSegments:    nil, //[][]byte{},
+				ImportedSegments:    importedSegments,
 				NewData:             nil, // Add any mock new data segments as needed
 				NumSegmentsExported: 1,   // ??
 				Extrinsics: [][]byte{

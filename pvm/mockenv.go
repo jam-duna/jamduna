@@ -15,6 +15,14 @@ type MockHostEnv struct {
 	db *storage.StateDBStorage
 }
 
+func (mh *MockHostEnv) FlexBackend() interface{} {
+	return nil
+}
+
+func (mh *MockHostEnv) GetEnvType() string {
+	return "Mock"
+}
+
 func NewMockHostEnvDB() *storage.StateDBStorage {
 	test_db, _ := trie.InitLevelDB()
 	return test_db

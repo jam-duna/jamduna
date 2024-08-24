@@ -56,4 +56,14 @@ type HostEnv interface {
 	Designate(v []byte) uint32
 	Empower(m uint32, a uint32, v uint32) uint32
 	Assign(c []byte) uint32
+
+	GetEnvType() string
+
+	//
+	FlexBackend() interface {}
+}
+
+
+type CustomeBackend interface {
+	GetTimeSlot() uint32
 }

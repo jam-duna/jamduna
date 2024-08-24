@@ -50,18 +50,16 @@ type VM struct {
 	writable_ram_start  uint32
 	writable_ram_length uint32
 
-	// SOLICITS+FORGETS
-
+	// Work Package Inputs
 	extrinsics [][]byte
 	payload    []byte
 	Imports    [][]byte
-	// outputs
+	// EXPORTS
 	Exports [][]byte
 
+	// SOLICITS+FORGETS
 	Solicits []Solicit
 	Forgets  []Forgets
-	// EXPORTS
-
 }
 
 type Forgets struct {
@@ -377,10 +375,16 @@ func (vm *VM) Execute() error {
 	return nil
 }
 
-// step performs a single step in the PVM
+// set ups extrinsics and payload
 func (vm *VM) SetExtrinsicsPayload(extrinsics [][]byte, payload []byte) error {
 	vm.extrinsics = extrinsics
 	vm.payload = payload
+	return nil
+}
+
+// set up Imports
+func (vm *VM) SetImports(imports [][]byte) error {
+	vm.Imports = imports
 	return nil
 }
 

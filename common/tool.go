@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"time"
@@ -25,4 +26,17 @@ func DecodeUint64(data []byte) int {
 func ComputeCurrentJCETime() uint32 {
 	currentTime := time.Now().Unix()
 	return uint32(currentTime) // computeJCETime(currentTime)
+}
+
+func CompareBytes(b1 []byte, b2 []byte) bool {
+	return bytes.Equal(b1, b2)
+}
+
+func FalseBytes(data []byte) []byte {
+	result := make([]byte, len(data))
+	for i := 0; i < len(data); i++ {
+		result[i] = 0xFF - data[i]
+		// result[i] = ^data[i]
+	}
+	return result
 }

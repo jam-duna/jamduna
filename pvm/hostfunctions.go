@@ -519,8 +519,18 @@ func (vm *VM) hostWrite() uint32 {
 
 func (vm *VM) GetJCETime() uint32 {
 	//TODO: need access to state. Right now we are just using currJCE, which doesn't make sense
-	currJCE := common.ComputeCurrentJCETime()
-	return uint32(currJCE)
+	envType := vm.hostenv.GetEnvType()
+	var targetJCE uint32
+	switch envType {
+	case "NODE":
+		//targetJCE = vm.hostenv.GetTimeslot() // TODO: desmorate we can pass arb state between
+		targetJCE = common.ComputeCurrentJCETime()
+		break;
+	case "MOCK":
+		targetJCE = common.ComputeCurrentJCETime()
+		break;
+	}
+	return targetJCE
 }
 
 // Solicit preimage
@@ -656,19 +666,12 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint32 {
 // Import Segment
 func (vm *VM) hostImport() uint32 {
 	// import  - which copies  a specific i  (e.g. holding the bytes "9") into RAM from "ImportDA" to be "accumulated"
-	iBytes := bytes.Repeat([]byte{9}, 9) // RAM holding the bytes "9"
-	// v, errCode := vm.hostenv.GetImportItem(i)
-	// if errCode == NONE {
-	// 	return errCode
-	// }
-
 	omega_0, _ := vm.readRegister(0)
-
 	var v_Bytes []byte
-	if omega_0 < uint32(len(iBytes)) {
-		v_Bytes = iBytes
+	if omega_0 < uint32(len(vm.Imports)) {
+		v_Bytes = vm.Imports[omega_0][:]
 	} else {
-		v_Bytes = nil
+		v_Bytes = []byte{}
 	}
 
 	o, _ := vm.readRegister(1)
@@ -690,7 +693,6 @@ func (vm *VM) hostImport() uint32 {
 		return NONE
 	}
 }
-
 
 // Extrinsic
 func (vm *VM) hostExtrinsic() uint32 {
