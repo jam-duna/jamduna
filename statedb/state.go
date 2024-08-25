@@ -1,13 +1,10 @@
 package statedb
 
 import (
-	//"crypto/rand"
-	//"fmt"
-	//"math/big"
-
+	"encoding/json"
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
-	//"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -68,12 +65,12 @@ type Kai_state struct {
 
 // Types for Pi
 type Pi_state struct {
-	BlockNumber        uint64 `json:"block_number"`        // The number of blocks produced by the validator.
-	TicketNumber       uint64 `json:"ticket_number"`       // The number of tickets introduced by the validator.
-	PreimageNumber     uint64 `json:"preimage_number"`     // The number of preimages introduced by the validator.
-	OctetsNumber       uint64 `json:"octets_number"`       // The total number of octets across all preimages introduced by the validator.
-	ReportNumber       uint64 `json:"report_number"`       // The number of reports guaranteed by the validator.
-	AvailabilityNumber uint64 `json:"availability_number"` // The number of availability assurances made by the validator.
+	BlocksProduced         uint32 `json:"block_number"`        // The number of blocks produced by the validator.
+	TicketsIntroduced      uint32 `json:"ticket_number"`       // The number of tickets introduced by the validator.
+	PreimagesIntroduced    uint32 `json:"preimage_number"`     // The number of preimages introduced by the validator.
+	OctetsIntroduced       uint32 `json:"octets_number"`       // The total number of octets across all preimages introduced by the validator.
+	ReportsGuaranteed      uint32 `json:"report_number"`       // The number of reports guaranteed by the validator.
+	AvailabilityAssurances uint32 `json:"availability_number"` // The number of availability assurances made by the validator.
 }
 
 func NewJamState() *JamState {
@@ -154,22 +151,69 @@ func (state *JamState) Accumulate(serviceIndex int, accumulationState types.Accu
 	return args, nil
 }
 
-// Tally updates the statistics for validators based on their activities.
-// func (n *JamState) Tally(validatorIndex int, activity string, count int) {
-// 	switch activity {
-// 	case "blocks":
-// 		n.CurrentEpochStats[validatorIndex].BlocksProduced += count
-// 	case "tickets":
-// 		n.CurrentEpochStats[validatorIndex].TicketsIntroduced += count
-// 	case "preimages":
-// 		n.CurrentEpochStats[validatorIndex].PreimagesIntroduced += count
-// 	case "octets":
-// 		n.CurrentEpochStats[validatorIndex].OctetsIntroduced += count
-// 	case "reports":
-// 		n.CurrentEpochStats[validatorIndex].ReportsGuaranteed += count
-// 	case "assurances":
-// 		n.CurrentEpochStats[validatorIndex].AvailabilityAssurances += count
-// 	default:
-// 		fmt.Println("Unknown activity:", activity)
-// 	}
-// }
+// tallyStatistics updates the statistics for validators based on their activities.
+func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt uint32) {
+	switch activity {
+	case "blocks":
+		n.ValidatorStatistics[0][validatorIndex].BlocksProduced += cnt
+	case "tickets":
+		n.ValidatorStatistics[0][validatorIndex].TicketsIntroduced += cnt
+	case "preimages":
+		n.ValidatorStatistics[0][validatorIndex].PreimagesIntroduced += cnt
+	case "octets":
+		n.ValidatorStatistics[0][validatorIndex].OctetsIntroduced += cnt
+	case "reports":
+		n.ValidatorStatistics[0][validatorIndex].ReportsGuaranteed += cnt
+	case "assurances":
+		n.ValidatorStatistics[0][validatorIndex].AvailabilityAssurances += cnt
+	default:
+		fmt.Println("Unknown activity:", activity)
+	}
+}
+
+func (n *JamState) GetAuthQueueBytes() ([]byte, error) {
+	// AuthorizationsPool
+	scale_bytes, err := json.Marshal(n.AuthorizationsPool)
+	if err != nil {
+		fmt.Println("Error serializing AuthQueue", err)
+	}
+	return scale_bytes, nil
+}
+
+func (n *JamState) GetPrivilegedServicesIndicesBytes() ([]byte, error) {
+	// PrivilegedServiceIndices
+	scale_bytes, err := json.Marshal(n.PrivilegedServiceIndices)
+	if err != nil {
+		fmt.Println("Error serializing AuthQueue", err)
+	}
+	return scale_bytes, nil
+}
+
+func (n *JamState) GetRecentBlocksBytes() ([]byte, error) {
+	// BeefyPool
+	scale_bytes, err := json.Marshal(n.BeefyPool)
+	if err != nil {
+		fmt.Println("Error serializing RecentBlocks", err)
+	}
+	return scale_bytes, nil
+}
+
+func (n *JamState) GetPiBytes() ([]byte, error) {
+	// use scale to encode the Rho_state
+	//use json marshal to get the bytes
+	scale_bytes, err := json.Marshal(n.ValidatorStatistics)
+	if err != nil {
+		return nil, err
+	}
+	return scale_bytes, nil
+}
+
+func (j *JamState) GetRhoBytes() ([]byte, error) {
+	// use scale to encode the Rho_state
+	//use json marshal to get the bytes
+	scale_bytes, err := json.Marshal(j.AvailabilityAssignments)
+	if err != nil {
+		return nil, err
+	}
+	return scale_bytes, nil
+}

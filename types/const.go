@@ -10,6 +10,10 @@ const (
 )
 
 const (
+	JamCommonEra = 1704100800 //1200 UTC on January 1, 2024
+)
+
+const (
 	PeriodSecond                     = 8              // A represents the period, in seconds, between audit tranches.
 	MinElectiveServiceItemBalance    = 10             // B_I represents the additional minimum balance required per item of elective service state.
 	MinElectiveServiceOctetBalance   = 1              // B_L represents the additional minimum balance required per octet of elective service state.
@@ -34,7 +38,7 @@ const (
 	MaxServiceCodeSize               = 4000000        // S = 4,000,000: The maximum size of service code in octets.
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	TotalValidators                  = 6              // V = 1023: The total number of validators.
-	ErasureCodedPieceSize            = 684            // ***** ADJUST: W_C = 684: The basic size of our erasure-coded pieces. See equation 316.
+	ErasureCodedPieceSize            = 4              // W_C = 684: The basic size of our erasure-coded pieces. See equation 316.
 	MaxManifestEntries               = 1 << 11        // W_M = 2^11: The maximum number of entries in a work-package manifest.
 	MaxEncodedWorkPackageSize        = 12 * (1 << 20) // W_P = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
 	MaxEncodedWorkReportSize         = 96 * (1 << 10) // W_R = 96 * 2^10: The maximum size of an encoded work-report in octets.

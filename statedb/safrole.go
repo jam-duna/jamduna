@@ -31,6 +31,11 @@ type SafroleHeader struct {
 	BlockSeal          []byte
 }
 
+type SafroleAccumulator struct {
+	Id      common.Hash `json:"id"`
+	Attempt int         `json:"attempt"`
+}
+
 // 6.1 protocol configuration
 type Input struct {
 	Slot       uint32      `json:"slot"`
@@ -81,13 +86,6 @@ type TicketEnvelope struct {
 	Extra         []byte                                //additional data for user-defined applications.
 	RingSignature [types.ExtrinsicSignatureInBytes]byte //ring signature of the envelope data (attempt & extra)
 }
-
-var (
-	jamTicketSeal   = []byte("jam_ticket_seal")
-	jamFallbackSeal = []byte("jam_fallback_seal")
-	jamRandomness   = []byte("jam_randomness")
-	jamEntropy      = []byte("jam_entropy")
-)
 
 type SafroleState struct {
 	Id             uint32 `json:"Id"`
@@ -278,7 +276,7 @@ func (s *SafroleState) ComputeCurrRandomness(fresh_randomness common.Hash) commo
 // ticketSealVRFInput constructs the input for VRF based on target epoch randomness and attempt.
 func (s *SafroleState) ticketSealVRFInput(targetEpochRandomness common.Hash, attempt int) []byte {
 	// Concatenate sassafrasTicketSeal, targetEpochRandomness, and attemptBytes
-	ticket_vrf_input := append(append(jamTicketSeal, targetEpochRandomness.Bytes()...), []byte{byte(attempt & 0xF)}...)
+	ticket_vrf_input := append(append([]byte(types.X_T), targetEpochRandomness.Bytes()...), []byte{byte(attempt & 0xF)}...)
 	return ticket_vrf_input
 }
 
@@ -597,13 +595,13 @@ func (s *SafroleState) SignBlockSeal(authority_secret_key bandersnatch.PrivateKe
 
 // 6.8.2. Secondary Method
 func computeEntropyVRFInput(inner_vrfOutput common.Hash) []byte {
-	entropyPrefix := []byte(jamEntropy)
+	entropyPrefix := []byte(types.X_E)
 	entropyVRFInput := append(entropyPrefix, inner_vrfOutput.Bytes()...)
 	return entropyVRFInput
 }
 
 func fallbackSealVRFInput(targetRandomness common.Hash) []byte {
-	sealPrefix := []byte(jamFallbackSeal)
+	sealPrefix := []byte(types.X_F)
 	sealVRFInput := append(sealPrefix, targetRandomness.Bytes()...)
 	return sealVRFInput
 }
@@ -1045,7 +1043,7 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 		}
 		if len(s.Entropy) == 4 {
 			//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-			vrfInputData := append(append(jamTicketSeal, s.Entropy[2].Bytes()...), byte(e.Attempt))
+			vrfInputData := append(append([]byte(types.X_T), s.Entropy[2].Bytes()...), byte(e.Attempt))
 			auxData := []byte{}
 			vrfOutput, err := bandersnatch.RingVrfVerify(ringsetBytes, e.Signature[:], vrfInputData, auxData)
 			if err != nil {

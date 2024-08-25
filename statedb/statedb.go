@@ -5,15 +5,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"sync"
-	"time"
-
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
+	"sort"
+	"sync"
+	"time"
 )
 
 type Message struct {
@@ -150,7 +151,7 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 }
 
 func (s *StateDB) ProcessIncomingLookup(l types.PreimageLookup) {
-	//TODO: check existense of lookup and stick into map
+	//TODO: check existence of lookup and stick into map
 	//cj := s.GetPvmState()
 	fmt.Printf("[N%v] ProcessIncomingLookup -- Adding lookup: %v\n", s.Id, l.String())
 	account_preimage_hash, err := s.ValidateLookup(&l)
@@ -222,6 +223,20 @@ func (s *StateDB) RemoveLookup(l *types.PreimageLookup) {
 	s.preimageLookupsMutex.Lock()
 	defer s.preimageLookupsMutex.Unlock()
 	delete(s.queuedPreimageLookups, l.AccountPreimageHash())
+}
+
+// IsAuthorizedPVM performs the is-authorized PVM function.
+func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
+	// Ensure the work-package warrants the needed core-time
+	// Ensure all segment-tree roots which form imported segment commitments are known and valid
+	// Ensure that all preimage data referenced as commitments of extrinsic segments can be fetched
+
+	// For demonstration, let's assume these checks are passed
+	//for _, workItem := range workPackage.WorkItems {
+
+	//}
+
+	return true, nil
 }
 
 // EP Errors
@@ -325,29 +340,6 @@ func (s *StateDB) GetPvmState() *PvmState {
 }
 */
 
-// todo: implement this, not sure if this correct
-func (s *StateDB) GetDisputesState() {
-	/*
-		//not sure if this is correct
-		t := s.GetTrie()
-		//TODO: deserialize the disputes state
-		disputeState := JamState{}
-		PsiBytes, err := t.GetState(C5)
-		disputeState.SetPsi(PsiBytes)
-		RhoBytes, err := t.GetState(C10)
-		disputeState.SetRho(RhoBytes)
-		tauByte, err := t.GetState(C11)
-		tau := binary.BigEndian.Uint32(tauByte) // not sure if this is big endian
-		disputeState.SetTau(tau)
-		disputeState.SetKappa(s.Safrole.CurrValidators)
-		disputeState.SetLambda(s.Safrole.PrevValidators)
-		if err != nil {
-			fmt.Println("Error getting disputes state", err)
-		}
-		s.JamState = &disputeState
-	*/
-}
-
 func (s *StateDB) UpdateTrieState() common.Hash {
 	//γ ≡⎩γk, γz, γs, γa⎭
 	//γk :one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
@@ -367,34 +359,54 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	priorEpochValidatorEncode := sf.GetValidatorData("Pre")
 	mostRecentBlockTimeSlotEncode := common.EncodeUint64(uint64(sf.GetTimeSlot()))
 
-	t := s.GetTrie()
-
-	// Corejam: PreimageLookups, Guarantees, Assurances
-	// cj := s.GetCorejam()
-	// TODO
-
-	// Disputes: C5, C10
 	d := s.GetJamState()
 	disputeState, err := d.GetPsiBytes()
 	if err != nil {
-		fmt.Println("Error getting disputes state", err)
+		fmt.Println("Error serializing psi", err)
 	}
-	t.SetState(C5, disputeState)
-	// TODO: set C10
-	// IMPORTANT:dispute only modifies the C10 dagger
+	rhoEncode, err := d.GetRhoBytes()
+	if err != nil {
+		fmt.Println("Error serializing rho", err)
+	}
+	piEncode, err := d.GetPiBytes()
+	if err != nil {
+		fmt.Println("Error serializing pi", err)
+	}
 
-	// Safrole
+	coreAuthPoolEncode, err := d.GetAuthQueueBytes()
+	if err != nil {
+		fmt.Println("Error serializing CoreAuthPool", err)
+	}
+
+	authQueueEncode, err := d.GetAuthQueueBytes()
+	if err != nil {
+		fmt.Println("Error serializing AuthQueue", err)
+	}
+
+	privilegedServiceIndicesEncode, err := d.GetPrivilegedServicesIndicesBytes()
+	if err != nil {
+		fmt.Println("Error serializing CoreAuthPool", err)
+	}
+
+	recentBlocksEncode, err := d.GetRecentBlocksBytes()
+	if err != nil {
+		fmt.Println("Error serializing Recent Blocks", err)
+	}
+
+	t := s.GetTrie()
+	t.SetState(C1, coreAuthPoolEncode)
+	t.SetState(C2, authQueueEncode)
+	t.SetState(C3, recentBlocksEncode)
 	t.SetState(C4, safroleStateEncode)
+	t.SetState(C5, disputeState)
 	t.SetState(C6, entropyEncode)
 	t.SetState(C7, nextEpochValidatorsEncode)
 	t.SetState(C8, currEpochValidatorsEncode)
 	t.SetState(C9, priorEpochValidatorEncode)
+	t.SetState(C10, rhoEncode)
 	t.SetState(C11, mostRecentBlockTimeSlotEncode)
-	// TODO: C1 = "CoreAuthPool"
-	// TODO: C2 = "AuthQueue"
-	// TODO: C3 = "RecentBlocks"
-	// TODO: C12 = "PrivilegedServiceIndices"
-	// TODO: C13 = "ActiveValidator"
+	t.SetState(C12, privilegedServiceIndicesEncode)
+	t.SetState(C13, piEncode)
 	return common.BytesToHash(t.GetRootHash())
 }
 
@@ -539,6 +551,8 @@ func (s *StateDB) SetID(id uint32) {
 }
 
 func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup, targetJCE uint32, id uint32) error {
+	num_preimages := uint32(0)
+	num_octets := uint32(0)
 
 	//TODO: (eq 156) need to make sure E_P is sorted. by what??
 	// validate (eq 156)
@@ -564,7 +578,13 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup
 		// δ†[s]l[H(p),∣p∣] = [τ′]
 		t.SetPreImageBlob(l.Service_Index(), l.Blob())
 		t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
+		num_preimages++
+		num_octets += l.BlobLength()
 	}
+
+	s.JamState.tallyStatistics(s.Id, "preimages", num_preimages)
+	s.JamState.tallyStatistics(s.Id, "octets", num_octets)
+
 	return nil
 }
 
@@ -605,16 +625,22 @@ func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances [
 		}
 	}
 	// core's data is now available
+	num_assurances := uint32(0)
 	for c, available := range tally {
 		if available > 2*types.TotalValidators/3 {
 			d.clearRhoByCore(uint32(c))
 		}
+		num_assurances++
 	}
+	s.JamState.tallyStatistics(s.Id, "assurances", num_assurances)
 
 	// Guarantees
+	num_reports := uint32(0)
 	for _, g := range guarantees {
 		d.setRhoByWorkReport(g.WorkReport.Core, g.WorkReport, targetJCE)
+		num_reports++
 	}
+	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
 
 	return VMark, OMark, nil
 }
@@ -636,6 +662,7 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 	if err != nil {
 		return err
 	}
+	s.JamState.tallyStatistics(s.Id, "blocks", 1)
 
 	// Safrole last
 	ticketExts := blk.Tickets()
@@ -653,6 +680,7 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 		panic(1)
 		return err
 	}
+	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
 	s.JamState.SafroleState = &s2
 	s.Block = blk
 	s.ParentHash = s.BlockHash
@@ -664,6 +692,26 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 
 func (s *StateDB) GetBlock() *types.Block {
 	return s.Block
+}
+
+func (s *StateDB) areValidatorsAssignedToCore(coreIndex uint32, credentials []types.GuaranteeCredential) bool {
+	// TODO: logic to verify if validators are assigned to the core.
+	return true
+}
+
+func (s *StateDB) isReportPendingOnCore(coreIndex uint32) bool {
+	// TODO: logic to check if a report is pending on the core.
+	return false
+}
+
+func (s *StateDB) hasReportTimedOut(workReport types.WorkReport) bool {
+	// TODO: logic to check if a work report has timed out.
+	return true
+}
+
+func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
+	// TODO: logic to validate the code hash prediction.
+	return true
 }
 
 // make block generate block prior to state execution
@@ -680,11 +728,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	h.TimeSlot = targetJCE
 
 	// Extrinsic Data has 5 different Extrinsics
-	// cj := s.GetCorejam()
 
 	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
 	extrinsicData.PreimageLookups = make([]types.PreimageLookup, 0)
-	// TODO
 	for _, preimageLookup := range s.queuedPreimageLookups {
 		pl, err := preimageLookup.DeepCopy()
 		if err != nil {
@@ -692,7 +738,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		}
 		extrinsicData.PreimageLookups = append(extrinsicData.PreimageLookups, pl)
 	}
-	// TODO: need somekind of ordering eq 156
+	// TODO: These pairs must be ordered and without duplicates (equation 156 requires this).
 	for i := 0; i < len(extrinsicData.PreimageLookups); i++ {
 		for j := 0; j < len(extrinsicData.PreimageLookups)-1; j++ {
 			if extrinsicData.PreimageLookups[j].ServiceIndex > extrinsicData.PreimageLookups[j+1].ServiceIndex {
@@ -702,28 +748,86 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	}
 
 	s.queuedAssurances = make(map[common.Hash]types.Assurance)
+
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
-	// TODO
 	for _, guarantee := range s.queuedGuarantees {
 		g, err := guarantee.DeepCopy()
 		if err != nil {
 			continue
 		}
+		// 138 - Ensure we have 2 or 3 credentials per work report minimum.
+		if len(g.Credentials) < 2 {
+			// Skip guarantees that do not meet the minimum number of credentials.
+			continue
+		}
+
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
+	}
+	// 139 - Order guarantees by core (assuming WorkReport contains core index).
+	sort.Slice(extrinsicData.Guarantees, func(i, j int) bool {
+		return extrinsicData.Guarantees[i].WorkReport.Core < extrinsicData.Guarantees[j].WorkReport.Core
+	})
+
+	// 140 - credentials ordered by validator index
+	for i := range extrinsicData.Guarantees {
+		sort.Slice(extrinsicData.Guarantees[i].Credentials, func(a, b int) bool {
+			return extrinsicData.Guarantees[i].Credentials[a].ValidatorIndex < extrinsicData.Guarantees[i].Credentials[b].ValidatorIndex
+		})
+	}
+	// 141 - The signing validators must be assigned to the core in G or G*
+	for _, guarantee := range extrinsicData.Guarantees {
+		if !s.areValidatorsAssignedToCore(guarantee.WorkReport.Core, guarantee.Credentials) {
+			// Handle the case where validators are not correctly assigned.
+			return nil, s, errors.New("validators not correctly assigned to core")
+		}
+	}
+	// 144 - No reports may be placed on cores with a report pending availability on it unless it has timed out.
+	for _, guarantee := range extrinsicData.Guarantees {
+		if s.isReportPendingOnCore(guarantee.WorkReport.Core) && !s.hasReportTimedOut(guarantee.WorkReport) {
+			// Skip this guarantee if the core has a pending report that hasn't timed out.
+			continue
+		}
+	}
+	// 147 - There must be no duplicate work-package hashes (i.e. two work-reports of the same package).
+	workPackageHashes := make(map[common.Hash]bool)
+	for _, guarantee := range extrinsicData.Guarantees {
+		hash := guarantee.WorkReport.AvailabilitySpec.WorkPackageHash
+		if workPackageHashes[hash] {
+			// Handle duplicate work-package hash.
+			return nil, s, errors.New("duplicate work-package hash detected")
+		}
+		workPackageHashes[hash] = true
+	}
+
+	// TODO: (skip) Recent Blocks
+
+	// 153 - We require that all work results within the extrinsic predicted the correct code hash for their corresponding service:
+	for _, guarantee := range extrinsicData.Guarantees {
+		if !s.isCorrectCodeHash(guarantee.WorkReport) {
+			// Handle incorrect code hash prediction.
+			return nil, s, errors.New("incorrect code hash prediction for service")
+		}
 	}
 	s.queuedGuarantees = make(map[common.Hash]types.Guarantee)
 
 	// E_A - Assurances  aggregate queuedAssurances into extrinsicData.Assurances
 	extrinsicData.Assurances = make([]types.Assurance, 0)
-	// TODO
 	for _, assurance := range s.queuedAssurances {
 		a, err := assurance.DeepCopy()
 		if err != nil {
 			continue
 		}
+		// 125 - The assurances must all be anchored on the parent
+		if a.ParentHash != s.ParentHash {
+			continue
+		}
 		extrinsicData.Assurances = append(extrinsicData.Assurances, a)
 	}
+	// 126 - The assurances must ordered by validator index:
+	sort.Slice(extrinsicData.Assurances, func(i, j int) bool {
+		return extrinsicData.Assurances[i].ValidatorIndex < extrinsicData.Assurances[j].ValidatorIndex
+	})
 	s.queuedAssurances = make(map[common.Hash]types.Assurance)
 
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
@@ -731,10 +835,10 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	needMarkerVerdicts := d.NeedsVerdictsMarker(targetJCE)
 	needMarkerOffenders := d.NeedsOffendersMarker(targetJCE)
 	if needMarkerVerdicts {
-		// TODO
+		// TODO: 116 - b.Header.VerdictsMarkers
 	}
 	if needMarkerOffenders {
-		// TODO
+		// TODO: 117 - b.Header.OffenderMarkers
 	}
 	extrinsicData.Disputes = make([]types.Dispute, 0)
 	for _, dispute := range s.queuedDisputes {
@@ -744,6 +848,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		}
 		extrinsicData.Disputes = append(extrinsicData.Disputes, d)
 	}
+	// TODO: 103 Verdicts v must be ordered by report hash.
+	// TODO: 104 Offender signatures c and f must each be ordered by the validator’s Ed25519 key.
+	// TODO: 105 There may be no duplicate report hashes within the extrinsic, nor amongst any past reported hashes.
 	s.queuedDisputes = make(map[common.Hash]types.Dispute)
 
 	needEpochMarker := isNewEpoch && false
@@ -820,12 +927,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	newStateDB.ParentHash = b.Header.ParentHash
 	newStateDB.ApplyStateTransitionFromBlock(context.Background(), b)
 	return b, newStateDB, nil
-}
-
-// Flush calls each SMTs flush operation
-func (s *StateDB) Flush(ctx context.Context, timeSlotIndex uint32) error {
-	//log.Info(fmt.Sprintf("[statedb:Flush] Round %d updated epochRoot %x", statedb.proposedRound, statedb.epochStorage.GetRootChunkHash()))
-	return nil
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4

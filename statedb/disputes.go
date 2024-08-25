@@ -57,15 +57,7 @@ func (j *JamState) GetPsiBytes() ([]byte, error) {
 	return scale_bytes, nil
 
 }
-func (j *JamState) GetRhoBytes() ([]byte, error) {
-	// use scale to encode the Rho_state
-	//use json marshal to get the bytes
-	scale_bytes, err := json.Marshal(j.AvailabilityAssignments)
-	if err != nil {
-		return nil, err
-	}
-	return scale_bytes, nil
-}
+
 func (j *JamState) Disputes(input types.Dispute) (types.VerdictMarker, types.OffenderMarker, error) {
 	// Implement the function logic here
 	// check the all input data are valid ,eq 98~106
