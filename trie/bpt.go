@@ -561,9 +561,9 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	lBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
 	blob_h := blob_hash.Bytes()
-	_h4 := falseBytes(blob_h[4:])        			// (¬h4:)
-	l_and_h := append(lBytes, _h4...)         		// (E4(l) ⌢ (¬h4:)
-	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	_h4 := falseBytes(blob_h[4:])                 // (¬h4:)
+	l_and_h := append(lBytes, _h4...)             // (E4(l) ⌢ (¬h4:)
+	account_lookuphash := ComputeC_sh(s, l_and_h) // C(s, (E4(l) ⌢ (¬h4:))
 	stateKey := account_lookuphash.Bytes()
 
 	/*
@@ -590,9 +590,9 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	lBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
 	blob_h := blob_hash.Bytes()
-	_h4 := falseBytes(blob_h[4:])        			// (¬h4:)
-	l_and_h := append(lBytes, _h4...)         		// (E4(l) ⌢ (¬h4:)
-	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	_h4 := falseBytes(blob_h[4:])                 // (¬h4:)
+	l_and_h := append(lBytes, _h4...)             // (E4(l) ⌢ (¬h4:)
+	account_lookuphash := ComputeC_sh(s, l_and_h) // C(s, (E4(l) ⌢ (¬h4:))
 	stateKey := account_lookuphash.Bytes()
 
 	/*
@@ -621,9 +621,9 @@ func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_
 	lBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
 	blob_h := blob_hash.Bytes()
-	_h4 := falseBytes(blob_h[4:])        			// (¬h4:)
-	l_and_h := append(lBytes, _h4...)         		// (E4(l) ⌢ (¬h4:)
-	account_lookuphash := ComputeC_sh(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	_h4 := falseBytes(blob_h[4:])                 // (¬h4:)
+	l_and_h := append(lBytes, _h4...)             // (E4(l) ⌢ (¬h4:)
+	account_lookuphash := ComputeC_sh(s, l_and_h) // C(s, (E4(l) ⌢ (¬h4:))
 	stateKey := account_lookuphash.Bytes()
 
 	err := t.Delete(stateKey)

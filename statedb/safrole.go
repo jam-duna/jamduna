@@ -17,15 +17,6 @@ import (
 	//"github.com/colorfulnotion/jam/trie"
 )
 
-const (
-	// tiny (NOTE: large is 600 + 1023, should use ProtocolConfiguration)
-	SecondsPerSlot = 12
-	EpochNumSlots  = 10
-	NumValidators  = 6
-	NumAttempts    = 2
-	EpochTail      = 10 //Y
-)
-
 type SafroleHeader struct {
 	ParentHash         common.Hash
 	PriorStateRoot     common.Hash
@@ -41,11 +32,6 @@ type SafroleHeader struct {
 }
 
 // 6.1 protocol configuration
-type ProtocolConfiguration struct {
-	EpochNumSlots uint32 // number of slots for each epoch (The "v")
-	NumAttempts   uint8  // maximum number of tickets each authority can submit ("")
-}
-
 type Input struct {
 	Slot       uint32      `json:"slot"`
 	Entropy    common.Hash `json:"entropy"`
@@ -197,8 +183,8 @@ func (s *SafroleState) InTicketAccumulator(ticketID common.Hash) bool {
 
 func (s *SafroleState) GenerateWinningMarker() ([]*types.TicketBody, error) {
 	tickets := s.NextEpochTicketsAccumulator
-	if len(tickets) != EpochNumSlots {
-		//accumulator should keep exactly EpochNumSlots ticket
+	if len(tickets) != types.EpochLength {
+		//accumulator should keep exactly EpochLength ticket
 		return nil, fmt.Errorf("Invalid Ticket size")
 	}
 	outsidein_tickets := s.computeTicketSlotBinding(tickets)
@@ -241,8 +227,8 @@ func (s *SafroleState) EpochAndPhase(currCJE uint32) (currentEpoch int32, curren
 		currentPhase = 0
 		return
 	}
-	currentEpoch = int32((currCJE - s.EpochFirstSlot) / (SecondsPerSlot * EpochNumSlots)) // eg. / 60
-	currentPhase = ((currCJE - s.EpochFirstSlot) % (SecondsPerSlot * EpochNumSlots)) / SecondsPerSlot
+	currentEpoch = int32((currCJE - s.EpochFirstSlot) / (types.SecondsPerSlot * types.EpochLength)) // eg. / 60
+	currentPhase = ((currCJE - s.EpochFirstSlot) % (types.SecondsPerSlot * types.EpochLength)) / types.SecondsPerSlot
 	return
 }
 
@@ -256,17 +242,17 @@ func (s *SafroleState) IsNewEpoch(currCJE uint32) bool {
 func (s *SafroleState) IsTicketSubmissionCloses(currCJE uint32) bool {
 	//prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
 	_, currPhase := s.EpochAndPhase(currCJE)
-	if currPhase >= EpochTail {
+	if currPhase >= types.TicketSubmissionEndSlot {
 		return true
 	}
 	return false
 }
 
 func CalculateEpochAndPhase(currentTimeslot, priorTimeslot uint32) (currentEpoch, priorEpoch, currentPhase, priorPhase uint32) {
-	currentEpoch = currentTimeslot / EpochNumSlots
-	currentPhase = currentTimeslot % EpochNumSlots
-	priorEpoch = priorTimeslot / EpochNumSlots
-	priorPhase = priorTimeslot % EpochNumSlots
+	currentEpoch = currentTimeslot / types.EpochLength
+	currentPhase = currentTimeslot % types.EpochLength
+	priorEpoch = priorTimeslot / types.EpochLength
+	priorPhase = priorTimeslot % types.EpochLength
 	return
 }
 
@@ -342,7 +328,7 @@ func (s *SafroleState) GetCurrEpochFirst() uint32 {
 }
 
 func (s *SafroleState) GetNextEpochFirst() uint32 {
-	nextEpochFirstSlot := s.EpochFirstSlot + EpochNumSlots
+	nextEpochFirstSlot := s.EpochFirstSlot + types.EpochLength
 	return nextEpochFirstSlot
 }
 
@@ -446,7 +432,7 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 
 func (s *SafroleState) GenerateTickets(secret bandersnatch.PrivateKey, isNextEpoch bool) []types.Ticket {
 	tickets := make([]types.Ticket, 0)
-	for attempt := 0; attempt < NumAttempts; attempt++ {
+	for attempt := 0; attempt < types.TicketEntriesPerValidator; attempt++ {
 		// We can GenerateTickets for the NEXT epoch based on s.Entropy[1], but the CURRENT epoch based on s.Entropy[2]
 		entropy := s.Entropy[2]
 		if isNextEpoch {
@@ -502,7 +488,7 @@ func (s *SafroleState) validateTicket_test_vector(targetEpochRandomness common.H
 }
 
 func (s *SafroleState) ValidateProposedTicket(t *types.Ticket) (common.Hash, error) {
-	if t.Attempt >= NumAttempts {
+	if t.Attempt >= types.TicketEntriesPerValidator {
 		return common.Hash{}, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
 	}
 
@@ -558,10 +544,10 @@ func (s *SafroleState) QueueTicketEnvelope(envelope *TicketEnvelope) error {
 // computeTicketSlotBinding has logic for assigning tickets to slots
 func (s *SafroleState) computeTicketSlotBinding(inp []types.TicketBody) []*types.TicketBody {
 	i := 0
-	tickets := make([]*types.TicketBody, 0, EpochNumSlots)
+	tickets := make([]*types.TicketBody, 0, types.EpochLength)
 	for i < len(inp)/2 { //MK: check this line, was s.TicketsAccumulator/2
 		tickets = append(tickets, &inp[i])
-		tickets = append(tickets, &inp[EpochNumSlots-1-i])
+		tickets = append(tickets, &inp[types.EpochLength-1-i])
 		i++
 	}
 	return tickets
@@ -707,7 +693,7 @@ func (s *SafroleState) CheckEpochType() string {
 func (s *SafroleState) GetBindedAttempt(targetJCE uint32) (int, error) {
 	_, currPhase := s.EpochAndPhase(targetJCE)
 	t_or_k := s.TicketsOrKeys
-	if len(t_or_k.Tickets) == EpochNumSlots {
+	if len(t_or_k.Tickets) == types.EpochLength {
 		winning_ticket := t_or_k.Tickets[currPhase]
 		return int(winning_ticket.Attempt), nil
 	}
@@ -923,12 +909,12 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	//fmt.Printf("Current Slot: %d => Input Slot: %d \n", s.Timeslot, targetJCE)
 
 	for _, e := range tickets {
-		if currPhase >= EpochTail {
+		if currPhase >= types.TicketSubmissionEndSlot {
 			return s2, fmt.Errorf(errTicketSubmissionInTail)
 		}
 		if len(s.Entropy) == 4 {
 			//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-			if e.Attempt >= NumAttempts {
+			if e.Attempt >= types.TicketEntriesPerValidator {
 				return s2, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
 			}
 			ticket_id, err := s.ValidateProposedTicket(&e)
@@ -962,16 +948,16 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	})
 
 	// Drop useless tickets. Should this be error or not?
-	if len(s2.NextEpochTicketsAccumulator) > EpochNumSlots {
-		s2.NextEpochTicketsAccumulator = s2.NextEpochTicketsAccumulator[0:EpochNumSlots]
+	if len(s2.NextEpochTicketsAccumulator) > types.EpochLength {
+		s2.NextEpochTicketsAccumulator = s2.NextEpochTicketsAccumulator[0:types.EpochLength]
 	}
 
 	// in the tail slot with a full set of tickets
 
-	if len(s2.NextEpochTicketsAccumulator) == EpochNumSlots && currPhase >= EpochTail { //MK check EpochNumSlots-1 ?
+	if len(s2.NextEpochTicketsAccumulator) == types.EpochLength && currPhase >= types.TicketSubmissionEndSlot { //MK check EpochNumSlots-1 ?
 		//TODO this is Winning ticket elgible. Check if header has marker, if yes, verify it
 		winning_tickets := header.WinningTicketsMark
-		if len(winning_tickets) == EpochNumSlots {
+		if len(winning_tickets) == types.EpochLength {
 			expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
 			verified, err := VerifyWinningMarker(winning_tickets, expected_tickets)
 			if !verified || err != nil {
@@ -1054,7 +1040,7 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 	//fmt.Printf("Current Slot: %d => Input Slot: %d \n", s.Timeslot, input.Slot)
 	newTickets := []types.TicketBody{}
 	for _, e := range input.Extrinsics {
-		if input.Slot >= EpochTail {
+		if input.Slot >= types.TicketSubmissionEndSlot {
 			return *o, s2, fmt.Errorf(errTicketSubmissionInTail)
 		}
 		if len(s.Entropy) == 4 {
@@ -1071,7 +1057,7 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 				fmt.Printf("DETECTED Resubmit %x\n", vrfOutput)
 				return *o, s2, fmt.Errorf(errTicketResubmission)
 			}
-			if e.Attempt >= NumAttempts {
+			if e.Attempt >= types.TicketEntriesPerValidator {
 				return *o, s2, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
 			}
 			newa := types.TicketBody{
@@ -1097,15 +1083,15 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 		fmt.Printf(" %d: %s\n", i, t.Id)
 	}
 	// Drop useless tickets
-	if len(s2.TicketsAccumulator) > EpochNumSlots {
-		s2.TicketsAccumulator = s2.TicketsAccumulator[0:EpochNumSlots]
+	if len(s2.TicketsAccumulator) > types.EpochLength {
+		s2.TicketsAccumulator = s2.TicketsAccumulator[0:types.EpochLength]
 	}
 
 	// the last slot in the Epoch, with a full set of tickets
-	if len(s2.TicketsAccumulator) == EpochNumSlots && input.Slot == EpochNumSlots-1 {
+	if len(s2.TicketsAccumulator) == types.EpochLength && input.Slot == types.EpochLength-1 {
 		ok.TicketsMark = s.computeTicketSlotBinding(s2.TicketsAccumulator)
 	}
-	fmt.Printf(" -- %d %d %d \n", input.Slot, EpochNumSlots, input.Slot%EpochNumSlots)
+	fmt.Printf(" -- %d %d %d \n", input.Slot, types.EpochLength, input.Slot%types.EpochLength)
 	// adjust entropy
 	hasher256, err := blake2b.New256(nil)
 	if err != nil {
@@ -1114,9 +1100,9 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 	hasher256.Write(append(s.Entropy[0].Bytes(), input.Entropy.Bytes()...))
 	res := hasher256.Sum(nil)
 
-	if input.Slot%EpochNumSlots == 0 {
+	if input.Slot%types.EpochLength == 0 {
 		// New Epoch
-		v := make([]common.Hash, NumValidators)
+		v := make([]common.Hash, types.TotalValidators)
 		for i, x := range s.DesignedValidators {
 			v[i] = x.Bandersnatch
 			fmt.Printf(" !! %d %x\n", i, v[i])

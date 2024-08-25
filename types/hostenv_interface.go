@@ -60,9 +60,8 @@ type HostEnv interface {
 	GetEnvType() string
 
 	//
-	FlexBackend() interface {}
+	FlexBackend() interface{}
 }
-
 
 type CustomeBackend interface {
 	GetTimeSlot() uint32

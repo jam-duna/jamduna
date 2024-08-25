@@ -357,7 +357,7 @@ func checkVerdicts(v []types.Verdict) error {
 func checkCulprit(c []types.Culprit) error {
 	for i, culprit := range c {
 		//check culprit signature is valid
-		sign_message := append([]byte(types.X_G), culprit.WorkReportHash...)
+		sign_message := append([]byte(types.X_G), culprit.WorkReportHash.Bytes()...)
 		//verify the signature
 		if !ed25519.Verify(ed25519.PublicKey(culprit.Key), sign_message, culprit.Signature) {
 			return fmt.Errorf("Culprit Error: the signature of the culprit %v is invalid", culprit.Key)
@@ -389,9 +389,9 @@ func checkFault(f []types.Fault) error {
 		// jam_guarantee concat the work report hash
 		sign_message := []byte{}
 		if fault.Voting {
-			sign_message = append([]byte(types.X_True), fault.WorkReportHash...)
+			sign_message = append([]byte(types.X_True), fault.WorkReportHash.Bytes()...)
 		} else {
-			sign_message = append([]byte(types.X_False), fault.WorkReportHash...)
+			sign_message = append([]byte(types.X_False), fault.WorkReportHash.Bytes()...)
 		}
 		//verify the signature
 		if !ed25519.Verify(ed25519.PublicKey(fault.Key), sign_message, fault.Signature) {
@@ -520,13 +520,12 @@ func sortSet(VerdictResult []VerdictResult, preState JamState) (JamState, JamSta
 func clearReportRho(preState JamState, V []VerdictResult) JamState {
 	post_state := preState
 	for i := range post_state.AvailabilityAssignments {
-		rhoo := &post_state.AvailabilityAssignments[i]
+		rhoo := post_state.AvailabilityAssignments[i]
 		for _, h := range V {
-			wrHash := common.ComputeHash(rhoo.DummyWorkReport)
+			wrHash := common.ComputeHash(rhoo.WorkReport.Bytes())
 			if bytes.Equal(wrHash, h.WorkReportHash.Bytes()) && h.PositveCount < ValidatorNum*2/3 {
 				// clear the old report
-				rhoo.DummyWorkReport = []byte{}
-				rhoo.Timeout = 0
+				post_state.AvailabilityAssignments[i] = nil
 
 			}
 		}
@@ -649,7 +648,7 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 	counter := 0
 	for _, s := range state_prime.DisputesState.Psi_g {
 		for _, f := range f {
-			if bytes.Equal(s, f.WorkReportHash) {
+			if bytes.Equal(s, f.WorkReportHash.Bytes()) {
 				counter++
 			}
 		}
@@ -663,7 +662,7 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 			return fmt.Errorf("Fault Error: fault should be false, invalid key: %x", f.Key)
 		}
 		for _, s := range state_prime.DisputesState.Psi_g {
-			if bytes.Equal(s, f.WorkReportHash) {
+			if bytes.Equal(s, f.WorkReportHash.Bytes()) {
 				found = true
 			}
 		}
@@ -677,7 +676,7 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 	counter := 0
 	for _, s := range state_prime.DisputesState.Psi_b {
 		for _, c := range c {
-			if bytes.Equal(s, c.WorkReportHash) {
+			if bytes.Equal(s, c.WorkReportHash.Bytes()) {
 				counter++
 			}
 		}
@@ -689,7 +688,7 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 	found := false
 	for _, c := range c {
 		for _, s := range state_prime.DisputesState.Psi_b {
-			if bytes.Equal(s, c.WorkReportHash) {
+			if bytes.Equal(s, c.WorkReportHash.Bytes()) {
 				found = true
 			}
 		}

@@ -75,3 +75,7 @@ func (g *Guarantee) Hash() common.Hash {
 	}
 	return common.BytesToHash(common.ComputeHash(data))
 }
+
+func (g *Guarantee) ValidateSignatures() error {
+	return nil
+}

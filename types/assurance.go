@@ -1,7 +1,9 @@
 package types
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 )
@@ -29,6 +31,26 @@ type Assurance struct {
 	Bitstring      []byte           `json:"bitstring"`
 	ValidatorIndex uint32           `json:"validator_index"`
 	Signature      Ed25519Signature `json:"signature"`
+}
+
+// computeAssuranceBytes abstracts the process of generating the bytes to be signed or verified.
+func (a *Assurance) computeAssuranceBytes() []byte {
+	h := common.ComputeHash(append(a.ParentHash.Bytes(), a.Bitstring...))
+	return append([]byte(X_A), h...)
+}
+
+func (a *Assurance) Sign(Ed25519Secret []byte, parentHash common.Hash) {
+	assuranceBytes := a.computeAssuranceBytes()
+	a.Signature = ed25519.Sign(Ed25519Secret, assuranceBytes)
+}
+
+func (a *Assurance) ValidateSignature(publicKey []byte) error {
+	assuranceBytes := a.computeAssuranceBytes()
+
+	if !ed25519.Verify(publicKey, assuranceBytes, a.Signature) {
+		return errors.New("invalid signature")
+	}
+	return nil
 }
 
 func (a Assurance) DeepCopy() (Assurance, error) {

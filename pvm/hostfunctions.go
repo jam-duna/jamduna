@@ -525,10 +525,10 @@ func (vm *VM) GetJCETime() uint32 {
 	case "NODE":
 		//targetJCE = vm.hostenv.GetTimeslot() // TODO: desmorate we can pass arb state between
 		targetJCE = common.ComputeCurrentJCETime()
-		break;
+		break
 	case "MOCK":
 		targetJCE = common.ComputeCurrentJCETime()
-		break;
+		break
 	}
 	return targetJCE
 }

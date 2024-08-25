@@ -68,7 +68,6 @@ func hashNodes(left, right *Node) []byte {
 	return h.Sum(nil)
 }
 
-
 // eq 187
 func PadToMultipleOfN(x []byte, n int) []byte {
 	if n <= 0 {

@@ -52,7 +52,7 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j.SafroleState.Entropy[3] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[2].Bytes())) //BLAKE2B of EpochN2
 
 	j.DisputesState = Psi_state{}
-	j.AvailabilityAssignments = make([]Rho_state, 0)
+	//j.AvailabilityAssignments = make([types.TotalCores]*Rho_state, 0)
 
 	return j
 }

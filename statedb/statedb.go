@@ -10,12 +10,10 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/corejam"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/colorfulnotion/jam/pvm"
-
 )
 
 type Message struct {
@@ -24,18 +22,17 @@ type Message struct {
 }
 
 type StateDB struct {
-	Id         uint32                `json:"id"`
-	Block      *types.Block          `json:"block"`
-	ParentHash common.Hash           `json:"parentHash"`
-	BlockHash  common.Hash           `json:"blockHash"`
-	StateRoot  common.Hash           `json:"stateRoot"`
-	Corejam    *corejam.CorejamState `json:"corejam"`
-	JamState   *JamState             `json:"Jamstate"`
+	Id         uint32       `json:"id"`
+	Block      *types.Block `json:"block"`
+	ParentHash common.Hash  `json:"parentHash"`
+	BlockHash  common.Hash  `json:"blockHash"`
+	StateRoot  common.Hash  `json:"stateRoot"`
+	JamState   *JamState    `json:"Jamstate"`
 	sdb        *storage.StateDBStorage
 	trie       *trie.MerkleTree
 
-	VMs 	   map[uint32]*pvm.VM
-	vmMutex    sync.Mutex
+	VMs     map[uint32]*pvm.VM
+	vmMutex sync.Mutex
 
 	knownPreimageLookups  map[common.Hash]uint32
 	queuedPreimageLookups map[common.Hash]types.PreimageLookup
@@ -56,7 +53,6 @@ type StateDB struct {
 	knownTickets  map[common.Hash]int
 	queuedTickets map[common.Hash]types.Ticket
 	ticketMutex   sync.Mutex
-
 }
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
@@ -183,8 +179,7 @@ func (s *StateDB) ProcessIncomingDispute(d types.Dispute) {
 
 func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
 	// get the guarantee state
-	cj := s.GetCorejam()
-	err := cj.ValidateProposedGuarantee(&g)
+	err := g.ValidateSignatures()
 	if err != nil {
 		fmt.Printf("Invalid guarantee. Err=%v\n", err)
 		return
@@ -192,10 +187,14 @@ func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
 	s.AddGuaranteeToQueue(g)
 }
 
+func (s *StateDB) getValidatorCredential() []byte {
+	// TODO
+	return nil
+}
+
 func (s *StateDB) ProcessIncomingAssurance(a types.Assurance) {
-	// get the assurances state
-	cj := s.GetCorejam()
-	err := cj.ValidateProposedAssurance(&a)
+	cred := s.getValidatorCredential()
+	err := a.ValidateSignature(cred)
 	if err != nil {
 		fmt.Printf("Invalid guarantee. Err=%v\n", err)
 		return
@@ -304,17 +303,12 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	j := InitGenesisState(c)
 	statedb.JamState = j // setting the dispute state so that block 1 can be produced
 	// setting the safrole state so that block 1 can be produced
-	statedb.Corejam = &corejam.CorejamState{} // .InitGenesisState(c) // setting the corejam state so that block 1 can be produced
 	statedb.UpdateTrieState()
 	return statedb, nil
 }
 
 func (s *StateDB) GetTrie() *trie.MerkleTree {
 	return s.trie
-}
-
-func (s *StateDB) GetCorejam() *corejam.CorejamState {
-	return s.Corejam
 }
 
 func (s *StateDB) GetSafrole() *SafroleState {
@@ -457,7 +451,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	return statedb, nil
 }
 
-func (s *StateDB) CopyTrieState(stateRoot common.Hash) (*trie.MerkleTree) {
+func (s *StateDB) CopyTrieState(stateRoot common.Hash) *trie.MerkleTree {
 	t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), s.sdb)
 	return t
 }
@@ -472,9 +466,8 @@ func (s *StateDB) Copy() *StateDB {
 		BlockHash:      s.BlockHash,
 		StateRoot:      s.StateRoot,
 		JamState:       s.JamState.Copy(), // DisputesState has a Copy method
-		Corejam:        s.Corejam.Copy(),  // CorejamState has a Copy method
 		sdb:            s.sdb,
-		trie:           s.CopyTrieState(s.StateRoot), // Deep copy if the MerkleTree is mutable
+		trie:           s.trie, // NOT WORKING: s.CopyTrieState(s.StateRoot), // Deep copy if the MerkleTree is mutable
 		knownTickets:   make(map[common.Hash]int),
 		queuedTickets:  make(map[common.Hash]types.Ticket),
 		knownDisputes:  make(map[common.Hash]int),
@@ -517,7 +510,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, 
 		//bandersnatchPub := credential.BandersnatchPub
 		_, phase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 		// round robin TEMPORARY
-		if phase%NumValidators == s.Id {
+		if phase%types.TotalValidators == s.Id {
 			//fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
 			isAuthorizedBlockBuilder = true
 		}
@@ -575,45 +568,55 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup
 	return nil
 }
 
-func (s *StateDB) ApplyStateTransitionGuarantees(guarantees []types.Guarantee, targetJCE uint32, id uint32) error {
-	// TODO: Guarantee
-	return nil
-}
-
-func (s *StateDB) ApplyStateTransitionAssurances(assurances []types.Assurance, targetJCE uint32, id uint32) error {
-	// TODO: In the same way that extrinsic Tickets are processed, Assurances are
-	return nil
-}
-
-func (s *StateDB) ApplyStateTransitionDisputes(Disputes []types.Dispute, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, error) {
-	/*
-		s.GetDisputesState()
-		var VMark types.VerdictMarker
-		var OMark types.OffenderMarker
-		// apply the disputes
-		VMark, OMark, err := s.Dispute.Disputes(d)
-		if err != nil {
-			return types.VerdictMarker{}, types.OffenderMarker{}, err
-		}
-		(types.VerdictMarker, types.OffenderMarker, error)
-		// VMark, OMark, nil
-	*/
+func (s *StateDB) getRhoWorkReportByWorkPackage(workPackageHash common.Hash) (types.WorkReport, uint32, bool) {
 	// TODO
+	return types.WorkReport{}, 0, false
+}
+
+// Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
+func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, error) {
 	var VMark types.VerdictMarker
 	var OMark types.OffenderMarker
-	s.GetJamState()
+
+	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
+	d := s.GetJamState()
 	for _, dispute := range Disputes {
-		//get the dispute state
+		for _, v := range dispute.Verdict {
+			_, core, ok := s.getRhoWorkReportByWorkPackage(v.WorkReportHash)
+			if ok {
+				if len(v.Votes) > 2*types.TotalValidators/3 {
+					d.clearRhoByCore(core)
+				}
+			}
+		}
 		//apply the dispute
 		var err error
 		VMark, OMark, err = s.JamState.Disputes(dispute)
 		if err != nil {
 			return types.VerdictMarker{}, types.OffenderMarker{}, err
 		}
-		//update the state
 	}
-	return VMark, OMark, nil
 
+	// Assurances: get the bitstring from the availability
+	tally := make([]uint32, types.TotalCores)
+	for _, a := range assurances {
+		for c, bs := range a.Bitstring {
+			tally[c] += uint32(bs)
+		}
+	}
+	// core's data is now available
+	for c, available := range tally {
+		if available > 2*types.TotalValidators/3 {
+			d.clearRhoByCore(uint32(c))
+		}
+	}
+
+	// Guarantees
+	for _, g := range guarantees {
+		d.setRhoByWorkReport(g.WorkReport.Core, g.WorkReport, targetJCE)
+	}
+
+	return VMark, OMark, nil
 }
 
 // given previous safrole, applt state transition using block
@@ -628,26 +631,12 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 		return err
 	}
 
-	// Guarantees
-	guarantees := blk.Guarantees()
-	err = s.ApplyStateTransitionGuarantees(guarantees, targetJCE, s.Id)
+	// Disputes, Assurances. Guarantees
+	_, _, err = s.ApplyStateTransitionRho(blk.Disputes(), blk.Assurances(), blk.Guarantees(), targetJCE, s.Id)
 	if err != nil {
 		return err
 	}
 
-	// Assurances
-	assurances := blk.Assurances()
-	err = s.ApplyStateTransitionAssurances(assurances, targetJCE, s.Id)
-	if err != nil {
-		return err
-	}
-
-	// Disputes
-	disputes := blk.Disputes()
-	_, _, err = s.ApplyStateTransitionDisputes(disputes, targetJCE, s.Id)
-	if err != nil {
-		return err
-	}
 	// Safrole last
 	ticketExts := blk.Tickets()
 	//sf_header := blk.ConvertToSafroleHeader()

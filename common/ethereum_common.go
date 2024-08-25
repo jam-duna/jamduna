@@ -30,6 +30,25 @@ func BytesToHash(b []byte) Hash {
 	return Hash(ethereumCommon.BytesToHash(b))
 }
 
+// Hex2Bytes converts a byte slice to a Hash.
+func Hex2Bytes(b string) []byte {
+	return ethereumCommon.Hex2Bytes(b)
+}
+
+func Hex2BLS(b string) [144]byte {
+	x := ethereumCommon.Hex2Bytes(b)
+	var result [144]byte
+	copy(result[:], x)
+	return result
+}
+
+func Hex2Metadata(b string) [128]byte {
+	x := ethereumCommon.Hex2Bytes(b)
+	var result [128]byte
+	copy(result[:], x)
+	return result
+}
+
 // HexToHash converts a hexadecimal string to a Hash.
 func HexToHash(s string) Hash {
 	return Hash(ethereumCommon.HexToHash(s))

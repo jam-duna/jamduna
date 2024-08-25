@@ -6,20 +6,20 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/trie"
 )
 
 const OK uint32 = 0
 
 type HostEnv struct {
-	node *Node
+	node    *Node
 	statedb *statedb.StateDB
 }
 
-//singleton
+// singleton
 type NodeHostEnv struct {
-	node *Node
+	node    *Node
 	statedb *statedb.StateDB
 	//flex    types.CustomeBackend
 }

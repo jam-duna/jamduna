@@ -34,16 +34,16 @@ type Verdict struct {
 }
 
 type Culprit struct {
-	WorkReportHash []byte    `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Key            PublicKey `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature      []byte    `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+	WorkReportHash common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
+	Key            PublicKey   `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
+	Signature      []byte      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
 }
 
 type Fault struct {
-	WorkReportHash []byte    `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Voting         bool      `json:"vote"`      // vote (BOOLEAN in disputes.asn)
-	Key            PublicKey `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature      []byte    `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+	WorkReportHash common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
+	Voting         bool        `json:"vote"`      // vote (BOOLEAN in disputes.asn)
+	Key            PublicKey   `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
+	Signature      []byte      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
 }
 
 type Vote struct {

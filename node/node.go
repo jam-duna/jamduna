@@ -73,8 +73,8 @@ type Node struct {
 	peers      []string
 	peersInfo  map[string]NodeInfo //<ed25519> -> NodeInfo
 	//peersAddr  	 map[string]string
-	tlsConfig   *tls.Config
-	mutex       sync.Mutex
+	tlsConfig *tls.Config
+	mutex     sync.Mutex
 	//VMs         map[uint32]*pvm.VM
 	connections map[string]quic.Connection
 	streams     map[string]quic.Stream
@@ -311,7 +311,7 @@ func (n *Node) generateEpochTickets(epoch uint32, isNextEpoch bool) {
 func (n *Node) GenerateTickets(currJCE uint32) {
 	sf := n.statedb.GetSafrole()
 	currEpoch, currPhase := sf.EpochAndPhase(currJCE)
-	if currPhase >= statedb.EpochTail {
+	if currPhase >= types.TicketSubmissionEndSlot {
 		if n.generatedEpochTickets(uint32(currEpoch+1)) == false {
 			n.generateEpochTickets(uint32(currEpoch+1), true)
 		}
@@ -485,6 +485,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 				}
 			}
 		}
+
 	case "ImportDAQuery":
 		var query types.ImportDAQuery
 		err := json.Unmarshal([]byte(msg.Payload), &query)
@@ -520,6 +521,15 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		err := json.Unmarshal([]byte(msg.Payload), &ticket)
 		if err == nil {
 			err = n.processTicket(*ticket)
+			if err == nil {
+				response = ok
+			}
+		}
+	case "AvailabilityJustification":
+		var aj *types.AvailabilityJustification
+		err := json.Unmarshal([]byte(msg.Payload), &aj)
+		if err == nil {
+			err = n.processAvailabilityJustification(aj)
 			if err == nil {
 				response = ok
 			}
@@ -915,20 +925,6 @@ func (n *Node) computeAssuranceBitstring() []byte {
 	return []byte{1, 1}
 }
 
-func (n *Node) checkAssurance() error {
-	assurance := types.Assurance{
-		ParentHash:     n.statedb.ParentHash,
-		Bitstring:      n.computeAssuranceBitstring(),
-		ValidatorIndex: n.id,
-		//	Signature: signature,
-	}
-	h := common.ComputeHash(append(n.statedb.ParentHash.Bytes(), assurance.Bitstring...))
-	assuranceBytes := append([]byte(types.X_A), h...)
-	assurance.Signature = ed25519.Sign(n.credential.Ed25519Secret, assuranceBytes)
-	n.broadcast(assurance)
-	return nil
-}
-
 /*
 M_B: WBT
 M : CDT
@@ -965,6 +961,25 @@ and 𝓫• = H#(C⟦|b|/W_c⟧(𝓟_wc(b)))  𝓟 here is Padding
 
 and s• = M#_B(T⟦C#_6⟧(s ⌢ P(s)))  P here is Page-Proof
 */
+func (n *Node) newAvailabilityJustification(guarantee types.Guarantee) types.AvailabilityJustification {
+	return types.AvailabilityJustification{}
+}
+
+func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustification) error {
+	// TODO: validate proof
+
+	assurance := types.Assurance{
+		ParentHash:     n.statedb.ParentHash,
+		Bitstring:      n.computeAssuranceBitstring(),
+		ValidatorIndex: n.id,
+		//	Signature: signature,
+	}
+	assurance.Sign(n.credential.Ed25519Secret, n.statedb.ParentHash)
+
+	n.broadcast(assurance)
+	return nil
+}
+
 func (n *Node) getImportSegment(segmentRoot common.Hash, segmentIndex uint32) ([]byte, error) {
 	// TODO
 	return []byte{}, nil
@@ -982,7 +997,7 @@ func (n *Node) getImportSegments(importsegments []types.ImportSegment) ([][]byte
 	return imports, nil
 }
 
-func (n *Node) getPVMStateDB() (*statedb.StateDB) {
+func (n *Node) getPVMStateDB() *statedb.StateDB {
 	// TODO: processWorkPackage should provide clear signal on which stateDB to work with. What is this signal?
 	// I don't think it should be the tip. workPackage probably requires somekind of blkhash or stateRoot?
 	target_statedb := n.statedb.Copy() // stub. need to figure out what to do here
@@ -1081,13 +1096,12 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 		PackageSpecification: "mock_package_specification",
 		Results:              results,
 	}
-	// Sign the serialized WorkReport
-	signature := ed25519.Sign(n.credential.Ed25519Secret, append([]byte(types.X_G), common.ComputeHash(workReport.Bytes())...))
 
 	// Create a GuaranteeCredential with the signature and a mock validator index
 	credential := types.GuaranteeCredential{
-		ValidatorIndex: 0, // Mock validator index
-		Signature:      signature,
+		ValidatorIndex: n.id, // Mock validator index
+		// Sign the serialized WorkReport
+		Signature: workReport.Sign(n.credential.Ed25519Secret),
 	}
 
 	// Create a Guarantee with the WorkReport, TimeSlot, and Credentials
@@ -1098,6 +1112,10 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 	}
 	// This will be received by all validators
 	n.broadcast(guarantee)
+
+	// This will be received by all validators
+	aj := n.newAvailabilityJustification(guarantee)
+	n.broadcast(aj)
 
 	return nil
 }
@@ -1348,6 +1366,8 @@ func (n *Node) FetchAndReconstructData(blob_hash common.Hash) ([]byte, error) {
 func getMessageType(obj interface{}) string {
 
 	switch obj.(type) {
+	case types.AvailabilityJustification:
+		return "AvailabilityJustification"
 	case types.ImportDAQuery:
 		return "ImportDAQuery"
 	case types.BlockQuery:

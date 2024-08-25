@@ -1,7 +1,9 @@
 package types
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 )
@@ -24,6 +26,26 @@ type WorkReport struct {
 	RefinementContext    RefinementContext         `json:"refinement_context"`
 	PackageSpecification string                    `json:"package_specification"`
 	Results              []WorkResult              `json:"results"`
+}
+
+// computeWorkReportBytes abstracts the process of generating the bytes to be signed or verified.
+func (a *WorkReport) computeWorkReportBytes() []byte {
+	return append([]byte(X_G), common.ComputeHash(a.Bytes())...)
+}
+
+func (a *WorkReport) Sign(Ed25519Secret []byte) []byte {
+	workReportBytes := a.computeWorkReportBytes()
+	return ed25519.Sign(Ed25519Secret, workReportBytes)
+}
+
+func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error {
+	workReportBytes := a.computeWorkReportBytes()
+
+	if !ed25519.Verify(publicKey, workReportBytes, signature) {
+		return errors.New("invalid signature")
+	}
+
+	return nil
 }
 
 // Bytes returns the bytes of the Assurance
