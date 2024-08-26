@@ -23,10 +23,10 @@ type JamState struct {
 
 // Types for Beta
 type Beta_state struct {
-	H common.Hash                   `json:"h"`
-	B []common.Hash                 `json:"b"`
-	S common.Hash                   `json:"s"`
-	P [types.TotalCores]common.Hash `json:"p"`
+	HeaderHash common.Hash                   `json:"header_hash"`
+	MMR        []common.Hash                 `json:"mmr"`
+	StateRoot  common.Hash                   `json:"state_root"`
+	Reported   [types.TotalCores]common.Hash `json:"reported"`
 }
 
 // Types for Psi
