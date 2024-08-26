@@ -334,12 +334,6 @@ func (s *StateDB) GetJamState() *JamState {
 	return s.JamState
 }
 
-/*
-func (s *StateDB) GetPvmState() *PvmState {
-	return s.Pvm
-}
-*/
-
 func (s *StateDB) UpdateTrieState() common.Hash {
 	//γ ≡⎩γk, γz, γs, γa⎭
 	//γk :one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
@@ -593,10 +587,79 @@ func (s *StateDB) getRhoWorkReportByWorkPackage(workPackageHash common.Hash) (ty
 	return types.WorkReport{}, 0, false
 }
 
+// for any hits in m, remove them from pool
+func (s *StateDB) remove_guarantees_authhash(pool []common.Hash, m map[common.Hash]bool) []common.Hash {
+	p := make([]common.Hash, 0)
+	for _, h := range p {
+		_, ok := m[h]
+		if ok {
+
+		} else {
+			p = append(p, h)
+		}
+	}
+	return p
+}
+
+func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, error) {
+	// TODO: fetch from trie
+	return &types.ServiceAccount{}, false, nil
+}
+
+func (s *StateDB) getPreimage(codeHash common.Hash) []byte {
+	// TODO
+	return []byte{}
+}
+
+func (s *StateDB) Accumulate(cores map[uint32]bool) error {
+	for c, _ := range cores {
+		serviceAccount, ok, err := s.getServiceAccount(c)
+		if err == nil && ok {
+			codeHash := serviceAccount.CodeHash
+			code := s.getPreimage(codeHash)
+			fmt.Printf("Accumulate codeHash: %v serviceAccount: %v\n", c, serviceAccount)
+			vm := pvm.NewVMFromCode(code, 0, nil) // TODO:  build n.NewNodeHostEnv(s) equivalent
+			vm.Execute()
+		}
+	}
+	return nil
+}
+
+// Section 8.2 - Eq 85+86
+func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarantee) error {
+	for c := uint32(0); c < types.TotalCores; c++ {
+		if len(guarantees) > 0 {
+			// build m, holding the set of authorization hashes matching the core c in guarantees
+			m := make(map[common.Hash]bool)
+			hits := 0
+			for _, g := range guarantees {
+				if g.WorkReport.Core == c {
+					m[g.WorkReport.AuthorizerHash] = true
+					hits++
+				}
+			}
+			// only use m to update the pool with remove_guarantees_authhash if we have hits > 0
+			if hits > 0 {
+				s.JamState.AuthorizationsPool[c] = s.remove_guarantees_authhash(s.JamState.AuthorizationsPool[c], m)
+			}
+		}
+		// Eq 85 -- add
+		for _, q := range s.JamState.AuthorizationQueue[c] {
+			s.JamState.AuthorizationsPool[c] = append(s.JamState.AuthorizationsPool[c], q)
+		}
+		// cap AuthorizationsPool length at O=types.MaxAuthorizationPoolItems
+		if len(s.JamState.AuthorizationsPool[c]) > types.MaxAuthorizationPoolItems {
+			s.JamState.AuthorizationsPool[c] = s.JamState.AuthorizationsPool[c][:types.MaxAuthorizationPoolItems]
+		}
+	}
+	return nil
+}
+
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, error) {
+func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, map[uint32]bool, error) {
 	var VMark types.VerdictMarker
 	var OMark types.OffenderMarker
+	cores := make(map[uint32]bool)
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
@@ -613,7 +676,7 @@ func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances [
 		var err error
 		VMark, OMark, err = s.JamState.Disputes(dispute)
 		if err != nil {
-			return types.VerdictMarker{}, types.OffenderMarker{}, err
+			return types.VerdictMarker{}, types.OffenderMarker{}, cores, err
 		}
 	}
 
@@ -629,6 +692,7 @@ func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances [
 	for c, available := range tally {
 		if available > 2*types.TotalValidators/3 {
 			d.clearRhoByCore(uint32(c))
+			cores[uint32(c)] = true
 		}
 		num_assurances++
 	}
@@ -642,7 +706,7 @@ func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances [
 	}
 	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
 
-	return VMark, OMark, nil
+	return VMark, OMark, cores, nil
 }
 
 // given previous safrole, applt state transition using block
@@ -650,23 +714,8 @@ func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances [
 func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.Block) (err error) {
 	targetJCE := blk.TimeSlot()
 
-	// Preimages
-	preimages := blk.PreimageLookups()
-	err = s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
-	if err != nil {
-		return err
-	}
-
-	// Disputes, Assurances. Guarantees
-	_, _, err = s.ApplyStateTransitionRho(blk.Disputes(), blk.Assurances(), blk.Guarantees(), targetJCE, s.Id)
-	if err != nil {
-		return err
-	}
-	s.JamState.tallyStatistics(s.Id, "blocks", 1)
-
-	// Safrole last
+	// 19-22 - Safrole last
 	ticketExts := blk.Tickets()
-	//sf_header := blk.ConvertToSafroleHeader()
 	sf_header := blk.GetHeader()
 	epochMark := blk.EpochMark()
 	if epochMark != nil {
@@ -680,8 +729,31 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 		panic(1)
 		return err
 	}
-	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
 	s.JamState.SafroleState = &s2
+	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
+
+	// 24 - Preimages
+	preimages := blk.PreimageLookups()
+	err = s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
+	if err != nil {
+		return err
+	}
+
+	// 23,25-27 Disputes, Assurances. Guarantees
+	_, _, cores, err := s.ApplyStateTransitionRho(blk.Disputes(), blk.Assurances(), blk.Guarantees(), targetJCE, s.Id)
+	if err != nil {
+		return err
+	}
+
+	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
+	s.Accumulate(cores)
+
+	// 29 -  Update Authorization Pool alpha'
+	s.ApplyStateTransitionAuthorizations(blk.Guarantees())
+
+	// 30 - compute pi
+	s.JamState.tallyStatistics(s.Id, "blocks", 1)
+
 	s.Block = blk
 	s.ParentHash = s.BlockHash
 	s.BlockHash = blk.Hash()
