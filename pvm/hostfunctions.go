@@ -3,12 +3,14 @@ package pvm
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/scale"
 	"github.com/colorfulnotion/jam/types"
+
+	"github.com/ethereum/go-ethereum/crypto"
+	//"github.com/ethereum/go-ethereum/crypto/secp256k1"
 )
 
 // Appendix B - Host function
@@ -38,6 +40,7 @@ const (
 	EXPUNGE           = 22
 	EXTRINSIC         = 23
 	PAYLOAD           = 24
+	ECRECOVER         = 25
 )
 
 // false byte
@@ -50,20 +53,9 @@ func falseBytes(data []byte) []byte {
 	return result
 }
 
-func (vm *VM) IsAuthorized(p, c byte) (uint32, error) {
-	// Implement the Is-Authorized logic
-	// Return the amount of gas remaining or an error code
-	if p == 0 {
-		return LOW, nil // Example logic
-	}
-	return OK, nil
-}
-
-// func (vm *VM) InvokeHostCall(opcode byte, operands []byte) (bool, error) {
+// InvokeHostCall handles host calls
+// Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
-	// Implement the logic for handling host calls
-	// Return true if the call results in a halt condition, otherwise false
-	// host_fn := int(opcode)
 	fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
 	switch host_fn {
 	case GAS:
@@ -166,66 +158,13 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.hostPayload()
 		return true, nil
 
+	case ECRECOVER:
+		vm.hostECRecover()
+		return true, nil
+
 	default:
 		return false, fmt.Errorf("unknown host call: %d\n", host_fn)
 	}
-}
-
-type RefineInput struct {
-	s uint32
-}
-
-type AccumulateInput struct {
-	δ uint32
-}
-
-type OT struct {
-	sb uint32
-}
-
-type OnTransferInput struct {
-	sc uint32
-	s  OT
-	t  []uint32
-}
-
-func (vm *VM) Refine(input RefineInput) (uint32, []byte, error) {
-	// Implement the Refine Invocation logic
-	if input.s == BAD {
-		return BAD, nil, errors.New("bad refine invocation")
-	}
-	if input.s > S {
-		return BIG, nil, errors.New("refine invocation too big")
-	}
-	// Perform the actual refine logic and return the result
-	output := []byte("refined_data")
-	return OK, output, nil
-}
-
-func (vm *VM) Accumulate(input AccumulateInput) (uint32, error) {
-	// Implement the Accumulate Invocation logic based on the provided specification
-	// Handle the accumulation logic here
-	if input.δ == BAD {
-		return BAD, errors.New("accumulation failed")
-	}
-	// Perform the actual accumulation logic and return the result
-	return OK, nil
-}
-
-func (vm *VM) OnTransfer(input OnTransferInput) (byte, error) {
-	// Implement the On-Transfer Invocation logic based on the provided specification
-	// If sc is empty or t is empty, return s
-	/*if input.sc == 0 || len(input.t) == 0 {
-		return input.s.sb, nil
-	}
-
-	// Update the service account state as specified in the function definition
-	for _, ret := range input.t {
-		input.s.sb += ret
-	}
-	*/
-	// Perform further processing as per the spec
-	return OK, nil
 }
 
 func min(x, y int) int {
@@ -235,32 +174,19 @@ func min(x, y int) int {
 	return y
 }
 
-type Service struct {
-	tc uint32
-	tb uint32
-	tt uint32
-	tg uint32
-	tm uint32
-	tl uint32
-	ti uint32
-}
-
-func (vm *VM) getService(service uint32) (*Service, error) {
-	return &Service{}, nil
-}
-
 // Information-on-Service
 func (vm *VM) hostInfo() uint32 {
 	service, _ := vm.readRegister(0)
 	bo, _ := vm.readRegister(1)
-	s, err := vm.getService(service)
+	t, err := vm.hostenv.GetService(service)
 	if err != nil {
 		return NONE
 	}
 	buffer := bytes.NewBuffer(nil)
 	encoder := scale.NewEncoder(buffer)
-	t := []interface{}{s.tc, s.tb, s.tt, s.tg, s.tm, s.tl, s.ti}
-	err = encoder.Encode(t)
+
+	e := []interface{}{t.CodeHash, t.Balance, t.GasLimitG, t.GasLimitM}
+	err = encoder.Encode(e)
 	m := buffer.Bytes()
 	vm.writeRAMBytes(bo, m[:])
 
@@ -284,8 +210,7 @@ func (vm *VM) hostAssign() uint32 {
 		return CORE
 	}
 	o, _ := vm.readRegister(1)
-	Q := 1
-	c, _ := vm.readRAMBytes(o, 32*Q)
+	c, _ := vm.readRAMBytes(o, 32*types.MaxAuthorizationQueueItems)
 	vm.hostenv.SetX(types.Assign{Core: core, C: c})
 	return OK
 }
@@ -365,17 +290,27 @@ func (vm *VM) hostTransfer() uint32 {
 
 // Gas Service
 func (vm *VM) hostGas() uint32 {
-	// a := (xs[len(xs)-1] - xs[0]) + o
-	// g := vm.ξ
-	// return WHO
-	// return LOW
+	vm.writeRegister(0, uint32(vm.ξ&0xFFFFFFFF))
+	vm.writeRegister(1, uint32((vm.ξ>>32)&0xFFFFFFFF))
 	return OK
 }
 
 // Quit Service
 func (vm *VM) hostQuit() uint32 {
-	// a := (xs[len(xs)-1] - xs[0]) + o
-	// g := vm.ξ
+	/*
+		d, _ := vm.readRegister(0)
+		s := vm.hostenv.GetService(vm.S)
+		a := s.Balance + types.BaseServiceBalance // TODO: (x_s)_t
+		var transferMemo *TransferMemo
+		if d == vm.S || d == 0xFFFFFFFF {
+			transferMemo = nil
+		} else {
+			o, _ := vm.readRegister(1)
+			transferMemo := types.TransferMemoFromBytes(transferMemoBytes)
+			transferBytes, _ := vm.readRAMBytes(o, types.TransferMemoSize)
+		}
+		g := vm.ξ
+	*/
 	// return WHO
 	// return LOW
 	return OK
@@ -727,9 +662,27 @@ func (vm *VM) hostPayload() uint32 {
 		vm.writeRegister(0, OK)
 		return OK
 	} else {
-		vm.writeRegister(0, NONE)
 		return NONE
 	}
+}
+
+// ECRecover
+func (vm *VM) hostECRecover() uint32 {
+	o, _ := vm.readRegister(0)
+	ho, _ := vm.readRegister(1)
+	sig, _ := vm.readRAMBytes(o, 65)
+	h, _ := vm.readRAMBytes(ho, 32)
+	recoveredPubKey, err := crypto.SigToPub(h, sig)
+	if err != nil {
+		vm.writeRegister(0, NONE)
+	}
+	recoveredPubKeyBytes := crypto.FromECDSAPub(recoveredPubKey)
+	p, _ := vm.readRegister(2)
+	vm.writeRAMBytes(p, recoveredPubKeyBytes[:])
+
+	vm.writeRegister(0, OK)
+	return OK
+
 }
 
 // Export segment host-call

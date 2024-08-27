@@ -13,13 +13,10 @@ const (
 
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
-	StorageDict         map[common.Hash]string `json:"storage_dict"`
-	PreimageLookupDictP map[common.Hash]string `json:"preimage_lookup_dict_p"`
-	PreimageLookupDictL map[common.Hash]int    `json:"preimage_lookup_dict_l"`
-	CodeHash            common.Hash            `json:"code_hash"`
-	Balance             int                    `json:"balance"`
-	GasLimitG           int                    `json:"gas_limit_g"`
-	GasLimitM           int                    `json:"gas_limit_m"`
+	CodeHash  common.Hash `json:"code_hash"`
+	Balance   uint32      `json:"balance"`
+	GasLimitG uint64      `json:"gas_limit_g"`
+	GasLimitM uint64      `json:"gas_limit_m"`
 }
 
 // Convert the ServiceAccount to a byte slice.
@@ -45,6 +42,6 @@ func ServiceAccountFromBytes(data []byte) (*ServiceAccount, error) {
 
 // Convert the ServiceAccount to a human-readable string.
 func (s *ServiceAccount) String() string {
-	return fmt.Sprintf("ServiceAccount{StorageDict: %v, PreimageLookupDictP: %v, PreimageLookupDictL: %v, CodeHash: %v, Balance: %d, GasLimitG: %d, GasLimitM: %d}",
-		s.StorageDict, s.PreimageLookupDictP, s.PreimageLookupDictL, s.CodeHash.Hex(), s.Balance, s.GasLimitG, s.GasLimitM)
+	return fmt.Sprintf("ServiceAccount{CodeHash: %v, Balance: %d, GasLimitG: %d, GasLimitM: %d}",
+		s.CodeHash.Hex(), s.Balance, s.GasLimitG, s.GasLimitM)
 }

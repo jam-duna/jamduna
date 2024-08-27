@@ -32,4 +32,5 @@ type HostEnv interface {
 
 	SetX(x interface{}) uint32
 	GetX(x string) interface{}
+	GetService(service uint32) (*ServiceAccount, error)
 }

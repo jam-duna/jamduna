@@ -54,6 +54,9 @@ type StateDB struct {
 	knownTickets  map[common.Hash]int
 	queuedTickets map[common.Hash]types.Ticket
 	ticketMutex   sync.Mutex
+
+	X XContext
+	S uint32
 }
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
@@ -770,6 +773,8 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 
 	// 30 - compute pi
 	s.JamState.tallyStatistics(s.Id, "blocks", 1)
+
+	s.ApplyXContext()
 
 	s.Block = blk
 	s.ParentHash = s.BlockHash

@@ -1,7 +1,7 @@
 package types
 
 import (
-//"github.com/colorfulnotion/jam/common"
+// "github.com/colorfulnotion/jam/common"
 )
 
 type Empower struct {

@@ -7,6 +7,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // MockHostEnv struct implements the HostEnv interface with mock responses
@@ -259,4 +260,8 @@ func (mh *MockHostEnv) SetX(obj interface{}) uint32 {
 
 func (mh *MockHostEnv) GetX(c string) interface{} {
 	return uint32(0)
+}
+
+func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, error) {
+	return nil, nil
 }

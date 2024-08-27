@@ -1,7 +1,6 @@
 package statedb
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
@@ -9,6 +8,42 @@ import (
 )
 
 const OK uint32 = 0
+
+const (
+	x_s = "s"
+	x_c = "c"
+	x_v = "v"
+	x_i = "i"
+	x_t = "t"
+	x_n = "n"
+	x_p = "p"
+)
+
+type XContext struct {
+	s *types.ServiceAccount
+	c [types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash
+	v []types.Validator
+	i uint32
+	t []*types.AddTransfer
+	n map[uint32]*types.ServiceAccount
+	p *types.Empower
+}
+
+func (s *StateDB) ApplyXContext() {
+	x := s.X
+	if x.s != nil {
+		// TODO: write s
+		s.WriteService(s.S, x.s)
+	}
+	for service, sa := range x.n {
+		// TODO: write service => sa
+		s.WriteService(service, sa)
+	}
+
+	// TODO LATER: write c, write v back to node, p+i
+
+	// TODO -- treat t
+}
 
 func (s *StateDB) GetTimeslot() uint32 {
 	// Successfully casted to *statedb.StateDB
@@ -25,6 +60,18 @@ func (s *StateDB) ReadServiceBytes(service uint32) []byte {
 	return value
 }
 
+func (s *StateDB) GetService(service uint32) (*types.ServiceAccount, error) {
+	serviceBytes := s.ReadServiceBytes(service)
+	if serviceBytes == nil {
+		return nil, nil
+	}
+	return types.ServiceAccountFromBytes(serviceBytes)
+}
+
+func (s *StateDB) WriteService(service uint32, sa *types.ServiceAccount) {
+	v, _ := sa.Bytes()
+	s.WriteServiceBytes(service, v)
+}
 func (s *StateDB) WriteServiceBytes(service uint32, v []byte) {
 	tree := s.GetTrie()
 	tree.SetService(255, service, v)
@@ -77,14 +124,6 @@ func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Ha
 	tree := s.GetTrie()
 	tree.SetPreImageLookup(service, blob_hash, blob_length, time_slots)
 }
-
-/* Does this make sense?
-func (nh *HostEnv) WriteServicePreimageBlob(s uint32, blob []byte) bool {
-	t := nh.GetTrie()
-	t.SetPreImageBlob(s, blob)
-	return true
-}
-*/
 
 // HistoricalLookup, GetImportItem, ExportSegment
 func (s *StateDB) HistoricalLookup(service uint32, t uint32, blob_hash common.Hash) []byte {
@@ -162,43 +201,77 @@ func (s *StateDB) DeleteServicePreimageLookupKey(service uint32, blob_hash commo
 	}
 	return nil
 }
-func (s *StateDB) empower(e types.Empower) uint32 {
+
+func (s *StateDB) empower(p *types.Empower) uint32 {
+	s.X.p = p
 	return OK
 }
 
-func (s *StateDB) designate(e types.Designate) uint32 {
+func (s *StateDB) designate(designate *types.Designate) uint32 {
+	for i := 0; i < types.TotalValidators; i++ {
+		s.X.v[i], _ = types.ValidatorFromBytes(designate.V[i*176 : (i+1)*176])
+	}
 	return OK
 }
 
-func (s *StateDB) assign(e types.Assign) uint32 {
+func (s *StateDB) assign(assign *types.Assign) uint32 {
+	for i := 0; i < types.MaxAuthorizationQueueItems; i++ {
+		s.X.c[assign.Core][i] = common.BytesToHash(assign.C[i*32 : (i+1)*32])
+	}
 	return OK
 }
 
-func (s *StateDB) newService(e types.NewService) uint32 {
+func (s *StateDB) getNewServiceIdentifier(i uint32) uint32 {
+	_, err := s.GetService(i)
+	if err == nil {
+		return i
+	} else {
+		return s.getNewServiceIdentifier((i-0xFF+1)%(0xFFFFFFFF-0x100) + 0xFF)
+	}
+}
+
+func (s *StateDB) newService(newService *types.NewService) uint32 {
+	// ServiceAccount represents a service account.
+	a := &types.ServiceAccount{
+		CodeHash:  common.BytesToHash(newService.C),
+		Balance:   newService.B,
+		GasLimitG: newService.G,
+		GasLimitM: newService.M,
+	}
+	i := s.getNewServiceIdentifier(0)
+	s.X.n[i] = a
 	return OK
 }
 
-func (s *StateDB) upgradeService(e types.UpgradeService) uint32 {
+func (s *StateDB) upgradeService(upgrade *types.UpgradeService) uint32 {
+	a, ok := s.X.n[s.S]
+	if ok {
+		a.CodeHash = common.BytesToHash(upgrade.C)
+		a.GasLimitG = upgrade.G
+		a.GasLimitM = upgrade.M
+	}
 	return OK
 }
 
-func (s *StateDB) addTransfer(e types.AddTransfer) uint32 {
+func (s *StateDB) addTransfer(t *types.AddTransfer) uint32 {
+	s.X.t = append(s.X.t, t)
 	return OK
 }
+
 func (s *StateDB) SetX(obj interface{}) uint32 {
 	switch v := obj.(type) {
 	case types.Empower:
-		return s.empower(v)
+		return s.empower(&v)
 	case types.Designate:
-		return s.designate(v)
+		return s.designate(&v)
 	case types.Assign:
-		return s.assign(v)
+		return s.assign(&v)
 	case types.NewService:
-		return s.newService(v)
+		return s.newService(&v)
 	case types.UpgradeService:
-		return s.upgradeService(v)
+		return s.upgradeService(&v)
 	case types.AddTransfer:
-		return s.addTransfer(v)
+		return s.addTransfer(&v)
 	default:
 		panic(0)
 	}
@@ -206,26 +279,25 @@ func (s *StateDB) SetX(obj interface{}) uint32 {
 }
 
 func (s *StateDB) GetX(ctx string) interface{} {
-	// TODO: for each possible value of ctx return some internal state variable of X
+	// for each possible value of ctx return some internal state variable of X
+	x := s.X
 	switch ctx {
-	case "p":
-		break
-	case "s":
-		break
-	case "c":
-		break
-	case "v":
-		break
-	case "i":
-		break
+	case x_s:
+		return x.s
+	case x_c:
+		return x.c
+	case x_v:
+		return x.v
+	case x_i:
+		return x.i
+	case x_t:
+		return x.t
+	case x_n:
+		return x.n
+	case x_p:
+		return x.p
 	default:
 		panic(0)
 	}
 	return 0
-}
-
-func uint32ToBytes(s uint32) []byte {
-	sbytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sbytes, s)
-	return sbytes
 }
