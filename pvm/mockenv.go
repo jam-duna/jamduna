@@ -1,7 +1,6 @@
 package pvm
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
 
@@ -13,14 +12,6 @@ import (
 // MockHostEnv struct implements the HostEnv interface with mock responses
 type MockHostEnv struct {
 	db *storage.StateDBStorage
-}
-
-func (mh *MockHostEnv) FlexBackend() interface{} {
-	return nil
-}
-
-func (mh *MockHostEnv) GetEnvType() string {
-	return "Mock"
 }
 
 func NewMockHostEnvDB() *storage.StateDBStorage {
@@ -262,66 +253,10 @@ func (mh *MockHostEnv) DeleteServicePreimageLookupKey(s uint32, blob_hash common
 	return nil
 }
 
-// Not used:
-
-func (mh *MockHostEnv) NewService(c []byte, l, b uint32, g, m uint64) uint32 {
+func (mh *MockHostEnv) SetX(obj interface{}) uint32 {
 	return uint32(0)
 }
 
-func (mh *MockHostEnv) UpgradeService(c []byte, g, m uint64) uint32 {
-	return uint32(0)
-}
-
-func (mh *MockHostEnv) AddTransfer(memo []byte, a, g uint64, d uint32) uint32 {
-	return uint32(0)
-}
-
-func (mh *MockHostEnv) GetImportItem(i uint32) ([]byte, uint32) {
-	bytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bytes, i)
-	return bytes, uint32(4)
-}
-
-func (mh *MockHostEnv) ExportSegment(x []byte) uint32 {
-	return uint32(0)
-}
-
-func (mh *MockHostEnv) ContainsKey(h []byte, z []byte) bool {
-	return false // Assume the key does not exist
-}
-
-func (mh *MockHostEnv) DeleteKey(k common.Hash) error {
-	return nil
-}
-
-func (mh *MockHostEnv) SetKey(k common.Hash, v []byte, b0 uint32, numBytes int) error {
-	return nil // Assume success
-}
-
-func (mh *MockHostEnv) AddKey(k common.Hash, v []byte) error {
-	return nil // Assume success
-}
-
-func (mh *MockHostEnv) CreateVM(code []byte, i uint32) uint32 {
-	return uint32(0)
-}
-
-func (mh *MockHostEnv) GetVM(n uint32) (*VM, bool) {
-	return &VM{}, false // Return a dummy VM and indicate failure
-}
-
-func (mh *MockHostEnv) ExpungeVM(n uint32) bool {
-	return false // Assume failure
-}
-
-func (mh *MockHostEnv) Designate(v []byte) uint32 {
-	return uint32(0)
-}
-
-func (mh *MockHostEnv) Empower(m uint32, a uint32, v uint32) uint32 {
-	return uint32(0)
-}
-
-func (mh *MockHostEnv) Assign(c []byte) uint32 {
+func (mh *MockHostEnv) GetX(c string) interface{} {
 	return uint32(0)
 }

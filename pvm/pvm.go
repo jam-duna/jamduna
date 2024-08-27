@@ -50,6 +50,8 @@ type VM struct {
 	writable_ram_start  uint32
 	writable_ram_length uint32
 
+	VMs map[uint32]*VM
+
 	// Work Package Inputs
 	extrinsics [][]byte
 	payload    []byte
@@ -1450,4 +1452,33 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint32 {
 
 	fmt.Printf(" aluReg - rA[%d]=%d  regB[%d]=%d regD[%d]=%d\n", registerIndexA, valueA, registerIndexB, valueB, registerIndexD, result)
 	return vm.writeRegister(registerIndexD, result)
+}
+
+// VM Management: CreateVM, GetVM, ExpungeVM
+func (vm *VM) CreateVM(code []byte, i uint32) uint32 {
+	maxN := uint32(0)
+	for n := range vm.VMs {
+		if n > maxN {
+			maxN = n
+		}
+	}
+	vm.VMs[maxN+1] = NewVMFromCode(code, i, vm.hostenv)
+	return maxN + 1
+}
+
+func (vm *VM) GetVM(n uint32) (*VM, bool) {
+	vm, ok := vm.VMs[n]
+	if !ok {
+		return nil, false
+	}
+	return vm, true
+}
+
+func (vm *VM) ExpungeVM(n uint32) bool {
+	_, ok := vm.VMs[n]
+	if !ok {
+		return false
+	}
+	vm.VMs[n] = nil
+	return true
 }

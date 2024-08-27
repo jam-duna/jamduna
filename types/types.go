@@ -88,17 +88,6 @@ type DeferredTransfer struct {
 	GasLimit      int      `json:"gas_limit"`
 }
 
-// ServiceAccount represents a service account.
-type ServiceAccount struct {
-	StorageDict         map[common.Hash]string `json:"storage_dict"`
-	PreimageLookupDictP map[common.Hash]string `json:"preimage_lookup_dict_p"`
-	PreimageLookupDictL map[common.Hash]int    `json:"preimage_lookup_dict_l"`
-	CodeHash            common.Hash            `json:"code_hash"`
-	Balance             int                    `json:"balance"`
-	GasLimitG           int                    `json:"gas_limit_g"`
-	GasLimitM           int                    `json:"gas_limit_m"`
-}
-
 // AccumulationState represents the state required for accumulation.
 type AccumulationState struct {
 	ServiceIndices    []int              `json:"service_indices"`

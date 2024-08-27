@@ -602,13 +602,28 @@ func (s *StateDB) remove_guarantees_authhash(pool []common.Hash, m map[common.Ha
 }
 
 func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, error) {
-	// TODO: fetch from trie
+	t := s.GetTrie()
+	v, err := t.GetService(types.ServiceAccountPrefix, c)
+	if err != nil {
+		return &types.ServiceAccount{}, false, nil
+	}
+	// v looks like: ac ⌢ E8(ab,ag,am,al) ⌢ E4(ai)
+	// TODO: William to figure out the transformation
+	a, err := types.ServiceAccountFromBytes(v)
+	if err != nil {
+		return &types.ServiceAccount{}, false, nil
+	}
+	fmt.Printf("getServiceAccount s=%v, v=%v\n", c, a.String())
 	return &types.ServiceAccount{}, false, nil
 }
 
-func (s *StateDB) getPreimage(codeHash common.Hash) []byte {
-	// TODO
-	return []byte{}
+func (s *StateDB) getPreimageBlob(c uint32, codeHash common.Hash) ([]byte, error) {
+	t := s.GetTrie()
+	preimage_blob, err := t.GetPreImageBlob(c, codeHash.Bytes())
+	if err != nil {
+		return []byte{}, err
+	}
+	return preimage_blob, nil
 }
 
 func (s *StateDB) Accumulate(cores map[uint32]bool) error {
@@ -616,10 +631,12 @@ func (s *StateDB) Accumulate(cores map[uint32]bool) error {
 		serviceAccount, ok, err := s.getServiceAccount(c)
 		if err == nil && ok {
 			codeHash := serviceAccount.CodeHash
-			code := s.getPreimage(codeHash)
-			fmt.Printf("Accumulate codeHash: %v serviceAccount: %v\n", c, serviceAccount)
-			vm := pvm.NewVMFromCode(code, 0, nil) // TODO:  build n.NewNodeHostEnv(s) equivalent
-			vm.Execute()
+			code, err := s.getPreimageBlob(c, codeHash)
+			if err == nil {
+				fmt.Printf("Accumulate codeHash: %v serviceAccount: %v\n", c, serviceAccount)
+				vm := pvm.NewVMFromCode(code, 0, s)
+				vm.Execute()
+			}
 		}
 	}
 	return nil

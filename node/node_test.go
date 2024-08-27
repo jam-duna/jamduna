@@ -207,7 +207,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		//you can potentially call NewForceCreateVM() and initialize your vm, make sure you handle the reg properly
 		poa_node := nodes[i]
 		target_statedb := poa_node.getPVMStateDB()
-		vm := pvm.NewVMFromCode(solict_program_code, 0, poa_node.NewNodeHostEnv(target_statedb))
+		vm := pvm.NewVMFromCode(solict_program_code, 0, target_statedb)
 		// NEW IDEA: hostSolicit will fill this array
 		// lookups = vm.Solicits
 		err := vm.Execute()

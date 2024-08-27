@@ -75,7 +75,7 @@ type Node struct {
 	//peersAddr  	 map[string]string
 	tlsConfig *tls.Config
 	mutex     sync.Mutex
-	//VMs         map[uint32]*pvm.VM
+
 	connections map[string]quic.Connection
 	streams     map[string]quic.Stream
 	store       *storage.StateDBStorage /// where to put this?
@@ -1016,7 +1016,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 			return err
 		}
 		// TODO: statedb should follow HostEnv
-		vm := pvm.NewVMFromCode(code, 0, n.NewNodeHostEnv(targetStateDB))
+		vm := pvm.NewVMFromCode(code, 0, targetStateDB)
 		imports, err := n.getImportSegments(workItem.ImportedSegments)
 		if err != nil {
 			return err

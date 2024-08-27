@@ -8,6 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/scale"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // Appendix B - Host function
@@ -272,7 +273,7 @@ func (vm *VM) hostEmpower() uint32 {
 	a, _ := vm.readRegister(1)
 	v, _ := vm.readRegister(0)
 	// Set (x'p)_m, (x'p)_a, (x'p)_v
-	vm.hostenv.Empower(m, a, v)
+	vm.hostenv.SetX(types.Empower{M: m, A: a, V: v})
 	return OK
 }
 
@@ -285,7 +286,7 @@ func (vm *VM) hostAssign() uint32 {
 	o, _ := vm.readRegister(1)
 	Q := 1
 	c, _ := vm.readRAMBytes(o, 32*Q)
-	vm.hostenv.Assign(c)
+	vm.hostenv.SetX(types.Assign{Core: core, C: c})
 	return OK
 }
 
@@ -296,7 +297,7 @@ func (vm *VM) hostDesignate() uint32 {
 	if errCode == OOB {
 		return OOB
 	}
-	return vm.hostenv.Designate(v)
+	return vm.hostenv.SetX(types.Designate{V: v})
 }
 
 // Checkpoint gets Gas-remaining
@@ -324,7 +325,7 @@ func (vm *VM) hostNew() uint32 {
 	m := uint64(mh)<<32 + uint64(ml)
 	b := uint32(0) // TODO
 	// TODO: CASH if balance insufficient
-	return vm.hostenv.NewService(c, l, b, g, m)
+	return vm.hostenv.SetX(types.NewService{C: c, L: l, B: b, G: g, M: m})
 }
 
 // Upgrade service
@@ -340,7 +341,7 @@ func (vm *VM) hostUpgrade() uint32 {
 	}
 	g := uint64(gh)<<32 + uint64(gl)
 	m := uint64(mh)<<32 + uint64(ml)
-	return vm.hostenv.UpgradeService(c, g, m)
+	return vm.hostenv.SetX(types.UpgradeService{C: c, G: g, M: m})
 }
 
 // Transfer host call
@@ -359,7 +360,7 @@ func (vm *VM) hostTransfer() uint32 {
 	if errCode == OOB {
 		return OOB
 	}
-	return vm.hostenv.AddTransfer(m, a, g, d)
+	return vm.hostenv.SetX(types.AddTransfer{M: m, A: a, G: g, D: d})
 }
 
 // Gas Service
@@ -518,19 +519,7 @@ func (vm *VM) hostWrite() uint32 {
 }
 
 func (vm *VM) GetJCETime() uint32 {
-	//TODO: need access to state. Right now we are just using currJCE, which doesn't make sense
-	envType := vm.hostenv.GetEnvType()
-	var targetJCE uint32
-	switch envType {
-	case "NODE":
-		//targetJCE = vm.hostenv.GetTimeslot() // TODO: desmorate we can pass arb state between
-		targetJCE = common.ComputeCurrentJCETime()
-		break
-	case "MOCK":
-		targetJCE = common.ComputeCurrentJCETime()
-		break
-	}
-	return targetJCE
+	return common.ComputeCurrentJCETime()
 }
 
 // Solicit preimage
@@ -798,7 +787,7 @@ func (vm *VM) hostMachine() uint32 {
 	if errCode != OK {
 		return errCode
 	}
-	n := vm.hostenv.CreateVM(p, i)
+	n := vm.CreateVM(p, i)
 	return n
 }
 
@@ -824,10 +813,6 @@ func (vm *VM) hostPeek() uint32 {
 	return OK
 }
 
-func (vm *VM) GetVM(n uint32) (*VM, bool) {
-	return nil, false
-}
-
 func (vm *VM) hostPoke() uint32 {
 	n, _ := vm.readRegister(0)
 	a, _ := vm.readRegister(1)
@@ -850,7 +835,7 @@ func (vm *VM) hostPoke() uint32 {
 
 func (vm *VM) hostExpunge() uint32 {
 	n, _ := vm.readRegister(0)
-	if vm.hostenv.ExpungeVM(n) {
+	if vm.ExpungeVM(n) {
 		return OK
 	}
 	return WHO
