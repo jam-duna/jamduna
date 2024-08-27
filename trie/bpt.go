@@ -237,7 +237,14 @@ func (t *MerkleTree) GetRootHash() []byte {
 }
 
 func InitMerkleTreeFromHash(root []byte, db *storage.StateDBStorage) (*MerkleTree, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
 	tree := &MerkleTree{Root: nil, db: db}
+	if compareBytes(root, common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000000")) {
+		fmt.Printf("Root Hash is empty\n")
+		return &MerkleTree{Root: nil, db: db}, nil
+	}
 	rootNode, err := tree.levelDBGetBranch(root)
 	if err != nil {
 		return nil, err
@@ -261,7 +268,15 @@ func (t *MerkleTree) levelDBSetBranch(branchHash, value []byte) {
 
 func (t *MerkleTree) levelDBGetBranch(branchHash []byte) (*Node, error) {
 	value, err := t.levelDBGet(branchHash)
-
+	if err != nil {
+		return nil, err
+	}
+	if value == nil {
+		return nil, fmt.Errorf("value is nil for key: %s", branchHash)
+	}
+	if len(value) < 38 {
+		return nil, fmt.Errorf("value is too short, expected at least 38 bytes but got %d bytes", len(value))
+	}
 	leftHash := make([]byte, 32)
 	copy(leftHash, value[6:38])
 	rightHash := value[38:]
@@ -748,7 +763,7 @@ func (t *MerkleTree) Insert(key, value []byte) {
 func (t *MerkleTree) insertNode(node *Node, key, value []byte, depth int) *Node {
 	nullNode := Node{Hash: make([]byte, 32)}
 
-	if node == nil || compareBytes(node.Hash, nullNode.Hash) {
+	if node == nil || compareBytes(node.Hash, nullNode.Hash) || depth > len(key)*8 {
 		return &Node{
 			Hash: computeHash(leaf(key, value)),
 			Key:  key,
@@ -864,7 +879,7 @@ func (t *MerkleTree) updateNode(node *Node, key, value []byte) {
 }
 
 func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
-	if node == nil {
+	if node == nil || depth > len(key)*8 {
 		return
 	}
 	if compareBytes(node.Key, key) {
@@ -901,7 +916,7 @@ func (t *MerkleTree) Get(key []byte) ([]byte, error) {
 }
 
 func (t *MerkleTree) getValue(node *Node, key []byte, depth int) ([]byte, error) {
-	if node == nil {
+	if node == nil || depth > len(key)*8 {
 		return nil, errors.New("key not found")
 	}
 
@@ -936,7 +951,7 @@ func (t *MerkleTree) Trace(key []byte) ([][]byte, error) {
 }
 
 func (t *MerkleTree) tracePath(node *Node, key []byte, depth int, path *[][]byte) error {
-	if node == nil {
+	if node == nil || depth > len(key)*8 {
 		return errors.New("key not found")
 	}
 

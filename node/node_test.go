@@ -11,9 +11,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
 	"io/ioutil"
 	"os"
+
+	"github.com/colorfulnotion/jam/common"
 
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
@@ -258,6 +259,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 
 		// check whetere intergrate successfully
 		t := s.GetTrie()
+		t = s.CopyTrieState(s.StateRoot)
 		data, _ := t.GetPreImageBlob(b1.Extrinsic.PreimageLookups[0].ServiceIndex, bhash(b1.Extrinsic.PreimageLookups[0].Data).Bytes())
 		ts, _ := t.GetPreImageLookup(b1.Extrinsic.PreimageLookups[0].ServiceIndex, bhash(b1.Extrinsic.PreimageLookups[0].Data), uint32(len(b1.Extrinsic.PreimageLookups[0].Data)))
 		fmt.Println("data:", data)

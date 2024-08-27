@@ -262,6 +262,9 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	if err == nil {
 		_statedb.SetID(id)
 		node.addStateDB(_statedb)
+	} else {
+		fmt.Printf("NewGenesisStateDB ERR %v\n", err)
+		return nil, err
 	}
 	node.setValidatorCredential(credential)
 
@@ -366,9 +369,9 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		var blkHash common.Hash
 		if _statedb.GetBlock() != nil {
 			blkHash = _statedb.GetBlock().Hash()
-			fmt.Printf("[N%d] addStateDB1 [%v <- %v]\n", n.id, _statedb.ParentHash, _statedb.BlockHash)
+			fmt.Printf("[N%d] addStateDB1 [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHash, _statedb.BlockHash, _statedb.StateRoot)
 		} else {
-			fmt.Printf("[N%d] addStateDB0 [%v <- %v]\n", n.id, _statedb.ParentHash, _statedb.BlockHash)
+			fmt.Printf("[N%d] addStateDB0 [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHash, _statedb.BlockHash, _statedb.StateRoot)
 		}
 		n.statedb = _statedb
 		n.statedbMap[blkHash] = _statedb

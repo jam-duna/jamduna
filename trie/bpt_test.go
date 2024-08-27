@@ -452,17 +452,37 @@ func TestInitial(t *testing.T) {
 	// Get the root hash of the tree
 	rootHash := tree.GetRootHash()
 
-	// Rebuild the tree from the root hash
-	initialTree, err := InitMerkleTreeFromHash(rootHash, tree.db)
+	// Rebuild the recovered tree (rt) from the root hash
+	rt, err := InitMerkleTreeFromHash(rootHash, test_db)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	initialTree.printTree(initialTree.Root, 0)
+	rt.printTree(rt.Root, 0)
 
 	// Compare the initial tree with the reconstructed tree
-	if !compareTrees(tree.Root, initialTree.Root) {
+	if !compareTrees(tree.Root, rt.Root) {
 		t.Error("The reconstructed tree does not match the initial tree")
 	}
+
+	// TODO: stanley to test insert on this recovered tree..
+	// recoveredTree.SetState()
+/*
+	rt.SetState(C1, coreAuthPoolEncode)
+	rt.SetState(C2, authQueueEncode)
+	rt.SetState(C3, recentBlocksEncode)
+	rt.SetState(C4, safroleStateEncode)
+	rt.SetState(C5, disputeState)
+	rt.SetState(C6, entropyEncode)
+	rt.SetState(C7, nextEpochValidatorsEncode)
+	rt.SetState(C8, currEpochValidatorsEncode)
+	rt.SetState(C9, priorEpochValidatorEncode)
+	rt.SetState(C10, rhoEncode)
+	rt.SetState(C11, mostRecentBlockTimeSlotEncode)
+	rt.SetState(C12, privilegedServiceIndicesEncode)
+	rt.SetState(C13, piEncode)
+*/
+
+
 }
 
 // Test service

@@ -289,6 +289,7 @@ func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb.knownAssurances = make(map[common.Hash]int)
 	statedb.queuedPreimageLookups = make(map[common.Hash]types.PreimageLookup)
 	statedb.knownPreimageLookups = make(map[common.Hash]uint32)
+	statedb.SetStorage(sdb)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 	return statedb
 }
@@ -321,12 +322,25 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	j := InitGenesisState(c)
 	statedb.JamState = j // setting the dispute state so that block 1 can be produced
 	// setting the safrole state so that block 1 can be produced
-	statedb.UpdateTrieState()
+
+	statedb.StateRoot = statedb.UpdateTrieState()
 	return statedb, nil
+}
+
+func (s *StateDB) GetStateRoot() common.Hash {
+	return s.StateRoot
 }
 
 func (s *StateDB) GetTrie() *trie.MerkleTree {
 	return s.trie
+}
+
+func (s *StateDB) GetStorage() *storage.StateDBStorage {
+	return s.sdb
+}
+
+func (s *StateDB) SetStorage(sdb *storage.StateDBStorage) {
+	s.sdb = sdb
 }
 
 func (s *StateDB) GetSafrole() *SafroleState {
@@ -391,6 +405,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	}
 
 	t := s.GetTrie()
+	fmt.Printf("UpdateTrieState - before root:%v\n", t.GetRoot())
 	t.SetState(C1, coreAuthPoolEncode)
 	t.SetState(C2, authQueueEncode)
 	t.SetState(C3, recentBlocksEncode)
@@ -404,7 +419,9 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C11, mostRecentBlockTimeSlotEncode)
 	t.SetState(C12, privilegedServiceIndicesEncode)
 	t.SetState(C13, piEncode)
-	return common.BytesToHash(t.GetRootHash())
+	updated_root := t.GetRoot()
+	fmt.Printf("UpdateTrieState - after root:%v\n", updated_root)
+	return updated_root
 }
 
 func (s *StateDB) GetSafroleState() *SafroleState {
@@ -476,7 +493,7 @@ func (s *StateDB) Copy() *StateDB {
 		StateRoot:      s.StateRoot,
 		JamState:       s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:            s.sdb,
-		trie:           s.trie, // NOT WORKING: s.CopyTrieState(s.StateRoot), // Deep copy if the MerkleTree is mutable
+		trie:           s.CopyTrieState(s.StateRoot),
 		knownTickets:   make(map[common.Hash]int),
 		queuedTickets:  make(map[common.Hash]types.Ticket),
 		knownDisputes:  make(map[common.Hash]int),
@@ -813,12 +830,14 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IsTicketSubmissionCloses(targetJCE)
+	stateRoot := s.GetStateRoot()
+	fmt.Printf("MakeBlock start - stateRoot:%v\n", stateRoot)
 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()
 	extrinsicData := types.NewExtrinsic()
 	h.ParentHash = s.BlockHash
-	h.PriorStateRoot = s.StateRoot
+	h.PriorStateRoot = stateRoot
 	h.TimeSlot = targetJCE
 
 	// Extrinsic Data has 5 different Extrinsics
