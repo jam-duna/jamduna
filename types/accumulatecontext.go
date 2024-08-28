@@ -22,9 +22,10 @@ type Assign struct {
 type NewService struct {
 	C []byte
 	L uint32
-	B uint32
+	B uint64
 	G uint64
 	M uint64
+	i uint32
 }
 
 type UpgradeService struct {

@@ -83,6 +83,7 @@ func (s *StateDB) WriteService(service uint32, sa *types.ServiceAccount) {
 	v, _ := sa.Bytes()
 	s.WriteServiceBytes(service, v)
 }
+
 func (s *StateDB) WriteServiceBytes(service uint32, v []byte) {
 	tree := s.GetTrie()
 	tree.SetService(255, service, v)

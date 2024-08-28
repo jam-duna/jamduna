@@ -56,8 +56,7 @@ type VM struct {
 	extrinsics [][]byte
 	payload    []byte
 	Imports    [][]byte
-	// EXPORTS
-	Exports [][]byte
+	Exports    [][]byte
 
 	// SOLICITS+FORGETS
 	Solicits []Solicit
@@ -314,6 +313,7 @@ func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMa
 		pc:       initialPC,
 		ram:      make([]byte, 4096*64),
 		hostenv:  hostENV, //check if we need this
+		Exports:  make([][]byte, 0),
 	}
 	for _, pg := range pages {
 		for i, b := range pg.Contents {
@@ -342,7 +342,6 @@ func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, host
 	vm := &VM{
 		register: make([]uint32, regSize),
 		ram:      make([]byte, 4096*64),
-		//hostenv:  &MockHostEnv{db: db},
 		hostenv: hostENV,
 	}
 	for _, pg := range pages {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // TestCase

@@ -248,8 +248,12 @@ func (vm *VM) hostNew() uint32 {
 	mh, _ := vm.readRegister(5)
 	g := uint64(gh)<<32 + uint64(gl)
 	m := uint64(mh)<<32 + uint64(ml)
-	b := uint32(0) // TODO
-	// TODO: CASH if balance insufficient
+	b := uint64(0)
+	/*
+	TODO: William to figure out the (x_s)b-a_t
+	TODO: CASH if balance insufficient
+	TODO: OOB on x_t
+	*/
 	return vm.hostenv.SetX(types.NewService{C: c, L: l, B: b, G: g, M: m})
 }
 
@@ -266,6 +270,10 @@ func (vm *VM) hostUpgrade() uint32 {
 	}
 	g := uint64(gh)<<32 + uint64(gl)
 	m := uint64(mh)<<32 + uint64(ml)
+	/*
+	TODO: CASH if balance insufficient
+	TODO: OOB on x_t
+	*/
 	return vm.hostenv.SetX(types.UpgradeService{C: c, G: g, M: m})
 }
 
@@ -685,6 +693,18 @@ func (vm *VM) hostECRecover() uint32 {
 
 }
 
+func (vm *VM) GetExport() [][]byte {
+	e := vm.Exports
+	if e == nil {
+		e = make([][]byte, 0)
+	}
+	return e
+}
+
+func (vm *VM) SetExport(updated_e [][]byte) {
+	vm.Exports = updated_e
+}
+
 // Export segment host-call
 func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 	// (b) export  - which appends "z" items of size W_S from a section of RAM (e.g. holding the bytes "9") into e
@@ -693,7 +713,7 @@ func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 	if z > (W_C * W_S) {
 		z = W_C * W_S
 	}
-	e := make([][]byte, z)
+	e := vm.GetExport()
 	for i := uint32(0); i < z; i += 1 {
 		// chunk, errCode := vm.readRAMBytes(p+i*W_S, W_S)
 		// if errCode == OOB {
@@ -725,6 +745,7 @@ func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 	} else {
 		vm.writeRegister(0, sigma+uint32(len(e)))
 		e = append(e, x)
+		vm.SetExport(e)
 		// errCode = vm.hostenv.ExportSegment(x)
 		return OK, e
 	}
