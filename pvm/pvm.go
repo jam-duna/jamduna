@@ -359,7 +359,10 @@ func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, host
 }
 
 // Execute runs the program until it terminates
-func (vm *VM) Execute() error {
+func (vm *VM) Execute(entryPoint string) error {
+	if len(entryPoint) > 0 {
+		// TODO: lookup entrypoint in jump table
+	}
 	for !vm.terminated {
 		if err := vm.step(); err != nil {
 			return err

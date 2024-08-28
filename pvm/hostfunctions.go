@@ -330,7 +330,7 @@ func (vm *VM) hostInvoke() uint32 {
 		return WHO
 	}
 	m.setGasRegister(gasBytes, registerBytes)
-	m.Execute()
+	m.Execute(types.EntryPointGeneric)
 	// TODO: HOST, FAULT, PANIC
 	return HALT
 }

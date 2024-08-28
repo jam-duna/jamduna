@@ -211,7 +211,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		vm := pvm.NewVMFromCode(solict_program_code, 0, target_statedb)
 		// NEW IDEA: hostSolicit will fill this array
 		// lookups = vm.Solicits
-		err := vm.Execute()
+		err := vm.Execute(types.EntryPointAccumulate)
 		lookups := vm.Solicits
 		if err != nil {
 			fmt.Printf("VM Execute Err:%v/n", err)

@@ -35,14 +35,25 @@ func (s *StateDB) ApplyXContext() {
 		// TODO: write s
 		s.WriteService(s.S, x.s)
 	}
+
+	// n - NewService 12.4.2 (165)
 	for service, sa := range x.n {
 		// TODO: write service => sa
 		s.WriteService(service, sa)
 	}
 
-	// TODO LATER: write c, write v back to node, p+i
+	// p - Empower => Kai_state 12.4.1 (164)
+	s.JamState.PrivilegedServiceIndices.Kai_m = x.p.M
+	s.JamState.PrivilegedServiceIndices.Kai_a = x.p.A
+	s.JamState.PrivilegedServiceIndices.Kai_v = x.p.V
 
-	// TODO -- treat t
+	// c - Designate => AuthorizationQueue
+	for i := 0; i < types.TotalCores; i++ {
+		copy(s.JamState.AuthorizationQueue[i], x.c[i][:])
+	}
+
+	// v - Assign => DesignatedValidators
+	s.JamState.SafroleState.DesignedValidators = x.v // []types.Validator `json:"designed_validators"`
 }
 
 func (s *StateDB) GetTimeslot() uint32 {

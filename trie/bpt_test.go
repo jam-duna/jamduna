@@ -466,22 +466,21 @@ func TestInitial(t *testing.T) {
 
 	// TODO: stanley to test insert on this recovered tree..
 	// recoveredTree.SetState()
-/*
-	rt.SetState(C1, coreAuthPoolEncode)
-	rt.SetState(C2, authQueueEncode)
-	rt.SetState(C3, recentBlocksEncode)
-	rt.SetState(C4, safroleStateEncode)
-	rt.SetState(C5, disputeState)
-	rt.SetState(C6, entropyEncode)
-	rt.SetState(C7, nextEpochValidatorsEncode)
-	rt.SetState(C8, currEpochValidatorsEncode)
-	rt.SetState(C9, priorEpochValidatorEncode)
-	rt.SetState(C10, rhoEncode)
-	rt.SetState(C11, mostRecentBlockTimeSlotEncode)
-	rt.SetState(C12, privilegedServiceIndicesEncode)
-	rt.SetState(C13, piEncode)
-*/
-
+	/*
+		rt.SetState(C1, coreAuthPoolEncode)
+		rt.SetState(C2, authQueueEncode)
+		rt.SetState(C3, recentBlocksEncode)
+		rt.SetState(C4, safroleStateEncode)
+		rt.SetState(C5, disputeState)
+		rt.SetState(C6, entropyEncode)
+		rt.SetState(C7, nextEpochValidatorsEncode)
+		rt.SetState(C8, currEpochValidatorsEncode)
+		rt.SetState(C9, priorEpochValidatorEncode)
+		rt.SetState(C10, rhoEncode)
+		rt.SetState(C11, mostRecentBlockTimeSlotEncode)
+		rt.SetState(C12, privilegedServiceIndicesEncode)
+		rt.SetState(C13, piEncode)
+	*/
 
 }
 

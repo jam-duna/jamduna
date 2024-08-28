@@ -11,6 +11,14 @@ const (
 	ServiceAccountPrefix = 255
 )
 
+const (
+	EntryPointGeneric    = ""
+	EntryPointRefine     = "refine"
+	EntryPointAccumulate = "accumulate"
+	EntryPointOnTransfer = "on_transfer"
+	EntryPointAuthorize  = "authorization"
+)
+
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
 	CodeHash  common.Hash `json:"code_hash"`

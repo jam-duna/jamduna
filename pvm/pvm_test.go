@@ -140,7 +140,7 @@ func TestHostfun(t *testing.T) {
 func pvm_test(t *testing.T, tc TestCase) error {
 	hostENV := NewMockHostEnv()
 	pvm := NewVM(tc.Code, tc.InitialRegs, tc.InitialPC, tc.InitialPageMap, tc.InitialMemory, hostENV)
-	pvm.Execute()
+	pvm.Execute(types.EntryPointGeneric)
 	// Check the registers
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
 		fmt.Printf("REGISTER MATCH!\n")

@@ -396,7 +396,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 
 	privilegedServiceIndicesEncode, err := d.GetPrivilegedServicesIndicesBytes()
 	if err != nil {
-		fmt.Println("Error serializing CoreAuthPool", err)
+		fmt.Println("Error serializing PrivilegedServicesIndices", err)
 	}
 
 	recentBlocksEncode, err := d.GetRecentBlocksBytes()
@@ -646,17 +646,40 @@ func (s *StateDB) getPreimageBlob(c uint32, codeHash common.Hash) ([]byte, error
 	return preimage_blob, nil
 }
 
+func (s *StateDB) getServiceCoreCode(c uint32) (code []byte, err error) {
+	serviceAccount, ok, err := s.getServiceAccount(c)
+	if err != nil {
+		return []byte{}, err
+	}
+	if !ok {
+		return []byte{}, errors.New("Service Account/Core not found")
+	}
+	codeHash := serviceAccount.CodeHash
+	code, err = s.getPreimageBlob(c, codeHash)
+	if err != nil {
+		return []byte{}, errors.New("Code not found")
+	}
+	return code, nil
+}
+
 func (s *StateDB) Accumulate(cores map[uint32]bool) error {
 	for c, _ := range cores {
-		serviceAccount, ok, err := s.getServiceAccount(c)
-		if err == nil && ok {
-			codeHash := serviceAccount.CodeHash
-			code, err := s.getPreimageBlob(c, codeHash)
-			if err == nil {
-				fmt.Printf("Accumulate codeHash: %v serviceAccount: %v\n", c, serviceAccount)
-				vm := pvm.NewVMFromCode(code, 0, s)
-				vm.Execute()
-			}
+		code, err := s.getServiceCoreCode(c)
+		if err == nil {
+			vm := pvm.NewVMFromCode(code, 0, s)
+			vm.Execute(types.EntryPointAccumulate)
+		}
+	}
+	return nil
+}
+
+func (s *StateDB) OnTransfer(cores map[uint32]bool) error {
+	for c, _ := range cores {
+		code, err := s.getServiceCoreCode(c)
+		if err == nil {
+			fmt.Printf("OnTransfers %d\n", c)
+			vm := pvm.NewVMFromCode(code, 0, s)
+			vm.Execute(types.EntryPointOnTransfer)
 		}
 	}
 	return nil
@@ -792,6 +815,8 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 	s.JamState.tallyStatistics(s.Id, "blocks", 1)
 
 	s.ApplyXContext()
+
+	s.OnTransfer(cores)
 
 	s.Block = blk
 	s.ParentHash = s.BlockHash

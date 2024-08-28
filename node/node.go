@@ -1026,7 +1026,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 		}
 		vm.SetImports(imports)
 		vm.SetExtrinsicsPayload(workItem.Extrinsics, workItem.PayloadBlob)
-		err = vm.Execute()
+		err = vm.Execute(types.EntryPointRefine)
 		if err != nil {
 			return err
 		}
