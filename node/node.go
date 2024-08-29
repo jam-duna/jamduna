@@ -855,17 +855,16 @@ func (n *Node) extendChain() error {
 				nextBlock := b
 				fmt.Printf("[N%d] extendChain %v <- %v\n", n.id, parenthash, nextBlock.Hash())
 				// now APPLY the block to the tip
-				s := n.statedb.Copy()
-				err := s.ProcessIncomingBlock(nextBlock)
+				newStateDB, err := statedb.ApplyStateTransitionFromBlock(n.statedb, context.Background(), nextBlock)
 				if err != nil {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err
 				}
 				// EXTEND the tip of the chain
-				n.addStateDB(s)
+				n.addStateDB(newStateDB)
 				parenthash = nextBlock.Hash()
-				fmt.Printf("[N%d] extendChain addstatedb parenthash=nextBlock.Hash()=%v: .... statedb TIP Now: s:%v<-%v which should match n.statedb %v<-%v\n", n.id, parenthash,
-					s.ParentHash, s.BlockHash, n.statedb.ParentHash, n.statedb.BlockHash)
+				fmt.Printf("[N%d] extendChain addstatedb TIP Now: s:%v<-%v\n",
+					n.id, newStateDB.ParentHash, newStateDB.BlockHash)
 				break
 			}
 		}
@@ -1417,8 +1416,11 @@ func (n *Node) runClient() {
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
-
-			newBlock, newStateDB := n.statedb.ProcessState(n.credential)
+			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential)
+			if err != nil {
+				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
+				panic(0)
+			}
 			if newStateDB != nil {
 				// we authored a block
 				n.addStateDB(newStateDB)

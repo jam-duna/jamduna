@@ -25,7 +25,7 @@ type NewService struct {
 	B uint64
 	G uint64
 	M uint64
-	i uint32
+	I uint32 // new service_index
 }
 
 type UpgradeService struct {

@@ -1,7 +1,7 @@
 package trie
 
 import (
-	"bytes"
+	//"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -620,18 +620,4 @@ func TestServiceStorage(t *testing.T) {
 	fmt.Println("Storage1", Storage1)
 	fmt.Println("Storage2", Storage2)
 	fmt.Println("Storage3", Storage3)
-}
-
-// compareBytes compares two Tries
-func compareTrees(node1, node2 *Node) bool {
-	if node1 == nil && node2 == nil {
-		return true
-	}
-	if node1 == nil || node2 == nil {
-		return false
-	}
-	if !compareBytes(node1.Hash, node2.Hash) || !bytes.Equal(node1.Key, node2.Key) {
-		return false
-	}
-	return compareTrees(node1.Left, node2.Left) && compareTrees(node1.Right, node2.Right)
 }

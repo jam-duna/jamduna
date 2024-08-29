@@ -109,32 +109,6 @@ func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
 	return exists
 }
 
-func (s *StateDB) ProcessIncomingBlock(b *types.Block) error {
-	currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(b.Header.TimeSlot)
-	// TODO: validate block
-	is_validated := true
-	if is_validated {
-		// taking the parent, applying it
-		tickets := b.Tickets()
-		lookups := b.PreimageLookups()
-		s.Block = b
-		s.ApplyStateTransitionFromBlock(context.Background(), b)
-		// shawn apply the disputes state
-		for _, ticket := range tickets {
-			s.RemoveTicket(&ticket)
-		}
-
-		for _, l := range lookups {
-			s.RemoveLookup(&l)
-		}
-		if s.Id == 0 {
-			fmt.Printf("[N%v] ProcessIncomingBlock Block %v. (Epoch,Phase) = (%v,%v) Slot=%v\n", s.Id, b.Hash(), currEpoch, currPhase, b.Header.TimeSlot)
-		}
-		return nil
-	}
-
-	return fmt.Errorf("ERROR in validating block")
-}
 
 func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	//s.QueueTicketEnvelope(t)
@@ -159,7 +133,7 @@ func (s *StateDB) ProcessIncomingLookup(l types.PreimageLookup) {
 	fmt.Printf("[N%v] ProcessIncomingLookup -- Adding lookup: %v\n", s.Id, l.String())
 	account_preimage_hash, err := s.ValidateLookup(&l)
 	if err != nil {
-		fmt.Printf("Invalid Ticket. Err=%v\n", err)
+		fmt.Printf("Invalid lookup. Err=%v\n", err)
 		return
 	}
 	if s.CheckLookupExists(account_preimage_hash) {
@@ -216,16 +190,28 @@ func (s *StateDB) RemoveTicket(t *types.Ticket) {
 	delete(s.queuedTickets, t.TicketID())
 }
 
+func (s *StateDB) RemoveLookup(p *types.PreimageLookup) {
+	s.preimageLookupsMutex.Lock()
+	defer s.preimageLookupsMutex.Unlock()
+	delete(s.queuedPreimageLookups, p.AccountPreimageHash())
+}
+
+func (s *StateDB) RemoveGuarantee(g *types.Guarantee) {
+	s.guaranteeMutex.Lock()
+	defer s.guaranteeMutex.Unlock()
+	delete(s.queuedGuarantees, g.Hash())
+}
+
+func (s *StateDB) RemoveAssurance(a *types.Assurance) {
+	s.assuranceMutex.Lock()
+	defer s.assuranceMutex.Unlock()
+	delete(s.queuedAssurances, a.Hash())
+}
+
 func (s *StateDB) RemoveDispute(d *types.Dispute) {
 	s.disputeMutex.Lock()
 	defer s.disputeMutex.Unlock()
-	// delete(s.queuedDispute, d.Hash())
-}
-
-func (s *StateDB) RemoveLookup(l *types.PreimageLookup) {
-	s.preimageLookupsMutex.Lock()
-	defer s.preimageLookupsMutex.Unlock()
-	delete(s.queuedPreimageLookups, l.AccountPreimageHash())
+	delete(s.queuedDisputes, d.Hash())
 }
 
 // IsAuthorizedPVM performs the is-authorized PVM function.
@@ -329,6 +315,12 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 
 func (s *StateDB) GetStateRoot() common.Hash {
 	return s.StateRoot
+}
+
+func (s *StateDB) GetTentativeStateRoot() common.Hash {
+	// return the trie root at the moment
+	t := s.GetTrie()
+	return t.GetRoot()
 }
 
 func (s *StateDB) GetTrie() *trie.MerkleTree {
@@ -483,9 +475,10 @@ func (s *StateDB) CopyTrieState(stateRoot common.Hash) *trie.MerkleTree {
 }
 
 // Copy generates a copy of the StateDB
-func (s *StateDB) Copy() *StateDB {
+func (s *StateDB) Copy() (newStateDB *StateDB) {
 	// Create a new instance of StateDB
-	n := &StateDB{
+	// T.P.G.A.
+	newStateDB = &StateDB{
 		Id:             s.Id,
 		Block:          s.Block.Copy(), // You might need to deep copy the Block if it's mutable
 		ParentHash:     s.ParentHash,
@@ -495,39 +488,101 @@ func (s *StateDB) Copy() *StateDB {
 		sdb:            s.sdb,
 		trie:           s.CopyTrieState(s.StateRoot),
 		knownTickets:   make(map[common.Hash]int),
-		queuedTickets:  make(map[common.Hash]types.Ticket),
+		knownPreimageLookups: make(map[common.Hash]uint32),
+		knownGuarantees:  make(map[common.Hash]int),
+		knownAssurances:  make(map[common.Hash]int),
 		knownDisputes:  make(map[common.Hash]int),
+		queuedTickets:  make(map[common.Hash]types.Ticket),
+		queuedPreimageLookups: make(map[common.Hash]types.PreimageLookup),
+		queuedGuarantees:  make(map[common.Hash]types.Guarantee),
+		queuedAssurances:  make(map[common.Hash]types.Assurance),
 		queuedDisputes: make(map[common.Hash]types.Dispute),
-	}
 
-	// Copy maps
+		/*
+		Following flds are not copied over..?
+
+		VMs       map[uint32]*pvm.VM
+		vmMutex   sync.Mutex
+		X 		  XContext
+		S 		  uint32
+
+		*/
+	}
+	s.CloneExtrinsicMap(newStateDB)
+	return newStateDB
+}
+
+func (s *StateDB) CloneExtrinsicMap(n *StateDB) {
+	// Tickets
 	for k, v := range s.knownTickets {
 		n.knownTickets[k] = v
 	}
-
 	for k, v := range s.queuedTickets {
 		t, _ := v.DeepCopy()
 		n.queuedTickets[k] = t
 	}
 
-	/*
-		   for k, v := range s.queuedDisputes {
-			t, _ := v.DeepCopy()
-			n.queuedDisputes[k] = t
-		for k, v := range s.knownDisputes {
-			t, _ := v.DeepCopy()
-			n.knownDisputes[k] = t
-		}
-		}
-	*/
+	// Preimages
+	for k, v := range s.knownPreimageLookups {
+		n.knownPreimageLookups[k] = v
+	}
+	for k, v := range s.queuedPreimageLookups {
+		p, _ := v.DeepCopy()
+		n.queuedPreimageLookups[k] = p
+	}
 
-	return n
+	// Guarantees
+	for k, v := range s.knownGuarantees {
+		n.knownGuarantees[k] = v
+	}
+
+	for k, v := range s.queuedGuarantees {
+		t, _ := v.DeepCopy()
+		n.queuedGuarantees[k] = t
+	}
+
+	// Assurance
+	for k, v := range s.knownAssurances {
+		n.knownAssurances[k] = v
+	}
+	for k, v := range s.queuedAssurances {
+		t, _ := v.DeepCopy()
+		n.queuedAssurances[k] = t
+	}
+
+	// Dispute
+	for k, v := range s.knownDisputes {
+		n.knownDisputes[k] = v
+	}
+	for k, v := range s.queuedDisputes {
+		d, _ := v.DeepCopy()
+		n.queuedDisputes[k] = d
+	}
 }
 
-func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, *StateDB) {
+func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.PreimageLookup, guarantees []types.Guarantee, assurances []types.Assurance, disputes []types.Dispute) {
+		// T.P.G.A.D
+	    for _, t := range tickets {
+			s.RemoveTicket(&t)
+		}
+		for _, p := range lookups {
+			s.RemoveLookup(&p)
+		}
+		for _, g := range guarantees {
+			s.RemoveGuarantee(&g)
+		}
+		for _, a := range assurances {
+			s.RemoveAssurance(&a)
+		}
+		for _, d := range disputes {
+			s.RemoveDispute(&d)
+		}
+}
+
+func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, *StateDB, error) {
 	genesisReady := s.JamState.SafroleState.CheckGenesisReady()
 	if !genesisReady {
-		return nil, nil
+		return nil, nil, nil
 	}
 	currJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady()
 	if timeSlotReady {
@@ -546,17 +601,24 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, 
 		//isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, credential, ticketIDs)
 		if isAuthorizedBlockBuilder {
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
-			// take the current stateDB + generate a new proposed Block and a new stateDB
-			proposedBlk, newStateDB, err := s.MakeBlock(credential, currJCE)
-			if err == nil {
-				fmt.Printf("[N%v] Proposed %v<-%v (Epoch,Phase) = (%v,%v) Slot=%v\n", s.Id, proposedBlk.ParentHash(), proposedBlk.Hash(), currEpoch, currPhase, currJCE)
-				return proposedBlk, newStateDB
+			// propose block without state transition
+			proposedBlk, err := s.MakeBlock(credential, currJCE)
+			if err != nil {
+				return nil, nil, err
 			}
+			fmt.Printf("[N%v] Proposed %v<-%v (Epoch,Phase) = (%v,%v) Slot=%v\n", s.Id, proposedBlk.ParentHash(), proposedBlk.Hash(), currEpoch, currPhase, currJCE)
+			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
+			if err != nil {
+				// HOW could this happen, we made the block ourselves!
+				return nil, nil, err
+			}
+			fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, proposedBlk.Hash(), newStateDB.String())
+			return proposedBlk, newStateDB, nil
 		} else {
 			//waiting for block ... potentially submit ticket here
 		}
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 func (s *StateDB) SetID(id uint32) {
@@ -666,7 +728,7 @@ func (s *StateDB) Accumulate(cores map[uint32]bool) error {
 	for c, _ := range cores {
 		code, err := s.getServiceCoreCode(c)
 		if err == nil {
-			vm := pvm.NewVMFromCode(code, 0, s)
+			vm := pvm.NewVMFromCode(c, code, 0, s)
 			vm.Execute(types.EntryPointAccumulate)
 		}
 	}
@@ -678,7 +740,7 @@ func (s *StateDB) OnTransfer(cores map[uint32]bool) error {
 		code, err := s.getServiceCoreCode(c)
 		if err == nil {
 			fmt.Printf("OnTransfers %d\n", c)
-			vm := pvm.NewVMFromCode(code, 0, s)
+			vm := pvm.NewVMFromCode(c, code, 0, s)
 			vm.Execute(types.EntryPointOnTransfer)
 		}
 	}
@@ -771,7 +833,12 @@ func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances [
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.Block) (err error) {
+func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
+	s = oldState.Copy()
+	s.JamState = oldState.JamState.Copy()
+	s.Block = blk
+	s.ParentHash = blk.Header.ParentHash
+
 	targetJCE := blk.TimeSlot()
 
 	// 19-22 - Safrole last
@@ -787,7 +854,7 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 	if err != nil {
 		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", err)
 		panic(1)
-		return err
+		return s, err
 	}
 	s.JamState.SafroleState = &s2
 	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
@@ -796,13 +863,17 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 	preimages := blk.PreimageLookups()
 	err = s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
 	if err != nil {
-		return err
+		return s, err
 	}
 
 	// 23,25-27 Disputes, Assurances. Guarantees
-	_, _, cores, err := s.ApplyStateTransitionRho(blk.Disputes(), blk.Assurances(), blk.Guarantees(), targetJCE, s.Id)
+	disputes := blk.Disputes()
+	assurances := blk.Assurances()
+	guarantees := blk.Guarantees()
+
+	_, _, cores, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
 	if err != nil {
-		return err
+		return s, err
 	}
 
 	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
@@ -823,7 +894,10 @@ func (s *StateDB) ApplyStateTransitionFromBlock(ctx context.Context, blk *types.
 	s.BlockHash = blk.Hash()
 	s.StateRoot = s.UpdateTrieState()
 	fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
-	return nil
+
+	//State transisiton is successful.  Remove E(T,P,A,G,D) from statedb queue
+	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
+	return s, nil
 }
 
 func (s *StateDB) GetBlock() *types.Block {
@@ -851,7 +925,7 @@ func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
 }
 
 // make block generate block prior to state execution
-func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) (bl *types.Block, newStateDB *StateDB, err error) {
+func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) (bl *types.Block, err error) {
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IsTicketSubmissionCloses(targetJCE)
@@ -876,7 +950,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		}
 		extrinsicData.PreimageLookups = append(extrinsicData.PreimageLookups, pl)
 	}
-	// TODO: These pairs must be ordered and without duplicates (equation 156 requires this).
+
+	// 156: These pairs must be ordered and without duplicates
 	for i := 0; i < len(extrinsicData.PreimageLookups); i++ {
 		for j := 0; j < len(extrinsicData.PreimageLookups)-1; j++ {
 			if extrinsicData.PreimageLookups[j].ServiceIndex > extrinsicData.PreimageLookups[j+1].ServiceIndex {
@@ -884,8 +959,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			}
 		}
 	}
-
-	s.queuedAssurances = make(map[common.Hash]types.Assurance)
+	s.queuedPreimageLookups = make(map[common.Hash]types.PreimageLookup)
 
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
@@ -899,7 +973,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			// Skip guarantees that do not meet the minimum number of credentials.
 			continue
 		}
-
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
 	}
 	// 139 - Order guarantees by core (assuming WorkReport contains core index).
@@ -917,7 +990,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	for _, guarantee := range extrinsicData.Guarantees {
 		if !s.areValidatorsAssignedToCore(guarantee.WorkReport.Core, guarantee.Credentials) {
 			// Handle the case where validators are not correctly assigned.
-			return nil, s, errors.New("validators not correctly assigned to core")
+			return nil,  errors.New("validators not correctly assigned to core")
 		}
 	}
 	// 144 - No reports may be placed on cores with a report pending availability on it unless it has timed out.
@@ -933,7 +1006,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		hash := guarantee.WorkReport.AvailabilitySpec.WorkPackageHash
 		if workPackageHashes[hash] {
 			// Handle duplicate work-package hash.
-			return nil, s, errors.New("duplicate work-package hash detected")
+			return nil,  errors.New("duplicate work-package hash detected")
 		}
 		workPackageHashes[hash] = true
 	}
@@ -944,7 +1017,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	for _, guarantee := range extrinsicData.Guarantees {
 		if !s.isCorrectCodeHash(guarantee.WorkReport) {
 			// Handle incorrect code hash prediction.
-			return nil, s, errors.New("incorrect code hash prediction for service")
+			return nil, errors.New("incorrect code hash prediction for service")
 		}
 	}
 	s.queuedGuarantees = make(map[common.Hash]types.Guarantee)
@@ -1030,7 +1103,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	h.ExtrinsicHash = extrinsicData.Hash()
 	author_index, err := sf.GetAuthorIndex(credential.BandersnatchPub, "Curr")
 	if err != nil {
-		return bl, newStateDB, err
+		return bl, err
 	}
 	h.BlockAuthorKey = author_index
 	b.Extrinsic = extrinsicData
@@ -1042,7 +1115,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	if epochType == "fallback" {
 		blockseal, fresh_vrfSig, err := sf.SignFallBack(credential.BandersnatchSecret, unsignHeaderHash)
 		if err != nil {
-			return bl, newStateDB, err
+			return bl, err
 		}
 		h.BlockSeal = blockseal
 		h.VRFSignature = fresh_vrfSig
@@ -1050,21 +1123,13 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		attempt, err := sf.GetBindedAttempt(targetJCE)
 		blockseal, fresh_vrfSig, err := sf.SignPrimary(credential.BandersnatchSecret, unsignHeaderHash, attempt)
 		if err != nil {
-			return bl, newStateDB, err
+			return bl,  err
 		}
 		h.BlockSeal = blockseal
 		h.VRFSignature = fresh_vrfSig
 	}
-
 	b.Header = *h
-	fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, b.Hash(), newStateDB.String())
-	newStateDB = s.Copy() // newEmptyStateDB(s.sdb)
-	newStateDB.JamState = s.JamState.Copy()
-	newStateDB.Block = b
-
-	newStateDB.ParentHash = b.Header.ParentHash
-	newStateDB.ApplyStateTransitionFromBlock(context.Background(), b)
-	return b, newStateDB, nil
+	return b, nil
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4

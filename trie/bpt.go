@@ -245,7 +245,7 @@ func InitMerkleTreeFromHash(root []byte, db *storage.StateDBStorage) (*MerkleTre
 		fmt.Printf("Root Hash is empty\n")
 		return &MerkleTree{Root: nil, db: db}, nil
 	}
-	rootNode, err := tree.levelDBGetBranch(root)
+	rootNode, err := tree.levelDBGetNode(root)
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +401,15 @@ func (t *MerkleTree) Close() error {
 		return fmt.Errorf("database is not initialized")
 	}
 	return t.db.Close()
+}
+
+func (n *Node) String() string {
+	s := fmt.Sprintf("Node Hash=%x, Key=%x\n", n.Hash, n.Key)
+	return s
+}
+
+func (t *MerkleTree) PrintTree(node *Node, level int) {
+	t.printTree(node, level)
 }
 
 func (t *MerkleTree) printTree(node *Node, level int) {
@@ -596,6 +605,7 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 		vBytes = append([]byte{uint8(len(time_slots))}, time_slotsByte...)
 	}
 	// Insert the value into the state
+	fmt.Printf("SetPreImageLookup stateKey=%x, vBytes=%v\n", stateKey, vBytes)
 	t.Insert(stateKey, vBytes)
 }
 
@@ -1064,4 +1074,40 @@ func falseBytes(data []byte) []byte {
 		// result[i] = ^data[i]
 	}
 	return result
+}
+
+// compareBytes compares two Tries
+func CompareTrees(node1, node2 *Node) bool {
+	return compareTrees(node1, node2)
+}
+
+func compareTrees(node1, node2 *Node) bool {
+	if node1 == nil && node2 == nil {
+		return true
+	}
+	if node1 == nil && node2 != nil {
+		fmt.Printf("Node1 empty. Node2 Not Empty\n")
+		fmt.Printf("Node1 %v\n", node1.String())
+		fmt.Printf("Node2 %v\n", node2.String())
+		return false
+	}
+	if node1 != nil && node2 == nil {
+		fmt.Printf("Node1 Not empty. Node2 Empty\n")
+		fmt.Printf("Node1 %v\n", node1.String())
+		fmt.Printf("Node2 %v\n", node2.String())
+		return false
+	}
+	if !compareBytes(node1.Hash, node2.Hash){
+		fmt.Printf("Node Hash Mismatch N1=%x N2=%x\n", node1.Hash, node2.Hash)
+		fmt.Printf("Node1 %v\n", node1.String())
+		fmt.Printf("Node2 %v\n", node2.String())
+		return false
+	}
+	if !compareBytes(node1.Key, node2.Key) {
+		fmt.Printf("Node Key Mismatch N1=%x N2=%x\n", node1.Key, node2.Key)
+		fmt.Printf("Node1 %v\n", node1.String())
+		fmt.Printf("Node2 %v\n", node2.String())
+		return false
+	}
+	return compareTrees(node1.Left, node2.Left) && compareTrees(node1.Right, node2.Right)
 }

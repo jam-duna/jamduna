@@ -49,6 +49,7 @@ type VM struct {
 	hostenv             types.HostEnv
 	writable_ram_start  uint32
 	writable_ram_length uint32
+	service_index		uint32
 
 	VMs map[uint32]*VM
 
@@ -296,7 +297,7 @@ func parseProgram(p []byte) *Program {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv) *VM {
+func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv) *VM {
 	if len(code) == 0 {
 		panic("NO CODE\n")
 	}
@@ -314,6 +315,7 @@ func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMa
 		ram:      make([]byte, 4096*64),
 		hostenv:  hostENV, //check if we need this
 		Exports:  make([][]byte, 0),
+		service_index: service_index,
 	}
 	for _, pg := range pages {
 		for i, b := range pg.Contents {
@@ -324,8 +326,8 @@ func NewVM(code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMa
 	return vm
 }
 
-func NewVMFromCode(code []byte, i uint32, hostENV types.HostEnv) *VM {
-	return NewVM(code, []uint32{}, i, []PageMap{}, []Page{}, hostENV)
+func NewVMFromCode(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv) *VM {
+	return NewVM(serviceIndex, code, []uint32{}, i, []PageMap{}, []Page{}, hostENV)
 }
 
 func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
@@ -1457,14 +1459,14 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint32 {
 }
 
 // VM Management: CreateVM, GetVM, ExpungeVM
-func (vm *VM) CreateVM(code []byte, i uint32) uint32 {
+func (vm *VM) CreateVM(serviceAcct uint32, code []byte, i uint32) uint32 {
 	maxN := uint32(0)
 	for n := range vm.VMs {
 		if n > maxN {
 			maxN = n
 		}
 	}
-	vm.VMs[maxN+1] = NewVMFromCode(code, i, vm.hostenv)
+	vm.VMs[maxN+1] = NewVMFromCode(serviceAcct, code, i, vm.hostenv)
 	return maxN + 1
 }
 

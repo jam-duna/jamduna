@@ -30,29 +30,34 @@ type XContext struct {
 }
 
 func (s *StateDB) ApplyXContext() {
+	return
 	x := s.X
 	if x.s != nil {
 		// TODO: write s
 		s.WriteService(s.S, x.s)
 	}
-
 	// n - NewService 12.4.2 (165)
 	for service, sa := range x.n {
 		// TODO: write service => sa
 		s.WriteService(service, sa)
 	}
-
 	// p - Empower => Kai_state 12.4.1 (164)
 	s.JamState.PrivilegedServiceIndices.Kai_m = x.p.M
 	s.JamState.PrivilegedServiceIndices.Kai_a = x.p.A
 	s.JamState.PrivilegedServiceIndices.Kai_v = x.p.V
 
+
 	// c - Designate => AuthorizationQueue
 	for i := 0; i < types.TotalCores; i++ {
 		copy(s.JamState.AuthorizationQueue[i], x.c[i][:])
 	}
-
 	// v - Assign => DesignatedValidators
+
+	fmt.Printf("AAA=%v\n", s.JamState)
+	fmt.Printf("BBB=%v\n", s.JamState.SafroleState)
+	fmt.Printf("CCC=%v\n", s.JamState.SafroleState.DesignedValidators)
+	//fmt.Printf("DDD=%v\n", s.JamState)
+
 	s.JamState.SafroleState.DesignedValidators = x.v // []types.Validator `json:"designed_validators"`
 }
 
@@ -133,8 +138,12 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 }
 
 func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
+	fmt.Printf("WriteServicePreimageLookup Called! service=%v, (h,l)=(%v,%v). anchors:%v\n", service, blob_hash, blob_length, time_slots)
 	tree := s.GetTrie()
 	tree.SetPreImageLookup(service, blob_hash, blob_length, time_slots)
+	//fmt.Printf("Latest root=%v\n", s.GetTentativeStateRoot())
+	//v, _ := tree.GetPreImageLookup(service, blob_hash, blob_length)
+	//fmt.Printf("GetPreImageLookup0 right after %v\n", v)
 }
 
 // HistoricalLookup, GetImportItem, ExportSegment
@@ -233,15 +242,6 @@ func (s *StateDB) assign(assign *types.Assign) uint32 {
 	return OK
 }
 
-func (s *StateDB) getNewServiceIdentifier(i uint32) uint32 {
-	_, err := s.GetService(i)
-	if err == nil {
-		return i
-	} else {
-		return s.getNewServiceIdentifier((i-0xFF+1)%(0xFFFFFFFF-0x100) + 0xFF)
-	}
-}
-
 func (s *StateDB) newService(newService *types.NewService) uint32 {
 	// ServiceAccount represents a service account.
 	a := &types.ServiceAccount{
@@ -250,7 +250,7 @@ func (s *StateDB) newService(newService *types.NewService) uint32 {
 		GasLimitG: newService.G,
 		GasLimitM: newService.M,
 	}
-	i := s.getNewServiceIdentifier(0)
+	i := newService.I
 	s.X.n[i] = a
 	return OK
 }

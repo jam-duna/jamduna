@@ -233,6 +233,55 @@ func (vm *VM) hostCheckpoint() uint32 {
 	return OK
 }
 
+func bump(i uint32) uint32 {
+	const lowerLimit uint32 = 1 << 8               // 2^8 = 256
+	const upperLimit uint32 = (1 << 32) - (1 << 9) // 2^32 - 2^9 = 4294966784
+
+	//(i - 256 + 42) =  (i - 241)??
+	adjusted := int64(i) - int64(lowerLimit) + 42
+
+	// need to make sure the result of the modulus operation is non-negative.
+	// This is done by: ((adjusted % upperLimit) + upperLimit) % upperLimit.
+	// This expression guarantees that if `adjusted` is negative, adding `upperLimit` first makes it positive.
+	// Then, applying `% upperLimit` again ensures the result is within the range [0, upperLimit).
+	modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
+
+	// Step 3: Return the result by adding `lowerLimit` back.
+	// This aligns the final result with the desired range: [2^8, 2^32 - 2^9].
+	return lowerLimit + uint32(modResult)
+}
+
+
+func (vm *VM) k_exist(i uint32) bool {
+	//check i not in K(δ†) or c(255,i)
+	_, err := vm.hostenv.GetService(i)
+	if err == nil {
+		// account found
+		return true
+	}
+	return false
+}
+
+func (vm *VM) check(i uint32) uint32 {
+	const lowerLimit uint32 = 1 << 8               // 2^8 = 256
+	const upperLimit uint32 = (1 << 32) - (1 << 9) // 2^32 - 2^9 = 4294966784
+
+	// Base case: return i if it is not in the set K(delta)
+	if !vm.k_exist(i) {
+		return i
+	}
+	// Correct handling of the adjustment to prevent negative values:
+	// Convert the expression to int64 to handle potential negatives safely.
+	adjusted := int64(i) - int64(lowerLimit) + 1
+
+	// Ensure the adjusted value is non-negative and within the valid range:
+	modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
+
+	// Return check with the adjusted result, adding lowerLimit back to align the range
+	// (i−2^8 +1)mod(2^32 −2^9)+2^8
+	return vm.check(lowerLimit + uint32(modResult))
+}
+
 // New service
 func (vm *VM) hostNew() uint32 {
 	// put 'g' and 'm' together
@@ -249,12 +298,25 @@ func (vm *VM) hostNew() uint32 {
 	g := uint64(gh)<<32 + uint64(gl)
 	m := uint64(mh)<<32 + uint64(ml)
 	b := uint64(0)
+	x_i := uint32(0) // this is the xContext_i
+	// s := vm.service_index
+	// to deduct a_t from s
+
+	//I think new service need to be set up like this
+	new_service_xi := vm.check(bump(x_i))
+	vm.hostenv.WriteServicePreimageLookup(new_service_xi, common.BytesToHash(c), l, []uint32{})
+	solicit := Solicit{
+		BlobHash: common.BytesToHash(c),
+		Length:   l,
+	}
+	vm.Solicits = append(vm.Solicits, solicit)
+
 	/*
 	TODO: William to figure out the (x_s)b-a_t
 	TODO: CASH if balance insufficient
 	TODO: OOB on x_t
 	*/
-	return vm.hostenv.SetX(types.NewService{C: c, L: l, B: b, G: g, M: m})
+	return vm.hostenv.SetX(types.NewService{C: c, L: l, B: b, G: g, M: m, I: x_i})
 }
 
 // Upgrade service
@@ -468,7 +530,8 @@ func (vm *VM) GetJCETime() uint32 {
 // Solicit preimage
 func (vm *VM) hostSolicit() uint32 {
 	// Got l of X_s by setting s = 1, z = z(from RAM)
-	s := uint32(49) // s: serviceIndex
+	// Question: William why this is hardcoded as 49?
+	s := uint32(49) // s: serviceIndex.
 	o, _ := vm.readRegister(0)
 	z, _ := vm.readRegister(1)              // z: blob_len
 	hBytes, err_h := vm.readRAMBytes(o, 32) // h: blobHash
@@ -479,6 +542,7 @@ func (vm *VM) hostSolicit() uint32 {
 	}
 
 	// check balance a_t <= a_b
+	/* TODO: william to figure out proper struct
 	service_data := vm.hostenv.ReadServiceBytes(s) // read service account(X_s) where service index = 1
 	if len(service_data) > 0 {
 		a_b_byte := service_data[len(service_data)-36 : len(service_data)-28]
@@ -494,6 +558,7 @@ func (vm *VM) hostSolicit() uint32 {
 			return FULL
 		}
 	}
+	*/
 
 	solicit := Solicit{
 		BlobHash: common.BytesToHash(hBytes),
@@ -761,7 +826,9 @@ func (vm *VM) hostMachine() uint32 {
 	if errCode != OK {
 		return errCode
 	}
-	n := vm.CreateVM(p, i)
+	// need service account here??
+	serviceAcct := uint32(0)
+	n := vm.CreateVM(serviceAcct, p, i)
 	return n
 }
 

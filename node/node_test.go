@@ -41,8 +41,8 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 
 	genesisConfig := statedb.NewGenesisConfig(validators)
 
-	prettyJSON, _ := json.MarshalIndent(validators, "", "  ")
-	fmt.Printf("Validators (size:%v) %s\n", numNodes, prettyJSON)
+	//prettyJSON, _ := json.MarshalIndent(validators, "", "  ")
+	//fmt.Printf("Validators (size:%v) %s\n", numNodes, prettyJSON)
 
 	for i := uint32(0); i < numNodes; i++ {
 		addr := fmt.Sprintf(quicAddr, 9000+i)

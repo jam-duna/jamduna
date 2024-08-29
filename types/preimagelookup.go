@@ -36,7 +36,7 @@ func (p *PreimageLookup) Service_Index() uint32 {
 }
 
 func (p *PreimageLookup) String() string {
-	s := fmt.Sprintf("ServiceIndex=%v, BlobHash=%v (Len:%v). a_l=%v, a_p=%v\n", p.Service_Index(), p.BlobHash(), p.BlobLength(), p.AccountLookupHash(), p.AccountPreimageHash())
+	s := fmt.Sprintf("ServiceIndex=%v, (h,z)=(%v,%v), a_l=%v, a_p=%v\n", p.Service_Index(), p.BlobHash(), p.BlobLength(), p.AccountLookupHash(), p.AccountPreimageHash())
 	return s
 }
 

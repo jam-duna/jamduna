@@ -142,7 +142,7 @@ func (state *JamState) Accumulate(serviceIndex int, accumulationState types.Accu
 
 	// Call the virtual machine
 	code := []byte{}
-	vm := pvm.NewVMFromCode(code, 0, nil) // Assuming `nil` for HostEnv
+	vm := pvm.NewVMFromCode(uint32(serviceIndex), code, 0, nil) // Assuming `nil` for HostEnv
 	err := vm.Execute(types.EntryPointAccumulate)
 	if err != nil {
 		return types.AccumulationState{}, err
