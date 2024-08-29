@@ -129,16 +129,16 @@ type GasAttributable struct {
 
 // the b part of EQ(186)
 type AuditFriendlyWorkPackage struct {
-	Package []byte // "p":comprising the workpackage itself
-	ExtrinsicData []byte // "x":the extrinsic data
-	ImportSegment []byte // "i":the concatenated import segments
+	Package              []byte // "p":comprising the workpackage itself
+	ExtrinsicData        []byte // "x":the extrinsic data
+	ImportSegment        []byte // "i":the concatenated import segments
 	MerkleJustifications []byte // "j":their proofs of correctness
 }
 
 // EQ(186):Availability Specifier
 type AvailabilitySpecifier struct {
-	PackageHash common.Hash // the hash of the workpackage
-	AuditFriendlyWorkPackageLength uint32 // the length of the AuditFriendlyWorkPackage
-	AvailabilityVector []byte // The transport of AuditFriendlyWorkPackage Hashed and segment which is built by CDT
-	ExportedSegments []Segment	// the exported segments which is built by WBT
+	PackageHash                    common.Hash // the hash of the workpackage
+	AuditFriendlyWorkPackageLength uint32      // the length of the AuditFriendlyWorkPackage
+	AvailabilityVector             []byte      // The transport of AuditFriendlyWorkPackage Hashed and segment which is built by CDT
+	ExportedSegments               []Segment   // the exported segments which is built by WBT
 }

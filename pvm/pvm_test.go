@@ -3,11 +3,11 @@ package pvm
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/types"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
 	"testing"
-	"github.com/colorfulnotion/jam/types"
 )
 
 // TestCase

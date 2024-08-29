@@ -13,8 +13,8 @@ import (
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 
-	"github.com/colorfulnotion/jam/types"
 	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 )
 
 func TestNodePOAAccumulatePVM(t *testing.T) {
@@ -38,10 +38,10 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 
 	senderNode := nodes[0]
 	extrinsics := []string{"abcdef", "abcd", "cat", "dog"}
-    blob_arr := make([][]byte, len(extrinsics))
+	blob_arr := make([][]byte, len(extrinsics))
 	for data_i, s := range extrinsics {
 		data := []byte(s)
-        blob_arr[data_i] = data
+		blob_arr[data_i] = data
 		fmt.Println(data)
 		blob_hash, err := senderNode.EncodeAndDistributeData(data)
 		if err != nil {
@@ -100,14 +100,13 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		target_statedb_tr := target_statedb.GetTrie()
 		v, err2 := target_statedb_tr.GetPreImageLookup(49, common.Blake2Hash(blob_arr[0]), 6)
 		if err2 != nil {
-			t.Fatalf("ROOT2 err %v\n",  err2)
+			t.Fatalf("ROOT2 err %v\n", err2)
 		}
 		fmt.Printf("GetPreImageLookup2 right after %v\n", v)
 
 		validation_tr, _ := trie.InitMerkleTreeFromHash(tentativeRoot.Bytes(), target_statedb.GetStorage())
 
-
-		if (!trie.CompareTrees(target_statedb_tr.Root, validation_tr.Root)){
+		if !trie.CompareTrees(target_statedb_tr.Root, validation_tr.Root) {
 			fmt.Printf("--------Original-------\n")
 			target_statedb_tr.PrintTree(target_statedb_tr.Root, 0)
 			fmt.Printf("--------Recovered-------\n")
@@ -117,7 +116,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 
 		//validation_tr :=  target_statedb.GetTrie()
 		validation_anchor_timeslot, validation_err := validation_tr.GetPreImageLookup(49, common.Blake2Hash(blob_arr[0]), 6)
-		if (validation_err != nil){
+		if validation_err != nil {
 			t.Fatalf("ROOT=%v. NOT FOUND! err %v\n", validation_tr.GetRoot(), validation_err)
 			panic(0)
 		}
@@ -136,7 +135,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		// σ' ≡ Υ(σ,B)
 		//s1  ≡ Υ(s0,B1)
 		s1, s1_err := statedb.ApplyStateTransitionFromBlock(s0, ctx, b1)
-		if (s1_err != nil){
+		if s1_err != nil {
 			t.Fatalf("S0->S1 Transition Err: %v\n", s1_err)
 		}
 		fmt.Printf("S0->S1 Transition success!\n")
@@ -179,36 +178,35 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		//s2_tr := s2.GetTrie()
 		s2_tr := s2.CopyTrieState(s2.StateRoot)
 		s2_preimages := b2.PreimageLookups()
-        e_p := s2_preimages[0]
+		e_p := s2_preimages[0]
 		preimageBlob, _ := s2_tr.GetPreImageBlob(e_p.Service_Index(), e_p.BlobHash().Bytes())
 		anchor_timeslot, _ := s2_tr.GetPreImageLookup(e_p.Service_Index(), e_p.BlobHash(), e_p.BlobLength())
 
-        if (!common.CompareBytes(preimageBlob, blob_arr[0])){
-            t.Fatalf("Mismatch: originalBlob=%x, retrievedBlob=%x\n", preimageBlob, blob_arr[0])
-        }
+		if !common.CompareBytes(preimageBlob, blob_arr[0]) {
+			t.Fatalf("Mismatch: originalBlob=%x, retrievedBlob=%x\n", preimageBlob, blob_arr[0])
+		}
 
-        if (anchor_timeslot[0] != b1.TimeSlot()+1){
-            t.Fatalf("Anchor_slot mismatch original=%v, retrieved=%v\n", anchor_timeslot[0], b1.TimeSlot()+1)
-        }
-        fmt.Printf("EP Succ\n")
+		if anchor_timeslot[0] != b1.TimeSlot()+1 {
+			t.Fatalf("Anchor_slot mismatch original=%v, retrieved=%v\n", anchor_timeslot[0], b1.TimeSlot()+1)
+		}
+		fmt.Printf("EP Succ\n")
 	}
 }
 
 func TestNodePOASolicitLookup(t *testing.T) {
-    // testing a_l & a_p
-    //-- after the Above EP. use pvm host lookup=1 to retrive result
+	// testing a_l & a_p
+	//-- after the Above EP. use pvm host lookup=1 to retrive result
 }
 
 func TestNodePOAHistoricalLookup(t *testing.T) {
-    //-- after the Above EP. use pvm host historical_lookup=15 to anchor_timeslot
+	//-- after the Above EP. use pvm host historical_lookup=15 to anchor_timeslot
 }
 
-
 func TestNodePOAReadWrite(t *testing.T) {
-     // testing a_s via read=2, write=3
-     //-- reads 4 numbers, squares them and writes the sum
+	// testing a_s via read=2, write=3
+	//-- reads 4 numbers, squares them and writes the sum
 }
 
 func TestNodePOAExport(t *testing.T) {
-    //-- squares an extrinsic input and exports it
+	//-- squares an extrinsic input and exports it
 }

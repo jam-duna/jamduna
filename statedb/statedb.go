@@ -109,7 +109,6 @@ func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
 	return exists
 }
 
-
 func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	//s.QueueTicketEnvelope(t)
 	//statedb.tickets[common.BytesToHash(ticket_id)] = t
@@ -479,32 +478,32 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	// Create a new instance of StateDB
 	// T.P.G.A.
 	newStateDB = &StateDB{
-		Id:             s.Id,
-		Block:          s.Block.Copy(), // You might need to deep copy the Block if it's mutable
-		ParentHash:     s.ParentHash,
-		BlockHash:      s.BlockHash,
-		StateRoot:      s.StateRoot,
-		JamState:       s.JamState.Copy(), // DisputesState has a Copy method
-		sdb:            s.sdb,
-		trie:           s.CopyTrieState(s.StateRoot),
-		knownTickets:   make(map[common.Hash]int),
-		knownPreimageLookups: make(map[common.Hash]uint32),
-		knownGuarantees:  make(map[common.Hash]int),
-		knownAssurances:  make(map[common.Hash]int),
-		knownDisputes:  make(map[common.Hash]int),
-		queuedTickets:  make(map[common.Hash]types.Ticket),
+		Id:                    s.Id,
+		Block:                 s.Block.Copy(), // You might need to deep copy the Block if it's mutable
+		ParentHash:            s.ParentHash,
+		BlockHash:             s.BlockHash,
+		StateRoot:             s.StateRoot,
+		JamState:              s.JamState.Copy(), // DisputesState has a Copy method
+		sdb:                   s.sdb,
+		trie:                  s.CopyTrieState(s.StateRoot),
+		knownTickets:          make(map[common.Hash]int),
+		knownPreimageLookups:  make(map[common.Hash]uint32),
+		knownGuarantees:       make(map[common.Hash]int),
+		knownAssurances:       make(map[common.Hash]int),
+		knownDisputes:         make(map[common.Hash]int),
+		queuedTickets:         make(map[common.Hash]types.Ticket),
 		queuedPreimageLookups: make(map[common.Hash]types.PreimageLookup),
-		queuedGuarantees:  make(map[common.Hash]types.Guarantee),
-		queuedAssurances:  make(map[common.Hash]types.Assurance),
-		queuedDisputes: make(map[common.Hash]types.Dispute),
+		queuedGuarantees:      make(map[common.Hash]types.Guarantee),
+		queuedAssurances:      make(map[common.Hash]types.Assurance),
+		queuedDisputes:        make(map[common.Hash]types.Dispute),
 
 		/*
-		Following flds are not copied over..?
+			Following flds are not copied over..?
 
-		VMs       map[uint32]*pvm.VM
-		vmMutex   sync.Mutex
-		X 		  XContext
-		S 		  uint32
+			VMs       map[uint32]*pvm.VM
+			vmMutex   sync.Mutex
+			X 		  XContext
+			S 		  uint32
 
 		*/
 	}
@@ -561,22 +560,22 @@ func (s *StateDB) CloneExtrinsicMap(n *StateDB) {
 }
 
 func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.PreimageLookup, guarantees []types.Guarantee, assurances []types.Assurance, disputes []types.Dispute) {
-		// T.P.G.A.D
-	    for _, t := range tickets {
-			s.RemoveTicket(&t)
-		}
-		for _, p := range lookups {
-			s.RemoveLookup(&p)
-		}
-		for _, g := range guarantees {
-			s.RemoveGuarantee(&g)
-		}
-		for _, a := range assurances {
-			s.RemoveAssurance(&a)
-		}
-		for _, d := range disputes {
-			s.RemoveDispute(&d)
-		}
+	// T.P.G.A.D
+	for _, t := range tickets {
+		s.RemoveTicket(&t)
+	}
+	for _, p := range lookups {
+		s.RemoveLookup(&p)
+	}
+	for _, g := range guarantees {
+		s.RemoveGuarantee(&g)
+	}
+	for _, a := range assurances {
+		s.RemoveAssurance(&a)
+	}
+	for _, d := range disputes {
+		s.RemoveDispute(&d)
+	}
 }
 
 func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, *StateDB, error) {
@@ -990,7 +989,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	for _, guarantee := range extrinsicData.Guarantees {
 		if !s.areValidatorsAssignedToCore(guarantee.WorkReport.Core, guarantee.Credentials) {
 			// Handle the case where validators are not correctly assigned.
-			return nil,  errors.New("validators not correctly assigned to core")
+			return nil, errors.New("validators not correctly assigned to core")
 		}
 	}
 	// 144 - No reports may be placed on cores with a report pending availability on it unless it has timed out.
@@ -1006,7 +1005,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		hash := guarantee.WorkReport.AvailabilitySpec.WorkPackageHash
 		if workPackageHashes[hash] {
 			// Handle duplicate work-package hash.
-			return nil,  errors.New("duplicate work-package hash detected")
+			return nil, errors.New("duplicate work-package hash detected")
 		}
 		workPackageHashes[hash] = true
 	}
@@ -1123,7 +1122,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		attempt, err := sf.GetBindedAttempt(targetJCE)
 		blockseal, fresh_vrfSig, err := sf.SignPrimary(credential.BandersnatchSecret, unsignHeaderHash, attempt)
 		if err != nil {
-			return bl,  err
+			return bl, err
 		}
 		h.BlockSeal = blockseal
 		h.VRFSignature = fresh_vrfSig

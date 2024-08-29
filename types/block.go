@@ -88,24 +88,6 @@ func (b *Block) EpochMark() *EpochMark {
 	return b.GetHeader().EpochMark
 }
 
-/*
-// ConvertToSafroleHeader converts a statedb.BlockHeader to a SafroleHeader
-func (header *BlockHeader) ConvertToSafroleHeader() SafroleHeader {
-	return SafroleHeader{
-		ParentHash:         header.ParentHash,
-		PriorStateRoot:     header.PriorStateRoot,
-		ExtrinsicHash:      header.ExtrinsicHash,
-		TimeSlot:           header.TimeSlot,
-		EpochMark:          header.EpochMark,
-		WinningTicketsMark: header.WinningTicketsMark,
-		VerdictsMarkers:    header.VerdictsMarkers,
-		OffenderMarkers:    header.OffenderMarkers,
-		BlockAuthorKey:     header.BlockAuthorKey,
-		VRFSignature:       header.VRFSignature,
-		BlockSeal:          header.BlockSeal,
-	}
-} */
-
 func BlockFromBytes(data []byte) (*Block, error) {
 	var b Block
 	err := json.Unmarshal(data, &b)
@@ -133,7 +115,6 @@ func (b *Block) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	//
 	return common.BytesToHash(common.ComputeHash(blockBytes))
 }
 

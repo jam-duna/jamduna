@@ -251,7 +251,6 @@ func bump(i uint32) uint32 {
 	return lowerLimit + uint32(modResult)
 }
 
-
 func (vm *VM) k_exist(i uint32) bool {
 	//check i not in K(δ†) or c(255,i)
 	_, err := vm.hostenv.GetService(i)
@@ -312,9 +311,9 @@ func (vm *VM) hostNew() uint32 {
 	vm.Solicits = append(vm.Solicits, solicit)
 
 	/*
-	TODO: William to figure out the (x_s)b-a_t
-	TODO: CASH if balance insufficient
-	TODO: OOB on x_t
+		TODO: William to figure out the (x_s)b-a_t
+		TODO: CASH if balance insufficient
+		TODO: OOB on x_t
 	*/
 	return vm.hostenv.SetX(types.NewService{C: c, L: l, B: b, G: g, M: m, I: x_i})
 }
@@ -333,8 +332,8 @@ func (vm *VM) hostUpgrade() uint32 {
 	g := uint64(gh)<<32 + uint64(gl)
 	m := uint64(mh)<<32 + uint64(ml)
 	/*
-	TODO: CASH if balance insufficient
-	TODO: OOB on x_t
+		TODO: CASH if balance insufficient
+		TODO: OOB on x_t
 	*/
 	return vm.hostenv.SetX(types.UpgradeService{C: c, G: g, M: m})
 }

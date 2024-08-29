@@ -270,6 +270,8 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 
 	go node.runServer()
 	go node.runClient()
+	go node.runWebService(id)
+
 	return node, nil
 }
 

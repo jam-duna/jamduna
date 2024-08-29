@@ -21,12 +21,12 @@ const (
 
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
-	CodeHash  common.Hash 		 `json:"code_hash"`
-	Balance   uint64      		 `json:"balance"`
-	GasLimitG uint64      		 `json:"gas_limit_g"`
-	GasLimitM uint64      		 `json:"gas_limit_m"`
-	StorageSize uint64           `json:"a_l"`   //a_l - total number of octets used in storage (9.3)
-	NumStorageItems  uint32      `json:"a_i"` 	//a_i - the number of items in storage (9.3)
+	CodeHash        common.Hash `json:"code_hash"`
+	Balance         uint64      `json:"balance"`
+	GasLimitG       uint64      `json:"gas_limit_g"`
+	GasLimitM       uint64      `json:"gas_limit_m"`
+	StorageSize     uint64      `json:"a_l"` //a_l - total number of octets used in storage (9.3)
+	NumStorageItems uint32      `json:"a_i"` //a_i - the number of items in storage (9.3)
 }
 
 // Convert the ServiceAccount to a byte slice.
@@ -59,6 +59,6 @@ func (s *ServiceAccount) String() string {
 // eq 95
 func (s *ServiceAccount) Compute_threshold() uint64 {
 	//BS +BI ⋅ai +BL ⋅al
-	account_threshold := BaseServiceBalance + MinElectiveServiceItemBalance * uint64(s.NumStorageItems)  + MinElectiveServiceOctetBalance * s.StorageSize
+	account_threshold := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
 	return account_threshold
 }

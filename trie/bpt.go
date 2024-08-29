@@ -40,7 +40,7 @@ const (
 )
 
 const (
-	LevelDBNull = "null"
+	LevelDBNull  = "null"
 	LevelDBEmpty = ""
 )
 
@@ -1104,7 +1104,7 @@ func compareTrees(node1, node2 *Node) bool {
 		fmt.Printf("Node2 %v\n", node2.String())
 		return false
 	}
-	if !compareBytes(node1.Hash, node2.Hash){
+	if !compareBytes(node1.Hash, node2.Hash) {
 		fmt.Printf("Node Hash Mismatch N1=%x N2=%x\n", node1.Hash, node2.Hash)
 		fmt.Printf("Node1 %v\n", node1.String())
 		fmt.Printf("Node2 %v\n", node2.String())

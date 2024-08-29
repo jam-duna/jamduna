@@ -49,7 +49,7 @@ type VM struct {
 	hostenv             types.HostEnv
 	writable_ram_start  uint32
 	writable_ram_length uint32
-	service_index		uint32
+	service_index       uint32
 
 	VMs map[uint32]*VM
 
@@ -305,16 +305,16 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
 	fmt.Println("================================================================")
 	vm := &VM{
-		JSize:    p.JSize,
-		Z:        p.Z,
-		J:        p.J,
-		code:     p.Code,
-		bitmask:  p.K[0], // pass in bitmask K
-		register: make([]uint32, regSize),
-		pc:       initialPC,
-		ram:      make([]byte, 4096*64),
-		hostenv:  hostENV, //check if we need this
-		Exports:  make([][]byte, 0),
+		JSize:         p.JSize,
+		Z:             p.Z,
+		J:             p.J,
+		code:          p.Code,
+		bitmask:       p.K[0], // pass in bitmask K
+		register:      make([]uint32, regSize),
+		pc:            initialPC,
+		ram:           make([]byte, 4096*64),
+		hostenv:       hostENV, //check if we need this
+		Exports:       make([][]byte, 0),
 		service_index: service_index,
 	}
 	for _, pg := range pages {
@@ -344,7 +344,7 @@ func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, host
 	vm := &VM{
 		register: make([]uint32, regSize),
 		ram:      make([]byte, 4096*64),
-		hostenv: hostENV,
+		hostenv:  hostENV,
 	}
 	for _, pg := range pages {
 		for i, b := range pg.Contents {

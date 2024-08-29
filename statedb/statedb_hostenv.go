@@ -46,7 +46,6 @@ func (s *StateDB) ApplyXContext() {
 	s.JamState.PrivilegedServiceIndices.Kai_a = x.p.A
 	s.JamState.PrivilegedServiceIndices.Kai_v = x.p.V
 
-
 	// c - Designate => AuthorizationQueue
 	for i := 0; i < types.TotalCores; i++ {
 		copy(s.JamState.AuthorizationQueue[i], x.c[i][:])
