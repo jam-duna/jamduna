@@ -197,8 +197,8 @@ func TestWorkGuarantee(t *testing.T) {
 		nodes[i] = node
 	}
 
-	// TODO: make squaring refine code that reads an extrinsic and exports the square of the 4 byte value in the extrinsic
-	code, err := loadByteCode("../pvm/hostfunctions/squareextrinsic.pvm")
+	// fib code
+	code, err := loadByteCode("../jamtestvectors/workpackages/fib.pvm")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -207,37 +207,38 @@ func TestWorkGuarantee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-
-	// Prepare a mock work package and work item
-	importedSegments := make([]types.ImportSegment, 0)
-	// TODO: write out some imported segments similar to the Extrinsics
-	workPackage := types.WorkPackage{
-		AuthorizationToken: []byte("0x"),
-		ServiceIndex:       1,
-		AuthorizationCode:  common.BytesToHash([]byte{}),
-		ParamBlob:          []byte("0x"),
-		Context:            []byte("0x"),
-		WorkItems: []types.WorkItem{
-			{
-				ServiceIdentifier:   47,
-				CodeHash:            codeHash,
-				PayloadBlob:         []byte("0x00000010"),
-				GasLimit:            10000000,
-				ImportedSegments:    importedSegments,
-				NewData:             nil, // Add any mock new data segments as needed
-				NumSegmentsExported: 1,   // ??
-				Extrinsics: [][]byte{
-					{0x00, 0x00, 0x00, 0x01},
-					{0x00, 0x00, 0x00, 0x03},
-					{0x00, 0x00, 0x00, 0x05},
-					{0x00, 0x00, 0x00, 0x07},
+	authToken := []byte("0x") // TODO: sign
+	var exportedItem types.ImportSegment
+	for n := 1; n < 20; n++ {
+		importedSegments := make([]types.ImportSegment, 0)
+		if n > 1 {
+			importedSegments = append(importedSegments, exportedItem)
+		}
+		workPackage := types.WorkPackage{
+			AuthorizationToken: authToken,
+			ServiceIndex:       47,
+			AuthorizationCode:  common.BytesToHash([]byte{}),
+			ParamBlob:          []byte("0x"),
+			Context:            []byte("0x"),
+			WorkItems: []types.WorkItem{
+				{
+					ServiceIdentifier:   47,
+					CodeHash:            codeHash,
+					PayloadBlob:         []byte("0x00000010"),
+					GasLimit:            10000000,
+					ImportedSegments:    importedSegments,
+					NewData:             nil,
+					NumSegmentsExported: 1,
 				},
 			},
-		},
-	}
-	for _, n := range nodes {
-		if n.coreIndex == 0 {
-			n.processWorkPackage(workPackage)
 		}
+		for _, n := range nodes {
+			if n.coreIndex == 0 {
+				n.processWorkPackage(workPackage)
+			}
+		}
+
+		// TODO: get exportedItem from refine execution ... or accumulate if it can do export
+
 	}
 }

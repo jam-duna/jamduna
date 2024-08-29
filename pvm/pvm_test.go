@@ -78,7 +78,7 @@ func hostfun_test(t *testing.T, hftc hostfun_TestCase) error {
 
 func TestHostfun(t *testing.T) {
 	// Directory containing the JSON files
-	dir := "../jamtestvectors/host_funtion/tests"
+	dir := "../jamtestvectors/host_function/tests"
 
 	// input the file that you want to check
 	targetFiles := []string{
