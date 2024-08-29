@@ -1011,6 +1011,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
+	service_index := uint32(workPackage.ServiceIndex)
 
 	for _, workItem := range workPackage.WorkItems {
 		code, err := n.FetchAndReconstructData(workItem.CodeHash)
@@ -1018,7 +1019,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 			return err
 		}
 		// TODO: statedb should follow HostEnv
-		vm := pvm.NewVMFromCode(code, 0, targetStateDB)
+		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		imports, err := n.getImportSegments(workItem.ImportedSegments)
 		if err != nil {
 			return err

@@ -81,8 +81,9 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		poa_node := nodes[i]
 		//target_statedb := poa_node.getPVMStateDB()
 		target_statedb := poa_node.statedb.Copy()
-		fmt.Printf("Starting StateRoot: %v\n", target_statedb.GetStateRoot())
-		vm := pvm.NewVMFromCode(serviceIndex, solict_program_code, 0, target_statedb)
+		target_statedb_start_root := target_statedb.GetStateRoot()
+		fmt.Printf("Starting StateRoot: %v\n", target_statedb_start_root)
+		vm := pvm.NewVMFromCode(uint32(serviceIndex), solict_program_code, 0, target_statedb)
 		// NEW IDEA: hostSolicit will fill this array
 		// lookups = vm.Solicits
 		vm_err := vm.Execute(types.EntryPointAccumulate)
@@ -90,32 +91,35 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		if vm_err != nil {
 			fmt.Printf("VM Execute Err:%v\n", vm_err)
 		}
-		fmt.Printf("Tentative StateRoot: %v\n", target_statedb.GetTentativeStateRoot())
-		// IMPORTANT - manually trigger the stateRoot update here. But What should be the process to actually update this?
-		target_statedb.StateRoot = target_statedb.GetTentativeStateRoot()
-		//poa_node.statedb = target_statedb.Copy()
+		tentativeRoot := target_statedb.GetTentativeStateRoot() // root after vm execution
+		fmt.Printf("Tentative StateRoot: %v\n", tentativeRoot)
+		// IMPORTANT - manually trigger the stateRoot update here. But What should be the process to actually update this for non-poa case?
+		target_statedb.StateRoot = tentativeRoot
+		poa_node.statedb = target_statedb.Copy()
 
-		fmt.Printf("--------BBBB-------\n")
 		target_statedb_tr := target_statedb.GetTrie()
-		target_statedb_tr.PrintTree(target_statedb_tr.Root, 0)
-
 		v, err2 := target_statedb_tr.GetPreImageLookup(49, common.Blake2Hash(blob_arr[0]), 6)
 		if err2 != nil {
 			t.Fatalf("ROOT2 err %v\n",  err2)
 		}
 		fmt.Printf("GetPreImageLookup2 right after %v\n", v)
 
-		validation_tr, _ := trie.InitMerkleTreeFromHash(target_statedb.GetTentativeStateRoot().Bytes(), target_statedb.GetStorage())
-		fmt.Printf("--------AAAA-------\n")
-		validation_tr.PrintTree(validation_tr.Root, 0)
+		validation_tr, _ := trie.InitMerkleTreeFromHash(tentativeRoot.Bytes(), target_statedb.GetStorage())
 
-		trie.CompareTrees(target_statedb_tr.Root, validation_tr.Root)
+
+		if (!trie.CompareTrees(target_statedb_tr.Root, validation_tr.Root)){
+			fmt.Printf("--------Original-------\n")
+			target_statedb_tr.PrintTree(target_statedb_tr.Root, 0)
+			fmt.Printf("--------Recovered-------\n")
+			validation_tr.PrintTree(validation_tr.Root, 0)
+			t.Fatalf("Mismatch!\n")
+		}
 
 		//validation_tr :=  target_statedb.GetTrie()
-		validation_anchor_timeslot, v_err := validation_tr.GetPreImageLookup(49, common.Blake2Hash(blob_arr[0]), 6)
-		if (v_err != nil){
-			//t.Fatalf("ROOT=%v. NOT FOUND! v_err %v\n", validation_tr.GetRoot(), v_err)
-			//panic(0)
+		validation_anchor_timeslot, validation_err := validation_tr.GetPreImageLookup(49, common.Blake2Hash(blob_arr[0]), 6)
+		if (validation_err != nil){
+			t.Fatalf("ROOT=%v. NOT FOUND! err %v\n", validation_tr.GetRoot(), validation_err)
+			panic(0)
 		}
 		fmt.Printf("validation_anchor_timeslot=%v\n", validation_anchor_timeslot)
 
@@ -183,8 +187,8 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
             t.Fatalf("Mismatch: originalBlob=%x, retrievedBlob=%x\n", preimageBlob, blob_arr[0])
         }
 
-        if (anchor_timeslot[0] != b1.TimeSlot()){
-            t.Fatalf("Anchor_slot mimatch original=%v, retrieved=%v\n", preimageBlob, blob_arr[0])
+        if (anchor_timeslot[0] != b1.TimeSlot()+1){
+            t.Fatalf("Anchor_slot mismatch original=%v, retrieved=%v\n", anchor_timeslot[0], b1.TimeSlot()+1)
         }
         fmt.Printf("EP Succ\n")
 	}

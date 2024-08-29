@@ -39,6 +39,11 @@ const (
 	C13 = "ActiveValidator"
 )
 
+const (
+	LevelDBNull = "null"
+	LevelDBEmpty = ""
+)
+
 /*
 Branch Node (64 bytes)
 +-------------------------------------------------+
@@ -364,7 +369,7 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("failed to get key %s: %v", k, err)
 	}
-	return value, nil
+	return RecoverNull(value), nil
 }
 
 func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
@@ -750,6 +755,7 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blob_hash []byte) error {
 
 // Insert fixed-length hashed key with value for the BPT
 func (t *MerkleTree) Insert(key, value []byte) {
+	value = ValidateNull(value)
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
 		encodedLeaf := leaf(key, value)
@@ -773,7 +779,7 @@ func (t *MerkleTree) Insert(key, value []byte) {
 func (t *MerkleTree) insertNode(node *Node, key, value []byte, depth int) *Node {
 	nullNode := Node{Hash: make([]byte, 32)}
 
-	if node == nil || compareBytes(node.Hash, nullNode.Hash) || depth > len(key)*8 {
+	if node == nil || compareBytes(node.Hash, nullNode.Hash) || depth > computeKeyLengthAsBit(key) {
 		return &Node{
 			Hash: computeHash(leaf(key, value)),
 			Key:  key,
@@ -889,7 +895,7 @@ func (t *MerkleTree) updateNode(node *Node, key, value []byte) {
 }
 
 func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
-	if node == nil || depth > len(key)*8 {
+	if node == nil || depth > computeKeyLengthAsBit(key) {
 		return
 	}
 	if compareBytes(node.Key, key) {
@@ -922,11 +928,12 @@ func (t *MerkleTree) Get(key []byte) ([]byte, error) {
 	// if t.Root == nil {
 	// 	return nil, errors.New("empty tree")
 	// }
-	return t.getValue(t.Root, key, 0)
+	value, err := t.getValue(t.Root, key, 0)
+	return RecoverNull(value), err
 }
 
 func (t *MerkleTree) getValue(node *Node, key []byte, depth int) ([]byte, error) {
-	if node == nil || depth > len(key)*8 {
+	if node == nil || depth > computeKeyLengthAsBit(key) {
 		return nil, errors.New("key not found")
 	}
 
@@ -961,7 +968,7 @@ func (t *MerkleTree) Trace(key []byte) ([][]byte, error) {
 }
 
 func (t *MerkleTree) tracePath(node *Node, key []byte, depth int, path *[][]byte) error {
-	if node == nil || depth > len(key)*8 {
+	if node == nil || depth > computeKeyLengthAsBit(key) {
 		return errors.New("key not found")
 	}
 
@@ -1110,4 +1117,26 @@ func compareTrees(node1, node2 *Node) bool {
 		return false
 	}
 	return compareTrees(node1.Left, node2.Left) && compareTrees(node1.Right, node2.Right)
+}
+
+// Compute the key length in bits. byte -> 8bits
+func computeKeyLengthAsBit(key []byte) int {
+	return len(key) * 8
+}
+
+// Because leveldb can't store nil value, we need to set a null value
+func ValidateNull(value []byte) []byte {
+	if compareBytes(value, []byte(LevelDBEmpty)) {
+		value = []byte(LevelDBNull)
+		//fmt.Printf("Value is empty, setting null value\n")
+	}
+	return value
+}
+
+// If the value is null, return a null byte
+func RecoverNull(value []byte) []byte {
+	if compareBytes(value, []byte(LevelDBNull)) {
+		return []byte(LevelDBEmpty)
+	}
+	return value
 }
