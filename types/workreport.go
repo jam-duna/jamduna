@@ -22,7 +22,7 @@ type WorkReport struct {
 	AvailabilitySpec     AvailabilitySpecification `json:"availability"`
 	AuthorizerHash       common.Hash               `json:"authorizer_hash"`
 	Core                 uint32                    `json:"total_size"`
-	Output               []byte                    `json:"output"`
+	AuthorizationOutput  []byte                    `json:"authorization_output"`
 	RefinementContext    RefinementContext         `json:"refinement_context"`
 	PackageSpecification string                    `json:"package_specification"`
 	Results              []WorkResult              `json:"results"`

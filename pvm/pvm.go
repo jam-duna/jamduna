@@ -394,6 +394,30 @@ func (vm *VM) SetImports(imports [][]byte) error {
 	return nil
 }
 
+// copy a into 2^32 - Z_Q - Z_I and initialize registers
+func (vm *VM) SetArgumentInputs(a []byte) error {
+	vm.writeRegister(0, 0)
+	vm.writeRegister(1, 0xFFFF0000) // 2^32 - 2^16
+	vm.writeRegister(2, 0xFEFE0000) // 2^32 - 2 * 2^16 - 2^24
+	for r := 3; r < 10; r++ {
+		vm.writeRegister(r, 0)
+	}
+	vm.writeRegister(10, 0xFEFF0000) // 2^32 - 2^16 - 2^24
+	vm.writeRegister(11, uint32(len(a)))
+	for r := 12; r < 16; r++ {
+		vm.writeRegister(r, 0)
+	}
+	vm.writeRAMBytes(0xFEFF0000, a)
+	return nil
+}
+
+func (vm *VM) GetArgumentOutputs(a []byte) ([]byte, uint32) {
+	o, _ := vm.readRegister(10)
+	l, _ := vm.readRegister(11)
+	output, res := vm.readRAMBytes(o, int(l))
+	return output, res
+}
+
 // step performs a single step in the PVM
 func (vm *VM) step() error {
 	if vm.pc >= uint32(len(vm.code)) {

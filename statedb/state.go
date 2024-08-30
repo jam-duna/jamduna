@@ -113,8 +113,11 @@ func (original *JamState) Copy() *JamState {
 }
 
 // clearRhoByCore clears the Rho state for a specific core
-func (state *JamState) clearRhoByCore(core uint32) {
+func (state *JamState) clearRhoByCore(core uint32) (r *Rho_state) {
+	r = state.AvailabilityAssignments[core]
+
 	state.AvailabilityAssignments[core] = nil
+	return r
 }
 
 // setRhoByWorkReport sets the Rho state for a specific core with a WorkReport and timeslot

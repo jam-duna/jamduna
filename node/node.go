@@ -1020,7 +1020,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 		if err != nil {
 			return err
 		}
-		// TODO: statedb should follow HostEnv
+
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		imports, err := n.getImportSegments(workItem.ImportedSegments)
 		if err != nil {

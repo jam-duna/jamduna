@@ -723,18 +723,40 @@ func (s *StateDB) getServiceCoreCode(c uint32) (code []byte, err error) {
 	return code, nil
 }
 
-func (s *StateDB) Accumulate(cores map[uint32]bool) error {
-	for c, _ := range cores {
-		code, err := s.getServiceCoreCode(c)
-		if err == nil {
+func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult) []byte {
+	output := make([]byte, 0)
+	for _, r := range results {
+		output = append(output, r.Output...) // TODO: r.Error
+		output = append(output, r.PayloadHash.Bytes()...)
+		output = append(output, r.AuthorizationOutput...)
+		output = append(output, r.WorkPackageHash.Bytes()...)
+	}
+	return output
+}
+
+func (s *StateDB) Accumulate(cores map[uint32]*Rho_state) error {
+	for c, rho_state := range cores {
+		if rho_state != nil {
+			wrangledWorkResults := make([]types.WrangledWorkResult, 0)
+			code, err := s.getServiceCoreCode(c)
+			if err == nil {
+				// Wrangle results from work report
+				workReport := rho_state.WorkReport
+				for _, workResult := range workReport.Results {
+					wrangledWorkResult := workResult.Wrangle(workReport.AuthorizationOutput, workReport.AvailabilitySpec.WorkPackageHash)
+					wrangledWorkResults = append(wrangledWorkResults, wrangledWorkResult)
+				}
+			}
+			wrangledWorkResultsBytes := s.getWrangledWorkResultsBytes(wrangledWorkResults)
 			vm := pvm.NewVMFromCode(c, code, 0, s)
+			vm.SetArgumentInputs(wrangledWorkResultsBytes)
 			vm.Execute(types.EntryPointAccumulate)
 		}
 	}
 	return nil
 }
 
-func (s *StateDB) OnTransfer(cores map[uint32]bool) error {
+func (s *StateDB) OnTransfer(cores map[uint32]*Rho_state) error {
 	for c, _ := range cores {
 		code, err := s.getServiceCoreCode(c)
 		if err == nil {
@@ -777,10 +799,10 @@ func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarante
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, map[uint32]bool, error) {
+func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, map[uint32]*Rho_state, error) {
 	var VMark types.VerdictMarker
 	var OMark types.OffenderMarker
-	cores := make(map[uint32]bool)
+	cores := make(map[uint32]*Rho_state)
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
@@ -812,8 +834,7 @@ func (s *StateDB) ApplyStateTransitionRho(Disputes []types.Dispute, assurances [
 	num_assurances := uint32(0)
 	for c, available := range tally {
 		if available > 2*types.TotalValidators/3 {
-			d.clearRhoByCore(uint32(c))
-			cores[uint32(c)] = true
+			cores[uint32(c)] = d.clearRhoByCore(uint32(c))
 		}
 		num_assurances++
 	}

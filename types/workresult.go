@@ -10,6 +10,29 @@ type WorkResult struct {
 	CodeHash               common.Hash `json:"code_hash"`
 	PayloadHash            common.Hash `json:"payload_hash"`
 	GasPrioritizationRatio uint32      `json:"gas_prioritization_ratio"`
-	Output                 []byte      `json:"refinement_context"`
+	Output                 []byte      `json:"output"`
 	Error                  string      `json:"error"`
+}
+
+// see 12.3 Wrangling - Eq 159
+type WrangledWorkResult struct {
+	// Note this is Output OR Error
+	Output []byte `json:"output"`
+	// l
+	PayloadHash         common.Hash `json:"payload_hash"`
+	AuthorizationOutput []byte      `json:"authorization_output"`
+	WorkPackageHash     common.Hash `json:"output"`
+
+	// matched with error
+	Error string `json:"error"`
+}
+
+func (wr *WorkResult) Wrangle(authorizationOutput []byte, workPackageHash common.Hash) WrangledWorkResult {
+	return WrangledWorkResult{
+		Output:              wr.Output,
+		PayloadHash:         wr.PayloadHash,
+		AuthorizationOutput: authorizationOutput,
+		WorkPackageHash:     workPackageHash,
+		Error:               wr.Error,
+	}
 }

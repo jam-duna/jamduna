@@ -1,43 +1,41 @@
 pub @refine:
     @import_12_byte_record:
     a0 = 1
-    a1 = 0x6000
-    a2 = 12  
-    ecalli 16 
+    a1 = 0xFEFE0000
+    a2 = 12
+    ecalli 16
     a1 = 0
     jump @init if a0 != a1
-    
+
     @fibsum:
-    a1 = u32[0x6004]
-    a2 = u32[0x6008]
-    u32[0x6004] = a1
+    a1 = u32[0xFEFE0004]
+    a2 = u32[0xFEFE0008]
+    u32[0xFEFE0004] = a1
     a1 = a1 + a2
-    u32[0x6008] = a1
-    
+    u32[0xFEFE0008] = a1
+
     a3 = 1
-    a0 = u32[0x6000]
+    a0 = u32[0xFEFE0000]
     a0 = a0 + a3
-    u32[0x6000] = a0
 
     @export_12_byte_record:
-    a0 = 0x6000
+    a0 = 0xFEFE0000
     a1 = 12
     ecalli 17
     trap
 
     @init:
-    u32 [0x6000] = 0x00000001
-    u32 [0x6004] = 0x00000001
-    u32 [0x6008] = 0x00000000
+    u32 [0xFEFE0000] = 0x00000001
+    u32 [0xFEFE0004] = 0x00000001
+    u32 [0xFEFE0008] = 0x00000000
     jump @fibsum
-    
+
 pub @accumulate:
-    @TODO_wrangled_refine_results_to_0x4000:
-        
     @write:
+    u32 [0x4000] = 0x00001234
     a0 = 0x4000
     a1 = 4
-    a2 = 0x5000
+    a2 = 0xFEFF0000
     a3 = 12
     u32 [0x4000] = 0x00000000
     ecalli 3
@@ -45,8 +43,8 @@ pub @accumulate:
 
 pub @authorization:
     @readsig:
-    a0 = 0x1000
-    a1 = 0x2000 
+    a0 = 0xFEFE0000
+    a1 = 0x2000
     a2 = 0x3000
     @setup_public_address:
     u32 [0x4000] = 0x62730609
@@ -58,12 +56,12 @@ pub @authorization:
     @TODO_copy_sig_wphash:
     ecalli 25
     a3 = 0
-    
+
     @check_match_to_public_address:
     a0 = u32 [0x3000]
     a1 = u32 [0x4000]
     jump @notauth if a0 != a1
-    
+
     a0 = u32 [0x3004]
     a1 = u32 [0x4004]
     jump @notauth if a0 != a1
@@ -80,11 +78,10 @@ pub @authorization:
     a1 = u32 [0x4010]
     jump @notauth if a0 != a1
     trap
-    
+
     @notauth:
     trap
 
 pub @on_transfer:
     @TODO:
     trap
-
