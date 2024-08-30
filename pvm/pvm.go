@@ -43,7 +43,7 @@ type VM struct {
 	terminated          bool
 	hostCall            bool   // ̵h in GP
 	host_func_id        uint32 // h in GP
-	ram                 []byte
+	ram                 map[uint32][4096]byte
 	register            []uint32
 	ξ                   uint64
 	hostenv             types.HostEnv
@@ -312,15 +312,13 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 		bitmask:       p.K[0], // pass in bitmask K
 		register:      make([]uint32, regSize),
 		pc:            initialPC,
-		ram:           make([]byte, 4096*64),
+		ram:           make(map[uint32][4096]byte),
 		hostenv:       hostENV, //check if we need this
 		Exports:       make([][]byte, 0),
 		service_index: service_index,
 	}
 	for _, pg := range pages {
-		for i, b := range pg.Contents {
-			vm.ram[pg.Address+uint32(i)] = b
-		}
+		vm.writeRAMBytes(pg.Address, pg.Contents)
 	}
 	copy(vm.register, initialRegs)
 	return vm
@@ -343,14 +341,13 @@ func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, host
 
 	vm := &VM{
 		register: make([]uint32, regSize),
-		ram:      make([]byte, 4096*64),
+		ram:      make(map[uint32][4096]byte),
 		hostenv:  hostENV,
 	}
 	for _, pg := range pages {
-		for i, b := range pg.Contents {
-			vm.ram[pg.Address+uint32(i)] = b
-		}
+		vm.writeRAMBytes(pg.Address, pg.Contents)
 	}
+
 	if pagemap[0].IsWritable {
 		vm.writable_ram_start = uint32(pagemap[0].Address)
 		vm.writable_ram_length = uint32(pagemap[0].Length)
@@ -678,35 +675,108 @@ func (vm *VM) djump(operands []byte) uint32 {
 	return OK
 }
 
-// Implement additional functions for RAM and register access as per the specification
 func (vm *VM) readRAM(address uint32) (byte, uint32) {
-	if address < 0 || address >= uint32(len(vm.ram)) {
-		return 0, OOB
+	// Determine the page and offset within the page
+	page := address / 4096
+	offset := address % 4096
+
+	// Retrieve the page from the RAM, return 0 if the page does not exist
+	pageData, exists := vm.ram[page]
+	if !exists {
+		return 0, OK
 	}
-	return vm.ram[address], OK
+
+	// Return the byte at the specified address and the status code OK
+	return pageData[offset], OK
+}
+
+func (vm *VM) writeRAM(address uint32, value byte) uint32 {
+	// Determine the page and offset within the page
+	page := address / 4096
+	offset := address % 4096
+
+	// Retrieve the page from the RAM or create a new page if it doesn't exist
+	pageData, exists := vm.ram[page]
+	if !exists {
+		pageData = [4096]byte{}
+	}
+
+	// Write the byte to the specified address
+	pageData[offset] = value
+
+	// Store the updated page back in the RAM
+	vm.ram[page] = pageData
+
+	// Return the status code OK
+	return OK
 }
 
 func (vm *VM) readRAMBytes(address uint32, numBytes int) ([]byte, uint32) {
-	if address >= uint32(len(vm.ram)) {
-		return []byte{}, OOB
+	var result []byte
+	remainingBytes := numBytes
+	currentAddress := address
+
+	for remainingBytes > 0 {
+		// Determine the current page and offset within the page
+		currentPage := currentAddress / 4096
+		currentOffset := currentAddress % 4096
+
+		// Determine how many bytes can be read from the current page
+		bytesToRead := int(4096 - currentOffset)
+		if bytesToRead > remainingBytes {
+			bytesToRead = remainingBytes
+		}
+
+		// Retrieve the page data, return 0s if the page does not exist
+		pageData, exists := vm.ram[currentPage]
+		if !exists {
+			result = append(result, make([]byte, bytesToRead)...)
+		} else {
+			result = append(result, pageData[currentOffset:currentOffset+uint32(bytesToRead)]...)
+		}
+
+		// Update the current address and the number of remaining bytes
+		currentAddress += uint32(bytesToRead)
+		remainingBytes -= bytesToRead
 	}
-	return vm.ram[address:(address + uint32(numBytes))], OK
+
+	return result, OK
 }
 
 func (vm *VM) writeRAMBytes(address uint32, value []byte) uint32 {
-	if address < 0 || address >= uint32(len(vm.ram)) {
-		return OOB
+	remainingBytes := len(value)
+	currentAddress := address
+	bytesWritten := 0
+
+	for remainingBytes > 0 {
+		// Determine the current page and offset within the page
+		currentPage := currentAddress / 4096
+		currentOffset := currentAddress % 4096
+
+		// Determine how many bytes can be written to the current page
+		bytesToWrite := int(4096 - currentOffset)
+		if bytesToWrite > remainingBytes {
+			bytesToWrite = remainingBytes
+		}
+
+		// Retrieve the page data or create a new page if it doesn't exist
+		pageData, exists := vm.ram[currentPage]
+		if !exists {
+			pageData = [4096]byte{}
+		}
+
+		// Write the bytes to the current page
+		copy(pageData[currentOffset:], value[bytesWritten:bytesWritten+bytesToWrite])
+
+		// Store the updated page back in the RAM
+		vm.ram[currentPage] = pageData
+
+		// Update the current address and the number of remaining bytes
+		currentAddress += uint32(bytesToWrite)
+		bytesWritten += bytesToWrite
+		remainingBytes -= bytesToWrite
 	}
-	for i, b := range value {
-		vm.ram[address+uint32(i)] = b
-	}
-	return OK
-}
-func (vm *VM) writeRAM(address uint32, value byte) uint32 {
-	if address < 0 || address >= uint32(len(vm.ram)) {
-		return OOB
-	}
-	vm.ram[address] = value
+
 	return OK
 }
 

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/types"
 	"io/ioutil"
+	"math/rand"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestCase
@@ -167,6 +169,56 @@ func pvm_test(t *testing.T, tc TestCase) error {
 			}
 	*/
 	return nil // "trap", tc.InitialRegs, tc.InitialPC, tc.InitialMemory
+}
+
+func TestReadWriteRAM(t *testing.T) {
+	const (
+		testSize      = 1024 * 1024 // 4MB
+		numIterations = 1000
+		memorySize    = 0xFFFFFFFF
+	)
+
+	rand.Seed(time.Now().UnixNano())
+
+	for i := 0; i < numIterations; i++ {
+		// Initialize the VM with a RAM of sufficient size
+		vm := &VM{
+			ram: make(map[uint32][4096]byte),
+		}
+
+		// Create a random byte pattern of 1MB
+		data := make([]byte, testSize)
+		rand.Read(data)
+
+		// Choose a random start address within the RAM
+		startAddress := uint32(rand.Intn(memorySize - testSize))
+
+		// Write the random byte pattern to the RAM
+		status := vm.writeRAMBytes(startAddress, data)
+		if status != OK {
+			t.Fatalf("Iteration %d: Failed to write data to RAM", i)
+		}
+
+		// Read the data back from the RAM
+		readData, status := vm.readRAMBytes(startAddress, testSize)
+		if status != OK {
+			t.Fatalf("Iteration %d: Failed to read data from RAM", i)
+		}
+
+		// Verify that the data read matches the data written
+		if len(readData) != len(data) {
+			t.Fatalf("Iteration %d: Length mismatch between written and read data", i)
+		}
+
+		for j := range data {
+			if data[j] != readData[j] {
+				t.Fatalf("Iteration %d: Data mismatch at byte %d", i, j)
+			}
+		}
+		if i%100 == 0 {
+			fmt.Printf("%d out of %d\n", i, numIterations)
+		}
+	}
 }
 
 func TestPVM(t *testing.T) {
