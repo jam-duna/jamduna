@@ -176,47 +176,47 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 
 func (n *JamState) GetAuthQueueBytes() ([]byte, error) {
 	// AuthorizationsPool
-	scale_bytes, err := json.Marshal(n.AuthorizationsPool)
+	codec_bytes, err := json.Marshal(n.AuthorizationsPool)
 	if err != nil {
 		fmt.Println("Error serializing AuthQueue", err)
 	}
-	return scale_bytes, nil
+	return codec_bytes, nil
 }
 
 func (n *JamState) GetPrivilegedServicesIndicesBytes() ([]byte, error) {
 	// PrivilegedServiceIndices
-	scale_bytes, err := json.Marshal(n.PrivilegedServiceIndices)
+	codec_bytes, err := json.Marshal(n.PrivilegedServiceIndices)
 	if err != nil {
 		fmt.Println("Error serializing AuthQueue", err)
 	}
-	return scale_bytes, nil
+	return codec_bytes, nil
 }
 
 func (n *JamState) GetRecentBlocksBytes() ([]byte, error) {
 	// BeefyPool
-	scale_bytes, err := json.Marshal(n.BeefyPool)
+	codec_bytes, err := json.Marshal(n.BeefyPool)
 	if err != nil {
 		fmt.Println("Error serializing RecentBlocks", err)
 	}
-	return scale_bytes, nil
+	return codec_bytes, nil
 }
 
 func (n *JamState) GetPiBytes() ([]byte, error) {
 	// use scale to encode the Rho_state
 	//use json marshal to get the bytes
-	scale_bytes, err := json.Marshal(n.ValidatorStatistics)
+	codec_bytes, err := json.Marshal(n.ValidatorStatistics)
 	if err != nil {
 		return nil, err
 	}
-	return scale_bytes, nil
+	return codec_bytes, nil
 }
 
 func (j *JamState) GetRhoBytes() ([]byte, error) {
 	// use scale to encode the Rho_state
 	//use json marshal to get the bytes
-	scale_bytes, err := json.Marshal(j.AvailabilityAssignments)
+	codec_bytes, err := json.Marshal(j.AvailabilityAssignments)
 	if err != nil {
 		return nil, err
 	}
-	return scale_bytes, nil
+	return codec_bytes, nil
 }

@@ -16,11 +16,10 @@ import (
 */
 // RefinementContext represents the context of the chain at the point of evaluation.
 type RefinementContext struct {
-	Anchor             common.Hash `json:"anchor"`
-	PosteriorStateRoot common.Hash `json:"posterior_state_root"`
-	PosteriorBeefyRoot common.Hash `json:"posterior_beefy_root"`
-	LookupAnchor       common.Hash `json:"lookup_anchor"`
-	HeaderHash         common.Hash `json:"header_hash"`
-	Timeslot           uint32      `json:"timeslot"`
-	Prerequisite       common.Hash `json:"prerequisite,omitempty"`
+	Anchor           common.Hash `json:"anchor"`
+	StateRoot        common.Hash `json:"state_root"`
+	BeefyRoot        common.Hash `json:"beefy_root"`
+	LookupAnchor     common.Hash `json:"lookup_anchor"`
+	LookupAnchorSlot uint32      `json:"lookup_anchor_slot"`
+	Prerequisite     common.Hash `json:"prerequisite,omitempty"`
 }

@@ -557,11 +557,11 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 				response = ok
 			}
 		}
-	case "Dispute":
-		var disputes types.Dispute
-		err := json.Unmarshal([]byte(msg.Payload), &disputes)
+	case "Vote":
+		var vote types.Vote
+		err := json.Unmarshal([]byte(msg.Payload), &vote)
 		if err == nil {
-			err = n.processDisputes(disputes)
+			err = n.processVote(vote)
 			if err == nil {
 				response = ok
 			}
@@ -797,10 +797,10 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 	return nil // Success
 }
 
-func (n *Node) processDisputes(dispute types.Dispute) error {
-	// Store the dispute in the tip's queued disputes
+func (n *Node) processVote(vote types.Vote) error {
+	// Store the vote in the tip's queued vote
 	s := n.getState()
-	s.ProcessIncomingDispute(dispute)
+	s.ProcessIncomingVote(vote)
 	return nil
 }
 
@@ -924,7 +924,7 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 	return nil // Success
 }
 
-func (n *Node) computeAssuranceBitstring() []byte {
+func (n *Node) computeAssuranceBitfield() []byte {
 	// TODO
 	return []byte{1, 1}
 }
@@ -973,8 +973,8 @@ func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustificat
 	// TODO: validate proof
 
 	assurance := types.Assurance{
-		ParentHash:     n.statedb.ParentHash,
-		Bitstring:      n.computeAssuranceBitstring(),
+		Anchor:         n.statedb.ParentHash,
+		Bitfield:       n.computeAssuranceBitfield(),
 		ValidatorIndex: n.id,
 		//	Signature: signature,
 	}
@@ -992,7 +992,7 @@ func (n *Node) getImportSegment(segmentRoot common.Hash, segmentIndex uint32) ([
 func (n *Node) getImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
 	var imports [][]byte
 	for _, s := range importsegments {
-		importItem, err := n.getImportSegment(s.SegmentRoot, s.SegmentIndex)
+		importItem, err := n.getImportSegment(s.TreeRoot, s.Index)
 		if err != nil {
 			return imports, err
 		}
@@ -1027,7 +1027,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 			return err
 		}
 		vm.SetImports(imports)
-		vm.SetExtrinsicsPayload(workItem.Extrinsics, workItem.PayloadBlob)
+		vm.SetExtrinsicsPayload(workItem.Extrinsics, workItem.Payload)
 		err = vm.Execute(types.EntryPointRefine)
 		if err != nil {
 			return err
@@ -1083,13 +1083,12 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 	}
 
 	refinementContext := types.RefinementContext{
-		Anchor:             common.HexToHash("0x123abc"),          // TODO
-		PosteriorStateRoot: n.statedb.Block.Header.PriorStateRoot, // TODO
-		PosteriorBeefyRoot: common.HexToHash("0x"),                // SKIP
-		LookupAnchor:       n.statedb.ParentHash,                  // TODO
-		HeaderHash:         n.statedb.ParentHash,                  // TODO
-		Timeslot:           n.statedb.Block.Header.TimeSlot,
-		Prerequisite:       common.HexToHash("0x"), // SKIP
+		Anchor:           common.HexToHash("0x123abc"),           // TODO
+		StateRoot:        n.statedb.Block.Header.ParentStateRoot, // TODO
+		BeefyRoot:        common.HexToHash("0x"),                 // SKIP
+		LookupAnchor:     n.statedb.ParentHash,                   // TODO
+		LookupAnchorSlot: n.statedb.Block.Header.Slot,
+		Prerequisite:     common.HexToHash("0x"), // SKIP
 	}
 
 	workReport := types.WorkReport{
@@ -1385,8 +1384,8 @@ func getMessageType(obj interface{}) string {
 		return "Guarantee"
 	case types.Assurance:
 		return "Assurance"
-	case types.Dispute:
-		return "Dispute"
+	case types.Vote:
+		return "Vote"
 	case types.PreimageLookup:
 		return "PreimageLookup"
 	case types.Ticket:

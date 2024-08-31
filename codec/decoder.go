@@ -1,7 +1,4 @@
-// Copyright 2021 ChainSafe Systems (ON)
-// SPDX-License-Identifier: LGPL-3.0-only
-
-package scale
+package codec
 
 import (
 	"bytes"
@@ -14,14 +11,58 @@ import (
 	"reflect"
 )
 
-// indirect walks down v allocating pointers as needed,
-// until it gets to a non-pointer.
+// Uint128 represents a 128-bit unsigned integer.
+type Uint128 struct {
+	Low  uint64
+	High uint64
+}
+
+// Implement the missing methods for Uint128
+func NewUint128(buf []byte) (Uint128, error) {
+	if len(buf) != 16 {
+		return Uint128{}, fmt.Errorf("invalid length for Uint128: %d", len(buf))
+	}
+	return Uint128{
+		Low:  binary.LittleEndian.Uint64(buf[:8]),
+		High: binary.LittleEndian.Uint64(buf[8:]),
+	}, nil
+}
+
+// Result represents a generic result type with an OK or Error value.
+type Result struct {
+	mode int
+	ok   interface{}
+	err  interface{}
+}
+
+const (
+	OK  = 0
+	Err = 1
+)
+
+// Result methods
+func (r *Result) Set(mode int, value interface{}) error {
+	if mode != OK && mode != Err {
+		return fmt.Errorf("invalid result mode: %d", mode)
+	}
+	r.mode = mode
+	if mode == OK {
+		r.ok = value
+	} else {
+		r.err = value
+	}
+	return nil
+}
+
+func (r *Result) IsSet() bool {
+	return r.mode == OK || r.mode == Err
+}
+
+// indirect walks down v allocating pointers as needed, until it gets to a non-pointer.
 func indirect(dstv reflect.Value) (elem reflect.Value) {
 	dstv0 := dstv
 	haveAddr := false
 	for {
-		// Load value from interface, but only if the result will be
-		// usefully addressable.
 		if dstv.Kind() == reflect.Interface && !dstv.IsNil() {
 			e := dstv.Elem()
 			if e.Kind() == reflect.Ptr && !e.IsNil() && e.Elem().Kind() == reflect.Ptr {
@@ -36,9 +77,6 @@ func indirect(dstv reflect.Value) (elem reflect.Value) {
 		if dstv.CanSet() {
 			break
 		}
-		// Prevent infinite loop if v is an interface pointing to its own address:
-		//     var v interface{}
-		//     v = &v
 		if dstv.Elem().Kind() == reflect.Interface && dstv.Elem().Elem() == dstv {
 			dstv = dstv.Elem()
 			break
@@ -47,7 +85,7 @@ func indirect(dstv reflect.Value) (elem reflect.Value) {
 			dstv.Set(reflect.New(dstv.Type().Elem()))
 		}
 		if haveAddr {
-			dstv = dstv0 // restore original value after round-trip Value.Addr().Elem()
+			dstv = dstv0
 			haveAddr = false
 		} else {
 			dstv = dstv.Elem()
@@ -76,9 +114,9 @@ func Unmarshal(data []byte, dst interface{}) (err error) {
 	return
 }
 
-// Unmarshaler is the interface for custom SCALE unmarshalling for a given type
+// Unmarshaler is the interface for custom JAM codec for a given type
 type Unmarshaler interface {
-	UnmarshalSCALE(io.Reader) error
+	UnmarshalJAM(io.Reader) error
 }
 
 // Decoder is used to decode from an io.Reader
@@ -86,7 +124,7 @@ type Decoder struct {
 	decodeState
 }
 
-// Decode accepts a pointer to a destination and decodes into supplied destination
+// Decode accepts a pointer to a destination and decodes into the supplied destination
 func (d *Decoder) Decode(dst interface{}) (err error) {
 	dstv := reflect.ValueOf(dst)
 	if dstv.Kind() != reflect.Ptr || dstv.IsNil() {
@@ -116,7 +154,7 @@ type decodeState struct {
 func (ds *decodeState) unmarshal(dstv reflect.Value) (err error) {
 	unmarshalerType := reflect.TypeOf((*Unmarshaler)(nil)).Elem()
 	if dstv.CanAddr() && dstv.Addr().Type().Implements(unmarshalerType) {
-		methodVal := dstv.Addr().MethodByName("UnmarshalSCALE")
+		methodVal := dstv.Addr().MethodByName("UnmarshalJAM")
 		values := methodVal.Call([]reflect.Value{reflect.ValueOf(ds.Reader)})
 		if !values[0].IsNil() {
 			errIn := values[0].Interface()
@@ -151,6 +189,8 @@ func (ds *decodeState) unmarshal(dstv reflect.Value) (err error) {
 		err = ds.decodeBytes(dstv)
 	case bool:
 		err = ds.decodeBool(dstv)
+	case []bool:
+		err = ds.decodeBitSequence(dstv)
 	case Result:
 		err = ds.decodeResult(dstv)
 	default:
@@ -263,8 +303,8 @@ func (ds *decodeState) decodeCustomPrimitive(dstv reflect.Value) (err error) {
 }
 
 func (ds *decodeState) ReadByte() (byte, error) {
-	b := make([]byte, 1)        // make buffer
-	_, err := ds.Reader.Read(b) // read what's in the Decoder's underlying buffer to our new buffer b
+	b := make([]byte, 1)
+	_, err := ds.Reader.Read(b)
 	return b[0], err
 }
 
@@ -335,7 +375,7 @@ func (ds *decodeState) decodePointer(dstv reflect.Value) (err error) {
 		}
 	default:
 		bytes, _ := io.ReadAll(ds.Reader)
-		err = fmt.Errorf("%w: value: %v, bytes: %v", errUnsupportedOption, rb, bytes)
+		err = fmt.Errorf("%w: value: %v, bytes: %v", ErrUnsupportedOption, rb, bytes)
 	}
 	return
 }
@@ -399,6 +439,35 @@ func (ds *decodeState) decodeArray(dstv reflect.Value) (err error) {
 	return
 }
 
+// FieldIndex represents an index of a field within a struct.
+type FieldIndex struct {
+	fieldIndex int
+}
+
+// fieldScaleIndicesCache is a placeholder for caching information about field indices.
+type fieldScaleIndicesCache struct{}
+
+// fieldScaleIndices retrieves the indices of all exported fields in the struct.
+func (c *fieldScaleIndicesCache) fieldScaleIndices(v interface{}) (reflect.Value, []FieldIndex, error) {
+	value := reflect.ValueOf(v)
+	if value.Kind() != reflect.Struct {
+		return reflect.Value{}, nil, fmt.Errorf("expected a struct, got %T", v)
+	}
+
+	typ := value.Type()
+	var indices []FieldIndex
+	for i := 0; i < value.NumField(); i++ {
+		field := typ.Field(i)
+		if field.PkgPath == "" { // PkgPath is empty for exported fields
+			indices = append(indices, FieldIndex{fieldIndex: i})
+		}
+	}
+	return value, indices, nil
+}
+
+// A global cache variable
+var cache = &fieldScaleIndicesCache{}
+
 func (ds *decodeState) decodeMap(dstv reflect.Value) (err error) {
 	numberOfTuples, err := ds.decodeLength()
 	if err != nil {
@@ -427,37 +496,38 @@ func (ds *decodeState) decodeMap(dstv reflect.Value) (err error) {
 	return nil
 }
 
-// decodeStruct decodes a byte array representing a SCALE tuple. The order of data is
+// decodeStruct decodes a byte array representing a JAM tuple. The order of data is
 // determined by the source tuple in rust, or the struct field order in a go struct
 func (ds *decodeState) decodeStruct(dstv reflect.Value) (err error) {
 	in := dstv.Interface()
-	_, indices, err := cache.fieldScaleIndices(in)
+	v, indices, err := cache.fieldScaleIndices(in)
 	if err != nil {
-		return
+		return fmt.Errorf("failed to get field indices: %w", err)
 	}
-	temp := reflect.New(reflect.ValueOf(in).Type())
-	for _, i := range indices {
-		field := temp.Elem().Field(i.fieldIndex)
+
+	temp := reflect.New(v.Type()).Elem()
+	for _, index := range indices {
+		field := temp.Field(index.fieldIndex)
 		if !field.CanInterface() {
 			continue
 		}
-		// if the value is not a zero value, set it as non-zero value from dst.
-		// this is required for VaryingDataTypeSlice and VaryingDataType
-		inv := reflect.ValueOf(in)
-		if inv.Field(i.fieldIndex).IsValid() && !inv.Field(i.fieldIndex).IsZero() {
-			field.Set(inv.Field(i.fieldIndex))
+
+		// If the field is already set, retain the value.
+		if !v.Field(index.fieldIndex).IsZero() {
+			field.Set(v.Field(index.fieldIndex))
 		}
+
 		err = ds.unmarshal(field)
 		if err != nil {
-			return fmt.Errorf("decoding struct: unmarshalling field at index %d: %w", i.fieldIndex, err)
+			return fmt.Errorf("failed to unmarshal field at index %d: %w", index.fieldIndex, err)
 		}
 	}
-	dstv.Set(temp.Elem())
-	return
+	dstv.Set(temp)
+	return nil
 }
 
-// decodeBool accepts a byte array representing a SCALE encoded bool and performs SCALE decoding
-// of the bool then returns it. if invalid returns an error
+// decodeBool accepts a byte array representing a JAM encoded bool and performs JAM decoding
+// of the bool then returns it. If invalid returns an error
 func (ds *decodeState) decodeBool(dstv reflect.Value) (err error) {
 	rb, err := ds.ReadByte()
 	if err != nil {
@@ -476,8 +546,7 @@ func (ds *decodeState) decodeBool(dstv reflect.Value) (err error) {
 	return
 }
 
-// TODO: Should this be renamed to decodeCompactInt?
-// decodeUint will decode unsigned integer
+// decodeUint will decode unsigned integers according to the JAM encoding specification
 func (ds *decodeState) decodeUint(dstv reflect.Value) (err error) {
 	const maxUint32 = ^uint32(0)
 	const maxUint64 = ^uint64(0)
@@ -488,17 +557,12 @@ func (ds *decodeState) decodeUint(dstv reflect.Value) (err error) {
 
 	in := dstv.Interface()
 	temp := reflect.New(reflect.TypeOf(in))
-	// check mode of encoding, stored at 2 least significant bits
 	mode := prefix % 4
 	var value uint64
 	switch mode {
 	case 0:
-		// 0b00: single-byte mode; upper six bits are the LE encoding of the value (valid only for
-		// values of 0-63).
 		value = uint64(prefix >> 2)
 	case 1:
-		// 0b01: two-byte mode: upper six bits and the following byte is the LE encoding of the
-		// value (valid only for values 64-(2**14-1))
 		buf, err := ds.ReadByte()
 		if err != nil {
 			return fmt.Errorf("reading byte: %w", err)
@@ -508,8 +572,6 @@ func (ds *decodeState) decodeUint(dstv reflect.Value) (err error) {
 			return fmt.Errorf("%w: %d (%b)", ErrU16OutOfRange, value, value)
 		}
 	case 2:
-		// 0b10: four-byte mode: upper six bits and the following three bytes are the LE encoding
-		// of the value (valid only for values (2**14)-(2**30-1)).
 		buf := make([]byte, 3)
 		_, err = ds.Read(buf)
 		if err != nil {
@@ -520,9 +582,6 @@ func (ds *decodeState) decodeUint(dstv reflect.Value) (err error) {
 			return fmt.Errorf("%w: %d (%b)", ErrU32OutOfRange, value, value)
 		}
 	case 3:
-		// 0b11: Big-integer mode: The upper six bits are the number of bytes following, plus four.
-		// The value is contained, LE encoded, in the bytes following. The final (most significant)
-		// byte must be non-zero. Valid only for values (2**30)-(2**536-1).
 		byteLen := (prefix >> 2) + 4
 		buf := make([]byte, byteLen)
 		_, err = ds.Read(buf)
@@ -556,12 +615,33 @@ func (ds *decodeState) decodeUint(dstv reflect.Value) (err error) {
 }
 
 var (
-	ErrU16OutOfRange            = errors.New("uint16 out of range")
-	ErrU32OutOfRange            = errors.New("uint32 out of range")
-	ErrU64OutOfRange            = errors.New("uint64 out of range")
-	ErrU64NotSupported          = errors.New("uint64 is not supported")
-	ErrCompactUintPrefixUnknown = errors.New("unknown prefix for compact uint")
+	ErrU16OutOfRange               = errors.New("uint16 out of range")
+	ErrU32OutOfRange               = errors.New("uint32 out of range")
+	ErrU64OutOfRange               = errors.New("uint64 out of range")
+	ErrU64NotSupported             = errors.New("uint64 is not supported")
+	ErrCompactUintPrefixUnknown    = errors.New("unknown prefix for compact uint")
+	ErrUnsupportedCustomPrimitive  = errors.New("UnsupportedCustomPrimitive")
+	ErrResultNotSet                = errors.New("ErrResultNotSet")
+	ErrUnsupportedDestination      = errors.New("unsupported destination type")
+	ErrUnsupportedType             = errors.New("unsupported type")
+	ErrUnsupportedResult           = errors.New("unsupported result value")
+	ErrUnknownVaryingDataTypeValue = errors.New("unknown varying data type value")
+	ErrUnsupportedOption           = errors.New("unsupported option")
+	errDecodeBool                  = errors.New("failed to decode bool")
+	errBigIntIsNil                 = errors.New("big.Int is nil")
+	errUint128IsNil                = errors.New("Uint128 is nil")
 )
+
+// EncodeVaryingDataType is an interface for encoding varying data types with discriminators.
+type EncodeVaryingDataType interface {
+	IndexValue() (int, interface{}, error)
+}
+
+// VaryingDataType represents a generic interface for types that can vary and need a discriminator.
+type VaryingDataType interface {
+	ValueAt(index uint) (interface{}, error)
+	SetValue(interface{}) error
+}
 
 // decodeLength is helper method which calls decodeUint and casts to int
 func (ds *decodeState) decodeLength() (l uint, err error) {
@@ -625,7 +705,7 @@ func (ds *decodeState) decodeSmallInt(firstByte, mode byte) (out int64, err erro
 	return
 }
 
-// decodeBigInt decodes a SCALE encoded byte array into a *big.Int
+// decodeBigInt decodes a JAM encoded byte array into a *big.Int
 // Works for all integers, including ints > 2**64
 func (ds *decodeState) decodeBigInt(dstv reflect.Value) (err error) {
 	b, err := ds.ReadByte()
@@ -732,8 +812,8 @@ func (ds *decodeState) decodeFixedWidthInt(dstv reflect.Value) (err error) {
 	return
 }
 
-// decodeUint128 accepts a byte array representing a SCALE encoded
-// common.Uint128 and performs SCALE decoding of the Uint128
+// decodeUint128 accepts a byte array representing a JAM encoded
+// common.Uint128 and performs JAM decoding of the Uint128
 func (ds *decodeState) decodeUint128(dstv reflect.Value) (err error) {
 	buf := make([]byte, 16)
 	err = binary.Read(ds, binary.LittleEndian, buf)
@@ -746,4 +826,49 @@ func (ds *decodeState) decodeUint128(dstv reflect.Value) (err error) {
 	}
 	dstv.Set(reflect.ValueOf(ui128))
 	return
+}
+
+// decodeBitSequence decodes a sequence of bits packed into octets
+func (ds *decodeState) decodeBitSequence(dstv reflect.Value) (err error) {
+	in := dstv.Interface()
+	temp := reflect.New(reflect.TypeOf(in)).Elem()
+
+	length := dstv.Len()
+	packedBytes := make([]byte, (length+7)/8)
+	_, err = ds.Read(packedBytes)
+	if err != nil {
+		return fmt.Errorf("reading bit sequence: %w", err)
+	}
+
+	for i := 0; i < length; i++ {
+		byteIndex := i / 8
+		bitIndex := i % 8
+		bitValue := (packedBytes[byteIndex] >> bitIndex) & 1
+		temp.Index(i).SetBool(bitValue == 1)
+	}
+
+	dstv.Set(temp)
+	return
+}
+
+// reverseBytes reverses the order of bytes in a slice
+func reverseBytes(input []byte) []byte {
+	if len(input) == 0 {
+		return input
+	}
+	output := make([]byte, len(input))
+	for i := range input {
+		output[i] = input[len(input)-1-i]
+	}
+	return output
+}
+
+// padBytes pads the byte slice to a specific size
+func padBytes(input []byte, order binary.ByteOrder) []byte {
+	padded := make([]byte, 16)
+	copy(padded, input)
+	if order == binary.BigEndian {
+		reverseBytes(padded)
+	}
+	return padded
 }

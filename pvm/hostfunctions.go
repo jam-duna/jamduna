@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/colorfulnotion/jam/codec"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/scale"
 	"github.com/colorfulnotion/jam/types"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -182,12 +182,9 @@ func (vm *VM) hostInfo() uint32 {
 	if err != nil {
 		return NONE
 	}
-	buffer := bytes.NewBuffer(nil)
-	encoder := scale.NewEncoder(buffer)
 
 	e := []interface{}{t.CodeHash, t.Balance, t.GasLimitG, t.GasLimitM}
-	err = encoder.Encode(e)
-	m := buffer.Bytes()
+	m, _ := codec.Encode(e)
 	vm.writeRAMBytes(bo, m[:])
 
 	return OK
@@ -696,7 +693,7 @@ func (vm *VM) hostExtrinsic() uint32 {
 	omega_0, _ := vm.readRegister(0)
 	var v_Bytes []byte
 	if omega_0 < uint32(len(vm.extrinsics)) {
-		v_Bytes = vm.extrinsics[omega_0]
+		v_Bytes = vm.extrinsics[omega_0].Hash.Bytes() // should be the raw extrinsic
 	} else {
 		v_Bytes = []byte{}
 	}

@@ -49,6 +49,10 @@ func Hex2Metadata(b string) [128]byte {
 	return result
 }
 
+func FromHex(b string) []byte {
+	return ethereumCommon.FromHex(b)
+}
+
 // HexToHash converts a hexadecimal string to a Hash.
 func HexToHash(s string) Hash {
 	return Hash(ethereumCommon.HexToHash(s))

@@ -14,6 +14,10 @@ type OffenderMarker struct {
 	OffenderKey []PublicKey `json:"offender_mark"`
 }
 
+type SOffenderMarker struct {
+	OffenderKey []string `json:"offender_mark"`
+}
+
 /*
 Section 10.2.  The disputes extrinsic, ${\bf E}_D$, may contain one or more verdicts ${\bf v}$.
 
@@ -26,17 +30,34 @@ type Dispute struct {
 	Fault   []Fault   `json:"faults"`
 }
 
+type SDispute struct {
+	Verdict []SVerdict `json:"verdicts"`
+	Culprit []SCulprit `json:"culprits"`
+	Fault   []SFault   `json:"faults"`
+}
+
 type Verdict struct {
-	//TODO: WorkReportHash shoulbe be common.Hash?
-	WorkReportHash common.Hash `json:"target"` // WorkReportHash (ByteArray32 in disputes.asn)
-	Epoch          uint32      `json:"age"`    // EpochIndex (U32 in disputes.asn)
-	Votes          []Vote      `json:"votes"`  // DisputeJudgements
+	Target common.Hash `json:"target"` // WorkReportHash (ByteArray32 in disputes.asn)
+	Epoch  uint32      `json:"age"`    // EpochIndex (U32 in disputes.asn)
+	Votes  []Vote      `json:"votes"`  // DisputeJudgements
+}
+
+type SVerdict struct {
+	Target common.Hash `json:"target"` // WorkReportHash (ByteArray32 in disputes.asn)
+	Epoch  uint32      `json:"age"`    // EpochIndex (U32 in disputes.asn)
+	Votes  []SVote     `json:"votes"`  // DisputeJudgements
 }
 
 type Culprit struct {
-	WorkReportHash common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Key            PublicKey   `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature      []byte      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+	Target    common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
+	Key       PublicKey   `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
+	Signature []byte      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+}
+
+type SCulprit struct {
+	Target    common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
+	Key       string      `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
+	Signature string      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
 }
 
 type Fault struct {
@@ -46,10 +67,11 @@ type Fault struct {
 	Signature      []byte      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
 }
 
-type Vote struct {
-	Voting    bool   `json:"vote"`      // true for guilty, false for innocent
-	Index     uint16 `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
-	Signature []byte `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
+type SFault struct {
+	WorkReportHash common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
+	Voting         bool        `json:"vote"`      // vote (BOOLEAN in disputes.asn)
+	Key            string      `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
+	Signature      string      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
 }
 
 func (t Dispute) DeepCopy() (Dispute, error) {
@@ -88,4 +110,95 @@ func (a *Dispute) Hash() common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(common.ComputeHash(data))
+}
+
+func (s *SFault) Deserialize() (Fault, error) {
+	keyBytes := common.FromHex(s.Key)
+	var key PublicKey
+	copy(key[:], keyBytes)
+
+	signature := common.FromHex(s.Signature)
+
+	return Fault{
+		WorkReportHash: s.WorkReportHash,
+		Voting:         s.Voting,
+		Key:            key,
+		Signature:      signature,
+	}, nil
+}
+
+func (s *SCulprit) Deserialize() (Culprit, error) {
+	keyBytes := common.FromHex(s.Key)
+	var key PublicKey
+	copy(key[:], keyBytes)
+
+	return Culprit{
+		Target:    s.Target,
+		Key:       key,
+		Signature: common.FromHex(s.Signature),
+	}, nil
+}
+
+func (s *SVerdict) Deserialize() (Verdict, error) {
+	votes := make([]Vote, len(s.Votes))
+	for i, sv := range s.Votes {
+		vote, err := sv.Deserialize()
+		if err != nil {
+			return Verdict{}, err
+		}
+		votes[i] = vote
+	}
+
+	return Verdict{
+		Target: s.Target,
+		Epoch:  s.Epoch,
+		Votes:  votes,
+	}, nil
+}
+
+func (s *SDispute) Deserialize() (Dispute, error) {
+	verdicts := make([]Verdict, len(s.Verdict))
+	for i, sv := range s.Verdict {
+		v, err := sv.Deserialize()
+		if err != nil {
+			return Dispute{}, err
+		}
+		verdicts[i] = v
+	}
+
+	culprits := make([]Culprit, len(s.Culprit))
+	for i, sc := range s.Culprit {
+		c, err := sc.Deserialize()
+		if err != nil {
+			return Dispute{}, err
+		}
+		culprits[i] = c
+	}
+
+	faults := make([]Fault, len(s.Fault))
+	for i, sf := range s.Fault {
+		f, err := sf.Deserialize()
+		if err != nil {
+			return Dispute{}, err
+		}
+		faults[i] = f
+	}
+
+	return Dispute{
+		Verdict: verdicts,
+		Culprit: culprits,
+		Fault:   faults,
+	}, nil
+}
+
+func (s *SOffenderMarker) Deserialize() (*OffenderMarker, error) {
+	keys := make([]PublicKey, len(s.OffenderKey))
+	for i, keyStr := range s.OffenderKey {
+		keyBytes := common.FromHex(keyStr)
+		copy(keys[i][:], keyBytes)
+	}
+
+	return &OffenderMarker{
+		OffenderKey: keys,
+	}, nil
 }

@@ -214,21 +214,21 @@ func TestWorkGuarantee(t *testing.T) {
 		if n > 1 {
 			importedSegments = append(importedSegments, exportedItem)
 		}
+		context := types.RefinementContext{}
 		workPackage := types.WorkPackage{
 			AuthorizationToken: authToken,
 			ServiceIndex:       47,
 			AuthorizationCode:  common.BytesToHash([]byte{}),
 			ParamBlob:          []byte("0x"),
-			Context:            []byte("0x"),
+			Context:            context,
 			WorkItems: []types.WorkItem{
 				{
-					ServiceIdentifier:   47,
-					CodeHash:            codeHash,
-					PayloadBlob:         []byte("0x00000010"),
-					GasLimit:            10000000,
-					ImportedSegments:    importedSegments,
-					NewData:             nil,
-					NumSegmentsExported: 1,
+					ServiceIdentifier: 47,
+					CodeHash:          codeHash,
+					Payload:           []byte("0x00000010"),
+					GasLimit:          10000000,
+					ImportedSegments:  importedSegments,
+					ExportCount:       1,
 				},
 			},
 		}

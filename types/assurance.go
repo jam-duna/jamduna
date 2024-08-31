@@ -26,16 +26,25 @@ A value of 1 (or ⊺, if interpreted as a Boolean) at any given index implies th
 // Assurance represents an assurance value.
 type Assurance struct {
 	// H_p - see Eq 124
-	ParentHash common.Hash `json:"parent_hash"`
+	Anchor common.Hash `json:"anchor"`
 	// f - 1 means "available"
-	Bitstring      []byte           `json:"bitstring"`
+	Bitfield       []byte           `json:"bitfield"`
 	ValidatorIndex uint32           `json:"validator_index"`
 	Signature      Ed25519Signature `json:"signature"`
 }
 
+type SAssurance struct {
+	// H_p - see Eq 124
+	Anchor common.Hash `json:"anchor"`
+	// f - 1 means "available"
+	Bitfield       string `json:"bitfield"`
+	ValidatorIndex uint32 `json:"validator_index"`
+	Signature      string `json:"signature"`
+}
+
 // computeAssuranceBytes abstracts the process of generating the bytes to be signed or verified.
 func (a *Assurance) computeAssuranceBytes() []byte {
-	h := common.ComputeHash(append(a.ParentHash.Bytes(), a.Bitstring...))
+	h := common.ComputeHash(append(a.Anchor.Bytes(), a.Bitfield...))
 	return append([]byte(X_A), h...)
 }
 
@@ -89,4 +98,27 @@ func (a *Assurance) Hash() common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(common.ComputeHash(data))
+}
+
+func (s *SAssurance) Deserialize() (Assurance, error) {
+	// Convert Bitstring from hex string to []byte
+	bitfieldBytes := common.FromHex(s.Bitfield)
+	// Convert Signature from hex string to Ed25519Signature
+	signatureBytes := common.FromHex(s.Signature)
+
+	// Ensure the signature is the correct length
+	if len(signatureBytes) != 64 {
+		return Assurance{}, fmt.Errorf("invalid signature length: expected 64 bytes, got %d", len(signatureBytes))
+	}
+
+	var signature Ed25519Signature
+	copy(signature[:], signatureBytes)
+
+	// Return the converted Assurance struct
+	return Assurance{
+		Anchor:         s.Anchor,
+		Bitfield:       bitfieldBytes,
+		ValidatorIndex: s.ValidatorIndex,
+		Signature:      signature,
+	}, nil
 }

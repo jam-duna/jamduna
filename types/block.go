@@ -12,6 +12,11 @@ type Block struct {
 	Extrinsic ExtrinsicData `json:"extrinsic"`
 }
 
+type SBlock struct {
+	Header    SBlockHeader   `json:"header"`
+	Extrinsic SExtrinsicData `json:"extrinsic"`
+}
+
 func NewBlock() *Block {
 	//var b Block
 	b := &Block{}
@@ -26,10 +31,10 @@ func (b *Block) Copy() *Block {
 	c := NewBlock()
 
 	// Copy Header fields
-	c.Header.ParentHash = b.Header.ParentHash
-	c.Header.PriorStateRoot = b.Header.PriorStateRoot
+	c.Header.Parent = b.Header.Parent
+	c.Header.ParentStateRoot = b.Header.ParentStateRoot
 	c.Header.ExtrinsicHash = b.Header.ExtrinsicHash
-	c.Header.TimeSlot = b.Header.TimeSlot
+	c.Header.Slot = b.Header.Slot
 
 	if b.Header.EpochMark != nil {
 		epochMarkCopy := *b.Header.EpochMark
@@ -81,7 +86,7 @@ func (b *Block) GetHeader() BlockHeader {
 }
 
 func (b *Block) TimeSlot() uint32 {
-	return b.GetHeader().TimeSlot
+	return b.GetHeader().Slot
 }
 
 func (b *Block) EpochMark() *EpochMark {
@@ -120,7 +125,7 @@ func (b *Block) Hash() common.Hash {
 
 // Hash returns the hash of the block.
 func (b *Block) ParentHash() common.Hash {
-	return b.Header.ParentHash
+	return b.Header.Parent
 }
 
 func (b *Block) String() string {
@@ -152,7 +157,24 @@ func (b *Block) Assurances() []Assurance {
 	return extrinsicData.Assurances
 }
 
-func (b *Block) Disputes() []Dispute {
+func (b *Block) Disputes() Dispute {
 	extrinsicData := b.Extrinsic
 	return extrinsicData.Disputes
+}
+
+func (s *SBlock) Deserialize() (Block, error) {
+	header, err := s.Header.Deserialize()
+	if err != nil {
+		return Block{}, err
+	}
+
+	extrinsic, err := s.Extrinsic.Deserialize()
+	if err != nil {
+		return Block{}, err
+	}
+
+	return Block{
+		Header:    header,
+		Extrinsic: extrinsic,
+	}, nil
 }

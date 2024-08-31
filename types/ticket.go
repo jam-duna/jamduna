@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
@@ -15,6 +16,11 @@ Section 6.7 - Equation 73.  Ticket Extrinsic is a *sequence* of proofs of valid 
 type Ticket struct {
 	Attempt   int                             `json:"attempt"`
 	Signature [ExtrinsicSignatureInBytes]byte `json:"signature"`
+}
+
+type STicket struct {
+	Attempt   int    `json:"attempt"`
+	Signature string `json:"signature"`
 }
 
 func (t Ticket) MarshalJSON() ([]byte, error) {
@@ -83,4 +89,23 @@ func (t *Ticket) TicketID() common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(ticket_id)
+}
+
+func (s *STicket) Deserialize() (Ticket, error) {
+	// Decode the signature from hex string to byte slice
+	signatureBytes := common.FromHex(s.Signature)
+	// Ensure the signature has the correct length
+	if len(signatureBytes) != ExtrinsicSignatureInBytes {
+		return Ticket{}, errors.New("invalid signature length")
+	}
+
+	// Copy the byte slice into the fixed-size array
+	var signature [ExtrinsicSignatureInBytes]byte
+	copy(signature[:], signatureBytes)
+
+	// Return the Ticket struct
+	return Ticket{
+		Attempt:   s.Attempt,
+		Signature: signature,
+	}, nil
 }

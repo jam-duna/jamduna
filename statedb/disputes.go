@@ -35,7 +35,7 @@ type VerdictResult struct {
 	PositveCount   int
 }
 
-func (j *JamState) ValidateProposedDispute(dispute *types.Dispute) error {
+func (j *JamState) ValidateProposedVote(v *types.Vote) error {
 	return nil
 }
 func (j *JamState) NeedsVerdictsMarker(targetJCE uint32) bool {
@@ -50,11 +50,11 @@ func (j *JamState) NeedsOffendersMarker(targetJCE uint32) bool {
 func (j *JamState) GetPsiBytes() ([]byte, error) {
 	// use scale to encode the Psi_state
 	//use json marshal to get the bytes
-	scale_bytes, err := json.Marshal(j.DisputesState)
+	codec_bytes, err := json.Marshal(j.DisputesState)
 	if err != nil {
 		return nil, err
 	}
-	return scale_bytes, nil
+	return codec_bytes, nil
 
 }
 
@@ -275,9 +275,9 @@ func checkSignature(v types.Verdict, pre_state JamState) error {
 		// check the signature
 		sign_message := []byte{}
 		if vote.Voting {
-			sign_message = append([]byte(types.X_True), v.WorkReportHash.Bytes()...)
+			sign_message = append([]byte(types.X_True), v.Target.Bytes()...)
 		} else {
-			sign_message = append([]byte(types.X_False), v.WorkReportHash.Bytes()...)
+			sign_message = append([]byte(types.X_False), v.Target.Bytes()...)
 		}
 		if v.Epoch == pre_state.SafroleState.Timeslot/E {
 			// check the signature
@@ -330,16 +330,16 @@ func checkVerdicts(v []types.Verdict) error {
 			if i == j {
 				continue
 			}
-			if bytes.Equal(veverdict2.WorkReportHash.Bytes(), verdict.WorkReportHash.Bytes()) {
-				return fmt.Errorf("Verdict Error: duplicate WorkReportHash %v in index %v", verdict.WorkReportHash, j)
+			if bytes.Equal(veverdict2.Target.Bytes(), verdict.Target.Bytes()) {
+				return fmt.Errorf("Verdict Error: duplicate WorkReportHash %v in index %v", verdict.Target, j)
 			}
 		}
 		// check index
 		if i == 0 {
 			continue
 		}
-		if bytes.Compare(v[i].WorkReportHash.Bytes(), v[i-1].WorkReportHash.Bytes()) < 0 {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x should be bigger than %x", v[i].WorkReportHash, v[i-1].WorkReportHash)
+		if bytes.Compare(v[i].Target.Bytes(), v[i-1].Target.Bytes()) < 0 {
+			return fmt.Errorf("Verdict Error: WorkReportHash %x should be bigger than %x", v[i].Target, v[i-1].Target)
 		}
 	}
 	return nil
@@ -349,7 +349,7 @@ func checkVerdicts(v []types.Verdict) error {
 func checkCulprit(c []types.Culprit) error {
 	for i, culprit := range c {
 		//check culprit signature is valid
-		sign_message := append([]byte(types.X_G), culprit.WorkReportHash.Bytes()...)
+		sign_message := append([]byte(types.X_G), culprit.Target.Bytes()...)
 		//verify the signature
 		if !ed25519.Verify(ed25519.PublicKey(culprit.Key), sign_message, culprit.Signature) {
 			return fmt.Errorf("Culprit Error: the signature of the culprit %v is invalid", culprit.Key)
@@ -412,14 +412,14 @@ func checkFault(f []types.Fault) error {
 // eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
 func checkWorkReportHash(v []types.Verdict, psi_g [][]byte, psi_b [][]byte, psi_w [][]byte) error {
 	for _, verdict := range v {
-		if checkWorkReportHashInSet(verdict.WorkReportHash.Bytes(), psi_g) {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_g", verdict.WorkReportHash)
+		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_g) {
+			return fmt.Errorf("Verdict Error: Target %x already in psi_g", verdict.Target)
 		}
-		if checkWorkReportHashInSet(verdict.WorkReportHash.Bytes(), psi_b) {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_b", verdict.WorkReportHash)
+		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_b) {
+			return fmt.Errorf("Verdict Error: Target %x already in psi_b", verdict.Target)
 		}
-		if checkWorkReportHashInSet(verdict.WorkReportHash.Bytes(), psi_w) {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_w", verdict.WorkReportHash)
+		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_w) {
+			return fmt.Errorf("Verdict Error: Target %x already in psi_w", verdict.Target)
 		}
 	}
 	return nil
@@ -469,7 +469,7 @@ func verdict2result(v []types.Verdict) []VerdictResult {
 			}
 		}
 		result = append(result, VerdictResult{
-			WorkReportHash: verdict.WorkReportHash,
+			WorkReportHash: verdict.Target,
 			PositveCount:   positiveCount,
 		})
 		// for _, r := range result {
@@ -668,7 +668,7 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 	counter := 0
 	for _, s := range state_prime.DisputesState.Psi_b {
 		for _, c := range c {
-			if bytes.Equal(s, c.WorkReportHash.Bytes()) {
+			if bytes.Equal(s, c.Target.Bytes()) {
 				counter++
 			}
 		}
@@ -680,12 +680,12 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 	found := false
 	for _, c := range c {
 		for _, s := range state_prime.DisputesState.Psi_b {
-			if bytes.Equal(s, c.WorkReportHash.Bytes()) {
+			if bytes.Equal(s, c.Target.Bytes()) {
 				found = true
 			}
 		}
 		if !found {
-			return fmt.Errorf("Culprit Error: work report hash %x should be in bad set", c.WorkReportHash)
+			return fmt.Errorf("Culprit Error: work report hash %x should be in bad set", c.Target)
 		}
 	}
 	return nil

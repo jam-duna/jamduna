@@ -12,7 +12,15 @@ type ExtrinsicData struct {
 	PreimageLookups []PreimageLookup `json:"preimage_lookups"`
 	Guarantees      []Guarantee      `json:"guarantees"`
 	Assurances      []Assurance      `json:"assurances"`
-	Disputes        []Dispute        `json:"disputes"`
+	Disputes        Dispute          `json:"disputes"`
+}
+
+type SExtrinsicData struct {
+	Tickets         []STicket        `json:"tickets"`
+	PreimageLookups []PreimageLookup `json:"preimage_lookups"`
+	Guarantees      []Guarantee      `json:"guarantees"`
+	Assurances      []SAssurance     `json:"assurances"`
+	Disputes        SDispute         `json:"disputes"`
 }
 
 func NewExtrinsic() ExtrinsicData {
@@ -36,4 +44,37 @@ func (e *ExtrinsicData) Hash() common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(common.ComputeHash(data))
+}
+
+func (s *SExtrinsicData) Deserialize() (ExtrinsicData, error) {
+	assurances := make([]Assurance, len(s.Assurances))
+	for i, sa := range s.Assurances {
+		a, err := sa.Deserialize()
+		if err != nil {
+			return ExtrinsicData{}, err
+		}
+		assurances[i] = a
+	}
+
+	tickets := make([]Ticket, len(s.Tickets))
+	for i, sa := range s.Tickets {
+		a, err := sa.Deserialize()
+		if err != nil {
+			return ExtrinsicData{}, err
+		}
+		tickets[i] = a
+	}
+
+	dispute, err := s.Disputes.Deserialize()
+	if err != nil {
+		return ExtrinsicData{}, err
+	}
+
+	return ExtrinsicData{
+		Tickets:         tickets, // Assuming STicket is the same as Ticket
+		PreimageLookups: s.PreimageLookups,
+		Guarantees:      s.Guarantees,
+		Assurances:      assurances,
+		Disputes:        dispute, // Assuming Disputes is a slice of one element
+	}, nil
 }

@@ -286,8 +286,8 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	// Convert Input.Verdicts
 	for _, verdict := range rawDisputeData.Input.Disputes.Verdicts {
 		verdictStruct := types.Verdict{
-			WorkReportHash: hexDecodeOrPanic(verdict.Target),
-			Epoch:          verdict.Age,
+			Target: hexDecodeOrPanic(verdict.Target),
+			Epoch:  verdict.Age,
 		}
 		for _, vote := range verdict.Votes {
 			verdictStruct.Votes = append(verdictStruct.Votes, types.Vote{
@@ -302,9 +302,9 @@ func ReadAndConvertJson(filePath string) (DisputeData, error) {
 	// Convert Input.Culprits
 	for _, culprit := range rawDisputeData.Input.Disputes.Culprits {
 		disputeData.Input.Culprit = append(disputeData.Input.Culprit, types.Culprit{
-			WorkReportHash: common.BytesToHash(common.Hex2Bytes(culprit.Target)),
-			Key:            common.Hex2Bytes(culprit.Key),
-			Signature:      common.Hex2Bytes(culprit.Signature),
+			Target:    common.BytesToHash(common.Hex2Bytes(culprit.Target)),
+			Key:       common.Hex2Bytes(culprit.Key),
+			Signature: common.Hex2Bytes(culprit.Signature),
 		})
 	}
 

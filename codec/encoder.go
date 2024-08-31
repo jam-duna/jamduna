@@ -1,7 +1,4 @@
-// Copyright 2021 ChainSafe Systems (ON)
-// SPDX-License-Identifier: LGPL-3.0-only
-
-package scale
+package codec
 
 import (
 	"bytes"
@@ -47,9 +44,9 @@ func Marshal(v interface{}) (b []byte, err error) {
 	return
 }
 
-// Marshaler is the interface for custom SCALE marshalling for a given type
+// Marshaler is the interface for custom JAM marshalling for a given type
 type Marshaler interface {
-	MarshalSCALE() ([]byte, error)
+	MarshalJAM() ([]byte, error)
 }
 
 // MustMarshal runs Marshal and panics on error.
@@ -70,7 +67,7 @@ func (es *encodeState) marshal(in interface{}) (err error) {
 	marshaler, ok := in.(Marshaler)
 	if ok {
 		var bytes []byte
-		bytes, err = marshaler.MarshalSCALE()
+		bytes, err = marshaler.MarshalJAM()
 		if err != nil {
 			return
 		}
@@ -101,6 +98,8 @@ func (es *encodeState) marshal(in interface{}) (err error) {
 		err = es.encodeBytes([]byte(in))
 	case bool:
 		err = es.encodeBool(in)
+	case []bool:
+		err = es.encodeBitSequence(in)
 	case Result:
 		err = es.encodeResult(in)
 	default:
@@ -137,6 +136,7 @@ func (es *encodeState) marshal(in interface{}) (err error) {
 	return
 }
 
+// encodeCustomPrimitive encodes basic Go primitives
 func (es *encodeState) encodeCustomPrimitive(in interface{}) (err error) {
 	switch reflect.TypeOf(in).Kind() {
 	case reflect.Bool:
@@ -171,6 +171,7 @@ func (es *encodeState) encodeCustomPrimitive(in interface{}) (err error) {
 	return
 }
 
+// encodeResult encodes a Result type
 func (es *encodeState) encodeResult(res Result) (err error) {
 	if !res.IsSet() {
 		err = fmt.Errorf("%w: %+v", ErrResultNotSet, res)
@@ -193,13 +194,14 @@ func (es *encodeState) encodeResult(res Result) (err error) {
 		in = res.err
 	}
 	switch in := in.(type) {
-	case empty:
+	//case empty:
 	default:
 		err = es.marshal(in)
 	}
 	return
 }
 
+// encodeVaryingDataType encodes varying data types with discriminator
 func (es *encodeState) encodeVaryingDataType(vdt EncodeVaryingDataType) (err error) {
 	index, value, err := vdt.IndexValue()
 	if err != nil {
@@ -213,6 +215,7 @@ func (es *encodeState) encodeVaryingDataType(vdt EncodeVaryingDataType) (err err
 	return
 }
 
+// encodeSlice encodes a slice with length prefix
 func (es *encodeState) encodeSlice(in interface{}) (err error) {
 	v := reflect.ValueOf(in)
 	err = es.encodeLength(v.Len())
@@ -228,9 +231,7 @@ func (es *encodeState) encodeSlice(in interface{}) (err error) {
 	return
 }
 
-// encodeArray encodes an interface where the underlying type is an array
-// it encodes and writes each value in the Array. Arrays of known size do not
-// have the length prepended since you know the length when decoding
+// encodeArray encodes an array without length prefix
 func (es *encodeState) encodeArray(in interface{}) (err error) {
 	v := reflect.ValueOf(in)
 	for i := 0; i < v.Len(); i++ {
@@ -242,6 +243,7 @@ func (es *encodeState) encodeArray(in interface{}) (err error) {
 	return
 }
 
+// encodeMap encodes a map with key-value pairs and length prefix
 func (es *encodeState) encodeMap(in interface{}) (err error) {
 	v := reflect.ValueOf(in)
 	err = es.encodeLength(v.Len())
@@ -270,10 +272,7 @@ func (es *encodeState) encodeMap(in interface{}) (err error) {
 	return nil
 }
 
-// encodeBigInt performs the same encoding as encodeInteger, except on a big.Int.
-// if 2^30 <= n < 2^536 write
-// [lower 2 bits of first byte = 11] [upper 6 bits of first byte = # of bytes following less 4]
-// [append i as a byte array to the first byte]
+// encodeBigInt encodes a big.Int with JAM encoding
 func (es *encodeState) encodeBigInt(i *big.Int) (err error) {
 	switch {
 	case i == nil:
@@ -302,9 +301,7 @@ func (es *encodeState) encodeBigInt(i *big.Int) (err error) {
 	return
 }
 
-// encodeBool performs the following:
-// l = true -> write [1]
-// l = false -> write [0]
+// encodeBool encodes a boolean value
 func (es *encodeState) encodeBool(l bool) (err error) {
 	switch l {
 	case true:
@@ -315,10 +312,7 @@ func (es *encodeState) encodeBool(l bool) (err error) {
 	return
 }
 
-// encodeByteArray performs the following:
-// b -> [encodeInteger(len(b)) b]
-// it writes to the buffer a byte array where the first byte is the length of b encoded with SCALE, followed by the
-// byte array b itself
+// encodeBytes encodes a byte slice with length prefix
 func (es *encodeState) encodeBytes(b []byte) (err error) {
 	err = es.encodeLength(len(b))
 	if err != nil {
@@ -329,7 +323,7 @@ func (es *encodeState) encodeBytes(b []byte) (err error) {
 	return
 }
 
-// encodeFixedWidthInt encodes an int with size < 2**32 by putting it into little endian byte format
+// encodeFixedWidthInt encodes fixed width integers
 func (es *encodeState) encodeFixedWidthInt(i interface{}) (err error) {
 	switch i := i.(type) {
 	case int8:
@@ -354,9 +348,7 @@ func (es *encodeState) encodeFixedWidthInt(i interface{}) (err error) {
 	return
 }
 
-// encodeStruct reads the number of fields in the struct and their types
-// and writes to the buffer each of the struct fields encoded
-// as their respective types
+// encodeStruct encodes struct fields recursively
 func (es *encodeState) encodeStruct(in interface{}) (err error) {
 	v, indices, err := es.fieldScaleIndices(in)
 	if err != nil {
@@ -375,20 +367,12 @@ func (es *encodeState) encodeStruct(in interface{}) (err error) {
 	return
 }
 
-// encodeLength is a helper function that calls encodeUint, which is the scale length encoding
+// encodeLength encodes the length of a collection
 func (es *encodeState) encodeLength(l int) (err error) {
 	return es.encodeUint(uint(l))
 }
 
-// encodeUint performs the following on integer i:
-// i  -> i^0...i^n where n is the length in bits of i
-// note that the bit representation of i is in little endian; ie i^0 is the least significant bit of i,
-// and i^n is the most significant bit
-// if n < 2^6 write [00 i^2...i^8 ] [ 8 bits = 1 byte encoded ]
-// if 2^6 <= n < 2^14 write [01 i^2...i^16] [ 16 bits = 2 byte encoded ]
-// if 2^14 <= n < 2^30 write [10 i^2...i^32] [ 32 bits = 4 byte encoded ]
-// if n >= 2^30 write [lower 2 bits of first byte = 11] [upper 6 bits of first byte = # of bytes following less 4]
-// [append i as a byte array to the first byte]
+// encodeUint encodes unsigned integers with JAM encoding
 func (es *encodeState) encodeUint(i uint) (err error) {
 	switch {
 	case i < 1<<6:
@@ -401,10 +385,6 @@ func (es *encodeState) encodeUint(i uint) (err error) {
 		o := make([]byte, 8)
 		m := i
 		var numBytes int
-		// calculate the number of bytes needed to store i
-		// the most significant byte cannot be zero
-		// each iteration, shift by 1 byte until the number is zero
-		// then break and save the numBytes needed
 		for numBytes = 0; numBytes < 256 && m != 0; numBytes++ {
 			m = m >> 8
 		}
@@ -421,12 +401,42 @@ func (es *encodeState) encodeUint(i uint) (err error) {
 	return
 }
 
-// encodeUint128 encodes a Uint128
+// Bytes converts the Uint128 value into a byte slice in little-endian order.
+func (i *Uint128) Bytes() []byte {
+	buf := make([]byte, 16)
+	binary.LittleEndian.PutUint64(buf[:8], i.Low)
+	binary.LittleEndian.PutUint64(buf[8:], i.High)
+	return buf
+}
+
+// encodeUint128 encodes a Uint128 value
 func (es *encodeState) encodeUint128(i *Uint128) (err error) {
 	if i == nil {
 		err = fmt.Errorf("%w", errUint128IsNil)
 		return
 	}
 	err = binary.Write(es, binary.LittleEndian, padBytes(i.Bytes(), binary.LittleEndian))
+	return
+}
+
+// encodeBitSequence encodes a sequence of bits as a packed octet stream
+func (es *encodeState) encodeBitSequence(bits []bool) (err error) {
+	if len(bits) == 0 {
+		_, err = es.Write([]byte{})
+		return
+	}
+
+	var packedBytes []byte
+	for i := 0; i < len(bits); i += 8 {
+		var b byte
+		for j := 0; j < 8 && i+j < len(bits); j++ {
+			if bits[i+j] {
+				b |= 1 << j
+			}
+		}
+		packedBytes = append(packedBytes, b)
+	}
+
+	_, err = es.Write(packedBytes)
 	return
 }
