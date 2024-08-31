@@ -30,6 +30,10 @@ func BytesToHash(b []byte) Hash {
 	return Hash(ethereumCommon.BytesToHash(b))
 }
 
+func Bytes2Hex(d []byte) string {
+	return ethereumCommon.Bytes2Hex(d)
+}
+
 // Hex2Bytes converts a byte slice to a Hash.
 func Hex2Bytes(b string) []byte {
 	return ethereumCommon.Hex2Bytes(b)
@@ -56,11 +60,6 @@ func FromHex(b string) []byte {
 // HexToHash converts a hexadecimal string to a Hash.
 func HexToHash(s string) Hash {
 	return Hash(ethereumCommon.HexToHash(s))
-}
-
-// Bytes2Hex converts a byte slice to a hexadecimal string.
-func Bytes2Hex(d []byte) string {
-	return ethereumCommon.Bytes2Hex(d)
 }
 
 // MarshalJSON custom marshaler to convert Hash to hex string.

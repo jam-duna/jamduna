@@ -62,6 +62,9 @@ type VM struct {
 	// SOLICITS+FORGETS
 	Solicits []Solicit
 	Forgets  []Forgets
+
+	X types.XContext
+	Y types.XContext
 }
 
 type Forgets struct {

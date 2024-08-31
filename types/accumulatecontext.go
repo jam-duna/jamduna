@@ -19,6 +19,7 @@ type Assign struct {
 	C    []byte
 }
 
+/*
 type NewService struct {
 	C []byte
 	L uint32
@@ -26,6 +27,12 @@ type NewService struct {
 	G uint64
 	M uint64
 	I uint32 // new service_index
+}
+*/
+
+type NewService struct {
+	S uint32
+	A ServiceAccount
 }
 
 type UpgradeService struct {

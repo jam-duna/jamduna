@@ -293,26 +293,67 @@ func (vm *VM) hostNew() uint32 {
 	mh, _ := vm.readRegister(5)
 	g := uint64(gh)<<32 + uint64(gl)
 	m := uint64(mh)<<32 + uint64(ml)
-	b := uint64(0)
-	x_i := uint32(0) // this is the xContext_i
-	// s := vm.service_index
-	// to deduct a_t from s
 
-	//I think new service need to be set up like this
-	new_service_xi := vm.check(bump(x_i))
-	vm.hostenv.WriteServicePreimageLookup(new_service_xi, common.BytesToHash(c), l, []uint32{})
-	solicit := Solicit{
-		BlobHash: common.BytesToHash(c),
-		Length:   l,
+	xContext := vm.hostenv.GetXContext()
+	xs := xContext.GetX_s()
+
+	// vm also needs xContext_i. DO NOT HARDCODE
+	xi := xContext.GetX_i()
+
+	// simulate a with c, g, m
+	a := types.ServiceAccount{
+		CodeHash:  common.BytesToHash(c),
+		GasLimitG: g,
+		GasLimitM: m,
 	}
-	vm.Solicits = append(vm.Solicits, solicit)
+	// Compute footprint & threshold: a_l, a_s, a-t
+	a.StorageSize = uint64(81 + l + 0) //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
+	a.NumStorageItems = 2*1 + 0  	   //a_s = 2⋅∣al∣+∣as∣
+	a.Balance = a.ComputeThreshold()  //set a's balance to a_t
 
-	/*
-		TODO: William to figure out the (x_s)b-a_t
-		TODO: CASH if balance insufficient
-		TODO: OOB on x_t
-	*/
-	return vm.hostenv.SetX(types.NewService{C: c, L: l, B: b, G: g, M: m, I: x_i})
+	b := uint64(0)
+	if (xs.Balance >= a.Balance){
+		// make sure no overflow here
+		b = xs.Balance - a.Balance
+	}
+	if (b >= xs.ComputeThreshold()){
+		//xs has enough balance to fund the creation of a AND covering its own threshold
+
+		// updating (ω0',xi',xn',(x's)b)
+
+		// ω0' <- xi
+		vm.writeRegister(0, xi)
+
+		// xi' <- check(bump(xi))
+		next_xi := vm.check(bump(xi)) // this is the next xi
+		xContext.SetX_i(next_xi)
+
+		// xi ↦ a
+		a.SetServiceIndex(xi)
+
+		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
+		// vm.hostenv.WriteServicePreimageLookup(new_service_xi, common.BytesToHash(c), l, []uint32{})
+		a.JournalInsertLookup(common.BytesToHash(c), l, []uint32{})
+
+		// xn' <- xn ∪ {xi ↦ a}.
+		// TODO: add new_service_xi -> a mapping
+		// this is using xi but not xi??
+		xContext.SetX_n(xi, &a)
+
+		// (x's)b <- (xs)b - at
+		xs.Balance = xs.Balance - a.Balance
+		xContext.SetX_s(xs)
+		vm.hostenv.SetXContext(xContext)
+
+		solicit := Solicit{
+			BlobHash: common.BytesToHash(c),
+			Length:   l,
+		}
+		vm.Solicits = append(vm.Solicits, solicit)
+		return OK
+	}else{
+		return CASH //balance insufficient
+	}
 }
 
 // Upgrade service
@@ -328,11 +369,15 @@ func (vm *VM) hostUpgrade() uint32 {
 	}
 	g := uint64(gh)<<32 + uint64(gl)
 	m := uint64(mh)<<32 + uint64(ml)
-	/*
-		TODO: CASH if balance insufficient
-		TODO: OOB on x_t
-	*/
-	return vm.hostenv.SetX(types.UpgradeService{C: c, G: g, M: m})
+
+	xContext := vm.hostenv.GetXContext()
+	xs := xContext.GetX_s()
+	xs.CodeHash = common.BytesToHash(c)
+	xs.GasLimitG = g
+	xs.GasLimitM = m	
+	xContext.SetX_s(xs)
+	vm.hostenv.SetXContext(xContext)
+	return OK
 }
 
 // Transfer host call
@@ -527,7 +572,10 @@ func (vm *VM) GetJCETime() uint32 {
 func (vm *VM) hostSolicit() uint32 {
 	// Got l of X_s by setting s = 1, z = z(from RAM)
 	// Question: William why this is hardcoded as 49?
-	s := uint32(49) // s: serviceIndex.
+
+	xContext := vm.hostenv.GetXContext()
+	xs := xContext.GetX_s()
+
 	o, _ := vm.readRegister(0)
 	z, _ := vm.readRegister(1)              // z: blob_len
 	hBytes, err_h := vm.readRAMBytes(o, 32) // h: blobHash
@@ -565,17 +613,23 @@ func (vm *VM) hostSolicit() uint32 {
 	//key := append(lbytes, hBytes...) //GP(292)
 	//h := common.BytesToHash(key)
 
-	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, common.BytesToHash(hBytes), z)
+	X_s_l := vm.hostenv.ReadServicePreimageLookup(xs.ServiceIndex(), common.BytesToHash(hBytes), z)
 	if len(X_s_l) == 0 {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
 		vm.Solicits = append(vm.Solicits, solicit)
-		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, []uint32{})
+		//vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, []uint32{})
+		xs.JournalInsertLookup(common.BytesToHash(hBytes), z, []uint32{})
+		xContext.SetX_s(xs)
+		vm.hostenv.SetXContext(xContext)
 		vm.writeRegister(0, OK)
 		return OK
 	} else if X_s_l[0] == 2 { // [x, y]
 		anchor_timeslot := vm.GetJCETime()
 		vm.Solicits = append(vm.Solicits, solicit)
-		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+		//vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+		xContext.SetX_s(xs)
+		vm.hostenv.SetXContext(xContext)
+		xs.JournalInsertLookup(common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
 		vm.writeRegister(0, OK)
 		return OK
 	} else {

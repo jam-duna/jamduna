@@ -55,9 +55,11 @@ type StateDB struct {
 	queuedTickets map[common.Hash]types.Ticket
 	ticketMutex   sync.Mutex
 
-	X XContext
-	S uint32
+	X *types.XContext
+
+	//S uint32
 }
+
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
 	s.ticketMutex.Lock()
@@ -688,7 +690,7 @@ func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, erro
 	}
 	// v looks like: ac ⌢ E8(ab,ag,am,al) ⌢ E4(ai)
 	// TODO: William to figure out the transformation
-	a, err := types.ServiceAccountFromBytes(v)
+	a, err := types.ServiceAccountFromBytes(c, v)
 	if err != nil {
 		return &types.ServiceAccount{}, false, nil
 	}
@@ -733,19 +735,30 @@ func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult
 }
 
 func (s *StateDB) Accumulate(cores map[uint32]*Rho_state) error {
+	xContext := types.NewXContext()
+	//TODO: setup xi, x_vm,
+	s.SetXContext(xContext)
 	for c, rho_state := range cores {
 		if rho_state != nil {
 			wrangledWorkResults := make([]types.WrangledWorkResult, 0)
 			code, err := s.getServiceCoreCode(c)
+			service_index := 0
 			if err == nil {
 				// Wrangle results from work report
 				workReport := rho_state.WorkReport
 				for _, workResult := range workReport.Results {
 					wrangledWorkResult := workResult.Wrangle(workReport.AuthorizationOutput, workReport.AvailabilitySpec.WorkPackageHash)
 					wrangledWorkResults = append(wrangledWorkResults, wrangledWorkResult)
+					service_index = workResult.Service
 				}
 			}
 			wrangledWorkResultsBytes := s.getWrangledWorkResultsBytes(wrangledWorkResults)
+
+			Xs, _ := s.GetService(uint32(service_index))
+			//s.X.S = Xs
+			X := s.GetXContext()
+			X.S = Xs
+			s.UpdateXContext(X)
 			vm := pvm.NewVMFromCode(c, code, 0, s)
 			vm.SetArgumentInputs(wrangledWorkResultsBytes)
 			vm.Execute(types.EntryPointAccumulate)
