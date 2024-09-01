@@ -25,11 +25,6 @@ type CDMerkleTree struct {
 	leaves []*CDTNode
 }
 
-// Segment represents a segment of data
-type Segment struct {
-	Data []byte
-}
-
 // PagedProof represents a paged proof
 type PagedProof struct {
 	SegmentHashes [64]common.Hash
@@ -247,7 +242,12 @@ func findSibling(parent, node *CDTNode) *CDTNode {
 }
 
 // generatePageProof creates paged proofs from segments
-func generatePageProof(segments []Segment) []PagedProof {
+func GeneratePageProof(segments []common.Segment) []PagedProof {
+	return generatePageProof(segments)
+}
+
+// generatePageProof creates paged proofs from segments
+func generatePageProof(segments []common.Segment) []PagedProof {
 	var pagedProofs []PagedProof
 	var currentPageSegments []common.Hash
 
@@ -301,4 +301,18 @@ func generateMerkleRoot(hashes []common.Hash) common.Hash {
 	tree := NewCDMerkleTree(hashBytes)
 
 	return common.BytesToHash(tree.Root())
+}
+
+// Trasnform PagedProof to bytes
+func (pp PagedProof) ToBytes() []byte {
+	var result []byte
+
+	// Trsnform the segment hashes to bytes
+	for _, hash := range pp.SegmentHashes {
+		result = append(result, hash[:]...)
+	}
+
+	result = append(result, pp.MerkleRoot[:]...)
+
+	return result
 }

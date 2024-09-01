@@ -200,11 +200,11 @@ func TestCDTGet(t *testing.T) {
 
 // TestGeneratePageProof tests the generation of page proofs
 func TestGeneratePageProof(t *testing.T) {
-	var segments []Segment
+	var segments []common.Segment
 
 	for i := 1; i <= 65; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
-		segments = append(segments, Segment{Data: data})
+		segments = append(segments, common.Segment{Data: data})
 	}
 
 	pagedProofs := generatePageProof(segments)

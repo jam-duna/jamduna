@@ -26,7 +26,7 @@ type AtomicShards struct {
 	} `json:"segment"`
 }
 
-func Encode(original []byte) ([][][]byte, error) {
+func Encode(original []byte, GFPointsPerShard int) ([][][]byte, error) {
 	// TODO: Using non-inplace operation on buffer, output is a bit memory inefficient.
 
 	// Calculate the shardSize
