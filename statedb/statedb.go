@@ -60,7 +60,6 @@ type StateDB struct {
 	//S uint32
 }
 
-
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
@@ -747,7 +746,7 @@ func (s *StateDB) Accumulate(cores map[uint32]*Rho_state) error {
 				// Wrangle results from work report
 				workReport := rho_state.WorkReport
 				for _, workResult := range workReport.Results {
-					wrangledWorkResult := workResult.Wrangle(workReport.AuthorizationOutput, workReport.AvailabilitySpec.WorkPackageHash)
+					wrangledWorkResult := workResult.Wrangle(workReport.AuthorizationOutput, workReport.AvailabilitySpecifier.WorkPackageHash)
 					wrangledWorkResults = append(wrangledWorkResults, wrangledWorkResult)
 					service_index = workResult.Service
 				}
@@ -1032,7 +1031,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	// 147 - There must be no duplicate work-package hashes (i.e. two work-reports of the same package).
 	workPackageHashes := make(map[common.Hash]bool)
 	for _, guarantee := range extrinsicData.Guarantees {
-		hash := guarantee.WorkReport.AvailabilitySpec.WorkPackageHash
+		hash := guarantee.WorkReport.AvailabilitySpecifier.WorkPackageHash
 		if workPackageHashes[hash] {
 			// Handle duplicate work-package hash.
 			return nil, errors.New("duplicate work-package hash detected")

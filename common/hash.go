@@ -26,8 +26,3 @@ func Blake2AsHex(data []byte) Hash {
 func Blake2Hash(data []byte) Hash {
 	return BytesToHash(ComputeHash(data))
 }
-
-// Segment represents a segment of data
-type Segment struct {
-	Data []byte
-}

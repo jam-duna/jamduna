@@ -26,11 +26,40 @@ type WorkItem struct {
 	// y: a payload blob
 	Payload []byte `json:"payload"`
 	// x: extrinsic
-	Extrinsics []WorkItemExtrinsic `json:"extrinsic"`
+	Extrinsics      []WorkItemExtrinsic `json:"extrinsic"`
+	ExtrinsicsBlobs [][]byte            `json:"extrinsics"`
 	// g: a gas limit
 	GasLimit         int             `json:"gas_limit"`
 	ImportedSegments []ImportSegment `json:"imported_segments"`
 	ExportCount      uint32          `json:"export_count"`
+}
+
+type ImportSegment struct {
+	TreeRoot common.Hash `json:"tree_root"`
+	Index    uint32      `json:"index"`
+}
+type WorkItemExtrinsic struct {
+	Hash common.Hash `json:"hash"`
+	Len  uint32      `json:"len"`
+}
+
+// Segment represents a segment of data
+type Segment struct {
+	Data []byte
+}
+
+// The workitem is an ordered collection of segments
+type ASWorkItem struct {
+	Segments   []Segment
+	Extrinsics []WorkItemExtrinsic `json:"extrinsic"`
+}
+
+func (item ASWorkItem) ToByteSlices() [][]byte {
+	var slices [][]byte
+	for _, segment := range item.Segments {
+		slices = append(slices, segment.Data)
+	}
+	return slices
 }
 
 type SWorkItem struct {
@@ -49,15 +78,6 @@ type SWorkItem struct {
 }
 
 //From Sec 14: Once done, then imported segments must be reconstructed. This process may in fact be lazy as the Refine function makes no usage of the data until the ${\tt import}$ hostcall is made. Fetching generally implies that, for each imported segment, erasure-coded chunks are retrieved from enough unique validators (342, including the guarantor).  Chunks must be fetched for both the data itself and for justification metadata which allows us to ensure that the data is correct.
-
-type ImportSegment struct {
-	TreeRoot common.Hash `json:"tree_root"`
-	Index    uint32      `json:"index"`
-}
-type WorkItemExtrinsic struct {
-	Hash common.Hash `json:"hash"`
-	Len  uint32      `json:"len"`
-}
 
 /*
 	{

@@ -13,8 +13,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"reflect"
-	"math"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
@@ -601,7 +599,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		var workPackage types.WorkPackage
 		err := json.Unmarshal([]byte(msg.Payload), &workPackage)
 		if err == nil {
-			err = n.processWorkPackage(workPackage)
+			_, err = n.processWorkPackage(workPackage)
 			if err == nil {
 				response = ok
 			}
@@ -1010,79 +1008,79 @@ func (n *Node) getPVMStateDB() *statedb.StateDB {
 	return target_statedb
 }
 
-func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
+func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.AvailabilitySpecifier, err error) {
 
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
 	service_index := uint32(workPackage.ServiceIndex)
+	packageHash := workPackage.Hash()
 
+	// set up audit friendly work WorkPackage
+	asworkPackage := types.ASWorkPackage{
+		ImportSegments: make([]types.ASWorkItem, 0),
+	}
+	segments := make([]types.Segment, 0)
 	for _, workItem := range workPackage.WorkItems {
 		code, err := n.FetchAndReconstructData(workItem.CodeHash)
 		if err != nil {
-			return err
+			return spec, err
 		}
 
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		imports, err := n.getImportSegments(workItem.ImportedSegments)
 		if err != nil {
-			return err
+			return spec, err
 		}
 		vm.SetImports(imports)
-		vm.SetExtrinsicsPayload(workItem.Extrinsics, workItem.Payload)
+		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
 		err = vm.Execute(types.EntryPointRefine)
 		if err != nil {
-			return err
+			return spec, err
+		}
+		output, _ := vm.GetArgumentOutputs()
+
+		// The workitem is an ordered collection of segments
+		asWorkItem := types.ASWorkItem{
+			Segments:   make([]types.Segment, 0),
+			Extrinsics: make([]types.WorkItemExtrinsic, 0),
+		}
+		for _, i := range vm.Imports {
+			asWorkItem.Segments = append(asWorkItem.Segments, types.Segment{Data: i})
+		}
+		for _, extrinsicblob := range workItem.ExtrinsicsBlobs {
+			asWorkItem.Extrinsics = append(asWorkItem.Extrinsics, types.WorkItemExtrinsic{Hash: common.BytesToHash(extrinsicblob), Len: uint32(len(extrinsicblob))})
 		}
 
-		leaves := [][]byte{}
+		// 1. NOTE: We do NOT need to erasure code import data
+		// 2. TODO: We DO need to erasure encode extrinsics into "Audit DA"
+		// ******TODO******
+
+		// 3. We DO need to erasure code exports from refine execution into "Import DA"
 		for _, e := range vm.Exports {
-			h, err := n.EncodeAndDistributeData(e)
+			s := types.Segment{Data: e}
+			segments = append(segments, s) // this is used in NewAvailabilitySpecifier
+			_, err := n.EncodeAndDistributeData(e)
 			if err != nil {
-				return err
-			}
-			leaves = append(leaves, h.Bytes()) // h is the H(e) .. assuming e is wc*ws
-			// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
-			/*
-				result := types.WorkResult{
-					Service:                workItem.ServiceIdentifier,
-					CodeHash:               workItem.CodeHash,
-					PayloadHash:            common.Blake2Hash(workItem.PayloadBlob),
-					GasPrioritizationRatio: 0,
-					Output:                 []byte{}, // refinement_context
-					Error:                  "",
-				}
-			*/
-			//results = append(results, result)
-			//fmt.Printf("[N%d] EXPORTED ITEM %d => encoded in DA %v", n.id, e, h)
-		}
-
-		tree := trie.NewCDMerkleTree(leaves)
-
-		// Test justification for each leaf
-		for i, leaf := range leaves {
-			justification, err := tree.Justify(i)
-			if err != nil {
-				return fmt.Errorf("Error justifying leaf %d: %v\n", i, err)
-			}
-			leafHash := trie.ComputeLeaf(leaf)
-			computedRoot := trie.VerifyJustification(leafHash, i, justification)
-			if !common.CompareBytes(computedRoot, tree.Root()) {
-				return fmt.Errorf("Justification failed for leaf %d: expected root %s, got %s\n", i, tree.RootHash(), common.Hash(computedRoot))
-			} else {
-				fmt.Printf("Justification verified for leaf %d\n", i)
+				return spec, err
 			}
 		}
 
+		// setup work results
+		// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
+		result := types.WorkResult{
+			Service:                workItem.ServiceIdentifier,
+			CodeHash:               workItem.CodeHash,
+			PayloadHash:            common.Blake2Hash(workItem.Payload),
+			GasPrioritizationRatio: 0,
+			Output:                 output,
+			Error:                  "", // TODO: need to get from the error
+		}
+		results = append(results, result)
 	}
 
-	// Now create a WorkReport with AvailabilitySpecification and RefinementContext
-	availabilitySpec := types.AvailabilitySpecification{
-		WorkPackageHash: workPackage.Hash(),
-		BundleLength:    10,                           // ???
-		ErasureRoot:     common.HexToHash("0xdef456"), // TODO
-		SegmentRoot:     common.HexToHash("0x789abc"), // TODO
-	}
+	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
+	spec = NewAvailabilitySpecifier(packageHash, asworkPackage, segments)
 
 	refinementContext := types.RefinementContext{
 		Anchor:           common.HexToHash("0x123abc"),           // TODO
@@ -1094,13 +1092,12 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 	}
 
 	workReport := types.WorkReport{
-		AvailabilitySpec: availabilitySpec,
-		AuthorizerHash:   common.HexToHash("0x"), // SKIP
-		Core:             n.coreIndex,
-		//	Output:               result.Output,
-		RefinementContext:    refinementContext,
-		PackageSpecification: "mock_package_specification",
-		Results:              results,
+		AvailabilitySpecifier: *spec,
+		AuthorizerHash:        common.HexToHash("0x"), // SKIP
+		Core:                  n.coreIndex,
+		RefinementContext:     refinementContext,
+		PackageSpecification:  "mock_package_specification",
+		Results:               results,
 	}
 
 	// Create a GuaranteeCredential with the signature and a mock validator index
@@ -1119,11 +1116,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) error {
 	// This will be received by all validators
 	n.broadcast(guarantee)
 
-	// This will be received by all validators
-	aj := n.newAvailabilityJustification(guarantee)
-	n.broadcast(aj)
-
-	return nil
+	return spec, nil
 }
 
 // -----Custom methods for tiny QUIC EC experiment-----
@@ -1478,326 +1471,4 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 
 func generateObject() interface{} {
 	return nil
-}
-
-func BuildAvailabilitySpecifier(packageHash common.Hash, workPackage ASWorkPackage, segments []common.Segment) *AvailabilitySpecifier {
-	// Compute b using EncodeWorkPackage
-	b := EncodeWorkPackage(workPackage)
-
-	// Length of `b`
-	bLength := uint32(len(b))
-
-	// Compute b♣ and s♣
-	bClub := ComputeBClub(b, 684)
-	sClub := ComputeSClub(segments)
-
-	// u = (bClub, sClub)
-	u := generateU(bClub, sClub)
-
-	// Return the Availability Specifier
-	return &AvailabilitySpecifier{
-		PackageHash:                    packageHash,
-		AuditFriendlyWorkPackageLength: bLength,
-		AvailabilityVector:             u,
-		ExportedSegments:               sClub,
-	}
-}
-
-// Compute b♣ using the EncodeWorkPackage function
-func ComputeBClub(b []byte, W_C int) []common.Hash {
-	// Padding b to the length of W_C
-	paddedB := padToLength(b, W_C)
-
-	// Process the padded data using erasure coding
-	encodedB, _ := erasurecoding.Encode(paddedB, int(math.Ceil(float64(len(b)) / float64(W_C))))
-
-	// Hash each element of the encoded data
-	var bClub []common.Hash
-	for _, block := range encodedB {
-		for _, b := range block {
-			bClub = append(bClub, common.Hash(padToLength(b, 32)))
-		}
-	}
-
-	return bClub
-}
-
-func ComputeSClub(segments []common.Segment) []common.Hash {
-	var combinedData [][][]byte
-
-	pageProofs := trie.GeneratePageProof(segments)
-	for _, segment := range segments {
-		// Generate PageProofs for the segment, and combine them with the segment data
-
-		combinedSegment := segment.Data
-		for _, pageProof := range pageProofs {
-			combinedSegment = append(combinedSegment, pageProof.ToBytes()...)
-		}
-
-		// Erasure Coding
-		encodedSegment, _ := erasurecoding.Encode(combinedSegment, 6)
-
-		// Append the encoded segment to the combined data
-		combinedData = append(combinedData, encodedSegment...)
-	}
-
-	// Transpose the combined data
-	transposedData := transpose3D(combinedData)
-	var sClub []common.Hash
-	for _, data := range transposedData {
-		root := trie.NewWellBalancedTree(data).Root()
-		sClub = append(sClub, common.Hash(root))
-	}
-
-	return sClub
-}
-
-// Pad the data to the specified length
-func padToLength(data []byte, length int) []byte {
-	padded := make([]byte, length)
-	copy(padded, data)
-	return padded
-}
-
-// The E(p,x,i,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
-func EncodeWorkPackage(wp ASWorkPackage) []byte {
-	// 1. Encode the package (p)
-	encodedPackage := Encode(wp)
-
-	// 2. Encode the extrinsic (x)
-	encodedExtrinsic := Encode(wp.Extrinsic)
-
-	// 3. Encode the segments (i)
-	var encodedSegments []byte
-	for _, segment := range wp.ImportSegments {
-		encodedSegments = append(encodedSegments, Encode(segment)...)
-	}
-
-	// 4. Encode the justifications (j)
-	var encodedJustifications []byte
-	for i, segment := range wp.ImportSegments {
-		byteSlices := segment.ToByteSlices()
-		tree := trie.NewCDMerkleTree(byteSlices)
-		justification, _ := tree.Justify(i)
-		encodedJustifications = append(encodedJustifications, Encode(justification)...)
-	}
-	// Combine all encoded parts: e(p,x,i,j)
-	return append(append(append(encodedPackage, encodedExtrinsic...), encodedSegments...), encodedJustifications...)
-}
-
-func (item ASWorkItem) ToByteSlices() [][]byte {
-	var slices [][]byte
-	for _, segment := range item.segments {
-		slices = append(slices, segment.Data)
-	}
-	return slices
-}
-
-// Encode b♣ and s♣ into a matrix
-func generateU(b []common.Hash, s []common.Hash) common.Hash {
-	// Combine b♣ and s♣ into a matrix and transpose it
-	transposedMatrix := transpose(combineElements(b, s))
-
-	// Compute x̂ for each x in the transposed matrix
-	var hashedElements [][]byte
-	for _, x := range transposedMatrix {
-		hashedX := common.ComputeHash(x)
-		hashedElements = append(hashedElements, hashedX[:])
-	}
-
-	// Generate WBT from the hashed elements and return the root (u)
-	wbt := trie.NewWellBalancedTree(hashedElements)
-	return common.Hash(wbt.Root())
-}
-
-// Gererate the root of the WBT from the segments
-func generateSegmentsRoot(segments []common.Segment) common.Hash {
-	var segmentData [][]byte
-	for _, segment := range segments {
-		segmentData = append(segmentData, segment.Data)
-	}
-
-	wbt := trie.NewWellBalancedTree(segmentData)
-	return common.Hash(wbt.Root())
-}
-
-// Helper function to transpose a matrix
-func transpose(matrix [][]byte) [][]byte {
-	if len(matrix) == 0 {
-		return nil
-	}
-
-	transposed := make([][]byte, len(matrix[0]))
-	for i := range transposed {
-		transposed[i] = make([]byte, len(matrix))
-		for j := range matrix {
-			transposed[i][j] = matrix[j][i]
-		}
-	}
-	return transposed
-}
-
-func transpose3D(data [][][]byte) [][][]byte {
-	if len(data) == 0 || len(data[0]) == 0 {
-		return [][][]byte{}
-	}
-
-	rowCount := len(data[0])
-	colCount := len(data[0][0])
-
-	// Building a new 3D array to store the transposed data
-	transposed := make([][][]byte, len(data))
-	for i := range transposed {
-		transposed[i] = make([][]byte, colCount)
-		for j := range transposed[i] {
-			transposed[i][j] = make([]byte, rowCount)
-		}
-	}
-
-	// Transposing the data
-	for i := 0; i < len(data); i++ {
-		for j := 0; j < rowCount; j++ {
-			for k := 0; k < colCount; k++ {
-				transposed[i][k][j] = data[i][j][k]
-			}
-		}
-	}
-
-	return transposed
-}
-
-// Helper function to combine elements from b♣ and s♣ into a matrix
-func combineElements(b []common.Hash, s []common.Hash) [][]byte {
-	var combined [][]byte
-
-	// Transpose the b♣ array
-	for _, hash := range b {
-		combined = append(combined, hash[:])
-	}
-
-	// Append the s♣ array
-	for _, segment := range s {
-		combined = append(combined, segment[:])
-	}
-
-	return combined
-}
-
-// Data Encoding
-func Encode(data interface{}) []byte {
-	v := reflect.ValueOf(data)
-	switch v.Kind() {
-	case reflect.Struct:
-		var encoded []byte
-		for i := 0; i < v.NumField(); i++ {
-			field := v.Type().Field(i)
-			if field.PkgPath != "" {
-				// Unexported field, skip it
-				continue
-			}
-			encoded = append(encoded, Encode(v.Field(i).Interface())...)
-		}
-		return encoded
-	case reflect.Bool:
-		if v.Bool() {
-			return []byte{1}
-		}
-		return []byte{0}
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return E(uint64(v.Int()))
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return E(v.Uint())
-	case reflect.Float32, reflect.Float64:
-		return E(uint64(v.Float()))
-	case reflect.String:
-		// use LengthE
-		uint64Slice := make([]uint64, 0)
-		for _, c := range v.String() {
-			uint64Slice = append(uint64Slice, uint64(c))
-		}
-		encoded := E(uint64(len(uint64Slice)))
-		for i := 0; i < len(uint64Slice); i++ {
-			encoded = append(encoded, E(uint64Slice[i])...)
-		}
-		return encoded
-	case reflect.Array:
-		var encoded []byte
-		for i := 0; i < v.Len(); i++ {
-			if v.Index(i).Kind() == reflect.Uint8 {
-				encoded = append(encoded, []byte{byte(v.Index(i).Uint())}...)
-			} else {
-				encoded = append(encoded, Encode(v.Index(i).Interface())...)
-			}
-		}
-		return encoded
-	case reflect.Slice:
-		encoded := E(uint64(v.Len()))
-		for i := 0; i < v.Len(); i++ {
-			if v.Index(i).Kind() == reflect.Uint8 {
-				encoded = append(encoded, []byte{byte(v.Index(i).Uint())}...)
-			} else {
-				encoded = append(encoded, Encode(v.Index(i).Interface())...)
-			}
-		}
-		return encoded
-	case reflect.Ptr:
-		if v.IsNil() {
-			return []byte{0}
-		}
-		return append([]byte{1}, Encode(v.Elem().Interface())...)
-	}
-	return []byte{}
-}
-
-func powerOfTwo(exp uint32) uint64 {
-	var result uint64 = 1
-	for i := uint32(0); i < exp; i++ {
-		result *= 2
-	}
-	return result
-}
-
-func E_l(x uint64, l uint32) []byte {
-	if l == 0 {
-		return []byte{}
-	} else {
-		encoded := []byte{byte(x % 256)}
-		encoded = append(encoded, E_l(x/256, l-1)...)
-		return encoded
-	}
-}
-
-func E4(x uint64) []byte {
-	if x == 0 {
-		return []byte{0}
-	}
-	for l := uint32(0); l < 3; l++ {
-		if x >= powerOfTwo(7*l) && x < powerOfTwo(7*(l+1)) {
-			encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(8-l) + (x / powerOfTwo(8*l)))}
-			encoded = append(encoded, E_l(x%powerOfTwo(8*l), l)...)
-			return encoded
-		}
-	}
-	if x >= powerOfTwo(21) && x < powerOfTwo(29) {
-		encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(5) + x/powerOfTwo(24))}
-		encoded = append(encoded, E_l(x%powerOfTwo(24), 3)...)
-		return encoded
-	}
-	return nil
-}
-
-func E(x uint64) []byte {
-	if x == 0 {
-		return []byte{0}
-	}
-	for l := uint32(0); l < 8; l++ {
-		if x >= powerOfTwo(7*l) && x < powerOfTwo(7*(l+1)) {
-			encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(8-l) + x/powerOfTwo(8*l))}
-			encoded = append(encoded, E_l(x%powerOfTwo(8*l), l)...)
-			return encoded
-		}
-	}
-	encoded := []byte{byte(powerOfTwo(8) - 1)}
-	encoded = append(encoded, E_l(x, 8)...)
-	return encoded
 }

@@ -19,7 +19,7 @@ const (
 	x_p = "P"
 )
 
-func (s *StateDB) WriteAccount(sa *types.ServiceAccount){
+func (s *StateDB) WriteAccount(sa *types.ServiceAccount) {
 	service_idx := sa.ServiceIndex()
 	//two ways of proceeding this... via journal (most reliable) or via memory (faster but order is not guaranteed)
 	jounrnals := sa.GetJournals()
@@ -27,21 +27,21 @@ func (s *StateDB) WriteAccount(sa *types.ServiceAccount){
 		op_type, _, obj := j.GetJournalRecordType()
 		switch v := obj.(type) {
 		case types.JournalStorageKV:
-			if (op_type == types.JournalOPWrite){
+			if op_type == types.JournalOPWrite {
 				s.WriteServiceStorage(service_idx, v.K, v.V)
-			}else if (op_type == types.JournalOPDelete){
+			} else if op_type == types.JournalOPDelete {
 				s.DeleteServiceStorageKey(service_idx, v.K)
 			}
 		case types.JournalLookupKV:
-			if (op_type == types.JournalOPWrite){
+			if op_type == types.JournalOPWrite {
 				s.WriteServicePreimageLookup(service_idx, v.H, v.Z, v.T)
-			}else if (op_type == types.JournalOPDelete){
+			} else if op_type == types.JournalOPDelete {
 				s.DeleteServicePreimageLookupKey(service_idx, v.H, v.Z)
 			}
 		case types.JournalPreimageKV:
-			if (op_type == types.JournalOPWrite){
+			if op_type == types.JournalOPWrite {
 				s.WriteServicePreimageBlob(service_idx, v.P)
-			}else if (op_type == types.JournalOPDelete){
+			} else if op_type == types.JournalOPDelete {
 				s.DeleteServicePreimageKey(service_idx, v.H)
 			}
 		default:
@@ -133,11 +133,11 @@ func (s *StateDB) ReadServiceStorage(service uint32, k []byte) []byte {
 	XContext := s.GetXContext()
 	xs := XContext.GetX_s()
 	foundInJournal := false
-	if (service != xs.ServiceIndex()){
+	if service != xs.ServiceIndex() {
 		//weird.. how?
 	}
 	foundInJournal, error, val := xs.JournalGetStorage(k)
-	if (foundInJournal) {
+	if foundInJournal {
 		if error != nil {
 			// there shouldn't be error..
 		}
@@ -164,15 +164,15 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 	XContext := s.GetXContext()
 	xs := XContext.GetX_s()
 	sa := &types.ServiceAccount{}
-	if (service == xs.ServiceIndex()){
+	if service == xs.ServiceIndex() {
 		sa = xs
-	}else{
+	} else {
 		// weird .. how
 	}
 	found, sa := XContext.GetX_n(service)
-	if (found){
+	if found {
 		foundInJournal, error, blob := sa.JournalGetPreimage(blob_hash)
-		if (foundInJournal) {
+		if foundInJournal {
 			if error != nil {
 				// there shouldn't be error..
 			}
@@ -200,11 +200,11 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 	// first check journal
 	XContext := s.GetXContext()
 	xs := XContext.GetX_s()
-	if (service != xs.ServiceIndex()){
+	if service != xs.ServiceIndex() {
 		//weird.. how?
 	}
 	foundInJournal, error, anchors := xs.JournalGetLookup(blob_hash, blob_length)
-	if (foundInJournal) {
+	if foundInJournal {
 		if error != nil {
 			// there shouldn't be error..
 		}

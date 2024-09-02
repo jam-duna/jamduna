@@ -33,6 +33,12 @@ type WorkPackage struct {
 	WorkItems []WorkItem `json:"work_items"`
 }
 
+// The workpackage is an ordered collection of workitems
+type ASWorkPackage struct {
+	ImportSegments []ASWorkItem
+	Extrinsic      []byte
+}
+
 type SWorkPackage struct {
 	// $j$ - a simple blob acting as an authorization token
 	AuthorizationToken string `json:"authorization_token"`

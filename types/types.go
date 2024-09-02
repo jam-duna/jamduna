@@ -48,10 +48,6 @@ type ECChunkQuery struct {
 	SegmentRoot []byte `json:"segment_root"`
 }
 
-type Segment struct {
-	Data []byte
-}
-
 // `ImportDAQuery` + `ImportDAResponse` WIP:
 type ImportDAQuery struct {
 	SegmentRoot    common.Hash `json:"segment_root"`
@@ -133,12 +129,4 @@ type AuditFriendlyWorkPackage struct {
 	ExtrinsicData        []byte // "x":the extrinsic data
 	ImportSegment        []byte // "i":the concatenated import segments
 	MerkleJustifications []byte // "j":their proofs of correctness
-}
-
-// EQ(186):Availability Specifier
-type AvailabilitySpecifier struct {
-	PackageHash                    common.Hash // the hash of the workpackage
-	AuditFriendlyWorkPackageLength uint32      // the length of the AuditFriendlyWorkPackage
-	AvailabilityVector             []byte      // The transport of AuditFriendlyWorkPackage Hashed and segment which is built by CDT
-	ExportedSegments               []Segment   // the exported segments which is built by WBT
 }

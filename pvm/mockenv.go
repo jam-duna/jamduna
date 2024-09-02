@@ -29,7 +29,7 @@ func (mh *MockHostEnv) GetXContext() *types.XContext {
 	return new(types.XContext)
 }
 
-func (mh *MockHostEnv) SetXContext(x *types.XContext)  {}
+func (mh *MockHostEnv) SetXContext(x *types.XContext) {}
 
 func (mh *MockHostEnv) UpdateXContext(x *types.XContext) {}
 

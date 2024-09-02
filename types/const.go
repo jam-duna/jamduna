@@ -38,11 +38,11 @@ const (
 	MaxServiceCodeSize               = 4000000        // S = 4,000,000: The maximum size of service code in octets.
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	TotalValidators                  = 6              // V = 1023: The total number of validators.
-	ErasureCodedPieceSize            = 4              // W_C = 684: The basic size of our erasure-coded pieces. See equation 316.
+	W_C                              = 4              // W_C = 684: The basic size of our erasure-coded pieces. See equation 316.
 	MaxManifestEntries               = 1 << 11        // W_M = 2^11: The maximum number of entries in a work-package manifest.
 	MaxEncodedWorkPackageSize        = 12 * (1 << 20) // W_P = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
 	MaxEncodedWorkReportSize         = 96 * (1 << 10) // W_R = 96 * 2^10: The maximum size of an encoded work-report in octets.
-	ExportedSegmentSize              = 6              // W_S = 6: The size of an exported segment in erasure-coded pieces.
+	W_S                              = 6              // W_S = 6: The size of an exported segment in erasure-coded pieces.
 	TicketSubmissionEndSlot          = 8              // Y = 500: The number of slots into an epoch at which ticket-submission ends.
 	PVMDynamicAddressAlignmentFactor = 2              // Z_A = 2: The pvm dynamic address alignment factor. See equation 227.
 	PVMInitInputDataSize             = 1 << 24        // Z_I = 2^24: The standard pvm program initialization input data size. See equation A.7.

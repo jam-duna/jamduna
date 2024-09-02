@@ -3,10 +3,10 @@ package types
 import (
 	//"encoding/hex"
 	//"encoding/json"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
-	"bytes"
 )
 
 const (
@@ -22,52 +22,52 @@ const (
 )
 
 const (
-	PreimageRecordType    		= "Preimage"
-	LookupRecordType      		= "Lookup"
+	PreimageRecordType          = "Preimage"
+	LookupRecordType            = "Lookup"
 	PreimageANDLookupRecordType = "PL"
-	StorageRecordType			= "Storage"
-	UnknownRecordType   		= "Unknown"
-	JournalOPWrite				= "WRITE"
-	JournalOPDelete				= "DELETE"
-	JournalOPRead				= "READ"
-	JournalOPNOTInitiated		= "NONE"
+	StorageRecordType           = "Storage"
+	UnknownRecordType           = "Unknown"
+	JournalOPWrite              = "WRITE"
+	JournalOPDelete             = "DELETE"
+	JournalOPRead               = "READ"
+	JournalOPNOTInitiated       = "NONE"
 )
 
 // ServiceAccount represents a service account.
 type AccountState struct {
-	serviceIndex	uint32                                  //a_idx - account idx helpful for identifying xs
-	CodeHash        common.Hash `json:"code_hash"`			//a_c - account code hash c
-	Balance         uint64      `json:"balance"`			//a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
-	GasLimitG       uint64      `json:"gas_limit_g"`		//a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
-	GasLimitM       uint64      `json:"gas_limit_m"`		//a_m - the minimum required for the On Transfer entry-point.
-	StorageSize     uint64      `json:"storage_size"` 		//a_l - total number of octets used in storage (9.3)
-	NumStorageItems uint32      `json:"num_storage_items"` 	//a_i - the number of items in storage (9.3)
+	serviceIndex    uint32      //a_idx - account idx helpful for identifying xs
+	CodeHash        common.Hash `json:"code_hash"`         //a_c - account code hash c
+	Balance         uint64      `json:"balance"`           //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
+	GasLimitG       uint64      `json:"gas_limit_g"`       //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
+	GasLimitM       uint64      `json:"gas_limit_m"`       //a_m - the minimum required for the On Transfer entry-point.
+	StorageSize     uint64      `json:"storage_size"`      //a_l - total number of octets used in storage (9.3)
+	NumStorageItems uint32      `json:"num_storage_items"` //a_i - the number of items in storage (9.3)
 }
 
 type ServiceAccount struct {
 	//account state portion
-	serviceIndex	uint32
-	CodeHash        common.Hash              `json:"code_hash"`
-	Balance         uint64                   `json:"balance"`
-	GasLimitG       uint64                   `json:"gas_limit_g"`
-	GasLimitM       uint64                   `json:"gas_limit_m"`
-	StorageSize     uint64      			 `json:"storage_size"` 		    //a_l - total number of octets used in storage (9.3)
-	NumStorageItems uint32      			 `json:"num_storage_items"` 	//a_i - the number of items in storage (9.3)
+	serviceIndex    uint32
+	CodeHash        common.Hash `json:"code_hash"`
+	Balance         uint64      `json:"balance"`
+	GasLimitG       uint64      `json:"gas_limit_g"`
+	GasLimitM       uint64      `json:"gas_limit_m"`
+	StorageSize     uint64      `json:"storage_size"`      //a_l - total number of octets used in storage (9.3)
+	NumStorageItems uint32      `json:"num_storage_items"` //a_i - the number of items in storage (9.3)
 
 	// journal portion
-	Journals	 []Journal
-	Storage      map[string][]byte   	 	  `json:"s_map"` 		        // arbitrary_k -> v. if v=[]byte. use as delete
-	Lookup       map[string][]uint32   	 	  `json:"l_map"`			    // (h,l) -> anchor
-	Preimage 	 map[string][]byte            `json:"p"`			        // H(p)  -> p
-	Delete       map[string]string	          `json:"delete"`               // (key) -> type, if (h,l) If present, delete a_l & a_p
-	Exist		 map[string]string			  `json:"exist"`               // key is effectively touched. this is essential to switch between bpt vs lookup here
+	Journals []Journal
+	Storage  map[string][]byte   `json:"s_map"`  // arbitrary_k -> v. if v=[]byte. use as delete
+	Lookup   map[string][]uint32 `json:"l_map"`  // (h,l) -> anchor
+	Preimage map[string][]byte   `json:"p"`      // H(p)  -> p
+	Delete   map[string]string   `json:"delete"` // (key) -> type, if (h,l) If present, delete a_l & a_p
+	Exist    map[string]string   `json:"exist"`  // key is effectively touched. this is essential to switch between bpt vs lookup here
 }
 
 type Journal struct {
-	OP 		string
+	OP      string
 	KeyType string
 	Key     string
-	Obj		interface{}
+	Obj     interface{}
 }
 
 type JournalStorageKV struct {
@@ -188,7 +188,7 @@ func (s *AccountState) Recover(data []byte) error {
 	return nil
 }
 
-func AccountStateFromBytes(service_index uint32, data []byte) (*AccountState, error){
+func AccountStateFromBytes(service_index uint32, data []byte) (*AccountState, error) {
 	acct := AccountState{}
 	if err := acct.Recover(data); err != nil {
 		fmt.Println("Error recovering:", err)
@@ -214,7 +214,7 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 	}
 	// Initialize a new ServiceAccount and copy the relevant fields
 	serviceAccount := &ServiceAccount{
-		serviceIndex:	 service_index,
+		serviceIndex:    service_index,
 		CodeHash:        acctState.CodeHash,
 		Balance:         acctState.Balance,
 		GasLimitG:       acctState.GasLimitG,
@@ -223,12 +223,12 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 		NumStorageItems: acctState.NumStorageItems,
 
 		// Initialize maps to avoid nil reference errors
-		Journals:  make([]Journal, 0),
+		Journals: make([]Journal, 0),
 		Storage:  make(map[string][]byte),
 		Lookup:   make(map[string][]uint32),
 		Preimage: make(map[string][]byte),
 		Delete:   make(map[string]string),
-		Exist:  make(map[string]string),
+		Exist:    make(map[string]string),
 	}
 	return serviceAccount, nil
 }
@@ -236,7 +236,7 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 func (s *ServiceAccount) AccountState() *AccountState {
 	// Create a new AccountState and copy relevant fields
 	return &AccountState{
-		serviceIndex:	 s.serviceIndex,
+		serviceIndex:    s.serviceIndex,
 		CodeHash:        s.CodeHash,
 		Balance:         s.Balance,
 		GasLimitG:       s.GasLimitG,
@@ -266,12 +266,12 @@ func (s *ServiceAccount) String() string {
 	return str
 }
 
-func (s *ServiceAccount) AddJournal(op string, key_type string, key string, obj interface{}){
+func (s *ServiceAccount) AddJournal(op string, key_type string, key string, obj interface{}) {
 	j := Journal{
-		OP: op,
+		OP:      op,
 		KeyType: key_type,
-		Key: key,
-		Obj: obj,
+		Key:     key,
+		Obj:     obj,
 	}
 	s.MarkDirty(key, key_type) // IMPORTANT: must mark dirty here..
 	s.Journals = append(s.Journals, j)
@@ -305,8 +305,7 @@ func (s *ServiceAccount) OverwriteJournalMemory(k string, key_type string) {
 	}
 }
 
-
-func (s *ServiceAccount) IsDirty (k string) (bool, string) {
+func (s *ServiceAccount) IsDirty(k string) (bool, string) {
 	// Check if the key exists in the `Exist` map and is marked as `true`
 	if op_type, exists := s.Exist[k]; exists {
 		return true, op_type
@@ -318,18 +317,18 @@ func (s *ServiceAccount) MarkDirty(k string, op_type string) {
 	s.Exist[k] = op_type
 }
 
-func (s *ServiceAccount) JournalGetStorage(key []byte) (bool, error, []byte){
+func (s *ServiceAccount) JournalGetStorage(key []byte) (bool, error, []byte) {
 	k := common.Bytes2Hex(key)
 	isDirty, op_type := s.IsDirty(k) // get last rec
-	if (isDirty){
+	if isDirty {
 		//should be return via journal mem
-		if (op_type == JournalOPDelete){
+		if op_type == JournalOPDelete {
 			// has been marked as delete - should have save not found behavior as if we are calling bpt
 			return true, nil, nil
-		} else if (op_type == JournalOPWrite){
+		} else if op_type == JournalOPWrite {
 			// return value from jornal map
 			v, found := s.Storage[k]
-			if ! found {
+			if !found {
 				// shouldn't be here
 				panic(0)
 			}
@@ -343,15 +342,15 @@ func (s *ServiceAccount) JournalGetStorage(key []byte) (bool, error, []byte){
 func (s *ServiceAccount) JournalGetPreimage(blobHash common.Hash) (bool, error, []byte) {
 	k := blobHash.Hex()
 	isDirty, op_type := s.IsDirty(k) // get last rec
-	if (isDirty){
+	if isDirty {
 		//should be return via journal mem
-		if (op_type == JournalOPDelete){
+		if op_type == JournalOPDelete {
 			// has been marked as delete - should have save not found behavior as if we are calling bpt
 			return true, nil, nil
-		} else if (op_type == JournalOPWrite){
+		} else if op_type == JournalOPWrite {
 			// return value from jornal map
 			blob, found := s.Preimage[k]
-			if ! found {
+			if !found {
 				// shouldn't be here
 				panic(0)
 			}
@@ -365,15 +364,15 @@ func (s *ServiceAccount) JournalGetPreimage(blobHash common.Hash) (bool, error, 
 func (s *ServiceAccount) JournalGetLookup(blobHash common.Hash, z uint32) (bool, error, []uint32) {
 	k := fmt.Sprintf("%v_%v", blobHash, z)
 	isDirty, op_type := s.IsDirty(k) // get last rec
-	if (isDirty){
+	if isDirty {
 		//should be return via journal mem
-		if (op_type == JournalOPDelete){
+		if op_type == JournalOPDelete {
 			// has been marked as delete - should have save not found behavior as if we are calling bpt
 			return true, nil, nil
-		} else if (op_type == JournalOPWrite){
+		} else if op_type == JournalOPWrite {
 			// return value from jornal map
 			anchor_timeslot, found := s.Lookup[k]
-			if ! found {
+			if !found {
 				// shouldn't be here
 				panic(0)
 			}
@@ -429,7 +428,7 @@ func (s *ServiceAccount) JournalDeleteLookup(blobHash common.Hash, z uint32) {
 }
 
 func (s *ServiceAccount) JournalDeletePreimageAndLookup(blobHash common.Hash, z uint32) {
-	s.JournalDeleteLookup(blobHash,z)
+	s.JournalDeleteLookup(blobHash, z)
 	s.JournalDeletePreimage(blobHash)
 }
 

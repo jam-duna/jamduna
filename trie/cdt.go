@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
 //"golang.org/x/crypto/blake2b"
@@ -242,12 +243,12 @@ func findSibling(parent, node *CDTNode) *CDTNode {
 }
 
 // generatePageProof creates paged proofs from segments
-func GeneratePageProof(segments []common.Segment) []PagedProof {
+func GeneratePageProof(segments []types.Segment) []PagedProof {
 	return generatePageProof(segments)
 }
 
 // generatePageProof creates paged proofs from segments
-func generatePageProof(segments []common.Segment) []PagedProof {
+func generatePageProof(segments []types.Segment) []PagedProof {
 	var pagedProofs []PagedProof
 	var currentPageSegments []common.Hash
 

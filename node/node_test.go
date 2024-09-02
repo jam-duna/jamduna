@@ -232,64 +232,43 @@ func TestWorkGuarantee(t *testing.T) {
 				},
 			},
 		}
+		packageHash := workPackage.Hash()
 		for _, n := range nodes {
 			if n.coreIndex == 0 {
-				n.processWorkPackage(workPackage)
+				specifier, err := n.processWorkPackage(workPackage)
+				if err != nil {
+					panic(0)
+				}
+				// 1. Check PackageHash
+				if specifier.WorkPackageHash != packageHash {
+					t.Errorf("expected PackageHash %v, got %v", packageHash, specifier.WorkPackageHash)
+				} else {
+					fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegments)
+				}
+
+				if len(specifier.ErasureRoot) == 0 {
+					t.Error("ErasureRoot should not be empty")
+				} else {
+					fmt.Printf("ErasureRoot:%s\n", specifier.ErasureRoot)
+				}
+
+				if len(specifier.SegmentRoot) == 0 {
+					t.Error("SegmentRoot should not be empty")
+				} else {
+					fmt.Printf("SegmentRoot:%s\n", specifier.SegmentRoot)
+				}
+
+				// 4. Check ExportedSegments (simplified check)
+				if len(specifier.ExportedSegments) == 0 {
+					t.Error("ExportedSegments should not be empty")
+				} else {
+					fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegments)
+				}
+
+				t.Logf("Generated Availability Specifier: %+v", specifier)
+
 			}
 		}
-
-		// TODO: get exportedItem from refine execution ... or accumulate if it can do export
-
-	}
-}
-
-func TestBuildAvailabilitySpecifier(t *testing.T) {
-	// Step 1: Prepare test data
-	packageHash := common.Hash{0x1, 0x2, 0x3, 0x4}
-	workPackage := ASWorkPackage{
-		ImportSegments: []ASWorkItem{
-			{segments: []common.Segment{
-				{Data: []byte("segment1")},
-				{Data: []byte("segment2")},
-			}},
-		},
-		Extrinsic: []byte("extrinsicData"),
-	}
-	segments := []common.Segment{
-		{Data: []byte("segment1")},
-		{Data: []byte("segment2")},
 	}
 
-	// Step 2: Call the function
-	specifier := BuildAvailabilitySpecifier(packageHash, workPackage, segments)
-
-	// Step 3: Check the results
-	// 1. Check PackageHash
-	if specifier.PackageHash != packageHash {
-		t.Errorf("expected PackageHash %v, got %v", packageHash, specifier.PackageHash)
-	}else{
-		fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegments)
-	}
-
-	expectedLength := uint32(len(EncodeWorkPackage(workPackage)))
-	if specifier.AuditFriendlyWorkPackageLength != expectedLength {
-		t.Errorf("expected AuditFriendlyWorkPackageLength %v, got %v", expectedLength, specifier.AuditFriendlyWorkPackageLength)
-	}else{
-		fmt.Printf("AuditFriendlyWorkPackageLength:%d\n", specifier.AuditFriendlyWorkPackageLength)
-	}
-
-	if len(specifier.AvailabilityVector) == 0 {
-		t.Error("AvailabilityVector should not be empty")
-	}else{
-		fmt.Printf("AvailabilityVector root:%s\n", specifier.AvailabilityVector)
-	}
-
-	// 4. Check ExportedSegments (simplified check)
-	if len(specifier.ExportedSegments) == 0 {
-		t.Error("ExportedSegments should not be empty")
-	}else{
-		fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegments)
-	}
-
-	t.Logf("Generated Availability Specifier: %+v", specifier)
 }

@@ -54,7 +54,7 @@ type VM struct {
 	VMs map[uint32]*VM
 
 	// Work Package Inputs
-	extrinsics []types.WorkItemExtrinsic
+	Extrinsics [][]byte
 	payload    []byte
 	Imports    [][]byte
 	Exports    [][]byte
@@ -382,8 +382,8 @@ func (vm *VM) Execute(entryPoint string) error {
 }
 
 // set ups extrinsics and payload
-func (vm *VM) SetExtrinsicsPayload(extrinsics []types.WorkItemExtrinsic, payload []byte) error {
-	vm.extrinsics = extrinsics
+func (vm *VM) SetExtrinsicsPayload(extrinsics [][]byte, payload []byte) error {
+	vm.Extrinsics = extrinsics
 	vm.payload = payload
 	return nil
 }
@@ -411,7 +411,7 @@ func (vm *VM) SetArgumentInputs(a []byte) error {
 	return nil
 }
 
-func (vm *VM) GetArgumentOutputs(a []byte) ([]byte, uint32) {
+func (vm *VM) GetArgumentOutputs() ([]byte, uint32) {
 	o, _ := vm.readRegister(10)
 	l, _ := vm.readRegister(11)
 	output, res := vm.readRAMBytes(o, int(l))

@@ -55,30 +55,3 @@ type PagedProof struct {
 	Hashes     [64][32]byte
 	MerkleRoot [32]byte
 }
-
-// the b part of EQ(186)
-type AuditFriendlyWorkPackage struct {
-	Package              []byte // "p":comprising the workpackage itself
-	ExtrinsicData        []byte // "x":the extrinsic data
-	ImportSegment        []byte // "i":the concatenated import segments
-	MerkleJustifications []byte // "j":their proofs of correctness
-}
-
-// EQ(186):Availability Specifier
-type AvailabilitySpecifier struct {
-	PackageHash                    common.Hash   // the hash of the workpackage
-	AuditFriendlyWorkPackageLength uint32        // the length of the AuditFriendlyWorkPackage
-	AvailabilityVector             common.Hash   // The root of a transport (AuditFriendlyWorkPackage Hashed and segment) encoding which is built by CDT
-	ExportedSegments               []common.Hash // the exported segments root which is built by WBT
-}
-
-// The workpackage is an ordered collection of workitems
-type ASWorkPackage struct {
-	ImportSegments []ASWorkItem
-	Extrinsic      []byte
-}
-
-// The workitem is an ordered collection of segments
-type ASWorkItem struct {
-	segments []common.Segment
-}

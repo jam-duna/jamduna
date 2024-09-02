@@ -19,13 +19,13 @@ import (
 */
 // WorkReport represents a work report.
 type WorkReport struct {
-	AvailabilitySpec     AvailabilitySpecification `json:"availability"`
-	AuthorizerHash       common.Hash               `json:"authorizer_hash"`
-	Core                 uint32                    `json:"total_size"`
-	AuthorizationOutput  []byte                    `json:"authorization_output"`
-	RefinementContext    RefinementContext         `json:"refinement_context"`
-	PackageSpecification string                    `json:"package_specification"`
-	Results              []WorkResult              `json:"results"`
+	AvailabilitySpecifier AvailabilitySpecifier `json:"availability"`
+	AuthorizerHash        common.Hash           `json:"authorizer_hash"`
+	Core                  uint32                `json:"total_size"`
+	AuthorizationOutput   []byte                `json:"authorization_output"`
+	RefinementContext     RefinementContext     `json:"refinement_context"`
+	PackageSpecification  string                `json:"package_specification"`
+	Results               []WorkResult          `json:"results"`
 }
 
 // computeWorkReportBytes abstracts the process of generating the bytes to be signed or verified.

@@ -308,15 +308,15 @@ func (vm *VM) hostNew() uint32 {
 	}
 	// Compute footprint & threshold: a_l, a_s, a-t
 	a.StorageSize = uint64(81 + l + 0) //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
-	a.NumStorageItems = 2*1 + 0  	   //a_s = 2⋅∣al∣+∣as∣
-	a.Balance = a.ComputeThreshold()  //set a's balance to a_t
+	a.NumStorageItems = 2*1 + 0        //a_s = 2⋅∣al∣+∣as∣
+	a.Balance = a.ComputeThreshold()   //set a's balance to a_t
 
 	b := uint64(0)
-	if (xs.Balance >= a.Balance){
+	if xs.Balance >= a.Balance {
 		// make sure no overflow here
 		b = xs.Balance - a.Balance
 	}
-	if (b >= xs.ComputeThreshold()){
+	if b >= xs.ComputeThreshold() {
 		//xs has enough balance to fund the creation of a AND covering its own threshold
 
 		// updating (ω0',xi',xn',(x's)b)
@@ -351,7 +351,7 @@ func (vm *VM) hostNew() uint32 {
 		}
 		vm.Solicits = append(vm.Solicits, solicit)
 		return OK
-	}else{
+	} else {
 		return CASH //balance insufficient
 	}
 }
@@ -374,7 +374,7 @@ func (vm *VM) hostUpgrade() uint32 {
 	xs := xContext.GetX_s()
 	xs.CodeHash = common.BytesToHash(c)
 	xs.GasLimitG = g
-	xs.GasLimitM = m	
+	xs.GasLimitM = m
 	xContext.SetX_s(xs)
 	vm.hostenv.SetXContext(xContext)
 	return OK
@@ -746,8 +746,8 @@ func (vm *VM) hostExtrinsic() uint32 {
 
 	omega_0, _ := vm.readRegister(0)
 	var v_Bytes []byte
-	if omega_0 < uint32(len(vm.extrinsics)) {
-		v_Bytes = vm.extrinsics[omega_0].Hash.Bytes() // should be the raw extrinsic
+	if omega_0 < uint32(len(vm.Extrinsics)) {
+		v_Bytes = vm.Extrinsics[omega_0]
 	} else {
 		v_Bytes = []byte{}
 	}
