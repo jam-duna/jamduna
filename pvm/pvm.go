@@ -411,11 +411,12 @@ func (vm *VM) SetArgumentInputs(a []byte) error {
 	return nil
 }
 
-func (vm *VM) GetArgumentOutputs() ([]byte, uint32) {
+func (vm *VM) GetArgumentOutputs() (r types.Result, res uint32) {
 	o, _ := vm.readRegister(10)
 	l, _ := vm.readRegister(11)
 	output, res := vm.readRAMBytes(o, int(l))
-	return output, res
+	r.Ok = output
+	return r, res
 }
 
 // step performs a single step in the PVM

@@ -10,5 +10,5 @@ type EpochMark struct {
 	// Randomness accumulator snapshot
 	Entropy common.Hash `json:"entropy"`
 	// List of authorities scheduled for next epoch
-	Validators []common.Hash `json:"validators"` //bandersnatch keys
+	Validators [6]common.Hash `json:"validators"` //bandersnatch keys
 }

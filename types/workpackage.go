@@ -1,7 +1,6 @@
 package types
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
@@ -20,17 +19,15 @@ import (
 // WorkPackage represents a work package.
 type WorkPackage struct {
 	// $j$ - a simple blob acting as an authorization token
-	AuthorizationToken []byte `json:"authorization_token"`
+	Authorization []byte `json:"authorization"`
 	// $h$ - the index of the service which hosts the authorization code
-	ServiceIndex int `json:"service_index"`
+	AuthCodeHost uint32 `json:"auth_code_host"`
 	// $c$ - an authorization code hash
-	AuthorizationCode common.Hash `json:"authorization_code"`
-	// $p$ - a parameterization blob
-	ParamBlob []byte `json:"param_blob"`
+	Authorizer Authorizer `json:"authorizer"`
 	// $x$ - context
-	Context RefinementContext `json:"context"`
+	RefineContext RefinementContext `json:"context"`
 	// $i$ - a sequence of work items
-	WorkItems []WorkItem `json:"work_items"`
+	WorkItems []WorkItem `json:"items"`
 }
 
 // The workpackage is an ordered collection of workitems
@@ -40,18 +37,21 @@ type ASWorkPackage struct {
 }
 
 type SWorkPackage struct {
-	// $j$ - a simple blob acting as an authorization token
-	AuthorizationToken string `json:"authorization_token"`
-	// $h$ - the index of the service which hosts the authorization code
-	ServiceIndex int `json:"service_index"`
-	// $c$ - an authorization code hash
-	AuthorizationCode common.Hash `json:"authorization_code"`
-	// $p$ - a parameterization blob
-	ParamBlob string `json:"param_blob"`
-	// $x$ - context
-	Context RefinementContext `json:"context"`
-	// $i$ - a sequence of work items
-	WorkItems []SWorkItem `json:"work_items"`
+	Authorization string            `json:"authorization"`
+	AuthCodeHost  uint32            `json:"auth_code_host"`
+	Authorizer    SAuthorizer       `json:"authorizer"`
+	RefineContext RefinementContext `json:"context"`
+	WorkItems     []SWorkItem       `json:"items"`
+}
+
+type Authorizer struct {
+	CodeHash common.Hash `json:"code_hash"`
+	Params   []byte      `json:"params"`
+}
+
+type SAuthorizer struct {
+	CodeHash common.Hash `json:"code_hash"`
+	Params   string      `json:"params"`
 }
 
 // Bytes returns the bytes of the Assurance
@@ -75,31 +75,35 @@ func (a *WorkPackage) Hash() common.Hash {
 }
 
 func (s *SWorkPackage) Deserialize() (WorkPackage, error) {
-	authorizationToken, err := hex.DecodeString(s.AuthorizationToken)
+	authorization := common.FromHex(s.Authorization)
+	auth_code_host := s.AuthCodeHost
+	authorizer, err := s.Authorizer.Deserialize()
 	if err != nil {
-		return WorkPackage{}, fmt.Errorf("failed to decode authorization token: %v", err)
+		return WorkPackage{}, err
 	}
-
-	paramBlob, err := hex.DecodeString(s.ParamBlob)
-	if err != nil {
-		return WorkPackage{}, fmt.Errorf("failed to decode parameterization blob: %v", err)
-	}
-
-	workItems := make([]WorkItem, len(s.WorkItems))
-	for i, si := range s.WorkItems {
-		item, err := si.Deserialize()
+	refine_context := s.RefineContext
+	work_items := make([]WorkItem, len(s.WorkItems))
+	for i, item := range s.WorkItems {
+		work_items[i], err = item.Deserialize()
 		if err != nil {
 			return WorkPackage{}, err
 		}
-		workItems[i] = item
 	}
 
 	return WorkPackage{
-		AuthorizationToken: authorizationToken,
-		ServiceIndex:       s.ServiceIndex,
-		AuthorizationCode:  s.AuthorizationCode,
-		ParamBlob:          paramBlob,
-		Context:            s.Context,
-		WorkItems:          workItems,
+		Authorization: authorization,
+		AuthCodeHost:  auth_code_host,
+		Authorizer:    authorizer,
+		RefineContext: refine_context,
+		WorkItems:     work_items,
+	}, nil
+}
+
+func (s *SAuthorizer) Deserialize() (Authorizer, error) {
+	params := common.FromHex(s.Params)
+
+	return Authorizer{
+		CodeHash: s.CodeHash,
+		Params:   params,
 	}, nil
 }

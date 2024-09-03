@@ -23,3 +23,14 @@ type RefinementContext struct {
 	LookupAnchorSlot uint32      `json:"lookup_anchor_slot"`
 	Prerequisite     common.Hash `json:"prerequisite,omitempty"`
 }
+
+/*
+
+type RefineContext struct {
+	Anchor           common.Hash `json:"anchor"`
+	StateRoot        common.Hash `json:"state_root"`
+	BeefyRoot        common.Hash `json:"beefy_root"`
+	LookupAnchor     common.Hash `json:"lookup_anchor"`
+	LookupAnchorSlot uint32      `json:"lookup_anchor_slot"`
+	Prerequisite     *common.Hash `json:"prerequisite,omitempty"`
+}*/

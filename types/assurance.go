@@ -28,8 +28,8 @@ type Assurance struct {
 	// H_p - see Eq 124
 	Anchor common.Hash `json:"anchor"`
 	// f - 1 means "available"
-	Bitfield       []byte           `json:"bitfield"`
-	ValidatorIndex uint32           `json:"validator_index"`
+	Bitfield       [1]byte          `json:"bitfield"`
+	ValidatorIndex uint16           `json:"validator_index"`
 	Signature      Ed25519Signature `json:"signature"`
 }
 
@@ -38,25 +38,26 @@ type SAssurance struct {
 	Anchor common.Hash `json:"anchor"`
 	// f - 1 means "available"
 	Bitfield       string `json:"bitfield"`
-	ValidatorIndex uint32 `json:"validator_index"`
+	ValidatorIndex uint16 `json:"validator_index"`
 	Signature      string `json:"signature"`
 }
 
 // computeAssuranceBytes abstracts the process of generating the bytes to be signed or verified.
 func (a *Assurance) computeAssuranceBytes() []byte {
-	h := common.ComputeHash(append(a.Anchor.Bytes(), a.Bitfield...))
+	h := common.ComputeHash(append(a.Anchor.Bytes(), a.Bitfield[0]))
 	return append([]byte(X_A), h...)
 }
 
 func (a *Assurance) Sign(Ed25519Secret []byte, parentHash common.Hash) {
 	assuranceBytes := a.computeAssuranceBytes()
-	a.Signature = ed25519.Sign(Ed25519Secret, assuranceBytes)
+	sig := ed25519.Sign(Ed25519Secret, assuranceBytes)
+	copy(a.Signature[:], sig)
 }
 
 func (a *Assurance) ValidateSignature(publicKey []byte) error {
 	assuranceBytes := a.computeAssuranceBytes()
 
-	if !ed25519.Verify(publicKey, assuranceBytes, a.Signature) {
+	if !ed25519.Verify(publicKey, assuranceBytes, a.Signature[:]) {
 		return errors.New("invalid signature")
 	}
 	return nil
@@ -105,19 +106,20 @@ func (s *SAssurance) Deserialize() (Assurance, error) {
 	bitfieldBytes := common.FromHex(s.Bitfield)
 	// Convert Signature from hex string to Ed25519Signature
 	signatureBytes := common.FromHex(s.Signature)
-
+	var bitfield [1]byte
+	copy(bitfield[:], bitfieldBytes)
 	// Ensure the signature is the correct length
 	if len(signatureBytes) != 64 {
 		return Assurance{}, fmt.Errorf("invalid signature length: expected 64 bytes, got %d", len(signatureBytes))
 	}
 
-	var signature Ed25519Signature
+	var signature [64]byte
 	copy(signature[:], signatureBytes)
 
 	// Return the converted Assurance struct
 	return Assurance{
 		Anchor:         s.Anchor,
-		Bitfield:       bitfieldBytes,
+		Bitfield:       bitfield,
 		ValidatorIndex: s.ValidatorIndex,
 		Signature:      signature,
 	}, nil

@@ -1,7 +1,6 @@
 package types
 
 import (
-	"encoding/hex"
 	"encoding/json"
 
 	"fmt"
@@ -18,44 +17,32 @@ type BlockHeader struct {
 	// H_t
 	Slot uint32 `json:"slot"`
 	// H_e
-	EpochMark *EpochMark `json:"epoch_mark"`
+	EpochMark *EpochMark `json:"epoch_mark,omitempty"`
 	// H_w
-	WinningTicketsMark []*TicketBody `json:"winning_tickets_mark"`
+	TicketsMark [12]*TicketBody `json:"tickets_mark,omitempty"`
 	// H_j
 	VerdictsMarkers *VerdictMarker `json:"verdict_markers"` // renamed from judgement
 	// H_o
-	OffenderMarkers *OffenderMarker `json:"offender_markers"`
+	OffenderMarkers []PublicKey `json:"offenders_mark"`
 	// H_i
-	BlockAuthorKey uint16 `json:"block_author_key"`
+	AuthorIndex uint16 `json:"author_index"`
 	// H_v
-	VRFSignature []byte `json:"vrf_signature"`
+	EntropySource [96]byte `json:"entropy_source"`
 	// H_s
-	BlockSeal []byte `json:"block_seal"`
+	Seal [96]byte `json:"seal"`
 }
 
 type SBlockHeader struct {
-	// H_p
-	Parent common.Hash `json:"parent"`
-	// H_r
-	ParentStateRoot common.Hash `json:"parent_state_root"`
-	// H_x
-	ExtrinsicHash common.Hash `json:"extrinsic_hash"`
-	// H_t
-	Slot uint32 `json:"slot"`
-	// H_e
-	EpochMark *EpochMark `json:"epoch_mark"`
-	// H_w
-	WinningTicketsMark []*TicketBody `json:"winning_tickets_mark"`
-	// H_j
-	VerdictsMarkers *VerdictMarker `json:"verdict_markers"` // renamed from judgement
-	// H_o
-	OffenderMarkers *SOffenderMarker `json:"offender_markers"`
-	// H_i
-	BlockAuthorKey uint16 `json:"block_author_key"`
-	// H_v
-	VRFSignature string `json:"vrf_signature"`
-	// H_s
-	BlockSeal string `json:"block_seal"`
+	Parent          common.Hash     `json:"parent"`
+	ParentStateRoot common.Hash     `json:"parent_state_root"`
+	ExtrinsicHash   common.Hash     `json:"extrinsic_hash"`
+	Slot            uint32          `json:"slot"`
+	EpochMark       *EpochMark      `json:"epoch_mark,omitempty"`
+	TicketsMark     [12]*TicketBody `json:"tickets_mark,omitempty"`
+	OffendersMark   []string        `json:"offenders_mark"`
+	AuthorIndex     uint16          `json:"author_index"`
+	EntropySource   string          `json:"entropy_source"`
+	Seal            string          `json:"seal"`
 }
 
 // NewBlockHeader returns a fresh block header from scratch.
@@ -94,15 +81,15 @@ func (b *BlockHeader) BytesWithSig() []byte {
 func (b *BlockHeader) BytesWithoutSig() []byte {
 	// Create an instance of the new struct without the signature fields.
 	bwoSig := BlockHeaderWithoutSig{
-		ParentHash:         b.Parent,
-		PriorStateRoot:     b.ParentStateRoot,
-		ExtrinsicHash:      b.ExtrinsicHash,
-		TimeSlot:           b.Slot,
-		EpochMark:          b.EpochMark,
-		WinningTicketsMark: b.WinningTicketsMark,
-		VerdictsMarkers:    b.VerdictsMarkers,
-		OffenderMarkers:    b.OffenderMarkers,
-		BlockAuthorKey:     b.BlockAuthorKey,
+		ParentHash:      b.Parent,
+		PriorStateRoot:  b.ParentStateRoot,
+		ExtrinsicHash:   b.ExtrinsicHash,
+		TimeSlot:        b.Slot,
+		EpochMark:       b.EpochMark,
+		TicketsMark:     b.TicketsMark,
+		VerdictsMarkers: b.VerdictsMarkers,
+		//OffenderMarkers:    b.OffenderMarkers,
+		AuthorIndex: b.AuthorIndex,
 	}
 
 	// Marshal the new struct to JSON.
@@ -117,47 +104,50 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 
 // BlockHeaderWithoutSig represents the BlockHeader without signature fields.
 type BlockHeaderWithoutSig struct {
-	ParentHash         common.Hash     `json:"parent_hash"`
-	PriorStateRoot     common.Hash     `json:"prior_state_root"`
-	ExtrinsicHash      common.Hash     `json:"extrinsic_hash"`
-	TimeSlot           uint32          `json:"timeslot"`
-	EpochMark          *EpochMark      `json:"epoch_mark"`
-	WinningTicketsMark []*TicketBody   `json:"winning_tickets_mark"`
-	VerdictsMarkers    *VerdictMarker  `json:"verdict_markers"`
-	OffenderMarkers    *OffenderMarker `json:"offender_markers"`
-	BlockAuthorKey     uint16          `json:"block_author_key"`
+	ParentHash      common.Hash     `json:"parent_hash"`
+	PriorStateRoot  common.Hash     `json:"prior_state_root"`
+	ExtrinsicHash   common.Hash     `json:"extrinsic_hash"`
+	TimeSlot        uint32          `json:"timeslot"`
+	EpochMark       *EpochMark      `json:"epoch_mark"`
+	TicketsMark     [12]*TicketBody `json:"tickets_mark"`
+	VerdictsMarkers *VerdictMarker  `json:"verdict_markers"`
+	OffenderMarkers *OffenderMarker `json:"offender_markers"`
+	AuthorIndex     uint16          `json:"block_author_key"`
 }
 
 func (s *SBlockHeader) Deserialize() (BlockHeader, error) {
-	vrfSignature, err := hex.DecodeString(s.VRFSignature)
-	if err != nil {
-		return BlockHeader{}, fmt.Errorf("failed to decode VRF signature: %v", err)
+	parent := s.Parent
+	parent_state_root := s.ParentStateRoot
+	extrinsic_hash := s.ExtrinsicHash
+	slot := s.Slot
+	epoch_mark := s.EpochMark
+	tickets_mark := [12]*TicketBody{}
+	copy(tickets_mark[:], s.TicketsMark[:])
+
+	offenders_mark := make([]PublicKey, len(s.OffendersMark))
+	for i, v := range s.OffendersMark {
+		offenders_mark[i] = PublicKey(common.FromHex(v))
 	}
 
-	blockSeal, err := hex.DecodeString(s.BlockSeal)
-	if err != nil {
-		return BlockHeader{}, fmt.Errorf("failed to decode Block Seal: %v", err)
-	}
-	var offenderMarkers *OffenderMarker
-	if s.OffenderMarkers != nil {
-		offenderMarkers, err = s.OffenderMarkers.Deserialize()
-		if err != nil {
-			return BlockHeader{}, err
-		}
-	} else {
-	}
+	author_index := s.AuthorIndex
+	entropy_source_byte := common.FromHex(s.EntropySource)
+	var entropy_source [96]byte
+	copy(entropy_source[:], entropy_source_byte)
+
+	seal_byte := common.FromHex(s.Seal)
+	var seal [96]byte
+	copy(seal[:], seal_byte)
 
 	return BlockHeader{
-		Parent:             s.Parent,
-		ParentStateRoot:    s.ParentStateRoot,
-		ExtrinsicHash:      s.ExtrinsicHash,
-		Slot:               s.Slot,
-		EpochMark:          s.EpochMark,
-		WinningTicketsMark: s.WinningTicketsMark,
-		VerdictsMarkers:    s.VerdictsMarkers,
-		OffenderMarkers:    offenderMarkers,
-		BlockAuthorKey:     s.BlockAuthorKey,
-		VRFSignature:       vrfSignature,
-		BlockSeal:          blockSeal,
+		Parent:          parent,
+		ParentStateRoot: parent_state_root,
+		ExtrinsicHash:   extrinsic_hash,
+		Slot:            slot,
+		EpochMark:       epoch_mark,
+		TicketsMark:     tickets_mark,
+		//OffendersMark:   offenders_mark,
+		AuthorIndex:   author_index,
+		EntropySource: entropy_source,
+		Seal:          seal,
 	}, nil
 }

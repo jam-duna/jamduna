@@ -18,14 +18,31 @@ import (
 * $r$, the results of the evaluation of each of the items in the package r, which is always at least one item and may be no more than I items.
 */
 // WorkReport represents a work report.
+
 type WorkReport struct {
-	AvailabilitySpecifier AvailabilitySpecifier `json:"availability"`
-	AuthorizerHash        common.Hash           `json:"authorizer_hash"`
-	Core                  uint32                `json:"total_size"`
-	AuthorizationOutput   []byte                `json:"authorization_output"`
-	RefinementContext     RefinementContext     `json:"refinement_context"`
-	PackageSpecification  string                `json:"package_specification"`
-	Results               []WorkResult          `json:"results"`
+	AvailabilitySpec AvailabilitySpecifier `json:"availability"`
+	PackageSpec      WorkPackageSpec           `json:"packge_spec"`
+	RefineContext    RefinementContext         `json:"context"`
+	CoreIndex        uint16                    `json:"core_index"`
+	AuthorizerHash   common.Hash               `json:"authorizer_hash"`
+	AuthOutput       []byte                    `json:"auth_output"`
+	Results          []WorkResult              `json:"results"`
+}
+
+type SWorkReport struct {
+	PackageSpec    WorkPackageSpec   `json:"packge_spec"`
+	RefineContext  RefinementContext `json:"context"`
+	CoreIndex      uint16            `json:"core_index"`
+	AuthorizerHash common.Hash       `json:"authorizer_hash"`
+	AuthOutput     string            `json:"auth_output"`
+	Results        []SWorkResult     `json:"results"`
+}
+
+type WorkPackageSpec struct {
+	Hash     common.Hash `json:"hash"`
+	Len      uint32      `json:"len"`
+	Root     common.Hash `json:"root"`
+	Segments common.Hash `json:"segments"`
 }
 
 // computeWorkReportBytes abstracts the process of generating the bytes to be signed or verified.
@@ -66,4 +83,25 @@ func (a *WorkReport) Hash() common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(common.ComputeHash(data))
+}
+
+func (s *SWorkReport) Deserialize() (WorkReport, error) {
+	package_spec := s.PackageSpec
+	context := s.RefineContext
+	core_index := s.CoreIndex
+	authorizer_hash := s.AuthorizerHash
+	auth_output := common.FromHex(s.AuthOutput)
+	results := make([]WorkResult, len(s.Results))
+	for i, result := range s.Results {
+		results[i] = result.Deserialize()
+	}
+
+	return WorkReport{
+		PackageSpec:    package_spec,
+		RefineContext:  context,
+		CoreIndex:      core_index,
+		AuthorizerHash: authorizer_hash,
+		AuthOutput:     auth_output,
+		Results:        results,
+	}, nil
 }

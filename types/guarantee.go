@@ -17,10 +17,11 @@ The core index of each guarantee must be unique and guarantees must be in ascend
 */
 
 // Guaranteed Work Report`
+
 type Guarantee struct {
-	WorkReport  WorkReport            `json:"work_report"`
-	TimeSlot    uint32                `json:"time_slot"`
-	Credentials []GuaranteeCredential `json:"credentials"`
+	Report     WorkReport            `json:"report"`
+	Slot       uint32                `json:"slot"`
+	Signatures []GuaranteeCredential `json:"signatures"`
 }
 
 /*
@@ -34,7 +35,7 @@ The core index of each guarantee must be unique and guarantees must be in ascend
 */
 // Credential represents a series of tuples of a signature and a validator index.
 type GuaranteeCredential struct {
-	ValidatorIndex uint32           `json:"validator_index"`
+	ValidatorIndex uint16           `json:"validator_index"`
 	Signature      Ed25519Signature `json:"signature"`
 }
 
@@ -78,4 +79,44 @@ func (g *Guarantee) Hash() common.Hash {
 
 func (g *Guarantee) ValidateSignatures() error {
 	return nil
+}
+
+type SGuarantee struct {
+	Report     SWorkReport            `json:"report"`
+	Slot       uint32                 `json:"slot"`
+	Signatures []SGuaranteeCredential `json:"signatures"`
+}
+
+type SGuaranteeCredential struct {
+	ValidatorIndex uint16 `json:"validator_index"`
+	Signature      string `json:"signature"`
+}
+
+func (s *SGuarantee) Deserialize() (Guarantee, error) {
+	report, err := s.Report.Deserialize()
+	if err != nil {
+		return Guarantee{}, err
+	}
+
+	signatures := make([]GuaranteeCredential, len(s.Signatures))
+	for i, signature := range s.Signatures {
+		signatures[i] = signature.Deserialize()
+	}
+
+	return Guarantee{
+		Report:     report,
+		Slot:       s.Slot,
+		Signatures: signatures,
+	}, nil
+}
+
+func (s *SGuaranteeCredential) Deserialize() GuaranteeCredential {
+	signatureBytes := common.FromHex(s.Signature)
+	var signature Ed25519Signature
+	copy(signature[:], signatureBytes)
+
+	return GuaranteeCredential{
+		ValidatorIndex: s.ValidatorIndex,
+		Signature:      signature,
+	}
 }

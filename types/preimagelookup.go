@@ -14,43 +14,50 @@ Section 12.1. Preimage Integration. Prior to accumulation, we must first integra
 `PreimageExtrinsic` ${\bf E}_P$:
 */
 // LookupEntry represents a single entry in the lookup extrinsic.
+/*
 type PreimageLookup struct {
 	ServiceIndex uint32 `json:"service_index"`
 	Data         []byte `json:"data"`
 }
-
-func (p *PreimageLookup) BlobHash() common.Hash {
-	return common.BytesToHash(common.ComputeHash(p.Data))
+*/
+type Preimages struct {
+	Requester uint32 `json:"requester"`
+	Blob      []byte `json:"blob"`
 }
 
-func (p *PreimageLookup) BlobLength() uint32 {
-	return uint32(len(p.Data))
+type SPreimages struct {
+	Requester uint32 `json:"requester"`
+	Blob      string `json:"blob"`
 }
 
-func (p *PreimageLookup) Blob() []byte {
-	return p.Data
+func (p *Preimages) BlobHash() common.Hash {
+	return common.BytesToHash(common.ComputeHash(p.Blob))
 }
 
-func (p *PreimageLookup) Service_Index() uint32 {
-	return p.ServiceIndex
+func (p *Preimages) BlobLength() uint32 {
+	return uint32(len(p.Blob))
 }
 
-func (p *PreimageLookup) String() string {
+func (p *Preimages) Service_Index() uint32 {
+	return p.Requester
+}
+
+func (p *Preimages) String() string {
 	s := fmt.Sprintf("ServiceIndex=%v, (h,z)=(%v,%v), a_l=%v, a_p=%v\n", p.Service_Index(), p.BlobHash(), p.BlobLength(), p.AccountLookupHash(), p.AccountPreimageHash())
 	return s
 }
 
 // A_l --- C(s, (E4(l) ⌢ (¬h4:))
-func (p *PreimageLookup) AccountLookupHash() common.Hash {
-	s := p.ServiceIndex
+func (p *Preimages) AccountLookupHash() common.Hash {
+	s := p.Requester
 	blob_hash := p.BlobHash().Bytes()
 	blob_len := p.BlobLength()
 	return ComputeAL(s, blob_hash, blob_len)
 }
 
 // A_p --- c(s, H(p))
-func (p *PreimageLookup) AccountPreimageHash() common.Hash {
-	s := p.ServiceIndex
+func (p *Preimages) AccountPreimageHash() common.Hash {
+	s := p.Requester
 	blob_hash := p.BlobHash().Bytes()
 	return ComputeC_SH(s, blob_hash)
 }
@@ -97,8 +104,8 @@ func falseBytes(data []byte) []byte {
 	return result
 }
 
-func (p PreimageLookup) DeepCopy() (PreimageLookup, error) {
-	var copiedPreimageLookup PreimageLookup
+func (p Preimages) DeepCopy() (Preimages, error) {
+	var copiedPreimageLookup Preimages
 
 	// Serialize the original PreimageLookup to JSON
 	data, err := json.Marshal(p)
@@ -116,7 +123,7 @@ func (p PreimageLookup) DeepCopy() (PreimageLookup, error) {
 }
 
 // Bytes returns the bytes of the PreimageLookup.
-func (p *PreimageLookup) Bytes() []byte {
+func (p *Preimages) Bytes() []byte {
 	enc, err := json.Marshal(p)
 	if err != nil {
 		// Handle the error according to your needs.
@@ -126,11 +133,19 @@ func (p *PreimageLookup) Bytes() []byte {
 	return enc
 }
 
-func (p *PreimageLookup) Hash() common.Hash {
+func (p *Preimages) Hash() common.Hash {
 	data := p.Bytes()
 	if data == nil {
 		// Handle the error case
 		return common.Hash{}
 	}
 	return common.BytesToHash(common.ComputeHash(data))
+}
+
+func (s *SPreimages) Deserialize() (Preimages, error) {
+	blob := common.FromHex(s.Blob)
+	return Preimages{
+		Requester: s.Requester,
+		Blob:      blob,
+	}, nil
 }

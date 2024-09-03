@@ -66,7 +66,7 @@ type NodeInfo struct {
 
 type Node struct {
 	id        uint32
-	coreIndex uint32
+	coreIndex uint16
 
 	credential types.ValidatorSecret
 	server     quic.Listener
@@ -243,7 +243,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 
 	node := &Node{
 		id:          id,
-		coreIndex:   id % 2, // TODO: NumCores
+		coreIndex:   uint16(id % 2), // TODO: NumCores
 		store:       store,
 		server:      *listener,
 		peers:       peers,
@@ -349,7 +349,7 @@ func (n *Node) getPeerIndex(identifier string) (uint32, error) {
 func (n *Node) getPeerByIndex(peerIdx uint32) (string, error) {
 	for _, peer := range n.peersInfo {
 		if peer.PeerID == peerIdx {
-			return peer.Validator.Ed25519.String(), nil
+			return fmt.Sprintf("%x", peer.Validator.Ed25519), nil
 		}
 	}
 	return "", fmt.Errorf("peer not found")
@@ -566,12 +566,12 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 				response = ok
 			}
 		}
-	case "PreimageLookup":
-		var preimageLookup types.PreimageLookup
-		err := json.Unmarshal([]byte(msg.Payload), &preimageLookup)
+	case "Preimages":
+		var preimages types.Preimages
+		err := json.Unmarshal([]byte(msg.Payload), &preimages)
 		if err == nil {
 			// err = n.processPreimageLookup(preimageLookup)
-			err = n.processLookup(preimageLookup)
+			err = n.processLookup(preimages)
 			if err == nil {
 				response = ok
 			}
@@ -651,7 +651,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 func (n *Node) broadcast(obj interface{}) []byte {
 	result := []byte{}
 	for _, peer := range n.peersInfo {
-		peerIdentifier := peer.Validator.Ed25519.String()
+		peerIdentifier := fmt.Sprintf("%x", peer.Validator.Ed25519)
 		if peer.PeerID == n.id {
 			continue
 		}
@@ -775,7 +775,7 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	return nil // Success
 }
 
-func (n *Node) processLookup(preimageLookup types.PreimageLookup) error {
+func (n *Node) processLookup(preimageLookup types.Preimages) error {
 	// TODO: Store the lookup in a E_P aggregator
 	s := n.getState()
 	s.ProcessIncomingLookup(preimageLookup)
@@ -827,7 +827,7 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 
 	randomPeer := randomKey(n.peersInfo)
 	peer := n.peersInfo[randomPeer]
-	peerIdentifier := peer.Validator.Ed25519.String()
+	peerIdentifier := fmt.Sprintf("%x", peer.Validator.Ed25519)
 	resp, err := n.makeRequest(peerIdentifier, obj)
 	if err != nil {
 		fmt.Printf("runClient request error: %v\n", err)
@@ -924,9 +924,9 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 	return nil // Success
 }
 
-func (n *Node) computeAssuranceBitfield() []byte {
+func (n *Node) computeAssuranceBitfield() [1]byte {
 	// TODO
-	return []byte{1, 1}
+	return [1]byte{3}
 }
 
 /*
@@ -975,7 +975,7 @@ func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustificat
 	assurance := types.Assurance{
 		Anchor:         n.statedb.ParentHash,
 		Bitfield:       n.computeAssuranceBitfield(),
-		ValidatorIndex: n.id,
+		ValidatorIndex: uint16(n.id),
 		//	Signature: signature,
 	}
 	assurance.Sign(n.credential.Ed25519Secret, n.statedb.ParentHash)
@@ -1013,7 +1013,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
-	service_index := uint32(workPackage.ServiceIndex)
+	service_index := uint32(workPackage.AuthCodeHost)
 	packageHash := workPackage.Hash()
 
 	// set up audit friendly work WorkPackage
@@ -1069,12 +1069,11 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 		// setup work results
 		// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
 		result := types.WorkResult{
-			Service:                workItem.ServiceIdentifier,
+			Service:                workItem.Service,
 			CodeHash:               workItem.CodeHash,
 			PayloadHash:            common.Blake2Hash(workItem.Payload),
-			GasPrioritizationRatio: 0,
-			Output:                 output,
-			Error:                  "", // TODO: need to get from the error
+			GasRatio: 0,
+			Result:                 output,
 		}
 		results = append(results, result)
 	}
@@ -1092,26 +1091,27 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 	}
 
 	workReport := types.WorkReport{
-		AvailabilitySpecifier: *spec,
-		AuthorizerHash:        common.HexToHash("0x"), // SKIP
-		Core:                  n.coreIndex,
-		RefinementContext:     refinementContext,
-		PackageSpecification:  "mock_package_specification",
-		Results:               results,
+		AvailabilitySpec: *spec,
+		AuthorizerHash:   common.HexToHash("0x"), // SKIP
+		CoreIndex:        n.coreIndex,
+		//	Output:               result.Output,
+		RefineContext: refinementContext,
+		Results: results,
 	}
 
 	// Create a GuaranteeCredential with the signature and a mock validator index
+	sig := workReport.Sign(n.credential.Ed25519Secret)
 	credential := types.GuaranteeCredential{
-		ValidatorIndex: n.id, // Mock validator index
+		ValidatorIndex: uint16(n.id), // Mock validator index
 		// Sign the serialized WorkReport
-		Signature: workReport.Sign(n.credential.Ed25519Secret),
+		// Signature: sig,
 	}
-
+	copy(credential.Signature[:], sig[:])
 	// Create a Guarantee with the WorkReport, TimeSlot, and Credentials
 	guarantee := types.Guarantee{
-		WorkReport:  workReport,
-		TimeSlot:    n.statedb.Block.TimeSlot(),
-		Credentials: []types.GuaranteeCredential{credential},
+		Report:     workReport,
+		Slot:       n.statedb.Block.TimeSlot(),
+		Signatures: []types.GuaranteeCredential{credential},
 	}
 	// This will be received by all validators
 	n.broadcast(guarantee)
@@ -1381,8 +1381,8 @@ func getMessageType(obj interface{}) string {
 		return "Assurance"
 	case types.Vote:
 		return "Vote"
-	case types.PreimageLookup:
-		return "PreimageLookup"
+	case types.Preimages:
+		return "Preimages"
 	case types.Ticket:
 		return "Ticket"
 	case types.Block:

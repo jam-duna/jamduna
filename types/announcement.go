@@ -40,13 +40,15 @@ func (a *Announcement) computeAnnouncementBytes() []byte {
 }
 func (a *Announcement) Sign(Ed25519Secret []byte, parentHash common.Hash) {
 	announcementBytes := a.computeAnnouncementBytes()
-	a.Signature = ed25519.Sign(Ed25519Secret, announcementBytes)
+	sig := ed25519.Sign(Ed25519Secret, announcementBytes)
+
+	copy(a.Signature[:], sig)
 }
 
 func (a *Announcement) ValidateSignature(publicKey []byte) error {
 	announcementBytes := a.computeAnnouncementBytes()
 
-	if !ed25519.Verify(publicKey, announcementBytes, a.Signature) {
+	if !ed25519.Verify(publicKey, announcementBytes, a.Signature[:]) {
 		return errors.New("invalid signature")
 	}
 	return nil

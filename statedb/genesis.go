@@ -136,7 +136,7 @@ func InitValidator(bandersnatch_seed, ed25519_seed []byte) (types.Validator, err
 	if err != nil {
 		return validator, fmt.Errorf("Failed to init Ed25519 Key")
 	}
-	validator.Ed25519 = common.BytesToHash(ed25519_pub)
+	copy(validator.Ed25519[:], common.BytesToHash(ed25519_pub).Bytes())
 	validator.Bandersnatch = common.BytesToHash(banderSnatch_pub)
 	//fmt.Printf("validator %v\n", validator)
 	return validator, nil

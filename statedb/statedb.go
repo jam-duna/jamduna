@@ -36,7 +36,7 @@ type StateDB struct {
 	vmMutex sync.Mutex
 
 	knownPreimageLookups  map[common.Hash]uint32
-	queuedPreimageLookups map[common.Hash]types.PreimageLookup
+	queuedPreimageLookups map[common.Hash]types.Preimages
 	preimageLookupsMutex  sync.Mutex
 
 	knownGuarantees  map[common.Hash]int
@@ -51,7 +51,7 @@ type StateDB struct {
 	queuedVotes map[common.Hash]types.Vote
 	voteMutex   sync.Mutex
 
-	knownTickets  map[common.Hash]int
+	knownTickets  map[common.Hash]uint8
 	queuedTickets map[common.Hash]types.Ticket
 	ticketMutex   sync.Mutex
 
@@ -66,7 +66,7 @@ func (s *StateDB) AddTicketToQueue(t types.Ticket) {
 	s.queuedTickets[t.TicketID()] = t
 }
 
-func (s *StateDB) AddLookupToQueue(l types.PreimageLookup) {
+func (s *StateDB) AddLookupToQueue(l types.Preimages) {
 	s.preimageLookupsMutex.Lock()
 	defer s.preimageLookupsMutex.Unlock()
 	s.queuedPreimageLookups[l.AccountPreimageHash()] = l
@@ -127,7 +127,7 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	s.knownTickets[ticketID] = t.Attempt
 }
 
-func (s *StateDB) ProcessIncomingLookup(l types.PreimageLookup) {
+func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
 	//TODO: check existence of lookup and stick into map
 	//cj := s.GetPvmState()
 	fmt.Printf("[N%v] ProcessIncomingLookup -- Adding lookup: %v\n", s.Id, l.String())
@@ -190,7 +190,7 @@ func (s *StateDB) RemoveTicket(t *types.Ticket) {
 	delete(s.queuedTickets, t.TicketID())
 }
 
-func (s *StateDB) RemoveLookup(p *types.PreimageLookup) {
+func (s *StateDB) RemoveLookup(p *types.Preimages) {
 	s.preimageLookupsMutex.Lock()
 	defer s.preimageLookupsMutex.Unlock()
 	delete(s.queuedPreimageLookups, p.AccountPreimageHash())
@@ -236,7 +236,7 @@ const (
 	errPreimageBlobSet        = "PreimageBlob already set"
 )
 
-func (s *StateDB) ValidateLookup(l *types.PreimageLookup) (common.Hash, error) {
+func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	// check 157 - (1) a_p not equal to P (2) a_l is empty
 	t := s.GetTrie()
 	a_p := l.AccountPreimageHash()
@@ -266,14 +266,14 @@ func (s *StateDB) ValidateLookup(l *types.PreimageLookup) (common.Hash, error) {
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
 	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
-	statedb.knownTickets = make(map[common.Hash]int)
+	statedb.knownTickets = make(map[common.Hash]uint8)
 	statedb.queuedVotes = make(map[common.Hash]types.Vote)
 	statedb.knownVotes = make(map[common.Hash]int)
 	statedb.queuedGuarantees = make(map[common.Hash]types.Guarantee)
 	statedb.knownGuarantees = make(map[common.Hash]int)
 	statedb.queuedAssurances = make(map[common.Hash]types.Assurance)
 	statedb.knownAssurances = make(map[common.Hash]int)
-	statedb.queuedPreimageLookups = make(map[common.Hash]types.PreimageLookup)
+	statedb.queuedPreimageLookups = make(map[common.Hash]types.Preimages)
 	statedb.knownPreimageLookups = make(map[common.Hash]uint32)
 	statedb.SetStorage(sdb)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
@@ -436,7 +436,7 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
 	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
-	statedb.knownTickets = make(map[common.Hash]int)
+	statedb.knownTickets = make(map[common.Hash]uint8)
 	statedb.queuedVotes = make(map[common.Hash]types.Vote)
 	statedb.knownVotes = make(map[common.Hash]int)
 
@@ -487,13 +487,13 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		JamState:              s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:                   s.sdb,
 		trie:                  s.CopyTrieState(s.StateRoot),
-		knownTickets:          make(map[common.Hash]int),
+		knownTickets:          make(map[common.Hash]uint8),
 		knownPreimageLookups:  make(map[common.Hash]uint32),
 		knownGuarantees:       make(map[common.Hash]int),
 		knownAssurances:       make(map[common.Hash]int),
 		knownVotes:            make(map[common.Hash]int),
 		queuedTickets:         make(map[common.Hash]types.Ticket),
-		queuedPreimageLookups: make(map[common.Hash]types.PreimageLookup),
+		queuedPreimageLookups: make(map[common.Hash]types.Preimages),
 		queuedGuarantees:      make(map[common.Hash]types.Guarantee),
 		queuedAssurances:      make(map[common.Hash]types.Assurance),
 		queuedVotes:           make(map[common.Hash]types.Vote),
@@ -560,7 +560,7 @@ func (s *StateDB) CloneExtrinsicMap(n *StateDB) {
 	}
 }
 
-func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.PreimageLookup, guarantees []types.Guarantee, assurances []types.Assurance, dispute types.Dispute) {
+func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.Preimages, guarantees []types.Guarantee, assurances []types.Assurance, dispute types.Dispute) {
 	// T.P.G.A.D
 	for _, t := range tickets {
 		s.RemoveTicket(&t)
@@ -624,14 +624,14 @@ func (s *StateDB) SetID(id uint32) {
 	s.JamState.SafroleState.Id = id
 }
 
-func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup, targetJCE uint32, id uint32) error {
+func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, targetJCE uint32, id uint32) error {
 	num_preimages := uint32(0)
 	num_octets := uint32(0)
 
 	//TODO: (eq 156) need to make sure E_P is sorted. by what??
 	// validate (eq 156)
 	for i := 1; i < len(preimages); i++ {
-		if preimages[i].ServiceIndex <= preimages[i-1].ServiceIndex {
+		if preimages[i].Requester <= preimages[i-1].Requester {
 			return fmt.Errorf(errServiceIndices)
 		}
 	}
@@ -650,7 +650,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.PreimageLookup
 		// (eq 158)
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
-		t.SetPreImageBlob(l.Service_Index(), l.Blob())
+		t.SetPreImageBlob(l.Service_Index(), l.Blob)
 		t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
 		num_octets += l.BlobLength()
@@ -723,13 +723,7 @@ func (s *StateDB) getServiceCoreCode(c uint32) (code []byte, err error) {
 }
 
 func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult) []byte {
-	output := make([]byte, 0)
-	for _, r := range results {
-		output = append(output, r.Output...) // TODO: r.Error
-		output = append(output, r.PayloadHash.Bytes()...)
-		output = append(output, r.AuthorizationOutput...)
-		output = append(output, r.WorkPackageHash.Bytes()...)
-	}
+	output := types.Encode(results)
 	return output
 }
 
@@ -741,12 +735,12 @@ func (s *StateDB) Accumulate(cores map[uint32]*Rho_state) error {
 		if rho_state != nil {
 			wrangledWorkResults := make([]types.WrangledWorkResult, 0)
 			code, err := s.getServiceCoreCode(c)
-			service_index := 0
+			service_index := uint32(0)
 			if err == nil {
 				// Wrangle results from work report
 				workReport := rho_state.WorkReport
 				for _, workResult := range workReport.Results {
-					wrangledWorkResult := workResult.Wrangle(workReport.AuthorizationOutput, workReport.AvailabilitySpecifier.WorkPackageHash)
+					wrangledWorkResult := workResult.Wrangle(workReport.AuthOutput, workReport.AvailabilitySpec.WorkPackageHash)
 					wrangledWorkResults = append(wrangledWorkResults, wrangledWorkResult)
 					service_index = workResult.Service
 				}
@@ -780,14 +774,14 @@ func (s *StateDB) OnTransfer(cores map[uint32]*Rho_state) error {
 
 // Section 8.2 - Eq 85+86
 func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarantee) error {
-	for c := uint32(0); c < types.TotalCores; c++ {
+	for c := uint16(0); c < types.TotalCores; c++ {
 		if len(guarantees) > 0 {
 			// build m, holding the set of authorization hashes matching the core c in guarantees
 			m := make(map[common.Hash]bool)
 			hits := 0
 			for _, g := range guarantees {
-				if g.WorkReport.Core == c {
-					m[g.WorkReport.AuthorizerHash] = true
+				if g.Report.CoreIndex == c {
+					m[g.Report.AuthorizerHash] = true
 					hits++
 				}
 			}
@@ -851,7 +845,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	// Guarantees
 	num_reports := uint32(0)
 	for _, g := range guarantees {
-		d.setRhoByWorkReport(g.WorkReport.Core, g.WorkReport, targetJCE)
+		d.setRhoByWorkReport(g.Report.CoreIndex, g.Report, targetJCE)
 		num_reports++
 	}
 	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
@@ -874,7 +868,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	sf_header := blk.GetHeader()
 	epochMark := blk.EpochMark()
 	if epochMark != nil {
-		s.knownTickets = make(map[common.Hash]int) //keep track of known tickets
+		s.knownTickets = make(map[common.Hash]uint8) //keep track of known tickets
 		s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 	sf := s.GetSafrole()
@@ -932,12 +926,12 @@ func (s *StateDB) GetBlock() *types.Block {
 	return s.Block
 }
 
-func (s *StateDB) areValidatorsAssignedToCore(coreIndex uint32, credentials []types.GuaranteeCredential) bool {
+func (s *StateDB) areValidatorsAssignedToCore(coreIndex uint16, credentials []types.GuaranteeCredential) bool {
 	// TODO: logic to verify if validators are assigned to the core.
 	return true
 }
 
-func (s *StateDB) isReportPendingOnCore(coreIndex uint32) bool {
+func (s *StateDB) isReportPendingOnCore(coreIndex uint16) bool {
 	// TODO: logic to check if a report is pending on the core.
 	return false
 }
@@ -970,24 +964,24 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	// Extrinsic Data has 5 different Extrinsics
 
 	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
-	extrinsicData.PreimageLookups = make([]types.PreimageLookup, 0)
+	extrinsicData.Preimages = make([]types.Preimages, 0)
 	for _, preimageLookup := range s.queuedPreimageLookups {
 		pl, err := preimageLookup.DeepCopy()
 		if err != nil {
 			continue
 		}
-		extrinsicData.PreimageLookups = append(extrinsicData.PreimageLookups, pl)
+		extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 	}
 
 	// 156: These pairs must be ordered and without duplicates
-	for i := 0; i < len(extrinsicData.PreimageLookups); i++ {
-		for j := 0; j < len(extrinsicData.PreimageLookups)-1; j++ {
-			if extrinsicData.PreimageLookups[j].ServiceIndex > extrinsicData.PreimageLookups[j+1].ServiceIndex {
-				extrinsicData.PreimageLookups[j], extrinsicData.PreimageLookups[j+1] = extrinsicData.PreimageLookups[j+1], extrinsicData.PreimageLookups[j]
+	for i := 0; i < len(extrinsicData.Preimages); i++ {
+		for j := 0; j < len(extrinsicData.Preimages)-1; j++ {
+			if extrinsicData.Preimages[j].Requester > extrinsicData.Preimages[j+1].Requester {
+				extrinsicData.Preimages[j], extrinsicData.Preimages[j+1] = extrinsicData.Preimages[j+1], extrinsicData.Preimages[j]
 			}
 		}
 	}
-	s.queuedPreimageLookups = make(map[common.Hash]types.PreimageLookup)
+	s.queuedPreimageLookups = make(map[common.Hash]types.Preimages)
 
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
@@ -997,7 +991,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			continue
 		}
 		// 138 - Ensure we have 2 or 3 credentials per work report minimum.
-		if len(g.Credentials) < 2 {
+		if len(g.Signatures) < 2 {
 			// Skip guarantees that do not meet the minimum number of credentials.
 			continue
 		}
@@ -1005,25 +999,25 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	}
 	// 139 - Order guarantees by core (assuming WorkReport contains core index).
 	sort.Slice(extrinsicData.Guarantees, func(i, j int) bool {
-		return extrinsicData.Guarantees[i].WorkReport.Core < extrinsicData.Guarantees[j].WorkReport.Core
+		return extrinsicData.Guarantees[i].Report.CoreIndex < extrinsicData.Guarantees[j].Report.CoreIndex
 	})
 
 	// 140 - credentials ordered by validator index
 	for i := range extrinsicData.Guarantees {
-		sort.Slice(extrinsicData.Guarantees[i].Credentials, func(a, b int) bool {
-			return extrinsicData.Guarantees[i].Credentials[a].ValidatorIndex < extrinsicData.Guarantees[i].Credentials[b].ValidatorIndex
+		sort.Slice(extrinsicData.Guarantees[i].Signatures, func(a, b int) bool {
+			return extrinsicData.Guarantees[i].Signatures[a].ValidatorIndex < extrinsicData.Guarantees[i].Signatures[b].ValidatorIndex
 		})
 	}
 	// 141 - The signing validators must be assigned to the core in G or G*
 	for _, guarantee := range extrinsicData.Guarantees {
-		if !s.areValidatorsAssignedToCore(guarantee.WorkReport.Core, guarantee.Credentials) {
+		if !s.areValidatorsAssignedToCore(guarantee.Report.CoreIndex, guarantee.Signatures) {
 			// Handle the case where validators are not correctly assigned.
 			return nil, errors.New("validators not correctly assigned to core")
 		}
 	}
 	// 144 - No reports may be placed on cores with a report pending availability on it unless it has timed out.
 	for _, guarantee := range extrinsicData.Guarantees {
-		if s.isReportPendingOnCore(guarantee.WorkReport.Core) && !s.hasReportTimedOut(guarantee.WorkReport) {
+		if s.isReportPendingOnCore(guarantee.Report.CoreIndex) && !s.hasReportTimedOut(guarantee.Report) {
 			// Skip this guarantee if the core has a pending report that hasn't timed out.
 			continue
 		}
@@ -1031,7 +1025,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	// 147 - There must be no duplicate work-package hashes (i.e. two work-reports of the same package).
 	workPackageHashes := make(map[common.Hash]bool)
 	for _, guarantee := range extrinsicData.Guarantees {
-		hash := guarantee.WorkReport.AvailabilitySpecifier.WorkPackageHash
+		hash := guarantee.Report.AvailabilitySpec.WorkPackageHash
 		if workPackageHashes[hash] {
 			// Handle duplicate work-package hash.
 			return nil, errors.New("duplicate work-package hash detected")
@@ -1043,7 +1037,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 
 	// 153 - We require that all work results within the extrinsic predicted the correct code hash for their corresponding service:
 	for _, guarantee := range extrinsicData.Guarantees {
-		if !s.isCorrectCodeHash(guarantee.WorkReport) {
+		if !s.isCorrectCodeHash(guarantee.Report) {
 			// Handle incorrect code hash prediction.
 			return nil, errors.New("incorrect code hash prediction for service")
 		}
@@ -1099,7 +1093,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		h.EpochMark = epochMarker
 	}
 	if isNewEpoch {
-		h.WinningTicketsMark = make([]*types.TicketBody, 0) // clear out the tickets if its a new epoch
+		//h.TicketsMark = make([12]*types.TicketBody) // clear out the tickets if its a new epoch
 		s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 	if needWinningMarker {
@@ -1107,7 +1101,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		winningMarker, err := sf.GenerateWinningMarker()
 		//block is the first after the end of the submission period for tickets and if the ticket accumulator is saturated
 		if err == nil {
-			h.WinningTicketsMark = winningMarker
+			copy(h.TicketsMark[:], winningMarker[:])
 		}
 	} else {
 		// If there's new ticketID, add them into extrinsic
@@ -1132,7 +1126,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	if err != nil {
 		return bl, err
 	}
-	h.BlockAuthorKey = author_index
+	h.AuthorIndex = author_index
 	b.Extrinsic = extrinsicData
 
 	unsignHeaderHash := h.UnsignedHash()
@@ -1144,16 +1138,16 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		if err != nil {
 			return bl, err
 		}
-		h.BlockSeal = blockseal
-		h.VRFSignature = fresh_vrfSig
+		copy(h.Seal[:], blockseal[:])
+		copy(h.EntropySource[:], fresh_vrfSig[:])
 	} else {
 		attempt, err := sf.GetBindedAttempt(targetJCE)
 		blockseal, fresh_vrfSig, err := sf.SignPrimary(credential.BandersnatchSecret, unsignHeaderHash, attempt)
 		if err != nil {
 			return bl, err
 		}
-		h.BlockSeal = blockseal
-		h.VRFSignature = fresh_vrfSig
+		copy(h.Seal[:], blockseal[:])
+		copy(h.EntropySource[:], fresh_vrfSig[:])
 	}
 	b.Header = *h
 	return b, nil

@@ -7,15 +7,15 @@ import (
 )
 
 type Vote struct {
-	Voting    bool   `json:"vote"`      // true for guilty, false for innocent
-	Index     uint16 `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
-	Signature []byte `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
+	Voting    bool     `json:"vote"`      // true for guilty, false for innocent
+	Index     uint16   `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
+	Signature [64]byte `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
 }
 
 type SVote struct {
-	Voting    bool   `json:"vote"`      // true for guilty, false for innocent
-	Index     uint16 `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
-	Signature string `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
+	Voting    bool   `json:"vote"`
+	Index     uint16 `json:"index"`
+	Signature string `json:"signature"`
 }
 
 func (t Vote) DeepCopy() (Vote, error) {
@@ -56,9 +56,13 @@ func (v *Vote) Hash() common.Hash {
 }
 
 func (s *SVote) Deserialize() (Vote, error) {
+	signatureBytes := common.FromHex(s.Signature)
+	var signature [64]byte
+	copy(signature[:], signatureBytes)
+
 	return Vote{
 		Voting:    s.Voting,
 		Index:     s.Index,
-		Signature: common.FromHex(s.Signature),
+		Signature: signature,
 	}, nil
 }

@@ -149,9 +149,9 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
 			}
 			// now you have Preimage AND blob
-			lookup := types.PreimageLookup{
-				ServiceIndex: uint32(serviceIndex),
-				Data:         reconstructData[0:l.Length],
+			lookup := types.Preimages{
+				Requester: uint32(serviceIndex),
+				Blob:      reconstructData[0:l.Length],
 			}
 
 			// ADD TO Queue  which is used in the NEXT MakeBlock to fill the E_P

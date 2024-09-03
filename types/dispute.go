@@ -6,6 +6,10 @@ import (
 	"github.com/colorfulnotion/jam/common"
 )
 
+type SOffendersMark struct {
+	OffenderKey []string `json:"offender_mark"`
+}
+
 type VerdictMarker struct {
 	WorkReportHash []common.Hash `json:"verdict_mark"` // WorkReportHash (ByteArray32 in disputes.asn)
 }
@@ -37,41 +41,41 @@ type SDispute struct {
 }
 
 type Verdict struct {
-	Target common.Hash `json:"target"` // WorkReportHash (ByteArray32 in disputes.asn)
-	Epoch  uint32      `json:"age"`    // EpochIndex (U32 in disputes.asn)
-	Votes  []Vote      `json:"votes"`  // DisputeJudgements
+	Target common.Hash `json:"target"`
+	Epoch  uint32      `json:"age"`
+	Votes  [5]Vote     `json:"votes"`
 }
 
 type SVerdict struct {
-	Target common.Hash `json:"target"` // WorkReportHash (ByteArray32 in disputes.asn)
-	Epoch  uint32      `json:"age"`    // EpochIndex (U32 in disputes.asn)
-	Votes  []SVote     `json:"votes"`  // DisputeJudgements
+	Target common.Hash `json:"target"`
+	Epoch  uint32      `json:"age"`
+	Votes  [5]SVote    `json:"votes"`
 }
 
 type Culprit struct {
-	Target    common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Key       PublicKey   `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature []byte      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+	Target    common.Hash      `json:"target"`
+	Key       PublicKey        `json:"key"`
+	Signature Ed25519Signature `json:"signature"`
 }
 
 type SCulprit struct {
-	Target    common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Key       string      `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature string      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+	Target    common.Hash `json:"target"`
+	Key       string      `json:"key"`
+	Signature string      `json:"signature"`
 }
 
 type Fault struct {
-	WorkReportHash common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Voting         bool        `json:"vote"`      // vote (BOOLEAN in disputes.asn)
-	Key            PublicKey   `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature      []byte      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+	Target    common.Hash      `json:"target"`
+	Voting    bool             `json:"vote"`
+	Key       PublicKey        `json:"key"`
+	Signature Ed25519Signature `json:"signature"`
 }
 
 type SFault struct {
-	WorkReportHash common.Hash `json:"target"`    // WorkReportHash (ByteArray32 in disputes.asn)
-	Voting         bool        `json:"vote"`      // vote (BOOLEAN in disputes.asn)
-	Key            string      `json:"key"`       // Ed25519Key (ByteArray32 in disputes.asn)
-	Signature      string      `json:"signature"` // Ed25519Signature (ByteArray64 in disputes.asn)
+	Target    common.Hash `json:"target"`
+	Voting    bool        `json:"vote"`
+	Key       string      `json:"key"`
+	Signature string      `json:"signature"`
 }
 
 func (t Dispute) DeepCopy() (Dispute, error) {
@@ -116,14 +120,15 @@ func (s *SFault) Deserialize() (Fault, error) {
 	keyBytes := common.FromHex(s.Key)
 	var key PublicKey
 	copy(key[:], keyBytes)
-
-	signature := common.FromHex(s.Signature)
+	signatureBytes := common.FromHex(s.Signature)
+	var signature [64]byte
+	copy(signature[:], signatureBytes)
 
 	return Fault{
-		WorkReportHash: s.WorkReportHash,
-		Voting:         s.Voting,
-		Key:            key,
-		Signature:      signature,
+		Target:    s.Target,
+		Voting:    s.Voting,
+		Key:       key,
+		Signature: signature,
 	}, nil
 }
 
@@ -131,22 +136,25 @@ func (s *SCulprit) Deserialize() (Culprit, error) {
 	keyBytes := common.FromHex(s.Key)
 	var key PublicKey
 	copy(key[:], keyBytes)
+	signatureBytes := common.FromHex(s.Signature)
+	var signature [64]byte
+	copy(signature[:], signatureBytes)
 
 	return Culprit{
 		Target:    s.Target,
 		Key:       key,
-		Signature: common.FromHex(s.Signature),
+		Signature: signature,
 	}, nil
 }
 
 func (s *SVerdict) Deserialize() (Verdict, error) {
-	votes := make([]Vote, len(s.Votes))
+	votes := [5]Vote{}
 	for i, sv := range s.Votes {
-		vote, err := sv.Deserialize()
+		v, err := sv.Deserialize()
 		if err != nil {
 			return Verdict{}, err
 		}
-		votes[i] = vote
+		votes[i] = v
 	}
 
 	return Verdict{
@@ -155,7 +163,6 @@ func (s *SVerdict) Deserialize() (Verdict, error) {
 		Votes:  votes,
 	}, nil
 }
-
 func (s *SDispute) Deserialize() (Dispute, error) {
 	verdicts := make([]Verdict, len(s.Verdict))
 	for i, sv := range s.Verdict {

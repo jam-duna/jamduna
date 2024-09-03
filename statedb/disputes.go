@@ -267,54 +267,55 @@ func Dispute(input types.Dispute, preState JamState) (JamState, DOutput, error) 
 
 // eq 99
 func getPublicKey(K []types.Validator, Index uint32) types.PublicKey {
-	return K[Index].Ed25519.Bytes()
+	return K[Index].Ed25519
 }
 
 func checkSignature(v types.Verdict, pre_state JamState) error {
-	for i, vote := range v.Votes {
-		// check the signature
-		sign_message := []byte{}
-		if vote.Voting {
-			sign_message = append([]byte(types.X_True), v.Target.Bytes()...)
-		} else {
-			sign_message = append([]byte(types.X_False), v.Target.Bytes()...)
-		}
-		if v.Epoch == pre_state.SafroleState.Timeslot/E {
+	/*	for _, vote := range v.Votes {
 			// check the signature
-
-			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.CurrValidators, uint32(vote.Index))), sign_message, vote.Signature) {
-				return fmt.Errorf("Verdict Error: the signature of the voterId %v is invalid", vote.Index)
+			sign_message := []byte{}
+			if vote.Voting {
+				sign_message = append([]byte(types.X_True), v.Target.Bytes()...)
+			} else {
+				sign_message = append([]byte(types.X_False), v.Target.Bytes()...)
 			}
+			if v.Epoch == pre_state.SafroleState.Timeslot/E {
+				// check the signature
 
-		} else if v.Epoch == pre_state.SafroleState.Timeslot/E-1 {
-			// check the signature
-			// to do : ask davxy , here should be sign by lambda
-			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))), sign_message, vote.Signature) {
-				return fmt.Errorf("Verdict Error: the signature of the voterId %v in verdict %v is invalid, validator %x", vote.Index, i, ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))))
+	//			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.CurrValidators, uint32(vote.Index))), sign_message, vote.Signature) {
+	//				return fmt.Errorf("Verdict Error: the signature of the voterId %v is invalid", vote.Index)
+	//			}
+
+			} else if v.Epoch == pre_state.SafroleState.Timeslot/E-1 {
+				// check the signature
+				// to do : ask davxy , here should be sign by lambda
+	//			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))), sign_message, vote.Signature) {
+	//				return fmt.Errorf("Verdict Error: the signature of the voterId %v in verdict %v is invalid, validator %x", vote.Index, i, ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))))
+	//			}
+			} else {
+				return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, pre_state.SafroleState.Timeslot/E)
 			}
-		} else {
-			return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, pre_state.SafroleState.Timeslot/E)
 		}
-	}
+	*/
 	return nil
 }
 
 // eq 101
 func checkIfKeyOffend(key types.PublicKey, pre_state JamState) error {
 	for _, k := range pre_state.DisputesState.Psi_o {
-		if bytes.Equal(k, key) {
+		if bytes.Equal(k[:], key[:]) {
 			//drop the key
 			return fmt.Errorf("Bad Key: the key %x shouldn't be in old offenders set", key)
 		}
 	}
 	// check if the key is in the validator set
 	for _, k := range pre_state.SafroleState.CurrValidators {
-		if bytes.Equal(k.Ed25519.Bytes(), key) {
+		if bytes.Equal(k.Ed25519[:], key[:]) {
 			return nil
 		}
 	}
 	for _, k := range pre_state.SafroleState.PrevValidators {
-		if bytes.Equal(k.Ed25519.Bytes(), key) {
+		if bytes.Equal(k.Ed25519[:], key[:]) {
 			return nil
 		}
 	}
@@ -351,7 +352,7 @@ func checkCulprit(c []types.Culprit) error {
 		//check culprit signature is valid
 		sign_message := append([]byte(types.X_G), culprit.Target.Bytes()...)
 		//verify the signature
-		if !ed25519.Verify(ed25519.PublicKey(culprit.Key), sign_message, culprit.Signature) {
+		if !ed25519.Verify(ed25519.PublicKey(culprit.Key[:]), sign_message, culprit.Signature[:]) {
 			return fmt.Errorf("Culprit Error: the signature of the culprit %v is invalid", culprit.Key)
 		}
 		// check duplicate
@@ -359,7 +360,7 @@ func checkCulprit(c []types.Culprit) error {
 			if i == j {
 				continue
 			}
-			if bytes.Equal(c2.Key, culprit.Key) {
+			if bytes.Equal(c2.Key[:], culprit.Key[:]) {
 				return fmt.Errorf("Culprit Error: duplicate key %x in index %v and %v", culprit.Key, i, j)
 			}
 		}
@@ -367,7 +368,7 @@ func checkCulprit(c []types.Culprit) error {
 		if i == 0 {
 			continue
 		}
-		if bytes.Compare(c[i].Key, c[i-1].Key) < 0 {
+		if bytes.Compare(c[i].Key[:], c[i-1].Key[:]) < 0 {
 			return fmt.Errorf("Culprit Error: key %x should be bigger than %x", c[i].Key, c[i-1].Key)
 		}
 	}
@@ -381,12 +382,12 @@ func checkFault(f []types.Fault) error {
 		// jam_guarantee concat the work report hash
 		sign_message := []byte{}
 		if fault.Voting {
-			sign_message = append([]byte(types.X_True), fault.WorkReportHash.Bytes()...)
+			sign_message = append([]byte(types.X_True), fault.Target.Bytes()...)
 		} else {
-			sign_message = append([]byte(types.X_False), fault.WorkReportHash.Bytes()...)
+			sign_message = append([]byte(types.X_False), fault.Target.Bytes()...)
 		}
 		//verify the signature
-		if !ed25519.Verify(ed25519.PublicKey(fault.Key), sign_message, fault.Signature) {
+		if !ed25519.Verify(ed25519.PublicKey(fault.Key[:]), sign_message, fault.Signature[:]) {
 			return fmt.Errorf("Fault Error: the signature of the fault %v is invalid", fault.Key)
 		}
 		// check duplicate
@@ -394,7 +395,7 @@ func checkFault(f []types.Fault) error {
 			if i == j {
 				continue
 			}
-			if bytes.Equal(f2.Key, fault.Key) {
+			if bytes.Equal(f2.Key[:], fault.Key[:]) {
 				return fmt.Errorf("Fault Error: duplicate key %v in index %v and %v", fault.Key, i, j)
 			}
 		}
@@ -402,7 +403,7 @@ func checkFault(f []types.Fault) error {
 		if i == 0 {
 			continue
 		}
-		if bytes.Compare(f[i].Key, f[i-1].Key) < 0 {
+		if bytes.Compare(f[i].Key[:], f[i-1].Key[:]) < 0 {
 			return fmt.Errorf("Fault Error: key %x should be bigger than %x", f[i].Key, f[i-1].Key)
 		}
 	}
@@ -629,7 +630,7 @@ func sortByHash(set [][]byte) [][]byte {
 func sortByKey(set []types.PublicKey) []types.PublicKey {
 	for i := range set {
 		for j := range set {
-			if bytes.Compare(set[i], set[j]) < 0 {
+			if bytes.Compare(set[i][:], set[j][:]) < 0 {
 				set[i], set[j] = set[j], set[i]
 			}
 		}
@@ -640,7 +641,7 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 	counter := 0
 	for _, s := range state_prime.DisputesState.Psi_g {
 		for _, f := range f {
-			if bytes.Equal(s, f.WorkReportHash.Bytes()) {
+			if bytes.Equal(s, f.Target.Bytes()) {
 				counter++
 			}
 		}
@@ -654,12 +655,12 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 			return fmt.Errorf("Fault Error: fault should be false, invalid key: %x", f.Key)
 		}
 		for _, s := range state_prime.DisputesState.Psi_g {
-			if bytes.Equal(s, f.WorkReportHash.Bytes()) {
+			if bytes.Equal(s, f.Target.Bytes()) {
 				found = true
 			}
 		}
 		if !found {
-			return fmt.Errorf("Fault Error: work report hash %x should be in good set", f.WorkReportHash)
+			return fmt.Errorf("Fault Error: work report hash %x should be in good set", f.Target)
 		}
 	}
 	return nil

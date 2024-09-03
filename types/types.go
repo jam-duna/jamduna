@@ -8,8 +8,9 @@ import (
 	//"github.com/colorfulnotion/jam/trie"
 )
 
-type Ed25519Signature []byte
-type PublicKey []byte
+type Ed25519Signature [64]byte
+type PublicKey [32]byte
+
 type BMTProof []common.Hash
 
 const (

@@ -41,16 +41,14 @@ func (b *Block) Copy() *Block {
 		c.Header.EpochMark = &epochMarkCopy
 	}
 
-	if b.Header.WinningTicketsMark != nil {
-		winningTicketsCopy := make([]*TicketBody, len(b.Header.WinningTicketsMark))
-		for i, ticket := range b.Header.WinningTicketsMark {
-			if ticket != nil {
-				ticketCopy := *ticket
-				winningTicketsCopy[i] = &ticketCopy
-			}
+	var winningTicketsCopy [12]*TicketBody
+	for i, ticket := range b.Header.TicketsMark {
+		if ticket != nil {
+			ticketCopy := *ticket
+			winningTicketsCopy[i] = &ticketCopy
 		}
-		c.Header.WinningTicketsMark = winningTicketsCopy
 	}
+	c.Header.TicketsMark = winningTicketsCopy
 
 	if b.Header.VerdictsMarkers != nil {
 		judgementsMarkersCopy := *b.Header.VerdictsMarkers
@@ -58,17 +56,14 @@ func (b *Block) Copy() *Block {
 	}
 
 	if b.Header.OffenderMarkers != nil {
-		OffenderMarkersCopy := *b.Header.OffenderMarkers
-		c.Header.OffenderMarkers = &OffenderMarkersCopy
+		c.Header.OffenderMarkers = b.Header.OffenderMarkers
 	}
 
-	c.Header.BlockAuthorKey = b.Header.BlockAuthorKey
+	c.Header.AuthorIndex = b.Header.AuthorIndex
 
-	c.Header.VRFSignature = make([]byte, len(b.Header.VRFSignature))
-	copy(c.Header.VRFSignature, b.Header.VRFSignature)
+	copy(c.Header.EntropySource[:], b.Header.EntropySource[:])
 
-	c.Header.BlockSeal = make([]byte, len(b.Header.BlockSeal))
-	copy(c.Header.BlockSeal, b.Header.BlockSeal)
+	copy(c.Header.Seal[:], b.Header.Seal[:])
 
 	// Copy ExtrinsicData fields
 	c.Extrinsic.Tickets = make([]Ticket, len(b.Extrinsic.Tickets))
@@ -142,9 +137,9 @@ func (b *Block) Tickets() []Ticket {
 	return extrinsicData.Tickets
 }
 
-func (b *Block) PreimageLookups() []PreimageLookup {
+func (b *Block) PreimageLookups() []Preimages {
 	extrinsicData := b.Extrinsic
-	return extrinsicData.PreimageLookups
+	return extrinsicData.Preimages
 }
 
 func (b *Block) Guarantees() []Guarantee {
@@ -167,7 +162,6 @@ func (s *SBlock) Deserialize() (Block, error) {
 	if err != nil {
 		return Block{}, err
 	}
-
 	extrinsic, err := s.Extrinsic.Deserialize()
 	if err != nil {
 		return Block{}, err

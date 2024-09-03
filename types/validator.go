@@ -8,7 +8,7 @@ import (
 )
 
 type Validator struct {
-	Ed25519      common.Hash               `json:"ed25519"`
+	Ed25519      PublicKey                 `json:"ed25519"`
 	Bandersnatch common.Hash               `json:"bandersnatch"`
 	Bls          [BlsSizeInBytes]byte      `json:"bls"`
 	Metadata     [MetadataSizeInBytes]byte `json:"metadata"`
@@ -42,7 +42,7 @@ func (v Validator) GetBandersnatchKey() common.Hash {
 func (v Validator) Bytes() []byte {
 	// Initialize a byte slice with the required size
 	bytes := make([]byte, 0, ValidatorInByte)
-	bytes = append(bytes, v.Ed25519.Bytes()...)
+	bytes = append(bytes, v.Ed25519[:]...)
 	bytes = append(bytes, v.Bandersnatch.Bytes()...)
 	bytes = append(bytes, v.Bls[:]...)
 	bytes = append(bytes, v.Metadata[:]...)

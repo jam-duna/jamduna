@@ -27,7 +27,7 @@ type SValidator struct {
 }
 
 type SExtrinsic struct {
-	Attempt   int    `json:"attempt"`
+	Attempt   uint8  `json:"attempt"`
 	Signature string `json:"signature"`
 }
 type SSafroleAccumulator struct {
@@ -122,12 +122,14 @@ func (sv *SValidator) deserialize() (types.Validator, error) {
 	var metadataArray [types.MetadataSizeInBytes]byte
 	copy(metadataArray[:], sv.Metadata)
 
-	return types.Validator{
-		Ed25519:      common.HexToHash(sv.Ed25519),
+	v := types.Validator{
+		//Ed25519:      ed25519,
 		Bandersnatch: common.HexToHash(sv.Bandersnatch),
 		Bls:          blsArray,
 		Metadata:     metadataArray,
-	}, nil
+	}
+	copy(v.Ed25519[:], sv.Ed25519[:])
+	return v, nil
 }
 
 // Input to SInput
@@ -396,7 +398,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		ticketsAccumulator[idx] = accumulator
 	}
 
-	tickets := make([]*types.TicketBody, len(ss.TicketsOrKeys.Tickets))
+	var tickets [12]*types.TicketBody
 	for idx, sTicket := range ss.TicketsOrKeys.Tickets {
 		if len(sTicket.Id) != 66 {
 			return SafroleState{}, fmt.Errorf("invalid ticket id length - got %d expected %d", len(sTicket.Id), 66)
@@ -496,7 +498,7 @@ func (so *SOutput) deserialize() (Output, error) {
 				return Output{}, err
 			}
 
-			validators := make([]common.Hash, len(so.Ok.EpochMark.Validators))
+			var validators [6]common.Hash
 			for i, validator := range so.Ok.EpochMark.Validators {
 				decoded, err := hex.DecodeString(validator)
 				if err != nil {

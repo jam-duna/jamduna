@@ -14,8 +14,6 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/colorfulnotion/jam/common"
-
 	//"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 
@@ -47,7 +45,7 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	for i := uint32(0); i < numNodes; i++ {
 		addr := fmt.Sprintf(quicAddr, 9000+i)
 		peers[i] = addr
-		ed25519Key := validators[i].Ed25519.String()
+		ed25519Key := fmt.Sprintf("%x", validators[i].Ed25519)
 		peerList[ed25519Key] = NodeInfo{
 			PeerID:    i,
 			PeerAddr:  addr,
@@ -215,20 +213,33 @@ func TestWorkGuarantee(t *testing.T) {
 			importedSegments = append(importedSegments, exportedItem)
 		}
 		context := types.RefinementContext{}
+
+		// WorkPackage represents a work package.
+		/*type WorkPackage struct {
+			// $j$ - a simple blob acting as an authorization token
+			Authorization []byte `json:"authorization"`
+			// $h$ - the index of the service which hosts the authorization code
+			AuthCodeHost uint32 `json:"auth_code_host"`
+			// $c$ - an authorization code hash
+			Authorizer Authorizer `json:"authorizer"`
+			// $x$ - context
+			RefineContext RefinementContext `json:"context"`
+			// $i$ - a sequence of work items
+			WorkItems []WorkItem `json:"items"`
+		}*/
 		workPackage := types.WorkPackage{
-			AuthorizationToken: authToken,
-			ServiceIndex:       47,
-			AuthorizationCode:  common.BytesToHash([]byte{}),
-			ParamBlob:          []byte("0x"),
-			Context:            context,
+			Authorization: authToken,
+			AuthCodeHost:  47,
+			Authorizer:    types.Authorizer{},
+			RefineContext: context,
 			WorkItems: []types.WorkItem{
 				{
-					ServiceIdentifier: 47,
-					CodeHash:          codeHash,
-					Payload:           []byte("0x00000010"),
-					GasLimit:          10000000,
-					ImportedSegments:  importedSegments,
-					ExportCount:       1,
+					Service:          47,
+					CodeHash:         codeHash,
+					Payload:          []byte("0x00000010"),
+					GasLimit:         10000000,
+					ImportedSegments: importedSegments,
+					ExportCount:      1,
 				},
 			},
 		}

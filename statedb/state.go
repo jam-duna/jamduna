@@ -45,8 +45,8 @@ type Rho_state struct {
 
 // Types for Gamma
 type TicketsOrKeys struct {
-	Tickets []*types.TicketBody `json:"tickets,omitempty"`
-	Keys    []common.Hash       `json:"keys,omitempty"` //BandersnatchKey
+	Tickets [12]*types.TicketBody `json:"tickets,omitempty"`
+	Keys    []common.Hash         `json:"keys,omitempty"` //BandersnatchKey
 }
 
 type SafroleBasicState struct {
@@ -121,7 +121,7 @@ func (state *JamState) clearRhoByCore(core uint32) (r *Rho_state) {
 }
 
 // setRhoByWorkReport sets the Rho state for a specific core with a WorkReport and timeslot
-func (state *JamState) setRhoByWorkReport(core uint32, w types.WorkReport, t uint32) {
+func (state *JamState) setRhoByWorkReport(core uint16, w types.WorkReport, t uint32) {
 	state.AvailabilityAssignments[core] = &Rho_state{
 		WorkReport: w,
 		Timeslot:   t,

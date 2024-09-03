@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/codec"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 
@@ -184,7 +183,7 @@ func (vm *VM) hostInfo() uint32 {
 	}
 
 	e := []interface{}{t.CodeHash, t.Balance, t.GasLimitG, t.GasLimitM}
-	m, _ := codec.Encode(e)
+	m := types.Encode(e)
 	vm.writeRAMBytes(bo, m[:])
 
 	return OK
