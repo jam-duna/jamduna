@@ -4,12 +4,10 @@ import (
 	//"fmt"
 	// "github.com/colorfulnotion/jam/scale"
 	//"encoding/json"
+
 	"github.com/colorfulnotion/jam/common"
 	//"github.com/colorfulnotion/jam/trie"
 )
-
-type Ed25519Signature [64]byte
-type PublicKey [32]byte
 
 type BMTProof []common.Hash
 

@@ -3,13 +3,14 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
 type Vote struct {
-	Voting    bool     `json:"vote"`      // true for guilty, false for innocent
-	Index     uint16   `json:"index"`     // index of the vote in the list of votes (U16 in disputes.asn)
-	Signature [64]byte `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
+	Voting    bool             `json:"vote"`      // true for the work report is good, false for the work report is bad
+	Index     uint16           `json:"index"`     //validator index
+	Signature Ed25519Signature `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
 }
 
 type SVote struct {
@@ -65,4 +66,10 @@ func (s *SVote) Deserialize() (Vote, error) {
 		Index:     s.Index,
 		Signature: signature,
 	}, nil
+}
+
+func FormDispute(v map[common.Hash]Vote) Dispute {
+	//return nil dispute
+	_ = v
+	return Dispute{}
 }

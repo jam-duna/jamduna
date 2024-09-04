@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -15,7 +16,7 @@ type VerdictMarker struct {
 }
 
 type OffenderMarker struct {
-	OffenderKey []PublicKey `json:"offender_mark"`
+	OffenderKey []Ed25519Key `json:"offender_mark"`
 }
 
 type SOffenderMarker struct {
@@ -41,20 +42,20 @@ type SDispute struct {
 }
 
 type Verdict struct {
-	Target common.Hash `json:"target"`
-	Epoch  uint32      `json:"age"`
-	Votes  [5]Vote     `json:"votes"`
+	Target common.Hash                   `json:"target"`
+	Epoch  uint32                        `json:"age"`
+	Votes  [ValidatorsSuperMajority]Vote `json:"votes"`
 }
 
 type SVerdict struct {
 	Target common.Hash `json:"target"`
 	Epoch  uint32      `json:"age"`
-	Votes  [5]SVote    `json:"votes"`
+	Votes  []SVote     `json:"votes"`
 }
 
 type Culprit struct {
 	Target    common.Hash      `json:"target"`
-	Key       PublicKey        `json:"key"`
+	Key       Ed25519Key       `json:"key"`
 	Signature Ed25519Signature `json:"signature"`
 }
 
@@ -67,7 +68,7 @@ type SCulprit struct {
 type Fault struct {
 	Target    common.Hash      `json:"target"`
 	Voting    bool             `json:"vote"`
-	Key       PublicKey        `json:"key"`
+	Key       Ed25519Key       `json:"key"`
 	Signature Ed25519Signature `json:"signature"`
 }
 
@@ -118,7 +119,7 @@ func (a *Dispute) Hash() common.Hash {
 
 func (s *SFault) Deserialize() (Fault, error) {
 	keyBytes := common.FromHex(s.Key)
-	var key PublicKey
+	var key Ed25519Key
 	copy(key[:], keyBytes)
 	signatureBytes := common.FromHex(s.Signature)
 	var signature [64]byte
@@ -134,7 +135,7 @@ func (s *SFault) Deserialize() (Fault, error) {
 
 func (s *SCulprit) Deserialize() (Culprit, error) {
 	keyBytes := common.FromHex(s.Key)
-	var key PublicKey
+	var key Ed25519Key
 	copy(key[:], keyBytes)
 	signatureBytes := common.FromHex(s.Signature)
 	var signature [64]byte
@@ -148,7 +149,7 @@ func (s *SCulprit) Deserialize() (Culprit, error) {
 }
 
 func (s *SVerdict) Deserialize() (Verdict, error) {
-	votes := [5]Vote{}
+	votes := [2*TotalValidators/3 + 1]Vote{}
 	for i, sv := range s.Votes {
 		v, err := sv.Deserialize()
 		if err != nil {
@@ -199,7 +200,7 @@ func (s *SDispute) Deserialize() (Dispute, error) {
 }
 
 func (s *SOffenderMarker) Deserialize() (*OffenderMarker, error) {
-	keys := make([]PublicKey, len(s.OffenderKey))
+	keys := make([]Ed25519Key, len(s.OffenderKey))
 	for i, keyStr := range s.OffenderKey {
 		keyBytes := common.FromHex(keyStr)
 		copy(keys[i][:], keyBytes)

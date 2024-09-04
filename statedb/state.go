@@ -3,6 +3,7 @@ package statedb
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
@@ -31,10 +32,10 @@ type Beta_state struct {
 
 // Types for Psi
 type Psi_state struct {
-	Psi_g [][]byte          `json:"psi_g"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_b [][]byte          `json:"psi_b"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_w [][]byte          `json:"psi_w"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_o []types.PublicKey `json:"psi_o"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+	Psi_g [][]byte           `json:"psi_g"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_b [][]byte           `json:"psi_b"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_w [][]byte           `json:"psi_w"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_o []types.Ed25519Key `json:"psi_o"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
 }
 
 // Types for Rho

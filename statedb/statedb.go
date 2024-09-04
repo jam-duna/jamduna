@@ -7,14 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"sync"
+	"time"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
-	"sort"
-	"sync"
-	"time"
 )
 
 type Message struct {
@@ -147,6 +148,8 @@ func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
 func (s *StateDB) ProcessIncomingVote(v types.Vote) {
 	// get the disputes state
 	disp := s.GetJamState()
+
+	//TODO
 	err := disp.ValidateProposedVote(&v)
 	if err != nil {
 		fmt.Printf("Invalid dispute. Err=%v\n", err)
@@ -803,9 +806,7 @@ func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarante
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (types.VerdictMarker, types.OffenderMarker, map[uint32]*Rho_state, error) {
-	var VMark types.VerdictMarker
-	var OMark types.OffenderMarker
+func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (map[uint32]*Rho_state, error) {
 	cores := make(map[uint32]*Rho_state)
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
@@ -820,9 +821,15 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	}
 	//apply the dispute
 	var err error
-	VMark, OMark, err = s.JamState.Disputes(disputes)
+	result, err := d.IsValidateDispute(&disputes)
 	if err != nil {
-		return types.VerdictMarker{}, types.OffenderMarker{}, cores, err
+		return cores, err
+	}
+	//state changing here
+	d.ProcessDispute(result, disputes.Culprit, disputes.Fault)
+
+	if err != nil {
+		return cores, err
 	}
 
 	// Assurances: get the bitstring from the availability
@@ -850,7 +857,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	}
 	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
 
-	return VMark, OMark, cores, nil
+	return cores, nil
 }
 
 // given previous safrole, applt state transition using block
@@ -893,7 +900,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
 
-	_, _, cores, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
+	cores, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
 	if err != nil {
 		return s, err
 	}
@@ -1065,14 +1072,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	d := s.GetJamState()
-	needMarkerVerdicts := d.NeedsVerdictsMarker(targetJCE)
-	needMarkerOffenders := d.NeedsOffendersMarker(targetJCE)
-	if needMarkerVerdicts {
-		// TODO: 116 - b.Header.VerdictsMarkers
-	}
-	if needMarkerOffenders {
-		// TODO: 117 - b.Header.OffenderMarkers
-	}
+
 	// extrinsicData.Disputes = make([]types.Dispute, 0)
 	for _, v := range s.queuedVotes {
 		// TODO: use votes to make dispute d
@@ -1081,6 +1081,17 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		}
 		// extrinsicData.Disputes = append(extrinsicData.Disputes, d)
 	}
+	s.queuedVotes = make(map[common.Hash]types.Vote)
+	dispute := FormDispute(s.queuedVotes)
+	if d.NeedsOffendersMarker(&dispute) {
+		// Handle the case where the dispute does not need an offenders marker.
+		OffendMark, err := d.GetOffenderMark(dispute)
+		if err != nil {
+			return nil, err
+		}
+		h.OffenderMarkers = OffendMark.OffenderKey
+	}
+
 	// TODO: 103 Verdicts v must be ordered by report hash.
 	// TODO: 104 Offender signatures c and f must each be ordered by the validator’s Ed25519 key.
 	// TODO: 105 There may be no duplicate report hashes within the extrinsic, nor amongst any past reported hashes.

@@ -3,10 +3,12 @@ package types
 const (
 	BlsSizeInBytes            = 144
 	MetadataSizeInBytes       = 128
-	ExtrinsicSignatureInBytes = 784
+	ExtrinsicSignatureInBytes = 784 //RingSignatureLen
 	TicketsVerifierKeyInBytes = 144
 	ValidatorInByte           = 336
 	EntropySize               = 4
+	IETFSignatureLen          = 96
+	VRFOutputLen              = 32
 )
 
 const (
@@ -48,6 +50,10 @@ const (
 	PVMInitInputDataSize             = 1 << 24        // Z_I = 2^24: The standard pvm program initialization input data size. See equation A.7.
 	PVMInitPageSize                  = 1 << 14        // Z_P = 2^14: The standard pvm program initialization page size. See section A.7.
 	PVMInitSegmentSize               = 1 << 16        // Z_Q = 2^16: The standard pvm program initialization segment size. See section A.7.
+)
+
+const (
+	ValidatorsSuperMajority = int(2*TotalValidators/3 + 1)
 )
 
 //X: Signing Contexts.

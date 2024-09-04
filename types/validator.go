@@ -8,7 +8,7 @@ import (
 )
 
 type Validator struct {
-	Ed25519      PublicKey                 `json:"ed25519"`
+	Ed25519      Ed25519Key                `json:"ed25519"`
 	Bandersnatch common.Hash               `json:"bandersnatch"`
 	Bls          [BlsSizeInBytes]byte      `json:"bls"`
 	Metadata     [MetadataSizeInBytes]byte `json:"metadata"`
@@ -43,7 +43,7 @@ func (v Validator) Bytes() []byte {
 	// Initialize a byte slice with the required size
 	bytes := make([]byte, 0, ValidatorInByte)
 	bytes = append(bytes, v.Ed25519[:]...)
-	bytes = append(bytes, v.Bandersnatch.Bytes()...)
+	bytes = append(bytes, v.Bandersnatch[:]...)
 	bytes = append(bytes, v.Bls[:]...)
 	bytes = append(bytes, v.Metadata[:]...)
 	return bytes
@@ -114,4 +114,18 @@ func (v *Validator) UnmarshalJSON(data []byte) error {
 	copy(v.Metadata[:], metadataBytes)
 
 	return nil
+}
+
+func HexToBLS(hexStr string) [BlsSizeInBytes]byte {
+	b := common.Hex2Bytes(hexStr)
+	var bls [BlsSizeInBytes]byte
+	copy(bls[:], b)
+	return bls
+}
+
+func HexToMetadata(hexStr string) [MetadataSizeInBytes]byte {
+	b := common.Hex2Bytes(hexStr)
+	var meta [MetadataSizeInBytes]byte
+	copy(meta[:], b)
+	return meta
 }

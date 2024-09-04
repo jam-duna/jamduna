@@ -20,10 +20,8 @@ type BlockHeader struct {
 	EpochMark *EpochMark `json:"epoch_mark,omitempty"`
 	// H_w
 	TicketsMark [12]*TicketBody `json:"tickets_mark,omitempty"`
-	// H_j
-	VerdictsMarkers *VerdictMarker `json:"verdict_markers"` // renamed from judgement
 	// H_o
-	OffenderMarkers []PublicKey `json:"offenders_mark"`
+	OffenderMarkers []Ed25519Key `json:"offenders_mark"`
 	// H_i
 	AuthorIndex uint16 `json:"author_index"`
 	// H_v
@@ -87,8 +85,8 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 		TimeSlot:        b.Slot,
 		EpochMark:       b.EpochMark,
 		TicketsMark:     b.TicketsMark,
-		VerdictsMarkers: b.VerdictsMarkers,
-		//OffenderMarkers:    b.OffenderMarkers,
+		//VerdictsMarkers: b.VerdictsMarkers,
+		OffenderMarkers:    b.OffenderMarkers,
 		AuthorIndex: b.AuthorIndex,
 	}
 
@@ -111,7 +109,7 @@ type BlockHeaderWithoutSig struct {
 	EpochMark       *EpochMark      `json:"epoch_mark"`
 	TicketsMark     [12]*TicketBody `json:"tickets_mark"`
 	VerdictsMarkers *VerdictMarker  `json:"verdict_markers"`
-	OffenderMarkers *OffenderMarker `json:"offender_markers"`
+	OffenderMarkers []Ed25519Key	`json:"offender_markers"`
 	AuthorIndex     uint16          `json:"block_author_key"`
 }
 
@@ -124,9 +122,9 @@ func (s *SBlockHeader) Deserialize() (BlockHeader, error) {
 	tickets_mark := [12]*TicketBody{}
 	copy(tickets_mark[:], s.TicketsMark[:])
 
-	offenders_mark := make([]PublicKey, len(s.OffendersMark))
+	offenders_mark := make([]Ed25519Key, len(s.OffendersMark))
 	for i, v := range s.OffendersMark {
-		offenders_mark[i] = PublicKey(common.FromHex(v))
+		offenders_mark[i] = Ed25519Key(common.FromHex(v))
 	}
 
 	author_index := s.AuthorIndex

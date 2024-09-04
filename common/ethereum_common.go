@@ -62,6 +62,10 @@ func HexToHash(s string) Hash {
 	return Hash(ethereumCommon.HexToHash(s))
 }
 
+func Hex2Hash(s string) Hash {
+	return HexToHash(s)
+}
+
 // MarshalJSON custom marshaler to convert Hash to hex string.
 func (h Hash) MarshalJSON() ([]byte, error) {
 	return json.Marshal(h.Hex())

@@ -50,11 +50,12 @@ func (b *Block) Copy() *Block {
 	}
 	c.Header.TicketsMark = winningTicketsCopy
 
+/*
 	if b.Header.VerdictsMarkers != nil {
 		judgementsMarkersCopy := *b.Header.VerdictsMarkers
 		c.Header.VerdictsMarkers = &judgementsMarkersCopy
 	}
-
+*/
 	if b.Header.OffenderMarkers != nil {
 		c.Header.OffenderMarkers = b.Header.OffenderMarkers
 	}
