@@ -272,30 +272,30 @@ func getPublicKey(K []types.Validator, Index uint32) types.PublicKey {
 
 func checkSignature(v types.Verdict, pre_state JamState) error {
 	/*	for _, vote := range v.Votes {
-			// check the signature
-			sign_message := []byte{}
-			if vote.Voting {
-				sign_message = append([]byte(types.X_True), v.Target.Bytes()...)
-			} else {
-				sign_message = append([]byte(types.X_False), v.Target.Bytes()...)
-			}
-			if v.Epoch == pre_state.SafroleState.Timeslot/E {
 				// check the signature
+				sign_message := []byte{}
+				if vote.Voting {
+					sign_message = append([]byte(types.X_True), v.Target.Bytes()...)
+				} else {
+					sign_message = append([]byte(types.X_False), v.Target.Bytes()...)
+				}
+				if v.Epoch == pre_state.SafroleState.Timeslot/E {
+					// check the signature
 
-	//			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.CurrValidators, uint32(vote.Index))), sign_message, vote.Signature) {
-	//				return fmt.Errorf("Verdict Error: the signature of the voterId %v is invalid", vote.Index)
-	//			}
+		//			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.CurrValidators, uint32(vote.Index))), sign_message, vote.Signature) {
+		//				return fmt.Errorf("Verdict Error: the signature of the voterId %v is invalid", vote.Index)
+		//			}
 
-			} else if v.Epoch == pre_state.SafroleState.Timeslot/E-1 {
-				// check the signature
-				// to do : ask davxy , here should be sign by lambda
-	//			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))), sign_message, vote.Signature) {
-	//				return fmt.Errorf("Verdict Error: the signature of the voterId %v in verdict %v is invalid, validator %x", vote.Index, i, ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))))
-	//			}
-			} else {
-				return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, pre_state.SafroleState.Timeslot/E)
+				} else if v.Epoch == pre_state.SafroleState.Timeslot/E-1 {
+					// check the signature
+					// to do : ask davxy , here should be sign by lambda
+		//			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))), sign_message, vote.Signature) {
+		//				return fmt.Errorf("Verdict Error: the signature of the voterId %v in verdict %v is invalid, validator %x", vote.Index, i, ed25519.PublicKey(getPublicKey(pre_state.SafroleState.PrevValidators, uint32(vote.Index))))
+		//			}
+				} else {
+					return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, pre_state.SafroleState.Timeslot/E)
+				}
 			}
-		}
 	*/
 	return nil
 }

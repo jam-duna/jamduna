@@ -15,12 +15,21 @@ type WorkResult struct {
 
 type Result struct {
 	Ok  []byte `json:"ok,omitempty"`
-	Err string `json:"err,omitempty"`
+	Err uint8  `json:"err,omitempty"`
 }
+
+const (
+	RESULT_OK       = 0
+	RESULT_OOG      = 1
+	RESULT_PANIC    = 2
+	RESULT_BAD_CODE = 3
+	RESULT_OOB      = 4
+	RESULT_FAULT    = 5
+)
 
 type SResult struct {
 	Ok  string `json:"ok,omitempty"`
-	Err string `json:"err,omitempty"`
+	Err uint8  `json:"err,omitempty"`
 }
 
 type SWorkResult struct {

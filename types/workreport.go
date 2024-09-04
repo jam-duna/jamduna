@@ -21,16 +21,16 @@ import (
 
 type WorkReport struct {
 	AvailabilitySpec AvailabilitySpecifier `json:"availability"`
-	PackageSpec      WorkPackageSpec           `json:"packge_spec"`
-	RefineContext    RefinementContext         `json:"context"`
-	CoreIndex        uint16                    `json:"core_index"`
-	AuthorizerHash   common.Hash               `json:"authorizer_hash"`
-	AuthOutput       []byte                    `json:"auth_output"`
-	Results          []WorkResult              `json:"results"`
+	PackageSpec      WorkPackageSpec       `json:"packge_spec"`
+	RefineContext    RefinementContext     `json:"context"`
+	CoreIndex        uint16                `json:"core_index"`
+	AuthorizerHash   common.Hash           `json:"authorizer_hash"`
+	AuthOutput       []byte                `json:"auth_output"`
+	Results          []WorkResult          `json:"results"`
 }
 
 type SWorkReport struct {
-	PackageSpec    WorkPackageSpec   `json:"packge_spec"`
+	PackageSpec    WorkPackageSpec   `json:"package_spec"`
 	RefineContext  RefinementContext `json:"context"`
 	CoreIndex      uint16            `json:"core_index"`
 	AuthorizerHash common.Hash       `json:"authorizer_hash"`

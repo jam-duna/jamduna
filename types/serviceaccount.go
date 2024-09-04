@@ -14,11 +14,10 @@ const (
 )
 
 const (
-	EntryPointGeneric    = ""
-	EntryPointRefine     = "refine"
-	EntryPointAccumulate = "accumulate"
-	EntryPointOnTransfer = "on_transfer"
-	EntryPointAuthorize  = "authorization"
+	EntryPointRefine     = 0
+	EntryPointAccumulate = 1
+	EntryPointOnTransfer = 2
+	EntryPointGeneric    = 255
 )
 
 const (

@@ -40,6 +40,7 @@ type VM struct {
 	code                []byte
 	bitmask             string // K in GP
 	pc                  uint32 // Program counter
+	resultCode          uint8
 	terminated          bool
 	hostCall            bool   // ̵h in GP
 	host_func_id        uint32 // h in GP
@@ -360,8 +361,8 @@ func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, host
 }
 
 // Execute runs the program until it terminates
-func (vm *VM) Execute(entryPoint string) error {
-	if len(entryPoint) > 0 {
+func (vm *VM) Execute(entryPoint int) error {
+	if entryPoint >= 0 && entryPoint <= 2 {
 		// TODO: lookup entrypoint in jump table
 	}
 	for !vm.terminated {
@@ -414,8 +415,12 @@ func (vm *VM) SetArgumentInputs(a []byte) error {
 func (vm *VM) GetArgumentOutputs() (r types.Result, res uint32) {
 	o, _ := vm.readRegister(10)
 	l, _ := vm.readRegister(11)
+
 	output, res := vm.readRAMBytes(o, int(l))
-	r.Ok = output
+	r.Err = vm.resultCode
+	if r.Err == types.RESULT_OK {
+		r.Ok = output
+	}
 	return r, res
 }
 
@@ -437,6 +442,11 @@ func (vm *VM) step() error {
 	switch instr {
 	case TRAP, FALLTHROUGH:
 		fmt.Printf("TERMINATED\n")
+		if instr == TRAP {
+			vm.resultCode = types.RESULT_PANIC
+		} else {
+			vm.resultCode = types.RESULT_OK
+		}
 		vm.terminated = true
 	case JUMP:
 		errCode := vm.branch([]byte{1, operands[0]})
@@ -468,7 +478,10 @@ func (vm *VM) step() error {
 		vm.pc += 1 + len_operands
 
 		fmt.Printf("TERMINATED\n")
-		vm.terminated = true
+		if errCode != OK {
+			vm.resultCode = types.RESULT_FAULT
+			vm.terminated = true
+		}
 	case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32:
 		errCode := vm.storeImm(opcode, operands)
 		fmt.Println("Error: ", errCode)
@@ -535,6 +548,7 @@ func (vm *VM) step() error {
 		break
 	default:
 		vm.terminated = true
+		vm.resultCode = types.RESULT_PANIC
 		fmt.Printf("----\n")
 		return nil
 		/* Handle host call
@@ -667,11 +681,12 @@ func (vm *VM) djump(operands []byte) uint32 {
 
 	if valueA == uint32((1<<32)-(1<<16)) {
 		fmt.Printf("TERMINATED\n")
+		vm.resultCode = types.RESULT_OK
 		vm.terminated = true
 	} else if valueA == 0 || valueA > vx*Za || valueA%Za != 0 || exists {
+		vm.resultCode = types.RESULT_OOB
 		vm.terminated = true
 		return OOB
-
 	} else {
 		vm.pc = vm.pc + target
 	}

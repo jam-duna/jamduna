@@ -171,6 +171,11 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
+func NewNode(nodeName string, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo) (*Node, error) {
+	n, err := newNode(0, credential, genesisConfig, peers, peerList, ValidatorFlag)
+	return n, err
+}
+
 func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string) (*Node, error) {
 	path := fmt.Sprintf("/tmp/log/testdb%d", id)
 	store, err := storage.NewStateDBStorage(path)
@@ -1069,11 +1074,11 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 		// setup work results
 		// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
 		result := types.WorkResult{
-			Service:                workItem.Service,
-			CodeHash:               workItem.CodeHash,
-			PayloadHash:            common.Blake2Hash(workItem.Payload),
-			GasRatio: 0,
-			Result:                 output,
+			Service:     workItem.Service,
+			CodeHash:    workItem.CodeHash,
+			PayloadHash: common.Blake2Hash(workItem.Payload),
+			GasRatio:    0,
+			Result:      output,
 		}
 		results = append(results, result)
 	}
@@ -1096,7 +1101,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 		CoreIndex:        n.coreIndex,
 		//	Output:               result.Output,
 		RefineContext: refinementContext,
-		Results: results,
+		Results:       results,
 	}
 
 	// Create a GuaranteeCredential with the signature and a mock validator index
