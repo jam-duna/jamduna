@@ -1089,9 +1089,11 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 	refinementContext := types.RefineContext{
 		Anchor:           common.HexToHash("0x123abc"),           // TODO
 		StateRoot:        n.statedb.Block.Header.ParentStateRoot, // TODO
+		//StateRoot:      common.HexToHash("0x"),
 		BeefyRoot:        common.HexToHash("0x"),                 // SKIP
 		LookupAnchor:     n.statedb.ParentHash,                   // TODO
 		LookupAnchorSlot: n.statedb.Block.Header.Slot,
+		//LookupAnchorSlot: uint32(0),
 		Prerequisite:     &types.Prerequisite{common.HexToHash("0x")}, //common.HexToHash("0x"), // SKIP
 	}
 
@@ -1114,8 +1116,9 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 	copy(credential.Signature[:], sig[:])
 	// Create a Guarantee with the WorkReport, TimeSlot, and Credentials
 	guarantee := types.Guarantee{
-		Report:     workReport,
-		Slot:       n.statedb.Block.TimeSlot(),
+		Report: workReport,
+		// Slot:       n.statedb.Block.TimeSlot(),
+		Slot:       uint32(0),
 		Signatures: []types.GuaranteeCredential{credential},
 	}
 	// This will be received by all validators

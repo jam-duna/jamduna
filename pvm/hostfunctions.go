@@ -1,7 +1,6 @@
 package pvm
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -821,22 +820,18 @@ func (vm *VM) SetExport(updated_e [][]byte) {
 
 // Export segment host-call
 func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
-	// (b) export  - which appends "z" items of size W_S from a section of RAM (e.g. holding the bytes "9") into e
+	/*
+		need to get
+			ς
+		properly
+	*/
 	p, _ := vm.readRegister(0)
 	z, _ := vm.readRegister(1)
 	if z > (W_C * W_S) {
 		z = W_C * W_S
 	}
-	e := vm.GetExport()
-	for i := uint32(0); i < z; i += 1 {
-		// chunk, errCode := vm.readRAMBytes(p+i*W_S, W_S)
-		// if errCode == OOB {
-		// 	vm.writeRegister(0, OOB)
-		// 	return FULL, [][]byte{}
-		// }
-		chunk := bytes.Repeat([]byte{9}, W_S) // RAM holding the bytes "9"
-		e[i] = chunk
-	}
+
+	e := vm.Exports
 
 	x, errCode := vm.readRAMBytes(p, int(z))
 	if errCode == OOB {
@@ -844,20 +839,23 @@ func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 		return OOB, e
 	}
 
-	// apply eq(187) zero-padding function
-	length := (W_C * W_S) - (((z + (W_C*W_S - 1)) % (W_C * W_S)) + 1)
-	byteSequence := make([]byte, length)
-	x = append(x, byteSequence...)
+	/*  apply eq(187) zero-padding function:
 
-	// if len(e) >= WX return FULL
-	// where ... const W_X = 1024
+	And P is the zero-padding function to take an octet array to some multiple of n in length:
+	(187) 	P n∈N 1∶ ∶{ Y → Y k⋅n
+			x ↦ x ⌢ [0, 0, ...] ((∣x∣+n−1) mod n)+1...n
+	*/
+	n := (W_C * W_S)
+	length := n - ((len(x) + n - 1) % n) + 1
+	zeroSequence := make([]byte, length)
+	x = append(x, zeroSequence...)
 
-	sigma := uint32(0)                // Assume sigma=0
-	if sigma+uint32(len(e)) >= 1024 { // W_X
+	ς := uint32(0)               // Assume ς (sigma, Represent segment offset), need to get ς properly
+	if ς+uint32(len(e)) >= W_X { // W_X
 		vm.writeRegister(0, FULL)
 		return FULL, e
 	} else {
-		vm.writeRegister(0, sigma+uint32(len(e)))
+		vm.writeRegister(0, ς+uint32(len(e)))
 		e = append(e, x)
 		vm.SetExport(e)
 		// errCode = vm.hostenv.ExportSegment(x)

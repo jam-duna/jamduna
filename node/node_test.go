@@ -14,7 +14,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	//"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 
 	"github.com/colorfulnotion/jam/types"
@@ -196,7 +196,7 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 
 	// fib code
-	code, err := loadByteCode("../jamtestvectors/workpackages/fib.pvm")
+	code, err := loadByteCode("../jamtestvectors/workpackages/fib-refine-fixed.pvm")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -245,6 +245,7 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 		packageHash := workPackage.Hash()
 		for _, n := range nodes {
+			fmt.Println("Node ID:", n.id)
 			if n.coreIndex == 0 {
 				specifier, err := n.processWorkPackage(workPackage)
 				if err != nil {
@@ -282,4 +283,15 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 	}
 
+}
+
+func TestCodeParse(t *testing.T) {
+
+	// fib code
+	code, err := loadByteCode("../jamtestvectors/workpackages/fib_latest.pvm")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	fmt.Println("Code:", code)
+	pvm.NewVMFromParseProgramTest(code)
 }

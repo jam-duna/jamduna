@@ -1,0 +1,33 @@
+pub @refine:
+    @import_12_byte_record:
+    ra = 1
+    sp = 0xFEFE0000
+    t0 = 12
+    ecalli 16
+    sp = 0
+    jump @init if ra != sp
+
+    @fibsum:
+    sp = u32[0xFEFE0004]
+    t0 = u32[0xFEFE0008]
+    u32[0xFEFE0008] = sp
+    sp = sp + t0
+    u32[0xFEFE0004] = sp
+
+    t1 = 1
+    ra = u32[0xFEFE0000]
+    ra = ra + t1
+    u32[0xFEFE0000] = ra
+    jump @export_12_byte_record
+
+    @export_12_byte_record:
+    ra = 0xFEFE0000
+    sp = 12
+    ecalli 17
+    trap
+
+    @init:
+    u32 [0xFEFE0000] = 0x00000001
+    u32 [0xFEFE0004] = 0x00000001
+    u32 [0xFEFE0008] = 0x00000000
+    jump @fibsum

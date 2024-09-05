@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
@@ -11,9 +12,9 @@ import (
 
 const (
 	regSize  = 13
-	numCores = 341
-	W_C      = 642
-	W_S      = 6
+	numCores = types.TotalCores
+	W_C      = types.W_C
+	W_S      = types.W_S
 	W_X      = 1024
 	M        = 128
 	V        = 1023
@@ -270,7 +271,25 @@ const (
 	BIG = 3333
 )
 
+func value_check(value []byte) []byte {
+	if len(value) == 0 {
+		return []byte{0}
+	}
+	return value
+}
+
+func E_decode(byte_value []byte) uint64 {
+	// only supprot 2, 1 byte decode
+	byte_len := uint64(len(byte_value))
+	if byte_len == 2 {
+		result := uint64(int(byte_value[0]-128))*256 + uint64(byte_value[1])
+		return result
+	}
+	return 0
+}
+
 func parseProgram(p []byte) *Program {
+	// helpful funtion
 	reverseString := func(s string) string {
 		runes := []rune(s)
 		for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
@@ -279,25 +298,68 @@ func parseProgram(p []byte) *Program {
 		return string(runes)
 	}
 
-	fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], p[2])
-	kBytes := p[3+p[0]+p[2]:]
-	var kCombined string
-	for _, b := range kBytes {
-		binaryStr := fmt.Sprintf("%08b", b)
-		kCombined += reverseString(binaryStr)
-	}
-	if len(kCombined) > int(p[2]) {
-		kCombined = kCombined[:int(p[2])]
-	}
+	// Remove [80, 86, 77], this means "PVM" in Ascii
+	p = p[3:]
+	// Remove [0, 1, 5], this may represent version information
+	p = p[3:]
 
-	return &Program{
-		JSize: int(p[0]),
-		Z:     int(p[1]),
-		CSize: int(p[2]),
-		J:     p[3 : 3+p[0]],
-		Code:  p[3+p[0] : 3+p[0]+p[2]],
-		K:     []string{kCombined},
+	// Koute's PVM assembler will encode all @funtion name in to Ascii code, and insert it in front of program, so we have to remove them
+	var functionNameLength uint32
+
+	if len(p) > (1 << 14) {
+		fmt.Println("Currently not support program size larger than 2^14")
+
+	} else if len(p) > 256 {
+		functionNameLength = uint32(E_decode(p[0:2]))
+		p = p[2+1+2+functionNameLength:] // remove function name byte code
+		Csize := E_decode(p[2:4])
+		fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], Csize)
+		kBytes := p[1+1+2+Csize:]
+		var kCombined string
+		for _, b := range kBytes {
+			binaryStr := fmt.Sprintf("%08b", b)
+			kCombined += reverseString(binaryStr)
+		}
+		if len(kCombined) > int(p[2]) {
+			kCombined = kCombined[:int(p[2])]
+		}
+		program := &Program{
+			JSize: int(p[0]),
+			Z:     int(p[1]),
+			CSize: int(Csize),
+			J:     p[1+1+2 : 1+1+2+p[0]],
+			Code:  p[1+1+2+p[0] : uint32(1+1+2+p[0])+uint32(Csize)],
+			K:     []string{kCombined},
+		}
+		return program
+
+	} else {
+		functionNameLength = uint32(p[0])
+		p = p[1+1+1+functionNameLength:] // remove function name byte code
+		fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], p[2])
+		kBytes := p[3+p[0]+p[2]:]
+		var kCombined string
+		for _, b := range kBytes {
+			binaryStr := fmt.Sprintf("%08b", b)
+			kCombined += reverseString(binaryStr)
+		}
+		if len(kCombined) > int(p[2]) {
+			kCombined = kCombined[:int(p[2])]
+		}
+		program := &Program{
+			JSize: int(p[0]),
+			Z:     int(p[1]),
+			CSize: int(p[2]),
+			J:     p[3 : 3+p[0]],
+			Code:  p[3+p[0] : 3+p[0]+p[2]],
+			K:     []string{kCombined},
+		}
+		return program
+
 	}
+	fmt.Println("Failed to parse program!!")
+	return nil
+
 }
 
 // NewVM initializes a new VM with a given program
@@ -326,6 +388,12 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 	}
 	copy(vm.register, initialRegs)
 	return vm
+}
+
+func NewVMFromParseProgramTest(code []byte) {
+	p := parseProgram(code)
+	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
+	fmt.Println("================================================================")
 }
 
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv) *VM {
@@ -449,7 +517,18 @@ func (vm *VM) step() error {
 		}
 		vm.terminated = true
 	case JUMP:
-		errCode := vm.branch([]byte{1, operands[0]})
+		// handle no operand means 0
+		var vx int64
+		if len(operands) < 1 {
+			vx = int64(0)
+		} else {
+			lx := minInt(4, len(operands))
+			vx_raw := little_endian_to_uint(operands[0:lx])
+			vx = int64(vm.pc) + z_encode(uint32(vx_raw), uint32(lx))
+		}
+		fmt.Println("Jump to: ", vx)
+
+		errCode := vm.branch(uint64(vx), true)
 		fmt.Println("Error: ", errCode)
 		// vm.writeRegister(0, errCode)
 	case JUMP_IND:
@@ -853,6 +932,8 @@ func (vm *VM) storeImm(opcode byte, operands []byte) uint32 {
 	address := get_elided_uint32(operands[1:(1 + lx)])
 	value := operands[(1 + lx):]
 	value = reverseBytes(value)
+	// handle no operand means 0
+	value = value_check(value)
 	fmt.Printf("Set address %d, with value: %x\n", address, value)
 
 	switch opcode {
@@ -870,14 +951,22 @@ func (vm *VM) storeImm(opcode byte, operands []byte) uint32 {
 // load_imm (opcode 4)
 func (vm *VM) loadImm(operands []byte) uint32 {
 	registerIndex := int(operands[0])
-	immediate := get_elided_uint32(operands[1:])
+	// handle no operand means 0
+	var immediate uint32
+	if len(operands) < 2 {
+		immediate = uint32(0)
+	} else {
+		immediate = get_elided_uint32(operands[1:])
+	}
 	return vm.writeRegister(registerIndex, immediate)
 }
 
 // LOAD_U8, LOAD_U16, LOAD_U32
 func (vm *VM) load(opcode byte, operands []byte) uint32 {
 	registerIndex := int(operands[0])
-	address := get_elided_uint32(operands[1:])
+	// handle no operand means 0
+	var address uint32
+	address = binary.LittleEndian.Uint32(operands[1:])
 
 	switch opcode {
 	case LOAD_U8:
@@ -893,14 +982,14 @@ func (vm *VM) load(opcode byte, operands []byte) uint32 {
 			return errCode
 		}
 		fmt.Printf(" LOAD_u16: %d %v\n", address, value)
-		return vm.writeRegister(registerIndex, uint32(binary.BigEndian.Uint16(value)))
+		return vm.writeRegister(registerIndex, uint32(binary.LittleEndian.Uint16(value)))
 	case LOAD_U32:
 		value, errCode := vm.readRAMBytes(address, 4)
 		if errCode != OK {
 			return errCode
 		}
 		fmt.Printf(" LOAD_u32: %d %v\n", address, value)
-		return vm.writeRegister(registerIndex, uint32(binary.BigEndian.Uint32(value)))
+		return vm.writeRegister(registerIndex, uint32(binary.LittleEndian.Uint32(value)))
 	}
 	return OK
 }
@@ -910,6 +999,9 @@ func get_elided_uint32(o []byte) uint32 {
 	Immediate arguments are encoded in little-endian format with the most-significant bit being the sign bit.
 	They may be compactly encoded by eliding more significant octets. Elided octets are assumed to be zero if the MSB of the value is zero, and 255 otherwise.
 	*/
+	if len(o) == 0 {
+		return 0
+	}
 
 	if len(o) < 4 {
 		newNumbers := make([]byte, 4)
@@ -964,8 +1056,14 @@ func (vm *VM) store(opcode byte, operands []byte) uint32 {
 	if errCode != OK {
 		return errCode
 	}
+	// handle no operand means 0
+	var address uint32
+	if len(operands) < 2 {
+		address = uint32(0)
+	} else {
+		address = get_elided_uint32(operands[1:])
+	}
 
-	address := get_elided_uint32(operands[1:])
 	switch opcode {
 	case STORE_U8:
 		b8 := []byte{byte(value & 0xFF)}
@@ -973,12 +1071,12 @@ func (vm *VM) store(opcode byte, operands []byte) uint32 {
 		return vm.writeRAMBytes(address, b8)
 	case STORE_U16:
 		b16 := make([]byte, 2)
-		binary.BigEndian.PutUint16(b16, uint16(value&0xFFFF))
+		binary.LittleEndian.PutUint16(b16, uint16(value&0xFFFF))
 		fmt.Printf(" STORE_U16: %d %v\n", address, b16)
 		return vm.writeRAMBytes(address, b16)
 	case STORE_U32:
 		b32 := make([]byte, 4)
-		binary.BigEndian.PutUint32(b32, value)
+		binary.LittleEndian.PutUint32(b32, value)
 		fmt.Printf(" STORE_U32: %d %v\n", address, b32)
 		return vm.writeRAMBytes(address, b32)
 	}
@@ -997,11 +1095,11 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) uint32 {
 		return vm.writeRAMBytes(address, b8)
 	case STORE_IMM_IND_U16:
 		b16 := make([]byte, 2)
-		binary.BigEndian.PutUint16(b16, uint16(immediate&0xFFFF))
+		binary.LittleEndian.PutUint16(b16, uint16(immediate&0xFFFF))
 		return vm.writeRAMBytes(address, b16)
 	case STORE_IMM_IND_U32:
 		b32 := make([]byte, 4)
-		binary.BigEndian.PutUint32(b32, immediate)
+		binary.LittleEndian.PutUint32(b32, immediate)
 		return vm.writeRAMBytes(address, b32)
 	}
 	return OOB
@@ -1062,105 +1160,93 @@ func (vm *VM) sbrk(operands []byte) error {
 	return nil
 }
 
-func (vm *VM) branch(operands []byte) uint32 {
-	if len(operands) != 2 {
-		return OOB
-	}
-	condition := operands[0]
-	target := uint32(operands[1])
+func (vm *VM) branch(vx uint64, condition bool) uint32 {
 
-	// Implement the condition checking and branch logic here
-	if condition != 0 {
-		if target >= uint32(len(vm.code)) {
-			return OOB
-		}
-		vm.pc = vm.pc + target
+	if condition {
+		vm.pc = uint32(vx)
 	}
 	return OK
 }
 
 func (vm *VM) branchCond(opcode byte, operands []byte) uint32 {
 	registerIndexA := minInt(12, int(operands[0])%16)
-	immIndexX := minInt(4, int(operands[0])/16)
-	immIndexY := minInt(4, (len(operands)-immIndexX-1)%256)
-	vx := get_elided_uint32(operands[1 : 1+immIndexX])
-	vy := get_elided_uint32(operands[1+immIndexX : 1+immIndexX+immIndexY])
+	lx := minInt(4, int(operands[0])/16)
+	ly := minInt(4, maxInt(0, len(operands)-lx-1))
+	vx := get_elided_uint32(operands[1 : 1+lx])
+	vy := get_elided_uint32(operands[1+lx : 1+lx+ly])
 
 	valueA, errCode := vm.readRegister(registerIndexA)
 	if errCode != OK {
 		return errCode
 	}
 
-	if uint32(immIndexY) >= uint32(len(vm.code)) {
-		return OOB
-	}
 	switch opcode {
 	case BRANCH_EQ_IMM:
 		if byte(valueA) == byte(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_NE_IMM:
 		if byte(valueA) != byte(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_LT_U_IMM:
 		if uint(valueA) < uint(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_LT_S_IMM:
 		if int32(valueA) < int32(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_LE_U_IMM:
 		if uint(valueA) <= uint(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_LE_S_IMM:
 		if int32(valueA) <= int32(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_GE_U_IMM:
 		if uint(valueA) >= uint(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_GE_S_IMM:
 		if int32(valueA) >= int32(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_GT_U_IMM:
 		if uint(valueA) > uint(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_GT_S_IMM:
 		if int32(valueA) > int32(vx) {
-			vm.branch([]byte{1, byte(vy)})
+			vm.branch(uint64(vy), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
@@ -1198,7 +1284,13 @@ func (vm *VM) loadInd(opcode byte, operands []byte) uint32 {
 	if errCode != OK {
 		return errCode
 	}
-	immediate := get_elided_uint32(operands[1:])
+	// handle no operand means 0
+	var immediate uint32
+	if len(operands) < 2 {
+		immediate = uint32(0)
+	} else {
+		immediate = get_elided_uint32(operands[1:])
+	}
 
 	address := wB + immediate
 	switch opcode {
@@ -1224,19 +1316,19 @@ func (vm *VM) loadInd(opcode byte, operands []byte) uint32 {
 			return errCode
 
 		}
-		return vm.writeRegister(destRegisterIndex, uint32(binary.BigEndian.Uint16(value)))
+		return vm.writeRegister(destRegisterIndex, uint32(binary.LittleEndian.Uint16(value)))
 	case LOAD_IND_I16:
 		value, errCode := vm.readRAMBytes(address, 2)
 		if errCode != OK {
 			return errCode
 		}
-		return vm.writeRegister(destRegisterIndex, uint32(binary.BigEndian.Uint16(value)))
+		return vm.writeRegister(destRegisterIndex, uint32(binary.LittleEndian.Uint16(value)))
 	case LOAD_IND_U32:
 		value, errCode := vm.readRAMBytes(address, 4)
 		if errCode != OK {
 			return errCode
 		}
-		return vm.writeRegister(destRegisterIndex, uint32(binary.BigEndian.Uint32(value)))
+		return vm.writeRegister(destRegisterIndex, uint32(binary.LittleEndian.Uint32(value)))
 	}
 	return OOB
 }
@@ -1250,7 +1342,15 @@ func splitRegister(operand byte) (int, int) {
 // Implement ALU operations with immediate values
 func (vm *VM) aluImm(opcode byte, operands []byte) uint32 {
 	registerIndexD, registerIndexA := splitRegister(operands[0])
-	immediate := get_elided_uint32(operands[1:])
+
+	// handle no operand means 0
+	var immediate uint32
+	if len(operands) < 2 {
+		immediate = uint32(0)
+	} else {
+		immediate = get_elided_uint32(operands[1:])
+	}
+
 	fmt.Printf("a=%d d=%d immediate=%d\n", registerIndexA, registerIndexD, immediate)
 
 	valueA, errCode := vm.readRegister(registerIndexA)
@@ -1283,7 +1383,14 @@ func (vm *VM) aluImm(opcode byte, operands []byte) uint32 {
 			result = 0
 		}
 	case SET_LT_S_IMM:
-		immediate0 := get_elided_uint32(operands[1:]) // use get_elided_int32() will return a negative value
+
+		// handle no operand means 0
+		var immediate0 uint32
+		if len(operands) < 2 {
+			immediate0 = uint32(0)
+		} else {
+			immediate0 = get_elided_uint32(operands[1:]) // use get_elided_int32() will return a negative value
+		}
 
 		if int32(valueA) < int32(immediate0) {
 			result = 1
@@ -1299,7 +1406,13 @@ func (vm *VM) aluImm(opcode byte, operands []byte) uint32 {
 // Implement cmov_nz_imm, cmov_nz_imm
 func (vm *VM) cmovImm(opcode byte, operands []byte) uint32 {
 	registerIndexA, registerIndexB := splitRegister(operands[0])
-	immediate := get_elided_uint32(operands[1:])
+	// handle no operand means 0
+	var immediate uint32
+	if len(operands) < 2 {
+		immediate = uint32(0)
+	} else {
+		immediate = get_elided_uint32(operands[1:])
+	}
 	fmt.Printf("a=%d b=%d immediate=%d\n", registerIndexA, registerIndexB, immediate)
 
 	valueA, errCode := vm.readRegister(registerIndexA)
@@ -1336,7 +1449,13 @@ func (vm *VM) cmovImm(opcode byte, operands []byte) uint32 {
 // Implement shift operations with immediate values
 func (vm *VM) shiftImm(opcode byte, operands []byte) uint32 {
 	registerIndexB, registerIndexA := splitRegister(operands[0])
-	immediate := get_elided_uint32(operands[1:])
+	// handle no operand means 0
+	var immediate uint32
+	if len(operands) < 2 {
+		immediate = uint32(0)
+	} else {
+		immediate = get_elided_uint32(operands[1:])
+	}
 
 	valueA, errCode := vm.readRegister(registerIndexA)
 	if errCode != OK {
@@ -1368,7 +1487,13 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint32 {
 		mask := int32((1<<valueA)-1) << (32 - valueA)
 		result |= uint32(mask)
 	case SET_GT_S_IMM:
-		immediate2 := get_elided_uint32(operands[1:]) // use get_elided_int32() will return a negative value
+		// handle no operand means 0
+		var immediate2 uint32
+		if len(operands) < 2 {
+			immediate2 = uint32(0)
+		} else {
+			immediate2 = get_elided_uint32(operands[1:]) // use get_elided_int32() will return a negative value
+		}
 		if int32(valueA) > int32(immediate2) {
 			result = 1
 		} else {
@@ -1388,6 +1513,33 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint32 {
 	return vm.writeRegister(registerIndexB, result)
 }
 
+func little_endian_to_uint(a []byte) uint32 {
+	if len(a) == 1 {
+		return uint32(a[0])
+	} else if len(a) == 2 {
+		return uint32(binary.LittleEndian.Uint16(a))
+	} else if len(a) == 4 {
+		return uint32(binary.LittleEndian.Uint32(a))
+	} else {
+		return 0
+	}
+}
+
+// GP_.0.3.6(219)
+func z_encode(a uint32, n uint32) int64 {
+	modValue := uint32(1 << (8*n - 1))
+	if a < modValue {
+		return int64(a)
+	} else {
+		return int64(a) - int64(1<<(8*n))
+	}
+}
+
+// GP_.0.3.6(220)
+func z_decode(a int64, n uint32) uint64 {
+	return (uint64(math.Pow(2, float64(8*n))) + uint64(a)) % uint64(math.Pow(2, float64(8*n)))
+}
+
 // Implement branch logic for two registers and one offset
 func (vm *VM) branchReg(opcode byte, operands []byte) uint32 {
 	if len(operands) != 2 {
@@ -1396,12 +1548,10 @@ func (vm *VM) branchReg(opcode byte, operands []byte) uint32 {
 
 	registerIndexA := minInt(12, int(operands[0])%16)
 	registerIndexB := minInt(12, int(operands[0])/16)
+	l := uint32(operands[1])
 
-	offset := uint32(operands[1])
-
-	fmt.Print("registerIndexA: ", registerIndexA)
-	fmt.Print("  registerIndexB: ", registerIndexB)
-	fmt.Println("  jump step: ", offset)
+	lx := minInt(4, maxInt(0, len(operands)-1))
+	vx := int64(vm.pc) + z_encode(uint32(l), uint32(lx))
 
 	valueA, errCode := vm.readRegister(registerIndexA)
 	if errCode != OK {
@@ -1415,42 +1565,42 @@ func (vm *VM) branchReg(opcode byte, operands []byte) uint32 {
 	switch opcode {
 	case BRANCH_EQ:
 		if valueA == valueB {
-			vm.branch([]byte{1, byte(offset)})
+			vm.branch(uint64(vx), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_NE:
 		if valueA != valueB {
-			vm.branch([]byte{1, byte(offset)})
+			vm.branch(uint64(vx), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_LT_U:
 		if uint(valueA) < uint(valueB) {
-			vm.branch([]byte{1, byte(offset)})
+			vm.branch(uint64(vx), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_LT_S:
 		if int32(valueA) < int32(valueB) {
-			vm.branch([]byte{1, byte(offset)})
+			vm.branch(uint64(vx), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_GE_U:
 		if uint(valueA) >= uint(valueB) {
-			vm.branch([]byte{1, byte(offset)})
+			vm.branch(uint64(vx), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
 		}
 	case BRANCH_GE_S:
 		if int32(valueA) >= int32(valueB) {
-			vm.branch([]byte{1, byte(offset)})
+			vm.branch(uint64(vx), true)
 		} else {
 			vm.pc += uint32(1 + len(operands))
 			return OK
