@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -14,6 +15,15 @@ type ExtrinsicData struct {
 	Preimages  []Preimages `json:"preimages"`
 	Assurances []Assurance `json:"assurances"`
 	Guarantees []Guarantee `json:"guarantees"`
+}
+
+// for codec
+type CExtrinsicData struct {
+	Tickets    []Ticket     `json:"tickets"`
+	Disputes   Dispute      `json:"disputes"`
+	Preimages  []Preimages  `json:"preimages"`
+	Assurances []Assurance  `json:"assurances"`
+	Guarantees []CGuarantee `json:"guarantees"`
 }
 
 type SExtrinsicData struct {
@@ -47,42 +57,42 @@ func (e *ExtrinsicData) Hash() common.Hash {
 	return common.BytesToHash(common.ComputeHash(data))
 }
 
-func (s *SExtrinsicData) Deserialize() (ExtrinsicData, error) {
+func (s *SExtrinsicData) Deserialize() (CExtrinsicData, error) {
 	tickets := make([]Ticket, len(s.Tickets))
 	var err error
 	for i, ticket := range s.Tickets {
 		tickets[i], err = ticket.Deserialize()
 		if err != nil {
-			return ExtrinsicData{}, err
+			return CExtrinsicData{}, err
 		}
 	}
 	disputes, err := s.Disputes.Deserialize()
 	if err != nil {
-		return ExtrinsicData{}, err
+		return CExtrinsicData{}, err
 	}
 	preimages := make([]Preimages, len(s.Preimages))
 	for i, preimage := range s.Preimages {
 		preimages[i], err = preimage.Deserialize()
 		if err != nil {
-			return ExtrinsicData{}, err
+			return CExtrinsicData{}, err
 		}
 	}
 	assurances := make([]Assurance, len(s.Assurances))
 	for i, assurance := range s.Assurances {
 		assurances[i], err = assurance.Deserialize()
 		if err != nil {
-			return ExtrinsicData{}, err
+			return CExtrinsicData{}, err
 		}
 	}
-	guarantees := make([]Guarantee, len(s.Guarantees))
+	guarantees := make([]CGuarantee, len(s.Guarantees))
 	for i, guarantee := range s.Guarantees {
 		guarantees[i], err = guarantee.Deserialize()
 		if err != nil {
-			return ExtrinsicData{}, err
+			return CExtrinsicData{}, err
 		}
 	}
 
-	return ExtrinsicData{
+	return CExtrinsicData{
 		Tickets:    tickets,
 		Disputes:   disputes,
 		Preimages:  preimages,

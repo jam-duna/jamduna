@@ -22,7 +22,7 @@ const (
 	BaseServiceBalance               = 100            // B_S = 100: The basic minimum balance which all services require.
 	TotalCores                       = 2              // C = 341: The total number of cores.
 	PreimageExpiryPeriod             = 28800          // D = 28,800: The period in timeslots after which an unreferenced preimage may be expunged.
-	EpochLength                      = 10             // E = 600: The length of an epoch in timeslots.
+	EpochLength                      = 12             // E = 600: The length of an epoch in timeslots.
 	AuditBiasFactor                  = 2              // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.
 	AccumulationGasAllocation                         // G_A: The total gas allocated to a core for Accumulation.
 	IsAuthorizedGasAllocation                         // G_I : The gas allocated to invoke a work-package’s Is-Authorized logic.
@@ -69,4 +69,10 @@ const (
 	X_U     = "jam_audit"
 	X_True  = "jam_valid"
 	X_False = "jam_invalid"
+)
+
+// codec
+const (
+	validators_super_majority = TotalValidators*2/3 + 1
+	avail_bitfield_bytes      = (TotalCores + 7) / 8
 )

@@ -1,6 +1,7 @@
 package types
 
 import (
+	// "fmt"
 	"reflect"
 )
 
@@ -22,24 +23,24 @@ func E_l(x uint64, l uint32) []byte {
 	}
 }
 
-func E4(x uint64) []byte {
-	if x == 0 {
-		return []byte{0}
-	}
-	for l := uint32(0); l < 3; l++ {
-		if x >= powerOfTwo(7*l) && x < powerOfTwo(7*(l+1)) {
-			encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(8-l) + (x / powerOfTwo(8*l)))}
-			encoded = append(encoded, E_l(x%powerOfTwo(8*l), l)...)
-			return encoded
-		}
-	}
-	if x >= powerOfTwo(21) && x < powerOfTwo(29) {
-		encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(5) + x/powerOfTwo(24))}
-		encoded = append(encoded, E_l(x%powerOfTwo(24), 3)...)
-		return encoded
-	}
-	return nil
-}
+// func E4(x uint64) []byte {
+// 	if x == 0 {
+// 		return []byte{0}
+// 	}
+// 	for l := uint32(0); l < 3; l++ {
+// 		if x >= powerOfTwo(7*l) && x < powerOfTwo(7*(l+1)) {
+// 			encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(8-l) + (x / powerOfTwo(8*l)))}
+// 			encoded = append(encoded, E_l(x%powerOfTwo(8*l), l)...)
+// 			return encoded
+// 		}
+// 	}
+// 	if x >= powerOfTwo(21) && x < powerOfTwo(29) {
+// 		encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(5) + x/powerOfTwo(24))}
+// 		encoded = append(encoded, E_l(x%powerOfTwo(24), 3)...)
+// 		return encoded
+// 	}
+// 	return nil
+// }
 
 func E(x uint64) []byte {
 	if x == 0 {
@@ -92,31 +93,31 @@ func DecodeE_l(encoded []byte) uint64 {
 	return x
 }
 
-func DecodeE4(encoded []byte) (uint64, uint32) {
-	firstByte := encoded[0]
-	if firstByte == 0 {
-		return 0, 1
-	}
+// func DecodeE4(encoded []byte) (uint64, uint32) {
+// 	firstByte := encoded[0]
+// 	if firstByte == 0 {
+// 		return 0, 1
+// 	}
 
-	var l uint32
-	for l = 0; l < 3; l++ {
-		if firstByte >= byte(256-powerOfTwo(8-l)) && firstByte < byte(256-powerOfTwo(8-(l+1))) {
-			x1 := uint64(firstByte) - uint64(256-powerOfTwo(8-l))
-			x2 := DecodeE_l(encoded[1 : 1+l])
-			x := x1*powerOfTwo(8*l) + x2
-			return x, l + 1
-		}
-	}
+// 	var l uint32
+// 	for l = 0; l < 3; l++ {
+// 		if firstByte >= byte(256-powerOfTwo(8-l)) && firstByte < byte(256-powerOfTwo(8-(l+1))) {
+// 			x1 := uint64(firstByte) - uint64(256-powerOfTwo(8-l))
+// 			x2 := DecodeE_l(encoded[1 : 1+l])
+// 			x := x1*powerOfTwo(8*l) + x2
+// 			return x, l + 1
+// 		}
+// 	}
 
-	if firstByte >= byte(256-32) {
-		x1 := uint64(firstByte) - (256 - 32)
-		x2 := DecodeE_l(encoded[1 : 1+3])
-		x := x1*powerOfTwo(24) + x2
-		return x, 3 + 1
-	}
+// 	if firstByte >= byte(256-32) {
+// 		x1 := uint64(firstByte) - (256 - 32)
+// 		x2 := DecodeE_l(encoded[1 : 1+3])
+// 		x := x1*powerOfTwo(24) + x2
+// 		return x, 3 + 1
+// 	}
 
-	return 0, 0
-}
+// 	return 0, 0
+// }
 
 func DecodeE(encoded []byte) (uint64, uint32) {
 	firstByte := encoded[0]
@@ -156,47 +157,54 @@ func DecodeSeq_E(encoded []byte) []uint64 {
 	return T
 }
 
+func CheckCustomEncode(data interface{}) (bool, []byte) {
+	switch v := data.(type) {
+	case TicketsMark:
+		return true, v.Encode()
+	case EpochMark:
+		return true, v.Encode()
+	case Prerequisite:
+		return true, v.Encode()
+	case Result:
+		return true, v.Encode()
+	default:
+		return false, []byte{}
+	}
+}
+
+func CheckCustomDecode(data []byte, t reflect.Type) (bool, interface{}, uint32) {
+	switch t {
+	case reflect.TypeOf(TicketsMark{}):
+		decoded, length := TicketsMarkDecode(data, t)
+		return true, decoded, length
+	case reflect.TypeOf(EpochMark{}):
+		decoded, length := EpochMarkDecode(data, t)
+		return true, decoded, length
+	case reflect.TypeOf(Prerequisite{}):
+		decoded, length := PrerequisiteDecode(data, t)
+		return true, decoded, length
+	case reflect.TypeOf(Result{}):
+		decoded, length := ResultDecode(data, t)
+		return true, decoded, length
+	default:
+		return false, nil, 0
+	}
+}
+
 func Encode(data interface{}) []byte {
+	CheckCustomEncode(data)
+	customEncodeRequired, customEncoded := CheckCustomEncode(data)
+	if customEncodeRequired {
+		return customEncoded
+	}
 	v := reflect.ValueOf(data)
-	t := reflect.TypeOf(data)
-	if t == reflect.TypeOf(&EpochMark{}) {
-		if v.IsNil() {
 
-			return []byte{0}
-		} else {
-			if v.IsNil() {
-				return []byte{0}
-			}
-			return append([]byte{1}, Encode(v.Elem().Interface())...)
-		}
-	}
-	if t.Kind() == reflect.Array && t.Elem() == reflect.TypeOf(&TicketBody{}) {
-		isEmpty := true
-		for i := 0; i < v.Len(); i++ {
-			if !v.Index(i).IsNil() {
-				isEmpty = false
-				break
-			}
-		}
-
-		if isEmpty {
-			return []byte{0}
-		} else {
-			encoded := []byte{1}
-			for i := 0; i < v.Len(); i++ {
-				encoded = append(encoded, Encode(v.Index(i).Interface())...)
-			}
-			return encoded
-		}
-	}
 	switch v.Kind() {
 	case reflect.Bool:
 		if v.Bool() {
 			return []byte{1}
 		}
 		return []byte{0}
-	// case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-	// 	return E(uint64(v.Int()))
 	case reflect.Uint:
 		return E(v.Uint())
 	case reflect.Uint8:
@@ -207,8 +215,6 @@ func Encode(data interface{}) []byte {
 		return E_l(uint64(v.Uint()), 4)
 	case reflect.Uint64:
 		return E_l(uint64(v.Uint()), 8)
-	// case reflect.Float32, reflect.Float64:
-	// 	return E(uint64(v.Float()))
 	case reflect.String:
 		// use LengthE
 		uint64Slice := make([]uint64, 0)
@@ -251,44 +257,62 @@ func Encode(data interface{}) []byte {
 			return []byte{0}
 		}
 		return Encode(v.Elem().Interface())
+		// case reflect.Map:
+		// 	if _, ok := data.(map[string]interface{})["ok"]; ok {
+		// 		ok_byte := common.FromHex(data.(map[string]interface{})["ok"].(string))
+		// 		return append([]byte{0}, Encode(ok_byte)...)
+		// 	} else if _, ok := data.(map[string]interface{})["out-of-gas"]; ok {
+		// 		return []byte{1}
+		// 	} else if _, ok := data.(map[string]interface{})["panic"]; ok {
+		// 		return []byte{2}
+		// 	} else if _, ok := data.(map[string]interface{})["bad-code"]; ok {
+		// 		return []byte{3}
+		// 	} else if _, ok := data.(map[string]interface{})["code-oversize"]; ok {
+		// 		return []byte{4}
+		// 	}
 	}
 	return []byte{}
 }
 
 func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 	length := uint32(0)
+	customDecodeRequired, decoded, customLength := CheckCustomDecode(data, t)
+	if customDecodeRequired {
+		return decoded, customLength
+	}
 	v := reflect.New(t).Elem()
-
-	if t == reflect.TypeOf(&EpochMark{}) {
-		if data[0] == 0 {
-			v.Set(reflect.Zero(t))
-			return v.Interface(), 1
-		} else {
-			length++
-			ptrType := t.Elem()
-			ptr := reflect.New(ptrType)
-			elem, l := Decode(data[length:], ptrType)
-			ptr.Elem().Set(reflect.ValueOf(elem))
-			v.Set(ptr)
-			length += l
-			return v.Interface(), length
-		}
-	}
-
-	if t.Kind() == reflect.Array && t.Elem() == reflect.TypeOf(&TicketBody{}) {
-		if data[0] == 0 {
-			return reflect.Zero(t).Interface(), 1
-		} else {
-			arr := reflect.New(t).Elem()
-			length++
-			for i := 0; i < t.Len(); i++ {
-				elem, l := Decode(data[length:], t.Elem())
-				arr.Index(i).Set(reflect.ValueOf(elem))
+	/*
+		if t == reflect.TypeOf(&EpochMark{}) {
+			if data[0] == 0 {
+				v.Set(reflect.Zero(t))
+				return v.Interface(), 1
+			} else {
+				length++
+				ptrType := t.Elem()
+				ptr := reflect.New(ptrType)
+				elem, l := Decode(data[length:], ptrType)
+				ptr.Elem().Set(reflect.ValueOf(elem))
+				v.Set(ptr)
 				length += l
+				return v.Interface(), length
 			}
-			return arr.Interface(), length
 		}
-	}
+
+		if t.Kind() == reflect.Array && t.Elem() == reflect.TypeOf(&TicketBody{}) {
+			if data[0] == 0 {
+				return reflect.Zero(t).Interface(), 1
+			} else {
+				arr := reflect.New(t).Elem()
+				length++
+				for i := 0; i < t.Len(); i++ {
+					elem, l := Decode(data[length:], t.Elem())
+					arr.Index(i).Set(reflect.ValueOf(elem))
+					length += l
+				}
+				return arr.Interface(), length
+			}
+		}
+	*/
 
 	switch v.Kind() {
 	case reflect.Bool:
@@ -371,6 +395,26 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 			v.Set(ptr)
 			length += l
 		}
+		// case reflect.Map:
+		// 	v.Set(reflect.MakeMap(reflect.TypeOf(map[string]interface{}{})))
+		// 	if data[0] == 0 {
+		// 		length++
+		// 		ok_byte, l := Decode(data[length:], reflect.TypeOf([]byte{}))
+		// 		v.SetMapIndex(reflect.ValueOf("ok"), reflect.ValueOf(ok_byte))
+		// 		length += l
+		// 	} else if data[0] == 1 {
+		// 		length++
+		// 		v.SetMapIndex(reflect.ValueOf("out-of-gas"), reflect.ValueOf(nil))
+		// 	} else if data[0] == 2 {
+		// 		length++
+		// 		v.SetMapIndex(reflect.ValueOf("panic"), reflect.ValueOf(nil))
+		// 	} else if data[0] == 3 {
+		// 		length++
+		// 		v.SetMapIndex(reflect.ValueOf("bad-code"), reflect.ValueOf(nil))
+		// 	} else if data[0] == 4 {
+		// 		length++
+		// 		v.SetMapIndex(reflect.ValueOf("code-oversize"), reflect.ValueOf(nil))
+		// 	}
 	}
 	return v.Interface(), length
 }

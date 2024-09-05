@@ -42,15 +42,15 @@ type SDispute struct {
 }
 
 type Verdict struct {
-	Target common.Hash                   `json:"target"`
-	Epoch  uint32                        `json:"age"`
+	Target common.Hash                     `json:"target"`
+	Epoch  uint32                          `json:"age"`
 	Votes  [ValidatorsSuperMajority]Vote `json:"votes"`
 }
 
 type SVerdict struct {
-	Target common.Hash `json:"target"`
-	Epoch  uint32      `json:"age"`
-	Votes  []SVote     `json:"votes"`
+	Target common.Hash                      `json:"target"`
+	Epoch  uint32                           `json:"age"`
+	Votes  [ValidatorsSuperMajority]SVote `json:"votes"`
 }
 
 type Culprit struct {
@@ -122,7 +122,7 @@ func (s *SFault) Deserialize() (Fault, error) {
 	var key Ed25519Key
 	copy(key[:], keyBytes)
 	signatureBytes := common.FromHex(s.Signature)
-	var signature [64]byte
+	var signature Ed25519Signature
 	copy(signature[:], signatureBytes)
 
 	return Fault{
@@ -138,7 +138,7 @@ func (s *SCulprit) Deserialize() (Culprit, error) {
 	var key Ed25519Key
 	copy(key[:], keyBytes)
 	signatureBytes := common.FromHex(s.Signature)
-	var signature [64]byte
+	var signature Ed25519Signature
 	copy(signature[:], signatureBytes)
 
 	return Culprit{
@@ -149,7 +149,7 @@ func (s *SCulprit) Deserialize() (Culprit, error) {
 }
 
 func (s *SVerdict) Deserialize() (Verdict, error) {
-	votes := [2*TotalValidators/3 + 1]Vote{}
+	votes := [ValidatorsSuperMajority]Vote{}
 	for i, sv := range s.Votes {
 		v, err := sv.Deserialize()
 		if err != nil {

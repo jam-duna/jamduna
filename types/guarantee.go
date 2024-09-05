@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -20,6 +21,13 @@ The core index of each guarantee must be unique and guarantees must be in ascend
 
 type Guarantee struct {
 	Report     WorkReport            `json:"report"`
+	Slot       uint32                `json:"slot"`
+	Signatures []GuaranteeCredential `json:"signatures"`
+}
+
+// for codec
+type CGuarantee struct {
+	Report     CWorkReport           `json:"report"`
 	Slot       uint32                `json:"slot"`
 	Signatures []GuaranteeCredential `json:"signatures"`
 }
@@ -92,10 +100,10 @@ type SGuaranteeCredential struct {
 	Signature      string `json:"signature"`
 }
 
-func (s *SGuarantee) Deserialize() (Guarantee, error) {
+func (s *SGuarantee) Deserialize() (CGuarantee, error) {
 	report, err := s.Report.Deserialize()
 	if err != nil {
-		return Guarantee{}, err
+		return CGuarantee{}, err
 	}
 
 	signatures := make([]GuaranteeCredential, len(s.Signatures))
@@ -103,7 +111,7 @@ func (s *SGuarantee) Deserialize() (Guarantee, error) {
 		signatures[i] = signature.Deserialize()
 	}
 
-	return Guarantee{
+	return CGuarantee{
 		Report:     report,
 		Slot:       s.Slot,
 		Signatures: signatures,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -21,21 +22,30 @@ import (
 
 type WorkReport struct {
 	AvailabilitySpec AvailabilitySpecifier `json:"availability"`
-	PackageSpec      WorkPackageSpec       `json:"packge_spec"`
-	RefineContext    RefinementContext     `json:"context"`
+	PackageSpec      WorkPackageSpec       `json:"package_spec"`
+	RefineContext    RefineContext         `json:"context"`
 	CoreIndex        uint16                `json:"core_index"`
 	AuthorizerHash   common.Hash           `json:"authorizer_hash"`
 	AuthOutput       []byte                `json:"auth_output"`
 	Results          []WorkResult          `json:"results"`
 }
 
+type CWorkReport struct {
+	PackageSpec    WorkPackageSpec `json:"package_spec"`
+	RefineContext  RefineContext   `json:"context"`
+	CoreIndex      uint16          `json:"core_index"`
+	AuthorizerHash common.Hash     `json:"authorizer_hash"`
+	AuthOutput     []byte          `json:"auth_output"`
+	Results        []WorkResult    `json:"results"`
+}
+
 type SWorkReport struct {
-	PackageSpec    WorkPackageSpec   `json:"package_spec"`
-	RefineContext  RefinementContext `json:"context"`
-	CoreIndex      uint16            `json:"core_index"`
-	AuthorizerHash common.Hash       `json:"authorizer_hash"`
-	AuthOutput     string            `json:"auth_output"`
-	Results        []SWorkResult     `json:"results"`
+	PackageSpec    WorkPackageSpec `json:"package_spec"`
+	RefineContext  RefineContext   `json:"context"`
+	CoreIndex      uint16          `json:"core_index"`
+	AuthorizerHash common.Hash     `json:"authorizer_hash"`
+	AuthOutput     string          `json:"auth_output"`
+	Results        []SWorkResult   `json:"results"`
 }
 
 type WorkPackageSpec struct {
@@ -85,7 +95,7 @@ func (a *WorkReport) Hash() common.Hash {
 	return common.BytesToHash(common.ComputeHash(data))
 }
 
-func (s *SWorkReport) Deserialize() (WorkReport, error) {
+func (s *SWorkReport) Deserialize() (CWorkReport, error) {
 	package_spec := s.PackageSpec
 	context := s.RefineContext
 	core_index := s.CoreIndex
@@ -96,7 +106,7 @@ func (s *SWorkReport) Deserialize() (WorkReport, error) {
 		results[i] = result.Deserialize()
 	}
 
-	return WorkReport{
+	return CWorkReport{
 		PackageSpec:    package_spec,
 		RefineContext:  context,
 		CoreIndex:      core_index,

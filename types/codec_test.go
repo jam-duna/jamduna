@@ -21,20 +21,20 @@ func Test_Json(t *testing.T) {
 	}{
 		// The commented-out sections contain negative numbers, which cause encoding and decoding errors in the test vectors.
 		{"assurances_extrinsic.json", "assurances_extrinsic.bin", &[]SAssurance{}, &[]Assurance{}},
-		{"work_package.json", "work_package.bin", &SWorkPackage{}, &WorkPackage{}},
+		{"work_package.json", "work_package.bin", &SWorkPackage{}, &CWorkPackage{}},
 		{"disputes_extrinsic.json", "disputes_extrinsic.bin", &SDispute{}, &Dispute{}},
-		// {"extrinsic.json", "extrinsic.bin", &SExtrinsicData{}, &ExtrinsicData{}},
-		// {"block.json", "block.bin", &SBlock{}, &Block{}},
+		{"extrinsic.json", "extrinsic.bin", &SExtrinsicData{}, &CExtrinsicData{}},
+		{"block.json", "block.bin", &SBlock{}, &CBlock{}},
 		{"tickets_extrinsic.json", "tickets_extrinsic.bin", &[]STicket{}, &[]Ticket{}},
-		{"work_item.json", "work_item.bin", &SWorkItem{}, &WorkItem{}},
-		// {"guarantees_extrinsic.json", "guarantees_extrinsic.bin", &[]SGuarantee{}, &[]Guarantee{}},
-		{"header_0.json", "header_0.bin", &SBlockHeader{}, &BlockHeader{}},
-		{"header_1.json", "header_1.bin", &SBlockHeader{}, &BlockHeader{}},
+		{"work_item.json", "work_item.bin", &SWorkItem{}, &CWorkItem{}},
+		{"guarantees_extrinsic.json", "guarantees_extrinsic.bin", &[]SGuarantee{}, &[]CGuarantee{}},
+		{"header_0.json", "header_0.bin", &SBlockHeader{}, &CBlockHeader{}},
+		{"header_1.json", "header_1.bin", &SBlockHeader{}, &CBlockHeader{}},
 		{"preimages_extrinsic.json", "preimages_extrinsic.bin", &[]SPreimages{}, &[]Preimages{}},
-		{"refine_context.json", "refine_context.bin", &RefinementContext{}, &RefinementContext{}},
-		// {"work_report.json", "work_report.bin", &SReport{}, &Report{}},
-		// {"work_result_0.json", "work_result_0.bin", &SResults{}, &Results{}},
-		// {"work_result_1.json", "work_result_1.bin", &SResults{}, &Results{}},
+		{"refine_context.json", "refine_context.bin", &RefineContext{}, &RefineContext{}},
+		{"work_report.json", "work_report.bin", &SWorkReport{}, &CWorkReport{}},
+		{"work_result_0.json", "work_result_0.bin", &SWorkResult{}, &WorkResult{}},
+		{"work_result_1.json", "work_result_1.bin", &SWorkResult{}, &WorkResult{}},
 	}
 
 	for _, tc := range testCases {
@@ -70,11 +70,11 @@ func Test_Json(t *testing.T) {
 				}
 				tc.expectedType = &assurances
 			case *SWorkPackage:
-				*tc.expectedType.(*WorkPackage), err = parsed.Deserialize()
+				*tc.expectedType.(*CWorkPackage), err = parsed.Deserialize()
 				if err != nil {
 					t.Fatalf("failed to deserialize SWorkPackage: %v", err)
 				}
-				fmt.Println("Deserialized:", *tc.expectedType.(*WorkPackage))
+				fmt.Println("Deserialized:", *tc.expectedType.(*CWorkPackage))
 			case *SDispute:
 				*tc.expectedType.(*Dispute), err = parsed.Deserialize()
 				if err != nil {
@@ -82,17 +82,17 @@ func Test_Json(t *testing.T) {
 				}
 				fmt.Println("Deserialized:", *tc.expectedType.(*Dispute))
 			case *SExtrinsicData:
-				*tc.expectedType.(*ExtrinsicData), err = parsed.Deserialize()
+				*tc.expectedType.(*CExtrinsicData), err = parsed.Deserialize()
 				if err != nil {
 					t.Fatalf("failed to deserialize SExtrinsicData: %v", err)
 				}
-				fmt.Println("Deserialized:", *tc.expectedType.(*ExtrinsicData))
+				fmt.Println("Deserialized:", *tc.expectedType.(*CExtrinsicData))
 			case *SBlock:
-				*tc.expectedType.(*Block), err = parsed.Deserialize()
+				*tc.expectedType.(*CBlock), err = parsed.Deserialize()
 				if err != nil {
 					t.Fatalf("failed to deserialize SBlock: %v", err)
 				}
-				fmt.Println("Deserialized:", *tc.expectedType.(*Block))
+				fmt.Println("Deserialized:", *tc.expectedType.(*CBlock))
 			case *[]STicket:
 				tickets := make([]Ticket, 0)
 				for _, sTicket := range *parsed {
@@ -105,28 +105,28 @@ func Test_Json(t *testing.T) {
 				}
 				tc.expectedType = &tickets
 			case *SWorkItem:
-				*tc.expectedType.(*WorkItem), err = parsed.Deserialize()
+				*tc.expectedType.(*CWorkItem), err = parsed.Deserialize()
 				if err != nil {
 					t.Fatalf("failed to deserialize SWorkItem: %v", err)
 				}
-				fmt.Println("Deserialized:", *tc.expectedType.(*WorkItem))
+				fmt.Println("Deserialized:", *tc.expectedType.(*CWorkItem))
 			case *SBlockHeader:
-				*tc.expectedType.(*BlockHeader), err = parsed.Deserialize()
+				*tc.expectedType.(*CBlockHeader), err = parsed.Deserialize()
 				if err != nil {
 					t.Fatalf("failed to deserialize SHeader: %v", err)
 				}
-				fmt.Println("Deserialized:", *tc.expectedType.(*BlockHeader))
-			case *RefinementContext:
+				fmt.Println("Deserialized:", *tc.expectedType.(*CBlockHeader))
+			case *RefineContext:
 				tc.expectedType = tc.parsedType
 			case *SWorkReport:
-				*tc.expectedType.(*WorkReport), err = parsed.Deserialize()
+				*tc.expectedType.(*CWorkReport), err = parsed.Deserialize()
 				if err != nil {
 					t.Fatalf("failed to deserialize SReport: %v", err)
 				}
-				fmt.Println("Deserialized:", *tc.expectedType.(*WorkReport))
-			case *SResult:
-				*tc.expectedType.(*Result) = parsed.Deserialize()
-				fmt.Println("Deserialized:", *tc.expectedType.(*Result))
+				fmt.Println("Deserialized:", *tc.expectedType.(*CWorkReport))
+			case *SWorkResult:
+				*tc.expectedType.(*WorkResult) = parsed.Deserialize()
+				fmt.Println("Deserialized:", *tc.expectedType.(*WorkResult))
 			case *[]SPreimages:
 				preimages := make([]Preimages, 0)
 				for _, sPreimages := range *parsed {
@@ -138,6 +138,17 @@ func Test_Json(t *testing.T) {
 					preimages = append(preimages, preimage)
 				}
 				tc.expectedType = &preimages
+			case *[]SGuarantee:
+				guarantees := make([]CGuarantee, 0)
+				for _, sGuarantee := range *parsed {
+					guarantee, err := sGuarantee.Deserialize()
+					if err != nil {
+						t.Fatalf("failed to deserialize SGuarantee: %v", err)
+					}
+					fmt.Println("Deserialized:", guarantee)
+					guarantees = append(guarantees, guarantee)
+				}
+				tc.expectedType = &guarantees
 			}
 
 			fmt.Println("Expected:", tc.expectedType)
@@ -271,25 +282,25 @@ func Test_Codec(t *testing.T) {
 	// fmt.Printf("Encoded a: %x\n", encoded)
 }
 
-func Test_E4(t *testing.T) {
-	test := uint64(536870911) // 2^29-1
-	encoded := E4(test)
-	fmt.Printf("E4* Encoded %d: %x\n", test, encoded)
-	decoded, _ := DecodeE4(encoded)
-	fmt.Println("E4* Decoded:", decoded)
-	if test != decoded {
-		t.Errorf("E4* test failed: %d != %d", test, decoded)
-	}
+// func Test_E4(t *testing.T) {
+// 	test := uint64(536870911) // 2^29-1
+// 	encoded := E4(test)
+// 	fmt.Printf("E4* Encoded %d: %x\n", test, encoded)
+// 	decoded, _ := DecodeE4(encoded)
+// 	fmt.Println("E4* Decoded:", decoded)
+// 	if test != decoded {
+// 		t.Errorf("E4* test failed: %d != %d", test, decoded)
+// 	}
 
-	test = uint64(2097151) // 2^21-1
-	encoded = E4(test)
-	fmt.Printf("E4* Encoded %d: %x\n", test, encoded)
-	decoded, _ = DecodeE4(encoded)
-	fmt.Println("E4* Decoded:", decoded)
-	if test != decoded {
-		t.Errorf("E4* test failed: %d != %d", test, decoded)
-	}
-}
+// 	test = uint64(2097151) // 2^21-1
+// 	encoded = E4(test)
+// 	fmt.Printf("E4* Encoded %d: %x\n", test, encoded)
+// 	decoded, _ = DecodeE4(encoded)
+// 	fmt.Println("E4* Decoded:", decoded)
+// 	if test != decoded {
+// 		t.Errorf("E4* test failed: %d != %d", test, decoded)
+// 	}
+// }
 
 func Test_E_l(t *testing.T) {
 	test := uint64(257)

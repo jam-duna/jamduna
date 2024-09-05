@@ -16,7 +16,8 @@ const (
 )
 
 type Ed25519Signature [Ed25519SignatureSize]byte
-type Ed25519Key [Ed25519PubkeySize]byte
+type Ed25519Key 	  common.Hash
+//type Ed25519Key [Ed25519PubkeySize]byte
 
 func (pk Ed25519Key) Bytes() []byte {
 	return pk[:]
@@ -51,7 +52,7 @@ func HexToEd25519Sig(hexStr string) Ed25519Signature {
 	return signature
 }
 
-func HexToEd25519Pub(hexStr string) Ed25519Key {
+func HexToEd25519Key(hexStr string) Ed25519Key {
 	b := common.Hex2Bytes(hexStr)
 	var pubkey Ed25519Key
 	copy(pubkey[:], b)

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 )
@@ -13,8 +14,8 @@ Section 6.7 - Equation 73.  Ticket Extrinsic is a *sequence* of proofs of valid 
 */
 
 type Ticket struct {
-	Attempt   uint8                           `json:"attempt"`
-	Signature [ExtrinsicSignatureInBytes]byte `json:"signature"`
+	Attempt   uint8                     `json:"attempt"`
+	Signature BandersnatchRingSignature `json:"signature"`
 }
 
 type STicket struct {
@@ -92,7 +93,7 @@ func (t *Ticket) TicketID() common.Hash {
 
 func (s *STicket) Deserialize() (Ticket, error) {
 	signatureBytes := common.FromHex(s.Signature)
-	var signature [ExtrinsicSignatureInBytes]byte
+	var signature BandersnatchRingSignature
 	copy(signature[:], signatureBytes)
 
 	return Ticket{

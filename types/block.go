@@ -4,12 +4,18 @@ import (
 	"fmt"
 	// "github.com/colorfulnotion/jam/scale"
 	"encoding/json"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
 type Block struct {
 	Header    BlockHeader   `json:"header"`
 	Extrinsic ExtrinsicData `json:"extrinsic"`
+}
+
+type CBlock struct {
+	Header    CBlockHeader   `json:"header"`
+	Extrinsic CExtrinsicData `json:"extrinsic"`
 }
 
 type SBlock struct {
@@ -41,23 +47,15 @@ func (b *Block) Copy() *Block {
 		c.Header.EpochMark = &epochMarkCopy
 	}
 
-	var winningTicketsCopy [12]*TicketBody
-	for i, ticket := range b.Header.TicketsMark {
-		if ticket != nil {
-			ticketCopy := *ticket
-			winningTicketsCopy[i] = &ticketCopy
-		}
-	}
-	c.Header.TicketsMark = winningTicketsCopy
+	c.Header.TicketsMark = b.Header.TicketsMark
 
-/*
-	if b.Header.VerdictsMarkers != nil {
-		judgementsMarkersCopy := *b.Header.VerdictsMarkers
-		c.Header.VerdictsMarkers = &judgementsMarkersCopy
-	}
-*/
-	if b.Header.OffenderMarkers != nil {
-		c.Header.OffenderMarkers = b.Header.OffenderMarkers
+	// if b.Header.VerdictsMarkers != nil {
+	// 	judgementsMarkersCopy := *b.Header.VerdictsMarkers
+	// 	c.Header.VerdictsMarkers = &judgementsMarkersCopy
+	// }
+
+	if b.Header.OffendersMark != nil {
+		c.Header.OffendersMark = b.Header.OffendersMark
 	}
 
 	c.Header.AuthorIndex = b.Header.AuthorIndex
@@ -158,17 +156,17 @@ func (b *Block) Disputes() Dispute {
 	return extrinsicData.Disputes
 }
 
-func (s *SBlock) Deserialize() (Block, error) {
+func (s *SBlock) Deserialize() (CBlock, error) {
 	header, err := s.Header.Deserialize()
 	if err != nil {
-		return Block{}, err
+		return CBlock{}, err
 	}
 	extrinsic, err := s.Extrinsic.Deserialize()
 	if err != nil {
-		return Block{}, err
+		return CBlock{}, err
 	}
 
-	return Block{
+	return CBlock{
 		Header:    header,
 		Extrinsic: extrinsic,
 	}, nil

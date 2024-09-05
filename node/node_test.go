@@ -212,7 +212,7 @@ func TestWorkGuarantee(t *testing.T) {
 		if n > 1 {
 			importedSegments = append(importedSegments, exportedItem)
 		}
-		context := types.RefinementContext{}
+		context := types.RefineContext{}
 
 		// WorkPackage represents a work package.
 		/*type WorkPackage struct {

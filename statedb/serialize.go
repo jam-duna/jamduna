@@ -123,12 +123,13 @@ func (sv *SValidator) deserialize() (types.Validator, error) {
 	copy(metadataArray[:], sv.Metadata)
 
 	v := types.Validator{
-		//Ed25519:      ed25519,
-		Bandersnatch: common.HexToHash(sv.Bandersnatch),
+		Ed25519:      types.HexToEd25519Key(sv.Ed25519),
+		Bandersnatch: types.HexToBandersnatchKey(sv.Bandersnatch),
 		Bls:          blsArray,
 		Metadata:     metadataArray,
 	}
-	copy(v.Ed25519[:], sv.Ed25519[:])
+	//copy(v.Ed25519[:], sv.Ed25519[:])
+	//copy(v.Bandersnatch[:], common.HexToHash(sv.Bandersnatch))
 	return v, nil
 }
 
@@ -398,11 +399,13 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		ticketsAccumulator[idx] = accumulator
 	}
 
-	var tickets [12]*types.TicketBody
+	var tickets []*types.TicketBody
+	// var tickets *types.TicketsMark
 	for idx, sTicket := range ss.TicketsOrKeys.Tickets {
 		if len(sTicket.Id) != 66 {
 			return SafroleState{}, fmt.Errorf("invalid ticket id length - got %d expected %d", len(sTicket.Id), 66)
 		}
+		// tickets[idx] = types.TicketBody{
 		tickets[idx] = &types.TicketBody{
 			Id:      common.HexToHash(sTicket.Id),
 			Attempt: sTicket.Attempt,

@@ -155,6 +155,7 @@ func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
 	}
 }
 
+//[12]*types.TicketBody
 func VerifyWinningMarker(winning_marker [12]*types.TicketBody, expected_marker []*types.TicketBody) (bool, error) {
 	// Check if both slices have the same length
 	if len(winning_marker) != len(expected_marker) {
@@ -179,6 +180,7 @@ func (s *SafroleState) InTicketAccumulator(ticketID common.Hash) bool {
 	return false
 }
 
+//func (s *SafroleState) GenerateWinningMarker() (*types.TicketsMark, error) {
 func (s *SafroleState) GenerateWinningMarker() ([]*types.TicketBody, error) {
 	tickets := s.NextEpochTicketsAccumulator
 	if len(tickets) != types.EpochLength {
@@ -186,7 +188,11 @@ func (s *SafroleState) GenerateWinningMarker() ([]*types.TicketBody, error) {
 		return nil, fmt.Errorf("Invalid Ticket size")
 	}
 	outsidein_tickets := s.computeTicketSlotBinding(tickets)
-	return outsidein_tickets, nil
+	var ticketsMark []*types.TicketBody
+	for idx, ticket := range outsidein_tickets {
+		ticketsMark[idx] = ticket
+	}
+	return ticketsMark, nil
 }
 
 type Output struct {
@@ -422,7 +428,8 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 	}
 	pubkeys := []bandersnatch.PublicKey{}
 	for _, v := range validatorSet {
-		pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
+		//pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
+		pubkeys = append(pubkeys, common.ConvertToSlice(v.Bandersnatch))
 	}
 	ringsetBytes = bandersnatch.InitRingSet(pubkeys)
 	return ringsetBytes
@@ -955,9 +962,10 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	if len(s2.NextEpochTicketsAccumulator) == types.EpochLength && currPhase >= types.TicketSubmissionEndSlot { //MK check EpochNumSlots-1 ?
 		//TODO this is Winning ticket elgible. Check if header has marker, if yes, verify it
 		winning_tickets := header.TicketsMark
+		
 		if len(winning_tickets) == types.EpochLength {
 			expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
-			verified, err := VerifyWinningMarker(winning_tickets, expected_tickets)
+			verified, err := VerifyWinningMarker([12]*types.TicketBody(winning_tickets), expected_tickets)
 			if !verified || err != nil {
 				return s2, fmt.Errorf(errTicketResubmission)
 			}
@@ -1030,7 +1038,8 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 
 	pubkeys := []bandersnatch.PublicKey{}
 	for _, v := range s.NextValidators {
-		pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
+		//pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
+		pubkeys = append(pubkeys, common.ConvertToSlice(v.Bandersnatch))
 	}
 	ringsetBytes := bandersnatch.InitRingSet(pubkeys)
 
@@ -1102,7 +1111,7 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 		// New Epoch
 		var v [6]common.Hash
 		for i, x := range s.DesignedValidators {
-			v[i] = x.Bandersnatch
+			v[i] = x.Bandersnatch.Hash()
 			fmt.Printf(" !! %d %x\n", i, v[i])
 		}
 		ok.EpochMark = &types.EpochMark{

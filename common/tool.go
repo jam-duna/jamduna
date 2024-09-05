@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"time"
+	"reflect"
 )
 
 // encodeUint64 encodes a uint64 value into a byte slice in LittleEndian order
@@ -39,4 +40,21 @@ func FalseBytes(data []byte) []byte {
 		// result[i] = ^data[i]
 	}
 	return result
+}
+
+func ConvertToSlice(arr interface{}) []byte {
+	// Use reflection to handle different lengths of fixed-length arrays
+	v := reflect.ValueOf(arr)
+
+	if v.Kind() != reflect.Array {
+		panic("input is not an array")
+	}
+
+	// Convert to a byte slice
+	byteSlice := make([]byte, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		byteSlice[i] = byte(v.Index(i).Uint())
+	}
+
+	return byteSlice
 }

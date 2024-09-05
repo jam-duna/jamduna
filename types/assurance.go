@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -28,9 +29,9 @@ type Assurance struct {
 	// H_p - see Eq 124
 	Anchor common.Hash `json:"anchor"`
 	// f - 1 means "available"
-	Bitfield       [1]byte          `json:"bitfield"`
-	ValidatorIndex uint16           `json:"validator_index"`
-	Signature      Ed25519Signature `json:"signature"`
+	Bitfield       [avail_bitfield_bytes]byte `json:"bitfield"`
+	ValidatorIndex uint16                     `json:"validator_index"`
+	Signature      Ed25519Signature           `json:"signature"`
 }
 
 type SAssurance struct {
@@ -106,12 +107,8 @@ func (s *SAssurance) Deserialize() (Assurance, error) {
 	bitfieldBytes := common.FromHex(s.Bitfield)
 	// Convert Signature from hex string to Ed25519Signature
 	signatureBytes := common.FromHex(s.Signature)
-	var bitfield [1]byte
+	var bitfield [avail_bitfield_bytes]byte
 	copy(bitfield[:], bitfieldBytes)
-	// Ensure the signature is the correct length
-	if len(signatureBytes) != 64 {
-		return Assurance{}, fmt.Errorf("invalid signature length: expected 64 bytes, got %d", len(signatureBytes))
-	}
 
 	var signature [64]byte
 	copy(signature[:], signatureBytes)

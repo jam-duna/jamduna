@@ -1089,7 +1089,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		if err != nil {
 			return nil, err
 		}
-		h.OffenderMarkers = OffendMark.OffenderKey
+		h.OffendersMark = OffendMark.OffenderKey
 	}
 
 	// TODO: 103 Verdicts v must be ordered by report hash.

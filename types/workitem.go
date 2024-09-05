@@ -64,6 +64,17 @@ func (item ASWorkItem) ToByteSlices() [][]byte {
 	return slices
 }
 
+// for codec
+type CWorkItem struct {
+	Service          uint32              `json:"service"`
+	CodeHash         common.Hash         `json:"code_hash"`
+	Payload          []byte              `json:"payload"`
+	GasLimit         uint64              `json:"gas_limit"`
+	ImportedSegments []ImportSegment     `json:"import_segments"`
+	Extrinsics       []WorkItemExtrinsic `json:"extrinsic"`
+	ExportCount      uint16              `json:"export_count"`
+}
+
 type SWorkItem struct {
 	Service          uint32              `json:"service"`
 	CodeHash         common.Hash         `json:"code_hash"`
@@ -74,7 +85,7 @@ type SWorkItem struct {
 	ExportCount      uint16              `json:"export_count"`
 }
 
-func (s *SWorkItem) Deserialize() (WorkItem, error) {
+func (s *SWorkItem) Deserialize() (CWorkItem, error) {
 	payload := common.FromHex(s.Payload)
 	imported_segments := make([]ImportSegment, len(s.ImportedSegments))
 	copy(imported_segments, s.ImportedSegments)
@@ -82,7 +93,7 @@ func (s *SWorkItem) Deserialize() (WorkItem, error) {
 	copy(extrinsics, s.Extrinsics)
 	export_count := s.ExportCount
 
-	return WorkItem{
+	return CWorkItem{
 		Service:          s.Service,
 		CodeHash:         s.CodeHash,
 		Payload:          payload,

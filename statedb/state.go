@@ -46,8 +46,16 @@ type Rho_state struct {
 
 // Types for Gamma
 type TicketsOrKeys struct {
-	Tickets [12]*types.TicketBody `json:"tickets,omitempty"`
+	Tickets []*types.TicketBody `json:"tickets,omitempty"`
+	// Tickets *types.TicketsMark	  `json:"tickets,omitempty"`
 	Keys    []common.Hash         `json:"keys,omitempty"` //BandersnatchKey
+}
+
+func (t TicketsOrKeys) TicketLen() int {
+	if t.Tickets != nil {
+		return len(t.Tickets)
+	}
+	return 0
 }
 
 type SafroleBasicState struct {

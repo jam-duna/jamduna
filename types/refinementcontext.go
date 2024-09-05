@@ -1,6 +1,8 @@
 package types
 
 import (
+	"reflect"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -15,22 +17,39 @@ import (
 * the hash of an optional prerequisite work-package p.
 */
 // RefinementContext represents the context of the chain at the point of evaluation.
-type RefinementContext struct {
-	Anchor           common.Hash `json:"anchor"`
-	StateRoot        common.Hash `json:"state_root"`
-	BeefyRoot        common.Hash `json:"beefy_root"`
-	LookupAnchor     common.Hash `json:"lookup_anchor"`
-	LookupAnchorSlot uint32      `json:"lookup_anchor_slot"`
-	Prerequisite     common.Hash `json:"prerequisite,omitempty"`
-}
-
-/*
+// type RefinementContext struct {
+// 	Anchor           common.Hash `json:"anchor"`
+// 	StateRoot        common.Hash `json:"state_root"`
+// 	BeefyRoot        common.Hash `json:"beefy_root"`
+// 	LookupAnchor     common.Hash `json:"lookup_anchor"`
+// 	LookupAnchorSlot uint32      `json:"lookup_anchor_slot"`
+// 	Prerequisite     common.Hash `json:"prerequisite,omitempty"`
+// }
 
 type RefineContext struct {
-	Anchor           common.Hash `json:"anchor"`
-	StateRoot        common.Hash `json:"state_root"`
-	BeefyRoot        common.Hash `json:"beefy_root"`
-	LookupAnchor     common.Hash `json:"lookup_anchor"`
-	LookupAnchorSlot uint32      `json:"lookup_anchor_slot"`
-	Prerequisite     *common.Hash `json:"prerequisite,omitempty"`
-}*/
+	Anchor           common.Hash  `json:"anchor"`
+	StateRoot        common.Hash  `json:"state_root"`
+	BeefyRoot        common.Hash  `json:"beefy_root"`
+	LookupAnchor     common.Hash  `json:"lookup_anchor"`
+	LookupAnchorSlot uint32       `json:"lookup_anchor_slot"`
+	Prerequisite     *Prerequisite `json:"prerequisite,omitempty"`
+}
+
+type Prerequisite struct {
+	common.Hash
+}
+
+func (P Prerequisite) Encode() []byte {
+	encoded := []byte{1}
+	encoded = append(encoded, Encode(P.Hash)...)
+	return encoded
+}
+
+func PrerequisiteDecode(data []byte, t reflect.Type) (interface{}, uint32) {
+	v:= reflect.New(t).Elem()
+	length := uint32(1)
+	decoded, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	length += l
+	v.Field(0).Set(reflect.ValueOf(decoded))
+	return v.Interface(), length
+}

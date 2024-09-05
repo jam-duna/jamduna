@@ -4,12 +4,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
+type BandersnatchKey common.Hash
+type BandersnatchVrfSignature [IETFSignatureLen]byte
+type BandersnatchRingSignature [ExtrinsicSignatureInBytes]byte
+
 type Validator struct {
 	Ed25519      Ed25519Key                `json:"ed25519"`
-	Bandersnatch common.Hash               `json:"bandersnatch"`
+	Bandersnatch BandersnatchKey           `json:"bandersnatch"`
 	Bls          [BlsSizeInBytes]byte      `json:"bls"`
 	Metadata     [MetadataSizeInBytes]byte `json:"metadata"`
 }
@@ -36,7 +41,18 @@ func (v ValidatorSecret) MarshalJSON() ([]byte, error) {
 }
 
 func (v Validator) GetBandersnatchKey() common.Hash {
-	return v.Bandersnatch
+	return common.Hash(v.Bandersnatch)
+}
+
+func (b BandersnatchKey) Hash() common.Hash {
+	return common.Hash(b)
+}
+
+func HexToBandersnatchKey(hexStr string) BandersnatchKey {
+	b := common.Hex2Bytes(hexStr)
+	var pubkey BandersnatchKey
+	copy(pubkey[:], b)
+	return pubkey
 }
 
 func (v Validator) Bytes() []byte {
