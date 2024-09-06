@@ -297,45 +297,66 @@ func parseProgram(p []byte) *Program {
 		}
 		return string(runes)
 	}
+	// Include ascii byte code, we should remove it
+	if p[0] == 80 && p[1] == 86 && p[2] == 77 {
+		fmt.Println("Include ascii byte code")
+		// Remove [80, 86, 77], this means "PVM" in Ascii
+		p = p[3:]
+		// Remove [0, 1, 5], this may represent version information
+		p = p[3:]
+		// Koute's PVM assembler will encode all @funtion name in to Ascii code, and insert it in front of program, so we have to remove them
+		var functionNameLength uint32
+		if len(p) > (1 << 14) {
+			fmt.Println("Currently not support program size larger than 2^14")
 
-	// Remove [80, 86, 77], this means "PVM" in Ascii
-	p = p[3:]
-	// Remove [0, 1, 5], this may represent version information
-	p = p[3:]
+		} else if len(p) > 256 {
+			functionNameLength = uint32(E_decode(p[0:2]))
+			p = p[2+1+2+functionNameLength:] // remove function name byte code
+			Csize := E_decode(p[2:4])
+			fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], Csize)
+			kBytes := p[1+1+2+Csize:]
+			var kCombined string
+			for _, b := range kBytes {
+				binaryStr := fmt.Sprintf("%08b", b)
+				kCombined += reverseString(binaryStr)
+			}
+			if len(kCombined) > int(p[2]) {
+				kCombined = kCombined[:int(p[2])]
+			}
+			program := &Program{
+				JSize: int(p[0]),
+				Z:     int(p[1]),
+				CSize: int(Csize),
+				J:     p[1+1+2 : 1+1+2+p[0]],
+				Code:  p[1+1+2+p[0] : uint32(1+1+2+p[0])+uint32(Csize)],
+				K:     []string{kCombined},
+			}
+			return program
 
-	// Koute's PVM assembler will encode all @funtion name in to Ascii code, and insert it in front of program, so we have to remove them
-	var functionNameLength uint32
-
-	if len(p) > (1 << 14) {
-		fmt.Println("Currently not support program size larger than 2^14")
-
-	} else if len(p) > 256 {
-		functionNameLength = uint32(E_decode(p[0:2]))
-		p = p[2+1+2+functionNameLength:] // remove function name byte code
-		Csize := E_decode(p[2:4])
-		fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], Csize)
-		kBytes := p[1+1+2+Csize:]
-		var kCombined string
-		for _, b := range kBytes {
-			binaryStr := fmt.Sprintf("%08b", b)
-			kCombined += reverseString(binaryStr)
+		} else {
+			fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], p[2])
+			kBytes := p[3+p[0]+p[2]:]
+			var kCombined string
+			for _, b := range kBytes {
+				binaryStr := fmt.Sprintf("%08b", b)
+				kCombined += reverseString(binaryStr)
+			}
+			if len(kCombined) > int(p[2]) {
+				kCombined = kCombined[:int(p[2])]
+			}
+			program := &Program{
+				JSize: int(p[0]),
+				Z:     int(p[1]),
+				CSize: int(p[2]),
+				J:     p[3 : 3+p[0]],
+				Code:  p[3+p[0] : 3+p[0]+p[2]],
+				K:     []string{kCombined},
+			}
+			return program
 		}
-		if len(kCombined) > int(p[2]) {
-			kCombined = kCombined[:int(p[2])]
-		}
-		program := &Program{
-			JSize: int(p[0]),
-			Z:     int(p[1]),
-			CSize: int(Csize),
-			J:     p[1+1+2 : 1+1+2+p[0]],
-			Code:  p[1+1+2+p[0] : uint32(1+1+2+p[0])+uint32(Csize)],
-			K:     []string{kCombined},
-		}
-		return program
 
 	} else {
-		functionNameLength = uint32(p[0])
-		p = p[1+1+1+functionNameLength:] // remove function name byte code
+		fmt.Println("Pure PVM code")
 		fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], p[2])
 		kBytes := p[3+p[0]+p[2]:]
 		var kCombined string
@@ -355,7 +376,6 @@ func parseProgram(p []byte) *Program {
 			K:     []string{kCombined},
 		}
 		return program
-
 	}
 	fmt.Println("Failed to parse program!!")
 	return nil
