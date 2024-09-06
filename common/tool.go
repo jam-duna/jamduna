@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"time"
 	"reflect"
+	"time"
 )
 
 // encodeUint64 encodes a uint64 value into a byte slice in LittleEndian order

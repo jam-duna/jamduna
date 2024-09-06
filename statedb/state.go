@@ -48,7 +48,7 @@ type Rho_state struct {
 type TicketsOrKeys struct {
 	Tickets []*types.TicketBody `json:"tickets,omitempty"`
 	// Tickets *types.TicketsMark	  `json:"tickets,omitempty"`
-	Keys    []common.Hash         `json:"keys,omitempty"` //BandersnatchKey
+	Keys []common.Hash `json:"keys,omitempty"` //BandersnatchKey
 }
 
 func (t TicketsOrKeys) TicketLen() int {

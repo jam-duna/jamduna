@@ -1085,16 +1085,14 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 
 	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
 	spec = NewAvailabilitySpecifier(packageHash, asworkPackage, segments)
-
+	prerequisite_hash := common.HexToHash("0x")
 	refinementContext := types.RefineContext{
-		Anchor:           common.HexToHash("0x123abc"),           // TODO
-		StateRoot:        n.statedb.Block.Header.ParentStateRoot, // TODO
-		//StateRoot:      common.HexToHash("0x"),
-		BeefyRoot:        common.HexToHash("0x"),                 // SKIP
-		LookupAnchor:     n.statedb.ParentHash,                   // TODO
-		LookupAnchorSlot: n.statedb.Block.Header.Slot,
-		//LookupAnchorSlot: uint32(0),
-		Prerequisite:     &types.Prerequisite{common.HexToHash("0x")}, //common.HexToHash("0x"), // SKIP
+		Anchor:           common.HexToHash("0x123abc"),              // TODO
+		StateRoot:        n.statedb.Block.Header.ParentStateRoot,    // TODO, common.HexToHash("0x")
+		BeefyRoot:        common.HexToHash("0x"),                    // SKIP
+		LookupAnchor:     n.statedb.ParentHash,                      // TODO
+		LookupAnchorSlot: n.statedb.Block.Header.Slot,               //TODO: uint32(0)
+		Prerequisite:     (*types.Prerequisite)(&prerequisite_hash), //common.HexToHash("0x"), // SKIP
 	}
 
 	workReport := types.WorkReport{

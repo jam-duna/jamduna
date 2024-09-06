@@ -1104,7 +1104,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		h.EpochMark = epochMarker
 	}
 	if isNewEpoch {
-		//h.TicketsMark = make([12]*types.TicketBody) // clear out the tickets if its a new epoch
+		//h.TicketsMark = make([types.EpochLength]*types.TicketBody) // clear out the tickets if its a new epoch
 		s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 	if needWinningMarker {

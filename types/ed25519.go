@@ -16,7 +16,8 @@ const (
 )
 
 type Ed25519Signature [Ed25519SignatureSize]byte
-type Ed25519Key 	  common.Hash
+type Ed25519Key common.Hash
+
 //type Ed25519Key [Ed25519PubkeySize]byte
 
 func (pk Ed25519Key) Bytes() []byte {

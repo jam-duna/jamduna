@@ -37,11 +37,6 @@ type Result struct {
 	Err uint8  `json:"err,omitempty"`
 }
 
-// type SResult struct {
-// 	Ok  string `json:"ok,omitempty"`
-// 	Err uint8  `json:"err,omitempty"`
-// }
-
 // see 12.3 Wrangling - Eq 159
 type WrangledWorkResult struct {
 	// Note this is Output OR Error
@@ -103,13 +98,6 @@ func (s *SWorkResult) Deserialize() WorkResult {
 	}
 }
 
-// func (s *SResult) Deserialize() Result {
-// 	return Result{
-// 		Ok:  common.FromHex(s.Ok),
-// 		Err: s.Err,
-// 	}
-// }
-
 func (R Result) Encode() []byte {
 	if R.Err == RESULT_OK {
 		ok_byte := R.Ok
@@ -129,7 +117,7 @@ func (R Result) Encode() []byte {
 	return nil
 }
 
-func ResultDecode(data []byte, t reflect.Type) (interface{}, uint32) {
+func (target Result) Decode(data []byte) (interface{}, uint32) {
 	length := uint32(1)
 	switch data[0] {
 	case 0:

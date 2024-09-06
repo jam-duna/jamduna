@@ -42,14 +42,14 @@ type SDispute struct {
 }
 
 type Verdict struct {
-	Target common.Hash                     `json:"target"`
-	Epoch  uint32                          `json:"age"`
+	Target common.Hash                   `json:"target"`
+	Epoch  uint32                        `json:"age"`
 	Votes  [ValidatorsSuperMajority]Vote `json:"votes"`
 }
 
 type SVerdict struct {
-	Target common.Hash                      `json:"target"`
-	Epoch  uint32                           `json:"age"`
+	Target common.Hash                    `json:"target"`
+	Epoch  uint32                         `json:"age"`
 	Votes  [ValidatorsSuperMajority]SVote `json:"votes"`
 }
 

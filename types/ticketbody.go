@@ -1,9 +1,9 @@
 package types
 
 import (
-	"github.com/colorfulnotion/jam/common"
-	//"encoding/json"
 	"reflect"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 // TicketBody represents the structure of a ticket
@@ -23,21 +23,13 @@ func (T TicketsMark) Encode() []byte {
 	return encoded
 }
 
-func TicketsMarkDecode(data []byte, t reflect.Type) (interface{}, uint32) {
-	v:= reflect.New(t).Elem()
+func (target TicketsMark) Decode(data []byte) (interface{}, uint32) {
+	var decoded TicketsMark
 	length := uint32(1)
 	for i := 0; i < EpochLength; i++ {
-		elem, l := Decode(data[length:], v.Index(i).Type())
-		v.Index(i).Set(reflect.ValueOf(elem))
+		elem, l := Decode(data[length:], reflect.TypeOf(TicketBody{}))
+		decoded[i] = elem.(TicketBody)
 		length += l
 	}
-	return v.Interface(), length
-}
-
-func (T TicketsMark) AsTicketBody() [12]*TicketBody {
-	tickets := [12]*TicketBody{}
-	for idx, t := range T {
-		tickets[idx] = &t
-	}
-	return tickets
+	return decoded, length
 }

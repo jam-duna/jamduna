@@ -155,8 +155,7 @@ func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
 	}
 }
 
-//[12]*types.TicketBody
-func VerifyWinningMarker(winning_marker [12]*types.TicketBody, expected_marker []*types.TicketBody) (bool, error) {
+func VerifyWinningMarker(winning_marker [types.EpochLength]*types.TicketBody, expected_marker []*types.TicketBody) (bool, error) {
 	// Check if both slices have the same length
 	if len(winning_marker) != len(expected_marker) {
 		return false, fmt.Errorf("length mismatch: winning_marker has %d elements, expected_marker has %d elements", len(winning_marker), len(expected_marker))
@@ -180,7 +179,7 @@ func (s *SafroleState) InTicketAccumulator(ticketID common.Hash) bool {
 	return false
 }
 
-//func (s *SafroleState) GenerateWinningMarker() (*types.TicketsMark, error) {
+// func (s *SafroleState) GenerateWinningMarker() (*types.TicketsMark, error) {
 func (s *SafroleState) GenerateWinningMarker() ([]*types.TicketBody, error) {
 	tickets := s.NextEpochTicketsAccumulator
 	if len(tickets) != types.EpochLength {
@@ -962,10 +961,10 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	if len(s2.NextEpochTicketsAccumulator) == types.EpochLength && currPhase >= types.TicketSubmissionEndSlot { //MK check EpochNumSlots-1 ?
 		//TODO this is Winning ticket elgible. Check if header has marker, if yes, verify it
 		winning_tickets := header.TicketsMark
-		
+
 		if len(winning_tickets) == types.EpochLength {
 			expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
-			verified, err := VerifyWinningMarker([12]*types.TicketBody(winning_tickets), expected_tickets)
+			verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(winning_tickets), expected_tickets)
 			if !verified || err != nil {
 				return s2, fmt.Errorf(errTicketResubmission)
 			}

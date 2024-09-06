@@ -4,7 +4,6 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	//"encoding/json"
 )
 
 // EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch
@@ -22,14 +21,15 @@ func (E EpochMark) Encode() []byte {
 	return encoded
 }
 
-func EpochMarkDecode(data []byte, t reflect.Type) (interface{}, uint32) {
-	v:= reflect.New(t).Elem()
+func (target EpochMark) Decode(data []byte) (interface{}, uint32) {
 	length := uint32(1)
-	decoded , l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
-	v.Field(0).Set(reflect.ValueOf(decoded))
+	entropy, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
 	length += l
-	decoded , l = Decode(data[length:], reflect.TypeOf([TotalValidators]common.Hash{}))
-	v.Field(1).Set(reflect.ValueOf(decoded))
+	validators, l := Decode(data[length:], reflect.TypeOf([TotalValidators]common.Hash{}))
+	decoded := EpochMark{
+		Entropy:    entropy.(common.Hash),
+		Validators: validators.([TotalValidators]common.Hash),
+	}
 	length += l
-	return v.Interface(), length
+	return decoded, length
 }

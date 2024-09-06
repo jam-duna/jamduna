@@ -27,29 +27,27 @@ import (
 // }
 
 type RefineContext struct {
-	Anchor           common.Hash  `json:"anchor"`
-	StateRoot        common.Hash  `json:"state_root"`
-	BeefyRoot        common.Hash  `json:"beefy_root"`
-	LookupAnchor     common.Hash  `json:"lookup_anchor"`
-	LookupAnchorSlot uint32       `json:"lookup_anchor_slot"`
+	Anchor           common.Hash   `json:"anchor"`
+	StateRoot        common.Hash   `json:"state_root"`
+	BeefyRoot        common.Hash   `json:"beefy_root"`
+	LookupAnchor     common.Hash   `json:"lookup_anchor"`
+	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"`
 	Prerequisite     *Prerequisite `json:"prerequisite,omitempty"`
 }
 
-type Prerequisite struct {
-	common.Hash
-}
+type Prerequisite common.Hash
 
 func (P Prerequisite) Encode() []byte {
 	encoded := []byte{1}
-	encoded = append(encoded, Encode(P.Hash)...)
+	encoded = append(encoded, Encode(P)...)
 	return encoded
 }
 
-func PrerequisiteDecode(data []byte, t reflect.Type) (interface{}, uint32) {
-	v:= reflect.New(t).Elem()
+func (target Prerequisite) Decode(data []byte) (interface{}, uint32) {
+	var decoded Prerequisite
 	length := uint32(1)
-	decoded, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	prerequisite, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
 	length += l
-	v.Field(0).Set(reflect.ValueOf(decoded))
-	return v.Interface(), length
+	decoded = Prerequisite(prerequisite.(common.Hash))
+	return decoded, length
 }
