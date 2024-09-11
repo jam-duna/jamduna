@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 
@@ -294,4 +295,25 @@ func TestCodeParse(t *testing.T) {
 	}
 	fmt.Println("Code:", code)
 	pvm.NewVMFromParseProgramTest(code)
+}
+func TestNodeRotation(t *testing.T) {
+	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	if err != nil {
+		t.Fatalf("Error Seeting up nodes: %v\n", err)
+	}
+
+	nodes := make([]*Node, numNodes)
+	for i := 0; i < numNodes; i++ {
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag)
+		if err != nil {
+			t.Fatalf("Failed to create node %d: %v\n", i, err)
+		}
+		//node.state = statedb.ProcessGenesis(genesisAuthorities)
+		nodes[i] = node
+	}
+	assign := nodes[0].statedb.AssignGuarantorsTesting(common.BytesToHash(common.ComputeHash([]byte("test"))))
+	for _, a := range assign {
+		fmt.Printf("CoreIndex:%d, Validator:%x\n", a.CoreIndex, a.Validator.Ed25519)
+	}
+
 }

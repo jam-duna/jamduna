@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/crypto"
-	"golang.org/x/crypto/sha3"
 )
 
 // EthSign signs the given authToken using the provided private key in hex format.
@@ -21,10 +20,7 @@ func EthSign(privateKeyHex string, authToken []byte) ([]byte, []byte, error) {
 	// Ethereum message prefix
 	message := append([]byte("\x19Ethereum Signed Message:\n32"), authToken...)
 
-	// Hash the message using Keccak-256
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(message)
-	messageHash := hash.Sum(nil)
+	messageHash := Keccak256(message).Bytes()
 
 	// Sign the hash
 	signature, err := crypto.Sign(messageHash, privateKey)

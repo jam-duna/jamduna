@@ -1426,10 +1426,15 @@ func (n *Node) runClient() {
 			}
 			if newStateDB != nil {
 				// we authored a block
+				newStateDB.PreviousGuarantors()
+				newStateDB.AssignGuarantors()
 				n.addStateDB(newStateDB)
 				n.blocks[newBlock.Hash()] = newBlock
 				n.broadcast(*newBlock)
 				fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
+				for _, g := range newStateDB.GuarantorAssignments {
+					fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %x -> core %v \n", n.id, g.Validator.Ed25519, g.CoreIndex)
+				}
 			}
 		case msg := <-n.messageChan:
 			n.processOutgoingMessage(msg)

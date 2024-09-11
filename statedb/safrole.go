@@ -273,7 +273,7 @@ func (s *SafroleState) ComputeCurrRandomness(fresh_randomness common.Hash) commo
 	randomness_buffer0 := s.Entropy[0].Bytes()
 
 	// Compute BLAKE2 hash of the combined data
-	new_randomness := common.Blake2AsHex(append(randomness_buffer0, fresh_randomness.Bytes()...))
+	new_randomness := common.Blake2Hash(append(randomness_buffer0, fresh_randomness.Bytes()...))
 	return new_randomness
 }
 

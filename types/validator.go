@@ -19,6 +19,10 @@ type Validator struct {
 	Metadata     [MetadataSizeInBytes]byte `json:"metadata"`
 }
 
+func (v *Validator) GetEd25519Key() Ed25519Key {
+	return v.Ed25519
+}
+
 // used for calling FFI
 type ValidatorSecret struct {
 	Ed25519Pub         common.Hash `json:"ed25519_pub"`

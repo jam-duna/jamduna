@@ -51,3 +51,7 @@ func (target Prerequisite) Decode(data []byte) (interface{}, uint32) {
 	decoded = Prerequisite(prerequisite.(common.Hash))
 	return decoded, length
 }
+
+func (p *Prerequisite) Hash() common.Hash {
+	return common.Hash(*p)
+}

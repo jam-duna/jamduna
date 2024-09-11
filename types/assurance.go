@@ -43,6 +43,22 @@ type SAssurance struct {
 	Signature      string `json:"signature"`
 }
 
+func (A *Assurance) BitFieldToBytes() []byte {
+	return A.Bitfield[:]
+}
+
+func (A *Assurance) SetBitFied_Bit(index uint8, value bool) {
+	if value {
+		A.Bitfield[0] |= 1 << index
+	} else {
+		A.Bitfield[0] &= ^(1 << index)
+	}
+}
+
+func (A *Assurance) GetBitFied_Bit(index uint16) bool {
+	return (A.Bitfield[0] & (1 << index)) != 0
+}
+
 // computeAssuranceBytes abstracts the process of generating the bytes to be signed or verified.
 func (a *Assurance) computeAssuranceBytes() []byte {
 	h := common.ComputeHash(append(a.Anchor.Bytes(), a.Bitfield[0]))

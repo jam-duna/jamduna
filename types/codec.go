@@ -88,7 +88,7 @@ func LengthE(x []uint64) []byte {
 	return encoded
 }
 
- // GP v0.3.6 eq(274) ↕x≡(|x|,x) - Length Discriminator Decoding. Maybe Reuqired later [DO NOT DELETE]
+// GP v0.3.6 eq(274) ↕x≡(|x|,x) - Length Discriminator Decoding. Maybe Reuqired later [DO NOT DELETE]
 func DecodeLengthE(encoded []byte) ([]uint64, uint32) {
 	length, l := DecodeE([]byte{encoded[0]})
 	var T []uint64

@@ -5,8 +5,9 @@ import (
 	"crypto/ed25519"
 	//	"errors"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
 	"reflect"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 const (
@@ -73,4 +74,15 @@ func InitEd25519Key(seed []byte) ([]byte, []byte, error) {
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
 
 	return ed25519_pub, ed25519_priv, nil
+}
+
+func Ed25519Sign(priv Ed25519Key, msg []byte) Ed25519Signature {
+	signature := ed25519.Sign(ed25519.PrivateKey(priv[:]), msg)
+	var ed25519Signature Ed25519Signature
+	copy(ed25519Signature[:], signature)
+	return ed25519Signature
+}
+
+func Ed25519Verify(pub Ed25519Key, msg []byte, sig Ed25519Signature) bool {
+	return ed25519.Verify(ed25519.PublicKey(pub[:]), msg, sig[:])
 }

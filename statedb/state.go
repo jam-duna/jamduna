@@ -30,6 +30,14 @@ type Beta_state struct {
 	Reported   [types.TotalCores]common.Hash `json:"reported"`
 }
 
+func (b *Beta_state) MMR_Bytes() []byte {
+	codec_bytes, err := json.Marshal(b.MMR)
+	if err != nil {
+		fmt.Println("Error serializing MMR", err)
+	}
+	return codec_bytes
+}
+
 // Types for Psi
 type Psi_state struct {
 	Psi_g [][]byte           `json:"psi_g"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
@@ -122,20 +130,12 @@ func (original *JamState) Copy() *JamState {
 }
 
 // clearRhoByCore clears the Rho state for a specific core
-func (state *JamState) clearRhoByCore(core uint32) (r *Rho_state) {
-	r = state.AvailabilityAssignments[core]
+// func clearRhoByCore(core uint32, cores map[uint32]*Rho_state) (r *Rho_state) {
+// 	r = cores[core]=nil
 
-	state.AvailabilityAssignments[core] = nil
-	return r
-}
-
-// setRhoByWorkReport sets the Rho state for a specific core with a WorkReport and timeslot
-func (state *JamState) setRhoByWorkReport(core uint16, w types.WorkReport, t uint32) {
-	state.AvailabilityAssignments[core] = &Rho_state{
-		WorkReport: w,
-		Timeslot:   t,
-	}
-}
+// 	state.AvailabilityAssignments[core] = nil
+// 	return r
+// }
 
 // Accumulate performs the accumulation of a single service.
 func (state *JamState) Accumulate(serviceIndex int, accumulationState types.AccumulationState) (types.AccumulationState, error) {

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -58,6 +57,8 @@ type StateDB struct {
 
 	X *types.XContext
 
+	GuarantorAssignments         []types.GuarantorAssignment
+	PreviousGuarantorAssignments []types.GuarantorAssignment
 	//S uint32
 }
 
@@ -458,7 +459,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 			return statedb, err
 		}
 
-		h := common.Blake2AsHex(encodedBlock)
+		h := common.Blake2Hash(encodedBlock)
 		if bytes.Compare(h.Bytes(), blockHash.Bytes()) != 0 {
 			return statedb, fmt.Errorf("[statedb:newStateDB] hash of data incorrect [%d bytes]", len(encodedBlock))
 		}
@@ -730,14 +731,14 @@ func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult
 	return output
 }
 
-func (s *StateDB) Accumulate(cores map[uint32]*Rho_state) error {
+func (s *StateDB) Accumulate() error {
 	xContext := types.NewXContext()
 	//TODO: setup xi, x_vm,
 	s.SetXContext(xContext)
-	for c, rho_state := range cores {
+	for _, rho_state := range s.JamState.AvailabilityAssignments {
 		if rho_state != nil {
 			wrangledWorkResults := make([]types.WrangledWorkResult, 0)
-			code, err := s.getServiceCoreCode(c)
+			code, err := s.getServiceCoreCode(uint32(rho_state.WorkReport.CoreIndex))
 			service_index := uint32(0)
 			if err == nil {
 				// Wrangle results from work report
@@ -755,7 +756,7 @@ func (s *StateDB) Accumulate(cores map[uint32]*Rho_state) error {
 			X := s.GetXContext()
 			X.S = Xs
 			s.UpdateXContext(X)
-			vm := pvm.NewVMFromCode(c, code, 0, s)
+			vm := pvm.NewVMFromCode(uint32(rho_state.WorkReport.CoreIndex), code, 0, s)
 			vm.SetArgumentInputs(wrangledWorkResultsBytes)
 			vm.Execute(types.EntryPointAccumulate)
 		}
@@ -763,12 +764,15 @@ func (s *StateDB) Accumulate(cores map[uint32]*Rho_state) error {
 	return nil
 }
 
-func (s *StateDB) OnTransfer(cores map[uint32]*Rho_state) error {
-	for c, _ := range cores {
-		code, err := s.getServiceCoreCode(c)
+func (s *StateDB) OnTransfer() error {
+	for _, core := range s.JamState.AvailabilityAssignments {
+		if core == nil {
+			continue
+		}
+		code, err := s.getServiceCoreCode(uint32(core.WorkReport.CoreIndex))
 		if err == nil {
-			fmt.Printf("OnTransfers %d\n", c)
-			vm := pvm.NewVMFromCode(c, code, 0, s)
+			fmt.Printf("OnTransfers %d\n", core.WorkReport.CoreIndex)
+			vm := pvm.NewVMFromCode(uint32(core.WorkReport.CoreIndex), code, 0, s)
 			vm.Execute(types.EntryPointOnTransfer)
 		}
 	}
@@ -806,58 +810,47 @@ func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarante
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (map[uint32]*Rho_state, error) {
-	cores := make(map[uint32]*Rho_state)
+func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) error {
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
-	for _, v := range disputes.Verdict {
-		_, core, ok := s.getRhoWorkReportByWorkPackage(v.Target)
-		if ok {
-			if len(v.Votes) > 2*types.TotalValidators/3 {
-				d.clearRhoByCore(core)
-			}
-		}
-	}
 	//apply the dispute
 	var err error
 	result, err := d.IsValidateDispute(&disputes)
 	if err != nil {
-		return cores, err
+		return err
 	}
 	//state changing here
+	//cores reading the old jam state
+	//ρ†
 	d.ProcessDispute(result, disputes.Culprit, disputes.Fault)
-
 	if err != nil {
-		return cores, err
+		return err
+	}
+
+	err = s.ValidateAssurances(assurances)
+	if err != nil {
+		return err
 	}
 
 	// Assurances: get the bitstring from the availability
-	tally := make([]uint32, types.TotalCores)
-	for _, a := range assurances {
-		for c, bs := range a.Bitfield {
-			tally[c] += uint32(bs)
-		}
-	}
 	// core's data is now available
-	num_assurances := uint32(0)
-	for c, available := range tally {
-		if available > 2*types.TotalValidators/3 {
-			cores[uint32(c)] = d.clearRhoByCore(uint32(c))
-		}
-		num_assurances++
-	}
+	//ρ††
+	num_assurances, availableWorkReport := d.ProcessAssurances(assurances)
+	_ = availableWorkReport // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.JamState.tallyStatistics(s.Id, "assurances", num_assurances)
 
 	// Guarantees
-	num_reports := uint32(0)
-	for _, g := range guarantees {
-		d.setRhoByWorkReport(g.Report.CoreIndex, g.Report, targetJCE)
-		num_reports++
+	err = s.ValidateGuarantees(guarantees)
+	if err != nil {
+		return err
 	}
+	num_reports := uint32(len(guarantees))
+
+	d.ProcessGuarantees(guarantees)
 	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
 
-	return cores, nil
+	return nil
 }
 
 // given previous safrole, applt state transition using block
@@ -900,23 +893,32 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
 
-	cores, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
+	err = s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
+	if err != nil {
+		return s, err
+	}
+	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
+	// TODO : Remove cores and get the rho state from JamState
+	err = s.Accumulate()
 	if err != nil {
 		return s, err
 	}
 
-	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
-	s.Accumulate(cores)
-
 	// 29 -  Update Authorization Pool alpha'
-	s.ApplyStateTransitionAuthorizations(blk.Guarantees())
+	err = s.ApplyStateTransitionAuthorizations(blk.Guarantees())
+	if err != nil {
+		return s, err
+	}
 
 	// 30 - compute pi
 	s.JamState.tallyStatistics(s.Id, "blocks", 1)
 
 	s.ApplyXContext()
-
-	s.OnTransfer(cores)
+	// TODO : Remove cores and get the rho state from JamState
+	err = s.OnTransfer()
+	if err != nil {
+		return s, err
+	}
 
 	s.Block = blk
 	s.ParentHash = s.BlockHash
@@ -931,21 +933,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 func (s *StateDB) GetBlock() *types.Block {
 	return s.Block
-}
-
-func (s *StateDB) areValidatorsAssignedToCore(coreIndex uint16, credentials []types.GuaranteeCredential) bool {
-	// TODO: logic to verify if validators are assigned to the core.
-	return true
-}
-
-func (s *StateDB) isReportPendingOnCore(coreIndex uint16) bool {
-	// TODO: logic to check if a report is pending on the core.
-	return false
-}
-
-func (s *StateDB) hasReportTimedOut(workReport types.WorkReport) bool {
-	// TODO: logic to check if a work report has timed out.
-	return true
 }
 
 func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
@@ -997,58 +984,21 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		if err != nil {
 			continue
 		}
-		// 138 - Ensure we have 2 or 3 credentials per work report minimum.
-		if len(g.Signatures) < 2 {
-			// Skip guarantees that do not meet the minimum number of credentials.
+
+		err = s.Verify_Guarantee(g)
+		if err != nil {
+			fmt.Println("Error verifying guarantee: ", err)
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
 	}
-	// 139 - Order guarantees by core (assuming WorkReport contains core index).
-	sort.Slice(extrinsicData.Guarantees, func(i, j int) bool {
-		return extrinsicData.Guarantees[i].Report.CoreIndex < extrinsicData.Guarantees[j].Report.CoreIndex
-	})
-
-	// 140 - credentials ordered by validator index
-	for i := range extrinsicData.Guarantees {
-		sort.Slice(extrinsicData.Guarantees[i].Signatures, func(a, b int) bool {
-			return extrinsicData.Guarantees[i].Signatures[a].ValidatorIndex < extrinsicData.Guarantees[i].Signatures[b].ValidatorIndex
-		})
-	}
-	// 141 - The signing validators must be assigned to the core in G or G*
-	for _, guarantee := range extrinsicData.Guarantees {
-		if !s.areValidatorsAssignedToCore(guarantee.Report.CoreIndex, guarantee.Signatures) {
-			// Handle the case where validators are not correctly assigned.
-			return nil, errors.New("validators not correctly assigned to core")
-		}
-	}
-	// 144 - No reports may be placed on cores with a report pending availability on it unless it has timed out.
-	for _, guarantee := range extrinsicData.Guarantees {
-		if s.isReportPendingOnCore(guarantee.Report.CoreIndex) && !s.hasReportTimedOut(guarantee.Report) {
-			// Skip this guarantee if the core has a pending report that hasn't timed out.
-			continue
-		}
-	}
-	// 147 - There must be no duplicate work-package hashes (i.e. two work-reports of the same package).
-	workPackageHashes := make(map[common.Hash]bool)
-	for _, guarantee := range extrinsicData.Guarantees {
-		hash := guarantee.Report.AvailabilitySpec.WorkPackageHash
-		if workPackageHashes[hash] {
-			// Handle duplicate work-package hash.
-			return nil, errors.New("duplicate work-package hash detected")
-		}
-		workPackageHashes[hash] = true
+	SortByCoreIndex(extrinsicData.Guarantees)
+	// return duplicate guarantee err
+	err = s.CheckGuaranteesWorkReport(extrinsicData.Guarantees)
+	if err != nil {
+		return nil, err
 	}
 
-	// TODO: (skip) Recent Blocks
-
-	// 153 - We require that all work results within the extrinsic predicted the correct code hash for their corresponding service:
-	for _, guarantee := range extrinsicData.Guarantees {
-		if !s.isCorrectCodeHash(guarantee.Report) {
-			// Handle incorrect code hash prediction.
-			return nil, errors.New("incorrect code hash prediction for service")
-		}
-	}
 	s.queuedGuarantees = make(map[common.Hash]types.Guarantee)
 
 	// E_A - Assurances  aggregate queuedAssurances into extrinsicData.Assurances
@@ -1059,15 +1009,15 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			continue
 		}
 		// 125 - The assurances must all be anchored on the parent
-		if a.Anchor != s.ParentHash {
+		err = s.VerifyAssurance(a)
+		if err != nil {
+			fmt.Println("Error verifying assurance: ", err)
 			continue
 		}
 		extrinsicData.Assurances = append(extrinsicData.Assurances, a)
 	}
-	// 126 - The assurances must ordered by validator index:
-	sort.Slice(extrinsicData.Assurances, func(i, j int) bool {
-		return extrinsicData.Assurances[i].ValidatorIndex < extrinsicData.Assurances[j].ValidatorIndex
-	})
+	// 126 - The assurances must ordered by validator index
+	SortAssurances(extrinsicData.Assurances)
 	s.queuedAssurances = make(map[common.Hash]types.Assurance)
 
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes

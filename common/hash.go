@@ -2,7 +2,9 @@ package common
 
 import (
 	"encoding/binary"
+
 	"golang.org/x/crypto/blake2b"
+	"golang.org/x/crypto/sha3"
 )
 
 // computeHash computes the BLAKE2b hash of the given data
@@ -17,12 +19,13 @@ func Uint32ToBytes(val uint32) []byte {
 	return bytes
 }
 
-func Blake2AsHex(data []byte) Hash {
-	//hash := blake2b.Sum256([]byte(data))
-	//return hex.EncodeToString(hash[:])
+func Blake2Hash(data []byte) Hash {
 	return BytesToHash(ComputeHash(data))
 }
 
-func Blake2Hash(data []byte) Hash {
-	return BytesToHash(ComputeHash(data))
+func Keccak256(data []byte) Hash {
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(data)
+	h := hash.Sum(nil)
+	return BytesToHash(h)
 }

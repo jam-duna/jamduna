@@ -45,10 +45,10 @@ func safrole_stf(sinput SInput, spreState SState) (SOutput, SState, error) {
 }
 
 func TestBlake2b(t *testing.T) {
-	// blake2AsHex("data goes here") -> "0xce73267ed8316b4350672f32ba49af86a7ae7af1267beb868a27f3fda03c044a"
+	// Blake2Hash("data goes here") -> "0xce73267ed8316b4350672f32ba49af86a7ae7af1267beb868a27f3fda03c044a"
 	expectedHash := common.HexToHash("0xce73267ed8316b4350672f32ba49af86a7ae7af1267beb868a27f3fda03c044a")
 	data := "data goes here"
-	actualHash := common.Blake2AsHex([]byte(data))
+	actualHash := common.Blake2Hash([]byte(data))
 	if actualHash != expectedHash {
 		t.Errorf("Hash mismatch: expected %s, got %s", expectedHash.Hex(), actualHash.Hex())
 	} else {
