@@ -1,14 +1,15 @@
 package node
 
 import (
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/erasurecoding"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
-	"math"
 )
 
-func NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.ASWorkPackage, segments []types.Segment) *types.AvailabilitySpecifier {
+func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) (*types.AvailabilitySpecifier, common.Hash, common.Hash) {
 	// Compute b using EncodeWorkPackage
 	b := encodeWorkPackage(workPackage)
 
@@ -16,29 +17,34 @@ func NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.ASWorkP
 	bLength := uint32(len(b))
 
 	// Compute b♣ and s♣
-	bClub := computeBClub(b)
-	sClub := computeSClub(segments)
+	bClub, bClubBlobHash := n.computeBClub(b)
+	sClub, sClubBlobHash := n.computeSClub(segments)
 
 	// u = (bClub, sClub)
-	u := generateU(bClub, sClub)
+	erasure_root_u := generateErasureRoot(bClub, sClub)
+
+	// ExportedSegmentRoot = CDT(segments)
+	exported_segment_root_e := generateSegmentsRoot(segments)
 
 	// Return the Availability Specifier
-	return &types.AvailabilitySpecifier{
-		WorkPackageHash:  packageHash,
-		BundleLength:     bLength,
-		ErasureRoot:      u,
-		ExportedSegments: sClub,
-		// TODO: SegmentRoot:
+	availabilitySpecifier := types.AvailabilitySpecifier{
+		WorkPackageHash:     packageHash,
+		BundleLength:        bLength,
+		ErasureRoot:         erasure_root_u,
+		ExportedSegmentRoot: exported_segment_root_e,
 	}
+	return &availabilitySpecifier, bClubBlobHash, sClubBlobHash
 }
 
 // Compute b♣ using the EncodeWorkPackage function
-func computeBClub(b []byte) []common.Hash {
+func (n *Node) computeBClub(b []byte) ([]common.Hash, common.Hash) {
 	// Padding b to the length of W_C
 	paddedB := padToLength(b, types.W_C)
 
 	// Process the padded data using erasure coding
-	encodedB, _ := erasurecoding.Encode(paddedB, int(math.Ceil(float64(len(b))/float64(types.W_C))))
+	c_base := types.ComputeC_Base(len(b))
+	blob_hash, _ := n.EncodeAndDistributeArbitraryData(paddedB, c_base)
+	encodedB, _ := erasurecoding.Encode(paddedB, c_base)
 
 	// Hash each element of the encoded data
 	var bClub []common.Hash
@@ -48,27 +54,33 @@ func computeBClub(b []byte) []common.Hash {
 		}
 	}
 
-	return bClub
+	return bClub, blob_hash
 }
 
-func computeSClub(segments []types.Segment) []common.Hash {
+func (n *Node) computeSClub(segments [][]byte) ([]common.Hash, common.Hash) {
 	var combinedData [][][]byte
 
-	pageProofs := trie.GeneratePageProof(segments)
+	pageProofs, _ := trie.GeneratePageProof(segments)
+	var combinedSegment []byte
+
 	for _, segment := range segments {
-		// Generate PageProofs for the segment, and combine them with the segment data
-
-		combinedSegment := segment.Data
-		for _, pageProof := range pageProofs {
-			combinedSegment = append(combinedSegment, pageProof.ToBytes()...)
+		for _, subSegment := range segment {
+			combinedSegment = append(combinedSegment, subSegment)
 		}
-
-		// Erasure Coding
-		encodedSegment, _ := erasurecoding.Encode(combinedSegment, 6)
-
-		// Append the encoded segment to the combined data
-		combinedData = append(combinedData, encodedSegment...)
 	}
+
+	for _, pageProof := range pageProofs {
+		for _, subProof := range pageProof {
+			combinedSegment = append(combinedSegment, subProof)
+		}
+	}
+
+	// Erasure Coding
+	blob_hash, _ := n.EncodeAndDistributeSegmentData(combinedSegment)
+	encodedSegment, _ := erasurecoding.Encode(combinedSegment, 6)
+
+	// Append the encoded segment to the combined data
+	combinedData = append(combinedData, encodedSegment...)
 
 	// Transpose the combined data
 	transposedData := transpose3D(combinedData)
@@ -78,7 +90,7 @@ func computeSClub(segments []types.Segment) []common.Hash {
 		sClub = append(sClub, common.Hash(root))
 	}
 
-	return sClub
+	return sClub, blob_hash
 }
 
 // Pad the data to the specified length
@@ -88,8 +100,8 @@ func padToLength(data []byte, length int) []byte {
 	return padded
 }
 
-// Encode b♣ and s♣ into a matrix
-func generateU(b []common.Hash, s []common.Hash) common.Hash {
+// MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix
+func generateErasureRoot(b []common.Hash, s []common.Hash) common.Hash {
 	// Combine b♣ and s♣ into a matrix and transpose it
 	var combined [][]byte
 
@@ -117,15 +129,82 @@ func generateU(b []common.Hash, s []common.Hash) common.Hash {
 	return common.Hash(wbt.Root())
 }
 
-// Gererate the root of the WBT from the segments
-func generateSegmentsRoot(segments []types.Segment) common.Hash {
+//M(s) - TODO: Stanley please check, should be CDT here. Not WBT
+func generateSegmentsRoot(segments [][]byte) common.Hash {
 	var segmentData [][]byte
 	for _, segment := range segments {
-		segmentData = append(segmentData, segment.Data)
+		segmentData = append(segmentData, segment)
 	}
 
-	wbt := trie.NewWellBalancedTree(segmentData)
-	return common.Hash(wbt.Root())
+	cdt := trie.NewCDMerkleTree(segmentData)
+	return common.Hash(cdt.Root())
+}
+
+// Validate the availability specifier
+func (n *Node) IsValidAvailabilitySpecifier(bClubBlobHash, sClubBlobHash common.Hash, originalAS *types.AvailabilitySpecifier) (bool, error) {
+	// Fetch and reconstruct the data for b♣ and s♣
+	bClubData, err := n.FetchAndReconstructAllSegmentsData(bClubBlobHash)
+	if err != nil {
+		return false, err
+	}
+
+	sClubData, err := n.FetchAndReconstructAllSegmentsData(sClubBlobHash)
+	if err != nil {
+		return false, err
+	}
+
+	// Recalculate the AvailabilitySpecifier
+	reconstructbClub := n.recomputeBClub(bClubData)
+	reconstructsClub := n.recomputeSClub(sClubData)
+	erasureRoot_u := generateErasureRoot(reconstructbClub, reconstructsClub)
+
+	recalculatedAS := &types.AvailabilitySpecifier{
+		WorkPackageHash:     originalAS.WorkPackageHash,
+		BundleLength:        originalAS.BundleLength,
+		ErasureRoot:         erasureRoot_u,
+		ExportedSegmentRoot: originalAS.ExportedSegmentRoot,
+	}
+
+	// compare the recalculated AvailabilitySpecifier with the original
+	if originalAS.ErasureRoot != recalculatedAS.ErasureRoot {
+		fmt.Printf("ErasureRoot mismatch (%x, %x)\n", originalAS.ErasureRoot, recalculatedAS.ErasureRoot)
+		return false, nil
+	}
+	return true, nil
+}
+
+// Recompute b♣ using the EncodeWorkPackage function
+func (n *Node) recomputeBClub(paddedB []byte) []common.Hash {
+	c_base := types.ComputeC_Base(len(paddedB))
+	encodedB, _ := erasurecoding.Encode(paddedB, c_base)
+
+	// Hash each element of the encoded data
+	var bClub []common.Hash
+	for _, block := range encodedB {
+		for _, b := range block {
+			bClub = append(bClub, common.Hash(padToLength(b, 32)))
+		}
+	}
+
+	return bClub
+}
+
+func (n *Node) recomputeSClub(combinedSegment []byte) []common.Hash {
+	var combinedData [][][]byte
+	encodedSegment, _ := erasurecoding.Encode(combinedSegment, 6)
+
+	// Append the encoded segment to the combined data
+	combinedData = append(combinedData, encodedSegment...)
+
+	// Transpose the combined data
+	transposedData := transpose3D(combinedData)
+	var sClub []common.Hash
+	for _, data := range transposedData {
+		root := trie.NewWellBalancedTree(data).Root()
+		sClub = append(sClub, common.Hash(root))
+	}
+
+	return sClub
 }
 
 // Helper function to transpose a matrix
@@ -173,26 +252,40 @@ func transpose3D(data [][][]byte) [][][]byte {
 	return transposed
 }
 
+
+// TODO: Sean to encode & decode properly
 // The E(p,x,i,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
-func encodeWorkPackage(wp types.ASWorkPackage) []byte {
+func encodeWorkPackage(wp types.WorkPackage) []byte {
 	// 1. Encode the package (p)
 	encodedPackage := types.Encode(wp)
 
 	// 2. Encode the extrinsic (x)
-	encodedExtrinsic := types.Encode(wp.Extrinsic)
-
+	x := wp.WorkItems
+	encodedExtrinsic := make([]byte, 0)
+	for _, WorkItem := range x {
+		encodedExtrinsic = types.Encode(WorkItem.Extrinsics)
+	}
 	// 3. Encode the segments (i)
 	var encodedSegments []byte
-	for _, segment := range wp.ImportSegments {
-		encodedSegments = append(encodedSegments, types.Encode(segment)...)
+	for _, WorkItem := range x {
+		for _, segment := range WorkItem.ImportedSegments {
+			encodedSegments = append(encodedSegments, types.Encode(segment)...)
+		}
 	}
 
 	// 4. Encode the justifications (j)
 	var encodedJustifications []byte
-	for i, segment := range wp.ImportSegments {
-		byteSlices := segment.ToByteSlices()
-		tree := trie.NewCDMerkleTree(byteSlices)
-		justification, _ := tree.Justify(i)
+	for _, WorkItem := range x {
+		var justification [][]byte
+		var segments [][]byte
+		for _, segment := range WorkItem.ImportedSegments {
+			segments = append(segments, segment.TreeRoot[:])
+		}
+		tree := trie.NewCDMerkleTree(segments)
+		for i, _ := range WorkItem.ImportedSegments {
+			justify, _ := tree.Justify(i)
+			justification = append(justification, justify...)
+		}
 		encodedJustifications = append(encodedJustifications, types.Encode(justification)...)
 	}
 	// Combine all encoded parts: e(p,x,i,j)

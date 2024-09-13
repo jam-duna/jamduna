@@ -56,14 +56,6 @@ type ASWorkItem struct {
 	Extrinsics []WorkItemExtrinsic `json:"extrinsic"`
 }
 
-func (item ASWorkItem) ToByteSlices() [][]byte {
-	var slices [][]byte
-	for _, segment := range item.Segments {
-		slices = append(slices, segment.Data)
-	}
-	return slices
-}
-
 // for codec
 type CWorkItem struct {
 	Service          uint32              `json:"service"`

@@ -7,6 +7,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	//"github.com/colorfulnotion/jam/trie"
+	"math"
 )
 
 type BMTProof []common.Hash
@@ -44,7 +45,7 @@ type ECChunkResponse struct {
 }
 
 type ECChunkQuery struct {
-	SegmentRoot []byte `json:"segment_root"`
+	SegmentRoot common.Hash `json:"segment_root"`
 }
 
 // `ImportDAQuery` + `ImportDAResponse` WIP:
@@ -128,4 +129,9 @@ type AuditFriendlyWorkPackage struct {
 	ExtrinsicData        []byte // "x":the extrinsic data
 	ImportSegment        []byte // "i":the concatenated import segments
 	MerkleJustifications []byte // "j":their proofs of correctness
+}
+
+func ComputeC_Base(blob_length int) int {
+	c := int(math.Ceil(float64(blob_length) / float64(W_C)))
+	return c
 }

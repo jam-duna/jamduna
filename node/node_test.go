@@ -92,10 +92,77 @@ func TestNodeSafrole(t *testing.T) {
 	}
 }
 
+func TestSegmentECRoundTrip(t *testing.T) {
+	// Define various data sizes to test
+	dataSizes := []int{32, 64, 128, 256, 512, 1024, 2048}
+
+	// Initialize nodes
+	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	if err != nil {
+		t.Fatalf("Error setting up nodes: %v\n", err)
+	}
+
+	nodes := make([]*Node, numNodes)
+	for i := 0; i < numNodes; i++ {
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		if err != nil {
+			t.Fatalf("Failed to create node %d: %v\n", i, err)
+		}
+		nodes[i] = node
+	}
+
+	// Wait for nodes to be ready
+	fmt.Println("Waiting for nodes to be ready...")
+	time.Sleep(2 * time.Second)
+	fmt.Println("Time Sleep End...")
+
+	// Test encoding, distributing, fetching, and reconstructing data for each size
+	for _, size := range dataSizes {
+		fmt.Printf("processing %d........\n", size)
+		size := size
+		t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
+			// Generate random data of the specified size
+			data := make([]byte, size)
+			_, err := rand.Read(data)
+			if err != nil {
+				t.Fatalf("Failed to generate random data: %v", err)
+			}
+
+			// Use sender node to encode and distribute data
+			senderNode := nodes[0]
+			fmt.Println("Starting EncodeAndDistributeSegmentData...")
+			blobHash, err := senderNode.EncodeAndDistributeSegmentData(data)
+			fmt.Println("Finished EncodeAndDistributeSegmentData...")
+			if err != nil {
+				t.Fatalf("Failed to encode and distribute data: %v", err)
+			}
+
+			// Simulate a small delay before fetching and reconstructing the data
+			time.Sleep(2 * time.Second)
+
+			// Use the first node to fetch and reconstruct the data
+			fmt.Println("Starting FetchAndReconstructSegmentData...")
+			reconstructedData, err := senderNode.FetchAndReconstructAllSegmentsData(blobHash)
+			fmt.Println("Finished FetchAndReconstructSegmentData...")
+			if err != nil {
+				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
+			}
+
+			// Compare original and reconstructed data
+			if !bytes.Equal(data, reconstructedData) {
+				t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
+			} else {
+				fmt.Printf("Roundtrip success for DataSize%d\n", size)
+			}
+		})
+	}
+}
+
 func TestECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
 	//try to do it separately test for each size
 	dataSizes := []int{1028, 23, 24, 25, 26, 27, 28, 29, 30, 31, 39, 1024}
+	// dataSizes := []int{2084}
 	// Initialize nodes
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
 	if err != nil {
@@ -117,6 +184,7 @@ func TestECRoundTrip(t *testing.T) {
 	senderNode := nodes[0]
 
 	for _, size := range dataSizes {
+		size := size
 		t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
 			// Generate random data of the specified size
 			data := make([]byte, size)
@@ -125,12 +193,13 @@ func TestECRoundTrip(t *testing.T) {
 				t.Fatalf("Failed to generate random data: %v", err)
 			}
 
-			blob_hash, err := senderNode.EncodeAndDistributeData(data)
+			blob_len := len(data)
+			blob_hash, err := senderNode.EncodeAndDistributeArbitraryData(data, blob_len)
 			if err != nil {
 				t.Fatalf("Failed to encode and distribute data: %v", err)
 			}
 			time.Sleep(500 * time.Millisecond)
-			reconstructData, err := senderNode.FetchAndReconstructData(blob_hash)
+			reconstructData, err := senderNode.FetchAndReconstructArbitraryData(blob_hash, blob_len)
 			if err != nil {
 				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
 			}
@@ -139,6 +208,8 @@ func TestECRoundTrip(t *testing.T) {
 
 			// Compare the original data and the reconstructed data with bytes.Equal
 			if !bytes.Equal(data, reconstructData) {
+				fmt.Printf("Original data: %x\n", data)
+				fmt.Printf("Reconstructed data: %x\n", reconstructData)
 				t.Fatalf("Original data and reconstructed data are different for size %d", size)
 			} else {
 				fmt.Printf("roundtrip success for DataSize%d\n", size)
@@ -181,6 +252,17 @@ func loadByteCode(filePath string) ([]byte, error) {
 	return bytes, nil
 }
 
+/*
+
+ Group effort - Fib
+ need Willaim export & import
+ need Sean's encode func for E(p,x,i,j) + e
+ need Stanley availability specifier(as) & paged proof & process to reconstruct using AS
+ need Shawn's Assurance/Judgement based on Stanley's reconstructed wp
+ need Jerry -
+
+*/
+
 func TestWorkGuarantee(t *testing.T) {
 
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
@@ -202,7 +284,8 @@ func TestWorkGuarantee(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	codeHash, err := nodes[0].EncodeAndDistributeData(code)
+	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
+	codeHash, err := nodes[0].EncodeAndDistributeArbitraryData(code, len(code))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -248,7 +331,7 @@ func TestWorkGuarantee(t *testing.T) {
 		for _, n := range nodes {
 			fmt.Println("Node ID:", n.id)
 			if n.coreIndex == 0 {
-				specifier, err := n.processWorkPackage(workPackage)
+				specifier, err, _, _ := n.processWorkPackage(workPackage)
 				if err != nil {
 					panic(0)
 				}
@@ -256,7 +339,7 @@ func TestWorkGuarantee(t *testing.T) {
 				if specifier.WorkPackageHash != packageHash {
 					t.Errorf("expected PackageHash %v, got %v", packageHash, specifier.WorkPackageHash)
 				} else {
-					fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegments)
+					fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegmentRoot)
 				}
 
 				if len(specifier.ErasureRoot) == 0 {
@@ -265,17 +348,17 @@ func TestWorkGuarantee(t *testing.T) {
 					fmt.Printf("ErasureRoot:%s\n", specifier.ErasureRoot)
 				}
 
-				if len(specifier.SegmentRoot) == 0 {
+				if len(specifier.ErasureRoot) == 0 {
 					t.Error("SegmentRoot should not be empty")
 				} else {
-					fmt.Printf("SegmentRoot:%s\n", specifier.SegmentRoot)
+					fmt.Printf("SegmentRoot:%s\n", specifier.ErasureRoot)
 				}
 
-				// 4. Check ExportedSegments (simplified check)
-				if len(specifier.ExportedSegments) == 0 {
-					t.Error("ExportedSegments should not be empty")
+				// 4. Check ExportedSegmentRoot (simplified check)
+				if len(specifier.ExportedSegmentRoot) == 0 {
+					t.Error("ExportedSegmentRoot should not be empty")
 				} else {
-					fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegments)
+					fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegmentRoot)
 				}
 
 				t.Logf("Generated Availability Specifier: %+v", specifier)
@@ -296,24 +379,38 @@ func TestCodeParse(t *testing.T) {
 	fmt.Println("Code:", code)
 	pvm.NewVMFromParseProgramTest(code)
 }
-func TestNodeRotation(t *testing.T) {
+
+func TestIsValidAvailabilitySpecifier(t *testing.T) {
+	// Set up the network
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
 	if err != nil {
-		t.Fatalf("Error Seeting up nodes: %v\n", err)
+		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
-
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
-		//node.state = statedb.ProcessGenesis(genesisAuthorities)
 		nodes[i] = node
 	}
-	assign := nodes[0].statedb.AssignGuarantorsTesting(common.BytesToHash(common.ComputeHash([]byte("test"))))
-	for _, a := range assign {
-		fmt.Printf("CoreIndex:%d, Validator:%x\n", a.CoreIndex, a.Validator.Ed25519)
-	}
 
+	senderNode := nodes[0]
+
+	// Simulate a work package and segments
+	workPackage := types.WorkPackage{ /*...Set fields...*/ }
+	segments := [][]byte{[]byte("segment1"), []byte("segment2")}
+
+	// Generate the AvailabilitySpecifier
+	packageHash := common.ComputeHash([]byte("test_package"))
+	originalAS, bClubBlobHash, sClubBlobHash := senderNode.NewAvailabilitySpecifier(common.Hash(packageHash), workPackage, segments)
+
+	// Validate the AvailabilitySpecifier
+	isValid, err := senderNode.IsValidAvailabilitySpecifier(bClubBlobHash, sClubBlobHash, originalAS)
+	if err != nil {
+		t.Fatalf("Error validating AvailabilitySpecifier: %v", err)
+	}
+	if isValid == false {
+		t.Fatalf("AvailabilitySpecifier is not valid: %v", err)
+	}
 }

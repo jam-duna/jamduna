@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"github.com/klauspost/reedsolomon"
 )
 
 // Define the structure for the JSON data
@@ -25,6 +26,190 @@ type TestCase struct {
 			SegmentEC []string `json:"segment_ec"`
 		} `json:"segments"`
 	} `json:"segment"`
+}
+
+type AtomicShards struct {
+	Data    string `json:"data"`
+	Segment struct {
+		Segments []struct {
+			SegmentEC []string `json:"segment_ec"`
+		} `json:"segments"`
+	} `json:"segment"`
+}
+
+
+// GetShards with padding
+func GetSubshards(data []byte) [][][]byte {
+	segments := (len(data)) / 1026 / 12
+	shards := 1026
+	shardLength := 12
+	array := make([][][]byte, segments)
+	for i := 0; i < segments; i++ {
+		array[i] = make([][]byte, shards)
+		for j := 0; j < shards; j++ {
+			array[i][j] = make([]byte, shardLength)
+			for k := 0; k < shardLength; k++ {
+				index := i*12312 + j*12 + k
+				if index < len(data) {
+					array[i][j][k] = data[index]
+				} else {
+					array[i][j][k] = 0 // padding
+				}
+			}
+		}
+	}
+	return array
+}
+
+// GetShards without padding
+func GetSubshardsAtomic(data []byte, original []byte) [][][]byte {
+	segmentsNum := len(original) / 4104
+	datashardslength := (((len(original)%4104)-1)/684 + 1) * 2
+	segments := (len(data)) / 1026 / 12
+	shards := 1026
+	shardLength := 12
+	array := make([][][]byte, segments)
+	for i := 0; i < segments; i++ {
+		if i < segmentsNum {
+			array[i] = make([][]byte, shards)
+			for j := 0; j < shards; j++ {
+				array[i][j] = make([]byte, shardLength)
+				for k := 0; k < shardLength; k++ {
+					index := i*12312 + j*12 + k
+					if index < len(data) {
+						array[i][j][k] = data[index]
+					} else {
+						array[i][j][k] = 0 // padding
+					}
+				}
+			}
+		} else {
+			array[i] = make([][]byte, shards)
+			for j := 0; j < shards; j++ {
+				array[i][j] = make([]byte, datashardslength)
+				for k := 0; k < datashardslength; k++ {
+					index := i*12312 + j*12 + k
+					if index < len(data) {
+						array[i][j][k] = data[index]
+					} else {
+						array[i][j][k] = 0 // padding
+					}
+				}
+			}
+		}
+
+	}
+
+	return array
+}
+
+// Converts the 3D array to JSON with hex encoding and saves files
+func ConvertToJSON(data []byte, encodedArray [][][]byte, filePath string) error {
+	originalDataHex := hex.EncodeToString(data)
+
+	segments := make([]struct {
+		SegmentEC []string `json:"segment_ec"`
+	}, len(encodedArray))
+	for i, arr2D := range encodedArray {
+		segmentShards := make([]string, len(arr2D))
+		for j, arr1D := range arr2D {
+			hexShard := ""
+			for _, v := range arr1D {
+				hexShard += hex.EncodeToString([]byte{v})
+			}
+			segmentShards[j] = hexShard
+		}
+		segments[i] = struct {
+			SegmentEC []string `json:"segment_ec"`
+		}{SegmentEC: segmentShards}
+	}
+
+	jsonOutput := AtomicShards{
+		Data: originalDataHex,
+		Segment: struct {
+			Segments []struct {
+				SegmentEC []string `json:"segment_ec"`
+			} `json:"segments"`
+		}{
+			Segments: segments,
+		},
+	}
+
+	jsonData, err := json.MarshalIndent(jsonOutput, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// Save to the specified file path
+	err = os.WriteFile(filePath, jsonData, 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func EncodeTiny(original []byte) ([][]byte, error) {
+	if len(original) != 24 {
+		return nil, fmt.Errorf("original data length must be 24 bytes")
+	}
+	originalData := make([][]byte, 12)
+	for i := 0; i < 12; i++ {
+		originalData[i] = make([]byte, 64)
+	}
+	for i := 0; i < 4; i++ {
+		originalData[i][0] = original[i*2]
+		originalData[i][1] = original[i*2+1]
+		originalData[i][2] = original[8+i*2]
+		originalData[i][3] = original[8+i*2+1]
+		originalData[i][4] = original[16+i*2]
+		originalData[i][5] = original[16+i*2+1]
+	}
+	enc, err := reedsolomon.New(4, 8, reedsolomon.WithLeopardGF16(true))
+	if err != nil {
+		return nil, err
+	}
+
+	err = enc.Encode(originalData)
+	if err != nil {
+		return nil, err
+	}
+
+	encodedData := make([][]byte, 12)
+	for i := 0; i < 12; i++ {
+		encodedData[i] = originalData[i][:6]
+	}
+
+	return encodedData, nil
+}
+
+func DecodeTiny(encoded [][]byte) ([]byte, error) {
+	paddedData := make([][]byte, 12)
+	for i := 0; i < 12; i++ {
+		paddedData[i] = append(encoded[i], make([]byte, 58)...)
+	}
+
+	dec, err := reedsolomon.New(4, 8, reedsolomon.WithLeopardGF16(true))
+	if err != nil {
+		return nil, err
+	}
+
+	err = dec.Reconstruct(paddedData)
+	if err != nil {
+		return nil, err
+	}
+
+	original := make([]byte, 24)
+	for i := 0; i < 4; i++ {
+		original[i*2] = paddedData[i][0]
+		original[i*2+1] = paddedData[i][1]
+		original[8+i*2] = paddedData[i][2]
+		original[8+i*2+1] = paddedData[i][3]
+		original[16+i*2] = paddedData[i][4]
+		original[16+i*2+1] = paddedData[i][5]
+	}
+
+	return original, nil
 }
 
 // This function is used to read the test vector (old base 64 from PR4/Cheme) from the JSON file
@@ -118,12 +303,17 @@ func test_encode_decode(t *testing.T, size uint32) error {
 	fmt.Printf("Original data %x\n", original)
 
 	// Encode the original data
-	encodedOutput, err0 := Encode(original)
+	numPiecesK := 6
+
+	// Derive K, N
+	K, N := GetCodingRate()
+
+	encodedOutput, err0 := Encode(original, numPiecesK)
 	if err0 != nil {
 		t.Fatalf("Error in Encode: %v", err0)
 	}
 	fmt.Printf("Encoded output:\n")
-	print3DByteArray(encodedOutput)
+	// print3DByteArray(encodedOutput)
 
 	// Pseudo availability of all subshards, randomly "erase" some subshards according to the availableCount value
 	availability := make([][]bool, len(encodedOutput))
@@ -151,9 +341,9 @@ func test_encode_decode(t *testing.T, size uint32) error {
 		}
 	}
 	fmt.Printf("Erased output:\n")
-	print3DByteArray(encodedOutput)
+	// print3DByteArray(encodedOutput)
 
-	decodedOutput, err2 := Decode(encodedOutput)
+	decodedOutput, err2 := Decode(encodedOutput, numPiecesK)
 	if err2 != nil {
 		t.Fatalf("Error in Decode: %v", err2)
 	}
@@ -205,6 +395,14 @@ func TestGenerateTestVectors(t *testing.T) {
 		200000, // larger 2r
 	}
 
+	// Encode the original data
+	numPiecesK := 6
+
+	// TODO: Stanley to check this Jerry
+	// Derive K, N
+	// K := w_c / 2
+	// N := w_s
+
 	//fixed random seed for repeatability
 	rand.Seed(1000003)
 	for _, size := range sizes {
@@ -214,7 +412,7 @@ func TestGenerateTestVectors(t *testing.T) {
 			t.Fatalf("Error generating random bytes: %v", err)
 		}
 
-		encodedOutput, err0 := Encode(original)
+		encodedOutput, err0 := Encode(original, numPiecesK)
 		if err0 != nil {
 			t.Fatalf("Error in Encode: %v", err0)
 		}
@@ -240,8 +438,12 @@ func TestTestVectors(t *testing.T) {
 		encodeddata[0][i] = make([]byte, 64)
 		copy(encodeddata[0][i], encoded[i*12:(i+1)*12])
 	}
+
+	// Encode the original data
+	numPiecesK := 6
+
 	//decode
-	decodedOutput, err2 := Decode(encodeddata)
+	decodedOutput, err2 := Decode(encodeddata, numPiecesK)
 	if err2 != nil {
 		t.Fatalf("Error in Decode: %v", err2)
 	}

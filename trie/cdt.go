@@ -26,12 +26,6 @@ type CDMerkleTree struct {
 	leaves []*CDTNode
 }
 
-// PagedProof represents a paged proof
-type PagedProof struct {
-	SegmentHashes [64]common.Hash
-	MerkleRoot    common.Hash
-}
-
 // NewCDMerkleTree creates a new constant-depth Merkle tree
 func NewCDMerkleTree(values [][]byte) *CDMerkleTree {
 	// If there are no leaves, return a tree with a hash of 0
@@ -243,77 +237,49 @@ func findSibling(parent, node *CDTNode) *CDTNode {
 }
 
 // generatePageProof creates paged proofs from segments
-func GeneratePageProof(segments []types.Segment) []PagedProof {
+func GeneratePageProof(segments [][]byte) ([][]byte, error) {
 	return generatePageProof(segments)
 }
 
-// generatePageProof creates paged proofs from segments
-func generatePageProof(segments []types.Segment) []PagedProof {
-	var pagedProofs []PagedProof
-	var currentPageSegments []common.Hash
+/* generatePageProof creates paged proofs from segments
+ */
+func generatePageProof(segments [][]byte) ([][]byte, error) {
+	// Build the Merkle tree
+	tree := NewCDMerkleTree(segments)
 
-	for _, segment := range segments {
-		data := segment.Data
-
-		// put the hash of the segment into the current page
-		currentPageSegments = append(currentPageSegments, common.Hash(computeLeaf(data)))
-
-		// if the current page is full, create a paged proof
-		if len(currentPageSegments) == 64 {
-			pagedProofs = append(pagedProofs, createPagedProof(currentPageSegments))
-			currentPageSegments = []common.Hash{}
+	// Count the number of pages
+	pageSize := 64
+	numPages := (len(segments) + pageSize - 1) / pageSize // ceiling function
+	results := make([][]byte, 0)
+	for page := 0; page < numPages; page++ {
+		// The start and end index of the current page
+		start := page * 64
+		end := start + 64
+		if end > len(segments) {
+			end = len(segments)
 		}
-	}
 
-	// if there are remaining segments, create a paged proof
-	if len(currentPageSegments) > 0 {
-		for len(currentPageSegments) < 64 {
-			// append empty hashes to fill the page
-			currentPageSegments = append(currentPageSegments, common.Hash{})
+		// Calculate the index of the leaf node
+		i := page * 64
+
+		// Get the justification for the leaf node
+		tracePath, err := tree.JustifyX(i, 6)
+		if err != nil {
+			return results, err
 		}
-		pagedProofs = append(pagedProofs, createPagedProof(currentPageSegments))
+
+		// Encode the trace path and the segments
+		encoded := types.Encode(append(tracePath, segments[start:end]...))
+		if err != nil {
+			return results, err
+		}
+
+		// Pad the encoded data to W_C * W_S
+		paddingSize := types.W_C * types.W_S
+		paddedOutput := make([]byte, paddingSize)
+		copy(paddedOutput, encoded) // If the encoded data is larger than the padding size, it will be truncated
+		results = append(results, paddedOutput)
 	}
 
-	return pagedProofs
-}
-
-// createPagedProof creates a paged proof
-func createPagedProof(segmentHashes []common.Hash) PagedProof {
-	var segmentHashesArray [64]common.Hash
-	copy(segmentHashesArray[:], segmentHashes)
-
-	merkleRoot := generateMerkleRoot(segmentHashes)
-
-	return PagedProof{
-		SegmentHashes: segmentHashesArray,
-		MerkleRoot:    merkleRoot,
-	}
-}
-
-// generates the Merkle root from the segment hashes
-func generateMerkleRoot(hashes []common.Hash) common.Hash {
-	// transform the hashes to byte slices
-	var hashBytes [][]byte
-	for _, hash := range hashes {
-		hashBytes = append(hashBytes, hash[:])
-	}
-
-	// create a new CDMerkleTree by the hashes
-	tree := NewCDMerkleTree(hashBytes)
-
-	return common.BytesToHash(tree.Root())
-}
-
-// Trasnform PagedProof to bytes
-func (pp PagedProof) ToBytes() []byte {
-	var result []byte
-
-	// Trsnform the segment hashes to bytes
-	for _, hash := range pp.SegmentHashes {
-		result = append(result, hash[:]...)
-	}
-
-	result = append(result, pp.MerkleRoot[:]...)
-
-	return result
+	return results, nil
 }

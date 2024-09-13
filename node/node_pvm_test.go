@@ -43,7 +43,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		data := []byte(s)
 		blob_arr[data_i] = data
 		fmt.Println(data)
-		blob_hash, err := senderNode.EncodeAndDistributeData(data)
+		blob_hash, err := senderNode.EncodeAndDistributeArbitraryData(data, len(data))
 		if err != nil {
 			t.Fatalf("Failed to encode and distribute data: %v", err)
 		}
@@ -143,7 +143,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 
 		// use lookups to do Fetch
 		for _, l := range lookups {
-			reconstructData, err := senderNode.FetchAndReconstructData(l.BlobHash)
+			reconstructData, err := senderNode.FetchAndReconstructArbitraryData(l.BlobHash, int(l.Length))
 			//reconstructData, err := senderNode.FetchAndReconstructData(l.BlobHash, l.Length)
 			if err != nil {
 				t.Fatalf("Failed to fetch and reconstruct data: %v", err)

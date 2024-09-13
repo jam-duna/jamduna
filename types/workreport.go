@@ -21,8 +21,7 @@ import (
 // WorkReport represents a work report.
 
 type WorkReport struct {
-	AvailabilitySpec AvailabilitySpecifier `json:"availability"`
-	PackageSpec      WorkPackageSpec       `json:"package_spec"`
+	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
 	RefineContext    RefineContext         `json:"context"`
 	CoreIndex        uint16                `json:"core_index"`
 	AuthorizerHash   common.Hash           `json:"authorizer_hash"`
@@ -30,29 +29,22 @@ type WorkReport struct {
 	Results          []WorkResult          `json:"results"`
 }
 
-type CWorkReport struct {
-	PackageSpec    WorkPackageSpec `json:"package_spec"`
-	RefineContext  RefineContext   `json:"context"`
-	CoreIndex      uint16          `json:"core_index"`
-	AuthorizerHash common.Hash     `json:"authorizer_hash"`
-	AuthOutput     []byte          `json:"auth_output"`
-	Results        []WorkResult    `json:"results"`
-}
-
 type SWorkReport struct {
-	PackageSpec    WorkPackageSpec `json:"package_spec"`
-	RefineContext  RefineContext   `json:"context"`
-	CoreIndex      uint16          `json:"core_index"`
-	AuthorizerHash common.Hash     `json:"authorizer_hash"`
-	AuthOutput     string          `json:"auth_output"`
-	Results        []SWorkResult   `json:"results"`
+	AvailabilitySpec CAvailabilitySpecifier `json:"package_spec"`
+	RefineContext    RefineContext          `json:"context"`
+	CoreIndex        uint16                 `json:"core_index"`
+	AuthorizerHash   common.Hash            `json:"authorizer_hash"`
+	AuthOutput       string                 `json:"auth_output"`
+	Results          []SWorkResult          `json:"results"`
 }
 
-type WorkPackageSpec struct {
-	Hash     common.Hash `json:"hash"`
-	Len      uint32      `json:"len"`
-	Root     common.Hash `json:"root"`
-	Segments common.Hash `json:"segments"`
+type CWorkReport struct {
+	AvailabilitySpec CAvailabilitySpecifier `json:"package_spec"`
+	RefineContext    RefineContext          `json:"context"`
+	CoreIndex        uint16                 `json:"core_index"`
+	AuthorizerHash   common.Hash            `json:"authorizer_hash"`
+	AuthOutput       []byte                 `json:"auth_output"`
+	Results          []WorkResult           `json:"results"`
 }
 
 // computeWorkReportBytes abstracts the process of generating the bytes to be signed or verified.
@@ -96,7 +88,7 @@ func (a *WorkReport) Hash() common.Hash {
 }
 
 func (s *SWorkReport) Deserialize() (CWorkReport, error) {
-	package_spec := s.PackageSpec
+	package_spec := s.AvailabilitySpec
 	context := s.RefineContext
 	core_index := s.CoreIndex
 	authorizer_hash := s.AuthorizerHash
@@ -107,11 +99,11 @@ func (s *SWorkReport) Deserialize() (CWorkReport, error) {
 	}
 
 	return CWorkReport{
-		PackageSpec:    package_spec,
-		RefineContext:  context,
-		CoreIndex:      core_index,
-		AuthorizerHash: authorizer_hash,
-		AuthOutput:     auth_output,
-		Results:        results,
+		AvailabilitySpec: package_spec,
+		RefineContext:    context,
+		CoreIndex:        core_index,
+		AuthorizerHash:   authorizer_hash,
+		AuthOutput:       auth_output,
+		Results:          results,
 	}, nil
 }

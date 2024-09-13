@@ -4,9 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"testing"
-
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
 )
 
 func TestCDMerkleTree(t *testing.T) {
@@ -201,14 +198,14 @@ func TestCDTGet(t *testing.T) {
 
 // TestGeneratePageProof tests the generation of page proofs
 func TestGeneratePageProof(t *testing.T) {
-	var segments []types.Segment
+	var segments [][]byte
 
 	for i := 1; i <= 65; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
-		segments = append(segments, types.Segment{Data: data})
+		segments = append(segments, data)
 	}
 
-	pagedProofs := generatePageProof(segments)
+	pagedProofs, _ := generatePageProof(segments)
 
 	if len(pagedProofs) == 0 {
 		t.Fatalf("Expected non-empty page proofs")
@@ -216,18 +213,6 @@ func TestGeneratePageProof(t *testing.T) {
 
 	// print the Merkle Root of each page
 	for i, proof := range pagedProofs {
-		t.Logf("Page %d MerkleRoot: %s", i, hex.EncodeToString(proof.MerkleRoot[:]))
-		for j, segmentHash := range proof.SegmentHashes {
-			if segmentHash != (common.Hash{}) { // if the hash is not empty
-				t.Logf("Segment %d Hash: %s", j, hex.EncodeToString(segmentHash[:]))
-			}
-		}
-	}
-
-	// check the number of segment hashes in each page
-	for i, proof := range pagedProofs {
-		if len(proof.SegmentHashes) != 64 {
-			t.Errorf("Page %d does not have 64 segment hashes, but %d", i, len(proof.SegmentHashes))
-		}
+		t.Logf("Page %d PageProof: %s", i, (proof))
 	}
 }
