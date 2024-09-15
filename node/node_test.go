@@ -2,12 +2,13 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"fmt"
 	"time"
 
 	//"sync"
-	//"context"
+
 	"encoding/json"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/trie"
 
 	"github.com/colorfulnotion/jam/types"
 )
@@ -95,6 +97,7 @@ func TestNodeSafrole(t *testing.T) {
 func TestSegmentECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
 	dataSizes := []int{32, 64, 128, 256, 512, 1024, 2048}
+	// dataSizes := []int{10}
 
 	// Initialize nodes
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
@@ -122,16 +125,22 @@ func TestSegmentECRoundTrip(t *testing.T) {
 		size := size
 		t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
 			// Generate random data of the specified size
-			data := make([]byte, size)
-			_, err := rand.Read(data)
-			if err != nil {
-				t.Fatalf("Failed to generate random data: %v", err)
+			var data [][]byte
+			for i := 0; i < 10; i++ {
+				randData := make([]byte, size)
+				_, err := rand.Read(randData)
+				data = append(data, randData)
+				if err != nil {
+					t.Fatalf("Failed to generate random data: %v", err)
+				}
 			}
+			pageProofs, _ := trie.GeneratePageProof(data)
+			combinedSegmentAndPageProofs := append(data, pageProofs...)
 
 			// Use sender node to encode and distribute data
 			senderNode := nodes[0]
 			fmt.Println("Starting EncodeAndDistributeSegmentData...")
-			blobHash, err := senderNode.EncodeAndDistributeSegmentData(data)
+			blobHash, err := senderNode.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs)
 			fmt.Println("Finished EncodeAndDistributeSegmentData...")
 			if err != nil {
 				t.Fatalf("Failed to encode and distribute data: %v", err)
@@ -143,17 +152,20 @@ func TestSegmentECRoundTrip(t *testing.T) {
 			// Use the first node to fetch and reconstruct the data
 			fmt.Println("Starting FetchAndReconstructSegmentData...")
 			reconstructedData, err := senderNode.FetchAndReconstructAllSegmentsData(blobHash)
-			fmt.Println("Finished FetchAndReconstructSegmentData...")
 			if err != nil {
 				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
 			}
+			fmt.Println("Finished FetchAndReconstructSegmentData...")
 
 			// Compare original and reconstructed data
-			if !bytes.Equal(data, reconstructedData) {
-				t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
-			} else {
-				fmt.Printf("Roundtrip success for DataSize%d\n", size)
+			for i := 0; i < size; i++ {
+				if !bytes.Equal(data[i], reconstructedData[i][:len(data[i])]) {
+					fmt.Printf("Original data: %x\n", data[i])
+					fmt.Printf("Reconstructed data: %x\n", reconstructedData[i][:len(data[i])])
+					t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
+				}
 			}
+			fmt.Printf("Roundtrip success for DataSize%d\n", size)
 		})
 	}
 }
@@ -289,14 +301,29 @@ func TestWorkGuarantee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	authToken := []byte("0x") // TODO: sign
-	var exportedItem types.ImportSegment
-	for n := 1; n < 20; n++ {
-		importedSegments := make([]types.ImportSegment, 0)
-		if n > 1 {
-			importedSegments = append(importedSegments, exportedItem)
+
+	for _, n := range nodes {
+		target_statedb := n.getPVMStateDB()
+		target_statedb.WriteServicePreimageBlob(47, code)
+		tentativeRoot := target_statedb.GetTentativeStateRoot()
+		target_statedb.StateRoot = tentativeRoot
+		n.statedb = target_statedb.Copy()
+
+		recovered_code := n.statedb.ReadServicePreimageBlob(47, codeHash)
+		if !common.CompareBytes(code, recovered_code) {
+			panic(0)
 		}
-		context := types.RefineContext{}
+	}
+
+	authToken := []byte("0x")               // TODO: sign
+	var exportedItems []types.ImportSegment // how do you get import segments from previous round?
+	importedSegments := make([]types.ImportSegment, 0)
+	for n := 1; n < 20; n++ {
+		importedSegments = make([]types.ImportSegment, 0)
+		if n > 1 {
+			importedSegments = append(importedSegments, exportedItems...)
+		}
+		refine_context := types.RefineContext{}
 
 		// WorkPackage represents a work package.
 		/*type WorkPackage struct {
@@ -315,7 +342,7 @@ func TestWorkGuarantee(t *testing.T) {
 			Authorization: authToken,
 			AuthCodeHost:  47,
 			Authorizer:    types.Authorizer{},
-			RefineContext: context,
+			RefineContext: refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:          47,
@@ -329,9 +356,26 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 		packageHash := workPackage.Hash()
 		for _, n := range nodes {
+			ctx := context.Background()
+			s0 := n.statedb
+			if s0 == nil {
+				fmt.Println("s0 is nil")
+			}
+			targetJCE := statedb.ComputeCurrentJCETime() + 120
+			b1, b1_err := s0.MakeBlock(n.credential, targetJCE)
+			if b1_err != nil {
+				t.Fatalf("MakeBlock err %v\n", b1_err)
+			}
+			s1, s1_err := statedb.ApplyStateTransitionFromBlock(s0, ctx, b1)
+			if s1_err != nil {
+				t.Fatalf("S0->S1 Transition Err: %v\n", s1_err)
+			}
+			n.addStateDB(s1)
+
 			fmt.Println("Node ID:", n.id)
 			if n.coreIndex == 0 {
-				specifier, err, _, _ := n.processWorkPackage(workPackage)
+				//spec *types.AvailabilitySpecifier, err error, bBlobHash common.Hash, sBlobHash common.Hash, exportedSegments [][]byte
+				specifier, err, _, treeRoot := n.processWorkPackage(workPackage)
 				if err != nil {
 					panic(0)
 				}
@@ -360,19 +404,26 @@ func TestWorkGuarantee(t *testing.T) {
 				} else {
 					fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegmentRoot)
 				}
-
 				t.Logf("Generated Availability Specifier: %+v", specifier)
-
+				// TODO: use specifier to setup the next importsegments
+				exportedSegments, _ := n.FetchAndReconstructAllSegmentsData(treeRoot)
+				fmt.Printf("exportedSegments Len=%v\n", len(exportedSegments))
+				exportedItems = nil
+				for i, segmentRoot := range exportedSegments {
+					exportedItems = append(exportedItems, types.ImportSegment{
+						TreeRoot: common.Hash(segmentRoot),
+						Index:    uint32(i),
+					})
+				}
 			}
 		}
 	}
-
 }
 
 func TestCodeParse(t *testing.T) {
 
 	// fib code
-	code, err := loadByteCode("../jamtestvectors/workpackages/fib_latest.pvm")
+	code, err := loadByteCode("../jamtestvectors/workpackages/fib-full.pvm")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -403,10 +454,10 @@ func TestIsValidAvailabilitySpecifier(t *testing.T) {
 
 	// Generate the AvailabilitySpecifier
 	packageHash := common.ComputeHash([]byte("test_package"))
-	originalAS, bClubBlobHash, sClubBlobHash := senderNode.NewAvailabilitySpecifier(common.Hash(packageHash), workPackage, segments)
+	originalAS, blobHash, treeRoot := senderNode.NewAvailabilitySpecifier(common.Hash(packageHash), workPackage, segments)
 
 	// Validate the AvailabilitySpecifier
-	isValid, err := senderNode.IsValidAvailabilitySpecifier(bClubBlobHash, sClubBlobHash, originalAS)
+	isValid, err := senderNode.IsValidAvailabilitySpecifier(blobHash, int(originalAS.BundleLength), treeRoot, originalAS)
 	if err != nil {
 		t.Fatalf("Error validating AvailabilitySpecifier: %v", err)
 	}

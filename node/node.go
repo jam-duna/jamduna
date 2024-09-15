@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"math"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
@@ -31,14 +32,7 @@ import (
 	"github.com/colorfulnotion/jam/erasurecoding"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/quic-go/quic-go"
-	"golang.org/x/crypto/blake2b"
 )
-
-// Hash function using Blake2b
-func bhash(data []byte) common.Hash {
-	hash := blake2b.Sum256(data)
-	return common.BytesToHash(hash[:])
-}
 
 const (
 	numNodes = 6
@@ -105,7 +99,7 @@ When a block is authored, we take the latest block identified by some parenthash
 
 func generateSeedSet(ringSize int) ([][]byte, error) {
 
-	entropy := bhash([]byte("42"))
+	entropy := common.Blake2Hash([]byte("42"))
 
 	// Generate the ring set with deterministic random seeds
 	ringSet := make([][]byte, ringSize)
@@ -118,7 +112,7 @@ func generateSeedSet(ringSize int) ([][]byte, error) {
 		for j := range seed {
 			seed[j] ^= entropy[j%len(entropy)]
 		}
-		ringSet[i] = bhash(append(seed[:], byte(i))).Bytes()
+		ringSet[i] = common.Blake2Hash(append(seed[:], byte(i))).Bytes()
 	}
 	return ringSet, nil
 }
@@ -991,6 +985,7 @@ func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustificat
 
 func (n *Node) getImportSegment(treeRoot common.Hash, segmentIndex uint32) ([]byte, error) {
 	// TODO: do you need segmentRoot or segmentsRoot here?
+	fmt.Printf("treeRoot: %v, segmentIndex: %v \n", treeRoot, segmentIndex)
 	segmentData, err := n.FetchAndReconstructSegmentData(treeRoot, segmentIndex)
 	if err != nil {
 		return []byte{}, err
@@ -1017,7 +1012,7 @@ func (n *Node) getPVMStateDB() *statedb.StateDB {
 	return target_statedb
 }
 
-func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.AvailabilitySpecifier, err error, bBlobHash common.Hash, sBlobHash common.Hash) {
+func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.AvailabilitySpecifier, err error, blobHash common.Hash, treeRoot common.Hash) {
 
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
@@ -1034,7 +1029,12 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 		// recover code from the bpt. NOT from DA
 		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if len(code) == 0 {
+			fmt.Printf("Code Not Found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
 			return spec, fmt.Errorf("Blob not found in bpt. C(%v, %v)", service_index, workItem.CodeHash), common.Hash{}, common.Hash{}
+		}
+		if common.Blake2Hash(code) != workItem.CodeHash {
+			fmt.Printf("Code and CodeHash Mismatch\n")
+			panic(0)
 		}
 
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
@@ -1070,10 +1070,12 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 		for _, e := range vm.Exports {
 			s := e
 			segments = append(segments, s) // this is used in NewAvailabilitySpecifier
-			_, err := n.EncodeAndDistributeSegmentData(e)
-			if err != nil {
-				return spec, err, common.Hash{}, common.Hash{}
-			}
+		}
+		pageProofs, _ := trie.GeneratePageProof(segments)
+		combinedSegmentAndPageProofs := append(segments, pageProofs...)
+		_, err = n.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs)
+		if err != nil {
+			return spec, err, common.Hash{}, common.Hash{}
 		}
 
 		// setup work results
@@ -1089,7 +1091,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 	}
 
 	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
-	spec, bBlobHash, sBlobHash = n.NewAvailabilitySpecifier(packageHash, asworkPackage, segments)
+	spec, blobHash, treeRoot = n.NewAvailabilitySpecifier(packageHash, asworkPackage, segments)
 	prerequisite_hash := common.HexToHash("0x")
 	refinementContext := types.RefineContext{
 		Anchor:           common.HexToHash("0x123abc"),              // TODO
@@ -1127,7 +1129,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 	// This will be received by all validators
 	n.broadcast(guarantee)
 
-	return spec, nil, bBlobHash, sBlobHash
+	return spec, nil, blobHash, treeRoot
 }
 
 // -----Custom methods for tiny QUIC EC experiment-----
@@ -1238,82 +1240,87 @@ func decodeBlobMeta(value []byte) (int, []byte, error) {
 	return originalLength, segmentRootsFlattened, nil
 }
 
-func (n *Node) EncodeAndDistributeSegmentData(data []byte) (common.Hash, error) {
-	// Encode the data into segments
-	segments, err := n.encode(data, true, len(data)) // Set to false for variable size segments
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	// Build segment roots
-	segmentRoots := make([][]byte, 0)
-	for i := range segments {
-		leaves := segments[i]
-		tree := trie.NewCDMerkleTree(leaves)
-		segmentRoots = append(segmentRoots, tree.Root())
-	}
-
-	// Generate the blob hash by hashing the original data
-	blob_hash := bhash(data)
-
-	// Flatten the segment roots
-	segmentRootsFlattened := make([]byte, 0)
-	for i := range segmentRoots {
-		segmentRootsFlattened = append(segmentRootsFlattened, segmentRoots[i]...)
-	}
-
-	// Store the blob meta data, and return an error if it fails
-	blob_meta := encodeBlobMeta(segmentRootsFlattened, len(data))
-	err = n.store.WriteKV(blob_hash, blob_meta)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	// Pack the chunks into DistributeECChunk objects
-	ecChunks, err := n.packChunks(segments, segmentRoots)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	// Distribute the chunks to the random K peers (K = numNodes)
-	for i, ecChunk := range ecChunks {
-
-		peerIdx := uint32(i % numNodes)
-
-		if peerIdx == n.id {
-			n.processDistributeECChunk(ecChunk)
-		}
-
-		peerIdentifier, err := n.getPeerByIndex(peerIdx)
+func (n *Node) EncodeAndDistributeSegmentData(data [][]byte) (treeRoot common.Hash, err error) {
+	basicTree := trie.NewCDMerkleTree(data)
+	treeRoot = common.Hash(basicTree.Root())
+	var segmentsECRoots []byte
+	for _, singleData := range data {
+		// Encode the data into segments
+		erasureCodingSegments, err := n.encode(singleData, true, len(singleData)) // Set to false for variable size segments
 		if err != nil {
 			return common.Hash{}, err
 		}
-		response, err := n.makeRequest(peerIdentifier, ecChunk)
-		if err != nil {
-			fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
-			continue
+
+		// Build segment roots
+		segmentRoots := make([][]byte, 0)
+		for i := range erasureCodingSegments {
+			leaves := erasureCodingSegments[i]
+			tree := trie.NewCDMerkleTree(leaves)
+			segmentRoots = append(segmentRoots, tree.Root())
 		}
 
-		_ = response
+		// Generate the blob hash by hashing the original data
+		blobTree := trie.NewCDMerkleTree(segmentRoots)
+		segmentsECRoot := blobTree.Root()
 
-		// Wait for nodes to process the request
-		// time.Sleep(100 * time.Millisecond)
+		// Append the segment root to the list of segment roots
+		segmentsECRoots = append(segmentsECRoots, segmentsECRoot...)
+
+		// Flatten the segment roots
+		segmentRootsFlattened := make([]byte, 0)
+		for i := range segmentRoots {
+			segmentRootsFlattened = append(segmentRootsFlattened, segmentRoots[i]...)
+		}
+
+		// Store the blob meta data, and return an error if it fails
+		segment_meta := encodeBlobMeta(segmentRootsFlattened, len(data))
+		err = n.store.WriteKV(common.Hash(segmentsECRoot), segment_meta)
+		if err != nil {
+			return common.Hash{}, err
+		}
+
+		// Pack the chunks into DistributeECChunk objects
+		ecChunks, err := n.packChunks(erasureCodingSegments, segmentRoots)
+		if err != nil {
+			return common.Hash{}, err
+		}
+
+		// Distribute the chunks to the random K peers (K = numNodes)
+		for i, ecChunk := range ecChunks {
+
+			peerIdx := uint32(i % numNodes)
+
+			if peerIdx == n.id {
+				n.processDistributeECChunk(ecChunk)
+			}
+
+			peerIdentifier, err := n.getPeerByIndex(peerIdx)
+			if err != nil {
+				return common.Hash{}, err
+			}
+			response, err := n.makeRequest(peerIdentifier, ecChunk)
+			if err != nil {
+				fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
+				continue
+			}
+			_ = response
+		}
 	}
-
+	n.store.WriteKV(treeRoot, segmentsECRoots)
 	// Return the blob hash if the process is successful
-	return blob_hash, nil
+	return treeRoot, nil
 }
 
-func (n *Node) EncodeAndDistributeArbitraryData(data []byte, data_len int) (common.Hash, error) {
+func (n *Node) EncodeAndDistributeArbitraryData(blob []byte, blobLen int) (blobHash common.Hash, err error) {
 	// Load the file and encode them into segments of chunks
-	segments, err := n.encode(data, false, data_len)
+	segments, err := n.encode(blob, false, blobLen)
 	if err != nil {
 		return common.Hash{}, err
 	}
 	if len(segments) != 1 {
 		panic("Expected only one segment")
 	}
-	fmt.Printf("Number of segments: %d for data size %d\n", len(segments), data_len)
+	fmt.Printf("Number of segments: %d for data size %d\n", len(segments), blobLen)
 
 	// Build segment roots
 	segmentRoots := make([][]byte, 0)
@@ -1323,14 +1330,14 @@ func (n *Node) EncodeAndDistributeArbitraryData(data []byte, data_len int) (comm
 		segmentRoots = append(segmentRoots, tree.Root())
 	}
 
-	blob_hash := bhash(data)
+	blobHash = common.Blake2Hash(blob)
 	segmentRootsFlattened := make([]byte, 0)
 	for i := range segmentRoots {
 		segmentRootsFlattened = append(segmentRootsFlattened, segmentRoots[i]...)
 	}
 	/// storer needs to know the size of original byte in order to eliminate any segment padding
-	blob_meta := encodeBlobMeta(segmentRootsFlattened, len(data))
-	n.store.WriteKV(blob_hash, blob_meta)
+	blob_meta := encodeBlobMeta(segmentRootsFlattened, len(blob))
+	n.store.WriteKV(blobHash, blob_meta)
 
 	// Pack the chunks into DistributeECChunk objects
 	ecChunks, err := n.packChunks(segments, segmentRoots)
@@ -1363,115 +1370,36 @@ func (n *Node) EncodeAndDistributeArbitraryData(data []byte, data_len int) (comm
 		// time.Sleep(100 * time.Millisecond)
 	}
 
-	return blob_hash, nil
+	return blobHash, nil
 }
 
-// Fixed size Wc*Ws
-func (n *Node) FetchAndReconstructSegmentData(blob_hash common.Hash, segment_index uint32) ([]byte, error) {
+func (n *Node) FetchAndReconstructSegmentData(treeRoot common.Hash, segmentIndex uint32) ([]byte, error) {
 	K, N := erasurecoding.GetCodingRate()
 	fmt.Printf("Using K=%d and N=%d\n", K, N)
 
-	blob_meta, err := n.store.ReadKV(blob_hash)
+	// Get all segment EC roots from the tree root
+	segmentsECRoots, err := n.store.ReadKV(treeRoot)
+	if err != nil {
+		fmt.Printf("Failed to read KV: %v\n", err)
+		return nil, err
+	}
+	allHash := SplitBytesIntoHash(segmentsECRoots, len(common.Hash{}))
+
+	// Get the segment EC root for the segment index
+	segmentsECRoot := allHash[segmentIndex]
+	segment_meta, err := n.store.ReadKV(segmentsECRoot)
 	if err != nil {
 		return nil, err
 	}
-	originalLength, segmentRootsFlattened, _ := decodeBlobMeta(blob_meta)
-	segmentRoots := make([][]byte, 0)
+	originalLength, segmentRootsFlattened, _ := decodeBlobMeta(segment_meta)
+	erasurCodingSegmentRoots := make([][]byte, 0)
 	for i := 0; i < len(segmentRootsFlattened); i += 32 {
-		segmentRoots = append(segmentRoots, segmentRootsFlattened[i:i+32])
+		erasurCodingSegmentRoots = append(erasurCodingSegmentRoots, segmentRootsFlattened[i:i+32])
 	}
 
 	// Fetch the chunks from peers
 	decoderInputSegments := make([][][]byte, 0)
-	for i, segmentRoot := range segmentRoots {
-		_ = i
-		_ = segmentRoot
-		ecChunkResponses := make([]types.ECChunkResponse, 0)
-		fetchedChunks := 0
-		for j := 0; j < numNodes; j++ {
-			peerIdentifier, err := n.getPeerByIndex(uint32(j))
-			if err != nil {
-				return nil, err
-			}
-			ecChunkQuery := types.ECChunkQuery{
-				SegmentRoot: common.Hash(segmentRoots[segment_index]),
-			}
-			response, err := n.makeRequest(peerIdentifier, ecChunkQuery)
-			// fmt.Printf("[DEBUG] Received response: %s\n", response)
-			if err != nil {
-				fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
-				ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
-			}
-			var ecChunkResponse types.ECChunkResponse
-			err = json.Unmarshal(response, &ecChunkResponse)
-			if err != nil {
-				return nil, err
-			}
-			ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
-
-			fetchedChunks++
-			if fetchedChunks >= K {
-				break
-			}
-		}
-
-		// debug
-		fmt.Printf("Fetched %d chunks\n", fetchedChunks)
-		for j := 0; j < fetchedChunks; j++ {
-			fmt.Printf("Chunk %d: %x\n", j, ecChunkResponses[j])
-		}
-
-		// build decoder input
-		// _ = decoderInputSegments
-		decoderInputSegment := make([][]byte, 0)
-		for j := 0; j < N; j++ {
-			if j >= len(ecChunkResponses) {
-				decoderInputSegment = append(decoderInputSegment, nil)
-				continue
-			}
-			if len(ecChunkResponses[j].Data) == 0 {
-				decoderInputSegment = append(decoderInputSegment, nil)
-				continue
-			}
-			decoderInputSegment = append(decoderInputSegment, ecChunkResponses[j].Data)
-		}
-		decoderInputSegments = append(decoderInputSegments, decoderInputSegment)
-
-		break
-	}
-
-	// Reconstruct the data
-	reconstructedData, err := n.decode(decoderInputSegments, false, 24)
-	if err != nil {
-		return nil, err
-	}
-
-	// Trim any padding using the original length
-	_ = originalLength
-	// if len(reconstructedData) > int(originalLength) {
-	// 	reconstructedData = reconstructedData[:originalLength]
-	// }
-
-	return reconstructedData, nil
-}
-
-func (n *Node) FetchAndReconstructAllSegmentsData(blob_hash common.Hash) ([]byte, error) {
-	K, N := erasurecoding.GetCodingRate()
-	fmt.Printf("Using K=%d and N=%d\n", K, N)
-
-	blob_meta, err := n.store.ReadKV(blob_hash)
-	if err != nil {
-		return nil, err
-	}
-	originalLength, segmentRootsFlattened, _ := decodeBlobMeta(blob_meta)
-	segmentRoots := make([][]byte, 0)
-	for i := 0; i < len(segmentRootsFlattened); i += 32 {
-		segmentRoots = append(segmentRoots, segmentRootsFlattened[i:i+32])
-	}
-
-	// Fetch the chunks from peers
-	decoderInputSegments := make([][][]byte, 0)
-	for i, segmentRoot := range segmentRoots {
+	for i, erasurCodingSegmentRoot := range erasurCodingSegmentRoots {
 		_ = i
 		ecChunkResponses := make([]types.ECChunkResponse, 0)
 		fetchedChunks := 0
@@ -1481,7 +1409,7 @@ func (n *Node) FetchAndReconstructAllSegmentsData(blob_hash common.Hash) ([]byte
 				return nil, err
 			}
 			ecChunkQuery := types.ECChunkQuery{
-				SegmentRoot: common.Hash(segmentRoot),
+				SegmentRoot: common.Hash(erasurCodingSegmentRoot),
 			}
 			response, err := n.makeRequest(peerIdentifier, ecChunkQuery)
 			// fmt.Printf("[DEBUG] Received response: %s\n", response)
@@ -1539,12 +1467,106 @@ func (n *Node) FetchAndReconstructAllSegmentsData(blob_hash common.Hash) ([]byte
 	return reconstructedData, nil
 }
 
-// Dynamic Size
-func (n *Node) FetchAndReconstructArbitraryData(blob_hash common.Hash, blob_len int) ([]byte, error) {
+func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byte, error) {
+	var outputData [][]byte
 	K, N := erasurecoding.GetCodingRate()
-	fmt.Printf("Using K=%d and N=%d for data size %d\n", K, N, blob_len)
+	fmt.Printf("Using K=%d and N=%d\n", K, N)
 
-	blob_meta, err := n.store.ReadKV(blob_hash)
+	segmentsECRoots, err := n.store.ReadKV(treeRoot)
+	if err != nil {
+		return nil, err
+	}
+	allHash := SplitBytesIntoHash(segmentsECRoots, len(common.Hash{}))
+	// segmentRoots, pageProohRoots := splitHashes(allHash)
+	segmentRoots, _ := splitHashes(allHash)
+
+	for z, segmentRoot := range segmentRoots {
+		segmentMeta, err := n.store.ReadKV(segmentRoot)
+		if err != nil {
+			return nil, err
+		}
+		originalLength, segmentRootsFlattened, _ := decodeBlobMeta(segmentMeta)
+		erasurCodingSegmentRoots := make([][]byte, 0)
+		for i := 0; i < len(segmentRootsFlattened); i += 32 {
+			erasurCodingSegmentRoots = append(erasurCodingSegmentRoots, segmentRootsFlattened[i:i+32])
+		}
+		// Fetch the chunks from peers
+		decoderInputSegments := make([][][]byte, 0)
+		for i, erasurCodingSegmentRoot := range erasurCodingSegmentRoots {
+			_ = i
+			ecChunkResponses := make([]types.ECChunkResponse, 0)
+			fetchedChunks := 0
+			for j := 0; j < numNodes; j++ {
+				peerIdentifier, err := n.getPeerByIndex(uint32(j))
+				if err != nil {
+					return nil, err
+				}
+				ecChunkQuery := types.ECChunkQuery{
+					SegmentRoot: common.Hash(erasurCodingSegmentRoot),
+				}
+				response, err := n.makeRequest(peerIdentifier, ecChunkQuery)
+				// fmt.Printf("[DEBUG] Received response: %s\n", response)
+				if err != nil {
+					fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
+					ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
+				}
+				var ecChunkResponse types.ECChunkResponse
+				err = json.Unmarshal(response, &ecChunkResponse)
+				if err != nil {
+					return nil, err
+				}
+				ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
+
+				fetchedChunks++
+				if fetchedChunks >= K {
+					break
+				}
+			}
+
+			// debug
+			fmt.Printf("Fetched %d chunks\n", fetchedChunks)
+			for j := 0; j < fetchedChunks; j++ {
+				fmt.Printf("Chunk %d: %x\n", j, ecChunkResponses[j])
+			}
+
+			// build decoder input
+			// _ = decoderInputSegments
+			decoderInputSegment := make([][]byte, 0)
+			for j := 0; j < N; j++ {
+				if j >= len(ecChunkResponses) {
+					decoderInputSegment = append(decoderInputSegment, nil)
+					continue
+				}
+				if len(ecChunkResponses[j].Data) == 0 {
+					decoderInputSegment = append(decoderInputSegment, nil)
+					continue
+				}
+				decoderInputSegment = append(decoderInputSegment, ecChunkResponses[j].Data)
+			}
+			decoderInputSegments = append(decoderInputSegments, decoderInputSegment)
+		}
+
+		// Reconstruct the data
+		reconstructedData, err := n.decode(decoderInputSegments, true, 24)
+		if err != nil {
+			return nil, err
+		}
+
+		// Trim any padding using the original length
+		if len(reconstructedData) > int(originalLength) {
+			reconstructedData = reconstructedData[:originalLength]
+		}
+		outputData = append(outputData, reconstructedData)
+		fmt.Printf("Process [%d] segmentsECRoots: %x\n", z, common.Hash(segmentRoot))
+	}
+	return outputData, nil
+}
+
+func (n *Node) FetchAndReconstructArbitraryData(blobHash common.Hash, blobLen int) ([]byte, error) {
+	K, N := erasurecoding.GetCodingRate()
+	fmt.Printf("Using K=%d and N=%d for data size %d\n", K, N, blobLen)
+
+	blob_meta, err := n.store.ReadKV(blobHash)
 	if err != nil {
 		return nil, err
 	}
@@ -1568,23 +1590,6 @@ func (n *Node) FetchAndReconstructArbitraryData(blob_hash common.Hash, blob_len 
 			ecChunkQuery := types.ECChunkQuery{
 				SegmentRoot: common.Hash(segmentRoot),
 			}
-			/*
-				if peerIdentifier == n.getIdentifier() {
-					// Fetch the chunk from local storage
-					ecChunkResponse, err := n.processECChunkQuery(ecChunkQuery)
-					if err != nil {
-						return nil, err
-					}
-
-					ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
-
-					fetchedChunks++
-					if fetchedChunks >= erasurecoding.K {
-						break
-					}
-					continue
-				}
-			*/
 			response, err := n.makeRequest(peerIdentifier, ecChunkQuery)
 			if err != nil {
 				fmt.Printf("Failed to make request from node %d to %s: %v", 0, peerIdentifier, err)
@@ -1627,7 +1632,7 @@ func (n *Node) FetchAndReconstructArbitraryData(blob_hash common.Hash, blob_len 
 	}
 
 	// Reconstruct the data
-	reconstructedData, err := n.decode(decoderInputSegments, false, int(blob_len))
+	reconstructedData, err := n.decode(decoderInputSegments, false, int(blobLen))
 	if err != nil {
 		return nil, err
 	}
@@ -1749,4 +1754,37 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 
 func generateObject() interface{} {
 	return nil
+}
+
+// Split the []byte into Hash of fixed size
+func SplitBytesIntoHash(data []byte, hashSize int) []common.Hash {
+	// Calculate the number of hashs
+	numChunks := int(math.Ceil(float64(len(data)) / float64(hashSize)))
+	// Make a slice of hashs
+	hashs := make([]common.Hash, 0, numChunks)
+
+	// Slice the data into hashs
+	for i := 0; i < len(data); i += hashSize {
+		end := i + hashSize
+		if end > len(data) {
+			end = len(data)
+		}
+		hashs = append(hashs, common.Hash(data[i:end]))
+	}
+	return hashs
+}
+
+func splitHashes(hashes []common.Hash) ([]common.Hash, []common.Hash) {
+	// Compute the total number of segments
+	totalSegments := len(hashes)
+	// Compute the number of page proofs
+	pfCount := int(math.Ceil(float64(totalSegments) / 64))
+
+	// The part of the hashes that are segment hashes
+	segmentHashs := hashes[:totalSegments-pfCount]
+
+	// The remaining part of the hashes that are page proofs
+	pfHashs := hashes[totalSegments-pfCount:]
+
+	return segmentHashs, pfHashs
 }
