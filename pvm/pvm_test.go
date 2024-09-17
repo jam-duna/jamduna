@@ -3,13 +3,14 @@ package pvm
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/colorfulnotion/jam/types"
 	"io/ioutil"
 	"math/rand"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/colorfulnotion/jam/types"
 )
 
 // TestCase
@@ -34,6 +35,71 @@ type hostfun_TestCase struct {
 	InitialMemory  []Page    `json:"initial-memory"`
 	ExpectedRegs   []uint32  `json:"expected-regs"`
 	ExpectedMemory []Page    `json:"expected-memory"`
+}
+
+func TestProgramCodec(t *testing.T) {
+	bytecode := []byte{1, 1, 14, 8, 4, 7, 2, 17, 19, 7, 2, 0, 4, 8, 239, 190, 173, 222, 153, 193, 0}
+
+	bytecodeDecoded := DecodeProgram(bytecode)
+	PrintProgam(bytecodeDecoded)
+
+	bytecodeEncoded := EncodeProgram(bytecodeDecoded)
+	fmt.Println("Encoded: ", bytecodeEncoded)
+	if equalByteSlices(bytecode, bytecodeEncoded) {
+		fmt.Println("Bytecode match!")
+	}
+
+	fmt.Println("--------------------------------------------------")
+
+	bytecode = []byte{
+		0, 0, 100,
+		4, 0, 1, 4, 1, 0, 0, 254, 254,
+		4, 2, 12, 78, 16, 4, 1, 30, 16, 62, 10, 1,
+		4, 0, 254, 254, 10, 2, 8, 0, 254, 254,
+		22, 1, 8, 0, 254, 254, 8, 33, 1, 22, 1,
+		4, 0, 254, 254, 4, 3, 1, 10, 0, 0, 0, 254, 254,
+		8, 48, 0, 22, 0, 0, 0, 254, 254, 5, 2,
+		4, 0, 0, 0, 254, 254, 4, 1, 12, 78, 17, 0, 38,
+		4, 0, 0, 254, 254, 1, 38, 4, 4, 0, 254, 254, 1,
+		38, 4, 8, 0, 254, 254, 5, 177, 9, 82, 9, 130,
+		32, 65, 130, 4, 5, 105, 32, 16, 244, 0,
+	}
+
+	bytecodeDecoded = DecodeProgram(bytecode)
+	PrintProgam(bytecodeDecoded)
+
+	bytecodeEncoded = EncodeProgram(bytecodeDecoded)
+	fmt.Println("Encoded: ", bytecodeEncoded)
+	if equalByteSlices(bytecode, bytecodeEncoded) {
+		fmt.Println("Bytecode match!")
+	}
+
+}
+
+func TestCodec(t *testing.T) {
+	powers := []uint64{
+		1 << 0,  // 2^0
+		1 << 7,  // 2^7
+		1 << 14, // 2^14
+		1 << 21, // 2^21
+		1 << 28, // 2^28
+		1 << 35, // 2^35
+		1 << 42, // 2^42
+		1 << 49, // 2^49
+	}
+
+	for _, p := range powers {
+		// encode
+		encodedResult := types.E(p)
+		fmt.Printf("Input: %d, Encoded: %v\n", p, encodedResult)
+		// decode
+		decodedValue, length := types.DecodeE(encodedResult)
+		fmt.Printf("Decoded Value: %d, Length: %d\n", decodedValue, length)
+		if decodedValue != p {
+			t.Errorf("Decoded value (%d) does not match original value (%d)", decodedValue, p)
+		}
+		fmt.Println("--------------------------------------------------")
+	}
 }
 
 func hostfun_test(t *testing.T, hftc hostfun_TestCase) error {

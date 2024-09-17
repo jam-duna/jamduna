@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
 	"github.com/klauspost/reedsolomon"
 )
 
@@ -36,7 +37,6 @@ type AtomicShards struct {
 		} `json:"segments"`
 	} `json:"segment"`
 }
-
 
 // GetShards with padding
 func GetSubshards(data []byte) [][][]byte {

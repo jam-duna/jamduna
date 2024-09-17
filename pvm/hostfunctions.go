@@ -844,11 +844,13 @@ func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 	And P is the zero-padding function to take an octet array to some multiple of n in length:
 	(187) 	P n∈N 1∶ ∶{ Y → Y k⋅n
 			x ↦ x ⌢ [0, 0, ...] ((∣x∣+n−1) mod n)+1...n
-	*/
+
 	n := (W_C * W_S)
 	length := n - ((len(x) + n - 1) % n) + 1
 	zeroSequence := make([]byte, length)
 	x = append(x, zeroSequence...)
+	*/
+	x = common.PadToMultipleOfN(x, W_C*W_S)
 
 	ς := uint32(0)               // Assume ς (sigma, Represent segment offset), need to get ς properly
 	if ς+uint32(len(e)) >= W_X { // W_X

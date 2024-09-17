@@ -161,24 +161,24 @@ func (s *StateDB) WriteServiceStorage(service uint32, k []byte, storage []byte) 
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) []byte {
-	XContext := s.GetXContext()
-	xs := XContext.GetX_s()
-	sa := &types.ServiceAccount{}
-	if service == xs.ServiceIndex() {
-		sa = xs
-	} else {
-		// weird .. how
-	}
-	found, sa := XContext.GetX_n(service)
-	if found {
-		foundInJournal, error, blob := sa.JournalGetPreimage(blob_hash)
-		if foundInJournal {
-			if error != nil {
-				// there shouldn't be error..
-			}
-			return blob
-		}
-	}
+	// XContext := s.GetXContext()
+	// xs := XContext.GetX_s()
+	// sa := &types.ServiceAccount{}
+	// if service == xs.ServiceIndex() {
+	// 	sa = xs
+	// } else {
+	// 	// weird .. how
+	// }
+	// found, sa := XContext.GetX_n(service)
+	// if found {
+	// 	foundInJournal, error, blob := sa.JournalGetPreimage(blob_hash)
+	// 	if foundInJournal {
+	// 		if error != nil {
+	// 			// there shouldn't be error..
+	// 		}
+	// 		return blob
+	// 	}
+	// }
 
 	// not init case
 	tree := s.GetTrie()

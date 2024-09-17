@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
@@ -35,8 +36,8 @@ type Page struct {
 }
 
 type VM struct {
-	JSize               int
-	Z                   int
+	JSize               uint64
+	Z                   uint8
 	J                   []byte
 	code                []byte
 	bitmask             string // K in GP
@@ -78,9 +79,9 @@ type Solicit struct {
 }
 
 type Program struct {
-	JSize int
-	Z     int // 1 byte
-	CSize int
+	JSize uint64
+	Z     uint8 // 1 byte
+	CSize uint64
 	J     []byte
 	Code  []byte
 	//K     []byte
@@ -271,6 +272,56 @@ const (
 	BIG = 3333
 )
 
+func extractBytes(input []byte) ([]byte, []byte) {
+	/*
+		In GP_0.36 (272):
+		If the input value of (272) is large, "l" will also increase and vice versa.
+		"l" is than be used to encode first byte and the reaming "l" bytes.
+		If the first byte is large, that means the number of the entire encoded bytes is large and vice versa.
+		So the first byte can be used to determine the number of bytes to extract and the rule is as follows:
+	*/
+
+	if len(input) == 0 {
+		return nil, input
+	}
+
+	firstByte := input[0]
+	var numBytes int
+
+	// Determine the number of bytes to extract based on the value of the 0th byte.
+	switch {
+	case firstByte >= 1 && firstByte < 128:
+		numBytes = 1
+	case firstByte >= 128 && firstByte < 192:
+		numBytes = 2
+	case firstByte >= 192 && firstByte < 224:
+		numBytes = 3
+	case firstByte >= 224 && firstByte < 240:
+		numBytes = 4
+	case firstByte >= 240 && firstByte < 248:
+		numBytes = 5
+	case firstByte >= 248 && firstByte < 252:
+		numBytes = 6
+	case firstByte >= 252 && firstByte < 254:
+		numBytes = 7
+	case firstByte >= 254:
+		numBytes = 8
+	default:
+		numBytes = 1
+	}
+
+	// If the input length is insufficient to extract the specified number of bytes, return the original input.
+	if len(input) < numBytes {
+		return input, nil
+	}
+
+	// Extract the specified number of bytes and return the remaining bytes.
+	extracted := input[:numBytes]
+	remaining := input[numBytes:]
+
+	return extracted, remaining
+}
+
 func value_check(value []byte) []byte {
 	if len(value) == 0 {
 		return []byte{0}
@@ -278,26 +329,68 @@ func value_check(value []byte) []byte {
 	return value
 }
 
-func E_decode(byte_value []byte) uint64 {
-	// only supprot 2, 1 byte decode
-	byte_len := uint64(len(byte_value))
-	if byte_len == 2 {
-		result := uint64(int(byte_value[0]-128))*256 + uint64(byte_value[1])
-		return result
-	}
-	return 0
+func PrintProgam(p *Program) {
+	fmt.Printf("JSize=%d\n", p.JSize)
+	fmt.Printf("Z=%d\n", p.Z)
+	fmt.Printf("CSize=%d\n", p.CSize)
+	fmt.Printf("J=%v\n", p.J)
+	fmt.Printf("Code=%v\n", p.Code)
+	fmt.Printf("K=%v\n", p.K)
 }
 
-func parseProgram(p []byte) *Program {
-	// helpful funtion
-	reverseString := func(s string) string {
-		runes := []rune(s)
-		for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
-			runes[i], runes[j] = runes[j], runes[i]
-		}
-		return string(runes)
+func reverseString(s string) string {
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
 	}
-	// Include ascii byte code, we should remove it
+	return string(runes)
+}
+
+func binaryStringToByte(binaryStr string) byte {
+	var result byte
+	for i, bit := range binaryStr {
+		if bit == '1' {
+			result |= 1 << (len(binaryStr) - 1 - i)
+		}
+	}
+	return result
+}
+
+func EncodeProgram(p *Program) []byte {
+	// Encode the program
+	encoded := make([]byte, 0)
+
+	encoded = append(encoded, types.E(p.JSize)...)
+	encoded = append(encoded, types.E_l(uint64(p.Z), 1)...)
+	encoded = append(encoded, types.E(p.CSize)...)
+	for _, j := range p.J {
+		encoded = append(encoded, types.E_l(uint64(j), uint32(p.Z))...)
+	}
+	encoded = append(encoded, p.Code...)
+
+	var k_bytes []byte
+	for i := 0; i < len(p.K[0]); i += 8 {
+		end := i + 8
+		if end > len(p.K[0]) {
+			end = len(p.K[0])
+		}
+		group := p.K[0][i:end]
+		reversedGroup := reverseString(group)
+		if len(reversedGroup) < 8 {
+			reversedGroup = strings.Repeat("1", 8-len(reversedGroup)) + reversedGroup
+		}
+
+		byteValue := binaryStringToByte(reversedGroup)
+		k_bytes = append(k_bytes, byteValue)
+	}
+	encoded = append(encoded, k_bytes...)
+	encoded = append(encoded, []byte{0}...)
+	return encoded
+}
+
+func DecodeProgram(p []byte) *Program {
+	// Check if the program include ascii byte code
+	var pure_code []byte
 	if p[0] == 80 && p[1] == 86 && p[2] == 77 {
 		fmt.Println("Include ascii byte code")
 		// Remove [80, 86, 77], this means "PVM" in Ascii
@@ -305,80 +398,57 @@ func parseProgram(p []byte) *Program {
 		// Remove [0, 1, 5], this may represent version information
 		p = p[3:]
 		// Koute's PVM assembler will encode all @funtion name in to Ascii code, and insert it in front of program, so we have to remove them
-		var functionNameLength uint32
-		if len(p) > (1 << 14) {
-			fmt.Println("Currently not support program size larger than 2^14")
+		var container_length_byte, num_section_byte, unknowm_byte []byte
+		container_length_byte, p = extractBytes(p)
+		num_section_byte, p = extractBytes(p)
+		unknowm_byte, p = extractBytes(p)
+		container_length, _ := types.DecodeE(container_length_byte)
+		num_section, _ := types.DecodeE(num_section_byte)
+		unknown, _ := types.DecodeE(unknowm_byte)
+		pure_code = p[container_length:]
 
-		} else if len(p) > 256 {
-			functionNameLength = uint32(E_decode(p[0:2]))
-			p = p[2+1+2+functionNameLength:] // remove function name byte code
-			Csize := E_decode(p[2:4])
-			fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], Csize)
-			kBytes := p[1+1+2+Csize:]
-			var kCombined string
-			for _, b := range kBytes {
-				binaryStr := fmt.Sprintf("%08b", b)
-				kCombined += reverseString(binaryStr)
-			}
-			if len(kCombined) > int(p[2]) {
-				kCombined = kCombined[:int(p[2])]
-			}
-			program := &Program{
-				JSize: int(p[0]),
-				Z:     int(p[1]),
-				CSize: int(Csize),
-				J:     p[1+1+2 : 1+1+2+p[0]],
-				Code:  p[1+1+2+p[0] : uint32(1+1+2+p[0])+uint32(Csize)],
-				K:     []string{kCombined},
-			}
-			return program
-
-		} else {
-			fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], p[2])
-			kBytes := p[3+p[0]+p[2]:]
-			var kCombined string
-			for _, b := range kBytes {
-				binaryStr := fmt.Sprintf("%08b", b)
-				kCombined += reverseString(binaryStr)
-			}
-			if len(kCombined) > int(p[2]) {
-				kCombined = kCombined[:int(p[2])]
-			}
-			program := &Program{
-				JSize: int(p[0]),
-				Z:     int(p[1]),
-				CSize: int(p[2]),
-				J:     p[3 : 3+p[0]],
-				Code:  p[3+p[0] : 3+p[0]+p[2]],
-				K:     []string{kCombined},
-			}
-			return program
-		}
+		fmt.Println("container_length: ", container_length)
+		fmt.Println("num_section: ", num_section)
+		fmt.Println("unknowm_byte: ", unknown)
+		fmt.Println("PVM code after edit: ", pure_code)
 
 	} else {
-		fmt.Println("Pure PVM code")
-		fmt.Printf("JSize=%d Z=%d CSize=%d\n", p[0], p[1], p[2])
-		kBytes := p[3+p[0]+p[2]:]
-		var kCombined string
-		for _, b := range kBytes {
-			binaryStr := fmt.Sprintf("%08b", b)
-			kCombined += reverseString(binaryStr)
-		}
-		if len(kCombined) > int(p[2]) {
-			kCombined = kCombined[:int(p[2])]
-		}
-		program := &Program{
-			JSize: int(p[0]),
-			Z:     int(p[1]),
-			CSize: int(p[2]),
-			J:     p[3 : 3+p[0]],
-			Code:  p[3+p[0] : 3+p[0]+p[2]],
-			K:     []string{kCombined},
-		}
-		return program
+		// pure PVM code
+		fmt.Println("Pure PVM code: ", p)
+		pure_code = p
 	}
-	fmt.Println("Failed to parse program!!")
-	return nil
+	var j_size_byte, z_byte, c_size_byte []byte
+	j_size_byte, pure_code = extractBytes(pure_code)
+	z_byte, pure_code = extractBytes(pure_code)
+	c_size_byte, pure_code = extractBytes(pure_code)
+
+	j_size, _ := types.DecodeE(j_size_byte)
+	z, _ := types.DecodeE(z_byte)
+	c_size, _ := types.DecodeE(c_size_byte)
+
+	fmt.Printf("JSize=%d Z=%d CSize=%d\n", j_size, z, c_size)
+
+	j_byte := pure_code[:j_size]
+	c_byte := pure_code[j_size : j_size+c_size]
+	k_bytes := pure_code[j_size+c_size:]
+	var kCombined string
+	for _, b := range k_bytes {
+		binaryStr := fmt.Sprintf("%08b", b)
+		kCombined += reverseString(binaryStr)
+	}
+	if len(kCombined) > int(c_size) {
+		kCombined = kCombined[:int(c_size)]
+	}
+
+	program := &Program{
+		JSize: j_size,
+		Z:     uint8(z),
+		CSize: c_size,
+		J:     j_byte,
+		Code:  c_byte,
+		K:     []string{kCombined},
+	}
+	return program
 
 }
 
@@ -387,7 +457,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 	if len(code) == 0 {
 		panic("NO CODE\n")
 	}
-	p := parseProgram(code)
+	p := DecodeProgram(code)
 	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
 	fmt.Println("================================================================")
 	vm := &VM{
@@ -411,7 +481,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 }
 
 func NewVMFromParseProgramTest(code []byte) {
-	p := parseProgram(code)
+	p := DecodeProgram(code)
 	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
 	fmt.Println("================================================================")
 }

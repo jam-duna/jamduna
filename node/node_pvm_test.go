@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	//"sync"
@@ -43,7 +44,20 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		data := []byte(s)
 		blob_arr[data_i] = data
 		fmt.Println(data)
-		blob_hash, err := senderNode.EncodeAndDistributeArbitraryData(data, len(data))
+
+		// Encode and distribute the data
+		blob_hash := common.Hash{}
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			blob_hash, err = senderNode.EncodeAndDistributeArbitraryData(data, len(data), &wg)
+			if err != nil {
+				fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+			}
+		}()
+
+		// Wait for the data to be encoded and distributed
+		wg.Wait()
 		if err != nil {
 			t.Fatalf("Failed to encode and distribute data: %v", err)
 		}

@@ -9,7 +9,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) (*types.AvailabilitySpecifier, common.Hash, common.Hash) {
+func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) *types.AvailabilitySpecifier {
 	// Compute b using EncodeWorkPackage
 	b := encodeWorkPackage(workPackage)
 
@@ -17,8 +17,8 @@ func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage typ
 	bLength := uint32(len(b))
 
 	// Compute b♣ and s♣
-	bClub, bClubBlobHash := n.computeBClub(b)
-	sClub, segmentsTreeRoot := n.computeSClub(segments)
+	bClub := n.computeBClub(b)
+	sClub := n.computeSClub(segments)
 
 	// u = (bClub, sClub)
 	erasure_root_u := generateErasureRoot(bClub, sClub)
@@ -33,44 +33,42 @@ func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage typ
 		ErasureRoot:         erasure_root_u,
 		ExportedSegmentRoot: exported_segment_root_e,
 	}
-	return &availabilitySpecifier, bClubBlobHash, segmentsTreeRoot
+	return &availabilitySpecifier
 }
 
 // Compute b♣ using the EncodeWorkPackage function
-func (n *Node) computeBClub(b []byte) ([]common.Hash, common.Hash) {
+func (n *Node) computeBClub(b []byte) []common.Hash {
 	// Padding b to the length of W_C
-	paddedB := padToLength(b, types.W_C)
+	paddedB := common.PadToMultipleOfN(b, types.W_C)
 
 	// Process the padded data using erasure coding
 	c_base := types.ComputeC_Base(len(b))
-	blob_hash, _ := n.EncodeAndDistributeArbitraryData(paddedB, c_base)
 	encodedB, _ := erasurecoding.Encode(paddedB, c_base)
 
 	// Hash each element of the encoded data
 	var bClub []common.Hash
 	for _, block := range encodedB {
 		for _, b := range block {
-			bClub = append(bClub, common.Hash(padToLength(b, 32)))
+			bClub = append(bClub, common.Hash(common.PadToMultipleOfN(b, 32)))
 		}
 	}
 
-	return bClub, blob_hash
+	return bClub
 }
 
-func (n *Node) computeSClub(segments [][]byte) ([]common.Hash, common.Hash) {
+func (n *Node) computeSClub(segments [][]byte) []common.Hash {
 	var combinedData [][][]byte
 
 	pageProofs, _ := trie.GeneratePageProof(segments)
 	combinedSegmentAndPageProofs := append(segments, pageProofs...)
-
-	// Erasure Coding
-	treeRoot, _ := n.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs)
 
 	// Flatten the combined data
 	var FlattenData []byte
 	for _, data := range combinedSegmentAndPageProofs {
 		FlattenData = append(FlattenData, data...)
 	}
+
+	// Erasure code the combined data
 	encodedSegment, _ := erasurecoding.Encode(FlattenData, 6)
 
 	// Append the encoded segment to the combined data
@@ -84,14 +82,7 @@ func (n *Node) computeSClub(segments [][]byte) ([]common.Hash, common.Hash) {
 		sClub = append(sClub, common.Hash(root))
 	}
 
-	return sClub, treeRoot
-}
-
-// Pad the data to the specified length
-func padToLength(data []byte, length int) []byte {
-	padded := make([]byte, length)
-	copy(padded, data)
-	return padded
+	return sClub
 }
 
 // MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix
@@ -176,7 +167,7 @@ func (n *Node) recomputeBClub(paddedB []byte) []common.Hash {
 	var bClub []common.Hash
 	for _, block := range encodedB {
 		for _, b := range block {
-			bClub = append(bClub, common.Hash(padToLength(b, 32)))
+			bClub = append(bClub, common.Hash(common.PadToMultipleOfN(b, 32)))
 		}
 	}
 

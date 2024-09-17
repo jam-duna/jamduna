@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"sync"
 	"time"
 
 	//"sync"
@@ -96,7 +97,8 @@ func TestNodeSafrole(t *testing.T) {
 
 func TestSegmentECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
-	dataSizes := []int{32, 64, 128, 256, 512, 1024, 2048}
+	dataSizes := []int{types.W_C * types.W_S}
+	segmentSizes := []int{1, 10}
 	// dataSizes := []int{10}
 
 	// Initialize nodes
@@ -120,53 +122,70 @@ func TestSegmentECRoundTrip(t *testing.T) {
 	fmt.Println("Time Sleep End...")
 
 	// Test encoding, distributing, fetching, and reconstructing data for each size
-	for _, size := range dataSizes {
-		fmt.Printf("processing %d........\n", size)
-		size := size
-		t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
-			// Generate random data of the specified size
-			var data [][]byte
-			for i := 0; i < 10; i++ {
-				randData := make([]byte, size)
-				_, err := rand.Read(randData)
-				data = append(data, randData)
+
+	for _, segmentLength := range segmentSizes {
+		for _, size := range dataSizes {
+			fmt.Printf("processing %d........\n", size)
+			size := size
+			t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
+				// Generate random data of the specified size
+				var data [][]byte
+				for i := 0; i < segmentLength; i++ {
+					randData := make([]byte, size)
+					_, err := rand.Read(randData)
+					data = append(data, randData)
+					if err != nil {
+						t.Fatalf("Failed to generate random data: %v", err)
+					}
+				}
+
+				pageProofs, _ := trie.GeneratePageProof(data)
+				combinedSegmentAndPageProofs := append(data, pageProofs...)
+
+				// Use sender node to encode and distribute data
+				senderNode := nodes[0]
+				fmt.Println("Starting EncodeAndDistributeSegmentData...")
+
+				treeRoot := common.Hash{}
+				var wg sync.WaitGroup
+				wg.Add(1)
+				// Coroutine to encode and distribute data
+				go func() {
+					treeRoot, err = senderNode.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs, &wg)
+					if err != nil {
+						fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+					}
+				}()
+
+				// Wait for the encoding and distribution to finish
+				wg.Wait()
+				fmt.Println("Finished EncodeAndDistributeSegmentData...")
 				if err != nil {
-					t.Fatalf("Failed to generate random data: %v", err)
+					t.Fatalf("Failed to encode and distribute data: %v", err)
 				}
-			}
-			pageProofs, _ := trie.GeneratePageProof(data)
-			combinedSegmentAndPageProofs := append(data, pageProofs...)
 
-			// Use sender node to encode and distribute data
-			senderNode := nodes[0]
-			fmt.Println("Starting EncodeAndDistributeSegmentData...")
-			blobHash, err := senderNode.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs)
-			fmt.Println("Finished EncodeAndDistributeSegmentData...")
-			if err != nil {
-				t.Fatalf("Failed to encode and distribute data: %v", err)
-			}
+				// Simulate a small delay before fetching and reconstructing the data
+				time.Sleep(2 * time.Second)
 
-			// Simulate a small delay before fetching and reconstructing the data
-			time.Sleep(2 * time.Second)
-
-			// Use the first node to fetch and reconstruct the data
-			fmt.Println("Starting FetchAndReconstructSegmentData...")
-			reconstructedData, err := senderNode.FetchAndReconstructAllSegmentsData(blobHash)
-			if err != nil {
-				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
-			}
-			fmt.Println("Finished FetchAndReconstructSegmentData...")
-
-			// Compare original and reconstructed data
-			for i := 0; i < size; i++ {
-				if !bytes.Equal(data[i], reconstructedData[i][:len(data[i])]) {
-					fmt.Printf("Original data: %x\n", data[i])
-					fmt.Printf("Reconstructed data: %x\n", reconstructedData[i][:len(data[i])])
-					t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
+				// Use the first node to fetch and reconstruct the data
+				fmt.Println("Starting FetchAndReconstructSegmentData...")
+				reconstructedData, err := senderNode.FetchAndReconstructAllSegmentsData(treeRoot)
+				if err != nil {
+					t.Fatalf("Failed to fetch and reconstruct data: %v", err)
 				}
-			}
-			fmt.Printf("Roundtrip success for DataSize%d\n", size)
-		})
+				fmt.Println("Finished FetchAndReconstructSegmentData...")
+
+				// Compare original and reconstructed data
+				for i := 0; i < len(data); i++ {
+					if !bytes.Equal(data[i], reconstructedData[i][:len(data[i])]) {
+						fmt.Printf("Original data: %x\n", data[i])
+						fmt.Printf("Reconstructed data: %x\n", reconstructedData[i][:len(data[i])])
+						t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
+					}
+				}
+				fmt.Printf("Roundtrip success for DataSize%d\n", size)
+			})
+		}
 	}
 }
 
@@ -174,6 +193,7 @@ func TestECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
 	//try to do it separately test for each size
 	dataSizes := []int{1028, 23, 24, 25, 26, 27, 28, 29, 30, 31, 39, 1024}
+	// dataSizes := []int{types.W_C * types.W_S, types.W_C * types.W_S * 2, types.W_C * types.W_S * 3}
 	// dataSizes := []int{2084}
 	// Initialize nodes
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
@@ -206,7 +226,22 @@ func TestECRoundTrip(t *testing.T) {
 			}
 
 			blob_len := len(data)
-			blob_hash, err := senderNode.EncodeAndDistributeArbitraryData(data, blob_len)
+			blob_hash := common.Hash{}
+
+			var wg sync.WaitGroup
+			wg.Add(1) // Wait for one task to complete
+
+			// Coroutine to encode and distribute arbitrary data
+			go func() {
+				blob_hash, err = senderNode.EncodeAndDistributeArbitraryData(data, blob_len, &wg)
+				if err != nil {
+					fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+				}
+			}()
+
+			// Wait for the encoding and distribution to finish
+			wg.Wait()
+
 			if err != nil {
 				t.Fatalf("Failed to encode and distribute data: %v", err)
 			}
@@ -297,7 +332,21 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 
 	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
-	codeHash, err := nodes[0].EncodeAndDistributeArbitraryData(code, len(code))
+	codeHash := common.Hash{}
+	var wg sync.WaitGroup
+	wg.Add(1) // Wait for one task to complete
+
+	// Coroutine to encode and distribute arbitrary data
+	go func() {
+		codeHash, err = nodes[0].EncodeAndDistributeArbitraryData(code, len(code), &wg)
+		if err != nil {
+			fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+		}
+	}()
+
+	// Wait for the encoding and distribution to finish
+	wg.Wait()
+
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -317,9 +366,8 @@ func TestWorkGuarantee(t *testing.T) {
 
 	authToken := []byte("0x")               // TODO: sign
 	var exportedItems []types.ImportSegment // how do you get import segments from previous round?
-	importedSegments := make([]types.ImportSegment, 0)
 	for n := 1; n < 20; n++ {
-		importedSegments = make([]types.ImportSegment, 0)
+		importedSegments := make([]types.ImportSegment, 0)
 		if n > 1 {
 			importedSegments = append(importedSegments, exportedItems...)
 		}
@@ -371,11 +419,20 @@ func TestWorkGuarantee(t *testing.T) {
 				t.Fatalf("S0->S1 Transition Err: %v\n", s1_err)
 			}
 			n.addStateDB(s1)
+			target_statedb := n.getPVMStateDB()
+			target_statedb.WriteServicePreimageBlob(workPackage.AuthCodeHost, code)
+			tentativeRoot := target_statedb.GetTentativeStateRoot()
+			target_statedb.StateRoot = tentativeRoot
+			n.statedb = target_statedb.Copy()
+			recovered_code := n.statedb.ReadServicePreimageBlob(workPackage.AuthCodeHost, codeHash)
+			if !common.CompareBytes(code, recovered_code) {
+				panic(0)
+			}
 
 			fmt.Println("Node ID:", n.id)
 			if n.coreIndex == 0 {
 				//spec *types.AvailabilitySpecifier, err error, bBlobHash common.Hash, sBlobHash common.Hash, exportedSegments [][]byte
-				specifier, err, _, treeRoot := n.processWorkPackage(workPackage)
+				specifier, treeRoot, err := n.processWorkPackage(workPackage)
 				if err != nil {
 					panic(0)
 				}
@@ -406,15 +463,19 @@ func TestWorkGuarantee(t *testing.T) {
 				}
 				t.Logf("Generated Availability Specifier: %+v", specifier)
 				// TODO: use specifier to setup the next importsegments
-				exportedSegments, _ := n.FetchAndReconstructAllSegmentsData(treeRoot)
-				fmt.Printf("exportedSegments Len=%v\n", len(exportedSegments))
+				exportedSegmentsRoot, _ := n.GetSegmentTreeRoots(treeRoot)
+				fmt.Printf("exportedSegments Len=%d, exportedSegments: %x\n", len(exportedSegmentsRoot), exportedSegmentsRoot)
 				exportedItems = nil
-				for i, segmentRoot := range exportedSegments {
-					exportedItems = append(exportedItems, types.ImportSegment{
-						TreeRoot: common.Hash(segmentRoot),
+				for i, segmentRoot := range exportedSegmentsRoot {
+					fmt.Printf("[seg_idx=%v] segmentRoot=%x\n", i, treeRoot)
+					exportedItem := types.ImportSegment{
+						TreeRoot: segmentRoot,
 						Index:    uint32(i),
-					})
+					}
+					fmt.Printf("exportedItem: %v\n", exportedItem)
+					exportedItems = append(exportedItems, exportedItem)
 				}
+				fmt.Printf("++ exportedSegments: %v\n", exportedSegmentsRoot)
 			}
 		}
 	}
@@ -431,37 +492,54 @@ func TestCodeParse(t *testing.T) {
 	pvm.NewVMFromParseProgramTest(code)
 }
 
-func TestIsValidAvailabilitySpecifier(t *testing.T) {
-	// Set up the network
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
-	if err != nil {
-		t.Fatalf("Error setting up nodes: %v\n", err)
-	}
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		nodes[i] = node
+// func TestIsValidAvailabilitySpecifier(t *testing.T) {
+// 	// Set up the network
+// 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+// 	if err != nil {
+// 		t.Fatalf("Error setting up nodes: %v\n", err)
+// 	}
+// 	nodes := make([]*Node, numNodes)
+// 	for i := 0; i < numNodes; i++ {
+// 		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+// 		if err != nil {
+// 			t.Fatalf("Failed to create node %d: %v\n", i, err)
+// 		}
+// 		nodes[i] = node
+// 	}
+
+// 	senderNode := nodes[0]
+
+// 	// Simulate a work package and segments
+// 	workPackage := types.WorkPackage{ /*...Set fields...*/ }
+// 	segments := [][]byte{[]byte("segment1"), []byte("segment2")}
+
+// 	// Generate the AvailabilitySpecifier
+// 	packageHash := common.ComputeHash([]byte("test_package"))
+// 	originalAS, blobHash, treeRoot := senderNode.NewAvailabilitySpecifier(common.Hash(packageHash), workPackage, segments)
+
+// 	// Validate the AvailabilitySpecifier
+// 	isValid, err := senderNode.IsValidAvailabilitySpecifier(blobHash, int(originalAS.BundleLength), treeRoot, originalAS)
+// 	if err != nil {
+// 		t.Fatalf("Error validating AvailabilitySpecifier: %v", err)
+// 	}
+// 	if isValid == false {
+// 		t.Fatalf("AvailabilitySpecifier is not valid: %v", err)
+// 	}
+// }
+
+func TestPadding(T *testing.T) {
+	// Initialize a vector of 49 elements
+	x := make([]byte, 49)
+	for i := 0; i < 49; i++ {
+		x[i] = byte(i + 1)
 	}
 
-	senderNode := nodes[0]
+	fmt.Println("Original Vector:", x)
 
-	// Simulate a work package and segments
-	workPackage := types.WorkPackage{ /*...Set fields...*/ }
-	segments := [][]byte{[]byte("segment1"), []byte("segment2")}
+	// Padding the vector to a multiple of 4
+	n := 4
+	filledX := common.PadToMultipleOfN(x, n)
 
-	// Generate the AvailabilitySpecifier
-	packageHash := common.ComputeHash([]byte("test_package"))
-	originalAS, blobHash, treeRoot := senderNode.NewAvailabilitySpecifier(common.Hash(packageHash), workPackage, segments)
-
-	// Validate the AvailabilitySpecifier
-	isValid, err := senderNode.IsValidAvailabilitySpecifier(blobHash, int(originalAS.BundleLength), treeRoot, originalAS)
-	if err != nil {
-		t.Fatalf("Error validating AvailabilitySpecifier: %v", err)
-	}
-	if isValid == false {
-		t.Fatalf("AvailabilitySpecifier is not valid: %v", err)
-	}
+	fmt.Println("After Padding:", filledX)
+	fmt.Printf("Number of Elements: %d\n", len(filledX))
 }

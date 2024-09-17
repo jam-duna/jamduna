@@ -29,3 +29,25 @@ func Keccak256(data []byte) Hash {
 	h := hash.Sum(nil)
 	return BytesToHash(h)
 }
+
+// Pad the input to the specified length
+func PadToMultipleOfN(input []byte, n int) []byte {
+	return padToMultipleOfN(input, n)
+}
+
+func padToMultipleOfN(input []byte, n int) []byte {
+	length := len(input)
+	mod := (length+n-1)%n + 1
+
+	// Calculate the padding
+	padding := 0
+	if mod != 0 {
+		padding = n - mod
+	}
+
+	// Fill the padding
+	for i := 0; i < padding; i++ {
+		input = append(input, 0)
+	}
+	return input
+}
