@@ -11,7 +11,8 @@ import (
 
 func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) *types.AvailabilitySpecifier {
 	// Compute b using EncodeWorkPackage
-	b := encodeWorkPackage(workPackage)
+	b := n.encodeWorkPackage(workPackage)
+	// decodeb, _ := types.Decode(b, reflect.TypeOf([4][]byte{}))
 
 	// Length of `b`
 	bLength := uint32(len(b))
@@ -245,9 +246,11 @@ func transpose3D(data [][][]byte) [][][]byte {
 
 // TODO: Sean to encode & decode properly
 // The E(p,x,i,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
-func encodeWorkPackage(wp types.WorkPackage) []byte {
+func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
+	output := make([]byte, 0)
 	// 1. Encode the package (p)
 	encodedPackage := types.Encode(wp)
+	output = append(output, encodedPackage...)
 
 	// 2. Encode the extrinsic (x)
 	x := wp.WorkItems
@@ -255,22 +258,21 @@ func encodeWorkPackage(wp types.WorkPackage) []byte {
 	for _, WorkItem := range x {
 		encodedExtrinsic = types.Encode(WorkItem.Extrinsics)
 	}
+	output = append(output, encodedExtrinsic...)
+
 	// 3. Encode the segments (i)
 	var encodedSegments []byte
+	var segments [][]byte
 	for _, WorkItem := range x {
-		for _, segment := range WorkItem.ImportedSegments {
-			encodedSegments = append(encodedSegments, types.Encode(segment)...)
-		}
+		segments, _ = n.getImportSegments(WorkItem.ImportedSegments)
 	}
+	encodedSegments = types.Encode(segments)
+	output = append(output, encodedSegments...)
 
 	// 4. Encode the justifications (j)
 	var encodedJustifications []byte
 	for _, WorkItem := range x {
 		var justification []common.Hash
-		var segments [][]byte
-		for _, segment := range WorkItem.ImportedSegments {
-			segments = append(segments, segment.TreeRoot[:])
-		}
 		tree := trie.NewCDMerkleTree(segments)
 		for i, _ := range WorkItem.ImportedSegments {
 			justifies, _ := tree.Justify(i)
@@ -282,6 +284,52 @@ func encodeWorkPackage(wp types.WorkPackage) []byte {
 		}
 		encodedJustifications = append(encodedJustifications, types.Encode(justification)...)
 	}
+	output = append(output, encodedJustifications...)
+
 	// Combine all encoded parts: e(p,x,i,j)
-	return append(append(append(encodedPackage, encodedExtrinsic...), encodedSegments...), encodedJustifications...)
+	return output
+}
+
+func (n *Node) VerifyWorkPackage(wp types.WorkPackage, decodedB [][]byte) []byte {
+	output := make([]byte, 0)
+	// 1. Encode the package (p)
+	encodedPackage := types.Encode(wp)
+	output = append(output, encodedPackage...)
+
+	// 2. Encode the extrinsic (x)
+	x := wp.WorkItems
+	encodedExtrinsic := make([]byte, 0)
+	for _, WorkItem := range x {
+		encodedExtrinsic = types.Encode(WorkItem.Extrinsics)
+	}
+	output = append(output, encodedExtrinsic...)
+
+	// 3. Encode the segments (i)
+	var encodedSegments []byte
+	var segments [][]byte
+	for _, WorkItem := range x {
+		segments, _ = n.getImportSegments(WorkItem.ImportedSegments)
+	}
+	encodedSegments = types.Encode(segments)
+	output = append(output, encodedSegments...)
+
+	// 4. Encode the justifications (j)
+	var encodedJustifications []byte
+	for _, WorkItem := range x {
+		var justification []common.Hash
+		tree := trie.NewCDMerkleTree(segments)
+		for i, _ := range WorkItem.ImportedSegments {
+			justifies, _ := tree.Justify(i)
+			var tmpJustification []common.Hash
+			for _, justify := range justifies {
+				tmpJustification = append(tmpJustification, common.Hash(justify))
+			}
+			justification = append(justification, tmpJustification...)
+		}
+		encodedJustifications = append(encodedJustifications, types.Encode(justification)...)
+	}
+	output = append(output, encodedJustifications...)
+
+	// Combine all encoded parts: e(p,x,i,j)
+	return output
 }

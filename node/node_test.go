@@ -265,40 +265,6 @@ func TestECRoundTrip(t *testing.T) {
 	}
 }
 
-// ---------------------------- Helper Functions ----------------------------
-
-func print3DByteArray(arr [][][]byte) {
-	for i := range arr {
-		fmt.Printf("Segment %d:\n", i)
-		fmt.Println("----------------")
-		for j := range arr[i] {
-			for k := range arr[i][j] {
-				fmt.Printf("%02x ", arr[i][j][k])
-			}
-			fmt.Println()
-		}
-		fmt.Println("----------------")
-	}
-}
-
-// loadByteCode reads the bytes from the given file path and returns them as a byte slice.
-func loadByteCode(filePath string) ([]byte, error) {
-	// Open the file
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Read the bytes from the file
-	bytes, err := ioutil.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
-}
-
 /*
 
  Group effort - Fib
@@ -306,7 +272,6 @@ func loadByteCode(filePath string) ([]byte, error) {
  need Sean's encode func for E(p,x,i,j) + e
  need Stanley availability specifier(as) & paged proof & process to reconstruct using AS
  need Shawn's Assurance/Judgement based on Stanley's reconstructed wp
- need Jerry -
 
 */
 
@@ -367,6 +332,8 @@ func TestWorkGuarantee(t *testing.T) {
 	authToken := []byte("0x")               // TODO: sign
 	var exportedItems []types.ImportSegment // how do you get import segments from previous round?
 	for n := 1; n < 20; n++ {
+		time.Sleep(types.PeriodSecond * time.Second)
+		fmt.Printf("\n\n\n********************** FIB N=%v Starts **********************\n", n)
 		importedSegments := make([]types.ImportSegment, 0)
 		if n > 1 {
 			importedSegments = append(importedSegments, exportedItems...)
@@ -386,6 +353,7 @@ func TestWorkGuarantee(t *testing.T) {
 			// $i$ - a sequence of work items
 			WorkItems []WorkItem `json:"items"`
 		}*/
+
 		workPackage := types.WorkPackage{
 			Authorization: authToken,
 			AuthCodeHost:  47,
@@ -467,7 +435,7 @@ func TestWorkGuarantee(t *testing.T) {
 				fmt.Printf("exportedSegments Len=%d, exportedSegments: %x\n", len(exportedSegmentsRoot), exportedSegmentsRoot)
 				exportedItems = nil
 				for i, segmentRoot := range exportedSegmentsRoot {
-					fmt.Printf("[seg_idx=%v] segmentRoot=%x\n", i, treeRoot)
+					fmt.Printf("[seg_idx=%v] segmentRoot=%v\n", i, treeRoot)
 					exportedItem := types.ImportSegment{
 						TreeRoot: segmentRoot,
 						Index:    uint32(i),
@@ -527,19 +495,22 @@ func TestCodeParse(t *testing.T) {
 // 	}
 // }
 
-func TestPadding(T *testing.T) {
-	// Initialize a vector of 49 elements
-	x := make([]byte, 49)
-	for i := 0; i < 49; i++ {
-		x[i] = byte(i + 1)
+// ---------------------------- Helper Functions ----------------------------
+
+// loadByteCode reads the bytes from the given file path and returns them as a byte slice.
+func loadByteCode(filePath string) ([]byte, error) {
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Read the bytes from the file
+	bytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, err
 	}
 
-	fmt.Println("Original Vector:", x)
-
-	// Padding the vector to a multiple of 4
-	n := 4
-	filledX := common.PadToMultipleOfN(x, n)
-
-	fmt.Println("After Padding:", filledX)
-	fmt.Printf("Number of Elements: %d\n", len(filledX))
+	return bytes, nil
 }

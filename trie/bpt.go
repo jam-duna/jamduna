@@ -305,6 +305,7 @@ func (t *MerkleTree) levelDBGetBranch(branchHash []byte) (*Node, error) {
 }
 
 func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
+	value = ValidateNull(value)
 	_, _v, isEmbedded, _ := decodeLeaf(encodedLeaf)
 	t.levelDBSet(append(computeHash(encodedLeaf), value...), key)
 	if isEmbedded {
@@ -755,7 +756,6 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blob_hash []byte) error {
 
 // Insert fixed-length hashed key with value for the BPT
 func (t *MerkleTree) Insert(key, value []byte) {
-	value = ValidateNull(value)
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
 		encodedLeaf := leaf(key, value)

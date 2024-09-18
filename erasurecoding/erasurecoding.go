@@ -8,12 +8,12 @@ import (
 )
 
 var (
-// Configurations for the erasure coding library. See https://pkg.go.dev/github.com/klauspost/reedsolomon#New
-// TODO: Coding rate has been changed to 342:1023 in the latest version of the GP.
-// CodingRate_K                int = 2 // coding rate = 342:1023. See GP, Appendix H for more details.
-// CodingRate_N                int = 6 // coding rate = 342:1023. See GP, Appendix H for more details.
-// numPieces int = 6 // k = 6, shard size = k * 2. See GP, Appendix H.1 for more details.
-   GFPointsSize = 2 //  little-endian Y2 (E2)
+	// Configurations for the erasure coding library. See https://pkg.go.dev/github.com/klauspost/reedsolomon#New
+	// TODO: Coding rate has been changed to 342:1023 in the latest version of the GP.
+	// CodingRate_K                int = 2 // coding rate = 342:1023. See GP, Appendix H for more details.
+	// CodingRate_N                int = 6 // coding rate = 342:1023. See GP, Appendix H for more details.
+	// numPieces int = 6 // k = 6, shard size = k * 2. See GP, Appendix H.1 for more details.
+	GFPointsSize = 2 //  little-endian Y2 (E2)
 )
 
 func GetCodingRate() (coding_rate_K int, coding_rate_N int) {
@@ -30,8 +30,8 @@ func Encode(original []byte, numPieces int) ([][][]byte, error) {
 	CodingRate_K, CodingRate_N := GetCodingRate()
 
 	// Calculate the shardSize
-	shardSize := numPieces * GFPointsSize                    		// 1 GF point = 2 bytes (E2)
-	shardSizeRounded := 64 * ((shardSize + 64 - 1) / 64) 			// round up to 64 bytes. See https://github.com/klauspost/reedsolomon?tab=readme-ov-file#leopard-compatible-gf16
+	shardSize := numPieces * GFPointsSize                // 1 GF point = 2 bytes (E2)
+	shardSizeRounded := 64 * ((shardSize + 64 - 1) / 64) // round up to 64 bytes. See https://github.com/klauspost/reedsolomon?tab=readme-ov-file#leopard-compatible-gf16
 	dataSegmentSize := shardSize * CodingRate_K
 
 	// Calculate the dataShards (original) and parityShards (redundant) arguments for the RS function
@@ -111,7 +111,7 @@ func Decode(encodedData [][][]byte, numPieces int) ([]byte, error) {
 	CodingRate_K, CodingRate_N := GetCodingRate()
 
 	// Calculate the shardSize
-	shardSize := numPieces * GFPointsSize                    // 1 GF point = 2 bytes (E2)
+	shardSize := numPieces * GFPointsSize // 1 GF point = 2 bytes (E2)
 	dataSegmentSize := shardSize * CodingRate_K
 	shardSizeRounded := 64 * ((shardSize + 64 - 1) / 64) // round up to 64 bytes. See: 	shardSizeRounded := 64 * ((shardSize + 64 - 1) / 64) // round up to 64 bytes. See https://github.com/klauspost/reedsolomon?tab=readme-ov-file#leopard-compatible-gf16
 	numSegments := len(encodedData)

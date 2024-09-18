@@ -150,7 +150,7 @@ func (s *StateDB) ReadServiceStorage(service uint32, k []byte) []byte {
 	if err != nil {
 		return nil
 	} else {
-		fmt.Printf("get value=%x, err=%v\n", storage, err)
+		fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
 		return storage
 	}
 }
@@ -161,6 +161,8 @@ func (s *StateDB) WriteServiceStorage(service uint32, k []byte, storage []byte) 
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) []byte {
+	//TODO: willaim DO NOT disable this
+
 	// XContext := s.GetXContext()
 	// xs := XContext.GetX_s()
 	// sa := &types.ServiceAccount{}
@@ -186,7 +188,7 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 	if err != nil {
 		return nil
 	} else {
-		fmt.Printf("get value=%x, err=%v\n", blob, err)
+		fmt.Printf("ReadServicePreimageBlob (s,l)=(%v, %v) RESULT: blob=%x (len=%v), err=%v\n", service, blob_hash, blob, len(blob), err)
 		return blob
 	}
 }
@@ -216,7 +218,7 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 	if err != nil {
 		return nil
 	} else {
-		fmt.Printf("get value=%x, err=%v\n", time_slots, err)
+		fmt.Printf("ReadServicePreimageLookup (s, (h,l))=(%v, (%v,%v))  RESULT: time_slots=%v, err=%v\n", service, blob_hash, blob_length, time_slots, err)
 		return time_slots
 	}
 }

@@ -992,6 +992,9 @@ func (n *Node) getImportSegment(treeRoot common.Hash, segmentIndex uint32) ([]by
 	}
 	return segmentData, nil
 }
+func (n *Node) GetImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
+	return n.getImportSegments(importsegments)
+}
 
 func (n *Node) getImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
 	var imports [][]byte

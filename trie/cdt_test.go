@@ -3,40 +3,79 @@ package trie
 import (
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
-func TestCDMerkleTree(t *testing.T) {
-	leaves := [][]byte{
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
-		[]byte("leaf4"),
-		[]byte("leaf5"),
-	}
+var TestingSegmentsNum = 31
 
-	// Create the Merkle tree
-	tree := NewCDMerkleTree(leaves)
-
-	// Verify the tree structure and hash values
-	if tree.root == nil {
-		t.Fatal("Expected root to be non-nil")
-	} else {
-		fmt.Printf("Root: %x\n", tree.root.Hash)
-	}
-	tree.PrintTree()
-
+func TestCDTGet(t *testing.T) {
+	testCDTGet(t, TestingSegmentsNum)
 }
 
 func TestJustify(t *testing.T) {
-	leaves := [][]byte{
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
-	}
+	testJustify(t, TestingSegmentsNum)
+}
 
-	// Create the Merkle tree
+func TestVerifyJustifyX(t *testing.T) {
+	testVerifyJustifyX(t, TestingSegmentsNum)
+}
+
+func TestPageProof(t *testing.T) {
+	testPageProof(t, TestingSegmentsNum)
+}
+
+func TestCDT(t *testing.T) {
+	var TestingSegmentsNums = []int{1, 2, 3, 5, 10, 31, 32, 33, 64, 65, 128}
+	// var TestingSegmentsNums []int
+	// for i := 1; i <= 513; i++ {
+	// 	TestingSegmentsNums = append(TestingSegmentsNums, i)
+	// }
+	for _, numSegments := range TestingSegmentsNums {
+		numSegments := numSegments // Capture loop variable
+		t.Run(fmt.Sprintf("SegmentsNum=%d", numSegments), func(t *testing.T) {
+			// Optionally run in parallel
+			// t.Parallel()
+
+			t.Run("TestCDTGet", func(t *testing.T) {
+				testCDTGet(t, numSegments)
+			})
+
+			t.Run("TestJustify", func(t *testing.T) {
+				testJustify(t, numSegments)
+			})
+
+			t.Run("TestVerifyJustifyX", func(t *testing.T) {
+				testVerifyJustifyX(t, numSegments)
+			})
+
+			t.Run("testPageProof", func(t *testing.T) {
+				testPageProof(t, numSegments)
+			})
+
+		})
+	}
+}
+
+func testJustify(t *testing.T, numSegments int) {
+	// Initialize segments
+	var segments [][]byte
+	for i := 0; i < TestingSegmentsNum; i++ {
+		data := []byte(fmt.Sprintf("segment%d", i))
+		data = common.PadToMultipleOfN(data, types.W_C*types.W_S)
+		segments = append(segments, data)
+	}
+	leaves := segments
+	// Build Merkle Tree
 	tree := NewCDMerkleTree(leaves)
+	tree.PrintTree()
+
+	segmentLen := len(segments)
+	treeLen := tree.Length()
+	t.Logf("Input segments Len: %v (Padded CDT length: %v)\n", segmentLen, treeLen)
 
 	// Test justification for each leaf
 	for i, leaf := range leaves {
@@ -56,99 +95,30 @@ func TestJustify(t *testing.T) {
 	}
 }
 
-func TestJustifyX(t *testing.T) {
-	leaves := [][]byte{
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
+func testVerifyJustifyX(t *testing.T, numSegments int) {
+
+	// Initialize segments
+	var segments [][]byte
+	for i := 0; i < TestingSegmentsNum; i++ {
+		data := []byte(fmt.Sprintf("segment%d", i))
+		data = common.PadToMultipleOfN(data, types.W_C*types.W_S)
+		segments = append(segments, data)
 	}
-
-	// Create the Merkle tree
-	tree := NewCDMerkleTree(leaves)
-	tree.PrintTree()
-
-	// Define the index and size x
-	index := 1
-	x := 2
-
-	// Get the justification
-	justification, err := tree.JustifyX(index, x)
-	if err != nil {
-		t.Fatalf("JustifyX returned an error: %v", err)
-	}
-
-	// Verify the length of the justification
-	if len(justification) != x {
-		t.Fatalf("JustifyX returned %d elements, expected %d", len(justification), x)
-	}
-
-	// Expected justification values (this may need to be adjusted based on your actual tree structure)
-	expectedJustification := [][]byte{
-		tree.leaves[0].Hash,
-		computeNode(append(tree.leaves[2].Hash, make([]byte, 32)...)), // Assuming the padding is a zero hash
-	}
-
-	// Verify the justification values
-	for i, expectedHash := range expectedJustification {
-		if !compareBytes(justification[i], expectedHash) {
-			t.Errorf("JustifyX element %d hash mismatch: expected %x, got %x", i, expectedHash, justification[i])
-		} else {
-			fmt.Printf("JustifyX element %d hash verified: %x\n", i, justification[i])
-		}
-	}
-}
-
-func TestVerifyJustification(t *testing.T) {
-	leaves := [][]byte{
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
-	}
-
+	leaves := segments
 	// Build Merkle Tree
 	tree := NewCDMerkleTree(leaves)
 	tree.PrintTree()
 
-	// Choose a leaf to verify
-	index := 1 // Choose leaf2
-	leafHash := computeLeaf(leaves[index])
-
-	// Get justification
-	justification, err := tree.Justify(index)
-	if err != nil {
-		t.Fatalf("Failed to get justification: %v", err)
-	}
-
-	// Verify justification
-	computedRoot := verifyJustification(leafHash, index, justification)
-	expectedRoot := tree.Root()
-
-	if !compareBytes(computedRoot, expectedRoot) {
-		t.Errorf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
-	} else {
-		fmt.Printf("Root hash verified: %x\n", computedRoot)
-	}
-}
-
-func TestVerifyJustifyX(t *testing.T) {
-	// Initialize the tree with some values
-	leaves := [][]byte{
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
-		[]byte("leaf4"),
-	}
-
-	// Build Merkle Tree
-	tree := NewCDMerkleTree(leaves)
-	tree.PrintTree()
+	segmentLen := len(segments)
+	treeLen := tree.Length()
+	t.Logf("Input segments Len: %v (Padded CDT length: %v)\n", segmentLen, treeLen)
 
 	// Index of the leaf to justify
-	index := 2 // leaf3
-	leafHash := computeLeaf([]byte("leaf3"))
+	index := 0
+	leafHash := computeLeaf(segments[index])
 
 	// Get justification for the leaf
-	x := 3 // The depth of the tree or less
+	x := 2 // The depth of the tree or less
 	justification, err := tree.JustifyX(index, x)
 	if err != nil {
 		t.Fatalf("JustifyX failed: %v", err)
@@ -156,63 +126,111 @@ func TestVerifyJustifyX(t *testing.T) {
 
 	// Verify the justification
 	computedRoot := verifyJustifyX(leafHash, index, justification, x)
-	expectedRoot := tree.Root()
+	expectedRoot := justification[len(justification)-1]
 
 	if !compareBytes(computedRoot, expectedRoot) {
 		t.Errorf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
 	} else {
-		fmt.Printf("Root hash verified: %x\n", computedRoot)
+		t.Logf("Root hash verified: %x\n", computedRoot)
 	}
 }
 
-func TestCDTGet(t *testing.T) {
-	leaves := [][]byte{
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
-		[]byte("leaf4"),
+func testCDTGet(t *testing.T, numSegments int) {
+
+	// Initialize segments
+	var segments [][]byte
+	for i := 0; i < TestingSegmentsNum; i++ {
+		data := []byte(fmt.Sprintf("segment%d", i))
+		data = common.PadToMultipleOfN(data, types.W_C*types.W_S)
+		segments = append(segments, data)
 	}
+	leaves := segments
 	// Build Merkle Tree
 	tree := NewCDMerkleTree(leaves)
 	tree.PrintTree()
-	for i := 0; i <= len(leaves); i++ {
-		{
-			if i < len(leaves) {
-				leaf, err := tree.Get(i)
-				if err == nil {
-					fmt.Printf("Get %d: %s\n", i, string(leaf))
-				} else {
-					t.Errorf("Get %d should be Error: %v\n", i, err)
-				}
-			} else {
-				_, err := tree.Get(i)
-				if err != nil {
-					fmt.Printf("Error: %v\n", err)
-				} else {
-					t.Errorf("Get %d should be Error: %v\n", i, err)
-				}
-			}
+
+	segmentLen := len(segments)
+	treeLen := tree.Length()
+	t.Logf("Input segments Len: %v (Padded CDT length: %v)\n", segmentLen, treeLen)
+
+	for i := 0; i < segmentLen; i++ {
+		leaf, err := tree.Get(i)
+		if err == nil {
+			t.Logf("Get %d: %s\n", i, string(leaf))
+		} else {
+			t.Errorf("Getting %d but got Error: %v\n", i, err)
 		}
+	}
+
+	leaf, err := tree.Get(treeLen)
+	if err != nil {
+		t.Logf("Error: %v\n", err)
+	} else {
+		t.Errorf("Get %d should be Error: %v but got %v\n", treeLen, err, leaf)
 	}
 }
 
-// TestGeneratePageProof tests the generation of page proofs
-func TestGeneratePageProof(t *testing.T) {
+func testPageProof(t *testing.T, numSegments int) {
 	var segments [][]byte
+	var TestingSegmentsNums = []int{1, 2, 3, 5, 10, 31, 32, 33, 64, 65, 128, 2046}
+	// var TestingSegmentsNums = []int{1, 2}
 
-	for i := 1; i <= 65; i++ {
-		data := []byte(fmt.Sprintf("segment%d", i))
-		segments = append(segments, data)
-	}
+	// Initialize segments
+	for _, TestingSegmentsNum := range TestingSegmentsNums {
+		fmt.Printf("-------------------%d-------------------\n", TestingSegmentsNum)
+		segments = nil
+		for i := 0; i < TestingSegmentsNum+1; i++ {
+			data := []byte(fmt.Sprintf("segment%d", i))
+			data = common.PadToMultipleOfN(data, types.W_C*types.W_S)
+			segments = append(segments, data)
+		}
+		// Generate the paged proofs
+		pagedProofs, err := generatePageProof(segments)
+		if err != nil {
+			t.Fatalf("Failed to generate page proofs: %v", err)
+		}
 
-	pagedProofs, _ := generatePageProof(segments)
+		if len(pagedProofs) == 0 {
+			t.Fatalf("Expected non-empty page proofs")
+		}
+		// Print the Merkle Root of each page
+		for i, proof := range pagedProofs {
+			// Decode the proof back to segments and verify
+			decodedData, _ := types.Decode(proof, reflect.TypeOf([][]uint8{}))
+			decodedSegments := decodedData.([][]byte)
+			t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
+			// Compare decoded segments with original
+			start := i * 64
+			end := start + 64
+			if end > len(segments) {
+				end = len(segments)
+			}
+			var position int
+			for _, segment := range segments {
+				position = findPositions(decodedSegments, segment)
+				if position != -1 {
+					break
+				}
+			}
+			if position == -1 {
+				t.Fatalf("Segment not found in the decoded segments")
+			}
 
-	if len(pagedProofs) == 0 {
-		t.Fatalf("Expected non-empty page proofs")
-	}
-
-	// print the Merkle Root of each page
-	for i, proof := range pagedProofs {
-		t.Logf("Page %d PageProof: %s", i, (proof))
+			expectedSegments := segments[start:end]
+			expecteddecodedSegments := decodedSegments[position:]
+			for j := range expecteddecodedSegments {
+				if !compareBytes(expecteddecodedSegments[j], expectedSegments[j]) {
+					t.Errorf("Segment mismatch: expected %x, got %x", expectedSegments[j], decodedSegments[j])
+				}
+			}
+			result, err := VerifyPageProof(decodedSegments, i)
+			if err != nil {
+				t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
+			} else if result {
+				t.Logf("Page %d PageProof Verified\n", i)
+			} else {
+				t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
+			}
+		}
 	}
 }

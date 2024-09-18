@@ -81,12 +81,6 @@ func TestMerkleTree(t *testing.T) {
 	for i, testCase := range testVectors {
 		// Create the Merkle Tree input from the test case
 		fmt.Printf("testCase %d: %v\n", i, testCase)
-		var input [][2][]byte
-		for k, v := range testCase.Input {
-			key, _ := hex.DecodeString(k)
-			value, _ := hex.DecodeString(v)
-			input = append(input, [2][]byte{key, value})
-		}
 
 		isSerialized := true
 		var rootHash []byte
@@ -106,11 +100,12 @@ func TestMerkleTree(t *testing.T) {
 				key, _ := hex.DecodeString(k)
 				value, _ := hex.DecodeString(v)
 				tree.Insert(key, value)
+				fmt.Printf("computeHash:) %x\n", computeHash(leaf(key, value)))
 			}
 			rootHash = tree.GetRootHash()
 		}
-
 		// Compare the computed root hash with the expected output
+		tree.printTree(tree.Root, 0)
 		expectedHash, _ := hex.DecodeString(testCase.Output)
 		if !compareBytes(rootHash, expectedHash) {
 			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, hex.EncodeToString(rootHash), testCase.Output)
@@ -321,6 +316,7 @@ func TestModify(t *testing.T) {
 		// Compare the computed root hash with the expected output
 		expectedHash, _ := hex.DecodeString(testCase.Output)
 		if !compareBytes(rootHash, expectedHash) {
+			tree.PrintTree(tree.Root, 0)
 			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, hex.EncodeToString(rootHash), testCase.Output)
 		} else {
 			t.Logf("Test case %d: Vector OK, rootHash=%x", i, expectedHash)
