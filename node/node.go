@@ -77,6 +77,17 @@ type Node struct {
 	// holds a map of epoch to at most 2 tickets
 	selfTickets map[uint32][]types.Ticket
 
+	// this is for audit
+	announcementBucket     types.AnnounceBucket
+	prevAnnouncementBucket types.AnnounceBucket
+	announcementMutex      sync.Mutex
+	judgementBucket        types.JudgeBucket
+	judgementMutex         sync.Mutex
+
+	// this is for assurances
+	// use work package hash to lookup the availbility
+	assurancesBucket map[common.Hash]types.IsPackageRecieved
+	assuranceMutex   sync.Mutex
 	// holds a map of the parenthash to the block
 	blocks map[common.Hash]*types.Block
 	// holds a map of the hash to the stateDB
@@ -394,8 +405,12 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 	return nil
 }
 
-func (n *Node) getIdentifier() string {
-	return n.credential.Ed25519Pub.String()
+func (n *Node) GetEd25519Key() types.Ed25519Key {
+	return types.Ed25519Key(n.credential.Ed25519Pub)
+}
+
+func (n *Node) GetEd25519Secret() []byte {
+	return n.credential.Ed25519Secret
 }
 
 func (n *Node) ResetPeer(peerIdentifier string) {
@@ -556,14 +571,30 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 				response = ok
 			}
 		}
-	case "Vote":
-		var vote types.Vote
-		err := json.Unmarshal([]byte(msg.Payload), &vote)
+	case "Judgement":
+		var judgement types.Judgement
+		err := json.Unmarshal([]byte(msg.Payload), &judgement)
 		if err == nil {
-			err = n.processVote(vote)
+			err = n.processJudgement(judgement)
+			if err == nil {
+				response = ok
+			} else {
+				fmt.Println(err.Error())
+			}
+			fmt.Printf(" -- [N%d] received judgement From N%d\n", n.id, msg.Id)
+			fmt.Printf(" -- [N%d] received judgement From N%d (%v <- %v)\n", n.id, msg.Id, judgement.WorkReport.GetWorkPackageHash(), judgement.WorkReport.GetWorkPackageHash())
+
+		}
+	case "Announcement":
+		var announcement types.Announcement
+		err := json.Unmarshal([]byte(msg.Payload), &announcement)
+		if err == nil {
+			err = n.processAnnouncement(announcement)
 			if err == nil {
 				response = ok
 			}
+			fmt.Printf(" -- [N%d] received announcement From N%d\n", n.id, msg.Id)
+			fmt.Printf(" -- [N%d] received announcement From N%d (%v <- %v)\n", n.id, msg.Id, announcement.WorkReport.GetWorkPackageHash(), announcement.WorkReport.GetWorkPackageHash())
 		}
 	case "Preimages":
 		var preimages types.Preimages
@@ -585,15 +616,7 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 				response = ok
 			}
 		}
-	case "Announcement":
-		var announcement types.Announcement
-		err := json.Unmarshal([]byte(msg.Payload), &announcement)
-		if err == nil {
-			err = n.processAnnouncement(announcement)
-			if err == nil {
-				response = ok
-			}
-		}
+
 	case "WorkPackage":
 		var workPackage types.WorkPackage
 		err := json.Unmarshal([]byte(msg.Payload), &workPackage)
@@ -796,13 +819,6 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 	return nil // Success
 }
 
-func (n *Node) processVote(vote types.Vote) error {
-	// Store the vote in the tip's queued vote
-	s := n.getState()
-	s.ProcessIncomingVote(vote)
-	return nil
-}
-
 func (n *Node) dumpstatedbmap() {
 	for hash, statedb := range n.statedbMap {
 		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHash, statedb.BlockHash, statedb.StateRoot)
@@ -918,11 +934,6 @@ func (n *Node) processBlock(blk *types.Block) error {
 	return nil // Success
 }
 
-func (n *Node) processAnnouncement(announcement types.Announcement) error {
-	// TODO: TBD
-	return nil // Success
-}
-
 func (n *Node) computeAssuranceBitfield() [1]byte {
 	// TODO
 	return [1]byte{3}
@@ -970,14 +981,15 @@ func (n *Node) newAvailabilityJustification(guarantee types.Guarantee) types.Ava
 
 func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustification) error {
 	// TODO: validate proof
-
+	//ed25519Key := n.GetEd25519Key()
+	ed25519Priv := n.GetEd25519Secret()
 	assurance := types.Assurance{
 		Anchor:         n.statedb.ParentHash,
 		Bitfield:       n.computeAssuranceBitfield(),
 		ValidatorIndex: uint16(n.id),
 		//	Signature: signature,
 	}
-	assurance.Sign(n.credential.Ed25519Secret, n.statedb.ParentHash)
+	assurance.Sign(ed25519Priv)
 
 	n.broadcast(assurance)
 	return nil
@@ -1079,9 +1091,9 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 		combinedSegmentAndPageProofs := append(segments, pageProofs...)
 
 		var wg sync.WaitGroup
-		wg.Add(1) // 等待一個任務完成
+		wg.Add(1)
 
-		// 使用協程來執行 EncodeAndDistributeSegmentData
+		// EncodeAndDistributeSegmentData
 		go func() {
 			treeRoot, err = n.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs, &wg)
 			if err != nil {
@@ -1130,7 +1142,7 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 	}
 
 	// Create a GuaranteeCredential with the signature and a mock validator index
-	sig := workReport.Sign(n.credential.Ed25519Secret)
+	sig := workReport.Sign(n.GetEd25519Secret())
 	credential := types.GuaranteeCredential{
 		ValidatorIndex: uint16(n.id), // Mock validator index
 		// Sign the serialized WorkReport
@@ -1769,8 +1781,8 @@ func getMessageType(obj interface{}) string {
 		return "Guarantee"
 	case types.Assurance:
 		return "Assurance"
-	case types.Vote:
-		return "Vote"
+	case types.Judgement:
+		return "Judgement"
 	case types.Preimages:
 		return "Preimages"
 	case types.Ticket:
@@ -1810,10 +1822,15 @@ func (n *Node) runClient() {
 			}
 			if newStateDB != nil {
 				// we authored a block
+				newStateDB.PreviousGuarantors()
+				newStateDB.AssignGuarantors()
 				n.addStateDB(newStateDB)
 				n.blocks[newBlock.Hash()] = newBlock
 				n.broadcast(*newBlock)
 				fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
+				for _, g := range newStateDB.GuarantorAssignments {
+					fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %x -> core %v \n", n.id, g.Validator.Ed25519, g.CoreIndex)
+				}
 			}
 		case msg := <-n.messageChan:
 			n.processOutgoingMessage(msg)

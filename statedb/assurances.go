@@ -117,3 +117,18 @@ func CheckSorting_EAs(assurances []types.Assurance) error {
 	return nil
 
 }
+
+// FOR generate assurance extrinsic
+
+func (j *JamState) GetWorkReportFromRho() ([types.TotalCores]types.WorkReport, error) {
+	reports := [types.TotalCores]types.WorkReport{}
+	for i, rho := range j.AvailabilityAssignments {
+		if rho == nil {
+			reports[i] = types.WorkReport{}
+		} else {
+			reports[i] = rho.WorkReport
+		}
+
+	}
+	return reports, nil
+}

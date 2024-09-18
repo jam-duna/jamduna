@@ -54,6 +54,8 @@ const (
 
 const (
 	ValidatorsSuperMajority = int(2*TotalValidators/3 + 1)
+	WonkyTrueThreshold      = int(TotalValidators / 3)
+	WonkyFalseThreshold     = int(TotalValidators/3 + 1)
 )
 
 //X: Signing Contexts.

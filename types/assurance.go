@@ -47,7 +47,7 @@ func (A *Assurance) BitFieldToBytes() []byte {
 	return A.Bitfield[:]
 }
 
-func (A *Assurance) SetBitFied_Bit(index uint8, value bool) {
+func (A *Assurance) SetBitFied_Bit(index uint16, value bool) {
 	if value {
 		A.Bitfield[0] |= 1 << index
 	} else {
@@ -65,7 +65,7 @@ func (a *Assurance) computeAssuranceBytes() []byte {
 	return append([]byte(X_A), h...)
 }
 
-func (a *Assurance) Sign(Ed25519Secret []byte, parentHash common.Hash) {
+func (a *Assurance) Sign(Ed25519Secret []byte) {
 	assuranceBytes := a.computeAssuranceBytes()
 	sig := ed25519.Sign(Ed25519Secret, assuranceBytes)
 	copy(a.Signature[:], sig)
@@ -136,4 +136,11 @@ func (s *SAssurance) Deserialize() (Assurance, error) {
 		ValidatorIndex: s.ValidatorIndex,
 		Signature:      signature,
 	}, nil
+}
+
+// Create a object for save the availibility
+
+type IsPackageRecieved struct {
+	WorkReportBundle bool
+	ExportedSegments bool
 }

@@ -47,9 +47,9 @@ type StateDB struct {
 	queuedAssurances map[common.Hash]types.Assurance
 	assuranceMutex   sync.Mutex
 
-	knownVotes  map[common.Hash]int
-	queuedVotes map[common.Hash]types.Vote
-	voteMutex   sync.Mutex
+	knownJudgements map[common.Hash]int
+	queueJudgements map[common.Hash]types.Judgement
+	judgementMutex  sync.Mutex
 
 	knownTickets  map[common.Hash]uint8
 	queuedTickets map[common.Hash]types.Ticket
@@ -59,6 +59,7 @@ type StateDB struct {
 
 	GuarantorAssignments         []types.GuarantorAssignment
 	PreviousGuarantorAssignments []types.GuarantorAssignment
+	AvailableWorkReport          []types.WorkReport // every block has its own available work report
 	//S uint32
 }
 
@@ -74,10 +75,10 @@ func (s *StateDB) AddLookupToQueue(l types.Preimages) {
 	s.queuedPreimageLookups[l.AccountPreimageHash()] = l
 }
 
-func (s *StateDB) AddVoteToQueue(v types.Vote) {
-	s.voteMutex.Lock()
-	defer s.voteMutex.Unlock()
-	s.queuedVotes[v.Hash()] = v
+func (s *StateDB) AddJudgementToQueue(j types.Judgement) {
+	s.judgementMutex.Lock()
+	defer s.judgementMutex.Unlock()
+	s.queueJudgements[j.WorkReport.Hash()] = j
 }
 
 func (s *StateDB) AddGuaranteeToQueue(g types.Guarantee) {
@@ -146,17 +147,9 @@ func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
 	s.knownPreimageLookups[account_preimage_hash] = sf.GetTimeSlot() // hostForget has certain logic that will probably reference this field???
 }
 
-func (s *StateDB) ProcessIncomingVote(v types.Vote) {
+func (s *StateDB) ProcessIncomingJudgement(j types.Judgement) {
 	// get the disputes state
-	disp := s.GetJamState()
 
-	//TODO
-	err := disp.ValidateProposedVote(&v)
-	if err != nil {
-		fmt.Printf("Invalid dispute. Err=%v\n", err)
-		return
-	}
-	s.AddVoteToQueue(v)
 }
 
 func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
@@ -212,10 +205,10 @@ func (s *StateDB) RemoveAssurance(a *types.Assurance) {
 	delete(s.queuedAssurances, a.Hash())
 }
 
-func (s *StateDB) RemoveVote(v *types.Vote) {
-	s.voteMutex.Lock()
-	defer s.voteMutex.Unlock()
-	delete(s.queuedVotes, v.Hash())
+func (s *StateDB) RemoveJudgement(j *types.Judgement) {
+	s.judgementMutex.Lock()
+	defer s.judgementMutex.Unlock()
+	delete(s.queueJudgements, j.WorkReport.Hash())
 }
 
 // IsAuthorizedPVM performs the is-authorized PVM function.
@@ -271,8 +264,8 @@ func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
 	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]uint8)
-	statedb.queuedVotes = make(map[common.Hash]types.Vote)
-	statedb.knownVotes = make(map[common.Hash]int)
+	statedb.queueJudgements = make(map[common.Hash]types.Judgement)
+	statedb.knownJudgements = make(map[common.Hash]int)
 	statedb.queuedGuarantees = make(map[common.Hash]types.Guarantee)
 	statedb.knownGuarantees = make(map[common.Hash]int)
 	statedb.queuedAssurances = make(map[common.Hash]types.Assurance)
@@ -441,8 +434,8 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	statedb = newEmptyStateDB(sdb)
 	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]uint8)
-	statedb.queuedVotes = make(map[common.Hash]types.Vote)
-	statedb.knownVotes = make(map[common.Hash]int)
+	statedb.queueJudgements = make(map[common.Hash]types.Judgement)
+	statedb.knownJudgements = make(map[common.Hash]int)
 
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 	statedb.JamState = NewJamState()
@@ -495,12 +488,12 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		knownPreimageLookups:  make(map[common.Hash]uint32),
 		knownGuarantees:       make(map[common.Hash]int),
 		knownAssurances:       make(map[common.Hash]int),
-		knownVotes:            make(map[common.Hash]int),
+		knownJudgements:       make(map[common.Hash]int),
 		queuedTickets:         make(map[common.Hash]types.Ticket),
 		queuedPreimageLookups: make(map[common.Hash]types.Preimages),
 		queuedGuarantees:      make(map[common.Hash]types.Guarantee),
 		queuedAssurances:      make(map[common.Hash]types.Assurance),
-		queuedVotes:           make(map[common.Hash]types.Vote),
+		queueJudgements:       make(map[common.Hash]types.Judgement),
 
 		/*
 			Following flds are not copied over..?
@@ -555,12 +548,12 @@ func (s *StateDB) CloneExtrinsicMap(n *StateDB) {
 	}
 
 	// Vote
-	for k, v := range s.knownVotes {
-		n.knownVotes[k] = v
+	for k, v := range s.knownJudgements {
+		n.knownJudgements[k] = v
 	}
-	for k, v := range s.queuedVotes {
+	for k, v := range s.queueJudgements {
 		d, _ := v.DeepCopy()
-		n.queuedVotes[k] = d
+		n.queueJudgements[k] = d
 	}
 }
 
@@ -837,7 +830,8 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	// core's data is now available
 	//ρ††
 	num_assurances, availableWorkReport := d.ProcessAssurances(assurances)
-	_ = availableWorkReport // availableWorkReport is the work report that is available for the core, will be used in the audit section
+	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
+	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 	s.JamState.tallyStatistics(s.Id, "assurances", num_assurances)
 
 	// Guarantees
@@ -1021,26 +1015,26 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	s.queuedAssurances = make(map[common.Hash]types.Assurance)
 
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
-	d := s.GetJamState()
+	// d := s.GetJamState()
 
 	// extrinsicData.Disputes = make([]types.Dispute, 0)
-	for _, v := range s.queuedVotes {
+	for _, v := range s.queueJudgements {
 		// TODO: use votes to make dispute d
-		if v.Voting {
+		if v.Judge {
 
 		}
 		// extrinsicData.Disputes = append(extrinsicData.Disputes, d)
 	}
-	s.queuedVotes = make(map[common.Hash]types.Vote)
-	dispute := FormDispute(s.queuedVotes)
-	if d.NeedsOffendersMarker(&dispute) {
-		// Handle the case where the dispute does not need an offenders marker.
-		OffendMark, err := d.GetOffenderMark(dispute)
-		if err != nil {
-			return nil, err
-		}
-		h.OffendersMark = OffendMark.OffenderKey
-	}
+	s.queueJudgements = make(map[common.Hash]types.Judgement)
+	// dispute := FormDispute(s.queuedVotes)
+	// if d.NeedsOffendersMarker(&dispute) {
+	// 	// Handle the case where the dispute does not need an offenders marker.
+	// 	OffendMark, err := d.GetOffenderMark(dispute)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	h.OffendersMark = OffendMark.OffenderKey
+	// }
 
 	// TODO: 103 Verdicts v must be ordered by report hash.
 	// TODO: 104 Offender signatures c and f must each be ordered by the validator’s Ed25519 key.

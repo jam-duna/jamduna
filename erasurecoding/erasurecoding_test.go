@@ -313,7 +313,7 @@ func test_encode_decode(t *testing.T, size uint32) error {
 		t.Fatalf("Error in Encode: %v", err0)
 	}
 	fmt.Printf("Encoded output:\n")
-	// print3DByteArray(encodedOutput)
+	// Print3DByteArray(encodedOutput)
 
 	// Pseudo availability of all subshards, randomly "erase" some subshards according to the availableCount value
 	availability := make([][]bool, len(encodedOutput))
@@ -341,7 +341,7 @@ func test_encode_decode(t *testing.T, size uint32) error {
 		}
 	}
 	fmt.Printf("Erased output:\n")
-	// print3DByteArray(encodedOutput)
+	// Print3DByteArray(encodedOutput)
 
 	decodedOutput, err2 := Decode(encodedOutput, numPiecesK)
 	if err2 != nil {

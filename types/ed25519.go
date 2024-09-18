@@ -54,6 +54,11 @@ func HexToEd25519Sig(hexStr string) Ed25519Signature {
 	return signature
 }
 
+//Ed25519Signature to byte
+func (e *Ed25519Signature) Bytes() []byte {
+	return e[:]
+}
+
 func HexToEd25519Key(hexStr string) Ed25519Key {
 	b := common.Hex2Bytes(hexStr)
 	var pubkey Ed25519Key

@@ -172,7 +172,7 @@ func Decode(encodedData [][][]byte, numPieces int) ([]byte, error) {
 	return data, nil
 }
 
-func print3DByteArray(arr [][][]byte) {
+func Print3DByteArray(arr [][][]byte) {
 	for i := range arr {
 		fmt.Printf("Segment %d:\n", i)
 		fmt.Println("----------------")

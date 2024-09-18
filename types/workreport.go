@@ -47,6 +47,20 @@ type CWorkReport struct {
 	Results          []WorkResult           `json:"results"`
 }
 
+// eq 190
+type WorkReportNeedAudit struct {
+	Q [TotalCores]WorkReport `json:"available_work_report"`
+}
+
+type WorkReportSelection struct {
+	WorkReport WorkReport `json:"work_report"`
+	Core       uint16     `json:"core_index"`
+}
+
+func (a *WorkReport) GetWorkPackageHash() common.Hash {
+	return a.AvailabilitySpec.WorkPackageHash
+}
+
 // computeWorkReportBytes abstracts the process of generating the bytes to be signed or verified.
 func (a *WorkReport) computeWorkReportBytes() []byte {
 	return append([]byte(X_G), common.ComputeHash(a.Bytes())...)

@@ -120,18 +120,6 @@ func (j *JamState) GetPsiBytes() ([]byte, error) {
 
 }
 
-func (j *JamState) ValidateProposedVote(t *types.Vote) error {
-	//check the work report hash is in rho
-
-	return nil
-}
-
-func FormDispute(v map[common.Hash]types.Vote) types.Dispute {
-	//return nil dispute
-	_ = v
-	return types.Dispute{}
-}
-
 func (j *JamState) GetOffenderMark(input types.Dispute) (types.OffenderMarker, error) {
 	for _, v := range input.Verdict {
 		err := j.checkSignature(v)

@@ -213,7 +213,7 @@ func (s *StateDB) checkAncestorSetA(g types.Guarantee) error {
 func (s *StateDB) checkReportNotInRecentHistory(g types.Guarantee) error {
 	for _, beta := range s.JamState.BeefyPool {
 		for _, report := range beta.Reported {
-			if report == g.Report.AvailabilitySpec.WorkPackageHash {
+			if report == g.Report.GetWorkPackageHash() {
 
 				return errors.New("invalid report in recent history")
 			}
@@ -225,7 +225,7 @@ func (s *StateDB) checkReportNotInRecentHistory(g types.Guarantee) error {
 // TODO 150 check prerequisite work-package: most recent history haven't been implemented
 func (s *StateDB) checkPrerequisiteWorkPackage(g types.Guarantee) error {
 	if g.Report.RefineContext.Prerequisite != nil {
-		exBool := g.Report.RefineContext.Prerequisite.Hash() == g.Report.AvailabilitySpec.WorkPackageHash
+		exBool := g.Report.RefineContext.Prerequisite.Hash() == g.Report.GetWorkPackageHash()
 		betaBool := false
 		if exBool || betaBool {
 			return nil

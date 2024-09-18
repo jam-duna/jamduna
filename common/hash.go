@@ -19,6 +19,13 @@ func Uint32ToBytes(val uint32) []byte {
 	return bytes
 }
 
+func Uint16ToBytes(value uint16) []byte {
+	bytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(bytes, value)
+	return bytes
+}
+
+
 func Blake2Hash(data []byte) Hash {
 	return BytesToHash(ComputeHash(data))
 }

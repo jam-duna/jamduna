@@ -379,6 +379,20 @@ func (s *SafroleState) GetValidatorData(phase string) (validatorsData []byte) {
 	return validatorsData
 }
 
+func (s *SafroleState) GetCurrValidatorIndex(key types.Ed25519Key) int {
+	for i, v := range s.CurrValidators {
+		if v.Ed25519 == key {
+			return i
+		}
+	}
+	// If not found, return -1
+	return -1
+}
+
+func (s *SafroleState) GetCurrValidator(index int) types.Validator {
+	return s.CurrValidators[index]
+}
+
 func (s *SafroleState) SetValidatorData(validatorsData []byte, phase string) error {
 	// Calculate the expected length for each validator data
 	const validatorLength = 32 + 32 + 144 + 128

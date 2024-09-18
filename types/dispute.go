@@ -117,6 +117,34 @@ func (a *Dispute) Hash() common.Hash {
 	return common.BytesToHash(common.ComputeHash(data))
 }
 
+func (a *Dispute) Print() {
+	fmt.Printf("Dispute:\n")
+	fmt.Printf("  Verdicts:\n")
+	for _, v := range a.Verdict {
+		fmt.Printf("    - Target:    %04x\n", v.Target)
+		fmt.Printf("      Epoch:     %d\n", v.Epoch)
+		fmt.Printf("      Votes:\n")
+		for _, vote := range v.Votes {
+			fmt.Printf("        -- Validator:  %d\n", vote.Index)
+			fmt.Printf("           Vote:       %t\n", vote.Voting)
+			fmt.Printf("           Signature:  %x\n", vote.Signature)
+		}
+	}
+	fmt.Printf("  Culprits:\n")
+	for _, c := range a.Culprit {
+		fmt.Printf("    - Target:    %x\n", c.Target)
+		fmt.Printf("      Key:       %x\n", c.Key)
+		fmt.Printf("      Signature: %x\n", c.Signature)
+	}
+	fmt.Printf("  Faults:\n")
+	for _, f := range a.Fault {
+		fmt.Printf("    - Target:    %x\n", f.Target)
+		fmt.Printf("      Voting:    %t\n", f.Voting)
+		fmt.Printf("      Key:       %x\n", f.Key)
+		fmt.Printf("      Signature: %x\n", f.Signature)
+	}
+}
+
 func (s *SFault) Deserialize() (Fault, error) {
 	keyBytes := common.FromHex(s.Key)
 	var key Ed25519Key

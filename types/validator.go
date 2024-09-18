@@ -136,6 +136,10 @@ func (v *Validator) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (b *BandersnatchVrfSignature) Bytes() []byte {
+	return b[:]
+}
+
 func HexToBLS(hexStr string) [BlsSizeInBytes]byte {
 	b := common.Hex2Bytes(hexStr)
 	var bls [BlsSizeInBytes]byte
