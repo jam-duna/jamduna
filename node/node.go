@@ -995,7 +995,7 @@ func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustificat
 	return nil
 }
 
-func (n *Node) getImportSegment(treeRoot common.Hash, segmentIndex uint32) ([]byte, error) {
+func (n *Node) getImportSegment(treeRoot common.Hash, segmentIndex uint16) ([]byte, error) {
 	// TODO: do you need segmentRoot or segmentsRoot here?
 	fmt.Printf("treeRoot: %v, segmentIndex: %v \n", treeRoot, segmentIndex)
 	segmentData, err := n.FetchAndReconstructSpecificSegmentData(treeRoot)

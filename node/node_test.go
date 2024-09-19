@@ -30,7 +30,6 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 
 	peers := make([]string, numNodes)
 	peerList := make(map[string]NodeInfo)
-
 	validators := make([]types.Validator, numNodes)
 	for i := 0; i < numNodes; i++ {
 		validator, err := statedb.InitValidator(seeds[i], seeds[i])
@@ -438,7 +437,7 @@ func TestWorkGuarantee(t *testing.T) {
 					fmt.Printf("[seg_idx=%v] segmentRoot=%v\n", i, treeRoot)
 					exportedItem := types.ImportSegment{
 						TreeRoot: segmentRoot,
-						Index:    uint32(i),
+						Index:    uint16(i),
 					}
 					fmt.Printf("exportedItem: %v\n", exportedItem)
 					exportedItems = append(exportedItems, exportedItem)

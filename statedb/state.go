@@ -9,25 +9,31 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+type AuthorizationQueue [types.TotalCores][]common.Hash
+type BeefyPool [types.RecentHistorySize]Beta_state
+type AvailabilityAssignments [types.TotalCores]*Rho_state
+
 type JamState struct {
-	AuthorizationsPool       [types.TotalCores][]common.Hash     `json:"authorizations_pool"` // alpha The core αuthorizations pool. α eq 85
-	AuthorizationQueue       [types.TotalCores][]common.Hash     `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
-	BeefyPool                [types.RecentHistorySize]Beta_state `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
-	SafroleStateGamma        SafroleBasicState                   `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
-	SafroleState             *SafroleState                       `json:"safrole"`
-	PriorServiceAccountState map[uint32]types.ServiceAccount     `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
-	AvailabilityAssignments  [types.TotalCores]*Rho_state        `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
-	DisputesState            Psi_state                           `json:"disputes_state"`              // psi - Disputes ψ eq 97
-	PrivilegedServiceIndices Kai_state                           `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
-	ValidatorStatistics      [2][types.TotalValidators]Pi_state  `json:"validator_statistics"`        // pi The validator statistics. π eq 171
+	AuthorizationsPool       [types.TotalCores][]common.Hash    `json:"authorizations_pool"` // alpha The core αuthorizations pool. α eq 85
+	AuthorizationQueue       AuthorizationQueue                 `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
+	BeefyPool                BeefyPool                          `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
+	SafroleStateGamma        SafroleBasicState                  `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
+	SafroleState             *SafroleState                      `json:"safrole"`
+	PriorServiceAccountState map[uint32]types.ServiceAccount    `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
+	AvailabilityAssignments  AvailabilityAssignments       `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
+	DisputesState            Psi_state                          `json:"disputes_state"`              // psi - Disputes ψ eq 97
+	PrivilegedServiceIndices Kai_state                          `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
+	ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"validator_statistics"`        // pi The validator statistics. π eq 171
 }
 
 // Types for Beta
+type Em_B []common.Hash
+type Reported [types.TotalCores]common.Hash
 type Beta_state struct {
-	HeaderHash common.Hash                   `json:"header_hash"`
-	MMR        []common.Hash                 `json:"mmr"`
-	StateRoot  common.Hash                   `json:"state_root"`
-	Reported   [types.TotalCores]common.Hash `json:"reported"`
+	HeaderHash common.Hash `json:"header_hash"`
+	MMR        Em_B        `json:"mmr"`
+	StateRoot  common.Hash `json:"state_root"`
+	Reported   Reported    `json:"reported"`
 }
 
 func (b *Beta_state) MMR_Bytes() []byte {
@@ -183,49 +189,49 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 	}
 }
 
-func (n *JamState) GetAuthQueueBytes() ([]byte, error) {
-	// AuthorizationsPool
-	codec_bytes, err := json.Marshal(n.AuthorizationsPool)
-	if err != nil {
-		fmt.Println("Error serializing AuthQueue", err)
-	}
-	return codec_bytes, nil
-}
+// func (n *JamState) GetAuthQueueBytes() ([]byte, error) {
+// 	// AuthorizationsPool
+// 	codec_bytes, err := json.Marshal(n.AuthorizationsPool)
+// 	if err != nil {
+// 		fmt.Println("Error serializing AuthQueue", err)
+// 	}
+// 	return codec_bytes, nil
+// }
 
-func (n *JamState) GetPrivilegedServicesIndicesBytes() ([]byte, error) {
-	// PrivilegedServiceIndices
-	codec_bytes, err := json.Marshal(n.PrivilegedServiceIndices)
-	if err != nil {
-		fmt.Println("Error serializing AuthQueue", err)
-	}
-	return codec_bytes, nil
-}
+// func (n *JamState) GetPrivilegedServicesIndicesBytes() ([]byte, error) {
+// 	// PrivilegedServiceIndices
+// 	codec_bytes, err := json.Marshal(n.PrivilegedServiceIndices)
+// 	if err != nil {
+// 		fmt.Println("Error serializing AuthQueue", err)
+// 	}
+// 	return codec_bytes, nil
+// }
 
-func (n *JamState) GetRecentBlocksBytes() ([]byte, error) {
-	// BeefyPool
-	codec_bytes, err := json.Marshal(n.BeefyPool)
-	if err != nil {
-		fmt.Println("Error serializing RecentBlocks", err)
-	}
-	return codec_bytes, nil
-}
+// func (n *JamState) GetRecentBlocksBytes() ([]byte, error) {
+// 	// BeefyPool
+// 	codec_bytes, err := json.Marshal(n.BeefyPool)
+// 	if err != nil {
+// 		fmt.Println("Error serializing RecentBlocks", err)
+// 	}
+// 	return codec_bytes, nil
+// }
 
-func (n *JamState) GetPiBytes() ([]byte, error) {
-	// use scale to encode the Rho_state
-	//use json marshal to get the bytes
-	codec_bytes, err := json.Marshal(n.ValidatorStatistics)
-	if err != nil {
-		return nil, err
-	}
-	return codec_bytes, nil
-}
+// func (n *JamState) GetPiBytes() ([]byte, error) {
+// 	// use scale to encode the Rho_state
+// 	//use json marshal to get the bytes
+// 	codec_bytes, err := json.Marshal(n.ValidatorStatistics)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return codec_bytes, nil
+// }
 
-func (j *JamState) GetRhoBytes() ([]byte, error) {
-	// use scale to encode the Rho_state
-	//use json marshal to get the bytes
-	codec_bytes, err := json.Marshal(j.AvailabilityAssignments)
-	if err != nil {
-		return nil, err
-	}
-	return codec_bytes, nil
-}
+// func (j *JamState) GetRhoBytes() ([]byte, error) {
+// 	// use scale to encode the Rho_state
+// 	//use json marshal to get the bytes
+// 	codec_bytes, err := json.Marshal(j.AvailabilityAssignments)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return codec_bytes, nil
+// }

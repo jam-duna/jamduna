@@ -1,6 +1,9 @@
 package common
 
 import (
+	"fmt"
+	"reflect"
+
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
 	//"github.com/ethereum/go-ethereum/common/hexutil"
 	//"encoding/hex"
@@ -79,4 +82,20 @@ func (h *Hash) UnmarshalJSON(data []byte) error {
 	}
 	*h = HexToHash(hexStr)
 	return nil
+}
+
+func PrintHex(h interface{}) {
+	v := reflect.ValueOf(h)
+	if (v.Kind() == reflect.Slice || v.Kind() == reflect.Array) && (v.Type().Elem().Kind() == reflect.Uint8) {
+		fmt.Printf("0x")
+		for i := 0; i < v.Len(); i++ {
+			fmt.Printf("%x", v.Index(i).Interface())
+		}
+		fmt.Printf("\n")
+	} else if v.Kind() == reflect.String {
+		fmt.Printf("%s", v.Interface())
+		fmt.Printf("\n")
+	} else {
+		fmt.Println("Unsupported type")
+	}
 }

@@ -14,17 +14,10 @@ SegmentRoot(e)		: M(s) - root of a constant-depth, left-biased and zero-hash-pad
 
 // EQ(186):Availability Specifier
 type AvailabilitySpecifier struct {
-	WorkPackageHash     common.Hash `json:"work_package_hash"`
-	BundleLength        uint32      `json:"bundle_length"`
-	ErasureRoot         common.Hash `json:"erasure_root"`
-	ExportedSegmentRoot common.Hash `json:"segment_root"`
-}
-
-type CAvailabilitySpecifier struct {
 	WorkPackageHash     common.Hash `json:"hash"`
 	BundleLength        uint32      `json:"len"`
-	ErasureRoot         common.Hash `json:"root"`
-	ExportedSegmentRoot common.Hash `json:"segments"`
+	ErasureRoot         common.Hash `json:"erasure_root"`
+	ExportedSegmentRoot common.Hash `json:"exports_root"`
 }
 
 // sharing (justified) DA chunks:  Vec<Hash> ++ Blob ++ Vec<Hash> ++ Vec<SegmentChunk> ++ Vec<Hash>.

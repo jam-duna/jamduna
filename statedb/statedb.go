@@ -340,6 +340,79 @@ func (s *StateDB) GetJamState() *JamState {
 	return s.JamState
 }
 
+func (s *StateDB) RecoverTrieState() {
+	// Now read C1.....C13 from the trie and put it back into JamState
+	t := s.GetTrie()
+	coreAuthPoolEncode, err := t.GetState(C1)
+	if err != nil {
+		fmt.Printf("Error reading CoreAuthPool from trie: %v\n", err)
+	}
+	authQueueEncode, err := t.GetState(C2)
+	if err != nil {
+		fmt.Printf("Error reading AuthQueue from trie: %v\n", err)
+	}
+	recentBlocksEncode, err := t.GetState(C3)
+	if err != nil {
+		fmt.Printf("Error reading RecentBlocks from trie: %v\n", err)
+	}
+	safroleStateEncode, err := t.GetState(C4)
+	if err != nil {
+		fmt.Printf("Error reading SafroleState from trie: %v\n", err)
+	}
+	disputeStateEncode, err := t.GetState(C5)
+	if err != nil {
+		fmt.Printf("Error reading DisputeState from trie: %v\n", err)
+	}
+	entropyEncode, err := t.GetState(C6)
+	if err != nil {
+		fmt.Printf("Error reading Entropy from trie: %v\n", err)
+	}
+	nextEpochValidatorsEncode, err := t.GetState(C7)
+	if err != nil {
+		fmt.Printf("Error reading NextEpochValidators from trie: %v\n", err)
+	}
+	currEpochValidatorsEncode, err := t.GetState(C8)
+	if err != nil {
+		fmt.Printf("Error reading CurrentEpochValidators from trie: %v\n", err)
+	}
+	priorEpochValidatorEncode, err := t.GetState(C9)
+	if err != nil {
+		fmt.Printf("Error reading PriorEpochValidators from trie: %v\n", err)
+	}
+	mostRecentBlockTimeSlotEncode, err := t.GetState(C10)
+	if err != nil {
+		fmt.Printf("Error reading MostRecentBlockTimeSlot from trie: %v\n", err)
+	}
+	rhoEncode, err := t.GetState(C11)
+	if err != nil {
+		fmt.Printf("Error reading Rho from trie: %v\n", err)
+	}
+	privilegedServiceIndicesEncode, err := t.GetState(C12)
+	if err != nil {
+		fmt.Printf("Error reading PrivilegedServiceIndices from trie: %v\n", err)
+	}
+	piEncode, err := t.GetState(C13)
+	if err != nil {
+		fmt.Printf("Error reading ActiveValidator from trie: %v\n", err)
+	}
+	//Decode(authQueueEncode) -> AuthorizationQueue
+	//set AuthorizationQueue back to JamState
+	d := s.GetJamState()
+	d.SetAuthPool(coreAuthPoolEncode)
+	d.SetAuthQueue(authQueueEncode)
+	d.SetRecentBlocks(recentBlocksEncode)
+	d.SetSafroleState(safroleStateEncode)
+	d.SetPsi(disputeStateEncode)
+	d.SetEntropy(entropyEncode)
+	d.SetNextEpochValidators(nextEpochValidatorsEncode)
+	d.SetCurrEpochValidators(currEpochValidatorsEncode)
+	d.SetPriorEpochValidators(priorEpochValidatorEncode)
+	d.SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotEncode)
+	d.SetRho(rhoEncode)
+	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
+	d.SetPi(piEncode)
+}
+
 func (s *StateDB) UpdateTrieState() common.Hash {
 	//γ ≡⎩γk, γz, γs, γa⎭
 	//γk :one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
@@ -352,46 +425,21 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		panic(222)
 	}
 	sb := sf.GetSafroleBasicState()
-	safroleStateEncode, _ := sb.Bytes()
-	entropyEncode := sf.EntropyToBytes()
-	nextEpochValidatorsEncode := sf.GetValidatorData("Next")
-	currEpochValidatorsEncode := sf.GetValidatorData("Curr")
-	priorEpochValidatorEncode := sf.GetValidatorData("Pre")
-	mostRecentBlockTimeSlotEncode := common.EncodeUint64(uint64(sf.GetTimeSlot()))
+	safroleStateEncode := sb.GetSafroleStateBytes()
+	entropyEncode := sf.GetEntropyBytes()
+	nextEpochValidatorsEncode := sf.GetNextEpochValidatorsBytes()
+	currEpochValidatorsEncode := sf.GetCurrEpochValidatorsBytes()
+	priorEpochValidatorEncode := sf.GetPriorEpochValidatorsBytes()
+	mostRecentBlockTimeSlotEncode := sf.GetMostRecentBlockTimeSlotBytes()
 
 	d := s.GetJamState()
-	disputeState, err := d.GetPsiBytes()
-	if err != nil {
-		fmt.Println("Error serializing psi", err)
-	}
-	rhoEncode, err := d.GetRhoBytes()
-	if err != nil {
-		fmt.Println("Error serializing rho", err)
-	}
-	piEncode, err := d.GetPiBytes()
-	if err != nil {
-		fmt.Println("Error serializing pi", err)
-	}
-
-	coreAuthPoolEncode, err := d.GetAuthQueueBytes()
-	if err != nil {
-		fmt.Println("Error serializing CoreAuthPool", err)
-	}
-
-	authQueueEncode, err := d.GetAuthQueueBytes()
-	if err != nil {
-		fmt.Println("Error serializing AuthQueue", err)
-	}
-
-	privilegedServiceIndicesEncode, err := d.GetPrivilegedServicesIndicesBytes()
-	if err != nil {
-		fmt.Println("Error serializing PrivilegedServicesIndices", err)
-	}
-
-	recentBlocksEncode, err := d.GetRecentBlocksBytes()
-	if err != nil {
-		fmt.Println("Error serializing Recent Blocks", err)
-	}
+	disputeState := d.GetPsiBytes()
+	rhoEncode := d.GetRhoBytes()
+	piEncode := d.GetPiBytes()
+	coreAuthPoolEncode := d.GetAuthPoolBytes()
+	authQueueEncode := d.GetAuthQueueBytes()
+	privilegedServiceIndicesEncode := d.GetPrivilegedServicesIndicesBytes()
+	recentBlocksEncode := d.GetRecentBlocksBytes()
 
 	t := s.GetTrie()
 	fmt.Printf("UpdateTrieState - before root:%v\n", t.GetRoot())

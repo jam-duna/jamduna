@@ -3,7 +3,6 @@ package statedb
 import (
 	"bytes"
 	"crypto/ed25519"
-	"encoding/json"
 	"fmt"
 
 	//"github.com/colorfulnotion/jam/bandersnatch"
@@ -109,16 +108,16 @@ func (j *JamState) NeedsOffendersMarker(d *types.Dispute) bool {
 	return true
 }
 
-func (j *JamState) GetPsiBytes() ([]byte, error) {
-	// use scale to encode the Psi_state
-	//use json marshal to get the bytes
-	scale_bytes, err := json.Marshal(j.DisputesState)
-	if err != nil {
-		return nil, err
-	}
-	return scale_bytes, nil
+// func (j *JamState) GetPsiBytes() ([]byte, error) {
+// 	// use scale to encode the Psi_state
+// 	//use json marshal to get the bytes
+// 	scale_bytes, err := json.Marshal(j.DisputesState)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return scale_bytes, nil
 
-}
+// }
 
 func (j *JamState) GetOffenderMark(input types.Dispute) (types.OffenderMarker, error) {
 	for _, v := range input.Verdict {

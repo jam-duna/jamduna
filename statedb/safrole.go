@@ -87,6 +87,9 @@ type TicketEnvelope struct {
 	RingSignature [types.ExtrinsicSignatureInBytes]byte //ring signature of the envelope data (attempt & extra)
 }
 
+type Entropy []common.Hash
+type Validators []types.Validator
+
 type SafroleState struct {
 	Id             uint32 `json:"Id"`
 	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
@@ -102,13 +105,13 @@ type SafroleState struct {
 	// Entropy[1] accumulator snapshot BEFORE the execution of the first block of epoch N   - randomness used for ticket targeting epoch N+2
 	// Entropy[2] accumulator snapshot BEFORE the execution of the first block of epoch N-1 - randomness used for ticket targeting epoch N+1
 	// Entropy[3] accumulator snapshot BEFORE the execution of the first block of epoch N-2 - randomness used for ticket targeting current epoch N
-	Entropy []common.Hash `json:"entropy"`
+	Entropy Entropy `json:"entropy"`
 
 	// 4 authorities[pre, curr, next, designed]
-	PrevValidators     []types.Validator `json:"prev_validators"`
-	CurrValidators     []types.Validator `json:"curr_validators"`
-	NextValidators     []types.Validator `json:"next_validators"`
-	DesignedValidators []types.Validator `json:"designed_validators"`
+	PrevValidators     Validators `json:"prev_validators"`
+	CurrValidators     Validators `json:"curr_validators"`
+	NextValidators     Validators `json:"next_validators"`
+	DesignedValidators Validators `json:"designed_validators"`
 
 	// Accumulator of tickets, modified with Extrinsics to hold ORDERED array of Tickets
 	NextEpochTicketsAccumulator []types.TicketBody `json:"next_tickets_accumulator"` //gamma_a

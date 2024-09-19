@@ -30,7 +30,7 @@ type WorkReport struct {
 }
 
 type SWorkReport struct {
-	AvailabilitySpec CAvailabilitySpecifier `json:"package_spec"`
+	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
 	RefineContext    RefineContext          `json:"context"`
 	CoreIndex        uint16                 `json:"core_index"`
 	AuthorizerHash   common.Hash            `json:"authorizer_hash"`
@@ -39,7 +39,7 @@ type SWorkReport struct {
 }
 
 type CWorkReport struct {
-	AvailabilitySpec CAvailabilitySpecifier `json:"package_spec"`
+	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
 	RefineContext    RefineContext          `json:"context"`
 	CoreIndex        uint16                 `json:"core_index"`
 	AuthorizerHash   common.Hash            `json:"authorizer_hash"`
