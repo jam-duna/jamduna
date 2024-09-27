@@ -124,12 +124,10 @@ func CheckCustomDecode(data []byte, t reflect.Type) (bool, interface{}, uint32) 
 
 func Encode(data interface{}) []byte {
 	v := reflect.ValueOf(data)
-	if v.Kind() != reflect.Ptr {
-		CheckCustomEncode(data)
-		customEncodeRequired, customEncoded := CheckCustomEncode(data)
-		if customEncodeRequired {
-			return customEncoded
-		}
+	CheckCustomEncode(data)
+	customEncodeRequired, customEncoded := CheckCustomEncode(data)
+	if customEncodeRequired {
+		return customEncoded
 	}
 
 	switch v.Kind() {
@@ -205,11 +203,9 @@ func Encode(data interface{}) []byte {
 func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 	length := uint32(0)
 	v := reflect.New(t).Elem()
-	if t.Kind() != reflect.Ptr {
-		customDecodeRequired, decoded, customLength := CheckCustomDecode(data, t)
-		if customDecodeRequired {
-			return decoded, customLength
-		}
+	customDecodeRequired, decoded, customLength := CheckCustomDecode(data, t)
+	if customDecodeRequired {
+		return decoded, customLength
 	}
 
 	switch v.Kind() {
@@ -237,7 +233,8 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 		v.SetUint(x)
 		length = 8
 	case reflect.String:
-		str_len, length := DecodeE([]byte{data[0]})
+		str_len, len := DecodeE([]byte{data[0]})
+		length += len
 		var T []uint64
 		for i := 0; i < int(str_len); i++ {
 			x, l := DecodeE(data[length:])
@@ -282,7 +279,9 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			elem, l := Decode(data[length:], v.Field(i).Type())
-			v.Field(i).Set(reflect.ValueOf(elem))
+			if elem != nil {
+				v.Field(i).Set(reflect.ValueOf(elem))
+			}
 			length += l
 		}
 

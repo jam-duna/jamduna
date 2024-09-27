@@ -2,9 +2,8 @@ package types
 
 import (
 	"crypto/ed25519"
-	//"encoding/binary"
-	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -27,38 +26,33 @@ func (j Judgement) DeepCopy() (Judgement, error) {
 	var copiedJudgement Judgement
 
 	// Serialize the original Judgement to JSON
-	data, err := json.Marshal(j)
-	if err != nil {
-		return copiedJudgement, err
-	}
+	data := Encode(j)
 
 	// Deserialize the JSON back into a new Judgement instance
-	err = json.Unmarshal(data, &copiedJudgement)
-	if err != nil {
-		return copiedJudgement, err
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(Judgement{}))
+	copiedJudgement = decoded.(Judgement)
 
 	return copiedJudgement, nil
 }
 
-func (j *Judgement) Sign(Ed25519Secret []byte) {
+func (j *Judgement) UnsignedBytesWithSalt() []byte {
 	var signtext []byte
 	if j.Judge {
 		signtext = append([]byte(X_True), j.WorkReport.AvailabilitySpec.WorkPackageHash.Bytes()...)
 	} else {
 		signtext = append([]byte(X_False), j.WorkReport.AvailabilitySpec.WorkPackageHash.Bytes()...)
 	}
+	return signtext
+}
+
+func (j *Judgement) Sign(Ed25519Secret []byte) {
+	signtext := j.UnsignedBytesWithSalt()
 
 	j.Signature = Ed25519Signature(ed25519.Sign(Ed25519Secret, signtext))
 }
 
-func (j *Judgement) ValidateSignature(key Ed25519Key) error {
-	var signtext []byte
-	if j.Judge {
-		signtext = append([]byte(X_True), j.WorkReport.AvailabilitySpec.WorkPackageHash.Bytes()...)
-	} else {
-		signtext = append([]byte(X_False), j.WorkReport.AvailabilitySpec.WorkPackageHash.Bytes()...)
-	}
+func (j *Judgement) Verify(key Ed25519Key) error {
+	signtext := j.UnsignedBytesWithSalt()
 
 	if !ed25519.Verify(key.PublicKey(), signtext, j.Signature.Bytes()) {
 		return fmt.Errorf("invalid signature by validator %v", j.Validator)
@@ -66,23 +60,19 @@ func (j *Judgement) ValidateSignature(key Ed25519Key) error {
 	return nil
 }
 
-func (j *Judgement) Bytes() []byte {
-	enc, err := json.Marshal(j)
-	if err != nil {
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
-	return enc
-}
+// func (j *Judgement) Bytes() []byte {
+// 	enc := Encode(j)
+// 	return enc
+// }
 
-func (j *Judgement) Hash() common.Hash {
-	data := j.Bytes()
-	if data == nil {
-		return common.Hash{}
+// func (j *Judgement) Hash() common.Hash {
+// 	data := j.Bytes()
+// 	if data == nil {
+// 		return common.Hash{}
 
-	}
-	return common.BytesToHash(common.ComputeHash(data))
-}
+// 	}
+// 	return common.Blake2Hash(data)
+// }
 
 type JudgeBucket struct {
 	Judgements      map[common.Hash][]Judgement `json:"judgements"`
@@ -206,4 +196,14 @@ func (J *JudgeBucket) GetWonkeyJudgement(W common.Hash) []Judgement {
 	}
 
 	return judgements[:ValidatorsSuperMajority]
+}
+
+func (j *Judgement) Bytes() []byte {
+	enc := Encode(j)
+	return enc
+}
+
+func (j *Judgement) Hash() common.Hash {
+	data := j.Bytes()
+	return common.Blake2Hash(data)
 }

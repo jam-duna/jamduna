@@ -2,8 +2,8 @@ package types
 
 import (
 	"encoding/json"
-
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -22,8 +22,6 @@ type BlockHeader struct {
 	// H_w
 	// TicketsMark *TicketsMark `json:"tickets_mark,omitempty"`
 	TicketsMark []*TicketBody `json:"tickets_mark,omitempty"`
-	// H_j
-	// VerdictsMarkers *VerdictMarker `json:"verdict_markers"` // renamed from judgement
 	// H_o
 	OffendersMark []Ed25519Key `json:"offenders_mark"`
 	// H_i
@@ -32,6 +30,20 @@ type BlockHeader struct {
 	EntropySource BandersnatchVrfSignature `json:"entropy_source"`
 	// H_s
 	Seal BandersnatchVrfSignature `json:"seal"`
+	// H_j
+	// VerdictsMarkers *VerdictMarker `json:"verdict_markers"` // renamed from judgement
+}
+
+// BlockHeaderWithoutSig represents the BlockHeader without signature fields.
+type BlockHeaderWithoutSig struct {
+	ParentHash     common.Hash  `json:"parent_hash"`
+	PriorStateRoot common.Hash  `json:"prior_state_root"`
+	ExtrinsicHash  common.Hash  `json:"extrinsic_hash"`
+	TimeSlot       uint32       `json:"timeslot"`
+	EpochMark      *EpochMark   `json:"epoch_mark"`
+	TicketsMark    *TicketsMark `json:"tickets_mark"`
+	OffendersMark []Ed25519Key `json:"offenders_mark"`
+	AuthorIndex   uint16       `json:"block_author_key"`
 }
 
 // for codec
@@ -41,24 +53,11 @@ type CBlockHeader struct {
 	ExtrinsicHash   common.Hash              `json:"extrinsic_hash"`
 	Slot            uint32                   `json:"slot"`
 	EpochMark       *EpochMark               `json:"epoch_mark,omitempty"`
-	TicketsMark     *TicketsMark             `json:"tickets_mark,omitempty"`
+	TicketsMark     *TicketsMark             `json:"tickets_mark"`
 	OffendersMark   []Ed25519Key             `json:"offenders_mark"`
 	AuthorIndex     uint16                   `json:"author_index"`
 	EntropySource   BandersnatchVrfSignature `json:"entropy_source"`
 	Seal            BandersnatchVrfSignature `json:"seal"`
-}
-
-type SBlockHeader struct {
-	Parent          common.Hash  `json:"parent"`
-	ParentStateRoot common.Hash  `json:"parent_state_root"`
-	ExtrinsicHash   common.Hash  `json:"extrinsic_hash"`
-	Slot            uint32       `json:"slot"`
-	EpochMark       *EpochMark   `json:"epoch_mark,omitempty"`
-	TicketsMark     *TicketsMark `json:"tickets_mark,omitempty"`
-	OffendersMark   []string     `json:"offenders_mark"`
-	AuthorIndex     uint16       `json:"author_index"`
-	EntropySource   string       `json:"entropy_source"`
-	Seal            string       `json:"seal"`
 }
 
 // NewBlockHeader returns a fresh block header from scratch.
@@ -74,25 +73,34 @@ func (b *BlockHeader) Bytes() ([]byte, error) {
 // UnsignedHash returns the hash of the block in unsigned form.
 func (b *BlockHeader) UnsignedHash() common.Hash {
 	unsignedBytes := b.BytesWithoutSig()
-	return common.BytesToHash(common.ComputeHash(unsignedBytes))
+	return common.Blake2Hash(unsignedBytes)
 }
 
 // Hash returns the hash of the block in unsigned form.
 func (b *BlockHeader) Hash() common.Hash {
 	data := b.BytesWithSig()
-	return common.BytesToHash(common.ComputeHash(data))
+	return common.Blake2Hash(data)
 }
 
 func (b *BlockHeader) BytesWithSig() []byte {
-	enc, err := json.Marshal(b)
-	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
+	cb, _ := b.toCBlockHeader()
+	enc := Encode(cb)
 	return enc
 }
 
+func (b *BlockHeader) Encode() []byte {
+	cb, _ := b.toCBlockHeader()
+	enc := Encode(cb)
+	return enc
+}
+
+func (b *BlockHeader) Decode(data []byte) (interface{}, uint32) {
+	//decode into CBlockHeader and then type cast to BlockHeader
+	decoded, dataLen := Decode(data, reflect.TypeOf(CBlockHeader{}))
+	return &decoded, dataLen
+}
+
+// TODO FOR SEAN: why is ticet mark empty
 // BytesWithoutSig returns the bytes of a block without the signature.
 func (b *BlockHeader) BytesWithoutSig() []byte {
 	// Create an instance of the new struct without the signature fields.
@@ -103,68 +111,190 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 		TimeSlot:       b.Slot,
 		EpochMark:      b.EpochMark,
 		// TicketsMark:    b.TicketsMark,
-
-		// VerdictsMarkers: b.VerdictsMarkers,
 		OffendersMark: b.OffendersMark,
 		AuthorIndex:   b.AuthorIndex,
 	}
 
-	// Marshal the new struct to JSON.
-	enc, err := json.Marshal(bwoSig)
-	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
+	ticketMark, ok, _ := b.ConvertTicketsMark()
+	if ok && ticketMark != nil {
+		bwoSig.TicketsMark = ticketMark
 	}
+
+	// Marshal the new struct to JSON.
+	enc := Encode(bwoSig)
+	fmt.Printf("BytesWithoutSig %x\n", enc)
 	return enc
 }
 
-// BlockHeaderWithoutSig represents the BlockHeader without signature fields.
-type BlockHeaderWithoutSig struct {
-	ParentHash     common.Hash `json:"parent_hash"`
-	PriorStateRoot common.Hash `json:"prior_state_root"`
-	ExtrinsicHash  common.Hash `json:"extrinsic_hash"`
-	TimeSlot       uint32      `json:"timeslot"`
-	EpochMark      *EpochMark  `json:"epoch_mark"`
-	// TicketsMark    *TicketsMark `json:"tickets_mark"`
-	TicketsMark []*TicketBody `json:"tickets_mark"`
-	// VerdictsMarkers *VerdictMarker  `json:"verdict_markers"`
-	OffendersMark []Ed25519Key `json:"offenders_mark"`
-	AuthorIndex   uint16       `json:"block_author_key"`
+func (b *BlockHeader) ConvertTicketsMark() (*TicketsMark, bool, error) {
+
+	var ticketsMark TicketsMark
+	ticketCnt := 0
+
+	// Handle TicketsMark conversion
+	if len(b.TicketsMark) > 0 {
+		if len(b.TicketsMark) > EpochLength {
+			return nil, false, fmt.Errorf("TicketsMark length exceeds EpochLength")
+		}
+
+		if len(b.TicketsMark) != EpochLength {
+			return nil, false, fmt.Errorf("TicketsMark length mismatch")
+		}
+
+		for i := 0; i < len(b.TicketsMark); i++ {
+			//ticketsMark[i] = *b.TicketsMark[i]
+			if b.TicketsMark[i] != nil {
+				ticketCnt++
+				ticketsMark[i] = *b.TicketsMark[i]
+			} else {
+				ticketsMark[i] = TicketBody{}
+			}
+		}
+		if ticketCnt != EpochLength {
+			return nil, false, fmt.Errorf("TicketsMark containing nil ticket")
+		}
+		return &ticketsMark, true, nil
+	}
+	return nil, true, nil
 }
 
-func (s *SBlockHeader) Deserialize() (CBlockHeader, error) {
-	parent := s.Parent
-	parent_state_root := s.ParentStateRoot
-	extrinsic_hash := s.ExtrinsicHash
-	slot := s.Slot
-	epoch_mark := s.EpochMark
-	tickets_mark := s.TicketsMark
-
-	offenders_mark := make([]Ed25519Key, len(s.OffendersMark))
-	for i, v := range s.OffendersMark {
-		offenders_mark[i] = Ed25519Key(common.FromHex(v))
+// type casting BlockHeader -> CBlockHeader
+func (b *BlockHeader) toCBlockHeader() (*CBlockHeader, error) {
+	cbh := &CBlockHeader{
+		Parent:          b.Parent,
+		ParentStateRoot: b.ParentStateRoot,
+		ExtrinsicHash:   b.ExtrinsicHash,
+		Slot:            b.Slot,
+		EpochMark:       b.EpochMark,
+		//TicketsMark:     nil,
+		OffendersMark: b.OffendersMark,
+		AuthorIndex:   b.AuthorIndex,
+		EntropySource: b.EntropySource,
+		Seal:          b.Seal,
 	}
 
-	author_index := s.AuthorIndex
-	entropy_source_byte := common.FromHex(s.EntropySource)
-	var entropy_source BandersnatchVrfSignature
-	copy(entropy_source[:], entropy_source_byte)
+	ticketMark, ok, _ := b.ConvertTicketsMark()
+	if ok && ticketMark != nil {
+		cbh.TicketsMark = ticketMark
+	}
+	return cbh, nil
+}
 
-	seal_byte := common.FromHex(s.Seal)
+// type casting CBlockHeader -> BlockHeader
+func (b *BlockHeader) fromCBlockHeader(cbh *CBlockHeader) {
+	b.Parent = cbh.Parent
+	b.ParentStateRoot = cbh.ParentStateRoot
+	b.ExtrinsicHash = cbh.ExtrinsicHash
+	b.Slot = cbh.Slot
+	b.EpochMark = cbh.EpochMark
+	b.OffendersMark = cbh.OffendersMark
+	b.AuthorIndex = cbh.AuthorIndex
+	b.EntropySource = cbh.EntropySource
+	b.Seal = cbh.Seal
+
+	// Handle TicketsMark conversion
+	if cbh.TicketsMark != nil {
+		ticketsMark := make([]*TicketBody, 0, EpochLength)
+		for i := 0; i < len(cbh.TicketsMark); i++ {
+			// Create a copy of the TicketBody
+			ticket := cbh.TicketsMark[i]
+			ticketsMark = append(ticketsMark, &ticket)
+		}
+		b.TicketsMark = ticketsMark
+	} else {
+		b.TicketsMark = nil
+	}
+}
+
+func (b *BlockHeader) MarshalJSON() ([]byte, error) {
+	cbh, err := b.toCBlockHeader()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(cbh)
+}
+
+func (b *BlockHeader) UnmarshalJSON(data []byte) error {
+	var cbh CBlockHeader
+	if err := json.Unmarshal(data, &cbh); err != nil {
+		return err
+	}
+	b.fromCBlockHeader(&cbh)
+	return nil
+}
+
+func (a *CBlockHeader) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Parent          common.Hash  `json:"parent"`
+		ParentStateRoot common.Hash  `json:"parent_state_root"`
+		ExtrinsicHash   common.Hash  `json:"extrinsic_hash"`
+		Slot            uint32       `json:"slot"`
+		EpochMark       *EpochMark   `json:"epoch_mark"`
+		TicketsMark     *TicketsMark `json:"tickets_mark"`
+		OffenderMarker  []string     `json:"offenders_mark"`
+		AuthorIndex     uint16       `json:"author_index"`
+		EntropySource   string       `json:"entropy_source"`
+		Seal            string       `json:"seal"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+
+	a.Parent = s.Parent
+	a.ParentStateRoot = s.ParentStateRoot
+	a.ExtrinsicHash = s.ExtrinsicHash
+	a.Slot = s.Slot
+	a.EpochMark = s.EpochMark
+	a.TicketsMark = s.TicketsMark
+
+	offendersMark := make([]Ed25519Key, len(s.OffenderMarker))
+	for i, v := range s.OffenderMarker {
+		offendersMark[i] = Ed25519Key(common.FromHex(v))
+	}
+	a.OffendersMark = offendersMark
+
+	a.AuthorIndex = s.AuthorIndex
+
+	entropySourceByte := common.FromHex(s.EntropySource)
+	var entropySource BandersnatchVrfSignature
+	copy(entropySource[:], entropySourceByte)
+	a.EntropySource = entropySource
+
+	sealByte := common.FromHex(s.Seal)
 	var seal BandersnatchVrfSignature
-	copy(seal[:], seal_byte)
+	copy(seal[:], sealByte)
+	a.Seal = seal
 
-	return CBlockHeader{
-		Parent:          parent,
-		ParentStateRoot: parent_state_root,
-		ExtrinsicHash:   extrinsic_hash,
-		Slot:            slot,
-		EpochMark:       epoch_mark,
-		TicketsMark:     tickets_mark,
-		OffendersMark:   offenders_mark,
-		AuthorIndex:     author_index,
-		EntropySource:   entropy_source,
-		Seal:            seal,
-	}, nil
+	return nil
+}
+
+func (a CBlockHeader) MarshalJSON() ([]byte, error) {
+	offendersMark := []string{}
+	for _, v := range a.OffendersMark {
+		offendersMark = append(offendersMark, common.HexString(v[:]))
+	}
+
+	return json.Marshal(&struct {
+		Parent          common.Hash  `json:"parent"`
+		ParentStateRoot common.Hash  `json:"parent_state_root"`
+		ExtrinsicHash   common.Hash  `json:"extrinsic_hash"`
+		Slot            uint32       `json:"slot"`
+		EpochMark       *EpochMark   `json:"epoch_mark"`
+		TicketsMark     *TicketsMark `json:"tickets_mark"`
+		OffenderMarker  []string     `json:"offenders_mark"`
+		AuthorIndex     uint16       `json:"author_index"`
+		EntropySource   string       `json:"entropy_source"`
+		Seal            string       `json:"seal"`
+	}{
+		Parent:          a.Parent,
+		ParentStateRoot: a.ParentStateRoot,
+		ExtrinsicHash:   a.ExtrinsicHash,
+		Slot:            a.Slot,
+		EpochMark:       a.EpochMark,
+		TicketsMark:     a.TicketsMark,
+		OffenderMarker:  offendersMark,
+		AuthorIndex:     a.AuthorIndex,
+		EntropySource:   common.HexString(a.EntropySource[:]),
+		Seal:            common.HexString(a.Seal[:]),
+	})
 }

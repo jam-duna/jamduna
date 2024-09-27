@@ -1,9 +1,9 @@
 package types
 
 import (
-	"fmt"
-	// "github.com/colorfulnotion/jam/scale"
 	"encoding/json"
+	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -14,13 +14,8 @@ type Block struct {
 }
 
 type CBlock struct {
-	Header    CBlockHeader   `json:"header"`
-	Extrinsic CExtrinsicData `json:"extrinsic"`
-}
-
-type SBlock struct {
-	Header    SBlockHeader   `json:"header"`
-	Extrinsic SExtrinsicData `json:"extrinsic"`
+	Header    CBlockHeader  `json:"header"`
+	Extrinsic ExtrinsicData `json:"extrinsic"`
 }
 
 func NewBlock() *Block {
@@ -89,21 +84,18 @@ func (b *Block) EpochMark() *EpochMark {
 
 func BlockFromBytes(data []byte) (*Block, error) {
 	var b Block
-	err := json.Unmarshal(data, &b)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling JSON: %v", err)
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(Block{}))
+	b = decoded.(Block)
 	return &b, nil
 }
 
 // Bytes returns the bytes of the block.
 func (b *Block) Bytes() []byte {
-	enc, err := json.Marshal(b)
+	cb, err := b.toCBlock()
 	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
 		return nil
 	}
+	enc := Encode(cb)
 	return enc
 }
 
@@ -114,7 +106,7 @@ func (b *Block) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.BytesToHash(common.ComputeHash(blockBytes))
+	return common.Blake2Hash(blockBytes)
 }
 
 // Hash returns the hash of the block.
@@ -156,18 +148,53 @@ func (b *Block) Disputes() Dispute {
 	return extrinsicData.Disputes
 }
 
-func (s *SBlock) Deserialize() (CBlock, error) {
-	header, err := s.Header.Deserialize()
-	if err != nil {
-		return CBlock{}, err
-	}
-	extrinsic, err := s.Extrinsic.Deserialize()
-	if err != nil {
-		return CBlock{}, err
+// type casting CBlock -> Block
+func (b *Block) fromCBlock(cb *CBlock) {
+	if cb == nil {
+		return
 	}
 
-	return CBlock{
-		Header:    header,
-		Extrinsic: extrinsic,
-	}, nil
+	// Convert CBlockHeader to BlockHeader
+	b.Header.fromCBlockHeader(&cb.Header)
+
+	// Copy the Extrinsic field directly
+	b.Extrinsic = cb.Extrinsic
+}
+
+// type casting Block -> CBlock
+func (b *Block) toCBlock() (*CBlock, error) {
+	// Convert BlockHeader to CBlockHeader
+	cbh, err := b.Header.toCBlockHeader()
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the CBlock
+	cb := &CBlock{
+		Header:    *cbh,
+		Extrinsic: b.Extrinsic,
+	}
+
+	return cb, nil
+}
+
+func (b *Block) MarshalJSON() ([]byte, error) {
+	// Convert Block to CBlock
+	cb, err := b.toCBlock()
+	if err != nil {
+		return nil, err
+	}
+	// Marshal CBlock to JSON
+	return json.Marshal(cb)
+}
+
+func (b *Block) UnmarshalJSON(data []byte) error {
+	// Unmarshal data into a CBlock
+	var cb CBlock
+	if err := json.Unmarshal(data, &cb); err != nil {
+		return err
+	}
+	// Convert CBlock to Block
+	b.fromCBlock(&cb)
+	return nil
 }

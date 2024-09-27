@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -23,11 +24,6 @@ type PreimageLookup struct {
 type Preimages struct {
 	Requester uint32 `json:"requester"`
 	Blob      []byte `json:"blob"`
-}
-
-type SPreimages struct {
-	Requester uint32 `json:"requester"`
-	Blob      string `json:"blob"`
 }
 
 func (p *Preimages) BlobHash() common.Hash {
@@ -108,28 +104,18 @@ func (p Preimages) DeepCopy() (Preimages, error) {
 	var copiedPreimageLookup Preimages
 
 	// Serialize the original PreimageLookup to JSON
-	data, err := json.Marshal(p)
-	if err != nil {
-		return copiedPreimageLookup, err
-	}
+	data := Encode(p)
 
 	// Deserialize the JSON back into a new PreimageLookup instance
-	err = json.Unmarshal(data, &copiedPreimageLookup)
-	if err != nil {
-		return copiedPreimageLookup, err
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(Preimages{}))
+	copiedPreimageLookup = decoded.(Preimages)
 
 	return copiedPreimageLookup, nil
 }
 
 // Bytes returns the bytes of the PreimageLookup.
 func (p *Preimages) Bytes() []byte {
-	enc, err := json.Marshal(p)
-	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
+	enc := Encode(p)
 	return enc
 }
 
@@ -139,13 +125,33 @@ func (p *Preimages) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.BytesToHash(common.ComputeHash(data))
+	return common.Blake2Hash(data)
 }
 
-func (s *SPreimages) Deserialize() (Preimages, error) {
-	blob := common.FromHex(s.Blob)
-	return Preimages{
-		Requester: s.Requester,
-		Blob:      blob,
-	}, nil
+func (a *Preimages) UnmarshalJSON(data []byte) error {
+	type Alias Preimages
+	aux := &struct {
+		*Alias
+		Blob string `json:"blob"`
+	}{
+		Alias: (*Alias)(a),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	blobBytes := common.FromHex(aux.Blob)
+	a.Blob = blobBytes
+	return nil
+}
+
+func (a Preimages) MarshalJSON() ([]byte, error) {
+	type Alias Preimages
+	blob := common.HexString(a.Blob)
+	return json.Marshal(&struct {
+		*Alias
+		Blob string `json:"blob"`
+	}{
+		Alias: (*Alias)(&a),
+		Blob: blob,
+	})
 }

@@ -2,7 +2,9 @@ package types
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -25,11 +27,9 @@ type Guarantee struct {
 	Signatures []GuaranteeCredential `json:"signatures"`
 }
 
-// for codec
-type CGuarantee struct {
-	Report     CWorkReport           `json:"report"`
-	Slot       uint32                `json:"slot"`
-	Signatures []GuaranteeCredential `json:"signatures"`
+type GuaranteeReport struct {
+	Report              WorkReport          `json:"report"`
+	GuaranteeCredential GuaranteeCredential `json:"guarantee_credential"`
 }
 
 /*
@@ -47,8 +47,35 @@ type GuaranteeCredential struct {
 	Signature      Ed25519Signature `json:"signature"`
 }
 
-func (g Guarantee) DeepCopy() (Guarantee, error) {
-	var copiedGuarantee Guarantee
+func (g *GuaranteeReport) Sign(secret []byte) error {
+	signtext := g.UnsignedBytesWithSalt()
+	if len(secret) != 64 {
+		return fmt.Errorf("secret length is not 64")
+	}
+	sig := Ed25519SignByBytes(secret, signtext)
+	g.GuaranteeCredential.Signature = sig
+	return nil
+}
+
+func (g *GuaranteeReport) UnsignedBytes() []byte {
+	signtext := g.Report.Hash().Bytes()
+	return signtext
+}
+
+func (g *GuaranteeReport) UnsignedBytesWithSalt() []byte {
+	signtext := g.UnsignedBytes()
+	signtext = append([]byte(X_G), signtext...)
+	return signtext
+}
+
+func (g *GuaranteeReport) Verify(key Ed25519Key) bool {
+	signtext := g.UnsignedBytesWithSalt()
+	boo := Ed25519Verify(key, signtext, g.GuaranteeCredential.Signature)
+	return boo
+}
+
+func (g *GuaranteeReport) DeepCopy() (GuaranteeReport, error) {
+	var copiedGuarantee GuaranteeReport
 
 	// Serialize the original Guarantee to JSON
 	data, err := json.Marshal(g)
@@ -65,14 +92,36 @@ func (g Guarantee) DeepCopy() (Guarantee, error) {
 	return copiedGuarantee, nil
 }
 
+func (g *GuaranteeReport) Bytes() []byte {
+	enc := Encode(g)
+	return enc
+}
+
+func BytesToGuaranteeReport(data []byte) (GuaranteeReport, error) {
+	var copiedGuarantee GuaranteeReport
+	err := json.Unmarshal(data, &copiedGuarantee)
+	if err != nil {
+		return copiedGuarantee, err
+	}
+	return copiedGuarantee, nil
+}
+
+func (g Guarantee) DeepCopy() (Guarantee, error) {
+	var copiedGuarantee Guarantee
+
+	// Serialize the original Guarantee to JSON
+	data := Encode(g)
+
+	// Deserialize the JSON back into a new Guarantee instance
+	decoded, _ := Decode(data, reflect.TypeOf(Guarantee{}))
+	copiedGuarantee = decoded.(Guarantee)
+
+	return copiedGuarantee, nil
+}
+
 // Bytes returns the bytes of the Guarantee.
 func (g *Guarantee) Bytes() []byte {
-	enc, err := json.Marshal(g)
-	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
+	enc := Encode(g)
 	return enc
 }
 
@@ -82,49 +131,73 @@ func (g *Guarantee) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.BytesToHash(common.ComputeHash(data))
+	return common.Blake2Hash(data)
 }
 
-func (g *Guarantee) ValidateSignatures() error {
+func (g *GuaranteeCredential) UnmarshalJSON(data []byte) error {
+	type Alias GuaranteeCredential
+	aux := &struct {
+		*Alias
+		Signature string `json:"signature"`
+	}{
+		Alias: (*Alias)(g),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	sigBytes := common.FromHex(aux.Signature)
+	copy(g.Signature[:], sigBytes)
 	return nil
 }
 
-type SGuarantee struct {
-	Report     SWorkReport            `json:"report"`
-	Slot       uint32                 `json:"slot"`
-	Signatures []SGuaranteeCredential `json:"signatures"`
+func (g *Guarantee) UnsignedBytes() []byte {
+	signtext := g.Report.Hash().Bytes()
+	return signtext
 }
 
-type SGuaranteeCredential struct {
-	ValidatorIndex uint16 `json:"validator_index"`
-	Signature      string `json:"signature"`
+func (g *Guarantee) UnsignedBytesWithSalt() []byte {
+	signtext := g.UnsignedBytes()
+	signtext = append([]byte(X_G), signtext...)
+	return signtext
 }
 
-func (s *SGuarantee) Deserialize() (CGuarantee, error) {
-	report, err := s.Report.Deserialize()
-	if err != nil {
-		return CGuarantee{}, err
+func (g *Guarantee) Verify(CurrV []Validator) error {
+	signtext := g.UnsignedBytesWithSalt()
+
+	for _, i := range g.Signatures {
+		//verify the signature
+		// [i.ValidatorIndex].Ed25519
+		fmt.Println("Process Verify EG")
+		fmt.Printf("Validator Index: %v, Validator Key: %v\n", i.ValidatorIndex, CurrV[i.ValidatorIndex].Ed25519)
+		if !Ed25519Verify(Ed25519Key(CurrV[i.ValidatorIndex].Ed25519), signtext, i.Signature) {
+			return errors.New(fmt.Sprintf("invalid signature in guarantee by validator %v", i.ValidatorIndex))
+		}
+
 	}
-
-	signatures := make([]GuaranteeCredential, len(s.Signatures))
-	for i, signature := range s.Signatures {
-		signatures[i] = signature.Deserialize()
-	}
-
-	return CGuarantee{
-		Report:     report,
-		Slot:       s.Slot,
-		Signatures: signatures,
-	}, nil
+	return nil
 }
 
-func (s *SGuaranteeCredential) Deserialize() GuaranteeCredential {
-	signatureBytes := common.FromHex(s.Signature)
-	var signature Ed25519Signature
-	copy(signature[:], signatureBytes)
+func (g GuaranteeCredential) MarshalJSON() ([]byte, error) {
+	type Alias GuaranteeCredential
+	sig := common.HexString(g.Signature[:])
+	return json.Marshal(&struct {
+		*Alias
+		Signature string `json:"signature"`
+	}{
+		Alias:     (*Alias)(&g),
+		Signature: sig,
+	})
+}
 
-	return GuaranteeCredential{
-		ValidatorIndex: s.ValidatorIndex,
-		Signature:      signature,
+// helper function to print the Guarantee
+func (g *Guarantee) Print() {
+	fmt.Println("Guarantee:")
+	fmt.Println("= Report:")
+	g.Report.Print()
+	fmt.Println("= Slot:", g.Slot)
+	fmt.Println("= Signatures:")
+	for _, signature := range g.Signatures {
+		fmt.Printf("== ValidatorIndex: %d\n", signature.ValidatorIndex)
+		fmt.Printf("== Signature: %x\n", signature.Signature)
 	}
 }

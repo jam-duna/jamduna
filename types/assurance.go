@@ -4,7 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -34,13 +34,14 @@ type Assurance struct {
 	Signature      Ed25519Signature           `json:"signature"`
 }
 
-type SAssurance struct {
-	// H_p - see Eq 124
-	Anchor common.Hash `json:"anchor"`
-	// f - 1 means "available"
-	Bitfield       string `json:"bitfield"`
-	ValidatorIndex uint16 `json:"validator_index"`
-	Signature      string `json:"signature"`
+func (a *Assurance) Bytes() []byte {
+	enc := Encode(a)
+	return enc
+}
+
+func (a *Assurance) Hash() common.Hash {
+	data := a.Bytes()
+	return common.Blake2Hash(data)
 }
 
 func (A *Assurance) BitFieldToBytes() []byte {
@@ -59,22 +60,30 @@ func (A *Assurance) GetBitFied_Bit(index uint16) bool {
 	return (A.Bitfield[0] & (1 << index)) != 0
 }
 
+func (a *Assurance) UnsignedBytes() []byte {
+	signtext := common.ComputeHash(append(a.Anchor.Bytes(), a.Bitfield[0])) // this bitfield is a byte, TODO: check if this is correct
+	return signtext
+}
+
 // computeAssuranceBytes abstracts the process of generating the bytes to be signed or verified.
-func (a *Assurance) computeAssuranceBytes() []byte {
-	h := common.ComputeHash(append(a.Anchor.Bytes(), a.Bitfield[0]))
-	return append([]byte(X_A), h...)
+func (a *Assurance) UnsignedBytesWithSalt() []byte {
+	signtext := a.UnsignedBytes()
+	return append([]byte(X_A), signtext...)
 }
 
 func (a *Assurance) Sign(Ed25519Secret []byte) {
-	assuranceBytes := a.computeAssuranceBytes()
+	assuranceBytes := a.UnsignedBytesWithSalt()
 	sig := ed25519.Sign(Ed25519Secret, assuranceBytes)
 	copy(a.Signature[:], sig)
 }
 
-func (a *Assurance) ValidateSignature(publicKey []byte) error {
-	assuranceBytes := a.computeAssuranceBytes()
-
-	if !ed25519.Verify(publicKey, assuranceBytes, a.Signature[:]) {
+func (a *Assurance) Verify(parent common.Hash, validator Validator) error {
+	if len(a.Signature) == 0 {
+		return errors.New("signature is empty")
+	}
+	signtext := a.UnsignedBytesWithSalt()
+	//verify the signature
+	if !Ed25519Verify(Ed25519Key(validator.Ed25519), signtext, a.Signature) {
 		return errors.New("invalid signature")
 	}
 	return nil
@@ -84,41 +93,49 @@ func (a Assurance) DeepCopy() (Assurance, error) {
 	var copiedAssurance Assurance
 
 	// Serialize the original Assurance to JSON
-	data, err := json.Marshal(a)
-	if err != nil {
-		return copiedAssurance, err
-	}
+	data := Encode(a)
 
 	// Deserialize the JSON back into a new Assurance instance
-	err = json.Unmarshal(data, &copiedAssurance)
-	if err != nil {
-		return copiedAssurance, err
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(Assurance{}))
+	copiedAssurance = decoded.(Assurance)
 
 	return copiedAssurance, nil
 }
 
 // Bytes returns the bytes of the Assurance
-func (a *Assurance) Bytes() []byte {
-	enc, err := json.Marshal(a)
+// func (a *Assurance) Bytes() []byte {
+// 	enc := Encode(a)
+// 	return enc
+// }
+
+// func (a *Assurance) Hash() common.Hash {
+// 	data := a.Bytes()
+// 	if data == nil {
+// 		// Handle the error case
+// 		return common.Hash{}
+// 	}
+// 	return common.Blake2Hash(data)
+// }
+
+// Create a object for save the availibility
+
+type IsPackageRecieved struct {
+	WorkReportBundle bool
+	ExportedSegments bool
+}
+
+func (a *Assurance) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Anchor         common.Hash `json:"anchor"`
+		Bitfield       string      `json:"bitfield"`
+		ValidatorIndex uint16      `json:"validator_index"`
+		Signature      string      `json:"signature"`
+	}
+	err := json.Unmarshal(data, &s)
 	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
+		return err
 	}
-	return enc
-}
 
-func (a *Assurance) Hash() common.Hash {
-	data := a.Bytes()
-	if data == nil {
-		// Handle the error case
-		return common.Hash{}
-	}
-	return common.BytesToHash(common.ComputeHash(data))
-}
-
-func (s *SAssurance) Deserialize() (Assurance, error) {
 	// Convert Bitstring from hex string to []byte
 	bitfieldBytes := common.FromHex(s.Bitfield)
 	// Convert Signature from hex string to Ed25519Signature
@@ -126,21 +143,37 @@ func (s *SAssurance) Deserialize() (Assurance, error) {
 	var bitfield [avail_bitfield_bytes]byte
 	copy(bitfield[:], bitfieldBytes)
 
-	var signature [64]byte
+	var signature Ed25519Signature
 	copy(signature[:], signatureBytes)
 
 	// Return the converted Assurance struct
-	return Assurance{
-		Anchor:         s.Anchor,
-		Bitfield:       bitfield,
-		ValidatorIndex: s.ValidatorIndex,
-		Signature:      signature,
-	}, nil
+	a.Anchor = s.Anchor
+	a.Bitfield = bitfield
+	a.ValidatorIndex = s.ValidatorIndex
+	a.Signature = signature
+
+	return nil
 }
 
-// Create a object for save the availibility
+func (a *Assurance) MarshalJSON() ([]byte, error) {
+	// Convert Bitfield from []byte to hex string
+	bitfield := common.HexString(a.Bitfield[:])
+	// Convert Signature from Ed25519Signature to hex string
+	signature := common.HexString(a.Signature[:])
 
-type IsPackageRecieved struct {
-	WorkReportBundle bool
-	ExportedSegments bool
+	// Create a struct to hold the converted Assurance struct
+	s := struct {
+		Anchor         common.Hash `json:"anchor"`
+		Bitfield       string      `json:"bitfield"`
+		ValidatorIndex uint16      `json:"validator_index"`
+		Signature      string      `json:"signature"`
+	}{
+		Anchor:         a.Anchor,
+		Bitfield:       bitfield,
+		ValidatorIndex: a.ValidatorIndex,
+		Signature:      signature,
+	}
+
+	// Marshal the struct to JSON
+	return json.Marshal(&s)
 }

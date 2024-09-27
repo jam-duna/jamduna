@@ -1,9 +1,9 @@
 package types
 
 import (
-	//	"fmt"
+	"encoding/json"
+
 	"github.com/colorfulnotion/jam/common"
-	//"encoding/hex"
 )
 
 /*
@@ -17,6 +17,9 @@ A work item includes: (See Equation 175)
   - ${\bf x}$, a sequence of hashes of data segments to be introduced in this block (and which we assume the validator knows);
   - $e$, the number of data segments exported by this work item
 */
+
+type ExtrinsicsBlobs [][]byte
+
 // WorkItem represents a work item.
 type WorkItem struct {
 	// s: the identifier of the service to which it relates
@@ -25,12 +28,12 @@ type WorkItem struct {
 	CodeHash common.Hash `json:"code_hash"`
 	// y: a payload blob
 	Payload []byte `json:"payload"`
-	// x: extrinsic
-	Extrinsics      []WorkItemExtrinsic `json:"extrinsic"`
-	ExtrinsicsBlobs [][]byte            `json:"extrinsics"`
 	// g: a gas limit
 	GasLimit         uint64          `json:"gas_limit"`
 	ImportedSegments []ImportSegment `json:"import_segments"`
+	// x: extrinsic
+	Extrinsics      []WorkItemExtrinsic `json:"extrinsic"`
+	ExtrinsicsBlobs ExtrinsicsBlobs     `json:"extrinsics"`
 	// x: extrinsic
 	ExportCount uint16 `json:"export_count"`
 }
@@ -56,42 +59,54 @@ type ASWorkItem struct {
 	Extrinsics []WorkItemExtrinsic `json:"extrinsic"`
 }
 
-// for codec
-type CWorkItem struct {
-	Service          uint32              `json:"service"`
-	CodeHash         common.Hash         `json:"code_hash"`
-	Payload          []byte              `json:"payload"`
-	GasLimit         uint64              `json:"gas_limit"`
-	ImportedSegments []ImportSegment     `json:"import_segments"`
-	Extrinsics       []WorkItemExtrinsic `json:"extrinsic"`
-	ExportCount      uint16              `json:"export_count"`
+func (E ExtrinsicsBlobs) Encode() []byte {
+	return []byte{}
 }
 
-type SWorkItem struct {
-	Service          uint32              `json:"service"`
-	CodeHash         common.Hash         `json:"code_hash"`
-	Payload          string              `json:"payload"`
-	GasLimit         uint64              `json:"gas_limit"`
-	ImportedSegments []ImportSegment     `json:"import_segments"`
-	Extrinsics       []WorkItemExtrinsic `json:"extrinsic"`
-	ExportCount      uint16              `json:"export_count"`
+func (E ExtrinsicsBlobs) Decode(data []byte) (interface{}, uint32) {
+	return nil, 0
 }
 
-func (s *SWorkItem) Deserialize() (CWorkItem, error) {
-	payload := common.FromHex(s.Payload)
-	imported_segments := make([]ImportSegment, len(s.ImportedSegments))
-	copy(imported_segments, s.ImportedSegments)
-	extrinsics := make([]WorkItemExtrinsic, len(s.Extrinsics))
-	copy(extrinsics, s.Extrinsics)
-	export_count := s.ExportCount
+func (a *WorkItem) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Service          uint32              `json:"service"`
+		CodeHash         common.Hash         `json:"code_hash"`
+		Payload          string              `json:"payload"`
+		GasLimit         uint64              `json:"gas_limit"`
+		ImportedSegments []ImportSegment     `json:"import_segments"`
+		Extrinsics       []WorkItemExtrinsic `json:"extrinsic"`
+		ExportCount      uint16              `json:"export_count"`
+	}
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return err
+	}
+	a.Service = s.Service
+	a.CodeHash = s.CodeHash
+	a.Payload = common.FromHex(s.Payload)
+	a.GasLimit = s.GasLimit
+	a.ImportedSegments = s.ImportedSegments
+	a.Extrinsics = s.Extrinsics
+	a.ExportCount = s.ExportCount
+	return nil
+}
 
-	return CWorkItem{
-		Service:          s.Service,
-		CodeHash:         s.CodeHash,
-		Payload:          payload,
-		GasLimit:         s.GasLimit,
-		ImportedSegments: imported_segments,
-		Extrinsics:       extrinsics,
-		ExportCount:      export_count,
-	}, nil
+func (a *WorkItem) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Service          uint32              `json:"service"`
+		CodeHash         common.Hash         `json:"code_hash"`
+		Payload          string              `json:"payload"`
+		GasLimit         uint64              `json:"gas_limit"`
+		ImportedSegments []ImportSegment     `json:"import_segments"`
+		Extrinsics       []WorkItemExtrinsic `json:"extrinsic"`
+		ExportCount      uint16              `json:"export_count"`
+	}{
+		Service:          a.Service,
+		CodeHash:         a.CodeHash,
+		Payload: common.HexString(a.Payload),
+		GasLimit:         a.GasLimit,
+		ImportedSegments: a.ImportedSegments,
+		Extrinsics:       a.Extrinsics,
+		ExportCount:      a.ExportCount,
+	})
 }

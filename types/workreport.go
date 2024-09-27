@@ -29,24 +29,6 @@ type WorkReport struct {
 	Results          []WorkResult          `json:"results"`
 }
 
-type SWorkReport struct {
-	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
-	RefineContext    RefineContext          `json:"context"`
-	CoreIndex        uint16                 `json:"core_index"`
-	AuthorizerHash   common.Hash            `json:"authorizer_hash"`
-	AuthOutput       string                 `json:"auth_output"`
-	Results          []SWorkResult          `json:"results"`
-}
-
-type CWorkReport struct {
-	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
-	RefineContext    RefineContext          `json:"context"`
-	CoreIndex        uint16                 `json:"core_index"`
-	AuthorizerHash   common.Hash            `json:"authorizer_hash"`
-	AuthOutput       []byte                 `json:"auth_output"`
-	Results          []WorkResult           `json:"results"`
-}
-
 // eq 190
 type WorkReportNeedAudit struct {
 	Q [TotalCores]WorkReport `json:"available_work_report"`
@@ -77,18 +59,12 @@ func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error
 	if !ed25519.Verify(publicKey, workReportBytes, signature) {
 		return errors.New("invalid signature")
 	}
-
 	return nil
 }
 
 // Bytes returns the bytes of the Assurance
 func (a *WorkReport) Bytes() []byte {
-	enc, err := json.Marshal(a)
-	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
+	enc := Encode(a)
 	return enc
 }
 
@@ -98,26 +74,97 @@ func (a *WorkReport) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.BytesToHash(common.ComputeHash(data))
+	return common.Blake2Hash(data)
 }
 
-func (s *SWorkReport) Deserialize() (CWorkReport, error) {
-	package_spec := s.AvailabilitySpec
-	context := s.RefineContext
-	core_index := s.CoreIndex
-	authorizer_hash := s.AuthorizerHash
-	auth_output := common.FromHex(s.AuthOutput)
-	results := make([]WorkResult, len(s.Results))
-	for i, result := range s.Results {
-		results[i] = result.Deserialize()
+func (a *WorkReport) UnmarshalJSON(data []byte) error {
+	var s struct {
+		AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
+		RefineContext    RefineContext         `json:"context"`
+		CoreIndex        uint16                `json:"core_index"`
+		AuthorizerHash   common.Hash           `json:"authorizer_hash"`
+		AuthOutput       string                `json:"auth_output"`
+		Results          []WorkResult          `json:"results"`
 	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	a.AvailabilitySpec = s.AvailabilitySpec
+	a.RefineContext = s.RefineContext
+	a.CoreIndex = s.CoreIndex
+	a.AuthorizerHash = s.AuthorizerHash
+	a.AuthOutput = common.FromHex(s.AuthOutput)
+	a.Results = s.Results
+	return nil
+}
 
-	return CWorkReport{
-		AvailabilitySpec: package_spec,
-		RefineContext:    context,
-		CoreIndex:        core_index,
-		AuthorizerHash:   authorizer_hash,
-		AuthOutput:       auth_output,
-		Results:          results,
-	}, nil
+func (a WorkReport) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
+		RefineContext    RefineContext         `json:"context"`
+		CoreIndex        uint16                `json:"core_index"`
+		AuthorizerHash   common.Hash           `json:"authorizer_hash"`
+		AuthOutput       string                `json:"auth_output"`
+		Results          []WorkResult          `json:"results"`
+	}{
+		AvailabilitySpec: a.AvailabilitySpec,
+		RefineContext:    a.RefineContext,
+		CoreIndex:        a.CoreIndex,
+		AuthorizerHash:   a.AuthorizerHash,
+		AuthOutput:       common.HexString(a.AuthOutput),
+		Results:          a.Results,
+	})
+}
+
+// helper function to print the WorkReport
+func (a *WorkReport) Print() {
+	// type WorkReport struct {
+	// 	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
+	// 	RefineContext    RefineContext         `json:"context"`
+	// 	CoreIndex        uint16                `json:"core_index"`
+	// 	AuthorizerHash   common.Hash           `json:"authorizer_hash"`
+	// 	AuthOutput       []byte                `json:"auth_output"`
+	// 	Results          []WorkResult          `json:"results"`
+	// }
+
+	fmt.Println("WorkReport:")
+	fmt.Println("= AvailabilitySpec:")
+	fmt.Println("== WorkPackageHash:", a.AvailabilitySpec.WorkPackageHash)
+	fmt.Println("== BundleLength:", a.AvailabilitySpec.BundleLength)
+	fmt.Println("== ErasureRoot:", a.AvailabilitySpec.ErasureRoot)
+	fmt.Println("== ExportedSegmentRoot:", a.AvailabilitySpec.ExportedSegmentRoot)
+	fmt.Println("= RefineContext:")
+	// Anchor           common.Hash   `json:"anchor"`
+	// StateRoot        common.Hash   `json:"state_root"`
+	// BeefyRoot        common.Hash   `json:"beefy_root"`
+	// LookupAnchor     common.Hash   `json:"lookup_anchor"`
+	// LookupAnchorSlot uint32        `json:"lookup_anchor_slot"`
+	// Prerequisite     *Prerequisite `json:"prerequisite,omitempty"`
+	fmt.Println("== Anchor:", a.RefineContext.Anchor)
+	fmt.Println("== StateRoot:", a.RefineContext.StateRoot)
+	fmt.Println("== BeefyRoot:", a.RefineContext.BeefyRoot)
+	fmt.Println("== LookupAnchor:", a.RefineContext.LookupAnchor)
+	fmt.Println("== LookupAnchorSlot:", a.RefineContext.LookupAnchorSlot)
+	fmt.Println("== Prerequisite:", a.RefineContext.Prerequisite)
+	fmt.Println("= CoreIndex:", a.CoreIndex)
+	fmt.Println("= AuthorizerHash:", a.AuthorizerHash)
+	fmt.Println("= AuthOutput:", a.AuthOutput)
+	fmt.Println("= Results:")
+	// Service     uint32      `json:"service"`
+	// CodeHash    common.Hash `json:"code_hash"`
+	// PayloadHash common.Hash `json:"payload_hash"`
+	// GasRatio    uint64      `json:"gas_ratio"`
+	// Result      Result      `json:"result"`
+	for i, result := range a.Results {
+		fmt.Println("== Result", i)
+		fmt.Println("=== Service:", result.Service)
+		fmt.Println("=== CodeHash:", result.CodeHash)
+		fmt.Println("=== PayloadHash:", result.PayloadHash)
+		fmt.Println("=== GasRatio:", result.GasRatio)
+		fmt.Println("=== Result:")
+		// Ok  []byte `json:"ok,omitempty"`
+		// Err uint8  `json:"err,omitempty"`
+		fmt.Println("==== Ok:", result.Result.Ok)
+		fmt.Println("==== Err:", result.Result.Err)
+	}
 }

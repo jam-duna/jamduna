@@ -84,13 +84,13 @@ func TestVerify(t *testing.T) {
 		"f16e5352840afb47e206b5c89f560f2611835855cf2e6ebad1acc9520a72591d",
 	}
 
-	var pubkeys []bandersnatch.PublicKey
+	var pubkeys []bandersnatch.BanderSnatchKey
 	for _, hexStr := range pubkeysHex {
 		bytes, err := hex.DecodeString(hexStr)
 		if err != nil {
 			t.Fatalf("Error decoding hex string: %v", err)
 		}
-		pubkeys = append(pubkeys, bytes)
+		pubkeys = append(pubkeys, bandersnatch.BanderSnatchKey(bytes))
 	}
 
 	ringsetBytes := bandersnatch.InitRingSet(pubkeys)

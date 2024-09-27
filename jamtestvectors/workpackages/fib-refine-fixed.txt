@@ -1,6 +1,6 @@
 pub @refine:
     @import_12_byte_record:
-    ra = 1
+    ra = 0
     sp = 0xFEFE0000
     t0 = 12
     ecalli 16

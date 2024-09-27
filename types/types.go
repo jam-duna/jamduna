@@ -1,13 +1,9 @@
 package types
 
 import (
-	//"fmt"
-	// "github.com/colorfulnotion/jam/scale"
-	//"encoding/json"
+	"math"
 
 	"github.com/colorfulnotion/jam/common"
-	//"github.com/colorfulnotion/jam/trie"
-	"math"
 )
 
 type BMTProof []common.Hash

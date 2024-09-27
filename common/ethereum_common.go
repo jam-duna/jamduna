@@ -99,3 +99,19 @@ func PrintHex(h interface{}) {
 		fmt.Println("Unsupported type")
 	}
 }
+
+func HexString(h interface{}) string {
+	var result string
+	v := reflect.ValueOf(h)
+	if (v.Kind() == reflect.Slice || v.Kind() == reflect.Array) && (v.Type().Elem().Kind() == reflect.Uint8) {
+		result = "0x"
+		for i := 0; i < v.Len(); i++ {
+			result += fmt.Sprintf("%02x", v.Index(i).Interface()) // 使用 %02x 確保兩位數
+		}
+	} else if v.Kind() == reflect.String {
+		result = fmt.Sprintf("%s", v.Interface())
+	} else {
+		result = "Unsupported type"
+	}
+	return result
+}

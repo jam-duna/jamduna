@@ -1,11 +1,10 @@
 package types
 
 import (
-	//"encoding/hex"
-	//"encoding/json"
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 

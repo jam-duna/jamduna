@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/erasurecoding"
@@ -9,10 +10,65 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+func compareWorkPackages(wp1, wp2 types.WorkPackage) bool {
+	// Compare Authorization
+	if !common.CompareBytes(wp1.Authorization, wp2.Authorization) {
+		fmt.Printf("Authorization mismatch (%x, %x)\n", wp1.Authorization, wp2.Authorization)
+		fmt.Println("Authorization mismatch")
+		return false
+	}
+
+	// Compare AuthCodeHost
+	if wp1.AuthCodeHost != wp2.AuthCodeHost {
+		return false
+	}
+
+	// Compare Authorizer struct
+	if !common.CompareBytes(wp1.Authorizer.CodeHash[:], wp2.Authorizer.CodeHash[:]) {
+		return false
+	}
+	if !common.CompareBytes(wp1.Authorizer.Params, wp2.Authorizer.Params) {
+		return false
+	}
+
+	// Compare RefineContext struct
+	if !common.CompareBytes(wp1.RefineContext.Anchor[:], wp2.RefineContext.Anchor[:]) {
+		return false
+	}
+	if !common.CompareBytes(wp1.RefineContext.StateRoot[:], wp2.RefineContext.StateRoot[:]) {
+		return false
+	}
+	if !common.CompareBytes(wp1.RefineContext.BeefyRoot[:], wp2.RefineContext.BeefyRoot[:]) {
+		return false
+	}
+	if !common.CompareBytes(wp1.RefineContext.LookupAnchor[:], wp2.RefineContext.LookupAnchor[:]) {
+		return false
+	}
+	if wp1.RefineContext.LookupAnchorSlot != wp2.RefineContext.LookupAnchorSlot {
+		return false
+	}
+
+	// Compare WorkItems
+	if len(wp1.WorkItems) != len(wp2.WorkItems) {
+		return false
+	}
+	for i := range wp1.WorkItems {
+		if wp1.WorkItems[i].CodeHash != wp2.WorkItems[i].CodeHash {
+			return false
+		}
+	}
+	return true
+}
+
 func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) *types.AvailabilitySpecifier {
 	// Compute b using EncodeWorkPackage
 	b := n.encodeWorkPackage(workPackage)
-	// decodeb, _ := types.Decode(b, reflect.TypeOf([4][]byte{}))
+	p := n.decodeWorkPackage(b)
+	if compareWorkPackages(workPackage, p) {
+		fmt.Println("----------Original WorkPackage and Decoded WorkPackage are the same-------")
+	} else {
+		fmt.Println("----------Original WorkPackage and Decoded WorkPackage are different-------")
+	}
 
 	// Length of `b`
 	bLength := uint32(len(b))
@@ -247,17 +303,21 @@ func transpose3D(data [][][]byte) [][][]byte {
 // TODO: Sean to encode & decode properly
 // The E(p,x,i,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
 func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
+	fmt.Println("encodeWorkPackage")
 	output := make([]byte, 0)
 	// 1. Encode the package (p)
+	fmt.Println("wp:", wp)
 	encodedPackage := types.Encode(wp)
 	output = append(output, encodedPackage...)
 
 	// 2. Encode the extrinsic (x)
 	x := wp.WorkItems
-	encodedExtrinsic := make([]byte, 0)
+	extrinsics := make([][]byte, 0)
 	for _, WorkItem := range x {
-		encodedExtrinsic = types.Encode(WorkItem.Extrinsics)
+		extrinsics = append(extrinsics, WorkItem.ExtrinsicsBlobs...)
 	}
+	fmt.Println("extrinsics:", extrinsics)
+	encodedExtrinsic := types.Encode(extrinsics)
 	output = append(output, encodedExtrinsic...)
 
 	// 3. Encode the segments (i)
@@ -266,28 +326,70 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 	for _, WorkItem := range x {
 		segments, _ = n.getImportSegments(WorkItem.ImportedSegments)
 	}
+	fmt.Println("segments:", segments)
 	encodedSegments = types.Encode(segments)
 	output = append(output, encodedSegments...)
 
 	// 4. Encode the justifications (j)
 	var encodedJustifications []byte
+	var justification [][]byte
 	for _, WorkItem := range x {
-		var justification []common.Hash
 		tree := trie.NewCDMerkleTree(segments)
 		for i, _ := range WorkItem.ImportedSegments {
 			justifies, _ := tree.Justify(i)
-			var tmpJustification []common.Hash
+			var tmpJustification [][]byte
 			for _, justify := range justifies {
-				tmpJustification = append(tmpJustification, common.Hash(justify))
+				tmpJustification = append(tmpJustification, justify)
 			}
 			justification = append(justification, tmpJustification...)
 		}
-		encodedJustifications = append(encodedJustifications, types.Encode(justification)...)
 	}
+	encodedJustifications = append(encodedJustifications, types.Encode(justification)...)
+
 	output = append(output, encodedJustifications...)
 
 	// Combine all encoded parts: e(p,x,i,j)
 	return output
+}
+
+func (n *Node) decodeWorkPackage(encodedWorkPackage []byte) types.WorkPackage {
+	fmt.Println("decodeWorkPackage")
+	decodedPackage := types.WorkPackage{}
+	// length := uint32(0)
+
+	// // Decode the package (p)
+	// wp, l := types.Decode(encodedWorkPackage, reflect.TypeOf(types.WorkPackage{}))
+	wp, _ := types.Decode(encodedWorkPackage, reflect.TypeOf(types.WorkPackage{}))
+	fmt.Println("wp:", wp)
+	decodedPackage = wp.(types.WorkPackage)
+	// length += l
+
+	// // Decode the extrinsic (x)
+	// extrinsics, l := types.Decode(encodedWorkPackage[length:], reflect.TypeOf([][]byte{}))
+	// fmt.Println("extrinsics:", extrinsics)
+	// decodedPackage.WorkItems = make([]types.WorkItem, 0)
+	// for _, extrinsic := range extrinsics.([][]byte) {
+	// 	decodedPackage.WorkItems = append(decodedPackage.WorkItems, types.WorkItem{
+	// 		ExtrinsicsBlobs: [][]byte{extrinsic},
+	// 	})
+	// }
+	// length += l
+
+	// // Decode the segments (i)
+	// segments, l := types.Decode(encodedWorkPackage[length:], reflect.TypeOf([][]byte{}))
+	// fmt.Println("segments:", segments)
+	// // setImportSegments
+	// length += l
+
+	// // Decode the justifications (j)
+	// justifications, l := types.Decode(encodedWorkPackage[length:], reflect.TypeOf([][]byte{}))
+	// fmt.Println("justifications:", justifications)
+	// // setJustifications
+	// length += l
+
+	return decodedPackage
+	// return decodedPackage, decodedPackage.WorkItems, segments,justifications
+	/* return four item */
 }
 
 func (n *Node) VerifyWorkPackage(wp types.WorkPackage, decodedB [][]byte) []byte {

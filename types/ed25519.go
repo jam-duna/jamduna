@@ -2,6 +2,7 @@ package types
 
 import (
 	//	"bytes"
+	"encoding/json"
 	"crypto/ed25519"
 	//	"errors"
 	"fmt"
@@ -16,13 +17,26 @@ const (
 	Ed25519SignatureSize  = 64 // 32 byte R + 32 byte S
 )
 
-type Ed25519Signature [Ed25519SignatureSize]byte
 type Ed25519Key common.Hash
+type Ed25519Priv ed25519.PrivateKey
+type Ed25519Signature [Ed25519SignatureSize]byte
 
-//type Ed25519Key [Ed25519PubkeySize]byte
+
+func (k Ed25519Key) MarshalJSON() ([]byte, error) {
+    return json.Marshal(common.Hash(k).Hex())
+}
+
+func (k *Ed25519Key) UnmarshalJSON(data []byte) error {
+    var hexStr string
+    if err := json.Unmarshal(data, &hexStr); err != nil {
+        return err
+    }
+    *k = Ed25519Key(common.HexToHash(hexStr))
+    return nil
+}
 
 func (pk Ed25519Key) Bytes() []byte {
-	return pk[:]
+	return pk.Bytes()
 }
 
 func (pk Ed25519Key) PublicKey() ed25519.PublicKey {
@@ -54,7 +68,7 @@ func HexToEd25519Sig(hexStr string) Ed25519Signature {
 	return signature
 }
 
-//Ed25519Signature to byte
+// Ed25519Signature to byte
 func (e *Ed25519Signature) Bytes() []byte {
 	return e[:]
 }
@@ -66,10 +80,10 @@ func HexToEd25519Key(hexStr string) Ed25519Key {
 	return pubkey
 }
 
-func InitEd25519Key(seed []byte) ([]byte, []byte, error) {
+func InitEd25519Key(seed []byte) (Ed25519Key, []byte, error) {
 	// Check if the seed length is 32 bytes
 	if len(seed) != ed25519.SeedSize {
-		return nil, nil, fmt.Errorf("seed length must be %d bytes", ed25519.SeedSize)
+		return Ed25519Key{}, nil, fmt.Errorf("seed length must be %d bytes", ed25519.SeedSize)
 	}
 
 	// Generate the private key from the seed
@@ -78,16 +92,32 @@ func InitEd25519Key(seed []byte) ([]byte, []byte, error) {
 	// The public key is the second half of the private key
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
 
-	return ed25519_pub, ed25519_priv, nil
+	return Ed25519Key(ed25519_pub), ed25519_priv, nil
 }
 
-func Ed25519Sign(priv Ed25519Key, msg []byte) Ed25519Signature {
-	signature := ed25519.Sign(ed25519.PrivateKey(priv[:]), msg)
+func BytesToEd25519Priv(b []byte) (Ed25519Priv, error) {
+	if len(b) != Ed25519PrivateKeySize {
+		return nil, fmt.Errorf("invalid byte slice length: expected %d bytes, got %d", Ed25519PrivateKeySize, len(b))
+	}
+	var priv Ed25519Priv
+	copy(priv[:], b)
+	return priv, nil
+}
+
+func Ed25519Sign(priv Ed25519Priv, msg []byte) Ed25519Signature {
+	signature := ed25519.Sign(ed25519.PrivateKey(priv), msg)
+	var ed25519Signature Ed25519Signature
+	copy(ed25519Signature[:], signature)
+	return ed25519Signature
+}
+
+func Ed25519SignByBytes(priv []byte, msg []byte) Ed25519Signature {
+	signature := ed25519.Sign(ed25519.PrivateKey(priv), msg)
 	var ed25519Signature Ed25519Signature
 	copy(ed25519Signature[:], signature)
 	return ed25519Signature
 }
 
 func Ed25519Verify(pub Ed25519Key, msg []byte, sig Ed25519Signature) bool {
-	return ed25519.Verify(ed25519.PublicKey(pub[:]), msg, sig[:])
+	return ed25519.Verify(pub.PublicKey(), msg, sig[:])
 }

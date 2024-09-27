@@ -10,13 +10,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/binary"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -48,7 +47,8 @@ const (
 type QuicMessage struct {
 	Id      uint32
 	MsgType string `json:"msgType"`
-	Payload string `json:"payload"`
+	//Payload string `json:"payload"`
+	Payload []byte `json:"payload"`
 }
 
 type NodeInfo struct {
@@ -76,14 +76,16 @@ type Node struct {
 
 	// holds a map of epoch to at most 2 tickets
 	selfTickets map[uint32][]types.Ticket
-
 	// this is for audit
 	announcementBucket     types.AnnounceBucket
 	prevAnnouncementBucket types.AnnounceBucket
 	announcementMutex      sync.Mutex
 	judgementBucket        types.JudgeBucket
 	judgementMutex         sync.Mutex
-
+	// use validator index to lookup the guarantee from the validator in their core
+	guaranteeBucket map[common.Hash][]types.GuaranteeReport
+	guaranteeMutex  sync.Mutex
+	isBadGuarantor  bool
 	// this is for assurances
 	// use work package hash to lookup the availbility
 	assurancesBucket map[common.Hash]types.IsPackageRecieved
@@ -167,11 +169,7 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	n.credential = credential
 	if false {
-		jsonData, err := json.Marshal(credential)
-		if err != nil {
-			fmt.Printf("Error marshaling JSON: %v\n", err)
-			return
-		}
+		jsonData := types.Encode(credential)
 		fmt.Printf("[N%v] credential %s\n", n.id, jsonData)
 	}
 }
@@ -308,13 +306,47 @@ func (n *Node) generatedEpochTickets(epoch uint32) bool {
 	return true
 }
 
+// use ed25519 key to get peer info
+func (n *Node) GetPeerInfoByEd25519(key types.Ed25519Key) (NodeInfo, error) {
+	for _, peer := range n.peersInfo {
+		if peer.Validator.Ed25519 == key {
+			return peer, nil
+		}
+	}
+	return NodeInfo{}, fmt.Errorf("peer not found")
+}
+
 func (n *Node) GetBandersnatchSecret() []byte {
 	return n.credential.BandersnatchSecret
+}
+func (n *Node) GetSelfCoreIndex() (uint16, error) {
+	for _, assignment := range n.statedb.GuarantorAssignments {
+		if assignment.Validator.GetEd25519Key() == n.GetEd25519Key() {
+			return assignment.CoreIndex, nil
+		}
+	}
+	return 0, fmt.Errorf("core index not found")
+}
+func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
+	coWorkers := make([]types.Validator, 0)
+	for _, assignment := range n.statedb.GuarantorAssignments {
+		if types.Ed25519Key(n.credential.Ed25519Pub) == assignment.Validator.Ed25519 {
+			continue
+		}
+		if assignment.CoreIndex == coreIndex {
+			coWorkers = append(coWorkers, assignment.Validator)
+		}
+	}
+	return coWorkers
+}
+func (n *Node) GetCurrValidatorIndex() uint32 {
+	return uint32(n.statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
 }
 
 func (n *Node) generateEpochTickets(epoch uint32, isNextEpoch bool) {
 	sf := n.statedb.GetSafrole()
-	tickets := sf.GenerateTickets(n.GetBandersnatchSecret(), isNextEpoch)
+	auth_secret, _ := sf.ConvertBanderSnatchSecret(n.GetBandersnatchSecret())
+	tickets := sf.GenerateTickets(auth_secret, isNextEpoch)
 	fmt.Printf("[N%v] Generating Tickets for (Epoch,isNextEpoch) = (%v,%v)\n", n.id, epoch, isNextEpoch)
 	n.selfTickets[epoch] = tickets
 	for _, t := range tickets {
@@ -480,11 +512,8 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 	}
 
 	var msg QuicMessage
-	err = json.Unmarshal(buf, &msg)
-	if err != nil {
-		fmt.Printf("Failed to unmarshal QuicMessage: %v\n", err)
-		return
-	}
+	decoded, _ := types.Decode(buf, reflect.TypeOf(msg))
+	msg = decoded.(QuicMessage)
 
 	//fmt.Printf(" -- [N%v] handleStream Read From N%v (msgType=%v)\n", n.id, msg.Id, msg.MsgType)
 	response := []byte("1")
@@ -492,61 +521,54 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 	switch msg.MsgType {
 	case "BlockQuery":
 		var query types.BlockQuery
-		err := json.Unmarshal([]byte(msg.Payload), &query)
-		if err == nil {
-			blk, found := n.blocks[query.BlockHash]
-			fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id, query.BlockHash, found)
-			if found {
-				serializedR, err := json.Marshal(blk)
-				if err == nil {
-					fmt.Printf("[N%d] Responded to BlockQuery %v with: %s\n", n.id, query.BlockHash, serializedR)
-					response = serializedR
-				}
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+		query = decoded.(types.BlockQuery)
+		blk, found := n.blocks[query.BlockHash]
+		fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id, query.BlockHash, found)
+		if found {
+			serializedR := types.Encode(blk)
+			//serializedR := types.Encode(blk)
+			if err == nil {
+				fmt.Printf("[N%d] Responded to BlockQuery %v with: %s\n", n.id, query.BlockHash, serializedR)
+				response = serializedR
 			}
 		}
 
-	case "ImportDAQuery":
-		var query types.ImportDAQuery
-		err := json.Unmarshal([]byte(msg.Payload), &query)
-		if err == nil {
-			r := types.ImportDAResponse{Data: [][]byte{[]byte("dummy data")}}
-			serializedR, err := json.Marshal(r)
-			if err == nil {
-				response = serializedR
-			}
-		}
-	case "AuditDAQuery":
-		var query types.AuditDAQuery
-		err := json.Unmarshal([]byte(msg.Payload), &query)
-		if err == nil {
-			r := types.AuditDAResponse{Data: []byte("dummy data")}
-			serializedR, err := json.Marshal(r)
-			if err == nil {
-				response = serializedR
-			}
-		}
-	case "ImportDAReconstructQuery":
-		var query types.ImportDAReconstructQuery
-		err := json.Unmarshal([]byte(msg.Payload), &query)
-		if err == nil {
-			r := types.ImportDAReconstructResponse{Data: []byte("dummy data")}
-			serializedR, err := json.Marshal(r)
-			if err == nil {
-				response = serializedR
-			}
-		}
+	// case "ImportDAQuery":
+	// 	var query types.ImportDAQuery
+	// 	decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+	// 	query = decoded.(types.ImportDAQuery)
+	// 	r := types.ImportDAResponse{Data: [][]byte{[]byte("dummy data")}}
+	// 	serializedR := types.Encode(r)
+	// 	response = serializedR
+	// case "AuditDAQuery":
+	// 	var query types.AuditDAQuery
+	// 	decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+	// 	query = decoded.(types.AuditDAQuery)
+	// 	r := types.AuditDAResponse{Data: []byte("dummy data")}
+	// 	serializedR := types.Encode(r)
+	// 	response = serializedR
+	// case "ImportDAReconstructQuery":
+	// 	var query types.ImportDAReconstructQuery
+	// 	decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+	// 	query = decoded.(types.ImportDAReconstructQuery)
+	// 	if err == nil {
+	// 		r := types.ImportDAReconstructResponse{Data: []byte("dummy data")}
+	// 		serializedR := types.Encode(r)
+	// 		response = serializedR
+	// 	}
 	case "Ticket":
 		var ticket *types.Ticket
-		err := json.Unmarshal([]byte(msg.Payload), &ticket)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(ticket))
+		ticket = decoded.(*types.Ticket)
+		err = n.processTicket(*ticket)
 		if err == nil {
-			err = n.processTicket(*ticket)
-			if err == nil {
-				response = ok
-			}
+			response = ok
 		}
 	case "AvailabilityJustification":
 		var aj *types.AvailabilityJustification
-		err := json.Unmarshal([]byte(msg.Payload), &aj)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(aj))
+		aj = decoded.(*types.AvailabilityJustification)
 		if err == nil {
 			err = n.processAvailabilityJustification(aj)
 			if err == nil {
@@ -555,25 +577,30 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		}
 	case "Guarantee":
 		var guarantee types.Guarantee
-		err := json.Unmarshal([]byte(msg.Payload), &guarantee)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(guarantee))
+		guarantee = decoded.(types.Guarantee)
 		if err == nil {
 			err = n.processGuarantee(guarantee)
 			if err == nil {
 				response = ok
 			}
 		}
+		fmt.Printf(" -- [N%d] received guarantee From N%d\n", n.id, msg.Id)
 	case "Assurance":
 		var assurance types.Assurance
-		err := json.Unmarshal([]byte(msg.Payload), &assurance)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(assurance))
+		assurance = decoded.(types.Assurance)
 		if err == nil {
 			err = n.processAssurance(assurance)
 			if err == nil {
 				response = ok
 			}
 		}
+		fmt.Printf(" -- [N%d] received assurance From N%d\n", n.id, msg.Id)
 	case "Judgement":
 		var judgement types.Judgement
-		err := json.Unmarshal([]byte(msg.Payload), &judgement)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(judgement))
+		judgement = decoded.(types.Judgement)
 		if err == nil {
 			err = n.processJudgement(judgement)
 			if err == nil {
@@ -587,18 +614,18 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 		}
 	case "Announcement":
 		var announcement types.Announcement
-		err := json.Unmarshal([]byte(msg.Payload), &announcement)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(announcement))
+		announcement = decoded.(types.Announcement)
+		err = n.processAnnouncement(announcement)
 		if err == nil {
-			err = n.processAnnouncement(announcement)
-			if err == nil {
-				response = ok
-			}
-			fmt.Printf(" -- [N%d] received announcement From N%d\n", n.id, msg.Id)
-			fmt.Printf(" -- [N%d] received announcement From N%d (%v <- %v)\n", n.id, msg.Id, announcement.WorkReport.GetWorkPackageHash(), announcement.WorkReport.GetWorkPackageHash())
+			response = ok
 		}
+		fmt.Printf(" -- [N%d] received announcement From N%d\n", n.id, msg.Id)
+		fmt.Printf(" -- [N%d] received announcement From N%d (%v <- %v)\n", n.id, msg.Id, announcement.WorkReport.GetWorkPackageHash(), announcement.WorkReport.GetWorkPackageHash())
 	case "Preimages":
 		var preimages types.Preimages
-		err := json.Unmarshal([]byte(msg.Payload), &preimages)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(preimages))
+		preimages = decoded.(types.Preimages)
 		if err == nil {
 			// err = n.processPreimageLookup(preimageLookup)
 			err = n.processLookup(preimages)
@@ -607,8 +634,8 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 			}
 		}
 	case "Block":
-		var block *types.Block
-		err := json.Unmarshal([]byte(msg.Payload), &block)
+		block, err := types.BlockFromBytes(msg.Payload)
+		//err := interface{}
 		if err == nil {
 			fmt.Printf(" -- [N%d] received block From N%d (%v <- %v)\n", n.id, msg.Id, block.ParentHash(), block.Hash())
 			err = n.processBlock(block)
@@ -619,46 +646,61 @@ func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
 
 	case "WorkPackage":
 		var workPackage types.WorkPackage
-		err := json.Unmarshal([]byte(msg.Payload), &workPackage)
-		if err == nil {
-			_, _, err = n.processWorkPackage(workPackage)
-			if err == nil {
-				response = ok
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(workPackage))
+		workPackage = decoded.(types.WorkPackage)
+		var work types.GuaranteeReport
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			work, _, _, err = n.processWorkPackage(workPackage)
+			if err != nil {
+				fmt.Printf(" -- [N%d] WorkPackage Error: %v\n", n.id, err)
 			}
+		}()
+		wg.Wait()
+		if n.isBadGuarantor {
+			fmt.Printf(" -- [N%d] Is a Bad Guarantor\n", n.id)
+			work.Report.Results[0].Result.Ok = []byte("I am Culprits><")
+			work.Sign(n.GetEd25519Secret())
 		}
+		_ = n.processGuaranteeReport(work)
+		if err == nil {
+			response = ok
+		}
+		n.coreBroadcast(work)
+		// }
+		fmt.Printf(" -- [N%d] received WorkPackage From N%d\n", n.id, msg.Id)
+	case "GuaranteeReport":
+		var guaranteeReport types.GuaranteeReport
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(guaranteeReport))
+		guaranteeReport = decoded.(types.GuaranteeReport)
+		err = n.processGuaranteeReport(guaranteeReport)
+		if err == nil {
+			response = ok
+		}
+		fmt.Printf(" -- [N%d] received GuaranteeReport From N%d\n", n.id, msg.Id)
+
 	// -----Custom messages for tiny QUIC experiment-----
 
 	case "DistributeECChunk":
 		var chunk types.DistributeECChunk
-		err := json.Unmarshal([]byte(msg.Payload), &chunk)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(chunk))
+		chunk = decoded.(types.DistributeECChunk)
+		err = n.processDistributeECChunk(chunk)
 		if err == nil {
-			err = n.processDistributeECChunk(chunk)
-			if err == nil {
-				response = ok
-			}
+			response = ok
 		}
-
-	// case "ECChunkResponse":
-	// 	var chunk ECChunkResponse
-	// 	err := json.Unmarshal([]byte(msg.Payload), &chunk)
-	// 	if err == nil {
-	// 		err = n.processECChunkResponse(chunk)
-	// 		if err == nil {
-	// 			response = ok
-	// 		}
-	// 	}
+		fmt.Printf(" -- [N%d] received DistributeECChunk From N%d\n", n.id, msg.Id)
 
 	case "ECChunkQuery":
 		var query types.ECChunkQuery
-		err := json.Unmarshal([]byte(msg.Payload), &query)
+		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+		query = decoded.(types.ECChunkQuery)
+		r, err := n.processECChunkQuery(query)
 		if err == nil {
-			r, err := n.processECChunkQuery(query)
-			if err == nil {
-				serializedR, err := json.Marshal(r)
-				if err == nil {
-					response = serializedR
-				}
-			}
+			serializedR := types.Encode(r)
+			response = serializedR
 		}
 	}
 
@@ -686,6 +728,37 @@ func (n *Node) broadcast(obj interface{}) []byte {
 		if len(resp) > 0 {
 			result = resp
 		}
+	}
+	return result
+}
+
+func (n *Node) coreBroadcast(obj interface{}) []byte {
+	result := []byte{}
+	core, err := n.GetSelfCoreIndex()
+	if err != nil {
+		fmt.Printf("coreBroadcast Error: %v\n", err)
+		return nil
+	}
+	coworker := n.GetCoreCoWorkers(core)
+	for _, peer := range n.peersInfo {
+		for _, worker := range coworker {
+			if worker.Ed25519 == peer.Validator.Ed25519 {
+				peerIdentifier := fmt.Sprintf("%x", peer.Validator.Ed25519)
+				if peer.PeerID == n.id {
+					continue
+				}
+				//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
+				resp, err := n.makeRequest(peerIdentifier, obj)
+				if err != nil {
+					fmt.Printf("runClient request error: %v\n", err)
+					continue
+				}
+				if len(resp) > 0 {
+					result = resp
+				}
+			}
+		}
+
 	}
 	return result
 }
@@ -720,30 +793,20 @@ func (n *Node) makeRequest(peerIdentifier string, obj interface{}) ([]byte, erro
 
 	n.connectionMu.Unlock()
 
-	payload, err := json.Marshal(obj)
-	if err != nil {
-		return nil, err
-	}
+	payload := types.Encode(obj)
 
 	quicMessage := QuicMessage{
 		Id:      n.id,
 		MsgType: msgType,
-		Payload: string(payload),
+		Payload: payload,
 	}
 
-	messageData, err := json.Marshal(quicMessage)
-	if err != nil {
-		fmt.Printf("HMM2 %v\n", err)
-		return nil, err
-	}
+	messageData := types.Encode(quicMessage)
 
 	// Sanity check: Unmarshal messageData to verify it
-	var sanityCheckMsg QuicMessage
-	err = json.Unmarshal(messageData, &sanityCheckMsg)
-	if err != nil {
-		fmt.Printf("Sanity check failed: %v\n", err)
-		return nil, err
-	}
+	// var sanityCheckMsg QuicMessage
+	// decoded, _ := types.Decode(messageData, reflect.TypeOf(sanityCheckMsg))
+	// sanityCheckMsg = decoded.(QuicMessage)
 
 	// Length-prefix the message
 	messageLength := uint32(len(messageData))
@@ -814,6 +877,9 @@ func (n *Node) processGuarantee(guarantee types.Guarantee) error {
 
 func (n *Node) processAssurance(assurance types.Assurance) error {
 	// Store the assurance in the tip's queued assurance
+	if len(assurance.Signature) == 0 {
+		return fmt.Errorf("No assurance signature")
+	}
 	s := n.getState()
 	s.ProcessIncomingAssurance(assurance)
 	return nil // Success
@@ -849,10 +915,11 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 		return nil, nil
 	}
 	if len(resp) > 10 {
-		blk, err := types.BlockFromBytes(resp)
-		if err != nil {
-			return nil, err
-		}
+		//this need to be consistent with the receiving side
+		//blk, err := types.BlockFromBytes(resp)
+		var blk *types.Block
+		decoded, _ := types.Decode(resp, reflect.TypeOf(blk))
+		blk = decoded.(*types.Block)
 		fmt.Printf("[N%d] fetchBlock(%v) %v<-%v [from %s]: %s\n", n.id, blockHash, blk.ParentHash(), blk.Hash(), randomPeer, blk.String())
 		n.blocks[blk.Hash()] = blk
 		return blk, nil
@@ -1027,155 +1094,14 @@ func (n *Node) getPVMStateDB() *statedb.StateDB {
 	return target_statedb
 }
 
-func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
-
-	// Create a new PVM instance with mock code and execute it
-	results := []types.WorkResult{}
-	targetStateDB := n.getPVMStateDB()
-	service_index := uint32(workPackage.AuthCodeHost)
-	packageHash := workPackage.Hash()
-
-	// set up audit friendly work WorkPackage
-	asworkPackage := types.WorkPackage{
-		WorkItems: make([]types.WorkItem, 0),
-	}
-	segments := make([][]byte, 0)
-	for _, workItem := range workPackage.WorkItems {
-		// recover code from the bpt. NOT from DA
-		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
-		if len(code) == 0 {
-			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
-			fmt.Println(err)
-			return spec, common.Hash{}, err
-		}
-		if common.Blake2Hash(code) != workItem.CodeHash {
-			fmt.Printf("Code and CodeHash Mismatch\n")
-			panic(0)
-		}
-		// Refine entry point is 5
-		Refine_entry_point := uint32(5)
-		// Set melicious mode
-		IsMelicious := false
-		vm := pvm.NewVMFromCode_With_EntryPoint(service_index, code, 0, targetStateDB, Refine_entry_point, IsMelicious)
-		imports, err := n.getImportSegments(workItem.ImportedSegments)
-		if err != nil {
-			return spec, common.Hash{}, err
-		}
-		vm.SetImports(imports)
-		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		err = vm.Execute(types.EntryPointRefine)
-		if err != nil {
-			return spec, common.Hash{}, err
-		}
-		output, _ := vm.GetArgumentOutputs()
-
-		// The workitem is an ordered collection of segments
-		asWorkItem := types.ASWorkItem{
-			Segments:   make([]types.Segment, 0),
-			Extrinsics: make([]types.WorkItemExtrinsic, 0),
-		}
-		for _, i := range vm.Imports {
-			asWorkItem.Segments = append(asWorkItem.Segments, types.Segment{Data: i})
-		}
-		for _, extrinsicblob := range workItem.ExtrinsicsBlobs {
-			asWorkItem.Extrinsics = append(asWorkItem.Extrinsics, types.WorkItemExtrinsic{Hash: common.BytesToHash(extrinsicblob), Len: uint32(len(extrinsicblob))})
-		}
-
-		// 1. NOTE: We do NOT need to erasure code import data
-		// 2. TODO: We DO need to erasure encode extrinsics into "Audit DA"
-		// ******TODO******
-
-		// 3. We DO need to erasure code exports from refine execution into "Import DA"
-		for _, e := range vm.Exports {
-			s := e
-			segments = append(segments, s) // this is used in NewAvailabilitySpecifier
-		}
-		pageProofs, _ := trie.GeneratePageProof(segments)
-		combinedSegmentAndPageProofs := append(segments, pageProofs...)
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-
-		// EncodeAndDistributeSegmentData
-		go func() {
-			treeRoot, err = n.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs, &wg)
-			if err != nil {
-				fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-			}
-		}()
-
-		// Wait for the task to complete
-		wg.Wait()
-
-		if err != nil {
-			return spec, common.Hash{}, err
-		}
-
-		// setup work results
-		// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
-		result := types.WorkResult{
-			Service:     workItem.Service,
-			CodeHash:    workItem.CodeHash,
-			PayloadHash: common.Blake2Hash(workItem.Payload),
-			GasRatio:    0,
-			Result:      output,
-		}
-		results = append(results, result)
-	}
-
-	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
-	spec = n.NewAvailabilitySpecifier(packageHash, asworkPackage, segments)
-	prerequisite_hash := common.HexToHash("0x")
-	refinementContext := types.RefineContext{
-		Anchor:           common.HexToHash("0x123abc"),              // TODO
-		StateRoot:        n.statedb.Block.Header.ParentStateRoot,    // TODO, common.HexToHash("0x")
-		BeefyRoot:        common.HexToHash("0x"),                    // SKIP
-		LookupAnchor:     n.statedb.ParentHash,                      // TODO
-		LookupAnchorSlot: n.statedb.Block.Header.Slot,               //TODO: uint32(0)
-		Prerequisite:     (*types.Prerequisite)(&prerequisite_hash), //common.HexToHash("0x"), // SKIP
-	}
-
-	workReport := types.WorkReport{
-		AvailabilitySpec: *spec,
-		AuthorizerHash:   common.HexToHash("0x"), // SKIP
-		CoreIndex:        n.coreIndex,
-		//	Output:               result.Output,
-		RefineContext: refinementContext,
-		Results:       results,
-	}
-
-	// Create a GuaranteeCredential with the signature and a mock validator index
-	sig := workReport.Sign(n.GetEd25519Secret())
-	credential := types.GuaranteeCredential{
-		ValidatorIndex: uint16(n.id), // Mock validator index
-		// Sign the serialized WorkReport
-		// Signature: sig,
-	}
-	copy(credential.Signature[:], sig[:])
-	// Create a Guarantee with the WorkReport, TimeSlot, and Credentials
-	guarantee := types.Guarantee{
-		Report: workReport,
-		// Slot:       n.statedb.Block.TimeSlot(),
-		Slot:       uint32(0),
-		Signatures: []types.GuaranteeCredential{credential},
-	}
-	// This will be received by all validators
-	n.broadcast(guarantee)
-
-	return spec, treeRoot, nil
-}
-
 // -----Custom methods for tiny QUIC EC experiment-----
 
 func (n *Node) processDistributeECChunk(chunk types.DistributeECChunk) error {
 	// Serialize the chunk
-	serialized, err := json.Marshal(chunk)
-	if err != nil {
-		return err
-	}
+	serialized := types.Encode(chunk)
 	// Save the chunk to the local storage
 	key := fmt.Sprintf("DA-%d", chunk.SegmentRoot)
-	err = n.store.WriteRawKV([]byte(key), serialized)
+	err := n.store.WriteRawKV([]byte(key), serialized)
 	if err != nil {
 		return err
 	}
@@ -1191,10 +1117,8 @@ func (n *Node) processECChunkQuery(ecChunkQuery types.ECChunkQuery) (types.ECChu
 	}
 	// Deserialize the chunk
 	var chunk types.ECChunkResponse
-	err = json.Unmarshal(data, &chunk)
-	if err != nil {
-		return types.ECChunkResponse{}, err
-	}
+	decoded, _ := types.Decode(data, reflect.TypeOf(chunk))
+	chunk = decoded.(types.ECChunkResponse)
 	return chunk, nil
 }
 
@@ -1456,10 +1380,8 @@ func (n *Node) FetchAndReconstructSegmentData(treeRoot common.Hash, segmentIndex
 				ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 			}
 			var ecChunkResponse types.ECChunkResponse
-			err = json.Unmarshal(response, &ecChunkResponse)
-			if err != nil {
-				return nil, err
-			}
+			decoded, _ := types.Decode(response, reflect.TypeOf(ecChunkResponse))
+			ecChunkResponse = decoded.(types.ECChunkResponse)
 			ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
 
 			fetchedChunks++
@@ -1550,10 +1472,8 @@ func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byt
 					ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 				}
 				var ecChunkResponse types.ECChunkResponse
-				err = json.Unmarshal(response, &ecChunkResponse)
-				if err != nil {
-					return nil, err
-				}
+				decoded, _ := types.Decode(response, reflect.TypeOf(ecChunkResponse))
+				ecChunkResponse = decoded.(types.ECChunkResponse)
 				ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
 
 				fetchedChunks++
@@ -1635,10 +1555,8 @@ func (n *Node) FetchAndReconstructSpecificSegmentData(segmentRoot common.Hash) (
 				ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 			}
 			var ecChunkResponse types.ECChunkResponse
-			err = json.Unmarshal(response, &ecChunkResponse)
-			if err != nil {
-				return nil, err
-			}
+			decoded, _ := types.Decode(response, reflect.TypeOf(ecChunkResponse))
+			ecChunkResponse = decoded.(types.ECChunkResponse)
 			ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
 
 			fetchedChunks++
@@ -1677,9 +1595,11 @@ func (n *Node) FetchAndReconstructSpecificSegmentData(segmentRoot common.Hash) (
 	}
 
 	// Trim any padding using the original length
-	if len(reconstructedData) > int(originalLength) {
-		reconstructedData = reconstructedData[:originalLength]
-	}
+	// if len(reconstructedData) > int(originalLength) {
+	// 	reconstructedData = reconstructedData[:originalLength]
+	// }
+
+	_ = originalLength
 
 	return reconstructedData, nil
 }
@@ -1718,10 +1638,8 @@ func (n *Node) FetchAndReconstructArbitraryData(blobHash common.Hash, blobLen in
 				ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 			}
 			var ecChunkResponse types.ECChunkResponse
-			err = json.Unmarshal(response, &ecChunkResponse)
-			if err != nil {
-				return nil, err
-			}
+			decoded, _ := types.Decode(response, reflect.TypeOf(ecChunkResponse))
+			ecChunkResponse = decoded.(types.ECChunkResponse)
 			ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
 
 			fetchedChunks++
@@ -1800,6 +1718,8 @@ func getMessageType(obj interface{}) string {
 		return "DistributeECChunk"
 	case types.ECChunkQuery:
 		return "ECChunkQuery"
+	case types.GuaranteeReport:
+		return "GuaranteeReport"
 	default:
 		return "unknown"
 	}
@@ -1848,30 +1768,16 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 	switch msgType {
 	case "Ticket":
 		var ticket types.Ticket
-		payloadBytes, err := json.Marshal(msg.Payload)
-		if err != nil {
-			fmt.Printf("Error marshaling payload to JSON: %v\n", err)
-			return
-		}
-		err = json.Unmarshal(payloadBytes, &ticket)
-		if err != nil {
-			fmt.Printf("Error unmarshaling Ticket: %v\n", err)
-			return
-		}
+		payloadBytes := types.Encode(msg.Payload)
+		decoded, _ := types.Decode(payloadBytes, reflect.TypeOf(ticket))
+		ticket = decoded.(types.Ticket)
 		//fmt.Printf("[N%v] Outgoing Ticket: %+v\n", n.id, ticket.TicketID())
 		n.broadcast(ticket)
 	case "Block":
 		var blk types.Block
-		payloadBytes, err := json.Marshal(msg.Payload)
-		if err != nil {
-			fmt.Printf("Error marshaling payload to JSON: %v\n", err)
-			return
-		}
-		err = json.Unmarshal(payloadBytes, &blk)
-		if err != nil {
-			fmt.Printf("Error unmarshaling Ticket: %v\n", err)
-			return
-		}
+		payloadBytes := types.Encode(msg.Payload)
+		decoded, _ := types.Decode(payloadBytes, reflect.TypeOf(blk))
+		blk = decoded.(types.Block)
 		//fmt.Printf("[N%v] Outgoing Block: %+v\n", n.id, blk.Hash())
 		n.broadcast(blk)
 	default:

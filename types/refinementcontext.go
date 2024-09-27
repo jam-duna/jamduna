@@ -16,15 +16,6 @@ import (
 * timeslot $t$
 * the hash of an optional prerequisite work-package p.
 */
-// RefinementContext represents the context of the chain at the point of evaluation.
-// type RefinementContext struct {
-// 	Anchor           common.Hash `json:"anchor"`
-// 	StateRoot        common.Hash `json:"state_root"`
-// 	BeefyRoot        common.Hash `json:"beefy_root"`
-// 	LookupAnchor     common.Hash `json:"lookup_anchor"`
-// 	LookupAnchorSlot uint32      `json:"lookup_anchor_slot"`
-// 	Prerequisite     common.Hash `json:"prerequisite,omitempty"`
-// }
 
 type RefineContext struct {
 	Anchor           common.Hash   `json:"anchor"`
@@ -32,24 +23,30 @@ type RefineContext struct {
 	BeefyRoot        common.Hash   `json:"beefy_root"`
 	LookupAnchor     common.Hash   `json:"lookup_anchor"`
 	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"`
-	Prerequisite     *Prerequisite `json:"prerequisite,omitempty"`
+	Prerequisite     *Prerequisite `json:"prerequisite"`
 }
 
 type Prerequisite common.Hash
 
-func (P Prerequisite) Encode() []byte {
+func (P *Prerequisite) Encode() []byte {
+	if P == nil {
+		return []byte{0}
+	}
 	encoded := []byte{1}
-	encoded = append(encoded, Encode(P)...)
+	encoded = append(encoded, Encode(*P)...)
 	return encoded
 }
 
-func (target Prerequisite) Decode(data []byte) (interface{}, uint32) {
+func (target *Prerequisite) Decode(data []byte) (interface{}, uint32) {
+	if data[0] == 0 {
+		return nil, 1
+	}
 	var decoded Prerequisite
 	length := uint32(1)
 	prerequisite, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
 	length += l
 	decoded = Prerequisite(prerequisite.(common.Hash))
-	return decoded, length
+	return &decoded, length
 }
 
 func (p *Prerequisite) Hash() common.Hash {

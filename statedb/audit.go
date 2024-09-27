@@ -52,7 +52,7 @@ func (s *StateDB) GetWorkReportNeedAuditTiny() []types.WorkReport {
 }
 
 // eq 190
-func (s *StateDB) Get_s0Quantity(V bandersnatch.PrivateKey) ([]byte, error) {
+func (s *StateDB) Get_s0Quantity(V bandersnatch.BanderSnatchSecret) ([]byte, error) {
 	alias, err := AliasOutput(s.Block.Header.EntropySource.Bytes())
 	if err != nil {
 		return nil, err
@@ -66,7 +66,7 @@ func (s *StateDB) Get_s0Quantity(V bandersnatch.PrivateKey) ([]byte, error) {
 }
 
 // func 201 TODO check double plus means
-func (s *StateDB) Get_snQuantity(V bandersnatch.PrivateKey, W types.WorkReport) ([]byte, error) {
+func (s *StateDB) Get_snQuantity(V bandersnatch.BanderSnatchSecret, W types.WorkReport) ([]byte, error) {
 	signcontext := append(append([]byte(types.X_U), W.GetWorkPackageHash().Bytes()...), common.Uint32ToBytes(s.GetTranche())...)
 	signature, _, err := bandersnatch.IetfVrfSign(V, []byte{0}, signcontext)
 	if err != nil {
@@ -87,7 +87,7 @@ func WorkReportToSelection(W []types.WorkReport) []types.WorkReportSelection {
 }
 
 // eq 192
-func (s *StateDB) Select_a0(V bandersnatch.PrivateKey) ([]types.WorkReportSelection, error) {
+func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkReportSelection, error) {
 	s0, err := s.Get_s0Quantity(V)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.JudgeBucket, W_
 	}
 	return count
 }
-func (s *StateDB) Select_an(V bandersnatch.PrivateKey, A_sub1 types.AnnounceBucket, J types.JudgeBucket) ([]types.WorkReportSelection, error) {
+func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 types.AnnounceBucket, J types.JudgeBucket) ([]types.WorkReportSelection, error) {
 	an := []types.WorkReportSelection{}
 	availible_workreport := WorkReportToSelection(s.AvailableWorkReport)
 	for _, W := range availible_workreport {
@@ -324,15 +324,15 @@ func (s *StateDB) JudgementToCulprit(J []types.Judgement, W_hash common.Hash) []
 // TODO: here is the stub code to lookup the EG
 func (s *StateDB) GetCulprits(ts uint32, report types.WorkReport) []types.Culprit {
 	culprits := make([]types.Culprit, 0)
-	for _, G := range s.GuarantorAssignments {
-		if G.CoreIndex == report.CoreIndex {
-			culprits = append(culprits, types.Culprit{
-				Target:    report.GetWorkPackageHash(),
-				Key:       G.Validator.Ed25519,
-				Signature: types.Ed25519Sign(G.Validator.Ed25519, []byte("Something")),
-			})
-		}
-	}
+	// for _, G := range s.GuarantorAssignments {
+	// 	if G.CoreIndex == report.CoreIndex {
+	// 		culprits = append(culprits, types.Culprit{
+	// 			Target:    report.GetWorkPackageHash(),
+	// 			Key:       G.Validator.Ed25519,
+	// 			Signature: types.Ed25519Sign(G.Validator., []byte("Something")),
+	// 		})
+	// 	}
+	// }
 	return culprits
 }
 

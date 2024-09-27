@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -37,46 +36,14 @@ type ASWorkPackage struct {
 	Extrinsic      []byte
 }
 
-// for codec
-type CWorkPackage struct {
-	// $j$ - a simple blob acting as an authorization token
-	Authorization []byte `json:"authorization"`
-	// $h$ - the index of the service which hosts the authorization code
-	AuthCodeHost uint32 `json:"auth_code_host"`
-	// $c$ - an authorization code hash
-	Authorizer Authorizer `json:"authorizer"`
-	// $x$ - context
-	RefineContext RefineContext `json:"context"`
-	// $i$ - a sequence of work items
-	WorkItems []CWorkItem `json:"items"`
-}
-
-type SWorkPackage struct {
-	Authorization string        `json:"authorization"`
-	AuthCodeHost  uint32        `json:"auth_code_host"`
-	Authorizer    SAuthorizer   `json:"authorizer"`
-	RefineContext RefineContext `json:"context"`
-	WorkItems     []SWorkItem   `json:"items"`
-}
-
 type Authorizer struct {
 	CodeHash common.Hash `json:"code_hash"`
 	Params   []byte      `json:"params"`
 }
 
-type SAuthorizer struct {
-	CodeHash common.Hash `json:"code_hash"`
-	Params   string      `json:"params"`
-}
-
 // Bytes returns the bytes of the Assurance
 func (a *WorkPackage) Bytes() []byte {
-	enc, err := json.Marshal(a)
-	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
+	enc := Encode(a)
 	return enc
 }
 
@@ -86,39 +53,71 @@ func (a *WorkPackage) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.BytesToHash(common.ComputeHash(data))
+	return common.Blake2Hash(data)
 }
 
-func (s *SWorkPackage) Deserialize() (CWorkPackage, error) {
-	authorization := common.FromHex(s.Authorization)
-	auth_code_host := s.AuthCodeHost
-	authorizer, err := s.Authorizer.Deserialize()
+func (a *WorkPackage) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Authorization string        `json:"authorization"`
+		AuthCodeHost  uint32        `json:"auth_code_host"`
+		Authorizer    Authorizer    `json:"authorizer"`
+		RefineContext RefineContext `json:"context"`
+		WorkItems     []WorkItem    `json:"items"`
+	}
+	err := json.Unmarshal(data, &s)
 	if err != nil {
-		return CWorkPackage{}, err
-	}
-	refine_context := s.RefineContext
-	work_items := make([]CWorkItem, len(s.WorkItems))
-	for i, item := range s.WorkItems {
-		work_items[i], err = item.Deserialize()
-		if err != nil {
-			return CWorkPackage{}, err
-		}
+		return err
 	}
 
-	return CWorkPackage{
-		Authorization: authorization,
-		AuthCodeHost:  auth_code_host,
-		Authorizer:    authorizer,
-		RefineContext: refine_context,
-		WorkItems:     work_items,
-	}, nil
+	a.Authorization = common.FromHex(s.Authorization)
+	a.AuthCodeHost = s.AuthCodeHost
+	a.Authorizer = s.Authorizer
+	a.RefineContext = s.RefineContext
+	a.WorkItems = s.WorkItems
+
+	return nil
 }
 
-func (s *SAuthorizer) Deserialize() (Authorizer, error) {
-	params := common.FromHex(s.Params)
+func (a *Authorizer) UnmarshalJSON(data []byte) error {
+	var s struct {
+		CodeHash common.Hash `json:"code_hash"`
+		Params   string      `json:"params"`
+	}
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return err
+	}
+	a.CodeHash = s.CodeHash
+	a.Params = common.FromHex(s.Params)
 
-	return Authorizer{
-		CodeHash: s.CodeHash,
-		Params:   params,
-	}, nil
+	return nil
+}
+
+func (a *WorkPackage) MarshalJSON() ([]byte, error) {
+	// Convert Authorization from []byte to hex string
+	authorization := common.HexString(a.Authorization)
+
+	return json.Marshal(&struct {
+		Authorization string        `json:"authorization"`
+		AuthCodeHost  uint32        `json:"auth_code_host"`
+		Authorizer    Authorizer    `json:"authorizer"`
+		RefineContext RefineContext `json:"context"`
+		WorkItems     []WorkItem    `json:"items"`
+	}{
+		Authorization: authorization,
+		AuthCodeHost:  a.AuthCodeHost,
+		Authorizer:    a.Authorizer,
+		RefineContext: a.RefineContext,
+		WorkItems:     a.WorkItems,
+	})
+}
+
+func (a *Authorizer) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		CodeHash common.Hash `json:"code_hash"`
+		Params   string      `json:"params"`
+	}{
+		CodeHash: a.CodeHash,
+		Params:   common.HexString(a.Params),
+	})
 }

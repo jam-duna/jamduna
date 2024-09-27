@@ -85,6 +85,7 @@ func (s *StateDB) AddGuaranteeToQueue(g types.Guarantee) {
 	s.guaranteeMutex.Lock()
 	defer s.guaranteeMutex.Unlock()
 	s.queuedGuarantees[g.Hash()] = g
+	fmt.Printf("[N%v] AddGuaranteeToQueue -- Adding guarantee W_Hash: %v\n", s.Id, g.Report.GetWorkPackageHash())
 }
 
 func (s *StateDB) AddAssuranceToQueue(a types.Assurance) {
@@ -154,7 +155,8 @@ func (s *StateDB) ProcessIncomingJudgement(j types.Judgement) {
 
 func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
 	// get the guarantee state
-	err := g.ValidateSignatures()
+	CurrV := s.GetSafrole().CurrValidators
+	err := g.Verify(CurrV)
 	if err != nil {
 		fmt.Printf("Invalid guarantee. Err=%v\n", err)
 		return
@@ -168,10 +170,14 @@ func (s *StateDB) getValidatorCredential() []byte {
 }
 
 func (s *StateDB) ProcessIncomingAssurance(a types.Assurance) {
-	cred := s.getValidatorCredential()
-	err := a.ValidateSignature(cred)
+	if len(a.Signature) == 0 {
+		fmt.Printf("Invalid Assurance. Err=%v\n", errors.New("Empty signature"))
+		return
+	}
+	cred := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
+	err := a.Verify(s.BlockHash, cred)
 	if err != nil {
-		fmt.Printf("Invalid guarantee. Err=%v\n", err)
+		fmt.Printf("Invalid Assurance. Err=%v\n", err)
 		return
 	}
 	s.AddAssuranceToQueue(a)
@@ -776,14 +782,20 @@ func (s *StateDB) Accumulate() error {
 	xContext := types.NewXContext()
 	//TODO: setup xi, x_vm,
 	s.SetXContext(xContext)
-	for _, rho_state := range s.JamState.AvailabilityAssignments {
-		if rho_state != nil {
+	fmt.Printf("AvailableWorkReport %v\n", len(s.AvailableWorkReport))
+	if len(s.AvailableWorkReport) == 0 {
+
+		for _, wr := range s.AvailableWorkReport {
 			wrangledWorkResults := make([]types.WrangledWorkResult, 0)
-			code, err := s.getServiceCoreCode(uint32(rho_state.WorkReport.CoreIndex))
-			service_index := uint32(0)
-			if err == nil {
+			// code, err := s.getServiceCoreCode(uint32(47))
+			service_index := uint32(wr.Results[0].Service)
+			code_hash := wr.Results[0].CodeHash
+			code := s.ReadServicePreimageBlob(service_index, code_hash)
+			fmt.Printf("Accumulate Code %x\n", code)
+
+			if len(code) != 0 {
 				// Wrangle results from work report
-				workReport := rho_state.WorkReport
+				workReport := wr
 				for _, workResult := range workReport.Results {
 					wrangledWorkResult := workResult.Wrangle(workReport.AuthOutput, workReport.AvailabilitySpec.WorkPackageHash)
 					wrangledWorkResults = append(wrangledWorkResults, wrangledWorkResult)
@@ -797,11 +809,12 @@ func (s *StateDB) Accumulate() error {
 			X := s.GetXContext()
 			X.S = Xs
 			s.UpdateXContext(X)
-			vm := pvm.NewVMFromCode(uint32(rho_state.WorkReport.CoreIndex), code, 0, s)
+			vm := pvm.NewVMFromCode(uint32(47), code, 0, s)
 			vm.SetArgumentInputs(wrangledWorkResultsBytes)
 			vm.Execute(types.EntryPointAccumulate)
 		}
 	}
+
 	return nil
 }
 
@@ -881,6 +894,14 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 	s.JamState.tallyStatistics(s.Id, "assurances", num_assurances)
+	fmt.Printf("Rho State Update - Assurances\n")
+	for i, rho := range s.JamState.AvailabilityAssignments {
+		if rho == nil {
+			fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
+		} else {
+			fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
+		}
+	}
 
 	// Guarantees
 	err = s.ValidateGuarantees(guarantees)
@@ -890,6 +911,14 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	num_reports := uint32(len(guarantees))
 
 	d.ProcessGuarantees(guarantees)
+	fmt.Printf("Rho State Update - Guarantees\n")
+	for i, rho := range s.JamState.AvailabilityAssignments {
+		if rho == nil {
+			fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
+		} else {
+			fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
+		}
+	}
 	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
 
 	return nil
@@ -921,6 +950,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, err
 	}
 	s.JamState.SafroleState = &s2
+	fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
 
 	// 24 - Preimages
@@ -929,15 +959,26 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
+	fmt.Printf("ApplyStateTransitionFromBlock - Preimages\n")
 
 	// 23,25-27 Disputes, Assurances. Guarantees
 	disputes := blk.Disputes()
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
 
+	for _, g := range guarantees {
+		fmt.Printf("[Core: %d]ApplyStateTransitionFromBlock Guarantee W_Hash%v\n", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	}
+
 	err = s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
 	if err != nil {
 		return s, err
+	}
+	fmt.Printf("ApplyStateTransitionFromBlock - Disputes, Assurances, Guarantees\n")
+	for _, rho := range s.JamState.AvailabilityAssignments {
+		if rho != nil {
+			fmt.Printf("ApplyStateTransitionFromBlock - Rho core[%d] WorkPackage Hash: %v\n", rho.WorkReport.CoreIndex, rho.WorkReport.GetWorkPackageHash())
+		}
 	}
 	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
 	// TODO : Remove cores and get the rho state from JamState
@@ -945,29 +986,29 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-
+	fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
 	// 29 -  Update Authorization Pool alpha'
 	err = s.ApplyStateTransitionAuthorizations(blk.Guarantees())
 	if err != nil {
 		return s, err
 	}
+	fmt.Printf("ApplyStateTransitionFromBlock - Authorizations\n")
 
 	// 30 - compute pi
 	s.JamState.tallyStatistics(s.Id, "blocks", 1)
-
+	fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
 	s.ApplyXContext()
 	// TODO : Remove cores and get the rho state from JamState
 	err = s.OnTransfer()
 	if err != nil {
 		return s, err
 	}
-
+	fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
 	s.Block = blk
 	s.ParentHash = s.BlockHash
 	s.BlockHash = blk.Hash()
-	s.StateRoot = s.UpdateTrieState()
+	// s.StateRoot = s.UpdateTrieState()
 	fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
-
 	//State transisiton is successful.  Remove E(T,P,A,G,D) from statedb queue
 	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
 	return s, nil
@@ -1019,30 +1060,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	}
 	s.queuedPreimageLookups = make(map[common.Hash]types.Preimages)
 
-	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
-	extrinsicData.Guarantees = make([]types.Guarantee, 0)
-	for _, guarantee := range s.queuedGuarantees {
-		g, err := guarantee.DeepCopy()
-		if err != nil {
-			continue
-		}
-
-		err = s.Verify_Guarantee(g)
-		if err != nil {
-			fmt.Println("Error verifying guarantee: ", err)
-			continue
-		}
-		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
-	}
-	SortByCoreIndex(extrinsicData.Guarantees)
-	// return duplicate guarantee err
-	err = s.CheckGuaranteesWorkReport(extrinsicData.Guarantees)
-	if err != nil {
-		return nil, err
-	}
-
-	s.queuedGuarantees = make(map[common.Hash]types.Guarantee)
-
 	// E_A - Assurances  aggregate queuedAssurances into extrinsicData.Assurances
 	extrinsicData.Assurances = make([]types.Assurance, 0)
 	for _, assurance := range s.queuedAssurances {
@@ -1056,11 +1073,62 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			fmt.Println("Error verifying assurance: ", err)
 			continue
 		}
+		err = CheckDuplicate(extrinsicData.Assurances, a)
+		if err != nil {
+			fmt.Println("Error checking duplicate assurance: ", err)
+			continue
+		}
 		extrinsicData.Assurances = append(extrinsicData.Assurances, a)
 	}
 	// 126 - The assurances must ordered by validator index
 	SortAssurances(extrinsicData.Assurances)
 	s.queuedAssurances = make(map[common.Hash]types.Assurance)
+	tmpState := s.JamState.Copy()
+	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances)
+	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
+	extrinsicData.Guarantees = make([]types.Guarantee, 0)
+	fmt.Printf("MakeBlock - queuedGuarantees %v\n", len(s.queuedGuarantees))
+	for _, guarantee := range s.queuedGuarantees {
+		g, err := guarantee.DeepCopy()
+		if err != nil {
+			continue
+		}
+
+		err = s.Verify_Guarantee(g)
+		if err != nil {
+			fmt.Println("Error verifying guarantee: ", err)
+			continue
+		}
+		//142 check pending report
+		err = tmpState.CheckReportTimeOut(guarantee, s.GetTimeslot())
+		if err != nil {
+			fmt.Println("Error checking report timeout: ", err)
+			continue
+		}
+		err = tmpState.CheckReportPendingOnCore(g)
+		if err != nil {
+			fmt.Println("Error checking report pending on core: ", err)
+			continue
+		}
+		err = CheckCoreIndex(extrinsicData.Guarantees, g)
+		if err != nil {
+			fmt.Println("Error checking core index: ", err)
+			continue
+		}
+		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
+		fmt.Printf("Include Guarantee (Package Hash : %v)\n", g.Report.GetWorkPackageHash())
+		// check guarantee one per core
+		// check guarantee is not a duplicate
+
+	}
+	SortByCoreIndex(extrinsicData.Guarantees)
+	// return duplicate guarantee err
+	err = s.CheckGuaranteesWorkReport(extrinsicData.Guarantees)
+	if err != nil {
+		return nil, err
+	}
+
+	s.queuedGuarantees = make(map[common.Hash]types.Guarantee)
 
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()
@@ -1125,7 +1193,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()
-	author_index, err := sf.GetAuthorIndex(credential.BandersnatchPub, "Curr")
+	author_index, err := sf.GetAuthorIndex(credential.BandersnatchPub.Hash(), "Curr")
 	if err != nil {
 		return bl, err
 	}
@@ -1135,9 +1203,15 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	unsignHeaderHash := h.UnsignedHash()
 
 	//signing
+
+	auth_secret_key, err := sf.ConvertBanderSnatchSecret(credential.BandersnatchSecret)
+	if err != nil {
+		return bl, err
+	}
+
 	epochType := sf.CheckEpochType()
 	if epochType == "fallback" {
-		blockseal, fresh_vrfSig, err := sf.SignFallBack(credential.BandersnatchSecret, unsignHeaderHash)
+		blockseal, fresh_vrfSig, err := sf.SignFallBack(auth_secret_key, unsignHeaderHash)
 		if err != nil {
 			return bl, err
 		}
@@ -1145,7 +1219,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		copy(h.EntropySource[:], fresh_vrfSig[:])
 	} else {
 		attempt, err := sf.GetBindedAttempt(targetJCE)
-		blockseal, fresh_vrfSig, err := sf.SignPrimary(credential.BandersnatchSecret, unsignHeaderHash, attempt)
+		blockseal, fresh_vrfSig, err := sf.SignPrimary(auth_secret_key, unsignHeaderHash, attempt)
 		if err != nil {
 			return bl, err
 		}

@@ -1,8 +1,6 @@
 package types
 
 import (
-	//"fmt"
-
 	"github.com/colorfulnotion/jam/common"
 )
 

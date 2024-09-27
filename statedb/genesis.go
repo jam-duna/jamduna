@@ -132,12 +132,13 @@ func InitValidator(bandersnatch_seed, ed25519_seed []byte) (types.Validator, err
 	if err != nil {
 		return validator, fmt.Errorf("Failed to init BanderSnatch Key")
 	}
-	ed25519_pub, _, err := bandersnatch.InitEd25519Key(ed25519_seed)
+	ed25519_pub, _, err := types.InitEd25519Key(ed25519_seed)
 	if err != nil {
 		return validator, fmt.Errorf("Failed to init Ed25519 Key")
 	}
-	copy(validator.Ed25519[:], ed25519_pub)
-	copy(validator.Bandersnatch[:], banderSnatch_pub)
+	//copy(validator.Ed25519[:], ed25519_pub)
+	validator.Ed25519 = ed25519_pub
+	copy(validator.Bandersnatch[:], banderSnatch_pub.Bytes())
 	//copy(validator.Ed25519[:], common.BytesToHash(ed25519_pub).Bytes())
 	//validator.Bandersnatch = common.BytesToHash(banderSnatch_pub)
 	//fmt.Printf("validator %v\n", validator)
@@ -150,15 +151,15 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed []byte) (types.Validato
 	if err != nil {
 		return validatorSecret, fmt.Errorf("Failed to init BanderSnatch Key")
 	}
-	ed25519_pub, ed25519_priv, err := bandersnatch.InitEd25519Key(ed25519_seed)
+	ed25519_pub, ed25519_priv, err := types.InitEd25519Key(ed25519_seed)
 	if err != nil {
 		return validatorSecret, fmt.Errorf("Failed to init Ed25519 Key")
 	}
 	validatorSecret.Ed25519Secret = ed25519_priv
-	validatorSecret.Ed25519Pub = common.BytesToHash(ed25519_pub)
+	validatorSecret.Ed25519Pub = ed25519_pub
 
-	validatorSecret.BandersnatchSecret = banderSnatch_priv
-	validatorSecret.BandersnatchPub = common.BytesToHash(banderSnatch_pub)
+	validatorSecret.BandersnatchSecret = banderSnatch_priv.Bytes()
+	validatorSecret.BandersnatchPub = types.BandersnatchKey(banderSnatch_pub)
 	//fmt.Printf("validatorSecret %v\n", validatorSecret)
 	return validatorSecret, nil
 }

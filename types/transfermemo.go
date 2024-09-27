@@ -1,8 +1,6 @@
 package types
 
-import (
-	"encoding/json"
-)
+import "reflect"
 
 type TransferMemo struct {
 	S uint32
@@ -16,9 +14,7 @@ type TransferMemo struct {
 func TransferMemoFromBytes(data []byte) (*TransferMemo, error) {
 	var t TransferMemo
 	// Deserialize the JSON bytes into a ServiceAccount struct
-	err := json.Unmarshal(data, &t)
-	if err != nil {
-		return nil, err
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(TransferMemo{}))
+	t = decoded.(TransferMemo)
 	return &t, nil
 }

@@ -2,7 +2,9 @@ package types
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -35,22 +37,31 @@ type Dispute struct {
 	Fault   []Fault   `json:"faults"`
 }
 
-type SDispute struct {
-	Verdict []SVerdict `json:"verdicts"`
-	Culprit []SCulprit `json:"culprits"`
-	Fault   []SFault   `json:"faults"`
-}
-
 type Verdict struct {
 	Target common.Hash                   `json:"target"`
 	Epoch  uint32                        `json:"age"`
 	Votes  [ValidatorsSuperMajority]Vote `json:"votes"`
 }
 
-type SVerdict struct {
-	Target common.Hash                    `json:"target"`
-	Epoch  uint32                         `json:"age"`
-	Votes  [ValidatorsSuperMajority]SVote `json:"votes"`
+func (v *Verdict) Verify(validators []Validator) error {
+	target := v.Target
+	for _, vote := range v.Votes {
+		signtext := vote.UnsignedBytesWithSalt(target)
+		if Ed25519Verify(validators[vote.Index].Ed25519, signtext, vote.Signature) == false {
+			return errors.New(fmt.Sprintf("Invalid signature for vote %d", vote.Index))
+		}
+	}
+	return nil
+}
+
+func (v *Vote) UnsignedBytesWithSalt(target common.Hash) []byte {
+	signtext := target.Bytes()
+	if v.Voting {
+		signtext = append([]byte(X_True), signtext...)
+	} else {
+		signtext = append([]byte(X_False), signtext...)
+	}
+	return signtext
 }
 
 type Culprit struct {
@@ -59,10 +70,15 @@ type Culprit struct {
 	Signature Ed25519Signature `json:"signature"`
 }
 
-type SCulprit struct {
-	Target    common.Hash `json:"target"`
-	Key       string      `json:"key"`
-	Signature string      `json:"signature"`
+func (c *Culprit) Verify() bool {
+	signtext := c.UnsignedBytesWithSalt()
+	return Ed25519Verify(c.Key, signtext, c.Signature)
+}
+
+func (c *Culprit) UnsignedBytesWithSalt() []byte {
+	signtext := c.Target.Bytes()
+	signtext = append([]byte(X_G), signtext...)
+	return signtext
 }
 
 type Fault struct {
@@ -72,39 +88,37 @@ type Fault struct {
 	Signature Ed25519Signature `json:"signature"`
 }
 
-type SFault struct {
-	Target    common.Hash `json:"target"`
-	Voting    bool        `json:"vote"`
-	Key       string      `json:"key"`
-	Signature string      `json:"signature"`
+func (f *Fault) Verify() bool {
+	signtext := f.UnsignedBytesWithSalt()
+	return Ed25519Verify(f.Key, signtext, f.Signature)
+}
+
+func (f *Fault) UnsignedBytesWithSalt() []byte {
+	signtext := f.Target.Bytes()
+	if f.Voting {
+		signtext = append([]byte(X_True), signtext...)
+	} else {
+		signtext = append([]byte(X_False), signtext...)
+	}
+	return signtext
 }
 
 func (t Dispute) DeepCopy() (Dispute, error) {
 	var copiedDispute Dispute
 
 	// Serialize the original Dispute to JSON
-	data, err := json.Marshal(t)
-	if err != nil {
-		return copiedDispute, err
-	}
+	data := Encode(t)
 
 	// Deserialize the JSON back into a new Dispute instance
-	err = json.Unmarshal(data, &copiedDispute)
-	if err != nil {
-		return copiedDispute, err
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(Dispute{}))
+	copiedDispute = decoded.(Dispute)
 
 	return copiedDispute, nil
 }
 
 // Bytes returns the bytes of the Dispute
 func (a *Dispute) Bytes() []byte {
-	enc, err := json.Marshal(a)
-	if err != nil {
-		// Handle the error according to your needs.
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
+	enc := Encode(a)
 	return enc
 }
 
@@ -114,7 +128,7 @@ func (a *Dispute) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.BytesToHash(common.ComputeHash(data))
+	return common.Blake2Hash(data)
 }
 
 func (a *Dispute) Print() {
@@ -145,96 +159,164 @@ func (a *Dispute) Print() {
 	}
 }
 
-func (s *SFault) Deserialize() (Fault, error) {
+func (a *Culprit) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Target    common.Hash `json:"target"`
+		Key       string      `json:"key"`
+		Signature string      `json:"signature"`
+	}
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return err
+	}
+	a.Target = s.Target
 	keyBytes := common.FromHex(s.Key)
-	var key Ed25519Key
-	copy(key[:], keyBytes)
+	copy(a.Key[:], keyBytes)
 	signatureBytes := common.FromHex(s.Signature)
-	var signature Ed25519Signature
-	copy(signature[:], signatureBytes)
+	copy(a.Signature[:], signatureBytes)
 
-	return Fault{
-		Target:    s.Target,
-		Voting:    s.Voting,
-		Key:       key,
-		Signature: signature,
-	}, nil
+	return nil
 }
 
-func (s *SCulprit) Deserialize() (Culprit, error) {
-	keyBytes := common.FromHex(s.Key)
-	var key Ed25519Key
-	copy(key[:], keyBytes)
-	signatureBytes := common.FromHex(s.Signature)
-	var signature Ed25519Signature
-	copy(signature[:], signatureBytes)
-
-	return Culprit{
-		Target:    s.Target,
-		Key:       key,
-		Signature: signature,
-	}, nil
+type Vote struct {
+	Voting    bool             `json:"vote"`      // true for the work report is good, false for the work report is bad
+	Index     uint16           `json:"index"`     // validator index
+	Signature Ed25519Signature `json:"signature"` // signature of the vote (ByteArray64 in disputes.asn)
 }
 
-func (s *SVerdict) Deserialize() (Verdict, error) {
-	votes := [ValidatorsSuperMajority]Vote{}
-	for i, sv := range s.Votes {
-		v, err := sv.Deserialize()
-		if err != nil {
-			return Verdict{}, err
-		}
-		votes[i] = v
-	}
+func (t Vote) DeepCopy() (Vote, error) {
+	var copiedVote Vote
 
-	return Verdict{
-		Target: s.Target,
-		Epoch:  s.Epoch,
-		Votes:  votes,
-	}, nil
-}
-func (s *SDispute) Deserialize() (Dispute, error) {
-	verdicts := make([]Verdict, len(s.Verdict))
-	for i, sv := range s.Verdict {
-		v, err := sv.Deserialize()
-		if err != nil {
-			return Dispute{}, err
-		}
-		verdicts[i] = v
-	}
+	// Serialize the original Dispute to JSON
+	data := Encode(t)
 
-	culprits := make([]Culprit, len(s.Culprit))
-	for i, sc := range s.Culprit {
-		c, err := sc.Deserialize()
-		if err != nil {
-			return Dispute{}, err
-		}
-		culprits[i] = c
-	}
-
-	faults := make([]Fault, len(s.Fault))
-	for i, sf := range s.Fault {
-		f, err := sf.Deserialize()
-		if err != nil {
-			return Dispute{}, err
-		}
-		faults[i] = f
-	}
-
-	return Dispute{
-		Verdict: verdicts,
-		Culprit: culprits,
-		Fault:   faults,
-	}, nil
+	// Deserialize the JSON back into a new Dispute instance
+	decoded, _ := Decode(data, reflect.TypeOf(Vote{}))
+	copiedVote = decoded.(Vote)
+	return copiedVote, nil
 }
 
-func (s *SOffenderMarker) Deserialize() (*OffenderMarker, error) {
-	keys := make([]Ed25519Key, len(s.OffenderKey))
-	for i, keyStr := range s.OffenderKey {
-		keyBytes := common.FromHex(keyStr)
-		copy(keys[i][:], keyBytes)
+// func (v *Vote) Bytes() []byte {
+// 	enc := Encode(v)
+// 	return enc
+// }
+
+// func (v *Vote) Hash() common.Hash {
+// 	data := v.Bytes()
+// 	if data == nil {
+// 		// Handle the error case
+// 		return common.Hash{}
+// 	}
+// 	return common.Blake2Hash(data)
+// }
+
+func FormDispute(v map[common.Hash]Vote) Dispute {
+	//return nil dispute
+	_ = v
+	return Dispute{}
+}
+
+func (a *Vote) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Voting    bool   `json:"vote"`
+		Index     uint16 `json:"index"`
+		Signature string `json:"signature"`
+	}
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return err
 	}
 
-	return &OffenderMarker{
-		OffenderKey: keys,
-	}, nil
+	a.Voting = s.Voting
+	a.Index = s.Index
+	a.Signature = Ed25519Signature(common.FromHex(s.Signature))
+	return nil
+}
+
+func (a Vote) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Voting    bool   `json:"vote"`
+		Index     uint16 `json:"index"`
+		Signature string `json:"signature"`
+	}{
+		Voting:    a.Voting,
+		Index:     a.Index,
+		Signature: common.HexString(a.Signature[:]),
+	})
+}
+
+func (v *Vote) Bytes() []byte {
+	enc := Encode(v)
+	return enc
+}
+
+func (v *Vote) Hash() common.Hash {
+	data := v.Bytes()
+	return common.Blake2Hash(data)
+}
+
+func (a *Fault) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Target    common.Hash `json:"target"`
+		Voting    bool        `json:"vote"`
+		Key       string      `json:"key"`
+		Signature string      `json:"signature"`
+	}
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return err
+	}
+
+	a.Target = s.Target
+	a.Voting = s.Voting
+	a.Key = Ed25519Key(common.FromHex(s.Key))
+	a.Signature = Ed25519Signature(common.FromHex(s.Signature))
+
+	return nil
+}
+
+func (a *Culprit) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Target    common.Hash `json:"target"`
+		Key       string      `json:"key"`
+		Signature string      `json:"signature"`
+	}{
+		Target:    a.Target,
+		Key:       common.HexString(a.Key[:]),
+		Signature: common.HexString(a.Signature[:]),
+	})
+}
+
+func (a *Fault) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Target    common.Hash `json:"target"`
+		Voting    bool        `json:"vote"`
+		Key       string      `json:"key"`
+		Signature string      `json:"signature"`
+	}{
+		Target:    a.Target,
+		Voting:    a.Voting,
+		Key:       common.HexString(a.Key[:]),
+		Signature: common.HexString(a.Signature[:]),
+	})
+}
+
+func (c *Culprit) Bytes() []byte {
+	enc := Encode(c)
+	return enc
+}
+
+func (c *Culprit) Hash() common.Hash {
+	data := c.Bytes()
+	return common.Blake2Hash(data)
+}
+
+func (f *Fault) Bytes() []byte {
+	enc := Encode(f)
+	return enc
+}
+
+func (f *Fault) Hash() common.Hash {
+	data := f.Bytes()
+	return common.Blake2Hash(data)
 }

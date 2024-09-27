@@ -274,7 +274,7 @@ func TestECRoundTrip(t *testing.T) {
 
 */
 
-func TestWorkGuarantee(t *testing.T) {
+func TestWorkGuaranteeWithExtrinsic(t *testing.T) {
 
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
 	if err != nil {
@@ -291,6 +291,222 @@ func TestWorkGuarantee(t *testing.T) {
 
 	// fib code
 	code, err := loadByteCode("../jamtestvectors/workpackages/fib_full_with_entry_point.pvm")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
+	codeHash := common.Hash{}
+	fmt.Printf("Code: %x\n", code)
+	codeHash = common.Blake2Hash(code)
+	// var wg sync.WaitGroup
+	// wg.Add(1) // Wait for one task to complete
+
+	// Coroutine to encode and distribute arbitrary data
+	// go func() {
+	// 	codeHash, err = nodes[0].EncodeAndDistributeArbitraryData(code, len(code), &wg)
+	// 	if err != nil {
+	// 		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+	// 	}
+	// }()
+
+	// Wait for the encoding and distribution to finish
+	// wg.Wait()
+
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	for _, n := range nodes {
+		target_statedb := n.getPVMStateDB()
+		target_statedb.WriteServicePreimageBlob(47, code)
+		tentativeRoot := target_statedb.GetTentativeStateRoot()
+		target_statedb.StateRoot = tentativeRoot
+		n.statedb = target_statedb.Copy()
+
+		recovered_code := n.statedb.ReadServicePreimageBlob(47, codeHash)
+		if !common.CompareBytes(code, recovered_code) {
+			panic(0)
+		}
+	}
+
+	authToken := []byte("0x")               // TODO: sign
+	var exportedItems []types.ImportSegment // how do you get import segments from previous round?
+	for n := 1; n < 21; n++ {
+		fmt.Printf("\n\n\n********************** FIB N=%v Starts **********************\n", n)
+		time.Sleep(3 * time.Second)
+		importedSegments := make([]types.ImportSegment, 0)
+		// if n == 1 {
+		// 	importedSegments = append(importedSegments, types.ImportSegment{
+		// 		TreeRoot: treeRoot,
+		// 		Index:    0,
+		// 	})
+		// }
+		if n > 1 {
+			importedSegments = append(importedSegments, exportedItems...)
+		}
+		refine_context := types.RefineContext{}
+
+		// WorkPackage represents a work package.
+		/*type WorkPackage struct {
+			// $j$ - a simple blob acting as an authorization token
+			Authorization []byte `json:"authorization"`
+			// $h$ - the index of the service which hosts the authorization code
+			AuthCodeHost uint32 `json:"auth_code_host"`
+			// $c$ - an authorization code hash
+			Authorizer Authorizer `json:"authorizer"`
+			// $x$ - context
+			RefineContext RefinementContext `json:"context"`
+			// $i$ - a sequence of work items
+			WorkItems []WorkItem `json:"items"`
+		}*/
+
+		workPackage := types.WorkPackage{
+			Authorization: authToken,
+			AuthCodeHost:  47,
+			Authorizer:    types.Authorizer{},
+			RefineContext: refine_context,
+			WorkItems: []types.WorkItem{
+				{
+					Service:          47,
+					CodeHash:         codeHash,
+					Payload:          []byte("0x00000010"),
+					GasLimit:         10000000,
+					ImportedSegments: importedSegments,
+					ExportCount:      1,
+				},
+			},
+		}
+		packageHash := workPackage.Hash()
+		currentJce := statedb.ComputeCurrentJCETime()
+		for _, n := range nodes {
+			_, phase := n.statedb.JamState.SafroleState.EpochAndPhase(currentJce)
+			EA, err := n.GenerateDummyAssurance()
+			if err == nil {
+				n.broadcast(EA)
+			} else {
+				fmt.Printf("GenerateDummyAssurance Error: %v\n", err)
+			}
+
+			if phase%types.TotalValidators == n.statedb.Id {
+				fmt.Println("Authorized Block Builder is Node: ", n.id)
+				ctx := context.Background()
+				s0 := n.statedb
+				if s0 == nil {
+					fmt.Println("s0 is nil")
+				}
+				targetJCE := statedb.ComputeCurrentJCETime() + 120
+				b1, b1_err := s0.MakeBlock(n.credential, targetJCE)
+				if b1_err != nil {
+					t.Fatalf("MakeBlock err %v\n", b1_err)
+				}
+				s1, s1_err := statedb.ApplyStateTransitionFromBlock(s0, ctx, b1)
+				if s1_err != nil {
+					t.Fatalf("S0->S1 Transition Err: %v\n", s1_err)
+				}
+				n.addStateDB(s1)
+				n.broadcast(*b1)
+			}
+		}
+
+		for _, n := range nodes {
+			fmt.Println("Node ID:", n.id)
+			target_statedb := n.getPVMStateDB()
+			target_statedb.WriteServicePreimageBlob(workPackage.AuthCodeHost, code)
+			tentativeRoot := target_statedb.GetTentativeStateRoot()
+			target_statedb.StateRoot = tentativeRoot
+			n.statedb = target_statedb.Copy()
+			n.statedb.AssignGuarantors(true)
+			n.statedb.PreviousGuarantors(true)
+			recovered_code := n.statedb.ReadServicePreimageBlob(workPackage.AuthCodeHost, codeHash)
+			if !common.CompareBytes(code, recovered_code) {
+				panic(0)
+			}
+		}
+		//spec *types.AvailabilitySpecifier, err error, bBlobHash common.Hash, sBlobHash common.Hash, exportedSegments [][]byte
+		E_G, treeRoot, specifier, err := nodes[0].GenerateGuarantee(workPackage)
+		if err != nil {
+			t.Fatalf("Failed to generate guarantee: %v", err)
+		}
+		nodes[0].broadcast(E_G)
+		err = nodes[0].processGuarantee(E_G)
+		if err != nil {
+			t.Fatalf("Failed to self process guarantee: %v", err)
+		}
+		// 1. Check PackageHash
+		if specifier.WorkPackageHash != packageHash {
+			t.Errorf("expected PackageHash %v, got %v", packageHash, specifier.WorkPackageHash)
+		} else {
+			fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegmentRoot)
+		}
+
+		if len(specifier.ErasureRoot) == 0 {
+			t.Error("ErasureRoot should not be empty")
+		} else {
+			fmt.Printf("ErasureRoot:%s\n", specifier.ErasureRoot)
+		}
+
+		if len(specifier.ErasureRoot) == 0 {
+			t.Error("SegmentRoot should not be empty")
+		} else {
+			fmt.Printf("SegmentRoot:%s\n", specifier.ErasureRoot)
+		}
+
+		// 4. Check ExportedSegmentRoot (simplified check)
+		if len(specifier.ExportedSegmentRoot) == 0 {
+			t.Error("ExportedSegmentRoot should not be empty")
+		} else {
+			fmt.Printf("Exported Segments root:%s\n", specifier.ExportedSegmentRoot)
+		}
+		t.Logf("Generated Availability Specifier: %+v", specifier)
+		// TODO: use specifier to setup the next importsegments
+		exportedSegmentsRoot, _ := nodes[0].GetSegmentTreeRoots(treeRoot)
+		fmt.Printf("exportedSegments Len=%d, exportedSegments: %x\n", len(exportedSegmentsRoot), exportedSegmentsRoot)
+		exportedItems = nil
+		for i, segmentRoot := range exportedSegmentsRoot {
+			fmt.Printf("[seg_idx=%v] segmentRoot=%v\n", i, treeRoot)
+			exportedItem := types.ImportSegment{
+				TreeRoot: segmentRoot,
+				Index:    uint16(i),
+			}
+			fmt.Printf("exportedItem: %v\n", exportedItem)
+			exportedItems = append(exportedItems, exportedItem)
+		}
+		fmt.Printf("++ exportedSegments: %v\n", exportedSegmentsRoot)
+		fmt.Printf("===Extrinsic Guarantees: ===\n")
+		fmt.Printf("Bucket Length %d\n", len(nodes[0].guaranteeBucket[workPackage.Hash()]))
+		for _, g := range nodes[0].guaranteeBucket[workPackage.Hash()] {
+			fmt.Printf("Recieved From [V%d]\n", g.GuaranteeCredential.ValidatorIndex)
+		}
+		E_G.Print()
+		//delay
+		time.Sleep(1 * time.Second)
+		// EG_2, err := nodes[4].FormGuarantee(workPackage.Hash())
+		// if err != nil {
+		// 	t.Fatalf("Failed to form guarantee: %v", err)
+		// }
+		// assert.Equal(t, E_G.Bytes(), EG_2.Bytes(), "The guarantees E_G and EG_2 should be equal")
+
+	}
+
+}
+func TestWorkGuarantee(t *testing.T) {
+
+	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	if err != nil {
+		t.Fatalf("Error setting up nodes: %v\n", err)
+	}
+	nodes := make([]*Node, numNodes)
+	for i := 0; i < numNodes; i++ {
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		if err != nil {
+			t.Fatalf("Failed to create node %d: %v\n", i, err)
+		}
+		nodes[i] = node
+	}
+
+	// fib code
+	code, err := loadByteCode("../jamtestvectors/workpackages/fib-refine-fixed.pvm")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -399,7 +615,7 @@ func TestWorkGuarantee(t *testing.T) {
 			fmt.Println("Node ID:", n.id)
 			if n.coreIndex == 0 {
 				//spec *types.AvailabilitySpecifier, err error, bBlobHash common.Hash, sBlobHash common.Hash, exportedSegments [][]byte
-				specifier, treeRoot, err := n.processWorkPackage(workPackage)
+				_, specifier, treeRoot, err := n.processWorkPackage(workPackage)
 				if err != nil {
 					panic(0)
 				}
@@ -447,7 +663,6 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 	}
 }
-
 func TestCodeParse(t *testing.T) {
 
 	// fib code

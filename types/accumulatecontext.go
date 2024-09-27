@@ -1,9 +1,5 @@
 package types
 
-import (
-// "github.com/colorfulnotion/jam/common"
-)
-
 type Empower struct {
 	M uint32
 	A uint32

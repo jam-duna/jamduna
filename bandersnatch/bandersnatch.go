@@ -9,60 +9,71 @@ package bandersnatch
 import "C"
 import (
 	"bytes"
-	"crypto/ed25519"
+	//"crypto/ed25519"
 	"errors"
 	"fmt"
 	"unsafe"
+	"encoding/hex"
+
+	//"github.com/colorfulnotion/jam/types"
 )
 
-type PrivateKey []byte
-type PublicKey []byte
+type BanderSnatchSecret [PubkeyLen]byte
+type BanderSnatchKey [SecretLen]byte
+type BandersnatchVrfSignature [IETFSignatureLen]byte
+type BandersnatchRingSignature [RingSignatureLen]byte
+
 type Seed []byte
 
-const (
-	RingSignatureLen = 784
-	IETFSignatureLen = 96
-	VRFOutputLen     = 32
-)
+func (bk BanderSnatchKey) Bytes() []byte {
+	return bk[:]
+}
 
-func InitEd25519Key(seed []byte) ([]byte, []byte, error) {
-	// Check if the seed length is 32 bytes
-	if len(seed) != ed25519.SeedSize {
-		return nil, nil, fmt.Errorf("seed length must be %d bytes", ed25519.SeedSize)
+func (bs BanderSnatchSecret) Bytes() []byte {
+	return bs[:]
+}
+
+func (bk BanderSnatchKey) String() string {
+	return hex.EncodeToString(bk.Bytes())
+}
+
+func (bs BanderSnatchSecret) String() string {
+	return hex.EncodeToString(bs.Bytes())
+}
+
+func BytesToBanderSnatchSecret(b []byte) (bs BanderSnatchSecret, err error) {
+	if len(b) != SecretLen {
+		return BanderSnatchSecret{}, fmt.Errorf("invalid byte slice length: expected %d bytes, got %d", SecretLen, len(b))
 	}
-
-	// Generate the private key from the seed
-	ed25519_priv := ed25519.NewKeyFromSeed(seed)
-
-	// The public key is the second half of the private key
-	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
-
-	return ed25519_pub, ed25519_priv, nil
+	copy(bs[:], b)
+	return bs, nil
 }
 
 // InitBanderSnatchKey initializes the BanderSnatch keys using the provided seed.
-func InitBanderSnatchKey(seed []byte) (PublicKey, PrivateKey, error) {
+func InitBanderSnatchKey(seed []byte) (key BanderSnatchKey, secret BanderSnatchSecret, err error) {
 	// Check if the seed length is 32 bytes
-	if len(seed) != 32 {
-		return nil, nil, fmt.Errorf("seed length must be 32 bytes")
+	if len(seed) != SeedLen {
+		return key, secret, fmt.Errorf("seed length must be %v bytes", SeedLen)
 	}
 
 	// Retrieve the public key
-	banderSnatch_pub, err := getPublicKey(seed)
+	banderSnatch_pub, err := getBanderSnatchPublicKey(seed)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get public key: %v", err)
+		return key, secret, fmt.Errorf("failed to get public key: %v", err)
 	}
 
 	// Retrieve the private key
-	banderSnatch_priv, err := getPrivateKey(seed)
+	banderSnatch_priv, err := getBanderSnatchPrivateKey(seed)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get private key: %v", err)
+		return key, secret, fmt.Errorf("failed to get private key: %v", err)
 	}
+	fmt.Printf("!!!!BanderSnatch Pub Len=%v, Priv Len=%v\n", len(banderSnatch_pub), len(banderSnatch_priv))
 	return banderSnatch_pub, banderSnatch_priv, nil
 }
 
-func getPublicKey(seed []byte) (PublicKey, error) {
-	pubKey := make([]byte, 32) // Adjust size as necessary
+func getBanderSnatchPublicKey(seed []byte) (BanderSnatchKey, error) {
+	//pubKey := make([]byte, 32) // Adjust size as necessary
+	pubKey := BanderSnatchKey{}
 	C.get_public_key(
 		(*C.uchar)(unsafe.Pointer(&seed[0])),
 		C.size_t(len(seed)),
@@ -72,8 +83,9 @@ func getPublicKey(seed []byte) (PublicKey, error) {
 	return pubKey, nil
 }
 
-func getPrivateKey(seed []byte) (PrivateKey, error) {
-	secret := make([]byte, 32) // Adjust size as necessary
+func getBanderSnatchPrivateKey(seed []byte) (BanderSnatchSecret, error) {
+	//secret := make([]byte, 32) // Adjust size as necessary
+	secret := BanderSnatchSecret{}
 	C.get_private_key(
 		(*C.uchar)(unsafe.Pointer(&seed[0])),
 		C.size_t(len(seed)),
@@ -83,17 +95,17 @@ func getPrivateKey(seed []byte) (PrivateKey, error) {
 	return secret, nil
 }
 
-func InitRingSet(ringset []PublicKey) (ringsetBytes []byte) {
+func InitRingSet(ringset []BanderSnatchKey) (ringsetBytes []byte) {
 	// Flatten pubkeys into a single byte slice
 	for _, pubkey := range ringset {
-		ringsetBytes = append(ringsetBytes, pubkey...)
+		ringsetBytes = append(ringsetBytes, pubkey[:]...)
 	}
 	return ringsetBytes
 }
 
 // Anonymous Ring VRF
 // RingVRFSign is Used for tickets submission to sign ticket anonymously. Output and Ring Proof bundled together (as per section 2.2)
-func RingVrfSign(privateKey PrivateKey, ringsetBytes, vrfInputData, auxData []byte /*, proverIdx int*/) ([]byte, []byte, error) {
+func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxData []byte /*, proverIdx int*/) ([]byte, []byte, error) {
 	sig := make([]byte, RingSignatureLen) // 784 bytes
 	vrfOutput := make([]byte, 32)
 
@@ -153,7 +165,7 @@ func RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte) ([]byt
 
 // Non Anonymous IETF VRF
 // IetfVrfSign is Used for ticket claiming during block production.
-func IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte) ([]byte, []byte, error) {
+func IetfVrfSign(privateKey BanderSnatchSecret, vrfInputData, auxData []byte) ([]byte, []byte, error) {
 	sig := make([]byte, IETFSignatureLen) // 96 bytes
 	vrfOutput := make([]byte, 32)
 	auxDataL := C.size_t(len(auxData))
@@ -182,7 +194,7 @@ func IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte) ([]byte, [
 // IetfVrfVerifyAndGenerateVrfOutput is Used for ticket claim verification during block import
 // returns vrfOutput on success
 // NOTE: this external func should use PublicKey directly instead of index
-func IetfVrfVerify(pubKey PublicKey, signature, vrfInputData, auxData []byte) ([]byte, error) {
+func IetfVrfVerify(pubKey BanderSnatchKey, signature, vrfInputData, auxData []byte) ([]byte, error) {
 	vrfOutput := make([]byte, VRFOutputLen)
 	result := C.ietf_vrf_verify(
 		(*C.uchar)(unsafe.Pointer(&pubKey[0])),
@@ -207,7 +219,7 @@ since VRFSignedOutput(ringSig) and  VRFSignedOutput(ietfSig) yield same output_h
 it should be possible to compute ticketID without goign through RingVRFSign
 */
 // Return vrfOutput given PrivateKey, vrfInputData
-func VRFOutput(privateKey PrivateKey, vrfInputData, auxData []byte) ([]byte, error) {
+func VRFOutput(privateKey BanderSnatchSecret, vrfInputData, auxData []byte) ([]byte, error) {
 	vrfOutput := make([]byte, 32)
 	_, vrfOutput, err := IetfVrfSign(privateKey, vrfInputData, auxData)
 	if err != nil {
@@ -247,8 +259,8 @@ func VRFSignedOutput(signature []byte) ([]byte, error) {
 }
 
 func GetRingCommitment(ringsetBytes []byte) ([]byte, error) {
-	emptyBytes := make([]byte, 144)
-	commitmentBytes := make([]byte, 144)
+	emptyBytes := make([]byte, BlsLen)
+	commitmentBytes := make([]byte, BlsLen)
 	C.get_ring_commitment(
 		(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
 		C.size_t(len(ringsetBytes)),

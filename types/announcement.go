@@ -2,13 +2,11 @@ package types
 
 import (
 	"crypto/ed25519"
-	//"encoding/binary"
-	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
-
 
 // Announcement  Section 17.3 Equations (196)-(199) TBD
 type Announcement struct {
@@ -19,22 +17,36 @@ type Announcement struct {
 	Signature      Ed25519Signature `json:"signature"`
 }
 
+func (a *Announcement) Bytes() []byte {
+	enc := Encode(a)
+
+	return enc
+}
+
+func (a *Announcement) Hash() common.Hash {
+	data := a.Bytes()
+	return common.Blake2Hash(data)
+}
+
 // computeAnnouncementBytes abstracts the process of generating the bytes to be signed or verified.
-func (a *Announcement) computeAnnouncementBytes() []byte {
-	h := append(common.Uint32ToBytes(a.Tranche), common.Uint16ToBytes(a.Core)...)
+func (a *Announcement) UnsignedBytes() []byte {
+	signtext := append(common.Uint32ToBytes(a.Tranche), common.Uint16ToBytes(a.Core)...)
 	h0 := a.WorkReport.AvailabilitySpec.WorkPackageHash
-	h = append(h, h0.Bytes()...)
-	return append([]byte(X_I), h...)
+	signtext = append(signtext, h0.Bytes()...)
+	return signtext
+}
+
+func (a *Announcement) UnsignedBytesWithSalt() []byte {
+	signtext := a.UnsignedBytes()
+	return append([]byte(X_I), signtext...)
 }
 func (a *Announcement) Sign(Ed25519Secret []byte) {
-	signtext := append([]byte(X_I), common.Uint32ToBytes(a.Tranche)...)
-	signtext = append(signtext, common.Uint16ToBytes(a.Core)...)
-	signtext = append(signtext, a.WorkReport.AvailabilitySpec.WorkPackageHash.Bytes()...)
+	signtext := a.UnsignedBytesWithSalt()
 	a.Signature = Ed25519Signature(ed25519.Sign(Ed25519Secret, signtext))
 }
 
-func (a *Announcement) ValidateSignature(key Ed25519Key) error {
-	announcementBytes := a.computeAnnouncementBytes()
+func (a *Announcement) Verify(key Ed25519Key) error {
+	announcementBytes := a.UnsignedBytesWithSalt()
 
 	if !ed25519.Verify(key.PublicKey(), announcementBytes, a.Signature.Bytes()) {
 		return fmt.Errorf("invalid signature by signature %v", a.Signature)
@@ -42,23 +54,18 @@ func (a *Announcement) ValidateSignature(key Ed25519Key) error {
 	return nil
 }
 
-func (a *Announcement) Bytes() []byte {
-	enc, err := json.Marshal(a)
-	if err != nil {
-		fmt.Println("Error marshaling JSON:", err)
-		return nil
-	}
-	return enc
-}
+// func (a *Announcement) Bytes() []byte {
+// 	enc := Encode(a)
+// 	return enc
+// }
 
-func (a *Announcement) Hash() common.Hash {
-	data := a.Bytes()
-	if data == nil {
-		return common.Hash{}
-	}
-	return common.BytesToHash(common.ComputeHash(data))
-}
-
+// func (a *Announcement) Hash() common.Hash {
+// 	data := a.Bytes()
+// 	if data == nil {
+// 		return common.Hash{}
+// 	}
+// 	return common.Blake2Hash(data)
+// }
 
 // eq 198
 type AnnounceBucket struct {
@@ -90,16 +97,11 @@ func (W *AnnounceBucket) DeepCopy() (AnnounceBucket, error) {
 	var copiedAnnounceBucket AnnounceBucket
 
 	// Serialize the original AnnounceBucket to JSON
-	data, err := json.Marshal(W)
-	if err != nil {
-		return copiedAnnounceBucket, err
-	}
+	data := Encode(W)
 
 	// Deserialize the JSON back into a new AnnounceBucket instance
-	err = json.Unmarshal(data, &copiedAnnounceBucket)
-	if err != nil {
-		return copiedAnnounceBucket, err
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(AnnounceBucket{}))
+	copiedAnnounceBucket = decoded.(AnnounceBucket)
 
 	return copiedAnnounceBucket, nil
 }

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -22,14 +23,6 @@ type WorkResult struct {
 	PayloadHash common.Hash `json:"payload_hash"`
 	GasRatio    uint64      `json:"gas_ratio"`
 	Result      Result      `json:"result"`
-}
-
-type SWorkResult struct {
-	Service     uint32                 `json:"service"`
-	CodeHash    common.Hash            `json:"code_hash"`
-	PayloadHash common.Hash            `json:"payload_hash"`
-	GasRatio    uint64                 `json:"gas_ratio"`
-	Result      map[string]interface{} `json:"result"`
 }
 
 type Result struct {
@@ -58,43 +51,6 @@ func (wr *WorkResult) Wrangle(authorizationOutput []byte, workPackageHash common
 		PayloadHash:         wr.PayloadHash,
 		AuthorizationOutput: authorizationOutput,
 		WorkPackageHash:     workPackageHash,
-	}
-}
-
-func (s *SWorkResult) Deserialize() WorkResult {
-	var result Result
-	if _, ok := s.Result["ok"]; ok {
-		result = Result{
-			Ok:  common.FromHex(s.Result["ok"].(string)),
-			Err: RESULT_OK,
-		}
-	} else if _, ok := s.Result["out-of-gas"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: RESULT_OOG,
-		}
-	} else if _, ok := s.Result["panic"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: RESULT_PANIC,
-		}
-	} else if _, ok := s.Result["bad-code"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: RESULT_BAD_CODE,
-		}
-	} else if _, ok := s.Result["code-oversize"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: RESULT_OOB,
-		}
-	}
-	return WorkResult{
-		Service:     s.Service,
-		CodeHash:    s.CodeHash,
-		PayloadHash: s.PayloadHash,
-		GasRatio:    s.GasRatio,
-		Result:      result,
 	}
 }
 
@@ -148,4 +104,100 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 		}, length
 	}
 	return nil, 0
+}
+
+func (a *WorkResult) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Service     uint32                 `json:"service"`
+		CodeHash    common.Hash            `json:"code_hash"`
+		PayloadHash common.Hash            `json:"payload_hash"`
+		GasRatio    uint64                 `json:"gas_ratio"`
+		Result      map[string]interface{} `json:"result"`
+	}
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return err
+	}
+
+	var result Result
+	if _, ok := s.Result["ok"]; ok {
+		result = Result{
+			Ok:  common.FromHex(s.Result["ok"].(string)),
+			Err: RESULT_OK,
+		}
+	}
+	if _, ok := s.Result["out-of-gas"]; ok {
+		result = Result{
+			Ok:  nil,
+			Err: RESULT_OOG,
+		}
+	}
+	if _, ok := s.Result["panic"]; ok {
+		result = Result{
+			Ok:  nil,
+			Err: RESULT_PANIC,
+		}
+	}
+	if _, ok := s.Result["bad-code"]; ok {
+		result = Result{
+			Ok:  nil,
+			Err: RESULT_BAD_CODE,
+		}
+	}
+	if _, ok := s.Result["code-oversize"]; ok {
+		result = Result{
+			Ok:  nil,
+			Err: RESULT_OOB,
+		}
+	}
+
+	a.Service = s.Service
+	a.CodeHash = s.CodeHash
+	a.PayloadHash = s.PayloadHash
+	a.GasRatio = s.GasRatio
+	a.Result = result
+
+	return nil
+}
+
+func (a WorkResult) MarshalJSON() ([]byte, error) {
+	var result map[string]interface{}
+	if a.Result.Err == RESULT_OK {
+		result = map[string]interface{}{
+			"ok": common.HexString(a.Result.Ok),
+		}
+	} else {
+		switch a.Result.Err {
+		case RESULT_OOG:
+			result = map[string]interface{}{
+				"out-of-gas": nil,
+			}
+		case RESULT_PANIC:
+			result = map[string]interface{}{
+				"panic": nil,
+			}
+		case RESULT_BAD_CODE:
+			result = map[string]interface{}{
+				"bad-code": nil,
+			}
+		case RESULT_OOB:
+			result = map[string]interface{}{
+				"code-oversize": nil,
+			}
+		}
+	}
+
+	return json.Marshal(&struct {
+		Service     uint32                 `json:"service"`
+		CodeHash    common.Hash            `json:"code_hash"`
+		PayloadHash common.Hash            `json:"payload_hash"`
+		GasRatio    uint64                 `json:"gas_ratio"`
+		Result      map[string]interface{} `json:"result"`
+	}{
+		Service:     a.Service,
+		CodeHash:    a.CodeHash,
+		PayloadHash: a.PayloadHash,
+		GasRatio:    a.GasRatio,
+		Result:      result,
+	})
 }

@@ -1,9 +1,9 @@
 package types
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
@@ -18,37 +18,29 @@ type Ticket struct {
 	Signature BandersnatchRingSignature `json:"signature"`
 }
 
-type STicket struct {
-	Attempt   uint8  `json:"attempt"`
-	Signature string `json:"signature"`
-}
-
 func (t Ticket) MarshalJSON() ([]byte, error) {
 	type Alias Ticket
 	return json.Marshal(&struct {
-		Signature string `json:"signature"`
 		*Alias
+		Signature string `json:"signature"`
 	}{
-		Signature: hex.EncodeToString(t.Signature[:]),
 		Alias:     (*Alias)(&t),
+		Signature: common.HexString(t.Signature[:]),
 	})
 }
 
 func (t *Ticket) UnmarshalJSON(data []byte) error {
 	type Alias Ticket
 	aux := &struct {
-		Signature string `json:"signature"`
 		*Alias
+		Signature string `json:"signature"`
 	}{
 		Alias: (*Alias)(t),
 	}
 	if err := json.Unmarshal(data, aux); err != nil {
 		return err
 	}
-	sigBytes, err := hex.DecodeString(aux.Signature)
-	if err != nil {
-		return err
-	}
+	sigBytes := common.FromHex(aux.Signature)
 	copy(t.Signature[:], sigBytes)
 	return nil
 }
@@ -57,22 +49,17 @@ func (t Ticket) DeepCopy() (Ticket, error) {
 	var copiedTicket Ticket
 
 	// Serialize the original Ticket to JSON
-	data, err := json.Marshal(t)
-	if err != nil {
-		return copiedTicket, err
-	}
+	data := Encode(t)
 
 	// Deserialize the JSON back into a new Ticket instance
-	err = json.Unmarshal(data, &copiedTicket)
-	if err != nil {
-		return copiedTicket, err
-	}
+	decoded, _ := Decode(data, reflect.TypeOf(Ticket{}))
+	copiedTicket = decoded.(Ticket)
 
 	return copiedTicket, nil
 }
 
 func (t Ticket) String() string {
-	return fmt.Sprintf("Ticket{Attempt: %d, Signature: %s}", t.Attempt, hex.EncodeToString(t.Signature[:]))
+	return fmt.Sprintf("Ticket{Attempt: %d, Signature: %s}", t.Attempt, common.HexString(t.Signature[:]))
 }
 
 func (t *Ticket) TicketIDWithCheck() (common.Hash, error) {
@@ -91,13 +78,33 @@ func (t *Ticket) TicketID() common.Hash {
 	return common.BytesToHash(ticket_id)
 }
 
-func (s *STicket) Deserialize() (Ticket, error) {
-	signatureBytes := common.FromHex(s.Signature)
-	var signature BandersnatchRingSignature
-	copy(signature[:], signatureBytes)
 
-	return Ticket{
-		Attempt:   s.Attempt,
-		Signature: signature,
-	}, nil
+func (t *Ticket) Bytes() ([]byte, error) {
+	return t.BytesWithSig(), nil
+}
+
+func (t *Ticket) UnsignedHash() common.Hash {
+	unsignedBytes := t.BytesWithoutSig()
+	return common.Blake2Hash(unsignedBytes)
+}
+
+func (t *Ticket) Hash() common.Hash {
+	data := t.BytesWithSig()
+	return common.Blake2Hash(data)
+}
+
+func (t *Ticket) BytesWithSig() []byte {
+	enc := Encode(t)
+	return enc
+}
+
+func (t *Ticket) BytesWithoutSig() []byte {
+	s := struct {
+		Attempt uint8 `json:"attempt"`
+	}{
+		Attempt: t.Attempt,
+	}
+	enc := Encode(s)
+	fmt.Printf("BytesWithoutSig %x\n", enc)
+	return enc
 }

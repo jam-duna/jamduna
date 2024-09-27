@@ -25,8 +25,8 @@ func TestVRFOperations(t *testing.T) {
 	// Generate 6 different random seeds
 	fmt.Println("TestVRFOperations: Generating 6 random seeds")
 	seeds := make([][]byte, 6)
-	pubKeys := make([][]byte, 6)
-	privateKeys := make([][]byte, 6)
+	pubKeys := make([]BanderSnatchKey, 6)
+	privateKeys := make([]BanderSnatchSecret, 6)
 	for i := 0; i < 6; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
@@ -46,14 +46,14 @@ func TestVRFOperations(t *testing.T) {
 		}
 		pubKeys[i] = banderSnatch_pub
 		privateKeys[i] = banderSnatch_priv
-		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, hex.EncodeToString(banderSnatch_pub))
-		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, hex.EncodeToString(banderSnatch_priv))
+		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, hex.EncodeToString(banderSnatch_pub.Bytes()))
+		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, hex.EncodeToString(banderSnatch_priv.Bytes()))
 	}
 
 	// Create a ring set by concatenating all public keys
 	var ringSet []byte
 	for _, pubKey := range pubKeys {
-		ringSet = append(ringSet, pubKey...)
+		ringSet = append(ringSet, pubKey.Bytes()...)
 	}
 
 	// Example data to be signed
@@ -167,8 +167,8 @@ func TestVRFOperationsSimulation(t *testing.T) {
 	// Generate 6 different random seeds
 	fmt.Println("TestVRFOperations: Generating 6 random seeds")
 	seeds := make([][]byte, 6)
-	pubKeys := make([][]byte, 6)
-	privateKeys := make([][]byte, 6)
+	pubKeys := make([]BanderSnatchKey, 6)
+	privateKeys := make([]BanderSnatchSecret, 6)
 	for i := 0; i < 6; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
@@ -178,14 +178,14 @@ func TestVRFOperationsSimulation(t *testing.T) {
 		}
 		pubKeys[i] = banderSnatch_pub
 		privateKeys[i] = banderSnatch_priv
-		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, hex.EncodeToString(banderSnatch_pub))
-		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, hex.EncodeToString(banderSnatch_priv))
+		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, banderSnatch_pub.String())
+		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, banderSnatch_priv.String())
 	}
 
 	// Create a ring set by concatenating all public keys
 	var ringSet []byte
 	for _, pubKey := range pubKeys {
-		ringSet = append(ringSet, pubKey...)
+		ringSet = append(ringSet, pubKey.Bytes()...)
 	}
 
 	// Example data to be signed
@@ -217,11 +217,13 @@ func TestVRFOperationsSimulation(t *testing.T) {
 				fmt.Println("Introduced error in signature.")
 			case 2:
 				// PubKey error
-				pubKeys[proverIdx] = introduceError(pubKeys[proverIdx])
+				errPub := BanderSnatchKey(introduceError(pubKeys[proverIdx].Bytes()))
+				pubKeys[proverIdx] = errPub
 				fmt.Println("Introduced error in pubKey.")
 			case 3:
 				// PrivateKey error
-				privateKeys[proverIdx] = introduceError(privateKeys[proverIdx])
+				errPriv := BanderSnatchSecret(introduceError(privateKeys[proverIdx].Bytes()))
+				privateKeys[proverIdx] = errPriv
 				fmt.Println("Introduced error in privateKey.")
 			case 4:
 				// RingSet error
@@ -240,11 +242,13 @@ func TestVRFOperationsSimulation(t *testing.T) {
 				fmt.Println("Introduced length error in signature.")
 			case 2:
 				// PubKey length error
-				pubKeys[proverIdx] = introduceLengthError(pubKeys[proverIdx])
+				errPub := BanderSnatchKey(introduceError(pubKeys[proverIdx].Bytes()))
+				pubKeys[proverIdx] = errPub
 				fmt.Println("Introduced length error in pubKey.")
 			case 3:
 				// PrivateKey length error
-				privateKeys[proverIdx] = introduceLengthError(privateKeys[proverIdx])
+				errPriv := BanderSnatchSecret(introduceError(privateKeys[proverIdx].Bytes()))
+				privateKeys[proverIdx] = errPriv
 				fmt.Println("Introduced length error in privateKey.")
 			case 4:
 				// RingSet length error
@@ -334,18 +338,18 @@ func TestRingCommitment(t *testing.T) {
 	// Generate 6 different random seeds
 	fmt.Println("TestRingCommitment: Generating 6 random seeds")
 	seeds := make([][]byte, 6)
-	pubKeys := make([][]byte, 6)
-	privateKeys := make([][]byte, 6)
+	pubKeys := make([]BanderSnatchKey, 6)
+	privateKeys := make([]BanderSnatchSecret, 6)
 	for i := 0; i < 6; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestRingCommitment seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
-		pubKey, err := getPublicKey(seeds[i])
+		pubKey, err := getBanderSnatchPublicKey(seeds[i])
 		if err != nil {
-			t.Fatalf("GetPublicKey failed: %v", err)
+			t.Fatalf("getBanderSnatchPublicKey failed: %v", err)
 		}
-		privateKey, err := getPrivateKey(seeds[i])
+		privateKey, err := getBanderSnatchPrivateKey(seeds[i])
 		if err != nil {
-			t.Fatalf("GetPrivateKey failed: %v", err)
+			t.Fatalf("getBanderSnatchPrivateKey failed: %v", err)
 		}
 		pubKeys[i] = pubKey
 		privateKeys[i] = privateKey
@@ -357,7 +361,7 @@ func TestRingCommitment(t *testing.T) {
 	extraByte := []byte{0x11, 0x12, 0x13}
 	ringSet := []byte{}
 	for _, pubKey := range pubKeys {
-		ringSet = append(ringSet, pubKey...)
+		ringSet = append(ringSet, pubKey.Bytes()...)
 	}
 	invalidRingSet := append(extraByte, ringSet...)
 	ringCommitment, err := GetRingCommitment(ringSet)

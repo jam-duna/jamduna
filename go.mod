@@ -1,6 +1,8 @@
 module github.com/colorfulnotion/jam
 
-go 1.21
+go 1.22.0
+
+toolchain go1.23.1
 
 require (
 	github.com/ethereum/go-ethereum v1.14.5
@@ -8,7 +10,7 @@ require (
 	github.com/quic-go/quic-go v0.38.2
 	github.com/stretchr/testify v1.8.4
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
-	golang.org/x/crypto v0.22.0
+	golang.org/x/crypto v0.27.0
 )
 
 require (
@@ -27,10 +29,11 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/quic-go/qtls-go1-20 v0.3.3 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
+	github.com/yuin/goldmark v1.4.13 // indirect
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e // indirect
-	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/net v0.24.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
-	golang.org/x/tools v0.20.0 // indirect
+	golang.org/x/mod v0.21.0 // indirect
+	golang.org/x/net v0.29.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/tools v0.25.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

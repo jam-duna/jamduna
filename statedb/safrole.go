@@ -149,7 +149,7 @@ func VerifyEpochMarker(epochMark *types.EpochMark) (bool, error) {
 func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
 	var nextValidators [6]common.Hash
 	for i, v := range s.NextValidators {
-		nextValidators[i] = v.GetBandersnatchKey()
+		nextValidators[i] = v.GetBandersnatchKey().Hash()
 	}
 	fmt.Printf("nextValidators Len=%v\n", nextValidators)
 	return &types.EpochMark{
@@ -288,7 +288,7 @@ func (s *SafroleState) ticketSealVRFInput(targetEpochRandomness common.Hash, att
 	return ticket_vrf_input
 }
 
-func (s *SafroleState) computeTicketID(authority_secret_key bandersnatch.PrivateKey, ticket_vrf_input []byte) (common.Hash, error) {
+func (s *SafroleState) computeTicketID(authority_secret_key bandersnatch.BanderSnatchSecret, ticket_vrf_input []byte) (common.Hash, error) {
 	//ticket_id := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input)
 	auxData := []byte{}
 	ticket_id, err := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input, auxData)
@@ -442,16 +442,17 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 	case "Designed": //N+2
 		validatorSet = s.DesignedValidators
 	}
-	pubkeys := []bandersnatch.PublicKey{}
+	pubkeys := []bandersnatch.BanderSnatchKey{}
 	for _, v := range validatorSet {
 		//pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
-		pubkeys = append(pubkeys, common.ConvertToSlice(v.Bandersnatch))
+		pubkey := bandersnatch.BanderSnatchKey(common.ConvertToSlice(v.Bandersnatch))
+		pubkeys = append(pubkeys, pubkey)
 	}
 	ringsetBytes = bandersnatch.InitRingSet(pubkeys)
 	return ringsetBytes
 }
 
-func (s *SafroleState) GenerateTickets(secret bandersnatch.PrivateKey, isNextEpoch bool) []types.Ticket {
+func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, isNextEpoch bool) []types.Ticket {
 	tickets := make([]types.Ticket, 0)
 	for attempt := uint8(0); attempt < types.TicketEntriesPerValidator; attempt++ {
 		// We can GenerateTickets for the NEXT epoch based on s.Entropy[1], but the CURRENT epoch based on s.Entropy[2]
@@ -470,7 +471,7 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.PrivateKey, isNextEpo
 	return tickets
 }
 
-func (s *SafroleState) generateTicket(secret bandersnatch.PrivateKey, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, error) {
+func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, error) {
 	ticket_vrf_input := s.ticketSealVRFInput(targetEpochRandomness, attempt)
 	//RingVrfSign(privateKey, ringsetBytes, vrfInputData, auxData []byte)
 	//During epoch N, each authority scheduled for epoch N+2 constructs a set of tickets which may be eligible (6.5.2) for on-chain submission.
@@ -574,8 +575,9 @@ func (s *SafroleState) computeTicketSlotBinding(inp []types.TicketBody) []*types
 	return tickets
 }
 
-func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.PrivateKey, unsignHeaderHash common.Hash, attempt uint8) ([]byte, []byte, error) {
+func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeaderHash common.Hash, attempt uint8) ([]byte, []byte, error) {
 	sealVRFInput := s.ticketSealVRFInput(s.Entropy[3], attempt)
+
 	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeaderHash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Fallback BlockSeal ERR=%v", err)
@@ -590,8 +592,13 @@ func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.PrivateKey,
 	return blockSeal, fresh_VRFSignature, nil
 }
 
+func (s *SafroleState) ConvertBanderSnatchSecret(authority_secret_key []byte) (bandersnatch.BanderSnatchSecret, error){
+	//TODO: figure out a plan to standardize between bandersnatch package and types
+	return bandersnatch.BytesToBanderSnatchSecret(authority_secret_key)
+}
+
 // 6.8.1 Primary Method for legit ticket - is it bare VRF here???
-func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.PrivateKey, unsignHeaderHash common.Hash) ([]byte, []byte, error) {
+func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeaderHash common.Hash) ([]byte, []byte, error) {
 	sealVRFInput := fallbackSealVRFInput(s.Entropy[3]) // the context
 	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeaderHash)
 	if err != nil {
@@ -607,7 +614,7 @@ func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.PrivateKey
 	return blockSeal, fresh_VRFSignature, nil
 }
 
-func (s *SafroleState) SignBlockSeal(authority_secret_key bandersnatch.PrivateKey, sealVRFInput []byte, unsignHeaderHash common.Hash) ([]byte, []byte, error) {
+func (s *SafroleState) SignBlockSeal(authority_secret_key bandersnatch.BanderSnatchSecret, sealVRFInput []byte, unsignHeaderHash common.Hash) ([]byte, []byte, error) {
 	//IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte)
 	ietfSig, inner_vrfOutput, err := bandersnatch.IetfVrfSign(authority_secret_key, sealVRFInput, unsignHeaderHash.Bytes())
 	if err != nil {
@@ -653,7 +660,7 @@ func (s *SafroleState) GetAuthorIndex(authorkey common.Hash, phase string) (uint
 	}
 
 	for authorIdx, v := range validatorSet {
-		if v.GetBandersnatchKey() == authorkey {
+		if common.Hash(v.GetBandersnatchKey()) == authorkey {
 			return uint16(authorIdx), nil
 		}
 	}
@@ -686,7 +693,7 @@ func (s *SafroleState) GetFallbackValidator(slot_index uint32) common.Hash {
 	authority_idx, _ := s.computeFallbackAuthorityIndex(targetRandomness, relativeSlotIndex, len(s.CurrValidators))
 	valdator := s.CurrValidators[authority_idx]
 	//fmt.Printf("Fallback slot_index=%v relativeSlotIdx=%v, Validator=%v (authority_idx=%v)\n", slot_index, relativeSlotIndex, valdator.GetBandersnatchKey(), authority_idx)
-	return valdator.GetBandersnatchKey()
+	return valdator.GetBandersnatchKey().Hash()
 }
 
 func (s *SafroleState) GetPrimaryWinningTicket(slot_index uint32) common.Hash {
@@ -1052,10 +1059,11 @@ func (s *SafroleState) STF(input Input) (Output, *SafroleState, error) {
 		ticketIDs[a.Id] = a.Attempt
 	}
 
-	pubkeys := []bandersnatch.PublicKey{}
+	pubkeys := []bandersnatch.BanderSnatchKey{}
 	for _, v := range s.NextValidators {
 		//pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
-		pubkeys = append(pubkeys, common.ConvertToSlice(v.Bandersnatch))
+		pubkey := bandersnatch.BanderSnatchKey(common.ConvertToSlice(v.Bandersnatch))
+		pubkeys = append(pubkeys, pubkey)
 	}
 	ringsetBytes := bandersnatch.InitRingSet(pubkeys)
 

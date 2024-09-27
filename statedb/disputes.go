@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"fmt"
 
 	//"github.com/colorfulnotion/jam/bandersnatch"
@@ -224,31 +223,27 @@ func getPublicKey(K []types.Validator, Index uint32) types.Ed25519Key {
 }
 
 func (j *JamState) checkSignature(v types.Verdict) error {
-	for i, vote := range v.Votes {
+
+	// check the signature
+
+	if v.Epoch == j.SafroleState.Timeslot/E {
 		// check the signature
-		sign_message := []byte{}
-		if vote.Voting {
-			sign_message = append([]byte(types.X_True), v.Target.Bytes()...)
-		} else {
-			sign_message = append([]byte(types.X_False), v.Target.Bytes()...)
+		err := v.Verify(j.SafroleState.CurrValidators)
+		if err != nil {
+			return err
 		}
-		if v.Epoch == j.SafroleState.Timeslot/E {
-			// check the signature
 
-			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(j.SafroleState.CurrValidators, uint32(vote.Index)).Bytes()), sign_message, vote.Signature.Bytes()) {
-				return fmt.Errorf("Verdict Error: the signature of the voterId %v is invalid", vote.Index)
-			}
+	} else if v.Epoch == j.SafroleState.Timeslot/E-1 {
 
-		} else if v.Epoch == j.SafroleState.Timeslot/E-1 {
-			// check the signature
-			// to do : ask davxy , here should be sign by lambda
-			if !ed25519.Verify(ed25519.PublicKey(getPublicKey(j.SafroleState.PrevValidators, uint32(vote.Index)).Bytes()), sign_message, vote.Signature.Bytes()) {
-				return fmt.Errorf("Verdict Error: the signature of the voterId %v in verdict %v is invalid, validator %x", vote.Index, i, ed25519.PublicKey(getPublicKey(j.SafroleState.PrevValidators, uint32(vote.Index)).Bytes()))
-			}
-		} else {
-			return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, j.SafroleState.Timeslot/E)
+		err := v.Verify(j.SafroleState.PrevValidators)
+		if err != nil {
+			return err
 		}
+
+	} else {
+		return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, j.SafroleState.Timeslot/E)
 	}
+
 	return nil
 }
 
@@ -302,9 +297,8 @@ func checkVerdicts(v []types.Verdict) error {
 func checkCulprit(c []types.Culprit) error {
 	for i, culprit := range c {
 		//check culprit signature is valid
-		sign_message := append([]byte(types.X_G), culprit.Target.Bytes()...)
 		//verify the signature
-		if !ed25519.Verify(ed25519.PublicKey(culprit.Key[:]), sign_message, culprit.Signature[:]) {
+		if !culprit.Verify() {
 			return fmt.Errorf("Culprit Error: the signature of the culprit %v is invalid", culprit.Key)
 		}
 		// check duplicate
@@ -332,14 +326,8 @@ func checkFault(f []types.Fault) error {
 	for i, fault := range f {
 		//check fault signature is valid
 		// jam_guarantee concat the work report hash
-		sign_message := []byte{}
-		if fault.Voting {
-			sign_message = append([]byte(types.X_True), fault.Target.Bytes()...)
-		} else {
-			sign_message = append([]byte(types.X_False), fault.Target.Bytes()...)
-		}
 		//verify the signature
-		if !ed25519.Verify(ed25519.PublicKey(fault.Key[:]), sign_message, fault.Signature[:]) {
+		if !fault.Verify() {
 			return fmt.Errorf("Fault Error: the signature of the fault %v is invalid", fault.Key)
 		}
 		// check duplicate

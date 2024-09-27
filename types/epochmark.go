@@ -14,14 +14,19 @@ type EpochMark struct {
 	Validators [TotalValidators]common.Hash `json:"validators"` //bandersnatch keys
 }
 
-func (E EpochMark) Encode() []byte {
+func (E *EpochMark) Encode() []byte {
+	if E == nil {
+		return []byte{0}
+	}
 	encoded := []byte{1}
-	encoded = append(encoded, Encode(E.Entropy)...)
-	encoded = append(encoded, Encode(E.Validators)...)
+	encoded = append(encoded, Encode(*E)...)
 	return encoded
 }
 
-func (target EpochMark) Decode(data []byte) (interface{}, uint32) {
+func (target *EpochMark) Decode(data []byte) (interface{}, uint32) {
+	if data[0] == 0 {
+		return nil, 1
+	}
 	length := uint32(1)
 	entropy, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
 	length += l
@@ -31,5 +36,5 @@ func (target EpochMark) Decode(data []byte) (interface{}, uint32) {
 		Validators: validators.([TotalValidators]common.Hash),
 	}
 	length += l
-	return decoded, length
+	return &decoded, length
 }
