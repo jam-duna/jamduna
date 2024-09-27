@@ -290,7 +290,7 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 
 	// fib code
-	code, err := loadByteCode("../jamtestvectors/workpackages/fib-refine-fixed.pvm")
+	code, err := loadByteCode("../jamtestvectors/workpackages/fib_full_with_entry_point.pvm")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}

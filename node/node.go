@@ -1052,8 +1052,11 @@ func (n *Node) processWorkPackage(workPackage types.WorkPackage) (spec *types.Av
 			fmt.Printf("Code and CodeHash Mismatch\n")
 			panic(0)
 		}
-
-		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
+		// Refine entry point is 5
+		Refine_entry_point := uint32(5)
+		// Set melicious mode
+		IsMelicious := false
+		vm := pvm.NewVMFromCode_With_EntryPoint(service_index, code, 0, targetStateDB, Refine_entry_point, IsMelicious)
 		imports, err := n.getImportSegments(workItem.ImportedSegments)
 		if err != nil {
 			return spec, common.Hash{}, err

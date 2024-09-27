@@ -68,6 +68,12 @@ type VM struct {
 
 	X types.XContext
 	Y types.XContext
+
+	// Invocation funtions entry point
+	EntryPoint uint32
+
+	// Melicious Setting
+	IsMelicious bool
 }
 
 type Forgets struct {
@@ -480,6 +486,39 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 	return vm
 }
 
+// NewVM with entrypoint and isMelicious
+func NewVM_With_EntryPoint(service_index uint32, code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv, Entrypoint uint32, IsMelicious bool) *VM {
+	if len(code) == 0 {
+		panic("NO CODE\n")
+	}
+	fmt.Println("Code: ", code)
+	p := DecodeProgram(code)
+	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
+	fmt.Println("================================================================")
+	vm := &VM{
+		JSize:         p.JSize,
+		Z:             p.Z,
+		J:             p.J,
+		code:          p.Code,
+		bitmask:       p.K[0], // pass in bitmask K
+		register:      make([]uint32, regSize),
+		pc:            initialPC,
+		ram:           make(map[uint32][4096]byte),
+		hostenv:       hostENV, //check if we need this
+		Exports:       make([][]byte, 0),
+		service_index: service_index,
+		EntryPoint:    Entrypoint,
+		IsMelicious:   IsMelicious,
+	}
+	// set vm.pc with entrypoint
+	vm.pc = Entrypoint
+	for _, pg := range pages {
+		vm.writeRAMBytes(pg.Address, pg.Contents)
+	}
+	copy(vm.register, initialRegs)
+	return vm
+}
+
 func NewVMFromParseProgramTest(code []byte) {
 	p := DecodeProgram(code)
 	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
@@ -488,6 +527,10 @@ func NewVMFromParseProgramTest(code []byte) {
 
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv) *VM {
 	return NewVM(serviceIndex, code, []uint32{}, i, []PageMap{}, []Page{}, hostENV)
+}
+
+func NewVMFromCode_With_EntryPoint(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv, Entrypoint uint32, IsMelicious bool) *VM {
+	return NewVM_With_EntryPoint(serviceIndex, code, []uint32{}, i, []PageMap{}, []Page{}, hostENV, Entrypoint, IsMelicious)
 }
 
 func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
@@ -1721,7 +1764,11 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint32 {
 	var result uint32
 	switch opcode {
 	case ADD_REG:
-		result = valueA + valueB
+		if vm.IsMelicious {
+			result = valueA * valueB
+		} else {
+			result = valueA + valueB
+		}
 	case SUB_REG:
 		result = valueA - valueB
 	case AND_REG:
