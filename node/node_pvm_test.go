@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	//"sync"
@@ -45,23 +44,23 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		blob_arr[data_i] = data
 		fmt.Println(data)
 
-		// Encode and distribute the data
-		blob_hash := common.Hash{}
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			blob_hash, err = senderNode.EncodeAndDistributeArbitraryData(data, len(data), &wg)
-			if err != nil {
-				fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-			}
-		}()
+		paddedData := common.PadToMultipleOfN(data, types.W_C)
+		dataLength := len(data)
 
-		// Wait for the data to be encoded and distributed
-		wg.Wait()
+		chunks, err := senderNode.encode(paddedData, false, dataLength)
 		if err != nil {
-			t.Fatalf("Failed to encode and distribute data: %v", err)
+			fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
 		}
-		fmt.Printf("successfully distributed blob_hash : %v\n", blob_hash)
+
+		dataBlobHash := common.Blake2Hash(paddedData)
+
+		err = senderNode.DistributeArbitraryData(chunks, dataBlobHash, dataLength)
+
+		if err != nil {
+			fmt.Println("Error in DistributeSegmentData:", err)
+		}
+
+		fmt.Printf("successfully distributed blob_hash : %v\n", dataBlobHash)
 	}
 
 	// Accumulate function performs the accumulation of a single service.

@@ -103,7 +103,7 @@ func (a *WorkItem) MarshalJSON() ([]byte, error) {
 	}{
 		Service:          a.Service,
 		CodeHash:         a.CodeHash,
-		Payload: common.HexString(a.Payload),
+		Payload:          common.HexString(a.Payload),
 		GasLimit:         a.GasLimit,
 		ImportedSegments: a.ImportedSegments,
 		Extrinsics:       a.Extrinsics,

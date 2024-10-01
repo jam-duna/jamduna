@@ -152,6 +152,6 @@ func (a Preimages) MarshalJSON() ([]byte, error) {
 		Blob string `json:"blob"`
 	}{
 		Alias: (*Alias)(&a),
-		Blob: blob,
+		Blob:  blob,
 	})
 }

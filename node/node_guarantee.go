@@ -5,10 +5,9 @@ import (
 	"sort"
 	"sync"
 	"time"
+	//"encoding/binary"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -107,7 +106,7 @@ func (n *Node) GenerateGuarantee(workPackage types.WorkPackage) (types.Guarantee
 	go func() {
 		defer wg.Done()
 		var err error
-		work, _, root, err := n.processWorkPackage(workPackage)
+		work, _, root, err := n.ProcessWorkPackage(workPackage)
 		if err != nil {
 			fmt.Println("Error processing work package:", err)
 			return
@@ -228,125 +227,11 @@ func (n *Node) FormGuarantee(PackageHash common.Hash) (types.Guarantee, error) {
 }
 
 // work package -> work report -> guarantee report
-func (n *Node) processWorkPackage(workPackage types.WorkPackage) (work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
-
-	// Create a new PVM instance with mock code and execute it
-	results := []types.WorkResult{}
-	targetStateDB := n.getPVMStateDB()
-	service_index := uint32(workPackage.AuthCodeHost)
-	packageHash := workPackage.Hash()
-	fmt.Printf("[V%d]Processing Work Package: %v, Key: %v\n", n.GetCurrValidatorIndex(), packageHash, n.GetEd25519Key())
-	// set up audit friendly work WorkPackage
-	asworkPackage := types.WorkPackage{
-		WorkItems: make([]types.WorkItem, 0),
-	}
-	segments := make([][]byte, 0)
-	for _, workItem := range workPackage.WorkItems {
-		// recover code from the bpt. NOT from DA
-		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
-		if len(code) == 0 {
-			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
-			fmt.Println(err)
-			return types.GuaranteeReport{}, spec, common.Hash{}, err
-		}
-		if common.Blake2Hash(code) != workItem.CodeHash {
-			fmt.Printf("Code and CodeHash Mismatch\n")
-			panic(0)
-		}
-
-		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
-		imports, err := n.getImportSegments(workItem.ImportedSegments)
-		fmt.Printf("[V%d]Imported Segments: %v\n", n.GetCurrValidatorIndex(), imports)
-		if err != nil {
-			// return spec, common.Hash{}, err
-			imports = make([][]byte, 0)
-		}
-		vm.SetImports(imports)
-		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		err = vm.Execute(types.EntryPointRefine)
-		if err != nil {
-			return types.GuaranteeReport{}, spec, common.Hash{}, err
-		}
-		output, _ := vm.GetArgumentOutputs()
-
-		// The workitem is an ordered collection of segments
-		asWorkItem := types.ASWorkItem{
-			Segments:   make([]types.Segment, 0),
-			Extrinsics: make([]types.WorkItemExtrinsic, 0),
-		}
-		for _, i := range vm.Imports {
-			asWorkItem.Segments = append(asWorkItem.Segments, types.Segment{Data: i})
-		}
-		for _, extrinsicblob := range workItem.ExtrinsicsBlobs {
-			asWorkItem.Extrinsics = append(asWorkItem.Extrinsics, types.WorkItemExtrinsic{Hash: common.BytesToHash(extrinsicblob), Len: uint32(len(extrinsicblob))})
-		}
-
-		// 1. NOTE: We do NOT need to erasure code import data
-		// 2. TODO: We DO need to erasure encode extrinsics into "Audit DA"
-		// ******TODO******
-
-		// 3. We DO need to erasure code exports from refine execution into "Import DA"
-		fmt.Printf("VM Exports: %v\n", vm.Exports)
-		for _, e := range vm.Exports {
-			s := e
-			segments = append(segments, s) // this is used in NewAvailabilitySpecifier
-		}
-		pageProofs, _ := trie.GeneratePageProof(segments)
-		combinedSegmentAndPageProofs := append(segments, pageProofs...)
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-
-		// EncodeAndDistributeSegmentData
-		go func() {
-			treeRoot, err = n.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs, &wg)
-			if err != nil {
-				fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-			}
-		}()
-
-		// Wait for the task to complete
-		wg.Wait()
-		if err != nil {
-			return types.GuaranteeReport{}, spec, common.Hash{}, err
-		}
-		fmt.Printf("Combined Segment and Page Proofs: %v\n", combinedSegmentAndPageProofs)
-		// setup work results
-		// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
-		result := types.WorkResult{
-			Service:     workItem.Service,
-			CodeHash:    workItem.CodeHash,
-			PayloadHash: common.Blake2Hash(workItem.Payload),
-			GasRatio:    0,
-			Result:      output,
-		}
-		results = append(results, result)
-	}
-
-	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
-	spec = n.NewAvailabilitySpecifier(packageHash, asworkPackage, segments)
-	prerequisite_hash := common.HexToHash("0x")
-	refinementContext := types.RefineContext{
-		Anchor:           n.statedb.ParentHash,                      // TODO
-		StateRoot:        n.statedb.Block.Header.ParentStateRoot,    // TODO, common.HexToHash("0x")
-		BeefyRoot:        common.HexToHash("0x"),                    // SKIP
-		LookupAnchor:     n.statedb.ParentHash,                      // TODO
-		LookupAnchorSlot: n.statedb.Block.Header.Slot,               //TODO: uint32(0)
-		Prerequisite:     (*types.Prerequisite)(&prerequisite_hash), //common.HexToHash("0x"), // SKIP
-	}
-	core, err := n.GetSelfCoreIndex()
+func (n *Node) ProcessWorkPackage(workPackage types.WorkPackage) (work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
+	workReport, spec, treeRoot, err := n.executeWorkPackage(workPackage)
 	if err != nil {
 		return types.GuaranteeReport{}, spec, common.Hash{}, err
 	}
-	workReport := types.WorkReport{
-		AvailabilitySpec: *spec,
-		AuthorizerHash:   common.HexToHash("0x"), // SKIP
-		CoreIndex:        core,
-		//	Output:               result.Output,
-		RefineContext: refinementContext,
-		Results:       results,
-	}
-
 	workReport.Print()
 	work = n.MakeGuaranteeReport(workReport)
 	work.Sign(n.GetEd25519Secret())

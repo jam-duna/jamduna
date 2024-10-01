@@ -15,16 +15,31 @@ func ComputeHash(data []byte) []byte {
 
 func Uint32ToBytes(val uint32) []byte {
 	bytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(bytes, val)
+	binary.LittleEndian.PutUint32(bytes, val)
 	return bytes
 }
 
 func Uint16ToBytes(value uint16) []byte {
 	bytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(bytes, value)
+	binary.LittleEndian.PutUint16(bytes, value)
 	return bytes
 }
 
+func BytesToUint32(data []byte) uint32 {
+	if len(data) < 4 {
+		// Handle the error according to your application's needs
+		panic("BytesToUint32: byte slice too short")
+	}
+	return binary.LittleEndian.Uint32(data)
+}
+
+func BytesToUint16(data []byte) uint16 {
+	if len(data) < 2 {
+		// Handle the error according to your application's needs
+		panic("BytesToUint16: byte slice too short")
+	}
+	return binary.LittleEndian.Uint16(data)
+}
 
 func Blake2Hash(data []byte) Hash {
 	return BytesToHash(ComputeHash(data))

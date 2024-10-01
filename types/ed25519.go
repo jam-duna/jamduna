@@ -2,8 +2,8 @@ package types
 
 import (
 	//	"bytes"
-	"encoding/json"
 	"crypto/ed25519"
+	"encoding/json"
 	//	"errors"
 	"fmt"
 	"reflect"
@@ -21,18 +21,21 @@ type Ed25519Key common.Hash
 type Ed25519Priv ed25519.PrivateKey
 type Ed25519Signature [Ed25519SignatureSize]byte
 
-
 func (k Ed25519Key) MarshalJSON() ([]byte, error) {
-    return json.Marshal(common.Hash(k).Hex())
+	return json.Marshal(common.Hash(k).Hex())
 }
 
 func (k *Ed25519Key) UnmarshalJSON(data []byte) error {
-    var hexStr string
-    if err := json.Unmarshal(data, &hexStr); err != nil {
-        return err
-    }
-    *k = Ed25519Key(common.HexToHash(hexStr))
-    return nil
+	var hexStr string
+	if err := json.Unmarshal(data, &hexStr); err != nil {
+		return err
+	}
+	*k = Ed25519Key(common.HexToHash(hexStr))
+	return nil
+}
+
+func (k Ed25519Key) String() string {
+	return common.Hash(k).Hex()
 }
 
 func (pk Ed25519Key) Bytes() []byte {

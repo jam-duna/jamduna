@@ -361,6 +361,10 @@ func VerifyPageProof(pageProof [][]byte, pageIndex int) (bool, error) {
 	return true, nil
 }
 
+func FindPositions(nums [][]byte, target []byte) int {
+	return findPositions(nums, target)
+}
+
 func findPositions(nums [][]byte, target []byte) int {
 	positions := -1
 	for i, num := range nums {

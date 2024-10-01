@@ -10,11 +10,10 @@ import "C"
 import (
 	"bytes"
 	//"crypto/ed25519"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"unsafe"
-	"encoding/hex"
-
 	//"github.com/colorfulnotion/jam/types"
 )
 
@@ -67,7 +66,7 @@ func InitBanderSnatchKey(seed []byte) (key BanderSnatchKey, secret BanderSnatchS
 	if err != nil {
 		return key, secret, fmt.Errorf("failed to get private key: %v", err)
 	}
-	fmt.Printf("!!!!BanderSnatch Pub Len=%v, Priv Len=%v\n", len(banderSnatch_pub), len(banderSnatch_priv))
+	//fmt.Printf("!!!!BanderSnatch Pub Len=%v, Priv Len=%v\n", len(banderSnatch_pub), len(banderSnatch_priv))
 	return banderSnatch_pub, banderSnatch_priv, nil
 }
 

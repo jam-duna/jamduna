@@ -18,9 +18,9 @@ type Validator struct {
 
 type ValidatorSecret struct {
 	BandersnatchPub    BandersnatchKey `json:"bandersnatch"`
-	Ed25519Pub         Ed25519Key `json:"ed25519"`
-	BandersnatchSecret []byte      `json:"bandersnatch_priv"`
-	Ed25519Secret      []byte      `json:"ed25519_priv"`
+	Ed25519Pub         Ed25519Key      `json:"ed25519"`
+	BandersnatchSecret []byte          `json:"bandersnatch_priv"`
+	Ed25519Secret      []byte          `json:"ed25519_priv"`
 }
 
 func (v *Validator) GetEd25519Key() Ed25519Key {
@@ -121,57 +121,56 @@ func HexToMetadata(hexStr string) [MetadataSizeInBytes]byte {
 }
 
 func (v ValidatorSecret) MarshalJSON() ([]byte, error) {
-    // Define an alias without the secret fields
-    type Alias struct {
-        BandersnatchPub BandersnatchKey `json:"bandersnatch"`
-        Ed25519Pub      Ed25519Key      `json:"ed25519"`
-    }
+	// Define an alias without the secret fields
+	type Alias struct {
+		BandersnatchPub BandersnatchKey `json:"bandersnatch"`
+		Ed25519Pub      Ed25519Key      `json:"ed25519"`
+	}
 
-    return json.Marshal(&struct {
-        Alias
+	return json.Marshal(&struct {
+		Alias
 		BandersnatchSecret string `json:"bandersnatch_priv"`
-        Ed25519Secret      string `json:"ed25519_priv"`
-
-    }{
-        Alias:              Alias{BandersnatchPub: v.BandersnatchPub, Ed25519Pub: v.Ed25519Pub},
+		Ed25519Secret      string `json:"ed25519_priv"`
+	}{
+		Alias:              Alias{BandersnatchPub: v.BandersnatchPub, Ed25519Pub: v.Ed25519Pub},
 		BandersnatchSecret: hex.EncodeToString(v.BandersnatchSecret),
-        Ed25519Secret:      hex.EncodeToString(v.Ed25519Secret),
-    })
+		Ed25519Secret:      hex.EncodeToString(v.Ed25519Secret),
+	})
 }
 
 func (v *ValidatorSecret) UnmarshalJSON(data []byte) error {
-    // Define an alias without the secret fields
-    type Alias struct {
-        BandersnatchPub BandersnatchKey `json:"bandersnatch"`
-        Ed25519Pub      Ed25519Key      `json:"ed25519"`
-    }
+	// Define an alias without the secret fields
+	type Alias struct {
+		BandersnatchPub BandersnatchKey `json:"bandersnatch"`
+		Ed25519Pub      Ed25519Key      `json:"ed25519"`
+	}
 
-    aux := &struct {
-        Alias
+	aux := &struct {
+		Alias
 		BandersnatchSecret string `json:"bandersnatch_priv"`
-        Ed25519Secret      string `json:"ed25519_priv"`
-    }{}
+		Ed25519Secret      string `json:"ed25519_priv"`
+	}{}
 
-    if err := json.Unmarshal(data, aux); err != nil {
-        return err
-    }
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
 
-    // Assign the public keys from Alias
-    v.BandersnatchPub = aux.BandersnatchPub
-    v.Ed25519Pub = aux.Ed25519Pub
+	// Assign the public keys from Alias
+	v.BandersnatchPub = aux.BandersnatchPub
+	v.Ed25519Pub = aux.Ed25519Pub
 
-    // Decode the hex strings into byte slices for the secret keys
-    ed25519SecretBytes, err := hex.DecodeString(aux.Ed25519Secret)
-    if err != nil {
-        return err
-    }
-    v.Ed25519Secret = ed25519SecretBytes
+	// Decode the hex strings into byte slices for the secret keys
+	ed25519SecretBytes, err := hex.DecodeString(aux.Ed25519Secret)
+	if err != nil {
+		return err
+	}
+	v.Ed25519Secret = ed25519SecretBytes
 
-    bandersnatchSecretBytes, err := hex.DecodeString(aux.BandersnatchSecret)
-    if err != nil {
-        return err
-    }
-    v.BandersnatchSecret = bandersnatchSecretBytes
+	bandersnatchSecretBytes, err := hex.DecodeString(aux.BandersnatchSecret)
+	if err != nil {
+		return err
+	}
+	v.BandersnatchSecret = bandersnatchSecretBytes
 
-    return nil
+	return nil
 }

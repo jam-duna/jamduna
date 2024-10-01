@@ -2,7 +2,7 @@ package types
 
 import (
 	"encoding/json"
-
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -41,10 +41,19 @@ type Authorizer struct {
 	Params   []byte      `json:"params"`
 }
 
+func (a *WorkPackage) String() string {
+	enc, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
+}
+
 // Bytes returns the bytes of the Assurance
 func (a *WorkPackage) Bytes() []byte {
-	enc := Encode(a)
-	return enc
+	encode := Encode(a)
+	return encode
 }
 
 func (a *WorkPackage) Hash() common.Hash {

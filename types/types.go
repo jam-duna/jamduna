@@ -30,9 +30,21 @@ type BlockQuery struct {
 
 // -----Custom types for tiny QUIC experiment-----
 
+type DistributeErasureRoot struct {
+	Key  common.Hash `json:"block_hash"`
+	Data []byte      `json:"blob_hash"`
+}
+
+type ErasureRootResponse struct {
+	Key  common.Hash `json:"segment_root"`
+	Data []byte      `json:"blob_hash"`
+}
+
 type DistributeECChunk struct {
-	SegmentRoot []byte `json:"segment_root"`
-	Data        []byte `json:"data"`
+	SegmentRoot []byte      `json:"segment_root"`
+	Data        []byte      `json:"data"`
+	RootHash    common.Hash `json:"root_hash"`
+	BlobMeta    []byte      `json:"blob_meta"`
 }
 
 type ECChunkResponse struct {

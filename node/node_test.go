@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"sync"
+	"math"
 	"time"
 
 	//"sync"
@@ -23,6 +23,26 @@ import (
 
 	"github.com/colorfulnotion/jam/types"
 )
+
+func generateSeedSet(ringSize int) ([][]byte, error) {
+
+	entropy := common.Blake2Hash([]byte("42"))
+
+	// Generate the ring set with deterministic random seeds
+	ringSet := make([][]byte, ringSize)
+	for i := 0; i < ringSize; i++ {
+		seed := make([]byte, 32)
+		if _, err := rand.Read(entropy.Bytes()); err != nil {
+			return nil, err
+		}
+		// XOR the deterministic seed with the random seed to make it deterministic
+		for j := range seed {
+			seed[j] ^= entropy[j%len(entropy)]
+		}
+		ringSet[i] = common.Blake2Hash(append(seed[:], byte(i))).Bytes()
+	}
+	return ringSet, nil
+}
 
 func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, []types.ValidatorSecret, error) {
 	seeds, _ := generateSeedSet(numNodes)
@@ -48,7 +68,7 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	for i := uint32(0); i < numNodes; i++ {
 		addr := fmt.Sprintf(quicAddr, 9000+i)
 		peers[i] = addr
-		ed25519Key := fmt.Sprintf("%x", validators[i].Ed25519)
+		ed25519Key := validators[i].Ed25519.String()
 		peerList[ed25519Key] = NodeInfo{
 			PeerID:    i,
 			PeerAddr:  addr,
@@ -59,9 +79,9 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	// Print out peerList
 	prettyPeerList, err := json.MarshalIndent(peerList, "", "  ")
 	if err != nil {
-		return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v", err)
+		return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
 	}
-	fmt.Printf("PeerList: %s\n", prettyPeerList)
+	//fmt.Printf("PeerList: %s\n", prettyPeerList)
 
 	// Compute validator secrets
 	validatorSecrets := make([]types.ValidatorSecret, numNodes)
@@ -97,8 +117,8 @@ func TestNodeSafrole(t *testing.T) {
 func TestSegmentECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
 	dataSizes := []int{types.W_C * types.W_S}
-	segmentSizes := []int{1, 10}
-	// dataSizes := []int{10}
+	// segmentSizes := []int{1, 10}
+	segmentSizes := []int{10}
 
 	// Initialize nodes
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
@@ -132,6 +152,7 @@ func TestSegmentECRoundTrip(t *testing.T) {
 				for i := 0; i < segmentLength; i++ {
 					randData := make([]byte, size)
 					_, err := rand.Read(randData)
+					randData = common.PadToMultipleOfN(randData, types.W_C*types.W_S)
 					data = append(data, randData)
 					if err != nil {
 						t.Fatalf("Failed to generate random data: %v", err)
@@ -146,43 +167,89 @@ func TestSegmentECRoundTrip(t *testing.T) {
 				fmt.Println("Starting EncodeAndDistributeSegmentData...")
 
 				treeRoot := common.Hash{}
-				var wg sync.WaitGroup
-				wg.Add(1)
-				// Coroutine to encode and distribute data
-				go func() {
-					treeRoot, err = senderNode.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs, &wg)
+				// Encode the combined data
+				var segmentsECRoots []byte
+				// Flatten the combined data
+				var FlattenData []byte
+				for _, singleData := range combinedSegmentAndPageProofs {
+					FlattenData = append(FlattenData, singleData...)
+				}
+				// Erasure code the combined data
+				for _, singleData := range combinedSegmentAndPageProofs {
+					// Encode the data into segments
+					erasureCodingSegments, err := senderNode.encode(singleData, true, len(singleData)) // Set to false for variable size segments
+					if err != nil {
+						fmt.Printf("Error in EncodeAndDistributeSegmentData: %v\n", err)
+					}
+
+					// Build segment roots
+					segmentRoots := make([][]byte, 0)
+					for i := range erasureCodingSegments {
+						leaves := erasureCodingSegments[i]
+						tree := trie.NewCDMerkleTree(leaves)
+						segmentRoots = append(segmentRoots, tree.Root())
+					}
+
+					// Generate the blob hash by hashing the original data
+					blobTree := trie.NewCDMerkleTree(segmentRoots)
+					segmentsECRoot := blobTree.Root()
+
+					// Append the segment root to the list of segment roots
+					segmentsECRoots = append(segmentsECRoots, segmentsECRoot...)
+					// Distribute the segments
+					err = senderNode.DistributeSegmentData(erasureCodingSegments, segmentRoots, len(FlattenData))
 					if err != nil {
 						fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
 					}
-				}()
+				}
 
-				// Wait for the encoding and distribution to finish
-				wg.Wait()
 				fmt.Println("Finished EncodeAndDistributeSegmentData...")
 				if err != nil {
 					t.Fatalf("Failed to encode and distribute data: %v", err)
 				}
 
 				// Simulate a small delay before fetching and reconstructing the data
-				time.Sleep(2 * time.Second)
+				time.Sleep(3 * time.Second)
 
 				// Use the first node to fetch and reconstruct the data
-				fmt.Println("Starting FetchAndReconstructSegmentData...")
-				reconstructedData, err := senderNode.FetchAndReconstructAllSegmentsData(treeRoot)
+				fmt.Println("Starting FetchAndReconstructAllSegmentsData...")
+				reconstructedData, _, _, err := senderNode.FetchAndReconstructAllSegmentsData(treeRoot)
 				if err != nil {
 					t.Fatalf("Failed to fetch and reconstruct data: %v", err)
 				}
-				fmt.Println("Finished FetchAndReconstructSegmentData...")
+				fmt.Println("Finished FetchAndReconstructAllSegmentsData...")
 
 				// Compare original and reconstructed data
 				for i := 0; i < len(data); i++ {
+					fmt.Printf("Original data: %x\n", data[i])
+					fmt.Printf("Reconstructed data: %x\n", reconstructedData[i][:len(data[i])])
 					if !bytes.Equal(data[i], reconstructedData[i][:len(data[i])]) {
 						fmt.Printf("Original data: %x\n", data[i])
 						fmt.Printf("Reconstructed data: %x\n", reconstructedData[i][:len(data[i])])
 						t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
 					}
 				}
-				fmt.Printf("Roundtrip success for DataSize%d\n", size)
+
+				for i := 0; i < len(data); i++ {
+					reconstructedSegment, reconstructedPageProof, err := senderNode.FetchAndReconstructSegmentData(treeRoot, uint32(i))
+					fmt.Printf("Finished FetchAndReconstructSegmentData %d...\n", i)
+					if err != nil {
+						t.Fatalf("Failed to fetch and reconstruct data: %v", err)
+					}
+					fmt.Printf("Reconstructed data: %x\n", reconstructedSegment)
+					if !common.CompareBytes(data[i], reconstructedSegment) {
+						fmt.Printf("Original data: %x\n", data[i])
+						fmt.Printf("Reconstructed data: %x\n", reconstructedSegment)
+						t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
+					}
+					if !common.CompareBytes(pageProofs[int(math.Floor(float64(i)/64))], reconstructedPageProof[:len(pageProofs[int(math.Floor(float64(i)/64))])]) {
+						fmt.Printf("pageProofs[int(math.Ceil(i/64))] data: %x\n", pageProofs[int(math.Floor(float64(i)/64))])
+						fmt.Printf("reconstructedPageProof data: %x\n", reconstructedPageProof)
+						t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
+					}
+
+					fmt.Printf("Roundtrip success for DataSize%d\n", size)
+				}
 			})
 		}
 	}
@@ -224,28 +291,24 @@ func TestECRoundTrip(t *testing.T) {
 				t.Fatalf("Failed to generate random data: %v", err)
 			}
 
-			blob_len := len(data)
-			blob_hash := common.Hash{}
+			paddeddata := common.PadToMultipleOfN(data, types.W_C)
+			dataLength := len(data)
 
-			var wg sync.WaitGroup
-			wg.Add(1) // Wait for one task to complete
+			chunks, err := senderNode.encode(paddeddata, false, dataLength)
+			if err != nil {
+				fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+			}
 
-			// Coroutine to encode and distribute arbitrary data
-			go func() {
-				blob_hash, err = senderNode.EncodeAndDistributeArbitraryData(data, blob_len, &wg)
-				if err != nil {
-					fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-				}
-			}()
+			blobHash := common.Blake2Hash(paddeddata)
 
-			// Wait for the encoding and distribution to finish
-			wg.Wait()
+			err = senderNode.DistributeArbitraryData(chunks, blobHash, dataLength)
 
 			if err != nil {
 				t.Fatalf("Failed to encode and distribute data: %v", err)
 			}
+
 			time.Sleep(500 * time.Millisecond)
-			reconstructData, err := senderNode.FetchAndReconstructArbitraryData(blob_hash, blob_len)
+			reconstructData, err := senderNode.FetchAndReconstructArbitraryData(blobHash, dataLength)
 			if err != nil {
 				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
 			}
@@ -512,24 +575,24 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 
 	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
-	codeHash := common.Hash{}
-	var wg sync.WaitGroup
-	wg.Add(1) // Wait for one task to complete
+	codeHash := common.Blake2Hash(code)
 
-	// Coroutine to encode and distribute arbitrary data
-	go func() {
-		codeHash, err = nodes[0].EncodeAndDistributeArbitraryData(code, len(code), &wg)
-		if err != nil {
-			fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-		}
-	}()
+	codeLength := len(code)
 
-	// Wait for the encoding and distribution to finish
-	wg.Wait()
+	chunks, err := nodes[0].encode(code, false, codeLength)
+	if err != nil {
+		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+	}
+
+	err = nodes[0].DistributeArbitraryData(chunks, codeHash, codeLength)
 
 	if err != nil {
-		t.Fatalf("%v", err)
+		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
 	}
+
+	// if (codeHash != recoveredCodeHash){
+	// 	t.Fatalf("CodeHash mismatch!")
+	// }
 
 	for _, n := range nodes {
 		target_statedb := n.getPVMStateDB()
@@ -544,13 +607,43 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 	}
 
+	currentJce := statedb.ComputeCurrentJCETime() + 120
+	for _, n := range nodes {
+		_, phase := n.statedb.JamState.SafroleState.EpochAndPhase(currentJce)
+		if phase%types.TotalValidators == n.statedb.Id {
+			fmt.Println("Authorized Block Builder is Node: ", n.id)
+			ctx := context.Background()
+			s0 := n.statedb
+			if s0 == nil {
+				fmt.Println("s0 is nil")
+			}
+			b1, b1_err := s0.MakeBlock(n.credential, currentJce)
+			if b1_err != nil {
+				t.Fatalf("MakeBlock err %v\n", b1_err)
+			}
+			s1, s1_err := statedb.ApplyStateTransitionFromBlock(s0, ctx, b1)
+			if s1_err != nil {
+				t.Fatalf("S0->S1 Transition Err: %v\n", s1_err)
+			}
+			n.addStateDB(s1)
+			n.broadcast(*b1)
+		}
+	}
+
+	ctx := context.Background()
+	if ctx != nil {
+		// will need this later
+	}
+
 	authToken := []byte("0x")               // TODO: sign
 	var exportedItems []types.ImportSegment // how do you get import segments from previous round?
-	for n := 1; n < 20; n++ {
-		time.Sleep(types.PeriodSecond * time.Second)
-		fmt.Printf("\n\n\n********************** FIB N=%v Starts **********************\n", n)
+	for fibN := 1; fibN < 20; fibN++ {
+		//time.Sleep(types.PeriodSecond * time.Second)
+		time.Sleep(2 * time.Second)
+		fmt.Printf("\n\n\n********************** FIB N=%v Starts **********************\n", fibN)
 		importedSegments := make([]types.ImportSegment, 0)
-		if n > 1 {
+
+		if fibN > 1 {
 			importedSegments = append(importedSegments, exportedItems...)
 		}
 		refine_context := types.RefineContext{}
@@ -586,36 +679,25 @@ func TestWorkGuarantee(t *testing.T) {
 			},
 		}
 		packageHash := workPackage.Hash()
-		for _, n := range nodes {
-			ctx := context.Background()
-			s0 := n.statedb
-			if s0 == nil {
-				fmt.Println("s0 is nil")
-			}
-			targetJCE := statedb.ComputeCurrentJCETime() + 120
-			b1, b1_err := s0.MakeBlock(n.credential, targetJCE)
-			if b1_err != nil {
-				t.Fatalf("MakeBlock err %v\n", b1_err)
-			}
-			s1, s1_err := statedb.ApplyStateTransitionFromBlock(s0, ctx, b1)
-			if s1_err != nil {
-				t.Fatalf("S0->S1 Transition Err: %v\n", s1_err)
-			}
-			n.addStateDB(s1)
-			target_statedb := n.getPVMStateDB()
-			target_statedb.WriteServicePreimageBlob(workPackage.AuthCodeHost, code)
-			tentativeRoot := target_statedb.GetTentativeStateRoot()
-			target_statedb.StateRoot = tentativeRoot
-			n.statedb = target_statedb.Copy()
-			recovered_code := n.statedb.ReadServicePreimageBlob(workPackage.AuthCodeHost, codeHash)
-			if !common.CompareBytes(code, recovered_code) {
-				panic(0)
-			}
+		fmt.Printf("workPackage!!!! hash=%v, %v\n", packageHash, workPackage)
+		//currentJce := statedb.ComputeCurrentJCETime()
 
+		for _, n := range nodes {
 			fmt.Println("Node ID:", n.id)
-			if n.coreIndex == 0 {
+
+			// target_statedb := n.getPVMStateDB()
+			// target_statedb.WriteServicePreimageBlob(workPackage.AuthCodeHost, code)
+			// tentativeRoot := target_statedb.GetTentativeStateRoot()
+			// target_statedb.StateRoot = tentativeRoot
+			// n.statedb = target_statedb.Copy()
+			// recovered_code := n.statedb.ReadServicePreimageBlob(workPackage.AuthCodeHost, codeHash)
+			// if !common.CompareBytes(code, recovered_code) {
+			// 	panic(0)
+			// }
+
+			if n.coreIndex%2 == 0 {
 				//spec *types.AvailabilitySpecifier, err error, bBlobHash common.Hash, sBlobHash common.Hash, exportedSegments [][]byte
-				_, specifier, treeRoot, err := n.processWorkPackage(workPackage)
+				_, specifier, _, err := n.ProcessWorkPackage(workPackage)
 				if err != nil {
 					panic(0)
 				}
@@ -646,11 +728,11 @@ func TestWorkGuarantee(t *testing.T) {
 				}
 				t.Logf("Generated Availability Specifier: %+v", specifier)
 				// TODO: use specifier to setup the next importsegments
-				exportedSegmentsRoot, _ := n.GetSegmentTreeRoots(treeRoot)
+				exportedSegmentsRoot, _ := n.GetSegmentTreeRoots(specifier.ErasureRoot)
 				fmt.Printf("exportedSegments Len=%d, exportedSegments: %x\n", len(exportedSegmentsRoot), exportedSegmentsRoot)
 				exportedItems = nil
 				for i, segmentRoot := range exportedSegmentsRoot {
-					fmt.Printf("[seg_idx=%v] segmentRoot=%v\n", i, treeRoot)
+					fmt.Printf("[seg_idx=%v]\n", i)
 					exportedItem := types.ImportSegment{
 						TreeRoot: segmentRoot,
 						Index:    uint16(i),
@@ -661,6 +743,7 @@ func TestWorkGuarantee(t *testing.T) {
 				fmt.Printf("++ exportedSegments: %v\n", exportedSegmentsRoot)
 			}
 		}
+		// need to compile EG
 	}
 }
 func TestCodeParse(t *testing.T) {
@@ -673,6 +756,7 @@ func TestCodeParse(t *testing.T) {
 	fmt.Println("Code:", code)
 	pvm.NewVMFromParseProgramTest(code)
 }
+
 func TestNodeRotation(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
 	if err != nil {
@@ -690,44 +774,9 @@ func TestNodeRotation(t *testing.T) {
 	}
 	assign := nodes[0].statedb.AssignGuarantorsTesting(common.BytesToHash(common.ComputeHash([]byte("test"))))
 	for _, a := range assign {
-		fmt.Printf("CoreIndex:%d, Validator:%x\n", a.CoreIndex, a.Validator.Ed25519)
+		fmt.Printf("CoreIndex:%d, Validator:%v\n", a.CoreIndex, a.Validator.Ed25519.String())
 	}
 }
-
-// func TestIsValidAvailabilitySpecifier(t *testing.T) {
-// 	// Set up the network
-// 	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
-// 	if err != nil {
-// 		t.Fatalf("Error setting up nodes: %v\n", err)
-// 	}
-// 	nodes := make([]*Node, numNodes)
-// 	for i := 0; i < numNodes; i++ {
-// 		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
-// 		if err != nil {
-// 			t.Fatalf("Failed to create node %d: %v\n", i, err)
-// 		}
-// 		nodes[i] = node
-// 	}
-
-// 	senderNode := nodes[0]
-
-// 	// Simulate a work package and segments
-// 	workPackage := types.WorkPackage{ /*...Set fields...*/ }
-// 	segments := [][]byte{[]byte("segment1"), []byte("segment2")}
-
-// 	// Generate the AvailabilitySpecifier
-// 	packageHash := common.ComputeHash([]byte("test_package"))
-// 	originalAS, blobHash, treeRoot := senderNode.NewAvailabilitySpecifier(common.Hash(packageHash), workPackage, segments)
-
-// 	// Validate the AvailabilitySpecifier
-// 	isValid, err := senderNode.IsValidAvailabilitySpecifier(blobHash, int(originalAS.BundleLength), treeRoot, originalAS)
-// 	if err != nil {
-// 		t.Fatalf("Error validating AvailabilitySpecifier: %v", err)
-// 	}
-// 	if isValid == false {
-// 		t.Fatalf("AvailabilitySpecifier is not valid: %v", err)
-// 	}
-// }
 
 // ---------------------------- Helper Functions ----------------------------
 

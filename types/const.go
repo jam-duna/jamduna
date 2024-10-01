@@ -1,5 +1,9 @@
 package types
 
+import (
+	"time"
+)
+
 const (
 	BlsSizeInBytes            = 144
 	MetadataSizeInBytes       = 128
@@ -50,6 +54,11 @@ const (
 	PVMInitInputDataSize             = 1 << 24        // Z_I = 2^24: The standard pvm program initialization input data size. See equation A.7.
 	PVMInitPageSize                  = 1 << 14        // Z_P = 2^14: The standard pvm program initialization page size. See section A.7.
 	PVMInitSegmentSize               = 1 << 16        // Z_Q = 2^16: The standard pvm program initialization segment size. See section A.7.
+)
+
+const (
+	QuicIndividualTimeout = 8000 * time.Millisecond
+	QuicOverallTimeout    = 10000 * time.Millisecond
 )
 
 const (

@@ -1,7 +1,8 @@
 package storage
 
 import (
-	//"github.com/ethereum/go-ethereum/crypto"
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/syndtr/goleveldb/leveldb"
 )
@@ -24,7 +25,7 @@ func NewStateDBStorage(path string) (*StateDBStorage, error) {
 func (store *StateDBStorage) ReadKV(key common.Hash) ([]byte, error) {
 	data, err := store.db.Get(key.Bytes(), nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ReadKV %v Err: %v", key, err)
 	}
 	return data, nil
 }
@@ -44,10 +45,10 @@ func (store *StateDBStorage) Close() error {
 	return store.db.Close()
 }
 
-func (store *StateDBStorage) ReadRawK(key []byte) ([]byte, error) {
+func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, error) {
 	data, err := store.db.Get(key, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ReadRawKV %v Err: %v", key, err)
 	}
 	return data, nil
 }

@@ -42,8 +42,8 @@ type BlockHeaderWithoutSig struct {
 	TimeSlot       uint32       `json:"timeslot"`
 	EpochMark      *EpochMark   `json:"epoch_mark"`
 	TicketsMark    *TicketsMark `json:"tickets_mark"`
-	OffendersMark []Ed25519Key `json:"offenders_mark"`
-	AuthorIndex   uint16       `json:"block_author_key"`
+	OffendersMark  []Ed25519Key `json:"offenders_mark"`
+	AuthorIndex    uint16       `json:"block_author_key"`
 }
 
 // for codec

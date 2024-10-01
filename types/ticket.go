@@ -78,7 +78,6 @@ func (t *Ticket) TicketID() common.Hash {
 	return common.BytesToHash(ticket_id)
 }
 
-
 func (t *Ticket) Bytes() ([]byte, error) {
 	return t.BytesWithSig(), nil
 }

@@ -72,8 +72,8 @@ type VM struct {
 	// Invocation funtions entry point
 	EntryPoint uint32
 
-	// Melicious Setting
-	IsMelicious bool
+	// Malicious Setting
+	IsMalicious bool
 }
 
 type Forgets struct {
@@ -486,8 +486,8 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 	return vm
 }
 
-// NewVM with entrypoint and isMelicious
-func NewVM_With_EntryPoint(service_index uint32, code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv, Entrypoint uint32, IsMelicious bool) *VM {
+// NewVM with entrypoint and IsMalicious
+func NewVM_With_EntryPoint(service_index uint32, code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv, Entrypoint uint32, IsMalicious bool) *VM {
 	if len(code) == 0 {
 		panic("NO CODE\n")
 	}
@@ -508,7 +508,7 @@ func NewVM_With_EntryPoint(service_index uint32, code []byte, initialRegs []uint
 		Exports:       make([][]byte, 0),
 		service_index: service_index,
 		EntryPoint:    Entrypoint,
-		IsMelicious:   IsMelicious,
+		IsMalicious:   IsMalicious,
 	}
 	// set vm.pc with entrypoint
 	vm.pc = Entrypoint
@@ -529,8 +529,8 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint32, hostENV types.Hos
 	return NewVM(serviceIndex, code, []uint32{}, i, []PageMap{}, []Page{}, hostENV)
 }
 
-func NewVMFromCode_With_EntryPoint(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv, Entrypoint uint32, IsMelicious bool) *VM {
-	return NewVM_With_EntryPoint(serviceIndex, code, []uint32{}, i, []PageMap{}, []Page{}, hostENV, Entrypoint, IsMelicious)
+func NewVMFromCode_With_EntryPoint(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv, Entrypoint uint32, IsMalicious bool) *VM {
+	return NewVM_With_EntryPoint(serviceIndex, code, []uint32{}, i, []PageMap{}, []Page{}, hostENV, Entrypoint, IsMalicious)
 }
 
 func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
@@ -1764,7 +1764,8 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint32 {
 	var result uint32
 	switch opcode {
 	case ADD_REG:
-		if vm.IsMelicious {
+		// set Malicious flag
+		if vm.IsMalicious {
 			result = valueA * valueB
 		} else {
 			result = valueA + valueB

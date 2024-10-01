@@ -20,7 +20,7 @@ type JamState struct {
 	SafroleStateGamma        SafroleBasicState                  `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
 	SafroleState             *SafroleState                      `json:"safrole"`
 	PriorServiceAccountState map[uint32]types.ServiceAccount    `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
-	AvailabilityAssignments  AvailabilityAssignments       `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
+	AvailabilityAssignments  AvailabilityAssignments            `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
 	DisputesState            Psi_state                          `json:"disputes_state"`              // psi - Disputes ψ eq 97
 	PrivilegedServiceIndices Kai_state                          `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
 	ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"validator_statistics"`        // pi The validator statistics. π eq 171

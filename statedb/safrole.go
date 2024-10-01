@@ -592,7 +592,7 @@ func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.BanderSnatc
 	return blockSeal, fresh_VRFSignature, nil
 }
 
-func (s *SafroleState) ConvertBanderSnatchSecret(authority_secret_key []byte) (bandersnatch.BanderSnatchSecret, error){
+func (s *SafroleState) ConvertBanderSnatchSecret(authority_secret_key []byte) (bandersnatch.BanderSnatchSecret, error) {
 	//TODO: figure out a plan to standardize between bandersnatch package and types
 	return bandersnatch.BytesToBanderSnatchSecret(authority_secret_key)
 }
