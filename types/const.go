@@ -5,12 +5,13 @@ import (
 )
 
 const (
-	BlsSizeInBytes      = 144
-	BlsPubInBytes       = 48
-	BlsPrivInBytes      = 32
-	Ed25519SeedInBytes  = 32
-	Ed25519PrivInBytes  = 32
-	Ed25519PubInBytes   = 32
+	BlsPubInBytes  = 144
+	BlsPrivInBytes = 32
+
+	Ed25519SeedInBytes = 32
+	Ed25519PrivInBytes = 64 // Seed+Pub .. typically or always?
+	Ed25519PubInBytes  = 32
+
 	MetadataSizeInBytes = 128
 
 	ExtrinsicSignatureInBytes = 784 //RingSignatureLen

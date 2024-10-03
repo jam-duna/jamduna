@@ -1,4 +1,5 @@
 # Compiled files and executables
+target
 **/target/
 
 # Remove Cargo.lock from gitignore, and check it into git, if creating an

@@ -160,26 +160,14 @@ func AggregateVerify(pubkeys []DoublePublicKey, agg_sig Signature, message []byt
 	return false
 }
 
-// package main
-
-// /*
-// #cgo LDFLAGS: -L /mnt/d/EE303_code/jam/bls/target/release -lbls
-// #include <bls.h>
-// */
-// import "C"
-// import (
-// 	"fmt"
-// 	"unsafe"
-// )
-
-// func main() {
-// 	seed := []byte{0x00, 0x01, 0x02, 0x03}
-// 	var secret [32]byte
-// 	C.get_secret_key(
-// 		(*C.uchar)(unsafe.Pointer(&seed[0])),
-// 		(C.size_t)(len(seed)),
-// 		(*C.uchar)(unsafe.Pointer(&secret[0])),
-// 		(C.size_t)(32),
-// 	)
-// 	fmt.Printf("Secret Key: %x\n", secret)
-// }
+func InitBLSKey(seed []byte) (bls_pub DoublePublicKey, bls_priv SecretKey, err error) {
+	bls_priv, err = GetSecretKey(seed)
+	if err != nil {
+		return bls_pub, bls_priv, err
+	}
+	bls_pub, err = GetDoublePublicKey(seed)
+	if err != nil {
+		return bls_pub, bls_priv, err
+	}
+	return bls_pub, bls_priv, nil
+}

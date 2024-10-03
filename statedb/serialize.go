@@ -112,11 +112,11 @@ func (sv *SValidator) deserialize() (types.Validator, error) {
 		return types.Validator{}, fmt.Errorf("invalid bandersnatch length, got %d expected %d", len(sv.Bandersnatch), 66)
 	}
 	bls, _ := hexutil.Decode(sv.Bls)
-	if len(bls) > 0 && len(bls) != types.BlsSizeInBytes {
-		return types.Validator{}, fmt.Errorf("invalid bls length, got %d expected %d", len(bls), types.BlsSizeInBytes)
+	if len(bls) > 0 && len(bls) != types.BlsPubInBytes {
+		return types.Validator{}, fmt.Errorf("invalid bls length, got %d expected %d", len(bls), types.BlsPubInBytes)
 	}
 
-	var blsArray [types.BlsSizeInBytes]byte
+	var blsArray [types.BlsPubInBytes]byte
 	copy(blsArray[:], sv.Bls)
 
 	var metadataArray [types.MetadataSizeInBytes]byte

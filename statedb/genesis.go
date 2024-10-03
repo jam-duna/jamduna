@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
+	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -135,7 +136,7 @@ func (g *GenesisConfig) String() string {
 	return string(enc)
 }
 
-func InitValidator(bandersnatch_seed, ed25519_seed, bls_priv []byte, metadata string) (types.Validator, error) {
+func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata string) (types.Validator, error) {
 	validator := types.Validator{}
 	banderSnatch_pub, _, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
@@ -145,17 +146,19 @@ func InitValidator(bandersnatch_seed, ed25519_seed, bls_priv []byte, metadata st
 	if err != nil {
 		return validator, fmt.Errorf("Failed to init Ed25519 Key")
 	}
-	//copy(validator.Ed25519[:], ed25519_pub)
+	bls_pub, _, err := bls.InitBLSKey(bls_seed)
+	if err != nil {
+		return validator, fmt.Errorf("Failed to init BanderSnatch Key")
+	}
+
 	validator.Ed25519 = ed25519_pub
 	copy(validator.Bandersnatch[:], banderSnatch_pub.Bytes())
-	//copy(validator.Ed25519[:], common.BytesToHash(ed25519_pub).Bytes())
-	//validator.Bandersnatch = common.BytesToHash(banderSnatch_pub)
-	//fmt.Printf("validator %v\n", validator)
 	copy(validator.Metadata[:], []byte(metadata))
+	copy(validator.Bls[:], bls_pub.Bytes())
 	return validator, nil
 }
 
-func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_priv []byte, metadata string) (types.ValidatorSecret, error) {
+func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata string) (types.ValidatorSecret, error) {
 	validatorSecret := types.ValidatorSecret{}
 	banderSnatch_pub, banderSnatch_priv, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
@@ -165,13 +168,20 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_priv []byte, metad
 	if err != nil {
 		return validatorSecret, fmt.Errorf("Failed to init Ed25519 Key")
 	}
-	validatorSecret.Ed25519Secret = ed25519_priv
+	bls_pub, bls_priv, err := bls.InitBLSKey(bls_seed)
+	if err != nil {
+		return validatorSecret, fmt.Errorf("Failed to init BanderSnatch Key")
+	}
+
+	copy(validatorSecret.Ed25519Secret[:], ed25519_priv[:])
 	validatorSecret.Ed25519Pub = ed25519_pub
 
 	validatorSecret.BandersnatchSecret = banderSnatch_priv.Bytes()
 	validatorSecret.BandersnatchPub = types.BandersnatchKey(banderSnatch_pub)
-	//fmt.Printf("validatorSecret %v\n", validatorSecret)
-	copy(validatorSecret.Metadata[:], []byte(metadata))
 
+	copy(validatorSecret.BlsSecret[:], bls_priv.Bytes())
+	copy(validatorSecret.BlsPub[:], bls_pub.Bytes())
+
+	copy(validatorSecret.Metadata[:], []byte(metadata))
 	return validatorSecret, nil
 }

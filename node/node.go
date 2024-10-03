@@ -155,7 +155,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	}
 
 	var cert tls.Certificate
-	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret)
+	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
 	fmt.Printf("ed25519_priv=%s\n", hex.EncodeToString(ed25519_priv))
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
 	fmt.Printf("ed25519_pub=%s\n", hex.EncodeToString(ed25519_pub))
@@ -374,7 +374,7 @@ func (n *Node) GetEd25519Key() types.Ed25519Key {
 }
 
 func (n *Node) GetEd25519Secret() []byte {
-	return n.credential.Ed25519Secret
+	return n.credential.Ed25519Secret[:]
 }
 
 func (n *Node) ResetPeer(peerIdentifier string) {
