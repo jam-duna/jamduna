@@ -14,8 +14,8 @@ import (
 
 // GenesisConfig is the key data "genesis" structure loaded and saved at the start of every binary run
 type GenesisConfig struct {
-	Epoch0Timestamp uint64
-	Authorities     []types.Validator
+	Epoch0Timestamp uint64            `json:"epoch0_timestamp,omitempty"`
+	Authorities     []types.Validator `json:"authorities,omitempty"`
 }
 
 type GenesisAuthorities struct {
@@ -126,7 +126,16 @@ func readGenesisConfig(filePath string) (*GenesisAuthorities, error) {
 	return &config, nil
 }
 
-func InitValidator(bandersnatch_seed, ed25519_seed []byte) (types.Validator, error) {
+func (g *GenesisConfig) String() string {
+	enc, err := json.MarshalIndent(g, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
+}
+
+func InitValidator(bandersnatch_seed, ed25519_seed, bls_priv []byte, metadata string) (types.Validator, error) {
 	validator := types.Validator{}
 	banderSnatch_pub, _, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
@@ -142,10 +151,11 @@ func InitValidator(bandersnatch_seed, ed25519_seed []byte) (types.Validator, err
 	//copy(validator.Ed25519[:], common.BytesToHash(ed25519_pub).Bytes())
 	//validator.Bandersnatch = common.BytesToHash(banderSnatch_pub)
 	//fmt.Printf("validator %v\n", validator)
+	copy(validator.Metadata[:], []byte(metadata))
 	return validator, nil
 }
 
-func InitValidatorSecret(bandersnatch_seed, ed25519_seed []byte) (types.ValidatorSecret, error) {
+func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_priv []byte, metadata string) (types.ValidatorSecret, error) {
 	validatorSecret := types.ValidatorSecret{}
 	banderSnatch_pub, banderSnatch_priv, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
@@ -161,5 +171,7 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed []byte) (types.Validato
 	validatorSecret.BandersnatchSecret = banderSnatch_priv.Bytes()
 	validatorSecret.BandersnatchPub = types.BandersnatchKey(banderSnatch_pub)
 	//fmt.Printf("validatorSecret %v\n", validatorSecret)
+	copy(validatorSecret.Metadata[:], []byte(metadata))
+
 	return validatorSecret, nil
 }

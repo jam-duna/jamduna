@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -17,10 +18,13 @@ type Validator struct {
 }
 
 type ValidatorSecret struct {
-	BandersnatchPub    BandersnatchKey `json:"bandersnatch"`
-	Ed25519Pub         Ed25519Key      `json:"ed25519"`
-	BandersnatchSecret []byte          `json:"bandersnatch_priv"`
-	Ed25519Secret      []byte          `json:"ed25519_priv"`
+	BandersnatchPub    BandersnatchKey           `json:"bandersnatch"`
+	Ed25519Pub         Ed25519Key                `json:"ed25519"`
+	BlsPub             [BlsSizeInBytes]byte      `json:"bls"`
+	Metadata           [MetadataSizeInBytes]byte `json:"metadata"`
+	BandersnatchSecret []byte                    `json:"bandersnatch_priv"`
+	Ed25519Secret      []byte                    `json:"ed25519_priv"`
+	BlsSecret          []byte                    `json:"bls_priv"`
 }
 
 func (v *Validator) GetEd25519Key() Ed25519Key {
@@ -121,56 +125,116 @@ func HexToMetadata(hexStr string) [MetadataSizeInBytes]byte {
 }
 
 func (v ValidatorSecret) MarshalJSON() ([]byte, error) {
-	// Define an alias without the secret fields
-	type Alias struct {
-		BandersnatchPub BandersnatchKey `json:"bandersnatch"`
-		Ed25519Pub      Ed25519Key      `json:"ed25519"`
-	}
+    // Define an alias without the secret fields to prevent recursion
+    type Alias struct {
+        BandersnatchPub BandersnatchKey `json:"bandersnatch"`
+        Ed25519Pub      Ed25519Key      `json:"ed25519"`
+    }
 
-	return json.Marshal(&struct {
-		Alias
-		BandersnatchSecret string `json:"bandersnatch_priv"`
-		Ed25519Secret      string `json:"ed25519_priv"`
-	}{
-		Alias:              Alias{BandersnatchPub: v.BandersnatchPub, Ed25519Pub: v.Ed25519Pub},
-		BandersnatchSecret: hex.EncodeToString(v.BandersnatchSecret),
-		Ed25519Secret:      hex.EncodeToString(v.Ed25519Secret),
-	})
+    // Helper function to encode []byte to hex string, handling empty slices
+    encodeBytesToHex := func(data []byte) string {
+        if len(data) == 0 {
+            return "0x"
+        }
+        return "0x" + hex.EncodeToString(data)
+    }
+
+    // Similarly for fixed-size arrays
+    encodeArrayToHex := func(data []byte) string {
+        if len(data) == 0 {
+            return "0x"
+        }
+        return "0x" + hex.EncodeToString(data)
+    }
+
+    return json.Marshal(&struct {
+        Alias
+        Bls      string `json:"bls"`
+        Metadata string `json:"metadata"`
+        BandersnatchSecret string `json:"bandersnatch_priv"`
+        Ed25519Secret      string `json:"ed25519_priv"`
+        BlsSecret          string `json:"bls_priv"`
+    }{
+        Alias: Alias{
+            BandersnatchPub: v.BandersnatchPub,
+            Ed25519Pub:      v.Ed25519Pub,
+        },
+        Bls:      encodeArrayToHex(v.BlsPub[:]),
+        Metadata: encodeArrayToHex(v.Metadata[:]),
+        BandersnatchSecret: encodeBytesToHex(v.BandersnatchSecret),
+        Ed25519Secret:      encodeBytesToHex(v.Ed25519Secret),
+        BlsSecret:          encodeBytesToHex(v.BlsSecret),
+    })
 }
 
 func (v *ValidatorSecret) UnmarshalJSON(data []byte) error {
-	// Define an alias without the secret fields
-	type Alias struct {
-		BandersnatchPub BandersnatchKey `json:"bandersnatch"`
-		Ed25519Pub      Ed25519Key      `json:"ed25519"`
-	}
+    // Define an alias without the secret fields
+    type Alias struct {
+        BandersnatchPub BandersnatchKey `json:"bandersnatch"`
+        Ed25519Pub      Ed25519Key      `json:"ed25519"`
+    }
 
-	aux := &struct {
-		Alias
-		BandersnatchSecret string `json:"bandersnatch_priv"`
-		Ed25519Secret      string `json:"ed25519_priv"`
-	}{}
+    aux := &struct {
+        Alias
+        Bls      string `json:"bls"`
+        Metadata string `json:"metadata"`
+        BandersnatchSecret string `json:"bandersnatch_priv"`
+        Ed25519Secret      string `json:"ed25519_priv"`
+        BlsSecret          string `json:"bls_priv"`
+    }{}
 
-	if err := json.Unmarshal(data, aux); err != nil {
-		return err
-	}
+    // Unmarshal the data into the auxiliary struct
+    if err := json.Unmarshal(data, aux); err != nil {
+        return err
+    }
 
-	// Assign the public keys from Alias
-	v.BandersnatchPub = aux.BandersnatchPub
-	v.Ed25519Pub = aux.Ed25519Pub
+    // Assign the public keys from Alias
+    v.BandersnatchPub = aux.BandersnatchPub
+    v.Ed25519Pub = aux.Ed25519Pub
 
-	// Decode the hex strings into byte slices for the secret keys
-	ed25519SecretBytes, err := hex.DecodeString(aux.Ed25519Secret)
-	if err != nil {
-		return err
-	}
-	v.Ed25519Secret = ed25519SecretBytes
+    // Helper function to decode hex strings to []byte, handling "0x"
+    decodeHexToBytes := func(s string) ([]byte, error) {
+        if s == "0x" || s == "" {
+            return []byte{}, nil
+        }
+        if strings.HasPrefix(s, "0x") {
+            s = s[2:]
+        }
+        return hex.DecodeString(s)
+    }
 
-	bandersnatchSecretBytes, err := hex.DecodeString(aux.BandersnatchSecret)
-	if err != nil {
-		return err
-	}
-	v.BandersnatchSecret = bandersnatchSecretBytes
+    var err error
 
-	return nil
+    // Decode BlsPub
+    blsBytes, err := decodeHexToBytes(aux.Bls)
+    if err != nil {
+        return fmt.Errorf("failed to decode BlsPub: %v", err)
+    }
+    if len(blsBytes) != BlsSizeInBytes {
+        return fmt.Errorf("invalid BlsPub length: expected %d bytes, got %d", BlsSizeInBytes, len(blsBytes))
+    }
+    copy(v.BlsPub[:], blsBytes)
+
+    // Decode Metadata
+    metadataBytes, err := decodeHexToBytes(aux.Metadata)
+    if err != nil {
+        return fmt.Errorf("failed to decode Metadata: %v", err)
+    }
+    if len(metadataBytes) != MetadataSizeInBytes {
+        return fmt.Errorf("invalid Metadata length: expected %d bytes, got %d", MetadataSizeInBytes, len(metadataBytes))
+    }
+    copy(v.Metadata[:], metadataBytes)
+
+    // Decode Secret Fields
+    if v.BandersnatchSecret, err = decodeHexToBytes(aux.BandersnatchSecret); err != nil {
+        return fmt.Errorf("failed to decode BandersnatchSecret: %v", err)
+    }
+    if v.Ed25519Secret, err = decodeHexToBytes(aux.Ed25519Secret); err != nil {
+        return fmt.Errorf("failed to decode Ed25519Secret: %v", err)
+    }
+    if v.BlsSecret, err = decodeHexToBytes(aux.BlsSecret); err != nil {
+        return fmt.Errorf("failed to decode BlsSecret: %v", err)
+    }
+
+    return nil
 }

@@ -9,11 +9,41 @@ We are developing [JAM](https://jam.web3.foundation/) in Go in Summer 2024/Fall 
 
 For background on JAM, see [this](https://wiki.polkadot.network/docs/learn-jam-chain) and the [JAM Gray paper](https://graypaper.com/)
 
-## Request for Fellowship Candidacy
 
-Assuming we succeed at passing Milestone 1, we request Polkadot Fellowship candidacy of:
-* Sourabh Niyogi (Level 3)
-* Michael Chung (Level 2)
+## Building JAM
+
+```
+# make jam
+Building JAM...
+mkdir -p bin
+go build -o bin/jam jam.go
+```
+
+## Running JAM
+
+```
+# bin/jam -h
+Usage: jam [options]
+  -bandersnatch string
+    	Bandersnatch Seed (only for development)
+  -bls string
+    	BLS private key (only for development)
+  -datadir string
+    	Specifies the directory for the blockchain, keystore, and other data. (default "/root/.jam")
+  -ed25519 string
+    	Ed25519 Seed (only for development)
+  -genesis string
+    	Specifies the genesis state json file.
+  -h	Displays help information about the commands and flags.
+  -metadata string
+    	Node metadata (default "Alice")
+  -port int
+    	Specifies the network listening port. (default 9900)
+  -ts int
+    	Epoch0 Unix timestamp (will override genesis config)
+  -validatorindex int
+    	Validator Index (only for development)
+```
 
 ## Libraries used
 

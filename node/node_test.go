@@ -52,7 +52,9 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	peerList := make(map[string]NodeInfo)
 	validators := make([]types.Validator, numNodes)
 	for i := 0; i < numNodes; i++ {
-		validator, err := statedb.InitValidator(seeds[i], seeds[i])
+		bls_priv := []byte{}
+		meta := ""
+		validator, err := statedb.InitValidator(seeds[i], seeds[i], bls_priv, meta)
 		if err == nil {
 			validators[i] = validator
 		} else {
@@ -86,7 +88,9 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	// Compute validator secrets
 	validatorSecrets := make([]types.ValidatorSecret, numNodes)
 	for i := 0; i < numNodes; i++ {
-		validatorSecret, err := statedb.InitValidatorSecret(seeds[i], seeds[i])
+		bls_priv := []byte{}
+		meta := ""
+		validatorSecret, err := statedb.InitValidatorSecret(seeds[i], seeds[i], bls_priv, meta)
 		if err != nil {
 			return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
 		}

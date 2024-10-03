@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/rsa"
+
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	//	"encoding/binary"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math"
@@ -18,9 +18,6 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
-
-	//	"io"
-	"log"
 	"math/big"
 	rand0 "math/rand"
 	"strings"
@@ -33,7 +30,7 @@ import (
 
 const (
 	numNodes = 6
-	quicAddr = "localhost:%d" // karura-internal.polkaholic.io:%d
+	quicAddr = "localhost:%d"
 )
 
 const (
@@ -158,49 +155,14 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	}
 
 	var cert tls.Certificate
-	use_rsa := false
-	if use_rsa {
-		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			fmt.Println("Failed to generate private key:", err)
-			return nil, err
-		}
+	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret)
+	fmt.Printf("ed25519_priv=%s\n", hex.EncodeToString(ed25519_priv))
+	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
+	fmt.Printf("ed25519_pub=%s\n", hex.EncodeToString(ed25519_pub))
 
-		template := x509.Certificate{
-			SerialNumber: big.NewInt(1),
-			Subject: pkix.Name{
-				Organization: []string{"Org"},
-			},
-			NotBefore:             time.Now(),
-			NotAfter:              time.Now().AddDate(1, 0, 0), // Valid for 1 year
-			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-			BasicConstraintsValid: true,
-		}
-
-		derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-		if err != nil {
-			fmt.Println("Failed to create certificate:", err)
-			return nil, err
-		}
-
-		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
-
-		cert, err = tls.X509KeyPair(certPEM, keyPEM)
-		if err != nil {
-			log.Fatal("Error loading certificate:", err)
-		}
-	} else {
-		privKeyBytes := credential.Ed25519Secret
-		//fmt.Printf("privKeyBytes=%x\n", privKeyBytes)
-		ed25519_priv := ed25519.PrivateKey(privKeyBytes)
-		ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
-
-		cert, err = generateSelfSignedCert(ed25519_pub, ed25519_priv)
-		if err != nil {
-			return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
-		}
+	cert, err = generateSelfSignedCert(ed25519_pub, ed25519_priv)
+	if err != nil {
+		return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
 	}
 
 	tlsConfig := &tls.Config{
