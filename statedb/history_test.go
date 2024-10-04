@@ -41,9 +41,9 @@ func (H *HOutput) Decode(data []byte) (interface{}, uint32) {
 // HistoryData struct definition
 type HistoryData struct {
 	Input     HInput   `json:"input"`
-	PreState  HState    `json:"pre_state"`
+	PreState  HState   `json:"pre_state"`
 	Output    *HOutput `json:"output"`
-	PostState HState    `json:"post_state"`
+	PostState HState   `json:"post_state"`
 }
 
 func TestRecentHistory(t *testing.T) {

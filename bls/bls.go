@@ -1,7 +1,7 @@
 package bls
 
 /*
-#cgo LDFLAGS: -L target/release -lbls
+#cgo LDFLAGS: -L./target/release -lbls -ldl
 #include <stdint.h>
 #include <stdlib.h>
 #include <bls.h>

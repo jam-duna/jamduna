@@ -5,9 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"path/filepath"
 	"math"
 	"math/big"
+	"path/filepath"
 	"time"
 
 	//"sync"
@@ -38,19 +38,19 @@ func generateSeedSet(ringSize int) ([][]byte, error) {
 	}
 
 	/*
-	entropy := common.Blake2Hash([]byte("42"))
-	Generate the ring set with deterministic random seeds
-	for i := 0; i < ringSize; i++ {
-		seed := make([]byte, 32)
-		if _, err := rand.Read(entropy.Bytes()); err != nil {
-			return nil, err
+		entropy := common.Blake2Hash([]byte("42"))
+		Generate the ring set with deterministic random seeds
+		for i := 0; i < ringSize; i++ {
+			seed := make([]byte, 32)
+			if _, err := rand.Read(entropy.Bytes()); err != nil {
+				return nil, err
+			}
+			// XOR the deterministic seed with the random seed to make it deterministic
+			for j := range seed {
+				seed[j] ^= entropy[j%len(entropy)]
+			}
+			ringSet[i] = common.Blake2Hash(append(seed[:], byte(i))).Bytes()
 		}
-		// XOR the deterministic seed with the random seed to make it deterministic
-		for j := range seed {
-			seed[j] ^= entropy[j%len(entropy)]
-		}
-		ringSet[i] = common.Blake2Hash(append(seed[:], byte(i))).Bytes()
-	}
 	*/
 	return ringSet, nil
 }
@@ -852,50 +852,49 @@ func loadByteCode(filePath string) ([]byte, error) {
 	return bytes, nil
 }
 
-
 func deleteUserJamDirectory(force bool) error {
-    currentUser, err := user.Current()
-    if err != nil {
-        return fmt.Errorf("could not get current user: %v", err)
-    }
-    username := currentUser.Username
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("could not get current user: %v", err)
+	}
+	username := currentUser.Username
 
-    path := filepath.Join("/tmp", username, "jam")
+	path := filepath.Join("/tmp", username, "jam")
 
-    // Safety checks
-    if path == "/" || path == "" {
-        return fmt.Errorf("invalid path: %s", path)
-    }
+	// Safety checks
+	if path == "/" || path == "" {
+		return fmt.Errorf("invalid path: %s", path)
+	}
 
-    if !filepath.HasPrefix(path, "/tmp/") {
-        return fmt.Errorf("refusing to delete directory outside /tmp/: %s", path)
-    }
+	if !filepath.HasPrefix(path, "/tmp/") {
+		return fmt.Errorf("refusing to delete directory outside /tmp/: %s", path)
+	}
 
-    // Check if directory exists
-    if _, err := os.Stat(path); os.IsNotExist(err) {
-        fmt.Printf("Directory %s does not exist, nothing to delete.\n", path)
-        return nil
-    }
+	// Check if directory exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		fmt.Printf("Directory %s does not exist, nothing to delete.\n", path)
+		return nil
+	}
 
-    // Skip prompt if 'force' is true
-    if !force {
-        fmt.Printf("Are you sure you want to delete all contents under %s? (y/N): ", path)
-        var response string
-        fmt.Scanln(&response)
-        if response != "y" && response != "Y" {
-            fmt.Println("Operation canceled.")
-            return nil
-        }
-    }
+	// Skip prompt if 'force' is true
+	if !force {
+		fmt.Printf("Are you sure you want to delete all contents under %s? (y/N): ", path)
+		var response string
+		fmt.Scanln(&response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Operation canceled.")
+			return nil
+		}
+	}
 
-    // Remove the directory and its contents
-    err = os.RemoveAll(path)
-    if err != nil {
-        return fmt.Errorf("failed to delete directory %s: %v", path, err)
-    }
+	// Remove the directory and its contents
+	err = os.RemoveAll(path)
+	if err != nil {
+		return fmt.Errorf("failed to delete directory %s: %v", path, err)
+	}
 
-    fmt.Printf("Successfully deleted directory %s and all its contents.\n", path)
-    return nil
+	fmt.Printf("Successfully deleted directory %s and all its contents.\n", path)
+	return nil
 }
 
 func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
@@ -910,7 +909,7 @@ func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
 	*/
 	currentUser, err := user.Current()
 	if err != nil {
-	    return "", fmt.Errorf("could not get current user: %v", err)
+		return "", fmt.Errorf("could not get current user: %v", err)
 	}
 	username := currentUser.Username
 	path := fmt.Sprintf("/tmp/%s/jam/%v/node%v", username, unixtimestamp, id)
@@ -923,13 +922,12 @@ func SetLevelDBPaths(numNodes int) []string {
 	for i := 0; i < numNodes; i++ {
 		node_idx := fmt.Sprintf("%d", i)
 		node_path, err := computeLevelDBPath(node_idx, int(currJCE))
-		if (err == nil){
+		if err == nil {
 			node_paths[i] = node_path
 		}
 	}
 	return node_paths
 }
-
 
 func TestLevelDBDelete(t *testing.T) {
 	err := deleteUserJamDirectory(true)

@@ -91,7 +91,7 @@ type Node struct {
 	connectionMu sync.Mutex
 	messageChan  chan statedb.Message
 	nodeType     string
-	dataDir 	 string
+	dataDir      string
 
 	epoch0Timestamp uint32
 }
@@ -203,7 +203,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 		statedbMap:  make(map[common.Hash]*statedb.StateDB),
 		blocks:      make(map[common.Hash]*types.Block),
 		selfTickets: make(map[common.Hash][]types.TicketBucket),
-		dataDir	   : dataDir,
+		dataDir:     dataDir,
 	}
 
 	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
@@ -215,7 +215,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 		return nil, err
 	}
 	node.setValidatorCredential(credential)
-	if (genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0){
+	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
 	node.writeDebug(genesisConfig, uint32(genesisConfig.Epoch0Timestamp))
@@ -670,32 +670,32 @@ func (n *Node) getPVMStateDB() *statedb.StateDB {
 // -----Custom methods for tiny QUIC EC experiment-----
 
 func getStructType(obj interface{}) string {
-    v := reflect.TypeOf(obj)
+	v := reflect.TypeOf(obj)
 
-    // If the type is a pointer, get the underlying element type
-    if v.Kind() == reflect.Ptr {
-        v = v.Elem()
-    }
+	// If the type is a pointer, get the underlying element type
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
 
-    // Get the type name (if available) and the package path
-    structType := v.Name()
-    pkgPath := v.PkgPath()
+	// Get the type name (if available) and the package path
+	structType := v.Name()
+	pkgPath := v.PkgPath()
 
-    // If there's no name, handle unexported types differently
-    if structType == "" {
-        structType = fmt.Sprintf("%v", v) // Fallback to full type description
-    }
+	// If there's no name, handle unexported types differently
+	if structType == "" {
+		structType = fmt.Sprintf("%v", v) // Fallback to full type description
+	}
 
-    // Check if there's a package path (means it's an exported type)
-    if pkgPath != "" {
-        parts := strings.Split(structType, ".")
-        structType = strings.ToLower(parts[len(parts)-1])
-    } else {
-        structType = strings.ToLower(structType)
-    }
+	// Check if there's a package path (means it's an exported type)
+	if pkgPath != "" {
+		parts := strings.Split(structType, ".")
+		structType = strings.ToLower(parts[len(parts)-1])
+	} else {
+		structType = strings.ToLower(structType)
+	}
 
-    fmt.Printf("!!!!getStructType=%v\n", structType)
-    return structType
+	fmt.Printf("!!!!getStructType=%v\n", structType)
+	return structType
 }
 
 func getMessageType(obj interface{}) string {
@@ -753,37 +753,36 @@ func getMessageType(obj interface{}) string {
 
 const TickTime = 2000
 
-
 func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
 	//msgType := getStructType(obj)
 	msgType := getMessageType(obj)
-	if (msgType != "unknown"){
+	if msgType != "unknown" {
 	}
 	dataDir := fmt.Sprintf("%s/data", n.dataDir)
 	structDir := fmt.Sprintf("%s/%vs", dataDir, msgType)
 	//fmt.Printf("!!!! writeDebug msgType=%v, structDir=%v\n", msgType, structDir)
-	if (msgType != "unknown"){
+	if msgType != "unknown" {
 		epoch, phase := statedb.ComputeEpochAndPhase(Timeslot, n.epoch0Timestamp)
 		path := fmt.Sprintf("%s/%v_%v_%v", structDir, msgType, epoch, phase)
-		if (msgType == "Ticket"){
+		if msgType == "Ticket" {
 			if ticket, ok := obj.(*types.Ticket); ok {
-		        // Cast successful, you can now access ticket's methods or fields
-		        identifier, _ := ticket.TicketID()  // Assuming TicketID() is a method of types.Ticket
-		        path = fmt.Sprintf("%v_%v", path, identifier)
-		    } else {
-		        // Handle case where obj is not a *types.Ticket
-		        return fmt.Errorf("expected types.Ticket but got %T", obj)
-		    }
+				// Cast successful, you can now access ticket's methods or fields
+				identifier, _ := ticket.TicketID() // Assuming TicketID() is a method of types.Ticket
+				path = fmt.Sprintf("%v_%v", path, identifier)
+			} else {
+				// Handle case where obj is not a *types.Ticket
+				return fmt.Errorf("expected types.Ticket but got %T", obj)
+			}
 		}
-		if (msgType == "Block"){
+		if msgType == "Block" {
 			if block, ok := obj.(*types.Block); ok {
-		        // Cast successful, you can now access ticket's methods or fields
-		        identifier := block.Hash()  // Assuming TicketID() is a method of types.Ticket
-		        path = fmt.Sprintf("%v_%v", path, identifier)
-		    } else {
-		        // Handle case where obj is not a *types.Ticket
-		        return fmt.Errorf("expected types.Ticket but got %T", obj)
-		    }
+				// Cast successful, you can now access ticket's methods or fields
+				identifier := block.Hash() // Assuming TicketID() is a method of types.Ticket
+				path = fmt.Sprintf("%v_%v", path, identifier)
+			} else {
+				// Handle case where obj is not a *types.Ticket
+				return fmt.Errorf("expected types.Ticket but got %T", obj)
+			}
 		}
 		jsonPath := fmt.Sprintf("%s.json", path)
 		codecPath := fmt.Sprintf("%s.codec", path)
@@ -798,9 +797,9 @@ func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
 		}
 
 		switch v := obj.(type) {
-			default:
+		default:
 			jsonEncode, _ := json.MarshalIndent(v, "", "    ")
-			codecEncode :=  types.Encode(v)
+			codecEncode := types.Encode(v)
 
 			//fmt.Printf("jsonEncode=%s \n", string(jsonEncode))
 			//fmt.Printf("codecEncode=%x \n", codecEncode)
@@ -909,7 +908,7 @@ func (n *Node) runClient() {
 					n.BroadcastTickets(currJCE)
 				}
 				// TODO Shawn: DO NOT WRITE ANYTHING into JAM repo
-				if (debug){
+				if debug {
 					timeslot := newStateDB.GetSafrole().Timeslot
 					err := n.writeDebug(newBlock, timeslot)
 					if err != nil {

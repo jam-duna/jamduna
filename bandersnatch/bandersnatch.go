@@ -1,7 +1,7 @@
 package bandersnatch
 
 /*
-#cgo LDFLAGS: -L target/release -lbandersnatch
+#cgo LDFLAGS: -Ltarget/release -lbandersnatch -ldl
 #include <stdint.h>
 #include <stdlib.h>
 #include <bandersnatch.h>

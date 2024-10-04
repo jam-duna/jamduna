@@ -3,7 +3,7 @@ package trie
 import (
 	"fmt"
 	"testing"
-	
+
 	"github.com/colorfulnotion/jam/common"
 )
 

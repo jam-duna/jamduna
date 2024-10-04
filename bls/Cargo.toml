@@ -27,4 +27,4 @@ thiserror = { version = "1.0", default-features = false }
 constcat = "0.3.0"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["staticlib"]

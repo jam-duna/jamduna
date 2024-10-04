@@ -70,7 +70,7 @@ func main() {
 
 	currTS := uint64(time.Now().Unix())
 	if config.Epoch0Timestamp > 0 {
-		if (currTS >= uint64(config.Epoch0Timestamp)){
+		if currTS >= uint64(config.Epoch0Timestamp) {
 			fmt.Println("Invalid Config. Now(%v) > Epoch0Timestamp (%v)", currTS, config.Epoch0Timestamp)
 			os.Exit(1)
 		}
@@ -129,9 +129,9 @@ func generateValidatorNetwork(N uint32) (validators []types.Validator, secrets [
 			iHex = "0" + iHex
 		}
 		iHexByteLen := len(iHex) / 2
-		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes - iHexByteLen), iHex)
-		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen - iHexByteLen), iHex)
-		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes - iHexByteLen), iHex)
+		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes-iHexByteLen), iHex)
+		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen-iHexByteLen), iHex)
+		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes-iHexByteLen), iHex)
 
 		// Set up the secret/validator using hex values
 		v, s, err := setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata)

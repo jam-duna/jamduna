@@ -31,8 +31,8 @@ type DInput struct {
 }
 
 type DisputeData struct {
-	Input     DInput    `json:"input"`
-	PreState  DJamState `json:"pre_state"`
+	Input    DInput    `json:"input"`
+	PreState DJamState `json:"pre_state"`
 	// Output    DOutput   `json:"output"`
 	PostState DJamState `json:"post_state"`
 }

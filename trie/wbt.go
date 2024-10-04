@@ -3,9 +3,9 @@ package trie
 import (
 	"errors"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
 	"math"
 	"strings"
-	"github.com/colorfulnotion/jam/common"
 )
 
 // WBTNode represents a node in the WBT
