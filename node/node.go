@@ -8,7 +8,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/hex"
+	"io/ioutil"
+	"os"
+
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math"
@@ -62,8 +65,9 @@ type Node struct {
 	streams     map[string]quic.Stream
 	store       *storage.StateDBStorage /// where to put this?
 
-	// holds a map of epoch to at most 2 tickets
-	selfTickets map[uint32][]types.Ticket
+	// holds a map of epoch (use entropy to control it) to at most 2 tickets
+	selfTickets  map[common.Hash][]types.TicketBucket
+	ticketsMutex sync.Mutex
 	// this is for audit
 	announcementBucket     types.AnnounceBucket
 	prevAnnouncementBucket types.AnnounceBucket
@@ -87,6 +91,9 @@ type Node struct {
 	connectionMu sync.Mutex
 	messageChan  chan statedb.Message
 	nodeType     string
+	dataDir 	 string
+
+	epoch0Timestamp uint32
 }
 
 /*
@@ -142,23 +149,22 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func NewNode(nodeName string, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo) (*Node, error) {
-	n, err := newNode(0, credential, genesisConfig, peers, peerList, ValidatorFlag)
+func NewNode(nodeName string, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, dataDir string) (*Node, error) {
+	n, err := newNode(0, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir)
 	return n, err
 }
 
-func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string) (*Node, error) {
-	path := fmt.Sprintf("/tmp/log/testdb%d", id)
-	store, err := storage.NewStateDBStorage(path)
+func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string, dataDir string) (*Node, error) {
+	fmt.Printf("[N%v] Using levelDB path=%v\n", id, dataDir)
+	levelDBPath := fmt.Sprintf("%v/leveldb/", dataDir)
+	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
 		return nil, err
 	}
 
 	var cert tls.Certificate
 	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
-	fmt.Printf("ed25519_priv=%s\n", hex.EncodeToString(ed25519_priv))
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
-	fmt.Printf("ed25519_pub=%s\n", hex.EncodeToString(ed25519_pub))
 
 	cert, err = generateSelfSignedCert(ed25519_pub, ed25519_priv)
 	if err != nil {
@@ -196,7 +202,8 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 		nodeType:    nodeType,
 		statedbMap:  make(map[common.Hash]*statedb.StateDB),
 		blocks:      make(map[common.Hash]*types.Block),
-		selfTickets: make(map[uint32][]types.Ticket),
+		selfTickets: make(map[common.Hash][]types.TicketBucket),
+		dataDir	   : dataDir,
 	}
 
 	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
@@ -208,6 +215,10 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 		return nil, err
 	}
 	node.setValidatorCredential(credential)
+	if (genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0){
+		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
+	}
+	node.writeDebug(genesisConfig, uint32(genesisConfig.Epoch0Timestamp))
 
 	go node.runServer()
 	go node.runClient()
@@ -231,14 +242,6 @@ func getConnKey(identifier string, incoming bool) string {
 	}
 }
 
-func (n *Node) generatedEpochTickets(epoch uint32) bool {
-	_, ok := n.selfTickets[epoch]
-	if !ok {
-		return false
-	}
-	return true
-}
-
 // use ed25519 key to get peer info
 func (n *Node) GetPeerInfoByEd25519(key types.Ed25519Key) (NodeInfo, error) {
 	for _, peer := range n.peersInfo {
@@ -252,6 +255,7 @@ func (n *Node) GetPeerInfoByEd25519(key types.Ed25519Key) (NodeInfo, error) {
 func (n *Node) GetBandersnatchSecret() []byte {
 	return n.credential.BandersnatchSecret
 }
+
 func (n *Node) GetSelfCoreIndex() (uint16, error) {
 	for _, assignment := range n.statedb.GuarantorAssignments {
 		if assignment.Validator.GetEd25519Key() == n.GetEd25519Key() {
@@ -274,30 +278,6 @@ func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 }
 func (n *Node) GetCurrValidatorIndex() uint32 {
 	return uint32(n.statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
-}
-
-func (n *Node) generateEpochTickets(epoch uint32, isNextEpoch bool) {
-	sf := n.statedb.GetSafrole()
-	auth_secret, _ := sf.ConvertBanderSnatchSecret(n.GetBandersnatchSecret())
-	tickets := sf.GenerateTickets(auth_secret, isNextEpoch)
-	fmt.Printf("[N%v] Generating Tickets for (Epoch,isNextEpoch) = (%v,%v)\n", n.id, epoch, isNextEpoch)
-	n.selfTickets[epoch] = tickets
-	for _, t := range tickets {
-		// send tickets to neighbors
-		n.broadcast(t)
-	}
-}
-
-func (n *Node) GenerateTickets(currJCE uint32) {
-	sf := n.statedb.GetSafrole()
-	currEpoch, currPhase := sf.EpochAndPhase(currJCE)
-	if currPhase >= types.TicketSubmissionEndSlot {
-		if n.generatedEpochTickets(uint32(currEpoch+1)) == false {
-			n.generateEpochTickets(uint32(currEpoch+1), true)
-		}
-	} else if n.generatedEpochTickets(uint32(currEpoch)) == false {
-		n.generateEpochTickets(uint32(currEpoch), false)
-	}
 }
 
 func (n *Node) GetNodeType() string {
@@ -689,8 +669,36 @@ func (n *Node) getPVMStateDB() *statedb.StateDB {
 
 // -----Custom methods for tiny QUIC EC experiment-----
 
-func getMessageType(obj interface{}) string {
+func getStructType(obj interface{}) string {
+    v := reflect.TypeOf(obj)
 
+    // If the type is a pointer, get the underlying element type
+    if v.Kind() == reflect.Ptr {
+        v = v.Elem()
+    }
+
+    // Get the type name (if available) and the package path
+    structType := v.Name()
+    pkgPath := v.PkgPath()
+
+    // If there's no name, handle unexported types differently
+    if structType == "" {
+        structType = fmt.Sprintf("%v", v) // Fallback to full type description
+    }
+
+    // Check if there's a package path (means it's an exported type)
+    if pkgPath != "" {
+        parts := strings.Split(structType, ".")
+        structType = strings.ToLower(parts[len(parts)-1])
+    } else {
+        structType = strings.ToLower(structType)
+    }
+
+    fmt.Printf("!!!!getStructType=%v\n", structType)
+    return structType
+}
+
+func getMessageType(obj interface{}) string {
 	switch obj.(type) {
 	case types.AvailabilityJustification:
 		return "AvailabilityJustification"
@@ -712,6 +720,10 @@ func getMessageType(obj interface{}) string {
 		return "Preimages"
 	case types.Ticket:
 		return "Ticket"
+	case *types.Ticket:
+		return "Ticket"
+	case *types.Block:
+		return "Block"
 	case types.Block:
 		return "Block"
 	case types.Announcement:
@@ -724,6 +736,16 @@ func getMessageType(obj interface{}) string {
 		return "ECChunkQuery"
 	case types.GuaranteeReport:
 		return "GuaranteeReport"
+	case *statedb.StateDB:
+		return "StateDB"
+	case statedb.StateDB:
+		return "StateDB"
+	case *statedb.JamState:
+		return "JamState"
+	case statedb.JamState:
+		return "JamState"
+	case *statedb.GenesisConfig:
+		return "GenesisConfig"
 	default:
 		return "unknown"
 	}
@@ -731,8 +753,114 @@ func getMessageType(obj interface{}) string {
 
 const TickTime = 2000
 
+
+func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
+	//msgType := getStructType(obj)
+	msgType := getMessageType(obj)
+	if (msgType != "unknown"){
+	}
+	dataDir := fmt.Sprintf("%s/data", n.dataDir)
+	structDir := fmt.Sprintf("%s/%vs", dataDir, msgType)
+	//fmt.Printf("!!!! writeDebug msgType=%v, structDir=%v\n", msgType, structDir)
+	if (msgType != "unknown"){
+		epoch, phase := statedb.ComputeEpochAndPhase(Timeslot, n.epoch0Timestamp)
+		path := fmt.Sprintf("%s/%v_%v_%v", structDir, msgType, epoch, phase)
+		if (msgType == "Ticket"){
+			if ticket, ok := obj.(*types.Ticket); ok {
+		        // Cast successful, you can now access ticket's methods or fields
+		        identifier, _ := ticket.TicketID()  // Assuming TicketID() is a method of types.Ticket
+		        path = fmt.Sprintf("%v_%v", path, identifier)
+		    } else {
+		        // Handle case where obj is not a *types.Ticket
+		        return fmt.Errorf("expected types.Ticket but got %T", obj)
+		    }
+		}
+		if (msgType == "Block"){
+			if block, ok := obj.(*types.Block); ok {
+		        // Cast successful, you can now access ticket's methods or fields
+		        identifier := block.Hash()  // Assuming TicketID() is a method of types.Ticket
+		        path = fmt.Sprintf("%v_%v", path, identifier)
+		    } else {
+		        // Handle case where obj is not a *types.Ticket
+		        return fmt.Errorf("expected types.Ticket but got %T", obj)
+		    }
+		}
+		jsonPath := fmt.Sprintf("%s.json", path)
+		codecPath := fmt.Sprintf("%s.codec", path)
+		//fmt.Printf("jsonPath=%v, codecPath=%v\n", jsonPath, codecPath)
+
+		// Check if the directories exist, if not create them
+		if _, err := os.Stat(structDir); os.IsNotExist(err) {
+			err := os.MkdirAll(structDir, os.ModePerm)
+			if err != nil {
+				return fmt.Errorf("Error creating %v directory: %v\n", msgType, err)
+			}
+		}
+
+		switch v := obj.(type) {
+			default:
+			jsonEncode, _ := json.MarshalIndent(v, "", "    ")
+			codecEncode :=  types.Encode(v)
+
+			//fmt.Printf("jsonEncode=%s \n", string(jsonEncode))
+			//fmt.Printf("codecEncode=%x \n", codecEncode)
+
+			err := ioutil.WriteFile(jsonPath, jsonEncode, 0644)
+			if err != nil {
+				return fmt.Errorf("Error writing block file: %v\n", err)
+			}
+			err = ioutil.WriteFile(codecPath, codecEncode, 0644)
+			if err != nil {
+				return fmt.Errorf("Error writing state file: %v\n", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (n *Node) writeDebugState(newBlock *types.Block, newStateDB *statedb.StateDB) error {
+	// save the new block as json, put it in to dir /block&state
+	jsonBlock, _ := json.MarshalIndent(newBlock, "", "    ")
+	jsonState, _ := json.MarshalIndent(newStateDB.JamState, "", "    ")
+	// use epoch and phase
+	epoch, phase := newStateDB.GetSafrole().EpochAndPhase(newStateDB.GetSafrole().Timeslot)
+
+	dataDir := fmt.Sprintf("%s/data/", n.dataDir)
+
+	blockDir := fmt.Sprintf("%s/blocks", dataDir)
+	stateDir := fmt.Sprintf("%s/state", dataDir)
+
+	// Check if the directories exist, if not create them
+	if _, err := os.Stat(blockDir); os.IsNotExist(err) {
+		err := os.MkdirAll(blockDir, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("Error creating block directory: %v\n", err)
+		}
+	}
+
+	if _, err := os.Stat(stateDir); os.IsNotExist(err) {
+		err := os.MkdirAll(stateDir, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("Error creating state directory: %v\n", err)
+		}
+	}
+
+	blockPath := fmt.Sprintf("%s/block_%v_%v.json", blockDir, epoch, phase)
+	statePath := fmt.Sprintf("%s/state_%v_%v.json", stateDir, epoch, phase)
+	err := ioutil.WriteFile(blockPath, jsonBlock, 0644)
+	if err != nil {
+		return fmt.Errorf("Error writing block file: %v\n", err)
+	}
+	err = ioutil.WriteFile(statePath, jsonState, 0644)
+	if err != nil {
+		return fmt.Errorf("Error writing state file: %v\n", err)
+	}
+	return nil
+}
+
 func (n *Node) runClient() {
 
+	debug := true
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
 
@@ -742,7 +870,11 @@ func (n *Node) runClient() {
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
-			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential)
+			ticketIDs, err := n.GetSelfTicketsIDs()
+			if err != nil {
+				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
+			}
+			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs)
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				panic(0)
@@ -751,12 +883,43 @@ func (n *Node) runClient() {
 				// we authored a block
 				newStateDB.PreviousGuarantors()
 				newStateDB.AssignGuarantors()
+
 				n.addStateDB(newStateDB)
 				n.blocks[newBlock.Hash()] = newBlock
 				n.broadcast(*newBlock)
 				fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
 				for _, g := range newStateDB.GuarantorAssignments {
 					fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
+				}
+
+				currSlot := n.statedb.GetSafrole().Timeslot
+				_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currSlot)
+				if currPhase >= types.EpochLength-1 {
+					nextEpochSlot := n.statedb.GetSafrole().GetNextEpochFirst() + 2
+					n.GenerateTickets(nextEpochSlot)
+					n.CheckSelfTicketsIsIncluded(*newBlock, nextEpochSlot)
+					n.BroadcastTickets(nextEpochSlot)
+				}
+
+				if newStateDB.Block.Header.EpochMark != nil {
+					fmt.Printf("[N%d] EPOCH MARK: %v\n", n.id, newStateDB.Block.Header.EpochMark)
+					currJCE := statedb.ComputeCurrentJCETime()
+					n.GenerateTickets(currJCE)
+					n.CheckSelfTicketsIsIncluded(*newBlock, currJCE)
+					n.BroadcastTickets(currJCE)
+				}
+				// TODO Shawn: DO NOT WRITE ANYTHING into JAM repo
+				if (debug){
+					timeslot := newStateDB.GetSafrole().Timeslot
+					err := n.writeDebug(newBlock, timeslot)
+					if err != nil {
+						fmt.Printf("writeDebug Block err: %v\n", err)
+					}
+					err = n.writeDebug(newStateDB.JamState, timeslot)
+					if err != nil {
+						fmt.Printf("writeDebug JamState err: %v\n", err)
+					}
+					//n.writeDebugState(newBlock, newStateDB)
 				}
 			}
 		case msg := <-n.messageChan:

@@ -2,15 +2,14 @@ package statedb
 
 import (
 	"encoding/json"
-	//"errors"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/trie"
-	"github.com/colorfulnotion/jam/types"
-	"io/ioutil"
+	"fmt"
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,119 +23,97 @@ type HInput struct {
 	WorkPackages []common.Hash `json:"work_packages"`
 }
 
-// MMR struct definition
-type MMR struct {
-	Peaks []common.Hash `json:"peaks"`
-}
-
-// Beta struct definition
-
-type HBeta struct {
-	HeaderHash common.Hash   `json:"header_hash"`
-	MMR        MMR           `json:"mmr"`
-	StateRoot  common.Hash   `json:"state_root"`
-	Reported   []common.Hash `json:"reported"`
-}
-
 // PreState and PostState struct definitions
-type State struct {
-	Beta []HBeta `json:"beta"`
+type HState struct {
+	Beta BeefyPool `json:"beta"`
+}
+
+type HOutput struct{}
+
+func (H *HOutput) Encode() []byte {
+	return []byte{}
+}
+
+func (H *HOutput) Decode(data []byte) (interface{}, uint32) {
+	return nil, 0
 }
 
 // HistoryData struct definition
 type HistoryData struct {
-	Input     HInput `json:"input"`
-	PreState  State  `json:"pre_state"`
-	PostState State  `json:"post_state"`
+	Input     HInput   `json:"input"`
+	PreState  HState    `json:"pre_state"`
+	Output    *HOutput `json:"output"`
+	PostState HState    `json:"post_state"`
 }
 
 func TestRecentHistory(t *testing.T) {
-	files := []string{
-		"../jamtestvectors/history/data/progress_blocks_history-1.json",
-		"../jamtestvectors/history/data/progress_blocks_history-2.json",
-		"../jamtestvectors/history/data/progress_blocks_history-3.json",
-		"../jamtestvectors/history/data/progress_blocks_history-4.json",
+	testCases := []struct {
+		jsonFile     string
+		binFile      string
+		expectedType interface{}
+	}{
+		{"progress_blocks_history-1.json", "progress_blocks_history-1.bin", &HistoryData{}},
+		{"progress_blocks_history-2.json", "progress_blocks_history-2.bin", &HistoryData{}},
+		{"progress_blocks_history-3.json", "progress_blocks_history-3.bin", &HistoryData{}},
+		{"progress_blocks_history-4.json", "progress_blocks_history-4.bin", &HistoryData{}},
 	}
+	for _, tc := range testCases {
+		t.Run(tc.jsonFile, func(t *testing.T) {
+			jsonPath := filepath.Join("../jamtestvectors/history/data", tc.jsonFile)
+			binPath := filepath.Join("../jamtestvectors/history/data", tc.binFile)
 
-	sdb, err := storage.NewStateDBStorage("/tmp/rh")
-	if err != nil {
-		panic(err)
-	}
-	for _, file := range files {
-		t.Run(filepath.Base(file), func(t *testing.T) {
-			data, err := ioutil.ReadFile(file)
+			targetedStructType := reflect.TypeOf(tc.expectedType)
+
+			fmt.Printf("\n\n\nTesting %v\n", targetedStructType)
+			// Read and unmarshal JSON file
+			jsonData, err := os.ReadFile(jsonPath)
 			if err != nil {
-				t.Fatalf("Failed to read file %s: %v", file, err)
+				t.Fatalf("failed to read JSON file: %v", err)
 			}
 
-			var history HistoryData
-			if err := json.Unmarshal(data, &history); err != nil {
-				t.Fatalf("Failed to unmarshal JSON data: %v", err)
-			}
-
-			// Assume RecentHistorySTF is a function that takes input and pre_state, and returns post_state
-			resultPostState, err := RecentHistorySTF(sdb, history.Input, history.PreState)
+			err = json.Unmarshal(jsonData, tc.expectedType)
 			if err != nil {
-				t.Fatalf("RecentHistorySTF returned an error: %v", err)
+				t.Fatalf("failed to unmarshal JSON data: %v", err)
+			}
+			fmt.Printf("Unmarshaled %s\n", jsonPath)
+			fmt.Printf("Expected: %v\n", tc.expectedType)
+			// Encode the struct to bytes
+			encodedBytes := types.Encode(tc.expectedType)
+
+			fmt.Printf("Encoded: %x\n\n", encodedBytes)
+
+			decodedStruct, _ := types.Decode(encodedBytes, targetedStructType)
+			fmt.Printf("Decoded:  %v\n\n", decodedStruct)
+
+			// Marshal the struct to JSON
+			encodedJSON, err := json.MarshalIndent(decodedStruct, "", "  ")
+			if err != nil {
+				t.Fatalf("failed to marshal JSON data: %v", err)
+			}
+			fmt.Printf("Encoded JSON:\n%s\n", encodedJSON)
+
+			// output bin file
+			// err = os.WriteFile("./output.bin", encodedBytes, 0644)
+			// if err != nil {
+			// 	t.Fatalf("failed to write binary file: %v", err)
+			// }
+
+			// Read the expected bytes from the binary file
+			expectedBytes, err := os.ReadFile(binPath)
+			if err != nil {
+				t.Fatalf("failed to read binary file: %v", err)
+			}
+			assert.Equal(t, expectedBytes, encodedBytes, "encoded bytes do not match expected bytes")
+
+			if false {
+				decoded, _ := types.Decode(expectedBytes, reflect.TypeOf(tc.expectedType))
+				encodedBytes2 := types.Encode(decoded)
+				// Compare the encoded bytes with the expected bytes
+				assert.Equal(t, expectedBytes, encodedBytes2, "encoded bytes do not match expected bytes")
 			}
 
-			// Compare the expected and actual post_state
-			assert.Equal(t, history.PostState, resultPostState, "Post state mismatch for file: %s", file)
+			// Compare the encoded JSON with the original JSON
+			assert.JSONEq(t, string(jsonData), string(encodedJSON), "encoded JSON does not match original JSON")
 		})
 	}
-}
-
-func RecentHistorySTF(sdb *storage.StateDBStorage, input HInput, preState State) (State, error) {
-	// Ensure there is at least one block in the state history
-	var lastBeta HBeta
-	if len(preState.Beta) == 0 {
-		lastBeta = HBeta{}
-	} else {
-		lastBeta = preState.Beta[len(preState.Beta)-1]
-	}
-
-	// Step 1: Update β† ≡ β except β†[|β|−1]ₛ = Hᵣ
-	// Extract the last β from preState
-
-	r := []common.Hash{}
-	trie_mmr := trie.NewMMR() // nil, sdb
-	// Step 2: Compute the accumulation-
-	for _, wp := range input.WorkPackages {
-		trie_mmr.Append(wp.Bytes())
-		r = append(r, wp)
-	}
-	trie_mmr.Append(input.AccumulateRoot.Bytes())
-	r = append(r, input.AccumulateRoot)
-
-	// Step 3: Append the new block's header hash and Merkle root to β†
-	newBeta := HBeta{
-		HeaderHash: input.HeaderHash, // present Header hash
-		MMR:        MMRAdjusted(lastBeta.MMR, r),
-		StateRoot:  common.Hash{},
-		Reported:   input.WorkPackages, // from E_G
-	}
-
-	// Step 4: Update the state trie root
-	newBetaEncode, _ := json.Marshal(newBeta)
-
-	trie := trie.NewMerkleTree(nil, sdb)
-	trie.SetState(C10, newBetaEncode)
-	newBeta.StateRoot = trie.GetRoot()
-
-	// Step 5: Append n to β† and shift out the oldest block if necessary
-	postState := State{
-		Beta: append(preState.Beta, newBeta),
-	}
-
-	// Keep only the last H blocks (remove the oldest if necessary)
-	if len(postState.Beta) > types.RecentHistorySize {
-		postState.Beta = postState.Beta[len(postState.Beta)-types.RecentHistorySize:]
-	}
-
-	return postState, nil
-}
-
-func MMRAdjusted(pre MMR, newPeaks []common.Hash) (post MMR) {
-	// TODO
-	return post
 }

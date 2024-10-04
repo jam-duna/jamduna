@@ -67,10 +67,16 @@ func main() {
 			os.Exit(0)
 		}
 	}
+
+	currTS := uint64(time.Now().Unix())
 	if config.Epoch0Timestamp > 0 {
+		if (currTS >= uint64(config.Epoch0Timestamp)){
+			fmt.Println("Invalid Config. Now(%v) > Epoch0Timestamp (%v)", currTS, config.Epoch0Timestamp)
+			os.Exit(1)
+		}
 		genesisConfig.Epoch0Timestamp = uint64(config.Epoch0Timestamp)
 	} else if genesisConfig.Epoch0Timestamp == 0 && config.Epoch0Timestamp > 0 {
-		genesisConfig.Epoch0Timestamp = uint64(time.Now().Unix()) + 6
+		genesisConfig.Epoch0Timestamp = currTS + 6
 	}
 
 	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
@@ -83,7 +89,7 @@ func main() {
 	}
 
 	// Set up peers and node
-	_, err = node.NewNode(config.NodeName, secrets[validatorIndex], &genesisConfig, peers, peerList)
+	_, err = node.NewNode(config.NodeName, secrets[validatorIndex], &genesisConfig, peers, peerList, config.DataDir)
 	if err != nil {
 		panic(1)
 	}
@@ -118,10 +124,15 @@ func generateValidatorNetwork(N uint32) (validators []types.Validator, secrets [
 		remoteAddr := fmt.Sprintf("localhost:%d", 9900+i)
 		metadata := fmt.Sprintf("%s:%s", remoteAddr, nodeName)
 		// Create hex strings for keys
-		iHex := fmt.Sprintf("%02x", i)
-		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes-1), iHex)
-		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen-1), iHex)
-		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes-1), iHex)
+		iHex := fmt.Sprintf("%x", i)
+		if len(iHex)%2 != 0 {
+			iHex = "0" + iHex
+		}
+		iHexByteLen := len(iHex) / 2
+		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes - iHexByteLen), iHex)
+		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen - iHexByteLen), iHex)
+		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes - iHexByteLen), iHex)
+
 		// Set up the secret/validator using hex values
 		v, s, err := setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata)
 		if err != nil {
@@ -145,6 +156,13 @@ const debug = false
 
 // setupValidatorSecret sets up the validator secret struct and validates input lengths
 func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) (validator types.Validator, secret types.ValidatorSecret, err error) {
+
+	// Decode hex inputs
+	bandersnatch_seed := common.FromHex(bandersnatchHex)
+	ed25519_seed := common.FromHex(ed25519Hex)
+	bls_secret := common.FromHex(blsHex)
+	validator_meta := []byte(metadata)
+
 	// Validate hex input lengths
 	if debug {
 		fmt.Printf("bandersnatchHex: %s\n", bandersnatchHex)
@@ -152,23 +170,19 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 		fmt.Printf("blsHex: %s\n", blsHex)
 		fmt.Printf("metadata: %s\n", metadata)
 	}
-	if len(bandersnatchHex) != (bandersnatch.SecretLen+1)*2 {
-		return validator, secret, fmt.Errorf("invalid input length (%d) for bandersnatch seed %s - expected len of %d", bandersnatchHex, len(bandersnatchHex), (bandersnatch.SecretLen+1)*2)
+	if len(bandersnatch_seed) != (bandersnatch.SecretLen) {
+		return validator, secret, fmt.Errorf("invalid input length (%d) for bandersnatch seed %s - expected len of %d", len(bandersnatch_seed), bandersnatchHex, bandersnatch.SecretLen)
 	}
-	if len(ed25519Hex) != (ed25519.SeedSize+1)*2 {
+	if len(ed25519_seed) != (ed25519.SeedSize) {
 		return validator, secret, fmt.Errorf("invalid input length for ed25519 seed %s", ed25519Hex)
 	}
-	if len(blsHex) != (types.BlsPrivInBytes+1)*2 {
+	if len(bls_secret) != (types.BlsPrivInBytes) {
 		return validator, secret, fmt.Errorf("invalid input length for bls private key %s", blsHex)
 	}
-	if len(metadata) > types.MetadataSizeInBytes {
+	if len(validator_meta) > types.MetadataSizeInBytes {
 		return validator, secret, fmt.Errorf("invalid input length for metadata %s", metadata)
 	}
 
-	// Decode hex inputs
-	bandersnatch_seed := common.FromHex(bandersnatchHex)
-	ed25519_seed := common.FromHex(ed25519Hex)
-	bls_secret := common.FromHex(blsHex)
 	validator, err = statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_secret, metadata)
 	if err != nil {
 		return validator, secret, err

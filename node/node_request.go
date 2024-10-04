@@ -12,8 +12,10 @@ import (
 	"io"
 	"log"
 	"reflect"
+
 	//"encoding/json"
 
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -310,13 +312,14 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 	// 		response = serializedR
 	// 	}
 	case "Ticket":
-		var ticket *types.Ticket
+		var ticket types.Ticket
 		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(ticket))
-		ticket = decoded.(*types.Ticket)
-		err = n.processTicket(*ticket)
+		ticket = decoded.(types.Ticket)
+		err = n.processTicket(ticket)
 		if err == nil {
 			response = ok
 		}
+		fmt.Printf(" -- [N%d] received ticket From N%d\n", n.id, msg.Id)
 	case "AvailabilityJustification":
 		var aj *types.AvailabilityJustification
 		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(aj))
@@ -394,6 +397,21 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 			if err == nil {
 				response = ok
 			}
+			currSlot := n.statedb.GetSafrole().Timeslot
+			_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currSlot)
+			jce := statedb.ComputeCurrentJCETime()
+			if currPhase >= types.EpochLength-1 {
+				nextEpochSlot := n.statedb.GetSafrole().GetNextEpochFirst()
+				nextEpoch, nextPhase := n.statedb.GetSafrole().EpochAndPhase(nextEpochSlot)
+				fmt.Printf(" -- [N%d] Generating Tickets For Next Epoch: %d, Phase: %d\n", n.id, nextEpoch, nextPhase)
+				n.GenerateTickets(jce)
+			}
+
+			if block.Header.EpochMark != nil {
+				n.GenerateTickets(jce)
+			}
+			n.CheckSelfTicketsIsIncluded(*block, jce)
+			n.BroadcastTickets(jce)
 		}
 
 	case "WorkPackage":

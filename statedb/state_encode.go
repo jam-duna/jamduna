@@ -7,12 +7,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-type CTicketsOrKeys struct {
-	Tickets *[types.EpochLength]types.TicketBody `json:"tickets,omitempty"`
-	// Tickets *types.TicketsMark	  `json:"tickets,omitempty"`
-	Keys *[types.EpochLength]common.Hash `json:"keys,omitempty"` //BandersnatchKey
-}
-
 // C1
 func (n *JamState) GetAuthPoolBytes() []byte {
 	if len(n.AuthorizationsPool) == 0 {
@@ -47,33 +41,30 @@ func (n *JamState) GetAuthQueueBytes() []byte {
 }
 
 // C3
-func (T BeefyPool) Encode() []byte {
-	beefypool := []Beta_state{}
-	for i := 0; i < len(T); i++ {
-		beefypool = append(beefypool, T[i])
-	}
-	encoded := types.Encode(beefypool)
-	return encoded
-}
-
-func (T Em_B) Encode() []byte {
+func (T Peaks) Encode() []byte {
 	if len(T) == 0 {
 		return []byte{0}
-	} else {
-		encoded := []byte{1}
-		encoded = append(encoded, types.Encode(T)...)
-		return encoded
 	}
-}
-
-func (T Reported) Encode() []byte {
-	reported := []common.Hash{}
+	encoded := types.Encode(uint(len(T)))
 	for i := 0; i < len(T); i++ {
-		reported = append(reported, T[i])
+		if T[i] == nil {
+			encoded = append(encoded, []byte{0}...)
+		} else {
+			encoded = append(encoded, []byte{1}...)
+			encoded = append(encoded, types.Encode(T[i])...)
+		}
 	}
-	encoded := types.Encode(reported)
 	return encoded
 }
+
+// func (T Reported) Encode() []byte {
+// 	reported := []common.Hash{}
+// 	for i := 0; i < len(T); i++ {
+// 		reported = append(reported, T[i])
+// 	}
+// 	encoded := types.Encode(reported)
+// 	return encoded
+// }
 
 func (n *JamState) GetRecentBlocksBytes() []byte {
 	codec_bytes := types.Encode(n.BeefyPool)
@@ -81,56 +72,100 @@ func (n *JamState) GetRecentBlocksBytes() []byte {
 }
 
 // C4
-func (T CTicketsOrKeys) Encode() []byte {
+func (T TicketsOrKeys) T2CT() CTicketsOrKeys {
+	var Tickets types.TicketsMark
+	var Keys [types.EpochLength]common.Hash
+	var C CTicketsOrKeys
+
 	if T.Tickets != nil {
-		return append([]byte{0}, types.Encode(T.Tickets)...)
+		n := len(T.Tickets)
+		if n > types.EpochLength {
+			// Handle the error or truncate the slice
+			n = types.EpochLength
+		}
+		for i := 0; i < n; i++ {
+			Tickets[i] = *(T.Tickets)[i]
+		}
+		C.Tickets = &Tickets
 	}
+
 	if T.Keys != nil {
-		return append([]byte{1}, types.Encode(T.Keys)...)
+		n := len(T.Keys)
+		if n > types.EpochLength {
+			// Handle the error or truncate the slice
+			n = types.EpochLength
+		}
+		for i := 0; i < n; i++ {
+			Keys[i] = T.Keys[i]
+		}
+		C.Keys = &Keys
 	}
-	return []byte{}
+
+	return C
 }
 
-func (T SafroleBasicState) Encode() []byte {
-	var gamma_k [types.TotalValidators]types.Validator
-	var gamma_z [types.TicketsVerifierKeyInBytes]byte
-	if len(T.GammaK) == 0 || len(T.GammaK) > types.TotalValidators || len(T.GammaZ) == 0 || len(T.GammaZ) > types.TicketsVerifierKeyInBytes {
-		fmt.Println("SafroleBasicState Encode: GammaK or GammaZ is not initialized")
+func (T CTicketsOrKeys) Encode() []byte {
+	if T.Tickets == nil && T.Keys == nil || len(T.Tickets) == 0 && len(T.Keys) == 0 {
 		return []byte{}
 	}
-	copy(gamma_k[:], T.GammaK)
-	copy(gamma_z[:], T.GammaZ)
-
-	var gamma_s CTicketsOrKeys
-	gamma_s_type := []byte{}
-	if (T.GammaS.Tickets == nil && T.GammaS.Keys == nil) || (T.GammaS.Tickets != nil && T.GammaS.Keys != nil) || len(T.GammaS.Tickets) > types.EpochLength || len(T.GammaS.Keys) > types.EpochLength || len(T.GammaS.Tickets) == 0 && len(T.GammaS.Keys) == 0 {
-		fmt.Println("SafroleBasicState Encode: GammaS is not initialized")
-		return []byte{}
+	encoded := []byte{}
+	if T.Tickets != nil && T.Keys == nil {
+		encoded = append(encoded, byte(0))
+		encoded = append(encoded, types.Encode(T.Tickets)...)
 	}
-	fmt.Println("T.GammaS", T.GammaS)
-	fmt.Println("T.GammaS.Tickets", T.GammaS.Tickets)
-	fmt.Println("T.GammaS.Keys", T.GammaS.Keys)
-	if T.GammaS.Tickets != nil && T.GammaS.Keys == nil {
-		for i := 0; i < len(T.GammaS.Tickets); i++ {
-			gamma_s.Tickets[i] = *(T.GammaS.Tickets)[i]
-		}
-		gamma_s_type = []byte{0}
+	if T.Keys != nil && T.Tickets == nil {
+		encoded = append(encoded, byte(1))
+		encoded = append(encoded, types.Encode(T.Keys)...)
 	}
-	if T.GammaS.Keys != nil && T.GammaS.Tickets == nil {
-		copy(gamma_s.Keys[:], T.GammaS.Keys)
-		gamma_s_type = []byte{1}
-	}
-	encoded := types.Encode(gamma_k)
-	encoded = append(encoded, types.Encode(gamma_z)...)
-	encoded = append(encoded, gamma_s_type...)
-	if gamma_s_type[0] == 0 {
-		encoded = append(encoded, types.Encode(gamma_s.Tickets)...)
-	} else {
-		encoded = append(encoded, types.Encode(gamma_s.Keys)...)
-	}
-	encoded = append(encoded, types.Encode(T.GammaA)...)
 	return encoded
 }
+
+func (T TicketsOrKeys) Encode() []byte {
+	CT := T.T2CT()
+	encoded := types.Encode(CT)
+	return encoded
+}
+
+// func (T SafroleBasicState) Encode() []byte {
+// 	var gamma_k [types.TotalValidators]types.Validator
+// 	var gamma_z [types.TicketsVerifierKeyInBytes]byte
+// 	if len(T.GammaK) == 0 || len(T.GammaK) > types.TotalValidators || len(T.GammaZ) == 0 || len(T.GammaZ) > types.TicketsVerifierKeyInBytes {
+// 		fmt.Println("SafroleBasicState Encode: GammaK or GammaZ is not initialized")
+// 		return []byte{}
+// 	}
+// 	copy(gamma_k[:], T.GammaK)
+// 	copy(gamma_z[:], T.GammaZ)
+
+// 	var gamma_s CTicketsOrKeys
+// 	gamma_s_type := []byte{}
+// 	if (T.GammaS.Tickets == nil && T.GammaS.Keys == nil) || (T.GammaS.Tickets != nil && T.GammaS.Keys != nil) || len(T.GammaS.Tickets) > types.EpochLength || len(T.GammaS.Keys) > types.EpochLength || len(T.GammaS.Tickets) == 0 && len(T.GammaS.Keys) == 0 {
+// 		fmt.Println("SafroleBasicState Encode: GammaS is not initialized")
+// 		return []byte{}
+// 	}
+// 	fmt.Println("T.GammaS", T.GammaS)
+// 	fmt.Println("T.GammaS.Tickets", T.GammaS.Tickets)
+// 	fmt.Println("T.GammaS.Keys", T.GammaS.Keys)
+// 	if T.GammaS.Tickets != nil && T.GammaS.Keys == nil {
+// 		for i := 0; i < len(T.GammaS.Tickets); i++ {
+// 			gamma_s.Tickets[i] = *(T.GammaS.Tickets)[i]
+// 		}
+// 		gamma_s_type = []byte{0}
+// 	}
+// 	if T.GammaS.Keys != nil && T.GammaS.Tickets == nil {
+// 		copy(gamma_s.Keys[:], T.GammaS.Keys)
+// 		gamma_s_type = []byte{1}
+// 	}
+// 	encoded := types.Encode(gamma_k)
+// 	encoded = append(encoded, types.Encode(gamma_z)...)
+// 	encoded = append(encoded, gamma_s_type...)
+// 	if gamma_s_type[0] == 0 {
+// 		encoded = append(encoded, types.Encode(gamma_s.Tickets)...)
+// 	} else {
+// 		encoded = append(encoded, types.Encode(gamma_s.Keys)...)
+// 	}
+// 	encoded = append(encoded, types.Encode(T.GammaA)...)
+// 	return encoded
+// }
 
 func (s SafroleBasicState) GetSafroleStateBytes() []byte {
 	codec_bytes := types.Encode(s)
@@ -138,25 +173,32 @@ func (s SafroleBasicState) GetSafroleStateBytes() []byte {
 }
 
 // C5
-func (T Psi_state) Encode() []byte {
-	var psi_g [types.TotalValidators]common.Hash
-	var psi_b [types.TotalValidators]common.Hash
-	var psi_w [types.TotalValidators]common.Hash
-	if len(T.Psi_g) == 0 || len(T.Psi_g) > types.TotalValidators || len(T.Psi_b) == 0 || len(T.Psi_b) > types.TotalValidators || len(T.Psi_w) == 0 || len(T.Psi_w) > types.TotalValidators {
-		fmt.Println("Psi_state Encode: Psi_g, Psi_b or Psi_w is not initialized")
-		return []byte{}
+func (P Psi_state) Encode() []byte {
+	var psi_g []common.Hash
+	for _, v := range P.Psi_g {
+		psi_g = append(psi_g, common.BytesToHash(v))
 	}
-	for i := 0; i < types.TotalValidators; i++ {
-		for j := 0; j < 32; j++ {
-			psi_g[i][j] = T.Psi_g[i][j]
-			psi_b[i][j] = T.Psi_b[i][j]
-			psi_w[i][j] = T.Psi_w[i][j]
-		}
+	var psi_b []common.Hash
+	for _, v := range P.Psi_b {
+		psi_b = append(psi_b, common.BytesToHash(v))
 	}
-	encoded := types.Encode(psi_g)
-	encoded = append(encoded, types.Encode(psi_b)...)
-	encoded = append(encoded, types.Encode(psi_w)...)
-	encoded = append(encoded, types.Encode(T.Psi_o)...)
+	var psi_w []common.Hash
+	for _, v := range P.Psi_w {
+		psi_w = append(psi_w, common.BytesToHash(v))
+	}
+
+	s := struct {
+		Psi_g []common.Hash      `json:"psi_g"`
+		Psi_b []common.Hash      `json:"psi_b"`
+		Psi_w []common.Hash      `json:"psi_w"`
+		Psi_o []types.Ed25519Key `json:"psi_o"`
+	}{
+		Psi_g: psi_g,
+		Psi_b: psi_b,
+		Psi_w: psi_w,
+		Psi_o: P.Psi_o,
+	}
+	encoded := types.Encode(s)
 	return encoded
 }
 
@@ -166,16 +208,16 @@ func (j *JamState) GetPsiBytes() []byte {
 }
 
 // C6
-func (T Entropy) Encode() []byte {
-	var entropy [types.EntropySize]common.Hash
-	if len(T) == 0 || len(T) > types.EntropySize {
-		fmt.Println("Entropy Encode: Entropy is not initialized")
-		return []byte{}
-	}
-	copy(entropy[:], T)
-	encoded := types.Encode(entropy)
-	return encoded
-}
+// func (T Entropy) Encode() []byte {
+// 	var entropy [types.EntropySize]common.Hash
+// 	if len(T) == 0 || len(T) > types.EntropySize {
+// 		fmt.Println("Entropy Encode: Entropy is not initialized")
+// 		return []byte{}
+// 	}
+// 	copy(entropy[:], T)
+// 	encoded := types.Encode(entropy)
+// 	return encoded
+// }
 
 func (s *SafroleState) GetEntropyBytes() []byte {
 	if s == nil {

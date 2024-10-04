@@ -193,7 +193,6 @@ impl Verifier {
         let verifier = ring_ctx.verifier(verifier_key);
 
         if Public::verify(input, output, aux_data, &signature.proof, &verifier).is_err() {
-            println!("Ring signature verification failure");
             return Err(());
         }
 
@@ -867,7 +866,6 @@ pub extern "C" fn ring_vrf_verify(
             1
         }
         Err(e) => {
-            println!("Verification failed: {:?}", e);
             0
         }
     }
@@ -1018,9 +1016,7 @@ mod tests {
         if result == 1 {
             println!("Verification successful");
             println!("VRF Output1: {:?}", hex::encode(vrf_output));
-        } else {
-            println!("Verification failed");
-        }
+        } 
     }
 
     #[test]
@@ -1140,8 +1136,6 @@ mod tests {
         if result == 1 {
             println!("Verification successful");
             println!("VRF Output: {:?}", hex::encode(vrf_output));
-        } else {
-            println!("Verification failed");
         }
     }
 

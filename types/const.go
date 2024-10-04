@@ -31,7 +31,7 @@ const (
 	TotalCores              = 2  // C = 341: The total number of cores.
 	TotalValidators         = 6  // V = 1023: The total number of validators.
 	TicketSubmissionEndSlot = 8  // Y = 500: The number of slots into an epoch at which ticket-submission ends.
-	EpochLength             = 10 // E = 600: The length of an epoch in timeslots.
+	EpochLength             = 12 // E = 600: The length of an epoch in timeslots.
 
 	// Medium: configure these
 	W_S = 6 // W_S = 6: The size of an exported segment in erasure-coded pieces.

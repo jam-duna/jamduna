@@ -70,12 +70,12 @@ func (t *Ticket) TicketIDWithCheck() (common.Hash, error) {
 	return common.BytesToHash(ticket_id), err
 }
 
-func (t *Ticket) TicketID() common.Hash {
+func (t *Ticket) TicketID() (common.Hash, error) {
 	ticket_id, err := bandersnatch.VRFSignedOutput(t.Signature[:])
 	if err != nil {
-		return common.Hash{}
+		return common.Hash{}, fmt.Errorf("invalid ticket_id err=%v", err)
 	}
-	return common.BytesToHash(ticket_id)
+	return common.BytesToHash(ticket_id), nil
 }
 
 func (t *Ticket) Bytes() ([]byte, error) {
@@ -106,4 +106,26 @@ func (t *Ticket) BytesWithoutSig() []byte {
 	enc := Encode(s)
 	fmt.Printf("BytesWithoutSig %x\n", enc)
 	return enc
+}
+
+// shawn added ticket bucket to store tickets for node itself
+
+type TicketBucket struct {
+	Ticket     Ticket
+	IsIncluded *bool
+}
+
+func (t *Ticket) TicketToBucket() TicketBucket {
+	return TicketBucket{
+		Ticket:     *t,
+		IsIncluded: new(bool),
+	}
+}
+
+func TicketsToBuckets(tickets []Ticket) []TicketBucket {
+	bucket := make([]TicketBucket, len(tickets))
+	for i := range tickets {
+		bucket[i] = tickets[i].TicketToBucket()
+	}
+	return bucket
 }

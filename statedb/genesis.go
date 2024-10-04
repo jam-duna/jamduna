@@ -46,12 +46,12 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 		each of the other entries is set as the Blake2b hash of the previous entry.
 	*/
 
-	j.SafroleState.Entropy = make([]common.Hash, types.EntropySize)
+	// j.SafroleState.Entropy = make([]common.Hash, types.EntropySize)
 	j.SafroleState.Entropy[0] = common.BytesToHash(common.ComputeHash(vB))                                //BLAKE2B hash of the genesis block#0
 	j.SafroleState.Entropy[1] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[0].Bytes())) //BLAKE2B of Current
 	j.SafroleState.Entropy[2] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[1].Bytes())) //BLAKE2B of EpochN1
 	j.SafroleState.Entropy[3] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[2].Bytes())) //BLAKE2B of EpochN2
-
+	j.SafroleState.TicketsOrKeys.Keys, _ = j.SafroleState.ChooseFallBackValidator()
 	j.DisputesState = Psi_state{}
 	//j.AvailabilityAssignments = make([types.TotalCores]*Rho_state, 0)
 

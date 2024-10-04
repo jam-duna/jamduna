@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"encoding/hex"
 	"fmt"
 	"reflect"
 	"testing"
@@ -88,7 +87,7 @@ func testJustify(t *testing.T, numSegments int) {
 		computedRoot := verifyJustification(leafHash, i, justification)
 
 		if !compareBytes(computedRoot, tree.Root()) {
-			t.Errorf("Justification failed for leaf %d: expected root %s, got %s", i, hex.EncodeToString(tree.Root()), hex.EncodeToString(computedRoot))
+			t.Errorf("Justification failed for leaf %d: expected root %s, got %s", i, common.Bytes2Hex(tree.Root()), common.Bytes2Hex(computedRoot))
 		} else {
 			t.Logf("Justification verified for leaf %d", i)
 		}

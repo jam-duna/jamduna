@@ -21,10 +21,10 @@ const E = types.EpochLength
 
 // ==========Output=======
 type DOutput struct {
-	DOk *struct {
-		OffenderMark []types.Ed25519Key `json:"offender_mark"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
-	} `json:"ok"`
-	Err string `json:"err"` // ErrorCode
+	Ok *struct {
+		OffenderMark []types.Ed25519Key `json:"offenders_mark"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+	} `json:"ok,omitempty"`
+	Err *string `json:"err,omitempty" ` // ErrorCode
 }
 
 type VerdictResult struct {

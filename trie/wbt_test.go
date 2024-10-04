@@ -1,9 +1,10 @@
 package trie
 
 import (
-	"encoding/hex"
 	"fmt"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 // TestWellBalancedTree tests the MerkleB method of the WellBalancedTree
@@ -40,7 +41,7 @@ func TestWBTProof(t *testing.T) {
 	}
 	tree := NewWellBalancedTree(values)
 
-	fmt.Printf("Root: %s\n", hex.EncodeToString(tree.Root()))
+	fmt.Printf("Root: %s\n", common.Bytes2Hex(tree.Root()))
 	fmt.Printf("Total leaves: %d\n", len(tree.leaves))
 
 	// Print the tree structure
@@ -51,7 +52,7 @@ func TestWBTProof(t *testing.T) {
 	if found {
 		fmt.Printf("Proof path for value '%s':\n", value)
 		for _, p := range path {
-			fmt.Println(hex.EncodeToString(p[0]))
+			fmt.Println(common.Bytes2Hex(p[0]))
 		}
 		if Verify(tree.Root(), value, path) {
 			fmt.Printf("Verification: %v\n", true)
@@ -79,7 +80,7 @@ func TestWBTGet(t *testing.T) {
 	}
 	tree := NewWellBalancedTree(values)
 
-	fmt.Printf("Root: %s\n", hex.EncodeToString(tree.Root()))
+	fmt.Printf("Root: %s\n", common.Bytes2Hex(tree.Root()))
 	fmt.Printf("Total leaves: %d\n", len(tree.leaves))
 
 	// Print the tree structure
@@ -139,7 +140,7 @@ func TestTraceByIndex(t *testing.T) {
 
 		fmt.Printf("Proof path for index %d:\n", i)
 		for _, p := range path {
-			fmt.Printf("  Sibling Hash: %s, Direction: %s\n", hex.EncodeToString(p[0]), p[1])
+			fmt.Printf("  Sibling Hash: %s, Direction: %s\n", common.Bytes2Hex(p[0]), p[1])
 		}
 	}
 }

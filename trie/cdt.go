@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -112,9 +111,9 @@ func printCDTNode(node *CDTNode, level int, pos string) {
 	}
 	prefix := strings.Repeat("  ", level)
 	if node.Left == nil && node.Right == nil {
-		fmt.Printf("%s[Leaf %s]: %s\n", prefix, pos, hex.EncodeToString(node.Hash))
+		fmt.Printf("%s[Leaf %s]: %s\n", prefix, pos, common.Bytes2Hex(node.Hash))
 	} else {
-		fmt.Printf("%s[Branch %s]: %s\n", prefix, pos, hex.EncodeToString(node.Hash))
+		fmt.Printf("%s[Branch %s]: %s\n", prefix, pos, common.Bytes2Hex(node.Hash))
 	}
 	printCDTNode(node.Left, level+1, "Left")
 	printCDTNode(node.Right, level+1, "Right")

@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"path/filepath"
 	"math"
+	"math/big"
 	"time"
 
 	//"sync"
@@ -15,6 +17,7 @@ import (
 
 	"io/ioutil"
 	"os"
+	"os/user"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
@@ -26,10 +29,17 @@ import (
 
 func generateSeedSet(ringSize int) ([][]byte, error) {
 
-	entropy := common.Blake2Hash([]byte("42"))
-
-	// Generate the ring set with deterministic random seeds
 	ringSet := make([][]byte, ringSize)
+	for i := 0; i < ringSize; i++ {
+		seed := make([]byte, 32)
+		idxBytes := big.NewInt(int64(i)).Bytes()
+		copy(seed[32-len(idxBytes):], idxBytes)
+		ringSet[i] = seed
+	}
+
+	/*
+	entropy := common.Blake2Hash([]byte("42"))
+	Generate the ring set with deterministic random seeds
 	for i := 0; i < ringSize; i++ {
 		seed := make([]byte, 32)
 		if _, err := rand.Read(entropy.Bytes()); err != nil {
@@ -41,24 +51,60 @@ func generateSeedSet(ringSize int) ([][]byte, error) {
 		}
 		ringSet[i] = common.Blake2Hash(append(seed[:], byte(i))).Bytes()
 	}
+	*/
 	return ringSet, nil
 }
 
-func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, []types.ValidatorSecret, error) {
+func generateMetadata(idx int) (string, error) {
+	//should be max of 128 bytes
+	var nodeName string
+	// assign metadata names for the first 6
+	switch idx {
+	case 0:
+		nodeName = "Alice"
+	case 1:
+		nodeName = "Bob"
+	case 2:
+		nodeName = "Charlie"
+	case 3:
+		nodeName = "Dave"
+	case 4:
+		nodeName = "Eve"
+	case 5:
+		nodeName = "Fergie"
+	default:
+		nodeName = fmt.Sprintf("Node%d", idx)
+	}
+	remoteAddr := fmt.Sprintf("localhost:%d", 9900+idx)
+	metadata := fmt.Sprintf("%s:%s", remoteAddr, nodeName)
+	metadata_byte := []byte(metadata)
+
+	if len(metadata_byte) > types.MetadataSizeInBytes {
+		return metadata, fmt.Errorf("invalid input length for metadata %s", metadata)
+	}
+	return metadata, nil
+}
+
+func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, []types.ValidatorSecret, []string, error) {
 	seeds, _ := generateSeedSet(numNodes)
-	fmt.Printf("seeds %x\n", seeds)
 
 	peers := make([]string, numNodes)
 	peerList := make(map[string]NodeInfo)
 	validators := make([]types.Validator, numNodes)
+	nodePaths := SetLevelDBPaths(numNodes)
 	for i := 0; i < numNodes; i++ {
-		bls_priv := []byte{}
-		meta := ""
-		validator, err := statedb.InitValidator(seeds[i], seeds[i], bls_priv, meta)
+
+		seed_i := seeds[i]
+		bandersnatch_seed := seed_i
+		ed25519_seed := seed_i
+		bls_seed := seed_i
+		metadata, _ := generateMetadata(i)
+
+		validator, err := statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err == nil {
 			validators[i] = validator
 		} else {
-			return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
+			return statedb.GenesisConfig{}, nil, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
 		}
 	}
 
@@ -81,33 +127,37 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	// Print out peerList
 	prettyPeerList, err := json.MarshalIndent(peerList, "", "  ")
 	if err != nil {
-		return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
+		return statedb.GenesisConfig{}, nil, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
 	}
 	//fmt.Printf("PeerList: %s\n", prettyPeerList)
 
 	// Compute validator secrets
 	validatorSecrets := make([]types.ValidatorSecret, numNodes)
 	for i := 0; i < numNodes; i++ {
-		bls_priv := []byte{}
-		meta := ""
-		validatorSecret, err := statedb.InitValidatorSecret(seeds[i], seeds[i], bls_priv, meta)
+		seed_i := seeds[i]
+		bandersnatch_seed := seed_i
+		ed25519_seed := seed_i
+		bls_seed := seed_i
+		metadata, _ := generateMetadata(i)
+		//bandersnatch_seed, ed25519_seed, bls_seed
+		validatorSecret, err := statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err != nil {
-			return statedb.GenesisConfig{}, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
+			return statedb.GenesisConfig{}, nil, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
 		}
 		validatorSecrets[i] = validatorSecret
 	}
-	return genesisConfig, peers, peerList, validatorSecrets, nil
+	return genesisConfig, peers, peerList, validatorSecrets, nodePaths, nil
 }
 
 func TestNodeSafrole(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error Seeting up nodes: %v\n", err)
 	}
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -125,14 +175,14 @@ func TestSegmentECRoundTrip(t *testing.T) {
 	segmentSizes := []int{10}
 
 	// Initialize nodes
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -266,14 +316,14 @@ func TestECRoundTrip(t *testing.T) {
 	// dataSizes := []int{types.W_C * types.W_S, types.W_C * types.W_S * 2, types.W_C * types.W_S * 3}
 	// dataSizes := []int{2084}
 	// Initialize nodes
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -343,13 +393,13 @@ func TestECRoundTrip(t *testing.T) {
 
 func TestWorkGuaranteeWithExtrinsic(t *testing.T) {
 
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -559,13 +609,13 @@ func TestWorkGuaranteeWithExtrinsic(t *testing.T) {
 }
 func TestWorkGuarantee(t *testing.T) {
 
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -762,14 +812,14 @@ func TestCodeParse(t *testing.T) {
 }
 
 func TestNodeRotation(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error Seeting up nodes: %v\n", err)
 	}
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -800,4 +850,90 @@ func loadByteCode(filePath string) ([]byte, error) {
 	}
 
 	return bytes, nil
+}
+
+
+func deleteUserJamDirectory(force bool) error {
+    currentUser, err := user.Current()
+    if err != nil {
+        return fmt.Errorf("could not get current user: %v", err)
+    }
+    username := currentUser.Username
+
+    path := filepath.Join("/tmp", username, "jam")
+
+    // Safety checks
+    if path == "/" || path == "" {
+        return fmt.Errorf("invalid path: %s", path)
+    }
+
+    if !filepath.HasPrefix(path, "/tmp/") {
+        return fmt.Errorf("refusing to delete directory outside /tmp/: %s", path)
+    }
+
+    // Check if directory exists
+    if _, err := os.Stat(path); os.IsNotExist(err) {
+        fmt.Printf("Directory %s does not exist, nothing to delete.\n", path)
+        return nil
+    }
+
+    // Skip prompt if 'force' is true
+    if !force {
+        fmt.Printf("Are you sure you want to delete all contents under %s? (y/N): ", path)
+        var response string
+        fmt.Scanln(&response)
+        if response != "y" && response != "Y" {
+            fmt.Println("Operation canceled.")
+            return nil
+        }
+    }
+
+    // Remove the directory and its contents
+    err = os.RemoveAll(path)
+    if err != nil {
+        return fmt.Errorf("failed to delete directory %s: %v", path, err)
+    }
+
+    fmt.Printf("Successfully deleted directory %s and all its contents.\n", path)
+    return nil
+}
+
+func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
+	/* standardize on
+	/tmp/<user>/jam/<unixtimestamp>/testdb#
+
+	/tmp/ntust/jam/1727903082/node1/leveldb/
+	/tmp/ntust/jam/1727903082/node1/data/
+
+	/tmp/root/jam/1727903082/node1/
+
+	*/
+	currentUser, err := user.Current()
+	if err != nil {
+	    return "", fmt.Errorf("could not get current user: %v", err)
+	}
+	username := currentUser.Username
+	path := fmt.Sprintf("/tmp/%s/jam/%v/node%v", username, unixtimestamp, id)
+	return path, nil
+}
+
+func SetLevelDBPaths(numNodes int) []string {
+	node_paths := make([]string, numNodes)
+	currJCE := statedb.ComputeCurrentJCETime()
+	for i := 0; i < numNodes; i++ {
+		node_idx := fmt.Sprintf("%d", i)
+		node_path, err := computeLevelDBPath(node_idx, int(currJCE))
+		if (err == nil){
+			node_paths[i] = node_path
+		}
+	}
+	return node_paths
+}
+
+
+func TestLevelDBDelete(t *testing.T) {
+	err := deleteUserJamDirectory(true)
+	if err != nil {
+		t.Fatalf("Deletetion Error: %v\n", err)
+	}
 }

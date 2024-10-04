@@ -10,7 +10,9 @@ import (
 )
 
 type AuthorizationQueue [types.TotalCores][]common.Hash
-type BeefyPool [types.RecentHistorySize]Beta_state
+
+// type BeefyPool [types.RecentHistorySize]Beta_state
+type BeefyPool []Beta_state
 type AvailabilityAssignments [types.TotalCores]*Rho_state
 
 type JamState struct {
@@ -26,14 +28,19 @@ type JamState struct {
 	ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"validator_statistics"`        // pi The validator statistics. π eq 171
 }
 
+type Peaks []*common.Hash
+
 // Types for Beta
-type Em_B []common.Hash
-type Reported [types.TotalCores]common.Hash
+type MMR struct {
+	Peaks Peaks `json:"peaks"`
+}
+
+// type Reported []common.Hash
 type Beta_state struct {
-	HeaderHash common.Hash `json:"header_hash"`
-	MMR        Em_B        `json:"mmr"`
-	StateRoot  common.Hash `json:"state_root"`
-	Reported   Reported    `json:"reported"`
+	HeaderHash common.Hash   `json:"header_hash"`
+	MMR        MMR           `json:"mmr"`
+	StateRoot  common.Hash   `json:"state_root"`
+	Reported   []common.Hash `json:"reported"`
 }
 
 func (b *Beta_state) MMR_Bytes() []byte {
@@ -55,7 +62,7 @@ type Psi_state struct {
 // Types for Rho
 type Rho_state struct {
 	WorkReport types.WorkReport `json:"workreport"`
-	Timeslot   uint32           `json:"timeslot"`
+	Timeslot   uint32           `json:"timeout"`
 }
 
 // Types for Gamma
@@ -63,6 +70,11 @@ type TicketsOrKeys struct {
 	Tickets []*types.TicketBody `json:"tickets,omitempty"`
 	// Tickets *types.TicketsMark	  `json:"tickets,omitempty"`
 	Keys []common.Hash `json:"keys,omitempty"` //BandersnatchKey
+}
+
+type CTicketsOrKeys struct {
+	Tickets *types.TicketsMark              `json:"tickets,omitempty"`
+	Keys    *[types.EpochLength]common.Hash `json:"keys,omitempty"`
 }
 
 func (t TicketsOrKeys) TicketLen() int {
@@ -74,9 +86,9 @@ func (t TicketsOrKeys) TicketLen() int {
 
 type SafroleBasicState struct {
 	GammaK []types.Validator  `json:"gamma_k"` // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	GammaZ []byte             `json:"gamma_z"` // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	GammaS TicketsOrKeys      `json:"gamma_s"` // γs: Current epoch’s slot-sealer series (epoch N)
 	GammaA []types.TicketBody `json:"gamma_a"` // γa: Ticket accumulator for the next epoch (epoch N+1)
+	GammaS TicketsOrKeys      `json:"gamma_s"` // γs: Current epoch’s slot-sealer series (epoch N)
+	GammaZ []byte             `json:"gamma_z"` // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 }
 
 // Types for Kai
@@ -235,3 +247,59 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 // 	}
 // 	return codec_bytes, nil
 // }
+
+func (a *Psi_state) UnmarshalJSON(data []byte) error {
+	var s struct {
+		Psi_g []string `json:"psi_g"`
+		Psi_b []string `json:"psi_b"`
+		Psi_w []string `json:"psi_w"`
+		Psi_o []string `json:"psi_o"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	for _, v := range s.Psi_g {
+		a.Psi_g = append(a.Psi_g, common.FromHex(v))
+	}
+	for _, v := range s.Psi_b {
+		a.Psi_b = append(a.Psi_b, common.FromHex(v))
+	}
+	for _, v := range s.Psi_w {
+		a.Psi_w = append(a.Psi_w, common.FromHex(v))
+	}
+	for _, v := range s.Psi_o {
+		a.Psi_o = append(a.Psi_o, types.Ed25519Key(common.FromHex(v)))
+	}
+
+	return nil
+}
+
+func (a *Psi_state) MarshalJSON() ([]byte, error) {
+	psi_g := []string{}
+	for _, v := range a.Psi_g {
+		psi_g = append(psi_g, common.HexString(v))
+	}
+	psi_b := []string{}
+	for _, v := range a.Psi_b {
+		psi_b = append(psi_b, common.HexString(v))
+	}
+	psi_w := []string{}
+	for _, v := range a.Psi_w {
+		psi_w = append(psi_w, common.HexString(v))
+	}
+	psi_o := []string{}
+	for _, v := range a.Psi_o {
+		psi_o = append(psi_o, common.HexString(v[:]))
+	}
+	return json.Marshal(&struct {
+		Psi_g []string `json:"psi_g"`
+		Psi_b []string `json:"psi_b"`
+		Psi_w []string `json:"psi_w"`
+		Psi_o []string `json:"psi_o"`
+	}{
+		Psi_g: psi_g,
+		Psi_b: psi_b,
+		Psi_w: psi_w,
+		Psi_o: psi_o,
+	})
+}

@@ -108,7 +108,7 @@ func TestMerkleTree(t *testing.T) {
 		tree.printTree(tree.Root, 0)
 		expectedHash, _ := hex.DecodeString(testCase.Output)
 		if !compareBytes(rootHash, expectedHash) {
-			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, hex.EncodeToString(rootHash), testCase.Output)
+			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, common.Bytes2Hex(rootHash), testCase.Output)
 		} else {
 			t.Logf("Test case %d: Vector OK, rootHash=%x", i, expectedHash)
 		}
@@ -317,7 +317,7 @@ func TestModify(t *testing.T) {
 		expectedHash, _ := hex.DecodeString(testCase.Output)
 		if !compareBytes(rootHash, expectedHash) {
 			tree.PrintTree(tree.Root, 0)
-			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, hex.EncodeToString(rootHash), testCase.Output)
+			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, common.Bytes2Hex(rootHash), testCase.Output)
 		} else {
 			t.Logf("Test case %d: Vector OK, rootHash=%x", i, expectedHash)
 		}

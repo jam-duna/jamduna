@@ -1,5 +1,5 @@
 package statedb
-
+/*
 import (
 	"bytes"
 	"encoding/hex"
@@ -252,7 +252,7 @@ func (s *SafroleState) serialize() SState {
 		TicketsVerifierKey: common.Bytes2Hex(s.TicketsVerifierKey),
 	}
 }
-*/
+
 
 // SState to State
 // func (ss *SState) deserialize() (SafroleState, error) {
@@ -608,3 +608,4 @@ func equalState(s1 SState, s2 SState) error {
 
 	return nil
 }
+*/

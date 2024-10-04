@@ -2,7 +2,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -120,20 +119,20 @@ func getLeafAtIndex(node *MMRNode, targetIndex int, currentIndex *int) ([]byte, 
 func (mmr *MerkleMountainRange) PrintTree() {
 	fmt.Println("Merkle Mountain Range Structure:")
 	for i, peak := range mmr.peaks {
-		fmt.Printf("Peak %d (Hash: %s, Size: %d):\n", i, hex.EncodeToString(peak.Hash), mmr.nodeSize(peak))
+		fmt.Printf("Peak %d (Hash: %s, Size: %d):\n", i, common.Bytes2Hex(peak.Hash), mmr.nodeSize(peak))
 		mmr.printNode(peak, "  ")
 	}
 }
 
 func (mmr *MerkleMountainRange) printNode(node *MMRNode, indent string) {
 	if node.Left != nil && node.Right != nil {
-		fmt.Printf("%sBranch Node: %s\n", indent, hex.EncodeToString(node.Hash))
+		fmt.Printf("%sBranch Node: %s\n", indent, common.Bytes2Hex(node.Hash))
 		fmt.Printf("%sLeft:\n", indent)
 		mmr.printNode(node.Left, indent+"  ")
 		fmt.Printf("%sRight:\n", indent)
 		mmr.printNode(node.Right, indent+"  ")
 	} else {
-		fmt.Printf("%sLeaf Node: %s\n", indent, hex.EncodeToString(node.Hash))
+		fmt.Printf("%sLeaf Node: %s\n", indent, common.Bytes2Hex(node.Hash))
 	}
 }
 

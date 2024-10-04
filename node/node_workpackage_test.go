@@ -125,13 +125,13 @@ var targetFIB = 10
 
 func TestAvailabilityReconstruction(t *testing.T) {
 	// Set up the network
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

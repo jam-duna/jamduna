@@ -1,9 +1,10 @@
 package trie
 
 import (
-	"encoding/hex"
 	"fmt"
 	"testing"
+	
+	"github.com/colorfulnotion/jam/common"
 )
 
 // TestMMR tests the Merkle Mountain Range implementation
@@ -67,10 +68,10 @@ func TestTraceAndVerify(t *testing.T) {
 		proof := mmr.Trace(value)
 		fmt.Printf("Trace path for value %s:\n", string(value))
 		fmt.Printf("Value %x:\n", computeHash(value))
-		fmt.Printf("Leaf hash: %s\n", hex.EncodeToString(proof.LeafHash))
-		fmt.Printf("Root hash: %s\n", hex.EncodeToString(proof.RootHash))
+		fmt.Printf("Leaf hash: %s\n", common.Bytes2Hex(proof.LeafHash))
+		fmt.Printf("Root hash: %s\n", common.Bytes2Hex(proof.RootHash))
 		for i, hash := range proof.SiblingHashes {
-			fmt.Printf("Sibling hash %d: %s (Position: %s)\n", i, hex.EncodeToString(hash), proof.SiblingPosition[i])
+			fmt.Printf("Sibling hash %d: %s (Position: %s)\n", i, common.Bytes2Hex(hash), proof.SiblingPosition[i])
 		}
 		if !mmr.Verify(value, proof) {
 			t.Errorf("Failed to verify proof for value %s", string(value))

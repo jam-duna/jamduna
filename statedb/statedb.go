@@ -66,7 +66,12 @@ type StateDB struct {
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
-	s.queuedTickets[t.TicketID()] = t
+	ticketID, err := t.TicketID()
+	if err != nil {
+		fmt.Printf("Invalid Ticket. Err=%v\n", err)
+		return
+	}
+	s.queuedTickets[ticketID] = t
 }
 
 func (s *StateDB) AddLookupToQueue(l types.Preimages) {
@@ -190,7 +195,12 @@ func (s *StateDB) GetVMMutex() sync.Mutex {
 func (s *StateDB) RemoveTicket(t *types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
-	delete(s.queuedTickets, t.TicketID())
+	ticketID, err := t.TicketID()
+	if err != nil {
+		fmt.Printf("Invalid Ticket. Err=%v\n", err)
+		return
+	}
+	delete(s.queuedTickets, ticketID)
 }
 
 func (s *StateDB) RemoveLookup(p *types.Preimages) {
@@ -628,7 +638,7 @@ func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.Preim
 	// TODO: manage dispute
 }
 
-func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, *StateDB, error) {
+func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []common.Hash) (*types.Block, *StateDB, error) {
 	genesisReady := s.JamState.SafroleState.CheckGenesisReady()
 	if !genesisReady {
 		return nil, nil, nil
@@ -638,16 +648,15 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret) (*types.Block, 
 		// Time to propose block if authorized
 		isAuthorizedBlockBuilder := false
 		//bandersnatchPub := credential.BandersnatchPub
-		_, phase := s.JamState.SafroleState.EpochAndPhase(currJCE)
-		// round robin TEMPORARY
-		if phase%types.TotalValidators == s.Id {
-			//fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
-			isAuthorizedBlockBuilder = true
-		}
+		// _, phase := s.JamState.SafroleState.EpochAndPhase(currJCE)
+		// // round robin TEMPORARY
+		// if phase%types.TotalValidators == s.Id {
+		// 	//fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
+		// 	isAuthorizedBlockBuilder = true
+		// }
 
-		//sf := s.GetSafrole()
-		//ticketIDs := s.GetSelfTickets(targetEpoch)
-		//isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, credential, ticketIDs)
+		sf := s.GetSafrole()
+		isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		if isAuthorizedBlockBuilder {
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 			// propose block without state transition
@@ -1025,9 +1034,10 @@ func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
 
 // make block generate block prior to state execution
 func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) (bl *types.Block, err error) {
+
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
-	needWinningMarker := sf.IsTicketSubmissionCloses(targetJCE)
+	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 	stateRoot := s.GetStateRoot()
 	fmt.Printf("MakeBlock start - stateRoot:%v\n", stateRoot)
 
@@ -1156,40 +1166,47 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	// TODO: 104 Offender signatures c and f must each be ordered by the validator’s Ed25519 key.
 	// TODO: 105 There may be no duplicate report hashes within the extrinsic, nor amongst any past reported hashes.
 
-	needEpochMarker := isNewEpoch && false
+	needEpochMarker := isNewEpoch
+	// eq 71
 	if needEpochMarker {
 		epochMarker := sf.GenerateEpochMarker()
 		//a tuple of the epoch randomness and a sequence of Bandersnatch keys defining the Bandersnatch valida- tor keys (kb) beginning in the next epoch
 		fmt.Printf("targetJCE=%v EpochMarker:%v\n", targetJCE, epochMarker)
 		h.EpochMark = epochMarker
 	}
-	if isNewEpoch {
-		//h.TicketsMark = make([types.EpochLength]*types.TicketBody) // clear out the tickets if its a new epoch
-		s.queuedTickets = make(map[common.Hash]types.Ticket)
-	}
+	// eq 72
 	if needWinningMarker {
-		fmt.Printf("targetJCE=%v check WinningMarker\n", targetJCE)
 		winningMarker, err := sf.GenerateWinningMarker()
 		//block is the first after the end of the submission period for tickets and if the ticket accumulator is saturated
 		if err == nil {
-			copy(h.TicketsMark[:], winningMarker[:])
+			fmt.Printf("targetJCE=%v WinningTicketMarker:%v\n", targetJCE, winningMarker)
+			h.TicketsMark = winningMarker
 		}
 	} else {
 		// If there's new ticketID, add them into extrinsic
 		// Question: can we submit tickets at the exact tail end block?
 		extrinsicData.Tickets = make([]types.Ticket, 0)
-		for ticketID, ticket := range s.queuedTickets {
-			t, err := ticket.DeepCopy()
-			if err != nil {
-				continue
+		// add the limitation for receiving tickets
+		if s.JamState.SafroleState.IsTicketSubmsissionClosed(targetJCE) && !isNewEpoch {
+			s.queuedTickets = make(map[common.Hash]types.Ticket)
+		} else {
+			for ticketID, ticket := range s.queuedTickets {
+				t, err := ticket.DeepCopy()
+				if err != nil {
+					continue
+				}
+				if s.JamState.SafroleState.InTicketAccumulator(ticketID) {
+					continue
+				} else if len(extrinsicData.Tickets) >= types.MaxTicketsPerExtrinsic {
+					// we only allow a maxium number of tickets per block
+					continue
+				} else {
+					// fmt.Printf("[N%d] GetTicketQueue %v => %v\n", s.Id, ticketID, t)
+					extrinsicData.Tickets = append(extrinsicData.Tickets, t)
+				}
 			}
-			if s.JamState.SafroleState.InTicketAccumulator(ticketID) {
-			} else {
-				// fmt.Printf("[N%d] GetTicketQueue %v => %v\n", s.Id, ticketID, t)
-				extrinsicData.Tickets = append(extrinsicData.Tickets, t)
-			}
+			s.queuedTickets = make(map[common.Hash]types.Ticket)
 		}
-		s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()

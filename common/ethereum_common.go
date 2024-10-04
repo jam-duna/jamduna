@@ -34,23 +34,23 @@ func BytesToHash(b []byte) Hash {
 }
 
 func Bytes2Hex(d []byte) string {
-	return ethereumCommon.Bytes2Hex(d)
+	return "0x" + ethereumCommon.Bytes2Hex(d)
 }
 
 // Hex2Bytes converts a byte slice to a Hash.
 func Hex2Bytes(b string) []byte {
-	return ethereumCommon.Hex2Bytes(b)
+	return ethereumCommon.FromHex(b)
 }
 
 func Hex2BLS(b string) [144]byte {
-	x := ethereumCommon.Hex2Bytes(b)
+	x := ethereumCommon.FromHex(b)
 	var result [144]byte
 	copy(result[:], x)
 	return result
 }
 
 func Hex2Metadata(b string) [128]byte {
-	x := ethereumCommon.Hex2Bytes(b)
+	x := ethereumCommon.FromHex(b)
 	var result [128]byte
 	copy(result[:], x)
 	return result
@@ -70,7 +70,7 @@ func Hex2Hash(s string) Hash {
 }
 
 // MarshalJSON custom marshaler to convert Hash to hex string.
-func (h Hash) MarshalJSON() ([]byte, error) {
+func (h *Hash) MarshalJSON() ([]byte, error) {
 	return json.Marshal(h.Hex())
 }
 
@@ -106,7 +106,7 @@ func HexString(h interface{}) string {
 	if (v.Kind() == reflect.Slice || v.Kind() == reflect.Array) && (v.Type().Elem().Kind() == reflect.Uint8) {
 		result = "0x"
 		for i := 0; i < v.Len(); i++ {
-			result += fmt.Sprintf("%02x", v.Index(i).Interface()) // 使用 %02x 確保兩位數
+			result += fmt.Sprintf("%02x", v.Index(i).Interface())
 		}
 	} else if v.Kind() == reflect.String {
 		result = fmt.Sprintf("%s", v.Interface())

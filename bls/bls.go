@@ -42,6 +42,9 @@ type Seed []byte
 func GetSecretKey(seed []byte) (SecretKey, error) {
 	// Retrieve the secret key
 	secret := SecretKey{}
+	if len(seed) == 0 {
+		return secret, errors.New("BLS seed empty")
+	}
 	C.get_secret_key(
 		(*C.uchar)(unsafe.Pointer(&seed[0])),
 		(C.size_t)(len(seed)),

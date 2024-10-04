@@ -11,14 +11,14 @@ import (
 )
 
 func TestNodeAudit(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -58,14 +58,14 @@ func TestNodeAudit(t *testing.T) {
 
 }
 func TestNodeAssurance(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, err := SetupQuicNetwork()
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag)
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

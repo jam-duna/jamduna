@@ -1,11 +1,11 @@
 package trie
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"strings"
+	"github.com/colorfulnotion/jam/common"
 )
 
 // WBTNode represents a node in the WBT
@@ -89,9 +89,9 @@ func printNode(node *WBTNode, level int, pos string) {
 	}
 	prefix := strings.Repeat("  ", level)
 	if node.Left == nil && node.Right == nil {
-		fmt.Printf("%s[Leaf %s]: %s\n", prefix, pos, hex.EncodeToString(node.Hash))
+		fmt.Printf("%s[Leaf %s]: %s\n", prefix, pos, common.Bytes2Hex(node.Hash))
 	} else {
-		fmt.Printf("%s[Branch %s]: %s\n", prefix, pos, hex.EncodeToString(node.Hash))
+		fmt.Printf("%s[Branch %s]: %s\n", prefix, pos, common.Bytes2Hex(node.Hash))
 	}
 	printNode(node.Left, level+1, "Left")
 	printNode(node.Right, level+1, "Right")

@@ -9,7 +9,10 @@ import (
 type BMTProof []common.Hash
 
 const (
-	validatorCount = 1023
+	// tiny
+	validatorCount = 12
+	// full
+	// validatorCount = 1023
 	coreCount      = 341
 	epochLength    = 600
 	rotationPeriod = 10

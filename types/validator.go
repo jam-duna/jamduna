@@ -1,11 +1,9 @@
 package types
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -48,20 +46,18 @@ func ValidatorFromBytes(data []byte) (Validator, error) {
 }
 
 // MarshalJSON custom marshaler to convert byte arrays to hex strings
-func (v Validator) MarshalJSON() ([]byte, error) {
-	type Alias struct {
-		Ed25519      Ed25519Key      `json:"ed25519"`
-		Bandersnatch BandersnatchKey `json:"bandersnatch"`
-	}
+func (v *Validator) MarshalJSON() ([]byte, error) {
 
 	return json.Marshal(&struct {
-		Alias
-		Bls      string `json:"bls"`
-		Metadata string `json:"metadata"`
+		Bandersnatch BandersnatchKey `json:"bandersnatch"`
+		Ed25519      Ed25519Key      `json:"ed25519"`
+		Bls          string          `json:"bls"`
+		Metadata     string          `json:"metadata"`
 	}{
-		Alias:    Alias{Ed25519: v.Ed25519, Bandersnatch: v.Bandersnatch},
-		Bls:      hex.EncodeToString(v.Bls[:]),
-		Metadata: hex.EncodeToString(v.Metadata[:]),
+		Bandersnatch: v.Bandersnatch,
+		Ed25519:      v.Ed25519,
+		Bls:          common.Bytes2Hex(v.Bls[:]),
+		Metadata:     common.Bytes2Hex(v.Metadata[:]),
 	})
 }
 
@@ -85,23 +81,19 @@ func (v *Validator) UnmarshalJSON(data []byte) error {
 	v.Ed25519 = aux.Ed25519
 	v.Bandersnatch = aux.Bandersnatch
 
-	blsBytes, err := hex.DecodeString(aux.Bls)
-	if err != nil {
-		return err
-	}
-	if len(blsBytes) != BlsPubInBytes {
+	bls_pub := common.Hex2Bytes(aux.Bls)
+	meta := common.Hex2Bytes(aux.Metadata)
+
+	if len(bls_pub) != BlsPubInBytes {
 		return fmt.Errorf("invalid length for bls field")
 	}
-	copy(v.Bls[:], blsBytes)
 
-	metadataBytes, err := hex.DecodeString(aux.Metadata)
-	if err != nil {
-		return err
-	}
-	if len(metadataBytes) != MetadataSizeInBytes {
+	if len(meta) != MetadataSizeInBytes {
 		return fmt.Errorf("invalid length for metadata field")
 	}
-	copy(v.Metadata[:], metadataBytes)
+
+	copy(v.Bls[:], bls_pub)
+	copy(v.Metadata[:], meta)
 
 	return nil
 }
@@ -131,22 +123,6 @@ func (v ValidatorSecret) MarshalJSON() ([]byte, error) {
 		Ed25519Pub      Ed25519Key      `json:"ed25519"`
 	}
 
-	// Helper function to encode []byte to hex string, handling empty slices
-	encodeBytesToHex := func(data []byte) string {
-		if len(data) == 0 {
-			return "0x"
-		}
-		return "0x" + hex.EncodeToString(data)
-	}
-
-	// Similarly for fixed-size arrays
-	encodeArrayToHex := func(data []byte) string {
-		if len(data) == 0 {
-			return "0x"
-		}
-		return "0x" + hex.EncodeToString(data)
-	}
-
 	return json.Marshal(&struct {
 		Alias
 		Bls                string `json:"bls"`
@@ -159,11 +135,11 @@ func (v ValidatorSecret) MarshalJSON() ([]byte, error) {
 			BandersnatchPub: v.BandersnatchPub,
 			Ed25519Pub:      v.Ed25519Pub,
 		},
-		Bls:                encodeArrayToHex(v.BlsPub[:]),
-		Metadata:           encodeArrayToHex(v.Metadata[:]),
-		BandersnatchSecret: encodeBytesToHex(v.BandersnatchSecret),
-		Ed25519Secret:      encodeArrayToHex(v.Ed25519Secret[:]),
-		BlsSecret:          encodeArrayToHex(v.BlsSecret[:]),
+		Bls:                common.Bytes2Hex(v.BlsPub[:]),
+		Metadata:           common.Bytes2Hex(v.Metadata[:]),
+		BandersnatchSecret: common.Bytes2Hex(v.BandersnatchSecret),
+		Ed25519Secret:      common.Bytes2Hex(v.Ed25519Secret[:]),
+		BlsSecret:          common.Bytes2Hex(v.BlsSecret[:]),
 	})
 }
 
@@ -192,53 +168,24 @@ func (v *ValidatorSecret) UnmarshalJSON(data []byte) error {
 	v.BandersnatchPub = aux.BandersnatchPub
 	v.Ed25519Pub = aux.Ed25519Pub
 
-	// Helper function to decode hex strings to []byte, handling "0x"
-	decodeHexToBytes := func(s string) ([]byte, error) {
-		if s == "0x" || s == "" {
-			return []byte{}, nil
-		}
-		if strings.HasPrefix(s, "0x") {
-			s = s[2:]
-		}
-		return hex.DecodeString(s)
+	bls_pub := common.Hex2Bytes(aux.Bls)
+	metadata := common.Hex2Bytes(aux.Metadata)
+	bandersnatch_secret := common.Hex2Bytes(aux.BandersnatchSecret)
+	ed25519_secret := common.Hex2Bytes(aux.Ed25519Secret)
+	bls_secret := common.Hex2Bytes(aux.BlsSecret)
+
+	if len(bls_pub) != BlsPubInBytes {
+		return fmt.Errorf("invalid BlsPub length: expected %d bytes, got %d", BlsPubInBytes, len(bls_pub))
 	}
 
-	var err error
+	if len(metadata) != MetadataSizeInBytes {
+		return fmt.Errorf("invalid Metadata length: expected %d bytes, got %d", metadata, len(metadata))
+	}
 
-	// Decode BlsPub
-	blsBytes, err := decodeHexToBytes(aux.Bls)
-	if err != nil {
-		return fmt.Errorf("failed to decode BlsPub: %v", err)
-	}
-	if len(blsBytes) != BlsPubInBytes {
-		return fmt.Errorf("invalid BlsPub length: expected %d bytes, got %d", BlsPubInBytes, len(blsBytes))
-	}
-	copy(v.BlsPub[:], blsBytes)
-
-	// Decode Metadata
-	metadataBytes, err := decodeHexToBytes(aux.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to decode Metadata: %v", err)
-	}
-	if len(metadataBytes) != MetadataSizeInBytes {
-		return fmt.Errorf("invalid Metadata length: expected %d bytes, got %d", MetadataSizeInBytes, len(metadataBytes))
-	}
-	copy(v.Metadata[:], metadataBytes)
-
-	// Decode Secret Fields
-	v.BandersnatchSecret, err = decodeHexToBytes(aux.BandersnatchSecret)
-	if err != nil {
-		return fmt.Errorf("failed to decode BandersnatchSecret: %v", err)
-	}
-	ed25519_secret, err := decodeHexToBytes(aux.Ed25519Secret[:])
-	if err != nil {
-		return fmt.Errorf("failed to decode Ed25519Secret: %v", err)
-	}
-	copy(v.Ed25519Secret[:], ed25519_secret[:])
-	bls_secret, err := decodeHexToBytes(aux.BlsSecret[:])
-	if err != nil {
-		return fmt.Errorf("failed to decode BlsSecret: %v", err)
-	}
+	copy(v.BlsPub[:], bls_pub)
+	copy(v.Metadata[:], metadata)
+	copy(v.BandersnatchSecret, bandersnatch_secret)
+	copy(v.Ed25519Secret[:], ed25519_secret)
 	copy(v.BlsSecret[:], bls_secret)
 	return nil
 }
