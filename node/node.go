@@ -218,8 +218,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
-	node.writeDebug(genesisConfig, uint32(genesisConfig.Epoch0Timestamp))
-
+	err = node.writeDebug(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
 	go node.runServer()
 	go node.runClient()
 	go node.runWebService(id)
@@ -744,6 +743,10 @@ func getMessageType(obj interface{}) string {
 		return "JamState"
 	case statedb.JamState:
 		return "JamState"
+	case statedb.StateSnapshot:
+		return "StateSnapshot"
+	case *statedb.StateSnapshot:
+		return "StateSnapshot"
 	case *statedb.GenesisConfig:
 		return "GenesisConfig"
 	default:
@@ -763,7 +766,10 @@ func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
 	//fmt.Printf("!!!! writeDebug msgType=%v, structDir=%v\n", msgType, structDir)
 	if msgType != "unknown" {
 		epoch, phase := statedb.ComputeEpochAndPhase(Timeslot, n.epoch0Timestamp)
-		path := fmt.Sprintf("%s/%v_%v_%v", structDir, msgType, epoch, phase)
+		path := fmt.Sprintf("%s/%v_%v", structDir, epoch, phase)
+		if epoch == 0xFFFFFFFF || phase == 0xFFFFFFFF {
+			path = fmt.Sprintf("%s/genesis", structDir)
+		}
 		if msgType == "Ticket" {
 			if ticket, ok := obj.(*types.Ticket); ok {
 				// Cast successful, you can now access ticket's methods or fields
@@ -781,7 +787,7 @@ func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
 				path = fmt.Sprintf("%v_%v", path, identifier)
 			} else {
 				// Handle case where obj is not a *types.Ticket
-				return fmt.Errorf("expected types.Ticket but got %T", obj)
+				return fmt.Errorf("expected types.Block but got %T", obj)
 			}
 		}
 		jsonPath := fmt.Sprintf("%s.json", path)
@@ -914,7 +920,7 @@ func (n *Node) runClient() {
 					if err != nil {
 						fmt.Printf("writeDebug Block err: %v\n", err)
 					}
-					err = n.writeDebug(newStateDB.JamState, timeslot)
+					err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot)
 					if err != nil {
 						fmt.Printf("writeDebug JamState err: %v\n", err)
 					}

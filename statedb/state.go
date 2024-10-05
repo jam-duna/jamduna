@@ -93,9 +93,9 @@ type SafroleBasicState struct {
 
 // Types for Kai
 type Kai_state struct {
-	Kai_m uint32 `json:"kai_m"` // The index of the empower service
-	Kai_a uint32 `json:"kai_a"` // The index of the designate service
-	Kai_v uint32 `json:"kai_v"` // The index of the assign service
+	Kai_m uint32 `json:"chi_m"` // The index of the empower service
+	Kai_a uint32 `json:"chi_a"` // The index of the designate service
+	Kai_v uint32 `json:"chi_v"` // The index of the assign service
 }
 
 // Types for Pi

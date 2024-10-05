@@ -48,7 +48,7 @@ const (
 	RefineGasAllocation                               // G_R: The total gas allocated for a work-package’s Refine logic.
 	RecentHistorySize                = 8              // H = 8: The size of recent history, in blocks.
 	MaxWorkItemsPerPackage           = 4              // I = 4: The maximum amount of work items in a package.
-	MaxTicketsPerExtrinsic           = 16             // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
+	MaxTicketsPerExtrinsic           = 3              // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
 	LookupAnchorMaxAge               = 14400          // L = 14,400: The maximum age in timeslots of the lookup anchor.
 	TransferMemoSize                 = 128            // M = 128: The size of a transfer memo in octets.
 	TicketEntriesPerValidator        = 2              // N = 2: The number of ticket entries per validator.
