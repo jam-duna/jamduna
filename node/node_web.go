@@ -83,7 +83,7 @@ func setCorsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
-func (n *Node) runWebService(i uint32) {
+func (n *Node) runWebService() {
 	port := 8080
 	mux := http.NewServeMux()
 
