@@ -157,7 +157,7 @@ func TestNodeSafrole(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i])
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -182,7 +182,7 @@ func TestSegmentECRoundTrip(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -323,7 +323,7 @@ func TestECRoundTrip(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -399,7 +399,7 @@ func TestWorkGuaranteeWithExtrinsic(t *testing.T) {
 	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -615,7 +615,7 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -819,7 +819,7 @@ func TestNodeRotation(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i])
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

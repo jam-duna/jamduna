@@ -84,7 +84,7 @@ func setCorsHeaders(w http.ResponseWriter) {
 }
 
 func (n *Node) runWebService(i uint32) {
-	port := 9900 + int(i)
+	port := 8080
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/recentblocks", func(w http.ResponseWriter, r *http.Request) {

@@ -131,7 +131,7 @@ func TestAvailabilityReconstruction(t *testing.T) {
 	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i])
+		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

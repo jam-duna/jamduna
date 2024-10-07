@@ -17,14 +17,24 @@ import (
 	"time"
 )
 
+func getNextTimestampMultipleOf12() int {
+	current := time.Now().Unix()
+	future := current + 12
+	remainder := future % 12
+	if remainder != 0 {
+		future += 12 - remainder
+	}
+	return int(future)
+}
+
 func main() {
-	validators, secrets, peers, peerList, err := generateValidatorNetwork(types.TotalValidators)
+	validators, secrets, err := generateValidatorNetwork()
 	if err != nil {
-		fmt.Println("Error: %s", err)
+		fmt.Printf("Error: %s", err)
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
-
+	defaultTS := getNextTimestampMultipleOf12()
 	// Parse the command-line flags into config
 	config := &types.CommandConfig{}
 	var help bool
@@ -32,7 +42,7 @@ func main() {
 	flag.BoolVar(&help, "h", false, "Displays help information about the commands and flags.")
 	flag.StringVar(&config.DataDir, "datadir", filepath.Join(os.Getenv("HOME"), ".jam"), "Specifies the directory for the blockchain, keystore, and other data.")
 	flag.IntVar(&config.Port, "port", 9900, "Specifies the network listening port.")
-	flag.IntVar(&config.Epoch0Timestamp, "ts", 0, "Epoch0 Unix timestamp (will override genesis config)")
+	flag.IntVar(&config.Epoch0Timestamp, "ts", defaultTS, "Epoch0 Unix timestamp (will override genesis config)")
 
 	flag.IntVar(&validatorIndex, "validatorindex", 0, "Validator Index (only for development)")
 	flag.StringVar(&config.Genesis, "genesis", "", "Specifies the genesis state json file.")
@@ -48,6 +58,7 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
+	peers, peerList, err := generatePeerNetwork(validators, config.Port)
 
 	// Load and parse genesis file
 	var genesisConfig statedb.GenesisConfig
@@ -71,7 +82,7 @@ func main() {
 	currTS := uint64(time.Now().Unix())
 	if config.Epoch0Timestamp > 0 {
 		if currTS >= uint64(config.Epoch0Timestamp) {
-			fmt.Println("Invalid Config. Now(%v) > Epoch0Timestamp (%v)", currTS, config.Epoch0Timestamp)
+			fmt.Printf("Invalid Config. Now(%v) > Epoch0Timestamp (%v)", currTS, config.Epoch0Timestamp)
 			os.Exit(1)
 		}
 		genesisConfig.Epoch0Timestamp = uint64(config.Epoch0Timestamp)
@@ -89,40 +100,38 @@ func main() {
 	}
 
 	// Set up peers and node
-	_, err = node.NewNode(config.NodeName, secrets[validatorIndex], &genesisConfig, peers, peerList, config.DataDir)
+	_, err = node.NewNode(uint32(validatorIndex), secrets[validatorIndex], &genesisConfig, peers, peerList, config.DataDir, config.Port)
 	if err != nil {
 		panic(1)
 	}
-	fmt.Println(genesisConfig.String())
 	for {
 
 	}
 }
 
-func generateValidatorNetwork(N uint32) (validators []types.Validator, secrets []types.ValidatorSecret, peers []string, peerList map[string]node.NodeInfo, err error) {
+func generatePeerNetwork(validators []types.Validator, port int) (peers []string, peerList map[string]node.NodeInfo, err error) {
 	peerList = make(map[string]node.NodeInfo)
-	for i := uint32(0); i < N; i++ {
-		var nodeName string
-		// assign metadata names for the first 6
-		switch i {
-		case 0:
-			nodeName = "Alice"
-		case 1:
-			nodeName = "Bob"
-		case 2:
-			nodeName = "Charlie"
-		case 3:
-			nodeName = "Dave"
-		case 4:
-			nodeName = "Eve"
-		case 5:
-			nodeName = "Fergie"
-		default:
-			nodeName = fmt.Sprintf("Node%d", i)
+	for i := uint32(0); i < types.TotalValidators; i++ {
+		v := validators[i]
+		peerAddr := fmt.Sprintf("node%d:%d", i, port)
+		remoteAddr := fmt.Sprintf("node%d:%d", i, port)
+		peer := fmt.Sprintf("%s", v.Ed25519)
+		peers = append(peers, peer)
+		peerList[peer] = node.NodeInfo{
+			PeerID:     i,
+			PeerAddr:   peerAddr,
+			RemoteAddr: remoteAddr,
+			Validator:  v,
 		}
-		peerAddr := fmt.Sprintf("localhost:%d", 9900+i)
-		remoteAddr := fmt.Sprintf("localhost:%d", 9900+i)
-		metadata := fmt.Sprintf("%s:%s", remoteAddr, nodeName)
+	}
+	return peers, peerList, nil
+}
+
+func generateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
+	for i := uint32(0); i < types.TotalValidators; i++ {
+		// assign metadata names for the first 6
+		// nodeName := fmt.Sprintf("node%d", i)
+		metadata := fmt.Sprintf("node%d", i)
 		// Create hex strings for keys
 		iHex := fmt.Sprintf("%x", i)
 		if len(iHex)%2 != 0 {
@@ -136,20 +145,12 @@ func generateValidatorNetwork(N uint32) (validators []types.Validator, secrets [
 		// Set up the secret/validator using hex values
 		v, s, err := setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata)
 		if err != nil {
-			return validators, secrets, peers, peerList, err
+			return validators, secrets, err
 		}
-		peer := fmt.Sprintf("%x", v.Ed25519)
 		validators = append(validators, v)
 		secrets = append(secrets, s)
-		peers = append(peers, peer)
-		peerList[peer] = node.NodeInfo{
-			PeerID:     i,
-			PeerAddr:   peerAddr,
-			RemoteAddr: remoteAddr,
-			Validator:  v,
-		}
 	}
-	return validators, secrets, peers, peerList, nil
+	return validators, secrets, nil
 }
 
 const debug = false

@@ -243,6 +243,7 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 
 // EP Errors
 const (
+	debug                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
@@ -670,7 +671,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 				// HOW could this happen, we made the block ourselves!
 				return nil, nil, err
 			}
-			fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, proposedBlk.Hash(), newStateDB.String())
+			//fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, proposedBlk.Hash(), newStateDB.String())
 			return proposedBlk, newStateDB, nil
 		} else {
 			//waiting for block ... potentially submit ticket here
@@ -791,7 +792,9 @@ func (s *StateDB) Accumulate() error {
 	xContext := types.NewXContext()
 	//TODO: setup xi, x_vm,
 	s.SetXContext(xContext)
-	fmt.Printf("AvailableWorkReport %v\n", len(s.AvailableWorkReport))
+	if debug {
+		fmt.Printf("AvailableWorkReport %v\n", len(s.AvailableWorkReport))
+	}
 	if len(s.AvailableWorkReport) == 0 {
 
 		for _, wr := range s.AvailableWorkReport {
@@ -903,12 +906,14 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 	s.JamState.tallyStatistics(s.Id, "assurances", num_assurances)
-	fmt.Printf("Rho State Update - Assurances\n")
-	for i, rho := range s.JamState.AvailabilityAssignments {
-		if rho == nil {
-			fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
-		} else {
-			fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
+	if debug {
+		fmt.Printf("Rho State Update - Assurances\n")
+		for i, rho := range s.JamState.AvailabilityAssignments {
+			if rho == nil {
+				fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
+			} else {
+				fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
+			}
 		}
 	}
 
@@ -920,12 +925,14 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	num_reports := uint32(len(guarantees))
 
 	d.ProcessGuarantees(guarantees)
-	fmt.Printf("Rho State Update - Guarantees\n")
-	for i, rho := range s.JamState.AvailabilityAssignments {
-		if rho == nil {
-			fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
-		} else {
-			fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
+	if debug {
+		fmt.Printf("Rho State Update - Guarantees\n")
+		for i, rho := range s.JamState.AvailabilityAssignments {
+			if rho == nil {
+				fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
+			} else {
+				fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
+			}
 		}
 	}
 	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
@@ -959,7 +966,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, err
 	}
 	s.JamState.SafroleState = &s2
-	fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
+	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
 
 	// 24 - Preimages
@@ -968,25 +975,29 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-	fmt.Printf("ApplyStateTransitionFromBlock - Preimages\n")
+	//fmt.Printf("ApplyStateTransitionFromBlock - Preimages\n")
 
 	// 23,25-27 Disputes, Assurances. Guarantees
 	disputes := blk.Disputes()
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
 
-	for _, g := range guarantees {
-		fmt.Printf("[Core: %d]ApplyStateTransitionFromBlock Guarantee W_Hash%v\n", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	if debug {
+		for _, g := range guarantees {
+			fmt.Printf("[Core: %d]ApplyStateTransitionFromBlock Guarantee W_Hash%v\n", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+		}
 	}
 
 	err = s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
 	if err != nil {
 		return s, err
 	}
-	fmt.Printf("ApplyStateTransitionFromBlock - Disputes, Assurances, Guarantees\n")
-	for _, rho := range s.JamState.AvailabilityAssignments {
-		if rho != nil {
-			fmt.Printf("ApplyStateTransitionFromBlock - Rho core[%d] WorkPackage Hash: %v\n", rho.WorkReport.CoreIndex, rho.WorkReport.GetWorkPackageHash())
+	if debug {
+		fmt.Printf("ApplyStateTransitionFromBlock - Disputes, Assurances, Guarantees\n")
+		for _, rho := range s.JamState.AvailabilityAssignments {
+			if rho != nil {
+				fmt.Printf("ApplyStateTransitionFromBlock - Rho core[%d] WorkPackage Hash: %v\n", rho.WorkReport.CoreIndex, rho.WorkReport.GetWorkPackageHash())
+			}
 		}
 	}
 	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
@@ -995,29 +1006,38 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-	fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
+	if debug {
+		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
+	}
 	// 29 -  Update Authorization Pool alpha'
 	err = s.ApplyStateTransitionAuthorizations(blk.Guarantees())
 	if err != nil {
 		return s, err
 	}
-	fmt.Printf("ApplyStateTransitionFromBlock - Authorizations\n")
-
+	if debug {
+		fmt.Printf("ApplyStateTransitionFromBlock - Authorizations\n")
+	}
 	// 30 - compute pi
 	s.JamState.tallyStatistics(s.Id, "blocks", 1)
-	fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
+	if debug {
+		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
+	}
 	s.ApplyXContext()
 	// TODO : Remove cores and get the rho state from JamState
 	err = s.OnTransfer()
 	if err != nil {
 		return s, err
 	}
-	fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
+	if debug {
+		fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
+	}
 	s.Block = blk
 	s.ParentHash = s.BlockHash
 	s.BlockHash = blk.Hash()
 	// s.StateRoot = s.UpdateTrieState()
-	fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
+	if debug {
+		fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
+	}
 	//State transisiton is successful.  Remove E(T,P,A,G,D) from statedb queue
 	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
 	return s, nil
@@ -1097,7 +1117,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
-	fmt.Printf("MakeBlock - queuedGuarantees %v\n", len(s.queuedGuarantees))
+	if debug {
+		fmt.Printf("MakeBlock - queuedGuarantees %v\n", len(s.queuedGuarantees))
+	}
 	for _, guarantee := range s.queuedGuarantees {
 		g, err := guarantee.DeepCopy()
 		if err != nil {

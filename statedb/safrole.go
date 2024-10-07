@@ -149,7 +149,7 @@ func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
 	for i, v := range s.NextValidators {
 		nextValidators[i] = v.GetBandersnatchKey().Hash()
 	}
-	fmt.Printf("nextValidators Len=%v\n", nextValidators)
+	//fmt.Printf("nextValidators Len=%v\n", nextValidators)
 	return &types.EpochMark{
 		Entropy:    s.Entropy[1], // Assuming s.Entropy has at least two elements
 		Validators: nextValidators,

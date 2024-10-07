@@ -34,6 +34,7 @@ import (
 const (
 	numNodes = 6
 	quicAddr = "localhost:%d"
+	basePort = 9000
 )
 
 const (
@@ -149,13 +150,27 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func NewNode(nodeName string, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, dataDir string) (*Node, error) {
-	n, err := newNode(0, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir)
+func NewNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, dataDir string, port int) (*Node, error) {
+	n, err := newNode(id, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir, port)
 	return n, err
 }
 
-func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string, dataDir string) (*Node, error) {
-	fmt.Printf("[N%v] Using levelDB path=%v\n", id, dataDir)
+func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string, dataDir string, port int) (*Node, error) {
+	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
+
+	// Print each peer in the 'peers' slice
+	fmt.Println("Peers:")
+	for _, peer := range peers {
+		fmt.Printf("  - %s\n", peer)
+	}
+
+	// Iterate over peerList and print each key and its corresponding NodeInfo
+	fmt.Println("Peer List:")
+	for key, nodeInfo := range peerList {
+		fmt.Printf("  Key: %s, LocalAddr: %s\n", key, nodeInfo.PeerAddr)
+	}
+
 	levelDBPath := fmt.Sprintf("%v/leveldb/", dataDir)
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
@@ -177,7 +192,6 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 		NextProtos:         []string{"h3", "http/1.1", "ping/1.1"}, // Enable QUIC and HTTP/3
 	}
 
-	addr := fmt.Sprintf(quicAddr, 9000+id)
 	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
 	listener, err := quic.ListenAddr(addr, tlsConfig, generateQuicConfig())
 
@@ -221,7 +235,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	err = node.writeDebug(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
 	go node.runServer()
 	go node.runClient()
-	go node.runWebService(id)
+	//go node.runWebService(id)
 
 	return node, nil
 }
@@ -316,6 +330,7 @@ func (n *Node) getPeerAddr(identifier string) (string, error) {
 		return peer.PeerAddr, nil
 	}
 	fmt.Printf("getPeerAddr not found %v\n", identifier)
+
 	return "", fmt.Errorf("peer not found")
 }
 
@@ -528,9 +543,19 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 		//blk, err := types.BlockFromBytes(resp)
 		var blk *types.Block
 		decoded, _ := types.Decode(resp, reflect.TypeOf(blk))
-		blk = decoded.(*types.Block)
-		fmt.Printf("[N%d] fetchBlock(%v) %v<-%v [from %s]: %s\n", n.id, blockHash, blk.ParentHash(), blk.Hash(), randomPeer, blk.String())
-		n.blocks[blk.Hash()] = blk
+		if err != nil {
+			fmt.Printf("fetchBlock %v\n", err)
+		}
+		blk, ok := decoded.(*types.Block)
+		if !ok {
+			fmt.Printf("failed to assert decoded to *types.Block %x", resp)
+			// Handle the error or take appropriate action if the assertion fails
+			return blk, fmt.Errorf("failed to assert decoded to *types.Block")
+		}
+		fmt.Printf("[N%d] fetchBlock(%v) %v\n", n.id, blockHash, resp)
+		if blk != nil {
+			n.blocks[blk.Hash()] = blk
+		}
 		return blk, nil
 	}
 	return nil, fmt.Errorf("fetchBlock - No response")
@@ -588,7 +613,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 			parentBlock, ok := n.blocks[b.ParentHash()]
 			if !ok {
 				parentBlock, err = n.fetchBlock(b.ParentHash())
-				if err != nil {
+				if err != nil || parentBlock == nil {
 					// have to give up right now (could try again though!)
 					return err
 				}
@@ -893,9 +918,9 @@ func (n *Node) runClient() {
 				n.blocks[newBlock.Hash()] = newBlock
 				n.broadcast(*newBlock)
 				fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
-				for _, g := range newStateDB.GuarantorAssignments {
-					fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
-				}
+				//for _, g := range newStateDB.GuarantorAssignments {
+				//fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
+				//}
 
 				currSlot := n.statedb.GetSafrole().Timeslot
 				_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currSlot)

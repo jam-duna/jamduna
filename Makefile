@@ -7,6 +7,11 @@ jam:
 	mkdir -p $(OUTPUT_DIR)
 	go build -o $(OUTPUT_DIR)/$(BINARY) $(SRC)
 
+testnet:
+	make jam
+	docker build -t colorfulnotion/jam .
+	docker-compose up
+
 clean:
 	rm -f $(OUTPUT_DIR)/$(BINARY)
 

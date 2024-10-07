@@ -122,7 +122,7 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 
 	// Marshal the new struct to JSON.
 	enc := Encode(bwoSig)
-	fmt.Printf("BytesWithoutSig %x\n", enc)
+	//fmt.Printf("BytesWithoutSig %x\n", enc)
 	return enc
 }
 
