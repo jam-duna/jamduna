@@ -31,7 +31,7 @@ const (
 	TotalCores              = 2  // C = 341: The total number of cores.
 	TotalValidators         = 6  // V = 1023: The total number of validators.
 	TicketSubmissionEndSlot = 8  // Y = 500: The number of slots into an epoch at which ticket-submission ends.
-	EpochLength             = 12 // E = 600: The length of an epoch in timeslots.
+	EpochLength             = 10 // E = 600: The length of an epoch in timeslots.
 
 	// Medium: configure these
 	W_S = 6 // W_S = 6: The size of an exported segment in erasure-coded pieces.
@@ -51,7 +51,9 @@ const (
 	MaxTicketsPerExtrinsic           = 3              // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
 	LookupAnchorMaxAge               = 14400          // L = 14,400: The maximum age in timeslots of the lookup anchor.
 	TransferMemoSize                 = 128            // M = 128: The size of a transfer memo in octets.
-	TicketEntriesPerValidator        = 2              // N = 2: The number of ticket entries per validator.
+
+	TicketEntriesPerValidator        = 3              // N = 2: The number of ticket entries per validator.
+
 	MaxAuthorizationPoolItems        = 8              // O = 8: The maximum number of items in the authorizations pool.
 	SecondsPerSlot                   = 6              // P = 6: The slot period, in seconds.
 	MaxAuthorizationQueueItems       = 80             // Q = 80: The maximum number of items in the authorizations queue.
@@ -97,4 +99,9 @@ const (
 const (
 	validators_super_majority = TotalValidators*2/3 + 1
 	avail_bitfield_bytes      = (TotalCores + 7) / 8
+)
+
+// extrinsic tidy up constants
+const (
+	MaxEpochsToKeepSelfTickets = 5
 )

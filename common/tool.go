@@ -29,6 +29,11 @@ func ComputeCurrentJCETime() uint32 {
 	return uint32(currentTime) // computeJCETime(currentTime)
 }
 
+func ComputeCurrenTS() uint32 {
+	currentTime := time.Now().Unix()
+	return uint32(currentTime)
+}
+
 func CompareBytes(b1 []byte, b2 []byte) bool {
 	return bytes.Equal(b1, b2)
 }

@@ -17,15 +17,16 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
 	"math/big"
 	rand0 "math/rand"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/quic-go/quic-go"
@@ -93,7 +94,6 @@ type Node struct {
 	messageChan  chan statedb.Message
 	nodeType     string
 	dataDir      string
-
 	epoch0Timestamp uint32
 }
 
@@ -232,7 +232,8 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
-	err = node.writeDebug(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
+	node.store.WriteLog(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
+	//err = node.writeDebug(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
 	go node.runServer()
 	go node.runClient()
 	//go node.runWebService(id)
@@ -781,8 +782,19 @@ func getMessageType(obj interface{}) string {
 
 const TickTime = 2000
 
-func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
+func (n *Node) writeDebug(obj interface{}, timeslot uint32) error {
+	l := storage.LogMessage {
+		Payload: obj,
+		Timeslot: timeslot,
+		//TODO:...
+	}
+	return n.WriteLog(l)
+}
+
+func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	//msgType := getStructType(obj)
+	obj := logMsg.Payload
+	timeSlot := logMsg.Timeslot
 	msgType := getMessageType(obj)
 	if msgType != "unknown" {
 	}
@@ -790,8 +802,9 @@ func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
 	structDir := fmt.Sprintf("%s/%vs", dataDir, msgType)
 	//fmt.Printf("!!!! writeDebug msgType=%v, structDir=%v\n", msgType, structDir)
 	if msgType != "unknown" {
-		epoch, phase := statedb.ComputeEpochAndPhase(Timeslot, n.epoch0Timestamp)
-		path := fmt.Sprintf("%s/%v_%v", structDir, epoch, phase)
+		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
+		currTS := common.ComputeCurrenTS()
+		path := fmt.Sprintf("%s/%v_%v_%v", structDir, currTS, epoch, phase)
 		if epoch == 0xFFFFFFFF || phase == 0xFFFFFFFF {
 			path = fmt.Sprintf("%s/genesis", structDir)
 		}
@@ -837,53 +850,13 @@ func (n *Node) writeDebug(obj interface{}, Timeslot uint32) error {
 
 			err := ioutil.WriteFile(jsonPath, jsonEncode, 0644)
 			if err != nil {
-				return fmt.Errorf("Error writing block file: %v\n", err)
+				return fmt.Errorf("Error writing json file: %v\n", err)
 			}
 			err = ioutil.WriteFile(codecPath, codecEncode, 0644)
 			if err != nil {
-				return fmt.Errorf("Error writing state file: %v\n", err)
+				return fmt.Errorf("Error writing codec file: %v\n", err)
 			}
 		}
-	}
-	return nil
-}
-
-func (n *Node) writeDebugState(newBlock *types.Block, newStateDB *statedb.StateDB) error {
-	// save the new block as json, put it in to dir /block&state
-	jsonBlock, _ := json.MarshalIndent(newBlock, "", "    ")
-	jsonState, _ := json.MarshalIndent(newStateDB.JamState, "", "    ")
-	// use epoch and phase
-	epoch, phase := newStateDB.GetSafrole().EpochAndPhase(newStateDB.GetSafrole().Timeslot)
-
-	dataDir := fmt.Sprintf("%s/data/", n.dataDir)
-
-	blockDir := fmt.Sprintf("%s/blocks", dataDir)
-	stateDir := fmt.Sprintf("%s/state", dataDir)
-
-	// Check if the directories exist, if not create them
-	if _, err := os.Stat(blockDir); os.IsNotExist(err) {
-		err := os.MkdirAll(blockDir, os.ModePerm)
-		if err != nil {
-			return fmt.Errorf("Error creating block directory: %v\n", err)
-		}
-	}
-
-	if _, err := os.Stat(stateDir); os.IsNotExist(err) {
-		err := os.MkdirAll(stateDir, os.ModePerm)
-		if err != nil {
-			return fmt.Errorf("Error creating state directory: %v\n", err)
-		}
-	}
-
-	blockPath := fmt.Sprintf("%s/block_%v_%v.json", blockDir, epoch, phase)
-	statePath := fmt.Sprintf("%s/state_%v_%v.json", stateDir, epoch, phase)
-	err := ioutil.WriteFile(blockPath, jsonBlock, 0644)
-	if err != nil {
-		return fmt.Errorf("Error writing block file: %v\n", err)
-	}
-	err = ioutil.WriteFile(statePath, jsonState, 0644)
-	if err != nil {
-		return fmt.Errorf("Error writing state file: %v\n", err)
 	}
 	return nil
 }
@@ -894,6 +867,8 @@ func (n *Node) runClient() {
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
 
+	logChan := n.store.GetChan()
+
 	for {
 		select {
 		case <-ticker_pulse.C:
@@ -903,6 +878,11 @@ func (n *Node) runClient() {
 			ticketIDs, err := n.GetSelfTicketsIDs()
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
+			}
+			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(statedb.ComputeCurrentJCETime())
+			if currEpoch == 0 && currPhase == 0 {
+				n.GenerateTickets(statedb.ComputeCurrentJCETime())
+				n.BroadcastTickets(statedb.ComputeCurrentJCETime())
 			}
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs)
 			if err != nil {
@@ -923,7 +903,7 @@ func (n *Node) runClient() {
 				//}
 
 				currSlot := n.statedb.GetSafrole().Timeslot
-				_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currSlot)
+				currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currSlot)
 				if currPhase >= types.EpochLength-1 {
 					nextEpochSlot := n.statedb.GetSafrole().GetNextEpochFirst() + 2
 					n.GenerateTickets(nextEpochSlot)
@@ -931,14 +911,14 @@ func (n *Node) runClient() {
 					n.BroadcastTickets(nextEpochSlot)
 				}
 
-				if newStateDB.Block.Header.EpochMark != nil {
+				if newStateDB.Block.Header.EpochMark != nil || (currEpoch == 0 && currPhase == 0) {
 					fmt.Printf("[N%d] EPOCH MARK: %v\n", n.id, newStateDB.Block.Header.EpochMark)
 					currJCE := statedb.ComputeCurrentJCETime()
 					n.GenerateTickets(currJCE)
 					n.CheckSelfTicketsIsIncluded(*newBlock, currJCE)
 					n.BroadcastTickets(currJCE)
 				}
-				// TODO Shawn: DO NOT WRITE ANYTHING into JAM repo
+
 				if debug {
 					timeslot := newStateDB.GetSafrole().Timeslot
 					err := n.writeDebug(newBlock, timeslot)
@@ -949,11 +929,12 @@ func (n *Node) runClient() {
 					if err != nil {
 						fmt.Printf("writeDebug JamState err: %v\n", err)
 					}
-					//n.writeDebugState(newBlock, newStateDB)
 				}
 			}
-		case msg := <-n.messageChan:
-			n.processOutgoingMessage(msg)
+
+		case log := <-logChan:
+			//fmt.Printf("IM here!!! %v\n", log)
+			n.WriteLog(log)
 		}
 	}
 }

@@ -111,21 +111,23 @@ func (t *Ticket) BytesWithoutSig() []byte {
 // shawn added ticket bucket to store tickets for node itself
 
 type TicketBucket struct {
-	Ticket     Ticket
-	IsIncluded *bool
+	Ticket         Ticket
+	IsIncluded     *bool
+	GeneratedEpoch uint32
 }
 
-func (t *Ticket) TicketToBucket() TicketBucket {
+func (t *Ticket) TicketToBucket(epoch uint32) TicketBucket {
 	return TicketBucket{
-		Ticket:     *t,
-		IsIncluded: new(bool),
+		Ticket:         *t,
+		IsIncluded:     new(bool),
+		GeneratedEpoch: epoch,
 	}
 }
 
-func TicketsToBuckets(tickets []Ticket) []TicketBucket {
+func TicketsToBuckets(tickets []Ticket, epoch uint32) []TicketBucket {
 	bucket := make([]TicketBucket, len(tickets))
 	for i := range tickets {
-		bucket[i] = tickets[i].TicketToBucket()
+		bucket[i] = tickets[i].TicketToBucket(epoch)
 	}
 	return bucket
 }

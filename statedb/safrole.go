@@ -246,10 +246,7 @@ func (s *SafroleState) EpochAndPhase(currCJE uint32) (currentEpoch int32, curren
 
 func (s *SafroleState) IsNewEpoch(currCJE uint32) bool {
 	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, currPhase := s.EpochAndPhase(currCJE)
-	if currEpoch == 0 && currPhase == 1 {
-		return true
-	}
+	currEpoch, _ := s.EpochAndPhase(currCJE)
 	return currEpoch > prevEpoch
 }
 
@@ -860,7 +857,6 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	if err != nil {
 
 		fmt.Printf("GetFreshRandomness ERR %v (len=%d)", err, len(header.EntropySource[:]))
-		panic(0)
 		return s2, fmt.Errorf("GetFreshRandomness %v", err)
 	}
 	// in the tail slot with a full set of tickets
@@ -927,30 +923,15 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 				continue // return s2, fmt.Errorf(errTicketResubmission)
 			}
 
-			newa := types.TicketBody{
-				Id:      ticket_id,
-				Attempt: uint8(e.Attempt),
-			}
-			//			if len(newTickets) > 0 && compareTickets(newa.Id, newTickets[len(newTickets)-1].Id) < 0 {
-			//				return s2, fmt.Errorf(errTicketBadOrder)
-			//			}
+			s2.PutTicketInAccumulator(ticket_id, e.Attempt)
 
-			s2.NextEpochTicketsAccumulator = append(s2.NextEpochTicketsAccumulator, newa)
 			if s.Id == 0 {
 				fmt.Printf("[N%d] added Ticket ID %v\n", id, ticket_id)
 			}
 		}
 	}
-
-	// Sort tickets using compareTickets
-	sort.SliceStable(s2.NextEpochTicketsAccumulator, func(i, j int) bool {
-		return compareTickets(s2.NextEpochTicketsAccumulator[i].Id, s2.NextEpochTicketsAccumulator[j].Id) < 0
-	})
-
-	// Drop useless tickets. Should this be error or not?
-	if len(s2.NextEpochTicketsAccumulator) > types.EpochLength {
-		s2.NextEpochTicketsAccumulator = s2.NextEpochTicketsAccumulator[0:types.EpochLength]
-	}
+	// Sort and trim tickets
+	s2.SortAndTrimTickets()
 
 	s2.BlockNumber = s.BlockNumber + 1
 	s2.Timeslot = targetJCE
@@ -975,6 +956,26 @@ func (s2 *SafroleState) StableEntropy(s *SafroleState, new_entropy_0 common.Hash
 	s2.Entropy[2] = s.Entropy[2]
 	s2.Entropy[3] = s.Entropy[3]
 	fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY norm 1:%v 2:%v 3:%v\n", s2.Id, s2.Entropy[1], s2.Entropy[2], s2.Entropy[3])
+}
+
+func (s2 *SafroleState) PutTicketInAccumulator(tickeID common.Hash, attempt uint8) {
+	newa := types.TicketBody{
+		Id:      tickeID,
+		Attempt: attempt,
+	}
+	s2.NextEpochTicketsAccumulator = append(s2.NextEpochTicketsAccumulator, newa)
+}
+
+func (s *SafroleState) SortAndTrimTickets() {
+	// Sort tickets using compareTickets
+	sort.SliceStable(s.NextEpochTicketsAccumulator, func(i, j int) bool {
+		return compareTickets(s.NextEpochTicketsAccumulator[i].Id, s.NextEpochTicketsAccumulator[j].Id) < 0
+	})
+
+	// Drop useless tickets
+	if len(s.NextEpochTicketsAccumulator) > types.EpochLength {
+		s.NextEpochTicketsAccumulator = s.NextEpochTicketsAccumulator[0:types.EpochLength]
+	}
 }
 
 func (s *SafroleState) ChooseFallBackValidator() ([]common.Hash, error) {

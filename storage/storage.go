@@ -7,9 +7,16 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+type LogMessage struct {
+	Payload interface{}
+	Timeslot uint32
+	Self 	bool
+}
+
 // StateDBStorage struct to hold the LevelDB instance
 type StateDBStorage struct {
 	db *leveldb.DB
+	logChan chan LogMessage
 }
 
 // NewStateDBStorage initializes a new LevelDB store
@@ -18,7 +25,11 @@ func NewStateDBStorage(path string) (*StateDBStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &StateDBStorage{db: db}, nil
+	s := StateDBStorage{
+		db: db,
+		logChan: make(chan LogMessage, 100),
+	}
+	return &s, nil
 }
 
 // ReadKV reads a value for a given key from the LevelDB store
@@ -59,4 +70,17 @@ func (store *StateDBStorage) WriteRawKV(key []byte, value []byte) error {
 
 func (store *StateDBStorage) DeleteRawK(key []byte) error {
 	return store.db.Delete(key, nil)
+}
+
+func (store *StateDBStorage) WriteLog(obj interface{}, timeslot uint32) {
+    msg := LogMessage{
+        Payload:  obj,
+        Timeslot: timeslot,
+    }
+    store.logChan <- msg
+}
+
+
+func (store *StateDBStorage) GetChan() chan LogMessage {
+	return store.logChan
 }

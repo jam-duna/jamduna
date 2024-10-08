@@ -61,6 +61,8 @@ type StateDB struct {
 	PreviousGuarantorAssignments []types.GuarantorAssignment
 	AvailableWorkReport          []types.WorkReport // every block has its own available work report
 	//S uint32
+
+	logChan chan storage.LogMessage
 }
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket) {
@@ -119,6 +121,10 @@ func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
 	return exists
 }
 
+func (s *StateDB) writeLog(obj interface{}, timeslot uint32){
+	s.sdb.WriteLog(obj, timeslot)
+}
+
 func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	//s.QueueTicketEnvelope(t)
 	//statedb.tickets[common.BytesToHash(ticket_id)] = t
@@ -131,8 +137,11 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	if s.CheckTicketExists(ticketID) {
 		return
 	}
-	// fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v\n", s.Id, ticketID)
+	fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v\n", s.Id, ticketID)
 	s.AddTicketToQueue(t)
+	//TODO: log ticket here
+	currJCE, _ := s.JamState.SafroleState.CheckTimeSlotReady()
+	s.writeLog(&t, currJCE)
 	s.knownTickets[ticketID] = t.Attempt
 }
 
@@ -291,6 +300,7 @@ func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb.knownPreimageLookups = make(map[common.Hash]uint32)
 	statedb.SetStorage(sdb)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
+	statedb.logChan = make(chan storage.LogMessage, 100)
 	return statedb
 }
 
@@ -482,6 +492,17 @@ func (s *StateDB) GetSafroleState() *SafroleState {
 	return s.JamState.SafroleState
 }
 
+// func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {
+// 	WriteLog
+//
+//     msg := storage.LogMessage{
+//         Payload:  obj,
+//         Timeslot: timeslot,
+//     }
+// 	fmt.Printf("sending logMsg: %v\n", msg)
+//     s.logChan <- msg
+// }
+
 func (s *StateDB) String() string {
 	enc, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -559,6 +580,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		queuedGuarantees:      make(map[common.Hash]types.Guarantee),
 		queuedAssurances:      make(map[common.Hash]types.Assurance),
 		queueJudgements:       make(map[common.Hash]types.Judgement),
+		logChan:			   make(chan storage.LogMessage, 100),
 
 		/*
 			Following flds are not copied over..?
@@ -1187,7 +1209,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	// TODO: 103 Verdicts v must be ordered by report hash.
 	// TODO: 104 Offender signatures c and f must each be ordered by the validator’s Ed25519 key.
 	// TODO: 105 There may be no duplicate report hashes within the extrinsic, nor amongst any past reported hashes.
-
+	// target_Epoch, target_Phase := sf.EpochAndPhase(targetJCE)
 	needEpochMarker := isNewEpoch
 	// eq 71
 	if needEpochMarker {

@@ -397,6 +397,7 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 			if err == nil {
 				response = ok
 			}
+
 			currSlot := n.statedb.GetSafrole().Timeslot
 			_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currSlot)
 			jce := statedb.ComputeCurrentJCETime()
@@ -406,12 +407,13 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 				fmt.Printf(" -- [N%d] Generating Tickets For Next Epoch: %d, Phase: %d\n", n.id, nextEpoch, nextPhase)
 				n.GenerateTickets(jce)
 			}
-
 			if block.Header.EpochMark != nil {
 				n.GenerateTickets(jce)
 			}
+			
 			n.CheckSelfTicketsIsIncluded(*block, jce)
 			n.BroadcastTickets(jce)
+			n.CleanUpSelfTickets(jce)
 		}
 
 	case "WorkPackage":
