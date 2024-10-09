@@ -4,14 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
 	"html/template"
 	"log"
 	"net/http"
 	"path"
 	"reflect"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/types"
 )
 
 func encodeapi(objectType string, inp string) (string, error) {
@@ -201,53 +202,53 @@ func decodeapi(objectType, input string) (string, error) {
 
 	switch objectType {
 	case "Block":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.Block{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.Block{}))
 	case "Ticket":
 		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.Ticket{}))
 	case "Guarantee":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.Guarantee{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.Guarantee{}))
 	case "Assurance":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.Assurance{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.Assurance{}))
 	case "Preimages":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.Preimages{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.Preimages{}))
 	case "Announcement":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.Announcement{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.Announcement{}))
 	case "Judgement":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.Judgement{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.Judgement{}))
 	case "WorkPackage":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.WorkPackage{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.WorkPackage{}))
 	case "WorkResult":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.WorkResult{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.WorkResult{}))
 	case "WorkReport":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.WorkReport{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.WorkReport{}))
 	case "WorkItem":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&types.WorkItem{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(types.WorkItem{}))
 	case "C1":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&[types.TotalCores][]common.Hash{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf([types.TotalCores][]common.Hash{}))
 	case "C2":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.AuthorizationQueue{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.AuthorizationQueue{}))
 	case "C3":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.BeefyPool{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.BeefyPool{}))
 	case "C4":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.SafroleBasicState{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.SafroleBasicState{}))
 	case "C5":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.Psi_state{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.Psi_state{}))
 	case "C6":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.Entropy{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.Entropy{}))
 	case "C7":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.Validators{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
 	case "C8":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.Validators{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
 	case "C9":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.Validators{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
 	case "C10":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.AvailabilityAssignments{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.AvailabilityAssignments{}))
 	case "C11":
 		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(uint32(0)))
 	case "C12":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&statedb.Kai_state{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(statedb.Kai_state{}))
 	case "C13":
-		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf(&[2][types.TotalValidators]statedb.Pi_state{}))
+		decodedStruct, _ = types.Decode(encodedBytes, reflect.TypeOf([2][types.TotalValidators]statedb.Pi_state{}))
 	default:
 		return "", errors.New("Unknown object type")
 	}
@@ -257,7 +258,7 @@ func decodeapi(objectType, input string) (string, error) {
 	}
 
 	// Convert decoded structure to JSON string
-	decodedJSON, err := json.MarshalIndent(&decodedStruct, "", "    ")
+	decodedJSON, err := json.MarshalIndent(decodedStruct, "", "    ")
 	if err != nil {
 		return "", err
 	}
@@ -268,6 +269,10 @@ func decodeapi(objectType, input string) (string, error) {
 func main() {
 	port := 8080
 	mux := http.NewServeMux()
+
+	// Serve static files from the "./static" directory
+	fileServer := http.FileServer(http.Dir("./static"))
+	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fp := path.Join(".", "codec.html")

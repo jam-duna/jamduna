@@ -274,7 +274,7 @@ func (a *Psi_state) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *Psi_state) MarshalJSON() ([]byte, error) {
+func (a Psi_state) MarshalJSON() ([]byte, error) {
 	psi_g := []string{}
 	for _, v := range a.Psi_g {
 		psi_g = append(psi_g, common.HexString(v))

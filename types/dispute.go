@@ -275,7 +275,7 @@ func (a *Fault) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *Culprit) MarshalJSON() ([]byte, error) {
+func (a Culprit) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		Target    common.Hash `json:"target"`
 		Key       string      `json:"key"`
@@ -287,7 +287,7 @@ func (a *Culprit) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func (a *Fault) MarshalJSON() ([]byte, error) {
+func (a Fault) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		Target    common.Hash `json:"target"`
 		Voting    bool        `json:"vote"`

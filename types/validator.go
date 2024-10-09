@@ -46,7 +46,7 @@ func ValidatorFromBytes(data []byte) (Validator, error) {
 }
 
 // MarshalJSON custom marshaler to convert byte arrays to hex strings
-func (v *Validator) MarshalJSON() ([]byte, error) {
+func (v Validator) MarshalJSON() ([]byte, error) {
 
 	return json.Marshal(&struct {
 		Bandersnatch BandersnatchKey `json:"bandersnatch"`

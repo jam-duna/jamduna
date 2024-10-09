@@ -91,7 +91,7 @@ func (a *WorkItem) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *WorkItem) MarshalJSON() ([]byte, error) {
+func (a WorkItem) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		Service          uint32              `json:"service"`
 		CodeHash         common.Hash         `json:"code_hash"`

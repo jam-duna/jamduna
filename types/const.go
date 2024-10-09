@@ -28,11 +28,15 @@ const (
 
 const (
 	// Tiny testnet : Tickets only
-	TotalCores              = 2  // C = 341: The total number of cores.
-	TotalValidators         = 6  // V = 1023: The total number of validators.
-	TicketSubmissionEndSlot = 8  // Y = 500: The number of slots into an epoch at which ticket-submission ends.
-	EpochLength             = 10 // E = 600: The length of an epoch in timeslots.
+	TotalValidators           = 6  // V = 1023: The total number of validators.
+	TotalCores                = 2  // C = 341: The total number of cores.
+	TicketEntriesPerValidator = 3  // N = 2: The number of ticket entries per validator.
+	EpochLength               = 12 // E = 600: The length of an epoch in timeslots.
+	TicketSubmissionEndSlot   = 8  // Y = 500: The number of slots into an epoch at which ticket-submission ends.
+	MaxTicketsPerExtrinsic    = 3  // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
+)
 
+const (
 	// Medium: configure these
 	W_S = 6 // W_S = 6: The size of an exported segment in erasure-coded pieces.
 	W_C = 4 // W_C = 684: The basic size of our erasure-coded pieces. See equation 316.
@@ -48,12 +52,8 @@ const (
 	RefineGasAllocation                               // G_R: The total gas allocated for a work-package’s Refine logic.
 	RecentHistorySize                = 8              // H = 8: The size of recent history, in blocks.
 	MaxWorkItemsPerPackage           = 4              // I = 4: The maximum amount of work items in a package.
-	MaxTicketsPerExtrinsic           = 3              // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
 	LookupAnchorMaxAge               = 14400          // L = 14,400: The maximum age in timeslots of the lookup anchor.
 	TransferMemoSize                 = 128            // M = 128: The size of a transfer memo in octets.
-
-	TicketEntriesPerValidator        = 3              // N = 2: The number of ticket entries per validator.
-
 	MaxAuthorizationPoolItems        = 8              // O = 8: The maximum number of items in the authorizations pool.
 	SecondsPerSlot                   = 6              // P = 6: The slot period, in seconds.
 	MaxAuthorizationQueueItems       = 80             // Q = 80: The maximum number of items in the authorizations queue.

@@ -52,7 +52,7 @@ func (a *DRho_state) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *DRho_state) MarshalJSON() ([]byte, error) {
+func (a DRho_state) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		DummyWorkReport string `json:"dummy_work_report"`
 		Timeout         uint32 `json:"timeout"`

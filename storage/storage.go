@@ -8,14 +8,14 @@ import (
 )
 
 type LogMessage struct {
-	Payload interface{}
+	Payload  interface{}
 	Timeslot uint32
-	Self 	bool
+	Self     bool
 }
 
 // StateDBStorage struct to hold the LevelDB instance
 type StateDBStorage struct {
-	db *leveldb.DB
+	db      *leveldb.DB
 	logChan chan LogMessage
 }
 
@@ -26,7 +26,7 @@ func NewStateDBStorage(path string) (*StateDBStorage, error) {
 		return nil, err
 	}
 	s := StateDBStorage{
-		db: db,
+		db:      db,
 		logChan: make(chan LogMessage, 100),
 	}
 	return &s, nil
@@ -73,13 +73,12 @@ func (store *StateDBStorage) DeleteRawK(key []byte) error {
 }
 
 func (store *StateDBStorage) WriteLog(obj interface{}, timeslot uint32) {
-    msg := LogMessage{
-        Payload:  obj,
-        Timeslot: timeslot,
-    }
-    store.logChan <- msg
+	msg := LogMessage{
+		Payload:  obj,
+		Timeslot: timeslot,
+	}
+	store.logChan <- msg
 }
-
 
 func (store *StateDBStorage) GetChan() chan LogMessage {
 	return store.logChan

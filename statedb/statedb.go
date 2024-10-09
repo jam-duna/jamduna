@@ -121,7 +121,7 @@ func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
 	return exists
 }
 
-func (s *StateDB) writeLog(obj interface{}, timeslot uint32){
+func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {
 	s.sdb.WriteLog(obj, timeslot)
 }
 
@@ -129,9 +129,9 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	//s.QueueTicketEnvelope(t)
 	//statedb.tickets[common.BytesToHash(ticket_id)] = t
 	sf := s.GetSafrole()
-	ticketID, err := sf.ValidateProposedTicket(&t)
+	ticketID, err := sf.ValidateProposedTicket(&t, false)
 	if err != nil {
-		fmt.Printf("Invalid Ticket. Err=%v\n", err)
+		fmt.Printf("ProcessIncomingTicket Error Invalid Ticket. Err=%v\n", err)
 		return
 	}
 	if s.CheckTicketExists(ticketID) {
@@ -580,7 +580,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		queuedGuarantees:      make(map[common.Hash]types.Guarantee),
 		queuedAssurances:      make(map[common.Hash]types.Assurance),
 		queueJudgements:       make(map[common.Hash]types.Judgement),
-		logChan:			   make(chan storage.LogMessage, 100),
+		logChan:               make(chan storage.LogMessage, 100),
 
 		/*
 			Following flds are not copied over..?
@@ -978,7 +978,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	epochMark := blk.EpochMark()
 	if epochMark != nil {
 		s.knownTickets = make(map[common.Hash]uint8) //keep track of known tickets
-		s.queuedTickets = make(map[common.Hash]types.Ticket)
+		// s.queuedTickets = make(map[common.Hash]types.Ticket)
 	}
 	sf := s.GetSafrole()
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header, s.Id)
@@ -1062,6 +1062,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	//State transisiton is successful.  Remove E(T,P,A,G,D) from statedb queue
 	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
+	fmt.Printf("Queue Tickets Length: %v\n", len(s.queuedTickets))
 	return s, nil
 }
 
@@ -1232,7 +1233,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		extrinsicData.Tickets = make([]types.Ticket, 0)
 		// add the limitation for receiving tickets
 		if s.JamState.SafroleState.IsTicketSubmsissionClosed(targetJCE) && !isNewEpoch {
-			s.queuedTickets = make(map[common.Hash]types.Ticket)
+			// s.queuedTickets = make(map[common.Hash]types.Ticket)
+
 		} else {
 			for ticketID, ticket := range s.queuedTickets {
 				t, err := ticket.DeepCopy()
@@ -1249,7 +1251,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 					extrinsicData.Tickets = append(extrinsicData.Tickets, t)
 				}
 			}
-			s.queuedTickets = make(map[common.Hash]types.Ticket)
+			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 		}
 	}
 

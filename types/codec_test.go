@@ -41,55 +41,65 @@ func TestCodec(t *testing.T) {
 			targetedStructType := reflect.TypeOf(tc.expectedType)
 
 			fmt.Printf("\n\n\nTesting %v\n", targetedStructType)
-			// Read and unmarshal JSON file
-			jsonData, err := os.ReadFile(jsonPath)
+
+			// Read Codec
+			expectedCodec, err := os.ReadFile(binPath)
+			if err != nil {
+				t.Fatalf("failed to read codec file: %v", err)
+			}
+			codecDecodedStruct, _ := Decode(expectedCodec, targetedStructType)
+			//fmt.Printf("Recovered Strcuct from codec: %v\n", codecDecodedStruct)
+
+			// Read JSON file
+			expectedJson, err := os.ReadFile(jsonPath)
 			if err != nil {
 				t.Fatalf("failed to read JSON file: %v", err)
 			}
 
-			err = json.Unmarshal(jsonData, tc.expectedType)
+			jsonDecodedStrcut := tc.expectedType
+			err = json.Unmarshal(expectedJson, jsonDecodedStrcut)
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
 			fmt.Printf("Unmarshaled %s\n", jsonPath)
-			fmt.Printf("Expected: %v\n", tc.expectedType)
-			// Encode the struct to bytes
-			encodedBytes := Encode(tc.expectedType)
+			//fmt.Printf("Recovered Strcuct from json: %v\n", jsonDecodedStrcut)
 
-			fmt.Printf("Encoded: %x\n\n", encodedBytes)
+			// Getting Codec Result
+			codec_via_json_source := Encode(jsonDecodedStrcut)
+			codec_via_codec_source := Encode(codecDecodedStruct)
+			fmt.Printf("[Codec Testing] json->codec:\n%x\n", codec_via_json_source)
 
-			decodedStruct, _ := Decode(encodedBytes, targetedStructType)
-			fmt.Printf("Decoded:  %v\n\n", decodedStruct)
-
-			// Marshal the struct to JSON
-			encodedJSON, err := json.MarshalIndent(decodedStruct, "", "  ")
+			// Getting JSON Result
+			json_via_codec_source, err := json.MarshalIndent(codecDecodedStruct, "", "  ")
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
-			fmt.Printf("Encoded JSON:\n%s\n", encodedJSON)
-
-			// output bin file
-			// err = os.WriteFile("./output.bin", encodedBytes, 0644)
-			// if err != nil {
-			// 	t.Fatalf("failed to write binary file: %v", err)
-			// }
-
-			// Read the expected bytes from the binary file
-			expectedBytes, err := os.ReadFile(binPath)
+			json_via_json_source, err := json.MarshalIndent(jsonDecodedStrcut, "", "  ")
 			if err != nil {
-				t.Fatalf("failed to read binary file: %v", err)
+				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
-			assert.Equal(t, expectedBytes, encodedBytes, "encoded bytes do not match expected bytes")
+			fmt.Printf("[JSON Testing] codec->json:\n%s\n", string(json_via_codec_source))
 
-			if false {
-				decoded, _ := Decode(expectedBytes, reflect.TypeOf(tc.expectedType))
-				encodedBytes2 := Encode(decoded)
-				// Compare the encoded bytes with the expected bytes
-				assert.Equal(t, expectedBytes, encodedBytes2, "encoded bytes do not match expected bytes")
-			}
+			// let's E2E work on every direction
 
-			// Compare the encoded JSON with the original JSON
-			assert.JSONEq(t, string(jsonData), string(encodedJSON), "encoded JSON does not match original JSON")
+			// Test 0: codec(codecDecodedStruct) = self
+			assert.Equal(t, expectedCodec, codec_via_codec_source, "codec -> struct -> codec Failure")
+
+			// Test 1: json(jsonDecodedStrcut) = self
+			assert.JSONEq(t, string(expectedJson), string(json_via_codec_source), "json -> struct -> json Failure")
+
+			// Test 2: codec(codecDecodedStruct) = codec(jsonDecodedStrcut)
+			assert.Equal(t, codec_via_json_source, codec_via_codec_source, "json -> struct -> codec Failure")
+
+			// Test 3: JSON(codecDecodedStruct) = JSON(jsonDecodedStrcut)
+			assert.JSONEq(t, string(json_via_codec_source), string(json_via_json_source), "json -> struct -> codec Failure")
+
+			// Test 4: codecDecodedStruct = jsonDecodedStrcut
+			// if reflect.DeepEqual(&codecDecodedStruct, &jsonDecodedStrcut) {
+			// 	fmt.Println("The structs are equal")
+			// } else {
+			// 	t.Fatalf("codecDecodedStruct <> jsonDecodedStrcut mismatch!")
+			// }
 		})
 	}
 }

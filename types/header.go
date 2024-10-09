@@ -206,7 +206,7 @@ func (b *BlockHeader) fromCBlockHeader(cbh *CBlockHeader) {
 	}
 }
 
-func (b *BlockHeader) MarshalJSON() ([]byte, error) {
+func (b BlockHeader) MarshalJSON() ([]byte, error) {
 	cbh, err := b.toCBlockHeader()
 	if err != nil {
 		return nil, err

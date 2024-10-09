@@ -178,7 +178,7 @@ func (b *Block) toCBlock() (*CBlock, error) {
 	return cb, nil
 }
 
-func (b *Block) MarshalJSON() ([]byte, error) {
+func (b Block) MarshalJSON() ([]byte, error) {
 	// Convert Block to CBlock
 	cb, err := b.toCBlock()
 	if err != nil {

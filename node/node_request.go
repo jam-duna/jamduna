@@ -15,7 +15,6 @@ import (
 
 	//"encoding/json"
 
-	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -396,26 +395,14 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 			err = n.processBlock(block)
 			if err == nil {
 				response = ok
+				// _, currPhase := n.statedb.GetSafrole().EpochAndPhase(n.statedb.GetSafrole().Timeslot)
+				// if currPhase == types.EpochLength-1 {
+				// 	n.GenerateTickets(n.statedb.GetSafrole().Timeslot)
+				// 	n.BroadcastTickets(n.statedb.GetSafrole().Timeslot)
+				// }
 			}
 
-			currSlot := n.statedb.GetSafrole().Timeslot
-			_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currSlot)
-			jce := statedb.ComputeCurrentJCETime()
-			if currPhase >= types.EpochLength-1 {
-				nextEpochSlot := n.statedb.GetSafrole().GetNextEpochFirst()
-				nextEpoch, nextPhase := n.statedb.GetSafrole().EpochAndPhase(nextEpochSlot)
-				fmt.Printf(" -- [N%d] Generating Tickets For Next Epoch: %d, Phase: %d\n", n.id, nextEpoch, nextPhase)
-				n.GenerateTickets(jce)
-			}
-			if block.Header.EpochMark != nil {
-				n.GenerateTickets(jce)
-			}
-			
-			n.CheckSelfTicketsIsIncluded(*block, jce)
-			n.BroadcastTickets(jce)
-			n.CleanUpSelfTickets(jce)
 		}
-
 	case "WorkPackage":
 		var workPackage types.WorkPackage
 		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(workPackage))

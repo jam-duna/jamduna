@@ -505,16 +505,19 @@ func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, ta
 	return ticket, nil
 }
 
-func (s *SafroleState) ValidateProposedTicket(t *types.Ticket) (common.Hash, error) {
+func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (common.Hash, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
 		return common.Hash{}, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
 	}
 
 	//step 0: derive ticketVRFInput
-	targetEpochRandomness := s.Entropy[2]
+	entroptIdx := 2
+	targetEpochRandomness := s.Entropy[entroptIdx]
+	isTicketSubmsissionClosed := s.IsTicketSubmsissionClosed(uint32(s.Timeslot))
 
-	if s.IsTicketSubmsissionClosed(uint32(s.Timeslot)) {
-		targetEpochRandomness = s.Entropy[1]
+	if  (isTicketSubmsissionClosed || shifted) {
+		entroptIdx = 1
+		targetEpochRandomness = s.Entropy[entroptIdx]
 		ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 
 		//step 1: verify envelope's VRFSignature using ring verifier
@@ -522,7 +525,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket) (common.Hash, err
 		ringsetBytes := s.GetRingSet("Next")
 		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
-			//fmt.Printf("[N%d] ValidateProposed Ticket Succ %v %d:%v\n", s.Id, t.TicketID(), i, targetEpochRandomness)
+			fmt.Printf("[N%d] ValidateProposed Ticket Succ (SubmsissionClosed - using n%v)  %x:%v\n", s.Id, entroptIdx, ticket_id, targetEpochRandomness)
 			return common.BytesToHash(ticket_id), nil
 		}
 	} else {
@@ -532,13 +535,13 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket) (common.Hash, err
 		ringsetBytes := s.GetRingSet("Next")
 		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
-			//fmt.Printf("[N%d] ValidateProposed Ticket Succ %v %d:%v\n", s.Id, t.TicketID(), i, targetEpochRandomness)
+			fmt.Printf("[N%d] ValidateProposed Ticket Succ (Regular - using n%v) %x:%v\n", s.Id, entroptIdx, ticket_id, targetEpochRandomness)
 			return common.BytesToHash(ticket_id), nil
 		}
 	}
 
 	ticketID, _ := t.TicketID()
-	fmt.Printf("[N%d] ValidateProposed Ticket Fail %v[used entropy %v] 0:%v 1:%v 2:%v 3:%v\n", s.Id, ticketID, targetEpochRandomness, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3])
+	fmt.Printf("[N%d] ValidateProposed Ticket Fail (using n%v) %v:%v\n0:%v\n1:%v\n2:%v\n3:%v\n(isTicketSubmsissionClosed=%v)\n", s.Id, entroptIdx, ticketID, targetEpochRandomness, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3], isTicketSubmsissionClosed)
 	return common.Hash{}, fmt.Errorf(errTicketBadRingProof)
 }
 
@@ -725,17 +728,17 @@ func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub co
 		winning_ticket_id := s.GetPrimaryWinningTicket(slot_index)
 		for _, ticketID := range ticketIDs {
 			if ticketID == winning_ticket_id {
-				fmt.Printf("[AUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", currEpoch, currPhase, slot_index, bandersnatchPub)
+				fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
 				return true
 			}
 		}
-		fmt.Printf("[UNAUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", currEpoch, currPhase, slot_index, bandersnatchPub)
+		fmt.Printf("[N%v] [UNAUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
 	} else {
 
 		//fallback mode
 		fallback_validator := s.GetFallbackValidator(currPhase)
 		if fallback_validator == bandersnatchPub {
-			fmt.Printf("[AUTHORIZED] (%v, %v) slot_index=%v fallback validator=%v\n", currEpoch, currPhase, slot_index, bandersnatchPub)
+			fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v fallback validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
 			return true
 		}
 	}
@@ -895,9 +898,11 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	}
 	// entropy phasing eq 67 & 57
 	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)
+	isShifted := false
 	if currEpoch > prevEpoch {
 		// New Epoch
 		s2.PhasingEntropyAndValidator(s, new_entropy_0)
+		isShifted = true
 	} else {
 		// Epoch in progress
 		s2.StableEntropy(s, new_entropy_0)
@@ -912,7 +917,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 			if e.Attempt >= types.TicketEntriesPerValidator {
 				return s2, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
 			}
-			ticket_id, err := s.ValidateProposedTicket(&e)
+			ticket_id, err := s.ValidateProposedTicket(&e, isShifted)
 			if err != nil {
 				return s2, fmt.Errorf(errTicketBadRingProof)
 			}
@@ -942,12 +947,13 @@ func (s2 *SafroleState) PhasingEntropyAndValidator(s *SafroleState, new_entropy_
 	s2.PrevValidators = s2.CurrValidators
 	s2.CurrValidators = s2.NextValidators
 	s2.NextValidators = s2.DesignedValidators
-	s2.Entropy[0] = new_entropy_0
+	prev_n0 := s2.Entropy[0]
 	s2.Entropy[1] = s.Entropy[0]
 	s2.Entropy[2] = s.Entropy[1]
 	s2.Entropy[3] = s.Entropy[2]
+	s2.Entropy[0] = new_entropy_0
 	s2.NextEpochTicketsAccumulator = s2.NextEpochTicketsAccumulator[0:0]
-	fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY shifted new epoch 0:%v 1:%v 2:%v 3:%v\n", s2.Id, s2.Entropy[0], s2.Entropy[1], s2.Entropy[2], s2.Entropy[3])
+	fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY shifted new epoch\n0:%v\n1:%v\n2:%v\n3:%v\n0(original):%v\n", s2.Id, s2.Entropy[0], s2.Entropy[1], s2.Entropy[2], s2.Entropy[3], prev_n0)
 }
 
 func (s2 *SafroleState) StableEntropy(s *SafroleState, new_entropy_0 common.Hash) {
@@ -1216,7 +1222,7 @@ func (E *Extrinsic) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (E *Extrinsic) MarshalJSON() ([]byte, error) {
+func (E Extrinsic) MarshalJSON() ([]byte, error) {
 	sig := common.HexString(E.Signature[:])
 	return json.Marshal(struct {
 		Attempt   uint8  `json:"attempt"`

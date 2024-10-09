@@ -70,7 +70,7 @@ func Hex2Hash(s string) Hash {
 }
 
 // MarshalJSON custom marshaler to convert Hash to hex string.
-func (h *Hash) MarshalJSON() ([]byte, error) {
+func (h Hash) MarshalJSON() ([]byte, error) {
 	return json.Marshal(h.Hex())
 }
 

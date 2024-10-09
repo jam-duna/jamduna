@@ -155,7 +155,7 @@ func (a *Assurance) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *Assurance) MarshalJSON() ([]byte, error) {
+func (a Assurance) MarshalJSON() ([]byte, error) {
 	// Convert Bitfield from []byte to hex string
 	bitfield := common.HexString(a.Bitfield[:])
 	// Convert Signature from Ed25519Signature to hex string

@@ -51,13 +51,14 @@ func (n *Node) GenerateTickets(currJCE uint32) {
 	n.ticketsMutex.Lock()
 	defer n.ticketsMutex.Unlock()
 	sf := n.statedb.GetSafrole()
-	_, _ = sf.EpochAndPhase(n.statedb.GetSafrole().Timeslot)
+	actualEpoch, _ := sf.EpochAndPhase(n.statedb.GetSafrole().Timeslot)
 	currEpoch, _ := sf.EpochAndPhase(currJCE)
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
 	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(currJCE) {
 		fmt.Printf("Using Entropy 1 for Node %v to generate tickets\n", n.id)
 		copy(usedEntropy[:], n.statedb.GetSafrole().Entropy[1][:])
 	}
+	fmt.Printf("GenerateTickets currEpoch=%v | actualEpoch=%v selected Entropy=%v\n", currEpoch, actualEpoch, usedEntropy)
 	if len(n.selfTickets[usedEntropy]) == types.TicketEntriesPerValidator {
 		fmt.Printf("Node %v has generated %v tickets in epoch %v\n", n.id, types.TicketEntriesPerValidator, currEpoch)
 		return

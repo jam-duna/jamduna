@@ -102,7 +102,7 @@ func (a *Authorizer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *WorkPackage) MarshalJSON() ([]byte, error) {
+func (a WorkPackage) MarshalJSON() ([]byte, error) {
 	// Convert Authorization from []byte to hex string
 	authorization := common.HexString(a.Authorization)
 
@@ -121,7 +121,7 @@ func (a *WorkPackage) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func (a *Authorizer) MarshalJSON() ([]byte, error) {
+func (a Authorizer) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		CodeHash common.Hash `json:"code_hash"`
 		Params   string      `json:"params"`
