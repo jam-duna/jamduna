@@ -170,7 +170,7 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metad
 	}
 	bls_pub, bls_priv, err := bls.InitBLSKey(bls_seed)
 	if err != nil {
-		return validatorSecret, fmt.Errorf("Failed to init BanderSnatch Key")
+		return validatorSecret, fmt.Errorf("Failed to init BLS Key")
 	}
 
 	copy(validatorSecret.Ed25519Secret[:], ed25519_priv[:])
