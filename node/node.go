@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"io/ioutil"
 	"os"
 
 	"encoding/json"
@@ -145,7 +144,10 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	n.credential = credential
 	if false {
-		jsonData := types.Encode(credential)
+		jsonData, err := types.Encode(credential)
+		if err != nil {
+			fmt.Printf("setValidatorCredential: %v\n", err)
+		}
 		fmt.Printf("[N%v] credential %s\n", n.id, jsonData)
 	}
 }
@@ -543,9 +545,9 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 		//this need to be consistent with the receiving side
 		//blk, err := types.BlockFromBytes(resp)
 		var blk *types.Block
-		decoded, _ := types.Decode(resp, reflect.TypeOf(blk))
+		decoded, _, err := types.Decode(resp, reflect.TypeOf(blk))
 		if err != nil {
-			fmt.Printf("fetchBlock %v\n", err)
+			fmt.Printf("failed to decode block %v\n", err)
 		}
 		blk, ok := decoded.(*types.Block)
 		if !ok {
@@ -843,16 +845,19 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 		switch v := obj.(type) {
 		default:
 			jsonEncode, _ := json.MarshalIndent(v, "", "    ")
-			codecEncode := types.Encode(v)
+			codecEncode, err := types.Encode(v)
+			if err != nil {
+				return fmt.Errorf("Error encoding object: %v\n", err)
+			}
 
 			//fmt.Printf("jsonEncode=%s \n", string(jsonEncode))
 			//fmt.Printf("codecEncode=%x \n", codecEncode)
 
-			err := ioutil.WriteFile(jsonPath, jsonEncode, 0644)
+			err = os.WriteFile(jsonPath, jsonEncode, 0644)
 			if err != nil {
 				return fmt.Errorf("Error writing json file: %v\n", err)
 			}
-			err = ioutil.WriteFile(codecPath, codecEncode, 0644)
+			err = os.WriteFile(codecPath, codecEncode, 0644)
 			if err != nil {
 				return fmt.Errorf("Error writing codec file: %v\n", err)
 			}
@@ -941,15 +946,27 @@ func (n *Node) processOutgoingMessage(msg statedb.Message) {
 	switch msgType {
 	case "Ticket":
 		var ticket types.Ticket
-		payloadBytes := types.Encode(msg.Payload)
-		decoded, _ := types.Decode(payloadBytes, reflect.TypeOf(ticket))
+		payloadBytes, err := types.Encode(msg.Payload)
+		if err != nil {
+			fmt.Printf("[N%v] Error encoding payload: %v\n", n.id, err)
+		}
+		decoded, _, err := types.Decode(payloadBytes, reflect.TypeOf(ticket))
+		if err != nil {
+			fmt.Printf("[N%v] Error decoding payload: %v\n", n.id, err)
+		}
 		ticket = decoded.(types.Ticket)
 		//fmt.Printf("[N%v] Outgoing Ticket: %+v\n", n.id, ticket.TicketID())
 		n.broadcast(ticket)
 	case "Block":
 		var blk types.Block
-		payloadBytes := types.Encode(msg.Payload)
-		decoded, _ := types.Decode(payloadBytes, reflect.TypeOf(blk))
+		payloadBytes, err := types.Encode(msg.Payload)
+		if err != nil {
+			fmt.Printf("[N%v] Error encoding payload: %v\n", n.id, err)
+		}
+		decoded, _, err := types.Decode(payloadBytes, reflect.TypeOf(blk))
+		if err != nil {
+			fmt.Printf("[N%v] Error decoding payload: %v\n", n.id, err)
+		}
 		blk = decoded.(types.Block)
 		//fmt.Printf("[N%v] Outgoing Block: %+v\n", n.id, blk.Hash())
 		n.broadcast(blk)

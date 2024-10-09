@@ -52,7 +52,10 @@ func (a *WorkPackage) String() string {
 
 // Bytes returns the bytes of the Assurance
 func (a *WorkPackage) Bytes() []byte {
-	encode := Encode(a)
+	encode, err := Encode(a)
+	if err != nil {
+		return nil
+	}
 	return encode
 }
 

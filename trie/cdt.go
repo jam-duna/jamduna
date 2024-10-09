@@ -290,7 +290,7 @@ func generatePageProof(segments [][]byte) ([][]byte, error) {
 
 		// Encode the trace path and the segments
 		combinedData := append(tracePath, segments[start:end]...)
-		encoded := types.Encode(combinedData)
+		encoded, err := types.Encode(combinedData)
 
 		if err != nil {
 			return results, err

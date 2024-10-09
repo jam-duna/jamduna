@@ -84,7 +84,10 @@ func (b *Block) EpochMark() *EpochMark {
 
 func BlockFromBytes(data []byte) (*Block, error) {
 	var b Block
-	decoded, _ := Decode(data, reflect.TypeOf(Block{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Block{}))
+	if err != nil {
+		return nil, err
+	}
 	b = decoded.(Block)
 	return &b, nil
 }
@@ -95,7 +98,10 @@ func (b *Block) Bytes() []byte {
 	if err != nil {
 		return nil
 	}
-	enc := Encode(cb)
+	enc, err := Encode(cb)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 

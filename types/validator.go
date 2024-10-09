@@ -34,13 +34,19 @@ func (v Validator) GetBandersnatchKey() BandersnatchKey {
 }
 
 func (v Validator) Bytes() []byte {
-	bytes := Encode(v)
+	bytes, err := Encode(v)
+	if err != nil {
+		return nil
+	}
 	return bytes
 }
 
 func ValidatorFromBytes(data []byte) (Validator, error) {
 	var v Validator
-	decoded, _ := Decode(data, reflect.TypeOf(v))
+	decoded, _, err := Decode(data, reflect.TypeOf(v))
+	if err != nil {
+		return v, err
+	}
 	v = decoded.(Validator)
 	return v, nil
 }

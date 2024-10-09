@@ -806,7 +806,10 @@ func (s *StateDB) getServiceCoreCode(c uint32) (code []byte, err error) {
 }
 
 func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult) []byte {
-	output := types.Encode(results)
+	output, err := types.Encode(results)
+	if err != nil {
+		return []byte{}
+	}
 	return output
 }
 

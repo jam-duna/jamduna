@@ -57,7 +57,11 @@ func (wr *WorkResult) Wrangle(authorizationOutput []byte, workPackageHash common
 func (R Result) Encode() []byte {
 	if R.Err == RESULT_OK {
 		ok_byte := R.Ok
-		return append([]byte{0}, Encode(ok_byte)...)
+		encodedOk, err := Encode(ok_byte)
+		if err != nil {
+			return nil
+		}
+		return append([]byte{0}, encodedOk...)
 	} else {
 		switch R.Err {
 		case RESULT_OOG:
@@ -77,7 +81,10 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 	length := uint32(1)
 	switch data[0] {
 	case 0:
-		ok_byte, l := Decode(data[length:], reflect.TypeOf([]byte{}))
+		ok_byte, l, err := Decode(data[length:], reflect.TypeOf([]byte{}))
+		if err != nil {
+			return nil, length
+		}
 		return Result{
 			Ok:  ok_byte.([]byte),
 			Err: RESULT_OK,

@@ -14,7 +14,10 @@ type TransferMemo struct {
 func TransferMemoFromBytes(data []byte) (*TransferMemo, error) {
 	var t TransferMemo
 	// Deserialize the JSON bytes into a ServiceAccount struct
-	decoded, _ := Decode(data, reflect.TypeOf(TransferMemo{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(TransferMemo{}))
+	if err != nil {
+		return nil, err
+	}
 	t = decoded.(TransferMemo)
 	return &t, nil
 }

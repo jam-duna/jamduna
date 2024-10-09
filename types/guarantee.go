@@ -93,7 +93,10 @@ func (g *GuaranteeReport) DeepCopy() (GuaranteeReport, error) {
 }
 
 func (g *GuaranteeReport) Bytes() []byte {
-	enc := Encode(g)
+	enc, err := Encode(g)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
@@ -110,10 +113,16 @@ func (g Guarantee) DeepCopy() (Guarantee, error) {
 	var copiedGuarantee Guarantee
 
 	// Serialize the original Guarantee to JSON
-	data := Encode(g)
+	data, err := Encode(g)
+	if err != nil {
+		return copiedGuarantee, err
+	}
 
 	// Deserialize the JSON back into a new Guarantee instance
-	decoded, _ := Decode(data, reflect.TypeOf(Guarantee{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Guarantee{}))
+	if err != nil {
+		return copiedGuarantee, err
+	}
 	copiedGuarantee = decoded.(Guarantee)
 
 	return copiedGuarantee, nil
@@ -121,7 +130,10 @@ func (g Guarantee) DeepCopy() (Guarantee, error) {
 
 // Bytes returns the bytes of the Guarantee.
 func (g *Guarantee) Bytes() []byte {
-	enc := Encode(g)
+	enc, err := Encode(g)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 

@@ -122,30 +122,30 @@ func CheckCustomDecode(data []byte, t reflect.Type) (bool, interface{}, uint32) 
 	return false, nil, 0
 }
 
-func Encode(data interface{}) []byte {
+func Encode(data interface{}) ([]byte, error) {
 	v := reflect.ValueOf(data)
 	CheckCustomEncode(data)
 	customEncodeRequired, customEncoded := CheckCustomEncode(data)
 	if customEncodeRequired {
-		return customEncoded
+		return customEncoded, nil
 	}
 
 	switch v.Kind() {
 	case reflect.Bool:
 		if v.Bool() {
-			return []byte{1}
+			return []byte{1}, nil
 		}
-		return []byte{0}
+		return []byte{0}, nil
 	case reflect.Uint:
-		return E(v.Uint())
+		return E(v.Uint()), nil
 	case reflect.Uint8:
-		return E_l(uint64(v.Uint()), 1)
+		return E_l(uint64(v.Uint()), 1), nil
 	case reflect.Uint16:
-		return E_l(uint64(v.Uint()), 2)
+		return E_l(uint64(v.Uint()), 2), nil
 	case reflect.Uint32:
-		return E_l(uint64(v.Uint()), 4)
+		return E_l(uint64(v.Uint()), 4), nil
 	case reflect.Uint64:
-		return E_l(uint64(v.Uint()), 8)
+		return E_l(uint64(v.Uint()), 8), nil
 	case reflect.String:
 		uint64Slice := make([]uint64, 0)
 		for _, c := range v.String() {
@@ -155,7 +155,7 @@ func Encode(data interface{}) []byte {
 		for i := 0; i < len(uint64Slice); i++ {
 			encoded = append(encoded, E(uint64Slice[i])...)
 		}
-		return encoded
+		return encoded, nil
 
 	// GP v0.3.6 eq(273) Sequence Encoding
 	case reflect.Array:
@@ -165,10 +165,14 @@ func Encode(data interface{}) []byte {
 			if v.Index(i).Kind() == reflect.Uint8 {
 				encoded = append(encoded, []byte{byte(v.Index(i).Uint())}...)
 			} else {
-				encoded = append(encoded, Encode(v.Index(i).Interface())...)
+				encodedVi, err := Encode(v.Index(i).Interface())
+				if err != nil {
+					return nil, err
+				}
+				encoded = append(encoded, encodedVi...)
 			}
 		}
-		return encoded
+		return encoded, nil
 
 	case reflect.Slice:
 		// GP v0.3.6 eq(274) Length Discriminator Encoding
@@ -177,35 +181,43 @@ func Encode(data interface{}) []byte {
 			if v.Index(i).Kind() == reflect.Uint8 {
 				encoded = append(encoded, []byte{byte(v.Index(i).Uint())}...)
 			} else {
-				encoded = append(encoded, Encode(v.Index(i).Interface())...)
+				encodedVi, err := Encode(v.Index(i).Interface())
+				if err != nil {
+					return nil, err
+				}
+				encoded = append(encoded, encodedVi...)
 			}
 		}
-		return encoded
+		return encoded, nil
 
 		// GP v0.3.6 eq(269) Concatenation Rule
 	case reflect.Struct:
 		var encoded []byte
 		for i := 0; i < v.NumField(); i++ {
-			encoded = append(encoded, Encode(v.Field(i).Interface())...)
+			encodedVi, err := Encode(v.Field(i).Interface())
+			if err != nil {
+				return nil, err
+			}
+			encoded = append(encoded, encodedVi...)
 		}
-		return encoded
+		return encoded, nil
 
 		// GP v0.3.6 eq(270) Tuples Rule
 	case reflect.Ptr:
 		if v.IsNil() {
-			return []byte{0}
+			return []byte{0}, nil
 		}
 		return Encode(v.Elem().Interface())
 	}
-	return []byte{}
+	return []byte{}, nil
 }
 
-func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
+func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 	length := uint32(0)
 	v := reflect.New(t).Elem()
 	customDecodeRequired, decoded, customLength := CheckCustomDecode(data, t)
 	if customDecodeRequired {
-		return decoded, customLength
+		return decoded, customLength, nil
 	}
 
 	switch v.Kind() {
@@ -252,7 +264,10 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 				v.Index(i).Set(reflect.ValueOf(data[length]))
 				length++
 			} else {
-				elem, l := Decode(data[length:], v.Index(i).Type())
+				elem, l, err := Decode(data[length:], v.Index(i).Type())
+				if err != nil {
+					return nil, 0, err
+				}
 				v.Index(i).Set(reflect.ValueOf(elem))
 				length += l
 			}
@@ -269,7 +284,10 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 				v.Index(i).Set(reflect.ValueOf(data[length]))
 				length++
 			} else {
-				elem, l := Decode(data[length:], v.Index(i).Type())
+				elem, l, err := Decode(data[length:], v.Index(i).Type())
+				if err != nil {
+					return nil, 0, err
+				}
 				v.Index(i).Set(reflect.ValueOf(elem))
 				length += l
 			}
@@ -278,7 +296,10 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 	// GP v0.3.6 eq(269) Concatenation Rule
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
-			elem, l := Decode(data[length:], v.Field(i).Type())
+			elem, l, err := Decode(data[length:], v.Field(i).Type())
+			if err != nil {
+				return nil, 0, err
+			}
 			if elem != nil {
 				v.Field(i).Set(reflect.ValueOf(elem))
 			}
@@ -293,11 +314,14 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32) {
 		} else {
 			ptrType := t.Elem()
 			ptr := reflect.New(ptrType)
-			elem, l := Decode(data[length:], ptrType)
+			elem, l, err := Decode(data[length:], ptrType)
+			if err != nil {
+				return nil, 0, err
+			}
 			ptr.Elem().Set(reflect.ValueOf(elem))
 			v.Set(ptr)
 			length += l
 		}
 	}
-	return v.Interface(), length
+	return v.Interface(), length, nil
 }

@@ -34,19 +34,31 @@ func (n *Node) IsSelfRequesting(peerIdentifier string) bool {
 }
 
 func EncodeAsQuicMessage(obj interface{}, idx uint32) []byte {
-	payload := types.Encode(obj)
+	payload, err := types.Encode(obj)
+	if err != nil {
+		fmt.Printf("EncodeAsQuicMessage: %v\n", err)
+		return nil
+	}
 	msgType := getMessageType(obj)
 	quicMessage := QuicMessage{
 		Id:      idx,
 		MsgType: msgType,
 		Payload: payload,
 	}
-	messageData := types.Encode(quicMessage)
+	messageData, err := types.Encode(quicMessage)
+	if err != nil {
+		fmt.Printf("EncodeAsQuicMessage: %v\n", err)
+		return nil
+	}
 	return messageData
 }
 
 func DecodeAsQuicMessage(messageData []byte) (msg QuicMessage) {
-	decoded, _ := types.Decode(messageData, reflect.TypeOf(msg))
+	decoded, _, err := types.Decode(messageData, reflect.TypeOf(msg))
+	if err != nil {
+		fmt.Printf("DecodeAsQuicMessage: %v\n", err)
+		return QuicMessage{}
+	}
 	msg = decoded.(QuicMessage)
 	return msg
 }
@@ -270,19 +282,24 @@ func (n *Node) makeRequests(peerIdentifier string, objs []interface{}, minSucces
 func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) {
 	ok := []byte("0")
 	response = []byte("1")
-	var err error
 	switch msg.MsgType {
 	case "BlockQuery":
 		var query types.BlockQuery
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+		if err != nil {
+			fmt.Printf("BlockQuery Decode Error: %v\n", err)
+		}
 		query = decoded.(types.BlockQuery)
 		blk, found := n.blocks[query.BlockHash]
 		fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id, query.BlockHash, found)
 		if found {
-			serializedR := types.Encode(blk)
+			serializedR, err := types.Encode(blk)
+			if err != nil {
+				fmt.Printf("BlockQuery Encode Error: %v\n", err)
+			}
 			//serializedR := types.Encode(blk)
 			if err == nil {
-				fmt.Printf("[N%d] Responded to BlockQuery %v with: %s\n", n.id, query.BlockHash, serializedR)
+				fmt.Printf("[N%d] Responded to BlockQuery %v with: %v\n", n.id, query.BlockHash, serializedR)
 				response = serializedR
 			}
 		}
@@ -312,7 +329,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 	// 	}
 	case "Ticket":
 		var ticket types.Ticket
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(ticket))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(ticket))
+		if err != nil {
+			fmt.Printf("Ticket Decode Error: %v\n", err)
+		}
 		ticket = decoded.(types.Ticket)
 		err = n.processTicket(ticket)
 		if err == nil {
@@ -321,7 +341,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		fmt.Printf(" -- [N%d] received ticket From N%d\n", n.id, msg.Id)
 	case "AvailabilityJustification":
 		var aj *types.AvailabilityJustification
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(aj))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(aj))
+		if err != nil {
+			fmt.Printf("AvailabilityJustification Decode Error: %v\n", err)
+		}
 		aj = decoded.(*types.AvailabilityJustification)
 		if err == nil {
 			err = n.processAvailabilityJustification(aj)
@@ -331,7 +354,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		}
 	case "Guarantee":
 		var guarantee types.Guarantee
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(guarantee))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(guarantee))
+		if err != nil {
+			fmt.Printf("Guarantee Decode Error: %v\n", err)
+		}
 		guarantee = decoded.(types.Guarantee)
 		if err == nil {
 			err = n.processGuarantee(guarantee)
@@ -342,7 +368,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		fmt.Printf(" -- [N%d] received guarantee From N%d\n", n.id, msg.Id)
 	case "Assurance":
 		var assurance types.Assurance
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(assurance))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(assurance))
+		if err != nil {
+			fmt.Printf("Assurance Decode Error: %v\n", err)
+		}
 		assurance = decoded.(types.Assurance)
 		if err == nil {
 			err = n.processAssurance(assurance)
@@ -353,7 +382,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		fmt.Printf(" -- [N%d] received assurance From N%d\n", n.id, msg.Id)
 	case "Judgement":
 		var judgement types.Judgement
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(judgement))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(judgement))
+		if err != nil {
+			fmt.Printf("Judgement Decode Error: %v\n", err)
+		}
 		judgement = decoded.(types.Judgement)
 		if err == nil {
 			err = n.processJudgement(judgement)
@@ -368,7 +400,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		}
 	case "Announcement":
 		var announcement types.Announcement
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(announcement))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(announcement))
+		if err != nil {
+			fmt.Printf("Announcement Decode Error: %v\n", err)
+		}
 		announcement = decoded.(types.Announcement)
 		err = n.processAnnouncement(announcement)
 		if err == nil {
@@ -378,7 +413,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		fmt.Printf(" -- [N%d] received announcement From N%d (%v <- %v)\n", n.id, msg.Id, announcement.WorkReport.GetWorkPackageHash(), announcement.WorkReport.GetWorkPackageHash())
 	case "Preimages":
 		var preimages types.Preimages
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(preimages))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(preimages))
+		if err != nil {
+			fmt.Printf("Preimages Decode Error: %v\n", err)
+		}
 		preimages = decoded.(types.Preimages)
 		if err == nil {
 			// err = n.processPreimageLookup(preimageLookup)
@@ -400,7 +438,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		}
 	case "WorkPackage":
 		var workPackage types.WorkPackage
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(workPackage))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(workPackage))
+		if err != nil {
+			fmt.Printf("WorkPackage Decode Error: %v\n", err)
+		}
 		workPackage = decoded.(types.WorkPackage)
 		var work types.GuaranteeReport
 		var wg sync.WaitGroup
@@ -427,7 +468,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		fmt.Printf(" -- [N%d] received WorkPackage From N%d\n", n.id, msg.Id)
 	case "GuaranteeReport":
 		var guaranteeReport types.GuaranteeReport
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(guaranteeReport))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(guaranteeReport))
+		if err != nil {
+			fmt.Printf("GuaranteeReport Decode Error: %v\n", err)
+		}
 		guaranteeReport = decoded.(types.GuaranteeReport)
 		err = n.processGuaranteeReport(guaranteeReport)
 		if err == nil {
@@ -439,7 +483,10 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 
 	case "DistributeECChunk":
 		var chunk types.DistributeECChunk
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(chunk))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(chunk))
+		if err != nil {
+			fmt.Printf("DistributeECChunk Decode Error: %v\n", err)
+		}
 		chunk = decoded.(types.DistributeECChunk)
 		err = n.processDistributeECChunk(chunk)
 		if err == nil {
@@ -459,11 +506,17 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 
 	case "ECChunkQuery":
 		var query types.ECChunkQuery
-		decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
+		if err != nil {
+			fmt.Printf("ECChunkQuery Decode Error: %v\n", err)
+		}
 		query = decoded.(types.ECChunkQuery)
 		r, err := n.processECChunkQuery(query)
 		if err == nil {
-			serializedR := types.Encode(r)
+			serializedR, err := types.Encode(r)
+			if err != nil {
+				fmt.Printf("ECChunkQuery Encode Error: %v\n", err)
+			}
 			response = serializedR
 		} else {
 			response = []byte{}

@@ -18,7 +18,10 @@ type Announcement struct {
 }
 
 func (a *Announcement) Bytes() []byte {
-	enc := Encode(a)
+	enc, err := Encode(a)
+	if err != nil {
+		return nil
+	}
 
 	return enc
 }
@@ -97,10 +100,16 @@ func (W *AnnounceBucket) DeepCopy() (AnnounceBucket, error) {
 	var copiedAnnounceBucket AnnounceBucket
 
 	// Serialize the original AnnounceBucket to JSON
-	data := Encode(W)
+	data, err := Encode(W)
+	if err != nil {
+		return copiedAnnounceBucket, err
+	}
 
 	// Deserialize the JSON back into a new AnnounceBucket instance
-	decoded, _ := Decode(data, reflect.TypeOf(AnnounceBucket{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(AnnounceBucket{}))
+	if err != nil {
+		return copiedAnnounceBucket, err
+	}
 	copiedAnnounceBucket = decoded.(AnnounceBucket)
 
 	return copiedAnnounceBucket, nil

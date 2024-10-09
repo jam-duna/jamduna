@@ -21,7 +21,11 @@ func (T *TicketsMark) Encode() []byte {
 	v := reflect.ValueOf(*T)
 	encoded := []byte{1}
 	for i := 0; i < v.Len(); i++ {
-		encoded = append(encoded, Encode(v.Index(i).Interface())...)
+		encodedV, err := Encode(v.Index(i).Interface())
+		if err != nil {
+			return []byte{}
+		}
+		encoded = append(encoded, encodedV...)
 	}
 	return encoded
 }
@@ -33,7 +37,10 @@ func (target *TicketsMark) Decode(data []byte) (interface{}, uint32) {
 	var decoded TicketsMark
 	length := uint32(1)
 	for i := 0; i < EpochLength; i++ {
-		elem, l := Decode(data[length:], reflect.TypeOf(TicketBody{}))
+		elem, l, err := Decode(data[length:], reflect.TypeOf(TicketBody{}))
+		if err != nil {
+			return nil, length
+		}
 		decoded[i] = elem.(TicketBody)
 		length += l
 	}

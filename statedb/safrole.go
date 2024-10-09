@@ -525,7 +525,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 		ringsetBytes := s.GetRingSet("Next")
 		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
-			fmt.Printf("[N%d] ValidateProposed Ticket Succ (SubmsissionClosed - using η%v:%v) TicketID=%x\n", s.Id, entroptIdx,targetEpochRandomness, ticket_id)
+			fmt.Printf("[N%d] ValidateProposed Ticket Succ (SubmsissionClosed - using η%v:%v) TicketID=%x\n", s.Id, entroptIdx, targetEpochRandomness, ticket_id)
 			return common.BytesToHash(ticket_id), nil
 		}
 	} else {
@@ -547,16 +547,23 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 
 func (s *StateDB) RemoveUnusedTickets() {
 	//Remove the tickets when the ticket submission is closed
-	// remove the tickets entropy[2] in queue
+	//remove the tickets entropy[2] in queue
+	s.ticketMutex.Lock()
+	defer s.ticketMutex.Unlock()
 	sf := s.GetSafrole()
 	if sf.IsTicketSubmsissionClosed(uint32(s.GetSafrole().Timeslot)) {
 		for _, t := range s.queuedTickets {
-			TicketID, err := sf.ValidateProposedTicket(&t, false)
-			if err != nil {
+			targetEpochRandomness := sf.Entropy[2]
+			ticketVRFInput := sf.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
+			//step 1: verify envelope's VRFSignature using ring verifier
+			//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
+			ringsetBytes := sf.GetRingSet("Next")
+			ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
+			ticket_id_hash := common.BytesToHash(ticket_id)
+			if err == nil {
 				// delete the ticket
-				delete(s.queuedTickets, TicketID)
+				delete(s.queuedTickets, ticket_id_hash)
 			}
-
 		}
 	}
 }
@@ -683,14 +690,21 @@ func (s *SafroleState) GetAuthorIndex(authorkey common.Hash, phase string) (uint
 // computeAuthorityIndex computes the authority index for claiming an orphan slot
 func (s *SafroleState) computeFallbackAuthorityIndex(targetRandomness common.Hash, relativeSlotIndex uint32, validatorsLen int) (uint32, error) {
 	// Concatenate target_randomness and relative_slot_index
-	hashInput := append(targetRandomness.Bytes(), types.Encode(relativeSlotIndex)...)
+	encodedRelativeSlotIndex, err := types.Encode(relativeSlotIndex)
+	if err != nil {
+		return 0, err
+	}
+	hashInput := append(targetRandomness.Bytes(), encodedRelativeSlotIndex...)
 
 	// Compute BLAKE2 hash
 	hash := common.ComputeHash(hashInput)
 
 	// Extract the first 4 bytes of the hash to compute the index
 	indexBytes := hash[:4]
-	index, _ := types.Decode(indexBytes, reflect.TypeOf(uint32(0))) //Check, shawn use the codec here
+	index, _, err := types.Decode(indexBytes, reflect.TypeOf(uint32(0))) //Check, shawn use the codec here
+	if err != nil {
+		return 0, err
+	}
 	//fmt.Printf("targetRandomness=%x, relativeSlotIndex=%v, indexBytes=%x, priv_index=%v. (authLen=%v)", targetRandomness, relativeSlotIndex, indexBytes, index, len(s.Authorities))
 	// transform the index to uint32
 	indexUint32, ok := index.(uint32)

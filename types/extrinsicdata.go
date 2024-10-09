@@ -18,7 +18,10 @@ func NewExtrinsic() ExtrinsicData {
 }
 
 func (e *ExtrinsicData) Bytes() []byte {
-	enc := Encode(e)
+	enc, err := Encode(e)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 

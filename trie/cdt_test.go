@@ -195,7 +195,10 @@ func testPageProof(t *testing.T, numSegments int) {
 		// Print the Merkle Root of each page
 		for i, proof := range pagedProofs {
 			// Decode the proof back to segments and verify
-			decodedData, _ := types.Decode(proof, reflect.TypeOf([][]uint8{}))
+			decodedData, _, err := types.Decode(proof, reflect.TypeOf([][]uint8{}))
+			if err != nil {
+				t.Fatalf("Failed to decode page proof: %v", err)
+			}
 			decodedSegments := decodedData.([][]byte)
 			t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
 			// Compare decoded segments with original

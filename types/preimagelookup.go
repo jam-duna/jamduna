@@ -104,10 +104,16 @@ func (p Preimages) DeepCopy() (Preimages, error) {
 	var copiedPreimageLookup Preimages
 
 	// Serialize the original PreimageLookup to JSON
-	data := Encode(p)
+	data, err := Encode(p)
+	if err != nil {
+		return copiedPreimageLookup, err
+	}
 
 	// Deserialize the JSON back into a new PreimageLookup instance
-	decoded, _ := Decode(data, reflect.TypeOf(Preimages{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Preimages{}))
+	if err != nil {
+		return copiedPreimageLookup, err
+	}
 	copiedPreimageLookup = decoded.(Preimages)
 
 	return copiedPreimageLookup, nil
@@ -115,7 +121,10 @@ func (p Preimages) DeepCopy() (Preimages, error) {
 
 // Bytes returns the bytes of the PreimageLookup.
 func (p *Preimages) Bytes() []byte {
-	enc := Encode(p)
+	enc, err := Encode(p)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 

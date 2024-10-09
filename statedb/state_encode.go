@@ -13,7 +13,11 @@ func (n *JamState) GetAuthPoolBytes() []byte {
 		fmt.Println("AuthorizationsPool is empty")
 		return []byte{}
 	}
-	codec_bytes := types.Encode(n.AuthorizationsPool)
+	codec_bytes, err := types.Encode(n.AuthorizationsPool)
+	if err != nil {
+		fmt.Println("Error encoding AuthorizationsPool")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -27,7 +31,11 @@ func (T AuthorizationQueue) Encode() []byte {
 	for i := 0; i < len(T); i++ {
 		copy(authorizations_queue[i][:], T[i])
 	}
-	encoded := types.Encode(authorizations_queue)
+	encoded, err := types.Encode(authorizations_queue)
+	if err != nil {
+		fmt.Println("Error encoding AuthorizationQueue")
+		return []byte{}
+	}
 	return encoded
 }
 
@@ -36,7 +44,11 @@ func (n *JamState) GetAuthQueueBytes() []byte {
 		fmt.Println("AuthorizationQueue is empty")
 		return []byte{}
 	}
-	codec_bytes := types.Encode(n.AuthorizationQueue)
+	codec_bytes, err := types.Encode(n.AuthorizationQueue)
+	if err != nil {
+		fmt.Println("Error encoding AuthorizationQueue")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -45,13 +57,22 @@ func (T Peaks) Encode() []byte {
 	if len(T) == 0 {
 		return []byte{0}
 	}
-	encoded := types.Encode(uint(len(T)))
+	encoded, err := types.Encode(uint(len(T)))
+	if err != nil {
+		fmt.Println("Error encoding Peaks")
+		return []byte{}
+	}
 	for i := 0; i < len(T); i++ {
 		if T[i] == nil {
 			encoded = append(encoded, []byte{0}...)
 		} else {
 			encoded = append(encoded, []byte{1}...)
-			encoded = append(encoded, types.Encode(T[i])...)
+			encodedTi, err := types.Encode(T[i])
+			if err != nil {
+				fmt.Println("Error encoding Peaks")
+				return []byte{}
+			}
+			encoded = append(encoded, encodedTi...)
 		}
 	}
 	return encoded
@@ -67,7 +88,11 @@ func (T Peaks) Encode() []byte {
 // }
 
 func (n *JamState) GetRecentBlocksBytes() []byte {
-	codec_bytes := types.Encode(n.BeefyPool)
+	codec_bytes, err := types.Encode(n.BeefyPool)
+	if err != nil {
+		fmt.Println("Error encoding BeefyPool")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -111,18 +136,32 @@ func (T CTicketsOrKeys) Encode() []byte {
 	encoded := []byte{}
 	if T.Tickets != nil && T.Keys == nil {
 		encoded = append(encoded, byte(0))
-		encoded = append(encoded, types.Encode(T.Tickets)...)
+		encodedTickets, err := types.Encode(T.Tickets)
+		if err != nil {
+			fmt.Println("Error encoding Tickets")
+			return []byte{}
+		}
+		encoded = append(encoded, encodedTickets...)
 	}
 	if T.Keys != nil && T.Tickets == nil {
 		encoded = append(encoded, byte(1))
-		encoded = append(encoded, types.Encode(T.Keys)...)
+		encodedKeys, err := types.Encode(T.Keys)
+		if err != nil {
+			fmt.Println("Error encoding Keys")
+			return []byte{}
+		}
+		encoded = append(encoded, encodedKeys...)
 	}
 	return encoded
 }
 
 func (T TicketsOrKeys) Encode() []byte {
 	CT := T.T2CT()
-	encoded := types.Encode(CT)
+	encoded, err := types.Encode(CT)
+	if err != nil {
+		fmt.Println("Error encoding CTicketsOrKeys")
+		return []byte{}
+	}
 	return encoded
 }
 
@@ -168,7 +207,11 @@ func (T TicketsOrKeys) Encode() []byte {
 // }
 
 func (s SafroleBasicState) GetSafroleStateBytes() []byte {
-	codec_bytes := types.Encode(s)
+	codec_bytes, err := types.Encode(s)
+	if err != nil {
+		fmt.Println("Error encoding SafroleBasicState")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -198,12 +241,20 @@ func (P Psi_state) Encode() []byte {
 		Psi_w: psi_w,
 		Psi_o: P.Psi_o,
 	}
-	encoded := types.Encode(s)
+	encoded, err := types.Encode(s)
+	if err != nil {
+		fmt.Println("Error encoding Psi_state")
+		return []byte{}
+	}
 	return encoded
 }
 
 func (j *JamState) GetPsiBytes() []byte {
-	codec_bytes := types.Encode(j.DisputesState)
+	codec_bytes, err := types.Encode(j.DisputesState)
+	if err != nil {
+		fmt.Println("Error encoding DisputesState")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -224,7 +275,11 @@ func (s *SafroleState) GetEntropyBytes() []byte {
 		fmt.Println("Entropy is empty")
 		return []byte{}
 	}
-	codec_bytes := types.Encode(s.Entropy)
+	codec_bytes, err := types.Encode(s.Entropy)
+	if err != nil {
+		fmt.Println("Error encoding Entropy")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -236,7 +291,11 @@ func (T Validators) Encode() []byte {
 		return []byte{}
 	}
 	copy(validators[:], T)
-	encoded := types.Encode(validators)
+	encoded, err := types.Encode(validators)
+	if err != nil {
+		fmt.Println("Error encoding Validators")
+		return []byte{}
+	}
 	return encoded
 }
 
@@ -246,7 +305,11 @@ func (s *SafroleState) GetNextEpochValidatorsBytes() []byte {
 		fmt.Println("Entropy is empty")
 		return []byte{}
 	}
-	codec_bytes := types.Encode(s.NextValidators)
+	codec_bytes, err := types.Encode(s.NextValidators)
+	if err != nil {
+		fmt.Println("Error encoding NextValidators")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -256,7 +319,11 @@ func (s *SafroleState) GetCurrEpochValidatorsBytes() []byte {
 		fmt.Println("Entropy is empty")
 		return []byte{}
 	}
-	codec_bytes := types.Encode(s.CurrValidators)
+	codec_bytes, err := types.Encode(s.CurrValidators)
+	if err != nil {
+		fmt.Println("Error encoding CurrValidators")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -266,7 +333,11 @@ func (s *SafroleState) GetPriorEpochValidatorsBytes() []byte {
 		fmt.Println("Entropy is empty")
 		return []byte{}
 	}
-	codec_bytes := types.Encode(s.PrevValidators)
+	codec_bytes, err := types.Encode(s.PrevValidators)
+	if err != nil {
+		fmt.Println("Error encoding PrevValidators")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -278,14 +349,23 @@ func (T AvailabilityAssignments) Encode() []byte {
 			encoded = append(encoded, []byte{0}...)
 		} else {
 			encoded = append(encoded, []byte{1}...)
-			encoded = append(encoded, types.Encode(T[i])...)
+			encodedTi, err := types.Encode(T[i])
+			if err != nil {
+				fmt.Println("Error encoding AvailabilityAssignments")
+				return []byte{}
+			}
+			encoded = append(encoded, encodedTi...)
 		}
 	}
 	return encoded
 }
 
 func (n *JamState) GetRhoBytes() []byte {
-	codec_bytes := types.Encode(n.AvailabilityAssignments)
+	codec_bytes, err := types.Encode(n.AvailabilityAssignments)
+	if err != nil {
+		fmt.Println("Error encoding AvailabilityAssignments")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
@@ -295,18 +375,30 @@ func (s *SafroleState) GetMostRecentBlockTimeSlotBytes() []byte {
 		fmt.Println("Entropy is empty")
 		return []byte{}
 	}
-	codec_bytes := types.Encode(s.Timeslot)
+	codec_bytes, err := types.Encode(s.Timeslot)
+	if err != nil {
+		fmt.Println("Error encoding Timeslot")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
 // C12
 func (n *JamState) GetPrivilegedServicesIndicesBytes() []byte {
-	codec_bytes := types.Encode(n.PrivilegedServiceIndices)
+	codec_bytes, err := types.Encode(n.PrivilegedServiceIndices)
+	if err != nil {
+		fmt.Println("Error encoding PrivilegedServiceIndices")
+		return []byte{}
+	}
 	return codec_bytes
 }
 
 // C13
 func (n *JamState) GetPiBytes() []byte {
-	encoded := types.Encode(n.ValidatorStatistics)
+	encoded, err := types.Encode(n.ValidatorStatistics)
+	if err != nil {
+		fmt.Println("Error encoding ValidatorStatistics")
+		return []byte{}
+	}
 	return encoded
 }

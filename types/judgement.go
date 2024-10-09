@@ -26,10 +26,16 @@ func (j Judgement) DeepCopy() (Judgement, error) {
 	var copiedJudgement Judgement
 
 	// Serialize the original Judgement to JSON
-	data := Encode(j)
+	data, err := Encode(j)
+	if err != nil {
+		return copiedJudgement, err
+	}
 
 	// Deserialize the JSON back into a new Judgement instance
-	decoded, _ := Decode(data, reflect.TypeOf(Judgement{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Judgement{}))
+	if err != nil {
+		return copiedJudgement, err
+	}
 	copiedJudgement = decoded.(Judgement)
 
 	return copiedJudgement, nil
@@ -199,7 +205,10 @@ func (J *JudgeBucket) GetWonkeyJudgement(W common.Hash) []Judgement {
 }
 
 func (j *Judgement) Bytes() []byte {
-	enc := Encode(j)
+	enc, err := Encode(j)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 

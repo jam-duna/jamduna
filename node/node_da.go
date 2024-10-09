@@ -359,7 +359,10 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 	output := make([]byte, 0)
 	// 1. Encode the package (p)
 	fmt.Println("wp:", wp)
-	encodedPackage := types.Encode(wp)
+	encodedPackage, err := types.Encode(wp)
+	if err != nil {
+		fmt.Println("Error in encodeWorkPackage:", err)
+	}
 	output = append(output, encodedPackage...)
 
 	// 2. Encode the extrinsic (x)
@@ -369,7 +372,10 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 		extrinsics = append(extrinsics, WorkItem.ExtrinsicsBlobs...)
 	}
 	fmt.Println("extrinsics:", extrinsics)
-	encodedExtrinsic := types.Encode(extrinsics)
+	encodedExtrinsic, err := types.Encode(extrinsics)
+	if err != nil {
+		fmt.Println("Error in encodeWorkPackage:", err)
+	}
 	output = append(output, encodedExtrinsic...)
 
 	// 3. Encode the segments (i)
@@ -379,7 +385,10 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 		segments, _ = n.getImportSegments(WorkItem.ImportedSegments)
 	}
 	fmt.Println("segments:", segments)
-	encodedSegments = types.Encode(segments)
+	encodedSegments, err = types.Encode(segments)
+	if err != nil {
+		fmt.Println("Error in encodeWorkPackage:", err)
+	}
 	output = append(output, encodedSegments...)
 
 	// 4. Encode the justifications (j)
@@ -396,7 +405,11 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 			justification = append(justification, tmpJustification...)
 		}
 	}
-	encodedJustifications = append(encodedJustifications, types.Encode(justification)...)
+	encodedJustification, err := types.Encode(justification)
+	if err != nil {
+		fmt.Println("Error in encodeWorkPackage:", err)
+	}
+	encodedJustifications = append(encodedJustifications, encodedJustification...)
 
 	output = append(output, encodedJustifications...)
 
@@ -410,7 +423,10 @@ func (n *Node) decodeWorkPackage(encodedWorkPackage []byte) types.WorkPackage {
 
 	// // Decode the package (p)
 	// wp, l := types.Decode(encodedWorkPackage, reflect.TypeOf(types.WorkPackage{}))
-	wp, _ := types.Decode(encodedWorkPackage, reflect.TypeOf(types.WorkPackage{}))
+	wp, _, err := types.Decode(encodedWorkPackage, reflect.TypeOf(types.WorkPackage{}))
+	if err != nil {
+		fmt.Println("Error in decodeWorkPackage:", err)
+	}
 	decodedPackage := wp.(types.WorkPackage)
 	fmt.Println("decodedPackage:", decodedPackage.String())
 	// length += l

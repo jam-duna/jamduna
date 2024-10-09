@@ -184,16 +184,19 @@ func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte, blobHash c
 // -----Custom methods for tiny QUIC EC experiment-----
 func (n *Node) processDistributeECChunk(chunk types.DistributeECChunk) error {
 	// Serialize the chunk
-	serialized := types.Encode(types.ECChunkResponse{
+	serialized, err := types.Encode(types.ECChunkResponse{
 		SegmentRoot: chunk.SegmentRoot,
 		Data:        chunk.Data,
 	})
+	if err != nil {
+		return err
+	}
 
 	key := fmt.Sprintf("DA-%v", common.Hash(chunk.SegmentRoot))
 	fmt.Printf("ECChunkReceive Store key %s | val %x\n", key, serialized)
 
 	// Save the chunk to the local storage
-	err := n.WriteRawKV(key, serialized)
+	err = n.WriteRawKV(key, serialized)
 	if err != nil {
 		return err
 	}
@@ -217,7 +220,10 @@ func (n *Node) processECChunkQuery(ecChunkQuery types.ECChunkQuery) (types.ECChu
 	// Deserialize the chunk
 	var chunk types.ECChunkResponse
 	// err = json.Unmarshal(data, &chunk)
-	decodedData, _ := types.Decode(data, reflect.TypeOf(types.ECChunkResponse{}))
+	decodedData, _, err := types.Decode(data, reflect.TypeOf(types.ECChunkResponse{}))
+	if err != nil {
+		return types.ECChunkResponse{}, err
+	}
 	chunk = decodedData.(types.ECChunkResponse)
 
 	if err != nil {
@@ -382,7 +388,10 @@ func (n *Node) FetchAndReconstructSegmentData(treeRoot common.Hash, segmentIndex
 				}
 				var ecChunkResponse types.ECChunkResponse
 				fmt.Printf("types.Decode response %v\n", response)
-				decodedResponse, _ := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+				decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+				if err != nil {
+					return nil, nil, err
+				}
 				ecChunkResponse = decodedResponse.(types.ECChunkResponse)
 				if err != nil {
 					return nil, nil, err
@@ -482,7 +491,10 @@ func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byt
 					ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 				} else {
 					fmt.Printf("Received response: %x\n", response)
-					decodedResponse, _ := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+					decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+					if err != nil {
+						return nil, nil, nil, err
+					}
 					ecChunkResponse = decodedResponse.(types.ECChunkResponse)
 					if err != nil {
 						return nil, nil, nil, err
@@ -568,7 +580,10 @@ func (n *Node) FetchAndReconstructSpecificSegmentData(segmentRoot common.Hash) (
 			}
 			var ecChunkResponse types.ECChunkResponse
 			fmt.Printf("types.Decode response %v\n", response)
-			decodedResponse, _ := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+			decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+			if err != nil {
+				return nil, err
+			}
 			ecChunkResponse = decodedResponse.(types.ECChunkResponse)
 
 			ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
@@ -647,7 +662,10 @@ func (n *Node) FetchAndReconstructArbitraryData(blobHash common.Hash, blobLen in
 			}
 			var ecChunkResponse types.ECChunkResponse
 			fmt.Printf("types.Decode response %v\n", response)
-			decodedResponse, _ := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+			decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
+			if err != nil {
+				return nil, err
+			}
 			ecChunkResponse = decodedResponse.(types.ECChunkResponse)
 
 			if err != nil {

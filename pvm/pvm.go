@@ -366,11 +366,17 @@ func EncodeProgram(p *Program) []byte {
 	// Encode the program
 	encoded := make([]byte, 0)
 
-	encoded = append(encoded, types.E(p.JSize)...)
-	encoded = append(encoded, types.E_l(uint64(p.Z), 1)...)
-	encoded = append(encoded, types.E(p.CSize)...)
+	encodedJSize := types.E(p.JSize)
+	encoded = append(encoded, encodedJSize...)
+
+	encodedZ := types.E_l(uint64(p.Z), 1)
+	encoded = append(encoded, encodedZ...)
+
+	encodedCSize := types.E(p.CSize)
+	encoded = append(encoded, encodedCSize...)
 	for _, j := range p.J {
-		encoded = append(encoded, types.E_l(uint64(j), uint32(p.Z))...)
+		encodedj := types.E_l(uint64(j), uint32(p.Z))
+		encoded = append(encoded, encodedj...)
 	}
 	encoded = append(encoded, p.Code...)
 
@@ -411,6 +417,7 @@ func DecodeProgram(p []byte) *Program {
 		container_length, _ := types.DecodeE(container_length_byte)
 		num_section, _ := types.DecodeE(num_section_byte)
 		unknown, _ := types.DecodeE(unknowm_byte)
+
 		pure_code = p[container_length:]
 
 		fmt.Println("container_length: ", container_length)

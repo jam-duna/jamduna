@@ -49,10 +49,16 @@ func (t Ticket) DeepCopy() (Ticket, error) {
 	var copiedTicket Ticket
 
 	// Serialize the original Ticket to JSON
-	data := Encode(t)
+	data, err := Encode(t)
+	if err != nil {
+		return copiedTicket, err
+	}
 
 	// Deserialize the JSON back into a new Ticket instance
-	decoded, _ := Decode(data, reflect.TypeOf(Ticket{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Ticket{}))
+	if err != nil {
+		return copiedTicket, err
+	}
 	copiedTicket = decoded.(Ticket)
 
 	return copiedTicket, nil
@@ -93,7 +99,10 @@ func (t *Ticket) Hash() common.Hash {
 }
 
 func (t *Ticket) BytesWithSig() []byte {
-	enc := Encode(t)
+	enc, err := Encode(t)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
@@ -103,7 +112,10 @@ func (t *Ticket) BytesWithoutSig() []byte {
 	}{
 		Attempt: t.Attempt,
 	}
-	enc := Encode(s)
+	enc, err := Encode(s)
+	if err != nil {
+		return nil
+	}
 	fmt.Printf("BytesWithoutSig %x\n", enc)
 	return enc
 }

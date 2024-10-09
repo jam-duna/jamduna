@@ -182,7 +182,10 @@ func (vm *VM) hostInfo() uint32 {
 	}
 
 	e := []interface{}{t.CodeHash, t.Balance, t.GasLimitG, t.GasLimitM}
-	m := types.Encode(e)
+	m, err := types.Encode(e)
+	if err != nil {
+		return NONE
+	}
 	vm.writeRAMBytes(bo, m[:])
 
 	return OK

@@ -19,7 +19,11 @@ func (E *EpochMark) Encode() []byte {
 		return []byte{0}
 	}
 	encoded := []byte{1}
-	encoded = append(encoded, Encode(*E)...)
+	encodedEpochMark, err := Encode(*E)
+	if err != nil {
+		return []byte{}
+	}
+	encoded = append(encoded, encodedEpochMark...)
 	return encoded
 }
 
@@ -28,9 +32,15 @@ func (target *EpochMark) Decode(data []byte) (interface{}, uint32) {
 		return nil, 1
 	}
 	length := uint32(1)
-	entropy, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	entropy, l, err := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	if err != nil {
+		return nil, length
+	}
 	length += l
-	validators, l := Decode(data[length:], reflect.TypeOf([TotalValidators]common.Hash{}))
+	validators, l, err := Decode(data[length:], reflect.TypeOf([TotalValidators]common.Hash{}))
+	if err != nil {
+		return nil, length
+	}
 	decoded := EpochMark{
 		Entropy:    entropy.(common.Hash),
 		Validators: validators.([TotalValidators]common.Hash),

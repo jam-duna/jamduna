@@ -21,8 +21,15 @@ func ShuffleCores(slice []uint16, entropy []uint32) []uint16 {
 func Compute_QL(h common.Hash, num int) []uint32 {
 	entropy := make([]uint32, num)
 	for i := 0; i < num; i++ {
-		data := common.ComputeHash(append(h.Bytes(), types.Encode(uint32(i/8))...))
-		decodedValue, _ := types.Decode(data[4*i:4*(i+1)], reflect.TypeOf(uint32(0)))
+		encoded, err := types.Encode(uint32(i/8))
+		if err != nil {
+			panic(err)
+		}
+		data := common.ComputeHash(append(h.Bytes(), encoded...))
+		decodedValue, _, err := types.Decode(data[4*i:4*(i+1)], reflect.TypeOf(uint32(0)))
+		if err != nil {
+			panic(err)
+		}
 		entropy[i] = decodedValue.(uint32)
 	}
 	return entropy

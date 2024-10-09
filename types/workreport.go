@@ -64,7 +64,10 @@ func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error
 
 // Bytes returns the bytes of the Assurance
 func (a *WorkReport) Bytes() []byte {
-	enc := Encode(a)
+	enc, err := Encode(a)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 

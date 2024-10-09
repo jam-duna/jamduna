@@ -189,7 +189,10 @@ func TestAvailabilityReconstruction(t *testing.T) {
 			}
 
 			for i, proof := range pageProofs {
-				decodedData, _ := types.Decode(proof, reflect.TypeOf([][]uint8{}))
+				decodedData, _, err := types.Decode(proof, reflect.TypeOf([][]uint8{}))
+				if err != nil {
+					t.Fatalf("Error decoding page proof: %v\n", err)
+				}
 				decodedSegments := decodedData.([][]byte)
 				t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
 				// Compare decoded segments with original

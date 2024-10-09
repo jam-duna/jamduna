@@ -78,11 +78,16 @@ func TestRecentHistory(t *testing.T) {
 			fmt.Printf("Unmarshaled %s\n", jsonPath)
 			fmt.Printf("Expected: %v\n", tc.expectedType)
 			// Encode the struct to bytes
-			encodedBytes := types.Encode(tc.expectedType)
-
+			encodedBytes, err := types.Encode(tc.expectedType)
+			if err != nil {
+				t.Fatalf("failed to encode data: %v", err)
+			}
 			fmt.Printf("Encoded: %x\n\n", encodedBytes)
 
-			decodedStruct, _ := types.Decode(encodedBytes, targetedStructType)
+			decodedStruct, _, err := types.Decode(encodedBytes, targetedStructType)
+			if err != nil {
+				t.Fatalf("failed to decode data: %v", err)
+			}
 			fmt.Printf("Decoded:  %v\n\n", decodedStruct)
 
 			// Marshal the struct to JSON
@@ -106,8 +111,14 @@ func TestRecentHistory(t *testing.T) {
 			assert.Equal(t, expectedBytes, encodedBytes, "encoded bytes do not match expected bytes")
 
 			if false {
-				decoded, _ := types.Decode(expectedBytes, reflect.TypeOf(tc.expectedType))
-				encodedBytes2 := types.Encode(decoded)
+				decoded, _, err := types.Decode(expectedBytes, reflect.TypeOf(tc.expectedType))
+				if err != nil {
+					t.Fatalf("failed to decode data: %v", err)
+				}
+				encodedBytes2, err := types.Encode(decoded)
+				if err != nil {
+					t.Fatalf("failed to encode data: %v", err)
+				}
 				// Compare the encoded bytes with the expected bytes
 				assert.Equal(t, expectedBytes, encodedBytes2, "encoded bytes do not match expected bytes")
 			}

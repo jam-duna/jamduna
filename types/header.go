@@ -84,20 +84,30 @@ func (b *BlockHeader) Hash() common.Hash {
 
 func (b *BlockHeader) BytesWithSig() []byte {
 	cb, _ := b.toCBlockHeader()
-	enc := Encode(cb)
+	enc, err := Encode(cb)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
-func (b *BlockHeader) Encode() []byte {
+func (b BlockHeader) Encode() []byte {
 	cb, _ := b.toCBlockHeader()
-	enc := Encode(cb)
+	enc, err := Encode(cb)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
-func (b *BlockHeader) Decode(data []byte) (interface{}, uint32) {
-	//decode into CBlockHeader and then type cast to BlockHeader
-	decoded, dataLen := Decode(data, reflect.TypeOf(CBlockHeader{}))
-	return &decoded, dataLen
+func (b BlockHeader) Decode(data []byte) (interface{}, uint32) {
+	decoded, dataLen, err := Decode(data, reflect.TypeOf(CBlockHeader{}))
+	if err != nil {
+		return nil, 0
+	}
+	cbh := decoded.(CBlockHeader)
+	b.fromCBlockHeader(&cbh)
+	return b, dataLen
 }
 
 // TODO FOR SEAN: why is ticet mark empty
@@ -121,7 +131,10 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 	}
 
 	// Marshal the new struct to JSON.
-	enc := Encode(bwoSig)
+	enc, err := Encode(bwoSig)
+	if err != nil {
+		return nil
+	}
 	//fmt.Printf("BytesWithoutSig %x\n", enc)
 	return enc
 }
@@ -268,7 +281,7 @@ func (a *CBlockHeader) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a CBlockHeader) MarshalJSON() ([]byte, error) {
+func (a *CBlockHeader) MarshalJSON() ([]byte, error) {
 	offendersMark := []string{}
 	for _, v := range a.OffendersMark {
 		offendersMark = append(offendersMark, common.HexString(v[:]))

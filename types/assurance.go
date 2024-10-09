@@ -35,7 +35,10 @@ type Assurance struct {
 }
 
 func (a *Assurance) Bytes() []byte {
-	enc := Encode(a)
+	enc, err := Encode(a)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
@@ -93,10 +96,16 @@ func (a Assurance) DeepCopy() (Assurance, error) {
 	var copiedAssurance Assurance
 
 	// Serialize the original Assurance to JSON
-	data := Encode(a)
+	data, err := Encode(a)
+	if err != nil {
+		return copiedAssurance, err
+	}
 
 	// Deserialize the JSON back into a new Assurance instance
-	decoded, _ := Decode(data, reflect.TypeOf(Assurance{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Assurance{}))
+	if err != nil {
+		return copiedAssurance, err
+	}
 	copiedAssurance = decoded.(Assurance)
 
 	return copiedAssurance, nil

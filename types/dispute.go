@@ -107,10 +107,16 @@ func (t Dispute) DeepCopy() (Dispute, error) {
 	var copiedDispute Dispute
 
 	// Serialize the original Dispute to JSON
-	data := Encode(t)
+	data, err := Encode(t)
+	if err != nil {
+		return copiedDispute, err
+	}
 
 	// Deserialize the JSON back into a new Dispute instance
-	decoded, _ := Decode(data, reflect.TypeOf(Dispute{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Dispute{}))
+	if err != nil {
+		return copiedDispute, err
+	}
 	copiedDispute = decoded.(Dispute)
 
 	return copiedDispute, nil
@@ -118,7 +124,10 @@ func (t Dispute) DeepCopy() (Dispute, error) {
 
 // Bytes returns the bytes of the Dispute
 func (a *Dispute) Bytes() []byte {
-	enc := Encode(a)
+	enc, err := Encode(a)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
@@ -188,10 +197,16 @@ func (t Vote) DeepCopy() (Vote, error) {
 	var copiedVote Vote
 
 	// Serialize the original Dispute to JSON
-	data := Encode(t)
+	data, err := Encode(t)
+	if err != nil {
+		return copiedVote, err
+	}
 
 	// Deserialize the JSON back into a new Dispute instance
-	decoded, _ := Decode(data, reflect.TypeOf(Vote{}))
+	decoded, _, err := Decode(data, reflect.TypeOf(Vote{}))
+	if err != nil {
+		return copiedVote, err
+	}
 	copiedVote = decoded.(Vote)
 	return copiedVote, nil
 }
@@ -246,7 +261,10 @@ func (a Vote) MarshalJSON() ([]byte, error) {
 }
 
 func (v *Vote) Bytes() []byte {
-	enc := Encode(v)
+	enc, err := Encode(v)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
@@ -302,7 +320,10 @@ func (a Fault) MarshalJSON() ([]byte, error) {
 }
 
 func (c *Culprit) Bytes() []byte {
-	enc := Encode(c)
+	enc, err := Encode(c)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
@@ -312,7 +333,10 @@ func (c *Culprit) Hash() common.Hash {
 }
 
 func (f *Fault) Bytes() []byte {
-	enc := Encode(f)
+	enc, err := Encode(f)
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 

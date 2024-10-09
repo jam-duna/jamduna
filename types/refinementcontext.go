@@ -33,7 +33,11 @@ func (P *Prerequisite) Encode() []byte {
 		return []byte{0}
 	}
 	encoded := []byte{1}
-	encoded = append(encoded, Encode(*P)...)
+	encodedPrerequisite, err := Encode(*P)
+	if err != nil {
+		return []byte{}
+	}
+	encoded = append(encoded, encodedPrerequisite...)
 	return encoded
 }
 
@@ -43,7 +47,10 @@ func (target *Prerequisite) Decode(data []byte) (interface{}, uint32) {
 	}
 	var decoded Prerequisite
 	length := uint32(1)
-	prerequisite, l := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	prerequisite, l, err := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	if err != nil {
+		return nil, length
+	}
 	length += l
 	decoded = Prerequisite(prerequisite.(common.Hash))
 	return &decoded, length
