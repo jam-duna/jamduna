@@ -395,11 +395,6 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 			err = n.processBlock(block)
 			if err == nil {
 				response = ok
-				// _, currPhase := n.statedb.GetSafrole().EpochAndPhase(n.statedb.GetSafrole().Timeslot)
-				// if currPhase == types.EpochLength-1 {
-				// 	n.GenerateTickets(n.statedb.GetSafrole().Timeslot)
-				// 	n.BroadcastTickets(n.statedb.GetSafrole().Timeslot)
-				// }
 			}
 
 		}

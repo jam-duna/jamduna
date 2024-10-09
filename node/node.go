@@ -886,18 +886,16 @@ func (n *Node) runClient() {
 				// this is the genesis case?
 				genesisEpochFirstSlot := n.statedb.GetSafrole().EpochFirstSlot
 				// genesisEpochFirstSlot-1 < currJCE <= genesisEpochFirstSlot+1
-				if (genesisEpochFirstSlot-1 < currJCE && currJCE <= genesisEpochFirstSlot+1) {
-					n.GenerateTickets(statedb.ComputeCurrentJCETime())
-					n.BroadcastTickets(statedb.ComputeCurrentJCETime())
+				if genesisEpochFirstSlot-1 < currJCE && currJCE <= genesisEpochFirstSlot+1 {
+					n.GenerateTickets()
+					n.BroadcastTickets()
 				}
-			} else if currEpoch >0 && currPhase == types.EpochLength-1 { // you had currPhase == types.EpochLength-1
-				nextEpochFirst := n.statedb.GetSafrole().GetNextEpochFirst()
-				endPhase := uint32(types.EpochLength - types.TicketSubmissionEndSlot)
+			} else if currPhase == types.EpochLength-1 { // you had currPhase == types.EpochLength-1
 				// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-				if (nextEpochFirst - endPhase < currJCE && currJCE <= nextEpochFirst) {
-					n.GenerateTickets(statedb.ComputeCurrentJCETime())
-					n.BroadcastTickets(statedb.ComputeCurrentJCETime())
-				}
+				fmt.Printf("[N%d]GenerateTickets currEpoch=%v, currPhase=%v\n", n.id, currEpoch, currPhase)
+				n.GenerateTickets()
+				n.BroadcastTickets()
+
 			}
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs)
 			if err != nil {
@@ -908,10 +906,6 @@ func (n *Node) runClient() {
 				// we authored a block
 				newStateDB.PreviousGuarantors()
 				newStateDB.AssignGuarantors()
-				if currPhase == types.EpochLength-1 {
-					n.GenerateTickets(n.statedb.GetSafrole().Timeslot)
-					n.BroadcastTickets(n.statedb.GetSafrole().Timeslot)
-				}
 				n.addStateDB(newStateDB)
 				n.blocks[newBlock.Hash()] = newBlock
 				n.broadcast(*newBlock)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	//	"io"
 )
@@ -47,14 +48,14 @@ func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBuck
 	return buckets, nil
 }
 
-func (n *Node) GenerateTickets(currJCE uint32) {
+func (n *Node) GenerateTickets() {
 	n.ticketsMutex.Lock()
 	defer n.ticketsMutex.Unlock()
 	sf := n.statedb.GetSafrole()
 	actualEpoch, _ := sf.EpochAndPhase(n.statedb.GetSafrole().Timeslot)
-	currEpoch, _ := sf.EpochAndPhase(currJCE)
+	currEpoch, _ := sf.EpochAndPhase(statedb.ComputeCurrentJCETime())
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
-	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(currJCE) {
+	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(n.statedb.GetSafrole().Timeslot) {
 		fmt.Printf("Using Entropy 1 for Node %v to generate tickets\n", n.id)
 		copy(usedEntropy[:], n.statedb.GetSafrole().Entropy[1][:])
 	}
@@ -102,23 +103,29 @@ func (n *Node) CheckSelfTicketsIsIncluded(Block types.Block, currJCE uint32) {
 	return
 }
 
-func (n *Node) BroadcastTickets(currJCE uint32) {
+func (n *Node) BroadcastTickets() {
 	sf := n.statedb.GetSafrole()
+	currJCE := sf.Timeslot
 	currEpoch, _ := sf.EpochAndPhase(currJCE)
 	if currEpoch < 0 {
 		return
 	}
 	n.ticketsMutex.Lock()
 	defer n.ticketsMutex.Unlock()
-	tickets := n.selfTickets[n.statedb.GetSafrole().Entropy[2]]
+	usingEntropy := n.statedb.GetSafrole().Entropy[2]
+
 	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(currJCE) {
-		tickets = n.selfTickets[n.statedb.GetSafrole().Entropy[1]]
+		usingEntropy = n.statedb.GetSafrole().Entropy[1]
 	}
+	tickets := n.selfTickets[usingEntropy]
 	for _, ticketbucket := range tickets {
 		if !*ticketbucket.IsIncluded {
 			ticket := ticketbucket.Ticket
 			fmt.Printf("[N%v] Broadcasting Ticket %x\n", n.id, ticket.Attempt)
-			n.broadcast(ticket)
+			if !*ticketbucket.IsBroadcasted {
+				n.broadcast(ticket)
+				*ticketbucket.IsBroadcasted = true
+			}
 			//n.writeDebug(&ticket, currJCE)
 		}
 	}

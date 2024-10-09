@@ -969,7 +969,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState = oldState.JamState.Copy()
 	s.Block = blk
 	s.ParentHash = blk.Header.Parent
-
+	s.RemoveUnusedTickets()
 	targetJCE := blk.TimeSlot()
 
 	// 19-22 - Safrole last
@@ -1090,8 +1090,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	h.Parent = s.BlockHash
 	h.ParentStateRoot = stateRoot
 	h.Slot = targetJCE
-
 	// Extrinsic Data has 5 different Extrinsics
+	s.RemoveUnusedTickets()
 
 	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
 	extrinsicData.Preimages = make([]types.Preimages, 0)
