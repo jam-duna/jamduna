@@ -177,7 +177,7 @@ func ShuffleWorkReport(slice []types.WorkReportSelection, entropy []uint32) {
 
 // eq 195
 func (s *StateDB) GetTranche() uint32 {
-	currentJCETime := ComputeCurrentJCETime() // Replace with the actual value or variable representing the current JCE time
+	currentJCETime := common.ComputeCurrentJCETime() // Replace with the actual value or variable representing the current JCE time
 	return (currentJCETime - types.SecondsPerSlot*s.JamState.SafroleState.GetTimeSlot()) / types.PeriodSecond
 }
 

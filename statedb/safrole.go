@@ -126,7 +126,7 @@ type SafroleState struct {
 func NewSafroleState() *SafroleState {
 	return &SafroleState{
 		Id:                 99999,
-		Timeslot:           uint32(ComputeCurrentJCETime()),
+		Timeslot:           uint32(common.ComputeCurrentJCETime()),
 		BlockNumber:        0,
 		Entropy:            Entropy{},
 		PrevValidators:     []types.Validator{},
@@ -777,25 +777,25 @@ func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub co
 }
 
 func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
-	currJCE := ComputeCurrentJCETime()
+	currJCE := common.ComputeCurrentJCETime()
 	prevEpoch, prevPhase := s.EpochAndPhase(s.GetTimeSlot())
 	currEpoch, currPhase := s.EpochAndPhase(currJCE)
 	fmt.Printf("[N%d] CheckTimeSlotReady PREV [%d] %d %d Curr [%d] %d %d\n",
-		s.Id, s.GetTimeSlot(), prevEpoch, prevPhase,
-		currJCE, currEpoch, currPhase)
+		s.Id, s.GetTimeSlot(), prevEpoch, prevPhase, currJCE, currEpoch, currPhase)
 	if currEpoch > prevEpoch {
 		return currJCE, true
 	} else if currEpoch == prevEpoch && currPhase > prevPhase {
+		// normal case
 		return currJCE, true
 	}
 	return currJCE, false
 }
 
-func (s *SafroleState) CheckGenesisReady() (isReady bool) {
-	if s.BlockNumber == 0 {
-		currJCE := ComputeCurrentJCETime()
+func (s *SafroleState) CheckFirstPhaseReady() (isReady bool) {
+	if s.BlockNumber == -1 {
+		currJCE := common.ComputeCurrentJCETime()
 		if currJCE < s.EpochFirstSlot {
-			fmt.Printf("Not ready currJCE: %v < epoch0TimeSlot %v\n", currJCE, s.EpochFirstSlot)
+			fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot)
 			return false
 		}
 	}

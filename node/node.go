@@ -884,7 +884,7 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
-			currJCE := statedb.ComputeCurrentJCETime()
+			currJCE := common.ComputeCurrentJCETime()
 			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
 
 			if currEpoch == 0 && currPhase == 0 {

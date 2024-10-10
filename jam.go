@@ -24,7 +24,7 @@ func getNextTimestampMultipleOf12() int {
 	if remainder != 0 {
 		future += 12 - remainder
 	}
-	return int(future)
+	return int(future) + types.SecondsPerSlot
 }
 
 func main() {

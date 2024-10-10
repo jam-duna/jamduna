@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
+	//"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
@@ -331,6 +331,20 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	statedb.Block = nil
 	j := InitGenesisState(c)
 	statedb.JamState = j // setting the dispute state so that block 1 can be produced
+	// setting the safrole state so that block 1 can be produced
+
+	statedb.StateRoot = statedb.UpdateTrieState()
+	return statedb, nil
+}
+
+func InitStateDBFromSnapshot(sdb *storage.StateDBStorage, snapshot *StateSnapshot) (statedb *StateDB, err error) {
+	statedb, err = newStateDB(sdb, common.Hash{})
+	if err != nil {
+		return statedb, err
+	}
+
+	statedb.Block = nil
+	statedb.JamState = InitStateFromSnapshot(snapshot)
 	// setting the safrole state so that block 1 can be produced
 
 	statedb.StateRoot = statedb.UpdateTrieState()
@@ -662,7 +676,7 @@ func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.Preim
 }
 
 func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []common.Hash) (*types.Block, *StateDB, error) {
-	genesisReady := s.JamState.SafroleState.CheckGenesisReady()
+	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady()
 	if !genesisReady {
 		return nil, nil, nil
 	}
@@ -1294,22 +1308,4 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	}
 	b.Header = *h
 	return b, nil
-}
-
-// The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
-func ComputeJCETime(unixTimestamp int64) int64 {
-	production := false
-	if production {
-		// Define the start of the Jam Common Era
-		jceStart := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
-
-		// Convert the Unix timestamp to a Time object
-		currentTime := time.Unix(unixTimestamp, 0).UTC()
-
-		// Calculate the difference in seconds
-		diff := currentTime.Sub(jceStart)
-		return int64(diff.Seconds())
-	} else {
-		return unixTimestamp
-	}
 }

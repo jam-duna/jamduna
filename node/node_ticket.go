@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	//	"io"
 )
@@ -53,7 +52,7 @@ func (n *Node) GenerateTickets() {
 	defer n.ticketsMutex.Unlock()
 	sf := n.statedb.GetSafrole()
 	actualEpoch, _ := sf.EpochAndPhase(n.statedb.GetSafrole().Timeslot)
-	currEpoch, _ := sf.EpochAndPhase(statedb.ComputeCurrentJCETime())
+	currEpoch, _ := sf.EpochAndPhase(common.ComputeCurrentJCETime())
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
 	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(n.statedb.GetSafrole().Timeslot) {
 		fmt.Printf("Using Entropy 1 for Node %v to generate tickets\n", n.id)

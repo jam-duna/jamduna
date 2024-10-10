@@ -24,9 +24,33 @@ func DecodeUint64(data []byte) int {
 	return int(binary.LittleEndian.Uint64(data))
 }
 
+// This is FAKE
 func ComputeCurrentJCETime() uint32 {
 	currentTime := time.Now().Unix()
 	return uint32(currentTime) // computeJCETime(currentTime)
+}
+
+func ComputeRealCurrentJCETime() uint32 {
+	currentTime := time.Now().Unix()
+	return uint32(ComputeJCETime(currentTime))
+}
+
+// The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
+func ComputeJCETime(unixTimestamp int64) int64 {
+	production := false
+	if production {
+		// Define the start of the Jam Common Era
+		jceStart := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+
+		// Convert the Unix timestamp to a Time object
+		currentTime := time.Unix(unixTimestamp, 0).UTC()
+
+		// Calculate the difference in seconds
+		diff := currentTime.Sub(jceStart)
+		return int64(diff.Seconds())
+	} else {
+		return unixTimestamp
+	}
 }
 
 func ComputeCurrenTS() uint32 {

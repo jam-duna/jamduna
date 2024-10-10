@@ -23,12 +23,24 @@ type GenesisAuthorities struct {
 	Authorities []types.Validator
 }
 
+func InitStateFromSnapshot(s *StateSnapshot) (j *JamState) {
+	j = NewJamState()
+	// TODO
+	return j
+}
+
 // 6.4.1 Startup parameters
 func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j = NewJamState()
 
+	// shift starting condition by one phase to make space for 0_0
+	genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp - types.PeriodSecond)
+	fmt.Printf("InitGenesisState genesisTimeslot=%v\n", genesisTimeslot)
+
 	j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
-	j.SafroleState.Timeslot = j.SafroleState.EpochFirstSlot
+	j.SafroleState.Timeslot = genesisTimeslot
+	j.SafroleState.BlockNumber = -1 // also not ok
+
 	validators := genesisConfig.Authorities
 	vB := []byte{}
 	for _, v := range validators {
@@ -39,7 +51,6 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j.SafroleState.NextValidators = validators
 	j.SafroleState.DesignedValidators = validators
 
-	j.SafroleState.BlockNumber = 0
 	/*
 		The on-chain randomness is initialized after the genesis block construction.
 		The first buffer entry is set as the Blake2b hash of the genesis block,
@@ -71,11 +82,6 @@ func computeJCETime(unixTimestamp int64) uint32 {
 	return uint32(diff.Seconds())
 }
 
-func ComputeCurrentJCETime() uint32 {
-	currentTime := time.Now().Unix()
-	return uint32(currentTime) // computeJCETime(currentTime)
-}
-
 // Function to convert JCETime back to the original Unix timestamp
 func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 	// Define the start of the Jam Common Era
@@ -88,8 +94,10 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 
 func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 	now := time.Now().Unix()
+	epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
+	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v\n", epoch0Timestamp)
 	return GenesisConfig{
-		Epoch0Timestamp: uint64(6 * ((now + 12) / 6)),
+		Epoch0Timestamp: epoch0Timestamp,
 		Authorities:     validators,
 	}
 }

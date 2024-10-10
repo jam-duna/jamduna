@@ -14,6 +14,10 @@ jamweb:
 		@echo "Building JAM WEB..."
 		@cd jamweb && go build
 
+validatetraces:
+		@echo "Building JAM validatetraces..."
+		@cd cmd/validatetraces && go build
+
 testnet:
 	make jam
 	docker build -t colorfulnotion/jam .
