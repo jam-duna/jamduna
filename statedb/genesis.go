@@ -95,7 +95,7 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 	now := time.Now().Unix()
 	epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
-	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v\n", epoch0Timestamp)
+	fmt.Printf("NewGenesisConfig epoch0Timestamp: %v\n", epoch0Timestamp)
 	return GenesisConfig{
 		Epoch0Timestamp: epoch0Timestamp,
 		Authorities:     validators,

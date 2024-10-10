@@ -20,7 +20,6 @@ type BlockHeader struct {
 	// H_e
 	EpochMark *EpochMark `json:"epoch_mark,omitempty"`
 	// H_w
-	// TicketsMark *TicketsMark `json:"tickets_mark,omitempty"`
 	TicketsMark []*TicketBody `json:"tickets_mark,omitempty"`
 	// H_o
 	OffendersMark []Ed25519Key `json:"offenders_mark"`

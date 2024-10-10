@@ -1,9 +1,9 @@
 package types
 
 import (
-	"reflect"
-
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
+	"reflect"
 )
 
 // EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch
@@ -12,6 +12,17 @@ type EpochMark struct {
 	Entropy common.Hash `json:"entropy"`
 	// List of authorities scheduled for next epoch
 	Validators [TotalValidators]common.Hash `json:"validators"` //bandersnatch keys
+}
+
+func (e EpochMark) String() string {
+	entropyShort := common.Str(e.Entropy)
+	/*validatorsShort := ""
+	q := ""
+	for _, validator := range e.Validators {
+		validatorsShort += q + common.Str(validator)
+		q = ", "
+	} */
+	return fmt.Sprintf("\033[32mEpochMarker\033[0m(η1=%s)", entropyShort) // validatorsShort
 }
 
 func (E *EpochMark) Encode() []byte {

@@ -1,14 +1,13 @@
 package statedb
 
 import (
-	//"github.com/ethereum/go-ethereum/crypto"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
-	//"time"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
@@ -129,17 +128,23 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	//s.QueueTicketEnvelope(t)
 	//statedb.tickets[common.BytesToHash(ticket_id)] = t
 	sf := s.GetSafrole()
+	start := time.Now()
 	ticketID, err := sf.ValidateProposedTicket(&t, false)
 	if err != nil {
-		fmt.Printf("ProcessIncomingTicket Error Invalid Ticket. Err=%v\n", err)
+		if debug {
+			fmt.Printf("ProcessIncomingTicket Error Invalid Ticket. Err=%v\n", err)
+		}
 		return
 	}
+	elapsed := time.Since(start).Microseconds()
+	if trace && elapsed > 500000 {
+		fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v [%d ms]\n", s.Id, ticketID, time.Since(start).Microseconds()/1000)
+	}
+
 	if s.CheckTicketExists(ticketID) {
 		return
 	}
-	fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v\n", s.Id, ticketID)
 	s.AddTicketToQueue(t)
-	//TODO: log ticket here
 	currJCE, _ := s.JamState.SafroleState.CheckTimeSlotReady()
 	s.writeLog(&t, currJCE)
 	s.knownTickets[ticketID] = t.Attempt
@@ -253,6 +258,7 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 // EP Errors
 const (
 	debug                     = false
+	trace                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
@@ -483,7 +489,9 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	recentBlocksEncode := d.GetRecentBlocksBytes()
 
 	t := s.GetTrie()
-	fmt.Printf("UpdateTrieState - before root:%v\n", t.GetRoot())
+	if debug {
+		fmt.Printf("UpdateTrieState - before root:%v\n", t.GetRoot())
+	}
 	t.SetState(C1, coreAuthPoolEncode)
 	t.SetState(C2, authQueueEncode)
 	t.SetState(C3, recentBlocksEncode)
@@ -498,7 +506,9 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C12, privilegedServiceIndicesEncode)
 	t.SetState(C13, piEncode)
 	updated_root := t.GetRoot()
-	fmt.Printf("UpdateTrieState - after root:%v\n", updated_root)
+	if debug {
+		fmt.Printf("UpdateTrieState - after root:%v\n", updated_root)
+	}
 	return updated_root
 }
 
@@ -684,30 +694,28 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 	if timeSlotReady {
 		// Time to propose block if authorized
 		isAuthorizedBlockBuilder := false
-		//bandersnatchPub := credential.BandersnatchPub
-		// _, phase := s.JamState.SafroleState.EpochAndPhase(currJCE)
-		// // round robin TEMPORARY
-		// if phase%types.TotalValidators == s.Id {
-		// 	//fmt.Printf("IsAuthorized caller: phase(%d) == s.Id(%d)\n", phase, s.Id)
-		// 	isAuthorizedBlockBuilder = true
-		// }
-
 		sf := s.GetSafrole()
 		isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		if isAuthorizedBlockBuilder {
-			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 			// propose block without state transition
+			start := time.Now()
 			proposedBlk, err := s.MakeBlock(credential, currJCE)
 			if err != nil {
 				return nil, nil, err
 			}
-			fmt.Printf("[N%v] Proposed %v<-%v (Epoch,Phase) = (%v,%v) Slot=%v\n", s.Id, proposedBlk.ParentHash(), proposedBlk.Hash(), currEpoch, currPhase, currJCE)
 			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
 				return nil, nil, err
 			}
-			//fmt.Printf("[N%d] MakeBlock StateDB (after application of Block %v) %v\n", s.Id, proposedBlk.Hash(), newStateDB.String())
+
+			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
+
+			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%v,m'=%v, len(γ_a')=%d %s\n", s.Id, common.Str(proposedBlk.ParentHash()), common.Str(proposedBlk.Hash()), currEpoch, currPhase, len(s.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str())
+			elapsed := time.Since(start)
+			if trace && elapsed > 2000000 {
+				fmt.Printf("\033[31m MakeBlock / ApplyStateTransitionFromBlock\033[0m %d ms\n", elapsed/1000)
+			}
 			return proposedBlk, newStateDB, nil
 		} else {
 			//waiting for block ... potentially submit ticket here
@@ -982,6 +990,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
+	start := time.Now()
 	s = oldState.Copy()
 	s.JamState = oldState.JamState.Copy()
 	s.Block = blk
@@ -1007,6 +1016,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.SafroleState = &s2
 	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
+	elapsed := time.Since(start).Microseconds()
+	if trace && elapsed > 1000000 {
+		fmt.Printf("\033[31mApplyStateTransitionFromBlock:Tickets\033[0m %d ms\n", elapsed/1000)
+	}
 
 	// 24 - Preimages
 	preimages := blk.PreimageLookups()
@@ -1079,7 +1092,14 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	//State transisiton is successful.  Remove E(T,P,A,G,D) from statedb queue
 	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
-	fmt.Printf("Queue Tickets Length: %v\n", len(s.queuedTickets))
+	if debug {
+		fmt.Printf("Queue Tickets Length: %v\n", len(s.queuedTickets))
+	}
+
+	elapsed = time.Since(start).Microseconds()
+	if trace && elapsed > 3000000 {
+		fmt.Printf("\033[31m ApplyStateTransitionFromBlock:TOTAL \033[0m %d ms\n", elapsed/1000)
+	}
 	return s, nil
 }
 
@@ -1099,7 +1119,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 	stateRoot := s.GetStateRoot()
-	fmt.Printf("MakeBlock start - stateRoot:%v\n", stateRoot)
 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()
@@ -1157,9 +1176,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
-	if debug {
-		fmt.Printf("MakeBlock - queuedGuarantees %v\n", len(s.queuedGuarantees))
-	}
 	for _, guarantee := range s.queuedGuarantees {
 		g, err := guarantee.DeepCopy()
 		if err != nil {
@@ -1233,7 +1249,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	if needEpochMarker {
 		epochMarker := sf.GenerateEpochMarker()
 		//a tuple of the epoch randomness and a sequence of Bandersnatch keys defining the Bandersnatch valida- tor keys (kb) beginning in the next epoch
-		fmt.Printf("targetJCE=%v EpochMarker:%v\n", targetJCE, epochMarker)
+		if debug {
+			fmt.Printf("[N%d] *** \033[32mEpochMarker\033[0m %v\n", s.Id, epochMarker)
+		}
 		h.EpochMark = epochMarker
 	}
 	// eq 72
@@ -1241,7 +1259,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		winningMarker, err := sf.GenerateWinningMarker()
 		//block is the first after the end of the submission period for tickets and if the ticket accumulator is saturated
 		if err == nil {
-			fmt.Printf("targetJCE=%v WinningTicketMarker:%v\n", targetJCE, winningMarker)
+			if debug {
+				fmt.Printf("[N%d] *** \033[32mWinningTicketMarker\033[0m #Tickets=%d targetJCE=%v\n", s.Id, len(winningMarker), targetJCE)
+			}
 			h.TicketsMark = winningMarker
 		}
 	} else {
@@ -1249,7 +1269,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		// Question: can we submit tickets at the exact tail end block?
 		extrinsicData.Tickets = make([]types.Ticket, 0)
 		// add the limitation for receiving tickets
-		if s.JamState.SafroleState.IsTicketSubmsissionClosed(targetJCE) && !isNewEpoch {
+		if s.JamState.SafroleState.IsTicketSubmissionClosed(targetJCE) && !isNewEpoch {
 			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 
 		} else {

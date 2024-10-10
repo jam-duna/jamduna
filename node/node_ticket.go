@@ -38,11 +38,15 @@ func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBuck
 	if n.selfTickets[usedEntropy] == nil {
 		n.selfTickets[usedEntropy] = make([]types.TicketBucket, 0)
 	}
-	fmt.Printf("[N%v] Generating Tickets for = (%v)\n", n.id, usedEntropy)
+	if debug {
+		fmt.Printf("[N%v] Generating Tickets for = (%v)\n", n.id, usedEntropy)
+	}
 	buckets := types.TicketsToBuckets(tickets, sf.Epoch)
 	n.selfTickets[usedEntropy] = buckets
-	for _, bucket := range n.selfTickets[usedEntropy] {
-		fmt.Printf("[N%v] Put Ticket %x in Bucket:%v\n", n.id, bucket.Ticket.Attempt, usedEntropy)
+	if debug {
+		for _, bucket := range n.selfTickets[usedEntropy] {
+			fmt.Printf("[N%v] Put Ticket %x in Bucket:%v\n", n.id, bucket.Ticket.Attempt, usedEntropy)
+		}
 	}
 	return buckets, nil
 }
@@ -54,13 +58,17 @@ func (n *Node) GenerateTickets() {
 	actualEpoch, _ := sf.EpochAndPhase(n.statedb.GetSafrole().Timeslot)
 	currEpoch, _ := sf.EpochAndPhase(common.ComputeCurrentJCETime())
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
-	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(n.statedb.GetSafrole().Timeslot) {
-		fmt.Printf("Using Entropy 1 for Node %v to generate tickets\n", n.id)
+	if n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetSafrole().Timeslot) {
+		if debug {
+			fmt.Printf("Using Entropy 1 for Node %v to generate tickets\n", n.id)
+		}
 		copy(usedEntropy[:], n.statedb.GetSafrole().Entropy[1][:])
 	}
-	fmt.Printf("GenerateTickets currEpoch=%v | actualEpoch=%v selected Entropy=%v\n", currEpoch, actualEpoch, usedEntropy)
 	if len(n.selfTickets[usedEntropy]) == types.TicketEntriesPerValidator {
-		fmt.Printf("Node %v has generated %v tickets in epoch %v\n", n.id, types.TicketEntriesPerValidator, currEpoch)
+		if debug {
+			fmt.Printf("GenerateTickets currEpoch=%v | actualEpoch=%v selected Entropy=%v\n", currEpoch, actualEpoch, usedEntropy)
+			fmt.Printf("Node %v has generated %v tickets in epoch %v\n", n.id, types.TicketEntriesPerValidator, currEpoch)
+		}
 		return
 	}
 	if !n.IsTicketGenerated(usedEntropy) {
@@ -81,7 +89,7 @@ func (n *Node) CheckSelfTicketsIsIncluded(Block types.Block, currJCE uint32) {
 	}
 	fmt.Printf("[N%v] Checking Self Tickets for Epoch %v\n", n.id, currEpoch)
 	tickets := n.selfTickets[n.statedb.GetSafrole().Entropy[2]]
-	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(currJCE) {
+	if n.statedb.GetSafrole().IsTicketSubmissionClosed(currJCE) {
 		tickets = n.selfTickets[n.statedb.GetSafrole().Entropy[1]]
 	}
 	if tickets == nil {
@@ -113,14 +121,16 @@ func (n *Node) BroadcastTickets() {
 	defer n.ticketsMutex.Unlock()
 	usingEntropy := n.statedb.GetSafrole().Entropy[2]
 
-	if n.statedb.GetSafrole().IsTicketSubmsissionClosed(currJCE) {
+	if n.statedb.GetSafrole().IsTicketSubmissionClosed(currJCE) {
 		usingEntropy = n.statedb.GetSafrole().Entropy[1]
 	}
 	tickets := n.selfTickets[usingEntropy]
 	for _, ticketbucket := range tickets {
 		if !*ticketbucket.IsIncluded {
 			ticket := ticketbucket.Ticket
-			fmt.Printf("[N%v] Broadcasting Ticket %x\n", n.id, ticket.Attempt)
+			if debug {
+				fmt.Printf("[N%v] Broadcasting Ticket %x\n", n.id, ticket.Attempt)
+			}
 			if !*ticketbucket.IsBroadcasted {
 				n.broadcast(ticket)
 				*ticketbucket.IsBroadcasted = true

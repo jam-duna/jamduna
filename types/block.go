@@ -120,6 +120,34 @@ func (b *Block) ParentHash() common.Hash {
 	return b.Header.Parent
 }
 
+func (b *Block) Str() string {
+	out := fmt.Sprintf("[N%d]", b.Header.AuthorIndex)
+	out += fmt.Sprintf("H_t=%d ", b.Header.Slot)
+	out += fmt.Sprintf("H_r=%s ", common.Str(b.Header.ParentStateRoot))
+	if b.Header.EpochMark != nil {
+		out += b.Header.EpochMark.String()
+	}
+	if len(b.Header.TicketsMark) > 0 {
+		out += fmt.Sprintf(" \033[32mWinningTickets\033[0m(%d)", len(b.Header.TicketsMark))
+	}
+	if len(b.Extrinsic.Tickets) > 0 {
+		out += fmt.Sprintf(" \033[34m |E_T|=%d\033[0m", len(b.Extrinsic.Tickets))
+	}
+	/*if len(b.Extrinsic.Disputes) > 0 {
+		out += fmt.Sprintf(" \032[32m |E_D|=%d\033[0m %d\n", len(b.Extrinsic.Disputes))
+	} */
+	if len(b.Extrinsic.Preimages) > 0 {
+		out += fmt.Sprintf(" \032[34m |E_P|=%d\033[0m\n", len(b.Extrinsic.Preimages))
+	}
+	if len(b.Extrinsic.Assurances) > 0 {
+		out += fmt.Sprintf(" \032[34m |E_P|=%d\033[0m\n", len(b.Extrinsic.Assurances))
+	}
+	if len(b.Extrinsic.Guarantees) > 0 {
+		out += fmt.Sprintf(" \032[34m |E_G|=%d\033[0m\n", len(b.Extrinsic.Guarantees))
+	}
+	return out
+}
+
 func (b *Block) String() string {
 	enc, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {

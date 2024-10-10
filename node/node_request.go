@@ -13,8 +13,7 @@ import (
 	"log"
 	"reflect"
 
-	//"encoding/json"
-
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -291,7 +290,9 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		}
 		query = decoded.(types.BlockQuery)
 		blk, found := n.blocks[query.BlockHash]
-		fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id, query.BlockHash, found)
+		if debug {
+			fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id, query.BlockHash, found)
+		}
 		if found {
 			serializedR, err := types.Encode(blk)
 			if err != nil {
@@ -299,7 +300,9 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 			}
 			//serializedR := types.Encode(blk)
 			if err == nil {
-				fmt.Printf("[N%d] Responded to BlockQuery %v with: %v\n", n.id, query.BlockHash, serializedR)
+				if debug {
+					fmt.Printf("[N%d] Responded to BlockQuery %v with len=%v\n", n.id, query.BlockHash, len(serializedR))
+				}
 				response = serializedR
 			}
 		}
@@ -338,7 +341,9 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		if err == nil {
 			response = ok
 		}
-		fmt.Printf(" -- [N%d] received ticket From N%d\n", n.id, msg.Id)
+		if debug {
+			fmt.Printf(" -- [N%d] received ticket From N%d\n", n.id, msg.Id)
+		}
 	case "AvailabilityJustification":
 		var aj *types.AvailabilityJustification
 		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(aj))
@@ -429,7 +434,9 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 		block, err := types.BlockFromBytes(msg.Payload)
 		//err := interface{}
 		if err == nil {
-			fmt.Printf(" -- [N%d] received block From N%d (%v <- %v)\n", n.id, msg.Id, block.ParentHash(), block.Hash())
+			if debug {
+				fmt.Printf(" -- [N%d] received block From N%d (%s <- %s)\n", n.id, msg.Id, common.Str(block.ParentHash()), common.Str(block.Hash()))
+			}
 			err = n.processBlock(block)
 			if err == nil {
 				response = ok

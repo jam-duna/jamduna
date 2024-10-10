@@ -7,14 +7,12 @@ import (
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/types"
 
-	//"encoding/hex"
 	"encoding/json"
 	"errors"
 	"sort"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	// "golang.org/x/crypto/blake2b"
-	//"github.com/colorfulnotion/jam/trie"
 )
 
 type SafroleHeader struct {
@@ -252,15 +250,15 @@ func (s *SafroleState) IsNewEpoch(currCJE uint32) bool {
 
 // used for detecting the end of submission period
 func (s *SafroleState) IseWinningMarkerNeeded(currCJE uint32) bool {
-	//prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
-	_, currPhase := s.EpochAndPhase(currCJE)
-	if currPhase >= types.TicketSubmissionEndSlot && len(s.NextEpochTicketsAccumulator) == types.EpochLength {
+	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
+	currEpoch, currPhase := s.EpochAndPhase(currCJE)
+	if currEpoch == prevEpoch && prevPhase < types.TicketSubmissionEndSlot && types.TicketSubmissionEndSlot <= currPhase && len(s.NextEpochTicketsAccumulator) == types.EpochLength {
 		return true
 	}
 	return false
 }
 
-func (s *SafroleState) IsTicketSubmsissionClosed(currJCE uint32) bool {
+func (s *SafroleState) IsTicketSubmissionClosed(currJCE uint32) bool {
 	_, currPhase := s.EpochAndPhase(currJCE)
 	if currPhase >= types.TicketSubmissionEndSlot {
 		return true
@@ -359,11 +357,6 @@ func (s *SafroleState) GetTimeSlot() uint32 {
 }
 
 func (s *SafroleState) GetEpochValidatorAndRandomness(phase string) ([]types.Validator, common.Hash) {
-	// 4 authorities[pre, curr, next, designed]
-	// η0 Entropy[0] CURRENT randomness accumulator (see sec 6.10). randomness_buffer[0] = BLAKE2(CONCAT(randomness_buffer[0], fresh_randomness));
-	// η1 Entropy[1] accumulator snapshot BEFORE the execution of the first block of epoch N   - randomness used for ticket targeting epoch N+2
-	// η2 Entropy[2] accumulator snapshot BEFORE the execution of the first block of epoch N-1 - randomness used for ticket targeting epoch N+1
-	// η3 Entropy[3] accumulator snapshot BEFORE the execution of the first block of epoch N-2 - randomness used for ticket targeting current epoch N
 	var validatorSet []types.Validator
 	var target_randomness common.Hash
 	switch phase {
@@ -460,7 +453,6 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 	}
 	pubkeys := []bandersnatch.BanderSnatchKey{}
 	for _, v := range validatorSet {
-		//pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
 		pubkey := bandersnatch.BanderSnatchKey(common.ConvertToSlice(v.Bandersnatch))
 		pubkeys = append(pubkeys, pubkey)
 	}
@@ -470,17 +462,25 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 
 func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) []types.Ticket {
 	tickets := make([]types.Ticket, 0)
+	start := time.Now()
 	for attempt := uint8(0); attempt < types.TicketEntriesPerValidator; attempt++ {
 		// We can GenerateTickets for the NEXT epoch based on s.Entropy[1], but the CURRENT epoch based on s.Entropy[2]
 		entropy := usedEntropy
 		ticket, err := s.generateTicket(secret, entropy, attempt)
 		if err == nil {
-			fmt.Printf("[N%d] Generated ticket %d: %v\n", s.Id, attempt, entropy)
+			if debug {
+				fmt.Printf("[N%d] Generated ticket %d: %v\n", s.Id, attempt, entropy)
+			}
 			tickets = append(tickets, ticket)
 		} else {
 			fmt.Printf("Error generating ticket for attempt %d: %v\n", attempt, err)
 		}
 	}
+	elapsed := time.Since(start).Microseconds()
+	if trace && elapsed > 2000000 {
+		fmt.Printf(" --- GenerateTickets took %d ms\n", time.Since(start).Microseconds()/1000)
+	}
+
 	return tickets
 }
 
@@ -513,9 +513,9 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 	//step 0: derive ticketVRFInput
 	entroptIdx := 2
 	targetEpochRandomness := s.Entropy[entroptIdx]
-	isTicketSubmsissionClosed := s.IsTicketSubmsissionClosed(uint32(s.Timeslot))
+	isTicketSubmissionClosed := s.IsTicketSubmissionClosed(uint32(s.Timeslot))
 
-	if isTicketSubmsissionClosed || shifted {
+	if isTicketSubmissionClosed || shifted {
 		entroptIdx = 1
 		targetEpochRandomness = s.Entropy[entroptIdx]
 		ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
@@ -525,7 +525,9 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 		ringsetBytes := s.GetRingSet("Next")
 		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
-			fmt.Printf("[N%d] ValidateProposed Ticket Succ (SubmsissionClosed - using η%v:%v) TicketID=%x\n", s.Id, entroptIdx, targetEpochRandomness, ticket_id)
+			if debug {
+				fmt.Printf("[N%d] ValidateProposed Ticket Succ (SubmissionClosed - using η%v:%v) TicketID=%x\n", s.Id, entroptIdx, targetEpochRandomness, ticket_id)
+			}
 			return common.BytesToHash(ticket_id), nil
 		}
 	} else {
@@ -535,13 +537,17 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 		ringsetBytes := s.GetRingSet("Next")
 		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
-			fmt.Printf("[N%d] ValidateProposed Ticket Succ (Regular - using η%v:%v) TicketID=%x\n", s.Id, entroptIdx, targetEpochRandomness, ticket_id)
+			if debug {
+				fmt.Printf("[N%d] ValidateProposed Ticket Succ (Regular - using η%v:%v) TicketID=%x\n", s.Id, entroptIdx, targetEpochRandomness, ticket_id)
+			}
 			return common.BytesToHash(ticket_id), nil
 		}
 	}
 
 	ticketID, _ := t.TicketID()
-	fmt.Printf("[N%d] ValidateProposed Ticket Fail (using n%v:%v) TicketID=%v\nη0:%v\nη1:%v\nη2:%v\nη3:%v\n(SubmsissionClosed=%v)\n", s.Id, entroptIdx, targetEpochRandomness, ticketID, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3], isTicketSubmsissionClosed)
+	if debug {
+		fmt.Printf("[N%d] ValidateProposed Ticket Fail (using n%v:%v) TicketID=%v\nη0:%v\nη1:%v\nη2:%v\nη3:%v\n(SubmissionClosed=%v)\n", s.Id, entroptIdx, targetEpochRandomness, ticketID, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3], isTicketSubmissionClosed)
+	}
 	return common.Hash{}, fmt.Errorf(errTicketBadRingProof)
 }
 
@@ -551,7 +557,7 @@ func (s *StateDB) RemoveUnusedTickets() {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
 	sf := s.GetSafrole()
-	if sf.IsTicketSubmsissionClosed(uint32(s.GetSafrole().Timeslot)) {
+	if sf.IsTicketSubmissionClosed(uint32(s.GetSafrole().Timeslot)) {
 		for _, t := range s.queuedTickets {
 			targetEpochRandomness := sf.Entropy[2]
 			ticketVRFInput := sf.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
@@ -606,7 +612,9 @@ func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.BanderSnatc
 	if err != nil {
 		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
 	}
-	fmt.Printf("SignPrimary unsignHeaderHash=%v, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", unsignHeaderHash, blockSeal, fresh_VRFSignature, freshRandomness)
+	if debug {
+		fmt.Printf("SignPrimary unsignHeaderHash=%v, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", unsignHeaderHash, blockSeal, fresh_VRFSignature, freshRandomness)
+	}
 	return blockSeal, fresh_VRFSignature, nil
 }
 
@@ -628,7 +636,9 @@ func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.BanderSnat
 	if err != nil {
 		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
 	}
-	fmt.Printf("SignFallBack unsignHeaderHash=%v, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", unsignHeaderHash, blockSeal, fresh_VRFSignature, freshRandomness)
+	if debug {
+		fmt.Printf("SignFallBack unsignHeaderHash=%v, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", unsignHeaderHash, blockSeal, fresh_VRFSignature, freshRandomness)
+	}
 	return blockSeal, fresh_VRFSignature, nil
 }
 
@@ -758,17 +768,23 @@ func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub co
 		winning_ticket_id := s.GetPrimaryWinningTicket(slot_index)
 		for _, ticketID := range ticketIDs {
 			if ticketID == winning_ticket_id {
-				fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
+				if debug {
+					fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
+				}
 				return true
 			}
 		}
-		fmt.Printf("[N%v] [UNAUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
+		if debug {
+			fmt.Printf("[N%v] [UNAUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
+		}
 	} else {
 
 		//fallback mode
 		fallback_validator := s.GetFallbackValidator(currPhase)
 		if fallback_validator == bandersnatchPub {
-			fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v fallback validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
+			if debug {
+				fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v fallback validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
+			}
 			return true
 		}
 	}
@@ -780,8 +796,11 @@ func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
 	currJCE := common.ComputeCurrentJCETime()
 	prevEpoch, prevPhase := s.EpochAndPhase(s.GetTimeSlot())
 	currEpoch, currPhase := s.EpochAndPhase(currJCE)
-	fmt.Printf("[N%d] CheckTimeSlotReady PREV [%d] %d %d Curr [%d] %d %d\n",
-		s.Id, s.GetTimeSlot(), prevEpoch, prevPhase, currJCE, currEpoch, currPhase)
+	if debug {
+		if prevEpoch != currEpoch || currPhase != prevPhase {
+			fmt.Printf("[N%d] CheckTimeSlotReady PREV [%d] %d %d Curr [%d] %d %d\n", s.Id, s.GetTimeSlot(), prevEpoch, prevPhase, currJCE, currEpoch, currPhase)
+		}
+	}
 	if currEpoch > prevEpoch {
 		return currJCE, true
 	} else if currEpoch == prevEpoch && currPhase > prevPhase {
@@ -896,7 +915,9 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 
 	if prevEpoch < currEpoch { //MK check EpochNumSlots-1 ?
 		//TODO this is Winning ticket elgible. Check if header has marker, if yes, verify it
-		fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
+		if debug {
+			fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
+		}
 		// eq 68 primary mode
 		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength {
 			winning_tickets, err := s2.GenerateWinningMarker()
@@ -954,15 +975,13 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 
 			_, exists := ticketIDs[ticket_id]
 			if exists {
-				fmt.Printf("DETECTED Resubmit %v\n", ticket_id)
+				if debug {
+					fmt.Printf("DETECTED Resubmit %v\n", ticket_id)
+				}
 				continue // return s2, fmt.Errorf(errTicketResubmission)
 			}
 
 			s2.PutTicketInAccumulator(ticket_id, e.Attempt)
-
-			if s.Id == 0 {
-				fmt.Printf("[N%d] added Ticket ID %v\n", id, ticket_id)
-			}
 		}
 	}
 	// Sort and trim tickets
@@ -983,7 +1002,9 @@ func (s2 *SafroleState) PhasingEntropyAndValidator(s *SafroleState, new_entropy_
 	s2.Entropy[3] = s.Entropy[2]
 	s2.Entropy[0] = new_entropy_0
 	s2.NextEpochTicketsAccumulator = s2.NextEpochTicketsAccumulator[0:0]
-	fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY shifted new epoch\nη0:%v\nη1:%v\nη2:%v\nη3:%v\nη0:%v (original)\n", s2.Id, s2.Entropy[0], s2.Entropy[1], s2.Entropy[2], s2.Entropy[3], prev_n0)
+	if debug {
+		fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY shifted new epoch\nη0:%v\nη1:%v\nη2:%v\nη3:%v\nη0:%v (original)\n", s2.Id, s2.Entropy[0], s2.Entropy[1], s2.Entropy[2], s2.Entropy[3], prev_n0)
+	}
 }
 
 func (s2 *SafroleState) StableEntropy(s *SafroleState, new_entropy_0 common.Hash) {
@@ -991,7 +1012,9 @@ func (s2 *SafroleState) StableEntropy(s *SafroleState, new_entropy_0 common.Hash
 	s2.Entropy[1] = s.Entropy[1]
 	s2.Entropy[2] = s.Entropy[2]
 	s2.Entropy[3] = s.Entropy[3]
-	fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY norm\nη1:%v\nη2:%v\nη3:%v\n", s2.Id, s2.Entropy[1], s2.Entropy[2], s2.Entropy[3])
+	if debug {
+		fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY norm\nη1:%v\nη2:%v\nη3:%v\n", s2.Id, s2.Entropy[1], s2.Entropy[2], s2.Entropy[3])
+	}
 }
 
 func (s2 *SafroleState) PutTicketInAccumulator(tickeID common.Hash, attempt uint8) {
@@ -1032,208 +1055,6 @@ func (s *SafroleState) ChooseFallBackValidator() ([]common.Hash, error) {
 	return chosenkeys, nil
 
 }
-
-// func (s *SafroleState) GetProposedTargetEpochRandomness() common.Hash {
-// 	targetRandomness := s.Entropy[2]
-// 	return targetRandomness
-// }
-// 6.6. On-chain Tickets Validation
-// func (s *SafroleState) validateTicket_test_vector(targetEpochRandomness common.Hash, envelope *TicketEnvelope) (common.Hash, error) {
-
-// 	//step 0: derive ticketVRFInput
-// 	ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, envelope.Attempt)
-
-// 	//step 1: verify envelope's VRFSignature using ring verifier
-// 	//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-// 	ringsetBytes := s.GetRingSet("Designed")
-// 	ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, envelope.RingSignature[:], ticketVRFInput, envelope.Extra)
-// 	if err != nil {
-// 		return common.Hash{}, fmt.Errorf("Bad signature")
-// 	}
-
-// 	return common.BytesToHash(ticket_id), nil
-// }
-// queueTicketEnvelope adds a ticket envelope to the list and sorts it
-// func (s *SafroleState) QueueTicketEnvelope(envelope *TicketEnvelope) error {
-// 	//return nil
-// 	ticket_id, err := s.validateTicket_test_vector(s.Entropy[0], envelope)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	// Add envelope to s.TicketsAccumulator as "t"
-// 	t := types.TicketBody{
-// 		Id:      ticket_id,
-// 		Attempt: uint8(envelope.Attempt),
-// 	}
-// 	s.TicketsAccumulator = append(s.TicketsAccumulator, t)
-
-// 	return nil
-
-// }
-// func (s *SafroleState) validateExtrinsic(e Extrinsic) (*TicketEnvelope, error) {
-// 	ticket_id, err := bandersnatch.VRFSignedOutput(e.Signature[:])
-// 	if err != nil {
-// 		return nil, fmt.Errorf("invalid ticket_id err=%v", err)
-// 	}
-// 	return &TicketEnvelope{
-// 		Id:            common.BytesToHash(ticket_id),
-// 		Attempt:       e.Attempt,
-// 		Extra:         []byte{},
-// 		RingSignature: e.Signature,
-// 	}, nil
-// }
-// func (s *SafroleState) AdvanceSafrole(targetJCE uint32) error {
-// 	prevJCE := s.GetTimeSlot()
-// 	if prevJCE < targetJCE {
-// 		return fmt.Errorf(errTimeslotNotMonotonic)
-// 	}
-// 	currEpochFirst := s.GetCurrEpochFirst()
-// 	nextEpochFirst := s.GetNextEpochFirst()
-// 	if currEpochFirst > targetJCE {
-// 		//not ready to advance
-// 		return fmt.Errorf(errEpochFirstSlotNotMet)
-// 	}
-
-// 	if targetJCE >= nextEpochFirst {
-// 		// New Epoch
-// 		s.Entropy[0] = s.ComputeCurrRandomness(s.Entropy[0])
-// 		s.Entropy[1] = s.Entropy[0]
-// 		s.Entropy[2] = s.Entropy[1]
-// 		s.Entropy[3] = s.Entropy[2]
-// 	} else {
-// 		// Epoch in progress
-// 		s.Entropy[0] = s.ComputeCurrRandomness(s.Entropy[0])
-// 	}
-// 	if targetJCE > prevJCE {
-// 		s.Timeslot = targetJCE
-// 	}
-// 	return nil
-// }
-// statefrole_stf is the function to be tested
-// func (s *SafroleState) STF(input SInput) (SOutput, *SafroleState, error) {
-
-// 	s2 := s.Copy()
-// 	o := &SOutput{
-// 		Ok: nil,
-// 	}
-// 	ok := &struct {
-// 		EpochMark   *types.EpochMark    `json:"epoch_mark"`
-// 		TicketsMark []*types.TicketBody `json:"tickets_mark"`
-// 	}{
-// 		EpochMark:   nil,
-// 		TicketsMark: nil,
-// 	}
-// 	if input.Slot <= s.Timeslot {
-// 		return *o, s2, fmt.Errorf(errTimeslotNotMonotonic)
-// 	}
-
-// 	// tally existing ticketIDs
-// 	ticketIDs := make(map[common.Hash]uint8)
-// 	for _, a := range s.TicketsAccumulator {
-// 		//fmt.Printf("ticketID? %d => %s\n", i, a.Id.String())
-// 		ticketIDs[a.Id] = a.Attempt
-// 	}
-
-// 	pubkeys := []bandersnatch.BanderSnatchKey{}
-// 	for _, v := range s.NextValidators {
-// 		//pubkeys = append(pubkeys, v.Bandersnatch.Bytes())
-// 		pubkey := bandersnatch.BanderSnatchKey(common.ConvertToSlice(v.Bandersnatch))
-// 		pubkeys = append(pubkeys, pubkey)
-// 	}
-// 	ringsetBytes := bandersnatch.InitRingSet(pubkeys)
-
-// 	// Process Extrinsic Tickets
-// 	//fmt.Printf("Current Slot: %d => Input Slot: %d \n", s.Timeslot, input.Slot)
-// 	newTickets := []types.TicketBody{}
-// 	for _, e := range input.Extrinsics {
-// 		if input.Slot >= types.TicketSubmissionEndSlot {
-// 			return *o, s2, fmt.Errorf(errTicketSubmissionInTail)
-// 		}
-// 		if len(s.Entropy) == types.EntropySize {
-// 			//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-// 			vrfInputData := append(append([]byte(types.X_T), s.Entropy[2].Bytes()...), byte(e.Attempt))
-// 			auxData := []byte{}
-// 			vrfOutput, err := bandersnatch.RingVrfVerify(ringsetBytes, e.Signature[:], vrfInputData, auxData)
-// 			if err != nil {
-// 				panic(33)
-// 				return *o, s2, fmt.Errorf(errTicketBadRingProof)
-// 			}
-// 			_, exists := ticketIDs[common.BytesToHash(vrfOutput)]
-// 			if exists {
-// 				fmt.Printf("DETECTED Resubmit %x\n", vrfOutput)
-// 				return *o, s2, fmt.Errorf(errTicketResubmission)
-// 			}
-// 			if e.Attempt >= types.TicketEntriesPerValidator {
-// 				return *o, s2, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
-// 			}
-// 			newa := types.TicketBody{
-// 				Id:      common.BytesToHash(vrfOutput),
-// 				Attempt: uint8(e.Attempt),
-// 			}
-// 			if len(newTickets) > 0 && compareTickets(newa.Id, newTickets[len(newTickets)-1].Id) < 0 {
-// 				return *o, s2, fmt.Errorf(errTicketBadOrder)
-// 			}
-// 			newTickets = append(newTickets, newa)
-// 			fmt.Printf("added Ticket ID %x\n", vrfOutput)
-// 		}
-// 	}
-// 	for _, newa := range newTickets {
-// 		s2.TicketsAccumulator = append(s2.TicketsAccumulator, newa)
-// 	}
-// 	// Sort tickets using compareTickets
-// 	sort.SliceStable(s2.TicketsAccumulator, func(i, j int) bool {
-// 		return compareTickets(s2.TicketsAccumulator[i].Id, s2.TicketsAccumulator[j].Id) < 0
-// 	})
-// 	fmt.Printf("Sorted Tickets:\n")
-// 	for i, t := range s2.TicketsAccumulator {
-// 		fmt.Printf(" %d: %s\n", i, t.Id)
-// 	}
-// 	// Drop useless tickets
-// 	if len(s2.TicketsAccumulator) > types.EpochLength {
-// 		s2.TicketsAccumulator = s2.TicketsAccumulator[0:types.EpochLength]
-// 	}
-
-// 	// the last slot in the Epoch, with a full set of tickets
-// 	if len(s2.TicketsAccumulator) == types.EpochLength && input.Slot == types.EpochLength-1 {
-// 		ok.TicketsMark = s.computeTicketSlotBinding(s2.TicketsAccumulator)
-// 	}
-// 	fmt.Printf(" -- %d %d %d \n", input.Slot, types.EpochLength, input.Slot%types.EpochLength)
-// 	// adjust entropy
-// 	hasher256, err := blake2b.New256(nil)
-// 	if err != nil {
-// 		return *o, s2, err
-// 	}
-// 	hasher256.Write(append(s.Entropy[0].Bytes(), input.Entropy.Bytes()...))
-// 	res := hasher256.Sum(nil)
-
-// 	if input.Slot%types.EpochLength == 0 {
-// 		// New Epoch
-// 		var v [6]common.Hash
-// 		for i, x := range s.DesignedValidators {
-// 			v[i] = x.Bandersnatch.Hash()
-// 			fmt.Printf(" !! %d %x\n", i, v[i])
-// 		}
-// 		ok.EpochMark = &types.EpochMark{
-// 			Entropy:    s.Entropy[0],
-// 			Validators: v,
-// 		}
-// 		s2.Entropy[1] = s.Entropy[0]
-// 		s2.Entropy[2] = s.Entropy[1]
-// 		s2.Entropy[3] = s.Entropy[2]
-// 		s2.Entropy[0] = common.BytesToHash(res)
-// 		s2.TicketsAccumulator = s2.TicketsAccumulator[0:0]
-// 	} else {
-// 		// Epoch in progress
-// 		s2.Entropy[0] = common.BytesToHash(res)
-// 		s2.Entropy[1] = s.Entropy[1]
-// 		s2.Entropy[2] = s.Entropy[2]
-// 		s2.Entropy[3] = s.Entropy[3]
-// 	}
-
-// 	s2.Timeslot = input.Slot
-// 	o.Ok = ok
-// 	return *o, s2, fmt.Errorf(errNone)
-// }
 
 func (E *Extrinsic) UnmarshalJSON(data []byte) error {
 	var s struct {

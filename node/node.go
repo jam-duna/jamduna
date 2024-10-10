@@ -32,6 +32,8 @@ import (
 )
 
 const (
+	debug    = false
+	trace    = false
 	numNodes = 6
 	quicAddr = "localhost:%d"
 	basePort = 9000
@@ -161,16 +163,18 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
 
-	// Print each peer in the 'peers' slice
-	fmt.Println("Peers:")
-	for _, peer := range peers {
-		fmt.Printf("  - %s\n", peer)
-	}
+	if debug {
+		// Print each peer in the 'peers' slice
+		fmt.Println("Peers:")
+		for _, peer := range peers {
+			fmt.Printf("  - %s\n", peer)
+		}
 
-	// Iterate over peerList and print each key and its corresponding NodeInfo
-	fmt.Println("Peer List:")
-	for key, nodeInfo := range peerList {
-		fmt.Printf("  Key: %s, LocalAddr: %s\n", key, nodeInfo.PeerAddr)
+		// Iterate over peerList and print each key and its corresponding NodeInfo
+		fmt.Println("Peer List:")
+		for key, nodeInfo := range peerList {
+			fmt.Printf("  Key: %s, LocalAddr: %s\n", key, nodeInfo.PeerAddr)
+		}
 	}
 
 	levelDBPath := fmt.Sprintf("%v/leveldb/", dataDir)
@@ -342,9 +346,9 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		var blkHash common.Hash
 		if _statedb.GetBlock() != nil {
 			blkHash = _statedb.GetBlock().Hash()
-			fmt.Printf("[N%d] addStateDB1 [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHash, _statedb.BlockHash, _statedb.StateRoot)
-		} else {
-			fmt.Printf("[N%d] addStateDB0 [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHash, _statedb.BlockHash, _statedb.StateRoot)
+		}
+		if debug {
+			fmt.Printf("[N%d] addStateDB [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHash, _statedb.BlockHash, _statedb.StateRoot)
 		}
 		n.statedb = _statedb
 		n.statedbMap[blkHash] = _statedb
@@ -359,7 +363,9 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		panic(0)
 	}
 	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() {
-		fmt.Printf("[N%d] addStateDB TIP %v\n", n.id, _statedb.GetBlock().Hash())
+		if debug {
+			fmt.Printf("[N%d] addStateDB TIP %v\n", n.id, _statedb.GetBlock().Hash())
+		}
 		n.statedb = _statedb
 		n.statedbMap[_statedb.GetBlock().Hash()] = _statedb
 	}
@@ -555,7 +561,9 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 			// Handle the error or take appropriate action if the assertion fails
 			return blk, fmt.Errorf("failed to assert decoded to *types.Block")
 		}
-		fmt.Printf("[N%d] fetchBlock(%v) %v\n", n.id, blockHash, resp)
+		if debug {
+			fmt.Printf("[N%d] fetchBlock(%v) len=%d\n", n.id, common.Str(blockHash), len(resp))
+		}
 		if blk != nil {
 			n.blocks[blk.Hash()] = blk
 		}
@@ -564,7 +572,6 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 	return nil, fmt.Errorf("fetchBlock - No response")
 }
 
-// given n.blocks, 1 or more of which can extend the tip, we advance the chain
 func (n *Node) extendChain() error {
 	parenthash := n.statedb.BlockHash
 	for {
@@ -574,25 +581,39 @@ func (n *Node) extendChain() error {
 			if b.ParentHash() == parenthash {
 				ok = true
 				nextBlock := b
-				fmt.Printf("[N%d] extendChain %v <- %v\n", n.id, parenthash, nextBlock.Hash())
-				// now APPLY the block to the tip
+
+				// Measure time taken to apply state transition
+				start := time.Now()
+
+				// Apply the block to the tip
 				newStateDB, err := statedb.ApplyStateTransitionFromBlock(n.statedb, context.Background(), nextBlock)
+
 				if err != nil {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err
 				}
-				// EXTEND the tip of the chain
+
+				// Print the elapsed time in milliseconds
+				elapsed := time.Since(start).Microseconds()
+				if elapsed > 1000000 && trace {
+					fmt.Printf("[N%d] extendChain %v <- %v \033[ApplyStateTransitionFromBlock\033[0m took %d ms\n", n.id, common.Str(parenthash), common.Str(nextBlock.Hash()), elapsed/1000)
+				}
+
+				// Extend the tip of the chain
 				n.addStateDB(newStateDB)
 				parenthash = nextBlock.Hash()
-				fmt.Printf("[N%d] extendChain addstatedb TIP Now: s:%v<-%v\n",
-					n.id, newStateDB.ParentHash, newStateDB.BlockHash)
+				if debug {
+					fmt.Printf("[N%d] extendChain addstatedb TIP Now: s:%v<-%v\n", n.id, newStateDB.ParentHash, newStateDB.BlockHash)
+				}
 				break
 			}
 		}
 
-		if ok == false {
-			// if there is no next block, we're done!
-			fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parenthash)
+		if !ok {
+			// If there is no next block, we're done!
+			if debug {
+				fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parenthash)
+			}
 			return nil
 		}
 	}
@@ -609,7 +630,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 			//fmt.Printf("[N%d] processBlock: hit genesis (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else if n.statedb != nil && b.ParentHash() == n.statedb.BlockHash {
-			fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
+			//fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else {
 			var err error
@@ -635,6 +656,17 @@ func (n *Node) processBlock(blk *types.Block) error {
 
 	// we got to the tip, now extend the chain, moving the tip forward, applying blocks using blockcache
 	n.extendChain()
+
+	currJCE := common.ComputeCurrentJCETime()
+	currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
+	if blk.Header.EpochMark != nil  || ( currEpoch == 0 && currPhase == 0 ) {
+		if debug {
+			fmt.Printf("[N%d]GenerateTickets currEpoch=%v, currPhase=%v\n", n.id, currEpoch, currPhase)
+		}
+		n.GenerateTickets()
+		n.BroadcastTickets()
+	}
+
 	return nil // Success
 }
 
@@ -805,8 +837,8 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	//fmt.Printf("!!!! writeDebug msgType=%v, structDir=%v\n", msgType, structDir)
 	if msgType != "unknown" {
 		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
-		currTS := common.ComputeCurrenTS()
-		path := fmt.Sprintf("%s/%v_%v_%v", structDir, currTS, epoch, phase)
+		//currTS := common.ComputeCurrenTS()
+		path := fmt.Sprintf("%s/%v_%v", structDir, epoch, phase)
 		if epoch == 0xFFFFFFFF || phase == 0xFFFFFFFF {
 			path = fmt.Sprintf("%s/genesis", structDir)
 		}
@@ -820,7 +852,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 				return fmt.Errorf("expected types.Ticket but got %T", obj)
 			}
 		}
-		if msgType == "Block" {
+		if msgType == "Block" && false {
 			if block, ok := obj.(*types.Block); ok {
 				// Cast successful, you can now access ticket's methods or fields
 				identifier := block.Hash() // Assuming TicketID() is a method of types.Ticket
@@ -831,7 +863,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 			}
 		}
 		jsonPath := fmt.Sprintf("%s.json", path)
-		codecPath := fmt.Sprintf("%s.codec", path)
+		codecPath := fmt.Sprintf("%s.bin", path)
 		//fmt.Printf("jsonPath=%v, codecPath=%v\n", jsonPath, codecPath)
 
 		// Check if the directories exist, if not create them
@@ -868,7 +900,6 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 
 func (n *Node) runClient() {
 
-	debug := true
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
 
@@ -884,24 +915,6 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
-			currJCE := common.ComputeCurrentJCETime()
-			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
-
-			if currEpoch == 0 && currPhase == 0 {
-				// this is the genesis case?
-				genesisEpochFirstSlot := n.statedb.GetSafrole().EpochFirstSlot
-				// genesisEpochFirstSlot-1 < currJCE <= genesisEpochFirstSlot+1
-				if genesisEpochFirstSlot-1 < currJCE && currJCE <= genesisEpochFirstSlot+1 {
-					n.GenerateTickets()
-					n.BroadcastTickets()
-				}
-			} else if currPhase == types.EpochLength-1 { // you had currPhase == types.EpochLength-1
-				// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-				fmt.Printf("[N%d]GenerateTickets currEpoch=%v, currPhase=%v\n", n.id, currEpoch, currPhase)
-				n.GenerateTickets()
-				n.BroadcastTickets()
-
-			}
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs)
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
@@ -914,12 +927,13 @@ func (n *Node) runClient() {
 				n.addStateDB(newStateDB)
 				n.blocks[newBlock.Hash()] = newBlock
 				n.broadcast(*newBlock)
-				fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
-				for _, g := range newStateDB.GuarantorAssignments {
-					fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
-				}
 
 				if debug {
+					fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
+					for _, g := range newStateDB.GuarantorAssignments {
+						fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
+					}
+
 					timeslot := newStateDB.GetSafrole().Timeslot
 					err := n.writeDebug(newBlock, timeslot)
 					if err != nil {
