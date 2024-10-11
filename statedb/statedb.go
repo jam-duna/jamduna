@@ -51,7 +51,7 @@ type StateDB struct {
 	judgementMutex  sync.Mutex
 
 	knownTickets  map[common.Hash]uint8
-	queuedTickets map[common.Hash]types.Ticket
+	queuedTickets map[common.Hash][]types.Ticket
 	ticketMutex   sync.Mutex
 
 	X *types.XContext
@@ -64,15 +64,10 @@ type StateDB struct {
 	logChan chan storage.LogMessage
 }
 
-func (s *StateDB) AddTicketToQueue(t types.Ticket) {
+func (s *StateDB) AddTicketToQueue(t types.Ticket, used_entropy common.Hash) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
-	ticketID, err := t.TicketID()
-	if err != nil {
-		fmt.Printf("Invalid Ticket. Err=%v\n", err)
-		return
-	}
-	s.queuedTickets[ticketID] = t
+	s.queuedTickets[used_entropy] = append(s.queuedTickets[used_entropy], t)
 }
 
 func (s *StateDB) AddLookupToQueue(l types.Preimages) {
@@ -129,7 +124,7 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	//statedb.tickets[common.BytesToHash(ticket_id)] = t
 	sf := s.GetSafrole()
 	start := time.Now()
-	ticketID, err := sf.ValidateProposedTicket(&t, false)
+	ticketID, entropy_idx, err := sf.ValidateIncomingTicket(&t)
 	if err != nil {
 		if debug {
 			fmt.Printf("ProcessIncomingTicket Error Invalid Ticket. Err=%v\n", err)
@@ -144,7 +139,10 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 	if s.CheckTicketExists(ticketID) {
 		return
 	}
-	s.AddTicketToQueue(t)
+
+	used_entropy := s.GetSafrole().Entropy[entropy_idx]
+	s.AddTicketToQueue(t, used_entropy)
+	//TODO: log ticket here
 	currJCE, _ := s.JamState.SafroleState.CheckTimeSlotReady()
 	s.writeLog(&t, currJCE)
 	s.knownTickets[ticketID] = t.Attempt
@@ -209,12 +207,14 @@ func (s *StateDB) GetVMMutex() sync.Mutex {
 func (s *StateDB) RemoveTicket(t *types.Ticket) {
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
-	ticketID, err := t.TicketID()
-	if err != nil {
-		fmt.Printf("Invalid Ticket. Err=%v\n", err)
-		return
+	using_entropy := s.GetSafrole().Entropy[2]
+	for i, ticket := range s.queuedTickets[using_entropy] {
+		if ticket.Hash() == t.Hash() {
+			s.queuedTickets[using_entropy] = append(s.queuedTickets[using_entropy][:i], s.queuedTickets[using_entropy][i+1:]...)
+			break
+		}
 	}
-	delete(s.queuedTickets, ticketID)
+
 }
 
 func (s *StateDB) RemoveLookup(p *types.Preimages) {
@@ -294,7 +294,7 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
-	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
+	statedb.queuedTickets = make(map[common.Hash][]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]uint8)
 	statedb.queueJudgements = make(map[common.Hash]types.Judgement)
 	statedb.knownJudgements = make(map[common.Hash]int)
@@ -542,7 +542,7 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
-	statedb.queuedTickets = make(map[common.Hash]types.Ticket)
+	statedb.queuedTickets = make(map[common.Hash][]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]uint8)
 	statedb.queueJudgements = make(map[common.Hash]types.Judgement)
 	statedb.knownJudgements = make(map[common.Hash]int)
@@ -599,7 +599,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		knownGuarantees:       make(map[common.Hash]int),
 		knownAssurances:       make(map[common.Hash]int),
 		knownJudgements:       make(map[common.Hash]int),
-		queuedTickets:         make(map[common.Hash]types.Ticket),
+		queuedTickets:         make(map[common.Hash][]types.Ticket),
 		queuedPreimageLookups: make(map[common.Hash]types.Preimages),
 		queuedGuarantees:      make(map[common.Hash]types.Guarantee),
 		queuedAssurances:      make(map[common.Hash]types.Assurance),
@@ -625,8 +625,10 @@ func (s *StateDB) CloneExtrinsicMap(n *StateDB) {
 	for k, v := range s.knownTickets {
 		n.knownTickets[k] = v
 	}
+	// use copy
 	for k, v := range s.queuedTickets {
-		t, _ := v.DeepCopy()
+		t := make([]types.Ticket, len(v))
+		copy(t, v)
 		n.queuedTickets[k] = t
 	}
 
@@ -729,7 +731,7 @@ func (s *StateDB) SetID(id uint32) {
 	s.JamState.SafroleState.Id = id
 }
 
-func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, targetJCE uint32, id uint32) error {
+func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, targetJCE uint32, id uint32) (uint32, uint32, error) {
 	num_preimages := uint32(0)
 	num_octets := uint32(0)
 
@@ -737,7 +739,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	// validate (eq 156)
 	for i := 1; i < len(preimages); i++ {
 		if preimages[i].Requester <= preimages[i-1].Requester {
-			return fmt.Errorf(errServiceIndices)
+			return 0, 0, fmt.Errorf(errServiceIndices)
 		}
 	}
 
@@ -745,7 +747,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// validate eq 157
 		_, err := s.ValidateLookup(&l)
 		if err != nil {
-			return err
+			return 0, 0, err
 		}
 	}
 
@@ -761,10 +763,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		num_octets += l.BlobLength()
 	}
 
-	s.JamState.tallyStatistics(s.Id, "preimages", num_preimages)
-	s.JamState.tallyStatistics(s.Id, "octets", num_octets)
-
-	return nil
+	return num_preimages, num_octets, nil
 }
 
 func (s *StateDB) getRhoWorkReportByWorkPackage(workPackageHash common.Hash) (types.WorkReport, uint32, bool) {
@@ -923,7 +922,7 @@ func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarante
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) error {
+func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (uint32, uint32, error) {
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
@@ -931,19 +930,19 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	var err error
 	result, err := d.IsValidateDispute(&disputes)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	//state changing here
 	//cores reading the old jam state
 	//ρ†
 	d.ProcessDispute(result, disputes.Culprit, disputes.Fault)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 
 	err = s.ValidateAssurances(assurances)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 
 	// Assurances: get the bitstring from the availability
@@ -952,7 +951,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	num_assurances, availableWorkReport := d.ProcessAssurances(assurances)
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
-	s.JamState.tallyStatistics(s.Id, "assurances", num_assurances)
+
 	if debug {
 		fmt.Printf("Rho State Update - Assurances\n")
 		for i, rho := range s.JamState.AvailabilityAssignments {
@@ -967,7 +966,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	// Guarantees
 	err = s.ValidateGuarantees(guarantees)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	num_reports := uint32(len(guarantees))
 
@@ -982,9 +981,8 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 			}
 		}
 	}
-	s.JamState.tallyStatistics(s.Id, "reports", num_reports)
 
-	return nil
+	return num_reports, num_assurances, nil
 }
 
 // given previous safrole, applt state transition using block
@@ -1002,9 +1000,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	ticketExts := blk.Tickets()
 	sf_header := blk.GetHeader()
 	epochMark := blk.EpochMark()
+
 	if epochMark != nil {
 		s.knownTickets = make(map[common.Hash]uint8) //keep track of known tickets
 		// s.queuedTickets = make(map[common.Hash]types.Ticket)
+		s.GetJamState().ResetTallyStatistics()
 	}
 	sf := s.GetSafrole()
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header, s.Id)
@@ -1015,7 +1015,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	s.JamState.SafroleState = &s2
 	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
-	s.JamState.tallyStatistics(s.Id, "tickets", uint32(len(ticketExts)))
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
 	elapsed := time.Since(start).Microseconds()
 	if trace && elapsed > 1000000 {
 		fmt.Printf("\033[31mApplyStateTransitionFromBlock:Tickets\033[0m %d ms\n", elapsed/1000)
@@ -1023,12 +1023,13 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// 24 - Preimages
 	preimages := blk.PreimageLookups()
-	err = s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
+	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
 	if err != nil {
 		return s, err
 	}
 	//fmt.Printf("ApplyStateTransitionFromBlock - Preimages\n")
-
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "preimages", num_preimage)
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
 	// 23,25-27 Disputes, Assurances. Guarantees
 	disputes := blk.Disputes()
 	assurances := blk.Assurances()
@@ -1040,7 +1041,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}
 	}
 
-	err = s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
+	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
 	if err != nil {
 		return s, err
 	}
@@ -1052,6 +1053,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "assurances", num_assurances)
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
+
 	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
 	// TODO : Remove cores and get the rho state from JamState
 	err = s.Accumulate()
@@ -1070,7 +1074,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		fmt.Printf("ApplyStateTransitionFromBlock - Authorizations\n")
 	}
 	// 30 - compute pi
-	s.JamState.tallyStatistics(s.Id, "blocks", 1)
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
 	}
@@ -1274,11 +1278,13 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 
 		} else {
-			for ticketID, ticket := range s.queuedTickets {
+			next_n2 := s.JamState.SafroleState.GetNextN2()
+			for _, ticket := range s.queuedTickets[next_n2] {
 				t, err := ticket.DeepCopy()
 				if err != nil {
 					continue
 				}
+				ticketID, _ := t.TicketID()
 				if s.JamState.SafroleState.InTicketAccumulator(ticketID) {
 					continue
 				} else if len(extrinsicData.Tickets) >= types.MaxTicketsPerExtrinsic {
@@ -1289,6 +1295,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 					extrinsicData.Tickets = append(extrinsicData.Tickets, t)
 				}
 			}
+
 			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 		}
 	}

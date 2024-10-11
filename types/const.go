@@ -36,6 +36,10 @@ const (
 	MaxTicketsPerExtrinsic    = 3  // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
 )
 
+// time mode
+// three mode input => "JAM", "TimeStamp", "TimeSlot"
+const TimeUnitMode = "JAM"
+
 const (
 	// Medium: configure these
 	W_S = 6 // W_S = 6: The size of an exported segment in erasure-coded pieces.

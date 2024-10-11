@@ -56,7 +56,10 @@ func (n *Node) GenerateTickets() {
 	defer n.ticketsMutex.Unlock()
 	sf := n.statedb.GetSafrole()
 	actualEpoch, _ := sf.EpochAndPhase(n.statedb.GetSafrole().Timeslot)
-	currEpoch, _ := sf.EpochAndPhase(common.ComputeCurrentJCETime())
+	// timeslot mark
+	// jce := common.ComputeCurrentJCETime()
+	jce := common.ComputeRealCurrentJCETime(types.TimeUnitMode)
+	currEpoch, _ := sf.EpochAndPhase(jce)
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
 	if n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetSafrole().Timeslot) {
 		if debug {

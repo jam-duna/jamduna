@@ -180,8 +180,18 @@ func (state *JamState) Accumulate(serviceIndex int, accumulationState types.Accu
 	return args, nil
 }
 
+func (n *JamState) ResetTallyStatistics() {
+
+	n.ValidatorStatistics[1] = n.ValidatorStatistics[0]
+	n.ValidatorStatistics[0] = [types.TotalValidators]Pi_state{
+		{BlocksProduced: 0, TicketsIntroduced: 0, PreimagesIntroduced: 0, OctetsIntroduced: 0, ReportsGuaranteed: 0, AvailabilityAssurances: 0},
+	}
+}
+
 // tallyStatistics updates the statistics for validators based on their activities.
 func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt uint32) {
+	// Update the statistics for the validator based on the activity
+
 	switch activity {
 	case "blocks":
 		n.ValidatorStatistics[0][validatorIndex].BlocksProduced += cnt

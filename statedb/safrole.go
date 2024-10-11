@@ -72,6 +72,14 @@ func (s *SafroleState) GetSafroleBasicState() SafroleBasicState {
 	}
 }
 
+func (s *SafroleState) GetNextN2() common.Hash {
+	_, currphase := s.EpochAndPhase(uint32(s.Timeslot))
+	if currphase == types.EpochLength-1 {
+		return s.Entropy[1]
+	}
+	return s.Entropy[2]
+}
+
 // Extrinsic is submitted by authorities, which are added to Safrole State in TicketsAccumulator if valid
 type Extrinsic struct {
 	Attempt   uint8                                 `json:"attempt"`
@@ -123,8 +131,9 @@ type SafroleState struct {
 
 func NewSafroleState() *SafroleState {
 	return &SafroleState{
-		Id:                 99999,
-		Timeslot:           uint32(common.ComputeCurrentJCETime()),
+		Id: 99999,
+		// Timeslot:           uint32(common.ComputeCurrentJCETime()),
+		Timeslot:           common.ComputeTimeUnit(types.TimeUnitMode),
 		BlockNumber:        0,
 		Entropy:            Entropy{},
 		PrevValidators:     []types.Validator{},
@@ -220,26 +229,76 @@ type ClaimData struct {
 	RandomnessSource []byte `json:"randomness_source"`
 }
 
-func ComputeEpochAndPhase(currCJE, Epoch0Timestamp uint32) (currentEpoch uint32, currentPhase uint32) {
-	if currCJE < Epoch0Timestamp || currCJE == 0xFFFFFFFF {
-		currentEpoch = 0xFFFFFFFF
-		currentPhase = 0xFFFFFFFF
+func ComputeEpochAndPhase(ts, Epoch0Timestamp uint32) (currentEpoch uint32, currentPhase uint32) {
+
+	if types.TimeUnitMode == "TimeStamp" {
+		if ts < Epoch0Timestamp || ts == 0xFFFFFFFF {
+			currentEpoch = 0xFFFFFFFF
+			currentPhase = 0xFFFFFFFF
+			return currentEpoch, currentPhase
+		}
+	} else if types.TimeUnitMode == "TimeSlot" {
+		if ts < Epoch0Timestamp/types.SecondsPerSlot {
+			currentEpoch = 0xFFFFFFFF
+			currentPhase = 0xFFFFFFFF
+			return currentEpoch, currentPhase
+		} else {
+			currentEpoch = (ts - Epoch0Timestamp/types.SecondsPerSlot) / types.EpochLength
+			currentPhase = (ts - Epoch0Timestamp/types.SecondsPerSlot) % types.EpochLength
+			return currentEpoch, currentPhase
+		}
+	} else if types.TimeUnitMode == "JAM" {
+		if ts < Epoch0Timestamp/types.SecondsPerSlot {
+			currentEpoch = 0xFFFFFFFF
+			currentPhase = 0xFFFFFFFF
+			return currentEpoch, currentPhase
+		}
+		currentEpoch = ts / types.EpochLength
+		currentPhase = ts % types.EpochLength
 		return currentEpoch, currentPhase
+
+	} else {
+		return 0xFFFFFFFF, 0xFFFFFFFF
 	}
-	currentEpoch = uint32((currCJE - Epoch0Timestamp) / (types.SecondsPerSlot * types.EpochLength)) // eg. / 60
-	currentPhase = ((currCJE - Epoch0Timestamp) % (types.SecondsPerSlot * types.EpochLength)) / types.SecondsPerSlot
-	return
+
+	return 0xFFFFFFFF, 0xFFFFFFFF
 }
 
-func (s *SafroleState) EpochAndPhase(currCJE uint32) (currentEpoch int32, currentPhase uint32) {
-	if currCJE < s.EpochFirstSlot {
-		currentEpoch = -1
-		currentPhase = 0
+func (s *SafroleState) EpochAndPhase(ts uint32) (currentEpoch int32, currentPhase uint32) {
+	if types.TimeUnitMode == "TimeStamp" {
+		if ts < s.EpochFirstSlot {
+			currentEpoch = -1
+			currentPhase = 0
+			return
+		}
+		currentEpoch = int32((ts - s.EpochFirstSlot) / (types.SecondsPerSlot * types.EpochLength)) // eg. / 60
+		currentPhase = ((ts - s.EpochFirstSlot) % (types.SecondsPerSlot * types.EpochLength)) / types.SecondsPerSlot
 		return
+	} else if types.TimeUnitMode == "TimeSlot" {
+		realEpochFirstSlot := s.EpochFirstSlot / uint32(types.SecondsPerSlot)
+		if ts < realEpochFirstSlot {
+			currentEpoch = -1
+			currentPhase = 0
+			return
+		}
+		currentEpoch = int32((ts - realEpochFirstSlot) / types.EpochLength) // eg. / 60
+		currentPhase = ((ts - realEpochFirstSlot) % types.EpochLength)
+		return
+	} else if types.TimeUnitMode == "JAM" {
+		realEpochFirstSlot := s.EpochFirstSlot / uint32(types.SecondsPerSlot)
+		if ts < realEpochFirstSlot {
+			currentEpoch = -1
+			currentPhase = 0
+			return
+		}
+
+		currentEpoch = int32(ts / types.EpochLength) // eg. / 60
+		currentPhase = ts % types.EpochLength
+		return
+	} else {
+		return -1, 0
 	}
-	currentEpoch = int32((currCJE - s.EpochFirstSlot) / (types.SecondsPerSlot * types.EpochLength)) // eg. / 60
-	currentPhase = ((currCJE - s.EpochFirstSlot) % (types.SecondsPerSlot * types.EpochLength)) / types.SecondsPerSlot
-	return
+
 }
 
 func (s *SafroleState) IsNewEpoch(currCJE uint32) bool {
@@ -551,26 +610,39 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 	return common.Hash{}, fmt.Errorf(errTicketBadRingProof)
 }
 
+func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int, error) {
+	if t.Attempt >= types.TicketEntriesPerValidator {
+		return common.Hash{}, -1, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
+	}
+	for i := 1; i < 3; i++ {
+		targetEpochRandomness := s.Entropy[i]
+		ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
+		//step 1: verify envelope's VRFSignature using ring verifier
+		//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
+		ringsetBytes := s.GetRingSet("Next")
+		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
+		if err == nil {
+			if debug {
+				fmt.Printf("[N%d] ValidateIncoming Ticket Succ (using η%v:%v) TicketID=%x\n", s.Id, i, targetEpochRandomness, ticket_id)
+			}
+			return common.BytesToHash(ticket_id), i, nil
+		}
+	}
+	ticketID, _ := t.TicketID()
+	fmt.Printf("[N%d] ValidateIncoming Ticket Fail TicketID=%v\nη0:%v\nη1:%v\nη2:%v\nη3:%v\n", s.Id, ticketID, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3])
+
+	return common.Hash{}, -1, fmt.Errorf(errTicketBadRingProof)
+}
+
 func (s *StateDB) RemoveUnusedTickets() {
 	//Remove the tickets when the ticket submission is closed
 	//remove the tickets entropy[2] in queue
 	s.ticketMutex.Lock()
 	defer s.ticketMutex.Unlock()
 	sf := s.GetSafrole()
+	uselessEntropy := sf.Entropy[2]
 	if sf.IsTicketSubmissionClosed(uint32(s.GetSafrole().Timeslot)) {
-		for _, t := range s.queuedTickets {
-			targetEpochRandomness := sf.Entropy[2]
-			ticketVRFInput := sf.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
-			//step 1: verify envelope's VRFSignature using ring verifier
-			//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-			ringsetBytes := sf.GetRingSet("Next")
-			ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
-			ticket_id_hash := common.BytesToHash(ticket_id)
-			if err == nil {
-				// delete the ticket
-				delete(s.queuedTickets, ticket_id_hash)
-			}
-		}
+		delete(s.queuedTickets, uselessEntropy)
 	}
 }
 
@@ -793,7 +865,9 @@ func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub co
 }
 
 func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
-	currJCE := common.ComputeCurrentJCETime()
+	// timeslot mark
+	// currJCE := common.ComputeCurrentJCETime()
+	currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
 	prevEpoch, prevPhase := s.EpochAndPhase(s.GetTimeSlot())
 	currEpoch, currPhase := s.EpochAndPhase(currJCE)
 	if debug {
@@ -812,7 +886,10 @@ func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
 
 func (s *SafroleState) CheckFirstPhaseReady() (isReady bool) {
 	if s.BlockNumber == -1 {
-		currJCE := common.ComputeCurrentJCETime()
+		// timeslot mark
+		// currJCE := common.ComputeCurrentJCETime()
+		currJCE := common.ComputeRealCurrentJCETime(types.TimeUnitMode)
+
 		if currJCE < s.EpochFirstSlot {
 			fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot)
 			return false

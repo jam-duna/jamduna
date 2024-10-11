@@ -566,7 +566,10 @@ func (vm *VM) hostWrite() uint32 {
 }
 
 func (vm *VM) GetJCETime() uint32 {
-	return common.ComputeCurrentJCETime()
+	// timeslot mark
+
+	// return common.ComputeCurrentJCETime()
+	return common.ComputeTimeUnit(types.TimeUnitMode)
 }
 
 // Solicit preimage

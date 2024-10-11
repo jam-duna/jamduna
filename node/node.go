@@ -903,6 +903,25 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
+			// timeslot mark
+			// currJCE := common.ComputeCurrentJCETime()
+			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
+			if currEpoch != -1 {
+				if currPhase == 0 {
+					n.GenerateTickets()
+					n.BroadcastTickets()
+
+				} else if currPhase == types.EpochLength-1 { // you had currPhase == types.EpochLength-1
+					// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
+					if debug {
+						fmt.Printf("[N%d]GenerateTickets currEpoch=%v, currPhase=%v\n", n.id, currEpoch, currPhase)
+					}
+					n.GenerateTickets()
+					n.BroadcastTickets()
+
+				}
+			}
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs)
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)

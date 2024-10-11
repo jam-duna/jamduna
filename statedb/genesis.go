@@ -39,6 +39,9 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 
 	j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
 	j.SafroleState.Timeslot = genesisTimeslot
+	if types.TimeUnitMode != "TimeStamp" {
+		j.SafroleState.Timeslot = j.SafroleState.Timeslot / types.SecondsPerSlot
+	}
 	j.SafroleState.BlockNumber = -1 // also not ok
 
 	validators := genesisConfig.Authorities
@@ -94,8 +97,13 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 
 func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 	now := time.Now().Unix()
-	epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
-	fmt.Printf("NewGenesisConfig epoch0Timestamp: %v\n", epoch0Timestamp)
+	if types.TimeUnitMode != "TimeStamp" {
+		now = int64(computeJCETime(now))
+	}
+	// epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
+	second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength)
+	epoch0Timestamp := uint64(now) + second_per_epoch - (uint64(now) % second_per_epoch) // let it be the start of the epoch
+	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v\n", epoch0Timestamp)
 	return GenesisConfig{
 		Epoch0Timestamp: epoch0Timestamp,
 		Authorities:     validators,

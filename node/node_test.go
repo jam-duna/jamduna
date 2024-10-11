@@ -495,7 +495,9 @@ func TestWorkGuaranteeWithExtrinsic(t *testing.T) {
 			},
 		}
 		packageHash := workPackage.Hash()
-		currentJce := common.ComputeCurrentJCETime()
+		// timeslot mark
+		// currentJce := common.ComputeCurrentJCETime()
+		currentJce := common.ComputeTimeUnit(types.TimeUnitMode)
 		for _, n := range nodes {
 			_, phase := n.statedb.JamState.SafroleState.EpochAndPhase(currentJce)
 			EA, err := n.GenerateDummyAssurance()
@@ -512,7 +514,9 @@ func TestWorkGuaranteeWithExtrinsic(t *testing.T) {
 				if s0 == nil {
 					fmt.Println("s0 is nil")
 				}
-				targetJCE := common.ComputeCurrentJCETime() + 120
+				// timeslot mark
+				// targetJCE := common.ComputeCurrentJCETime() + 120
+				targetJCE := common.ComputeTimeUnit(types.TimeUnitMode) + 120
 				b1, b1_err := s0.MakeBlock(n.credential, targetJCE)
 				if b1_err != nil {
 					t.Fatalf("MakeBlock err %v\n", b1_err)
@@ -660,8 +664,9 @@ func TestWorkGuarantee(t *testing.T) {
 			panic(0)
 		}
 	}
-
-	currentJce := common.ComputeCurrentJCETime() + 120
+	// timeslot mark
+	// currentJce := common.ComputeCurrentJCETime() + 120
+	currentJce := common.ComputeTimeUnit(types.TimeUnitMode) + 120
 	for _, n := range nodes {
 		_, phase := n.statedb.JamState.SafroleState.EpochAndPhase(currentJce)
 		if phase%types.TotalValidators == n.statedb.Id {
@@ -918,7 +923,9 @@ func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
 
 func SetLevelDBPaths(numNodes int) []string {
 	node_paths := make([]string, numNodes)
-	currJCE := common.ComputeCurrentJCETime()
+	// timeslot mark
+	// currJCE := common.ComputeCurrentJCETime()
+	currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
 	for i := 0; i < numNodes; i++ {
 		node_idx := fmt.Sprintf("%d", i)
 		node_path, err := computeLevelDBPath(node_idx, int(currJCE))

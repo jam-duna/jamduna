@@ -30,14 +30,33 @@ func ComputeCurrentJCETime() uint32 {
 	return uint32(currentTime) // computeJCETime(currentTime)
 }
 
-func ComputeRealCurrentJCETime() uint32 {
+func ComputeRealCurrentJCETime(TimeUnitMode string) uint32 {
 	currentTime := time.Now().Unix()
-	return uint32(ComputeJCETime(currentTime))
+	if TimeUnitMode == "TimeStamp" {
+		return uint32(ComputeJCETime(currentTime, false))
+	} else {
+		return uint32(ComputeJCETime(currentTime, true))
+	}
 }
 
-// The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
-func ComputeJCETime(unixTimestamp int64) int64 {
-	production := false
+// here if I use types.SecondPerSlot, it will be a circular import
+func ComputeTimeSlot(TimeUnitMode string) uint32 {
+	currentTime := time.Now().Unix()
+	JCE := uint32(ComputeJCETime(currentTime, true))
+	timeslot := JCE / 6
+	return timeslot
+}
+
+func ComputeTimeUnit(TimeUnitMode string) uint32 {
+	unit := ComputeTimeSlot(TimeUnitMode)
+	if TimeUnitMode == "TimeStamp" {
+		unit = ComputeRealCurrentJCETime(TimeUnitMode)
+	}
+	return unit
+}
+
+// Jam Common Era: 1704110400 or Jan 01 2024 12:00:00 GMT+0000; See section 4.4
+func ComputeJCETime(unixTimestamp int64, production bool) int64 {
 	if production {
 		// Define the start of the Jam Common Era
 		jceStart := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
