@@ -68,8 +68,7 @@ type Rho_state struct {
 // Types for Gamma
 type TicketsOrKeys struct {
 	Tickets []*types.TicketBody `json:"tickets,omitempty"`
-	// Tickets *types.TicketsMark	  `json:"tickets,omitempty"`
-	Keys []common.Hash `json:"keys,omitempty"` //BandersnatchKey
+	Keys    []common.Hash       `json:"keys,omitempty"` //BandersnatchKey
 }
 
 type CTicketsOrKeys struct {
@@ -201,52 +200,36 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 	}
 }
 
-// func (n *JamState) GetAuthQueueBytes() ([]byte, error) {
-// 	// AuthorizationsPool
-// 	codec_bytes, err := json.Marshal(n.AuthorizationsPool)
-// 	if err != nil {
-// 		fmt.Println("Error serializing AuthQueue", err)
-// 	}
-// 	return codec_bytes, nil
-// }
+func (j *JamState) GetValidatorStats() string {
+	out := ""
+	for i := 0; i < types.TotalValidators; i++ {
+		v := ""
+		pi := j.ValidatorStatistics[0][i]
+		if pi.BlocksProduced > 0 {
+			v += fmt.Sprintf("b=%d", pi.BlocksProduced)
+		}
+		if pi.TicketsIntroduced > 0 {
+			v += fmt.Sprintf("|t=%d", pi.TicketsIntroduced)
+		}
+		if pi.PreimagesIntroduced > 0 {
+			v += fmt.Sprintf("|p=%d", pi.PreimagesIntroduced)
+		}
+		if pi.OctetsIntroduced > 0 {
+			v += fmt.Sprintf("|o=%d", pi.OctetsIntroduced)
+		}
+		if pi.ReportsGuaranteed > 0 {
+			v += fmt.Sprintf("|r=%d", pi.ReportsGuaranteed)
+		}
+		if pi.AvailabilityAssurances > 0 {
+			v += fmt.Sprintf("|a=%d", pi.AvailabilityAssurances)
+		}
+		if len(v) > 0 {
+			out += fmt.Sprintf("%d:[%s] ", i, v)
+		}
+	}
+	return out
 
-// func (n *JamState) GetPrivilegedServicesIndicesBytes() ([]byte, error) {
-// 	// PrivilegedServiceIndices
-// 	codec_bytes, err := json.Marshal(n.PrivilegedServiceIndices)
-// 	if err != nil {
-// 		fmt.Println("Error serializing AuthQueue", err)
-// 	}
-// 	return codec_bytes, nil
-// }
-
-// func (n *JamState) GetRecentBlocksBytes() ([]byte, error) {
-// 	// BeefyPool
-// 	codec_bytes, err := json.Marshal(n.BeefyPool)
-// 	if err != nil {
-// 		fmt.Println("Error serializing RecentBlocks", err)
-// 	}
-// 	return codec_bytes, nil
-// }
-
-// func (n *JamState) GetPiBytes() ([]byte, error) {
-// 	// use scale to encode the Rho_state
-// 	//use json marshal to get the bytes
-// 	codec_bytes, err := json.Marshal(n.ValidatorStatistics)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return codec_bytes, nil
-// }
-
-// func (j *JamState) GetRhoBytes() ([]byte, error) {
-// 	// use scale to encode the Rho_state
-// 	//use json marshal to get the bytes
-// 	codec_bytes, err := json.Marshal(j.AvailabilityAssignments)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return codec_bytes, nil
-// }
+}
 
 func (a *Psi_state) UnmarshalJSON(data []byte) error {
 	var s struct {

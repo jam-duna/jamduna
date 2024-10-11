@@ -711,7 +711,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 
-			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%v,m'=%v, len(γ_a')=%d %s\n", s.Id, common.Str(proposedBlk.ParentHash()), common.Str(proposedBlk.Hash()), currEpoch, currPhase, len(s.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str())
+			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%v,m'=%v, len(γ_a')=%d %s %s\n", s.Id, common.Str(proposedBlk.ParentHash()), common.Str(proposedBlk.Hash()), currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
 			elapsed := time.Since(start)
 			if trace && elapsed > 2000000 {
 				fmt.Printf("\033[31m MakeBlock / ApplyStateTransitionFromBlock\033[0m %d ms\n", elapsed/1000)
@@ -1086,7 +1086,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.Block = blk
 	s.ParentHash = s.BlockHash
 	s.BlockHash = blk.Hash()
-	// s.StateRoot = s.UpdateTrieState()
+	s.StateRoot = s.UpdateTrieState()
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
 	}
@@ -1119,6 +1119,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 	stateRoot := s.GetStateRoot()
+	// BROKEN: s.RecoverTrieState()
 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()

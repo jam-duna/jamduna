@@ -239,11 +239,9 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
 	node.store.WriteLog(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
-	//err = node.writeDebug(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
+
 	go node.runServer()
 	go node.runClient()
-	//go node.runWebService(id)
-
 	return node, nil
 }
 
@@ -659,7 +657,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 
 	currJCE := common.ComputeCurrentJCETime()
 	currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
-	if blk.Header.EpochMark != nil  || ( currEpoch == 0 && currPhase == 0 ) {
+	if blk.Header.EpochMark != nil || (currEpoch == 0 && currPhase == 0) {
 		if debug {
 			fmt.Printf("[N%d]GenerateTickets currEpoch=%v, currPhase=%v\n", n.id, currEpoch, currPhase)
 		}
@@ -852,19 +850,9 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 				return fmt.Errorf("expected types.Ticket but got %T", obj)
 			}
 		}
-		if msgType == "Block" && false {
-			if block, ok := obj.(*types.Block); ok {
-				// Cast successful, you can now access ticket's methods or fields
-				identifier := block.Hash() // Assuming TicketID() is a method of types.Ticket
-				path = fmt.Sprintf("%v_%v", path, identifier)
-			} else {
-				// Handle case where obj is not a *types.Ticket
-				return fmt.Errorf("expected types.Block but got %T", obj)
-			}
-		}
 		jsonPath := fmt.Sprintf("%s.json", path)
 		codecPath := fmt.Sprintf("%s.bin", path)
-		//fmt.Printf("jsonPath=%v, codecPath=%v\n", jsonPath, codecPath)
+		// fmt.Printf("%s jsonPath=%v, codecPath=%v\n", msgType, jsonPath, codecPath)
 
 		// Check if the directories exist, if not create them
 		if _, err := os.Stat(structDir); os.IsNotExist(err) {
@@ -933,17 +921,17 @@ func (n *Node) runClient() {
 					for _, g := range newStateDB.GuarantorAssignments {
 						fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
 					}
-
-					timeslot := newStateDB.GetSafrole().Timeslot
-					err := n.writeDebug(newBlock, timeslot)
-					if err != nil {
-						fmt.Printf("writeDebug Block err: %v\n", err)
-					}
-					err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot)
-					if err != nil {
-						fmt.Printf("writeDebug JamState err: %v\n", err)
-					}
 				}
+				timeslot := newStateDB.GetSafrole().Timeslot
+				err := n.writeDebug(newBlock, timeslot)
+				if err != nil {
+					fmt.Printf("writeDebug Block err: %v\n", err)
+				}
+				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot)
+				if err != nil {
+					fmt.Printf("writeDebug JamState err: %v\n", err)
+				}
+
 			}
 
 		case log := <-logChan:

@@ -121,7 +121,7 @@ func (b *Block) ParentHash() common.Hash {
 }
 
 func (b *Block) Str() string {
-	out := fmt.Sprintf("[N%d]", b.Header.AuthorIndex)
+	out := fmt.Sprintf("[N%d] ", b.Header.AuthorIndex)
 	out += fmt.Sprintf("H_t=%d ", b.Header.Slot)
 	out += fmt.Sprintf("H_r=%s ", common.Str(b.Header.ParentStateRoot))
 	if b.Header.EpochMark != nil {
