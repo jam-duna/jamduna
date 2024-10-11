@@ -109,6 +109,7 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	}
 
 	genesisConfig := statedb.NewGenesisConfig(validators)
+	//genesisConfig.SaveToFile("../genesis.json")
 
 	//prettyJSON, _ := json.MarshalIndent(validators, "", "  ")
 	//fmt.Printf("Validators (size:%v) %s\n", numNodes, prettyJSON)

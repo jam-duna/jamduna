@@ -147,12 +147,15 @@ func (original *JamState) Copy() *JamState {
 }
 
 // clearRhoByCore clears the Rho state for a specific core
-// func clearRhoByCore(core uint32, cores map[uint32]*Rho_state) (r *Rho_state) {
-// 	r = cores[core]=nil
-
-// 	state.AvailabilityAssignments[core] = nil
-// 	return r
-// }
+func (state *JamState) String() string {
+	// Marshal the JamState into indented JSON
+	jsonBytes, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return "failedmarshaling"
+	}
+	// Return the JSON as a string
+	return string(jsonBytes)
+}
 
 // Accumulate performs the accumulation of a single service.
 func (state *JamState) Accumulate(serviceIndex int, accumulationState types.AccumulationState) (types.AccumulationState, error) {

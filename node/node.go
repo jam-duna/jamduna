@@ -238,8 +238,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
-	node.store.WriteLog(_statedb.JamState.Snapshot(), 0xFFFFFFFF)
-
+	node.store.WriteLog(_statedb.JamState.Snapshot(), 0)
 	go node.runServer()
 	go node.runClient()
 	return node, nil
@@ -837,9 +836,10 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
 		//currTS := common.ComputeCurrenTS()
 		path := fmt.Sprintf("%s/%v_%v", structDir, epoch, phase)
-		if epoch == 0xFFFFFFFF || phase == 0xFFFFFFFF {
+		if epoch == 0 && phase == 0 {
 			path = fmt.Sprintf("%s/genesis", structDir)
 		}
+
 		if msgType == "Ticket" {
 			if ticket, ok := obj.(*types.Ticket); ok {
 				// Cast successful, you can now access ticket's methods or fields
@@ -852,7 +852,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 		}
 		jsonPath := fmt.Sprintf("%s.json", path)
 		codecPath := fmt.Sprintf("%s.bin", path)
-		// fmt.Printf("%s jsonPath=%v, codecPath=%v\n", msgType, jsonPath, codecPath)
+		//fmt.Printf("%s jsonPath=%v, codecPath=%v\n", msgType, jsonPath, codecPath)
 
 		// Check if the directories exist, if not create them
 		if _, err := os.Stat(structDir); os.IsNotExist(err) {

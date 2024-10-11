@@ -339,6 +339,7 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	statedb.JamState = j // setting the dispute state so that block 1 can be produced
 	// setting the safrole state so that block 1 can be produced
 	stateRoot := statedb.UpdateTrieState()
+	fmt.Printf("NewGenesisStateDB: %v\n", j)
 	statedb.StateRoot = stateRoot
 	fmt.Printf("NewGenesisStateDB stateRoot=%v\n", stateRoot)
 	return statedb, nil
@@ -353,8 +354,8 @@ func InitStateDBFromSnapshot(sdb *storage.StateDBStorage, snapshot *StateSnapsho
 	statedb.Block = nil
 	statedb.JamState = InitStateFromSnapshot(snapshot)
 	// setting the safrole state so that block 1 can be produced
-
 	statedb.StateRoot = statedb.UpdateTrieState()
+	fmt.Printf("InitStateDBFromSnapshot stateRoot=%v JamState: %s\n", statedb.StateRoot, statedb.JamState.String())
 	return statedb, nil
 }
 

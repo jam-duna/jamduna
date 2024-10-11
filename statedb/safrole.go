@@ -102,16 +102,9 @@ type SafroleState struct {
 	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
 	Epoch          uint32 `json:"epoch"`
 
-	TimeStamp   int    `json:"timestamp"`
-	Timeslot    uint32 `json:"timeslot"`
-	BlockNumber int    `json:"blockNumber"`
-	// Entropy holds 4 32 byte
-	// Entropy[0] CURRENT randomness accumulator (see sec 6.10). randomness_buffer[0] = BLAKE2(CONCAT(randomness_buffer[0], fresh_randomness));
-	// where fresh_randomness = vrf_signed_output(claim.randomness_source)
+	TimeStamp int    `json:"timestamp"`
+	Timeslot  uint32 `json:"timeslot"`
 
-	// Entropy[1] accumulator snapshot BEFORE the execution of the first block of epoch N   - randomness used for ticket targeting epoch N+2
-	// Entropy[2] accumulator snapshot BEFORE the execution of the first block of epoch N-1 - randomness used for ticket targeting epoch N+1
-	// Entropy[3] accumulator snapshot BEFORE the execution of the first block of epoch N-2 - randomness used for ticket targeting current epoch N
 	Entropy Entropy `json:"entropy"`
 
 	// 4 authorities[pre, curr, next, designed]
@@ -133,8 +126,8 @@ func NewSafroleState() *SafroleState {
 	return &SafroleState{
 		Id: 99999,
 		// Timeslot:           uint32(common.ComputeCurrentJCETime()),
-		Timeslot:           common.ComputeTimeUnit(types.TimeUnitMode),
-		BlockNumber:        0,
+		Timeslot: common.ComputeTimeUnit(types.TimeUnitMode),
+
 		Entropy:            Entropy{},
 		PrevValidators:     []types.Validator{},
 		CurrValidators:     []types.Validator{},
@@ -233,14 +226,14 @@ func ComputeEpochAndPhase(ts, Epoch0Timestamp uint32) (currentEpoch uint32, curr
 
 	if types.TimeUnitMode == "TimeStamp" {
 		if ts < Epoch0Timestamp || ts == 0xFFFFFFFF {
-			currentEpoch = 0xFFFFFFFF
-			currentPhase = 0xFFFFFFFF
+			currentEpoch = 0
+			currentPhase = 0
 			return currentEpoch, currentPhase
 		}
 	} else if types.TimeUnitMode == "TimeSlot" {
 		if ts < Epoch0Timestamp/types.SecondsPerSlot {
-			currentEpoch = 0xFFFFFFFF
-			currentPhase = 0xFFFFFFFF
+			currentEpoch = 0
+			currentPhase = 0
 			return currentEpoch, currentPhase
 		} else {
 			currentEpoch = (ts - Epoch0Timestamp/types.SecondsPerSlot) / types.EpochLength
@@ -249,8 +242,8 @@ func ComputeEpochAndPhase(ts, Epoch0Timestamp uint32) (currentEpoch uint32, curr
 		}
 	} else if types.TimeUnitMode == "JAM" {
 		if ts < Epoch0Timestamp/types.SecondsPerSlot {
-			currentEpoch = 0xFFFFFFFF
-			currentPhase = 0xFFFFFFFF
+			currentEpoch = 0
+			currentPhase = 0
 			return currentEpoch, currentPhase
 		}
 		currentEpoch = ts / types.EpochLength
@@ -258,10 +251,10 @@ func ComputeEpochAndPhase(ts, Epoch0Timestamp uint32) (currentEpoch uint32, curr
 		return currentEpoch, currentPhase
 
 	} else {
-		return 0xFFFFFFFF, 0xFFFFFFFF
+		return 0, 0
 	}
 
-	return 0xFFFFFFFF, 0xFFFFFFFF
+	return 0, 0
 }
 
 func (s *SafroleState) EpochAndPhase(ts uint32) (currentEpoch int32, currentPhase uint32) {
@@ -885,15 +878,11 @@ func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
 }
 
 func (s *SafroleState) CheckFirstPhaseReady() (isReady bool) {
-	if s.BlockNumber == -1 {
-		// timeslot mark
-		// currJCE := common.ComputeCurrentJCETime()
-		currJCE := common.ComputeRealCurrentJCETime(types.TimeUnitMode)
-
-		if currJCE < s.EpochFirstSlot {
-			fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot)
-			return false
-		}
+	// timeslot mark
+	currJCE := common.ComputeRealCurrentJCETime(types.TimeUnitMode)
+	if currJCE < s.EpochFirstSlot {
+		fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot)
+		return false
 	}
 	return true
 }
@@ -905,7 +894,6 @@ func cloneSafroleState(original SafroleState) SafroleState {
 		Epoch:                       original.Epoch,
 		TimeStamp:                   original.TimeStamp,
 		Timeslot:                    original.Timeslot,
-		BlockNumber:                 original.BlockNumber,
 		Entropy:                     original.Entropy,
 		PrevValidators:              make([]types.Validator, len(original.PrevValidators)),
 		CurrValidators:              make([]types.Validator, len(original.CurrValidators)),
@@ -938,7 +926,6 @@ func (original *SafroleState) Copy() *SafroleState {
 		Epoch:                       original.Epoch,
 		TimeStamp:                   original.TimeStamp,
 		Timeslot:                    original.Timeslot,
-		BlockNumber:                 original.BlockNumber,
 		Entropy:                     original.Entropy,
 		PrevValidators:              make([]types.Validator, len(original.PrevValidators)),
 		CurrValidators:              make([]types.Validator, len(original.CurrValidators)),
@@ -1064,7 +1051,6 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	// Sort and trim tickets
 	s2.SortAndTrimTickets()
 
-	s2.BlockNumber = s.BlockNumber + 1
 	s2.Timeslot = targetJCE
 	return s2, nil
 }

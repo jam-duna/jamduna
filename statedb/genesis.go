@@ -25,7 +25,41 @@ type GenesisAuthorities struct {
 
 func InitStateFromSnapshot(s *StateSnapshot) (j *JamState) {
 	j = NewJamState()
-	// TODO
+	// ??? j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
+	j.SafroleState.Timeslot = s.Timeslot
+	if types.TimeUnitMode != "TimeStamp" {
+		j.SafroleState.Timeslot = j.SafroleState.Timeslot / types.SecondsPerSlot
+	}
+	j.SafroleState.PrevValidators = s.PrevValidators
+	j.SafroleState.CurrValidators = s.CurrValidators
+	j.SafroleState.NextValidators = s.NextValidators
+	j.SafroleState.DesignedValidators = s.Gamma.GammaK // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+
+	j.SafroleState.Entropy[0] = s.Entropy[0]
+	j.SafroleState.Entropy[1] = s.Entropy[1]
+	j.SafroleState.Entropy[2] = s.Entropy[2]
+	j.SafroleState.Entropy[3] = s.Entropy[3]
+	
+	j.SafroleState.NextEpochTicketsAccumulator = s.Gamma.GammaA // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
+	j.SafroleState.TicketsVerifierKey = s.Gamma.GammaZ // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	j.SafroleState.TicketsOrKeys = s.Gamma.GammaS // γs: Current epoch’s slot-sealer series (epoch N)
+	
+	/*
+	Gamma is of type SafroleBasicState with:
+	type SafroleBasicState struct {
+	  GammaK []types.Validator  `json:"gamma_k"` 
+	  GammaA []types.TicketBody `json:"gamma_a"` 
+	  GammaS TicketsOrKeys      `json:"gamma_s"` 
+	  GammaZ []byte             `json:"gamma_z"` 
+	}
+	*/
+
+	//ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"pi"`    
+	//AuthorizationsPool
+	//AuthorizationQueue
+	//BeefyPool
+	//AvailabilityAssignments
+	j.DisputesState = Psi_state{}
 	return j
 }
 
@@ -38,11 +72,10 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	fmt.Printf("InitGenesisState genesisTimeslot=%v\n", genesisTimeslot)
 
 	j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
-	j.SafroleState.Timeslot = genesisTimeslot
+	j.SafroleState.Timeslot = 0
 	if types.TimeUnitMode != "TimeStamp" {
 		j.SafroleState.Timeslot = j.SafroleState.Timeslot / types.SecondsPerSlot
 	}
-	j.SafroleState.BlockNumber = -1 // also not ok
 
 	validators := genesisConfig.Authorities
 	vB := []byte{}
@@ -111,8 +144,8 @@ func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 }
 
 // writeGenesisConfig writes the genesis configuration to a JSON file
-func writeGenesisConfig(filePath string, config *GenesisAuthorities) error {
-	// Marshal the GenesisAuthorities struct into JSON
+func (config *GenesisConfig) SaveToFile(filePath string) error {
+	// Marshal config into JSON
 	bytes, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
@@ -127,7 +160,7 @@ func writeGenesisConfig(filePath string, config *GenesisAuthorities) error {
 }
 
 // readGenesisConfig reads the genesis configuration from a JSON file
-func readGenesisConfig(filePath string) (*GenesisAuthorities, error) {
+func ReadGenesisConfig(filePath string) (*GenesisConfig, error) {
 	// Read the JSON data from the specified file
 	bytes, err := ioutil.ReadFile(filePath)
 	if err != nil {
@@ -135,7 +168,7 @@ func readGenesisConfig(filePath string) (*GenesisAuthorities, error) {
 	}
 
 	// Unmarshal the JSON data into the GenesisAuthorities struct
-	var config GenesisAuthorities
+	var config GenesisConfig
 	err = json.Unmarshal(bytes, &config)
 	if err != nil {
 		return nil, err
