@@ -8,26 +8,44 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// C1
+/*
+const (
+	C1  = "CoreAuthPool"
+	C2  = "AuthQueue"
+	C3  = "RecentBlocks"
+	C4  = "safroleState"
+	C5  = "PastJudgements"
+	C6  = "Entropy"
+	C7  = "NextEpochValidatorKeys"
+	C8  = "CurrentValidatorKeys"
+	C9  = "PriorEpochValidatorKeys"
+	C10 = "PendingReports"
+	C11 = "MostRecentBlockTimeslot"
+	C12 = "PrivilegedServiceIndices"
+	C13 = "ActiveValidator"
+)
+*/
+
+// C1 CoreAuthPool
 func (n *JamState) SetAuthPool(authPoolByte []byte) {
 	if len(authPoolByte) == 0 {
-		fmt.Println("AuthPoolByte is empty")
+		fmt.Println("C1 AuthPoolByte is empty")
 		return
 	}
 	authorizationsPool, _, err := types.Decode(authPoolByte, reflect.TypeOf([types.TotalCores][]common.Hash{}))
 	if err != nil {
-		fmt.Println("Error decoding AuthPoolByte: ", err)
+		fmt.Println("Error decoding C1 AuthPoolByte: ", err)
 		return
 	}
 	n.AuthorizationsPool = authorizationsPool.([types.TotalCores][]common.Hash)
 }
 
-// C2
+// C2 AuthQueue
 func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
 	authorizations_queue := [types.TotalCores][80]common.Hash{}
 	decoded, length, err := types.Decode(data, reflect.TypeOf(authorizations_queue))
 	if err != nil {
-		fmt.Println("Error decoding AuthorizationQueue: ", err)
+		fmt.Println("Error decoding C2 AuthorizationQueue: ", err)
 		return AuthorizationQueue{}, 0
 	}
 	authorizations_queue = decoded.([types.TotalCores][80]common.Hash)
@@ -39,18 +57,18 @@ func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
 
 func (n *JamState) SetAuthQueue(authQueueByte []byte) {
 	if len(authQueueByte) == 0 {
-		fmt.Println("AuthQueueByte is empty")
+		fmt.Println("C2 AuthQueueByte is empty")
 		return
 	}
 	authorizationQueues, _, err := types.Decode(authQueueByte, reflect.TypeOf(AuthorizationQueue{}))
 	if err != nil {
-		fmt.Println("Error decoding AuthQueueByte: ", err)
+		fmt.Println("Error decoding C2 AuthQueueByte: ", err)
 		return
 	}
 	n.AuthorizationQueue = authorizationQueues.(AuthorizationQueue)
 }
 
-// C3
+// C3 RecentBlocks
 func (T Peaks) Decode(data []byte) (interface{}, uint32) {
 	if len(data) == 0 {
 		return Peaks{}, 0
@@ -106,7 +124,7 @@ func (n *JamState) SetRecentBlocks(recentBlocksByte []byte) {
 	n.BeefyPool = recentBlocks.(BeefyPool)
 }
 
-// C4
+// C4 safroleState
 func (C CTicketsOrKeys) CT2T() TicketsOrKeys {
 	var T TicketsOrKeys
 
@@ -221,9 +239,8 @@ func (n *JamState) SetSafroleState(safroleStateByte []byte) {
 	n.SafroleStateGamma = safroleState.(SafroleBasicState)
 }
 
-// C5
+// C5 PastJudgements
 func (P Psi_state) Decode(data []byte) (interface{}, uint32) {
-	fmt.Println("data: ", data)
 	var s struct {
 		Psi_g []common.Hash      `json:"psi_g"`
 		Psi_b []common.Hash      `json:"psi_b"`
@@ -235,7 +252,6 @@ func (P Psi_state) Decode(data []byte) (interface{}, uint32) {
 		fmt.Println("Error decoding Psi_state: ", err)
 		return Psi_state{}, 0
 	}
-	fmt.Println("Decoded: ", decoded)
 	sDecoded := decoded.(struct {
 		Psi_g []common.Hash      `json:"psi_g"`
 		Psi_b []common.Hash      `json:"psi_b"`
@@ -279,18 +295,18 @@ func (P Psi_state) Decode(data []byte) (interface{}, uint32) {
 
 func (j *JamState) SetPsi(psiByte []byte) {
 	if len(psiByte) == 0 {
-		fmt.Println("PsiByte is empty")
+		fmt.Println("C5 PsiByte is empty")
 		return
 	}
 	disputesState, _, err := types.Decode(psiByte, reflect.TypeOf(Psi_state{}))
 	if err != nil {
-		fmt.Println("Error decoding PsiByte: ", err)
+		fmt.Println("Error decoding C5 PsiByte: ", err)
 		return
 	}
 	j.DisputesState = disputesState.(Psi_state)
 }
 
-// C6
+// C6 Entropy
 // func (T Entropy) Decode(data []byte) (interface{}, uint32) {
 // 	entropy, length := types.Decode(data, reflect.TypeOf([types.EntropySize]common.Hash{}))
 // 	for i := 0; i < types.EntropySize; i++ {
@@ -301,13 +317,13 @@ func (j *JamState) SetPsi(psiByte []byte) {
 
 func (n *JamState) SetEntropy(entropyByte []byte) {
 	if len(entropyByte) == 0 {
-		fmt.Println("EntropyByte is empty")
+		fmt.Println("C6 EntropyByte is empty")
 		return
 	}
-	fmt.Println("EntropyByte is not empty: ", entropyByte)
+	//fmt.Printf("C6 EntropyByte is not empty: %x\n", entropyByte)
 	entropy, _, err := types.Decode(entropyByte, reflect.TypeOf(Entropy{}))
 	if err != nil {
-		fmt.Println("Error decoding EntropyByte: ", err)
+		fmt.Println("Error decoding C6 EntropyByte: ", err)
 		return
 	}
 	n.SafroleState.Entropy = entropy.(Entropy)
@@ -329,49 +345,49 @@ func (T Validators) Decode(data []byte) (interface{}, uint32) {
 	return T, length
 }
 
-// C7
+// C7 NextEpochValidatorKeys
 func (n *JamState) SetNextEpochValidators(nextEpochValidatorsByte []byte) {
 	if len(nextEpochValidatorsByte) == 0 {
-		fmt.Println("NextEpochValidatorsByte is empty")
+		fmt.Println("C7 NextEpochValidatorsByte is empty")
 		return
 	}
 	nextEpochValidators, _, err := types.Decode(nextEpochValidatorsByte, reflect.TypeOf(Validators{}))
 	if err != nil {
-		fmt.Println("Error decoding NextEpochValidatorsByte: ", err)
+		fmt.Println("Error decoding C7 NextEpochValidatorsByte: ", err)
 		return
 	}
 	n.SafroleState.NextValidators = nextEpochValidators.(Validators)
 }
 
-// C8
+// C8 CurrentValidatorKeys
 func (n *JamState) SetCurrEpochValidators(currEpochValidatorsByte []byte) {
 	if len(currEpochValidatorsByte) == 0 {
-		fmt.Println("CurrEpochValidatorsByte is empty")
+		fmt.Println("C8 CurrEpochValidatorsByte is empty")
 		return
 	}
 	currEpochValidators, _, err := types.Decode(currEpochValidatorsByte, reflect.TypeOf(Validators{}))
 	if err != nil {
-		fmt.Println("Error decoding CurrEpochValidatorsByte: ", err)
+		fmt.Println("Error decoding C8 CurrEpochValidatorsByte: ", err)
 		return
 	}
 	n.SafroleState.CurrValidators = currEpochValidators.(Validators)
 }
 
-// C9
+// C9 PriorEpochValidatorKeys
 func (n *JamState) SetPriorEpochValidators(priorEpochValidatorsByte []byte) {
 	if len(priorEpochValidatorsByte) == 0 {
-		fmt.Println("PriorEpochValidatorsByte is empty")
+		fmt.Println("C9 PriorEpochValidatorsByte is empty")
 		return
 	}
 	priorEpochValidators, _, err := types.Decode(priorEpochValidatorsByte, reflect.TypeOf(Validators{}))
 	if err != nil {
-		fmt.Println("Error decoding PriorEpochValidatorsByte: ", err)
+		fmt.Println("Error decoding C9 PriorEpochValidatorsByte: ", err)
 		return
 	}
 	n.SafroleState.PrevValidators = priorEpochValidators.(Validators)
 }
 
-// C10
+// C10 PendingReports
 func (T AvailabilityAssignments) Decode(data []byte) (interface{}, uint32) {
 	length := uint32(0)
 	for i := 0; i < len(T); i++ {
@@ -382,7 +398,7 @@ func (T AvailabilityAssignments) Decode(data []byte) (interface{}, uint32) {
 			length++
 			rho_state, l, err := types.Decode(data[length:], reflect.TypeOf(Rho_state{}))
 			if err != nil {
-				fmt.Println("Error decoding AvailabilityAssignments: ", err)
+				fmt.Println("Error decoding C10 RhoByte ", err)
 				return AvailabilityAssignments{}, 0
 			}
 			T[i] = rho_state.(*Rho_state)
@@ -394,54 +410,55 @@ func (T AvailabilityAssignments) Decode(data []byte) (interface{}, uint32) {
 
 func (n *JamState) SetRho(rhoByte []byte) {
 	if len(rhoByte) == 0 {
-		fmt.Println("RhoByte is empty")
+		fmt.Println("C10 RhoByte is empty")
 		return
 	}
 	availabilityAssignments, _, err := types.Decode(rhoByte, reflect.TypeOf(AvailabilityAssignments{}))
 	if err != nil {
-		fmt.Println("Error decoding RhoByte: ", err)
+		fmt.Println("Error decoding C10 RhoByte: ", err)
 		return
 	}
 	n.AvailabilityAssignments = availabilityAssignments.(AvailabilityAssignments)
 }
 
-// C11
+// C11 MostRecentBlockTimeslot
 func (n *JamState) SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotByte []byte) {
 	if len(mostRecentBlockTimeSlotByte) == 0 {
-		fmt.Println("MostRecentBlockTimeSlotByte is empty")
+		fmt.Println("C11 MostRecentBlockTimeSlotByte is empty")
 		return
 	}
 	mostRecentBlockTimeSlot, _, err := types.Decode(mostRecentBlockTimeSlotByte, reflect.TypeOf(uint32(0)))
+	//fmt.Printf("Recoved C11 MostRecentBlockTimeSlot=%v (byte=%v)\n", mostRecentBlockTimeSlot, mostRecentBlockTimeSlotByte)
 	if err != nil {
-		fmt.Println("Error decoding MostRecentBlockTimeSlotByte: ", err)
+		fmt.Println("Error decoding C11 MostRecentBlockTimeSlotByte: ", err)
 		return
 	}
 	n.SafroleState.Timeslot = mostRecentBlockTimeSlot.(uint32)
 }
 
-// C12
+// C12 PrivilegedServiceIndices
 func (n *JamState) SetPrivilegedServicesIndices(privilegedServicesIndicesByte []byte) {
 	if len(privilegedServicesIndicesByte) == 0 {
-		fmt.Println("PrivilegedServicesIndicesByte is empty")
+		fmt.Println("C12 PrivilegedServicesIndicesByte is empty")
 		return
 	}
 	privilegedServicesIndices, _, err := types.Decode(privilegedServicesIndicesByte, reflect.TypeOf(Kai_state{}))
 	if err != nil {
-		fmt.Println("Error decoding PrivilegedServicesIndicesByte: ", err)
+		fmt.Println("Error decoding C12 PrivilegedServicesIndicesByte: ", err)
 		return
 	}
 	n.PrivilegedServiceIndices = privilegedServicesIndices.(Kai_state)
 }
 
-// C13
+// C13 ActiveValidator
 func (n *JamState) SetPi(piByte []byte) {
 	if len(piByte) == 0 {
-		fmt.Println("PiByte is empty")
+		fmt.Println("C13 PiByte is empty")
 		return
 	}
 	validatorStatistics, _, err := types.Decode(piByte, reflect.TypeOf([2][types.TotalValidators]Pi_state{}))
 	if err != nil {
-		fmt.Println("Error decoding PiByte: ", err)
+		fmt.Println("Error decoding C13 PiByte: ", err)
 		return
 	}
 	n.ValidatorStatistics = validatorStatistics.([2][types.TotalValidators]Pi_state)

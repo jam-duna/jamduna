@@ -40,8 +40,7 @@ const (
 )
 
 const (
-	LevelDBNull  = "null"
-	LevelDBEmpty = ""
+	LevelDBNull = "null"
 )
 
 /*
@@ -305,7 +304,6 @@ func (t *MerkleTree) levelDBGetBranch(branchHash []byte) (*Node, error) {
 }
 
 func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
-	value = ValidateNull(value)
 	_, _v, isEmbedded, _ := decodeLeaf(encodedLeaf)
 	t.levelDBSet(append(computeHash(encodedLeaf), value...), key)
 	if isEmbedded {
@@ -370,7 +368,7 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("failed to get key %s: %v", k, err)
 	}
-	return RecoverNull(value), nil
+	return RecoverNull(k, value), nil
 }
 
 func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
@@ -473,6 +471,7 @@ func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 	case C13:
 		stateKey[0] = 0x0D
 	}
+	//fmt.Printf("SetState %v stateKey=%x | value=%x\n", _stateIdentifier, stateKey, value)
 	t.Insert(stateKey, value)
 }
 func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
@@ -505,7 +504,9 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	case C13:
 		stateKey[0] = 0x0D
 	}
-	return t.Get(stateKey)
+	value, err := t.Get(stateKey)
+	//fmt.Printf("GetState %v stateKey=%x | RecovedValue=%x, err=%v\n", _stateIdentifier, stateKey, value, err)
+	return value, err
 }
 
 // EQ 290 - state-key constructor functions C
@@ -757,6 +758,8 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blob_hash []byte) error {
 // Insert fixed-length hashed key with value for the BPT
 func (t *MerkleTree) Insert(key, value []byte) {
 	node, err := t.findNode(t.Root, key, 0)
+	value = append(value, key...)
+	value = ValidateNull(value)
 	if err != nil {
 		encodedLeaf := leaf(key, value)
 		t.levelDBSetLeaf(encodedLeaf, value, key)
@@ -822,7 +825,7 @@ func (t *MerkleTree) insertNode(node *Node, key, value []byte, depth int) *Node 
 
 func (t *MerkleTree) createBranchNode(node *Node, key, value []byte, depth int) *Node {
 	existingKey := node.Key
-	existingValue, _ := t.Get(node.Key)
+	existingValue, _ := t.GetValue(node.Key)
 
 	node.Key = nil
 
@@ -925,11 +928,24 @@ func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
 
 // Get retrieves the value of a specific key in the Merkle Tree
 func (t *MerkleTree) Get(key []byte) ([]byte, error) {
-	// if t.Root == nil {
-	// 	return nil, errors.New("empty tree")
-	// }
 	value, err := t.getValue(t.Root, key, 0)
-	return RecoverNull(value), err
+	value = RecoverNull(key, value)
+	if len(value) >= len(key) && key != nil && value != nil {
+		if compareBytes(value[len(value)-len(key):], key) {
+			if len(value)-len(key) > 0 {
+				result := make([]byte, len(value)-len(key))
+				copy(result, value[:len(value)-len(key)])
+				return result, nil
+			}
+		}
+	}
+	return value, err
+}
+
+func (t *MerkleTree) GetValue(key []byte) ([]byte, error) {
+	value, err := t.getValue(t.Root, key, 0)
+	value = RecoverNull(key, value)
+	return value, err
 }
 
 func (t *MerkleTree) getValue(node *Node, key []byte, depth int) ([]byte, error) {
@@ -1126,17 +1142,31 @@ func computeKeyLengthAsBit(key []byte) int {
 
 // Because leveldb can't store nil value, we need to set a null value
 func ValidateNull(value []byte) []byte {
-	if compareBytes(value, []byte(LevelDBEmpty)) {
-		value = []byte(LevelDBNull)
-		//fmt.Printf("Value is empty, setting null value\n")
+	if allBytesAreZero(value) {
+		prefix := []byte("null")
+		value = append(prefix, value...)
+		value = append(value, prefix...)
+		// fmt.Printf("Value is empty, setting null value: %x\n", value)
 	}
 	return value
 }
 
 // If the value is null, return a null byte
-func RecoverNull(value []byte) []byte {
-	if compareBytes(value, []byte(LevelDBNull)) {
-		return []byte(LevelDBEmpty)
+func RecoverNull(key []byte, value []byte) []byte {
+	if len(value) > 4 {
+		if compareBytes(value[:4], []byte("null")) && compareBytes(value[len(value)-4:], []byte("null")) {
+			value = value[4 : len(value)-4]
+		}
 	}
+
 	return value
+}
+
+func allBytesAreZero(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }

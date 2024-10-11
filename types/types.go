@@ -146,3 +146,9 @@ func ComputeC_Base(blob_length int) int {
 	c := int(math.Ceil(float64(blob_length) / float64(W_C)))
 	return c
 }
+
+// For BPT
+type BPTNode struct {
+	Value []byte `json:"value"`
+	Key   []byte `json:"key"`
+}

@@ -338,8 +338,9 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	j := InitGenesisState(c)
 	statedb.JamState = j // setting the dispute state so that block 1 can be produced
 	// setting the safrole state so that block 1 can be produced
-
-	statedb.StateRoot = statedb.UpdateTrieState()
+	stateRoot := statedb.UpdateTrieState()
+	statedb.StateRoot = stateRoot
+	fmt.Printf("NewGenesisStateDB stateRoot=%v\n", stateRoot)
 	return statedb, nil
 }
 
@@ -387,63 +388,82 @@ func (s *StateDB) GetJamState() *JamState {
 	return s.JamState
 }
 
-func (s *StateDB) RecoverTrieState() {
+func (s *StateDB) SetJamState(jamState *JamState) {
+	s.JamState = jamState
+}
+
+func (s *StateDB) GetJamSnapshot() *StateSnapshot {
+	return s.JamState.Snapshot()
+}
+
+func (s *StateDB) RecoverTrieState(stateRoot common.Hash) {
 	// Now read C1.....C13 from the trie and put it back into JamState
-	t := s.GetTrie()
+	//t := s.GetTrie()
+
+	t := s.CopyTrieState(stateRoot)
+
 	coreAuthPoolEncode, err := t.GetState(C1)
 	if err != nil {
-		fmt.Printf("Error reading CoreAuthPool from trie: %v\n", err)
+		fmt.Printf("Error reading C1 CoreAuthPool from trie: %v\n", err)
 	}
 	authQueueEncode, err := t.GetState(C2)
 	if err != nil {
-		fmt.Printf("Error reading AuthQueue from trie: %v\n", err)
+		fmt.Printf("Error reading C2 AuthQueue from trie: %v\n", err)
 	}
 	recentBlocksEncode, err := t.GetState(C3)
 	if err != nil {
-		fmt.Printf("Error reading RecentBlocks from trie: %v\n", err)
+		fmt.Printf("Error reading C3 RecentBlocks from trie: %v\n", err)
 	}
 	safroleStateEncode, err := t.GetState(C4)
 	if err != nil {
-		fmt.Printf("Error reading SafroleState from trie: %v\n", err)
+		fmt.Printf("Error reading C4 SafroleState from trie: %v\n", err)
 	}
 	disputeStateEncode, err := t.GetState(C5)
 	if err != nil {
-		fmt.Printf("Error reading DisputeState from trie: %v\n", err)
+		fmt.Printf("Error reading C5 DisputeState from trie: %v\n", err)
 	}
 	entropyEncode, err := t.GetState(C6)
 	if err != nil {
-		fmt.Printf("Error reading Entropy from trie: %v\n", err)
+		fmt.Printf("Error reading C6 Entropy from trie: %v\n", err)
 	}
 	nextEpochValidatorsEncode, err := t.GetState(C7)
 	if err != nil {
-		fmt.Printf("Error reading NextEpochValidators from trie: %v\n", err)
+		fmt.Printf("Error reading C7 NextEpochValidators from trie: %v\n", err)
 	}
 	currEpochValidatorsEncode, err := t.GetState(C8)
 	if err != nil {
-		fmt.Printf("Error reading CurrentEpochValidators from trie: %v\n", err)
+		fmt.Printf("Error reading C8 CurrentEpochValidators from trie: %v\n", err)
 	}
 	priorEpochValidatorEncode, err := t.GetState(C9)
 	if err != nil {
-		fmt.Printf("Error reading PriorEpochValidators from trie: %v\n", err)
+		fmt.Printf("Error reading C9 PriorEpochValidators from trie: %v\n", err)
 	}
-	mostRecentBlockTimeSlotEncode, err := t.GetState(C10)
+	rhoEncode, err := t.GetState(C10)
 	if err != nil {
-		fmt.Printf("Error reading MostRecentBlockTimeSlot from trie: %v\n", err)
+		fmt.Printf("Error reading C10 Rho from trie: %v\n", err)
 	}
-	rhoEncode, err := t.GetState(C11)
+	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
 	if err != nil {
-		fmt.Printf("Error reading Rho from trie: %v\n", err)
+		fmt.Printf("Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
 	}
 	privilegedServiceIndicesEncode, err := t.GetState(C12)
 	if err != nil {
-		fmt.Printf("Error reading PrivilegedServiceIndices from trie: %v\n", err)
+		fmt.Printf("Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
 	}
 	piEncode, err := t.GetState(C13)
 	if err != nil {
-		fmt.Printf("Error reading ActiveValidator from trie: %v\n", err)
+		fmt.Printf("Error reading C13 ActiveValidator from trie: %v\n", err)
 	}
 	//Decode(authQueueEncode) -> AuthorizationQueue
 	//set AuthorizationQueue back to JamState
+
+	// fmt.Printf("retrieved C7 NextEpochValidators %v\n", nextEpochValidatorsEncode)
+	// fmt.Printf("retrieved C8 CurrentEpochValidators%v\n", currEpochValidatorsEncode)
+	// fmt.Printf("retrieved C9 PriorEpochValidators%v\n", priorEpochValidatorEncode)
+	// fmt.Printf("retrieved C7 NextEpochValidators %v\n", nextEpochValidatorsEncode)
+	// fmt.Printf("retrieved C8 CurrentEpochValidators%v\n", currEpochValidatorsEncode)
+	// fmt.Printf("retrieved C9 PriorEpochValidators%v\n", priorEpochValidatorEncode)
+
 	d := s.GetJamState()
 	d.SetAuthPool(coreAuthPoolEncode)
 	d.SetAuthQueue(authQueueEncode)
@@ -458,6 +478,10 @@ func (s *StateDB) RecoverTrieState() {
 	d.SetRho(rhoEncode)
 	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
 	d.SetPi(piEncode)
+
+	s.SetJamState(d)
+	//fmt.Printf("[N%v] RecoverTrieState %v\n", s.Id, s.GetJamSnapshot())
+
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -489,9 +513,9 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	recentBlocksEncode := d.GetRecentBlocksBytes()
 
 	t := s.GetTrie()
-	if debug {
-		fmt.Printf("UpdateTrieState - before root:%v\n", t.GetRoot())
-	}
+	prev_root := t.GetRoot()
+	debug := false
+	verify := true
 	t.SetState(C1, coreAuthPoolEncode)
 	t.SetState(C2, authQueueEncode)
 	t.SetState(C3, recentBlocksEncode)
@@ -506,14 +530,120 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C12, privilegedServiceIndicesEncode)
 	t.SetState(C13, piEncode)
 	updated_root := t.GetRoot()
+
 	if debug {
-		fmt.Printf("UpdateTrieState - after root:%v\n", updated_root)
+		fmt.Printf("[N%v] UpdateTrieState - before root:%v\n", s.Id, prev_root)
+		fmt.Printf("[N%v] UpdateTrieState - after root:%v\n", s.Id, updated_root)
+		// fmt.Printf("C1 coreAuthPoolEncode %x \n", coreAuthPoolEncode)
+		// fmt.Printf("C2 authQueueEncode %x \n", authQueueEncode)
+		// fmt.Printf("C3 recentBlocksEncode %x \n", recentBlocksEncode)
+		// fmt.Printf("C4 safroleStateEncode %x \n", safroleStateEncode)
+		// fmt.Printf("C5 disputeState %x \n", disputeState)
+		// fmt.Printf("C6 entropyEncode %x \n", entropyEncode)
+		// fmt.Printf("C7 nextEpochValidatorsEncode %x \n", nextEpochValidatorsEncode)
+		// fmt.Printf("C8 currEpochValidatorsEncode %x \n", currEpochValidatorsEncode)
+		// fmt.Printf("C9 priorEpochValidatorEncode %x \n", priorEpochValidatorEncode)
+		// fmt.Printf("C10 rhoEncode %x \n", rhoEncode)
+		// fmt.Printf("C11 mostRecentBlockTimeSlotEncode %x \n", mostRecentBlockTimeSlotEncode)
+		// fmt.Printf("C12 privilegedServiceIndicesEncode %x \n", privilegedServiceIndicesEncode)
+		// fmt.Printf("C13 piEncode %x \n", piEncode)
 	}
+
+	if debug || verify {
+		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
+		checkingResult, err := CheckingAllState(t, t2)
+		if !checkingResult || err != nil {
+			panic(fmt.Sprintf("CheckingAllState ERROR: %v\n", err))
+		}
+	}
+
 	return updated_root
 }
 
 func (s *StateDB) GetSafroleState() *SafroleState {
 	return s.JamState.SafroleState
+}
+
+func CheckingAllState(t *trie.MerkleTree, t2 *trie.MerkleTree) (bool, error) {
+	c1a, _ := t.GetState(C1)
+	c1b, _ := t2.GetState(C1)
+	if !common.CompareBytes(c1a, c1b) {
+		fmt.Printf("C1 is not the same\n")
+		return false, fmt.Errorf("C1 is not the same")
+	}
+	c2a, _ := t.GetState(C2)
+	c2b, _ := t2.GetState(C2)
+	if !common.CompareBytes(c2a, c2b) {
+		fmt.Printf("C2 is not the same\n")
+		return false, fmt.Errorf("C2 is not the same")
+	}
+	c3a, _ := t.GetState(C3)
+	c3b, _ := t2.GetState(C3)
+	if !common.CompareBytes(c3a, c3b) {
+		fmt.Printf("C3 is not the same\n")
+		return false, fmt.Errorf("C3 is not the same")
+	}
+	c4a, _ := t.GetState(C4)
+	c4b, _ := t2.GetState(C4)
+	if !common.CompareBytes(c4a, c4b) {
+		fmt.Printf("C4 is not the same\n")
+		return false, fmt.Errorf("C4 is not the same")
+	}
+	c5a, _ := t.GetState(C5)
+	c5b, _ := t2.GetState(C5)
+	if !common.CompareBytes(c5a, c5b) {
+		fmt.Printf("C5 is not the same\n")
+		return false, fmt.Errorf("C5 is not the same")
+	}
+	c6a, _ := t.GetState(C6)
+	c6b, _ := t2.GetState(C6)
+	if !common.CompareBytes(c6a, c6b) {
+		fmt.Printf("C6 is not the same\n")
+		return false, fmt.Errorf("C6 is not the same")
+	}
+	c7a, _ := t.GetState(C7)
+	c7b, _ := t2.GetState(C7)
+	if !common.CompareBytes(c7a, c7b) {
+		fmt.Printf("C7 is not the same\n")
+		return false, fmt.Errorf("C7 is not the same")
+	}
+	c8a, _ := t.GetState(C8)
+	c8b, _ := t2.GetState(C8)
+	if !common.CompareBytes(c8a, c8b) {
+		fmt.Printf("C8 is not the same\n")
+		return false, fmt.Errorf("C8 is not the same")
+	}
+	c9a, _ := t.GetState(C9)
+	c9b, _ := t2.GetState(C9)
+	if !common.CompareBytes(c9a, c9b) {
+		fmt.Printf("C9 is not the same\n")
+		return false, fmt.Errorf("C9 is not the same")
+	}
+	c10a, _ := t.GetState(C10)
+	c10b, _ := t2.GetState(C10)
+	if !common.CompareBytes(c10a, c10b) {
+		fmt.Printf("C10 is not the same\n")
+		return false, fmt.Errorf("C10 is not the same")
+	}
+	c11a, _ := t.GetState(C11)
+	c11b, _ := t2.GetState(C11)
+	if !common.CompareBytes(c11a, c11b) {
+		fmt.Printf("C11 is not the same\n")
+		return false, fmt.Errorf("C11 is not the same")
+	}
+	c12a, _ := t.GetState(C12)
+	c12b, _ := t2.GetState(C12)
+	if !common.CompareBytes(c12a, c12b) {
+		fmt.Printf("C12 is not the same\n")
+		return false, fmt.Errorf("C12 is not the same")
+	}
+	c13a, _ := t.GetState(C13)
+	c13b, _ := t2.GetState(C13)
+	if !common.CompareBytes(c13a, c13b) {
+		fmt.Printf("C13 is not the same\n")
+		return false, fmt.Errorf("C13 is not the same")
+	}
+	return true, nil
 }
 
 // func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {
@@ -713,7 +843,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 
-			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%v,m'=%v, len(γ_a')=%d %s %s\n", s.Id, common.Str(proposedBlk.ParentHash()), common.Str(proposedBlk.Hash()), currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
+			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.ParentHash()), common.Str(proposedBlk.Hash()), currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
 			elapsed := time.Since(start)
 			if trace && elapsed > 2000000 {
 				fmt.Printf("\033[31m MakeBlock / ApplyStateTransitionFromBlock\033[0m %d ms\n", elapsed/1000)
@@ -1123,7 +1253,11 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 	stateRoot := s.GetStateRoot()
-	// BROKEN: s.RecoverTrieState()
+
+	//fmt.Printf("[N%v] Original JamState %v\n", s.Id, s.GetJamSnapshot())
+	//fmt.Printf("[N%v] MakeBlock using stateRoot %v\n", s.Id, stateRoot)
+	s.RecoverTrieState(stateRoot)
+	//fmt.Printf("[N%v] Recovered JamState %v\n", s.Id, s.GetJamSnapshot())
 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()

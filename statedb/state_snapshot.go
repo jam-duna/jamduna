@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"encoding/json"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -72,4 +73,10 @@ func (original SafroleBasicState) Copy() SafroleBasicState {
 	copy(copied.GammaA[:], original.GammaA[:])
 	copy(copied.GammaZ[:], original.GammaZ[:])
 	return copied
+}
+
+func (s *StateSnapshot) String() string {
+	//jsonEncode, _ := json.MarshalIndent(s, "", "    ")
+	jsonEncode, _ := json.Marshal(s)
+	return string(jsonEncode)
 }

@@ -128,7 +128,7 @@ func (b *Block) Str() string {
 		out += b.Header.EpochMark.String()
 	}
 	if len(b.Header.TicketsMark) > 0 {
-		out += fmt.Sprintf(" \033[32mWinningTickets\033[0m(%d)", len(b.Header.TicketsMark))
+		out += fmt.Sprintf(" \033[32m WinningTickets\033[0m(%d)", len(b.Header.TicketsMark))
 	}
 	if len(b.Extrinsic.Tickets) > 0 {
 		out += fmt.Sprintf(" \033[34m |E_T|=%d\033[0m", len(b.Extrinsic.Tickets))
