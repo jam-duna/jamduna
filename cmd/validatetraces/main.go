@@ -3,12 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
-	"encoding/json"
 	"io/ioutil"
 	"log"
 	"os"
@@ -47,7 +47,7 @@ func processBlocks(genesisFile string, basePath string) error {
 			log.Fatalf("Error unmarshaling genesis JSON file %s: %v\n", genesisFile, err)
 		}
 	}
-	
+
 	stateDB, err := statedb.InitStateDBFromSnapshot(storage, statesnapshot)
 	if err != nil {
 		log.Fatalf("Error InitStateDBFromSnapshot %v\n", err)

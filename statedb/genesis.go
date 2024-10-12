@@ -39,22 +39,22 @@ func InitStateFromSnapshot(s *StateSnapshot) (j *JamState) {
 	j.SafroleState.Entropy[1] = s.Entropy[1]
 	j.SafroleState.Entropy[2] = s.Entropy[2]
 	j.SafroleState.Entropy[3] = s.Entropy[3]
-	
+
 	j.SafroleState.NextEpochTicketsAccumulator = s.Gamma.GammaA // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
-	j.SafroleState.TicketsVerifierKey = s.Gamma.GammaZ // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	j.SafroleState.TicketsOrKeys = s.Gamma.GammaS // γs: Current epoch’s slot-sealer series (epoch N)
-	
+	j.SafroleState.TicketsVerifierKey = s.Gamma.GammaZ          // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	j.SafroleState.TicketsOrKeys = s.Gamma.GammaS               // γs: Current epoch’s slot-sealer series (epoch N)
+
 	/*
-	Gamma is of type SafroleBasicState with:
-	type SafroleBasicState struct {
-	  GammaK []types.Validator  `json:"gamma_k"` 
-	  GammaA []types.TicketBody `json:"gamma_a"` 
-	  GammaS TicketsOrKeys      `json:"gamma_s"` 
-	  GammaZ []byte             `json:"gamma_z"` 
-	}
+		Gamma is of type SafroleBasicState with:
+		type SafroleBasicState struct {
+		  GammaK []types.Validator  `json:"gamma_k"`
+		  GammaA []types.TicketBody `json:"gamma_a"`
+		  GammaS TicketsOrKeys      `json:"gamma_s"`
+		  GammaZ []byte             `json:"gamma_z"`
+		}
 	*/
 
-	//ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"pi"`    
+	//ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"pi"`
 	//AuthorizationsPool
 	//AuthorizationQueue
 	//BeefyPool
@@ -134,8 +134,11 @@ func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 		now = int64(computeJCETime(now))
 	}
 	// epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
-	second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength)
+	second_per_epoch := uint64(types.SecondsPerSlot * 1) // types.EpochLength
+
+	// USE THIS for generating public traces with a full E for the first epoch
 	epoch0Timestamp := uint64(now) + second_per_epoch - (uint64(now) % second_per_epoch) // let it be the start of the epoch
+
 	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v\n", epoch0Timestamp)
 	return GenesisConfig{
 		Epoch0Timestamp: epoch0Timestamp,

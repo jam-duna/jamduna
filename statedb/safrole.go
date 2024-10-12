@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -115,7 +116,6 @@ type SafroleState struct {
 
 	// Accumulator of tickets, modified with Extrinsics to hold ORDERED array of Tickets
 	NextEpochTicketsAccumulator []types.TicketBody `json:"next_tickets_accumulator"` //gamma_a
-	TicketsAccumulator          []types.TicketBody `json:"tickets_accumulator"`
 	TicketsOrKeys               TicketsOrKeys      `json:"tickets_or_keys"`
 
 	// []bandersnatch.ValidatorKeySet
@@ -133,7 +133,6 @@ func NewSafroleState() *SafroleState {
 		CurrValidators:     []types.Validator{},
 		NextValidators:     []types.Validator{},
 		DesignedValidators: []types.Validator{},
-		TicketsAccumulator: []types.TicketBody{},
 		TicketsOrKeys:      TicketsOrKeys{},
 		TicketsVerifierKey: []byte{},
 	}
@@ -513,24 +512,40 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 }
 
 func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) []types.Ticket {
-	tickets := make([]types.Ticket, 0)
+	tickets := make([]types.Ticket, types.TicketEntriesPerValidator) // Pre-allocate space for tickets
+	var wg sync.WaitGroup
+	var mu sync.Mutex // To synchronize access to the tickets slice
+
 	start := time.Now()
 	for attempt := uint8(0); attempt < types.TicketEntriesPerValidator; attempt++ {
-		// We can GenerateTickets for the NEXT epoch based on s.Entropy[1], but the CURRENT epoch based on s.Entropy[2]
-		entropy := usedEntropy
-		ticket, err := s.generateTicket(secret, entropy, attempt)
-		if err == nil {
-			if debug {
-				fmt.Printf("[N%d] Generated ticket %d: %v\n", s.Id, attempt, entropy)
+		wg.Add(1)
+
+		// Launch a goroutine for each attempt
+		go func(attempt uint8) {
+			defer wg.Done()
+
+			entropy := usedEntropy
+			ticket, err := s.generateTicket(secret, entropy, attempt)
+
+			if err == nil {
+				if debug {
+					fmt.Printf("[N%d] Generated ticket %d: %v\n", s.Id, attempt, entropy)
+				}
+				// Lock to safely append to tickets
+				mu.Lock()
+				tickets[attempt] = ticket // Store the ticket at the index of the attempt
+				mu.Unlock()
+			} else {
+				fmt.Printf("Error generating ticket for attempt %d: %v\n", attempt, err)
 			}
-			tickets = append(tickets, ticket)
-		} else {
-			fmt.Printf("Error generating ticket for attempt %d: %v\n", attempt, err)
-		}
+		}(attempt) // Pass the attempt variable to avoid closure capture issues
 	}
+
+	wg.Wait() // Wait for all goroutines to finish
+
 	elapsed := time.Since(start).Microseconds()
-	if trace && elapsed > 2000000 {
-		fmt.Printf(" --- GenerateTickets took %d ms\n", time.Since(start).Microseconds()/1000)
+	if trace && elapsed > 1000000 { // OPTIMIZED generateTicket
+		fmt.Printf(" --- GenerateTickets took %d ms\n", elapsed/1000)
 	}
 
 	return tickets
@@ -881,7 +896,7 @@ func (s *SafroleState) CheckFirstPhaseReady() (isReady bool) {
 	// timeslot mark
 	currJCE := common.ComputeRealCurrentJCETime(types.TimeUnitMode)
 	if currJCE < s.EpochFirstSlot {
-		fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot)
+		//fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot)
 		return false
 	}
 	return true
@@ -900,7 +915,6 @@ func cloneSafroleState(original SafroleState) SafroleState {
 		NextValidators:              make([]types.Validator, len(original.NextValidators)),
 		DesignedValidators:          make([]types.Validator, len(original.DesignedValidators)),
 		NextEpochTicketsAccumulator: make([]types.TicketBody, len(original.NextEpochTicketsAccumulator)),
-		TicketsAccumulator:          make([]types.TicketBody, len(original.TicketsAccumulator)),
 		TicketsOrKeys:               original.TicketsOrKeys,
 		TicketsVerifierKey:          make([]byte, len(original.TicketsVerifierKey)),
 	}
@@ -911,7 +925,6 @@ func cloneSafroleState(original SafroleState) SafroleState {
 	copy(copied.NextValidators, original.NextValidators)
 	copy(copied.DesignedValidators, original.DesignedValidators)
 	copy(copied.NextEpochTicketsAccumulator, original.NextEpochTicketsAccumulator)
-	copy(copied.TicketsAccumulator, original.TicketsAccumulator)
 	copy(copied.TicketsVerifierKey, original.TicketsVerifierKey)
 
 	return copied
@@ -932,7 +945,6 @@ func (original *SafroleState) Copy() *SafroleState {
 		NextValidators:              make([]types.Validator, len(original.NextValidators)),
 		DesignedValidators:          make([]types.Validator, len(original.DesignedValidators)),
 		NextEpochTicketsAccumulator: make([]types.TicketBody, len(original.NextEpochTicketsAccumulator)),
-		TicketsAccumulator:          make([]types.TicketBody, len(original.TicketsAccumulator)),
 		TicketsOrKeys:               original.TicketsOrKeys, // Assuming this has value semantics
 		TicketsVerifierKey:          make([]byte, len(original.TicketsVerifierKey)),
 	}
@@ -943,7 +955,6 @@ func (original *SafroleState) Copy() *SafroleState {
 	copy(copyState.NextValidators, original.NextValidators)
 	copy(copyState.DesignedValidators, original.DesignedValidators)
 	copy(copyState.NextEpochTicketsAccumulator, original.NextEpochTicketsAccumulator)
-	copy(copyState.TicketsAccumulator, original.TicketsAccumulator)
 	// Copy the TicketsVerifierKey slice
 	copy(copyState.TicketsVerifierKey, original.TicketsVerifierKey)
 
@@ -954,8 +965,11 @@ func (original *SafroleState) Copy() *SafroleState {
 func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, id uint32) (SafroleState, error) {
 	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
-
 	s2 := cloneSafroleState(*s)
+	if currPhase >= types.TicketSubmissionEndSlot && len(tickets) > 0 {
+		return s2, fmt.Errorf(errTicketSubmissionInTail)
+	}
+
 	if currEpoch < prevEpoch || (currEpoch == prevEpoch && currPhase < prevPhase) {
 		return s2, fmt.Errorf("%v - currEpoch %d prevEpoch %d  currPhase %d  prevPhase %d", errTimeslotNotMonotonic, currEpoch, prevEpoch, currPhase, prevPhase)
 	}
@@ -1022,32 +1036,45 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 		// Epoch in progress
 		s2.StableEntropy(s, new_entropy_0)
 	}
-	// eq 78 put tickets in the accumulator
+
+	var wg sync.WaitGroup
+	ticketMutex := &sync.Mutex{}
+	errCh := make(chan error, len(tickets))
+
+	// Iterate over tickets in parallel
 	for _, e := range tickets {
-		if currPhase >= types.TicketSubmissionEndSlot {
-			return s2, fmt.Errorf(errTicketSubmissionInTail)
-		}
-		if len(s.Entropy) == 4 {
-			//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-			if e.Attempt >= types.TicketEntriesPerValidator {
-				return s2, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
-			}
+		wg.Add(1)
+
+		go func(e types.Ticket) {
+			defer wg.Done()
+
+			// Validate the ticket in parallel
 			ticket_id, err := s.ValidateProposedTicket(&e, isShifted)
 			if err != nil {
-				return s2, fmt.Errorf(errTicketBadRingProof)
+				errCh <- fmt.Errorf(errTicketBadRingProof)
+				return
 			}
+
+			// Protect access to shared resources (map) with a mutex
+			ticketMutex.Lock()
+			defer ticketMutex.Unlock()
 
 			_, exists := ticketIDs[ticket_id]
 			if exists {
 				if debug {
 					fmt.Printf("DETECTED Resubmit %v\n", ticket_id)
 				}
-				continue // return s2, fmt.Errorf(errTicketResubmission)
+				return
 			}
 
+			// If the ticket is valid, add it to the accumulator
 			s2.PutTicketInAccumulator(ticket_id, e.Attempt)
-		}
+		}(e)
 	}
+
+	// Wait for all goroutines to finish
+	wg.Wait()
+
 	// Sort and trim tickets
 	s2.SortAndTrimTickets()
 

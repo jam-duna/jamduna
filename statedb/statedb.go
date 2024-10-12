@@ -339,9 +339,7 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	statedb.JamState = j // setting the dispute state so that block 1 can be produced
 	// setting the safrole state so that block 1 can be produced
 	stateRoot := statedb.UpdateTrieState()
-	fmt.Printf("NewGenesisStateDB: %v\n", j)
 	statedb.StateRoot = stateRoot
-	fmt.Printf("NewGenesisStateDB stateRoot=%v\n", stateRoot)
 	return statedb, nil
 }
 
@@ -355,7 +353,7 @@ func InitStateDBFromSnapshot(sdb *storage.StateDBStorage, snapshot *StateSnapsho
 	statedb.JamState = InitStateFromSnapshot(snapshot)
 	// setting the safrole state so that block 1 can be produced
 	statedb.StateRoot = statedb.UpdateTrieState()
-	fmt.Printf("InitStateDBFromSnapshot stateRoot=%v JamState: %s\n", statedb.StateRoot, statedb.JamState.String())
+
 	return statedb, nil
 }
 
@@ -1148,7 +1146,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
 	elapsed := time.Since(start).Microseconds()
-	if trace && elapsed > 1000000 {
+	if trace && elapsed > 1000000 { // OPTIMIZED ApplyStateTransitionTickets/ValidateProposedTicket
 		fmt.Printf("\033[31mApplyStateTransitionFromBlock:Tickets\033[0m %d ms\n", elapsed/1000)
 	}
 

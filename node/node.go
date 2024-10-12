@@ -811,7 +811,7 @@ func getMessageType(obj interface{}) string {
 	}
 }
 
-const TickTime = 2000
+const TickTime = 200
 
 func (n *Node) writeDebug(obj interface{}, timeslot uint32) error {
 	l := storage.LogMessage{
