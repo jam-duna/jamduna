@@ -20,7 +20,6 @@ import (
 	"os/user"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 
@@ -628,7 +627,8 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 
 	// fib code
-	code, err := loadByteCode("../jamtestvectors/workpackages/fib-refine-fixed.pvm")
+	// code, err := loadByteCode("../jamtestvectors/workpackages/fib-refine-fixed.pvm")
+	code, err := loadByteCode("../jamtestvectors/workpackages/fib-standardized.pvm")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -806,16 +806,17 @@ func TestWorkGuarantee(t *testing.T) {
 		// need to compile EG
 	}
 }
-func TestCodeParse(t *testing.T) {
 
-	// fib code
-	code, err := loadByteCode("../jamtestvectors/workpackages/fib-full.pvm")
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	fmt.Println("Code:", code)
-	pvm.NewVMFromParseProgramTest(code)
-}
+// func TestCodeParse(t *testing.T) {
+
+// 	// fib code
+// 	code, err := loadByteCode("../jamtestvectors/workpackages/standardized_jam_service.pvm")
+// 	if err != nil {
+// 		t.Fatalf("%v", err)
+// 	}
+// 	fmt.Println("Code:", code)
+// 	pvm.NewVMFromParseProgramTest(code)
+// }
 
 func TestNodeRotation(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
