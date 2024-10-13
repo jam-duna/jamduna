@@ -102,7 +102,7 @@ const (
 // codec
 const (
 	validators_super_majority = TotalValidators*2/3 + 1
-	avail_bitfield_bytes      = (TotalCores + 7) / 8
+	Avail_bitfield_bytes      = (TotalCores + 7) / 8
 )
 
 // extrinsic tidy up constants

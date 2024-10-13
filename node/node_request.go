@@ -24,6 +24,97 @@ type QuicMessage struct {
 	Payload []byte `json:"payload"`
 }
 
+const (
+	jamsnpEnabled = false
+)
+
+func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
+	// TODO: Sourabh
+	fmt.Println("OnHandshake")
+	return nil
+}
+
+func (n *Node) OnBlockAnnouncement(validatorIndex uint16, h types.BlockHeader, headerHash common.Hash, slot uint32) (err error) {
+	// TODO: Sourabh
+	fmt.Println("OnBlockAnnouncement")
+	return nil
+}
+
+func (n *Node) OnTicketDistribution(epoch uint32, attempt uint8, signature types.BandersnatchRingSignature) (err error) {
+	// TODO: Sourabh
+	fmt.Println("OnTicketDistribution")
+	return nil
+}
+
+func (n *Node) GetBlocks(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
+	// TODO: Michael+Sourabh
+	fmt.Println("GetBlocks")
+	return blocks, ok, nil
+}
+
+func (n *Node) OnWorkReportDistribution(validatorIndex uint16, slot uint32, credentials []types.GuaranteeCredential, wr types.WorkReport) (err error) {
+	// TODO: Shawn - process WorkReport
+	fmt.Println("OnWorkReportDistribution")
+	return nil
+}
+
+func (n *Node) WorkReportLookup(workreportHash common.Hash) ([]byte, bool, error) {
+	// TODO: Shawn
+	return []byte{}, false, nil
+}
+
+func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []common.Hash, bundle []byte) (workPackageHash common.Hash, signature types.Ed25519Signature, err error) {
+	// TODO: Shawn -- initiate PVM Refine operation
+	return workPackageHash, signature, nil
+}
+
+func (n *Node) OnAssurance(validatorIndex uint16, anchor common.Hash, bitfield [types.Avail_bitfield_bytes]byte, signature types.Ed25519Signature) (err error) {
+	// TODO: Shawn - process Assurance
+	fmt.Println("OnAssurance")
+	return nil
+}
+
+func (n *Node) OnAuditAnnouncement(validatorIndex uint16, headerHash common.Hash, tranche uint8, coreIndexes []uint16, workReportHashes []common.Hash, signature types.Ed25519Signature) (err error) {
+	// TODO: Shawn - process Assurance
+	fmt.Println("OnAuditAnnouncement")
+	return nil
+}
+
+func (n *Node) OnJudgementPublication(epoch uint32, validatorIndex uint16, validity uint8, workReportHash common.Hash, signature types.Ed25519Signature) (err error) {
+	// TODO: Shawn - process Judgement Publication
+	fmt.Println("OnJudgementPublication")
+	return nil
+}
+
+func (n *Node) OnPreimageAnnouncement(validatorIndex uint16, preimageHash common.Hash) ([]byte, bool, error) {
+	// TODO: William
+	return []byte{}, false, nil
+}
+
+func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
+	// TODO: William
+	return []byte{}, false, nil
+}
+
+func (n *Node) GetSegmentShard(erasureRoot common.Hash, shardIndex uint16, SegmentIndex []uint16) (segmentshards []byte, justifications [][]byte, ok bool, err error) {
+	// TODO: Stanley+Michael
+	segmentshards = []byte{}
+	justifications = [][]byte{}
+	return segmentshards, justifications, false, nil
+}
+
+func (n *Node) GetShard(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, justification []byte, ok bool, err error) {
+	// TODO: Stanley+Michael
+	bundleShard = []byte{}
+	justification = []byte{}
+	return bundleShard, justification, false, nil
+}
+
+func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValue, ok bool, err error) {
+	// TODO: Stanley
+	return boundarynodes, keyvalues, false, nil
+}
+
 func (n *Node) IsSelfRequesting(peerIdentifier string) bool {
 	ed25519key := n.GetEd25519Key()
 	if ed25519key.String() == peerIdentifier {
@@ -307,29 +398,6 @@ func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) 
 			}
 		}
 
-	// case "ImportDAQuery":
-	// 	var query types.ImportDAQuery
-	// 	decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
-	// 	query = decoded.(types.ImportDAQuery)
-	// 	r := types.ImportDAResponse{Data: [][]byte{[]byte("dummy data")}}
-	// 	serializedR := types.Encode(r)
-	// 	response = serializedR
-	// case "AuditDAQuery":
-	// 	var query types.AuditDAQuery
-	// 	decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
-	// 	query = decoded.(types.AuditDAQuery)
-	// 	r := types.AuditDAResponse{Data: []byte("dummy data")}
-	// 	serializedR := types.Encode(r)
-	// 	response = serializedR
-	// case "ImportDAReconstructQuery":
-	// 	var query types.ImportDAReconstructQuery
-	// 	decoded, _ := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
-	// 	query = decoded.(types.ImportDAReconstructQuery)
-	// 	if err == nil {
-	// 		r := types.ImportDAReconstructResponse{Data: []byte("dummy data")}
-	// 		serializedR := types.Encode(r)
-	// 		response = serializedR
-	// 	}
 	case "Ticket":
 		var ticket types.Ticket
 		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(ticket))

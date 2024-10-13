@@ -422,7 +422,6 @@ func (n *Node) decodeWorkPackage(encodedWorkPackage []byte) types.WorkPackage {
 	// length := uint32(0)
 
 	// // Decode the package (p)
-	// wp, l := types.Decode(encodedWorkPackage, reflect.TypeOf(types.WorkPackage{}))
 	wp, _, err := types.Decode(encodedWorkPackage, reflect.TypeOf(types.WorkPackage{}))
 	if err != nil {
 		fmt.Println("Error in decodeWorkPackage:", err)

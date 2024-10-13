@@ -50,6 +50,7 @@ type NodeInfo struct {
 	PeerAddr   string          `json:"peer_addr"`
 	RemoteAddr string          `json:"remote_addr"`
 	Validator  types.Validator `json:"validator"`
+	Peer       Peer
 }
 
 type Node struct {
@@ -439,6 +440,77 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			fmt.Printf("runClient request error: %v\n", err)
 			continue
 		}
+		if jamsnpEnabled {
+			p := peer.Peer
+			objType := reflect.TypeOf(obj)
+			switch objType {
+			case reflect.TypeOf(types.Ticket{}):
+				t := obj.(types.Ticket)
+				epoch := uint32(0) // TODO: Shawn
+				err := p.SendTicketDistribution(epoch, t, false)
+				if err != nil {
+					fmt.Printf("SendTicketDistribution ERR %v\n", err)
+				}
+				break
+			case reflect.TypeOf(types.Block{}):
+				b := obj.(types.Block)
+				slot := uint32(0) // TODO: Shawn
+				err := p.SendBlockAnnouncement(b, slot)
+				if err != nil {
+					fmt.Printf("SendBlockAnnouncement ERR %v\n", err)
+				}
+				break
+
+			case reflect.TypeOf(types.Guarantee{}):
+				g := obj.(types.Guarantee)
+
+				err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
+				if err != nil {
+					fmt.Printf("SendWorkReportDistribution ERR %v\n", err)
+				}
+
+				break
+			case reflect.TypeOf(types.Assurance{}):
+				a := obj.(types.Assurance)
+				err := p.SendAssurance(&a)
+				if err != nil {
+					fmt.Printf("SendAssurance ERR %v\n", err)
+				}
+				break
+			case reflect.TypeOf(types.Announcement{}):
+				a := obj.(types.Announcement)
+				coreIndex := uint16(0) // TODO: Shawn
+				workPackageHash := a.WorkReport.AvailabilitySpec.WorkPackageHash
+				headerHash := common.Hash{} // TODO: Shawn
+				err := p.SendAuditAnnouncement(workPackageHash, headerHash, coreIndex, &a)
+				if err != nil {
+					fmt.Printf("SendAuditAnnouncement ERR %v\n", err)
+				}
+				break
+			case reflect.TypeOf(types.Judgement{}):
+				j := obj.(types.Judgement)
+				epoch := uint32(0) // TODO: Shawn
+				workReportHash := j.WorkReport.Hash()
+				validity := uint8(0)        // TODO: Shawn
+				validatorIndex := uint16(0) // TODO: Shawn
+				err := p.SendJudgmentPublication(epoch, validatorIndex, validity, workReportHash, j.Signature)
+				if err != nil {
+					fmt.Printf("SendJudgmentPublication ERR %v\n", err)
+				}
+				break
+
+			case reflect.TypeOf(types.Preimages{}):
+				preimage := obj.(types.Preimages)
+				// TODO: William
+				//requester := p.Requester
+				preimageHash := common.BytesToHash(common.ComputeHash(preimage.Blob))
+				_, err := p.SendPreimageRequest(preimageHash)
+				if err != nil {
+					fmt.Printf("SendPreimageRequest ERR %v\n", err)
+				}
+				break
+			}
+		}
 		if len(resp) > 0 {
 			result = resp
 		}
@@ -460,6 +532,19 @@ func (n *Node) coreBroadcast(obj interface{}) []byte {
 				peerIdentifier := peer.Validator.Ed25519.String()
 				if peer.PeerID == n.id {
 					continue
+				}
+				if jamsnpEnabled {
+					p := peer.Peer
+					objType := reflect.TypeOf(obj)
+					switch objType {
+					case reflect.TypeOf(types.WorkPackage{}):
+						wp := obj.(types.WorkPackage)
+						workpackagehashes, segmentRoots, bundle := wp.Split()
+						err := p.ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
+						if err != nil {
+
+						}
+					}
 				}
 				//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
 				resp, err := n.makeRequest(peerIdentifier, obj, types.QuicOverallTimeout)
@@ -758,14 +843,8 @@ func getMessageType(obj interface{}) string {
 	switch obj.(type) {
 	case types.AvailabilityJustification:
 		return "AvailabilityJustification"
-	case types.ImportDAQuery:
-		return "ImportDAQuery"
 	case types.BlockQuery:
 		return "BlockQuery"
-	case types.AuditDAQuery:
-		return "AuditDAQuery"
-	case types.ImportDAReconstructQuery:
-		return "ImportDAReconstructQuery"
 	case types.Guarantee:
 		return "Guarantee"
 	case types.Assurance:

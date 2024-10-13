@@ -29,7 +29,7 @@ type Assurance struct {
 	// H_p - see Eq 124
 	Anchor common.Hash `json:"anchor"`
 	// f - 1 means "available"
-	Bitfield       [avail_bitfield_bytes]byte `json:"bitfield"`
+	Bitfield       [Avail_bitfield_bytes]byte `json:"bitfield"`
 	ValidatorIndex uint16                     `json:"validator_index"`
 	Signature      Ed25519Signature           `json:"signature"`
 }
@@ -149,7 +149,7 @@ func (a *Assurance) UnmarshalJSON(data []byte) error {
 	bitfieldBytes := common.FromHex(s.Bitfield)
 	// Convert Signature from hex string to Ed25519Signature
 	signatureBytes := common.FromHex(s.Signature)
-	var bitfield [avail_bitfield_bytes]byte
+	var bitfield [Avail_bitfield_bytes]byte
 	copy(bitfield[:], bitfieldBytes)
 
 	var signature Ed25519Signature

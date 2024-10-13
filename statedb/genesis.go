@@ -44,16 +44,6 @@ func InitStateFromSnapshot(s *StateSnapshot) (j *JamState) {
 	j.SafroleState.TicketsVerifierKey = s.Gamma.GammaZ          // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 	j.SafroleState.TicketsOrKeys = s.Gamma.GammaS               // γs: Current epoch’s slot-sealer series (epoch N)
 
-	/*
-		Gamma is of type SafroleBasicState with:
-		type SafroleBasicState struct {
-		  GammaK []types.Validator  `json:"gamma_k"`
-		  GammaA []types.TicketBody `json:"gamma_a"`
-		  GammaS TicketsOrKeys      `json:"gamma_s"`
-		  GammaZ []byte             `json:"gamma_z"`
-		}
-	*/
-
 	//ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"pi"`
 	//AuthorizationsPool
 	//AuthorizationQueue

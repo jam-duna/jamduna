@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"reflect"
 
+	"bytes"
+	"encoding/binary"
 	"github.com/colorfulnotion/jam/common"
+	"io"
 )
 
 /*
@@ -47,6 +50,39 @@ type GuaranteeCredential struct {
 	Signature      Ed25519Signature `json:"signature"`
 }
 
+// ToBytes serializes the GuaranteeCredential struct into a byte array
+func (cred *GuaranteeCredential) ToBytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// Serialize ValidatorIndex (2 bytes)
+	if err := binary.Write(buf, binary.BigEndian, cred.ValidatorIndex); err != nil {
+		return nil, err
+	}
+
+	// Serialize Signature (64 bytes for Ed25519Signature)
+	if _, err := buf.Write(cred.Signature[:]); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// FromBytes deserializes a byte array into a GuaranteeCredential struct
+func (cred *GuaranteeCredential) FromBytes(data []byte) error {
+	buf := bytes.NewReader(data)
+
+	// Deserialize ValidatorIndex (2 bytes)
+	if err := binary.Read(buf, binary.BigEndian, &cred.ValidatorIndex); err != nil {
+		return err
+	}
+
+	// Deserialize Signature (64 bytes)
+	if _, err := io.ReadFull(buf, cred.Signature[:]); err != nil {
+		return err
+	}
+
+	return nil
+}
 func (g *GuaranteeReport) Sign(secret []byte) error {
 	signtext := g.UnsignedBytesWithSalt()
 	if len(secret) != 64 {

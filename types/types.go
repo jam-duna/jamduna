@@ -31,18 +31,6 @@ type BlockQuery struct {
 	BlockHash common.Hash `json:"block_hash"`
 }
 
-// -----Custom types for tiny QUIC experiment-----
-
-type DistributeErasureRoot struct {
-	Key  common.Hash `json:"block_hash"`
-	Data []byte      `json:"blob_hash"`
-}
-
-type ErasureRootResponse struct {
-	Key  common.Hash `json:"segment_root"`
-	Data []byte      `json:"blob_hash"`
-}
-
 type DistributeECChunk struct {
 	SegmentRoot []byte      `json:"segment_root"`
 	Data        []byte      `json:"data"`
@@ -57,37 +45,6 @@ type ECChunkResponse struct {
 
 type ECChunkQuery struct {
 	SegmentRoot common.Hash `json:"segment_root"`
-}
-
-// `ImportDAQuery` + `ImportDAResponse` WIP:
-type ImportDAQuery struct {
-	SegmentRoot    common.Hash `json:"segment_root"`
-	SegmentIndex   uint32      `json:"segment_index"`
-	ProofRequested bool        `json:"proof_requested"`
-}
-
-type ImportDAResponse struct {
-	Data  [][]byte `json:"data"`
-	Proof BMTProof `json:"proof"`
-}
-
-type AuditDAQuery struct {
-	SegmentRoot    common.Hash `json:"segment_root"`
-	Index          int         `json:"segment_index"`
-	ProofRequested bool        `json:"proof_requested"`
-}
-
-type AuditDAResponse struct {
-	Data  []byte   `json:"data"`
-	Proof BMTProof `json:"proof"`
-}
-
-type ImportDAReconstructQuery struct {
-	SegmentRoot common.Hash `json:"segment_root"`
-}
-
-type ImportDAReconstructResponse struct {
-	Data []byte `json:"data"`
 }
 
 // DeferredTransfer represents a deferred transfer.

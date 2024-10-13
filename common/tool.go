@@ -106,3 +106,22 @@ func ConvertToSlice(arr interface{}) []byte {
 
 	return byteSlice
 }
+
+// ConcatenateByteSlices concatenates a slice of byte slices into a single byte slice
+func ConcatenateByteSlices(slices [][]byte) []byte {
+	// Calculate the total length of the concatenated byte slice
+	totalLen := 0
+	for _, b := range slices {
+		totalLen += len(b)
+	}
+
+	// Create a single byte slice with the total length
+	result := make([]byte, 0, totalLen)
+
+	// Append each byte slice to the result
+	for _, b := range slices {
+		result = append(result, b...)
+	}
+
+	return result
+}

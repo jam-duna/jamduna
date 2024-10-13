@@ -101,10 +101,8 @@ type Validators []types.Validator
 type SafroleState struct {
 	Id             uint32 `json:"Id"`
 	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
-	Epoch          uint32 `json:"epoch"`
 
-	TimeStamp int    `json:"timestamp"`
-	Timeslot  uint32 `json:"timeslot"`
+	Timeslot uint32 `json:"timeslot"`
 
 	Entropy Entropy `json:"entropy"`
 
@@ -906,8 +904,6 @@ func cloneSafroleState(original SafroleState) SafroleState {
 	copied := SafroleState{
 		Id:                          original.Id,
 		EpochFirstSlot:              original.EpochFirstSlot,
-		Epoch:                       original.Epoch,
-		TimeStamp:                   original.TimeStamp,
 		Timeslot:                    original.Timeslot,
 		Entropy:                     original.Entropy,
 		PrevValidators:              make([]types.Validator, len(original.PrevValidators)),
@@ -936,8 +932,6 @@ func (original *SafroleState) Copy() *SafroleState {
 	copyState := &SafroleState{
 		Id:                          original.Id,
 		EpochFirstSlot:              original.EpochFirstSlot,
-		Epoch:                       original.Epoch,
-		TimeStamp:                   original.TimeStamp,
 		Timeslot:                    original.Timeslot,
 		Entropy:                     original.Entropy,
 		PrevValidators:              make([]types.Validator, len(original.PrevValidators)),
@@ -959,6 +953,11 @@ func (original *SafroleState) Copy() *SafroleState {
 	copy(copyState.TicketsVerifierKey, original.TicketsVerifierKey)
 
 	return copyState
+}
+
+func (s *SafroleState) GetEpoch() uint32 {
+	//todo
+	return 0
 }
 
 // statefrole_stf is the function to be tested

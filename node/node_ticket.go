@@ -1,14 +1,9 @@
 package node
 
 import (
-
-	//	"encoding/binary"
-
 	"fmt"
-
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
-	//	"io"
 )
 
 func (n *Node) GetSelfTicketsIDs() ([]common.Hash, error) {
@@ -41,7 +36,7 @@ func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBuck
 	if debug {
 		fmt.Printf("[N%v] Generating Tickets for = (%v)\n", n.id, usedEntropy)
 	}
-	buckets := types.TicketsToBuckets(tickets, sf.Epoch)
+	buckets := types.TicketsToBuckets(tickets, sf.GetEpoch())
 	n.selfTickets[usedEntropy] = buckets
 	if debug {
 		for _, bucket := range n.selfTickets[usedEntropy] {

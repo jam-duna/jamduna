@@ -354,7 +354,7 @@ func (s *StateDB) AppendDisputes(J types.JudgeBucket, W_hash common.Hash) error 
 		faults := s.JudgementToFault(J.GetFalseJudgement(W_hash), W_hash) //the false goes to fault
 		goodset_verdict := types.Verdict{
 			Target: W_hash,
-			Epoch:  s.GetSafrole().Epoch,
+			Epoch:  s.GetSafrole().GetEpoch(),
 		}
 
 		for i, true_vote := range true_votes {
@@ -370,7 +370,7 @@ func (s *StateDB) AppendDisputes(J types.JudgeBucket, W_hash common.Hash) error 
 		false_votes := JudgementToVote(J.GetFalseJudgement(W_hash))
 		badset_verdict := types.Verdict{
 			Target: W_hash,
-			Epoch:  s.GetSafrole().Epoch,
+			Epoch:  s.GetSafrole().GetEpoch(),
 		}
 		for i, false_vote := range false_votes {
 			badset_verdict.Votes[i] = false_vote //get 2/3+1 false
@@ -383,7 +383,7 @@ func (s *StateDB) AppendDisputes(J types.JudgeBucket, W_hash common.Hash) error 
 		wonky_votes := JudgementToVote(J.GetWonkeyJudgement(W_hash))
 		wonky_verdict := types.Verdict{
 			Target: W_hash,
-			Epoch:  s.GetSafrole().Epoch,
+			Epoch:  s.GetSafrole().GetEpoch(),
 		}
 		true_c := 0
 		false_c := 0

@@ -15,12 +15,6 @@ Section 12.1. Preimage Integration. Prior to accumulation, we must first integra
 `PreimageExtrinsic` ${\bf E}_P$:
 */
 // LookupEntry represents a single entry in the lookup extrinsic.
-/*
-type PreimageLookup struct {
-	ServiceIndex uint32 `json:"service_index"`
-	Data         []byte `json:"data"`
-}
-*/
 type Preimages struct {
 	Requester uint32 `json:"requester"`
 	Blob      []byte `json:"blob"`
