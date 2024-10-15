@@ -100,7 +100,7 @@ func main() {
 	}
 
 	// Set up peers and node
-	_, err = node.NewNode(uint32(validatorIndex), secrets[validatorIndex], &genesisConfig, peers, peerList, config.DataDir, config.Port)
+	_, err = node.NewNode(uint16(validatorIndex), secrets[validatorIndex], &genesisConfig, peers, peerList, config.DataDir, config.Port)
 	if err != nil {
 		panic(1)
 	}
@@ -109,19 +109,17 @@ func main() {
 	}
 }
 
-func generatePeerNetwork(validators []types.Validator, port int) (peers []string, peerList map[string]node.NodeInfo, err error) {
-	peerList = make(map[string]node.NodeInfo)
-	for i := uint32(0); i < types.TotalValidators; i++ {
+func generatePeerNetwork(validators []types.Validator, port int) (peers []string, peerList map[uint16]*node.Peer, err error) {
+	peerList = make(map[uint16]*node.Peer)
+	for i := uint16(0); i < types.TotalValidators; i++ {
 		v := validators[i]
 		peerAddr := fmt.Sprintf("node%d:%d", i, port)
-		remoteAddr := fmt.Sprintf("node%d:%d", i, port)
 		peer := fmt.Sprintf("%s", v.Ed25519)
 		peers = append(peers, peer)
-		peerList[peer] = node.NodeInfo{
-			PeerID:     i,
-			PeerAddr:   peerAddr,
-			RemoteAddr: remoteAddr,
-			Validator:  v,
+		peerList[i] = &node.Peer{
+			PeerID:    i,
+			PeerAddr:  peerAddr,
+			Validator: v,
 		}
 	}
 	return peers, peerList, nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
 	"io"
 	"reflect"
 )
@@ -74,7 +75,7 @@ func (req *JAMSNPBlockRequest) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, err error) {
+func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximumBlocks uint32) (block types.Block, err error) {
 	req := &JAMSNPBlockRequest{
 		HeaderHash:    headerHash,
 		Direction:     direction,
@@ -82,55 +83,78 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 	}
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return blocks, err
+		return block, err
 	}
-	p.sendCode(CE128_BlockRequest)
-	err = p.sendQuicBytes(reqBytes)
+	stream, err := p.openStream(CE128_BlockRequest)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
-		return blocks, err
+		fmt.Printf("%s SendBlockRequest ERR1 %v\n", p.String(), err)
+		panic(0)
+		return block, err
 	}
-	respBytes, err := p.receiveQuicBytes()
-	if err != nil {
-		return blocks, err
-	}
-	blocksT, _, err := types.Decode(respBytes, reflect.TypeOf([]types.Block(nil)))
-	blocks = blocksT.([]types.Block)
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
+	// fmt.Printf("%s SendBlockRequest %v\n", p.String(), headerHash)
 
-	return blocks, err
+	respBytes, err := receiveQuicBytes(stream)
+	if err != nil {
+		fmt.Printf("%s SendBlockRequest ERR2 %v\n", p.String(), err)
+		panic(0)
+		return block, err
+	}
+	//fmt.Printf("%s SendBlockRequest received %d bytes: [%x]\n", p.String(), len(respBytes), respBytes)
+
+	blocks, _, err := types.Decode(respBytes, reflect.TypeOf(types.Block{}))
+	if err != nil {
+		fmt.Printf("%s SendBlockRequest ERR3 %v\n", p.String(), err)
+		return block, err
+	}
+	block = blocks.(types.Block)
+	return block, nil
 }
 
-func (p *Peer) processBlockRequest(msg []byte) (err error) {
+func (n *Node) onBlockRequest(stream quic.Stream, msg []byte) (err error) {
 	var newReq JAMSNPBlockRequest
+	defer stream.Close()
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
-		fmt.Println("Error deserializing:", err)
+		fmt.Printf("%s onBlockRequest Error deserializing: %v\n", n.String(), err)
 		return
 	}
 	// read the request and response with a set of blocks
-	blocks, ok, err := p.node.GetBlocks(newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
+	blocks, ok, err := n.BlocksLookup(newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
 	if err != nil {
+		fmt.Printf("%s onBlockRequest BlocksLookup ERR %v\n", n.String(), err)
 		return err
 	}
 	if !ok {
-		return nil // TODO
+		panic(314)
+		return nil
 	}
-	blocksBytes, err := types.Encode(blocks)
-	if err != nil {
-		return err
-	}
-	err = p.sendQuicBytes(blocksBytes)
-	if err != nil {
-		return err
-	}
+	block := blocks[0]
+	var blockBytes []byte
 
+	blockBytes, err = types.Encode(block)
+	if err != nil {
+		return err
+	}
+	// CHECK BLOCK if the blockbytes we sent are decodable and equal the headerhash
+	c, _, err := types.Decode(blockBytes, reflect.TypeOf(types.Block{}))
+	if err != nil {
+		fmt.Printf("%s SendBlockRequest ERR3 %v\n", n.String(), err)
+		return err
+	}
+	checkBlock := c.(types.Block)
+	checkheaderHash := checkBlock.Header.Hash()
+	if checkheaderHash != newReq.HeaderHash {
+		panic(9999)
+	}
+	// CHECK BLOCK if the blockbytes we sent are decodable and equal the headerhash
+	//fmt.Printf("%s onBlockRequest(headerHash: %v) => sending 1 block (%d bytes)=[%v => %v]\n", n.String(), newReq.HeaderHash, len(blockBytes), checkheaderHash, blockBytes)
+	err = sendQuicBytes(stream, blockBytes)
+	if err != nil {
+		fmt.Printf("%s onBlockRequest ERR %v", n.String(), err)
+		return err
+	}
 	// <-- FIN
-	p.receiveFIN()
-	// --> FIN
-	p.sendFIN()
 	return nil
 }

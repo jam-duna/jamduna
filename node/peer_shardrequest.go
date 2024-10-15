@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/quic-go/quic-go"
 	"io"
 )
 
@@ -73,11 +74,11 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendShardRequest(erasureRoot common.Hash, shardIndex uint16, isAudit bool) (err error) {
+	code := uint8(CE137_ShardRequest)
 	if isAudit {
-		p.sendCode(CE138_ShardRequest)
-	} else {
-		p.sendCode(CE137_ShardRequest)
+		code = CE138_ShardRequest
 	}
+	stream, err := p.openStream(code)
 	req := &JAMSNPShardRequest{
 		ErasureRoot: erasureRoot,
 		ShardIndex:  shardIndex,
@@ -87,19 +88,14 @@ func (p *Peer) SendShardRequest(erasureRoot common.Hash, shardIndex uint16, isAu
 	if err != nil {
 		return err
 	}
-	err = p.sendQuicBytes(reqBytes)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
-
 	return nil
 }
 
-func (p *Peer) processShardRequest(msg []byte, isAudit bool) (err error) {
+func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err error) {
 	var req JAMSNPShardRequest
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)
@@ -107,7 +103,7 @@ func (p *Peer) processShardRequest(msg []byte, isAudit bool) (err error) {
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	bundleShard, justification, ok, err := p.node.GetShard(req.ErasureRoot, req.ShardIndex)
+	bundleShard, justification, ok, err := n.GetShard(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		return err
 	}
@@ -115,7 +111,7 @@ func (p *Peer) processShardRequest(msg []byte, isAudit bool) (err error) {
 		// TODO
 	}
 	// <-- Bundle Shard
-	err = p.sendQuicBytes(bundleShard)
+	err = sendQuicBytes(stream, bundleShard)
 	if err != nil {
 		return err
 	}
@@ -123,15 +119,12 @@ func (p *Peer) processShardRequest(msg []byte, isAudit bool) (err error) {
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 
 	// <-- Justification
-	err = p.sendQuicBytes(justification)
+	err = sendQuicBytes(stream, justification)
 	if err != nil {
 		return err
 	}
-
-	// --> FIN
-	p.receiveFIN()
 	// <-- FIN
-	p.sendFIN()
+	stream.Close()
 
 	return nil
 }
@@ -163,6 +156,6 @@ func (p *Peer) SendAuditShardRequest(erasureRoot common.Hash, shardIndex uint16)
 	return p.SendShardRequest(erasureRoot, shardIndex, true)
 }
 
-func (p *Peer) processAuditShardRequest(msg []byte, isAudit bool) error {
-	return p.processShardRequest(msg, true)
+func (n *Node) onAuditShardRequest(stream quic.Stream, msg []byte, isAudit bool) error {
+	return n.onShardRequest(stream, msg, true)
 }

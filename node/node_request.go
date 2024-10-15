@@ -1,28 +1,17 @@
 package node
 
 import (
-	"bytes"
-	"context"
-	"errors"
+	//"bytes"
+	//"context"
+	//"errors"
 	"fmt"
-	"sync"
-	"time"
-
-	"encoding/binary"
-	"io"
-	"log"
-	"reflect"
-
+	//"sync"
+	//"time"
+	//"encoding/binary"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/quic-go/quic-go"
+	//"github.com/quic-go/quic-go"
 )
-
-type QuicMessage struct {
-	Id      uint32
-	MsgType string `json:"msgType"`
-	Payload []byte `json:"payload"`
-}
 
 const (
 	jamsnpEnabled = false
@@ -34,72 +23,60 @@ func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timesl
 	return nil
 }
 
-func (n *Node) OnBlockAnnouncement(validatorIndex uint16, h types.BlockHeader, headerHash common.Hash, slot uint32) (err error) {
-	// TODO: Sourabh
-	fmt.Println("OnBlockAnnouncement")
-	return nil
+func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
+	blocks = make([]types.Block, 0)
+	//fmt.Printf("%s BlocksLookup(%v) requested\n", n.String(), headerHash)
+	blk, found := n.headers[headerHash]
+	if found {
+		blocks = append(blocks, *blk)
+		// TODO: Sourabh - go in the direction up to maximumBlocks
+		return blocks, true, nil
+	}
+	//for h, _ := range n.headers {
+	//	fmt.Printf(" %s BlocksLookup(%v) INSPECT: %v\n", n.String(), headerHash, h)
+	//}
+	return blocks, false, nil
 }
 
-func (n *Node) OnTicketDistribution(epoch uint32, attempt uint8, signature types.BandersnatchRingSignature) (err error) {
-	// TODO: Sourabh
-	fmt.Println("OnTicketDistribution")
-	return nil
-}
+func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.WorkReport, ok bool, err error) {
+	workReport, found := n.workReports[workReportHash]
+	if found {
+		return workReport, true, nil
+	}
+	return workReport, false, nil
 
-func (n *Node) GetBlocks(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
-	// TODO: Michael+Sourabh
-	fmt.Println("GetBlocks")
-	return blocks, ok, nil
-}
-
-func (n *Node) OnWorkReportDistribution(validatorIndex uint16, slot uint32, credentials []types.GuaranteeCredential, wr types.WorkReport) (err error) {
-	// TODO: Shawn - process WorkReport
-	fmt.Println("OnWorkReportDistribution")
-	return nil
-}
-
-func (n *Node) WorkReportLookup(workreportHash common.Hash) ([]byte, bool, error) {
-	// TODO: Shawn
-	return []byte{}, false, nil
 }
 
 func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []common.Hash, bundle []byte) (workPackageHash common.Hash, signature types.Ed25519Signature, err error) {
 	// TODO: Shawn -- initiate PVM Refine operation
+	/*		var work types.GuaranteeReport
+			work, _, _, err = n.ProcessWorkPackage(workPackage)
+			if err != nil {
+					fmt.Printf(" -- [N%d] WorkPackage Error: %v\n", n.id, err)
+			}
+			_ = n.processGuaranteeReport(work)
+			n.coreBroadcast(work)
+	*/
+
 	return workPackageHash, signature, nil
 }
 
-func (n *Node) OnAssurance(validatorIndex uint16, anchor common.Hash, bitfield [types.Avail_bitfield_bytes]byte, signature types.Ed25519Signature) (err error) {
-	// TODO: Shawn - process Assurance
-	fmt.Println("OnAssurance")
-	return nil
-}
-
-func (n *Node) OnAuditAnnouncement(validatorIndex uint16, headerHash common.Hash, tranche uint8, coreIndexes []uint16, workReportHashes []common.Hash, signature types.Ed25519Signature) (err error) {
-	// TODO: Shawn - process Assurance
-	fmt.Println("OnAuditAnnouncement")
-	return nil
-}
-
-func (n *Node) OnJudgementPublication(epoch uint32, validatorIndex uint16, validity uint8, workReportHash common.Hash, signature types.Ed25519Signature) (err error) {
-	// TODO: Shawn - process Judgement Publication
-	fmt.Println("OnJudgementPublication")
-	return nil
-}
-
-func (n *Node) OnPreimageAnnouncement(validatorIndex uint16, preimageHash common.Hash) ([]byte, bool, error) {
-	// TODO: William
-	return []byte{}, false, nil
-}
-
 func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
-	// TODO: William
-	return []byte{}, false, nil
+	// TODO: William to review
+	preimage, ok := n.preimages[preimageHash]
+	if !ok {
+		return []byte{}, false, nil
+	}
+	return preimage, true, nil
 }
 
 func (n *Node) GetSegmentShard(erasureRoot common.Hash, shardIndex uint16, SegmentIndex []uint16) (segmentshards []byte, justifications [][]byte, ok bool, err error) {
-	// TODO: Stanley+Michael
+	// TODO: Stanley+Michael to review
 	segmentshards = []byte{}
 	justifications = [][]byte{}
+	//err = n.processDistributeECChunk(chunk)
+	//r, err := n.processECChunkQuery(query)
+
 	return segmentshards, justifications, false, nil
 }
 
@@ -107,6 +84,7 @@ func (n *Node) GetShard(erasureRoot common.Hash, shardIndex uint16) (bundleShard
 	// TODO: Stanley+Michael
 	bundleShard = []byte{}
 	justification = []byte{}
+	//err = n.processAvailabilityJustification(aj)
 	return bundleShard, justification, false, nil
 }
 
@@ -123,36 +101,114 @@ func (n *Node) IsSelfRequesting(peerIdentifier string) bool {
 	return false
 }
 
-func EncodeAsQuicMessage(obj interface{}, idx uint32) []byte {
-	payload, err := types.Encode(obj)
+func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncement) (block *types.Block, err error) {
+	// initiate CE128_BlockRequest
+	validatorIndex := blockAnnouncement.ValidatorIndex
+	p, ok := n.peersInfo[validatorIndex]
+	if !ok {
+		fmt.Printf("processBlockAnnouncement %d NOT Found\n", validatorIndex)
+		for i, p := range n.peersInfo {
+			fmt.Printf("%d => %s\n", i, p.PeerAddr)
+		}
+		panic(120)
+		return block, fmt.Errorf("Invalid validator index %d", validatorIndex)
+	}
+	headerHash := blockAnnouncement.HeaderHash
+	blockRaw, err := p.SendBlockRequest(headerHash, 0, 1)
 	if err != nil {
-		fmt.Printf("EncodeAsQuicMessage: %v\n", err)
-		return nil
+		fmt.Printf("processBlockAnnouncement ERR %v\n", err)
+		panic(123)
+		return block, err
 	}
-	msgType := getMessageType(obj)
-	quicMessage := QuicMessage{
-		Id:      idx,
-		MsgType: msgType,
-		Payload: payload,
+	block = &blockRaw
+	receivedHeaderHash := block.Header.Hash()
+	if receivedHeaderHash != headerHash {
+		panic(6665)
+		return block, fmt.Errorf("failed header hash retrieval")
 	}
-	messageData, err := types.Encode(quicMessage)
-	if err != nil {
-		fmt.Printf("EncodeAsQuicMessage: %v\n", err)
-		return nil
-	}
-	return messageData
+	n.headers[receivedHeaderHash] = block
+	n.blocks[block.ParentHash()] = block
+	//fmt.Printf("  %s received Block %v <- %v\n", n.String(), block.Hash(), block.ParentHash())
+	return block, nil
 }
 
-func DecodeAsQuicMessage(messageData []byte) (msg QuicMessage) {
-	decoded, _, err := types.Decode(messageData, reflect.TypeOf(msg))
-	if err != nil {
-		fmt.Printf("DecodeAsQuicMessage: %v\n", err)
-		return QuicMessage{}
+func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageAnnouncement) (err error) {
+	// initiate CE143_PreimageRequest
+	validatorIndex := preimageAnnouncement.ValidatorIndex
+	p, ok := n.peersInfo[validatorIndex]
+	if !ok {
+		return fmt.Errorf("Invalid validator index %d", validatorIndex)
 	}
-	msg = decoded.(QuicMessage)
-	return msg
+	preimageHash := preimageAnnouncement.PreimageHash
+	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
+	if err != nil {
+		return err
+	}
+	n.preimages[preimageHash] = preimage
+	return nil
 }
 
+func (n *Node) runMain() {
+	for {
+		select {
+		case blockAnnouncement := <-n.blockAnnouncementsCh:
+			//fmt.Printf("[N%d] received Block Announcement from %d\n", n.id, blockAnnouncement.ValidatorIndex)
+			b, err := n.processBlockAnnouncement(blockAnnouncement)
+			if err != nil {
+				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)
+			} else {
+				n.processBlock(b)
+			}
+		case ticket := <-n.ticketsCh:
+			n.processTicket(ticket)
+		case workPackage := <-n.workPackagesCh:
+			// TODO: Shawn to review
+			guaranteeReport, _, _, err := n.ProcessWorkPackage(workPackage)
+			if err != nil {
+				fmt.Printf("ProcessWorkPackage: %v\n", err)
+			}
+			err = n.processGuaranteeReport(guaranteeReport)
+			if err != nil {
+				fmt.Printf("processGuaranteeReport: %v\n", err)
+			}
+		case workReport := <-n.workReportsCh:
+			n.workReports[workReport.Hash()] = workReport
+			// TODO: Shawn to review
+		case guarantee := <-n.guaranteesCh:
+			// TODO: Shawn to review
+			err := n.processGuarantee(guarantee)
+			if err != nil {
+				fmt.Printf("processGuarantee: %v\n", err)
+			}
+		case assurance := <-n.assurancesCh:
+			// TODO: Shawn to review
+			err := n.processAssurance(assurance)
+			if err != nil {
+				fmt.Printf("processAssurance: %v\n", err)
+			}
+		case preimageAnnouncement := <-n.preimageAnnouncementsCh:
+			// TODO: William to review
+			err := n.processPreimageAnnouncements(preimageAnnouncement)
+			if err != nil {
+				fmt.Printf("processPreimages: %v\n", err)
+			}
+		case announcement := <-n.announcementsCh:
+			// TODO: Shawn to review
+			err := n.processAnnouncement(announcement)
+			if err != nil {
+				fmt.Printf("processAnnouncement: %v\n", err)
+			}
+		case judgement := <-n.judgementsCh:
+			// TODO: Shawn to review
+			err := n.processJudgement(judgement)
+			if err != nil {
+				fmt.Printf("processJudgement: %v\n", err)
+			}
+		}
+	}
+}
+
+/*
 // internal makeRquest call with ctx implementation
 func (n *Node) makeRequestInternal(ctx context.Context, peerIdentifier string, obj interface{}) ([]byte, error) {
 	peerAddr, _ := n.getPeerAddr(peerIdentifier)
@@ -162,11 +218,9 @@ func (n *Node) makeRequestInternal(ctx context.Context, peerIdentifier string, o
 		return nil, fmt.Errorf("unsupported type")
 	}
 
-	messageData := EncodeAsQuicMessage(obj, n.id)
 	if n.IsSelfRequesting(peerIdentifier) {
 		// for self requesting, no need to open stream channel..
 		fmt.Printf("[N%v] %v Self Requesting!!!\n", n.id, msgType)
-		QuicMsg := DecodeAsQuicMessage(messageData)
 
 		// Channel to receive the response or error
 		responseCh := make(chan []byte, 1)
@@ -174,7 +228,7 @@ func (n *Node) makeRequestInternal(ctx context.Context, peerIdentifier string, o
 
 		// Run handleQuicMsg in a goroutine to handle context cancellation
 		go func() {
-			_, response := n.handleQuicMsg(QuicMsg)
+
 			select {
 			case <-ctx.Done():
 				errCh <- ctx.Err()
@@ -293,19 +347,12 @@ func (n *Node) makeRequestInternal(ctx context.Context, peerIdentifier string, o
 		return response, nil
 	}
 }
-
+*/
 // single makeRequest call via makeRequestInternal
-func (n *Node) makeRequest(peerIdentifier string, obj interface{}, singleTimeout time.Duration) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), singleTimeout)
-	defer cancel()
+//	ctx, cancel := context.WithTimeout(context.Background(), singleTimeout)
+//	defer cancel()
 
-	res, err := n.makeRequestInternal(ctx, peerIdentifier, obj)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
+/*
 // plural makeRequest calls via makeRequestInternal, with a minSuccess required because cancelling other simantanteous req
 func (n *Node) makeRequests(peerIdentifier string, objs []interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([][]byte, error) {
 	var wg sync.WaitGroup
@@ -368,269 +415,4 @@ func (n *Node) makeRequests(peerIdentifier string, objs []interface{}, minSucces
 	//TODO..need somekind of sorting here..
 	return finalResults, nil
 }
-
-func (n *Node) handleQuicMsg(msg QuicMessage) (msgType string, response []byte) {
-	ok := []byte("0")
-	response = []byte("1")
-	switch msg.MsgType {
-	case "BlockQuery":
-		var query types.BlockQuery
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
-		if err != nil {
-			fmt.Printf("BlockQuery Decode Error: %v\n", err)
-		}
-		query = decoded.(types.BlockQuery)
-		blk, found := n.blocks[query.BlockHash]
-		if debug {
-			fmt.Printf("[N%d] Received BlockQuery %v found: %v\n", n.id, query.BlockHash, found)
-		}
-		if found {
-			serializedR, err := types.Encode(blk)
-			if err != nil {
-				fmt.Printf("BlockQuery Encode Error: %v\n", err)
-			}
-			//serializedR := types.Encode(blk)
-			if err == nil {
-				if debug {
-					fmt.Printf("[N%d] Responded to BlockQuery %v with len=%v\n", n.id, query.BlockHash, len(serializedR))
-				}
-				response = serializedR
-			}
-		}
-
-	case "Ticket":
-		var ticket types.Ticket
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(ticket))
-		if err != nil {
-			fmt.Printf("Ticket Decode Error: %v\n", err)
-		}
-		ticket = decoded.(types.Ticket)
-		err = n.processTicket(ticket)
-		if err == nil {
-			response = ok
-		}
-		if debug {
-			fmt.Printf(" -- [N%d] received ticket From N%d\n", n.id, msg.Id)
-		}
-	case "AvailabilityJustification":
-		var aj *types.AvailabilityJustification
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(aj))
-		if err != nil {
-			fmt.Printf("AvailabilityJustification Decode Error: %v\n", err)
-		}
-		aj = decoded.(*types.AvailabilityJustification)
-		if err == nil {
-			err = n.processAvailabilityJustification(aj)
-			if err == nil {
-				response = ok
-			}
-		}
-	case "Guarantee":
-		var guarantee types.Guarantee
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(guarantee))
-		if err != nil {
-			fmt.Printf("Guarantee Decode Error: %v\n", err)
-		}
-		guarantee = decoded.(types.Guarantee)
-		if err == nil {
-			err = n.processGuarantee(guarantee)
-			if err == nil {
-				response = ok
-			}
-		}
-		fmt.Printf(" -- [N%d] received guarantee From N%d\n", n.id, msg.Id)
-	case "Assurance":
-		var assurance types.Assurance
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(assurance))
-		if err != nil {
-			fmt.Printf("Assurance Decode Error: %v\n", err)
-		}
-		assurance = decoded.(types.Assurance)
-		if err == nil {
-			err = n.processAssurance(assurance)
-			if err == nil {
-				response = ok
-			}
-		}
-		fmt.Printf(" -- [N%d] received assurance From N%d\n", n.id, msg.Id)
-	case "Judgement":
-		var judgement types.Judgement
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(judgement))
-		if err != nil {
-			fmt.Printf("Judgement Decode Error: %v\n", err)
-		}
-		judgement = decoded.(types.Judgement)
-		if err == nil {
-			err = n.processJudgement(judgement)
-			if err == nil {
-				response = ok
-			} else {
-				fmt.Println(err.Error())
-			}
-			fmt.Printf(" -- [N%d] received judgement From N%d\n", n.id, msg.Id)
-			fmt.Printf(" -- [N%d] received judgement From N%d (%v <- %v)\n", n.id, msg.Id, judgement.WorkReport.GetWorkPackageHash(), judgement.WorkReport.GetWorkPackageHash())
-
-		}
-	case "Announcement":
-		var announcement types.Announcement
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(announcement))
-		if err != nil {
-			fmt.Printf("Announcement Decode Error: %v\n", err)
-		}
-		announcement = decoded.(types.Announcement)
-		err = n.processAnnouncement(announcement)
-		if err == nil {
-			response = ok
-		}
-		fmt.Printf(" -- [N%d] received announcement From N%d\n", n.id, msg.Id)
-		fmt.Printf(" -- [N%d] received announcement From N%d (%v <- %v)\n", n.id, msg.Id, announcement.WorkReport.GetWorkPackageHash(), announcement.WorkReport.GetWorkPackageHash())
-	case "Preimages":
-		var preimages types.Preimages
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(preimages))
-		if err != nil {
-			fmt.Printf("Preimages Decode Error: %v\n", err)
-		}
-		preimages = decoded.(types.Preimages)
-		if err == nil {
-			// err = n.processPreimageLookup(preimageLookup)
-			err = n.processLookup(preimages)
-			if err == nil {
-				response = ok
-			}
-		}
-	case "Block":
-		block, err := types.BlockFromBytes(msg.Payload)
-		//err := interface{}
-		if err == nil {
-			if debug {
-				fmt.Printf(" -- [N%d] received block From N%d (%s <- %s)\n", n.id, msg.Id, common.Str(block.ParentHash()), common.Str(block.Hash()))
-			}
-			err = n.processBlock(block)
-			if err == nil {
-				response = ok
-			}
-
-		}
-	case "WorkPackage":
-		var workPackage types.WorkPackage
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(workPackage))
-		if err != nil {
-			fmt.Printf("WorkPackage Decode Error: %v\n", err)
-		}
-		workPackage = decoded.(types.WorkPackage)
-		var work types.GuaranteeReport
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			work, _, _, err = n.ProcessWorkPackage(workPackage)
-			if err != nil {
-				fmt.Printf(" -- [N%d] WorkPackage Error: %v\n", n.id, err)
-			}
-		}()
-		wg.Wait()
-		if n.isBadGuarantor {
-			fmt.Printf(" -- [N%d] Is a Bad Guarantor\n", n.id)
-			work.Report.Results[0].Result.Ok = []byte("I am Culprits><")
-			work.Sign(n.GetEd25519Secret())
-		}
-		_ = n.processGuaranteeReport(work)
-		if err == nil {
-			response = ok
-		}
-		n.coreBroadcast(work)
-		// }
-		fmt.Printf(" -- [N%d] received WorkPackage From N%d\n", n.id, msg.Id)
-	case "GuaranteeReport":
-		var guaranteeReport types.GuaranteeReport
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(guaranteeReport))
-		if err != nil {
-			fmt.Printf("GuaranteeReport Decode Error: %v\n", err)
-		}
-		guaranteeReport = decoded.(types.GuaranteeReport)
-		err = n.processGuaranteeReport(guaranteeReport)
-		if err == nil {
-			response = ok
-		}
-		fmt.Printf(" -- [N%d] received GuaranteeReport From N%d\n", n.id, msg.Id)
-
-	// -----Custom messages for tiny QUIC experiment-----
-
-	case "DistributeECChunk":
-		var chunk types.DistributeECChunk
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(chunk))
-		if err != nil {
-			fmt.Printf("DistributeECChunk Decode Error: %v\n", err)
-		}
-		chunk = decoded.(types.DistributeECChunk)
-		err = n.processDistributeECChunk(chunk)
-		if err == nil {
-			response = ok
-		}
-		fmt.Printf(" -- [N%d] received DistributeECChunk From N%d\n", n.id, msg.Id)
-
-	// case "ECChunkResponse":
-	// 	var chunk ECChunkResponse
-	// 	err := json.Unmarshal([]byte(msg.Payload), &chunk)
-	// 	if err == nil {
-	// 		err = n.processECChunkResponse(chunk)
-	// 		if err == nil {
-	// 			response = ok
-	// 		}
-	// 	}
-
-	case "ECChunkQuery":
-		var query types.ECChunkQuery
-		decoded, _, err := types.Decode([]byte(msg.Payload), reflect.TypeOf(query))
-		if err != nil {
-			fmt.Printf("ECChunkQuery Decode Error: %v\n", err)
-		}
-		query = decoded.(types.ECChunkQuery)
-		r, err := n.processECChunkQuery(query)
-		if err == nil {
-			serializedR, err := types.Encode(r)
-			if err != nil {
-				fmt.Printf("ECChunkQuery Encode Error: %v\n", err)
-			}
-			response = serializedR
-		} else {
-			response = []byte{}
-			fmt.Printf("processECChunkQuery error: %v\n", err)
-		}
-	}
-	return msg.MsgType, response
-}
-
-func (n *Node) handleStream(peerAddr string, stream quic.Stream) {
-
-	defer stream.Close()
-	var lengthPrefix [4]byte
-	_, err := io.ReadFull(stream, lengthPrefix[:])
-	if err != nil {
-		fmt.Printf("[N%v] handleStream: Read length prefix error: %v\n", n.id, err)
-		return
-	}
-	messageLength := binary.BigEndian.Uint32(lengthPrefix[:])
-	buf := make([]byte, messageLength)
-	_, err = io.ReadFull(stream, buf)
-	if err != nil {
-		fmt.Printf("[N%v] handleStream: Read message error: %v\n", n.id, err)
-		return
-	}
-
-	// response := []byte("1")
-
-	// handleQuicMsg logic has been moved out to support self-requesting case
-	msg := DecodeAsQuicMessage(buf)
-	msgType, response := n.handleQuicMsg(msg)
-	if msgType != "unknown" {
-		//fmt.Printf(" -- [N%v] handleStream Read From N%v (msgType=%v)\n", n.id, msg.Id, msg.MsgType)
-	}
-
-	_, err = stream.Write(response)
-	if err != nil {
-		log.Println(err)
-	}
-	//fmt.Printf("responded with: %s\n", string(response))
-	//stream.Close()
-}
+*/

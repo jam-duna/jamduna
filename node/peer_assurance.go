@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
+
 	"io"
 )
 
@@ -85,20 +87,16 @@ func (p *Peer) SendAssurance(a *types.Assurance) (err error) {
 	if err != nil {
 		return err
 	}
-	p.sendCode(CE141_AssuranceDistribution)
+	stream, err := p.openStream(CE141_AssuranceDistribution)
 	// --> Assurance
-	err = p.sendQuicBytes(reqBytes)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
 	return nil
 }
 
-func (p *Peer) processAssuranceDistribution(msg []byte) (err error) {
+func (n *Node) onAssuranceDistribution(stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	var newReq JAMSNPAssuranceDistribution
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -106,10 +104,15 @@ func (p *Peer) processAssuranceDistribution(msg []byte) (err error) {
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	err = p.node.OnAssurance(p.validatorIndex, newReq.Anchor, newReq.Bitfield, newReq.Signature)
-	// --> FIN
-	p.receiveFIN()
 	// <-- FIN
-	p.sendFIN()
-	return err
+	stream.Close()
+
+	assurance := types.Assurance{
+		Anchor:         newReq.Anchor,
+		Bitfield:       newReq.Bitfield,
+		ValidatorIndex: peerID,
+		Signature:      newReq.Signature,
+	}
+	n.assurancesCh <- assurance
+	return nil
 }

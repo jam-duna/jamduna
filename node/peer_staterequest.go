@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
 )
 
 /*
@@ -117,26 +118,22 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 	if err != nil {
 		return err
 	}
-	p.sendCode(CE129_StateRequest)
+	stream, err := p.openStream(CE129_StateRequest)
 	// --> Header Hash ++ Start Key ++ End Key ++ Maximum Size
-	err = p.sendQuicBytes(reqBytes)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	// --> FIN
-	p.sendFIN()
 
 	//<-- [Boundary Node]
 	// TODO
 	//<-- [Key ++ Value]
 	// TODO
 
-	// <-- FIN
-	p.receiveFIN()
 	return nil
 }
 
-func (p *Peer) processStateRequest(msg []byte) (err error) {
+func (n *Node) onStateRequest(stream quic.Stream, msg []byte) (err error) {
 	var newReq JAMSNPStateRequest
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -144,20 +141,18 @@ func (p *Peer) processStateRequest(msg []byte) (err error) {
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	// --> FIN
-	p.receiveFIN()
 
-	boundarynodes, keyvalues, ok, err := p.node.GetState(newReq.HeaderHash, newReq.StartKey, newReq.EndKey, newReq.MaximumSize)
+	boundarynodes, keyvalues, ok, err := n.GetState(newReq.HeaderHash, newReq.StartKey, newReq.EndKey, newReq.MaximumSize)
 	if !ok {
 
 	}
 	//<-- [Boundary Node]
-	err = p.sendQuicBytes(common.ConcatenateByteSlices(boundarynodes))
+	err = sendQuicBytes(stream, common.ConcatenateByteSlices(boundarynodes))
 	//<-- [Key ++ Value]
 	kvbytes, err := keyvalues.ToBytes()
-	err = p.sendQuicBytes(kvbytes)
+	err = sendQuicBytes(stream, kvbytes)
 
 	// <-- FIN
-	p.sendFIN()
+	stream.Close()
 	return
 }

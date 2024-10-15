@@ -25,8 +25,8 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 	}
 
 	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
+	for i := uint16(0); i < numNodes; i++ {
+		node, err := newNode(i, validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], int(basePort+i))
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -158,8 +158,9 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 
 		// use lookups to do Fetch
 		for _, l := range lookups {
-			reconstructData, err := senderNode.FetchAndReconstructArbitraryData(l.BlobHash, int(l.Length))
+			//reconstructData, err := senderNode.FetchAndReconstructArbitraryData(l.BlobHash, int(l.Length))
 			//reconstructData, err := senderNode.FetchAndReconstructData(l.BlobHash, l.Length)
+			var reconstructData []byte
 			if err != nil {
 				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
 			}
@@ -171,7 +172,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 
 			// ADD TO Queue  which is used in the NEXT MakeBlock to fill the E_P
 			//stateDB need to add lookup
-			nodes[i].processLookup(lookup)
+			nodes[i].processPreimages(lookup)
 		}
 
 		// this block should include E_P

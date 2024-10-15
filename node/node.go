@@ -35,7 +35,7 @@ const (
 	debug    = false
 	trace    = false
 	numNodes = 6
-	quicAddr = "localhost:%d"
+	quicAddr = "127.0.0.1:%d"
 	basePort = 9000
 )
 
@@ -45,29 +45,19 @@ const (
 	ValidatorDAFlag = "VALIDATOR&DA"
 )
 
-type NodeInfo struct {
-	PeerID     uint32          `json:"peer_id"`
-	PeerAddr   string          `json:"peer_addr"`
-	RemoteAddr string          `json:"remote_addr"`
-	Validator  types.Validator `json:"validator"`
-	Peer       Peer
-}
-
 type Node struct {
-	id        uint32
+	id        uint16
 	coreIndex uint16
 
 	credential types.ValidatorSecret
 	server     quic.Listener
 	peers      []string
-	peersInfo  map[string]NodeInfo //<ed25519> -> NodeInfo
+	peersInfo  map[uint16]*Peer //<ed25519> -> NodeInfo
 	//peersAddr  	 map[string]string
 	tlsConfig *tls.Config
 	mutex     sync.Mutex
 
-	connections map[string]quic.Connection
-	streams     map[string]quic.Stream
-	store       *storage.StateDBStorage /// where to put this?
+	store *storage.StateDBStorage /// where to put this?
 
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
@@ -87,12 +77,25 @@ type Node struct {
 	assurancesBucket map[common.Hash]types.IsPackageRecieved
 	assuranceMutex   sync.Mutex
 	// holds a map of the parenthash to the block
-	blocks map[common.Hash]*types.Block
+	blocks      map[common.Hash]*types.Block
+	headers     map[common.Hash]*types.Block
+	preimages   map[common.Hash][]byte
+	workReports map[common.Hash]types.WorkReport
+
+	blockAnnouncementsCh    chan types.BlockAnnouncement
+	ticketsCh               chan types.Ticket
+	workPackagesCh          chan types.WorkPackage
+	workReportsCh           chan types.WorkReport
+	guaranteesCh            chan types.Guarantee
+	assurancesCh            chan types.Assurance
+	preimageAnnouncementsCh chan types.PreimageAnnouncement
+	announcementsCh         chan types.Announcement
+	judgementsCh            chan types.Judgement
+
 	// holds a map of the hash to the stateDB
 	statedbMap map[common.Hash]*statedb.StateDB
 	// holds the tip
 	statedb         *statedb.StateDB
-	connectionMu    sync.Mutex
 	messageChan     chan statedb.Message
 	nodeType        string
 	dataDir         string
@@ -144,6 +147,10 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 	return tls.X509KeyPair(certPEM, privKeyPEM)
 }
 
+func (n *Node) String() string {
+	return fmt.Sprintf("[N%d]", n.id)
+}
+
 func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	n.credential = credential
 	if false {
@@ -155,28 +162,14 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func NewNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, dataDir string, port int) (*Node, error) {
+func NewNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
 	n, err := newNode(id, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir, port)
 	return n, err
 }
 
-func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[string]NodeInfo, nodeType string, dataDir string, port int) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
-
-	if debug {
-		// Print each peer in the 'peers' slice
-		fmt.Println("Peers:")
-		for _, peer := range peers {
-			fmt.Printf("  - %s\n", peer)
-		}
-
-		// Iterate over peerList and print each key and its corresponding NodeInfo
-		fmt.Println("Peer List:")
-		for key, nodeInfo := range peerList {
-			fmt.Printf("  Key: %s, LocalAddr: %s\n", key, nodeInfo.PeerAddr)
-		}
-	}
 
 	levelDBPath := fmt.Sprintf("%v/leveldb/", dataDir)
 	store, err := storage.NewStateDBStorage(levelDBPath)
@@ -200,7 +193,7 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	}
 
 	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
-	listener, err := quic.ListenAddr(addr, tlsConfig, generateQuicConfig())
+	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
 
 	if err != nil {
 		fmt.Printf("ERR %v\n", err)
@@ -215,21 +208,36 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 		store:       store,
 		server:      *listener,
 		peers:       peers,
-		peersInfo:   peerList,
+		peersInfo:   make(map[uint16]*Peer),
 		tlsConfig:   tlsConfig,
-		connections: make(map[string]quic.Connection),
-		streams:     make(map[string]quic.Stream),
 		messageChan: messageChan,
 		nodeType:    nodeType,
-		statedbMap:  make(map[common.Hash]*statedb.StateDB),
-		blocks:      make(map[common.Hash]*types.Block),
+
+		statedbMap: make(map[common.Hash]*statedb.StateDB),
+		blocks:     make(map[common.Hash]*types.Block),
+		headers:    make(map[common.Hash]*types.Block),
+		preimages:  make(map[common.Hash][]byte),
+
 		selfTickets: make(map[common.Hash][]types.TicketBucket),
-		dataDir:     dataDir,
+
+		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
+		ticketsCh:               make(chan types.Ticket, 200),
+		workPackagesCh:          make(chan types.WorkPackage, 200),
+		workReportsCh:           make(chan types.WorkReport, 200),
+		guaranteesCh:            make(chan types.Guarantee, 200),
+		assurancesCh:            make(chan types.Assurance, 200),
+		preimageAnnouncementsCh: make(chan types.PreimageAnnouncement, 200),
+		announcementsCh:         make(chan types.Announcement, 200),
+		judgementsCh:            make(chan types.Judgement, 200),
+		dataDir:                 dataDir,
+	}
+	for validatorIndex, p := range startPeerList {
+		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
 	}
 
 	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
 	if err == nil {
-		_statedb.SetID(id)
+		_statedb.SetID(uint32(id))
 		node.addStateDB(_statedb)
 	} else {
 		fmt.Printf("NewGenesisStateDB ERR %v\n", err)
@@ -242,10 +250,11 @@ func newNode(id uint32, credential types.ValidatorSecret, genesisConfig *statedb
 	node.store.WriteLog(_statedb.JamState.Snapshot(), 0)
 	go node.runServer()
 	go node.runClient()
+	go node.runMain()
 	return node, nil
 }
 
-func generateQuicConfig() *quic.Config {
+func GenerateQuicConfig() *quic.Config {
 	return &quic.Config{
 		Allow0RTT:       true,
 		KeepAlivePeriod: time.Minute,
@@ -261,13 +270,13 @@ func getConnKey(identifier string, incoming bool) string {
 }
 
 // use ed25519 key to get peer info
-func (n *Node) GetPeerInfoByEd25519(key types.Ed25519Key) (NodeInfo, error) {
+func (n *Node) GetPeerInfoByEd25519(key types.Ed25519Key) (*Peer, error) {
 	for _, peer := range n.peersInfo {
 		if peer.Validator.Ed25519 == key {
 			return peer, nil
 		}
 	}
-	return NodeInfo{}, fmt.Errorf("peer not found")
+	return nil, fmt.Errorf("peer not found")
 }
 
 func (n *Node) GetBandersnatchSecret() []byte {
@@ -311,32 +320,19 @@ func (n *Node) getTrie() *trie.MerkleTree {
 	return s.GetTrie()
 }
 
-func (n *Node) getPeerIndex(identifier string) (uint32, error) {
-	peer, exist := n.peersInfo[identifier]
-	if exist {
-		return peer.PeerID, nil
-	}
-	return 0, fmt.Errorf("peer not found")
+func (n *Node) getPeerByIndex(peerIdx uint16) (*Peer, error) {
+	p := n.peersInfo[peerIdx]
+
+	return p, fmt.Errorf("peer not found")
 }
 
-func (n *Node) getPeerByIndex(peerIdx uint32) (string, error) {
-	for _, peer := range n.peersInfo {
-		if peer.PeerID == peerIdx {
-			return peer.Validator.Ed25519.String(), nil
-		}
-	}
-	return "", fmt.Errorf("peer not found")
-}
-
-func (n *Node) getPeerAddr(identifier string) (string, error) {
-	peer, exist := n.peersInfo[identifier]
+func (n *Node) getPeerAddr(peerIdx uint16) (*Peer, error) {
+	peer, exist := n.peersInfo[peerIdx]
 	if exist {
-		//fmt.Printf("getPeerAddr[%v] found %v\n", identifier, peer)
-		return peer.PeerAddr, nil
+		return peer, nil
 	}
-	fmt.Printf("getPeerAddr not found %v\n", identifier)
-
-	return "", fmt.Errorf("peer not found")
+	fmt.Printf("getPeerAddr not found %v\n", peerIdx)
+	return nil, fmt.Errorf("peer not found")
 }
 
 func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
@@ -379,19 +375,21 @@ func (n *Node) GetEd25519Secret() []byte {
 }
 
 func (n *Node) ResetPeer(peerIdentifier string) {
+	/*
+	   inConnKey := getConnKey(peerIdentifier, false)
+	   outcomingConnKey := getConnKey(peerIdentifier, false)
+	   n.connectionMu.Lock()
+	   defer n.connectionMu.Unlock()
+	   delete(n.connections, outcomingConnKey)
+	   delete(n.streams, outcomingConnKey)
+	   delete(n.connections, inConnKey)
+	   delete(n.streams, inConnKey)
+	   peer, exist := n.peersInfo[peerIdentifier]
 
-	inConnKey := getConnKey(peerIdentifier, false)
-	outcomingConnKey := getConnKey(peerIdentifier, false)
-	n.connectionMu.Lock()
-	defer n.connectionMu.Unlock()
-	delete(n.connections, outcomingConnKey)
-	delete(n.streams, outcomingConnKey)
-	delete(n.connections, inConnKey)
-	delete(n.streams, inConnKey)
-	peer, exist := n.peersInfo[peerIdentifier]
-	if exist {
-		peer.RemoteAddr = peer.PeerAddr
-	}
+	   	if exist {
+	   		peer.RemoteAddr = peer.PeerAddr
+	   	}
+	*/
 }
 
 func (n *Node) runServer() {
@@ -405,15 +403,22 @@ func (n *Node) runServer() {
 	}
 }
 
+func (n *Node) lookupAddr(addr string) uint16 {
+
+	for validatorIndex, p := range n.peersInfo {
+		fmt.Printf("compare %s to %s\n", p.PeerAddr, addr)
+		if p.PeerAddr == addr {
+			return validatorIndex
+		}
+	}
+	panic(1024)
+}
+
 func (n *Node) handleConnection(conn quic.Connection) {
-	peerAddr := conn.RemoteAddr().String()
-
-	//fmt.Printf("[N%v] handleConnection. peerAddr=%v\n", n.id, peerAddr)
-
-	n.connectionMu.Lock()
-	n.connections[peerAddr] = conn
-	n.connectionMu.Unlock()
-
+	//remoteAddr := conn.RemoteAddr()
+	//localAddr := conn.LocalAddr()
+	//fmt.Printf("handleConnection: remoteAddr=%s localAddr=%s\n", remoteAddr, localAddr);
+	//peerID := n.lookupAddr(localAddr.String())
 	for {
 		stream, err := conn.AcceptStream(context.Background())
 		if err != nil {
@@ -422,98 +427,87 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			}
 			fmt.Printf("handleConnection: Accept stream error: %v\n", err)
 		}
-		//fmt.Printf("[N%v] AcceptStream. peerAddr=%v\n", n.id, peerAddr)
-		n.handleStream(peerAddr, stream)
+		go n.DispatchIncomingQUICStream(stream)
 	}
 }
 
 func (n *Node) broadcast(obj interface{}) []byte {
 	result := []byte{}
-	for _, peer := range n.peersInfo {
-		peerIdentifier := peer.Validator.Ed25519.String()
-		if peer.PeerID == n.id {
+	for id, p := range n.peersInfo {
+		if id == n.id {
 			continue
 		}
-		//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
-		resp, err := n.makeRequest(peerIdentifier, obj, types.QuicIndividualTimeout)
-		if err != nil {
-			fmt.Printf("runClient request error: %v\n", err)
-			continue
-		}
-		if jamsnpEnabled {
-			p := peer.Peer
-			objType := reflect.TypeOf(obj)
-			switch objType {
-			case reflect.TypeOf(types.Ticket{}):
-				t := obj.(types.Ticket)
-				epoch := uint32(0) // TODO: Shawn
-				err := p.SendTicketDistribution(epoch, t, false)
-				if err != nil {
-					fmt.Printf("SendTicketDistribution ERR %v\n", err)
-				}
-				break
-			case reflect.TypeOf(types.Block{}):
-				b := obj.(types.Block)
-				slot := uint32(0) // TODO: Shawn
-				err := p.SendBlockAnnouncement(b, slot)
-				if err != nil {
-					fmt.Printf("SendBlockAnnouncement ERR %v\n", err)
-				}
-				break
-
-			case reflect.TypeOf(types.Guarantee{}):
-				g := obj.(types.Guarantee)
-
-				err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
-				if err != nil {
-					fmt.Printf("SendWorkReportDistribution ERR %v\n", err)
-				}
-
-				break
-			case reflect.TypeOf(types.Assurance{}):
-				a := obj.(types.Assurance)
-				err := p.SendAssurance(&a)
-				if err != nil {
-					fmt.Printf("SendAssurance ERR %v\n", err)
-				}
-				break
-			case reflect.TypeOf(types.Announcement{}):
-				a := obj.(types.Announcement)
-				coreIndex := uint16(0) // TODO: Shawn
-				workPackageHash := a.WorkReport.AvailabilitySpec.WorkPackageHash
-				headerHash := common.Hash{} // TODO: Shawn
-				err := p.SendAuditAnnouncement(workPackageHash, headerHash, coreIndex, &a)
-				if err != nil {
-					fmt.Printf("SendAuditAnnouncement ERR %v\n", err)
-				}
-				break
-			case reflect.TypeOf(types.Judgement{}):
-				j := obj.(types.Judgement)
-				epoch := uint32(0) // TODO: Shawn
-				workReportHash := j.WorkReport.Hash()
-				validity := uint8(0)        // TODO: Shawn
-				validatorIndex := uint16(0) // TODO: Shawn
-				err := p.SendJudgmentPublication(epoch, validatorIndex, validity, workReportHash, j.Signature)
-				if err != nil {
-					fmt.Printf("SendJudgmentPublication ERR %v\n", err)
-				}
-				break
-
-			case reflect.TypeOf(types.Preimages{}):
-				preimage := obj.(types.Preimages)
-				// TODO: William
-				//requester := p.Requester
-				preimageHash := common.BytesToHash(common.ComputeHash(preimage.Blob))
-				_, err := p.SendPreimageRequest(preimageHash)
-				if err != nil {
-					fmt.Printf("SendPreimageRequest ERR %v\n", err)
-				}
-				break
+		//fmt.Printf("%s BROADCAST PeerID=%v\n", n.String(), p.PeerID)
+		objType := reflect.TypeOf(obj)
+		switch objType {
+		case reflect.TypeOf(types.Ticket{}):
+			t := obj.(types.Ticket)
+			epoch := uint32(0) // TODO: Shawn
+			err := p.SendTicketDistribution(epoch, t, false)
+			if err != nil {
+				fmt.Printf("SendTicketDistribution ERR %v\n", err)
 			}
+			break
+		case reflect.TypeOf(types.Block{}):
+			b := obj.(types.Block)
+			slot := uint32(0) // TODO: Shawn
+			//fmt.Printf("%s BROADCAST SendBlockAnnouncement to %d: %v\n", n.String(), id, b.Header.Hash())
+			err := p.SendBlockAnnouncement(b, slot)
+			if err != nil {
+				fmt.Printf("SendBlockAnnouncement ERR %v\n", err)
+			}
+			break
+
+		case reflect.TypeOf(types.Guarantee{}):
+			g := obj.(types.Guarantee)
+
+			err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
+			if err != nil {
+				fmt.Printf("SendWorkReportDistribution ERR %v\n", err)
+			}
+
+			break
+		case reflect.TypeOf(types.Assurance{}):
+			a := obj.(types.Assurance)
+			err := p.SendAssurance(&a)
+			if err != nil {
+				fmt.Printf("SendAssurance ERR %v\n", err)
+			}
+			break
+		case reflect.TypeOf(types.Announcement{}):
+			a := obj.(types.Announcement)
+			coreIndex := uint16(0) // TODO: Shawn
+			workPackageHash := a.WorkReport.AvailabilitySpec.WorkPackageHash
+			headerHash := common.Hash{} // TODO: Shawn
+			err := p.SendAuditAnnouncement(workPackageHash, headerHash, coreIndex, &a)
+			if err != nil {
+				fmt.Printf("SendAuditAnnouncement ERR %v\n", err)
+			}
+			break
+		case reflect.TypeOf(types.Judgement{}):
+			j := obj.(types.Judgement)
+			epoch := uint32(0) // TODO: Shawn
+			workReportHash := j.WorkReport.Hash()
+			validity := uint8(0)        // TODO: Shawn
+			validatorIndex := uint16(0) // TODO: Shawn
+			err := p.SendJudgmentPublication(epoch, validatorIndex, validity, workReportHash, j.Signature)
+			if err != nil {
+				fmt.Printf("SendJudgmentPublication ERR %v\n", err)
+			}
+			break
+
+		case reflect.TypeOf(types.Preimages{}):
+			preimage := obj.(types.Preimages)
+			// TODO: William
+			//requester := p.Requester
+			preimageHash := common.BytesToHash(common.ComputeHash(preimage.Blob))
+			_, err := p.SendPreimageRequest(preimageHash)
+			if err != nil {
+				fmt.Printf("SendPreimageRequest ERR %v\n", err)
+			}
+			break
 		}
-		if len(resp) > 0 {
-			result = resp
-		}
+
 	}
 	return result
 }
@@ -526,15 +520,14 @@ func (n *Node) coreBroadcast(obj interface{}) []byte {
 		return nil
 	}
 	coworker := n.GetCoreCoWorkers(core)
-	for _, peer := range n.peersInfo {
+	for id, p := range n.peersInfo {
 		for _, worker := range coworker {
-			if worker.Ed25519 == peer.Validator.Ed25519 {
-				peerIdentifier := peer.Validator.Ed25519.String()
-				if peer.PeerID == n.id {
+			if worker.Ed25519 == p.Validator.Ed25519 {
+				//peerIdentifier := peer.Validator.Ed25519.String()
+				if id == n.id {
 					continue
 				}
 				if jamsnpEnabled {
-					p := peer.Peer
 					objType := reflect.TypeOf(obj)
 					switch objType {
 					case reflect.TypeOf(types.WorkPackage{}):
@@ -547,14 +540,8 @@ func (n *Node) coreBroadcast(obj interface{}) []byte {
 					}
 				}
 				//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
-				resp, err := n.makeRequest(peerIdentifier, obj, types.QuicOverallTimeout)
-				if err != nil {
-					fmt.Printf("runClient request error: %v\n", err)
-					continue
-				}
-				if len(resp) > 0 {
-					result = resp
-				}
+				//resp, err := n.makeRequest(peerIdentifier, obj, types.QuicOverallTimeout)
+
 			}
 		}
 
@@ -575,7 +562,7 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	return nil // Success
 }
 
-func (n *Node) processLookup(preimageLookup types.Preimages) error {
+func (n *Node) processPreimages(preimageLookup types.Preimages) error {
 	// TODO: Store the lookup in a E_P aggregator
 	s := n.getState()
 	s.ProcessIncomingLookup(preimageLookup)
@@ -609,7 +596,7 @@ func (n *Node) dumpstatedbmap() {
 	}
 }
 
-func randomKey(m map[string]NodeInfo) string {
+func randomKey(m map[string]*Peer) string {
 	rand0.Seed(time.Now().UnixNano())
 	keys := make([]string, 0, len(m))
 	for key := range m {
@@ -619,38 +606,6 @@ func randomKey(m map[string]NodeInfo) string {
 }
 
 func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
-	obj := types.BlockQuery{BlockHash: blockHash}
-
-	randomPeer := randomKey(n.peersInfo)
-	peer := n.peersInfo[randomPeer]
-	peerIdentifier := peer.Validator.Ed25519.String()
-	resp, err := n.makeRequest(peerIdentifier, obj, types.QuicIndividualTimeout)
-	if err != nil {
-		fmt.Printf("runClient request error: %v\n", err)
-		return nil, nil
-	}
-	if len(resp) > 10 {
-		//this need to be consistent with the receiving side
-		//blk, err := types.BlockFromBytes(resp)
-		var blk *types.Block
-		decoded, _, err := types.Decode(resp, reflect.TypeOf(blk))
-		if err != nil {
-			fmt.Printf("failed to decode block %v\n", err)
-		}
-		blk, ok := decoded.(*types.Block)
-		if !ok {
-			fmt.Printf("failed to assert decoded to *types.Block %x", resp)
-			// Handle the error or take appropriate action if the assertion fails
-			return blk, fmt.Errorf("failed to assert decoded to *types.Block")
-		}
-		if debug {
-			fmt.Printf("[N%d] fetchBlock(%v) len=%d\n", n.id, common.Str(blockHash), len(resp))
-		}
-		if blk != nil {
-			n.blocks[blk.Hash()] = blk
-		}
-		return blk, nil
-	}
 	return nil, fmt.Errorf("fetchBlock - No response")
 }
 
@@ -707,6 +662,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 	// walk blk backwards, up to the tip, if possible -- but if encountering an unknown parenthash, immediately fetch the block.  Give up if we can't do anything
 	b := blk
 	n.blocks[b.Hash()] = blk
+	n.headers[b.Header.Hash()] = blk
 	for {
 		if b.ParentHash() == (common.Hash{}) {
 			//fmt.Printf("[N%d] processBlock: hit genesis (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
@@ -777,12 +733,12 @@ func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustificat
 	return nil
 }
 
-func (n *Node) getImportSegment(treeRoot common.Hash, segmentIndex uint16) ([]byte, error) {
+func (n *Node) getImportSegment(treeRoot common.Hash, segmentIndex uint16) (segmentData []byte, err error) {
 	// TODO: do you need segmentRoot or segmentsRoot here?
-	segmentData, err := n.FetchAndReconstructSpecificSegmentData(treeRoot)
+	/*segmentData, err := n.FetchAndReconstructSpecificSegmentData(treeRoot)
 	if err != nil {
 		return []byte{}, err
-	}
+	}*/
 	return segmentData, nil
 }
 func (n *Node) GetImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
@@ -1012,10 +968,12 @@ func (n *Node) runClient() {
 				newStateDB.AssignGuarantors()
 				n.addStateDB(newStateDB)
 				n.blocks[newBlock.Hash()] = newBlock
+				headerHash := newBlock.Header.Hash()
+				n.headers[headerHash] = newBlock
+				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				n.broadcast(*newBlock)
 
 				if debug {
-					fmt.Printf("[N%d] BLOCK BROADCASTED: %v <- %v\n", n.id, newBlock.ParentHash(), newBlock.Hash())
 					for _, g := range newStateDB.GuarantorAssignments {
 						fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
 					}

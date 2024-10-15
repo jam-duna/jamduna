@@ -18,7 +18,7 @@ func TestNodeAudit(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -65,7 +65,7 @@ func TestNodeAssurance(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

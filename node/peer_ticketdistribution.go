@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
 )
 
 /*
@@ -100,25 +101,26 @@ func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool
 	if err != nil {
 		return err
 	}
+	code := uint8(CE131_TicketDistribution)
 	if isProxy {
-		p.sendCode(CE131_TicketDistribution)
-	} else {
-		p.sendCode(CE132_TicketDistribution)
+		code = CE132_TicketDistribution
 	}
+	stream, err := p.openStream(code)
+	if err != nil {
+		fmt.Printf("SendTicketDistribution ERR %v\n", err)
+		return err
+	}
+	//fmt.Printf("%s SendTicketDistribution %d %x\n", p.String(), t.Attempt, t.Signature)
 	// TODO: proper treatment of Proxy
-	err = p.sendQuicBytes(reqBytes)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
 
 	return nil
 }
 
-func (p *Peer) processTicketDistribution(msg []byte) (err error) {
+func (n *Node) onTicketDistribution(stream quic.Stream, msg []byte) (err error) {
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -126,11 +128,15 @@ func (p *Peer) processTicketDistribution(msg []byte) (err error) {
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	// --> FIN
-	p.receiveFIN()
 
-	p.node.OnTicketDistribution(newReq.Epoch, newReq.Attempt, newReq.Signature)
 	// <-- FIN
-	p.sendFIN()
+	stream.Close()
+
+	var ticket types.Ticket
+	ticket.Attempt = newReq.Attempt
+	ticket.Signature = newReq.Signature
+	//fmt.Printf("%s onTicketDistribution %d %x=>%d %x\n", n.String(), newReq.Attempt, newReq.Signature, ticket.Attempt, ticket.Signature)
+
+	n.ticketsCh <- ticket
 	return
 }

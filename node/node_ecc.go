@@ -12,7 +12,7 @@ import (
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 
-	"time"
+	//"time"
 
 	"github.com/colorfulnotion/jam/erasurecoding"
 	"github.com/colorfulnotion/jam/trie"
@@ -252,29 +252,12 @@ func (n *Node) DistributeSegmentData(erasureCodingSegments [][][]byte, segmentRo
 	}
 
 	// Pack the chunks into DistributeECChunk objects
-	ecChunks, err := n.packChunks(erasureCodingSegments, segmentRoots, common.Hash(segmentsECRoot), segment_meta)
+	_, err = n.packChunks(erasureCodingSegments, segmentRoots, common.Hash(segmentsECRoot), segment_meta)
 	if err != nil {
 		return err
 	}
 
-	// Distribute the chunks to the random K peers (K = numNodes)
-	for i, ecChunk := range ecChunks {
-
-		peerIdx := uint32(i % numNodes)
-
-		// Do not call processDistributeECChunk for itself. MakeRequest should handle self-requesting case
-
-		peerIdentifier, err := n.getPeerByIndex(peerIdx)
-		if err != nil {
-			return err
-		}
-		response, err := n.makeRequest(peerIdentifier, ecChunk, types.QuicIndividualTimeout)
-		if err != nil {
-			fmt.Printf("Failed to make request from N%d to N%v (%s): %v\n", n.id, peerIdx, peerIdentifier, err)
-			continue
-		}
-		_ = response
-	}
+	// TODO: SAVE the shards
 	return nil
 }
 
@@ -302,46 +285,16 @@ func (n *Node) DistributeArbitraryData(chunks [][][]byte, blobHash common.Hash, 
 	// n.store.WriteKV(blobHash, blob_meta)
 
 	// Pack the chunks into DistributeECChunk objects
-	ecChunks, err := n.packChunks(chunks, chunksRoots, blobHash, blob_meta)
+	_, err = n.packChunks(chunks, chunksRoots, blobHash, blob_meta)
 	if err != nil {
 		return err
 	}
 
-	// Send the DistributeECChunk object to a random K peers
-	for i, ecChunk := range ecChunks {
-
-		peerIdx := uint32(i % numNodes)
-
-		if peerIdx == n.id {
-			n.processDistributeECChunk(ecChunk)
-		}
-
-		peerIdentifier, err := n.getPeerByIndex(peerIdx)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("--Making request from N%v to N%v(%s)\n", n.id, peerIdx, peerIdentifier)
-		var response []byte
-		for retries := 0; retries < 5; retries++ {
-			response, err = n.makeRequest(peerIdentifier, ecChunk, types.QuicIndividualTimeout)
-			if err == nil {
-				break
-			}
-		}
-		if err != nil {
-			fmt.Printf("Failed to make request from N%v to N%v(%s): %v\n", n.id, peerIdx, peerIdentifier, err)
-			continue
-		}
-		_ = response
-
-		// Wait for nodes to process the request
-		// time.Sleep(100 * time.Millisecond)
-	}
-
-	fmt.Printf("allHash encode %x\n", chunksRoots)
+	// SAVE the shards
 	return nil
 }
 
+/*
 func (n *Node) FetchAndReconstructSegmentData(treeRoot common.Hash, segmentIndex uint32) ([]byte, []byte, error) {
 	var outputData [][]byte
 	K, N := erasurecoding.GetCodingRate()
@@ -379,24 +332,9 @@ func (n *Node) FetchAndReconstructSegmentData(treeRoot common.Hash, segmentIndex
 				ecChunkQuery := types.ECChunkQuery{
 					SegmentRoot: common.Hash(erasurCodingSegmentRoot),
 				}
-				response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
-				time.Sleep(100 * time.Millisecond)
-				// fmt.Printf("[DEBUG] Received response: %s\n", response)
-				if err != nil {
-					fmt.Printf("Failed to make request from N%d to N%d (%s): %v\n", n.id, j, peerIdentifier, err)
-					ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
-				}
+				//response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
 				var ecChunkResponse types.ECChunkResponse
-				fmt.Printf("types.Decode response %v\n", response)
-				decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
-				if err != nil {
-					return nil, nil, err
-				}
-				ecChunkResponse = decodedResponse.(types.ECChunkResponse)
-				if err != nil {
-					return nil, nil, err
-				}
-				ecChunkResponses = append(ecChunkResponses, ecChunkResponse)
+
 
 				fetchedChunks++
 				if fetchedChunks >= K {
@@ -438,7 +376,8 @@ func (n *Node) FetchAndReconstructSegmentData(treeRoot common.Hash, segmentIndex
 	segmentData, pageProofData := SplitDataIntoSegmentAndPageProofByIndex(outputData, segmentIndex)
 	return segmentData, pageProofData, nil
 }
-
+*/
+/*
 func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byte, [][]byte, []common.Hash, error) {
 	var outputData [][]byte
 	K, N := erasurecoding.GetCodingRate()
@@ -477,7 +416,7 @@ func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byt
 				ecChunkQuery := types.ECChunkQuery{
 					SegmentRoot: common.Hash(erasurCodingSegmentRoot),
 				}
-				response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
+				//response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
 				// fmt.Printf("[DEBUG] Received response: %s\n", response)
 				if err != nil {
 					fmt.Printf("Failed to make request from N%d to N%d (%s): %v\n", n.id, j, peerIdentifier, err)
@@ -485,12 +424,9 @@ func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byt
 				}
 
 				var ecChunkResponse types.ECChunkResponse
-				fmt.Printf("types.Decode response %v\n", response)
 				if response == nil {
-					fmt.Printf("Received response is nil\n")
 					ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 				} else {
-					fmt.Printf("Received response: %x\n", response)
 					decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
 					if err != nil {
 						return nil, nil, nil, err
@@ -543,7 +479,6 @@ func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byt
 
 	return segmentData, pageProofData, segmentRoots, nil
 }
-
 func (n *Node) FetchAndReconstructSpecificSegmentData(segmentRoot common.Hash) ([]byte, error) {
 	K, N := erasurecoding.GetCodingRate()
 	fmt.Printf("Using K=%d and N=%d\n", K, N)
@@ -572,14 +507,14 @@ func (n *Node) FetchAndReconstructSpecificSegmentData(segmentRoot common.Hash) (
 			ecChunkQuery := types.ECChunkQuery{
 				SegmentRoot: common.Hash(erasurCodingSegmentRoot),
 			}
-			response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
+			//response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
 			// fmt.Printf("[DEBUG] Received response: %s\n", response)
 			if err != nil {
-				fmt.Printf("Failed to make request from N%d to N%d (%s) %v", n.id, j, peerIdentifier, err)
+
 				ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
 			}
 			var ecChunkResponse types.ECChunkResponse
-			fmt.Printf("types.Decode response %v\n", response)
+
 			decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
 			if err != nil {
 				return nil, err
@@ -655,11 +590,11 @@ func (n *Node) FetchAndReconstructArbitraryData(blobHash common.Hash, blobLen in
 			ecChunkQuery := types.ECChunkQuery{
 				SegmentRoot: common.Hash(segmentRoot),
 			}
-			response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
-			if err != nil {
-				fmt.Printf("Failed to make request from N%d to N%d (%s): %v", n.id, j, peerIdentifier, err)
-				ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
-			}
+			//response, err := n.makeRequest(peerIdentifier, ecChunkQuery, types.QuicIndividualTimeout)
+			//if err != nil {
+			//	fmt.Printf("Failed to make request from N%d to N%d (%s): %v", n.id, j, peerIdentifier, err)
+			//	ecChunkResponses = append(ecChunkResponses, types.ECChunkResponse{})
+			//}
 			var ecChunkResponse types.ECChunkResponse
 			fmt.Printf("types.Decode response %v\n", response)
 			decodedResponse, _, err := types.Decode(response, reflect.TypeOf(types.ECChunkResponse{}))
@@ -715,3 +650,4 @@ func (n *Node) FetchAndReconstructArbitraryData(blobHash common.Hash, blobLen in
 
 	return reconstructedData, nil
 }
+*/

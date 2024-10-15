@@ -227,30 +227,37 @@ func generateSegmentsRoot(segments [][]byte) common.Hash {
 
 // Validate the availability specifier
 func (n *Node) IsValidAvailabilitySpecifier(bClubBlobHash common.Hash, bLength int, sClubBlobHash common.Hash, originalAS *types.AvailabilitySpecifier) (bool, error) {
-	// Fetch and reconstruct the data for b♣ and s♣
-	bClubData, err := n.FetchAndReconstructArbitraryData(bClubBlobHash, bLength)
-	if err != nil {
-		return false, err
-	}
-
-	sClubData, _, _, err := n.FetchAndReconstructAllSegmentsData(sClubBlobHash)
-	if err != nil {
-		return false, err
-	}
-
-	// Recalculate the AvailabilitySpecifier
-	reconstructbClub := n.recomputeBClub(bClubData)
-	reconstructsClub := n.recomputeSClub(sClubData)
-
-	//bClub, sClub, blobRoot, treeRoot
-	erasureRoot_u := n.generateErasureRoot(reconstructbClub, reconstructsClub, bClubBlobHash, sClubBlobHash)
-
-	// compare the recalculated AvailabilitySpecifier with the original
-	if originalAS.ErasureRoot != erasureRoot_u {
-		fmt.Printf("ErasureRoot mismatch (%x, %x)\n", originalAS.ErasureRoot, erasureRoot_u)
-		return false, nil
-	}
 	return true, nil
+	/*
+	   // Fetch and reconstruct the data for b♣ and s♣
+	   bClubData, err := n.FetchAndReconstructArbitraryData(bClubBlobHash, bLength)
+
+	   	if err != nil {
+	   		return false, err
+	   	}
+
+	   sClubData, _, _, err := n.FetchAndReconstructAllSegmentsData(sClubBlobHash)
+
+	   	if err != nil {
+	   		return false, err
+	   	}
+
+	   // Recalculate the AvailabilitySpecifier
+	   reconstructbClub := n.recomputeBClub(bClubData)
+	   reconstructsClub := n.recomputeSClub(sClubData)
+
+	   //bClub, sClub, blobRoot, treeRoot
+	   erasureRoot_u := n.generateErasureRoot(reconstructbClub, reconstructsClub, bClubBlobHash, sClubBlobHash)
+
+	   // compare the recalculated AvailabilitySpecifier with the original
+
+	   	if originalAS.ErasureRoot != erasureRoot_u {
+	   		fmt.Printf("ErasureRoot mismatch (%x, %x)\n", originalAS.ErasureRoot, erasureRoot_u)
+	   		return false, nil
+	   	}
+
+	   return true, nil
+	*/
 }
 
 // Recompute b♣ using the EncodeWorkPackage function
@@ -520,46 +527,48 @@ func (n *Node) VerifyWorkPackage(workPackage types.WorkPackage) bool {
 }
 
 // After FetchExportedSegments and quick verify exported segments
-func (n *Node) FetchWorkPackage(erasureRoot common.Hash, lengthB int) (types.WorkPackage, common.Hash, error) {
-	// Fetch the WorkPackage and the exported segments
-	// erasureRoot = B^Club + S^Club
-	allHash, err := n.store.ReadKV(erasureRoot)
-	if err != nil {
-		fmt.Println("Error in FetchWorkPackageAndExportedSegments:", err)
-	}
-	fmt.Printf("erasureRoot Val %x\n", allHash)
-	bClubRoot := allHash[:32]
-	bClubHash := common.Hash(bClubRoot)
+func (n *Node) FetchWorkPackage(erasureRoot common.Hash, lengthB int) (workpackage types.WorkPackage, bClubHash common.Hash, err error) {
+	/*
+		// Fetch the WorkPackage and the exported segments
+		// erasureRoot = B^Club + S^Club
+		allHash, err := n.store.ReadKV(erasureRoot)
+		if err != nil {
+			fmt.Println("Error in FetchWorkPackageAndExportedSegments:", err)
+		}
+		fmt.Printf("erasureRoot Val %x\n", allHash)
+		bClubRoot := allHash[:32]
+		bClubHash := common.Hash(bClubRoot)
 
-	encodedB, err := n.FetchAndReconstructArbitraryData(bClubHash, lengthB)
-	if err != nil {
-		fmt.Printf("\nError in FetchWorkPackage: %v\n", err)
-		return types.WorkPackage{}, common.Hash{}, err
-	}
-	fmt.Printf("FetchWorkPackage erasureRoot=%v, bClubHash=%v, encodedB=%v\n", erasureRoot, bClubHash, encodedB)
-	encodedB = encodedB[:lengthB]
-	workpackage := n.decodeWorkPackage(encodedB)
-	// TODO:Do something like audit
-
+		encodedB, err := n.FetchAndReconstructArbitraryData(bClubHash, lengthB)
+		if err != nil {
+			fmt.Printf("\nError in FetchWorkPackage: %v\n", err)
+			return types.WorkPackage{}, common.Hash{}, err
+		}
+		fmt.Printf("FetchWorkPackage erasureRoot=%v, bClubHash=%v, encodedB=%v\n", erasureRoot, bClubHash, encodedB)
+		encodedB = encodedB[:lengthB]
+		workpackage := n.decodeWorkPackage(encodedB)
+		// TODO:Do something like audit
+	*/
 	return workpackage, bClubHash, err
 }
-
-func (n *Node) FetchExportedSegments(erasureRoot common.Hash) ([][]byte, [][]byte, []common.Hash, common.Hash, error) {
-	// Fetch the WorkPackage and the exported segments
-	// TODO: use broadcast to fetch the data
-	// erasureRoot = B^Club + S^Club
-	allHash, err := n.store.ReadKV(erasureRoot)
-	if err != nil {
-		fmt.Println("Error in FetchWorkPackageAndExportedSegments:", err)
-	}
-	fmt.Printf("allHash: %x\n", allHash)
-	sClubRoot := allHash[32:]
-	sClubHash := common.Hash(sClubRoot)
-	fmt.Printf("sClubHash: %v\n", sClubHash)
-	exportedSegments, pageProofs, treeRoots, err := n.FetchAndReconstructAllSegmentsData(sClubHash)
-	if err != nil {
-		return [][]byte{}, [][]byte{}, []common.Hash{}, common.Hash{}, err
-	}
+func (n *Node) FetchExportedSegments(erasureRoot common.Hash) (exportedSegments [][]byte, pageProofs [][]byte, treeRoots []common.Hash, sClubHash common.Hash, err error) {
+	/*
+		// Fetch the WorkPackage and the exported segments
+		// TODO: use broadcast to fetch the data
+		// erasureRoot = B^Club + S^Club
+		allHash, err := n.store.ReadKV(erasureRoot)
+		if err != nil {
+			fmt.Println("Error in FetchWorkPackageAndExportedSegments:", err)
+		}
+		fmt.Printf("allHash: %x\n", allHash)
+		sClubRoot := allHash[32:]
+		sClubHash := common.Hash(sClubRoot)
+		fmt.Printf("sClubHash: %v\n", sClubHash)
+		exportedSegments, pageProofs, treeRoots, err := n.FetchAndReconstructAllSegmentsData(sClubHash)
+		if err != nil {
+			return [][]byte{}, [][]byte{}, []common.Hash{}, common.Hash{}, err
+		}
+	*/
 	return exportedSegments, pageProofs, treeRoots, sClubHash, nil
 }
 

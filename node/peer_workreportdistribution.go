@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
 	"io"
 	"reflect"
 )
@@ -114,21 +114,8 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) processWorkReportDistribution(msg []byte) (err error) {
-	var newReq JAMSNPWorkReport
-	// Deserialize byte array back into the struct
-	err = newReq.FromBytes(msg)
-	if err != nil {
-		fmt.Println("Error deserializing:", err)
-		return
-	}
-
-	p.node.OnWorkReportDistribution(p.validatorIndex, newReq.Slot, newReq.Credentials, newReq.WorkReport)
-	return nil
-}
-
 func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, credentials []types.GuaranteeCredential) (err error) {
-	p.sendCode(CE135_WorkReportDistribution)
+	stream, err := p.openStream(CE135_WorkReportDistribution)
 	newReq := JAMSNPWorkReport{
 		Slot:        slot,
 		Len:         uint8(len(credentials)),
@@ -139,70 +126,30 @@ func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, cred
 	if err != nil {
 		return err
 	}
-	err = p.sendQuicBytes(reqBytes)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-/*
-CE 136: Work-report request
-Request for the work-report with the given hash.
-
-This should be used to request missing work-reports on receipt of a new block; blocks directly contain only the hashes of included work-reports.
-
-A node announcing a new block may be assumed to possess the referenced work-reports. Such nodes should thus be queried first for missing reports.
-
-Work Report Hash = [u8; 32]
-Work Report = As in GP
-
-Node -> Node
-
---> Work Report Hash
---> FIN
-<-- Work Report
-<-- FIN
-*/
-
-func (p *Peer) processWorkReportRequest(msg []byte) (err error) {
-	h := common.BytesToHash(msg)
-	workReport, ok, err := p.node.WorkReportLookup(h)
+func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err error) {
+	var newReq JAMSNPWorkReport
+	// Deserialize byte array back into the struct
+	err = newReq.FromBytes(msg)
 	if err != nil {
-		return err
-	}
-	if !ok {
-		// TODO
-	}
-	err = p.sendQuicBytes(workReport)
-	if err != nil {
-		return err
+		fmt.Println("Error deserializing:", err)
+		return
 	}
 
+	workReport := newReq.WorkReport
+	guarantee := types.Guarantee{
+		Report:     workReport,
+		Slot:       newReq.Slot,
+		Signatures: newReq.Credentials,
+		// ValidatorIndex: n.lookupPeer(stream)
+	}
+	n.guaranteesCh <- guarantee
+	n.workReportsCh <- workReport
 	return nil
-}
-
-func (p *Peer) makeWorkReportRequest(workReportHash common.Hash) (workReport types.WorkReport, err error) {
-	p.sendCode(CE136_WorkReportRequest)
-	err = p.sendQuicBytes(workReportHash.Bytes())
-	if err != nil {
-		return workReport, err
-	}
-	workReportBytes, err := p.receiveQuicBytes()
-	if err != nil {
-		return workReport, err
-	}
-
-	wr, _, err := types.Decode(workReportBytes, reflect.TypeOf(types.WorkReport{}))
-	if err != nil {
-		return workReport, err
-	}
-	workReport = wr.(types.WorkReport)
-
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
-
-	return workReport, nil
 }

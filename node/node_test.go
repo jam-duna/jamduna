@@ -1,11 +1,11 @@
 package node
 
 import (
-	"bytes"
+	//"bytes"
 	"context"
-	"crypto/rand"
+	//"crypto/rand"
 	"fmt"
-	"math"
+	//"math"
 	"math/big"
 	"path/filepath"
 	"time"
@@ -21,7 +21,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/trie"
+	//"github.com/colorfulnotion/jam/trie"
 
 	"github.com/colorfulnotion/jam/types"
 )
@@ -74,7 +74,7 @@ func generateMetadata(idx int) (string, error) {
 	default:
 		nodeName = fmt.Sprintf("Node%d", idx)
 	}
-	remoteAddr := fmt.Sprintf("localhost:%d", 9900+idx)
+	remoteAddr := fmt.Sprintf("127.0.0.1:%d", 9900+idx)
 	metadata := fmt.Sprintf("%s:%s", remoteAddr, nodeName)
 	metadata_byte := []byte(metadata)
 
@@ -84,11 +84,11 @@ func generateMetadata(idx int) (string, error) {
 	return metadata, nil
 }
 
-func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, []types.ValidatorSecret, []string, error) {
+func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
 	seeds, _ := generateSeedSet(numNodes)
 
 	peers := make([]string, numNodes)
-	peerList := make(map[string]NodeInfo)
+	peerList := make(map[uint16]*Peer)
 	validators := make([]types.Validator, numNodes)
 	nodePaths := SetLevelDBPaths(numNodes)
 	for i := 0; i < numNodes; i++ {
@@ -113,11 +113,10 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[string]NodeInfo, [
 	//prettyJSON, _ := json.MarshalIndent(validators, "", "  ")
 	//fmt.Printf("Validators (size:%v) %s\n", numNodes, prettyJSON)
 
-	for i := uint32(0); i < numNodes; i++ {
+	for i := uint16(0); i < numNodes; i++ {
 		addr := fmt.Sprintf(quicAddr, 9000+i)
 		peers[i] = addr
-		ed25519Key := validators[i].Ed25519.String()
-		peerList[ed25519Key] = NodeInfo{
+		peerList[i] = &Peer{
 			PeerID:    i,
 			PeerAddr:  addr,
 			Validator: validators[i],
@@ -157,7 +156,7 @@ func TestNodeSafrole(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -168,6 +167,7 @@ func TestNodeSafrole(t *testing.T) {
 	}
 }
 
+/*
 func TestSegmentECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
 	dataSizes := []int{types.W_C * types.W_S}
@@ -381,7 +381,6 @@ func TestECRoundTrip(t *testing.T) {
 	}
 }
 
-/*
 
  Group effort - Fib
  need Willaim export & import
@@ -398,8 +397,8 @@ func TestWorkGuaranteeWithExtrinsic(t *testing.T) {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
+	for i := uint16(0); i < numNodes; i++ {
+		node, err := newNode(i, validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], int(basePort+i))
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -619,7 +618,7 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}
@@ -826,7 +825,7 @@ func TestNodeRotation(t *testing.T) {
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

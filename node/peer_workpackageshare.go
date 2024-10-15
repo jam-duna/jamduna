@@ -6,108 +6,9 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
 	"io"
-	"reflect"
 )
-
-/*
-CE 133: Work-package submission
-Submission of a work-package from a builder to a guarantor assigned to the relevant core.
-
-Core Index = u16
-Work Package = As in GP
-Extrinsic = [u8]
-
-Builder -> Guarantor
-
---> Core Index ++ Work Package
---> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
---> FIN
-<-- FIN
-*/
-
-type JAMSNPWorkPackage struct {
-	CoreIndex   uint16            `json:"coreIndex"`
-	WorkPackage types.WorkPackage `json:"workPackage"`
-}
-
-// ToBytes serializes the JAMSNPWorkPackage struct into a byte array
-func (pkg *JAMSNPWorkPackage) ToBytes() ([]byte, error) {
-	buf := new(bytes.Buffer)
-
-	// Serialize CoreIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, pkg.CoreIndex); err != nil {
-		return nil, err
-	}
-
-	// Serialize WorkPackage (dynamically sized, using WorkPackage's ToBytes method)
-	workPackageBytes := pkg.WorkPackage.Bytes()
-	if _, err := buf.Write(workPackageBytes); err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
-}
-
-// FromBytes deserializes a byte array into a JAMSNPWorkPackage struct
-func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
-	buf := bytes.NewReader(data)
-
-	// Deserialize CoreIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &pkg.CoreIndex); err != nil {
-		return err
-	}
-
-	// Deserialize WorkPackage (dynamically sized)
-	workPackageBytes := make([]byte, buf.Len()) // Remaining bytes are for the WorkPackage
-	wp, _, err := types.Decode(workPackageBytes, reflect.TypeOf(types.WorkPackage{}))
-	if err != nil {
-		fmt.Println("Error in decodeWorkPackage:", err)
-	}
-	pkg.WorkPackage = wp.(types.WorkPackage)
-	return nil
-}
-
-func (p *Peer) processWorkPackageSubmission(msg []byte) (err error) {
-	var newReq JAMSNPWorkPackage
-	// Deserialize byte array back into the struct
-	err = newReq.FromBytes(msg)
-	if err != nil {
-		fmt.Println("Error deserializing:", err)
-		return
-	}
-	// TODO: read extrinsics
-	fmt.Println("Work Package Submission:", msg)
-
-	return nil
-}
-
-func (p *Peer) broadcastWorkPackageSubmission(coreIndex uint16, pkg types.WorkPackage, extrinsics []byte) (err error) {
-	req := JAMSNPWorkPackage{
-		CoreIndex:   coreIndex,
-		WorkPackage: pkg,
-	}
-
-	reqBytes, err := req.ToBytes()
-	if err != nil {
-		return err
-	}
-	p.sendCode(CE133_WorkPackageSubmission)
-	err = p.sendQuicBytes(reqBytes)
-	if err != nil {
-		return err
-	}
-	err = p.sendQuicBytes(extrinsics)
-	if err != nil {
-		return err
-	}
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
-
-	return nil
-}
 
 /*
 CE 134: Work-package sharing
@@ -301,17 +202,17 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash,
 	if err != nil {
 		return err
 	}
-	p.sendCode(CE134_WorkPackageShare)
-	err = p.sendQuicBytes(reqBytes)
+	stream, err := p.openStream(CE134_WorkPackageShare)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	err = p.sendQuicBytes(bundle)
+	err = sendQuicBytes(stream, bundle)
 	if err != nil {
 		return err
 	}
 	// <-- Work Report Hash ++ Ed25519 Signature
-	respBytes, err := p.receiveQuicBytes()
+	respBytes, err := receiveQuicBytes(stream)
 	if err != nil {
 		return err
 	}
@@ -322,15 +223,11 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash,
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
 
 	return nil
 }
 
-func (p *Peer) processWorkPackageShare(msg []byte) (err error) {
+func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	// --> Core Index ++ Segment Root Mappings
 	var newReq JAMSNPWorkPackageShare
 	err = newReq.FromBytes(msg)
@@ -339,7 +236,7 @@ func (p *Peer) processWorkPackageShare(msg []byte) (err error) {
 		return
 	}
 	// --> Work Package Bundle
-	bundle, err := p.receiveQuicBytes()
+	bundle, err := receiveQuicBytes(stream)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
 		return
@@ -353,7 +250,7 @@ func (p *Peer) processWorkPackageShare(msg []byte) (err error) {
 		segmentroots = append(segmentroots, sr.SegmentRoot)
 	}
 
-	workPackageHash, signature, err := p.node.RefineBundle(newReq.CoreIndex, workpackagehashes, segmentroots, bundle)
+	workPackageHash, signature, err := n.RefineBundle(newReq.CoreIndex, workpackagehashes, segmentroots, bundle)
 	if err != nil {
 		return
 	}
@@ -366,14 +263,12 @@ func (p *Peer) processWorkPackageShare(msg []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	err = p.sendQuicBytes(reqBytes)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	// --> FIN
-	p.receiveFIN()
 	// <-- FIN
-	p.sendFIN()
+	stream.Close()
 
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
 	"io"
 )
 
@@ -239,31 +240,28 @@ func (p *Peer) SendAuditAnnouncement(workReportHash common.Hash, headerHash comm
 	if err != nil {
 		return err
 	}
-	err = p.sendQuicBytes(reqBytes)
+	stream, err := p.openStream(CE144_AuditAnnouncement)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
 	/*
-	  for _, r := range reports {
-	    if a.Tranche == 0 {
-				// [Tranche 0] --> Bandersnatch Signature (s_0 in GP)
-	      // TODO: Shawn: need BandersnatchSignature
-	    } else {
-			//	[Tranche not 0] --> [Bandersnatch Signature (s_n(w) in GP) ++ No Shows] (One entry per WR in the first message)
-	      // TODO: Shawn: need BandersnatchSignature
-	    }
-	  }
+		  for _, r := range reports {
+		    if a.Tranche == 0 {
+					// [Tranche 0] --> Bandersnatch Signature (s_0 in GP)
+		      // TODO: Shawn: need BandersnatchSignature
+		    } else {
+				//	[Tranche not 0] --> [Bandersnatch Signature (s_n(w) in GP) ++ No Shows] (One entry per WR in the first message)
+		      // TODO: Shawn: need BandersnatchSignature
+		    }
+		  }
 	*/
-
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
 
 	return nil
 }
 
-func (p *Peer) processAuditAnnouncement(msg []byte) (err error) {
+// TODO: Shawn CHECK
+func (n *Node) onAuditAnnouncement(stream quic.Stream, msg []byte) (err error) {
 	var newReq JAMSNPAuditAnnouncement
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -278,11 +276,16 @@ func (p *Peer) processAuditAnnouncement(msg []byte) (err error) {
 		workReportHashes = append(workReportHashes, r.WorkReportHash)
 	}
 
-	p.node.OnAuditAnnouncement(p.validatorIndex, newReq.HeaderHash, newReq.Tranche, coreIndexes, workReportHashes, newReq.Signature)
-	// --> FIN
-	p.receiveFIN()
 	// <-- FIN
-	p.sendFIN()
+	stream.Close()
+	announcement := types.Announcement{
+		// Core:  0,
+		Tranche: uint32(newReq.Tranche),
+		//WorkReport:     WorkReport
+		//ValidatorIndex: uint32(validatorIndex),
+		Signature: newReq.Signature,
+	}
+	n.announcementsCh <- announcement
 
 	return
 }

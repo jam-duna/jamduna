@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
+
 	"io"
 )
 
@@ -115,31 +117,39 @@ func (p *Peer) SendJudgmentPublication(epoch uint32, validatorIndex uint16, vali
 	if err != nil {
 		return err
 	}
-	p.sendCode(CE145_JudgmentPublication)
-	err = p.sendQuicBytes(reqBytes)
+	stream, err := p.openStream(CE145_JudgmentPublication)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
 
 	return nil
 }
 
 // Node has received a JudgementPublication message to act on
-func (p *Peer) processJudgmentPublication(msg []byte) (err error) {
+func (n *Node) onJudgmentPublication(stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	var jp JAMSNPJudgmentPublication
 	err = jp.FromBytes(msg)
 	if err != nil {
 		return err
 	}
-	p.node.OnJudgementPublication(jp.Epoch, jp.ValidatorIndex, jp.Validity, jp.WorkReportHash, jp.Signature)
-	// --> FIN
-	p.receiveFIN()
 	// <-- FIN
-	p.sendFIN()
+	stream.Close()
+
+	// TODO: Shawn CHECK
+	judge := true
+	if jp.Validity == 0 {
+		judge = false
+	}
+	judgement := types.Judgement{
+		//Core       uint16
+		Judge: judge,
+		//Tranche    uint32
+		//WorkReport WorkReport
+		Validator: peerID,
+		Signature: jp.Signature,
+	}
+	n.judgementsCh <- judgement
 
 	return nil
 }

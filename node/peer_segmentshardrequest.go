@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/quic-go/quic-go"
 	"io"
 )
 
@@ -123,12 +124,12 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (err error) {
-	if withJustification {
-		p.sendCode(CE140_SegmentShardRequest)
-	} else {
-		p.sendCode(CE139_SegmentShardRequest)
 
+	code := uint8(CE139_SegmentShardRequest)
+	if withJustification {
+		code = CE140_SegmentShardRequest
 	}
+	stream, err := p.openStream(code)
 	req := &JAMSNPSegmentShardRequest{
 		ErasureRoot:  erasureRoot,
 		ShardIndex:   shardIndex,
@@ -140,19 +141,15 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	if err != nil {
 		return err
 	}
-	err = p.sendQuicBytes(reqBytes)
+	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
 	}
-	// --> FIN
-	p.sendFIN()
-	// <-- FIN
-	p.receiveFIN()
 
 	return nil
 }
 
-func (p *Peer) processSegmentShardRequest(msg []byte, withJustification bool) (err error) {
+func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustification bool) (err error) {
 	var req JAMSNPSegmentShardRequest
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)
@@ -160,7 +157,7 @@ func (p *Peer) processSegmentShardRequest(msg []byte, withJustification bool) (e
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	segmentshards, justifications, ok, err := p.node.GetSegmentShard(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+	segmentshards, justifications, ok, err := n.GetSegmentShard(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
 	if err != nil {
 		return err
 	}
@@ -169,7 +166,7 @@ func (p *Peer) processSegmentShardRequest(msg []byte, withJustification bool) (e
 		return nil
 	}
 	// <-- Bundle Shard
-	err = p.sendQuicBytes(segmentshards)
+	err = sendQuicBytes(stream, segmentshards)
 	if err != nil {
 		return err
 	}
@@ -177,16 +174,15 @@ func (p *Peer) processSegmentShardRequest(msg []byte, withJustification bool) (e
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if withJustification {
 		for _, j := range justifications {
-			err := p.sendQuicBytes(j)
+			err := sendQuicBytes(stream, j)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	// --> FIN
-	p.receiveFIN()
+
 	// <-- FIN
-	p.sendFIN()
+	stream.Close()
 
 	return nil
 }
