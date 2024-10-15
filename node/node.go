@@ -476,10 +476,10 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			break
 		case reflect.TypeOf(types.Announcement{}):
 			a := obj.(types.Announcement)
-			coreIndex := uint16(0) // TODO: Shawn
-			workPackageHash := a.WorkReport.AvailabilitySpec.WorkPackageHash
-			headerHash := common.Hash{} // TODO: Shawn
-			err := p.SendAuditAnnouncement(workPackageHash, headerHash, coreIndex, &a)
+			coreIndex := a.Core
+			workReportHash := a.WorkReportHash
+			headerHash := a.HeaderHash
+			err := p.SendAuditAnnouncement(workReportHash, headerHash, coreIndex, &a)
 			if err != nil {
 				fmt.Printf("SendAuditAnnouncement ERR %v\n", err)
 			}

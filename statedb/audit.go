@@ -121,7 +121,7 @@ func GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.JudgeBucket, W_
 	count := 0
 	for _, a := range A.Announcements[W_hash] {
 		for _, j := range J.Judgements[W_hash] {
-			if (a.Core == j.Core) && (j.Judge == true) {
+			if (a.Signature == j.Signature) && (j.Judge == true) {
 				count++
 			}
 		}
@@ -188,7 +188,7 @@ func (s *StateDB) MakeAnnouncement(tranche uint32, workreport types.WorkReportSe
 	announcement := types.Announcement{
 		Core:           workreport.Core,
 		Tranche:        tranche,
-		WorkReport:     workreport.WorkReport,
+		WorkReportHash: workreport.WorkReport.Hash(),
 		ValidatorIndex: validatoridx,
 	}
 	announcement.Sign(Ed25519Secret)
@@ -197,7 +197,6 @@ func (s *StateDB) MakeAnnouncement(tranche uint32, workreport types.WorkReportSe
 
 func (s *StateDB) MakeJudgement(tranche uint32, workreport types.WorkReportSelection, judge bool, Ed25519Secret []byte, validator uint16) (types.Judgement, error) {
 	judgement := types.Judgement{
-		Core:       workreport.Core,
 		Tranche:    tranche,
 		Judge:      judge,
 		Validator:  validator,
@@ -240,7 +239,7 @@ func (s *StateDB) IsReportAuditedTiny(A types.AnnounceBucket, J types.JudgeBucke
 		//double check no invalid
 		for _, j := range J.Judgements[W_hash] {
 			if j.Judge != true {
-				return fmt.Errorf("Validator[%d] said false /n", j.Core)
+				return fmt.Errorf("Validator[%d] said false /n", j.Validator)
 			}
 		}
 		return nil
@@ -300,7 +299,7 @@ func (s *StateDB) JudgementToFault(J []types.Judgement, W_hash common.Hash) []ty
 			faults = append(faults, types.Fault{
 				Target:    W_hash,
 				Voting:    j.Judge,
-				Key:       s.GetSafrole().CurrValidators[int(j.Core)].Ed25519,
+				Key:       s.GetSafrole().CurrValidators[int(j.Validator)].Ed25519,
 				Signature: j.Signature,
 			})
 		}

@@ -9,7 +9,6 @@ import (
 )
 
 type Judgement struct {
-	Core       uint16           `json:"core"`
 	Judge      bool             `json:"judge"`
 	Tranche    uint32           `json:"tranche"`
 	WorkReport WorkReport       `json:"work_report"`
@@ -111,14 +110,14 @@ func (J *JudgeBucket) GetLen(w common.Hash) int {
 	return len(J.Judgements[w])
 }
 
-func (J *JudgeBucket) GetJudgement(w common.Hash, core uint16) (Judgement, bool) {
-	for _, j := range J.Judgements[w] {
-		if j.Core == core {
-			return j, true
-		}
-	}
-	return Judgement{}, false
-}
+// func (J *JudgeBucket) GetJudgement(w common.Hash, core uint16) (Judgement, bool) {
+// 	for _, j := range J.Judgements[w] {
+// 		if j.Core == core {
+// 			return j, true
+// 		}
+// 	}
+// 	return Judgement{}, false
+// }
 
 func (J *JudgeBucket) GetTrueCount(W common.Hash) int {
 	count := 0
@@ -145,7 +144,7 @@ func (J *JudgeBucket) GetTrueJudgement(W common.Hash) []Judgement {
 	for _, j := range J.Judgements[W] {
 		//drop duplicate
 		for _, jj := range judgements {
-			if (j.Core == jj.Core) && (j.Tranche == jj.Tranche) {
+			if (j.Signature == jj.Signature) && (j.Tranche == jj.Tranche) {
 				continue
 			}
 		}
@@ -161,7 +160,7 @@ func (J *JudgeBucket) GetFalseJudgement(W common.Hash) []Judgement {
 	for _, j := range J.Judgements[W] {
 		//drop duplicate
 		for _, jj := range judgements {
-			if (j.Core == jj.Core) && (j.Tranche == jj.Tranche) {
+			if (j.Signature == jj.Signature) && (j.Tranche == jj.Tranche) {
 				continue
 			}
 		}
@@ -182,7 +181,7 @@ func (J *JudgeBucket) GetWonkeyJudgement(W common.Hash) []Judgement {
 	for _, j := range J.Judgements[W] {
 		//drop duplicate
 		for _, jj := range judgements {
-			if (j.Core == jj.Core) && (j.Tranche == jj.Tranche) {
+			if (j.Signature == jj.Signature) && (j.Tranche == jj.Tranche) {
 				continue
 			}
 		}

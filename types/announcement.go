@@ -10,11 +10,13 @@ import (
 
 // Announcement  Section 17.3 Equations (196)-(199) TBD
 type Announcement struct {
-	Core           uint16           `json:"core"`
-	Tranche        uint32           `json:"tranche"`
-	WorkReport     WorkReport       `json:"work_report"`
-	ValidatorIndex uint32           `json:"validator_index"`
-	Signature      Ed25519Signature `json:"signature"`
+	HeaderHash      common.Hash      `json:"header_hash"`
+	Core            uint16           `json:"core"`
+	Tranche         uint32           `json:"tranche"`
+	WorkReportHash  common.Hash      `json:"work_report_hash"`
+	Signature       Ed25519Signature `json:"signature"`
+	ValidatorIndex  uint32           `json:"validator_index"`
+	TrancheEvidence common.Hash      `json:"tranche_evidence"`
 }
 
 func (a *Announcement) Bytes() []byte {
@@ -33,9 +35,12 @@ func (a *Announcement) Hash() common.Hash {
 
 // computeAnnouncementBytes abstracts the process of generating the bytes to be signed or verified.
 func (a *Announcement) UnsignedBytes() []byte {
-	signtext := append(common.Uint32ToBytes(a.Tranche), common.Uint16ToBytes(a.Core)...)
-	h0 := a.WorkReport.AvailabilitySpec.WorkPackageHash
-	signtext = append(signtext, h0.Bytes()...)
+	// eq 214
+	signtext_n, _ := Encode(a.Core)
+	signtext_n = append(signtext_n, a.WorkReportHash.Bytes()...)
+	signtext, _ := Encode(a.Tranche)
+	signtext = append(signtext, signtext_n...)
+	signtext = append(signtext, a.HeaderHash.Bytes()...)
 	return signtext
 }
 
@@ -91,7 +96,7 @@ func (W *AnnounceBucket) PutAnnouncement(a Announcement) {
 	if W.KnownAnnouncements[a.Hash()] {
 		return
 	}
-	W.Announcements[a.WorkReport.AvailabilitySpec.WorkPackageHash] = append(W.Announcements[a.WorkReport.AvailabilitySpec.WorkPackageHash], a)
+	W.Announcements[a.WorkReportHash] = append(W.Announcements[a.WorkReportHash], a)
 	W.KnownAnnouncements[a.Hash()] = true
 }
 

@@ -163,6 +163,7 @@ func TestNodeSafrole(t *testing.T) {
 		//node.state = statedb.ProcessGenesis(genesisAuthorities)
 		nodes[i] = node
 	}
+	statedb.RunGraph()
 	for {
 	}
 }
