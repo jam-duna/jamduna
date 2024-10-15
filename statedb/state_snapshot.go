@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"encoding/json"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -53,13 +54,21 @@ func (n *JamState) Snapshot() *StateSnapshot {
 }
 
 func (original TicketsOrKeys) Copy() TicketsOrKeys {
-	copied := TicketsOrKeys{
-		Tickets: make([]*types.TicketBody, len(original.Tickets)),
-		Keys:    make([]common.Hash, len(original.Keys)),
+	// Only one of either Tickets or Keys can have a value, so they cannot be initialized with `make` beforehand.
+	if original.Tickets != nil && original.Keys == nil {
+		copid := TicketsOrKeys{
+			Tickets: make([]*types.TicketBody, len(original.Tickets)),
+		}
+		copy(copid.Tickets[:], original.Tickets[:])
+		return copid
+	} else if original.Tickets == nil && original.Keys != nil {
+		copid := TicketsOrKeys{
+			Keys: make([]common.Hash, len(original.Keys)),
+		}
+		copy(copid.Keys[:], original.Keys[:])
+		return copid
 	}
-	copy(copied.Tickets[:], original.Tickets[:])
-	copy(copied.Keys[:], original.Keys[:])
-	return copied
+	return TicketsOrKeys{}
 }
 
 func (original SafroleBasicState) Copy() SafroleBasicState {

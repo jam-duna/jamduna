@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -39,7 +40,10 @@
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
 
-        label, select, textarea, button {
+        label,
+        select,
+        textarea,
+        button {
             display: block;
             width: 100%;
             margin-bottom: 20px;
@@ -70,9 +74,10 @@
         }
     </style>
 </head>
+
 <body>
     <header>
-        <img src="https://i.ibb.co/PCCmkxg/image.png" alt="Codec Logo"/>
+        <img src="https://i.ibb.co/PCCmkxg/image.png" alt="Codec Logo" />
     </header>
 
     <main>
@@ -99,16 +104,17 @@
             <option value="C1">C1 - Authorization Pool</option>
             <option value="C2">C2 - Authorization Queue</option>
             <option value="C3">C3 - Beefy Pool</option>
-            <option value="C4">Gamma</option>
-            <option value="C5">Psi</option>
-            <option value="C6">Entropy</option>
-            <option value="C7">Next Validators</option>
-            <option value="C8">Current Validators</option>
-            <option value="C9">Prior Validators</option>
-            <option value="C10">Availability Assignments</option>
-            <option value="C11">Timeslot</option>
-            <option value="C12">PrivilegedServiceIndices</option>
-            <option value="C13">Validator Statistics</option>
+            <option value="C4">C4 - Gamma</option>
+            <option value="C5">C5 - Psi</option>
+            <option value="C6">C6 - Entropy</option>
+            <option value="C7">C7 - Next Validators</option>
+            <option value="C8">C8 - Current Validators</option>
+            <option value="C9">C9 - Prior Validators</option>
+            <option value="C10">C10 - Availability Assignments</option>
+            <option value="C11">C11 - Timeslot</option>
+            <option value="C12">C12 - PrivilegedServiceIndices</option>
+            <option value="C13">C13 - Validator Statistics</option>
+            <option value="JamState">Snapshot / Genesis (C1-C13) </option>
         </select>
 
         <label for="inputText">Input:</label>
@@ -150,11 +156,11 @@
             updateInputText();
         };
 
-        document.getElementById('actionType').addEventListener('change', function() {
+        document.getElementById('actionType').addEventListener('change', function () {
             document.getElementById('actionButton').textContent = this.value.charAt(0).toUpperCase() + this.value.slice(1);
         });
 
-        document.getElementById('actionButton').addEventListener('click', function() {
+        document.getElementById('actionButton').addEventListener('click', function () {
             const actionType = document.getElementById('actionType').value;
             const objectType = document.getElementById('objectType').value;
             const inputText = document.getElementById('inputText').value;
@@ -171,12 +177,13 @@
                 },
                 body: JSON.stringify(requestData)
             })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('outputText').value = data.result;
-            })
-            .catch(error => console.error('Error:', error));
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('outputText').value = data.result;
+                })
+                .catch(error => console.error('Error:', error));
         });
     </script>
 </body>
+
 </html>

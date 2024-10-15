@@ -39,7 +39,8 @@ func processBlocks(genesisFile string, basePath string) error {
 		if err != nil {
 			log.Fatalf("Error decoding genesis file %s: %v\n", genesisFile, err)
 		}
-		statesnapshot = s.(*statedb.StateSnapshot)
+		st := s.(statedb.StateSnapshot)
+		statesnapshot = &st
 	} else {
 		// JSON unmarshal snapshotBytes into statesnapshot
 		err := json.Unmarshal(snapshotBytes, &statesnapshot)

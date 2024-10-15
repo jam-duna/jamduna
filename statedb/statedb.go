@@ -395,7 +395,7 @@ func (s *StateDB) GetJamSnapshot() *StateSnapshot {
 	return s.JamState.Snapshot()
 }
 
-func (s *StateDB) RecoverTrieState(stateRoot common.Hash) {
+func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	// Now read C1.....C13 from the trie and put it back into JamState
 	//t := s.GetTrie()
 
@@ -479,7 +479,7 @@ func (s *StateDB) RecoverTrieState(stateRoot common.Hash) {
 	d.SetPi(piEncode)
 
 	s.SetJamState(d)
-	//fmt.Printf("[N%v] RecoverTrieState %v\n", s.Id, s.GetJamSnapshot())
+	//fmt.Printf("[N%v] RecoverJamState %v\n", s.Id, s.GetJamSnapshot())
 
 }
 
@@ -1255,7 +1255,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 
 	//fmt.Printf("[N%v] Original JamState %v\n", s.Id, s.GetJamSnapshot())
 	//fmt.Printf("[N%v] MakeBlock using stateRoot %v\n", s.Id, stateRoot)
-	s.RecoverTrieState(stateRoot)
+	s.RecoverJamState(stateRoot)
 	//fmt.Printf("[N%v] Recovered JamState %v\n", s.Id, s.GetJamSnapshot())
 
 	b := types.NewBlock()

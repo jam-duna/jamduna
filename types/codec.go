@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"reflect"
 )
 
@@ -104,29 +105,44 @@ func CheckCustomEncode(data interface{}) (bool, []byte) {
 	if data == nil {
 		return false, []byte{}
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println(r)
+		}
+	}()
+
 	if encoder, ok := data.(CustomEncoder); ok {
 		return true, encoder.Encode()
 	}
+
 	return false, []byte{}
 }
 
 func CheckCustomDecode(data []byte, t reflect.Type) (bool, interface{}, uint32) {
-	// Create a zero value of the type
 	instance := reflect.New(t).Elem().Interface()
-	// Check if the type implements the CustomDecoder interface
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println(r)
+		}
+	}()
+
 	if decoder, ok := instance.(CustomDecoder); ok {
 		decoded, length := decoder.Decode(data)
 		return true, decoded, length
 	}
-	// Fallback to default behavior if not implemented
+
 	return false, nil, 0
 }
 
 func Encode(data interface{}) ([]byte, error) {
 	v := reflect.ValueOf(data)
-	CheckCustomEncode(data)
 	customEncodeRequired, customEncoded := CheckCustomEncode(data)
 	if customEncodeRequired {
+		if len(customEncoded) == 0 {
+			return []byte{}, nil
+		}
 		return customEncoded, nil
 	}
 
@@ -190,7 +206,7 @@ func Encode(data interface{}) ([]byte, error) {
 		}
 		return encoded, nil
 
-		// GP v0.3.6 eq(269) Concatenation Rule
+	// GP v0.3.6 eq(269) Concatenation Rule
 	case reflect.Struct:
 		var encoded []byte
 		for i := 0; i < v.NumField(); i++ {
@@ -202,14 +218,15 @@ func Encode(data interface{}) ([]byte, error) {
 		}
 		return encoded, nil
 
-		// GP v0.3.6 eq(270) Tuples Rule
+	// GP v0.3.6 eq(270) Tuples Rule
 	case reflect.Ptr:
 		if v.IsNil() {
 			return []byte{0}, nil
 		}
 		return Encode(v.Elem().Interface())
+	default:
+		return []byte{}, fmt.Errorf("unsupported type: %s", v.Kind().String())
 	}
-	return []byte{}, nil
 }
 
 func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
@@ -217,39 +234,69 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 	v := reflect.New(t).Elem()
 	customDecodeRequired, decoded, customLength := CheckCustomDecode(data, t)
 	if customDecodeRequired {
+		if len(data) < int(customLength) {
+			return nil, 0, fmt.Errorf("data length insufficient for custom decode")
+		}
 		return decoded, customLength, nil
 	}
 
 	switch v.Kind() {
 	case reflect.Bool:
+		if len(data) < 1 {
+			return nil, 0, fmt.Errorf("data length insufficient for bool")
+		}
 		v.SetBool(data[0] == 1)
 		length = 1
 	case reflect.Uint:
 		x, l := DecodeE(data)
+		if len(data) < int(l) {
+			return nil, 0, fmt.Errorf("data length insufficient for uint")
+		}
 		v.SetUint(x)
 		length = l
 	case reflect.Uint8:
+		if len(data) < 1 {
+			return nil, 0, fmt.Errorf("data length insufficient for uint8")
+		}
 		x := DecodeE_l(data)
 		v.SetUint(x)
 		length = 1
 	case reflect.Uint16:
+		if len(data) < 2 {
+			return nil, 0, fmt.Errorf("data length insufficient for uint16")
+		}
 		x := DecodeE_l(data)
 		v.SetUint(x)
 		length = 2
 	case reflect.Uint32:
+		if len(data) < 4 {
+			return nil, 0, fmt.Errorf("data length insufficient for uint32")
+		}
 		x := DecodeE_l(data)
 		v.SetUint(x)
 		length = 4
 	case reflect.Uint64:
+		if len(data) < 8 {
+			return nil, 0, fmt.Errorf("data length insufficient for uint64")
+		}
 		x := DecodeE_l(data)
 		v.SetUint(x)
 		length = 8
 	case reflect.String:
-		str_len, len := DecodeE([]byte{data[0]})
-		length += len
+		str_len, l := DecodeE(data)
+		if len(data) < int(length+l) {
+			return nil, 0, fmt.Errorf("data length insufficient for decoding string length")
+		}
+		length += l
 		var T []uint64
 		for i := 0; i < int(str_len); i++ {
+			if len(data) < int(length+1) {
+				return nil, 0, fmt.Errorf("data length insufficient for string character")
+			}
 			x, l := DecodeE(data[length:])
+			if len(data) < int(length+l) {
+				return nil, 0, fmt.Errorf("data length insufficient for string character decoding")
+			}
 			T = append(T, x)
 			length += l
 		}
@@ -260,63 +307,92 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 		v.SetString(str)
 	case reflect.Array:
 		for i := 0; i < v.Len(); i++ {
+			if len(data) < int(length+1) {
+				return nil, 0, fmt.Errorf("data length insufficient for array element")
+			}
 			if v.Index(i).Kind() == reflect.Uint8 {
 				v.Index(i).Set(reflect.ValueOf(data[length]))
 				length++
 			} else {
+				if len(data[length:]) < 1 {
+					return nil, 0, fmt.Errorf("data length insufficient for array element decoding")
+				}
 				elem, l, err := Decode(data[length:], v.Index(i).Type())
 				if err != nil {
 					return nil, 0, err
+				}
+				if len(data) < int(length+l) {
+					return nil, 0, fmt.Errorf("data length insufficient for array element decoding")
 				}
 				v.Index(i).Set(reflect.ValueOf(elem))
 				length += l
 			}
 		}
-
-	// GP v0.3.6 eq(274) Length Discriminator Decoding
 	case reflect.Slice:
 		item_len, l := DecodeE(data)
-
+		if len(data) < int(length+l) {
+			return nil, 0, fmt.Errorf("data length insufficient for slice length")
+		}
 		v.Set(reflect.MakeSlice(t, int(item_len), int(item_len)))
 		length += l
 		for i := 0; i < int(item_len); i++ {
+			if len(data) < int(length+1) {
+				return nil, 0, fmt.Errorf("data length insufficient for slice element")
+			}
 			if v.Index(i).Kind() == reflect.Uint8 {
 				v.Index(i).Set(reflect.ValueOf(data[length]))
 				length++
 			} else {
+				if len(data[length:]) < 1 {
+					return nil, 0, fmt.Errorf("data length insufficient for slice element decoding")
+				}
 				elem, l, err := Decode(data[length:], v.Index(i).Type())
 				if err != nil {
 					return nil, 0, err
+				}
+				if len(data) < int(length+l) {
+					return nil, 0, fmt.Errorf("data length insufficient for slice element decoding")
 				}
 				v.Index(i).Set(reflect.ValueOf(elem))
 				length += l
 			}
 		}
-
-	// GP v0.3.6 eq(269) Concatenation Rule
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
+			if len(data[length:]) < 1 {
+				return nil, 0, fmt.Errorf("data length insufficient for struct field")
+			}
 			elem, l, err := Decode(data[length:], v.Field(i).Type())
 			if err != nil {
 				return nil, 0, err
+			}
+			if len(data) < int(length+l) {
+				return nil, 0, fmt.Errorf("data length insufficient for struct field decoding")
 			}
 			if elem != nil {
 				v.Field(i).Set(reflect.ValueOf(elem))
 			}
 			length += l
 		}
-
-	// GP v0.3.6 eq(270) Tuples Rule
 	case reflect.Ptr:
+		if len(data) < int(length+1) {
+			return nil, 0, fmt.Errorf("data length insufficient for pointer indicator")
+		}
 		if data[length] == 0 {
 			length++
 			v.Set(reflect.Zero(t))
 		} else {
 			ptrType := t.Elem()
+			if len(data[length:]) < 1 {
+				return nil, 0, fmt.Errorf("data length insufficient for pointer content decoding")
+			}
 			ptr := reflect.New(ptrType)
 			elem, l, err := Decode(data[length:], ptrType)
 			if err != nil {
 				return nil, 0, err
+			}
+			if len(data) < int(length+l) {
+				return nil, 0, fmt.Errorf("data length insufficient for pointer content")
 			}
 			ptr.Elem().Set(reflect.ValueOf(elem))
 			v.Set(ptr)

@@ -58,7 +58,8 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j = NewJamState()
 
 	// shift starting condition by one phase to make space for 0_0
-	genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp - types.PeriodSecond)
+	//genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp - types.PeriodSecond)
+	genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp)
 	fmt.Printf("InitGenesisState genesisTimeslot=%v\n", genesisTimeslot)
 
 	j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
@@ -124,12 +125,13 @@ func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 		now = int64(computeJCETime(now))
 	}
 	// epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
-	second_per_epoch := uint64(types.SecondsPerSlot * 1) // types.EpochLength
+	second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength) // types.EpochLength
+
 
 	// USE THIS for generating public traces with a full E for the first epoch
-	epoch0Timestamp := uint64(now) + second_per_epoch - (uint64(now) % second_per_epoch) // let it be the start of the epoch
-
-	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v\n", epoch0Timestamp)
+	waitTime :=  second_per_epoch - (uint64(now) % second_per_epoch)
+	epoch0Timestamp := uint64(now) + waitTime
+	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v. Wait:%v Sec \n", epoch0Timestamp, uint64(waitTime))
 	return GenesisConfig{
 		Epoch0Timestamp: epoch0Timestamp,
 		Authorities:     validators,

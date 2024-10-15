@@ -177,6 +177,13 @@ func encodeapi(objectType string, inp string) (string, error) {
 			return "", err
 		}
 		obj = c13
+	case "JamState":
+		var jamstate statedb.StateSnapshot
+		err = json.Unmarshal(input, &jamstate)
+		if err != nil {
+			return "", err
+		}
+		obj = jamstate
 	default:
 		return "", errors.New("Unknown object type")
 	}
@@ -252,6 +259,8 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Kai_state{}))
 	case "C13":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([2][types.TotalValidators]statedb.Pi_state{}))
+	case "JamState":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.StateSnapshot{}))
 	default:
 		return "", errors.New("Unknown object type")
 	}
