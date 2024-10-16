@@ -50,6 +50,7 @@ func (p *Peer) SendBlockAnnouncement(b types.Block, slot uint32) (err error) {
 }
 
 func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+	defer stream.Close()
 	var newReq types.BlockAnnouncement
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -58,7 +59,6 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 		return
 	}
 	// <-- FIN
-	stream.Close()
 
 	headerHash := newReq.HeaderHash
 	_, found := n.headers[headerHash]

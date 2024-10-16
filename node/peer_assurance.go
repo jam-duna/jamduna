@@ -97,6 +97,7 @@ func (p *Peer) SendAssurance(a *types.Assurance) (err error) {
 }
 
 func (n *Node) onAssuranceDistribution(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+	defer stream.Close()
 	var newReq JAMSNPAssuranceDistribution
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -105,7 +106,6 @@ func (n *Node) onAssuranceDistribution(stream quic.Stream, msg []byte, peerID ui
 		return
 	}
 	// <-- FIN
-	stream.Close()
 
 	assurance := types.Assurance{
 		Anchor:         newReq.Anchor,

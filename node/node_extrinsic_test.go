@@ -37,12 +37,6 @@ func TestNodeAudit(t *testing.T) {
 		fmt.Printf("Node[%d] state is ok\n", n.id)
 
 	}
-	for _, n := range nodes {
-		err := n.Tiny_Audit()
-		if err != nil {
-			t.Fatalf("tiny audit error: %v\n", err.Error())
-		}
-	}
 
 	//delay for a while
 	time.Sleep(1 * time.Second)

@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
-	"io"
-	"reflect"
 )
 
 /*
@@ -47,12 +47,10 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 	if err := binary.Write(buf, binary.BigEndian, wr.Slot); err != nil {
 		return nil, err
 	}
-
 	// Serialize Len (1 byte)
 	if err := buf.WriteByte(wr.Len); err != nil {
 		return nil, err
 	}
-
 	// Serialize Credentials (dynamically sized)
 	for _, cred := range wr.Credentials {
 		credBytes, err := cred.ToBytes()
@@ -63,53 +61,50 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 			return nil, err
 		}
 	}
-
 	// Serialize WorkReport
-	workReportBytes := wr.WorkReport.Bytes()
+	WR := wr.WorkReport
+	workReportBytes := WR.Bytes()
 	if _, err := buf.Write(workReportBytes); err != nil {
 		return nil, err
 	}
-
 	return buf.Bytes(), nil
 }
 func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
-
 	// Deserialize Slot (4 bytes)
 	if err := binary.Read(buf, binary.BigEndian, &wr.Slot); err != nil {
-		return err
+		return fmt.Errorf("Error deserializing Slot: %v", err)
 	}
-
 	// Deserialize Len (1 byte)
 	lenByte, err := buf.ReadByte()
 	if err != nil {
-		return err
+		return fmt.Errorf("Error deserializing Len: %v", err)
 	}
 	wr.Len = lenByte
 
 	// Deserialize Credentials (dynamically sized)
+	wr.Credentials = make([]types.GuaranteeCredential, wr.Len)
 	for i := 0; i < int(wr.Len); i++ {
 		var cred types.GuaranteeCredential
 		credData := make([]byte, 66) // Assuming 66 bytes for GuaranteeCredential
 		if _, err := io.ReadFull(buf, credData); err != nil {
-			return err
+			return fmt.Errorf("Error reading GuaranteeCredential: %v", err)
 		}
 		if err := cred.FromBytes(credData); err != nil {
-			return err
+			return fmt.Errorf("Error deserializing GuaranteeCredential: %v", err)
 		}
-		wr.Credentials = append(wr.Credentials, cred)
+		wr.Credentials[i] = cred
 	}
 
 	// Deserialize WorkReport (assuming it knows its own length)
 	workReportData := make([]byte, buf.Len()) // Read remaining bytes for WorkReport
 	if _, err := io.ReadFull(buf, workReportData); err != nil {
-		return err
+		return fmt.Errorf("Error reading WorkReport: %v", err)
 	}
-	r, _, err := types.Decode(workReportData, reflect.TypeOf(types.WorkReport{}))
+	err = wr.WorkReport.FromBytes(workReportData)
 	if err != nil {
-		return err
+		return fmt.Errorf("Error deserializing WorkReport: %v", err)
 	}
-	wr.WorkReport = r.(types.WorkReport)
 
 	return nil
 }
@@ -138,7 +133,7 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
-		fmt.Println("Error deserializing:", err)
+		fmt.Println("Error deserializing onWorkReportDistribution:", err)
 		return
 	}
 

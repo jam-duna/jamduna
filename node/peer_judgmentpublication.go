@@ -128,13 +128,13 @@ func (p *Peer) SendJudgmentPublication(epoch uint32, validatorIndex uint16, vali
 
 // Node has received a JudgementPublication message to act on
 func (n *Node) onJudgmentPublication(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+	defer stream.Close()
 	var jp JAMSNPJudgmentPublication
 	err = jp.FromBytes(msg)
 	if err != nil {
 		return err
 	}
 	// <-- FIN
-	stream.Close()
 
 	// TODO: Shawn CHECK
 	judge := true

@@ -195,12 +195,12 @@ func (s *StateDB) MakeAnnouncement(tranche uint32, workreport types.WorkReportSe
 	return announcement, nil
 }
 
-func (s *StateDB) MakeJudgement(tranche uint32, workreport types.WorkReportSelection, judge bool, Ed25519Secret []byte, validator uint16) (types.Judgement, error) {
+func (s *StateDB) MakeJudgement(tranche uint32, workreport types.WorkReport, judge bool, Ed25519Secret []byte, validator uint16) (types.Judgement, error) {
 	judgement := types.Judgement{
 		Tranche:    tranche,
 		Judge:      judge,
 		Validator:  validator,
-		WorkReport: workreport.WorkReport,
+		WorkReport: workreport,
 	}
 	judgement.Sign(Ed25519Secret)
 	return judgement, nil

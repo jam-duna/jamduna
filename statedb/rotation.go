@@ -70,7 +70,8 @@ func (s *StateDB) AssignGuarantors(lock ...bool) {
 				Validator: kappa,
 			})
 		}
-		s.GuarantorAssignments = assignments
+		s.GuarantorAssignments = make([]types.GuarantorAssignment, len(assignments))
+		copy(s.GuarantorAssignments, assignments)
 
 	} else {
 		assignments := make([]types.GuarantorAssignment, 0)
@@ -83,7 +84,8 @@ func (s *StateDB) AssignGuarantors(lock ...bool) {
 				Validator: kappa,
 			})
 		}
-		s.GuarantorAssignments = assignments
+		s.GuarantorAssignments = make([]types.GuarantorAssignment, len(assignments))
+		copy(s.GuarantorAssignments, assignments)
 	}
 
 }

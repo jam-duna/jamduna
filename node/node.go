@@ -248,6 +248,10 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
 	node.store.WriteLog(_statedb.JamState.Snapshot(), 0)
+
+	node.statedb.PreviousGuarantors(true)
+	node.statedb.AssignGuarantors(true)
+
 	go node.runServer()
 	go node.runClient()
 	go node.runMain()
@@ -284,6 +288,9 @@ func (n *Node) GetBandersnatchSecret() []byte {
 }
 
 func (n *Node) GetSelfCoreIndex() (uint16, error) {
+	if len(n.statedb.GuarantorAssignments) == 0 {
+		return 0, fmt.Errorf("NO ASSIGNMENTS")
+	}
 	for _, assignment := range n.statedb.GuarantorAssignments {
 		if assignment.Validator.GetEd25519Key() == n.GetEd25519Key() {
 			return assignment.CoreIndex, nil
@@ -303,6 +310,20 @@ func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 	}
 	return coWorkers
 }
+
+func (n *Node) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
+	coWorkers = make([]Peer, 0)
+	for _, assignment := range n.statedb.GuarantorAssignments {
+		if assignment.CoreIndex == core {
+			peer, err := n.GetPeerInfoByEd25519(assignment.Validator.Ed25519)
+			if err == nil {
+				coWorkers = append(coWorkers, *peer.Clone())
+			}
+		}
+	}
+	return coWorkers
+}
+
 func (n *Node) GetCurrValidatorIndex() uint32 {
 	return uint32(n.statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
 }
@@ -527,18 +548,30 @@ func (n *Node) coreBroadcast(obj interface{}) []byte {
 				if id == n.id {
 					continue
 				}
-				if jamsnpEnabled {
+
 					objType := reflect.TypeOf(obj)
 					switch objType {
 					case reflect.TypeOf(types.WorkPackage{}):
+						fmt.Printf("coreBroadcast: WorkPackage\n")
 						wp := obj.(types.WorkPackage)
 						workpackagehashes, segmentRoots, bundle := wp.Split()
-						err := p.ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
+						//stub
+						bundle = n.encodeWorkPackage(wp)
+						work_report_hash, sig, err := p.ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
 						if err != nil {
-
+							fmt.Printf("ShareWorkPackage ERR in coreBoarcast: %v\n", err)
+						}
+						validatorIdx := n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519)
+						if validatorIdx == -1 {
+							fmt.Printf("coreBroadcast: vidx not found\n")
+						}
+						work := p.MakeGuaranteeReport(sig, uint16(validatorIdx))
+						err = n.PutGuaranteeBucketWithoutReport(work, wp.Hash(), work_report_hash)
+						if err != nil {
+							fmt.Printf("PutGuaranteeBucket ERR in coreBoarcast: %v\n", err)
 						}
 					}
-				}
+
 				//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
 				//resp, err := n.makeRequest(peerIdentifier, obj, types.QuicOverallTimeout)
 
@@ -642,6 +675,13 @@ func (n *Node) extendChain() error {
 				if debug {
 					fmt.Printf("[N%d] extendChain addstatedb TIP Now: s:%v<-%v\n", n.id, newStateDB.ParentHash, newStateDB.BlockHash)
 				}
+
+				if len(b.Extrinsic.Guarantees) > 0 {
+					for _, g := range b.Extrinsic.Guarantees {
+							n.assureData(g)
+					}
+				}
+
 				break
 			}
 		}
@@ -656,9 +696,51 @@ func (n *Node) extendChain() error {
 	}
 }
 
+// assureData, given a Guarantee with a AvailabiltySpec within a WorkReport, fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA
+func (n *Node) assureData(g types.Guarantee) error {
+	wr := g.Report
+	if n.coreIndex != wr.CoreIndex {
+		spec := wr.AvailabilitySpec
+		erasureRoot := spec.ErasureRoot
+		bundleLength := spec.BundleLength
+		//workPackageHash := spec.WorkPackageHash
+		//exportedSegmentRoot := spec.ExportedSegmentRoot
+		coreValidator := uint16(0) // TODO: Shawn get the validators for the wr.CoreIndex
+		bundleShard, segmentShards, justification, err := n.peersInfo[coreValidator].SendShardRequest(erasureRoot, n.id, false)
+		if err != nil {
+				fmt.Printf("%s assureData: SendShardRequest %v\n", n.String(), err)
+		} else {
+			if uint32(len(bundleShard)) == bundleLength {
+				segmentIndex := make([]uint16, 0) // TODO: Michael
+				segmentShardsI, justificationsI, err := n.peersInfo[coreValidator].SendSegmentShardRequest(erasureRoot, n.id, segmentIndex, false)
+				if err != nil {
+					fmt.Printf("%s assureData: SendSegmentShardRequest %v\n", n.String(),  err)
+				}
+				err = n.store.StoreImportDA(erasureRoot, n.id, segmentShardsI, justificationsI)
+				if err != nil {
+					fmt.Printf("%s assureData: StoreImportDA %v\n", n.String(),  err)
+				} else {
+					err = n.store.StoreAuditDA(erasureRoot, n.id, bundleShard, segmentShards, justification)
+					if err != nil {
+						fmt.Printf("%s assureData: storeAuditDA %v\n", n.String(),  err)
+					} else {
+						a := types.Assurance {
+							Anchor: n.statedb.ParentHash,
+							//Bitfield: make([types.Avail_bitfield_bytes]byte TODO
+							ValidatorIndex: n.id,
+						}
+						a.Sign(n.credential.Ed25519Secret[:])
+						n.broadcast(a)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // we arrive here when we receive a block from another node
 func (n *Node) processBlock(blk *types.Block) error {
-
 	// walk blk backwards, up to the tip, if possible -- but if encountering an unknown parenthash, immediately fetch the block.  Give up if we can't do anything
 	b := blk
 	n.blocks[b.Hash()] = blk
@@ -964,8 +1046,8 @@ func (n *Node) runClient() {
 			}
 			if newStateDB != nil {
 				// we authored a block
-				newStateDB.PreviousGuarantors()
-				newStateDB.AssignGuarantors()
+				newStateDB.PreviousGuarantors(true)
+				newStateDB.AssignGuarantors(true)
 				n.addStateDB(newStateDB)
 				n.blocks[newBlock.Hash()] = newBlock
 				headerHash := newBlock.Header.Hash()

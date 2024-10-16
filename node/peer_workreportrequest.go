@@ -47,13 +47,13 @@ func (p *Peer) SendWorkReportRequest(workReportHash common.Hash) (workReport typ
 }
 
 func (n *Node) onWorkReportRequest(stream quic.Stream, msg []byte) (err error) {
+	defer stream.Close()
 	h := common.BytesToHash(msg)
 	workReport, ok, err := n.WorkReportLookup(h)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		stream.Close()
 		return nil
 	}
 

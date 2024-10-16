@@ -10,3 +10,8 @@ test:
 testsf:
 	@echo "Running TestNodeSafrole with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestNodeSafrole
+
+# Target for running a specific test function with the timeout
+testwg:
+	@echo "Running TestWorkGuarantee with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run TestWorkGuarantee

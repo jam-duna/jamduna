@@ -123,7 +123,7 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (err error) {
+func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error) {
 
 	code := uint8(CE139_SegmentShardRequest)
 	if withJustification {
@@ -139,17 +139,32 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return
 	}
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
-		return err
+		return
 	}
-
-	return nil
+	// <-- [Segment Shard]
+	segmentShards, err = receiveQuicBytes(stream)
+	if err != nil {
+		return
+	}
+	if withJustification {
+		for j := uint8(0); j < req.Len; j++ {
+			var justification []byte
+			justification, err = receiveQuicBytes(stream)
+			if err != nil {
+				return
+			}
+			justifications = append(justifications, justification)
+		}
+	}
+	return
 }
 
 func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustification bool) (err error) {
+	defer 	stream.Close()
 	var req JAMSNPSegmentShardRequest
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)
@@ -157,13 +172,12 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	segmentshards, justifications, ok, err := n.GetSegmentShard(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+	segmentshards, justifications, ok, err := n.store.GetSegmentShard(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		// TODO
-		return nil
+		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
 	err = sendQuicBytes(stream, segmentshards)
@@ -182,7 +196,6 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 	}
 
 	// <-- FIN
-	stream.Close()
 
 	return nil
 }

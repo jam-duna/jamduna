@@ -121,6 +121,7 @@ func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool
 }
 
 func (n *Node) onTicketDistribution(stream quic.Stream, msg []byte) (err error) {
+	defer stream.Close()
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -130,7 +131,6 @@ func (n *Node) onTicketDistribution(stream quic.Stream, msg []byte) (err error) 
 	}
 
 	// <-- FIN
-	stream.Close()
 
 	var ticket types.Ticket
 	ticket.Attempt = newReq.Attempt

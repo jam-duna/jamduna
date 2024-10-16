@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -30,12 +31,6 @@ type WorkPackage struct {
 	WorkItems []WorkItem `json:"items"`
 }
 
-// The workpackage is an ordered collection of workitems
-type ASWorkPackage struct {
-	ImportSegments []ASWorkItem
-	Extrinsic      []byte
-}
-
 type Authorizer struct {
 	CodeHash common.Hash `json:"code_hash"`
 	Params   []byte      `json:"params"`
@@ -48,6 +43,11 @@ func (a *WorkPackage) String() string {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
 	return string(enc)
+}
+
+func NewWorkPackage(bundle, segments []byte) *WorkPackage {
+	// TODO
+	return &WorkPackage{}
 }
 
 func (a *WorkPackage) Split() (workpackagehashes []common.Hash, segmentRoots []common.Hash, bundle []byte) {

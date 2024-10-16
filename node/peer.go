@@ -5,10 +5,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/colorfulnotion/jam/types"
-	"github.com/quic-go/quic-go"
 	"io"
 	"log"
+
+	"github.com/colorfulnotion/jam/types"
+	"github.com/quic-go/quic-go"
+
 	//"bytes"
 	"sync"
 )
@@ -47,6 +49,16 @@ type Peer struct {
 
 	// TODO: UP0 will keep this
 	//stream quic.Stream
+}
+
+func (p *Peer) Clone() *Peer {
+	return &Peer{
+		node:      p.node,
+		PeerID:    p.PeerID,
+		PeerAddr:  p.PeerAddr,
+		Validator: p.Validator,
+		conn:      p.conn,
+	}
 }
 
 func NewPeer(n *Node, validatorIndex uint16, validator types.Validator, peerAddr string) (p *Peer) {

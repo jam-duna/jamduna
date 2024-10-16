@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+
 	//"encoding/binary"
 
 	"github.com/colorfulnotion/jam/common"
@@ -36,6 +37,28 @@ func (n *Node) PutGuaranteeBucket(workR types.GuaranteeReport) error {
 	return nil
 }
 
+func (n *Node) PutGuaranteeBucketWithoutReport(workR types.GuaranteeReport, workPackageHash common.Hash, work_report_hash common.Hash) error {
+	fmt.Printf("[V%d]Put Guarantee Bucket (W_Hash:%v) From [V%d]\n", n.GetCurrValidatorIndex(), workPackageHash, workR.GuaranteeCredential.ValidatorIndex)
+	n.guaranteeMutex.Lock()
+	defer n.guaranteeMutex.Unlock()
+	if n.guaranteeBucket == nil {
+		// initialize the guarantee bucket
+		n.guaranteeBucket = make(map[common.Hash][]types.GuaranteeReport)
+	}
+	// check if the guarantee is already in the bucket
+	for _, work := range n.guaranteeBucket[workPackageHash] {
+		if work.GuaranteeCredential.ValidatorIndex == workR.GuaranteeCredential.ValidatorIndex {
+			return fmt.Errorf("Guarantee already in bucket")
+		}
+		if work.Report.Hash() == work_report_hash {
+			workR.Report = work.Report
+		}
+	}
+
+	n.guaranteeBucket[workPackageHash] = append(n.guaranteeBucket[workPackageHash], workR)
+	return nil
+}
+
 // verify the guarantee report and put it into the guarantee bucket
 func (n *Node) processGuaranteeReport(report types.GuaranteeReport) error {
 	// Check if the guarantee is valid
@@ -58,6 +81,13 @@ func (n *Node) processGuaranteeReport(report types.GuaranteeReport) error {
 		verify := report.Verify(key)
 		if verify {
 			isInCore = true
+			// TODO: Michael + Shawn
+			peerID := uint16(0)
+			workpackagehashes := []common.Hash{}
+			segmentRoots := []common.Hash{}
+			bundle := []byte{}
+			go n.peersInfo[peerID].ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
+
 			break
 		}
 	}
@@ -232,7 +262,7 @@ func (n *Node) ProcessWorkPackage(workPackage types.WorkPackage) (work types.Gua
 	if err != nil {
 		return types.GuaranteeReport{}, spec, common.Hash{}, err
 	}
-	workReport.Print()
+	fmt.Printf("[N%d]Work Report Hash: %v\n", n.GetCurrValidatorIndex(), workReport.Hash())
 	work = n.MakeGuaranteeReport(workReport)
 	work.Sign(n.GetEd25519Secret())
 	return work, spec, treeRoot, nil
@@ -245,6 +275,17 @@ func (n *Node) MakeGuaranteeReport(report types.WorkReport) types.GuaranteeRepor
 		Report: report,
 		GuaranteeCredential: types.GuaranteeCredential{
 			ValidatorIndex: uint16(n.GetCurrValidatorIndex()),
+		},
+	}
+	return g
+}
+
+func (p *Peer) MakeGuaranteeReport(signature types.Ed25519Signature, validatoridx uint16) types.GuaranteeReport {
+	var g = types.GuaranteeReport{
+		Report: types.WorkReport{},
+		GuaranteeCredential: types.GuaranteeCredential{
+			ValidatorIndex: validatoridx,
+			Signature:      signature,
 		},
 	}
 	return g

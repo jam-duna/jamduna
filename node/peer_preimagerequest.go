@@ -44,6 +44,7 @@ func (p *Peer) SendPreimageRequest(preimageHash common.Hash) (preimage []byte, e
 
 // TODO: William to review
 func (n *Node) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
+	defer stream.Close()
 	// --> Hash
 	preimageHash := common.BytesToHash(msg)
 	preimage, ok, err := n.PreimageLookup(preimageHash)
@@ -51,7 +52,6 @@ func (n *Node) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
 		return err
 	}
 	if !ok {
-		stream.Close()
 		return nil
 	}
 	err = sendQuicBytes(stream, preimage)
@@ -59,6 +59,5 @@ func (n *Node) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
 		return err
 	}
 	// <-- FIN
-	stream.Close()
 	return nil
 }

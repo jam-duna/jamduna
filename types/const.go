@@ -39,7 +39,7 @@ const (
 // time mode
 // three mode input => "JAM", "TimeStamp", "TimeSlot"
 const TimeUnitMode = "JAM"
-
+const CoreLazyMode bool = true
 const (
 	// Medium: configure these
 	W_S = 6 // W_S = 6: The size of an exported segment in erasure-coded pieces.

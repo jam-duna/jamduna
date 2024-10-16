@@ -67,6 +67,15 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (v *Validator) Print() {
+	// print JSON
+	jsonBytes, err := json.Marshal(v)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(string(jsonBytes))
+}
+
 // UnmarshalJSON custom unmarshal method to handle hex strings for byte arrays
 func (v *Validator) UnmarshalJSON(data []byte) error {
 	type Alias struct {

@@ -13,9 +13,6 @@ import (
 	//"github.com/quic-go/quic-go"
 )
 
-const (
-	jamsnpEnabled = false
-)
 
 func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
 	// TODO: Sourabh
@@ -47,18 +44,24 @@ func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.Wo
 
 }
 
-func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []common.Hash, bundle []byte) (workPackageHash common.Hash, signature types.Ed25519Signature, err error) {
-	// TODO: Shawn -- initiate PVM Refine operation
-	/*		var work types.GuaranteeReport
-			work, _, _, err = n.ProcessWorkPackage(workPackage)
-			if err != nil {
-					fmt.Printf(" -- [N%d] WorkPackage Error: %v\n", n.id, err)
-			}
-			_ = n.processGuaranteeReport(work)
-			n.coreBroadcast(work)
-	*/
-
-	return workPackageHash, signature, nil
+func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []common.Hash, bundle []byte) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
+	// TODO: use real bundle
+	// stub code
+	if len(bundle) == 0 {
+		panic(123)
+	}
+	workPackage := n.decodeWorkPackage(bundle)
+	workReport, _, _, err := n.executeWorkPackage(workPackage)
+	if err != nil {
+		return common.Hash{}, types.Ed25519Signature{}, err
+	}
+	workReportHash = workReport.Hash()
+	work := n.MakeGuaranteeReport(workReport)
+	fmt.Printf("[N%d]Work Report Hash %v\n", n.GetCurrValidatorIndex(), workReportHash)
+	work.Sign(n.GetEd25519Secret())
+	signature = work.GuaranteeCredential.Signature
+	// stub code
+	return workReportHash, signature, nil
 }
 
 func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
@@ -68,24 +71,6 @@ func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
 		return []byte{}, false, nil
 	}
 	return preimage, true, nil
-}
-
-func (n *Node) GetSegmentShard(erasureRoot common.Hash, shardIndex uint16, SegmentIndex []uint16) (segmentshards []byte, justifications [][]byte, ok bool, err error) {
-	// TODO: Stanley+Michael to review
-	segmentshards = []byte{}
-	justifications = [][]byte{}
-	//err = n.processDistributeECChunk(chunk)
-	//r, err := n.processECChunkQuery(query)
-
-	return segmentshards, justifications, false, nil
-}
-
-func (n *Node) GetShard(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, justification []byte, ok bool, err error) {
-	// TODO: Stanley+Michael
-	bundleShard = []byte{}
-	justification = []byte{}
-	//err = n.processAvailabilityJustification(aj)
-	return bundleShard, justification, false, nil
 }
 
 func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValue, ok bool, err error) {
@@ -172,6 +157,9 @@ func (n *Node) runMain() {
 				fmt.Printf("processGuaranteeReport: %v\n", err)
 			}
 		case workReport := <-n.workReportsCh:
+			if n.workReports == nil {
+				n.workReports = make(map[common.Hash]types.WorkReport)
+			}
 			n.workReports[workReport.Hash()] = workReport
 			// TODO: Shawn to review
 		case guarantee := <-n.guaranteesCh:

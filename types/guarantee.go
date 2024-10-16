@@ -2,14 +2,14 @@ package types
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 
 	"bytes"
 	"encoding/binary"
-	"github.com/colorfulnotion/jam/common"
 	"io"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 /*
@@ -95,6 +95,12 @@ func (g *GuaranteeReport) Sign(secret []byte) error {
 
 func (g *GuaranteeReport) UnsignedBytes() []byte {
 	signtext := g.Report.Hash().Bytes()
+	// print json
+	jsonBytes, err := json.Marshal(g.Report)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(string(jsonBytes))
 	return signtext
 }
 
@@ -200,6 +206,12 @@ func (g *GuaranteeCredential) UnmarshalJSON(data []byte) error {
 
 func (g *Guarantee) UnsignedBytes() []byte {
 	signtext := g.Report.Hash().Bytes()
+	// print json
+	jsonBytes, err := json.Marshal(g.Report)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(string(jsonBytes))
 	return signtext
 }
 
@@ -211,14 +223,17 @@ func (g *Guarantee) UnsignedBytesWithSalt() []byte {
 
 func (g *Guarantee) Verify(CurrV []Validator) error {
 	signtext := g.UnsignedBytesWithSalt()
-
+	emptyHash := common.Hash{}
+	if g.Report.AvailabilitySpec.WorkPackageHash == emptyHash {
+		return fmt.Errorf("WorkPackageHash is empty")
+	}
+	//verify the signature
 	for _, i := range g.Signatures {
 		//verify the signature
 		// [i.ValidatorIndex].Ed25519
-		fmt.Println("Process Verify EG")
-		fmt.Printf("Validator Index: %v, Validator Key: %v\n", i.ValidatorIndex, CurrV[i.ValidatorIndex].Ed25519)
-		if !Ed25519Verify(Ed25519Key(CurrV[i.ValidatorIndex].Ed25519), signtext, i.Signature) {
-			return errors.New(fmt.Sprintf("invalid signature in guarantee by validator %v", i.ValidatorIndex))
+		validatorKey := CurrV[i.ValidatorIndex].GetEd25519Key()
+		if !Ed25519Verify(validatorKey, signtext, i.Signature) {
+			return fmt.Errorf("invalid signature in guarantee by validator %v", i.ValidatorIndex)
 		}
 
 	}

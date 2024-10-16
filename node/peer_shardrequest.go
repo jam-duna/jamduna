@@ -73,7 +73,7 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendShardRequest(erasureRoot common.Hash, shardIndex uint16, isAudit bool) (err error) {
+func (p *Peer) SendShardRequest(erasureRoot common.Hash, shardIndex uint16, isAudit bool) (bundleShard []byte, segmentShards []byte, justification []byte, err error) {
 	code := uint8(CE137_ShardRequest)
 	if isAudit {
 		code = CE138_ShardRequest
@@ -86,16 +86,37 @@ func (p *Peer) SendShardRequest(erasureRoot common.Hash, shardIndex uint16, isAu
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return
 	}
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
-		return err
+		return
 	}
-	return nil
+	// <-- Bundle Shard
+	bundleShard, err = receiveQuicBytes(stream)
+	if err != nil {
+		return
+	}
+	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+	segmentShards, err = receiveQuicBytes(stream)
+	if err != nil {
+		return
+	}
+	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+	segmentShards, err = receiveQuicBytes(stream)
+	if err != nil {
+		return
+	}
+	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+	justification, err = receiveQuicBytes(stream)
+	if err != nil {
+		return
+	}
+	return
 }
 
 func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err error) {
+	defer 	stream.Close()
 	var req JAMSNPShardRequest
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)
@@ -103,12 +124,12 @@ func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	bundleShard, justification, ok, err := n.GetShard(req.ErasureRoot, req.ShardIndex)
+	bundleShard, segmentShards, justification, ok, err := n.store.GetShard(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		// TODO
+			return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
 	err = sendQuicBytes(stream, bundleShard)
@@ -117,6 +138,10 @@ func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+	err = sendQuicBytes(stream, segmentShards)
+	if err != nil {
+		return err
+	}
 
 	// <-- Justification
 	err = sendQuicBytes(stream, justification)
@@ -124,7 +149,6 @@ func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err
 		return err
 	}
 	// <-- FIN
-	stream.Close()
 
 	return nil
 }
@@ -152,7 +176,7 @@ Auditor -> Assurer
 <-- FIN
 */
 // basically the same as the above without segments
-func (p *Peer) SendAuditShardRequest(erasureRoot common.Hash, shardIndex uint16) (err error) {
+func (p *Peer) SendAuditShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, segmentShards []byte, justification []byte, err error) {
 	return p.SendShardRequest(erasureRoot, shardIndex, true)
 }
 

@@ -64,11 +64,35 @@ func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error
 
 // Bytes returns the bytes of the Assurance
 func (a *WorkReport) Bytes() []byte {
-	enc, err := Encode(a)
+	// enc, err := Encode(a)
+	// if err != nil {
+	// 	return nil
+	// }
+	// return enc
+
+	// use json for now, codec probably has a bug
+	enc, err := json.Marshal(a)
 	if err != nil {
 		return nil
 	}
 	return enc
+}
+
+func (a *WorkReport) FromBytes(data []byte) error {
+	var temp WorkReport
+	err := json.Unmarshal(data, &temp)
+	if err != nil {
+		return err
+	}
+	*a = temp
+	emptyHash := common.Hash{}
+	if a.AvailabilitySpec.WorkPackageHash == emptyHash {
+		return errors.New("WorkPackageHash is empty")
+	}
+
+	a.Results[0].Result = Result{}
+
+	return nil
 }
 
 func (a *WorkReport) Hash() common.Hash {

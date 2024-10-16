@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
-	"io"
 )
 
 /*
@@ -84,6 +85,7 @@ type JAMSNPWorkPackageShare struct {
 	CoreIndex    uint16                     `json:"coreIndex"`
 	Len          uint8                      `json:"len"`
 	SegmentRoots []JAMSNPSegmentRootMapping `json:"segmentRoots"`
+	Bundle       []byte                     `json:"bundle"`
 }
 
 func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
@@ -109,6 +111,11 @@ func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
 		if _, err := buf.Write(rootMappingBytes); err != nil {
 			return nil, err
 		}
+	}
+
+	// Serialize Bundle (dynamically sized)
+	if _, err := buf.Write(share.Bundle); err != nil {
+		return nil, err
 	}
 
 	return buf.Bytes(), nil
@@ -141,6 +148,12 @@ func (share *JAMSNPWorkPackageShare) FromBytes(data []byte) error {
 			return err
 		}
 		share.SegmentRoots[i] = rootMapping
+	}
+
+	// Deserialize Bundle (dynamically sized)
+	share.Bundle = make([]byte, buf.Len())
+	if _, err := buf.Read(share.Bundle); err != nil {
+		return err
 	}
 
 	return nil
@@ -185,7 +198,7 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash, segmentRoot []common.Hash, bundle []byte) (err error) {
+func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash, segmentRoot []common.Hash, bundle []byte) (work_report_hash common.Hash, signature types.Ed25519Signature, err error) {
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
 	for i, h := range workpackagehash {
 		segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
@@ -196,25 +209,22 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash,
 	req := JAMSNPWorkPackageShare{
 		CoreIndex:    coreIndex,
 		SegmentRoots: segmentroots,
+		Bundle:       bundle,
 	}
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return work_report_hash, signature, err
 	}
 	stream, err := p.openStream(CE134_WorkPackageShare)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
-		return err
-	}
-	err = sendQuicBytes(stream, bundle)
-	if err != nil {
-		return err
+		return work_report_hash, signature, err
 	}
 	// <-- Work Report Hash ++ Ed25519 Signature
 	respBytes, err := receiveQuicBytes(stream)
 	if err != nil {
-		return err
+		return work_report_hash, signature, err
 	}
 
 	var newReq JAMSNPWorkPackageShareResponse
@@ -224,10 +234,15 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash,
 		return
 	}
 
-	return nil
+	work_report_hash = newReq.WorkReportHash
+	signature = newReq.Signature
+
+	return work_report_hash, signature, nil
 }
 
 func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
+	defer 	stream.Close()
+
 	// --> Core Index ++ Segment Root Mappings
 	var newReq JAMSNPWorkPackageShare
 	err = newReq.FromBytes(msg)
@@ -236,7 +251,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		return
 	}
 	// --> Work Package Bundle
-	bundle, err := receiveQuicBytes(stream)
+	bundle := newReq.Bundle
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
 		return
@@ -250,12 +265,13 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		segmentroots = append(segmentroots, sr.SegmentRoot)
 	}
 
-	workPackageHash, signature, err := n.RefineBundle(newReq.CoreIndex, workpackagehashes, segmentroots, bundle)
+	workReportHash, signature, err := n.RefineBundle(newReq.CoreIndex, workpackagehashes, segmentroots, bundle)
 	if err != nil {
 		return
 	}
+	fmt.Printf("%s refined Workpackage %d bytes JSON: %s\n", n.String(), len(bundle), bundle)
 	req := JAMSNPWorkPackageShareResponse{
-		WorkReportHash: workPackageHash,
+		WorkReportHash: workReportHash,
 		Signature:      signature,
 	}
 
@@ -268,7 +284,6 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		return err
 	}
 	// <-- FIN
-	stream.Close()
 
 	return nil
 }

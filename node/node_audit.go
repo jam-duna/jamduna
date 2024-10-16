@@ -1,39 +1,79 @@
 package node
 
 import (
-	"encoding/json"
+	//"encoding/json"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
+//	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) Tiny_Audit() error {
-	// For tiny setup , we just audit without going thorugh tranche
-	W := n.statedb.GetWorkReportNeedAuditTiny()
-	jsonData, err := json.MarshalIndent(W, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal work reports: %v", err)
+func (n *Node) auditWorkReport(workReport types.WorkReport) error {
+	erasureRoot := workReport.AvailabilitySpec.ErasureRoot
+	// reconstruct the work package
+	segmentIndex := make([]uint16, 0) // TODO: Michael
+	bundleShards := make([][]byte, types.TotalValidators)
+	segmentShards := make([][]byte, types.TotalValidators)
+	segmentShardsI := make([][]byte, types.TotalValidators)
+	for i := uint16(0); i < types.TotalValidators; i++ {
+		if i == n.id {
+			bundleShard, segmentShard, _, ok, err := n.store.GetShard(erasureRoot, i)
+			if err != nil {
+			} else if ok {
+					bundleShards[i] = bundleShard
+					segmentShards[i] = segmentShard
+			}
+			segmentShardI, _, ok, err := n.store.GetSegmentShard(erasureRoot, i, segmentIndex)
+			if err != nil {
+
+			} else if ok {
+				segmentShardsI[i] = segmentShardI
+			}
+		} else {
+			// TODO: optimize with gofunc ala makeRequests
+			bundleShard, segmentShard, _, err := n.peersInfo[i].SendShardRequest(erasureRoot, i, true)
+			if err != nil {
+
+			} else {
+				bundleShards[i] = bundleShard
+				segmentShards[i] = segmentShard
+			}
+			segmentShardI, _, err := n.peersInfo[i].SendSegmentShardRequest(erasureRoot, i, segmentIndex, true)
+			if err != nil {
+
+			} else {
+				segmentShardsI[i] = segmentShardI
+			}
+		}
 	}
-	fmt.Println(string(jsonData))
-	W_selected := statedb.WorkReportToSelection(W)
-	for _, w := range W_selected {
-		// announce w
-		announcement, err := n.MakeAnnouncement(0, w)
-		n.broadcast(announcement)
-		// judge w
-		fmt.Printf("Node[%d] is judging work report %v\n", n.id, w)
-		judgement, err := n.MakeJudgement(w, 0)
+	bundle, segments, err := n.reconstructBundleAndSegments(bundleShards, segmentShards, segmentShardsI)
+	if err != nil {
+		return err
+	}
+	wp := types.NewWorkPackage(bundle, segments)
+	guaranteeReport, _, _, err := n.ProcessWorkPackage(*wp)
+	if err != nil {
+			return err
+	}
+	// TODO: Shawn to fill in - judge guaranteeReport compared to workReport
+		judgement, err := n.MakeJudgement(workReport, guaranteeReport, 0)
 		if err != nil {
-			//handle error
-			continue
+			return err
 		}
 		n.broadcast(judgement)
-	}
-
 	return nil
+}
 
+
+func (n *Node) Judge( wr types.WorkReport, gr types.GuaranteeReport) bool {
+	//TODO: work package=>work report here
+	return false
+}
+
+func (n *Node) reconstructBundleAndSegments(bundleShards, segmentShards, segmentShardsI [][]byte) (bundle []byte, segments []byte, err error) {
+	// TODO: Michael
+	return bundle, segments, fmt.Errorf("Not implemented")
 }
 
 // we should have a function to check if the block is audited
@@ -59,11 +99,6 @@ func (n *Node) MakeDisputes() error {
 	return nil
 }
 
-func (n *Node) Judge(types.WorkReportSelection) bool {
-	//TODO: work package=>work report here
-	return false
-}
-
 // every time we make an announcement, we should broadcast it to the network
 // announcement before judgement
 func (n *Node) MakeAnnouncement(tranche uint32, w types.WorkReportSelection) (types.Announcement, error) {
@@ -78,14 +113,14 @@ func (n *Node) MakeAnnouncement(tranche uint32, w types.WorkReportSelection) (ty
 	return announcement, nil
 }
 
-func (n *Node) MakeJudgement(w types.WorkReportSelection, tranche uint32) (types.Judgement, error) {
+func (n *Node) MakeJudgement(w types.WorkReport, gr types.GuaranteeReport, tranche uint32) (types.Judgement, error) {
 	var judgement types.Judgement
 	ed25519Key := n.GetEd25519Key()
 	ed25519Priv := n.GetEd25519Secret()
 
 	index := n.statedb.GetSafrole().GetCurrValidatorIndex(ed25519Key)
 
-	if n.Judge(w) {
+	if n.Judge(w, gr) {
 		judgement, err := n.statedb.MakeJudgement(tranche, w, true, ed25519Priv, uint16(index))
 		if err != nil {
 			return types.Judgement{}, err
@@ -101,7 +136,6 @@ func (n *Node) MakeJudgement(w types.WorkReportSelection, tranche uint32) (types
 		return judgement, nil
 	}
 	return judgement, nil
-
 }
 
 // put it in the announcement bucket
