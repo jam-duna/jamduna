@@ -30,11 +30,6 @@ type Guarantee struct {
 	Signatures []GuaranteeCredential `json:"signatures"`
 }
 
-type GuaranteeReport struct {
-	Report              WorkReport          `json:"report"`
-	GuaranteeCredential GuaranteeCredential `json:"guarantee_credential"`
-}
-
 /*
 Section 11.4 - Work Report Guarantees. See Equations 136 - 143. The guarantees extrinsic, ${\bf E}_G$, a *series* of guarantees, at most one for each core, each of which is a tuple of:
 * core index
@@ -82,54 +77,6 @@ func (cred *GuaranteeCredential) FromBytes(data []byte) error {
 	}
 
 	return nil
-}
-func (g *GuaranteeReport) Sign(secret []byte) (err error) {
-	copy(g.GuaranteeCredential.Signature[:], g.Report.Sign(secret))
-	return nil
-}
-
-func (g *GuaranteeReport) Verify(key Ed25519Key) bool {
-	// func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error
-	err := g.Report.ValidateSignature(key[:], g.GuaranteeCredential.Signature[:])
-	if err != nil {
-		return false
-	}
-	return true
-}
-
-func (g *GuaranteeReport) DeepCopy() (GuaranteeReport, error) {
-	var copiedGuarantee GuaranteeReport
-
-	// Serialize the original Guarantee to JSON
-	data, err := json.Marshal(g)
-	if err != nil {
-		return copiedGuarantee, err
-	}
-
-	// Deserialize the JSON back into a new Guarantee instance
-	err = json.Unmarshal(data, &copiedGuarantee)
-	if err != nil {
-		return copiedGuarantee, err
-	}
-
-	return copiedGuarantee, nil
-}
-
-func (g *GuaranteeReport) Bytes() []byte {
-	enc, err := Encode(g)
-	if err != nil {
-		return nil
-	}
-	return enc
-}
-
-func BytesToGuaranteeReport(data []byte) (GuaranteeReport, error) {
-	var copiedGuarantee GuaranteeReport
-	err := json.Unmarshal(data, &copiedGuarantee)
-	if err != nil {
-		return copiedGuarantee, err
-	}
-	return copiedGuarantee, nil
 }
 
 func (g Guarantee) DeepCopy() (Guarantee, error) {
@@ -224,15 +171,6 @@ func (g GuaranteeCredential) MarshalJSON() ([]byte, error) {
 
 // helper function to print the Guarantee
 func (g *Guarantee) String() string {
-	enc, err := json.MarshalIndent(g, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
-}
-
-func (g *GuaranteeReport) String() string {
 	enc, err := json.MarshalIndent(g, "", "  ")
 	if err != nil {
 		// Handle the error according to your needs.

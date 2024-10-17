@@ -491,14 +491,6 @@ func TestWorkGuarantee(t *testing.T) {
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
-		time.Sleep(10 * time.Second)
-		E_G, err := nodes[4].FormGuarantee(workPackage.Hash())
-		if err != nil {
-			t.Fatalf("Failed to FormGuarantee: %v", err)
-		} else {
-			nodes[4].broadcast(E_G)
-		}
-
 		// we trace core 0 only
 		for {
 			time.Sleep(1 * time.Second)
@@ -511,12 +503,6 @@ func TestWorkGuarantee(t *testing.T) {
 		for {
 			if nodes[4].statedb.JamState.AvailabilityAssignments[0] == nil {
 				break
-			}
-			for _, n := range nodes {
-				EA, err := n.GenerateDummyAssurance()
-				if err == nil {
-					n.broadcast(EA)
-				}
 			}
 			time.Sleep(types.SecondsPerSlot * time.Second)
 		}

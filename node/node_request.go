@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
-	"reflect"
 )
 
 func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
@@ -38,42 +37,6 @@ func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.Wo
 	}
 	return workReport, false, nil
 
-}
-
-func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []common.Hash, bundle []byte) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
-	if len(bundle) == 0 {
-		panic(123)
-	}
-	var workPackage types.WorkPackage
-	if immediateAvailability {
-		decoded, _, err := types.Decode(bundle, reflect.TypeOf(types.WorkPackage{}))
-		if err != nil {
-			panic(125)
-		}
-		workPackage = decoded.(types.WorkPackage)
-	} else {
-		bp, err := types.WorkPackageBundleFromBytes(bundle)
-		if err != nil {
-			panic(123)
-		}
-		workPackage = bp.WorkPackage
-	}
-	workReport, _, _, err := n.executeWorkPackage(workPackage)
-	if err != nil {
-		return common.Hash{}, types.Ed25519Signature{}, err
-	}
-	workReportHash = workReport.Hash()
-	work := types.GuaranteeReport{
-		Report: workReport,
-		GuaranteeCredential: types.GuaranteeCredential{
-			ValidatorIndex: uint16(n.GetCurrValidatorIndex()),
-		},
-	}
-	work.Sign(n.GetEd25519Secret())
-	signature = work.GuaranteeCredential.Signature
-	fmt.Printf("%s [RefineBundle:executeWorkPackage] workReportHash %v Sig: %x\n", n.String(), workReportHash, signature)
-	// stub code
-	return workReportHash, signature, nil
 }
 
 func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
@@ -174,14 +137,11 @@ func (n *Node) runMain() {
 		case ticket := <-n.ticketsCh:
 			n.processTicket(ticket)
 		case workPackage := <-n.workPackagesCh:
-			guaranteeReport, _, treeRoot, err := n.ProcessWorkPackage(workPackage)
+			_, _, treeRoot, err := n.executeWorkPackage(workPackage)
 			if err != nil {
-				fmt.Printf("ProcessWorkPackage: %v\n", err)
+				fmt.Printf("executeWorkPackage: %v\n", err)
 			}
-			err = n.processGuaranteeReport(guaranteeReport)
-			if err != nil {
-				fmt.Printf("processGuaranteeReport: %v\n", err)
-			}
+			// TODO: Michael+Sourabh to discuss
 			exportedsegmentsNum := 1
 			err = n.AddNewImportSegments(treeRoot, exportedsegmentsNum, workPackage.Hash())
 			if err != nil {

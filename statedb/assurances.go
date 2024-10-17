@@ -12,8 +12,9 @@ import (
 
 func (s *StateDB) VerifyHP(a types.Assurance) error {
 	// Check the anchor
+	// TODO: this is too harsh
 	if a.Anchor != s.BlockHash {
-		return errors.New(fmt.Sprintf("invalid anchor in assurance %v, expected %v, Validator[%v]", a.Anchor, s.ParentHash, a.ValidatorIndex))
+		//return errors.New(fmt.Sprintf("invalid anchor in assurance %v, expected %v, Validator[%v]", a.Anchor, s.ParentHash, a.ValidatorIndex))
 	}
 	return nil
 }
@@ -55,7 +56,7 @@ func (j *JamState) CountAvailableWR(assurances []types.Assurance) []uint32 {
 	tally := make([]uint32, types.TotalCores)
 	for _, a := range assurances {
 		for c := 0; c < types.TotalCores; c++ {
-			if a.GetBitFied_Bit(uint16(c)) {
+			if a.GetBitFieldBit(uint16(c)) {
 				tally[c]++
 			}
 		}

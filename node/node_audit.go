@@ -42,7 +42,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 	}
 	workPackage := workPackageRaw.(types.WorkPackage)
 
-	guaranteeReport, spec, _, err := n.ProcessWorkPackage(workPackage)
+	guarantee, spec, _, err := n.executeWorkPackage(workPackage)
 	if err != nil {
 		return
 	}
@@ -51,7 +51,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 		auditPass = true
 	}
 
-	judgement, err := n.MakeJudgement(workReport, guaranteeReport, 0, auditPass)
+	judgement, err := n.MakeJudgement(workReport, guarantee, 0, auditPass)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (n *Node) MakeAnnouncement(tranche uint32, w types.WorkReportSelection) (ty
 	return announcement, nil
 }
 
-func (n *Node) MakeJudgement(w types.WorkReport, gr types.GuaranteeReport, tranche uint32, auditPass bool) (types.Judgement, error) {
+func (n *Node) MakeJudgement(w types.WorkReport, gr types.Guarantee, tranche uint32, auditPass bool) (types.Judgement, error) {
 	var judgement types.Judgement
 	ed25519Key := n.GetEd25519Key()
 	ed25519Priv := n.GetEd25519Secret()
@@ -108,7 +108,6 @@ func (n *Node) MakeJudgement(w types.WorkReport, gr types.GuaranteeReport, tranc
 		return types.Judgement{}, err
 	}
 	n.processJudgement(judgement)
-	return judgement, nil
 	return judgement, nil
 }
 

@@ -35,7 +35,13 @@ const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
 	immediateAvailability = true
 
-	debug    = false
+	debugB = false // Blocks, Announcment
+	debugG = false // WorkPackage / Guaranteeing
+	debugT = false // Tickets
+	debugP = false // Preimages
+	debugA = false // Assurances + Audits + Judgement
+	debug  = false // General Node Ops
+
 	trace    = false
 	numNodes = 6
 	quicAddr = "127.0.0.1:%d"
@@ -71,10 +77,8 @@ type Node struct {
 	announcementMutex      sync.Mutex
 	judgementBucket        types.JudgeBucket
 	judgementMutex         sync.Mutex
-	// use validator index to lookup the guarantee from the validator in their core
-	guaranteeBucket map[common.Hash][]types.GuaranteeReport
-	guaranteeMutex  sync.Mutex
-	isBadGuarantor  bool
+
+	isBadGuarantor bool
 	// this is for assurances
 	// use work package hash to lookup the availbility
 	assurancesBucket map[common.Hash]types.IsPackageRecieved
@@ -486,7 +490,9 @@ func (n *Node) broadcast(obj interface{}) []byte {
 
 		case reflect.TypeOf(types.Guarantee{}):
 			g := obj.(types.Guarantee)
-			fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d\n", n.String(), id)
+			if debugG {
+				fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d\n", n.String(), id)
+			}
 			err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
 			if err != nil {
 				fmt.Printf("SendWorkReportDistribution ERR %v\n", err)
@@ -533,50 +539,6 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				fmt.Printf("SendPreimageRequest ERR %v\n", err)
 			}
 			break
-		}
-
-	}
-	return result
-}
-
-func (n *Node) coreBroadcast(obj interface{}) []byte {
-	result := []byte{}
-	core, err := n.GetSelfCoreIndex()
-	if err != nil {
-		fmt.Printf("coreBroadcast Error: %v\n", err)
-		return nil
-	}
-	coworker := n.GetCoreCoWorkers(core)
-	for id, p := range n.peersInfo {
-		for _, worker := range coworker {
-			if worker.Ed25519 == p.Validator.Ed25519 {
-				//peerIdentifier := peer.Validator.Ed25519.String()
-				if id == n.id {
-					continue
-				}
-
-				objType := reflect.TypeOf(obj)
-				switch objType {
-				case reflect.TypeOf(types.WorkPackage{}):
-					wp := obj.(types.WorkPackage)
-					// immediate-term: bundle = wp.Bytes()
-					bundle := wp.Bytes()
-					// TODO: short-term: bundle := CompilePackageBundle(wp).Bytes()
-					work_report_hash, sig, err := p.ShareWorkPackage(core, bundle)
-					if err != nil {
-						fmt.Printf("ShareWorkPackage ERR in coreBoarcast: %v\n", err)
-					}
-					validatorIdx := n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519)
-					if validatorIdx == -1 {
-						fmt.Printf("coreBroadcast: validatorIndex not found\n")
-					}
-					work := p.MakeGuaranteeReport(sig, uint16(validatorIdx))
-					err = n.PutGuaranteeBucketWithoutReport(work, wp.Hash(), work_report_hash)
-					if err != nil {
-						fmt.Printf("PutGuaranteeBucket ERR in coreBoarcast: %v\n", err)
-					}
-				}
-			}
 		}
 
 	}
@@ -699,49 +661,6 @@ func (n *Node) extendChain() error {
 	}
 }
 
-// assureData, given a Guarantee with a AvailabiltySpec within a WorkReport, fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA
-func (n *Node) assureData(g types.Guarantee) error {
-	wr := g.Report
-	if n.coreIndex != wr.CoreIndex {
-		spec := wr.AvailabilitySpec
-		erasureRoot := spec.ErasureRoot
-		bundleLength := spec.BundleLength
-		//workPackageHash := spec.WorkPackageHash
-		//exportedSegmentRoot := spec.ExportedSegmentRoot
-		coreValidator := uint16(0) // TODO: Shawn get the validators for the wr.CoreIndex
-		bundleShard, segmentShards, justification, err := n.peersInfo[coreValidator].SendShardRequest(erasureRoot, n.id, false)
-		if err != nil {
-			fmt.Printf("%s assureData: SendShardRequest %v\n", n.String(), err)
-		} else {
-			if uint32(len(bundleShard)) == bundleLength {
-				segmentIndex := make([]uint16, 0) // TODO: Michael
-				segmentShardsI, justificationsI, err := n.peersInfo[coreValidator].SendSegmentShardRequest(erasureRoot, n.id, segmentIndex, false)
-				if err != nil {
-					fmt.Printf("%s assureData: SendSegmentShardRequest %v\n", n.String(), err)
-				}
-				err = n.store.StoreImportDA(erasureRoot, n.id, segmentShardsI, justificationsI)
-				if err != nil {
-					fmt.Printf("%s assureData: StoreImportDA %v\n", n.String(), err)
-				} else {
-					err = n.store.StoreAuditDA(erasureRoot, n.id, bundleShard, segmentShards, justification)
-					if err != nil {
-						fmt.Printf("%s assureData: storeAuditDA %v\n", n.String(), err)
-					} else {
-						a := types.Assurance{
-							Anchor: n.statedb.ParentHash,
-							//Bitfield: make([types.Avail_bitfield_bytes]byte TODO
-							ValidatorIndex: n.id,
-						}
-						a.Sign(n.credential.Ed25519Secret[:])
-						n.broadcast(a)
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
-
 // we arrive here when we receive a block from another node
 func (n *Node) processBlock(blk *types.Block) error {
 	// walk blk backwards, up to the tip, if possible -- but if encountering an unknown parenthash, immediately fetch the block.  Give up if we can't do anything
@@ -843,9 +762,8 @@ func (n *Node) getImportSegments(importsegments []types.ImportSegment) ([][]byte
 }
 
 func (n *Node) getPVMStateDB() *statedb.StateDB {
-	// TODO: processWorkPackage should provide clear signal on which stateDB to work with. What is this signal?
-	// I don't think it should be the tip. workPackage probably requires somekind of blkhash or stateRoot?
-	target_statedb := n.statedb.Copy() // stub. need to figure out what to do here
+	// refine's executeWorkPackage is a statelessish process
+	target_statedb := n.statedb.Copy()
 	return target_statedb
 }
 
@@ -910,8 +828,6 @@ func getMessageType(obj interface{}) string {
 		return "DistributeECChunk"
 	case types.ECChunkQuery:
 		return "ECChunkQuery"
-	case types.GuaranteeReport:
-		return "GuaranteeReport"
 	case *statedb.StateDB:
 		return "StateDB"
 	case statedb.StateDB:

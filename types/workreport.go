@@ -48,9 +48,15 @@ func (a *WorkReport) computeWorkReportBytes() []byte {
 	return append([]byte(X_G), common.ComputeHash(a.Bytes())...)
 }
 
-func (a *WorkReport) Sign(Ed25519Secret []byte) []byte {
-	workReportBytes := a.computeWorkReportBytes()
-	return ed25519.Sign(Ed25519Secret, workReportBytes)
+func ComputeWorkReportSignBytesWithHash(a common.Hash) []byte {
+	return append([]byte(X_G), a.Bytes()...)
+}
+
+func (a *WorkReport) Sign(Ed25519Secret []byte, validatorIndex uint16) (gc GuaranteeCredential) {
+	gc.ValidatorIndex = validatorIndex
+	sig := ed25519.Sign(Ed25519Secret, a.computeWorkReportBytes())
+	copy(gc.Signature[:], sig[:])
+	return gc
 }
 
 func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error {

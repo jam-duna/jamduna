@@ -20,8 +20,10 @@ func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage typ
 	package_bundle_byte := package_bundle.Bytes()
 	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(package_bundle_byte)
 
-	fmt.Printf("packageHash=%v, encodedPackage(Len=%v):%x\n", packageHash, len(package_bundle_byte), package_bundle_byte)
-	fmt.Printf("raw=%v\n", package_bundle.String())
+	if debug {
+		fmt.Printf("packageHash=%v, encodedPackage(Len=%v):%x\n", packageHash, len(package_bundle_byte), package_bundle_byte)
+		fmt.Printf("raw=%v\n", package_bundle.String())
+	}
 
 	//recovered_b := n.decodeWorkPackage(package_bundle)
 
@@ -667,7 +669,7 @@ func (n *Node) FetchExportedSegments(erasureRoot common.Hash) (exportedSegments 
 // }
 
 // work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error
-func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.WorkReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
+func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
 
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
@@ -685,7 +687,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		if len(code) == 0 {
 			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
 			fmt.Println(err)
-			return types.WorkReport{}, spec, common.Hash{}, err
+			return
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
 			fmt.Printf("Code and CodeHash Mismatch\n")
@@ -694,8 +696,8 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		// set malicious mode here
 		vm.IsMalicious = false
-		imports, err := n.getImportSegments(workItem.ImportedSegments)
-		if err != nil {
+		imports, err0 := n.getImportSegments(workItem.ImportedSegments)
+		if err0 != nil {
 			// return spec, common.Hash{}, err
 			imports = make([][]byte, 0)
 		}
@@ -713,8 +715,8 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		vm.SetImports(imports)
 		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
 		err = vm.Execute(types.EntryPointRefine)
-		if err != nil {
-			return types.WorkReport{}, spec, common.Hash{}, err
+		if err0 != nil {
+			return
 		}
 		output, _ := vm.GetArgumentOutputs()
 		// The workitem is an ordered collection of segments
@@ -768,9 +770,6 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		results = append(results, result)
 	}
 
-	//treeRoot, err = n.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs, &wg)
-	// TODO: need to figure out where distribution is happening
-
 	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
 	spec = n.NewAvailabilitySpecifier(packageHash, workPackage, segments)
 	prerequisite_hash := common.HexToHash("0x")
@@ -785,10 +784,10 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 
 	core, err := n.GetSelfCoreIndex()
 	if err != nil {
-		return types.WorkReport{}, spec, common.Hash{}, err
+		return
 	}
 
-	work = types.WorkReport{
+	workReport := types.WorkReport{
 		AvailabilitySpec: *spec,
 		AuthorizerHash:   common.HexToHash("0x"), // SKIP
 		CoreIndex:        core,
@@ -810,5 +809,12 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 			fmt.Printf("[executeWorkPackage:StoreAuditDA] Err %v\n", err)
 		}
 	}
+
+	gc := workReport.Sign(n.GetEd25519Secret(), uint16(n.GetCurrValidatorIndex()))
+	guarantee = types.Guarantee{
+		Report:     workReport,
+		Signatures: []types.GuaranteeCredential{gc},
+	}
+
 	return
 }

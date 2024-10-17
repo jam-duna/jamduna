@@ -86,7 +86,9 @@ func (s *StateDB) AddGuaranteeToQueue(g types.Guarantee) {
 	s.guaranteeMutex.Lock()
 	defer s.guaranteeMutex.Unlock()
 	s.queuedGuarantees[g.Hash()] = g
-	fmt.Printf("[N%v] [statedb:AddGuaranteeToQueue] -- Adding guarantee workPackageHash: %v\n", s.Id, g.Report.GetWorkPackageHash())
+	if debug {
+		fmt.Printf("[N%v] [statedb:AddGuaranteeToQueue] -- Adding guarantee workPackageHash: %v\n", s.Id, g.Report.GetWorkPackageHash())
+	}
 }
 
 func (s *StateDB) AddAssuranceToQueue(a types.Assurance) {

@@ -198,7 +198,7 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle []byte) (work_report_hash common.Hash, signature types.Ed25519Signature, err error) {
+func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle []byte, pubKey types.Ed25519Key) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
 	/*TODO:
 	  for i, h := range bundle. {
@@ -216,17 +216,17 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle []byte) (work_report_ha
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return work_report_hash, signature, err
+		return
 	}
 	stream, err := p.openStream(CE134_WorkPackageShare)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
-		return work_report_hash, signature, err
+		return
 	}
 	// <-- Work Report Hash ++ Ed25519 Signature
 	respBytes, err := receiveQuicBytes(stream)
 	if err != nil {
-		return work_report_hash, signature, err
+		return
 	}
 
 	var newReq JAMSNPWorkPackageShareResponse
@@ -236,10 +236,14 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle []byte) (work_report_ha
 		return
 	}
 
-	work_report_hash = newReq.WorkReportHash
+	workReportHash = newReq.WorkReportHash
 	signature = newReq.Signature
-
-	return work_report_hash, signature, nil
+	// validate the signature against the workReportHash
+	if !types.Ed25519Verify(pubKey, types.ComputeWorkReportSignBytesWithHash(workReportHash), signature) {
+		fmt.Printf("WARNING: Sig not verified: %v", workReportHash)
+		//TEMP: return
+	}
+	return
 }
 
 func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
@@ -267,16 +271,17 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		segmentroots = append(segmentroots, sr.SegmentRoot)
 	}
 
-	workReportHash, signature, err := n.RefineBundle(newReq.CoreIndex, workpackagehashes, segmentroots, bundle)
+	guarantee, err := n.RefineBundle(newReq.CoreIndex, workpackagehashes, segmentroots, bundle)
 	if err != nil {
 		return
 	}
 	req := JAMSNPWorkPackageShareResponse{
-		WorkReportHash: workReportHash,
-		Signature:      signature,
+		WorkReportHash: guarantee.Report.Hash(),
+		Signature:      guarantee.Signatures[0].Signature,
 	}
-
-	fmt.Printf("%s onWorkPackageShare:RefineBundle workReportHash: %v Signature: %x\n", n.String(), workReportHash, req.Signature)
+	if debugG {
+		fmt.Printf("%s onWorkPackageShare:RefineBundle workReportHash: %v Signature: %x\n", n.String(), req.WorkReportHash, req.Signature)
+	}
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return err

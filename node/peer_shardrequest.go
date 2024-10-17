@@ -92,25 +92,28 @@ func (p *Peer) SendShardRequest(erasureRoot common.Hash, shardIndex uint16, isAu
 	if err != nil {
 		return
 	}
+	if debugA {
+		fmt.Printf("%s SendShardRequest(erasureRoot=%v, shardIndex=%d)\n", p.String(), req.ErasureRoot, req.ShardIndex)
+	}
 	// <-- Bundle Shard
 	bundleShard, err = receiveQuicBytes(stream)
 	if err != nil {
 		return
 	}
-	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	segmentShards, err = receiveQuicBytes(stream)
-	if err != nil {
-		return
+	if debugA {
+		fmt.Printf("%s SendShardRequest received %d bytes for bundleShard\n", p.String(), len(bundleShard))
 	}
-	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	segmentShards, err = receiveQuicBytes(stream)
-	if err != nil {
-		return
-	}
-	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	justification, err = receiveQuicBytes(stream)
-	if err != nil {
-		return
+	if false {
+		// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+		segmentShards, err = receiveQuicBytes(stream)
+		if err != nil {
+			return
+		}
+		// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+		justification, err = receiveQuicBytes(stream)
+		if err != nil {
+			return
+		}
 	}
 	return
 }
@@ -124,8 +127,12 @@ func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err
 		fmt.Println("Error deserializing:", err)
 		return
 	}
+	if debugA {
+		fmt.Printf("%s onShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
+	}
 	bundleShard, segmentShards, justification, ok, err := n.store.GetShard(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
+		fmt.Printf("onShardRequest ERR0 %v\n", err)
 		return err
 	}
 	if !ok {
@@ -134,22 +141,26 @@ func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err
 	// <-- Bundle Shard
 	err = sendQuicBytes(stream, bundleShard)
 	if err != nil {
+		fmt.Printf("onShardRequest ERR1 %v\n", err)
 		return err
 	}
-
-	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	err = sendQuicBytes(stream, segmentShards)
-	if err != nil {
-		return err
+	if debugA {
+		fmt.Printf("%s onShardRequest sent %d bytes\n", n.String(), len(bundleShard))
 	}
+	if false {
+		// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+		err = sendQuicBytes(stream, segmentShards)
+		if err != nil {
+			return err
+		}
 
-	// <-- Justification
-	err = sendQuicBytes(stream, justification)
-	if err != nil {
-		return err
+		// <-- Justification
+		err = sendQuicBytes(stream, justification)
+		if err != nil {
+			return err
+		}
 	}
 	// <-- FIN
-
 	return nil
 }
 

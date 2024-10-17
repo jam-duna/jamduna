@@ -51,7 +51,7 @@ func (A *Assurance) BitFieldToBytes() []byte {
 	return A.Bitfield[:]
 }
 
-func (A *Assurance) SetBitFied_Bit(index uint16, value bool) {
+func (A *Assurance) SetBitFieldBit(index uint16, value bool) {
 	if value {
 		A.Bitfield[0] |= 1 << index
 	} else {
@@ -59,7 +59,7 @@ func (A *Assurance) SetBitFied_Bit(index uint16, value bool) {
 	}
 }
 
-func (A *Assurance) GetBitFied_Bit(index uint16) bool {
+func (A *Assurance) GetBitFieldBit(index uint16) bool {
 	return (A.Bitfield[0] & (1 << index)) != 0
 }
 

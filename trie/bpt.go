@@ -778,7 +778,7 @@ func (t *MerkleTree) Insert(key, value []byte) {
 		encodedLeaf := leaf(key, value)
 		t.levelDBSetLeaf(encodedLeaf, value, key)
 		if t.Root == nil {
-			fmt.Printf("encodedLeaf=%x, computedHash=%x\n", encodedLeaf, computeHash(encodedLeaf))
+			//fmt.Printf("encodedLeaf=%x, computedHash=%x\n", encodedLeaf, computeHash(encodedLeaf))
 			t.Root = &Node{
 				Hash: computeHash(encodedLeaf),
 				Key:  key,
