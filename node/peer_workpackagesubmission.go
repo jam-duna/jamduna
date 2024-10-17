@@ -59,7 +59,6 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	}
 
 	// Deserialize WorkPackage (dynamically sized)
-	fmt.Printf("Setup buf: %d \n", buf.Len())
 	workPackageBytes := make([]byte, buf.Len()) // Remaining bytes are for the WorkPackage
 	if _, err := buf.Read(workPackageBytes); err != nil {
 		return fmt.Errorf("failed to read WorkPackage bytes: %w", err)
@@ -105,7 +104,7 @@ func (p *Peer) SendWorkPackageSubmission(coreIndex uint16, pkg types.WorkPackage
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s submitted Workpackage %d bytes JSON: %s\n", p.String(), len(reqBytes), pkg.String())
+	fmt.Printf("%s submitted Workpackage %d bytes\n", p.String(), len(reqBytes))
 	/*
 		// TODO: write extrinsics
 		err = sendQuicBytes(stream, extrinsics)
@@ -132,7 +131,7 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		return fmt.Errorf("Core index mismatch: %d != %d", newReq.CoreIndex, selfCoreIndex)
 	}
 
-	fmt.Printf("[N%d]On Work Package Submission: %+v\n", n.id, newReq.CoreIndex)
+	fmt.Printf("%s received Work Package Submission [CORE %+v]\n", n.String(), newReq.CoreIndex)
 	// TODO: read extrinsics
 
 	n.workPackagesCh <- newReq.WorkPackage

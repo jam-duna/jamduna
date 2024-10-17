@@ -64,35 +64,11 @@ func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error
 
 // Bytes returns the bytes of the Assurance
 func (a *WorkReport) Bytes() []byte {
-	// enc, err := Encode(a)
-	// if err != nil {
-	// 	return nil
-	// }
-	// return enc
-
-	// use json for now, codec probably has a bug
-	enc, err := json.Marshal(a)
+	enc, err := Encode(a)
 	if err != nil {
 		return nil
 	}
 	return enc
-}
-
-func (a *WorkReport) FromBytes(data []byte) error {
-	var temp WorkReport
-	err := json.Unmarshal(data, &temp)
-	if err != nil {
-		return err
-	}
-	*a = temp
-	emptyHash := common.Hash{}
-	if a.AvailabilitySpec.WorkPackageHash == emptyHash {
-		return errors.New("WorkPackageHash is empty")
-	}
-
-	a.Results[0].Result = Result{}
-
-	return nil
 }
 
 func (a *WorkReport) Hash() common.Hash {
@@ -144,54 +120,11 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 }
 
 // helper function to print the WorkReport
-func (a *WorkReport) Print() {
-	// type WorkReport struct {
-	// 	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
-	// 	RefineContext    RefineContext         `json:"context"`
-	// 	CoreIndex        uint16                `json:"core_index"`
-	// 	AuthorizerHash   common.Hash           `json:"authorizer_hash"`
-	// 	AuthOutput       []byte                `json:"auth_output"`
-	// 	Results          []WorkResult          `json:"results"`
-	// }
-
-	fmt.Println("WorkReport:")
-	fmt.Println("= AvailabilitySpec:")
-	fmt.Println("== WorkPackageHash:", a.AvailabilitySpec.WorkPackageHash)
-	fmt.Println("== BundleLength:", a.AvailabilitySpec.BundleLength)
-	fmt.Println("== ErasureRoot:", a.AvailabilitySpec.ErasureRoot)
-	fmt.Println("== ExportedSegmentRoot:", a.AvailabilitySpec.ExportedSegmentRoot)
-	fmt.Println("= RefineContext:")
-	// Anchor           common.Hash   `json:"anchor"`
-	// StateRoot        common.Hash   `json:"state_root"`
-	// BeefyRoot        common.Hash   `json:"beefy_root"`
-	// LookupAnchor     common.Hash   `json:"lookup_anchor"`
-	// LookupAnchorSlot uint32        `json:"lookup_anchor_slot"`
-	// Prerequisite     *Prerequisite `json:"prerequisite,omitempty"`
-	fmt.Println("== Anchor:", a.RefineContext.Anchor)
-	fmt.Println("== StateRoot:", a.RefineContext.StateRoot)
-	fmt.Println("== BeefyRoot:", a.RefineContext.BeefyRoot)
-	fmt.Println("== LookupAnchor:", a.RefineContext.LookupAnchor)
-	fmt.Println("== LookupAnchorSlot:", a.RefineContext.LookupAnchorSlot)
-	fmt.Println("== Prerequisite:", a.RefineContext.Prerequisite)
-	fmt.Println("= CoreIndex:", a.CoreIndex)
-	fmt.Println("= AuthorizerHash:", a.AuthorizerHash)
-	fmt.Println("= AuthOutput:", a.AuthOutput)
-	fmt.Println("= Results:")
-	// Service     uint32      `json:"service"`
-	// CodeHash    common.Hash `json:"code_hash"`
-	// PayloadHash common.Hash `json:"payload_hash"`
-	// GasRatio    uint64      `json:"gas_ratio"`
-	// Result      Result      `json:"result"`
-	for i, result := range a.Results {
-		fmt.Println("== Result", i)
-		fmt.Println("=== Service:", result.Service)
-		fmt.Println("=== CodeHash:", result.CodeHash)
-		fmt.Println("=== PayloadHash:", result.PayloadHash)
-		fmt.Println("=== GasRatio:", result.GasRatio)
-		fmt.Println("=== Result:")
-		// Ok  []byte `json:"ok,omitempty"`
-		// Err uint8  `json:"err,omitempty"`
-		fmt.Println("==== Ok:", result.Result.Ok)
-		fmt.Println("==== Err:", result.Result.Err)
+func (a *WorkReport) String() string {
+	enc, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
+	return string(enc)
 }

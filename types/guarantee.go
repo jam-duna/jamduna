@@ -83,37 +83,18 @@ func (cred *GuaranteeCredential) FromBytes(data []byte) error {
 
 	return nil
 }
-func (g *GuaranteeReport) Sign(secret []byte) error {
-	signtext := g.UnsignedBytesWithSalt()
-	if len(secret) != 64 {
-		return fmt.Errorf("secret length is not 64")
-	}
-	sig := Ed25519SignByBytes(secret, signtext)
-	g.GuaranteeCredential.Signature = sig
+func (g *GuaranteeReport) Sign(secret []byte) (err error) {
+	copy(g.GuaranteeCredential.Signature[:], g.Report.Sign(secret))
 	return nil
 }
 
-func (g *GuaranteeReport) UnsignedBytes() []byte {
-	signtext := g.Report.Hash().Bytes()
-	// print json
-	jsonBytes, err := json.Marshal(g.Report)
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(string(jsonBytes))
-	return signtext
-}
-
-func (g *GuaranteeReport) UnsignedBytesWithSalt() []byte {
-	signtext := g.UnsignedBytes()
-	signtext = append([]byte(X_G), signtext...)
-	return signtext
-}
-
 func (g *GuaranteeReport) Verify(key Ed25519Key) bool {
-	signtext := g.UnsignedBytesWithSalt()
-	boo := Ed25519Verify(key, signtext, g.GuaranteeCredential.Signature)
-	return boo
+	// func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error
+	err := g.Report.ValidateSignature(key[:], g.GuaranteeCredential.Signature[:])
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 func (g *GuaranteeReport) DeepCopy() (GuaranteeReport, error) {
@@ -204,38 +185,27 @@ func (g *GuaranteeCredential) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (g *Guarantee) UnsignedBytes() []byte {
-	signtext := g.Report.Hash().Bytes()
-	// print json
-	jsonBytes, err := json.Marshal(g.Report)
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(string(jsonBytes))
-	return signtext
-}
-
-func (g *Guarantee) UnsignedBytesWithSalt() []byte {
-	signtext := g.UnsignedBytes()
-	signtext = append([]byte(X_G), signtext...)
-	return signtext
-}
-
 func (g *Guarantee) Verify(CurrV []Validator) error {
-	signtext := g.UnsignedBytesWithSalt()
+	signtext := g.Report.computeWorkReportBytes()
 	emptyHash := common.Hash{}
 	if g.Report.AvailabilitySpec.WorkPackageHash == emptyHash {
 		return fmt.Errorf("WorkPackageHash is empty")
 	}
+	// fmt.Printf("[guarantee:Verify] Verifying Guarantee %s\nSigntext:[%s]\n", g.String(), common.Bytes2Hex(signtext))
 	//verify the signature
+	numErrors := 0
 	for _, i := range g.Signatures {
 		//verify the signature
 		// [i.ValidatorIndex].Ed25519
 		validatorKey := CurrV[i.ValidatorIndex].GetEd25519Key()
 		if !Ed25519Verify(validatorKey, signtext, i.Signature) {
-			return fmt.Errorf("invalid signature in guarantee by validator %v", i.ValidatorIndex)
+			numErrors++
+			fmt.Printf("[guarantee:Verify] ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
 		}
-
+	}
+	if numErrors > 0 {
+		return fmt.Errorf("Invalid sigs")
+		panic(12344)
 	}
 	return nil
 }
@@ -253,14 +223,20 @@ func (g GuaranteeCredential) MarshalJSON() ([]byte, error) {
 }
 
 // helper function to print the Guarantee
-func (g *Guarantee) Print() {
-	fmt.Println("Guarantee:")
-	fmt.Println("= Report:")
-	g.Report.Print()
-	fmt.Println("= Slot:", g.Slot)
-	fmt.Println("= Signatures:")
-	for _, signature := range g.Signatures {
-		fmt.Printf("== ValidatorIndex: %d\n", signature.ValidatorIndex)
-		fmt.Printf("== Signature: %x\n", signature.Signature)
+func (g *Guarantee) String() string {
+	enc, err := json.MarshalIndent(g, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
+	return string(enc)
+}
+
+func (g *GuaranteeReport) String() string {
+	enc, err := json.MarshalIndent(g, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
 }

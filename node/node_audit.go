@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-//	"github.com/colorfulnotion/jam/statedb"
+	//	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -21,8 +21,8 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) error {
 			bundleShard, segmentShard, _, ok, err := n.store.GetShard(erasureRoot, i)
 			if err != nil {
 			} else if ok {
-					bundleShards[i] = bundleShard
-					segmentShards[i] = segmentShard
+				bundleShards[i] = bundleShard
+				segmentShards[i] = segmentShard
 			}
 			segmentShardI, _, ok, err := n.store.GetSegmentShard(erasureRoot, i, segmentIndex)
 			if err != nil {
@@ -54,19 +54,18 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) error {
 	wp := types.NewWorkPackage(bundle, segments)
 	guaranteeReport, _, _, err := n.ProcessWorkPackage(*wp)
 	if err != nil {
-			return err
+		return err
 	}
 	// TODO: Shawn to fill in - judge guaranteeReport compared to workReport
-		judgement, err := n.MakeJudgement(workReport, guaranteeReport, 0)
-		if err != nil {
-			return err
-		}
-		n.broadcast(judgement)
+	judgement, err := n.MakeJudgement(workReport, guaranteeReport, 0)
+	if err != nil {
+		return err
+	}
+	n.broadcast(judgement)
 	return nil
 }
 
-
-func (n *Node) Judge( wr types.WorkReport, gr types.GuaranteeReport) bool {
+func (n *Node) Judge(wr types.WorkReport, gr types.GuaranteeReport) bool {
 	//TODO: work package=>work report here
 	return false
 }

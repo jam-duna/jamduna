@@ -28,7 +28,7 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 	//139 The signing validators must be assigned to the core in G or G*
 	err = s.AreValidatorsAssignedToCore(guarantee)
 	if err != nil {
-		fmt.Printf("error(slot problem): %v\n", err)
+		fmt.Printf("Verify_Guarantee error(slot problem): %v\n", err)
 	}
 	//TODO: 139 C_v
 
@@ -280,7 +280,7 @@ func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
 	for _, guarantee := range guarantees {
 		if j.AvailabilityAssignments[guarantee.Report.CoreIndex] == nil {
 			j.SetRhoByWorkReport(guarantee.Report.CoreIndex, guarantee.Report, j.SafroleState.GetTimeSlot())
-			fmt.Printf("ProcessGuarantees Success: %v\n", guarantee.Report.CoreIndex)
+			fmt.Printf("ProcessGuarantees Success on Core %v\n", guarantee.Report.CoreIndex)
 		}
 	}
 

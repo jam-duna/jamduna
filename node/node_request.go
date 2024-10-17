@@ -13,7 +13,6 @@ import (
 	//"github.com/quic-go/quic-go"
 )
 
-
 func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
 	// TODO: Sourabh
 	fmt.Println("OnHandshake")
@@ -56,10 +55,15 @@ func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []
 		return common.Hash{}, types.Ed25519Signature{}, err
 	}
 	workReportHash = workReport.Hash()
-	work := n.MakeGuaranteeReport(workReport)
-	fmt.Printf("[N%d]Work Report Hash %v\n", n.GetCurrValidatorIndex(), workReportHash)
+	work := types.GuaranteeReport{
+		Report: workReport,
+		GuaranteeCredential: types.GuaranteeCredential{
+			ValidatorIndex: uint16(n.GetCurrValidatorIndex()),
+		},
+	}
 	work.Sign(n.GetEd25519Secret())
 	signature = work.GuaranteeCredential.Signature
+	fmt.Printf("%s [RefineBundle:executeWorkPackage] workReportHash %v Sig: %x\n", n.String(), workReportHash, signature)
 	// stub code
 	return workReportHash, signature, nil
 }

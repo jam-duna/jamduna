@@ -21,11 +21,11 @@ type StateDBStorage struct {
 }
 
 const (
-	ImportDASegmentShardPrefix   = "is_"
-	ImportDAJustificationPrefix  = "ij_"
-	AuditDABundlePrefix          = "ab_"
-	AuditDASegmentShardPrefix    = "as_"
-	AuditDAJustificationPrefix   = "aj_"
+	ImportDASegmentShardPrefix  = "is_"
+	ImportDAJustificationPrefix = "ij_"
+	AuditDABundlePrefix         = "ab_"
+	AuditDASegmentShardPrefix   = "as_"
+	AuditDAJustificationPrefix  = "aj_"
 )
 
 // NewStateDBStorage initializes a new LevelDB store
@@ -98,7 +98,7 @@ func generateKey(prefix string, erasureRoot common.Hash, shardIndex uint16) []by
 	var buffer bytes.Buffer
 	buffer.WriteString(prefix)
 	buffer.Write(erasureRoot.Bytes())
-	buffer.WriteByte(byte(shardIndex >> 8))  // high byte
+	buffer.WriteByte(byte(shardIndex >> 8))   // high byte
 	buffer.WriteByte(byte(shardIndex & 0xff)) // low byte
 	return buffer.Bytes()
 }

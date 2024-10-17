@@ -134,7 +134,7 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 }
 
 func (n *Node) onStateRequest(stream quic.Stream, msg []byte) (err error) {
-	defer 	stream.Close()
+	defer stream.Close()
 
 	var newReq JAMSNPStateRequest
 	// Deserialize byte array back into the struct

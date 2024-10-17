@@ -32,7 +32,9 @@ import (
 )
 
 const (
-	debug    = false
+	debug         = false
+	canAssureData = false // Michael => Stanley
+
 	trace    = false
 	numNodes = 6
 	quicAddr = "127.0.0.1:%d"
@@ -481,7 +483,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 
 		case reflect.TypeOf(types.Guarantee{}):
 			g := obj.(types.Guarantee)
-
+			fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d\n", n.String(), id)
 			err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
 			if err != nil {
 				fmt.Printf("SendWorkReportDistribution ERR %v\n", err)
@@ -549,32 +551,27 @@ func (n *Node) coreBroadcast(obj interface{}) []byte {
 					continue
 				}
 
-					objType := reflect.TypeOf(obj)
-					switch objType {
-					case reflect.TypeOf(types.WorkPackage{}):
-						fmt.Printf("coreBroadcast: WorkPackage\n")
-						wp := obj.(types.WorkPackage)
-						workpackagehashes, segmentRoots, bundle := wp.Split()
-						//stub
-						bundle = n.encodeWorkPackage(wp)
-						work_report_hash, sig, err := p.ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
-						if err != nil {
-							fmt.Printf("ShareWorkPackage ERR in coreBoarcast: %v\n", err)
-						}
-						validatorIdx := n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519)
-						if validatorIdx == -1 {
-							fmt.Printf("coreBroadcast: vidx not found\n")
-						}
-						work := p.MakeGuaranteeReport(sig, uint16(validatorIdx))
-						err = n.PutGuaranteeBucketWithoutReport(work, wp.Hash(), work_report_hash)
-						if err != nil {
-							fmt.Printf("PutGuaranteeBucket ERR in coreBoarcast: %v\n", err)
-						}
+				objType := reflect.TypeOf(obj)
+				switch objType {
+				case reflect.TypeOf(types.WorkPackage{}):
+					wp := obj.(types.WorkPackage)
+					workpackagehashes, segmentRoots, bundle := wp.Split()
+					//stub
+					bundle = n.encodeWorkPackage(wp)
+					work_report_hash, sig, err := p.ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
+					if err != nil {
+						fmt.Printf("ShareWorkPackage ERR in coreBoarcast: %v\n", err)
 					}
-
-				//fmt.Printf("PeerID=%v, peerIdentifier=%v\n", peer.PeerID, peerIdentifier)
-				//resp, err := n.makeRequest(peerIdentifier, obj, types.QuicOverallTimeout)
-
+					validatorIdx := n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519)
+					if validatorIdx == -1 {
+						fmt.Printf("coreBroadcast: validatorIndex not found\n")
+					}
+					work := p.MakeGuaranteeReport(sig, uint16(validatorIdx))
+					err = n.PutGuaranteeBucketWithoutReport(work, wp.Hash(), work_report_hash)
+					if err != nil {
+						fmt.Printf("PutGuaranteeBucket ERR in coreBoarcast: %v\n", err)
+					}
+				}
 			}
 		}
 
@@ -605,6 +602,8 @@ func (n *Node) processPreimages(preimageLookup types.Preimages) error {
 // Guarantees are sent by a validator working on a core receiving a work package and executing a refine operation
 func (n *Node) processGuarantee(guarantee types.Guarantee) error {
 	// Store the guarantee in the tip's queued guarantee
+	//fmt.Printf("%s [node:processGuarantee]\n", n.String()) // , guarantee.String()
+
 	s := n.getState()
 	s.ProcessIncomingGuarantee(guarantee)
 	return nil // Success
@@ -676,9 +675,11 @@ func (n *Node) extendChain() error {
 					fmt.Printf("[N%d] extendChain addstatedb TIP Now: s:%v<-%v\n", n.id, newStateDB.ParentHash, newStateDB.BlockHash)
 				}
 
-				if len(b.Extrinsic.Guarantees) > 0 {
-					for _, g := range b.Extrinsic.Guarantees {
+				if canAssureData {
+					if len(b.Extrinsic.Guarantees) > 0 {
+						for _, g := range b.Extrinsic.Guarantees {
 							n.assureData(g)
+						}
 					}
 				}
 
@@ -708,23 +709,23 @@ func (n *Node) assureData(g types.Guarantee) error {
 		coreValidator := uint16(0) // TODO: Shawn get the validators for the wr.CoreIndex
 		bundleShard, segmentShards, justification, err := n.peersInfo[coreValidator].SendShardRequest(erasureRoot, n.id, false)
 		if err != nil {
-				fmt.Printf("%s assureData: SendShardRequest %v\n", n.String(), err)
+			fmt.Printf("%s assureData: SendShardRequest %v\n", n.String(), err)
 		} else {
 			if uint32(len(bundleShard)) == bundleLength {
 				segmentIndex := make([]uint16, 0) // TODO: Michael
 				segmentShardsI, justificationsI, err := n.peersInfo[coreValidator].SendSegmentShardRequest(erasureRoot, n.id, segmentIndex, false)
 				if err != nil {
-					fmt.Printf("%s assureData: SendSegmentShardRequest %v\n", n.String(),  err)
+					fmt.Printf("%s assureData: SendSegmentShardRequest %v\n", n.String(), err)
 				}
 				err = n.store.StoreImportDA(erasureRoot, n.id, segmentShardsI, justificationsI)
 				if err != nil {
-					fmt.Printf("%s assureData: StoreImportDA %v\n", n.String(),  err)
+					fmt.Printf("%s assureData: StoreImportDA %v\n", n.String(), err)
 				} else {
 					err = n.store.StoreAuditDA(erasureRoot, n.id, bundleShard, segmentShards, justification)
 					if err != nil {
-						fmt.Printf("%s assureData: storeAuditDA %v\n", n.String(),  err)
+						fmt.Printf("%s assureData: storeAuditDA %v\n", n.String(), err)
 					} else {
-						a := types.Assurance {
+						a := types.Assurance{
 							Anchor: n.statedb.ParentHash,
 							//Bitfield: make([types.Avail_bitfield_bytes]byte TODO
 							ValidatorIndex: n.id,

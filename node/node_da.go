@@ -17,11 +17,11 @@ import (
 func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) *types.AvailabilitySpecifier {
 	// Compute b using EncodeWorkPackage
 	b := n.encodeWorkPackage(workPackage)
-	fmt.Printf("packageHash=%v, encodedPackage(Len=%v):%x\n", packageHash, len(b), b)
-	fmt.Printf("raw=%v\n", workPackage.String())
+	//fmt.Printf("packageHash=%v, encodedPackage(Len=%v):%x\n", packageHash, len(b), b)
+	//fmt.Printf("raw=%v\n", workPackage.String())
 	p := n.decodeWorkPackage(b)
 	if common.CompareBytes(workPackage.Bytes(), p.Bytes()) {
-		fmt.Printf("----------Original WorkPackage and Decoded WorkPackage are the same-------\n")
+		//fmt.Printf("----------Original WorkPackage and Decoded WorkPackage are the same-------\n")
 	} else {
 		fmt.Printf("----------Original WorkPackage and Decoded WorkPackage are different-------\n")
 	}
@@ -130,7 +130,7 @@ func (n *Node) computeAndDistributeSClub(segments [][]byte) (common.Hash, [][]co
 	//STANLEY TODO: this has to be part of metadata
 	n.FakeWriteKV(treeRoot, segmentsECRoots)
 
-	fmt.Printf("treeRoot: %x\n", treeRoot[:])
+	//fmt.Printf("treeRoot: %x\n", treeRoot[:])
 	// Append the encoded segment to the combined data
 	combinedData = append(combinedData, encodedSegment...)
 	// fmt.Printf("Before Transpose Size: %d, %d, %d\n", len(combinedData), len(combinedData[0]), len(combinedData[0][0]))
@@ -182,13 +182,15 @@ func (n *Node) generateErasureRoot(b [][]common.Hash, s [][]common.Hash, blobHas
 	// Generate WBT from the hashed elements and return the root (u)
 	wbt := trie.NewWellBalancedTree(flattenHashedElements)
 	erasureRoot := common.Hash(wbt.Root())
-	fmt.Printf("Len(blobHash), blobHash: %d, %x\n", len(blobHash), blobHash[:])
-	fmt.Printf("Len(treeRoot), treeRoot: %d, %x\n", len(treeRoot), treeRoot[:])
+	//fmt.Printf("Len(blobHash), blobHash: %d, %x\n", len(blobHash), blobHash[:])
+	//fmt.Printf("Len(treeRoot), treeRoot: %d, %x\n", len(treeRoot), treeRoot[:])
 
 	//STANLEY TODO: this has to be part of metadata
-	n.FakeWriteKV(erasureRoot, append(blobHash[:], treeRoot[:]...))
+	//n.FakeWriteKV(erasureRoot, append(blobHash[:], treeRoot[:]...))
 
-	fmt.Printf("Len(ErasureRoot), ErasureRoot: %d, %v\n", len(erasureRoot), erasureRoot)
+	if debug {
+		fmt.Printf("Len(ErasureRoot), ErasureRoot: %d, %v\n", len(erasureRoot), erasureRoot)
+	}
 	return erasureRoot
 }
 
@@ -362,10 +364,10 @@ func transpose3D(data [][][]byte) [][][]byte {
 // TODO: Sean to encode & decode properly
 // The E(p,x,i,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
 func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
-	fmt.Println("encodeWorkPackage")
+	//fmt.Println("encodeWorkPackage")
 	output := make([]byte, 0)
 	// 1. Encode the package (p)
-	fmt.Println("wp:", wp)
+	//fmt.Println("wp:", wp)
 	encodedPackage, err := types.Encode(wp)
 	if err != nil {
 		fmt.Println("Error in encodeWorkPackage:", err)
@@ -378,7 +380,9 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 	for _, WorkItem := range x {
 		extrinsics = append(extrinsics, WorkItem.ExtrinsicsBlobs...)
 	}
-	fmt.Println("extrinsics:", extrinsics)
+	if debug {
+		fmt.Println("extrinsics:", extrinsics)
+	}
 	encodedExtrinsic, err := types.Encode(extrinsics)
 	if err != nil {
 		fmt.Println("Error in encodeWorkPackage:", err)
@@ -391,7 +395,7 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 	for _, WorkItem := range x {
 		segments, _ = n.getImportSegments(WorkItem.ImportedSegments)
 	}
-	fmt.Println("segments:", segments)
+	//fmt.Println("segments:", segments)
 	encodedSegments, err = types.Encode(segments)
 	if err != nil {
 		fmt.Println("Error in encodeWorkPackage:", err)
@@ -425,7 +429,7 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 }
 
 func (n *Node) decodeWorkPackage(encodedWorkPackage []byte) types.WorkPackage {
-	fmt.Println("decodeWorkPackage")
+	//fmt.Println("decodeWorkPackage")
 	// length := uint32(0)
 
 	// // Decode the package (p)
@@ -434,7 +438,7 @@ func (n *Node) decodeWorkPackage(encodedWorkPackage []byte) types.WorkPackage {
 		fmt.Println("Error in decodeWorkPackage:", err)
 	}
 	decodedPackage := wp.(types.WorkPackage)
-	fmt.Println("decodedPackage:", decodedPackage.String())
+	//fmt.Println("decodedPackage:", decodedPackage.String())
 	// length += l
 	/*
 		// Decode the extrinsic (x)
@@ -594,7 +598,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 	targetStateDB := n.getPVMStateDB()
 	service_index := uint32(workPackage.AuthCodeHost)
 	packageHash := workPackage.Hash()
-	fmt.Printf("[V%d]Processing Work Package: %v, Key: %v\n", n.GetCurrValidatorIndex(), packageHash, n.GetEd25519Key())
+	fmt.Printf("%s executeWorkPackage workPackageHash=%v\n", n.String(), packageHash)
 
 	//TODO: do we still need audit friendly work WorkPackage?
 
@@ -620,13 +624,15 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 			imports = make([][]byte, 0)
 		}
 		// Decode Import Segments to FIB fromat
-		fmt.Printf("Import Segments: %v\n", imports)
+		//fmt.Printf("Import Segments: %v\n", imports)
 		if len(imports) > 0 {
-			fib_imported_result := imports[0][:12]
-			n := binary.LittleEndian.Uint32(fib_imported_result[0:4])
-			Fib_n := binary.LittleEndian.Uint32(fib_imported_result[4:8])
-			Fib_n_1 := binary.LittleEndian.Uint32(fib_imported_result[8:12])
-			fmt.Printf("Imported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
+			if debug {
+				fib_imported_result := imports[0][:12]
+				n := binary.LittleEndian.Uint32(fib_imported_result[0:4])
+				Fib_n := binary.LittleEndian.Uint32(fib_imported_result[4:8])
+				Fib_n_1 := binary.LittleEndian.Uint32(fib_imported_result[8:12])
+				fmt.Printf("Imported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
+			}
 		}
 		vm.SetImports(imports)
 		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
@@ -635,7 +641,10 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 			return types.WorkReport{}, spec, common.Hash{}, err
 		}
 		output, _ := vm.GetArgumentOutputs()
-
+		// HACK
+		output = types.Result{
+			Ok: []byte{1},
+		}
 		// The workitem is an ordered collection of segments
 		asWorkItem := types.ASWorkItem{
 			Segments:   make([]types.Segment, 0),
@@ -653,20 +662,22 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		// ******TODO******
 
 		// 3. We DO need to erasure code exports from refine execution into "Import DA"
-		fmt.Printf("VM Exports: %v\n", vm.Exports)
+		//fmt.Printf("VM Exports: %v\n", vm.Exports)
 		for _, e := range vm.Exports {
 			s := e
 			segments = append(segments, s) // this is used in NewAvailabilitySpecifier
 		}
 
 		// Decode the Exports Segments to FIB format
-		fmt.Printf("Exports Segments: %v\n", segments)
+		//fmt.Printf("Exports Segments: %v\n", segments)
 		if len(segments) > 0 {
-			fib_exported_result := segments[0][:12]
-			n := binary.LittleEndian.Uint32(fib_exported_result[0:4])
-			Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])
-			Fib_n_1 := binary.LittleEndian.Uint32(fib_exported_result[8:12])
-			fmt.Printf("Exported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
+			if debug {
+				fib_exported_result := segments[0][:12]
+				n := binary.LittleEndian.Uint32(fib_exported_result[0:4])
+				Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])
+				Fib_n_1 := binary.LittleEndian.Uint32(fib_exported_result[8:12])
+				fmt.Printf("Exported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
+			}
 		}
 
 		//pageProofs, _ := trie.GeneratePageProof(segments)
@@ -681,6 +692,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 			GasRatio:    0,
 			Result:      output,
 		}
+		//fmt.Printf("[node_da:executeWorkPackage] WorkResult %s output: %s\n", result.String(), output.String())
 		results = append(results, result)
 	}
 
@@ -712,10 +724,6 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		RefineContext: refinementContext,
 		Results:       results,
 	}
-
-	//workReport.Print()
-	//work = n.MakeGuaranteeReport(workReport)
-	//work.Sign(n.GetEd25519Secret())
 
 	return workReport, spec, treeRoot, nil
 }

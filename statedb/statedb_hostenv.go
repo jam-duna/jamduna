@@ -188,7 +188,9 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 	if err != nil {
 		return nil
 	} else {
-		fmt.Printf("ReadServicePreimageBlob (s,l)=(%v, %v) RESULT: blob=%x (len=%v), err=%v\n", service, blob_hash, blob, len(blob), err)
+		if debug {
+			fmt.Printf("ReadServicePreimageBlob (s,l)=(%v, %v) RESULT: blob=%x (len=%v), err=%v\n", service, blob_hash, blob, len(blob), err)
+		}
 		return blob
 	}
 }

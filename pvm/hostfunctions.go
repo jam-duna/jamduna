@@ -54,7 +54,9 @@ func falseBytes(data []byte) []byte {
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
-	fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
+	if debug {
+		fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
+	}
 	switch host_fn {
 	case GAS:
 		vm.hostGas()

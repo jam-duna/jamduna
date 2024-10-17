@@ -60,7 +60,9 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	// shift starting condition by one phase to make space for 0_0
 	//genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp - types.PeriodSecond)
 	genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp)
-	fmt.Printf("InitGenesisState genesisTimeslot=%v\n", genesisTimeslot)
+	if debug {
+		fmt.Printf("InitGenesisState genesisTimeslot=%v\n", genesisTimeslot)
+	}
 
 	j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
 	j.SafroleState.Timeslot = 0

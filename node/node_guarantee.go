@@ -19,7 +19,10 @@ import (
 // The guarantee bucket is a map of work package hash to a list of guarantee reports
 // will be used to form the extrinsic guarantee
 func (n *Node) PutGuaranteeBucket(workR types.GuaranteeReport) error {
-	fmt.Printf("[V%d]Put Guarantee Bucket (W_Hash:%v) From [V%d]\n", n.GetCurrValidatorIndex(), workR.Report.GetWorkPackageHash(), workR.GuaranteeCredential.ValidatorIndex)
+	workPackageHash := workR.Report.GetWorkPackageHash()
+	if debug {
+		fmt.Printf("%s PutGuaranteeBucket (workPackageHash:%v) WR From [V%d]\n", n.String(), workPackageHash, workR.GuaranteeCredential.ValidatorIndex)
+	}
 	n.guaranteeMutex.Lock()
 	defer n.guaranteeMutex.Unlock()
 	if n.guaranteeBucket == nil {
@@ -27,18 +30,18 @@ func (n *Node) PutGuaranteeBucket(workR types.GuaranteeReport) error {
 		n.guaranteeBucket = make(map[common.Hash][]types.GuaranteeReport)
 	}
 	// check if the guarantee is already in the bucket
-	for _, work := range n.guaranteeBucket[workR.Report.GetWorkPackageHash()] {
+	for _, work := range n.guaranteeBucket[workPackageHash] {
 		if work.GuaranteeCredential.ValidatorIndex == workR.GuaranteeCredential.ValidatorIndex {
 			return fmt.Errorf("Guarantee already in bucket")
 		}
 	}
 
-	n.guaranteeBucket[workR.Report.GetWorkPackageHash()] = append(n.guaranteeBucket[workR.Report.GetWorkPackageHash()], workR)
+	n.guaranteeBucket[workPackageHash] = append(n.guaranteeBucket[workPackageHash], workR)
 	return nil
 }
 
 func (n *Node) PutGuaranteeBucketWithoutReport(workR types.GuaranteeReport, workPackageHash common.Hash, work_report_hash common.Hash) error {
-	fmt.Printf("[V%d]Put Guarantee Bucket (W_Hash:%v) From [V%d]\n", n.GetCurrValidatorIndex(), workPackageHash, workR.GuaranteeCredential.ValidatorIndex)
+	fmt.Printf("%s PutGuaranteeBucketWithoutReport (workPackageHash:%v) From [N%d]\n", n.String(), workPackageHash, workR.GuaranteeCredential.ValidatorIndex)
 	n.guaranteeMutex.Lock()
 	defer n.guaranteeMutex.Unlock()
 	if n.guaranteeBucket == nil {
@@ -262,23 +265,20 @@ func (n *Node) ProcessWorkPackage(workPackage types.WorkPackage) (work types.Gua
 	if err != nil {
 		return types.GuaranteeReport{}, spec, common.Hash{}, err
 	}
-	fmt.Printf("[N%d]Work Report Hash: %v\n", n.GetCurrValidatorIndex(), workReport.Hash())
-	work = n.MakeGuaranteeReport(workReport)
+
+	work = types.GuaranteeReport{
+		Report: workReport,
+		GuaranteeCredential: types.GuaranteeCredential{
+			ValidatorIndex: uint16(n.GetCurrValidatorIndex()),
+		},
+	}
 	work.Sign(n.GetEd25519Secret())
+	fmt.Printf("%s [ProcessWorkPackage:executeWorkPackage] Resulting Work Report Hash: %v\n", n.String(), workReport.Hash())
 	return work, spec, treeRoot, nil
 }
 
 // helper function
 // work report -> guarantee report
-func (n *Node) MakeGuaranteeReport(report types.WorkReport) types.GuaranteeReport {
-	var g = types.GuaranteeReport{
-		Report: report,
-		GuaranteeCredential: types.GuaranteeCredential{
-			ValidatorIndex: uint16(n.GetCurrValidatorIndex()),
-		},
-	}
-	return g
-}
 
 func (p *Peer) MakeGuaranteeReport(signature types.Ed25519Signature, validatoridx uint16) types.GuaranteeReport {
 	var g = types.GuaranteeReport{

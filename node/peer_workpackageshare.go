@@ -241,7 +241,7 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash,
 }
 
 func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
-	defer 	stream.Close()
+	defer stream.Close()
 
 	// --> Core Index ++ Segment Root Mappings
 	var newReq JAMSNPWorkPackageShare
@@ -269,12 +269,12 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		return
 	}
-	fmt.Printf("%s refined Workpackage %d bytes JSON: %s\n", n.String(), len(bundle), bundle)
 	req := JAMSNPWorkPackageShareResponse{
 		WorkReportHash: workReportHash,
 		Signature:      signature,
 	}
 
+	fmt.Printf("%s onWorkPackageShare:RefineBundle workReportHash: %v Signature: %x\n", n.String(), workReportHash, req.Signature)
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return err

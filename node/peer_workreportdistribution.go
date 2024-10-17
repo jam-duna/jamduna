@@ -8,6 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
+	"reflect"
 )
 
 /*
@@ -57,6 +58,7 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		if _, err := buf.Write(credBytes); err != nil {
 			return nil, err
 		}
@@ -69,6 +71,7 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+
 func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 	// Deserialize Slot (4 bytes)
@@ -86,7 +89,7 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	wr.Credentials = make([]types.GuaranteeCredential, wr.Len)
 	for i := 0; i < int(wr.Len); i++ {
 		var cred types.GuaranteeCredential
-		credData := make([]byte, 66) // Assuming 66 bytes for GuaranteeCredential
+		credData := make([]byte, 66) // VERIFIED 66 bytes for GuaranteeCredential
 		if _, err := io.ReadFull(buf, credData); err != nil {
 			return fmt.Errorf("Error reading GuaranteeCredential: %v", err)
 		}
@@ -97,15 +100,16 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	}
 
 	// Deserialize WorkReport (assuming it knows its own length)
-	workReportData := make([]byte, buf.Len()) // Read remaining bytes for WorkReport
-	if _, err := io.ReadFull(buf, workReportData); err != nil {
+	workReportBytes := make([]byte, buf.Len()) // Read remaining bytes for WorkReport
+	if _, err := io.ReadFull(buf, workReportBytes); err != nil {
 		return fmt.Errorf("Error reading WorkReport: %v", err)
 	}
-	err = wr.WorkReport.FromBytes(workReportData)
-	if err != nil {
-		return fmt.Errorf("Error deserializing WorkReport: %v", err)
-	}
 
+	workReportRaw, _, err := types.Decode(workReportBytes, reflect.TypeOf(types.WorkReport{}))
+	if err != nil {
+		return fmt.Errorf("WorkReport Decode Error: %v", err)
+	}
+	wr.WorkReport = workReportRaw.(types.WorkReport)
 	return nil
 }
 
@@ -134,6 +138,7 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		fmt.Println("Error deserializing onWorkReportDistribution:", err)
+		panic(11112)
 		return
 	}
 
@@ -142,7 +147,6 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 		Report:     workReport,
 		Slot:       newReq.Slot,
 		Signatures: newReq.Credentials,
-		// ValidatorIndex: n.lookupPeer(stream)
 	}
 	n.guaranteesCh <- guarantee
 	n.workReportsCh <- workReport

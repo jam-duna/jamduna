@@ -116,7 +116,7 @@ func (p *Peer) SendShardRequest(erasureRoot common.Hash, shardIndex uint16, isAu
 }
 
 func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err error) {
-	defer 	stream.Close()
+	defer stream.Close()
 	var req JAMSNPShardRequest
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)
@@ -129,7 +129,7 @@ func (n *Node) onShardRequest(stream quic.Stream, msg []byte, isAudit bool) (err
 		return err
 	}
 	if !ok {
-			return fmt.Errorf("Not found")
+		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
 	err = sendQuicBytes(stream, bundleShard)

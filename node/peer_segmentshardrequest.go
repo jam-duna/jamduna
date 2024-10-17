@@ -164,7 +164,7 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 }
 
 func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustification bool) (err error) {
-	defer 	stream.Close()
+	defer stream.Close()
 	var req JAMSNPSegmentShardRequest
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)

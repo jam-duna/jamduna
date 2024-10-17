@@ -53,12 +53,12 @@ func (n *Node) FakeReadKV(key common.Hash) ([]byte, error) {
 }
 
 func (n *Node) FakeWriteKV(key common.Hash, val []byte) error {
-	fmt.Printf("FAKE local write detected! key=%v\n", key)
+	//fmt.Printf("FAKE local write detected! key=%v\n", key)
 	return n.WriteKV(key, val)
 }
 
 func (n *Node) FakeWriteRawKV(key string, val []byte) error {
-	fmt.Printf("FAKE local write detected! key=%v\n", key)
+	//fmt.Printf("FAKE local write detected! key=%v\n", key)
 	return n.WriteRawKV(key, val)
 }
 

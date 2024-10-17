@@ -133,17 +133,17 @@ func (b *Block) Str() string {
 	if len(b.Extrinsic.Tickets) > 0 {
 		out += fmt.Sprintf(" \033[34m |E_T|=%d\033[0m", len(b.Extrinsic.Tickets))
 	}
+	if len(b.Extrinsic.Guarantees) > 0 {
+		out += fmt.Sprintf(" \033[31m |E_G|=%d\033[0m", len(b.Extrinsic.Guarantees))
+	}
 	/*if len(b.Extrinsic.Disputes) > 0 {
-		out += fmt.Sprintf(" \032[32m |E_D|=%d\033[0m %d\n", len(b.Extrinsic.Disputes))
+		out += fmt.Sprintf(" \032[32m |E_D|=%d\033[0m %d", len(b.Extrinsic.Disputes))
 	} */
 	if len(b.Extrinsic.Preimages) > 0 {
-		out += fmt.Sprintf(" \032[34m |E_P|=%d\033[0m\n", len(b.Extrinsic.Preimages))
+		out += fmt.Sprintf(" \033[31m |E_P|=%d\033[0m", len(b.Extrinsic.Preimages))
 	}
 	if len(b.Extrinsic.Assurances) > 0 {
-		out += fmt.Sprintf(" \032[34m |E_P|=%d\033[0m\n", len(b.Extrinsic.Assurances))
-	}
-	if len(b.Extrinsic.Guarantees) > 0 {
-		out += fmt.Sprintf(" \032[34m |E_G|=%d\033[0m\n", len(b.Extrinsic.Guarantees))
+		out += fmt.Sprintf(" \033[31m |E_A|=%d\033[0m", len(b.Extrinsic.Assurances))
 	}
 	return out
 }

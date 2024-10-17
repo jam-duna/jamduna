@@ -2,9 +2,9 @@ package types
 
 import (
 	"encoding/json"
-	"reflect"
-
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
+	"reflect"
 )
 
 const (
@@ -207,4 +207,22 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 		GasRatio:    a.GasRatio,
 		Result:      result,
 	})
+}
+
+// helper function to print the WorkReport
+func (a *WorkResult) String() string {
+	enc, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
+}
+func (a *Result) String() string {
+	enc, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
 }

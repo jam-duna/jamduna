@@ -262,7 +262,7 @@ func (p *Peer) SendAuditAnnouncement(workReportHash common.Hash, headerHash comm
 
 // TODO: Shawn CHECK
 func (n *Node) onAuditAnnouncement(stream quic.Stream, msg []byte) (err error) {
-	defer 	stream.Close()
+	defer stream.Close()
 	var newReq JAMSNPAuditAnnouncement
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
