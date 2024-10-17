@@ -1,6 +1,7 @@
 package trie
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -25,42 +26,38 @@ func TestWBMerkleTree(t *testing.T) {
 	}
 }
 
-func TestWBTProof(t *testing.T) {
-	values := [][]byte{
-		[]byte("a"),
-		[]byte("b"),
-		[]byte("c"),
-		[]byte("d"),
-		[]byte("e"),
-		[]byte("f"),
-		[]byte("g"),
-		[]byte("h"),
-		[]byte("i"),
-		[]byte("j"),
-		[]byte("k"),
+func TestWBTTrace(t *testing.T) {
+	// Initialize the tree with some values
+	values := [][]byte{}
+	numShards := 200
+	for i := 0; i < numShards; i++ {
+		values = append(values, []byte(fmt.Sprintf("value%d", i)))
 	}
-	tree := NewWellBalancedTree(values)
 
-	fmt.Printf("Root: %s\n", common.Bytes2Hex(tree.Root()))
-	fmt.Printf("Total leaves: %d\n", len(tree.leaves))
+	wbt := NewWellBalancedTree(values)
 
-	// Print the tree structure
-	tree.PrintTree()
-
-	value := []byte("e")
-	path, found := tree.Trace(value)
-	if found {
-		fmt.Printf("Proof path for value '%s':\n", value)
-		for _, p := range path {
-			fmt.Println(common.Bytes2Hex(p[0]))
+	// Test the Trace method to get the proof path for a given index
+	for shardIndex := 0; shardIndex < numShards; shardIndex++ {
+		treeLen, leafHash, path, isFound, err := wbt.Trace(int(shardIndex))
+		if err != nil || !isFound {
+			t.Errorf("Trace error: %v", err)
 		}
-		if Verify(tree.Root(), value, path) {
-			fmt.Printf("Verification: %v\n", true)
-		} else {
-			t.Errorf("Proof for key [%s] is invalid.\n", value)
+		// wbt.PrintTree()
+		// fmt.Printf("Trace path:%s\n", path)
+		// fmt.Printf("Trace path for index %d:\n", shardIndex)
+		// for i, hash := range path {
+		// 	fmt.Printf("Step %d: %x\n", i, hash.Bytes())
+		// }
+
+		derivedRoot, verified, err := VerifyWBT(treeLen, shardIndex, wbt.RootHash(), leafHash, path)
+
+		if err != nil || verified == false {
+			t.Errorf("VerifyWBT error: %v", err)
 		}
-	} else {
-		fmt.Printf("Value '%s' not found in the tree.\n", value)
+		expectedHash := wbt.Root()
+		if !bytes.Equal(derivedRoot[:], expectedHash) {
+			t.Errorf("shardIndex %d, expected hash %x, got %s", shardIndex, expectedHash, derivedRoot)
+		}
 	}
 }
 
@@ -104,43 +101,6 @@ func TestWBTGet(t *testing.T) {
 					t.Errorf("Get [%d] should be Error: %v\n", i, err)
 				}
 			}
-		}
-	}
-}
-
-func TestTraceByIndex(t *testing.T) {
-	values := [][]byte{
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
-		[]byte("leaf4"),
-	}
-
-	// Build a well-balanced tree
-	wbt := NewWellBalancedTree(values)
-	wbt.PrintTree()
-
-	// Test tracing by index
-	for i := 0; i < len(values); i++ {
-		leafHash := computeNode(values[i])
-		path, found, err := wbt.TraceByIndex(i)
-
-		if err != nil {
-			t.Fatalf("Error tracing index %d: %v", i, err)
-		}
-		if !found {
-			t.Fatalf("Node not found for index %d", i)
-		}
-
-		if VerifyByIndex(wbt.Root(), leafHash, path) {
-			fmt.Printf("Verification succeeded for index %d\n", i)
-		} else {
-			t.Fatalf("Verification failed for index %d", i)
-		}
-
-		fmt.Printf("Proof path for index %d:\n", i)
-		for _, p := range path {
-			fmt.Printf("  Sibling Hash: %s, Direction: %s\n", common.Bytes2Hex(p[0]), p[1])
 		}
 	}
 }

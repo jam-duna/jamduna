@@ -98,12 +98,37 @@ func (n *Node) WriteRawKV(key string, val []byte) error {
 	return nil
 }
 
-func (n *Node) ReadRawKV(key string) ([]byte, error) {
+func (n *Node) WriteKVByte(key []byte, val []byte) error {
+	store, err := n.GetStorage()
+	if err != nil {
+		return err
+	}
+	err = store.WriteRawKV(key, val)
+	if err != nil {
+		return fmt.Errorf("ReadRawKV K=%v|V=%x Err:%v\n", key, val, err)
+	}
+	return nil
+}
+
+func (n *Node) ReadRawKV(key []byte) ([]byte, error) {
 	store, err := n.GetStorage()
 	if err != nil {
 		return []byte{}, err
 	}
 	val, err := store.ReadRawKV([]byte(key))
+	if err != nil {
+		return []byte{}, fmt.Errorf("ReadRawKV K=%v not found\n", key)
+	}
+	//fmt.Printf("Read key %s | val %x\n", key, val)
+	return val, nil
+}
+
+func (n *Node) ReadKVByte(key []byte) ([]byte, error) {
+	store, err := n.GetStorage()
+	if err != nil {
+		return []byte{}, err
+	}
+	val, err := store.ReadRawKV(key)
 	if err != nil {
 		return []byte{}, fmt.Errorf("ReadRawKV K=%v not found\n", key)
 	}
@@ -196,7 +221,7 @@ func (n *Node) processDistributeECChunk(chunk types.DistributeECChunk) error {
 	fmt.Printf("ECChunkReceive Store key %s | val %x\n", key, serialized)
 
 	// Save the chunk to the local storage
-	err = n.WriteRawKV(key, serialized)
+	err = n.WriteKVByte([]byte(key), serialized)
 	if err != nil {
 		return err
 	}
@@ -212,7 +237,7 @@ func (n *Node) processDistributeECChunk(chunk types.DistributeECChunk) error {
 func (n *Node) processECChunkQuery(ecChunkQuery types.ECChunkQuery) (types.ECChunkResponse, error) {
 	key := fmt.Sprintf("DA-%v", ecChunkQuery.SegmentRoot)
 	// fmt.Printf("[N%v] processECChunkQuery key=%s\n", n.id, key)
-	data, err := n.ReadRawKV(key)
+	data, err := n.ReadKVByte([]byte(key))
 	fmt.Printf("ECChunkQuery Fetch key %s | val %x\n", key, data)
 	if err != nil {
 		return types.ECChunkResponse{}, err

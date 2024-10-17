@@ -35,9 +35,10 @@ func compareBytes(a, b []byte) bool {
 
 // computeHash hashes the data using Blake2b-256
 func computeHash(data []byte) []byte {
-	h, _ := blake2b.New256(nil)
-	h.Write(data)
-	return h.Sum(nil)
+	// h, _ := blake2b.New256(nil)
+	// h.Write(data)
+	// return h.Sum(nil)
+	return common.ComputeHash(data)
 }
 
 // computeNode hashes the data with $node on WBT, CDT using Blake2b-256

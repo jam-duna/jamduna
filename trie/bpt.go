@@ -40,7 +40,8 @@ const (
 )
 
 const (
-	LevelDBNull = "null"
+	LevelDBNull  = "null"
+	LevelDBEmpty = ""
 )
 
 /*
@@ -156,9 +157,9 @@ func branch(left, right []byte) []byte {
 	if len(left) != 32 || len(right) != 32 {
 		panic("branch: input hashes must be 32 bytes")
 	}
-	head := left[0] & 0xfe                           // Set the LSB of the first byte of the left hash to 0
-	left255bits := append([]byte{head}, left[1:]...) // Left: last 255 bits of
-	concatenated := append(left255bits, right...)    // (l,r): 512 bits
+	head := left[0] & 0x7f // Set the LSB of the first byte of the left hash to 0
+	left255bits := append([]byte{head}, left[1:]...)   // Left: last 255 bits of
+	concatenated := append(left255bits, right...)      // (l,r): 512 bits
 	return concatenated
 }
 
@@ -166,7 +167,7 @@ func branch(left, right []byte) []byte {
 func leaf(k, v []byte) []byte {
 	// Embedded-value leaf node
 	if len(v) <= 32 {
-		head := byte(0b01 | (len(v) << 2))
+		head := byte(0b10000000 | len(v))
 		tmpk := make([]byte, len(k))
 		copy(tmpk, k)
 		if len(tmpk) > 31 {
@@ -178,7 +179,7 @@ func leaf(k, v []byte) []byte {
 		return append([]byte{head}, append(tmpk, value...)...)
 	} else {
 		// Regular leaf node
-		head := byte(0b11)
+		head := byte(0b11000000)
 		tmpk := make([]byte, len(k))
 		copy(tmpk, k)
 		if len(tmpk) > 31 {
@@ -200,12 +201,12 @@ func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 	head := leaf[0]
 	key := leaf[1:32]
 
-	if head&0b11 == 0b01 {
+	if head&0b11000000 == 0b10000000 {
 		// Embedded-value leaf node
-		valueSize := int(head >> 2)
+		valueSize := int(head & 0b00111111) // Extract the value size from the lower 6 bits
 		value := leaf[32 : 32+valueSize]
 		return key, value, true, nil
-	} else if head&0b11 == 0b11 {
+	} else if head&0b11000000 == 0b11000000 {
 		// Regular leaf node
 		hash := leaf[32:64]
 		return key, hash, false, nil
@@ -219,7 +220,7 @@ func bit(k []byte, i int) bool {
 	if byteIndex >= len(k) {
 		return false // return false if index is out of range
 	}
-	bitIndex := i % 8             // the bit position within the byte
+	bitIndex := 7 - (i % 8) // the bit position within the byte
 	b := k[byteIndex]             // target byte
 	mask := byte(1 << (bitIndex)) // least significant bit first
 	return (b & mask) != 0        // return set (1) or not (0)
@@ -296,37 +297,46 @@ func (t *MerkleTree) levelDBGetBranch(branchHash []byte) (*Node, error) {
 		return nil, err
 	}
 
-	return &Node{
+	n := Node{
 		Hash:  branchHash,
 		Left:  leftNode,
 		Right: rightNode,
-	}, nil
+	}
+	return &n, nil
 }
 
 func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
-	_, _v, isEmbedded, _ := decodeLeaf(encodedLeaf)
-	t.levelDBSet(append(computeHash(encodedLeaf), value...), key)
+	_k, _v, isEmbedded, _ := decodeLeaf(encodedLeaf)
+	encodedLeafHash := computeHash(encodedLeaf)
+	encodedLeafHashVal := computeHash(append(encodedLeafHash, value...))
+	//t.levelDBSet(key, encodedLeafHashVal)
+	t.levelDBSet(encodedLeafHashVal, key)
 	if isEmbedded {
 		// value-embedded leaf node: 2 bits | 6 bits (value size) | 31 bytes (key)
 		// value is less or equal to 32 bytes
 		// value can be recovered from encodedLeaf.
-		t.levelDBSet(computeHash(encodedLeaf), encodedLeaf)
+		t.levelDBSet(encodedLeafHash, encodedLeaf)
 	} else {
 		// regular leaf node: 2 bits | 2 bits | 6 bits (0s) | 31 bytes (key)
 		// value is greater than 32 bytes
 		// store additional hash(value) -> value
-		t.levelDBSet(computeHash(encodedLeaf), encodedLeaf)
+		if len(_k) > 0 {
+
+		}
+		t.levelDBSet(encodedLeafHash, encodedLeaf)
 		t.levelDBSet(_v, value)
 	}
 }
 
 func (t *MerkleTree) levelDBGetLeaf(nodeHash []byte) ([]byte, error) {
 	encodedLeaf, err := t.levelDBGet(nodeHash)
+	//TODO:
 	if err != nil {
 		return nil, err
 	}
 	//recover encodedLeaf from nodeHash
 	_, _v, isEmbedded, err := decodeLeaf(encodedLeaf)
+	// fmt.Printf("levelDBGetLeaf nodeHash=%x k=%x, v=%x, isEmbedded=%v\n", nodeHash, _K, _v, isEmbedded)
 	if err != nil {
 		return nil, fmt.Errorf("leaf Err: %s", err)
 	}
@@ -346,11 +356,10 @@ func (t *MerkleTree) levelDBSet(k, v []byte) error {
 	if t.db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	key := k
-	//err := t.db.Put(key, v, nil)
-	err := t.db.WriteKV(common.BytesToHash(key), v)
+	//fmt.Printf("Len(k)=%d, k=%x\n", len(k), k)
+	err := t.db.WriteRawKV(k, v)
 	if err != nil {
-		return fmt.Errorf("failed to set key %s: %v", key, err)
+		return fmt.Errorf("failed to set key %s: %v", k, err)
 	}
 	return nil
 }
@@ -361,19 +370,19 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, error) {
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	//value, err := t.db.Get(k, nil)
-	value, err := t.db.ReadKV(common.BytesToHash(k))
+	value, err := t.db.ReadRawKV(k)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
 			return nil, fmt.Errorf("key not found: %s", k)
 		}
 		return nil, fmt.Errorf("failed to get key %s: %v", k, err)
 	}
-	return RecoverNull(k, value), nil
+	return value, nil
 }
 
 func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
 	//value, _ := t.db.Get([]byte(nodeHash), nil)
-	value, _ := t.db.ReadKV(common.BytesToHash(nodeHash))
+	value, _ := t.db.ReadRawKV(nodeHash)
 	zeroHash := make([]byte, 32)
 	if compareBytes(nodeHash, zeroHash) || value == nil {
 		return &Node{
@@ -381,8 +390,9 @@ func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
 		}, nil
 	}
 	leafKey, _ := t.levelDBGetLeaf(nodeHash)
+	// fmt.Printf("levelDBGetNode: nodeHash=%x, leafKey=%x\n", nodeHash, leafKey)
 	if leafKey != nil {
-		leafValue, _ := t.db.ReadKV(common.BytesToHash([]byte(append(nodeHash, leafKey...))))
+		leafValue, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
 		//leafValue, _ := t.db.Get([]byte(append(nodeHash, leafKey...)), nil)
 		return &Node{
 			Hash: nodeHash,
@@ -443,6 +453,7 @@ func (t *MerkleTree) printTree(node *Node, level int) {
 
 func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 	stateKey := make([]byte, 32)
+	debug := false
 	switch _stateIdentifier {
 	case C1:
 		stateKey[0] = 0x01
@@ -471,11 +482,14 @@ func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 	case C13:
 		stateKey[0] = 0x0D
 	}
-	//fmt.Printf("SetState %v stateKey=%x | value=%x\n", _stateIdentifier, stateKey, value)
+	if debug {
+		fmt.Printf("SetState %v stateKey=%x | value=%x\n", _stateIdentifier, stateKey, value)
+	}
 	t.Insert(stateKey, value)
 }
 func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	stateKey := make([]byte, 32)
+	debug := false
 	switch _stateIdentifier {
 	case C1:
 		stateKey[0] = 0x01
@@ -505,7 +519,9 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 		stateKey[0] = 0x0D
 	}
 	value, err := t.Get(stateKey)
-	//fmt.Printf("GetState %v stateKey=%x | RecovedValue=%x, err=%v\n", _stateIdentifier, stateKey, value, err)
+	if debug {
+		fmt.Printf("GetState %v stateKey=%x | RecovedValue=%x, err=%v\n", _stateIdentifier, stateKey, value, err)
+	}
 	return value, err
 }
 
@@ -758,12 +774,11 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blob_hash []byte) error {
 // Insert fixed-length hashed key with value for the BPT
 func (t *MerkleTree) Insert(key, value []byte) {
 	node, err := t.findNode(t.Root, key, 0)
-	value = append(value, key...)
-	value = ValidateNull(value)
 	if err != nil {
 		encodedLeaf := leaf(key, value)
 		t.levelDBSetLeaf(encodedLeaf, value, key)
 		if t.Root == nil {
+			fmt.Printf("encodedLeaf=%x, computedHash=%x\n", encodedLeaf, computeHash(encodedLeaf))
 			t.Root = &Node{
 				Hash: computeHash(encodedLeaf),
 				Key:  key,
@@ -825,8 +840,10 @@ func (t *MerkleTree) insertNode(node *Node, key, value []byte, depth int) *Node 
 
 func (t *MerkleTree) createBranchNode(node *Node, key, value []byte, depth int) *Node {
 	existingKey := node.Key
-	existingValue, _ := t.GetValue(node.Key)
+	//existingValue, _ := t.GetValue_stanley(node.Key) // new but wrong
+	existingValue, _ := t.Get(node.Key)
 
+	// why do you need to null here?
 	node.Key = nil
 
 	if bit(existingKey, depth) {
@@ -929,22 +946,11 @@ func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
 // Get retrieves the value of a specific key in the Merkle Tree
 func (t *MerkleTree) Get(key []byte) ([]byte, error) {
 	value, err := t.getValue(t.Root, key, 0)
-	value = RecoverNull(key, value)
-	if len(value) >= len(key) && key != nil && value != nil {
-		if compareBytes(value[len(value)-len(key):], key) {
-			if len(value)-len(key) > 0 {
-				result := make([]byte, len(value)-len(key))
-				copy(result, value[:len(value)-len(key)])
-				return result, nil
-			}
-		}
-	}
 	return value, err
 }
 
 func (t *MerkleTree) GetValue(key []byte) ([]byte, error) {
 	value, err := t.getValue(t.Root, key, 0)
-	value = RecoverNull(key, value)
 	return value, err
 }
 
@@ -1138,35 +1144,4 @@ func compareTrees(node1, node2 *Node) bool {
 // Compute the key length in bits. byte -> 8bits
 func computeKeyLengthAsBit(key []byte) int {
 	return len(key) * 8
-}
-
-// Because leveldb can't store nil value, we need to set a null value
-func ValidateNull(value []byte) []byte {
-	if allBytesAreZero(value) {
-		prefix := []byte("null")
-		value = append(prefix, value...)
-		value = append(value, prefix...)
-		// fmt.Printf("Value is empty, setting null value: %x\n", value)
-	}
-	return value
-}
-
-// If the value is null, return a null byte
-func RecoverNull(key []byte, value []byte) []byte {
-	if len(value) > 4 {
-		if compareBytes(value[:4], []byte("null")) && compareBytes(value[len(value)-4:], []byte("null")) {
-			value = value[4 : len(value)-4]
-		}
-	}
-
-	return value
-}
-
-func allBytesAreZero(data []byte) bool {
-	for _, b := range data {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
 }

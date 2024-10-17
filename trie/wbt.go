@@ -3,9 +3,10 @@ package trie
 import (
 	"errors"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
 	"math"
 	"strings"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 // WBTNode represents a node in the WBT
@@ -36,6 +37,10 @@ func (tree *WellBalancedTree) Root() []byte {
 	return tree.root.Hash
 }
 
+func (tree *WellBalancedTree) RootHash() common.Hash {
+	return common.Hash(tree.root.Hash)
+}
+
 // buildTreeRecursive recursively constructs the tree and returns the root node
 func buildTreeRecursive(nodes []*WBTNode) *WBTNode {
 	if len(nodes) == 1 {
@@ -61,7 +66,7 @@ func NewWellBalancedTree(values [][]byte) *WellBalancedTree {
 	leaves := make([]*WBTNode, len(values))
 	for i, value := range values {
 		leaves[i] = &WBTNode{
-			Hash:  computeNode(value),
+			Hash:  computeLeaf(value),
 			Value: value,
 		}
 	}
@@ -98,92 +103,110 @@ func printNode(node *WBTNode, level int, pos string) {
 }
 
 // Trace returns the proof path for a given value
-func (tree *WellBalancedTree) Trace(value []byte) ([][2][]byte, bool) {
-	path := [][2][]byte{}
-	found := tracePath(tree.root, computeNode(value), &path)
-	return path, found
+func (tree *WellBalancedTree) Trace(index int) (int, common.Hash, []common.Hash, bool, error) {
+	treeLen, leafHash, path, isFound, err := tree.trace(index)
+	if err != nil {
+		fmt.Printf("Get proof path error: %v\n", err)
+		return treeLen, common.Hash{}, nil, false, err
+	}
+	return treeLen, leafHash, path, isFound, nil
 }
 
-// tracePath recursively finds the path to the given hash
-func tracePath(node *WBTNode, hash []byte, path *[][2][]byte) bool {
-	if node == nil {
-		return false
-	}
-	if string(node.Hash) == string(hash) {
-		return true
-	}
-	if tracePath(node.Left, hash, path) {
-		*path = append(*path, [2][]byte{node.Right.Hash, []byte("Right")})
-		return true
-	}
-	if tracePath(node.Right, hash, path) {
-		*path = append(*path, [2][]byte{node.Left.Hash, []byte("Left")})
-		return true
-	}
-	return false
-}
-
-// Verify verifies the proof path for a given value and root hash
-func Verify(rootHash, value []byte, path [][2][]byte) bool {
-	hash := computeNode(value)
-	for _, sibling := range path {
-		siblingHash := sibling[0]
-		direction := sibling[1]
-		if string(direction) == "Left" {
-			fmt.Printf("computeNode(%x, %x)): %x \n", hash, siblingHash, computeNode(append(siblingHash, hash...)))
-			hash = computeNode(append(siblingHash, hash...))
-		} else {
-			fmt.Printf("computeNode(%x, %x)): %x \n", siblingHash, hash, computeNode(append(hash, siblingHash...)))
-			hash = computeNode(append(hash, siblingHash...))
-		}
-	}
-	return compareBytes(hash, rootHash)
-}
-
-// TraceByIndex returns the proof path for a given index
-func (tree *WellBalancedTree) TraceByIndex(index int) ([][2][]byte, bool, error) {
+func (tree *WellBalancedTree) trace(index int) (int, common.Hash, []common.Hash, bool, error) {
+	treeLen := len(tree.leaves)
 	if index < 0 || index >= len(tree.leaves) {
-		return nil, false, errors.New("index out of leaf range")
+		return treeLen, common.Hash{}, nil, false, errors.New("index out of leaf range")
 	}
-	path := [][2][]byte{}
-	found := tracePathByIndex(tree.root, index, &path, 0, len(tree.leaves)-1)
-	return path, found, nil
-}
 
-// tracePathByIndex recursively finds the path to the given index
-func tracePathByIndex(node *WBTNode, index int, path *[][2][]byte, start, end int) bool {
-	if node == nil {
-		return false
-	}
-	if start == end {
-		return true
-	}
-	mid := (start + end) / 2
-	if index <= mid {
-		if tracePathByIndex(node.Left, index, path, start, mid) {
-			*path = append(*path, [2][]byte{node.Right.Hash, []byte("Right")})
-			return true
-		}
-	} else {
-		if tracePathByIndex(node.Right, index, path, mid+1, end) {
-			*path = append(*path, [2][]byte{node.Left.Hash, []byte("Left")})
-			return true
-		}
-	}
-	return false
-}
+	tracePath := make([]common.Hash, 0)
+	currentNode := tree.leaves[index]
+	leafHash := common.Hash(computeLeaf(currentNode.Value))
+	for currentNode != tree.root {
+		parent := findWBTParent(tree.root, currentNode) // Find parent node
+		sibling := findWBTSibling(parent, currentNode)  // Find sibling node
 
-// VerifyByIndex verifies the proof path for a given index and root hash
-func VerifyByIndex(rootHash []byte, leafHash []byte, path [][2][]byte) bool {
-	hash := leafHash
-	for _, sibling := range path {
-		siblingHash := sibling[0]
-		direction := sibling[1]
-		if string(direction) == "Left" {
-			hash = computeNode(append(siblingHash, hash...))
+		if sibling != nil {
+			tracePath = append(tracePath, common.BytesToHash(sibling.Hash)) // Add sibling hash
 		} else {
-			hash = computeNode(append(hash, siblingHash...))
+			tracePath = append(tracePath, BytesToHash(make([]byte, 32))) // If sibling is nil, add empty hash
+		}
+		currentNode = parent
+	}
+	return treeLen, leafHash, tracePath, true, nil
+}
+
+func VerifyWBT(treeLen int, index int, erasureRoot common.Hash, leafHash common.Hash, tracePath []common.Hash) (common.Hash, bool, error) {
+	if index < 0 || index >= treeLen {
+		return common.Hash{}, false, errors.New("index out of range")
+	}
+	start, end := 0, treeLen-1
+	currentHash := leafHash
+
+	// Compute the direction of the path
+	direction := computeDirection(index, start, end, tracePath)
+	direction = reverse(direction)
+	//fmt.Printf("Index :%d, Direction: %v\n", index, direction)
+
+	// Compute the root hash
+	for i, dir := range direction {
+		siblingHash := tracePath[i]
+
+		if dir == 0 {
+			currentHash = common.BytesToHash(computeNode(append(currentHash[:], siblingHash[:]...)))
+		} else {
+			currentHash = common.BytesToHash(computeNode(append(siblingHash[:], currentHash[:]...)))
 		}
 	}
-	return compareBytes(hash, rootHash)
+	isValid := erasureRoot.String() == currentHash.String()
+
+	return currentHash, isValid, nil
+}
+
+func computeDirection(index, start, end int, tracePath []common.Hash) []int {
+	direction := []int{}
+	for i := 0; i < len(tracePath); i++ {
+		mid := (start + end) / 2
+
+		if index <= mid {
+			end = mid
+			direction = append(direction, 0)
+		} else {
+			start = mid + 1
+			direction = append(direction, 1)
+		}
+	}
+	return direction
+}
+
+func reverse(direction []int) []int {
+	for i := 0; i < len(direction)/2; i++ {
+		j := len(direction) - i - 1
+		direction[i], direction[j] = direction[j], direction[i]
+	}
+	return direction
+}
+
+// findParent finds the parent of the given node
+func findWBTParent(root, node *WBTNode) *WBTNode {
+	if root == nil || root == node {
+		return nil
+	}
+	if root.Left == node || root.Right == node {
+		return root
+	}
+
+	if leftParent := findWBTParent(root.Left, node); leftParent != nil {
+		return leftParent
+	}
+	return findWBTParent(root.Right, node)
+}
+
+func findWBTSibling(parent, node *WBTNode) *WBTNode {
+	if parent == nil {
+		return nil
+	}
+	if parent.Left == node {
+		return parent.Right
+	}
+	return parent.Left
 }
