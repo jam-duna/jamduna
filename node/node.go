@@ -32,9 +32,10 @@ import (
 )
 
 const (
-	debug         = false
-	canAssureData = false // Michael => Stanley
+	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
+	immediateAvailability = true
 
+	debug    = false
 	trace    = false
 	numNodes = 6
 	quicAddr = "127.0.0.1:%d"
@@ -556,15 +557,12 @@ func (n *Node) coreBroadcast(obj interface{}) []byte {
 
 				objType := reflect.TypeOf(obj)
 				switch objType {
-				case reflect.TypeOf(types.WorkPackageBundle{}):
-
-					b := obj.(types.WorkPackageBundle)
-					wp := b.WorkPackage
-
-					workpackagehashes, segmentRoots, bundle := b.Split()
-					//stub: user workpackage bundle
-					//bundle = n.encodeWorkPackage(wp)
-					work_report_hash, sig, err := p.ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
+				case reflect.TypeOf(types.WorkPackage{}):
+					wp := obj.(types.WorkPackage)
+					// immediate-term: bundle = wp.Bytes()
+					bundle := wp.Bytes()
+					// TODO: short-term: bundle := CompilePackageBundle(wp).Bytes()
+					work_report_hash, sig, err := p.ShareWorkPackage(core, bundle)
 					if err != nil {
 						fmt.Printf("ShareWorkPackage ERR in coreBoarcast: %v\n", err)
 					}
@@ -681,11 +679,9 @@ func (n *Node) extendChain() error {
 					fmt.Printf("[N%d] extendChain addstatedb TIP Now: s:%v<-%v\n", n.id, newStateDB.ParentHash, newStateDB.BlockHash)
 				}
 
-				if canAssureData {
-					if len(b.Extrinsic.Guarantees) > 0 {
-						for _, g := range b.Extrinsic.Guarantees {
-							n.assureData(g)
-						}
+				if len(b.Extrinsic.Guarantees) > 0 {
+					for _, g := range b.Extrinsic.Guarantees {
+						n.assureData(g)
 					}
 				}
 

@@ -5,12 +5,9 @@ import (
 	//"context"
 	//"errors"
 	"fmt"
-	//"sync"
-	//"time"
-	//"encoding/binary"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
-	//"github.com/quic-go/quic-go"
+	"reflect"
 )
 
 func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
@@ -44,16 +41,23 @@ func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.Wo
 }
 
 func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []common.Hash, bundle []byte) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
-	// TODO: use real bundle
-	// stub code
 	if len(bundle) == 0 {
 		panic(123)
 	}
-	bp, err := types.WorkPackageBundleFromBytes(bundle)
-	if (err != nil){
-		panic(123)
+	var workPackage types.WorkPackage
+	if immediateAvailability {
+		decoded, _, err := types.Decode(bundle, reflect.TypeOf(types.WorkPackage{}))
+		if err != nil {
+			panic(125)
+		}
+		workPackage = decoded.(types.WorkPackage)
+	} else {
+		bp, err := types.WorkPackageBundleFromBytes(bundle)
+		if err != nil {
+			panic(123)
+		}
+		workPackage = bp.WorkPackage
 	}
-	workPackage := bp.WorkPackage
 	workReport, _, _, err := n.executeWorkPackage(workPackage)
 	if err != nil {
 		return common.Hash{}, types.Ed25519Signature{}, err
@@ -170,7 +174,6 @@ func (n *Node) runMain() {
 		case ticket := <-n.ticketsCh:
 			n.processTicket(ticket)
 		case workPackage := <-n.workPackagesCh:
-			// TODO: Shawn to review
 			guaranteeReport, _, treeRoot, err := n.ProcessWorkPackage(workPackage)
 			if err != nil {
 				fmt.Printf("ProcessWorkPackage: %v\n", err)
@@ -189,15 +192,12 @@ func (n *Node) runMain() {
 				n.workReports = make(map[common.Hash]types.WorkReport)
 			}
 			n.workReports[workReport.Hash()] = workReport
-			// TODO: Shawn to review
 		case guarantee := <-n.guaranteesCh:
-			// TODO: Shawn to review
 			err := n.processGuarantee(guarantee)
 			if err != nil {
 				fmt.Printf("processGuarantee: %v\n", err)
 			}
 		case assurance := <-n.assurancesCh:
-			// TODO: Shawn to review
 			err := n.processAssurance(assurance)
 			if err != nil {
 				fmt.Printf("processAssurance: %v\n", err)

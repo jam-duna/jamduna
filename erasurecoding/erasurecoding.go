@@ -1,8 +1,9 @@
 package erasurecoding
 
 import (
+	"errors"
 	"fmt"
-
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/klauspost/reedsolomon"
 )
@@ -15,6 +16,56 @@ var (
 	// numPieces int = 6 // k = 6, shard size = k * 2. See GP, Appendix H.1 for more details.
 	GFPointsSize = 2 //  little-endian Y2 (E2)
 )
+
+const (
+	dataShards   = 2
+	parityShards = 4
+)
+
+// Encode encodes the original data into numPieces using Reed-Solomon encoding
+func EncodeBundle(original []byte, numPieces int) ([][]byte, error) {
+	if len(original) == 0 || numPieces < 2 {
+		return nil, errors.New("invalid input data or number of pieces")
+	}
+
+	encoder, err := reedsolomon.New(dataShards, parityShards, reedsolomon.WithLeopardGF16(true))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create encoder: %v", err)
+	}
+
+	// Split the original data into data shards
+	shards, err := encoder.Split(original)
+	if err != nil {
+		return nil, fmt.Errorf("failed to split data: %v", err)
+	}
+
+	// Encode the shards with Reed-Solomon
+	err = encoder.Encode(shards)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode data: %v", err)
+	}
+
+	return shards, nil
+}
+
+// Decode reconstructs the original data from the encoded shards
+func DecodeBundle(encodedData [][]byte) ([]byte, error) {
+	if len(encodedData) != types.TotalValidators {
+		return nil, errors.New("encoded data length does not match number of pieces")
+	}
+
+	decoder, err := reedsolomon.New(dataShards, parityShards, reedsolomon.WithLeopardGF16(true))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create decoder: %v", err)
+	}
+
+	// Attempt to reconstruct missing shards
+	err = decoder.Reconstruct(encodedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct data: %v", err)
+	}
+	return common.ConcatenateByteSlices(encodedData), nil
+}
 
 func GetCodingRate() (coding_rate_K int, coding_rate_N int) {
 	coding_rate_K = types.W_C / 2

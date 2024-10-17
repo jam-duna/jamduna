@@ -1,78 +1,62 @@
 package node
 
 import (
-	//"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	//	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/erasurecoding"
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) auditWorkReport(workReport types.WorkReport) error {
+func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 	erasureRoot := workReport.AvailabilitySpec.ErasureRoot
 	// reconstruct the work package
-	segmentIndex := make([]uint16, 0) // TODO: Michael
 	bundleShards := make([][]byte, types.TotalValidators)
-	segmentShards := make([][]byte, types.TotalValidators)
-	segmentShardsI := make([][]byte, types.TotalValidators)
 	for i := uint16(0); i < types.TotalValidators; i++ {
 		if i == n.id {
-			bundleShard, segmentShard, _, ok, err := n.store.GetShard(erasureRoot, i)
+			bundleShard, _, _, ok, err := n.store.GetShard(erasureRoot, i)
 			if err != nil {
 			} else if ok {
 				bundleShards[i] = bundleShard
-				segmentShards[i] = segmentShard
-			}
-			segmentShardI, _, ok, err := n.store.GetSegmentShard(erasureRoot, i, segmentIndex)
-			if err != nil {
-
-			} else if ok {
-				segmentShardsI[i] = segmentShardI
 			}
 		} else {
 			// TODO: optimize with gofunc ala makeRequests
-			bundleShard, segmentShard, _, err := n.peersInfo[i].SendShardRequest(erasureRoot, i, true)
+			bundleShard, _, _, err := n.peersInfo[i].SendShardRequest(erasureRoot, i, true)
 			if err != nil {
 
 			} else {
 				bundleShards[i] = bundleShard
-				segmentShards[i] = segmentShard
-			}
-			segmentShardI, _, err := n.peersInfo[i].SendSegmentShardRequest(erasureRoot, i, segmentIndex, true)
-			if err != nil {
-
-			} else {
-				segmentShardsI[i] = segmentShardI
 			}
 		}
 	}
-	bundle, segments, err := n.reconstructBundleAndSegments(bundleShards, segmentShards, segmentShardsI)
+
+	bundle, err := erasurecoding.DecodeBundle(bundleShards)
 	if err != nil {
-		return err
+		return
 	}
-	wp := types.NewWorkPackage(bundle, segments)
-	guaranteeReport, _, _, err := n.ProcessWorkPackage(*wp)
+
+	workPackageRaw, _, err := types.Decode(bundle, reflect.TypeOf(types.WorkPackage{}))
 	if err != nil {
-		return err
+		return
 	}
-	// TODO: Shawn to fill in - judge guaranteeReport compared to workReport
-	judgement, err := n.MakeJudgement(workReport, guaranteeReport, 0)
+	workPackage := workPackageRaw.(types.WorkPackage)
+
+	guaranteeReport, spec, _, err := n.ProcessWorkPackage(workPackage)
+	if err != nil {
+		return
+	}
+	auditPass := false
+	if workReport.AvailabilitySpec.ErasureRoot == spec.ErasureRoot {
+		auditPass = true
+	}
+
+	judgement, err := n.MakeJudgement(workReport, guaranteeReport, 0, auditPass)
 	if err != nil {
 		return err
 	}
 	n.broadcast(judgement)
 	return nil
-}
-
-func (n *Node) Judge(wr types.WorkReport, gr types.GuaranteeReport) bool {
-	//TODO: work package=>work report here
-	return false
-}
-
-func (n *Node) reconstructBundleAndSegments(bundleShards, segmentShards, segmentShardsI [][]byte) (bundle []byte, segments []byte, err error) {
-	// TODO: Michael
-	return bundle, segments, fmt.Errorf("Not implemented")
 }
 
 // we should have a function to check if the block is audited
@@ -112,28 +96,19 @@ func (n *Node) MakeAnnouncement(tranche uint32, w types.WorkReportSelection) (ty
 	return announcement, nil
 }
 
-func (n *Node) MakeJudgement(w types.WorkReport, gr types.GuaranteeReport, tranche uint32) (types.Judgement, error) {
+func (n *Node) MakeJudgement(w types.WorkReport, gr types.GuaranteeReport, tranche uint32, auditPass bool) (types.Judgement, error) {
 	var judgement types.Judgement
 	ed25519Key := n.GetEd25519Key()
 	ed25519Priv := n.GetEd25519Secret()
 
 	index := n.statedb.GetSafrole().GetCurrValidatorIndex(ed25519Key)
 
-	if n.Judge(w, gr) {
-		judgement, err := n.statedb.MakeJudgement(tranche, w, true, ed25519Priv, uint16(index))
-		if err != nil {
-			return types.Judgement{}, err
-		}
-		n.processJudgement(judgement)
-		return judgement, nil
-	} else {
-		judgement, err := n.statedb.MakeJudgement(tranche, w, false, ed25519Priv, uint16(index))
-		if err != nil {
-			return types.Judgement{}, err
-		}
-		n.processJudgement(judgement)
-		return judgement, nil
+	judgement, err := n.statedb.MakeJudgement(tranche, w, auditPass, ed25519Priv, uint16(index))
+	if err != nil {
+		return types.Judgement{}, err
 	}
+	n.processJudgement(judgement)
+	return judgement, nil
 	return judgement, nil
 }
 

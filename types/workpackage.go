@@ -78,16 +78,6 @@ func (a *WorkPackage) String() string {
 	return string(enc)
 }
 
-func NewWorkPackage(bundle, segments []byte) *WorkPackage {
-	// TODO
-	return &WorkPackage{}
-}
-
-func (b *WorkPackageBundle) Split() (workpackagehashes []common.Hash, segmentRoots []common.Hash, bundle []byte) {
-	// TODO: Stanley
-	return workpackagehashes, segmentRoots, bundle
-}
-
 // Bytes returns the bytes of the Assurance
 func (a *WorkPackage) Bytes() []byte {
 	encode, err := Encode(a)

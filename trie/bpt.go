@@ -157,9 +157,9 @@ func branch(left, right []byte) []byte {
 	if len(left) != 32 || len(right) != 32 {
 		panic("branch: input hashes must be 32 bytes")
 	}
-	head := left[0] & 0x7f // Set the LSB of the first byte of the left hash to 0
-	left255bits := append([]byte{head}, left[1:]...)   // Left: last 255 bits of
-	concatenated := append(left255bits, right...)      // (l,r): 512 bits
+	head := left[0] & 0x7f                           // Set the LSB of the first byte of the left hash to 0
+	left255bits := append([]byte{head}, left[1:]...) // Left: last 255 bits of
+	concatenated := append(left255bits, right...)    // (l,r): 512 bits
 	return concatenated
 }
 
@@ -220,7 +220,7 @@ func bit(k []byte, i int) bool {
 	if byteIndex >= len(k) {
 		return false // return false if index is out of range
 	}
-	bitIndex := 7 - (i % 8) // the bit position within the byte
+	bitIndex := 7 - (i % 8)       // the bit position within the byte
 	b := k[byteIndex]             // target byte
 	mask := byte(1 << (bitIndex)) // least significant bit first
 	return (b & mask) != 0        // return set (1) or not (0)

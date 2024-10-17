@@ -198,16 +198,18 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) ShareWorkPackage(coreIndex uint16, workpackagehash []common.Hash, segmentRoot []common.Hash, bundle []byte) (work_report_hash common.Hash, signature types.Ed25519Signature, err error) {
+func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle []byte) (work_report_hash common.Hash, signature types.Ed25519Signature, err error) {
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
-	for i, h := range workpackagehash {
+	/*TODO:
+	  for i, h := range bundle. {
 		segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
 			WorkPackageHash: h,
 			SegmentRoot:     segmentRoot[i],
 		})
-	}
+	}*/
 	req := JAMSNPWorkPackageShare{
 		CoreIndex:    coreIndex,
+		Len:          uint8(len(segmentroots)),
 		SegmentRoots: segmentroots,
 		Bundle:       bundle,
 	}

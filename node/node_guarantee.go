@@ -89,13 +89,8 @@ func (n *Node) processGuaranteeReport(report types.GuaranteeReport) error {
 		verify := report.Verify(key)
 		if verify {
 			isInCore = true
-			// TODO: Michael + Shawn
-			peerID := uint16(0)
-			workpackagehashes := []common.Hash{}
-			segmentRoots := []common.Hash{}
-			bundle := []byte{}
-			go n.peersInfo[peerID].ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
-
+			panic(999)
+			// go n.peersInfo[peerID].ShareWorkPackage(core, []byte{})
 			break
 		}
 	}

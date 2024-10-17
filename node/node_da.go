@@ -370,7 +370,7 @@ func transpose3D(data [][][]byte) [][][]byte {
 // TODO: Sean to encode & decode properly
 // The E(p,x,s,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
 
-func (n *Node) CompilePackageBundle(p types.WorkPackage) (types.WorkPackageBundle) {
+func (n *Node) CompilePackageBundle(p types.WorkPackage) types.WorkPackageBundle {
 
 	workItems := p.WorkItems
 	workItemCnt := len(workItems)
@@ -384,18 +384,17 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage) (types.WorkPackageBundl
 	}
 
 	// s - [ImportSegmentData] should be size of G = W_E * W_S
-	importedSegmentData := make([][][]byte,  workItemCnt)
-	importedSegmentIdx := make([][]uint16,  workItemCnt)
-
+	importedSegmentData := make([][][]byte, workItemCnt)
+	importedSegmentIdx := make([][]uint16, workItemCnt)
 
 	for workIdx, workItem := range workItems {
 		// not sure what does idx mean inside of ImportedSegments
-		segmentIdxMap :=  make([]uint16, len(workItem.ImportedSegments))
+		segmentIdxMap := make([]uint16, len(workItem.ImportedSegments))
 		workItemIdx_importedSegmentData, err := n.getImportSegments(workItem.ImportedSegments)
-		for i, workItem_importedSegment:= range workItem.ImportedSegments{
+		for i, workItem_importedSegment := range workItem.ImportedSegments {
 			segmentIdxMap[i] = workItem_importedSegment.Index
 		}
-		if (err != nil){
+		if err != nil {
 			//TODO
 		}
 		importedSegmentIdx[workIdx] = segmentIdxMap
@@ -423,14 +422,13 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage) (types.WorkPackageBundl
 	}
 
 	workPackageBundle := types.WorkPackageBundle{
-		WorkPackage: p,
-		ExtrinsicData: extrinsicData,
+		WorkPackage:       p,
+		ExtrinsicData:     extrinsicData,
 		ImportSegmentData: importedSegmentData,
-		Justification: justification,
+		Justification:     justification,
 	}
 	return workPackageBundle
 }
-
 
 func (n *Node) encodeWorkPackage_delete(wp types.WorkPackage) []byte {
 	//fmt.Println("encodeWorkPackage")
@@ -790,7 +788,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		return types.WorkReport{}, spec, common.Hash{}, err
 	}
 
-	workReport := types.WorkReport{
+	work = types.WorkReport{
 		AvailabilitySpec: *spec,
 		AuthorizerHash:   common.HexToHash("0x"), // SKIP
 		CoreIndex:        core,
@@ -799,5 +797,18 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 		Results:       results,
 	}
 
-	return workReport, spec, treeRoot, nil
+	var bundleShards [][]byte
+	bundleShards, err = erasurecoding.EncodeBundle(workPackage.Bytes(), types.TotalValidators)
+	if err != nil {
+		return
+	}
+	for shardIndex, bundleShard := range bundleShards {
+		segmentShards := make([]byte, 0)
+		justification := []byte{}
+		err = n.store.StoreAuditDA(spec.ErasureRoot, uint16(shardIndex), bundleShard, segmentShards, justification)
+		if err != nil {
+			fmt.Printf("[executeWorkPackage:StoreAuditDA] Err %v\n", err)
+		}
+	}
+	return
 }
