@@ -129,7 +129,7 @@ func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 	// epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
 	// FOR JAM TESTNET:
 	// second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength)
-	second_per_epoch := uint64(types.SecondsPerSlot * 1) // types.EpochLength
+	second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength) // types.EpochLength
 
 	// USE THIS for generating public traces with a full E for the first epoch
 	waitTime := second_per_epoch - (uint64(now) % second_per_epoch)

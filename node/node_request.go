@@ -141,6 +141,21 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	return nil
 }
 
+func (n *Node) AddNewImportSegments(treeRoot common.Hash, num int, workpackage_hash common.Hash) error {
+	if n.segments == nil {
+		n.segments = make(map[common.Hash][]types.ImportSegment)
+	}
+	segments := make([]types.ImportSegment, num)
+	for i := 0; i < num; i++ {
+		segments[i] = types.ImportSegment{
+			TreeRoot: treeRoot,
+			Index:    uint16(i),
+		}
+	}
+	n.segments[workpackage_hash] = segments
+	return nil
+}
+
 func (n *Node) runMain() {
 	for {
 		select {
@@ -156,13 +171,18 @@ func (n *Node) runMain() {
 			n.processTicket(ticket)
 		case workPackage := <-n.workPackagesCh:
 			// TODO: Shawn to review
-			guaranteeReport, _, _, err := n.ProcessWorkPackage(workPackage)
+			guaranteeReport, _, treeRoot, err := n.ProcessWorkPackage(workPackage)
 			if err != nil {
 				fmt.Printf("ProcessWorkPackage: %v\n", err)
 			}
 			err = n.processGuaranteeReport(guaranteeReport)
 			if err != nil {
 				fmt.Printf("processGuaranteeReport: %v\n", err)
+			}
+			exportedsegmentsNum := 1
+			err = n.AddNewImportSegments(treeRoot, exportedsegmentsNum, workPackage.Hash())
+			if err != nil {
+				fmt.Printf("AddNewImportSegments: %v\n", err)
 			}
 		case workReport := <-n.workReportsCh:
 			if n.workReports == nil {

@@ -28,7 +28,8 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 	//139 The signing validators must be assigned to the core in G or G*
 	err = s.AreValidatorsAssignedToCore(guarantee)
 	if err != nil {
-		fmt.Printf("Verify_Guarantee error(slot problem): %v\n", err)
+		fmt.Printf("Verify_Guarantee error: %v\n", err)
+		return err
 	}
 	//TODO: 139 C_v
 
@@ -134,14 +135,15 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 					return nil
 				}
 			}
-			return errors.New(fmt.Sprintf("validator %v is not assigned to core %v", g.ValidatorIndex, guarantee.Report.CoreIndex))
+			return errors.New(fmt.Sprintf("validator %v is not assigned to core %v (Previous)", g.ValidatorIndex, guarantee.Report.CoreIndex))
 		} else {
 			for i, assignment := range s.GuarantorAssignments {
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
+
 					return nil
 				}
 			}
-			return errors.New(fmt.Sprintf("validator %v is not assigned to core %v", g.ValidatorIndex, guarantee.Report.CoreIndex))
+			return errors.New(fmt.Sprintf("validator %v is not assigned to core %v (Now)", g.ValidatorIndex, guarantee.Report.CoreIndex))
 		}
 	}
 	return nil
@@ -280,7 +282,9 @@ func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
 	for _, guarantee := range guarantees {
 		if j.AvailabilityAssignments[guarantee.Report.CoreIndex] == nil {
 			j.SetRhoByWorkReport(guarantee.Report.CoreIndex, guarantee.Report, j.SafroleState.GetTimeSlot())
-			fmt.Printf("ProcessGuarantees Success on Core %v\n", guarantee.Report.CoreIndex)
+			if debug {
+				fmt.Printf("ProcessGuarantees Success on Core %v\n", guarantee.Report.CoreIndex)
+			}
 		}
 	}
 

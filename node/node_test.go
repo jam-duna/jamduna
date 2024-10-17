@@ -409,7 +409,12 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 
 	// give some time for nodes to come up
-	time.Sleep(3 * time.Second)
+	for {
+		time.Sleep(1 * time.Second)
+		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady() {
+			break
+		}
+	}
 
 	// fib code
 	code, err := loadByteCode("../jamtestvectors/workpackages/fib-standardized.pvm")
@@ -430,7 +435,8 @@ func TestWorkGuarantee(t *testing.T) {
 	if err != nil {
 		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
 	}
-
+	// we can try to use EP to replace the code here
+	//----------------------------------------------
 	for _, n := range nodes {
 		target_statedb := n.getPVMStateDB()
 		target_statedb.WriteServicePreimageBlob(service, code)
@@ -445,9 +451,10 @@ func TestWorkGuarantee(t *testing.T) {
 		n.statedb.PreviousGuarantors(true)
 		n.statedb.AssignGuarantors(true)
 	}
+	//----------------------------------------------
 	time.Sleep(12 * time.Second)
 	var exportedItems []types.ImportSegment
-	for fibN := 1; fibN < 2; fibN++ {
+	for fibN := 1; fibN < 21; fibN++ {
 		fmt.Printf("\n\n\n********************** FIB N=%v Starts **********************\n", fibN)
 		importedSegments := make([]types.ImportSegment, 0)
 
@@ -487,11 +494,33 @@ func TestWorkGuarantee(t *testing.T) {
 		time.Sleep(10 * time.Second)
 		E_G, err := nodes[4].FormGuarantee(workPackage.Hash())
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("Failed to FormGuarantee: %v", err)
+		} else {
+			nodes[4].broadcast(E_G)
 		}
-		nodes[4].broadcast(E_G)
 
-		time.Sleep(30 * time.Second)
+		// we trace core 0 only
+		for {
+			time.Sleep(1 * time.Second)
+			if nodes[4].statedb.JamState.AvailabilityAssignments[0] != nil {
+				break
+			}
+		}
+
+		// add assurance
+		for {
+			if nodes[4].statedb.JamState.AvailabilityAssignments[0] == nil {
+				break
+			}
+			for _, n := range nodes {
+				EA, err := n.GenerateDummyAssurance()
+				if err == nil {
+					n.broadcast(EA)
+				}
+			}
+			time.Sleep(types.SecondsPerSlot * time.Second)
+		}
+		exportedItems = nodes[4].segments[workPackage.Hash()]
 	}
 }
 

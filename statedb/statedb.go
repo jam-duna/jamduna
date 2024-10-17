@@ -734,7 +734,6 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		queuedAssurances:      make(map[common.Hash]types.Assurance),
 		queueJudgements:       make(map[common.Hash]types.Judgement),
 		logChan:               make(chan storage.LogMessage, 100),
-
 		/*
 			Following flds are not copied over..?
 
@@ -746,6 +745,8 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		*/
 	}
 	s.CloneExtrinsicMap(newStateDB)
+	newStateDB.AssignGuarantors(true)
+	newStateDB.PreviousGuarantors(true)
 	return newStateDB
 }
 
@@ -1289,7 +1290,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 
 	// E_A - Assurances  aggregate queuedAssurances into extrinsicData.Assurances
 	extrinsicData.Assurances = make([]types.Assurance, 0)
-	for _, assurance := range s.queuedAssurances {
+	for i, assurance := range s.queuedAssurances {
 		a, err := assurance.DeepCopy()
 		if err != nil {
 			continue
@@ -1298,6 +1299,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		err = s.VerifyAssurance(a)
 		if err != nil {
 			fmt.Println("Error verifying assurance: ", err)
+			// remove the assurance from the queue
+			delete(s.queuedAssurances, i)
 			continue
 		}
 		err = CheckDuplicate(extrinsicData.Assurances, a)

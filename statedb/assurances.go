@@ -13,7 +13,7 @@ import (
 func (s *StateDB) VerifyHP(a types.Assurance) error {
 	// Check the anchor
 	if a.Anchor != s.BlockHash {
-		return errors.New(fmt.Sprintf("invalid anchor in assurance %x, expected %x, Validator[%v]", a.Anchor, s.ParentHash, a.ValidatorIndex))
+		return errors.New(fmt.Sprintf("invalid anchor in assurance %v, expected %v, Validator[%v]", a.Anchor, s.ParentHash, a.ValidatorIndex))
 	}
 	return nil
 }

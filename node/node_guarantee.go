@@ -44,6 +44,11 @@ func (n *Node) PutGuaranteeBucketWithoutReport(workR types.GuaranteeReport, work
 	fmt.Printf("%s PutGuaranteeBucketWithoutReport (workPackageHash:%v) From [N%d]\n", n.String(), workPackageHash, workR.GuaranteeCredential.ValidatorIndex)
 	n.guaranteeMutex.Lock()
 	defer n.guaranteeMutex.Unlock()
+	emptyhash := common.Hash{}
+	if work_report_hash == emptyhash {
+		return fmt.Errorf("Work report hash is empty")
+	}
+
 	if n.guaranteeBucket == nil {
 		// initialize the guarantee bucket
 		n.guaranteeBucket = make(map[common.Hash][]types.GuaranteeReport)
@@ -235,6 +240,14 @@ func (n *Node) FormGuarantee(PackageHash common.Hash) (types.Guarantee, error) {
 			if workReportCounter[eg.Report.Hash()] >= 2 {
 				guantorcredentials = append(guantorcredentials, eg.GuaranteeCredential)
 				goodWorkReports = eg.Report
+				emptyHash := common.Hash{}
+				if goodWorkReports.AvailabilitySpec.WorkPackageHash == emptyHash {
+					for i, counter := range workReportCounter {
+						fmt.Printf("WorkReportHash: %v, Count: %v\n", i, counter)
+					}
+					return types.Guarantee{}, fmt.Errorf("WorkPackageHash is empty")
+				}
+
 			}
 		}
 		// Sort the guarantor credentials by validator index
@@ -242,6 +255,7 @@ func (n *Node) FormGuarantee(PackageHash common.Hash) (types.Guarantee, error) {
 			return guantorcredentials[i].ValidatorIndex < guantorcredentials[j].ValidatorIndex
 		})
 		if len(guantorcredentials) >= 2 {
+
 			extrinsicGuarantee := types.Guarantee{
 				Report:     goodWorkReports,
 				Slot:       n.statedb.GetTimeslot(),

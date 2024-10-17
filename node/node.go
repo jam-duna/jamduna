@@ -84,6 +84,8 @@ type Node struct {
 	preimages   map[common.Hash][]byte
 	workReports map[common.Hash]types.WorkReport
 
+	segments map[common.Hash][]types.ImportSegment
+
 	blockAnnouncementsCh    chan types.BlockAnnouncement
 	ticketsCh               chan types.Ticket
 	workPackagesCh          chan types.WorkPackage
@@ -496,6 +498,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			if err != nil {
 				fmt.Printf("SendAssurance ERR %v\n", err)
 			}
+			n.processAssurance(a)
 			break
 		case reflect.TypeOf(types.Announcement{}):
 			a := obj.(types.Announcement)
@@ -1024,6 +1027,9 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
+			n.statedb.PreviousGuarantors(true)
+			n.statedb.AssignGuarantors(true)
+
 			// timeslot mark
 			// currJCE := common.ComputeCurrentJCETime()
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
