@@ -158,10 +158,10 @@ func TestAvailabilityReconstruction(t *testing.T) {
 		// Generate the AvailabilitySpecifier
 		packageHash := workPackage.Hash()
 		originalAS = senderNode.NewAvailabilitySpecifier(packageHash, workPackage, segments)
-
-		encodeCheck := senderNode.VerifyWorkPackage(workPackage)
+		packagebundle := senderNode.CompilePackageBundle(workPackage)
+		encodeCheck := senderNode.VerifyWorkPackageBundle(packagebundle)
 		if !encodeCheck {
-			t.Fatalf("VerifyWorkPackage FAILED! \n")
+			t.Fatalf("VerifyWorkPackageBundle FAILED! \n")
 		}
 
 		// for _, n := range nodes {

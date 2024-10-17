@@ -15,22 +15,28 @@ import (
 )
 
 func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) *types.AvailabilitySpecifier {
-	// Compute b using EncodeWorkPackage
-	b := n.encodeWorkPackage(workPackage)
-	//fmt.Printf("packageHash=%v, encodedPackage(Len=%v):%x\n", packageHash, len(b), b)
-	//fmt.Printf("raw=%v\n", workPackage.String())
-	p := n.decodeWorkPackage(b)
-	if common.CompareBytes(workPackage.Bytes(), p.Bytes()) {
+	// compile wp into b
+	package_bundle := n.CompilePackageBundle(workPackage)
+	package_bundle_byte := package_bundle.Bytes()
+	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(package_bundle_byte)
+
+	fmt.Printf("packageHash=%v, encodedPackage(Len=%v):%x\n", packageHash, len(package_bundle_byte), package_bundle_byte)
+	fmt.Printf("raw=%v\n", package_bundle.String())
+
+	//recovered_b := n.decodeWorkPackage(package_bundle)
+
+	//TODO: make sure b equals recovered_b
+	if common.CompareBytes(package_bundle.Bytes(), recovered_package_bundle.Bytes()) {
 		//fmt.Printf("----------Original WorkPackage and Decoded WorkPackage are the same-------\n")
 	} else {
 		fmt.Printf("----------Original WorkPackage and Decoded WorkPackage are different-------\n")
 	}
 
 	// Length of `b`
-	bLength := uint32(len(b))
+	bLength := uint32(len(package_bundle_byte))
 
 	// Compute b♣ and s♣
-	blobRoot, bClub := n.computeAndDistributeBClub(b)
+	blobRoot, bClub := n.computeAndDistributeBClub(package_bundle_byte)
 	treeRoot, sClub := n.computeAndDistributeSClub(segments)
 
 	// u = (bClub, sClub)
@@ -362,8 +368,71 @@ func transpose3D(data [][][]byte) [][][]byte {
 }
 
 // TODO: Sean to encode & decode properly
-// The E(p,x,i,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
-func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
+// The E(p,x,s,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
+
+func (n *Node) CompilePackageBundle(p types.WorkPackage) (types.WorkPackageBundle) {
+
+	workItems := p.WorkItems
+	workItemCnt := len(workItems)
+
+	// p - workPackage
+
+	// x - [extrinsic data] for some workitem argument w
+	extrinsicData := make([]types.ExtrinsicsBlobs, workItemCnt)
+	for workIdx, workItem := range workItems {
+		extrinsicData[workIdx] = workItem.ExtrinsicsBlobs
+	}
+
+	// s - [ImportSegmentData] should be size of G = W_E * W_S
+	importedSegmentData := make([][][]byte,  workItemCnt)
+	importedSegmentIdx := make([][]uint16,  workItemCnt)
+
+
+	for workIdx, workItem := range workItems {
+		// not sure what does idx mean inside of ImportedSegments
+		segmentIdxMap :=  make([]uint16, len(workItem.ImportedSegments))
+		workItemIdx_importedSegmentData, err := n.getImportSegments(workItem.ImportedSegments)
+		for i, workItem_importedSegment:= range workItem.ImportedSegments{
+			segmentIdxMap[i] = workItem_importedSegment.Index
+		}
+		if (err != nil){
+			//TODO
+		}
+		importedSegmentIdx[workIdx] = segmentIdxMap
+		importedSegmentData[workIdx] = workItemIdx_importedSegmentData
+	}
+
+	// j - justifications
+	justification := make([][][]common.Hash, workItemCnt)
+
+	for workIdx, item_segmentData := range importedSegmentData {
+		workIdx_segment_tree := trie.NewCDMerkleTree(item_segmentData)
+		var item_Justification [][]common.Hash
+		for segment_idx, _ := range item_segmentData {
+			// not sure what does index mean here...
+			importedSegments_Index := importedSegmentIdx[workIdx][segment_idx]
+			// not sure if we should use segment_idx or Index from ImportedSegments
+			segment_Justification, _ := workIdx_segment_tree.Justify(int(importedSegments_Index))
+			segment_Justification_hash := make([]common.Hash, len(segment_Justification))
+			for hash_idx, byte := range segment_Justification {
+				segment_Justification_hash[hash_idx] = common.Hash(byte)
+			}
+			item_Justification = append(item_Justification, segment_Justification_hash)
+			justification[workIdx] = item_Justification
+		}
+	}
+
+	workPackageBundle := types.WorkPackageBundle{
+		WorkPackage: p,
+		ExtrinsicData: extrinsicData,
+		ImportSegmentData: importedSegmentData,
+		Justification: justification,
+	}
+	return workPackageBundle
+}
+
+
+func (n *Node) encodeWorkPackage_delete(wp types.WorkPackage) []byte {
 	//fmt.Println("encodeWorkPackage")
 	output := make([]byte, 0)
 	// 1. Encode the package (p)
@@ -416,6 +485,7 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 			justification = append(justification, tmpJustification...)
 		}
 	}
+
 	encodedJustification, err := types.Encode(justification)
 	if err != nil {
 		fmt.Println("Error in encodeWorkPackage:", err)
@@ -428,7 +498,7 @@ func (n *Node) encodeWorkPackage(wp types.WorkPackage) []byte {
 	return output
 }
 
-func (n *Node) decodeWorkPackage(encodedWorkPackage []byte) types.WorkPackage {
+func (n *Node) decodeWorkPackage_delete(encodedWorkPackage []byte) types.WorkPackage {
 	//fmt.Println("decodeWorkPackage")
 	// length := uint32(0)
 
@@ -520,14 +590,22 @@ func compareWorkPackages(wp1, wp2 types.WorkPackage) bool {
 }
 
 // Verify WorkPackage by comparing the original and the decoded WorkPackage
-func (n *Node) VerifyWorkPackage(workPackage types.WorkPackage) bool {
-	b := n.encodeWorkPackage(workPackage)
-	p := n.decodeWorkPackage(b)
-	if compareWorkPackages(workPackage, p) {
+func (n *Node) VerifyWorkPackageBundle(package_bundle types.WorkPackageBundle) bool {
+
+	package_bundle_byte := package_bundle.Bytes()
+	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(package_bundle_byte)
+	if common.CompareBytes(package_bundle.Bytes(), recovered_package_bundle.Bytes()) {
+		//fmt.Printf("----------Original WorkPackageBundle and Decoded WorkPackageBundle are the same-------\n")
 		return true
 	} else {
+		//fmt.Printf("----------Original WorkPackage and Decoded WorkPackage are different-------\n")
 		return false
 	}
+	// if compareWorkPackageBundle(b, recovered_package_bundle) {
+	// 	return true
+	// } else {
+	// 	return false
+	// }
 }
 
 // After FetchExportedSegments and quick verify exported segments
@@ -641,10 +719,6 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (work types.Wor
 			return types.WorkReport{}, spec, common.Hash{}, err
 		}
 		output, _ := vm.GetArgumentOutputs()
-		// HACK
-		output = types.Result{
-			Ok: []byte{1},
-		}
 		// The workitem is an ordered collection of segments
 		asWorkItem := types.ASWorkItem{
 			Segments:   make([]types.Segment, 0),

@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -31,6 +32,38 @@ type WorkPackage struct {
 	WorkItems []WorkItem `json:"items"`
 }
 
+// WorkPackageBundle represents a work package.
+type WorkPackageBundle struct {
+	WorkPackage       WorkPackage       `json:"p"` // P: workPackage
+	ExtrinsicData     []ExtrinsicsBlobs `json:"x"` // X: extrinsic data for some workitem argument w
+	ImportSegmentData [][][]byte        `json:"s"` // M: import segment data, previouslly called m (each of segment is size of W_E*W_S)
+	Justification     [][][]common.Hash `json:"j"` // J: justifications of segment data build using CDT
+}
+
+// TODO: Sean should finish codec here. and remove json
+func (b *WorkPackageBundle) Bytes() []byte {
+	encoded, err := Encode(b)
+	if err != nil {
+		return nil
+	}
+	return encoded
+}
+
+func (b *WorkPackageBundle) String() string {
+	jsonByte, _ := json.Marshal(b)
+	return string(jsonByte)
+}
+
+func WorkPackageBundleFromBytes(data []byte) (*WorkPackageBundle, error) {
+	var b WorkPackageBundle
+	decoded, _, err := Decode(data, reflect.TypeOf(WorkPackageBundle{}))
+	if err != nil {
+		return nil, err
+	}
+	b = decoded.(WorkPackageBundle)
+	return &b, nil
+}
+
 type Authorizer struct {
 	CodeHash common.Hash `json:"code_hash"`
 	Params   []byte      `json:"params"`
@@ -50,7 +83,7 @@ func NewWorkPackage(bundle, segments []byte) *WorkPackage {
 	return &WorkPackage{}
 }
 
-func (a *WorkPackage) Split() (workpackagehashes []common.Hash, segmentRoots []common.Hash, bundle []byte) {
+func (b *WorkPackageBundle) Split() (workpackagehashes []common.Hash, segmentRoots []common.Hash, bundle []byte) {
 	// TODO: Stanley
 	return workpackagehashes, segmentRoots, bundle
 }

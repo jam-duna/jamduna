@@ -487,9 +487,8 @@ func TestWorkGuarantee(t *testing.T) {
 		time.Sleep(10 * time.Second)
 		E_G, err := nodes[4].FormGuarantee(workPackage.Hash())
 		if err != nil {
-			fmt.Printf("FormGuarantee ERR %v\n", err)
+			t.Fatal(err)
 		}
-
 		nodes[4].broadcast(E_G)
 
 		time.Sleep(30 * time.Second)

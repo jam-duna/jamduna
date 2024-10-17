@@ -6,9 +6,9 @@ import (
 
 /* Availability Specifier
 WorkPackageHash(h)	: the hash of the workpackage
-BundleLength(l)		: the len of the AuditFriendlyWorkPackage
+BundleLength(l)		: the len of the packagebundle
 ErasureRoot(u)		: MB([x∣x∈T[b♣,s♣]]) - root of a binary Merkle tree which (WBT) functions as a commitment to all data required for the auditing of the report and for use by later workpackages should they need to retrieve any data yielded.
-					  The root of a transport (AuditFriendlyWorkPackage Hashed and segment) encoding which is built by CDT
+					  The root of a transport (packagebundle Hashed and segment) encoding which is built by CDT
 SegmentRoot(e)		: M(s) - root of a constant-depth, left-biased and zero-hash-padded binary Merkle tree (CDT) committing to the hashes of each of the exported segments of each work-item.
 */
 

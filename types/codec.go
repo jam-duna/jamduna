@@ -324,7 +324,9 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 				if len(data) < int(length+l) {
 					return nil, 0, fmt.Errorf("data length insufficient for array element decoding")
 				}
-				v.Index(i).Set(reflect.ValueOf(elem))
+				if elem != nil {
+					v.Index(i).Set(reflect.ValueOf(elem))
+				}
 				length += l
 			}
 		}
@@ -353,7 +355,9 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 				if len(data) < int(length+l) {
 					return nil, 0, fmt.Errorf("data length insufficient for slice element decoding")
 				}
-				v.Index(i).Set(reflect.ValueOf(elem))
+				if elem != nil {
+					v.Index(i).Set(reflect.ValueOf(elem))
+				}
 				length += l
 			}
 		}
@@ -394,7 +398,9 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 			if len(data) < int(length+l) {
 				return nil, 0, fmt.Errorf("data length insufficient for pointer content")
 			}
-			ptr.Elem().Set(reflect.ValueOf(elem))
+			if elem != nil {
+				ptr.Elem().Set(reflect.ValueOf(elem))
+			}
 			v.Set(ptr)
 			length += l
 		}

@@ -3,8 +3,9 @@ package types
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
 	"reflect"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 const (
@@ -72,9 +73,12 @@ func (R Result) Encode() []byte {
 			return []byte{3}
 		case RESULT_OOB:
 			return []byte{4}
+		case RESULT_FAULT:
+			return []byte{5}
+		default:
+			return []byte{R.Err}
 		}
 	}
-	return nil
 }
 
 func (target Result) Decode(data []byte) (interface{}, uint32) {
@@ -109,8 +113,17 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 			Ok:  nil,
 			Err: RESULT_OOB,
 		}, length
+	case 5:
+		return Result{
+			Ok:  nil,
+			Err: RESULT_FAULT,
+		}, length
+	default:
+		return Result{
+			Ok:  nil,
+			Err: data[0],
+		}, length
 	}
-	return nil, 0
 }
 
 func (a *WorkResult) UnmarshalJSON(data []byte) error {

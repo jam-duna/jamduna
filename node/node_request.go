@@ -49,7 +49,11 @@ func (n *Node) RefineBundle(coreIndex uint16, workpackagehashes, segmentroots []
 	if len(bundle) == 0 {
 		panic(123)
 	}
-	workPackage := n.decodeWorkPackage(bundle)
+	bp, err := types.WorkPackageBundleFromBytes(bundle)
+	if (err != nil){
+		panic(123)
+	}
+	workPackage := bp.WorkPackage
 	workReport, _, _, err := n.executeWorkPackage(workPackage)
 	if err != nil {
 		return common.Hash{}, types.Ed25519Signature{}, err

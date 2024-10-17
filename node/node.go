@@ -553,11 +553,14 @@ func (n *Node) coreBroadcast(obj interface{}) []byte {
 
 				objType := reflect.TypeOf(obj)
 				switch objType {
-				case reflect.TypeOf(types.WorkPackage{}):
-					wp := obj.(types.WorkPackage)
-					workpackagehashes, segmentRoots, bundle := wp.Split()
-					//stub
-					bundle = n.encodeWorkPackage(wp)
+				case reflect.TypeOf(types.WorkPackageBundle{}):
+
+					b := obj.(types.WorkPackageBundle)
+					wp := b.WorkPackage
+
+					workpackagehashes, segmentRoots, bundle := b.Split()
+					//stub: user workpackage bundle
+					//bundle = n.encodeWorkPackage(wp)
 					work_report_hash, sig, err := p.ShareWorkPackage(core, workpackagehashes, segmentRoots, bundle)
 					if err != nil {
 						fmt.Printf("ShareWorkPackage ERR in coreBoarcast: %v\n", err)

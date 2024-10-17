@@ -834,6 +834,8 @@ func (vm *VM) Execute(entryPoint int) error {
 	if debug {
 		fmt.Println("last pc: ", vm.pc)
 	}
+	// if vm finished without error, set result code to OK
+	vm.resultCode = types.RESULT_OK
 	return nil
 }
 
