@@ -68,7 +68,7 @@ func DecodeBundle(encodedData [][]byte) ([]byte, error) {
 }
 
 func GetCodingRate() (coding_rate_K int, coding_rate_N int) {
-	coding_rate_K = types.W_C / 2
+	coding_rate_K = types.W_E / 2
 	coding_rate_N = types.TotalValidators
 	return coding_rate_K, coding_rate_N
 }

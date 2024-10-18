@@ -127,7 +127,7 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 
 	code := uint8(CE139_SegmentShardRequest)
 	if withJustification {
-		code = CE140_SegmentShardRequest
+		code = CE140_SegmentShardRequestP
 	}
 	stream, err := p.openStream(code)
 	req := &JAMSNPSegmentShardRequest{
@@ -172,7 +172,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	segmentshards, justifications, ok, err := n.store.GetSegmentShard(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+	segmentshards, justifications, ok, err := n.GetSegmentShard(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
 	if err != nil {
 		return err
 	}

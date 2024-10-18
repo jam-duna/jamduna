@@ -25,10 +25,10 @@ const (
 	CE134_WorkPackageShare             = 134
 	CE135_WorkReportDistribution       = 135
 	CE136_WorkReportRequest            = 136
-	CE137_ShardRequest                 = 137
-	CE138_ShardRequest                 = 138
+	CE137_FullShardRequest             = 137
+	CE138_BundleShardRequest           = 138
 	CE139_SegmentShardRequest          = 139
-	CE140_SegmentShardRequest          = 140
+	CE140_SegmentShardRequestP         = 140
 	CE141_AssuranceDistribution        = 141
 	CE142_PreimageAnnouncement         = 142
 	CE143_PreimageRequest              = 143
@@ -197,12 +197,14 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream) error {
 		n.onWorkReportDistribution(stream, msg)
 	case CE136_WorkReportRequest:
 		n.onWorkReportRequest(stream, msg)
-	case CE137_ShardRequest:
-		n.onShardRequest(stream, msg, false)
-	case CE138_ShardRequest:
-		n.onAuditShardRequest(stream, msg, true)
-	case CE139_SegmentShardRequest, CE140_SegmentShardRequest:
+	case CE137_FullShardRequest:
+		n.onFullShardRequest(stream, msg)
+	case CE138_BundleShardRequest:
+		n.onBundleShardRequest(stream, msg)
+	case CE139_SegmentShardRequest:
 		n.onSegmentShardRequest(stream, msg, false)
+	case CE140_SegmentShardRequestP:
+		n.onSegmentShardRequest(stream, msg, true)
 	case CE141_AssuranceDistribution:
 		n.onAssuranceDistribution(stream, msg, peerID)
 	case CE142_PreimageAnnouncement:

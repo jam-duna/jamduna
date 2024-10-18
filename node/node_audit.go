@@ -15,14 +15,16 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 	bundleShards := make([][]byte, types.TotalValidators)
 	for i := uint16(0); i < types.TotalValidators; i++ {
 		if i == n.id {
-			bundleShard, _, _, ok, err := n.store.GetShard(erasureRoot, i)
+			bundleShard, _, ok, err := n.GetBundleShard(erasureRoot, i)
 			if err != nil {
 			} else if ok {
 				bundleShards[i] = bundleShard
 			}
 		} else {
 			// TODO: optimize with gofunc ala makeRequests
-			bundleShard, _, _, err := n.peersInfo[i].SendShardRequest(erasureRoot, i, true)
+			// bundleShard, bundleJustification, err
+			bundleShard, _, err := n.peersInfo[i].SendBundleShardRequest(erasureRoot, i)
+			// TODO: wire up bundleJustification
 			if err != nil {
 
 			} else {

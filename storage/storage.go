@@ -143,7 +143,7 @@ func (store *StateDBStorage) StoreAuditDA(erasureRoot common.Hash, shardIndex ui
 	return nil
 }
 
-func (store *StateDBStorage) GetSegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16) (segmentShards []byte, justifications [][]byte, ok bool, err error) {
+func (store *StateDBStorage) GetSegmentShard_NO_ACCESS(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16) (segmentShards []byte, justifications [][]byte, ok bool, err error) {
 	key := generateKey(AuditDASegmentShardPrefix, erasureRoot, shardIndex)
 	segmentShards, err = store.db.Get(key, nil)
 	if err != nil {
@@ -165,7 +165,7 @@ func (store *StateDBStorage) GetSegmentShard(erasureRoot common.Hash, shardIndex
 	return segmentShards, justifications, true, nil
 }
 
-func (store *StateDBStorage) GetShard(erasureRoot common.Hash, shardIndex uint16) (bundleShard, segmentShards, justification []byte, ok bool, err error) {
+func (store *StateDBStorage) GetShard_NO_ACCESS(erasureRoot common.Hash, shardIndex uint16) (bundleShard, segmentShards, justification []byte, ok bool, err error) {
 	key := generateKey(AuditDABundlePrefix, erasureRoot, shardIndex)
 	bundleShard, err = store.db.Get(key, nil)
 	if err != nil {
@@ -186,6 +186,5 @@ func (store *StateDBStorage) GetShard(erasureRoot common.Hash, shardIndex uint16
 	if err != nil && err != leveldb.ErrNotFound {
 		return nil, nil, nil, false, err
 	}
-
 	return bundleShard, segmentShards, justification, true, nil
 }

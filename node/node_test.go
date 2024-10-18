@@ -172,7 +172,7 @@ func TestNodeSafrole(t *testing.T) {
 /*
 func TestSegmentECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
-	dataSizes := []int{types.W_C * types.W_S}
+	dataSizes := []int{types.W_E * types.W_S}
 	// segmentSizes := []int{1, 10}
 	segmentSizes := []int{10}
 
@@ -208,7 +208,7 @@ func TestSegmentECRoundTrip(t *testing.T) {
 				for i := 0; i < segmentLength; i++ {
 					randData := make([]byte, size)
 					_, err := rand.Read(randData)
-					randData = common.PadToMultipleOfN(randData, types.W_C*types.W_S)
+					randData = common.PadToMultipleOfN(randData, types.W_E*types.W_S)
 					data = append(data, randData)
 					if err != nil {
 						t.Fatalf("Failed to generate random data: %v", err)
@@ -253,10 +253,12 @@ func TestSegmentECRoundTrip(t *testing.T) {
 					// Append the segment root to the list of segment roots
 					segmentsECRoots = append(segmentsECRoots, segmentsECRoot...)
 					// Distribute the segments
-					err = senderNode.DistributeSegmentData(erasureCodingSegments, segmentRoots, len(FlattenData))
+					ecChunks, err := senderNode.BuildExportedSegmentChunks(erasureCodingSegments, segmentRoots)
 					if err != nil {
 						fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
 					}
+					senderNode.DistributeEcChunks(ecChunks)
+					fmt.Printf("len(ecChunks)=%v\n", ecChunks)
 				}
 
 				fmt.Println("Finished EncodeAndDistributeSegmentData...")
@@ -315,7 +317,7 @@ func TestECRoundTrip(t *testing.T) {
 	// Define various data sizes to test
 	//try to do it separately test for each size
 	dataSizes := []int{1028, 23, 24, 25, 26, 27, 28, 29, 30, 31, 39, 1024}
-	// dataSizes := []int{types.W_C * types.W_S, types.W_C * types.W_S * 2, types.W_C * types.W_S * 3}
+	// dataSizes := []int{types.W_E * types.W_S, types.W_E * types.W_S * 2, types.W_E * types.W_S * 3}
 	// dataSizes := []int{2084}
 	// Initialize nodes
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
@@ -347,17 +349,9 @@ func TestECRoundTrip(t *testing.T) {
 				t.Fatalf("Failed to generate random data: %v", err)
 			}
 
-			paddeddata := common.PadToMultipleOfN(data, types.W_C)
-			dataLength := len(data)
-
-			chunks, err := senderNode.encode(paddeddata, false, dataLength)
-			if err != nil {
-				fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-			}
-
-			blobHash := common.Blake2Hash(paddeddata)
-
-			err = senderNode.DistributeArbitraryData(chunks, blobHash, dataLength)
+			chunks, blobHash, dataLength := senderNode.PrepareArbitaryData(data)
+			ecChunks, err := senderNode.BuildArbitraryDataChunks(chunks, blobHash, dataLength)
+			senderNode.DistributeEcChunks(ecChunks)
 
 			if err != nil {
 				t.Fatalf("Failed to encode and distribute data: %v", err)
@@ -422,21 +416,21 @@ func TestWorkGuarantee(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	// TODO: William - need to use privileged service (stored in genesis state) to load this code with a specific service
 	service := uint32(47) // WRONG: william to fix
-	codeHash := common.Blake2Hash(code)
-	codeLength := len(code)
-	chunks, err := nodes[0].encode(code, false, codeLength)
+	
+	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
+	chunks, codeHash, codeLength := nodes[0].PrepareArbitaryData(code)
+	ecChunks, err := nodes[0].BuildArbitraryDataChunks(chunks, codeHash, codeLength)
 	if err != nil {
 		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
 	}
-
-	err = nodes[0].DistributeArbitraryData(chunks, codeHash, codeLength)
-	if err != nil {
-		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-	}
+	nodes[0].DistributeEcChunks(ecChunks)
 	// we can try to use EP to replace the code here
-	//----------------------------------------------
+
+	// if (codeHash != recoveredCodeHash){
+	// 	t.Fatalf("CodeHash mismatch!")
+	// }
+
 	for _, n := range nodes {
 		target_statedb := n.getPVMStateDB()
 		target_statedb.WriteServicePreimageBlob(service, code)

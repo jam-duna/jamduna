@@ -5,8 +5,10 @@ import (
 	//"context"
 	//"errors"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/colorfulnotion/jam/trie"
 )
 
 func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
@@ -46,6 +48,54 @@ func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
 		return []byte{}, false, nil
 	}
 	return preimage, true, nil
+	return []byte{}, false, nil
+}
+
+// CE137_FullShardRequest
+func (n *Node) GetFullShard(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, segmentShards [][]byte, justification []byte, ok bool, err error) {
+	// TODO: Stanley+Michael
+	recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, err := n.GetMeta(erasureRoot)
+	if err != nil {
+		return bundleShard, segmentShards, justification, false, err
+	}
+	shardJustification, orderedBundleShard, orderedSegmentShard := GetShardSpecificOrderedChunks(shardIndex, recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
+
+	bundleShard = orderedBundleShard.Data
+
+	segmentShards = make([][]byte, len(orderedSegmentShard))
+	for segment_idx, segment_shard := range orderedSegmentShard {
+		segmentShards[segment_idx] = segment_shard.Data
+	}
+	fmt.Printf("GetFullShard shardIndex %v segmentShards: %x\n", shardIndex, segmentShards)
+	justification = shardJustification.CompactPath()
+	//justification = []byte{} //shardJustifications
+	bClub := common.Blake2Hash(bundleShard)
+	sClub := trie.NewWellBalancedTree(segmentShards).RootHash()
+	//pair := append(b[i].Bytes(), s[i].Bytes()...)
+	pair := append(bClub.Bytes(),sClub.Bytes()...)
+	leafHash := common.Hash(trie.ComputeLeaf(pair))
+	fmt.Printf("GetFullShard shardIndex %v expected pair=%x pair=%x -> leafHash=%v\n", shardIndex, shardJustification.Leaf, pair, leafHash)
+	path, _ := common.ExpandPath(justification)
+	verified := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
+
+	fmt.Printf("GetFullShard !!! ErasureRootPath shardIdx=%v, treeLen=%v leafHash=%v, path=%v | verified=%v\n", shardIndex, types.TotalValidators, leafHash, path, verified)
+	return bundleShard, segmentShards, justification, false, nil
+}
+
+// CE138_ShardRequest
+func (n *Node) GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, justification []byte, ok bool, err error) {
+	// TODO: Stanley+Michael
+	bundleShard = []byte{}
+	justification = []byte{}
+	return bundleShard, justification, false, nil
+}
+
+// CE139_SegmentShardRequest
+func (n *Node) GetSegmentShard(erasureRoot common.Hash, shardIndex uint16, SegmentIndex []uint16) (segmentshards []byte, segment_justifications [][]byte, ok bool, err error) {
+	//j⌢[b] <--- CE_137 shared
+	segmentshards = []byte{}
+	segment_justifications = [][]byte{}
+	return segmentshards, segment_justifications, false, nil
 }
 
 func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValue, ok bool, err error) {

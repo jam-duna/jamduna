@@ -62,7 +62,7 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 	spec := g.Report.AvailabilitySpec
 	erasureRoot := spec.ErasureRoot
 	guarantor := g.Signatures[0].ValidatorIndex // TODO: try any of them, not the 0th one
-	bundleShard, segmentShards, justification, err := n.peersInfo[guarantor].SendShardRequest(erasureRoot, n.id, false)
+	bundleShard, segmentShards, justification, err := n.peersInfo[guarantor].SendFullShardRequest(erasureRoot, n.id)
 	if err != nil {
 		fmt.Printf("%s assureData: SendShardRequest %v\n", n.String(), err)
 		return

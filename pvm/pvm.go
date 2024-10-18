@@ -17,7 +17,7 @@ const (
 
 	regSize  = 13
 	numCores = types.TotalCores
-	W_C      = types.W_C
+	W_E      = types.W_E
 	W_S      = types.W_S
 	W_X      = 1024
 	M        = 128

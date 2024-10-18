@@ -400,7 +400,7 @@ func TestGenerateTestVectors(t *testing.T) {
 
 	// TODO: Stanley to check this Jerry
 	// Derive K, N
-	// K := w_c / 2
+	// K := W_E / 2
 	// N := w_s
 
 	//fixed random seed for repeatability

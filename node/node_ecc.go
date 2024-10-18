@@ -186,6 +186,7 @@ func (n *Node) decode(data [][][]byte, isFixed bool, data_len int) ([]byte, erro
 //		// Return the DistributeECChunk objects
 //		return chunks, nil
 //	}
+
 func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte, blobHash common.Hash, blobMeta []byte) ([]types.DistributeECChunk, error) {
 	// TODO: Pack the chunks into DistributeECChunk objects
 	chunks := make([]types.DistributeECChunk, 0)
@@ -230,7 +231,7 @@ func (n *Node) processDistributeECChunk(chunk types.DistributeECChunk) error {
 		return err
 	}
 
-	fmt.Printf(" -- [N%d] saved DistributeECChunk common.Hash(chunk.RootHash)=%s\nchunk.BlobMeta=%x\nchunk.SegmentRoot=%x\nchunk.Data=%x\n", n.id, common.Hash(chunk.RootHash), chunk.BlobMeta, common.Hash(chunk.SegmentRoot), chunk.Data)
+	fmt.Printf(" -- [N%d] saved DistributeECChunk common.Hash(chunk.RootHash)=%s\nchunk.BlobMeta=%x\nchunk.SegmentRoot=%s\nchunk.Data=%x\n", n.id, common.Hash(chunk.RootHash), chunk.BlobMeta, common.Hash(chunk.SegmentRoot), chunk.Data)
 	return nil
 }
 
@@ -257,7 +258,44 @@ func (n *Node) processECChunkQuery(ecChunkQuery types.ECChunkQuery) (types.ECChu
 	return chunk, nil
 }
 
-func (n *Node) DistributeSegmentData(erasureCodingSegments [][][]byte, segmentRoots [][]byte, lengthData int) (err error) {
+func (n *Node) DistributeExportedEcChunkArray(ecChunksArr [][]types.DistributeECChunk) error {
+	for _, ecChunks := range ecChunksArr {
+		err := n.DistributeEcChunks(ecChunks)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (n *Node) DistributeEcChunks(ecChunks []types.DistributeECChunk) error {
+/*
+	numNodes := types.TotalValidators
+	peerIdentifiers := make([]string, len(ecChunks))
+	requestObjs := make([]interface{}, len(ecChunks))
+
+	for i, ecChunk := range ecChunks {
+		peerIdx := uint32(i % numNodes)
+		peerIdentifier, err := n.getPeerByIndex(peerIdx)
+		if err != nil {
+			return err
+		}
+		peerIdentifiers[i] = peerIdentifier
+		requestObjs[i] = ecChunk
+	}
+	responses, err := n.makeRequests(peerIdentifiers, requestObjs, types.TotalValidators, types.QuicIndividualTimeout,  types.QuicOverallTimeout)
+	if err != nil {
+		fmt.Printf("[N%v] DistributeEcChunks MakeRequests Errors %v\n", n.id, err)
+		return err
+	}
+
+	fmt.Printf("DistributeEcChunks resp=%v\n", len(responses))
+*/
+	return nil
+}
+
+// was Distribute_SegmentData
+func (n *Node) BuildExportedSegmentChunks(erasureCodingSegments [][][]byte, segmentRoots [][]byte) (ecChunks []types.DistributeECChunk, err error) {
 
 	// Generate the blob hash by hashing the original data
 	blobTree := trie.NewCDMerkleTree(segmentRoots)
@@ -273,20 +311,22 @@ func (n *Node) DistributeSegmentData(erasureCodingSegments [][][]byte, segmentRo
 	segment_meta := encodeBlobMeta(segmentRootsFlattened)
 	err = n.store.WriteKV(common.Hash(segmentsECRoot), segment_meta)
 	if err != nil {
-		return err
+		return ecChunks, err
 	}
 
 	// Pack the chunks into DistributeECChunk objects
-	_, err = n.packChunks(erasureCodingSegments, segmentRoots, common.Hash(segmentsECRoot), segment_meta)
+	ecChunks, err = n.packChunks(erasureCodingSegments, segmentRoots, common.Hash(segmentsECRoot), segment_meta)
 	if err != nil {
-		return err
+		return ecChunks, err
 	}
 
-	// TODO: SAVE the shards
-	return nil
+	//n.DistributeEcChunks(ecChunks)
+	return ecChunks, nil
 }
 
-func (n *Node) DistributeArbitraryData(chunks [][][]byte, blobHash common.Hash, blobLen int) (err error) {
+// Compute ecChunks without distribution for arbitrary dara
+// Renamed from DistributeArbitraryData -- to remove distribution
+func (n *Node) BuildArbitraryDataChunks(chunks [][][]byte, blobHash common.Hash, blobLen int) (ecChunks []types.DistributeECChunk, err error) {
 
 	// if len(segments) != 1 {
 	// 	panic("Expected only one segment")
@@ -310,13 +350,14 @@ func (n *Node) DistributeArbitraryData(chunks [][][]byte, blobHash common.Hash, 
 	// n.store.WriteKV(blobHash, blob_meta)
 
 	// Pack the chunks into DistributeECChunk objects
-	_, err = n.packChunks(chunks, chunksRoots, blobHash, blob_meta)
+	ecChunks, err = n.packChunks(chunks, chunksRoots, blobHash, blob_meta)
 	if err != nil {
-		return err
+		return ecChunks, err
 	}
 
-	// SAVE the shards
-	return nil
+	//n.DistributeEcChunks(ecChunks)
+	fmt.Printf("allHash encode %x\n", chunksRoots)
+	return ecChunks, nil
 }
 
 /*
@@ -413,6 +454,7 @@ func (n *Node) FetchAndReconstructAllSegmentsData(treeRoot common.Hash) ([][]byt
 		return nil, nil, nil, err
 	}
 	allHash := SplitBytesIntoHash(segmentsECRoots, len(common.Hash{}))
+	fmt.Printf("FetchAndReconstructAllSegmentsData root:%v, allHash=%v\n", treeRoot, allHash)
 	// segmentRoots, pageProohRoots := splitHashes(allHash)
 	segmentRoots, _ := splitHashes(allHash)
 

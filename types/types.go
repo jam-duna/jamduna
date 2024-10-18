@@ -2,6 +2,7 @@ package types
 
 import (
 	"math"
+	"encoding/json"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -31,11 +32,54 @@ type BlockQuery struct {
 	BlockHash common.Hash `json:"block_hash"`
 }
 
+type ConformantECChunk struct {
+	Data        []byte      `json:"data"`
+	ShardIndex  uint32		`json:"shardIdx"`
+}
+
+// Marshal marshals ConformantECChunk into JSON
+func (c *ConformantECChunk) Marshal() ([]byte, error) {
+	return json.Marshal(c)
+}
+
+// Unmarshal unmarshals JSON data into DistributeECChunk
+func (c *ConformantECChunk) Unmarshal(data []byte) error {
+	return json.Unmarshal(data, c)
+}
+
+func (c *ConformantECChunk) Bytes() ([]byte) {
+	jsonData, _ := c.Marshal()
+	return jsonData
+}
+
+func (c *ConformantECChunk) String() string {
+	return string(c.Bytes())
+}
+
 type DistributeECChunk struct {
 	SegmentRoot []byte      `json:"segment_root"`
 	Data        []byte      `json:"data"`
 	RootHash    common.Hash `json:"root_hash"`
 	BlobMeta    []byte      `json:"blob_meta"`
+}
+
+// Marshal marshals DistributeECChunk into JSON
+func (d *DistributeECChunk) Marshal() ([]byte, error) {
+	return json.Marshal(d)
+}
+
+// Unmarshal unmarshals JSON data into DistributeECChunk
+func (d *DistributeECChunk) Unmarshal(data []byte) error {
+	return json.Unmarshal(data, d)
+}
+
+func (d *DistributeECChunk) Bytes() ([]byte) {
+	jsonData, _ := d.Marshal()
+	return jsonData
+}
+
+func (d *DistributeECChunk) String() string {
+	return string(d.Bytes())
 }
 
 type ECChunkResponse struct {
@@ -92,7 +136,7 @@ type GasAttributable struct {
 }
 
 func ComputeC_Base(blob_length int) int {
-	c := int(math.Ceil(float64(blob_length) / float64(W_C)))
+	c := int(math.Ceil(float64(blob_length) / float64(W_E)))
 	return c
 }
 

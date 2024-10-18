@@ -125,3 +125,25 @@ func ConcatenateByteSlices(slices [][]byte) []byte {
 
 	return result
 }
+
+func CompactPath(path []Hash) []byte {
+    combined := make([]byte, 0)
+    for _, h := range path {
+        combined = append(combined, h[:]...)
+    }
+    return combined
+}
+
+func ExpandPath(compact []byte) ([]Hash, error) {
+    if len(compact)%32 != 0 {
+        return nil, fmt.Errorf("invalid compact path length, must be a multiple of 32")
+    }
+    hashCount := len(compact) / 32
+    hashes := make([]Hash, hashCount)
+    for i := 0; i < hashCount; i++ {
+        var hash Hash
+        copy(hash[:], compact[i*32:(i+1)*32]) // Copy 32 bytes into the hash
+        hashes[i] = hash
+    }
+    return hashes, nil
+}

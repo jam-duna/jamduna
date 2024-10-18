@@ -734,8 +734,8 @@ func (vm *VM) hostImport() uint32 {
 	}
 	o, _ := vm.readRegister(8) // a1 = 8
 	l, _ := vm.readRegister(9) // a2 = 9
-	if l > (W_C * W_S) {
-		l = W_C * W_S
+	if l > (W_E * W_S) {
+		l = W_E * W_S
 	}
 
 	if len(v_Bytes) != 0 {
@@ -841,8 +841,8 @@ func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 	*/
 	p, _ := vm.readRegister(7) // a0 = 7
 	z, _ := vm.readRegister(8) // a1 = 8
-	if z > (W_C * W_S) {
-		z = W_C * W_S
+	if z > (W_E * W_S) {
+		z = W_E * W_S
 	}
 
 	e := vm.Exports
@@ -859,12 +859,12 @@ func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 	(187) 	P n∈N 1∶ ∶{ Y → Y k⋅n
 			x ↦ x ⌢ [0, 0, ...] ((∣x∣+n−1) mod n)+1...n
 
-	n := (W_C * W_S)
+	n := (W_E * W_S)
 	length := n - ((len(x) + n - 1) % n) + 1
 	zeroSequence := make([]byte, length)
 	x = append(x, zeroSequence...)
 	*/
-	x = common.PadToMultipleOfN(x, W_C*W_S)
+	x = common.PadToMultipleOfN(x, W_E*W_S)
 
 	ς := uint32(0)               // Assume ς (sigma, Represent segment offset), need to get ς properly
 	if ς+uint32(len(e)) >= W_X { // W_X

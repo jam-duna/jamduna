@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"encoding/json"
 	"encoding/binary"
 
 	"github.com/colorfulnotion/jam/pvm"
@@ -14,7 +15,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) *types.AvailabilitySpecifier {
+func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) {
 	// compile wp into b
 	package_bundle := n.CompilePackageBundle(workPackage)
 	package_bundle_byte := package_bundle.Bytes()
@@ -34,18 +35,28 @@ func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage typ
 		fmt.Printf("----------Original WorkPackage and Decoded WorkPackage are different-------\n")
 	}
 
-	// Length of `b`
-	bLength := uint32(len(package_bundle_byte))
+	b := package_bundle.Bytes()
 
-	// Compute b♣ and s♣
-	blobRoot, bClub := n.computeAndDistributeBClub(package_bundle_byte)
-	treeRoot, sClub := n.computeAndDistributeSClub(segments)
+	// Length of `b`
+	bLength := uint32(len(b))
+
+	// Build b♣ and s♣
+	blobRoot, bClubs, bEcChunks := n.buildBClub(b)
+	combinedTreeRoot, sClubs, segmentsECRoots, segmentItemRoots, sEcChunksArr := n.buildSClub(segments)
+	//treeRoot, sClubs, sEcChunksArr := n.buildSClub(segments)
+	fmt.Printf("len(bEcChunks)=%v\n", len(bEcChunks))
+	fmt.Printf("len(sEcChunksArr)=%v\n", len(sEcChunksArr))
+	fmt.Printf("bClubs %v\n", bClubs)
+	fmt.Printf("sClubs %v\n", sClubs)
+	fmt.Printf("combinedTreeRoot %v\n", combinedTreeRoot)
+	fmt.Printf("segmentsECRoots %v\n", segmentsECRoots)
+	fmt.Printf("segmentItemRoots %v\n", segmentItemRoots)
 
 	// u = (bClub, sClub)
-	erasure_root_u := n.generateErasureRoot(bClub, sClub, blobRoot, treeRoot)
+	erasure_root_u := n.generateErasureRoot(bClubs, sClubs, blobRoot, combinedTreeRoot)
 
 	// ExportedSegmentRoot = CDT(segments)
-	exported_segment_root_e := generateSegmentsRoot(segments)
+	exported_segment_root_e := generateExportedSegmentsRoot(segments)
 
 	// Return the Availability Specifier
 	availabilitySpecifier := types.AvailabilitySpecifier{
@@ -54,52 +65,339 @@ func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage typ
 		ErasureRoot:         erasure_root_u,
 		ExportedSegmentRoot: exported_segment_root_e,
 	}
-	return &availabilitySpecifier
+
+	erasureMeta = ECCErasureMap {
+		ErasureRoot: erasure_root_u,
+		ExportedSegmentRoot: exported_segment_root_e,
+		WorkPackageHash: packageHash,
+		BundleLength: bLength,
+		BClubs: bClubs,
+		SClubs: sClubs,
+		BlobRoot: blobRoot,
+		CombinedTreeRoot: combinedTreeRoot,
+		SegmentsECRoots: segmentsECRoots,
+		SegmentItemRoots: segmentItemRoots,
+	}
+
+	return &availabilitySpecifier, erasureMeta, bEcChunks, sEcChunksArr
 }
 
-// Compute b♣ using the EncodeWorkPackage function
-func (n *Node) computeAndDistributeBClub(b []byte) (common.Hash, [][]common.Hash) {
-	// Padding b to the length of W_C
-	paddedB := common.PadToMultipleOfN(b, types.W_C)
+func (n *Node) GetMeta(erasureRoot common.Hash) (erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk, err error){
+	//TODO: should probably store erasureRoot -> pbH
+	erasure_metaKey := fmt.Sprintf("erasureMeta-%v", erasureRoot)
+	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasureRoot)
+	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasureRoot)
+	erasure_metaKey_val, err := n.ReadRawKV([]byte(erasure_metaKey))
+	erasure_bKey_val, err := n.ReadRawKV([]byte(erasure_bKey))
+	erasure_sKey_val, err := n.ReadRawKV([]byte(erasure_sKey))
+	if (err != nil){
+		return erasureMeta, bECChunks, sECChunksArray, fmt.Errorf("Fail to find erasure_metaKey=%v", erasureRoot)
+	}
+	// TODO: figure out the codec later
+    if err := erasureMeta.Unmarshal(erasure_metaKey_val); err != nil {
+        fmt.Println("Error unmarshalling JSON:", err)
+        return erasureMeta, bECChunks, sECChunksArray, err
+    }
+
+	// Variables to hold the unmarshalled data
+    // var bECChunks []types.DistributeECChunk
+    // var sECChunksArray [][]types.DistributeECChunk
+
+    if err := json.Unmarshal(erasure_bKey_val, &bECChunks); err != nil {
+        return erasureMeta, bECChunks, sECChunksArray, err
+    }
+
+    if err := json.Unmarshal(erasure_sKey_val, &sECChunksArray); err != nil {
+        return erasureMeta, bECChunks, sECChunksArray, err
+    }
+	fmt.Printf("Recover Meta from levelDB. Ready for Building. %v, erasureMap=%v, bECChunks=%v, sECChunksArray=%v\n", erasureRoot, erasureMeta.String(), bECChunks, sECChunksArray)
+	return erasureMeta, bECChunks, sECChunksArray, err
+}
+
+func (n *Node) StoreMeta(as *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk){
+	erasure_root_u := as.ErasureRoot
+	erasure_metaKey := fmt.Sprintf("erasureMeta-%v", erasure_root_u)
+	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
+	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasure_root_u)
+	packageHash_sey := fmt.Sprintf("erasureSChunk-%v", as.WorkPackageHash)
+
+
+	bChunkJson, _ := json.Marshal(bECChunks)
+	sChunkJson, _ := json.Marshal(sECChunksArray)
+
+
+	fmt.Printf("erasure_metaKey=%v, val=%s\n", erasure_metaKey, string(erasureMeta.Bytes()))
+	fmt.Printf("erasure_bKey=%v, val=%s\n", erasure_metaKey, string(bChunkJson))
+	fmt.Printf("erasure_sKey=%v, val=%s\n", erasure_metaKey, string(sChunkJson))
+	n.FakeWriteRawKV(erasure_metaKey, erasureMeta.Bytes())
+	n.FakeWriteRawKV(erasure_bKey, bChunkJson)
+	n.FakeWriteRawKV(erasure_sKey, sChunkJson)
+	n.FakeWriteRawKV(packageHash_sey, erasure_root_u.Bytes())
+
+}
+
+// this is the default justification from (b,s) to erasureRoot
+func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJustifications []types.Justification, err error) {
+	shardJustifications = make([]types.Justification, types.TotalValidators)
+	erasureTree, bundle_segment_pairs := GenerateErasureTree(b, s)
+	erasureRoot := erasureTree.RootHash()
+	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx ++ {
+		treeLen, leafHash, path, isFound, _ := erasureTree.Trace(shardIdx)
+		verified := VerifyJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
+		if (!verified){
+			return shardJustifications, fmt.Errorf("Justification Failure")
+		}
+		if (verified){
+			shardJustifications[shardIdx] = types.Justification {
+				Root: erasureRoot,
+				ShardIdx: shardIdx,
+				TreeLen: types.TotalValidators,
+				Leaf: bundle_segment_pairs[shardIdx],
+				LeafHash: leafHash,
+				Path: path,
+			}
+		}
+		fmt.Printf("ErasureRootPath shardIdx=%v, treeLen=%v leafHash=%v, path=%v, isFound=%v | verified=%v\n", shardIdx, treeLen, leafHash, path, isFound, verified)
+	}
+	return shardJustifications, nil
+}
+
+// Verify T(s,i,H)
+func VerifyJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash common.Hash, path []common.Hash) bool {
+	recoveredRoot, verified, _ := trie.VerifyWBT(treeLen, int(shardIndex), root, leafHash, path)
+	if (root != recoveredRoot){
+		fmt.Sprintf("VerifyJustification Failure! Expected:%v | Recovered: %v\n", root, recoveredRoot)
+		//panic("VerifyJustification")
+	}
+	return verified
+}
+
+// Generating co-path for T(s,i,H)
+// s: [(b♣T,s♣T)...] -  sequence of (work-package bundle shard hash, segment shard root) pairs satisfying u = MB(s)
+// i: shardIdx or ChunkIdx
+// H: Blake2b
+func GenerateJustification(root common.Hash, shardIndex uint16, leaves [][]byte) (treeLen int, leafHash common.Hash, path []common.Hash, isFound bool) {
+	wbt := trie.NewWellBalancedTree(leaves)
+	//treeLen, leafHash, path, isFound, nil
+	treeLen, leafHash, path, isFound, _ = wbt.Trace(int(shardIndex))
+	//fmt.Printf("[shardIndex=%v] erasureRoot=%v, leafHash=%v, path=%v, found=%v\n", shardIndex, erasureRoot, leafHash, path, isFound)
+	return treeLen, leafHash, path, isFound
+}
+
+func GetOrderedChunks(erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) (shardJustifications []types.Justification, orderedBundleShards []types.ConformantECChunk, orderedSegmentShards [][]types.ConformantECChunk){
+		shardJustifications, _ = ErasureRootDefaultJustification(erasureMeta.BClubs,  erasureMeta.SClubs)
+		fmt.Printf("shardJustifications: %v\n", shardJustifications[0].String())
+		orderedBundleShards = ComputeOrderedNPBundleChunks(bECChunks)
+		fmt.Printf("orderedBundleShards %x\v\n", orderedBundleShards)
+		orderedSegmentShards = ComputeOrderedExportedNPChunks(sECChunksArray)
+		fmt.Printf("orderedSegmentShards %x\v\n", orderedSegmentShards)
+		return shardJustifications, orderedBundleShards, orderedSegmentShards
+}
+
+func GetShardSpecificOrderedChunks(shardIdx uint16, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) (shardJustification types.Justification, bundleShard types.ConformantECChunk, segmentShards []types.ConformantECChunk){
+	idx := int(shardIdx)
+	shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(erasureMeta, bECChunks, sECChunksArray)
+	return shardJustifications[idx], orderedBundleShards[idx], orderedSegmentShards[idx]
+}
+
+func (n *Node) FakeDistributeChunks(erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk){
+	//cheating .. remove after correctness
+	debug := true
+	if (debug){
+		// Distribute b♣ Chunks and s♣ Chunks
+		n.DistributeEcChunks(bECChunks)
+		n.DistributeExportedEcChunkArray(sECChunksArray)
+	}
+}
+
+
+type ECCErasureMap struct {
+	ErasureRoot common.Hash
+	ExportedSegmentRoot common.Hash
+	WorkPackageHash common.Hash
+	BundleLength uint32
+	BClubs []common.Hash
+	SClubs []common.Hash
+	BlobRoot common.Hash
+	CombinedTreeRoot common.Hash
+	SegmentsECRoots []common.Hash
+	SegmentItemRoots [][]common.Hash
+}
+
+// Marshal marshals ECCErasureMap into JSON
+func (e *ECCErasureMap) Marshal() ([]byte, error) {
+	return json.Marshal(e)
+}
+
+func (e *ECCErasureMap) Unmarshal(data []byte) error {
+	return json.Unmarshal(data, e)
+}
+
+// TODO: use codec ..
+func (e *ECCErasureMap) Bytes() ([]byte) {
+	jsonData, _ := e.Marshal()
+	return jsonData
+}
+
+// TODO: use codec ..
+func (e *ECCErasureMap) String() string {
+	return string(e.Bytes())
+}
+
+
+func (n *Node) PrepareArbitaryData(b []byte) ([][][]byte, common.Hash, int){
+	// Padding b to the length of W_E
+	paddedB := common.PadToMultipleOfN(b, types.W_E)
 	bLength := len(b)
 
 	chunks, err := n.encode(paddedB, false, bLength)
 	if err != nil {
-		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+		fmt.Println("Error in prepareArbitaryData:", err)
 	}
-
 	blobHash := common.Blake2Hash(paddedB)
+	return chunks, blobHash, bLength
+}
 
-	err = n.DistributeArbitraryData(chunks, blobHash, bLength)
+// Compute b♣ using the EncodeWorkPackage function
+func (n *Node) buildBClub(b []byte) (common.Hash, []common.Hash, []types.DistributeECChunk) {
 
+	chunks, blobHash, bLength := n.PrepareArbitaryData(b)
+	ecChunks, err := n.BuildArbitraryDataChunks(chunks, blobHash, bLength)
 	if err != nil {
 		fmt.Println("Error in DistributeSegmentData:", err)
 	}
 
+	//var tmpbClub []common.Hash
+	// for _, block := range chunks {
+	// 	for _, b := range block {
+	// 		tmpbClub = append(tmpbClub, common.Hash(common.PadToMultipleOfN(b, 32)))
+	// 	}
+	// 	bClub = tmpbClub
+	// }
+
 	// Hash each element of the encoded data
-	var tmpbClub []common.Hash
-	var bClub [][]common.Hash
-
-	for _, block := range chunks {
-		for _, b := range block {
-			tmpbClub = append(tmpbClub, common.Hash(common.PadToMultipleOfN(b, 32)))
-		}
-		bClub = append(bClub, tmpbClub)
+	bClubs := make([]common.Hash, types.TotalValidators)
+	bundleShards := chunks[0] // this should be of size 1
+	for shardIdx, shard := range bundleShards {
+		//tmpbClub = append(tmpbClub, common.Hash(common.PadToMultipleOfN(shard, 32)))
+		bClubs[shardIdx] = common.Blake2Hash(shard)
 	}
-
-	return blobHash, bClub
+	return blobHash, bClubs, ecChunks
 }
 
-func (n *Node) computeAndDistributeSClub(segments [][]byte) (common.Hash, [][]common.Hash) {
+func (n *Node) buildSClub(segments [][]byte) (common.Hash, []common.Hash, []common.Hash, [][]common.Hash, [][]types.DistributeECChunk) {
+
+	ecChunksArr := make([][]types.DistributeECChunk, 0)
+	pageProofs, _ := trie.GeneratePageProof(segments)
+	exportedSegmentLen := len(segments)
+	pageProofLen := len(pageProofs)
+
+	// array of segmentsRoot ++ pageProofRoot
+	var segmentsECRoots []common.Hash
+
+	// this is the raw roots at ith_item level
+	segmentItemRoots := make([][]common.Hash, exportedSegmentLen + pageProofLen)
+
+
+	// logic a transpose
+	sequentialTranspose := make([][][]byte, types.TotalValidators)
+
+	// gathering root per segment or pageProof
+	for segmentIdx, segmentData := range segments {
+		// Encode the data into segments
+		erasureCodingSegments, err := n.encode(segmentData, true, len(segmentData)) // Set to false for variable size segments
+		if err != nil {
+			fmt.Printf("Error in buildSClub segment#%v: %v\n", segmentIdx, err)
+		}
+
+		// Build segment roots
+		fmt.Printf("segment#%v len=%v\n", segmentIdx, len(erasureCodingSegments))
+		if (len(erasureCodingSegments) != 1){
+			panic("Invalid segment implementation! NOT OK")
+		}
+
+		segmentLeaves := erasureCodingSegments[0]
+		segmentTree := trie.NewCDMerkleTree(segmentLeaves)
+		segmentRoot := segmentTree.RootHash()
+		segmentRoots := make([][]byte, 1)
+		segmentRoots[0] = segmentRoot.Bytes()
+
+		segmentItemRoots[segmentIdx] = []common.Hash{segmentRoot}
+
+		// Generate the blob hash by hashing the original data
+		// blobTree := trie.NewCDMerkleTree(segmentRoots)
+		// segmentsECRoot := blobTree.Root()
+		// fmt.Printf("segment#%v: segmentsECRoot=%x, segmentRoots=%x\n", segmentIdx, segmentsECRoot, segmentRoots)
+
+		blobTree := trie.NewCDMerkleTree(segmentRoots)
+		segmentsECRoot := blobTree.RootHash()
+		segmentsECRoots = append(segmentsECRoots, segmentsECRoot)
+
+		// Distribute the segments
+		ecChunks, err := n.BuildExportedSegmentChunks(erasureCodingSegments, segmentRoots)
+		if err != nil {
+			fmt.Printf("Error in buildSClub segment#%v: %v\n", segmentIdx, err)
+		}
+		for chunkIdx, ecChunks := range ecChunks {
+			shardIdx := uint32(chunkIdx % types.TotalValidators)
+			sequentialTranspose[shardIdx] = append(sequentialTranspose[shardIdx], ecChunks.Data)
+		}
+
+		fmt.Printf("buildSClub segment#%v: len(ecChunks)=%v\n", segmentIdx, len(ecChunks))
+		ecChunksArr = append(ecChunksArr, ecChunks)
+	}
+
+	// gathering root per pagrProof, each pageProof can be more than G per our implementation
+	for pageIdx, pageData := range pageProofs {
+		// Encode the data into segments
+		erasureCodingPageSegments, err := n.encode(pageData, true, len(pageData)) // Set to false for variable size segments
+		if err != nil {
+			fmt.Printf("Error in buildSClub pageProof#%v: %v\n", pageIdx, err)
+		}
+
+		// Build segment roots -- page can be longer than G long
+		fmt.Printf("!!! pageProof#%v len=%v\n", pageIdx, len(erasureCodingPageSegments))
+		pageSegmentRoots := make([][]byte, 0)
+		ith_pageProof := make([]common.Hash, 0)
+		for i := range erasureCodingPageSegments {
+			pageProofleaves := erasureCodingPageSegments[i]
+			pageProofSubtree := trie.NewCDMerkleTree(pageProofleaves)
+			pageProofSubtreeRoot := pageProofSubtree.RootHash()
+			ith_pageProof = append(ith_pageProof, pageProofSubtreeRoot)
+			pageSegmentRoots = append(pageSegmentRoots, pageProofSubtreeRoot.Bytes())
+		}
+
+		segmentItemRoots[exportedSegmentLen+pageIdx] = ith_pageProof
+		pageProofTree := trie.NewCDMerkleTree(pageSegmentRoots)
+		pageProofTreeRoot := pageProofTree.RootHash()
+
+		// Append the segment root to the list of segment roots
+		segmentsECRoots = append(segmentsECRoots, pageProofTreeRoot)
+		// Distribute the segments
+		ecChunks, err := n.BuildExportedSegmentChunks(erasureCodingPageSegments, pageSegmentRoots)
+		if err != nil {
+			fmt.Printf("Error in buildSClub pageProof#%v: %v\n", pageIdx, err)
+		}
+		for chunkIdx, ecChunks := range ecChunks {
+			shardIdx := uint32(chunkIdx % types.TotalValidators)
+			sequentialTranspose[shardIdx] = append(sequentialTranspose[shardIdx], ecChunks.Data)
+		}
+		fmt.Printf("len(ecChunks)=%v\n", len(ecChunks)) // this is multiple of totalValidators
+
+		fmt.Printf("buildSClub pageProof#%v: len(ecChunks)=%v\n", pageIdx, len(ecChunks))
+		ecChunksArr = append(ecChunksArr, ecChunks)
+	}
+	fmt.Printf("len(ecChunksArr)=%v\n", len(ecChunksArr))
+
 	var combinedData [][][]byte
 
-	pageProofs, _ := trie.GeneratePageProof(segments)
+	//s++P(s)
 	combinedSegmentAndPageProofs := append(segments, pageProofs...)
 
-	// Encode the combined data
-	basicTree := trie.NewCDMerkleTree(combinedSegmentAndPageProofs)
-	treeRoot := common.Hash(basicTree.Root())
-	var segmentsECRoots []byte
+	// Encode the combined data: s++P(s)
+	combinedTree := trie.NewCDMerkleTree(combinedSegmentAndPageProofs)
+	combinedTreeRoot := common.Hash(combinedTree.Root())
+
 	// Flatten the combined data
 	var FlattenData []byte
 	for _, singleData := range combinedSegmentAndPageProofs {
@@ -107,125 +405,73 @@ func (n *Node) computeAndDistributeSClub(segments [][]byte) (common.Hash, [][]co
 	}
 	// Erasure code the combined data
 	encodedSegment, _ := erasurecoding.Encode(FlattenData, 6)
-	for _, singleData := range combinedSegmentAndPageProofs {
-		// Encode the data into segments
-		erasureCodingSegments, err := n.encode(singleData, true, len(singleData)) // Set to false for variable size segments
-		if err != nil {
-			fmt.Printf("Error in EncodeAndDistributeSegmentData: %v\n", err)
-		}
 
-		// Build segment roots
-		segmentRoots := make([][]byte, 0)
-		for i := range erasureCodingSegments {
-			leaves := erasureCodingSegments[i]
-			tree := trie.NewCDMerkleTree(leaves)
-			segmentRoots = append(segmentRoots, tree.Root())
-		}
-
-		// Generate the blob hash by hashing the original data
-		blobTree := trie.NewCDMerkleTree(segmentRoots)
-		segmentsECRoot := blobTree.Root()
-
-		// Append the segment root to the list of segment roots
-		segmentsECRoots = append(segmentsECRoots, segmentsECRoot...)
-		// Distribute the segments
-		err = n.DistributeSegmentData(erasureCodingSegments, segmentRoots, len(FlattenData))
-		if err != nil {
-			fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-		}
+	var flattenSegmentsECRoots []byte
+	for _, segmentsECRoot := range segmentsECRoots {
+		flattenSegmentsECRoots = append(flattenSegmentsECRoots, segmentsECRoot[:]...)
 	}
 
-	//STANLEY TODO: this has to be part of metadata
-	n.FakeWriteKV(treeRoot, segmentsECRoots)
+	n.FakeWriteKV(combinedTreeRoot, flattenSegmentsECRoots)
+	//fmt.Printf("combinedTreeRoot: %x -> %v\n", combinedTreeRoot[:], segmentsECRoots)
+	//fmt.Printf("combinedTreeRoot: %x -> items %v\n", combinedTreeRoot[:], segmentItemRoots)
 
-	//fmt.Printf("treeRoot: %x\n", treeRoot[:])
 	// Append the encoded segment to the combined data
-	combinedData = append(combinedData, encodedSegment...)
+	combinedData = encodedSegment
+
 	// fmt.Printf("Before Transpose Size: %d, %d, %d\n", len(combinedData), len(combinedData[0]), len(combinedData[0][0]))
 
 	// Transpose the combined data
 	transposedData := transpose3D(combinedData)
-	// fmt.Printf("After Transpose Size: %d, %d, %d\n", len(transposedData), len(transposedData[0]), len(transposedData[0][0]))
+	 fmt.Printf("After Transpose Size: %d, %d, %d\n", len(transposedData), len(transposedData[0]), len(transposedData[0][0]))
 
-	var sClub [][]common.Hash
-	var tmpsClub []common.Hash
-	for _, data := range transposedData {
-		root := trie.NewWellBalancedTree(data).Root()
-		tmpsClub = append(tmpsClub, common.Hash(root))
+	sClub := make([]common.Hash, types.TotalValidators)
+	for shardIdx, shardData := range sequentialTranspose {
+		shard_wbt := trie.NewWellBalancedTree(shardData)
+		//fmt.Printf("!!!sClub verifying shardIdx=%v, shardData%x Root=%v\n", shardIdx, shardData, shard_wbt.RootHash())
+		sClub[shardIdx] = shard_wbt.RootHash()
 	}
-	sClub = append(sClub, tmpsClub)
-
-	return treeRoot, sClub
+	return combinedTreeRoot, sClub, segmentsECRoots, segmentItemRoots, ecChunksArr
 }
 
-// MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix
-func (n *Node) generateErasureRoot(b [][]common.Hash, s [][]common.Hash, blobHash common.Hash, treeRoot common.Hash) common.Hash {
+func GenerateErasureTree(b []common.Hash, s []common.Hash) (*trie.WellBalancedTree, [][]byte) {
 	// Combine b♣ and s♣ into a matrix and transpose it
+	bundle_segment_pairs := make([][]byte, types.TotalValidators)
 
-	transposedB := transposeHash(b)
-	transposedS := transposeHash(s)
-
-	combined := make([][][]byte, len(transposedB))
 	// Transpose the b♣ array and s♣ array
-	for i := range transposedB {
-		for j := range transposedB[i] {
-			combined[i] = append(combined[i], transposedB[i][j][:])
-		}
-		for j := range transposedS[i] {
-			combined[i] = append(combined[i], transposedS[i][j][:])
-		}
-	}
-
-	// Compute x̂ for each x in the transposed matrix
-	var hashedElements [][]byte
-	for _, x := range combined {
-		hashedElements = append(hashedElements, x...)
-	}
-
-	var flattenHashedElements [][]byte
-	for _, element := range hashedElements {
-		flattenHashedElements = append(flattenHashedElements, element[:])
+	for i := 0; i < types.TotalValidators; i ++ {
+		//(work-package bundle shard hash, segment shard root) pairs
+		pair := append(b[i].Bytes(), s[i].Bytes()...)
+		bundle_segment_pairs[i] = pair
 	}
 
 	// Generate WBT from the hashed elements and return the root (u)
-	wbt := trie.NewWellBalancedTree(flattenHashedElements)
-	erasureRoot := common.Hash(wbt.Root())
-	//fmt.Printf("Len(blobHash), blobHash: %d, %x\n", len(blobHash), blobHash[:])
-	//fmt.Printf("Len(treeRoot), treeRoot: %d, %x\n", len(treeRoot), treeRoot[:])
+	wbt := trie.NewWellBalancedTree(bundle_segment_pairs)
+	// do I get same root for wbt and wbt1??
+	return wbt, bundle_segment_pairs
+}
+
+
+// MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix
+func (n *Node) generateErasureRoot(b []common.Hash, s []common.Hash, blobHash common.Hash, treeRoot common.Hash) common.Hash {
+	erasureTree, bundle_segment_pairs := GenerateErasureTree(b, s)
+	erasureRoot := common.Hash(erasureTree.Root())
+	fmt.Printf("Len(bundle_segment_pairs), bundle_segment_pairs: %d, %x\n", len(bundle_segment_pairs), bundle_segment_pairs)
+	fmt.Printf("Len(blobHash), blobHash: %d, %x\n", len(blobHash), blobHash[:])
+	fmt.Printf("Len(treeRoot), treeRoot: %d, %x\n", len(treeRoot), treeRoot[:])
 
 	//STANLEY TODO: this has to be part of metadata
-	//n.FakeWriteKV(erasureRoot, append(blobHash[:], treeRoot[:]...))
-
-	if debug {
-		fmt.Printf("Len(ErasureRoot), ErasureRoot: %d, %v\n", len(erasureRoot), erasureRoot)
+	n.FakeWriteKV(erasureRoot, append(blobHash[:], treeRoot[:]...))
+	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx ++ {
+		treeLen, leafHash, path, isFound := GenerateJustification(erasureRoot, uint16(shardIdx), bundle_segment_pairs)
+		verified := VerifyJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
+		fmt.Printf("ErasureRootPath shardIdx=%v, treeLen=%v leafHash=%v, path=%v, isFound=%v | verified=%v\n", shardIdx, treeLen, leafHash, path, isFound, verified)
 	}
+	fmt.Printf("Len(ErasureRoot), ErasureRoot: %d, %v\n", len(erasureRoot), erasureRoot)
 	return erasureRoot
 }
 
-// Transpose the list of common.Hash into a list of byte slices
-func transposeHash(matrix [][]common.Hash) [][]common.Hash {
-	if len(matrix) == 0 || len(matrix[0]) == 0 {
-		return nil
-	}
-
-	// Transposed matrix initialization
-	transposed := make([][]common.Hash, len(matrix[0]))
-	for i := range transposed {
-		transposed[i] = make([]common.Hash, len(matrix))
-	}
-
-	// Transposing the data
-	for i := 0; i < len(matrix[0]); i++ {
-		for j := 0; j < len(matrix); j++ {
-			transposed[i][j] = matrix[j][i]
-		}
-	}
-
-	return transposed
-}
-
-// M(s) - TODO: Stanley please check, should be CDT here. Not WBT
-func generateSegmentsRoot(segments [][]byte) common.Hash {
+// M(s) - CDT of exportedSegment
+func generateExportedSegmentsRoot(segments [][]byte) common.Hash {
 	var segmentData [][]byte
 	for _, segment := range segments {
 		segmentData = append(segmentData, segment)
@@ -271,7 +517,7 @@ func (n *Node) IsValidAvailabilitySpecifier(bClubBlobHash common.Hash, bLength i
 }
 
 // Recompute b♣ using the EncodeWorkPackage function
-func (n *Node) recomputeBClub(paddedB []byte) [][]common.Hash {
+func (n *Node) recomputeBClub(paddedB []byte) []common.Hash {
 	// Process the padded data using erasure coding
 	c_base := types.ComputeC_Base(len(paddedB))
 
@@ -282,19 +528,20 @@ func (n *Node) recomputeBClub(paddedB []byte) [][]common.Hash {
 
 	// Hash each element of the encoded data
 	var tmpbClub []common.Hash
-	var bClub [][]common.Hash
+	var bClub []common.Hash
 
 	for _, block := range encodedB {
 		for _, b := range block {
 			tmpbClub = append(tmpbClub, common.Hash(common.PadToMultipleOfN(b, 32)))
 		}
-		bClub = append(bClub, tmpbClub)
+		//bClub = append(bClub, tmpbClub)
+		bClub = tmpbClub
 	}
 
 	return bClub
 }
 
-func (n *Node) recomputeSClub(combinedSegmentAndPageProofs [][]byte) [][]common.Hash {
+func (n *Node) recomputeSClub(combinedSegmentAndPageProofs [][]byte) []common.Hash {
 	var combinedData [][][]byte
 
 	// Flatten the combined data
@@ -316,13 +563,14 @@ func (n *Node) recomputeSClub(combinedSegmentAndPageProofs [][]byte) [][]common.
 	transposedData := transpose3D(combinedData)
 	// fmt.Printf("After Transpose Size: %d, %d, %d\n", len(transposedData), len(transposedData[0]), len(transposedData[0][0]))
 
-	var sClub [][]common.Hash
+	var sClub []common.Hash
 	var tmpsClub []common.Hash
 	for _, data := range transposedData {
 		root := trie.NewWellBalancedTree(data).Root()
 		tmpsClub = append(tmpsClub, common.Hash(root))
 	}
-	sClub = append(sClub, tmpsClub)
+	sClub = tmpsClub
+	//sClub = append(sClub, tmpsClub)
 
 	return sClub
 }
@@ -770,8 +1018,11 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		results = append(results, result)
 	}
 
+	// treeRoot, err = n.EncodeAndDistributeSegmentData(combinedSegmentAndPageProofs, &wg)
+	// TODO: need to figure out where distribution is happening
+
 	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
-	spec = n.NewAvailabilitySpecifier(packageHash, workPackage, segments)
+	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(packageHash, workPackage, segments)
 	prerequisite_hash := common.HexToHash("0x")
 	refinementContext := types.RefineContext{
 		Anchor:           n.statedb.ParentHash,                      // TODO  common.HexToHash("0x123abc")
@@ -796,6 +1047,11 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		Results:       results,
 	}
 
+
+	n.StoreMeta(spec , erasureMeta, bECChunks, sECChunksArray)
+	n.FakeDistributeChunks(erasureMeta, bECChunks, sECChunksArray)
+
+/*
 	var bundleShards [][]byte
 	bundleShards, err = erasurecoding.EncodeBundle(workPackage.Bytes(), types.TotalValidators)
 	if err != nil {
@@ -809,6 +1065,11 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 			fmt.Printf("[executeWorkPackage:StoreAuditDA] Err %v\n", err)
 		}
 	}
+*/
+	//workReport.Print()
+	//work = n.MakeGuaranteeReport(workReport)
+	//work.Sign(n.GetEd25519Secret())
+
 
 	gc := workReport.Sign(n.GetEd25519Secret(), uint16(n.GetCurrValidatorIndex()))
 	guarantee = types.Guarantee{

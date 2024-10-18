@@ -296,8 +296,8 @@ func generatePageProof(segments [][]byte) ([][]byte, error) {
 			return results, err
 		}
 
-		// Pad the encoded data to W_C * W_S
-		// paddingSize := types.W_C * types.W_S
+		// Pad the encoded data to W_E * W_S
+		// paddingSize := types.W_E * types.W_S
 		// paddedOutput := make([]byte, paddingSize)
 		// copy(paddedOutput, encoded) // If the encoded data is larger than the padding size, it will be truncated
 		results = append(results, encoded)

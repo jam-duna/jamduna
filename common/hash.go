@@ -73,3 +73,11 @@ func padToMultipleOfN(input []byte, n int) []byte {
 	}
 	return input
 }
+
+// used for justification.. with $node as salt
+func ComputeHash_WBT(data []byte) []byte {
+	h, _ := blake2b.New256(nil)
+	h.Write([]byte("node"))
+	h.Write(data)
+	return h.Sum(nil)
+}
