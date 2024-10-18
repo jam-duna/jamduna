@@ -156,9 +156,9 @@ func TestAvailabilityReconstruction(t *testing.T) {
 
 		// Generate the AvailabilitySpecifier
 		packageHash := workPackage.Hash()
-		availabilitySpecifier , erasureMeta, bECChunks, sECChunksArray := senderNode.NewAvailabilitySpecifier(packageHash, workPackage, segments)
+		availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray := senderNode.NewAvailabilitySpecifier(packageHash, workPackage, segments)
 
-		senderNode.StoreMeta(availabilitySpecifier , erasureMeta, bECChunks, sECChunksArray)
+		senderNode.StoreMeta(availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray)
 		recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, _ := senderNode.GetMeta(erasureMeta.ErasureRoot)
 		//shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
 
@@ -166,8 +166,6 @@ func TestAvailabilityReconstruction(t *testing.T) {
 			senderNode.GetFullShard(recoveredMeta.ErasureRoot, uint16(shardIdx))
 		}
 		senderNode.FakeDistributeChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
-
-
 
 		originalAS = availabilitySpecifier
 

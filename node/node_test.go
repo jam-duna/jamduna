@@ -417,7 +417,7 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 
 	service := uint32(47) // WRONG: william to fix
-	
+
 	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
 	chunks, codeHash, codeLength := nodes[0].PrepareArbitaryData(code)
 	ecChunks, err := nodes[0].BuildArbitraryDataChunks(chunks, codeHash, codeLength)

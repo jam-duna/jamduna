@@ -1,8 +1,8 @@
 package types
 
 import (
-	"math"
 	"encoding/json"
+	"math"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -33,8 +33,8 @@ type BlockQuery struct {
 }
 
 type ConformantECChunk struct {
-	Data        []byte      `json:"data"`
-	ShardIndex  uint32		`json:"shardIdx"`
+	Data       []byte `json:"data"`
+	ShardIndex uint32 `json:"shardIdx"`
 }
 
 // Marshal marshals ConformantECChunk into JSON
@@ -47,7 +47,7 @@ func (c *ConformantECChunk) Unmarshal(data []byte) error {
 	return json.Unmarshal(data, c)
 }
 
-func (c *ConformantECChunk) Bytes() ([]byte) {
+func (c *ConformantECChunk) Bytes() []byte {
 	jsonData, _ := c.Marshal()
 	return jsonData
 }
@@ -73,7 +73,7 @@ func (d *DistributeECChunk) Unmarshal(data []byte) error {
 	return json.Unmarshal(data, d)
 }
 
-func (d *DistributeECChunk) Bytes() ([]byte) {
+func (d *DistributeECChunk) Bytes() []byte {
 	jsonData, _ := d.Marshal()
 	return jsonData
 }

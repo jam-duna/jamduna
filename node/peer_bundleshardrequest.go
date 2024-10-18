@@ -31,7 +31,7 @@ Auditor -> Assurer
 
 // TODO: separate them
 func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, justification []byte, err error) {
-    code := uint8(CE138_BundleShardRequest)
+	code := uint8(CE138_BundleShardRequest)
 	stream, err := p.openStream(code)
 	req := &JAMSNPShardRequest{
 		ErasureRoot: erasureRoot,
@@ -77,7 +77,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 	if debugA {
 		fmt.Printf("%s onBundleShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
 	}
-    //TODO: this should be bundleshard call
+	//TODO: this should be bundleshard call
 	bundleShard, justification, ok, err := n.GetBundleShard(req.ErasureRoot, req.ShardIndex)
 	//bundleShard, justification, ok, err := n.GetBundleShard(req.ErasureRoot, req.ShardIndex)
 	if err != nil {

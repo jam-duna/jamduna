@@ -44,17 +44,17 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		blob_arr[data_i] = data
 		fmt.Println(data)
 
-/*
-		paddedData := common.PadToMultipleOfN(data, types.W_E)
-		dataLength := len(data)
+		/*
+			paddedData := common.PadToMultipleOfN(data, types.W_E)
+			dataLength := len(data)
 
-		chunks, err := senderNode.encode(paddedData, false, dataLength)
-		if err != nil {
-			fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-		}
+			chunks, err := senderNode.encode(paddedData, false, dataLength)
+			if err != nil {
+				fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
+			}
 
-		dataBlobHash := common.Blake2Hash(paddedData)
-*/
+			dataBlobHash := common.Blake2Hash(paddedData)
+		*/
 		chunks, dataBlobHash, dataLength := senderNode.PrepareArbitaryData(data)
 
 		ecChunks, err := senderNode.BuildArbitraryDataChunks(chunks, dataBlobHash, dataLength)

@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
 	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 )
 
 func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
@@ -72,7 +72,7 @@ func (n *Node) GetFullShard(erasureRoot common.Hash, shardIndex uint16) (bundleS
 	bClub := common.Blake2Hash(bundleShard)
 	sClub := trie.NewWellBalancedTree(segmentShards).RootHash()
 	//pair := append(b[i].Bytes(), s[i].Bytes()...)
-	pair := append(bClub.Bytes(),sClub.Bytes()...)
+	pair := append(bClub.Bytes(), sClub.Bytes()...)
 	leafHash := common.Hash(trie.ComputeLeaf(pair))
 	fmt.Printf("GetFullShard shardIndex %v expected pair=%x pair=%x -> leafHash=%v\n", shardIndex, shardJustification.Leaf, pair, leafHash)
 	path, _ := common.ExpandPath(justification)

@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+
 	"flag"
 	"fmt"
 	"github.com/colorfulnotion/jam/statedb"
@@ -19,6 +19,22 @@ import (
 	"strings"
 )
 
+func readSnapshot(fn string) (statesnapshot *statedb.StateSnapshot, snapshotBytes []byte, err error) {
+	snapshotBytes, err = ioutil.ReadFile(fn)
+	if err != nil {
+		log.Fatalf("[readSnapshot:ReadFile] %s ERR %v\n", fn, err)
+		return
+	}
+	// Decode genesis into the initial StateDB
+	s, _, err := types.Decode(snapshotBytes, reflect.TypeOf(statedb.StateSnapshot{}))
+	if err != nil {
+		log.Fatalf("Error decoding genesis file %s: %v\n", fn, err)
+	}
+	st := s.(statedb.StateSnapshot)
+	statesnapshot = &st
+	return
+}
+
 func processBlocks(genesisFile string, basePath string) error {
 	storage, err := storage.NewStateDBStorage("/tmp/validatetraces")
 	if err != nil {
@@ -26,27 +42,9 @@ func processBlocks(genesisFile string, basePath string) error {
 	}
 
 	// Read the snapshot file into snapshotBytes
-	fmt.Printf("reading genesis snapshot: %s\n", genesisFile)
-	snapshotBytes, err := ioutil.ReadFile(genesisFile)
+	statesnapshot, _, err := readSnapshot(genesisFile)
 	if err != nil {
-		log.Fatalf("Error decoding genesis snapshot %s: %v\n", genesisFile, err)
-	}
-	// fmt.Printf("%x\n", snapshotBytes);
-	// Decode genesis into the initial StateDB
-	var statesnapshot *statedb.StateSnapshot
-	if strings.Contains(genesisFile, ".bin") {
-		s, _, err := types.Decode(snapshotBytes, reflect.TypeOf(statedb.StateSnapshot{}))
-		if err != nil {
-			log.Fatalf("Error decoding genesis file %s: %v\n", genesisFile, err)
-		}
-		st := s.(statedb.StateSnapshot)
-		statesnapshot = &st
-	} else {
-		// JSON unmarshal snapshotBytes into statesnapshot
-		err := json.Unmarshal(snapshotBytes, &statesnapshot)
-		if err != nil {
-			log.Fatalf("Error unmarshaling genesis JSON file %s: %v\n", genesisFile, err)
-		}
+		return err
 	}
 
 	stateDB, err := statedb.InitStateDBFromSnapshot(storage, statesnapshot)
@@ -144,15 +142,13 @@ func processBlocks(genesisFile string, basePath string) error {
 			// Check if the corresponding snapshot file exists
 			if _, err := os.Stat(snapshotPath); err == nil {
 				// Read the snapshot file into expectedSnapshotBytes
-				expectedSnapshotBytes, err := ioutil.ReadFile(snapshotPath)
+				_, expectedSnapshotBytes, err := readSnapshot(snapshotPath)
 				if err != nil {
-					log.Printf("Error reading snapshot file %s: %v\n", snapshotPath, err)
-					continue
+					log.Fatalf("failed to read snapshot %s\n", snapshotFile)
 				}
-
 				// Validate the snapshot
 				if bytes.Equal(snapshotBytes, expectedSnapshotBytes) {
-					fmt.Printf("VALIDATED Block %s => State %s\n", blockFile, snapshotFile)
+					fmt.Printf("VALIDATED Block %s => State %s | %s\n", blockFile, snapshotFile, block.Str())
 					stateDB = newStateDB
 				} else {
 					log.Printf("Validation failed for Block %s => State %s\n", blockFile, snapshotFile)
@@ -169,8 +165,8 @@ func processBlocks(genesisFile string, basePath string) error {
 
 func main() {
 	// Define command-line flags
-	mode := flag.String("mode", "safrole", "Mode to use (default: safrole)")
-	team := flag.String("team", "jam-duna", "Team name to use (default: jam-duna)")
+	mode := flag.String("mode", "assurances", "Mode to use (default: safrole)")
+	team := flag.String("team", "jam_duna", "Team name to use (default: jam_duna)")
 	traceDir := flag.String("traceDir", "/root/go/src/github.com/jam-duna/jamtestnet/traces", "Directory path to trace files")
 
 	// Parse the flags
@@ -179,7 +175,7 @@ func main() {
 	// Construct the paths using the flags
 	modeDir := filepath.Join(*traceDir, *mode)
 	teamDir := filepath.Join(modeDir, *team)
-	genesisFile := filepath.Join(modeDir, "genesis.json")
+	genesisFile := filepath.Join(modeDir, "genesis.bin")
 
 	// Process the blocks and state transitions
 	err := processBlocks(genesisFile, teamDir)

@@ -269,28 +269,28 @@ func (n *Node) DistributeExportedEcChunkArray(ecChunksArr [][]types.DistributeEC
 }
 
 func (n *Node) DistributeEcChunks(ecChunks []types.DistributeECChunk) error {
-/*
-	numNodes := types.TotalValidators
-	peerIdentifiers := make([]string, len(ecChunks))
-	requestObjs := make([]interface{}, len(ecChunks))
+	/*
+		numNodes := types.TotalValidators
+		peerIdentifiers := make([]string, len(ecChunks))
+		requestObjs := make([]interface{}, len(ecChunks))
 
-	for i, ecChunk := range ecChunks {
-		peerIdx := uint32(i % numNodes)
-		peerIdentifier, err := n.getPeerByIndex(peerIdx)
+		for i, ecChunk := range ecChunks {
+			peerIdx := uint32(i % numNodes)
+			peerIdentifier, err := n.getPeerByIndex(peerIdx)
+			if err != nil {
+				return err
+			}
+			peerIdentifiers[i] = peerIdentifier
+			requestObjs[i] = ecChunk
+		}
+		responses, err := n.makeRequests(peerIdentifiers, requestObjs, types.TotalValidators, types.QuicIndividualTimeout,  types.QuicOverallTimeout)
 		if err != nil {
+			fmt.Printf("[N%v] DistributeEcChunks MakeRequests Errors %v\n", n.id, err)
 			return err
 		}
-		peerIdentifiers[i] = peerIdentifier
-		requestObjs[i] = ecChunk
-	}
-	responses, err := n.makeRequests(peerIdentifiers, requestObjs, types.TotalValidators, types.QuicIndividualTimeout,  types.QuicOverallTimeout)
-	if err != nil {
-		fmt.Printf("[N%v] DistributeEcChunks MakeRequests Errors %v\n", n.id, err)
-		return err
-	}
 
-	fmt.Printf("DistributeEcChunks resp=%v\n", len(responses))
-*/
+		fmt.Printf("DistributeEcChunks resp=%v\n", len(responses))
+	*/
 	return nil
 }
 
