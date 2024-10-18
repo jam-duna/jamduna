@@ -315,7 +315,10 @@ func (T AvailabilityAssignments) Decode(data []byte) (interface{}, uint32) {
 			if err != nil {
 				return AvailabilityAssignments{}, 0
 			}
-			T[i] = rho_state.(*Rho_state)
+			for i := 0; i < types.TotalCores; i++ {
+				rho := rho_state.(Rho_state)
+				T[i] = &rho
+			}
 			length += l
 		}
 	}
