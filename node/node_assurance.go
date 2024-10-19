@@ -62,29 +62,19 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 	spec := g.Report.AvailabilitySpec
 	erasureRoot := spec.ErasureRoot
 	guarantor := g.Signatures[0].ValidatorIndex // TODO: try any of them, not the 0th one
-	bundleShard, segmentShards, justification, err := n.peersInfo[guarantor].SendFullShardRequest(erasureRoot, n.id)
+	bundleShard, concatSegmentShards, justification, err := n.peersInfo[guarantor].SendFullShardRequest(erasureRoot, n.id)
 	if err != nil {
 		fmt.Printf("%s assureData: SendShardRequest %v\n", n.String(), err)
 		return
 	}
-	if false {
-		segmentIndex := make([]uint16, 0) // TODO: Michael
-		segmentShardsI, justificationsI, err := n.peersInfo[guarantor].SendSegmentShardRequest(erasureRoot, n.id, segmentIndex, false)
-		if err != nil {
-			fmt.Printf("%s assureData: SendSegmentShardRequest %v\n", n.String(), err)
-			return err
-		}
-		err = n.store.StoreImportDA(erasureRoot, n.id, segmentShardsI, justificationsI)
-		if err != nil {
-			fmt.Printf("%s assureData: StoreImportDA %v\n", n.String(), err)
-			return err
-		}
-	}
-	err = n.store.StoreAuditDA(erasureRoot, n.id, bundleShard, segmentShards, justification)
+	segmentShards, err := SplitToSegmentShards(concatSegmentShards)
 	if err != nil {
-		fmt.Printf("%s assureData: storeAuditDA %v\n", n.String(), err)
+		fmt.Printf("%s assureData: SplitAsSegmentShards %v\n", n.String(), err)
 		return
 	}
+
+	n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
+
 	//TODO: Shawn
 	//reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
 	//if err != nil {

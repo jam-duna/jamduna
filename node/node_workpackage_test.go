@@ -163,8 +163,13 @@ func TestAvailabilityReconstruction(t *testing.T) {
 		//shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
 
 		for shardIdx := 0; shardIdx < numNodes; shardIdx++ {
-			senderNode.GetFullShard(recoveredMeta.ErasureRoot, uint16(shardIdx))
+			erasureRoot, shardIndex, bundleShard, segmentShards, justification, ok, err := senderNode.GetFullShard_Guarantor(recoveredMeta.ErasureRoot, uint16(shardIdx))
+			if (!ok || err != nil){
+				t.Fatalf("Failed to prepareFullShards for node %d: %v\n", shardIdx, err)
+			}
+			nodes[shardIdx].StoreFullShard_Assurer(erasureRoot, shardIndex, bundleShard, segmentShards, justification)
 		}
+
 		senderNode.FakeDistributeChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
 
 		originalAS = availabilitySpecifier

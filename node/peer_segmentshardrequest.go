@@ -172,7 +172,12 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	segmentshards, justifications, ok, err := n.GetSegmentShard(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+	erasureRoot, shardIndex, segmentIndices, selected_segmentshards, selected_full_justification, selected_segment_justifications, exportedSegmentAndPageProofLens, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+
+	if (erasureRoot != req.ErasureRoot || shardIndex != req.ShardIndex || len(segmentIndices) != len(req.SegmentIndex)){
+		fmt.Printf("selected_full_justifications: %v\n", exportedSegmentAndPageProofLens)
+		return fmt.Errorf("Invalid Response")
+	}
 	if err != nil {
 		return err
 	}
@@ -180,15 +185,21 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
-	err = sendQuicBytes(stream, segmentshards)
+	combined_selected_segmentshards, _ := CombineSegmentShards(selected_segmentshards)
+	err = sendQuicBytes(stream, combined_selected_segmentshards)
 	if err != nil {
 		return err
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if withJustification {
-		for _, j := range justifications {
-			err := sendQuicBytes(stream, j)
+		for item_idx, s_j := range selected_segment_justifications {
+			s_f := selected_full_justification[item_idx]
+			err := sendQuicBytes(stream, s_f)
+			if err != nil {
+				return err
+			}
+			err = sendQuicBytes(stream, s_j)
 			if err != nil {
 				return err
 			}

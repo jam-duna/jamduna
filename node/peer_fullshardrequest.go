@@ -74,7 +74,7 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 }
 
 // TODO: separate them
-func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, segmentShards []byte, justification []byte, err error) {
+func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, concatSegmentShards []byte, justification []byte, err error) {
 	code := uint8(CE137_FullShardRequest)
 	stream, err := p.openStream(code)
 	req := &JAMSNPShardRequest{
@@ -102,7 +102,7 @@ func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) 
 		fmt.Printf("%s SendFullShardRequest received %d bytes for bundleShard\n", p.String(), len(bundleShard))
 	}
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	segmentShards, err = receiveQuicBytes(stream)
+	concatSegmentShards, err = receiveQuicBytes(stream)
 	if err != nil {
 		return
 	}
@@ -127,7 +127,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	if debugA {
 		fmt.Printf("%s onFullShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
 	}
-	bundleShard, segmentShards, justification, ok, err := n.GetFullShard(req.ErasureRoot, req.ShardIndex)
+	_, _, bundleShard, segmentShards, justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	//bundleShard, justification, ok, err := n.GetBundleShard(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR0 %v\n", err)

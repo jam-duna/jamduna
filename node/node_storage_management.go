@@ -1,0 +1,418 @@
+package node
+
+import (
+	"fmt"
+	//"time"
+    "bytes"
+    "encoding/json"
+
+	"github.com/colorfulnotion/jam/common"
+
+	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
+)
+
+
+func (n *Node) GetMeta(erasureRoot common.Hash) (erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk, err error){
+	//TODO: should probably store erasureRoot -> pbH
+	erasure_metaKey := fmt.Sprintf("erasureMeta-%v", erasureRoot)
+	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasureRoot)
+	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasureRoot)
+	erasure_metaKey_val, err := n.ReadRawKV([]byte(erasure_metaKey))
+	erasure_bKey_val, err := n.ReadRawKV([]byte(erasure_bKey))
+	erasure_sKey_val, err := n.ReadRawKV([]byte(erasure_sKey))
+	if (err != nil){
+		return erasureMeta, bECChunks, sECChunksArray, fmt.Errorf("Fail to find erasure_metaKey=%v", erasureRoot)
+	}
+	// TODO: figure out the codec later
+    if err := erasureMeta.Unmarshal(erasure_metaKey_val); err != nil {
+        fmt.Println("Error unmarshalling JSON:", err)
+        return erasureMeta, bECChunks, sECChunksArray, err
+    }
+
+    if err := json.Unmarshal(erasure_bKey_val, &bECChunks); err != nil {
+        return erasureMeta, bECChunks, sECChunksArray, err
+    }
+
+    if err := json.Unmarshal(erasure_sKey_val, &sECChunksArray); err != nil {
+        return erasureMeta, bECChunks, sECChunksArray, err
+    }
+	//fmt.Printf("Recover Meta from levelDB. Ready for Building. %v, erasureMap=%v, bECChunks=%v, sECChunksArray=%v\n", erasureRoot, erasureMeta.String(), bECChunks, sECChunksArray)
+	return erasureMeta, bECChunks, sECChunksArray, err
+}
+
+func (n *Node) StoreMeta(as *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk){
+	erasure_root_u := as.ErasureRoot
+	erasure_metaKey := fmt.Sprintf("erasureMeta-%v", erasure_root_u)
+	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
+	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasure_root_u)
+	packageHash_sey := fmt.Sprintf("erasureSChunk-%v", as.WorkPackageHash)
+
+
+	bChunkJson, _ := json.Marshal(bECChunks)
+	sChunkJson, _ := json.Marshal(sECChunksArray)
+
+	fmt.Printf("erasure_metaKey=%v, val=%s\n", erasure_metaKey, string(erasureMeta.Bytes()))
+	fmt.Printf("erasure_bKey=%v, val=%s\n", erasure_metaKey, string(bChunkJson))
+	fmt.Printf("erasure_sKey=%v, val=%s\n", erasure_metaKey, string(sChunkJson))
+	n.WriteRawKV(erasure_metaKey, erasureMeta.Bytes())
+	n.WriteRawKV(erasure_bKey, bChunkJson)
+	n.WriteRawKV(erasure_sKey, sChunkJson)
+	n.WriteRawKV(packageHash_sey, erasure_root_u.Bytes())
+
+}
+
+// Helper function to generate a key using a prefix, erasureRoot, and shardIndex
+func generateKey(prefix string, erasureRoot common.Hash, shardIndex uint16) []byte {
+	var buffer bytes.Buffer
+	buffer.WriteString(prefix)
+	buffer.Write(erasureRoot.Bytes())
+	buffer.WriteByte(byte(shardIndex >> 8))   // high byte
+	buffer.WriteByte(byte(shardIndex & 0xff)) // low byte
+	return buffer.Bytes()
+}
+
+func generateErasureRootShardIdxKey(erasureRoot common.Hash, shardIndex uint16) string {
+    return fmt.Sprintf("es_%v_%d", erasureRoot, shardIndex)
+}
+
+
+func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, err error){
+    fixedSegmentSize := types.W_S * 2
+    if (len(concatenatedShards) % (fixedSegmentSize) != 0){
+        return nil, fmt.Errorf("Invalid SegmentShards Len:%v. MUST BE multiple of %v", len(concatenatedShards), fixedSegmentSize)
+    }
+
+    for i := 0; i < len(concatenatedShards); i += fixedSegmentSize {
+        shard := concatenatedShards[i : i+fixedSegmentSize]
+        segmentShards = append(segmentShards, shard)
+    }
+    return segmentShards, nil
+}
+
+func CombineSegmentShards(segmentShards [][]byte) (concatenatedShards []byte, err error) {
+    // Loop through each segment shard and append it to the combined slice
+    fixedSegmentSize := types.W_S * 2
+    for _, shard := range segmentShards {
+        concatenatedShards = append(concatenatedShards, shard...)
+    }
+    if (len(concatenatedShards) % (fixedSegmentSize) != 0){
+        return nil, fmt.Errorf("Invalid SegmentShards Len:%v. MUST BE multiple of %v", len(concatenatedShards), fixedSegmentSize)
+    }
+    return concatenatedShards, nil
+}
+
+// Verification: CE137_FullShard
+func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, segmentShards [][]byte, justification []byte) (bool, error){
+    // verify its validity
+    bClub := common.Blake2Hash(bundleShard)
+    sClub := trie.NewWellBalancedTree(segmentShards).RootHash()
+    bundle_segment_pair := append(bClub.Bytes(),sClub.Bytes()...)
+    leafHash := common.ComputeLeafHash_WBT(bundle_segment_pair)
+    path, err := common.ExpandPath(justification)
+    if (err != nil){
+        return false, err
+    }
+    verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
+    if (!verified){
+        return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
+    }
+    return true, nil
+}
+
+// Qns Source : CE137_FullShard -- By Assurer to Guarantor
+// Ans Source : NOT SPECIFIED by Jam_np. Stored As is
+func (n *Node) GetFullShard_Guarantor(erasureRoot common.Hash, shardIndex uint16) (erasure_root common.Hash, shard_idx uint16, bundleShard []byte, segmentShards [][]byte, justification []byte, ok bool, err error) {
+	recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, err := n.GetMeta(erasureRoot)
+	if err != nil {
+		return erasureRoot, shardIndex, bundleShard, segmentShards, justification, false, err
+	}
+	shardJustification, orderedBundleShard, orderedSegmentShard := GetShardSpecificOrderedChunks(shardIndex, recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
+
+	bundleShard = orderedBundleShard.Data
+
+	segmentShards = make([][]byte, len(orderedSegmentShard))
+	for segment_idx, segment_shard := range orderedSegmentShard {
+		segmentShards[segment_idx] = segment_shard.Data
+	}
+	//fmt.Printf("GetFullShard shardIndex %v segmentShards: %x\n", shardIndex, segmentShards)
+	justification = shardJustification.CompactPath()
+
+    verified, err := VerifyFullShard(erasureRoot, shardIndex, bundleShard, segmentShards, justification)
+    if (!verified){
+        //DO NOT REMOVE THIS.
+        panic(err)
+    }
+	//fmt.Printf("GetFullShard !!! ErasureRootPath shardIdx=%v, treeLen=%v leafHash=%v, path=%v | verified=%v\n", shardIndex, types.TotalValidators, leafHash, path, verified)
+	return erasureRoot, shardIndex, bundleShard, segmentShards, justification, true, nil
+}
+
+
+// Ans Source: CE137_FullShard Resp -- Stored By Assurer ONLY
+// Allowing CE138_BundleShard  ANS via StoreAuditDA
+// Allowing CE139_SegmentShard ANS via StoreImportDA
+func (n *Node) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, segmentShards [][]byte, justification []byte) (error){
+    verified, err := VerifyFullShard(erasureRoot, shardIndex, bundleShard, segmentShards, justification)
+    if !verified || err != nil {
+        return fmt.Errorf("Received Invalid FullShard! %v", err)
+    }
+    fmt.Printf("[CE137_ANS Verified] erasureRoot-shardIndex: %v-%d\n", erasureRoot, shardIndex)
+
+    // Store path to Erasure Root
+    bClub := common.Blake2Hash(bundleShard)
+    sClub := trie.NewWellBalancedTree(segmentShards).RootHash()
+    bundle_segment_pair := append(bClub.Bytes(),sClub.Bytes()...)
+
+    // levelDB key->Val (* Required for multi validator case or CE200s)
+    // *f_erasureRoot_<erasureRoot> -> [f_erasureRoot_<shardIdx>]
+    // f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
+
+    esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
+    f_es_key := fmt.Sprintf("f_%v", esKey)
+    f_es_val := append(bundle_segment_pair, justification...)
+    n.WriteRawKV(f_es_key, f_es_val)
+    fmt.Printf("f_es: %v -> %x\n", f_es_key, f_es_val)
+
+    // Do not store justification for b,s . It should be generated on the fly
+
+    // Short-term Audit DA (b)
+    _errB := n.StoreAuditDA(erasureRoot, shardIndex, bundleShard)
+    if _errB != nil {
+        return _errB
+    }
+
+    // Long-term ImportDA (s)
+    _errS := n.StoreImportDA (erasureRoot, shardIndex, segmentShards)
+    if _errS != nil {
+        return _errS
+    }
+
+    return nil
+}
+
+func (n *Node) StoreFullShardJustification(erasureRoot common.Hash, shardIndex uint16, bClubH common.Hash, sClubH common.Hash, justification []byte){
+    // levelDB key->Val (* Required for multi validator case or CE200s)
+    // *f_erasureRoot_<erasureRoot> -> [f_erasureRoot_<shardIdx>]
+    // f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
+    esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
+    f_es_key := fmt.Sprintf("f_%v", esKey)
+    bundle_segment_pair := append(bClubH.Bytes(),sClubH.Bytes()...)
+    f_es_val := append(bundle_segment_pair, justification...)
+    n.WriteRawKV(f_es_key, f_es_val)
+    fmt.Printf("f_es: %v -> %x\n", f_es_key, f_es_val)
+}
+
+func (n *Node) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, justification []byte, err error) {
+    esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
+    f_es_key := fmt.Sprintf("f_%v", esKey)
+    data, err := n.ReadRawKV([]byte(f_es_key))
+    bClubH = common.Hash(data[:32])
+    sClubH = common.Hash(data[32:64])
+    justification = data[64:]
+    return bClubH, sClubH, justification, nil
+}
+
+
+// Short-term Audit DA -  Used to Store bClub(bundleShard) by Assurers (til finality)
+func (n *Node) StoreAuditDA(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) (err error) {
+    // *b_erasureRoot_<erasureRoot> -> [b_erasureRoot_<shardIdx>]
+    // b_erasureRoot_<shardIdx> -> bundleShard
+    esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
+    b_es_key := fmt.Sprintf("b_%s", esKey)
+    n.WriteRawKV(b_es_key, bundleShard)
+    fmt.Printf("StoreAuditDA %v -> %x\n", b_es_key, bundleShard)
+	return nil
+}
+
+// Long-term ImportDA - Used to Store sClub (segmentShard) by Assurers (at least 672 epochs)
+func (n *Node) StoreImportDA(erasureRoot common.Hash, shardIndex uint16, segmentShards [][]byte) (err error) {
+    // *s_erasureRoot_<erasureRoot> -> [s_erasureRoot_<shardIdx>]
+    // s_erasureRoot_<shardIdx> -> combinedSegmentShards
+
+    /*
+    proof Step:
+    retrieve combinedSegmentShards via s_erasureRoot_<shardIdx>
+    combinedSegmentShards -> SegmentShards (via SplitToSegmentShards)
+    SegmentShards -> wbt tree
+    Derieve Path: T(s,i,H)
+    SegmentJustification: wbt_tree_root ++ path
+    */
+
+    esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
+    s_es_key := fmt.Sprintf("s_%s", esKey)
+    concatenatedShards, err := CombineSegmentShards(segmentShards)
+    if err != nil {
+        return err
+    }
+    n.WriteRawKV(s_es_key, concatenatedShards)
+
+    //testing
+    var testShards []uint16
+    for idx, _ := range segmentShards{
+        testShards = append(testShards, uint16(idx))
+    }
+    fmt.Printf("setting StoreImportDA testShards: %v\n", testShards)
+
+    n.GetSegmentShard_Assurer(erasureRoot, shardIndex, testShards)
+
+    fmt.Printf("StoreAuditDA %v -> %x (%x)\n", s_es_key, segmentShards, concatenatedShards)
+	return nil
+}
+
+// Verification: CE138_BundleShard_FullShard
+func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, sclub_justification []byte) (bool, error){
+    // verify its validity
+    bClub := common.Blake2Hash(bundleShard)
+    sclub_path, err := common.ExpandPath(sclub_justification)
+    if (err != nil){
+        return false, err
+    }
+
+    sClub := sclub_path[0]
+    path := sclub_path[1:]
+    bundle_segment_pair := append(bClub.Bytes(),sClub.Bytes()...)
+    leafHash := common.ComputeLeafHash_WBT(bundle_segment_pair)
+    verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
+    if (!verified){
+        return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
+    }
+    return true, nil
+}
+
+// Qns Source : CE138_BundleShard --  Ask to Assurer From Auditor
+// Ans Source : CE137_FullShard (via StoreAuditDA)
+func (n *Node) GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, justification []byte, ok bool, err error) {
+	bundleShard = []byte{}
+	justification = []byte{}
+
+    esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
+    b_es_key := fmt.Sprintf("b_%s", esKey)
+
+    bundleShard, err = n.ReadRawKV([]byte(b_es_key))
+    bClubH, sClubH, justification, err := n.GetFullShardJustification(erasureRoot, shardIndex)
+    if err != nil {
+        return nil, nil, false, err
+    }
+    fmt.Printf("GetBundleShard %v= %x %x\n", b_es_key, bClubH, sClubH)
+    var sclub_justification []byte
+    sclub_justification = append(sClubH[:], justification...)
+
+    // proof: retrieve b_erasureRoot_<shardIdx> ++ SClub ++ default_justification
+    verified, err := VerifyBundleShard(erasureRoot, shardIndex, bundleShard, sclub_justification)
+    if (!verified){
+        panic(err)
+        return nil, nil, false, err
+    }
+    fmt.Printf("[CE138_QNS Verified] erasureRoot-shardIndex: %v-%d\n", erasureRoot, shardIndex)
+	return bundleShard, justification, true, nil
+}
+
+
+// Verification: CE140_SegmentShard
+func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard []byte, segmentIndex uint16, full_justification[]byte, bclub_sclub_justification []byte, exportedSegmentLen int) (bool, error){
+    fmt.Printf("VerifySegmentShard Step 0!!!! shardIndex=%x segmentShard %v\n", shardIndex, segmentShard)
+
+    //full_path & s_path MUST NEED saparation. Not sure why
+
+    // verify its validity
+    fPath, err := common.ExpandPath(full_justification)
+    if (err != nil){
+        return false, err
+    }
+
+    // verify its validity
+    bclub_path, err := common.ExpandPath(bclub_sclub_justification)
+    if (err != nil){
+        return false, err
+    }
+
+    bClub := bclub_path[0]
+    fmt.Printf("bClub %v\n", bClub)
+    //sClub := bclub_path[1] //hack
+    //fmt.Printf("sClub %v\n", sClub)
+    bPath := bclub_path[1:]
+    fmt.Printf("bPath %v\n", bPath)
+    segmentLeafHash := common.ComputeLeafHash_WBT(segmentShard)
+
+    //fPath := full_bclub_path[:f_j_len]
+    //fmt.Printf("fPath %v\n", fPath)
+    _, recovered_sClub := VerifyJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentLeafHash, bPath)
+    // fmt.Printf("VerifySegmentShard Step 1: shardIndex=%x recovered_sClub %v | true sClub %v\n", shardIndex, recovered_sClub, sClub)
+    // if (recovered_sClub != common.Hash(sClub)){
+    //     // not sure why it fails here
+    //     panic("recovered_sClub mismatch!! ")
+    // }
+
+    bundle_segment_pair := append(bClub.Bytes(),recovered_sClub.Bytes()...)
+    fmt.Printf("VerifySegmentShard Step 2: shardIndex=%x bundle_segment_pair %x\n", shardIndex, bundle_segment_pair)
+    erasureLeafHash := common.ComputeLeafHash_WBT(bundle_segment_pair)
+
+    verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), erasureLeafHash, fPath)
+    fmt.Printf("VerifySegmentShard Step 3: shardIndex=%x recovered_sClub:%v -> erasureRoot:%v | verified:%v\n", shardIndex, recovered_sClub, erasureRoot, verified)
+    if (!verified){
+        return false, fmt.Errorf("Segment Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
+    }
+
+    return true, nil
+}
+
+
+// Qns Source : CE140/CE139_SegmentShard Question -- By Guarantor to Assurer
+// Ans Source : CE137_FullShard ANS (via StoreImportDA)
+func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16) (erasure_root common.Hash, shard_index uint16, segment_Indices []uint16, selected_segments [][]byte, selected_full_justifications [][]byte, selected_segments_justifications [][]byte, exportedSegmentAndPageProofLens int, ok bool, err error) {
+	//j⌢[b] <--- CE_137 shared
+	//segmentshards = []byte{}
+	//segment_justifications = [][]byte{}
+
+    esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
+    s_es_key := fmt.Sprintf("s_%s", esKey)
+
+    concatenatedShards, err := n.ReadRawKV([]byte(s_es_key))
+    segmentShards, _ := SplitToSegmentShards(concatenatedShards)
+
+    segmentTree := trie.NewWellBalancedTree(segmentShards)
+    recoveredSclubH := segmentTree.RootHash()
+
+    bClubH, sClubH, full_justification, err := n.GetFullShardJustification(erasureRoot, shardIndex)
+    if err != nil {
+        return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
+    }
+    if (recoveredSclubH != sClubH){
+        panic("Invalid GetSegmentShard ERROR??")
+    }
+
+    fmt.Printf("full_justification len is %v!!!\b",len(full_justification))
+
+    fmt.Printf("%v GetSegmentShard_Assurer GetSegmentShard %v %v %v, %x\n", segmentIndices, s_es_key, bClubH, sClubH, full_justification)
+
+    exportedSegmentAndPageProofLen := len(segmentShards)
+    for _, segmentIndex := range segmentIndices {
+        selected_segment := segmentShards[segmentIndex]
+        selected_segments = append(selected_segments, selected_segment)
+        _, segmentLeafHash, segmentPath, isFound, err := segmentTree.Trace(int(segmentIndex))
+        if err != nil || !isFound {
+            return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
+        }
+        fmt.Printf("GetSegmentShard_Assurer foundsegment = %v\n", segmentLeafHash)
+
+        var s_justification []byte
+        for _, segmentHash := range segmentPath {
+            s_justification = append(s_justification, segmentHash.Bytes()...)
+        }
+
+        bclub_sclub_sj := make([]byte, 0)
+        bclub_sclub_sj = append(bclub_sclub_sj, bClubH.Bytes()...)
+        //bclub_sclub_sj = append(bclub_sclub_sj, recoveredSclubH.Bytes()...)
+        bclub_sclub_sj = append(bclub_sclub_sj, s_justification...)
+        selected_segments_justifications = append(selected_segments_justifications, bclub_sclub_sj)
+        selected_full_justifications = append(selected_segments_justifications, full_justification)
+
+        verified, err := VerifySegmentShard(erasureRoot, shardIndex, segmentShards[segmentIndex], uint16(segmentIndex), full_justification, bclub_sclub_sj, exportedSegmentAndPageProofLen)
+        if err != nil || !verified {
+            panic(err)
+            return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
+        }
+    }
+
+	return erasureRoot, shardIndex, segmentIndices, selected_segments, selected_full_justifications, selected_segments_justifications, exportedSegmentAndPageProofLens, false, nil
+}

@@ -210,3 +210,14 @@ func findWBTSibling(parent, node *WBTNode) *WBTNode {
 	}
 	return parent.Left
 }
+
+
+func ComputeExpectedWBTCopathSize(numLeaves int) int {
+    if numLeaves <= 1 {
+        // If there's only one leaf, the co-path size is 0 (no siblings).
+        return 0
+    }
+
+    // Calculate the number of levels in the tree (log2 of the number of leaves, rounded up)
+    return int(math.Ceil(math.Log2(float64(numLeaves))))
+}
