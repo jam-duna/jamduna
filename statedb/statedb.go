@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -328,20 +329,29 @@ const (
 	C12 = "PrivilegedServiceIndices"
 	C13 = "ActiveValidator"
 )
+const (
+	TestServiceCode = 47
+	TestServiceFile = "../jamtestvectors/workpackages/fib-standardized.pvm"
+)
 
 // NewGenesisStateDB generates the first StateDB object and genesis block
 func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
-		return statedb, err
+		return
 	}
 
 	statedb.Block = nil
-	j := InitGenesisState(c)
-	statedb.JamState = j // setting the dispute state so that block 1 can be produced
-	// setting the safrole state so that block 1 can be produced
-	stateRoot := statedb.UpdateTrieState()
-	statedb.StateRoot = stateRoot
+	statedb.JamState = InitGenesisState(c)
+
+	// TODO: load bootstrap service into genesis state
+	code, err := os.ReadFile(TestServiceFile)
+	if err != nil {
+		return statedb, err
+	}
+	statedb.WriteServicePreimageBlob(TestServiceCode, code)
+
+	statedb.StateRoot = statedb.UpdateTrieState()
 	return statedb, nil
 }
 

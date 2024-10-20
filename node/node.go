@@ -33,14 +33,13 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	immediateAvailability = true
-
-	debugB = false // Blocks, Announcment
-	debugG = false // WorkPackage / Guaranteeing
-	debugT = false // Tickets
-	debugP = false // Preimages
-	debugA = false // Assurances + Audits + Judgement
-	debug  = false // General Node Ops
+	debugDA = false // DA
+	debugB  = false // Blocks, Announcment
+	debugG  = false // WorkPackage / Guaranteeing
+	debugT  = false // Tickets
+	debugP  = false // Preimages
+	debugA  = false // Assurances + Audits + Judgement
+	debug   = false // General Node Ops
 
 	trace    = false
 	numNodes = 6
@@ -1072,23 +1071,6 @@ func splitHashes(hashes []common.Hash) ([]common.Hash, []common.Hash) {
 	pfHashs := hashes[totalSegments-pfCount:]
 
 	return segmentHashs, pfHashs
-}
-
-func (n *Node) GetSegmentTreeRoots(erasureRoot common.Hash) ([]common.Hash, error) {
-	hashs, err := n.store.ReadKV(erasureRoot)
-	if err != nil {
-		fmt.Println("Error in FetchWorkPackageAndExportedSegments:", err)
-	}
-	// fmt.Printf("allHash: %x\n", hashs)
-	treeRoot := hashs[32:]
-
-	segmentsECRoots, err := n.store.ReadKV(common.Hash(treeRoot))
-	if err != nil {
-		return nil, err
-	}
-	allHash := SplitBytesIntoHash(segmentsECRoots, len(common.Hash{}))
-	segmentRoots, _ := splitHashes(allHash)
-	return segmentRoots, nil
 }
 
 // SplitDataIntoSegmentAndPageProof splits the data into segment and page proof

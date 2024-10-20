@@ -57,7 +57,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		*/
 		chunks, dataBlobHash, dataLength := senderNode.PrepareArbitaryData(data)
 
-		ecChunks, err := senderNode.BuildArbitraryDataChunks(chunks, dataBlobHash, dataLength)
+		ecChunks, err := senderNode.BuildArbitraryDataChunks(chunks, dataLength)
 		senderNode.DistributeEcChunks(ecChunks)
 
 		// TODO: distribute here

@@ -169,25 +169,7 @@ func (n *Node) decode(data [][][]byte, isFixed bool, data_len int) ([]byte, erro
 
 }
 
-//	func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte) ([]types.DistributeECChunk, error) {
-//		// TODO: Pack the chunks into DistributeECChunk objects
-//		chunks := make([]types.DistributeECChunk, 0)
-//		for i := range segments {
-//			for j := range segments[i] {
-//				// Pack the DistributeECChunk object
-//				// TODO: Modify this as needed.
-//				chunk := types.DistributeECChunk{
-//					SegmentRoot: segmentRoots[i],
-//					Data:        segments[i][j],
-//				}
-//				chunks = append(chunks, chunk)
-//			}
-//		}
-//		// Return the DistributeECChunk objects
-//		return chunks, nil
-//	}
-
-func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte, blobHash common.Hash, blobMeta []byte) ([]types.DistributeECChunk, error) {
+func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte, blobMeta []byte) ([]types.DistributeECChunk, error) {
 	// TODO: Pack the chunks into DistributeECChunk objects
 	chunks := make([]types.DistributeECChunk, 0)
 	for i := range segments {
@@ -197,7 +179,6 @@ func (n *Node) packChunks(segments [][][]byte, segmentRoots [][]byte, blobHash c
 			chunk := types.DistributeECChunk{
 				SegmentRoot: segmentRoots[i],
 				Data:        segments[i][j],
-				RootHash:    blobHash,
 				BlobMeta:    blobMeta,
 			}
 			chunks = append(chunks, chunk)
@@ -315,7 +296,7 @@ func (n *Node) BuildExportedSegmentChunks(erasureCodingSegments [][][]byte, segm
 	}
 
 	// Pack the chunks into DistributeECChunk objects
-	ecChunks, err = n.packChunks(erasureCodingSegments, segmentRoots, common.Hash(segmentsECRoot), segment_meta)
+	ecChunks, err = n.packChunks(erasureCodingSegments, segmentRoots, segment_meta)
 	if err != nil {
 		return ecChunks, err
 	}
@@ -325,14 +306,7 @@ func (n *Node) BuildExportedSegmentChunks(erasureCodingSegments [][][]byte, segm
 }
 
 // Compute ecChunks without distribution for arbitrary dara
-// Renamed from DistributeArbitraryData -- to remove distribution
-func (n *Node) BuildArbitraryDataChunks(chunks [][][]byte, blobHash common.Hash, blobLen int) (ecChunks []types.DistributeECChunk, err error) {
-
-	// if len(segments) != 1 {
-	// 	panic("Expected only one segment")
-	// }
-	// fmt.Printf("Number of segments: %d for data size %d\n", len(segments), blobLen)
-
+func (n *Node) BuildArbitraryDataChunks(chunks [][][]byte, blobLen int) (ecChunks []types.DistributeECChunk, err error) {
 	// Build segment roots
 	chunksRoots := make([][]byte, 0)
 	for i := range chunks {
@@ -347,16 +321,16 @@ func (n *Node) BuildArbitraryDataChunks(chunks [][][]byte, blobHash common.Hash,
 	}
 	/// storer needs to know the size of original byte in order to eliminate any segment padding
 	blob_meta := encodeBlobMeta(segmentRootsFlattened)
-	// n.store.WriteKV(blobHash, blob_meta)
 
 	// Pack the chunks into DistributeECChunk objects
-	ecChunks, err = n.packChunks(chunks, chunksRoots, blobHash, blob_meta)
+	ecChunks, err = n.packChunks(chunks, chunksRoots, blob_meta)
 	if err != nil {
 		return ecChunks, err
 	}
 
-	//n.DistributeEcChunks(ecChunks)
-	fmt.Printf("allHash encode %x\n", chunksRoots)
+	if debugDA {
+		fmt.Printf("allHash encode %x\n", chunksRoots)
+	}
 	return ecChunks, nil
 }
 

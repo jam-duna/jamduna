@@ -11,10 +11,10 @@ import (
 
 // WBT justification helper
 type Justification struct {
-	Root     common.Hash   `json:"root"`
-	ShardIdx int           `json:"shard_index"`
-	TreeLen  int           `json:"len"`
-	Leaf     []byte        `json:"leaf"`
+	Root     common.Hash `json:"root"`
+	ShardIdx int         `json:"shard_index"`
+	TreeLen  int         `json:"len"`
+	//Leaf     []byte        `json:"leaf"`
 	LeafHash common.Hash   `json:"leaf_hash"`
 	Path     []common.Hash `json:"path"`
 }

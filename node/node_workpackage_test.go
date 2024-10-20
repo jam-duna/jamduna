@@ -1,27 +1,12 @@
 package node
 
 import (
-	//"context"
-	//"crypto/rand"
 	"fmt"
-	"reflect"
-
-	//"sync"
-
-	//"encoding/json"
-	"testing"
-
-	//"io/ioutil"
-	//"os"
-
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/trie"
-
-	//github.com/colorfulnotion/jam/pvm"
-	//"github.com/colorfulnotion/jam/statedb"
-	//"github.com/colorfulnotion/jam/trie"
-
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
+	"os"
+	"testing"
 )
 
 // computeFib calculates Fib[n] and Fib[n-1]
@@ -93,12 +78,11 @@ func testWorkpackage(fibN int) (workPackage types.WorkPackage, segments [][]byte
 	authToken := []byte("0x")
 
 	// fib code
-	code, err := loadByteCode("../jamtestvectors/workpackages/fib-refine-fixed.pvm")
+	code, err := os.ReadFile(statedb.TestServiceFile)
 	if err != nil {
 		panic(0)
 	}
 
-	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
 	codeHash := common.Blake2Hash(code)
 
 	workPackage = types.WorkPackage{
@@ -162,12 +146,13 @@ func TestAvailabilityReconstruction(t *testing.T) {
 		recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, _ := senderNode.GetMeta(erasureMeta.ErasureRoot)
 		//shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
 
-		for shardIdx := 0; shardIdx < numNodes; shardIdx++ {
-			erasureRoot, shardIndex, bundleShard, segmentShards, justification, ok, err := senderNode.GetFullShard_Guarantor(recoveredMeta.ErasureRoot, uint16(shardIdx))
-			if (!ok || err != nil){
+		for shardIdx := uint16(0); shardIdx < numNodes; shardIdx++ {
+			erasureRoot := recoveredMeta.ErasureRoot
+			bundleShard, segmentShards, justification, ok, err := senderNode.GetFullShard_Guarantor(erasureRoot, shardIdx)
+			if !ok || err != nil {
 				t.Fatalf("Failed to prepareFullShards for node %d: %v\n", shardIdx, err)
 			}
-			nodes[shardIdx].StoreFullShard_Assurer(erasureRoot, shardIndex, bundleShard, segmentShards, justification)
+			nodes[shardIdx].StoreFullShard_Assurer(erasureRoot, shardIdx, bundleShard, segmentShards, justification)
 		}
 
 		senderNode.FakeDistributeChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
@@ -179,75 +164,75 @@ func TestAvailabilityReconstruction(t *testing.T) {
 		// 	t.Fatalf("VerifyWorkPackageBundle FAILED! \n")
 		// }
 
-		// for _, n := range nodes {
-		for idx, n := range nodes {
+		for idx, _ := range nodes {
 			if idx != senderIndex {
 				continue
 			}
 			//skip verification for now ...
 			continue
-			workPackageReconstruction, bClubHash, err := n.FetchWorkPackage(originalAS.ErasureRoot, int(originalAS.BundleLength))
-			if err != nil {
-				t.Errorf("[N%v] WP Reconstruction failure err:%v\n", n.coreIndex, err)
-			}
-			fmt.Printf("%v\n", bClubHash)
-			// if workPackageReconstruction.Hash() != workPackage.Hash() {
-			if !common.CompareBytes(workPackageReconstruction.Bytes(), workPackage.Bytes()) {
-				fmt.Printf("workPackageReconstruction.Bytes=%v\n", workPackageReconstruction.Bytes())
-				fmt.Printf("workPackage.Bytes=%v\n", workPackage.Bytes())
-				t.Fatalf("[N%v] WP Reconstruction Mismatch!\n", n.coreIndex)
-			}
-
-			// exportedSegments, pageProofs, treeRoots, sClubHash, err := n.FetchExportedSegments(originalAS.ErasureRoot)
-			exportedSegments, pageProofs, treeRoots, _, err := n.FetchExportedSegments(originalAS.ErasureRoot)
-			fmt.Printf("len(exportedSegments)=%v, len(treeRoots)=%v\n", len(exportedSegments), len(treeRoots))
-			if err != nil {
-				t.Fatalf("[N%v] Exported Segment Reconstruction failure err:%v\n", n.coreIndex, err)
-			}
-
-			for i, proof := range pageProofs {
-				decodedData, _, err := types.Decode(proof, reflect.TypeOf([][]uint8{}))
+			/*
+				workPackageReconstruction, bClubHash, err := n.FetchWorkPackage(originalAS.ErasureRoot, int(originalAS.BundleLength))
 				if err != nil {
-					t.Fatalf("Error decoding page proof: %v\n", err)
+					t.Errorf("[N%v] WP Reconstruction failure err:%v\n", n.coreIndex, err)
 				}
-				decodedSegments := decodedData.([][]byte)
-				t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
-				// Compare decoded segments with original
-				start := i * 64
-				end := start + 64
-				if end > len(segments) {
-					end = len(segments)
+				fmt.Printf("%v\n", bClubHash)
+				// if workPackageReconstruction.Hash() != workPackage.Hash() {
+				if !common.CompareBytes(workPackageReconstruction.Bytes(), workPackage.Bytes()) {
+					fmt.Printf("workPackageReconstruction.Bytes=%v\n", workPackageReconstruction.Bytes())
+					fmt.Printf("workPackage.Bytes=%v\n", workPackage.Bytes())
+					t.Fatalf("[N%v] WP Reconstruction Mismatch!\n", n.coreIndex)
 				}
-				var position int
-				for _, segment := range segments {
-					position = trie.FindPositions(decodedSegments, segment)
-					if position != -1 {
-						break
+
+				// exportedSegments, pageProofs, treeRoots, sClubHash, err := n.FetchExportedSegments(originalAS.ErasureRoot)
+				exportedSegments, pageProofs, treeRoots, _, err := n.FetchExportedSegments(originalAS.ErasureRoot)
+				fmt.Printf("len(exportedSegments)=%v, len(treeRoots)=%v\n", len(exportedSegments), len(treeRoots))
+				if err != nil {
+					t.Fatalf("[N%v] Exported Segment Reconstruction failure err:%v\n", n.coreIndex, err)
+				}
+
+				for i, proof := range pageProofs {
+					decodedData, _, err := types.Decode(proof, reflect.TypeOf([][]uint8{}))
+					if err != nil {
+						t.Fatalf("Error decoding page proof: %v\n", err)
+					}
+					decodedSegments := decodedData.([][]byte)
+					t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
+					// Compare decoded segments with original
+					start := i * 64
+					end := start + 64
+					if end > len(segments) {
+						end = len(segments)
+					}
+					var position int
+					for _, segment := range segments {
+						position = trie.FindPositions(decodedSegments, segment)
+						if position != -1 {
+							break
+						}
+					}
+					if position == -1 {
+						t.Fatalf("Segment not found in the decoded segments")
+					}
+
+					expectedSegments := segments[start:end]
+					expecteddecodedSegments := decodedSegments[position:]
+					for j := range expecteddecodedSegments {
+						if !common.CompareBytes(expecteddecodedSegments[j], expectedSegments[j]) {
+							t.Errorf("Segment mismatch: expected %x, got %x", expectedSegments[j], decodedSegments[j])
+						}
+					}
+					result, err := trie.VerifyPageProof(decodedSegments, i)
+					if err != nil {
+						t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
+					} else if result {
+						t.Logf("Page %d PageProof Verified\n", i)
+					} else {
+						t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
 					}
 				}
-				if position == -1 {
-					t.Fatalf("Segment not found in the decoded segments")
-				}
-
-				expectedSegments := segments[start:end]
-				expecteddecodedSegments := decodedSegments[position:]
-				for j := range expecteddecodedSegments {
-					if !common.CompareBytes(expecteddecodedSegments[j], expectedSegments[j]) {
-						t.Errorf("Segment mismatch: expected %x, got %x", expectedSegments[j], decodedSegments[j])
-					}
-				}
-				result, err := trie.VerifyPageProof(decodedSegments, i)
-				if err != nil {
-					t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
-				} else if result {
-					t.Logf("Page %d PageProof Verified\n", i)
-				} else {
-					t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
-				}
-			}
-
+			*/
 			//TODO: in it consider success when we get here??
-			fmt.Printf("✅✅ [N%v] reconstructing FIB=%v\n", n.id, fibN)
+			//fmt.Printf("✅✅ [N%v] reconstructing FIB=%v\n", n.id, fibN)
 
 			// isValid, err := senderNode.IsValidAvailabilitySpecifier(bClubHash, int(originalAS.BundleLength), sClubHash, originalAS)
 			// if err != nil {

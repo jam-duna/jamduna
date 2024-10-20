@@ -271,7 +271,11 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		segmentroots = append(segmentroots, sr.SegmentRoot)
 	}
 
-	guarantee, err := n.RefineBundle(newReq.CoreIndex, workpackagehashes, segmentroots, bundle)
+	bp, err := types.WorkPackageBundleFromBytes(bundle)
+	if err != nil {
+		panic(123)
+	}
+	guarantee, _, _, err := n.executeWorkPackage(bp.WorkPackage)
 	if err != nil {
 		return
 	}

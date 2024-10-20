@@ -1,30 +1,17 @@
 package node
 
 import (
-	//"bytes"
-
-	//"crypto/rand"
-	"fmt"
-	//"math"
-	"math/big"
-	"path/filepath"
-	"time"
-
-	//"sync"
-
 	"encoding/json"
-	"testing"
-
-	"io/ioutil"
-	"os"
-	"os/user"
-
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
-
-	//"github.com/colorfulnotion/jam/trie"
-
 	"github.com/colorfulnotion/jam/types"
+	"math/big"
+	"os"
+	"os/user"
+	"path/filepath"
+	"testing"
+	"time"
 )
 
 func generateSeedSet(ringSize int) ([][]byte, error) {
@@ -410,38 +397,12 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 	}
 
-	// fib code
-	code, err := loadByteCode("../jamtestvectors/workpackages/fib-standardized.pvm")
+	code, err := os.ReadFile(statedb.TestServiceFile)
 	if err != nil {
-		t.Fatalf("%v", err)
+		panic(0)
 	}
-
-	service := uint32(47) // WRONG: william to fix
-
-	// TODO: need to use TestNodePOAAccumulatePVM logic to put the code into system
-	chunks, codeHash, codeLength := nodes[0].PrepareArbitaryData(code)
-	ecChunks, err := nodes[0].BuildArbitraryDataChunks(chunks, codeHash, codeLength)
-	if err != nil {
-		fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-	}
-	nodes[0].DistributeEcChunks(ecChunks)
-	// we can try to use EP to replace the code here
-
-	// if (codeHash != recoveredCodeHash){
-	// 	t.Fatalf("CodeHash mismatch!")
-	// }
-
+	codeHash := common.Blake2Hash(code)
 	for _, n := range nodes {
-		target_statedb := n.getPVMStateDB()
-		target_statedb.WriteServicePreimageBlob(service, code)
-		tentativeRoot := target_statedb.GetTentativeStateRoot()
-		target_statedb.StateRoot = tentativeRoot
-		n.statedb = target_statedb.Copy()
-
-		recovered_code := n.statedb.ReadServicePreimageBlob(service, codeHash)
-		if !common.CompareBytes(code, recovered_code) {
-			panic(0)
-		}
 		n.statedb.PreviousGuarantors(true)
 		n.statedb.AssignGuarantors(true)
 	}
@@ -461,12 +422,12 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 		workPackage := types.WorkPackage{
 			Authorization: []byte("0x"), // TODO: sign
-			AuthCodeHost:  47,
+			AuthCodeHost:  statedb.TestServiceCode,
 			Authorizer:    types.Authorizer{},
 			RefineContext: refine_context,
 			WorkItems: []types.WorkItem{
 				{
-					Service:          service,
+					Service:          statedb.TestServiceCode,
 					CodeHash:         codeHash,
 					Payload:          []byte("0x00000010"),
 					GasLimit:         10000000,
@@ -504,17 +465,6 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 }
 
-// func TestCodeParse(t *testing.T) {
-
-// 	// fib code
-// 	code, err := loadByteCode("../jamtestvectors/workpackages/standardized_jam_service.pvm")
-// 	if err != nil {
-// 		t.Fatalf("%v", err)
-// 	}
-// 	fmt.Println("Code:", code)
-// 	pvm.NewVMFromParseProgramTest(code)
-// }
-
 func TestNodeRotation(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
@@ -534,26 +484,6 @@ func TestNodeRotation(t *testing.T) {
 	for _, a := range assign {
 		fmt.Printf("CoreIndex:%d, Validator:%v\n", a.CoreIndex, a.Validator.Ed25519.String())
 	}
-}
-
-// ---------------------------- Helper Functions ----------------------------
-
-// loadByteCode reads the bytes from the given file path and returns them as a byte slice.
-func loadByteCode(filePath string) ([]byte, error) {
-	// Open the file
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Read the bytes from the file
-	bytes, err := ioutil.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
 }
 
 func deleteUserJamDirectory(force bool) error {

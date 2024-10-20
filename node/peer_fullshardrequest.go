@@ -115,6 +115,7 @@ func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) 
 	return
 }
 
+// guarantor receives CE137 request from assurer by erasureRoot and shard index
 func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 	var req JAMSNPShardRequest
@@ -127,8 +128,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	if debugA {
 		fmt.Printf("%s onFullShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
 	}
-	_, _, bundleShard, segmentShards, justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
-	//bundleShard, justification, ok, err := n.GetBundleShard(req.ErasureRoot, req.ShardIndex)
+	bundleShard, segmentShards, justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR0 %v\n", err)
 		return err
@@ -144,14 +144,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-
-	// This is an array. Should have been the [][]byte type
-	var flatSegmentShards []byte
-	for _, shards := range segmentShards {
-		flatSegmentShards = append(flatSegmentShards, shards...)
-	}
-
-	err = sendQuicBytes(stream, flatSegmentShards)
+	err = sendQuicBytes(stream, common.ConcatenateByteSlices(segmentShards))
 	if err != nil {
 		return err
 	}

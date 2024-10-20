@@ -53,12 +53,6 @@ type Segment struct {
 	Data []byte
 }
 
-// The workitem is an ordered collection of segments
-type ASWorkItem struct {
-	Segments   []Segment
-	Extrinsics []WorkItemExtrinsic `json:"extrinsic"`
-}
-
 func (E ExtrinsicsBlobs) Encode() []byte {
 	return []byte{}
 }
