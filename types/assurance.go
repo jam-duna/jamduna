@@ -52,15 +52,21 @@ func (A *Assurance) BitFieldToBytes() []byte {
 }
 
 func (A *Assurance) SetBitFieldBit(index uint16, value bool) {
+	byteIndex := index / 8   // Determine which byte in the array the bit is in
+	bitPosition := index % 8 // Determine the position within the byte
+
 	if value {
-		A.Bitfield[0] |= 1 << index
+		A.Bitfield[byteIndex] |= 1 << bitPosition
 	} else {
-		A.Bitfield[0] &= ^(1 << index)
+		A.Bitfield[byteIndex] &= ^(1 << bitPosition)
 	}
 }
 
 func (A *Assurance) GetBitFieldBit(index uint16) bool {
-	return (A.Bitfield[0] & (1 << index)) != 0
+	byteIndex := index / 8   // Determine which byte in the array the bit is in
+	bitPosition := index % 8 // Determine the position within the byte
+
+	return (A.Bitfield[byteIndex] & (1 << bitPosition)) != 0
 }
 
 func (a *Assurance) UnsignedBytes() []byte {
@@ -125,13 +131,6 @@ func (a Assurance) DeepCopy() (Assurance, error) {
 // 	}
 // 	return common.Blake2Hash(data)
 // }
-
-// Create a object for save the availibility
-
-type IsPackageRecieved struct {
-	WorkReportBundle bool
-	ExportedSegments bool
-}
 
 func (a *Assurance) UnmarshalJSON(data []byte) error {
 	var s struct {

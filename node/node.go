@@ -78,10 +78,11 @@ type Node struct {
 	judgementMutex         sync.Mutex
 
 	isBadGuarantor bool
-	// this is for assurances
-	// use work package hash to lookup the availbility
-	assurancesBucket map[common.Hash]types.IsPackageRecieved
+
+	// assurances state: are this node assuring the work package bundle/segments?
+	assurancesBucket map[common.Hash]bool
 	assuranceMutex   sync.Mutex
+
 	// holds a map of the parenthash to the block
 	blocks      map[common.Hash]*types.Block
 	headers     map[common.Hash]*types.Block
@@ -226,7 +227,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		headers:    make(map[common.Hash]*types.Block),
 		preimages:  make(map[common.Hash][]byte),
 
-		selfTickets: make(map[common.Hash][]types.TicketBucket),
+		selfTickets:      make(map[common.Hash][]types.TicketBucket),
+		assurancesBucket: make(map[common.Hash]bool),
 
 		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
@@ -245,7 +247,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 
 	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
 	if err == nil {
-		_statedb.SetID(uint32(id))
+		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)
 	} else {
 		fmt.Printf("NewGenesisStateDB ERR %v\n", err)

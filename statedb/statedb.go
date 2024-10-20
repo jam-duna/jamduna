@@ -23,7 +23,7 @@ type Message struct {
 }
 
 type StateDB struct {
-	Id         uint32       `json:"id"`
+	Id         uint16       `json:"id"`
 	Block      *types.Block `json:"block"`
 	ParentHash common.Hash  `json:"parentHash"`
 	BlockHash  common.Hash  `json:"blockHash"`
@@ -261,6 +261,8 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 // EP Errors
 const (
 	debug                     = false
+	debugA                    = false
+	debugG                    = false
 	trace                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
@@ -886,12 +888,12 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 	return nil, nil, nil
 }
 
-func (s *StateDB) SetID(id uint32) {
+func (s *StateDB) SetID(id uint16) {
 	s.Id = id
 	s.JamState.SafroleState.Id = id
 }
 
-func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, targetJCE uint32, id uint32) (uint32, uint32, error) {
+func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, targetJCE uint32) (uint32, uint32, error) {
 	num_preimages := uint32(0)
 	num_octets := uint32(0)
 
@@ -1082,7 +1084,7 @@ func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarante
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32, id uint32) (uint32, uint32, error) {
+func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (uint32, uint32, error) {
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
@@ -1112,7 +1114,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 
-	if debug {
+	if debugA {
 		fmt.Printf("Rho State Update - Assurances\n")
 		for i, rho := range s.JamState.AvailabilityAssignments {
 			if rho == nil {
@@ -1167,7 +1169,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s.GetJamState().ResetTallyStatistics()
 	}
 	sf := s.GetSafrole()
-	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header, s.Id)
+	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header)
 	if err != nil {
 		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", err)
 		panic(1)
@@ -1183,7 +1185,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// 24 - Preimages
 	preimages := blk.PreimageLookups()
-	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE, s.Id)
+	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE)
 	if err != nil {
 		return s, err
 	}
@@ -1201,7 +1203,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}
 	}
 
-	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE, s.Id)
+	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE)
 	if err != nil {
 		return s, err
 	}
@@ -1375,7 +1377,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
-		fmt.Printf("Include Guarantee (Package Hash : %v)\n", g.Report.GetWorkPackageHash())
+		if debugG {
+			fmt.Printf("[N%d] Include Guarantee (Package Hash : %v)\n", s.Id, g.Report.GetWorkPackageHash())
+		}
 		// check guarantee one per core
 		// check guarantee is not a duplicate
 

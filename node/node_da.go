@@ -352,11 +352,12 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage) types.WorkPackageBundle
 		// not sure what does idx mean inside of ImportedSegments
 		segmentIdxMap := make([]uint16, len(workItem.ImportedSegments))
 		workItemIdx_importedSegmentData, err := n.getImportSegments(workItem.ImportedSegments)
+		if err != nil {
+			fmt.Printf("getImportSegments: %v\n", err)
+			panic(40)
+		}
 		for i, workItem_importedSegment := range workItem.ImportedSegments {
 			segmentIdxMap[i] = workItem_importedSegment.Index
-		}
-		if err != nil {
-			//TODO
 		}
 		importedSegmentIdx[workIdx] = segmentIdxMap
 		importedSegmentData[workIdx] = workItemIdx_importedSegmentData
@@ -387,6 +388,7 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage) types.WorkPackageBundle
 		ImportSegmentData: importedSegmentData,
 		Justification:     justification,
 	}
+	fmt.Printf("ImportSegmentData: %d %v\n", len(importedSegmentData), importedSegmentData)
 	return workPackageBundle
 }
 
@@ -453,12 +455,12 @@ func (n *Node) VerifyWorkPackageBundle(package_bundle types.WorkPackageBundle) b
 
 // work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error
 func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
+
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
 	service_index := uint32(workPackage.AuthCodeHost)
 	packageHash := workPackage.Hash()
-	fmt.Printf("%s executeWorkPackage workPackageHash=%v\n", n.String(), packageHash)
 
 	segments := make([][]byte, 0)
 	for _, workItem := range workPackage.WorkItems {
@@ -503,15 +505,13 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		}
 
 		// Decode the Exports Segments to FIB format
-		//fmt.Printf("Exports Segments: %v\n", segments)
 		if len(segments) > 0 {
-			if debug {
-				fib_exported_result := segments[0][:12]
-				n := binary.LittleEndian.Uint32(fib_exported_result[0:4])
-				Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])
-				Fib_n_1 := binary.LittleEndian.Uint32(fib_exported_result[8:12])
-				fmt.Printf("Exported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
-			}
+			fmt.Printf("Exports Segments: len(segments)=%d\n", len(segments))
+			fib_exported_result := segments[0][:12]
+			n := binary.LittleEndian.Uint32(fib_exported_result[0:4])
+			Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])
+			Fib_n_1 := binary.LittleEndian.Uint32(fib_exported_result[8:12])
+			fmt.Printf("  Exported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
 		}
 
 		result := types.WorkResult{
@@ -526,14 +526,16 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 
 	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
 	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(packageHash, workPackage, segments)
-	prerequisite_hash := common.HexToHash("0x")
+	prerequisite_hash := common.HexToHash("0x") // TODO: Sean
+	// TODO: Sourabh [finality] => Stanley [Recent Blocks] => Shawn [Anchor/LookupAnchor]
+	empty := common.Hash{}
 	refinementContext := types.RefineContext{
-		Anchor:           n.statedb.ParentHash,                      // TODO  common.HexToHash("0x123abc")
-		StateRoot:        n.statedb.Block.Header.ParentStateRoot,    // TODO, common.HexToHash("0x")
-		BeefyRoot:        common.HexToHash("0x"),                    // SKIP
-		LookupAnchor:     n.statedb.ParentHash,                      // TODO
-		LookupAnchorSlot: n.statedb.Block.Header.Slot,               //TODO: uint32(0)
-		Prerequisite:     (*types.Prerequisite)(&prerequisite_hash), //common.HexToHash("0x"), // SKIP
+		Anchor:           empty,
+		StateRoot:        empty,
+		BeefyRoot:        empty,
+		LookupAnchor:     empty,
+		LookupAnchorSlot: 0,
+		Prerequisite:     (*types.Prerequisite)(&prerequisite_hash),
 	}
 
 	core, err := n.GetSelfCoreIndex()
@@ -548,6 +550,9 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		//	Output:               result.Output,
 		RefineContext: refinementContext,
 		Results:       results,
+	}
+	if debugG {
+		fmt.Printf("%s executeWorkPackage  workreporthash %v => erasureRoot: %v\n", n.String(), common.Str(workReport.Hash()), spec.ErasureRoot)
 	}
 
 	n.StoreMeta(spec, erasureMeta, bECChunks, sECChunksArray)

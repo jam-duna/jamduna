@@ -6,55 +6,34 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// TODO : check the assurance bucket
-// actually the assurance bucket might be useless
-// we can use the availability specifier to check if the work report is available
-func (n *Node) UpdateAssurancesBucket(oldReports []types.WorkReport) error {
-	n.assurancesBucket = make(map[common.Hash]types.IsPackageRecieved)
-	reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
-	if err != nil {
-		return err
-	}
-	for i := 0; i < len(reports); i++ {
-		n.assurancesBucket[reports[i].GetWorkPackageHash()] = types.IsPackageRecieved{
-			ExportedSegments: false,
-			WorkReportBundle: false,
-		}
-	}
-	// todo: check the leveldb data and update the assurance bucket, see if there is any exported segments or work report bundle
-	for _, report := range oldReports {
-		n.assurancesBucket[report.GetWorkPackageHash()] = types.IsPackageRecieved{
-			ExportedSegments: true,
-			WorkReportBundle: true,
-		}
-	}
-	return nil
+func (n *Node) markAssuring(workPackageHash common.Hash) {
+	n.assuranceMutex.Lock()
+	defer n.assuranceMutex.Unlock()
+	n.assurancesBucket[workPackageHash] = true
+}
+func (n *Node) isAssuring(workPackageHash common.Hash) bool {
+	n.assuranceMutex.Lock()
+	defer n.assuranceMutex.Unlock()
+	_, ok := n.assurancesBucket[workPackageHash]
+	return ok
 }
 
-// use the bucket to form the extrinsic
-// but can be modified to use the availability specifier
-
-func (n *Node) GenerateAssurance() (types.Assurance, error) {
-	ed25519Key := n.GetEd25519Key()
-	ed25519Priv := n.GetEd25519Secret()
+func (n *Node) GenerateAssurance() (a types.Assurance, err error) {
 	reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
 	if err != nil {
-		return types.Assurance{}, err
+		return
 	}
-	assurance := types.Assurance{}
-	for i := 0; i < len(reports); i++ {
-		u := n.assurancesBucket[reports[i].GetWorkPackageHash()].WorkReportBundle
-		s := n.assurancesBucket[reports[i].GetWorkPackageHash()].ExportedSegments
-		if u && s {
-			assurance.SetBitFieldBit(reports[i].CoreIndex, true)
-		} else {
-			assurance.SetBitFieldBit(reports[i].CoreIndex, false)
+	for _, r := range reports {
+		wph := r.AvailabilitySpec.WorkPackageHash
+		isA := n.isAssuring(wph)
+		if isA {
+			a.SetBitFieldBit(r.CoreIndex, isA)
 		}
 	}
-	assurance.Anchor = n.statedb.GetBlock().ParentHash()
-	assurance.ValidatorIndex = uint16(n.statedb.GetSafrole().GetCurrValidatorIndex(ed25519Key))
-	assurance.Sign(ed25519Priv)
-	return assurance, nil
+	a.Anchor = n.statedb.GetBlock().ParentHash()
+	a.ValidatorIndex = n.statedb.Id
+	a.Sign(n.GetEd25519Secret())
+	return
 }
 
 // assureData, given a Guarantee with a AvailabiltySpec within a WorkReport, fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA
@@ -74,21 +53,17 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 	}
 
 	n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
+	// TODO: is this verified? check err
 
-	//TODO: Shawn
-	//reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
-	//if err != nil {
-	//	return
-	//}
-	a := types.Assurance{
-		Anchor:         n.statedb.ParentHash,
-		ValidatorIndex: n.id,
+	n.markAssuring(spec.WorkPackageHash)
+
+	a, err := n.GenerateAssurance()
+	if err != nil {
+		return
 	}
-	a.SetBitFieldBit(g.Report.CoreIndex, false)
-	a.Sign(n.credential.Ed25519Secret[:])
-	//if debugA {
-	fmt.Printf("%s [assureData] Broadcasting assurance CORE %d\n", n.String(), g.Report.CoreIndex)
-	//}
+	if debugA {
+		fmt.Printf("%s [assureData] Broadcasting assurance CORE %d: bitfield=%x\n", n.String(), g.Report.CoreIndex, a.Bitfield)
+	}
 	n.broadcast(a)
 	return nil
 }

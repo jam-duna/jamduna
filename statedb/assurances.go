@@ -9,7 +9,6 @@ import (
 )
 
 // Check validity of assurance
-
 func (s *StateDB) VerifyHP(a types.Assurance) error {
 	// Check the anchor
 	// TODO: this is too harsh
@@ -54,8 +53,8 @@ func CheckDuplicate(assurances []types.Assurance, new types.Assurance) error {
 func (j *JamState) CountAvailableWR(assurances []types.Assurance) []uint32 {
 	// Count the number of available assurances for each validator
 	tally := make([]uint32, types.TotalCores)
-	for _, a := range assurances {
-		for c := 0; c < types.TotalCores; c++ {
+	for c := 0; c < types.TotalCores; c++ {
+		for _, a := range assurances {
 			if a.GetBitFieldBit(uint16(c)) {
 				tally[c]++
 			}
@@ -72,7 +71,7 @@ func (j *JamState) ProcessAssuranceState(tally []uint32) (uint32, []types.WorkRe
 		if j.AvailabilityAssignments[c] == nil {
 			continue
 		}
-		if available > 2*types.TotalValidators/3 {
+		if available >= 2*types.TotalValidators/3 {
 			BigW = append(BigW, j.AvailabilityAssignments[c].WorkReport)
 			j.AvailabilityAssignments[c] = nil
 		}
@@ -84,7 +83,6 @@ func (j *JamState) ProcessAssuranceState(tally []uint32) (uint32, []types.WorkRe
 func (j *JamState) ProcessAssurances(assurances []types.Assurance) (uint32, []types.WorkReport) {
 	// Count the number of available assurances for each validator
 	tally := j.CountAvailableWR(assurances)
-
 	// Update the validator's assurance state
 	numAssurances, BigW := j.ProcessAssuranceState(tally)
 	return numAssurances, BigW

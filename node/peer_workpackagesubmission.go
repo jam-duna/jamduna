@@ -104,7 +104,9 @@ func (p *Peer) SendWorkPackageSubmission(coreIndex uint16, pkg types.WorkPackage
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s submitted Workpackage %d bytes\n", p.String(), len(reqBytes))
+	if debugG {
+		fmt.Printf("%s submitted Workpackage %d bytes\n", p.String(), len(reqBytes))
+	}
 	/*
 		// TODO: write extrinsics
 		err = sendQuicBytes(stream, extrinsics)
@@ -130,8 +132,9 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	if newReq.CoreIndex != selfCoreIndex {
 		return fmt.Errorf("Core index mismatch: %d != %d", newReq.CoreIndex, selfCoreIndex)
 	}
-
-	fmt.Printf("%s received Work Package Submission [CORE %+v]\n", n.String(), newReq.CoreIndex)
+	if debugG {
+		fmt.Printf("%s received Work Package Submission [CORE %+v]\n", n.String(), newReq.CoreIndex)
+	}
 	// TODO: read extrinsics
 
 	n.workPackagesCh <- newReq.WorkPackage

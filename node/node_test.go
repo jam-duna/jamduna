@@ -1,8 +1,8 @@
 package node
 
 import (
-	"encoding/json"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
@@ -201,7 +201,7 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 		bootstrapService := uint32(statedb.BootstrapServiceCode)
 		bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-		
+
 		codeLenBytes := make([]byte, 4)
 		binary.LittleEndian.PutUint32(codeLenBytes, uint32(len(code)))
 		fibCodeWorkPackage := types.WorkPackage{
@@ -236,19 +236,23 @@ func TestWorkGuarantee(t *testing.T) {
 	//----------------------------------------------
 	time.Sleep(12 * time.Second)
 	var exportedItems []types.ImportSegment
+	n1 := nodes[1]
+	n4 := nodes[4]
+	core := 0
 	for fibN := 1; fibN < 21; fibN++ {
-		fmt.Printf("\n\n\n********************** FIB N=%v Starts **********************\n", fibN)
 		importedSegments := make([]types.ImportSegment, 0)
-
 		if fibN > 1 {
+			// TODO: REVIEW
 			importedSegments = append(importedSegments, exportedItems...)
 		}
 		refine_context := types.RefineContext{
-			//TODO: Sean
+			//TODO: Sean prereq of fib(n) is fib(n-1) and fib(n-2) package
 			// Prerequisite     *Prerequisite `json:"prerequisite"`
 		}
+		payload := make([]byte, 4)
+		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{
-			Authorization: []byte("0x"), // TODO: sign
+			Authorization: []byte("0x"), // TODO: set up null-authorizer
 			AuthCodeHost:  statedb.TestServiceCode,
 			Authorizer:    types.Authorizer{},
 			RefineContext: refine_context,
@@ -256,39 +260,44 @@ func TestWorkGuarantee(t *testing.T) {
 				{
 					Service:          statedb.TestServiceCode,
 					CodeHash:         codeHash,
-					Payload:          []byte("0x00000010"),
+					Payload:          payload,
 					GasLimit:         10000000,
 					ImportedSegments: importedSegments,
 					ExportCount:      1,
 				},
 			},
 		}
+		workPackageHash := workPackage.Hash()
 
-		// CE133_WorkPackageSubmission: Node 1 (outside Core 0) sends package to Node 0 (in Core 0) via
+		// Question: can we remove this?  Why do we need this here?
 		for _, n := range nodes {
 			n.statedb.PreviousGuarantors(true)
 			n.statedb.AssignGuarantors(true)
 		}
-		err := nodes[1].peersInfo[4].SendWorkPackageSubmission(0, workPackage, []byte{})
+		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
+		// CE133_WorkPackageSubmission: n1 => n4
+		err := n1.peersInfo[4].SendWorkPackageSubmission(0, workPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
-		// we trace core 0 only
+		// wait until the work report is pending
 		for {
 			time.Sleep(1 * time.Second)
-			if nodes[4].statedb.JamState.AvailabilityAssignments[0] != nil {
+			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
 				break
 			}
 		}
 
-		// add assurance
+		// wait until the work report is cleared
 		for {
-			if nodes[4].statedb.JamState.AvailabilityAssignments[0] == nil {
+			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
 				break
 			}
-			time.Sleep(types.SecondsPerSlot * time.Second)
+			time.Sleep(1 * time.Second)
 		}
-		exportedItems = nodes[4].segments[workPackage.Hash()]
+		// TODO: REVIEW
+		exportedItems = n4.segments[workPackageHash]
+		fmt.Printf(" => Exported Items [%s]=%v\n", workPackageHash, exportedItems)
 	}
 }
 

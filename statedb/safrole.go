@@ -99,7 +99,7 @@ type Entropy [types.EntropySize]common.Hash
 type Validators []types.Validator
 
 type SafroleState struct {
-	Id             uint32 `json:"Id"`
+	Id             uint16 `json:"Id"`
 	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
 
 	Timeslot uint32 `json:"timeslot"`
@@ -122,7 +122,7 @@ type SafroleState struct {
 
 func NewSafroleState() *SafroleState {
 	return &SafroleState{
-		Id: 99999,
+		Id: 9999,
 		// Timeslot:           uint32(common.ComputeCurrentJCETime()),
 		Timeslot: common.ComputeTimeUnit(types.TimeUnitMode),
 
@@ -961,7 +961,7 @@ func (s *SafroleState) GetEpoch() uint32 {
 }
 
 // statefrole_stf is the function to be tested
-func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, id uint32) (SafroleState, error) {
+func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) (SafroleState, error) {
 	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 	s2 := cloneSafroleState(*s)

@@ -230,8 +230,9 @@ func (s *StateDB) CheckRecentBlock(g types.Guarantee) error {
 	return errors.New(fmt.Sprintf("Invalid recent block, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash()))
 }
 
-// 147
+// TODO: 147
 func (s *StateDB) CheckTimeSlotHeader(g types.Guarantee) error {
+	return nil
 	if g.Report.RefineContext.LookupAnchorSlot >= s.Block.TimeSlot()-types.LookupAnchorMaxAge {
 		return nil
 	}

@@ -72,7 +72,7 @@ func TestNodeAssurance(t *testing.T) {
 		if n.statedb == nil {
 			fmt.Printf("Node[%d] state is nil\n", n.id)
 		}
-		n.AddDummyStateAssurance()
+
 	}
 	//generate assurance
 	fmt.Println("Generating assurance...")
@@ -86,36 +86,6 @@ func TestNodeAssurance(t *testing.T) {
 		fmt.Printf("Node[%d] Signature: %x\n", n.id, assurance.Signature)
 		fmt.Printf("Node[%d] ValidatorIndex: %d\n", n.id, assurance.ValidatorIndex)
 	}
-}
-
-// helper function
-func (n *Node) AddDummyStateAssurance() error {
-	n.statedb.JamState.AvailabilityAssignments = [types.TotalCores]*statedb.Rho_state{}
-	n.UpdateAssurancesBucket([]types.WorkReport{})
-	for i := 0; i < 2; i++ {
-		fmt.Printf("Node[%d] add dummy Rhostate\n", n.id)
-		n.statedb.JamState.AvailabilityAssignments[i] = &statedb.Rho_state{
-			WorkReport: types.WorkReport{
-				AvailabilitySpec: types.AvailabilitySpecifier{
-					WorkPackageHash: common.BytesToHash(append([]byte("test"), byte(i))),
-				},
-				CoreIndex: uint16(i),
-			},
-		}
-		//dummy parent hash
-		fmt.Printf("Node[%d] add dummy ParentHash\n", n.id)
-		n.statedb.Block = &types.Block{
-			Header: types.BlockHeader{
-				Parent: common.BytesToHash(append([]byte("test"), byte(i))),
-			},
-		}
-		fmt.Printf("Node[%d] add dummy IsPackageRecieved\n", n.id)
-		n.assurancesBucket[common.BytesToHash(append([]byte("test"), byte(i)))] = types.IsPackageRecieved{
-			ExportedSegments: true,
-			WorkReportBundle: true,
-		}
-	}
-	return nil
 }
 
 // helper function

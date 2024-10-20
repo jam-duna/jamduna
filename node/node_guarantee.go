@@ -30,6 +30,9 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 				if !doneExecute {
 					guarantee, _, _, err = n.executeWorkPackage(wp)
 					doneExecute = true
+					if debugG {
+						fmt.Printf("%s [broadcastWorkPackage] Guarantee from self\n", n.String())
+					}
 				}
 				if guarantee.Report.Hash() == fellowWorkReportHash {
 					guarantee.Signatures = append(guarantee.Signatures, types.GuaranteeCredential{
@@ -39,8 +42,13 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 					sort.Slice(guarantee.Signatures, func(i, j int) bool {
 						return guarantee.Signatures[i].ValidatorIndex < guarantee.Signatures[j].ValidatorIndex
 					})
+					if debugG {
+						fmt.Printf("%s [broadcastWorkPackage] Guarantee from fellow.. broadcast\n", n.String())
+					}
 					n.broadcast(guarantee)
 					return
+				} else {
+					fmt.Printf("%s [broadcastWorkPackage] Guarantee from fellow did not match!\n", n.String())
 				}
 			}
 		}
