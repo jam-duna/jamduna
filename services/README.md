@@ -1,6 +1,8 @@
-## Work Package Test Vectors
+## Service Test Vectors
 
-This "workpackages" directory has working packages
+This "service" directory has 2 services:
+* fib - working in `TestWorkGuarantee`
+* bootstrap - under development, to set up any new service using `new` host function
 
 ### fib Service
 
@@ -49,17 +51,17 @@ pub @refine:
     a0 = 1
     a1 = 0x6000
     a2 = 12  
-    ecalli 16 
+    ecalli 16
     a1 = 0
     jump @init if a0 != a1     // if we didn't get an importable item jump to init and then come back
-    
+
     @fibsum:
     a1 = u32[0x6004]
     a2 = u32[0x6008]
     u32[0x6004] = a1               // compute Fib[n] as Fib[n-1]  at 0x6004
     a1 = a1 + a2
     u32[0x6008] = a1               // compute Fib[n-1] as Fib[n-2] at 0x6008
-    
+
     a3 = 1                         // increment n at 0x6000
     a0 = u32[0x6000]
     a0 = a0 + a3
@@ -76,11 +78,11 @@ pub @refine:
     u32 [0x6004] = 0x00000001
     u32 [0x6008] = 0x00000000
     jump @fibsum
-    
+
 pub @accumulate:
     // TODO: copy _wrangled_ 12 byte work result to 0x6000
     @TODO_wrangled_refine_results_to_0x4000:
-        
+
     @write:
     a0 = 0x4000
     a1 = 4
@@ -93,7 +95,7 @@ pub @accumulate:
 pub @authorization:
     @readsig:
     a0 = 0x1000
-    a1 = 0x2000 
+    a1 = 0x2000
     a2 = 0x3000
     @setup_public_address:
     u32 [0x4000] = 0x62730609
@@ -104,17 +106,17 @@ pub @authorization:
 
     // TODO: copy 65 signature (signing the workpackage hash) into 0x1000, copy 32-byte workpackage hash into 0x2000
     @TODO_copy_sig_wphash:
-    
+
     // ecrecover will return 20byte address into 0x3000 if OK
     @ecrecover:
     ecalli 25
     a3 = 0
-    
+
     @check_match_to_public_address:
     a0 = u32 [0x3000]
     a1 = u32 [0x4000]
     jump @notauth if a0 != a1
-    
+
     a0 = u32 [0x3004]
     a1 = u32 [0x4004]
     jump @notauth if a0 != a1
@@ -131,7 +133,7 @@ pub @authorization:
     a1 = u32 [0x4010]
     jump @notauth if a0 != a1
     trap
-    
+
     @notauth:
     trap
 
@@ -150,7 +152,7 @@ warning: /root/go/src/github.com/colorfulnotion/polkavm/Cargo.toml: unused manif
 
 ### Disassembly
 ```
-# cargo run -p polkatool disassemble --show-raw-bytes fib.polkavm 
+# cargo run -p polkatool disassemble --show-raw-bytes fib.polkavm
 warning: /root/go/src/github.com/colorfulnotion/polkavm/Cargo.toml: unused manifest key: workspace.lints.rust.unexpected_cfgs.check-cfg
     Finished dev [unoptimized + debuginfo] target(s) in 0.05s
      Running `target/debug/polkatool disassemble --show-raw-bytes fib.polkavm`

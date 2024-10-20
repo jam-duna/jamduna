@@ -329,12 +329,22 @@ const (
 	C12 = "PrivilegedServiceIndices"
 	C13 = "ActiveValidator"
 )
+
+// Initial services
 const (
-	TestServiceCode = 47
-	TestServiceFile = "../jamtestvectors/workpackages/fib-standardized.pvm"
+	BootstrapServiceCode = 0
+	BootstrapServiceFile = "../services/bootstrap.pvm"
+
+	TestServiceCode = 47 // this is temporary
+	TestServiceFile = "../services/fib.pvm"
 )
 
-// NewGenesisStateDB generates the first StateDB object and genesis block
+type GenesisService struct {
+	Code uint32
+	File string
+}
+
+// NewGenesisStateDB generates the first StateDB object and genesis statedb
 func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
@@ -344,12 +354,20 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	statedb.Block = nil
 	statedb.JamState = InitGenesisState(c)
 
-	// TODO: load bootstrap service into genesis state
-	code, err := os.ReadFile(TestServiceFile)
-	if err != nil {
-		return statedb, err
+	// Load services into genesis state
+	services := []GenesisService{
+		{Code: BootstrapServiceCode, File: BootstrapServiceFile},
+		{Code: TestServiceCode, File: TestServiceFile},
+		// Add more services here as needed
 	}
-	statedb.WriteServicePreimageBlob(TestServiceCode, code)
+
+	for _, service := range services {
+		code, err := os.ReadFile(service.File)
+		if err != nil {
+			return statedb, err
+		}
+		statedb.WriteServicePreimageBlob(service.Code, code)
+	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()
 	return statedb, nil

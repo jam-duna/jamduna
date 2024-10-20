@@ -1,0 +1,23 @@
+// point to y "payload" (code length at 0xFEFF0004, code at 0xFEFF0008)
+pub @refine: 
+    a10 = 0xFEFF0008      // c
+    a11 = u32[0xFEFF0004] // |c|
+    trap
+
+pub @accumulate:
+    a7 = location of result from refine 
+    a8 = length of result from refine   
+    a9 = 0x2000
+    a10 = 0x1000
+    a11 = 0x3000
+    a12 = 0x4000
+    ecalli 9 
+    trap
+
+pub @authorization:
+    fallthrough
+
+pub @on_transfer:
+    fallthrough
+
+

@@ -95,6 +95,11 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j.DisputesState = Psi_state{}
 	//j.AvailabilityAssignments = make([types.TotalCores]*Rho_state, 0)
 
+	// Setup Bootstrap Service for all 3 privileges
+	j.PrivilegedServiceIndices.Kai_a = BootstrapServiceCode
+	j.PrivilegedServiceIndices.Kai_v = BootstrapServiceCode
+	j.PrivilegedServiceIndices.Kai_m = BootstrapServiceCode
+
 	return j
 }
 

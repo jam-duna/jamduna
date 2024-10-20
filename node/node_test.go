@@ -2,6 +2,7 @@ package node
 
 import (
 	"encoding/json"
+	"encoding/binary"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
@@ -156,223 +157,6 @@ func TestNodeSafrole(t *testing.T) {
 	}
 }
 
-/*
-func TestSegmentECRoundTrip(t *testing.T) {
-	// Define various data sizes to test
-	dataSizes := []int{types.W_E * types.W_S}
-	// segmentSizes := []int{1, 10}
-	segmentSizes := []int{10}
-
-	// Initialize nodes
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
-	if err != nil {
-		t.Fatalf("Error setting up nodes: %v\n", err)
-	}
-
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		nodes[i] = node
-	}
-
-	// Wait for nodes to be ready
-	fmt.Println("Waiting for nodes to be ready...")
-	time.Sleep(2 * time.Second)
-	fmt.Println("Time Sleep End...")
-
-	// Test encoding, distributing, fetching, and reconstructing data for each size
-
-	for _, segmentLength := range segmentSizes {
-		for _, size := range dataSizes {
-			fmt.Printf("processing %d........\n", size)
-			size := size
-			t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
-				// Generate random data of the specified size
-				var data [][]byte
-				for i := 0; i < segmentLength; i++ {
-					randData := make([]byte, size)
-					_, err := rand.Read(randData)
-					randData = common.PadToMultipleOfN(randData, types.W_E*types.W_S)
-					data = append(data, randData)
-					if err != nil {
-						t.Fatalf("Failed to generate random data: %v", err)
-					}
-				}
-
-				pageProofs, _ := trie.GeneratePageProof(data)
-				combinedSegmentAndPageProofs := append(data, pageProofs...)
-
-				// Use sender node to encode and distribute data
-				senderNode := nodes[0]
-				fmt.Println("Starting EncodeAndDistributeSegmentData...")
-
-				treeRoot := common.Hash{}
-				// Encode the combined data
-				var segmentsECRoots []byte
-				// Flatten the combined data
-				var FlattenData []byte
-				for _, singleData := range combinedSegmentAndPageProofs {
-					FlattenData = append(FlattenData, singleData...)
-				}
-				// Erasure code the combined data
-				for _, singleData := range combinedSegmentAndPageProofs {
-					// Encode the data into segments
-					erasureCodingSegments, err := senderNode.encode(singleData, true, len(singleData)) // Set to false for variable size segments
-					if err != nil {
-						fmt.Printf("Error in EncodeAndDistributeSegmentData: %v\n", err)
-					}
-
-					// Build segment roots
-					segmentRoots := make([][]byte, 0)
-					for i := range erasureCodingSegments {
-						leaves := erasureCodingSegments[i]
-						tree := trie.NewCDMerkleTree(leaves)
-						segmentRoots = append(segmentRoots, tree.Root())
-					}
-
-					// Generate the blob hash by hashing the original data
-					blobTree := trie.NewCDMerkleTree(segmentRoots)
-					segmentsECRoot := blobTree.Root()
-
-					// Append the segment root to the list of segment roots
-					segmentsECRoots = append(segmentsECRoots, segmentsECRoot...)
-					// Distribute the segments
-					ecChunks, err := senderNode.BuildExportedSegmentChunks(erasureCodingSegments, segmentRoots)
-					if err != nil {
-						fmt.Println("Error in EncodeAndDistributeSegmentData:", err)
-					}
-					senderNode.DistributeEcChunks(ecChunks)
-					fmt.Printf("len(ecChunks)=%v\n", ecChunks)
-				}
-
-				fmt.Println("Finished EncodeAndDistributeSegmentData...")
-				if err != nil {
-					t.Fatalf("Failed to encode and distribute data: %v", err)
-				}
-
-				// Simulate a small delay before fetching and reconstructing the data
-				time.Sleep(3 * time.Second)
-
-				// Use the first node to fetch and reconstruct the data
-				fmt.Println("Starting FetchAndReconstructAllSegmentsData...")
-				reconstructedData, _, _, err := senderNode.FetchAndReconstructAllSegmentsData(treeRoot)
-				if err != nil {
-					t.Fatalf("Failed to fetch and reconstruct data: %v", err)
-				}
-				fmt.Println("Finished FetchAndReconstructAllSegmentsData...")
-
-				// Compare original and reconstructed data
-				for i := 0; i < len(data); i++ {
-					fmt.Printf("Original data: %x\n", data[i])
-					fmt.Printf("Reconstructed data: %x\n", reconstructedData[i][:len(data[i])])
-					if !bytes.Equal(data[i], reconstructedData[i][:len(data[i])]) {
-						fmt.Printf("Original data: %x\n", data[i])
-						fmt.Printf("Reconstructed data: %x\n", reconstructedData[i][:len(data[i])])
-						t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
-					}
-				}
-
-				for i := 0; i < len(data); i++ {
-					reconstructedSegment, reconstructedPageProof, err := senderNode.FetchAndReconstructSegmentData(treeRoot, uint32(i))
-					fmt.Printf("Finished FetchAndReconstructSegmentData %d...\n", i)
-					if err != nil {
-						t.Fatalf("Failed to fetch and reconstruct data: %v", err)
-					}
-					fmt.Printf("Reconstructed data: %x\n", reconstructedSegment)
-					if !common.CompareBytes(data[i], reconstructedSegment) {
-						fmt.Printf("Original data: %x\n", data[i])
-						fmt.Printf("Reconstructed data: %x\n", reconstructedSegment)
-						t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
-					}
-					if !common.CompareBytes(pageProofs[int(math.Floor(float64(i)/64))], reconstructedPageProof[:len(pageProofs[int(math.Floor(float64(i)/64))])]) {
-						fmt.Printf("pageProofs[int(math.Ceil(i/64))] data: %x\n", pageProofs[int(math.Floor(float64(i)/64))])
-						fmt.Printf("reconstructedPageProof data: %x\n", reconstructedPageProof)
-						t.Fatalf("Data mismatch for size %d: original and reconstructed data are not the same", size)
-					}
-
-					fmt.Printf("Roundtrip success for DataSize%d\n", size)
-				}
-			})
-		}
-	}
-}
-
-func TestECRoundTrip(t *testing.T) {
-	// Define various data sizes to test
-	//try to do it separately test for each size
-	dataSizes := []int{1028, 23, 24, 25, 26, 27, 28, 29, 30, 31, 39, 1024}
-	// dataSizes := []int{types.W_E * types.W_S, types.W_E * types.W_S * 2, types.W_E * types.W_S * 3}
-	// dataSizes := []int{2084}
-	// Initialize nodes
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
-	if err != nil {
-		t.Fatalf("Error setting up nodes: %v\n", err)
-	}
-
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint32(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		nodes[i] = node
-	}
-	// Wait for nodes to be ready
-	fmt.Println("Waiting for nodes to be ready...")
-	time.Sleep(1 * time.Second)
-
-	senderNode := nodes[0]
-
-	for _, size := range dataSizes {
-		size := size
-		t.Run(fmt.Sprintf("DataSize%d", size), func(t *testing.T) {
-			// Generate random data of the specified size
-			data := make([]byte, size)
-			_, err := rand.Read(data)
-			if err != nil {
-				t.Fatalf("Failed to generate random data: %v", err)
-			}
-
-			chunks, blobHash, dataLength := senderNode.PrepareArbitaryData(data)
-			ecChunks, err := senderNode.BuildArbitraryDataChunks(chunks, blobHash, dataLength)
-			senderNode.DistributeEcChunks(ecChunks)
-
-			if err != nil {
-				t.Fatalf("Failed to encode and distribute data: %v", err)
-			}
-
-			time.Sleep(500 * time.Millisecond)
-			reconstructData, err := senderNode.FetchAndReconstructArbitraryData(blobHash, dataLength)
-			if err != nil {
-				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
-			}
-			time.Sleep(1000 * time.Millisecond)
-			fmt.Printf("Reconstructed data (size %d): %x\n", len(reconstructData), reconstructData)
-
-			// Compare the original data and the reconstructed data with bytes.Equal
-			if !bytes.Equal(data, reconstructData) {
-				fmt.Printf("Original data: %x\n", data)
-				fmt.Printf("Reconstructed data: %x\n", reconstructData)
-				t.Fatalf("Original data and reconstructed data are different for size %d", size)
-			} else {
-				fmt.Printf("roundtrip success for DataSize%d\n", size)
-			}
-		})
-	}
-}
-
-
- Group effort - Fib
- need Willaim export & import
- need Sean's encode func for E(p,x,i,j) + e
- need Stanley availability specifier(as) & paged proof & process to reconstruct using AS
- need Shawn's Assurance/Judgement based on Stanley's reconstructed wp
-
-*/
-
 func TestWorkGuarantee(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
@@ -401,7 +185,50 @@ func TestWorkGuarantee(t *testing.T) {
 	if err != nil {
 		panic(0)
 	}
+
+	for _, n := range nodes {
+		n.statedb.PreviousGuarantors(true)
+		n.statedb.AssignGuarantors(true)
+	}
+	time.Sleep(12 * time.Second)
+	//----------------------------------------------
+	loadTestService := false
+	if loadTestService {
+		// set up testservice using the Bootstrap service
+		bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
+		if err != nil {
+			panic(0)
+		}
+		bootstrapService := uint32(statedb.BootstrapServiceCode)
+		bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
+		
+		codeLenBytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(codeLenBytes, uint32(len(code)))
+		fibCodeWorkPackage := types.WorkPackage{
+			Authorization: []byte(""),
+			AuthCodeHost:  bootstrapService,
+			Authorizer:    types.Authorizer{},
+			RefineContext: types.RefineContext{},
+			WorkItems: []types.WorkItem{
+				{
+					Service:          bootstrapService,
+					CodeHash:         bootstrapCodeHash,
+					Payload:          append(codeLenBytes, code...), // "y" = |c| ++ c
+					GasLimit:         10000000,
+					ImportedSegments: make([]types.ImportSegment, 0),
+					ExportCount:      0,
+				},
+			},
+		}
+		err = nodes[1].peersInfo[4].SendWorkPackageSubmission(0, fibCodeWorkPackage, []byte{})
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+		// TODO: William - figure out how to get new service back from the above accumulate XContext (see hostNew SetX_i call)
+		time.Sleep(12 * time.Second)
+	}
 	codeHash := common.Blake2Hash(code)
+
 	for _, n := range nodes {
 		n.statedb.PreviousGuarantors(true)
 		n.statedb.AssignGuarantors(true)

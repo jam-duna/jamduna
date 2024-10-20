@@ -686,15 +686,19 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 	_ = o_byte
 	_ = w_byte
 
+	// TODO: William - initialize RAM "a" @ 0xFEFF0000 (2^32 - Z_Q - Z_I) based on entrypoint:
+	//  Refine a = E(s, y, p, c, a, o, x bar ...) Eq 271
+	//  Accumulate a = E(o) Eq 275
+	//  IsAuthorized - E(p,c) Eq 268
+	//  Transfer - E(t) Eq 282
 	vm := &VM{
-		JSize:    p.JSize,
-		Z:        p.Z,
-		J:        p.J,
-		code:     p.Code,
-		bitmask:  p.K[0], // pass in bitmask K
-		register: make([]uint32, regSize),
-		pc:       initialPC,
-		// ram:           make(map[uint32][4096]byte),
+		JSize:         p.JSize,
+		Z:             p.Z,
+		J:             p.J,
+		code:          p.Code,
+		bitmask:       p.K[0], // pass in bitmask K
+		register:      make([]uint32, regSize),
+		pc:            initialPC,
 		ram:           NewRAM(),
 		hostenv:       hostENV, //check if we need this
 		Exports:       make([][]byte, 0),

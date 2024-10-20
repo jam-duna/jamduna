@@ -150,13 +150,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.hostExpunge()
 		return true, nil
 
-	case EXTRINSIC:
-		vm.hostExtrinsic()
-		return true, nil
-
-	case PAYLOAD:
-		vm.hostPayload()
-		return true, nil
+		// TODO: eliminate
 
 	case ECRECOVER:
 		vm.hostECRecover()
@@ -749,54 +743,6 @@ func (vm *VM) hostImport() uint32 {
 		return OK
 	} else {
 		vm.writeRegister(7, NONE)
-		return NONE
-	}
-}
-
-// Extrinsic
-func (vm *VM) hostExtrinsic() uint32 {
-
-	omega_0, _ := vm.readRegister(7)
-	var v_Bytes []byte
-	if omega_0 < uint32(len(vm.Extrinsics)) {
-		v_Bytes = vm.Extrinsics[omega_0]
-	} else {
-		v_Bytes = []byte{}
-	}
-
-	o, _ := vm.readRegister(8)
-	l, _ := vm.readRegister(9)
-
-	if len(v_Bytes) != 0 {
-		errCode := vm.writeRAMBytes(o, v_Bytes[:l])
-		if errCode == OOB {
-			vm.writeRegister(7, OOB)
-			return errCode
-		}
-		vm.writeRegister(7, OK)
-		return OK
-	} else {
-		vm.writeRegister(7, NONE)
-		return NONE
-	}
-}
-
-// Payload
-func (vm *VM) hostPayload() uint32 {
-
-	v_Bytes := vm.payload[:]
-	o, _ := vm.readRegister(7)
-	l, _ := vm.readRegister(8)
-
-	if len(v_Bytes) != 0 {
-		errCode := vm.writeRAMBytes(o, v_Bytes[:l])
-		if errCode == OOB {
-			vm.writeRegister(7, OOB)
-			return errCode
-		}
-		vm.writeRegister(7, OK)
-		return OK
-	} else {
 		return NONE
 	}
 }
