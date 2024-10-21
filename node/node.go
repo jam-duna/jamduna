@@ -465,12 +465,16 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 func (n *Node) broadcast(obj interface{}) []byte {
 	result := []byte{}
+	objType := reflect.TypeOf(obj)
 	for id, p := range n.peersInfo {
 		if id == n.id {
-			continue
+			if objType == reflect.TypeOf(types.Assurance{}) {
+				a := obj.(types.Assurance)
+				n.assurancesCh <- a
+				continue
+			}
 		}
 		//fmt.Printf("%s BROADCAST PeerID=%v\n", n.String(), p.PeerID)
-		objType := reflect.TypeOf(obj)
 		switch objType {
 		case reflect.TypeOf(types.Ticket{}):
 			t := obj.(types.Ticket)
@@ -507,7 +511,6 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			if err != nil {
 				fmt.Printf("SendAssurance ERR %v\n", err)
 			}
-			n.processAssurance(a)
 			break
 		case reflect.TypeOf(types.Announcement{}):
 			a := obj.(types.Announcement)
@@ -965,6 +968,11 @@ func (n *Node) runClient() {
 				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot)
 				if err != nil {
 					fmt.Printf("writeDebug JamState err: %v\n", err)
+				}
+				if len(newBlock.Extrinsic.Guarantees) > 0 {
+					for _, g := range newBlock.Extrinsic.Guarantees {
+						n.assureData(g)
+					}
 				}
 
 			}

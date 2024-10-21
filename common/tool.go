@@ -55,17 +55,22 @@ func ComputeTimeUnit(TimeUnitMode string) uint32 {
 	return unit
 }
 
+var JceStart = time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+
+func AddJamStart(time time.Duration) {
+	JceStart = JceStart.Add(time)
+}
+
 // Jam Common Era: 1704110400 or Jan 01 2024 12:00:00 GMT+0000; See section 4.4
 func ComputeJCETime(unixTimestamp int64, production bool) int64 {
 	if production {
 		// Define the start of the Jam Common Era
-		jceStart := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
 
 		// Convert the Unix timestamp to a Time object
 		currentTime := time.Unix(unixTimestamp, 0).UTC()
 
 		// Calculate the difference in seconds
-		diff := currentTime.Sub(jceStart)
+		diff := currentTime.Sub(JceStart)
 		return int64(diff.Seconds())
 	} else {
 		return unixTimestamp

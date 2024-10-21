@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )

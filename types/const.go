@@ -34,11 +34,13 @@ const (
 	EpochLength               = 12 // E = 600: The length of an epoch in timeslots.
 	TicketSubmissionEndSlot   = 10 // Y = 500: The number of slots into an epoch at which ticket-submission ends.
 	MaxTicketsPerExtrinsic    = 3  // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
+	SecondsPerEpoch           = EpochLength * SecondsPerSlot
 )
 
 // time mode
 // three mode input => "JAM", "TimeStamp", "TimeSlot"
 const TimeUnitMode = "JAM"
+const TimeSavingMode bool = true
 const CoreLazyMode bool = true
 const (
 	// Medium: configure these

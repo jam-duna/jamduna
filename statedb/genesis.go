@@ -128,17 +128,30 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 
 func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 	now := time.Now().Unix()
+	second_per_epoch := types.SecondsPerEpoch // types.EpochLength
 	if types.TimeUnitMode != "TimeStamp" {
-		now = int64(computeJCETime(now))
+		now = common.ComputeJCETime(now, true)
 	}
 	// epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
 	// FOR JAM TESTNET:
 	// second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength)
-	second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength) // types.EpochLength
-
 	// USE THIS for generating public traces with a full E for the first epoch
-	waitTime := second_per_epoch - (uint64(now) % second_per_epoch)
-	epoch0Timestamp := uint64(now) + waitTime
+	waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
+	epoch0Timestamp := uint64(now) + uint64(waitTime)
+	if types.TimeSavingMode && !(waitTime < 5) {
+		fmt.Printf("===Time Saving Mode===\n")
+		AddTime := (time.Duration(-waitTime) + 5) * time.Second
+		fmt.Printf("AddTime: %v\n", AddTime)
+		common.AddJamStart(AddTime)
+		fmt.Printf("JCE Start Time: %v\n", common.JceStart)
+		now := time.Now().Unix()
+		if types.TimeUnitMode != "TimeStamp" {
+			now = common.ComputeJCETime(now, true)
+		}
+		waitTime = int64(second_per_epoch) - now%int64(second_per_epoch)
+		epoch0Timestamp = uint64(now) + uint64(waitTime)
+	}
+
 	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v. Wait:%v Sec \n", epoch0Timestamp, uint64(waitTime))
 	return GenesisConfig{
 		Epoch0Timestamp: epoch0Timestamp,
