@@ -40,8 +40,8 @@ type WorkItem struct {
 
 // From Sec 14: Once done, then imported segments must be reconstructed. This process may in fact be lazy as the Refine function makes no usage of the data until the ${\tt import}$ hostcall is made. Fetching generally implies that, for each imported segment, erasure-coded chunks are retrieved from enough unique validators (342, including the guarantor).  Chunks must be fetched for both the data itself and for justification metadata which allows us to ensure that the data is correct.
 type ImportSegment struct {
-	TreeRoot common.Hash `json:"tree_root"`
-	Index    uint16      `json:"index"`
+	WorkPackageHash common.Hash `json:"work_package_hash"`
+	Index           uint16      `json:"index"`
 }
 type WorkItemExtrinsic struct {
 	Hash common.Hash `json:"hash"`

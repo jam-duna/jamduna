@@ -279,6 +279,10 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		return
 	}
+	if len(guarantee.Signatures) == 0 {
+		return fmt.Errorf("onWorkPackageShare: No guarantee signature")
+	}
+
 	req := JAMSNPWorkPackageShareResponse{
 		WorkReportHash: guarantee.Report.Hash(),
 		Signature:      guarantee.Signatures[0].Signature,

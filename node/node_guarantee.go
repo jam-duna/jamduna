@@ -20,6 +20,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 				if id == n.id {
 					continue
 				}
+				//fmt.Printf("broadcastWorkPackage wp=%v", wp.String())
 				bundle := n.CompilePackageBundle(wp)
 				// TODO: parallelize the RefineBundle with the 2 ShareWorkPackage calls -- whichever one matches our
 				fellowWorkReportHash, fellowSignature, errfellow := p.ShareWorkPackage(coreIndex, bundle.Bytes(), p.Validator.Ed25519)

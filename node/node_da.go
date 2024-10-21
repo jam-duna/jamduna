@@ -351,7 +351,7 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage) types.WorkPackageBundle
 	for workIdx, workItem := range workItems {
 		// not sure what does idx mean inside of ImportedSegments
 		segmentIdxMap := make([]uint16, len(workItem.ImportedSegments))
-		workItemIdx_importedSegmentData, err := n.getImportSegments(workItem.ImportedSegments)
+		workItemIdx_importedSegmentData, err := n.GetImportSegments(workItem.ImportedSegments)
 		if err != nil {
 			fmt.Printf("getImportSegments: %v\n", err)
 			panic(40)
@@ -388,7 +388,7 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage) types.WorkPackageBundle
 		ImportSegmentData: importedSegmentData,
 		Justification:     justification,
 	}
-	fmt.Printf("ImportSegmentData: %d %v\n", len(importedSegmentData), importedSegmentData)
+	//fmt.Printf("ImportSegmentData: %d %v\n", len(importedSegmentData), importedSegmentData)
 	return workPackageBundle
 }
 
@@ -460,7 +460,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
 	service_index := uint32(workPackage.AuthCodeHost)
-	packageHash := workPackage.Hash()
+	workPackageHash := workPackage.Hash()
 
 	segments := make([][]byte, 0)
 	for _, workItem := range workPackage.WorkItems {
@@ -478,7 +478,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		// set malicious mode here
 		vm.IsMalicious = false
-		imports, err0 := n.getImportSegments(workItem.ImportedSegments)
+		imports, err0 := n.GetImportSegments(workItem.ImportedSegments)
 		if err0 != nil {
 			// return spec, common.Hash{}, err
 			imports = make([][]byte, 0)
@@ -503,6 +503,10 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		for _, e := range vm.Exports {
 			segments = append(segments, e) // this is used in NewAvailabilitySpecifier
 		}
+		err = n.StoreImportDACache(workPackageHash, common.ConcatenateByteSlices(segments))
+		if err != nil {
+			panic(1349)
+		}
 
 		// Decode the Exports Segments to FIB format
 		if len(segments) > 0 {
@@ -525,7 +529,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 	}
 
 	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
-	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(packageHash, workPackage, segments)
+	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments)
 	prerequisite_hash := common.HexToHash("0x") // TODO: Sean
 	// TODO: Sourabh [finality] => Stanley [Recent Blocks] => Shawn [Anchor/LookupAnchor]
 	empty := common.Hash{}

@@ -89,7 +89,7 @@ type Node struct {
 	preimages   map[common.Hash][]byte
 	workReports map[common.Hash]types.WorkReport
 
-	segments map[common.Hash][]types.ImportSegment
+	importDACache map[common.Hash][]byte
 
 	blockAnnouncementsCh    chan types.BlockAnnouncement
 	ticketsCh               chan types.Ticket
@@ -229,6 +229,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
+		importDACache:    make(map[common.Hash][]byte),
 
 		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
@@ -713,51 +714,24 @@ func (n *Node) processBlock(blk *types.Block) error {
 	return nil // Success
 }
 
-func (n *Node) computeAssuranceBitfield() [1]byte {
-	// TODO
-	return [1]byte{3}
-}
-
-func (n *Node) newAvailabilityJustification(guarantee types.Guarantee) types.AvailabilityJustification {
-	return types.AvailabilityJustification{}
-}
-
-func (n *Node) processAvailabilityJustification(aj *types.AvailabilityJustification) error {
-	// TODO: validate proof
-	//ed25519Key := n.GetEd25519Key()
-	ed25519Priv := n.GetEd25519Secret()
-	assurance := types.Assurance{
-		Anchor:         n.statedb.ParentHash,
-		Bitfield:       n.computeAssuranceBitfield(),
-		ValidatorIndex: uint16(n.id),
-		//	Signature: signature,
+// h is a WorkPackageHash only for now.  The segmentsRoot solution is too complex right now as it requires a mapping between EVERY possible segmentroot and the erasure root.  M
+func (n *Node) getImportSegment(workPackageHash common.Hash, segmentIndex uint16) (segmentData []byte, ok bool) {
+	segmentsConcat, ok := n.importDACache[workPackageHash]
+	if !ok {
+		return segmentData, false
 	}
-	assurance.Sign(ed25519Priv)
+	segmentData = segmentsConcat[segmentIndex*(types.W_S*types.W_E) : (segmentIndex+1)*(types.W_S*types.W_E)]
+	return
 
-	n.broadcast(assurance)
-	return nil
-}
-
-func (n *Node) getImportSegment(treeRoot common.Hash, segmentIndex uint16) (segmentData []byte, err error) {
-	// TODO: do you need segmentRoot or segmentsRoot here?
-	/*segmentData, err := n.FetchAndReconstructSpecificSegmentData(treeRoot)
-	if err != nil {
-		return []byte{}, err
-	}*/
-	return segmentData, nil
 }
 func (n *Node) GetImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
-	return n.getImportSegments(importsegments)
-}
-
-func (n *Node) getImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
 	var imports [][]byte
 	for _, s := range importsegments {
-		importItem, err := n.getImportSegment(s.TreeRoot, s.Index)
-		if err != nil {
-			return imports, err
+		segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
+		if !ok {
+			return imports, fmt.Errorf("Not found")
 		}
-		imports = append(imports, importItem)
+		imports = append(imports, segment)
 	}
 	return imports, nil
 }

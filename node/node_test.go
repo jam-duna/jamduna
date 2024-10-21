@@ -235,15 +235,19 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 	//----------------------------------------------
 	time.Sleep(12 * time.Second)
-	var exportedItems []types.ImportSegment
+
 	n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
+	prevWorkPackageHash := common.Hash{}
 	for fibN := 1; fibN < 21; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 1 {
-			// TODO: REVIEW
-			importedSegments = append(importedSegments, exportedItems...)
+			importedSegment := types.ImportSegment{
+				WorkPackageHash: prevWorkPackageHash,
+				Index:           0,
+			}
+			importedSegments = append(importedSegments, importedSegment)
 		}
 		refine_context := types.RefineContext{
 			//TODO: Sean prereq of fib(n) is fib(n-1) and fib(n-2) package
@@ -295,9 +299,7 @@ func TestWorkGuarantee(t *testing.T) {
 			}
 			time.Sleep(1 * time.Second)
 		}
-		// TODO: REVIEW
-		exportedItems = n4.segments[workPackageHash]
-		fmt.Printf(" => Exported Items [%s]=%v\n", workPackageHash, exportedItems)
+		prevWorkPackageHash = workPackageHash
 	}
 }
 

@@ -122,24 +122,24 @@ func TestAvailabilityReconstruction(t *testing.T) {
 	}
 
 	// Simulate a work package and segments
-	var originalAS *types.AvailabilitySpecifier
+	//var originalAS *types.AvailabilitySpecifier
 
 	senderIndex := 0
 	senderNode := nodes[senderIndex]
 
 	for fibN := 1; fibN <= targetFIB; fibN++ {
 		workPackage, segments := testWorkpackage(fibN)
+		packageHash := workPackage.Hash()
 		if fibN > 1 {
 			importedSegments := make([]types.ImportSegment, 0)
 			importedSegments = append(importedSegments, types.ImportSegment{
-				TreeRoot: originalAS.ExportedSegmentRoot,
-				Index:    uint16(0),
+				WorkPackageHash: packageHash,
+				Index:           uint16(0),
 			})
 			workPackage.WorkItems[0].ImportedSegments = importedSegments
 		}
 
 		// Generate the AvailabilitySpecifier
-		packageHash := workPackage.Hash()
 		availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray := senderNode.NewAvailabilitySpecifier(packageHash, workPackage, segments)
 
 		senderNode.StoreMeta(availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray)
@@ -157,7 +157,7 @@ func TestAvailabilityReconstruction(t *testing.T) {
 
 		senderNode.FakeDistributeChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
 
-		originalAS = availabilitySpecifier
+		//originalAS = availabilitySpecifier
 
 		// encodeCheck := senderNode.VerifyWorkPackageBundle(workPackage)
 		// if !encodeCheck {

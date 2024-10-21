@@ -111,18 +111,9 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	return nil
 }
 
-func (n *Node) AddNewImportSegments(treeRoot common.Hash, num int, workpackage_hash common.Hash) error {
-	if n.segments == nil {
-		n.segments = make(map[common.Hash][]types.ImportSegment)
-	}
-	segments := make([]types.ImportSegment, num)
-	for i := 0; i < num; i++ {
-		segments[i] = types.ImportSegment{
-			TreeRoot: treeRoot,
-			Index:    uint16(i),
-		}
-	}
-	n.segments[workpackage_hash] = segments
+func (n *Node) StoreImportDACache(workPackageHash common.Hash, segments []byte) error {
+	// TODO: store in levelDB
+	n.importDACache[workPackageHash] = segments
 	return nil
 }
 
@@ -140,15 +131,9 @@ func (n *Node) runMain() {
 		case ticket := <-n.ticketsCh:
 			n.processTicket(ticket)
 		case workPackage := <-n.workPackagesCh:
-			_, _, treeRoot, err := n.executeWorkPackage(workPackage)
+			_, _, _, err := n.executeWorkPackage(workPackage)
 			if err != nil {
 				fmt.Printf("executeWorkPackage: %v\n", err)
-			}
-			// TODO: Michael+Sourabh to discuss
-			exportedsegmentsNum := 1
-			err = n.AddNewImportSegments(treeRoot, exportedsegmentsNum, workPackage.Hash())
-			if err != nil {
-				fmt.Printf("AddNewImportSegments: %v\n", err)
 			}
 		case workReport := <-n.workReportsCh:
 			if n.workReports == nil {
