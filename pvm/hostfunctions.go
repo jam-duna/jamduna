@@ -738,7 +738,9 @@ func (vm *VM) hostImport() uint32 {
 			vm.writeRegister(7, OOB)
 			return errCode
 		}
-		fmt.Printf("Write RAM Bytes: %v\n", v_Bytes[:])
+		if debug {
+			fmt.Printf("Write RAM Bytes: %v\n", v_Bytes[:])
+		}
 		vm.writeRegister(7, OK)
 		return OK
 	} else {

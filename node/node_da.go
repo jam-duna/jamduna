@@ -135,7 +135,6 @@ func GetShardSpecificOrderedChunks(shardIdx uint16, erasureMeta ECCErasureMap, b
 
 func (n *Node) FakeDistributeChunks(erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) {
 	//cheating .. remove after correctness
-	debug := true
 	if debug {
 		// Distribute b♣ Chunks and s♣ Chunks
 		n.DistributeEcChunks(bECChunks)
@@ -503,14 +502,9 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		for _, e := range vm.Exports {
 			segments = append(segments, e) // this is used in NewAvailabilitySpecifier
 		}
-		err = n.StoreImportDACache(workPackageHash, common.ConcatenateByteSlices(segments))
-		if err != nil {
-			panic(1349)
-		}
 
 		// Decode the Exports Segments to FIB format
 		if len(segments) > 0 {
-			fmt.Printf("Exports Segments: len(segments)=%d\n", len(segments))
 			fib_exported_result := segments[0][:12]
 			n := binary.LittleEndian.Uint32(fib_exported_result[0:4])
 			Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])
@@ -530,18 +524,6 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 
 	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
 	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments)
-	prerequisite_hash := common.HexToHash("0x") // TODO: Sean
-	// TODO: Sourabh [finality] => Stanley [Recent Blocks] => Shawn [Anchor/LookupAnchor]
-	empty := common.Hash{}
-	refinementContext := types.RefineContext{
-		Anchor:           empty,
-		StateRoot:        empty,
-		BeefyRoot:        empty,
-		LookupAnchor:     empty,
-		LookupAnchorSlot: 0,
-		Prerequisite:     (*types.Prerequisite)(&prerequisite_hash),
-	}
-
 	core, err := n.GetSelfCoreIndex()
 	if err != nil {
 		return
@@ -551,14 +533,17 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		AvailabilitySpec: *spec,
 		AuthorizerHash:   common.HexToHash("0x"), // SKIP
 		CoreIndex:        core,
-		//	Output:               result.Output,
-		RefineContext: refinementContext,
-		Results:       results,
+		RefineContext:    workPackage.RefineContext,
+		Results:          results,
 	}
 	if debugG {
 		fmt.Printf("%s executeWorkPackage  workreporthash %v => erasureRoot: %v\n", n.String(), common.Str(workReport.Hash()), spec.ErasureRoot)
 	}
 
+	err = n.StoreImportDACache(spec, common.ConcatenateByteSlices(segments))
+	if err != nil {
+		panic(1349)
+	}
 	n.StoreMeta(spec, erasureMeta, bECChunks, sECChunksArray)
 	n.FakeDistributeChunks(erasureMeta, bECChunks, sECChunksArray)
 

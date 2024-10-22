@@ -111,9 +111,13 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	return nil
 }
 
-func (n *Node) StoreImportDACache(workPackageHash common.Hash, segments []byte) error {
-	// TODO: store in levelDB
-	n.importDACache[workPackageHash] = segments
+func (n *Node) StoreImportDACache(spec *types.AvailabilitySpecifier, segments []byte) error {
+	// TODO: using the spec, record
+	// (a) spec.WorkPackageHash => spec.ErasureRoot
+	// (b) spec.ExportedSegmentRoot => spec.ErasureRoot
+	// (c) spec.ErasureRoot => segments
+	// and be able to retrieve the ith segment by either (a) spec.WorkPackageHash or (b) spec.ExportedSegmentRoot using (c) in response to
+	n.importDACache[spec.WorkPackageHash] = segments
 	return nil
 }
 
@@ -143,30 +147,30 @@ func (n *Node) runMain() {
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {
-				fmt.Printf("processGuarantee: %v\n", err)
+				fmt.Printf("%s processGuarantee: %v\n", n.String(), err)
 			}
 		case assurance := <-n.assurancesCh:
 			err := n.processAssurance(assurance)
 			if err != nil {
-				fmt.Printf("processAssurance: %v\n", err)
+				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
 			}
 		case preimageAnnouncement := <-n.preimageAnnouncementsCh:
 			// TODO: William to review
 			err := n.processPreimageAnnouncements(preimageAnnouncement)
 			if err != nil {
-				fmt.Printf("processPreimages: %v\n", err)
+				fmt.Printf("%s processPreimages: %v\n", n.String(), err)
 			}
 		case announcement := <-n.announcementsCh:
 			// TODO: Shawn to review
 			err := n.processAnnouncement(announcement)
 			if err != nil {
-				fmt.Printf("processAnnouncement: %v\n", err)
+				fmt.Printf("%s processAnnouncement: %v\n", n.String(), err)
 			}
 		case judgement := <-n.judgementsCh:
 			// TODO: Shawn to review
 			err := n.processJudgement(judgement)
 			if err != nil {
-				fmt.Printf("processJudgement: %v\n", err)
+				fmt.Printf("%s processJudgement: %v\n", n.String(), err)
 			}
 		}
 	}

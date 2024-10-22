@@ -19,17 +19,22 @@ func (n *Node) isAssuring(workPackageHash common.Hash) bool {
 	return ok
 }
 
-func (n *Node) GenerateAssurance() (a types.Assurance, err error) {
+func (n *Node) generateAssurance() (a types.Assurance, numCores uint16, err error) {
 	reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
 	if err != nil {
 		return
 	}
+	numCores = 0
 	for _, r := range reports {
 		wph := r.AvailabilitySpec.WorkPackageHash
 		isA := n.isAssuring(wph)
 		if isA {
 			a.SetBitFieldBit(r.CoreIndex, isA)
+			numCores++
 		}
+	}
+	if numCores == 0 {
+		return a, numCores, nil
 	}
 	a.Anchor = n.statedb.GetBlock().ParentHash()
 	a.ValidatorIndex = n.statedb.Id
@@ -53,18 +58,12 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 		return
 	}
 
-	n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
-	// TODO: is this verified? check err
-
-	n.markAssuring(spec.WorkPackageHash)
-
-	a, err := n.GenerateAssurance()
+	err = n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
 	if err != nil {
 		return
 	}
-	if debugA {
-		fmt.Printf("%s [assureData] Broadcasting assurance CORE %d: bitfield=%x\n", n.String(), g.Report.CoreIndex, a.Bitfield)
-	}
-	n.broadcast(a)
+
+	n.markAssuring(spec.WorkPackageHash)
+
 	return nil
 }

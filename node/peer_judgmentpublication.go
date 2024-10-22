@@ -103,15 +103,19 @@ func (pub *JAMSNPJudgmentPublication) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendJudgmentPublication(epoch uint32, validatorIndex uint16, validity uint8, workReportHash common.Hash, signature types.Ed25519Signature) (err error) {
+func (p *Peer) SendJudgmentPublication(epoch uint32, j types.Judgement) (err error) {
 	//--> Epoch Index ++ Validator Index ++ Validity ++ Work Report Hash ++ Ed25519 Signature
+	validity := uint8(0)
+	if j.Judge {
+		validity = 1
+	}
 	req := &JAMSNPJudgmentPublication{
 		Epoch:          epoch,
-		ValidatorIndex: validatorIndex,
+		ValidatorIndex: j.Validator,
 		Validity:       validity,
-		WorkReportHash: workReportHash,
-		Signature:      signature,
+		WorkReportHash: j.WorkReport.Hash(),
 	}
+	copy(req.Signature[:], j.Signature[:])
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
@@ -136,19 +140,19 @@ func (n *Node) onJudgmentPublication(stream quic.Stream, msg []byte, peerID uint
 	}
 	// <-- FIN
 
-	// TODO: Shawn CHECK
 	judge := true
 	if jp.Validity == 0 {
 		judge = false
 	}
 	judgement := types.Judgement{
-		//Core       uint16
+		//Epoch: jp.Epoch,
 		Judge: judge,
-		//Tranche    uint32
-		//WorkReport WorkReport
-		Validator: peerID,
-		Signature: jp.Signature,
+		// TODO: Shawn CHECK
+		Tranche: 0,
+		// WorkReport: WorkReport,
+		Validator: jp.ValidatorIndex,
 	}
+	copy(judgement.Signature[:], jp.Signature[:])
 	n.judgementsCh <- judgement
 
 	return nil

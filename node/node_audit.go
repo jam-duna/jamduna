@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/erasurecoding"
+	//"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -13,47 +12,61 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 	erasureRoot := workReport.AvailabilitySpec.ErasureRoot
 	// reconstruct the work package
 	bundleShards := make([][]byte, types.TotalValidators)
+	bundleLength := workReport.AvailabilitySpec.BundleLength
+	// TODO: optimize with gofunc ala makeRequests
 	for i := uint16(0); i < types.TotalValidators; i++ {
 		if i == n.id {
 			bundleShard, _, ok, err := n.GetBundleShard(erasureRoot, i)
 			if err != nil {
 			} else if ok {
 				bundleShards[i] = bundleShard
+				if debugJ {
+					fmt.Printf("%s [auditWorkReport:GetBundleShard] SHARD %d = %d bytes\n", n.String(), i, len(bundleShard))
+				}
 			}
 		} else {
-			// TODO: optimize with gofunc ala makeRequests
 			// bundleShard, bundleJustification, err
 			bundleShard, _, err := n.peersInfo[i].SendBundleShardRequest(erasureRoot, i)
-			// TODO: wire up bundleJustification
 			if err != nil {
 
 			} else {
 				bundleShards[i] = bundleShard
+				if debugJ {
+					fmt.Printf("%s [auditWorkReport:SendBundleShardRequest] SHARD %d = %d bytes\n", n.String(), i, len(bundleShard))
+				}
 			}
 		}
 	}
-
-	bundle, err := erasurecoding.DecodeBundle(bundleShards)
+	bundleShardsRaw := make([][][]byte, 1)
+	bundleShardsRaw[0] = bundleShards
+	bundleData, err := n.decode(bundleShardsRaw, false, int(bundleLength))
 	if err != nil {
+		fmt.Printf("[auditWorkReport:decode] ERR %v\n", err)
 		return
 	}
-
-	workPackageRaw, _, err := types.Decode(bundle, reflect.TypeOf(types.WorkPackage{}))
+	if debugJ {
+		fmt.Printf("%s [auditWorkReport:decode] %d bytes\n", n.String(), len(bundleData))
+	}
+	workPackageBundleRaw, _, err := types.Decode(bundleData, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
+		fmt.Printf("[auditWorkReport] ERR %v\n", err)
 		return
 	}
-	workPackage := workPackageRaw.(types.WorkPackage)
-
-	guarantee, spec, _, err := n.executeWorkPackage(workPackage)
+	workPackageBundle := workPackageBundleRaw.(types.WorkPackageBundle)
+	guarantee, spec, _, err := n.executeWorkPackage(workPackageBundle.WorkPackage)
 	if err != nil {
 		return
 	}
 	auditPass := false
 	if workReport.AvailabilitySpec.ErasureRoot == spec.ErasureRoot {
 		auditPass = true
+		fmt.Printf("%s [auditWorkReport:executeWorkPackage] %s AUDIT PASS\n", n.String(), workPackageBundle.WorkPackage.Hash())
+	} else {
+		fmt.Printf("%s [auditWorkReport:executeWorkPackage] %s AUDIT FAIL\n", n.String(), workPackageBundle.WorkPackage.Hash())
 	}
 
-	judgement, err := n.MakeJudgement(workReport, guarantee, 0, auditPass)
+	tranche := uint32(0) // TODO: Shawn
+	judgement, err := n.MakeJudgement(guarantee.Report, tranche, auditPass)
 	if err != nil {
 		return err
 	}
@@ -98,18 +111,14 @@ func (n *Node) MakeAnnouncement(tranche uint32, w types.WorkReportSelection) (ty
 	return announcement, nil
 }
 
-func (n *Node) MakeJudgement(w types.WorkReport, gr types.Guarantee, tranche uint32, auditPass bool) (types.Judgement, error) {
-	var judgement types.Judgement
-	ed25519Key := n.GetEd25519Key()
-	ed25519Priv := n.GetEd25519Secret()
-
-	index := n.statedb.GetSafrole().GetCurrValidatorIndex(ed25519Key)
-
-	judgement, err := n.statedb.MakeJudgement(tranche, w, auditPass, ed25519Priv, uint16(index))
-	if err != nil {
-		return types.Judgement{}, err
+func (n *Node) MakeJudgement(workreport types.WorkReport, tranche uint32, auditPass bool) (judgement types.Judgement, err error) {
+	judgement = types.Judgement{
+		Tranche:    tranche,
+		Judge:      auditPass,
+		Validator:  n.id,
+		WorkReport: workreport,
 	}
-	n.processJudgement(judgement)
+	judgement.Sign(n.GetEd25519Secret())
 	return judgement, nil
 }
 
@@ -138,10 +147,7 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 	defer n.judgementMutex.Unlock()
 	// Store the vote in the tip's queued vote
 	// TODO: check if the judgement is false => issue a judge for this work report
-	emptyHash := common.Hash{}
-	if judgement.WorkReport.GetWorkPackageHash() == emptyHash {
-		return fmt.Errorf("work report hash is nil")
-	}
+
 	index := int(judgement.Validator)
 	pubkey := n.statedb.GetSafrole().GetCurrValidator(index).Ed25519
 	err := judgement.Verify(pubkey) // include the signature verification

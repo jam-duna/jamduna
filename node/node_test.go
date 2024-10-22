@@ -285,9 +285,15 @@ func TestWorkGuarantee(t *testing.T) {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
 		// wait until the work report is pending
+		var workReport types.WorkReport
+		audit := false
 		for {
 			time.Sleep(1 * time.Second)
 			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+				audit = true
 				break
 			}
 		}
@@ -298,6 +304,12 @@ func TestWorkGuarantee(t *testing.T) {
 				break
 			}
 			time.Sleep(1 * time.Second)
+		}
+		if audit {
+			err := n1.auditWorkReport(workReport)
+			if err != nil {
+				t.Fatalf("[auditWorkReport] ERR: %v", err)
+			}
 		}
 		prevWorkPackageHash = workPackageHash
 	}

@@ -29,7 +29,6 @@ Auditor -> Assurer
 <-- FIN
 */
 
-// TODO: separate them
 func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, justification []byte, err error) {
 	code := uint8(CE138_BundleShardRequest)
 	stream, err := p.openStream(code)
@@ -98,7 +97,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 	if err != nil {
 		return err
 	}
-
+	// TODO: Verify justification
 	// <-- FIN
 	return nil
 }
