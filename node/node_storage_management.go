@@ -231,6 +231,69 @@ func (n *Node) StoreAuditDA(erasureRoot common.Hash, shardIndex uint16, bundleSh
 	return nil
 }
 
+func generateHashToErasureRootKey(h common.Hash) string {
+	return fmt.Sprintf("htoe_%v", h)
+}
+
+func generateErasureRootToSegmentsKey(erasureRoot common.Hash) string {
+	return fmt.Sprintf("etos_%v", erasureRoot)
+}
+
+// h is a WorkPackageHash or ExportSegmentRoot
+func (n *Node) getImportSegment(h common.Hash, segmentIndex uint16) ([]byte, bool) {
+	const segmentSize = types.W_S * types.W_E
+
+	// Check if the segment data is available in the cache
+	if segmentsConcat, found := n.importDACache[h]; found {
+		// Return the segment from the cached data
+		return extractSegment(segmentsConcat, segmentIndex, segmentSize), true
+	}
+
+	// Retrieve ErasureRoot from LevelDB
+	erasureRoot, err := n.ReadRawKV([]byte(generateHashToErasureRootKey(h)))
+	if err != nil {
+		return nil, false
+	}
+
+	// Retrieve the concatenated segments using the ErasureRoot
+	segmentsConcat, err := n.ReadRawKV([]byte(generateErasureRootToSegmentsKey(common.Hash(erasureRoot))))
+	if err != nil {
+		return nil, false
+	}
+
+	// Cache the concatenated segments for future lookups
+	n.importDACache[h] = segmentsConcat
+
+	// Extract and return the requested segment
+	return extractSegment(segmentsConcat, segmentIndex, segmentSize), true
+}
+
+// Helper function to extract a segment from the concatenated segments
+func extractSegment(segmentsConcat []byte, segmentIndex uint16, segmentSize int) []byte {
+	start := int(segmentIndex) * segmentSize
+	end := start + segmentSize
+	return segmentsConcat[start:end]
+}
+
+func (n *Node) StoreImportDACache(spec *types.AvailabilitySpecifier, segments []byte) error {
+	erasureRoot := spec.ErasureRoot
+	// using the spec, record 2 mappings from hash to erasureRoot (a)+(b):
+	// (a) spec.WorkPackageHash => spec.ErasureRoot
+	n.WriteRawKV(generateHashToErasureRootKey(spec.WorkPackageHash), erasureRoot.Bytes())
+	n.importDACache[spec.WorkPackageHash] = segments
+	// (b) spec.ExportedSegmentRoot => spec.ErasureRoot
+	n.WriteRawKV(generateHashToErasureRootKey(spec.ExportedSegmentRoot), erasureRoot.Bytes())
+	n.importDACache[spec.ExportedSegmentRoot] = segments
+
+	// Then support the ability to map ErasureRoot to the segments data
+	// (c) spec.ErasureRoot => segments
+	n.WriteRawKV(generateErasureRootToSegmentsKey(erasureRoot), segments)
+
+	// and be able to retrieve the ith segment by either (a) spec.WorkPackageHash or (b) spec.ExportedSegmentRoot using (c) in response to
+	n.importDACache[spec.WorkPackageHash] = segments
+	return nil
+}
+
 // Long-term ImportDA - Used to Store sClub (segmentShard) by Assurers (at least 672 epochs)
 func (n *Node) StoreImportDA(erasureRoot common.Hash, shardIndex uint16, segmentShards [][]byte) (err error) {
 	// *s_erasureRoot_<erasureRoot> -> [s_erasureRoot_<shardIdx>]
@@ -310,7 +373,7 @@ func (n *Node) GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (bundl
 	sclub_justification = append(sClubH[:], justification...)
 
 	// proof: retrieve b_erasureRoot_<shardIdx> ++ SClub ++ default_justification
-	verified, err := VerifyBundleShard(erasureRoot, shardIndex, bundleShard, sclub_justification)
+	verified, err := VerifyBundleShard(erasureRoot, shardIndex, bundleShard, sclub_justification) // this is needed
 	if !verified {
 		panic(err)
 		return nil, nil, false, err
@@ -318,7 +381,7 @@ func (n *Node) GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (bundl
 	if debugDA {
 		fmt.Printf("[CE138_QNS Verified] erasureRoot-shardIndex: %v-%d\n", erasureRoot, shardIndex)
 	}
-	return bundleShard, justification, true, nil
+	return bundleShard, sclub_justification, true, nil
 }
 
 // Verification: CE140_SegmentShard

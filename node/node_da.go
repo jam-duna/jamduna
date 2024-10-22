@@ -506,10 +506,10 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		// Decode the Exports Segments to FIB format
 		if len(segments) > 0 {
 			fib_exported_result := segments[0][:12]
-			n := binary.LittleEndian.Uint32(fib_exported_result[0:4])
+			num := binary.LittleEndian.Uint32(fib_exported_result[0:4])
 			Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])
 			Fib_n_1 := binary.LittleEndian.Uint32(fib_exported_result[8:12])
-			fmt.Printf("  Exported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
+			fmt.Printf("%s Exported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n", n.String(), num, Fib_n, Fib_n_1)
 		}
 
 		result := types.WorkResult{

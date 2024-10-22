@@ -23,6 +23,7 @@ type Message struct {
 }
 
 type StateDB struct {
+	Finalized  bool
 	Id         uint16       `json:"id"`
 	Block      *types.Block `json:"block"`
 	ParentHash common.Hash  `json:"parentHash"`
@@ -703,6 +704,7 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
+	statedb.Finalized = false
 	statedb.queuedTickets = make(map[common.Hash][]types.Ticket)
 	statedb.knownTickets = make(map[common.Hash]uint8)
 	statedb.queueJudgements = make(map[common.Hash]types.Judgement)

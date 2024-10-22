@@ -111,16 +111,6 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	return nil
 }
 
-func (n *Node) StoreImportDACache(spec *types.AvailabilitySpecifier, segments []byte) error {
-	// TODO: using the spec, record
-	// (a) spec.WorkPackageHash => spec.ErasureRoot
-	// (b) spec.ExportedSegmentRoot => spec.ErasureRoot
-	// (c) spec.ErasureRoot => segments
-	// and be able to retrieve the ith segment by either (a) spec.WorkPackageHash or (b) spec.ExportedSegmentRoot using (c) in response to
-	n.importDACache[spec.WorkPackageHash] = segments
-	return nil
-}
-
 func (n *Node) runMain() {
 	for {
 		select {

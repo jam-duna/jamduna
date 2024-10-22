@@ -143,6 +143,7 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 // if it's full set, we should check if there is a bad judgement
 // if so, we should make a dispute extrinsic by checking we have the judgement or not
 func (n *Node) processJudgement(judgement types.Judgement) error {
+	return nil
 	n.judgementMutex.Lock()
 	defer n.judgementMutex.Unlock()
 	// Store the vote in the tip's queued vote

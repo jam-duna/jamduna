@@ -638,26 +638,14 @@ func (n *Node) extendChain() error {
 
 				// Extend the tip of the chain
 				n.addStateDB(newStateDB)
+
+				// simulated finality
+				n.finalizeBlocks()
 				parenthash = nextBlock.Hash()
 				if debug {
 					fmt.Printf("%s [extendChain:addStateDB] TIP Now: s:%v<-%v\n", n.String(), newStateDB.ParentHash, newStateDB.BlockHash)
 				}
-
-				if len(b.Extrinsic.Guarantees) > 0 {
-					for _, g := range b.Extrinsic.Guarantees {
-						n.assureData(g)
-					}
-				}
-				a, numCores, err := n.generateAssurance()
-				if err != nil {
-					fmt.Printf("%s [extendChain:generateAssurance] ERR %v\n", n.String(), err)
-				} else if numCores > 0 {
-					if debugA {
-						fmt.Printf("%s [assureData] Broadcasting assurance bitfield=%x\n", n.String(), a.Bitfield)
-					}
-					n.broadcast(a)
-				}
-
+				n.assureNewBlock(b)
 				break
 			}
 		}
@@ -670,6 +658,26 @@ func (n *Node) extendChain() error {
 			return nil
 		}
 	}
+}
+
+func (n *Node) assureNewBlock(b *types.Block) error {
+	if len(b.Extrinsic.Guarantees) > 0 {
+		for _, g := range b.Extrinsic.Guarantees {
+			n.assureData(g)
+		}
+	}
+	a, numCores, err := n.generateAssurance()
+	if err != nil {
+		return err
+	}
+	if numCores == 0 {
+		return nil
+	}
+	if debugA {
+		fmt.Printf("%s [assureNewBlock] Broadcasting assurance bitfield=%x\n", n.String(), a.Bitfield)
+	}
+	n.broadcast(a)
+	return nil
 }
 
 // we arrive here when we receive a block from another node
@@ -723,17 +731,6 @@ func (n *Node) processBlock(blk *types.Block) error {
 	return nil // Success
 }
 
-// h is a WorkPackageHash or ExportSegmentRoot
-func (n *Node) getImportSegment(h common.Hash, segmentIndex uint16) (segmentData []byte, ok bool) {
-	segmentsConcat, ok := n.importDACache[h]
-	if !ok {
-		// TODO: (1) read level DB key using h => ErasureRoot and then (2) use ErasureRoot to get the segmentsConcat data
-		return segmentData, false
-	}
-	segmentData = segmentsConcat[segmentIndex*(types.W_S*types.W_E) : (segmentIndex+1)*(types.W_S*types.W_E)]
-	return
-
-}
 func (n *Node) GetImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
 	var imports [][]byte
 	for _, s := range importsegments {
@@ -976,12 +973,8 @@ func (n *Node) runClient() {
 				if err != nil {
 					fmt.Printf("writeDebug JamState err: %v\n", err)
 				}
-				if len(newBlock.Extrinsic.Guarantees) > 0 {
-					for _, g := range newBlock.Extrinsic.Guarantees {
-						n.assureData(g)
-					}
-				}
 
+				n.assureNewBlock(newBlock)
 			}
 
 		case log := <-logChan:
