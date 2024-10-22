@@ -140,12 +140,12 @@ func (T CTicketsOrKeys) Decode(data []byte) (interface{}, uint32) {
 	}
 	switch data[0] {
 	case 0:
-		decoded, length, err := types.Decode(data[1:], reflect.TypeOf(types.TicketsMark{}))
+		decoded, length, err := types.Decode(data[1:], reflect.TypeOf(&types.TicketsMark{}))
 		if err != nil {
 			return nil, 0
 		}
-		ticketsMark := decoded.(types.TicketsMark)
-		T.Tickets = &ticketsMark
+		ticketsMark := decoded.(*types.TicketsMark)
+		T.Tickets = ticketsMark
 		return T, length + 1
 	case 1:
 		decoded, length, err := types.Decode(data[1:], reflect.TypeOf([types.EpochLength]common.Hash{}))

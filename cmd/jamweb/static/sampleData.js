@@ -329,15 +329,15 @@ var sample_encodings = {
         "payload": "0x0102030405",
         "gas_limit": 42,
         "import_segments": [{
-                "tree_root": "0x461236a7eb29dcffc1dd282ce1de0e0ed691fc80e91e02276fe8f778f088a1b8",
+                "work_package_hash": "0x461236a7eb29dcffc1dd282ce1de0e0ed691fc80e91e02276fe8f778f088a1b8",
                 "index": 0
             },
             {
-                "tree_root": "0xe7cb536522c1c1b41fff8021055b774e929530941ea12c10f1213c56455f29ad",
+                "work_package_hash": "0xe7cb536522c1c1b41fff8021055b774e929530941ea12c10f1213c56455f29ad",
                 "index": 1
             },
             {
-                "tree_root": "0xb0a487a4adf6a0eda5d69ddd2f8b241cf44204f0ff793e993e5e553b7862a1dc",
+                "work_package_hash": "0xb0a487a4adf6a0eda5d69ddd2f8b241cf44204f0ff793e993e5e553b7862a1dc",
                 "index": 2
             }
         ],
@@ -373,15 +373,15 @@ var sample_encodings = {
                 "payload": "0x0102030405",
                 "gas_limit": 42,
                 "import_segments": [{
-                        "tree_root": "0x461236a7eb29dcffc1dd282ce1de0e0ed691fc80e91e02276fe8f778f088a1b8",
+                        "work_package_hash": "0x461236a7eb29dcffc1dd282ce1de0e0ed691fc80e91e02276fe8f778f088a1b8",
                         "index": 0
                     },
                     {
-                        "tree_root": "0xe7cb536522c1c1b41fff8021055b774e929530941ea12c10f1213c56455f29ad",
+                        "work_package_hash": "0xe7cb536522c1c1b41fff8021055b774e929530941ea12c10f1213c56455f29ad",
                         "index": 1
                     },
                     {
-                        "tree_root": "0xb0a487a4adf6a0eda5d69ddd2f8b241cf44204f0ff793e993e5e553b7862a1dc",
+                        "work_package_hash": "0xb0a487a4adf6a0eda5d69ddd2f8b241cf44204f0ff793e993e5e553b7862a1dc",
                         "index": 2
                     }
                 ],
@@ -402,11 +402,11 @@ var sample_encodings = {
                 "payload": "0x030201",
                 "gas_limit": 77,
                 "import_segments": [{
-                        "tree_root": "0x3e5d0bea78537414bd1cfdaeb0f22d743bcaba5dbffacbabce8457f4cd78f69b",
+                        "work_package_hash": "0x3e5d0bea78537414bd1cfdaeb0f22d743bcaba5dbffacbabce8457f4cd78f69b",
                         "index": 0
                     },
                     {
-                        "tree_root": "0xb7f8dffa65971832ec9e19719debc04b1ccd9ad27187a4943807ca756962481b",
+                        "work_package_hash": "0xb7f8dffa65971832ec9e19719debc04b1ccd9ad27187a4943807ca756962481b",
                         "index": 1
                     }
                 ],
