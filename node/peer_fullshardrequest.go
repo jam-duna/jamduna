@@ -73,7 +73,6 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 	return nil
 }
 
-// TODO: separate them
 func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, concatSegmentShards []byte, justification []byte, err error) {
 	code := uint8(CE137_FullShardRequest)
 	stream, err := p.openStream(code)

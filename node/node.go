@@ -40,6 +40,7 @@ const (
 	debugP  = false // Preimages
 	debugA  = false // Assurances
 	debugJ  = false // Audits + Judgements
+	debugF  = false // Finality
 	debug   = false // General Node Ops
 
 	trace    = false
@@ -89,8 +90,6 @@ type Node struct {
 	headers     map[common.Hash]*types.Block
 	preimages   map[common.Hash][]byte
 	workReports map[common.Hash]types.WorkReport
-
-	importDACache map[common.Hash][]byte
 
 	blockAnnouncementsCh    chan types.BlockAnnouncement
 	ticketsCh               chan types.Ticket
@@ -230,7 +229,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
-		importDACache:    make(map[common.Hash][]byte),
 
 		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
@@ -731,12 +729,58 @@ func (n *Node) processBlock(blk *types.Block) error {
 	return nil // Success
 }
 
-func (n *Node) GetImportSegments(importsegments []types.ImportSegment) ([][]byte, error) {
-	var imports [][]byte
+// reconstructSegments uses CE139 and CAN use CE140 upon failure
+func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint16) ([]byte, error) {
+	segmentShards := make([][]byte, types.TotalValidators)
+	// TODO: optimize with gofunc ala makeRequests
+	for i := uint16(0); i < types.TotalValidators; i++ {
+		if i == n.id {
+			_, _, _, selected_segments, _, _, _, ok, err := n.GetSegmentShard_Assurer(erasureRoot, i, segmentIndex)
+			if err != nil {
+				fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] ERR %v\n", n.String(), err)
+			} else if ok {
+				segmentShards[i] = selected_segments[0] // TODO: Michael -- need a multi segment to test
+				if debugJ {
+					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), i, len(segmentShards[i]))
+				}
+			}
+		} else {
+			segmentShard, _, err := n.peersInfo[i].SendSegmentShardRequest(erasureRoot, i, segmentIndex, false)
+			if err != nil {
+				fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] ERR %v\n", n.String(), err)
+			} else {
+				// TODO: Michael - check if it matches -- how?  then use CE140 to verification
+				// segmentShard, _, err := n.peersInfo[i].SendSegmentShardRequest(erasureRoot, i, segmentIndex, true)
+				segmentShards[i] = segmentShard // TODO: Michael -- need a multi segment to test
+				if debugJ {
+					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), i, len(segmentShards))
+				}
+			}
+		}
+	}
+
+	return []byte{}, nil
+}
+
+func (n *Node) GetImportSegments(importsegments []types.ImportSegment) (imports [][]byte, err error) {
+	imports = make([][]byte, 0)
 	for _, s := range importsegments {
 		segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
+		// TODO CHECK: ok = false
 		if !ok {
-			return imports, fmt.Errorf("Not found")
+			// if we have a miss, we use CE139
+			erasureRoot, err := n.getErasureRootFromHash(s.WorkPackageHash)
+			if err != nil {
+				fmt.Printf("%s [GetImportSegments:getErasureRootFromHash] WorkPackageHash=%v ERR %v\n", n.String(), s.WorkPackageHash, err)
+				return imports, fmt.Errorf("Not found")
+			}
+			fmt.Printf("GetImportSegments: erasureRoot = %v", erasureRoot)
+			segment, err = n.reconstructSegments(erasureRoot, []uint16{s.Index})
+			if err != nil {
+				fmt.Printf("%s [GetImportSegments:reconstructSegments] ErasureRoot=%v ERR %v\n", n.String(), erasureRoot, err)
+				return imports, fmt.Errorf("Not found")
+			}
+			fmt.Printf("GetImportSegments: segment = %v", segment)
 		}
 		imports = append(imports, segment)
 	}

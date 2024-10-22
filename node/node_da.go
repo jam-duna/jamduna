@@ -540,7 +540,8 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		fmt.Printf("%s executeWorkPackage  workreporthash %v => erasureRoot: %v\n", n.String(), common.Str(workReport.Hash()), spec.ErasureRoot)
 	}
 
-	err = n.StoreImportDACache(spec, common.ConcatenateByteSlices(segments))
+	// a guarantor uses StoreImportDAErasureRootToSegments store segments but proper solution is with getImportSegment using CE139
+	err = n.StoreImportDAErasureRootToSegments(spec, common.ConcatenateByteSlices(segments))
 	if err != nil {
 		panic(1349)
 	}

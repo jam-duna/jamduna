@@ -18,6 +18,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 		if i == n.id {
 			bundleShard, _, ok, err := n.GetBundleShard(erasureRoot, i)
 			if err != nil {
+				fmt.Printf("%s [auditWorkReport:GetBundleShard] ERR %v\n", n.String(), err)
 			} else if ok {
 				bundleShards[i] = bundleShard
 				if debugJ {
@@ -25,14 +26,18 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 				}
 			}
 		} else {
-			// bundleShard, bundleJustification, err
-			bundleShard, _, err := n.peersInfo[i].SendBundleShardRequest(erasureRoot, i)
+			bundleShard, sclub_justification, err := n.peersInfo[i].SendBundleShardRequest(erasureRoot, i)
 			if err != nil {
-
+				fmt.Printf("%s [auditWorkReport:GetBundleShard] ERR %v\n", n.String(), err)
 			} else {
-				bundleShards[i] = bundleShard
-				if debugJ {
-					fmt.Printf("%s [auditWorkReport:SendBundleShardRequest] SHARD %d = %d bytes\n", n.String(), i, len(bundleShard))
+				verified, err := VerifyBundleShard(erasureRoot, i, bundleShard, sclub_justification) // this is needed
+				if err != nil || !verified {
+					fmt.Printf("VerifyBundleShard ERR %v verified: %v \n", err, verified)
+				} else {
+					bundleShards[i] = bundleShard
+					if debugDA {
+						fmt.Printf("%s [auditWorkReport:SendBundleShardRequest] VERIFIED SHARD %d = %d bytes\n", n.String(), i, len(bundleShard))
+					}
 				}
 			}
 		}

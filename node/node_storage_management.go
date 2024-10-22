@@ -240,29 +240,30 @@ func generateErasureRootToSegmentsKey(erasureRoot common.Hash) string {
 }
 
 // h is a WorkPackageHash or ExportSegmentRoot
+func (n *Node) getErasureRootFromHash(h common.Hash) (erasureRoot common.Hash, err error) {
+	// Retrieve ErasureRoot from LevelDB
+	erasureRootRaw, err0 := n.ReadRawKV([]byte(generateHashToErasureRootKey(h)))
+	if err0 != nil {
+		return erasureRoot, err0
+	}
+	return common.Hash(erasureRootRaw), nil
+}
+
+// h is a WorkPackageHash or ExportSegmentRoot
 func (n *Node) getImportSegment(h common.Hash, segmentIndex uint16) ([]byte, bool) {
 	const segmentSize = types.W_S * types.W_E
 
-	// Check if the segment data is available in the cache
-	if segmentsConcat, found := n.importDACache[h]; found {
-		// Return the segment from the cached data
-		return extractSegment(segmentsConcat, segmentIndex, segmentSize), true
-	}
-
 	// Retrieve ErasureRoot from LevelDB
-	erasureRoot, err := n.ReadRawKV([]byte(generateHashToErasureRootKey(h)))
+	erasureRoot, err := n.getErasureRootFromHash(h)
 	if err != nil {
 		return nil, false
 	}
 
 	// Retrieve the concatenated segments using the ErasureRoot
-	segmentsConcat, err := n.ReadRawKV([]byte(generateErasureRootToSegmentsKey(common.Hash(erasureRoot))))
+	segmentsConcat, err := n.ReadRawKV([]byte(generateErasureRootToSegmentsKey(erasureRoot)))
 	if err != nil {
 		return nil, false
 	}
-
-	// Cache the concatenated segments for future lookups
-	n.importDACache[h] = segmentsConcat
 
 	// Extract and return the requested segment
 	return extractSegment(segmentsConcat, segmentIndex, segmentSize), true
@@ -275,22 +276,20 @@ func extractSegment(segmentsConcat []byte, segmentIndex uint16, segmentSize int)
 	return segmentsConcat[start:end]
 }
 
-func (n *Node) StoreImportDACache(spec *types.AvailabilitySpecifier, segments []byte) error {
+func (n *Node) StoreImportDAWorkReportMap(spec types.AvailabilitySpecifier) error {
 	erasureRoot := spec.ErasureRoot
 	// using the spec, record 2 mappings from hash to erasureRoot (a)+(b):
 	// (a) spec.WorkPackageHash => spec.ErasureRoot
 	n.WriteRawKV(generateHashToErasureRootKey(spec.WorkPackageHash), erasureRoot.Bytes())
-	n.importDACache[spec.WorkPackageHash] = segments
 	// (b) spec.ExportedSegmentRoot => spec.ErasureRoot
 	n.WriteRawKV(generateHashToErasureRootKey(spec.ExportedSegmentRoot), erasureRoot.Bytes())
-	n.importDACache[spec.ExportedSegmentRoot] = segments
+	return nil
+}
 
-	// Then support the ability to map ErasureRoot to the segments data
-	// (c) spec.ErasureRoot => segments
-	n.WriteRawKV(generateErasureRootToSegmentsKey(erasureRoot), segments)
-
-	// and be able to retrieve the ith segment by either (a) spec.WorkPackageHash or (b) spec.ExportedSegmentRoot using (c) in response to
-	n.importDACache[spec.WorkPackageHash] = segments
+// spec.ErasureRoot => segments
+// and be able to retrieve the ith segment by either (a) spec.WorkPackageHash or (b) spec.ExportedSegmentRoot using (c) in response to
+func (n *Node) StoreImportDAErasureRootToSegments(spec *types.AvailabilitySpecifier, segments []byte) error {
+	n.WriteRawKV(generateErasureRootToSegmentsKey(spec.ErasureRoot), segments)
 	return nil
 }
 

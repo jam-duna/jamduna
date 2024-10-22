@@ -40,7 +40,9 @@ func (n *Node) countDescendantsWithNoForks(blockHash common.Hash, depth int) int
 func (n *Node) finalizeBlocks() {
 	for _, statedb := range n.statedbMap {
 		if !statedb.Finalized && n.countDescendantsWithNoForks(statedb.BlockHash, 0) == 1 {
-			fmt.Printf("%s Finality %v\n", n.String(), statedb.BlockHash)
+			if debugF {
+				fmt.Printf("%s Finality %v\n", n.String(), statedb.BlockHash)
+			}
 			statedb.Finalized = true
 		}
 	}
