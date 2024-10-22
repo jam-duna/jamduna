@@ -133,15 +133,6 @@ func GetShardSpecificOrderedChunks(shardIdx uint16, erasureMeta ECCErasureMap, b
 	return shardJustifications[idx], orderedBundleShards[idx], orderedSegmentShards[idx]
 }
 
-func (n *Node) FakeDistributeChunks(erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) {
-	//cheating .. remove after correctness
-	if debug {
-		// Distribute b♣ Chunks and s♣ Chunks
-		n.DistributeEcChunks(bECChunks)
-		n.DistributeExportedEcChunkArray(sECChunksArray)
-	}
-}
-
 type ECCErasureMap struct {
 	ErasureRoot         common.Hash
 	ExportedSegmentRoot common.Hash
@@ -541,12 +532,12 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 	}
 
 	// a guarantor uses StoreImportDAErasureRootToSegments store segments but proper solution is with getImportSegment using CE139
-	err = n.StoreImportDAErasureRootToSegments(spec, common.ConcatenateByteSlices(segments))
-	if err != nil {
-		panic(1349)
-	}
-	n.StoreMeta(spec, erasureMeta, bECChunks, sECChunksArray)
-	n.FakeDistributeChunks(erasureMeta, bECChunks, sECChunksArray)
+	// err = n.StoreImportDAErasureRootToSegments(spec, common.ConcatenateByteSlices(segments))
+	// if err != nil {
+	// 	panic(1349)
+	// }
+	n.StoreMeta_Guarantor(spec, erasureMeta, bECChunks, sECChunksArray)
+	//n.FakeDistributeChunks(erasureMeta, bECChunks, sECChunksArray)
 
 	gc := workReport.Sign(n.GetEd25519Secret(), uint16(n.GetCurrValidatorIndex()))
 	guarantee = types.Guarantee{

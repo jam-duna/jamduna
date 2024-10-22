@@ -77,7 +77,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 		fmt.Printf("%s onBundleShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
 	}
 
-	bundleShard, justification, ok, err := n.GetBundleShard(req.ErasureRoot, req.ShardIndex)
+	_, _, bundleShard, b_justification, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onBundleShardRequest ERR0 %v\n", err)
 		return err
@@ -93,7 +93,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 	}
 
 	// <-- Justification
-	err = sendQuicBytes(stream, justification)
+	err = sendQuicBytes(stream, b_justification)
 	if err != nil {
 		return err
 	}

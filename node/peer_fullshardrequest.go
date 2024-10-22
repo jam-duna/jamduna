@@ -127,7 +127,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	if debugA {
 		fmt.Printf("%s onFullShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
 	}
-	bundleShard, segmentShards, justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
+	_, _, bundleShard, segmentShards, f_justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR0 %v\n", err)
 		return err
@@ -149,7 +149,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	}
 
 	// <-- Justification
-	err = sendQuicBytes(stream, justification)
+	err = sendQuicBytes(stream, f_justification)
 	if err != nil {
 		return err
 	}

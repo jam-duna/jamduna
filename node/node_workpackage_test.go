@@ -142,20 +142,22 @@ func TestAvailabilityReconstruction(t *testing.T) {
 		// Generate the AvailabilitySpecifier
 		availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray := senderNode.NewAvailabilitySpecifier(packageHash, workPackage, segments)
 
-		senderNode.StoreMeta(availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray)
-		recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, _ := senderNode.GetMeta(erasureMeta.ErasureRoot)
+		senderNode.StoreMeta_Guarantor(availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray)
+		recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, err := senderNode.GetMeta_Guarantor(erasureMeta.ErasureRoot)
 		//shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
+		if (err != nil){
+			fmt.Printf("len(recoveredbECChunks)=%v len(recoveredsECChunksArray)=%v\n", len(recoveredbECChunks), len(recoveredsECChunksArray))
+		}
 
 		for shardIdx := uint16(0); shardIdx < numNodes; shardIdx++ {
 			erasureRoot := recoveredMeta.ErasureRoot
-			bundleShard, segmentShards, justification, ok, err := senderNode.GetFullShard_Guarantor(erasureRoot, shardIdx)
+			erasureRoot, shardIndex, bundleShard, segmentShards, justification, ok, err := senderNode.GetFullShard_Guarantor(erasureRoot, shardIdx)
 			if !ok || err != nil {
-				t.Fatalf("Failed to prepareFullShards for node %d: %v\n", shardIdx, err)
+				t.Fatalf("Failed to prepareFullShards %v_%d for node %d: %v\n", erasureRoot, shardIndex, shardIdx, err)
 			}
 			nodes[shardIdx].StoreFullShard_Assurer(erasureRoot, shardIdx, bundleShard, segmentShards, justification)
 		}
 
-		senderNode.FakeDistributeChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
 
 		//originalAS = availabilitySpecifier
 

@@ -16,13 +16,13 @@ func (n *Node) auditWorkReport(workReport types.WorkReport) (err error) {
 	// TODO: optimize with gofunc ala makeRequests
 	for i := uint16(0); i < types.TotalValidators; i++ {
 		if i == n.id {
-			bundleShard, _, ok, err := n.GetBundleShard(erasureRoot, i)
+			erasureRoot, shardIndex, bundleShard, _, ok, err := n.GetBundleShard_Assurer(erasureRoot, i)
 			if err != nil {
 				fmt.Printf("%s [auditWorkReport:GetBundleShard] ERR %v\n", n.String(), err)
 			} else if ok {
-				bundleShards[i] = bundleShard
+				bundleShards[shardIndex] = bundleShard
 				if debugJ {
-					fmt.Printf("%s [auditWorkReport:GetBundleShard] SHARD %d = %d bytes\n", n.String(), i, len(bundleShard))
+					fmt.Printf("%s [auditWorkReport:GetBundleShard] SHARD %v_%d = %d bytes\n", n.String(), erasureRoot, i, len(bundleShard))
 				}
 			}
 		} else {

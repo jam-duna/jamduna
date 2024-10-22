@@ -14,6 +14,9 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 	}
 	doneExecute := false
 	coworker := n.GetCoreCoWorkers(coreIndex)
+	if debugDA {
+		fmt.Printf("%s Core: %d, WorkPackageHash=%v, len(coworker)=%x\n", n.String(), coreIndex, wp.Hash(), len(coworker))
+	}
 	for id, p := range n.peersInfo {
 		for _, worker := range coworker {
 			if worker.Ed25519 == p.Validator.Ed25519 {

@@ -145,14 +145,14 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	if err != nil {
 		return
 	}
-	fmt.Printf("%s [SendSegmentShardRequest:sendQuicBytes] %d bytes\n", p.String(), len(reqBytes))
+	//fmt.Printf("%s [SendSegmentShardRequest:sendQuicBytes] %d bytes\n", p.String(), len(reqBytes))
 	// <-- [Segment Shard]
 	segmentShards, err = receiveQuicBytes(stream)
 	if err != nil {
 		fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] ERR %v\n", p.String(), err)
 		return
 	}
-	fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] %d bytes\n", p.String(), len(segmentShards))
+	//fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] %d bytes\n", p.String(), len(segmentShards))
 	if withJustification {
 		for j := uint8(0); j < req.Len; j++ {
 			var justification []byte
@@ -191,13 +191,13 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 	}
 	// <-- Bundle Shard
 	combined_selected_segmentshards, _ := CombineSegmentShards(selected_segmentshards)
-	fmt.Printf("%s [onSegmentShardRequest:combined_selected_segmentshards] %d\n", n.String(), len(combined_selected_segmentshards))
+	//fmt.Printf("%s [onSegmentShardRequest:combined_selected_segmentshards] %d\n", n.String(), len(combined_selected_segmentshards))
 	err = sendQuicBytes(stream, combined_selected_segmentshards)
 	if err != nil {
 		fmt.Printf("%s [onSegmentShardRequest:sendQuicBytes] ERR %v\n", n.String(), err)
 		return
 	}
-	fmt.Printf("%s [onSegmentShardRequest:sendQuicBytes] %d bytes\n", n.String(), len(combined_selected_segmentshards))
+	//fmt.Printf("%s [onSegmentShardRequest:sendQuicBytes] %d bytes\n", n.String(), len(combined_selected_segmentshards))
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if withJustification {

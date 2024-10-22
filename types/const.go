@@ -27,6 +27,10 @@ const (
 )
 
 const (
+	FixedSegmentSizeG 		  =  W_S*W_E
+)
+
+const (
 	// Tiny testnet : Tickets only
 	TotalValidators           = 6  // V = 1023: The total number of validators.
 	TotalCores                = 2  // C = 341: The total number of cores.

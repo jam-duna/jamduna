@@ -729,44 +729,86 @@ func (n *Node) processBlock(blk *types.Block) error {
 	return nil // Success
 }
 
+func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte){
+	// setup proper arr for reconstruction
+	segmentShards = make([][][]byte, segmentLen)
+	for j := 0; j < segmentLen; j++ {
+		for shardIdx := uint16(0); shardIdx < types.TotalValidators; shardIdx++ {
+			segmentShards[j] =  make([][]byte, types.TotalValidators)
+		}
+	}
+	return segmentShards
+}
+
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
-func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint16) ([]byte, error) {
-	segmentShards := make([][]byte, types.TotalValidators)
+// need to actually ECdecode
+func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint16) (exported_segments [][]byte, err error) {
+
+	exported_segments = make([][]byte, len(segmentIndex))
+	segmentShards := setupSegmentsShards(len(segmentIndex))
 	// TODO: optimize with gofunc ala makeRequests
-	for i := uint16(0); i < types.TotalValidators; i++ {
-		if i == n.id {
-			_, _, _, selected_segments, _, _, _, ok, err := n.GetSegmentShard_Assurer(erasureRoot, i, segmentIndex)
+	for shardIdx := uint16(0); shardIdx < types.TotalValidators; shardIdx++ {
+		if shardIdx == n.id {
+			//erasureRoot, shardIndex, segmentIndices, selected_segments, selected_full_justifications, selected_segments_justifications, exportedSegmentAndPageProofLens, true, nil
+			_, _, _, selected_segments, _, _, _, ok, err := n.GetSegmentShard_Assurer(erasureRoot, shardIdx, segmentIndex)
 			if err != nil {
 				fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] ERR %v\n", n.String(), err)
 			} else if ok {
-				segmentShards[i] = selected_segments[0] // TODO: Michael -- need a multi segment to test
 				if debugJ {
-					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), i, len(segmentShards[i]))
+					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(segmentShards[shardIdx]))
+				}
+				//fmt.Printf("!!!shardIndex=%v, selected_segments=%x\n", shardIdx, selected_segments)
+				for idx, selected_segment := range selected_segments {
+					segmentIdx := segmentIndex[idx]
+					segmentShards[segmentIdx][shardIdx] = selected_segment
 				}
 			}
 		} else {
-			segmentShard, _, err := n.peersInfo[i].SendSegmentShardRequest(erasureRoot, i, segmentIndex, false)
+			// [LOW PRIORITY] Stanley to improve it with proper justification
+			concatenatedShards, _, err := n.peersInfo[shardIdx].SendSegmentShardRequest(erasureRoot, shardIdx, segmentIndex, false)
 			if err != nil {
 				fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] ERR %v\n", n.String(), err)
 			} else {
-				// TODO: Michael - check if it matches -- how?  then use CE140 to verification
-				// segmentShard, _, err := n.peersInfo[i].SendSegmentShardRequest(erasureRoot, i, segmentIndex, true)
-				segmentShards[i] = segmentShard // TODO: Michael -- need a multi segment to test
+				// TODO: use CE140 to verification
+				selected_segments, err := SplitToSegmentShards(concatenatedShards)
+				if err != nil {
+					continue
+				}
 				if debugJ {
-					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), i, len(segmentShards))
+					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(concatenatedShards))
+				}
+				//fmt.Printf("shardIndex=%v, selected_segment=%x\n", shardIdx, selected_segments)
+				for idx, selected_segment := range selected_segments {
+					segmentIdx := segmentIndex[idx]
+					segmentShards[segmentIdx][shardIdx] = selected_segment
 				}
 			}
 		}
 	}
-
-	return []byte{}, nil
+	for return_idx, segmentShard := range segmentShards {
+		segmentShardRaw := make([][][]byte, 1)
+		segmentShardRaw[0] = segmentShard
+		exported_segment, err := n.decode(segmentShardRaw, true, types.FixedSegmentSizeG)
+		if (err != nil){
+			return exported_segments, fmt.Errorf("Invalid Reconstructions %v", err)
+		}
+		exported_segments[return_idx] = exported_segment
+	}
+	if debugJ {
+		fmt.Printf("reconstructSegments %v_%v exported_segments=%x,(raw=%x)\n", erasureRoot, segmentIndex, exported_segments, segmentShards)
+	}
+	return exported_segments, nil
 }
 
 func (n *Node) GetImportSegments(importsegments []types.ImportSegment) (imports [][]byte, err error) {
 	imports = make([][]byte, 0)
+
+	//TODO: not sure if wp_hash, Index is sorted at all. If not. we can't do wp_hash, idx=[..] properly with for loop 
+
 	for _, s := range importsegments {
-		segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
+		// segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
 		// TODO CHECK: ok = false
+		ok := false
 		if !ok {
 			// if we have a miss, we use CE139
 			erasureRoot, err := n.getErasureRootFromHash(s.WorkPackageHash)
@@ -774,16 +816,20 @@ func (n *Node) GetImportSegments(importsegments []types.ImportSegment) (imports 
 				fmt.Printf("%s [GetImportSegments:getErasureRootFromHash] WorkPackageHash=%v ERR %v\n", n.String(), s.WorkPackageHash, err)
 				return imports, fmt.Errorf("Not found")
 			}
-			fmt.Printf("GetImportSegments: erasureRoot = %v", erasureRoot)
-			segment, err = n.reconstructSegments(erasureRoot, []uint16{s.Index})
+			//fmt.Printf("GetImportSegments: erasureRoot = %v", erasureRoot)
+			segments, err := n.reconstructSegments(erasureRoot, []uint16{s.Index})
 			if err != nil {
 				fmt.Printf("%s [GetImportSegments:reconstructSegments] ErasureRoot=%v ERR %v\n", n.String(), erasureRoot, err)
 				return imports, fmt.Errorf("Not found")
 			}
-			fmt.Printf("GetImportSegments: segment = %v", segment)
+			if debugJ {
+				fmt.Printf("GetImportSegments(%v_%d -> %v_%d)\n", s.WorkPackageHash, s.Index, erasureRoot, s.Index)
+				fmt.Printf("GetImportSegments: segments = %v\n", segments)
+			}
+			imports = append(imports, segments...)
 		}
-		imports = append(imports, segment)
 	}
+	//fmt.Printf("GetImportSegments ** final imports=%x\n", imports)
 	return imports, nil
 }
 

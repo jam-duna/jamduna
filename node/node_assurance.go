@@ -49,6 +49,7 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 
 	guarantor := g.Signatures[0].ValidatorIndex // TODO: try any of them, not the 0th one
 	bundleShard, concatSegmentShards, justification, err := n.peersInfo[guarantor].SendFullShardRequest(erasureRoot, n.id)
+	fullshard_identifier := fmt.Sprintf("%v_%d", erasureRoot, n.id)
 	if err != nil {
 		fmt.Printf("%s [assureData: SendShardRequest] ERR %v\n", n.String(), err)
 		return
@@ -64,7 +65,7 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 		return
 	}
 	if debugDA {
-		fmt.Printf("%s [assureData:VerifyFullShard] verified %v\n", n.String(), verified)
+		fmt.Printf("%s [assureData:VerifyFullShard] %v verified %v\n", n.String(), verified, fullshard_identifier)
 	}
 
 	err = n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
