@@ -71,7 +71,7 @@ func (j *JamState) ProcessAssuranceState(tally []uint32) (uint32, []types.WorkRe
 		if j.AvailabilityAssignments[c] == nil {
 			continue
 		}
-		if available > 2*types.TotalValidators/3 {
+		if available >= 2*types.TotalValidators/3 {
 			BigW = append(BigW, j.AvailabilityAssignments[c].WorkReport)
 			j.AvailabilityAssignments[c] = nil
 		}

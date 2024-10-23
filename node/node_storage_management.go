@@ -201,6 +201,13 @@ func (n *Node) GetFullShardJustification(erasureRoot common.Hash, shardIndex uin
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	f_es_key := fmt.Sprintf("f_%v", esKey)
 	data, err := n.ReadRawKV([]byte(f_es_key))
+	if err != nil {
+		return
+	}
+	if len(data) < 64 {
+		err = fmt.Errorf("GetFullShardJustification Bad data")
+		return
+	}
 	bClubH = common.Hash(data[:32])
 	sClubH = common.Hash(data[32:64])
 	justification = data[64:]
@@ -274,8 +281,6 @@ func (n *Node) StoreImportDAWorkReportMap(spec types.AvailabilitySpecifier) erro
 	n.WriteRawKV(generateHashToErasureRootKey(spec.ExportedSegmentRoot), erasureRoot.Bytes())
 	return nil
 }
-
-
 
 // spec.ErasureRoot => segments
 // and be able to retrieve the ith segment by either (a) spec.WorkPackageHash or (b) spec.ExportedSegmentRoot using (c) in response to

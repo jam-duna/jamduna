@@ -97,7 +97,6 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 	respBytes, err := receiveQuicBytes(stream)
 	if err != nil {
 		fmt.Printf("%s SendBlockRequest ERR2 %v\n", p.String(), err)
-		panic(0)
 		return block, err
 	}
 	//fmt.Printf("%s SendBlockRequest received %d bytes: [%x]\n", p.String(), len(respBytes), respBytes)

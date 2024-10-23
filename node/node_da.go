@@ -484,16 +484,12 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 			}
 		}
 		vm.SetImports(imports)
+
 		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		err = vm.Execute(types.EntryPointRefine)
-		if err0 != nil {
-			return
-		}
-		output, _ := vm.GetArgumentOutputs()
+		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, workItem.ExtrinsicsBlobs)
 		for _, e := range vm.Exports {
 			segments = append(segments, e) // this is used in NewAvailabilitySpecifier
 		}
-
 		// Decode the Exports Segments to FIB format
 		if len(segments) > 0 {
 			fib_exported_result := segments[0][:12]

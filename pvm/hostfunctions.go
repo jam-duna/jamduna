@@ -538,14 +538,20 @@ func (vm *VM) hostWrite() uint32 {
 	}
 
 	// check balance a_t <= a_b
+	a_t := uint64(0)
+	a_b := uint64(0)
+	a_i := uint64(0)
+	a_l := uint64(0)
 	service_byte := vm.hostenv.ReadServiceBytes(s)
-	a_b_byte := service_byte[len(service_byte)-36 : len(service_byte)-24]
-	a_l_byte := service_byte[len(service_byte)-12 : len(service_byte)-4]
-	a_i_byte := service_byte[len(service_byte)-4:]
-	a_b := binary.LittleEndian.Uint64(a_b_byte)
-	a_l := binary.LittleEndian.Uint64(a_l_byte)
-	a_i := binary.LittleEndian.Uint64(a_i_byte)
-	a_t := 10 + 1*a_i + 100*a_l
+	if len(service_byte) > 36 {
+		a_b_byte := service_byte[len(service_byte)-36 : len(service_byte)-24]
+		a_l_byte := service_byte[len(service_byte)-12 : len(service_byte)-4]
+		a_i_byte := service_byte[len(service_byte)-4:]
+		a_b = binary.LittleEndian.Uint64(a_b_byte)
+		a_l = binary.LittleEndian.Uint64(a_l_byte)
+		a_i = binary.LittleEndian.Uint64(a_i_byte)
+		a_t = 10 + 1*a_i + 100*a_l
+	}
 
 	if a_t <= a_b {
 		vm.writeRegister(7, uint32(l))

@@ -125,7 +125,7 @@ type StatisticalReporter struct {
 
 // ServiceAccumulation represents a service accumulation result.
 type ServiceAccumulation struct {
-	ServiceIndex int         `json:"service_index"`
+	ServiceIndex uint32      `json:"service_index"`
 	Result       common.Hash `json:"result"`
 }
 

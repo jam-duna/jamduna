@@ -11,8 +11,6 @@ import (
 
 type AuthorizationQueue [types.TotalCores][]common.Hash
 
-// type BeefyPool [types.RecentHistorySize]Beta_state
-type BeefyPool []Beta_state
 type AvailabilityAssignments [types.TotalCores]*Rho_state
 
 type JamState struct {
@@ -26,21 +24,6 @@ type JamState struct {
 	DisputesState            Psi_state                          `json:"disputes_state"`              // psi - Disputes ψ eq 97
 	PrivilegedServiceIndices Kai_state                          `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
 	ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"validator_statistics"`        // pi The validator statistics. π eq 171
-}
-
-type Peaks []*common.Hash
-
-// Types for Beta
-type MMR struct {
-	Peaks Peaks `json:"peaks"`
-}
-
-// type Reported []common.Hash
-type Beta_state struct {
-	HeaderHash common.Hash   `json:"header_hash"`
-	MMR        MMR           `json:"mmr"`
-	StateRoot  common.Hash   `json:"state_root"`
-	Reported   []common.Hash `json:"reported"`
 }
 
 func (b *Beta_state) MMR_Bytes() []byte {

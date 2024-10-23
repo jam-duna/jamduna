@@ -104,8 +104,8 @@ type Node struct {
 	// holds a map of the hash to the stateDB
 	statedbMap map[common.Hash]*statedb.StateDB
 	// holds the tip
-	statedb         *statedb.StateDB
-	messageChan     chan statedb.Message
+	statedb *statedb.StateDB
+
 	nodeType        string
 	dataDir         string
 	epoch0Timestamp uint32
@@ -209,18 +209,15 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		return nil, err
 	}
 
-	messageChan := make(chan statedb.Message, 100)
-
 	node := &Node{
-		id:          id,
-		coreIndex:   uint16(id % 2), // TODO: NumCores
-		store:       store,
-		server:      *listener,
-		peers:       peers,
-		peersInfo:   make(map[uint16]*Peer),
-		tlsConfig:   tlsConfig,
-		messageChan: messageChan,
-		nodeType:    nodeType,
+		id:        id,
+		coreIndex: uint16(id % 2), // TODO: NumCores
+		store:     store,
+		server:    *listener,
+		peers:     peers,
+		peersInfo: make(map[uint16]*Peer),
+		tlsConfig: tlsConfig,
+		nodeType:  nodeType,
 
 		statedbMap: make(map[common.Hash]*statedb.StateDB),
 		blocks:     make(map[common.Hash]*types.Block),
@@ -729,12 +726,12 @@ func (n *Node) processBlock(blk *types.Block) error {
 	return nil // Success
 }
 
-func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte){
+func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
 	// setup proper arr for reconstruction
 	segmentShards = make([][][]byte, segmentLen)
 	for j := 0; j < segmentLen; j++ {
 		for shardIdx := uint16(0); shardIdx < types.TotalValidators; shardIdx++ {
-			segmentShards[j] =  make([][]byte, types.TotalValidators)
+			segmentShards[j] = make([][]byte, types.TotalValidators)
 		}
 	}
 	return segmentShards
@@ -789,7 +786,7 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint1
 		segmentShardRaw := make([][][]byte, 1)
 		segmentShardRaw[0] = segmentShard
 		exported_segment, err := n.decode(segmentShardRaw, true, types.FixedSegmentSizeG)
-		if (err != nil){
+		if err != nil {
 			return exported_segments, fmt.Errorf("Invalid Reconstructions %v", err)
 		}
 		exported_segments[return_idx] = exported_segment
@@ -803,7 +800,7 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint1
 func (n *Node) GetImportSegments(importsegments []types.ImportSegment) (imports [][]byte, err error) {
 	imports = make([][]byte, 0)
 
-	//TODO: not sure if wp_hash, Index is sorted at all. If not. we can't do wp_hash, idx=[..] properly with for loop 
+	//TODO: not sure if wp_hash, Index is sorted at all. If not. we can't do wp_hash, idx=[..] properly with for loop
 
 	for _, s := range importsegments {
 		// segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
@@ -1071,42 +1068,6 @@ func (n *Node) runClient() {
 			//fmt.Printf("IM here!!! %v\n", log)
 			n.WriteLog(log)
 		}
-	}
-}
-
-func (n *Node) processOutgoingMessage(msg statedb.Message) {
-	msgType := msg.MsgType
-
-	// Unmarshal the payload to the appropriate type
-	switch msgType {
-	case "Ticket":
-		var ticket types.Ticket
-		payloadBytes, err := types.Encode(msg.Payload)
-		if err != nil {
-			fmt.Printf("[N%v] Error encoding payload: %v\n", n.id, err)
-		}
-		decoded, _, err := types.Decode(payloadBytes, reflect.TypeOf(ticket))
-		if err != nil {
-			fmt.Printf("[N%v] Error decoding payload: %v\n", n.id, err)
-		}
-		ticket = decoded.(types.Ticket)
-		//fmt.Printf("[N%v] Outgoing Ticket: %+v\n", n.id, ticket.TicketID())
-		n.broadcast(ticket)
-	case "Block":
-		var blk types.Block
-		payloadBytes, err := types.Encode(msg.Payload)
-		if err != nil {
-			fmt.Printf("[N%v] Error encoding payload: %v\n", n.id, err)
-		}
-		decoded, _, err := types.Decode(payloadBytes, reflect.TypeOf(blk))
-		if err != nil {
-			fmt.Printf("[N%v] Error decoding payload: %v\n", n.id, err)
-		}
-		blk = decoded.(types.Block)
-		//fmt.Printf("[N%v] Outgoing Block: %+v\n", n.id, blk.Hash())
-		n.broadcast(blk)
-	default:
-		fmt.Printf("[N%v] Unhandled message type: %v\n", n.id, msg.MsgType)
 	}
 }
 

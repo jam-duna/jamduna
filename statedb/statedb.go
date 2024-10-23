@@ -17,11 +17,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-type Message struct {
-	MsgType string
-	Payload interface{}
-}
-
 type StateDB struct {
 	Finalized  bool
 	Id         uint16       `json:"id"`
@@ -61,7 +56,8 @@ type StateDB struct {
 	GuarantorAssignments         []types.GuarantorAssignment
 	PreviousGuarantorAssignments []types.GuarantorAssignment
 	AvailableWorkReport          []types.WorkReport // every block has its own available work report
-	//S uint32
+
+	mmr *trie.MerkleMountainRange
 
 	logChan chan storage.LogMessage
 }
@@ -998,63 +994,6 @@ func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult
 	return output
 }
 
-func (s *StateDB) Accumulate() error {
-	xContext := types.NewXContext()
-	//TODO: setup xi, x_vm,
-	s.SetXContext(xContext)
-	if debug {
-		fmt.Printf("AvailableWorkReport %v\n", len(s.AvailableWorkReport))
-	}
-	if len(s.AvailableWorkReport) == 0 {
-
-		for _, wr := range s.AvailableWorkReport {
-			wrangledWorkResults := make([]types.WrangledWorkResult, 0)
-			// code, err := s.getServiceCoreCode(uint32(47))
-			service_index := uint32(wr.Results[0].Service)
-			code_hash := wr.Results[0].CodeHash
-			code := s.ReadServicePreimageBlob(service_index, code_hash)
-			fmt.Printf("Accumulate Code %x\n", code)
-
-			if len(code) != 0 {
-				// Wrangle results from work report
-				workReport := wr
-				for _, workResult := range workReport.Results {
-					wrangledWorkResult := workResult.Wrangle(workReport.AuthOutput, workReport.AvailabilitySpec.WorkPackageHash)
-					wrangledWorkResults = append(wrangledWorkResults, wrangledWorkResult)
-					service_index = workResult.Service
-				}
-			}
-			wrangledWorkResultsBytes := s.getWrangledWorkResultsBytes(wrangledWorkResults)
-
-			Xs, _ := s.GetService(uint32(service_index))
-			//s.X.S = Xs
-			X := s.GetXContext()
-			X.S = Xs
-			s.UpdateXContext(X)
-			vm := pvm.NewVMFromCode(uint32(47), code, 0, s)
-			vm.SetArgumentInputs(wrangledWorkResultsBytes)
-			vm.Execute(types.EntryPointAccumulate)
-		}
-	}
-
-	return nil
-}
-
-func (s *StateDB) OnTransfer() error {
-	for _, core := range s.JamState.AvailabilityAssignments {
-		if core == nil {
-			continue
-		}
-		code, err := s.getServiceCoreCode(uint32(core.WorkReport.CoreIndex))
-		if err == nil {
-			fmt.Printf("OnTransfers %d\n", core.WorkReport.CoreIndex)
-			vm := pvm.NewVMFromCode(uint32(core.WorkReport.CoreIndex), code, 0, s)
-			vm.Execute(types.EntryPointOnTransfer)
-		}
-	}
-	return nil
-}
-
 // Section 8.2 - Eq 85+86
 func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarantee) error {
 	for c := uint16(0); c < types.TotalCores; c++ {
@@ -1220,9 +1159,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "assurances", num_assurances)
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
 
-	// 28 -- ACCUMULATE OPERATIONS BASED ON cores
-	// TODO : Remove cores and get the rho state from JamState
-	err = s.Accumulate()
+	// 28 -- ACCUMULATE
+	serviceAccumulations, reported, err := s.Accumulate()
 	if err != nil {
 		return s, err
 	}
@@ -1243,7 +1181,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
 	}
 	s.ApplyXContext()
-	// TODO : Remove cores and get the rho state from JamState
+
 	err = s.OnTransfer()
 	if err != nil {
 		return s, err
@@ -1255,6 +1193,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.ParentHash = s.BlockHash
 	s.BlockHash = blk.Hash()
 	s.StateRoot = s.UpdateTrieState()
+
+	s.mmr = s.ApplyStateRecentHistory(serviceAccumulations, reported)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
 	}

@@ -145,7 +145,7 @@ func TestAvailabilityReconstruction(t *testing.T) {
 		senderNode.StoreMeta_Guarantor(availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray)
 		recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, err := senderNode.GetMeta_Guarantor(erasureMeta.ErasureRoot)
 		//shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
-		if (err != nil){
+		if err != nil {
 			fmt.Printf("len(recoveredbECChunks)=%v len(recoveredsECChunksArray)=%v\n", len(recoveredbECChunks), len(recoveredsECChunksArray))
 		}
 
@@ -157,7 +157,6 @@ func TestAvailabilityReconstruction(t *testing.T) {
 			}
 			nodes[shardIdx].StoreFullShard_Assurer(erasureRoot, shardIdx, bundleShard, segmentShards, justification)
 		}
-
 
 		//originalAS = availabilitySpecifier
 

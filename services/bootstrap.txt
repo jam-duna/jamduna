@@ -1,17 +1,30 @@
-// point to y "payload" (code length at 0xFEFF0004, code at 0xFEFF0008)
-pub @refine: 
-    a10 = 0xFEFF0008      // c
-    a11 = u32[0xFEFF0004] // |c|
+pub @refine:
+    a10 = 0xFEFF0004 // codehash is 32 byte payload starting at 0xFEFF0000 but has 4 bytes of bootstrap service 0 before it
+    a11 = 32
     trap
 
 pub @accumulate:
-    a7 = location of result from refine 
-    a8 = length of result from refine   
+    // hostcall to new with codehash from refine output which should be at 0xFEFF0000
+    a7 = 0xFEFF0000
+    a8 = 0        // CHECK what preimage needs here
     a9 = 0x2000
     a10 = 0x1000
     a11 = 0x3000
     a12 = 0x4000
-    ecalli 9 
+    // call "new"
+    ecalli 9
+
+    // write bootstrap storage key (0) with new service key value copied to a7
+    u32 [0xFEFE0000] = 0
+    u32 [0xFEFE0004] = a7
+    // 4-byte key is at 0xFEFE0000
+    a7 = 0xFEFE0000
+    a8 = 4
+    // 4-byte value is at
+    a9 = 0xFEFFE0004
+    a10 = 4
+    // call "write"
+    ecalli 3
     trap
 
 pub @authorization:
@@ -19,5 +32,3 @@ pub @authorization:
 
 pub @on_transfer:
     fallthrough
-
-

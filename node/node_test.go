@@ -190,6 +190,7 @@ func TestWorkGuarantee(t *testing.T) {
 		n.statedb.PreviousGuarantors(true)
 		n.statedb.AssignGuarantors(true)
 	}
+	codeHash := common.Blake2Hash(code)
 	time.Sleep(12 * time.Second)
 	//----------------------------------------------
 	loadTestService := false
@@ -201,9 +202,6 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 		bootstrapService := uint32(statedb.BootstrapServiceCode)
 		bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-
-		codeLenBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(codeLenBytes, uint32(len(code)))
 		fibCodeWorkPackage := types.WorkPackage{
 			Authorization: []byte(""),
 			AuthCodeHost:  bootstrapService,
@@ -213,7 +211,7 @@ func TestWorkGuarantee(t *testing.T) {
 				{
 					Service:          bootstrapService,
 					CodeHash:         bootstrapCodeHash,
-					Payload:          append(codeLenBytes, code...), // "y" = |c| ++ c
+					Payload:          codeHash.Bytes(),
 					GasLimit:         10000000,
 					ImportedSegments: make([]types.ImportSegment, 0),
 					ExportCount:      0,
@@ -227,7 +225,6 @@ func TestWorkGuarantee(t *testing.T) {
 		// TODO: William - figure out how to get new service back from the above accumulate XContext (see hostNew SetX_i call)
 		time.Sleep(12 * time.Second)
 	}
-	codeHash := common.Blake2Hash(code)
 
 	for _, n := range nodes {
 		n.statedb.PreviousGuarantors(true)

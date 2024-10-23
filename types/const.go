@@ -27,7 +27,7 @@ const (
 )
 
 const (
-	FixedSegmentSizeG 		  =  W_S*W_E
+	FixedSegmentSizeG = W_S * W_E
 )
 
 const (

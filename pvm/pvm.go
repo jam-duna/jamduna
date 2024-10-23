@@ -795,25 +795,46 @@ func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
 	}
 }
 
-// for hostfuntion test
-// func NewVMforhostfun(initialRegs []uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv) *VM {
+func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, codeHash common.Hash, authorizerCodeHash common.Hash, authorization []byte, extrinsicsBlobs [][]byte) (r types.Result, res uint32) {
+	// TODO: William -- work with Sean on encode/decode of argument inputs here
+	// Refine inputs: let a = E(s, y, p, c, a, o, ↕[↕x S x <− x])
+	a := common.Uint32ToBytes(s)                 // s - the service index
+	a = append(a, y...)                          //  work payload, y,
+	//a = append(a, workPackageHash.Bytes()...)    // p - work package hash
+	//a = append(a, codeHash.Bytes()...)           //  c - the prediction of the hash of that service’s code c at the time of reporting,
+	//a = append(a, authorizerCodeHash.Bytes()...) //
+	//a = append(a, authorization...)              // authorization
+	//a = append(a, common.ConcatenateByteSlices(extrinsicsBlobs)...)
+	//vm.setArgumentInputs(a)
+	vm.Execute(types.EntryPointRefine)
+	return vm.getArgumentOutputs()
+}
 
-// 	vm := &VM{
-// 		register: make([]uint32, regSize),
-// 		ram:      make(map[uint32][4096]byte),
-// 		hostenv:  hostENV,
-// 	}
-// 	for _, pg := range pages {
-// 		vm.writeRAMBytes(pg.Address, pg.Contents)
-// 	}
+func (vm *VM) ExecuteAccumulate(wrangledBytes []byte) (r types.Result, res uint32) {
+	//vm.setArgumentInputs(wrangledBytes)
+	vm.Execute(types.EntryPointAccumulate)
+	return vm.getArgumentOutputs()
+}
 
-// 	if pagemap[0].IsWritable {
-// 		vm.writable_ram_start = uint32(pagemap[0].Address)
-// 		vm.writable_ram_length = uint32(pagemap[0].Length)
-// 	}
-// 	copy(vm.register, initialRegs)
-// 	return vm
-// }
+func (vm *VM) ExecuteTransfer(t []*types.AddTransfer) (r types.Result, res uint32) {
+	// a = E(t)   take transfer memos t and encode them
+	a := make([]byte, 0)
+	for _, t := range t {
+		a = append(a, t.Bytes()...)
+	}
+	vm.setArgumentInputs(a)
+	vm.Execute(types.EntryPointOnTransfer)
+	return vm.getArgumentOutputs()
+}
+
+// E(p, c)
+func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint32) (r types.Result, res uint32) {
+	a := p.Bytes()
+	a = append(a, common.Uint32ToBytes(c)...)
+	vm.setArgumentInputs(a)
+	vm.Execute(types.EntryPointOnTransfer)
+	return vm.getArgumentOutputs()
+}
 
 // Execute runs the program until it terminates
 func (vm *VM) Execute(entryPoint int) error {
@@ -857,7 +878,7 @@ func (vm *VM) SetImports(imports [][]byte) error {
 }
 
 // copy a into 2^32 - Z_Q - Z_I and initialize registers
-func (vm *VM) SetArgumentInputs(a []byte) error {
+func (vm *VM) setArgumentInputs(a []byte) error {
 	vm.writeRegister(0, 0)
 	vm.writeRegister(1, 0xFFFF0000) // 2^32 - 2^16
 	vm.writeRegister(2, 0xFEFE0000) // 2^32 - 2 * 2^16 - 2^24
@@ -873,7 +894,7 @@ func (vm *VM) SetArgumentInputs(a []byte) error {
 	return nil
 }
 
-func (vm *VM) GetArgumentOutputs() (r types.Result, res uint32) {
+func (vm *VM) getArgumentOutputs() (r types.Result, res uint32) {
 	o, _ := vm.readRegister(10)
 	l, _ := vm.readRegister(11)
 

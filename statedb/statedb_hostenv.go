@@ -129,20 +129,22 @@ func (s *StateDB) WriteServiceBytes(service uint32, v []byte) {
 }
 
 func (s *StateDB) ReadServiceStorage(service uint32, k []byte) []byte {
-	// first check journal
+	/*// first check journal
 	XContext := s.GetXContext()
 	xs := XContext.GetX_s()
-	foundInJournal := false
-	if service != xs.ServiceIndex() {
-		//weird.. how?
-	}
-	foundInJournal, error, val := xs.JournalGetStorage(k)
-	if foundInJournal {
-		if error != nil {
-			// there shouldn't be error..
+	if xs {
+		foundInJournal := false
+		if service != xs.ServiceIndex() {
+			//weird.. how?
 		}
-		return val
-	}
+		foundInJournal, error, val := xs.JournalGetStorage(k)
+		if foundInJournal {
+			if error != nil {
+				// there shouldn't be error..
+			}
+			return val
+		}
+	}*/
 
 	// not init case
 	tree := s.GetTrie()
@@ -150,7 +152,7 @@ func (s *StateDB) ReadServiceStorage(service uint32, k []byte) []byte {
 	if err != nil {
 		return nil
 	} else {
-		fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
+		//fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
 		return storage
 	}
 }
