@@ -21,6 +21,10 @@ type SerializedBlock struct {
 
 // Get Recent Block up to limit
 func (n *Node) getRecentBlocks(limit int) []SerializedBlock {
+	n.statedbMapMutex.Lock()
+	n.statedbMutex.Lock()
+	defer n.statedbMapMutex.Unlock()
+	defer n.statedbMutex.Unlock()
 	blocks := make([]SerializedBlock, 0, limit)
 
 	if n.statedb == nil {
@@ -32,7 +36,7 @@ func (n *Node) getRecentBlocks(limit int) []SerializedBlock {
 	currentHash := currentState.BlockHash
 
 	for i := 0; i < limit; i++ {
-		block, exists := n.blocks[currentHash]
+		block, exists := n.cacheBlockRead(currentHash)
 		if !exists {
 			break // Stop if the block is not found
 		}
@@ -59,7 +63,7 @@ func (n *Node) getRecentBlocks(limit int) []SerializedBlock {
 
 func (n *Node) getBlock(blockHash string) (types.Block, error) {
 	hash := common.HexToHash(blockHash)
-	block, exists := n.blocks[hash]
+	block, exists := n.cacheBlockRead(hash)
 	if !exists {
 		return types.Block{}, errors.New("Not found")
 	}

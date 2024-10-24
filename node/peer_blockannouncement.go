@@ -61,7 +61,7 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 	// <-- FIN
 
 	headerHash := newReq.HeaderHash
-	_, found := n.headers[headerHash]
+	_, found := n.cacheHeadersRead(headerHash)
 	if !found {
 		blockAnnouncement := types.BlockAnnouncement{
 			ValidatorIndex: peerID,

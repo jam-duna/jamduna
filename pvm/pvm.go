@@ -798,8 +798,8 @@ func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
 func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, codeHash common.Hash, authorizerCodeHash common.Hash, authorization []byte, extrinsicsBlobs [][]byte) (r types.Result, res uint32) {
 	// TODO: William -- work with Sean on encode/decode of argument inputs here
 	// Refine inputs: let a = E(s, y, p, c, a, o, ↕[↕x S x <− x])
-	a := common.Uint32ToBytes(s)                 // s - the service index
-	a = append(a, y...)                          //  work payload, y,
+	a := common.Uint32ToBytes(s) // s - the service index
+	a = append(a, y...)          //  work payload, y,
 	//a = append(a, workPackageHash.Bytes()...)    // p - work package hash
 	//a = append(a, codeHash.Bytes()...)           //  c - the prediction of the hash of that service’s code c at the time of reporting,
 	//a = append(a, authorizerCodeHash.Bytes()...) //

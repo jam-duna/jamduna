@@ -26,14 +26,11 @@ func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBloc
 		// TODO: Sourabh - go in the direction up to maximumBlocks
 		return blocks, true, nil
 	}
-	//for h, _ := range n.headers {
-	//	fmt.Printf(" %s BlocksLookup(%v) INSPECT: %v\n", n.String(), headerHash, h)
-	//}
 	return blocks, false, nil
 }
 
 func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.WorkReport, ok bool, err error) {
-	workReport, found := n.workReports[workReportHash]
+	workReport, found := n.cacheWorkReportRead(workReportHash)
 	if found {
 		return workReport, true, nil
 	}
@@ -89,8 +86,8 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncemen
 		panic(6665)
 		return block, fmt.Errorf("failed header hash retrieval")
 	}
-	n.headers[receivedHeaderHash] = block
-	n.blocks[block.ParentHash()] = block
+	n.cacheHeaders(receivedHeaderHash, block)
+	n.cacheBlock(block)
 	//fmt.Printf("  %s received Block %v <- %v\n", n.String(), block.Hash(), block.ParentHash())
 	return block, nil
 }
@@ -109,6 +106,44 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	}
 	n.preimages[preimageHash] = preimage
 	return nil
+}
+func (n *Node) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) {
+	n.blocksMutex.Lock()
+	defer n.blocksMutex.Unlock()
+	b, ok = n.blocks[parentHash]
+	return
+}
+
+func (n *Node) cacheBlock(block *types.Block) {
+	n.blocksMutex.Lock()
+	defer n.blocksMutex.Unlock()
+	n.blocks[block.ParentHash()] = block
+}
+
+func (n *Node) cacheHeadersRead(h common.Hash) (b *types.Block, ok bool) {
+	n.headersMutex.Lock()
+	defer n.headersMutex.Unlock()
+	b, ok = n.headers[h]
+	return
+}
+
+func (n *Node) cacheHeaders(h common.Hash, block *types.Block) {
+	n.headersMutex.Lock()
+	defer n.headersMutex.Unlock()
+	n.headers[h] = block
+}
+
+func (n *Node) cacheWorkReport(workReport types.WorkReport) {
+	n.workReportsMutex.Lock()
+	defer n.workReportsMutex.Unlock()
+	n.workReports[workReport.Hash()] = workReport
+}
+
+func (n *Node) cacheWorkReportRead(h common.Hash) (workReport types.WorkReport, ok bool) {
+	n.workReportsMutex.Lock()
+	defer n.workReportsMutex.Unlock()
+	workReport, ok = n.workReports[h]
+	return
 }
 
 func (n *Node) runMain() {
@@ -133,7 +168,7 @@ func (n *Node) runMain() {
 			if n.workReports == nil {
 				n.workReports = make(map[common.Hash]types.WorkReport)
 			}
-			n.workReports[workReport.Hash()] = workReport
+			n.cacheWorkReport(workReport)
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {

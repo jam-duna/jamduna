@@ -7,6 +7,7 @@ import (
 
 // Check if a StateDB has exactly one child (i.e., no forks)
 func (n *Node) hasSingleChild(blockHash common.Hash) bool {
+
 	count := 0
 	for _, statedb := range n.statedbMap {
 		if statedb.ParentHash == blockHash {
@@ -38,6 +39,9 @@ func (n *Node) countDescendantsWithNoForks(blockHash common.Hash, depth int) int
 
 // Mark StateDB as finalized if it has 5 descendants with no forks
 func (n *Node) finalizeBlocks() {
+	n.statedbMapMutex.Lock()
+	defer n.statedbMapMutex.Unlock()
+
 	for _, statedb := range n.statedbMap {
 		if !statedb.Finalized && n.countDescendantsWithNoForks(statedb.BlockHash, 0) == 1 {
 			if debugF {

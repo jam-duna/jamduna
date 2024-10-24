@@ -56,16 +56,15 @@ const (
 )
 
 type Node struct {
-	id        uint16
-	coreIndex uint16
+	id uint16
+	//coreIndex uint16
 
 	credential types.ValidatorSecret
 	server     quic.Listener
 	peers      []string
 	peersInfo  map[uint16]*Peer //<ed25519> -> NodeInfo
-	//peersAddr  	 map[string]string
+
 	tlsConfig *tls.Config
-	mutex     sync.Mutex
 
 	store *storage.StateDBStorage /// where to put this?
 
@@ -76,8 +75,9 @@ type Node struct {
 	announcementBucket     types.AnnounceBucket
 	prevAnnouncementBucket types.AnnounceBucket
 	announcementMutex      sync.Mutex
-	judgementBucket        types.JudgeBucket
-	judgementMutex         sync.Mutex
+
+	judgementBucket types.JudgeBucket
+	judgementMutex  sync.Mutex
 
 	isBadGuarantor bool
 
@@ -87,9 +87,16 @@ type Node struct {
 
 	// holds a map of the parenthash to the block
 	blocks      map[common.Hash]*types.Block
-	headers     map[common.Hash]*types.Block
-	preimages   map[common.Hash][]byte
-	workReports map[common.Hash]types.WorkReport
+	blocksMutex sync.Mutex
+
+	headers      map[common.Hash]*types.Block
+	headersMutex sync.Mutex
+
+	preimages      map[common.Hash][]byte
+	preimagesMutex sync.Mutex
+
+	workReports      map[common.Hash]types.WorkReport
+	workReportsMutex sync.Mutex
 
 	blockAnnouncementsCh    chan types.BlockAnnouncement
 	ticketsCh               chan types.Ticket
@@ -102,9 +109,12 @@ type Node struct {
 	judgementsCh            chan types.Judgement
 
 	// holds a map of the hash to the stateDB
-	statedbMap map[common.Hash]*statedb.StateDB
+	statedbMap      map[common.Hash]*statedb.StateDB
+	statedbMapMutex sync.Mutex
+
 	// holds the tip
-	statedb *statedb.StateDB
+	statedb      *statedb.StateDB
+	statedbMutex sync.Mutex
 
 	nodeType        string
 	dataDir         string
@@ -211,7 +221,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 
 	node := &Node{
 		id:        id,
-		coreIndex: uint16(id % 2), // TODO: NumCores
 		store:     store,
 		server:    *listener,
 		peers:     peers,
@@ -364,6 +373,11 @@ func (n *Node) getPeerAddr(peerIdx uint16) (*Peer, error) {
 }
 
 func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
+	n.statedbMutex.Lock()
+	n.statedbMapMutex.Lock()
+	defer n.statedbMutex.Unlock()
+	defer n.statedbMapMutex.Unlock()
+
 	if n.statedb == nil || n.statedb.GetBlock() == nil {
 		var blkHash common.Hash
 		if _statedb.GetBlock() != nil {
@@ -583,9 +597,15 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 }
 
 func (n *Node) dumpstatedbmap() {
+	n.statedbMapMutex.Lock()
+	defer n.statedbMapMutex.Unlock()
+
 	for hash, statedb := range n.statedbMap {
 		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHash, statedb.BlockHash, statedb.StateRoot)
 	}
+
+	n.blocksMutex.Lock()
+	defer n.blocksMutex.Unlock()
 	for hash, blk := range n.blocks {
 		fmt.Printf("dumpstatedbmap: blocks[%v] => %v\n", hash, blk.Hash())
 	}
@@ -679,8 +699,9 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 func (n *Node) processBlock(blk *types.Block) error {
 	// walk blk backwards, up to the tip, if possible -- but if encountering an unknown parenthash, immediately fetch the block.  Give up if we can't do anything
 	b := blk
-	n.blocks[b.Hash()] = blk
-	n.headers[b.Header.Hash()] = blk
+
+	n.cacheBlock(blk)
+	n.cacheHeaders(b.Header.Hash(), blk)
 	for {
 		if b.ParentHash() == (common.Hash{}) {
 			//fmt.Printf("[N%d] processBlock: hit genesis (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
@@ -690,7 +711,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 			break
 		} else {
 			var err error
-			parentBlock, ok := n.blocks[b.ParentHash()]
+			parentBlock, ok := n.cacheBlockRead(b.ParentHash())
 			if !ok {
 				parentBlock, err = n.fetchBlock(b.ParentHash())
 				if err != nil || parentBlock == nil {
@@ -700,7 +721,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 				// got the parent block, store it in the cache
 				if parentBlock.Hash() == blk.ParentHash() {
 					fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.ParentHash(), blk.Hash())
-					n.blocks[parentBlock.Hash()] = parentBlock
+					n.cacheBlock(parentBlock)
 				} else {
 					return nil
 				}
@@ -1040,9 +1061,8 @@ func (n *Node) runClient() {
 				newStateDB.PreviousGuarantors(true)
 				newStateDB.AssignGuarantors(true)
 				n.addStateDB(newStateDB)
-				n.blocks[newBlock.Hash()] = newBlock
-				headerHash := newBlock.Header.Hash()
-				n.headers[headerHash] = newBlock
+				n.cacheBlock(newBlock)
+				n.cacheHeaders(newBlock.Header.Hash(), newBlock)
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				n.broadcast(*newBlock)
 
