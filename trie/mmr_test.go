@@ -2,134 +2,79 @@ package trie
 
 import (
 	"fmt"
-	"testing"
-
 	"github.com/colorfulnotion/jam/common"
+	"testing"
 )
 
-// TestMMR tests the Merkle Mountain Range implementation
-func TestMMR(t *testing.T) {
-	// t.Skip()
-	// t.Skip()
-	mmr := NewMMR()
-
-	leaves := [][2][]byte{
-		{[]byte("value1")},
-		{[]byte("value2")},
-		{[]byte("value3")},
-		{[]byte("value4")},
-		{[]byte("value5")},
-		{[]byte("value1")},
-		{[]byte("value2")},
-		{[]byte("value3")},
-		{[]byte("value4")},
-		{[]byte("value5")},
-		{[]byte("value2")},
-		{[]byte("value3")},
-		{[]byte("value4")},
-		{[]byte("value5")},
-		{[]byte("value5")},
+// Recent History Test
+func TestMMRAppend(t *testing.T) {
+	mmr := MMR{}
+	expected := []MMR{
+		MMR{
+			peaks: [][]byte{
+				common.Hex2Bytes("0x8720b97ddd6acc0f6eb66e095524038675a4e4067adc10ec39939eaefc47d842"),
+			},
+		},
+		MMR{
+			peaks: [][]byte{
+				nil,
+				common.Hex2Bytes("0x7076c31882a5953e097aef8378969945e72807c4705e53a0c5aacc9176f0d56b"),
+			},
+		},
+		MMR{
+			peaks: [][]byte{
+				nil,
+				nil,
+				nil,
+				common.Hex2Bytes("0x658b919f734bd39262c10589aa1afc657471d902a6a361c044f78de17d660bc6"),
+			},
+		},
+		MMR{
+			peaks: [][]byte{
+				common.Hex2Bytes("0xa983417440b618f29ed0b7fa65212fce2d363cb2b2c18871a05c4f67217290b0"),
+				nil,
+				nil,
+				common.Hex2Bytes("0x658b919f734bd39262c10589aa1afc657471d902a6a361c044f78de17d660bc6"),
+			},
+		},
 	}
 
-	for _, leaf := range leaves {
-		mmr.Append(leaf[0])
+	// test 1
+	mmr.Append(common.Hex2Bytes("0x8720b97ddd6acc0f6eb66e095524038675a4e4067adc10ec39939eaefc47d842"))
+	if mmr.ComparePeaks(expected[0]) == false {
+		t.Fatalf("Test1 FAIL")
 	}
 
-	mmr.PrintTree()
-	rootHash := mmr.Root()
-	t.Logf("rootHash:%x\n", rootHash)
-	if len(rootHash.Bytes()) == 0 {
-		t.Logf("Root hash should not be empty")
-	}
-}
-
-func TestTraceAndVerify(t *testing.T) {
-	mmr := NewMMR()
-
-	// Append some values
-	values := [][]byte{
-		[]byte("A"),
-		[]byte("B"),
-		[]byte("C"),
-		[]byte("D"),
-		[]byte("E"),
-		[]byte("F"),
-		[]byte("G"),
+	// test 2
+	mmr.Append(common.Hex2Bytes("0x7507515a48439dc58bc318c48a120b656136699f42bfd2bd45473becba53462d"))
+	if mmr.ComparePeaks(expected[1]) == false {
+		t.Fatalf("Test2 FAIL")
 	}
 
-	for _, value := range values {
-		mmr.Append(value)
+	// test 3
+	mmr = MMR{}
+	mmr.peaks = [][]byte{
+		common.Hex2Bytes("0xf986bfeff7411437ca6a23163a96b5582e6739f261e697dc6f3c05a1ada1ed0c"),
+		common.Hex2Bytes("0xca29f72b6d40cfdb5814569cf906b3d369ae5f56b63d06f2b6bb47be191182a6"),
+		common.Hex2Bytes("0xe17766e385ad36f22ff2357053ab8af6a6335331b90de2aa9c12ec9f397fa414"),
 	}
-	fmt.Printf("Root Hash %x:\n", mmr.Root())
-	mmr.PrintTree()
-
-	// Generate and verify proofs for each value
-	for _, value := range values {
-		proof := mmr.Trace(value)
-		fmt.Printf("Trace path for value %s:\n", string(value))
-		fmt.Printf("Value %x:\n", computeHash(value))
-		fmt.Printf("Leaf hash: %s\n", common.Bytes2Hex(proof.LeafHash))
-		fmt.Printf("Root hash: %s\n", common.Bytes2Hex(proof.RootHash))
-		for i, hash := range proof.SiblingHashes {
-			fmt.Printf("Sibling hash %d: %s (Position: %s)\n", i, common.Bytes2Hex(hash), proof.SiblingPosition[i])
-		}
-		if !mmr.Verify(value, proof) {
-			t.Errorf("Failed to verify proof for value %s", string(value))
-		}
+	mmr.Append(common.Hex2Bytes("0x8223d5eaa57ccef85993b7180a593577fd38a65fb41e4bcea2933d8b202905f0"))
+	if mmr.ComparePeaks(expected[2]) == false {
+		t.Fatalf("Test3 FAIL")
 	}
 
-	// Attempt to verify an incorrect proof
-	wrongValue := []byte("Z")
-	wrongProof := mmr.Trace(values[0]) // Use proof of a valid value
-	if !mmr.Verify(wrongValue, wrongProof) {
-		t.Errorf("Input incorrectly verified proof for wrong value should be Error")
+	// test 4
+	mmr = MMR{}
+	mmr.peaks = [][]byte{
+		nil,
+		nil,
+		nil,
+		common.Hex2Bytes("0x658b919f734bd39262c10589aa1afc657471d902a6a361c044f78de17d660bc6"),
 	}
-}
-
-func TestMMRGet(t *testing.T) {
-	leaves := [][2][]byte{
-		{[]byte("value1")},
-		{[]byte("value2")},
-		{[]byte("value3")},
-		{[]byte("value4")},
-		{[]byte("value5")},
-		{[]byte("value1")},
-		{[]byte("value2")},
-		{[]byte("value3")},
-		{[]byte("value4")},
-		{[]byte("value5")},
-		{[]byte("value2")},
-		{[]byte("value3")},
-		{[]byte("value4")},
-		{[]byte("value5")},
-		{[]byte("value5")},
+	mmr.Append(common.Hex2Bytes("0xa983417440b618f29ed0b7fa65212fce2d363cb2b2c18871a05c4f67217290b0"))
+	if mmr.ComparePeaks(expected[3]) == false {
+		t.Fatalf("Test4 FAIL")
 	}
 
-	// Create the Merkle Mountain Range
-	mmr := NewMMR()
-	for _, leaf := range leaves {
-		mmr.Append(leaf[0])
-	}
-	mmr.PrintTree()
-
-	// Test Get
-	for i := 0; i <= len(leaves); i++ {
-		{
-			if i < len(leaves) {
-				leaf, err := mmr.Get(i)
-				if err == nil {
-					fmt.Printf("Get [%d]: %s\n", i, string(leaf))
-				} else {
-					t.Errorf("Get [%d] should be Error: %v\n", i, err)
-				}
-			} else {
-				_, err := mmr.Get(i)
-				if err != nil {
-					fmt.Printf("Get [%d]: %v\n", i, err)
-				} else {
-					t.Errorf("Get [%d] should be Error: %v\n", i, err)
-				}
-			}
-		}
-	}
+	fmt.Printf("SUCCESS\n")
 }

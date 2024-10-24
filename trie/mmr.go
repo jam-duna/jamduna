@@ -2,237 +2,84 @@ package trie
 
 import (
 	"bytes"
-	"errors"
+	"encoding/hex"
 	"fmt"
-
-	"github.com/colorfulnotion/jam/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Node represents a node in the Merkle Tree
-type MMRNode struct {
-	Hash  []byte
-	Value []byte
-	Left  *MMRNode
-	Right *MMRNode
+type MMR struct {
+	peaks [][]byte
 }
 
-// MerkleMountainRange represents the MMR structure
-type MerkleMountainRange struct {
-	peaks []*MMRNode
+func keccak256(data []byte) []byte {
+	hash := crypto.Keccak256(data)
+	return hash
 }
 
-// NewMMR creates a new Merkle Mountain Range
-func NewMMR() *MerkleMountainRange {
-	return &MerkleMountainRange{
-		peaks: make([]*MMRNode, 0),
+func hashConcat(left, right []byte) []byte {
+	combined := append(left, right...)
+	return keccak256(combined)
+}
+
+// Append function for the MMR (as described in the image)
+func (m *MMR) Append(data []byte) {
+	m.peaks = appendToMMR(m.peaks, data)
+}
+
+func (m *MMR) Print() {
+	for i, peak := range m.peaks {
+		if peak == nil {
+			fmt.Printf("Peak %d: nil\n", i)
+		} else {
+			fmt.Printf("Peak %d: %s\n", i, hex.EncodeToString(peak))
+		}
 	}
 }
 
-// Append adds a new leaf to the MMR
-func (mmr *MerkleMountainRange) Append(value []byte) {
-	leaf := &MMRNode{
-		Hash:  computeHash(value),
-		Value: value,
-	}
-	mmr.peaks = append(mmr.peaks, leaf)
-	mmr.rebalance()
-}
-
-// rebalance maintains the MMR properties
-func (mmr *MerkleMountainRange) rebalance() {
-	for len(mmr.peaks) > 1 {
-		lastPeakSize := mmr.nodeSize(mmr.peaks[len(mmr.peaks)-1])
-		secondLastPeakSize := mmr.nodeSize(mmr.peaks[len(mmr.peaks)-2])
-		if lastPeakSize == secondLastPeakSize && isPowerOfTwo(lastPeakSize) {
-			left := mmr.peaks[len(mmr.peaks)-2]
-			right := mmr.peaks[len(mmr.peaks)-1]
-			combined := &MMRNode{
-				Hash:  computeHash(append(left.Hash, right.Hash...)),
-				Left:  left,
-				Right: right,
+func (m *MMR) ComparePeaks(compare MMR) bool {
+	for i, peak := range m.peaks {
+		cpeak := compare.peaks[i]
+		if peak == nil {
+			if cpeak != nil {
+				return false
 			}
-			mmr.peaks = mmr.peaks[:len(mmr.peaks)-2]
-			mmr.peaks = append(mmr.peaks, combined)
 		} else {
-			break
+			if bytes.Compare(cpeak, peak) != 0 {
+				return false
+			}
 		}
 	}
+	return true
 }
 
-// Root returns the root hash of the MMR
-func (mmr *MerkleMountainRange) Root() common.Hash {
-	if len(mmr.peaks) == 0 {
-		return common.BytesToHash([]byte{})
-	}
-	combined := mmr.peaks[0].Hash
-	for i := 1; i < len(mmr.peaks); i++ {
-		combined = append(combined, mmr.peaks[i].Hash...)
-	}
-	fmt.Printf("Compute Root Hash(%x): %x\n", combined, computeHash(combined))
-	return common.BytesToHash(computeHash(combined))
+func appendToMMR(peaks [][]byte, l []byte) [][]byte {
+	return P(peaks, l, 0)
 }
 
-// Get returns the value of the leaf at the given index
-func (mmr *MerkleMountainRange) Get(index int) ([]byte, error) {
-	if index < 0 {
-		return nil, errors.New("index out of range")
+// Recursive function P, combining roots
+func P(r [][]byte, l []byte, n int) [][]byte {
+	if n >= len(r) {
+		return append(r, l)
 	}
-
-	currentIndex := 0
-	for _, peak := range mmr.peaks {
-		value, err := getLeafAtIndex(peak, index, &currentIndex)
-		if err == nil {
-			return value, nil
-		}
+	if n < len(r) && r[n] == nil {
+		return R(r, n, l)
 	}
-
-	return nil, errors.New("index out of range")
+	return P(R(r, n, nil), hashConcat(r[n], l), n+1)
 }
 
-func getLeafAtIndex(node *MMRNode, targetIndex int, currentIndex *int) ([]byte, error) {
-	if node.Left == nil && node.Right == nil {
-		if *currentIndex == targetIndex {
-			return node.Value, nil
-		}
-		*currentIndex++
-		return nil, errors.New("index not found")
-	}
-
-	if node.Left != nil {
-		value, err := getLeafAtIndex(node.Left, targetIndex, currentIndex)
-		if err == nil {
-			return value, nil
-		}
-	}
-
-	if node.Right != nil {
-		value, err := getLeafAtIndex(node.Right, targetIndex, currentIndex)
-		if err == nil {
-			return value, nil
-		}
-	}
-
-	return nil, errors.New("index not found")
-}
-
-// PrintTree prints the structure of the MMR
-func (mmr *MerkleMountainRange) PrintTree() {
-	fmt.Println("Merkle Mountain Range Structure:")
-	for i, peak := range mmr.peaks {
-		fmt.Printf("Peak %d (Hash: %s, Size: %d):\n", i, common.Bytes2Hex(peak.Hash), mmr.nodeSize(peak))
-		mmr.printNode(peak, "  ")
-	}
-}
-
-func (mmr *MerkleMountainRange) printNode(node *MMRNode, indent string) {
-	if node.Left != nil && node.Right != nil {
-		fmt.Printf("%sBranch Node: %s\n", indent, common.Bytes2Hex(node.Hash))
-		fmt.Printf("%sLeft:\n", indent)
-		mmr.printNode(node.Left, indent+"  ")
-		fmt.Printf("%sRight:\n", indent)
-		mmr.printNode(node.Right, indent+"  ")
-	} else {
-		fmt.Printf("%sLeaf Node: %s\n", indent, common.Bytes2Hex(node.Hash))
-	}
-}
-
-// nodeSize calculates the size of a given node
-func (mmr *MerkleMountainRange) nodeSize(node *MMRNode) int {
-	if node == nil {
-		return 0
-	}
-	if node.Left == nil && node.Right == nil {
-		return 1
-	}
-	return mmr.nodeSize(node.Left) + mmr.nodeSize(node.Right)
-}
-
-// MerkleProof represents the proof needed to verify an entry in the MMR
-type MerkleProof struct {
-	LeafHash        []byte
-	RootHash        []byte
-	PeakHashes      [][]byte
-	SiblingHashes   [][]byte
-	SiblingPosition []string
-}
-
-// Trace generates a Merkle proof for the given value
-func (mmr *MerkleMountainRange) Trace(value []byte) *MerkleProof {
-	leafHash := computeHash(value)
-	var siblingHashes [][]byte
-	var siblingPositions []string
-
-	for _, peak := range mmr.peaks {
-		if tracePath, pos := traceNode(peak, leafHash); tracePath != nil {
-			siblingHashes = append(siblingHashes, tracePath...)
-			siblingPositions = append(siblingPositions, pos...)
-			break
-		}
-	}
-
-	var peakHashes [][]byte
-	for _, peak := range mmr.peaks {
-		peakHashes = append(peakHashes, peak.Hash)
-	}
-
-	return &MerkleProof{
-		LeafHash:        leafHash,
-		RootHash:        mmr.Root().Bytes(),
-		PeakHashes:      peakHashes,
-		SiblingHashes:   siblingHashes,
-		SiblingPosition: siblingPositions,
-	}
-}
-
-func traceNode(node *MMRNode, hash []byte) ([][]byte, []string) {
-	if node == nil {
-		return nil, nil
-	}
-	if bytes.Equal(node.Hash, hash) {
-		return [][]byte{}, []string{}
-	}
-	if node.Left != nil {
-		leftPath, leftPos := traceNode(node.Left, hash)
-		if leftPath != nil {
-			return append(leftPath, node.Right.Hash), append(leftPos, "right")
-		}
-	}
-	if node.Right != nil {
-		rightPath, rightPos := traceNode(node.Right, hash)
-		if rightPath != nil {
-			return append(rightPath, node.Left.Hash), append(rightPos, "left")
-		}
-	}
-	return nil, nil
-}
-
-// Verify verifies the given value against the provided Merkle proof
-func (mmr *MerkleMountainRange) Verify(value []byte, proof *MerkleProof) bool {
-	hash := computeHash(value)
-	for i, siblingHash := range proof.SiblingHashes {
-		if proof.SiblingPosition[i] == "left" {
-			fmt.Printf("Compute Hash(%x, %x): %x\n", siblingHash, hash, computeHash(append(siblingHash, hash...)))
-			hash = computeHash(append(siblingHash, hash...))
+// Function R for updating peaks
+func R(r [][]byte, i int, t []byte) [][]byte {
+	s := make([][]byte, len(r))
+	for j := 0; j < len(r); j++ {
+		if i == j {
+			if t == nil {
+				s[j] = nil
+			} else {
+				s[j] = t
+			}
 		} else {
-			fmt.Printf("Compute Hash(%x, %x): %x\n", hash, siblingHash, computeHash(append(hash, siblingHash...)))
-			hash = computeHash(append(hash, siblingHash...))
+			s[j] = r[j]
 		}
 	}
-
-	var combined []byte
-	for _, peakHash := range proof.PeakHashes {
-		if bytes.Equal(peakHash, proof.LeafHash) {
-			combined = append(combined, hash...)
-		} else {
-			combined = append(combined, peakHash...)
-		}
-	}
-	fmt.Printf("Compute finalHash(%x): %x\n", combined, computeHash(combined))
-	finalHash := computeHash(combined)
-	return bytes.Equal(finalHash, proof.RootHash)
-}
-
-// isPowerOfTwo checks if a number is a power of two
-func isPowerOfTwo(x int) bool {
-	return (x & (x - 1)) == 0
+	return s
 }
