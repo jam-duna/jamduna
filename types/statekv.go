@@ -7,6 +7,10 @@ import (
 	"bytes"
 )
 
+type StateKeyValueList struct {
+	Items []StateKeyValue
+}
+
 type StateKeyValue struct {
 	Key   [31]byte `json:"key"`
 	Len   uint8    `json:"len"`
@@ -14,30 +18,30 @@ type StateKeyValue struct {
 }
 
 // ToBytes serializes the JAMSNPStateKeyValue struct into a byte array
-func (kv *StateKeyValue) ToBytes() ([]byte, error) {
+func (kvs *StateKeyValueList) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
+	for _, kv := range kvs.Items {
+		// Serialize Key (31 bytes)
+		if _, err := buf.Write(kv.Key[:]); err != nil {
+			return nil, err
+		}
 
-	// Serialize Key (31 bytes)
-	if _, err := buf.Write(kv.Key[:]); err != nil {
-		return nil, err
+		// Serialize Len (1 byte, uint8)
+		if err := buf.WriteByte(kv.Len); err != nil {
+			return nil, err
+		}
+
+		// Serialize Value length (4 bytes for uint32 length)
+		valueLength := uint32(len(kv.Value))
+		if err := binary.Write(buf, binary.BigEndian, valueLength); err != nil {
+			return nil, err
+		}
+
+		// Serialize Value (dynamically sized based on length)
+		if _, err := buf.Write(kv.Value); err != nil {
+			return nil, err
+		}
 	}
-
-	// Serialize Len (1 byte, uint8)
-	if err := buf.WriteByte(kv.Len); err != nil {
-		return nil, err
-	}
-
-	// Serialize Value length (4 bytes for uint32 length)
-	valueLength := uint32(len(kv.Value))
-	if err := binary.Write(buf, binary.BigEndian, valueLength); err != nil {
-		return nil, err
-	}
-
-	// Serialize Value (dynamically sized based on length)
-	if _, err := buf.Write(kv.Value); err != nil {
-		return nil, err
-	}
-
 	return buf.Bytes(), nil
 }
 

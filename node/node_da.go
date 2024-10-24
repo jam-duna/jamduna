@@ -322,6 +322,18 @@ func generateExportedSegmentsRoot(segments [][]byte) common.Hash {
 	return common.Hash(cdt.Root())
 }
 
+func (n *Node) FetchWorkPackageBundle(erasureRoot common.Hash) (pb *types.WorkPackageBundle, err error) {
+	// now call C138 to get bundle_shard from assurer...
+	// and then do ec rescontruction for b
+	return pb, nil
+}
+
+func (n *Node) FetchImportSegements(erasureRoot common.Hash, segmentIdx uint16) (segments []byte, err error) {
+	// now call C139 to get bundle_shard from assurer...
+	// and then do ec rescontruction for b
+	return segments, nil
+}
+
 // The E(p,x,s,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
 func (n *Node) CompilePackageBundle(p types.WorkPackage) types.WorkPackageBundle {
 	workItems := p.WorkItems

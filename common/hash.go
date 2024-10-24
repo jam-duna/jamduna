@@ -75,7 +75,7 @@ func padToMultipleOfN(input []byte, n int) []byte {
 }
 
 // used for justification.. with $node as salt
-func ComputeLeafHash_WBT(data []byte) Hash {
+func ComputeLeafHash_WBT_Blake2B(data []byte) Hash {
 	h, _ := blake2b.New256(nil)
 	h.Write([]byte("leaf"))
 	h.Write(data)

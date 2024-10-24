@@ -48,9 +48,14 @@ func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
 	return []byte{}, false, nil
 }
 
-func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValue, ok bool, err error) {
+func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	// TODO: Stanley
-	return boundarynodes, keyvalues, false, nil
+	s := n.getPVMStateDB()
+	stateRoot := s.GetStateRoot()
+	trie := s.CopyTrieState(stateRoot)
+	foundKeyVal, boundaryNode, err := trie.GetStateByRange(startKey[:], endKey[:], maximumSize)
+	keyvalues = types.StateKeyValueList{Items: foundKeyVal}
+	return boundaryNode, keyvalues, false, nil
 }
 
 func (n *Node) IsSelfRequesting(peerIdentifier string) bool {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -424,6 +425,74 @@ func (n *Node) String() string {
 
 func (t *MerkleTree) PrintTree(node *Node, level int) {
 	t.printTree(node, level)
+}
+
+// maximum size: The total encoded length of the response
+func (t *MerkleTree) GetStateByRange(starKey []byte, endKey []byte, maxSize uint32) (foundKeyVal []types.StateKeyValue, boundaryNode [][]byte, err error) {
+	foundKeyVal = make([]types.StateKeyValue, 0)
+	currenSize := uint32(0)
+	t.getTreeContent(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode)
+	fmt.Printf("GetStateByRange: starKey=%x, endKey=%x, len(foundKeyVal)=%v, foundKeyVal=%x, actualSize=%v, maxSize=%v\n", starKey, endKey, len(foundKeyVal), foundKeyVal, currenSize, maxSize)
+	return foundKeyVal, boundaryNode, err
+}
+
+func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKey []byte, currenSize *uint32, maxSize uint32, foundkv *[]types.StateKeyValue, boundaryNodes *[][]byte) (ok bool) {
+	if *currenSize >= maxSize {
+		return true
+	}
+	if level == 0 && t.Root != nil {
+		fmt.Printf("Root Hash: %x\n", t.Root.Hash)
+	}
+	if node == nil {
+		fmt.Printf("%snode empty\n", strings.Repeat("  ", level))
+		return
+	}
+	nodeType := "Branch"
+	if node.Left == nil && node.Right == nil {
+		nodeType = "Leaf"
+	}
+	//fmt.Printf("%s[%s Node] Key: %x, Hash: %x\n", strings.Repeat("  ", level), nodeType, node.Key, node.Hash)
+	*boundaryNodes = append(*boundaryNodes, node.Hash)
+
+	value, _ := t.Get(node.Key)
+	if value != nil {
+		//fmt.Printf("%s  [Leaf Node] Value: %x\n", strings.Repeat("  ", level), value)
+		paddedStart := make([]byte, len(node.Key))
+		paddedEnd := make([]byte, len(node.Key))
+
+		// Copy the original key into the new slice
+		copy(paddedStart, node.Key)
+		copy(paddedEnd, node.Key)
+
+		if (common.CompareKeys(paddedStart, node.Key) >= 0 && common.CompareKeys(paddedEnd, node.Key) >= 0) && (nodeType == "Leaf") {
+			// check if the key is within range..
+			// key is expected to 31 bytes
+
+			var k_31 [31]byte
+			copy(k_31[:], node.Key[1:])
+			if len(k_31) != 31 {
+				panic(fmt.Sprintf("Key is not 31 bytes: %x", node.Key))
+			}
+			stateKeyValue := types.StateKeyValue{
+				Key:   k_31,
+				Len:   uint8(len(value)),
+				Value: value,
+			}
+			addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)
+			fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
+
+			*foundkv = append(*foundkv, stateKeyValue)
+			*currenSize += uint32(addSize)
+		}
+		fmt.Printf("currenSize, maxSize: %v, %v\n", *currenSize, maxSize)
+	}
+	if node.Left != nil || node.Right != nil {
+		//fmt.Printf("%s  Left:\n", strings.Repeat("  ", level))
+		t.getTreeContent(node.Left, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
+		//fmt.Printf("%s  Right:\n", strings.Repeat("  ", level))
+		t.getTreeContent(node.Right, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
+	}
+	return true
 }
 
 func (t *MerkleTree) printTree(node *Node, level int) {

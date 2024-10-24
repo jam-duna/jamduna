@@ -115,3 +115,9 @@ const (
 const (
 	MaxEpochsToKeepSelfTickets = 5
 )
+
+// Hash Type
+const (
+	Keccak  string = "keccak"
+	Blake2b string = "blake2b"
+)

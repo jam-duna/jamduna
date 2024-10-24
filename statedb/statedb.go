@@ -585,6 +585,32 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		}
 	}
 
+/*
+	// use C1
+	startKey := common.Hex2Bytes("0x0100000000000000000000000000000000000000000000000000000000000000")
+
+	// use C14
+	endKey := common.Hex2Bytes("0x0d00000000000000000000000000000000000000000000000000000000000000")
+
+	// maxSize
+	maxSize := uint32(10000)
+	foundKeyVal, boundaryNode, err := t.GetStateByRange(startKey, endKey, maxSize)
+	if err != nil {
+		fmt.Printf("Error getting state by range: %v\n", err)
+	}
+
+
+	fmt.Printf("foundKeyVal: ")
+	for i, kv := range foundKeyVal {
+		fmt.Printf("[%d] %x\n", i, kv)
+	}
+	fmt.Printf("\n")
+	fmt.Printf("boundaryNode: ")
+	for i, nodeHash := range boundaryNode {
+		fmt.Printf("[%d] %x\n", i, nodeHash)
+	}
+	fmt.Printf("\n")
+*/
 	return updated_root
 }
 

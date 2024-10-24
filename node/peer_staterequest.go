@@ -6,6 +6,7 @@ import (
 
 	"bytes"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -104,7 +105,8 @@ func (req *JAMSNPStateRequest) FromBytes(data []byte) error {
 }
 
 type JAMSNPStateResponse struct {
-	KeyValues []types.StateKeyValue `json:"boundary"`
+	Boundary  [][]byte              `json:"boundary"`
+	KeyValues []types.StateKeyValue `json:"keyValues"`
 }
 
 func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (err error) {

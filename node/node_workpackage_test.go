@@ -2,11 +2,12 @@ package node
 
 import (
 	"fmt"
+	"os"
+	"testing"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
-	"os"
-	"testing"
 )
 
 // computeFib calculates Fib[n] and Fib[n-1]
@@ -151,11 +152,10 @@ func TestAvailabilityReconstruction(t *testing.T) {
 
 		for shardIdx := uint16(0); shardIdx < numNodes; shardIdx++ {
 			erasureRoot := recoveredMeta.ErasureRoot
-			erasureRoot, shardIndex, bundleShard, segmentShards, justification, ok, err := senderNode.GetFullShard_Guarantor(erasureRoot, shardIdx)
+			erasureRoot, shardIndex, _, _, _, ok, err := senderNode.GetFullShard_Guarantor(erasureRoot, shardIdx)
 			if !ok || err != nil {
 				t.Fatalf("Failed to prepareFullShards %v_%d for node %d: %v\n", erasureRoot, shardIndex, shardIdx, err)
 			}
-			nodes[shardIdx].StoreFullShard_Assurer(erasureRoot, shardIdx, bundleShard, segmentShards, justification)
 		}
 
 		//originalAS = availabilitySpecifier
@@ -172,7 +172,7 @@ func TestAvailabilityReconstruction(t *testing.T) {
 			//skip verification for now ...
 			continue
 			/*
-				workPackageReconstruction, bClubHash, err := n.FetchWorkPackage(originalAS.ErasureRoot, int(originalAS.BundleLength))
+				workPackageReconstruction, bClubHash, err := n.FetchWorkPackageBundle(originalAS.ErasureRoot)
 				if err != nil {
 					t.Errorf("[N%v] WP Reconstruction failure err:%v\n", n.coreIndex, err)
 				}

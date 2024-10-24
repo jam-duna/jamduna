@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // WBTNode represents a node in the WBT
@@ -19,18 +20,19 @@ type WBTNode struct {
 
 // WellBalancedTree represents the WBT structure
 type WellBalancedTree struct {
-	root   *WBTNode
-	leaves []*WBTNode
+	root     *WBTNode
+	leaves   []*WBTNode
+	hashType string
 }
 
 // buildWellBalancedTree constructs a well-balanced binary tree from the given leaves
 func (wbt *WellBalancedTree) buildWellBalancedTree() {
 	if len(wbt.leaves) == 0 {
 		// If no leaves, return hash of 0
-		wbt.root = &WBTNode{Hash: computeHash([]byte{0})}
+		wbt.root = &WBTNode{Hash: computeHash([]byte{0}, wbt.hashType)}
 		return
 	}
-	wbt.root = buildTreeRecursive(wbt.leaves)
+	wbt.root = buildTreeRecursive(wbt.leaves, wbt.hashType)
 }
 
 func (tree *WellBalancedTree) Root() []byte {
@@ -42,17 +44,17 @@ func (tree *WellBalancedTree) RootHash() common.Hash {
 }
 
 // buildTreeRecursive recursively constructs the tree and returns the root node
-func buildTreeRecursive(nodes []*WBTNode) *WBTNode {
+func buildTreeRecursive(nodes []*WBTNode, hashType string) *WBTNode {
 	if len(nodes) == 1 {
 		return nodes[0]
 	}
 
 	mid := int(math.Round(float64(len(nodes)) / 2))
-	left := buildTreeRecursive(nodes[:mid])
-	right := buildTreeRecursive(nodes[mid:])
+	left := buildTreeRecursive(nodes[:mid], hashType)
+	right := buildTreeRecursive(nodes[mid:], hashType)
 
 	combinedValue := append(left.Hash, right.Hash...)
-	hash := computeNode(combinedValue)
+	hash := computeNode(combinedValue, hashType)
 
 	return &WBTNode{
 		Hash:  hash,
@@ -62,15 +64,19 @@ func buildTreeRecursive(nodes []*WBTNode) *WBTNode {
 }
 
 // NewWellBalancedTree creates a new well-balanced tree with the given values
-func NewWellBalancedTree(values [][]byte) *WellBalancedTree {
+func NewWellBalancedTree(values [][]byte, hashTypes ...string) *WellBalancedTree {
 	leaves := make([]*WBTNode, len(values))
+	hashType := types.Blake2b
+	if len(hashTypes) > 0 && hashTypes[0] == types.Keccak {
+		hashType = types.Keccak
+	}
 	for i, value := range values {
 		leaves[i] = &WBTNode{
-			Hash:  computeLeaf(value),
+			Hash:  computeLeaf(value, hashType),
 			Value: value,
 		}
 	}
-	wbt := &WellBalancedTree{leaves: leaves}
+	wbt := &WellBalancedTree{leaves: leaves, hashType: hashType}
 	wbt.buildWellBalancedTree()
 	return wbt
 }
@@ -120,7 +126,7 @@ func (tree *WellBalancedTree) trace(index int) (int, common.Hash, []common.Hash,
 
 	tracePath := make([]common.Hash, 0)
 	currentNode := tree.leaves[index]
-	leafHash := common.Hash(computeLeaf(currentNode.Value))
+	leafHash := common.Hash(computeLeaf(currentNode.Value, tree.hashType))
 	for currentNode != tree.root {
 		parent := findWBTParent(tree.root, currentNode) // Find parent node
 		sibling := findWBTSibling(parent, currentNode)  // Find sibling node
@@ -135,7 +141,11 @@ func (tree *WellBalancedTree) trace(index int) (int, common.Hash, []common.Hash,
 	return treeLen, leafHash, tracePath, true, nil
 }
 
-func VerifyWBT(treeLen int, index int, erasureRoot common.Hash, leafHash common.Hash, tracePath []common.Hash) (common.Hash, bool, error) {
+func VerifyWBT(treeLen int, index int, erasureRoot common.Hash, leafHash common.Hash, tracePath []common.Hash, hashTypes ...string) (common.Hash, bool, error) {
+	hashType := types.Blake2b
+	if len(hashTypes) != 0 && hashTypes[0] == types.Keccak {
+		hashType = types.Keccak
+	}
 	if index < 0 || index >= treeLen {
 		return common.Hash{}, false, errors.New("index out of range")
 	}
@@ -152,9 +162,9 @@ func VerifyWBT(treeLen int, index int, erasureRoot common.Hash, leafHash common.
 		siblingHash := tracePath[i]
 
 		if dir == 0 {
-			currentHash = common.BytesToHash(computeNode(append(currentHash[:], siblingHash[:]...)))
+			currentHash = common.BytesToHash(computeNode(append(currentHash[:], siblingHash[:]...), hashType))
 		} else {
-			currentHash = common.BytesToHash(computeNode(append(siblingHash[:], currentHash[:]...)))
+			currentHash = common.BytesToHash(computeNode(append(siblingHash[:], currentHash[:]...), hashType))
 		}
 	}
 	isValid := erasureRoot.String() == currentHash.String()

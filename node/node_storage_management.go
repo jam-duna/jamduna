@@ -106,7 +106,7 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	bClub := common.Blake2Hash(bundleShard)
 	sClub := trie.NewWellBalancedTree(segmentShards).RootHash()
 	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
-	leafHash := common.ComputeLeafHash_WBT(bundle_segment_pair)
+	leafHash := common.ComputeLeafHash_WBT_Blake2B(bundle_segment_pair)
 	path, err := common.ExpandPath(justification)
 	if err != nil {
 		return false, err
@@ -341,7 +341,7 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 	sClub := sclub_path[0]
 	path := sclub_path[1:]
 	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
-	leafHash := common.ComputeLeafHash_WBT(bundle_segment_pair)
+	leafHash := common.ComputeLeafHash_WBT_Blake2B(bundle_segment_pair)
 	verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
 	if !verified {
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
@@ -407,7 +407,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 		fmt.Printf("bClub %v\n", bClub)
 		fmt.Printf("bPath %v\n", bPath)
 	}
-	segmentLeafHash := common.ComputeLeafHash_WBT(segmentShard)
+	segmentLeafHash := common.ComputeLeafHash_WBT_Blake2B(segmentShard)
 
 	_, recovered_sClub := VerifyJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentLeafHash, bPath)
 
@@ -415,7 +415,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	if debugDA {
 		fmt.Printf("VerifySegmentShard Step 2: shardIndex=%x bundle_segment_pair %x\n", shardIndex, bundle_segment_pair)
 	}
-	erasureLeafHash := common.ComputeLeafHash_WBT(bundle_segment_pair)
+	erasureLeafHash := common.ComputeLeafHash_WBT_Blake2B(bundle_segment_pair)
 
 	verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), erasureLeafHash, fPath)
 	if debugDA {

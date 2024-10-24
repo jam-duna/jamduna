@@ -3,10 +3,14 @@ package trie
 import (
 	//"errors"
 	//"math"
+
+	"fmt"
 	"hash"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/crypto/blake2b"
+	"golang.org/x/crypto/sha3"
 )
 
 func BytesToHash(data []byte) common.Hash {
@@ -34,39 +38,53 @@ func compareBytes(a, b []byte) bool {
 }
 
 // computeHash hashes the data using Blake2b-256
-func computeHash(data []byte) []byte {
-	// h, _ := blake2b.New256(nil)
-	// h.Write(data)
-	// return h.Sum(nil)
-	return common.ComputeHash(data)
+func computeHash(data []byte, hashType ...string) []byte {
+	var h hash.Hash
+	var selectedHash = types.Blake2b
+	//fmt.Printf("hashType %v\n", hashType)
+	//fmt.Printf("data %x\n", data)
+	// Check if "keccak" is passed in hashType, else use default Blake2b-256.
+	if len(hashType) > 0 && hashType[0] == types.Keccak {
+		fmt.Printf("using %v\n", selectedHash)
+		selectedHash = types.Keccak
+		h = sha3.NewLegacyKeccak256()
+	} else {
+		h, _ = blake2b.New256(nil)
+	}
+	h.Write(data)
+	return h.Sum(nil)
 }
 
 // computeNode hashes the data with $node on WBT, CDT using Blake2b-256
-func computeNode(data []byte) []byte {
-	h, _ := blake2b.New256(nil)
+func computeNode(data []byte, hashType ...string) []byte {
+	var h hash.Hash
+	// Check if "keccak" is passed in hashType, else use default Blake2b-256.
+	if len(hashType) > 0 && hashType[0] == types.Keccak {
+		h = sha3.NewLegacyKeccak256()
+	} else {
+		h, _ = blake2b.New256(nil)
+	}
 	h.Write([]byte("node"))
 	h.Write(data)
 	return h.Sum(nil)
 }
 
 // computeLeaf hashes the data with $leaf on CDT using Blake2b-256
-func computeLeaf(data []byte) []byte {
-	h, _ := blake2b.New256(nil)
+func computeLeaf(data []byte, hashType ...string) []byte {
+	var h hash.Hash
+	// Check if "keccak" is passed in hashType, else use default Blake2b-256.
+	if len(hashType) > 0 && hashType[0] == types.Keccak {
+		h = sha3.NewLegacyKeccak256()
+	} else {
+		h, _ = blake2b.New256(nil)
+	}
 	h.Write([]byte("leaf"))
 	h.Write(data)
 	return h.Sum(nil)
 }
 
-func ComputeLeaf(data []byte) []byte {
-	return computeLeaf(data)
-}
-
-func hashNodes(left, right *Node) []byte {
-	h, _ := blake2b.New256(nil)
-	h.Write([]byte("node"))
-	h.Write(left.Hash)
-	h.Write(right.Hash)
-	return h.Sum(nil)
+func ComputeLeaf(data []byte, hashType ...string) []byte {
+	return computeLeaf(data, hashType...)
 }
 
 // eq 187

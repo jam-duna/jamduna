@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // TestWellBalancedTree tests the MerkleB method of the WellBalancedTree
@@ -18,7 +19,7 @@ func TestWBMerkleTree(t *testing.T) {
 		[]byte("e"),
 		[]byte("f"),
 	}
-	tree := NewWellBalancedTree(values)
+	tree := NewWellBalancedTree(values, types.Blake2b)
 	// Print the tree structure
 	tree.PrintTree()
 	if tree.Root() == nil {
@@ -34,7 +35,7 @@ func TestWBTTrace(t *testing.T) {
 		values = append(values, []byte(fmt.Sprintf("value%d", i)))
 	}
 
-	wbt := NewWellBalancedTree(values)
+	wbt := NewWellBalancedTree(values, types.Blake2b)
 
 	// Test the Trace method to get the proof path for a given index
 	for shardIndex := 0; shardIndex < numShards; shardIndex++ {
@@ -49,7 +50,7 @@ func TestWBTTrace(t *testing.T) {
 		// 	fmt.Printf("Step %d: %x\n", i, hash.Bytes())
 		// }
 
-		derivedRoot, verified, err := VerifyWBT(treeLen, shardIndex, wbt.RootHash(), leafHash, path)
+		derivedRoot, verified, err := VerifyWBT(treeLen, shardIndex, wbt.RootHash(), leafHash, path, wbt.hashType)
 
 		if err != nil || verified == false {
 			t.Errorf("VerifyWBT error: %v", err)
@@ -75,7 +76,7 @@ func TestWBTGet(t *testing.T) {
 		[]byte("j"),
 		[]byte("k"),
 	}
-	tree := NewWellBalancedTree(values)
+	tree := NewWellBalancedTree(values, types.Keccak)
 
 	fmt.Printf("Root: %s\n", common.Bytes2Hex(tree.Root()))
 	fmt.Printf("Total leaves: %d\n", len(tree.leaves))

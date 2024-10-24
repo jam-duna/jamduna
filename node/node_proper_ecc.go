@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"reflect"
 
 	//	"encoding/json"
 	//	"encoding/binary"
@@ -41,29 +40,6 @@ func (n *Node) processNPECChunk(chunk types.DistributeECChunk) error {
 
 	fmt.Printf(" -- [N%d] saved DistributeECChunk common.Hash(chunk.RootHash)=%s\nchunk.BlobMeta=%x\nchunk.SegmentRoot=%s\nchunk.Data=%x\n", n.id, common.Hash(chunk.RootHash), chunk.BlobMeta, common.Hash(chunk.SegmentRoot), chunk.Data)
 	return nil
-}
-
-func (n *Node) processECChunkQuery2(ecChunkQuery types.ECChunkQuery) (types.ECChunkResponse, error) {
-	key := fmt.Sprintf("DA-%v", ecChunkQuery.SegmentRoot)
-	// fmt.Printf("[N%v] processECChunkQuery key=%s\n", n.id, key)
-	data, err := n.ReadRawKV([]byte(key))
-	fmt.Printf("ECChunkQuery Fetch key %s | val %x\n", key, data)
-	if err != nil {
-		return types.ECChunkResponse{}, err
-	}
-	// Deserialize the chunk
-	var chunk types.ECChunkResponse
-	// err = json.Unmarshal(data, &chunk)
-	decodedData, _, err := types.Decode(data, reflect.TypeOf(types.ECChunkResponse{}))
-	if err != nil {
-		return types.ECChunkResponse{}, err
-	}
-	chunk = decodedData.(types.ECChunkResponse)
-
-	if err != nil {
-		return types.ECChunkResponse{}, err
-	}
-	return chunk, nil
 }
 
 func ComputeOrderedExportedNPChunks(ecChunksArr [][]types.DistributeECChunk) (segmentsShardsAll [][]types.ConformantECChunk) {
