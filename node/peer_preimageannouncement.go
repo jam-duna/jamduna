@@ -1,6 +1,8 @@
 package node
 
 import (
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -17,31 +19,42 @@ provided the preimage has been requested on chain and the recipient is not alrea
 Preimage announcements should not be forwarded to other validators; validators should propagate preimages
 only be including them in blocks they author.
 
-Hash = [u8; 32]
+Service ID = u32
+Preimage Length = u32
 
 Node -> Validator
 
---> Hash
+--> Service ID ++ Hash ++ Preimage Length
 --> FIN
 <-- FIN
 */
-func (p *Peer) SendPreimageAnnouncement(preimageHash common.Hash) (err error) {
+
+func (p *Peer) SendPreimageAnnouncement(serviceID uint32, preimageHash common.Hash, preimageLen uint32) (err error) {
 	stream, err := p.openStream(CE142_PreimageAnnouncement)
-	// --> Hash
-	err = sendQuicBytes(stream, preimageHash.Bytes())
+	// --> Service ID ++ Hash ++ Preimage Length
+	pa := types.PreimageAnnouncement{
+		ServiceIndex: serviceID,
+		PreimageHash: preimageHash,
+		PreimageLen:  preimageLen,
+	}
+	// TODO: encode it
+	paBytes, _ := pa.ToBytes()
+	err = sendQuicBytes(stream, paBytes)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// TODO: William to review
 func (n *Node) onPreimageAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
-	preimageHash := common.BytesToHash(msg)
-	preimageAnnouncement := types.PreimageAnnouncement{
-		ValidatorIndex: peerID,
-		PreimageHash:   preimageHash,
+	defer stream.Close()
+	var preimageAnnouncement types.PreimageAnnouncement
+	err = preimageAnnouncement.FromBytes(msg)
+	if err != nil {
+		fmt.Println("Error deserializing:", err)
+		return
 	}
+	preimageAnnouncement.ValidatorIndex = peerID
 	n.preimageAnnouncementsCh <- preimageAnnouncement
 	return nil
 }

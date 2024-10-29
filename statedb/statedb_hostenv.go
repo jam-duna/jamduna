@@ -113,7 +113,7 @@ func (s *StateDB) ReadServiceBytes(service uint32) []byte {
 func (s *StateDB) GetService(service uint32) (*types.ServiceAccount, error) {
 	serviceBytes := s.ReadServiceBytes(service)
 	if serviceBytes == nil {
-		return nil, nil
+		return nil, fmt.Errorf("Service not found")
 	}
 	return types.ServiceAccountFromBytes(service, serviceBytes)
 }
@@ -228,7 +228,7 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 }
 
 func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
-	fmt.Printf("WriteServicePreimageLookup Called! service=%v, (h,l)=(%v,%v). anchors:%v\n", service, blob_hash, blob_length, time_slots)
+	//fmt.Printf("WriteServicePreimageLookup Called! service=%v, (h,l)=(%v,%v). anchors:%v\n", service, blob_hash, blob_length, time_slots)
 	tree := s.GetTrie()
 	tree.SetPreImageLookup(service, blob_hash, blob_length, time_slots)
 	//fmt.Printf("Latest root=%v\n", s.GetTentativeStateRoot())

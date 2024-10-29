@@ -92,7 +92,8 @@ type Node struct {
 	headers      map[common.Hash]*types.Block
 	headersMutex sync.Mutex
 
-	preimages      map[common.Hash][]byte
+	services       map[uint32]common.Hash // service_idx -> preimageLookup
+	preimages      map[common.Hash][]byte // preimageLookup -> preimageBlob
 	preimagesMutex sync.Mutex
 
 	workReports      map[common.Hash]types.WorkReport
@@ -232,6 +233,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		blocks:     make(map[common.Hash]*types.Block),
 		headers:    make(map[common.Hash]*types.Block),
 		preimages:  make(map[common.Hash][]byte),
+		services:   make(map[uint32]common.Hash),
 
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
@@ -570,8 +572,8 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 }
 
 func (n *Node) processPreimages(preimageLookup types.Preimages) error {
-	// TODO: Store the lookup in a E_P aggregator
 	s := n.getState()
+	//fmt.Printf("%s [node:processPreimages] %v\n", n.String(), preimageLookup.String())
 	s.ProcessIncomingLookup(preimageLookup)
 	return nil // Success
 }
@@ -639,7 +641,7 @@ func (n *Node) extendChain() error {
 
 				// Apply the block to the tip
 				newStateDB, err := statedb.ApplyStateTransitionFromBlock(n.statedb, context.Background(), nextBlock)
-
+				//new_xi := newStateDB.GetXContext().GetX_i()
 				if err != nil {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err

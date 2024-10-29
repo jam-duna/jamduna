@@ -87,32 +87,31 @@ func CompareBytes(b1 []byte, b2 []byte) bool {
 }
 
 func CompareKeys(b1, b2 []byte) int {
-    // Find the minimum length of the two slices
-    minLen := len(b1)
-    if len(b2) < minLen {
-        minLen = len(b2)
-    }
+	// Find the minimum length of the two slices
+	minLen := len(b1)
+	if len(b2) < minLen {
+		minLen = len(b2)
+	}
 
-    // Compare byte by byte
-    for i := 0; i < minLen; i++ {
-        if b1[i] < b2[i] {
-            return -1 // b1 is smaller than b2
-        } else if b1[i] > b2[i] {
-            return 1 // b1 is greater than b2
-        }
-    }
+	// Compare byte by byte
+	for i := 0; i < minLen; i++ {
+		if b1[i] < b2[i] {
+			return -1 // b1 is smaller than b2
+		} else if b1[i] > b2[i] {
+			return 1 // b1 is greater than b2
+		}
+	}
 
-    // If all compared bytes are equal, compare lengths
-    if len(b1) < len(b2) {
-        return -1 // b1 is smaller than b2
-    } else if len(b1) > len(b2) {
-        return 1 // b1 is greater than b2
-    }
+	// If all compared bytes are equal, compare lengths
+	if len(b1) < len(b2) {
+		return -1 // b1 is smaller than b2
+	} else if len(b1) > len(b2) {
+		return 1 // b1 is greater than b2
+	}
 
-    // If lengths are also equal, the slices are identical
-    return 0
+	// If lengths are also equal, the slices are identical
+	return 0
 }
-
 
 func FalseBytes(data []byte) []byte {
 	result := make([]byte, len(data))

@@ -39,7 +39,25 @@ func (s *StateDB) Accumulate() (serviceAccumulations []types.ServiceAccumulation
 			X.S = Xs
 			s.UpdateXContext(X)
 			wrangledWorkResultsBytes := s.getWrangledWorkResultsBytes(wrangledWorkResults)
+
 			vm := pvm.NewVMFromCode(serviceIndex, code, 0, s)
+
+			// Calculate i for X_i eq(277)
+			entropy := s.JamState.SafroleState.Entropy[0].Bytes()
+			timeslot := s.JamState.SafroleState.Timeslot
+			encoded_service, _ := types.Encode(serviceIndex)
+			encoded_entropy, _ := types.Encode(entropy)
+			encoded_timeslot, _ := types.Encode(timeslot)
+			encoded := append(encoded_service, append(encoded_entropy, encoded_timeslot...)...)
+			hash := common.Blake2Hash(encoded).Bytes()
+			hash = hash[:4]
+			decoded := uint32(types.DecodeE_l(hash))
+			i := decoded%((1<<32)-(1<<9)) + (1 << 8)
+			i = vm.Check(i)
+
+			X.SetX_i(i)
+			s.UpdateXContext(X)
+
 			r, _ := vm.ExecuteAccumulate(wrangledWorkResultsBytes)
 			if r.Err == types.RESULT_OK {
 				accumulationResult := common.Blake2Hash(r.Ok) // checks

@@ -499,11 +499,14 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 
 		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
 		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, workItem.ExtrinsicsBlobs)
-		for _, e := range vm.Exports {
-			segments = append(segments, e) // this is used in NewAvailabilitySpecifier
+
+		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
+		for i := 0; i < len(exports); i += types.W_E * types.W_S {
+			segments = append(segments, exports[i:i+types.W_E*types.W_S])
 		}
+
 		// Decode the Exports Segments to FIB format
-		if len(segments) > 0 {
+		if len(segments) > 0 && service_index != 0 {
 			fib_exported_result := segments[0][:12]
 			num := binary.LittleEndian.Uint32(fib_exported_result[0:4])
 			Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])

@@ -151,12 +151,16 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
 	//TODO: check existence of lookup and stick into map
 	//cj := s.GetPvmState()
-	fmt.Printf("[N%v] ProcessIncomingLookup -- Adding lookup: %v\n", s.Id, l.String())
-	account_preimage_hash, err := s.ValidateLookup(&l)
-	if err != nil {
-		fmt.Printf("Invalid lookup. Err=%v\n", err)
-		return
-	}
+	//fmt.Printf("[N%v] ProcessIncomingLookup -- Adding lookup: %v\n", s.Id, l.String())
+	account_preimage_hash := l.AccountPreimageHash()
+	// Willaim: dont do validation here. Instead, do have a procedure to remove stale EP
+	/*
+		account_preimage_hash, err := s.ValidateLookup(&l)
+		if err != nil {
+			fmt.Printf("Invalid lookup. Err=%v\n", err)
+			return
+		}
+	*/
 	if s.CheckLookupExists(account_preimage_hash) {
 		return
 	}
@@ -585,32 +589,32 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		}
 	}
 
-/*
-	// use C1
-	startKey := common.Hex2Bytes("0x0100000000000000000000000000000000000000000000000000000000000000")
+	/*
+		// use C1
+		startKey := common.Hex2Bytes("0x0100000000000000000000000000000000000000000000000000000000000000")
 
-	// use C14
-	endKey := common.Hex2Bytes("0x0d00000000000000000000000000000000000000000000000000000000000000")
+		// use C14
+		endKey := common.Hex2Bytes("0x0d00000000000000000000000000000000000000000000000000000000000000")
 
-	// maxSize
-	maxSize := uint32(10000)
-	foundKeyVal, boundaryNode, err := t.GetStateByRange(startKey, endKey, maxSize)
-	if err != nil {
-		fmt.Printf("Error getting state by range: %v\n", err)
-	}
+		// maxSize
+		maxSize := uint32(10000)
+		foundKeyVal, boundaryNode, err := t.GetStateByRange(startKey, endKey, maxSize)
+		if err != nil {
+			fmt.Printf("Error getting state by range: %v\n", err)
+		}
 
 
-	fmt.Printf("foundKeyVal: ")
-	for i, kv := range foundKeyVal {
-		fmt.Printf("[%d] %x\n", i, kv)
-	}
-	fmt.Printf("\n")
-	fmt.Printf("boundaryNode: ")
-	for i, nodeHash := range boundaryNode {
-		fmt.Printf("[%d] %x\n", i, nodeHash)
-	}
-	fmt.Printf("\n")
-*/
+		fmt.Printf("foundKeyVal: ")
+		for i, kv := range foundKeyVal {
+			fmt.Printf("[%d] %x\n", i, kv)
+		}
+		fmt.Printf("\n")
+		fmt.Printf("boundaryNode: ")
+		for i, nodeHash := range boundaryNode {
+			fmt.Printf("[%d] %x\n", i, nodeHash)
+		}
+		fmt.Printf("\n")
+	*/
 	return updated_root
 }
 
@@ -922,7 +926,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	num_octets := uint32(0)
 
 	//TODO: (eq 156) need to make sure E_P is sorted. by what??
-	// validate (eq 156)
+	//validate (eq 156)
 	for i := 1; i < len(preimages); i++ {
 		if preimages[i].Requester <= preimages[i-1].Requester {
 			return 0, 0, fmt.Errorf(errServiceIndices)
@@ -938,13 +942,15 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	}
 
 	// ready for state transisiton
-	t := s.GetTrie()
+	// t := s.GetTrie()
 	for _, l := range preimages {
 		// (eq 158)
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
-		t.SetPreImageBlob(l.Service_Index(), l.Blob)
-		t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
+		// t.SetPreImageBlob(l.Service_Index(), l.Blob)
+		// t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
+		s.WriteServicePreimageBlob(l.Service_Index(), l.Blob)
+		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
 		num_octets += l.BlobLength()
 	}
@@ -983,8 +989,9 @@ func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, erro
 	if err != nil {
 		return &types.ServiceAccount{}, false, nil
 	}
-	fmt.Printf("getServiceAccount s=%v, v=%v\n", c, a.String())
-	return &types.ServiceAccount{}, false, nil
+	//William check here!
+	//fmt.Printf("getServiceAccount s=%v, v=%v\n", c, a.String())
+	return a, false, nil
 }
 
 func (s *StateDB) getPreimageBlob(c uint32, codeHash common.Hash) ([]byte, error) {
@@ -1270,12 +1277,19 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 
 	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
 	extrinsicData.Preimages = make([]types.Preimages, 0)
+
+	// Make sure this Preimages is ready to be included..
+
 	for _, preimageLookup := range s.queuedPreimageLookups {
-		pl, err := preimageLookup.DeepCopy()
-		if err != nil {
-			continue
+		_, err := s.ValidateLookup(&preimageLookup)
+		if err == nil {
+			//fmt.Printf("Preimage ready: %v\n", preimageLookup.String())
+			pl, err := preimageLookup.DeepCopy()
+			if err != nil {
+				continue
+			}
+			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 		}
-		extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 	}
 
 	// 156: These pairs must be ordered and without duplicates

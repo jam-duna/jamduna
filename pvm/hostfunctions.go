@@ -39,6 +39,7 @@ const (
 	EXTRINSIC         = 23
 	PAYLOAD           = 24
 	ECRECOVER         = 25
+	FOR_TEST          = 105
 )
 
 // false byte
@@ -54,7 +55,7 @@ func falseBytes(data []byte) []byte {
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
-	if debug {
+	if debug_pvm {
 		fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
 	}
 	switch host_fn {
@@ -155,6 +156,9 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	case ECRECOVER:
 		vm.hostECRecover()
 		return true, nil
+	// this will be remove once we fix the jame service tool
+	case FOR_TEST:
+		return true, nil
 
 	default:
 		return false, fmt.Errorf("unknown host call: %d\n", host_fn)
@@ -244,11 +248,13 @@ func bump(i uint32) uint32 {
 	// This is done by: ((adjusted % upperLimit) + upperLimit) % upperLimit.
 	// This expression guarantees that if `adjusted` is negative, adding `upperLimit` first makes it positive.
 	// Then, applying `% upperLimit` again ensures the result is within the range [0, upperLimit).
-	modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
+	// modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
+	modResult := lowerLimit + uint32(adjusted)%upperLimit
 
 	// Step 3: Return the result by adding `lowerLimit` back.
 	// This aligns the final result with the desired range: [2^8, 2^32 - 2^9].
-	return lowerLimit + uint32(modResult)
+	// return lowerLimit + uint32(modResult)
+	return uint32(modResult)
 }
 
 func (vm *VM) k_exist(i uint32) bool {
@@ -261,24 +267,33 @@ func (vm *VM) k_exist(i uint32) bool {
 	return false
 }
 
-func (vm *VM) check(i uint32) uint32 {
+func (vm *VM) Check(i uint32) uint32 {
 	const lowerLimit uint32 = 1 << 8               // 2^8 = 256
 	const upperLimit uint32 = (1 << 32) - (1 << 9) // 2^32 - 2^9 = 4294966784
 
 	// Base case: return i if it is not in the set K(delta)
-	if !vm.k_exist(i) {
-		return i
+	// if !vm.k_exist(i) {
+	// 	return i
+	// }
+	// // Correct handling of the adjustment to prevent negative values:
+	// // Convert the expression to int64 to handle potential negatives safely.
+	// adjusted := int64(i) - int64(lowerLimit) + 1
+
+	// // Ensure the adjusted value is non-negative and within the valid range:
+	// // modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
+	// modResult := (adjusted % int64(upperLimit)) + int64(lowerLimit)
+
+	// // Return check with the adjusted result, adding lowerLimit back to align the range
+	// // (i−2^8 +1)mod(2^32 −2^9)+2^8
+	// // return vm.check(lowerLimit + uint32(modResult))
+	// return vm.check(uint32(modResult))
+	for vm.k_exist(i) {
+		adjusted := int64(i) - int64(lowerLimit) + 1
+		modResult := (adjusted % int64(upperLimit)) + int64(lowerLimit)
+		i = uint32(modResult)
 	}
-	// Correct handling of the adjustment to prevent negative values:
-	// Convert the expression to int64 to handle potential negatives safely.
-	adjusted := int64(i) - int64(lowerLimit) + 1
 
-	// Ensure the adjusted value is non-negative and within the valid range:
-	modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
-
-	// Return check with the adjusted result, adding lowerLimit back to align the range
-	// (i−2^8 +1)mod(2^32 −2^9)+2^8
-	return vm.check(lowerLimit + uint32(modResult))
+	return i
 }
 
 // New service
@@ -299,15 +314,14 @@ func (vm *VM) hostNew() uint32 {
 
 	xContext := vm.hostenv.GetXContext()
 	xs := xContext.GetX_s()
-
-	// vm also needs xContext_i. DO NOT HARDCODE
 	xi := xContext.GetX_i()
 
 	// simulate a with c, g, m
 	a := types.ServiceAccount{
-		CodeHash:  common.BytesToHash(c),
-		GasLimitG: g,
-		GasLimitM: m,
+		CodeHash:    common.BytesToHash(c),
+		GasLimitG:   g,
+		GasLimitM:   m,
+		StorageSize: uint64(l),
 	}
 	// Compute footprint & threshold: a_l, a_s, a-t
 	a.StorageSize = uint64(81 + l + 0) //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
@@ -325,15 +339,16 @@ func (vm *VM) hostNew() uint32 {
 		// updating (ω0',xi',xn',(x's)b)
 
 		// ω0' <- xi
-		vm.writeRegister(7, xi)
+		// vm.writeRegister(7, xi)
 
 		// xi' <- check(bump(xi))
-		next_xi := vm.check(bump(xi)) // this is the next xi
+		next_xi := vm.Check(bump(xi)) // this is the next xi
+		vm.writeRegister(7, next_xi)
 		xContext.SetX_i(next_xi)
+		// vm.hostenv.WriteServicePreimageLookup(next_xi, common.BytesToHash(c), l, []uint32{vm.GetJCETime()})
 
 		// xi ↦ a
-		a.SetServiceIndex(xi)
-
+		a.SetServiceIndex(next_xi)
 		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
 		// vm.hostenv.WriteServicePreimageLookup(new_service_xi, common.BytesToHash(c), l, []uint32{})
 		a.JournalInsertLookup(common.BytesToHash(c), l, []uint32{})
@@ -348,11 +363,11 @@ func (vm *VM) hostNew() uint32 {
 		xContext.SetX_s(xs)
 		vm.hostenv.SetXContext(xContext)
 
-		solicit := Solicit{
-			BlobHash: common.BytesToHash(c),
-			Length:   l,
-		}
-		vm.Solicits = append(vm.Solicits, solicit)
+		// solicit := Solicit{
+		// 	BlobHash: common.BytesToHash(c),
+		// 	Length:   l,
+		// }
+		// vm.Solicits = append(vm.Solicits, solicit)
 		return OK
 	} else {
 		return CASH //balance insufficient
@@ -527,10 +542,10 @@ func (vm *VM) hostWrite() uint32 {
 	vz, _ := vm.readRegister(10)
 	k, err_k := vm.readRAMBytes(ko, int(kz))
 	if err_k == OOB {
-		fmt.Println("Read RAM Error")
 		vm.writeRegister(7, OOB)
 		return OOB
 	}
+	//k_hash := common.Blake2Hash(append(types.E_l(uint64(s), 4), k...))
 	S_s_k := vm.hostenv.ReadServiceStorage(s, k) // get bold s in GP
 	l := uint32(len(S_s_k))
 	if l == 0 {
@@ -540,29 +555,35 @@ func (vm *VM) hostWrite() uint32 {
 	// check balance a_t <= a_b
 	a_t := uint64(0)
 	a_b := uint64(0)
-	a_i := uint64(0)
-	a_l := uint64(0)
-	service_byte := vm.hostenv.ReadServiceBytes(s)
-	if len(service_byte) > 36 {
-		a_b_byte := service_byte[len(service_byte)-36 : len(service_byte)-24]
-		a_l_byte := service_byte[len(service_byte)-12 : len(service_byte)-4]
-		a_i_byte := service_byte[len(service_byte)-4:]
-		a_b = binary.LittleEndian.Uint64(a_b_byte)
-		a_l = binary.LittleEndian.Uint64(a_l_byte)
-		a_i = binary.LittleEndian.Uint64(a_i_byte)
-		a_t = 10 + 1*a_i + 100*a_l
-	}
+	// a_i := uint64(0)
+	// a_l := uint64(0)
+
+	// should make sure there is service account data on chain, so we can it's info
+	// C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i ) ,
+
+	// service_byte := vm.hostenv.ReadServiceBytes(s)
+	// if len(service_byte) > 36 {
+	// 	a_b_byte := service_byte[len(service_byte)-36 : len(service_byte)-24]
+	// 	a_l_byte := service_byte[len(service_byte)-12 : len(service_byte)-4]
+	// 	a_i_byte := service_byte[len(service_byte)-4:]
+	// 	a_b = binary.LittleEndian.Uint64(a_b_byte)
+	// 	a_l = binary.LittleEndian.Uint64(a_l_byte)
+	// 	a_i = binary.LittleEndian.Uint64(a_i_byte)
+	// 	a_t = 10 + 1*a_i + 100*a_l
+	// }
 
 	if a_t <= a_b {
-		vm.writeRegister(7, uint32(l))
 		// adjust S
 		if vz == 0 {
 			vm.hostenv.DeleteServiceStorageKey(s, k)
+			//vm.hostenv.DeleteServiceStorageKey(s, k_hash.Bytes())
 		} else {
 			v, _ := vm.readRAMBytes(vo, int(vz))
 			vm.hostenv.WriteServiceStorage(s, k, v)
+			//fmt.Printf("!!Write Storage with s=%v, k=%x, v=%x\n", s, k, v)
+			//vm.hostenv.WriteServiceStorage(s, k, v)
+			vm.writeRegister(7, uint32(len(v)))
 		}
-		vm.writeRegister(7, l)
 		return l
 	} else if a_t > a_b {
 		vm.writeRegister(7, FULL)
@@ -583,7 +604,6 @@ func (vm *VM) GetJCETime() uint32 {
 // Solicit preimage
 func (vm *VM) hostSolicit() uint32 {
 	// Got l of X_s by setting s = 1, z = z(from RAM)
-	// Question: William why this is hardcoded as 49?
 
 	xContext := vm.hostenv.GetXContext()
 	xs := xContext.GetX_s()
@@ -616,21 +636,17 @@ func (vm *VM) hostSolicit() uint32 {
 	}
 	*/
 
+	blobHash := common.Hash(hBytes)
 	solicit := Solicit{
-		BlobHash: common.BytesToHash(hBytes),
+		BlobHash: blobHash,
 		Length:   z,
 	}
-	//hBytes = falseBytes(hBytes[4:])
-	//lbytes := uint32ToBytes(z)
-	//key := append(lbytes, hBytes...) //GP(292)
-	//h := common.BytesToHash(key)
 
-	X_s_l := vm.hostenv.ReadServicePreimageLookup(xs.ServiceIndex(), common.BytesToHash(hBytes), z)
+	X_s_l := vm.hostenv.ReadServicePreimageLookup(xs.ServiceIndex(), blobHash, z)
 	if len(X_s_l) == 0 {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
 		vm.Solicits = append(vm.Solicits, solicit)
-		//vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, []uint32{})
-		xs.JournalInsertLookup(common.BytesToHash(hBytes), z, []uint32{})
+		xs.JournalInsertLookup(blobHash, z, []uint32{})
 		xContext.SetX_s(xs)
 		vm.hostenv.SetXContext(xContext)
 		vm.writeRegister(7, OK)
@@ -638,10 +654,9 @@ func (vm *VM) hostSolicit() uint32 {
 	} else if X_s_l[0] == 2 { // [x, y]
 		anchor_timeslot := vm.GetJCETime()
 		vm.Solicits = append(vm.Solicits, solicit)
-		//vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
 		xContext.SetX_s(xs)
 		vm.hostenv.SetXContext(xContext)
-		xs.JournalInsertLookup(common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+		xs.JournalInsertLookup(blobHash, z, append(X_s_l, []uint32{anchor_timeslot}...))
 		vm.writeRegister(7, OK)
 		return OK
 	} else {
@@ -662,20 +677,21 @@ func (vm *VM) hostForget() uint32 {
 		return OOB
 	}
 
-	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, common.BytesToHash(hBytes), z)
+	blobHash := common.Hash(hBytes)
+	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, blobHash, z)
 	anchor_timeslot := vm.GetJCETime()
 	if len(X_s_l) == 0 || (len(X_s_l) == 2 && X_s_l[1] < (anchor_timeslot-D)) {
-		vm.hostenv.DeleteServicePreimageLookupKey(s, common.BytesToHash(hBytes), z)
-		vm.hostenv.DeleteServicePreimageKey(s, common.BytesToHash(hBytes))
+		vm.hostenv.DeleteServicePreimageLookupKey(s, blobHash, z)
+		vm.hostenv.DeleteServicePreimageKey(s, blobHash)
 		vm.writeRegister(7, OK)
 		return OK
 	} else if len(X_s_l) == 1 {
-		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, append(X_s_l, []uint32{anchor_timeslot}...))
+		vm.hostenv.WriteServicePreimageLookup(s, blobHash, z, append(X_s_l, []uint32{anchor_timeslot}...))
 		vm.writeRegister(7, OK)
 		return OK
 	} else if len(X_s_l) == 3 && X_s_l[1] < (anchor_timeslot-D) {
 		X_s_l[2] = uint32(anchor_timeslot)
-		vm.hostenv.WriteServicePreimageLookup(s, common.BytesToHash(hBytes), z, X_s_l)
+		vm.hostenv.WriteServicePreimageLookup(s, blobHash, z, X_s_l)
 		vm.writeRegister(7, OK)
 		return OK
 	} else {
@@ -698,7 +714,7 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint32 {
 		vm.writeRegister(0, OOB)
 		return errCode
 	}
-	h := common.Blake2Hash(hBytes)
+	h := common.Hash(hBytes)
 	fmt.Println(h)
 	v := vm.hostenv.HistoricalLookup(s, t, h)
 	vLength := uint32(len(v))
@@ -744,7 +760,7 @@ func (vm *VM) hostImport() uint32 {
 			vm.writeRegister(7, OOB)
 			return errCode
 		}
-		if debug {
+		if debug_pvm {
 			fmt.Printf("Write RAM Bytes: %v\n", v_Bytes[:])
 		}
 		vm.writeRegister(7, OK)
@@ -772,18 +788,6 @@ func (vm *VM) hostECRecover() uint32 {
 	vm.writeRegister(7, OK)
 	return OK
 
-}
-
-func (vm *VM) GetExport() [][]byte {
-	e := vm.Exports
-	if e == nil {
-		e = make([][]byte, 0)
-	}
-	return e
-}
-
-func (vm *VM) SetExport(updated_e [][]byte) {
-	vm.Exports = updated_e
 }
 
 // Export segment host-call
@@ -827,7 +831,6 @@ func (vm *VM) hostExport(pi uint32) (uint32, [][]byte) {
 	} else {
 		vm.writeRegister(7, ς+uint32(len(e)))
 		e = append(e, x)
-		vm.SetExport(e)
 		// errCode = vm.hostenv.ExportSegment(x)
 		return OK, e
 	}

@@ -1,6 +1,8 @@
 package node
 
 import (
+	"time"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/quic-go/quic-go"
 )
@@ -34,15 +36,14 @@ func (p *Peer) SendPreimageRequest(preimageHash common.Hash) (preimage []byte, e
 	if err != nil {
 		return preimage, err
 	}
+	time.Sleep(10 * time.Second)
 	preimage, err = receiveQuicBytes(stream)
 	if err != nil {
 		return preimage, err
 	}
-
 	return preimage, nil
 }
 
-// TODO: William to review
 func (n *Node) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 	// --> Hash

@@ -26,8 +26,26 @@ type XContext struct {
 
 func NewXContext() *XContext {
 	//TODO
+	sa := ServiceAccount{
+		Balance:         1000,
+		GasLimitG:       0,
+		GasLimitM:       0,
+		StorageSize:     0,
+		NumStorageItems: 0,
+
+		Journals: make([]Journal, 0),
+		Storage:  make(map[string][]byte),
+		Lookup:   make(map[string][]uint32),
+		Preimage: make(map[string][]byte),
+		Delete:   make(map[string]string),
+		Exist:    make(map[string]string),
+	}
+	sa.SetServiceIndex(0)
+
 	x := &XContext{
 		N: make(map[uint32]*ServiceAccount, 0),
+		S: &sa,
+		I: 0,
 	}
 	return x
 }

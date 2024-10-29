@@ -313,6 +313,9 @@ func (s *ServiceAccount) IsDirty(k string) (bool, string) {
 }
 
 func (s *ServiceAccount) MarkDirty(k string, op_type string) {
+	if s.Exist == nil {
+		s.Exist = make(map[string]string)
+	}
 	s.Exist[k] = op_type
 }
 
@@ -414,6 +417,9 @@ func (s *ServiceAccount) JournalInsertLookup(blobHash common.Hash, z uint32, tim
 	// key is 32 ++ 4 byte length
 	k := fmt.Sprintf("%v_%v", blobHash, z)
 	s.AddJournal(JournalOPWrite, LookupRecordType, k, JournalLookupKV{H: blobHash, Z: z, T: time_slots})
+	if s.Lookup == nil {
+		s.Lookup = make(map[string][]uint32)
+	}
 	s.Lookup[k] = time_slots
 	s.OverwriteDelete(k)
 }

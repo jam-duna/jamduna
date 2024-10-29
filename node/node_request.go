@@ -39,9 +39,9 @@ func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.Wo
 }
 
 func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
-	// TODO: William to review
 	preimage, ok := n.preimages[preimageHash]
 	if !ok {
+		fmt.Printf("preimageHash not ok\n")
 		return []byte{}, false, nil
 	}
 	return preimage, true, nil
@@ -104,14 +104,26 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	if !ok {
 		return fmt.Errorf("Invalid validator index %d", validatorIndex)
 	}
+	serviceIndex := preimageAnnouncement.ServiceIndex
 	preimageHash := preimageAnnouncement.PreimageHash
 	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
 	if err != nil {
 		return err
 	}
+
+	n.services[serviceIndex] = preimageHash
 	n.preimages[preimageHash] = preimage
+
+	lookup := types.Preimages{
+		Requester: uint32(serviceIndex),
+		Blob:      preimage,
+	}
+	// ADD TO Queue
+	n.processPreimages(lookup)
+
 	return nil
 }
+
 func (n *Node) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) {
 	n.blocksMutex.Lock()
 	defer n.blocksMutex.Unlock()
@@ -185,7 +197,6 @@ func (n *Node) runMain() {
 				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
 			}
 		case preimageAnnouncement := <-n.preimageAnnouncementsCh:
-			// TODO: William to review
 			err := n.processPreimageAnnouncements(preimageAnnouncement)
 			if err != nil {
 				fmt.Printf("%s processPreimages: %v\n", n.String(), err)

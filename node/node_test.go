@@ -4,15 +4,17 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
 	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 )
 
 func generateSeedSet(ringSize int) ([][]byte, error) {
@@ -181,6 +183,7 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 	}
 
+	// this is fib
 	code, err := os.ReadFile(statedb.TestServiceFile)
 	if err != nil {
 		panic(0)
@@ -192,8 +195,19 @@ func TestWorkGuarantee(t *testing.T) {
 	}
 	codeHash := common.Blake2Hash(code)
 	time.Sleep(12 * time.Second)
+	fmt.Printf("Code Length: %v\n", len(code))
+	fmt.Printf("Code Hash: %x\n", codeHash.Bytes())
+	// code length: 206
+	// Code Hash: d570234cc23da642334328827383e3625e1199a26747fc50c5ae45a731e6ff5c
+
+	builerIdx := 1
+	builderNode := nodes[builerIdx]
+	builderNode.preimages[codeHash] = code
+	new_service_idx := uint32(0)
+	fmt.Printf("Builder storing  %v -> %x\n", codeHash, code)
+
 	//----------------------------------------------
-	loadTestService := false
+	loadTestService := true
 	if loadTestService {
 		// set up testservice using the Bootstrap service
 		bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
@@ -218,12 +232,58 @@ func TestWorkGuarantee(t *testing.T) {
 				},
 			},
 		}
-		err = nodes[1].peersInfo[4].SendWorkPackageSubmission(0, fibCodeWorkPackage, []byte{})
+		err = builderNode.peersInfo[4].SendWorkPackageSubmission(0, fibCodeWorkPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
 		// TODO: William - figure out how to get new service back from the above accumulate XContext (see hostNew SetX_i call)
 		time.Sleep(12 * time.Second)
+
+		// node1 can only broadcast announcement if it observes "service.storage("0") is non-empty"
+		time.Sleep(12 * time.Second)
+
+		service_ticker := time.NewTicker(types.SecondsPerSlot)
+		defer service_ticker.Stop()
+
+		new_service_found := false
+
+		for !new_service_found {
+			select {
+			case <-service_ticker.C:
+				//TODO: find service_index ... can be serviced via CE129 using stateKey=00b5000000000000ffffffffffffffffffffffffffffffffffffffffffffffff
+				stateDB := builderNode.getState()
+				if stateDB != nil && stateDB.Block != nil {
+					// fmt.Printf("finding newservice from bootstrapService.s[0]...\n")
+					stateRoot := stateDB.Block.GetHeader().ParentStateRoot
+					t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
+
+					newserviceKey := []byte{0, 0, 0, 0} // "0"
+					service_account_byte, _ := t.GetServiceStorage(bootstrapService, newserviceKey)
+					if err != nil {
+						//not ready yet ...
+						continue
+					}
+					decoded_new_service_idx := types.DecodeE_l(service_account_byte)
+					if decoded_new_service_idx != 0 {
+						new_service_idx = uint32(decoded_new_service_idx)
+						//TODO: now use new_service_idx and see if (c,l) is correct
+						fmt.Printf("Found service_idx: %v!!!\n", new_service_idx)
+						new_service_found = true
+					}
+				}
+			}
+		}
+
+		for validatorIdx, _ := range nodes {
+			if validatorIdx != builerIdx {
+				if new_service_idx > 0 {
+					err = builderNode.peersInfo[uint16(validatorIdx)].SendPreimageAnnouncement(new_service_idx, codeHash, uint32(len(code)))
+					if err != nil {
+						fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
+					}
+				}
+			}
+		}
 	}
 
 	for _, n := range nodes {
@@ -231,7 +291,8 @@ func TestWorkGuarantee(t *testing.T) {
 		n.statedb.AssignGuarantors(true)
 	}
 	//----------------------------------------------
-	time.Sleep(12 * time.Second)
+	time.Sleep(60 * time.Second)
+	fmt.Printf("Start FIB\n")
 
 	n1 := nodes[1]
 	n4 := nodes[4]
@@ -254,12 +315,14 @@ func TestWorkGuarantee(t *testing.T) {
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{
 			Authorization: []byte("0x"), // TODO: set up null-authorizer
-			AuthCodeHost:  statedb.TestServiceCode,
+			//AuthCodeHost:  statedb.TestServiceCode,
+			AuthCodeHost:  new_service_idx,
 			Authorizer:    types.Authorizer{},
 			RefineContext: refine_context,
 			WorkItems: []types.WorkItem{
 				{
-					Service:          statedb.TestServiceCode,
+					//Service:          statedb.TestServiceCode,
+					Service:          new_service_idx,
 					CodeHash:         codeHash,
 					Payload:          payload,
 					GasLimit:         10000000,

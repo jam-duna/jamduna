@@ -697,7 +697,7 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 		vBytes = append([]byte{uint8(len(time_slots))}, time_slotsByte...)
 	}
 	// Insert the value into the state
-	fmt.Printf("SetPreImageLookup stateKey=%x, vBytes=%v\n", stateKey, vBytes)
+	//fmt.Printf("SetPreImageLookup stateKey=%x, vBytes=%v\n", stateKey, vBytes)
 	t.Insert(stateKey, vBytes)
 }
 
