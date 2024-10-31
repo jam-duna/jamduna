@@ -2,49 +2,68 @@ package trie
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
+	"reflect"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
 type MMR struct {
-	peaks [][]byte
+	Peaks []*common.Hash
 }
 
-func keccak256(data []byte) []byte {
+func NewMMR() *MMR {
+	return &MMR{
+		Peaks: make([]*common.Hash, 0),
+	}
+}
+
+func keccak256(data []byte) common.Hash {
 	hash := crypto.Keccak256(data)
-	return hash
+	return common.Hash(hash)
 }
 
-func hashConcat(left, right []byte) []byte {
-	combined := append(left, right...)
-	return keccak256(combined)
+func hashConcat(left, right *common.Hash) *common.Hash {
+	if left == nil && right == nil {
+		return nil
+	}
+	if left == nil {
+		left = &common.Hash{}
+	}
+	if right == nil {
+		right = &common.Hash{}
+	}
+	combined := append(left.Bytes(), right.Bytes()...)
+	r := keccak256(combined)
+	return &r
 }
 
 // Append function for the MMR (as described in the image)
-func (m *MMR) Append(data []byte) {
-	m.peaks = appendToMMR(m.peaks, data)
+func (m *MMR) Append(data *common.Hash) {
+	m.Peaks = appendToMMR(m.Peaks, data)
 }
 
 func (m *MMR) Print() {
-	for i, peak := range m.peaks {
+	for i, peak := range m.Peaks {
 		if peak == nil {
 			fmt.Printf("Peak %d: nil\n", i)
 		} else {
-			fmt.Printf("Peak %d: %s\n", i, hex.EncodeToString(peak))
+			fmt.Printf("Peak %d: %v\n", i, *peak)
 		}
 	}
 }
 
 func (m *MMR) ComparePeaks(compare MMR) bool {
-	for i, peak := range m.peaks {
-		cpeak := compare.peaks[i]
+	for i, peak := range m.Peaks {
+		cpeak := compare.Peaks[i]
 		if peak == nil {
 			if cpeak != nil {
 				return false
 			}
 		} else {
-			if bytes.Compare(cpeak, peak) != 0 {
+			if bytes.Compare(cpeak.Bytes(), peak.Bytes()) != 0 {
 				return false
 			}
 		}
@@ -52,12 +71,12 @@ func (m *MMR) ComparePeaks(compare MMR) bool {
 	return true
 }
 
-func appendToMMR(peaks [][]byte, l []byte) [][]byte {
-	return P(peaks, l, 0)
+func appendToMMR(Peaks []*common.Hash, l *common.Hash) []*common.Hash {
+	return P(Peaks, l, 0)
 }
 
 // Recursive function P, combining roots
-func P(r [][]byte, l []byte, n int) [][]byte {
+func P(r []*common.Hash, l *common.Hash, n int) []*common.Hash {
 	if n >= len(r) {
 		return append(r, l)
 	}
@@ -67,9 +86,9 @@ func P(r [][]byte, l []byte, n int) [][]byte {
 	return P(R(r, n, nil), hashConcat(r[n], l), n+1)
 }
 
-// Function R for updating peaks
-func R(r [][]byte, i int, t []byte) [][]byte {
-	s := make([][]byte, len(r))
+// Function R for updating Peaks
+func R(r []*common.Hash, i int, t *common.Hash) []*common.Hash {
+	s := make([]*common.Hash, len(r))
 	for j := 0; j < len(r); j++ {
 		if i == j {
 			if t == nil {
@@ -82,4 +101,75 @@ func R(r [][]byte, i int, t []byte) [][]byte {
 		}
 	}
 	return s
+}
+
+func (M MMR) Encode() []byte {
+	T := M.Peaks
+	if len(T) == 0 {
+		return []byte{0}
+	}
+
+	encoded, err := types.Encode(uint(len(T)))
+	if err != nil {
+		return nil
+	}
+
+	for i := 0; i < len(T); i++ {
+		if T[i] == nil {
+			encoded = append(encoded, 0)
+		} else {
+			encoded = append(encoded, 1)
+			encodedTi, err := types.Encode(T[i])
+			if err != nil {
+				return nil
+			}
+			encoded = append(encoded, encodedTi...)
+		}
+	}
+	return encoded
+}
+
+func (M MMR) Decode(data []byte) (interface{}, uint32) {
+	if len(data) == 0 {
+		M.Peaks = []*common.Hash{}
+		return M, 0
+	}
+
+	peaks_len, length, err := types.Decode(data, reflect.TypeOf(uint(0)))
+	if err != nil {
+		M.Peaks = []*common.Hash{}
+		return M, 0
+	}
+
+	if peaks_len.(uint) == 0 {
+		M.Peaks = []*common.Hash{}
+		return M, length
+	}
+
+	peaks := make([]*common.Hash, peaks_len.(uint))
+	for i := 0; i < int(peaks_len.(uint)); i++ {
+		if length >= uint32(len(data)) {
+			M.Peaks = []*common.Hash{}
+			return M, 0
+		}
+
+		if data[length] == 0 {
+			peaks[i] = nil
+			length++
+		} else if data[length] == 1 {
+			length++
+			decoded, l, err := types.Decode(data[length:], reflect.TypeOf(&common.Hash{}))
+			if err != nil {
+				M.Peaks = []*common.Hash{}
+				return M, 0
+			}
+			peaks[i] = decoded.(*common.Hash)
+			length += l
+		} else {
+			M.Peaks = []*common.Hash{}
+			return M, 0
+		}
+	}
+	M.Peaks = peaks
+	return M, length
 }

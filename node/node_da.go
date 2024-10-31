@@ -110,7 +110,7 @@ func VerifyJustification(treeLen int, root common.Hash, shardIndex uint16, leafH
 // i: shardIdx or ChunkIdx
 // H: Blake2b
 func GenerateJustification(root common.Hash, shardIndex uint16, leaves [][]byte) (treeLen int, leafHash common.Hash, path []common.Hash, isFound bool) {
-	wbt := trie.NewWellBalancedTree(leaves)
+	wbt := trie.NewWellBalancedTree(leaves, types.Blake2b)
 	//treeLen, leafHash, path, isFound, nil
 	treeLen, leafHash, path, isFound, _ = wbt.Trace(int(shardIndex))
 	//fmt.Printf("[shardIndex=%v] erasureRoot=%v, leafHash=%v, path=%v, found=%v\n", shardIndex, erasureRoot, leafHash, path, isFound)
@@ -273,7 +273,7 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 
 	sClub = make([]common.Hash, types.TotalValidators)
 	for shardIdx, shardData := range sequentialTranspose {
-		shard_wbt := trie.NewWellBalancedTree(shardData)
+		shard_wbt := trie.NewWellBalancedTree(shardData, types.Blake2b)
 		sClub[shardIdx] = shard_wbt.RootHash()
 	}
 	return sClub, ecChunksArr
@@ -287,7 +287,7 @@ func GenerateErasureTree(b []common.Hash, s []common.Hash) (*trie.WellBalancedTr
 	}
 
 	// Generate and return erasureroot
-	return trie.NewWellBalancedTree(bundleSegmentPairs), bundleSegmentPairs
+	return trie.NewWellBalancedTree(bundleSegmentPairs, types.Blake2b), bundleSegmentPairs
 }
 
 // MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix

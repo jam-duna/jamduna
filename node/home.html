@@ -1,41 +1,80 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recent Blocks</title>
     <style>
-      body {
-	  font-size: 10px;
-	  font-family: Arial;
-      }
-        table, th, td {
+        body {
+            font-size: 10px;
+            font-family: Arial;
+        }
+
+        table,
+        th,
+        td {
             border: 0px solid black;
             border-collapse: collapse;
             padding: 0px;
         }
+
         .extrinsicCount {
             font-size: 10px;
             display: block;
         }
-        .numtickets { color: red; }
-        .numpreimagelookups { color: blue; }
-        .numguarantees { color: green; }
-        .numassurances { color: orange; }
-        .numdisputes { color: purple; }
-        .epochmark { color: #FF69B4; } /* HotPink */
-        .winningticketsmark { color: #00FFFF; } /* Aqua */
-        .verdictmarkers { color: #FFD700; } /* Gold */
-        .offendermarkers { color: #FF4500; } /* OrangeRed */
+
+        .numtickets {
+            color: red;
+        }
+
+        .numpreimagelookups {
+            color: blue;
+        }
+
+        .numguarantees {
+            color: green;
+        }
+
+        .numassurances {
+            color: orange;
+        }
+
+        .numdisputes {
+            color: purple;
+        }
+
+        .epochmark {
+            color: #FF69B4;
+        }
+
+        /* HotPink */
+        .winningticketsmark {
+            color: #00FFFF;
+        }
+
+        /* Aqua */
+        .verdictmarkers {
+            color: #FFD700;
+        }
+
+        /* Gold */
+        .offendermarkers {
+            color: #FF4500;
+        }
+
+        /* OrangeRed */
         .details-container {
             margin-top: 20px;
         }
+
         pre {
             background-color: #f4f4f4;
             padding: 1px;
             overflow: auto;
             max-height: 500px;
         }
+
         .link-button {
             margin-right: 5px;
             text-decoration: underline;
@@ -44,8 +83,16 @@
         }
     </style>
 </head>
+
 <body>
-    <table border=0 width="100%"><tr><td width="15%"><img src="https://i.ibb.co/PCCmkxg/image.png" height="100"/></td><td width="85%" align="left"><font size="+2">Colorful Notion JAM Block Explorer</font></td></tr></table>
+    <table border=0 width="100%">
+        <tr>
+            <td width="15%"><img src="https://i.ibb.co/PCCmkxg/image.png" height="100" /></td>
+            <td width="85%" align="left">
+                <font size="+2">Colorful Notion JAM Block Explorer</font>
+            </td>
+        </tr>
+    </table>
     <table id="blocksTable">
         <tr id="server0"></tr>
         <tr id="server1"></tr>
@@ -61,7 +108,7 @@
 
 
     <script>
-      var baseURL = `http://karura-internal.polkaholic.io`;
+        var baseURL = `http://karura-internal.polkaholic.io`;
         const servers = [0, 1, 2, 3, 4, 5];
 
         function fetchRecentBlocks(serverIndex) {
@@ -120,7 +167,7 @@
 
                     // BlockHeader fields
                     const header = block.header;
-	            detailsTable += createTableRow('BlockHash', blockHash);
+                    detailsTable += createTableRow('BlockHash', blockHash);
                     detailsTable += createTableRow('ParentHash', header.parent_hash);
                     detailsTable += createTableRow('PriorStateRoot', header.prior_state_root);
                     detailsTable += createTableRow('ExtrinsicHash', header.extrinsic_hash);
@@ -135,11 +182,11 @@
 
                     // ExtrinsicData counts
                     const extrinsic = block.extrinsic;
-		    if ( extrinsic.tickets ) detailsTable += createTableRow('Tickets', extrinsic.tickets.length);
-                    if ( extrinsic.preimage_lookups ) detailsTable += createTableRow('PreimageLookups', extrinsic.preimage_lookups.length);
-                    if ( extrinsic.guarantees ) detailsTable += createTableRow('Guarantees', extrinsic.guarantees.length);
-                    if ( extrinsic.assurances ) detailsTable += createTableRow('Assurances', extrinsic.assurances.length);
-                    if ( extrinsic.disputes ) detailsTable += createTableRow('Disputes', extrinsic.disputes.length);
+                    if (extrinsic.tickets) detailsTable += createTableRow('Tickets', extrinsic.tickets.length);
+                    if (extrinsic.preimage_lookups) detailsTable += createTableRow('PreimageLookups', extrinsic.preimage_lookups.length);
+                    if (extrinsic.guarantees) detailsTable += createTableRow('Guarantees', extrinsic.guarantees.length);
+                    if (extrinsic.assurances) detailsTable += createTableRow('Assurances', extrinsic.assurances.length);
+                    if (extrinsic.disputes) detailsTable += createTableRow('Disputes', extrinsic.disputes.length);
                     detailsTable += `</table>`;
 
                     document.getElementById('details').innerHTML = detailsTable;
@@ -152,7 +199,7 @@
                 .then(response => response.json())
                 .then(jamState => {
                     let detailsTable = `<h2>State Details</h2> <table>`;
-		    detailsTable += createTableRow('BlockHash', blockHash);
+                    detailsTable += createTableRow('BlockHash', blockHash);
                     detailsTable += createTableRow('SafroleStateGamma', formatJSON(jamState.safrole_state_gamma));
                     detailsTable += createTableRow('SafroleState', formatJSON(jamState.safrole_state) || 'None');
                     detailsTable += createTableRow('AvailabilityAssignments', formatJSON(jamState.availability_assignments));
@@ -160,7 +207,7 @@
                     detailsTable += createTableRow('DisputesState', formatJSON(jamState.disputes_state));
                     detailsTable += createTableRow('AuthorizationsPool', formatJSON(jamState.authorizations_pool));
                     detailsTable += createTableRow('AuthorizationQueue', formatJSON(jamState.authorization_queue));
-                    detailsTable += createTableRow('BeefyPool', formatJSON(jamState.beefy_pool));
+                    detailsTable += createTableRow('RecentBlocks', formatJSON(jamState.beefy_pool));
                     detailsTable += createTableRow('PriorServiceAccountState', formatJSON(jamState.prior_service_account_state));
                     detailsTable += createTableRow('PrivilegedServiceIndices', formatJSON(jamState.privileged_services_indices));
                     detailsTable += `</table>`;
@@ -188,19 +235,20 @@
         }
 
         function formatTimestamp(unixTimestamp) {
-	    const now = Math.floor(Date.now() / 1000); // Current time in seconds
-	    const secondsAgo = now - unixTimestamp;
-	    const date = new Date(unixTimestamp * 1000); // Convert Unix timestamp to milliseconds
-	    const hours = String(date.getUTCHours()).padStart(2, '0');
-	    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-	    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-	    
-	    return `${hours}:${minutes}:${seconds} (${secondsAgo}s ago)`;
-	}
+            const now = Math.floor(Date.now() / 1000); // Current time in seconds
+            const secondsAgo = now - unixTimestamp;
+            const date = new Date(unixTimestamp * 1000); // Convert Unix timestamp to milliseconds
+            const hours = String(date.getUTCHours()).padStart(2, '0');
+            const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+            const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+
+            return `${hours}:${minutes}:${seconds} (${secondsAgo}s ago)`;
+        }
 
         // Initial load and interval refresh
         refreshBlocks();
         setInterval(refreshBlocks, 2000);
     </script>
 </body>
+
 </html>

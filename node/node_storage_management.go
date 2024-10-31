@@ -165,7 +165,7 @@ func CombineSegmentShards(segmentShards [][]byte) (concatenatedShards []byte, er
 func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, segmentShards [][]byte, justification []byte) (bool, error) {
 	// verify its validity
 	bClub := common.Blake2Hash(bundleShard)
-	sClub := trie.NewWellBalancedTree(segmentShards).RootHash()
+	sClub := trie.NewWellBalancedTree(segmentShards, types.Blake2b).RootHash()
 	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
 	leafHash := common.ComputeLeafHash_WBT_Blake2B(bundle_segment_pair)
 	path, err := common.ExpandPath(justification)
@@ -221,7 +221,7 @@ func (n *Node) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16
 
 	// Store path to Erasure Root
 	bClubH := common.Blake2Hash(bundleShard)
-	sClubH := trie.NewWellBalancedTree(segmentShards).RootHash()
+	sClubH := trie.NewWellBalancedTree(segmentShards, types.Blake2b).RootHash()
 
 	n.StoreFullShardJustification(erasureRoot, shardIndex, bClubH, sClubH, full_justification)
 
@@ -502,7 +502,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 	concatenatedShards, err := n.ReadRawKV([]byte(s_es_key))
 	segmentShards, _ := SplitToSegmentShards(concatenatedShards)
 
-	segmentTree := trie.NewWellBalancedTree(segmentShards)
+	segmentTree := trie.NewWellBalancedTree(segmentShards, types.Blake2b)
 	recoveredSclubH := segmentTree.RootHash()
 
 	bClubH, sClubH, full_justification, err := n.GetFullShardJustification(erasureRoot, shardIndex)

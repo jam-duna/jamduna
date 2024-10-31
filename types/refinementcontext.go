@@ -26,7 +26,7 @@ type RefineContext struct {
 	Prerequisite     *Prerequisite `json:"prerequisite"`
 }
 
-type Prerequisite common.Hash
+type Prerequisite []common.Hash
 
 func (P *Prerequisite) Encode() []byte {
 	if P == nil {
@@ -47,15 +47,15 @@ func (target *Prerequisite) Decode(data []byte) (interface{}, uint32) {
 	}
 	var decoded Prerequisite
 	length := uint32(1)
-	prerequisite, l, err := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	prerequisite, l, err := Decode(data[length:], reflect.TypeOf([]common.Hash{}))
 	if err != nil {
 		return nil, length
 	}
 	length += l
-	decoded = Prerequisite(prerequisite.(common.Hash))
+	decoded = Prerequisite(prerequisite.([]common.Hash))
 	return &decoded, length
 }
 
-func (p *Prerequisite) Hash() common.Hash {
-	return common.Hash(*p)
+func (p *Prerequisite) Hash() []common.Hash {
+	return []common.Hash(*p)
 }

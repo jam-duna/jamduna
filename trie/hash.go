@@ -4,7 +4,7 @@ import (
 	//"errors"
 	//"math"
 
-	"fmt"
+	//"fmt"
 	"hash"
 
 	"github.com/colorfulnotion/jam/common"
@@ -40,13 +40,9 @@ func compareBytes(a, b []byte) bool {
 // computeHash hashes the data using Blake2b-256
 func computeHash(data []byte, hashType ...string) []byte {
 	var h hash.Hash
-	var selectedHash = types.Blake2b
-	//fmt.Printf("hashType %v\n", hashType)
-	//fmt.Printf("data %x\n", data)
 	// Check if "keccak" is passed in hashType, else use default Blake2b-256.
 	if len(hashType) > 0 && hashType[0] == types.Keccak {
-		fmt.Printf("using %v\n", selectedHash)
-		selectedHash = types.Keccak
+		//fmt.Printf("!!using %v\n", types.Keccak)
 		h = sha3.NewLegacyKeccak256()
 	} else {
 		h, _ = blake2b.New256(nil)

@@ -47,7 +47,7 @@ func InitStateFromSnapshot(s *StateSnapshot) (j *JamState) {
 	//ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"pi"`
 	//AuthorizationsPool
 	//AuthorizationQueue
-	//BeefyPool
+	//RecentBlocks
 	//AvailabilityAssignments
 	j.DisputesState = Psi_state{}
 	return j

@@ -221,9 +221,9 @@ func (s *StateDB) CheckGuaranteesWorkReport(guarantees []types.Guarantee) error 
 
 // 146
 func (s *StateDB) CheckRecentBlock(g types.Guarantee) error {
-	anchor := (s.JamState.BeefyPool[types.RecentHistorySize-1].HeaderHash == g.Report.RefineContext.Anchor)
-	stateroot := (s.JamState.BeefyPool[types.RecentHistorySize-1].StateRoot == g.Report.RefineContext.StateRoot)
-	beefy := common.Keccak256(s.JamState.BeefyPool[types.RecentHistorySize-1].MMR_Bytes()) == g.Report.RefineContext.BeefyRoot
+	anchor := (s.JamState.RecentBlocks[types.RecentHistorySize-1].HeaderHash == g.Report.RefineContext.Anchor)
+	stateroot := (s.JamState.RecentBlocks[types.RecentHistorySize-1].StateRoot == g.Report.RefineContext.StateRoot)
+	beefy := common.Keccak256(s.JamState.RecentBlocks[types.RecentHistorySize-1].MMR_Bytes()) == g.Report.RefineContext.BeefyRoot
 	if anchor && stateroot && beefy {
 		return nil
 	}
@@ -245,7 +245,7 @@ func (s *StateDB) CheckAncestorSetA(g types.Guarantee) error {
 }
 
 func (s *StateDB) CheckReportNotInRecentHistory(g types.Guarantee) error {
-	for _, beta := range s.JamState.BeefyPool {
+	for _, beta := range s.JamState.RecentBlocks {
 		for _, report := range beta.Reported {
 			if report == g.Report.GetWorkPackageHash() {
 
@@ -259,7 +259,13 @@ func (s *StateDB) CheckReportNotInRecentHistory(g types.Guarantee) error {
 // TODO 150 check prerequisite work-package: most recent history haven't been implemented
 func (s *StateDB) CheckPrerequisiteWorkPackage(g types.Guarantee) error {
 	if g.Report.RefineContext.Prerequisite != nil {
-		exBool := g.Report.RefineContext.Prerequisite.Hash() == g.Report.GetWorkPackageHash()
+		exBool := false
+		for _, hash := range g.Report.RefineContext.Prerequisite.Hash() {
+			if hash == g.Report.GetWorkPackageHash() {
+				exBool = true
+				break
+			}
+		}
 		betaBool := false
 		if exBool || betaBool {
 			return nil

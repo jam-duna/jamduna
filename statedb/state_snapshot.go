@@ -11,7 +11,7 @@ import (
 type StateSnapshot struct {
 	AuthorizationsPool       [types.TotalCores][]common.Hash    `json:"alpha"`  // c1
 	AuthorizationQueue       AuthorizationQueue                 `json:"varphi"` // c2
-	BeefyPool                BeefyPool                          `json:"beta"`   // c3
+	RecentBlocks             RecentBlocks                       `json:"beta"`   // c3
 	Gamma                    SafroleBasicState                  `json:"gamma"`  // c4
 	Disputes                 Psi_state                          `json:"psi"`    // c5
 	Entropy                  Entropy                            `json:"eta"`    // c6
@@ -29,7 +29,7 @@ func (n *JamState) Snapshot() *StateSnapshot {
 	copied := &StateSnapshot{
 		AuthorizationsPool:       n.AuthorizationsPool,                                  // C1 -- todo
 		AuthorizationQueue:       n.AuthorizationQueue,                                  // C2 -- todo
-		BeefyPool:                n.BeefyPool,                                           // C3 -- todo
+		RecentBlocks:             n.RecentBlocks,                                        // C3 -- todo
 		Gamma:                    n.SafroleState.GetSafroleBasicState().Copy(),          // C4
 		Disputes:                 n.DisputesState,                                       // C5 -- todo
 		Entropy:                  n.SafroleState.Entropy,                                // C6

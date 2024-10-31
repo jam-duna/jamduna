@@ -115,7 +115,7 @@ func encodeapi(objectType string, inp string) (string, error) {
 		}
 		obj = c2
 	case "C3":
-		var c3 statedb.BeefyPool
+		var c3 statedb.RecentBlocks
 		err = json.Unmarshal(input, &c3)
 		if err != nil {
 			return "", err
@@ -238,7 +238,7 @@ func decodeapi(objectType, input string) (string, error) {
 	case "C2":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.AuthorizationQueue{}))
 	case "C3":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.BeefyPool{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.RecentBlocks{}))
 	case "C4":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.SafroleBasicState{}))
 	case "C5":

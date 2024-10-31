@@ -19,7 +19,7 @@ func (n *JamState) GetAuthPoolBytes() []byte {
 
 // C2
 func (T AuthorizationQueue) Encode() []byte {
-	authorizations_queue := [types.TotalCores][80]common.Hash{}
+	authorizations_queue := [types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash{}
 	if len(T) == 0 || len(T) > types.TotalCores {
 		return []byte{}
 	}
@@ -44,32 +44,9 @@ func (n *JamState) GetAuthQueueBytes() []byte {
 	return codec_bytes
 }
 
-// C3
-func (T Peaks) Encode() []byte {
-	if len(T) == 0 {
-		return []byte{0}
-	}
-	encoded, err := types.Encode(uint(len(T)))
-	if err != nil {
-		return []byte{}
-	}
-	for i := 0; i < len(T); i++ {
-		if T[i] == nil {
-			encoded = append(encoded, []byte{0}...)
-		} else {
-			encoded = append(encoded, []byte{1}...)
-			encodedTi, err := types.Encode(T[i])
-			if err != nil {
-				return []byte{}
-			}
-			encoded = append(encoded, encodedTi...)
-		}
-	}
-	return encoded
-}
-
+// C3 RecentBlocks
 func (n *JamState) GetRecentBlocksBytes() []byte {
-	codec_bytes, err := types.Encode(n.BeefyPool)
+	codec_bytes, err := types.Encode(n.RecentBlocks)
 	if err != nil {
 		return []byte{}
 	}

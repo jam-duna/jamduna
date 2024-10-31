@@ -47,7 +47,13 @@ func (n *Node) finalizeBlocks() {
 			if debugF {
 				fmt.Printf("%s Finality %v\n", n.String(), statedb.BlockHash)
 			}
-			statedb.Finalized = true
+			// TODO: connect to Grandpa
+			blsSignature, finalizedEpoch, err := statedb.Finalize(n.credential)
+			if err != nil {
+				fmt.Printf("%s [finalizeBlocks:Finalize] ERR %v", n.String(), err)
+			} else if finalizedEpoch {
+				fmt.Printf("%s [finalizeBlocks:Finalize] BLS Signature %x\n", n.String(), blsSignature)
+			}
 		}
 	}
 }

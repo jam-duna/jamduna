@@ -39,14 +39,19 @@ func (n *JamState) SetAuthPool(authPoolByte []byte) {
 
 // C2 AuthQueue
 func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
-	authorizations_queue := [types.TotalCores][80]common.Hash{}
+	authorizations_queue := [types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash{}
 	decoded, length, err := types.Decode(data, reflect.TypeOf(authorizations_queue))
 	if err != nil {
 		return AuthorizationQueue{}, 0
 	}
-	authorizations_queue = decoded.([types.TotalCores][80]common.Hash)
-	for i := 0; i < len(authorizations_queue); i++ {
-		copy(T[i][:], authorizations_queue[i][:])
+	authorizations_queue = decoded.([types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash)
+	for i := 0; i < types.TotalCores; i++ {
+		if len(T[i]) == 0 {
+			T[i] = make([]common.Hash, types.MaxAuthorizationQueueItems)
+		}
+		for j := 0; j < types.MaxAuthorizationQueueItems; j++ {
+			T[i][j] = authorizations_queue[i][j]
+		}
 	}
 	return T, length
 }
@@ -63,45 +68,15 @@ func (n *JamState) SetAuthQueue(authQueueByte []byte) {
 }
 
 // C3 RecentBlocks
-func (T Peaks) Decode(data []byte) (interface{}, uint32) {
-	if len(data) == 0 {
-		return Peaks{}, 0
-	}
-	peaks_len, length, err := types.Decode(data, reflect.TypeOf(uint(0)))
-	if err != nil {
-		return Peaks{}, 0
-	}
-	if peaks_len.(uint) == 0 {
-		return Peaks{}, length
-	}
-	peaks := make([]*common.Hash, peaks_len.(uint))
-	for i := 0; i < int(peaks_len.(uint)); i++ {
-		if data[length] == 0 {
-			peaks[i] = nil
-			length++
-		} else if data[length] == 1 {
-			length++
-			decoded, l, err := types.Decode(data[length:], reflect.TypeOf(common.Hash{}))
-			if err != nil {
-				return Peaks{}, 0
-			}
-			peak := decoded.(common.Hash)
-			peaks[i] = &peak
-			length += l
-		}
-	}
-	return peaks, length
-}
-
 func (n *JamState) SetRecentBlocks(recentBlocksByte []byte) {
 	if len(recentBlocksByte) == 0 {
 		return
 	}
-	recentBlocks, _, err := types.Decode(recentBlocksByte, reflect.TypeOf(BeefyPool{}))
+	recentBlocks, _, err := types.Decode(recentBlocksByte, reflect.TypeOf(RecentBlocks{}))
 	if err != nil {
 		return
 	}
-	n.BeefyPool = recentBlocks.(BeefyPool)
+	n.RecentBlocks = recentBlocks.(RecentBlocks)
 }
 
 // C4 safroleState

@@ -3,29 +3,16 @@ package statedb
 import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
-type BeefyPool []Beta_state
-
-type Peaks []*common.Hash
-type MMR struct {
-	Peaks Peaks `json:"peaks"`
-}
-
-type Beta_state struct {
-	HeaderHash common.Hash   `json:"header_hash"`
-	MMR        MMR           `json:"mmr"`
-	StateRoot  common.Hash   `json:"state_root"`
-	Reported   []common.Hash `json:"reported"`
-}
-
-func (s *StateDB) Accumulate() (serviceAccumulations []types.ServiceAccumulation, reported []common.Hash, err error) {
+func (s *StateDB) Accumulate() (err error) {
 	xContext := types.NewXContext()
 	s.SetXContext(xContext)
-	reported = make([]common.Hash, 0)
+	reported := make([]common.Hash, 0)
 	// ServiceAccumulation represents a service accumulation result.
-	serviceAccumulations = make([]types.ServiceAccumulation, 0)
+	serviceAccumulations := make([]types.ServiceAccumulation, 0)
 	for _, workReport := range s.AvailableWorkReport {
 		wrangledWorkResults := make([]types.WrangledWorkResult, 0)
 		// Wrangle results from work report
@@ -69,9 +56,19 @@ func (s *StateDB) Accumulate() (serviceAccumulations []types.ServiceAccumulation
 			}
 			reported = append(reported, workReport.AvailabilitySpec.WorkPackageHash)
 		}
-
 	}
-	return serviceAccumulations, reported, nil
+
+	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
+	var leaves [][]byte
+	for _, sa := range serviceAccumulations {
+		// put (s,h) of C  into leaves
+		leaf := append(common.Uint32ToBytes(sa.ServiceIndex), sa.Result.Bytes()...)
+		leaves = append(leaves, leaf)
+	}
+	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
+	s.accumulationRoot = common.Hash(tree.Root())
+
+	return nil
 }
 
 // CalculateGasAttributable calculates the gas attributable for each service.

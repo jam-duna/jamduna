@@ -51,13 +51,14 @@ type StateDB struct {
 	queuedTickets map[common.Hash][]types.Ticket
 	ticketMutex   sync.Mutex
 
+	// used in ApplyStateRecentHistory between statedbs
+	accumulationRoot common.Hash
+
 	X *types.XContext
 
 	GuarantorAssignments         []types.GuarantorAssignment
 	PreviousGuarantorAssignments []types.GuarantorAssignment
 	AvailableWorkReport          []types.WorkReport // every block has its own available work report
-
-	mmr *trie.MerkleMountainRange
 
 	logChan chan storage.LogMessage
 }
@@ -782,6 +783,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		StateRoot:             s.StateRoot,
 		JamState:              s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:                   s.sdb,
+		accumulationRoot:      s.accumulationRoot, // compressed C
 		trie:                  s.CopyTrieState(s.StateRoot),
 		knownTickets:          make(map[common.Hash]uint8),
 		knownPreimageLookups:  make(map[common.Hash]uint32),
@@ -1132,6 +1134,13 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.RemoveUnusedTickets()
 	targetJCE := blk.TimeSlot()
 
+	if debug {
+		fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
+	}
+	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
+	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
+	s.ApplyStateRecentHistory(blk, &(s.accumulationRoot))
+
 	// 19-22 - Safrole last
 	ticketExts := blk.Tickets()
 	sf_header := blk.GetHeader()
@@ -1193,7 +1202,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
 
 	// 28 -- ACCUMULATE
-	serviceAccumulations, reported, err := s.Accumulate()
+	err = s.Accumulate()
 	if err != nil {
 		return s, err
 	}
@@ -1227,10 +1236,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.BlockHash = blk.Hash()
 	s.StateRoot = s.UpdateTrieState()
 
-	s.mmr = s.ApplyStateRecentHistory(serviceAccumulations, reported)
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
-	}
 	//State transisiton is successful.  Remove E(T,P,A,G,D) from statedb queue
 	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
 	if debug {

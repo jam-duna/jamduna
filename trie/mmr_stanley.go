@@ -24,7 +24,7 @@ type MerkleMountainRange struct {
 }
 
 // NewMMR creates a new Merkle Mountain Range
-func NewMMR(hashTypes ...string) *MerkleMountainRange {
+func NewMMR_stanley(hashTypes ...string) *MerkleMountainRange {
 	hashType := types.Blake2b
 	if len(hashTypes) != 0 && hashTypes[0] == types.Keccak {
 		hashType = types.Keccak

@@ -16,7 +16,7 @@ type AvailabilityAssignments [types.TotalCores]*Rho_state
 type JamState struct {
 	AuthorizationsPool       [types.TotalCores][]common.Hash    `json:"authorizations_pool"` // alpha The core αuthorizations pool. α eq 85
 	AuthorizationQueue       AuthorizationQueue                 `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
-	BeefyPool                BeefyPool                          `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
+	RecentBlocks             RecentBlocks                       `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
 	SafroleStateGamma        SafroleBasicState                  `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
 	SafroleState             *SafroleState                      `json:"safrole"`
 	PriorServiceAccountState map[uint32]types.ServiceAccount    `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
@@ -27,7 +27,7 @@ type JamState struct {
 }
 
 func (b *Beta_state) MMR_Bytes() []byte {
-	codec_bytes, err := json.Marshal(b.MMR)
+	codec_bytes, err := json.Marshal(b.B)
 	if err != nil {
 		fmt.Println("Error serializing MMR", err)
 	}
@@ -135,7 +135,7 @@ func NewJamState() *JamState {
 func (original *JamState) Copy() *JamState {
 	copyState := &JamState{
 		AuthorizationsPool:       original.AuthorizationsPool,
-		BeefyPool:                original.BeefyPool,
+		RecentBlocks:             original.RecentBlocks,
 		SafroleStateGamma:        original.SafroleStateGamma,
 		DisputesState:            original.DisputesState,
 		PrivilegedServiceIndices: original.PrivilegedServiceIndices,
