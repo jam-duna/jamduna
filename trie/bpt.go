@@ -431,21 +431,89 @@ func (t *MerkleTree) PrintTree(node *Node, level int) {
 func (t *MerkleTree) GetStateByRange(starKey []byte, endKey []byte, maxSize uint32) (foundKeyVal []types.StateKeyValue, boundaryNode [][]byte, err error) {
 	foundKeyVal = make([]types.StateKeyValue, 0)
 	currenSize := uint32(0)
-	t.getTreeContent(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode)
-	fmt.Printf("GetStateByRange: starKey=%x, endKey=%x, len(foundKeyVal)=%v, foundKeyVal=%x, actualSize=%v, maxSize=%v\n", starKey, endKey, len(foundKeyVal), foundKeyVal, currenSize, maxSize)
+	paddedStart := make([]byte, 32)
+	copy(paddedStart, starKey)
+	value, _ := t.Get(paddedStart)
+	fmt.Printf("paddedStart: %x, value: %x\n", paddedStart, value)
+	found := false
+	end := false
+	if value != nil {
+		t.getTreeContentIncludeKey(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode, &found, &end)
+	} else {
+		t.getTreeContent(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode)
+		fmt.Printf("GetStateByRange: starKey=%x, endKey=%x, len(foundKeyVal)=%v, foundKeyVal=%x, actualSize=%v, maxSize=%v\n", starKey, endKey, len(foundKeyVal), foundKeyVal, currenSize, maxSize)
+	}
 	return foundKeyVal, boundaryNode, err
+}
+
+func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []byte, endKey []byte, currenSize *uint32, maxSize uint32, foundkv *[]types.StateKeyValue, boundaryNodes *[][]byte, findKey *bool, end *bool) (ok bool) {
+	if *currenSize >= maxSize || *end {
+		return true
+	}
+	nodeType := "Branch"
+	if node.Left == nil && node.Right == nil {
+		nodeType = "Leaf"
+	}
+	//fmt.Printf("%s[%s Node] Key: %x, Hash: %x\n", strings.Repeat("  ", level), nodeType, node.Key, node.Hash)
+	*boundaryNodes = append(*boundaryNodes, node.Hash)
+
+	value, _ := t.Get(node.Key)
+
+	// Copy the original key into the new slice
+	if value != nil {
+		//fmt.Printf("%s  [Leaf Node] Value: %x\n", strings.Repeat("  ", level), value)
+		paddedStart := make([]byte, len(node.Key))
+		paddedEnd := make([]byte, len(node.Key))
+		// Copy the original key into the new slice
+		copy(paddedStart, starKey)
+		copy(paddedEnd, endKey)
+
+		if common.CompareBytes(node.Key, paddedStart) {
+			fmt.Printf("Found Key: %x\n", node.Key)
+			*boundaryNodes = make([][]byte, 0)
+			*boundaryNodes, _ = t.GetPath(node.Key)
+			*boundaryNodes = append(*boundaryNodes, node.Hash)
+			*findKey = true
+		}
+		if *findKey {
+			if (common.CompareKeys(paddedStart, node.Key) >= 0 && common.CompareKeys(paddedEnd, node.Key) >= 0) && (nodeType == "Leaf") {
+				// check if the key is within range..
+				// key is expected to 31 bytes
+
+				var k_31 [31]byte
+				copy(k_31[:], node.Key[1:])
+				if len(k_31) != 31 {
+					panic(fmt.Sprintf("Key is not 31 bytes: %x", node.Key))
+				}
+				stateKeyValue := types.StateKeyValue{
+					Key:   k_31,
+					Len:   uint8(len(value)),
+					Value: value,
+				}
+				addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)
+				fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
+
+				*foundkv = append(*foundkv, stateKeyValue)
+				*currenSize += uint32(addSize)
+			}
+			if common.CompareBytes(paddedEnd, node.Key) {
+				*end = true
+				return true
+			}
+		}
+	}
+	if node.Left != nil || node.Right != nil {
+		//fmt.Printf("%s  Left:\n", strings.Repeat("  ", level))
+		t.getTreeContentIncludeKey(node.Left, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
+		//fmt.Printf("%s  Right:\n", strings.Repeat("  ", level))
+		t.getTreeContentIncludeKey(node.Right, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
+	}
+	return true
 }
 
 func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKey []byte, currenSize *uint32, maxSize uint32, foundkv *[]types.StateKeyValue, boundaryNodes *[][]byte) (ok bool) {
 	if *currenSize >= maxSize {
 		return true
-	}
-	if level == 0 && t.Root != nil {
-		fmt.Printf("Root Hash: %x\n", t.Root.Hash)
-	}
-	if node == nil {
-		fmt.Printf("%snode empty\n", strings.Repeat("  ", level))
-		return
 	}
 	nodeType := "Branch"
 	if node.Left == nil && node.Right == nil {
@@ -459,11 +527,9 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 		//fmt.Printf("%s  [Leaf Node] Value: %x\n", strings.Repeat("  ", level), value)
 		paddedStart := make([]byte, len(node.Key))
 		paddedEnd := make([]byte, len(node.Key))
-
 		// Copy the original key into the new slice
-		copy(paddedStart, node.Key)
-		copy(paddedEnd, node.Key)
-
+		copy(paddedStart, starKey)
+		copy(paddedEnd, endKey)
 		if (common.CompareKeys(paddedStart, node.Key) >= 0 && common.CompareKeys(paddedEnd, node.Key) >= 0) && (nodeType == "Leaf") {
 			// check if the key is within range..
 			// key is expected to 31 bytes
@@ -484,7 +550,9 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 			*foundkv = append(*foundkv, stateKeyValue)
 			*currenSize += uint32(addSize)
 		}
-		fmt.Printf("currenSize, maxSize: %v, %v\n", *currenSize, maxSize)
+		if common.CompareBytes(paddedEnd, node.Key) {
+			return true
+		}
 	}
 	if node.Left != nil || node.Right != nil {
 		//fmt.Printf("%s  Left:\n", strings.Repeat("  ", level))
@@ -556,6 +624,7 @@ func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 	}
 	t.Insert(stateKey, value)
 }
+
 func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	stateKey := make([]byte, 32)
 	debug := false
@@ -1077,6 +1146,45 @@ func (t *MerkleTree) tracePath(node *Node, key []byte, depth int, path *[][]byte
 	} else {
 		if node.Right != nil {
 			*path = append(*path, node.Right.Hash)
+		} else {
+			*path = append(*path, make([]byte, 32))
+		}
+		return t.tracePath(node.Left, key, depth+1, path)
+	}
+}
+
+func (t *MerkleTree) GetPath(key []byte) ([][]byte, error) {
+	if t.Root == nil {
+		return nil, errors.New("empty tree")
+	}
+	var path [][]byte
+	err := t.getPath(t.Root, key, 0, &path)
+	if err != nil {
+		return nil, err
+	}
+	return path, nil
+}
+
+func (t *MerkleTree) getPath(node *Node, key []byte, depth int, path *[][]byte) error {
+	if node == nil || depth > computeKeyLengthAsBit(key) {
+		return errors.New("key not found")
+	}
+
+	if compareBytes(node.Key, key) {
+		*path = append(*path, node.Hash)
+		return nil
+	}
+
+	if bit(key, depth) {
+		if node.Hash != nil {
+			*path = append(*path, node.Hash)
+		} else {
+			*path = append(*path, make([]byte, 32))
+		}
+		return t.tracePath(node.Right, key, depth+1, path)
+	} else {
+		if node.Hash != nil {
+			*path = append(*path, node.Hash)
 		} else {
 			*path = append(*path, make([]byte, 32))
 		}

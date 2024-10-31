@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 	//"github.com/colorfulnotion/jam/trie"
 )
@@ -25,8 +26,15 @@ func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBloc
 		blocks = append(blocks, *blk)
 		// TODO: Sourabh - go in the direction up to maximumBlocks
 		return blocks, true, nil
+	} else {
+		blkFromDB, err := n.GetBlockByHeader(headerHash)
+		if err != nil {
+			fmt.Printf("GetBlockByHeader ERR %v\n", err)
+			return blocks, false, err
+		}
+		blocks = append(blocks, blkFromDB)
+		return blocks, true, nil
 	}
-	return blocks, false, nil
 }
 
 func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.WorkReport, ok bool, err error) {
@@ -51,11 +59,46 @@ func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
 func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	// TODO: Stanley
 	s := n.getPVMStateDB()
-	stateRoot := s.GetStateRoot()
+	// stateRoot := s.GetStateRoot()
+	blocks, ok, err := n.BlocksLookup(headerHash, 0, 1)
+	if !ok || err != nil {
+		fmt.Printf("BlocksLookup ERR %v\n", err)
+		return boundarynodes, keyvalues, false, err
+	}
+	stateRoot := blocks[0].Header.ParentStateRoot
 	trie := s.CopyTrieState(stateRoot)
 	foundKeyVal, boundaryNode, err := trie.GetStateByRange(startKey[:], endKey[:], maximumSize)
+	if err != nil {
+		fmt.Printf("GetState ERR %v\n", err)
+		return boundarynodes, keyvalues, false, err
+	}
 	keyvalues = types.StateKeyValueList{Items: foundKeyVal}
-	return boundaryNode, keyvalues, false, nil
+	return boundaryNode, keyvalues, true, nil
+}
+
+func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, key []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+	return n.getServiceIdxStorage(headerHash, service_idx, key)
+}
+
+func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, key []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+	s := n.getPVMStateDB()
+	// stateRoot := s.GetStateRoot()
+	blocks, ok, err := n.BlocksLookup(headerHash, 0, 1)
+	if !ok || err != nil {
+		fmt.Printf("BlocksLookup ERR %v\n", err)
+		return boundarynodes, keyvalues, false, err
+	}
+	stateRoot := blocks[0].Header.ParentStateRoot
+	stateTrie := s.CopyTrieState(stateRoot)
+	service_account := trie.ComputeC_sh(service_idx, key)
+	maxSize := uint32(1000000)
+	foundKeyVal, boundaryNode, err := stateTrie.GetStateByRange(service_account[:], common.Hex2Bytes("0xFFFFFFFFFF"), maxSize)
+	if err != nil {
+		fmt.Printf("GetState ERR %v\n", err)
+		return boundarynodes, keyvalues, false, err
+	}
+	keyvalues = types.StateKeyValueList{Items: foundKeyVal}
+	return boundaryNode, keyvalues, true, nil
 }
 
 func (n *Node) IsSelfRequesting(peerIdentifier string) bool {

@@ -2,6 +2,8 @@ package node
 
 import (
 	"fmt"
+	"reflect"
+
 	//"time"
 	"bytes"
 	"encoding/json"
@@ -11,6 +13,65 @@ import (
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
+
+func (n *Node) StoreBlock(blk *types.Block) error {
+	// from block, derive blockHash & headerHash
+	s, err := n.GetStorage()
+	if err != nil {
+		fmt.Printf("Error getting storage: %v\n", err)
+		return err
+	}
+	headerhash := blk.Header.Hash()
+	blockHash := blk.Hash()
+
+	// header_<headerhash> -> blockHash.
+	headerPrefix := []byte("header_")
+	storeKey := append(headerPrefix, headerhash[:]...)
+	s.WriteRawKV(storeKey, blockHash[:])
+
+	// blk_<blockHash> -> codec(block)
+	blockPrefix := []byte("blk_")
+	blkStoreKey := append(blockPrefix, blockHash[:]...)
+	encodedblk, err := types.Encode(blk)
+	if err != nil {
+		fmt.Printf("Error encoding block: %v\n", err)
+		return err
+	}
+	s.WriteRawKV(blkStoreKey, encodedblk)
+
+	// child_<parentHash>_headerhash -> blockHash and potentially use "seek"
+	childPrefix := []byte("child_")
+	childStoreKey := append(childPrefix, blk.Header.Parent[:]...)
+	childStoreKey = append(childStoreKey, headerhash[:]...)
+	s.WriteRawKV(childStoreKey, blockHash[:])
+	return nil
+}
+
+func (n *Node) GetBlockByHeader(blkHeader common.Hash) (types.Block, error) {
+	//header_<headerhash> -> blockHash
+	headerPrefix := []byte("header_")
+	storeKey := append(headerPrefix, blkHeader[:]...)
+	blockHash, err := n.ReadRawKV(storeKey)
+	if err != nil {
+		fmt.Printf("Error reading blockHash: %v\n", err)
+		return types.Block{}, err
+	}
+	//blk_<blockHash> -> codec(block)
+	blockPrefix := []byte("blk_")
+	blkStoreKey := append(blockPrefix, blockHash...)
+	encodedblk, err := n.ReadRawKV(blkStoreKey)
+	if err != nil {
+		fmt.Printf("Error reading block: %v\n", err)
+		return types.Block{}, err
+	}
+	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
+	if err != nil {
+		fmt.Printf("Error decoding block: %v\n", err)
+		return types.Block{}, err
+	}
+
+	return blk.(types.Block), nil
+}
 
 func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk, err error) {
 	//TODO: should probably store erasureRoot -> pbH

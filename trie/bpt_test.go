@@ -69,6 +69,7 @@ func TestTrace(t *testing.T) {
 	for _, item := range data {
 		tree.Insert(item[0], item[1])
 	}
+	tree.PrintTree(tree.Root, 0)
 	trace, err := tree.Trace(hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"))
 
 	if err != nil {
@@ -78,7 +79,8 @@ func TestTrace(t *testing.T) {
 	if len(trace) == 0 {
 		t.Error("Expected a non-empty trace, got empty")
 	}
-
+	path, _ := tree.GetPath(hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"))
+	fmt.Printf("GetPath %x\n", path)
 	tree.Close()
 	t.Logf("Trace path: %x\n", trace)
 }
