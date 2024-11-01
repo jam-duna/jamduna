@@ -22,6 +22,8 @@ const (
 	C11 = "MostRecentBlockTimeslot"
 	C12 = "PrivilegedServiceIndices"
 	C13 = "ActiveValidator"
+	C14 = "AccumulationQueue"
+	C15 = "AccumulationHistory"
 )
 */
 
@@ -346,4 +348,28 @@ func (n *JamState) SetPi(piByte []byte) {
 		return
 	}
 	n.ValidatorStatistics = validatorStatistics.([2][types.TotalValidators]Pi_state)
+}
+
+// C14 AccumulateQueue
+func (n *JamState) SetAccumulateQueue(accumulateQueueByte []byte) {
+	if len(accumulateQueueByte) == 0 {
+		return
+	}
+	validatorStatistics, _, err := types.Decode(accumulateQueueByte, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
+	if err != nil {
+		return
+	}
+	n.AccumulationQueue = validatorStatistics.([types.EpochLength][]types.AccumulationQueue)
+}
+
+// C15 AccumulateHistory
+func (n *JamState) SetAccumulateHistory(accumulateHistoryByte []byte) {
+	if len(accumulateHistoryByte) == 0 {
+		return
+	}
+	validatorStatistics, _, err := types.Decode(accumulateHistoryByte, reflect.TypeOf([types.EpochLength]types.AccumulationHistory{}))
+	if err != nil {
+		return
+	}
+	n.AccumulationHistory = validatorStatistics.([types.EpochLength]types.AccumulationHistory)
 }

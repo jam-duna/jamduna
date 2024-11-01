@@ -503,6 +503,8 @@ func TestInitial(t *testing.T) {
 		rt.SetState(C11, mostRecentBlockTimeSlotEncode)
 		rt.SetState(C12, privilegedServiceIndicesEncode)
 		rt.SetState(C13, piEncode)
+		rt.SetState(C14, accumulationQueueEncode)
+		rt.SetState(C15, accumulationHistoryEncode)
 	*/
 
 }

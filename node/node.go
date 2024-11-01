@@ -265,6 +265,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
+	node.store.WriteLog(_statedb.JamState.Snapshot().Raw(), 0)
 	node.store.WriteLog(_statedb.JamState.Snapshot(), 0)
 
 	node.statedb.PreviousGuarantors(true)
@@ -933,6 +934,10 @@ func getMessageType(obj interface{}) string {
 		return "StateSnapshot"
 	case *statedb.StateSnapshot:
 		return "StateSnapshot"
+	case statedb.StateSnapshotRaw:
+		return "Trace"
+	case *statedb.StateSnapshotRaw:
+		return "Trace"
 	case *statedb.GenesisConfig:
 		return "GenesisConfig"
 	default:
@@ -1079,6 +1084,10 @@ func (n *Node) runClient() {
 				err := n.writeDebug(newBlock, timeslot)
 				if err != nil {
 					fmt.Printf("writeDebug Block err: %v\n", err)
+				}
+				err = n.writeDebug(newStateDB.JamState.Snapshot().Raw(), timeslot)
+				if err != nil {
+					fmt.Printf("writeDebug JamStateRaw err: %v\n", err)
 				}
 				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot)
 				if err != nil {

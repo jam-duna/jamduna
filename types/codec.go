@@ -224,6 +224,23 @@ func Encode(data interface{}) ([]byte, error) {
 			return []byte{0}, nil
 		}
 		return Encode(v.Elem().Interface())
+	case reflect.Map:
+		// order by key
+		keys := v.MapKeys()
+		encoded := E(uint64(len(keys)))
+		for _, key := range keys {
+			encodedKey, err := Encode(key.Interface())
+			if err != nil {
+				return nil, err
+			}
+			encoded = append(encoded, encodedKey...)
+			encodedValue, err := Encode(v.MapIndex(key).Interface())
+			if err != nil {
+				return nil, err
+			}
+			encoded = append(encoded, encodedValue...)
+		}
+		return encoded, nil
 	default:
 		return []byte{}, fmt.Errorf("unsupported type: %s", v.Kind().String())
 	}
@@ -403,6 +420,38 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 			}
 			v.Set(ptr)
 			length += l
+		}
+	case reflect.Map:
+		map_len, l := DecodeE(data)
+		if len(data) < int(length+l) {
+			return nil, 0, fmt.Errorf("data length insufficient for map length")
+		}
+		v.Set(reflect.MakeMap(t))
+		length += l
+		for i := 0; i < int(map_len); i++ {
+			if len(data[length:]) < 1 {
+				return nil, 0, fmt.Errorf("data length insufficient for map key")
+			}
+			key, l, err := Decode(data[length:], v.Type().Key())
+			if err != nil {
+				return nil, 0, err
+			}
+			if len(data) < int(length+l) {
+				return nil, 0, fmt.Errorf("data length insufficient for map key decoding")
+			}
+			length += l
+			if len(data[length:]) < 1 {
+				return nil, 0, fmt.Errorf("data length insufficient for map value")
+			}
+			value, l, err := Decode(data[length:], v.Type().Elem())
+			if err != nil {
+				return nil, 0, err
+			}
+			if len(data) < int(length+l) {
+				return nil, 0, fmt.Errorf("data length insufficient for map value decoding")
+			}
+			length += l
+			v.SetMapIndex(reflect.ValueOf(key), reflect.ValueOf(value))
 		}
 	}
 	return v.Interface(), length, nil

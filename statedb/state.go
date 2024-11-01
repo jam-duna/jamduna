@@ -14,16 +14,19 @@ type AuthorizationQueue [types.TotalCores][]common.Hash
 type AvailabilityAssignments [types.TotalCores]*Rho_state
 
 type JamState struct {
-	AuthorizationsPool       [types.TotalCores][]common.Hash    `json:"authorizations_pool"` // alpha The core αuthorizations pool. α eq 85
-	AuthorizationQueue       AuthorizationQueue                 `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
-	RecentBlocks             RecentBlocks                       `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
-	SafroleStateGamma        SafroleBasicState                  `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
-	SafroleState             *SafroleState                      `json:"safrole"`
-	PriorServiceAccountState map[uint32]types.ServiceAccount    `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
-	AvailabilityAssignments  AvailabilityAssignments            `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
-	DisputesState            Psi_state                          `json:"disputes_state"`              // psi - Disputes ψ eq 97
-	PrivilegedServiceIndices Kai_state                          `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
-	ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"validator_statistics"`        // pi The validator statistics. π eq 171
+	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"authorizations_pool"` // alpha The core αuthorizations pool. α eq 85
+	AuthorizationQueue       AuthorizationQueue                           `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
+	RecentBlocks             RecentBlocks                                 `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
+	SafroleStateGamma        SafroleBasicState                            `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
+	SafroleState             *SafroleState                                `json:"safrole"`
+	PriorServiceAccountState map[uint32]types.ServiceAccount              `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
+	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
+	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
+	PrivilegedServiceIndices Kai_state                                    `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
+	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"validator_statistics"`        // pi The validator statistics. π eq 171
+	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"accumulate_queue"`            // theta - The accumulation queue  θ eq 164
+	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulate_history"`          // xi - The accumulation history  ξ eq 162
+
 }
 
 func (b *Beta_state) MMR_Bytes() []byte {

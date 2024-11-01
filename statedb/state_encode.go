@@ -295,3 +295,21 @@ func (n *JamState) GetPiBytes() []byte {
 	}
 	return encoded
 }
+
+// C14
+func (n *JamState) GetAccumulationQueueBytes() []byte {
+	encoded, err := types.Encode(n.AccumulationQueue)
+	if err != nil {
+		return []byte{}
+	}
+	return encoded
+}
+
+// C15
+func (n *JamState) GetAccumulationHistoryBytes() []byte {
+	encoded, err := types.Encode(n.AccumulationHistory)
+	if err != nil {
+		return []byte{}
+	}
+	return encoded
+}

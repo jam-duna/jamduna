@@ -64,3 +64,26 @@ func TestGetState(t *testing.T) {
 		time.Sleep(6 * time.Second)
 	}
 }
+
+func TestStateRaw(t *testing.T) {
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	if err != nil {
+		t.Fatalf("Error Seeting up nodes: %v\n", err)
+	}
+
+	nodes := make([]*Node, numNodes)
+	for i := 0; i < numNodes; i++ {
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
+		if err != nil {
+			t.Fatalf("Failed to create node %d: %v\n", i, err)
+		}
+		//node.state = statedb.ProcessGenesis(genesisAuthorities)
+		nodes[i] = node
+	}
+	// statedb.RunGraph()
+	for {
+		node := nodes[0]
+		snapshot:=node.statedb.GetJamSnapshot()
+		fmt.Println("snapshot:",snapshot)
+	}
+}

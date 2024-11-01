@@ -3,13 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+
+	// "encoding/json"
 
 	"flag"
 	"fmt"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -17,10 +16,33 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 )
 
+func readSnapshotRaw(fn string) (statesnapshot *statedb.StateSnapshot, snapshotBytesRaw []byte, err error) {
+	/*
+	statesnapshotraw := statedb.StateSnapshotRaw{}
+	TODO: Sean needs to do somekind of decode to first get StateSnapshotRaw. Then you can do StateSnapshotRaw -> StateSnapshot
+	rest would be the same...
+	*/
+	snapshotBytesRaw, err = os.ReadFile(fn)
+	if err != nil {
+		log.Fatalf("[readSnapshot:ReadFile] %s ERR %v\n", fn, err)
+		return
+	}
+	snapshotRaw := statedb.StateSnapshotRaw{}
+	json.Unmarshal(snapshotBytesRaw, &snapshotRaw)
+	statesnapshot = snapshotRaw.FromStateSnapshotRaw()
+	fmt.Printf("snapshotBytesRaw: %s\n", snapshotBytesRaw)
+
+	return statesnapshot, snapshotBytesRaw, err
+}
+
 func readSnapshot(fn string) (statesnapshot *statedb.StateSnapshot, snapshotBytes []byte, err error) {
-	snapshotBytes, err = ioutil.ReadFile(fn)
+	snapshotBytes, err = os.ReadFile(fn)
 	if err != nil {
 		log.Fatalf("[readSnapshot:ReadFile] %s ERR %v\n", fn, err)
 		return
@@ -42,7 +64,8 @@ func processBlocks(genesisFile string, basePath string) error {
 	}
 
 	// Read the snapshot file into snapshotBytes
-	statesnapshot, _, err := readSnapshot(genesisFile)
+	statesnapshot, _, err := readSnapshotRaw(genesisFile) // this should be well-formed snashopt. not the []kv version
+	//statesnapshot, _, err := readSnapshot(genesisFile)
 	if err != nil {
 		return err
 	}
@@ -52,12 +75,12 @@ func processBlocks(genesisFile string, basePath string) error {
 		log.Fatalf("Error InitStateDBFromSnapshot %v\n", err)
 	}
 	blocksDir := filepath.Join(basePath, "blocks")
-	snapshotsDir := filepath.Join(basePath, "state_snapshots")
+	snapshotsDir := filepath.Join(basePath, "state_snapshots") // should pointed to the newest trace format
 
 	blocks := make(map[int]map[int]types.Block)
 
 	// Find all block files in blocksDir
-	blockFiles, err := ioutil.ReadDir(blocksDir)
+	blockFiles, err := os.ReadDir(blocksDir)
 	if err != nil {
 		return fmt.Errorf("failed to read blocks directory: %v", err)
 	}
@@ -86,7 +109,7 @@ func processBlocks(genesisFile string, basePath string) error {
 
 			// Read the block file
 			blockPath := filepath.Join(blocksDir, file.Name())
-			blockBytes, err := ioutil.ReadFile(blockPath)
+			blockBytes, err := os.ReadFile(blockPath)
 			if err != nil {
 				log.Printf("Error reading block file %s: %v\n", blockPath, err)
 				continue
@@ -142,7 +165,7 @@ func processBlocks(genesisFile string, basePath string) error {
 			// Check if the corresponding snapshot file exists
 			if _, err := os.Stat(snapshotPath); err == nil {
 				// Read the snapshot file into expectedSnapshotBytes
-				_, expectedSnapshotBytes, err := readSnapshot(snapshotPath)
+				_, expectedSnapshotBytes, err := readSnapshotRaw(snapshotPath)
 				if err != nil {
 					log.Fatalf("failed to read snapshot %s\n", snapshotFile)
 				}

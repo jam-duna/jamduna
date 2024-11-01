@@ -1,5 +1,16 @@
 package types
 
+import "github.com/colorfulnotion/jam/common"
+
+type AccumulationQueue struct {
+	WorkReports     []WorkReport  `json:"work_reports"`
+	WorkPackageHash []common.Hash `json:"work_package_hash"`
+}
+
+type AccumulationHistory struct {
+	WorkPackageHash []common.Hash `json:"work_package_hash"`
+}
+
 type Empower struct {
 	M uint32
 	A uint32

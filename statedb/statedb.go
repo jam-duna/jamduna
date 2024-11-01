@@ -332,6 +332,8 @@ const (
 	C11 = "MostRecentBlockTimeslot"
 	C12 = "PrivilegedServiceIndices"
 	C13 = "ActiveValidator"
+	C14 = "AccumulationQueue"
+	C15 = "AccumulationHistory"
 )
 
 // Initial services
@@ -487,6 +489,14 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	if err != nil {
 		fmt.Printf("Error reading C13 ActiveValidator from trie: %v\n", err)
 	}
+	accunulateQueueEncode, err := t.GetState(C14)
+	if err != nil {
+		fmt.Printf("Error reading C14 accunulateQueue from trie: %v\n", err)
+	}
+	accunulateHistoryEncode, err := t.GetState(C15)
+	if err != nil {
+		fmt.Printf("Error reading C15 accunulateHistory from trie: %v\n", err)
+	}
 	//Decode(authQueueEncode) -> AuthorizationQueue
 	//set AuthorizationQueue back to JamState
 
@@ -511,6 +521,8 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetRho(rhoEncode)
 	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
 	d.SetPi(piEncode)
+	d.SetAccumulateQueue(accunulateQueueEncode)
+	d.SetAccumulateHistory(accunulateHistoryEncode)
 
 	s.SetJamState(d)
 	//fmt.Printf("[N%v] RecoverJamState %v\n", s.Id, s.GetJamSnapshot())
@@ -545,6 +557,10 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	privilegedServiceIndicesEncode := d.GetPrivilegedServicesIndicesBytes()
 	recentBlocksEncode := d.GetRecentBlocksBytes()
 
+	// TODO:Implement real Accumulation Queue and Accumulation History
+	accunulateQueueEncode := d.GetAccumulationQueueBytes()
+	accunulateHistoryEncode := d.GetAccumulationHistoryBytes()
+
 	t := s.GetTrie()
 	prev_root := t.GetRoot()
 	debug := false
@@ -562,6 +578,8 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C11, mostRecentBlockTimeSlotEncode)
 	t.SetState(C12, privilegedServiceIndicesEncode)
 	t.SetState(C13, piEncode)
+	t.SetState(C14, accunulateQueueEncode)
+	t.SetState(C15, accunulateHistoryEncode)
 	updated_root := t.GetRoot()
 
 	if debug {
@@ -580,6 +598,8 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		// fmt.Printf("C11 mostRecentBlockTimeSlotEncode %x \n", mostRecentBlockTimeSlotEncode)
 		// fmt.Printf("C12 privilegedServiceIndicesEncode %x \n", privilegedServiceIndicesEncode)
 		// fmt.Printf("C13 piEncode %x \n", piEncode)
+		// fmt.Printf("C14 accunulateQueueEncode %x \n", accunulateQueueEncode)
+		// fmt.Printf("C15 accunulateHistoryEncode %x \n", accunulateHistoryEncode)
 	}
 
 	if debug || verify {
@@ -701,6 +721,18 @@ func CheckingAllState(t *trie.MerkleTree, t2 *trie.MerkleTree) (bool, error) {
 	if !common.CompareBytes(c13a, c13b) {
 		fmt.Printf("C13 is not the same\n")
 		return false, fmt.Errorf("C13 is not the same")
+	}
+	c14a, _ := t.GetState(C14)
+	c14b, _ := t2.GetState(C14)
+	if !common.CompareBytes(c14a, c14b) {
+		fmt.Printf("C14 is not the same\n")
+		return false, fmt.Errorf("C14 is not the same")
+	}
+	c15a, _ := t.GetState(C15)
+	c15b, _ := t2.GetState(C15)
+	if !common.CompareBytes(c15a, c15b) {
+		fmt.Printf("C15 is not the same\n")
+		return false, fmt.Errorf("C15 is not the same")
 	}
 	return true, nil
 }

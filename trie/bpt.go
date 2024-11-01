@@ -38,6 +38,8 @@ const (
 	C11 = "MostRecentBlockTimeslot"
 	C12 = "PrivilegedServiceIndices"
 	C13 = "ActiveValidator"
+	C14 = "AccumulationQueue"
+	C15 = "AccumulationHistory"
 )
 
 const (
@@ -618,6 +620,10 @@ func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 		stateKey[0] = 0x0C
 	case C13:
 		stateKey[0] = 0x0D
+	case C14:
+		stateKey[0] = 0x0E
+	case C15:
+		stateKey[0] = 0x0F
 	}
 	if debug {
 		fmt.Printf("SetState %v stateKey=%x | value=%x\n", _stateIdentifier, stateKey, value)
@@ -655,6 +661,10 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 		stateKey[0] = 0x0C
 	case C13:
 		stateKey[0] = 0x0D
+	case C14:
+		stateKey[0] = 0x0E
+	case C15:
+		stateKey[0] = 0x0F
 	}
 	value, err := t.Get(stateKey)
 	if debug {
