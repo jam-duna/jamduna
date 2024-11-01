@@ -78,7 +78,7 @@ func (s *StateDB) AddLookupToQueue(l types.Preimages) {
 func (s *StateDB) AddJudgementToQueue(j types.Judgement) {
 	s.judgementMutex.Lock()
 	defer s.judgementMutex.Unlock()
-	s.queueJudgements[j.WorkReport.Hash()] = j
+	s.queueJudgements[j.WorkReportHash] = j
 }
 
 func (s *StateDB) AddGuaranteeToQueue(g types.Guarantee) {
@@ -243,7 +243,7 @@ func (s *StateDB) RemoveAssurance(a *types.Assurance) {
 func (s *StateDB) RemoveJudgement(j *types.Judgement) {
 	s.judgementMutex.Lock()
 	defer s.judgementMutex.Unlock()
-	delete(s.queueJudgements, j.WorkReport.Hash())
+	delete(s.queueJudgements, j.WorkReportHash)
 }
 
 // IsAuthorizedPVM performs the is-authorized PVM function.
@@ -265,6 +265,7 @@ const (
 	debug                     = false
 	debugA                    = false
 	debugG                    = false
+	debugAudit                = false
 	trace                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
@@ -391,6 +392,10 @@ func InitStateDBFromSnapshot(sdb *storage.StateDBStorage, snapshot *StateSnapsho
 	statedb.StateRoot = statedb.UpdateTrieState()
 
 	return statedb, nil
+}
+
+func (s *StateDB) HeaderHash() common.Hash {
+	return s.Block.Header.Hash()
 }
 
 func (s *StateDB) GetStateRoot() common.Hash {
@@ -807,6 +812,8 @@ func (s *StateDB) CopyTrieState(stateRoot common.Hash) *trie.MerkleTree {
 func (s *StateDB) Copy() (newStateDB *StateDB) {
 	// Create a new instance of StateDB
 	// T.P.G.A.
+	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
+	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 	newStateDB = &StateDB{
 		Id:                    s.Id,
 		Block:                 s.Block.Copy(), // You might need to deep copy the Block if it's mutable
@@ -828,6 +835,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		queuedAssurances:      make(map[common.Hash]types.Assurance),
 		queueJudgements:       make(map[common.Hash]types.Judgement),
 		logChan:               make(chan storage.LogMessage, 100),
+		AvailableWorkReport:   tmpAvailableWorkReport,
 		/*
 			Following flds are not copied over..?
 

@@ -212,7 +212,7 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream) error {
 	case CE143_PreimageRequest:
 		n.onPreimageRequest(stream, msg)
 	case CE144_AuditAnnouncement:
-		n.onAuditAnnouncement(stream, msg)
+		n.onAuditAnnouncement(stream, msg, peerID)
 	case CE145_JudgmentPublication:
 		n.onJudgmentPublication(stream, msg, peerID)
 	default:

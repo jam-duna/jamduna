@@ -275,9 +275,16 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		panic(123)
 	}
-	guarantee, _, _, err := n.executeWorkPackage(bp.WorkPackage)
+	workReport, err := n.executeWorkPackageBundle(*bp)
 	if err != nil {
 		return
+	} else {
+		n.workReportsCh <- workReport
+	}
+	gc := workReport.Sign(n.GetEd25519Secret(), uint16(n.GetCurrValidatorIndex()))
+	guarantee := types.Guarantee{
+		Report:     workReport,
+		Signatures: []types.GuaranteeCredential{gc},
 	}
 	if len(guarantee.Signatures) == 0 {
 		return fmt.Errorf("onWorkPackageShare: No guarantee signature")

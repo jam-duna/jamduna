@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"time"
 
 	"encoding/binary"
 	"encoding/json"
@@ -339,7 +340,6 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage) types.WorkPackageBundle
 	workItems := p.WorkItems
 	workItemCnt := len(workItems)
 	// p - workPackage
-
 	// x - [extrinsic data] for some workitem argument w
 	extrinsicData := make([]types.ExtrinsicsBlobs, workItemCnt)
 	for workIdx, workItem := range workItems {
@@ -455,9 +455,73 @@ func (n *Node) VerifyWorkPackageBundle(package_bundle types.WorkPackageBundle) b
 	}
 }
 
+func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle) (work_report types.WorkReport, err error) {
+	start := time.Now()
+	results := []types.WorkResult{}
+	targetStateDB := n.getPVMStateDB()
+	workPackage := package_bundle.WorkPackage
+	service_index := uint32(workPackage.AuthCodeHost)
+	workPackageHash := workPackage.Hash()
+	Importsegments := make([][]byte, 0)
+	// Import Segments
+	for _, segment := range package_bundle.ImportSegmentData {
+		Importsegments = append(Importsegments, segment...)
+	}
+	var segments [][]byte
+	for _, workItem := range workPackage.WorkItems {
+		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
+		if len(code) == 0 {
+			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
+			fmt.Println(err)
+			return
+		}
+		if common.Blake2Hash(code) != workItem.CodeHash {
+			fmt.Printf("Code and CodeHash Mismatch\n")
+			panic(0)
+		}
+		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
+		vm.IsMalicious = false
+		vm.SetImports(Importsegments)
+		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
+		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, workItem.ExtrinsicsBlobs)
+		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
+		for i := 0; i < len(exports); i += types.W_E * types.W_S {
+			segments = append(segments, exports[i:i+types.W_E*types.W_S])
+		}
+		result := types.WorkResult{
+			Service:     workItem.Service,
+			CodeHash:    workItem.CodeHash,
+			PayloadHash: common.Blake2Hash(workItem.Payload),
+			GasRatio:    0,
+			Result:      output,
+		}
+		results = append(results, result)
+	}
+	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments)
+	core, err := n.GetSelfCoreIndex()
+	if err != nil {
+		return
+	}
+	workReport := types.WorkReport{
+		AvailabilitySpec: *spec,
+		AuthorizerHash:   common.HexToHash("0x"), // SKIP
+		CoreIndex:        core,
+		RefineContext:    workPackage.RefineContext,
+		Results:          results,
+	}
+	if debugG {
+		fmt.Printf("%s executeWorkPackage  workreporthash %v => erasureRoot: %v\n", n.String(), common.Str(workReport.Hash()), spec.ErasureRoot)
+	}
+	n.StoreMeta_Guarantor(spec, erasureMeta, bECChunks, sECChunksArray)
+	if debugE {
+		fmt.Printf("%s executeWorkPackageBundle took %v\n", n.String(), time.Since(start))
+	}
+	return workReport, err
+}
+
 // work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error
 func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
-
+	start := time.Now()
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
@@ -554,6 +618,9 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 	guarantee = types.Guarantee{
 		Report:     workReport,
 		Signatures: []types.GuaranteeCredential{gc},
+	}
+	if debugE {
+		fmt.Printf("%s executeWorkPackage took %v\n", n.String(), time.Since(start))
 	}
 	return
 }

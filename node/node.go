@@ -33,17 +33,19 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	debugDA = false // DA
-	debugB  = false // Blocks, Announcment
-	debugG  = false // Guaranteeing
-	debugT  = false // Tickets/Safrole
-	debugP  = false // Preimages
-	debugA  = false // Assurances
-	debugJ  = false // Audits + Judgements
-	debugF  = false // Finality
-	debug   = false // General Node Ops
+	debugDA    = false // DA
+	debugB     = false // Blocks, Announcment
+	debugG     = false // Guaranteeing
+	debugT     = false // Tickets/Safrole
+	debugP     = false // Preimages
+	debugA     = false // Assurances
+	debugF     = false // Finality
+	debugJ     = false // Audits + Judgements
+	debug      = false // General Node Ops
+	debugAudit = false // Audit
+	trace      = false
+	debugE     = true // monitoring fn execution time
 
-	trace    = false
 	numNodes = 6
 	quicAddr = "127.0.0.1:%d"
 	basePort = 9000
@@ -71,13 +73,15 @@ type Node struct {
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
-	// this is for audit
-	announcementBucket     types.AnnounceBucket
-	prevAnnouncementBucket types.AnnounceBucket
-	announcementMutex      sync.Mutex
 
-	judgementBucket types.JudgeBucket
-	judgementMutex  sync.Mutex
+	// this is for audit
+	// announcement [headerHash -> [wr_hash]]
+	//auditing_statedb *statedb.StateDB
+	auditingMap     sync.Map
+	announcementMap sync.Map // headerHash -> stateDB
+	judgementMap    sync.Map // headerHash -> JudgeBucket
+	//judgementBucket types.JudgeBucket
+	judgementWRMap map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this
 
 	isBadGuarantor bool
 
@@ -108,6 +112,12 @@ type Node struct {
 	preimageAnnouncementsCh chan types.PreimageAnnouncement
 	announcementsCh         chan types.Announcement
 	judgementsCh            chan types.Judgement
+	auditingCh              chan *statedb.StateDB // use this to trigger auditing, block hash
+
+	waitingAnnouncements      []types.Announcement
+	waitingAnnouncementsMutex sync.Mutex
+	waitingJudgements         []types.Judgement
+	waitingJudgementsMutex    sync.Mutex
 
 	// holds a map of the hash to the stateDB
 	statedbMap      map[common.Hash]*statedb.StateDB
@@ -229,11 +239,13 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		tlsConfig: tlsConfig,
 		nodeType:  nodeType,
 
-		statedbMap: make(map[common.Hash]*statedb.StateDB),
-		blocks:     make(map[common.Hash]*types.Block),
-		headers:    make(map[common.Hash]*types.Block),
-		preimages:  make(map[common.Hash][]byte),
-		services:   make(map[uint32]common.Hash),
+		statedbMap:     make(map[common.Hash]*statedb.StateDB),
+		judgementWRMap: make(map[common.Hash]common.Hash),
+
+		blocks:    make(map[common.Hash]*types.Block),
+		headers:   make(map[common.Hash]*types.Block),
+		preimages: make(map[common.Hash][]byte),
+		services:  make(map[uint32]common.Hash),
 
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
@@ -247,7 +259,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		preimageAnnouncementsCh: make(chan types.PreimageAnnouncement, 200),
 		announcementsCh:         make(chan types.Announcement, 200),
 		judgementsCh:            make(chan types.Judgement, 200),
-		dataDir:                 dataDir,
+		auditingCh:              make(chan *statedb.StateDB, 200),
+
+		dataDir: dataDir,
 	}
 	for validatorIndex, p := range startPeerList {
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
@@ -274,6 +288,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	go node.runServer()
 	go node.runClient()
 	go node.runMain()
+	go node.runAudit()
 	return node, nil
 }
 
@@ -525,12 +540,9 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				fmt.Printf("SendAssurance ERR %v\n", err)
 			}
 			break
-		case reflect.TypeOf(types.Announcement{}):
-			a := obj.(types.Announcement)
-			coreIndex := a.Core
-			workReportHash := a.WorkReportHash
-			headerHash := a.HeaderHash
-			err := p.SendAuditAnnouncement(workReportHash, headerHash, coreIndex, &a)
+		case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
+			a := obj.(JAMSNPAuditAnnouncementWithProof)
+			err := p.SendAuditAnnouncement(&a)
 			if err != nil {
 				fmt.Printf("SendAuditAnnouncement ERR %v\n", err)
 			}
@@ -664,8 +676,12 @@ func (n *Node) extendChain() error {
 					fmt.Printf("%s [extendChain:addStateDB] TIP Now: s:%v<-%v\n", n.String(), newStateDB.ParentHash, newStateDB.BlockHash)
 				}
 				n.assureNewBlock(b)
+				n.statedbMapMutex.Lock()
+				n.auditingCh <- n.statedbMap[n.statedb.BlockHash].Copy()
+				n.statedbMapMutex.Unlock()
 				break
 			}
+
 		}
 
 		if !ok {
@@ -1095,6 +1111,9 @@ func (n *Node) runClient() {
 				}
 
 				n.assureNewBlock(newBlock)
+				n.statedbMapMutex.Lock()
+				n.auditingCh <- n.statedbMap[n.statedb.BlockHash].Copy()
+				n.statedbMapMutex.Unlock()
 			}
 
 		case log := <-logChan:

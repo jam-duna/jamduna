@@ -83,7 +83,7 @@ func TestStateRaw(t *testing.T) {
 	// statedb.RunGraph()
 	for {
 		node := nodes[0]
-		snapshot:=node.statedb.GetJamSnapshot()
-		fmt.Println("snapshot:",snapshot)
+		snapshot := node.statedb.GetJamSnapshot()
+		fmt.Println("snapshot:", snapshot)
 	}
 }

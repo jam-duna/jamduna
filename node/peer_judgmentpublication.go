@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"encoding/binary"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -113,7 +114,7 @@ func (p *Peer) SendJudgmentPublication(epoch uint32, j types.Judgement) (err err
 		Epoch:          epoch,
 		ValidatorIndex: j.Validator,
 		Validity:       validity,
-		WorkReportHash: j.WorkReport.Hash(),
+		WorkReportHash: j.WorkReportHash,
 	}
 	copy(req.Signature[:], j.Signature[:])
 
@@ -148,9 +149,9 @@ func (n *Node) onJudgmentPublication(stream quic.Stream, msg []byte, peerID uint
 		//Epoch: jp.Epoch,
 		Judge: judge,
 		// TODO: Shawn CHECK
-		Tranche: 0,
-		// WorkReport: WorkReport,
-		Validator: jp.ValidatorIndex,
+		WorkReportHash: jp.WorkReportHash,
+		Validator:      jp.ValidatorIndex,
+		Signature:      jp.Signature,
 	}
 	copy(judgement.Signature[:], jp.Signature[:])
 	n.judgementsCh <- judgement

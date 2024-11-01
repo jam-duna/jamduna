@@ -75,6 +75,10 @@ func (b *BlockHeader) UnsignedHash() common.Hash {
 	return common.Blake2Hash(unsignedBytes)
 }
 
+func (b *BlockHeader) HeaderHash() common.Hash {
+	return b.Hash()
+}
+
 // Hash returns the hash of the block in unsigned form.
 func (b *BlockHeader) Hash() common.Hash {
 	data := b.BytesWithSig()

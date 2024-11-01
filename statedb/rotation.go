@@ -54,12 +54,8 @@ func Permute(e common.Hash, t uint32) []uint16 {
 }
 
 // 134
-func (s *StateDB) AssignGuarantors(lock ...bool) {
-	lockbool := false
-	if len(lock) > 0 {
-		lockbool = lock[0]
-	}
-	if lockbool {
+func (s *StateDB) AssignGuarantors(lock bool) {
+	if lock {
 		assignments := make([]types.GuarantorAssignment, 0)
 		entropy := common.Blake2Hash([]byte("colorfulnotion"))
 		t := uint32(222)
@@ -105,12 +101,8 @@ func (s *StateDB) AssignGuarantorsTesting(entropy common.Hash) []types.Guarantor
 }
 
 // 135
-func (s *StateDB) PreviousGuarantors(lock ...bool) {
-	lockbool := false
-	if len(lock) > 0 {
-		lockbool = lock[0]
-	}
-	if lockbool {
+func (s *StateDB) PreviousGuarantors(lock bool) {
+	if lock {
 		assignments := make([]types.GuarantorAssignment, 0)
 		entropy := common.Blake2Hash([]byte("colorfulnotion"))
 		t := uint32(222)

@@ -5,6 +5,7 @@ import (
 	//"context"
 	//"errors"
 	"fmt"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
@@ -206,8 +207,14 @@ func (n *Node) cacheWorkReportRead(h common.Hash) (workReport types.WorkReport, 
 }
 
 func (n *Node) runMain() {
+	// MK: adding ticker here to avoid high CPU usage
+	paulseTicker := time.NewTicker(1 * time.Millisecond)
+	defer paulseTicker.Stop()
+
 	for {
 		select {
+		case <-paulseTicker.C:
+			// Small pause to reduce CPU load when channels are quiet
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
 			//fmt.Printf("[N%d] received Block Announcement from %d\n", n.id, blockAnnouncement.ValidatorIndex)
 			b, err := n.processBlockAnnouncement(blockAnnouncement)
@@ -219,9 +226,12 @@ func (n *Node) runMain() {
 		case ticket := <-n.ticketsCh:
 			n.processTicket(ticket)
 		case workPackage := <-n.workPackagesCh:
-			_, _, _, err := n.executeWorkPackage(workPackage)
+			g, _, _, err := n.executeWorkPackage(workPackage)
+			wr := g.Report
 			if err != nil {
 				fmt.Printf("executeWorkPackage: %v\n", err)
+			} else {
+				n.workReportsCh <- wr
 			}
 		case workReport := <-n.workReportsCh:
 			if n.workReports == nil {

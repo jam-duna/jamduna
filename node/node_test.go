@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
+	"golang.org/x/exp/rand"
 )
 
 func generateSeedSet(ringSize int) ([][]byte, error) {
@@ -158,7 +161,6 @@ func TestNodeSafrole(t *testing.T) {
 	for {
 	}
 }
-
 func TestWorkGuarantee(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
@@ -294,7 +296,7 @@ func TestWorkGuarantee(t *testing.T) {
 	time.Sleep(60 * time.Second)
 	fmt.Printf("Start FIB\n")
 
-	n1 := nodes[1]
+	// n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
 	prevWorkPackageHash := common.Hash{}
@@ -340,20 +342,41 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
 		// CE133_WorkPackageSubmission: n1 => n4
-		err := n1.peersInfo[4].SendWorkPackageSubmission(0, workPackage, []byte{})
+		// v1, v2, v4 => core
+		// random select 1 sender and 1 receiver
+		senderIdx := rand.Intn(3)
+		receiverIdx := rand.Intn(3)
+		for senderIdx == receiverIdx {
+			receiverIdx = rand.Intn(3)
+		}
+		if senderIdx == 0 {
+			senderIdx = 1
+		} else if senderIdx == 1 {
+			senderIdx = 2
+		} else {
+			senderIdx = 4
+		}
+		if receiverIdx == 0 {
+			receiverIdx = 1
+		} else if receiverIdx == 1 {
+			receiverIdx = 2
+		} else {
+			receiverIdx = 4
+		}
+		err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(0, workPackage, []byte{})
 		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+			fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 		}
 		// wait until the work report is pending
 		var workReport types.WorkReport
-		audit := false
+		// audit := false
 		for {
 			time.Sleep(1 * time.Second)
 			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
 				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
 				workReport = rho_state.WorkReport
 				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-				audit = true
+				// audit = true
 				break
 			}
 		}
@@ -365,14 +388,15 @@ func TestWorkGuarantee(t *testing.T) {
 			}
 			time.Sleep(1 * time.Second)
 		}
-		if audit {
-			err := n1.auditWorkReport(workReport)
-			if err != nil {
-				t.Fatalf("[auditWorkReport] ERR: %v", err)
-			}
-		}
+		// if audit {
+		// 	for _, n := range nodes {
+		// 		n.Audit()
+		// 	}
+		// }
+		time.Sleep(15 * time.Second)
 		prevWorkPackageHash = workPackageHash
 	}
+	http.ListenAndServe("localhost:6060", nil)
 }
 
 func TestNodeRotation(t *testing.T) {

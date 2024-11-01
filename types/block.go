@@ -63,6 +63,22 @@ func (b *Block) Copy() *Block {
 	c.Extrinsic.Tickets = make([]Ticket, len(b.Extrinsic.Tickets))
 	copy(c.Extrinsic.Tickets, b.Extrinsic.Tickets)
 
+	c.Extrinsic.Preimages = make([]Preimages, len(b.Extrinsic.Preimages))
+	copy(c.Extrinsic.Preimages, b.Extrinsic.Preimages)
+
+	c.Extrinsic.Guarantees = make([]Guarantee, len(b.Extrinsic.Guarantees))
+	copy(c.Extrinsic.Guarantees, b.Extrinsic.Guarantees)
+
+	c.Extrinsic.Assurances = make([]Assurance, len(b.Extrinsic.Assurances))
+	copy(c.Extrinsic.Assurances, b.Extrinsic.Assurances)
+
+	c.Extrinsic.Disputes.Verdict = make([]Verdict, len(b.Extrinsic.Disputes.Verdict))
+	copy(c.Extrinsic.Disputes.Verdict, b.Extrinsic.Disputes.Verdict)
+	c.Extrinsic.Disputes.Culprit = make([]Culprit, len(b.Extrinsic.Disputes.Culprit))
+	copy(c.Extrinsic.Disputes.Culprit, b.Extrinsic.Disputes.Culprit)
+	c.Extrinsic.Disputes.Fault = make([]Fault, len(b.Extrinsic.Disputes.Fault))
+	copy(c.Extrinsic.Disputes.Fault, b.Extrinsic.Disputes.Fault)
+
 	return c
 }
 

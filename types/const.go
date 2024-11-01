@@ -51,7 +51,7 @@ const (
 	W_S = 6 // W_S = 6: The size of an exported segment in erasure-coded pieces.
 	W_E = 4 // W_E = 684: The basic size of our erasure-coded pieces. See equation 316.
 
-	PeriodSecond                     = 8              // A=6 represents the period, in seconds, between audit tranches.
+	PeriodSecond                     = 4              // A=8 represents the period, in seconds, between audit tranches.
 	MinElectiveServiceItemBalance    = 10             // B_I represents the additional minimum balance required per item of elective service state.
 	MinElectiveServiceOctetBalance   = 1              // B_L represents the additional minimum balance required per octet of elective service state.
 	BaseServiceBalance               = 100            // B_S = 100: The basic minimum balance which all services require.

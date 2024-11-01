@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
@@ -53,12 +54,16 @@ func (s *StateDB) GetWorkReportNeedAuditTiny() []types.WorkReport {
 
 // eq 190
 func (s *StateDB) Get_s0Quantity(V bandersnatch.BanderSnatchSecret) ([]byte, error) {
+	if len(V) != 32 {
+		return nil, errors.New("Invalid length of V")
+	}
 	alias, err := AliasOutput(s.Block.Header.EntropySource.Bytes())
 	if err != nil {
 		return nil, err
 	}
 	signtext := append([]byte(types.X_U), alias...)
-	signature, _, err := bandersnatch.IetfVrfSign(V, []byte{}, []byte(signtext))
+	// TODO: Check the input of IetfVrfSign, the second parameter should be empty
+	signature, _, err := bandersnatch.IetfVrfSign(V, []byte{0}, []byte(signtext))
 	if err != nil {
 		return nil, err
 	}
@@ -87,16 +92,17 @@ func WorkReportToSelection(W []types.WorkReport) []types.WorkReportSelection {
 }
 
 // eq 192
-func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkReportSelection, error) {
+func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkReportSelection, bandersnatch.BandersnatchVrfSignature, error) {
 	s0, err := s.Get_s0Quantity(V)
 	if err != nil {
-		return nil, err
+		return nil, bandersnatch.BandersnatchVrfSignature{}, err
 	}
 	s0_alias, err := AliasOutput(s0)
 	if err != nil {
-		return nil, err
+		return nil, bandersnatch.BandersnatchVrfSignature{}, err
 	}
 	tmp := WorkReportToSelection(s.AvailableWorkReport)
+
 	entropy := Compute_QL(common.BytesToHash(s0_alias), len(tmp))
 	ShuffleWorkReport(tmp, entropy)
 
@@ -114,35 +120,66 @@ func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkRepo
 		}
 
 	}
-	return a0, nil
+	if len(s0) != 96 {
+		return nil, bandersnatch.BandersnatchVrfSignature{}, errors.New("Invalid length of s0")
+	}
+	var s0Signature bandersnatch.BandersnatchVrfSignature
+	copy(s0Signature[:], s0)
+	return a0, s0Signature, nil
 }
 
-func GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.JudgeBucket, W_hash common.Hash) int {
+func (s *StateDB) GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.JudgeBucket, W_hash common.Hash) ([]types.Announcement, int) {
 	count := 0
+	var announcements = make([]types.Announcement, 0)
 	for _, a := range A.Announcements[W_hash] {
+		var tmp types.Judgement
 		for _, j := range J.Judgements[W_hash] {
-			if (a.Signature == j.Signature) && (j.Judge == true) {
+			tmp = j
+			if !j.Judge && a.ValidatorIndex == uint32(j.Validator) {
 				count++
+				announcements = append(announcements, a)
+				break
+			} else if a.ValidatorIndex == uint32(j.Validator) {
+				break
 			}
 		}
+		// check the last one
+		if a.ValidatorIndex != uint32(tmp.Validator) && debugAudit {
+			fmt.Printf("[N%d] [T:%d] Validator %d didn't judge in Tranche %d\n", s.Id, s.Block.TimeSlot(), a.ValidatorIndex, a.Tranche)
+			count++
+			announcements = append(announcements, a)
+		}
 	}
-	return count
+	return announcements, count
 }
-func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 types.AnnounceBucket, J types.JudgeBucket) ([]types.WorkReportSelection, error) {
+func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 types.AnnounceBucket, J types.JudgeBucket) ([]types.WorkReportSelection, map[common.Hash][]types.Announcement, map[common.Hash]int, []bandersnatch.BandersnatchVrfSignature, error) {
 	an := []types.WorkReportSelection{}
 	availible_workreport := WorkReportToSelection(s.AvailableWorkReport)
+	no_show_announcements := make(map[common.Hash][]types.Announcement)
+	no_show_length := make(map[common.Hash]int)
+	sns := make([]bandersnatch.BandersnatchVrfSignature, 0)
 	for _, W := range availible_workreport {
 		//get the number of true count
 		sn, err := s.Get_snQuantity(V, W.WorkReport)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, nil, err
 		}
 		sn_alias, err := AliasOutput(sn)
-		if Bytes2Int(sn_alias)*types.AuditBiasFactor/256*types.TotalValidators < GetAnnouncementWithoutJtrue(A_sub1, J, W.WorkReport.GetWorkPackageHash()) {
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		announcements, length := s.GetAnnouncementWithoutJtrue(A_sub1, J, W.WorkReport.Hash())
+		if Bytes2Int(sn_alias)*types.AuditBiasFactor/256*types.TotalValidators < length || true {
 			an = append(an, W)
+			// sn=> bandersnatch.BandersnatchVrfSignature
+			var sig bandersnatch.BandersnatchVrfSignature
+			copy(sig[:], sn)
+			sns = append(sns, sig)
+			no_show_announcements[W.WorkReport.Hash()] = announcements
+			no_show_length[W.WorkReport.Hash()] = length
 		}
 	}
-	return an, nil
+	return an, no_show_announcements, no_show_length, sns, nil
 }
 
 // func (s *StateDB) SelectionToAnnouncement(an []types.WorkReportSelection) []types.Announcement
@@ -178,18 +215,32 @@ func ShuffleWorkReport(slice []types.WorkReportSelection, entropy []uint32) {
 // eq 195
 func (s *StateDB) GetTranche() uint32 {
 	// timeslot mark
-	currentJCETime := common.ComputeTimeUnit(types.TimeUnitMode)
+	currentTime := time.Now().Unix()
+	JCE := uint32(common.ComputeJCETime(currentTime, true))
 	// currentJCETime := common.ComputeCurrentJCETime() // Replace with the actual value or variable representing the current JCE time
-	return (currentJCETime - types.SecondsPerSlot*s.JamState.SafroleState.GetTimeSlot()) / types.PeriodSecond
+	timeslot := s.Block.TimeSlot()
+	if s.Block == nil {
+		fmt.Printf("Block is nil\n")
+	}
+	return (JCE - types.SecondsPerSlot*timeslot) / types.PeriodSecond
+	// return 0
 }
 
 // eq 196
-func (s *StateDB) MakeAnnouncement(tranche uint32, workreport types.WorkReportSelection, Ed25519Secret []byte, validatoridx uint32) (types.Announcement, error) {
+func (s *StateDB) MakeAnnouncement(tranche uint32, workreport []types.WorkReportSelection, Ed25519Secret []byte, validatoridx uint32) (types.Announcement, error) {
+	var annReports []types.AnnouncementReport
+	for _, w := range workreport {
+		annReports = append(annReports, types.AnnouncementReport{
+			Core:           w.Core,
+			WorkReportHash: w.WorkReport.Hash(),
+		})
+	}
+
 	announcement := types.Announcement{
-		Core:           workreport.Core,
-		Tranche:        tranche,
-		WorkReportHash: workreport.WorkReport.Hash(),
-		ValidatorIndex: validatoridx,
+		HeaderHash:          s.HeaderHash(),
+		Tranche:             tranche,
+		Selected_WorkReport: annReports,
+		ValidatorIndex:      validatoridx,
 	}
 	announcement.Sign(Ed25519Secret)
 	return announcement, nil
@@ -208,23 +259,25 @@ func (s *StateDB) ValidateWorkReport(wp types.WorkPackage) bool {
 
 // eq 205
 func (a *StateDB) IsReportAudited(A types.AnnounceBucket, J types.JudgeBucket, W_hash common.Hash) bool {
-	if GetAnnouncementWithoutJtrue(A, J, W_hash) == 0 {
+	_, length := a.GetAnnouncementWithoutJtrue(A, J, W_hash)
+	if length == 0 {
 		//double check no invalid
 		for _, j := range J.Judgements[W_hash] {
-			if j.Judge != true {
+			if !j.Judge {
 				return false
 			}
 		}
 		return true
-	}
-	if J.GetTrueCount(W_hash) >= types.ValidatorsSuperMajority {
+	} else if J.GetTrueCount(W_hash) >= types.ValidatorsSuperMajority {
 		return true
 	}
+
 	return false
 }
 
 func (s *StateDB) IsReportAuditedTiny(A types.AnnounceBucket, J types.JudgeBucket, W_hash common.Hash) error {
-	if GetAnnouncementWithoutJtrue(A, J, W_hash) == 0 {
+	_, length := s.GetAnnouncementWithoutJtrue(A, J, W_hash)
+	if length == 0 {
 		//double check no invalid
 		for _, j := range J.Judgements[W_hash] {
 			if j.Judge != true {
@@ -242,8 +295,9 @@ func (s *StateDB) IsReportAuditedTiny(A types.AnnounceBucket, J types.JudgeBucke
 
 // 206 big U
 func (s *StateDB) IsBlockAudited(A types.AnnounceBucket, J types.JudgeBucket) bool {
+
 	for _, av := range s.AvailableWorkReport {
-		if s.IsReportAudited(A, J, av.GetWorkPackageHash()) {
+		if s.IsReportAudited(A, J, av.Hash()) {
 			continue
 		} else {
 			return false

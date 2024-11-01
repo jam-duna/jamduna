@@ -137,27 +137,26 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 	return &snapshotRaw
 }
 
-
 func (kv KeyVal) MarshalJSON() ([]byte, error) {
-    hexStrings := [2]string{
-        common.HexString(kv[0]),
-        common.HexString(kv[1]),
-    }
-    return json.Marshal(hexStrings)
+	hexStrings := [2]string{
+		common.HexString(kv[0]),
+		common.HexString(kv[1]),
+	}
+	return json.Marshal(hexStrings)
 }
 
 func (kv *KeyVal) UnmarshalJSON(data []byte) error {
-    var hexStrings [2]string
-    if err := json.Unmarshal(data, &hexStrings); err != nil {
-        return err
-    }
+	var hexStrings [2]string
+	if err := json.Unmarshal(data, &hexStrings); err != nil {
+		return err
+	}
 
-    for i, hexStr := range hexStrings {
-        bytes := common.Hex2Bytes(hexStr)
-        kv[i] = bytes
-    }
+	for i, hexStr := range hexStrings {
+		bytes := common.Hex2Bytes(hexStr)
+		kv[i] = bytes
+	}
 
-    return nil
+	return nil
 }
 
 func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {

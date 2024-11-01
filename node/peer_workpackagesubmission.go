@@ -137,7 +137,8 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	}
 	// TODO: read extrinsics
 
-	n.workPackagesCh <- newReq.WorkPackage
+	// TODO: Sourabh check if this even makes sense
+	//n.workPackagesCh <- newReq.WorkPackage
 	n.broadcastWorkpackage(newReq.WorkPackage)
 	return nil
 }

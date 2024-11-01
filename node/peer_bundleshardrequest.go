@@ -29,13 +29,16 @@ Auditor -> Assurer
 <-- FIN
 */
 
-func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, justification []byte, err error) {
+func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (erasure_root common.Hash, shard_index uint16, bundleShard []byte, justification []byte, err error) {
 	code := uint8(CE138_BundleShardRequest)
 	stream, err := p.openStream(code)
 	req := &JAMSNPShardRequest{
 		ErasureRoot: erasureRoot,
 		ShardIndex:  shardIndex,
 	}
+
+	erasure_root = req.ErasureRoot
+	shard_index = req.ShardIndex
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {

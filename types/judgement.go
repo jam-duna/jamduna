@@ -9,16 +9,10 @@ import (
 )
 
 type Judgement struct {
-	Judge      bool             `json:"judge"`
-	Tranche    uint32           `json:"tranche"`
-	WorkReport WorkReport       `json:"work_report"`
-	Validator  uint16           `json:"validator"`
-	Signature  Ed25519Signature `json:"signature"`
-}
-
-func (j Judgement) WorkPackageHash() common.Hash {
-	workpackageHash := j.WorkReport.AvailabilitySpec.WorkPackageHash
-	return workpackageHash
+	Judge          bool             `json:"judge"`
+	WorkReportHash common.Hash      `json:"work_report"`
+	Validator      uint16           `json:"validator"`
+	Signature      Ed25519Signature `json:"signature"`
 }
 
 func (j Judgement) DeepCopy() (Judgement, error) {
@@ -43,9 +37,9 @@ func (j Judgement) DeepCopy() (Judgement, error) {
 func (j *Judgement) UnsignedBytesWithSalt() []byte {
 	var signtext []byte
 	if j.Judge {
-		signtext = append([]byte(X_True), j.WorkReport.AvailabilitySpec.WorkPackageHash.Bytes()...)
+		signtext = append([]byte(X_True), j.WorkReportHash.Bytes()...)
 	} else {
-		signtext = append([]byte(X_False), j.WorkReport.AvailabilitySpec.WorkPackageHash.Bytes()...)
+		signtext = append([]byte(X_False), j.WorkReportHash.Bytes()...)
 	}
 	return signtext
 }
@@ -92,8 +86,8 @@ func (J *JudgeBucket) PutJudgement(j Judgement) {
 	if J.KnownJudgements == nil {
 		J.KnownJudgements = make(map[common.Hash]bool)
 	}
-	workPackageHash := j.WorkPackageHash()
-	coreJudgements, exists := J.Judgements[workPackageHash]
+	workReportHash := j.WorkReportHash
+	coreJudgements, exists := J.Judgements[workReportHash]
 	if !exists {
 		coreJudgements = make([]Judgement, 0)
 	}
@@ -101,13 +95,43 @@ func (J *JudgeBucket) PutJudgement(j Judgement) {
 	if J.KnownJudgements[j.Hash()] {
 		return
 	}
+	for _, jj := range coreJudgements {
+		if jj.Validator == j.Validator {
+			return
+		}
+	}
 	J.KnownJudgements[j.Hash()] = true
 	coreJudgements = append(coreJudgements, j)
-	J.Judgements[workPackageHash] = coreJudgements
+	J.Judgements[workReportHash] = coreJudgements
 }
 
 func (J *JudgeBucket) GetLen(w common.Hash) int {
 	return len(J.Judgements[w])
+}
+
+func (J *JudgeBucket) HaveMadeJudgement(j Judgement) bool {
+	if J.KnownJudgements == nil {
+		return false
+	}
+	return J.KnownJudgements[j.Hash()]
+}
+
+func (J *JudgeBucket) HaveMadeJudgementByValidator(workreporthash common.Hash, validator uint16) bool {
+	for _, j := range J.Judgements[workreporthash] {
+		if j.Validator == validator {
+			return true
+		}
+	}
+	return false
+}
+
+func (J *JudgeBucket) GetJudgementByValidator(workreporthash common.Hash, validator uint16) (Judgement, error) {
+	for _, j := range J.Judgements[workreporthash] {
+		if j.Validator == validator {
+			return j, nil
+		}
+	}
+	return Judgement{}, fmt.Errorf("validator %v has not made judgement on work report %v", validator, workreporthash)
 }
 
 // func (J *JudgeBucket) GetJudgement(w common.Hash, core uint16) (Judgement, bool) {
@@ -144,7 +168,7 @@ func (J *JudgeBucket) GetTrueJudgement(W common.Hash) []Judgement {
 	for _, j := range J.Judgements[W] {
 		//drop duplicate
 		for _, jj := range judgements {
-			if (j.Signature == jj.Signature) && (j.Tranche == jj.Tranche) {
+			if j.Signature == jj.Signature {
 				continue
 			}
 		}
@@ -160,7 +184,7 @@ func (J *JudgeBucket) GetFalseJudgement(W common.Hash) []Judgement {
 	for _, j := range J.Judgements[W] {
 		//drop duplicate
 		for _, jj := range judgements {
-			if (j.Signature == jj.Signature) && (j.Tranche == jj.Tranche) {
+			if j.Signature == jj.Signature {
 				continue
 			}
 		}
@@ -181,7 +205,7 @@ func (J *JudgeBucket) GetWonkeyJudgement(W common.Hash) []Judgement {
 	for _, j := range J.Judgements[W] {
 		//drop duplicate
 		for _, jj := range judgements {
-			if (j.Signature == jj.Signature) && (j.Tranche == jj.Tranche) {
+			if j.Signature == jj.Signature {
 				continue
 			}
 		}

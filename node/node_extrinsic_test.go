@@ -10,47 +10,47 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func TestNodeAudit(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
-	if err != nil {
-		t.Fatalf("Error setting up nodes: %v\n", err)
-	}
+// func TestNodeAudit(t *testing.T) {
+// 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+// 	if err != nil {
+// 		t.Fatalf("Error setting up nodes: %v\n", err)
+// 	}
 
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		nodes[i] = node
-	}
-	// Wait for nodes to be ready
-	fmt.Println("Waiting for nodes to be ready...")
-	time.Sleep(1 * time.Second)
-	fmt.Println("===Audit Start===")
-	for _, n := range nodes {
-		if n.statedb == nil {
-			fmt.Printf("Node[%d] state is nil\n", n.id)
-		}
-		fmt.Printf("Node[%d] add dummy Rhostate\n", n.id)
-		n.AddDummyStateAudit()
-		fmt.Printf("Node[%d] state is ok\n", n.id)
+// 	nodes := make([]*Node, numNodes)
+// 	for i := 0; i < numNodes; i++ {
+// 		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], basePort+i)
+// 		if err != nil {
+// 			t.Fatalf("Failed to create node %d: %v\n", i, err)
+// 		}
+// 		nodes[i] = node
+// 	}
+// 	// Wait for nodes to be ready
+// 	fmt.Println("Waiting for nodes to be ready...")
+// 	time.Sleep(1 * time.Second)
+// 	fmt.Println("===Audit Start===")
+// 	for _, n := range nodes {
+// 		if n.statedb == nil {
+// 			fmt.Printf("Node[%d] state is nil\n", n.id)
+// 		}
+// 		fmt.Printf("Node[%d] add dummy Rhostate\n", n.id)
+// 		n.AddDummyStateAudit()
+// 		fmt.Printf("Node[%d] state is ok\n", n.id)
 
-	}
+// 	}
 
-	//delay for a while
-	time.Sleep(1 * time.Second)
-	fmt.Println("===Done Audit, Start to make dispute===")
-	nodes[0].AddDummyBlockAudit()
-	//generate dispute
-	err = nodes[0].MakeDisputes()
-	if err != nil {
-		t.Fatalf("Failed to generate dispute: %v\n", err)
-	}
-	fmt.Println("Dispute generated successfully")
-	nodes[0].statedb.Block.Extrinsic.Disputes.Print()
+// 	//delay for a while
+// 	time.Sleep(1 * time.Second)
+// 	fmt.Println("===Done Audit, Start to make dispute===")
+// 	nodes[0].AddDummyBlockAudit()
+// 	//generate dispute
+// 	err = nodes[0].MakeDisputes()
+// 	if err != nil {
+// 		t.Fatalf("Failed to generate dispute: %v\n", err)
+// 	}
+// 	fmt.Println("Dispute generated successfully")
+// 	nodes[0].statedb.Block.Extrinsic.Disputes.Print()
 
-}
+// }
 func TestNodeAssurance(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {

@@ -7,9 +7,9 @@ import (
 // (h,l) -> E4(l)++H(h) for a_l
 func Compute_preimageLookup_internal(blob_hash Hash, blob_len uint32) Hash {
 	lBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lBytes, blob_len) 	// E4(l)
-	h_blobHash := ComputeHash(blob_hash.Bytes()) // H(h) -- hash of blobHash
-	al_internal_key := append(lBytes, h_blobHash...)    // (E4(l) ⌢ H(h) -- this is 36 bytes. but only the first 32 bytes matters
+	binary.LittleEndian.PutUint32(lBytes, blob_len)  // E4(l)
+	h_blobHash := ComputeHash(blob_hash.Bytes())     // H(h) -- hash of blobHash
+	al_internal_key := append(lBytes, h_blobHash...) // (E4(l) ⌢ H(h) -- this is 36 bytes. but only the first 32 bytes matters
 	al_32 := al_internal_key[:32]
 	return BytesToHash(al_32)
 }
@@ -34,8 +34,8 @@ func Compute_storageKey_internal(s uint32, k []byte) Hash {
 	binary.LittleEndian.PutUint32(prefixBytes, prefix)
 
 	sBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sBytes, s)         // E4(s)
-	raw_key := ComputeHash(append(sBytes, k...))	 // H(E4(s) ⌢ vk ⋅⋅⋅+k )
+	binary.LittleEndian.PutUint32(sBytes, s)     // E4(s)
+	raw_key := ComputeHash(append(sBytes, k...)) // H(E4(s) ⌢ vk ⋅⋅⋅+k )
 
 	as_internal_key := append(prefixBytes, raw_key[:28]...)
 	as_32 := as_internal_key[:32]

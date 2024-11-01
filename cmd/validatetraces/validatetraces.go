@@ -24,9 +24,9 @@ import (
 
 func readSnapshotRaw(fn string) (statesnapshot *statedb.StateSnapshot, snapshotBytesRaw []byte, err error) {
 	/*
-	statesnapshotraw := statedb.StateSnapshotRaw{}
-	TODO: Sean needs to do somekind of decode to first get StateSnapshotRaw. Then you can do StateSnapshotRaw -> StateSnapshot
-	rest would be the same...
+		statesnapshotraw := statedb.StateSnapshotRaw{}
+		TODO: Sean needs to do somekind of decode to first get StateSnapshotRaw. Then you can do StateSnapshotRaw -> StateSnapshot
+		rest would be the same...
 	*/
 	snapshotBytesRaw, err = os.ReadFile(fn)
 	if err != nil {
