@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 	//"github.com/colorfulnotion/jam/trie"
 )
@@ -90,7 +89,7 @@ func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, 
 	}
 	stateRoot := blocks[0].Header.ParentStateRoot
 	stateTrie := s.CopyTrieState(stateRoot)
-	service_account := trie.ComputeC_sh(service_idx, key)
+	service_account := common.ComputeC_sh(service_idx, key)
 	maxSize := uint32(1000000)
 	foundKeyVal, boundaryNode, err := stateTrie.GetStateByRange(service_account[:], common.Hex2Bytes("0xFFFFFFFFFF"), maxSize)
 	if err != nil {

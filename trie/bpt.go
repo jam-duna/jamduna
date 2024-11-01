@@ -663,48 +663,6 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	return value, err
 }
 
-// EQ 290 - state-key constructor functions C
-func ComputeC_i(i uint8) common.Hash {
-	//i ∈ N_8 ↦ [i,0,0,...]
-	stateKey := make([]byte, 32)
-	stateKey[0] = byte(i)
-	return common.BytesToHash(stateKey)
-}
-
-func ComputeC_is(i uint8, s uint32) common.Hash {
-	//(i,s ∈ N_S) ↦ [i,n0,n1,n2,n3,0,0,...] where n = E4(s)
-	stateKey := make([]byte, 32)
-	stateKey[0] = i
-	byteSlice := make([]byte, 4)
-	binary.LittleEndian.PutUint32(byteSlice, s)
-	for i := 1; i < 5; i++ {
-		stateKey[i] = byteSlice[i-1]
-	}
-	return common.BytesToHash(stateKey)
-}
-
-func ComputeC_sh(s uint32, h []byte) common.Hash {
-	//s: service_index
-	//h: hash_component (assumed to be exact 32bytes)
-	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
-	stateKey := make([]byte, 32)
-	nBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
-
-	for i := 0; i < 4; i++ {
-		stateKey[2*i] = nBytes[i]
-		if i < len(h) {
-			stateKey[2*i+1] = h[i]
-		}
-	}
-	for i := 4; i < 28; i++ {
-		if i < len(h) {
-			stateKey[i+4] = h[i]
-		}
-	}
-	return common.BytesToHash(stateKey)
-}
-
 func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
 	/*
 		∀(s ↦ a) ∈ δ ∶ C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i )
@@ -719,13 +677,13 @@ func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
 
 		(i, s ∈ N S ) ↦ [i, n 0 ,n 1 ,n 2 ,n 3 , 0, 0, . . . ] where n = E 4 (s)
 	*/
-	service_account := ComputeC_is(i, s)
+	service_account := common.ComputeC_is(i, s)
 	stateKey := service_account.Bytes()
 	t.Insert(stateKey, v)
 }
 
 func (t *MerkleTree) GetService(i uint8, s uint32) ([]byte, error) {
-	service_account := ComputeC_is(i, s)
+	service_account := common.ComputeC_is(i, s)
 	stateKey := service_account.Bytes()
 	return t.Get(stateKey)
 }
@@ -733,22 +691,8 @@ func (t *MerkleTree) GetService(i uint8, s uint32) ([]byte, error) {
 // set a_l (with timeslot if we have E_P). For GP_0.3.5(158)
 func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) {
 
-	/*
-		∀(s ↦ a) ∈ δ, ( ⎧⎩ h, l ⎫⎭ ↦ t)∈ a l ∶ C(s, E 4 (l)⌢(¬h 4∶ )) ↦ E(↕[E 4 (x) ∣ x <− t])
-		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
-
-		s: service_index
-		h: blob_hash
-		l: blob_len
-		t: time_slots
-	*/
-
-	lBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
-	blob_h := blob_hash.Bytes()
-	_h4 := falseBytes(blob_h[4:])                 // (¬h4:)
-	l_and_h := append(lBytes, _h4...)             // (E4(l) ⌢ (¬h4:)
-	account_lookuphash := ComputeC_sh(s, l_and_h) // C(s, (E4(l) ⌢ (¬h4:))
+	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
+	account_lookuphash := common.ComputeC_sh(s, al_internal_key.Bytes()) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
 
 	/*
@@ -773,12 +717,9 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 // lookup a_l .. returning time slot. For GP_0.3.5(157)
 func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) ([]uint32, error) {
 
-	lBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
-	blob_h := blob_hash.Bytes()
-	_h4 := falseBytes(blob_h[4:])                 // (¬h4:)
-	l_and_h := append(lBytes, _h4...)             // (E4(l) ⌢ (¬h4:)
-	account_lookuphash := ComputeC_sh(s, l_and_h) // C(s, (E4(l) ⌢ (¬h4:))
+	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
+	account_lookuphash := common.ComputeC_sh(s, al_internal_key.Bytes()) // C(s, (h,l))
+
 	stateKey := account_lookuphash.Bytes()
 
 	/*
@@ -804,12 +745,8 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 // Delete PreImageLookup key(hash)
 func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) error {
 
-	lBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
-	blob_h := blob_hash.Bytes()
-	_h4 := falseBytes(blob_h[4:])                 // (¬h4:)
-	l_and_h := append(lBytes, _h4...)             // (E4(l) ⌢ (¬h4:)
-	account_lookuphash := ComputeC_sh(s, l_and_h) // C(s, (E4(l) ⌢ (¬h4:))
+	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
+	account_lookuphash := common.ComputeC_sh(s, al_internal_key.Bytes()) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
 
 	err := t.Delete(stateKey)
@@ -818,20 +755,9 @@ func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_
 }
 
 func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storage []byte) {
-	/*
-		∀(s ↦ a) ∈ δ, (h ↦ v) ∈ a s ∶ C(s, h) ↦ v
-		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
 
-		s: service_index
-		h: storage_key from H(E4(s) ⌢ vk ⋅⋅⋅+k )
-		v: storage
-	*/
-
-	sBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sBytes, s)           // E4(s)
-	h_and_v := append(sBytes, k...)                    //(E4(s) ⌢ vk ⋅⋅⋅+k )
-	storage_key := common.Blake2Hash(h_and_v).Bytes()  // H(E4(s) ⌢ vk ⋅⋅⋅+k )
-	account_storage_key := ComputeC_sh(s, storage_key) // C(s, (E4(l) ⌢ (¬h4:))
+	as_internal_key := common.Compute_storageKey_internal(s, k)
+	account_storage_key := common.ComputeC_sh(s, as_internal_key.Bytes())
 	stateKey := account_storage_key.Bytes()
 
 	// Insert Stroage into trie
@@ -840,11 +766,8 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storage []byte) {
 
 func (t *MerkleTree) GetServiceStorage(s uint32, k []byte) ([]byte, error) {
 
-	sBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sBytes, s)           // E4(s)
-	h_and_v := append(sBytes, k...)                    //(E4(s) ⌢ vk ⋅⋅⋅+k )
-	storage_key := common.Blake2Hash(h_and_v).Bytes()  // H(E4(s) ⌢ vk ⋅⋅⋅+k )
-	account_storage_key := ComputeC_sh(s, storage_key) // C(s, (E4(l) ⌢ (¬h4:))
+	as_internal_key := common.Compute_storageKey_internal(s, k)
+	account_storage_key := common.ComputeC_sh(s, as_internal_key.Bytes())
 	stateKey := account_storage_key.Bytes()
 
 	// Get Storage from trie
@@ -853,20 +776,9 @@ func (t *MerkleTree) GetServiceStorage(s uint32, k []byte) ([]byte, error) {
 
 // Delete Storage key(hash)
 func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) error {
-	/*
-		∀(s ↦ a) ∈ δ, (h ↦ v) ∈ a s ∶ C(s, h) ↦ v
-		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
 
-		s: service_index
-		h: storage_hash
-		v: storage
-	*/
-
-	sBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sBytes, s)           // E4(s)
-	h_and_v := append(sBytes, k...)                    //(E4(s) ⌢ vk ⋅⋅⋅+k )
-	storage_key := common.Blake2Hash(h_and_v).Bytes()  // H(E4(s) ⌢ vk ⋅⋅⋅+k )
-	account_storage_key := ComputeC_sh(s, storage_key) // C(s, (E4(l) ⌢ (¬h4:))
+	as_internal_key := common.Compute_storageKey_internal(s, k)
+	account_storage_key := common.ComputeC_sh(s, as_internal_key.Bytes())
 	stateKey := account_storage_key.Bytes()
 
 	err := t.Delete(stateKey)
@@ -884,8 +796,10 @@ func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) {
 		p: blob
 	*/
 
-	blob_hash := common.ComputeHash(blob)
-	account_preimage_hash := ComputeC_sh(s, blob_hash)
+	blobHash := common.Blake2Hash(blob)
+	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
+	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key.Bytes())
+
 	stateKey := account_preimage_hash.Bytes()
 
 	// Insert Preimage Blob into trie
@@ -894,7 +808,10 @@ func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) {
 
 func (t *MerkleTree) GetPreImageBlob(s uint32, blob_hash []byte) ([]byte, error) {
 
-	account_preimage_hash := ComputeC_sh(s, blob_hash)
+	blobHash := common.BytesToHash(blob_hash)
+	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
+	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key.Bytes())
+
 	stateKey := account_preimage_hash.Bytes()
 
 	// Get Preimage Blob from trie
@@ -903,7 +820,11 @@ func (t *MerkleTree) GetPreImageBlob(s uint32, blob_hash []byte) ([]byte, error)
 
 // Delete PreImage Blob
 func (t *MerkleTree) DeletePreImageBlob(s uint32, blob_hash []byte) error {
-	account_preimage_hash := ComputeC_sh(s, blob_hash)
+
+	blobHash := common.BytesToHash(blob_hash)
+	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
+	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key.Bytes())
+
 	stateKey := account_preimage_hash.Bytes()
 	err := t.Delete(stateKey)
 	return err

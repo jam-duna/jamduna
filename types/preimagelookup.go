@@ -1,7 +1,7 @@
 package types
 
 import (
-	"encoding/binary"
+	//"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -49,49 +49,21 @@ func (p *Preimages) AccountLookupHash() common.Hash {
 func (p *Preimages) AccountPreimageHash() common.Hash {
 	s := p.Requester
 	blob_hash := p.BlobHash().Bytes()
-	return ComputeC_SH(s, blob_hash)
+	return ComputeAP(s, blob_hash)
 }
 
-// EQ 290 - state-key constructor functions C(s,h)
-func ComputeC_SH(s uint32, h []byte) common.Hash {
-	//s: service_index
-	//h: hash_component (assumed to be exact 32bytes)
-	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
-	stateKey := make([]byte, 32)
-	nBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
-
-	for i := 0; i < 4; i++ {
-		stateKey[2*i] = nBytes[i]
-		if i < len(h) {
-			stateKey[2*i+1] = h[i]
-		}
-	}
-	for i := 4; i < 28; i++ {
-		if i < len(h) {
-			stateKey[i+4] = h[i]
-		}
-	}
-	return common.BytesToHash(stateKey)
+func ComputeAP(s uint32, blob_hash []byte) common.Hash {
+	blobHash := common.Blake2Hash(blob_hash)
+	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
+	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key.Bytes())
+	return account_preimage_hash
 }
 
 func ComputeAL(s uint32, blob_hash []byte, blob_len uint32) common.Hash {
-	lBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lBytes, blob_len) // E4(l)
-	blob_hash = falseBytes(blob_hash[4:])           // (¬h4:)
-	l_and_h := append(lBytes, blob_hash...)         // (E4(l) ⌢ (¬h4:)
-	account_lookuphash := ComputeC_SH(s, l_and_h)   // C(s, (E4(l) ⌢ (¬h4:))
+	blobHash := common.Blake2Hash(blob_hash)
+	al_internal_key := common.Compute_preimageLookup_internal(blobHash, blob_len)
+	account_lookuphash := common.ComputeC_sh(s, al_internal_key.Bytes()) // C(s, (h,l))
 	return account_lookuphash
-}
-
-// Implement "¬"
-func falseBytes(data []byte) []byte {
-	result := make([]byte, len(data))
-	for i := 0; i < len(data); i++ {
-		result[i] = 0xFF - data[i]
-		// result[i] = ^data[i]
-	}
-	return result
 }
 
 func (p Preimages) DeepCopy() (Preimages, error) {
