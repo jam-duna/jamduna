@@ -262,14 +262,14 @@ func (mh *MockHostEnv) DeleteServicePreimageLookupKey(s uint32, blob_hash common
 	return nil
 }
 
-func (mh *MockHostEnv) SetX(obj interface{}) uint32 {
-	return uint32(0)
-}
-
-func (mh *MockHostEnv) GetX(c string) interface{} {
+func (mh *MockHostEnv) GetTimeslot() uint32 {
 	return uint32(0)
 }
 
 func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, error) {
 	return nil, nil
+}
+
+func (mh *MockHostEnv) Check(c uint32) uint32 {
+	return 47
 }

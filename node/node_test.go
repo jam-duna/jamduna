@@ -161,6 +161,28 @@ func TestNodeSafrole(t *testing.T) {
 	for {
 	}
 }
+
+func getServices(serviceNames []string) (services map[string]*types.TestService, err error) {
+	services = make(map[string]*types.TestService)
+	for i, serviceName := range serviceNames {
+		fileName := fmt.Sprintf("../services/%s.pvm", serviceName)
+		code, err1 := os.ReadFile(fileName)
+		if err1 != nil {
+			return services, err1
+		}
+		tmpServiceCode := uint32(i + 1)
+		codeHash := common.Blake2Hash(code)
+		services[serviceName] = &types.TestService{
+			ServiceCode: tmpServiceCode, // TEMPORARY
+			FileName:    fileName,
+			CodeHash:    codeHash,
+			Code:        code,
+		}
+		fmt.Printf("%d: %s Code Hash: %x (Code Length: %v)\n", tmpServiceCode, serviceName, codeHash.Bytes(), len(code))
+	}
+	return
+}
+
 func TestWorkGuarantee(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
@@ -185,40 +207,39 @@ func TestWorkGuarantee(t *testing.T) {
 		}
 	}
 
-	// this is fib
-	code, err := os.ReadFile(statedb.TestServiceFile)
-	if err != nil {
-		panic(0)
-	}
-
 	for _, n := range nodes {
 		n.statedb.PreviousGuarantors(true)
 		n.statedb.AssignGuarantors(true)
 	}
-	codeHash := common.Blake2Hash(code)
-	time.Sleep(12 * time.Second)
-	fmt.Printf("Code Length: %v\n", len(code))
-	fmt.Printf("Code Hash: %x\n", codeHash.Bytes())
 	// code length: 206
-	// Code Hash: d570234cc23da642334328827383e3625e1199a26747fc50c5ae45a731e6ff5c
+	bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
+	if err != nil {
+		panic(0)
+	}
+	bootstrapService := uint32(statedb.BootstrapServiceCode)
+	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
 
-	builerIdx := 1
-	builderNode := nodes[builerIdx]
-	builderNode.preimages[codeHash] = code
+	builderIdx := 1
+	builderNode := nodes[builderIdx]
+	builderNode.preimages[bootstrapCodeHash] = bootstrapCode
 	new_service_idx := uint32(0)
-	fmt.Printf("Builder storing  %v -> %x\n", codeHash, code)
 
-	//----------------------------------------------
-	loadTestService := true
-	if loadTestService {
-		// set up testservice using the Bootstrap service
-		bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
-		if err != nil {
-			panic(0)
-		}
-		bootstrapService := uint32(statedb.BootstrapServiceCode)
-		bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-		fibCodeWorkPackage := types.WorkPackage{
+	// Load testServices
+	testServices, err := getServices([]string{"fib", "tribonacci", "megatron"}) // "padovan", "pell", "racaman",
+	if err != nil {
+		panic(32)
+	}
+
+	// set builderNode's primages map
+	for _, service := range testServices {
+		builderNode.preimages[service.CodeHash] = service.Code
+	}
+
+	var previous_service_idx uint32
+	for serviceName, service := range testServices {
+		fmt.Printf("Builder storing TestService %s (%x)\n", serviceName, service.CodeHash)
+		// set up service using the Bootstrap service
+		codeWorkPackage := types.WorkPackage{
 			Authorization: []byte(""),
 			AuthCodeHost:  bootstrapService,
 			Authorizer:    types.Authorizer{},
@@ -227,64 +248,63 @@ func TestWorkGuarantee(t *testing.T) {
 				{
 					Service:          bootstrapService,
 					CodeHash:         bootstrapCodeHash,
-					Payload:          codeHash.Bytes(),
+					Payload:          append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
 					GasLimit:         10000000,
 					ImportedSegments: make([]types.ImportSegment, 0),
 					ExportCount:      0,
 				},
 			},
 		}
-		err = builderNode.peersInfo[4].SendWorkPackageSubmission(0, fibCodeWorkPackage, []byte{})
+		err = builderNode.peersInfo[4].SendWorkPackageSubmission(0, codeWorkPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
-		// TODO: William - figure out how to get new service back from the above accumulate XContext (see hostNew SetX_i call)
-		time.Sleep(12 * time.Second)
 
-		// node1 can only broadcast announcement if it observes "service.storage("0") is non-empty"
-		time.Sleep(12 * time.Second)
-
-		service_ticker := time.NewTicker(types.SecondsPerSlot)
-		defer service_ticker.Stop()
+		// service_ticker := time.NewTicker(types.SecondsPerSlot)
+		// defer service_ticker.Stop()
 
 		new_service_found := false
 
+		fmt.Printf("Waiting for %s service to be ready...\n", serviceName)
 		for !new_service_found {
-			select {
-			case <-service_ticker.C:
-				//TODO: find service_index ... can be serviced via CE129 using stateKey=00b5000000000000ffffffffffffffffffffffffffffffffffffffffffffffff
-				stateDB := builderNode.getState()
-				if stateDB != nil && stateDB.Block != nil {
-					// fmt.Printf("finding newservice from bootstrapService.s[0]...\n")
-					stateRoot := stateDB.Block.GetHeader().ParentStateRoot
-					t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
+			// select {
+			// case <-service_ticker.C:
+			//TODO: find service_index ... can be serviced via CE129 using stateKey=00b5000000000000ffffffffffffffffffffffffffffffffffffffffffffffff
+			stateDB := builderNode.getState()
+			if stateDB != nil && stateDB.Block != nil {
+				// fmt.Printf("finding newservice from bootstrapService.s[0]...\n")
+				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
+				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
 
-					newserviceKey := []byte{0, 0, 0, 0} // "0"
-					service_account_byte, _ := t.GetServiceStorage(bootstrapService, newserviceKey)
-					if err != nil {
-						//not ready yet ...
-						continue
-					}
-					decoded_new_service_idx := types.DecodeE_l(service_account_byte)
-					if decoded_new_service_idx != 0 {
-						new_service_idx = uint32(decoded_new_service_idx)
-						//TODO: now use new_service_idx and see if (c,l) is correct
-						fmt.Printf("Found service_idx: %v!!!\n", new_service_idx)
-						new_service_found = true
+				newserviceKey := []byte{0, 0, 0, 0} // "0"
+				service_account_byte, _ := t.GetServiceStorage(bootstrapService, newserviceKey)
+				if err != nil {
+					//not ready yet ...
+					continue
+				}
+				decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
+				if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
+					service.ServiceCode = decoded_new_service_idx
+					new_service_idx = decoded_new_service_idx
+					//TODO: now use new_service_idx and see if (c,l) is correct
+					fmt.Printf("%s Service Index: %v\n", serviceName, service.ServiceCode)
+					new_service_found = true
+					previous_service_idx = decoded_new_service_idx
+
+					for validatorIdx, _ := range nodes {
+						if validatorIdx != builderIdx {
+							if new_service_idx > 0 {
+								fmt.Printf("Sending new service_idx %v service.CodeHash %v, service.Code %v\n", new_service_idx, service.CodeHash, len(service.Code))
+								err = builderNode.peersInfo[uint16(validatorIdx)].SendPreimageAnnouncement(new_service_idx, service.CodeHash, uint32(len(service.Code)))
+								if err != nil {
+									fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
+								}
+							}
+						}
 					}
 				}
 			}
-		}
-
-		for validatorIdx, _ := range nodes {
-			if validatorIdx != builerIdx {
-				if new_service_idx > 0 {
-					err = builderNode.peersInfo[uint16(validatorIdx)].SendPreimageAnnouncement(new_service_idx, codeHash, uint32(len(code)))
-					if err != nil {
-						fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
-					}
-				}
-			}
+			// }
 		}
 	}
 
@@ -293,54 +313,109 @@ func TestWorkGuarantee(t *testing.T) {
 		n.statedb.AssignGuarantors(true)
 	}
 	//----------------------------------------------
-	time.Sleep(60 * time.Second)
+	time.Sleep(30 * time.Second)
 	fmt.Printf("Start FIB\n")
 
 	// n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
+	service0 := testServices["fib"]
+	service1 := testServices["tribonacci"]
+	serviceM := testServices["megatron"]
+	fmt.Printf("service0: %v, codehash: %v\n", service0.ServiceCode, service0.CodeHash)
+	fmt.Printf("service1: %v, codehash: %v\n", service1.ServiceCode, service1.CodeHash)
+	fmt.Printf("serviceM: %v, codehash: %v\n", serviceM.ServiceCode, serviceM.CodeHash)
+	FibWorkPackages := make([]types.WorkPackage, 0)
+	FibPackageHashes := make([]common.Hash, 0)
 	prevWorkPackageHash := common.Hash{}
-	for fibN := 1; fibN < 21; fibN++ {
+	for megaN := 1; megaN < 21; megaN++ {
 		importedSegments := make([]types.ImportSegment, 0)
-		if fibN > 1 {
-			importedSegment := types.ImportSegment{
+		importedSegmentsM := make([]types.ImportSegment, 0)
+		refineContext := types.RefineContext{
+			// These values don't matter until we have a historical lookup -- which we do not!
+			Anchor:           common.Hash{},
+			StateRoot:        common.Hash{},
+			BeefyRoot:        common.Hash{},
+			LookupAnchor:     common.Hash{},
+			LookupAnchorSlot: 0,
+		}
+
+		if megaN > 1 {
+			// TODO: Sean
+			//			prerequisite := types.Prerequisite{prevWorkPackageHash.Bytes()}
+			//			refineContext.Prerequisite = &common.Hash{}
+			importedSegments = append(importedSegments, types.ImportSegment{
 				WorkPackageHash: prevWorkPackageHash,
 				Index:           0,
-			}
-			importedSegments = append(importedSegments, importedSegment)
+			})
+			importedSegments = append(importedSegments, types.ImportSegment{
+				WorkPackageHash: prevWorkPackageHash,
+				Index:           1, // TODO: check
+			})
 		}
-		refine_context := types.RefineContext{
-			//TODO: Sean prereq of fib(n) is fib(n-1) and fib(n-2) package
-			// Prerequisite     *Prerequisite `json:"prerequisite"`
-		}
+
 		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(fibN))
+		binary.LittleEndian.PutUint32(payload, uint32(megaN))
+		payloadM := make([]byte, 8)
+		binary.LittleEndian.PutUint32(payloadM[0:4], uint32(service0.ServiceCode))
+		binary.LittleEndian.PutUint32(payloadM[4:8], uint32(service1.ServiceCode))
 		workPackage := types.WorkPackage{
 			Authorization: []byte("0x"), // TODO: set up null-authorizer
-			//AuthCodeHost:  statedb.TestServiceCode,
-			AuthCodeHost:  new_service_idx,
+			AuthCodeHost:  serviceM.ServiceCode,
 			Authorizer:    types.Authorizer{},
-			RefineContext: refine_context,
+			RefineContext: refineContext,
 			WorkItems: []types.WorkItem{
 				{
-					//Service:          statedb.TestServiceCode,
-					Service:          new_service_idx,
-					CodeHash:         codeHash,
+					Service:          service0.ServiceCode,
+					CodeHash:         service0.CodeHash,
 					Payload:          payload,
 					GasLimit:         10000000,
 					ImportedSegments: importedSegments,
 					ExportCount:      1,
 				},
+				{
+					Service:          service1.ServiceCode,
+					CodeHash:         service1.CodeHash,
+					Payload:          payload,
+					GasLimit:         10000000,
+					ImportedSegments: importedSegments,
+					ExportCount:      1,
+				},
+				{
+					Service:          serviceM.ServiceCode,
+					CodeHash:         serviceM.CodeHash,
+					Payload:          payloadM,
+					GasLimit:         10000000,
+					ImportedSegments: importedSegmentsM,
+					ExportCount:      0,
+				},
 			},
 		}
-		workPackageHash := workPackage.Hash()
 
-		// Question: can we remove this?  Why do we need this here?
+		workPackageHash := workPackage.Hash()
+		fmt.Println("WorkPackageHash:", workPackageHash)
+
+		FibWorkPackages = append(FibWorkPackages, workPackage)
+		FibPackageHashes = append(FibPackageHashes, workPackageHash)
+
+		prevWorkPackageHash = workPackageHash
+	}
+
+	// for i := 0; i < len(FibWorkPackages)-1; i++ {
+	// 	prerequisite := types.Prerequisite(FibPackageHashes[i+1])
+	// 	FibWorkPackages[i].RefineContext.Prerequisite = &prerequisite
+	// }
+
+	for i, workPackage := range FibWorkPackages {
+		megaN := i + 1
+		workPackageHash := FibPackageHashes[i]
+
+		// Update guarantors before each submission if necessary
 		for _, n := range nodes {
 			n.statedb.PreviousGuarantors(true)
 			n.statedb.AssignGuarantors(true)
 		}
-		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
+		fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", megaN, common.Str(workPackageHash))
 		// CE133_WorkPackageSubmission: n1 => n4
 		// v1, v2, v4 => core
 		// random select 1 sender and 1 receiver
@@ -367,7 +442,8 @@ func TestWorkGuarantee(t *testing.T) {
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 		}
-		// wait until the work report is pending
+
+		// Wait until the work report is pending
 		var workReport types.WorkReport
 		// audit := false
 		for {
@@ -381,7 +457,7 @@ func TestWorkGuarantee(t *testing.T) {
 			}
 		}
 
-		// wait until the work report is cleared
+		// Wait until the work report is cleared
 		for {
 			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
 				break

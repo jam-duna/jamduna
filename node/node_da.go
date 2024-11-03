@@ -531,6 +531,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 	segments := make([][]byte, 0)
 	for _, workItem := range workPackage.WorkItems {
 		// recover code from the bpt. NOT from DA
+		service_index = workItem.Service
 		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if len(code) == 0 {
 			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
@@ -563,7 +564,6 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 
 		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
 		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, workItem.ExtrinsicsBlobs)
-
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		for i := 0; i < len(exports); i += types.W_E * types.W_S {
 			segments = append(segments, exports[i:i+types.W_E*types.W_S])

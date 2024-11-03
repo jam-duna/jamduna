@@ -96,7 +96,6 @@ type TicketEnvelope struct {
 }
 
 type Entropy [types.EntropySize]common.Hash
-type Validators []types.Validator
 
 type SafroleState struct {
 	Id             uint16 `json:"Id"`
@@ -107,10 +106,10 @@ type SafroleState struct {
 	Entropy Entropy `json:"entropy"`
 
 	// 4 authorities[pre, curr, next, designed]
-	PrevValidators     Validators `json:"prev_validators"`
-	CurrValidators     Validators `json:"curr_validators"`
-	NextValidators     Validators `json:"next_validators"`
-	DesignedValidators Validators `json:"designed_validators"`
+	PrevValidators     types.Validators `json:"prev_validators"`
+	CurrValidators     types.Validators `json:"curr_validators"`
+	NextValidators     types.Validators `json:"next_validators"`
+	DesignedValidators types.Validators `json:"designed_validators"`
 
 	// Accumulator of tickets, modified with Extrinsics to hold ORDERED array of Tickets
 	NextEpochTicketsAccumulator []types.TicketBody `json:"next_tickets_accumulator"` //gamma_a
@@ -1176,10 +1175,10 @@ func (E Extrinsic) MarshalJSON() ([]byte, error) {
 type SafroleStateCodec struct {
 	Tau    uint32             `json:"tau"`
 	Eta    Entropy            `json:"eta"`
-	Lambda Validators         `json:"lambda"`
-	Kappa  Validators         `json:"kappa"`
-	GammaK Validators         `json:"gamma_k"`
-	Iota   Validators         `json:"iota"`
+	Lambda types.Validators   `json:"lambda"`
+	Kappa  types.Validators   `json:"kappa"`
+	GammaK types.Validators   `json:"gamma_k"`
+	Iota   types.Validators   `json:"iota"`
 	GammaA []types.TicketBody `json:"gamma_a"`
 	GammaS TicketsOrKeys      `json:"gamma_s"`
 	GammaZ [144]byte          `json:"gamma_z"`
@@ -1204,10 +1203,10 @@ func (a *SafroleStateCodec) UnmarshalJSON(data []byte) error {
 	var s struct {
 		Tau    uint32             `json:"tau"`
 		Eta    Entropy            `json:"eta"`
-		Lambda Validators         `json:"lambda"`
-		Kappa  Validators         `json:"kappa"`
-		GammaK Validators         `json:"gamma_k"`
-		Iota   Validators         `json:"iota"`
+		Lambda types.Validators   `json:"lambda"`
+		Kappa  types.Validators   `json:"kappa"`
+		GammaK types.Validators   `json:"gamma_k"`
+		Iota   types.Validators   `json:"iota"`
 		GammaA []types.TicketBody `json:"gamma_a"`
 		GammaS TicketsOrKeys      `json:"gamma_s"`
 		GammaZ string             `json:"gamma_z"`
@@ -1232,10 +1231,10 @@ func (a *SafroleStateCodec) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		Tau    uint32             `json:"tau"`
 		Eta    Entropy            `json:"eta"`
-		Lambda Validators         `json:"lambda"`
-		Kappa  Validators         `json:"kappa"`
-		GammaK Validators         `json:"gamma_k"`
-		Iota   Validators         `json:"iota"`
+		Lambda types.Validators   `json:"lambda"`
+		Kappa  types.Validators   `json:"kappa"`
+		GammaK types.Validators   `json:"gamma_k"`
+		Iota   types.Validators   `json:"iota"`
 		GammaA []types.TicketBody `json:"gamma_a"`
 		GammaS TicketsOrKeys      `json:"gamma_s"`
 		GammaZ string             `json:"gamma_z"`

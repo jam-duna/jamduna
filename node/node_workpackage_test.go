@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -79,7 +78,7 @@ func testWorkpackage(fibN int) (workPackage types.WorkPackage, segments [][]byte
 	authToken := []byte("0x")
 
 	// fib code
-	code, err := os.ReadFile(statedb.TestServiceFile)
+	code, err := os.ReadFile("../services/fib.pvm")
 	if err != nil {
 		panic(0)
 	}

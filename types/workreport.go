@@ -21,12 +21,25 @@ import (
 // WorkReport represents a work report.
 
 type WorkReport struct {
-	AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
-	RefineContext    RefineContext         `json:"context"`
-	CoreIndex        uint16                `json:"core_index"`
-	AuthorizerHash   common.Hash           `json:"authorizer_hash"`
-	AuthOutput       []byte                `json:"auth_output"`
-	Results          []WorkResult          `json:"results"`
+	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
+	RefineContext     RefineContext         `json:"context"`
+	CoreIndex         uint16                `json:"core_index"`
+	AuthorizerHash    common.Hash           `json:"authorizer_hash"`
+	AuthOutput        []byte                `json:"auth_output"`
+	SegmentRootLookup SegmentRootLookup     //eq 118 l∈D⟨H →H⟩
+	Results           []WorkResult          `json:"results"`
+}
+
+// Temporarily ignore encoding.
+type SegmentRootLookup map[common.Hash]common.Hash
+
+func (S SegmentRootLookup) Encode() []byte {
+	encoded := []byte{}
+	return encoded
+}
+
+func (S SegmentRootLookup) Decode(data []byte) (interface{}, uint32) {
+	return nil, 0
 }
 
 // eq 190

@@ -22,8 +22,8 @@ type DJamState struct {
 	Psi    Psi_state                `json:"psi"`
 	Rho    DAvailabilityAssignments `json:"rho"`
 	Tau    uint32                   `json:"tau"`
-	Kappa  Validators               `json:"kappa"`
-	Lambda Validators               `json:"lambda"`
+	Kappa  types.Validators         `json:"kappa"`
+	Lambda types.Validators         `json:"lambda"`
 }
 
 type DInput struct {

@@ -341,15 +341,7 @@ const (
 const (
 	BootstrapServiceCode = 0
 	BootstrapServiceFile = "../services/bootstrap.pvm"
-
-	TestServiceCode = 47 // this is temporary
-	TestServiceFile = "../services/fib.pvm"
 )
-
-type GenesisService struct {
-	Code uint32
-	File string
-}
 
 // NewGenesisStateDB generates the first StateDB object and genesis statedb
 func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *StateDB, err error) {
@@ -362,18 +354,17 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	statedb.JamState = InitGenesisState(c)
 
 	// Load services into genesis state
-	services := []GenesisService{
-		{Code: BootstrapServiceCode, File: BootstrapServiceFile},
-		{Code: TestServiceCode, File: TestServiceFile},
-		// Add more services here as needed
+	services := []types.TestService{
+		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
+		// Add more services here as needed IF they are needed for Genesis
 	}
 
 	for _, service := range services {
-		code, err := os.ReadFile(service.File)
+		code, err := os.ReadFile(service.FileName)
 		if err != nil {
 			return statedb, err
 		}
-		statedb.WriteServicePreimageBlob(service.Code, code)
+		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()
@@ -562,7 +553,6 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	privilegedServiceIndicesEncode := d.GetPrivilegedServicesIndicesBytes()
 	recentBlocksEncode := d.GetRecentBlocksBytes()
 
-	// TODO:Implement real Accumulation Queue and Accumulation History
 	accunulateQueueEncode := d.GetAccumulationQueueBytes()
 	accunulateHistoryEncode := d.GetAccumulationHistoryBytes()
 
@@ -991,6 +981,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// δ†[s]l[H(p),∣p∣] = [τ′]
 		// t.SetPreImageBlob(l.Service_Index(), l.Blob)
 		// t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
+		fmt.Printf(("WriteServicePreimageBlob, Service_Index: %d, Blob: %x\n"), l.Service_Index(), l.Blob)
 		s.WriteServicePreimageBlob(l.Service_Index(), l.Blob)
 		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
@@ -1242,13 +1233,25 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
 
 	// 28 -- ACCUMULATE
-	err = s.Accumulate()
-	if err != nil {
-		return s, err
-	}
+	var g uint64
+	var o types.PartialState
+	var f map[uint32]uint32
+	var b []BeefyCommitment
+	// TODO: Sourabh set up a set of work reports that do not have work reports and call OuterAccumulate
+	g, _, _, b = s.OuterAccumulate(g, s.AvailableWorkReport, o, f)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
 	}
+	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
+	var leaves [][]byte
+	for _, sa := range b {
+		// put (s,h) of C  into leaves
+		leaf := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
+		leaves = append(leaves, leaf)
+	}
+	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
+	s.accumulationRoot = common.Hash(tree.Root())
+
 	// 29 -  Update Authorization Pool alpha'
 	err = s.ApplyStateTransitionAuthorizations(blk.Guarantees())
 	if err != nil {
@@ -1262,7 +1265,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
 	}
-	s.ApplyXContext()
+	if s.X != nil {
+		s.ApplyXContext()
+	}
 
 	err = s.OnTransfer()
 	if err != nil {

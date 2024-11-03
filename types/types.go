@@ -91,15 +91,6 @@ type ECChunkQuery struct {
 	SegmentRoot common.Hash `json:"segment_root"`
 }
 
-// DeferredTransfer represents a deferred transfer.
-type DeferredTransfer struct {
-	SenderIndex   int      `json:"sender_index"`
-	ReceiverIndex int      `json:"receiver_index"`
-	Amount        int      `json:"amount"`
-	Memo          [64]byte `json:"memo"`
-	GasLimit      int      `json:"gas_limit"`
-}
-
 // AccumulationState represents the state required for accumulation.
 type AccumulationState struct {
 	ServiceIndices    []int              `json:"service_indices"`
@@ -121,12 +112,6 @@ type ValidatorStatistics struct {
 type StatisticalReporter struct {
 	CurrentEpochStats  []ValidatorStatistics `json:"current_epoch_stats"`
 	PreviousEpochStats []ValidatorStatistics `json:"previous_epoch_stats"`
-}
-
-// ServiceAccumulation represents a service accumulation result.
-type ServiceAccumulation struct {
-	ServiceIndex uint32      `json:"service_index"`
-	Result       common.Hash `json:"result"`
 }
 
 // GasAttributable represents the gas attributable for each service.

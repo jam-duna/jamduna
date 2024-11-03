@@ -17,22 +17,6 @@ func (n *JamState) GetAuthPoolBytes() []byte {
 	return codec_bytes
 }
 
-// C2
-func (T AuthorizationQueue) Encode() []byte {
-	authorizations_queue := [types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash{}
-	if len(T) == 0 || len(T) > types.TotalCores {
-		return []byte{}
-	}
-	for i := 0; i < len(T); i++ {
-		copy(authorizations_queue[i][:], T[i])
-	}
-	encoded, err := types.Encode(authorizations_queue)
-	if err != nil {
-		return []byte{}
-	}
-	return encoded
-}
-
 func (n *JamState) GetAuthQueueBytes() []byte {
 	if len(n.AuthorizationQueue) == 0 {
 		return []byte{}
@@ -44,7 +28,32 @@ func (n *JamState) GetAuthQueueBytes() []byte {
 	return codec_bytes
 }
 
-// C3 RecentBlocks
+// C3
+func (T Peaks) Encode() []byte {
+	if len(T) == 0 {
+		return []byte{0}
+	}
+
+	encoded, err := types.Encode(uint(len(T)))
+	if err != nil {
+		return nil
+	}
+
+	for i := 0; i < len(T); i++ {
+		if T[i] == nil {
+			encoded = append(encoded, 0)
+		} else {
+			encoded = append(encoded, 1)
+			encodedTi, err := types.Encode(T[i])
+			if err != nil {
+				return nil
+			}
+			encoded = append(encoded, encodedTi...)
+		}
+	}
+	return encoded
+}
+
 func (n *JamState) GetRecentBlocksBytes() []byte {
 	codec_bytes, err := types.Encode(n.RecentBlocks)
 	if err != nil {
@@ -188,20 +197,6 @@ func (s *SafroleState) GetEntropyBytes() []byte {
 		return []byte{}
 	}
 	return codec_bytes
-}
-
-// validators
-func (T Validators) Encode() []byte {
-	var validators [types.TotalValidators]types.Validator
-	if len(T) == 0 || len(T) > types.TotalValidators {
-		return []byte{}
-	}
-	copy(validators[:], T)
-	encoded, err := types.Encode(validators)
-	if err != nil {
-		return []byte{}
-	}
-	return encoded
 }
 
 // C7

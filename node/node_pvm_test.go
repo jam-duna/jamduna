@@ -106,7 +106,6 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		// NEW IDEA: hostSolicit will fill this array
 		// lookups = vm.Solicits
 		vm_err := vm.Execute(types.EntryPointAccumulate)
-		lookups := vm.Solicits
 		if vm_err != nil {
 			fmt.Printf("VM Execute Err:%v\n", vm_err)
 		}
@@ -163,24 +162,25 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		poa_node.addStateDB(s1)
 
 		// use lookups to do Fetch
-		for _, l := range lookups {
-			//reconstructData, err := senderNode.FetchAndReconstructArbitraryData(l.BlobHash, int(l.Length))
-			//reconstructData, err := senderNode.FetchAndReconstructData(l.BlobHash, l.Length)
-			var reconstructData []byte
-			if err != nil {
-				t.Fatalf("Failed to fetch and reconstruct data: %v", err)
-			}
-			// now you have Preimage AND blob
-			lookup := types.Preimages{
-				Requester: uint32(serviceIndex),
-				Blob:      reconstructData[0:l.Length],
-			}
+		/*
+			for _, l := range lookups {
+				//reconstructData, err := senderNode.FetchAndReconstructArbitraryData(l.BlobHash, int(l.Length))
+				//reconstructData, err := senderNode.FetchAndReconstructData(l.BlobHash, l.Length)
+				var reconstructData []byte
+				if err != nil {
+					t.Fatalf("Failed to fetch and reconstruct data: %v", err)
+				}
+				// now you have Preimage AND blob
+				lookup := types.Preimages{
+					Requester: uint32(serviceIndex),
+					Blob:      reconstructData[0:l.Length],
+				}
 
-			// ADD TO Queue  which is used in the NEXT MakeBlock to fill the E_P
-			//stateDB need to add lookup
-			nodes[i].processPreimages(lookup)
-		}
-
+				// ADD TO Queue  which is used in the NEXT MakeBlock to fill the E_P
+				//stateDB need to add lookup
+				nodes[i].processPreimages(lookup)
+			}
+		*/
 		// this block should include E_P
 		b2, b2_err := s1.MakeBlock(poa_node.credential, targetJCE+1)
 		if b2_err != nil {

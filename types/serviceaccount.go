@@ -33,70 +33,108 @@ const (
 )
 
 // ServiceAccount represents a service account.
-type AccountState struct {
-	serviceIndex    uint32      //a_idx - account idx helpful for identifying xs
+type ServiceAccount struct {
+	serviceIndex    uint32
 	CodeHash        common.Hash `json:"code_hash"`         //a_c - account code hash c
 	Balance         uint64      `json:"balance"`           //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
 	GasLimitG       uint64      `json:"gas_limit_g"`       //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
 	GasLimitM       uint64      `json:"gas_limit_m"`       //a_m - the minimum required for the On Transfer entry-point.
 	StorageSize     uint64      `json:"storage_size"`      //a_l - total number of octets used in storage (9.3)
 	NumStorageItems uint32      `json:"num_storage_items"` //a_i - the number of items in storage (9.3)
+
+	Dirty    bool
+	Storage  map[common.Hash]StorageObject  `json:"s_map"` // arbitrary_k -> v. if v=[]byte. use as delete
+	Lookup   map[common.Hash]LookupObject   `json:"l_map"` // (h,l) -> anchor
+	Preimage map[common.Hash]PreimageObject `json:"p"`     // H(p)  -> p
 }
 
-type ServiceAccount struct {
-	//account state portion
-	serviceIndex    uint32
-	CodeHash        common.Hash `json:"code_hash"`
-	Balance         uint64      `json:"balance"`
-	GasLimitG       uint64      `json:"gas_limit_g"`
-	GasLimitM       uint64      `json:"gas_limit_m"`
-	StorageSize     uint64      `json:"storage_size"`      //a_l - total number of octets used in storage (9.3)
-	NumStorageItems uint32      `json:"num_storage_items"` //a_i - the number of items in storage (9.3)
+func (s ServiceAccount) Clone() ServiceAccount {
+	// Start by cloning primitive fields directly
+	clone := ServiceAccount{
+		serviceIndex:    s.serviceIndex,
+		CodeHash:        s.CodeHash,
+		Balance:         s.Balance,
+		GasLimitG:       s.GasLimitG,
+		GasLimitM:       s.GasLimitM,
+		StorageSize:     s.StorageSize,
+		NumStorageItems: s.NumStorageItems,
+		Dirty:           s.Dirty,
+	}
 
-	// journal portion
-	Journals []Journal
-	Storage  map[string][]byte   `json:"s_map"`  // arbitrary_k -> v. if v=[]byte. use as delete
-	Lookup   map[string][]uint32 `json:"l_map"`  // (h,l) -> anchor
-	Preimage map[string][]byte   `json:"p"`      // H(p)  -> p
-	Delete   map[string]string   `json:"delete"` // (key) -> type, if (h,l) If present, delete a_l & a_p
-	Exist    map[string]string   `json:"exist"`  // key is effectively touched. this is essential to switch between bpt vs lookup here
+	// Clone the Storage map
+	clone.Storage = make(map[common.Hash]StorageObject, len(s.Storage))
+	for k, v := range s.Storage {
+		clone.Storage[k] = v.Clone() // Assuming StorageObject has a Clone method
+	}
+
+	// Clone the Lookup map
+	clone.Lookup = make(map[common.Hash]LookupObject, len(s.Lookup))
+	for k, v := range s.Lookup {
+		clone.Lookup[k] = v.Clone() // Assuming LookupObject has a Clone method
+	}
+
+	// Clone the Preimage map
+	clone.Preimage = make(map[common.Hash]PreimageObject, len(s.Preimage))
+	for k, v := range s.Preimage {
+		clone.Preimage[k] = v.Clone() // Assuming PreimageObject has a Clone method
+	}
+
+	return clone
 }
 
-type Journal struct {
-	OP      string
-	KeyType string
-	Key     string
-	Obj     interface{}
+type StorageObject struct {
+	Deleted bool
+	Dirty   bool
+	Value   []byte
 }
 
-type JournalStorageKV struct {
-	K []byte
-	V []byte
+func (o StorageObject) Clone() StorageObject {
+	// Deep copy the Value slice
+	valueCopy := make([]byte, len(o.Value))
+	copy(valueCopy, o.Value)
+
+	return StorageObject{
+		Deleted: o.Deleted,
+		Dirty:   o.Dirty,
+		Value:   valueCopy,
+	}
 }
 
-type JournalLookupKV struct {
-	H common.Hash
-	Z uint32
-	T []uint32
+type LookupObject struct {
+	Deleted bool
+	Dirty   bool
+	Z       uint32
+	T       []uint32
 }
 
-type JournalPreimageKV struct {
-	H common.Hash
-	P []byte
+func (o LookupObject) Clone() LookupObject {
+	// Deep copy the T slice
+	tCopy := make([]uint32, len(o.T))
+	copy(tCopy, o.T)
+
+	return LookupObject{
+		Deleted: o.Deleted,
+		Dirty:   o.Dirty,
+		Z:       o.Z,
+		T:       tCopy,
+	}
 }
 
-func (j *Journal) GetJournalRecordType() (string, string, interface{}) {
-	op := j.OP
-	obj := j.Obj
-	switch obj.(type) { // Type assertion to check the underlying type of Obj
-	case JournalStorageKV:
-		return op, StorageRecordType, obj
-	case JournalLookupKV:
-		return op, LookupRecordType, obj
-	case JournalPreimageKV:
-		return op, PreimageRecordType, obj
-	default:
-		return op, UnknownRecordType, obj
+type PreimageObject struct {
+	Deleted  bool
+	Dirty    bool
+	Preimage []byte
+}
+
+func (o PreimageObject) Clone() PreimageObject {
+	// Deep copy the Preimage slice
+	preimageCopy := make([]byte, len(o.Preimage))
+	copy(preimageCopy, o.Preimage)
+
+	return PreimageObject{
+		Deleted:  o.Deleted,
+		Dirty:    o.Dirty,
+		Preimage: preimageCopy,
 	}
 }
 
@@ -106,7 +144,7 @@ func (j *Journal) GetJournalRecordType() (string, string, interface{}) {
 // TODO: Need codec E here
 
 // Bytes encodes the AccountState as a byte slice
-func (s *AccountState) Bytes() ([]byte, error) {
+func (s *ServiceAccount) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 
 	if _, err := buf.Write(s.CodeHash.Bytes()); err != nil {
@@ -140,7 +178,7 @@ func (s *AccountState) Bytes() ([]byte, error) {
 }
 
 // Recover reconstructs an AccountState from a byte slice
-func (s *AccountState) Recover(data []byte) error {
+func (s *ServiceAccount) Recover(data []byte) error {
 	// Ensure the length of the data is correct
 	expectedLen := 32 + 8*4 + 4 // 32 bytes for CodeHash, 4 * 8 bytes for uint64, 4 bytes for uint32
 	if len(data) != expectedLen {
@@ -187,8 +225,8 @@ func (s *AccountState) Recover(data []byte) error {
 	return nil
 }
 
-func AccountStateFromBytes(service_index uint32, data []byte) (*AccountState, error) {
-	acct := AccountState{}
+func AccountStateFromBytes(service_index uint32, data []byte) (*ServiceAccount, error) {
+	acct := ServiceAccount{}
 	if err := acct.Recover(data); err != nil {
 		fmt.Println("Error recovering:", err)
 		return nil, err
@@ -197,11 +235,11 @@ func AccountStateFromBytes(service_index uint32, data []byte) (*AccountState, er
 	return &acct, nil
 }
 
-func (s *AccountState) ServiceIndex() uint32 {
+func (s *ServiceAccount) ServiceIndex() uint32 {
 	return s.serviceIndex
 }
 
-func (s *AccountState) SetServiceIndex(service_index uint32) {
+func (s *ServiceAccount) SetServiceIndex(service_index uint32) {
 	s.serviceIndex = service_index
 }
 
@@ -222,40 +260,11 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 		NumStorageItems: acctState.NumStorageItems,
 
 		// Initialize maps to avoid nil reference errors
-		Journals: make([]Journal, 0),
-		Storage:  make(map[string][]byte),
-		Lookup:   make(map[string][]uint32),
-		Preimage: make(map[string][]byte),
-		Delete:   make(map[string]string),
-		Exist:    make(map[string]string),
+		Storage:  make(map[common.Hash]StorageObject),
+		Lookup:   make(map[common.Hash]LookupObject),
+		Preimage: make(map[common.Hash]PreimageObject),
 	}
 	return serviceAccount, nil
-}
-
-func (s *ServiceAccount) AccountState() *AccountState {
-	// Create a new AccountState and copy relevant fields
-	return &AccountState{
-		serviceIndex:    s.serviceIndex,
-		CodeHash:        s.CodeHash,
-		Balance:         s.Balance,
-		GasLimitG:       s.GasLimitG,
-		GasLimitM:       s.GasLimitM,
-		StorageSize:     s.StorageSize,
-		NumStorageItems: s.NumStorageItems,
-	}
-}
-
-func (s *ServiceAccount) ServiceIndex() uint32 {
-	return s.serviceIndex
-}
-
-func (s *ServiceAccount) SetServiceIndex(service_index uint32) {
-	s.serviceIndex = service_index
-}
-
-func (s *ServiceAccount) Bytes() ([]byte, error) {
-	// get the accountState portion only
-	return s.AccountState().Bytes()
 }
 
 // Convert the ServiceAccount to a human-readable string.
@@ -265,180 +274,79 @@ func (s *ServiceAccount) String() string {
 	return str
 }
 
-func (s *ServiceAccount) AddJournal(op string, key_type string, key string, obj interface{}) {
-	j := Journal{
-		OP:      op,
-		KeyType: key_type,
-		Key:     key,
-		Obj:     obj,
+func (s *ServiceAccount) ReadStorage(key common.Hash, sdb HostEnv) (ok bool, v []byte) {
+	storageObj, ok := s.Storage[key]
+	if storageObj.Deleted {
+		return false, nil
 	}
-	s.MarkDirty(key, key_type) // IMPORTANT: must mark dirty here..
-	s.Journals = append(s.Journals, j)
-}
-
-func (s *ServiceAccount) IsMarkedAsDelete(k string) bool {
-	// Check if the key exists in the Delete map
-	if _, exists := s.Delete[k]; exists {
-		return true
-	}
-	return false
-}
-
-func (s *ServiceAccount) OverwriteDelete(k string) {
-	if s.IsMarkedAsDelete(k) {
-		delete(s.Delete, k)
-	}
-}
-
-func (s *ServiceAccount) OverwriteJournalMemory(k string, key_type string) {
-	isDirty, _ := s.IsDirty(k)
-	if isDirty {
-		switch key_type {
-		case StorageRecordType:
-			delete(s.Storage, k)
-		case LookupRecordType:
-			delete(s.Lookup, k)
-		case PreimageRecordType:
-			delete(s.Preimage, k)
+	if !ok {
+		var err error
+		v = sdb.ReadServiceStorage(s.serviceIndex, key.Bytes())
+		if err != nil {
+			return false, nil
 		}
 	}
+	return true, storageObj.Value
 }
 
-func (s *ServiceAccount) IsDirty(k string) (bool, string) {
-	// Check if the key exists in the `Exist` map and is marked as `true`
-	if op_type, exists := s.Exist[k]; exists {
-		return true, op_type
+func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok bool, preimage []byte) {
+	preimageObj, ok := s.Preimage[blobHash]
+	if preimageObj.Deleted {
+		return false, nil
 	}
-	return false, JournalOPNOTInitiated
-}
-
-func (s *ServiceAccount) MarkDirty(k string, op_type string) {
-	if s.Exist == nil {
-		s.Exist = make(map[string]string)
-	}
-	s.Exist[k] = op_type
-}
-
-func (s *ServiceAccount) JournalGetStorage(key []byte) (bool, error, []byte) {
-	k := common.Bytes2Hex(key)
-	isDirty, op_type := s.IsDirty(k) // get last rec
-	if isDirty {
-		//should be return via journal mem
-		if op_type == JournalOPDelete {
-			// has been marked as delete - should have save not found behavior as if we are calling bpt
-			return true, nil, nil
-		} else if op_type == JournalOPWrite {
-			// return value from jornal map
-			v, found := s.Storage[k]
-			if !found {
-				// shouldn't be here
-				panic(0)
-			}
-			return true, nil, v
+	if !ok {
+		preimage = sdb.ReadServicePreimageBlob(s.ServiceIndex(), blobHash)
+		s.Preimage[blobHash] = PreimageObject{
+			Dirty:    false,
+			Preimage: preimage,
 		}
+		return true, preimage
 	}
-	// NOT found in memory, require bpt lookup
-	return false, nil, nil
+	return true, preimageObj.Preimage
 }
 
-func (s *ServiceAccount) JournalGetPreimage(blobHash common.Hash) (bool, error, []byte) {
-	k := blobHash.Hex()
-	isDirty, op_type := s.IsDirty(k) // get last rec
-	if isDirty {
-		//should be return via journal mem
-		if op_type == JournalOPDelete {
-			// has been marked as delete - should have save not found behavior as if we are calling bpt
-			return true, nil, nil
-		} else if op_type == JournalOPWrite {
-			// return value from jornal map
-			blob, found := s.Preimage[k]
-			if !found {
-				// shouldn't be here
-				panic(0)
-			}
-			return true, nil, blob
+func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv) (ok bool, anchor_timeslot []uint32) {
+	lookupObj, ok := s.Lookup[blobHash]
+	if lookupObj.Deleted {
+		return false, []uint32{}
+	}
+	if !ok {
+		anchor_timeslot = sdb.ReadServicePreimageLookup(s.ServiceIndex(), blobHash, z)
+		s.Lookup[blobHash] = LookupObject{
+			Dirty: false,
+			Z:     z,
+			T:     anchor_timeslot,
 		}
+		return true, anchor_timeslot
 	}
-	// NOT found in memory, require bpt lookup
-	return false, nil, nil
+	return true, lookupObj.T
 }
 
-func (s *ServiceAccount) JournalGetLookup(blobHash common.Hash, z uint32) (bool, error, []uint32) {
-	k := fmt.Sprintf("%v_%v", blobHash, z)
-	isDirty, op_type := s.IsDirty(k) // get last rec
-	if isDirty {
-		//should be return via journal mem
-		if op_type == JournalOPDelete {
-			// has been marked as delete - should have save not found behavior as if we are calling bpt
-			return true, nil, nil
-		} else if op_type == JournalOPWrite {
-			// return value from jornal map
-			anchor_timeslot, found := s.Lookup[k]
-			if !found {
-				// shouldn't be here
-				panic(0)
-			}
-			return true, nil, anchor_timeslot
-		}
+func (s *ServiceAccount) WriteStorage(key common.Hash, val []byte) {
+	s.Dirty = true
+	s.Storage[key] = StorageObject{
+		Dirty:   true,
+		Deleted: len(val) == 0,
+		Value:   val,
 	}
-	// NOT found in memory, require bpt lookup
-	return false, nil, []uint32{}
 }
 
-func (s *ServiceAccount) JournalInsertStorage(key []byte, val []byte) {
-	k := common.Bytes2Hex(key)
-	s.AddJournal(JournalOPWrite, StorageRecordType, k, JournalStorageKV{K: key, V: val})
-	s.Storage[k] = val
-	s.OverwriteDelete(k)
-}
-
-func (s *ServiceAccount) JournalDeleteStorage(key []byte) {
-	k := common.Bytes2Hex(key)
-	s.OverwriteJournalMemory(k, StorageRecordType)
-	s.AddJournal(JournalOPDelete, StorageRecordType, k, JournalStorageKV{K: key})
-	s.Delete[k] = StorageRecordType
-}
-
-func (s *ServiceAccount) JournalInsertPreimage(blobHash common.Hash, blob []byte) {
-	k := blobHash.Hex()
-	s.AddJournal(JournalOPWrite, PreimageRecordType, k, JournalPreimageKV{H: blobHash, P: blob})
-	s.Preimage[blobHash.Hex()] = blob
-	s.OverwriteDelete(k)
-}
-
-func (s *ServiceAccount) JournalDeletePreimage(blobHash common.Hash) {
-	k := blobHash.Hex()
-	s.OverwriteJournalMemory(k, PreimageRecordType)
-	s.AddJournal(JournalOPDelete, PreimageRecordType, k, JournalPreimageKV{H: blobHash})
-	s.Delete[k] = PreimageRecordType
-}
-
-func (s *ServiceAccount) JournalInsertLookup(blobHash common.Hash, z uint32, time_slots []uint32) {
-	// key is 32 ++ 4 byte length
-	k := fmt.Sprintf("%v_%v", blobHash, z)
-	s.AddJournal(JournalOPWrite, LookupRecordType, k, JournalLookupKV{H: blobHash, Z: z, T: time_slots})
-	if s.Lookup == nil {
-		s.Lookup = make(map[string][]uint32)
+func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
+	s.Dirty = true
+	s.Preimage[blobHash] = PreimageObject{
+		Dirty:    true,
+		Deleted:  len(preimage) == 0,
+		Preimage: preimage,
 	}
-	s.Lookup[k] = time_slots
-	s.OverwriteDelete(k)
 }
 
-func (s *ServiceAccount) JournalDeleteLookup(blobHash common.Hash, z uint32) {
-	// key is 32 ++ 4 byte length
-	k := fmt.Sprintf("%v_%v", blobHash, z)
-	s.OverwriteJournalMemory(k, LookupRecordType)
-	s.AddJournal(JournalOPDelete, LookupRecordType, k, JournalLookupKV{H: blobHash})
-	s.Delete[k] = LookupRecordType
-}
-
-func (s *ServiceAccount) JournalDeletePreimageAndLookup(blobHash common.Hash, z uint32) {
-	s.JournalDeleteLookup(blobHash, z)
-	s.JournalDeletePreimage(blobHash)
-}
-
-func (s *ServiceAccount) GetJournals() []Journal {
-	return s.Journals
+func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots []uint32) {
+	s.Dirty = true
+	s.Lookup[blobHash] = LookupObject{
+		Dirty:   true,
+		Deleted: len(time_slots) == 0,
+		T:       time_slots,
+	}
 }
 
 // eq 95

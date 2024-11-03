@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -114,5 +115,30 @@ func TestCodec(t *testing.T) {
 			// 	t.Fatalf("codecDecodedStruct <> jsonDecodedStrcut mismatch!")
 			// }
 		})
+	}
+}
+
+func TestMapCodec(t *testing.T) {
+	hash1 := common.Hash{0x01, 0x02, 0x03}
+	hash2 := common.Hash{0x04, 0x05, 0x06}
+	hash3 := common.Hash{0x07, 0x08, 0x09}
+	a := map[common.Hash]common.Hash{
+		hash1: hash2,
+		hash2: hash1,
+		hash3: hash3,
+	}
+	fmt.Println("a: ", a)
+	encoded, err := Encode(a)
+	if err != nil {
+		t.Fatalf("failed to encode map: %v", err)
+	}
+	fmt.Printf("encoded: %x\n", encoded)
+	decoded, _, err := Decode(encoded, reflect.TypeOf(a))
+	if err != nil {
+		t.Fatalf("failed to decode map: %v", err)
+	}
+	fmt.Println("decoded: ", decoded)
+	if !reflect.DeepEqual(a, decoded) {
+		t.Fatalf("expected %v, got %v", a, decoded)
 	}
 }

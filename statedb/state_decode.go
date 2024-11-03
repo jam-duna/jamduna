@@ -39,37 +39,56 @@ func (n *JamState) SetAuthPool(authPoolByte []byte) {
 	n.AuthorizationsPool = authorizationsPool.([types.TotalCores][]common.Hash)
 }
 
-// C2 AuthQueue
-func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
-	authorizations_queue := [types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash{}
-	decoded, length, err := types.Decode(data, reflect.TypeOf(authorizations_queue))
-	if err != nil {
-		return AuthorizationQueue{}, 0
-	}
-	authorizations_queue = decoded.([types.TotalCores][types.MaxAuthorizationQueueItems]common.Hash)
-	for i := 0; i < types.TotalCores; i++ {
-		if len(T[i]) == 0 {
-			T[i] = make([]common.Hash, types.MaxAuthorizationQueueItems)
-		}
-		for j := 0; j < types.MaxAuthorizationQueueItems; j++ {
-			T[i][j] = authorizations_queue[i][j]
-		}
-	}
-	return T, length
-}
-
 func (n *JamState) SetAuthQueue(authQueueByte []byte) {
 	if len(authQueueByte) == 0 {
 		return
 	}
-	authorizationQueues, _, err := types.Decode(authQueueByte, reflect.TypeOf(AuthorizationQueue{}))
+	authorizationQueues, _, err := types.Decode(authQueueByte, reflect.TypeOf(types.AuthorizationQueue{}))
 	if err != nil {
 		return
 	}
-	n.AuthorizationQueue = authorizationQueues.(AuthorizationQueue)
+	n.AuthorizationQueue = authorizationQueues.(types.AuthorizationQueue)
 }
 
 // C3 RecentBlocks
+func (T Peaks) Decode(data []byte) (interface{}, uint32) {
+	if len(data) == 0 {
+		return Peaks{}, 0
+	}
+
+	peaks_len, length, err := types.Decode(data, reflect.TypeOf(uint(0)))
+	if err != nil {
+		return Peaks{}, 0
+	}
+
+	if peaks_len.(uint) == 0 {
+		return Peaks{}, length
+	}
+
+	peaks := make([]*common.Hash, peaks_len.(uint))
+	for i := 0; i < int(peaks_len.(uint)); i++ {
+		if length >= uint32(len(data)) {
+			return Peaks{}, 0
+		}
+
+		if data[length] == 0 {
+			peaks[i] = nil
+			length++
+		} else if data[length] == 1 {
+			length++
+			decoded, l, err := types.Decode(data[length:], reflect.TypeOf(&common.Hash{}))
+			if err != nil {
+				return Peaks{}, 0
+			}
+			peaks[i] = decoded.(*common.Hash)
+			length += l
+		} else {
+			return Peaks{}, 0
+		}
+	}
+	return peaks, length
+}
+
 func (n *JamState) SetRecentBlocks(recentBlocksByte []byte) {
 	if len(recentBlocksByte) == 0 {
 		return
@@ -228,31 +247,16 @@ func (n *JamState) SetEntropy(entropyByte []byte) {
 	n.SafroleState.Entropy = entropy.(Entropy)
 }
 
-// validators
-func (T Validators) Decode(data []byte) (interface{}, uint32) {
-	if len(data) == 0 {
-		return Validators{}, 0
-	}
-	validators, length, err := types.Decode(data, reflect.TypeOf([types.TotalValidators]types.Validator{}))
-	if err != nil {
-		return Validators{}, 0
-	}
-	for i := 0; i < types.TotalValidators; i++ {
-		T = append(T, validators.([types.TotalValidators]types.Validator)[i])
-	}
-	return T, length
-}
-
 // C7 NextEpochValidatorKeys
 func (n *JamState) SetNextEpochValidators(nextEpochValidatorsByte []byte) {
 	if len(nextEpochValidatorsByte) == 0 {
 		return
 	}
-	nextEpochValidators, _, err := types.Decode(nextEpochValidatorsByte, reflect.TypeOf(Validators{}))
+	nextEpochValidators, _, err := types.Decode(nextEpochValidatorsByte, reflect.TypeOf(types.Validators{}))
 	if err != nil {
 		return
 	}
-	n.SafroleState.NextValidators = nextEpochValidators.(Validators)
+	n.SafroleState.NextValidators = nextEpochValidators.(types.Validators)
 }
 
 // C8 CurrentValidatorKeys
@@ -260,11 +264,11 @@ func (n *JamState) SetCurrEpochValidators(currEpochValidatorsByte []byte) {
 	if len(currEpochValidatorsByte) == 0 {
 		return
 	}
-	currEpochValidators, _, err := types.Decode(currEpochValidatorsByte, reflect.TypeOf(Validators{}))
+	currEpochValidators, _, err := types.Decode(currEpochValidatorsByte, reflect.TypeOf(types.Validators{}))
 	if err != nil {
 		return
 	}
-	n.SafroleState.CurrValidators = currEpochValidators.(Validators)
+	n.SafroleState.CurrValidators = currEpochValidators.(types.Validators)
 }
 
 // C9 PriorEpochValidatorKeys
@@ -272,11 +276,11 @@ func (n *JamState) SetPriorEpochValidators(priorEpochValidatorsByte []byte) {
 	if len(priorEpochValidatorsByte) == 0 {
 		return
 	}
-	priorEpochValidators, _, err := types.Decode(priorEpochValidatorsByte, reflect.TypeOf(Validators{}))
+	priorEpochValidators, _, err := types.Decode(priorEpochValidatorsByte, reflect.TypeOf(types.Validators{}))
 	if err != nil {
 		return
 	}
-	n.SafroleState.PrevValidators = priorEpochValidators.(Validators)
+	n.SafroleState.PrevValidators = priorEpochValidators.(types.Validators)
 }
 
 // C10 PendingReports
@@ -331,11 +335,11 @@ func (n *JamState) SetPrivilegedServicesIndices(privilegedServicesIndicesByte []
 	if len(privilegedServicesIndicesByte) == 0 {
 		return
 	}
-	privilegedServicesIndices, _, err := types.Decode(privilegedServicesIndicesByte, reflect.TypeOf(Kai_state{}))
+	privilegedServicesIndices, _, err := types.Decode(privilegedServicesIndicesByte, reflect.TypeOf(types.Kai_state{}))
 	if err != nil {
 		return
 	}
-	n.PrivilegedServiceIndices = privilegedServicesIndices.(Kai_state)
+	n.PrivilegedServiceIndices = privilegedServicesIndices.(types.Kai_state)
 }
 
 // C13 ActiveValidator

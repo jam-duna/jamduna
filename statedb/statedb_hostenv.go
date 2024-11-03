@@ -19,80 +19,56 @@ const (
 	x_p = "P"
 )
 
-func (s *StateDB) WriteAccount(sa *types.ServiceAccount) {
+func (s *StateDB) WriteAccount(sa types.ServiceAccount) {
 	service_idx := sa.ServiceIndex()
 	//two ways of proceeding this... via journal (most reliable) or via memory (faster but order is not guaranteed)
-	jounrnals := sa.GetJournals()
-	for _, j := range jounrnals {
-		op_type, _, obj := j.GetJournalRecordType()
-		switch v := obj.(type) {
-		case types.JournalStorageKV:
-			if op_type == types.JournalOPWrite {
-				s.WriteServiceStorage(service_idx, v.K, v.V)
-			} else if op_type == types.JournalOPDelete {
-				s.DeleteServiceStorageKey(service_idx, v.K)
+	for key, storage := range sa.Storage {
+		if storage.Dirty {
+			if len(storage.Value) == 0 || storage.Deleted {
+				s.DeleteServiceStorageKey(service_idx, key.Bytes())
+			} else {
+				s.WriteServiceStorage(service_idx, key.Bytes(), storage.Value)
 			}
-		case types.JournalLookupKV:
-			if op_type == types.JournalOPWrite {
-				s.WriteServicePreimageLookup(service_idx, v.H, v.Z, v.T)
-			} else if op_type == types.JournalOPDelete {
-				s.DeleteServicePreimageLookupKey(service_idx, v.H, v.Z)
+		}
+	}
+	for blobHash, v := range sa.Lookup {
+		if v.Dirty {
+			if len(v.T) == 0 || v.Deleted {
+				s.DeleteServicePreimageLookupKey(service_idx, blobHash, v.Z)
+			} else {
+				s.WriteServicePreimageLookup(service_idx, blobHash, v.Z, v.T)
 			}
-		case types.JournalPreimageKV:
-			if op_type == types.JournalOPWrite {
-				s.WriteServicePreimageBlob(service_idx, v.P)
-			} else if op_type == types.JournalOPDelete {
-				s.DeleteServicePreimageKey(service_idx, v.H)
+		}
+	}
+	for blobHash, v := range sa.Preimage {
+		if v.Dirty {
+			if len(v.Preimage) == 0 || v.Deleted {
+				s.DeleteServicePreimageKey(service_idx, blobHash)
+			} else {
+				s.WriteServicePreimageBlob(service_idx, v.Preimage)
 			}
-		default:
-			panic(0)
 		}
 	}
 	s.WriteService(service_idx, sa)
 }
 
-func (s *StateDB) GetXContext() *types.XContext {
-	return s.X
-}
-
-func (s *StateDB) SetXContext(X *types.XContext) {
-	s.X = X
-}
-
-func (s *StateDB) UpdateXContext(X *types.XContext) {
-	s.X = X
-}
-
 func (s *StateDB) ApplyXContext() {
-
-	x := s.X
-	if x.S != nil {
-		// TODO: write s
-		s.WriteAccount(x.S)
-	}
+	x := s.X.U
 	// n - NewService 12.4.2 (165)
-	for _, sa := range x.N {
-		s.WriteAccount(sa)
+	for _, sa := range x.D {
+		if sa.Dirty {
+			s.WriteAccount(sa)
+		}
 	}
-	return
-	// TODO: Sourabh to connect this portion next
 	// p - Empower => Kai_state 12.4.1 (164)
-	// s.JamState.PrivilegedServiceIndices.Kai_m = x.P.M
-	// s.JamState.PrivilegedServiceIndices.Kai_a = x.P.A
-	// s.JamState.PrivilegedServiceIndices.Kai_v = x.P.V
+	s.JamState.PrivilegedServiceIndices = x.PrivilegedState
 
 	// c - Designate => AuthorizationQueue
 	for i := 0; i < types.TotalCores; i++ {
-		copy(s.JamState.AuthorizationQueue[i], x.C[i][:])
+		copy(s.JamState.AuthorizationQueue[i], x.QueueWorkReport[i][:])
 	}
 	// v - Assign => DesignatedValidators
-
-	fmt.Printf("AAA=%v\n", s.JamState)
-	fmt.Printf("BBB=%v\n", s.JamState.SafroleState)
-	fmt.Printf("CCC=%v\n", s.JamState.SafroleState.DesignedValidators)
-	//fmt.Printf("DDD=%v\n", s.JamState)
-
-	//s.JamState.SafroleState.DesignedValidators = x.V // []types.Validator `json:"designed_validators"`
+	s.JamState.SafroleState.DesignedValidators = x.UpcomingValidators
 }
 
 func (s *StateDB) GetTimeslot() uint32 {
@@ -118,7 +94,7 @@ func (s *StateDB) GetService(service uint32) (*types.ServiceAccount, error) {
 	return types.ServiceAccountFromBytes(service, serviceBytes)
 }
 
-func (s *StateDB) WriteService(service uint32, sa *types.ServiceAccount) {
+func (s *StateDB) WriteService(service uint32, sa types.ServiceAccount) {
 	v, _ := sa.Bytes()
 	s.WriteServiceBytes(service, v)
 }
@@ -129,23 +105,6 @@ func (s *StateDB) WriteServiceBytes(service uint32, v []byte) {
 }
 
 func (s *StateDB) ReadServiceStorage(service uint32, k []byte) []byte {
-	/*// first check journal
-	XContext := s.GetXContext()
-	xs := XContext.GetX_s()
-	if xs {
-		foundInJournal := false
-		if service != xs.ServiceIndex() {
-			//weird.. how?
-		}
-		foundInJournal, error, val := xs.JournalGetStorage(k)
-		if foundInJournal {
-			if error != nil {
-				// there shouldn't be error..
-			}
-			return val
-		}
-	}*/
-
 	// not init case
 	tree := s.GetTrie()
 	storage, err := tree.GetServiceStorage(service, k)
@@ -163,28 +122,6 @@ func (s *StateDB) WriteServiceStorage(service uint32, k []byte, storage []byte) 
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) []byte {
-	//TODO: willaim DO NOT disable this
-
-	// XContext := s.GetXContext()
-	// xs := XContext.GetX_s()
-	// sa := &types.ServiceAccount{}
-	// if service == xs.ServiceIndex() {
-	// 	sa = xs
-	// } else {
-	// 	// weird .. how
-	// }
-	// found, sa := XContext.GetX_n(service)
-	// if found {
-	// 	foundInJournal, error, blob := sa.JournalGetPreimage(blob_hash)
-	// 	if foundInJournal {
-	// 		if error != nil {
-	// 			// there shouldn't be error..
-	// 		}
-	// 		return blob
-	// 	}
-	// }
-
-	// not init case
 	tree := s.GetTrie()
 	blob, err := tree.GetPreImageBlob(service, blob_hash.Bytes())
 	if err != nil {
@@ -203,20 +140,6 @@ func (s *StateDB) WriteServicePreimageBlob(service uint32, blob []byte) {
 }
 
 func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Hash, blob_length uint32) []uint32 {
-	// first check journal
-	XContext := s.GetXContext()
-	xs := XContext.GetX_s()
-	if service != xs.ServiceIndex() {
-		//weird.. how?
-	}
-	foundInJournal, error, anchors := xs.JournalGetLookup(blob_hash, blob_length)
-	if foundInJournal {
-		if error != nil {
-			// there shouldn't be error..
-		}
-		return anchors
-	}
-	// not init case
 	tree := s.GetTrie()
 	time_slots, err := tree.GetPreImageLookup(service, blob_hash, blob_length)
 	if err != nil {
@@ -311,68 +234,4 @@ func (s *StateDB) DeleteServicePreimageLookupKey(service uint32, blob_hash commo
 		return err
 	}
 	return nil
-}
-
-func (s *StateDB) empower(p *types.Empower) uint32 {
-	s.X.P = p
-	return OK
-}
-
-func (s *StateDB) designate(designate *types.Designate) uint32 {
-	for i := 0; i < types.TotalValidators; i++ {
-		s.X.V[i], _ = types.ValidatorFromBytes(designate.V[i*176 : (i+1)*176])
-	}
-	return OK
-}
-
-func (s *StateDB) assign(assign *types.Assign) uint32 {
-	for i := 0; i < types.MaxAuthorizationQueueItems; i++ {
-		s.X.C[assign.Core][i] = common.BytesToHash(assign.C[i*32 : (i+1)*32])
-	}
-	return OK
-}
-
-func (s *StateDB) addTransfer(t *types.AddTransfer) uint32 {
-	s.X.T = append(s.X.T, t)
-	return OK
-}
-
-func (s *StateDB) SetX(obj interface{}) uint32 {
-	switch v := obj.(type) {
-	case types.Empower:
-		return s.empower(&v)
-	case types.Designate:
-		return s.designate(&v)
-	case types.Assign:
-		return s.assign(&v)
-	case types.AddTransfer:
-		return s.addTransfer(&v)
-	default:
-		panic(0)
-	}
-	return 0
-}
-
-func (s *StateDB) GetX(ctx string) interface{} {
-	// for each possible value of ctx return some internal state variable of X
-	x := s.X
-	switch ctx {
-	case x_s:
-		return x.S
-	case x_c:
-		return x.C
-	case x_v:
-		return x.V
-	case x_i:
-		return x.I
-	case x_t:
-		return x.T
-	case x_n:
-		return x.N
-	case x_p:
-		return x.P
-	default:
-		panic(0)
-	}
-	return 0
 }

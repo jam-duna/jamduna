@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
+	//	"reflect"
 	"sort"
 	"strings"
 
@@ -239,13 +239,8 @@ type VM struct {
 	Imports    [][]byte
 	Exports    [][]byte
 
-	// SOLICITS+FORGETS
-	Solicits []Solicit
-	Forgets  []Forgets
-
-	X types.XContext
+	X *types.XContext
 	Y types.XContext
-
 	// Invocation funtions entry point
 	EntryPoint uint32
 
@@ -705,9 +700,9 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		vm.writeRAMBytes((1<<32)-Z_Q-Z_I, vm.w_byte)
 		vm.SetAccessMode(2*Z_Q+Q_func(vm.o_size)+vm.w_size, 2*Z_Q+Q_func(vm.o_size)+P_func(vm.w_size)+vm.z*Z_P, ReadWrite)
 		vm.SetAccessMode((1<<32)-2*Z_Q-Z_I-P_func(vm.s), (1<<32)-2*Z_Q-Z_I, ReadWrite)
-		vm.SetAccessMode((1<<32)-2*Z_Q-Z_I, (1<<32)-Z_Q-Z_I+uint32(len(argument_data_a)), ReadWrite)
+		vm.SetAccessMode((1<<32)-Z_Q-Z_I, (1<<32)-Z_Q-Z_I+uint32(len(argument_data_a)), ReadWrite)
 		vm.writeRAMBytes((1<<32)-Z_Q-Z_I, argument_data_a)
-		vm.SetAccessMode((1<<32)-2*Z_Q-Z_I, (1<<32)-Z_Q-Z_I+uint32(len(argument_data_a)), ReadOnly)
+		vm.SetAccessMode((1<<32)-Z_Q-Z_I, (1<<32)-Z_Q-Z_I+uint32(len(argument_data_a)), ReadOnly)
 		vm.SetAccessMode((1<<32)-Z_Q-Z_I+uint32(len(argument_data_a)), (1<<32)-Z_Q-Z_I+P_func(uint32(len(argument_data_a))), ReadOnly)
 		vm.ram.FinalizePermissions()
 
@@ -835,19 +830,17 @@ func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, cod
 	return vm.getArgumentOutputs()
 }
 
-func (vm *VM) ExecuteAccumulate(wrangledBytes []byte) (r types.Result, res uint32) {
-	targetType := reflect.TypeOf([]types.WrangledWorkResult{})
-	decodedWrangleWorkResult, _, _ := types.Decode(wrangledBytes, targetType)
-
-	wrangledWorkResults, _ := decodedWrangleWorkResult.([]types.WrangledWorkResult)
-	//vm.setArgumentInputs(wrangledWorkResults[0].Output.Ok)
-	//vm.setArgumentInputs(wrangledBytes)
-	Standard_Program_Initialization(vm, wrangledWorkResults[0].Output.Ok) // eq 264/265
+func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint32) {
+	o, _ := types.Encode(elements)
+	Standard_Program_Initialization(vm, o) // eq 264/265
+	vm.X = X
+	vm.Y = X.Clone()
 	vm.Execute(types.EntryPointAccumulate)
+
 	return vm.getArgumentOutputs()
 }
 
-func (vm *VM) ExecuteTransfer(t []*types.AddTransfer) (r types.Result, res uint32) {
+func (vm *VM) ExecuteTransfer(t []types.DeferredTransfer) (r types.Result, res uint32) {
 	// a = E(t)   take transfer memos t and encode them
 	a := make([]byte, 0)
 	for _, t := range t {

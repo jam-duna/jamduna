@@ -44,7 +44,7 @@ const (
 	debug      = false // General Node Ops
 	debugAudit = false // Audit
 	trace      = false
-	debugE     = true // monitoring fn execution time
+	debugE     = false // monitoring fn execution time
 
 	numNodes = 6
 	quicAddr = "127.0.0.1:%d"
@@ -1087,7 +1087,8 @@ func (n *Node) runClient() {
 				n.addStateDB(newStateDB)
 				n.StoreBlock(newBlock)
 				n.cacheBlock(newBlock)
-				n.cacheHeaders(newBlock.Header.Hash(), newBlock)
+				headerHash := newBlock.Header.Hash()
+				n.cacheHeaders(headerHash, newBlock)
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				n.broadcast(*newBlock)
 

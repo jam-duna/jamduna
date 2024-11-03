@@ -14,6 +14,7 @@ type Validator struct {
 	Bls          [BlsPubInBytes]byte       `json:"bls"`
 	Metadata     [MetadataSizeInBytes]byte `json:"metadata"`
 }
+type Validators []Validator
 
 type ValidatorSecret struct {
 	BandersnatchPub    BandersnatchKey           `json:"bandersnatch"`
@@ -203,4 +204,68 @@ func (v *ValidatorSecret) UnmarshalJSON(data []byte) error {
 	copy(v.Ed25519Secret[:], ed25519_secret)
 	copy(v.BlsSecret[:], bls_secret)
 	return nil
+}
+
+// C2 AuthQueue
+func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
+	authorizations_queue := [TotalCores][MaxAuthorizationQueueItems]common.Hash{}
+	decoded, length, err := Decode(data, reflect.TypeOf(authorizations_queue))
+	if err != nil {
+		return AuthorizationQueue{}, 0
+	}
+	authorizations_queue = decoded.([TotalCores][MaxAuthorizationQueueItems]common.Hash)
+	for i := 0; i < TotalCores; i++ {
+		if len(T[i]) == 0 {
+			T[i] = make([]common.Hash, MaxAuthorizationQueueItems)
+		}
+		for j := 0; j < MaxAuthorizationQueueItems; j++ {
+			T[i][j] = authorizations_queue[i][j]
+		}
+	}
+	return T, length
+}
+
+// validators
+func (T Validators) Decode(data []byte) (interface{}, uint32) {
+	if len(data) == 0 {
+		return Validators{}, 0
+	}
+	validators, length, err := Decode(data, reflect.TypeOf([TotalValidators]Validator{}))
+	if err != nil {
+		return Validators{}, 0
+	}
+	for i := 0; i < TotalValidators; i++ {
+		T = append(T, validators.([TotalValidators]Validator)[i])
+	}
+	return T, length
+}
+
+// validators
+func (T Validators) Encode() []byte {
+	var validators [TotalValidators]Validator
+	if len(T) == 0 || len(T) > TotalValidators {
+		return []byte{}
+	}
+	copy(validators[:], T)
+	encoded, err := Encode(validators)
+	if err != nil {
+		return []byte{}
+	}
+	return encoded
+}
+
+// C2
+func (T AuthorizationQueue) Encode() []byte {
+	authorizations_queue := [TotalCores][MaxAuthorizationQueueItems]common.Hash{}
+	if len(T) == 0 || len(T) > TotalCores {
+		return []byte{}
+	}
+	for i := 0; i < len(T); i++ {
+		copy(authorizations_queue[i][:], T[i])
+	}
+	encoded, err := Encode(authorizations_queue)
+	if err != nil {
+		return []byte{}
+	}
+	return encoded
 }

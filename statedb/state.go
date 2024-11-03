@@ -5,30 +5,36 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
 )
-
-type AuthorizationQueue [types.TotalCores][]common.Hash
 
 type AvailabilityAssignments [types.TotalCores]*Rho_state
 
 type JamState struct {
 	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"authorizations_pool"` // alpha The core αuthorizations pool. α eq 85
-	AuthorizationQueue       AuthorizationQueue                           `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
+	AuthorizationQueue       types.AuthorizationQueue                     `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
 	RecentBlocks             RecentBlocks                                 `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
 	SafroleStateGamma        SafroleBasicState                            `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
 	SafroleState             *SafroleState                                `json:"safrole"`
 	PriorServiceAccountState map[uint32]types.ServiceAccount              `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
 	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
-	PrivilegedServiceIndices Kai_state                                    `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
+	PrivilegedServiceIndices types.Kai_state                              `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
 	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"validator_statistics"`        // pi The validator statistics. π eq 171
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"accumulate_queue"`            // theta - The accumulation queue  θ eq 164
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulate_history"`          // xi - The accumulation history  ξ eq 162
 
 }
 
+/*
+ReadyState                    [types.EpochLength][]Ready
+AccumulatedHistory       [types.EpochLength]map[common.Hash]common.Hash // work-report hash to segment-root dictionary
+
+type Ready struct { //AccumulationQueue
+WorkReport       types.WorkReport
+WorkPackageHashs []common.Hash
+}
+*/
 func (b *Beta_state) MMR_Bytes() []byte {
 	codec_bytes, err := json.Marshal(b.B)
 	if err != nil {
@@ -109,13 +115,6 @@ func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Types for Kai
-type Kai_state struct {
-	Kai_m uint32 `json:"chi_m"` // The index of the empower service
-	Kai_a uint32 `json:"chi_a"` // The index of the designate service
-	Kai_v uint32 `json:"chi_v"` // The index of the assign service
-}
-
 // Types for Pi
 type Pi_state struct {
 	BlocksProduced         uint32 `json:"block_number"`        // The number of blocks produced by the validator.
@@ -176,32 +175,6 @@ func (state *JamState) String() string {
 	return string(jsonBytes)
 }
 
-// Accumulate performs the accumulation of a single service.
-func (state *JamState) Accumulate(serviceIndex int, accumulationState types.AccumulationState) (types.AccumulationState, error) {
-	// Wrangle results for the service (simplified for demonstration)
-	//wrangledResults := state.SafroleState.CurrValidators // Assuming wrangled results are the current validators
-
-	// Calculate gas limit for the service
-	// TODO: gasLimit := 1000
-
-	// Create the arguments for the VM invocation
-	args := types.AccumulationState{
-		ServiceIndices: []int{serviceIndex},
-		//WorkReports:       wrangledResults,
-		DeferredTransfers: accumulationState.DeferredTransfers,
-	}
-
-	// Call the virtual machine
-	code := []byte{}
-	vm := pvm.NewVMFromCode(uint32(serviceIndex), code, 0, nil) // Assuming `nil` for HostEnv
-	err := vm.Execute(types.EntryPointAccumulate)
-	if err != nil {
-		return types.AccumulationState{}, err
-	}
-
-	return args, nil
-}
-
 func (n *JamState) ResetTallyStatistics() {
 
 	n.ValidatorStatistics[1] = n.ValidatorStatistics[0]
@@ -229,6 +202,15 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 		n.ValidatorStatistics[0][validatorIndex].AvailabilityAssurances += cnt
 	default:
 		fmt.Println("Unknown activity:", activity)
+	}
+}
+
+func (j *JamState) newPartialState() types.PartialState {
+	return types.PartialState{
+		D:                  make(map[uint32]types.ServiceAccount),
+		UpcomingValidators: j.SafroleState.NextValidators,
+		QueueWorkReport:    j.AuthorizationQueue,
+		PrivilegedState:    j.PrivilegedServiceIndices,
 	}
 }
 

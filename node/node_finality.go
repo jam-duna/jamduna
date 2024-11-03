@@ -53,7 +53,9 @@ func (n *Node) finalizeBlocks() {
 			if err != nil {
 				fmt.Printf("%s [finalizeBlocks:Finalize] ERR %v", n.String(), err)
 			} else if finalizedEpoch {
-				fmt.Printf("%s [finalizeBlocks:Finalize] BLS Signature %x\n", n.String(), blsSignature)
+				if debug {
+					fmt.Printf("%s [finalizeBlocks:Finalize] BLS Signature %x\n", n.String(), blsSignature)
+				}
 			}
 		}
 	}

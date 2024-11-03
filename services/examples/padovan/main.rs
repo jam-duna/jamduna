@@ -88,13 +88,13 @@ extern "C" fn refine() -> u32 {
         let n = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
         let fib_n = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
         let fib_n_minus_1 = u32::from_le_bytes(buffer[8..12].try_into().unwrap());
-    
+
         let new_fib_n = fib_n + fib_n_minus_1;
-    
+
         buffer[0..4].copy_from_slice(&(n + 1).to_le_bytes());
         buffer[4..8].copy_from_slice(&new_fib_n.to_le_bytes());
         buffer[8..12].copy_from_slice(&fib_n.to_le_bytes());
-    
+
     } else {
         buffer.copy_from_slice(&[1u8, 0u8, 0u8, 0u8, 1u8, 0u8, 0u8, 0u8, 1u8, 0u8, 0u8, 0u8]);
     }
@@ -123,6 +123,15 @@ extern "C" fn accumulate() -> u32 {
     unsafe {
         write(key.as_ptr(), 1, buffer.as_ptr(), buffer.len() as u32);
     }
+    unsafe {
+        core::arch::asm!(
+            "mv a3, {0}",
+            "mv a4, {1}",
+            in(reg) buffer_addr,
+            in(reg) buffer_len,
+        );
+    }
+    
 
     0
 }

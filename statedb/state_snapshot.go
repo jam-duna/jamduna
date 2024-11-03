@@ -29,17 +29,17 @@ var orderedStateList = []string{
 // C1 - C15
 type StateSnapshot struct {
 	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`  // c1
-	AuthorizationQueue       AuthorizationQueue                           `json:"varphi"` // c2
+	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"` // c2
 	RecentBlocks             RecentBlocks                                 `json:"beta"`   // c3
 	Gamma                    SafroleBasicState                            `json:"gamma"`  // c4
 	Disputes                 Psi_state                                    `json:"psi"`    // c5
 	Entropy                  Entropy                                      `json:"eta"`    // c6
-	NextValidators           Validators                                   `json:"iota"`   // c7
-	CurrValidators           Validators                                   `json:"kappa"`  // c8
-	PrevValidators           Validators                                   `json:"lambda"` // c9
+	NextValidators           types.Validators                             `json:"iota"`   // c7
+	CurrValidators           types.Validators                             `json:"kappa"`  // c8
+	PrevValidators           types.Validators                             `json:"lambda"` // c9
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`    // c10
 	Timeslot                 uint32                                       `json:"tau"`    // c11
-	PrivilegedServiceIndices Kai_state                                    `json:"chi"`    // c12
+	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`    // c12
 	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"pi"`     // c13
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`  // c14 Accumulation Queue
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`     // c15 Accumulation History
@@ -170,8 +170,8 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 			authorizationsPool, _, _ := types.Decode(kv[1], reflect.TypeOf([types.TotalCores][]common.Hash{}))
 			sn.AuthorizationsPool = authorizationsPool.([types.TotalCores][]common.Hash)
 		case C2:
-			authorizationQueue, _, _ := types.Decode(kv[1], reflect.TypeOf(AuthorizationQueue{}))
-			sn.AuthorizationQueue = authorizationQueue.(AuthorizationQueue)
+			authorizationQueue, _, _ := types.Decode(kv[1], reflect.TypeOf(types.AuthorizationQueue{}))
+			sn.AuthorizationQueue = authorizationQueue.(types.AuthorizationQueue)
 		case C3:
 			recentBlocks, _, _ := types.Decode(kv[1], reflect.TypeOf(RecentBlocks{}))
 			sn.RecentBlocks = recentBlocks.(RecentBlocks)
@@ -185,14 +185,14 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 			entropy, _, _ := types.Decode(kv[1], reflect.TypeOf(Entropy{}))
 			sn.Entropy = entropy.(Entropy)
 		case C7:
-			nextValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(Validators{}))
-			sn.NextValidators = nextValidators.(Validators)
+			nextValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Validators{}))
+			sn.NextValidators = nextValidators.(types.Validators)
 		case C8:
-			currValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(Validators{}))
-			sn.CurrValidators = currValidators.(Validators)
+			currValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Validators{}))
+			sn.CurrValidators = currValidators.(types.Validators)
 		case C9:
-			prevValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(Validators{}))
-			sn.PrevValidators = prevValidators.(Validators)
+			prevValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Validators{}))
+			sn.PrevValidators = prevValidators.(types.Validators)
 		case C10:
 			availabilityAssignments, _, _ := types.Decode(kv[1], reflect.TypeOf(AvailabilityAssignments{}))
 			sn.AvailabilityAssignments = availabilityAssignments.(AvailabilityAssignments)
@@ -200,8 +200,8 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 			timeslot, _, _ := types.Decode(kv[1], reflect.TypeOf(uint32(0)))
 			sn.Timeslot = timeslot.(uint32)
 		case C12:
-			privilegedServiceIndices, _, _ := types.Decode(kv[1], reflect.TypeOf(Kai_state{}))
-			sn.PrivilegedServiceIndices = privilegedServiceIndices.(Kai_state)
+			privilegedServiceIndices, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Kai_state{}))
+			sn.PrivilegedServiceIndices = privilegedServiceIndices.(types.Kai_state)
 		case C13:
 			validatorStatistics, _, _ := types.Decode(kv[1], reflect.TypeOf([2][types.TotalValidators]Pi_state{}))
 			sn.ValidatorStatistics = validatorStatistics.([2][types.TotalValidators]Pi_state)

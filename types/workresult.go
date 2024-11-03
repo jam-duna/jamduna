@@ -46,15 +46,6 @@ type WrangledWorkResult struct {
 	Error string `json:"error"`
 }
 
-func (wr *WorkResult) Wrangle(authorizationOutput []byte, workPackageHash common.Hash) WrangledWorkResult {
-	return WrangledWorkResult{
-		Output:              wr.Result,
-		PayloadHash:         wr.PayloadHash,
-		AuthorizationOutput: authorizationOutput,
-		WorkPackageHash:     workPackageHash,
-	}
-}
-
 func (R Result) Encode() []byte {
 	if R.Err == RESULT_OK {
 		ok_byte := R.Ok
