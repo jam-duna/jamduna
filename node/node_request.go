@@ -76,11 +76,11 @@ func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]by
 	return boundaryNode, keyvalues, true, nil
 }
 
-func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, key []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, key common.Hash) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	return n.getServiceIdxStorage(headerHash, service_idx, key)
 }
 
-func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, key []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, key common.Hash) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	s := n.getPVMStateDB()
 	// stateRoot := s.GetStateRoot()
 	blocks, ok, err := n.BlocksLookup(headerHash, 0, 1)
@@ -122,6 +122,7 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncemen
 		return block, fmt.Errorf("Invalid validator index %d", validatorIndex)
 	}
 	headerHash := blockAnnouncement.HeaderHash
+	//fmt.Printf("%s SendBlockRequest(%v) to N%d\n", n.String(), headerHash, validatorIndex)
 	blockRaw, err := p.SendBlockRequest(headerHash, 0, 1)
 	if err != nil {
 		fmt.Printf("processBlockAnnouncement ERR %v\n", err)

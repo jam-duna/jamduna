@@ -201,7 +201,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		s2_tr := s2.CopyTrieState(s2.StateRoot)
 		s2_preimages := b2.PreimageLookups()
 		e_p := s2_preimages[0]
-		preimageBlob, _ := s2_tr.GetPreImageBlob(e_p.Service_Index(), e_p.BlobHash().Bytes())
+		preimageBlob, _ := s2_tr.GetPreImageBlob(e_p.Service_Index(), e_p.BlobHash())
 		anchor_timeslot, _ := s2_tr.GetPreImageLookup(e_p.Service_Index(), e_p.BlobHash(), e_p.BlobLength())
 
 		if !common.CompareBytes(preimageBlob, blob_arr[0]) {

@@ -275,7 +275,11 @@ func bump(i uint32) uint32 {
 func (vm *VM) hostNew() uint32 {
 	xContext := vm.X
 	s := xContext.S
-	xs := xContext.U.D[s]
+	xs, ok := xContext.GetMutableServiceAccount(s, vm.hostenv)
+	if !ok {
+		fmt.Printf("hostNew: %d not found\n", s)
+		return OOB
+	}
 	// put 'g' and 'm' together
 	o, _ := vm.readRegister(7)
 	c, errCode := vm.readRAMBytes(o, 32)
@@ -293,16 +297,19 @@ func (vm *VM) hostNew() uint32 {
 	xi := xContext.I
 
 	// simulate a with c, g, m
-	a := types.ServiceAccount{
+	a := &types.ServiceAccount{
 		Dirty:           true,
 		CodeHash:        common.BytesToHash(c),
 		GasLimitG:       g,
 		GasLimitM:       m,
 		NumStorageItems: 2*1 + 0,            //a_s = 2⋅∣al∣+∣as∣
 		StorageSize:     uint64(81 + l + 0), //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
+		Storage:         make(map[common.Hash]types.StorageObject),
+		Lookup:          make(map[common.Hash]types.LookupObject),
+		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
 	a.SetServiceIndex(xi)
-
+	fmt.Printf("Service %d hostNew %v => %d\n", s, a.CodeHash, a.ServiceIndex())
 	// Compute footprint & threshold: a_l, a_s, a-t
 
 	// a.Balance = a.ComputeThreshold()
@@ -317,8 +324,7 @@ func (vm *VM) hostNew() uint32 {
 
 		// (x's)b <- (xs)b - at
 		xs.Balance = xs.Balance - a.Balance
-		xContext.D[xi] = a
-		xContext.D[s] = xs
+		xContext.U.D[xi] = a
 		return OK
 	} else {
 		fmt.Println("Balance insufficient")
@@ -472,8 +478,10 @@ func (vm *VM) hostRead() uint32 {
 		vm.writeRegister(7, OOB)
 		return OOB
 	}
-	key := common.Blake2Hash(k)
-	var a types.ServiceAccount
+
+	key := common.Compute_storageKey_internal(s, k)
+	fmt.Printf("hostRead s=%d, k=%v (%d) => Key: %v (hash(E_4(s)+k))\n", s, k, len(k), key)
+	var a *types.ServiceAccount
 	var ok bool
 	if w7 == s || w7 == 0xFFFFFFFF {
 		a = service
@@ -503,7 +511,11 @@ func (vm *VM) hostRead() uint32 {
 func (vm *VM) hostWrite() uint32 {
 	xContext := vm.X
 	s := xContext.S
-	xs := xContext.U.D[s]
+	xs, ok := xContext.GetMutableServiceAccount(s, vm.hostenv)
+	if !ok {
+		fmt.Printf("hostWrite: %d not found\n", s)
+		return OOB
+	}
 
 	// Assume that all ram can be read and written
 	// Got storage of bold S(service account in GP) by setting s = 0, k = k(from RAM)
@@ -516,7 +528,8 @@ func (vm *VM) hostWrite() uint32 {
 		vm.writeRegister(7, OOB)
 		return OOB
 	}
-	key := common.Blake2Hash(append(types.E_l(uint64(s), 4), k...))
+	key := common.Compute_storageKey_internal(s, k)
+	// fmt.Printf("hostWrite s=%d, k=%v (%d) => Key: %v (hash(E_4(s)+k))\n", s, k, len(k), key)
 
 	// C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i ) ,
 	a_t := uint64(0)
@@ -528,6 +541,7 @@ func (vm *VM) hostWrite() uint32 {
 		}
 		xs.WriteStorage(key, v)
 		vm.writeRegister(7, uint32(len(v)))
+		//fmt.Printf("hostwrite: WriteStorage(%d, %v => %v) len(v)=%d Dirty: %v\n", s, key, v, len(v), xs.Dirty)
 		return 0
 	} else {
 		vm.writeRegister(7, FULL)

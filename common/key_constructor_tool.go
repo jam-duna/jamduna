@@ -27,19 +27,12 @@ func Compute_preimageBlob_internal(blob_hash Hash) Hash {
 }
 
 // k -> E4(2^32-1)++k0...k28 for a_s
-func Compute_storageKey_internal(s uint32, k []byte) Hash {
-	//2^32 - 1 or ffffffff (LE)
-	prefixBytes := make([]byte, 4)
-	prefix := uint32(4294967295)
-	binary.LittleEndian.PutUint32(prefixBytes, prefix)
 
+func Compute_storageKey_internal(s uint32, k []byte) Hash {
 	sBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(sBytes, s)     // E4(s)
 	raw_key := ComputeHash(append(sBytes, k...)) // H(E4(s) ⌢ vk ⋅⋅⋅+k )
-
-	as_internal_key := append(prefixBytes, raw_key[:28]...)
-	as_32 := as_internal_key[:32]
-	return BytesToHash(as_32)
+	return BytesToHash(raw_key)
 }
 
 // EQ 290 - state-key constructor functions C
@@ -62,17 +55,18 @@ func ComputeC_is(i uint8, s uint32) Hash {
 	return BytesToHash(stateKey)
 }
 
-func ComputeC_sh(s uint32, h []byte) Hash {
+func ComputeC_sh(s uint32, h0 Hash) Hash {
 	//s: service_index
 	//h: hash_component (assumed to be exact 32bytes)
 	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
+	h := h0.Bytes()
 	stateKey := make([]byte, 32)
 	nBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
 
 	for i := 0; i < 4; i++ {
 		stateKey[2*i] = nBytes[i]
-		if i < len(h) {
+		if i < 32 {
 			stateKey[2*i+1] = h[i]
 		}
 	}

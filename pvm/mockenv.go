@@ -65,7 +65,7 @@ func (mh *MockHostEnv) WriteServiceBytes(s uint32, v []byte) {
 	tree.SetService(255, s, v)
 }
 
-func (mh *MockHostEnv) ReadServiceStorage(s uint32, k []byte) []byte {
+func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) []byte {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -83,7 +83,7 @@ func (mh *MockHostEnv) ReadServiceStorage(s uint32, k []byte) []byte {
 	}
 }
 
-func (mh *MockHostEnv) WriteServiceStorage(s uint32, k []byte, storage []byte) {
+func (mh *MockHostEnv) WriteServiceStorage(s uint32, k common.Hash, storage []byte) {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -104,7 +104,7 @@ func (mh *MockHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) 
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	blob, err := tree.GetPreImageBlob(s, blob_hash.Bytes())
+	blob, err := tree.GetPreImageBlob(s, blob_hash)
 	if err != nil {
 		return nil
 	} else {
@@ -165,7 +165,7 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	blob, err_v := tree.GetPreImageBlob(s, blob_hash.Bytes())
+	blob, err_v := tree.GetPreImageBlob(s, blob_hash)
 	if err_v != nil {
 		return nil
 	}
@@ -211,7 +211,7 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	}
 }
 
-func (mh *MockHostEnv) DeleteServiceStorageKey(s uint32, k []byte) error {
+func (mh *MockHostEnv) DeleteServiceStorageKey(s uint32, k common.Hash) error {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -237,7 +237,7 @@ func (mh *MockHostEnv) DeleteServicePreimageKey(s uint32, blob_hash common.Hash)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = tree.DeletePreImageBlob(s, blob_hash.Bytes())
+	err = tree.DeletePreImageBlob(s, blob_hash)
 	if err != nil {
 		log.Fatalf("Failed to delete blob_hash: %x, error: %v", blob_hash.Bytes(), err)
 		return err

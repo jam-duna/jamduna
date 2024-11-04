@@ -1,0 +1,15 @@
+[package]
+name = "evm"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+rlp = "0.4"                # For RLP encoding/decoding
+tiny-keccak = { version = "2.0", features = ["keccak"] }  # Enable Keccak hashing
+sha3 = "0.10"              # Provides Keccak256 function
+
+[dev-dependencies]
+assert_cmd = "2.0"         # For command-line testing (if needed in tests)
+anyhow = "1.0"             # Error handling, useful for more readable test outputs
+
+

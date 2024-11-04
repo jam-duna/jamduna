@@ -122,7 +122,7 @@ func (n *Node) onBlockRequest(stream quic.Stream, msg []byte) (err error) {
 	// read the request and response with a set of blocks
 	blocks, ok, err := n.BlocksLookup(newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
 	if err != nil {
-		fmt.Printf("%s onBlockRequest BlocksLookup ERR %v\n", n.String(), err)
+		fmt.Printf("%s onBlockRequest (headerHash=%v)  BlocksLookup ERR %v\n", n.String(), newReq.HeaderHash, err)
 		return err
 	}
 	if !ok {

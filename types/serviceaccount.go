@@ -20,17 +20,16 @@ const (
 	EntryPointGeneric       = 255
 )
 
+/*
+
 const (
 	PreimageRecordType          = "Preimage"
 	LookupRecordType            = "Lookup"
 	PreimageANDLookupRecordType = "PL"
 	StorageRecordType           = "Storage"
 	UnknownRecordType           = "Unknown"
-	JournalOPWrite              = "WRITE"
-	JournalOPDelete             = "DELETE"
-	JournalOPRead               = "READ"
-	JournalOPNOTInitiated       = "NONE"
 )
+*/
 
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
@@ -48,7 +47,7 @@ type ServiceAccount struct {
 	Preimage map[common.Hash]PreimageObject `json:"p"`     // H(p)  -> p
 }
 
-func (s ServiceAccount) Clone() ServiceAccount {
+func (s ServiceAccount) Clone() *ServiceAccount {
 	// Start by cloning primitive fields directly
 	clone := ServiceAccount{
 		serviceIndex:    s.serviceIndex,
@@ -79,7 +78,7 @@ func (s ServiceAccount) Clone() ServiceAccount {
 		clone.Preimage[k] = v.Clone() // Assuming PreimageObject has a Clone method
 	}
 
-	return clone
+	return &clone
 }
 
 type StorageObject struct {
@@ -281,7 +280,7 @@ func (s *ServiceAccount) ReadStorage(key common.Hash, sdb HostEnv) (ok bool, v [
 	}
 	if !ok {
 		var err error
-		v = sdb.ReadServiceStorage(s.serviceIndex, key.Bytes())
+		v = sdb.ReadServiceStorage(s.serviceIndex, key)
 		if err != nil {
 			return false, nil
 		}

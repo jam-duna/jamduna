@@ -279,7 +279,7 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	a_p := l.AccountPreimageHash()
 	//a_l := l.AccountLookupHash()
 
-	preimage_blob, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash().Bytes())
+	preimage_blob, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
 	//TODO: stanley to make sure we can check whether a key exist or not. err here is ambiguous here
 	if err == nil { // key found
 		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
@@ -364,7 +364,17 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 		if err != nil {
 			return statedb, err
 		}
+		codeHash := common.Blake2Hash(code)
+		bootstrapServiceAccount := types.ServiceAccount{
+			CodeHash:        codeHash,
+			Balance:         10000,
+			GasLimitG:       100,
+			GasLimitM:       100,
+			StorageSize:     uint64(len(code)),
+			NumStorageItems: 1,
+		}
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
+		statedb.WriteService(service.ServiceCode, bootstrapServiceAccount)
 	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()
@@ -1029,7 +1039,7 @@ func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, erro
 
 func (s *StateDB) getPreimageBlob(c uint32, codeHash common.Hash) ([]byte, error) {
 	t := s.GetTrie()
-	preimage_blob, err := t.GetPreImageBlob(c, codeHash.Bytes())
+	preimage_blob, err := t.GetPreImageBlob(c, codeHash)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -1237,11 +1247,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	var o types.PartialState
 	var f map[uint32]uint32
 	var b []BeefyCommitment
-	// TODO: Sourabh set up a set of work reports that do not have work reports and call OuterAccumulate
-	g, _, _, b = s.OuterAccumulate(g, s.AvailableWorkReport, o, f)
+
+	g, _, b = s.OuterAccumulate(g, s.AvailableWorkReport, &o, f)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
 	}
+	s.ApplyXContext(&o)
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	var leaves [][]byte
 	for _, sa := range b {
@@ -1264,9 +1275,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
-	}
-	if s.X != nil {
-		s.ApplyXContext()
 	}
 
 	err = s.OnTransfer()

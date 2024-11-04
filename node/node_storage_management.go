@@ -14,7 +14,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) StoreBlock(blk *types.Block) error {
+func (n *Node) StoreBlock(blk *types.Block, id uint16, debug bool) error {
 	// from block, derive blockHash & headerHash
 	s, err := n.GetStorage()
 	if err != nil {
@@ -28,7 +28,9 @@ func (n *Node) StoreBlock(blk *types.Block) error {
 	headerPrefix := []byte("header_")
 	storeKey := append(headerPrefix, headerhash[:]...)
 	s.WriteRawKV(storeKey, blockHash[:])
-
+	if debug && false {
+		fmt.Printf("  [N%d] StoreBlock(HeaderHash %v, BlockHash %v)\n", id, headerhash, blockHash)
+	}
 	// blk_<blockHash> -> codec(block)
 	blockPrefix := []byte("blk_")
 	blkStoreKey := append(blockPrefix, blockHash[:]...)

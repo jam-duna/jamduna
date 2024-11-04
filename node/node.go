@@ -288,7 +288,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	go node.runServer()
 	go node.runClient()
 	go node.runMain()
-	go node.runAudit()
+	//go node.runAudit()
 	return node, nil
 }
 
@@ -718,7 +718,7 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 func (n *Node) processBlock(blk *types.Block) error {
 	// walk blk backwards, up to the tip, if possible -- but if encountering an unknown parenthash, immediately fetch the block.  Give up if we can't do anything
 	b := blk
-	n.StoreBlock(blk)
+	n.StoreBlock(blk, n.id, false)
 	n.cacheBlock(blk)
 	n.cacheHeaders(b.Header.Hash(), blk)
 	for {
@@ -740,7 +740,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 				// got the parent block, store it in the cache
 				if parentBlock.Hash() == blk.ParentHash() {
 					fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.ParentHash(), blk.Hash())
-					n.StoreBlock(parentBlock)
+					n.StoreBlock(parentBlock, n.id, false)
 					n.cacheBlock(parentBlock)
 				} else {
 					return nil
@@ -1085,7 +1085,7 @@ func (n *Node) runClient() {
 				newStateDB.PreviousGuarantors(true)
 				newStateDB.AssignGuarantors(true)
 				n.addStateDB(newStateDB)
-				n.StoreBlock(newBlock)
+				n.StoreBlock(newBlock, n.id, true)
 				n.cacheBlock(newBlock)
 				headerHash := newBlock.Header.Hash()
 				n.cacheHeaders(headerHash, newBlock)

@@ -25,15 +25,15 @@ func (s *StateDB) WriteAccount(sa types.ServiceAccount) {
 	for key, storage := range sa.Storage {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
-				s.DeleteServiceStorageKey(service_idx, key.Bytes())
+				s.DeleteServiceStorageKey(service_idx, key)
 			} else {
-				s.WriteServiceStorage(service_idx, key.Bytes(), storage.Value)
+				s.WriteServiceStorage(service_idx, key, storage.Value)
 			}
 		}
 	}
 	for blobHash, v := range sa.Lookup {
 		if v.Dirty {
-			if len(v.T) == 0 || v.Deleted {
+			if v.Deleted { 
 				s.DeleteServicePreimageLookupKey(service_idx, blobHash, v.Z)
 			} else {
 				s.WriteServicePreimageLookup(service_idx, blobHash, v.Z, v.T)
@@ -52,23 +52,21 @@ func (s *StateDB) WriteAccount(sa types.ServiceAccount) {
 	s.WriteService(service_idx, sa)
 }
 
-func (s *StateDB) ApplyXContext() {
-	x := s.X.U
-	// n - NewService 12.4.2 (165)
-	for _, sa := range x.D {
+func (s *StateDB) ApplyXContext(U *types.PartialState) {
+	for _, sa := range U.D {
 		if sa.Dirty {
-			s.WriteAccount(sa)
+			s.WriteAccount(*sa)
 		}
 	}
 	// p - Empower => Kai_state 12.4.1 (164)
-	s.JamState.PrivilegedServiceIndices = x.PrivilegedState
+	s.JamState.PrivilegedServiceIndices = U.PrivilegedState
 
 	// c - Designate => AuthorizationQueue
 	for i := 0; i < types.TotalCores; i++ {
-		copy(s.JamState.AuthorizationQueue[i], x.QueueWorkReport[i][:])
+		copy(s.JamState.AuthorizationQueue[i], U.QueueWorkReport[i][:])
 	}
 	// v - Assign => DesignatedValidators
-	s.JamState.SafroleState.DesignedValidators = x.UpcomingValidators
+	s.JamState.SafroleState.DesignedValidators = U.UpcomingValidators
 }
 
 func (s *StateDB) GetTimeslot() uint32 {
@@ -104,7 +102,7 @@ func (s *StateDB) WriteServiceBytes(service uint32, v []byte) {
 	tree.SetService(255, service, v)
 }
 
-func (s *StateDB) ReadServiceStorage(service uint32, k []byte) []byte {
+func (s *StateDB) ReadServiceStorage(service uint32, k common.Hash) []byte {
 	// not init case
 	tree := s.GetTrie()
 	storage, err := tree.GetServiceStorage(service, k)
@@ -116,14 +114,14 @@ func (s *StateDB) ReadServiceStorage(service uint32, k []byte) []byte {
 	}
 }
 
-func (s *StateDB) WriteServiceStorage(service uint32, k []byte, storage []byte) {
+func (s *StateDB) WriteServiceStorage(service uint32, k common.Hash, storage []byte) {
 	tree := s.GetTrie()
 	tree.SetServiceStorage(service, k, storage)
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) []byte {
 	tree := s.GetTrie()
-	blob, err := tree.GetPreImageBlob(service, blob_hash.Bytes())
+	blob, err := tree.GetPreImageBlob(service, blob_hash)
 	if err != nil {
 		return nil
 	} else {
@@ -164,7 +162,7 @@ func (s *StateDB) HistoricalLookup(service uint32, t uint32, blob_hash common.Ha
 	tree := s.GetTrie()
 	rootHash := tree.GetRoot()
 	fmt.Printf("Root Hash=%v\n", rootHash)
-	blob, err_v := tree.GetPreImageBlob(service, blob_hash.Bytes())
+	blob, err_v := tree.GetPreImageBlob(service, blob_hash)
 	if err_v != nil {
 		return nil
 	}
@@ -205,11 +203,11 @@ func (s *StateDB) HistoricalLookup(service uint32, t uint32, blob_hash common.Ha
 	}
 }
 
-func (s *StateDB) DeleteServiceStorageKey(service uint32, k []byte) error {
+func (s *StateDB) DeleteServiceStorageKey(service uint32, k common.Hash) error {
 	tree := s.GetTrie()
 	err := tree.DeleteServiceStorage(service, k)
 	if err != nil {
-		fmt.Printf("Failed to delete k: %x, error: %v", k, err)
+		fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %x, error: %v\n", k, err)
 		return err
 	}
 	return nil
@@ -217,9 +215,9 @@ func (s *StateDB) DeleteServiceStorageKey(service uint32, k []byte) error {
 
 func (s *StateDB) DeleteServicePreimageKey(service uint32, blob_hash common.Hash) error {
 	tree := s.GetTrie()
-	err := tree.DeletePreImageBlob(service, blob_hash.Bytes())
+	err := tree.DeletePreImageBlob(service, blob_hash)
 	if err != nil {
-		fmt.Printf("Failed to delete blob_hash: %x, error: %v", blob_hash.Bytes(), err)
+		fmt.Printf("DeleteServicePreimageKey: Failed to delete blob_hash: %x, error: %v\n", blob_hash.Bytes(), err)
 		return err
 	}
 	return nil
@@ -230,7 +228,7 @@ func (s *StateDB) DeleteServicePreimageLookupKey(service uint32, blob_hash commo
 
 	err := tree.DeletePreImageLookup(service, blob_hash, blob_length)
 	if err != nil {
-		fmt.Printf("Failed to delete blob_hash: %v, blob_lookup_len: %d, error: %v", blob_hash, blob_length, err)
+		// =====> CHECK fmt.Printf("DeleteServicePreimageLookupKey: Failed to delete blob_hash: %v, blob_lookup_len: %d, error: %v\n", blob_hash, blob_length, err)
 		return err
 	}
 	return nil

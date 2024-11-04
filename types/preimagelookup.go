@@ -55,14 +55,14 @@ func (p *Preimages) AccountPreimageHash() common.Hash {
 func ComputeAP(s uint32, blob_hash []byte) common.Hash {
 	blobHash := common.Blake2Hash(blob_hash)
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
-	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key.Bytes())
+	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
 	return account_preimage_hash
 }
 
 func ComputeAL(s uint32, blob_hash []byte, blob_len uint32) common.Hash {
 	blobHash := common.Blake2Hash(blob_hash)
 	al_internal_key := common.Compute_preimageLookup_internal(blobHash, blob_len)
-	account_lookuphash := common.ComputeC_sh(s, al_internal_key.Bytes()) // C(s, (h,l))
+	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
 	return account_lookuphash
 }
 

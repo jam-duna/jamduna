@@ -2,10 +2,9 @@ package statedb
 
 import (
 	"errors"
-
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
-	//"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -246,50 +245,53 @@ tant deferred-transfers and accumulation-output pairings:
 */
 // eq 173
 // ∆+
-func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o types.PartialState, f map[uint32]uint32) (gas uint64, output_state types.PartialState, output_t []types.DeferredTransfer, output_b []BeefyCommitment) {
+func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (gas uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment) {
 	// not really sure i here , the max meaning. use uint32 for now
 	var gas_tmp uint64
-	var i uint64
+	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
-	for counter, workReport := range w {
+	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
 			gas_tmp += workResult.GasRatio // the gas ratio here maybe need to check again, the name is not clear
-			if gas_tmp > g {
-				i = uint64(counter) - 1
-				break
+			if gas_tmp <= g {
+				i++
+				if i >= uint64(len(w))+1 {
+					break
+				}
 			}
 
 		}
 	}
 	if i == 0 { // if i = 0, then nothing to do
 		gas = 0
-		output_state = o
+
 		output_t = make([]types.DeferredTransfer, 0)
 		output_b = make([]BeefyCommitment, 0)
 		return
+	}
+	//fmt.Printf("ParallelizedAccumulate i=%d/%d\n", i, len(w))
+	g_star, t_star, b_star := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports
+	if i >= uint64(len(w)) {                                         // no more reports
+		return g_star, t_star, b_star
+	}
+	j, outputT, outputB := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
+	gas = i + j
 
-	} else {
-
-		g_star, t_star, b_star := s.ParallelizedAccumulate(&o, w[0:i], f)                // parallelized accumulation the 0 to i work reports
-		j, outputState, outputT, outputB := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
-		gas = i + j
-		output_state = outputState
-		output_t = append(outputT, t_star...)
-		for _, b := range b_star {
-			duplicate := false
-			for _, existingB := range outputB {
-				if existingB.Service == b.Service && existingB.Commitment == b.Commitment {
-					duplicate = true
-					break
-				}
-			}
-			if !duplicate {
-				output_b = append(output_b, b)
+	output_t = append(outputT, t_star...)
+	for _, b := range b_star {
+		duplicate := false
+		for _, existingB := range outputB {
+			if existingB.Service == b.Service && existingB.Commitment == b.Commitment {
+				duplicate = true
+				break
 			}
 		}
-		return
+		if !duplicate {
+			output_b = append(output_b, b)
+		}
 	}
 
+	return
 }
 
 /*
@@ -305,6 +307,8 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			services = append(services, workResult.Service)
 		}
 	}
+
+	//fmt.Printf(" ParallelizedAccumulate - services %v\n", services)
 	output_u = 0
 	// get services from f key
 	for k := range f {
@@ -322,9 +326,10 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	}
 
 	// s ∈ K(d) ∖ s
-	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_m)
+	/*s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_m)
 	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_a)
-	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_v)
+	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_v) */
+
 	return
 }
 
@@ -367,7 +372,7 @@ func (sdb *StateDB) k_exist(i uint32) bool {
 	return false
 }
 
-func (sdb *StateDB) NewXContext(s uint32, serviceAccount types.ServiceAccount) *types.XContext {
+func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, u *types.PartialState) *types.XContext {
 	serviceAccount.SetServiceIndex(s)
 
 	// Calculate i for X_i eq(277)
@@ -379,11 +384,22 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount types.ServiceAccount) *
 	decoded := uint32(types.DecodeE_l(hash[:4]))
 
 	x := &types.XContext{
-		D: make(map[uint32]types.ServiceAccount, 0),
+		D: make(map[uint32]*types.ServiceAccount, 0), // this is NOT mutated but holds the state that could get mutatted
 		S: s,
 		I: sdb.Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
 	x.D[s] = serviceAccount
+	js := sdb.JamState
+	if u != nil {
+		x.U = u
+	} else if x.U == nil {
+		x.U = &types.PartialState{
+			D:                  make(map[uint32]*types.ServiceAccount), // this IS mutated
+			UpcomingValidators: js.SafroleState.NextValidators,
+			QueueWorkReport:    js.AuthorizationQueue,
+			PrivilegedState:    js.PrivilegedServiceIndices,
+		}
+	}
 	return x
 }
 
@@ -422,30 +438,30 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 				codeHash = workResult.CodeHash
 				p = append(p, types.AccumulateOperandElements{
 					Results: types.Result{
-						Ok:  workResult.PayloadHash[:],
+						Ok:  workResult.Result.Ok[:],
 						Err: types.RESULT_OK,
 					},
 					Payload:         workResult.PayloadHash,
 					WorkPackageHash: workReport.AvailabilitySpec.WorkPackageHash,
 					AuthOutput:      workReport.AuthOutput,
 				})
+				//fmt.Printf("SingleAccumulate %d workpackagehash=%v result=%v len(result)=%d\n", s, workReport.AvailabilitySpec.WorkPackageHash, workResult.Result.Ok[:], len(workResult.Result.Ok[:]))
 			}
 		}
 	}
 
 	serviceAccount, _ := sd.GetService(s)
-	xContext := sd.NewXContext(s, *serviceAccount)
+	xContext := sd.NewXContext(s, serviceAccount, o)
 	code := sd.ReadServicePreimageBlob(s, codeHash)
+	fmt.Printf(" SingleAccumulate(%d) codehash=%v\n", s, codeHash)
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
 	r, _ := vm.ExecuteAccumulate(p, xContext)
+	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
 
 	// BeefyCommitment represents a service accumulation result.
 	if r.Err == types.RESULT_OK {
 		output_b = common.Blake2Hash(r.Ok)
-	} else {
-		// output_b is a common.Hash{}
 	}
-
 	return
 }
 

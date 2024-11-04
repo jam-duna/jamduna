@@ -276,12 +276,16 @@ func TestWorkGuarantee(t *testing.T) {
 				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
 
-				newserviceKey := []byte{0, 0, 0, 0} // "0"
-				service_account_byte, _ := t.GetServiceStorage(bootstrapService, newserviceKey)
+				k := []byte{0, 0, 0, 0}
+				key := common.Compute_storageKey_internal(bootstrapService, k)
+				service_account_byte, err := t.GetServiceStorage(bootstrapService, key)
 				if err != nil {
+					//fmt.Printf("t.GetServiceStorage %v %v\n", key, err)
 					//not ready yet ...
+					time.Sleep(1 * time.Second)
 					continue
 				}
+				time.Sleep(1 * time.Second)
 				decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
 				if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
 					service.ServiceCode = decoded_new_service_idx
@@ -290,11 +294,12 @@ func TestWorkGuarantee(t *testing.T) {
 					fmt.Printf("%s Service Index: %v\n", serviceName, service.ServiceCode)
 					new_service_found = true
 					previous_service_idx = decoded_new_service_idx
+					fmt.Printf("t.GetServiceStorage %v FOUND  %v\n", key, service_account_byte)
 
 					for validatorIdx, _ := range nodes {
 						if validatorIdx != builderIdx {
 							if new_service_idx > 0 {
-								fmt.Printf("Sending new service_idx %v service.CodeHash %v, service.Code %v\n", new_service_idx, service.CodeHash, len(service.Code))
+								fmt.Printf("Sending new service_idx %v service.CodeHash %v, len(service.Code)=%v\n", new_service_idx, service.CodeHash, len(service.Code))
 								err = builderNode.peersInfo[uint16(validatorIdx)].SendPreimageAnnouncement(new_service_idx, service.CodeHash, uint32(len(service.Code)))
 								if err != nil {
 									fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
@@ -303,6 +308,7 @@ func TestWorkGuarantee(t *testing.T) {
 						}
 					}
 				}
+
 			}
 			// }
 		}
