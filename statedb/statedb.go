@@ -1244,11 +1244,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// 28 -- ACCUMULATE
 	var g uint64
-	var o types.PartialState
+	o := s.JamState.newPartialState()
 	var f map[uint32]uint32
 	var b []BeefyCommitment
-
-	g, _, b = s.OuterAccumulate(g, s.AvailableWorkReport, &o, f)
+	accumulate_input_wr := s.AvailableWorkReport
+	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
+	g, _, b = s.OuterAccumulate(g, accumulate_input_wr, &o, f)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
 	}

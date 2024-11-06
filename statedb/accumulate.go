@@ -3,6 +3,7 @@ package statedb
 import (
 	"errors"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
@@ -19,7 +20,7 @@ type MMR struct {
 	Peaks Peaks `json:"peaks"`
 }
 
-// eq.161 - W^!
+// v0.4.5 eq.165 - W^!
 func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
 	outputWorkReports := []types.WorkReport{}
 	for _, workReport := range W {
@@ -30,7 +31,7 @@ func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
 	return outputWorkReports
 }
 
-// eq.162 - W^Q
+// v0.4.5 eq.166 - W^Q
 func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQueue {
 	outputWorkReports := []types.WorkReport{}
 	for _, workReport := range W {
@@ -38,17 +39,11 @@ func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQue
 			outputWorkReports = append(outputWorkReports, workReport)
 		}
 	}
-	accumulatedcup := map[common.Hash]common.Hash{}
-	//	accumulated := j.AccumulationHistory
-	/*	for _, a := range accumulated {
-			for key, value := range a {
-				accumulatedcup[key] = value
-			}
-		}
-		type AccumulationHistory struct {
-			WorkPackageHash []common.Hash `json:"work_package_hash"`
-		}
-	*/
+	accumulatedcup := []common.Hash{}
+	accumulated := j.AccumulationHistory
+	for i := 0; i < len(accumulated); i++ {
+		accumulatedcup = append(accumulatedcup, accumulated[i].WorkPackageHash...)
+	}
 
 	depandancy := []types.AccumulationQueue{}
 	for _, workReport := range outputWorkReports {
@@ -57,7 +52,7 @@ func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQue
 	return QueueEditing(depandancy, accumulatedcup)
 }
 
-// eq.163 - D(w)
+// v0.4.5 eq.167 - D(w)
 func Depandancy(w types.WorkReport) types.AccumulationQueue {
 	unionMap := make(map[common.Hash]bool)
 	if w.RefineContext.Prerequisite != nil {
@@ -82,106 +77,73 @@ func Depandancy(w types.WorkReport) types.AccumulationQueue {
 	return result
 }
 
-// In eq.164 - union compare
-func union(a map[common.Hash]common.Hash, b map[common.Hash]common.Hash) map[common.Hash]common.Hash {
-	result := make(map[common.Hash]common.Hash)
-	for key, value := range a {
-		result[key] = value
-	}
-	for key, value := range b {
-		result[key] = value
-	}
-	return result
-}
-func isEqualSet(a, b map[common.Hash]common.Hash) bool {
-	if len(a) != len(b) {
-		return false
+// v0.4.5 eq.168 - function E
+func QueueEditing(r []types.AccumulationQueue, x []common.Hash) []types.AccumulationQueue {
+	var result []types.AccumulationQueue
+	hashSet := make(map[common.Hash]struct{}, len(x))
+	for _, h := range x {
+		hashSet[h] = struct{}{}
 	}
 
-	for key, valueA := range a {
-		valueB, exists := b[key]
-		if !exists || valueA != valueB {
-			return false
+	for _, item := range r {
+		found := false
+		for _, report := range item.WorkReports {
+			h := report.AvailabilitySpec.WorkPackageHash
+			if _, exists := hashSet[h]; exists {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, item)
 		}
 	}
-	return true
-}
-
-// eq.164 - function E
-func QueueEditing(r []types.AccumulationQueue, x map[common.Hash]common.Hash) []types.AccumulationQueue {
-	var result []types.AccumulationQueue
-	for _, item := range r {
-		/*		if _, exists := x[item.WorkReport.AvailabilitySpec.WorkPackageHash]; exists {
-					continue
-				}
-				segmentRootLookup := item.WorkReport.SegmentRootLookup
-				if segmentRootLookup == nil {
-					segmentRootLookup = make(map[common.Hash]common.Hash)
-				}
-				union1 := union(x, segmentRootLookup)
-				union2 := union(segmentRootLookup, x)
-				if !isEqualSet(union1, union2) {
-					continue
-				}*/
-		result = append(result, item)
-	}
 	return result
 }
 
-// eq.165 - function Q
-func PriorityQueue(r []types.AccumulationQueue, a map[common.Hash]common.Hash) []types.WorkReport {
-	if a == nil {
-		a = make(map[common.Hash]common.Hash)
-	}
+// v0.4.5 eq.169 - function Q
+func PriorityQueue(r []types.AccumulationQueue) []types.WorkReport {
 	g := []types.WorkReport{}
 	for _, item := range r {
 		if len(item.WorkPackageHash) == 0 {
-			//		g = append(g, item.WorkReport)
+			g = append(g, item.WorkReports...)
 		}
 	}
 	if len(g) == 0 {
 		return []types.WorkReport{}
 	} else {
 		result := g
-		// a ∪ P(g)
-		result = append(result, PriorityQueue(QueueEditing(r, Mapping(g)), union(a, Mapping(g)))...)
+		result = append(result, PriorityQueue(QueueEditing(r, Mapping(g)))...)
 		return result
 	}
 }
 
-// eq.166 - function P
-func Mapping(w []types.WorkReport) map[common.Hash]common.Hash {
-	result := make(map[common.Hash]common.Hash)
+// v0.4.5 eq.170 - function P
+func Mapping(w []types.WorkReport) []common.Hash {
+	result := []common.Hash{}
 	for _, workReport := range w {
-		result[workReport.AvailabilitySpec.WorkPackageHash] = workReport.AvailabilitySpec.ExportedSegmentRoot
+		result = append(result, workReport.AvailabilitySpec.WorkPackageHash)
 	}
 	return result
 }
 
-// eq.167 - m
+// v0.4.5 eq.171 - m
 func (s *StateDB) CurrentEpochSlot() uint32 {
 	Ht := s.Block.Header.Slot
 	return Ht % types.EpochLength
 }
 
-// eq.168 - W^*
+// v0.4.5 eq.172 - W^*
 func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport {
 	accumulated_immediately := AccumulatedImmediately(W)
 	result := accumulated_immediately
-	accumulatedcup := map[common.Hash]common.Hash{}
 	j := s.GetJamState()
-	//accumulated := j.AccumulationHistory
-	/*for _, a := range accumulated {
-		for key, value := range a {
-			accumulatedcup[key] = value
-		}
-	}*/
 	queued_execution := j.QueuedExecution(W)
-	result = append(result, PriorityQueue(s.ComputeReadyQueue(queued_execution, accumulated_immediately), union(accumulatedcup, Mapping(accumulated_immediately)))...)
+	result = append(result, PriorityQueue(s.ComputeReadyQueue(queued_execution, accumulated_immediately))...)
 	return result
 }
 
-// eq.169 - q
+// v0.4.5 eq.173 - q
 func (s *StateDB) ComputeReadyQueue(queued_execution []types.AccumulationQueue, accumulated_immediately []types.WorkReport) []types.AccumulationQueue {
 	j := s.GetJamState()
 	ready_state := j.AccumulationQueue

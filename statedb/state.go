@@ -206,8 +206,12 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 }
 
 func (j *JamState) newPartialState() types.PartialState {
+	d := make(map[uint32]*types.ServiceAccount)
+	for k, v := range j.PriorServiceAccountState {
+		d[k] = &v
+	}
 	return types.PartialState{
-		D:                  make(map[uint32]*types.ServiceAccount),
+		D:                  d,
 		UpcomingValidators: j.SafroleState.NextValidators,
 		QueueWorkReport:    j.AuthorizationQueue,
 		PrivilegedState:    j.PrivilegedServiceIndices,
