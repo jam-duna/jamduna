@@ -33,7 +33,7 @@ func (s *StateDB) WriteAccount(sa types.ServiceAccount) {
 	}
 	for blobHash, v := range sa.Lookup {
 		if v.Dirty {
-			if v.Deleted { 
+			if v.Deleted {
 				s.DeleteServicePreimageLookupKey(service_idx, blobHash, v.Z)
 			} else {
 				s.WriteServicePreimageLookup(service_idx, blobHash, v.Z, v.T)

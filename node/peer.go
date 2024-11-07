@@ -101,13 +101,6 @@ func (p *Peer) openStream(code uint8) (stream quic.Stream, err error) {
 		fmt.Printf("Write -- ERR %v\n", err)
 	}
 
-	_, err = stream.Write([]byte{byte(p.node.id)})
-	if err != nil {
-		fmt.Printf("Write -- ERR %v\n", err)
-	}
-
-	//fmt.Printf("Write successful, bytes written: %d\n", numBytes)
-
 	// Additional check for potential EOF issue
 	if err == io.EOF {
 		fmt.Println("EOF encountered during write.")
@@ -156,10 +149,10 @@ func receiveQuicBytes(stream quic.Stream) (resp []byte, err error) {
 }
 
 // jamsnp_dispatch reads from QUIC and dispatches based on message type
-func (n *Node) DispatchIncomingQUICStream(stream quic.Stream) error {
+func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) error {
 	var msgType byte
 
-	msgTypeBytes := make([]byte, 2) // code  + validatorIndex
+	msgTypeBytes := make([]byte, 1) // code
 	msgLenBytes := make([]byte, 4)
 	_, err := stream.Read(msgTypeBytes)
 	if err != nil {
@@ -167,7 +160,6 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream) error {
 		return err
 	}
 	msgType = msgTypeBytes[0]
-	peerID := uint16(msgTypeBytes[1])
 	// fmt.Printf("%s DispatchIncomingQUICStream from %d bytesRead=%d CODE=%d\n", n.String(), peerID, nRead, msgType)
 
 	_, err = stream.Read(msgLenBytes)

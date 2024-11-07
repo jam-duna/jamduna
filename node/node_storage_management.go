@@ -55,7 +55,7 @@ func (n *Node) GetBlockByHeader(blkHeader common.Hash) (types.Block, error) {
 	storeKey := append(headerPrefix, blkHeader[:]...)
 	blockHash, err := n.ReadRawKV(storeKey)
 	if err != nil {
-		fmt.Printf("Error reading blockHash: %v\n", err)
+		// fmt.Printf("Error reading blockHash: %v\n", err)
 		return types.Block{}, err
 	}
 	//blk_<blockHash> -> codec(block)

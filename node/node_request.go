@@ -27,9 +27,9 @@ func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBloc
 		// TODO: Sourabh - go in the direction up to maximumBlocks
 		return blocks, true, nil
 	} else {
+		//fmt.Printf("%s BlocksLookup %v\n", n.String(), headerHash)
 		blkFromDB, err := n.GetBlockByHeader(headerHash)
 		if err != nil {
-			fmt.Printf("GetBlockByHeader ERR %v\n", err)
 			return blocks, false, err
 		}
 		blocks = append(blocks, blkFromDB)
@@ -62,14 +62,12 @@ func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]by
 	// stateRoot := s.GetStateRoot()
 	blocks, ok, err := n.BlocksLookup(headerHash, 0, 1)
 	if !ok || err != nil {
-		fmt.Printf("BlocksLookup ERR %v\n", err)
 		return boundarynodes, keyvalues, false, err
 	}
 	stateRoot := blocks[0].Header.ParentStateRoot
 	trie := s.CopyTrieState(stateRoot)
 	foundKeyVal, boundaryNode, err := trie.GetStateByRange(startKey[:], endKey[:], maximumSize)
 	if err != nil {
-		fmt.Printf("GetState ERR %v\n", err)
 		return boundarynodes, keyvalues, false, err
 	}
 	keyvalues = types.StateKeyValueList{Items: foundKeyVal}
@@ -122,13 +120,23 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncemen
 		return block, fmt.Errorf("Invalid validator index %d", validatorIndex)
 	}
 	headerHash := blockAnnouncement.HeaderHash
-	//fmt.Printf("%s SendBlockRequest(%v) to N%d\n", n.String(), headerHash, validatorIndex)
-	blockRaw, err := p.SendBlockRequest(headerHash, 0, 1)
-	if err != nil {
-		fmt.Printf("processBlockAnnouncement ERR %v\n", err)
-		panic(123)
-		return block, err
+	//fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) to N%d\n", n.String(), headerHash, validatorIndex)
+	var blockRaw types.Block
+	for attempt := 1; attempt <= 3; attempt++ {
+		blockRaw, err = p.SendBlockRequest(headerHash, 0, 1)
+		if err == nil {
+			if attempt > 1 {
+				fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) attempt %d success\n", n.String(), headerHash, attempt)
+			}
+			break // exit loop if request succeeds
+		}
+		//time.Sleep(100)
+		if attempt == 3 {
+			fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) failed after 3 attempts\n", n.String(), headerHash)
+			return nil, err
+		}
 	}
+
 	block = &blockRaw
 	receivedHeaderHash := block.Header.Hash()
 	if receivedHeaderHash != headerHash {

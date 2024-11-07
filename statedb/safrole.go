@@ -633,8 +633,8 @@ func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int
 			return common.BytesToHash(ticket_id), i, nil
 		}
 	}
-	ticketID, _ := t.TicketID()
-	fmt.Printf("[N%d] ValidateIncoming Ticket Fail TicketID=%v\nη0:%v\nη1:%v\nη2:%v\nη3:%v\n", s.Id, ticketID, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3])
+	//ticketID, _ := t.TicketID()
+	//fmt.Printf("[N%d] ValidateIncoming Ticket Fail TicketID=%v\nη0:%v\nη1:%v\nη2:%v\nη3:%v\n", s.Id, ticketID, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3])
 
 	return common.Hash{}, -1, fmt.Errorf(errTicketBadRingProof)
 }

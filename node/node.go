@@ -10,10 +10,12 @@ import (
 	"crypto/x509/pkix"
 	"os"
 
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math"
+	"net"
 	"reflect"
 
 	"math/big"
@@ -83,7 +85,8 @@ type Node struct {
 	//judgementBucket types.JudgeBucket
 	judgementWRMap map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this
 
-	isBadGuarantor bool
+	clients      map[string]string
+	clientsMutex sync.Mutex
 
 	// assurances state: are this node assuring the work package bundle/segments?
 	assurancesBucket map[common.Hash]bool
@@ -154,6 +157,7 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 		ExtKeyUsage: []x509.ExtKeyUsage{
 			x509.ExtKeyUsageServerAuth,
 		},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 	}
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, ed25519_pub, ed25519_priv)
@@ -216,27 +220,12 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
 	}
 
-	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: true,                                   // For testing purposes only
-		NextProtos:         []string{"h3", "http/1.1", "ping/1.1"}, // Enable QUIC and HTTP/3
-	}
-
-	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
-	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
-
-	if err != nil {
-		fmt.Printf("ERR %v\n", err)
-		return nil, err
-	}
-
 	node := &Node{
 		id:        id,
 		store:     store,
-		server:    *listener,
 		peers:     peers,
 		peersInfo: make(map[uint16]*Peer),
-		tlsConfig: tlsConfig,
+		clients:   make(map[string]string),
 		nodeType:  nodeType,
 
 		statedbMap:     make(map[common.Hash]*statedb.StateDB),
@@ -263,6 +252,49 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 
 		dataDir: dataDir,
 	}
+
+	tlsConfig := &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		ClientAuth:         tls.RequireAnyClientCert,
+		InsecureSkipVerify: true,
+		GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) {
+			return &tls.Config{
+				Certificates:       []tls.Certificate{cert},
+				ClientAuth:         tls.RequireAnyClientCert,
+				InsecureSkipVerify: true,
+				VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+					if len(rawCerts) == 0 {
+						return fmt.Errorf("no client certificate provided")
+					}
+					cert, err := x509.ParseCertificate(rawCerts[0])
+					if err != nil {
+						return fmt.Errorf("failed to parse client certificate: %v", err)
+					}
+					pubKey, ok := cert.PublicKey.(ed25519.PublicKey)
+					if !ok {
+						return fmt.Errorf("client public key is not Ed25519")
+					}
+					node.clientsMutex.Lock()
+					node.clients[info.Conn.RemoteAddr().String()] = hex.EncodeToString(pubKey)
+					node.clientsMutex.Unlock()
+					//fmt.Printf("Client Ed25519 Public Key: %x %s\n", pubKey, info.Conn.RemoteAddr())
+					return nil
+				},
+				NextProtos: []string{"h3", "http/1.1", "ping/1.1"},
+			}, nil
+		},
+		NextProtos: []string{"h3", "http/1.1", "ping/1.1"},
+	}
+	node.tlsConfig = tlsConfig
+
+	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
+	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
+	if err != nil {
+		fmt.Printf("ERR %v\n", err)
+		return nil, err
+	}
+	node.server = *listener
+
 	for validatorIndex, p := range startPeerList {
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
 	}
@@ -463,22 +495,34 @@ func (n *Node) runServer() {
 	}
 }
 
-func (n *Node) lookupAddr(addr string) uint16 {
-
+func (n *Node) lookupPubKey(pubKey string) (uint16, bool) {
+	hpubKey := fmt.Sprintf("0x%s", pubKey)
 	for validatorIndex, p := range n.peersInfo {
-		fmt.Printf("compare %s to %s\n", p.PeerAddr, addr)
-		if p.PeerAddr == addr {
-			return validatorIndex
+		peerPubKey := p.Validator.Ed25519.String()
+		if peerPubKey == hpubKey {
+			return validatorIndex, true
 		}
 	}
-	panic(1024)
+
+	return 0, false
 }
 
 func (n *Node) handleConnection(conn quic.Connection) {
-	//remoteAddr := conn.RemoteAddr()
-	//localAddr := conn.LocalAddr()
-	//fmt.Printf("handleConnection: remoteAddr=%s localAddr=%s\n", remoteAddr, localAddr);
-	//peerID := n.lookupAddr(localAddr.String())
+
+	remoteAddr := conn.RemoteAddr().String()
+	n.clientsMutex.Lock()
+	pubKey, ok := n.clients[remoteAddr]
+	n.clientsMutex.Unlock()
+	if !ok {
+		fmt.Printf("handleConnection: UNKNOWN remoteAddr=%s unknown\n", remoteAddr)
+		return
+	}
+
+	validatorIndex, ok := n.lookupPubKey(pubKey)
+	if !ok {
+		fmt.Printf("handleConnection: UNKNOWN pubkey %s from remoteAddr=%s\n", pubKey, remoteAddr)
+		return
+	}
 	for {
 		stream, err := conn.AcceptStream(context.Background())
 		if err != nil {
@@ -487,7 +531,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			}
 			fmt.Printf("handleConnection: Accept stream error: %v\n", err)
 		}
-		go n.DispatchIncomingQUICStream(stream)
+		go n.DispatchIncomingQUICStream(stream, validatorIndex)
 	}
 }
 
