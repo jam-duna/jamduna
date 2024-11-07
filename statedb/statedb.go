@@ -280,12 +280,12 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	t := s.GetTrie()
 	a_p := l.AccountPreimageHash()
 	//a_l := l.AccountLookupHash()
-
 	preimage_blob, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
 	//TODO: stanley to make sure we can check whether a key exist or not. err here is ambiguous here
 	if err == nil { // key found
 		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
 			//H(p) = p
+			fmt.Printf("Fail at 157 - (1) a_p not equal to P\n")
 			return common.Hash{}, fmt.Errorf(errPreimageBlobSet)
 		}
 	}
@@ -293,15 +293,16 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	//fmt.Printf("Validating E_p %v\n",l.String())
 	anchors, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
+		fmt.Printf("Fail at no lookup\n")
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
-	if len(anchors) != 0 {
+	if len(anchors) == 0 {
 		// non-empty anchor
+		fmt.Printf("Fail at anchor wrong\n")
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotEmpty)
 	}
 	return a_p, nil
 }
-
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
 	statedb.queuedTickets = make(map[common.Hash][]types.Ticket)
@@ -686,7 +687,7 @@ func (s *StateDB) CompareStateRoot(genesis []KeyVal, parentStateRoot common.Hash
 		newTrie.SetRawKeyVal(common.Hash(kv[0]), kv[1])
 	}
 	new_root := newTrie.GetRoot()
-	timeslot := s.GetSafrole().Timeslot
+	//timeslot := s.GetSafrole().Timeslot
 	if !common.CompareBytes(parent_root[:], new_root[:]) {
 		return false, fmt.Errorf("Roots are not the same")
 	}

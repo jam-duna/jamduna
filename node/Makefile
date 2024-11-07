@@ -15,3 +15,8 @@ testsf:
 testwg:
 	@echo "Running TestWorkGuarantee with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestWorkGuarantee
+
+# Target for running a specific test function with the timeout
+testwgFIB:
+	@echo "Running TestWorkGuarantee with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run TestWorkGuarantee

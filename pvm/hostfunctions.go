@@ -320,7 +320,7 @@ func (vm *VM) hostNew() uint32 {
 		xContext.I = vm.hostenv.Check(bump(xi)) // this is the next xi
 
 		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
-		a.WriteLookup(common.BytesToHash(c), l, []uint32{})
+		a.WriteLookup(common.BytesToHash(c), l, []uint32{common.ComputeCurrenTS()})
 
 		// (x's)b <- (xs)b - at
 		xs.Balance = xs.Balance - a.Balance

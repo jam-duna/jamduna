@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
+
 	//	"reflect"
 	"sort"
 	"strings"
@@ -831,15 +833,27 @@ func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, cod
 }
 
 func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint32) {
-	o, _ := types.Encode(elements)
-	Standard_Program_Initialization(vm, o) // eq 264/265
-	vm.X = X
-	vm.Y = X.Clone()
-	vm.Execute(types.EntryPointAccumulate)
+	var arguments []types.AccumulateOperandElements
+	a, _ := types.Encode(elements)
+	// need to figure out how the encoded elements are used in the PVM
+	decoded, _, err := types.Decode(a, reflect.TypeOf(arguments))
+	if err != nil {
+		panic(err)
+	}
+
+	arguments, ok := decoded.([]types.AccumulateOperandElements)
+	if !ok {
+		panic("decoded data is not of type []types.AccumulateOperandElements")
+	}
+	for _, argument := range arguments {
+		Standard_Program_Initialization(vm, argument.Results.Ok) // eq 264/265
+		vm.X = X
+		vm.Y = X.Clone()
+		vm.Execute(types.EntryPointAccumulate)
+	}
 
 	return vm.getArgumentOutputs()
 }
-
 func (vm *VM) ExecuteTransfer(t []types.DeferredTransfer) (r types.Result, res uint32) {
 	// a = E(t)   take transfer memos t and encode them
 	a := make([]byte, 0)

@@ -344,6 +344,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 	s.Lookup[blobHash] = LookupObject{
 		Dirty:   true,
 		Deleted: len(time_slots) == 0,
+		Z:       z,
 		T:       time_slots,
 	}
 }

@@ -56,6 +56,9 @@ func SafroleBasicStateFromBytes(data []byte) (SafroleBasicState, error) {
 
 func (s *SafroleState) GetNextRingCommitment() ([]byte, error) {
 	ringsetBytes := s.GetRingSet("Next")
+	if len(ringsetBytes) == 0 {
+		return nil, fmt.Errorf("Not ready yet")
+	}
 	nextRingCommitment, err := bandersnatch.GetRingCommitment(ringsetBytes)
 	if err != nil {
 		return nil, err

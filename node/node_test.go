@@ -183,6 +183,304 @@ func getServices(serviceNames []string) (services map[string]*types.TestService,
 	return
 }
 
+func TestWorkGuaranteeFIB(t *testing.T) {
+	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	if err != nil {
+		t.Fatalf("Error Seeting up nodes: %v\n", err)
+	}
+
+	nodes := make([]*Node, numNodes)
+	for i := 0; i < numNodes; i++ {
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
+		if err != nil {
+			t.Fatalf("Failed to create node %d: %v\n", i, err)
+		}
+		//node.state = statedb.ProcessGenesis(genesisAuthorities)
+		nodes[i] = node
+	}
+
+	// give some time for nodes to come up
+	for {
+		time.Sleep(1 * time.Second)
+		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady() {
+			break
+		}
+	}
+
+	for _, n := range nodes {
+		n.statedb.PreviousGuarantors(true)
+		n.statedb.AssignGuarantors(true)
+	}
+	// code length: 206
+	bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
+	if err != nil {
+		panic(0)
+	}
+	bootstrapService := uint32(statedb.BootstrapServiceCode)
+	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
+
+	builderIdx := 1
+	builderNode := nodes[builderIdx]
+	builderNode.preimages[bootstrapCodeHash] = bootstrapCode
+	new_service_idx := uint32(0)
+
+	// Load testServices
+	testServices, err := getServices([]string{"fib", "tribonacci", "megatron"}) // "padovan", "pell", "racaman",
+	if err != nil {
+		panic(32)
+	}
+
+	// set builderNode's primages map
+	for _, service := range testServices {
+		builderNode.preimages[service.CodeHash] = service.Code
+	}
+
+	var previous_service_idx uint32
+	for serviceName, service := range testServices {
+		fmt.Printf("Builder storing TestService %s (%x)\n", serviceName, service.CodeHash)
+		// set up service using the Bootstrap service
+		codeWorkPackage := types.WorkPackage{
+			Authorization: []byte(""),
+			AuthCodeHost:  bootstrapService,
+			Authorizer:    types.Authorizer{},
+			RefineContext: types.RefineContext{},
+			WorkItems: []types.WorkItem{
+				{
+					Service:          bootstrapService,
+					CodeHash:         bootstrapCodeHash,
+					Payload:          append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
+					GasLimit:         10000000,
+					ImportedSegments: make([]types.ImportSegment, 0),
+					ExportCount:      0,
+				},
+			},
+		}
+		err = builderNode.peersInfo[4].SendWorkPackageSubmission(0, codeWorkPackage, []byte{})
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+
+		// service_ticker := time.NewTicker(types.SecondsPerSlot)
+		// defer service_ticker.Stop()
+
+		new_service_found := false
+
+		fmt.Printf("Waiting for %s service to be ready...\n", serviceName)
+		for !new_service_found {
+			// select {
+			// case <-service_ticker.C:
+			//TODO: find service_index ... can be serviced via CE129 using stateKey=00b5000000000000ffffffffffffffffffffffffffffffffffffffffffffffff
+			stateDB := builderNode.getState()
+			if stateDB != nil && stateDB.Block != nil {
+				// fmt.Printf("finding newservice from bootstrapService.s[0]...\n")
+				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
+				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
+
+				k := []byte{0, 0, 0, 0}
+				key := common.Compute_storageKey_internal(bootstrapService, k)
+				service_account_byte, err := t.GetServiceStorage(bootstrapService, key)
+				if err != nil {
+					//fmt.Printf("t.GetServiceStorage %v %v\n", key, err)
+					//not ready yet ...
+					time.Sleep(1 * time.Second)
+					continue
+				} else {
+					fmt.Printf("t.GetServiceStorage %v FOUND  %v\n", key, service_account_byte)
+				}
+				time.Sleep(1 * time.Second)
+				decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
+				if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
+					service.ServiceCode = decoded_new_service_idx
+					new_service_idx = decoded_new_service_idx
+					//TODO: now use new_service_idx and see if (c,l) is correct
+					fmt.Printf("%s Service Index: %v\n", serviceName, service.ServiceCode)
+					new_service_found = true
+					previous_service_idx = decoded_new_service_idx
+					fmt.Printf("t.GetServiceStorage %v FOUND  %v\n", key, service_account_byte)
+
+					for validatorIdx, _ := range nodes {
+						if validatorIdx != builderIdx {
+							if new_service_idx > 0 {
+								fmt.Printf("Sending new service_idx %v service.CodeHash %v, len(service.Code)=%v\n", new_service_idx, service.CodeHash, len(service.Code))
+								err = builderNode.peersInfo[uint16(validatorIdx)].SendPreimageAnnouncement(new_service_idx, service.CodeHash, uint32(len(service.Code)))
+								if err != nil {
+									fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
+								}
+							}
+						}
+					}
+				}
+
+			}
+			// }
+		}
+	}
+
+	for _, n := range nodes {
+		n.statedb.PreviousGuarantors(true)
+		n.statedb.AssignGuarantors(true)
+	}
+	//----------------------------------------------
+	time.Sleep(30 * time.Second)
+	fmt.Printf("Start FIB\n")
+
+	// n1 := nodes[1]
+	n4 := nodes[4]
+	core := 0
+	service0 := testServices["fib"]
+	service1 := testServices["tribonacci"]
+	serviceM := testServices["megatron"]
+	fmt.Printf("service0: %v, codehash: %v\n", service0.ServiceCode, service0.CodeHash)
+	fmt.Printf("service1: %v, codehash: %v\n", service1.ServiceCode, service1.CodeHash)
+	fmt.Printf("serviceM: %v, codehash: %v\n", serviceM.ServiceCode, serviceM.CodeHash)
+	FibWorkPackages := make([]types.WorkPackage, 0)
+	FibPackageHashes := make([]common.Hash, 0)
+	prevWorkPackageHash := common.Hash{}
+	for megaN := 1; megaN < 21; megaN++ {
+		importedSegments := make([]types.ImportSegment, 0)
+		// importedSegmentsM := make([]types.ImportSegment, 0)
+		refineContext := types.RefineContext{
+			// These values don't matter until we have a historical lookup -- which we do not!
+			Anchor:           common.Hash{},
+			StateRoot:        common.Hash{},
+			BeefyRoot:        common.Hash{},
+			LookupAnchor:     common.Hash{},
+			LookupAnchorSlot: 0,
+		}
+
+		if megaN > 1 {
+			// TODO: Sean
+			//			prerequisite := types.Prerequisite{prevWorkPackageHash.Bytes()}
+			//			refineContext.Prerequisite = &common.Hash{}
+			importedSegments = append(importedSegments, types.ImportSegment{
+				WorkPackageHash: prevWorkPackageHash,
+				Index:           0,
+			})
+			// importedSegments = append(importedSegments, types.ImportSegment{
+			// 	WorkPackageHash: prevWorkPackageHash,
+			// 	Index:           1, // TODO: check
+			// })
+		}
+
+		payload := make([]byte, 4)
+		// binary.LittleEndian.PutUint32(payload, uint32(megaN))
+		workPackage := types.WorkPackage{
+			Authorization: []byte("0x"), // TODO: set up null-authorizer
+			// AuthCodeHost:  serviceM.ServiceCode,
+			AuthCodeHost:  service0.ServiceCode,
+			Authorizer:    types.Authorizer{},
+			RefineContext: refineContext,
+			WorkItems: []types.WorkItem{
+				{
+					Service:          service0.ServiceCode,
+					CodeHash:         service0.CodeHash,
+					Payload:          payload,
+					GasLimit:         10000000,
+					ImportedSegments: importedSegments,
+					ExportCount:      1,
+				},
+				// {
+				// 	Service:          service1.ServiceCode,
+				// 	CodeHash:         service1.CodeHash,
+				// 	Payload:          payload,
+				// 	GasLimit:         10000000,
+				// 	ImportedSegments: importedSegments,
+				// 	ExportCount:      1,
+				// },
+				// {
+				// 	Service:          serviceM.ServiceCode,
+				// 	CodeHash:         serviceM.CodeHash,
+				// 	Payload:          payloadM,
+				// 	GasLimit:         10000000,
+				// 	ImportedSegments: importedSegmentsM,
+				// 	ExportCount:      0,
+				// },
+			},
+		}
+
+		workPackageHash := workPackage.Hash()
+		fmt.Println("WorkPackageHash:", workPackageHash)
+
+		FibWorkPackages = append(FibWorkPackages, workPackage)
+		FibPackageHashes = append(FibPackageHashes, workPackageHash)
+
+		prevWorkPackageHash = workPackageHash
+	}
+
+	// for i := 0; i < len(FibWorkPackages)-1; i++ {
+	// 	prerequisite := types.Prerequisite(FibPackageHashes[i+1])
+	// 	FibWorkPackages[i].RefineContext.Prerequisite = &prerequisite
+	// }
+
+	for i, workPackage := range FibWorkPackages {
+		megaN := i + 1
+		workPackageHash := FibPackageHashes[i]
+
+		// Update guarantors before each submission if necessary
+		for _, n := range nodes {
+			n.statedb.PreviousGuarantors(true)
+			n.statedb.AssignGuarantors(true)
+		}
+		fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", megaN, common.Str(workPackageHash))
+		// CE133_WorkPackageSubmission: n1 => n4
+		// v1, v2, v4 => core
+		// random select 1 sender and 1 receiver
+		senderIdx := rand.Intn(3)
+		receiverIdx := rand.Intn(3)
+		for senderIdx == receiverIdx {
+			receiverIdx = rand.Intn(3)
+		}
+		if senderIdx == 0 {
+			senderIdx = 1
+		} else if senderIdx == 1 {
+			senderIdx = 2
+		} else {
+			senderIdx = 4
+		}
+		if receiverIdx == 0 {
+			receiverIdx = 1
+		} else if receiverIdx == 1 {
+			receiverIdx = 2
+		} else {
+			receiverIdx = 4
+		}
+		err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(0, workPackage, []byte{})
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
+		}
+
+		// Wait until the work report is pending
+		var workReport types.WorkReport
+		// audit := false
+		for {
+			time.Sleep(1 * time.Second)
+			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+				// audit = true
+				break
+			}
+		}
+
+		// Wait until the work report is cleared
+		for {
+			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+		// if audit {
+		// 	for _, n := range nodes {
+		// 		n.Audit()
+		// 	}
+		// }
+		time.Sleep(15 * time.Second)
+		prevWorkPackageHash = workPackageHash
+	}
+	http.ListenAndServe("localhost:6060", nil)
+}
+
 func TestWorkGuarantee(t *testing.T) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {

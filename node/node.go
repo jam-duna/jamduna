@@ -843,7 +843,8 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint1
 				fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] ERR %v\n", n.String(), err)
 			} else if ok {
 				if debugJ {
-					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(segmentShards[shardIdx]))
+					// fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(segmentShards[shardIdx]))
+					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(selected_segments))
 				}
 				//fmt.Printf("!!!shardIndex=%v, selected_segments=%x\n", shardIdx, selected_segments)
 				for idx, selected_segment := range selected_segments {

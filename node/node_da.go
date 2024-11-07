@@ -469,6 +469,7 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle) 
 	}
 	var segments [][]byte
 	for _, workItem := range workPackage.WorkItems {
+		service_index = workItem.Service
 		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if len(code) == 0 {
 			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
