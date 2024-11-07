@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -395,6 +397,21 @@ func InitStateDBFromSnapshot(sdb *storage.StateDBStorage, snapshot *StateSnapsho
 	return statedb, nil
 }
 
+func InitStateDBFromGenesis(sdb *storage.StateDBStorage, snapshot *StateSnapshot, genesis string) (statedb *StateDB, err error) {
+	statedb, err = newStateDB(sdb, common.Hash{})
+	if err != nil {
+		return statedb, err
+	}
+
+	statedb.Block = nil
+	statedb.JamState = InitStateFromSnapshot(snapshot)
+	// setting the safrole state so that block 1 can be produced
+	// statedb.StateRoot = statedb.UpdateTrieState()
+	statedb.StateRoot = statedb.UpdateAllTrieState(genesis)
+
+	return statedb, nil
+}
+
 func (s *StateDB) HeaderHash() common.Hash {
 	return s.Block.Header.Hash()
 }
@@ -529,10 +546,8 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetPi(piEncode)
 	d.SetAccumulateQueue(accunulateQueueEncode)
 	d.SetAccumulateHistory(accunulateHistoryEncode)
-
 	s.SetJamState(d)
 	//fmt.Printf("[N%v] RecoverJamState %v\n", s.Id, s.GetJamSnapshot())
-
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -641,6 +656,90 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		}
 		fmt.Printf("\n")
 	*/
+	return updated_root
+}
+
+func (s *StateDB) GetAllKeyValues() []KeyVal {
+	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
+	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	maxSize := uint32(math.MaxUint32)
+	trie := s.CopyTrieState(s.StateRoot)
+	foundKeyVal, _, _ := trie.GetStateByRange(startKey, endKey, maxSize)
+
+	KeyVals := make([]KeyVal, 0)
+	for _, keyValue := range foundKeyVal {
+		var keyVal [2][]byte
+		realKey := trie.GetRealKey(keyValue.Key, keyValue.Value)
+		keyVal[0] = make([]byte, len(realKey))
+		keyVal[1] = make([]byte, len(keyValue.Value))
+		copy(keyVal[0], realKey)
+		copy(keyVal[1], keyValue.Value)
+		KeyVals = append(KeyVals, keyVal)
+	}
+	return KeyVals
+}
+
+func (s *StateDB) CompareStateRoot(genesis []KeyVal, parentStateRoot common.Hash) (bool, error) {
+	parent_root := s.StateRoot
+	newTrie := trie.NewMerkleTree(nil, s.sdb)
+	for _, kv := range genesis {
+		newTrie.SetRawKeyVal(common.Hash(kv[0]), kv[1])
+	}
+	new_root := newTrie.GetRoot()
+	timeslot := s.GetSafrole().Timeslot
+	if !common.CompareBytes(parent_root[:], new_root[:]) {
+		return false, fmt.Errorf("Roots are not the same")
+	}
+
+	//fmt.Printf("[%d] ", timeslot)
+	//fmt.Printf("current_root, new_root %v %v parentStateRoot: %v\n", parent_root, new_root, parentStateRoot)
+
+	return true, nil
+}
+
+func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
+	//γ ≡⎩γk, γz, γs, γa⎭
+	//γk :one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	//γz :epoch’s root, a Bandersnatch ring root composed with the one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	//γa :the ticket accumulator, a series of highest-scoring ticket identifiers to be used for the next epoch (epoch N+1)
+	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
+	snapshotBytesRaw, err := os.ReadFile(genesis)
+	if err != nil {
+		log.Fatalf("[readSnapshot:ReadFile] %s ERR %v\n", genesis, err)
+		return common.Hash{}
+	}
+	snapshotRaw := StateSnapshotRaw{}
+	json.Unmarshal(snapshotBytesRaw, &snapshotRaw)
+
+	t := s.GetTrie()
+	prev_root := t.GetRoot()
+	debug := false
+	verify := true
+
+	for _, kv := range snapshotRaw.KeyVals {
+		t.SetRawKeyVal(common.Hash(kv[0]), kv[1])
+		fmt.Printf("SetRawKeyVal %x %x\n", common.Hash(kv[0]), kv[1])
+	}
+	updated_root := t.GetRoot()
+
+	sf := s.GetSafrole()
+	if sf == nil {
+		fmt.Printf("NO SAFROLE %v", s)
+		panic(222)
+	}
+
+	if debug {
+		fmt.Printf("[N%v] UpdateTrieState - before root:%v\n", s.Id, prev_root)
+		fmt.Printf("[N%v] UpdateTrieState - after root:%v\n", s.Id, updated_root)
+	}
+
+	if debug || verify {
+		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
+		checkingResult, err := CheckingAllState(t, t2)
+		if !checkingResult || err != nil {
+			panic(fmt.Sprintf("CheckingAllState ERROR: %v\n", err))
+		}
+	}
 	return updated_root
 }
 
@@ -1174,7 +1273,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.ParentHash = blk.Header.Parent
 	s.RemoveUnusedTickets()
 	targetJCE := blk.TimeSlot()
-
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
 	}

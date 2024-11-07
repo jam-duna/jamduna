@@ -69,8 +69,8 @@ func processBlocks(genesisFile string, basePath string) error {
 	if err != nil {
 		return err
 	}
-
 	stateDB, err := statedb.InitStateDBFromSnapshot(storage, statesnapshot)
+	// stateDB, err := statedb.InitStateDBFromGenesis(storage, statesnapshot, genesisFile)
 	if err != nil {
 		log.Fatalf("Error InitStateDBFromSnapshot %v\n", err)
 	}

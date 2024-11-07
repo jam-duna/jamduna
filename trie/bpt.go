@@ -436,14 +436,13 @@ func (t *MerkleTree) GetStateByRange(starKey []byte, endKey []byte, maxSize uint
 	paddedStart := make([]byte, 32)
 	copy(paddedStart, starKey)
 	value, _ := t.Get(paddedStart)
-	fmt.Printf("paddedStart: %x, value: %x\n", paddedStart, value)
+	// fmt.Printf("paddedStart: %x, value: %x\n", paddedStart, value)
 	found := false
 	end := false
 	if value != nil {
 		t.getTreeContentIncludeKey(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode, &found, &end)
 	} else {
 		t.getTreeContent(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode)
-		fmt.Printf("GetStateByRange: starKey=%x, endKey=%x, len(foundKeyVal)=%v, foundKeyVal=%x, actualSize=%v, maxSize=%v\n", starKey, endKey, len(foundKeyVal), foundKeyVal, currenSize, maxSize)
 	}
 	return foundKeyVal, boundaryNode, err
 }
@@ -483,7 +482,7 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 				// key is expected to 31 bytes
 
 				var k_31 [31]byte
-				copy(k_31[:], node.Key[1:])
+				copy(k_31[:], node.Key[:31])
 				if len(k_31) != 31 {
 					panic(fmt.Sprintf("Key is not 31 bytes: %x", node.Key))
 				}
@@ -493,7 +492,7 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 					Value: value,
 				}
 				addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)
-				fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
+				// fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
 
 				*foundkv = append(*foundkv, stateKeyValue)
 				*currenSize += uint32(addSize)
@@ -523,7 +522,6 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 	}
 	//fmt.Printf("%s[%s Node] Key: %x, Hash: %x\n", strings.Repeat("  ", level), nodeType, node.Key, node.Hash)
 	*boundaryNodes = append(*boundaryNodes, node.Hash)
-
 	value, _ := t.Get(node.Key)
 	if value != nil {
 		//fmt.Printf("%s  [Leaf Node] Value: %x\n", strings.Repeat("  ", level), value)
@@ -532,12 +530,12 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 		// Copy the original key into the new slice
 		copy(paddedStart, starKey)
 		copy(paddedEnd, endKey)
-		if (common.CompareKeys(paddedStart, node.Key) >= 0 && common.CompareKeys(paddedEnd, node.Key) >= 0) && (nodeType == "Leaf") {
+		if nodeType == "Leaf" {
 			// check if the key is within range..
 			// key is expected to 31 bytes
 
 			var k_31 [31]byte
-			copy(k_31[:], node.Key[1:])
+			copy(k_31[:], node.Key[:31])
 			if len(k_31) != 31 {
 				panic(fmt.Sprintf("Key is not 31 bytes: %x", node.Key))
 			}
@@ -547,7 +545,7 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 				Value: value,
 			}
 			addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)
-			fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
+			// fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
 
 			*foundkv = append(*foundkv, stateKeyValue)
 			*currenSize += uint32(addSize)
@@ -563,6 +561,20 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 		t.getTreeContent(node.Right, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
 	}
 	return true
+}
+
+func (t *MerkleTree) GetRealKey(key [31]byte, value []byte) []byte {
+	encodedLeaf := leaf(key[:], value)
+	nodeHash := computeHash(encodedLeaf)
+
+	leafKey, _ := t.levelDBGetLeaf(nodeHash)
+	// fmt.Printf("levelDBGetNode: nodeHash=%x, leafKey=%x\n", nodeHash, leafKey)
+	if leafKey != nil {
+		realKey, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
+		//leafValue, _ := t.db.Get([]byte(append(nodeHash, leafKey...)), nil)
+		return realKey
+	}
+	return nil
 }
 
 func (t *MerkleTree) printTree(node *Node, level int) {
@@ -588,6 +600,10 @@ func (t *MerkleTree) printTree(node *Node, level int) {
 		fmt.Printf("%s  Right:\n", strings.Repeat("  ", level))
 		t.printTree(node.Right, level+1)
 	}
+}
+
+func (t *MerkleTree) SetRawKeyVal(key common.Hash, value []byte) {
+	t.Insert(key.Bytes(), value)
 }
 
 func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {

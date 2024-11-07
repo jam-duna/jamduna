@@ -28,21 +28,22 @@ var orderedStateList = []string{
 
 // C1 - C15
 type StateSnapshot struct {
-	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`  // c1
-	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"` // c2
-	RecentBlocks             RecentBlocks                                 `json:"beta"`   // c3
-	Gamma                    SafroleBasicState                            `json:"gamma"`  // c4
-	Disputes                 Psi_state                                    `json:"psi"`    // c5
-	Entropy                  Entropy                                      `json:"eta"`    // c6
-	NextValidators           types.Validators                             `json:"iota"`   // c7
-	CurrValidators           types.Validators                             `json:"kappa"`  // c8
-	PrevValidators           types.Validators                             `json:"lambda"` // c9
-	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`    // c10
-	Timeslot                 uint32                                       `json:"tau"`    // c11
-	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`    // c12
-	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"pi"`     // c13
-	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`  // c14 Accumulation Queue
-	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`     // c15 Accumulation History
+	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`           // c1
+	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"`          // c2
+	RecentBlocks             RecentBlocks                                 `json:"beta"`            // c3
+	Gamma                    SafroleBasicState                            `json:"gamma"`           // c4
+	Disputes                 Psi_state                                    `json:"psi"`             // c5
+	Entropy                  Entropy                                      `json:"eta"`             // c6
+	NextValidators           types.Validators                             `json:"iota"`            // c7
+	CurrValidators           types.Validators                             `json:"kappa"`           // c8
+	PrevValidators           types.Validators                             `json:"lambda"`          // c9
+	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`             // c10
+	Timeslot                 uint32                                       `json:"tau"`             // c11
+	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`             // c12
+	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"pi"`              // c13
+	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`           // c14 Accumulation Queue
+	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`              // c15 Accumulation History
+	ServiceAccount           []KeyVal                                     `json:"service_account"` // Other C
 }
 
 type KeyVal [2][]byte
@@ -131,6 +132,7 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 		kv[1] = stateVal
 		keyValList = append(keyValList, kv)
 	}
+
 	snapshotRaw := StateSnapshotRaw{
 		KeyVals: keyValList,
 	}

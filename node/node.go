@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"log"
 
 	"crypto/tls"
 	"crypto/x509"
@@ -311,8 +312,12 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
-	node.store.WriteLog(_statedb.JamState.Snapshot().Raw(), 0)
-	node.store.WriteLog(_statedb.JamState.Snapshot(), 0)
+	StateSnapshotRaw := statedb.StateSnapshotRaw{}
+	KeyVals := _statedb.GetAllKeyValues()
+	StateSnapshotRaw.KeyVals = KeyVals
+	node.store.WriteLog(StateSnapshotRaw, 0)
+	// node.store.WriteLog(_statedb.JamState.Snapshot().Raw(), 0)
+	// node.store.WriteLog(_statedb.JamState.Snapshot(), 0)
 
 	node.statedb.PreviousGuarantors(true)
 	node.statedb.AssignGuarantors(true)
@@ -697,6 +702,7 @@ func (n *Node) extendChain() error {
 				start := time.Now()
 
 				// Apply the block to the tip
+				n.statedb.RecoverJamState(nextBlock.Header.ParentStateRoot)
 				newStateDB, err := statedb.ApplyStateTransitionFromBlock(n.statedb, context.Background(), nextBlock)
 				//new_xi := newStateDB.GetXContext().GetX_i()
 				if err != nil {
@@ -1099,7 +1105,6 @@ func (n *Node) runClient() {
 			}
 			n.statedb.PreviousGuarantors(true)
 			n.statedb.AssignGuarantors(true)
-
 			// timeslot mark
 			// currJCE := common.ComputeCurrentJCETime()
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
@@ -1146,7 +1151,17 @@ func (n *Node) runClient() {
 				if err != nil {
 					fmt.Printf("writeDebug Block err: %v\n", err)
 				}
-				err = n.writeDebug(newStateDB.JamState.Snapshot().Raw(), timeslot)
+				s := n.statedb
+				allStates := s.GetAllKeyValues()
+				ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
+				if !ok || err != nil {
+					log.Fatalf("Error CompareStateRoot %v\n", err)
+				}
+				stateSnapshotRaw := statedb.StateSnapshotRaw{
+					KeyVals: allStates,
+				}
+				// err = n.writeDebug(newStateDB.JamState.Snapshot().Raw(), timeslot)
+				err = n.writeDebug(stateSnapshotRaw, timeslot)
 				if err != nil {
 					fmt.Printf("writeDebug JamStateRaw err: %v\n", err)
 				}
