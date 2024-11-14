@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
+	//"bytes"
 	"context"
-	"encoding/json"
-
-	// "encoding/json"
-
-	"flag"
+	//"encoding/json"
+	//"flag"
 	"fmt"
 	"log"
 	"os"
@@ -22,61 +19,12 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func readSnapshotRaw(fn string) (statesnapshot *statedb.StateSnapshot, snapshotBytesRaw []byte, err error) {
-	/*
-		statesnapshotraw := statedb.StateSnapshotRaw{}
-		TODO: Sean needs to do somekind of decode to first get StateSnapshotRaw. Then you can do StateSnapshotRaw -> StateSnapshot
-		rest would be the same...
-	*/
-	snapshotBytesRaw, err = os.ReadFile(fn)
-	if err != nil {
-		log.Fatalf("[readSnapshot:ReadFile] %s ERR %v\n", fn, err)
-		return
-	}
-	snapshotRaw := statedb.StateSnapshotRaw{}
-	json.Unmarshal(snapshotBytesRaw, &snapshotRaw)
-	statesnapshot = snapshotRaw.FromStateSnapshotRaw()
-	fmt.Printf("snapshotBytesRaw: %s\n", snapshotBytesRaw)
-
-	return statesnapshot, snapshotBytesRaw, err
-}
-
-func readSnapshot(fn string) (statesnapshot *statedb.StateSnapshot, snapshotBytes []byte, err error) {
-	snapshotBytes, err = os.ReadFile(fn)
-	if err != nil {
-		log.Fatalf("[readSnapshot:ReadFile] %s ERR %v\n", fn, err)
-		return
-	}
-	// Decode genesis into the initial StateDB
-	s, _, err := types.Decode(snapshotBytes, reflect.TypeOf(statedb.StateSnapshot{}))
-	if err != nil {
-		log.Fatalf("Error decoding genesis file %s: %v\n", fn, err)
-	}
-	st := s.(statedb.StateSnapshot)
-	statesnapshot = &st
-	return
-}
-
-func processBlocks(genesisFile string, basePath string) error {
-	storage, err := storage.NewStateDBStorage("/tmp/validatetraces")
-	if err != nil {
-		log.Fatalf("Error decoding genesis file %s: %v\n", genesisFile, err)
-	}
-
-	// Read the snapshot file into snapshotBytes
-	statesnapshot, _, err := readSnapshotRaw(genesisFile) // this should be well-formed snashopt. not the []kv version
-	//statesnapshot, _, err := readSnapshot(genesisFile)
-	if err != nil {
-		return err
-	}
-	stateDB, err := statedb.InitStateDBFromSnapshot(storage, statesnapshot)
-	// stateDB, err := statedb.InitStateDBFromGenesis(storage, statesnapshot, genesisFile)
-	if err != nil {
-		log.Fatalf("Error InitStateDBFromSnapshot %v\n", err)
-	}
-	blocksDir := filepath.Join(basePath, "blocks")
-	snapshotsDir := filepath.Join(basePath, "state_snapshots") // should pointed to the newest trace format
-
+func processBlocks(basePath string) error {
+	storage, err := storage.NewStateDBStorage("/tmp/validatetraces2")
+	validators := make([]types.Validator, types.TotalValidators)
+	genesisConfig := statedb.NewGenesisConfig(validators)
+	stateDB, err := statedb.NewGenesisStateDB(storage, &genesisConfig)
+	blocksDir := filepath.Join(basePath, "Blocks")
 	blocks := make(map[int]map[int]types.Block)
 
 	// Find all block files in blocksDir
@@ -149,8 +97,6 @@ func processBlocks(genesisFile string, basePath string) error {
 		for _, phase := range phases {
 			block := blocks[epoch][phase]
 			blockFile := fmt.Sprintf("%d_%d.bin", epoch, phase)
-			snapshotFile := fmt.Sprintf("%d_%d.bin", epoch, phase)
-			snapshotPath := filepath.Join(snapshotsDir, snapshotFile)
 
 			// Apply the state transition
 			newStateDB, err := statedb.ApplyStateTransitionFromBlock(stateDB, context.Background(), &block)
@@ -159,49 +105,15 @@ func processBlocks(genesisFile string, basePath string) error {
 				continue
 			}
 
-			snapshot := newStateDB.JamState.Snapshot()
-			snapshotBytes, err := types.Encode(snapshot)
-
-			// Check if the corresponding snapshot file exists
-			if _, err := os.Stat(snapshotPath); err == nil {
-				// Read the snapshot file into expectedSnapshotBytes
-				_, expectedSnapshotBytes, err := readSnapshotRaw(snapshotPath)
-				if err != nil {
-					log.Fatalf("failed to read snapshot %s\n", snapshotFile)
-				}
-				// Validate the snapshot
-				if bytes.Equal(snapshotBytes, expectedSnapshotBytes) {
-					fmt.Printf("VALIDATED Block %s => State %s | %s\n", blockFile, snapshotFile, block.Str())
-					stateDB = newStateDB
-				} else {
-					log.Printf("Validation failed for Block %s => State %s\n", blockFile, snapshotFile)
-					panic(1)
-				}
-			} else {
-				log.Printf("Snapshot file not found for %s\n", snapshotFile)
-				panic(fmt.Sprintf("Missing snapshot file: %s", snapshotFile))
-			}
+			fmt.Printf("%v Block.ParentStateRoot: %v statedb.StateRoot: %v\n", blockFile, block.Header.ParentStateRoot, newStateDB.StateRoot)
 		}
 	}
 	return nil
 }
 
 func main() {
-	// Define command-line flags
-	mode := flag.String("mode", "assurances", "Mode to use (default: safrole)")
-	team := flag.String("team", "jam_duna", "Team name to use (default: jam_duna)")
-	traceDir := flag.String("traceDir", "/root/go/src/github.com/jam-duna/jamtestnet/traces", "Directory path to trace files")
-
-	// Parse the flags
-	flag.Parse()
-
-	// Construct the paths using the flags
-	modeDir := filepath.Join(*traceDir, *mode)
-	teamDir := filepath.Join(modeDir, *team)
-	genesisFile := filepath.Join(modeDir, "genesis.bin")
-
 	// Process the blocks and state transitions
-	err := processBlocks(genesisFile, teamDir)
+	err := processBlocks(".")
 	if err != nil {
 		log.Fatalf("Error processing blocks: %v\n", err)
 	}

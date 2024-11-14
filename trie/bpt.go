@@ -45,6 +45,8 @@ const (
 const (
 	LevelDBNull  = "null"
 	LevelDBEmpty = ""
+
+	debug = false
 )
 
 /*
@@ -250,7 +252,6 @@ func InitMerkleTreeFromHash(root []byte, db *storage.StateDBStorage) (*MerkleTre
 	}
 	tree := &MerkleTree{Root: nil, db: db}
 	if compareBytes(root, common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000000")) {
-		fmt.Printf("Root Hash is empty\n")
 		return &MerkleTree{Root: nil, db: db}, nil
 	}
 	rootNode, err := tree.levelDBGetNode(root)
@@ -426,7 +427,9 @@ func (n *Node) String() string {
 }
 
 func (t *MerkleTree) PrintTree(node *Node, level int) {
+	fmt.Printf("\n----------------PrintTree START----------------\n")
 	t.printTree(node, level)
+	fmt.Printf("\n----------------PrintTree END----------------\n")
 }
 
 // maximum size: The total encoded length of the response
@@ -705,6 +708,9 @@ func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
 	*/
 	service_account := common.ComputeC_is(i, s)
 	stateKey := service_account.Bytes()
+	if debug {
+		fmt.Printf("SetService stateKey=%x, v=%x\n", stateKey, v)
+	}
 	t.Insert(stateKey, v)
 }
 
@@ -725,15 +731,24 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 		Follow GP_0.3.5(270, 273, 274, 276, 291)
 		Process State value(timeslots), covert []uint32 to []byte
 	*/
-	vBytes := []byte{}
-	if len(time_slots) > 0 {
-		time_slotsByte := make([]byte, len(time_slots)*4)
+	// vBytes := []byte{}
+	// if len(time_slots) > 0 {
+	// 	time_slotsByte := make([]byte, len(time_slots)*4)
 
-		// Convert time slots into byte
-		for i, v := range time_slots {
-			binary.LittleEndian.PutUint32(time_slotsByte[i*4:(i+1)*4], v)
-		}
-		vBytes = append([]byte{uint8(len(time_slots))}, time_slotsByte...)
+	// 	// Convert time slots into byte
+	// 	for i, v := range time_slots {
+	// 		binary.LittleEndian.PutUint32(time_slotsByte[i*4:(i+1)*4], v)
+	// 	}
+	// 	vBytes = append([]byte{uint8(len(time_slots))}, time_slotsByte...)
+	// } else {
+	// 	vBytes = []byte{0}
+	// }
+	vBytes, err := types.Encode(time_slots)
+	if err != nil {
+		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
+	}
+	if debug {
+		fmt.Printf("SetPreImageLookup stateKey=%x, vBytes=%v\n", stateKey, vBytes)
 	}
 	// Insert the value into the state
 	//fmt.Printf("SetPreImageLookup stateKey=%x, vBytes=%v\n", stateKey, vBytes)
@@ -754,6 +769,12 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	*/
 
 	vByte, err := t.Get(stateKey)
+	if err != nil {
+		return nil, err
+	}
+	if debug {
+		fmt.Printf("GetPreImageLookup stateKey=%x, vByte=%v\n", stateKey, vByte)
+	}
 	var time_slots []uint32
 
 	if len(vByte) == 0 {

@@ -3,7 +3,7 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
-
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -12,6 +12,10 @@ type PreimageAnnouncement struct {
 	ServiceIndex   uint32
 	PreimageHash   common.Hash
 	PreimageLen    uint32
+}
+
+func (req *PreimageAnnouncement) String() string {
+	return fmt.Sprintf(" Preimage: (s=%d, h=%v, l=%d)", req.ServiceIndex, req.PreimageHash, req.PreimageLen)
 }
 
 func (req *PreimageAnnouncement) ToBytes() ([]byte, error) {

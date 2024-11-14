@@ -19,9 +19,9 @@ const (
 	x_p = "P"
 )
 
-func (s *StateDB) WriteAccount(sa types.ServiceAccount) {
+func (s *StateDB) WriteAccount(sa *types.ServiceAccount) {
 	service_idx := sa.ServiceIndex()
-	//two ways of proceeding this... via journal (most reliable) or via memory (faster but order is not guaranteed)
+	//fmt.Printf("[N%d] WriteAccount %v\n", s.Id, sa.String())
 	for key, storage := range sa.Storage {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
@@ -34,6 +34,7 @@ func (s *StateDB) WriteAccount(sa types.ServiceAccount) {
 	for blobHash, v := range sa.Lookup {
 		if v.Dirty {
 			if v.Deleted {
+				panic("check this case as [] is natural -- does it exist")
 				s.DeleteServicePreimageLookupKey(service_idx, blobHash, v.Z)
 			} else {
 				s.WriteServicePreimageLookup(service_idx, blobHash, v.Z, v.T)
@@ -50,12 +51,15 @@ func (s *StateDB) WriteAccount(sa types.ServiceAccount) {
 		}
 	}
 	s.WriteService(service_idx, sa)
+
 }
 
 func (s *StateDB) ApplyXContext(U *types.PartialState) {
+	//U.Dump("ApplyXContext", s.Id);
 	for _, sa := range U.D {
 		if sa.Dirty {
-			s.WriteAccount(*sa)
+			s.WriteAccount(sa)
+		} else {
 		}
 	}
 	// p - Empower => Kai_state 12.4.1 (164)
@@ -92,7 +96,7 @@ func (s *StateDB) GetService(service uint32) (*types.ServiceAccount, error) {
 	return types.ServiceAccountFromBytes(service, serviceBytes)
 }
 
-func (s *StateDB) WriteService(service uint32, sa types.ServiceAccount) {
+func (s *StateDB) WriteService(service uint32, sa *types.ServiceAccount) {
 	v, _ := sa.Bytes()
 	s.WriteServiceBytes(service, v)
 }
@@ -149,12 +153,16 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 }
 
 func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
-	//fmt.Printf("WriteServicePreimageLookup Called! service=%v, (h,l)=(%v,%v). anchors:%v\n", service, blob_hash, blob_length, time_slots)
 	tree := s.GetTrie()
 	tree.SetPreImageLookup(service, blob_hash, blob_length, time_slots)
-	//fmt.Printf("Latest root=%v\n", s.GetTentativeStateRoot())
-	//v, _ := tree.GetPreImageLookup(service, blob_hash, blob_length)
-	//fmt.Printf("GetPreImageLookup0 right after %v\n", v)
+	if debug {
+		v, _ := tree.GetPreImageLookup(service, blob_hash, blob_length)
+		fmt.Printf("WriteServicePreimageLookup Called! service=%v, (h,l)=(%v,%v). anchors:%v\n", service, blob_hash, blob_length, time_slots)
+		fmt.Printf("GetPreImageLookup0 right after %x\n", v)
+		va := s.GetAllKeyValues()
+		fmt.Printf("GetAllKeyValues right after %x\n", va) // PROBLEM: MISLEADING if [] = 00
+		tree.PrintTree(tree.Root, 0)
+	}
 }
 
 // HistoricalLookup, GetImportItem, ExportSegment

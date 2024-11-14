@@ -268,11 +268,30 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 
 // Convert the ServiceAccount to a human-readable string.
 func (s *ServiceAccount) String() string {
-	str := fmt.Sprintf("ServiceAccount[i=%v] {CodeHash: %v, Balance: %d, GasLimitG: %d, GasLimitM: %d, StorageSize: %d, NumStorageItems: %d}, Map{}",
-		s.serviceIndex, s.CodeHash.Hex(), s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems)
-	return str
-}
+	// Initial account information
+	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v\n",
+		s.serviceIndex, s.CodeHash.Hex()) // s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems
 
+	// Lookup entries
+	str2 := ""
+	for h, lo := range s.Lookup {
+		str2 += fmt.Sprintf("  Lookup: %v => %v\n", h, lo)
+	}
+
+	// Preimage entries
+	str3 := ""
+	for h, lo := range s.Preimage {
+		str3 += fmt.Sprintf("  Preimage: %v => %v\n", h, lo)
+	}
+
+	// Storage entries
+	str4 := ""
+	for h, lo := range s.Storage {
+		str4 += fmt.Sprintf("  Storage: %v => %v\n", h, lo)
+	}
+
+	return str + str2 + str3 + str4
+}
 func (s *ServiceAccount) ReadStorage(key common.Hash, sdb HostEnv) (ok bool, v []byte) {
 	storageObj, ok := s.Storage[key]
 	if storageObj.Deleted {
@@ -343,7 +362,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 	s.Dirty = true
 	s.Lookup[blobHash] = LookupObject{
 		Dirty:   true,
-		Deleted: len(time_slots) == 0,
+		Deleted: false, // WAS len(time_slots) == 0,
 		Z:       z,
 		T:       time_slots,
 	}

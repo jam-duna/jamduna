@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	debug_pvm = false
+	debug_pvm  = false
+	debug_host = false
 
 	regSize  = 13
 	numCores = types.TotalCores

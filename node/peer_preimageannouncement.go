@@ -55,6 +55,9 @@ func (n *Node) onPreimageAnnouncement(stream quic.Stream, msg []byte, peerID uin
 		return
 	}
 	preimageAnnouncement.ValidatorIndex = peerID
-	n.preimageAnnouncementsCh <- preimageAnnouncement
-	return nil
+	if debugP {
+		fmt.Printf("%s received PreimageAnnouncement from %d (%s)\n", n.String(), peerID, preimageAnnouncement.String())
+	}
+	return n.processPreimageAnnouncements(preimageAnnouncement)
+
 }

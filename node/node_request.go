@@ -158,6 +158,9 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	}
 	serviceIndex := preimageAnnouncement.ServiceIndex
 	preimageHash := preimageAnnouncement.PreimageHash
+	if debugP {
+		fmt.Printf("%s [processPreimageAnnouncements:SendPreimageRequest] to N%d for (%d, %v)\n", n.String(), validatorIndex, serviceIndex, preimageHash)
+	}
 	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
 	if err != nil {
 		return err
@@ -170,7 +173,9 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 		Requester: uint32(serviceIndex),
 		Blob:      preimage,
 	}
-	// ADD TO Queue
+	if debugP {
+		fmt.Printf("%s processPreimageAnnouncements %s ==> adding to E_P\n", n.String(), preimageAnnouncement.String())
+	}
 	n.processPreimages(lookup)
 
 	return nil

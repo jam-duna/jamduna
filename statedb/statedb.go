@@ -152,21 +152,11 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 }
 
 func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
-	//TODO: check existence of lookup and stick into map
-	//cj := s.GetPvmState()
-	//fmt.Printf("[N%v] ProcessIncomingLookup -- Adding lookup: %v\n", s.Id, l.String())
 	account_preimage_hash := l.AccountPreimageHash()
-	// Willaim: dont do validation here. Instead, do have a procedure to remove stale EP
-	/*
-		account_preimage_hash, err := s.ValidateLookup(&l)
-		if err != nil {
-			fmt.Printf("Invalid lookup. Err=%v\n", err)
-			return
-		}
-	*/
-	if s.CheckLookupExists(account_preimage_hash) {
-		return
-	}
+	// TODO: William: dont do validation here. Instead, do have a procedure to remove stale EP
+	//if s.CheckLookupExists(account_preimage_hash) {
+	//	return
+	//}
 	s.AddLookupToQueue(l)
 	sf := s.GetSafrole()
 	s.knownPreimageLookups[account_preimage_hash] = sf.GetTimeSlot() // hostForget has certain logic that will probably reference this field???
@@ -267,6 +257,7 @@ const (
 	debug                     = false
 	debugA                    = false
 	debugG                    = false
+	debugP                    = false
 	debugAudit                = false
 	trace                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
@@ -293,12 +284,13 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	//fmt.Printf("Validating E_p %v\n",l.String())
 	anchors, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
-		fmt.Printf("Fail at no lookup\n")
+		fmt.Printf("Fail at anchor not set, service idx %v, blob hash %v, blob length %v\n", l.Service_Index(), l.BlobHash(), l.BlobLength())
+		va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
+		fmt.Printf("GetAllKeyValues right after %x\n", va)
+		t.PrintTree(t.Root, 0)
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
-	if len(anchors) == 0 {
-		// non-empty anchor
-		fmt.Printf("Fail at anchor wrong\n")
+	if len(anchors) == 1 { // we have to forget it -- check!
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotEmpty)
 	}
 	return a_p, nil
@@ -377,7 +369,7 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 			NumStorageItems: 1,
 		}
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
-		statedb.WriteService(service.ServiceCode, bootstrapServiceAccount)
+		statedb.WriteService(service.ServiceCode, &bootstrapServiceAccount)
 	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()
@@ -602,7 +594,6 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C14, accunulateQueueEncode)
 	t.SetState(C15, accunulateHistoryEncode)
 	updated_root := t.GetRoot()
-
 	if debug {
 		fmt.Printf("[N%v] UpdateTrieState - before root:%v\n", s.Id, prev_root)
 		fmt.Printf("[N%v] UpdateTrieState - after root:%v\n", s.Id, updated_root)
@@ -719,7 +710,7 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 
 	for _, kv := range snapshotRaw.KeyVals {
 		t.SetRawKeyVal(common.Hash(kv[0]), kv[1])
-		fmt.Printf("SetRawKeyVal %x %x\n", common.Hash(kv[0]), kv[1])
+		//fmt.Printf("SetRawKeyVal %v %x\n", common.Hash(kv[0]), kv[1])
 	}
 	updated_root := t.GetRoot()
 
@@ -1079,6 +1070,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// validate eq 157
 		_, err := s.ValidateLookup(&l)
 		if err != nil {
+			fmt.Printf("Error validating lookup: %v\n", err)
 			return 0, 0, err
 		}
 	}
@@ -1091,7 +1083,9 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// δ†[s]l[H(p),∣p∣] = [τ′]
 		// t.SetPreImageBlob(l.Service_Index(), l.Blob)
 		// t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
-		fmt.Printf(("WriteServicePreimageBlob, Service_Index: %d, Blob: %x\n"), l.Service_Index(), l.Blob)
+		if debugP {
+			fmt.Printf(("WriteServicePreimageBlob, Service_Index: %d, Blob: %x\n"), l.Service_Index(), l.Blob)
+		}
 		s.WriteServicePreimageBlob(l.Service_Index(), l.Blob)
 		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
@@ -1353,6 +1347,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
 	}
 	s.ApplyXContext(&o)
+
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	var leaves [][]byte
 	for _, sa := range b {

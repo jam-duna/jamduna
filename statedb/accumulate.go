@@ -2,7 +2,7 @@ package statedb
 
 import (
 	"errors"
-	"fmt"
+	//"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
@@ -231,9 +231,9 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 		output_b = make([]BeefyCommitment, 0)
 		return
 	}
-	//fmt.Printf("ParallelizedAccumulate i=%d/%d\n", i, len(w))
 	g_star, t_star, b_star := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports
-	if i >= uint64(len(w)) {                                         // no more reports
+	//o.Dump("OuterAccumulate", s.Id)
+	if i >= uint64(len(w)) { // no more reports
 		return g_star, t_star, b_star
 	}
 	j, outputT, outputB := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
@@ -270,7 +270,6 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		}
 	}
 
-	//fmt.Printf(" ParallelizedAccumulate - services %v\n", services)
 	output_u = 0
 	// get services from f key
 	for k := range f {
@@ -415,7 +414,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	serviceAccount, _ := sd.GetService(s)
 	xContext := sd.NewXContext(s, serviceAccount, o)
 	code := sd.ReadServicePreimageBlob(s, codeHash)
-	fmt.Printf(" SingleAccumulate(%d) codehash=%v\n", s, codeHash)
+	//o.Dump("SingleAccumulate", sd.Id)
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
 	r, _ := vm.ExecuteAccumulate(p, xContext)
 	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)

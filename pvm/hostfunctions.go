@@ -309,7 +309,9 @@ func (vm *VM) hostNew() uint32 {
 		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
 	a.SetServiceIndex(xi)
-	fmt.Printf("Service %d hostNew %v => %d\n", s, a.CodeHash, a.ServiceIndex())
+	if debug_host {
+		fmt.Printf("Service %d hostNew %v => %d\n", s, a.CodeHash, a.ServiceIndex())
+	}
 	// Compute footprint & threshold: a_l, a_s, a-t
 
 	// a.Balance = a.ComputeThreshold()
@@ -320,11 +322,14 @@ func (vm *VM) hostNew() uint32 {
 		xContext.I = vm.hostenv.Check(bump(xi)) // this is the next xi
 
 		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
-		a.WriteLookup(common.BytesToHash(c), l, []uint32{common.ComputeCurrenTS()})
+		// a.WriteLookup(common.BytesToHash(c), l, []uint32{common.ComputeCurrenTS()})
+		a.WriteLookup(common.BytesToHash(c), l, []uint32{})
 
 		// (x's)b <- (xs)b - at
+		// xContext.S = a.ServiceIndex()
 		xs.Balance = xs.Balance - a.Balance
 		xContext.U.D[xi] = a
+		vm.X = xContext
 		return OK
 	} else {
 		fmt.Println("Balance insufficient")
@@ -480,7 +485,6 @@ func (vm *VM) hostRead() uint32 {
 	}
 
 	key := common.Compute_storageKey_internal(s, k)
-	fmt.Printf("hostRead s=%d, k=%v (%d) => Key: %v (hash(E_4(s)+k))\n", s, k, len(k), key)
 	var a *types.ServiceAccount
 	var ok bool
 	if w7 == s || w7 == 0xFFFFFFFF {
@@ -592,16 +596,15 @@ func (vm *VM) hostSolicit(t uint32) uint32 {
 	*/
 
 	blobHash := common.Hash(hBytes)
-
 	X_s_l := vm.hostenv.ReadServicePreimageLookup(xs.ServiceIndex(), blobHash, z)
+	fmt.Printf("xs.ServiceIndex() = %d, blobHash = %v, z = %d, X_s_l = %v\n", xs.ServiceIndex(), blobHash, z, X_s_l)
 	if len(X_s_l) == 0 {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
 		xs.WriteLookup(blobHash, z, []uint32{})
 		vm.writeRegister(7, OK)
 		return OK
 	} else if X_s_l[0] == 2 { // [x, y]
-		anchor_timeslot := vm.GetJCETime()
-		xs.WriteLookup(blobHash, z, append(X_s_l, []uint32{anchor_timeslot}...))
+		xs.WriteLookup(blobHash, z, append(X_s_l, []uint32{t}...))
 		vm.writeRegister(7, OK)
 		return OK
 	} else {
@@ -624,18 +627,17 @@ func (vm *VM) hostForget(t uint32) uint32 {
 
 	blobHash := common.Hash(hBytes)
 	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, blobHash, z)
-	anchor_timeslot := vm.GetJCETime()
-	if len(X_s_l) == 0 || (len(X_s_l) == 2 && X_s_l[1] < (anchor_timeslot-D)) {
+	if len(X_s_l) == 0 || (len(X_s_l) == 2 && X_s_l[1] < (t-D)) {
 		vm.hostenv.DeleteServicePreimageLookupKey(s, blobHash, z)
 		vm.hostenv.DeleteServicePreimageKey(s, blobHash)
 		vm.writeRegister(7, OK)
 		return OK
 	} else if len(X_s_l) == 1 {
-		vm.hostenv.WriteServicePreimageLookup(s, blobHash, z, append(X_s_l, []uint32{anchor_timeslot}...))
+		vm.hostenv.WriteServicePreimageLookup(s, blobHash, z, append(X_s_l, []uint32{t}...))
 		vm.writeRegister(7, OK)
 		return OK
-	} else if len(X_s_l) == 3 && X_s_l[1] < (anchor_timeslot-D) {
-		X_s_l[2] = uint32(anchor_timeslot)
+	} else if len(X_s_l) == 3 && X_s_l[1] < (t-D) {
+		X_s_l[2] = uint32(t)
 		vm.hostenv.WriteServicePreimageLookup(s, blobHash, z, X_s_l)
 		vm.writeRegister(7, OK)
 		return OK

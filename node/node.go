@@ -48,10 +48,10 @@ const (
 	debugAudit = false // Audit
 	trace      = false
 	debugE     = false // monitoring fn execution time
-
-	numNodes = 6
-	quicAddr = "127.0.0.1:%d"
-	basePort = 9000
+	debugTree  = false // trie
+	numNodes   = 6
+	quicAddr   = "127.0.0.1:%d"
+	basePort   = 9000
 )
 
 const (
@@ -700,11 +700,16 @@ func (n *Node) extendChain() error {
 
 				// Measure time taken to apply state transition
 				start := time.Now()
-
 				// Apply the block to the tip
-				n.statedb.RecoverJamState(nextBlock.Header.ParentStateRoot)
-				newStateDB, err := statedb.ApplyStateTransitionFromBlock(n.statedb, context.Background(), nextBlock)
+				recoveredStateDB := n.statedb.Copy()
+				recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
+				newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock)
+
 				//new_xi := newStateDB.GetXContext().GetX_i()
+				if debugTree {
+					fmt.Printf("[N%d] Author newStateDB %v\n", n.id, newStateDB.StateRoot)
+					newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
+				}
 				if err != nil {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err
@@ -1129,6 +1134,10 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				panic(0)
+			}
+			if newStateDB != nil && debugTree {
+				fmt.Printf("[N%d] Author PrintTree \n", n.id)
+				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
 			}
 			if newStateDB != nil {
 				// we authored a block
