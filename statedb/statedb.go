@@ -102,8 +102,8 @@ func (s *StateDB) CheckTicketExists(ticketID common.Hash) bool {
 	if (ticketID == common.Hash{}) {
 		return true
 	}
-	s.preimageLookupsMutex.Lock()
-	defer s.preimageLookupsMutex.Unlock()
+	s.ticketMutex.Lock()
+	defer s.ticketMutex.Unlock()
 	_, exists := s.knownTickets[ticketID]
 	return exists
 }
@@ -112,8 +112,8 @@ func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
 	if (a_p == common.Hash{}) {
 		return true
 	}
-	s.ticketMutex.Lock()
-	defer s.ticketMutex.Unlock()
+	s.preimageLookupsMutex.Lock()
+	defer s.preimageLookupsMutex.Unlock()
 	_, exists := s.knownPreimageLookups[a_p]
 	return exists
 }
@@ -152,11 +152,21 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 }
 
 func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
+	//TODO: check existence of lookup and stick into map
+	//cj := s.GetPvmState()
+	// fmt.Printf("[N%v] ProcessIncomingLookup -- start Adding lookup: %v\n", s.Id, l.String())
 	account_preimage_hash := l.AccountPreimageHash()
-	// TODO: William: dont do validation here. Instead, do have a procedure to remove stale EP
-	//if s.CheckLookupExists(account_preimage_hash) {
-	//	return
-	//}
+	// Willaim: dont do validation here. Instead, do have a procedure to remove stale EP
+	/*
+		account_preimage_hash, err := s.ValidateLookup(&l)
+		if err != nil {
+			fmt.Printf("Invalid lookup. Err=%v\n", err)
+			return
+		}
+	*/
+	if s.CheckLookupExists(account_preimage_hash) {
+		return
+	}
 	s.AddLookupToQueue(l)
 	sf := s.GetSafrole()
 	s.knownPreimageLookups[account_preimage_hash] = sf.GetTimeSlot() // hostForget has certain logic that will probably reference this field???

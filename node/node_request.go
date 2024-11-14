@@ -47,13 +47,15 @@ func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.Wo
 }
 
 func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
+	n.preimagesMutex.Lock()
+	defer n.preimagesMutex.Unlock()
+
 	preimage, ok := n.preimages[preimageHash]
 	if !ok {
 		fmt.Printf("preimageHash not ok\n")
 		return []byte{}, false, nil
 	}
 	return preimage, true, nil
-	return []byte{}, false, nil
 }
 
 func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
@@ -165,9 +167,10 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	if err != nil {
 		return err
 	}
-
+	n.preimagesMutex.Lock()
 	n.services[serviceIndex] = preimageHash
 	n.preimages[preimageHash] = preimage
+	n.preimagesMutex.Unlock()
 
 	lookup := types.Preimages{
 		Requester: uint32(serviceIndex),
