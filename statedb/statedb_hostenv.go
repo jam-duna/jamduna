@@ -159,8 +159,7 @@ func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Ha
 		v, _ := tree.GetPreImageLookup(service, blob_hash, blob_length)
 		fmt.Printf("WriteServicePreimageLookup Called! service=%v, (h,l)=(%v,%v). anchors:%v\n", service, blob_hash, blob_length, time_slots)
 		fmt.Printf("GetPreImageLookup0 right after %x\n", v)
-		va := s.GetAllKeyValues()
-		fmt.Printf("GetAllKeyValues right after %x\n", va) // PROBLEM: MISLEADING if [] = 00
+		tree.PrintAllKeyValues() // (Solved)PROBLEM: MISLEADING if [] = 00
 		tree.PrintTree(tree.Root, 0)
 	}
 }

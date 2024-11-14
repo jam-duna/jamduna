@@ -285,8 +285,8 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	anchors, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
 		fmt.Printf("Fail at anchor not set, service idx %v, blob hash %v, blob length %v\n", l.Service_Index(), l.BlobHash(), l.BlobLength())
-		va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
-		fmt.Printf("GetAllKeyValues right after %x\n", va)
+		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
+		t.PrintAllKeyValues()
 		t.PrintTree(t.Root, 0)
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}

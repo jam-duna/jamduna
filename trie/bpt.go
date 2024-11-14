@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
@@ -11,6 +12,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 	"github.com/syndtr/goleveldb/leveldb"
 )
+
+type KeyVal [2][]byte
 
 // TODO: stanley to figure what this is
 type BMTProof []common.Hash
@@ -424,6 +427,28 @@ func (t *MerkleTree) Close() error {
 func (n *Node) String() string {
 	s := fmt.Sprintf("Node Hash=%x, Key=%x\n", n.Hash, n.Key)
 	return s
+}
+
+func (t *MerkleTree) PrintAllKeyValues() {
+	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
+	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	maxSize := uint32(math.MaxUint32)
+	foundKeyVal, _, _ := t.GetStateByRange(startKey, endKey, maxSize)
+
+	KeyVals := make([]KeyVal, 0)
+	for _, keyValue := range foundKeyVal {
+		var keyVal [2][]byte
+		realKey := t.GetRealKey(keyValue.Key, keyValue.Value)
+		keyVal[0] = make([]byte, len(realKey))
+		keyVal[1] = make([]byte, len(keyValue.Value))
+		copy(keyVal[0], realKey)
+		copy(keyVal[1], keyValue.Value)
+		KeyVals = append(KeyVals, keyVal)
+	}
+	fmt.Printf("GetAllKeyValues right after %x\n", KeyVals)
+	for _, kv := range KeyVals {
+		fmt.Printf("[Key] %x\n[Value] %x\n", kv[0], kv[1])
+	}
 }
 
 func (t *MerkleTree) PrintTree(node *Node, level int) {
