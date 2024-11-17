@@ -9,24 +9,49 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// TODO: ensure that 100% of these are used 
+const (
+	errAnchorNotRecent           = "anchor_not_recent"
+	errBadBeefyMMRRoot           = "bad_beefy_mmr_root"
+	errBadCodeHash               = "bad_code_hash"
+	errBadCoreIndex              = "bad_core_index"
+	errBadServiceID              = "bad_service_id"
+	errBadSignature              = "bad_signature"
+	errBadStateRoot              = "bad_state_root"
+	errServiceItemGasTooLow      = "service_item_gas_too_low"
+	errCoreEngaged               = "core_engaged"
+	errDependencyMissing         = "dependency_missing"
+	errDuplicatePackage          = "duplicate_package"
+	errFutureReportSlot          = "future_report_slot"
+	errInsufficientGuarantees    = "insufficient_guarantees"
+	errCoreUnauthorized          = "core_unauthorized"
+	errDuplicateGuarantors       = "duplicate_guarantors"
+	errOutOfOrderGuarantee       = "out_of_order_guarantee"
+	errReportEpochBeforeLast     = "report_epoch_before_last"
+	errSegmentRootLookupInvalid  = "segment_root_lookup_invalid"
+	errWorkReportGasTooHigh      = "work_report_gas_too_high"
+	errTooManyDependencies       = "too_many_dependencies"
+	errWrongAssignment           = "wrong_assignment"
+)
+
 // this function will be used by what should be included in the block
 func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
-	if len(guarantee.Signatures) < 2 {
+	if len(guarantee.Signatures) < 2 { // errInsufficientGuarantees 
 		return errors.New(fmt.Sprintf("not enough signatures , this work report is made by core : %v", guarantee.Report.CoreIndex))
 	}
 	//138 check index
-	err := CheckSorting_EG(guarantee)
+	err := CheckSorting_EG(guarantee) // errOutOfOrderGuarantee?
 	if err != nil {
 		return err
 	}
 	//139 check signature, core assign check,C_v ...
 	CurrV := s.JamState.SafroleState.CurrValidators
-	err = guarantee.Verify(CurrV)
+	err = guarantee.Verify(CurrV) // errBadSignature
 	if err != nil {
 		return err
 	}
 	//139 The signing validators must be assigned to the core in G or G*
-	err = s.AreValidatorsAssignedToCore(guarantee)
+	err = s.AreValidatorsAssignedToCore(guarantee) // errCoreUnauthorized
 	if err != nil {
 		fmt.Printf("Verify_Guarantee error: %v\n", err)
 		return err
@@ -34,19 +59,19 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 	//TODO: 139 C_v
 
 	//143 check gas
-	err = s.CheckGas(guarantee)
+	err = s.CheckGas(guarantee) //errServiceItemGasTooLow
 	if err != nil {
 		return err
 	}
 	//145 check package and report are same hex
 	//will do after check the single guarantee
-	// 146 resent restory
-	// err = s.checkRecentBlock(guarantee)
+	// 146 recent History 
+	// err = s.checkRecentBlock(guarantee) // errAnchorNotRecent
 	// if err != nil {
 	// 	return err
 	// }
 	//147
-	err = s.CheckTimeSlotHeader(guarantee)
+	err = s.CheckTimeSlotHeader(guarantee) //
 	if err != nil {
 		return err
 	}
@@ -56,17 +81,17 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 	// 	return err
 	// }
 	// //149- check report is not in recent history
-	// err = s.checkReportNotInRecentHistory(guarantee)
+	// err = s.checkReportNotInRecentHistory(guarantee) // errAnchorNotRecent
 	// if err != nil {
 	// 	return err
 	// }
 	// // TODO 150 check prerequisite work-package
-	// err = s.checkPrerequisiteWorkPackage(guarantee)
+	// err = s.checkPrerequisiteWorkPackage(guarantee)  //errDependencyMissing
 	// if err != nil {
 	// 	return err
 	// }
 	// 151 check code hash
-	// err = s.checkCodeHash(guarantee)
+	// err = s.checkCodeHash(guarantee) // errBadCodeHash
 	// if err != nil {
 	// 	return err
 	// }
@@ -76,7 +101,7 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 // this function will be used when a validator receive a block
 func (s *StateDB) ValidateGuarantees(guarantees []types.Guarantee) error {
 	// 137 check index
-	err := CheckSorting_EGs(guarantees)
+	err := CheckSorting_EGs(guarantees) // errOutOfOrderGuarantee
 	if err != nil {
 		return err
 	}
@@ -100,6 +125,7 @@ func SortByCoreIndex(guarantees []types.Guarantee) {
 
 }
 
+// errBadCoreIndex
 func CheckCoreIndex(guarantees []types.Guarantee, new types.Guarantee) error {
 	// check core index is correct
 	core := make(map[uint16]bool)
@@ -192,7 +218,7 @@ func (j JamState) CheckReportPendingOnCore(g types.Guarantee) error {
 func (s *StateDB) CheckGas(g types.Guarantee) error {
 	count := 0
 	for _, results := range g.Report.Results {
-		count += int(s.JamState.PriorServiceAccountState[uint32(results.Service)].GasLimitG)
+		count += int(s.JamState.PriorServiceAccountState[uint32(results.ServiceID)].GasLimitG)
 	}
 	//TODO: G_A has not been defined
 	if count > types.AccumulationGasAllocation {
@@ -258,9 +284,9 @@ func (s *StateDB) CheckReportNotInRecentHistory(g types.Guarantee) error {
 
 // TODO 150 check prerequisite work-package: most recent history haven't been implemented
 func (s *StateDB) CheckPrerequisiteWorkPackage(g types.Guarantee) error {
-	if g.Report.RefineContext.Prerequisite != nil {
+	if len(g.Report.RefineContext.Prerequisites) == 0 {
 		exBool := false
-		for _, hash := range g.Report.RefineContext.Prerequisite.Hash() {
+		for _, hash := range g.Report.RefineContext.Prerequisites {
 			if hash == g.Report.GetWorkPackageHash() {
 				exBool = true
 				break
@@ -277,7 +303,7 @@ func (s *StateDB) CheckPrerequisiteWorkPackage(g types.Guarantee) error {
 
 func (s *StateDB) CheckCodeHash(g types.Guarantee) error {
 	for _, results := range g.Report.Results {
-		if results.CodeHash != s.JamState.PriorServiceAccountState[uint32(results.Service)].CodeHash {
+		if results.CodeHash != s.JamState.PriorServiceAccountState[uint32(results.ServiceID)].CodeHash {
 			return errors.New(fmt.Sprintf("invalid code hash, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash()))
 		}
 	}

@@ -24,7 +24,7 @@ type MMR struct {
 func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
 	outputWorkReports := []types.WorkReport{}
 	for _, workReport := range W {
-		if workReport.RefineContext.Prerequisite == nil && len(workReport.SegmentRootLookup) == 0 {
+		if len(workReport.RefineContext.Prerequisites) == 0 && len(workReport.SegmentRootLookup) == 0 {
 			outputWorkReports = append(outputWorkReports, workReport)
 		}
 	}
@@ -35,7 +35,7 @@ func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
 func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQueue {
 	outputWorkReports := []types.WorkReport{}
 	for _, workReport := range W {
-		if workReport.RefineContext.Prerequisite != nil || len(workReport.SegmentRootLookup) != 0 {
+		if len(workReport.RefineContext.Prerequisites) == 0 || len(workReport.SegmentRootLookup) != 0 {
 			outputWorkReports = append(outputWorkReports, workReport)
 		}
 	}
@@ -55,7 +55,7 @@ func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQue
 // v0.4.5 eq.167 - D(w)
 func Depandancy(w types.WorkReport) types.AccumulationQueue {
 	unionMap := make(map[common.Hash]bool)
-	if w.RefineContext.Prerequisite != nil {
+	if len(w.RefineContext.Prerequisites) == 0 {
 		//prerequisite := *(w.RefineContext.Prerequisite)
 		//prerequisiteHash = common.Hash{} // (prerequisite)
 		//unionMap[prerequisiteHash] = true
@@ -214,7 +214,7 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 	// calculate how to maximize the work reports to enter the parallelized accumulation
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
-			gas_tmp += workResult.GasRatio // the gas ratio here maybe need to check again, the name is not clear
+			gas_tmp += workResult.Gas
 			if gas_tmp <= g {
 				i++
 				if i >= uint64(len(w))+1 {
@@ -266,7 +266,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	services := make([]uint32, 0)
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
-			services = append(services, workResult.Service)
+			services = append(services, workResult.ServiceID)
 		}
 	}
 
@@ -385,8 +385,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	// add all gas from work reports
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
-			if workResult.Service == s {
-				gas += uint32(workResult.GasRatio)
+			if workResult.ServiceID == s {
+				gas += uint32(workResult.Gas)
 			}
 		}
 	}
@@ -395,7 +395,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	p := make([]types.AccumulateOperandElements, 0)
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
-			if workResult.Service == s {
+			if workResult.ServiceID == s {
 				codeHash = workResult.CodeHash
 				p = append(p, types.AccumulateOperandElements{
 					Results: types.Result{

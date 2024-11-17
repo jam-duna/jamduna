@@ -489,10 +489,10 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle) 
 			segments = append(segments, exports[i:i+types.W_E*types.W_S])
 		}
 		result := types.WorkResult{
-			Service:     workItem.Service,
+			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
 			PayloadHash: common.Blake2Hash(workItem.Payload),
-			GasRatio:    0,
+			Gas:         0,
 			Result:      output,
 		}
 		results = append(results, result)
@@ -583,10 +583,10 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 		}
 
 		result := types.WorkResult{
-			Service:     workItem.Service,
+			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
 			PayloadHash: common.Blake2Hash(workItem.Payload),
-			GasRatio:    0,
+			Gas:         0,
 			Result:      output,
 		}
 		results = append(results, result)

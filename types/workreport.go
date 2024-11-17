@@ -26,7 +26,7 @@ type WorkReport struct {
 	CoreIndex         uint16                `json:"core_index"`
 	AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 	AuthOutput        []byte                `json:"auth_output"`
-	SegmentRootLookup SegmentRootLookup     //eq 118 l∈D⟨H →H⟩
+	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 	Results           []WorkResult          `json:"results"`
 }
 

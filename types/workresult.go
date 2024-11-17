@@ -19,10 +19,10 @@ const (
 
 // 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
 type WorkResult struct {
-	Service     uint32      `json:"service"`
+	ServiceID   uint32      `json:"service_id"`
 	CodeHash    common.Hash `json:"code_hash"`
 	PayloadHash common.Hash `json:"payload_hash"`
-	GasRatio    uint64      `json:"gas_ratio"`
+	Gas         uint64      `json:"gas"`
 	Result      Result      `json:"result"`
 }
 
@@ -119,10 +119,10 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 
 func (a *WorkResult) UnmarshalJSON(data []byte) error {
 	var s struct {
-		Service     uint32                 `json:"service"`
+		ServiceID   uint32                 `json:"service_id"`
 		CodeHash    common.Hash            `json:"code_hash"`
 		PayloadHash common.Hash            `json:"payload_hash"`
-		GasRatio    uint64                 `json:"gas_ratio"`
+		Gas         uint64                 `json:"gas"`
 		Result      map[string]interface{} `json:"result"`
 	}
 	err := json.Unmarshal(data, &s)
@@ -162,10 +162,10 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	a.Service = s.Service
+	a.ServiceID = s.ServiceID
 	a.CodeHash = s.CodeHash
 	a.PayloadHash = s.PayloadHash
-	a.GasRatio = s.GasRatio
+	a.Gas = s.Gas
 	a.Result = result
 
 	return nil
@@ -199,16 +199,16 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(&struct {
-		Service     uint32                 `json:"service"`
+		ServiceID   uint32                 `json:"service_id"`
 		CodeHash    common.Hash            `json:"code_hash"`
 		PayloadHash common.Hash            `json:"payload_hash"`
-		GasRatio    uint64                 `json:"gas_ratio"`
+		Gas         uint64                 `json:"gas"`
 		Result      map[string]interface{} `json:"result"`
 	}{
-		Service:     a.Service,
+		ServiceID:   a.ServiceID,
 		CodeHash:    a.CodeHash,
 		PayloadHash: a.PayloadHash,
-		GasRatio:    a.GasRatio,
+		Gas:         a.Gas,
 		Result:      result,
 	})
 }

@@ -23,7 +23,7 @@ type RefineContext struct {
 	BeefyRoot        common.Hash   `json:"beefy_root"`
 	LookupAnchor     common.Hash   `json:"lookup_anchor"`
 	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"`
-	Prerequisite     *Prerequisite `json:"prerequisite"`
+	Prerequisites    []common.Hash `json:"prerequisites"`
 }
 
 type Prerequisite []common.Hash
