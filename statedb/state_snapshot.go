@@ -282,6 +282,6 @@ func (original SafroleBasicState) Copy() SafroleBasicState {
 }
 
 func (s *StateSnapshot) String() string {
-	jsonEncode, _ := json.Marshal(s)
+	jsonEncode, _ := json.MarshalIndent(s, "", "  ") // Indent with 2 spaces
 	return string(jsonEncode)
 }

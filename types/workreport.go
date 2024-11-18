@@ -42,6 +42,31 @@ func (S SegmentRootLookup) Decode(data []byte) (interface{}, uint32) {
 	return nil, 0
 }
 
+// MarshalJSON serializes SegmentRootLookup as a map[string]string
+func (s SegmentRootLookup) MarshalJSON() ([]byte, error) {
+	stringMap := make(map[string]string)
+	for k, v := range s {
+		stringMap[k.Hex()] = v.Hex() // Assume `Hex()` returns a string representation of `common.Hash`
+	}
+	return json.Marshal(stringMap)
+}
+
+// UnmarshalJSON deserializes SegmentRootLookup from a map[string]string
+func (s *SegmentRootLookup) UnmarshalJSON(data []byte) error {
+	stringMap := make(map[string]string)
+	if err := json.Unmarshal(data, &stringMap); err != nil {
+		return err
+	}
+
+	*s = make(SegmentRootLookup)
+	for k, v := range stringMap {
+		keyHash := common.HexToHash(k) // Assume `HexToHash()` converts a string to `common.Hash`
+		valueHash := common.HexToHash(v)
+		(*s)[keyHash] = valueHash
+	}
+	return nil
+}
+
 // eq 190
 type WorkReportNeedAudit struct {
 	Q [TotalCores]WorkReport `json:"available_work_report"`

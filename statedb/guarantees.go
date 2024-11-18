@@ -312,12 +312,24 @@ func (j *JamState) CheckReportPendingOnCore(g types.Guarantee) error {
 }
 
 func (j *JamState) CheckInvalidCoreIndex() {
+	problem := false
 	for i, rho := range j.AvailabilityAssignments {
 		if rho != nil && rho.WorkReport.CoreIndex != uint16(i) {
-			panic(fmt.Sprintf("invalid core index %v,with report index %d", i, rho.WorkReport.CoreIndex))
+			problem = true
 		}
 	}
-	fmt.Printf("CheckInvalidCoreIndex: success\n")
+	// Core 0 : receiving megatron report; Core 1 : receiving fib+trib report
+	if problem {
+		for i, rho := range j.AvailabilityAssignments {
+			fmt.Printf("[Node] CheckInvalidCoreIndex i=%d rho: (WorkReportHash:%v) CoreIndex: %d WorkReport: %v\n",
+				i, rho.WorkReport.Hash(), rho.WorkReport.CoreIndex, rho.WorkReport.String())
+		}
+		fmt.Printf("CheckInvalidCoreIndex: FAILURE\n")
+		panic(1111)
+	} else {
+		fmt.Printf("CheckInvalidCoreIndex: success\n")
+	}
+
 }
 
 // v0.4.5 eq 144

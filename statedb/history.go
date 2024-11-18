@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"encoding/json"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -10,10 +11,37 @@ import (
 type RecentBlocks []Beta_state
 
 type Beta_state struct {
-	HeaderHash common.Hash                 `json:"header_hash"`
-	B          trie.MMR                    `json:"mmr"`
-	StateRoot  common.Hash                 `json:"state_root"`
-	Reported   map[common.Hash]common.Hash `json:"reported"`
+	HeaderHash common.Hash `json:"header_hash"`
+	B          trie.MMR    `json:"mmr"`
+	StateRoot  common.Hash `json:"state_root"`
+	Reported   Reported    `json:"reported"` // Use the custom type
+}
+
+type Reported map[common.Hash]common.Hash
+
+// MarshalJSON serializes Reported as a map[string]string
+func (r Reported) MarshalJSON() ([]byte, error) {
+	stringMap := make(map[string]string)
+	for k, v := range r {
+		stringMap[k.Hex()] = v.Hex() // Convert keys and values to hex strings
+	}
+	return json.Marshal(stringMap)
+}
+
+// UnmarshalJSON deserializes Reported from a map[string]string
+func (r *Reported) UnmarshalJSON(data []byte) error {
+	stringMap := make(map[string]string)
+	if err := json.Unmarshal(data, &stringMap); err != nil {
+		return err
+	}
+
+	*r = make(Reported)
+	for k, v := range stringMap {
+		keyHash := common.HexToHash(k) // Convert hex strings back to common.Hash
+		valueHash := common.HexToHash(v)
+		(*r)[keyHash] = valueHash
+	}
+	return nil
 }
 
 // Recent History : see Section 7
