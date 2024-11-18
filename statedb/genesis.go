@@ -100,6 +100,9 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j.PrivilegedServiceIndices.Kai_v = BootstrapServiceCode
 	j.PrivilegedServiceIndices.Kai_m = BootstrapServiceCode
 
+	// setup the initial state of the accumulate state
+	// j.AccumulationHistory = [types.EpochLength]types.AccumulationHistory{}
+	// j.AccumulationQueue = make([]types.AccumulationQueue, types.EpochLength)
 	return j
 }
 

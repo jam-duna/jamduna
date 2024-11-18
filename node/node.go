@@ -369,6 +369,17 @@ func (n *Node) GetSelfCoreIndex() (uint16, error) {
 	}
 	return 0, fmt.Errorf("core index not found")
 }
+
+func (n *Node) GetCoreIndexFromEd25519Key(key types.Ed25519Key) (uint16, error) {
+	assignments := n.statedb.GuarantorAssignments
+	for _, assignment := range assignments {
+		if assignment.Validator.GetEd25519Key() == key {
+			return assignment.CoreIndex, nil
+		}
+	}
+	return 0, fmt.Errorf("core index not found")
+}
+
 func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 	coWorkers := make([]types.Validator, 0)
 	for _, assignment := range n.statedb.GuarantorAssignments {

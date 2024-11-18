@@ -1,8 +1,6 @@
 package types
 
 import (
-	"reflect"
-
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -24,38 +22,4 @@ type RefineContext struct {
 	LookupAnchor     common.Hash   `json:"lookup_anchor"`
 	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"`
 	Prerequisites    []common.Hash `json:"prerequisites"`
-}
-
-type Prerequisite []common.Hash
-
-func (P *Prerequisite) Encode() []byte {
-	if P == nil {
-		return []byte{0}
-	}
-	encoded := []byte{1}
-	encodedPrerequisite, err := Encode(*P)
-	if err != nil {
-		return []byte{}
-	}
-	encoded = append(encoded, encodedPrerequisite...)
-	return encoded
-}
-
-func (target *Prerequisite) Decode(data []byte) (interface{}, uint32) {
-	if data[0] == 0 {
-		return nil, 1
-	}
-	var decoded Prerequisite
-	length := uint32(1)
-	prerequisite, l, err := Decode(data[length:], reflect.TypeOf([]common.Hash{}))
-	if err != nil {
-		return nil, length
-	}
-	length += l
-	decoded = Prerequisite(prerequisite.([]common.Hash))
-	return &decoded, length
-}
-
-func (p *Prerequisite) Hash() []common.Hash {
-	return []common.Hash(*p)
 }

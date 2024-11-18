@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"errors"
-	//"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
@@ -35,7 +34,7 @@ func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
 func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQueue {
 	outputWorkReports := []types.WorkReport{}
 	for _, workReport := range W {
-		if len(workReport.RefineContext.Prerequisites) == 0 || len(workReport.SegmentRootLookup) != 0 {
+		if len(workReport.RefineContext.Prerequisites) != 0 || len(workReport.SegmentRootLookup) != 0 {
 			outputWorkReports = append(outputWorkReports, workReport)
 		}
 	}
@@ -54,26 +53,21 @@ func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQue
 
 // v0.4.5 eq.167 - D(w)
 func Depandancy(w types.WorkReport) types.AccumulationQueue {
-	unionMap := make(map[common.Hash]bool)
-	if len(w.RefineContext.Prerequisites) == 0 {
-		//prerequisite := *(w.RefineContext.Prerequisite)
-		//prerequisiteHash = common.Hash{} // (prerequisite)
-		//unionMap[prerequisiteHash] = true
+	result := types.AccumulationQueue{}
+	result.WorkReports = append(result.WorkReports, w)
+	// w.RefineContext.Prerequisite union key(w.SegmentRootLookup)
+	hashSet := make(map[common.Hash]struct{})
+	for _, p := range w.RefineContext.Prerequisites {
+		hashSet[p] = struct{}{}
 	}
-	if w.SegmentRootLookup != nil {
-		for k := range w.SegmentRootLookup {
-			unionMap[k] = true
-		}
+	for key := range w.SegmentRootLookup {
+		hashSet[key] = struct{}{}
 	}
-	unionResult := []common.Hash{}
-	for key := range unionMap {
-		unionResult = append(unionResult, key)
+	depandancy := []common.Hash{}
+	for key := range hashSet {
+		depandancy = append(depandancy, key)
 	}
-
-	result := types.AccumulationQueue{
-
-		WorkPackageHash: unionResult,
-	}
+	result.WorkPackageHash = depandancy
 	return result
 }
 
@@ -207,7 +201,7 @@ tant deferred-transfers and accumulation-output pairings:
 */
 // eq 173
 // ∆+
-func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (gas uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment) {
+func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment) {
 	// not really sure i here , the max meaning. use uint32 for now
 	var gas_tmp uint64
 	i := uint64(0)
@@ -224,8 +218,9 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 
 		}
 	}
+	// fmt.Printf("OuterAccumulate i=%d\n", i)
 	if i == 0 { // if i = 0, then nothing to do
-		gas = 0
+		num = 0
 
 		output_t = make([]types.DeferredTransfer, 0)
 		output_b = make([]BeefyCommitment, 0)
@@ -234,10 +229,10 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 	g_star, t_star, b_star := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports
 	//o.Dump("OuterAccumulate", s.Id)
 	if i >= uint64(len(w)) { // no more reports
-		return g_star, t_star, b_star
+		return i, t_star, b_star
 	}
 	j, outputT, outputB := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
-	gas = i + j
+	num = i + j
 
 	output_t = append(outputT, t_star...)
 	for _, b := range b_star {
@@ -275,6 +270,8 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	for k := range f {
 		services = append(services, k)
 	}
+	// remove duplicates
+	services = UniqueUint32Slice(services)
 	for _, service := range services {
 		// this is parallelizable
 		T, B, U := s.SingleAccumulate(o, w, f, service)
@@ -292,6 +289,18 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_v) */
 
 	return
+}
+
+func UniqueUint32Slice(slice []uint32) []uint32 {
+	keys := make(map[uint32]bool)
+	list := []uint32{}
+	for _, entry := range slice {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+	return list
 }
 
 func (sdb *StateDB) Check(i uint32) uint32 {
@@ -444,4 +453,47 @@ func (s *StateDB) HostTransfer(services map[uint32]types.ServiceAccount, self_in
 		return types.ServiceAccount{}, errors.New("HostTransfer Error: service not found")
 	}
 	return types.ServiceAccount{}, nil
+}
+
+func (s *StateDB) ApplyStateTransitionAccumulation(w_star []types.WorkReport, num uint64, previousTimeslot uint32) {
+	// fmt.Printf("ApplyStateTransitionAccumulation num=%d previousTimeslot=%d\n", num, previousTimeslot)
+	jam := s.GetJamState()
+	w_q := jam.QueuedExecution(s.AvailableWorkReport)
+	jam.UpdateLatestHistory(w_star, int(num))
+	jam.UpdateReadyQueuedReport(w_q, previousTimeslot)
+}
+
+// eq 186, 187 0.4.5
+func (j *JamState) UpdateLatestHistory(w_star []types.WorkReport, num int) {
+	// get accumulated work report
+	accumulated_wr := w_star[:num]
+	// phasing every history
+	// 187
+	for i := 0; i < types.EpochLength-1; i++ {
+		j.AccumulationHistory[i] = j.AccumulationHistory[i+1]
+	}
+	// eq 186 0.4.5
+	j.AccumulationHistory[types.EpochLength-1].WorkPackageHash = Mapping(accumulated_wr)
+}
+
+func (j *JamState) UpdateReadyQueuedReport(w_q []types.AccumulationQueue, previous_t uint32) {
+	timeslot := j.SafroleState.Timeslot
+	_, phase := j.SafroleState.EpochAndPhase(timeslot)
+	// fmt.Printf("UpdateReadyQueuedReport timeslot=%d phase=%d, previous= %d\n", timeslot, phase, previous_t)
+	if previous_t == 0 {
+		return
+	}
+	for i := uint32(0); i < types.EpochLength; i++ {
+		if int(phase)-int(i) < 0 {
+			break
+		}
+		if i == 0 {
+			j.AccumulationQueue[phase-i] = QueueEditing(w_q, j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
+		} else if i >= 1 && i < timeslot-previous_t {
+			j.AccumulationQueue[phase-i] = []types.AccumulationQueue{}
+		} else {
+			j.AccumulationQueue[phase-i] = QueueEditing(j.AccumulationQueue[phase-i], j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
+		}
+
+	}
 }

@@ -1273,6 +1273,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
 	start := time.Now()
 	s = oldState.Copy()
+	old_timeslot := s.GetSafrole().Timeslot
 	s.JamState = oldState.JamState.Copy()
 	s.Block = blk
 	s.ParentHash = blk.Header.Parent
@@ -1346,18 +1347,19 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
 
 	// 28 -- ACCUMULATE
-	var g uint64
+	var g uint64 = 10000
 	o := s.JamState.newPartialState()
 	var f map[uint32]uint32
 	var b []BeefyCommitment
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	g, _, b = s.OuterAccumulate(g, accumulate_input_wr, &o, f)
+	n, _, b := s.OuterAccumulate(g, accumulate_input_wr, &o, f)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
 	}
-	s.ApplyXContext(&o)
 
+	s.ApplyXContext(&o)
+	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	var leaves [][]byte
 	for _, sa := range b {
@@ -1423,11 +1425,12 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 	stateRoot := s.GetStateRoot()
-
-	//fmt.Printf("[N%v] Original JamState %v\n", s.Id, s.GetJamSnapshot())
-	//fmt.Printf("[N%v] MakeBlock using stateRoot %v\n", s.Id, stateRoot)
+	s.JamState.CheckInvalidCoreIndex()
+	fmt.Printf("\n\n----- MAKEBLOCK\n[N%v] MakeBlock using stateRoot %v JamState %v\n", s.Id, stateRoot, s.GetJamSnapshot())
 	s.RecoverJamState(stateRoot)
-	//fmt.Printf("[N%v] Recovered JamState %v\n", s.Id, s.GetJamSnapshot())
+	fmt.Printf("[N%v] Recovered JamState %v\n", s.Id, s.GetJamSnapshot())
+	s.JamState.CheckInvalidCoreIndex()
+	fmt.Printf("------ MAKEBLOCK\n\n")
 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()
@@ -1499,9 +1502,13 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		if err != nil {
 			continue
 		}
-
+		s.JamState.CheckInvalidCoreIndex()
+		for _, rho := range s.JamState.AvailabilityAssignments {
+			fmt.Printf("Rho %v\n", rho)
+		}
 		err = s.Verify_Guarantee(g)
 		if err != nil {
+			fmt.Printf("Node %d \n", s.Id)
 			fmt.Println("Error verifying guarantee: ", err)
 			continue
 		}

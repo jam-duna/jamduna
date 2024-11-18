@@ -36,7 +36,7 @@ func (n *Node) generateAssurance() (a types.Assurance, numCores uint16, err erro
 	if numCores == 0 {
 		return a, numCores, nil
 	}
-	a.Anchor = n.statedb.GetBlock().ParentHash()
+	a.Anchor = n.statedb.GetBlock().Hash()
 	a.ValidatorIndex = n.statedb.Id
 	a.Sign(n.GetEd25519Secret())
 	return

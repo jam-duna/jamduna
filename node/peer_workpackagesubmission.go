@@ -81,7 +81,12 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	return nil
 }
 func (p *Peer) SendWorkPackageSubmission(coreIndex uint16, pkg types.WorkPackage, extrinsics []byte) (err error) {
-	core_idx, err := p.node.GetSelfCoreIndex()
+	if pkg.RefineContext.LookupAnchorSlot == 1 {
+		if len(pkg.RefineContext.Prerequisites) == 0 {
+			panic("Prerequisite is empty")
+		}
+	}
+	core_idx, err := p.node.GetCoreIndexFromEd25519Key(p.Validator.Ed25519)
 	if err != nil {
 		return fmt.Errorf("failed to get self core index: %w", err)
 	}
@@ -95,6 +100,13 @@ func (p *Peer) SendWorkPackageSubmission(coreIndex uint16, pkg types.WorkPackage
 	/*
 		Here need to setup some kind of verification for the work package
 	*/
+
+	// a, err := json.MarshalIndent(req, "", "  ")
+	// if err != nil {
+	// 	return err
+	// }
+	// fmt.Printf("send workpackage: %s\n", a)
+
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return err
@@ -125,6 +137,13 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		fmt.Println("Error deserializing:", err)
 		return
 	}
+
+	// a, err := json.MarshalIndent(newReq, "", "  ")
+	// if err != nil {
+	// 	return err
+	// }
+	// fmt.Printf("receive workpackage: %s\n", a)
+
 	selfCoreIndex, err := n.GetSelfCoreIndex()
 	if err != nil {
 		return fmt.Errorf("failed to get self core index: %w", err)

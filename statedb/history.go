@@ -10,19 +10,19 @@ import (
 type RecentBlocks []Beta_state
 
 type Beta_state struct {
-	HeaderHash common.Hash   `json:"header_hash"`
-	B          trie.MMR      `json:"mmr"`
-	StateRoot  common.Hash   `json:"state_root"`
-	Reported   []common.Hash `json:"reported"`
+	HeaderHash common.Hash                 `json:"header_hash"`
+	B          trie.MMR                    `json:"mmr"`
+	StateRoot  common.Hash                 `json:"state_root"`
+	Reported   map[common.Hash]common.Hash `json:"reported"`
 }
 
 // Recent History : see Section 7
 func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
-	reported := make([]common.Hash, 0)
+	reported := map[common.Hash]common.Hash{}
 	for _, g := range blk.Guarantees() {
-		reported = append(reported, g.Report.AvailabilitySpec.WorkPackageHash)
+		reported[g.Report.AvailabilitySpec.WorkPackageHash] = g.Report.AvailabilitySpec.ExportedSegmentRoot
 	}
 
 	preRecentBlocks := s.JamState.RecentBlocks
