@@ -44,6 +44,37 @@ func (r *Reported) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (b *Beta_state) UnmarshalJSON(data []byte) error {
+	var s struct {
+		HeaderHash common.Hash   `json:"header_hash"`
+		B          trie.MMR      `json:"mmr"`
+		StateRoot  common.Hash   `json:"state_root"`
+		Report     []interface{} `json:"reported"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	b.HeaderHash = s.HeaderHash
+	b.B = s.B
+	b.StateRoot = s.StateRoot
+	b.Reported = nil
+	return nil
+}
+
+func (b Beta_state) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		HeaderHash common.Hash   `json:"header_hash"`
+		B          trie.MMR      `json:"mmr"`
+		StateRoot  common.Hash   `json:"state_root"`
+		Report     []interface{} `json:"reported"`
+	}{
+		HeaderHash: b.HeaderHash,
+		B:          b.B,
+		StateRoot:  b.StateRoot,
+		Report:     []interface{}{},
+	})
+}
+
 // Recent History : see Section 7
 func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
 	// Eq 83 n

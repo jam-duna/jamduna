@@ -34,12 +34,12 @@ const (
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
 	serviceIndex    uint32
-	CodeHash        common.Hash `json:"code_hash"`         //a_c - account code hash c
-	Balance         uint64      `json:"balance"`           //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
-	GasLimitG       uint64      `json:"gas_limit_g"`       //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
-	GasLimitM       uint64      `json:"gas_limit_m"`       //a_m - the minimum required for the On Transfer entry-point.
-	StorageSize     uint64      `json:"storage_size"`      //a_l - total number of octets used in storage (9.3)
-	NumStorageItems uint32      `json:"num_storage_items"` //a_i - the number of items in storage (9.3)
+	CodeHash        common.Hash `json:"code_hash"`    //a_c - account code hash c
+	Balance         uint64      `json:"balance"`      //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
+	GasLimitG       uint64      `json:"min_item_gas"` //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
+	GasLimitM       uint64      `json:"min_memo_gas"` //a_m - the minimum required for the On Transfer entry-point.
+	StorageSize     uint64      `json:"code_size"`    //a_l - total number of octets used in storage (9.3)
+	NumStorageItems uint32      `json:"items"`        //a_i - the number of items in storage (9.3)
 
 	Dirty    bool
 	Storage  map[common.Hash]StorageObject  `json:"s_map"` // arbitrary_k -> v. if v=[]byte. use as delete
