@@ -134,6 +134,9 @@ type Node struct {
 	nodeType        string
 	dataDir         string
 	epoch0Timestamp uint32
+
+	chunkMap map[common.Hash][]byte
+	chunkBox map[common.Hash][][]byte
 }
 
 /*
@@ -199,6 +202,11 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 
 func NewNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
 	n, err := newNode(id, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir, port)
+	return n, err
+}
+
+func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	n, err := newNode(id, credential, genesisConfig, peers, peerList, DAFlag, dataDir, port)
 	return n, err
 }
 
@@ -1023,6 +1031,12 @@ func getMessageType(obj interface{}) string {
 		return "Trace"
 	case *statedb.GenesisConfig:
 		return "GenesisConfig"
+	case DA_announcement:
+		return "DA_announcement"
+	case DA_request:
+		return "DA_request"
+	case DA_response:
+		return "DA_response"
 	default:
 		return "unknown"
 	}

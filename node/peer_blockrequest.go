@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"reflect"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
-	"io"
-	"reflect"
 )
 
 /*

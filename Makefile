@@ -10,6 +10,11 @@ jam:
 	mkdir -p $(OUTPUT_DIR)
 	go build -o $(OUTPUT_DIR)/$(BINARY) $(SRC)
 
+da:
+	@echo "Building JAM..."
+	mkdir -p $(OUTPUT_DIR)
+	go build -o $(OUTPUT_DIR)/da da.go
+
 jamweb:
 		@echo "Building JAM WEB..."
 		@cd jamweb && go build

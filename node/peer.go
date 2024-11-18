@@ -34,6 +34,9 @@ const (
 	CE143_PreimageRequest              = 143
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
+	CE201_DA_Announcement              = 201
+	CE202_DA_Request                   = 202
+	CE203_DA_Reconstruction            = 203
 )
 
 type Peer struct {
@@ -207,6 +210,12 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 		n.onAuditAnnouncement(stream, msg, peerID)
 	case CE145_JudgmentPublication:
 		n.onJudgmentPublication(stream, msg, peerID)
+	case CE201_DA_Announcement:
+		n.onDA_Announcement(stream, msg)
+	case CE202_DA_Request:
+		n.onDA_Request(stream, msg)
+	case CE203_DA_Reconstruction:
+		n.onDA_Reconstruction(stream, msg)
 	default:
 		return errors.New("unknown message type")
 	}

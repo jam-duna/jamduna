@@ -4,7 +4,11 @@ import (
 	//"bytes"
 	//"context"
 	//"errors"
+
+	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -101,9 +105,8 @@ func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, 
 	return boundaryNode, keyvalues, true, nil
 }
 
-func (n *Node) IsSelfRequesting(peerIdentifier string) bool {
-	ed25519key := n.GetEd25519Key()
-	if ed25519key.String() == peerIdentifier {
+func (n *Node) IsSelfRequesting(peer_id uint16) bool {
+	if peer_id == n.id {
 		return true
 	}
 	return false
@@ -286,155 +289,113 @@ func (n *Node) runMain() {
 	}
 }
 
-/*
 // internal makeRquest call with ctx implementation
-func (n *Node) makeRequestInternal(ctx context.Context, peerIdentifier string, obj interface{}) ([]byte, error) {
-	peerAddr, _ := n.getPeerAddr(peerIdentifier)
-	peerID, _ := n.getPeerIndex(peerIdentifier)
+func (n *Node) makeRequestInternal(ctx context.Context, obj interface{}) (interface{}, error) {
+	// Get the peer ID from the object
+	writeErrCh := make(chan error, 1)
 	msgType := getMessageType(obj)
+	var peerID uint16
 	if msgType == "unknown" {
 		return nil, fmt.Errorf("unsupported type")
 	}
-
-	if n.IsSelfRequesting(peerIdentifier) {
-		// for self requesting, no need to open stream channel..
-		fmt.Printf("[N%v] %v Self Requesting!!!\n", n.id, msgType)
-
-		// Channel to receive the response or error
-		responseCh := make(chan []byte, 1)
-		errCh := make(chan error, 1)
-
-		// Run handleQuicMsg in a goroutine to handle context cancellation
-		go func() {
-
-			select {
-			case <-ctx.Done():
-				errCh <- ctx.Err()
-			default:
-				responseCh <- response
-				errCh <- nil
-			}
-		}()
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case err := <-errCh:
-			if err != nil {
-				return nil, err
-			}
-			response := <-responseCh
-			return response, nil
-		}
-	}
-
-	n.connectionMu.Lock()
-	conn, exists := n.connections[peerAddr]
-	if exists {
-		// Check if the connection is closed
-		if conn.Context().Err() != nil {
-			// Connection is closed, remove it from the cache
-			delete(n.connections, peerAddr)
-			exists = false
-			conn = nil
-		}
-	}
-	if !exists {
-		var err error
-		conn, err = quic.DialAddr(ctx, peerAddr, n.tlsConfig, generateQuicConfig())
-		if err != nil {
-			n.connectionMu.Unlock()
-			fmt.Printf("-- [N%v] makeRequest ERR %v peerAddr=%s (N%v)\n", n.id, err, peerAddr, peerID)
-			return nil, err
-		}
-		n.connections[peerAddr] = conn
-	}
-	n.connectionMu.Unlock()
-
-	stream, err := conn.OpenStreamSync(ctx)
+	req := obj.(DA_request)
+	peerID = req.ShardIndex
+	shard_hash := req.Hash
+	peer, err := n.getPeerByIndex(peerID)
 	if err != nil {
-		fmt.Printf("-- [N%v] openstreamsync ERR %v\n", n.id, err)
-		// Error opening stream, remove the connection from the cache
-		n.connectionMu.Lock()
-		delete(n.connections, peerAddr)
-		n.connectionMu.Unlock()
-		return nil, err
+		writeErrCh <- err
 	}
-	defer stream.Close()
+	data, v_idx, err := peer.DA_Reconstruction(req)
+	if err != nil {
+		writeErrCh <- err
+	}
+	// select {
+	// case <-ctx.Done():
+	// 	return nil, ctx.Err()
+	// case err := <-writeErrCh:
+	// 	if err != nil {
+	// 		fmt.Printf("-- [N%v] Write ERR %v\n", n.id, err)
+	// 		return nil, err
+	// 	}
+	// }
+	var response DA_response
+	response.Hash = shard_hash
+	response.ShardIndex = v_idx
+	response.Data = data
+	return response, nil
+	//n.chunkCh <- Chunk{Hash: shard_hash, Data: data}
+	// IMPORTANT: We handle self requesting inside the DA_Request
+	// if n.IsSelfRequesting(peerID) {
+	// 	// for self requesting, no need to open stream channel..
+	// 	fmt.Printf("[N%v] %v Self Requesting!!!\n", n.id, msgType)
 
-	// Length-prefix the message
-	messageLength := uint32(len(messageData))
-	lengthPrefix := make([]byte, 4)
-	binary.BigEndian.PutUint32(lengthPrefix, messageLength)
+	// 	// Channel to receive the response or error
+	// 	responseCh := make(chan []byte, 1)
+	// 	errCh := make(chan error, 1)
+
+	// 	// Run handleQuicMsg in a goroutine to handle context cancellation
+	// 	go func() {
+
+	// 		select {
+	// 		case <-ctx.Done():
+	// 			errCh <- ctx.Err()
+	// 		default:
+	// 			responseCh <- response
+	// 			errCh <- nil
+	// 		}
+	// 	}()
+
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		return nil, ctx.Err()
+	// 	case err := <-errCh:
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
+	// 		response := <-responseCh
+	// 		return response, nil
+	// 	}
+	// }
 
 	// Write the length and message data with context cancellation support
-	writeErrCh := make(chan error, 1)
-	go func() {
-		_, err = stream.Write(lengthPrefix)
-		if err != nil {
-			writeErrCh <- err
-			return
-		}
-		_, err = stream.Write(messageData)
-		writeErrCh <- err
-	}()
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case err := <-writeErrCh:
-		if err != nil {
-			fmt.Printf("-- [N%v] Write ERR %v\n", n.id, err)
-			return nil, err
-		}
-	}
+	// go func() {
+	// 	_, err = stream.Write(lengthPrefix)
+	// 	if err != nil {
+	// 		writeErrCh <- err
+	// 		return
+	// 	}
+	// 	_, err = stream.Write(messageData)
+	// 	writeErrCh <- err
+	// }()
 
 	// Read the response with context cancellation support
-	responseCh := make(chan []byte, 1)
-	readErrCh := make(chan error, 1)
+	// responseCh := make(chan []byte, 1)
+	// readErrCh := make(chan error, 1)
 
-	go func() {
-		var buffer bytes.Buffer
-		tmp := make([]byte, 4096)
-		for {
-			nRead, err := stream.Read(tmp)
-			if nRead > 0 {
-				buffer.Write(tmp[:nRead])
-			}
-			if err != nil {
-				if err.Error() == "EOF" {
-					responseCh <- buffer.Bytes()
-					readErrCh <- nil
-				} else {
-					readErrCh <- err
-				}
-				return
-			}
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case err := <-readErrCh:
-		if err != nil {
-			fmt.Printf("-- [N%v] Read ERR %v\n", n.id, err)
-			return nil, err
-		}
-		response := <-responseCh
-		return response, nil
-	}
+	// select {
+	// case <-ctx.Done():
+	// 	// we get into this case if (1) internal(individual)request is complete OR parent
+	// 	return nil, ctx.Err()
+	// case err := <-readErrCh:
+	// 	if err != nil {
+	// 		fmt.Printf("-- [N%v] Read ERR %v\n", n.id, err)
+	// 		return nil, err
+	// 	}
+	// 	// when we receive
+	// 	response := <-responseCh
+	// 	return response, nil
+	// }
 }
-*/
+
 // single makeRequest call via makeRequestInternal
 //	ctx, cancel := context.WithTimeout(context.Background(), singleTimeout)
 //	defer cancel()
 
-/*
 // plural makeRequest calls via makeRequestInternal, with a minSuccess required because cancelling other simantanteous req
-func (n *Node) makeRequests(peerIdentifier string, objs []interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([][]byte, error) {
+func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([]interface{}, error) {
 	var wg sync.WaitGroup
-	results := make(chan []byte, len(objs))
+	results := make(chan interface{}, len(objs))
 	errorsCh := make(chan error, len(objs))
 	var mu sync.Mutex
 	successCount := 0
@@ -453,7 +414,7 @@ func (n *Node) makeRequests(peerIdentifier string, objs []interface{}, minSucces
 			reqCtx, reqCancel := context.WithTimeout(ctx, singleTimeout)
 			defer reqCancel()
 
-			res, err := n.makeRequestInternal(reqCtx, peerIdentifier, obj)
+			res, err := n.makeRequestInternal(reqCtx, obj)
 			if err != nil {
 				errorsCh <- err
 				return
@@ -480,7 +441,7 @@ func (n *Node) makeRequests(peerIdentifier string, objs []interface{}, minSucces
 	close(results)
 	close(errorsCh)
 
-	var finalResults [][]byte
+	var finalResults []interface{}
 	for res := range results {
 		fmt.Printf("res %s\n", res)
 		finalResults = append(finalResults, res)
@@ -493,4 +454,3 @@ func (n *Node) makeRequests(peerIdentifier string, objs []interface{}, minSucces
 	//TODO..need somekind of sorting here..
 	return finalResults, nil
 }
-*/
