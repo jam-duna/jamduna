@@ -855,7 +855,6 @@ func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // need to actually ECdecode
 func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint16) (exported_segments [][]byte, err error) {
-
 	exported_segments = make([][]byte, len(segmentIndex))
 	segmentShards := setupSegmentsShards(len(segmentIndex))
 	// TODO: optimize with gofunc ala makeRequests
@@ -915,28 +914,56 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint1
 
 func (n *Node) GetImportSegments(importsegments []types.ImportSegment) (imports [][]byte, err error) {
 	imports = make([][]byte, 0)
-
 	//TODO: not sure if wp_hash, Index is sorted at all. If not. we can't do wp_hash, idx=[..] properly with for loop
 
-	for _, s := range importsegments {
-		// segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
-		// TODO CHECK: ok = false
-		ok := false
-		if !ok {
-			// if we have a miss, we use CE139
-			erasureRoot, err := n.getErasureRootFromHash(s.WorkPackageHash)
+	// for _, s := range importsegments {
+	// 	// segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
+	// 	// TODO CHECK: ok = false
+	// 	ok := false
+	// 	if !ok {
+	// 		// if we have a miss, we use CE139
+	// 		erasureRoot, err := n.getErasureRootFromHash(s.WorkPackageHash)
+	// 		if err != nil {
+	// 			fmt.Printf("%s [GetImportSegments:getErasureRootFromHash] WorkPackageHash=%v ERR %v\n", n.String(), s.WorkPackageHash, err)
+	// 			return imports, fmt.Errorf("Not found")
+	// 		}
+	// 		//fmt.Printf("GetImportSegments: erasureRoot = %v", erasureRoot)
+	// 		segments, err := n.reconstructSegments(erasureRoot, []uint16{s.Index})
+	// 		if err != nil {
+	// 			fmt.Printf("%s [GetImportSegments:reconstructSegments] ErasureRoot=%v ERR %v\n", n.String(), erasureRoot, err)
+	// 			return imports, fmt.Errorf("Not found")
+	// 		}
+	// 		if debugJ {
+	// 			fmt.Printf("GetImportSegments(%v_%d -> %v_%d)\n", s.WorkPackageHash, s.Index, erasureRoot, s.Index)
+	// 			fmt.Printf("GetImportSegments: segments = %v\n", segments)
+	// 		}
+	// 		imports = append(imports, segments...)
+	// 	}
+	// }
+
+	ok := false
+	if !ok {
+		// if we have a miss, we use CE139
+		if len(importsegments) != 0 {
+			WorkPackageHash := importsegments[0].WorkPackageHash
+			erasureRoot, err := n.getErasureRootFromHash(WorkPackageHash)
 			if err != nil {
-				fmt.Printf("%s [GetImportSegments:getErasureRootFromHash] WorkPackageHash=%v ERR %v\n", n.String(), s.WorkPackageHash, err)
+				fmt.Printf("%s [GetImportSegments:getErasureRootFromHash] WorkPackageHash=%v ERR %v\n", n.String(), WorkPackageHash, err)
 				return imports, fmt.Errorf("Not found")
 			}
 			//fmt.Printf("GetImportSegments: erasureRoot = %v", erasureRoot)
-			segments, err := n.reconstructSegments(erasureRoot, []uint16{s.Index})
+
+			allIndex := make([]uint16, 0)
+			for _, s := range importsegments {
+				allIndex = append(allIndex, s.Index)
+			}
+			segments, err := n.reconstructSegments(erasureRoot, allIndex)
 			if err != nil {
 				fmt.Printf("%s [GetImportSegments:reconstructSegments] ErasureRoot=%v ERR %v\n", n.String(), erasureRoot, err)
 				return imports, fmt.Errorf("Not found")
 			}
 			if debugJ {
-				fmt.Printf("GetImportSegments(%v_%d -> %v_%d)\n", s.WorkPackageHash, s.Index, erasureRoot, s.Index)
+				fmt.Printf("GetImportSegments(%v_%d -> %v_%d)\n", WorkPackageHash, allIndex, erasureRoot, allIndex)
 				fmt.Printf("GetImportSegments: segments = %v\n", segments)
 			}
 			imports = append(imports, segments...)
