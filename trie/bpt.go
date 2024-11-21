@@ -14,6 +14,7 @@ import (
 )
 
 type KeyVal [2][]byte
+type KeyVals []KeyVal
 
 // TODO: stanley to figure what this is
 type BMTProof []common.Hash
@@ -435,7 +436,7 @@ func (t *MerkleTree) PrintAllKeyValues() {
 	maxSize := uint32(math.MaxUint32)
 	foundKeyVal, _, _ := t.GetStateByRange(startKey, endKey, maxSize)
 
-	KeyVals := make([]KeyVal, 0)
+	KeyVals := make(KeyVals, 0)
 	for _, keyValue := range foundKeyVal {
 		var keyVal [2][]byte
 		realKey := t.GetRealKey(keyValue.Key, keyValue.Value)

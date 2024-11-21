@@ -10,31 +10,38 @@ import (
 
 // TODO: ensure that 100% of these are used
 const (
-	errAnchorNotRecent          = "anchor_not_recent"
-	errBadBeefyMMRRoot          = "bad_beefy_mmr_root"
-	errBadCodeHash              = "bad_code_hash"
-	errBadCoreIndex             = "bad_core_index"
-	errBadServiceID             = "bad_service_id"
-	errBadSignature             = "bad_signature"
-	errBadStateRoot             = "bad_state_root"
-	errServiceItemGasTooLow     = "service_item_gas_too_low"
-	errCoreEngaged              = "core_engaged"
-	errDependencyMissing        = "dependency_missing"
-	errDuplicatePackage         = "duplicate_package"
-	errFutureReportSlot         = "future_report_slot"
-	errInsufficientGuarantees   = "insufficient_guarantees"
-	errCoreUnauthorized         = "core_unauthorized"
-	errDuplicateGuarantors      = "duplicate_guarantors"
-	errOutOfOrderGuarantee      = "out_of_order_guarantee"
-	errReportEpochBeforeLast    = "report_epoch_before_last"
-	errSegmentRootLookupInvalid = "segment_root_lookup_invalid"
-	errWorkReportGasTooHigh     = "work_report_gas_too_high"
-	errTooManyDependencies      = "too_many_dependencies"
-	errWrongAssignment          = "wrong_assignment"
+	errAnchorNotRecent           = "anchor_not_recent"
+	errBadBeefyMMRRoot           = "bad_beefy_mmr_root"
+	errBadCodeHash               = "bad_code_hash"
+	errBadCoreIndex              = "bad_core_index"
+	errBadServiceID              = "bad_service_id"
+	errBadSignature              = "bad_signature"
+	errBadStateRoot              = "bad_state_root"
+	errServiceItemGasTooLow      = "service_item_gas_too_low"
+	errCoreEngaged               = "core_engaged"
+	errDependencyMissing         = "dependency_missing"
+	errDuplicatePackage          = "duplicated_package_in_report"
+	errFutureReportSlot          = "future_report_slot"
+	errInsufficientGuarantees    = "no_enough_guarantees"
+	errCoreUnauthorized          = "core_unauthorized"
+	errDuplicateGuarantors       = "duplicate_guarantors"
+	errOutOfOrderGuarantee       = "out_of_order_guarantees"
+	errReportEpochBeforeLast     = "report_epoch_before_last"
+	errSegmentRootLookupInvalid  = "segment_root_lookup_invalid"
+	errWorkReportGasTooHigh      = "too_high_work_report_gas"
+	errTooManyDependencies       = "too_many_dependencies"
+	errWrongAssignment           = "wrong_assignment"
+	errBadValidatorIndex         = "bad_validator_index"
+	errNotSortedGurantor         = "not_sorted_guarantor"
+	errDuplicatedPackageInReport = "duplicated_package_in_report"
 )
 
 func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
 	for _, guarantee := range guarantees {
+		if guarantee.Report.CoreIndex >= types.TotalCores {
+			fmt.Printf("ProcessGuarantees: invalid core index %v\n", guarantee.Report.CoreIndex)
+			continue
+		}
 		if j.AvailabilityAssignments[int(guarantee.Report.CoreIndex)] == nil {
 			j.SetRhoByWorkReport(guarantee.Report.CoreIndex, guarantee.Report, j.SafroleState.GetTimeSlot())
 			if debug {
@@ -52,10 +59,66 @@ func (state *JamState) SetRhoByWorkReport(core uint16, w types.WorkReport, t uin
 	}
 }
 
+func (s *StateDB) Verify_Guarantees() error {
+	// v0.4.5 eq 137 - check index
+	err := CheckSorting_EGs(s.Block.Extrinsic.Guarantees)
+	if err != nil {
+		return err
+	}
+	for _, guarantee := range s.Block.Extrinsic.Guarantees {
+		err = s.Verify_Guarantee(guarantee)
+		if err != nil {
+			return err
+		}
+	}
+	//v0.4.5 eq 146
+	err = s.checkLength() // not sure if this is correct behavior
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // this function will be used by what should be included in the block
 func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
+
+	// for shawn
+
+	err := s.VerifyGuarantee_Basic(guarantee)
+	// err = j.CheckReportPendingOnCore(guarantee)
+	if err != nil {
+		return err
+	}
+
+	// for stanley
+	// err = s.VerifyGuarantee_RecentHistory(guarantee)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// for william
+	// err = s.VerifyGuarantee_Authorization(guarantee)
+	// if err != nil {
+	// 	return err
+	// }
+
+	return nil
+}
+
+func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
+
+	max_core := types.TotalCores - 1
+	if guarantee.Report.CoreIndex > uint16(max_core) {
+		return fmt.Errorf("%s: %v", errBadCoreIndex, guarantee.Report.CoreIndex)
+	}
+	max_validator := types.TotalValidators - 1
+	for _, g := range guarantee.Signatures {
+		if g.ValidatorIndex > uint16(max_validator) {
+			return fmt.Errorf("%s:Validator index %v is invalid", errBadValidatorIndex, g.ValidatorIndex)
+		}
+	}
 	if len(guarantee.Signatures) < 2 {
-		return fmt.Errorf("not enough signatures, this work report is made by core: %v", guarantee.Report.CoreIndex)
+		return fmt.Errorf("%s:this work report is made by core: %v", errInsufficientGuarantees, guarantee.Report.CoreIndex)
 	}
 
 	// v0.4.5 eq 139 - check index
@@ -68,7 +131,7 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 	CurrV := s.JamState.SafroleState.CurrValidators
 	err = guarantee.Verify(CurrV) // errBadSignature
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %v", errBadSignature, err)
 	}
 	// v0.4.5 eq 140 - The signing validators must be assigned to the core in G or G*
 	err = s.AreValidatorsAssignedToCore(guarantee)
@@ -77,19 +140,14 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 		return err
 	}
 	//TODO: v0.4.5 eq 140 - C_v
-	// v0.4.5 eq 143
-	j := s.JamState
 
+	j := s.JamState
+	// v0.4.5 eq 143
 	if s.Block != nil {
 		err = j.CheckReportTimeOut(guarantee, s.Block.TimeSlot())
 		if err != nil {
 			return err
 		}
-	}
-
-	err = j.CheckReportPendingOnCore(guarantee)
-	if err != nil {
-		return err
 	}
 
 	//v0.4.5 eq 144 - check gas
@@ -98,43 +156,46 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 		return err
 	}
 
-	//v0.4.5 eq 146
-	err = s.checkLength()
+	// v0.4.5 eq 148
+	// g.Report.RefineContext.LookupAnchorSlot doesn't have a value
+	err = s.checkTimeSlotHeader(guarantee)
+	if err != nil {
+		return err
+	}
+	// v0.4.5 eq 156 - check code hash
+	// s.JamState.PriorServiceAccountState[result.Service].CodeHash doesn't have a value
+	err = s.checkCodeHash(guarantee)
+	if err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func (s *StateDB) VerifyGuarantee_RecentHistory(guarantee types.Guarantee) error {
+	// v0.4.5 eq 147 recent restory
+	err := s.checkRecentBlock(guarantee)
 	if err != nil {
 		return err
 	}
 
-	// v0.4.5 eq 147 recent restory
-	// err = s.checkRecentBlock(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// v0.4.5 eq 148
-	// g.Report.RefineContext.LookupAnchorSlot doesn't have a value
-	// err = s.checkTimeSlotHeader(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
-
 	// //TODO 149
-	// err = s.checkAncestorSetA(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
-
+	err = s.checkAncestorSetA(guarantee)
+	if err != nil {
+		return err
+	}
 	// v0.4.5 eq 152
 	// beefy root have fucking problem
-	// err = s.checkAnyPrereq(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
+	err = s.checkAnyPrereq(guarantee)
+	if err != nil {
+		return err
+	}
 
 	// v0.4.5 eq 153
-	// err = s.checkPrereq(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
+	err = s.checkPrereq(guarantee)
+	if err != nil {
+		return err
+	}
 
 	// v0.4.5 eq 155
 	err = s.checkRecentWorkPackage(guarantee)
@@ -142,12 +203,15 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 		return err
 	}
 
-	// v0.4.5 eq 156 - check code hash
-	// s.JamState.PriorServiceAccountState[result.Service].CodeHash doesn't have a value
-	// err = s.checkCodeHash(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
+	return nil
+}
+
+func (s *StateDB) VerifyGuarantee_Authorization(guarantee types.Guarantee) error {
+	// v0.4.5 eq 141
+	err := s.JamState.CheckReportPendingOnCore(guarantee)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -197,7 +261,7 @@ func CheckSorting_EGs(guarantees []types.Guarantee) error {
 	//check SortByCoreIndex is correct
 	for i := 0; i < len(guarantees)-1; i++ {
 		if guarantees[i].Report.CoreIndex >= guarantees[i+1].Report.CoreIndex {
-			return fmt.Errorf("guarantees are not sorted: %v and %v", guarantees[i].Report.CoreIndex, guarantees[i+1].Report.CoreIndex)
+			return fmt.Errorf("%s:guarantees are not sorted: %v and %v", errOutOfOrderGuarantee, guarantees[i].Report.CoreIndex, guarantees[i+1].Report.CoreIndex)
 		}
 	}
 	return nil
@@ -215,7 +279,7 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 					return nil
 				}
 			}
-			return fmt.Errorf("validator %v is not assigned to core %v (Previous)", g.ValidatorIndex, guarantee.Report.CoreIndex)
+			return fmt.Errorf("%s:validator %v is not assigned to core %v (Previous)", errWrongAssignment, g.ValidatorIndex, guarantee.Report.CoreIndex)
 		} else {
 			for i, assignment := range s.GuarantorAssignments {
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
@@ -223,7 +287,7 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 					return nil
 				}
 			}
-			return fmt.Errorf("validator %v is not assigned to core %v (Now)", g.ValidatorIndex, guarantee.Report.CoreIndex)
+			return fmt.Errorf("%s:validator %v is not assigned to core %v (Now)", errWrongAssignment, g.ValidatorIndex, guarantee.Report.CoreIndex)
 		}
 	}
 	return nil
@@ -242,7 +306,7 @@ func CheckSorting_EG(g types.Guarantee) error {
 	// check sort_by_validator_index is correct
 	for i := 0; i < len(g.Signatures)-1; i++ {
 		if g.Signatures[i].ValidatorIndex >= g.Signatures[i+1].ValidatorIndex {
-			return fmt.Errorf("guarantees are not sorted: V%d and V%d", g.Signatures[i].ValidatorIndex, g.Signatures[i+1].ValidatorIndex)
+			return fmt.Errorf("%s:guarantees are not sorted: V%d and V%d", errNotSortedGurantor, g.Signatures[i].ValidatorIndex, g.Signatures[i+1].ValidatorIndex)
 		}
 	}
 	return nil
@@ -280,6 +344,9 @@ func (s *StateDB) getWorkReport() []types.WorkReport {
 
 // v0.4.5 eq 143 - check pending report
 func (j *JamState) CheckReportTimeOut(g types.Guarantee, ts uint32) error {
+	if g.Slot > ts {
+		return fmt.Errorf("%s: invalid report time", errFutureReportSlot)
+	}
 	if j.AvailabilityAssignments[int(g.Report.CoreIndex)] == nil {
 		return nil
 	}
@@ -289,12 +356,7 @@ func (j *JamState) CheckReportTimeOut(g types.Guarantee, ts uint32) error {
 		return nil
 	}
 	if j.AvailabilityAssignments[int(g.Report.CoreIndex)] != nil {
-		fmt.Printf("Real Core Index:%d\n", j.AvailabilityAssignments[int(g.Report.CoreIndex)].WorkReport.CoreIndex)
-		for i, rho := range j.AvailabilityAssignments {
-
-			fmt.Printf("rho[%d],report:\n%s\n", i, rho.WorkReport.String())
-		}
-		return fmt.Errorf("CheckReportTimeOut:there is a pending report on core %v", g.Report.CoreIndex)
+		return fmt.Errorf("%s:there is a pending report on core %v", errCoreEngaged, g.Report.CoreIndex)
 
 	}
 	return fmt.Errorf("CheckReportTimeOut: invalid pending report on core %v, package hash:%v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
@@ -338,6 +400,7 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	for _, results := range g.Report.Results {
 		sum_rg += results.Gas
 	}
+	// current gas allocation is unlimited
 	if sum_rg <= types.AccumulationGasAllocation {
 		for _, results := range g.Report.Results {
 			if results.Gas >= s.JamState.PriorServiceAccountState[uint32(results.Gas)].GasLimitG {
@@ -345,7 +408,7 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 			}
 		}
 	}
-	return fmt.Errorf("invalid gas allocation, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	return fmt.Errorf("%s:invalid gas allocation, core %v, package %v", errWorkReportGasTooHigh, g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 }
 
 // v0.4.5 eq 145 - x
@@ -370,12 +433,15 @@ func (s *StateDB) getAvailibleSpecHash() []common.Hash {
 
 // v0.4.5 eq 146
 func (s *StateDB) checkLength() error {
-	p := s.getAvailibleSpecHash()
-	w := s.getWorkReport()
-	if len(p) == len(w) {
-		return nil
+	p_w := make(map[common.Hash]common.Hash)
+	for _, eg := range s.Block.Extrinsic.Guarantees {
+		if _, exists := p_w[eg.Report.GetWorkPackageHash()]; exists {
+			return fmt.Errorf("%s:invalid work report length", errDuplicatePackage)
+		}
+		p_w[eg.Report.GetWorkPackageHash()] = eg.Report.AvailabilitySpec.WorkPackageHash
 	}
-	return fmt.Errorf("invalid work report length")
+
+	return nil
 }
 
 // v0.4.5 eq 147
@@ -436,10 +502,13 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 // v0.4.5 eq 148
 func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
 	if s.Block == nil {
-		return nil
+		return fmt.Errorf("invalid lookup anchor slot: block is nil")
 	}
-
-	if g.Report.RefineContext.LookupAnchorSlot >= s.Block.TimeSlot()-types.LookupAnchorMaxAge {
+	valid_anchor := s.Block.TimeSlot() - types.LookupAnchorMaxAge
+	if s.Block.TimeSlot() < types.LookupAnchorMaxAge {
+		valid_anchor = 0
+	}
+	if g.Report.RefineContext.LookupAnchorSlot >= valid_anchor {
 		return nil
 	} else {
 		return fmt.Errorf("invalid lookup anchor slot, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
@@ -479,29 +548,46 @@ func (s *StateDB) getPrereqFromRho() []common.Hash {
 
 // v0.4.5 eq 152
 func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
-	prereqSet := make(map[common.Hash]struct{})
+	prereqSetFromQueue := make(map[common.Hash]struct{})
 	for _, hash := range s.getPrereqFromAccumulationQueue() {
-		prereqSet[hash] = struct{}{}
+		prereqSetFromQueue[hash] = struct{}{}
 	}
+	_, exists := prereqSetFromQueue[g.Report.AvailabilitySpec.WorkPackageHash]
+	if exists {
+		return fmt.Errorf("invalid prerequisite work package(from queue), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	}
+	prereqSetFromRho := make(map[common.Hash]struct{})
 	for _, hash := range s.getPrereqFromRho() {
-		prereqSet[hash] = struct{}{}
+		prereqSetFromRho[hash] = struct{}{}
 	}
+	_, exists = prereqSetFromRho[g.Report.AvailabilitySpec.WorkPackageHash]
+	if exists {
+		return fmt.Errorf("invalid prerequisite work package(from rho), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	}
+	prereqSetFromAccumulationHistory := make(map[common.Hash]struct{})
 	for i := 0; i < types.EpochLength; i++ {
 		for _, hash := range s.JamState.AccumulationHistory[i].WorkPackageHash {
-			prereqSet[hash] = struct{}{}
+			prereqSetFromAccumulationHistory[hash] = struct{}{}
 		}
 	}
+	_, exists = prereqSetFromAccumulationHistory[g.Report.AvailabilitySpec.WorkPackageHash]
+	if exists {
+		return fmt.Errorf("invalid prerequisite work package(from accumulation history), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	}
+
+	prereqSet := make(map[common.Hash]struct{})
 	for _, block := range s.JamState.RecentBlocks {
 		for key := range block.Reported {
 			prereqSet[key] = struct{}{}
 		}
 	}
-	_, exists := prereqSet[g.Report.AvailabilitySpec.WorkPackageHash]
-	if !exists {
-		return nil
-	} else {
-		return fmt.Errorf("invalid prerequisite work package, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	_, exists = prereqSet[g.Report.AvailabilitySpec.WorkPackageHash]
+	if exists {
+		return fmt.Errorf("invalid prerequisite work package(from recent block), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
+
+	return nil
+
 }
 
 // v0.4.5 eq 153
@@ -538,16 +624,16 @@ func (s *StateDB) checkPrereq(g types.Guarantee) error {
 			}
 		}
 		if !exists {
-			return fmt.Errorf("invalid prerequisite work package, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+			return fmt.Errorf("invalid prerequisite work package, core %v, package %v (not in set)", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 		}
 	}
 
-	return fmt.Errorf("invalid prerequisite work package, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	return nil
 }
 
 // v0.4.5 eq 154
-func getPresentBlock(g types.Guarantee) map[common.Hash]common.Hash {
-	p := map[common.Hash]common.Hash{}
+func getPresentBlock(g types.Guarantee) types.Hash2Hash {
+	p := types.Hash2Hash{}
 	p[g.Report.AvailabilitySpec.WorkPackageHash] = g.Report.AvailabilitySpec.ExportedSegmentRoot
 	return p
 }
@@ -589,7 +675,7 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 	for _, result := range g.Report.Results {
 		if result.CodeHash != s.JamState.PriorServiceAccountState[result.ServiceID].CodeHash {
-			return fmt.Errorf("invalid code hash, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+			return fmt.Errorf("%s:invalid code hash, core %v, package %v", errBadCodeHash, g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 		}
 	}
 	return nil

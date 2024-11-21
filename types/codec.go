@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"sort"
 )
 
 type CustomEncoder interface {
@@ -225,32 +226,50 @@ func Encode(data interface{}) ([]byte, error) {
 		}
 		return Encode(v.Elem().Interface())
 	case reflect.Map:
-		// order by key
 		keys := v.MapKeys()
-		encoded := E(uint64(len(keys)))
-		for _, key := range keys {
-			encodedKey, err := Encode(key.Interface())
-			if err != nil {
-				return nil, err
-			}
-			encoded = append(encoded, encodedKey...)
-			encodedValue, err := Encode(v.MapIndex(key).Interface())
-			if err != nil {
-				return nil, err
-			}
-			encoded = append(encoded, encodedValue...)
+		if len(keys) == 0 {
+			return []byte{0}, nil
 		}
-		return encoded, nil
+
+		sort.Slice(keys, func(i, j int) bool {
+			switch keys[i].Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				return keys[i].Int() < keys[j].Int()
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+				return keys[i].Uint() < keys[j].Uint()
+			case reflect.String:
+				return keys[i].String() < keys[j].String()
+			default:
+				return fmt.Sprintf("%v", keys[i]) < fmt.Sprintf("%v", keys[j])
+			}
+		})
+
+		type kvPair struct {
+			Key   interface{}
+			Value interface{}
+		}
+		var sortedKVPairs []kvPair
+		for _, key := range keys {
+			sortedKVPairs = append(sortedKVPairs, kvPair{
+				Key:   key.Interface(),
+				Value: v.MapIndex(key).Interface(),
+			})
+		}
+		fmt.Println("sortedKVPairs:", sortedKVPairs)
+		return Encode(sortedKVPairs)
+
 	default:
 		return []byte{}, fmt.Errorf("unsupported type: %s", v.Kind().String())
 	}
 }
 
 func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
+
 	length := uint32(0)
 	v := reflect.New(t).Elem()
 	customDecodeRequired, decoded, customLength := CheckCustomDecode(data, t)
 	if customDecodeRequired {
+		fmt.Printf("\n\n\nCustom Decode\n\n\n")
 		if len(data) < int(customLength) {
 			return nil, 0, fmt.Errorf("data length insufficient for custom decode")
 		}
@@ -422,37 +441,43 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 			length += l
 		}
 	case reflect.Map:
-		map_len, l := DecodeE(data)
-		if len(data) < int(length+l) {
-			return nil, 0, fmt.Errorf("data length insufficient for map length")
+		keyType := t.Key()
+		valueType := t.Elem()
+		fmt.Printf("keyType: %v\n", keyType)
+		fmt.Printf("valueType: %v\n", valueType)
+
+		kvPairType := reflect.StructOf([]reflect.StructField{
+			{
+				Name: "Key",
+				Type: keyType,
+				Tag:  reflect.StructTag(`json:"key"`),
+			},
+			{
+				Name: "Value",
+				Type: valueType,
+				Tag:  reflect.StructTag(`json:"value"`),
+			},
+		})
+
+		kvPairSliceType := reflect.SliceOf(kvPairType)
+
+		decoded, l, err := Decode(data, kvPairSliceType)
+		if err != nil {
+			return nil, 0, err
 		}
-		v.Set(reflect.MakeMap(t))
+
 		length += l
-		for i := 0; i < int(map_len); i++ {
-			if len(data[length:]) < 1 {
-				return nil, 0, fmt.Errorf("data length insufficient for map key")
-			}
-			key, l, err := Decode(data[length:], v.Type().Key())
-			if err != nil {
-				return nil, 0, err
-			}
-			if len(data) < int(length+l) {
-				return nil, 0, fmt.Errorf("data length insufficient for map key decoding")
-			}
-			length += l
-			if len(data[length:]) < 1 {
-				return nil, 0, fmt.Errorf("data length insufficient for map value")
-			}
-			value, l, err := Decode(data[length:], v.Type().Elem())
-			if err != nil {
-				return nil, 0, err
-			}
-			if len(data) < int(length+l) {
-				return nil, 0, fmt.Errorf("data length insufficient for map value decoding")
-			}
-			length += l
-			v.SetMapIndex(reflect.ValueOf(key), reflect.ValueOf(value))
+
+		v.Set(reflect.MakeMap(t))
+
+		kvPairs := reflect.ValueOf(decoded)
+		for i := 0; i < kvPairs.Len(); i++ {
+			kv := kvPairs.Index(i)
+			key := kv.FieldByName("Key")
+			value := kv.FieldByName("Value")
+			v.SetMapIndex(key, value)
 		}
+
 	}
 	return v.Interface(), length, nil
 }

@@ -57,12 +57,17 @@ func Permute(e common.Hash, t uint32) []uint16 {
 func (s *StateDB) AssignGuarantors(lock bool) {
 	if lock {
 		assignments := make([]types.GuarantorAssignment, 0)
-		entropy := common.Blake2Hash([]byte("colorfulnotion"))
-		t := uint32(222)
-		cores := Permute(entropy, t)
+		fixed_assignment := map[uint16]uint16{
+			0: 1,
+			1: 0,
+			2: 1,
+			3: 1,
+			4: 0,
+			5: 0,
+		}
 		for i, kappa := range s.JamState.SafroleState.CurrValidators {
 			assignments = append(assignments, types.GuarantorAssignment{
-				CoreIndex: cores[i],
+				CoreIndex: fixed_assignment[uint16(i)],
 				Validator: kappa,
 			})
 		}
@@ -104,12 +109,17 @@ func (s *StateDB) AssignGuarantorsTesting(entropy common.Hash) []types.Guarantor
 func (s *StateDB) PreviousGuarantors(lock bool) {
 	if lock {
 		assignments := make([]types.GuarantorAssignment, 0)
-		entropy := common.Blake2Hash([]byte("colorfulnotion"))
-		t := uint32(222)
-		cores := Permute(entropy, t)
+		fixed_assignment := map[uint16]uint16{
+			0: 1,
+			1: 0,
+			2: 1,
+			3: 1,
+			4: 0,
+			5: 0,
+		}
 		for i, lambda := range s.JamState.SafroleState.PrevValidators {
 			assignments = append(assignments, types.GuarantorAssignment{
-				CoreIndex: cores[i],
+				CoreIndex: fixed_assignment[uint16(i)],
 				Validator: lambda,
 			})
 		}

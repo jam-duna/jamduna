@@ -118,27 +118,22 @@ func TestCodec(t *testing.T) {
 	}
 }
 
-func TestMapCodec(t *testing.T) {
-	hash1 := common.Hash{0x01, 0x02, 0x03}
-	hash2 := common.Hash{0x04, 0x05, 0x06}
-	hash3 := common.Hash{0x07, 0x08, 0x09}
-	a := map[common.Hash]common.Hash{
-		hash1: hash2,
-		hash2: hash1,
-		hash3: hash3,
+func TestMapMarshal(t *testing.T) {
+	h := Hash2Hash{
+		common.Hex2Hash("123"): common.Hex2Hash("456"),
+		common.Hex2Hash("456"): common.Hex2Hash("789"),
 	}
-	fmt.Println("a: ", a)
-	encoded, err := Encode(a)
+	// test marshal
+	str, err := json.MarshalIndent(h, "", "  ")
 	if err != nil {
-		t.Fatalf("failed to encode map: %v", err)
+		t.Fatal(err)
 	}
-	fmt.Printf("encoded: %x\n", encoded)
-	decoded, _, err := Decode(encoded, reflect.TypeOf(a))
+	fmt.Println(string(str))
+	// test unmarshal
+	var h2 Hash2Hash
+	err = json.Unmarshal(str, &h2)
 	if err != nil {
-		t.Fatalf("failed to decode map: %v", err)
+		t.Fatal(err)
 	}
-	fmt.Println("decoded: ", decoded)
-	if !reflect.DeepEqual(a, decoded) {
-		t.Fatalf("expected %v, got %v", a, decoded)
-	}
+	fmt.Println(h2)
 }

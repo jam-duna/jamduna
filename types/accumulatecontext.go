@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -35,7 +36,7 @@ type PartialState struct {
 func (U PartialState) Dump(prefix string, id uint16) {
 	fmt.Printf("[N%d] Partial State Dump -- %s\n", id, prefix)
 	for serviceIndex, serviceAccount := range U.D {
-		fmt.Printf("[N%d] Service %d => Dirty %v\n", id, serviceIndex, serviceAccount.Dirty, serviceAccount.String())
+		fmt.Printf("[N%d] Service %d => Dirty %v %s\n", id, serviceIndex, serviceAccount.Dirty, serviceAccount.String())
 	}
 	fmt.Printf("[N%d]\n\n", id)
 }

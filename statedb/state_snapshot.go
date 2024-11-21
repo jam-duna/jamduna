@@ -43,13 +43,40 @@ type StateSnapshot struct {
 	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"pi"`              // c13
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`           // c14 Accumulation Queue
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`              // c15 Accumulation History
-	ServiceAccount           []KeyVal                                     `json:"service_account"` // Other C
+	ServiceAccount           KeyVals                                      `json:"service_account"` // Other C
 }
 
 type KeyVal [2][]byte
+type KeyVals []KeyVal
+
+type KeyValMap map[common.Hash][]byte
+
+func (kv KeyVals) Encode() []byte {
+	m := make(KeyValMap)
+	for _, kv := range kv {
+		m[common.BytesToHash(kv[0])] = kv[1]
+	}
+	encoded, err := types.Encode(m)
+	if err != nil {
+		panic(err)
+	}
+	return encoded
+}
+
+func (kv KeyVals) Decode(encoded []byte) (interface{}, uint32) {
+	decoded, l, err := types.Decode(encoded, reflect.TypeOf(KeyValMap{}))
+	if err != nil {
+		panic(err)
+	}
+	m := decoded.(KeyValMap)
+	for k, v := range m {
+		kv = append(kv, KeyVal{k.Bytes(), v})
+	}
+	return kv, l
+}
 
 type StateSnapshotRaw struct {
-	KeyVals []KeyVal `json:"keyvals"`
+	KeyVals KeyVals `json:"keyvals"`
 }
 
 func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
@@ -73,7 +100,7 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 		t.SetState(C15, accumulateHistoryEncode)
 	*/
 
-	keyValList := make([]KeyVal, 0)
+	keyValList := make(KeyVals, 0)
 
 	for _, _stateIdentifier := range orderedStateList {
 		stateKey := make([]byte, 32)

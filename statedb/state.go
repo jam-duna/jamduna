@@ -53,7 +53,7 @@ type Psi_state struct {
 
 // Types for Rho
 type Rho_state struct {
-	WorkReport types.WorkReport `json:"workreport"`
+	WorkReport types.WorkReport `json:"report"`
 	Timeslot   uint32           `json:"timeout"`
 }
 

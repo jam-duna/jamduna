@@ -26,45 +26,8 @@ type WorkReport struct {
 	CoreIndex         uint16                `json:"core_index"`
 	AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 	AuthOutput        []byte                `json:"auth_output"`
-	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
+	SegmentRootLookup Hash2Hash             `json:"segment_root_lookup"`
 	Results           []WorkResult          `json:"results"`
-}
-
-// Temporarily ignore encoding.
-type SegmentRootLookup map[common.Hash]common.Hash
-
-func (S SegmentRootLookup) Encode() []byte {
-	encoded := []byte{}
-	return encoded
-}
-
-func (S SegmentRootLookup) Decode(data []byte) (interface{}, uint32) {
-	return nil, 0
-}
-
-// MarshalJSON serializes SegmentRootLookup as a map[string]string
-func (s SegmentRootLookup) MarshalJSON() ([]byte, error) {
-	stringMap := make(map[string]string)
-	for k, v := range s {
-		stringMap[k.Hex()] = v.Hex() // Assume `Hex()` returns a string representation of `common.Hash`
-	}
-	return json.Marshal(stringMap)
-}
-
-// UnmarshalJSON deserializes SegmentRootLookup from a map[string]string
-func (s *SegmentRootLookup) UnmarshalJSON(data []byte) error {
-	stringMap := make(map[string]string)
-	if err := json.Unmarshal(data, &stringMap); err != nil {
-		return err
-	}
-
-	*s = make(SegmentRootLookup)
-	for k, v := range stringMap {
-		keyHash := common.HexToHash(k) // Assume `HexToHash()` converts a string to `common.Hash`
-		valueHash := common.HexToHash(v)
-		(*s)[keyHash] = valueHash
-	}
-	return nil
 }
 
 // eq 190

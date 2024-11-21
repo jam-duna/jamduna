@@ -661,14 +661,14 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	return updated_root
 }
 
-func (s *StateDB) GetAllKeyValues() []KeyVal {
+func (s *StateDB) GetAllKeyValues() KeyVals {
 	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
 	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	maxSize := uint32(math.MaxUint32)
 	trie := s.CopyTrieState(s.StateRoot)
 	foundKeyVal, _, _ := trie.GetStateByRange(startKey, endKey, maxSize)
 
-	KeyVals := make([]KeyVal, 0)
+	KeyVals := make(KeyVals, 0)
 	for _, keyValue := range foundKeyVal {
 		var keyVal [2][]byte
 		realKey := trie.GetRealKey(keyValue.Key, keyValue.Value)
@@ -681,7 +681,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 	return KeyVals
 }
 
-func (s *StateDB) CompareStateRoot(genesis []KeyVal, parentStateRoot common.Hash) (bool, error) {
+func (s *StateDB) CompareStateRoot(genesis KeyVals, parentStateRoot common.Hash) (bool, error) {
 	parent_root := s.StateRoot
 	newTrie := trie.NewMerkleTree(nil, s.sdb)
 	for _, kv := range genesis {
