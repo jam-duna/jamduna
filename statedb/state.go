@@ -75,43 +75,44 @@ func (t TicketsOrKeys) TicketLen() int {
 	return 0
 }
 
+type GammaK []types.Validator
 type GammaZ []byte
 
 type SafroleBasicState struct {
-	GammaK []types.Validator  `json:"gamma_k"` // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	GammaA []types.TicketBody `json:"gamma_a"` // γa: Ticket accumulator for the next epoch (epoch N+1)
+	GammaK GammaK             `json:"gamma_k"` // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	GammaZ GammaZ             `json:"gamma_z"` // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 	GammaS TicketsOrKeys      `json:"gamma_s"` // γs: Current epoch’s slot-sealer series (epoch N)
-	GammaZ []byte             `json:"gamma_z"` // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	GammaA []types.TicketBody `json:"gamma_a"` // γa: Ticket accumulator for the next epoch (epoch N+1)
 }
 
 func (sbs SafroleBasicState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		GammaK []types.Validator  `json:"gamma_k"`
-		GammaA []types.TicketBody `json:"gamma_a"`
-		GammaS TicketsOrKeys      `json:"gamma_s"`
+		GammaK GammaK  `json:"gamma_k"`
 		GammaZ string             `json:"gamma_z"`
+		GammaS TicketsOrKeys      `json:"gamma_s"`
+		GammaA []types.TicketBody `json:"gamma_a"`
 	}{
 		GammaK: sbs.GammaK,
-		GammaA: sbs.GammaA,
-		GammaS: sbs.GammaS,
 		GammaZ: common.HexString(sbs.GammaZ),
+		GammaS: sbs.GammaS,
+		GammaA: sbs.GammaA,
 	})
 }
 
 func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 	var s struct {
-		GammaK []types.Validator  `json:"gamma_k"`
-		GammaA []types.TicketBody `json:"gamma_a"`
-		GammaS TicketsOrKeys      `json:"gamma_s"`
+		GammaK GammaK  `json:"gamma_k"`
 		GammaZ string             `json:"gamma_z"`
+		GammaS TicketsOrKeys      `json:"gamma_s"`
+		GammaA []types.TicketBody `json:"gamma_a"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
 	sbs.GammaK = s.GammaK
-	sbs.GammaA = s.GammaA
-	sbs.GammaS = s.GammaS
 	sbs.GammaZ = common.FromHex(s.GammaZ)
+	sbs.GammaS = s.GammaS
+	sbs.GammaA = s.GammaA
 	return nil
 }
 

@@ -128,10 +128,20 @@ func (T TicketsOrKeys) Encode() []byte {
 	return encoded
 }
 
-func (G GammaZ) Encode() []byte {
+func (Z GammaZ) Encode() []byte {
 	var gammaZ [144]byte
-	copy(gammaZ[:], G[:])
+	copy(gammaZ[:], Z[:])
 	encoded, err := types.Encode(gammaZ)
+	if err != nil {
+		return []byte{}
+	}
+	return encoded
+}
+
+func (K GammaK) Encode() []byte {
+	var gammak [types.TotalValidators]types.Validator
+	copy(gammak[:], K[:])
+	encoded, err := types.Encode(gammak)
 	if err != nil {
 		return []byte{}
 	}

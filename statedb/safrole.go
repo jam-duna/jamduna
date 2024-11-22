@@ -69,7 +69,7 @@ func (s *SafroleState) GetNextRingCommitment() ([]byte, error) {
 func (s *SafroleState) GetSafroleBasicState() SafroleBasicState {
 	nextRingCommitment, _ := s.GetNextRingCommitment()
 	return SafroleBasicState{
-		GammaK: s.NextValidators,
+		GammaK: []types.Validator(s.NextValidators),
 		GammaA: s.NextEpochTicketsAccumulator,
 		GammaS: s.TicketsOrKeys,
 		GammaZ: nextRingCommitment,

@@ -168,15 +168,30 @@ func (T TicketsOrKeys) Decode(data []byte) (interface{}, uint32) {
 	return ticketsOrKeys, length
 }
 
-func (G GammaZ) Decode(data []byte) (interface{}, uint32) {
+func (Z GammaZ) Decode(data []byte) (interface{}, uint32) {
 	decoded, length, err := types.Decode(data, reflect.TypeOf([144]byte{}))
 	if err != nil {
 		return GammaZ{}, 0
 	}
-	var gammaZ GammaZ
+	gammaZ := make(GammaZ, 144)
 	decodedArray := decoded.([144]byte)
-	copy(gammaZ[:], decodedArray[:])
+	for i := 0; i < 144; i++ {
+		gammaZ[i] = decodedArray[i]
+	}
 	return gammaZ, length
+}
+
+func (K GammaK) Decode(data []byte) (interface{}, uint32) {
+	decoded, length, err := types.Decode(data, reflect.TypeOf([types.TotalValidators]types.Validator{}))
+	if err != nil {
+		return GammaK{}, 0
+	}
+	gammaK := make(GammaK, types.TotalValidators)
+	decodedArray := decoded.([types.TotalValidators]types.Validator)
+	for i := 0; i < types.TotalValidators; i++ {
+		gammaK[i] = decodedArray[i]
+	}
+	return gammaK, length
 }
 
 func (n *JamState) SetSafroleState(safroleStateByte []byte) {

@@ -33,7 +33,7 @@ func InitStateFromSnapshot(s *StateSnapshot) (j *JamState) {
 	j.SafroleState.PrevValidators = s.PrevValidators
 	j.SafroleState.CurrValidators = s.CurrValidators
 	j.SafroleState.NextValidators = s.NextValidators
-	j.SafroleState.DesignedValidators = s.Gamma.GammaK // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	j.SafroleState.DesignedValidators = []types.Validator(s.Gamma.GammaK) // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 
 	j.SafroleState.Entropy[0] = s.Entropy[0]
 	j.SafroleState.Entropy[1] = s.Entropy[1]
