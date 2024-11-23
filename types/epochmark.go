@@ -9,20 +9,22 @@ import (
 // EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch
 type EpochMark struct {
 	// Randomness accumulator snapshot
-	Entropy common.Hash `json:"entropy"`
+	Entropy        common.Hash `json:"entropy"`
+	TicketsEntropy common.Hash `json:"tickets_entropy"`
 	// List of authorities scheduled for next epoch
 	Validators [TotalValidators]common.Hash `json:"validators"` //bandersnatch keys
 }
 
 func (e EpochMark) String() string {
 	entropyShort := common.Str(e.Entropy)
+	ticketsEntropyShort := common.Str(e.TicketsEntropy)
 	/*validatorsShort := ""
 	q := ""
 	for _, validator := range e.Validators {
 		validatorsShort += q + common.Str(validator)
 		q = ", "
 	} */
-	return fmt.Sprintf("\033[32m EpochMarker\033[0m(η1=%s)", entropyShort) // validatorsShort
+	return fmt.Sprintf("\033[32m EpochMarker\033[0m(η1'=%s, η2'=%s)", entropyShort, ticketsEntropyShort) // validatorsShort
 }
 
 func (E *EpochMark) Encode() []byte {
@@ -48,13 +50,19 @@ func (target *EpochMark) Decode(data []byte) (interface{}, uint32) {
 		return nil, length
 	}
 	length += l
+	ticketsentropy, l, err := Decode(data[length:], reflect.TypeOf(common.Hash{}))
+	if err != nil {
+		return nil, length
+	}
+	length += l
 	validators, l, err := Decode(data[length:], reflect.TypeOf([TotalValidators]common.Hash{}))
 	if err != nil {
 		return nil, length
 	}
 	decoded := EpochMark{
-		Entropy:    entropy.(common.Hash),
-		Validators: validators.([TotalValidators]common.Hash),
+		Entropy:        entropy.(common.Hash),
+		TicketsEntropy: ticketsentropy.(common.Hash),
+		Validators:     validators.([TotalValidators]common.Hash),
 	}
 	length += l
 	return &decoded, length

@@ -89,12 +89,13 @@ func (a *WorkReport) Hash() common.Hash {
 
 func (a *WorkReport) UnmarshalJSON(data []byte) error {
 	var s struct {
-		AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
-		RefineContext    RefineContext         `json:"context"`
-		CoreIndex        uint16                `json:"core_index"`
-		AuthorizerHash   common.Hash           `json:"authorizer_hash"`
-		AuthOutput       string                `json:"auth_output"`
-		Results          []WorkResult          `json:"results"`
+		AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
+		RefineContext     RefineContext         `json:"context"`
+		CoreIndex         uint16                `json:"core_index"`
+		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
+		AuthOutput        string                `json:"auth_output"`
+		SegmentRootLookup Hash2Hash             `json:"segment_root_lookup"`
+		Results           []WorkResult          `json:"results"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
@@ -110,12 +111,13 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 
 func (a WorkReport) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		AvailabilitySpec AvailabilitySpecifier `json:"package_spec"`
-		RefineContext    RefineContext         `json:"context"`
-		CoreIndex        uint16                `json:"core_index"`
-		AuthorizerHash   common.Hash           `json:"authorizer_hash"`
-		AuthOutput       string                `json:"auth_output"`
-		Results          []WorkResult          `json:"results"`
+		AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
+		RefineContext     RefineContext         `json:"context"`
+		CoreIndex         uint16                `json:"core_index"`
+		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
+		AuthOutput        string                `json:"auth_output"`
+		SegmentRootLookup Hash2Hash             `json:"segment_root_lookup"`
+		Results           []WorkResult          `json:"results"`
 	}{
 		AvailabilitySpec: a.AvailabilitySpec,
 		RefineContext:    a.RefineContext,

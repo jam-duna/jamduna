@@ -388,7 +388,7 @@ func (j *JamState) CheckInvalidCoreIndex() {
 		}
 		fmt.Printf("CheckInvalidCoreIndex: FAILURE\n")
 		panic(1111)
-	} else {
+	} else if debug {
 		fmt.Printf("CheckInvalidCoreIndex: success\n")
 	}
 

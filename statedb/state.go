@@ -87,7 +87,7 @@ type SafroleBasicState struct {
 
 func (sbs SafroleBasicState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		GammaK GammaK  `json:"gamma_k"`
+		GammaK GammaK             `json:"gamma_k"`
 		GammaZ string             `json:"gamma_z"`
 		GammaS TicketsOrKeys      `json:"gamma_s"`
 		GammaA []types.TicketBody `json:"gamma_a"`
@@ -101,7 +101,7 @@ func (sbs SafroleBasicState) MarshalJSON() ([]byte, error) {
 
 func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 	var s struct {
-		GammaK GammaK  `json:"gamma_k"`
+		GammaK GammaK             `json:"gamma_k"`
 		GammaZ string             `json:"gamma_z"`
 		GammaS TicketsOrKeys      `json:"gamma_s"`
 		GammaA []types.TicketBody `json:"gamma_a"`

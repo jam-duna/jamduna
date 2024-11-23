@@ -51,7 +51,7 @@ func TestKV(t *testing.T) {
 	fmt.Println(string(b))
 }
 
-func TestE(t *testing.T){
+func TestE(t *testing.T) {
 	a := []byte{0x80, 0x93}
 	decoded, l := types.DecodeE(a)
 	fmt.Printf("Decoded: %v\n", decoded)

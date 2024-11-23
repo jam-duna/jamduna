@@ -1045,7 +1045,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 			}
 
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
-			AddDrawBlock(common.Str(proposedBlk.Hash()), common.Str(proposedBlk.ParentHash()), int(proposedBlk.Header.AuthorIndex), fmt.Sprintf("%d", proposedBlk.Header.Slot))
+			// AddDrawBlock(common.Str(proposedBlk.Hash()), common.Str(proposedBlk.ParentHash()), int(proposedBlk.Header.AuthorIndex), fmt.Sprintf("%d", proposedBlk.Header.Slot))
 			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.ParentHash()), common.Str(proposedBlk.Hash()), currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
 			elapsed := time.Since(start)
 			if trace && elapsed > 2000000 {
@@ -1297,7 +1297,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s.GetJamState().ResetTallyStatistics()
 	}
 	sf := s.GetSafrole()
-	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header)
+	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
 		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", err)
 		panic(1)

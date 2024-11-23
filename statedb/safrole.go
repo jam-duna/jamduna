@@ -149,9 +149,10 @@ func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
 		nextValidators[i] = v.GetBandersnatchKey().Hash()
 	}
 	//fmt.Printf("nextValidators Len=%v\n", nextValidators)
-	return &types.EpochMark{
-		Entropy:    s.Entropy[1], // Assuming s.Entropy has at least two elements
-		Validators: nextValidators,
+	return &types.EpochMark{ // see https://graypaper.fluffylabs.dev/#/911af30/0e72030e7203
+		Entropy:        s.Entropy[0], // this is eta1' = eta0
+		TicketsEntropy: s.Entropy[1], // this is eta2' = eta1
+		Validators:     nextValidators,
 	}
 }
 
@@ -1080,6 +1081,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	s2.SortAndTrimTickets()
 
 	s2.Timeslot = targetJCE
+
 	return s2, nil
 }
 

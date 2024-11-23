@@ -7,10 +7,10 @@ import (
 // T.P.G.A.D
 type ExtrinsicData struct {
 	Tickets    []Ticket    `json:"tickets"`
-	Disputes   Dispute     `json:"disputes"`
 	Preimages  []Preimages `json:"preimages"`
-	Assurances []Assurance `json:"assurances"`
 	Guarantees []Guarantee `json:"guarantees"`
+	Assurances []Assurance `json:"assurances"`
+	Disputes   Dispute     `json:"disputes"`
 }
 
 func NewExtrinsic() ExtrinsicData {
