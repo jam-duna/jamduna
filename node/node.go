@@ -76,6 +76,7 @@ type Node struct {
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
+	sendTickets  bool
 
 	// this is for audit
 	// announcement [headerHash -> [wr_hash]]
@@ -100,7 +101,6 @@ type Node struct {
 	headers      map[common.Hash]*types.Block
 	headersMutex sync.Mutex
 
-	services       map[uint32]common.Hash // service_idx -> preimageLookup
 	preimages      map[common.Hash][]byte // preimageLookup -> preimageBlob
 	preimagesMutex sync.Mutex
 
@@ -243,7 +243,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		blocks:    make(map[common.Hash]*types.Block),
 		headers:   make(map[common.Hash]*types.Block),
 		preimages: make(map[common.Hash][]byte),
-		services:  make(map[uint32]common.Hash),
+		//services:  make(map[uint32]common.Hash),
 
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
@@ -258,6 +258,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		announcementsCh:         make(chan types.Announcement, 200),
 		judgementsCh:            make(chan types.Judgement, 200),
 		auditingCh:              make(chan *statedb.StateDB, 200),
+
+		sendTickets: true,
 
 		dataDir: dataDir,
 	}
@@ -323,9 +325,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	StateSnapshotRaw := statedb.StateSnapshotRaw{}
 	KeyVals := _statedb.GetAllKeyValues()
 	StateSnapshotRaw.KeyVals = KeyVals
-	node.store.WriteLog(StateSnapshotRaw, 0)
-	// node.store.WriteLog(_statedb.JamState.Snapshot().Raw(), 0)
-	// node.store.WriteLog(_statedb.JamState.Snapshot(), 0)
+	node.store.WriteLog(StateSnapshotRaw, 0)             // write "Traces"
+	node.store.WriteLog(_statedb.JamState.Snapshot(), 0) // write "StateSnapshots"
 
 	node.statedb.PreviousGuarantors(true)
 	node.statedb.AssignGuarantors(true)
@@ -333,7 +334,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	go node.runServer()
 	go node.runClient()
 	go node.runMain()
-	//go node.runAudit()
+	go node.runPreimages()
+	go node.runBlocksTickets()
 	return node, nil
 }
 
@@ -568,6 +570,8 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				a := obj.(types.Assurance)
 				n.assurancesCh <- a
 				continue
+			} else if objType == reflect.TypeOf(types.PreimageAnnouncement{}) {
+				continue
 			}
 		}
 		//fmt.Printf("%s BROADCAST PeerID=%v\n", n.String(), p.PeerID)
@@ -623,14 +627,11 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				fmt.Printf("SendJudgmentPublication ERR %v\n", err)
 			}
 			break
-		case reflect.TypeOf(types.Preimages{}):
-			preimage := obj.(types.Preimages)
-			// TODO: William
-			//requester := p.Requester
-			preimageHash := common.BytesToHash(common.ComputeHash(preimage.Blob))
-			_, err := p.SendPreimageRequest(preimageHash)
+		case reflect.TypeOf(types.PreimageAnnouncement{}):
+			preimageAnnouncement := obj.(types.PreimageAnnouncement)
+			err := p.SendPreimageAnnouncement(&preimageAnnouncement)
 			if err != nil {
-				fmt.Printf("SendPreimageRequest ERR %v\n", err)
+				fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
 			}
 			break
 		}
@@ -649,13 +650,6 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	// Store the ticket in the tip's queued tickets
 	s := n.getState()
 	s.ProcessIncomingTicket(ticket)
-	return nil // Success
-}
-
-func (n *Node) processPreimages(preimageLookup types.Preimages) error {
-	s := n.getState()
-	//fmt.Printf("%s [node:processPreimages] %v\n", n.String(), preimageLookup.String())
-	s.ProcessIncomingLookup(preimageLookup)
 	return nil // Success
 }
 
@@ -1071,11 +1065,20 @@ func getMessageType(obj interface{}) string {
 
 const TickTime = 200
 
+func (n *Node) PrintGuarantorAssignments() {
+	for _, assign := range n.statedb.GuarantorAssignments {
+		vid := n.statedb.GetSafrole().GetCurrValidatorIndex(assign.Validator.GetEd25519Key())
+		fmt.Printf("v%d->c%v\n", vid, assign.CoreIndex)
+	}
+}
+func (n *Node) SetSendTickets(sendTickets bool) {
+	n.sendTickets = sendTickets
+}
+
 func (n *Node) writeDebug(obj interface{}, timeslot uint32) error {
 	l := storage.LogMessage{
 		Payload:  obj,
 		Timeslot: timeslot,
-		//TODO:...
 	}
 	return n.WriteLog(l)
 }
@@ -1093,7 +1096,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	if msgType != "unknown" {
 		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
 		//currTS := common.ComputeCurrenTS()
-		path := fmt.Sprintf("%s/%v_%v", structDir, epoch, phase)
+		path := fmt.Sprintf("%s/%v_%03d", structDir, epoch, phase)
 		if epoch == 0 && phase == 0 {
 			path = fmt.Sprintf("%s/genesis", structDir)
 		}
@@ -1222,12 +1225,11 @@ func (n *Node) runClient() {
 				stateSnapshotRaw := statedb.StateSnapshotRaw{
 					KeyVals: allStates,
 				}
-				// err = n.writeDebug(newStateDB.JamState.Snapshot().Raw(), timeslot)
-				err = n.writeDebug(stateSnapshotRaw, timeslot)
+				err = n.writeDebug(stateSnapshotRaw, timeslot) // Traces
 				if err != nil {
 					fmt.Printf("writeDebug JamStateRaw err: %v\n", err)
 				}
-				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot)
+				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot) // StateSnapshot
 				if err != nil {
 					fmt.Printf("writeDebug JamState err: %v\n", err)
 				}

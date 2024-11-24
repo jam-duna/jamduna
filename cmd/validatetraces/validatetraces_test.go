@@ -1,22 +1,22 @@
 package main_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-
-	"github.com/colorfulnotion/jam/trie"
-	"github.com/colorfulnotion/jam/types"
 )
 
 // Helper function to parse epoch and phase from filename
@@ -35,14 +35,14 @@ func parseEpochPhase(filename string) (int, int) {
 	return epoch, phase
 }
 
-func TestSnapshot(t *testing.T) {
+func testSnapshot(t *testing.T, basedir string) {
 
 	// set up maps to hold Blocks and Snapshots
 	blockParentStateRoot := make(map[string]common.Hash)
 	stateRoots := make(map[string]common.Hash)
 
 	// read all the Blocks  files in dir
-	dir := "Blocks"
+	dir := filepath.Join(basedir, "Blocks")
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		log.Fatalf("Error reading directory %s: %v\n", dir, err)
@@ -90,7 +90,7 @@ func TestSnapshot(t *testing.T) {
 	})
 
 	// Set the directory to scan for JSON files
-	snapshotsDir := "Traces"
+	snapshotsDir := filepath.Join(basedir, "Traces")
 	fmt.Printf("\nLoading %s:\n", snapshotsDir)
 	files, err = os.ReadDir(snapshotsDir)
 	if err != nil {
@@ -138,9 +138,9 @@ func TestSnapshot(t *testing.T) {
 		// Generate the guessed snapshot filename
 		var snapshotFile string
 		if phase == 0 {
-			snapshotFile = fmt.Sprintf("%d_11.json", epoch-1)
+			snapshotFile = fmt.Sprintf("%d_011.json", epoch-1)
 		} else {
-			snapshotFile = fmt.Sprintf("%d_%d.json", epoch, phase-1)
+			snapshotFile = fmt.Sprintf("%d_%03d.json", epoch, phase-1)
 		}
 
 		// Retrieve the state root, default to genesis if not found
@@ -158,4 +158,116 @@ func TestSnapshot(t *testing.T) {
 		fmt.Printf("Block File: %s => ParentStateRoot: %s, Snapshot File: %s => StateRoot: %v\n", blockFile, parentStateRoot, snapshotFile, stateRoot)
 	}
 
+}
+
+func processBlocks(basePath string) error {
+	storage, err := storage.NewStateDBStorage("/tmp/validatetraces2")
+	validators := make([]types.Validator, types.TotalValidators)
+	genesisConfig := statedb.NewGenesisConfig(validators)
+	stateDB, err := statedb.NewGenesisStateDB(storage, &genesisConfig)
+	blocksDir := filepath.Join(basePath, "Blocks")
+	blocks := make(map[int]map[int]types.Block)
+
+	// Find all block files in blocksDir
+	blockFiles, err := os.ReadDir(blocksDir)
+	if err != nil {
+		return fmt.Errorf("failed to read blocks directory: %v", err)
+	}
+
+	// Process all block files ending with `.bin`
+	for _, file := range blockFiles {
+		if strings.HasSuffix(file.Name(), ".bin") {
+			// Extract epoch and phase from filename `${epoch}_${phase}.bin`
+			parts := strings.Split(strings.TrimSuffix(file.Name(), ".bin"), "_")
+			if len(parts) != 2 {
+				log.Printf("Invalid block filename format: %s\n", file.Name())
+				continue
+			}
+
+			epoch, err := strconv.Atoi(parts[0])
+			if err != nil {
+				log.Printf("Invalid epoch in filename: %s\n", file.Name())
+				continue
+			}
+
+			phase, err := strconv.Atoi(parts[1])
+			if err != nil {
+				log.Printf("Invalid phase in filename: %s\n", file.Name())
+				continue
+			}
+
+			// Read the block file
+			blockPath := filepath.Join(blocksDir, file.Name())
+			blockBytes, err := os.ReadFile(blockPath)
+			if err != nil {
+				log.Printf("Error reading block file %s: %v\n", blockPath, err)
+				continue
+			}
+
+			// Decode block from blockBytes
+			b, _, err := types.Decode(blockBytes, reflect.TypeOf(types.Block{}))
+			if err != nil {
+				log.Printf("Error decoding block %s: %v\n", blockPath, err)
+				continue
+			}
+			block := b.(types.Block)
+
+			// Store the block in the blocks map
+			if blocks[epoch] == nil {
+				blocks[epoch] = make(map[int]types.Block)
+			}
+			blocks[epoch][phase] = block
+		}
+	}
+
+	// Sort epochs and phases to process in order
+	var epochs []int
+	for epoch := range blocks {
+		epochs = append(epochs, epoch)
+	}
+	sort.Ints(epochs)
+
+	// Iterate through epochs and phases in order
+	for _, epoch := range epochs {
+		var phases []int
+		for phase := range blocks[epoch] {
+			phases = append(phases, phase)
+		}
+		sort.Ints(phases)
+
+		for _, phase := range phases {
+			block := blocks[epoch][phase]
+			blockFile := fmt.Sprintf("%d_%d.bin", epoch, phase)
+
+			// Apply the state transition
+			newStateDB, err := statedb.ApplyStateTransitionFromBlock(stateDB, context.Background(), &block)
+			if err != nil {
+				log.Printf("Error applying state transition for block %s: %v\n", blockFile, err)
+				continue
+			}
+			stateDB = newStateDB
+			fmt.Printf("%v Block.ParentStateRoot: %v statedb.StateRoot: %v\n", blockFile, block.Header.ParentStateRoot, newStateDB.StateRoot)
+		}
+	}
+	return nil
+}
+
+func testApply(t *testing.T, dir string) {
+	// Process the blocks and state transitions
+	err := processBlocks(dir)
+	if err != nil {
+		log.Fatalf("Error processing blocks: %v\n", err)
+	}
+
+	fmt.Println("Trace validation completed successfully.")
+}
+
+func TestFallback(t *testing.T) {
+	testSnapshot(t, "fallback")
+	// testApply(t, "fallback")
+}
+
+func TestSafrole(t *testing.T) {
+	testSnapshot(t, "safrole")
+	// testApply(t, "safrole")
 }

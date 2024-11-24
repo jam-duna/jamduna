@@ -71,12 +71,6 @@ func (s *StateDB) AddTicketToQueue(t types.Ticket, used_entropy common.Hash) {
 	s.queuedTickets[used_entropy] = append(s.queuedTickets[used_entropy], t)
 }
 
-func (s *StateDB) AddLookupToQueue(l types.Preimages) {
-	s.preimageLookupsMutex.Lock()
-	defer s.preimageLookupsMutex.Unlock()
-	s.queuedPreimageLookups[l.AccountPreimageHash()] = l
-}
-
 func (s *StateDB) AddJudgementToQueue(j types.Judgement) {
 	s.judgementMutex.Lock()
 	defer s.judgementMutex.Unlock()
@@ -145,29 +139,24 @@ func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
 
 	used_entropy := s.GetSafrole().Entropy[entropy_idx]
 	s.AddTicketToQueue(t, used_entropy)
-	//TODO: log ticket here
-	currJCE, _ := s.JamState.SafroleState.CheckTimeSlotReady()
-	s.writeLog(&t, currJCE)
 	s.knownTickets[ticketID] = t.Attempt
 }
 
 func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
-	//TODO: check existence of lookup and stick into map
-	//cj := s.GetPvmState()
+
 	// fmt.Printf("[N%v] ProcessIncomingLookup -- start Adding lookup: %v\n", s.Id, l.String())
 	account_preimage_hash := l.AccountPreimageHash()
-	// Willaim: dont do validation here. Instead, do have a procedure to remove stale EP
-	/*
-		account_preimage_hash, err := s.ValidateLookup(&l)
-		if err != nil {
-			fmt.Printf("Invalid lookup. Err=%v\n", err)
-			return
-		}
-	*/
+	_, ok := s.knownPreimageLookups[account_preimage_hash]
+	if ok {
+		return
+	}
 	if s.CheckLookupExists(account_preimage_hash) {
 		return
 	}
-	s.AddLookupToQueue(l)
+
+	s.preimageLookupsMutex.Lock()
+	defer s.preimageLookupsMutex.Unlock()
+	s.queuedPreimageLookups[l.BlobHash()] = l
 	sf := s.GetSafrole()
 	s.knownPreimageLookups[account_preimage_hash] = sf.GetTimeSlot() // hostForget has certain logic that will probably reference this field???
 }
@@ -227,7 +216,8 @@ func (s *StateDB) RemoveTicket(t *types.Ticket) {
 func (s *StateDB) RemoveLookup(p *types.Preimages) {
 	s.preimageLookupsMutex.Lock()
 	defer s.preimageLookupsMutex.Unlock()
-	delete(s.queuedPreimageLookups, p.AccountPreimageHash())
+	blobHash := p.BlobHash()
+	delete(s.queuedPreimageLookups, blobHash)
 }
 
 func (s *StateDB) RemoveGuarantee(g *types.Guarantee) {
@@ -282,11 +272,10 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	a_p := l.AccountPreimageHash()
 	//a_l := l.AccountLookupHash()
 	preimage_blob, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
-	//TODO: stanley to make sure we can check whether a key exist or not. err here is ambiguous here
 	if err == nil { // key found
 		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
 			//H(p) = p
-			fmt.Printf("Fail at 157 - (1) a_p not equal to P\n")
+			fmt.Printf("Fail at 157 - (1) preimage already integrated\n")
 			return common.Hash{}, fmt.Errorf(errPreimageBlobSet)
 		}
 	}
@@ -409,7 +398,6 @@ func InitStateDBFromGenesis(sdb *storage.StateDBStorage, snapshot *StateSnapshot
 	statedb.Block = nil
 	statedb.JamState = InitStateFromSnapshot(snapshot)
 	// setting the safrole state so that block 1 can be produced
-	// statedb.StateRoot = statedb.UpdateTrieState()
 	statedb.StateRoot = statedb.UpdateAllTrieState(genesis)
 
 	return statedb, nil
@@ -1080,19 +1068,17 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// validate eq 157
 		_, err := s.ValidateLookup(&l)
 		if err != nil {
-			fmt.Printf("Error validating lookup: %v\n", err)
+			fmt.Printf("[N%d] ApplyStateTransitionPreimages ValidateLookup Error: %v\n", err)
 			return 0, 0, err
 		}
 	}
 
 	// ready for state transisiton
-	// t := s.GetTrie()
+	sf := s.GetSafrole()
 	for _, l := range preimages {
 		// (eq 158)
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
-		// t.SetPreImageBlob(l.Service_Index(), l.Blob)
-		// t.SetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		if debugP {
 			fmt.Printf(("WriteServicePreimageBlob, Service_Index: %d, Blob: %x\n"), l.Service_Index(), l.Blob)
 		}
@@ -1100,6 +1086,9 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
 		num_octets += l.BlobLength()
+		delete(s.queuedPreimageLookups, l.BlobHash())
+
+		s.knownPreimageLookups[l.AccountPreimageHash()] = sf.GetTimeSlot()
 	}
 
 	return num_preimages, num_octets, nil
@@ -1330,7 +1319,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			fmt.Printf("[Core: %d]ApplyStateTransitionFromBlock Guarantee W_Hash%v\n", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 		}
 	}
-
 	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE)
 	if err != nil {
 		return s, err
@@ -1396,7 +1384,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.BlockHash = blk.Hash()
 	s.StateRoot = s.UpdateTrieState()
 
-	//State transisiton is successful.  Remove E(T,P,A,G,D) from statedb queue
+	//State transition is successful.  Remove E(T,P,A,G,D) from statedb queue
 	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
 	if debug {
 		fmt.Printf("Queue Tickets Length: %v\n", len(s.queuedTickets))
@@ -1445,11 +1433,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	extrinsicData.Preimages = make([]types.Preimages, 0)
 
 	// Make sure this Preimages is ready to be included..
-
 	for _, preimageLookup := range s.queuedPreimageLookups {
 		_, err := s.ValidateLookup(&preimageLookup)
 		if err == nil {
-			//fmt.Printf("Preimage ready: %v\n", preimageLookup.String())
 			pl, err := preimageLookup.DeepCopy()
 			if err != nil {
 				continue
@@ -1466,7 +1452,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 			}
 		}
 	}
-	s.queuedPreimageLookups = make(map[common.Hash]types.Preimages)
 
 	// E_A - Assurances  aggregate queuedAssurances into extrinsicData.Assurances
 	extrinsicData.Assurances = make([]types.Assurance, 0)
@@ -1492,7 +1477,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 	}
 	// 126 - The assurances must ordered by validator index
 	SortAssurances(extrinsicData.Assurances)
-	s.queuedAssurances = make(map[common.Hash]types.Assurance)
 	tmpState := s.JamState.Copy()
 	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
@@ -1504,7 +1488,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		}
 		s.JamState.CheckInvalidCoreIndex()
 		for _, rho := range s.JamState.AvailabilityAssignments {
-			fmt.Printf("Rho %v\n", rho)
+			if debug {
+				fmt.Printf("Rho %v\n", rho)
+			}
 		}
 		err = s.Verify_Guarantee(g)
 		if err != nil {
@@ -1543,8 +1529,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		return nil, err
 	}
 
-	s.queuedGuarantees = make(map[common.Hash]types.Guarantee)
-
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()
 
@@ -1556,7 +1540,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32) 
 		}
 		// extrinsicData.Disputes = append(extrinsicData.Disputes, d)
 	}
-	s.queueJudgements = make(map[common.Hash]types.Judgement)
 	// dispute := FormDispute(s.queuedVotes)
 	// if d.NeedsOffendersMarker(&dispute) {
 	// 	// Handle the case where the dispute does not need an offenders marker.

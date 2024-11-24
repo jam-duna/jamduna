@@ -328,7 +328,7 @@ func (n *Node) FetchWorkPackageBundle(erasureRoot common.Hash) (pb *types.WorkPa
 	return pb, nil
 }
 
-func (n *Node) FetchImportSegements(erasureRoot common.Hash, segmentIdx uint16) (segments []byte, err error) {
+func (n *Node) FetchImportSegments(erasureRoot common.Hash, segmentIdx uint16) (segments []byte, err error) {
 	// now call C139 to get bundle_shard from assurer...
 	// and then do ec rescontruction for b
 	return segments, nil
@@ -560,7 +560,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 				// Fib_n := binary.LittleEndian.Uint32(fib_imported_result[4:8])
 				// Fib_n_1 := binary.LittleEndian.Uint32(fib_imported_result[8:12])
 				// fmt.Printf("Imported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n\n", n, Fib_n, Fib_n_1)
-				fmt.Printf("Imported segement: %x\n", imports[0])
+				fmt.Printf("Imported segment: %x\n", imports[0])
 			}
 		}
 		vm.SetImports(imports)
@@ -579,7 +579,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 			// Fib_n := binary.LittleEndian.Uint32(fib_exported_result[4:8])
 			// Fib_n_1 := binary.LittleEndian.Uint32(fib_exported_result[8:12])
 			// fmt.Printf("%s Exported FIB: n= %v, Fib[n]= %v, Fib[n-1]= %v\n", n.String(), num, Fib_n, Fib_n_1)
-			fmt.Printf("Exported segement: %x\n", segments[0])
+			fmt.Printf("Exported segment: %x\n", segments[0])
 		}
 
 		result := types.WorkResult{

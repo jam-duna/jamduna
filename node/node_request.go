@@ -56,7 +56,7 @@ func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
 
 	preimage, ok := n.preimages[preimageHash]
 	if !ok {
-		fmt.Printf("preimageHash not ok\n")
+		fmt.Printf("%s preimageHash not ok\n", n.String())
 		return []byte{}, false, nil
 	}
 	return preimage, true, nil
@@ -154,39 +154,6 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncemen
 	return block, nil
 }
 
-func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageAnnouncement) (err error) {
-	// initiate CE143_PreimageRequest
-	validatorIndex := preimageAnnouncement.ValidatorIndex
-	p, ok := n.peersInfo[validatorIndex]
-	if !ok {
-		return fmt.Errorf("Invalid validator index %d", validatorIndex)
-	}
-	serviceIndex := preimageAnnouncement.ServiceIndex
-	preimageHash := preimageAnnouncement.PreimageHash
-	if debugP {
-		fmt.Printf("%s [processPreimageAnnouncements:SendPreimageRequest] to N%d for (%d, %v)\n", n.String(), validatorIndex, serviceIndex, preimageHash)
-	}
-	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
-	if err != nil {
-		return err
-	}
-	n.preimagesMutex.Lock()
-	n.services[serviceIndex] = preimageHash
-	n.preimages[preimageHash] = preimage
-	n.preimagesMutex.Unlock()
-
-	lookup := types.Preimages{
-		Requester: uint32(serviceIndex),
-		Blob:      preimage,
-	}
-	if debugP {
-		fmt.Printf("%s processPreimageAnnouncements %s ==> adding to E_P\n", n.String(), preimageAnnouncement.String())
-	}
-	n.processPreimages(lookup)
-
-	return nil
-}
-
 func (n *Node) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) {
 	n.blocksMutex.Lock()
 	defer n.blocksMutex.Unlock()
@@ -226,14 +193,14 @@ func (n *Node) cacheWorkReportRead(h common.Hash) (workReport types.WorkReport, 
 	return
 }
 
-func (n *Node) runMain() {
-	// MK: adding ticker here to avoid high CPU usage
-	paulseTicker := time.NewTicker(1 * time.Millisecond)
-	defer paulseTicker.Stop()
+func (n *Node) runBlocksTickets() {
+	// ticker here to avoid high CPU usage
+	pulseTicker := time.NewTicker(20 * time.Millisecond)
+	defer pulseTicker.Stop()
 
 	for {
 		select {
-		case <-paulseTicker.C:
+		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
 			//fmt.Printf("[N%d] received Block Announcement from %d\n", n.id, blockAnnouncement.ValidatorIndex)
@@ -245,6 +212,19 @@ func (n *Node) runMain() {
 			}
 		case ticket := <-n.ticketsCh:
 			n.processTicket(ticket)
+		}
+	}
+}
+
+func (n *Node) runMain() {
+	// ticker here to avoid high CPU usage
+	pulseTicker := time.NewTicker(20 * time.Millisecond)
+	defer pulseTicker.Stop()
+
+	for {
+		select {
+		case <-pulseTicker.C:
+			// Small pause to reduce CPU load when channels are quiet
 		case workPackage := <-n.workPackagesCh:
 			g, _, _, err := n.executeWorkPackage(workPackage)
 			wr := g.Report
@@ -267,11 +247,6 @@ func (n *Node) runMain() {
 			err := n.processAssurance(assurance)
 			if err != nil {
 				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
-			}
-		case preimageAnnouncement := <-n.preimageAnnouncementsCh:
-			err := n.processPreimageAnnouncements(preimageAnnouncement)
-			if err != nil {
-				fmt.Printf("%s processPreimages: %v\n", n.String(), err)
 			}
 		case announcement := <-n.announcementsCh:
 			// TODO: Shawn to review

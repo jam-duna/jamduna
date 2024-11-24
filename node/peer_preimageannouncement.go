@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
@@ -29,15 +30,77 @@ Node -> Validator
 <-- FIN
 */
 
-func (p *Peer) SendPreimageAnnouncement(serviceID uint32, preimageHash common.Hash, preimageLen uint32) (err error) {
-	stream, err := p.openStream(CE142_PreimageAnnouncement)
-	// --> Service ID ++ Hash ++ Preimage Length
+func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash common.Hash, preimageLen uint32, preimage []byte) (err error) {
 	pa := types.PreimageAnnouncement{
 		ServiceIndex: serviceID,
 		PreimageHash: preimageHash,
 		PreimageLen:  preimageLen,
 	}
-	// TODO: encode it
+	n.preimagesMutex.Lock()
+	n.preimages[preimageHash] = preimage
+	n.preimagesMutex.Unlock()
+	preimageLookup := types.Preimages{
+		Requester: uint32(serviceID),
+		Blob:      preimage,
+	}
+	if debugP {
+		fmt.Printf("%s BroadcastPreimageAnnouncement ==> adding to E_P %s\n", n.String(), pa.String())
+	}
+	s := n.getState()
+	s.ProcessIncomingLookup(preimageLookup)
+
+	n.broadcast(pa)
+	return nil
+}
+
+func (n *Node) runPreimages() {
+	// ticker here to avoid high CPU usage
+	pulseTicker := time.NewTicker(20 * time.Millisecond)
+	defer pulseTicker.Stop()
+
+	for {
+		select {
+		case <-pulseTicker.C:
+			// Small pause to reduce CPU load when channels are quiet
+		case preimageAnnouncement := <-n.preimageAnnouncementsCh:
+			err := n.processPreimageAnnouncements(preimageAnnouncement)
+			if err != nil {
+				fmt.Printf("%s processPreimages: %v\n", n.String(), err)
+			}
+		}
+	}
+}
+
+func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageAnnouncement) (err error) {
+	// initiate CE143_PreimageRequest
+	validatorIndex := preimageAnnouncement.ValidatorIndex
+	p, ok := n.peersInfo[validatorIndex]
+	if !ok {
+		return fmt.Errorf("Invalid validator index %d", validatorIndex)
+	}
+	serviceIndex := preimageAnnouncement.ServiceIndex
+	preimageHash := preimageAnnouncement.PreimageHash
+	if debugP {
+		fmt.Printf("%s [processPreimageAnnouncements:SendPreimageRequest] to N%d for (%d, %v)\n", n.String(), validatorIndex, serviceIndex, preimageHash)
+	}
+	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
+	if err != nil {
+		return err
+	}
+
+	lookup := types.Preimages{
+		Requester: uint32(serviceIndex),
+		Blob:      preimage,
+	}
+	s := n.getState()
+	s.ProcessIncomingLookup(lookup)
+
+	return nil
+}
+
+func (p *Peer) SendPreimageAnnouncement(pa *types.PreimageAnnouncement) (err error) {
+	stream, err := p.openStream(CE142_PreimageAnnouncement)
+	// --> Service ID ++ Hash ++ Preimage Length
 	paBytes, _ := pa.ToBytes()
 	err = sendQuicBytes(stream, paBytes)
 	if err != nil {
@@ -60,4 +123,60 @@ func (n *Node) onPreimageAnnouncement(stream quic.Stream, msg []byte, peerID uin
 	}
 	return n.processPreimageAnnouncements(preimageAnnouncement)
 
+}
+
+/*
+CE 143: Preimage request
+Request for a preimage of the given hash.
+
+This should be used to request:
+
+Preimages announced via protocol 142.
+Missing preimages of hashes in the lookup extrinsics of new blocks.
+Requests for a preimage should be made to nodes that have announced possession of either the preimage itself or of a block containing the hash of the preimage in its lookup extrinsic.
+
+Note that this protocol is essentially the same as protocol 136 (work-report request), but the hash is expected to be checked against a different database
+(in the case of this protocol, the preimage lookup database).
+
+Hash = [u8; 32]
+Preimage = [u8]
+
+Node -> Node
+
+--> Hash
+--> FIN
+<-- Preimage
+<-- FIN
+*/
+func (p *Peer) SendPreimageRequest(preimageHash common.Hash) (preimage []byte, err error) {
+	stream, err := p.openStream(CE143_PreimageRequest)
+	err = sendQuicBytes(stream, preimageHash.Bytes())
+	if err != nil {
+		return preimage, err
+	}
+	time.Sleep(10 * time.Second)
+	preimage, err = receiveQuicBytes(stream)
+	if err != nil {
+		return preimage, err
+	}
+	return preimage, nil
+}
+
+func (n *Node) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
+	defer stream.Close()
+	// --> Hash
+	preimageHash := common.BytesToHash(msg)
+	preimage, ok, err := n.PreimageLookup(preimageHash)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	err = sendQuicBytes(stream, preimage)
+	if err != nil {
+		return err
+	}
+	// <-- FIN
+	return nil
 }

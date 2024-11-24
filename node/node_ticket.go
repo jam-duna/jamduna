@@ -110,6 +110,9 @@ func (n *Node) CheckSelfTicketsIsIncluded(Block types.Block, currJCE uint32) {
 }
 
 func (n *Node) BroadcastTickets() {
+	if n.sendTickets == false {
+		return
+	}
 	n.ticketsMutex.Lock()
 	defer n.ticketsMutex.Unlock()
 	sf := n.statedb.GetSafrole()
@@ -135,7 +138,6 @@ func (n *Node) BroadcastTickets() {
 				n.broadcast(ticket)
 				*ticketbucket.IsBroadcasted = true
 			}
-			//n.writeDebug(&ticket, currJCE)
 		}
 	}
 }

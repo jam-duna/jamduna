@@ -1,32 +1,18 @@
 # Set variables for testing
 TIMEOUT := 30m
 
-# Target for running tests with the timeout
-test:
-	@echo "Running tests with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) ./...
+fallback:
+	@echo "Running TestFallback with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run ^TestFallback$
 
-# Target for running a specific test function with the timeout
-testsf:
+safrole:
 	@echo "Running TestNodeSafrole with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestNodeSafrole
+	go test -timeout $(TIMEOUT) -v -run ^TestSafrole$
 
-# Target for running a specific test function with the timeout
-testwg:
-	@echo "Running TestWorkGuarantee with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestWorkGuarantee$
+fib:
+	@echo "Running TestFib with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run ^TestFib$
 
-# Target for running a specific test function with the timeout
-testwgFIB:
-	@echo "Running TestWorkGuaranteeFIB with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestWorkGuaranteeFIB$
-
-# Target for running a specific test function with the timeout
-testwgTRIB:
-	@echo "Running TestWorkGuaranteeTRIB with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestWorkGuaranteeTRIB$
-
-# Target for running a specific test function with the timeout
-testwgFIBTRIB:
-	@echo "Running TestWorkGuaranteeFIBTRIB with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestWorkGuaranteeFIBTRIB
+megatron:
+	@echo "Running TestMegatron with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run ^TestMegatron$
