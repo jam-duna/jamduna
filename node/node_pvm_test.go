@@ -145,8 +145,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 		s0 := poa_node.statedb
 		// timeslot mark
 		targetJCE := common.ComputeTimeUnit(types.TimeUnitMode) + 120
-
-		b1, b1_err := s0.MakeBlock(poa_node.credential, targetJCE)
+		b1, b1_err := s0.MakeBlock(poa_node.credential, targetJCE, nil)
 		if b1_err != nil {
 			t.Fatalf("MakeBlock err %v\n", b1_err)
 		}
@@ -182,7 +181,7 @@ func TestNodePOAAccumulatePVM(t *testing.T) {
 			}
 		*/
 		// this block should include E_P
-		b2, b2_err := s1.MakeBlock(poa_node.credential, targetJCE+1)
+		b2, b2_err := s1.MakeBlock(poa_node.credential, targetJCE+1, nil)
 		if b2_err != nil {
 			t.Fatalf("MakeBlock err %v\n", b2_err)
 		}

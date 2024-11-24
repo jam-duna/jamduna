@@ -172,10 +172,10 @@ func (P Psi_state) Encode() []byte {
 	}
 
 	s := struct {
-		Psi_g []common.Hash      `json:"psi_g"`
-		Psi_b []common.Hash      `json:"psi_b"`
-		Psi_w []common.Hash      `json:"psi_w"`
-		Psi_o []types.Ed25519Key `json:"psi_o"`
+		Psi_g []common.Hash      `json:"good"`
+		Psi_b []common.Hash      `json:"bad"`
+		Psi_w []common.Hash      `json:"wonky"`
+		Psi_o []types.Ed25519Key `json:"offenders"`
 	}{
 		Psi_g: psi_g,
 		Psi_b: psi_b,

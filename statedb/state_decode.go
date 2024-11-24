@@ -208,20 +208,20 @@ func (n *JamState) SetSafroleState(safroleStateByte []byte) {
 // C5 PastJudgements
 func (P Psi_state) Decode(data []byte) (interface{}, uint32) {
 	var s struct {
-		Psi_g []common.Hash      `json:"psi_g"`
-		Psi_b []common.Hash      `json:"psi_b"`
-		Psi_w []common.Hash      `json:"psi_w"`
-		Psi_o []types.Ed25519Key `json:"psi_o"`
+		Psi_g []common.Hash      `json:"good"`
+		Psi_b []common.Hash      `json:"bad"`
+		Psi_w []common.Hash      `json:"wonky"`
+		Psi_o []types.Ed25519Key `json:"others"`
 	}
 	decoded, l, err := types.Decode(data, reflect.TypeOf(s))
 	if err != nil {
 		return Psi_state{}, 0
 	}
 	sDecoded := decoded.(struct {
-		Psi_g []common.Hash      `json:"psi_g"`
-		Psi_b []common.Hash      `json:"psi_b"`
-		Psi_w []common.Hash      `json:"psi_w"`
-		Psi_o []types.Ed25519Key `json:"psi_o"`
+		Psi_g []common.Hash      `json:"good"`
+		Psi_b []common.Hash      `json:"bad"`
+		Psi_w []common.Hash      `json:"wonky"`
+		Psi_o []types.Ed25519Key `json:"others"`
 	})
 	P.Psi_g = make([][]byte, len(sDecoded.Psi_g))
 	for i, hash := range sDecoded.Psi_g {

@@ -157,6 +157,7 @@ func testSafrole(t *testing.T, sendtickets bool) {
 	}
 	statedb.RunGraph()
 	for {
+		time.Sleep(100 * time.Millisecond) // Adjust the delay as needed
 	}
 }
 
@@ -239,7 +240,7 @@ func testJAM(t *testing.T, jam string) {
 
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
-		fmt.Printf("Builder storing TestService %s (%x)\n", serviceName, service.CodeHash)
+		fmt.Printf("Builder storing TestService %s (%v)\n", serviceName, common.Str(service.CodeHash))
 		// set up service using the Bootstrap service
 		codeWorkPackage := types.WorkPackage{
 			Authorization: []byte(""),

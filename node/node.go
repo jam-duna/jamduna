@@ -62,7 +62,6 @@ const (
 
 type Node struct {
 	id uint16
-	//coreIndex uint16
 
 	credential types.ValidatorSecret
 	server     quic.Listener
@@ -92,6 +91,7 @@ type Node struct {
 
 	// assurances state: are this node assuring the work package bundle/segments?
 	assurancesBucket map[common.Hash]bool
+	queuedAssurances map[common.Hash]map[uint16]*types.Assurance
 	assuranceMutex   sync.Mutex
 
 	// holds a map of the parenthash to the block
@@ -247,6 +247,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
+		queuedAssurances: make(map[common.Hash]map[uint16]*types.Assurance),
 
 		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
@@ -663,13 +664,25 @@ func (n *Node) processGuarantee(guarantee types.Guarantee) error {
 	return nil // Success
 }
 
-func (n *Node) processAssurance(assurance types.Assurance) error {
-	// Store the assurance in the tip's queued assurance
+func (n *Node) processAssurance(assurance *types.Assurance) error {
+	// Validate the assurance signature
 	if len(assurance.Signature) == 0 {
-		return fmt.Errorf("No assurance signature")
+		return fmt.Errorf("no assurance signature")
 	}
-	s := n.getState()
-	s.ProcessIncomingAssurance(assurance)
+
+	// Check the assurance validity
+	if err := n.statedb.CheckIncomingAssurance(assurance); err != nil {
+		return err
+	}
+
+	// Ensure the map for this anchor exists
+	if _, exists := n.queuedAssurances[assurance.Anchor]; !exists {
+		n.queuedAssurances[assurance.Anchor] = make(map[uint16]*types.Assurance)
+	}
+
+	// Store the assurance in the appropriate map
+	n.queuedAssurances[assurance.Anchor][assurance.ValidatorIndex] = assurance
+	//fmt.Printf("%s processAssurance(Anchor=%v, ValidatorIndex=%d)\n", n.String(), assurance.Anchor, assurance.ValidatorIndex)
 	return nil // Success
 }
 
@@ -768,7 +781,7 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 			n.assureData(g)
 		}
 	}
-	a, numCores, err := n.generateAssurance()
+	a, numCores, err := n.generateAssurance(b.Hash())
 	if err != nil {
 		return err
 	}
@@ -1185,7 +1198,7 @@ func (n *Node) runClient() {
 
 				}
 			}
-			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs)
+			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, &(n.queuedAssurances))
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				panic(0)
@@ -1234,6 +1247,7 @@ func (n *Node) runClient() {
 					fmt.Printf("writeDebug JamState err: %v\n", err)
 				}
 
+				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
 				n.assureNewBlock(newBlock)
 				n.statedbMapMutex.Lock()
 				n.auditingCh <- n.statedbMap[n.statedb.BlockHash].Copy()

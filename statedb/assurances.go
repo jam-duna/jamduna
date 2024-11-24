@@ -5,30 +5,19 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
 
-// Check validity of assurance
-func (s *StateDB) VerifyHP(a types.Assurance) error {
-	// Check the anchor
-	return nil
-	// TODO: this is too harsh
-	if a.Anchor != s.BlockHash {
-		return errors.New(fmt.Sprintf("invalid anchor in assurance %v, expected %v, Validator[%v]", a.Anchor, s.ParentHash, a.ValidatorIndex))
-	}
-	return nil
-}
-
 func (s *StateDB) VerifyAssurance(a types.Assurance) error {
 	// Verify the anchor
-	if err := s.VerifyHP(a); err != nil {
-		return err
+	if a.Anchor != s.ParentHash {
+		fmt.Printf("[N%d] VerifyAssurance s.ParentHash %v =?= a.Anchor %v (a.ValidatorIndex=%d) FAIL\n", s.Id, common.Str(s.ParentHash), common.Str(a.Anchor), a.ValidatorIndex)
+		return errors.New(fmt.Sprintf("invalid anchor in assurance %v, expected %v, Validator[%v]", a.Anchor, s.ParentHash, a.ValidatorIndex))
 	}
 
 	// Verify the signature
-	parentHash := s.BlockHash
-	selfKey := s.GetSafrole().CurrValidators[a.ValidatorIndex]
-	err := a.Verify(parentHash, selfKey)
+	err := a.Verify(s.GetSafrole().CurrValidators[a.ValidatorIndex])
 	if err != nil {
 		return err
 	}

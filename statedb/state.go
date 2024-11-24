@@ -45,10 +45,10 @@ func (b *Beta_state) MMR_Bytes() []byte {
 
 // Types for Psi
 type Psi_state struct {
-	Psi_g [][]byte           `json:"psi_g"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_b [][]byte           `json:"psi_b"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_w [][]byte           `json:"psi_w"` // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_o []types.Ed25519Key `json:"psi_o"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+	Psi_g [][]byte           `json:"good"`      // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_b [][]byte           `json:"bad"`       // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_w [][]byte           `json:"wonky"`     // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Psi_o []types.Ed25519Key `json:"offenders"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
 }
 
 // Types for Rho
@@ -252,10 +252,10 @@ func (j *JamState) GetValidatorStats() string {
 
 func (a *Psi_state) UnmarshalJSON(data []byte) error {
 	var s struct {
-		Psi_g []string `json:"psi_g"`
-		Psi_b []string `json:"psi_b"`
-		Psi_w []string `json:"psi_w"`
-		Psi_o []string `json:"psi_o"`
+		Psi_g []string `json:"good"`
+		Psi_b []string `json:"bad"`
+		Psi_w []string `json:"wonky"`
+		Psi_o []string `json:"offenders"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
@@ -294,10 +294,10 @@ func (a Psi_state) MarshalJSON() ([]byte, error) {
 		psi_o = append(psi_o, common.HexString(v[:]))
 	}
 	return json.Marshal(&struct {
-		Psi_g []string `json:"psi_g"`
-		Psi_b []string `json:"psi_b"`
-		Psi_w []string `json:"psi_w"`
-		Psi_o []string `json:"psi_o"`
+		Psi_g []string `json:"good"`
+		Psi_b []string `json:"bad"`
+		Psi_w []string `json:"wonky"`
+		Psi_o []string `json:"others"`
 	}{
 		Psi_g: psi_g,
 		Psi_b: psi_b,

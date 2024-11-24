@@ -19,25 +19,23 @@ func (n *Node) isAssuring(workPackageHash common.Hash) bool {
 	return ok
 }
 
-func (n *Node) generateAssurance() (a types.Assurance, numCores uint16, err error) {
+func (n *Node) generateAssurance(blockHash common.Hash) (a types.Assurance, numCores uint16, err error) {
 	reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
 	if err != nil {
 		return
 	}
 	numCores = 0
 	for _, r := range reports {
-		wph := r.AvailabilitySpec.WorkPackageHash
-		isA := n.isAssuring(wph)
-		if isA {
-			a.SetBitFieldBit(r.CoreIndex, isA)
+		if n.isAssuring(r.AvailabilitySpec.WorkPackageHash) {
+			a.SetBitFieldBit(r.CoreIndex, true)
 			numCores++
 		}
 	}
 	if numCores == 0 {
 		return a, numCores, nil
 	}
-	a.Anchor = n.statedb.GetBlock().Hash()
-	a.ValidatorIndex = n.statedb.Id
+	a.Anchor = blockHash
+	a.ValidatorIndex = n.id
 	a.Sign(n.GetEd25519Secret())
 	return
 }

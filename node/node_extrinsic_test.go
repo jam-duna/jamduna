@@ -77,7 +77,7 @@ func TestNodeAssurance(t *testing.T) {
 	//generate assurance
 	fmt.Println("Generating assurance...")
 	for _, n := range nodes {
-		assurance, _, err := n.generateAssurance()
+		assurance, _, err := n.generateAssurance(common.Hash{})
 		if err != nil {
 			t.Fatalf("Failed to generate assurance for node %d: %v", n.id, err)
 		}

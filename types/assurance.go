@@ -86,7 +86,7 @@ func (a *Assurance) Sign(Ed25519Secret []byte) {
 	copy(a.Signature[:], sig)
 }
 
-func (a *Assurance) Verify(parent common.Hash, validator Validator) error {
+func (a *Assurance) Verify(validator Validator) error {
 	if len(a.Signature) == 0 {
 		return errors.New("signature is empty")
 	}
