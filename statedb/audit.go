@@ -70,14 +70,39 @@ func (s *StateDB) Get_s0Quantity(V bandersnatch.BanderSnatchSecret) ([]byte, err
 	return signature, nil
 }
 
+func (s *StateDB) Verify_s0(pubkey bandersnatch.BanderSnatchKey) (bool, error) {
+	if len(pubkey) != 32 {
+		return false, errors.New("Invalid length of pubkey")
+	}
+	alias, err := AliasOutput(s.Block.Header.EntropySource.Bytes())
+	if err != nil {
+		return false, err
+	}
+	signtext := append([]byte(types.X_U), alias...)
+	_, err = bandersnatch.IetfVrfVerify(pubkey, []byte{0}, []byte(signtext), s.Block.Header.EntropySource.Bytes())
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // func 201 TODO check double plus means
 func (s *StateDB) Get_snQuantity(V bandersnatch.BanderSnatchSecret, W types.WorkReport) ([]byte, error) {
-	signcontext := append(append([]byte(types.X_U), W.GetWorkPackageHash().Bytes()...), common.Uint32ToBytes(s.GetTranche())...)
+	signcontext := append(append([]byte(types.X_U), W.Hash().Bytes()...), common.Uint32ToBytes(s.GetTranche())...)
 	signature, _, err := bandersnatch.IetfVrfSign(V, []byte{0}, signcontext)
 	if err != nil {
 		return nil, err
 	}
 	return signature, nil
+}
+
+func (s *StateDB) Verify_sn(pubkey bandersnatch.BanderSnatchKey, W common.Hash, signature []byte) (bool, error) {
+	signcontext := append(append([]byte(types.X_U), W.Bytes()...), common.Uint32ToBytes(s.GetTranche())...)
+	_, err := bandersnatch.IetfVrfVerify(pubkey, []byte{0}, signcontext, signature)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func WorkReportToSelection(W []types.WorkReport) []types.WorkReportSelection {
@@ -354,13 +379,16 @@ func (s *StateDB) JudgementToFault(J []types.Judgement, W_hash common.Hash) []ty
 	return faults
 }
 
-func (s *StateDB) JudgementToCulprit(J []types.Judgement, W_hash common.Hash) []types.Culprit {
+func (s *StateDB) JudgementToCulprit(old_guarantee types.Guarantee) []types.Culprit {
 	//Stub: need culprit from judgment here.
 	culprits := make([]types.Culprit, 0)
-	for _, rho := range s.JamState.AvailabilityAssignments {
-		if rho.WorkReport.GetWorkPackageHash() == W_hash {
-			culprits = append(culprits, s.GetCulprits(rho.Timeslot, rho.WorkReport)...) //using time slot to lookup the extrinsic G??
-		}
+	for _, cred := range old_guarantee.Signatures {
+		key := s.GetSafrole().GetCurrValidator(int(cred.ValidatorIndex)).Ed25519
+		culprits = append(culprits, types.Culprit{
+			Target:    old_guarantee.Report.Hash(),
+			Key:       key,
+			Signature: cred.Signature,
+		})
 	}
 	return culprits
 }
@@ -381,74 +409,85 @@ func (s *StateDB) GetCulprits(ts uint32, report types.WorkReport) []types.Culpri
 }
 
 // issue dispute extrinsic
-func (s *StateDB) AppendDisputes(J types.JudgeBucket, W_hash common.Hash) error {
-	//types.TotalValidators*2/3 + 1 = supep majority
+func (s *StateDB) AppendDisputes(J *types.JudgeBucket, W_hash common.Hash, old_guarantee types.Guarantee) error {
 	true_count := J.GetTrueCount(W_hash)
 	false_count := J.GetFalseCount(W_hash)
 
 	if true_count+false_count < types.ValidatorsSuperMajority {
 		return fmt.Errorf("Not enough votes: true_count=%d, false_count=%d", true_count, false_count)
-	} else if true_count >= types.ValidatorsSuperMajority && false_count == 0 {
-		return errors.New("Not Required")
-	} else if true_count >= types.ValidatorsSuperMajority && false_count > 0 {
-		// disput required - Good set
-		true_votes := JudgementToVote(J.GetTrueJudgement(W_hash))
-		faults := s.JudgementToFault(J.GetFalseJudgement(W_hash), W_hash) //the false goes to fault
-		goodset_verdict := types.Verdict{
-			Target: W_hash,
-			Epoch:  s.GetSafrole().GetEpoch(),
-		}
-
-		for i, true_vote := range true_votes {
-			goodset_verdict.Votes[i] = true_vote //get 2/3+1 true
-		}
-
-		s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, goodset_verdict)
-		s.Block.Extrinsic.Disputes.Fault = append(s.Block.Extrinsic.Disputes.Fault, faults...)
-		fmt.Println("PrintSomething")
-
-	} else if false_count >= types.ValidatorsSuperMajority {
-		// disput required - Bad set
-		false_votes := JudgementToVote(J.GetFalseJudgement(W_hash))
-		badset_verdict := types.Verdict{
-			Target: W_hash,
-			Epoch:  s.GetSafrole().GetEpoch(),
-		}
-		for i, false_vote := range false_votes {
-			badset_verdict.Votes[i] = false_vote //get 2/3+1 false
-		}
-		s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, badset_verdict)
-
-		culprits := s.JudgementToCulprit(J.GetFalseJudgement(W_hash), W_hash)
-		s.Block.Extrinsic.Disputes.Culprit = culprits
-	} else if true_count >= types.WonkyTrueThreshold && false_count >= types.WonkyFalseThreshold {
-		wonky_votes := JudgementToVote(J.GetWonkeyJudgement(W_hash))
-		wonky_verdict := types.Verdict{
-			Target: W_hash,
-			Epoch:  s.GetSafrole().GetEpoch(),
-		}
-		true_c := 0
-		false_c := 0
-		for i, wonky_vote := range wonky_votes {
-			if wonky_vote.Voting == true {
-				if true_c >= types.WonkyTrueThreshold {
-					continue
-				}
-				true_c++
-			} else {
-				if false_c >= types.WonkyFalseThreshold {
-					continue
-				}
-				false_c++
-			}
-			wonky_verdict.Votes[i] = wonky_vote
-		}
-		s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict)
-	} else {
-		// shouldn't go here ..
-		panic(0)
 	}
 
-	return nil
+	if true_count >= types.ValidatorsSuperMajority {
+		if false_count == 0 {
+			return errors.New("Not Required")
+		}
+		s.appendGoodSetDispute(J, W_hash)
+		return nil
+	} else if false_count >= types.ValidatorsSuperMajority {
+		s.appendBadSetDispute(J, W_hash, old_guarantee)
+		return nil
+	} else if true_count >= types.WonkyTrueThreshold && false_count >= types.WonkyFalseThreshold {
+		s.appendWonkySetDispute(J, W_hash)
+		return nil
+	}
 
+	return fmt.Errorf("No need to dispute")
+}
+
+func (s *StateDB) appendGoodSetDispute(J *types.JudgeBucket, W_hash common.Hash) {
+	true_votes := JudgementToVote(J.GetTrueJudgement(W_hash))
+	faults := s.JudgementToFault(J.GetFalseJudgement(W_hash), W_hash)
+	goodset_verdict := types.Verdict{
+		Target: W_hash,
+		Epoch:  s.GetSafrole().GetEpoch(),
+	}
+
+	for i, true_vote := range true_votes {
+		goodset_verdict.Votes[i] = true_vote
+	}
+
+	s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, goodset_verdict)
+	s.Block.Extrinsic.Disputes.Fault = append(s.Block.Extrinsic.Disputes.Fault, faults...)
+}
+
+func (s *StateDB) appendBadSetDispute(J *types.JudgeBucket, W_hash common.Hash, old_guarantee types.Guarantee) {
+	false_votes := JudgementToVote(J.GetFalseJudgement(W_hash))
+	badset_verdict := types.Verdict{
+		Target: W_hash,
+		Epoch:  s.GetSafrole().GetEpoch(),
+	}
+
+	for i, false_vote := range false_votes {
+		badset_verdict.Votes[i] = false_vote
+	}
+
+	s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, badset_verdict)
+	culprits := s.JudgementToCulprit(old_guarantee)
+	s.Block.Extrinsic.Disputes.Culprit = culprits
+}
+
+func (s *StateDB) appendWonkySetDispute(J *types.JudgeBucket, W_hash common.Hash) {
+	wonky_votes := JudgementToVote(J.GetWonkeyJudgement(W_hash))
+	wonky_verdict := types.Verdict{
+		Target: W_hash,
+		Epoch:  s.GetSafrole().GetEpoch(),
+	}
+
+	true_c, false_c := 0, 0
+	for i, wonky_vote := range wonky_votes {
+		if wonky_vote.Voting {
+			if true_c >= types.WonkyTrueThreshold {
+				continue
+			}
+			true_c++
+		} else {
+			if false_c >= types.WonkyFalseThreshold {
+				continue
+			}
+			false_c++
+		}
+		wonky_verdict.Votes[i] = wonky_vote
+	}
+
+	s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, wonky_verdict)
 }

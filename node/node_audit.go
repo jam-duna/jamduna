@@ -152,14 +152,13 @@ func (n *Node) runAudit() {
 			}
 			err := n.addAuditingStateDB(audit_statedb)
 			if err != nil {
-				fmt.Printf("Audit Error %v\n", err)
+				fmt.Printf("Audit StateDB Error %v\n", err)
 			}
 			n.cleanWaitingAJ()
 			n.initAudit(headerHash)
-
 			err = n.Audit(headerHash)
 			if err != nil {
-				fmt.Printf("Audit Error %v\n", err)
+				fmt.Printf("Audit Failed %v\n", err)
 			} else {
 				if debugE {
 					fmt.Printf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
@@ -174,10 +173,8 @@ func (n *Node) runAudit() {
 
 func (n *Node) Audit(headerHash common.Hash) error {
 	// in normal situation, we will not have tranche1 unless we have networking problems. we can force it by setting requireTranche1 to true
-
+	// TODO return as bool, err to differentiate between error & audit result
 	paulseTicker := time.NewTicker(1 * time.Millisecond)
-
-	requireTranche1 := false
 	tmp := uint32(1 << 31)
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
@@ -185,7 +182,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 	}
 	tranche := auditing_statedb.GetTranche()
 	if tranche == 0 {
-		n.ProcessAudit(requireTranche1, tranche, headerHash)
+		n.ProcessAudit(tranche, headerHash)
 	}
 	done := false
 	for !done {
@@ -201,6 +198,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 			if tranche != tmp && tranche != 0 {
 				// if it's the same tranche, check if the block is audited
 				// if it's audited, break the loop
+
 				isAudited, err := n.CheckBlockAudited(headerHash, tranche-1)
 				if err != nil {
 					return fmt.Errorf("CheckBlockAudited failed :%v", err)
@@ -224,17 +222,18 @@ func (n *Node) Audit(headerHash common.Hash) error {
 					//TODO: we should never get here under tiny case
 					panic(fmt.Sprintf("%s [T:%d] Audit still not complete after Tranche %v block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche, auditing_statedb.Block.Hash()))
 				}
-				n.ProcessAudit(requireTranche1, tranche, headerHash)
+				n.ProcessAudit(tranche, headerHash)
 			}
+
 		default:
-			continue
+			time.Sleep(1 * time.Millisecond)
 		}
 
 	}
 	return nil
 }
 
-func (n *Node) ProcessAudit(requireTranche1 bool, tranche uint32, headerHash common.Hash) error {
+func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	// announce the work report
 	// reports=>work report selection need to be audited
 	var reports []types.WorkReportSelection
@@ -242,24 +241,77 @@ func (n *Node) ProcessAudit(requireTranche1 bool, tranche uint32, headerHash com
 	// "bench/backup" node - node that does not announe nor provide judgment at tranche0. so it can be used to fulfil problematic node at tranche > 0
 	var err error
 	/*
-		condition/setup requried for successful exit at tranch1:
-		node0 is "bench/backup" - not doing anything at tranche0 yet
-		node1 is "problematic" - it's issuing announcement but not providing judgement
-
+		Non-selected Auditor	nothing to do & nothing to be malicious about
+		"over-zealous" Auditor	not selected but decides to announce & judge nontheless; is this consider bad or accetable behavior?
+		Lazy Announcer	should announce but doesn't ==> NoShow
+		Lousy Announcer	announces but doesn't judge
+		Lying Judge saying false [LJ-F]	announces, judges False for Truthful Guarantor
+		Lying Judge saying true [LJ-T]	announces, judges True for Lying Guarantor
 	*/
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
-	if requireTranche1 {
-		// forcing tranche1 to happen by making node0 as "bench/backup"
-		if n.id != 0 && tranche == 0 {
-			reports, err = n.Announce(headerHash, tranche)
-		} else if tranche > 0 {
+
+	// normal behavior
+	switch n.AuditNodeType {
+	case "normal":
+		reports, err = n.Announce(headerHash, tranche)
+		judges, err := n.Judge(headerHash, reports)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+		} else {
+			n.DistributeJudgements(judges, headerHash)
+		}
+	case "lazy_announcer":
+		// Lazy Announcer: should announce but doesn't
+	case "lousy_announcer":
+		// Lousy Announcer: announces but doesn't judge
+		reports, err = n.Announce(headerHash, tranche)
+	case "lying_judger_F":
+		// Lying Judge saying false [LJ-F]: announces, judges False for Truthful Guarantor
+		reports, err = n.Announce(headerHash, tranche)
+		judges, err := n.Judge(headerHash, reports)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+		} else {
+			for i := range judges {
+				judges[i].Judge = false
+				judges[i].Sign(n.GetEd25519Secret())
+			}
+			n.DistributeJudgements(judges, headerHash)
+		}
+	case "lying_judger_T":
+		// Lying Judge saying true [LJ-T]: announces, judges True for Lying Guarantor
+		reports, err = n.Announce(headerHash, tranche)
+		judges, err := n.Judge(headerHash, reports)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+		} else {
+			for i := range judges {
+				judges[i].Judge = true
+				judges[i].Sign(n.GetEd25519Secret())
+			}
+			n.DistributeJudgements(judges, headerHash)
+		}
+	case "non-selected_auditor":
+		// Non-selected Auditor: nothing to do & nothing to be malicious about
+		if tranche > 0 {
 			reports, err = n.Announce(headerHash, tranche)
 		}
-	} else {
-		// normal behavior
-		reports, err = n.Announce(headerHash, tranche)
-	}
+		judges, err := n.Judge(headerHash, reports)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+		} else {
+			n.DistributeJudgements(judges, headerHash)
+		}
 
+	default:
+		reports, err = n.Announce(headerHash, tranche)
+		judges, err := n.Judge(headerHash, reports)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+		} else {
+			n.DistributeJudgements(judges, headerHash)
+		}
+	}
 	if debugAudit && len(reports) == 0 {
 		fmt.Printf("%s [T:%d] Tranche %v, no audit reports\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
 	} else if debugAudit {
@@ -272,34 +324,7 @@ func (n *Node) ProcessAudit(requireTranche1 bool, tranche uint32, headerHash com
 		fmt.Printf("Error %v\n", err)
 	}
 	// audit the work report
-	// let node 1 never issure judgement
 
-	if requireTranche1 {
-		// use to trigger tranche1
-		if n.id != 1 && tranche == 0 {
-			judges, err := n.Judge(headerHash, reports)
-			if err != nil {
-				fmt.Printf("Error %v\n", err)
-			} else {
-				n.DistributeJudgements(judges, headerHash)
-			}
-		} else if tranche > 0 {
-			judges, err := n.Judge(headerHash, reports)
-			if err != nil {
-				fmt.Printf("Error %v\n", err)
-			} else {
-				n.DistributeJudgements(judges, headerHash)
-			}
-		}
-	} else {
-		judges, err := n.Judge(headerHash, reports)
-		if err != nil {
-			fmt.Printf("Error %v\n", err)
-		} else {
-			n.DistributeJudgements(judges, headerHash)
-		}
-
-	}
 	return nil
 }
 
@@ -631,28 +656,80 @@ func (n *Node) CheckBlockAudited(headerHash common.Hash, tranche uint32) (bool, 
 
 		}
 	}
+	// try to form disputes if not audited
+
+	disputed, err := n.MakeDisputes(headerHash)
+	if disputed {
+
+		audting_statedb, err := n.getAuditingStateDB(headerHash)
+		if err != nil {
+			return false, err
+		}
+		audting_statedb.Block.Extrinsic.Disputes.Print()
+		return false, fmt.Errorf("%s Block %v is not audited -- issue disputes at tranche: %d", n.String(), headerHash, tranche)
+	}
+
 	return isBlockAudited, nil
 }
 
 // if there is a dispute (bad judgement), we should make a dispute extrinsic
-func (n *Node) MakeDisputes(headerHash common.Hash) error {
-
+func (n *Node) MakeDisputes(headerHash common.Hash) (bool, error) {
+	var err_dispute error
+	err_dispute = fmt.Errorf("No Need To Dispute")
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	judgement_bucket, err := n.getJudgementBucket(headerHash)
 	if err != nil {
-		return err
+		return false, err
 	}
-	for _, rho := range auditing_statedb.JamState.AvailabilityAssignments {
-		if rho == nil {
-			continue
+	for _, awr := range auditing_statedb.AvailableWorkReport {
+		old_eg, err := n.TraceOldGuarantee(headerHash, awr.GetWorkPackageHash())
+		if err != nil {
+			return false, err
 		}
-		auditing_statedb.AppendDisputes(*judgement_bucket, rho.WorkReport.GetWorkPackageHash())
+		err_dispute = auditing_statedb.AppendDisputes(judgement_bucket, awr.Hash(), old_eg)
 	}
-	return nil
+	if err_dispute == nil {
+		auditing_statedb.Block.Extrinsic.Disputes.FormatDispute()
+		n.updateAuditingStateDB(auditing_statedb)
+		return true, nil
+	}
+	return false, nil
+}
+
+func (n *Node) TraceOldGuarantee(headerHash common.Hash, workpackage_hash common.Hash) (types.Guarantee, error) {
+	auditing_statedb, err := n.getAuditingStateDB(headerHash)
+	if err != nil {
+		return types.Guarantee{}, err
+	}
+	parent_hash := auditing_statedb.Block.ParentHash()
+	empty := common.Hash{}
+	if !n.statedbMapMutex.TryLock() {
+		fmt.Printf("Failed to acquire lock for statedbMapMutex\n")
+		return types.Guarantee{}, fmt.Errorf("Failed to acquire lock for statedbMapMutex")
+	}
+	defer n.statedbMapMutex.Unlock()
+	// TODO: change to eg time slots limit
+	for i := 0; i < 100; i++ {
+		if parent_hash == empty {
+			return types.Guarantee{}, fmt.Errorf("TraceOldGuarantee: %v no parent hash", headerHash)
+		}
+		if statedb, exists := n.statedbMap[parent_hash]; exists {
+			block := statedb.Block
+			for _, block_eg := range block.Extrinsic.Guarantees {
+				if block_eg.Report.AvailabilitySpec.WorkPackageHash == workpackage_hash {
+					return block_eg, nil
+				}
+			}
+			parent_hash = block.Header.Parent
+		} else {
+			return types.Guarantee{}, fmt.Errorf("TraceOldGuarantee: parent %v not found", parent_hash)
+		}
+	}
+	return types.Guarantee{}, fmt.Errorf("TraceOldGuarantee: wp %v not found", workpackage_hash)
 }
 
 // every time we make an announcement, we should broadcast it to the network
@@ -760,5 +837,28 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 	}
 	judgementBucket.PutJudgement(judgement)
 	n.judgementMap.Store(headerHash, *judgementBucket)
+	if !judgement.Judge {
+		if judgementBucket.HaveMadeJudgementByValidator(judgement.WorkReportHash, uint16(n.GetCurrValidatorIndex())) {
+			return nil
+		} else {
+			var audit_report types.WorkReport
+			for _, a := range auditing_statedb.AvailableWorkReport {
+				if a.Hash() == judgement.WorkReportHash {
+					audit_report = a
+				}
+			}
+			emptyhash := common.Hash{}
+			if audit_report.Hash() == emptyhash {
+				return fmt.Errorf("work report not found")
+			}
+			audit_j, err := n.auditWorkReport(audit_report, headerHash)
+			if err != nil {
+				return err
+			}
+			n.DistributeJudgements([]types.Judgement{audit_j}, headerHash)
+
+		}
+	}
+
 	return nil
 }

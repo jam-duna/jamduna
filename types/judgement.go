@@ -166,12 +166,6 @@ func (J *JudgeBucket) GetFalseCount(W common.Hash) int {
 func (J *JudgeBucket) GetTrueJudgement(W common.Hash) []Judgement {
 	judgements := make([]Judgement, 0)
 	for _, j := range J.Judgements[W] {
-		//drop duplicate
-		for _, jj := range judgements {
-			if j.Signature == jj.Signature {
-				continue
-			}
-		}
 		if j.Judge {
 			judgements = append(judgements, j)
 		}
@@ -182,12 +176,6 @@ func (J *JudgeBucket) GetTrueJudgement(W common.Hash) []Judgement {
 func (J *JudgeBucket) GetFalseJudgement(W common.Hash) []Judgement {
 	judgements := make([]Judgement, 0)
 	for _, j := range J.Judgements[W] {
-		//drop duplicate
-		for _, jj := range judgements {
-			if j.Signature == jj.Signature {
-				continue
-			}
-		}
 		if !j.Judge {
 			judgements = append(judgements, j)
 		}
@@ -203,12 +191,6 @@ func (J *JudgeBucket) GetWonkeyJudgement(W common.Hash) []Judgement {
 	trueCount := 0
 	falseCount := 0
 	for _, j := range J.Judgements[W] {
-		//drop duplicate
-		for _, jj := range judgements {
-			if j.Signature == jj.Signature {
-				continue
-			}
-		}
 		if !j.Judge {
 			if falseCount >= WonkyFalseThreshold {
 				continue

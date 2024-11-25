@@ -62,11 +62,12 @@ const (
 
 type Node struct {
 	id uint16
-
-	credential types.ValidatorSecret
-	server     quic.Listener
-	peers      []string
-	peersInfo  map[uint16]*Peer //<ed25519> -> NodeInfo
+	//coreIndex uint16
+	AuditNodeType string
+	credential    types.ValidatorSecret
+	server        quic.Listener
+	peers         []string
+	peersInfo     map[uint16]*Peer //<ed25519> -> NodeInfo
 
 	tlsConfig *tls.Config
 
@@ -237,6 +238,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		clients:   make(map[string]string),
 		nodeType:  nodeType,
 
+		AuditNodeType: "normal",
+
 		statedbMap:     make(map[common.Hash]*statedb.StateDB),
 		judgementWRMap: make(map[common.Hash]common.Hash),
 
@@ -335,6 +338,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	go node.runServer()
 	go node.runClient()
 	go node.runMain()
+	// go node.runAudit()
 	go node.runPreimages()
 	go node.runBlocksTickets()
 	return node, nil

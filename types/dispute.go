@@ -1,10 +1,12 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -141,31 +143,12 @@ func (a *Dispute) Hash() common.Hash {
 }
 
 func (a *Dispute) Print() {
-	fmt.Printf("Dispute:\n")
-	fmt.Printf("  Verdicts:\n")
-	for _, v := range a.Verdict {
-		fmt.Printf("    - Target:    %04x\n", v.Target)
-		fmt.Printf("      Epoch:     %d\n", v.Epoch)
-		fmt.Printf("      Votes:\n")
-		for _, vote := range v.Votes {
-			fmt.Printf("        -- Validator:  %d\n", vote.Index)
-			fmt.Printf("           Vote:       %t\n", vote.Voting)
-			fmt.Printf("           Signature:  %x\n", vote.Signature)
-		}
+	// print json
+	enc, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		fmt.Println(err)
 	}
-	fmt.Printf("  Culprits:\n")
-	for _, c := range a.Culprit {
-		fmt.Printf("    - Target:    %x\n", c.Target)
-		fmt.Printf("      Key:       %x\n", c.Key)
-		fmt.Printf("      Signature: %x\n", c.Signature)
-	}
-	fmt.Printf("  Faults:\n")
-	for _, f := range a.Fault {
-		fmt.Printf("    - Target:    %x\n", f.Target)
-		fmt.Printf("      Voting:    %t\n", f.Voting)
-		fmt.Printf("      Key:       %x\n", f.Key)
-		fmt.Printf("      Signature: %x\n", f.Signature)
-	}
+	fmt.Println(string(enc))
 }
 
 func (a *Culprit) UnmarshalJSON(data []byte) error {
@@ -343,4 +326,51 @@ func (f *Fault) Bytes() []byte {
 func (f *Fault) Hash() common.Hash {
 	data := f.Bytes()
 	return common.Blake2Hash(data)
+}
+
+func (d *Dispute) FormatDispute() {
+	// verdicts, culprits, faults
+	// verdicts : order by target, votes : order by index
+	d.Verdict = SortVerdicts(d.Verdict)
+	// culprits : order by target
+	d.Culprit = SortCulprits(d.Culprit)
+	// faults : order by target
+	d.Fault = SortFaults(d.Fault)
+}
+
+func SortVerdicts(verdicts []Verdict) []Verdict {
+	// Sort the verdicts by target
+	sort.Slice(verdicts, func(i, j int) bool {
+		return bytes.Compare(verdicts[i].Target.Bytes(), verdicts[j].Target.Bytes()) < 0
+	})
+	for _, v := range verdicts {
+		v.Votes = SortVotes(v.Votes)
+	}
+	return verdicts
+}
+
+func SortVotes(votes [ValidatorsSuperMajority]Vote) [ValidatorsSuperMajority]Vote {
+	// Sort the votes by index
+	voteSlice := votes[:]
+	sort.Slice(voteSlice, func(i, j int) bool {
+		return voteSlice[i].Index < voteSlice[j].Index
+	})
+	copy(votes[:], voteSlice)
+	return votes
+}
+
+func SortCulprits(culprits []Culprit) []Culprit {
+	// Sort the culprits by target
+	sort.Slice(culprits, func(i, j int) bool {
+		return bytes.Compare(culprits[i].Target.Bytes(), culprits[j].Target.Bytes()) < 0
+	})
+	return culprits
+}
+
+func SortFaults(faults []Fault) []Fault {
+	// Sort the faults by target
+	sort.Slice(faults, func(i, j int) bool {
+		return bytes.Compare(faults[i].Target.Bytes(), faults[j].Target.Bytes()) < 0
+	})
+	return faults
 }

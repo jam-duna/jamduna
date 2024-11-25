@@ -341,6 +341,7 @@ func testJAM(t *testing.T, jam string) {
 
 func testFib(t *testing.T, nodes []*Node, testServices map[string]*types.TestService) {
 	fmt.Printf("Start FIB\n")
+
 	service0 := testServices["fib"]
 	n1 := nodes[1]
 	n4 := nodes[4]

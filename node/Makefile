@@ -16,3 +16,7 @@ fib:
 megatron:
 	@echo "Running TestMegatron with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run ^TestMegatron$
+
+disputes:
+	@echo "Running TestDisputes with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run ^TestDisputes$
