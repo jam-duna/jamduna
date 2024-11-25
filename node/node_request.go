@@ -164,7 +164,7 @@ func (n *Node) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) 
 func (n *Node) cacheBlock(block *types.Block) {
 	n.blocksMutex.Lock()
 	defer n.blocksMutex.Unlock()
-	n.blocks[block.ParentHash()] = block
+	n.blocks[block.GetParentHeaderHash()] = block
 }
 
 func (n *Node) cacheHeadersRead(h common.Hash) (b *types.Block, ok bool) {

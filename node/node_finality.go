@@ -7,11 +7,11 @@ import (
 )
 
 // Check if a StateDB has exactly one child (i.e., no forks)
-func (n *Node) hasSingleChild(blockHash common.Hash) bool {
+func (n *Node) hasSingleChild(headerHash common.Hash) bool {
 
 	count := 0
 	for _, statedb := range n.statedbMap {
-		if statedb.ParentHash == blockHash {
+		if statedb.ParentHeaderHash == headerHash {
 			count++
 		}
 		if count > 1 {
@@ -22,16 +22,16 @@ func (n *Node) hasSingleChild(blockHash common.Hash) bool {
 }
 
 // Count descendants with no forks
-func (n *Node) countDescendantsWithNoForks(blockHash common.Hash, depth int) int {
+func (n *Node) countDescendantsWithNoForks(headerHash common.Hash, depth int) int {
 	if depth == 5 {
 		return 1 // Reached depth of 5 descendants
 	}
 
 	for _, statedb := range n.statedbMap {
-		if statedb.ParentHash == blockHash {
-			if n.hasSingleChild(blockHash) {
+		if statedb.ParentHeaderHash == headerHash {
+			if n.hasSingleChild(headerHash) {
 				// Recursively check descendants
-				return n.countDescendantsWithNoForks(statedb.BlockHash, depth+1)
+				return n.countDescendantsWithNoForks(statedb.ParentHeaderHash, depth+1)
 			}
 		}
 	}
@@ -44,9 +44,9 @@ func (n *Node) finalizeBlocks() {
 	defer n.statedbMapMutex.Unlock()
 
 	for _, statedb := range n.statedbMap {
-		if !statedb.Finalized && n.countDescendantsWithNoForks(statedb.BlockHash, 0) == 1 {
+		if !statedb.Finalized && n.countDescendantsWithNoForks(statedb.HeaderHash, 0) == 1 {
 			if debugF {
-				fmt.Printf("%s Finality %v\n", n.String(), statedb.BlockHash)
+				fmt.Printf("%s Finality %v\n", n.String(), statedb.HeaderHash)
 			}
 			// TODO: connect to Grandpa
 			blsSignature, finalizedEpoch, err := statedb.Finalize(n.credential)

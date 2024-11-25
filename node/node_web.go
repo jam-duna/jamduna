@@ -33,7 +33,7 @@ func (n *Node) getRecentBlocks(limit int) []SerializedBlock {
 
 	// Start from the current block in the statedb
 	currentState := n.statedb
-	currentHash := currentState.BlockHash
+	currentHash := currentState.HeaderHash
 
 	for i := 0; i < limit; i++ {
 		block, exists := n.cacheBlockRead(currentHash)
@@ -48,13 +48,13 @@ func (n *Node) getRecentBlocks(limit int) []SerializedBlock {
 		})
 
 		// Move to the parent block using the ParentHash
-		parentHash := currentState.ParentHash
-		nextState, exists := n.statedbMap[parentHash]
+		parentHeaderHash := currentState.ParentHeaderHash
+		nextState, exists := n.statedbMap[parentHeaderHash]
 		if !exists {
 			break // Stop if the parent block is not found in the statedbMap
 		}
 
-		currentHash = parentHash
+		currentHash = parentHeaderHash
 		currentState = nextState
 	}
 

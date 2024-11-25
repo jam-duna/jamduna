@@ -20,15 +20,16 @@ import (
 )
 
 type StateDB struct {
-	Finalized  bool
-	Id         uint16       `json:"id"`
-	Block      *types.Block `json:"block"`
-	ParentHash common.Hash  `json:"parentHash"`
-	BlockHash  common.Hash  `json:"blockHash"`
-	StateRoot  common.Hash  `json:"stateRoot"`
-	JamState   *JamState    `json:"Jamstate"`
-	sdb        *storage.StateDBStorage
-	trie       *trie.MerkleTree
+	Finalized        bool
+	Id               uint16       `json:"id"`
+	Block            *types.Block `json:"block"`
+	ParentHeaderHash common.Hash  `json:"parentHeaderHash"`
+	HeaderHash       common.Hash  `json:"headerHash"`
+
+	StateRoot common.Hash `json:"stateRoot"`
+	JamState  *JamState   `json:"Jamstate"`
+	sdb       *storage.StateDBStorage
+	trie      *trie.MerkleTree
 
 	VMs     map[uint32]*pvm.VM
 	vmMutex sync.Mutex
@@ -381,7 +382,7 @@ func InitStateDBFromGenesis(sdb *storage.StateDBStorage, snapshot *StateSnapshot
 	return statedb, nil
 }
 
-func (s *StateDB) HeaderHash() common.Hash {
+func (s *StateDB) GetHeaderHash() common.Hash {
 	return s.Block.Header.Hash()
 }
 
@@ -864,7 +865,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 			return statedb, fmt.Errorf("[statedb:newStateDB] JSON decode error: %v", err)
 		}
 		statedb.Block = &block
-		statedb.ParentHash = block.Header.Parent
+		statedb.ParentHeaderHash = block.Header.ParentHeaderHash
 	}
 
 	return statedb, nil
@@ -884,8 +885,8 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	newStateDB = &StateDB{
 		Id:                    s.Id,
 		Block:                 s.Block.Copy(), // You might need to deep copy the Block if it's mutable
-		ParentHash:            s.ParentHash,
-		BlockHash:             s.BlockHash,
+		ParentHeaderHash:      s.ParentHeaderHash,
+		HeaderHash:            s.HeaderHash,
 		StateRoot:             s.StateRoot,
 		JamState:              s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:                   s.sdb,
@@ -992,6 +993,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 			if err != nil {
 				return nil, nil, err
 			}
+
 			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
@@ -1000,7 +1002,8 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 			// AddDrawBlock(common.Str(proposedBlk.Hash()), common.Str(proposedBlk.ParentHash()), int(proposedBlk.Header.AuthorIndex), fmt.Sprintf("%d", proposedBlk.Header.Slot))
-			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.ParentHash()), common.Str(proposedBlk.Hash()), currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
+			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
+				currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
 			elapsed := time.Since(start)
 			if trace && elapsed > 2000000 {
 				fmt.Printf("\033[31m MakeBlock / ApplyStateTransitionFromBlock\033[0m %d ms\n", elapsed/1000)
@@ -1231,12 +1234,14 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	old_timeslot := s.GetSafrole().Timeslot
 	s.JamState = oldState.JamState.Copy()
 	s.Block = blk
-	s.ParentHash = blk.Header.Parent
+	s.ParentHeaderHash = blk.Header.ParentHeaderHash
+	s.HeaderHash = blk.Header.Hash()
+	if debug {
+		fmt.Printf("[N%d] ApplyStateTransitionFromBlock (%v <== %v) s.StateRoot=%v\n", s.Id, s.ParentHeaderHash, s.HeaderHash, s.StateRoot)
+	}
+
 	s.RemoveUnusedTickets()
 	targetJCE := blk.TimeSlot()
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock blk.Hash()=%v s.StateRoot=%v\n", blk.Hash(), s.StateRoot)
-	}
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
 	s.ApplyStateRecentHistory(blk, &(s.accumulationRoot))
@@ -1345,20 +1350,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
 	}
-	s.Block = blk
-	s.ParentHash = s.BlockHash
-	s.BlockHash = blk.Hash()
 	s.StateRoot = s.UpdateTrieState()
 
 	//State transition is successful.  Remove E(T,P,A,G,D) from statedb queue
 	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
 	if debug {
 		fmt.Printf("Queue Tickets Length: %v\n", len(s.queuedTickets))
-	}
-
-	elapsed = time.Since(start).Microseconds()
-	if trace && elapsed > 3000000 {
-		fmt.Printf("\033[31m ApplyStateTransitionFromBlock:TOTAL \033[0m %d ms\n", elapsed/1000)
 	}
 	return s, nil
 }
@@ -1389,7 +1386,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()
 	extrinsicData := types.NewExtrinsic()
-	h.Parent = s.BlockHash
+	h.ParentHeaderHash = s.HeaderHash
 	h.ParentStateRoot = stateRoot
 	h.Slot = targetJCE
 	// Extrinsic Data has 5 different Extrinsics
@@ -1420,7 +1417,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 
 	// E_A - Assurances
-	aMap := (*assuranceMap)[h.Parent]
+	aMap := (*assuranceMap)[h.ParentHeaderHash]
 	assurances := make([]types.Assurance, 0)
 	for _, a := range aMap {
 		assurances = append(assurances, *a)

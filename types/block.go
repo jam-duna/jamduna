@@ -32,7 +32,7 @@ func (b *Block) Copy() *Block {
 	c := NewBlock()
 
 	// Copy Header fields
-	c.Header.Parent = b.Header.Parent
+	c.Header.ParentHeaderHash = b.Header.ParentHeaderHash
 	c.Header.ParentStateRoot = b.Header.ParentStateRoot
 	c.Header.ExtrinsicHash = b.Header.ExtrinsicHash
 	c.Header.Slot = b.Header.Slot
@@ -131,9 +131,9 @@ func (b *Block) Hash() common.Hash {
 	return common.Blake2Hash(blockBytes)
 }
 
-// Hash returns the hash of the block.
-func (b *Block) ParentHash() common.Hash {
-	return b.Header.Parent
+// ParentHash returns the headerhash of the parent.
+func (b *Block) GetParentHeaderHash() common.Hash {
+	return b.Header.ParentHeaderHash
 }
 
 func (b *Block) Str() string {

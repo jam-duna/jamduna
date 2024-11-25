@@ -43,7 +43,7 @@ func (n *Node) StoreBlock(blk *types.Block, id uint16, debug bool) error {
 
 	// child_<parentHash>_headerhash -> blockHash and potentially use "seek"
 	childPrefix := []byte("child_")
-	childStoreKey := append(childPrefix, blk.Header.Parent[:]...)
+	childStoreKey := append(childPrefix, blk.Header.ParentHeaderHash[:]...)
 	childStoreKey = append(childStoreKey, headerhash[:]...)
 	s.WriteRawKV(childStoreKey, blockHash[:])
 	return nil

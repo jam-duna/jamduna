@@ -32,7 +32,7 @@ func (n *Node) initAudit(headerHash common.Hash) {
 }
 
 func (n *Node) addAuditingStateDB(auditdb *statedb.StateDB) error {
-	headerHash := auditdb.HeaderHash()
+	headerHash := auditdb.GetHeaderHash()
 	_, loaded := n.auditingMap.LoadOrStore(headerHash, auditdb)
 	if loaded {
 		return nil
@@ -41,7 +41,7 @@ func (n *Node) addAuditingStateDB(auditdb *statedb.StateDB) error {
 }
 
 func (n *Node) updateAuditingStateDB(auditdb *statedb.StateDB) error {
-	headerHash := auditdb.HeaderHash()
+	headerHash := auditdb.GetHeaderHash()
 	_, exists := n.auditingMap.Load(headerHash)
 	if !exists {
 		return fmt.Errorf("updateAuditingStateDB failed headerHash %v missing!", headerHash)
@@ -146,9 +146,9 @@ func (n *Node) runAudit() {
 			// Small pause to reduce CPU load when channels are quiet
 
 		case audit_statedb := <-n.auditingCh:
-			headerHash := audit_statedb.HeaderHash()
+			headerHash := audit_statedb.GetHeaderHash()
 			if debugAudit {
-				fmt.Printf("%s [T:%d] start auditing block %v (headerHash:%v)\n", n.String(), audit_statedb.Block.TimeSlot(), audit_statedb.BlockHash, headerHash)
+				fmt.Printf("%s [T:%d] start auditing block %v (headerHash:%v)\n", n.String(), audit_statedb.Block.TimeSlot(), audit_statedb.HeaderHash, headerHash)
 			}
 			err := n.addAuditingStateDB(audit_statedb)
 			if err != nil {
@@ -705,7 +705,7 @@ func (n *Node) TraceOldGuarantee(headerHash common.Hash, workpackage_hash common
 	if err != nil {
 		return types.Guarantee{}, err
 	}
-	parent_hash := auditing_statedb.Block.ParentHash()
+	parent_hash := auditing_statedb.Block.GetParentHeaderHash()
 	empty := common.Hash{}
 	if !n.statedbMapMutex.TryLock() {
 		fmt.Printf("Failed to acquire lock for statedbMapMutex\n")
@@ -724,7 +724,7 @@ func (n *Node) TraceOldGuarantee(headerHash common.Hash, workpackage_hash common
 					return block_eg, nil
 				}
 			}
-			parent_hash = block.Header.Parent
+			parent_hash = block.GetParentHeaderHash()
 		} else {
 			return types.Guarantee{}, fmt.Errorf("TraceOldGuarantee: parent %v not found", parent_hash)
 		}

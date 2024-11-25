@@ -262,7 +262,7 @@ func (s *StateDB) MakeAnnouncement(tranche uint32, workreport []types.WorkReport
 	}
 
 	announcement := types.Announcement{
-		HeaderHash:          s.HeaderHash(),
+		HeaderHash:          s.GetHeaderHash(),
 		Tranche:             tranche,
 		Selected_WorkReport: annReports,
 		ValidatorIndex:      validatoridx,

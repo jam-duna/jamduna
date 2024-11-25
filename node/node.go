@@ -460,15 +460,15 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 	defer n.statedbMapMutex.Unlock()
 
 	if n.statedb == nil || n.statedb.GetBlock() == nil {
-		var blkHash common.Hash
+		var headerHash common.Hash
 		if _statedb.GetBlock() != nil {
-			blkHash = _statedb.GetBlock().Hash()
+			headerHash = _statedb.GetHeaderHash()
 		}
 		if debug {
-			fmt.Printf("[N%d] addStateDB [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHash, _statedb.BlockHash, _statedb.StateRoot)
+			fmt.Printf("[N%d] addStateDB [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHeaderHash, _statedb.HeaderHash, _statedb.StateRoot)
 		}
 		n.statedb = _statedb
-		n.statedbMap[blkHash] = _statedb
+		n.statedbMap[headerHash] = _statedb
 		return nil
 	}
 	if _statedb.GetBlock() == nil {
@@ -481,10 +481,10 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 	}
 	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() {
 		if debug {
-			fmt.Printf("[N%d] addStateDB TIP %v\n", n.id, _statedb.GetBlock().Hash())
+			fmt.Printf("[N%d] addStateDB TIP %v\n", n.id, _statedb.GetHeaderHash())
 		}
 		n.statedb = _statedb
-		n.statedbMap[_statedb.GetBlock().Hash()] = _statedb
+		n.statedbMap[_statedb.GetHeaderHash()] = _statedb
 	}
 	return nil
 }
@@ -695,7 +695,7 @@ func (n *Node) dumpstatedbmap() {
 	defer n.statedbMapMutex.Unlock()
 
 	for hash, statedb := range n.statedbMap {
-		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHash, statedb.BlockHash, statedb.StateRoot)
+		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHeaderHash, statedb.HeaderHash, statedb.StateRoot)
 	}
 
 	n.blocksMutex.Lock()
@@ -719,12 +719,12 @@ func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
 }
 
 func (n *Node) extendChain() error {
-	parenthash := n.statedb.BlockHash
+	parentheaderhash := n.statedb.HeaderHash
 	for {
 
 		ok := false
 		for _, b := range n.blocks {
-			if b.ParentHash() == parenthash {
+			if b.GetParentHeaderHash() == parentheaderhash {
 				ok = true
 				nextBlock := b
 
@@ -748,22 +748,21 @@ func (n *Node) extendChain() error {
 				// Print the elapsed time in milliseconds
 				elapsed := time.Since(start).Microseconds()
 				if elapsed > 1000000 && trace {
-					fmt.Printf("[N%d] extendChain %v <- %v \033[ApplyStateTransitionFromBlock\033[0m took %d ms\n", n.id, common.Str(parenthash), common.Str(nextBlock.Hash()), elapsed/1000)
+					fmt.Printf("[N%d] extendChain %v <- %v \033[ApplyStateTransitionFromBlock\033[0m took %d ms\n", n.id, common.Str(parentheaderhash), common.Str(nextBlock.Hash()), elapsed/1000)
 				}
 
 				// Extend the tip of the chain
 				n.addStateDB(newStateDB)
 
 				// simulated finality
-				n.finalizeBlocks()
-				parenthash = nextBlock.Hash()
-				if debug {
-					fmt.Printf("%s [extendChain:addStateDB] TIP Now: s:%v<-%v\n", n.String(), newStateDB.ParentHash, newStateDB.BlockHash)
-				}
+				//n.finalizeBlocks()
+				parentheaderhash = nextBlock.Header.Hash()
 				n.assureNewBlock(b)
-				n.statedbMapMutex.Lock()
-				n.auditingCh <- n.statedbMap[n.statedb.BlockHash].Copy()
-				n.statedbMapMutex.Unlock()
+				if false {
+					n.statedbMapMutex.Lock()
+					n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+					n.statedbMapMutex.Unlock()
+				}
 				break
 			}
 
@@ -772,7 +771,7 @@ func (n *Node) extendChain() error {
 		if !ok {
 			// If there is no next block, we're done!
 			if debug {
-				fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parenthash)
+				fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parentheaderhash)
 			}
 			return nil
 		}
@@ -785,7 +784,7 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 			n.assureData(g)
 		}
 	}
-	a, numCores, err := n.generateAssurance(b.Hash())
+	a, numCores, err := n.generateAssurance(b.Header.Hash())
 	if err != nil {
 		return err
 	}
@@ -807,24 +806,24 @@ func (n *Node) processBlock(blk *types.Block) error {
 	n.cacheBlock(blk)
 	n.cacheHeaders(b.Header.Hash(), blk)
 	for {
-		if b.ParentHash() == (common.Hash{}) {
+		if b.GetParentHeaderHash() == (common.Hash{}) {
 			//fmt.Printf("[N%d] processBlock: hit genesis (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
-		} else if n.statedb != nil && b.ParentHash() == n.statedb.BlockHash {
+		} else if n.statedb != nil && b.GetParentHeaderHash() == n.statedb.HeaderHash {
 			//fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else {
 			var err error
-			parentBlock, ok := n.cacheBlockRead(b.ParentHash())
+			parentBlock, ok := n.cacheBlockRead(b.GetParentHeaderHash())
 			if !ok {
-				parentBlock, err = n.fetchBlock(b.ParentHash())
+				parentBlock, err = n.fetchBlock(b.GetParentHeaderHash())
 				if err != nil || parentBlock == nil {
 					// have to give up right now (could try again though!)
 					return err
 				}
 				// got the parent block, store it in the cache
-				if parentBlock.Hash() == blk.ParentHash() {
-					fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.ParentHash(), blk.Hash())
+				if parentBlock.GetParentHeaderHash() == blk.GetParentHeaderHash() {
+					//fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.GetParentHeaderHash(), blk.Hash())
 					n.StoreBlock(parentBlock, n.id, false)
 					n.cacheBlock(parentBlock)
 				} else {
@@ -1254,7 +1253,7 @@ func (n *Node) runClient() {
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
 				n.assureNewBlock(newBlock)
 				n.statedbMapMutex.Lock()
-				n.auditingCh <- n.statedbMap[n.statedb.BlockHash].Copy()
+				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
 				n.statedbMapMutex.Unlock()
 			}
 

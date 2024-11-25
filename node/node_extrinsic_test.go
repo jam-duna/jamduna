@@ -117,7 +117,7 @@ func (n *Node) AddDummyStateAudit() {
 func (n *Node) AddDummyBlockAudit() {
 	n.statedb.Block = &types.Block{
 		Header: types.BlockHeader{
-			Parent: common.BytesToHash([]byte("test")),
+			ParentHeaderHash: common.BytesToHash([]byte("test")),
 		},
 		Extrinsic: types.ExtrinsicData{
 			Disputes: types.Dispute{

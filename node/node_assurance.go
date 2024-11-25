@@ -19,7 +19,7 @@ func (n *Node) isAssuring(workPackageHash common.Hash) bool {
 	return ok
 }
 
-func (n *Node) generateAssurance(blockHash common.Hash) (a types.Assurance, numCores uint16, err error) {
+func (n *Node) generateAssurance(headerHash common.Hash) (a types.Assurance, numCores uint16, err error) {
 	reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
 	if err != nil {
 		return
@@ -34,9 +34,10 @@ func (n *Node) generateAssurance(blockHash common.Hash) (a types.Assurance, numC
 	if numCores == 0 {
 		return a, numCores, nil
 	}
-	a.Anchor = blockHash
+	a.Anchor = headerHash
 	a.ValidatorIndex = n.id
 	a.Sign(n.GetEd25519Secret())
+
 	return
 }
 
