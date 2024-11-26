@@ -111,17 +111,9 @@ var targetFIB = 10
 
 func TestAvailabilityReconstruction(t *testing.T) {
 	// Set up the network
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
-	}
-	nodes := make([]*Node, numNodes)
-	for i := uint16(0); i < numNodes; i++ {
-		node, err := newNode(i, validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], int(basePort+i))
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		nodes[i] = node
 	}
 
 	// Simulate a work package and segments
@@ -251,19 +243,10 @@ func TestAvailabilityReconstruction(t *testing.T) {
 }
 
 func TestNodeRotation(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	// Set up the network
+	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
-		t.Fatalf("Error Seeting up nodes: %v\n", err)
-	}
-
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		//node.state = statedb.ProcessGenesis(genesisAuthorities)
-		nodes[i] = node
+		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 	assign := nodes[0].statedb.AssignGuarantorsTesting(common.BytesToHash(common.ComputeHash([]byte("test"))))
 	for _, a := range assign {

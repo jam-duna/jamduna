@@ -36,22 +36,23 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	debugDA    = false // DA
-	debugB     = false // Blocks, Announcment
-	debugG     = false // Guaranteeing
-	debugT     = false // Tickets/Safrole
-	debugP     = false // Preimages
-	debugA     = false // Assurances
-	debugF     = false // Finality
-	debugJ     = false // Audits + Judgements
-	debug      = false // General Node Ops
-	debugAudit = false // Audit
-	trace      = false
-	debugE     = false // monitoring fn execution time
-	debugTree  = false // trie
-	numNodes   = 6
-	quicAddr   = "127.0.0.1:%d"
-	basePort   = 9000
+	debugDA     = false // DA
+	debugB      = false // Blocks, Announcment
+	debugG      = false // Guaranteeing
+	debugT      = false // Tickets/Safrole
+	debugP      = false // Preimages
+	debugA      = false // Assurances
+	debugF      = false // Finality
+	debugJ      = false // Audits + Judgements
+	debug       = false // General Node Ops
+	debugAudit  = false // Audit
+	trace       = false
+	debugE      = false // monitoring fn execution time
+	debugTree   = false // trie
+	numNodes    = 6
+	quicAddr    = "127.0.0.1:%d"
+	basePort    = 9000
+	GenesisFile = "../cmd/validatetraces/safrole/Traces/genesis.json" // NOTE: this is the keyval version 
 )
 
 const (
@@ -202,16 +203,34 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 }
 
 func NewNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	n, err := newNode(id, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir, port)
+	snapshotRawBytes, err := os.ReadFile(GenesisFile)
+	if err != nil {
+		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
+	}
+	var stateSnapshotRaw statedb.StateSnapshotRaw
+	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
+	if err != nil {
+		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
+	}
+	n, err := newNode(id, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir, port, stateSnapshotRaw)
 	return n, err
 }
 
 func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	n, err := newNode(id, credential, genesisConfig, peers, peerList, DAFlag, dataDir, port)
+	snapshotRawBytes, err := os.ReadFile(GenesisFile)
+	if err != nil {
+		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
+	}
+	var stateSnapshotRaw statedb.StateSnapshotRaw
+	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
+	if err != nil {
+		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
+	}
+	n, err := newNode(id, credential, genesisConfig, peers, peerList, DAFlag, dataDir, port, stateSnapshotRaw)
 	return n, err
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int, trace_config statedb.StateSnapshotRaw) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
 
@@ -237,8 +256,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		peersInfo: make(map[uint16]*Peer),
 		clients:   make(map[string]string),
 		nodeType:  nodeType,
-
-		AuditNodeType: "normal",
 
 		statedbMap:     make(map[common.Hash]*statedb.StateDB),
 		judgementWRMap: make(map[common.Hash]common.Hash),
@@ -326,6 +343,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
 		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
 	}
+	node.statedb.UpdateAllTrieStateRaw(trace_config) // insert the genesis state into the trie
 	StateSnapshotRaw := statedb.StateSnapshotRaw{}
 	KeyVals := _statedb.GetAllKeyValues()
 	StateSnapshotRaw.KeyVals = KeyVals
@@ -338,7 +356,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	go node.runServer()
 	go node.runClient()
 	go node.runMain()
-	// go node.runAudit()
 	go node.runPreimages()
 	go node.runBlocksTickets()
 	return node, nil

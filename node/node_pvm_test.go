@@ -19,18 +19,10 @@ import (
 
 func TestNodePOAAccumulatePVM(t *testing.T) {
 
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	// Set up nodes
+	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
-		t.Fatalf("Error Seeting up nodes: %v\n", err)
-	}
-
-	nodes := make([]*Node, numNodes)
-	for i := uint16(0); i < numNodes; i++ {
-		node, err := newNode(i, validatorSecrets[i], &genesisConfig, peers, peerList, DAFlag, nodePaths[i], int(basePort+i))
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		nodes[i] = node
+		t.Fatalf("Failed to set up nodes: %v", err)
 	}
 	// Wait for nodes to be ready
 	fmt.Println("Waiting for nodes to be ready...")

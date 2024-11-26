@@ -9,19 +9,9 @@ import (
 )
 
 func TestGetState(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
-		t.Fatalf("Error Seeting up nodes: %v\n", err)
-	}
-
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		//node.state = statedb.ProcessGenesis(genesisAuthorities)
-		nodes[i] = node
+		t.Fatalf("Failed to set up nodes: %v", err)
 	}
 	// statedb.RunGraph()
 	for {
@@ -66,19 +56,9 @@ func TestGetState(t *testing.T) {
 }
 
 func TestStateRaw(t *testing.T) {
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
-		t.Fatalf("Error Seeting up nodes: %v\n", err)
-	}
-
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		//node.state = statedb.ProcessGenesis(genesisAuthorities)
-		nodes[i] = node
+		t.Fatalf("Failed to set up nodes: %v", err)
 	}
 	// statedb.RunGraph()
 	for {

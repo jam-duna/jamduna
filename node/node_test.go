@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	_ "net/http/pprof"
 	"os"
@@ -140,21 +141,37 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[uint16]*Peer, []ty
 	return genesisConfig, peers, peerList, validatorSecrets, nodePaths, nil
 }
 
-func testSafrole(t *testing.T, sendtickets bool) {
+func SetUpNodes(numNodes int) ([]*Node, error) {
 	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
 	if err != nil {
-		t.Fatalf("Error Seeting up nodes: %v\n", err)
+		return nil, err
 	}
-
+	snapshotRawBytes, err := os.ReadFile(GenesisFile)
+	if err != nil {
+		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
+	}
+	var stateSnapshotRaw statedb.StateSnapshotRaw
+	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
+	if err != nil {
+		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
+	}
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i, stateSnapshotRaw)
 		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
+			return nil, fmt.Errorf("Failed to create node %d: %v", i, err)
 		}
-		node.SetSendTickets(sendtickets)
 		nodes[i] = node
 	}
+	return nodes, nil
+}
+
+func testSafrole(t *testing.T, sendtickets bool) {
+	nodes, err := SetUpNodes(numNodes)
+	if err != nil {
+		t.Fatalf("Error setting up nodes: %v\n", err)
+	}
+	_ = nodes
 	statedb.RunGraph()
 	for {
 		time.Sleep(100 * time.Millisecond) // Adjust the delay as needed
@@ -183,20 +200,11 @@ func getServices(serviceNames []string) (services map[string]*types.TestService,
 }
 
 func testJAM(t *testing.T, jam string) {
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
-		t.Fatalf("Error Seeting up nodes: %v\n", err)
+		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
-
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		//node.state = statedb.ProcessGenesis(genesisAuthorities)
-		nodes[i] = node
-	}
+	_ = nodes
 
 	// give some time for nodes to come up
 	for {
@@ -238,16 +246,20 @@ func testJAM(t *testing.T, jam string) {
 	for _, service := range testServices {
 		builderNode.preimages[service.CodeHash] = service.Code
 	}
-
+	fmt.Printf("Waiting for the first block to be ready...\n")
+	time.Sleep(6 * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		fmt.Printf("Builder storing TestService %s (%v)\n", serviceName, common.Str(service.CodeHash))
 		// set up service using the Bootstrap service
+		slot := builderNode.statedb.GetSafrole().GetTimeSlot()
 		codeWorkPackage := types.WorkPackage{
 			Authorization: []byte(""),
 			AuthCodeHost:  bootstrapService,
 			Authorizer:    types.Authorizer{},
-			RefineContext: types.RefineContext{},
+			RefineContext: types.RefineContext{
+				LookupAnchorSlot: slot,
+			},
 			WorkItems: []types.WorkItem{
 				{
 					Service:          bootstrapService,
@@ -357,7 +369,15 @@ func testFib(t *testing.T, nodes []*Node, testServices map[string]*types.TestSer
 			}
 			importedSegments = append(importedSegments, importedSegment)
 		}
-		refine_context := types.RefineContext{}
+		timeslot := nodes[1].statedb.Block.GetHeader().Slot
+		refine_context := types.RefineContext{
+			Anchor:           common.Hash{},
+			StateRoot:        common.Hash{},
+			BeefyRoot:        common.Hash{},
+			LookupAnchor:     common.Hash{},
+			LookupAnchorSlot: timeslot,
+			Prerequisites:    []common.Hash{},
+		}
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{
@@ -423,14 +443,14 @@ func testMegatron(t *testing.T, nodes []*Node, testServices map[string]*types.Te
 	// make 20 workpackages for Fib and Trib
 	for n := 0; n < 6; n++ {
 		importedSegments := make([]types.ImportSegment, 0)
-
+		timeslot := nodes[1].statedb.GetSafrole().GetTimeSlot()
 		refineContext := types.RefineContext{
 			// These values don't matter until we have a historical lookup -- which we do not!
 			Anchor:           common.Hash{},
 			StateRoot:        common.Hash{},
 			BeefyRoot:        common.Hash{},
 			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: 0,
+			LookupAnchorSlot: timeslot,
 			Prerequisites:    []common.Hash{},
 		}
 
@@ -473,13 +493,14 @@ func testMegatron(t *testing.T, nodes []*Node, testServices map[string]*types.Te
 		importedSegmentsM := make([]types.ImportSegment, 0)
 		prereq := make([]common.Hash, 0)
 		prereq = append(prereq, Fib_Trib_WorkPackages[megaN].Hash())
+		ts := nodes[1].statedb.GetSafrole().GetTimeSlot()
 		refineContext := types.RefineContext{
 			// These values don't matter until we have a historical lookup -- which we do not!
 			Anchor:           common.Hash{},
 			StateRoot:        common.Hash{},
 			BeefyRoot:        common.Hash{},
 			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: 1,
+			LookupAnchorSlot: ts,
 			Prerequisites:    prereq,
 		}
 

@@ -355,6 +355,43 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	return statedb, nil
 }
 
+func NewStateDBFromSnapShotRaw(sdb *storage.StateDBStorage, snapshotRaw StateSnapshotRaw) (statedb *StateDB, err error) {
+	err = nil
+	statedb, err = newStateDB(sdb, common.Hash{})
+	statedb.Block = nil
+	if err != nil {
+		return
+	}
+	statedb.Block = nil
+	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(snapshotRaw)
+	statedb.JamState = NewJamState()
+	statedb.RecoverJamState(statedb.StateRoot)
+	// Load services into genesis state
+	services := []types.TestService{
+		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
+		// Add more services here as needed IF they are needed for Genesis
+	}
+
+	for _, service := range services {
+		code, err := os.ReadFile(service.FileName)
+		if err != nil {
+			return statedb, err
+		}
+		codeHash := common.Blake2Hash(code)
+		bootstrapServiceAccount := types.ServiceAccount{
+			CodeHash:        codeHash,
+			Balance:         10000,
+			GasLimitG:       100,
+			GasLimitM:       100,
+			StorageSize:     uint64(len(code)),
+			NumStorageItems: 1,
+		}
+		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
+		statedb.WriteService(service.ServiceCode, &bootstrapServiceAccount)
+	}
+	return statedb, err
+}
+
 func InitStateDBFromSnapshot(sdb *storage.StateDBStorage, snapshot *StateSnapshot) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
@@ -711,6 +748,14 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 		}
 	}
 	return updated_root
+}
+
+func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Hash {
+
+	for _, kv := range snapshotRaw.KeyVals {
+		s.trie.SetRawKeyVal(common.Hash(kv[0]), kv[1])
+	}
+	return s.trie.GetRoot()
 }
 
 func (s *StateDB) GetSafroleState() *SafroleState {

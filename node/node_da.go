@@ -492,7 +492,7 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle) 
 			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
 			PayloadHash: common.Blake2Hash(workItem.Payload),
-			Gas:         0,
+			Gas:         10,
 			Result:      output,
 		}
 		results = append(results, result)
@@ -586,7 +586,7 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage) (guarantee type
 			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
 			PayloadHash: common.Blake2Hash(workItem.Payload),
-			Gas:         0,
+			Gas:         10,
 			Result:      output,
 		}
 		results = append(results, result)

@@ -308,6 +308,7 @@ func (vm *VM) hostNew() uint32 {
 		Lookup:          make(map[common.Hash]types.LookupObject),
 		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
+	fmt.Printf("Service %d hostNew %v => %d, code hash: %v\n", s, a.CodeHash, a.ServiceIndex(), common.BytesToHash(c))
 	a.SetServiceIndex(xi)
 	if debug_host {
 		fmt.Printf("Service %d hostNew %v => %d\n", s, a.CodeHash, a.ServiceIndex())

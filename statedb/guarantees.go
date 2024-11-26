@@ -501,18 +501,14 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 
 // v0.4.5 eq 148
 func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
-	return nil
 	if s.Block == nil {
 		return fmt.Errorf("invalid lookup anchor slot: block is nil")
 	}
 	valid_anchor := s.Block.TimeSlot() - types.LookupAnchorMaxAge
-	if s.Block.TimeSlot() < types.LookupAnchorMaxAge {
-		valid_anchor = 0
-	}
 	if g.Report.RefineContext.LookupAnchorSlot >= valid_anchor {
 		return nil
 	} else {
-		return fmt.Errorf("invalid lookup anchor slot, core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+		return fmt.Errorf("invalid lookup anchor slot, core %v, package %v, timeslot %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash(), g.Report.RefineContext.LookupAnchorSlot)
 	}
 }
 
@@ -674,11 +670,28 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 
 // v0.4.5 eq 156
 func (s *StateDB) checkCodeHash(g types.Guarantee) error {
-	return nil
+	var err error
 	for _, result := range g.Report.Results {
 		if result.CodeHash != s.JamState.PriorServiceAccountState[result.ServiceID].CodeHash {
-			return fmt.Errorf("%s:invalid code hash, core %v, package %v", errBadCodeHash, g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+			// fmt.Printf("checkCodeHash: %v\n", result.CodeHash)
+			// fmt.Printf("checkCodeHash from service: %v\n", s.JamState.PriorServiceAccountState[result.ServiceID].CodeHash)
+			err = fmt.Errorf("%s: %v", errBadCodeHash, result.CodeHash)
 		}
+	}
+	// get service from trie
+	if err != nil {
+		t := s.CopyTrieState(s.StateRoot)
+		for _, result := range g.Report.Results {
+			v, err := t.GetService(255, result.ServiceID)
+			if err != nil {
+				return fmt.Errorf("%s: %v", errBadServiceID, err)
+			}
+			a, _ := types.ServiceAccountFromBytes(result.ServiceID, v)
+			if result.CodeHash != a.CodeHash {
+				return fmt.Errorf("%s: %v", errBadCodeHash, result.CodeHash)
+			}
+		}
+
 	}
 	return nil
 }
