@@ -93,16 +93,21 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j.SafroleState.Entropy[3] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[2].Bytes())) //BLAKE2B of EpochN2
 	j.SafroleState.TicketsOrKeys.Keys, _ = j.SafroleState.ChooseFallBackValidator()
 	j.DisputesState = Psi_state{}
-	//j.AvailabilityAssignments = make([types.TotalCores]*Rho_state, 0)
+
 
 	// Setup Bootstrap Service for all 3 privileges
 	j.PrivilegedServiceIndices.Kai_a = BootstrapServiceCode
 	j.PrivilegedServiceIndices.Kai_v = BootstrapServiceCode
 	j.PrivilegedServiceIndices.Kai_m = BootstrapServiceCode
-
+	for i := 0; i < types.TotalCores; i++ {
+		j.AuthorizationsPool[i] = make([]common.Hash, types.MaxAuthorizationPoolItems)
+		j.AuthorizationQueue[i] = make([]common.Hash, types.MaxAuthorizationQueueItems)
+	}
 	// setup the initial state of the accumulate state
-	// j.AccumulationHistory = [types.EpochLength]types.AccumulationHistory{}
-	// j.AccumulationQueue = make([]types.AccumulationQueue, types.EpochLength)
+	for i := 0; i < types.EpochLength; i++ {
+		j.AccumulationQueue[i] = make([]types.AccumulationQueue, 0)
+		j.AccumulationHistory[i] = types.AccumulationHistory{}
+	}
 	return j
 }
 

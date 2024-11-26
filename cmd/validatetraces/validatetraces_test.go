@@ -42,7 +42,7 @@ func testSnapshot(t *testing.T, basedir string) {
 	stateRoots := make(map[string]common.Hash)
 
 	// read all the Blocks  files in dir
-	dir := filepath.Join(basedir, "Blocks")
+	dir := filepath.Join(basedir, "blocks")
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		log.Fatalf("Error reading directory %s: %v\n", dir, err)
@@ -90,7 +90,7 @@ func testSnapshot(t *testing.T, basedir string) {
 	})
 
 	// Set the directory to scan for JSON files
-	snapshotsDir := filepath.Join(basedir, "Traces")
+	snapshotsDir := filepath.Join(basedir, "traces")
 	fmt.Printf("\nLoading %s:\n", snapshotsDir)
 	files, err = os.ReadDir(snapshotsDir)
 	if err != nil {
@@ -270,4 +270,9 @@ func TestFallback(t *testing.T) {
 func TestSafrole(t *testing.T) {
 	testSnapshot(t, "safrole")
 	// testApply(t, "safrole")
+}
+
+func TestAssurances(t *testing.T) {
+	testSnapshot(t, "assurances")
+	// testApply(t, "assurances")
 }
