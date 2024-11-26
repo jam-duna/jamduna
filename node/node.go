@@ -218,7 +218,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 	levelDBPath := fmt.Sprintf("%v/leveldb/", dataDir)
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewStateDBStorage %v", err)
 	}
 
 	var cert tls.Certificate

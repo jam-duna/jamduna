@@ -42,7 +42,7 @@ func main() {
 	var validatorIndex int
 	flag.BoolVar(&help, "h", false, "Displays help information about the commands and flags.")
 	flag.StringVar(&config.DataDir, "datadir", filepath.Join(os.Getenv("HOME"), ".jam"), "Specifies the directory for the blockchain, keystore, and other data.")
-	flag.IntVar(&config.Port, "port", 9900, "Specifies the network listening port.")
+	flag.IntVar(&config.Port, "port", 8000, "Specifies the network BASE port.")
 	flag.IntVar(&config.Epoch0Timestamp, "ts", defaultTS, "Epoch0 Unix timestamp (will override genesis config)")
 
 	flag.IntVar(&validatorIndex, "validatorindex", 0, "Validator Index (only for development)")
@@ -59,7 +59,7 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
-	peers, peerList, err := generatePeerNetwork(validators, config.Port)
+	peers, peerList, err := generatePeerNetwork(validators, uint16(config.Port))
 
 	// Load and parse genesis file
 	var genesisConfig statedb.GenesisConfig
@@ -101,9 +101,11 @@ func main() {
 	}
 
 	// Set up peers and node
-	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], &genesisConfig, peers, peerList, config.DataDir, config.Port)
+	dataDir := filepath.Join(config.DataDir, fmt.Sprintf("node%d", validatorIndex))
+	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], &genesisConfig, peers, peerList, dataDir, int(config.Port) + int(validatorIndex))
 	if err != nil {
-		panic(1)
+		fmt.Printf("---NewNodeDA %v\n", err)
+		panic(1999)
 	}
 	n.RunDASimulation()
 
@@ -112,16 +114,16 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			// Add your periodic task here
+
 		}
 	}
 }
 
-func generatePeerNetwork(validators []types.Validator, port int) (peers []string, peerList map[uint16]*node.Peer, err error) {
+func generatePeerNetwork(validators []types.Validator, port uint16) (peers []string, peerList map[uint16]*node.Peer, err error) {
 	peerList = make(map[uint16]*node.Peer)
 	for i := uint16(0); i < types.TotalValidators; i++ {
 		v := validators[i]
-		peerAddr := fmt.Sprintf("node%d:%d", i, port)
+		peerAddr := fmt.Sprintf("127.0.0.1:%d", port+i)
 		peer := fmt.Sprintf("%s", v.Ed25519)
 		peers = append(peers, peer)
 		peerList[i] = &node.Peer{

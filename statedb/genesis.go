@@ -94,7 +94,6 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j.SafroleState.TicketsOrKeys.Keys, _ = j.SafroleState.ChooseFallBackValidator()
 	j.DisputesState = Psi_state{}
 
-
 	// Setup Bootstrap Service for all 3 privileges
 	j.PrivilegedServiceIndices.Kai_a = BootstrapServiceCode
 	j.PrivilegedServiceIndices.Kai_v = BootstrapServiceCode

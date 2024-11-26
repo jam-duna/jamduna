@@ -105,7 +105,7 @@ func main() {
 		panic(1)
 	}
 	for {
-
+		time.Sleep(10 * time.Millisecond) // Adjust the delay as needed
 	}
 }
 

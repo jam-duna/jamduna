@@ -313,7 +313,7 @@ const (
 // Initial services
 const (
 	BootstrapServiceCode = 0
-	BootstrapServiceFile = "../services/bootstrap.pvm"
+	BootstrapServiceFile = "/services/bootstrap.pvm"
 )
 
 // NewGenesisStateDB generates the first StateDB object and genesis statedb
@@ -333,7 +333,8 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 	}
 
 	for _, service := range services {
-		code, err := os.ReadFile(service.FileName)
+		fn := common.GetFilePath(service.FileName)
+		code, err := os.ReadFile(fn)
 		if err != nil {
 			return statedb, err
 		}

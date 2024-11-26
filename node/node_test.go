@@ -164,7 +164,7 @@ func testSafrole(t *testing.T, sendtickets bool) {
 func getServices(serviceNames []string) (services map[string]*types.TestService, err error) {
 	services = make(map[string]*types.TestService)
 	for i, serviceName := range serviceNames {
-		fileName := fmt.Sprintf("../services/%s.pvm", serviceName)
+		fileName := common.GetFilePath(fmt.Sprintf("/services/%s.pvm", serviceName))
 		code, err1 := os.ReadFile(fileName)
 		if err1 != nil {
 			return services, err1
@@ -211,7 +211,8 @@ func testJAM(t *testing.T, jam string) {
 		n.statedb.AssignGuarantors(true)
 	}
 	// code length: 206
-	bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
+	fn := common.GetFilePath(statedb.BootstrapServiceFile)
+	bootstrapCode, err := os.ReadFile(fn)
 	if err != nil {
 		panic(0)
 	}

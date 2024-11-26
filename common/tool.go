@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"time"
 )
@@ -178,4 +180,15 @@ func ExpandPath(compact []byte) ([]Hash, error) {
 		hashes[i] = hash
 	}
 	return hashes, nil
+}
+
+func GetFilePath(fn string) string {
+	// Use environment variable JAM_PATH, but if its not set, use
+	basePath := os.Getenv("JAM_PATH")
+	if basePath == "" {
+		basePath = "/root/go/src/github.com/colorfulnotion/jam/"
+	}
+
+	// Construct the full file path using filepath package
+	return filepath.Join(basePath, fn)
 }
