@@ -89,6 +89,13 @@ func QueueEditing(r []types.AccumulationQueue, x []common.Hash) []types.Accumula
 			}
 		}
 		if !found {
+			new_wp_hash := []common.Hash{}
+			for _, h := range item.WorkPackageHash {
+				if _, exists := hashSet[h]; !exists {
+					new_wp_hash = append(new_wp_hash, h)
+				}
+			}
+			item.WorkPackageHash = new_wp_hash
 			result = append(result, item)
 		}
 	}
@@ -470,10 +477,14 @@ func (j *JamState) UpdateLatestHistory(w_star []types.WorkReport, num int) {
 	// phasing every history
 	// 187
 	for i := 0; i < types.EpochLength-1; i++ {
-		j.AccumulationHistory[i] = j.AccumulationHistory[i+1]
+		tmp_history := j.AccumulationHistory[i+1]
+		j.AccumulationHistory[i] = tmp_history
 	}
 	// eq 186 0.4.5
 	j.AccumulationHistory[types.EpochLength-1].WorkPackageHash = Mapping(accumulated_wr)
+	// if len(j.AccumulationHistory[types.EpochLength-1].WorkPackageHash) > 0 {
+	// 	fmt.Printf("UpdateLatestHistory WorkPackageHash=%v\n", j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
+	// }
 }
 
 func (j *JamState) UpdateReadyQueuedReport(w_q []types.AccumulationQueue, previous_t uint32) {

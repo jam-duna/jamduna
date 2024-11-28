@@ -446,11 +446,11 @@ func testMegatron(t *testing.T, nodes []*Node, testServices map[string]*types.Te
 		timeslot := nodes[1].statedb.GetSafrole().GetTimeSlot()
 		refineContext := types.RefineContext{
 			// These values don't matter until we have a historical lookup -- which we do not!
-			Anchor:           common.Hash{},
+			Anchor:           common.BytesToHash([]byte("hack")),
 			StateRoot:        common.Hash{},
 			BeefyRoot:        common.Hash{},
 			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: timeslot,
+			LookupAnchorSlot: timeslot + 100,
 			Prerequisites:    []common.Hash{},
 		}
 
@@ -493,6 +493,7 @@ func testMegatron(t *testing.T, nodes []*Node, testServices map[string]*types.Te
 		importedSegmentsM := make([]types.ImportSegment, 0)
 		prereq := make([]common.Hash, 0)
 		prereq = append(prereq, Fib_Trib_WorkPackages[megaN].Hash())
+		// prereq = append(prereq, common.BytesToHash([]byte("hack")))
 		ts := nodes[1].statedb.GetSafrole().GetTimeSlot()
 		refineContext := types.RefineContext{
 			// These values don't matter until we have a historical lookup -- which we do not!
@@ -500,7 +501,7 @@ func testMegatron(t *testing.T, nodes []*Node, testServices map[string]*types.Te
 			StateRoot:        common.Hash{},
 			BeefyRoot:        common.Hash{},
 			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: ts,
+			LookupAnchorSlot: ts + 100,
 			Prerequisites:    prereq,
 		}
 
@@ -572,10 +573,19 @@ func testMegatron(t *testing.T, nodes []*Node, testServices map[string]*types.Te
 	   v4->c0
 	   v5->c0
 	*/
-
+	ok := false
 	for {
+		if ok {
+			break
+		}
 		select {
 		case <-ticker.C:
+			if Fib_Tri_counter == 6 && Meg_counter == 6 {
+				fmt.Printf("All workpackages are sent\n")
+				ok = true
+				time.Sleep(19 * time.Second)
+				break
+			}
 			// here we can put some logic to send workpackages
 			// fmt.Printf("Checking for workpackages to send...\n")
 			// fmt.Printf("Fib_Tri_counter: %v, Meg_counter: %v\n", Fib_Tri_counter, Meg_counter)
@@ -593,34 +603,56 @@ func testMegatron(t *testing.T, nodes []*Node, testServices map[string]*types.Te
 			// } else {
 			// 	fmt.Printf("MEGATRON: Not Ready\n")
 			// }
-
-			if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready {
+			if (nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready) {
 				// if false{
 				// send workpackages to the network
 				Meg_Chan <- Meg_WorkPackages[Meg_counter]
 				Meg_counter++
 				Meg_Ready = false
-			} else if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil {
+
+				Fib_Tri_Chan <- Fib_Trib_WorkPackages[Fib_Tri_counter]
+				Fib_Tri_counter++
+				Fib_Tri_Ready = false
+
+			} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
 				Meg_Ready = false
 				Meg_Keeper = true
-
-			} else if Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil {
-				Meg_Ready = true
-				Meg_Keeper = false
-			}
-			if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready {
-				if Meg_Keeper {
-					Fib_Tri_Chan <- Fib_Trib_WorkPackages[Fib_Tri_counter]
-					Fib_Tri_counter++
-					Fib_Tri_Ready = false
-				}
-			} else if nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready {
 				Fib_Tri_Ready = false
 				Fib_Tri_Keeper = true
-			} else if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper == true {
+
+			} else if (Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper == true) {
+				Meg_Ready = true
+				Meg_Keeper = false
 				Fib_Tri_Ready = true
 				Fib_Tri_Keeper = false
 			}
+			// if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready {
+			// 	// if false{
+			// 	// send workpackages to the network
+			// 	Meg_Chan <- Meg_WorkPackages[Meg_counter]
+			// 	Meg_counter++
+			// 	Meg_Ready = false
+			// } else if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil {
+			// 	Meg_Ready = false
+			// 	Meg_Keeper = true
+
+			// } else if Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil {
+			// 	Meg_Ready = true
+			// 	Meg_Keeper = false
+			// }
+			// if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready {
+			// 	if Meg_Keeper {
+			// 		Fib_Tri_Chan <- Fib_Trib_WorkPackages[Fib_Tri_counter]
+			// 		Fib_Tri_counter++
+			// 		Fib_Tri_Ready = false
+			// 	}
+			// } else if nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready {
+			// 	Fib_Tri_Ready = false
+			// 	Fib_Tri_Keeper = true
+			// } else if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper == true {
+			// 	Fib_Tri_Ready = true
+			// 	Fib_Tri_Keeper = false
+			// }
 
 		case workPackage := <-Fib_Tri_Chan:
 			// submit to core 1

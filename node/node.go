@@ -52,7 +52,7 @@ const (
 	numNodes    = 6
 	quicAddr    = "127.0.0.1:%d"
 	basePort    = 9000
-	GenesisFile = "../cmd/validatetraces/safrole/Traces/genesis.json" // NOTE: this is the keyval version 
+	GenesisFile = "../cmd/validatetraces/safrole/traces/genesis.json" // NOTE: this is the keyval version
 )
 
 const (
@@ -95,6 +95,7 @@ type Node struct {
 	assurancesBucket map[common.Hash]bool
 	queuedAssurances map[common.Hash]map[uint16]*types.Assurance
 	assuranceMutex   sync.Mutex
+	delaysend        bool
 
 	// holds a map of the parenthash to the block
 	blocks      map[common.Hash]*types.Block
@@ -265,10 +266,10 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		preimages: make(map[common.Hash][]byte),
 		//services:  make(map[uint32]common.Hash),
 
-		selfTickets:      make(map[common.Hash][]types.TicketBucket),
-		assurancesBucket: make(map[common.Hash]bool),
-		queuedAssurances: make(map[common.Hash]map[uint16]*types.Assurance),
-
+		selfTickets:             make(map[common.Hash][]types.TicketBucket),
+		assurancesBucket:        make(map[common.Hash]bool),
+		queuedAssurances:        make(map[common.Hash]map[uint16]*types.Assurance),
+		delaysend:               false,
 		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
 		workPackagesCh:          make(chan types.WorkPackage, 200),

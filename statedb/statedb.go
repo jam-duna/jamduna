@@ -1523,6 +1523,10 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	if err != nil {
 		return nil, err
 	}
+	extrinsicData.Guarantees, err = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees)
+	if err != nil {
+		return nil, err
+	}
 
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()

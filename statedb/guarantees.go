@@ -8,6 +8,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// chapter 11
 // TODO: ensure that 100% of these are used
 const (
 	errAnchorNotRecent           = "anchor_not_recent"
@@ -76,7 +77,37 @@ func (s *StateDB) Verify_Guarantees() error {
 	if err != nil {
 		return err
 	}
+	// for recent history and extrinsics in the block, so it should be here
+	for _, guarantee := range s.Block.Extrinsic.Guarantees {
+		// v0.4.5 eq 153
+		err := s.checkPrereq(guarantee)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee) ([]types.Guarantee, error) {
+	// v0.4.5 eq 137 - check index
+	for i, guarantee := range EGs {
+		err := s.Verify_Guarantee(guarantee)
+		if err != nil {
+			// delete the guarantee
+			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
+			EGs = append(EGs[:i], EGs[i+1:]...)
+		}
+	}
+	// for recent history and extrinsics in the block, so it should be here
+	for i, guarantee := range EGs {
+		// v0.4.5 eq 153
+		err := s.checkPrereqWithoutBlock(guarantee, EGs)
+		if err != nil {
+			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
+			EGs = append(EGs[:i], EGs[i+1:]...)
+		}
+	}
+	return EGs, nil
 }
 
 // this function will be used by what should be included in the block
@@ -91,10 +122,10 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 	}
 
 	// for stanley
-	// err = s.VerifyGuarantee_RecentHistory(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
+	err = s.VerifyGuarantee_RecentHistory(guarantee)
+	if err != nil {
+		return err
+	}
 
 	// for william
 	// err = s.VerifyGuarantee_Authorization(guarantee)
@@ -106,7 +137,6 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 }
 
 func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
-
 	max_core := types.TotalCores - 1
 	if guarantee.Report.CoreIndex > uint16(max_core) {
 		return fmt.Errorf("%s: %v", errBadCoreIndex, guarantee.Report.CoreIndex)
@@ -173,36 +203,34 @@ func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
 }
 
 func (s *StateDB) VerifyGuarantee_RecentHistory(guarantee types.Guarantee) error {
-	// v0.4.5 eq 147 recent restory
-	err := s.checkRecentBlock(guarantee)
-	if err != nil {
-		return err
-	}
+	/*
+		// v0.4.5 eq 147 recent restory
+		err := s.checkRecentBlock(guarantee)
+		if err != nil {
+			return err
+		}
 
-	// //TODO 149
-	err = s.checkAncestorSetA(guarantee)
-	if err != nil {
-		return err
-	}
-	// v0.4.5 eq 152
-	// beefy root have fucking problem
-	err = s.checkAnyPrereq(guarantee)
-	if err != nil {
-		return err
-	}
+		// //TODO 149
+		err = s.checkAncestorSetA(guarantee)
+		if err != nil {
+			return err
+		}
 
-	// v0.4.5 eq 153
-	err = s.checkPrereq(guarantee)
-	if err != nil {
-		return err
-	}
+		// v0.4.5 eq 152
+		// beefy root have fucking problem
+		err = s.checkAnyPrereq(guarantee)
+		if err != nil {
+			return err
+		}
+	*/
 
-	// v0.4.5 eq 155
-	err = s.checkRecentWorkPackage(guarantee)
-	if err != nil {
-		return err
-	}
-
+	/*
+		// v0.4.5 eq 155
+		err = s.checkRecentWorkPackage(guarantee)
+		if err != nil {
+			return err
+		}
+	*/
 	return nil
 }
 
@@ -334,7 +362,9 @@ func (s *StateDB) CheckGuaranteesWorkReport(guarantees []types.Guarantee) error 
 // v0.4.5 eq 142 - w
 func (s *StateDB) getWorkReport() []types.WorkReport {
 	w := []types.WorkReport{}
+
 	if s.Block != nil {
+		fmt.Printf("eg len: %v\n", len(s.Block.Extrinsic.Guarantees))
 		for _, guarantee := range s.Block.Extrinsic.Guarantees {
 			w = append(w, guarantee.Report)
 		}
@@ -504,7 +534,11 @@ func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
 	if s.Block == nil {
 		return fmt.Errorf("invalid lookup anchor slot: block is nil")
 	}
-	valid_anchor := s.Block.TimeSlot() - types.LookupAnchorMaxAge
+	var valid_anchor uint32
+	valid_anchor = s.Block.TimeSlot() - types.LookupAnchorMaxAge
+	if types.LookupAnchorMaxAge > s.Block.TimeSlot() {
+		valid_anchor = 0
+	}
 	if g.Report.RefineContext.LookupAnchorSlot >= valid_anchor {
 		return nil
 	} else {
@@ -621,7 +655,50 @@ func (s *StateDB) checkPrereq(g types.Guarantee) error {
 			}
 		}
 		if !exists {
-			return fmt.Errorf("invalid prerequisite work package, core %v, package %v (not in set)", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+			// return fmt.Errorf("invalid prerequisite work package, core %v, package %v (not in set)", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+			return fmt.Errorf(errDependencyMissing)
+		}
+	}
+
+	return nil
+}
+
+func (s *StateDB) checkPrereqWithoutBlock(g types.Guarantee, EGs []types.Guarantee) error {
+	prereqSet := make(map[common.Hash]struct{})
+	p := []common.Hash{}
+	if len(g.Report.RefineContext.Prerequisites) != 0 {
+		p = append(p, g.Report.RefineContext.Prerequisites...)
+	}
+	for key := range g.Report.SegmentRootLookup {
+		p = append(p, key)
+	}
+
+	for _, block := range s.JamState.RecentBlocks {
+		for key := range block.Reported {
+			prereqSet[key] = struct{}{}
+		}
+	}
+
+	for _, guarantee := range EGs {
+		prereqSet[guarantee.Report.AvailabilitySpec.WorkPackageHash] = struct{}{}
+	}
+
+	if len(p) == 0 {
+		return nil
+	}
+
+	for _, hash := range p {
+		exists := false
+		for key := range prereqSet {
+			if hash == key {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			fmt.Printf("checking for %v\n", hash)
+			// return fmt.Errorf("invalid prerequisite work package, core %v, package %v (not in set)", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+			return fmt.Errorf("%s: core %v, package %v", errDependencyMissing, g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 		}
 	}
 
@@ -681,6 +758,9 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 	// get service from trie
 	if err != nil {
 		t := s.CopyTrieState(s.StateRoot)
+		if t == nil {
+			return fmt.Errorf("%s", errBadCodeHash)
+		}
 		for _, result := range g.Report.Results {
 			v, err := t.GetService(255, result.ServiceID)
 			if err != nil {

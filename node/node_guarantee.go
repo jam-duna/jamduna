@@ -61,6 +61,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 		panic(222)
 	} else {
 		n.broadcast(guarantee)
+		fmt.Printf("%s (core %d) [broadcastWorkPackage] broadcasted guarantee\n", n.String(), coreIndex)
 	}
 	return
 }

@@ -264,6 +264,8 @@ func (n *JamState) Snapshot() *StateSnapshot {
 		Timeslot:                 n.SafroleState.Timeslot,                               // C11
 		PrivilegedServiceIndices: n.PrivilegedServiceIndices,                            // C12 -- todo
 		ValidatorStatistics:      n.ValidatorStatistics,                                 // C13
+		AccumulationQueue:        n.AccumulationQueue,                                   // C14
+		AccumulationHistory:      n.AccumulationHistory,                                 // C15
 	}
 	copy(copied.Entropy[:], original.Entropy[:])
 	copy(copied.PrevValidators, original.PrevValidators)

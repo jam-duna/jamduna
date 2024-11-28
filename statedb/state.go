@@ -146,7 +146,9 @@ func (original *JamState) Copy() *JamState {
 		SafroleState:             original.SafroleState.Copy(),
 		PriorServiceAccountState: make(map[uint32]types.ServiceAccount),
 		//AvailabilityAssignments:  make([types.TotalCores]*Rho_state),
-		AuthorizationQueue: original.AuthorizationQueue,
+		AuthorizationQueue:  original.AuthorizationQueue,
+		AccumulationQueue:   original.AccumulationQueue,
+		AccumulationHistory: original.AccumulationHistory,
 	}
 
 	for key, value := range original.PriorServiceAccountState {
