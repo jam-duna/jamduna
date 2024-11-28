@@ -515,21 +515,46 @@ func (vm *VM) hostQuit() uint32 {
 	return OK
 }
 func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
-	// TODO
+
+	// gas todo
+	registers := make([]uint32, 13)
+	for i := 0; i < 13; i++ {
+		registers[i] = binary.LittleEndian.Uint32(registerBytes[i*4 : (i+1)*4])
+	}
+	vm.register = registers
 }
 
 // Invoke
 func (vm *VM) hostInvoke() uint32 {
 	n, _ := vm.ReadRegister(7)
 	o, _ := vm.ReadRegister(8)
-	gasBytes, _ := vm.ReadRAMBytes(o, 8)
-	registerBytes, _ := vm.ReadRAMBytes(o, 8+13*4)
+	gasBytes, errCodeGas := vm.ReadRAMBytes(o, 8)
+	if errCodeGas != OK {
+		vm.WriteRegister(7, OOB)
+		return OOB
+	}
+	// gas := binary.LittleEndian.Uint32(gasBytes)
+	m_n_reg := make([]uint32, 13)
+	for i := 0; i < 13; i++ {
+		reg_bytes, errCodeReg := vm.ReadRAMBytes(o+8+4*uint32(i), 4)
+		if errCodeReg != OK {
+			vm.WriteRegister(7, OOB)
+			return OOB
+		}
+		m_n_reg[i] = binary.LittleEndian.Uint32(reg_bytes)
+	}
+	// intialize invoke
+
+	registerBytes, _ := vm.ReadRAMBytes(o+8, 13*4)
 	m, ok := vm.GetVM(n) // hostenv.
 	if !ok {
 		return WHO
 	}
 	m.setGasRegister(gasBytes, registerBytes)
-	m.Execute(types.EntryPointGeneric)
+	m.Execute(5)
+	// put the register and gas back to the memory
+	gas := binary.LittleEndian.Uint64(gasBytes)
+	vm.PutGasAndRegistersToMemory(o, gas, m.register)
 	// TODO: HOST, FAULT, PANIC
 	return HALT
 }
@@ -906,60 +931,113 @@ func (vm *VM) hostMachine() uint32 {
 
 	p, errCode := vm.ReadRAMBytes(po, int(pz))
 	if errCode != OK {
+		vm.WriteRegister(7, errCode)
 		return errCode
 	}
+
 	// need service account here??
 	serviceAcct := uint32(0)
 	n := vm.CreateVM(serviceAcct, p, i)
+	vm.WriteRegister(7, n)
 	return n
 }
 
 func (vm *VM) hostPeek() uint32 {
 	n, _ := vm.ReadRegister(7)
-	a, _ := vm.ReadRegister(8)
-	b, _ := vm.ReadRegister(9)
-	l, _ := vm.ReadRegister(10)
-	m, ok := vm.GetVM(n) // hostenv.
+	o, _ := vm.ReadRegister(8)
+	s, _ := vm.ReadRegister(9)
+	z, _ := vm.ReadRegister(10)
+	m_n, ok := vm.GetVM(n) // hostenv.
 	if !ok {
+		vm.WriteRegister(7, WHO)
 		return WHO
 	}
 	// read l bytes from m
-	s, errCode := m.ReadRAMBytes(b, int(l))
+	s_data, errCode := m_n.ReadRAMBytes(s, int(z))
 	if errCode == OOB {
+		vm.WriteRegister(7, errCode)
 		return errCode
 	}
 	// write l bytes to vm
-	errCode = vm.WriteRAMBytes(a, s[:])
+	errCode = vm.WriteRAMBytes(o, s_data[:])
 	if errCode == OOB {
+		vm.WriteRegister(7, errCode)
 		return errCode
 	}
+	vm.WriteRegister(7, OK)
 	return OK
 }
 
 func (vm *VM) hostPoke() uint32 {
 	n, _ := vm.ReadRegister(7)
-	a, _ := vm.ReadRegister(8)
-	b, _ := vm.ReadRegister(9)
-	l, _ := vm.ReadRegister(10)
-	m, ok := vm.GetVM(n) // hostenv.
+	o, _ := vm.ReadRegister(8)
+	s, _ := vm.ReadRegister(9)
+	z, _ := vm.ReadRegister(10)
+	m_n, ok := vm.GetVM(n) // hostenv.
+	fmt.Printf("ok? %v\n", ok)
 	if !ok {
+		vm.WriteRegister(7, WHO)
 		return WHO
 	}
-	s, errCode := m.ReadRAMBytes(a, int(l))
+	// read data from original vm
+	s_data, errCode := vm.ReadRAMBytes(s, int(z))
+	fmt.Printf("ok? %v\n", errCode)
 	if errCode == OOB {
+		vm.WriteRegister(7, errCode)
 		return errCode
 	}
-	errCode = m.WriteRAMBytes(b, s[:])
+	// write data to m_n
+	errCode = m_n.WriteRAMBytes(o, s_data[:])
 	if errCode == OOB {
+		vm.WriteRegister(7, errCode)
 		return errCode
 	}
+	fmt.Printf("ok? %v\n", errCode)
+	vm.WriteRegister(7, OK)
 	return OK
 }
 
 func (vm *VM) hostExpunge() uint32 {
 	n, _ := vm.ReadRegister(7)
+	vm.WriteRegister(7, vm.VMs[n].pc)
 	if vm.ExpungeVM(n) {
 		return OK
 	}
+	vm.WriteRegister(7, WHO)
 	return WHO
+}
+
+func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs []uint32) (errCode uint32) {
+	gasBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(gasBytes, gas)
+	errCode = vm.WriteRAMBytes(input_address, gasBytes)
+	if errCode != OK {
+		return errCode
+	}
+	for i, reg := range regs {
+		regBytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(regBytes, reg)
+		errCode = vm.WriteRAMBytes(input_address+8+uint32(i*4), regBytes)
+		if errCode != OK {
+			return errCode
+		}
+	}
+	return OK
+}
+
+func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, regs []uint32, errCode uint32) {
+	gasBytes, errCode := vm.ReadRAMBytes(input_address, 8)
+	if errCode != OK {
+		return 0, nil, errCode
+	}
+	gas = binary.LittleEndian.Uint64(gasBytes)
+	regs = make([]uint32, 13)
+	for i := 0; i < 13; i++ {
+		regBytes, errCode := vm.ReadRAMBytes(input_address+8+uint32(i*4), 4)
+		if errCode != OK {
+			return 0, nil, errCode
+		}
+		regs[i] = binary.LittleEndian.Uint32(regBytes)
+	}
+	return gas, regs, OK
 }

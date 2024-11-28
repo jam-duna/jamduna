@@ -19,7 +19,7 @@ import (
 const (
 	debug_pvm      = false
 	debug_host     = false
-	ram_permission = true
+	ram_permission = false
 
 	regSize  = 13
 	numCores = types.TotalCores
@@ -203,6 +203,15 @@ func (vm *VM) WriteRAMBytes(addr uint32, data []byte) uint32 {
 	return OK
 }
 
+/*
+   func (vm *VM) ReadRAMBytes(addr uint32, length int) ([]byte, uint32) {
+	return vm.readRAMBytes(addr, length)
+}
+
+func (vm *VM) WriteRAMBytes(addr uint32, data []byte) uint32 {
+	return vm.writeRAMBytes(addr, data)
+        }
+*/
 // Read multiple bytes from the specified range in the VM's RAM
 func (vm *VM) ReadRAMBytes(addr uint32, length int) ([]byte, uint32) {
 	if vm.ram == nil {
@@ -2625,6 +2634,9 @@ func (vm *VM) CreateVM(serviceAcct uint32, code []byte, i uint32) uint32 {
 			maxN = n
 		}
 	}
+	if vm.VMs == nil {
+		vm.VMs = make(map[uint32]*VM)
+	}
 	vm.VMs[maxN+1] = NewVMFromCode(serviceAcct, code, i, vm.hostenv)
 	return maxN + 1
 }
@@ -2642,6 +2654,30 @@ func (vm *VM) ExpungeVM(n uint32) bool {
 	if !ok {
 		return false
 	}
-	vm.VMs[n] = nil
+	delete(vm.VMs, n)
 	return true
+}
+
+// shawn : add a pub function to get the register value
+func (vm *VM) GetRegisterValue(registerIndex int) (uint32, uint32) {
+	value, errCode := vm.ReadRegister(registerIndex)
+	return value, errCode
+}
+
+func (vm *VM) SetRegisterValue(registerIndex int, value uint32) uint32 {
+	return vm.WriteRegister(registerIndex, value)
+}
+
+func (vm *VM) HostCheat(input string) {
+	if input == "machine" {
+		vm.hostMachine()
+	} else if input == "poke" {
+		vm.hostPoke()
+	} else if input == "peek" {
+		vm.hostPeek()
+	} else if input == "invoke" {
+		vm.hostInvoke()
+	} else if input == "expunge" {
+		vm.hostExpunge()
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -498,4 +499,80 @@ func equalInterfaceSlices(a, b []interface{}) bool {
 		}
 	}
 	return true
+}
+
+func TestPVM_invoke(t *testing.T) {
+
+	// put code into ram
+	// get the address of the code and length (po, pz)
+	// put it into the register (7,8,9) = (po, pz, program counter)
+	code, err1 := os.ReadFile("../services/examples/xor/xor.pvm")
+	vm := NewVMFromCode(0, code, 0, nil)
+	// put the code into the ram and get the address and length
+	if err1 != nil {
+		t.Errorf("Error reading file: %v", err1)
+	}
+	var code_length = uint32(len(code))
+	vm.WriteRAMBytes(100, code)
+	vm.SetRegisterValue(7, 100)
+	vm.SetRegisterValue(8, code_length)
+	vm.SetRegisterValue(9, 0)
+	vm.hostMachine()
+	// get the vm number
+	vm2_num, _ := vm.GetRegisterValue(7)
+	fmt.Printf("New VM number: %v\n", vm2_num)
+	// set up the register for Poke and put the input data into the ram
+	//let [n, s, o, z] = ω7...11,, n= which vm, s = start address, o = n start address, z = length
+	// we should set o to other register
+	test_bytes := []byte{0x01, 0x02, 0x03, 0x04}
+	vm.WriteRAMBytes(25, test_bytes)
+	vm.SetRegisterValue(7, vm2_num)
+	vm.SetRegisterValue(8, 25)
+	vm.SetRegisterValue(9, 25)
+	vm.SetRegisterValue(10, 4)
+	vm.hostPoke()
+
+	test_bytes2 := []byte{0x05, 0x06, 0x07, 0x08}
+	vm.WriteRAMBytes(100, test_bytes2)
+	vm.SetRegisterValue(7, vm2_num)
+	vm.SetRegisterValue(8, 100)
+	vm.SetRegisterValue(9, 100)
+	vm.SetRegisterValue(10, 4)
+
+	// set up the memory for the vm (gas + register)
+	// set up the register that can let the code run ==> pointer + length
+	//13 regs
+	regs := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 100, 0}
+	err := vm.PutGasAndRegistersToMemory(300, 100, regs)
+	if err != OK {
+		t.Errorf("Error putting gas and registers to memory: %v", err)
+	}
+	// read the input and then hash it
+	// put it back to the memory
+	// put the pointer and length to the register
+	// it will return back to the parent vm memory
+	vm.SetRegisterValue(7, vm2_num)
+	vm.SetRegisterValue(8, 300)
+	vm.hostInvoke()
+	// use that pointer and length to read the memory
+	gas2, regs2, errCode := vm.GetGasAndRegistersFromMemory(300)
+	if errCode != OK {
+		t.Errorf("Error getting gas and registers from memory: %v", errCode)
+	}
+	fmt.Printf("Gas: %v\n", gas2)
+	fmt.Printf("Registers: %v\n", regs2[10])
+	fmt.Printf("Registers: %v\n", regs2[11])
+	vm.SetRegisterValue(7, vm2_num)
+	vm.SetRegisterValue(8, regs2[10])
+	vm.SetRegisterValue(9, regs2[10])
+	vm.SetRegisterValue(10, regs2[11])
+	vm.hostPeek()
+	data, errcode := vm.readRAMBytes(regs2[10], int(regs2[11]))
+	if errcode != OK {
+		t.Errorf("Error reading data from memory: %v", errcode)
+	}
+	fmt.Printf("Data: %v\n", data)
+	// except (4,4,4,12)
+	vm.SetRegisterValue(7, vm2_num)
+	vm.hostExpunge()
 }
