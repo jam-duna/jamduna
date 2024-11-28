@@ -20,7 +20,7 @@ const (
 )
 
 func (s *StateDB) WriteAccount(sa *types.ServiceAccount) {
-	service_idx := sa.ServiceIndex()
+	service_idx := sa.GetServiceIndex()
 	//fmt.Printf("[N%d] WriteAccount %v\n", s.Id, sa.String())
 	for key, storage := range sa.Storage {
 		if storage.Dirty {

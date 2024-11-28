@@ -33,7 +33,7 @@ const (
 
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
-	serviceIndex    uint32
+	ServiceIndex    uint32      `json:"service_index"`
 	CodeHash        common.Hash `json:"code_hash"`    //a_c - account code hash c
 	Balance         uint64      `json:"balance"`      //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
 	GasLimitG       uint64      `json:"min_item_gas"` //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
@@ -44,13 +44,13 @@ type ServiceAccount struct {
 	Dirty    bool
 	Storage  map[common.Hash]StorageObject  `json:"s_map"` // arbitrary_k -> v. if v=[]byte. use as delete
 	Lookup   map[common.Hash]LookupObject   `json:"l_map"` // (h,l) -> anchor
-	Preimage map[common.Hash]PreimageObject `json:"p"`     // H(p)  -> p
+	Preimage map[common.Hash]PreimageObject `json:"p_map"` // H(p)  -> p
 }
 
 func (s ServiceAccount) Clone() *ServiceAccount {
 	// Start by cloning primitive fields directly
 	clone := ServiceAccount{
-		serviceIndex:    s.serviceIndex,
+		ServiceIndex:    s.ServiceIndex,
 		CodeHash:        s.CodeHash,
 		Balance:         s.Balance,
 		GasLimitG:       s.GasLimitG,
@@ -84,7 +84,7 @@ func (s ServiceAccount) Clone() *ServiceAccount {
 type StorageObject struct {
 	Deleted bool
 	Dirty   bool
-	Value   []byte
+	Value   []byte `json:"value"` // v
 }
 
 func (o StorageObject) Clone() StorageObject {
@@ -102,8 +102,8 @@ func (o StorageObject) Clone() StorageObject {
 type LookupObject struct {
 	Deleted bool
 	Dirty   bool
-	Z       uint32
-	T       []uint32
+	Z       uint32   `json:"z"` // z
+	T       []uint32 `json:"t"` // t
 }
 
 func (o LookupObject) Clone() LookupObject {
@@ -122,7 +122,7 @@ func (o LookupObject) Clone() LookupObject {
 type PreimageObject struct {
 	Deleted  bool
 	Dirty    bool
-	Preimage []byte
+	Preimage []byte `json:"preimage"` // p
 }
 
 func (o PreimageObject) Clone() PreimageObject {
@@ -234,12 +234,12 @@ func AccountStateFromBytes(service_index uint32, data []byte) (*ServiceAccount, 
 	return &acct, nil
 }
 
-func (s *ServiceAccount) ServiceIndex() uint32 {
-	return s.serviceIndex
+func (s *ServiceAccount) GetServiceIndex() uint32 {
+	return s.ServiceIndex
 }
 
 func (s *ServiceAccount) SetServiceIndex(service_index uint32) {
-	s.serviceIndex = service_index
+	s.ServiceIndex = service_index
 }
 
 func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceAccount, error) {
@@ -250,7 +250,7 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 	}
 	// Initialize a new ServiceAccount and copy the relevant fields
 	serviceAccount := &ServiceAccount{
-		serviceIndex:    service_index,
+		ServiceIndex:    service_index,
 		CodeHash:        acctState.CodeHash,
 		Balance:         acctState.Balance,
 		GasLimitG:       acctState.GasLimitG,
@@ -270,7 +270,7 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 func (s *ServiceAccount) String() string {
 	// Initial account information
 	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v\n",
-		s.serviceIndex, s.CodeHash.Hex()) // s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems
+		s.ServiceIndex, s.CodeHash.Hex()) // s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems
 
 	// Lookup entries
 	str2 := ""
@@ -299,7 +299,7 @@ func (s *ServiceAccount) ReadStorage(key common.Hash, sdb HostEnv) (ok bool, v [
 	}
 	if !ok {
 		var err error
-		v = sdb.ReadServiceStorage(s.serviceIndex, key)
+		v = sdb.ReadServiceStorage(s.ServiceIndex, key)
 		if err != nil {
 			return false, nil
 		}
@@ -313,7 +313,7 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 		return false, nil
 	}
 	if !ok {
-		preimage = sdb.ReadServicePreimageBlob(s.ServiceIndex(), blobHash)
+		preimage = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
 		s.Preimage[blobHash] = PreimageObject{
 			Dirty:    false,
 			Preimage: preimage,
@@ -329,7 +329,7 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 		return false, []uint32{}
 	}
 	if !ok {
-		anchor_timeslot = sdb.ReadServicePreimageLookup(s.ServiceIndex(), blobHash, z)
+		anchor_timeslot = sdb.ReadServicePreimageLookup(s.GetServiceIndex(), blobHash, z)
 		s.Lookup[blobHash] = LookupObject{
 			Dirty: false,
 			Z:     z,

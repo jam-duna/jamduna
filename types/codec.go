@@ -258,7 +258,7 @@ func Encode(data interface{}) ([]byte, error) {
 				Value: v.MapIndex(key).Interface(),
 			})
 		}
-		//fmt.Println("sortedKVPairs:", sortedKVPairs)
+		// fmt.Println("sortedKVPairs:", sortedKVPairs)
 		return Encode(sortedKVPairs)
 
 	default:

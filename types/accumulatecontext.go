@@ -27,7 +27,7 @@ type AuthorizationQueue [TotalCores][]common.Hash
 
 // U: The set of partial state, used during accumulation. See equation 170.
 type PartialState struct {
-	D                  map[uint32]*ServiceAccount `json:"service_account"`
+	D                  map[uint32]*ServiceAccount `json:"D"`
 	UpcomingValidators Validators                 `json:"upcoming_validators"`
 	QueueWorkReport    AuthorizationQueue         `json:"authorizations_pool"`
 	PrivilegedState    Kai_state                  `json:"privileged_state"`
@@ -42,11 +42,11 @@ func (U PartialState) Dump(prefix string, id uint16) {
 }
 
 type XContext struct {
-	D map[uint32]*ServiceAccount
-	I uint32
-	S uint32
-	U *PartialState
-	T []DeferredTransfer
+	D map[uint32]*ServiceAccount `json:"D"`
+	I uint32                     `json:"I"`
+	S uint32                     `json:"S"`
+	U *PartialState              `json:"U"`
+	T []DeferredTransfer         `json:"T"`
 }
 
 // returns back X.U.D[s] but if there is a miss, uses

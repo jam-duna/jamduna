@@ -1,0 +1,92 @@
+{
+  "name": "hostExportFULL",
+  "initial-gas": 10000,
+  "initial-regs": [
+    4294901760,
+    4278059008,
+    0,
+    0,
+    0,
+    0,
+    0,
+    4278124544,
+    12,
+    0,
+    0,
+    0,
+    0
+  ],
+  "initial-memory-permission": [
+    {
+      "Start": 4278124544,
+      "Length": 12,
+      "Mode": 2
+    }
+  ],
+  "initial-memory": [
+    {
+      "start": 4278124544,
+      "contents": [
+        10,
+        10,
+        11,
+        11,
+        12,
+        12,
+        13,
+        13,
+        14,
+        14,
+        15,
+        15
+      ]
+    }
+  ],
+  "initial-refine-map": {},
+  "initial-export-segment": [
+    []
+  ],
+  "initial-import-segment": [
+    []
+  ],
+  "initial-export-segment-index": 9999,
+  "expected-gas": 9990,
+  "expected-regs": [
+    4294901760,
+    4278059008,
+    0,
+    0,
+    0,
+    0,
+    0,
+    4294967292,
+    12,
+    0,
+    0,
+    0,
+    0
+  ],
+  "expected-memory": [
+    {
+      "start": 4278124544,
+      "contents": [
+        10,
+        10,
+        11,
+        11,
+        12,
+        12,
+        13,
+        13,
+        14,
+        14,
+        15,
+        15
+      ]
+    }
+  ],
+  "expected-refine-map": {},
+  "expected-export-segment": [
+    []
+  ]
+}
