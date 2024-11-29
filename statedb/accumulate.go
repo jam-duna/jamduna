@@ -495,15 +495,14 @@ func (j *JamState) UpdateReadyQueuedReport(w_q []types.AccumulationQueue, previo
 		return
 	}
 	for i := uint32(0); i < types.EpochLength; i++ {
-		if int(phase)-int(i) < 0 {
-			break
-		}
+		// mod to get the correct index
+		num := (int(phase) - int(i) + types.EpochLength) % types.EpochLength
 		if i == 0 {
-			j.AccumulationQueue[phase-i] = QueueEditing(w_q, j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
+			j.AccumulationQueue[num] = QueueEditing(w_q, j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 		} else if i >= 1 && i < timeslot-previous_t {
-			j.AccumulationQueue[phase-i] = []types.AccumulationQueue{}
+			j.AccumulationQueue[num] = []types.AccumulationQueue{}
 		} else {
-			j.AccumulationQueue[phase-i] = QueueEditing(j.AccumulationQueue[phase-i], j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
+			j.AccumulationQueue[num] = QueueEditing(j.AccumulationQueue[num], j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 		}
 
 	}
