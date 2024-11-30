@@ -7,8 +7,16 @@ We are developing [JAM](https://jam.web3.foundation/) in Go in Summer 2024/Fall 
 
 **Goal**: Achieve **Milestone 1: IMPORTER** -- State-transitioning conformance tests pass and can import blocks.
 
-For background on JAM, see [this](https://wiki.polkadot.network/docs/learn-jam-chain) and the [JAM Gray paper](https://graypaper.com/)
+## Documentation:
 
+* [Parent-Child VMs](https://hackmd.io/ldPJih0ISMCP6pU5aXzaWg)
+* [Ordered Accumulation](https://hackmd.io/jeZLW09nRse8q3t_PavyrA)
+* [JAM Trustless Supercomputing Test Suite](https://hackmd.io/nk0Tr0iIQHmLm7WIXe_OoQ)
+* [JAM0 @ Bangkok](https://hackmd.io/qA7NNyjyQIil8oSq3aafjw)
+* [docs.jamcha.in] (https://docs.jamcha.in/)
+* [graypaper](https://graypaper.fluffylabs.dev/#/293bf5a/348e00348e00)
+* [JAM TestNet repo](https://github.com/jam-duna/jamtestnet/tree/main/traces/assurances/jam_duna) | [sheet](https://docs.google.com/spreadsheets/d/1ueAisCMOx7B-m_fXMLT0FXBxfVzydJyr-udE8jKwDN8/edit?gid=615049643#gid=615049643)
+* [JAM-NP](https://github.com/zdave-parity/jam-np/blob/main/simple.md)
 
 ## Building JAM
 

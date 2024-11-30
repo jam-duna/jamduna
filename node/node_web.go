@@ -1,11 +1,13 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"html/template"
 	"log"
@@ -87,9 +89,52 @@ func setCorsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
-func (n *Node) runWebService() {
-	port := 8080
+func (n *Node) runWebService(port uint16) {
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("/jamblocks", func(w http.ResponseWriter, r *http.Request) {
+		// then set up prestate, call ApplyStateTransitionFromBlock, get poststate, compute match
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// receive HTTP Post, parse as StateTransition
+		var stateTransition statedb.StateTransition
+		err := json.NewDecoder(r.Body).Decode(&stateTransition)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Apply the state transition
+		sdb, err := storage.NewStateDBStorage("/tmp/te")
+		if err != nil {
+			panic(err)
+		}
+		stateDB, err := statedb.NewStateDBFromSnapShotRaw(sdb, stateTransition.PreState)
+		if err != nil {
+			panic(err)
+		}
+		newStateDB, err := statedb.ApplyStateTransitionFromBlock(stateDB, context.Background(), &stateTransition.Block)
+		if err != nil {
+			if stateTransition.Valid {
+				log.Printf("ERROR:  applying state transition for valid block\n")
+			}
+			http.Error(w, fmt.Sprintf("Invalid block"), http.StatusNotAcceptable)
+		} else {
+			if !stateTransition.Valid {
+				log.Printf("ERROR:  applying state transition for invalid block\n")
+			}
+			// dump the keys and values from newstateDB
+			snapshot := newStateDB.JamState.Snapshot()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(snapshot)
+			//if newStateDB.StateRoot == stateTransition.StateRoot {
+			//}
+		}
+
+	})
 
 	mux.HandleFunc("/recentblocks", func(w http.ResponseWriter, r *http.Request) {
 		setCorsHeaders(w)

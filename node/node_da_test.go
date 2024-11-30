@@ -299,40 +299,6 @@ func deleteUserJamDirectory(force bool) error {
 	return nil
 }
 
-func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
-	/* standardize on
-	/tmp/<user>/jam/<unixtimestamp>/testdb#
-
-	/tmp/ntust/jam/1727903082/node1/leveldb/
-	/tmp/ntust/jam/1727903082/node1/data/
-
-	/tmp/root/jam/1727903082/node1/
-
-	*/
-	currentUser, err := user.Current()
-	if err != nil {
-		return "", fmt.Errorf("could not get current user: %v", err)
-	}
-	username := currentUser.Username
-	path := fmt.Sprintf("/tmp/%s/jam/%v/node%v", username, unixtimestamp, id)
-	return path, nil
-}
-
-func SetLevelDBPaths(numNodes int) []string {
-	node_paths := make([]string, numNodes)
-	// timeslot mark
-	// currJCE := common.ComputeCurrentJCETime()
-	currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
-	for i := 0; i < numNodes; i++ {
-		node_idx := fmt.Sprintf("%d", i)
-		node_path, err := computeLevelDBPath(node_idx, int(currJCE))
-		if err == nil {
-			node_paths[i] = node_path
-		}
-	}
-	return node_paths
-}
-
 func TestLevelDBDelete(t *testing.T) {
 	err := deleteUserJamDirectory(true)
 	if err != nil {

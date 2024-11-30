@@ -36,23 +36,25 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	debugDA     = false // DA
-	debugB      = false // Blocks, Announcment
-	debugG      = false // Guaranteeing
-	debugT      = false // Tickets/Safrole
-	debugP      = false // Preimages
-	debugA      = false // Assurances
-	debugF      = false // Finality
-	debugJ      = false // Audits + Judgements
-	debug       = false // General Node Ops
-	debugAudit  = false // Audit
-	trace       = false
-	debugE      = false // monitoring fn execution time
-	debugTree   = false // trie
-	numNodes    = 6
-	quicAddr    = "127.0.0.1:%d"
-	basePort    = 9000
-	GenesisFile = "../cmd/validatetraces/safrole/traces/genesis.json" // NOTE: this is the keyval version
+	debugDA    = false // DA
+	debugB     = false // Blocks, Announcment
+	debugG     = false // Guaranteeing
+	debugT     = false // Tickets/Safrole
+	debugP     = false // Preimages
+	debugA     = false // Assurances
+	debugF     = false // Finality
+	debugJ     = false // Audits + Judgements
+	debug      = false // General Node Ops
+	debugAudit = false // Audit
+	trace      = false
+	debugE     = false // monitoring fn execution time
+	debugTree  = false // trie
+	numNodes   = 6
+	quicAddr   = "127.0.0.1:%d"
+	basePort   = 9000
+
+	noRotation  = false
+	GenesisFile = "genesis.json"
 )
 
 const (
@@ -63,25 +65,24 @@ const (
 
 type Node struct {
 	id uint16
-	//coreIndex uint16
+
 	AuditNodeType string
 	credential    types.ValidatorSecret
 	server        quic.Listener
 	peers         []string
-	peersInfo     map[uint16]*Peer //<ed25519> -> NodeInfo
+	peersInfo     map[uint16]*Peer //<validatorIndex> -> Peer
 
 	tlsConfig *tls.Config
 
-	store *storage.StateDBStorage /// where to put this?
+	store *storage.StateDBStorage
 
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
-	sendTickets  bool
+	sendTickets  bool // when mode=fallback this is false, otherwise is true
 
 	// this is for audit
 	// announcement [headerHash -> [wr_hash]]
-	//auditing_statedb *statedb.StateDB
 	auditingMap     sync.Map
 	announcementMap sync.Map // headerHash -> stateDB
 	judgementMap    sync.Map // headerHash -> JudgeBucket
@@ -138,8 +139,13 @@ type Node struct {
 	dataDir         string
 	epoch0Timestamp uint32
 
+	// DA testing only
 	chunkMap map[common.Hash][]byte
 	chunkBox map[common.Hash][][]byte
+
+	// JamBlocks testing only
+	JAMBlocksEndpoint string
+	JAMBlocksPort     uint16
 }
 
 /*
@@ -203,32 +209,37 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func NewNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	snapshotRawBytes, err := os.ReadFile(GenesisFile)
+func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
+	snapshotRawBytes, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
+		return statedb.StateSnapshotRaw{}, fmt.Errorf("error reading JSON file %s: %v", filePath, err)
 	}
+
 	var stateSnapshotRaw statedb.StateSnapshotRaw
 	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
 	if err != nil {
-		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
+		return statedb.StateSnapshotRaw{}, fmt.Errorf("error unmarshaling JSON file %s: %v", filePath, err)
 	}
-	n, err := newNode(id, credential, genesisConfig, peers, peerList, ValidatorFlag, dataDir, port, stateSnapshotRaw)
-	return n, err
+
+	return stateSnapshotRaw, nil
+}
+
+func createNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
+	fn := common.GetFilePath(GenesisFile)
+	stateSnapshotRaw, err := loadStateSnapshot(fn)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	return newNode(id, credential, genesisConfig, peers, peerList, flag, dataDir, port, stateSnapshotRaw)
+}
+
+func NewNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, genesisConfig, peers, peerList, dataDir, port, ValidatorFlag)
 }
 
 func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	snapshotRawBytes, err := os.ReadFile(GenesisFile)
-	if err != nil {
-		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
-	}
-	var stateSnapshotRaw statedb.StateSnapshotRaw
-	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
-	if err != nil {
-		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
-	}
-	n, err := newNode(id, credential, genesisConfig, peers, peerList, DAFlag, dataDir, port, stateSnapshotRaw)
-	return n, err
+	return createNode(id, credential, genesisConfig, peers, peerList, dataDir, port, DAFlag)
 }
 
 func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int, trace_config statedb.StateSnapshotRaw) (*Node, error) {

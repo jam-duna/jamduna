@@ -188,7 +188,8 @@ func SetupNodeEnv(t *testing.T) *Node {
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
-	snapshotRawBytes, err := os.ReadFile(GenesisFile)
+	fn := common.GetFilePath(GenesisFile)
+	snapshotRawBytes, err := os.ReadFile(fn)
 	if err != nil {
 		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
 	}
