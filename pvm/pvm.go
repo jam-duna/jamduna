@@ -19,7 +19,7 @@ import (
 const (
 	debug_pvm      = false
 	debug_host     = false
-	ram_permission = false
+	ram_permission = true
 
 	regSize  = 13
 	numCores = types.TotalCores
@@ -194,7 +194,8 @@ func (vm *VM) WriteRAMBytes(addr uint32, data []byte) uint32 {
 		if vm.ram.GetAccessMode(addr+i) != ReadWrite && ram_permission {
 			// Ignore the memory permissions issue
 			if debug_pvm {
-				fmt.Println("Write access denied for one or more addresses")
+				fmt.Printf("Write access denied for address %d\n", addr+i)
+				// fmt.Println("Write access denied for one or more addresses")
 			}
 			return PANIC
 		}
@@ -227,7 +228,8 @@ func (vm *VM) ReadRAMBytes(addr uint32, length int) ([]byte, uint32) {
 		if vm.ram.GetAccessMode(addr+uint32(i)) == NoAccess && ram_permission {
 			// Ignore the memory permissions issue
 			if debug_pvm {
-				fmt.Println("Read access denied for one or more addresses")
+				fmt.Printf("Read access denied for address %d\n", addr+uint32(i))
+				// fmt.Println("Read access denied for one or more addresses")
 			}
 			return nil, PANIC
 		}
@@ -811,14 +813,37 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		}
 		// set up the initial values and access mode for the RAM
 		vm.SetAccessMode(Z_Q+vm.o_size, P_func(vm.o_size)-vm.o_size, ReadOnly)
+		if debug_pvm {
+			fmt.Printf("1. Set start address %d and length %d with permission %d\n", Z_Q+vm.o_size, P_func(vm.o_size)-vm.o_size, ReadOnly)
+		}
 		vm.SetAccessMode(2*Z_Q+Q_func(vm.o_size), vm.w_size, ReadWrite)
-		vm.WriteRAMBytes((1<<32)-Z_Q-Z_I, vm.w_byte)
-		vm.SetAccessMode(2*Z_Q+Q_func(vm.o_size)+vm.w_size, vm.z*Z_P, ReadWrite)
+		if debug_pvm {
+			fmt.Printf("2. Set start address %d and length %d with permission %d\n", 2*Z_Q+Q_func(vm.o_size), vm.w_size, ReadWrite)
+		}
+		vm.WriteRAMBytes(2*Z_Q+Q_func(vm.o_size), vm.w_byte)
+
+		vm.SetAccessMode(2*Z_Q+Q_func(vm.o_size)+vm.w_size, P_func(vm.w_size)+vm.z*Z_P-vm.w_size, ReadWrite)
+		if debug_pvm {
+			fmt.Printf("3. Set start address %d and length %d with permission %d\n", 2*Z_Q+Q_func(vm.o_size)+vm.w_size, P_func(vm.w_size)+vm.z*Z_P-vm.w_size, ReadWrite)
+		}
 		vm.SetAccessMode((1<<32)-2*Z_Q-Z_I-P_func(vm.s), P_func(vm.s), ReadWrite)
+		if debug_pvm {
+			fmt.Printf("4. Set start address %d and length %d with permission %d\n", (1<<32)-2*Z_Q-Z_I-P_func(vm.s), P_func(vm.s), ReadWrite)
+		}
 		vm.SetAccessMode((1<<32)-Z_Q-Z_I, uint32(len(argument_data_a)), ReadWrite)
+		if debug_pvm {
+			fmt.Printf("5. Set start address %d and length %d with permission %d\n", (1<<32)-Z_Q-Z_I, uint32(len(argument_data_a)), ReadWrite)
+		}
 		vm.WriteRAMBytes((1<<32)-Z_Q-Z_I, argument_data_a)
+
 		vm.SetAccessMode((1<<32)-Z_Q-Z_I, uint32(len(argument_data_a)), ReadOnly)
+		if debug_pvm {
+			fmt.Printf("6. Set start address %d and length %d with permission %d\n", (1<<32)-Z_Q-Z_I, uint32(len(argument_data_a)), ReadOnly)
+		}
 		vm.SetAccessMode((1<<32)-Z_Q-Z_I+uint32(len(argument_data_a)), P_func(uint32(len(argument_data_a)))-+uint32(len(argument_data_a)), ReadOnly)
+		if debug_pvm {
+			fmt.Printf("7. Set start address %d and length %d with permission %d\n", (1<<32)-Z_Q-Z_I+uint32(len(argument_data_a)), P_func(uint32(len(argument_data_a)))-+uint32(len(argument_data_a)), ReadOnly)
+		}
 		vm.ram.FinalizePermissions()
 
 		// set up the initial values for the registers
@@ -869,7 +894,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint32, initialPC ui
 	// }
 	copy(vm.register, initialRegs)
 	// Standard Program Initialization
-	Standard_Program_Initialization(vm, []byte{})
+	// Standard_Program_Initialization(vm, []byte{})
 	return vm
 }
 
@@ -947,13 +972,13 @@ func (vm *VM) GetServiceIndex() uint32 {
 func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, codeHash common.Hash, authorizerCodeHash common.Hash, authorization []byte, extrinsicsBlobs [][]byte) (r types.Result, res uint32) {
 	// TODO: William -- work with Sean on encode/decode of argument inputs here
 	// Refine inputs: let a = E(s, y, p, c, a, o, ↕[↕x S x <− x])
-	a := common.Uint32ToBytes(s) // s - the service index
-	a = append(a, y...)          //  work payload, y,
-	//a = append(a, workPackageHash.Bytes()...)    // p - work package hash
-	//a = append(a, codeHash.Bytes()...)           //  c - the prediction of the hash of that service’s code c at the time of reporting,
-	//a = append(a, authorizerCodeHash.Bytes()...) //
-	//a = append(a, authorization...)              // authorization
-	//a = append(a, common.ConcatenateByteSlices(extrinsicsBlobs)...)
+	a := common.Uint32ToBytes(s)                 // s - the service index
+	a = append(a, y...)                          //  work payload, y,
+	a = append(a, workPackageHash.Bytes()...)    // p - work package hash
+	a = append(a, codeHash.Bytes()...)           //  c - the prediction of the hash of that service’s code c at the time of reporting,
+	a = append(a, authorizerCodeHash.Bytes()...) //
+	a = append(a, authorization...)              // authorization
+	a = append(a, common.ConcatenateByteSlices(extrinsicsBlobs)...)
 	// vm.setArgumentInputs(a)
 
 	Standard_Program_Initialization(vm, a) // eq 264/265
