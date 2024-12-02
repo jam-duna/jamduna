@@ -53,6 +53,7 @@ const (
 	quicAddr   = "127.0.0.1:%d"
 	basePort   = 9000
 
+	godMode     = true
 	noRotation  = false
 	GenesisFile = "genesis.json"
 )
@@ -146,6 +147,10 @@ type Node struct {
 	// JamBlocks testing only
 	JAMBlocksEndpoint string
 	JAMBlocksPort     uint16
+
+	// god mode
+	godCh        *chan uint32
+	timeslotUsed map[uint32]bool
 }
 
 /*
@@ -207,6 +212,34 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 		}
 		fmt.Printf("[N%v] credential %s\n", n.id, jsonData)
 	}
+}
+
+func (n *Node) setGodCh(c *chan uint32) {
+	n.godCh = c
+}
+
+func (n *Node) sendGodTimeslotUsed(timeslot uint32) {
+	if n.godCh == nil {
+		return
+	}
+
+	*n.godCh <- timeslot
+}
+
+func (n *Node) receiveGodTimeslotUsed(timeslot uint32) {
+	if n.godCh == nil {
+		return
+	}
+	n.timeslotUsed[timeslot] = true
+}
+
+func (n *Node) checkGodTimeslotUsed(timeslot uint32) bool {
+	if n.godCh == nil {
+		return false
+	}
+
+	_, ok := n.timeslotUsed[timeslot]
+	return ok
 }
 
 func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
@@ -275,7 +308,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		blocks:    make(map[common.Hash]*types.Block),
 		headers:   make(map[common.Hash]*types.Block),
 		preimages: make(map[common.Hash][]byte),
-		//services:  make(map[uint32]common.Hash),
 
 		selfTickets:             make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket:        make(map[common.Hash]bool),
@@ -293,6 +325,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		auditingCh:              make(chan *statedb.StateDB, 200),
 
 		sendTickets: true,
+
+		timeslotUsed: make(map[uint32]bool),
+		godCh:        nil,
 
 		dataDir: dataDir,
 	}
@@ -1230,6 +1265,9 @@ func (n *Node) runClient() {
 
 				}
 			}
+			//if n.checkGodTimeslotUsed(currJCE) {
+			//	return
+			//}
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, &(n.queuedAssurances))
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
@@ -1240,6 +1278,11 @@ func (n *Node) runClient() {
 				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
 			}
 			if newStateDB != nil {
+				if n.checkGodTimeslotUsed(currJCE) {
+					fmt.Printf("%s could author but blocked by god\n", n.String())
+					return
+				}
+				n.sendGodTimeslotUsed(currJCE)
 				// we authored a block
 				newStateDB.PreviousGuarantors(true)
 				newStateDB.AssignGuarantors(true)

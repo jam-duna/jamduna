@@ -344,8 +344,8 @@ func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *
 			Balance:         10000,
 			GasLimitG:       100,
 			GasLimitM:       100,
-			StorageSize:     uint64(len(code)),
-			NumStorageItems: 1,
+			StorageSize:     uint64(81 + len(code) + 0), // a_l = ∑ 81+z per (h,z) + ∑ 32+s
+			NumStorageItems: 2*1 + 0,                    //a_i = 2⋅∣al∣+∣as∣
 		}
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 		statedb.WriteService(service.ServiceCode, &bootstrapServiceAccount)

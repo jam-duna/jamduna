@@ -216,17 +216,37 @@ func SetUpNodes(numNodes int) ([]*Node, error) {
 		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
 	}
 	nodes := make([]*Node, numNodes)
+	godIncomingCh := make(chan uint32, 10) // node sends timeslots to this channel when authoring
 	for i := 0; i < numNodes; i++ {
 		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i, stateSnapshotRaw)
 		if err != nil {
 			panic(err)
 			return nil, fmt.Errorf("Failed to create node %d: %v", i, err)
 		}
+		if godMode {
+			node.setGodCh(&godIncomingCh)
+		}
 		nodes[i] = node
 		if i == 0 {
 			go node.runWebService(8080)
 		}
 	}
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		for {
+			select {
+			case <-ticker.C:
+				break
+			case ts := <-godIncomingCh: // Correct channel receive operation
+				//fmt.Printf("god received %d\n", ts)
+				for _, n := range nodes { // Loop through nodes
+					//fmt.Printf("god sent %d to [N%d]\n", ts, i)
+					n.receiveGodTimeslotUsed(ts)
+				}
+			}
+		}
+
+	}()
 	return nodes, nil
 }
 
