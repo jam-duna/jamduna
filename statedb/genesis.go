@@ -1,76 +1,57 @@
 package statedb
 
 import (
-	"fmt"
-
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
-// GenesisConfig is the key data "genesis" structure loaded and saved at the start of every binary run
-type GenesisConfig struct {
-	Epoch0Timestamp uint64            `json:"epoch0_timestamp,omitempty"`
-	Authorities     []types.Validator `json:"authorities,omitempty"`
-}
-
-type GenesisAuthorities struct {
-	Authorities []types.Validator
-}
-
-func InitStateFromSnapshot(s *StateSnapshot) (j *JamState) {
-	j = NewJamState()
-	// ??? j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
-	j.SafroleState.Timeslot = s.Timeslot
-	if types.TimeUnitMode != "TimeStamp" {
-		j.SafroleState.Timeslot = j.SafroleState.Timeslot / types.SecondsPerSlot
-	}
-	j.SafroleState.PrevValidators = s.PrevValidators
-	j.SafroleState.CurrValidators = s.CurrValidators
-	j.SafroleState.NextValidators = s.NextValidators
-	j.SafroleState.DesignedValidators = []types.Validator(s.Gamma.GammaK) // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-
-	j.SafroleState.Entropy[0] = s.Entropy[0]
-	j.SafroleState.Entropy[1] = s.Entropy[1]
-	j.SafroleState.Entropy[2] = s.Entropy[2]
-	j.SafroleState.Entropy[3] = s.Entropy[3]
-
-	j.SafroleState.NextEpochTicketsAccumulator = s.Gamma.GammaA // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
-	j.SafroleState.TicketsVerifierKey = s.Gamma.GammaZ          // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	j.SafroleState.TicketsOrKeys = s.Gamma.GammaS               // γs: Current epoch’s slot-sealer series (epoch N)
-
-	//ValidatorStatistics      [2][types.TotalValidators]Pi_state `json:"pi"`
-	//AuthorizationsPool
-	//AuthorizationQueue
-	//RecentBlocks
-	//AvailabilityAssignments
-	j.DisputesState = Psi_state{}
-	return j
-}
-
 // 6.4.1 Startup parameters
-func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
-	j = NewJamState()
 
-	// shift starting condition by one phase to make space for 0_0
-	//genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp - types.PeriodSecond)
-	genesisTimeslot := uint32(genesisConfig.Epoch0Timestamp)
-	if debug {
-		fmt.Printf("InitGenesisState genesisTimeslot=%v\n", genesisTimeslot)
+// CreateGenesisState generates the StateDB object and genesis statedb
+func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, epochFirstSlot uint64, outputFilename string) (err error) {
+	statedb, err := newStateDB(sdb, common.Hash{})
+	if err != nil {
+		return
 	}
 
-	j.SafroleState.EpochFirstSlot = uint32(genesisConfig.Epoch0Timestamp)
+	validators := make(types.Validators, chainSpec.NumValidators)
+	for i := uint32(0); i < uint32(chainSpec.NumValidators); i++ {
+		seed := make([]byte, 32)
+
+		for j := 0; j < 8; j++ {
+			binary.LittleEndian.PutUint32(seed[j*4:], i)
+		}
+
+		v, err := InitValidatorSecret(seed, seed, seed, "")
+		if err != nil {
+			return err
+		}
+		var vpub types.Validator
+		copy(vpub.Bandersnatch[:], v.BandersnatchPub[:])
+		copy(vpub.Ed25519[:], v.Ed25519Pub[:])
+		copy(vpub.Bls[:], v.BlsPub[:])
+		copy(vpub.Metadata[:], v.Metadata[:])
+		validators[i] = vpub
+	}
+
+	j := NewJamState()
+	j.SafroleState.EpochFirstSlot = uint32(epochFirstSlot)
 	j.SafroleState.Timeslot = 0
 	if types.TimeUnitMode != "TimeStamp" {
 		j.SafroleState.Timeslot = j.SafroleState.Timeslot / types.SecondsPerSlot
 	}
 
-	validators := genesisConfig.Authorities
 	vB := []byte{}
 	for _, v := range validators {
 		vB = append(vB, v.Bytes()...)
@@ -85,8 +66,6 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 		The first buffer entry is set as the Blake2b hash of the genesis block,
 		each of the other entries is set as the Blake2b hash of the previous entry.
 	*/
-
-	// j.SafroleState.Entropy = make([]common.Hash, types.EntropySize)
 	j.SafroleState.Entropy[0] = common.BytesToHash(common.ComputeHash(vB))                                //BLAKE2B hash of the genesis block#0
 	j.SafroleState.Entropy[1] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[0].Bytes())) //BLAKE2B of Current
 	j.SafroleState.Entropy[2] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[1].Bytes())) //BLAKE2B of EpochN1
@@ -100,14 +79,104 @@ func InitGenesisState(genesisConfig *GenesisConfig) (j *JamState) {
 	j.PrivilegedServiceIndices.Kai_m = BootstrapServiceCode
 	for i := 0; i < types.TotalCores; i++ {
 		j.AuthorizationsPool[i] = make([]common.Hash, types.MaxAuthorizationPoolItems)
-		j.AuthorizationQueue[i] = make([]common.Hash, types.MaxAuthorizationQueueItems)
+		var temp [6]common.Hash
+		j.AuthorizationQueue[i] = temp
+		//j.AuthorizationQueue[i] = make([]common.Hash, types.MaxAuthorizationQueueItems)
 	}
 	// setup the initial state of the accumulate state
 	for i := 0; i < types.EpochLength; i++ {
 		j.AccumulationQueue[i] = make([]types.AccumulationQueue, 0)
 		j.AccumulationHistory[i] = types.AccumulationHistory{}
 	}
-	return j
+
+	statedb.JamState = j
+	statedb.Block = nil
+
+	// Load services into genesis state
+	services := []types.TestService{
+		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
+		// Add more services here as needed IF they are needed for Genesis
+	}
+
+	for _, service := range services {
+		fn := common.GetFilePath(service.FileName)
+		code, err := os.ReadFile(fn)
+		if err != nil {
+			return err
+		}
+		codeHash := common.Blake2Hash(code)
+		bootstrapServiceAccount := types.ServiceAccount{
+			CodeHash:        codeHash,
+			Balance:         10000,
+			GasLimitG:       100,
+			GasLimitM:       100,
+			StorageSize:     uint64(81 + len(code) + 0), // a_l = ∑ 81+z per (h,z) + ∑ 32+s
+			NumStorageItems: 2*1 + 0,                    //a_i = 2⋅∣al∣+∣as∣
+		}
+		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
+		statedb.WriteService(service.ServiceCode, &bootstrapServiceAccount)
+	}
+
+	statedb.StateRoot = statedb.UpdateTrieState()
+
+	trace := StateSnapshotRaw{
+		StateRoot: statedb.StateRoot,
+		KeyVals:   statedb.GetAllKeyValues(),
+	}
+
+	// Ensure the output directory exists
+	outputDir := filepath.Dir(outputFilename)
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		err = os.MkdirAll(outputDir, 0755)
+		if err != nil {
+			return fmt.Errorf("error creating output directory: %v", err)
+		}
+	}
+
+	// Write the file
+	err = ioutil.WriteFile(outputFilename, []byte(trace.String()), 0644)
+	if err != nil {
+		return fmt.Errorf("error writing file: %v", err)
+	}
+	return nil
+}
+
+func NewStateDBFromSnapshotRawFile(sdb *storage.StateDBStorage, filename string) (statedb *StateDB, err error) {
+	fn := common.GetFilePath(filename)
+	snapshotRawBytes, err := os.ReadFile(fn)
+	if err != nil {
+		return statedb, err
+	}
+	var stateSnapshotRaw StateSnapshotRaw
+	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
+	if err != nil {
+		return statedb, err
+	}
+	return NewStateDBFromSnapshotRaw(sdb, &stateSnapshotRaw)
+}
+
+func NewStateDBFromSnapshotRaw(sdb *storage.StateDBStorage, stateSnapshotRaw *StateSnapshotRaw) (statedb *StateDB, err error) {
+	statedb, err = newStateDB(sdb, common.Hash{})
+	if err != nil {
+		return statedb, err
+	}
+	statedb.Block = nil
+	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(*stateSnapshotRaw)
+	statedb.JamState = NewJamState()
+	statedb.RecoverJamState(statedb.StateRoot)
+
+	// Because we have safrolestate as internal state, JamState is NOT enough.
+	s := statedb.JamState
+	s.SafroleState.NextEpochTicketsAccumulator = s.SafroleStateGamma.GammaA      // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
+	s.SafroleState.TicketsVerifierKey = s.SafroleStateGamma.GammaZ               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	s.SafroleState.TicketsOrKeys = s.SafroleStateGamma.GammaS                    // γs: Current epoch’s slot-sealer series (epoch N)
+	s.SafroleState.NextValidators = types.Validators(s.SafroleStateGamma.GammaK) // γk: Next epoch’s validators (epoch N+1)
+	// fmt.Printf("GammaK: %x\n", types.Validators(s.SafroleStateGamma.GammaK))
+	// what about GammaK?
+	//fmt.Printf("JS: %s\n", statedb.JamState.String())
+	//fmt.Printf("Safrole State: %s\n", statedb.JamState.SafroleState.String())
+
+	return statedb, nil
 }
 
 // The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
@@ -133,7 +202,7 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 	return originalTime.Unix()
 }
 
-func NewGenesisConfig(validators []types.Validator) GenesisConfig {
+func NewEpoch0Timestamp() uint32 {
 	now := time.Now().Unix()
 	second_per_epoch := types.SecondsPerEpoch // types.EpochLength
 	if types.TimeUnitMode != "TimeStamp" {
@@ -160,52 +229,7 @@ func NewGenesisConfig(validators []types.Validator) GenesisConfig {
 	}
 
 	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v. Wait:%v Sec \n", epoch0Timestamp, uint64(waitTime))
-	return GenesisConfig{
-		Epoch0Timestamp: epoch0Timestamp,
-		Authorities:     validators,
-	}
-}
-
-// writeGenesisConfig writes the genesis configuration to a JSON file
-func (config *GenesisConfig) SaveToFile(filePath string) error {
-	// Marshal config into JSON
-	bytes, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Write the JSON data to the specified file
-	err = ioutil.WriteFile(filePath, bytes, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// readGenesisConfig reads the genesis configuration from a JSON file
-func ReadGenesisConfig(filePath string) (*GenesisConfig, error) {
-	// Read the JSON data from the specified file
-	bytes, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Unmarshal the JSON data into the GenesisAuthorities struct
-	var config GenesisConfig
-	err = json.Unmarshal(bytes, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
-func (g *GenesisConfig) String() string {
-	enc, err := json.MarshalIndent(g, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return uint32(epoch0Timestamp)
 }
 
 func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata string) (types.Validator, error) {

@@ -55,12 +55,11 @@ const (
 
 	godMode     = true
 	noRotation  = false
-	GenesisFile = "genesis.json"
+	GenesisFile = "tiny.json"
 )
 
 const (
 	ValidatorFlag   = "VALIDATOR"
-	DAFlag          = "DA"
 	ValidatorDAFlag = "VALIDATOR&DA"
 )
 
@@ -257,25 +256,19 @@ func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
 	return stateSnapshotRaw, nil
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
-	fn := common.GetFilePath(GenesisFile)
-	stateSnapshotRaw, err := loadStateSnapshot(fn)
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	return newNode(id, credential, genesisConfig, peers, peerList, flag, dataDir, port, stateSnapshotRaw)
+func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
+	return newNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, flag, dataDir, port)
 }
 
-func NewNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisConfig, peers, peerList, dataDir, port, ValidatorFlag)
+func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorFlag)
 }
 
-func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisConfig, peers, peerList, dataDir, port, DAFlag)
+func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorDAFlag)
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb.GenesisConfig, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int, trace_config statedb.StateSnapshotRaw) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
 
@@ -378,7 +371,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
 	}
 
-	_statedb, err := statedb.NewGenesisStateDB(node.store, genesisConfig)
+	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
 	if err == nil {
 		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)
@@ -387,19 +380,14 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisConfig *statedb
 		return nil, err
 	}
 	node.setValidatorCredential(credential)
-	if genesisConfig != nil && genesisConfig.Epoch0Timestamp > 0 {
-		node.epoch0Timestamp = uint32(genesisConfig.Epoch0Timestamp)
-	}
-	node.statedb.UpdateAllTrieStateRaw(trace_config) // insert the genesis state into the trie
-	StateSnapshotRaw := statedb.StateSnapshotRaw{}
-	KeyVals := _statedb.GetAllKeyValues()
-	StateSnapshotRaw.KeyVals = KeyVals
-	node.store.WriteLog(StateSnapshotRaw, 0)             // write "Traces"
-	node.store.WriteLog(_statedb.JamState.Snapshot(), 0) // write "StateSnapshots"
-
+	node.epoch0Timestamp = epoch0Timestamp
 	node.statedb.PreviousGuarantors(true)
 	node.statedb.AssignGuarantors(true)
-
+	var validators []types.Validator
+	validators = node.statedb.GetSafrole().NextValidators
+	if len(validators) == 0 {
+		panic("No validators")
+	}
 	go node.runServer()
 	go node.runClient()
 	go node.runMain()
@@ -1130,8 +1118,6 @@ func getMessageType(obj interface{}) string {
 		return "Trace"
 	case *statedb.StateSnapshotRaw:
 		return "Trace"
-	case *statedb.GenesisConfig:
-		return "GenesisConfig"
 	case DA_announcement:
 		return "DA_announcement"
 	case DA_request:
@@ -1233,9 +1219,10 @@ func (n *Node) runClient() {
 	defer ticker_pulse.Stop()
 
 	logChan := n.store.GetChan()
-
+	n.statedb.GetSafrole().EpochFirstSlot = n.epoch0Timestamp / types.SecondsPerSlot
 	for {
 		select {
+
 		case <-ticker_pulse.C:
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
@@ -1268,14 +1255,17 @@ func (n *Node) runClient() {
 			//if n.checkGodTimeslotUsed(currJCE) {
 			//	return
 			//}
+
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, &(n.queuedAssurances))
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				panic(0)
 			}
+
 			if newStateDB != nil && debugTree {
 				fmt.Printf("[N%d] Author PrintTree \n", n.id)
 				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
+
 			}
 			if newStateDB != nil {
 				if n.checkGodTimeslotUsed(currJCE) {

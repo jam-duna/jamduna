@@ -65,9 +65,9 @@ const (
 	MaxWorkItemsPerPackage           = 4              // I = 4: The maximum amount of work items in a package.
 	LookupAnchorMaxAge               = 14400          // L = 14,400: The maximum age in timeslots of the lookup anchor.
 	TransferMemoSize                 = 128            // M = 128: The size of a transfer memo in octets.
-	MaxAuthorizationPoolItems        = 8              // O = 8: The maximum number of items in the authorizations pool.
+	MaxAuthorizationPoolItems        = 2              // O = 8: The maximum number of items in the authorizations pool.
 	SecondsPerSlot                   = 6              // P = 6: The slot period, in seconds.
-	MaxAuthorizationQueueItems       = 80             // Q = 80: The maximum number of items in the authorizations queue.
+	MaxAuthorizationQueueItems       = 6              // Q = 80: The maximum number of items in the authorizations queue.
 	ValidatorCoreRotationPeriod      = 10             // R = 10: The rotation period of validator-core assignments, in timeslots.
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	MaxServiceCodeSize               = 4000000        // W_C = 4,000,000: The maximum size of service code in octets.

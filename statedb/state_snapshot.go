@@ -76,7 +76,8 @@ func (kv KeyVals) Decode(encoded []byte) (interface{}, uint32) {
 }
 
 type StateSnapshotRaw struct {
-	KeyVals KeyVals `json:"keyvals"`
+	StateRoot common.Hash `json:"state_root"`
+	KeyVals   KeyVals     `json:"keyvals"`
 }
 
 func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
@@ -312,5 +313,10 @@ func (original SafroleBasicState) Copy() SafroleBasicState {
 
 func (s *StateSnapshot) String() string {
 	jsonEncode, _ := json.MarshalIndent(s, "", "  ") // Indent with 2 spaces
+	return string(jsonEncode)
+}
+
+func (snr *StateSnapshotRaw) String() string {
+	jsonEncode, _ := json.MarshalIndent(snr, "", "  ") // Indent with 2 spaces
 	return string(jsonEncode)
 }

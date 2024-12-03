@@ -263,15 +263,15 @@ func (n *JamState) SetEntropy(entropyByte []byte) {
 }
 
 // C7 NextEpochValidatorKeys
-func (n *JamState) SetNextEpochValidators(nextEpochValidatorsByte []byte) {
-	if len(nextEpochValidatorsByte) == 0 {
+func (n *JamState) SetDesignedValidators(DesignedEpochValidatorsByte []byte) {
+	if len(DesignedEpochValidatorsByte) == 0 {
 		return
 	}
-	nextEpochValidators, _, err := types.Decode(nextEpochValidatorsByte, reflect.TypeOf(types.Validators{}))
+	DesignedEpochValidators, _, err := types.Decode(DesignedEpochValidatorsByte, reflect.TypeOf(types.Validators{}))
 	if err != nil {
 		return
 	}
-	n.SafroleState.NextValidators = nextEpochValidators.(types.Validators)
+	n.SafroleState.DesignedValidators = DesignedEpochValidators.(types.Validators)
 }
 
 // C8 CurrentValidatorKeys

@@ -16,6 +16,12 @@ type Validator struct {
 }
 type Validators []Validator
 
+func GetValidatorsLength(v Validators) int {
+	var tmp []Validator
+	tmp = v
+	return len(tmp)
+}
+
 type ValidatorSecret struct {
 	BandersnatchPub    BandersnatchKey           `json:"bandersnatch"`
 	Ed25519Pub         Ed25519Key                `json:"ed25519"`
@@ -216,8 +222,10 @@ func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
 	authorizations_queue = decoded.([TotalCores][MaxAuthorizationQueueItems]common.Hash)
 	for i := 0; i < TotalCores; i++ {
 		if len(T[i]) == 0 {
-			T[i] = make([]common.Hash, MaxAuthorizationQueueItems)
+			var temp [6]common.Hash
+			T[i] = temp //	T[i] = make([]common.Hash, MaxAuthorizationQueueItems)
 		}
+
 		for j := 0; j < MaxAuthorizationQueueItems; j++ {
 			T[i][j] = authorizations_queue[i][j]
 		}
@@ -261,7 +269,8 @@ func (T AuthorizationQueue) Encode() []byte {
 		return []byte{}
 	}
 	for i := 0; i < len(T); i++ {
-		copy(authorizations_queue[i][:], T[i])
+		copy(authorizations_queue[i][:], T[i][:])
+		// copy(authorizations_queue[i][:], T[i])
 	}
 	encoded, err := Encode(authorizations_queue)
 	if err != nil {

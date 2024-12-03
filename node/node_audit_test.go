@@ -83,7 +83,7 @@ func TestDisputes(t *testing.T) {
 				},
 			},
 		}
-		err = builderNode.peersInfo[4].SendWorkPackageSubmission(0, codeWorkPackage, []byte{})
+		err = builderNode.peersInfo[4].SendWorkPackageSubmission(codeWorkPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}

@@ -2,7 +2,7 @@ package main
 
 import (
 	"crypto/ed25519"
-	"encoding/json"
+
 	"flag"
 	"fmt"
 	"github.com/colorfulnotion/jam/bandersnatch"
@@ -10,7 +10,7 @@ import (
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
-	"io/ioutil"
+
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,36 +59,7 @@ func main() {
 		os.Exit(0)
 	}
 	peers, peerList, err := generatePeerNetwork(validators, config.Port)
-
-	// Load and parse genesis file
-	var genesisConfig statedb.GenesisConfig
-	if len(config.Genesis) == 0 {
-		// If no genesis file is provided, use default values with optional timestamp
-		genesisConfig.Authorities = validators
-	} else {
-		// Load genesis file and parse it into genesisConfig
-		data, err := ioutil.ReadFile(config.Genesis)
-		if err != nil {
-			os.Exit(0)
-		}
-
-		// Parse genesis file into genesisConfig
-		err = json.Unmarshal(data, &genesisConfig)
-		if err != nil {
-			os.Exit(0)
-		}
-	}
-
-	currTS := uint64(time.Now().Unix())
-	if config.Epoch0Timestamp > 0 {
-		if currTS >= uint64(config.Epoch0Timestamp) {
-			fmt.Printf("Invalid Config. Now(%v) > Epoch0Timestamp (%v)", currTS, config.Epoch0Timestamp)
-			os.Exit(1)
-		}
-		genesisConfig.Epoch0Timestamp = uint64(config.Epoch0Timestamp)
-	} else if genesisConfig.Epoch0Timestamp == 0 && config.Epoch0Timestamp > 0 {
-		genesisConfig.Epoch0Timestamp = currTS + 6
-	}
+	epoch0Timestamp := statedb.NewEpoch0Timestamp()
 
 	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
 		// set up validator secrets
@@ -100,7 +71,7 @@ func main() {
 	}
 
 	// Set up peers and node
-	_, err = node.NewNode(uint16(validatorIndex), secrets[validatorIndex], &genesisConfig, peers, peerList, config.DataDir, config.Port)
+	_, err = node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.Genesis, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
 	if err != nil {
 		panic(1)
 	}

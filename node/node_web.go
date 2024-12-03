@@ -112,7 +112,8 @@ func (n *Node) runWebService(port uint16) {
 		if err != nil {
 			panic(err)
 		}
-		stateDB, err := statedb.NewStateDBFromSnapShotRaw(sdb, stateTransition.PreState)
+
+		stateDB, err := statedb.NewStateDBFromSnapshotRaw(sdb, &(stateTransition.PreState))
 		if err != nil {
 			panic(err)
 		}

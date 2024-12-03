@@ -80,7 +80,7 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	pkg.WorkPackage = workPackage
 	return nil
 }
-func (p *Peer) SendWorkPackageSubmission(coreIndex uint16, pkg types.WorkPackage, extrinsics []byte) (err error) {
+func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics []byte) (err error) {
 	if pkg.RefineContext.LookupAnchorSlot == 1 {
 		if len(pkg.RefineContext.Prerequisites) == 0 {
 			panic("Prerequisite is empty")
@@ -90,11 +90,9 @@ func (p *Peer) SendWorkPackageSubmission(coreIndex uint16, pkg types.WorkPackage
 	if err != nil {
 		return fmt.Errorf("failed to get self core index: %w", err)
 	}
-	if coreIndex != core_idx {
-		return fmt.Errorf("Core index mismatch: %d != %d", coreIndex, core_idx)
-	}
+
 	req := JAMSNPWorkPackage{
-		CoreIndex:   coreIndex,
+		CoreIndex:   core_idx,
 		WorkPackage: pkg,
 	}
 	/*

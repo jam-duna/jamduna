@@ -3,7 +3,6 @@ package node
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +12,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/statedb"
+	//"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -184,24 +183,14 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 }
 
 func SetupNodeEnv(t *testing.T) *Node {
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork("tiny")
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
-	}
-	fn := common.GetFilePath(GenesisFile)
-	snapshotRawBytes, err := os.ReadFile(fn)
-	if err != nil {
-		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
-	}
-	var stateSnapshotRaw statedb.StateSnapshotRaw
-	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
-	if err != nil {
-		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
 	}
 	numNodes := 1
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i, stateSnapshotRaw)
+		node, err := newNode(uint16(i), validatorSecrets[i], GenesisFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

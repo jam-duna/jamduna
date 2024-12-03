@@ -307,7 +307,7 @@ func (vm *VM) hostAssign(X_U *types.PartialState) uint32 {
 	for i := 0; i < 32; i++ {
 		qi[i] = common.BytesToHash(c[i:(i + 32)])
 	}
-	X_U.QueueWorkReport[core] = qi
+	copy(X_U.QueueWorkReport[core][:], qi[:])
 	return OK
 }
 

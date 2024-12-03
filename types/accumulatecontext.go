@@ -23,7 +23,8 @@ type Kai_state struct {
 	Kai_g map[uint32]uint32 `json:"chi_g"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
 }
 
-type AuthorizationQueue [TotalCores][]common.Hash
+// fixed size for the authorization queue
+type AuthorizationQueue [TotalCores][MaxAuthorizationQueueItems]common.Hash
 
 // U: The set of partial state, used during accumulation. See equation 170.
 type PartialState struct {

@@ -5,13 +5,15 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
-	"log"
-	"math/big"
+
+	//"math/big"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -44,31 +46,15 @@ func sendStateTransition(endpoint string, st *statedb.StateTransition) (err erro
 	return
 }
 
-func generateSeedSet(ringSize int) ([][]byte, error) {
-
+func generateSeedSet(ringSize uint32) ([][]byte, error) {
 	ringSet := make([][]byte, ringSize)
-	for i := 0; i < ringSize; i++ {
+	for i := uint32(0); i < ringSize; i++ {
 		seed := make([]byte, 32)
-		idxBytes := big.NewInt(int64(i)).Bytes()
-		copy(seed[32-len(idxBytes):], idxBytes)
+		for j := 0; j < 8; j++ {
+			binary.LittleEndian.PutUint32(seed[j*4:], i)
+		}
 		ringSet[i] = seed
 	}
-
-	/*
-		entropy := common.Blake2Hash([]byte("42"))
-		Generate the ring set with deterministic random seeds
-		for i := 0; i < ringSize; i++ {
-			seed := make([]byte, 32)
-			if _, err := rand.Read(entropy.Bytes()); err != nil {
-				return nil, err
-			}
-			// XOR the deterministic seed with the random seed to make it deterministic
-			for j := range seed {
-				seed[j] ^= entropy[j%len(entropy)]
-			}
-			ringSet[i] = common.Blake2Hash(append(seed[:], byte(i))).Bytes()
-		}
-	*/
 	return ringSet, nil
 }
 
@@ -136,9 +122,8 @@ func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
 	return path, nil
 }
 
-func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
+func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
 	seeds, _ := generateSeedSet(numNodes)
-
 	peers := make([]string, numNodes)
 	peerList := make(map[uint16]*Peer)
 	validators := make([]types.Validator, numNodes)
@@ -155,16 +140,11 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[uint16]*Peer, []ty
 		if err == nil {
 			validators[i] = validator
 		} else {
-			return statedb.GenesisConfig{}, nil, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
+			return 0, nil, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
 		}
 	}
 
-	genesisConfig := statedb.NewGenesisConfig(validators)
-	//genesisConfig.SaveToFile("../genesis.json")
-
-	//prettyJSON, _ := json.MarshalIndent(validators, "", "  ")
-	//fmt.Printf("Validators (size:%v) %s\n", numNodes, prettyJSON)
-
+	epoch0Timestamp := statedb.NewEpoch0Timestamp()
 	for i := uint16(0); i < numNodes; i++ {
 		addr := fmt.Sprintf(quicAddr, 9000+i)
 		peers[i] = addr
@@ -178,7 +158,7 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[uint16]*Peer, []ty
 	// Print out peerList
 	prettyPeerList, err := json.MarshalIndent(peerList, "", "  ")
 	if err != nil {
-		return statedb.GenesisConfig{}, nil, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
+		return epoch0Timestamp, nil, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
 	}
 	//fmt.Printf("PeerList: %s\n", prettyPeerList)
 
@@ -193,32 +173,22 @@ func SetupQuicNetwork() (statedb.GenesisConfig, []string, map[uint16]*Peer, []ty
 		//bandersnatch_seed, ed25519_seed, bls_seed
 		validatorSecret, err := statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err != nil {
-			return statedb.GenesisConfig{}, nil, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
+			return epoch0Timestamp, nil, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
 		}
 		validatorSecrets[i] = validatorSecret
 	}
-	return genesisConfig, peers, peerList, validatorSecrets, nodePaths, nil
+	return epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, nil
 }
 
 func SetUpNodes(numNodes int) ([]*Node, error) {
-	genesisConfig, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork()
+	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork("tiny")
 	if err != nil {
 		return nil, err
-	}
-	fn := common.GetFilePath(GenesisFile)
-	snapshotRawBytes, err := os.ReadFile(fn)
-	if err != nil {
-		log.Fatalf("Error reading JSON file %s: %v\n", GenesisFile, err)
-	}
-	var stateSnapshotRaw statedb.StateSnapshotRaw
-	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
-	if err != nil {
-		log.Fatalf("Error unmarshaling JSON file %s: %v\n", GenesisFile, err)
 	}
 	nodes := make([]*Node, numNodes)
 	godIncomingCh := make(chan uint32, 10) // node sends timeslots to this channel when authoring
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], &genesisConfig, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i, stateSnapshotRaw)
+		node, err := newNode(uint16(i), validatorSecrets[i], GenesisFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			panic(err)
 			return nil, fmt.Errorf("Failed to create node %d: %v", i, err)
@@ -310,13 +280,6 @@ func jamtest(jam string) {
 			break
 		}
 	}
-	// TODO: REMOVE this
-	if noRotation {
-		for _, n := range nodes {
-			n.statedb.PreviousGuarantors(true)
-			n.statedb.AssignGuarantors(true)
-		}
-	}
 	// code length: 206
 	fn := common.GetFilePath(statedb.BootstrapServiceFile)
 	bootstrapCode, err := os.ReadFile(fn)
@@ -370,7 +333,7 @@ func jamtest(jam string) {
 				},
 			},
 		}
-		err = builderNode.peersInfo[4].SendWorkPackageSubmission(0, codeWorkPackage, []byte{})
+		err = builderNode.peersInfo[4].SendWorkPackageSubmission(codeWorkPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -407,11 +370,6 @@ func jamtest(jam string) {
 
 			}
 		}
-	}
-	// TODO: REMOVE this
-	for _, n := range nodes {
-		n.statedb.PreviousGuarantors(true)
-		n.statedb.AssignGuarantors(true)
 	}
 
 	fmt.Printf("All services are ready, Send preimage announcement\n")
@@ -498,7 +456,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 		workPackageHash := workPackage.Hash()
 
 		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
-		err := n1.peersInfo[4].SendWorkPackageSubmission(0, workPackage, []byte{})
+		err := n1.peersInfo[4].SendWorkPackageSubmission(workPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -767,7 +725,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			nodeIndices := []int{0, 2, 3}
 			senderIdx = nodeIndices[senderIdx]
 			receiverIdx = nodeIndices[receiverIdx]
-			err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(1, workPackage, []byte{})
+			err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(workPackage, []byte{})
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 			}
@@ -787,7 +745,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			senderIdx = nodeIndices[senderIdx]
 			receiverIdx = nodeIndices[receiverIdx]
 			fmt.Printf("Sending WorkPackage...\n")
-			err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(0, workPackage, []byte{})
+			err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(workPackage, []byte{})
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 			}

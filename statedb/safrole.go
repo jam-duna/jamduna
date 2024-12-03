@@ -557,6 +557,9 @@ func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, ta
 	//RingVrfSign(privateKey, ringsetBytes, vrfInputData, auxData []byte)
 	//During epoch N, each authority scheduled for epoch N+2 constructs a set of tickets which may be eligible (6.5.2) for on-chain submission.
 	auxData := []byte{}
+	if len(s.NextValidators) == 0 {
+		return types.Ticket{}, fmt.Errorf("No validators in NextValidators")
+	}
 	ringsetBytes := s.GetRingSet("Next")
 	//fmt.Printf("generateTicket secrete=%x, ringsetBytes=%x, ticket_vrf_input=%x, auxData=%x\n", secret, ringsetBytes, ticket_vrf_input, auxData)
 	//RingVrfSign(privateKeys[proverIdx], ringSet, vrfInputData, auxData)
@@ -753,17 +756,28 @@ func (s *SafroleState) GetRelativeSlotIndex(slot_index uint32) (uint32, error) {
 
 func (s *SafroleState) GetAuthorIndex(authorkey common.Hash, phase string) (uint16, error) {
 	var validatorSet []types.Validator
-
 	// Select the appropriate set of validators based on the phase
 	switch phase {
 	case "Pre": // N-1
+		if len(s.PrevValidators) == 0 {
+			return 0, errors.New("PrevValidators is empty")
+		}
 		validatorSet = s.PrevValidators
 	case "Curr": // N
+		if len(s.CurrValidators) == 0 {
+			return 0, errors.New("CurrValidators is empty")
+		}
 		validatorSet = s.CurrValidators
 	case "Next": // N+1
+		if len(s.NextValidators) == 0 {
+			return 0, errors.New("NextValidators is empty")
+		}
 		validatorSet = s.NextValidators
 	case "Designed": // N+2
 		validatorSet = s.DesignedValidators
+		if len(validatorSet) == 0 {
+			return 0, errors.New("DesignedValidators is empty")
+		}
 	default:
 		return 0, errors.New("invalid phase")
 	}
@@ -808,7 +822,18 @@ func (s *SafroleState) computeFallbackAuthorityIndex(targetRandomness common.Has
 // Fallback is using the perspective of right now
 func (s *SafroleState) GetFallbackValidator(slot_index uint32) common.Hash {
 	// fallback validator has been updated at eq 68
+	//fmt.Printf("GetFallbackValidator safrolestate: %s\n", s.String())
 	return s.TicketsOrKeys.Keys[slot_index]
+}
+
+func (state *SafroleState) String() string {
+	// Marshal the JamState into indented JSON
+	jsonBytes, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return "failedmarshaling"
+	}
+	// Return the JSON as a string
+	return string(jsonBytes)
 }
 
 func (s *SafroleState) GetPrimaryWinningTicket(slot_index uint32) common.Hash {
@@ -896,8 +921,9 @@ func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
 func (s *SafroleState) CheckFirstPhaseReady() (isReady bool) {
 	// timeslot mark
 	currJCE := common.ComputeRealCurrentJCETime(types.TimeUnitMode)
-	if currJCE < s.EpochFirstSlot {
-		//fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot)
+
+	if currJCE < s.EpochFirstSlot*types.SecondsPerSlot {
+		// fmt.Printf("Not ready currJCE: %v < s.EpochFirstSlot %v\n", currJCE, s.EpochFirstSlot*types.SecondsPerSlot)
 		return false
 	}
 	return true
@@ -992,7 +1018,6 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 		return s2, fmt.Errorf("GetFreshRandomness %v", err)
 	}
 	// in the tail slot with a full set of tickets
-
 	if prevEpoch < currEpoch { //MK check EpochNumSlots-1 ?
 		//TODO this is Winning ticket elgible. Check if header has marker, if yes, verify it
 		if debug {
@@ -1042,7 +1067,6 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	var wg sync.WaitGroup
 	ticketMutex := &sync.Mutex{}
 	errCh := make(chan error, len(tickets))
-
 	// Iterate over tickets in parallel
 	for _, e := range tickets {
 		wg.Add(1)
@@ -1088,7 +1112,13 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 func (s2 *SafroleState) PhasingEntropyAndValidator(s *SafroleState, new_entropy_0 common.Hash) {
 	s2.PrevValidators = s2.CurrValidators
 	s2.CurrValidators = s2.NextValidators
+	if types.GetValidatorsLength(s2.NextValidators) == 0 {
+		panic("no NextValidators")
+	}
 	s2.NextValidators = s2.DesignedValidators
+	if types.GetValidatorsLength(s2.DesignedValidators) == 0 {
+		panic("no DesignedValidators")
+	}
 	prev_n0 := s2.Entropy[0]
 	s2.Entropy[1] = s.Entropy[0]
 	s2.Entropy[2] = s.Entropy[1]

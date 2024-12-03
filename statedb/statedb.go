@@ -316,110 +316,6 @@ const (
 	BootstrapServiceFile = "/services/bootstrap.pvm"
 )
 
-// NewGenesisStateDB generates the first StateDB object and genesis statedb
-func NewGenesisStateDB(sdb *storage.StateDBStorage, c *GenesisConfig) (statedb *StateDB, err error) {
-	statedb, err = newStateDB(sdb, common.Hash{})
-	if err != nil {
-		return
-	}
-
-	statedb.Block = nil
-	statedb.JamState = InitGenesisState(c)
-
-	// Load services into genesis state
-	services := []types.TestService{
-		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
-		// Add more services here as needed IF they are needed for Genesis
-	}
-
-	for _, service := range services {
-		fn := common.GetFilePath(service.FileName)
-		code, err := os.ReadFile(fn)
-		if err != nil {
-			return statedb, err
-		}
-		codeHash := common.Blake2Hash(code)
-		bootstrapServiceAccount := types.ServiceAccount{
-			CodeHash:        codeHash,
-			Balance:         10000,
-			GasLimitG:       100,
-			GasLimitM:       100,
-			StorageSize:     uint64(81 + len(code) + 0), // a_l = ∑ 81+z per (h,z) + ∑ 32+s
-			NumStorageItems: 2*1 + 0,                    //a_i = 2⋅∣al∣+∣as∣
-		}
-		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
-		statedb.WriteService(service.ServiceCode, &bootstrapServiceAccount)
-	}
-
-	statedb.StateRoot = statedb.UpdateTrieState()
-	return statedb, nil
-}
-
-func NewStateDBFromSnapShotRaw(sdb *storage.StateDBStorage, snapshotRaw StateSnapshotRaw) (statedb *StateDB, err error) {
-	err = nil
-	statedb, err = newStateDB(sdb, common.Hash{})
-	statedb.Block = nil
-	if err != nil {
-		return
-	}
-	statedb.Block = nil
-	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(snapshotRaw)
-	statedb.JamState = NewJamState()
-	statedb.RecoverJamState(statedb.StateRoot)
-	// Load services into genesis state
-	services := []types.TestService{
-		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
-		// Add more services here as needed IF they are needed for Genesis
-	}
-
-	for _, service := range services {
-		code, err := os.ReadFile(service.FileName)
-		if err != nil {
-			return statedb, err
-		}
-		codeHash := common.Blake2Hash(code)
-		bootstrapServiceAccount := types.ServiceAccount{
-			CodeHash:        codeHash,
-			Balance:         10000,
-			GasLimitG:       100,
-			GasLimitM:       100,
-			StorageSize:     uint64(len(code)),
-			NumStorageItems: 1,
-		}
-		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
-		statedb.WriteService(service.ServiceCode, &bootstrapServiceAccount)
-	}
-	return statedb, err
-}
-
-func InitStateDBFromSnapshot(sdb *storage.StateDBStorage, snapshot *StateSnapshot) (statedb *StateDB, err error) {
-	statedb, err = newStateDB(sdb, common.Hash{})
-	if err != nil {
-		return statedb, err
-	}
-
-	statedb.Block = nil
-	statedb.JamState = InitStateFromSnapshot(snapshot)
-	// setting the safrole state so that block 1 can be produced
-	statedb.StateRoot = statedb.UpdateTrieState()
-
-	return statedb, nil
-}
-
-func InitStateDBFromGenesis(sdb *storage.StateDBStorage, snapshot *StateSnapshot, genesis string) (statedb *StateDB, err error) {
-	statedb, err = newStateDB(sdb, common.Hash{})
-	if err != nil {
-		return statedb, err
-	}
-
-	statedb.Block = nil
-	statedb.JamState = InitStateFromSnapshot(snapshot)
-	// setting the safrole state so that block 1 can be produced
-	statedb.StateRoot = statedb.UpdateAllTrieState(genesis)
-
-	return statedb, nil
-}
-
 func (s *StateDB) GetHeaderHash() common.Hash {
 	return s.Block.Header.Hash()
 }
@@ -492,7 +388,7 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	if err != nil {
 		fmt.Printf("Error reading C6 Entropy from trie: %v\n", err)
 	}
-	nextEpochValidatorsEncode, err := t.GetState(C7)
+	DesignedEpochValidatorsEncode, err := t.GetState(C7)
 	if err != nil {
 		fmt.Printf("Error reading C7 NextEpochValidators from trie: %v\n", err)
 	}
@@ -545,7 +441,7 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetSafroleState(safroleStateEncode)
 	d.SetPsi(disputeStateEncode)
 	d.SetEntropy(entropyEncode)
-	d.SetNextEpochValidators(nextEpochValidatorsEncode)
+	d.SetDesignedValidators(DesignedEpochValidatorsEncode)
 	d.SetCurrEpochValidators(currEpochValidatorsEncode)
 	d.SetPriorEpochValidators(priorEpochValidatorEncode)
 	d.SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotEncode)
@@ -555,7 +451,7 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetAccumulateQueue(accunulateQueueEncode)
 	d.SetAccumulateHistory(accunulateHistoryEncode)
 	s.SetJamState(d)
-	//fmt.Printf("[N%v] RecoverJamState %v\n", s.Id, s.GetJamSnapshot())
+	//fmt.Printf("[N%v] RecoverJamState jam state: %s -- safrolestate: %s\n", s.Id, d.String(), d.SafroleState.String())
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -1039,13 +935,16 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 			if err != nil {
 				return nil, nil, err
 			}
-
 			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
 				return nil, nil, err
 			}
-
+			var validators []types.Validator
+			validators = newStateDB.GetSafrole().NextValidators
+			if len(validators) == 0 {
+				panic("No validators")
+			}
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
 			// AddDrawBlock(common.Str(proposedBlk.Hash()), common.Str(proposedBlk.ParentHash()), int(proposedBlk.Header.AuthorIndex), fmt.Sprintf("%d", proposedBlk.Header.Slot))
 			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
@@ -1178,36 +1077,6 @@ func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult
 	return output
 }
 
-// Section 8.2 - Eq 85+86
-func (s *StateDB) ApplyStateTransitionAuthorizations(guarantees []types.Guarantee) error {
-	for c := uint16(0); c < types.TotalCores; c++ {
-		if len(guarantees) > 0 {
-			// build m, holding the set of authorization hashes matching the core c in guarantees
-			m := make(map[common.Hash]bool)
-			hits := 0
-			for _, g := range guarantees {
-				if g.Report.CoreIndex == c {
-					m[g.Report.AuthorizerHash] = true
-					hits++
-				}
-			}
-			// only use m to update the pool with remove_guarantees_authhash if we have hits > 0
-			if hits > 0 {
-				s.JamState.AuthorizationsPool[c] = s.remove_guarantees_authhash(s.JamState.AuthorizationsPool[c], m)
-			}
-		}
-		// Eq 85 -- add
-		for _, q := range s.JamState.AuthorizationQueue[c] {
-			s.JamState.AuthorizationsPool[c] = append(s.JamState.AuthorizationsPool[c], q)
-		}
-		// cap AuthorizationsPool length at O=types.MaxAuthorizationPoolItems
-		if len(s.JamState.AuthorizationsPool[c]) > types.MaxAuthorizationPoolItems {
-			s.JamState.AuthorizationsPool[c] = s.JamState.AuthorizationsPool[c][:types.MaxAuthorizationPoolItems]
-		}
-	}
-	return nil
-}
-
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
 func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (uint32, uint32, error) {
 
@@ -1309,6 +1178,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		panic(1)
 		return s, err
 	}
+	var vs []types.Validator
+	vs = s2.NextValidators
+	if len(vs) == 0 {
+		panic("No validators")
+	}
 	s.JamState.SafroleState = &s2
 	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
@@ -1365,6 +1239,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	s.ApplyXContext(&o)
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
+	s.ApplyStateTransitionAuthorizations()
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	var leaves [][]byte
 	for _, sa := range b {
@@ -1376,7 +1251,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.accumulationRoot = common.Hash(tree.Root())
 
 	// 29 -  Update Authorization Pool alpha'
-	err = s.ApplyStateTransitionAuthorizations(blk.Guarantees())
+	err = s.ApplyStateTransitionAuthorizations()
 	if err != nil {
 		return s, err
 	}
