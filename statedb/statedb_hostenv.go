@@ -81,8 +81,11 @@ func (s *StateDB) GetTimeslot() uint32 {
 
 func (s *StateDB) ReadServiceBytes(service uint32) []byte {
 	tree := s.GetTrie()
-	value, err := tree.GetService(255, service)
+	value, ok, err := tree.GetService(255, service)
 	if err != nil {
+		if !ok {
+			// fmt.Printf("ReadServiceBytes: Service not found\n")
+		}
 		return nil
 	}
 	return value
@@ -109,11 +112,13 @@ func (s *StateDB) WriteServiceBytes(service uint32, v []byte) {
 func (s *StateDB) ReadServiceStorage(service uint32, k common.Hash) []byte {
 	// not init case
 	tree := s.GetTrie()
-	storage, err := tree.GetServiceStorage(service, k)
+	storage, ok, err := tree.GetServiceStorage(service, k)
 	if err != nil {
+		if !ok {
+			fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
+		}
 		return nil
-	} else {
-		//fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
+	} else { //fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
 		return storage
 	}
 }

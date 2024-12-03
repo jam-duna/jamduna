@@ -36,25 +36,26 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	debugDA     = false // DA
-	debugB      = false // Blocks, Announcment
-	debugG      = false // Guaranteeing
-	debugT      = false // Tickets/Safrole
-	debugP      = false // Preimages
-	debugA      = false // Assurances
-	debugF      = false // Finality
-	debugJ      = false // Audits + Judgements
-	debug       = false // General Node Ops
-	debugAudit  = false // Audit
-	trace       = false
-	debugE      = false // monitoring fn execution time
-	debugTree   = false // trie
-	numNodes    = 6
-	quicAddr    = "127.0.0.1:%d"
-	basePort    = 9000
-	godMode     = true
-	noRotation  = false
-	GenesisFile = "tiny.json"
+	debugDA       = false // DA
+	debugB        = false // Blocks, Announcment
+	debugG        = false // Guaranteeing
+	debugT        = false // Tickets/Safrole
+	debugP        = false // Preimages
+	debugA        = false // Assurances
+	debugF        = false // Finality
+	debugJ        = false // Audits + Judgements
+	debug         = false // General Node Ops
+	debugAudit    = false // Audit
+	trace         = false
+	debugE        = false // monitoring fn execution time
+	debugTree     = false // trie
+	debugSegments = false // trie
+	numNodes      = 6
+	quicAddr      = "127.0.0.1:%d"
+	basePort      = 9000
+	godMode       = true
+	noRotation    = false
+	GenesisFile   = "tiny.json"
 )
 
 const (
@@ -928,123 +929,62 @@ func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
 
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // need to actually ECdecode
-func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndex []uint16) (exported_segments [][]byte, err error) {
-	exported_segments = make([][]byte, len(segmentIndex))
-	segmentShards := setupSegmentsShards(len(segmentIndex))
-	// TODO: optimize with gofunc ala makeRequests
-	for shardIdx := uint16(0); shardIdx < types.TotalValidators; shardIdx++ {
-		if shardIdx == n.id {
-			//erasureRoot, shardIndex, segmentIndices, selected_segments, selected_full_justifications, selected_segments_justifications, exportedSegmentAndPageProofLens, true, nil
-			_, _, _, selected_segments, _, _, _, ok, err := n.GetSegmentShard_Assurer(erasureRoot, shardIdx, segmentIndex)
-			if err != nil {
-				fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] ERR %v\n", n.String(), err)
-			} else if ok {
-				if debugJ {
-					// fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(segmentShards[shardIdx]))
-					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(selected_segments))
-				}
-				//fmt.Printf("!!!shardIndex=%v, selected_segments=%x\n", shardIdx, selected_segments)
-				for idx, selected_segment := range selected_segments {
-					segmentIdx := segmentIndex[idx]
-					segmentShards[segmentIdx][shardIdx] = selected_segment
-				}
-			}
-		} else {
-			// [LOW PRIORITY] Stanley to improve it with proper justification
-			concatenatedShards, _, err := n.peersInfo[shardIdx].SendSegmentShardRequest(erasureRoot, shardIdx, segmentIndex, false)
-			if err != nil {
-				fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] ERR %v\n", n.String(), err)
-			} else {
-				// TODO: use CE140 to verification
-				selected_segments, err := SplitToSegmentShards(concatenatedShards)
-				if err != nil {
-					continue
-				}
-				if debugJ {
-					fmt.Printf("%s [reconstructSegments:SendSegmentShardRequest] SHARD %d = %d bytes\n", n.String(), shardIdx, len(concatenatedShards))
-				}
-				//fmt.Printf("shardIndex=%v, selected_segment=%x\n", shardIdx, selected_segments)
-				for idx, selected_segment := range selected_segments {
-					segmentIdx := segmentIndex[idx]
-					segmentShards[segmentIdx][shardIdx] = selected_segment
-				}
+func (n *Node) reconstructSegments(workPackageHashes []common.Hash, workPackageHashesMapping map[common.Hash][]uint16) (receiveSegmentMapping map[common.Hash][][]byte, err error) {
+	// Receive the segments mapping
+	receiveSegmentMapping = make(map[common.Hash][][]byte, len(workPackageHashes))
+
+	// Prepare the DA request
+	for _, workPackageHash := range workPackageHashes {
+		receiveSegments := make([][]byte, len(workPackageHashesMapping[workPackageHash]))
+		receiveShard := make([][][]byte, len(workPackageHashesMapping[workPackageHash]))
+		for i := range receiveShard {
+			receiveShard[i] = make([][]byte, types.TotalValidators)
+		}
+		reconstruct_reqs := make([]CE139_request, types.TotalValidators)
+		for _, workPackageHash := range workPackageHashes {
+			for i := range types.TotalValidators {
+				reconstruct_reqs[i].WorkPackageHash = workPackageHash
+				reconstruct_reqs[i].ShardIndex = uint16(i)
+				reconstruct_reqs[i].SegmentIndices = workPackageHashesMapping[workPackageHash]
 			}
 		}
-	}
-	for return_idx, segmentShard := range segmentShards {
-		segmentShardRaw := make([][][]byte, 1)
-		segmentShardRaw[0] = segmentShard
-		exported_segment, err := n.decode(segmentShardRaw, true, types.FixedSegmentSizeG)
+		reqs := make([]interface{}, types.TotalValidators)
+		for i, req := range reconstruct_reqs {
+			reqs[i] = req
+		}
+
+		responses, err := n.makeRequests(reqs, types.W_E/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
 		if err != nil {
-			return exported_segments, fmt.Errorf("Invalid Reconstructions %v", err)
+			fmt.Printf("Error in fetching import segments: %v\n", err)
+			return nil, err
 		}
-		exported_segments[return_idx] = exported_segment
-	}
-	if debugJ {
-		fmt.Printf("reconstructSegments %v_%v exported_segments=%x,(raw=%x)\n", erasureRoot, segmentIndex, exported_segments, segmentShards)
-	}
-	return exported_segments, nil
-}
-
-func (n *Node) GetImportSegments(importsegments []types.ImportSegment) (imports [][]byte, err error) {
-	imports = make([][]byte, 0)
-	//TODO: not sure if wp_hash, Index is sorted at all. If not. we can't do wp_hash, idx=[..] properly with for loop
-
-	// for _, s := range importsegments {
-	// 	// segment, ok := n.getImportSegment(s.WorkPackageHash, s.Index)
-	// 	// TODO CHECK: ok = false
-	// 	ok := false
-	// 	if !ok {
-	// 		// if we have a miss, we use CE139
-	// 		erasureRoot, err := n.getErasureRootFromHash(s.WorkPackageHash)
-	// 		if err != nil {
-	// 			fmt.Printf("%s [GetImportSegments:getErasureRootFromHash] WorkPackageHash=%v ERR %v\n", n.String(), s.WorkPackageHash, err)
-	// 			return imports, fmt.Errorf("Not found")
-	// 		}
-	// 		//fmt.Printf("GetImportSegments: erasureRoot = %v", erasureRoot)
-	// 		segments, err := n.reconstructSegments(erasureRoot, []uint16{s.Index})
-	// 		if err != nil {
-	// 			fmt.Printf("%s [GetImportSegments:reconstructSegments] ErasureRoot=%v ERR %v\n", n.String(), erasureRoot, err)
-	// 			return imports, fmt.Errorf("Not found")
-	// 		}
-	// 		if debugJ {
-	// 			fmt.Printf("GetImportSegments(%v_%d -> %v_%d)\n", s.WorkPackageHash, s.Index, erasureRoot, s.Index)
-	// 			fmt.Printf("GetImportSegments: segments = %v\n", segments)
-	// 		}
-	// 		imports = append(imports, segments...)
-	// 	}
-	// }
-
-	ok := false
-	if !ok {
-		// if we have a miss, we use CE139
-		if len(importsegments) != 0 {
-			WorkPackageHash := importsegments[0].WorkPackageHash
-			erasureRoot, err := n.getErasureRootFromHash(WorkPackageHash)
+		for _, resp := range responses {
+			daResp, ok := resp.(CE139_response)
+			if !ok {
+				fmt.Printf("Error in fetching import segments: %v\n", err)
+			}
+			selected_segments, err := SplitToSegmentShards(daResp.segmentShards)
 			if err != nil {
-				fmt.Printf("%s [GetImportSegments:getErasureRootFromHash] WorkPackageHash=%v ERR %v\n", n.String(), WorkPackageHash, err)
-				return imports, fmt.Errorf("Not found")
+				fmt.Printf("Error in fetching import segments: %v\n", err)
+				continue
 			}
-			//fmt.Printf("GetImportSegments: erasureRoot = %v", erasureRoot)
-
-			allIndex := make([]uint16, 0)
-			for _, s := range importsegments {
-				allIndex = append(allIndex, s.Index)
+			for idx, selected_segment := range selected_segments {
+				// segmentIdx := segmentIndex[idx]
+				receiveShard[idx][daResp.ShardIndex] = selected_segment
 			}
-			segments, err := n.reconstructSegments(erasureRoot, allIndex)
-			if err != nil {
-				fmt.Printf("%s [GetImportSegments:reconstructSegments] ErasureRoot=%v ERR %v\n", n.String(), erasureRoot, err)
-				return imports, fmt.Errorf("Not found")
-			}
-			if debugJ {
-				fmt.Printf("GetImportSegments(%v_%d -> %v_%d)\n", WorkPackageHash, allIndex, erasureRoot, allIndex)
-				fmt.Printf("GetImportSegments: segments = %v\n", segments)
-			}
-			imports = append(imports, segments...)
 		}
+		for return_idx, segmentShard := range receiveShard {
+			segmentShardRaw := make([][][]byte, 1)
+			segmentShardRaw[0] = segmentShard
+			exported_segment, err := n.decode(segmentShardRaw, true, types.FixedSegmentSizeG)
+			if err != nil {
+				fmt.Printf("Error in fetching import segments: %v\n", err)
+			}
+			receiveSegments[return_idx] = exported_segment
+		}
+		receiveSegmentMapping[workPackageHash] = receiveSegments
 	}
-	//fmt.Printf("GetImportSegments ** final imports=%x\n", imports)
-	return imports, nil
+	return receiveSegmentMapping, nil
 }
 
 func (n *Node) getPVMStateDB() *statedb.StateDB {
@@ -1086,8 +1026,6 @@ func getStructType(obj interface{}) string {
 
 func getMessageType(obj interface{}) string {
 	switch obj.(type) {
-	case types.AvailabilityJustification:
-		return "AvailabilityJustification"
 	case types.BlockQuery:
 		return "BlockQuery"
 	case types.Guarantee:
@@ -1136,6 +1074,14 @@ func getMessageType(obj interface{}) string {
 		return "DA_request"
 	case DA_response:
 		return "DA_response"
+	case CE138_request:
+		return "CE138_request"
+	case CE138_response:
+		return "CE138_response"
+	case CE139_request:
+		return "CE139_request"
+	case CE139_response:
+		return "CE139_response"
 	default:
 		return "unknown"
 	}

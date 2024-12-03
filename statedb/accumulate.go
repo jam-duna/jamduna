@@ -233,6 +233,9 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 		output_b = make([]BeefyCommitment, 0)
 		return
 	}
+	if i >= uint64(len(w)) { // if i >= len(w), then all work reports are accumulated
+		i = uint64(len(w))
+	}
 	g_star, t_star, b_star := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports
 	//o.Dump("OuterAccumulate", s.Id)
 	if i >= uint64(len(w)) { // no more reports

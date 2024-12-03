@@ -352,8 +352,11 @@ func jamtest(jam string) {
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
 				k := []byte{0, 0, 0, 0}
 				key := common.Compute_storageKey_internal(bootstrapService, k)
-				service_account_byte, err := t.GetServiceStorage(bootstrapService, key)
+				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, key)
 				if err != nil {
+					if !ok {
+						fmt.Printf("t.GetServiceStorage %v NOT FOUND\n", key)
+					}
 					time.Sleep(1 * time.Second)
 					continue
 				}
@@ -507,7 +510,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	// ================================================
 	// make 20 workpackages for Fib and Trib
 	for n := 0; n < 6; n++ {
-		importedSegments := make([]types.ImportSegment, 0)
+		fibImportedSegments := make([]types.ImportSegment, 0)
+		tribImportedSegments := make([]types.ImportSegment, 0)
 		timeslot := nodes[1].statedb.GetSafrole().GetTimeSlot()
 		refineContext := types.RefineContext{
 			// These values don't matter until we have a historical lookup -- which we do not!
@@ -518,39 +522,74 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			LookupAnchorSlot: timeslot + 100,
 			Prerequisites:    []common.Hash{},
 		}
-
+		workPackage := types.WorkPackage{}
 		if n > 0 {
-			importedSegments = append(importedSegments, types.ImportSegment{
+			fibImportedSegments = append(fibImportedSegments, types.ImportSegment{
 				WorkPackageHash: prevWorkPackageHash,
 				Index:           0,
 			})
-			importedSegments = append(importedSegments, types.ImportSegment{
+			tribImportedSegments = append(tribImportedSegments, types.ImportSegment{
 				WorkPackageHash: prevWorkPackageHash,
 				Index:           1, // TODO: check
 			})
-		}
-
-		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(n+1))
-		workPackage := types.WorkPackage{
-			Authorization: []byte("0x"), // TODO: set up null-authorizer
-			AuthCodeHost:  service0.ServiceCode,
-			Authorizer:    types.Authorizer{},
-			RefineContext: refineContext,
-			WorkItems: []types.WorkItem{
-				{
-					Service:          service0.ServiceCode,
-					CodeHash:         service0.CodeHash,
-					Payload:          payload,
-					GasLimit:         10000000,
-					ImportedSegments: importedSegments,
-					ExportCount:      1,
+			payload := make([]byte, 4)
+			binary.LittleEndian.PutUint32(payload, uint32(n+1))
+			workPackage = types.WorkPackage{
+				Authorization: []byte("0x"), // TODO: set up null-authorizer
+				AuthCodeHost:  service0.ServiceCode,
+				Authorizer:    types.Authorizer{},
+				RefineContext: refineContext,
+				WorkItems: []types.WorkItem{
+					{
+						Service:          service0.ServiceCode,
+						CodeHash:         service0.CodeHash,
+						Payload:          payload,
+						GasLimit:         10000000,
+						ImportedSegments: fibImportedSegments,
+						ExportCount:      1,
+					},
+					{
+						Service:          service1.ServiceCode,
+						CodeHash:         service1.CodeHash,
+						Payload:          payload,
+						GasLimit:         10000000,
+						ImportedSegments: tribImportedSegments,
+						ExportCount:      1,
+					},
 				},
-			},
+			}
+		} else {
+			payload := make([]byte, 4)
+			binary.LittleEndian.PutUint32(payload, uint32(n+1))
+			workPackage = types.WorkPackage{
+				Authorization: []byte("0x"), // TODO: set up null-authorizer
+				AuthCodeHost:  service0.ServiceCode,
+				Authorizer:    types.Authorizer{},
+				RefineContext: refineContext,
+				WorkItems: []types.WorkItem{
+					{
+						Service:          service0.ServiceCode,
+						CodeHash:         service0.CodeHash,
+						Payload:          payload,
+						GasLimit:         10000000,
+						ImportedSegments: fibImportedSegments,
+						ExportCount:      1,
+					},
+					{
+						Service:          service1.ServiceCode,
+						CodeHash:         service1.CodeHash,
+						Payload:          payload,
+						GasLimit:         10000000,
+						ImportedSegments: tribImportedSegments,
+						ExportCount:      1,
+					},
+				},
+			}
 		}
 		Fib_Trib_WorkPackages = append(Fib_Trib_WorkPackages, workPackage)
 		workPackageHash := workPackage.Hash()
 		prevWorkPackageHash = workPackageHash
+
 	}
 	// =================================================
 	// make 20 workpackages for Megatron

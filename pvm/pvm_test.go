@@ -260,13 +260,13 @@ func TestReadWriteRAM(t *testing.T) {
 		startAddress := uint32(rand.Intn(memorySize - testSize))
 
 		// Write the random byte pattern to the RAM
-		status := vm.writeRAMBytes(startAddress, data)
+		status := vm.WriteRAMBytes(startAddress, data)
 		if status != OK {
 			t.Fatalf("Iteration %d: Failed to write data to RAM", i)
 		}
 
 		// Read the data back from the RAM
-		readData, status := vm.readRAMBytes(startAddress, testSize)
+		readData, status := vm.ReadRAMBytes(startAddress, testSize)
 		if status != OK {
 			t.Fatalf("Iteration %d: Failed to read data from RAM", i)
 		}
@@ -567,7 +567,7 @@ func TestPVM_invoke(t *testing.T) {
 	vm.SetRegisterValue(9, regs2[10])
 	vm.SetRegisterValue(10, regs2[11])
 	vm.hostPeek()
-	data, errcode := vm.readRAMBytes(regs2[10], int(regs2[11]))
+	data, errcode := vm.ReadRAMBytes(regs2[10], int(regs2[11]))
 	if errcode != OK {
 		t.Errorf("Error reading data from memory: %v", errcode)
 	}

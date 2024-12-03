@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/quic-go/quic-go"
-	"io"
 )
 
 /*
@@ -124,7 +125,6 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error) {
-
 	code := uint8(CE139_SegmentShardRequest)
 	if withJustification {
 		code = CE140_SegmentShardRequestP

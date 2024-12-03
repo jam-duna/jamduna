@@ -46,8 +46,12 @@ func (mh *MockHostEnv) ReadServiceBytes(s uint32) []byte {
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	value, err := tree.GetService(255, s)
+	value, ok, err := tree.GetService(255, s)
 	if err != nil {
+		if !ok {
+			fmt.Printf("ReadServiceBytes unexpected error: %v\n", err)
+		}
+		fmt.Printf("ReadServiceBytes key=%v, value=%x, err=%v\n", s, value, err)
 		return nil
 	}
 	return value
@@ -74,8 +78,11 @@ func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) []byte {
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	storage, err := tree.GetServiceStorage(s, k)
+	storage, ok, err := tree.GetServiceStorage(s, k)
 	if err != nil {
+		if !ok {
+			fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", s, k, storage, err)
+		}
 		return nil
 	} else {
 		fmt.Printf("get value=%x, err=%v\n", storage, err)

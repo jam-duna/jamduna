@@ -253,3 +253,43 @@ func TestReportVerifyTiny(t *testing.T) {
 		})
 	}
 }
+
+func TestReportVerifyTinyStanley(t *testing.T) {
+	// run throgh all the json files in the tiny folder
+
+	// stanley cover
+	/*
+		anchor_not_recent 🔴
+		bad_beefy_mmr 🔴
+		bad_service_id 🔴
+		bad_state_root 🔴
+		duplicate_package_in_recent_history 🔴
+		report_before_last_rotation 🔴
+		segment_root_lookup_invalid 🔴
+		segment_root_lookup_invalid 🔴
+	*/
+	testCases := []struct {
+		jsonFile string
+		except   bool
+	}{
+		{"anchor_not_recent-1.json", true},
+		{"bad_beefy_mmr-1.json", true},
+		{"bad_service_id-1.json", true},
+		{"bad_state_root-1.json", true},
+		{"duplicate_package_in_recent_history-1.json", true},
+		{"report_before_last_rotation-1.json", true},
+		{"segment_root_lookup_invalid-1.json", true},
+		{"segment_root_lookup_invalid-2.json", true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.jsonFile, func(t *testing.T) {
+			err := ReportVerify(tc.jsonFile, true)
+			if err == nil {
+				t.Fatalf("Expected error, but got none for %s", tc.jsonFile)
+			}
+
+			fmt.Printf("===Finish %s===\n", tc.jsonFile)
+		})
+	}
+
+}

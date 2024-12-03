@@ -154,6 +154,11 @@ func (mt *CDMerkleTree) Justify(index int) ([][]byte, error) {
 	}
 	justification := make([][]byte, 0)
 	currentNode := mt.leaves[index]
+
+	if len(mt.leaves) == 1 {
+		justification = append(justification, mt.Root())
+		return justification, nil
+	}
 	for currentNode != mt.root {
 		parent := findParent(mt.root, currentNode)
 		sibling := findSibling(parent, currentNode)
@@ -164,6 +169,7 @@ func (mt *CDMerkleTree) Justify(index int) ([][]byte, error) {
 		}
 		currentNode = parent
 	}
+
 	return justification, nil
 }
 
@@ -199,7 +205,7 @@ func VerifyJustification(leafHash []byte, index int, justification [][]byte) []b
 
 // verifyJustification verifies the justification for a given index
 func verifyJustification(leafHash []byte, index int, justification [][]byte) []byte {
-	if len(justification) == 1 {
+	if len(justification) == 0 {
 		return leafHash
 	}
 	currentHash := leafHash

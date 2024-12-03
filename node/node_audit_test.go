@@ -97,8 +97,11 @@ func TestDisputes(t *testing.T) {
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
 				k := []byte{0, 0, 0, 0}
 				key := common.Compute_storageKey_internal(bootstrapService, k)
-				service_account_byte, err := t.GetServiceStorage(bootstrapService, key)
+				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, key)
 				if err != nil {
+					if !ok {
+						fmt.Printf("t.GetServiceStorage unexpected %v Error\n", key)
+					}
 					time.Sleep(1 * time.Second)
 					continue
 				}

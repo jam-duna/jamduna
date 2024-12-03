@@ -81,3 +81,7 @@ func ComputeLeafHash_WBT_Blake2B(data []byte) Hash {
 	h.Write(data)
 	return Hash(h.Sum(nil))
 }
+
+func IsNilHash(h Hash) bool {
+	return h == Hash{}
+}

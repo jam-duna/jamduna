@@ -192,3 +192,30 @@ func GetFilePath(fn string) string {
 	// Construct the full file path using filepath package
 	return filepath.Join(basePath, fn)
 }
+
+func Uint16Contains(slice []uint16, value uint16) bool {
+	for _, v := range slice {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+func StrContains(slice []string, value string) bool {
+	for _, v := range slice {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+func HashContains(slice []Hash, value Hash) bool {
+	for _, v := range slice {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}

@@ -198,20 +198,26 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle []byte, pubKey types.Ed25519Key) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
+func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, pubKey types.Ed25519Key) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
-	/*TODO:
-	  for i, h := range bundle. {
-		segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
-			WorkPackageHash: h,
-			SegmentRoot:     segmentRoot[i],
-		})
-	}*/
+	// tree := trie.NewCDMerkleTree(bundle.ImportSegmentData)
+	// segmentRoot := tree.Root()
+	// segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
+	// 	WorkPackageHash: bundle.WorkPackage.Hash(),
+	// 	SegmentRoot:     common.BytesToHash(segmentRoot),
+	// })
+	//   for i, h := range bundle {
+	// 	segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
+	// 		WorkPackageHash: h,
+	// 		SegmentRoot:     segmentRoot[i],
+	// 	})
+	// }
+	bundleBytes := bundle.Bytes()
 	req := JAMSNPWorkPackageShare{
 		CoreIndex:    coreIndex,
 		Len:          uint8(len(segmentroots)),
 		SegmentRoots: segmentroots,
-		Bundle:       bundle,
+		Bundle:       bundleBytes,
 	}
 
 	reqBytes, err := req.ToBytes()
@@ -275,7 +281,14 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		panic(123)
 	}
-	workReport, err := n.executeWorkPackageBundle(*bp)
+	if len(segmentroots) == 0 {
+		segmentroots = append(segmentroots, common.Hash{})
+	}
+	importedSegmentRoots, err := n.GetImportedSegmentRoots(bp.WorkPackage)
+	if err != nil {
+		fmt.Printf("[auditWorkReport:GetImportedSegmentRoots] ERR %v\n", err)
+	}
+	workReport, err := n.executeWorkPackageBundle(*bp, importedSegmentRoots)
 	if err != nil {
 		return
 	} else {

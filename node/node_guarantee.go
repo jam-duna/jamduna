@@ -18,7 +18,11 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 	if debugDA {
 		fmt.Printf("%s Core: %d, WorkPackageHash=%v, len(coworker)=%x\n", n.String(), coreIndex, wp.Hash(), len(coworker))
 	}
-	guarantee, _, _, err = n.executeWorkPackage(wp)
+	importedSegments, err := n.FetchWorkpackageImportSegments(wp)
+	if err != nil {
+		// fmt.Printf("FetchWorkpackageImportSegments Error: %v\n", err)
+	}
+	guarantee, _, _, err = n.executeWorkPackage(wp, importedSegments)
 	doneExecute = true
 	if debugG {
 		fmt.Printf("%s [broadcastWorkPackage] Guarantee from self\n", n.String())
@@ -27,9 +31,9 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 		for _, worker := range coworker {
 			if worker.Ed25519 == p.Validator.Ed25519 && worker.Ed25519 != n.credential.Ed25519Pub {
 				//fmt.Printf("broadcastWorkPackage wp=%v", wp.String())
-				bundle := n.CompilePackageBundle(wp)
+				bundle := n.CompilePackageBundle(wp, importedSegments)
 				// TODO: parallelize the RefineBundle with the 2 ShareWorkPackage calls -- whichever one matches our
-				fellowWorkReportHash, fellowSignature, errfellow := p.ShareWorkPackage(coreIndex, bundle.Bytes(), p.Validator.Ed25519)
+				fellowWorkReportHash, fellowSignature, errfellow := p.ShareWorkPackage(coreIndex, bundle, p.Validator.Ed25519)
 				if errfellow != nil {
 					fmt.Printf("ShareWorkPackage ERR in broadcastWorkpackage: %v\n", err)
 					//try the next one
@@ -56,6 +60,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 			}
 		}
 	}
+	
 	if len(guarantee.Signatures) < 3 {
 		//TODO: Shawn - if more than 2s has passed after receiving 2nd sig, you can potentiall move on.
 		panic(222)

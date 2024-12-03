@@ -37,6 +37,8 @@ const (
 	errDuplicatedPackageInReport = "duplicated_package_in_report"
 )
 
+// v0.4.5 eq 157
+// v0.5 eq 11.42
 func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
 	for _, guarantee := range guarantees {
 		if guarantee.Report.CoreIndex >= types.TotalCores {
@@ -456,6 +458,7 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 }
 
 // v0.4.5 eq 145 - x
+// v0.5 eq 11.30
 func (s *StateDB) getRefineContext() []types.RefineContext {
 	x := []types.RefineContext{}
 	w := s.getWorkReport()
@@ -466,6 +469,7 @@ func (s *StateDB) getRefineContext() []types.RefineContext {
 }
 
 // v0.4.5 eq 145 - p
+// v0.5 eq 11.30
 func (s *StateDB) getAvailibleSpecHash() []common.Hash {
 	p := []common.Hash{}
 	w := s.getWorkReport()
@@ -489,6 +493,7 @@ func (s *StateDB) checkLength() error {
 }
 
 // v0.4.5 eq 147
+// v0.5 eq 11.32
 func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	refine := g.Report.RefineContext
 	anchor := true
@@ -544,6 +549,7 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 }
 
 // v0.4.5 eq 148
+// v0.5 eq 11.33
 func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
 	if s.Block == nil {
 		return fmt.Errorf("invalid lookup anchor slot: block is nil")
@@ -561,11 +567,13 @@ func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
 }
 
 // TODO: v0.4.5 eq 149
+// TODO: v0.5 eq 11.34
 func (s *StateDB) checkAncestorSetA(g types.Guarantee) error {
 	return nil
 }
 
 // v0.4.5 eq 150
+// TODO: v0.5 eq 11.35
 func (s *StateDB) getPrereqFromAccumulationQueue() []common.Hash {
 	result := []common.Hash{}
 	for i := 0; i < types.EpochLength; i++ {
@@ -581,6 +589,7 @@ func (s *StateDB) getPrereqFromAccumulationQueue() []common.Hash {
 }
 
 // v0.4.5 eq 151
+// TODO: v0.5 eq 11.36
 func (s *StateDB) getPrereqFromRho() []common.Hash {
 	result := []common.Hash{}
 	for _, rho := range s.JamState.AvailabilityAssignments {
@@ -592,6 +601,7 @@ func (s *StateDB) getPrereqFromRho() []common.Hash {
 }
 
 // v0.4.5 eq 152
+// v0.5 eq 11.37
 func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	prereqSetFromQueue := make(map[common.Hash]struct{})
 	for _, hash := range s.getPrereqFromAccumulationQueue() {
@@ -636,6 +646,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 }
 
 // v0.4.5 eq 153
+// v0.5 eq 11.38
 func (s *StateDB) checkPrereq(g types.Guarantee) error {
 	prereqSet := make(map[common.Hash]struct{})
 	p := []common.Hash{}
@@ -720,6 +731,7 @@ func (s *StateDB) checkPrereqWithoutBlock(g types.Guarantee, EGs []types.Guarant
 }
 
 // v0.4.5 eq 154
+// v0.5 eq 11.39
 func getPresentBlock(g types.Guarantee) types.Hash2Hash {
 	p := types.Hash2Hash{}
 	p[g.Report.AvailabilitySpec.WorkPackageHash] = g.Report.AvailabilitySpec.ExportedSegmentRoot
@@ -727,6 +739,7 @@ func getPresentBlock(g types.Guarantee) types.Hash2Hash {
 }
 
 // v0.4.5 eq 155
+// v0.5 eq 11.40
 func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 	present_block := getPresentBlock(g)
 	for _, block := range s.JamState.RecentBlocks {
@@ -760,6 +773,7 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 }
 
 // v0.4.5 eq 156
+// v0.5 eq 11.41
 func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 	var err error
 	for _, result := range g.Report.Results {
@@ -776,8 +790,12 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 			return fmt.Errorf("%s", errBadCodeHash)
 		}
 		for _, result := range g.Report.Results {
-			v, err := t.GetService(255, result.ServiceID)
+			v, ok, err := t.GetService(255, result.ServiceID)
 			if err != nil {
+				if !ok {
+					fmt.Printf("checkCodeHash unexpected error: %v\n", err)
+				}
+				fmt.Printf("checkCodeHash: Service not found\n")
 				return fmt.Errorf("%s: %v", errBadServiceID, err)
 			}
 			a, _ := types.ServiceAccountFromBytes(result.ServiceID, v)

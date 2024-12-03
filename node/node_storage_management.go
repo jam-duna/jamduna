@@ -308,6 +308,16 @@ func (n *Node) getErasureRootFromHash(h common.Hash) (erasureRoot common.Hash, e
 	return common.Hash(erasureRootRaw), nil
 }
 
+// h is a WorkPackageHash -> exportedSegmentsRoot
+func (n *Node) getExportedSegmenstRootFromHash(h common.Hash) (exportedSegmentsRoot common.Hash, err error) {
+	// Retrieve ErasureRoot from LevelDB
+	exportedSegmentsRootRaw, err0 := n.ReadRawKV([]byte(generateErasureRootToSegmentsKey(h)))
+	if err0 != nil {
+		return exportedSegmentsRoot, err0
+	}
+	return common.Hash(exportedSegmentsRootRaw), nil
+}
+
 // h is a WorkPackageHash or ExportSegmentRoot
 func (n *Node) getImportSegment(h common.Hash, segmentIndex uint16) ([]byte, bool) {
 	panic("dont call!")
@@ -342,6 +352,9 @@ func (n *Node) StoreImportDAWorkReportMap(spec types.AvailabilitySpecifier) erro
 	n.WriteRawKV(generateHashToErasureRootKey(spec.WorkPackageHash), erasureRoot.Bytes())
 	// (b) spec.ExportedSegmentRoot => spec.ErasureRoot
 	n.WriteRawKV(generateHashToErasureRootKey(spec.ExportedSegmentRoot), erasureRoot.Bytes())
+	// (c) spec.WorkPackageHash => spec.ExportedSegmentRoot
+	n.WriteRawKV(generateErasureRootToSegmentsKey(spec.WorkPackageHash), spec.ExportedSegmentRoot[:])
+
 	return nil
 }
 

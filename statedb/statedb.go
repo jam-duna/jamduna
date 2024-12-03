@@ -652,6 +652,9 @@ func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Has
 	for _, kv := range snapshotRaw.KeyVals {
 		s.trie.SetRawKeyVal(common.Hash(kv[0]), kv[1])
 	}
+	// bootStrapCode := common.FromHex("0x000000000000001000000084000000000072051100000005100000000518000000055f04071300040a0400fffe040b24040713000211f8031004031504050000fffe01582004070000fffe04090020040a0010040b0030040c00404e090d0503570404090400fffe04070000fffe040804040a044e03011004011502110813000407130021842a4825050922222a4190945201")
+	// bootStrapCodeHash := common.Blake2Hash(bootStrapCode)
+	// fmt.Printf("**** Adding s=0, bootStrapCodeHash=%v, len(%v), | bootStrapCode=%x\n", bootStrapCodeHash, len(bootStrapCode), bootStrapCode)
 	return s.trie.GetRoot()
 }
 
@@ -1030,8 +1033,11 @@ func (s *StateDB) remove_guarantees_authhash(pool []common.Hash, m map[common.Ha
 
 func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, error) {
 	t := s.GetTrie()
-	v, err := t.GetService(types.ServiceAccountPrefix, c)
+	v, ok, err := t.GetService(types.ServiceAccountPrefix, c)
 	if err != nil {
+		if !ok {
+			// fmt.Printf("getServiceAccount: ServiceAccount not found for core %d\n", c)
+		}
 		return &types.ServiceAccount{}, false, nil
 	}
 	// v looks like: ac ⌢ E8(ab,ag,am,al) ⌢ E4(ai)

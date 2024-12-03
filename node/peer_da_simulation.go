@@ -31,6 +31,29 @@ type Chunk struct {
 	Data []byte
 }
 
+type CE139_request struct {
+	WorkPackageHash common.Hash
+	SegmentIndices  []uint16
+	ShardIndex      uint16
+}
+
+type CE139_response struct {
+	WorkPackageHash common.Hash
+	ShardIndex      uint16
+	segmentShards   []byte
+}
+
+type CE138_request struct {
+	WorkPackageHash common.Hash
+	ShardIndex      uint16
+}
+
+type CE138_response struct {
+	WorkPackageHash common.Hash
+	ShardIndex      uint16
+	segmentShards   []byte
+}
+
 func (p *Peer) DA_Announcement(hash common.Hash, validator_index uint16) error {
 	stream, err := p.openStream(CE201_DA_Announcement)
 	if err != nil {
@@ -159,6 +182,32 @@ func (n *Node) onDA_Reconstruction(stream quic.Stream, msg []byte) (err error) {
 	chunk := n.chunkMap[req.(DA_request).Hash]
 	err = sendQuicBytes(stream, chunk)
 	return nil
+}
+
+func (p *Peer) CE138_Request(req CE138_request) ([]byte, uint16, error) {
+	if req.ShardIndex == uint16(p.PeerID) {
+		chunk := p.node.chunkMap[req.WorkPackageHash]
+		return chunk, p.PeerID, nil
+	}
+	stream, err := p.openStream(CE139_SegmentShardRequest)
+	if err != nil {
+		return nil, 0, err
+	}
+	req_bytes, err := types.Encode(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	// check if the encode is successful
+	err = sendQuicBytes(stream, req_bytes)
+	if err != nil {
+		return nil, 0, err
+	}
+	// receive the chunk
+	resp, err := receiveQuicBytes(stream)
+	if err != nil {
+		return nil, 0, err
+	}
+	return resp, p.PeerID, nil
 }
 
 // ---- test functions ----

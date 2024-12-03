@@ -46,7 +46,7 @@ func TestEdgeCases(t *testing.T) {
 		tree.Insert(item[0], item[1])
 	}
 	tree.printTree(tree.Root, 0)
-	getValue, err := tree.Get(hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"))
+	getValue, _, err := tree.Get(hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"))
 	if err != nil {
 		t.Errorf("Key: %x not found, error: %s\n", hex2Bytes("0000"), err)
 	}
@@ -153,7 +153,7 @@ func TestMerkleTree(t *testing.T) {
 			}
 
 			// Test Get
-			getValue, getErr := tree.Get(key)
+			getValue, _, getErr := tree.Get(key)
 			if getErr != nil {
 				t.Errorf("Key: %x not found, error: %s\n", key, getErr)
 			} else {
@@ -210,7 +210,7 @@ func TestBPTProof(t *testing.T) {
 	}
 
 	// Test Valid Proof
-	value, _ := tree.Get(key)
+	value, _, _ := tree.Get(key)
 	fmt.Printf("levelDBGet key=%x, value=%x\n", key, value)
 	if tree.Verify(key, value, tree.GetRootHash(), path) {
 		fmt.Printf("Proof for key [%x] is valid.\n", key)
@@ -257,7 +257,7 @@ func TestGet(t *testing.T) {
 		hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e6"), // The invalid Key
 	}
 	for _, key := range keys {
-		value, err := tree.Get(key)
+		value, _, err := tree.Get(key)
 		if err != nil {
 			t.Errorf("Key: %x not found, error: %s\n", key, err)
 		} else {
@@ -265,10 +265,13 @@ func TestGet(t *testing.T) {
 		}
 	}
 	for _, key := range validKeys {
-		value, err := tree.Get(key)
+		value, ok, err := tree.Get(key)
 		if err != nil {
 			fmt.Printf("Key: %x not found, error: %s\n", key, err)
 		} else {
+			if !ok {
+				fmt.Printf("Key: %x not found\n", key)
+			}
 			t.Errorf("Key: %x, Value: %x\n", key, value)
 		}
 	}
@@ -436,7 +439,7 @@ func TestStateKey(t *testing.T) {
 	// Get the root hash of the tree
 	// rootHash := tree.GetRootHash()
 
-	value, err := tree.GetPreImageBlob(0, hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7"))
+	value, err := tree.GetPreImageBlob(0, common.Hash(hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7")))
 	fmt.Printf("get value=%x, err=%v\n", value, err)
 
 	// for _, kv := range data {
@@ -522,10 +525,10 @@ func TestService(t *testing.T) {
 
 	tree.printTree(tree.Root, 0)
 
-	s1, _ := tree.GetService(255, 42)
-	s2, _ := tree.GetService(255, 43)
-	s3, _ := tree.GetService(255, 44)
-	s4, _ := tree.GetService(255, 45)
+	s1, _, _ := tree.GetService(255, 42)
+	s2, _, _ := tree.GetService(255, 43)
+	s3, _, _ := tree.GetService(255, 44)
+	s4, _, _ := tree.GetService(255, 45)
 
 	fmt.Println("s1:", s1)
 	fmt.Println("s2:", s2)
@@ -587,23 +590,23 @@ func TestServicePreImage_blob(t *testing.T) {
 
 	tree.printTree(tree.Root, 0)
 
-	blob1, _ := tree.GetPreImageBlob(42, common.ComputeHash([]byte{1}))
-	blob2, _ := tree.GetPreImageBlob(43, common.ComputeHash([]byte{1, 2}))
-	blob3, _ := tree.GetPreImageBlob(44, common.ComputeHash([]byte{1, 2, 3}))
-	blob4, _ := tree.GetPreImageBlob(45, common.ComputeHash([]byte{1, 2, 3}))
+	blob1, _ := tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
+	blob2, _ := tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
+	blob3, _ := tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
+	blob4, _ := tree.GetPreImageBlob(45, common.BytesToHash([]byte{1, 2, 3}))
 
 	fmt.Println("blob1:", blob1)
 	fmt.Println("blob2:", blob2)
 	fmt.Println("blob3:", blob3)
 	fmt.Println("blob4:", blob4)
 
-	_ = tree.DeletePreImageBlob(42, common.ComputeHash([]byte{1}))
-	_ = tree.DeletePreImageBlob(43, common.ComputeHash([]byte{1, 2}))
-	_ = tree.DeletePreImageBlob(44, common.ComputeHash([]byte{1, 2, 3}))
+	_ = tree.DeletePreImageBlob(42, common.BytesToHash([]byte{1}))
+	_ = tree.DeletePreImageBlob(43, common.BytesToHash([]byte{1, 2}))
+	_ = tree.DeletePreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
 
-	blob1, _ = tree.GetPreImageBlob(42, common.ComputeHash([]byte{1}))
-	blob2, _ = tree.GetPreImageBlob(43, common.ComputeHash([]byte{1, 2}))
-	blob3, _ = tree.GetPreImageBlob(44, common.ComputeHash([]byte{1, 2, 3}))
+	blob1, _ = tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
+	blob2, _ = tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
+	blob3, _ = tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
 
 	fmt.Println("blob1:", blob1)
 	fmt.Println("blob2:", blob2)
@@ -618,29 +621,29 @@ func TestServiceStorage(t *testing.T) {
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
 
-	tree.SetServiceStorage(42, common.ComputeHash([]byte{1}), []byte{1})
-	tree.SetServiceStorage(43, common.ComputeHash([]byte{1, 2}), []byte{1, 2})
-	tree.SetServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}), []byte{1, 2, 3})
+	tree.SetServiceStorage(42, common.BytesToHash([]byte{1}), []byte{1})
+	tree.SetServiceStorage(43, common.BytesToHash([]byte{1, 2}), []byte{1, 2})
+	tree.SetServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}), []byte{1, 2, 3})
 
 	tree.printTree(tree.Root, 0)
 
-	Storage1, _ := tree.GetServiceStorage(42, common.ComputeHash([]byte{1}))
-	Storage2, _ := tree.GetServiceStorage(43, common.ComputeHash([]byte{1, 2}))
-	Storage3, _ := tree.GetServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}))
-	Storage4, _ := tree.GetServiceStorage(45, common.ComputeHash([]byte{1, 2, 3}))
+	Storage1, _, _ := tree.GetServiceStorage(42, common.BytesToHash([]byte{1}))
+	Storage2, _, _ := tree.GetServiceStorage(43, common.BytesToHash([]byte{1, 2}))
+	Storage3, _, _ := tree.GetServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}))
+	Storage4, _, _ := tree.GetServiceStorage(45, common.BytesToHash([]byte{1, 2, 3}))
 
 	fmt.Println("Storage1", Storage1)
 	fmt.Println("Storage2", Storage2)
 	fmt.Println("Storage3", Storage3)
 	fmt.Println("Storage4", Storage4)
 
-	_ = tree.DeleteServiceStorage(42, common.ComputeHash([]byte{1}))
-	_ = tree.DeleteServiceStorage(43, common.ComputeHash([]byte{1, 2}))
-	_ = tree.DeleteServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}))
+	_ = tree.DeleteServiceStorage(42, common.BytesToHash([]byte{1}))
+	_ = tree.DeleteServiceStorage(43, common.BytesToHash([]byte{1, 2}))
+	_ = tree.DeleteServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}))
 
-	Storage1, _ = tree.GetServiceStorage(42, common.ComputeHash([]byte{1}))
-	Storage2, _ = tree.GetServiceStorage(43, common.ComputeHash([]byte{1, 2}))
-	Storage3, _ = tree.GetServiceStorage(44, common.ComputeHash([]byte{1, 2, 3}))
+	Storage1, _, _ = tree.GetServiceStorage(42, common.BytesToHash([]byte{1}))
+	Storage2, _, _ = tree.GetServiceStorage(43, common.BytesToHash([]byte{1, 2}))
+	Storage3, _, _ = tree.GetServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}))
 
 	fmt.Println("Storage1", Storage1)
 	fmt.Println("Storage2", Storage2)

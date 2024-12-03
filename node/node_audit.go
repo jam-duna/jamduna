@@ -599,7 +599,11 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		part B
 	*/
 	//TODO: Shawn - Im expecting you to time the following call. Expectation, this should execute fairly soon.
-	wr, err := n.executeWorkPackageBundle(workPackageBundle)
+	exportedSegmentRoot, err := n.GetImportedSegmentRoots(workPackageBundle.WorkPackage)
+	if err != nil {
+		fmt.Printf("[auditWorkReport:GetImportedSegmentRoots] ERR %v\n", err)
+	}
+	wr, err := n.executeWorkPackageBundle(workPackageBundle, exportedSegmentRoot)
 	if err != nil {
 		return
 	} else {
