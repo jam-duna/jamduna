@@ -19,16 +19,16 @@ type TestReport struct {
 }
 
 type ReportInput struct {
-	Guarantee     []types.Guarantee  `json:"guarantees"`
-	Slot          uint64             `json:"slot"`
-	Entropy       Entropy            `json:"entropy"`
-	OffenederMark []types.Ed25519Key `json:"offenders"`
+	Guarantee []types.Guarantee `json:"guarantees"`
+	Slot      uint64            `json:"slot"`
 }
 
 type StateReport struct {
 	AvailabilityAssignments  AvailabilityAssignments         `json:"avail_assignments"`
 	CurrValidators           types.Validators                `json:"curr_validators"`
 	PrevValidators           types.Validators                `json:"prev_validators"`
+	Entropy                  Entropy                         `json:"entropy"`
+	Offenders                []types.Ed25519Key              `json:"offenders"`
 	RecentBlocks             RecentBlocks                    `json:"recent_blocks"`
 	AuthorizationsPool       [types.TotalCores][]common.Hash `json:"auth_pools"`
 	PriorServiceAccountState []ServiceItem                   `json:"services"`
@@ -67,6 +67,7 @@ func (j *JamState) GetStateFromReportState(r StateReport) {
 	j.AvailabilityAssignments = r.AvailabilityAssignments
 	j.SafroleState.CurrValidators = r.CurrValidators
 	j.SafroleState.PrevValidators = r.PrevValidators
+	j.SafroleState.Entropy = r.Entropy
 	j.RecentBlocks = r.RecentBlocks
 	j.AuthorizationsPool = r.AuthorizationsPool
 	j.PriorServiceAccountState = ServiceToSeviceAccount(r.PriorServiceAccountState)
@@ -158,9 +159,10 @@ func ReportVerify(jsonFile string, exceptErr bool) error {
 	var block types.Block
 	db.Block = &block
 	db.JamState.GetStateFromReportState(report.PreState)
-	db.JamState.SafroleState.Entropy = report.Input.Entropy
+	db.JamState.SafroleState.Entropy = report.PreState.Entropy
 	db.Block.Header.Slot = uint32(report.Input.Slot)
-	db.Block.Header.OffendersMark = report.Input.OffenederMark
+	db.JamState.SafroleState.Timeslot = uint32(report.Input.Slot)
+	db.Block.Header.OffendersMark = report.PreState.Offenders
 	db.Block.Extrinsic.Guarantees = report.Input.Guarantee
 	db.AssignGuarantors(true)
 	db.PreviousGuarantors(true)
@@ -169,6 +171,7 @@ func ReportVerify(jsonFile string, exceptErr bool) error {
 	if err != nil && !exceptErr {
 		return fmt.Errorf("failed to verify guarantee: %v", err)
 	}
+	fmt.Printf("guarantor assignments: %v\n", len(db.PreviousGuarantorAssignments))
 	if err == nil && exceptErr {
 		return fmt.Errorf("Expected have error")
 	}

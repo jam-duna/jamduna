@@ -35,8 +35,8 @@ func TestDisputes(t *testing.T) {
 	}
 
 	for _, n := range nodes {
-		n.statedb.PreviousGuarantors(true)
-		n.statedb.AssignGuarantors(true)
+		n.statedb.PreviousGuarantors(noRotation)
+		n.statedb.AssignGuarantors(noRotation)
 	}
 	// code length: 206
 	bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
@@ -122,8 +122,8 @@ func TestDisputes(t *testing.T) {
 		}
 	}
 	for _, n := range nodes {
-		n.statedb.PreviousGuarantors(true)
-		n.statedb.AssignGuarantors(true)
+		n.statedb.PreviousGuarantors(noRotation)
+		n.statedb.AssignGuarantors(noRotation)
 	}
 
 	fmt.Printf("All services are ready, Send preimage announcement\n")
@@ -157,8 +157,8 @@ func TestDisputes(t *testing.T) {
 	}
 
 	for _, n := range nodes {
-		n.statedb.PreviousGuarantors(true)
-		n.statedb.AssignGuarantors(true)
+		n.statedb.PreviousGuarantors(noRotation)
+		n.statedb.AssignGuarantors(noRotation)
 	}
 	time.Sleep(50 * time.Second)
 }

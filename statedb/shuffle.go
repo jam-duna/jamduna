@@ -37,7 +37,7 @@ func NumericSequenceFromHash(h [32]byte, l uint32) []uint32 {
 }
 
 // ShuffleFromHash performs the Fisher-Yates shuffle based on a hash value.
-func ShuffleFromHash(sequence []uint32, hash [32]byte) []uint32 {
+func ShuffleFromHash(sequence []uint32, hash common.Hash) []uint32 {
 	randomSequence := NumericSequenceFromHash(hash, uint32(len(sequence)))
 	return FisherYatesShuffle(sequence, randomSequence)
 }

@@ -68,7 +68,7 @@ const (
 	MaxAuthorizationPoolItems        = 2              // O = 8: The maximum number of items in the authorizations pool.
 	SecondsPerSlot                   = 6              // P = 6: The slot period, in seconds.
 	MaxAuthorizationQueueItems       = 6              // Q = 80: The maximum number of items in the authorizations queue.
-	ValidatorCoreRotationPeriod      = 10             // R = 10: The rotation period of validator-core assignments, in timeslots.
+	ValidatorCoreRotationPeriod      = 4              // R = 10: The rotation period of validator-core assignments, in timeslots.
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	MaxServiceCodeSize               = 4000000        // W_C = 4,000,000: The maximum size of service code in octets.
 	MaxManifestEntries               = 1 << 11        // W_M = 2^11: The maximum number of entries in a work-package manifest.

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/exp/rand"
 
 	//"math/big"
+
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -280,6 +281,7 @@ func jamtest(jam string) {
 			break
 		}
 	}
+	time.Sleep(7 * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	// code length: 206
 	fn := common.GetFilePath(statedb.BootstrapServiceFile)
 	bootstrapCode, err := os.ReadFile(fn)
@@ -293,7 +295,6 @@ func jamtest(jam string) {
 	builderNode := nodes[builderIdx]
 	builderNode.preimages[bootstrapCodeHash] = bootstrapCode
 	new_service_idx := uint32(0)
-
 	// Load testServices
 	serviceNames := []string{"fib"}
 	if jam == "megatron" {
@@ -333,7 +334,11 @@ func jamtest(jam string) {
 				},
 			},
 		}
-		err = builderNode.peersInfo[4].SendWorkPackageSubmission(codeWorkPackage, []byte{})
+		// use get coworkers peers
+		core0_peers := builderNode.GetCoreCoWorkersPeers(0)
+		// ramdom pick the index from 0, 1, 2
+		randomIdx := rand.Intn(3)
+		err = core0_peers[randomIdx].SendWorkPackageSubmission(codeWorkPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -456,7 +461,9 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 		workPackageHash := workPackage.Hash()
 
 		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
-		err := n1.peersInfo[4].SendWorkPackageSubmission(workPackage, []byte{})
+		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+		ramdamIdx := rand.Intn(3)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, []byte{})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -623,13 +630,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 		fmt.Printf("v%d->c%v\n", vid, assign.CoreIndex)
 	}
 	/*
-	   v0->c1
-	   v2->c1
-	   v3->c1
-
-	   v1->c0
-	   v4->c0
-	   v5->c0
+	 get the core index every time before we send the workpackage
 	*/
 	ok := false
 	for {
@@ -645,22 +646,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				break
 			}
 			// here we can put some logic to send workpackages
-			// fmt.Printf("Checking for workpackages to send...\n")
-			// fmt.Printf("Fib_Tri_counter: %v, Meg_counter: %v\n", Fib_Tri_counter, Meg_counter)
-			// fmt.Printf("Fib_Tri_Ready: %v, Meg_Ready: %v\n", Fib_Tri_Ready, Meg_Ready)
-			// fmt.Printf("Fib_Tri_Keeper: %v, Meg_Keeper: %v\n", Fib_Tri_Keeper, Meg_Keeper)
 
-			// if nodes[3].statedb.JamState.AvailabilityAssignments[1] == nil {
-			// 	fmt.Printf("FIB_TRIB: Ready\n")
-			// } else {
-			// 	fmt.Printf("FIB_TRIB: Not Ready\n")
-			// }
-
-			// if nodes[3].statedb.JamState.AvailabilityAssignments[0] == nil {
-			// 	fmt.Printf("MEGATRON: Ready\n")
-			// } else {
-			// 	fmt.Printf("MEGATRON: Not Ready\n")
-			// }
 			if (nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready) {
 				// if false{
 				// send workpackages to the network
@@ -678,7 +664,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				Fib_Tri_Ready = false
 				Fib_Tri_Keeper = true
 
-			} else if (Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper == true) {
+			} else if (Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper) {
 				Meg_Ready = true
 				Meg_Keeper = false
 				Fib_Tri_Ready = true
@@ -715,6 +701,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 		case workPackage := <-Fib_Tri_Chan:
 			// submit to core 1
 			// v0, v3, v5 => core
+			core1_peers := nodes[0].GetCoreCoWorkersPeers(1)
 			fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(workPackage.Hash()))
 			// Randomly select sender and receiver
 			senderIdx := rand.Intn(3)
@@ -722,10 +709,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			for senderIdx == receiverIdx {
 				receiverIdx = rand.Intn(3)
 			}
-			nodeIndices := []int{0, 2, 3}
-			senderIdx = nodeIndices[senderIdx]
-			receiverIdx = nodeIndices[receiverIdx]
-			err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(workPackage, []byte{})
+
+			err := core1_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{})
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 			}
@@ -735,17 +720,14 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			// v1, v2, v4 => core
 			// random select 1 sender and 1 receiver
 			// Randomly select sender and receiver
+			core0_peers := nodes[0].GetCoreCoWorkersPeers(0)
 			fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", Meg_counter, common.Str(workPackage.Hash()))
 			senderIdx := rand.Intn(3)
 			receiverIdx := rand.Intn(3)
 			for senderIdx == receiverIdx {
 				receiverIdx = rand.Intn(3)
 			}
-			nodeIndices := []int{1, 4, 5}
-			senderIdx = nodeIndices[senderIdx]
-			receiverIdx = nodeIndices[receiverIdx]
-			fmt.Printf("Sending WorkPackage...\n")
-			err := nodes[senderIdx].peersInfo[uint16(receiverIdx)].SendWorkPackageSubmission(workPackage, []byte{})
+			err := core0_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{})
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 			}

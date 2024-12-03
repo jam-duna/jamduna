@@ -297,26 +297,40 @@ func CheckSorting_EGs(guarantees []types.Guarantee) error {
 
 // v0.4.5 eq 140 - The signing validators must be assigned to the core in G or G*
 func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
-	timeSlotPeriod := s.JamState.SafroleState.GetTimeSlot() / types.ValidatorCoreRotationPeriod
+	timeSlotPeriod := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
 	reportTime := guarantee.Slot / types.ValidatorCoreRotationPeriod
 	for _, g := range guarantee.Signatures {
-
+		find_and_correct := false
 		if timeSlotPeriod != reportTime {
 			for i, assignment := range s.PreviousGuarantorAssignments {
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
-					return nil
+					find_and_correct = true
+					break
 				}
 			}
-			return fmt.Errorf("%s:validator %v is not assigned to core %v (Previous)", errWrongAssignment, g.ValidatorIndex, guarantee.Report.CoreIndex)
+			if !find_and_correct {
+
+				return fmt.Errorf("%s:validator %v is not assigned to core %v (Now)", errWrongAssignment, g.ValidatorIndex, guarantee.Report.CoreIndex)
+			}
 		} else {
 			for i, assignment := range s.GuarantorAssignments {
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
-
-					return nil
+					find_and_correct = true
+					break
 				}
 			}
-			return fmt.Errorf("%s:validator %v is not assigned to core %v (Now)", errWrongAssignment, g.ValidatorIndex, guarantee.Report.CoreIndex)
+			if !find_and_correct {
+				fmt.Printf("%s\n", guarantee.String())
+				fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
+				for _, assignment := range s.GuarantorAssignments {
+					if assignment.CoreIndex == guarantee.Report.CoreIndex {
+						fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
+					}
+				}
+				return fmt.Errorf("%s:validator %v is not assigned to core %v (Now)", errWrongAssignment, g.ValidatorIndex, guarantee.Report.CoreIndex)
+			}
 		}
+
 	}
 	return nil
 }

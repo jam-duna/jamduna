@@ -128,7 +128,7 @@ func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkRepo
 	}
 	tmp := WorkReportToSelection(s.AvailableWorkReport)
 
-	entropy := Compute_QL(common.BytesToHash(s0_alias), len(tmp))
+	entropy := NumericSequenceFromHash(common.BytesToHash(s0_alias), uint32(len(tmp)))
 	ShuffleWorkReport(tmp, entropy)
 
 	var a0 []types.WorkReportSelection

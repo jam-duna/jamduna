@@ -60,6 +60,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 		//TODO: Shawn - if more than 2s has passed after receiving 2nd sig, you can potentiall move on.
 		panic(222)
 	} else {
+		guarantee.Slot = n.statedb.GetTimeslot()
 		n.broadcast(guarantee)
 		fmt.Printf("%s (core %d) [broadcastWorkPackage] broadcasted guarantee\n", n.String(), coreIndex)
 	}

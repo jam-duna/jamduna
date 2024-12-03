@@ -245,6 +245,7 @@ const (
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
 	errPreimageBlobSet        = "PreimageBlob already set"
+	noRotation                = false
 )
 
 func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
@@ -855,8 +856,8 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		*/
 	}
 	s.CloneExtrinsicMap(newStateDB)
-	newStateDB.AssignGuarantors(true)
-	newStateDB.PreviousGuarantors(true)
+	newStateDB.AssignGuarantors(noRotation)
+	newStateDB.PreviousGuarantors(noRotation)
 	return newStateDB
 }
 

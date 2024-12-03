@@ -36,23 +36,22 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	debugDA    = false // DA
-	debugB     = false // Blocks, Announcment
-	debugG     = false // Guaranteeing
-	debugT     = false // Tickets/Safrole
-	debugP     = false // Preimages
-	debugA     = false // Assurances
-	debugF     = false // Finality
-	debugJ     = false // Audits + Judgements
-	debug      = false // General Node Ops
-	debugAudit = false // Audit
-	trace      = false
-	debugE     = false // monitoring fn execution time
-	debugTree  = false // trie
-	numNodes   = 6
-	quicAddr   = "127.0.0.1:%d"
-	basePort   = 9000
-
+	debugDA     = false // DA
+	debugB      = false // Blocks, Announcment
+	debugG      = false // Guaranteeing
+	debugT      = false // Tickets/Safrole
+	debugP      = false // Preimages
+	debugA      = false // Assurances
+	debugF      = false // Finality
+	debugJ      = false // Audits + Judgements
+	debug       = false // General Node Ops
+	debugAudit  = false // Audit
+	trace       = false
+	debugE      = false // monitoring fn execution time
+	debugTree   = false // trie
+	numNodes    = 6
+	quicAddr    = "127.0.0.1:%d"
+	basePort    = 9000
 	godMode     = true
 	noRotation  = false
 	GenesisFile = "tiny.json"
@@ -459,6 +458,19 @@ func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 	}
 	return coWorkers
 }
+
+// func (n *Node) GetCoreWorkersPeers(core uint16)(workers []Peer) {
+// 	workers = make([]Peer, 0)
+// 	for _, assignment := range n.statedb.GuarantorAssignments {
+// 		if assignment.CoreIndex == core {
+// 			peer, err := n.GetPeerInfoByEd25519(assignment.Validator.Ed25519)
+// 			if err == nil {
+// 				workers = append(workers, *peer.Clone())
+// 			}
+// 		}
+// 	}
+// 	return workers
+// }
 
 func (n *Node) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
 	coWorkers = make([]Peer, 0)
@@ -1231,8 +1243,8 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
-			n.statedb.PreviousGuarantors(true)
-			n.statedb.AssignGuarantors(true)
+			n.statedb.PreviousGuarantors(noRotation)
+			n.statedb.AssignGuarantors(noRotation)
 			// timeslot mark
 			// currJCE := common.ComputeCurrentJCETime()
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
@@ -1274,8 +1286,8 @@ func (n *Node) runClient() {
 				}
 				n.sendGodTimeslotUsed(currJCE)
 				// we authored a block
-				newStateDB.PreviousGuarantors(true)
-				newStateDB.AssignGuarantors(true)
+				newStateDB.PreviousGuarantors(noRotation)
+				newStateDB.AssignGuarantors(noRotation)
 				n.addStateDB(newStateDB)
 				n.StoreBlock(newBlock, n.id, true)
 				n.cacheBlock(newBlock)
