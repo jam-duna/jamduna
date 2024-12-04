@@ -36,12 +36,12 @@ func main() {
 		fmt.Printf("Processing network: %s\n", network)
 
 		// Call createGenesisState for each network
-		outputFilename := common.GetFilePath(fmt.Sprintf("%s.json", network))
-		err := statedb.CreateGenesisState(sdb, chainSpec, 0, outputFilename)
+		outputFilename, err := statedb.CreateGenesisState(sdb, chainSpec, 0, network)
 		if err != nil {
 			log.Printf("Error writing genesis file for network %s: %v", network, err)
-		} else {
-			fmt.Printf("Genesis state written to %s\n", outputFilename)
+			panic(1)
 		}
+		fmt.Printf("Genesis state created: %s\n", outputFilename)
+
 	}
 }

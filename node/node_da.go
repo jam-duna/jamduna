@@ -504,7 +504,7 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, 
 			// 	return
 			// }
 			// package_bundle = *fetchPackageBundle
-		} else {
+		} else if debugG {
 			fmt.Printf("Justification Verification Passed\n")
 		}
 	}

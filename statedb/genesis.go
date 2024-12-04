@@ -4,9 +4,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	//"io/ioutil"
 	"os"
-	"path/filepath"
+	//"path/filepath"
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
@@ -19,7 +19,7 @@ import (
 // 6.4.1 Startup parameters
 
 // CreateGenesisState generates the StateDB object and genesis statedb
-func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, epochFirstSlot uint64, outputFilename string) (err error) {
+func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, epochFirstSlot uint64, network string) (outfn string, err error) {
 	statedb, err := newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return
@@ -33,9 +33,9 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			binary.LittleEndian.PutUint32(seed[j*4:], i)
 		}
 
-		v, err := InitValidatorSecret(seed, seed, seed, "")
-		if err != nil {
-			return err
+		v, err0 := InitValidatorSecret(seed, seed, seed, "")
+		if err0 != nil {
+			return outfn, err0
 		}
 		var vpub types.Validator
 		copy(vpub.Bandersnatch[:], v.BandersnatchPub[:])
@@ -100,9 +100,9 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 
 	for _, service := range services {
 		fn := common.GetFilePath(service.FileName)
-		code, err := os.ReadFile(fn)
-		if err != nil {
-			return err
+		code, err0 := os.ReadFile(fn)
+		if err0 != nil {
+			return outfn, err
 		}
 		codeHash := common.Blake2Hash(code)
 		bootstrapServiceAccount := types.ServiceAccount{
@@ -118,27 +118,17 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()
+	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/state_snapshots/genesis-%s", network))
+	types.SaveObject(outfn, statedb.JamState.Snapshot())
 
 	trace := StateSnapshotRaw{
 		StateRoot: statedb.StateRoot,
 		KeyVals:   statedb.GetAllKeyValues(),
 	}
+	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/traces/genesis-%s", network))
+	types.SaveObject(outfn, trace)
 
-	// Ensure the output directory exists
-	outputDir := filepath.Dir(outputFilename)
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		err = os.MkdirAll(outputDir, 0755)
-		if err != nil {
-			return fmt.Errorf("error creating output directory: %v", err)
-		}
-	}
-
-	// Write the file
-	err = ioutil.WriteFile(outputFilename, []byte(trace.String()), 0644)
-	if err != nil {
-		return fmt.Errorf("error writing file: %v", err)
-	}
-	return nil
+	return
 }
 
 func NewStateDBFromSnapshotRawFile(sdb *storage.StateDBStorage, filename string) (statedb *StateDB, err error) {

@@ -138,7 +138,7 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 	if g.Report.AvailabilitySpec.WorkPackageHash == emptyHash {
 		return fmt.Errorf("WorkPackageHash is empty")
 	}
-	fmt.Printf("[guarantee:Verify] Verifying Guarantee %s\nSigntext:[%s]\n", g.String(), common.Bytes2Hex(signtext))
+	//fmt.Printf("[guarantee:Verify] Verifying Guarantee %s\nSigntext:[%s]\n", g.String(), common.Bytes2Hex(signtext))
 	//verify the signature
 	numErrors := 0
 	for _, i := range g.Signatures {

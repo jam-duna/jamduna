@@ -226,7 +226,11 @@ func safrole(sendtickets bool) {
 	if err != nil {
 		panic(err)
 	}
-	_ = nodes
+
+	for _, n := range nodes {
+		n.SetSendTickets(false)
+	}
+
 	//statedb.RunGraph()
 	for {
 		time.Sleep(100 * time.Millisecond) // Adjust the delay as needed

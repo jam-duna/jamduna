@@ -1068,6 +1068,10 @@ func getMessageType(obj interface{}) string {
 		return "Trace"
 	case *statedb.StateSnapshotRaw:
 		return "Trace"
+	case statedb.StateTransition:
+		return "state_transition"
+	case *statedb.StateTransition:
+		return "state_transition"
 	case DA_announcement:
 		return "DA_announcement"
 	case DA_request:
@@ -1116,57 +1120,22 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	}
 	dataDir := fmt.Sprintf("%s/data", n.dataDir)
 	structDir := fmt.Sprintf("%s/%vs", dataDir, msgType)
-	//fmt.Printf("!!!! writeDebug msgType=%v, structDir=%v\n", msgType, structDir)
+
+	// Check if the directories exist, if not create them
+	if _, err := os.Stat(structDir); os.IsNotExist(err) {
+		err := os.MkdirAll(structDir, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("Error creating %v directory: %v\n", msgType, err)
+		}
+	}
+
 	if msgType != "unknown" {
 		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
-		//currTS := common.ComputeCurrenTS()
 		path := fmt.Sprintf("%s/%v_%03d", structDir, epoch, phase)
 		if epoch == 0 && phase == 0 {
 			path = fmt.Sprintf("%s/genesis", structDir)
 		}
-
-		if msgType == "Ticket" {
-			if ticket, ok := obj.(*types.Ticket); ok {
-				// Cast successful, you can now access ticket's methods or fields
-				identifier, _ := ticket.TicketID() // Assuming TicketID() is a method of types.Ticket
-				path = fmt.Sprintf("%v_%v", path, identifier)
-			} else {
-				// Handle case where obj is not a *types.Ticket
-				return fmt.Errorf("expected types.Ticket but got %T", obj)
-			}
-		}
-		jsonPath := fmt.Sprintf("%s.json", path)
-		codecPath := fmt.Sprintf("%s.bin", path)
-		//fmt.Printf("%s jsonPath=%v, codecPath=%v\n", msgType, jsonPath, codecPath)
-
-		// Check if the directories exist, if not create them
-		if _, err := os.Stat(structDir); os.IsNotExist(err) {
-			err := os.MkdirAll(structDir, os.ModePerm)
-			if err != nil {
-				return fmt.Errorf("Error creating %v directory: %v\n", msgType, err)
-			}
-		}
-
-		switch v := obj.(type) {
-		default:
-			jsonEncode, _ := json.MarshalIndent(v, "", "    ")
-			codecEncode, err := types.Encode(v)
-			if err != nil {
-				return fmt.Errorf("Error encoding object: %v\n", err)
-			}
-
-			//fmt.Printf("jsonEncode=%s \n", string(jsonEncode))
-			//fmt.Printf("codecEncode=%x \n", codecEncode)
-
-			err = os.WriteFile(jsonPath, jsonEncode, 0644)
-			if err != nil {
-				return fmt.Errorf("Error writing json file: %v\n", err)
-			}
-			err = os.WriteFile(codecPath, codecEncode, 0644)
-			if err != nil {
-				return fmt.Errorf("Error writing codec file: %v\n", err)
-			}
-		}
+		types.SaveObject(path, obj)
 	}
 	return nil
 }
@@ -1217,7 +1186,6 @@ func (n *Node) runClient() {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				panic(0)
 			}
-
 			if newStateDB != nil && debugTree {
 				fmt.Printf("[N%d] Author PrintTree \n", n.id)
 				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
@@ -1230,6 +1198,7 @@ func (n *Node) runClient() {
 				}
 				n.sendGodTimeslotUsed(currJCE)
 				// we authored a block
+				oldstate := n.statedb
 				newStateDB.PreviousGuarantors(noRotation)
 				newStateDB.AssignGuarantors(noRotation)
 				n.addStateDB(newStateDB)
@@ -1256,16 +1225,29 @@ func (n *Node) runClient() {
 				if !ok || err != nil {
 					log.Fatalf("Error CompareStateRoot %v\n", err)
 				}
-				stateSnapshotRaw := statedb.StateSnapshotRaw{
-					KeyVals: allStates,
-				}
-				err = n.writeDebug(stateSnapshotRaw, timeslot) // Traces
-				if err != nil {
-					fmt.Printf("writeDebug JamStateRaw err: %v\n", err)
-				}
+
+				// store StateSnapshot
 				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot) // StateSnapshot
 				if err != nil {
-					fmt.Printf("writeDebug JamState err: %v\n", err)
+					fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
+				}
+				// store StateTransition
+				st := statedb.StateTransition{
+					PreState: statedb.StateSnapshotRaw{
+						KeyVals:   oldstate.GetAllKeyValues(),
+						StateRoot: oldstate.StateRoot,
+					},
+					Block: *newBlock,
+					PostState: statedb.StateSnapshotRaw{
+						KeyVals:   newStateDB.GetAllKeyValues(),
+						StateRoot: newStateDB.StateRoot,
+					},
+				}
+				err = statedb.CheckStateTransition(n.store, &st)
+				if err != nil {
+					fmt.Printf("ERROR validating state transition\n")
+				} else {
+					fmt.Printf("Validated state transition\n")
 				}
 
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
@@ -1273,6 +1255,12 @@ func (n *Node) runClient() {
 				n.statedbMapMutex.Lock()
 				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
 				n.statedbMapMutex.Unlock()
+
+				err = n.writeDebug(st, timeslot) // StateTransition
+				if err != nil {
+					fmt.Printf("writeDebug StateTransition err: %v\n", err)
+				}
+
 			}
 
 		case log := <-logChan:

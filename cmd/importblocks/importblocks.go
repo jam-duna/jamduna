@@ -270,6 +270,8 @@ func main() {
 	validateConfig(config)
 	// set up network with config
 	node.ImportBlocks(&config)
+
+	// TODO: adjust importblocks to send stateTransition JSON via HTTP and receive statetransition; adjust validatetraces to validatestatetransition
 	for {
 
 	}

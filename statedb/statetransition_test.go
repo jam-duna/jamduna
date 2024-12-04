@@ -11,19 +11,19 @@ import (
 )
 
 func TestStateTransitionCodec(t *testing.T) {
-	preStateJsonPath := "../cmd/validatetraces/safrole/traces/395479_007.json"
+	preStateJsonPath := "testdata/traces/395479_007.json"
 	preStateJsonByte, err := os.ReadFile(preStateJsonPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	blockJsonPath := "../cmd/validatetraces/safrole/blocks/395479_007.json"
+	blockJsonPath := "testdata/blocks/395479_007.json"
 	blockJsonByte, err := os.ReadFile(blockJsonPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	postStateJsonPath := "../cmd/validatetraces/safrole/traces/395479_008.json"
+	postStateJsonPath := "testdata/traces/395479_008.json"
 	postStateJsonByte, err := os.ReadFile(postStateJsonPath)
 	if err != nil {
 		t.Fatal(err)
@@ -49,11 +49,9 @@ func TestStateTransitionCodec(t *testing.T) {
 	}
 
 	a := StateTransition{
-		PreState:      preState,
-		Block:         block,
-		PostState:     postState,
-		Valid:         true,
-		PostStateRoot: postState.StateRoot,
+		PreState:  preState,
+		Block:     block,
+		PostState: postState,
 	}
 	encoded, err := types.Encode(a)
 	if err != nil {

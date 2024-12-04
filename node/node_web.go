@@ -119,14 +119,8 @@ func (n *Node) runWebService(port uint16) {
 		}
 		newStateDB, err := statedb.ApplyStateTransitionFromBlock(stateDB, context.Background(), &stateTransition.Block)
 		if err != nil {
-			if stateTransition.Valid {
-				log.Printf("ERROR:  applying state transition for valid block\n")
-			}
 			http.Error(w, fmt.Sprintf("Invalid block"), http.StatusNotAcceptable)
 		} else {
-			if !stateTransition.Valid {
-				log.Printf("ERROR:  applying state transition for invalid block\n")
-			}
 			// dump the keys and values from newstateDB
 			snapshot := newStateDB.JamState.Snapshot()
 			w.Header().Set("Content-Type", "application/json")
