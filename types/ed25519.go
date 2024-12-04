@@ -25,6 +25,12 @@ func (k Ed25519Key) MarshalJSON() ([]byte, error) {
 	return json.Marshal(common.Hash(k).Hex())
 }
 
+func GenerateRandomEd25519Signature() Ed25519Signature {
+	var s Ed25519Signature
+	// TODO
+	return s
+}
+
 func (k *Ed25519Key) UnmarshalJSON(data []byte) error {
 	var hexStr string
 	if err := json.Unmarshal(data, &hexStr); err != nil {

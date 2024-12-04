@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -12,13 +13,20 @@ func (s *StateDB) VerifyAssurance(a types.Assurance) error {
 	// Verify the anchor
 	if a.Anchor != s.ParentHeaderHash {
 		fmt.Printf("[N%d] VerifyAssurance Fail  a.Anchor %v != s.ParentHeaderHash %v (ValidatorIndex %d)\n", s.Id, a.Anchor, s.ParentHeaderHash, a.ValidatorIndex)
-		return errors.New(fmt.Sprintf("invalid anchor in assurance %v, expected %v, Validator[%v]", a.Anchor, s.ParentHeaderHash, a.ValidatorIndex))
+		return jamerrors.ErrABadParentHash
+	}
+
+	if a.ValidatorIndex >= types.TotalValidators {
+		return jamerrors.ErrABadValidatorIndex
+	}
+	if a.ValidBitfield() {
+		return jamerrors.ErrABadCore
 	}
 
 	// Verify the signature
 	err := a.Verify(s.GetSafrole().CurrValidators[a.ValidatorIndex])
 	if err != nil {
-		return err
+		return jamerrors.ErrABadSignature
 	}
 	return nil
 }
@@ -109,7 +117,6 @@ func CheckSortingEAs(assurances []types.Assurance) error {
 }
 
 // For generating assurance extrinsic
-
 func (j *JamState) GetWorkReportFromRho() ([types.TotalCores]types.WorkReport, error) {
 	reports := [types.TotalCores]types.WorkReport{}
 	for i, rho := range j.AvailabilityAssignments {

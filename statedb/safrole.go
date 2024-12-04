@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
 )
 
 type SafroleHeader struct {
@@ -201,18 +202,8 @@ type SOutput struct {
 
 // StateDB STF Errors
 const (
-	errEpochFirstSlotNotMet = "Fail: EpochFirst not met"
-)
-
-// STF Errors
-const (
-	errTimeslotNotMonotonic                = "Fail: Timeslot must be strictly monotonic."
+	errEpochFirstSlotNotMet                = "Fail: EpochFirst not met"
 	errExtrinsicWithMoreTicketsThanAllowed = "Fail: Submit an extrinsic with more tickets than allowed."
-	errTicketResubmission                  = "Fail: Re-submit tickets from authority 0."
-	errTicketBadOrder                      = "Fail: Submit tickets in bad order."
-	errTicketBadRingProof                  = "Fail: Submit tickets with bad ring proof."
-	errTicketSubmissionInTail              = "Fail: Submit a ticket while in epoch's tail."
-	errNone                                = "ok"
 	errInvalidWinningMarker                = "Fail: Invalid winning marker"
 )
 
@@ -578,7 +569,7 @@ func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, ta
 
 func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (common.Hash, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
-		return common.Hash{}, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
+		return common.Hash{}, jamerrors.ErrTBadTicketAttemptNumber
 	}
 
 	//step 0: derive ticketVRFInput
@@ -619,7 +610,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 	if debug {
 		fmt.Printf("[N%d] ValidateProposed Ticket Fail (using n%v:%v) TicketID=%v\nη0:%v\nη1:%v\nη2:%v\nη3:%v\n(SubmissionClosed=%v)\n", s.Id, entroptIdx, targetEpochRandomness, ticketID, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3], isTicketSubmissionClosed)
 	}
-	return common.Hash{}, fmt.Errorf(errTicketBadRingProof)
+	return common.Hash{}, jamerrors.ErrTBadRingProof
 }
 
 func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int, error) {
@@ -643,7 +634,7 @@ func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int
 	//ticketID, _ := t.TicketID()
 	//fmt.Printf("[N%d] ValidateIncoming Ticket Fail TicketID=%v\nη0:%v\nη1:%v\nη2:%v\nη3:%v\n", s.Id, ticketID, s.Entropy[0], s.Entropy[1], s.Entropy[2], s.Entropy[3])
 
-	return common.Hash{}, -1, fmt.Errorf(errTicketBadRingProof)
+	return common.Hash{}, -1, jamerrors.ErrTBadRingProof
 }
 
 func (s *StateDB) RemoveUnusedTickets() {
@@ -995,11 +986,11 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 	s2 := cloneSafroleState(*s)
 	if currPhase >= types.TicketSubmissionEndSlot && len(tickets) > 0 {
-		return s2, fmt.Errorf(errTicketSubmissionInTail)
+		return s2, jamerrors.ErrTEpochLotteryOver
 	}
 
 	if currEpoch < prevEpoch || (currEpoch == prevEpoch && currPhase < prevPhase) {
-		return s2, fmt.Errorf("%v - currEpoch %d prevEpoch %d  currPhase %d  prevPhase %d", errTimeslotNotMonotonic, currEpoch, prevEpoch, currPhase, prevPhase)
+		return s2, jamerrors.ErrTTimeslotNotMonotonic
 	}
 
 	// tally existing ticketIDs
@@ -1032,7 +1023,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 			expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
 			verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(winning_tickets), expected_tickets)
 			if !verified || err != nil {
-				return s2, fmt.Errorf(errTicketResubmission)
+				return s2, jamerrors.ErrTTicketAlreadyInState // CHECK -- this looks wrong
 			}
 			// do something to set this marker
 			ticketsOrKeys := TicketsOrKeys{
@@ -1077,7 +1068,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 			// Validate the ticket in parallel
 			ticket_id, err := s.ValidateProposedTicket(&e, isShifted)
 			if err != nil {
-				errCh <- fmt.Errorf(errTicketBadRingProof)
+				errCh <- jamerrors.ErrTBadRingProof
 				return
 			}
 

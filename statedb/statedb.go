@@ -1401,10 +1401,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 	SortByCoreIndex(extrinsicData.Guarantees)
 	// return duplicate guarantee err
-	err = s.CheckGuaranteesWorkReport(extrinsicData.Guarantees)
-	if err != nil {
-		return nil, err
-	}
 	extrinsicData.Guarantees, err = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees)
 	if err != nil {
 		return nil, err

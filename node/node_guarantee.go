@@ -60,7 +60,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 			}
 		}
 	}
-	
+
 	if len(guarantee.Signatures) < 3 {
 		//TODO: Shawn - if more than 2s has passed after receiving 2nd sig, you can potentiall move on.
 		panic(222)

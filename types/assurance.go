@@ -51,6 +51,11 @@ func (A *Assurance) BitFieldToBytes() []byte {
 	return A.Bitfield[:]
 }
 
+func (A *Assurance) ValidBitfield() bool {
+	// TODO: check if the bitfield is on for some core that is
+	return true
+}
+
 func (A *Assurance) SetBitFieldBit(index uint16, value bool) {
 	byteIndex := index / 8   // Determine which byte in the array the bit is in
 	bitPosition := index % 8 // Determine the position within the byte

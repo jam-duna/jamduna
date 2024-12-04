@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	//"github.com/colorfulnotion/jam/bandersnatch"
-
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -27,6 +26,26 @@ type DOutput struct {
 	Err *string `json:"err,omitempty" ` // ErrorCode
 }
 
+/*
+ErrDNotSortedWorkReports	No - Shawn to review	Not sorted work reports within a verdict
+ErrDNotUniqueVotes	No - Shawn to review	Not unique votes within a verdict
+ErrDNotSortedValidVerdicts	Yes	Not sorted, valid verdicts
+ErrDNotHomogenousJudgements	No - Shawn to review	Not homogeneous judgements, but positive votes count is not correct
+ErrDMissingCulpritsBadVerdict	No - Shawn to review	Missing culprits for bad verdict
+ErrDSingleCulpritBadVerdict	No - Shawn to review	Single culprit for bad verdict
+ErrDTwoCulpritsBadVerdictNotSorted	Yes	Two culprits for bad verdict, not sorted
+ErrDAlreadyRecordedVerdict	No - Shawn to review	Report an already recorded verdict, with culprits
+ErrDCulpritAlreadyInOffenders	No - Shawn to review	Culprit offender already in the offenders list
+ErrDOffenderNotPresentVerdict	No - Shawn to review	Offender relative to a not present verdict
+ErrDMissingFaultsGoodVerdict	No - Shawn to review	Missing faults for good verdict
+ErrDTwoFaultOffendersGoodVerdict	No - Shawn to review	Two fault offenders for a good verdict, not sorted
+ErrDAlreadyRecordedVerdictWithFaults	No - Shawn to review	Report an already recorded verdict, with faults
+ErrDFaultOffenderInOffendersList	No - Shawn to review	Fault offender already in the offenders list
+ErrDAuditorMarkedOffender	No - Shawn to review	Auditor marked as offender, but vote matches the verdict.
+ErrDBadSignatureInVerdict	Yes	Bad signature within the verdict judgements
+ErrDBadSignatureInCulprits	Yes	Bad signature within the culprits sequence
+ErrDAgeTooOldInVerdicts	No - Shawn to review	Age too old for verdicts judgements
+*/
 type VerdictResult struct {
 	WorkReportHash common.Hash
 	PositveCount   int
@@ -223,27 +242,21 @@ func getPublicKey(K []types.Validator, Index uint32) types.Ed25519Key {
 }
 
 func (j *JamState) checkSignature(v types.Verdict) error {
-
 	// check the signature
-
 	if v.Epoch == j.SafroleState.Timeslot/E {
 		// check the signature
 		err := v.Verify(j.SafroleState.CurrValidators)
 		if err != nil {
-			return err
+			return jamerrors.ErrDBadSignatureInVerdict
 		}
-
 	} else if v.Epoch == j.SafroleState.Timeslot/E-1 {
-
 		err := v.Verify(j.SafroleState.PrevValidators)
 		if err != nil {
-			return err
+			return jamerrors.ErrDBadSignatureInVerdict
 		}
-
 	} else {
 		return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, j.SafroleState.Timeslot/E)
 	}
-
 	return nil
 }
 
@@ -252,7 +265,7 @@ func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
 	for _, k := range j.DisputesState.Psi_o {
 		if bytes.Equal(k.Bytes(), key.Bytes()) {
 			//drop the key
-			return fmt.Errorf("Bad Key: the key %x shouldn't be in old offenders set", key)
+			return jamerrors.ErrDCulpritAlreadyInOffenders
 		}
 	}
 	// check if the key is in the validator set
@@ -266,7 +279,7 @@ func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Bad Key: the key %v shouldn't be in old offenders set", key)
+	return jamerrors.ErrDCulpritAlreadyInOffenders
 }
 
 // eq 103 v: v should index by the work report hash and no duplicates
@@ -279,7 +292,7 @@ func checkVerdicts(v []types.Verdict) error {
 				continue
 			}
 			if bytes.Equal(veverdict2.Target.Bytes(), verdict.Target.Bytes()) {
-				return fmt.Errorf("Verdict Error: duplicate WorkReportHash %v in index %v", verdict.Target, j)
+				return jamerrors.ErrDNotSortedWorkReports
 			}
 		}
 		// check index
@@ -287,7 +300,7 @@ func checkVerdicts(v []types.Verdict) error {
 			continue
 		}
 		if bytes.Compare(v[i].Target.Bytes(), v[i-1].Target.Bytes()) < 0 {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x should be bigger than %x", v[i].Target, v[i-1].Target)
+			return jamerrors.ErrDNotSortedValidVerdicts
 		}
 	}
 	return nil
@@ -299,7 +312,7 @@ func checkCulprit(c []types.Culprit) error {
 		//check culprit signature is valid
 		//verify the signature
 		if !culprit.Verify() {
-			return fmt.Errorf("Culprit Error: the signature of the culprit %v is invalid", culprit.Key)
+			return jamerrors.ErrDBadSignatureInCulprits
 		}
 		// check duplicate
 		for j, c2 := range c {
@@ -307,7 +320,7 @@ func checkCulprit(c []types.Culprit) error {
 				continue
 			}
 			if bytes.Equal(c2.Key[:], culprit.Key[:]) {
-				return fmt.Errorf("Culprit Error: duplicate key %x in index %v and %v", culprit.Key, i, j)
+				return jamerrors.ErrDTwoCulpritsBadVerdictNotSorted
 			}
 		}
 		// check index
@@ -315,7 +328,8 @@ func checkCulprit(c []types.Culprit) error {
 			continue
 		}
 		if bytes.Compare(c[i].Key[:], c[i-1].Key[:]) < 0 {
-			return fmt.Errorf("Culprit Error: key %x should be bigger than %x", c[i].Key, c[i-1].Key)
+			return jamerrors.ErrDTwoCulpritsBadVerdictNotSorted
+
 		}
 	}
 	return nil
@@ -328,7 +342,7 @@ func checkFault(f []types.Fault) error {
 		// jam_guarantee concat the work report hash
 		//verify the signature
 		if !fault.Verify() {
-			return fmt.Errorf("Fault Error: the signature of the fault %v is invalid", fault.Key)
+			return jamerrors.ErrDBadSignatureInVerdict
 		}
 		// check duplicate
 		for j, f2 := range f {
@@ -336,7 +350,7 @@ func checkFault(f []types.Fault) error {
 				continue
 			}
 			if bytes.Equal(f2.Key[:], fault.Key[:]) {
-				return fmt.Errorf("Fault Error: duplicate key %v in index %v and %v", fault.Key, i, j)
+				return jamerrors.ErrDTwoFaultOffendersGoodVerdict
 			}
 		}
 		// check index
@@ -344,7 +358,7 @@ func checkFault(f []types.Fault) error {
 			continue
 		}
 		if bytes.Compare(f[i].Key[:], f[i-1].Key[:]) < 0 {
-			return fmt.Errorf("Fault Error: key %x should be bigger than %x", f[i].Key, f[i-1].Key)
+			return jamerrors.ErrDTwoFaultOffendersGoodVerdict
 		}
 	}
 	return nil
