@@ -19,8 +19,25 @@ const (
 // jamerrors.ErrGCoreWithoutAuthorizer: Target core without any authorizer.
 )
 
-// v0.4.5 eq 157
-// v0.5 eq 11.42
+/*
+version 0.4.5	version 0.5
+138	11.23
+139	11.24
+140	11.25
+143	11.28
+143	11.28
+144	11.29
+146	11.31
+147	11.32
+148	11.33
+149	11.34
+152	11.37
+153	11.38
+155	11.40
+156	11.41
+*/
+
+// v0.5 eq 11.42 - the rho state transition function
 func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
 	for _, guarantee := range guarantees {
 		if guarantee.Report.CoreIndex >= types.TotalCores {
@@ -44,8 +61,10 @@ func (state *JamState) SetRhoByWorkReport(core uint16, w types.WorkReport, t uin
 	}
 }
 
+// this function is the strictest one, is for the verification after the state transition before the state gets updated by extrinsic guarantees
 func (s *StateDB) Verify_Guarantees() error {
 	// v0.4.5 eq 137 - check index
+	// v0.5 eq 11.23
 	err := CheckSorting_EGs(s.Block.Extrinsic.Guarantees)
 	if err != nil {
 		return err
@@ -57,6 +76,7 @@ func (s *StateDB) Verify_Guarantees() error {
 		}
 	}
 	//v0.4.5 eq 146
+	// v0.5 eq 11.31
 	err = s.checkLength() // not sure if this is correct behavior
 	if err != nil {
 		return err
@@ -64,14 +84,16 @@ func (s *StateDB) Verify_Guarantees() error {
 	// for recent history and extrinsics in the block, so it should be here
 	for _, guarantee := range s.Block.Extrinsic.Guarantees {
 		// v0.4.5 eq 153
+		// v0.5 eq 11.38
 		err := s.checkPrereq(guarantee)
 		if err != nil {
-			return err
+			return jamerrors.ErrGDependencyMissing
 		}
 	}
 	return nil
 }
 
+// this function will accept one guarantee at a time, it will be used by make block to make sure which guarantee should be included in the block
 func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	max_core := types.TotalCores - 1
 	if guarantee.Report.CoreIndex > uint16(max_core) {
@@ -88,28 +110,30 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	}
 
 	// v0.4.5 eq 139 - check index
+	// v0.5 eq 11.24
 	err := CheckSorting_EG(guarantee)
 	if err != nil {
-		return err
+		return jamerrors.ErrGDuplicateGuarantors
 	}
 
 	// v0.4.5 eq 140 - check signature, core assign check,C_v ...
+	// v0.5 eq 11.25
 	CurrV := s.JamState.SafroleState.CurrValidators
 	err = guarantee.Verify(CurrV) // errBadSignature
 	if err != nil {
-		return err
+		return jamerrors.ErrGBadSignature
 	}
 	// v0.4.5 eq 140 - The signing validators must be assigned to the core in G or G*
+	// v0.5 eq 11.25
 	// custom function for make block
 	err = s.AreValidatorsAssignedToCore_MakeBlock(guarantee)
 	if err != nil {
 		fmt.Printf("Verify_Guarantee error MakeBlock: %v\n", err)
-		return err
+		return jamerrors.ErrGWrongAssignment
 	}
-	//TODO: v0.4.5 eq 140 - C_v
-
 	j := s.JamState
 	// v0.4.5 eq 143
+	// v0.5 eq 11.28
 	if s.Block != nil {
 		err = j.CheckReportTimeOut(guarantee, s.Block.TimeSlot())
 		if err != nil {
@@ -118,107 +142,70 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	}
 
 	//v0.4.5 eq 144 - check gas
+	// v.05 eq 11.29
 	err = s.checkGas(guarantee)
 	if err != nil {
-		return err
+		return jamerrors.ErrGWorkReportGasTooHigh
 	}
 
 	// v0.4.5 eq 148
+	// v0.5 eq 11.33
 	// g.Report.RefineContext.LookupAnchorSlot doesn't have a value
 	err = s.checkTimeSlotHeader(guarantee)
 	if err != nil {
-		return err
+		return jamerrors.ErrGAnchorNotRecent
 	}
 	// v0.4.5 eq 156 - check code hash
+	// v0.5 eq 11.41
 	// s.JamState.PriorServiceAccountState[result.Service].CodeHash doesn't have a value
 	err = s.checkCodeHash(guarantee)
 	if err != nil {
-		return err
+		return jamerrors.ErrGBadCodeHash
 	}
 	return nil
 }
 
-func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee) ([]types.Guarantee, error) {
+// this function accepts multiple guarantees at a time, it will be used by make block for dropping the invalid guarantees
+// after the first picking the valid guarantees, it will be used by remaining guarantees to make sure which guarantee should be included in the block
+// there are some verification need to be check with other guarantees, so it should be used after the first picking
+func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee) ([]types.Guarantee, error, bool) {
 	// v0.4.5 eq 137 - check index
+	// v0.5 eq 11.23
+	var valid bool
+	err := CheckSorting_EGs(EGs)
+	if err != nil {
+		return nil, err, false
+	}
 	for i, guarantee := range EGs {
-		max_core := types.TotalCores - 1
-		if guarantee.Report.CoreIndex > uint16(max_core) {
-			EGs = append(EGs[:i], EGs[i+1:]...)
-		}
-		max_validator := types.TotalValidators - 1
-		for _, g := range guarantee.Signatures {
-			if g.ValidatorIndex > uint16(max_validator) {
-				EGs = append(EGs[:i], EGs[i+1:]...)
-			}
-		}
-		if len(guarantee.Signatures) < 2 {
-			EGs = append(EGs[:i], EGs[i+1:]...)
-		}
-
 		// v0.4.5 eq 139 - check index
+		// v0.5 eq 11.24
 		err := CheckSorting_EG(guarantee)
 		if err != nil {
 			EGs = append(EGs[:i], EGs[i+1:]...)
+			valid = false
 		}
-
-		// v0.4.5 eq 140 - check signature, core assign check,C_v ...
-		CurrV := s.JamState.SafroleState.CurrValidators
-		err = guarantee.Verify(CurrV) // errBadSignature
-		if err != nil {
-			EGs = append(EGs[:i], EGs[i+1:]...)
-		}
-		// v0.4.5 eq 140 - The signing validators must be assigned to the core in G or G*
-		// custom function for make block
-		err = s.AreValidatorsAssignedToCore_MakeBlock(guarantee)
-		if err != nil {
-			fmt.Printf("Verify_Guarantees MakeBlock error: %v\n", err)
-			EGs = append(EGs[:i], EGs[i+1:]...)
-		}
-		//TODO: v0.4.5 eq 140 - C_v
-
-		j := s.JamState
-		// v0.4.5 eq 143
-		if s.Block != nil {
-			err = j.CheckReportTimeOut(guarantee, s.Block.TimeSlot())
-			if err != nil {
-				EGs = append(EGs[:i], EGs[i+1:]...)
-			}
-		}
-
-		//v0.4.5 eq 144 - check gas
-		err = s.checkGas(guarantee)
-		if err != nil {
-			EGs = append(EGs[:i], EGs[i+1:]...)
-		}
-
-		// v0.4.5 eq 148
-		// g.Report.RefineContext.LookupAnchorSlot doesn't have a value
-		err = s.checkTimeSlotHeader(guarantee)
-		if err != nil {
-			EGs = append(EGs[:i], EGs[i+1:]...)
-		}
-		// v0.4.5 eq 156 - check code hash
-		// s.JamState.PriorServiceAccountState[result.Service].CodeHash doesn't have a value
-		err = s.checkCodeHash(guarantee)
-		if err != nil {
-			EGs = append(EGs[:i], EGs[i+1:]...)
-		}
-		// for recent history and extrinsics in the block, so it should be here
 		// v0.4.5 eq 153
+		// v0.5 eq 11.38
 		err = s.checkPrereqWithoutBlock(guarantee, EGs)
 		if err != nil {
 			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
 			EGs = append(EGs[:i], EGs[i+1:]...)
+			valid = false
 		}
+
 	}
-	return EGs, nil
+	if valid {
+		return EGs, nil, true
+	} else {
+		return EGs, nil, false
+	}
 }
 
-// this function will be used by what should be included in the block
+// this function will be used by the state transition function in the single guarantee verification
+// it will be called by Verify_Guarantees
 func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 
 	// for shawn
-
 	err := s.VerifyGuarantee_Basic(guarantee)
 	// err = j.CheckReportPendingOnCore(guarantee)
 	if err != nil {
@@ -230,12 +217,6 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 	if err != nil {
 		return err
 	}
-
-	// for william
-	// err = s.VerifyGuarantee_Authorization(guarantee)
-	// if err != nil {
-	// 	return err
-	// }
 
 	return nil
 }
@@ -256,27 +237,34 @@ func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
 	}
 
 	// v0.4.5 eq 139 - check index
+	// v0.5 eq 11.24
 	err := CheckSorting_EG(guarantee)
 	if err != nil {
-		return err
+		return jamerrors.ErrGDuplicateGuarantors
 	}
 
 	// v0.4.5 eq 140 - check signature, core assign check,C_v ...
+	// v0.5 eq 11.25
 	CurrV := s.JamState.SafroleState.CurrValidators
 	err = guarantee.Verify(CurrV) // errBadSignature
 	if err != nil {
 		return jamerrors.ErrGBadSignature
 	}
 	// v0.4.5 eq 140 - The signing validators must be assigned to the core in G or G*
+	// v0.5 eq 11.25
 	err = s.AreValidatorsAssignedToCore(guarantee)
 	if err != nil {
-		fmt.Printf("Verify_Guarantee error: %v\n", err)
 		return err
 	}
-	//TODO: v0.4.5 eq 140 - C_v
-
 	j := s.JamState
 	// v0.4.5 eq 143
+	// v0.5 eq 11.28
+	err = j.CheckReportPendingOnCore(guarantee)
+	if err != nil {
+		return err
+	}
+	// v0.4.5 eq 143
+	// v0.5 eq 11.28
 	if s.Block != nil {
 		err = j.CheckReportTimeOut(guarantee, s.Block.TimeSlot())
 		if err != nil {
@@ -285,23 +273,25 @@ func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
 	}
 
 	//v0.4.5 eq 144 - check gas
+	// v.05 eq 11.29
 	err = s.checkGas(guarantee)
 	if err != nil {
 		return err
 	}
-
 	// v0.4.5 eq 148
+	// v0.5 eq 11.33
 	// g.Report.RefineContext.LookupAnchorSlot doesn't have a value
 	err = s.checkTimeSlotHeader(guarantee)
 	if err != nil {
 		return err
 	}
 	// v0.4.5 eq 156 - check code hash
-	// s.JamState.PriorServiceAccountState[result.Service].CodeHash doesn't have a value
+	// v0.5 eq 11.41
 	err = s.checkCodeHash(guarantee)
 	if err != nil {
 		return err
 	}
+
 	return nil
 
 }
@@ -338,35 +328,24 @@ func (s *StateDB) VerifyGuarantee_RecentHistory(guarantee types.Guarantee) error
 	return nil
 }
 
-func (s *StateDB) VerifyGuarantee_Authorization(guarantee types.Guarantee) error {
-	// v0.4.5 eq 141
-	err := s.JamState.CheckReportPendingOnCore(guarantee)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // this function will be used when a validator receive a block
 func (s *StateDB) ValidateGuarantees(guarantees []types.Guarantee) error {
-	// v0.4.5 eq138 - check index
-	err := CheckSorting_EGs(guarantees)
-	if err != nil {
+	for _, guarantee := range guarantees {
+		err := s.Verify_Guarantee_MakeBlock(guarantee)
+		if err != nil {
+			fmt.Printf("ValidateGuarantees error: %v\n", err)
+		}
+	}
+	_, err, valid := s.Verify_Guarantees_MakeBlock(guarantees)
+	if err != nil || !valid {
+		fmt.Printf("ValidateGuarantees error: %v\n", err)
 		return err
 	}
-	// v0.4.5 eq139~ check guarantee
-
-	_, err = s.Verify_Guarantees_MakeBlock(guarantees)
-	if err != nil {
-		fmt.Printf("ValidateGuarantees error: %v\n", err)
-		// remove the invalid guarantee
-	}
-
 	return nil
 }
 
 // v0.4.5 eq 137 - this function will be used by make block
+// v0.5 eq 11.23
 func SortByCoreIndex(guarantees []types.Guarantee) {
 	// sort guarantees by core index
 	sort.Slice(guarantees, func(i, j int) bool {
@@ -376,6 +355,8 @@ func SortByCoreIndex(guarantees []types.Guarantee) {
 }
 
 // errBadCoreIndex
+// v0.4.5 eq 138 - this function will be used by verify the block
+// v0.5 eq 11.23
 func CheckCoreIndex(guarantees []types.Guarantee, new types.Guarantee) error {
 	// check core index is correct
 	core := make(map[uint16]bool)
@@ -392,6 +373,7 @@ func CheckCoreIndex(guarantees []types.Guarantee, new types.Guarantee) error {
 }
 
 // v0.4.5 eq 138 - this function will be used by verify the block
+// v0.5 eq 11.23
 func CheckSorting_EGs(guarantees []types.Guarantee) error {
 	//check SortByCoreIndex is correct
 	for i := 0; i < len(guarantees)-1; i++ {
@@ -403,6 +385,7 @@ func CheckSorting_EGs(guarantees []types.Guarantee) error {
 }
 
 // v0.4.5 eq 140 - The signing validators must be assigned to the core in G or G*
+// v0.5 eq 11.25
 func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 	timeSlotPeriod := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
 	reportTime := guarantee.Slot / types.ValidatorCoreRotationPeriod
@@ -442,6 +425,7 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 }
 
 // v0.4.5 eq 140 - The signing validators must be assigned to the core in G or G*
+// v0.5 eq 11.25
 func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarantee) error {
 	timeSlotPeriod := s.Block.TimeSlot() / types.ValidatorCoreRotationPeriod
 	reportTime := guarantee.Slot / types.ValidatorCoreRotationPeriod
@@ -491,6 +475,7 @@ func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 }
 
 // v0.4.5 eq 139 - sort the guarantee by validator index
+// v0.5 eq 11.24
 func Sort_by_validator_index(g types.Guarantee) {
 	sort.Slice(g.Signatures, func(i, j int) bool {
 		return g.Signatures[i].ValidatorIndex < g.Signatures[j].ValidatorIndex
@@ -498,6 +483,7 @@ func Sort_by_validator_index(g types.Guarantee) {
 }
 
 // v0.4.5 eq 139
+// v0.5 eq 11.24
 // check the guarantee is sorted by validator index or not
 func CheckSorting_EG(g types.Guarantee) error {
 	// check sort_by_validator_index is correct
@@ -510,11 +496,11 @@ func CheckSorting_EG(g types.Guarantee) error {
 }
 
 // v0.4.5 eq 142 - w
+// v0.5 eq 11.27
 func (s *StateDB) getWorkReport() []types.WorkReport {
 	w := []types.WorkReport{}
 
 	if s.Block != nil {
-		fmt.Printf("eg len: %v\n", len(s.Block.Extrinsic.Guarantees))
 		for _, guarantee := range s.Block.Extrinsic.Guarantees {
 			w = append(w, guarantee.Report)
 		}
@@ -523,6 +509,7 @@ func (s *StateDB) getWorkReport() []types.WorkReport {
 }
 
 // v0.4.5 eq 143 - check pending report
+// v0.5 eq 11.28
 func (j *JamState) CheckReportTimeOut(g types.Guarantee, ts uint32) error {
 	if g.Slot > ts {
 		return jamerrors.ErrGFutureReportSlot
@@ -542,12 +529,21 @@ func (j *JamState) CheckReportTimeOut(g types.Guarantee, ts uint32) error {
 }
 
 // v0.4.5 eq 143 - Wa ∈ α[wc]
+// v0.5 eq 11.28
 func (j *JamState) CheckReportPendingOnCore(g types.Guarantee) error {
 	authorizations_pool := j.AuthorizationsPool[int(g.Report.CoreIndex)]
+	find := false
+	if len(authorizations_pool) == 0 {
+		return jamerrors.ErrGCoreWithoutAuthorizer
+	}
 	for _, authrization := range authorizations_pool {
-		if authrization != g.Report.AuthorizerHash {
-			return jamerrors.ErrGCoreUnexpectedAuthorizer
+		if authrization == g.Report.AuthorizerHash {
+			find = true
+			break
 		}
+	}
+	if !find {
+		return jamerrors.ErrGCoreUnexpectedAuthorizer
 	}
 	return nil
 }
@@ -574,6 +570,7 @@ func (j *JamState) CheckInvalidCoreIndex() {
 }
 
 // v0.4.5 eq 144
+// v0.5 eq 11.29
 func (s *StateDB) checkGas(g types.Guarantee) error {
 	sum_rg := uint64(0)
 	for _, results := range g.Report.Results {
@@ -613,6 +610,7 @@ func (s *StateDB) getAvailibleSpecHash() []common.Hash {
 }
 
 // v0.4.5 eq 146
+// v0.5 eq 11.31
 func (s *StateDB) checkLength() error {
 	p_w := make(map[common.Hash]common.Hash)
 	for _, eg := range s.Block.Extrinsic.Guarantees {
@@ -815,6 +813,7 @@ func (s *StateDB) checkPrereq(g types.Guarantee) error {
 	return nil
 }
 
+// this function is for the making block
 func (s *StateDB) checkPrereqWithoutBlock(g types.Guarantee, EGs []types.Guarantee) error {
 	prereqSet := make(map[common.Hash]struct{})
 	p := []common.Hash{}

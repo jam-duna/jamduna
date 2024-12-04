@@ -138,7 +138,7 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 	if g.Report.AvailabilitySpec.WorkPackageHash == emptyHash {
 		return fmt.Errorf("WorkPackageHash is empty")
 	}
-	// fmt.Printf("[guarantee:Verify] Verifying Guarantee %s\nSigntext:[%s]\n", g.String(), common.Bytes2Hex(signtext))
+	fmt.Printf("[guarantee:Verify] Verifying Guarantee %s\nSigntext:[%s]\n", g.String(), common.Bytes2Hex(signtext))
 	//verify the signature
 	numErrors := 0
 	for _, i := range g.Signatures {
@@ -148,10 +148,10 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 		if !Ed25519Verify(validatorKey, signtext, i.Signature) {
 
 			numErrors++
-			// fmt.Printf("[guarantee:Verify] ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
-			// fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
-			// fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
-			// fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
+			fmt.Printf("[guarantee:Verify] ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
+			fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
+			fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
+			fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
 		}
 	}
 	if numErrors > 0 {

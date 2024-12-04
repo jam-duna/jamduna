@@ -1128,7 +1128,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	}
 
 	// Guarantees
-	err = s.ValidateGuarantees(guarantees)
+	err = s.Verify_Guarantees()
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1404,7 +1404,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 	SortByCoreIndex(extrinsicData.Guarantees)
 	// return duplicate guarantee err
-	extrinsicData.Guarantees, err = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees)
+	extrinsicData.Guarantees, err, _ = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees)
 	if err != nil {
 		return nil, err
 	}
