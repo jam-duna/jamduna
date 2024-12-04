@@ -67,7 +67,12 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 	} else {
 		guarantee.Slot = n.statedb.GetTimeslot()
 		n.broadcast(guarantee)
-		fmt.Printf("%s (core %d) [broadcastWorkPackage] broadcasted guarantee\n", n.String(), coreIndex)
+		fmt.Printf("%s (core %d) [broadcastWorkPackage in slot %d] broadcasted guarantee ", n.String(), coreIndex, guarantee.Slot)
+		fmt.Printf("with validator :")
+		for _, sig := range guarantee.Signatures {
+			fmt.Printf(" v%d ", sig.ValidatorIndex)
+		}
+		fmt.Printf("\n")
 	}
 	return
 }

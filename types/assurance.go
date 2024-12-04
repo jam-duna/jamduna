@@ -53,7 +53,7 @@ func (A *Assurance) BitFieldToBytes() []byte {
 
 func (A *Assurance) ValidBitfield() bool {
 	// TODO: check if the bitfield is on for some core that is
-	return true
+	return false
 }
 
 func (A *Assurance) SetBitFieldBit(index uint16, value bool) {

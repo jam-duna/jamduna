@@ -937,6 +937,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 			start := time.Now()
 			proposedBlk, err := s.MakeBlock(credential, currJCE, assurances)
 			if err != nil {
+				fmt.Printf("Error making block: %v\n", err)
 				return nil, nil, err
 			}
 			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
@@ -1191,6 +1192,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		panic("No validators")
 	}
 	s.JamState.SafroleState = &s2
+	s.AssignGuarantors(noRotation)
+	s.PreviousGuarantors(noRotation)
 	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
 	elapsed := time.Since(start).Microseconds()
@@ -1369,10 +1372,10 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 				fmt.Printf("Rho %v\n", rho)
 			}
 		}
-		err = s.Verify_Guarantee(g)
+		err = s.Verify_Guarantee_MakeBlock(g)
 		if err != nil {
 			fmt.Printf("Node %d \n", s.Id)
-			fmt.Println("Error verifying guarantee: ", err)
+			fmt.Println("Error verifying guarantee (in Make Block): ", err)
 			continue
 		}
 		//142 check pending report

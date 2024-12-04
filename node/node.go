@@ -1189,8 +1189,6 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
-			n.statedb.PreviousGuarantors(noRotation)
-			n.statedb.AssignGuarantors(noRotation)
 			// timeslot mark
 			// currJCE := common.ComputeCurrentJCETime()
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
