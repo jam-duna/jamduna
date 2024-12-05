@@ -190,7 +190,7 @@ func TestSafroleVerify(t *testing.T) {
 	}
 	for _, tc := range testcases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
-			err := saforle_test(tc.jsonFile, tc.exceptErr)
+			err := safrole_test(tc.jsonFile, tc.exceptErr)
 			if err != nil {
 				t.Fatalf("failed: %v", err)
 			}

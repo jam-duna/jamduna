@@ -211,7 +211,7 @@ func (P Psi_state) Decode(data []byte) (interface{}, uint32) {
 		Psi_g []common.Hash      `json:"good"`
 		Psi_b []common.Hash      `json:"bad"`
 		Psi_w []common.Hash      `json:"wonky"`
-		Psi_o []types.Ed25519Key `json:"others"`
+		Psi_o []types.Ed25519Key `json:"offenders"`
 	}
 	decoded, l, err := types.Decode(data, reflect.TypeOf(s))
 	if err != nil {
@@ -221,7 +221,7 @@ func (P Psi_state) Decode(data []byte) (interface{}, uint32) {
 		Psi_g []common.Hash      `json:"good"`
 		Psi_b []common.Hash      `json:"bad"`
 		Psi_w []common.Hash      `json:"wonky"`
-		Psi_o []types.Ed25519Key `json:"others"`
+		Psi_o []types.Ed25519Key `json:"offenders"`
 	})
 	P.Psi_g = make([][]byte, len(sDecoded.Psi_g))
 	for i, hash := range sDecoded.Psi_g {

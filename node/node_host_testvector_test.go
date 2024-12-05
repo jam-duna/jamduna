@@ -182,15 +182,20 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 	return matchingFiles, fileContents, nil
 }
 
+func getGenesisFile(network string) string {
+	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network)
+}
+
 func SetupNodeEnv(t *testing.T) *Node {
-	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork("tiny")
+	network := "tiny"
+	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network)
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
 	numNodes := 1
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], GenesisFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], getGenesisFile(network), epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
 		if err != nil {
 			t.Fatalf("Failed to create node %d: %v\n", i, err)
 		}

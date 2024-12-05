@@ -45,6 +45,11 @@ type BlockHeaderWithoutSig struct {
 	AuthorIndex      uint16       `json:"block_author_key"`
 }
 
+func (b *BlockHeaderWithoutSig) String() string {
+	jsonByte, _ := json.Marshal(b)
+	return string(jsonByte)
+}
+
 // for codec
 type CBlockHeader struct {
 	ParentHeaderHash common.Hash              `json:"parent"`
@@ -133,12 +138,11 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 		bwoSig.TicketsMark = ticketMark
 	}
 
-	// Marshal the new struct to JSON.
+	// Marshal the new struct to codec
 	enc, err := Encode(bwoSig)
 	if err != nil {
 		return nil
 	}
-	//fmt.Printf("BytesWithoutSig %x\n", enc)
 	return enc
 }
 

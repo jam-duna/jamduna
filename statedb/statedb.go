@@ -240,6 +240,7 @@ const (
 	debugG                    = false
 	debugP                    = false
 	debugAudit                = false
+	debugSeal                 = false
 	trace                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
@@ -1494,13 +1495,33 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	h.AuthorIndex = author_index
 	b.Extrinsic = extrinsicData
 
-	unsignHeaderHash := h.UnsignedHash()
-
-	//signing
+	unsignHeaderHash := h.UnsignedHash() //signing
 
 	auth_secret_key, err := sf.ConvertBanderSnatchSecret(credential.BandersnatchSecret)
 	if err != nil {
 		return bl, err
+	}
+	if debugSeal {
+		// Create an instance of the new struct without the signature fields.
+		bwoSig := types.BlockHeaderWithoutSig{
+			ParentHeaderHash: h.ParentHeaderHash,
+			PriorStateRoot:   h.ParentStateRoot,
+			ExtrinsicHash:    h.ExtrinsicHash,
+			TimeSlot:         h.Slot,
+			EpochMark:        h.EpochMark,
+			// TicketsMark:    b.TicketsMark,
+			OffendersMark: h.OffendersMark,
+			AuthorIndex:   h.AuthorIndex,
+		}
+
+		ticketMark, ok, _ := h.ConvertTicketsMark()
+		if ok && ticketMark != nil {
+			bwoSig.TicketsMark = ticketMark
+		}
+		fmt.Printf("Node %d with secret key: %v\n", s.Id, auth_secret_key)
+		fmt.Printf("  Unsigned Header: %s\n", bwoSig.String())
+		fmt.Printf("  Unsigned Header Bytes: %x\n", h.BytesWithoutSig())
+		fmt.Printf("  Unsigned Header Hash: %v\n", unsignHeaderHash)
 	}
 
 	epochType := sf.CheckEpochType()
@@ -1511,6 +1532,11 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		}
 		copy(h.Seal[:], blockseal[:])
 		copy(h.EntropySource[:], fresh_vrfSig[:])
+		if debugSeal {
+			fmt.Printf("FALLBACK:\n")
+			fmt.Printf("  Seal: %x\n", h.Seal)
+			fmt.Printf("  EntropySource: %x\n", h.EntropySource)
+		}
 	} else {
 		attempt, err := sf.GetBindedAttempt(targetJCE)
 		blockseal, fresh_vrfSig, err := sf.SignPrimary(auth_secret_key, unsignHeaderHash, attempt)
@@ -1519,7 +1545,13 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		}
 		copy(h.Seal[:], blockseal[:])
 		copy(h.EntropySource[:], fresh_vrfSig[:])
+		if debugSeal {
+			fmt.Printf("SAFROLE - Attempt %d\n", attempt)
+			fmt.Printf("  Seal: %x\n", h.Seal)
+			fmt.Printf("  EntropySource: %x\n", h.EntropySource)
+		}
 	}
+
 	b.Header = *h
 	return b, nil
 }

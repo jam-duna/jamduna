@@ -23,17 +23,16 @@ clean:
 		git rm safrole/*
 		git rm assurances/*
 
-fallback:
-		mv src/fallback/node*/data/Blocks/* fallback/blocks
-		mv src/fallback/node*/data/StateSnapshots/* fallback/state_snapshots
-		mv src/fallback/node*/data/Traces/* fallback/traces
+TS=4888955
+MODE=assurances
 
-safrole:
-		mv src/safrole/node*/data/Blocks/* safrole/blocks
-		mv src/safrole/node*/data/StateSnapshots/* safrole/state_snapshots
-		mv src/safrole/node*/data/Traces/* safrole/traces
+# Targets
+cpmodedata:
+	mkdir -p $(MODE)/state_transitions/
+	mkdir -p $(MODE)/blocks/
+	mkdir -p $(MODE)/state_snapshots/
+	find /tmp/root/jam/$(TS)/node*/data/state_transitions/ -type f -exec cp {} $(MODE)/state_transitions/ \;
+	find /tmp/root/jam/$(TS)/node*/data/Blocks/ -type f -exec cp {} $(MODE)/blocks/ \;
+	find /tmp/root/jam/$(TS)/node*/data/StateSnapshots/ -type f -exec cp {} $(MODE)/state_snapshots/ \;
 
-assurances:
-		mv src/assurances/node*/data/Blocks/* assurances/blocks
-		mv src/assurances/node*/data/StateSnapshots/* assurances/state_snapshots
-		mv src/assurances/node*/data/Traces/* assurances/traces
+

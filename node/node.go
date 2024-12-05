@@ -55,7 +55,6 @@ const (
 	basePort      = 9000
 	godMode       = true
 	noRotation    = false
-	GenesisFile   = "tiny.json"
 )
 
 const (

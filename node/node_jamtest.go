@@ -182,7 +182,9 @@ func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []typ
 }
 
 func SetUpNodes(numNodes int) ([]*Node, error) {
-	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork("tiny")
+	network := "tiny"
+	GenesisFile := getGenesisFile(network)
+	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +230,7 @@ func safrole(sendtickets bool) {
 	}
 
 	for _, n := range nodes {
-		n.SetSendTickets(false)
+		n.SetSendTickets(sendtickets)
 	}
 
 	//statedb.RunGraph()

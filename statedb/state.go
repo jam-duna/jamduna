@@ -299,7 +299,7 @@ func (a Psi_state) MarshalJSON() ([]byte, error) {
 		Psi_g []string `json:"good"`
 		Psi_b []string `json:"bad"`
 		Psi_w []string `json:"wonky"`
-		Psi_o []string `json:"others"`
+		Psi_o []string `json:"offenders"`
 	}{
 		Psi_g: psi_g,
 		Psi_b: psi_b,
