@@ -38,10 +38,9 @@ type SafroleAccumulator struct {
 
 // 6.1 protocol configuration
 type SInput struct {
-	Slot          uint32             `json:"slot"`
-	Entropy       common.Hash        `json:"entropy"`
-	Extrinsics    []Extrinsic        `json:"extrinsic"`
-	PostOffenders []types.Ed25519Key `json:"post_offenders"`
+	Slot       uint32         `json:"slot"`
+	Entropy    common.Hash    `json:"entropy"`
+	Extrinsics []types.Ticket `json:"extrinsic"`
 }
 
 // Bytes serializes the SafroleBasicState to a byte slice
@@ -982,17 +981,13 @@ func (s *SafroleState) GetEpoch() uint32 {
 
 // statefrole_stf is the function to be tested
 func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) (SafroleState, error) {
-	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
+	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	currEpoch, _ := s.EpochAndPhase(targetJCE)
+	err := s.ValidateSaforle(tickets, targetJCE, header)
+	if err != nil {
+		return *s, err
+	}
 	s2 := cloneSafroleState(*s)
-	if currPhase >= types.TicketSubmissionEndSlot && len(tickets) > 0 {
-		return s2, jamerrors.ErrTEpochLotteryOver
-	}
-
-	if currEpoch < prevEpoch || (currEpoch == prevEpoch && currPhase < prevPhase) {
-		return s2, jamerrors.ErrTTimeslotNotMonotonic
-	}
-
 	// tally existing ticketIDs
 	ticketIDs := make(map[common.Hash]uint8)
 	for _, a := range s.NextEpochTicketsAccumulator {
@@ -1023,7 +1018,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 			expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
 			verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(winning_tickets), expected_tickets)
 			if !verified || err != nil {
-				return s2, jamerrors.ErrTTicketAlreadyInState // CHECK -- this looks wrong
+				return s2, fmt.Errorf("VerifyWinningMarker Failed:%s", err)
 			}
 			// do something to set this marker
 			ticketsOrKeys := TicketsOrKeys{
@@ -1098,6 +1093,62 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	s2.Timeslot = targetJCE
 
 	return s2, nil
+}
+
+// this function is for validate the block input is correct or not
+// should use the s3
+func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) error {
+	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
+	s2 := cloneSafroleState(*s)
+	if currPhase >= types.TicketSubmissionEndSlot && len(tickets) > 0 {
+		return jamerrors.ErrTEpochLotteryOver
+	}
+	if s.Timeslot >= targetJCE {
+		// fmt.Printf("currEpoch=%d, prevEpoch=%d, currPhase=%d, prevPhase=%d\n", currEpoch, prevEpoch, currPhase, prevPhase)
+		return jamerrors.ErrTTimeslotNotMonotonic
+	}
+	new_entropy_0 := common.Hash{} // use empty hash as entropy 0, since it's not useful in validation
+	isShifted := false
+	if currEpoch > prevEpoch {
+		// New Epoch
+		s2.PhasingEntropyAndValidator(&s2, new_entropy_0)
+		isShifted = true
+	} else {
+		// Epoch in progress
+		s2.StableEntropy(s, new_entropy_0)
+	}
+	ticketBodies := make([]types.TicketBody, 0) // n
+	for _, t := range tickets {
+		if t.Attempt >= types.TicketEntriesPerValidator {
+			return jamerrors.ErrTBadTicketAttemptNumber
+		}
+		ticket_id, err := s2.ValidateProposedTicket(&t, isShifted)
+		ticketBodies = append(ticketBodies, types.TicketBody{
+			Id:      ticket_id,
+			Attempt: t.Attempt,
+		})
+		for _, a := range s2.NextEpochTicketsAccumulator {
+
+			if err != nil {
+				return jamerrors.ErrTBadRingProof
+			}
+			if err != nil {
+				return fmt.Errorf("Unexpected error: %v", err)
+			}
+			if ticket_id == a.Id {
+				return jamerrors.ErrTTicketAlreadyInState
+			}
+		}
+	}
+	// check ticketBodies sorted by Id
+	// use bytes to compare
+	for i, a := range ticketBodies {
+		if i > 0 && compareTickets(a.Id, ticketBodies[i-1].Id) < 0 {
+			return jamerrors.ErrTTicketsBadOrder
+		}
+	}
+	return nil
 }
 
 func (s2 *SafroleState) PhasingEntropyAndValidator(s *SafroleState, new_entropy_0 common.Hash) {
@@ -1199,15 +1250,16 @@ func (E Extrinsic) MarshalJSON() ([]byte, error) {
 }
 
 type SafroleStateCodec struct {
-	Tau    uint32             `json:"tau"`
-	Eta    Entropy            `json:"eta"`
-	Lambda types.Validators   `json:"lambda"`
-	Kappa  types.Validators   `json:"kappa"`
-	GammaK types.Validators   `json:"gamma_k"`
-	Iota   types.Validators   `json:"iota"`
-	GammaA []types.TicketBody `json:"gamma_a"`
-	GammaS TicketsOrKeys      `json:"gamma_s"`
-	GammaZ [144]byte          `json:"gamma_z"`
+	Tau           uint32             `json:"tau"`
+	Eta           Entropy            `json:"eta"`
+	Lambda        types.Validators   `json:"lambda"`
+	Kappa         types.Validators   `json:"kappa"`
+	GammaK        types.Validators   `json:"gamma_k"`
+	Iota          types.Validators   `json:"iota"`
+	GammaA        []types.TicketBody `json:"gamma_a"`
+	GammaS        TicketsOrKeys      `json:"gamma_s"`
+	GammaZ        [144]byte          `json:"gamma_z"`
+	PostOffenders []types.Ed25519Key `json:"post_offenders"`
 }
 
 func (s *SafroleState) SafroleStateCodec() SafroleStateCodec {
@@ -1274,5 +1326,12 @@ func (a *SafroleStateCodec) MarshalJSON() ([]byte, error) {
 		GammaA: a.GammaA,
 		GammaS: a.GammaS,
 		GammaZ: common.HexString(a.GammaZ[:]),
+	})
+}
+func SortTicketsById(tickets []types.Ticket) {
+	sort.SliceStable(tickets, func(i, j int) bool {
+		a_id, _ := tickets[i].TicketID()
+		b_id, _ := tickets[j].TicketID()
+		return compareTickets(a_id, b_id) < 0
 	})
 }

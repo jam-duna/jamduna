@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -112,6 +113,92 @@ func TestSafrole(t *testing.T) {
 	}
 }
 
+func safrole_test(jsonFile string, exceptErr error) error {
+	jsonPath := filepath.Join("../jamtestvectors/safrole/tiny", jsonFile)
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return fmt.Errorf("failed to read JSON file: %v", err)
+	}
+
+	var tc TestCase
+	err = json.Unmarshal(jsonData, &tc)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal JSON data: %v", err)
+	}
+	var db StateDB
+	state := NewJamState()
+	var block types.Block
+	db.Block = &block
+	db.JamState = state
+	db.JamState.get_state_from_testcase(tc)
+	db.Block.Header.Slot = tc.Input.Slot
+	// db.Block.Header.EntropySource = tc.Input.Entropy
+	db.Block.Extrinsic.Tickets = tc.Input.Extrinsics
+	var sig [96]byte
+	copy(sig[0:32], tc.Input.Entropy.Bytes())
+	db.Block.Header.EntropySource = types.BandersnatchVrfSignature(sig)
+	_, err = db.GetSafrole().ApplyStateTransitionTickets(db.Block.Tickets(), db.Block.Header.Slot, db.Block.Header)
+	if err != exceptErr {
+		return fmt.Errorf("expected error %v, got %v", exceptErr, err)
+	}
+	return nil
+}
+
+func (j *JamState) get_state_from_testcase(tc TestCase) {
+	// Tau           uint32             `json:"tau"`
+	// Eta           Entropy            `json:"eta"`
+	// Lambda        types.Validators   `json:"lambda"`
+	// Kappa         types.Validators   `json:"kappa"`
+	// GammaK        types.Validators   `json:"gamma_k"`
+	// Iota          types.Validators   `json:"iota"`
+	// GammaA        []types.TicketBody `json:"gamma_a"`
+	// GammaS        TicketsOrKeys      `json:"gamma_s"`
+	// GammaZ        [144]byte          `json:"gamma_z"`
+	// PostOffenders []types.Ed25519Key `json:"post_offenders"`
+	sf := j.SafroleState
+	sf.Timeslot = tc.PreState.Tau
+	sf.Entropy = tc.PreState.Eta
+	sf.PrevValidators = tc.PreState.Lambda
+	sf.CurrValidators = tc.PreState.Kappa
+	sf.NextValidators = tc.PreState.GammaK
+	sf.DesignedValidators = tc.PreState.Iota
+	sf.NextEpochTicketsAccumulator = tc.PreState.GammaA
+	sf.TicketsOrKeys = tc.PreState.GammaS
+	sf.TicketsVerifierKey = tc.PreState.GammaZ[:]
+	j.DisputesState.Psi_o = tc.PreState.PostOffenders
+}
+
+func TestSafroleVerify(t *testing.T) {
+	/*
+		publish_tickets_no_mark-1 🔴	safrole	ErrTBadTicketAttemptNumber
+		publish_tickets_no_mark-3 🔴	safrole	ErrTTicketAlreadyInState
+		publish_tickets_no_mark-4 🔴	safrole	ErrTTicketsBadOrder
+		publish_tickets_no_mark-5 🔴	safrole	ErrTBadRingProof
+		publish_tickets_no_mark-7 🔴	safrole	ErrTEpochLotteryOver
+		enact_epoch_change_with_no_tickets-2 🔴	safrole	ErrTTimeslotNotMonotonic
+	*/
+	testcases := []struct {
+		jsonFile  string
+		exceptErr error
+	}{
+		{"publish-tickets-no-mark-1.json", jamerrors.ErrTBadTicketAttemptNumber},
+		{"publish-tickets-no-mark-3.json", jamerrors.ErrTTicketAlreadyInState},
+		{"publish-tickets-no-mark-4.json", jamerrors.ErrTTicketsBadOrder},
+		{"publish-tickets-no-mark-5.json", jamerrors.ErrTBadRingProof},
+		{"publish-tickets-no-mark-7.json", jamerrors.ErrTEpochLotteryOver},
+		{"enact-epoch-change-with-no-tickets-2.json", jamerrors.ErrTTimeslotNotMonotonic},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.jsonFile, func(t *testing.T) {
+			err := saforle_test(tc.jsonFile, tc.exceptErr)
+			if err != nil {
+				t.Fatalf("failed: %v", err)
+			}
+			fmt.Printf("PASS: %s\n", tc.jsonFile)
+		})
+	}
+}
+
 // // safrole_sstf is the function to be tested
 // func safrole_stf(sinput SInput, spreState SState) (SOutput, SState, error) {
 // 	//fmt.Printf("input=%v\n", input)
@@ -128,7 +215,7 @@ func TestSafrole(t *testing.T) {
 // 	// 	fmt.Printf("DESERIALIZE err %s\n", err2.Error())
 // 	// 	panic(2)
 // 	// }
-// 	// output, postState, err := preState.STF(input)
+// 	output, postState, err := preState.STF(input)
 // 	//TODO:return output.serialize(), postState.serialize(), err
 // 	return SOutput{}, SState{}, nil
 // }

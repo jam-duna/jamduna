@@ -19,8 +19,37 @@ func (s *StateDB) VerifyAssurance(a types.Assurance) error {
 	if a.ValidatorIndex >= types.TotalValidators {
 		return jamerrors.ErrABadValidatorIndex
 	}
-	if a.ValidBitfield() {
+	var HasRhoState []bool
+	for _, rho := range s.JamState.AvailabilityAssignments {
+		if rho != nil {
+			HasRhoState = append(HasRhoState, true)
+		} else {
+			HasRhoState = append(HasRhoState, false)
+		}
+	}
+	if !a.ValidBitfield(HasRhoState) {
 		return jamerrors.ErrABadCore
+	}
+
+	var IsRhoTimeOut []bool
+
+	for _, rho := range s.JamState.AvailabilityAssignments {
+
+		if rho != nil {
+			ts := s.JamState.SafroleState.Timeslot
+			timeoutbool := ts >= (rho.Timeslot)+uint32(types.UnavailableWorkReplacementPeriod)
+			if timeoutbool {
+				IsRhoTimeOut = append(IsRhoTimeOut, true)
+			} else {
+				IsRhoTimeOut = append(IsRhoTimeOut, false)
+			}
+		} else {
+			IsRhoTimeOut = append(IsRhoTimeOut, false)
+		}
+	}
+
+	if !a.CheckTimeout(IsRhoTimeOut) {
+		return jamerrors.ErrAStaleReport
 	}
 
 	// Verify the signature

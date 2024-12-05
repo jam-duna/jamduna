@@ -51,9 +51,22 @@ func (A *Assurance) BitFieldToBytes() []byte {
 	return A.Bitfield[:]
 }
 
-func (A *Assurance) ValidBitfield() bool {
-	// TODO: check if the bitfield is on for some core that is
-	return false
+func (A *Assurance) ValidBitfield(HadRho []bool) bool {
+	for i, rho := range HadRho {
+		if A.GetBitFieldBit(uint16(i)) && !rho {
+			return false
+		}
+	}
+	return true
+}
+
+func (A *Assurance) CheckTimeout(IsRhoTimeOut []bool) bool {
+	for i, timeout := range IsRhoTimeOut {
+		if A.GetBitFieldBit(uint16(i)) && timeout {
+			return false
+		}
+	}
+	return true
 }
 
 func (A *Assurance) SetBitFieldBit(index uint16, value bool) {

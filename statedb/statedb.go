@@ -1483,6 +1483,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 
 			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 		}
+		SortTicketsById(extrinsicData.Tickets)
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()

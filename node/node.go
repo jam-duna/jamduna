@@ -1246,7 +1246,7 @@ func (n *Node) runClient() {
 				err = statedb.CheckStateTransition(n.store, &st)
 				if err != nil {
 					fmt.Printf("ERROR validating state transition\n")
-				} else {
+				} else if debug {
 					fmt.Printf("Validated state transition\n")
 				}
 
