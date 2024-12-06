@@ -41,22 +41,67 @@ func (n *Node) StoreBlock(blk *types.Block, id uint16, debug bool) error {
 	}
 	s.WriteRawKV(blkStoreKey, encodedblk)
 
-	// child_<parentHash>_headerhash -> blockHash and potentially use "seek"
+	// child_<ParentHeaderHash>_headerhash -> blockHash and potentially use "seek"
 	childPrefix := []byte("child_")
+
 	childStoreKey := append(childPrefix, blk.Header.ParentHeaderHash[:]...)
 	childStoreKey = append(childStoreKey, headerhash[:]...)
+
 	s.WriteRawKV(childStoreKey, blockHash[:])
 	return nil
 }
 
-func (n *Node) GetBlockByHeader(blkHeader common.Hash) (types.Block, error) {
+func stripPrefix(key []byte, prefix []byte) ([]byte, error) {
+	// Check if the key starts with the childPrefix
+	if !bytes.HasPrefix(key, prefix) {
+		return nil, fmt.Errorf("key does not start with the specified prefix")
+	}
+
+	// Strip the prefix by slicing
+	return key[len(prefix):], nil
+}
+
+func (n *Node) GetAscendingBlockByHeader(headerHash common.Hash) (childBlks []*types.Block, err error) {
+
+	// child_<parentHash>_headerhash -> blockHash and potentially use "seek"
+	prefix := []byte("child_")
+	childStoreKey := append(prefix, headerHash[:]...)
+
+	s, _ := n.GetStorage()
+	keyvals, rErr := s.ReadRawKVWithPrefix(childStoreKey)
+	if rErr != nil {
+		return nil, fmt.Errorf("Error reading childStoreKey: %v\n", rErr)
+	}
+
+	// childBlks may contain forks !!!
+	childBlks = make([]*types.Block, 0)
+	for _, keyval := range keyvals {
+		strippedKey, err := stripPrefix(keyval[0], prefix)
+		if err != nil && len(strippedKey) != 64 {
+			fmt.Printf("Error stripping prefix: %v\n", err)
+			return nil, err
+		}
+		//headerHash := strippedKey[:32]
+		childHeaderHash := common.Hash(strippedKey[32:])
+		childBlk, err := n.GetStoredBlockByHeader(childHeaderHash)
+		if err != nil {
+			fmt.Printf("Error getting child block: %v\n", err)
+			return nil, err
+		}
+		childBlks = append(childBlks, childBlk)
+	}
+
+	return childBlks, nil
+}
+
+func (n *Node) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, error) {
 	//header_<headerhash> -> blockHash
 	headerPrefix := []byte("header_")
 	storeKey := append(headerPrefix, blkHeader[:]...)
 	blockHash, err := n.ReadRawKV(storeKey)
 	if err != nil {
 		// fmt.Printf("Error reading blockHash: %v\n", err)
-		return types.Block{}, err
+		return nil, err
 	}
 	//blk_<blockHash> -> codec(block)
 	blockPrefix := []byte("blk_")
@@ -64,15 +109,15 @@ func (n *Node) GetBlockByHeader(blkHeader common.Hash) (types.Block, error) {
 	encodedblk, err := n.ReadRawKV(blkStoreKey)
 	if err != nil {
 		fmt.Printf("Error reading block: %v\n", err)
-		return types.Block{}, err
+		return nil, err
 	}
 	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
 	if err != nil {
 		fmt.Printf("Error decoding block: %v\n", err)
-		return types.Block{}, err
+		return nil, err
 	}
-
-	return blk.(types.Block), nil
+	b := blk.(types.Block)
+	return &b, nil
 }
 
 func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk, err error) {

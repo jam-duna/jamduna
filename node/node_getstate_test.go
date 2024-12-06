@@ -22,7 +22,7 @@ func TestGetState(t *testing.T) {
 			fmt.Printf("node.statedb.Block.Header.Hash() %v\n", node.statedb.Block.Header.Hash())
 			headerHash = node.statedb.Block.Header.Hash()
 
-			node.GetBlockByHeader(headerHash)
+			node.GetStoredBlockByHeader(headerHash)
 		}
 
 		var startKey [31]byte

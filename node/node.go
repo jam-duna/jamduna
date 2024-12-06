@@ -787,8 +787,36 @@ func randomKey(m map[string]*Peer) string {
 	return keys[rand0.Intn(len(keys))]
 }
 
-func (n *Node) fetchBlock(blockHash common.Hash) (*types.Block, error) {
-	return nil, fmt.Errorf("fetchBlock - No response")
+func (n *Node) fetchBlocks(headerHash common.Hash, direction uint8, maximumBlocks uint32) (*[]types.Block, error) {
+	requests_original := make([]CE128_request, types.TotalValidators)
+	for i := range types.TotalValidators {
+		requests_original[i] = CE128_request{
+			ShardIndex:    uint16(i),
+			HeaderHash:    headerHash,
+			Direction:     direction,
+			MaximumBlocks: maximumBlocks,
+		}
+	}
+	requests := make([]interface{}, types.TotalValidators)
+	for i, req := range requests_original {
+		requests[i] = req
+	}
+
+	resps, err := n.makeRequests(requests, 1, time.Duration(3*maximumBlocks)*time.Second, time.Duration(6*maximumBlocks)*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	for _, resp := range resps {
+		ce128_Resp, ok := resp.(CE128_response)
+		if !ok {
+			// ignore such response
+			continue
+		}
+		if len(ce128_Resp.Blocks) >= 0 && ce128_Resp.HeaderHash == headerHash {
+			return &ce128_Resp.Blocks, nil
+		}
+	}
+	return nil, fmt.Errorf("fetchBlocks - No response")
 }
 
 func (n *Node) extendChain() error {
@@ -886,17 +914,18 @@ func (n *Node) processBlock(blk *types.Block) error {
 			//fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else {
-			var err error
 			parentBlock, ok := n.cacheBlockRead(b.GetParentHeaderHash())
 			if !ok {
-				parentBlock, err = n.fetchBlock(b.GetParentHeaderHash())
-				if err != nil || parentBlock == nil {
+				parentBlocks, err := n.fetchBlocks(b.GetParentHeaderHash(), 1, 1)
+				if err != nil || parentBlocks == nil {
 					// have to give up right now (could try again though!)
 					return err
+				} else {
+					parentBlock = &(*parentBlocks)[0]
 				}
 				// got the parent block, store it in the cache
 				if parentBlock.GetParentHeaderHash() == blk.GetParentHeaderHash() {
-					//fmt.Printf("[N%d] fetchBlock (%v<-%v) Validated --- CACHING\n", n.id, blk.GetParentHeaderHash(), blk.Hash())
+					//fmt.Printf("[N%d] fetchBlocks (%v<-%v) Validated --- CACHING\n", n.id, blk.GetParentHeaderHash(), blk.Hash())
 					n.StoreBlock(parentBlock, n.id, false)
 					n.cacheBlock(parentBlock)
 				} else {
@@ -1133,6 +1162,10 @@ func getMessageType(obj interface{}) string {
 		return "DA_request"
 	case DA_response:
 		return "DA_response"
+	case CE128_request:
+		return "CE128_request"
+	case CE128_response:
+		return "CE128_response"
 	case CE138_request:
 		return "CE138_request"
 	case CE138_response:

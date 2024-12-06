@@ -15,29 +15,108 @@ import (
 	//"github.com/colorfulnotion/jam/trie"
 )
 
+type CE139_request struct {
+	ErasureRoot    common.Hash
+	SegmentIndices []uint16
+	ShardIndex     uint16
+}
+
+type CE139_response struct {
+	ErasureRoot           common.Hash
+	ShardIndex            uint16
+	SegmentShards         []byte
+	SegmentJustifications [][]byte
+}
+
+type CE138_request struct {
+	ErasureRoot common.Hash
+	ShardIndex  uint16
+}
+
+type CE138_response struct {
+	WorkPackageHash common.Hash
+	ShardIndex      uint16
+	BundleShard     []byte
+	Justification   []byte
+}
+
+type CE128_request struct {
+	ShardIndex    uint16
+	HeaderHash    common.Hash `json:"headerHash"`
+	Direction     uint8       `json:"direction"`
+	MaximumBlocks uint32      `json:"maximumBlocks"`
+}
+
+type CE128_response struct {
+	ShardIndex uint16
+	HeaderHash common.Hash `json:"headerHash"`
+	Direction  uint8       `json:"direction"`
+	Blocks     []types.Block
+}
+
 func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
 	// TODO: Sourabh
 	fmt.Println("OnHandshake")
 	return nil
 }
 
-func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
-	blocks = make([]types.Block, 0)
-	//fmt.Printf("%s BlocksLookup(%v) requested\n", n.String(), headerHash)
-	blk, found := n.headers[headerHash]
-	if found {
-		blocks = append(blocks, *blk)
-		// TODO: Sourabh - go in the direction up to maximumBlocks
-		return blocks, true, nil
-	} else {
-		//fmt.Printf("%s BlocksLookup %v\n", n.String(), headerHash)
-		blkFromDB, err := n.GetBlockByHeader(headerHash)
-		if err != nil {
-			return blocks, false, err
-		}
-		blocks = append(blocks, blkFromDB)
-		return blocks, true, nil
+func (n *Node) GetBlockByHeaderHash(headerHash common.Hash) (*types.Block, error) {
+	blk, cachedFound := n.cacheHeadersRead(headerHash)
+	if cachedFound {
+		return blk, nil
 	}
+	blk, err := n.GetStoredBlockByHeader(headerHash)
+	if err != nil {
+		return blk, err
+	}
+	return blk, nil
+}
+
+func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
+	//fmt.Printf("%s BlocksLookup(%v) requested direction=%v, maximumBlocks=%v\n", n.String(), headerHash, direction, maximumBlocks)
+	blocks = make([]types.Block, 0)
+	if direction == 0 {
+		//Direction = 0 (Ascending exclusive)  - child, grandchild, ...
+		//panic("does not support Ascending exclusive fetch")
+
+		currentHash := headerHash
+		for i := uint32(0); i < maximumBlocks; i++ {
+			childBlksWithFork, err := n.GetAscendingBlockByHeader(currentHash)
+			if err != nil {
+				return blocks, false, err
+			}
+
+			// not sure which path to ascend to ... pick first one for now...
+			if len(childBlksWithFork) > 1 {
+				panic(fmt.Sprintf("BlocksLookup: multiple childBlksWithFork found %v\n", childBlksWithFork))
+			}
+			if len(childBlksWithFork) == 0 {
+				break
+			}
+			if len(childBlksWithFork) == 1 {
+				childBlk := childBlksWithFork[0]
+				blocks = append(blocks, *childBlk)
+				childHeaderHash := childBlk.Header.Hash()
+				currentHash = childHeaderHash
+			}
+		}
+	} else {
+		// Direction = 1 (Descending inclusive) - block, parent, grandparent ...
+		// go through fetch of up of maximumBlocks
+		currentHash := headerHash
+		for i := uint32(0); i < maximumBlocks; i++ {
+			blk, err := n.GetBlockByHeaderHash(currentHash)
+			if err != nil {
+				return blocks, false, err
+			}
+			blocks = append(blocks, *blk)
+			if blk.Header.ParentHeaderHash == (common.Hash{}) {
+				break
+			}
+			currentHash = blk.Header.ParentHeaderHash
+		}
+	}
+	return blocks, true, nil
 }
 
 func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.WorkReport, ok bool, err error) {
@@ -65,7 +144,7 @@ func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]by
 	// TODO: Stanley
 	s := n.getPVMStateDB()
 	// stateRoot := s.GetStateRoot()
-	blocks, ok, err := n.BlocksLookup(headerHash, 0, 1)
+	blocks, ok, err := n.BlocksLookup(headerHash, 1, 1)
 	if !ok || err != nil {
 		return boundarynodes, keyvalues, false, err
 	}
@@ -86,7 +165,7 @@ func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, 
 func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, key common.Hash) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	s := n.getPVMStateDB()
 	// stateRoot := s.GetStateRoot()
-	blocks, ok, err := n.BlocksLookup(headerHash, 0, 1)
+	blocks, ok, err := n.BlocksLookup(headerHash, 1, 1)
 	if !ok || err != nil {
 		fmt.Printf("BlocksLookup ERR %v\n", err)
 		return boundarynodes, keyvalues, false, err
@@ -125,9 +204,9 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncemen
 	}
 	headerHash := blockAnnouncement.HeaderHash
 	//fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) to N%d\n", n.String(), headerHash, validatorIndex)
-	var blockRaw types.Block
+	var blocksRaw []types.Block
 	for attempt := 1; attempt <= 3; attempt++ {
-		blockRaw, err = p.SendBlockRequest(headerHash, 0, 1)
+		blocksRaw, err = p.SendBlockRequest(headerHash, 1, 1)
 		if err == nil {
 			if attempt > 1 {
 				fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) attempt %d success\n", n.String(), headerHash, attempt)
@@ -141,7 +220,7 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncemen
 		}
 	}
 
-	block = &blockRaw
+	block = &blocksRaw[0]
 	receivedHeaderHash := block.Header.Hash()
 	if receivedHeaderHash != headerHash {
 		panic(6665)
@@ -157,7 +236,7 @@ func (n *Node) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) 
 	n.blocksMutex.Lock()
 	defer n.blocksMutex.Unlock()
 	b, ok = n.blocks[parentHash]
-	return
+	return b, ok
 }
 
 func (n *Node) cacheBlock(block *types.Block) {
@@ -170,7 +249,7 @@ func (n *Node) cacheHeadersRead(h common.Hash) (b *types.Block, ok bool) {
 	n.headersMutex.Lock()
 	defer n.headersMutex.Unlock()
 	b, ok = n.headers[h]
-	return
+	return b, ok
 }
 
 func (n *Node) cacheHeaders(h common.Hash, block *types.Block) {
@@ -312,6 +391,34 @@ func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
 		}
 		return response, nil
 
+	case "CE128_request":
+		req := obj.(CE128_request)
+		peerID = req.ShardIndex
+		headerHash := req.HeaderHash
+		direction := req.Direction
+		maximumBlocks := req.MaximumBlocks
+		// handle selfRequesting case
+		isSelfRequesting := req.ShardIndex == uint16(n.id)
+		if isSelfRequesting {
+			// no reason to even get here
+			return nil, fmt.Errorf("selfRequesting not supported")
+		}
+		peer, err := n.getPeerByIndex(peerID)
+		if err != nil {
+			return resp, err
+		}
+		blocks, err := peer.SendBlockRequest(headerHash, direction, maximumBlocks)
+		if err != nil {
+			return resp, err
+		}
+		response := CE128_response{
+			HeaderHash: headerHash,
+			ShardIndex: peerID,
+			Direction:  direction,
+			Blocks:     blocks,
+		}
+		return response, nil
+
 	case "CE138_request":
 		req := obj.(CE138_request)
 		peerID = req.ShardIndex
@@ -412,7 +519,10 @@ func (n *Node) makeRequestInternal(ctx context.Context, obj interface{}) (interf
 		}
 	}()
 
-	//msgType := getMessageType(obj)
+	msgType := getMessageType(obj)
+	if msgType == "unknown" {
+		return nil, fmt.Errorf("unsupported type")
+	}
 	select {
 	case <-ctx.Done():
 		// Context was canceled before the request completed
@@ -495,75 +605,4 @@ func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, o
 	}
 	//TODO..need somekind of sorting here..
 	return finalResults, nil
-}
-
-func (n *Node) makeRequestInternalFAKE(ctx context.Context, obj interface{}) (interface{}, error) {
-	// Get the peer ID from the object
-	writeErrCh := make(chan error, 1)
-	msgType := getMessageType(obj)
-	var peerID uint16
-	if msgType == "unknown" {
-		return nil, fmt.Errorf("unsupported type")
-	}
-	switch msgType {
-	case "DA_request":
-		req := obj.(DA_request)
-		peerID = req.ShardIndex
-		shard_hash := req.Hash
-		peer, err := n.getPeerByIndex(peerID)
-		if err != nil {
-			writeErrCh <- err
-		}
-		data, v_idx, err := peer.DA_Reconstruction(req)
-		if err != nil {
-			writeErrCh <- err
-		}
-		var response DA_response
-		response.Hash = shard_hash
-		response.ShardIndex = v_idx
-		response.Data = data
-		return response, nil
-
-	case "CE138_request":
-		req := obj.(CE138_request)
-		peerID = req.ShardIndex
-		erasureRoot := req.ErasureRoot
-		peer, err := n.getPeerByIndex(peerID)
-		if err != nil {
-			writeErrCh <- err
-		}
-		erasure_root, shard_index, bundleShard, _, err := peer.SendBundleShardRequest(erasureRoot, peerID)
-		if err != nil {
-			writeErrCh <- err
-		}
-		response := CE138_response{
-			WorkPackageHash: erasure_root,
-			ShardIndex:      shard_index,
-			BundleShard:     bundleShard,
-		}
-		return response, nil
-
-	case "CE139_request":
-		req := obj.(CE139_request)
-		peerID = req.ShardIndex
-		erasureRoot := req.ErasureRoot
-		segmentIndices := req.SegmentIndices
-		peer, err := n.getPeerByIndex(peerID)
-		if err != nil {
-			writeErrCh <- err
-		}
-		// func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error)
-		segmentShards, _, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, true)
-		if err != nil {
-			fmt.Printf("SendSegmentShardRequest: %v\n", err)
-			writeErrCh <- err
-		}
-		response := CE139_response{
-			ErasureRoot:   erasureRoot,
-			ShardIndex:    peerID,
-			SegmentShards: segmentShards,
-		}
-		return response, nil
-	}
-	return nil, fmt.Errorf("unsupported type")
 }

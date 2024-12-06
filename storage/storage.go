@@ -72,6 +72,24 @@ func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, error) {
 	return data, nil
 }
 
+func (store *StateDBStorage) ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, error) {
+	iter := store.db.NewIterator(nil, nil)
+	defer iter.Release()
+
+	var keyvals [][2][]byte
+	for iter.Next() {
+		key := iter.Key()
+		if len(key) >= len(prefix) && string(key[:len(prefix)]) == string(prefix) {
+			keyval := [2][]byte{key, iter.Value()}
+			keyvals = append(keyvals, keyval)
+		}
+	}
+	if err := iter.Error(); err != nil {
+		return nil, fmt.Errorf("ReadRawKVWithPrefix %v Err: %v", prefix, err)
+	}
+	return keyvals, nil
+}
+
 func (store *StateDBStorage) WriteRawKV(key []byte, value []byte) error {
 	return store.db.Put(key, value, nil)
 }

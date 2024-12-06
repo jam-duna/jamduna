@@ -31,31 +31,6 @@ type Chunk struct {
 	Data []byte
 }
 
-type CE139_request struct {
-	ErasureRoot    common.Hash
-	SegmentIndices []uint16
-	ShardIndex     uint16
-}
-
-type CE139_response struct {
-	ErasureRoot           common.Hash
-	ShardIndex            uint16
-	SegmentShards         []byte
-	SegmentJustifications [][]byte
-}
-
-type CE138_request struct {
-	ErasureRoot common.Hash
-	ShardIndex  uint16
-}
-
-type CE138_response struct {
-	WorkPackageHash common.Hash
-	ShardIndex      uint16
-	BundleShard     []byte
-	Justification   []byte
-}
-
 func (p *Peer) DA_Announcement(hash common.Hash, validator_index uint16) error {
 	stream, err := p.openStream(CE201_DA_Announcement)
 	if err != nil {
