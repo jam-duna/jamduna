@@ -182,10 +182,6 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 	return matchingFiles, fileContents, nil
 }
 
-func getGenesisFile(network string) string {
-	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network)
-}
-
 func SetupNodeEnv(t *testing.T) *Node {
 	network := "tiny"
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network)

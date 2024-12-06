@@ -438,7 +438,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 		if fibN > 1 {
 			importedSegment := types.ImportSegment{
 				RequestedHash: prevWorkPackageHash,
-				Index:           0,
+				Index:         0,
 			}
 			importedSegments = append(importedSegments, importedSegment)
 		}
@@ -534,11 +534,11 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 		if n > 0 {
 			fibImportedSegments = append(fibImportedSegments, types.ImportSegment{
 				RequestedHash: prevWorkPackageHash,
-				Index:           0,
+				Index:         0,
 			})
 			tribImportedSegments = append(tribImportedSegments, types.ImportSegment{
 				RequestedHash: prevWorkPackageHash,
-				Index:           1, // TODO: check
+				Index:         1, // TODO: check
 			})
 			payload := make([]byte, 4)
 			binary.LittleEndian.PutUint32(payload, uint32(n+1))

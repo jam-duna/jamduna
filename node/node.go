@@ -256,6 +256,10 @@ func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
 	return stateSnapshotRaw, nil
 }
 
+func getGenesisFile(network string) string {
+	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network)
+}
+
 func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
 	return newNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, flag, dataDir, port)
 }

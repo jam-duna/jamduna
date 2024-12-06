@@ -463,7 +463,6 @@ func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, o
 			select {
 			case results <- res:
 				mu.Lock()
-				fmt.Printf("SUCCESS %d\n", successCount)
 				successCount++
 				if successCount >= minSuccess {
 					cancel() // Cancel remaining requests once minSuccess is reached, include its childCtx

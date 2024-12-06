@@ -4,6 +4,7 @@ import (
 	//	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+
 	//	"errors"
 	"fmt"
 	"reflect"
@@ -45,7 +46,7 @@ func (k Ed25519Key) String() string {
 }
 
 func (pk Ed25519Key) Bytes() []byte {
-	return pk.Bytes()
+	return pk[:]
 }
 
 func (pk Ed25519Key) PublicKey() ed25519.PublicKey {

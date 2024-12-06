@@ -52,67 +52,72 @@ type VerdictResult struct {
 }
 
 func (j *JamState) IsValidateDispute(input *types.Dispute) ([]VerdictResult, error) {
+	// gp 0.5.0 (10.3)
 	for _, v := range input.Verdict {
 		err := j.checkSignature(v)
 		if err != nil {
 			return []VerdictResult{}, err
 		}
 	}
-
+	// gp 0.5.0 (10.5)
 	for _, c := range input.Culprit {
 		err := j.checkIfKeyOffend(c.Key)
-		if err != nil {
+		if err != nil && err.Error() == "Already in the Offenders" {
+			return []VerdictResult{}, jamerrors.ErrDCulpritAlreadyInOffenders
+		} else if err != nil {
 			return []VerdictResult{}, err
 		}
 	}
-	//eq 102 f: the key shouldn't be in old offenders set
+	// gp 0.5.0 (10.6)
 	for _, f := range input.Fault {
 		err := j.checkIfKeyOffend(f.Key)
-		if err != nil {
+		if err != nil && err.Error() == "Already in the Offenders" {
+			return []VerdictResult{}, jamerrors.ErrDFaultOffenderInOffendersList
+		} else if err != nil {
 			return []VerdictResult{}, err
 		}
 	}
-	//eq 103 v: v should index by the work report hash and no duplicates
+	//gp 0.5.0 (10.7) v: v should index by the work report hash and no duplicates
 	err := checkVerdicts(input.Verdict)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
-	//eq 104 c: should be index by key and no duplicates
+	//gp 0.5.0 (10.8) c: should be index by key and no duplicates
 	err = checkCulprit(input.Culprit)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
-	//eq 104 f: should be index by key and no duplicates
+	//gp 0.5.0 (10.8) f: should be index by key and no duplicates
 	err = checkFault(input.Fault)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
-	//eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
+	//gp 0.5.0 (10.9) v: work report hash should not be in the psi_g, psi_b, psi_w set
 	err = checkWorkReportHash(input.Verdict, j.DisputesState.Psi_g, j.DisputesState.Psi_b, j.DisputesState.Psi_w)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
-	//eq 106 v: the vote should be index by validator index and no duplicates
+	//gp 0.5.0 (10.10) v: the vote should be index by validator index and no duplicates
 	err = checkVote(input.Verdict)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
 	//process the dispute
-	//eq 107, 108 r,v (r=> report, v=> sum of votes)
+	//gp 0.5.0 (10.11, 12) r,v (r=> report, v=> sum of votes)
 	/* only have 3 cases
 	zero => bad
 	1/3 => wonky
 	2/3+1 => good
 	*/
 	result := verdict2result(input.Verdict)
-	//eq 107, 108 r,v (r=> report, v=> sum of votes)
+	//gp 0.5.0 (10.11, 12) r,v (r=> report, v=> sum of votes)
 	state_prime := j.sortSet_Prime(result)
-	//eq 109 if the Verdict is good, always have a least one fault
+	//gp 0.5.0 (10.13)if the Verdict is good, always have a least one fault
 	err = isFaultEnoughAndValid(state_prime, input.Fault)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
-	//eq 110 if the Verdict is bad, always have at least two culprit
+	//gp 0.5.0 (10.14) eq 110 if the Verdict is bad, always have at least two culprit
 	err = isCulpritEnoughAndValid(state_prime, input.Culprit)
 	if err != nil {
 		return []VerdictResult{}, err
@@ -209,7 +214,7 @@ func (j *JamState) GetOffenderMark(input types.Dispute) (types.OffenderMarker, e
 
 func (j *JamState) ProcessDispute(result []VerdictResult, c []types.Culprit, f []types.Fault) {
 	j.sortSet(result)
-	//eq 111 clear old report in rho , dummy report and timeout
+	//eq 10.15 start: clear old report in rho ,report and timeout
 	j.updateOffender(c, f)
 	j.clearReportRho(result)
 }
@@ -237,6 +242,7 @@ func (j *JamState) Disputes(input *types.Dispute) (types.OffenderMarker, error) 
 }
 
 // eq 99
+// gp 0.5.0 (10.4)
 func getPublicKey(K []types.Validator, Index uint32) types.Ed25519Key {
 	return K[Index].Ed25519
 }
@@ -255,17 +261,19 @@ func (j *JamState) checkSignature(v types.Verdict) error {
 			return jamerrors.ErrDBadSignatureInVerdict
 		}
 	} else {
-		return fmt.Errorf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v", v.Epoch, j.SafroleState.Timeslot/E)
+		fmt.Printf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v\n", v.Epoch, j.SafroleState.Timeslot/E)
+		return jamerrors.ErrDAgeTooOldInVerdicts
 	}
 	return nil
 }
 
 // eq 101
+// gp 0.5.0 (10.6)
 func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
 	for _, k := range j.DisputesState.Psi_o {
 		if bytes.Equal(k.Bytes(), key.Bytes()) {
 			//drop the key
-			return jamerrors.ErrDCulpritAlreadyInOffenders
+			return fmt.Errorf("Already in the Offenders")
 		}
 	}
 	// check if the key is in the validator set
@@ -279,10 +287,11 @@ func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
 			return nil
 		}
 	}
-	return jamerrors.ErrDCulpritAlreadyInOffenders
+	return fmt.Errorf("Already in the Offenders")
 }
 
 // eq 103 v: v should index by the work report hash and no duplicates
+// gp 0.5.0 (10.7)
 func checkVerdicts(v []types.Verdict) error {
 
 	for i, verdict := range v {
@@ -307,6 +316,7 @@ func checkVerdicts(v []types.Verdict) error {
 }
 
 // eq 104 c: should be index by key and no duplicates
+// gp 0.5.0 (10.8)
 func checkCulprit(c []types.Culprit) error {
 	for i, culprit := range c {
 		//check culprit signature is valid
@@ -336,6 +346,7 @@ func checkCulprit(c []types.Culprit) error {
 }
 
 // eq 104 f: should be index by key and no duplicates
+// gp 0.5.0 (10.8)
 func checkFault(f []types.Fault) error {
 	for i, fault := range f {
 		//check fault signature is valid
@@ -365,16 +376,19 @@ func checkFault(f []types.Fault) error {
 }
 
 // eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
+// gp 0.5.0 (10.9)
 func checkWorkReportHash(v []types.Verdict, psi_g [][]byte, psi_b [][]byte, psi_w [][]byte) error {
 	for _, verdict := range v {
 		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_g) {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_g", verdict.Target)
+			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
 		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_b) {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_b", verdict.Target)
+			fmt.Printf("Verdict Error: WorkReportHash %x already in psi_b\n", verdict.Target)
+			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
 		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_w) {
-			return fmt.Errorf("Verdict Error: WorkReportHash %x already in psi_w", verdict.Target)
+			fmt.Printf("Verdict Error: WorkReportHash %x already in psi_w\n", verdict.Target)
+			return jamerrors.ErrDAlreadyRecordedVerdictWithFaults
 		}
 	}
 	return nil
@@ -390,14 +404,19 @@ func checkWorkReportHashInSet(hash []byte, set [][]byte) bool {
 
 func checkVote(v []types.Verdict) error {
 	for _, verdict := range v {
+		vote_counter := 0
 		for i, vote := range verdict.Votes {
 			// check duplicate
+			if vote.Voting {
+				vote_counter++
+			}
 			for j, vote2 := range verdict.Votes {
 				if i == j {
 					continue
 				}
 				if vote2.Index == vote.Index {
-					return fmt.Errorf("Vote Error: duplicate index %v in index %v", vote.Index, j)
+					fmt.Printf("Vote Error: duplicate index %v in index %v\n", vote.Index, j)
+					return jamerrors.ErrDNotUniqueVotes
 				}
 			}
 			// check index
@@ -405,8 +424,15 @@ func checkVote(v []types.Verdict) error {
 				continue
 			}
 			if vote.Index < verdict.Votes[i-1].Index {
-				return fmt.Errorf("Vote Error: index %v should be bigger than %v", vote.Index, verdict.Votes[i-1].Index)
+				fmt.Printf("Vote Error: index %v should be bigger than %v\n", vote.Index, verdict.Votes[i-1].Index)
+				return jamerrors.ErrDNotSortedWorkReports
 			}
+		}
+		if vote_counter == 0 || vote_counter == types.ValidatorsSuperMajority || vote_counter == types.WonkyTrueThreshold {
+			continue
+		} else {
+			fmt.Printf("Vote Error: vote count %v is invalid\n", vote_counter)
+			return jamerrors.ErrDNotHomogenousJudgements
 		}
 	}
 	return nil
@@ -548,13 +574,14 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 			}
 		}
 		if counter < 1 {
-			return fmt.Errorf("Fault Error: psi_g should have at least one fault work report hash")
+			return jamerrors.ErrDMissingFaultsGoodVerdict
 		}
 	}
 	found := false
 	for _, f := range f {
 		if f.Voting {
-			return fmt.Errorf("Fault Error: fault should be false, invalid key: %x", f.Key)
+			fmt.Printf("Fault Error: fault should be false, invalid key: %v\n", f.Key)
+			return jamerrors.ErrDAuditorMarkedOffender
 		}
 		for _, s := range state_prime.DisputesState.Psi_g {
 			if bytes.Equal(s, f.Target.Bytes()) {
@@ -575,9 +602,12 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 				counter++
 			}
 		}
-
+		if counter == 0 {
+			return jamerrors.ErrDMissingCulpritsBadVerdict
+		}
 		if counter < 2 {
-			return fmt.Errorf("Culprit Error: work report hash %x in psi_b should have at least two culprit", s)
+			fmt.Printf("Culprit Error: work report hash %x in psi_b should have at least two culprit\n", s)
+			return jamerrors.ErrDSingleCulpritBadVerdict
 		}
 	}
 	found := false
@@ -588,7 +618,8 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("Culprit Error: work report hash %x should be in bad set", c.Target)
+			fmt.Printf("Culprit Error: work report hash %x should be in bad set\n", c.Target)
+			return jamerrors.ErrDOffenderNotPresentVerdict
 		}
 	}
 	return nil

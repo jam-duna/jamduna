@@ -125,7 +125,7 @@ func TestFetchSegments(t *testing.T) {
 			importedSegments := make([]types.ImportSegment, 0)
 			importedSegments = append(importedSegments, types.ImportSegment{
 				RequestedHash: packageHash,
-				Index:           uint16(0),
+				Index:         uint16(0),
 			})
 			workPackage.WorkItems[0].ImportedSegments = importedSegments
 		}
@@ -188,7 +188,7 @@ func TestAvailabilityReconstruction(t *testing.T) {
 			importedSegments := make([]types.ImportSegment, 0)
 			importedSegments = append(importedSegments, types.ImportSegment{
 				RequestedHash: packageHash,
-				Index:           uint16(0),
+				Index:         uint16(0),
 			})
 			workPackage.WorkItems[0].ImportedSegments = importedSegments
 		}
