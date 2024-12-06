@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/quic-go/quic-go"
 )
@@ -30,6 +31,11 @@ Auditor -> Assurer
 */
 
 func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (erasure_root common.Hash, shard_index uint16, bundleShard []byte, justification []byte, err error) {
+	//isSelfRequesting := req.ShardIndex == uint16(p.PeerID)
+	isSelfRequesting := false
+	if isSelfRequesting {
+
+	}
 	code := uint8(CE138_BundleShardRequest)
 	stream, err := p.openStream(code)
 	req := &JAMSNPShardRequest{

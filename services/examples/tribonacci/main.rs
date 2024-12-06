@@ -82,7 +82,7 @@ extern "C" fn is_authorized() -> u32 {
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine() -> u32 {
     let mut buffer = [0u8; 16];
-    let result = unsafe { import(1, buffer.as_mut_ptr(), buffer.len() as u32) };
+    let result = unsafe { import(0, buffer.as_mut_ptr(), buffer.len() as u32) };
     
     if result == 0 {
         let n = u32::from_le_bytes(buffer[0..4].try_into().unwrap());

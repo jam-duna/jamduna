@@ -284,11 +284,16 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if len(segmentroots) == 0 {
 		segmentroots = append(segmentroots, common.Hash{})
 	}
-	importedSegmentRoots, err := n.GetImportedSegmentRoots(bp.WorkPackage)
+	importedSegmentRoots, _, err := n.GetImportedSegmentRoots(bp.WorkPackage)
 	if err != nil {
-		fmt.Printf("[auditWorkReport:GetImportedSegmentRoots] ERR %v\n", err)
+		fmt.Printf("[N%v] AAA [auditWorkReport:GetImportedSegmentRoots] ERR %v\n", n.id, err)
 	}
-	workReport, err := n.executeWorkPackageBundle(*bp, importedSegmentRoots)
+	segmentRootLookup, err := n.GetSegmentRootLookup(bp.WorkPackage)
+	if err != nil {
+		fmt.Printf("[N%v] AAA [auditWorkReport:GetSegmentRootLookup] ERR %v\n", n.id, err)
+		return
+	}
+	workReport, err := n.executeWorkPackageBundle(*bp, importedSegmentRoots, segmentRootLookup)
 	if err != nil {
 		return
 	} else {

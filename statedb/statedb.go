@@ -137,10 +137,6 @@ func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
 
 	// fmt.Printf("[N%v] ProcessIncomingLookup -- start Adding lookup: %v\n", s.Id, l.String())
 	account_preimage_hash := l.AccountPreimageHash()
-	_, ok := s.knownPreimageLookups[account_preimage_hash]
-	if ok {
-		return
-	}
 	if s.CheckLookupExists(account_preimage_hash) {
 		return
 	}

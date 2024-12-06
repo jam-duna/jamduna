@@ -40,15 +40,6 @@ type WorkPackageBundle struct {
 	Justification     [][][]common.Hash `json:"j"` // J: justifications of segment data build using CDT
 }
 
-// WorkPackageBundle represents a work package.
-// type WorkPackageBundle struct {
-// 	WorkPackage       WorkPackage       `json:"p"` // P: workPackage
-// 	ExtrinsicData     []ExtrinsicsBlobs `json:"x"` // X: extrinsic data for some workitem argument w
-// 	ImportSegmentData [][]byte          `json:"s"` // M: import segment data, previouslly called m (each of segment is size of W_E*W_S)
-// 	Justification     [][]common.Hash   `json:"j"` // J: justifications of segment data build using CDT
-// }
-
-// TODO: Sean should finish codec here. and remove json
 func (b *WorkPackageBundle) Bytes() []byte {
 	encoded, err := Encode(b)
 	if err != nil {
@@ -60,6 +51,14 @@ func (b *WorkPackageBundle) Bytes() []byte {
 func (b *WorkPackageBundle) String() string {
 	jsonByte, _ := json.Marshal(b)
 	return string(jsonByte)
+}
+
+func (b *WorkPackageBundle) PackageHash() common.Hash {
+	return b.WorkPackage.Hash()
+}
+
+func (b *WorkPackageBundle) Package() WorkPackage {
+	return b.WorkPackage
 }
 
 func WorkPackageBundleFromBytes(data []byte) (*WorkPackageBundle, error) {

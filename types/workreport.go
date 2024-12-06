@@ -20,13 +20,43 @@ import (
 */
 // WorkReport represents a work report.
 
+/*
+SegmentRootLookupItem ::= SEQUENCE {
+    work-package-hash WorkPackageHash,
+    segment-tree-root OpaqueHash
+}
+*/
+
+type SegmentRootLookupItem struct {
+	WorkPackageHash common.Hash `json:"workPackageHash"`
+	SegmentRoot     common.Hash `json:"segment-tree-root"`
+}
+
+// SegmentRootLookup represents a list of SegmentRootLookupItem
+type SegmentRootLookup []SegmentRootLookupItem
+
+// MarshalJSON serializes the SegmentRootLookup into JSON
+func (s SegmentRootLookup) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]SegmentRootLookupItem(s))
+}
+
+// UnmarshalJSON deserializes JSON data into SegmentRootLookup
+func (s *SegmentRootLookup) UnmarshalJSON(data []byte) error {
+	var items []SegmentRootLookupItem
+	if err := json.Unmarshal(data, &items); err != nil {
+		return err
+	}
+	*s = items
+	return nil
+}
+
 type WorkReport struct {
 	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
 	RefineContext     RefineContext         `json:"context"`
 	CoreIndex         uint16                `json:"core_index"`
 	AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 	AuthOutput        []byte                `json:"auth_output"`
-	SegmentRootLookup Hash2Hash             `json:"segment_root_lookup"`
+	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 	Results           []WorkResult          `json:"results"`
 }
 
@@ -94,7 +124,7 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 		CoreIndex         uint16                `json:"core_index"`
 		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 		AuthOutput        string                `json:"auth_output"`
-		SegmentRootLookup Hash2Hash             `json:"segment_root_lookup"`
+		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 		Results           []WorkResult          `json:"results"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
@@ -105,6 +135,7 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 	a.CoreIndex = s.CoreIndex
 	a.AuthorizerHash = s.AuthorizerHash
 	a.AuthOutput = common.FromHex(s.AuthOutput)
+	a.SegmentRootLookup = s.SegmentRootLookup
 	a.Results = s.Results
 	return nil
 }
@@ -116,15 +147,16 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 		CoreIndex         uint16                `json:"core_index"`
 		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 		AuthOutput        string                `json:"auth_output"`
-		SegmentRootLookup Hash2Hash             `json:"segment_root_lookup"`
+		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 		Results           []WorkResult          `json:"results"`
 	}{
-		AvailabilitySpec: a.AvailabilitySpec,
-		RefineContext:    a.RefineContext,
-		CoreIndex:        a.CoreIndex,
-		AuthorizerHash:   a.AuthorizerHash,
-		AuthOutput:       common.HexString(a.AuthOutput),
-		Results:          a.Results,
+		AvailabilitySpec:  a.AvailabilitySpec,
+		RefineContext:     a.RefineContext,
+		CoreIndex:         a.CoreIndex,
+		AuthorizerHash:    a.AuthorizerHash,
+		AuthOutput:        common.HexString(a.AuthOutput),
+		SegmentRootLookup: a.SegmentRootLookup,
+		Results:           a.Results,
 	})
 }
 

@@ -140,9 +140,9 @@ func generateErasureRootShardIdxKey(erasureRoot common.Hash, shardIndex uint16) 
 
 func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, err error) {
 	fixedSegmentSize := types.W_S * 2
-	if len(concatenatedShards)%(fixedSegmentSize) != 0 {
-		return nil, fmt.Errorf("Invalid SegmentShards Len:%v. MUST BE multiple of %v", len(concatenatedShards), fixedSegmentSize)
-	}
+	// if len(concatenatedShards)%(fixedSegmentSize) != 0 {
+	// 	return nil, fmt.Errorf("Invalid SegmentShards Len:%v. MUST BE multiple of %v", len(concatenatedShards), fixedSegmentSize)
+	// }
 
 	for i := 0; i < len(concatenatedShards); i += fixedSegmentSize {
 		shard := concatenatedShards[i : i+fixedSegmentSize]
@@ -290,32 +290,50 @@ func (n *Node) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex uint16, 
 	return nil
 }
 
-func generateHashToErasureRootKey(h common.Hash) string {
-	return fmt.Sprintf("htoe_%v", h)
+// requestHash (packageHash(wp) or SegmentRoot(e)) -> ErasureRoot(u)
+func generateRequestedHashToErasureRootKey(requestHash common.Hash) string {
+	return fmt.Sprintf("rtou_%v", requestHash)
 }
 
+// ErasureRoot(u) -> SegmentsRoot(e)
 func generateErasureRootToSegmentsKey(erasureRoot common.Hash) string {
-	return fmt.Sprintf("etos_%v", erasureRoot)
+	return fmt.Sprintf("utoe_%v", erasureRoot)
+}
+
+// ErasureRoot(u) -> requestHash SegmentsRoot(u) ++ WorkPackageHash(wp)
+func generateErasureRootToRequestedHash(erasureRoot common.Hash) string {
+	return fmt.Sprintf("utor2_%v", erasureRoot)
 }
 
 // h is a WorkPackageHash or ExportSegmentRoot
 func (n *Node) getErasureRootFromHash(h common.Hash) (erasureRoot common.Hash, err error) {
 	// Retrieve ErasureRoot from LevelDB
-	erasureRootRaw, err0 := n.ReadRawKV([]byte(generateHashToErasureRootKey(h)))
+	erasureRootRaw, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(h)))
 	if err0 != nil {
 		return erasureRoot, err0
 	}
 	return common.Hash(erasureRootRaw), nil
 }
 
-// h is a WorkPackageHash -> exportedSegmentsRoot
-func (n *Node) getExportedSegmenstRootFromHash(h common.Hash) (exportedSegmentsRoot common.Hash, err error) {
-	// Retrieve ErasureRoot from LevelDB
-	exportedSegmentsRootRaw, err0 := n.ReadRawKV([]byte(generateErasureRootToSegmentsKey(h)))
+// reqHash -> erasureRoot -> exportedSegmentsRoot
+func (n *Node) getExportedSegmenstRootFromHash(requestedHash common.Hash) (exportedSegmentsRoot common.Hash, packageHash common.Hash, err error) {
+
+	// requestedHash -> erasureRoot
+	erasureRootRaw, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(requestedHash)))
 	if err0 != nil {
-		return exportedSegmentsRoot, err0
+		fmt.Printf("getExportedSegmenstRootFromHash: requestedHash %v not found %v\n", requestedHash, err0)
+		return exportedSegmentsRoot, packageHash, err0
 	}
-	return common.Hash(exportedSegmentsRootRaw), nil
+	erasureRoot := common.Hash(erasureRootRaw)
+
+	// erasureRoot -> exportedSegmentsRoot
+	segmentRoot_packageHash, err2 := n.ReadRawKV([]byte(generateErasureRootToRequestedHash(erasureRoot)))
+	if err2 != nil || len(segmentRoot_packageHash) != 64 {
+		return exportedSegmentsRoot, packageHash, err2
+	}
+	exportedSegmentsRoot = common.Hash(segmentRoot_packageHash[:32])
+	packageHash = common.Hash(segmentRoot_packageHash[32:64])
+	return exportedSegmentsRoot, packageHash, nil
 }
 
 // h is a WorkPackageHash or ExportSegmentRoot
@@ -346,14 +364,21 @@ func extractSegment(segmentsConcat []byte, segmentIndex uint16, segmentSize int)
 }
 
 func (n *Node) StoreImportDAWorkReportMap(spec types.AvailabilitySpecifier) error {
+	///fmt.Printf("!!! [N%v] StoreImportDAWorkReportMap: %v\n", n.id, spec)
 	erasureRoot := spec.ErasureRoot
-	// using the spec, record 2 mappings from hash to erasureRoot (a)+(b):
-	// (a) spec.WorkPackageHash => spec.ErasureRoot
-	n.WriteRawKV(generateHashToErasureRootKey(spec.WorkPackageHash), erasureRoot.Bytes())
-	// (b) spec.ExportedSegmentRoot => spec.ErasureRoot
-	n.WriteRawKV(generateHashToErasureRootKey(spec.ExportedSegmentRoot), erasureRoot.Bytes())
-	// (c) spec.WorkPackageHash => spec.ExportedSegmentRoot
-	n.WriteRawKV(generateErasureRootToSegmentsKey(spec.WorkPackageHash), spec.ExportedSegmentRoot[:])
+	segementRoot := spec.ExportedSegmentRoot
+	workpackageHash := spec.WorkPackageHash
+
+	// write 3 mappings:
+
+	// (a) workpackageHash => erasureRoot
+	n.WriteRawKV(generateRequestedHashToErasureRootKey(workpackageHash), erasureRoot.Bytes())
+	// (b) segementRoot => erasureRoot
+	n.WriteRawKV(generateRequestedHashToErasureRootKey(segementRoot), erasureRoot.Bytes())
+
+	// (c) erasureRoot => segementRoot ++ workpackageHash
+	segmentRoot_packageHash := append(segementRoot[:], workpackageHash.Bytes()...)
+	n.WriteRawKV(generateErasureRootToRequestedHash(erasureRoot), segmentRoot_packageHash)
 
 	return nil
 }
@@ -565,4 +590,16 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 	}
 
 	return erasureRoot, shardIndex, segmentIndices, selected_segments, selected_full_justifications, selected_segments_justifications, exportedSegmentAndPageProofLens, true, nil
+}
+
+// Look up the erasureRoot for  [exportedSegmentRoot, erasureRoot and WorkPackageHash]
+func (n *Node) ErasureRootLookUP(h common.Hash) (erasureRoot common.Hash, err error) {
+	erasureRootRaw, err := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(h)))
+	if err != nil {
+		if debugSegments {
+			fmt.Printf("Error reading erasureRoot: %v\n", err)
+		}
+		return h, nil
+	}
+	return common.Hash(erasureRootRaw), nil
 }

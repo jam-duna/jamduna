@@ -18,11 +18,18 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage) (guarantee types.Guara
 	if debugDA {
 		fmt.Printf("%s Core: %d, WorkPackageHash=%v, len(coworker)=%x\n", n.String(), coreIndex, wp.Hash(), len(coworker))
 	}
+	if debugSegments {
+		fmt.Printf("[N%d] broadcastWorkpackage executeWorkPackage\n", n.id)
+	}
 	importedSegments, err := n.FetchWorkpackageImportSegments(wp)
 	if err != nil {
 		// fmt.Printf("FetchWorkpackageImportSegments Error: %v\n", err)
 	}
-	guarantee, _, _, err = n.executeWorkPackage(wp, importedSegments)
+	segmentRootLookup, err := n.GetSegmentRootLookup(wp)
+	if err != nil {
+		fmt.Printf("FetchWorkpackageImportSegments GetSegmentRootLookup Error: %v\n", err)
+	}
+	guarantee, _, _, err = n.executeWorkPackage(wp, importedSegments, segmentRootLookup)
 	doneExecute = true
 	if debugG {
 		fmt.Printf("%s [broadcastWorkPackage] Guarantee from self\n", n.String())

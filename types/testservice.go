@@ -9,4 +9,5 @@ type TestService struct {
 	FileName    string
 	CodeHash    common.Hash
 	Code        []byte
+	ServiceName string
 }

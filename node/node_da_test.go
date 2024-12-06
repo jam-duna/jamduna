@@ -109,6 +109,65 @@ func testWorkpackage(fibN int) (workPackage types.WorkPackage, segments [][]byte
 
 var targetFIB = 10
 
+func TestFetchSegments(t *testing.T) {
+	// Set up the network
+	nodes, err := SetUpNodes(numNodes)
+	if err != nil {
+		t.Fatalf("Error setting up nodes: %v\n", err)
+	}
+	senderIndex := 0
+	senderNode := nodes[senderIndex]
+
+	for fibN := 1; fibN <= targetFIB; fibN++ {
+		workPackage, segments := testWorkpackage(fibN)
+		packageHash := workPackage.Hash()
+		if fibN > 1 {
+			importedSegments := make([]types.ImportSegment, 0)
+			importedSegments = append(importedSegments, types.ImportSegment{
+				RequestedHash: packageHash,
+				Index:           uint16(0),
+			})
+			workPackage.WorkItems[0].ImportedSegments = importedSegments
+		}
+
+		// Generate the AvailabilitySpecifier
+		senderNode.NewAvailabilitySpecifier(packageHash, workPackage, segments)
+
+		// senderNode.StoreMeta_Guarantor(availabilitySpecifier, erasureMeta, bECChunks, sECChunksArray)
+		// recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, err := senderNode.GetMeta_Guarantor(erasureMeta.ErasureRoot)
+		// //shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
+		// if err != nil {
+		// 	fmt.Printf("len(recoveredbECChunks)=%v len(recoveredsECChunksArray)=%v\n", len(recoveredbECChunks), len(recoveredsECChunksArray))
+		// }
+
+		// for shardIdx := uint16(0); shardIdx < numNodes; shardIdx++ {
+		// 	erasureRoot := recoveredMeta.ErasureRoot
+		// 	erasureRoot, shardIndex, _, _, _, ok, err := senderNode.GetFullShard_Guarantor(erasureRoot, shardIdx)
+		// 	if !ok || err != nil {
+		// 		t.Fatalf("Failed to prepareFullShards %v_%d for node %d: %v\n", erasureRoot, shardIndex, shardIdx, err)
+		// 	}
+		// }
+
+		//originalAS = availabilitySpecifier
+
+		// encodeCheck := senderNode.VerifyWorkPackageBundle(workPackage)
+		// if !encodeCheck {
+		// 	t.Fatalf("VerifyWorkPackageBundle FAILED! \n")
+		// }
+
+		for idx, _ := range nodes {
+			if idx != senderIndex {
+				continue
+			}
+			//skip verification for now ...
+			continue
+
+		}
+
+		// TODO: similar operation between segments and segmentReconstruction
+	}
+}
+
 func TestAvailabilityReconstruction(t *testing.T) {
 	// Set up the network
 	nodes, err := SetUpNodes(numNodes)
@@ -128,7 +187,7 @@ func TestAvailabilityReconstruction(t *testing.T) {
 		if fibN > 1 {
 			importedSegments := make([]types.ImportSegment, 0)
 			importedSegments = append(importedSegments, types.ImportSegment{
-				WorkPackageHash: packageHash,
+				RequestedHash: packageHash,
 				Index:           uint16(0),
 			})
 			workPackage.WorkItems[0].ImportedSegments = importedSegments

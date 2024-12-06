@@ -6,7 +6,6 @@ import (
 	//"errors"
 
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -226,11 +225,16 @@ func (n *Node) runMain() {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
 		case workPackage := <-n.workPackagesCh:
+			segmentRootLookup, err := n.GetSegmentRootLookup(workPackage)
+			if err != nil {
+				fmt.Printf("[N%d] Receive workPackage GetSegmentRootLookup Error: %v\n", n.id, err)
+			}
 			importSegments, err := n.FetchWorkpackageImportSegments(workPackage)
 			if err != nil {
 				// fmt.Printf("FetchWorkpackageImportSegments: %v\n", err)
 			}
-			g, _, _, err := n.executeWorkPackage(workPackage, importSegments)
+			fmt.Printf("[N%d] Receive workPackage executeWorkPackage\n", n.id)
+			g, _, _, err := n.executeWorkPackage(workPackage, importSegments, segmentRootLookup)
 			wr := g.Report
 			if err != nil {
 				fmt.Printf("executeWorkPackage: %v\n", err)
@@ -268,157 +272,161 @@ func (n *Node) runMain() {
 	}
 }
 
-// internal makeRquest call with ctx implementation
-func (n *Node) makeRequestInternal(ctx context.Context, obj interface{}) (interface{}, error) {
+// process request
+func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
+
 	// Get the peer ID from the object
-	writeErrCh := make(chan error, 1)
 	msgType := getMessageType(obj)
 	var peerID uint16
 	if msgType == "unknown" {
-		return nil, fmt.Errorf("unsupported type")
+		return nil, fmt.Errorf("unknown type: %s", msgType)
 	}
 	switch msgType {
 	case "DA_request":
-
 		req := obj.(DA_request)
 		peerID = req.ShardIndex
 		shard_hash := req.Hash
 		peer, err := n.getPeerByIndex(peerID)
 		if err != nil {
-			writeErrCh <- err
+			return resp, err
 		}
-		data, v_idx, err := peer.DA_Reconstruction(req)
+		// handle selfRequesting case
+		isSelfRequesting := req.ShardIndex == uint16(n.id)
+		if isSelfRequesting {
+			data := peer.node.chunkMap[req.Hash]
+			self_response := DA_response{
+				Hash:       shard_hash,
+				ShardIndex: peerID,
+				Data:       data,
+			}
+			return self_response, nil
+		}
+		data, shard_idx, err := peer.DA_Reconstruction(req)
 		if err != nil {
-			writeErrCh <- err
+			return resp, err
 		}
-		var response DA_response
-		response.Hash = shard_hash
-		response.ShardIndex = v_idx
-		response.Data = data
+		response := DA_response{
+			Hash:       shard_hash,
+			ShardIndex: shard_idx,
+			Data:       data,
+		}
 		return response, nil
-	// case "CE138_request":
-	// 	req := obj.(CE138_request)
-	// 	peerID = req.ShardIndex
-	// 	shard_hash := req.WorkPackageHash
-	// 	shardIndex := req.ShardIndex
-	// 	peer, err := n.getPeerByIndex(peerID)
-	// 	if err != nil {
-	// 		writeErrCh <- err
-	// 	}
-	// 	// func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error)
-	// 	erasureRoot, err := n.getErasureRootFromHash(shard_hash)
-	// 	if err != nil {
-	// 		fmt.Printf("getErasureRootFromHash: %v\n", err)
-	// 		writeErrCh <- err
-	// 	}
-	// 	segmentShards, justifications, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndex, false)
-	// 	response := CE138_response{
-	// 		WorkPackageHash: shard_hash,
-	// 		segmentShards:   segmentShards,
-	// 		justifications:  justifications,
-	// 	}
-	// 	return response, nil
+
+	case "CE138_request":
+		req := obj.(CE138_request)
+		peerID = req.ShardIndex
+		erasureRoot := req.ErasureRoot
+
+		// handle selfRequesting case
+		isSelfRequesting := req.ShardIndex == uint16(n.id)
+		if isSelfRequesting {
+			//erasure_root common.Hash, shard_index uint16, bundleShard []byte, justification []byte, err error
+			erasure_root, shard_index, bundleShard, b_justification, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
+			if err != nil {
+				return resp, err
+			}
+			self_response := CE138_response{
+				WorkPackageHash: erasure_root,
+				ShardIndex:      shard_index,
+				BundleShard:     bundleShard,
+				Justification:   b_justification,
+			}
+			return self_response, nil
+		}
+
+		peer, err := n.getPeerByIndex(peerID)
+		if err != nil {
+			return resp, err
+		}
+		erasure_root, shard_index, bundleShard, b_justification, err := peer.SendBundleShardRequest(erasureRoot, peerID)
+		if err != nil {
+			return resp, err
+		}
+		response := CE138_response{
+			WorkPackageHash: erasure_root,
+			ShardIndex:      shard_index,
+			BundleShard:     bundleShard,
+			Justification:   b_justification,
+		}
+		return response, nil
+
 	case "CE139_request":
 		req := obj.(CE139_request)
 		peerID = req.ShardIndex
-		shard_hash := req.WorkPackageHash
+		erasureRoot := req.ErasureRoot
 		segmentIndices := req.SegmentIndices
 		peer, err := n.getPeerByIndex(peerID)
 		if err != nil {
-			writeErrCh <- err
+			return resp, err
 		}
-		// func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error)
-		erasureRoot, err := n.getErasureRootFromHash(shard_hash)
-		if err != nil {
-			fmt.Printf("getErasureRootFromHash: %v\n", err)
-			writeErrCh <- err
+		// handle selfRequesting case
+		isSelfRequesting := req.ShardIndex == uint16(n.id)
+		if isSelfRequesting {
+			//erasureRoot, shardIndex, segmentIndices, selected_segmentshards, selected_full_justification, selected_segment_justifications, exportedSegmentAndPageProofLens, ok, err
+			erasureRoot, shardIndex, _, selected_segmentshards, _, _, _, _, err := n.GetSegmentShard_Assurer(erasureRoot, peerID, segmentIndices)
+			if err != nil {
+				return resp, err
+			}
+			combined_segmentShards, _ := CombineSegmentShards(selected_segmentshards)
+			self_response := CE139_response{
+				ErasureRoot:   erasureRoot,
+				ShardIndex:    shardIndex,
+				SegmentShards: combined_segmentShards,
+				//SegmentJustifications: segmentJustifications -- not ready yet
+			}
+			return self_response, nil
 		}
-		segmentShards, _, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, true)
+		// SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error)
+		segmentShards, segmentJustifications, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, true)
 		if err != nil {
-			fmt.Printf("SendSegmentShardRequest: %v\n", err)
-			writeErrCh <- err
+			return resp, err
 		}
 		response := CE139_response{
-			WorkPackageHash: shard_hash,
-			ShardIndex:      peerID,
-			segmentShards:   segmentShards,
+			ErasureRoot:           erasureRoot,
+			ShardIndex:            peerID,
+			SegmentShards:         segmentShards,
+			SegmentJustifications: segmentJustifications,
 		}
 		return response, nil
 
+	default:
+		return nil, fmt.Errorf("unsupported type: %s", msgType)
+
 	}
-	// select {
-	// case <-ctx.Done():
-	// 	return nil, ctx.Err()
-	// case err := <-writeErrCh:
-	// 	if err != nil {
-	// 		fmt.Printf("-- [N%v] Write ERR %v\n", n.id, err)
-	// 		return nil, err
-	// 	}
-	// }
-	//n.chunkCh <- Chunk{Hash: shard_hash, Data: data}
-	// IMPORTANT: We handle self requesting inside the DA_Request
-	// if n.IsSelfRequesting(peerID) {
-	// 	// for self requesting, no need to open stream channel..
-	// 	fmt.Printf("[N%v] %v Self Requesting!!!\n", n.id, msgType)
+}
 
-	// 	// Channel to receive the response or error
-	// 	responseCh := make(chan []byte, 1)
-	// 	errCh := make(chan error, 1)
+// internal makeRquest call with ctx implementation
+func (n *Node) makeRequestInternal(ctx context.Context, obj interface{}) (interface{}, error) {
 
-	// 	// Run handleQuicMsg in a goroutine to handle context cancellation
-	// 	go func() {
+	// Channel to receive the response or error
+	responseCh := make(chan interface{}, 1)
+	errCh := make(chan error, 1)
 
-	// 		select {
-	// 		case <-ctx.Done():
-	// 			errCh <- ctx.Err()
-	// 		default:
-	// 			responseCh <- response
-	// 			errCh <- nil
-	// 		}
-	// 	}()
+	// Goroutine to handle the request
+	go func() {
+		response, err := n.sendRequest(obj)
+		if err != nil {
+			errCh <- err
+		} else {
+			responseCh <- response
+		}
+	}()
 
-	// 	select {
-	// 	case <-ctx.Done():
-	// 		return nil, ctx.Err()
-	// 	case err := <-errCh:
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 		response := <-responseCh
-	// 		return response, nil
-	// 	}
-	// }
-
-	// Write the length and message data with context cancellation support
-
-	// go func() {
-	// 	_, err = stream.Write(lengthPrefix)
-	// 	if err != nil {
-	// 		writeErrCh <- err
-	// 		return
-	// 	}
-	// 	_, err = stream.Write(messageData)
-	// 	writeErrCh <- err
-	// }()
-
-	// Read the response with context cancellation support
-	// responseCh := make(chan []byte, 1)
-	// readErrCh := make(chan error, 1)
-
-	// select {
-	// case <-ctx.Done():
-	// 	// we get into this case if (1) internal(individual)request is complete OR parent
-	// 	return nil, ctx.Err()
-	// case err := <-readErrCh:
-	// 	if err != nil {
-	// 		fmt.Printf("-- [N%v] Read ERR %v\n", n.id, err)
-	// 		return nil, err
-	// 	}
-	// 	// when we receive
-	// 	response := <-responseCh
-	// 	return response, nil
-	// }
-	return nil, fmt.Errorf("unsupported type")
+	//msgType := getMessageType(obj)
+	select {
+	case <-ctx.Done():
+		// Context was canceled before the request completed
+		//fmt.Printf("[N%d] %v makeRequestInternal Done\n", n.id, msgType)
+		return nil, ctx.Err()
+	case err := <-errCh:
+		// Request encountered an error
+		//fmt.Printf("[N%d] %v makeRequestInternal err: %v\n", n.id, msgType, err)
+		return nil, err
+	case response := <-responseCh:
+		// Request succeeded
+		//fmt.Printf("[N%d] %v makeRequestInternal success: %v\n", n.id, msgType, response)
+		return response, nil
+	}
 }
 
 // single makeRequest call via makeRequestInternal
@@ -455,7 +463,7 @@ func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, o
 			select {
 			case results <- res:
 				mu.Lock()
-				// fmt.Printf("SUCCESS %d\n", successCount)
+				fmt.Printf("SUCCESS %d\n", successCount)
 				successCount++
 				if successCount >= minSuccess {
 					cancel() // Cancel remaining requests once minSuccess is reached, include its childCtx
@@ -484,8 +492,79 @@ func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, o
 	}
 	// If not enough successful responses
 	if successCount < minSuccess {
-		return nil, errors.New("not enough successful requests")
+		return nil, fmt.Errorf("not enough successful requests (successCount:%d < minSuccess:%d)", successCount, minSuccess)
 	}
 	//TODO..need somekind of sorting here..
 	return finalResults, nil
+}
+
+func (n *Node) makeRequestInternalFAKE(ctx context.Context, obj interface{}) (interface{}, error) {
+	// Get the peer ID from the object
+	writeErrCh := make(chan error, 1)
+	msgType := getMessageType(obj)
+	var peerID uint16
+	if msgType == "unknown" {
+		return nil, fmt.Errorf("unsupported type")
+	}
+	switch msgType {
+	case "DA_request":
+		req := obj.(DA_request)
+		peerID = req.ShardIndex
+		shard_hash := req.Hash
+		peer, err := n.getPeerByIndex(peerID)
+		if err != nil {
+			writeErrCh <- err
+		}
+		data, v_idx, err := peer.DA_Reconstruction(req)
+		if err != nil {
+			writeErrCh <- err
+		}
+		var response DA_response
+		response.Hash = shard_hash
+		response.ShardIndex = v_idx
+		response.Data = data
+		return response, nil
+
+	case "CE138_request":
+		req := obj.(CE138_request)
+		peerID = req.ShardIndex
+		erasureRoot := req.ErasureRoot
+		peer, err := n.getPeerByIndex(peerID)
+		if err != nil {
+			writeErrCh <- err
+		}
+		erasure_root, shard_index, bundleShard, _, err := peer.SendBundleShardRequest(erasureRoot, peerID)
+		if err != nil {
+			writeErrCh <- err
+		}
+		response := CE138_response{
+			WorkPackageHash: erasure_root,
+			ShardIndex:      shard_index,
+			BundleShard:     bundleShard,
+		}
+		return response, nil
+
+	case "CE139_request":
+		req := obj.(CE139_request)
+		peerID = req.ShardIndex
+		erasureRoot := req.ErasureRoot
+		segmentIndices := req.SegmentIndices
+		peer, err := n.getPeerByIndex(peerID)
+		if err != nil {
+			writeErrCh <- err
+		}
+		// func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error)
+		segmentShards, _, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, true)
+		if err != nil {
+			fmt.Printf("SendSegmentShardRequest: %v\n", err)
+			writeErrCh <- err
+		}
+		response := CE139_response{
+			ErasureRoot:   erasureRoot,
+			ShardIndex:    peerID,
+			SegmentShards: segmentShards,
+		}
+		return response, nil
+	}
+	return nil, fmt.Errorf("unsupported type")
 }

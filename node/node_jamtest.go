@@ -250,6 +250,7 @@ func getServices(serviceNames []string) (services map[string]*types.TestService,
 		tmpServiceCode := uint32(i + 1)
 		codeHash := common.Blake2Hash(code)
 		services[serviceName] = &types.TestService{
+			ServiceName: serviceName,
 			ServiceCode: tmpServiceCode, // TEMPORARY
 			FileName:    fileName,
 			CodeHash:    codeHash,
@@ -436,7 +437,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 1 {
 			importedSegment := types.ImportSegment{
-				WorkPackageHash: prevWorkPackageHash,
+				RequestedHash: prevWorkPackageHash,
 				Index:           0,
 			}
 			importedSegments = append(importedSegments, importedSegment)
@@ -503,19 +504,20 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 }
 
 func megatron(nodes []*Node, testServices map[string]*types.TestService) {
-	fmt.Printf("Start FIB\n")
+	fmt.Printf("Start Fib_Trib\n")
 	service0 := testServices["fib"]
 	service1 := testServices["tribonacci"]
 	serviceM := testServices["megatron"]
-	fmt.Printf("service0: %v, codehash: %v\n", service0.ServiceCode, service0.CodeHash)
-	fmt.Printf("service1: %v, codehash: %v\n", service1.ServiceCode, service1.CodeHash)
-	fmt.Printf("serviceM: %v, codehash: %v\n", serviceM.ServiceCode, serviceM.CodeHash)
+	fmt.Printf("service0: %v, codehash: %v (len=%v) | %v\n", service0.ServiceCode, service0.CodeHash, len(service0.Code), service0.ServiceName)
+	fmt.Printf("service1: %v, codehash: %v (len=%v) | %v\n", service1.ServiceCode, service1.CodeHash, len(service0.Code), service1.ServiceName)
+	fmt.Printf("serviceM: %v, codehash: %v (len=%v) | %v\n", serviceM.ServiceCode, serviceM.CodeHash, len(service0.Code), serviceM.ServiceName)
 	Fib_Trib_WorkPackages := make([]types.WorkPackage, 0)
 	Meg_WorkPackages := make([]types.WorkPackage, 0)
 	prevWorkPackageHash := common.Hash{}
 	// ================================================
-	// make 20 workpackages for Fib and Trib
-	for n := 0; n < 6; n++ {
+	// make n workpackages for Fib and Trib
+	targetNMax := 6
+	for n := 0; n < targetNMax; n++ {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)
 		timeslot := nodes[1].statedb.GetSafrole().GetTimeSlot()
@@ -531,11 +533,11 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 		workPackage := types.WorkPackage{}
 		if n > 0 {
 			fibImportedSegments = append(fibImportedSegments, types.ImportSegment{
-				WorkPackageHash: prevWorkPackageHash,
+				RequestedHash: prevWorkPackageHash,
 				Index:           0,
 			})
 			tribImportedSegments = append(tribImportedSegments, types.ImportSegment{
-				WorkPackageHash: prevWorkPackageHash,
+				RequestedHash: prevWorkPackageHash,
 				Index:           1, // TODO: check
 			})
 			payload := make([]byte, 4)
@@ -592,14 +594,15 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				},
 			}
 		}
+
 		Fib_Trib_WorkPackages = append(Fib_Trib_WorkPackages, workPackage)
 		workPackageHash := workPackage.Hash()
 		prevWorkPackageHash = workPackageHash
 
 	}
 	// =================================================
-	// make 20 workpackages for Megatron
-	for megaN := 0; megaN < 6; megaN++ {
+	// make n workpackages for Megatron
+	for megaN := 0; megaN < targetNMax; megaN++ {
 		importedSegmentsM := make([]types.ImportSegment, 0)
 		prereq := make([]common.Hash, 0)
 		prereq = append(prereq, Fib_Trib_WorkPackages[megaN].Hash())
@@ -620,6 +623,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 		payloadM := make([]byte, 8)
 		binary.LittleEndian.PutUint32(payloadM[0:4], uint32(service0.ServiceCode))
 		binary.LittleEndian.PutUint32(payloadM[4:8], uint32(service1.ServiceCode))
+
 		workPackage := types.WorkPackage{
 			Authorization: []byte("0x"), // TODO: set up null-authorizer
 			AuthCodeHost:  serviceM.ServiceCode,
@@ -636,25 +640,17 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				},
 			},
 		}
-
 		workPackageHash := workPackage.Hash()
-		//fmt.Println("WorkPackageHash:", workPackageHash)
-
 		Meg_WorkPackages = append(Meg_WorkPackages, workPackage)
 		prevWorkPackageHash = workPackageHash
 	}
-	fmt.Printf("Fib_Trib_WorkPackages: %v\n", len(Fib_Trib_WorkPackages))
-	for _, wp := range Fib_Trib_WorkPackages {
-		fmt.Printf("Fib_Trib_WorkPackage: %v\n", wp.Hash())
+	fmt.Printf("%v Fib_Trib_WorkPackages:\n", len(Fib_Trib_WorkPackages))
+	for wp_idx, wp := range Fib_Trib_WorkPackages {
+		fmt.Printf("  Fib_Trib_WorkPackage #%v: %v\n", wp_idx, wp.Hash())
 	}
-	fmt.Printf("Meg_WorkPackages: %v\n", len(Meg_WorkPackages))
-	for _, wp := range Meg_WorkPackages {
-		fmt.Printf("Meg_WorkPackage: %v\n", wp.Hash())
-		fmt.Printf("Prerequisite:")
-		for _, prereq := range wp.RefineContext.Prerequisites {
-			fmt.Printf("%v, ", prereq)
-		}
-		fmt.Printf("\n")
+	fmt.Printf("%v Megatron_WorkPackages:\n", len(Meg_WorkPackages))
+	for wp_idx, wp := range Meg_WorkPackages {
+		fmt.Printf("  Meg_WorkPackage #%v %v. PreReqs=%v\n", wp_idx, wp.Hash(), wp.RefineContext.Prerequisites)
 	}
 
 	// =================================================

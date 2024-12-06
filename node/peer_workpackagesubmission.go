@@ -147,6 +147,7 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		return fmt.Errorf("failed to get self core index: %w", err)
 	}
 	if newReq.CoreIndex != selfCoreIndex {
+		fmt.Printf("Core index mismatch: %d != %d\n", newReq.CoreIndex, selfCoreIndex)
 		return fmt.Errorf("Core index mismatch: %d != %d", newReq.CoreIndex, selfCoreIndex)
 	}
 	if debugG {

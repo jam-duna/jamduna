@@ -49,7 +49,8 @@ const (
 	trace         = false
 	debugE        = false // monitoring fn execution time
 	debugTree     = false // trie
-	debugSegments = false // trie
+	debugSegments = false // Fetch import segments
+	debugBundle   = false // Fetch WorkPackage Bundle
 	numNodes      = 6
 	quicAddr      = "127.0.0.1:%d"
 	basePort      = 9000
@@ -392,6 +393,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	go node.runMain()
 	go node.runPreimages()
 	go node.runBlocksTickets()
+	go node.runAudit() // disable this to pause FetchWorkPackageBundle
 	return node, nil
 }
 
@@ -504,8 +506,11 @@ func (n *Node) getTrie() *trie.MerkleTree {
 
 func (n *Node) getPeerByIndex(peerIdx uint16) (*Peer, error) {
 	p := n.peersInfo[peerIdx]
-
-	return p, fmt.Errorf("peer not found")
+	// check if peer exists
+	if p != nil {
+		return p, nil
+	}
+	return nil, fmt.Errorf("peer %v not found", peerIdx)
 }
 
 func (n *Node) getPeerAddr(peerIdx uint16) (*Peer, error) {
@@ -928,62 +933,109 @@ func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
 
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // need to actually ECdecode
-func (n *Node) reconstructSegments(workPackageHashes []common.Hash, workPackageHashesMapping map[common.Hash][]uint16) (receiveSegmentMapping map[common.Hash][][]byte, err error) {
-	// Receive the segments mapping
-	receiveSegmentMapping = make(map[common.Hash][][]byte, len(workPackageHashes))
-
-	// Prepare the DA request
-	for _, workPackageHash := range workPackageHashes {
-		receiveSegments := make([][]byte, len(workPackageHashesMapping[workPackageHash]))
-		receiveShard := make([][][]byte, len(workPackageHashesMapping[workPackageHash]))
-		for i := range receiveShard {
-			receiveShard[i] = make([][]byte, types.TotalValidators)
+// We continuily use erasureRoot to ask the question
+func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uint16) (segments [][]byte, err error) {
+	requests_original := make([]CE139_request, types.TotalValidators)
+	for i := range types.TotalValidators {
+		requests_original[i] = CE139_request{
+			ErasureRoot:    erasureRoot,
+			SegmentIndices: segmentIndices,
+			ShardIndex:     uint16(i),
 		}
-		reconstruct_reqs := make([]CE139_request, types.TotalValidators)
-		for _, workPackageHash := range workPackageHashes {
-			for i := range types.TotalValidators {
-				reconstruct_reqs[i].WorkPackageHash = workPackageHash
-				reconstruct_reqs[i].ShardIndex = uint16(i)
-				reconstruct_reqs[i].SegmentIndices = workPackageHashesMapping[workPackageHash]
-			}
-		}
-		reqs := make([]interface{}, types.TotalValidators)
-		for i, req := range reconstruct_reqs {
-			reqs[i] = req
-		}
-
-		responses, err := n.makeRequests(reqs, types.W_E/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
-		if err != nil {
-			fmt.Printf("Error in fetching import segments: %v\n", err)
-			return nil, err
-		}
-		for _, resp := range responses {
-			daResp, ok := resp.(CE139_response)
-			if !ok {
-				fmt.Printf("Error in fetching import segments: %v\n", err)
-			}
-			selected_segments, err := SplitToSegmentShards(daResp.segmentShards)
-			if err != nil {
-				fmt.Printf("Error in fetching import segments: %v\n", err)
-				continue
-			}
-			for idx, selected_segment := range selected_segments {
-				// segmentIdx := segmentIndex[idx]
-				receiveShard[idx][daResp.ShardIndex] = selected_segment
-			}
-		}
-		for return_idx, segmentShard := range receiveShard {
-			segmentShardRaw := make([][][]byte, 1)
-			segmentShardRaw[0] = segmentShard
-			exported_segment, err := n.decode(segmentShardRaw, true, types.FixedSegmentSizeG)
-			if err != nil {
-				fmt.Printf("Error in fetching import segments: %v\n", err)
-			}
-			receiveSegments[return_idx] = exported_segment
-		}
-		receiveSegmentMapping[workPackageHash] = receiveSegments
 	}
-	return receiveSegmentMapping, nil
+	requests := make([]interface{}, types.TotalValidators)
+	for i, req := range requests_original {
+		requests[i] = req
+	}
+
+	responses, err := n.makeRequests(requests, types.W_E/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
+	if err != nil {
+		fmt.Printf("Error in fetching import segments By ErasureRoot: %v\n", err)
+		return nil, err
+	}
+	receiveSegments := make([][]byte, len(segmentIndices))
+	receiveShard := make([][][]byte, len(segmentIndices))
+	for i := range receiveShard {
+		receiveShard[i] = make([][]byte, types.TotalValidators)
+	}
+
+	for _, resp := range responses {
+		daResp, ok := resp.(CE139_response)
+		if !ok {
+			fmt.Printf("Error in convert import segments CE139_response: %v\n", err)
+		}
+		selected_segments, err := SplitToSegmentShards(daResp.SegmentShards)
+		if err != nil {
+			fmt.Printf("Error in fetching import segments SplitToSegmentShards: %v\n", err)
+			continue
+		}
+		for idx, selected_segment := range selected_segments {
+			// segmentIdx := segmentIndex[idx]
+			receiveShard[idx][daResp.ShardIndex] = selected_segment
+		}
+	}
+	for return_idx, segmentShard := range receiveShard {
+		segmentShardRaw := make([][][]byte, 1)
+		segmentShardRaw[0] = segmentShard
+		exported_segment, err := n.decode(segmentShardRaw, true, types.FixedSegmentSizeG)
+		if err != nil {
+			fmt.Printf("Error in fetching import segments decode: %v\n", err)
+		}
+		receiveSegments[return_idx] = exported_segment
+	}
+	segments = receiveSegments
+
+	return segments, nil
+}
+
+func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32) (workPackageBundle types.WorkPackageBundle, err error) {
+	requests_original := make([]CE138_request, types.TotalValidators)
+	for i := range types.TotalValidators {
+		requests_original[i] = CE138_request{
+			ErasureRoot: erasureRoot,
+			ShardIndex:  uint16(i),
+		}
+	}
+	requests := make([]interface{}, types.TotalValidators)
+	for i, req := range requests_original {
+		requests[i] = req
+	}
+
+	responses, err := n.makeRequests(requests, types.W_E/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
+	if err != nil {
+		fmt.Printf("Error in fetching bundle segments makeRequests: %v\n", err)
+		return types.WorkPackageBundle{}, err
+	}
+	bundleShards := make([][]byte, types.TotalValidators)
+	for _, resp := range responses {
+		daResp, ok := resp.(CE138_response)
+		if !ok {
+			fmt.Printf("Error in convert bundle segments CE138_response: %v\n", err)
+		}
+
+		if debugBundle {
+			fmt.Printf("[N%d] [%d] len(BundleShard) %d daResp.BundleShard %x\n", n.id, daResp.ShardIndex, len(daResp.BundleShard), daResp.BundleShard)
+		}
+		// segmentIdx := segmentIndex[idx]
+		bundleShards[daResp.ShardIndex] = daResp.BundleShard
+	}
+	bundleShardsRaw := make([][][]byte, 1)
+	bundleShardsRaw[0] = bundleShards
+	//fmt.Printf("blength %d, bundleShardsRaw %x\n", blength, bundleShardsRaw)
+	exported_segment, err := n.decode(bundleShardsRaw, false, int(blength))
+	if err != nil {
+		fmt.Printf("Error in fetching bundle segments decode: %v\n", err)
+	}
+	if debugBundle {
+		fmt.Printf("[N%d] decode bundle exported_segment %x\n", n.id, exported_segment)
+	}
+	workPackageBundleRaw, _, err := types.Decode(exported_segment, reflect.TypeOf(types.WorkPackageBundle{}))
+	if err != nil {
+		fmt.Printf("[auditWorkReport] ERR %v\n", err)
+		return
+	}
+	workPackageBundle = workPackageBundleRaw.(types.WorkPackageBundle)
+	return workPackageBundle, nil
 }
 
 func (n *Node) getPVMStateDB() *statedb.StateDB {

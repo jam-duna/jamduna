@@ -60,8 +60,18 @@ func Depandancy(w types.WorkReport) types.AccumulationQueue {
 	for _, p := range w.RefineContext.Prerequisites {
 		hashSet[p] = struct{}{}
 	}
-	for key := range w.SegmentRootLookup {
+	/*
+	for _, key := range w.SegmentRootLookup {
 		hashSet[key] = struct{}{}
+	}
+	depandancy := []common.Hash{}
+	for key := range hashSet {
+		depandancy = append(depandancy, key)
+	}
+	*/
+	// Shawn please check
+	for _, segmentRootLookupItem := range w.SegmentRootLookup {
+		hashSet[segmentRootLookupItem.WorkPackageHash] = struct{}{}
 	}
 	depandancy := []common.Hash{}
 	for key := range hashSet {

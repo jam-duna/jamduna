@@ -62,13 +62,15 @@ func (s *StateDB) Verify_Guarantees() error {
 		return err
 	}
 	// for recent history and extrinsics in the block, so it should be here
-	for _, guarantee := range s.Block.Extrinsic.Guarantees {
-		// v0.5 eq 11.38
-		err := s.checkPrereq(guarantee)
-		if err != nil {
-			return jamerrors.ErrGDependencyMissing
+	/*
+		for _, guarantee := range s.Block.Extrinsic.Guarantees {
+			// v0.5 eq 11.38
+			err := s.checkPrereq(guarantee)
+			if err != nil {
+				return jamerrors.ErrGDependencyMissing
+			}
 		}
-	}
+	*/
 	return nil
 }
 
@@ -153,14 +155,15 @@ func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee) ([]types.Gu
 			EGs = append(EGs[:i], EGs[i+1:]...)
 			valid = false
 		}
-		// v0.5 eq 11.38
+		/* TODO: Shawn to re-enable this
+		v0.5 eq 11.38
 		err = s.checkPrereqWithoutBlock(guarantee, EGs)
 		if err != nil {
 			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
 			EGs = append(EGs[:i], EGs[i+1:]...)
 			valid = false
 		}
-
+		*/
 	}
 	if valid {
 		return EGs, nil, true
@@ -721,8 +724,8 @@ func (s *StateDB) checkPrereq(g types.Guarantee) error {
 	if len(g.Report.RefineContext.Prerequisites) != 0 {
 		p = append(p, g.Report.RefineContext.Prerequisites...)
 	}
-	for key := range g.Report.SegmentRootLookup {
-		p = append(p, key)
+	for _, lookupItem := range g.Report.SegmentRootLookup {
+		p = append(p, lookupItem.WorkPackageHash)
 	}
 
 	for _, block := range s.JamState.RecentBlocks {
@@ -762,8 +765,8 @@ func (s *StateDB) checkPrereqWithoutBlock(g types.Guarantee, EGs []types.Guarant
 	if len(g.Report.RefineContext.Prerequisites) != 0 {
 		p = append(p, g.Report.RefineContext.Prerequisites...)
 	}
-	for key := range g.Report.SegmentRootLookup {
-		p = append(p, key)
+	for _, lookupItem := range g.Report.SegmentRootLookup {
+		p = append(p, lookupItem.WorkPackageHash)
 	}
 
 	for _, block := range s.JamState.RecentBlocks {
@@ -818,7 +821,10 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 	if g.Report.SegmentRootLookup == nil {
 		return nil
 	}
-	for key, value := range g.Report.SegmentRootLookup {
+
+	for _, lookupItem := range g.Report.SegmentRootLookup {
+		key := lookupItem.WorkPackageHash
+		value := lookupItem.SegmentRoot
 		// if present_block[key] exists, compare the value
 		if _, exists := present_block[key]; exists {
 			if present_block[key] == value {

@@ -34,13 +34,12 @@ type WorkItem struct {
 	// x: extrinsic
 	Extrinsics      []WorkItemExtrinsic `json:"extrinsic"`
 	ExtrinsicsBlobs ExtrinsicsBlobs     `json:"extrinsics"`
-	// x: extrinsic
-	ExportCount uint16 `json:"export_count"`
+	ExportCount     uint16              `json:"export_count"`
 }
 
 // From Sec 14: Once done, then imported segments must be reconstructed. This process may in fact be lazy as the Refine function makes no usage of the data until the ${\tt import}$ hostcall is made. Fetching generally implies that, for each imported segment, erasure-coded chunks are retrieved from enough unique validators (342, including the guarantor).  Chunks must be fetched for both the data itself and for justification metadata which allows us to ensure that the data is correct.
 type ImportSegment struct {
-	WorkPackageHash common.Hash `json:"tree_root"`
+	RequestedHash   common.Hash `json:"tree_root"`
 	Index           uint16      `json:"index"`
 }
 type WorkItemExtrinsic struct {

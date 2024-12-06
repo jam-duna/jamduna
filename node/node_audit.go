@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
@@ -540,70 +539,37 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	}
 	*/
 	start := time.Now()
-	erasureRoot := workReport.AvailabilitySpec.ErasureRoot
-	// reconstruct the work package
-	bundleShards := make([][]byte, types.TotalValidators)
-	bundleLength := workReport.AvailabilitySpec.BundleLength
-	// TODO: optimize with gofunc ala makeRequests.
 
-	// This is CE138
-	for shard_idx := uint16(0); shard_idx < types.TotalValidators; shard_idx++ {
-		if shard_idx == n.id {
-			erasureRoot, shardIndex, bundleShard, _, ok, err := n.GetBundleShard_Assurer(erasureRoot, shard_idx)
-			if err != nil {
-				fmt.Printf("%s [auditWorkReport:GetBundleShard] ERR %v\n", n.String(), err)
-			} else if ok {
-				bundleShards[shardIndex] = bundleShard
-				if debugJ {
-					fmt.Printf("%s [auditWorkReport:GetBundleShard] SHARD %v_%d = %d bytes\n", n.String(), erasureRoot, shard_idx, len(bundleShard))
-				}
-			}
-		} else {
-			erasureRoot, shardIndex, bundleShard, sclub_justification, err := n.peersInfo[shard_idx].SendBundleShardRequest(erasureRoot, shard_idx)
-			if err != nil {
-				fmt.Printf("%s [auditWorkReport:GetBundleShard] ERR %v\n", n.String(), err)
-			} else {
-				verified, err := VerifyBundleShard(erasureRoot, shardIndex, bundleShard, sclub_justification) // this is needed
-				if err != nil || !verified {
-					fmt.Printf("VerifyBundleShard ERR %v verified: %v \n", err, verified)
-				} else {
-					bundleShards[shardIndex] = bundleShard
-					if debugDA {
-						fmt.Printf("%s [auditWorkReport:SendBundleShardRequest] VERIFIED SHARD %d = %d bytes\n", n.String(), shardIndex, len(bundleShard))
-					}
-				}
-			}
-		}
-	}
-
-	bundleShardsRaw := make([][][]byte, 1)
-	bundleShardsRaw[0] = bundleShards
-	bundleData, err := n.decode(bundleShardsRaw, false, int(bundleLength))
+	//TODO: use segmentRootLookup
+	spec := workReport.AvailabilitySpec
+	err = n.StoreImportDAWorkReportMap(spec)
 	if err != nil {
-		fmt.Printf("[auditWorkReport:decode] ERR %v\n", err)
+		fmt.Printf("%s [auditWorkReport:StoreImportDAWorkReportMap] ERR %v\n", n.String(), err)
 		return
 	}
-	if debugJ {
-		fmt.Printf("%s [auditWorkReport:decode] %d bytes\n", n.String(), len(bundleData))
-	}
-	workPackageBundleRaw, _, err := types.Decode(bundleData, reflect.TypeOf(types.WorkPackageBundle{}))
+
+	erasureRoot := spec.ErasureRoot
+	bundleLength := spec.BundleLength
+	workPackageHash := spec.WorkPackageHash
+	workPackageBundle, fetchErr := n.FetchWorkPackageBundle(workPackageHash, erasureRoot, bundleLength)
 	if err != nil {
-		fmt.Printf("[auditWorkReport] ERR %v\n", err)
+		fmt.Printf("WP=%v | erasureRoot=%v|len=%v [auditWorkReport:FetchWorkPackageBundle] ERR %v\n", workPackageHash, erasureRoot, bundleLength, fetchErr)
 		return
 	}
-	workPackageBundle := workPackageBundleRaw.(types.WorkPackageBundle)
-	if debugE {
-		fmt.Printf("%s auditWorkReport:fetch and decode time: %v\n", n.String(), time.Since(start))
-	}
-	/*
-		part B
-	*/
-	//TODO: Shawn - Im expecting you to time the following call. Expectation, this should execute fairly soon.
-	exportedSegmentRoot, err := n.GetImportedSegmentRoots(workPackageBundle.WorkPackage)
+	//segmentRootLookup, err := n.GetSegmentRootLookup(workPackageBundle.WorkPackage)
+
+	segmentRootLookup := workReport.SegmentRootLookup // use workReport's segmentRootLookup
+	exportedSegmentRoot, _, err := n.GetImportedSegmentRoots(workPackageBundle.WorkPackage)
 	if err != nil {
 		fmt.Printf("[auditWorkReport:GetImportedSegmentRoots] ERR %v\n", err)
 	}
-	wr, err := n.executeWorkPackageBundle(workPackageBundle, exportedSegmentRoot)
+	if debugE {
+		fmt.Printf("%s auditWorkReport:fetch and decode time: %v\n", n.String(), time.Since(start))
+	}
+	if debugAudit {
+		fmt.Printf("WP=%v | len=%v | byte=%x\n", workPackageBundle.PackageHash(), len(workPackageBundle.Bytes()), workPackageBundle.Bytes())
+	}
+	wr, err := n.executeWorkPackageBundle(workPackageBundle, exportedSegmentRoot, segmentRootLookup)
 	if err != nil {
 		return
 	} else {

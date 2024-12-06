@@ -79,27 +79,4 @@ func ComputeOrderedNPBundleChunks(ecChunks []types.DistributeECChunk) (bundleSha
 	}
 
 	return bundleShards
-
-	/*
-		    peerIdentifiers := make([]string, len(ecChunks))
-		    requestObjs := make([]interface{}, len(ecChunks))
-
-		    for i, ecChunk := range ecChunks {
-		        peerIdx := uint32(i % numNodes)
-		        peerIdentifier, err := n.getPeerByIndex(peerIdx)
-		        if err != nil {
-		            return err
-		        }
-		        peerIdentifiers[i] = peerIdentifier
-		        requestObjs[i] = ecChunk
-		    }
-
-			responses, err := n.makeRequests(peerIdentifiers, requestObjs, types.TotalValidators, types.QuicIndividualTimeout,  types.QuicOverallTimeout)
-			if err != nil {
-				fmt.Printf("[N%v] DistributeEcChunks MakeRequests Errors %v\n", n.id, err)
-				return err
-			}
-			fmt.Printf("DistributeEcChunks resp=%v\n", len(responses))
-	*/
-	return nil
 }

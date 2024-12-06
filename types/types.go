@@ -135,30 +135,32 @@ type BPTNode struct {
 
 type Hash2Hash map[common.Hash]common.Hash
 
+/*
 // ---use dictionary---
 // MarshalJSON serializes Hash2Hash as a map[string]string
-// func (h Hash2Hash) MarshalJSON() ([]byte, error) {
-// 	stringMap := make(map[string]string)
-// 	for k, v := range h {
-// 		stringMap[k.Hex()] = v.Hex() // Convert keys and values to hex strings
-// 	}
-// 	return json.Marshal(stringMap)
-// }
+func (h Hash2Hash) MarshalJSON() ([]byte, error) {
+	stringMap := make(map[string]string)
+	for k, v := range h {
+		stringMap[k.Hex()] = v.Hex() // Convert keys and values to hex strings
+	}
+	return json.Marshal(stringMap)
+}
 
-// UnmarshalJSON deserializes Hash2Hash from a map[string]string
-// func (h *Hash2Hash) UnmarshalJSON(data []byte) error {
-// 	stringMap := make(map[string]string)
-// 	if err := json.Unmarshal(data, &stringMap); err != nil {
-// 		return err
-// 	}
-// 	*h = make(Hash2Hash)
-// 	for k, v := range stringMap {
-// 		keyHash := common.HexToHash(k) // Convert hex strings back to common.Hash
-// 		valueHash := common.HexToHash(v)
-// 		(*h)[keyHash] = valueHash
-// 	}
-// 	return nil
-// }
+UnmarshalJSON deserializes Hash2Hash from a map[string]string
+func (h *Hash2Hash) UnmarshalJSON(data []byte) error {
+	stringMap := make(map[string]string)
+	if err := json.Unmarshal(data, &stringMap); err != nil {
+		return err
+	}
+	*h = make(Hash2Hash)
+	for k, v := range stringMap {
+		keyHash := common.HexToHash(k) // Convert hex strings back to common.Hash
+		valueHash := common.HexToHash(v)
+		(*h)[keyHash] = valueHash
+	}
+	return nil
+}
+*/
 
 // ---use pair---
 // MarshalJSON serializes Hash2Hash as a slice of pairs

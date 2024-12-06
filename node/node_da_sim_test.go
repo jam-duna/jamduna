@@ -48,7 +48,7 @@ func TestDASimulation(t *testing.T) {
 		}
 	}
 
-	resps, err := nodes[lastvalidator].makeRequests(reqs, types.TotalCores, time.Duration(1)*time.Second, time.Duration(10)*time.Second)
+	resps, err := nodes[lastvalidator].makeRequests(reqs, types.TotalCores, time.Duration(5)*time.Second, time.Duration(10)*time.Second)
 	if err != nil {
 		t.Fatalf("Error making requests: %v\n", err)
 	}
