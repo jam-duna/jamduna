@@ -1,0 +1,45 @@
+// RO data = 0/0 bytes
+// RW data = 0/0 bytes
+// Stack size = 8192 bytes
+// Jump table entry point size = 0 bytes
+// RO data = []
+// RW data = []
+// Instructions = 28
+// Code size = 76 bytes
+
+      :                          @0
+     0: 28 11 00 00 00           jump @4
+      :                          @1
+     5: 28 10 00 00 00           jump @5
+      :                          @2
+    10: 28 3a 00 00 00           jump @6
+      :                          @3
+    15: 28 39                    jump @7
+      :                          @4 [export #0: 'is_authorized']
+    17: 33 07                    a0 = 0x0
+    19: 32 00                    ret
+      :                          @5 [export #1: 'refine']
+    21: 8b 11 f8                 i64 sp = i64 sp - i64 8
+    24: 64 a7                    a0 = a3
+    26: 64 b8                    a1 = a4
+    28: 8d 77 20                 a0 = a0 <<64 32
+    31: 8e 77 20                 a0 = a0 >>64 32
+    34: 77 77                    a0 = i32 [a0]
+    36: 8d 88 20                 a1 = a1 <<64 32
+    39: 8e 88 20                 a1 = a1 >>64 32
+    42: 77 88                    a1 = i32 [a1]
+    44: bf 87 07                 a0 = a0 ^ a1
+    47: 70 17 04                 u32 [sp + 4] = a0
+    50: 8b 17 04                 i64 a0 = i64 sp + 0x4
+    53: 33 08 04                 a1 = 0x4
+    56: 64 7a                    a3 = a0
+    58: 33 0b 04                 a4 = 0x4
+    61: 33 07                    a0 = 0x0
+    63: 8b 11 08                 i64 sp = i64 sp + 0x8
+    66: 32 00                    ret
+      :                          @6 [export #2: 'accumulate']
+    68: 33 07                    a0 = 0x0
+    70: 32 00                    ret
+      :                          @7 [export #3: 'on_transfer']
+    72: 33 07                    a0 = 0x0
+    74: 32 00                    ret

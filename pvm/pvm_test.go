@@ -11,19 +11,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
 
 // TestCase
 type TestCase struct {
 	Name           string        `json:"name"`
-	InitialRegs    []uint32      `json:"initial-regs"`
+	InitialRegs    []uint64      `json:"initial-regs"`
 	InitialPC      uint32        `json:"initial-pc"`
 	InitialPageMap []PageMap     `json:"initial-page-map"`
 	InitialMemory  []Page        `json:"initial-memory"`
 	Code           []byte        `json:"program"`
 	ExpectedStatus string        `json:"expected-status"`
-	ExpectedRegs   []uint32      `json:"expected-regs"`
+	ExpectedRegs   []uint64      `json:"expected-regs"`
 	ExpectedPC     int           `json:"expected-pc"`
 	ExpectedMemory []interface{} `json:"expected-memory"`
 }
@@ -465,7 +466,7 @@ func contains(slice []string, item string) bool {
 }
 
 // Helper function to compare two integer slices
-func equalIntSlices(a, b []uint32) bool {
+func equalIntSlices(a, b []uint64) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -506,13 +507,13 @@ func TestPVM_invoke(t *testing.T) {
 	// put code into ram
 	// get the address of the code and length (po, pz)
 	// put it into the register (7,8,9) = (po, pz, program counter)
-	code, err1 := os.ReadFile("../services/examples/xor/xor.pvm")
+	code, err1 := os.ReadFile(common.GetFilePath("/services/xor.pvm"))
 	vm := NewVMFromCode(0, code, 0, nil)
 	// put the code into the ram and get the address and length
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
-	var code_length = uint32(len(code))
+	var code_length = uint64(len(code))
 	vm.WriteRAMBytes(100, code)
 	vm.SetRegisterValue(7, 100)
 	vm.SetRegisterValue(8, code_length)
@@ -542,7 +543,7 @@ func TestPVM_invoke(t *testing.T) {
 	// set up the memory for the vm (gas + register)
 	// set up the register that can let the code run ==> pointer + length
 	//13 regs
-	regs := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 100, 0}
+	regs := []uint64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 100, 0}
 	err := vm.PutGasAndRegistersToMemory(300, 100, regs)
 	if err != OK {
 		t.Errorf("Error putting gas and registers to memory: %v", err)
@@ -567,7 +568,7 @@ func TestPVM_invoke(t *testing.T) {
 	vm.SetRegisterValue(9, regs2[10])
 	vm.SetRegisterValue(10, regs2[11])
 	vm.hostPeek()
-	data, errcode := vm.ReadRAMBytes(regs2[10], int(regs2[11]))
+	data, errcode := vm.ReadRAMBytes(uint32(regs2[10]), int(regs2[11]))
 	if errcode != OK {
 		t.Errorf("Error reading data from memory: %v", errcode)
 	}

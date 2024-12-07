@@ -81,7 +81,7 @@ func testWorkpackage(fibN int) (workPackage types.WorkPackage, segments [][]byte
 	authToken := []byte("0x")
 
 	// fib code
-	code, err := os.ReadFile("../services/fib.pvm")
+	code, err := os.ReadFile(common.GetFilePath("/services/fib.pvm"))
 	if err != nil {
 		panic(0)
 	}

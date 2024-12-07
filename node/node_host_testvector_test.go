@@ -87,7 +87,7 @@ type XContextForTest struct {
 type RefineTestcase struct {
 	Name                    string                `json:"name"`
 	InitalGas               uint64                `json:"initial-gas"`
-	InitialRegs             []uint32              `json:"initial-regs"`
+	InitialRegs             []uint64              `json:"initial-regs"`
 	InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
 	InitialMemory           []PageForTest         `json:"initial-memory"`
 
@@ -95,10 +95,10 @@ type RefineTestcase struct {
 	InitialExportSegment []ByteSlice        `json:"initial-export-segment"`
 
 	InitialImportSegment    []ByteSlice `json:"initial-import-segment"`
-	InitialExportSegmentIdx uint32      `json:"initial-export-segment-index"`
+	InitialExportSegmentIdx uint64      `json:"initial-export-segment-index"`
 
 	ExpectedGas    uint64        `json:"expected-gas"`
-	ExpectedRegs   []uint32      `json:"expected-regs"`
+	ExpectedRegs   []uint64      `json:"expected-regs"`
 	ExpectedMemory []PageForTest `json:"expected-memory"`
 
 	ExpectedRefineM_map   RefineM_mapForTest `json:"expected-refine-map"`
@@ -108,7 +108,7 @@ type RefineTestcase struct {
 type AccumulateTestcase struct {
 	Name                    string                `json:"name"`
 	InitalGas               uint64                `json:"initial-gas"`
-	InitialRegs             []uint32              `json:"initial-regs"`
+	InitialRegs             []uint64              `json:"initial-regs"`
 	InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
 	InitialMemory           []PageForTest         `json:"initial-memory"`
 
@@ -117,7 +117,7 @@ type AccumulateTestcase struct {
 	InitialTimeslot   uint32           `json:"initial-timeslot"`
 
 	ExpectedGas    uint64        `json:"expected-gas"`
-	ExpectedRegs   []uint32      `json:"expected-regs"`
+	ExpectedRegs   []uint64      `json:"expected-regs"`
 	ExpectedMemory []PageForTest `json:"expected-memory"`
 
 	ExpectedXcontent_x *XContextForTest `json:"expected-xcontent-x"`
@@ -127,7 +127,7 @@ type AccumulateTestcase struct {
 type GeneralTestcase struct {
 	Name                    string                `json:"name"`
 	InitalGas               uint64                `json:"initial-gas"`
-	InitialRegs             []uint32              `json:"initial-regs"`
+	InitialRegs             []uint64              `json:"initial-regs"`
 	InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
 	InitialMemory           []PageForTest         `json:"initial-memory"`
 
@@ -136,13 +136,13 @@ type GeneralTestcase struct {
 	InitialDelta          map[uint32]*ServiceAccountForTest `json:"initial-delta"`
 
 	ExpectedGas    uint64        `json:"expected-gas"`
-	ExpectedRegs   []uint32      `json:"expected-regs"`
+	ExpectedRegs   []uint64      `json:"expected-regs"`
 	ExpectedMemory []PageForTest `json:"expected-memory"`
 
 	ExpectedXServiceAccount ServiceAccountForTest `json:"expected-service-account"`
 }
 
-var errorCaseNames = map[uint32]string{
+var errorCaseNames = map[uint64]string{
 	pvm.OK:   "OK",
 	pvm.OOB:  "OOB",
 	pvm.NONE: "NONE",
@@ -210,46 +210,46 @@ func SetupNodeEnv(t *testing.T) *Node {
 
 type Testcase interface {
 	GetInitialGas() uint64
-	GetInitialRegs() []uint32
+	GetInitialRegs() []uint64
 	GetInitialMemoryPermission() []pvm.PermissionRange
 	GetInitialMemory() []PageForTest
 
 	GetExpectedGas() uint64
-	GetExpectedRegs() []uint32
+	GetExpectedRegs() []uint64
 	GetExpectedMemory() []PageForTest
 	GetName() string
 }
 
 func (tc RefineTestcase) GetInitialGas() uint64    { return tc.InitalGas }
-func (tc RefineTestcase) GetInitialRegs() []uint32 { return tc.InitialRegs }
+func (tc RefineTestcase) GetInitialRegs() []uint64 { return tc.InitialRegs }
 func (tc RefineTestcase) GetInitialMemoryPermission() []pvm.PermissionRange {
 	return tc.InitialMemoryPermission
 }
 func (tc RefineTestcase) GetInitialMemory() []PageForTest  { return tc.InitialMemory }
 func (tc RefineTestcase) GetExpectedGas() uint64           { return tc.ExpectedGas }
-func (tc RefineTestcase) GetExpectedRegs() []uint32        { return tc.ExpectedRegs }
+func (tc RefineTestcase) GetExpectedRegs() []uint64        { return tc.ExpectedRegs }
 func (tc RefineTestcase) GetExpectedMemory() []PageForTest { return tc.ExpectedMemory }
 func (tc RefineTestcase) GetName() string                  { return tc.Name }
 
 func (tc AccumulateTestcase) GetInitialGas() uint64    { return tc.InitalGas }
-func (tc AccumulateTestcase) GetInitialRegs() []uint32 { return tc.InitialRegs }
+func (tc AccumulateTestcase) GetInitialRegs() []uint64 { return tc.InitialRegs }
 func (tc AccumulateTestcase) GetInitialMemoryPermission() []pvm.PermissionRange {
 	return tc.InitialMemoryPermission
 }
 func (tc AccumulateTestcase) GetInitialMemory() []PageForTest  { return tc.InitialMemory }
 func (tc AccumulateTestcase) GetExpectedGas() uint64           { return tc.ExpectedGas }
-func (tc AccumulateTestcase) GetExpectedRegs() []uint32        { return tc.ExpectedRegs }
+func (tc AccumulateTestcase) GetExpectedRegs() []uint64        { return tc.ExpectedRegs }
 func (tc AccumulateTestcase) GetExpectedMemory() []PageForTest { return tc.ExpectedMemory }
 func (tc AccumulateTestcase) GetName() string                  { return tc.Name }
 
 func (tc GeneralTestcase) GetInitialGas() uint64    { return tc.InitalGas }
-func (tc GeneralTestcase) GetInitialRegs() []uint32 { return tc.InitialRegs }
+func (tc GeneralTestcase) GetInitialRegs() []uint64 { return tc.InitialRegs }
 func (tc GeneralTestcase) GetInitialMemoryPermission() []pvm.PermissionRange {
 	return tc.InitialMemoryPermission
 }
 func (tc GeneralTestcase) GetInitialMemory() []PageForTest  { return tc.InitialMemory }
 func (tc GeneralTestcase) GetExpectedGas() uint64           { return tc.ExpectedGas }
-func (tc GeneralTestcase) GetExpectedRegs() []uint32        { return tc.ExpectedRegs }
+func (tc GeneralTestcase) GetExpectedRegs() []uint64        { return tc.ExpectedRegs }
 func (tc GeneralTestcase) GetExpectedMemory() []PageForTest { return tc.ExpectedMemory }
 func (tc GeneralTestcase) GetName() string                  { return tc.Name }
 
@@ -295,7 +295,7 @@ func InitPvmRefine(vm *pvm.VM, testcase RefineTestcase) {
 		copy(vm.Imports[i], bs)
 	}
 
-	vm.ExportSegmentIndex = testcase.InitialExportSegmentIdx
+	vm.ExportSegmentIndex = uint32(testcase.InitialExportSegmentIdx) // check
 }
 
 func InitPvmAccumulate(vm *pvm.VM, testcase AccumulateTestcase) {
@@ -579,7 +579,7 @@ func TestGeneral(t *testing.T) {
 }
 
 // Generate test vectors
-func GenerateTestVectors(t *testing.T, dirPath string, functions []string, errorCases map[string][]uint32, templateFileName string, testCaseType string) {
+func GenerateTestVectors(t *testing.T, dirPath string, functions []string, errorCases map[string][]uint64, templateFileName string, testCaseType string) {
 	// Read the template
 	templatePath := filepath.Join(dirPath, templateFileName)
 	templateContent, err := os.ReadFile(templatePath)
@@ -713,7 +713,7 @@ func WriteJSONFile(filePath string, data interface{}) error {
 func TestGenerateRefineTestVectors(t *testing.T) {
 	dirPath := "../jamtestvectors/host_function"
 	functions := []string{"Import", "Export"}
-	errorCases := map[string][]uint32{
+	errorCases := map[string][]uint64{
 		"Import": {pvm.OK, pvm.OOB, pvm.NONE},
 		"Export": {pvm.OK, pvm.OOB, pvm.FULL},
 	}
@@ -865,7 +865,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	}
 
 	testcase.InitialRegs[7] = 4278124544                                                                     // 0xFEFF0000
-	testcase.ExpectedRegs[7] = testcase.InitialExportSegmentIdx + uint32(len(testcase.InitialExportSegment)) // 0 + 1
+	testcase.ExpectedRegs[7] = testcase.InitialExportSegmentIdx + uint64(len(testcase.InitialExportSegment)) // 0 + 1
 
 	testcase.InitialRegs[8] = 12 // Export segment length
 	testcase.ExpectedRegs[8] = 12
@@ -983,7 +983,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 func TestGenerateAccumulateTestVectors(t *testing.T) {
 	dirPath := "../jamtestvectors/host_function"
 	functions := []string{"New"}
-	errorCases := map[string][]uint32{
+	errorCases := map[string][]uint64{
 		"New":      {pvm.OK, pvm.OOB, pvm.CASH},
 		"Solicit":  {pvm.OK, pvm.OOB, pvm.FULL, pvm.HUH},
 		"Forget":   {pvm.OK, pvm.OOB, pvm.HUH},
@@ -1167,7 +1167,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 func TestGenerateGeneralTestVectors(t *testing.T) {
 	dirPath := "../jamtestvectors/host_function"
 	functions := []string{"Read", "Write"}
-	errorCases := map[string][]uint32{
+	errorCases := map[string][]uint64{
 		"Read":  {pvm.OK, pvm.OOB, pvm.NONE},
 		"Write": {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
 	}
@@ -1404,7 +1404,7 @@ func ConvertToServiceAccount(saft *ServiceAccountForTest) (*types.ServiceAccount
 	// Convert Lookup map
 	for k, v := range saft.Lookup {
 		keyHash := common.HexToHash(k)
-		sa.Lookup[keyHash] = types.LookupObject{T: v}
+		sa.Lookup[keyHash] = types.LookupObject{T: v} // check
 	}
 
 	// Convert Preimage map

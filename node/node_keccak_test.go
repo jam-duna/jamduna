@@ -6,15 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestKeccak256(t *testing.T) {
-	// Test vectors from
-	// jam\services\examples\keccak256\keccak_blob.pvm
 	// read code from the file
-	code, err1 := os.ReadFile("../services/examples/keccak256/keccak256.pvm")
+	code, err1 := os.ReadFile(common.GetFilePath("/services/keccak256.pvm"))
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
@@ -32,7 +31,7 @@ func TestKeccak256(t *testing.T) {
 	vm := pvm.NewVMFromCode(0, code, 0, targetdb)
 	vm.WriteRAMBytes(100, input_byte)
 	vm.SetRegisterValue(10, 100)
-	vm.SetRegisterValue(11, uint32(len(input_byte)))
+	vm.SetRegisterValue(11, uint64(len(input_byte)))
 	err = vm.Execute(5)
 	if err != nil {
 		t.Errorf("Error executing VM: %v", err)
@@ -50,10 +49,8 @@ func TestKeccak256(t *testing.T) {
 }
 
 func TestXOR(t *testing.T) {
-	// Test vectors from
-	// jam\services\examples\xor\xor.pvm
 	// read code from the file
-	code, err1 := os.ReadFile("../services/examples/xor/xor.pvm")
+	code, err1 := os.ReadFile(common.GetFilePath("/services/xor.pvm"))
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
@@ -89,16 +86,13 @@ func TestXOR(t *testing.T) {
 	}
 
 	fmt.Printf("ResultXor: %v\n", resultXor)
-	result, _ := vm.ReadRAMBytes(result1, 8)
+	result, _ := vm.ReadRAMBytes(uint32(result1), 8)
 	fmt.Printf("Result: %v\n", result)
 }
 
 func TestXOR_Invoke(t *testing.T) {
-	var OK uint32 = 0
-	// Test vectors from
-	// jam\services\examples\xor\xor.pvm
 	// read code from the file
-	code, err1 := os.ReadFile("../services/examples/xor/xor.pvm")
+	code, err1 := os.ReadFile(common.GetFilePath("/services/xor/xor.pvm"))
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
@@ -112,7 +106,7 @@ func TestXOR_Invoke(t *testing.T) {
 	targetdb := nodes[0].statedb
 	fmt.Printf("XOR Code is: %v\n", code)
 	vm := pvm.NewVMFromCode(0, code, 0, targetdb)
-	var code_length = uint32(len(code))
+	var code_length = uint64(len(code))
 	vm.WriteRAMBytes(100, code)
 	vm.SetRegisterValue(7, 100)
 	vm.SetRegisterValue(8, code_length)
@@ -149,10 +143,10 @@ func TestXOR_Invoke(t *testing.T) {
 	// set up the memory for the vm (gas + register)
 	// set up the register that can let the code run ==> pointer + length
 	//13 regs
-	regs := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 100, 0}
+	regs := []uint64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 100, 0}
 	err2 := vm.PutGasAndRegistersToMemory(300, 100, regs)
 
-	if err2 != OK {
+	if err2 != pvm.OK {
 		t.Errorf("Error putting gas and registers to memory: %v", err)
 	}
 	// read the input and then hash it
@@ -164,8 +158,8 @@ func TestXOR_Invoke(t *testing.T) {
 	fmt.Println("Invoke Start")
 	vm.HostCheat("invoke")
 	for i := 0; i < 13; i++ {
-		value, err := vm.VMs[vm2_num].GetRegisterValue(i)
-		if err != OK {
+		value, err := vm.VMs[uint32(vm2_num)].GetRegisterValue(i)
+		if err != pvm.OK {
 			t.Errorf("Error getting register value: %v", err)
 		}
 		fmt.Printf("Regs[%d]: %v\n", i, value)
@@ -173,7 +167,7 @@ func TestXOR_Invoke(t *testing.T) {
 	fmt.Println("Invoke End")
 	// use that pointer and length to read the memory
 	gas2, regs2, errCode := vm.GetGasAndRegistersFromMemory(300)
-	if errCode != OK {
+	if errCode != pvm.OK {
 		t.Errorf("Error getting gas and registers from memory: %v", errCode)
 	}
 	fmt.Printf("Gas: %v\n", gas2)
@@ -187,8 +181,8 @@ func TestXOR_Invoke(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	vm.HostCheat("peek")
 	fmt.Println("Peek End")
-	data, errcode := vm.ReadRAMBytes(regs2[10], int(regs2[11]))
-	if errcode != OK {
+	data, errcode := vm.ReadRAMBytes(uint32(regs2[10]), int(regs2[11]))
+	if errcode != pvm.OK {
 		t.Errorf("Error reading data from memory: %v", errcode)
 	}
 	test_data := make([]byte, len(test_bytes))
@@ -204,10 +198,8 @@ func TestXOR_Invoke(t *testing.T) {
 
 }
 func TestAdd(t *testing.T) {
-	// Test vectors from
-	// jam\services\examples\xor\xor.pvm
 	// read code from the file
-	code, err1 := os.ReadFile("../services/examples/add/and.pvm")
+	code, err1 := os.ReadFile(common.GetFilePath("/services/and.pvm"))
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
@@ -242,6 +234,6 @@ func TestAdd(t *testing.T) {
 	}
 
 	fmt.Printf("ResultXor: %v\n", resultXor)
-	result, _ := vm.ReadRAMBytes(result1, 8)
+	result, _ := vm.ReadRAMBytes(uint32(result1), 8)
 	fmt.Printf("Result: %v\n", result)
 }
