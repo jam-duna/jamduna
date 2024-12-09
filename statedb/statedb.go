@@ -1497,28 +1497,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	if err != nil {
 		return bl, err
 	}
-	if debugSeal {
-		// Create an instance of the new struct without the signature fields.
-		bwoSig := types.BlockHeaderWithoutSig{
-			ParentHeaderHash: h.ParentHeaderHash,
-			PriorStateRoot:   h.ParentStateRoot,
-			ExtrinsicHash:    h.ExtrinsicHash,
-			TimeSlot:         h.Slot,
-			EpochMark:        h.EpochMark,
-			// TicketsMark:    b.TicketsMark,
-			OffendersMark: h.OffendersMark,
-			AuthorIndex:   h.AuthorIndex,
-		}
-
-		ticketMark, ok, _ := h.ConvertTicketsMark()
-		if ok && ticketMark != nil {
-			bwoSig.TicketsMark = ticketMark
-		}
-		fmt.Printf("Node %d with secret key: %v\n", s.Id, auth_secret_key)
-		fmt.Printf("  Unsigned Header: %s\n", bwoSig.String())
-		fmt.Printf("  Unsigned Header Bytes: %x\n", h.BytesWithoutSig())
-		fmt.Printf("  Unsigned Header Hash: %v\n", unsignHeaderHash)
-	}
 
 	epochType := sf.CheckEpochType()
 	if epochType == "fallback" {
@@ -1547,7 +1525,29 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			fmt.Printf("  EntropySource: %x\n", h.EntropySource)
 		}
 	}
+	if debugSeal {
+		// Create an instance of the new struct without the signature fields.
+		bwoSig := types.BlockHeaderWithoutSig{
+			ParentHeaderHash: h.ParentHeaderHash,
+			PriorStateRoot:   h.ParentStateRoot,
+			ExtrinsicHash:    h.ExtrinsicHash,
+			TimeSlot:         h.Slot,
+			EpochMark:        h.EpochMark,
+			// TicketsMark:    b.TicketsMark,
+			OffendersMark: h.OffendersMark,
+			AuthorIndex:   h.AuthorIndex,
+			EntropySource: h.EntropySource,
+		}
 
+		ticketMark, ok, _ := h.ConvertTicketsMark()
+		if ok && ticketMark != nil {
+			bwoSig.TicketsMark = ticketMark
+		}
+		fmt.Printf("Node %d with secret key: %v\n", s.Id, auth_secret_key)
+		fmt.Printf("  Unsigned Header: %s\n", bwoSig.String())
+		fmt.Printf("  Unsigned Header Bytes: %x\n", h.BytesWithoutSig())
+		fmt.Printf("  Unsigned Header Hash: %v\n", unsignHeaderHash)
+	}
 	b.Header = *h
 	return b, nil
 }

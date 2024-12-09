@@ -35,14 +35,15 @@ type BlockHeader struct {
 
 // BlockHeaderWithoutSig represents the BlockHeader without signature fields.
 type BlockHeaderWithoutSig struct {
-	ParentHeaderHash common.Hash  `json:"parent_hash"`
-	PriorStateRoot   common.Hash  `json:"prior_state_root"`
-	ExtrinsicHash    common.Hash  `json:"extrinsic_hash"`
-	TimeSlot         uint32       `json:"timeslot"`
-	EpochMark        *EpochMark   `json:"epoch_mark"`
-	TicketsMark      *TicketsMark `json:"tickets_mark"`
-	OffendersMark    []Ed25519Key `json:"offenders_mark"`
-	AuthorIndex      uint16       `json:"block_author_key"`
+	ParentHeaderHash common.Hash              `json:"parent_hash"`
+	PriorStateRoot   common.Hash              `json:"prior_state_root"`
+	ExtrinsicHash    common.Hash              `json:"extrinsic_hash"`
+	TimeSlot         uint32                   `json:"timeslot"`
+	EpochMark        *EpochMark               `json:"epoch_mark"`
+	TicketsMark      *TicketsMark             `json:"tickets_mark"`
+	OffendersMark    []Ed25519Key             `json:"offenders_mark"`
+	AuthorIndex      uint16                   `json:"block_author_key"`
+	EntropySource    BandersnatchVrfSignature `json:"entropy_source"`
 }
 
 func (b *BlockHeaderWithoutSig) String() string {
@@ -131,6 +132,7 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 		// TicketsMark:    b.TicketsMark,
 		OffendersMark: b.OffendersMark,
 		AuthorIndex:   b.AuthorIndex,
+		EntropySource: b.EntropySource,
 	}
 
 	ticketMark, ok, _ := b.ConvertTicketsMark()
