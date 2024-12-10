@@ -1,10 +1,12 @@
 package main
 
 import (
+	"math/rand"
+
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
-	"math/rand"
 )
 
 /*
@@ -46,6 +48,57 @@ type AvailabilitySpecifier struct {
 // reports fuzzBlocks
 func randomGuarantee(block *types.Block) *types.Guarantee {
 	return &(block.Extrinsic.Guarantees[rand.Intn(len(block.Extrinsic.Guarantees))])
+}
+
+// Generate a random hash
+func randomHash() common.Hash {
+	var b [32]byte
+	_, err := rand.Read(b[:]) // Fill b with random bytes
+	if err != nil {
+		panic("randomHash failed to generate random hash: " + err.Error())
+	}
+	return common.BytesToHash(b[:])
+}
+
+// Generate a random hash that is different from the input hash
+func randomDifferentHash(input common.Hash) common.Hash {
+	var b [32]byte
+	for {
+		_, err := rand.Read(b[:]) // Generate random bytes
+		if err != nil {
+			panic("randomDifferentHash failed to generate random hash: " + err.Error())
+		}
+
+		newHash := common.BytesToHash(b[:])
+		if newHash != input { // Check if the new hash is different from the input
+			return newHash
+		}
+	}
+}
+
+// randomDifferentHash generates a random hash that is different from all hashes in the input slice
+func randomDifferentHashes(input []common.Hash) common.Hash {
+	var b [32]byte
+	for {
+		_, err := rand.Read(b[:]) // Generate random bytes
+		if err != nil {
+			panic("randomDifferentHashes failed to generate random hash: " + err.Error())
+		}
+		newHash := common.BytesToHash(b[:])
+
+		// Check if newHash is different from all hashes in input
+		isUnique := true
+		for _, h := range input {
+			if newHash == h {
+				isUnique = false
+				break
+			}
+		}
+
+		if isUnique {
+			return newHash
+		}
+	}
 }
 
 // Sean
@@ -156,6 +209,12 @@ func fuzzBlockGAnchorNotRecent(block *types.Block) error {
 // Stanley
 func fuzzBlockGBadBeefyMMRRoot(block *types.Block) error {
 	// TODO: Implement fuzzing logic for GBadBeefyMMRRoot
+	g := randomGuarantee(block)
+	if g != nil {
+		beefyRoot := g.Report.RefineContext.BeefyRoot
+		g.Report.RefineContext.BeefyRoot = randomDifferentHash(beefyRoot)
+		return jamerrors.ErrGBadBeefyMMRRoot
+	}
 	return nil
 }
 
@@ -189,8 +248,21 @@ func fuzzBlockGBadStateRoot(block *types.Block, statedb *statedb.StateDB) error 
 }
 
 // Stanley
-func fuzzBlockGDuplicatePackageRecentHistory(block *types.Block, statedb *statedb.StateDB) error {
+func fuzzBlockGDuplicatePackageRecentHistory(statedb *statedb.StateDB) error {
 	// TODO: Implement fuzzing logic for GReportEpochBeforeLast
+	RecentBlocks := statedb.JamState.RecentBlocks
+	if len(RecentBlocks) > 0 {
+		// pick a random block from recent blocks
+		if len(RecentBlocks) == 1 {
+			RecentBlocks = append(RecentBlocks, RecentBlocks[0])
+			statedb.JamState.RecentBlocks = RecentBlocks
+			return jamerrors.ErrGDuplicatePackageRecentHistory
+		} else {
+			RecentBlocks[len(RecentBlocks)-1] = RecentBlocks[len(RecentBlocks)-2]
+			statedb.JamState.RecentBlocks = RecentBlocks
+			return jamerrors.ErrGDuplicatePackageRecentHistory
+		}
+	}
 	return nil
 }
 
@@ -201,14 +273,40 @@ func fuzzBlockGReportEpochBeforeLast(block *types.Block, statedb *statedb.StateD
 }
 
 // Stanley
-func fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks(block *types.Block, statedb *statedb.StateDB) error {
+func fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks(block *types.Block) error {
 	// TODO: Implement fuzzing logic for fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks
+	g := randomGuarantee(block)
+	if g != nil {
+		// Clear the current SegmentRootLookup and add random non-matching entries
+		g.Report.SegmentRootLookup = nil
+		for _, segmentRootLookup := range g.Report.SegmentRootLookup {
+			// Add random work package hashes and segment roots
+			g.Report.SegmentRootLookup = append(g.Report.SegmentRootLookup, types.SegmentRootLookupItem{
+				WorkPackageHash: randomDifferentHash(segmentRootLookup.WorkPackageHash),
+				SegmentRoot:     segmentRootLookup.SegmentRoot,
+			})
+		}
+		return jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks
+	}
 	return nil
 }
 
 // Stanley
-func fuzzBlockGSegmentRootLookupInvalidUnexpectedValue(block *types.Block, statedb *statedb.StateDB) error {
+func fuzzBlockGSegmentRootLookupInvalidUnexpectedValue(block *types.Block) error {
 	// TODO: Implement fuzzing logic for fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks
+	g := randomGuarantee(block)
+	if g != nil {
+		// Clear the current SegmentRootLookup and add random non-matching entries
+		g.Report.SegmentRootLookup = nil
+		for _, segmentRootLookup := range g.Report.SegmentRootLookup {
+			// Add random work package hashes and segment roots
+			g.Report.SegmentRootLookup = append(g.Report.SegmentRootLookup, types.SegmentRootLookupItem{
+				WorkPackageHash: segmentRootLookup.WorkPackageHash,
+				SegmentRoot:     randomDifferentHash(segmentRootLookup.SegmentRoot),
+			})
+		}
+		return jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks
+	}
 	return nil
 }
 

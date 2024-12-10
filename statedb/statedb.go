@@ -47,7 +47,7 @@ type StateDB struct {
 	ticketMutex   sync.Mutex
 
 	// used in ApplyStateRecentHistory between statedbs
-	accumulationRoot common.Hash
+	AccumulationRoot common.Hash
 
 	X *types.XContext
 
@@ -56,6 +56,8 @@ type StateDB struct {
 	AvailableWorkReport          []types.WorkReport // every block has its own available work report
 
 	logChan chan storage.LogMessage
+
+	AncestorSet []types.BlockHeader // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
 }
 
 func (s *StateDB) AddTicketToQueue(t types.Ticket, used_entropy common.Hash) {
@@ -801,7 +803,6 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		StateRoot:             s.StateRoot,
 		JamState:              s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:                   s.sdb,
-		accumulationRoot:      s.accumulationRoot, // compressed C
 		trie:                  s.CopyTrieState(s.StateRoot),
 		knownTickets:          make(map[common.Hash]uint8),
 		knownPreimageLookups:  make(map[common.Hash]uint32),
@@ -810,7 +811,9 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		queuedPreimageLookups: make(map[common.Hash]types.Preimages),
 		queueJudgements:       make(map[common.Hash]types.Judgement),
 		logChan:               make(chan storage.LogMessage, 100),
+		AccumulationRoot:      s.AccumulationRoot, // compressed C
 		AvailableWorkReport:   tmpAvailableWorkReport,
+		AncestorSet:           s.AncestorSet,
 		/*
 			Following flds are not copied over..?
 
@@ -1117,8 +1120,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
-	s.ApplyStateRecentHistory(blk, &(s.accumulationRoot))
-
+	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
 	// 19-22 - Safrole last
 	ticketExts := blk.Tickets()
 	sf_header := blk.GetHeader()
@@ -1208,7 +1210,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		leaves = append(leaves, leaf)
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
-	s.accumulationRoot = common.Hash(tree.Root())
+	s.AccumulationRoot = common.Hash(tree.Root())
 
 	// 29 -  Update Authorization Pool alpha'
 	err = s.ApplyStateTransitionAuthorizations()
@@ -1501,4 +1503,30 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 	b.Header = *h
 	return b, nil
+}
+
+func (s *StateDB) GetAncestorTimeSlot() []uint32 {
+	timeslots := make([]uint32, 0)
+	for _, h := range s.AncestorSet {
+		timeslots = append(timeslots, h.Slot)
+	}
+	return timeslots
+}
+
+func (s *StateDB) SetAncestor(blockHeader types.BlockHeader, oldState *StateDB) {
+	for _, h := range oldState.AncestorSet {
+		if blockHeader.Slot-h.Slot <= types.LookupAnchorMaxAge && !HeaderContains(s.AncestorSet, h) {
+			s.AncestorSet = append(s.AncestorSet, h)
+		}
+	}
+	s.AncestorSet = append(s.AncestorSet, blockHeader)
+}
+
+func HeaderContains(headers []types.BlockHeader, checkHeader types.BlockHeader) bool {
+	for _, h := range headers {
+		if h.Hash() == checkHeader.Hash() {
+			return true
+		}
+	}
+	return false
 }

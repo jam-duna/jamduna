@@ -49,6 +49,12 @@ type StateSnapshot struct {
 type KeyVal [2][]byte
 type KeyVals []KeyVal
 
+//	type KeyVals struct {
+//		K  []byte `json:"k"`
+//		V  []byte `json:"v"`
+//		MK string `json:"km,omitempty"`
+//		MV string `json:"kv,omitempty"`
+//	}
 type KeyValMap map[common.Hash][]byte
 
 func (kv KeyVals) Encode() []byte {

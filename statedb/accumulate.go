@@ -155,6 +155,19 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 }
 
 // v0.4.5 eq.173 - q
+func (s *StateDB) GetReadyQueue(W []types.WorkReport) []common.Hash {
+	accumulated_immediately := AccumulatedImmediately(W)
+	j := s.GetJamState()
+	queued_execution := j.QueuedExecution(W)
+	readyQueue := PriorityQueue(s.ComputeReadyQueue(queued_execution, accumulated_immediately))
+	readyQueueHeader := []common.Hash{}
+	for _, workReport := range readyQueue {
+		readyQueueHeader = append(readyQueueHeader, workReport.AvailabilitySpec.WorkPackageHash)
+	}
+	return readyQueueHeader
+}
+
+// v0.4.5 eq.173 - q
 func (s *StateDB) ComputeReadyQueue(queued_execution []types.AccumulationQueue, accumulated_immediately []types.WorkReport) []types.AccumulationQueue {
 	j := s.GetJamState()
 	ready_state := j.AccumulationQueue

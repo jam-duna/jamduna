@@ -62,15 +62,14 @@ func (s *StateDB) Verify_Guarantees() error {
 		return err
 	}
 	// for recent history and extrinsics in the block, so it should be here
-	/*
-		for _, guarantee := range s.Block.Extrinsic.Guarantees {
-			// v0.5 eq 11.38
-			err := s.checkPrereq(guarantee)
-			if err != nil {
-				return jamerrors.ErrGDependencyMissing
-			}
+	for _, guarantee := range s.Block.Extrinsic.Guarantees {
+		// v0.5 eq 11.38
+		err := s.checkPrereq(guarantee)
+		if err != nil {
+			return jamerrors.ErrGDependencyMissing
 		}
-	*/
+	}
+
 	return nil
 }
 
@@ -127,13 +126,13 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	// v0.5 eq 11.33
 	err = s.checkTimeSlotHeader(guarantee)
 	if err != nil {
-		return jamerrors.ErrGAnchorNotRecent
+		return err
 	}
 
 	// v0.5 eq 11.41 - check code hash
 	err = s.checkCodeHash(guarantee)
 	if err != nil {
-		return jamerrors.ErrGBadCodeHash
+		return err
 	}
 	return nil
 }
@@ -155,15 +154,14 @@ func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee) ([]types.Gu
 			EGs = append(EGs[:i], EGs[i+1:]...)
 			valid = false
 		}
-		/* TODO: Shawn to re-enable this
-		v0.5 eq 11.38
+		// TODO: Shawn to re-enable this
+		//v0.5 eq 11.38
 		err = s.checkPrereqWithoutBlock(guarantee, EGs)
 		if err != nil {
 			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
 			EGs = append(EGs[:i], EGs[i+1:]...)
 			valid = false
 		}
-		*/
 	}
 	if valid {
 		return EGs, nil, true
@@ -259,34 +257,32 @@ func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
 }
 
 func (s *StateDB) VerifyGuarantee_RecentHistory(guarantee types.Guarantee) error {
-	/*
-		// v0.4.5 eq 147 recent restory
-		err := s.checkRecentBlock(guarantee)
-		if err != nil {
-			return err
-		}
 
-		//TODO 149
-		err = s.checkAncestorSetA(guarantee)
-		if err != nil {
-			return err
-		}
+	// v0.4.5 eq 147 recent restory
+	err := s.checkRecentBlock(guarantee)
+	if err != nil {
+		return err
+	}
 
-		// v0.4.5 eq 152
-		// beefy root have fucking problem
-		err = s.checkAnyPrereq(guarantee)
-		if err != nil {
-			return err
-		}
-	*/
+	//TODO 149
+	err = s.checkAncestorSetA(guarantee)
+	if err != nil {
+		return err
+	}
 
-	/*
-		// v0.4.5 eq 155
-		err = s.checkRecentWorkPackage(guarantee)
-		if err != nil {
-			return err
-		}
-	*/
+	// v0.4.5 eq 152
+	// beefy root have fucking problem
+	err = s.checkAnyPrereq(guarantee)
+	if err != nil {
+		return err
+	}
+
+	// v0.4.5 eq 155
+	err = s.checkRecentWorkPackage(guarantee)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -596,20 +592,22 @@ func (s *StateDB) checkLength() error {
 }
 
 // v0.5 eq 11.32
+// TODO:stanley
 func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	refine := g.Report.RefineContext
 	anchor := true // CHECK -- I think this should be false
 	if refine.Anchor != (common.Hash{}) {
 		for _, block := range s.JamState.RecentBlocks {
-			if block.HeaderHash != refine.Anchor {
-				anchor = false
-			} else {
+			if block.HeaderHash == refine.Anchor {
 				anchor = true
 				break
+			} else {
+				anchor = false
 			}
 		}
 	}
 	if !anchor {
+		fmt.Printf("anchor not in recent blocks refine.Anchor: %v\n", refine.Anchor)
 		return jamerrors.ErrGAnchorNotRecent
 	}
 
@@ -664,12 +662,60 @@ func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
 	if g.Report.RefineContext.LookupAnchorSlot >= valid_anchor {
 		return nil
 	} else {
+		fmt.Printf("lookup anchor slot %d before last %d\n", g.Report.RefineContext.LookupAnchorSlot, valid_anchor)
 		return jamerrors.ErrGReportEpochBeforeLast
 	}
 }
 
 // TODO: v0.5 eq 11.34
+// TODO:stanley
 func (s *StateDB) checkAncestorSetA(g types.Guarantee) error {
+	// ancestor set A
+	refine := g.Report.RefineContext
+	// x_t := refine.Anchor.timeslot
+	timeslot := refine.LookupAnchorSlot
+	// A means ancestor set
+	ancestorSet := s.AncestorSet
+	includeTimeSlot := false
+	storeTimeSlot := make([]uint32, 0)
+	for _, header := range ancestorSet {
+		storeTimeSlot = append(storeTimeSlot, header.Slot)
+		if header.Slot == timeslot {
+			includeTimeSlot = true
+			break
+		}
+	}
+
+	if !includeTimeSlot {
+		fmt.Printf("[N%d] timeslot %d not in ancestor set %d\n", s.Id, timeslot, storeTimeSlot)
+		fmt.Printf("Ancestor Set didn't include the current timeslot\n")
+		return fmt.Errorf("ancestor set didn't include the current timeslot")
+	}
+
+	// Check if the ancestor set includes the anchor
+	includeWorkPackageHash := false
+	currentWorkPackage := refine.LookupAnchor
+	storeWorkPackageHash := make([]common.Hash, 0)
+	if currentWorkPackage != (common.Hash{}) {
+		for _, header := range ancestorSet {
+			headerBytes, err := header.Bytes()
+			if err != nil {
+				fmt.Printf("In checkAncestorSetA header.Bytes error: %v\n", err)
+			}
+			headerHash := common.Hash(common.ComputeHash(headerBytes))
+			storeWorkPackageHash = append(storeWorkPackageHash, headerHash)
+			if headerHash == currentWorkPackage {
+				includeWorkPackageHash = true
+				break
+			}
+		}
+
+		if !includeWorkPackageHash {
+			fmt.Printf("work package hash %v not in ancestor set %v\n", currentWorkPackage, storeWorkPackageHash)
+			fmt.Printf("Ancestor Set didn't include the current work package hash\n")
+			return fmt.Errorf("ancestor set didn't include the current work package hash")
+		}
+	}
 	return nil
 }
 
@@ -700,43 +746,54 @@ func (s *StateDB) getPrereqFromRho() []common.Hash {
 }
 
 // v0.5 eq 11.37
+// v0.5.2 eq 11.39
+// TODO:stanley ∀ p ∈ 𝒑, p ∉ ⋃{keys(x𝒑) | x ∈ β} ∪ ⋃{x | x ∈ accumulated} ∪ 𝒒 ∪ 𝒂
 func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	prereqSetFromQueue := make(map[common.Hash]struct{})
 	for _, hash := range s.getPrereqFromAccumulationQueue() {
 		prereqSetFromQueue[hash] = struct{}{}
 	}
-	_, exists := prereqSetFromQueue[g.Report.AvailabilitySpec.WorkPackageHash]
+	workPackageHash := g.Report.AvailabilitySpec.WorkPackageHash
+	if workPackageHash == (common.Hash{}) {
+		return fmt.Errorf("invalid work package hash")
+	}
+
+	_, exists := prereqSetFromQueue[workPackageHash]
 	if exists {
 		return fmt.Errorf("invalid prerequisite work package(from queue), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
-	prereqSetFromRho := make(map[common.Hash]struct{})
-	for _, hash := range s.getPrereqFromRho() {
-		prereqSetFromRho[hash] = struct{}{}
-	}
-	_, exists = prereqSetFromRho[g.Report.AvailabilitySpec.WorkPackageHash]
-	if exists {
-		return fmt.Errorf("invalid prerequisite work package(from rho), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
-	}
+
 	prereqSetFromAccumulationHistory := make(map[common.Hash]struct{})
 	for i := 0; i < types.EpochLength; i++ {
 		for _, hash := range s.JamState.AccumulationHistory[i].WorkPackageHash {
 			prereqSetFromAccumulationHistory[hash] = struct{}{}
 		}
 	}
-	_, exists = prereqSetFromAccumulationHistory[g.Report.AvailabilitySpec.WorkPackageHash]
+	_, exists = prereqSetFromAccumulationHistory[workPackageHash]
 	if exists {
 		return fmt.Errorf("invalid prerequisite work package(from accumulation history), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
 
-	prereqSet := make(map[common.Hash]struct{})
-	for _, block := range s.JamState.RecentBlocks {
-		for key := range block.Reported {
-			prereqSet[key] = struct{}{}
-		}
+	// 𝒒:Means the workPackageHash should not be in the ready work package set
+	accumulateWorkPackage := s.AvailableWorkReport
+	readyWorkPackagesHashes := s.GetReadyQueue(accumulateWorkPackage)
+	readyWorkPackagesHashMap := make(map[common.Hash]struct{})
+	for _, hash := range readyWorkPackagesHashes {
+		readyWorkPackagesHashMap[hash] = struct{}{}
 	}
-	_, exists = prereqSet[g.Report.AvailabilitySpec.WorkPackageHash]
+	_, exists = readyWorkPackagesHashMap[workPackageHash]
 	if exists {
-		return fmt.Errorf("invalid prerequisite work package(from recent block), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+		return fmt.Errorf("invalid prerequisite work package(from ready work package), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+	}
+
+	// 𝒂:This is a collection of "assigned" work packages.
+	prereqSetFromRho := make(map[common.Hash]struct{})
+	for _, hash := range s.getPrereqFromRho() {
+		prereqSetFromRho[hash] = struct{}{}
+	}
+	_, exists = prereqSetFromRho[workPackageHash]
+	if exists {
+		return fmt.Errorf("invalid prerequisite work package(from rho), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
 	return nil
 }
@@ -831,42 +888,67 @@ func getPresentBlock(g types.Guarantee) types.Hash2Hash {
 }
 
 // v0.5 eq 11.40
+// v0.5.2 eq 11.42
+// TODO:stanley
 func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
-	present_block := getPresentBlock(g)
-	for _, block := range s.JamState.RecentBlocks {
-		for key, value := range block.Reported {
-			if _, exists := present_block[key]; !exists {
-				present_block[key] = value
-			}
-		}
+	currentSegmentRootLookUp := g.Report.SegmentRootLookup
+	currentHash2Hash := make(map[common.Hash]common.Hash)
+	haveHash := false
+	for _, lookupItem := range currentSegmentRootLookUp {
+		haveHash = true
+		currentHash2Hash[lookupItem.WorkPackageHash] = lookupItem.SegmentRoot
 	}
-
-	// compare present block and report segment root lookup
-	if g.Report.SegmentRootLookup == nil {
+	if !haveHash {
 		return nil
 	}
 
-	for _, lookupItem := range g.Report.SegmentRootLookup {
-		key := lookupItem.WorkPackageHash
-		value := lookupItem.SegmentRoot
-		// if present_block[key] exists, compare the value
-		if _, exists := present_block[key]; exists {
-			if present_block[key] == value {
-				return nil // CHECK THIS and ErrGSegmentRootLookupInvalidUnexpectedValue and errGDuplicatePackageRecentHistory
-			} else {
-				return jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks
+	// Combine the present block and the recent blocks
+	presentBlockHash2Hash := getPresentBlock(g)
+	if len(s.JamState.RecentBlocks) == 0 {
+		fmt.Printf("Error s.JamState.RecentBlocks is nil, must have recentblock into it!\n")
+		return nil
+	}
+	for _, block := range s.JamState.RecentBlocks {
+		for key, value := range block.Reported {
+			if _, exists := presentBlockHash2Hash[key]; !exists {
+				presentBlockHash2Hash[key] = value
 			}
-		} else {
+		}
+	}
+
+	if currentSegmentRootLookUp == nil {
+		fmt.Printf("currentSegmentRootLookUp is nil\n")
+		return nil
+	}
+	if len(currentHash2Hash) != 0 {
+		includeSegment := false
+		// Check presentBlockHash2Hash include currentHash2Hash or not
+		for workPackageHash, segmentRoot := range presentBlockHash2Hash {
+			value, exists := currentHash2Hash[workPackageHash]
+			if exists && value == segmentRoot {
+				includeSegment = true
+				break
+			} else if exists && value != segmentRoot {
+				return jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue
+			}
+		}
+
+		if !includeSegment {
+			// stanley:Pls check
 			return jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks
 		}
 	}
-	return jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks
+
+	return nil
 }
 
 // v0.5 eq 11.41
 func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 	var err error
 	for _, result := range g.Report.Results {
+		if _, ok := s.JamState.PriorServiceAccountState[result.ServiceID]; !ok {
+			err = jamerrors.ErrGBadServiceID
+		}
 		if result.CodeHash != s.JamState.PriorServiceAccountState[result.ServiceID].CodeHash {
 			// fmt.Printf("checkCodeHash: %v\n", result.CodeHash)
 			// fmt.Printf("checkCodeHash from service: %v\n", s.JamState.PriorServiceAccountState[result.ServiceID].CodeHash)

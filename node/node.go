@@ -51,11 +51,13 @@ const (
 	debugTree     = false // trie
 	debugSegments = false // Fetch import segments
 	debugBundle   = false // Fetch WorkPackage Bundle
-	numNodes      = 6
-	quicAddr      = "127.0.0.1:%d"
-	basePort      = 9000
-	godMode       = true
-	noRotation    = false
+	debugAncestor = false // Check Ancestor
+
+	numNodes   = 6
+	quicAddr   = "127.0.0.1:%d"
+	basePort   = 9000
+	godMode    = true
+	noRotation = false
 )
 
 const (
@@ -97,7 +99,7 @@ type Node struct {
 	// assurances state: are this node assuring the work package bundle/segments?
 	assurancesBucket map[common.Hash]bool
 	assuranceMutex   sync.Mutex
-	delaysend        bool
+	delaysend        map[common.Hash]int // delaysend is a map of workpackagehash to the number of times it has been delayed
 
 	// holds a map of the parenthash to the block
 	blocks      map[common.Hash]*types.Block
@@ -311,7 +313,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
-		delaysend:        false,
+		delaysend:        make(map[common.Hash]int),
 
 		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
@@ -844,6 +846,13 @@ func (n *Node) extendChain() error {
 				recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
 				newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock)
 
+				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
+				if debugAncestor {
+					timeSlots1 := n.statedb.GetAncestorTimeSlot()
+					timeSlots2 := newStateDB.GetAncestorTimeSlot()
+					fmt.Printf("[N%d] Ancestor timeSlots1 %d\n", n.id, timeSlots1)
+					fmt.Printf("[N%d] Ancestor timeSlots2 %d\n", n.id, timeSlots2)
+				}
 				//new_xi := newStateDB.GetXContext().GetX_i()
 				if debugTree {
 					fmt.Printf("[N%d] Author newStateDB %v\n", n.id, newStateDB.StateRoot)
@@ -1298,6 +1307,14 @@ func (n *Node) runClient() {
 				oldstate := n.statedb
 				newStateDB.PreviousGuarantors(noRotation)
 				newStateDB.AssignGuarantors(noRotation)
+				newStateDB.SetAncestor(newBlock.Header, oldstate)
+				if debugAncestor {
+					timeSlots1 := n.statedb.GetAncestorTimeSlot()
+					timeSlots2 := newStateDB.GetAncestorTimeSlot()
+					fmt.Printf("[N%d] Ancestor timeSlots1 %d\n", n.id, timeSlots1)
+					fmt.Printf("[N%d] Ancestor timeSlots2 %d\n", n.id, timeSlots2)
+				}
+
 				n.addStateDB(newStateDB)
 				n.StoreBlock(newBlock, n.id, true)
 				n.cacheBlock(newBlock)
@@ -1340,7 +1357,7 @@ func (n *Node) runClient() {
 						StateRoot: newStateDB.StateRoot,
 					},
 				}
-				err = statedb.CheckStateTransition(n.store, &st)
+				err = statedb.CheckStateTransition(n.store, &st, s.AncestorSet, oldstate.AccumulationRoot)
 				if err != nil {
 					fmt.Printf("ERROR validating state transition\n")
 				} else if debug {

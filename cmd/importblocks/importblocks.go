@@ -4,13 +4,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
+	"math/rand"
+	"time"
+
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
-	"log"
-	"math/rand"
-	"time"
 )
 
 // Error map for each mode
@@ -153,12 +154,14 @@ func selectImportBlocksError(modes []string, block *types.Block, statedb *stated
 		return fuzzBlockGBadServiceID(block, statedb)
 	case jamerrors.ErrGBadStateRoot:
 		return fuzzBlockGBadStateRoot(block, statedb)
-	case jamerrors.ErrGReportEpochBeforeLast:
+	case jamerrors.ErrGBadStateRoot:
+		return fuzzBlockGDuplicatePackageRecentHistory(statedb)
+	case jamerrors.ErrGDuplicatePackageRecentHistory:
 		return fuzzBlockGReportEpochBeforeLast(block, statedb)
 	case jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks:
-		return fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks(block, statedb)
+		return fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks(block)
 	case jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue:
-		return fuzzBlockGSegmentRootLookupInvalidUnexpectedValue(block, statedb)
+		return fuzzBlockGSegmentRootLookupInvalidUnexpectedValue(block)
 	case jamerrors.ErrGCoreWithoutAuthorizer:
 		return fuzzBlockGCoreWithoutAuthorizer(block, statedb)
 	case jamerrors.ErrGCoreUnexpectedAuthorizer:

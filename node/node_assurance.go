@@ -27,12 +27,22 @@ func (n *Node) generateAssurance(headerHash common.Hash) (a types.Assurance, num
 	numCores = 0
 	for _, r := range reports {
 		// let fib send that bit later by setting delaysend
-		if r.RefineContext.Anchor == common.BytesToHash([]byte("hack")) && !n.delaysend {
-			n.delaysend = true
-		} else if n.isAssuring(r.AvailabilitySpec.WorkPackageHash) {
-			if r.RefineContext.Anchor == common.BytesToHash([]byte("hack")) {
-				n.delaysend = false
+		no_delay := true
+		// if r.AvailabilitySpec.WorkPackageHash is in node.delaysend
+		// then no_delay = false
+		if _, ok := n.delaysend[r.AvailabilitySpec.WorkPackageHash]; ok {
+			// see the value of the delay
+			// if delay is 0, then no_delay = true
+			if n.delaysend[r.AvailabilitySpec.WorkPackageHash] == 0 {
+				no_delay = true
+				// delete the key from node.delaysend
+				delete(n.delaysend, r.AvailabilitySpec.WorkPackageHash)
+			} else {
+				no_delay = false
+				n.delaysend[r.AvailabilitySpec.WorkPackageHash]--
 			}
+		}
+		if n.isAssuring(r.AvailabilitySpec.WorkPackageHash) && no_delay {
 			a.SetBitFieldBit(r.CoreIndex, true)
 			numCores++
 		}

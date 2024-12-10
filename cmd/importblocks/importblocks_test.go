@@ -2,9 +2,6 @@ package main_test
 
 import (
 	"fmt"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
 	"log"
 	"os"
 	"path/filepath"
@@ -13,6 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // Helper function to parse epoch and phase from filename
@@ -105,7 +107,7 @@ func processStateTransitions(basePath string) error {
 		for _, phase := range phases {
 			st := stateTransitions[epoch][phase]
 			// Apply the state transition
-			err := statedb.CheckStateTransition(storage, &st)
+			err := statedb.CheckStateTransition(storage, &st, nil, common.Hash{})
 			if err != nil {
 				return err
 			}

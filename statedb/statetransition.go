@@ -1,9 +1,9 @@
 package statedb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -29,7 +29,7 @@ func compareKeyVals(p0 KeyVals, p1 KeyVals) {
 	m1 := makemap(p1)
 	for k0, v0 := range m0 {
 		v1 := m1[k0]
-		if bytes.Compare(v0, v1) != 0 {
+		if !common.CompareBytes(v0, v1) {
 			fmt.Printf("K %v\n s1: %x\n st.PostState: %x\n", k0, v0, v1)
 		}
 	}
@@ -45,13 +45,15 @@ func makemap(p KeyVals) map[common.Hash][]byte {
 	return m
 }
 
-func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition) error {
+func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet []types.BlockHeader, accumulationRoot common.Hash) error {
 	// Apply the state transition
 	s0, err := NewStateDBFromSnapshotRaw(storage, &(st.PreState))
 	if err != nil {
 		return err
 	}
 
+	s0.AncestorSet = ancestorSet
+	s0.AccumulationRoot = accumulationRoot
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
 	if err != nil {
 		panic(err)

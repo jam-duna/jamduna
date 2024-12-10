@@ -51,7 +51,6 @@ func (b Beta_state) MarshalJSON() ([]byte, error) {
 
 // Recent History : see Section 7
 func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
-	return
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
 	reported := types.Hash2Hash{}
@@ -83,5 +82,5 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 		postRecentBlocks = postRecentBlocks[1 : types.RecentHistorySize+1]
 	}
 	s.JamState.RecentBlocks = postRecentBlocks
-	return
+	// return
 }

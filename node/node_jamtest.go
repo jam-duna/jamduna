@@ -521,13 +521,15 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)
 		timeslot := nodes[1].statedb.GetSafrole().GetTimeSlot()
+		// lastHeaderHash := nodes[1].statedb.HeaderHash
 		refineContext := types.RefineContext{
 			// These values don't matter until we have a historical lookup -- which we do not!
-			Anchor:           common.BytesToHash([]byte("hack")),
-			StateRoot:        common.Hash{},
-			BeefyRoot:        common.Hash{},
-			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: timeslot + 100,
+			Anchor:       common.Hash{},
+			StateRoot:    common.Hash{},
+			BeefyRoot:    common.Hash{},
+			LookupAnchor: common.Hash{},
+			// LookupAnchorSlot: timeslot + 100,// TODO: check this
+			LookupAnchorSlot: timeslot,
 			Prerequisites:    []common.Hash{},
 		}
 		workPackage := types.WorkPackage{}
@@ -610,11 +612,12 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 		ts := nodes[1].statedb.GetSafrole().GetTimeSlot()
 		refineContext := types.RefineContext{
 			// These values don't matter until we have a historical lookup -- which we do not!
-			Anchor:           common.Hash{},
-			StateRoot:        common.Hash{},
-			BeefyRoot:        common.Hash{},
-			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: ts + 100,
+			Anchor:       common.Hash{},
+			StateRoot:    common.Hash{},
+			BeefyRoot:    common.Hash{},
+			LookupAnchor: common.Hash{},
+			// LookupAnchorSlot: ts + 100, // TODO: check this
+			LookupAnchorSlot: ts,
 			Prerequisites:    prereq,
 		}
 
@@ -652,7 +655,12 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	for wp_idx, wp := range Meg_WorkPackages {
 		fmt.Printf("  Meg_WorkPackage #%v %v. PreReqs=%v\n", wp_idx, wp.Hash(), wp.RefineContext.Prerequisites)
 	}
-
+	// setting up the delay send for the fib_tri
+	for _, n := range nodes {
+		for _, wp := range Fib_Trib_WorkPackages {
+			n.delaysend[wp.Hash()] = 1
+		}
+	}
 	// =================================================
 	// set up ticker for loop
 	ticker := time.NewTicker(100 * time.Millisecond)

@@ -528,7 +528,6 @@ func (n *Node) GetImportedSegmentRoots(wp types.WorkPackage) (importedSegmentRoo
 }
 
 func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, importedSegmentRoots []common.Hash, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
-
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	//package_bundle.ImportSegmentData = importsegments // nullify the imported segments for testing
 	if len(package_bundle.Justification) > 0 && len(package_bundle.Justification[0]) > 0 {
