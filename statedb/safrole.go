@@ -673,10 +673,10 @@ func (s *SafroleState) computeTicketSlotBinding(inp []types.TicketBody) []*types
 	return tickets
 }
 
-func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeaderHash common.Hash, attempt uint8) ([]byte, []byte, error) {
+func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeader []byte, attempt uint8) ([]byte, []byte, error) {
 	sealVRFInput := s.ticketSealVRFInput(s.Entropy[3], attempt)
 
-	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeaderHash)
+	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Fallback BlockSeal ERR=%v", err)
 	}
@@ -687,7 +687,7 @@ func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.BanderSnatc
 		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
 	}
 	if debug {
-		fmt.Printf("SignPrimary unsignHeaderHash=%v, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", unsignHeaderHash, blockSeal, fresh_VRFSignature, freshRandomness)
+		fmt.Printf("SignPrimary unsignHeader(len=%v)=%x, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", len(unsignHeader), unsignHeader, blockSeal, fresh_VRFSignature, freshRandomness)
 	}
 	return blockSeal, fresh_VRFSignature, nil
 }
@@ -698,9 +698,9 @@ func (s *SafroleState) ConvertBanderSnatchSecret(authority_secret_key []byte) (b
 }
 
 // 6.8.1 Primary Method for legit ticket - is it bare VRF here???
-func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeaderHash common.Hash) ([]byte, []byte, error) {
+func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeader []byte) ([]byte, []byte, error) {
 	sealVRFInput := fallbackSealVRFInput(s.Entropy[3]) // the context
-	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeaderHash)
+	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Fallback BlockSeal ERR=%v", err)
 	}
@@ -711,14 +711,14 @@ func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.BanderSnat
 		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
 	}
 	if debug {
-		fmt.Printf("SignFallBack unsignHeaderHash=%v, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", unsignHeaderHash, blockSeal, fresh_VRFSignature, freshRandomness)
+		fmt.Printf("SignFallBack unsignHeader(len=%v)=%x, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", len(unsignHeader), unsignHeader, blockSeal, fresh_VRFSignature, freshRandomness)
 	}
 	return blockSeal, fresh_VRFSignature, nil
 }
 
-func (s *SafroleState) SignBlockSeal(authority_secret_key bandersnatch.BanderSnatchSecret, sealVRFInput []byte, unsignHeaderHash common.Hash) ([]byte, []byte, error) {
+func (s *SafroleState) SignBlockSeal(authority_secret_key bandersnatch.BanderSnatchSecret, sealVRFInput []byte, unsignHeader []byte) ([]byte, []byte, error) {
 	//IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte)
-	ietfSig, inner_vrfOutput, err := bandersnatch.IetfVrfSign(authority_secret_key, sealVRFInput, unsignHeaderHash.Bytes())
+	ietfSig, inner_vrfOutput, err := bandersnatch.IetfVrfSign(authority_secret_key, sealVRFInput, unsignHeader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("IetfVrfSign ERR=%v", err)
 	}

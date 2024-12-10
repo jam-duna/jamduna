@@ -1491,7 +1491,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	h.AuthorIndex = author_index
 	b.Extrinsic = extrinsicData
 
-	unsignHeaderHash := h.UnsignedHash() //signing
+	unsignHeader := h.BytesWithoutSig() //signing
 
 	auth_secret_key, err := sf.ConvertBanderSnatchSecret(credential.BandersnatchSecret)
 	if err != nil {
@@ -1500,7 +1500,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 
 	epochType := sf.CheckEpochType()
 	if epochType == "fallback" {
-		blockseal, fresh_vrfSig, err := sf.SignFallBack(auth_secret_key, unsignHeaderHash)
+		blockseal, fresh_vrfSig, err := sf.SignFallBack(auth_secret_key, unsignHeader)
 		if err != nil {
 			return bl, err
 		}
@@ -1513,7 +1513,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		}
 	} else {
 		attempt, err := sf.GetBindedAttempt(targetJCE)
-		blockseal, fresh_vrfSig, err := sf.SignPrimary(auth_secret_key, unsignHeaderHash, attempt)
+		blockseal, fresh_vrfSig, err := sf.SignPrimary(auth_secret_key, unsignHeader, attempt)
 		if err != nil {
 			return bl, err
 		}
@@ -1546,7 +1546,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		fmt.Printf("Node %d with secret key: %v\n", s.Id, auth_secret_key)
 		fmt.Printf("  Unsigned Header: %s\n", bwoSig.String())
 		fmt.Printf("  Unsigned Header Bytes: %x\n", h.BytesWithoutSig())
-		fmt.Printf("  Unsigned Header Hash: %v\n", unsignHeaderHash)
 	}
 	b.Header = *h
 	return b, nil
