@@ -76,6 +76,8 @@ type Node struct {
 
 	store *storage.StateDBStorage
 
+	extrinsic_pool *types.ExtrinsicPool
+
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
@@ -94,7 +96,6 @@ type Node struct {
 
 	// assurances state: are this node assuring the work package bundle/segments?
 	assurancesBucket map[common.Hash]bool
-	queuedAssurances map[common.Hash]map[uint16]*types.Assurance
 	assuranceMutex   sync.Mutex
 	delaysend        bool
 
@@ -299,6 +300,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		clients:   make(map[string]string),
 		nodeType:  nodeType,
 
+		extrinsic_pool: types.NewExtrinsicPool(),
+
 		statedbMap:     make(map[common.Hash]*statedb.StateDB),
 		judgementWRMap: make(map[common.Hash]common.Hash),
 
@@ -306,10 +309,10 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		headers:   make(map[common.Hash]*types.Block),
 		preimages: make(map[common.Hash][]byte),
 
-		selfTickets:             make(map[common.Hash][]types.TicketBucket),
-		assurancesBucket:        make(map[common.Hash]bool),
-		queuedAssurances:        make(map[common.Hash]map[uint16]*types.Assurance),
-		delaysend:               false,
+		selfTickets:      make(map[common.Hash][]types.TicketBucket),
+		assurancesBucket: make(map[common.Hash]bool),
+		delaysend:        false,
+
 		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
 		workPackagesCh:          make(chan types.WorkPackage, 200),
@@ -385,8 +388,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	node.setValidatorCredential(credential)
 	node.epoch0Timestamp = epoch0Timestamp
-	node.statedb.PreviousGuarantors(true)
-	node.statedb.AssignGuarantors(true)
+	node.statedb.PreviousGuarantors(noRotation)
+	node.statedb.AssignGuarantors(noRotation)
 	var validators []types.Validator
 	validators = node.statedb.GetSafrole().NextValidators
 	if len(validators) == 0 {
@@ -397,7 +400,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	go node.runMain()
 	go node.runPreimages()
 	go node.runBlocksTickets()
-	go node.runAudit() // disable this to pause FetchWorkPackageBundle
+	// go node.runAudit() // disable this to pause FetchWorkPackageBundle
 	return node, nil
 }
 
@@ -478,6 +481,7 @@ func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 // 	return workers
 // }
 
+// this function will return the core workers of that core
 func (n *Node) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
 	coWorkers = make([]Peer, 0)
 	for _, assignment := range n.statedb.GuarantorAssignments {
@@ -731,35 +735,39 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	return nil // Success
 }
 
-// Guarantees are sent by a validator working on a core receiving a work package and executing a refine operation
-func (n *Node) processGuarantee(guarantee types.Guarantee) error {
-	// Store the guarantee in the tip's queued guarantee
-	//fmt.Printf("%s [node:processGuarantee]\n", n.String()) // , guarantee.String()
-
-	s := n.getState()
-	s.ProcessIncomingGuarantee(guarantee)
-	return nil // Success
-}
-
-func (n *Node) processAssurance(assurance *types.Assurance) error {
+func (n *Node) processAssurance(assurance types.Assurance) error {
+	// Store the assurance in the tip's queued assurances
 	// Validate the assurance signature
 	if len(assurance.Signature) == 0 {
 		return fmt.Errorf("no assurance signature")
 	}
 
 	// Check the assurance validity
-	if err := n.statedb.CheckIncomingAssurance(assurance); err != nil {
+	if err := n.statedb.CheckIncomingAssurance(&assurance); err != nil {
 		return err
 	}
 
-	// Ensure the map for this anchor exists
-	if _, exists := n.queuedAssurances[assurance.Anchor]; !exists {
-		n.queuedAssurances[assurance.Anchor] = make(map[uint16]*types.Assurance)
+	// store it into extrinsic pool
+	err := n.extrinsic_pool.AddAssuranceToPool(assurance)
+	if err != nil {
+		fmt.Printf("processAssurance: AddAssuranceToPool ERR %v\n", err)
 	}
+	return nil // Success
+}
 
-	// Store the assurance in the appropriate map
-	n.queuedAssurances[assurance.Anchor][assurance.ValidatorIndex] = assurance
-	//fmt.Printf("%s processAssurance(Anchor=%v, ValidatorIndex=%d)\n", n.String(), assurance.Anchor, assurance.ValidatorIndex)
+func (n *Node) processGuarantee(g types.Guarantee) error {
+	// Store the guarantee in the tip's queued guarantees
+	s := n.getState()
+	CurrV := s.GetSafrole().CurrValidators
+	err := g.Verify(CurrV)
+	if err != nil {
+		fmt.Printf("processGuarantee: Invalid guarantee %s. Err=%v\n", g.String(), err)
+		return err
+	}
+	err = n.extrinsic_pool.AddGuaranteeToPool(g)
+	if err != nil {
+		fmt.Printf("processGuarantee: AddGuaranteeToPool ERR %v\n", err)
+	}
 	return nil // Success
 }
 
@@ -864,6 +872,7 @@ func (n *Node) extendChain() error {
 					n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
 					n.statedbMapMutex.Unlock()
 				}
+				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(b)
 				break
 			}
 
@@ -1269,7 +1278,7 @@ func (n *Node) runClient() {
 			//	return
 			//}
 
-			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, &(n.queuedAssurances))
+			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, n.extrinsic_pool)
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				panic(0)
@@ -1343,7 +1352,7 @@ func (n *Node) runClient() {
 				n.statedbMapMutex.Lock()
 				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
 				n.statedbMapMutex.Unlock()
-
+				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock)
 				err = n.writeDebug(st, timeslot) // StateTransition
 				if err != nil {
 					fmt.Printf("writeDebug StateTransition err: %v\n", err)

@@ -1,0 +1,37 @@
+Running TestMegatron with timeout 30m...
+go test -timeout 30m -v -run ^TestMegatron$
+=== RUN   TestMegatron
+===Time Saving Mode===
+AddTime: -6s
+JCE Start Time: 2024-01-01 11:59:54 +0000 UTC
+!!!NewGenesisConfig epoch0Timestamp: 29720088. Wait:5 Sec 
+[N0] newNode addr=0.0.0.0:9000 dataDir=/tmp/root/jam/4953346/node0
+[N1] newNode addr=0.0.0.0:9001 dataDir=/tmp/root/jam/4953346/node1
+Starting server on 0.0.0.0:8080
+[N2] newNode addr=0.0.0.0:9002 dataDir=/tmp/root/jam/4953346/node2
+[N3] newNode addr=0.0.0.0:9003 dataDir=/tmp/root/jam/4953346/node3
+[N4] newNode addr=0.0.0.0:9004 dataDir=/tmp/root/jam/4953346/node4
+[N5] newNode addr=0.0.0.0:9005 dataDir=/tmp/root/jam/4953346/node5
+[N2] [33m Blk 0000..0000<-49bd..6da1 [0m e'=412779,m'=00, len(γ_a')=0   	[N2] H_t=4953348 H_r=68d7..eb45 [32m EpochMarker[0m(η1'=6f6a..24af, η2'=835a..574e) 2:[b=1] 
+[N0] [33m Blk 49bd..6da1<-0223..2d8b [0m e'=412779,m'=01, len(γ_a')=3   	[N0] H_t=4953349 H_r=2cfc..64cf  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1] 
+1: fib Code Hash: 701623c7c517e327b2578d01c3fc67619ded80feaefd60833238073bfe4d18b3 (Code Length: 210)
+2: tribonacci Code Hash: b5732b6236d5dc997f6a182128d5170dba8e161634d4a5a05996efe8e2086e57 (Code Length: 222)
+3: megatron Code Hash: c4254ce54e9166133e4b84446c88bbce6d31324bbac003e7c72d39b4918a8d02 (Code Length: 193)
+Waiting for the first block to be ready...
+[N4] [33m Blk 49bd..6da1<-a4ce..cd07 [0m e'=412779,m'=02, len(γ_a')=3   	[N4] H_t=4953350 H_r=2cfc..64cf  [34m |E_T|=3[0m 2:[b=1] 4:[b=1|t=3] 
+Builder storing TestService tribonacci (b573..086e)
+Waiting for tribonacci service to be ready...
+sf.ApplyStateTransitionFromBlock Submit one ticket already recorded in the state.
+panic: 1
+
+goroutine 89 [running]:
+github.com/colorfulnotion/jam/statedb.ApplyStateTransitionFromBlock(0xc003e7d600, {0xc00391b8c8?, 0x44?}, 0xc00391b900)
+	/root/go/src/github.com/colorfulnotion/jam/statedb/statedb.go:1136 +0x1090
+github.com/colorfulnotion/jam/statedb.CheckStateTransition(0xc003e7c2c0?, 0xc00391b8c8)
+	/root/go/src/github.com/colorfulnotion/jam/statedb/statetransition.go:55 +0x58
+github.com/colorfulnotion/jam/node.(*Node).runClient(0xc0000f0908)
+	/root/go/src/github.com/colorfulnotion/jam/node/node.go:1343 +0x8cf
+created by github.com/colorfulnotion/jam/node.newNode in goroutine 7
+	/root/go/src/github.com/colorfulnotion/jam/node/node.go:399 +0x1213
+exit status 2
+FAIL	github.com/colorfulnotion/jam/node	18.171s

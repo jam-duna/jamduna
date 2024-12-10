@@ -345,7 +345,7 @@ func jamtest(jam string) {
 		core0_peers := builderNode.GetCoreCoWorkersPeers(0)
 		// ramdom pick the index from 0, 1, 2
 		randomIdx := rand.Intn(3)
-		err = core0_peers[randomIdx].SendWorkPackageSubmission(codeWorkPackage, []byte{})
+		err = core0_peers[randomIdx].SendWorkPackageSubmission(codeWorkPackage, []byte{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -473,7 +473,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, []byte{})
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, []byte{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -674,43 +674,63 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	 get the core index every time before we send the workpackage
 	*/
 	ok := false
+	sentLastWorkPackage := false
+	FinalRho := false
+	FinalAssurance := false
+	FinalMeg := false
 	for {
 		if ok {
 			break
 		}
 		select {
 		case <-ticker.C:
-			if Fib_Tri_counter == 6 && Meg_counter == 6 {
-				fmt.Printf("All workpackages are sent\n")
-				ok = true
-				time.Sleep(19 * time.Second)
-				break
+			if sentLastWorkPackage {
+				if FinalRho && FinalAssurance && FinalMeg {
+					fmt.Printf("Meg Finish\n")
+					ok = true
+					break
+				} else if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil {
+					FinalRho = true
+				} else if FinalRho {
+					if FinalAssurance {
+						if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil {
+							FinalMeg = true
+						}
+
+					} else if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil {
+						FinalAssurance = true
+					}
+
+				}
+			} else {
+				if Fib_Tri_counter == 6 && Meg_counter == 6 {
+					fmt.Printf("All workpackages are sent\n")
+					sentLastWorkPackage = true
+				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready) {
+					// if false{
+					// send workpackages to the network
+					Meg_Chan <- Meg_WorkPackages[Meg_counter]
+					Meg_counter++
+					Meg_Ready = false
+
+					Fib_Tri_Chan <- Fib_Trib_WorkPackages[Fib_Tri_counter]
+					Fib_Tri_counter++
+					Fib_Tri_Ready = false
+
+				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
+					Meg_Ready = false
+					Meg_Keeper = true
+					Fib_Tri_Ready = false
+					Fib_Tri_Keeper = true
+
+				} else if (Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper) {
+					Meg_Ready = true
+					Meg_Keeper = false
+					Fib_Tri_Ready = true
+					Fib_Tri_Keeper = false
+				}
 			}
-			// here we can put some logic to send workpackages
 
-			if (nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready) {
-				// if false{
-				// send workpackages to the network
-				Meg_Chan <- Meg_WorkPackages[Meg_counter]
-				Meg_counter++
-				Meg_Ready = false
-
-				Fib_Tri_Chan <- Fib_Trib_WorkPackages[Fib_Tri_counter]
-				Fib_Tri_counter++
-				Fib_Tri_Ready = false
-
-			} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
-				Meg_Ready = false
-				Meg_Keeper = true
-				Fib_Tri_Ready = false
-				Fib_Tri_Keeper = true
-
-			} else if (Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper) {
-				Meg_Ready = true
-				Meg_Keeper = false
-				Fib_Tri_Ready = true
-				Fib_Tri_Keeper = false
-			}
 			// if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready {
 			// 	// if false{
 			// 	// send workpackages to the network
@@ -745,13 +765,13 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			core1_peers := nodes[0].GetCoreCoWorkersPeers(1)
 			fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(workPackage.Hash()))
 			// Randomly select sender and receiver
-			senderIdx := rand.Intn(3)
+			senderIdx := rand.Intn(6)
 			receiverIdx := rand.Intn(3)
-			for senderIdx == receiverIdx {
+			for senderIdx == int(core1_peers[receiverIdx].PeerID) {
 				receiverIdx = rand.Intn(3)
 			}
 
-			err := core1_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{})
+			err := core1_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{}, 1)
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 			}
@@ -761,14 +781,15 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			// v1, v2, v4 => core
 			// random select 1 sender and 1 receiver
 			// Randomly select sender and receiver
-			core0_peers := nodes[0].GetCoreCoWorkersPeers(0)
+
 			fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", Meg_counter, common.Str(workPackage.Hash()))
-			senderIdx := rand.Intn(3)
+			senderIdx := rand.Intn(6)
 			receiverIdx := rand.Intn(3)
-			for senderIdx == receiverIdx {
+			core0_peers := nodes[senderIdx].GetCoreCoWorkersPeers(0)
+			for senderIdx == int(core0_peers[receiverIdx].PeerID) {
 				receiverIdx = rand.Intn(3)
 			}
-			err := core0_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{})
+			err := core0_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{}, 0)
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
 			}

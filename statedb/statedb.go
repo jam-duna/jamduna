@@ -38,10 +38,6 @@ type StateDB struct {
 	queuedPreimageLookups map[common.Hash]types.Preimages
 	preimageLookupsMutex  sync.Mutex
 
-	knownGuarantees  map[common.Hash]int
-	queuedGuarantees map[common.Hash]types.Guarantee
-	guaranteeMutex   sync.Mutex
-
 	knownJudgements map[common.Hash]int
 	queueJudgements map[common.Hash]types.Judgement
 	judgementMutex  sync.Mutex
@@ -72,15 +68,6 @@ func (s *StateDB) AddJudgementToQueue(j types.Judgement) {
 	s.judgementMutex.Lock()
 	defer s.judgementMutex.Unlock()
 	s.queueJudgements[j.WorkReportHash] = j
-}
-
-func (s *StateDB) AddGuaranteeToQueue(g types.Guarantee) {
-	s.guaranteeMutex.Lock()
-	defer s.guaranteeMutex.Unlock()
-	s.queuedGuarantees[g.Hash()] = g
-	if debug {
-		fmt.Printf("[N%v] [statedb:AddGuaranteeToQueue] -- Adding guarantee workPackageHash: %v\n", s.Id, g.Report.GetWorkPackageHash())
-	}
 }
 
 func (s *StateDB) CheckTicketExists(ticketID common.Hash) bool {
@@ -153,17 +140,6 @@ func (s *StateDB) ProcessIncomingJudgement(j types.Judgement) {
 
 }
 
-func (s *StateDB) ProcessIncomingGuarantee(g types.Guarantee) {
-	// get the guarantee state
-	CurrV := s.GetSafrole().CurrValidators
-	err := g.Verify(CurrV)
-	if err != nil {
-		fmt.Printf("ProcessIncomingGuarantee: Invalid guarantee %s. Err=%v\n", g.String(), err)
-		return
-	}
-	s.AddGuaranteeToQueue(g)
-}
-
 func (s *StateDB) getValidatorCredential() []byte {
 	// TODO
 	return nil
@@ -201,12 +177,6 @@ func (s *StateDB) RemoveLookup(p *types.Preimages) {
 	defer s.preimageLookupsMutex.Unlock()
 	blobHash := p.BlobHash()
 	delete(s.queuedPreimageLookups, blobHash)
-}
-
-func (s *StateDB) RemoveGuarantee(g *types.Guarantee) {
-	s.guaranteeMutex.Lock()
-	defer s.guaranteeMutex.Unlock()
-	delete(s.queuedGuarantees, g.Hash())
 }
 
 func (s *StateDB) RemoveJudgement(j *types.Judgement) {
@@ -279,8 +249,6 @@ func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb.knownTickets = make(map[common.Hash]uint8)
 	statedb.queueJudgements = make(map[common.Hash]types.Judgement)
 	statedb.knownJudgements = make(map[common.Hash]int)
-	statedb.queuedGuarantees = make(map[common.Hash]types.Guarantee)
-	statedb.knownGuarantees = make(map[common.Hash]int)
 	statedb.queuedPreimageLookups = make(map[common.Hash]types.Preimages)
 	statedb.knownPreimageLookups = make(map[common.Hash]uint32)
 	statedb.SetStorage(sdb)
@@ -837,11 +805,9 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		trie:                  s.CopyTrieState(s.StateRoot),
 		knownTickets:          make(map[common.Hash]uint8),
 		knownPreimageLookups:  make(map[common.Hash]uint32),
-		knownGuarantees:       make(map[common.Hash]int),
 		knownJudgements:       make(map[common.Hash]int),
 		queuedTickets:         make(map[common.Hash][]types.Ticket),
 		queuedPreimageLookups: make(map[common.Hash]types.Preimages),
-		queuedGuarantees:      make(map[common.Hash]types.Guarantee),
 		queueJudgements:       make(map[common.Hash]types.Judgement),
 		logChan:               make(chan storage.LogMessage, 100),
 		AvailableWorkReport:   tmpAvailableWorkReport,
@@ -882,16 +848,6 @@ func (s *StateDB) CloneExtrinsicMap(n *StateDB) {
 		n.queuedPreimageLookups[k] = p
 	}
 
-	// Guarantees
-	for k, v := range s.knownGuarantees {
-		n.knownGuarantees[k] = v
-	}
-
-	for k, v := range s.queuedGuarantees {
-		t, _ := v.DeepCopy()
-		n.queuedGuarantees[k] = t
-	}
-
 	// Assurance
 
 	// Vote
@@ -912,13 +868,10 @@ func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.Preim
 	for _, p := range lookups {
 		s.RemoveLookup(&p)
 	}
-	for _, g := range guarantees {
-		s.RemoveGuarantee(&g)
-	}
 	// TODO: manage dispute
 }
 
-func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []common.Hash, assurances *map[common.Hash]map[uint16]*types.Assurance) (*types.Block, *StateDB, error) {
+func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (*types.Block, *StateDB, error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady()
 	if !genesisReady {
 		return nil, nil, nil
@@ -932,7 +885,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 		if isAuthorizedBlockBuilder {
 			// propose block without state transition
 			start := time.Now()
-			proposedBlk, err := s.MakeBlock(credential, currJCE, assurances)
+			proposedBlk, err := s.MakeBlock(credential, currJCE, extrinsic_pool)
 			if err != nil {
 				fmt.Printf("Error making block: %v\n", err)
 				return nil, nil, err
@@ -1298,7 +1251,7 @@ func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
 }
 
 // make block generate block prior to state execution
-func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, assuranceMap *map[common.Hash]map[uint16]*types.Assurance) (bl *types.Block, err error) {
+func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
 
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
@@ -1345,20 +1298,20 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 
 	// E_A - Assurances
-	aMap := (*assuranceMap)[h.ParentHeaderHash]
-	assurances := make([]types.Assurance, 0)
-	for _, a := range aMap {
-		assurances = append(assurances, *a)
-	}
 	// 126 - The assurances must ordered by validator index
-	extrinsicData.Assurances = assurances
+	extrinsicData.Assurances = extrinsic_pool.GetAssurancesFromPool(h.ParentHeaderHash)
 	SortAssurances(extrinsicData.Assurances)
 
 	tmpState := s.JamState.Copy()
 	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
-	for _, guarantee := range s.queuedGuarantees {
+	queuedGuarantees := make([]types.Guarantee, 0)
+	currRotationIdx := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
+	previousIdx := currRotationIdx - 1
+	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
+	queuedGuarantees = extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
+	for _, guarantee := range queuedGuarantees {
 		g, err := guarantee.DeepCopy()
 		if err != nil {
 			continue
@@ -1405,7 +1358,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	if err != nil {
 		return nil, err
 	}
-
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()
 

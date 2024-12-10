@@ -1,0 +1,182 @@
+Running TestMegatron with timeout 30m...
+go test -timeout 30m -v -run ^TestMegatron$
+=== RUN   TestMegatron
+===Time Saving Mode===
+AddTime: -50s
+JCE Start Time: 2024-01-01 11:59:10 +0000 UTC
+!!!NewGenesisConfig epoch0Timestamp: 29720664. Wait:5 Sec 
+[N0] newNode addr=0.0.0.0:9000 dataDir=/tmp/root/jam/4953434/node0
+[N1] newNode addr=0.0.0.0:9001 dataDir=/tmp/root/jam/4953434/node1
+Starting server on 0.0.0.0:8080
+[N2] newNode addr=0.0.0.0:9002 dataDir=/tmp/root/jam/4953434/node2
+[N3] newNode addr=0.0.0.0:9003 dataDir=/tmp/root/jam/4953434/node3
+[N4] newNode addr=0.0.0.0:9004 dataDir=/tmp/root/jam/4953434/node4
+[N5] newNode addr=0.0.0.0:9005 dataDir=/tmp/root/jam/4953434/node5
+[N2] [33m Blk 0000..0000<-ab83..332a [0m e'=412787,m'=00, len(γ_a')=0   	[N2] H_t=4953444 H_r=68d7..eb45 [32m EpochMarker[0m(η1'=6f6a..24af, η2'=835a..574e) 2:[b=1] 
+[N0] [33m Blk ab83..332a<-763f..ec98 [0m e'=412787,m'=01, len(γ_a')=3   	[N0] H_t=4953445 H_r=15f9..8bef  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1] 
+1: fib Code Hash: 701623c7c517e327b2578d01c3fc67619ded80feaefd60833238073bfe4d18b3 (Code Length: 210)
+2: tribonacci Code Hash: b5732b6236d5dc997f6a182128d5170dba8e161634d4a5a05996efe8e2086e57 (Code Length: 222)
+3: megatron Code Hash: c4254ce54e9166133e4b84446c88bbce6d31324bbac003e7c72d39b4918a8d02 (Code Length: 193)
+Waiting for the first block to be ready...
+[N4] [33m Blk 763f..ec98<-3028..e005 [0m e'=412787,m'=02, len(γ_a')=6   	[N4] H_t=4953446 H_r=6a55..e062  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1] 4:[b=1|t=3] 
+Builder storing TestService fib (7016..4d18)
+Waiting for fib service to be ready...
+[N1] (core 0) [broadcastWorkPackage in slot 4953445] broadcasted guarantee with validator : v1  v2  v3 
+[N1] [33m Blk 3028..e005<-af4a..2e0a [0m e'=412787,m'=03, len(γ_a')=9   	[N1] H_t=4953447 H_r=cdb2..c498  [34m |E_T|=3[0m [31m |E_G|=1[0m 0:[b=1|t=3] 1:[b=1|t=3|r=1] 2:[b=1] 4:[b=1|t=3] 
+[N1] [33m Blk af4a..2e0a<-e062..83e5 [0m e'=412787,m'=04, len(γ_a')=12   	[N1] H_t=4953448 H_r=2ef5..2177  [34m |E_T|=3[0m [31m |E_A|=6[0m 0:[b=1|t=3] 1:[b=2|t=6|r=1|a=1] 2:[b=1] 4:[b=1|t=3] 
+[N0] [33m Blk e062..83e5<-507f..1b4e [0m e'=412787,m'=05, len(γ_a')=12   	[N0] H_t=4953449 H_r=0e90..94e6  [34m |E_T|=3[0m 0:[b=2|t=6] 1:[b=2|t=6|r=1|a=1] 2:[b=1] 4:[b=1|t=3] 
+fib Service Index: 4232271665
+Builder storing TestService tribonacci (b573..086e)
+Waiting for tribonacci service to be ready...
+[N4] (core 0) [broadcastWorkPackage in slot 4953449] broadcasted guarantee with validator : v0  v4  v5 
+[N5] [33m Blk 507f..1b4e<-3c54..1653 [0m e'=412787,m'=06, len(γ_a')=12   	[N5] H_t=4953450 H_r=021d..49bf  [34m |E_T|=3[0m [31m |E_G|=1[0m 0:[b=2|t=6] 1:[b=2|t=6|r=1|a=1] 2:[b=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N1] [33m Blk 3c54..1653<-411b..5474 [0m e'=412787,m'=07, len(γ_a')=12   	[N1] H_t=4953451 H_r=61ed..f667  [31m |E_P|=1[0m [31m |E_A|=6[0m 0:[b=2|t=6] 1:[b=3|t=6|p=1|o=210|r=1|a=2] 2:[b=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N2] [33m Blk 411b..5474<-bc79..68ab [0m e'=412787,m'=08, len(γ_a')=12   	[N2] H_t=4953452 H_r=778b..e750  0:[b=2|t=6] 1:[b=3|t=6|p=1|o=210|r=1|a=2] 2:[b=2] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+tribonacci Service Index: 3841912275
+Builder storing TestService megatron (c425..8a8d)
+Waiting for megatron service to be ready...
+[N1] (core 0) [broadcastWorkPackage in slot 4953452] broadcasted guarantee with validator : v1  v2  v3 
+[N2] [33m Blk bc79..68ab<-4e4c..3c82 [0m e'=412787,m'=09, len(γ_a')=12   	[N2] H_t=4953453 H_r=f3ee..5a87  [31m |E_G|=1[0m 0:[b=2|t=6] 1:[b=3|t=6|p=1|o=210|r=1|a=2] 2:[b=3|r=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N1] [33m Blk 4e4c..3c82<-4b6e..0d8e [0m e'=412787,m'=10, len(γ_a')=12   	[N1] H_t=4953454 H_r=9d21..8723  [32m WinningTickets[0m(12) [31m |E_P|=1[0m [31m |E_A|=6[0m 0:[b=2|t=6] 1:[b=4|t=6|p=2|o=432|r=1|a=3] 2:[b=3|r=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N4] [33m Blk 4b6e..0d8e<-1315..4eaa [0m e'=412787,m'=11, len(γ_a')=12   	[N4] H_t=4953455 H_r=3511..608e  0:[b=2|t=6] 1:[b=4|t=6|p=2|o=432|r=1|a=3] 2:[b=3|r=1] 4:[b=2|t=3] 5:[b=1|t=3|r=1] 
+megatron Service Index: 3841120805
+All services are ready, Send preimage announcement
+Wait until all the preimage blobs are ready
+[N2] [33m Blk 1315..4eaa<-3c14..ae17 [0m e'=412788,m'=00, len(γ_a')=3   	[N2] H_t=4953456 H_r=a391..a20a [32m EpochMarker[0m(η1'=ba4a..ed27, η2'=6f6a..24af) [34m |E_T|=3[0m 2:[b=1|t=3] 
+[N5] [33m Blk 3c14..ae17<-926a..0f47 [0m e'=412788,m'=01, len(γ_a')=6   	[N5] H_t=4953457 H_r=2b74..7e0d  [34m |E_T|=3[0m 2:[b=1|t=3] 5:[b=1|t=3] 
+[N4] [33m Blk 926a..0f47<-19e1..fb81 [0m e'=412788,m'=02, len(γ_a')=9   	[N4] H_t=4953458 H_r=7d94..cbd5  [34m |E_T|=3[0m [31m |E_P|=1[0m 2:[b=1|t=3] 4:[b=1|t=3|p=1|o=193] 5:[b=1|t=3] 
+Start Fib_Trib
+service0: 4232271665, codehash: 0x701623c7c517e327b2578d01c3fc67619ded80feaefd60833238073bfe4d18b3 (len=210) | fib
+service1: 3841912275, codehash: 0xb5732b6236d5dc997f6a182128d5170dba8e161634d4a5a05996efe8e2086e57 (len=210) | tribonacci
+serviceM: 3841120805, codehash: 0xc4254ce54e9166133e4b84446c88bbce6d31324bbac003e7c72d39b4918a8d02 (len=210) | megatron
+6 Fib_Trib_WorkPackages:
+  Fib_Trib_WorkPackage #0: 0x4cf9c861c45f2e2fa70bc3464127990598c242c19a20f25900bdddf4ad76934a
+  Fib_Trib_WorkPackage #1: 0x270211cfb06373739b9428db6fddba30d04cb9518b18edfc46aa3edbdef84d38
+  Fib_Trib_WorkPackage #2: 0x3ffef66f438bf73c4ee9eb5077d667576d790c658d8bc228614a5c6e8327358e
+  Fib_Trib_WorkPackage #3: 0x7986eab763431f7bea2336e071973e0dad12f999f04f56eda82aa9026dd8b2be
+  Fib_Trib_WorkPackage #4: 0x9e13dd8ff8483f058fdd33e69cfc4ea9c1924e05a75dfffe1a2e56dda93bbc80
+  Fib_Trib_WorkPackage #5: 0x21953aacecb8127d2071306630c58ed9a7052468b7593e485f25f318fedaca86
+6 Megatron_WorkPackages:
+  Meg_WorkPackage #0 0x96519a5a1b1b067bbff00b8331714dc378337b36d76a6b69927db1049e379313. PreReqs=[0x4cf9c861c45f2e2fa70bc3464127990598c242c19a20f25900bdddf4ad76934a]
+  Meg_WorkPackage #1 0x8128211ac294ac57180fa33f240db80041b951ef87a978ecdd765ccb6b791a40. PreReqs=[0x270211cfb06373739b9428db6fddba30d04cb9518b18edfc46aa3edbdef84d38]
+  Meg_WorkPackage #2 0xbef2a332b079158218659da288a80a288f7e4a4a24da739518ddf85d6232fe3e. PreReqs=[0x3ffef66f438bf73c4ee9eb5077d667576d790c658d8bc228614a5c6e8327358e]
+  Meg_WorkPackage #3 0xcdb1c4e29be6ab767b5f1c9367f289f729e48816efa9b5ede23f43a37ae6a76f. PreReqs=[0x7986eab763431f7bea2336e071973e0dad12f999f04f56eda82aa9026dd8b2be]
+  Meg_WorkPackage #4 0x977ae04c8b7fdb3bf0f4b78048416ec8786bdda0cace855b6221315f0d791663. PreReqs=[0x9e13dd8ff8483f058fdd33e69cfc4ea9c1924e05a75dfffe1a2e56dda93bbc80]
+  Meg_WorkPackage #5 0xdedd354801037d5757efcb7a443953f0c49600f06c70ec6533819a13fcdbeca4. PreReqs=[0x21953aacecb8127d2071306630c58ed9a7052468b7593e485f25f318fedaca86]
+Guarantor Assignment
+v0->c1
+v1->c0
+v2->c0
+v3->c1
+v4->c1
+v5->c0
+
+** [32m Fib_Tri 1 [0m workPackage: 4cf9..7693 **
+
+** [36m MEGATRON 1 [0m workPackage: 9651..3793 **
+[N4] (core 1) [broadcastWorkPackage in slot 4953458] broadcasted guarantee with validator : v0  v3  v4 
+[N5] (core 0) [broadcastWorkPackage in slot 4953458] broadcasted guarantee with validator : v1  v2  v5 
+[N3] [33m Blk 19e1..fb81<-bd6f..70bf [0m e'=412788,m'=03, len(γ_a')=12   	[N3] H_t=4953459 H_r=ce73..45be  [34m |E_T|=3[0m [31m |E_G|=2[0m 2:[b=1|t=3] 3:[b=1|t=3|r=2] 4:[b=1|t=3|p=1|o=193] 5:[b=1|t=3] 
+[N5] [33m Blk bd6f..70bf<-100f..1917 [0m e'=412788,m'=04, len(γ_a')=12   	[N5] H_t=4953460 H_r=aff0..7e75  [34m |E_T|=3[0m [31m |E_A|=6[0m 2:[b=1|t=3] 3:[b=1|t=3|r=2] 4:[b=1|t=3|p=1|o=193] 5:[b=2|t=6|a=2] 
+[N1] [33m Blk 100f..1917<-8856..931f [0m e'=412788,m'=05, len(γ_a')=12   	[N1] H_t=4953461 H_r=1795..f237  [34m |E_T|=3[0m [31m |E_A|=6[0m 1:[b=1|t=3|a=1] 2:[b=1|t=3] 3:[b=1|t=3|r=2] 4:[b=1|t=3|p=1|o=193] 5:[b=2|t=6|a=2] 
+
+** [36m MEGATRON 2 [0m workPackage: 8128..791a **
+
+** [32m Fib_Tri 2 [0m workPackage: 2702..f84d **
+[N4] (core 0) [broadcastWorkPackage in slot 4953461] broadcasted guarantee with validator : v0  v3  v4 
+[N1] WP=0x270211cfb06373739b9428db6fddba30d04cb9518b18edfc46aa3edbdef84d38 Justification Verification Passed
+[N2] WP=0x270211cfb06373739b9428db6fddba30d04cb9518b18edfc46aa3edbdef84d38 Justification Verification Passed
+[N5] (core 1) [broadcastWorkPackage in slot 4953461] broadcasted guarantee with validator : v1  v2  v5 
+[N3] [33m Blk 8856..931f<-d4ed..9516 [0m e'=412788,m'=06, len(γ_a')=12   	[N3] H_t=4953462 H_r=9b5f..af87  [31m |E_G|=2[0m 1:[b=1|t=3|a=1] 2:[b=1|t=3] 3:[b=2|t=3|r=4] 4:[b=1|t=3|p=1|o=193] 5:[b=2|t=6|a=2] 
+[N2] [33m Blk d4ed..9516<-2d20..8a86 [0m e'=412788,m'=07, len(γ_a')=12   	[N2] H_t=4953463 H_r=ca9c..7bf7  [31m |E_A|=6[0m 1:[b=1|t=3|a=1] 2:[b=2|t=3|a=2] 3:[b=2|t=3|r=4] 4:[b=1|t=3|p=1|o=193] 5:[b=2|t=6|a=2] 
+[N0] [33m Blk 2d20..8a86<-a5b4..5ff5 [0m e'=412788,m'=08, len(γ_a')=12   	[N0] H_t=4953464 H_r=599f..8873  [31m |E_A|=6[0m 0:[b=1|a=1] 1:[b=1|t=3|a=1] 2:[b=2|t=3|a=2] 3:[b=2|t=3|r=4] 4:[b=1|t=3|p=1|o=193] 5:[b=2|t=6|a=2] 
+
+** [36m MEGATRON 3 [0m workPackage: bef2..32fe **
+
+** [32m Fib_Tri 3 [0m workPackage: 3ffe..2735 **
+Core index mismatch: 0 != 1
+Core 1 worker: [N5 => 1]
+Core 1 worker: [N5 => 2]
+Core 1 worker: [N5 => 5]
+[N4] WP=0x3ffef66f438bf73c4ee9eb5077d667576d790c658d8bc228614a5c6e8327358e Justification Verification Passed
+[N0] WP=0x3ffef66f438bf73c4ee9eb5077d667576d790c658d8bc228614a5c6e8327358e Justification Verification Passed
+[N3] (core 1) [broadcastWorkPackage in slot 4953464] broadcasted guarantee with validator : v0  v3  v4 
+[N1] [33m Blk a5b4..5ff5<-186f..a439 [0m e'=412788,m'=09, len(γ_a')=12   	[N1] H_t=4953465 H_r=4fc0..f82d  [31m |E_G|=1[0m 0:[b=1|a=1] 1:[b=2|t=3|r=1|a=1] 2:[b=2|t=3|a=2] 3:[b=2|t=3|r=4] 4:[b=1|t=3|p=1|o=193] 5:[b=2|t=6|a=2] 
+[N5] [33m Blk 186f..a439<-34ea..48a2 [0m e'=412788,m'=10, len(γ_a')=12   	[N5] H_t=4953466 H_r=4f05..84a5  [32m WinningTickets[0m(12) 0:[b=1|a=1] 1:[b=2|t=3|r=1|a=1] 2:[b=2|t=3|a=2] 3:[b=2|t=3|r=4] 4:[b=1|t=3|p=1|o=193] 5:[b=3|t=6|a=3] 
+[N3] [33m Blk 34ea..48a2<-c61c..ea4b [0m e'=412788,m'=11, len(γ_a')=12   	[N3] H_t=4953467 H_r=d018..ddcb  [31m |E_A|=6[0m 0:[b=1|a=1] 1:[b=2|t=3|r=1|a=1] 2:[b=2|t=3|a=2] 3:[b=3|t=3|r=4|a=1] 4:[b=1|t=3|p=1|o=193] 5:[b=3|t=6|a=3] 
+[N2] [33m Blk c61c..ea4b<-a5b7..78f6 [0m e'=412789,m'=00, len(γ_a')=3   	[N2] H_t=4953468 H_r=1595..e90c [32m EpochMarker[0m(η1'=81b8..ae67, η2'=ba4a..ed27) [34m |E_T|=3[0m 2:[b=1|t=3] 
+[N0] [33m Blk a5b7..78f6<-fef5..81b8 [0m e'=412789,m'=01, len(γ_a')=6   	[N0] H_t=4953469 H_r=522b..e3f2  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1|t=3] 
+[N5] [33m Blk fef5..81b8<-3550..0eba [0m e'=412789,m'=02, len(γ_a')=9   	[N5] H_t=4953470 H_r=8133..268b  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1|t=3] 5:[b=1|t=3] 
+[N2] [33m Blk 3550..0eba<-bfd0..7022 [0m e'=412789,m'=03, len(γ_a')=12   	[N2] H_t=4953471 H_r=6cff..4933  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=2|t=6] 5:[b=1|t=3] 
+[N5] [33m Blk bfd0..7022<-4fc9..fd5f [0m e'=412789,m'=04, len(γ_a')=12   	[N5] H_t=4953472 H_r=811b..5a3d  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=2|t=6] 5:[b=2|t=6] 
+[N2] [33m Blk 4fc9..fd5f<-8d43..a54e [0m e'=412789,m'=05, len(γ_a')=12   	[N2] H_t=4953473 H_r=23db..e9d4  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=3|t=9] 5:[b=2|t=6] 
+[N3] [33m Blk 8d43..a54e<-0592..73d5 [0m e'=412789,m'=06, len(γ_a')=12   	[N3] H_t=4953474 H_r=57be..df83  0:[b=1|t=3] 2:[b=3|t=9] 3:[b=1] 5:[b=2|t=6] 
+[N1] [33m Blk 0592..73d5<-16e6..dd63 [0m e'=412789,m'=07, len(γ_a')=12   	[N1] H_t=4953475 H_r=e521..b076  0:[b=1|t=3] 1:[b=1] 2:[b=3|t=9] 3:[b=1] 5:[b=2|t=6] 
+[N3] [33m Blk 16e6..dd63<-0d5a..ab86 [0m e'=412789,m'=08, len(γ_a')=12   	[N3] H_t=4953476 H_r=c6c6..5b25  0:[b=1|t=3] 1:[b=1] 2:[b=3|t=9] 3:[b=2] 5:[b=2|t=6] 
+[N4] [33m Blk 0d5a..ab86<-5314..af28 [0m e'=412789,m'=09, len(γ_a')=12   	[N4] H_t=4953477 H_r=14c5..e1b8  0:[b=1|t=3] 1:[b=1] 2:[b=3|t=9] 3:[b=2] 4:[b=1] 5:[b=2|t=6] 
+[N5] [33m Blk 5314..af28<-324b..fde6 [0m e'=412789,m'=10, len(γ_a')=12   	[N5] H_t=4953478 H_r=7b70..c11f  [32m WinningTickets[0m(12) 0:[b=1|t=3] 1:[b=1] 2:[b=3|t=9] 3:[b=2] 4:[b=1] 5:[b=3|t=6] 
+[N2] [33m Blk 324b..fde6<-4a0b..dfd9 [0m e'=412789,m'=11, len(γ_a')=12   	[N2] H_t=4953479 H_r=f00d..c7fa  0:[b=1|t=3] 1:[b=1] 2:[b=4|t=9] 3:[b=2] 4:[b=1] 5:[b=3|t=6] 
+[N0] [33m Blk 4a0b..dfd9<-0b28..9c91 [0m e'=412790,m'=00, len(γ_a')=3   	[N0] H_t=4953480 H_r=77c7..4e96 [32m EpochMarker[0m(η1'=3cd4..69b7, η2'=81b8..ae67) [34m |E_T|=3[0m 0:[b=1|t=3] 
+[N0] [33m Blk 0b28..9c91<-e9d3..ab4f [0m e'=412790,m'=01, len(γ_a')=6   	[N0] H_t=4953481 H_r=d3aa..715d  [34m |E_T|=3[0m 0:[b=2|t=6] 
+[N3] [33m Blk e9d3..ab4f<-2aed..cc47 [0m e'=412790,m'=02, len(γ_a')=9   	[N3] H_t=4953482 H_r=6c39..fe7f  [34m |E_T|=3[0m 0:[b=2|t=6] 3:[b=1|t=3] 
+[N0] [33m Blk 2aed..cc47<-2c81..7ff4 [0m e'=412790,m'=03, len(γ_a')=12   	[N0] H_t=4953483 H_r=743b..55e5  [34m |E_T|=3[0m 0:[b=3|t=9] 3:[b=1|t=3] 
+[N2] [33m Blk 2c81..7ff4<-a23f..cdb6 [0m e'=412790,m'=04, len(γ_a')=12   	[N2] H_t=4953484 H_r=70b1..9b3d  [34m |E_T|=3[0m 0:[b=3|t=9] 2:[b=1|t=3] 3:[b=1|t=3] 
+[N1] [33m Blk a23f..cdb6<-b600..1519 [0m e'=412790,m'=05, len(γ_a')=12   	[N1] H_t=4953485 H_r=77c7..ea94  [34m |E_T|=3[0m 0:[b=3|t=9] 1:[b=1|t=3] 2:[b=1|t=3] 3:[b=1|t=3] 
+[N2] [33m Blk b600..1519<-30b3..e021 [0m e'=412790,m'=06, len(γ_a')=12   	[N2] H_t=4953486 H_r=c0da..d6da  0:[b=3|t=9] 1:[b=1|t=3] 2:[b=2|t=3] 3:[b=1|t=3] 
+[N2] [33m Blk 30b3..e021<-8122..7106 [0m e'=412790,m'=07, len(γ_a')=12   	[N2] H_t=4953487 H_r=8887..4b59  0:[b=3|t=9] 1:[b=1|t=3] 2:[b=3|t=3] 3:[b=1|t=3] 
+[N5] [33m Blk 8122..7106<-b0f5..e76d [0m e'=412790,m'=08, len(γ_a')=12   	[N5] H_t=4953488 H_r=3729..8e10  0:[b=3|t=9] 1:[b=1|t=3] 2:[b=3|t=3] 3:[b=1|t=3] 5:[b=1] 
+[N4] [33m Blk b0f5..e76d<-2478..6beb [0m e'=412790,m'=09, len(γ_a')=12   	[N4] H_t=4953489 H_r=044f..0d7c  0:[b=3|t=9] 1:[b=1|t=3] 2:[b=3|t=3] 3:[b=1|t=3] 4:[b=1] 5:[b=1] 
+[N0] [33m Blk 2478..6beb<-6bfa..08e7 [0m e'=412790,m'=10, len(γ_a')=12   	[N0] H_t=4953490 H_r=45d0..d645  [32m WinningTickets[0m(12) 0:[b=4|t=9] 1:[b=1|t=3] 2:[b=3|t=3] 3:[b=1|t=3] 4:[b=1] 5:[b=1] 
+[N3] [33m Blk 6bfa..08e7<-aaf8..274c [0m e'=412790,m'=11, len(γ_a')=12   	[N3] H_t=4953491 H_r=4c9e..2345  0:[b=4|t=9] 1:[b=1|t=3] 2:[b=3|t=3] 3:[b=2|t=3] 4:[b=1] 5:[b=1] 
+[N1] [33m Blk aaf8..274c<-9bac..459d [0m e'=412791,m'=00, len(γ_a')=3   	[N1] H_t=4953492 H_r=863c..fe03 [32m EpochMarker[0m(η1'=4b2d..2de1, η2'=3cd4..69b7) [34m |E_T|=3[0m 1:[b=1|t=3] 
+[N5] [33m Blk 9bac..459d<-8007..c9d9 [0m e'=412791,m'=01, len(γ_a')=6   	[N5] H_t=4953493 H_r=2463..0947  [34m |E_T|=3[0m 1:[b=1|t=3] 5:[b=1|t=3] 
+[N4] [33m Blk 8007..c9d9<-97be..55b4 [0m e'=412791,m'=02, len(γ_a')=9   	[N4] H_t=4953494 H_r=174f..1a21  [34m |E_T|=3[0m 1:[b=1|t=3] 4:[b=1|t=3] 5:[b=1|t=3] 
+[N1] [33m Blk 97be..55b4<-f78b..30ac [0m e'=412791,m'=03, len(γ_a')=12   	[N1] H_t=4953495 H_r=39bd..4c7b  [34m |E_T|=3[0m 1:[b=2|t=6] 4:[b=1|t=3] 5:[b=1|t=3] 
+[N2] [33m Blk f78b..30ac<-2830..d74d [0m e'=412791,m'=04, len(γ_a')=12   	[N2] H_t=4953496 H_r=4d0d..3cb3  [34m |E_T|=3[0m 1:[b=2|t=6] 2:[b=1|t=3] 4:[b=1|t=3] 5:[b=1|t=3] 
+[N4] [33m Blk 2830..d74d<-272e..932a [0m e'=412791,m'=05, len(γ_a')=12   	[N4] H_t=4953497 H_r=16f2..bf6c  [34m |E_T|=3[0m 1:[b=2|t=6] 2:[b=1|t=3] 4:[b=2|t=6] 5:[b=1|t=3] 
+[N3] [33m Blk 272e..932a<-6add..efd3 [0m e'=412791,m'=06, len(γ_a')=12   	[N3] H_t=4953498 H_r=e528..8cd2  1:[b=2|t=6] 2:[b=1|t=3] 3:[b=1] 4:[b=2|t=6] 5:[b=1|t=3] 
+[N2] [33m Blk 6add..efd3<-2ad6..4546 [0m e'=412791,m'=07, len(γ_a')=12   	[N2] H_t=4953499 H_r=9945..e53c  1:[b=2|t=6] 2:[b=2|t=3] 3:[b=1] 4:[b=2|t=6] 5:[b=1|t=3] 
+[N0] [33m Blk 2ad6..4546<-bd3b..63ad [0m e'=412791,m'=08, len(γ_a')=12   	[N0] H_t=4953500 H_r=265f..aad4  0:[b=1] 1:[b=2|t=6] 2:[b=2|t=3] 3:[b=1] 4:[b=2|t=6] 5:[b=1|t=3] 
+[N3] [33m Blk bd3b..63ad<-8912..f555 [0m e'=412791,m'=09, len(γ_a')=12   	[N3] H_t=4953501 H_r=b185..26ce  0:[b=1] 1:[b=2|t=6] 2:[b=2|t=3] 3:[b=2] 4:[b=2|t=6] 5:[b=1|t=3] 
+[N4] [33m Blk 8912..f555<-789f..55b5 [0m e'=412791,m'=10, len(γ_a')=12   	[N4] H_t=4953502 H_r=b40a..2cca  [32m WinningTickets[0m(12) 0:[b=1] 1:[b=2|t=6] 2:[b=2|t=3] 3:[b=2] 4:[b=3|t=6] 5:[b=1|t=3] 
+[N0] [33m Blk 789f..55b5<-7485..ffe7 [0m e'=412791,m'=11, len(γ_a')=12   	[N0] H_t=4953503 H_r=e3e4..e875  0:[b=2] 1:[b=2|t=6] 2:[b=2|t=3] 3:[b=2] 4:[b=3|t=6] 5:[b=1|t=3] 
+[N5] [33m Blk 7485..ffe7<-085d..2519 [0m e'=412792,m'=00, len(γ_a')=3   	[N5] H_t=4953504 H_r=95b8..062f [32m EpochMarker[0m(η1'=fa91..bb84, η2'=4b2d..2de1) [34m |E_T|=3[0m 5:[b=1|t=3] 
+[N0] [33m Blk 085d..2519<-c9c3..bcfe [0m e'=412792,m'=01, len(γ_a')=6   	[N0] H_t=4953505 H_r=ee73..e4a9  [34m |E_T|=3[0m 0:[b=1|t=3] 5:[b=1|t=3] 
+[N5] [33m Blk c9c3..bcfe<-7dfd..8d61 [0m e'=412792,m'=02, len(γ_a')=9   	[N5] H_t=4953506 H_r=a090..a992  [34m |E_T|=3[0m 0:[b=1|t=3] 5:[b=2|t=6] 
+[N5] [33m Blk 7dfd..8d61<-6477..476c [0m e'=412792,m'=03, len(γ_a')=12   	[N5] H_t=4953507 H_r=532a..abb3  [34m |E_T|=3[0m 0:[b=1|t=3] 5:[b=3|t=9] 
+[N2] [33m Blk 6477..476c<-a80c..3db8 [0m e'=412792,m'=04, len(γ_a')=12   	[N2] H_t=4953508 H_r=cdde..a376  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1|t=3] 5:[b=3|t=9] 
+[N1] [33m Blk a80c..3db8<-dc83..15d4 [0m e'=412792,m'=05, len(γ_a')=12   	[N1] H_t=4953509 H_r=a756..4127  [34m |E_T|=3[0m 0:[b=1|t=3] 1:[b=1|t=3] 2:[b=1|t=3] 5:[b=3|t=9] 
+[N3] [33m Blk dc83..15d4<-3050..93a2 [0m e'=412792,m'=06, len(γ_a')=12   	[N3] H_t=4953510 H_r=ae2a..7340  0:[b=1|t=3] 1:[b=1|t=3] 2:[b=1|t=3] 3:[b=1] 5:[b=3|t=9] 
+[N1] [33m Blk 3050..93a2<-4408..beae [0m e'=412792,m'=07, len(γ_a')=12   	[N1] H_t=4953511 H_r=ea44..03e3  0:[b=1|t=3] 1:[b=2|t=3] 2:[b=1|t=3] 3:[b=1] 5:[b=3|t=9] 
+[N2] [33m Blk 4408..beae<-2587..a940 [0m e'=412792,m'=08, len(γ_a')=12   	[N2] H_t=4953512 H_r=359e..ef86  0:[b=1|t=3] 1:[b=2|t=3] 2:[b=2|t=3] 3:[b=1] 5:[b=3|t=9] 
+[N3] [33m Blk 2587..a940<-28d7..4dc9 [0m e'=412792,m'=09, len(γ_a')=12   	[N3] H_t=4953513 H_r=ad5b..fc42  0:[b=1|t=3] 1:[b=2|t=3] 2:[b=2|t=3] 3:[b=2] 5:[b=3|t=9] 
+[N4] [33m Blk 28d7..4dc9<-4659..282c [0m e'=412792,m'=10, len(γ_a')=12   	[N4] H_t=4953514 H_r=0273..16c9  [32m WinningTickets[0m(12) 0:[b=1|t=3] 1:[b=2|t=3] 2:[b=2|t=3] 3:[b=2] 4:[b=1] 5:[b=3|t=9] 
+[N0] [33m Blk 4659..282c<-7965..d67c [0m e'=412792,m'=11, len(γ_a')=12   	[N0] H_t=4953515 H_r=7fbc..da3a  0:[b=2|t=3] 1:[b=2|t=3] 2:[b=2|t=3] 3:[b=2] 4:[b=1] 5:[b=3|t=9] 
+[N3] [33m Blk 7965..d67c<-4ee4..3f78 [0m e'=412793,m'=00, len(γ_a')=3   	[N3] H_t=4953516 H_r=bb35..9845 [32m EpochMarker[0m(η1'=5b37..7bee, η2'=fa91..bb84) [34m |E_T|=3[0m 3:[b=1|t=3] 
+[N1] [33m Blk 4ee4..3f78<-e425..e2c9 [0m e'=412793,m'=01, len(γ_a')=6   	[N1] H_t=4953517 H_r=257b..8d87  [34m |E_T|=3[0m 1:[b=1|t=3] 3:[b=1|t=3] 
+[N0] [33m Blk e425..e2c9<-e497..2c51 [0m e'=412793,m'=02, len(γ_a')=9   	[N0] H_t=4953518 H_r=e790..4372  [34m |E_T|=3[0m 0:[b=1|t=3] 1:[b=1|t=3] 3:[b=1|t=3] 
+[N0] [33m Blk e497..2c51<-23c8..8b84 [0m e'=412793,m'=03, len(γ_a')=12   	[N0] H_t=4953519 H_r=a95c..4e59  [34m |E_T|=3[0m 0:[b=2|t=6] 1:[b=1|t=3] 3:[b=1|t=3] 
+[N0] [33m Blk 23c8..8b84<-009c..b7d5 [0m e'=412793,m'=04, len(γ_a')=12   	[N0] H_t=4953520 H_r=b407..aa52  [34m |E_T|=3[0m 0:[b=3|t=9] 1:[b=1|t=3] 3:[b=1|t=3] 
+[N4] [33m Blk 009c..b7d5<-2e6e..a947 [0m e'=412793,m'=05, len(γ_a')=12   	[N4] H_t=4953521 H_r=272b..a4c1  [34m |E_T|=3[0m 0:[b=3|t=9] 1:[b=1|t=3] 3:[b=1|t=3] 4:[b=1|t=3] 
+[N5] [33m Blk 2e6e..a947<-ff37..db98 [0m e'=412793,m'=06, len(γ_a')=12   	[N5] H_t=4953522 H_r=ce72..bbaa  0:[b=3|t=9] 1:[b=1|t=3] 3:[b=1|t=3] 4:[b=1|t=3] 5:[b=1] 
+[N1] [33m Blk ff37..db98<-b2ae..2948 [0m e'=412793,m'=07, len(γ_a')=12   	[N1] H_t=4953523 H_r=a262..a599  0:[b=3|t=9] 1:[b=2|t=3] 3:[b=1|t=3] 4:[b=1|t=3] 5:[b=1] 
+[N5] [33m Blk b2ae..2948<-f3f8..7fa8 [0m e'=412793,m'=08, len(γ_a')=12   	[N5] H_t=4953524 H_r=316a..a346  0:[b=3|t=9] 1:[b=2|t=3] 3:[b=1|t=3] 4:[b=1|t=3] 5:[b=2] 
+[N5] [33m Blk f3f8..7fa8<-ad5c..a075 [0m e'=412793,m'=09, len(γ_a')=12   	[N5] H_t=4953525 H_r=eb83..9bfe  0:[b=3|t=9] 1:[b=2|t=3] 3:[b=1|t=3] 4:[b=1|t=3] 5:[b=3] 
+[N2] [33m Blk ad5c..a075<-5cb3..08b4 [0m e'=412793,m'=10, len(γ_a')=12   	[N2] H_t=4953526 H_r=f944..b7f3  [32m WinningTickets[0m(12) 0:[b=3|t=9] 1:[b=2|t=3] 2:[b=1] 3:[b=1|t=3] 4:[b=1|t=3] 5:[b=3] 
+[N3] [33m Blk 5cb3..08b4<-2f30..61a4 [0m e'=412793,m'=11, len(γ_a')=12   	[N3] H_t=4953527 H_r=7736..f35c  0:[b=3|t=9] 1:[b=2|t=3] 2:[b=1] 3:[b=2|t=3] 4:[b=1|t=3] 5:[b=3] 
+[N2] [33m Blk 2f30..61a4<-d40d..df5e [0m e'=412794,m'=00, len(γ_a')=3   	[N2] H_t=4953528 H_r=dd8a..c1be [32m EpochMarker[0m(η1'=4777..a2ff, η2'=5b37..7bee) [34m |E_T|=3[0m 2:[b=1|t=3] 
+[N2] [33m Blk d40d..df5e<-a865..39d1 [0m e'=412794,m'=01, len(γ_a')=6   	[N2] H_t=4953529 H_r=2cf9..4d4e  [34m |E_T|=3[0m 2:[b=2|t=6] 
+[N4] [33m Blk a865..39d1<-f40a..0b71 [0m e'=412794,m'=02, len(γ_a')=9   	[N4] H_t=4953530 H_r=91a4..97e6  [34m |E_T|=3[0m 2:[b=2|t=6] 4:[b=1|t=3] 
+[N3] [33m Blk f40a..0b71<-bacf..11fc [0m e'=412794,m'=03, len(γ_a')=12   	[N3] H_t=4953531 H_r=3368..f2be  [34m |E_T|=3[0m 2:[b=2|t=6] 3:[b=1|t=3] 4:[b=1|t=3] 
+[N3] [33m Blk bacf..11fc<-6d2b..9566 [0m e'=412794,m'=04, len(γ_a')=12   	[N3] H_t=4953532 H_r=2ef4..ebc4  [34m |E_T|=3[0m 2:[b=2|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 
+[N0] [33m Blk 6d2b..9566<-823e..9825 [0m e'=412794,m'=05, len(γ_a')=12   	[N0] H_t=4953533 H_r=5c44..ad85  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=2|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 
+[N0] [33m Blk 823e..9825<-d9d6..d94e [0m e'=412794,m'=06, len(γ_a')=12   	[N0] H_t=4953534 H_r=7faa..e693  0:[b=2|t=3] 2:[b=2|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 
+[N5] [33m Blk d9d6..d94e<-6d0d..a68d [0m e'=412794,m'=07, len(γ_a')=12   	[N5] H_t=4953535 H_r=79d6..f6bb  0:[b=2|t=3] 2:[b=2|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 5:[b=1] 
+[N5] [33m Blk 6d0d..a68d<-e027..213d [0m e'=412794,m'=08, len(γ_a')=12   	[N5] H_t=4953536 H_r=778c..391d  0:[b=2|t=3] 2:[b=2|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 5:[b=2] 
+[N1] [33m Blk e027..213d<-4b56..8998 [0m e'=412794,m'=09, len(γ_a')=12   	[N1] H_t=4953537 H_r=ce91..b69b  0:[b=2|t=3] 1:[b=1] 2:[b=2|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 5:[b=2] 
+[N0] [33m Blk 4b56..8998<-02fd..f044 [0m e'=412794,m'=10, len(γ_a')=12   	[N0] H_t=4953538 H_r=7a4d..8f48  [32m WinningTickets[0m(12) 0:[b=3|t=3] 1:[b=1] 2:[b=2|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 5:[b=2] 
+[N2] [33m Blk 02fd..f044<-d9e7..e6f6 [0m e'=412794,m'=11, len(γ_a')=12   	[N2] H_t=4953539 H_r=f4c6..37eb  0:[b=3|t=3] 1:[b=1] 2:[b=3|t=6] 3:[b=2|t=6] 4:[b=1|t=3] 5:[b=2] 
+[N2] [33m Blk d9e7..e6f6<-cc7d..b074 [0m e'=412795,m'=00, len(γ_a')=3   	[N2] H_t=4953540 H_r=9f04..489c [32m EpochMarker[0m(η1'=08a5..5cb0, η2'=4777..a2ff) [34m |E_T|=3[0m 2:[b=1|t=3] 
+[N4] [33m Blk cc7d..b074<-84df..fe3a [0m e'=412795,m'=01, len(γ_a')=6   	[N4] H_t=4953541 H_r=5a7c..8387  [34m |E_T|=3[0m 2:[b=1|t=3] 4:[b=1|t=3] 
+signal: interrupt
+FAIL	github.com/colorfulnotion/jam/node	591.664s

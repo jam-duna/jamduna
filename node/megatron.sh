@@ -1,0 +1,14 @@
+make megatron > logs/m0.txt
+make megatron > logs/m1.txt
+make megatron > logs/m2.txt
+make megatron > logs/m3.txt
+make megatron > logs/m4.txt
+make megatron > logs/m5.txt
+make megatron > logs/m6.txt
+make megatron > logs/m7.txt
+make megatron > logs/m8.txt
+make megatron > logs/m9.txt
+make megatron > logs/m10.txt
+make megatron > logs/m11.txt
+make megatron > logs/m12.txt
+

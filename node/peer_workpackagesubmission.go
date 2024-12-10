@@ -80,13 +80,12 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	pkg.WorkPackage = workPackage
 	return nil
 }
-func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics []byte) (err error) {
+func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics []byte, core_idx uint16) (err error) {
 	if pkg.RefineContext.LookupAnchorSlot == 1 {
 		if len(pkg.RefineContext.Prerequisites) == 0 {
 			panic("Prerequisite is empty")
 		}
 	}
-	core_idx, err := p.node.GetCoreIndexFromEd25519Key(p.Validator.Ed25519)
 	if err != nil {
 		return fmt.Errorf("failed to get self core index: %w", err)
 	}
@@ -115,7 +114,7 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics []byt
 		return err
 	}
 	if debugG {
-		fmt.Printf("%s submitted Workpackage %d bytes\n", p.String(), len(reqBytes))
+		fmt.Printf("%s submitted Workpackage %d bytes to core %d\n", p.String(), len(reqBytes), core_idx)
 	}
 	/*
 		// TODO: write extrinsics
@@ -148,6 +147,10 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	}
 	if newReq.CoreIndex != selfCoreIndex {
 		fmt.Printf("Core index mismatch: %d != %d\n", newReq.CoreIndex, selfCoreIndex)
+		core_workers := n.GetCoreCoWorkersPeers(selfCoreIndex)
+		for _, peer := range core_workers {
+			fmt.Printf("Core %d worker: %s\n", selfCoreIndex, peer.String())
+		}
 		return fmt.Errorf("Core index mismatch: %d != %d", newReq.CoreIndex, selfCoreIndex)
 	}
 	if debugG {

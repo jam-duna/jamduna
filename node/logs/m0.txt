@@ -1,0 +1,128 @@
+Running TestMegatron with timeout 30m...
+go test -timeout 30m -v -run ^TestMegatron$
+=== RUN   TestMegatron
+===Time Saving Mode===
+AddTime: -37s
+JCE Start Time: 2024-01-01 11:59:23 +0000 UTC
+!!!NewGenesisConfig epoch0Timestamp: 29719584. Wait:5 Sec 
+[N0] newNode addr=0.0.0.0:9000 dataDir=/tmp/root/jam/4953257/node0
+[N1] newNode addr=0.0.0.0:9001 dataDir=/tmp/root/jam/4953257/node1
+Starting server on 0.0.0.0:8080
+[N2] newNode addr=0.0.0.0:9002 dataDir=/tmp/root/jam/4953257/node2
+[N3] newNode addr=0.0.0.0:9003 dataDir=/tmp/root/jam/4953257/node3
+[N4] newNode addr=0.0.0.0:9004 dataDir=/tmp/root/jam/4953257/node4
+[N5] newNode addr=0.0.0.0:9005 dataDir=/tmp/root/jam/4953257/node5
+[N2] [33m Blk 0000..0000<-35ee..5011 [0m e'=412772,m'=00, len(γ_a')=0   	[N2] H_t=4953264 H_r=68d7..eb45 [32m EpochMarker[0m(η1'=6f6a..24af, η2'=835a..574e) 2:[b=1] 
+[N0] [33m Blk 35ee..5011<-abea..7152 [0m e'=412772,m'=01, len(γ_a')=3   	[N0] H_t=4953265 H_r=c569..2348  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1] 
+1: fib Code Hash: 701623c7c517e327b2578d01c3fc67619ded80feaefd60833238073bfe4d18b3 (Code Length: 210)
+2: tribonacci Code Hash: b5732b6236d5dc997f6a182128d5170dba8e161634d4a5a05996efe8e2086e57 (Code Length: 222)
+3: megatron Code Hash: c4254ce54e9166133e4b84446c88bbce6d31324bbac003e7c72d39b4918a8d02 (Code Length: 193)
+Waiting for the first block to be ready...
+[N4] [33m Blk abea..7152<-16dd..b2ee [0m e'=412772,m'=02, len(γ_a')=6   	[N4] H_t=4953266 H_r=49ca..3932  [34m |E_T|=3[0m 0:[b=1|t=3] 2:[b=1] 4:[b=1|t=3] 
+Builder storing TestService fib (7016..4d18)
+Waiting for fib service to be ready...
+[N1] (core 0) [broadcastWorkPackage in slot 4953265] broadcasted guarantee with validator : v1  v2  v3 
+[N1] [33m Blk 16dd..b2ee<-b5cd..c57c [0m e'=412772,m'=03, len(γ_a')=9   	[N1] H_t=4953267 H_r=bd2e..9a76  [34m |E_T|=3[0m [31m |E_G|=1[0m 0:[b=1|t=3] 1:[b=1|t=3|r=1] 2:[b=1] 4:[b=1|t=3] 
+[N1] [33m Blk b5cd..c57c<-4ee6..ec96 [0m e'=412772,m'=04, len(γ_a')=12   	[N1] H_t=4953268 H_r=4368..f4d5  [34m |E_T|=3[0m [31m |E_A|=6[0m 0:[b=1|t=3] 1:[b=2|t=6|r=1|a=1] 2:[b=1] 4:[b=1|t=3] 
+[N0] [33m Blk 4ee6..ec96<-5fcd..3b4d [0m e'=412772,m'=05, len(γ_a')=12   	[N0] H_t=4953269 H_r=6e5a..712f  [34m |E_T|=3[0m 0:[b=2|t=6] 1:[b=2|t=6|r=1|a=1] 2:[b=1] 4:[b=1|t=3] 
+fib Service Index: 1207737368
+Builder storing TestService tribonacci (b573..086e)
+Waiting for tribonacci service to be ready...
+[N4] (core 0) [broadcastWorkPackage in slot 4953269] broadcasted guarantee with validator : v0  v4  v5 
+[N5] [33m Blk 5fcd..3b4d<-0b74..8c48 [0m e'=412772,m'=06, len(γ_a')=12   	[N5] H_t=4953270 H_r=8de3..7a53  [34m |E_T|=3[0m [31m |E_G|=1[0m 0:[b=2|t=6] 1:[b=2|t=6|r=1|a=1] 2:[b=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N1] [33m Blk 0b74..8c48<-5b59..105d [0m e'=412772,m'=07, len(γ_a')=12   	[N1] H_t=4953271 H_r=ef7e..c8d6  [31m |E_P|=1[0m [31m |E_A|=6[0m 0:[b=2|t=6] 1:[b=3|t=6|p=1|o=210|r=1|a=2] 2:[b=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N2] [33m Blk 5b59..105d<-354a..b712 [0m e'=412772,m'=08, len(γ_a')=12   	[N2] H_t=4953272 H_r=188b..4035  0:[b=2|t=6] 1:[b=3|t=6|p=1|o=210|r=1|a=2] 2:[b=2] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+tribonacci Service Index: 198186115
+Builder storing TestService megatron (c425..8a8d)
+Waiting for megatron service to be ready...
+[N1] (core 0) [broadcastWorkPackage in slot 4953272] broadcasted guarantee with validator : v1  v2  v3 
+[N2] [33m Blk 354a..b712<-17ea..a6fb [0m e'=412772,m'=09, len(γ_a')=12   	[N2] H_t=4953273 H_r=9cdf..d1a0  [31m |E_G|=1[0m 0:[b=2|t=6] 1:[b=3|t=6|p=1|o=210|r=1|a=2] 2:[b=3|r=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N1] [33m Blk 17ea..a6fb<-e4cc..cea7 [0m e'=412772,m'=10, len(γ_a')=12   	[N1] H_t=4953274 H_r=622e..daa1  [32m WinningTickets[0m(12) [31m |E_P|=1[0m [31m |E_A|=6[0m 0:[b=2|t=6] 1:[b=4|t=6|p=2|o=432|r=1|a=3] 2:[b=3|r=1] 4:[b=1|t=3] 5:[b=1|t=3|r=1] 
+[N4] [33m Blk e4cc..cea7<-fe22..696b [0m e'=412772,m'=11, len(γ_a')=12   	[N4] H_t=4953275 H_r=3a4a..ac8f  0:[b=2|t=6] 1:[b=4|t=6|p=2|o=432|r=1|a=3] 2:[b=3|r=1] 4:[b=2|t=3] 5:[b=1|t=3|r=1] 
+megatron Service Index: 2891872120
+All services are ready, Send preimage announcement
+Wait until all the preimage blobs are ready
+[N2] [33m Blk fe22..696b<-22e6..354f [0m e'=412773,m'=00, len(γ_a')=3   	[N2] H_t=4953276 H_r=4ee9..764c [32m EpochMarker[0m(η1'=ba4a..ed27, η2'=6f6a..24af) [34m |E_T|=3[0m 2:[b=1|t=3] 
+[N5] [33m Blk 22e6..354f<-9126..8c71 [0m e'=412773,m'=01, len(γ_a')=6   	[N5] H_t=4953277 H_r=27ac..14b3  [34m |E_T|=3[0m 2:[b=1|t=3] 5:[b=1|t=3] 
+[N4] [33m Blk 9126..8c71<-b8ec..4af3 [0m e'=412773,m'=02, len(γ_a')=9   	[N4] H_t=4953278 H_r=a674..499c  [34m |E_T|=3[0m 2:[b=1|t=3] 4:[b=1|t=3] 5:[b=1|t=3] 
+[N3] [33m Blk b8ec..4af3<-920e..e4e3 [0m e'=412773,m'=03, len(γ_a')=12   	[N3] H_t=4953279 H_r=4b87..38c6  [34m |E_T|=3[0m [31m |E_P|=1[0m 2:[b=1|t=3] 3:[b=1|t=3|p=1|o=193] 4:[b=1|t=3] 5:[b=1|t=3] 
+Start Fib_Trib
+service0: 1207737368, codehash: 0x701623c7c517e327b2578d01c3fc67619ded80feaefd60833238073bfe4d18b3 (len=210) | fib
+service1: 198186115, codehash: 0xb5732b6236d5dc997f6a182128d5170dba8e161634d4a5a05996efe8e2086e57 (len=210) | tribonacci
+serviceM: 2891872120, codehash: 0xc4254ce54e9166133e4b84446c88bbce6d31324bbac003e7c72d39b4918a8d02 (len=210) | megatron
+6 Fib_Trib_WorkPackages:
+  Fib_Trib_WorkPackage #0: 0xd0a7dd1d0f94898cff6c10d8eaae5aa63cae8da815b72d6d610f401ced9b4acb
+  Fib_Trib_WorkPackage #1: 0x711a22493c2693a740cb4650fd7e2184ef431491875f2955e097ed7cf32b6aa9
+  Fib_Trib_WorkPackage #2: 0x449b3af67c291f5d936a60093887b7a151e007503c77179282fdb86c57823de1
+  Fib_Trib_WorkPackage #3: 0x655683793c9c9fb40d316d9a3fa7b12a0a362b4db5f8ea6065c99539e14b5f52
+  Fib_Trib_WorkPackage #4: 0xa14cb7818f5903055fb247e8202263e3a3e4c8837ea6523b2b83cc5e157cadb1
+  Fib_Trib_WorkPackage #5: 0xe0976d4e0a6f3887bfcbcb809b8d773cec9ab5d291f8560707925c6b0bc38bda
+6 Megatron_WorkPackages:
+  Meg_WorkPackage #0 0xb3ccd15f453b1c9313fad58a6b0759d96deef65ac336d388db6423204576c1bb. PreReqs=[0xd0a7dd1d0f94898cff6c10d8eaae5aa63cae8da815b72d6d610f401ced9b4acb]
+  Meg_WorkPackage #1 0x3becbc723f75ba1c05863e5e954f75fdde75893d13754fd4d0ecd969f8512de4. PreReqs=[0x711a22493c2693a740cb4650fd7e2184ef431491875f2955e097ed7cf32b6aa9]
+  Meg_WorkPackage #2 0x5dc19e99b41a03e6e5d396703010166468af9a20127096e82f1c5cf3af202bb7. PreReqs=[0x449b3af67c291f5d936a60093887b7a151e007503c77179282fdb86c57823de1]
+  Meg_WorkPackage #3 0x2f5f5d513024ef554a65315660aae8eaa5fbe0570c3af3b9fcfe0f2c157773d6. PreReqs=[0x655683793c9c9fb40d316d9a3fa7b12a0a362b4db5f8ea6065c99539e14b5f52]
+  Meg_WorkPackage #4 0xbcd8a56c053964293e80a5f307c4e0faf96f73c833172266bbb2e2053a77d1dc. PreReqs=[0xa14cb7818f5903055fb247e8202263e3a3e4c8837ea6523b2b83cc5e157cadb1]
+  Meg_WorkPackage #5 0x985f8ee2c2dbca5cad784ee5aca82a5682a83e592292c938f532877ab3c6c47b. PreReqs=[0xe0976d4e0a6f3887bfcbcb809b8d773cec9ab5d291f8560707925c6b0bc38bda]
+Guarantor Assignment
+v0->c1
+v1->c0
+v2->c0
+v3->c1
+v4->c1
+v5->c0
+
+** [36m MEGATRON 1 [0m workPackage: b3cc..76c1 **
+
+** [32m Fib_Tri 1 [0m workPackage: d0a7..9b4a **
+[N2] (core 0) [broadcastWorkPackage in slot 4953279] broadcasted guarantee with validator : v1  v2  v5 
+[N0] (core 1) [broadcastWorkPackage in slot 4953279] broadcasted guarantee with validator : v0  v3  v4 
+[N5] [33m Blk 920e..e4e3<-f8cf..1988 [0m e'=412773,m'=04, len(γ_a')=12   	[N5] H_t=4953280 H_r=dbca..b557  [34m |E_T|=3[0m [31m |E_G|=2[0m 2:[b=1|t=3] 3:[b=1|t=3|p=1|o=193] 4:[b=1|t=3] 5:[b=2|t=6|r=2] 
+[N1] [33m Blk f8cf..1988<-cd89..283e [0m e'=412773,m'=05, len(γ_a')=12   	[N1] H_t=4953281 H_r=fa55..7695  [34m |E_T|=3[0m [31m |E_A|=6[0m 1:[b=1|t=3|a=2] 2:[b=1|t=3] 3:[b=1|t=3|p=1|o=193] 4:[b=1|t=3] 5:[b=2|t=6|r=2] 
+[N3] [33m Blk cd89..283e<-b3ec..3597 [0m e'=412773,m'=06, len(γ_a')=12   	[N3] H_t=4953282 H_r=1fc4..2e70  [31m |E_A|=6[0m 1:[b=1|t=3|a=2] 2:[b=1|t=3] 3:[b=2|t=3|p=1|o=193|a=1] 4:[b=1|t=3] 5:[b=2|t=6|r=2] 
+
+** [36m MEGATRON 2 [0m workPackage: 3bec..512d **
+
+** [32m Fib_Tri 2 [0m workPackage: 711a..2b6a **
+[N4] (core 0) [broadcastWorkPackage in slot 4953282] broadcasted guarantee with validator : v0  v3  v4 
+[N1] WP=0x711a22493c2693a740cb4650fd7e2184ef431491875f2955e097ed7cf32b6aa9 Justification Verification Passed
+[N2] WP=0x711a22493c2693a740cb4650fd7e2184ef431491875f2955e097ed7cf32b6aa9 Justification Verification Passed
+[N5] (core 1) [broadcastWorkPackage in slot 4953282] broadcasted guarantee with validator : v1  v2  v5 
+[N2] [33m Blk b3ec..3597<-6bb8..eae1 [0m e'=412773,m'=07, len(γ_a')=12   	[N2] H_t=4953283 H_r=d2a7..7bce  [31m |E_G|=2[0m 1:[b=1|t=3|a=2] 2:[b=2|t=3|r=2] 3:[b=2|t=3|p=1|o=193|a=1] 4:[b=1|t=3] 5:[b=2|t=6|r=2] 
+[N0] [33m Blk 6bb8..eae1<-1a51..8e58 [0m e'=412773,m'=08, len(γ_a')=12   	[N0] H_t=4953284 H_r=6e39..1322  [31m |E_A|=6[0m 0:[b=1|a=2] 1:[b=1|t=3|a=2] 2:[b=2|t=3|r=2] 3:[b=2|t=3|p=1|o=193|a=1] 4:[b=1|t=3] 5:[b=2|t=6|r=2] 
+[N1] [33m Blk 1a51..8e58<-fd36..ffc9 [0m e'=412773,m'=09, len(γ_a')=12   	[N1] H_t=4953285 H_r=9388..830c  [31m |E_A|=6[0m 0:[b=1|a=2] 1:[b=2|t=3|a=3] 2:[b=2|t=3|r=2] 3:[b=2|t=3|p=1|o=193|a=1] 4:[b=1|t=3] 5:[b=2|t=6|r=2] 
+
+** [36m MEGATRON 3 [0m workPackage: 5dc1..202b **
+
+** [32m Fib_Tri 3 [0m workPackage: 449b..823d **
+[N4] WP=0x449b3af67c291f5d936a60093887b7a151e007503c77179282fdb86c57823de1 Justification Verification Passed
+[N5] (core 0) [broadcastWorkPackage in slot 4953285] broadcasted guarantee with validator : v1  v2  v5 
+[N0] WP=0x449b3af67c291f5d936a60093887b7a151e007503c77179282fdb86c57823de1 Justification Verification Passed
+[N3] (core 1) [broadcastWorkPackage in slot 4953285] broadcasted guarantee with validator : v0  v3  v4 
+[N5] [33m Blk fd36..ffc9<-8d45..0c01 [0m e'=412773,m'=10, len(γ_a')=12   	[N5] H_t=4953286 H_r=693e..0e4b  [32m WinningTickets[0m(12) [31m |E_G|=2[0m 0:[b=1|a=2] 1:[b=2|t=3|a=3] 2:[b=2|t=3|r=2] 3:[b=2|t=3|p=1|o=193|a=1] 4:[b=1|t=3] 5:[b=3|t=6|r=4] 
+[N3] [33m Blk 8d45..0c01<-4ccb..d1ba [0m e'=412773,m'=11, len(γ_a')=12   	[N3] H_t=4953287 H_r=f102..24b8  [31m |E_A|=6[0m 0:[b=1|a=2] 1:[b=2|t=3|a=3] 2:[b=2|t=3|r=2] 3:[b=3|t=3|p=1|o=193|a=3] 4:[b=1|t=3] 5:[b=3|t=6|r=4] 
+[N2] [33m Blk 4ccb..d1ba<-0b11..2e30 [0m e'=412774,m'=00, len(γ_a')=3   	[N2] H_t=4953288 H_r=91a5..eebd [32m EpochMarker[0m(η1'=81b8..ae67, η2'=ba4a..ed27) [34m |E_T|=3[0m [31m |E_A|=6[0m 2:[b=1|t=3|a=1] 
+
+** [32m Fib_Tri 4 [0m workPackage: 6556..4b5f **
+
+** [36m MEGATRON 4 [0m workPackage: 2f5f..7773 **
+Core index mismatch: 0 != 1
+Core 1 worker: [N2 => 1]
+Core 1 worker: [N2 => 2]
+Core 1 worker: [N2 => 3]
+[N0] WP=0x655683793c9c9fb40d316d9a3fa7b12a0a362b4db5f8ea6065c99539e14b5f52 Justification Verification Passed
+[N3] [broadcastWorkPackage] Guarantee from fellow [N3] did not match! 
+eg_wr: 0x577822d436d1fbd9671581a0bf1413bb652bbe48e8042c68f7db5f5efa9089d0, fellow_wr: 0x7f76c594cbbf7c7bf6d9eeef36d545a692503bb4fc289d4651d78c7fc49e3557
+panic: Guarantee from fellow did not match!
+
+goroutine 2168 [running]:
+github.com/colorfulnotion/jam/node.(*Node).broadcastWorkpackage(_, {{0xc002efbcf2, 0x2, 0x2}, 0x47fc9c18, {{0x0, 0x0, 0x0, 0x0, 0x0, ...}, ...}, ...})
+	/root/go/src/github.com/colorfulnotion/jam/node/node_guarantee.go:65 +0x10e6
+github.com/colorfulnotion/jam/node.(*Node).onWorkPackageSubmission(0xc0007fad88, {0xc002edeb00?, 0xd1dd3d66e95773c5?}, {0xc002edeb00?, 0x9ea7f1219f416fc4?, 0xa5264a2f3aea9008?})
+	/root/go/src/github.com/colorfulnotion/jam/node/peer_workpackagesubmission.go:163 +0x225
+github.com/colorfulnotion/jam/node.(*Node).DispatchIncomingQUICStream(0xc0007fad88, {0x7ff9147395e0, 0xc002525340}, 0x0)
+	/root/go/src/github.com/colorfulnotion/jam/node/peer.go:188 +0x2b9
+created by github.com/colorfulnotion/jam/node.(*Node).handleConnection in goroutine 556
+	/root/go/src/github.com/colorfulnotion/jam/node/node.go:642 +0x33f
+exit status 2
+FAIL	github.com/colorfulnotion/jam/node	150.394s

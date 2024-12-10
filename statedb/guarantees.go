@@ -344,6 +344,12 @@ func CheckSorting_EGs(guarantees []types.Guarantee) error {
 
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
 func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
+	assignment_idx := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
+	previous_assignment_idx := assignment_idx - 1
+	previous_assignment_slot := previous_assignment_idx * types.ValidatorCoreRotationPeriod
+	if guarantee.Slot < previous_assignment_slot {
+		return jamerrors.ErrGReportEpochBeforeLast
+	}
 	timeSlotPeriod := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
 	reportTime := guarantee.Slot / types.ValidatorCoreRotationPeriod
 	for _, g := range guarantee.Signatures {
@@ -367,7 +373,9 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 			}
 			if !find_and_correct {
 				fmt.Printf("%s\n", guarantee.String())
-				fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
+				if debugG {
+					fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
+				}
 				for _, assignment := range s.GuarantorAssignments {
 					if assignment.CoreIndex == guarantee.Report.CoreIndex {
 						fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
@@ -383,6 +391,13 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
 func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarantee) error {
+	ts := s.Block.TimeSlot()
+	assignment_idx := ts / types.ValidatorCoreRotationPeriod
+	previous_assignment_idx := assignment_idx - 1
+	previous_assignment_slot := previous_assignment_idx * types.ValidatorCoreRotationPeriod
+	if guarantee.Slot < previous_assignment_slot {
+		return jamerrors.ErrGReportEpochBeforeLast
+	}
 	timeSlotPeriod := s.Block.TimeSlot() / types.ValidatorCoreRotationPeriod
 	reportTime := guarantee.Slot / types.ValidatorCoreRotationPeriod
 	for _, g := range guarantee.Signatures {
@@ -404,6 +419,13 @@ func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 				for _, assignment := range s.GuarantorAssignments {
 					fmt.Printf("[core%d]validator %d\n", assignment.CoreIndex, s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
 				}
+				if debugG {
+					fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
+					fmt.Printf("guarantors\n")
+					for _, g := range guarantee.Signatures {
+						fmt.Printf("validator %d\n", g.ValidatorIndex)
+					}
+				}
 				return jamerrors.ErrGWrongAssignment
 
 			}
@@ -415,11 +437,13 @@ func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 				}
 			}
 			if !find_and_correct {
-				fmt.Printf("%s\n", guarantee.String())
-				fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
-				for _, assignment := range s.GuarantorAssignments {
-					if assignment.CoreIndex == guarantee.Report.CoreIndex {
-						fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
+				if debugG {
+					fmt.Printf("%s\n", guarantee.String())
+					fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
+					for _, assignment := range s.GuarantorAssignments {
+						if assignment.CoreIndex == guarantee.Report.CoreIndex {
+							fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
+						}
 					}
 				}
 				return jamerrors.ErrGWrongAssignment

@@ -331,7 +331,7 @@ func (n *Node) runMain() {
 				fmt.Printf("%s processGuarantee: %v\n", n.String(), err)
 			}
 		case assurance := <-n.assurancesCh:
-			err := n.processAssurance(&assurance)
+			err := n.processAssurance(assurance)
 			if err != nil {
 				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
 			}
