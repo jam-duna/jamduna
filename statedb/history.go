@@ -12,18 +12,18 @@ import (
 type RecentBlocks []Beta_state
 
 type Beta_state struct {
-	HeaderHash common.Hash     `json:"header_hash"`
-	B          trie.MMR        `json:"mmr"`
-	StateRoot  common.Hash     `json:"state_root"`
-	Reported   types.Hash2Hash `json:"reported"` // Use the custom type
+	HeaderHash common.Hash                   `json:"header_hash"`
+	B          trie.MMR                      `json:"mmr"`
+	StateRoot  common.Hash                   `json:"state_root"`
+	Reported   []types.SegmentRootLookupItem `json:"reported"` // Use the custom type
 }
 
 func (b *Beta_state) UnmarshalJSON(data []byte) error {
 	var s struct {
-		HeaderHash common.Hash   `json:"header_hash"`
-		B          trie.MMR      `json:"mmr"`
-		StateRoot  common.Hash   `json:"state_root"`
-		Report     []interface{} `json:"reported"`
+		HeaderHash common.Hash                   `json:"header_hash"`
+		B          trie.MMR                      `json:"mmr"`
+		StateRoot  common.Hash                   `json:"state_root"`
+		Report     []types.SegmentRootLookupItem `json:"reported"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
@@ -31,7 +31,7 @@ func (b *Beta_state) UnmarshalJSON(data []byte) error {
 	b.HeaderHash = s.HeaderHash
 	b.B = s.B
 	b.StateRoot = s.StateRoot
-	b.Reported = nil
+	b.Reported = s.Report
 	return nil
 }
 
@@ -53,9 +53,13 @@ func (b Beta_state) MarshalJSON() ([]byte, error) {
 func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
-	reported := types.Hash2Hash{}
+	reported := []types.SegmentRootLookupItem{}
 	for _, g := range blk.Guarantees() {
-		reported[g.Report.AvailabilitySpec.WorkPackageHash] = g.Report.AvailabilitySpec.ExportedSegmentRoot
+		temReported := types.SegmentRootLookupItem{
+			WorkPackageHash: g.Report.AvailabilitySpec.WorkPackageHash,
+			SegmentRoot:     g.Report.AvailabilitySpec.ExportedSegmentRoot,
+		}
+		reported = append(reported, temReported)
 	}
 
 	preRecentBlocks := s.JamState.RecentBlocks

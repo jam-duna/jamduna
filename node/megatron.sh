@@ -11,4 +11,3 @@ make megatron > logs/m9.txt
 make megatron > logs/m10.txt
 make megatron > logs/m11.txt
 make megatron > logs/m12.txt
-

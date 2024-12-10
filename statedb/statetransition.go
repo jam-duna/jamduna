@@ -21,7 +21,7 @@ type StateTransitionCheck struct {
 	PostStateMismatch  []common.Hash `json:"post_state_mismatch"`
 }
 
-func compareKeyVals(p0 KeyVals, p1 KeyVals) {
+func compareKeyVals(p0 []KeyVal, p1 []KeyVal) {
 	if len(p0) != len(p1) {
 		fmt.Printf("len pre %d != len post %d\n", len(p0), len(p1))
 	}
@@ -35,11 +35,11 @@ func compareKeyVals(p0 KeyVals, p1 KeyVals) {
 	}
 }
 
-func makemap(p KeyVals) map[common.Hash][]byte {
+func makemap(p []KeyVal) map[common.Hash][]byte {
 	m := make(map[common.Hash][]byte)
 	for _, kvs := range p {
-		k := common.BytesToHash(kvs[0])
-		v := kvs[1]
+		k := common.BytesToHash(kvs.Key)
+		v := kvs.Key
 		m[k] = v
 	}
 	return m

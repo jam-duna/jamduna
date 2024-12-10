@@ -9,6 +9,8 @@ import (
 	"log"
 	"math"
 	"os"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -530,31 +532,125 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	return updated_root
 }
 
-func (s *StateDB) GetAllKeyValues() KeyVals {
+func (s *StateDB) GetAllKeyValues() []KeyVal {
 	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
 	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	maxSize := uint32(math.MaxUint32)
-	trie := s.CopyTrieState(s.StateRoot)
-	foundKeyVal, _, _ := trie.GetStateByRange(startKey, endKey, maxSize)
+	t := s.CopyTrieState(s.StateRoot)
+	foundKeyVal, _, _ := t.GetStateByRange(startKey, endKey, maxSize)
 
-	KeyVals := make(KeyVals, 0)
+	tmpKeyVals := make([]KeyVal, 0)
 	for _, keyValue := range foundKeyVal {
-		var keyVal [2][]byte
-		realKey := trie.GetRealKey(keyValue.Key, keyValue.Value)
-		keyVal[0] = make([]byte, len(realKey))
-		keyVal[1] = make([]byte, len(keyValue.Value))
-		copy(keyVal[0], realKey)
-		copy(keyVal[1], keyValue.Value)
-		KeyVals = append(KeyVals, keyVal)
+		fetchRealKey := t.GetRealKey(keyValue.Key, keyValue.Value)
+		realValue := make([]byte, len(keyValue.Value))
+		realKey := make([]byte, 32)
+		copy(realKey, fetchRealKey)
+		copy(realValue, keyValue.Value)
+
+		metaKey := fmt.Sprintf("meta_%x", realKey)
+		metaKeyBytes, err := types.Encode(metaKey)
+		if err != nil {
+			fmt.Printf("PrintAllKeyValues Encode Error: %v\n", err)
+		}
+		metaValue := ""
+		metaValues := make([]string, 2)
+		switch {
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0100000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c1"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0200000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c2"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0300000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c3"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0400000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c4"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0500000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c5"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0600000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c6"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0700000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c7"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0800000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c8"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0900000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c9"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0A00000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c10"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0B00000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c11"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0C00000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c12"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0D00000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c13"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0E00000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c14"
+			metaValues[1] = ""
+
+		case common.CompareBytes(realKey, common.Hex2Bytes("0x0F00000000000000000000000000000000000000000000000000000000000000")):
+			metaValues[0] = "c15"
+			metaValues[1] = ""
+
+		default:
+			metaValueBytes, err := t.LevelDBGet(metaKeyBytes)
+			if err != nil {
+				fmt.Printf("PrintAllKeyValues levelDBGet Error: %v\n", err)
+			}
+			if metaValueBytes != nil {
+				metaValueDecode, _, err := types.Decode(metaValueBytes, reflect.TypeOf(""))
+				if err != nil {
+					fmt.Printf("PrintAllKeyValues Decode Error: %v\n", err)
+				}
+				metaValue = metaValueDecode.(string)
+				metaValues = strings.SplitN(metaValue, "|", 2)
+				//metaValues[1] = metaValue
+				//metaValues = strings.SplitN(metaValue, "|", 2)
+			} else {
+				metaValues = append(metaValues, "")
+				metaValues = append(metaValues, "")
+			}
+		}
+
+		keyVal := KeyVal{
+			Key:        realKey,
+			Value:      realValue,
+			StructType: metaValues[0],
+			Metadata:   metaValues[1],
+		}
+		tmpKeyVals = append(tmpKeyVals, keyVal)
 	}
-	return KeyVals
+	return tmpKeyVals
 }
 
 func (s *StateDB) CompareStateRoot(genesis KeyVals, parentStateRoot common.Hash) (bool, error) {
 	parent_root := s.StateRoot
 	newTrie := trie.NewMerkleTree(nil, s.sdb)
 	for _, kv := range genesis {
-		newTrie.SetRawKeyVal(common.Hash(kv[0]), kv[1])
+		newTrie.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
 	}
 	new_root := newTrie.GetRoot()
 	//timeslot := s.GetSafrole().Timeslot
@@ -588,7 +684,7 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	verify := true
 
 	for _, kv := range snapshotRaw.KeyVals {
-		t.SetRawKeyVal(common.Hash(kv[0]), kv[1])
+		t.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
 		//fmt.Printf("SetRawKeyVal %v %x\n", common.Hash(kv[0]), kv[1])
 	}
 	updated_root := t.GetRoot()
@@ -615,13 +711,26 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 }
 
 func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Hash {
-
 	for _, kv := range snapshotRaw.KeyVals {
-		s.trie.SetRawKeyVal(common.Hash(kv[0]), kv[1])
+		s.trie.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
+		if kv.Metadata != "" {
+			metaKey := fmt.Sprintf("meta_%x", kv.Key)
+			metaKeyBytes, err := types.Encode(metaKey)
+			if err != nil {
+				fmt.Printf("UpdateAllTrieStateRaw Encode Error: %v\n", err)
+			}
+			metaData := fmt.Sprintf("%s|%s", kv.StructType, kv.Metadata)
+			metaValueBytes, err := types.Encode(metaData)
+			if err != nil {
+				fmt.Printf("UpdateAllTrieStateRaw Encode Error: %v\n", err)
+			}
+			s.sdb.WriteRawKV(metaKeyBytes, metaValueBytes)
+		}
 	}
 	// bootStrapCode := common.FromHex("0x000000000000001000000084000000000072051100000005100000000518000000055f04071300040a0400fffe040b24040713000211f8031004031504050000fffe01582004070000fffe04090020040a0010040b0030040c00404e090d0503570404090400fffe04070000fffe040804040a044e03011004011502110813000407130021842a4825050922222a4190945201")
 	// bootStrapCodeHash := common.Blake2Hash(bootStrapCode)
 	// fmt.Printf("**** Adding s=0, bootStrapCodeHash=%v, len(%v), | bootStrapCode=%x\n", bootStrapCodeHash, len(bootStrapCode), bootStrapCode)
+
 	return s.trie.GetRoot()
 }
 

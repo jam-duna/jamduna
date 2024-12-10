@@ -46,40 +46,40 @@ type StateSnapshot struct {
 	ServiceAccount           KeyVals                                      `json:"service_account"` // Other C
 }
 
-type KeyVal [2][]byte
+type KeyVal struct {
+	Key        []byte `json:"k"`
+	Value      []byte `json:"v"`
+	StructType string `json:"struct_type,omitempty"`
+	Metadata   string `json:"meta,omitempty"`
+}
+
 type KeyVals []KeyVal
 
-//	type KeyVals struct {
-//		K  []byte `json:"k"`
-//		V  []byte `json:"v"`
-//		MK string `json:"km,omitempty"`
-//		MV string `json:"kv,omitempty"`
-//	}
 type KeyValMap map[common.Hash][]byte
 
-func (kv KeyVals) Encode() []byte {
-	m := make(KeyValMap)
-	for _, kv := range kv {
-		m[common.BytesToHash(kv[0])] = kv[1]
-	}
-	encoded, err := types.Encode(m)
-	if err != nil {
-		panic(err)
-	}
-	return encoded
-}
+// func (kv KeyVals) Encode() []byte {
+// 	m := make(KeyValMap)
+// 	for _, kv := range kv {
+// 		m[common.BytesToHash(kv[0])] = kv[1]
+// 	}
+// 	encoded, err := types.Encode(m)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	return encoded
+// }
 
-func (kv KeyVals) Decode(encoded []byte) (interface{}, uint32) {
-	decoded, l, err := types.Decode(encoded, reflect.TypeOf(KeyValMap{}))
-	if err != nil {
-		panic(err)
-	}
-	m := decoded.(KeyValMap)
-	for k, v := range m {
-		kv = append(kv, KeyVal{k.Bytes(), v})
-	}
-	return kv, l
-}
+// func (kv KeyVals) Decode(encoded []byte) (interface{}, uint32) {
+// 	decoded, l, err := types.Decode(encoded, reflect.TypeOf(KeyValMap{}))
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	m := decoded.(KeyValMap)
+// 	for k, v := range m {
+// 		kv = append(kv, KeyVal{k.Bytes(), v})
+// 	}
+// 	return kv, l
+// }
 
 type StateSnapshotRaw struct {
 	StateRoot common.Hash `json:"state_root"`
@@ -162,8 +162,8 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 
 		}
 		kv := KeyVal{}
-		kv[0] = stateKey
-		kv[1] = stateVal
+		kv.Key = stateKey
+		kv.Value = stateVal
 		keyValList = append(keyValList, kv)
 	}
 
@@ -174,23 +174,27 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 }
 
 func (kv KeyVal) MarshalJSON() ([]byte, error) {
-	hexStrings := [2]string{
-		common.HexString(kv[0]),
-		common.HexString(kv[1]),
+	hexStrings := [4]string{
+		common.HexString(kv.Key),
+		common.HexString(kv.Value),
+		kv.StructType,
+		kv.Metadata,
 	}
 	return json.Marshal(hexStrings)
 }
 
 func (kv *KeyVal) UnmarshalJSON(data []byte) error {
-	var hexStrings [2]string
+	var hexStrings [4]string
 	if err := json.Unmarshal(data, &hexStrings); err != nil {
 		return err
 	}
 
-	for i, hexStr := range hexStrings {
-		bytes := common.Hex2Bytes(hexStr)
-		kv[i] = bytes
-	}
+	keyBytes := common.Hex2Bytes(hexStrings[0])
+	kv.Key = keyBytes
+	valueBytes := common.Hex2Bytes(hexStrings[1])
+	kv.Value = valueBytes
+	kv.StructType = hexStrings[2]
+	kv.Metadata = hexStrings[3]
 
 	return nil
 }
@@ -203,49 +207,49 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 		//k := kv[0]
 		switch _stateIdentifier {
 		case C1:
-			authorizationsPool, _, _ := types.Decode(kv[1], reflect.TypeOf([types.TotalCores][]common.Hash{}))
+			authorizationsPool, _, _ := types.Decode(kv.Value, reflect.TypeOf([types.TotalCores][]common.Hash{}))
 			sn.AuthorizationsPool = authorizationsPool.([types.TotalCores][]common.Hash)
 		case C2:
-			authorizationQueue, _, _ := types.Decode(kv[1], reflect.TypeOf(types.AuthorizationQueue{}))
+			authorizationQueue, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.AuthorizationQueue{}))
 			sn.AuthorizationQueue = authorizationQueue.(types.AuthorizationQueue)
 		case C3:
-			recentBlocks, _, _ := types.Decode(kv[1], reflect.TypeOf(RecentBlocks{}))
+			recentBlocks, _, _ := types.Decode(kv.Value, reflect.TypeOf(RecentBlocks{}))
 			sn.RecentBlocks = recentBlocks.(RecentBlocks)
 		case C4:
-			gamma, _, _ := types.Decode(kv[1], reflect.TypeOf(SafroleBasicState{}))
+			gamma, _, _ := types.Decode(kv.Value, reflect.TypeOf(SafroleBasicState{}))
 			sn.Gamma = gamma.(SafroleBasicState)
 		case C5:
-			disputes, _, _ := types.Decode(kv[1], reflect.TypeOf(Psi_state{}))
+			disputes, _, _ := types.Decode(kv.Value, reflect.TypeOf(Psi_state{}))
 			sn.Disputes = disputes.(Psi_state)
 		case C6:
-			entropy, _, _ := types.Decode(kv[1], reflect.TypeOf(Entropy{}))
+			entropy, _, _ := types.Decode(kv.Value, reflect.TypeOf(Entropy{}))
 			sn.Entropy = entropy.(Entropy)
 		case C7:
-			nextValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Validators{}))
+			nextValidators, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.Validators{}))
 			sn.NextValidators = nextValidators.(types.Validators)
 		case C8:
-			currValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Validators{}))
+			currValidators, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.Validators{}))
 			sn.CurrValidators = currValidators.(types.Validators)
 		case C9:
-			prevValidators, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Validators{}))
+			prevValidators, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.Validators{}))
 			sn.PrevValidators = prevValidators.(types.Validators)
 		case C10:
-			availabilityAssignments, _, _ := types.Decode(kv[1], reflect.TypeOf(AvailabilityAssignments{}))
+			availabilityAssignments, _, _ := types.Decode(kv.Value, reflect.TypeOf(AvailabilityAssignments{}))
 			sn.AvailabilityAssignments = availabilityAssignments.(AvailabilityAssignments)
 		case C11:
-			timeslot, _, _ := types.Decode(kv[1], reflect.TypeOf(uint32(0)))
+			timeslot, _, _ := types.Decode(kv.Value, reflect.TypeOf(uint32(0)))
 			sn.Timeslot = timeslot.(uint32)
 		case C12:
-			privilegedServiceIndices, _, _ := types.Decode(kv[1], reflect.TypeOf(types.Kai_state{}))
+			privilegedServiceIndices, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.Kai_state{}))
 			sn.PrivilegedServiceIndices = privilegedServiceIndices.(types.Kai_state)
 		case C13:
-			validatorStatistics, _, _ := types.Decode(kv[1], reflect.TypeOf([2][types.TotalValidators]Pi_state{}))
+			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf([2][types.TotalValidators]Pi_state{}))
 			sn.ValidatorStatistics = validatorStatistics.([2][types.TotalValidators]Pi_state)
 		case C14:
-			validatorStatistics, _, _ := types.Decode(kv[1], reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
+			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
 			sn.AccumulationQueue = validatorStatistics.([types.EpochLength][]types.AccumulationQueue)
 		case C15:
-			validatorStatistics, _, _ := types.Decode(kv[1], reflect.TypeOf([types.EpochLength]types.AccumulationHistory{}))
+			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf([types.EpochLength]types.AccumulationHistory{}))
 			sn.AccumulationHistory = validatorStatistics.([types.EpochLength]types.AccumulationHistory)
 
 		default:

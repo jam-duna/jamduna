@@ -211,7 +211,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 		return fmt.Errorf("Expected have error:%v", exceptErr)
 	}
 	if err != nil && exceptErr != nil {
-		fmt.Printf("Expected error: %v\n", err)
+		fmt.Printf("Get error: %v\n", err)
 		//check error prefix vs json file name
 		// read string until the first '-'
 		// if the prefix is not the same as the json file name, return error
@@ -292,6 +292,36 @@ func TestReportVerifyTiny(t *testing.T) {
 		{"segment_root_lookup_invalid-2.json", jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue},
 		{"not_authorized-1.json", jamerrors.ErrGCoreWithoutAuthorizer},
 		{"not_authorized-2.json", jamerrors.ErrGCoreUnexpectedAuthorizer},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.jsonFile, func(t *testing.T) {
+			err := ReportVerify(tc.jsonFile, tc.except)
+			if err != nil {
+				t.Fatalf("failed : %v", err)
+			}
+			fmt.Printf("===Finish %s===\n", tc.jsonFile)
+		})
+	}
+}
+
+func TestReportVerifyTinyStanley(t *testing.T) {
+	// run throgh all the json files in the tiny folder
+
+	// shawn cover
+	/*
+		bad_state_root 🔴	reports	ErrGBadStateRoot
+		duplicate_package_in_recent_history 🔴	reports	ErrGDuplicatePackageRecentHistory
+		segment_root_lookup_invalid 🔴	reports	ErrGSegmentRootLookupInvalidNotRecentBlocks
+		segment_root_lookup_invalid 🔴	reports	ErrGSegmentRootLookupInvalidUnexpectedValue
+	*/
+	testCases := []struct {
+		jsonFile string
+		except   error
+	}{
+		{"bad_state_root-1.json", jamerrors.ErrGBadStateRoot},
+		{"duplicate_package_in_recent_history-1.json", jamerrors.ErrGDuplicatePackageRecentHistory},
+		{"segment_root_lookup_invalid-1.json", jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks},
+		{"segment_root_lookup_invalid-2.json", jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {

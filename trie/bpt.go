@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
@@ -13,8 +14,16 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
-type KeyVal [2][]byte
-type KeyVals []KeyVal
+type KeyVal struct {
+	Key        []byte `json:"k"`
+	Value      []byte `json:"v"`
+	StructType string `json:"struct_type,omitempty"`
+	Metadata   string `json:"meta,omitempty"`
+}
+
+type KeyVals struct {
+	KeyVals []KeyVal
+}
 
 // TODO: stanley to figure what this is
 type BMTProof []common.Hash
@@ -372,6 +381,10 @@ func (t *MerkleTree) levelDBSet(k, v []byte) error {
 	return nil
 }
 
+func (t *MerkleTree) LevelDBGet(k []byte) ([]byte, error) {
+	return t.levelDBGet(k)
+}
+
 // levelDBGet gets the value for the given key from the levelDBMap
 func (t *MerkleTree) levelDBGet(k []byte) ([]byte, error) {
 	if t.db == nil {
@@ -381,9 +394,9 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, error) {
 	value, err := t.db.ReadRawKV(k)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
-			return nil, fmt.Errorf("key not found: %s", k)
+			return nil, fmt.Errorf("key not found: %x", k)
 		}
-		return nil, fmt.Errorf("failed to get key %s: %v", k, err)
+		return nil, fmt.Errorf("failed to get key [%s]: %v", k, err)
 	}
 	return value, nil
 }
@@ -436,20 +449,46 @@ func (t *MerkleTree) PrintAllKeyValues() {
 	maxSize := uint32(math.MaxUint32)
 	foundKeyVal, _, _ := t.GetStateByRange(startKey, endKey, maxSize)
 
-	KeyVals := make(KeyVals, 0)
+	keyVals := make([]KeyVal, 0)
 	for _, keyValue := range foundKeyVal {
-		var keyVal [2][]byte
-		realKey := t.GetRealKey(keyValue.Key, keyValue.Value)
-		keyVal[0] = make([]byte, len(realKey))
-		keyVal[1] = make([]byte, len(keyValue.Value))
-		copy(keyVal[0], realKey)
-		copy(keyVal[1], keyValue.Value)
-		KeyVals = append(KeyVals, keyVal)
+		fetchRealKey := t.GetRealKey(keyValue.Key, keyValue.Value)
+		realValue := make([]byte, len(keyValue.Value))
+		realKey := make([]byte, 32)
+		copy(realKey, fetchRealKey)
+		copy(realValue, keyValue.Value)
+		metaKey := fmt.Sprintf("meta_%x", realKey)
+		metaKeyBytes, err := types.Encode(metaKey)
+		if err != nil {
+			fmt.Printf("PrintAllKeyValues Encode Error: %v\n", err)
+		}
+		if err != nil {
+			fmt.Printf("PrintAllKeyValues Encode Error: %v\n", err)
+		}
+		metaValueBytes, err := t.levelDBGet(metaKeyBytes)
+		if err != nil {
+			fmt.Printf("PrintAllKeyValues levelDBGet Error: %v\n", err)
+			return
+		}
+		metaValueDecode, _, err := types.Decode(metaValueBytes, reflect.TypeOf(""))
+		if err != nil {
+			fmt.Printf("PrintAllKeyValues Decode Error: %v\n", err)
+			return
+		}
+		metaValue := metaValueDecode.(string)
+		metaValues := strings.SplitN(metaValue, "|", 2)
+
+		keyVal := KeyVal{
+			Key:        realKey,
+			Value:      realValue,
+			StructType: metaValues[0],
+			Metadata:   metaValues[1],
+		}
+		keyVals = append(keyVals, keyVal)
 	}
-	fmt.Printf("GetAllKeyValues right after %x\n", KeyVals)
-	for _, kv := range KeyVals {
-		fmt.Printf("[Key] %x\n[Value] %x\n", kv[0], kv[1])
-	}
+	fmt.Printf("GetAllKeyValues right after %v\n", keyVals)
+	// for _, kv := range keyVals.KeyVals {
+	// 	fmt.Printf("[Key] %x\n[Value] %x\n", kv[0], kv[1])
+	// }
 }
 
 func (t *MerkleTree) PrintTree(node *Node, level int) {
@@ -740,6 +779,24 @@ func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
 	if debug {
 		fmt.Printf("SetService stateKey=%x, v=%x\n", stateKey, v)
 	}
+
+	metaKey := fmt.Sprintf("meta_%x", stateKey)
+	metaKeyBytes, err := types.Encode(metaKey)
+	if err != nil {
+		fmt.Printf("SetService metaKey Encode Error: %v\n", err)
+	}
+
+	acctState, err := types.AccountStateFromBytes(s, v)
+	if err != nil {
+		fmt.Printf("SetService AccountStateFromBytes Error: %v\n", err)
+	}
+
+	metaVal := fmt.Sprintf("service_account|s=%d|b=%d g=%d m=%d l=%d i=%d|clen=%d", s, acctState.Balance, acctState.GasLimitG, acctState.GasLimitM, acctState.StorageSize, acctState.NumStorageItems, len(acctState.CodeHash))
+	metaValBytes, err := types.Encode(metaVal)
+	if err != nil {
+		fmt.Printf("SetService metaValBytes Encode Error: %v\n", err)
+	}
+	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, v)
 }
 
@@ -767,18 +824,7 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 		Follow GP_0.3.5(270, 273, 274, 276, 291)
 		Process State value(timeslots), covert []uint32 to []byte
 	*/
-	// vBytes := []byte{}
-	// if len(time_slots) > 0 {
-	// 	time_slotsByte := make([]byte, len(time_slots)*4)
 
-	// 	// Convert time slots into byte
-	// 	for i, v := range time_slots {
-	// 		binary.LittleEndian.PutUint32(time_slotsByte[i*4:(i+1)*4], v)
-	// 	}
-	// 	vBytes = append([]byte{uint8(len(time_slots))}, time_slotsByte...)
-	// } else {
-	// 	vBytes = []byte{0}
-	// }
 	vBytes, err := types.Encode(time_slots)
 	if err != nil {
 		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
@@ -787,6 +833,18 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 		fmt.Printf("SetPreImageLookup stateKey=%x, vBytes=%v\n", stateKey, vBytes)
 	}
 	// Insert the value into the state
+
+	metaKey := fmt.Sprintf("meta_%x", stateKey)
+	metaKeyBytes, err := types.Encode(metaKey)
+	if err != nil {
+		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
+	}
+	metaVal := fmt.Sprintf("account_lookup|s=%d|h=%s l=%d t=%d|tlen=%d", s, blob_hash, blob_len, time_slots, len(time_slots))
+	metaValBytes, err := types.Encode(metaVal)
+	if err != nil {
+		fmt.Printf("SetPreImageLookup metaValBytes Encode Error: %v\n", err)
+	}
+	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, vBytes)
 }
 
@@ -845,6 +903,17 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 		fmt.Printf("SetServiceStorage stateKey=%x, storageValue=%x\n", stateKey, storageValue)
 	}
 
+	metaKey := fmt.Sprintf("meta_%x", stateKey)
+	metaKeyBytes, err := types.Encode(metaKey)
+	if err != nil {
+		fmt.Printf("SetServiceStorage Encode Error: %v\n", err)
+	}
+	metaVal := fmt.Sprintf("account_storage|s=%d|k=%s|vlen=%d", s, k, len(storageValue))
+	metaValBytes, err := types.Encode(metaVal)
+	if err != nil {
+		fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)
+	}
+	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, storageValue)
 }
 
@@ -886,6 +955,17 @@ func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) {
 
 	stateKey := account_preimage_hash.Bytes()
 
+	metaKey := fmt.Sprintf("meta_%x", stateKey)
+	metaKeyBytes, err := types.Encode(metaKey)
+	if err != nil {
+		fmt.Printf("SetPreImageBlob Encode Error: %v\n", err)
+	}
+	metaVal := fmt.Sprintf("account_preimage|s=%d|h=%v|plen=%d", s, blobHash, len(blob))
+	metaValBytes, err := types.Encode(metaVal)
+	if err != nil {
+		fmt.Printf("SetPreImageBlob metaValBytes Encode Error: %v\n", err)
+	}
+	t.levelDBSet(metaKeyBytes, metaValBytes)
 	// Insert Preimage Blob into trie
 	t.Insert(stateKey, blob)
 }
@@ -916,6 +996,9 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
 
 // Insert fixed-length hashed key with value for the BPT
 func (t *MerkleTree) Insert(key, value []byte) {
+	// if common.CompareBytes(key, common.Hex2Bytes("ff00000000000000000000000000000000000000000000000000000000000000")) {
+	// 	panic("Insert: key is ff")
+	// }
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
 		encodedLeaf := leaf(key, value)

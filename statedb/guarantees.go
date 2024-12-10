@@ -810,8 +810,8 @@ func (s *StateDB) checkPrereq(g types.Guarantee) error {
 	}
 
 	for _, block := range s.JamState.RecentBlocks {
-		for key := range block.Reported {
-			prereqSet[key] = struct{}{}
+		for _, segmentRootLookup := range block.Reported {
+			prereqSet[segmentRootLookup.WorkPackageHash] = struct{}{}
 		}
 	}
 
@@ -851,8 +851,8 @@ func (s *StateDB) checkPrereqWithoutBlock(g types.Guarantee, EGs []types.Guarant
 	}
 
 	for _, block := range s.JamState.RecentBlocks {
-		for key := range block.Reported {
-			prereqSet[key] = struct{}{}
+		for _, segmentRootLookup := range block.Reported {
+			prereqSet[segmentRootLookup.WorkPackageHash] = struct{}{}
 		}
 	}
 
@@ -881,9 +881,15 @@ func (s *StateDB) checkPrereqWithoutBlock(g types.Guarantee, EGs []types.Guarant
 }
 
 // v0.5 eq 11.39
-func getPresentBlock(g types.Guarantee) types.Hash2Hash {
-	p := types.Hash2Hash{}
-	p[g.Report.AvailabilitySpec.WorkPackageHash] = g.Report.AvailabilitySpec.ExportedSegmentRoot
+func getPresentBlock(g types.Guarantee) types.SegmentRootLookup {
+	p := types.SegmentRootLookup{}
+	for _, lookupItem := range g.Report.SegmentRootLookup {
+		tmeItem := types.SegmentRootLookupItem{
+			WorkPackageHash: lookupItem.WorkPackageHash,
+			SegmentRoot:     lookupItem.SegmentRoot,
+		}
+		p = append(p, tmeItem)
+	}
 	return p
 }
 
@@ -892,49 +898,44 @@ func getPresentBlock(g types.Guarantee) types.Hash2Hash {
 // TODO:stanley
 func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 	currentSegmentRootLookUp := g.Report.SegmentRootLookup
-	currentHash2Hash := make(map[common.Hash]common.Hash)
-	haveHash := false
-	for _, lookupItem := range currentSegmentRootLookUp {
-		haveHash = true
-		currentHash2Hash[lookupItem.WorkPackageHash] = lookupItem.SegmentRoot
-	}
-	if !haveHash {
+	if len(currentSegmentRootLookUp) == 0 {
+		// fmt.Printf("Error currentSegmentRootLookUp is nil, must have segmentRootLookup into it!\n")
 		return nil
 	}
 
 	// Combine the present block and the recent blocks
-	presentBlockHash2Hash := getPresentBlock(g)
+	presentBlockSegmentRootLookup := getPresentBlock(g)
 	if len(s.JamState.RecentBlocks) == 0 {
 		fmt.Printf("Error s.JamState.RecentBlocks is nil, must have recentblock into it!\n")
 		return nil
 	}
 	for _, block := range s.JamState.RecentBlocks {
-		for key, value := range block.Reported {
-			if _, exists := presentBlockHash2Hash[key]; !exists {
-				presentBlockHash2Hash[key] = value
+		for _, segmentRootLookupItem := range block.Reported {
+			tmpsegmentRootLookupItem := types.SegmentRootLookupItem{
+				WorkPackageHash: segmentRootLookupItem.WorkPackageHash,
+				SegmentRoot:     segmentRootLookupItem.SegmentRoot,
 			}
+			presentBlockSegmentRootLookup = append(presentBlockSegmentRootLookup, tmpsegmentRootLookupItem)
 		}
 	}
-
-	if currentSegmentRootLookUp == nil {
-		fmt.Printf("currentSegmentRootLookUp is nil\n")
-		return nil
-	}
-	if len(currentHash2Hash) != 0 {
-		includeSegment := false
-		// Check presentBlockHash2Hash include currentHash2Hash or not
-		for workPackageHash, segmentRoot := range presentBlockHash2Hash {
-			value, exists := currentHash2Hash[workPackageHash]
-			if exists && value == segmentRoot {
-				includeSegment = true
-				break
-			} else if exists && value != segmentRoot {
-				return jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue
+	// Check presentBlockHash2Hash include currentHash2Hash or not
+	segmentLookUpIncluded := make([]bool, len(currentSegmentRootLookUp))
+	for i, currentSegmentRootLookup := range currentSegmentRootLookUp {
+		for _, segmentRootLookup := range presentBlockSegmentRootLookup {
+			if segmentRootLookup.WorkPackageHash == currentSegmentRootLookup.WorkPackageHash {
+				if segmentRootLookup.SegmentRoot != currentSegmentRootLookup.SegmentRoot {
+					return jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue
+				} else {
+					segmentLookUpIncluded[i] = true
+					break
+				}
 			}
+			segmentLookUpIncluded[i] = false
 		}
-
-		if !includeSegment {
-			// stanley:Pls check
+	}
+	// Check if all the segmentRootLookup are included
+	for _, included := range segmentLookUpIncluded {
+		if !included {
 			return jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks
 		}
 	}

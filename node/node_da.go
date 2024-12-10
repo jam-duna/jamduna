@@ -857,6 +857,9 @@ func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]c
 	if debugSegments {
 		fmt.Printf("exportedRoots %v\n", exportedRoots)
 	}
+	if len(justifications) != len(importSegments) {
+		return false, fmt.Errorf("justification length mismatch")
+	}
 	verifyIndex := 0
 	for itemIndex := range importSegments {
 		for segmentIdx := range importSegments[itemIndex] {
