@@ -110,7 +110,7 @@ func GetHostFunctionDetails(name string) (int, []uint64) {
 
 type RefineM struct {
 	P []byte `json:"P"`
-	U *Page  `json:"U"`
+	U *RAM   `json:"U"`
 	I uint32 `json:"I"`
 }
 
@@ -278,7 +278,7 @@ func (vm *VM) hostInfo() uint64 {
 	if err != nil {
 		return NONE
 	}
-	vm.WriteRAMBytes(uint32(bo), m[:])
+	vm.Ram.WriteRAMBytes(uint32(bo), m[:])
 
 	return OK
 }
@@ -302,7 +302,7 @@ func (vm *VM) hostAssign(X_U *types.PartialState) uint64 {
 		return CORE
 	}
 	o, _ := vm.ReadRegister(8)
-	c, _ := vm.ReadRAMBytes(uint32(o), 32*types.MaxAuthorizationQueueItems)
+	c, _ := vm.Ram.ReadRAMBytes(uint32(o), 32*types.MaxAuthorizationQueueItems)
 	qi := make([]common.Hash, 32)
 	for i := 0; i < 32; i++ {
 		qi[i] = common.BytesToHash(c[i:(i + 32)])
@@ -314,7 +314,7 @@ func (vm *VM) hostAssign(X_U *types.PartialState) uint64 {
 // Designate validators
 func (vm *VM) hostDesignate(X_U *types.PartialState) uint64 {
 	o, _ := vm.ReadRegister(7)
-	v, errCode := vm.ReadRAMBytes(uint32(o), 176*V)
+	v, errCode := vm.Ram.ReadRAMBytes(uint32(o), 176*V)
 	if errCode == OOB {
 		return OOB
 	}
@@ -379,7 +379,7 @@ func (vm *VM) hostNew() uint64 {
 	}
 	// put 'g' and 'm' together
 	o, _ := vm.ReadRegister(7)
-	c, errCode := vm.ReadRAMBytes(uint32(o), 32)
+	c, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode != OK {
 		vm.WriteRegister(7, OOB)
 		return errCode
@@ -451,7 +451,7 @@ func (vm *VM) hostUpgrade() uint64 {
 	gh, _ := vm.ReadRegister(9)
 	ml, _ := vm.ReadRegister(10)
 	mh, _ := vm.ReadRegister(11)
-	c, errCode := vm.ReadRAMBytes(uint32(o), 32)
+	c, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode == OOB {
 		return errCode
 	}
@@ -478,7 +478,7 @@ func (vm *VM) hostTransfer() uint64 {
 	a := uint64(ah)<<32 + uint64(al)
 	g := uint64(gh)<<32 + uint64(gl)
 	// TODO check d -- WHO; check g -- LOW, HIGH
-	m, errCode := vm.ReadRAMBytes(uint32(o), M)
+	m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
 	if errCode == OOB {
 		return OOB
 	}
@@ -528,7 +528,7 @@ func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
 func (vm *VM) hostInvoke() uint64 {
 	n, _ := vm.ReadRegister(7)
 	o, _ := vm.ReadRegister(8)
-	gasBytes, errCodeGas := vm.ReadRAMBytes(uint32(o), 8)
+	gasBytes, errCodeGas := vm.Ram.ReadRAMBytes(uint32(o), 8)
 	if errCodeGas != OK {
 		vm.WriteRegister(7, OOB)
 		return OOB
@@ -536,7 +536,7 @@ func (vm *VM) hostInvoke() uint64 {
 	// gas := binary.LittleEndian.Uint32(gasBytes)
 	m_n_reg := make([]uint32, 13)
 	for i := 0; i < 13; i++ {
-		reg_bytes, errCodeReg := vm.ReadRAMBytes(uint32(o)+8+4*uint32(i), 4)
+		reg_bytes, errCodeReg := vm.Ram.ReadRAMBytes(uint32(o)+8+4*uint32(i), 4)
 		if errCodeReg != OK {
 			vm.WriteRegister(7, OOB)
 			return OOB
@@ -545,7 +545,7 @@ func (vm *VM) hostInvoke() uint64 {
 	}
 	// intialize invoke
 
-	registerBytes, _ := vm.ReadRAMBytes(uint32(o)+8, 13*4)
+	registerBytes, _ := vm.Ram.ReadRAMBytes(uint32(o)+8, 13*4)
 	m, ok := vm.GetVM(uint32(n))
 	if !ok {
 		return WHO
@@ -565,7 +565,7 @@ func (vm *VM) hostLookup() uint64 {
 	ho, _ := vm.ReadRegister(8)
 	bo, _ := vm.ReadRegister(9)
 	bz, _ := vm.ReadRegister(10)
-	k_bytes, err_k := vm.ReadRAMBytes(uint32(ho), 32)
+	k_bytes, err_k := vm.Ram.ReadRAMBytes(uint32(ho), 32)
 	if err_k == OOB {
 		vm.WriteRegister(0, OOB)
 		return OOB
@@ -577,7 +577,7 @@ func (vm *VM) hostLookup() uint64 {
 	if bz < l {
 		l = bz
 	}
-	vm.WriteRAMBytes(uint32(bo), v[:l])
+	vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
 
 	if len(h) != 0 {
 		vm.WriteRegister(7, l)
@@ -614,7 +614,7 @@ func (vm *VM) hostRead() uint64 {
 	kz, _ := vm.ReadRegister(9)
 	bo, _ := vm.ReadRegister(10)
 	bz, _ := vm.ReadRegister(11)
-	k, err_k := vm.ReadRAMBytes(uint32(ko), int(kz)) // this is the raw key.
+	k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
 	if err_k == OOB {
 		fmt.Println("Read RAM Error")
 		vm.WriteRegister(7, OOB)
@@ -641,7 +641,7 @@ func (vm *VM) hostRead() uint64 {
 		l = bz
 	}
 	if len(k) != 0 {
-		vm.WriteRAMBytes(uint32(bo), val[:l])
+		vm.Ram.WriteRAMBytes(uint32(bo), val[:l])
 		vm.WriteRegister(7, l)
 		return l
 	}
@@ -664,7 +664,7 @@ func (vm *VM) hostWrite() uint64 {
 	kz, _ := vm.ReadRegister(8)
 	vo, _ := vm.ReadRegister(9)
 	vz, _ := vm.ReadRegister(10)
-	k, err_k := vm.ReadRAMBytes(uint32(ko), int(kz))
+	k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz))
 	if err_k == OOB {
 		vm.WriteRegister(7, OOB)
 		return OOB
@@ -678,7 +678,7 @@ func (vm *VM) hostWrite() uint64 {
 		// adjust S
 		v := []byte{}
 		if vz > 0 {
-			v, _ = vm.ReadRAMBytes(uint32(vo), int(vz))
+			v, _ = vm.Ram.ReadRAMBytes(uint32(vo), uint32(vz))
 		}
 		xs.WriteStorage(key, v)
 		vm.WriteRegister(7, uint64(len(v)))
@@ -705,8 +705,8 @@ func (vm *VM) hostSolicit(t uint32) uint64 {
 	xs := d[s]
 	// Got l of X_s by setting s = 1, z = z(from RAM)
 	o, _ := vm.ReadRegister(7)
-	z, _ := vm.ReadRegister(8)                      // z: blob_len
-	hBytes, err_h := vm.ReadRAMBytes(uint32(o), 32) // h: blobHash
+	z, _ := vm.ReadRegister(8)                          // z: blob_len
+	hBytes, err_h := vm.Ram.ReadRAMBytes(uint32(o), 32) // h: blobHash
 	if err_h == OOB {
 		fmt.Println("Read RAM Error")
 		vm.WriteRegister(7, OOB)
@@ -756,7 +756,7 @@ func (vm *VM) hostForget(t uint32) uint64 {
 	s := uint32(1) // s: serviceIndex
 	o, _ := vm.ReadRegister(7)
 	z, _ := vm.ReadRegister(8)
-	hBytes, errCode := vm.ReadRAMBytes(uint32(o), 32)
+	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode == OOB {
 		fmt.Println("Read RAM Error")
 		return OOB
@@ -792,7 +792,7 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint64 {
 	bo, _ := vm.ReadRegister(9)
 	bz, _ := vm.ReadRegister(10)
 
-	hBytes, errCode := vm.ReadRAMBytes(uint32(ho), 32)
+	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(ho), 32)
 	if errCode == OOB {
 		fmt.Println("Read RAM Error")
 		vm.WriteRegister(0, OOB)
@@ -812,7 +812,7 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint64 {
 		if bz < l {
 			l = bz
 		}
-		vm.WriteRAMBytes(uint32(bo), v[:l])
+		vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
 		vm.WriteRegister(7, vLength)
 		fmt.Println(v[:l])
 		return vLength
@@ -839,7 +839,7 @@ func (vm *VM) hostImport() uint64 {
 	}
 
 	if len(v_Bytes) != 0 {
-		errCode := vm.WriteRAMBytes(uint32(o), v_Bytes[:])
+		errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[:])
 		if errCode != OK {
 			vm.WriteRegister(7, OOB)
 			return errCode
@@ -859,15 +859,15 @@ func (vm *VM) hostImport() uint64 {
 func (vm *VM) hostECRecover() uint32 {
 	o, _ := vm.ReadRegister(7)
 	ho, _ := vm.ReadRegister(8)
-	sig, _ := vm.ReadRAMBytes(uint32(o), 65)
-	h, _ := vm.ReadRAMBytes(uint32(ho), 32)
+	sig, _ := vm.Ram.ReadRAMBytes(uint32(o), 65)
+	h, _ := vm.Ram.ReadRAMBytes(uint32(ho), 32)
 	recoveredPubKey, err := crypto.SigToPub(h, sig)
 	if err != nil {
 		vm.WriteRegister(7, NONE)
 	}
 	recoveredPubKeyBytes := crypto.FromECDSAPub(recoveredPubKey)
 	p, _ := vm.ReadRegister(9)
-	vm.WriteRAMBytes(uint32(p), recoveredPubKeyBytes[:])
+	vm.Ram.WriteRAMBytes(uint32(p), recoveredPubKeyBytes[:])
 
 	vm.WriteRegister(7, OK)
 	return OK
@@ -889,7 +889,7 @@ func (vm *VM) hostExport(pi uint32) (uint64, [][]byte) {
 
 	e := vm.Exports
 
-	x, errCode := vm.ReadRAMBytes(uint32(p), int(z))
+	x, errCode := vm.Ram.ReadRAMBytes(uint32(p), uint32(z))
 	if errCode != OK {
 		vm.WriteRegister(7, OOB)
 		vm.Exports = e
@@ -929,7 +929,7 @@ func (vm *VM) hostMachine() uint64 {
 	pz, _ := vm.ReadRegister(8)
 	i, _ := vm.ReadRegister(9)
 
-	p, errCode := vm.ReadRAMBytes(uint32(po), int(pz))
+	p, errCode := vm.Ram.ReadRAMBytes(uint32(po), uint32(pz))
 	if errCode != OK {
 		vm.WriteRegister(7, uint64(errCode))
 		return errCode
@@ -953,13 +953,13 @@ func (vm *VM) hostPeek() uint64 {
 		return WHO
 	}
 	// read l bytes from m
-	s_data, errCode := m_n.ReadRAMBytes(uint32(s), int(z))
+	s_data, errCode := m_n.Ram.ReadRAMBytes(uint32(s), uint32(z))
 	if errCode == OOB {
 		vm.WriteRegister(7, uint64(errCode))
 		return errCode
 	}
 	// write l bytes to vm
-	errCode = vm.WriteRAMBytes(uint32(o), s_data[:])
+	errCode = vm.Ram.WriteRAMBytes(uint32(o), s_data[:])
 	if errCode == OOB {
 		vm.WriteRegister(7, OOB)
 		return errCode
@@ -980,14 +980,14 @@ func (vm *VM) hostPoke() uint64 {
 		return WHO
 	}
 	// read data from original vm
-	s_data, errCode := vm.ReadRAMBytes(uint32(s), int(z))
+	s_data, errCode := vm.Ram.ReadRAMBytes(uint32(s), uint32(z))
 	fmt.Printf("ok? %v\n", errCode)
 	if errCode == OOB {
 		vm.WriteRegister(7, uint64(errCode))
 		return errCode
 	}
 	// write data to m_n
-	errCode = m_n.WriteRAMBytes(uint32(o), s_data[:])
+	errCode = m_n.Ram.WriteRAMBytes(uint32(o), s_data[:])
 	if errCode == OOB {
 		vm.WriteRegister(7, OOB)
 		return errCode
@@ -1010,14 +1010,14 @@ func (vm *VM) hostExpunge() uint64 {
 func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs []uint64) (errCode uint64) {
 	gasBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(gasBytes, gas)
-	errCode = vm.WriteRAMBytes(input_address, gasBytes)
+	errCode = vm.Ram.WriteRAMBytes(input_address, gasBytes)
 	if errCode != OK {
 		return errCode
 	}
 	for i, reg := range regs {
 		regBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint64(regBytes, reg)
-		errCode = vm.WriteRAMBytes(input_address+8+uint32(i*4), regBytes)
+		errCode = vm.Ram.WriteRAMBytes(input_address+8+uint32(i*4), regBytes)
 		if errCode != OK {
 			return errCode
 		}
@@ -1026,14 +1026,14 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 }
 
 func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, regs []uint64, errCode uint64) {
-	gasBytes, errCode := vm.ReadRAMBytes(input_address, 8)
+	gasBytes, errCode := vm.Ram.ReadRAMBytes(input_address, 8)
 	if errCode != OK {
 		return 0, nil, errCode
 	}
 	gas = binary.LittleEndian.Uint64(gasBytes)
 	regs = make([]uint64, 13)
 	for i := 0; i < 13; i++ {
-		regBytes, errCode := vm.ReadRAMBytes(input_address+8+uint32(i*4), 4)
+		regBytes, errCode := vm.Ram.ReadRAMBytes(input_address+8+uint32(i*4), 4)
 		if errCode != OK {
 			return 0, nil, errCode
 		}

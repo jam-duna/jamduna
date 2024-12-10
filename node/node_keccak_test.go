@@ -29,7 +29,7 @@ func TestKeccak256(t *testing.T) {
 	fmt.Printf("keccak256 Code is: %v\n", code)
 	input_byte := []byte("Hello, world!")
 	vm := pvm.NewVMFromCode(0, code, 0, targetdb)
-	vm.WriteRAMBytes(100, input_byte)
+	vm.Ram.WriteRAMBytes(100, input_byte)
 	vm.SetRegisterValue(10, 100)
 	vm.SetRegisterValue(11, uint64(len(input_byte)))
 	err = vm.Execute(5)
@@ -43,7 +43,7 @@ func TestKeccak256(t *testing.T) {
 	fmt.Printf("A4: %v\n", result)
 
 	// read from the memory
-	resultBytes, _ := vm.ReadRAMBytes(10, 32)
+	resultBytes, _ := vm.Ram.ReadRAMBytes(10, 32)
 	fmt.Printf("Result: %x\n", resultBytes)
 
 }
@@ -66,9 +66,9 @@ func TestXOR(t *testing.T) {
 	fmt.Printf("XOR Code is: %v\n", code)
 	vm := pvm.NewVMFromCode(0, code, 0, targetdb)
 	test_bytes := []byte{0x01, 0x02, 0x03, 0x04}
-	vm.WriteRAMBytes(25, test_bytes)
+	vm.Ram.WriteRAMBytes(25, test_bytes)
 	test_bytes2 := []byte{0x05, 0x06, 0x07, 0x08}
-	vm.WriteRAMBytes(100, test_bytes2)
+	vm.Ram.WriteRAMBytes(100, test_bytes2)
 	vm.SetRegisterValue(10, 25)
 	vm.SetRegisterValue(11, 100)
 	err = vm.Execute(5)
@@ -86,7 +86,7 @@ func TestXOR(t *testing.T) {
 	}
 
 	fmt.Printf("ResultXor: %v\n", resultXor)
-	result, _ := vm.ReadRAMBytes(uint32(result1), 8)
+	result, _ := vm.Ram.ReadRAMBytes(uint32(result1), 8)
 	fmt.Printf("Result: %v\n", result)
 }
 
@@ -107,7 +107,7 @@ func TestXOR_Invoke(t *testing.T) {
 	fmt.Printf("XOR Code is: %v\n", code)
 	vm := pvm.NewVMFromCode(0, code, 0, targetdb)
 	var code_length = uint64(len(code))
-	vm.WriteRAMBytes(100, code)
+	vm.Ram.WriteRAMBytes(100, code)
 	vm.SetRegisterValue(7, 100)
 	vm.SetRegisterValue(8, code_length)
 	vm.SetRegisterValue(9, 0)
@@ -121,7 +121,7 @@ func TestXOR_Invoke(t *testing.T) {
 	//let [n, s, o, z] = ω7...11,, n= which vm, s = start address, o = n start address, z = length
 	// we should set o to other register
 	test_bytes := []byte{0x01, 0x02, 0x03, 0x04}
-	vm.WriteRAMBytes(25, test_bytes)
+	vm.Ram.WriteRAMBytes(25, test_bytes)
 	vm.SetRegisterValue(7, vm2_num)
 	vm.SetRegisterValue(8, 25)
 	vm.SetRegisterValue(9, 25)
@@ -131,7 +131,7 @@ func TestXOR_Invoke(t *testing.T) {
 	fmt.Println("Poke End")
 
 	test_bytes2 := []byte{0x05, 0x06, 0x07, 0x08}
-	vm.WriteRAMBytes(100, test_bytes2)
+	vm.Ram.WriteRAMBytes(100, test_bytes2)
 	vm.SetRegisterValue(7, vm2_num)
 	vm.SetRegisterValue(8, 100)
 	vm.SetRegisterValue(9, 100)
@@ -181,7 +181,7 @@ func TestXOR_Invoke(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	vm.HostCheat("peek")
 	fmt.Println("Peek End")
-	data, errcode := vm.ReadRAMBytes(uint32(regs2[10]), int(regs2[11]))
+	data, errcode := vm.Ram.ReadRAMBytes(uint32(regs2[10]), uint32(regs2[11]))
 	if errcode != pvm.OK {
 		t.Errorf("Error reading data from memory: %v", errcode)
 	}
@@ -214,9 +214,9 @@ func TestAdd(t *testing.T) {
 	fmt.Printf("XOR Code is: %v\n", code)
 	vm := pvm.NewVMFromCode(0, code, 0, targetdb)
 	test_bytes := []byte{0x01, 0x02, 0x03, 0x04}
-	vm.WriteRAMBytes(25, test_bytes)
+	vm.Ram.WriteRAMBytes(25, test_bytes)
 	test_bytes2 := []byte{0x01, 0x00, 0x00, 0x04}
-	vm.WriteRAMBytes(100, test_bytes2)
+	vm.Ram.WriteRAMBytes(100, test_bytes2)
 	vm.SetRegisterValue(10, 25)
 	vm.SetRegisterValue(11, 100)
 	err = vm.Execute(5)
@@ -234,6 +234,6 @@ func TestAdd(t *testing.T) {
 	}
 
 	fmt.Printf("ResultXor: %v\n", resultXor)
-	result, _ := vm.ReadRAMBytes(uint32(result1), 8)
+	result, _ := vm.Ram.ReadRAMBytes(uint32(result1), 8)
 	fmt.Printf("Result: %v\n", result)
 }

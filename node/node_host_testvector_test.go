@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,11 +9,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
-	//"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -39,13 +38,17 @@ func (b *ByteSlice) UnmarshalJSON(data []byte) error {
 }
 
 type PageForTest struct {
-	Start    uint32    `json:"start"`
-	Contents ByteSlice `json:"contents"`
+	Value  ByteSlice      `json:"value"`  // The data stored in the page
+	Access pvm.AccessMode `json:"access"` // The access mode of the page
+}
+
+type RAMForTest struct {
+	Pages map[uint32]*PageForTest `json:"pages"` // The pages in the RAM
 }
 type RefineMForTest struct {
-	P ByteSlice    `json:"P"`
-	U *PageForTest `json:"U"`
-	I uint32       `json:"I"`
+	P ByteSlice   `json:"P"`
+	U *RAMForTest `json:"U"`
+	I uint32      `json:"I"`
 }
 
 type RefineM_mapForTest map[uint32]*RefineMForTest
@@ -85,59 +88,56 @@ type XContextForTest struct {
 }
 
 type RefineTestcase struct {
-	Name                    string                `json:"name"`
-	InitalGas               uint64                `json:"initial-gas"`
-	InitialRegs             []uint64              `json:"initial-regs"`
-	InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
-	InitialMemory           []PageForTest         `json:"initial-memory"`
+	Name          string     `json:"name"`
+	InitalGas     uint64     `json:"initial-gas"`
+	InitialRegs   []uint64   `json:"initial-regs"`
+	InitialMemory RAMForTest `json:"initial-memory"`
 
 	InitialRefineM_map   RefineM_mapForTest `json:"initial-refine-map"` // m in refine function
 	InitialExportSegment []ByteSlice        `json:"initial-export-segment"`
 
 	InitialImportSegment    []ByteSlice `json:"initial-import-segment"`
-	InitialExportSegmentIdx uint64      `json:"initial-export-segment-index"`
+	InitialExportSegmentIdx uint32      `json:"initial-export-segment-index"`
 
-	ExpectedGas    uint64        `json:"expected-gas"`
-	ExpectedRegs   []uint64      `json:"expected-regs"`
-	ExpectedMemory []PageForTest `json:"expected-memory"`
+	ExpectedGas    uint64     `json:"expected-gas"`
+	ExpectedRegs   []uint64   `json:"expected-regs"`
+	ExpectedMemory RAMForTest `json:"expected-memory"`
 
 	ExpectedRefineM_map   RefineM_mapForTest `json:"expected-refine-map"`
 	ExpectedExportSegment []ByteSlice        `json:"expected-export-segment"`
 }
 
 type AccumulateTestcase struct {
-	Name                    string                `json:"name"`
-	InitalGas               uint64                `json:"initial-gas"`
-	InitialRegs             []uint64              `json:"initial-regs"`
-	InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
-	InitialMemory           []PageForTest         `json:"initial-memory"`
+	Name          string     `json:"name"`
+	InitalGas     uint64     `json:"initial-gas"`
+	InitialRegs   []uint64   `json:"initial-regs"`
+	InitialMemory RAMForTest `json:"initial-memory"`
 
 	InitialXcontent_x *XContextForTest `json:"initial-xcontent-x"`
 	InitialXcontent_y XContextForTest  `json:"initial-xcontent-y"`
 	InitialTimeslot   uint32           `json:"initial-timeslot"`
 
-	ExpectedGas    uint64        `json:"expected-gas"`
-	ExpectedRegs   []uint64      `json:"expected-regs"`
-	ExpectedMemory []PageForTest `json:"expected-memory"`
+	ExpectedGas    uint64     `json:"expected-gas"`
+	ExpectedRegs   []uint64   `json:"expected-regs"`
+	ExpectedMemory RAMForTest `json:"expected-memory"`
 
 	ExpectedXcontent_x *XContextForTest `json:"expected-xcontent-x"`
 	ExpectedXcontent_y XContextForTest  `json:"expected-xcontent-y"`
 }
 
 type GeneralTestcase struct {
-	Name                    string                `json:"name"`
-	InitalGas               uint64                `json:"initial-gas"`
-	InitialRegs             []uint64              `json:"initial-regs"`
-	InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
-	InitialMemory           []PageForTest         `json:"initial-memory"`
+	Name          string     `json:"name"`
+	InitalGas     uint64     `json:"initial-gas"`
+	InitialRegs   []uint64   `json:"initial-regs"`
+	InitialMemory RAMForTest `json:"initial-memory"`
 
 	InitialServiceAccount ServiceAccountForTest             `json:"initial-service-account"`
 	InitialServiceIndex   uint32                            `json:"initial-service-index"`
 	InitialDelta          map[uint32]*ServiceAccountForTest `json:"initial-delta"`
 
-	ExpectedGas    uint64        `json:"expected-gas"`
-	ExpectedRegs   []uint64      `json:"expected-regs"`
-	ExpectedMemory []PageForTest `json:"expected-memory"`
+	ExpectedGas    uint64     `json:"expected-gas"`
+	ExpectedRegs   []uint64   `json:"expected-regs"`
+	ExpectedMemory RAMForTest `json:"expected-memory"`
 
 	ExpectedXServiceAccount ServiceAccountForTest `json:"expected-service-account"`
 }
@@ -182,104 +182,56 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 	return matchingFiles, fileContents, nil
 }
 
-func SetupNodeEnv(t *testing.T) *Node {
-	network := "tiny"
-	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network)
-	if err != nil {
-		t.Fatalf("Error setting up nodes: %v\n", err)
-	}
-	numNodes := 1
-	nodes := make([]*Node, numNodes)
-	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], getGenesisFile(network), epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
-		if err != nil {
-			t.Fatalf("Failed to create node %d: %v\n", i, err)
-		}
-		nodes[i] = node
-	}
-
-	// give some time for nodes to come up
-	for {
-		time.Sleep(1 * time.Second)
-		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady() {
-			break
-		}
-	}
-	return nodes[0]
-}
-
 type Testcase interface {
 	GetInitialGas() uint64
 	GetInitialRegs() []uint64
-	GetInitialMemoryPermission() []pvm.PermissionRange
-	GetInitialMemory() []PageForTest
+	GetInitialMemory() RAMForTest
 
 	GetExpectedGas() uint64
 	GetExpectedRegs() []uint64
-	GetExpectedMemory() []PageForTest
+	GetExpectedMemory() RAMForTest
 	GetName() string
 }
 
-func (tc RefineTestcase) GetInitialGas() uint64    { return tc.InitalGas }
-func (tc RefineTestcase) GetInitialRegs() []uint64 { return tc.InitialRegs }
-func (tc RefineTestcase) GetInitialMemoryPermission() []pvm.PermissionRange {
-	return tc.InitialMemoryPermission
-}
-func (tc RefineTestcase) GetInitialMemory() []PageForTest  { return tc.InitialMemory }
-func (tc RefineTestcase) GetExpectedGas() uint64           { return tc.ExpectedGas }
-func (tc RefineTestcase) GetExpectedRegs() []uint64        { return tc.ExpectedRegs }
-func (tc RefineTestcase) GetExpectedMemory() []PageForTest { return tc.ExpectedMemory }
-func (tc RefineTestcase) GetName() string                  { return tc.Name }
+func (tc RefineTestcase) GetInitialGas() uint64         { return tc.InitalGas }
+func (tc RefineTestcase) GetInitialRegs() []uint64      { return tc.InitialRegs }
+func (tc RefineTestcase) GetInitialMemory() RAMForTest  { return tc.InitialMemory }
+func (tc RefineTestcase) GetExpectedGas() uint64        { return tc.ExpectedGas }
+func (tc RefineTestcase) GetExpectedRegs() []uint64     { return tc.ExpectedRegs }
+func (tc RefineTestcase) GetExpectedMemory() RAMForTest { return tc.ExpectedMemory }
+func (tc RefineTestcase) GetName() string               { return tc.Name }
 
-func (tc AccumulateTestcase) GetInitialGas() uint64    { return tc.InitalGas }
-func (tc AccumulateTestcase) GetInitialRegs() []uint64 { return tc.InitialRegs }
-func (tc AccumulateTestcase) GetInitialMemoryPermission() []pvm.PermissionRange {
-	return tc.InitialMemoryPermission
-}
-func (tc AccumulateTestcase) GetInitialMemory() []PageForTest  { return tc.InitialMemory }
-func (tc AccumulateTestcase) GetExpectedGas() uint64           { return tc.ExpectedGas }
-func (tc AccumulateTestcase) GetExpectedRegs() []uint64        { return tc.ExpectedRegs }
-func (tc AccumulateTestcase) GetExpectedMemory() []PageForTest { return tc.ExpectedMemory }
-func (tc AccumulateTestcase) GetName() string                  { return tc.Name }
+func (tc AccumulateTestcase) GetInitialGas() uint64         { return tc.InitalGas }
+func (tc AccumulateTestcase) GetInitialRegs() []uint64      { return tc.InitialRegs }
+func (tc AccumulateTestcase) GetInitialMemory() RAMForTest  { return tc.InitialMemory }
+func (tc AccumulateTestcase) GetExpectedGas() uint64        { return tc.ExpectedGas }
+func (tc AccumulateTestcase) GetExpectedRegs() []uint64     { return tc.ExpectedRegs }
+func (tc AccumulateTestcase) GetExpectedMemory() RAMForTest { return tc.ExpectedMemory }
+func (tc AccumulateTestcase) GetName() string               { return tc.Name }
 
-func (tc GeneralTestcase) GetInitialGas() uint64    { return tc.InitalGas }
-func (tc GeneralTestcase) GetInitialRegs() []uint64 { return tc.InitialRegs }
-func (tc GeneralTestcase) GetInitialMemoryPermission() []pvm.PermissionRange {
-	return tc.InitialMemoryPermission
-}
-func (tc GeneralTestcase) GetInitialMemory() []PageForTest  { return tc.InitialMemory }
-func (tc GeneralTestcase) GetExpectedGas() uint64           { return tc.ExpectedGas }
-func (tc GeneralTestcase) GetExpectedRegs() []uint64        { return tc.ExpectedRegs }
-func (tc GeneralTestcase) GetExpectedMemory() []PageForTest { return tc.ExpectedMemory }
-func (tc GeneralTestcase) GetName() string                  { return tc.Name }
+func (tc GeneralTestcase) GetInitialGas() uint64         { return tc.InitalGas }
+func (tc GeneralTestcase) GetInitialRegs() []uint64      { return tc.InitialRegs }
+func (tc GeneralTestcase) GetInitialMemory() RAMForTest  { return tc.InitialMemory }
+func (tc GeneralTestcase) GetExpectedGas() uint64        { return tc.ExpectedGas }
+func (tc GeneralTestcase) GetExpectedRegs() []uint64     { return tc.ExpectedRegs }
+func (tc GeneralTestcase) GetExpectedMemory() RAMForTest { return tc.ExpectedMemory }
+func (tc GeneralTestcase) GetName() string               { return tc.Name }
 
 func InitPvmBase(vm *pvm.VM, tc Testcase) {
 	vm.Gas = int64(tc.GetInitialGas())
 	for i, reg := range tc.GetInitialRegs() {
 		vm.WriteRegister(i, reg)
 	}
-	for _, perm := range tc.GetInitialMemoryPermission() {
-		vm.SetAccessMode(perm.Start, perm.Length, pvm.AccessMode(perm.Mode))
-	}
-	for _, mem := range tc.GetInitialMemory() {
-		vm.WriteRAMBytes(mem.Start, mem.Contents)
+	for page_addr, page := range tc.GetInitialMemory().Pages {
+		vm.Ram.SetPageAccess(page_addr, 1, page.Access)
+		vm.Ram.WriteRAMBytes(page_addr*pvm.PageSize, page.Value)
 	}
 }
 
 func InitPvmRefine(vm *pvm.VM, testcase RefineTestcase) {
 	// Initialize RefineM_map
 	vm.RefineM_map = make(map[uint32]*pvm.RefineM)
-	for k, v := range testcase.InitialRefineM_map {
-		page := &pvm.Page{
-			Start:    v.U.Start,
-			Contents: v.U.Contents,
-		}
-		vm.RefineM_map[k] = &pvm.RefineM{
-			P: v.P,
-			U: page,
-			I: v.I,
-		}
-	}
+	vm.RefineM_map = ConvertToRefineM_map(testcase.InitialRefineM_map)
 
 	// Initialize Export Segments
 	vm.Exports = make([][]byte, len(testcase.InitialExportSegment))
@@ -295,7 +247,7 @@ func InitPvmRefine(vm *pvm.VM, testcase RefineTestcase) {
 		copy(vm.Imports[i], bs)
 	}
 
-	vm.ExportSegmentIndex = uint32(testcase.InitialExportSegmentIdx) // check
+	vm.ExportSegmentIndex = testcase.InitialExportSegmentIdx
 }
 
 func InitPvmAccumulate(vm *pvm.VM, testcase AccumulateTestcase) {
@@ -362,12 +314,12 @@ func CompareBase(vm *pvm.VM, testcase Testcase) {
 		}
 	}
 	// Compare Memory
-	expectedMemory := testcase.GetExpectedMemory()
+	expectedMemory := testcase.GetExpectedMemory().Pages
 	if len(expectedMemory) > 0 {
-		for _, expectedMem := range expectedMemory {
-			actualMemory, _ := vm.ReadRAMBytes(expectedMem.Start, len(expectedMem.Contents))
-			if !equalByteSlices(actualMemory, expectedMem.Contents) {
-				fmt.Printf("Memory mismatch at address %d. Expected: %v, Got: %v\n", expectedMem.Start, expectedMem.Contents, actualMemory)
+		for page_addr, page := range expectedMemory {
+			actualMemory, _ := vm.Ram.ReadRAMBytes(page_addr*pvm.PageSize, uint32(len(page.Value)))
+			if !equalByteSlices(actualMemory, page.Value) {
+				fmt.Printf("Memory mismatch at address %d. Expected: %v, Got: %v\n", page_addr*pvm.PageSize, page.Value, actualMemory)
 				passed = false
 			}
 		}
@@ -384,7 +336,7 @@ func CompareRefine(vm *pvm.VM, testcase RefineTestcase) {
 	RefineM_map_test := ConvertToRefineM_map(testcase.InitialRefineM_map)
 	// Compare RefineM_map
 	if len(testcase.ExpectedRefineM_map) > 0 {
-		if !pvm.CompareRefineMMaps(vm.RefineM_map, RefineM_map_test) {
+		if !CompareRefineMMaps(vm.RefineM_map, RefineM_map_test) {
 			fmt.Printf("RefineM.P mismatch. Expected: %+v, Got: %+v\n", testcase.ExpectedRefineM_map, vm.RefineM_map)
 			passed = false
 		}
@@ -471,7 +423,11 @@ func CompareGeneral(vm *pvm.VM, testcase GeneralTestcase) {
 // Main test functions
 // Test all refine test vectors
 func TestRefine(t *testing.T) {
-	node := SetupNodeEnv(t)
+	nodes, err := SetUpNodes(1)
+	if err != nil {
+		panic("Error setting up nodes: %v\n")
+	}
+	node := nodes[0]
 
 	functions := []string{
 		"Import", "Export",
@@ -508,7 +464,11 @@ func TestRefine(t *testing.T) {
 
 // Test all accumulate test vectors
 func TestAccumulate(t *testing.T) {
-	node := SetupNodeEnv(t)
+	nodes, err := SetUpNodes(1)
+	if err != nil {
+		panic("Error setting up nodes: %v\n")
+	}
+	node := nodes[0]
 
 	functions := []string{"New", "Solicit", "Forget", "Transfer"}
 	functions = []string{"New"}
@@ -543,7 +503,11 @@ func TestAccumulate(t *testing.T) {
 
 // Test all general test vectors
 func TestGeneral(t *testing.T) {
-	node := SetupNodeEnv(t)
+	nodes, err := SetUpNodes(1)
+	if err != nil {
+		panic("Error setting up nodes: %v\n")
+	}
+	node := nodes[0]
 
 	functions := []string{
 		"Read", "Write",
@@ -623,8 +587,8 @@ func GenerateTestVectors(t *testing.T, dirPath string, functions []string, error
 				tc.ExpectedRegs[7] = errcase
 				// If error case is OOB, modify initial-memory-permission mode to 0
 				if errcase == pvm.OOB {
-					for i := range tc.InitialMemoryPermission {
-						tc.InitialMemoryPermission[i].Mode = 0
+					for _, page := range tc.InitialMemory.Pages {
+						page.Access.Inaccessible = true
 					}
 				}
 				// Update test case name
@@ -637,8 +601,8 @@ func GenerateTestVectors(t *testing.T, dirPath string, functions []string, error
 			case *AccumulateTestcase:
 				tc.ExpectedRegs[7] = errcase
 				if errcase == pvm.OOB {
-					for i := range tc.InitialMemoryPermission {
-						tc.InitialMemoryPermission[i].Mode = 0
+					for _, page := range tc.InitialMemory.Pages {
+						page.Access.Inaccessible = true
 					}
 				}
 				errcaseName, exists := errorCaseNames[errcase]
@@ -650,8 +614,8 @@ func GenerateTestVectors(t *testing.T, dirPath string, functions []string, error
 			case *GeneralTestcase:
 				tc.ExpectedRegs[7] = errcase
 				if errcase == pvm.OOB {
-					for i := range tc.InitialMemoryPermission {
-						tc.InitialMemoryPermission[i].Mode = 0
+					for _, page := range tc.InitialMemory.Pages {
+						page.Access.Inaccessible = true
 					}
 				}
 				errcaseName, exists := errorCaseNames[errcase]
@@ -743,19 +707,21 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	testcase.InitialRegs[7] = 0 // the 0th import segment
 	testcase.ExpectedRegs[7] = pvm.OK
 
-	testcase.InitialRegs[8] = 4278124544 // 0xFEFF0000
-	testcase.ExpectedRegs[8] = 4278124544
+	testcase.InitialRegs[8] = 32 * pvm.PageSize // 131072
+	testcase.ExpectedRegs[8] = 32 * pvm.PageSize
 
 	testcase.InitialRegs[9] = 12 // segement length
 	testcase.ExpectedRegs[9] = 12
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 12, Mode: 2},
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
+		},
 	}
-
-	testcase.InitialMemory = []PageForTest{}
-	testcase.ExpectedMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Writable: true}},
+		},
 	}
 
 	testcase.InitialRefineM_map = RefineM_mapForTest{}
@@ -786,18 +752,22 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	testcase.InitialRegs[7] = 0 // the 0th import segment
 	testcase.ExpectedRegs[7] = pvm.OOB
 
-	testcase.InitialRegs[8] = 4278124544 // 0xFEFF0000
-	testcase.ExpectedRegs[8] = 4278124544
+	testcase.InitialRegs[8] = 32 * pvm.PageSize // 131072
+	testcase.ExpectedRegs[8] = 32 * pvm.PageSize
 
 	testcase.InitialRegs[9] = 12 // segement length
 	testcase.ExpectedRegs[9] = 12
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 12, Mode: 0},
-	} // set mode to 0 to simulate OOB error
-
-	testcase.InitialMemory = []PageForTest{}
-	testcase.ExpectedMemory = []PageForTest{}
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Inaccessible: true}},
+		},
+	}
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Inaccessible: true}},
+		},
+	}
 
 	testcase.InitialRefineM_map = RefineM_mapForTest{}
 	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
@@ -827,17 +797,22 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	testcase.InitialRegs[7] = 9999 // Simulate NONE error
 	testcase.ExpectedRegs[7] = pvm.NONE
 
-	testcase.InitialRegs[8] = 4278124544 // 0xFEFF0000
-	testcase.ExpectedRegs[8] = 4278124544
+	testcase.InitialRegs[8] = 32 * pvm.PageSize  // 131072
+	testcase.ExpectedRegs[8] = 32 * pvm.PageSize // 131072
 
 	testcase.InitialRegs[9] = 12 // segement length
 	testcase.ExpectedRegs[9] = 12
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 12, Mode: 2},
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
+		},
 	}
-	testcase.InitialMemory = []PageForTest{}
-	testcase.ExpectedMemory = []PageForTest{}
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
+		},
+	}
 
 	testcase.InitialRefineM_map = RefineM_mapForTest{}
 	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
@@ -864,21 +839,21 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 		return
 	}
 
-	testcase.InitialRegs[7] = 4278124544                                                                     // 0xFEFF0000
-	testcase.ExpectedRegs[7] = testcase.InitialExportSegmentIdx + uint64(len(testcase.InitialExportSegment)) // 0 + 1
+	testcase.InitialRegs[7] = 32 * pvm.PageSize                                                                      // 12                                                                     // 0xFEFF0000
+	testcase.ExpectedRegs[7] = uint64(testcase.InitialExportSegmentIdx) + uint64(len(testcase.InitialExportSegment)) // 0 + 1
 
 	testcase.InitialRegs[8] = 12 // Export segment length
 	testcase.ExpectedRegs[8] = 12
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 12, Mode: 2},
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
-
-	testcase.InitialMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
-	}
-	testcase.ExpectedMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
 
 	testcase.InitialRefineM_map = RefineM_mapForTest{}
@@ -910,18 +885,22 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 		return
 	}
 
-	testcase.InitialRegs[7] = 4278124544 // 0xFEFF0000
+	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
 	testcase.ExpectedRegs[7] = pvm.OOB
 
 	testcase.InitialRegs[8] = 12 // Export segment length
 	testcase.ExpectedRegs[8] = 12
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 12, Mode: 0},
-	} // set mode to 0 to simulate OOB error
-
-	testcase.InitialMemory = []PageForTest{}
-	testcase.ExpectedMemory = []PageForTest{}
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Inaccessible: true}},
+		},
+	}
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Inaccessible: true}},
+		},
+	}
 
 	testcase.InitialRefineM_map = RefineM_mapForTest{}
 	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
@@ -954,15 +933,15 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	testcase.InitialRegs[8] = 12 // Export segment length
 	testcase.ExpectedRegs[8] = 12
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 12, Mode: 2},
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
-
-	testcase.InitialMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
-	}
-	testcase.ExpectedMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
 
 	testcase.InitialRefineM_map = RefineM_mapForTest{}
@@ -1013,8 +992,8 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 		fmt.Printf("Failed to read test case: %v\n", err)
 		return
 	}
-	testcase.InitialRegs[7] = 4278124544 // 0xFEFF0000
-	testcase.ExpectedRegs[7] = 1         // new service index (should be check)
+	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
+	testcase.ExpectedRegs[7] = 1                // new service index (should be check)
 
 	testcase.InitialRegs[8] = 12 // code length (should be check)
 	testcase.ExpectedRegs[8] = 12
@@ -1025,15 +1004,15 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 	testcase.InitialRegs[10] = 200 // Gas limit m
 	testcase.ExpectedRegs[10] = 200
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 32, Mode: 2},
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
-
-	testcase.InitialMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
-	}
-	testcase.ExpectedMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
 
 	a = &ServiceAccountForTest{}
@@ -1079,8 +1058,8 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 		fmt.Printf("Failed to read test case: %v\n", err)
 		return
 	}
-	testcase.InitialRegs[7] = 4278124544 // 0xFEFF0000
-	testcase.ExpectedRegs[7] = pvm.OOB   // new service index (should be check)
+	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
+	testcase.ExpectedRegs[7] = pvm.OOB          // new service index (should be check)
 
 	testcase.InitialRegs[8] = 12 // code length (should be check)
 	testcase.ExpectedRegs[8] = 12
@@ -1091,12 +1070,16 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 	testcase.InitialRegs[10] = 200 // Gas limit m
 	testcase.ExpectedRegs[10] = 200
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 32, Mode: 0}, // set mode to 0 to simulate OOB error
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
+		},
 	}
-
-	testcase.InitialMemory = []PageForTest{}
-	testcase.ExpectedMemory = []PageForTest{}
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
+		},
+	}
 
 	testcase.ExpectedXcontent_x = testcase.InitialXcontent_x
 
@@ -1116,8 +1099,8 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 		fmt.Printf("Failed to read test case: %v\n", err)
 		return
 	}
-	testcase.InitialRegs[7] = 4278124544 // 0xFEFF0000
-	testcase.ExpectedRegs[7] = pvm.CASH  // new service index (should be check)
+	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
+	testcase.ExpectedRegs[7] = pvm.CASH         // new service index (should be check)
 
 	testcase.InitialRegs[8] = 12 // code length (should be check)
 	testcase.ExpectedRegs[8] = 12
@@ -1128,15 +1111,15 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 	testcase.InitialRegs[10] = 200 // Gas limit m
 	testcase.ExpectedRegs[10] = 200
 
-	testcase.InitialMemoryPermission = []pvm.PermissionRange{
-		{Start: 4278124544, Length: 32, Mode: 2},
+	testcase.InitialMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
-
-	testcase.InitialMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
-	}
-	testcase.ExpectedMemory = []PageForTest{
-		{Start: 4278124544, Contents: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+	testcase.ExpectedMemory = RAMForTest{
+		Pages: map[uint32]*PageForTest{
+			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+		},
 	}
 
 	a = &ServiceAccountForTest{}
@@ -1243,23 +1226,84 @@ func equalByteSlices(a, b []byte) bool {
 	return true
 }
 
-func CompareRAMs(ram1, ram2 *pvm.RAM) bool {
-	// Handle nil cases
-	if ram1 == nil && ram2 == nil {
-		return true // Both are nil, considered equal
+func CompareRefineMMaps(map1, map2 pvm.RefineM_map) bool {
+	if len(map1) != len(map2) {
+		return false
 	}
+
+	for key, val1 := range map1 {
+		val2, exists := map2[key]
+		if !exists {
+			return false
+		}
+
+		if !CompareRefineM(val1, val2) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func CompareRefineM(m1, m2 *pvm.RefineM) bool {
+	if m1 == nil || m2 == nil {
+		return m1 == m2
+	}
+
+	if !bytes.Equal(m1.P, m2.P) {
+		return false
+	}
+
+	if !CompareRAM(m1.U, m2.U) {
+		return false
+	}
+
+	if m1.I != m2.I {
+		return false
+	}
+
+	return true
+}
+
+// ComparePage compares two MemoryPage instances for equality.
+func ComparePage(page1, page2 *pvm.Page) bool {
+	if page1 == nil || page2 == nil {
+		return page1 == page2
+	}
+
+	// Compare access modes
+	if page1.Access != page2.Access {
+		return false
+	}
+
+	// Compare contents
+	if (page1.Value == nil) != (page2.Value == nil) {
+		return false
+	}
+	if page1.Value != nil && !bytes.Equal(page1.Value, page2.Value) {
+		return false
+	}
+
+	return true
+}
+
+// CompareRAM compares two RAM instances for equality.
+func CompareRAM(ram1, ram2 *pvm.RAM) bool {
 	if ram1 == nil || ram2 == nil {
-		return false // One is nil, the other is not
+		return ram1 == ram2
 	}
 
-	// Compare memory maps
-	if !reflect.DeepEqual(ram1.Memory, ram2.Memory) {
+	// Compare the number of allocated pages
+	if len(ram1.Pages) != len(ram2.Pages) {
 		return false
 	}
 
-	// Compare permissions slices
-	if !reflect.DeepEqual(ram1.Permissions, ram2.Permissions) {
-		return false
+	// Compare each page in the RAM
+	for pageIndex, page1 := range ram1.Pages {
+		page2, exists := ram2.Pages[pageIndex]
+		if !exists || !ComparePage(page1, page2) {
+			return false
+		}
 	}
 
 	return true
@@ -1404,7 +1448,7 @@ func ConvertToServiceAccount(saft *ServiceAccountForTest) (*types.ServiceAccount
 	// Convert Lookup map
 	for k, v := range saft.Lookup {
 		keyHash := common.HexToHash(k)
-		sa.Lookup[keyHash] = types.LookupObject{T: v} // check
+		sa.Lookup[keyHash] = types.LookupObject{T: v}
 	}
 
 	// Convert Preimage map
@@ -1452,13 +1496,15 @@ func ConvertToServiceAccountForTest(sa *types.ServiceAccount) *ServiceAccountFor
 func ConvertToRefineM_map(refineM_mapFT map[uint32]*RefineMForTest) map[uint32]*pvm.RefineM {
 	refineM_map := make(map[uint32]*pvm.RefineM)
 	for k, v := range refineM_mapFT {
-		page := &pvm.Page{
-			Start:    v.U.Start,
-			Contents: v.U.Contents,
+		ram := pvm.NewRAM()
+
+		for page_addr, page := range v.U.Pages {
+			ram.SetPageAccess(page_addr, 1, page.Access)
+			ram.WriteRAMBytes(page_addr*pvm.PageSize, page.Value)
 		}
 		refineM_map[k] = &pvm.RefineM{
 			P: v.P,
-			U: page,
+			U: ram,
 			I: v.I,
 		}
 	}
@@ -1468,13 +1514,20 @@ func ConvertToRefineM_map(refineM_mapFT map[uint32]*RefineMForTest) map[uint32]*
 func ConvertToRefineM_mapForTest(refineM_map map[uint32]*pvm.RefineM) map[uint32]*RefineMForTest {
 	refineM_mapFT := make(map[uint32]*RefineMForTest)
 	for k, v := range refineM_map {
-		page := &PageForTest{
-			Start:    v.U.Start,
-			Contents: v.U.Contents,
+
+		RAMForTest := &RAMForTest{
+			Pages: make(map[uint32]*PageForTest),
+		}
+
+		for page_addr, page := range v.U.Pages {
+			RAMForTest.Pages[page_addr] = &PageForTest{
+				Value:  page.Value,
+				Access: page.Access,
+			}
 		}
 		refineM_mapFT[k] = &RefineMForTest{
 			P: v.P,
-			U: page,
+			U: RAMForTest,
 			I: v.I,
 		}
 	}
