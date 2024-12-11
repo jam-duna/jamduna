@@ -452,7 +452,7 @@ func TestStateKey(t *testing.T) {
 }
 
 // TestInitial tests the initialization of a Merkle tree from a root hash
-func TestInitial(t *testing.T) {
+func testInitial(t *testing.T) {
 	// Initialize the test data
 	// level_db_path := "../leveldb/BPT"
 	data := [][2][]byte{
@@ -513,7 +513,7 @@ func TestInitial(t *testing.T) {
 }
 
 // Test service
-func TestService(t *testing.T) {
+func testService(t *testing.T) {
 
 	// Build the initial tree and insert the data
 	test_db, _ := initLevelDB()

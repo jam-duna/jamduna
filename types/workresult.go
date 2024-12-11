@@ -22,7 +22,7 @@ type WorkResult struct {
 	ServiceID   uint32      `json:"service_id"`
 	CodeHash    common.Hash `json:"code_hash"`
 	PayloadHash common.Hash `json:"payload_hash"`
-	Gas         uint64      `json:"gas"`
+	Gas         uint64      `json:"accumulate_gas"`
 	Result      Result      `json:"result"`
 }
 
@@ -122,7 +122,7 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 		ServiceID   uint32                 `json:"service_id"`
 		CodeHash    common.Hash            `json:"code_hash"`
 		PayloadHash common.Hash            `json:"payload_hash"`
-		Gas         uint64                 `json:"gas"`
+		Gas         uint64                 `json:"accumulate_gas"`
 		Result      map[string]interface{} `json:"result"`
 	}
 	err := json.Unmarshal(data, &s)

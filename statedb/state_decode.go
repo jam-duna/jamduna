@@ -355,7 +355,6 @@ func (n *JamState) SetPrivilegedServicesIndices(privilegedServicesIndicesByte []
 	n.PrivilegedServiceIndices = privilegedServicesIndices.(types.Kai_state)
 }
 
-
 // C13 ActiveValidator
 func (n *JamState) SetPi(piByte []byte) {
 	if len(piByte) == 0 {

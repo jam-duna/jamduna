@@ -31,8 +31,9 @@ fn ring_context() -> &'static RingContext {
         use std::{fs::File, io::Read};
         let manifest_dir =
             std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
-        let filename = format!("{}/data/zcash-srs-2-11-uncompressed.bin", manifest_dir);
-        let mut file = File::open(filename).unwrap();
+        let filename = format!("{}/zcash-srs-2-11-uncompressed.bin", manifest_dir);
+        let mut file = File::open(&filename)
+            .unwrap_or_else(|e| panic!("Failed to open file '{}': {}", filename, e));
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).unwrap();
         let pcs_params = PcsParams::deserialize_uncompressed_unchecked(&mut &buf[..]).unwrap();

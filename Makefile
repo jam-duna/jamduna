@@ -28,17 +28,17 @@ testnet:
 	docker build -t colorfulnotion/jam .
 	docker-compose up
 
-clean:
-	rm -f $(OUTPUT_DIR)/$(BINARY)
+#clean:
+#	rm -f $(OUTPUT_DIR)/$(BINARY)
 
 # Target to build BLS FFI library
-bls:
+blslib:
 	@echo "Building BLS..."
 	@cd bls && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release
 	@echo "Built BLS library!"
 
 # Target to build Bandersnatch FFI library
-bandersnatch:
+bandersnatchlib:
 	@echo "Building Bandersnatch..."
 	@cd bandersnatch && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release
 	@echo "Built Bandersnatch library!"
@@ -53,7 +53,7 @@ cargo_clean:
 ffi_force: cargo_clean ffi
 
 # Target to build both BLS and Bandersnatch FFI libraries
-ffi: bls bandersnatch
+ffi: blslib bandersnatchlib
 	@echo "Built all FFI libraries (BLS + Bandersnatch)!"
 
 beauty:
@@ -63,3 +63,26 @@ beauty:
 fmt-check:
 	@echo "Checking formatting..."
 	@diff -u <(echo -n) <(gofmt -d .)
+
+
+# List of packages
+PACKAGES = bandersnatch bls common erasurecoding node pvm statedb trie types
+
+# Default target: Run all tests
+.PHONY: all
+all: $(PACKAGES)
+
+# Targets for individual packages
+.PHONY: $(PACKAGES)
+$(PACKAGES):
+	go test ./$(shell echo $@ | tr '_' '/')
+
+# Target to run all tests at once
+.PHONY: test-all
+test-all:
+	go test ./...
+
+# Clean target (optional)
+.PHONY: clean
+clean:
+	go clean -testcache

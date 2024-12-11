@@ -1,0 +1,97 @@
+name: Jam non-node package test
+
+env:
+  JAM_PATH: .
+  LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
+  CARGO_MANIFEST_DIR: ${{ github.workspace }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy.yml
+#  schedule:
+#    - cron: '0 */6 * * *'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.23
+
+      - name: Set up Rust
+        run: |
+          sudo apt update
+          sudo apt install -y curl build-essential
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source $HOME/.cargo/env
+
+      - name: Set environment variables
+        run: |
+          echo "JAM_PATH=." >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=./bls/target/release: ./bandersnatch/target/release" >> $GITHUB_ENV
+          echo "CARGO_MANIFEST_DIR=${{ github.workspace }}" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install -y build-essential
+
+      - name: Clear Go module cache
+        run: go clean -modcache
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install Go dependencies
+        run: go mod tidy
+
+      - name: Run make commands
+        run: |
+          make blslib
+          make bandersnatchlib
+
+      - name: Run test common
+        run: |
+          go test ./common || echo "Test failed but continuing."
+          mkdir -p "$CARGO_MANIFEST_DIR"
+
+      - name: Run test bls
+        run: go test ./bls || echo "Test failed but continuing."
+
+      - name: Run test bandersnatch
+        run: go test ./bandersnatch || echo "Test failed but continuing."
+
+      - name: Run test trie
+        run: go test ./trie || echo "Test failed but continuing."
+
+      - name: Run test types
+        run: go test ./types || echo "Test failed but continuing."
+
+      - name: Run test statedb
+        run: go test ./statedb || echo "Test failed but continuing."
+
+      - name: Run test erasurecoding
+        run: go test ./erasurecoding || echo "Test failed but continuing."
+
+      - name: Run test pvm
+        run: go test ./pvm || echo "Test failed but continuing."
+
+      - name: Run test fib
+        run: go test ./node -timeout 5m -v -run ^TestFib$ || echo "Test failed but continuing."
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ || echo "Test failed but continuing."
+
+

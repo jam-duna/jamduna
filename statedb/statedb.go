@@ -1228,8 +1228,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.RemoveUnusedTickets()
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
-	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
-	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
 	// 19-22 - Safrole last
 	ticketExts := blk.Tickets()
 	sf_header := blk.GetHeader()
@@ -1293,6 +1291,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
+
+	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
+	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
+
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "assurances", num_assurances)
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
 

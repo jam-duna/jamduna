@@ -173,3 +173,38 @@ func (M MMR) Decode(data []byte) (interface{}, uint32) {
 	M.Peaks = peaks
 	return M, length
 }
+
+func (M MMR) SuperPeak() *common.Hash {
+	// Helper function to compute SuperPeak recursively
+	var computeSuperPeak func(hashes []*common.Hash) *common.Hash
+	computeSuperPeak = func(hashes []*common.Hash) *common.Hash {
+		// Remove nil values from hashes
+		nonNilHashes := make([]*common.Hash, 0)
+		for _, h := range hashes {
+			if h != nil {
+				nonNilHashes = append(nonNilHashes, h)
+			}
+		}
+
+		// Base cases
+		if len(nonNilHashes) == 0 {
+			// Return empty hash (e.g., zero hash)
+			zeroHash := keccak256([]byte{})
+			return &zeroHash
+		}
+		if len(nonNilHashes) == 1 {
+			// Return the single hash
+			return nonNilHashes[0]
+		}
+
+		// Recursive computation
+		left := computeSuperPeak(nonNilHashes[:len(nonNilHashes)-1])
+		right := nonNilHashes[len(nonNilHashes)-1]
+		combined := append([]byte("node"), append(left.Bytes(), right.Bytes()...)...)
+		superPeakHash := keccak256(combined)
+		return &superPeakHash
+	}
+
+	// Start computation on the current MMR peaks
+	return computeSuperPeak(M.Peaks)
+}

@@ -12,18 +12,18 @@ import (
 type RecentBlocks []Beta_state
 
 type Beta_state struct {
-	HeaderHash common.Hash                   `json:"header_hash"`
-	B          trie.MMR                      `json:"mmr"`
-	StateRoot  common.Hash                   `json:"state_root"`
-	Reported   []types.SegmentRootLookupItem `json:"reported"` // Use the custom type
+	HeaderHash common.Hash             `json:"header_hash"`
+	B          trie.MMR                `json:"mmr"`
+	StateRoot  common.Hash             `json:"state_root"`
+	Reported   types.SegmentRootLookup `json:"report"` // Use the custom type
 }
 
 func (b *Beta_state) UnmarshalJSON(data []byte) error {
 	var s struct {
-		HeaderHash common.Hash                   `json:"header_hash"`
-		B          trie.MMR                      `json:"mmr"`
-		StateRoot  common.Hash                   `json:"state_root"`
-		Report     []types.SegmentRootLookupItem `json:"reported"`
+		HeaderHash common.Hash             `json:"header_hash"`
+		B          trie.MMR                `json:"mmr"`
+		StateRoot  common.Hash             `json:"state_root"`
+		Report     types.SegmentRootLookup `json:"reported"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
@@ -37,15 +37,15 @@ func (b *Beta_state) UnmarshalJSON(data []byte) error {
 
 func (b Beta_state) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		HeaderHash common.Hash   `json:"header_hash"`
-		B          trie.MMR      `json:"mmr"`
-		StateRoot  common.Hash   `json:"state_root"`
-		Report     []interface{} `json:"reported"`
+		HeaderHash common.Hash                   `json:"header_hash"`
+		B          trie.MMR                      `json:"mmr"`
+		StateRoot  common.Hash                   `json:"state_root"`
+		Report     []types.SegmentRootLookupItem `json:"reported"`
 	}{
 		HeaderHash: b.HeaderHash,
 		B:          b.B,
 		StateRoot:  b.StateRoot,
-		Report:     []interface{}{},
+		Report:     b.Reported,
 	})
 }
 

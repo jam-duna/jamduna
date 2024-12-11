@@ -3,10 +3,12 @@
 We offer two types of test vectors:
 
 - Tiny: These are designed for quick adjustments and prototyping, with reduced validators (6)
-  and cores (2) count. They are provided in both JSON format for easy inspection
-  and modification, and in SCALE format, which is the production binary codec.
+  cores count (2) and report core assignment rotation period (4). They are provided in both
+  JSON format for easy inspection and modification, and in SCALE format, which is the production
+  binary codec.
 
-- Full: These vectors use production validators (1023) and cores (341) count.
+- Full: These vectors use production validators (1023), cores count (341) and report core
+  assignment rotation period (10).
   Similar to the tiny vectors, they are available in JSON and SCALE format.
 
 Both JSON and SCALE formats conform to the JAM types ASN.1 [schema](../jam-types-asn/jam-types.asn)
@@ -69,6 +71,8 @@ subsystem.
   - Work report per core gas is very high, still less than the limit.
 - [too_high_work_report_gas](./tiny/too_high_work_report_gas-1.json) 🔴
   - Work report per core gas is too much high.
+- [service_item_gas_too_low](./tiny/service_item_gas_too_low.json) 🔴
+  - Accumulate gas is below the service minimum.
 - [many_dependencies](./tiny/many_dependencies-1.json) 🟢
   - Work report has many dependencies, still less than the limit.
 - [too_many_dependencies](./tiny/too_many_dependencies-1.json) 🔴

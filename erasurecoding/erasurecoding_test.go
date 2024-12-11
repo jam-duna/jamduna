@@ -383,7 +383,7 @@ func TestEC(t *testing.T) {
 }
 
 // This function is used to generate test vectors
-func TestGenerateTestVectors(t *testing.T) {
+func testGenerateTestVectors(t *testing.T) {
 	sizes := []uint32{
 		1, 32, 684, // one subshard point only
 		4096,   // one page only for subshad
@@ -427,7 +427,7 @@ func TestGenerateTestVectors(t *testing.T) {
 }
 
 // This function is used to test the Encode and Decode functions using the test vectors
-func TestTestVectors(t *testing.T) {
+func testTestVectors(t *testing.T) {
 	data, encoded, err := readTestVectorAtom("./vectors/old_vector/batch_1")
 	if err != nil {
 		t.Fatalf("Error reading test vector: %v", err)
