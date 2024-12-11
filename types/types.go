@@ -99,6 +99,7 @@ type AccumulationState struct {
 }
 
 // ValidatorStatistics represents the statistics tracked for each validator.
+/*
 type ValidatorStatistics struct {
 	BlocksProduced         int `json:"blocks_produced"`
 	TicketsIntroduced      int `json:"tickets_introduced"`
@@ -113,6 +114,7 @@ type StatisticalReporter struct {
 	CurrentEpochStats  []ValidatorStatistics `json:"current_epoch_stats"`
 	PreviousEpochStats []ValidatorStatistics `json:"previous_epoch_stats"`
 }
+*/
 
 // GasAttributable represents the gas attributable for each service.
 type GasAttributable struct {

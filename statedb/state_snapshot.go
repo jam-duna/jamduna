@@ -40,7 +40,7 @@ type StateSnapshot struct {
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`             // c10
 	Timeslot                 uint32                                       `json:"tau"`             // c11
 	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`             // c12
-	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"pi"`              // c13
+	ValidatorStatistics      ValidatorStatistics                          `json:"pi"`              // c13
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`           // c14 Accumulation Queue
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`              // c15 Accumulation History
 	ServiceAccount           KeyVals                                      `json:"service_account"` // Other C
@@ -243,8 +243,8 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 			privilegedServiceIndices, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.Kai_state{}))
 			sn.PrivilegedServiceIndices = privilegedServiceIndices.(types.Kai_state)
 		case C13:
-			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf([2][types.TotalValidators]Pi_state{}))
-			sn.ValidatorStatistics = validatorStatistics.([2][types.TotalValidators]Pi_state)
+			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf(ValidatorStatistics{}))
+			sn.ValidatorStatistics = validatorStatistics.(ValidatorStatistics)
 		case C14:
 			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
 			sn.AccumulationQueue = validatorStatistics.([types.EpochLength][]types.AccumulationQueue)
@@ -282,10 +282,9 @@ func (n *JamState) Snapshot() *StateSnapshot {
 	copy(copied.PrevValidators, original.PrevValidators)
 	copy(copied.CurrValidators, original.CurrValidators)
 	copy(copied.NextValidators, original.NextValidators)
-	for i := 0; i < len(n.ValidatorStatistics); i++ {
-		for j := 0; j < types.TotalValidators; j++ {
-			copied.ValidatorStatistics[i][j] = n.ValidatorStatistics[i][j]
-		}
+	for j := 0; j < types.TotalValidators; j++ {
+		copied.ValidatorStatistics.Current[j] = n.ValidatorStatistics.Current[j]
+		copied.ValidatorStatistics.Last[j] = n.ValidatorStatistics.Last[j]
 	}
 	return copied
 }

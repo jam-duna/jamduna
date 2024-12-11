@@ -10,12 +10,13 @@ import (
 )
 
 func (s *StateDB) VerifyAssurance(a types.Assurance) error {
-	// Verify the anchor
+	// 0.5.0 11.9 Verify the anchor
 	if a.Anchor != s.ParentHeaderHash {
 		fmt.Printf("[N%d] VerifyAssurance Fail  a.Anchor %v != s.ParentHeaderHash %v (ValidatorIndex %d)\n", s.Id, a.Anchor, s.ParentHeaderHash, a.ValidatorIndex)
 		return jamerrors.ErrABadParentHash
 	}
 
+	// 0.5.0 11.8
 	if a.ValidatorIndex >= types.TotalValidators {
 		return jamerrors.ErrABadValidatorIndex
 	}
@@ -27,14 +28,14 @@ func (s *StateDB) VerifyAssurance(a types.Assurance) error {
 			HasRhoState = append(HasRhoState, false)
 		}
 	}
+	//0.5.0 11.8
 	if !a.ValidBitfield(HasRhoState) {
 		return jamerrors.ErrABadCore
 	}
 
+	// 0.5.0 11.14
 	var IsRhoTimeOut []bool
-
 	for _, rho := range s.JamState.AvailabilityAssignments {
-
 		if rho != nil {
 			ts := s.JamState.SafroleState.Timeslot
 			timeoutbool := ts >= (rho.Timeslot)+uint32(types.UnavailableWorkReplacementPeriod)
@@ -47,12 +48,11 @@ func (s *StateDB) VerifyAssurance(a types.Assurance) error {
 			IsRhoTimeOut = append(IsRhoTimeOut, false)
 		}
 	}
-
 	if !a.CheckTimeout(IsRhoTimeOut) {
 		return jamerrors.ErrAStaleReport
 	}
 
-	// Verify the signature
+	// 0.5.0 11.11 Verify the signature
 	err := a.Verify(s.GetSafrole().CurrValidators[a.ValidatorIndex])
 	if err != nil {
 		return jamerrors.ErrABadSignature

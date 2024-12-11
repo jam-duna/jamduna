@@ -355,16 +355,17 @@ func (n *JamState) SetPrivilegedServicesIndices(privilegedServicesIndicesByte []
 	n.PrivilegedServiceIndices = privilegedServicesIndices.(types.Kai_state)
 }
 
+
 // C13 ActiveValidator
 func (n *JamState) SetPi(piByte []byte) {
 	if len(piByte) == 0 {
 		return
 	}
-	validatorStatistics, _, err := types.Decode(piByte, reflect.TypeOf([2][types.TotalValidators]Pi_state{}))
+	validatorStatistics, _, err := types.Decode(piByte, reflect.TypeOf(ValidatorStatistics{}))
 	if err != nil {
 		return
 	}
-	n.ValidatorStatistics = validatorStatistics.([2][types.TotalValidators]Pi_state)
+	n.ValidatorStatistics = validatorStatistics.(ValidatorStatistics)
 }
 
 // C14 AccumulateQueue

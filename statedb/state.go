@@ -3,6 +3,7 @@ package statedb
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
@@ -20,10 +21,40 @@ type JamState struct {
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
 	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
 	PrivilegedServiceIndices types.Kai_state                              `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
-	ValidatorStatistics      [2][types.TotalValidators]Pi_state           `json:"validator_statistics"`        // pi The validator statistics. π eq 171
+	ValidatorStatistics      ValidatorStatistics                          `json:"pi"`                          // pi The validator statistics. π eq 171
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"accumulate_queue"`            // theta - The accumulation queue  θ eq 164
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulate_history"`          // xi - The accumulation history  ξ eq 162
+}
 
+type ValidatorStatistics struct {
+	Current [types.TotalValidators]Pi_state `json:"current"`
+	Last    [types.TotalValidators]Pi_state `json:"last"`
+}
+
+type ValidatorStatisticsInternal [2][types.TotalValidators]Pi_state
+
+func (v *ValidatorStatistics) Encode() []byte {
+	statsInternal := ValidatorStatisticsInternal{}
+	statsInternal[0] = v.Current
+	statsInternal[1] = v.Last
+	encoded, err := types.Encode(statsInternal)
+	if err != nil {
+		return []byte{}
+	}
+	return encoded
+}
+
+func (v *ValidatorStatistics) Decode(data []byte) (interface{}, uint32) {
+	decoded, dataLen, err := types.Decode(data, reflect.TypeOf(ValidatorStatisticsInternal{}))
+	if err != nil {
+		return nil, 0
+	}
+	statsInternal := decoded.(ValidatorStatisticsInternal)
+	recoveredStats := ValidatorStatistics{}
+	recoveredStats.Current = statsInternal[0]
+	recoveredStats.Last = statsInternal[1]
+
+	return &recoveredStats, dataLen
 }
 
 /*
@@ -118,12 +149,12 @@ func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 
 // Types for Pi
 type Pi_state struct {
-	BlocksProduced         uint32 `json:"block_number"`        // The number of blocks produced by the validator.
-	TicketsIntroduced      uint32 `json:"ticket_number"`       // The number of tickets introduced by the validator.
-	PreimagesIntroduced    uint32 `json:"preimage_number"`     // The number of preimages introduced by the validator.
-	OctetsIntroduced       uint32 `json:"octets_number"`       // The total number of octets across all preimages introduced by the validator.
-	ReportsGuaranteed      uint32 `json:"report_number"`       // The number of reports guaranteed by the validator.
-	AvailabilityAssurances uint32 `json:"availability_number"` // The number of availability assurances made by the validator.
+	BlocksProduced         uint32 `json:"blocks"`          // The number of blocks produced by the validator.
+	TicketsIntroduced      uint32 `json:"tickets"`         // The number of tickets introduced by the validator.
+	PreimagesIntroduced    uint32 `json:"pre_images"`      // The number of preimages introduced by the validator.
+	OctetsIntroduced       uint32 `json:"pre_images_size"` // The total number of octets across all preimages introduced by the validator.
+	ReportsGuaranteed      uint32 `json:"guarantees"`      // The number of reports guaranteed by the validator.
+	AvailabilityAssurances uint32 `json:"assurances"`      // The number of availability assurances made by the validator.
 }
 
 func NewJamState() *JamState {
@@ -180,8 +211,8 @@ func (state *JamState) String() string {
 
 func (n *JamState) ResetTallyStatistics() {
 
-	n.ValidatorStatistics[1] = n.ValidatorStatistics[0]
-	n.ValidatorStatistics[0] = [types.TotalValidators]Pi_state{
+	copy(n.ValidatorStatistics.Last[:], n.ValidatorStatistics.Current[:])
+	n.ValidatorStatistics.Current = [types.TotalValidators]Pi_state{
 		{BlocksProduced: 0, TicketsIntroduced: 0, PreimagesIntroduced: 0, OctetsIntroduced: 0, ReportsGuaranteed: 0, AvailabilityAssurances: 0},
 	}
 }
@@ -192,17 +223,17 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 
 	switch activity {
 	case "blocks":
-		n.ValidatorStatistics[0][validatorIndex].BlocksProduced += cnt
+		n.ValidatorStatistics.Current[validatorIndex].BlocksProduced += cnt
 	case "tickets":
-		n.ValidatorStatistics[0][validatorIndex].TicketsIntroduced += cnt
+		n.ValidatorStatistics.Current[validatorIndex].TicketsIntroduced += cnt
 	case "preimages":
-		n.ValidatorStatistics[0][validatorIndex].PreimagesIntroduced += cnt
+		n.ValidatorStatistics.Current[validatorIndex].PreimagesIntroduced += cnt
 	case "octets":
-		n.ValidatorStatistics[0][validatorIndex].OctetsIntroduced += cnt
+		n.ValidatorStatistics.Current[validatorIndex].OctetsIntroduced += cnt
 	case "reports":
-		n.ValidatorStatistics[0][validatorIndex].ReportsGuaranteed += cnt
+		n.ValidatorStatistics.Current[validatorIndex].ReportsGuaranteed += cnt
 	case "assurances":
-		n.ValidatorStatistics[0][validatorIndex].AvailabilityAssurances += cnt
+		n.ValidatorStatistics.Current[validatorIndex].AvailabilityAssurances += cnt
 	default:
 		fmt.Println("Unknown activity:", activity)
 	}
@@ -225,7 +256,7 @@ func (j *JamState) GetValidatorStats() string {
 	out := ""
 	for i := 0; i < types.TotalValidators; i++ {
 		v := ""
-		pi := j.ValidatorStatistics[0][i]
+		pi := j.ValidatorStatistics.Current[i]
 		if pi.BlocksProduced > 0 {
 			v += fmt.Sprintf("b=%d", pi.BlocksProduced)
 		}
