@@ -25,24 +25,31 @@ func compareKeyVals(p0 []KeyVal, p1 []KeyVal) {
 	if len(p0) != len(p1) {
 		fmt.Printf("len pre %d != len post %d\n", len(p0), len(p1))
 	}
-	m0 := makemap(p0)
-	m1 := makemap(p1)
-	for k0, v0 := range m0 {
-		v1 := m1[k0]
+	kv0, m0 := makemap(p0)
+	kv1, m1 := makemap(p1)
+	for k0, v0 := range kv0 {
+		v1 := kv1[k0]
 		if !common.CompareBytes(v0, v1) {
-			fmt.Printf("K %v\n s1: %x\n st.PostState: %x\n", k0, v0, v1)
+			metaKey := fmt.Sprintf("meta_%v", k0)
+			metaData0 := m0[metaKey]
+			metaData1 := m1[metaKey]
+			fmt.Printf("K %v\ns1(Current) Meta Data: %s\nPostState Meta Data:   %s\n", k0, metaData0, metaData1)
+			fmt.Printf("s1(Current) Value: %x\nPostState   Value: %x\n", v0, v1)
 		}
 	}
 }
 
-func makemap(p []KeyVal) map[common.Hash][]byte {
-	m := make(map[common.Hash][]byte)
+func makemap(p []KeyVal) (map[common.Hash][]byte, map[string]string) {
+	kvMap := make(map[common.Hash][]byte)
+	metaMap := make(map[string]string)
 	for _, kvs := range p {
 		k := common.BytesToHash(kvs.Key)
-		v := kvs.Key
-		m[k] = v
+		v := kvs.Value
+		kvMap[k] = v
+		metaKey := fmt.Sprintf("meta_%v", k)
+		metaMap[metaKey] = fmt.Sprintf("%s|%s", kvs.StructType, kvs.Metadata)
 	}
-	return m
+	return kvMap, metaMap
 }
 
 func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet []types.BlockHeader, accumulationRoot common.Hash) error {

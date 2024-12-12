@@ -391,10 +391,11 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]by
 	verifyIndex := 0
 	justifications := make([][][]common.Hash, 0)
 	for itemIndex := range len(importSegments) {
-		CDTTree := trie.NewCDMerkleTree(imports)
+		cdtTree := trie.NewCDMerkleTree(imports)
+		//cdtTree.PrintTree()
 		tmpJustifications := make([][]common.Hash, 0)
 		for i := 0; i < len(importSegments[itemIndex]); i++ {
-			justification, err := CDTTree.Justify(verifyIndex)
+			justification, err := cdtTree.Justify(verifyIndex)
 			if err != nil {
 				fmt.Printf("Justification Error: %v\n", err)
 			}
@@ -527,15 +528,64 @@ func (n *Node) GetImportedSegmentRoots(wp types.WorkPackage) (importedSegmentRoo
 	return importedSegmentRoots, importedPackageHashes, nil
 }
 
-func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, importedSegmentRoots []common.Hash, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
+func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (fuzz_importsegments [][][]byte, fuzz_segmentRootLookup types.SegmentRootLookup) {
+
+	fuzz_importsegments = package_bundle.ImportSegmentData
+	fuzz_segmentRootLookup = segmentRootLookup
+
+	fuzz_hashing := false
+	if fuzz_hashing {
+		for workItemIdx, segmentData_i := range package_bundle.ImportSegmentData {
+			fakeSegmentData := make([][]byte, len(segmentData_i))
+			for j, segmentData_j := range segmentData_i {
+				fakeSegmentData[j] = common.Blake2Hash(segmentData_j[:]).Bytes()[:len(segmentData_j)]
+			}
+			fuzz_importsegments[workItemIdx] = fakeSegmentData
+		}
+
+		for idx, lookupItem := range fuzz_segmentRootLookup {
+
+			fuzz_lookupItem := lookupItem
+			lookupItem.SegmentRoot = common.Blake2Hash(lookupItem.SegmentRoot[:])
+			lookupItem.WorkPackageHash = common.Blake2Hash(lookupItem.WorkPackageHash[:])
+
+			fuzz_segmentRootLookup[idx] = fuzz_lookupItem
+		}
+	}
+	fuzz_ordering := true
+	if fuzz_ordering {
+		//reverse the order of the imported segments
+		for i, j := 0, len(fuzz_importsegments)-1; i < j; i, j = i+1, j-1 {
+			fuzz_importsegments[i], fuzz_importsegments[j] = fuzz_importsegments[j], fuzz_importsegments[i]
+		}
+		// reserse the order of the segment roots
+		for i, j := 0, len(fuzz_segmentRootLookup)-1; i < j; i, j = i+1, j-1 {
+			fuzz_segmentRootLookup[i], fuzz_segmentRootLookup[j] = fuzz_segmentRootLookup[j], fuzz_segmentRootLookup[i]
+		}
+	}
+	fuzz_null_both := false
+	if fuzz_null_both {
+		fuzz_importsegments = make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
+		fuzz_segmentRootLookup = make([]types.SegmentRootLookupItem, len(segmentRootLookup))
+	}
+	return fuzz_importsegments, fuzz_segmentRootLookup
+}
+
+func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
+	fuzz := false
+	if fuzz {
+		fmt.Printf("[N%d] Before fuzzJustification package_bundle.ImportSegmentData %x segmentRootLookup %x\n", n.id, package_bundle.ImportSegmentData, segmentRootLookup)
+		fuzz_importsegments, fuzz_segmentRoots := fuzzJustification(package_bundle, segmentRootLookup)
+		package_bundle.ImportSegmentData = fuzz_importsegments
+		//segmentRootLookup = fuzz_segmentRoots
+		fmt.Printf("[N%d] After fuzzJustification package_bundle.ImportSegmentData(fuzz_importsegments) %x fuzz_segmentRoots %x\n", n.id, fuzz_importsegments, fuzz_segmentRoots)
+	}
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
-	//package_bundle.ImportSegmentData = importsegments // nullify the imported segments for testing
 	if len(package_bundle.Justification) > 0 && len(package_bundle.Justification[0]) > 0 {
 		if debugSegments {
-			fmt.Printf("[N%v] WP=%v | package_bundle.ImportSegmentData, package_bundle.Justification: %x, %v | importedSegmentRoots=%v\n", n.id, package_bundle.PackageHash(), package_bundle.ImportSegmentData, package_bundle.Justification, importedSegmentRoots)
+			fmt.Printf("[N%v] WP=%v | package_bundle.ImportSegmentData, package_bundle.Justification: %x, %v | SegmentRootLookup=%v\n", n.id, package_bundle.PackageHash(), package_bundle.ImportSegmentData, package_bundle.Justification, segmentRootLookup)
 		}
-		// TODO: Stanley - I dont think this is correct doing proper verification at all...
-		ok, verifyErr := VerifyBundleJustification(package_bundle.ImportSegmentData, package_bundle.Justification, importedSegmentRoots)
+		ok, verifyErr := VerifyBundleJustification(package_bundle.ImportSegmentData, package_bundle.Justification, package_bundle.WorkPackage, segmentRootLookup)
 		if verifyErr != nil || !ok {
 			if verifyErr != nil {
 				fmt.Printf("Justification Verification Error %v\n", verifyErr)
@@ -852,35 +902,67 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage, importSegments 
 	return
 }
 
-func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]common.Hash, exportedRoots []common.Hash) (ok bool, err error) {
+func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]common.Hash, workPackage types.WorkPackage, segmentRootLookup types.SegmentRootLookup) (ok bool, err error) {
 	// Verify the justifications
-	if debugSegments {
-		fmt.Printf("exportedRoots %v\n", exportedRoots)
-	}
-	if len(justifications) != len(importSegments) {
-		return false, fmt.Errorf("justification length mismatch")
+	if !CheckSegmentJustificationSize(importSegments, justifications) {
+		return false, fmt.Errorf("importSegments and justification length mismatch")
 	}
 	verifyIndex := 0
-	for itemIndex := range importSegments {
-		for segmentIdx := range importSegments[itemIndex] {
+	for itemIndex, workItem := range workPackage.WorkItems {
+		for segmentIdx := range justifications[itemIndex] {
 			if debugSegments {
 				fmt.Printf("VerifyBundleJustification itemIndex %v, segmentIdx %v, importSegments[%x]\n", itemIndex, segmentIdx, importSegments[itemIndex])
 			}
 			segmentData := importSegments[itemIndex][segmentIdx]
 			segmentHash := common.ComputeLeafHash_WBT_Blake2B(segmentData)
-			root := exportedRoots[itemIndex]
+			importWorkPackageHash := workItem.ImportedSegments[segmentIdx].RequestedHash
+			root, err := GetExportSegmentRootByWorkPackageHash(segmentRootLookup, importWorkPackageHash)
+			if err != nil {
+				return false, err
+			}
 			transferJustifications := make([][]byte, 0)
 			for _, justification := range justifications[itemIndex][segmentIdx] {
 				transferJustifications = append(transferJustifications, justification[:])
 			}
+			fmt.Printf("segmentData %v, segmentHash %v, transferJustifications %x\n", segmentHash, segmentHash, transferJustifications)
 			computedRoot := trie.VerifyJustification(segmentHash[:], verifyIndex, transferJustifications)
 			if !common.CompareBytes(root[:], computedRoot) && !common.CompareBytes(root[:], segmentHash[:]) {
 				fmt.Printf("segmentData %x, segmentHash %v, transferJustifications %x\n", segmentData, segmentHash, transferJustifications)
-				fmt.Printf("except root %x, computed root %x\n", root[:], computedRoot)
+				fmt.Printf("expected root %x, computed root %x\n", root[:], computedRoot)
 				return false, fmt.Errorf("justification failure")
 			}
 			verifyIndex++
 		}
 	}
 	return true, nil
+}
+
+// Check importSegments and justifications
+func CheckSegmentJustificationSize(importSegments [][][]byte, justifications [][][]common.Hash) bool {
+	if len(importSegments) != len(justifications) {
+		return false
+	}
+	for i := range importSegments {
+		if len(importSegments[i]) != len(justifications[i]) {
+			return false
+		}
+		if len(importSegments[i]) == 0 || len(importSegments[i][0]) == 0 {
+			return false
+		}
+		for j := range importSegments[i] {
+			if len(importSegments[i][j]) == 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func GetExportSegmentRootByWorkPackageHash(segmentRootLookup types.SegmentRootLookup, workPackageHash common.Hash) (exportedSegmentRoot common.Hash, err error) {
+	for _, segmentRootLookupItem := range segmentRootLookup {
+		if segmentRootLookupItem.WorkPackageHash == workPackageHash {
+			return segmentRootLookupItem.SegmentRoot, nil
+		}
+	}
+	return common.Hash{}, fmt.Errorf("exported segment root not found")
 }

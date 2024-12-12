@@ -559,17 +559,13 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	//segmentRootLookup, err := n.GetSegmentRootLookup(workPackageBundle.WorkPackage)
 
 	segmentRootLookup := workReport.SegmentRootLookup // use workReport's segmentRootLookup
-	exportedSegmentRoot, _, err := n.GetImportedSegmentRoots(workPackageBundle.WorkPackage)
-	if err != nil {
-		fmt.Printf("[auditWorkReport:GetImportedSegmentRoots] ERR %v\n", err)
-	}
 	if debugE {
 		fmt.Printf("%s auditWorkReport:fetch and decode time: %v\n", n.String(), time.Since(start))
 	}
 	if debugAudit {
 		fmt.Printf("WP=%v | len=%v | byte=%x\n", workPackageBundle.PackageHash(), len(workPackageBundle.Bytes()), workPackageBundle.Bytes())
 	}
-	wr, err := n.executeWorkPackageBundle(workPackageBundle, exportedSegmentRoot, segmentRootLookup)
+	wr, err := n.executeWorkPackageBundle(workPackageBundle, segmentRootLookup)
 	if err != nil {
 		return
 	} else {
