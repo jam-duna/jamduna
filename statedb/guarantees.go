@@ -919,47 +919,37 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 
 // v0.5 eq 11.41
 func (s *StateDB) checkCodeHash(g types.Guarantee) error {
-	var err error
-	testing := false
+	//t := s.CopyTrieState(s.StateRoot)
 	for _, result := range g.Report.Results {
-		if _, ok := s.JamState.PriorServiceAccountState[result.ServiceID]; !ok {
-			err = jamerrors.ErrGBadServiceID
-			if testing {
-				return err
-			}
-
-		}
-		if result.CodeHash != s.JamState.PriorServiceAccountState[result.ServiceID].CodeHash {
-			// fmt.Printf("checkCodeHash: %v\n", result.CodeHash)
-			// fmt.Printf("checkCodeHash from service: %v\n", s.JamState.PriorServiceAccountState[result.ServiceID].CodeHash)
-			// IMPORTANT: we didn't pass the service into JamState, so we can't get the codehash from the service
-			// we have to check the codehash from the trie
-			// but we can save this function just for pass the test vectors
-			err = jamerrors.ErrGBadCodeHash
-			if testing {
-				return err
-			}
-		}
-	}
-	// get service from trie
-	if err != nil {
-		t := s.CopyTrieState(s.StateRoot)
-		if t == nil {
-			return jamerrors.ErrGBadCodeHash
-		}
-		for _, result := range g.Report.Results {
-			v, ok, err := t.GetService(255, result.ServiceID)
-			if err != nil || !ok { // CHECK
-				fmt.Printf("checkCodeHash: %v\n", err)
+		serviceID := result.ServiceID
+		codeHash := result.CodeHash
+		priorAccountState, ok := s.JamState.PriorServiceAccountState[serviceID]
+		if !ok {
+			// test_vector will not have fallback via trie
+			if s.trie == nil {
+				//fmt.Printf("AAA checkCodeHash serviceID=%v\n", serviceID)
 				return jamerrors.ErrGBadServiceID
 			}
-			a, _ := types.ServiceAccountFromBytes(result.ServiceID, v)
-			if result.CodeHash != a.CodeHash {
-				fmt.Printf("result.CodeHash: %v, service.codehash: %v\n", result.CodeHash, a.CodeHash)
-				return jamerrors.ErrGBadCodeHash
+			// this is a cache miss, get service from trie
+			v, ok, err := s.trie.GetService(255, serviceID)
+			if err != nil || !ok {
+				// true error case: serviceID is not found even in trie
+				//fmt.Printf("EEE checkCodeHash serviceID=%v not found in trie err: %v\n", serviceID, err)
+				return jamerrors.ErrGBadServiceID
 			}
+			accountState, err := types.ServiceAccountFromBytes(serviceID, v)
+			if err != nil {
+				panic(fmt.Sprintf("FFF checkCodeHash serviceID=%v Recovering err: %v\n", serviceID, err))
+				return jamerrors.ErrGBadServiceID
+			}
+			fmt.Printf("fallback checkCodeHash serviceID=%v, accountState=%v\n", serviceID, accountState.JsonString())
+			priorAccountState = *accountState
+			s.JamState.PriorServiceAccountState[serviceID] = priorAccountState
 		}
-
+		if codeHash != priorAccountState.CodeHash {
+			//fmt.Printf("CCC result.ServiceID=%v result.CodeHash: %v, service.codehash: %v\n", serviceID, result.CodeHash, priorAccountState.CodeHash)
+			return jamerrors.ErrGBadCodeHash
+		}
 	}
 	return nil
 }

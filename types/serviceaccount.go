@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
@@ -269,8 +270,8 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 // Convert the ServiceAccount to a human-readable string.
 func (s *ServiceAccount) String() string {
 	// Initial account information
-	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v\n",
-		s.ServiceIndex, s.CodeHash.Hex()) // s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems
+	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%v, G=%v M=%v L=%v, I=%v\n",
+		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems)
 
 	// Lookup entries
 	str2 := ""
@@ -289,9 +290,9 @@ func (s *ServiceAccount) String() string {
 	for h, lo := range s.Storage {
 		str4 += fmt.Sprintf("  Storage: %v => %v\n", h, lo)
 	}
-
 	return str + str2 + str3 + str4
 }
+
 func (s *ServiceAccount) ReadStorage(key common.Hash, sdb HostEnv) (ok bool, v []byte) {
 	storageObj, ok := s.Storage[key]
 	if storageObj.Deleted {
@@ -373,4 +374,66 @@ func (s *ServiceAccount) ComputeThreshold() uint64 {
 	//BS +BI ⋅ai +BL ⋅al
 	account_threshold := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
 	return account_threshold
+}
+
+func (s *ServiceAccount) MarshalJSON() ([]byte, error) {
+	type Alias ServiceAccount
+	return json.Marshal(&struct {
+		*Alias
+		CodeHash string                    `json:"code_hash"`
+		Storage  map[string]StorageObject  `json:"s_map"`
+		Lookup   map[string]LookupObject   `json:"l_map"`
+		Preimage map[string]PreimageObject `json:"p_map"`
+	}{
+		Alias:    (*Alias)(s),
+		CodeHash: s.CodeHash.Hex(),
+		Storage:  convertHashMapToStringMap(s.Storage),
+		Lookup:   convertHashMapToStringMap(s.Lookup),
+		Preimage: convertHashMapToStringMap(s.Preimage),
+	})
+}
+
+func (s *ServiceAccount) UnmarshalJSON(data []byte) error {
+	type Alias ServiceAccount
+	aux := &struct {
+		*Alias
+		CodeHash string                    `json:"code_hash"`
+		Storage  map[string]StorageObject  `json:"s_map"`
+		Lookup   map[string]LookupObject   `json:"l_map"`
+		Preimage map[string]PreimageObject `json:"p_map"`
+	}{
+		Alias: (*Alias)(s),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	s.CodeHash = common.HexToHash(aux.CodeHash)
+	s.Storage = convertStringMapToHashMap(aux.Storage)
+	s.Lookup = convertStringMapToHashMap(aux.Lookup)
+	s.Preimage = convertStringMapToHashMap(aux.Preimage)
+	return nil
+}
+
+func convertHashMapToStringMap[T any](input map[common.Hash]T) map[string]T {
+	output := make(map[string]T, len(input))
+	for k, v := range input {
+		output[k.Hex()] = v
+	}
+	return output
+}
+
+func convertStringMapToHashMap[T any](input map[string]T) map[common.Hash]T {
+	output := make(map[common.Hash]T, len(input))
+	for k, v := range input {
+		output[common.HexToHash(k)] = v
+	}
+	return output
+}
+
+func (s *ServiceAccount) JsonString() string {
+	jsonBytes, err := s.MarshalJSON()
+	if err != nil {
+		return fmt.Sprintf("Error marshalling ServiceAccount: %v", err)
+	}
+	return string(jsonBytes)
 }

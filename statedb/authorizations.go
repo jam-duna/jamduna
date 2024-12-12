@@ -55,6 +55,7 @@ func (s *StateDB) AddNewPoolFromQueue() {
 			head := len(pool) - types.MaxAuthorizationPoolItems
 			pool = pool[head:]
 		}
+		jam_state.AuthorizationsPool[core_idx] = pool
 	}
 }
 
