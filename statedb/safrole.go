@@ -636,18 +636,6 @@ func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int
 	return common.Hash{}, -1, jamerrors.ErrTBadRingProof
 }
 
-func (s *StateDB) RemoveUnusedTickets() {
-	//Remove the tickets when the ticket submission is closed
-	//remove the tickets entropy[2] in queue
-	s.ticketMutex.Lock()
-	defer s.ticketMutex.Unlock()
-	sf := s.GetSafrole()
-	uselessEntropy := sf.Entropy[2]
-	if sf.IsTicketSubmissionClosed(uint32(s.GetSafrole().Timeslot)) {
-		delete(s.queuedTickets, uselessEntropy)
-	}
-}
-
 func compareTickets(a, b common.Hash) int {
 	aBytes := a.Bytes()
 	bBytes := b.Bytes()

@@ -46,8 +46,7 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 	if debugP {
 		fmt.Printf("%s BroadcastPreimageAnnouncement ==> adding to E_P %s\n", n.String(), pa.String())
 	}
-	s := n.getState()
-	s.ProcessIncomingLookup(preimageLookup)
+	n.processPreimage(preimageLookup)
 
 	n.broadcast(pa)
 	return nil
@@ -92,8 +91,7 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 		Requester: uint32(serviceIndex),
 		Blob:      preimage,
 	}
-	s := n.getState()
-	s.ProcessIncomingLookup(lookup)
+	n.processPreimage(lookup)
 
 	return nil
 }

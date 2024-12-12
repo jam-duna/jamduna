@@ -730,49 +730,6 @@ func isTimeoutError(err error) bool {
 	return strings.Contains(err.Error(), "timeout")
 }
 
-func (n *Node) processTicket(ticket types.Ticket) error {
-	// Store the ticket in the tip's queued tickets
-	s := n.getState()
-	s.ProcessIncomingTicket(ticket)
-	return nil // Success
-}
-
-func (n *Node) processAssurance(assurance types.Assurance) error {
-	// Store the assurance in the tip's queued assurances
-	// Validate the assurance signature
-	if len(assurance.Signature) == 0 {
-		return fmt.Errorf("no assurance signature")
-	}
-
-	// Check the assurance validity
-	if err := n.statedb.CheckIncomingAssurance(&assurance); err != nil {
-		return err
-	}
-
-	// store it into extrinsic pool
-	err := n.extrinsic_pool.AddAssuranceToPool(assurance)
-	if err != nil {
-		fmt.Printf("processAssurance: AddAssuranceToPool ERR %v\n", err)
-	}
-	return nil // Success
-}
-
-func (n *Node) processGuarantee(g types.Guarantee) error {
-	// Store the guarantee in the tip's queued guarantees
-	s := n.getState()
-	CurrV := s.GetSafrole().CurrValidators
-	err := g.Verify(CurrV)
-	if err != nil {
-		fmt.Printf("processGuarantee: Invalid guarantee %s. Err=%v\n", g.String(), err)
-		return err
-	}
-	err = n.extrinsic_pool.AddGuaranteeToPool(g)
-	if err != nil {
-		fmt.Printf("processGuarantee: AddGuaranteeToPool ERR %v\n", err)
-	}
-	return nil // Success
-}
-
 func (n *Node) dumpstatedbmap() {
 	n.statedbMapMutex.Lock()
 	defer n.statedbMapMutex.Unlock()
@@ -881,7 +838,8 @@ func (n *Node) extendChain() error {
 					n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
 					n.statedbMapMutex.Unlock()
 				}
-				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(b)
+				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
+				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(b, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
 				break
 			}
 
@@ -1369,7 +1327,8 @@ func (n *Node) runClient() {
 				n.statedbMapMutex.Lock()
 				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
 				n.statedbMapMutex.Unlock()
-				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock)
+				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
+				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
 				err = n.writeDebug(st, timeslot) // StateTransition
 				if err != nil {
 					fmt.Printf("writeDebug StateTransition err: %v\n", err)

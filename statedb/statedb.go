@@ -36,18 +36,6 @@ type StateDB struct {
 	VMs     map[uint32]*pvm.VM
 	vmMutex sync.Mutex
 
-	knownPreimageLookups  map[common.Hash]uint32
-	queuedPreimageLookups map[common.Hash]types.Preimages
-	preimageLookupsMutex  sync.Mutex
-
-	knownJudgements map[common.Hash]int
-	queueJudgements map[common.Hash]types.Judgement
-	judgementMutex  sync.Mutex
-
-	knownTickets  map[common.Hash]uint8
-	queuedTickets map[common.Hash][]types.Ticket
-	ticketMutex   sync.Mutex
-
 	// used in ApplyStateRecentHistory between statedbs
 	AccumulationRoot common.Hash
 
@@ -62,81 +50,8 @@ type StateDB struct {
 	AncestorSet []types.BlockHeader // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
 }
 
-func (s *StateDB) AddTicketToQueue(t types.Ticket, used_entropy common.Hash) {
-	s.ticketMutex.Lock()
-	defer s.ticketMutex.Unlock()
-	s.queuedTickets[used_entropy] = append(s.queuedTickets[used_entropy], t)
-}
-
-func (s *StateDB) AddJudgementToQueue(j types.Judgement) {
-	s.judgementMutex.Lock()
-	defer s.judgementMutex.Unlock()
-	s.queueJudgements[j.WorkReportHash] = j
-}
-
-func (s *StateDB) CheckTicketExists(ticketID common.Hash) bool {
-	if (ticketID == common.Hash{}) {
-		return true
-	}
-	s.ticketMutex.Lock()
-	defer s.ticketMutex.Unlock()
-	_, exists := s.knownTickets[ticketID]
-	return exists
-}
-
-func (s *StateDB) CheckLookupExists(a_p common.Hash) bool {
-	if (a_p == common.Hash{}) {
-		return true
-	}
-	s.preimageLookupsMutex.Lock()
-	defer s.preimageLookupsMutex.Unlock()
-	_, exists := s.knownPreimageLookups[a_p]
-	return exists
-}
-
 func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {
 	s.sdb.WriteLog(obj, timeslot)
-}
-
-func (s *StateDB) ProcessIncomingTicket(t types.Ticket) {
-	//s.QueueTicketEnvelope(t)
-	//statedb.tickets[common.BytesToHash(ticket_id)] = t
-	sf := s.GetSafrole()
-	start := time.Now()
-	ticketID, entropy_idx, err := sf.ValidateIncomingTicket(&t)
-	if err != nil {
-		if debug {
-			fmt.Printf("ProcessIncomingTicket Error Invalid Ticket. Err=%v\n", err)
-		}
-		return
-	}
-	elapsed := time.Since(start).Microseconds()
-	if trace && elapsed > 500000 {
-		fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v [%d ms]\n", s.Id, ticketID, time.Since(start).Microseconds()/1000)
-	}
-
-	if s.CheckTicketExists(ticketID) {
-		return
-	}
-
-	used_entropy := s.GetSafrole().Entropy[entropy_idx]
-	s.AddTicketToQueue(t, used_entropy)
-	s.knownTickets[ticketID] = t.Attempt
-}
-
-func (s *StateDB) ProcessIncomingLookup(l types.Preimages) {
-
-	// fmt.Printf("[N%v] ProcessIncomingLookup -- start Adding lookup: %v\n", s.Id, l.String())
-	account_preimage_hash := l.AccountPreimageHash()
-	if s.CheckLookupExists(account_preimage_hash) {
-		return
-	}
-
-	s.preimageLookupsMutex.Lock()
-	defer s.preimageLookupsMutex.Unlock()
-	s.queuedPreimageLookups[l.BlobHash()] = l
-	sf := s.GetSafrole()
-	s.knownPreimageLookups[account_preimage_hash] = sf.GetTimeSlot() // hostForget has certain logic that will probably reference this field???
 }
 
 func (s *StateDB) ProcessIncomingJudgement(j types.Judgement) {
@@ -161,32 +76,6 @@ func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
 
 func (s *StateDB) GetVMMutex() sync.Mutex {
 	return s.vmMutex
-}
-
-func (s *StateDB) RemoveTicket(t *types.Ticket) {
-	s.ticketMutex.Lock()
-	defer s.ticketMutex.Unlock()
-	using_entropy := s.GetSafrole().Entropy[2]
-	for i, ticket := range s.queuedTickets[using_entropy] {
-		if ticket.Hash() == t.Hash() {
-			s.queuedTickets[using_entropy] = append(s.queuedTickets[using_entropy][:i], s.queuedTickets[using_entropy][i+1:]...)
-			break
-		}
-	}
-
-}
-
-func (s *StateDB) RemoveLookup(p *types.Preimages) {
-	s.preimageLookupsMutex.Lock()
-	defer s.preimageLookupsMutex.Unlock()
-	blobHash := p.BlobHash()
-	delete(s.queuedPreimageLookups, blobHash)
-}
-
-func (s *StateDB) RemoveJudgement(j *types.Judgement) {
-	s.judgementMutex.Lock()
-	defer s.judgementMutex.Unlock()
-	delete(s.queueJudgements, j.WorkReportHash)
 }
 
 // IsAuthorizedPVM performs the is-authorized PVM function.
@@ -249,12 +138,6 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 }
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
-	statedb.queuedTickets = make(map[common.Hash][]types.Ticket)
-	statedb.knownTickets = make(map[common.Hash]uint8)
-	statedb.queueJudgements = make(map[common.Hash]types.Judgement)
-	statedb.knownJudgements = make(map[common.Hash]int)
-	statedb.queuedPreimageLookups = make(map[common.Hash]types.Preimages)
-	statedb.knownPreimageLookups = make(map[common.Hash]uint32)
 	statedb.SetStorage(sdb)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 	statedb.logChan = make(chan storage.LogMessage, 100)
@@ -859,11 +742,6 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
 	statedb.Finalized = false
-	statedb.queuedTickets = make(map[common.Hash][]types.Ticket)
-	statedb.knownTickets = make(map[common.Hash]uint8)
-	statedb.queueJudgements = make(map[common.Hash]types.Judgement)
-	statedb.knownJudgements = make(map[common.Hash]int)
-
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
 	statedb.JamState = NewJamState()
 
@@ -905,24 +783,18 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
 	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 	newStateDB = &StateDB{
-		Id:                    s.Id,
-		Block:                 s.Block.Copy(), // You might need to deep copy the Block if it's mutable
-		ParentHeaderHash:      s.ParentHeaderHash,
-		HeaderHash:            s.HeaderHash,
-		StateRoot:             s.StateRoot,
-		JamState:              s.JamState.Copy(), // DisputesState has a Copy method
-		sdb:                   s.sdb,
-		trie:                  s.CopyTrieState(s.StateRoot),
-		knownTickets:          make(map[common.Hash]uint8),
-		knownPreimageLookups:  make(map[common.Hash]uint32),
-		knownJudgements:       make(map[common.Hash]int),
-		queuedTickets:         make(map[common.Hash][]types.Ticket),
-		queuedPreimageLookups: make(map[common.Hash]types.Preimages),
-		queueJudgements:       make(map[common.Hash]types.Judgement),
-		logChan:               make(chan storage.LogMessage, 100),
-		AccumulationRoot:      s.AccumulationRoot, // compressed C
-		AvailableWorkReport:   tmpAvailableWorkReport,
-		AncestorSet:           s.AncestorSet,
+		Id:                  s.Id,
+		Block:               s.Block.Copy(), // You might need to deep copy the Block if it's mutable
+		ParentHeaderHash:    s.ParentHeaderHash,
+		HeaderHash:          s.HeaderHash,
+		StateRoot:           s.StateRoot,
+		JamState:            s.JamState.Copy(), // DisputesState has a Copy method
+		sdb:                 s.sdb,
+		trie:                s.CopyTrieState(s.StateRoot),
+		logChan:             make(chan storage.LogMessage, 100),
+		AccumulationRoot:    s.AccumulationRoot, // compressed C
+		AvailableWorkReport: tmpAvailableWorkReport,
+		AncestorSet:         s.AncestorSet,
 		/*
 			Following flds are not copied over..?
 
@@ -933,54 +805,9 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 
 		*/
 	}
-	s.CloneExtrinsicMap(newStateDB)
 	newStateDB.AssignGuarantors(noRotation)
 	newStateDB.PreviousGuarantors(noRotation)
 	return newStateDB
-}
-
-func (s *StateDB) CloneExtrinsicMap(n *StateDB) {
-	// Tickets
-	for k, v := range s.knownTickets {
-		n.knownTickets[k] = v
-	}
-	// use copy
-	for k, v := range s.queuedTickets {
-		t := make([]types.Ticket, len(v))
-		copy(t, v)
-		n.queuedTickets[k] = t
-	}
-
-	// Preimages
-	for k, v := range s.knownPreimageLookups {
-		n.knownPreimageLookups[k] = v
-	}
-	for k, v := range s.queuedPreimageLookups {
-		p, _ := v.DeepCopy()
-		n.queuedPreimageLookups[k] = p
-	}
-
-	// Assurance
-
-	// Vote
-	for k, v := range s.knownJudgements {
-		n.knownJudgements[k] = v
-	}
-	for k, v := range s.queueJudgements {
-		d, _ := v.DeepCopy()
-		n.queueJudgements[k] = d
-	}
-}
-
-func (s *StateDB) RemoveExtrinsics(tickets []types.Ticket, lookups []types.Preimages, guarantees []types.Guarantee, assurances []types.Assurance, dispute types.Dispute) {
-	// T.P.G.A.D
-	for _, t := range tickets {
-		s.RemoveTicket(&t)
-	}
-	for _, p := range lookups {
-		s.RemoveLookup(&p)
-	}
-	// TODO: manage dispute
 }
 
 func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (*types.Block, *StateDB, error) {
@@ -1055,7 +882,6 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	}
 
 	// ready for state transisiton
-	sf := s.GetSafrole()
 	for _, l := range preimages {
 		// (eq 158)
 		// δ†[s]p[H(p)] = p
@@ -1067,9 +893,6 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
 		num_octets += l.BlobLength()
-		delete(s.queuedPreimageLookups, l.BlobHash())
-
-		s.knownPreimageLookups[l.AccountPreimageHash()] = sf.GetTimeSlot()
 	}
 
 	return num_preimages, num_octets, nil
@@ -1225,7 +1048,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		fmt.Printf("[N%d] ApplyStateTransitionFromBlock (%v <== %v) s.StateRoot=%v\n", s.Id, s.ParentHeaderHash, s.HeaderHash, s.StateRoot)
 	}
 
-	s.RemoveUnusedTickets()
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// 19-22 - Safrole last
@@ -1234,7 +1056,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	epochMark := blk.EpochMark()
 
 	if epochMark != nil {
-		s.knownTickets = make(map[common.Hash]uint8) //keep track of known tickets
 		// s.queuedTickets = make(map[common.Hash]types.Ticket)
 		s.GetJamState().ResetTallyStatistics()
 	}
@@ -1345,12 +1166,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
 	}
 	s.StateRoot = s.UpdateTrieState()
-
-	//State transition is successful.  Remove E(T,P,A,G,D) from statedb queue
-	s.RemoveExtrinsics(ticketExts, preimages, guarantees, assurances, disputes)
-	if debug {
-		fmt.Printf("Queue Tickets Length: %v\n", len(s.queuedTickets))
-	}
 	return s, nil
 }
 
@@ -1384,17 +1199,16 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	h.ParentStateRoot = stateRoot
 	h.Slot = targetJCE
 	// Extrinsic Data has 5 different Extrinsics
-	s.RemoveUnusedTickets()
-
 	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
 	extrinsicData.Preimages = make([]types.Preimages, 0)
 
 	// Make sure this Preimages is ready to be included..
-	for _, preimageLookup := range s.queuedPreimageLookups {
-		_, err := s.ValidateLookup(&preimageLookup)
+	for _, preimageLookup := range extrinsic_pool.GetPreimageFromPool() {
+		_, err := s.ValidateLookup(preimageLookup)
 		if err == nil {
 			pl, err := preimageLookup.DeepCopy()
 			if err != nil {
+				extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 				continue
 			}
 			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
@@ -1475,13 +1289,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	// d := s.GetJamState()
 
 	// extrinsicData.Disputes = make([]types.Dispute, 0)
-	for _, v := range s.queueJudgements {
-		// TODO: use votes to make dispute d
-		if v.Judge {
-
-		}
-		// extrinsicData.Disputes = append(extrinsicData.Disputes, d)
-	}
 	// dispute := FormDispute(s.queuedVotes)
 	// if d.NeedsOffendersMarker(&dispute) {
 	// 	// Handle the case where the dispute does not need an offenders marker.
@@ -1526,7 +1333,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 
 		} else {
 			next_n2 := s.JamState.SafroleState.GetNextN2()
-			for _, ticket := range s.queuedTickets[next_n2] {
+			for _, ticket := range extrinsic_pool.GetTicketsFromPool(next_n2) {
 				t, err := ticket.DeepCopy()
 				if err != nil {
 					continue
