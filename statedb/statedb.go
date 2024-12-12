@@ -212,7 +212,7 @@ func (s *StateDB) GetJamSnapshot() *StateSnapshot {
 }
 
 func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
-	// Now read C1.....C13 from the trie and put it back into JamState
+	// Now read C1.....C15 from the trie and put it back into JamState
 	//t := s.GetTrie()
 
 	t := s.CopyTrieState(stateRoot)
@@ -287,7 +287,7 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	// fmt.Printf("retrieved C8 CurrentEpochValidators%v\n", currEpochValidatorsEncode)
 	// fmt.Printf("retrieved C9 PriorEpochValidators%v\n", priorEpochValidatorEncode)
 
-	d := s.GetJamState()
+	d := s.GetJamState() // this will copy PriorServiceAccountState from the previous state. but can be optimized
 	d.SetAuthPool(coreAuthPoolEncode)
 	d.SetAuthQueue(authQueueEncode)
 	d.SetRecentBlocks(recentBlocksEncode)
@@ -299,6 +299,7 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetPriorEpochValidators(priorEpochValidatorEncode)
 	d.SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotEncode)
 	d.SetRho(rhoEncode)
+
 	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
 	d.SetPi(piEncode)
 	d.SetAccumulateQueue(accunulateQueueEncode)
@@ -1112,6 +1113,23 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
+	// we get the service into JamState by AvailableWorkReport
+	rho_wr := s.AvailableWorkReport
+	if err != nil {
+		fmt.Printf("Error getting work report from rho: %v\n", err)
+	}
+	for _, workreport := range rho_wr {
+		for _, result := range workreport.Results {
+			serviceID := result.ServiceID
+			v, ok, err := s.trie.GetService(255, serviceID)
+			if err != nil || !ok {
+				fmt.Printf("Error getting service from rho: %v\n", err)
+			}
+			accountState, err := types.ServiceAccountFromBytes(serviceID, v)
+			priorAccountState := *accountState
+			s.JamState.PriorServiceAccountState[serviceID] = priorAccountState
+		}
+	}
 
 	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
 	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
@@ -1122,6 +1140,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 28 -- ACCUMULATE
 	var g uint64 = 10000
 	o := s.JamState.newPartialState()
+	if debug {
+		fmt.Printf("[N%d] s.StateRoot=%v newPartialState len=%v\n", s.Id, s.StateRoot, len(o.D))
+	}
 	var f map[uint32]uint32
 	var b []BeefyCommitment
 	accumulate_input_wr := s.AvailableWorkReport

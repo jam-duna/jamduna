@@ -548,9 +548,38 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	}
 	// current gas allocation is unlimited
 	if sum_rg <= types.AccumulationGasAllocation {
+
 		for _, results := range g.Report.Results {
-			if results.Gas >= s.JamState.PriorServiceAccountState[uint32(results.Gas)].GasLimitG {
+			serviceID := results.ServiceID
+			if _, exists := s.JamState.PriorServiceAccountState[serviceID]; exists {
+				gas_limitG := s.JamState.PriorServiceAccountState[serviceID].GasLimitG
+
+				if results.Gas >= gas_limitG {
+					return nil
+				}
+			} else if s.trie == nil {
+				return jamerrors.ErrGBadServiceID
+			}
+			v, ok, err := s.trie.GetService(255, serviceID)
+			if err != nil || !ok {
+				// true error case: serviceID is not found even in trie
+				//fmt.Printf("EEE checkCodeHash serviceID=%v not found in trie err: %v\n", serviceID, err)
+				return jamerrors.ErrGBadServiceID
+			}
+			accountState, err := types.ServiceAccountFromBytes(serviceID, v)
+			if err != nil {
+				return jamerrors.ErrGBadServiceID
+			}
+			if debugG {
+				fmt.Printf("checkGas fallback checkCodeHash serviceID=%v, accountState=%v\n", serviceID, accountState.JsonString())
+			}
+			priorAccountState := *accountState
+			s.JamState.PriorServiceAccountState[serviceID] = priorAccountState
+			gas_limitG := s.JamState.PriorServiceAccountState[serviceID].GasLimitG
+			if results.Gas >= gas_limitG {
 				return nil
+			} else {
+				fmt.Printf("gas limit %d\n", gas_limitG)
 			}
 		}
 	}
@@ -890,8 +919,10 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 	// 		presentBlockSegmentRootLookup = append(presentBlockSegmentRootLookup, tmpsegmentRootLookupItem)
 	// 	}
 	// }
-	fmt.Printf("presentBlockSegmentRootLookup: %v\n", presentBlockSegmentRootLookup)
-	fmt.Printf("currentSegmentRootLookUp: %v\n", currentSegmentRootLookUp)
+	if debugG {
+		fmt.Printf("presentBlockSegmentRootLookup: %v\n", presentBlockSegmentRootLookup)
+		fmt.Printf("currentSegmentRootLookUp: %v\n", currentSegmentRootLookUp)
+	}
 	// Check presentBlockHash2Hash include currentHash2Hash or not
 	segmentLookUpIncluded := make([]bool, len(currentSegmentRootLookUp))
 	for i, currentSegmentRootLookup := range currentSegmentRootLookUp {
@@ -919,7 +950,7 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 
 // v0.5 eq 11.41
 func (s *StateDB) checkCodeHash(g types.Guarantee) error {
-	//t := s.CopyTrieState(s.StateRoot)
+	//prior_trie := s.CopyTrieState(s.StateRoot)
 	for _, result := range g.Report.Results {
 		serviceID := result.ServiceID
 		codeHash := result.CodeHash
@@ -927,13 +958,11 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 		if !ok {
 			// test_vector will not have fallback via trie
 			if s.trie == nil {
-				//fmt.Printf("AAA checkCodeHash serviceID=%v\n", serviceID)
 				return jamerrors.ErrGBadServiceID
 			}
-			// this is a cache miss, get service from trie
+			// on cache miss, get service from trie. not sure if prior_trie is needed
 			v, ok, err := s.trie.GetService(255, serviceID)
 			if err != nil || !ok {
-				// true error case: serviceID is not found even in trie
 				//fmt.Printf("EEE checkCodeHash serviceID=%v not found in trie err: %v\n", serviceID, err)
 				return jamerrors.ErrGBadServiceID
 			}
@@ -942,12 +971,14 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 				panic(fmt.Sprintf("FFF checkCodeHash serviceID=%v Recovering err: %v\n", serviceID, err))
 				return jamerrors.ErrGBadServiceID
 			}
-			fmt.Printf("fallback checkCodeHash serviceID=%v, accountState=%v\n", serviceID, accountState.JsonString())
+			if debugG {
+				fmt.Printf("fallback checkCodeHash serviceID=%v, accountState=%v\n", serviceID, accountState.JsonString())
+			}
 			priorAccountState = *accountState
 			s.JamState.PriorServiceAccountState[serviceID] = priorAccountState
 		}
 		if codeHash != priorAccountState.CodeHash {
-			//fmt.Printf("CCC result.ServiceID=%v result.CodeHash: %v, service.codehash: %v\n", serviceID, result.CodeHash, priorAccountState.CodeHash)
+			//fmt.Printf("result.ServiceID=%v result.CodeHash: %v, service.codehash: %v\n", serviceID, result.CodeHash, priorAccountState.CodeHash)
 			return jamerrors.ErrGBadCodeHash
 		}
 	}

@@ -9,8 +9,16 @@ on:
   push:
     branches:
       - main
+      - dev
     paths:
       - .github/workflows/deploy.yml
+      - bls/*.go
+      - bandersnatch/*.go
+      - types/*.go
+      - statedb/*.go
+      - pvm/*.go
+      - statedb/*.go
+      - node/*.go
 #  schedule:
 #    - cron: '0 */6 * * *'
 

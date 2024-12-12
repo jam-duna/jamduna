@@ -246,7 +246,7 @@ func (j *JamState) newPartialState() types.PartialState {
 	}
 	return types.PartialState{
 		D:                  d,
-		UpcomingValidators: j.SafroleState.NextValidators,
+		UpcomingValidators: j.SafroleState.DesignedValidators,
 		QueueWorkReport:    j.AuthorizationQueue,
 		PrivilegedState:    j.PrivilegedServiceIndices,
 	}

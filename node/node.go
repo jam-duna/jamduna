@@ -52,12 +52,12 @@ const (
 	debugSegments = false // Fetch import segments
 	debugBundle   = false // Fetch WorkPackage Bundle
 	debugAncestor = false // Check Ancestor
-
-	numNodes   = 6
-	quicAddr   = "127.0.0.1:%d"
-	basePort   = 9000
-	godMode    = true
-	noRotation = false
+	debugSTF      = true  // State Transition Function
+	numNodes      = 6
+	quicAddr      = "127.0.0.1:%d"
+	basePort      = 9000
+	godMode       = false
+	noRotation    = false
 )
 
 const (
@@ -1315,11 +1315,14 @@ func (n *Node) runClient() {
 						StateRoot: newStateDB.StateRoot,
 					},
 				}
-				err = statedb.CheckStateTransition(n.store, &st, s.AncestorSet, oldstate.AccumulationRoot)
-				if err != nil {
-					fmt.Printf("ERROR validating state transition\n")
-				} else if debug {
-					fmt.Printf("Validated state transition\n")
+
+				if debugSTF {
+					err = statedb.CheckStateTransition(n.store, &st, s.AncestorSet, oldstate.AccumulationRoot)
+					if err != nil {
+						panic(fmt.Sprintf("ERROR validating state transition\n"))
+					} else if debug {
+						fmt.Printf("Validated state transition\n")
+					}
 				}
 
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
