@@ -962,14 +962,11 @@ func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *t
 	r.Ok = []byte{}
 	return r, 0
 }
-func (vm *VM) ExecuteTransfer(t []types.DeferredTransfer) (r types.Result, res uint64) {
+func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
 	// a = E(t)   take transfer memos t and encode them
-	a := make([]byte, 0)
-	for _, t := range t {
-		a = append(a, t.Bytes()...)
-	}
-	// vm.setArgumentInputs(a)
-	Standard_Program_Initialization(vm, a) // eq 264/265
+	vm.ServiceAccount = service_account
+
+	Standard_Program_Initialization(vm, arguments) // eq 264/265
 	vm.Execute(types.EntryPointOnTransfer)
 	// return vm.getArgumentOutputs()
 	r.Err = vm.resultCode

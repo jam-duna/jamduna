@@ -480,12 +480,53 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 	return output
 }
 
-func (s *StateDB) HostTransfer(services map[uint32]types.ServiceAccount, self_index uint32, t []types.DeferredTransfer) (types.ServiceAccount, error) {
-	// stub
-	if _, ok := services[self_index]; !ok {
-		return types.ServiceAccount{}, errors.New("HostTransfer Error: service not found")
+func (s *StateDB) HostTransfer(delta_dager map[uint32]*types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (*types.ServiceAccount, error) {
+	// check if self_index is in delta_dager
+	if _, ok := delta_dager[self_index]; !ok {
+		return &types.ServiceAccount{}, errors.New("HostTransfer Error: service not found")
 	}
-	return types.ServiceAccount{}, nil
+
+	// select transfers eq 12.23
+	selectedTransfers := TransferSelect(t, self_index)
+	if len(selectedTransfers) == 0 {
+		return delta_dager[self_index], nil
+	}
+
+	self := delta_dager[self_index]
+	code := s.ReadServicePreimageBlob(self_index, self.CodeHash)
+	vm := pvm.NewVMFromCode(self_index, code, 0, s)
+
+	var input_argument []byte
+	encode_time_slot, _ := types.Encode(time_slot)
+	encodeService_index, _ := types.Encode(self_index)
+	encodeSelectedTransfers, _ := types.Encode(selectedTransfers)
+
+	input_argument = append(input_argument, encode_time_slot...)
+	input_argument = append(input_argument, encodeService_index...)
+	input_argument = append(input_argument, encodeSelectedTransfers...)
+
+	vm.ExecuteTransfer(input_argument, self)
+
+	return vm.ServiceAccount, nil
+}
+
+// eq 12.24
+func (s *StateDB) ProcessDeferredTransfers(delta_dager map[uint32]*types.ServiceAccount, time_slot uint32, t []types.DeferredTransfer) (map[uint32]*types.ServiceAccount, error) {
+	delta_dager_dager := make(map[uint32]*types.ServiceAccount)
+	for k, v := range delta_dager {
+		delta_dager_dager[k] = v
+	}
+
+	for i := range delta_dager {
+		updated_service, err := s.HostTransfer(delta_dager, time_slot, uint32(i), t)
+		if err != nil {
+			return delta_dager, errors.New("Service index: " + string(i) + " failed to process deferred transfers")
+		} else {
+			delta_dager_dager[i] = updated_service
+		}
+
+	}
+	return delta_dager_dager, nil
 }
 
 func (s *StateDB) ApplyStateTransitionAccumulation(w_star []types.WorkReport, num uint64, previousTimeslot uint32) {

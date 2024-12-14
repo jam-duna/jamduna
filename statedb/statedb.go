@@ -1147,9 +1147,15 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	var b []BeefyCommitment
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, _, b := s.OuterAccumulate(g, accumulate_input_wr, &o, f)
+	n, t, b := s.OuterAccumulate(g, accumulate_input_wr, &o, f)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
+	}
+
+	// Not sure whether transfer happens here
+	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
+	if len(t) > 0 {
+		s.ProcessDeferredTransfers(o.D, tau, t)
 	}
 
 	s.ApplyXContext(&o)
