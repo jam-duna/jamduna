@@ -69,7 +69,7 @@ func (mh *MockHostEnv) WriteServiceBytes(s uint32, v []byte) {
 	tree.SetService(255, s, v)
 }
 
-func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) []byte {
+func (mh *MockHostEnv) ReadServiceStorage(s uint32, k *[]byte) []byte {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -81,7 +81,7 @@ func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) []byte {
 	storage, ok, err := tree.GetServiceStorage(s, k)
 	if err != nil {
 		if !ok {
-			fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", s, k, storage, err)
+			fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", s, *k, storage, err)
 		}
 		return nil
 	} else {
@@ -90,7 +90,7 @@ func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) []byte {
 	}
 }
 
-func (mh *MockHostEnv) WriteServiceStorage(s uint32, k common.Hash, storage []byte) {
+func (mh *MockHostEnv) WriteServiceStorage(s uint32, k *[]byte, storage []byte) {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -218,7 +218,7 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	}
 }
 
-func (mh *MockHostEnv) DeleteServiceStorageKey(s uint32, k common.Hash) error {
+func (mh *MockHostEnv) DeleteServiceStorageKey(s uint32, k *[]byte) error {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -229,7 +229,7 @@ func (mh *MockHostEnv) DeleteServiceStorageKey(s uint32, k common.Hash) error {
 	}
 	err = tree.DeleteServiceStorage(s, k)
 	if err != nil {
-		log.Fatalf("Failed to delete k: %v, error: %v", k, err)
+		log.Fatalf("Failed to delete rk: %x, error: %v", *k, err)
 		return err
 	}
 	return nil

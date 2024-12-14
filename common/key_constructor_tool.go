@@ -35,6 +35,13 @@ func Compute_storageKey_internal(s uint32, k []byte) Hash {
 	return BytesToHash(raw_key)
 }
 
+func Compute_storageKey_internal_byte(s uint32, k []byte) []byte {
+	sBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(sBytes, s)     // E4(s)
+	raw_key := ComputeHash(append(sBytes, k...)) // H(E4(s) ⌢ vk ⋅⋅⋅+k )
+	return raw_key
+}
+
 // EQ 290 - state-key constructor functions C
 func ComputeC_i(i uint8) Hash {
 	//i ∈ N_8 ↦ [i,0,0,...]
@@ -60,6 +67,30 @@ func ComputeC_sh(s uint32, h0 Hash) Hash {
 	//h: hash_component (assumed to be exact 32bytes)
 	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
 	h := h0.Bytes()
+	stateKey := make([]byte, 32)
+	nBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
+
+	for i := 0; i < 4; i++ {
+		stateKey[2*i] = nBytes[i]
+		if i < 32 {
+			stateKey[2*i+1] = h[i]
+		}
+	}
+	for i := 4; i < 28; i++ {
+		if i < len(h) {
+			stateKey[i+4] = h[i]
+		}
+	}
+	return BytesToHash(stateKey)
+}
+
+func ComputeC_sh_Byte(s uint32, h0 []byte) Hash {
+	//s: service_index
+	//h: hash_component (assumed to be exact 32bytes)
+	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
+	h := make([]byte, 32)
+	copy(h, h0)
 	stateKey := make([]byte, 32)
 	nBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)

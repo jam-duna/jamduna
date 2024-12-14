@@ -358,11 +358,10 @@ func jamtest(jam string) {
 				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
 				k := []byte{0, 0, 0, 0}
-				key := common.Compute_storageKey_internal(bootstrapService, k)
-				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, key)
+				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, &k)
 				if err != nil {
 					if !ok {
-						fmt.Printf("t.GetServiceStorage %v NOT FOUND\n", key)
+						fmt.Printf("t.GetServiceStorage %x NOT FOUND\n", k)
 					}
 					time.Sleep(1 * time.Second)
 					continue

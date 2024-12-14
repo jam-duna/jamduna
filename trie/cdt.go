@@ -361,7 +361,7 @@ func VerifyPageProof(pageProof [][]byte, pageIndex int) (bool, error) {
 		fmt.Printf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
 		return false, errors.New("Root hash mismatch")
 	} else {
-		fmt.Printf("Root hash verified: %x\n", computedRoot)
+		// fmt.Printf("Root hash verified: %x\n", computedRoot)
 	}
 	return true, nil
 }

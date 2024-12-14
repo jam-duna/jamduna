@@ -85,7 +85,8 @@ func (s ServiceAccount) Clone() *ServiceAccount {
 type StorageObject struct {
 	Deleted bool
 	Dirty   bool
-	Value   []byte `json:"value"` // v
+	Value   []byte `json:"value"`  // v
+	RawKey  []byte `json:"rawkey"` // rawKey
 }
 
 func (o StorageObject) Clone() StorageObject {
@@ -293,14 +294,16 @@ func (s *ServiceAccount) String() string {
 	return str + str2 + str3 + str4
 }
 
-func (s *ServiceAccount) ReadStorage(key common.Hash, sdb HostEnv) (ok bool, v []byte) {
-	storageObj, ok := s.Storage[key]
+func (s *ServiceAccount) ReadStorage(serviceIndex uint32, rawK []byte, sdb HostEnv) (ok bool, v []byte) {
+	// serviceIndex := s.ServiceIndex
+	hk := common.Compute_storageKey_internal(serviceIndex, rawK)
+	storageObj, ok := s.Storage[hk]
 	if storageObj.Deleted {
 		return false, nil
 	}
 	if !ok {
 		var err error
-		v = sdb.ReadServiceStorage(s.ServiceIndex, key)
+		v = sdb.ReadServiceStorage(serviceIndex, &storageObj.RawKey)
 		if err != nil {
 			return false, nil
 		}
@@ -341,12 +344,16 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 	return true, lookupObj.T
 }
 
-func (s *ServiceAccount) WriteStorage(key common.Hash, val []byte) {
+func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK []byte, val []byte) {
+	// k for original raw key, hk for hash key
+	// serviceIndex := s.ServiceIndex
+	hk := common.Compute_storageKey_internal(serviceIndex, rawK)
 	s.Dirty = true
-	s.Storage[key] = StorageObject{
+	s.Storage[hk] = StorageObject{
 		Dirty:   true,
 		Deleted: len(val) == 0,
 		Value:   val,
+		RawKey:  rawK,
 	}
 }
 
@@ -421,11 +428,31 @@ func convertHashMapToStringMap[T any](input map[common.Hash]T) map[string]T {
 	}
 	return output
 }
+func convertByteMapToStringMap[T any](input map[*[]byte]T) map[string]T {
+	output := make(map[string]T, len(input))
+	for k, v := range input {
+		// *[]byte to string
+		kString := fmt.Sprintf("%x", *k)
+		fmt.Printf("string k=%s\n", kString)
+		output[kString] = v
+	}
+	return output
+}
 
 func convertStringMapToHashMap[T any](input map[string]T) map[common.Hash]T {
 	output := make(map[common.Hash]T, len(input))
 	for k, v := range input {
 		output[common.HexToHash(k)] = v
+	}
+	return output
+}
+
+func convertStringMapToByteMap[T any](input map[string]T) map[*[]byte]T {
+	output := make(map[*[]byte]T, len(input))
+	for k, v := range input {
+		// string to *[]byte
+		kBytes := []byte(k)
+		output[&kBytes] = v
 	}
 	return output
 }

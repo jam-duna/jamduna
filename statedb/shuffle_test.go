@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
+	"path/filepath"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -19,7 +19,7 @@ type ShuffleTestCase struct {
 // shuffle_test reads a JSON file of test cases and performs the tests.
 func TestShuffle(t *testing.T) {
 	// Read the input file
-	fn := common.GetFilePath("../jamtestvectors/shuffle/shuffle_tests.json")
+	fn := filepath.Join("../jamtestvectors/shuffle/shuffle_tests.json")
 	file, err := os.Open(fn)
 	if err != nil {
 		t.Fatalf("Failed to open testcases file: %v", err)

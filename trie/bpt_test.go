@@ -13,16 +13,12 @@ import (
 	"github.com/colorfulnotion/jam/common"
 )
 
-const test_leveldb_path = ""
+const bptDebug = false
 
 // TestVector represents a test case in the JSON file
 type TestVector struct {
 	Input  map[string]string `json:"input"`
 	Output string            `json:"output"`
-}
-
-func hexToBytes(hexStr string) ([]byte, error) {
-	return hex.DecodeString(hexStr)
 }
 
 func hex2Bytes(hexStr string) []byte {
@@ -37,7 +33,7 @@ func TestEdgeCases(t *testing.T) {
 	// t.Skip()
 	// level_db_path := "../leveldb/BPT"
 	data := [][2][]byte{
-		{hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")},
+		{hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("0000000000000000000000000000000000000000000000000000")},
 	}
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
@@ -45,12 +41,16 @@ func TestEdgeCases(t *testing.T) {
 	for _, item := range data {
 		tree.Insert(item[0], item[1])
 	}
-	tree.printTree(tree.Root, 0)
+	if bptDebug {
+		tree.printTree(tree.Root, 0)
+	}
 	getValue, _, err := tree.Get(hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"))
 	if err != nil {
 		t.Errorf("Key: %x not found, error: %s\n", hex2Bytes("0000"), err)
 	}
-	fmt.Printf("getValue %x\n", getValue)
+	if bptDebug {
+		fmt.Printf("getValue %x\n", getValue)
+	}
 }
 
 // TestTrace tests the tracing functionality in the Merkle tree
@@ -69,7 +69,9 @@ func TestTrace(t *testing.T) {
 	for _, item := range data {
 		tree.Insert(item[0], item[1])
 	}
-	tree.PrintTree(tree.Root, 0)
+	if bptDebug {
+		tree.PrintTree(tree.Root, 0)
+	}
 	trace, err := tree.Trace(hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"))
 
 	if err != nil {
@@ -80,9 +82,12 @@ func TestTrace(t *testing.T) {
 		t.Error("Expected a non-empty trace, got empty")
 	}
 	path, _ := tree.GetPath(hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"))
-	fmt.Printf("GetPath %x\n", path)
 	tree.Close()
-	t.Logf("Trace path: %x\n", trace)
+	if bptDebug {
+		fmt.Printf("GetPath %x\n", path)
+		t.Logf("Trace path: %x\n", trace)
+	}
+	DeleteLevelDB()
 }
 
 func TestMerkleTree(t *testing.T) {
@@ -102,15 +107,12 @@ func TestMerkleTree(t *testing.T) {
 	// Run each test case
 	for i, testCase := range testVectors {
 		// Create the Merkle Tree input from the test case
-		fmt.Printf("testCase %d: %v\n", i, testCase)
+		if bptDebug {
+			fmt.Printf("testCase %d: %v\n", i, testCase)
+		}
 
 		isSerialized := true
 		var rootHash []byte
-
-		// // Clear the LevelDB folder
-		// dbPath := fmt.Sprintf("../leveldb/BPT_%d", i)
-		// os.RemoveAll(dbPath)
-		// os.Mkdir(dbPath, 0755)
 
 		// Create an empty Merkle Tree
 		test_db, _ := initLevelDB()
@@ -122,12 +124,17 @@ func TestMerkleTree(t *testing.T) {
 				key, _ := hex.DecodeString(k)
 				value, _ := hex.DecodeString(v)
 				tree.Insert(key, value)
-				fmt.Printf("computeHash:) %x\n", computeHash(leaf(key, value)))
+				if bptDebug {
+					fmt.Printf("computeHash:) %x\n", computeHash(leaf(key, value)))
+				}
 			}
 			rootHash = tree.GetRootHash()
 		}
 		// Compare the computed root hash with the expected output
-		tree.printTree(tree.Root, 0)
+
+		if bptDebug {
+			tree.printTree(tree.Root, 0)
+		}
 		expectedHash, _ := hex.DecodeString(testCase.Output)
 		if !compareBytes(rootHash, expectedHash) {
 			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, common.Bytes2Hex(rootHash), testCase.Output)
@@ -147,7 +154,9 @@ func TestMerkleTree(t *testing.T) {
 
 			// Test Valid Proof
 			if tree.Verify(key, value, expectedHash, path) {
-				fmt.Printf("Proof for key [%x] is valid.\n", key)
+				if bptDebug {
+					fmt.Printf("Proof for key [%x] is valid.\n", key)
+				}
 			} else {
 				t.Errorf("Proof for key [%x] is invalid.\n", key)
 			}
@@ -157,41 +166,49 @@ func TestMerkleTree(t *testing.T) {
 			if getErr != nil {
 				t.Errorf("Key: %x not found, error: %s\n", key, getErr)
 			} else {
-				fmt.Printf("Key: %x, Value: %x\n", key, getValue)
+				if bptDebug {
+					fmt.Printf("Key: %x, Value: %x\n", key, getValue)
+				}
 			}
 		}
 		// os.RemoveAll(dbPath) // Clean up the LevelDB folder(if needed)
 		tree.Close()
 	}
+	DeleteLevelDB()
 }
 
 func TestBPTProof(t *testing.T) {
 	data := [][2][]byte{
 		{hex2Bytes("f2a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), hex2Bytes("22c62f84ee5775d1e75ba6519f6dfae571eb1888768f2a203281579656b6a29097f7c7e2cf44e38da9a541d9b4c773db8b71e1d3")},
 		{hex2Bytes("f3a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), hex2Bytes("44d0b26211d9d4a44e375207")},
-
-		// {hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
-		// {hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
-		// {hex2Bytes("a3dc3bed1b0727caf428961bed11c9998ae2476d8a97fad203171b628363d9a2"), hex2Bytes("8a0dafa9d6ae6177")},
-		// {hex2Bytes("15207c233b055f921701fc62b41a440d01dfa488016a97cc653a84afb5f94fd5"), hex2Bytes("157b6c821169dacabcf26690df")},
-		// {hex2Bytes("b05ff8a05bb23c0d7b177d47ce466ee58fd55c6a0351a3040cf3cbf5225aab19"), hex2Bytes("6a208734106f38b73880684b")},
+		{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
+		{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
+		{hex2Bytes("a3dc3bed1b0727caf428961bed11c9998ae2476d8a97fad203171b628363d9a2"), hex2Bytes("8a0dafa9d6ae6177")},
+		{hex2Bytes("15207c233b055f921701fc62b41a440d01dfa488016a97cc653a84afb5f94fd5"), hex2Bytes("157b6c821169dacabcf26690df")},
+		{hex2Bytes("b05ff8a05bb23c0d7b177d47ce466ee58fd55c6a0351a3040cf3cbf5225aab19"), hex2Bytes("6a208734106f38b73880684b")},
 	}
 	exceptedRootHash := hex2Bytes("b9c99f66e5784879a178795b63ae178f8a49ee113652a122cd4b3b2a321418c1")
 	// Create an empty Merkle Tree
 	//level_db_path := "../leveldb/BPT"
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
-	fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
+	if bptDebug {
+		fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
+	}
 
 	// Insert key-value pairs one by one
 	for index, kv := range data {
 		key := kv[0]
 		value := kv[1]
-		fmt.Printf("insert#%d, key=%x, value=%x\n", index, key, value)
+		if bptDebug {
+			fmt.Printf("insert#%d, key=%x, value=%x\n", index, key, value)
+		}
 		tree.Insert(key, value)
 	}
-	tree.printTree(tree.Root, 0)
 
+	if bptDebug {
+		tree.printTree(tree.Root, 0)
+	}
 	wrongKey := hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522ff")
 	_, err := tree.Trace(wrongKey)
 	if err == nil {
@@ -201,9 +218,13 @@ func TestBPTProof(t *testing.T) {
 	key := hex2Bytes("f2a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3")
 
 	path, err := tree.Trace(key)
-	fmt.Printf("Proof path for key %x: \n", key)
+	if bptDebug {
+		fmt.Printf("Proof path for key %x: \n", key)
+	}
 	for i, p := range path {
-		fmt.Printf("  Node %d: %x\n", i, p)
+		if bptDebug {
+			fmt.Printf("  Node %d: %x\n", i, p)
+		}
 	}
 	if err != nil {
 		t.Errorf("Unable to generate Proof for key [%x].Err %v\n", key, err)
@@ -211,9 +232,13 @@ func TestBPTProof(t *testing.T) {
 
 	// Test Valid Proof
 	value, _, _ := tree.Get(key)
-	fmt.Printf("levelDBGet key=%x, value=%x\n", key, value)
+	if bptDebug {
+		fmt.Printf("levelDBGet key=%x, value=%x\n", key, value)
+	}
 	if tree.Verify(key, value, tree.GetRootHash(), path) {
-		fmt.Printf("Proof for key [%x] is valid.\n", key)
+		if bptDebug {
+			fmt.Printf("Proof for key [%x] is valid.\n", key)
+		}
 	} else {
 		t.Errorf("Proof for key [%x] is invalid.\n", key)
 	}
@@ -223,9 +248,12 @@ func TestBPTProof(t *testing.T) {
 	if tree.Verify(key, invalidValue, exceptedRootHash, path) {
 		t.Errorf("Proof for key [%x] with invalid value is valid.\n", invalidValue)
 	} else {
-		fmt.Printf("Proof for key [%x] with invalid value is invalid.\n", invalidValue)
+		if bptDebug {
+			fmt.Printf("Proof for key [%x] with invalid value is invalid.\n", invalidValue)
+		}
 	}
 	tree.Close()
+	DeleteLevelDB()
 }
 
 func TestGet(t *testing.T) {
@@ -238,13 +266,17 @@ func TestGet(t *testing.T) {
 	// Create an empty Merkle Tree
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
-	fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
+	if bptDebug {
+		fmt.Printf("initial rootHash: %x\n", tree.GetRootHash())
+	}
 
 	// Insert key-value pairs one by one
 	for index, kv := range data {
 		key := kv[0]
 		value := kv[1]
-		fmt.Printf("insert#%d, key=%x, value=%x\n", index, key, value)
+		if bptDebug {
+			fmt.Printf("insert#%d, key=%x, value=%x\n", index, key, value)
+		}
 		tree.Insert(key, value)
 	}
 
@@ -261,13 +293,17 @@ func TestGet(t *testing.T) {
 		if err != nil {
 			t.Errorf("Key: %x not found, error: %s\n", key, err)
 		} else {
-			fmt.Printf("Key: %x, Value: %x\n", key, value)
+			if bptDebug {
+				fmt.Printf("Key: %x, Value: %x\n", key, value)
+			}
 		}
 	}
 	for _, key := range validKeys {
 		value, ok, err := tree.Get(key)
 		if err != nil {
-			fmt.Printf("Key: %x not found, error: %s\n", key, err)
+			if bptDebug {
+				fmt.Printf("Key: %x not found, error: %s\n", key, err)
+			}
 		} else {
 			if !ok {
 				fmt.Printf("Key: %x not found\n", key)
@@ -277,6 +313,7 @@ func TestGet(t *testing.T) {
 	}
 
 	tree.Close()
+	DeleteLevelDB()
 }
 
 func TestModify(t *testing.T) {
@@ -296,14 +333,18 @@ func TestModify(t *testing.T) {
 	// Run each test case
 	for i, testCase := range testVectors {
 		// Create the Merkle Tree input from the test case
-		fmt.Printf("testCase %d: %v\n", i, testCase)
+		if bptDebug {
+			fmt.Printf("testCase %d: %v\n", i, testCase)
+		}
 		var input [][2][]byte
 		for k, v := range testCase.Input {
 			key, _ := hex.DecodeString(k)
 			value, _ := hex.DecodeString(v)
 			input = append(input, [2][]byte{key, value})
 		}
-		fmt.Printf("input=%x (len=%v)\n", input, len(input))
+		if bptDebug {
+			fmt.Printf("input=%x (len=%v)\n", input, len(input))
+		}
 
 		var rootHash []byte
 
@@ -311,26 +352,17 @@ func TestModify(t *testing.T) {
 		test_db, _ := initLevelDB()
 		tree := NewMerkleTree(nil, test_db)
 
-		fmt.Printf("initial rootHash:%x \n", tree.GetRootHash())
+		if bptDebug {
+			fmt.Printf("initial rootHash:%x \n", tree.GetRootHash())
+		}
 		// Insert key-value pairs one by one
 		index := 0
 		rand.Seed(time.Now().UnixNano())
-		/*
-			for k, v := range testCase.Input {
-				fmt.Printf("insert#%d, k=%v, v=%v\n", index, k, v)
-				key, _ := hex.DecodeString(k)
-				value, _ := hex.DecodeString(v)
-				tree.Insert(key, value)
-				randomValue := make([]byte, len(v))
-				rand.Read(randomValue)
-				fmt.Printf("insert#%d, key=%x, randomValue=%x\n", index, key, randomValue)
-				tree.Insert(key, randomValue)
-				index++
-			}
-		*/
 		index = 0
 		for k, v := range testCase.Input {
-			fmt.Printf("insert#%d, k=%v, v=%v\n", index, k, v)
+			if bptDebug {
+				fmt.Printf("insert#%d, k=%v, v=%v\n", index, k, v)
+			}
 			key, _ := hex.DecodeString(k)
 			value, _ := hex.DecodeString(v)
 			tree.Insert(key, value)
@@ -342,13 +374,16 @@ func TestModify(t *testing.T) {
 		// Compare the computed root hash with the expected output
 		expectedHash, _ := hex.DecodeString(testCase.Output)
 		if !compareBytes(rootHash, expectedHash) {
-			tree.PrintTree(tree.Root, 0)
+			if bptDebug {
+				tree.PrintTree(tree.Root, 0)
+			}
 			t.Errorf("Test case %d: Root hash mismatch for input %v: got %s, want %s", i, testCase.Input, common.Bytes2Hex(rootHash), testCase.Output)
 		} else {
 			t.Logf("Test case %d: Vector OK, rootHash=%x", i, expectedHash)
 		}
 		tree.Close()
 	}
+	DeleteLevelDB()
 }
 
 // TestDelete tests the deletion of key-value pairs from the Merkle tree
@@ -373,10 +408,9 @@ func TestDelete(t *testing.T) {
 		tree.Insert(kv[0], kv[1])
 		rootHash := tree.GetRootHash()
 		rootHashes = append(rootHashes, rootHash)
-		fmt.Printf("Inserted key: %x, value: %x, RootHash: %x\n", kv[0], kv[1], rootHash)
-		// fmt.Printf("--------------------------------------------\n")
-		// tree.printTree(tree.Root, 0)
-		// fmt.Printf("--------------------------------------------\n")
+		if bptDebug {
+			fmt.Printf("Inserted key: %x, value: %x, RootHash: %x\n", kv[0], kv[1], rootHash)
+		}
 	}
 
 	// Check root hashes after each deletion in reverse order
@@ -391,68 +425,39 @@ func TestDelete(t *testing.T) {
 		if i > 0 {
 			expectedRootHash = rootHashes[i-1]
 		}
-		fmt.Printf("Deleted key: %x, RootHash after deletion: %x\n", kv[0], rootHash)
-
-		// fmt.Printf("--------------------------------------------\n")
-		// tree.printTree(tree.Root, 0)
-		// fmt.Printf("--------------------------------------------\n")
-
+		if bptDebug {
+			fmt.Printf("Deleted key: %x, RootHash after deletion: %x\n", kv[0], rootHash)
+		}
 		if !compareBytes(rootHash, expectedRootHash) {
 			t.Fatalf("RootHash mismatch after deleting key: %x. Got: %x, Expected: %x", kv[0], rootHash, expectedRootHash)
 		}
 	}
 	tree.Close()
+	DeleteLevelDB()
 }
 
 func TestStateKey(t *testing.T) {
-	// Test data
-	// data := [][2][]byte{
-	// 	{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
-	// 	{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
-	// }
-
-	//level_db_path := "../leveldb/BPT"
-	// Create a new Merkle Tree
-	// tree := NewMerkleTree(nil, test_leveldb_path)
-
 	test_db, _ := initLevelDB()
 	rootHash, tree, err := Initial_bpt(test_db)
 	if err != nil {
 		t.Errorf("Failed to initial BPT %v", err)
 	}
-	// defer tree.Close()
-	fmt.Printf("Root Hash=%x \n", rootHash)
-	// Insert key-value pairs one by one
-	// for _, kv := range data {
-	// 	value := kv[1]
-	// 	tree.SetService(255, 100, value)
-	// }
-	// // tree.printTree(tree.Root, 0)
-
-	// for _, kv := range data {
-	// 	key := kv[0]
-	// 	value := kv[1]
-	// 	tree.SetPreImage(126, key, value)
-	// }
-	// tree.printTree(tree.Root, 0)
-
-	// Get the root hash of the tree
-	// rootHash := tree.GetRootHash()
+	if bptDebug {
+		fmt.Printf("Root Hash=%x \n", rootHash)
+	}
 
 	value, err := tree.GetPreImageBlob(0, common.Hash(hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7")))
-	fmt.Printf("get value=%x, err=%v\n", value, err)
 
-	// for _, kv := range data {
-	// 	key := kv[0]
-	// 	value, err := tree.GetPreImage(126, key)
-	// 	fmt.Printf("getService value=%x, err=%v\n", value, err)
-	// }
-	tree.printTree(tree.Root, 0)
+	if bptDebug {
+		fmt.Printf("get value=%x, err=%v\n", value, err)
+		tree.printTree(tree.Root, 0)
+	}
 	tree.Close()
+	DeleteLevelDB()
 }
 
 // TestInitial tests the initialization of a Merkle tree from a root hash
-func testInitial(t *testing.T) {
+func TestInitial(t *testing.T) {
 	// Initialize the test data
 	// level_db_path := "../leveldb/BPT"
 	data := [][2][]byte{
@@ -473,8 +478,9 @@ func testInitial(t *testing.T) {
 		tree.Insert(item[0], item[1])
 	}
 
-	tree.printTree(tree.Root, 0)
-
+	if bptDebug {
+		tree.printTree(tree.Root, 0)
+	}
 	// Get the root hash of the tree
 	rootHash := tree.GetRootHash()
 
@@ -483,57 +489,44 @@ func testInitial(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	rt.printTree(rt.Root, 0)
 
+	if bptDebug {
+		rt.printTree(rt.Root, 0)
+	}
 	// Compare the initial tree with the reconstructed tree
 	if !compareTrees(tree.Root, rt.Root) {
 		t.Error("The reconstructed tree does not match the initial tree")
 	}
-
-	// TODO: stanley to test insert on this recovered tree..
-	// recoveredTree.SetState()
-	/*
-		rt.SetState(C1, coreAuthPoolEncode)
-		rt.SetState(C2, authQueueEncode)
-		rt.SetState(C3, recentBlocksEncode)
-		rt.SetState(CD, safroleStateEncode)
-		rt.SetState(C5, disputeState)
-		rt.SetState(C6, entropyEncode)
-		rt.SetState(C7, nextEpochValidatorsEncode)
-		rt.SetState(C8, currEpochValidatorsEncode)
-		rt.SetState(C9, priorEpochValidatorEncode)
-		rt.SetState(C10, rhoEncode)
-		rt.SetState(C11, mostRecentBlockTimeSlotEncode)
-		rt.SetState(C12, privilegedServiceIndicesEncode)
-		rt.SetState(C13, piEncode)
-		rt.SetState(C14, accumulationQueueEncode)
-		rt.SetState(C15, accumulationHistoryEncode)
-	*/
-
+	DeleteLevelDB()
 }
 
 // Test service
-func testService(t *testing.T) {
+func TestService(t *testing.T) {
 
 	// Build the initial tree and insert the data
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
+	value1 := PadToMultipleOfN([]byte{1}, 68)
+	value2 := PadToMultipleOfN([]byte{1, 2}, 68)
+	value3 := PadToMultipleOfN([]byte{1, 2, 3}, 68)
+	tree.SetService(255, 42, value1)
+	tree.SetService(255, 43, value2)
+	tree.SetService(255, 44, value3)
 
-	tree.SetService(255, 42, []byte{1})
-	tree.SetService(255, 43, []byte{1, 2})
-	tree.SetService(255, 44, []byte{1, 2, 3})
-
-	tree.printTree(tree.Root, 0)
-
+	if bptDebug {
+		tree.printTree(tree.Root, 0)
+	}
 	s1, _, _ := tree.GetService(255, 42)
 	s2, _, _ := tree.GetService(255, 43)
 	s3, _, _ := tree.GetService(255, 44)
 	s4, _, _ := tree.GetService(255, 45)
 
-	fmt.Println("s1:", s1)
-	fmt.Println("s2:", s2)
-	fmt.Println("s3:", s3)
-	fmt.Println("s4:", s4)
+	if bptDebug {
+		fmt.Println("s1:", s1)
+		fmt.Println("s2:", s2)
+		fmt.Println("s3:", s3)
+		fmt.Println("s4:", s4)
+	}
 }
 
 // Test PreImage_lookup
@@ -551,18 +544,21 @@ func TestServicePreImage_lookup(t *testing.T) {
 	tree.SetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)), []uint32{100, 200})
 	tree.SetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)), []uint32{100, 200, 300})
 
-	tree.printTree(tree.Root, 0)
+	if bptDebug {
+		tree.printTree(tree.Root, 0)
+	}
 
 	ts1, _ := tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
 	ts2, _ := tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
 	ts3, _ := tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
 	ts4, _ := tree.GetPreImageLookup(45, common.Blake2Hash(case_c), uint32(len(case_c)))
 
-	fmt.Println("ts1:", ts1)
-	fmt.Println("ts2:", ts2)
-	fmt.Println("ts3:", ts3)
-	fmt.Println("ts4:", ts4)
-
+	if bptDebug {
+		fmt.Println("ts1:", ts1)
+		fmt.Println("ts2:", ts2)
+		fmt.Println("ts3:", ts3)
+		fmt.Println("ts4:", ts4)
+	}
 	_ = tree.DeletePreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
 	_ = tree.DeletePreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
 	_ = tree.DeletePreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
@@ -570,11 +566,11 @@ func TestServicePreImage_lookup(t *testing.T) {
 	ts1, _ = tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
 	ts2, _ = tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
 	ts3, _ = tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
-
-	fmt.Println("ts1:", ts1)
-	fmt.Println("ts2:", ts2)
-	fmt.Println("ts3:", ts3)
-
+	if bptDebug {
+		fmt.Println("ts1:", ts1)
+		fmt.Println("ts2:", ts2)
+		fmt.Println("ts3:", ts3)
+	}
 }
 
 // Test PreImage_blob
@@ -588,18 +584,21 @@ func TestServicePreImage_blob(t *testing.T) {
 	tree.SetPreImageBlob(43, []byte{1, 2})
 	tree.SetPreImageBlob(44, []byte{1, 2, 3})
 
-	tree.printTree(tree.Root, 0)
+	if bptDebug {
+		tree.printTree(tree.Root, 0)
+	}
 
 	blob1, _ := tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
 	blob2, _ := tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
 	blob3, _ := tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
 	blob4, _ := tree.GetPreImageBlob(45, common.BytesToHash([]byte{1, 2, 3}))
 
-	fmt.Println("blob1:", blob1)
-	fmt.Println("blob2:", blob2)
-	fmt.Println("blob3:", blob3)
-	fmt.Println("blob4:", blob4)
-
+	if bptDebug {
+		fmt.Println("blob1:", blob1)
+		fmt.Println("blob2:", blob2)
+		fmt.Println("blob3:", blob3)
+		fmt.Println("blob4:", blob4)
+	}
 	_ = tree.DeletePreImageBlob(42, common.BytesToHash([]byte{1}))
 	_ = tree.DeletePreImageBlob(43, common.BytesToHash([]byte{1, 2}))
 	_ = tree.DeletePreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
@@ -607,10 +606,11 @@ func TestServicePreImage_blob(t *testing.T) {
 	blob1, _ = tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
 	blob2, _ = tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
 	blob3, _ = tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
-
-	fmt.Println("blob1:", blob1)
-	fmt.Println("blob2:", blob2)
-	fmt.Println("blob3:", blob3)
+	if bptDebug {
+		fmt.Println("blob1:", blob1)
+		fmt.Println("blob2:", blob2)
+		fmt.Println("blob3:", blob3)
+	}
 
 }
 
@@ -621,31 +621,35 @@ func TestServiceStorage(t *testing.T) {
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
 
-	tree.SetServiceStorage(42, common.BytesToHash([]byte{1}), []byte{1})
-	tree.SetServiceStorage(43, common.BytesToHash([]byte{1, 2}), []byte{1, 2})
-	tree.SetServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}), []byte{1, 2, 3})
+	tree.SetServiceStorage(42, &[]byte{1}, []byte{1})
+	tree.SetServiceStorage(43, &[]byte{1, 2}, []byte{1, 2})
+	tree.SetServiceStorage(44, &[]byte{1, 2, 3}, []byte{1, 2, 3})
 
-	tree.printTree(tree.Root, 0)
+	if bptDebug {
+		tree.printTree(tree.Root, 0)
+	}
 
-	Storage1, _, _ := tree.GetServiceStorage(42, common.BytesToHash([]byte{1}))
-	Storage2, _, _ := tree.GetServiceStorage(43, common.BytesToHash([]byte{1, 2}))
-	Storage3, _, _ := tree.GetServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}))
-	Storage4, _, _ := tree.GetServiceStorage(45, common.BytesToHash([]byte{1, 2, 3}))
+	Storage1, _, _ := tree.GetServiceStorage(42, &[]byte{1})
+	Storage2, _, _ := tree.GetServiceStorage(43, &[]byte{1, 2})
+	Storage3, _, _ := tree.GetServiceStorage(44, &[]byte{1, 2, 3})
+	Storage4, _, _ := tree.GetServiceStorage(45, &[]byte{1, 2, 3})
 
-	fmt.Println("Storage1", Storage1)
-	fmt.Println("Storage2", Storage2)
-	fmt.Println("Storage3", Storage3)
-	fmt.Println("Storage4", Storage4)
+	if bptDebug {
+		fmt.Println("Storage1", Storage1)
+		fmt.Println("Storage2", Storage2)
+		fmt.Println("Storage3", Storage3)
+		fmt.Println("Storage4", Storage4)
+	}
+	_ = tree.DeleteServiceStorage(42, &[]byte{1})
+	_ = tree.DeleteServiceStorage(43, &[]byte{1, 2})
+	_ = tree.DeleteServiceStorage(44, &[]byte{1, 2, 3})
 
-	_ = tree.DeleteServiceStorage(42, common.BytesToHash([]byte{1}))
-	_ = tree.DeleteServiceStorage(43, common.BytesToHash([]byte{1, 2}))
-	_ = tree.DeleteServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}))
-
-	Storage1, _, _ = tree.GetServiceStorage(42, common.BytesToHash([]byte{1}))
-	Storage2, _, _ = tree.GetServiceStorage(43, common.BytesToHash([]byte{1, 2}))
-	Storage3, _, _ = tree.GetServiceStorage(44, common.BytesToHash([]byte{1, 2, 3}))
-
-	fmt.Println("Storage1", Storage1)
-	fmt.Println("Storage2", Storage2)
-	fmt.Println("Storage3", Storage3)
+	Storage1, _, _ = tree.GetServiceStorage(42, &[]byte{1})
+	Storage2, _, _ = tree.GetServiceStorage(43, &[]byte{1, 2})
+	Storage3, _, _ = tree.GetServiceStorage(44, &[]byte{1, 2, 3})
+	if bptDebug {
+		fmt.Println("Storage1", Storage1)
+		fmt.Println("Storage2", Storage2)
+		fmt.Println("Storage3", Storage3)
+	}
 }

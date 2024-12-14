@@ -924,7 +924,6 @@ func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]c
 			for _, justification := range justifications[itemIndex][segmentIdx] {
 				transferJustifications = append(transferJustifications, justification[:])
 			}
-			fmt.Printf("segmentData %v, segmentHash %v, transferJustifications %x\n", segmentHash, segmentHash, transferJustifications)
 			computedRoot := trie.VerifyJustification(segmentHash[:], verifyIndex, transferJustifications)
 			if !common.CompareBytes(root[:], computedRoot) && !common.CompareBytes(root[:], segmentHash[:]) {
 				fmt.Printf("segmentData %x, segmentHash %v, transferJustifications %x\n", segmentData, segmentHash, transferJustifications)

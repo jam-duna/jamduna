@@ -22,12 +22,12 @@ const (
 func (s *StateDB) WriteAccount(sa *types.ServiceAccount) {
 	service_idx := sa.GetServiceIndex()
 	//fmt.Printf("[N%d] WriteAccount %v\n", s.Id, sa.String())
-	for key, storage := range sa.Storage {
+	for _, storage := range sa.Storage {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
-				s.DeleteServiceStorageKey(service_idx, key)
+				s.DeleteServiceStorageKey(service_idx, &storage.RawKey)
 			} else {
-				s.WriteServiceStorage(service_idx, key, storage.Value)
+				s.WriteServiceStorage(service_idx, &storage.RawKey, storage.Value)
 			}
 		}
 	}
@@ -109,13 +109,13 @@ func (s *StateDB) WriteServiceBytes(service uint32, v []byte) {
 	tree.SetService(255, service, v)
 }
 
-func (s *StateDB) ReadServiceStorage(service uint32, k common.Hash) []byte {
+func (s *StateDB) ReadServiceStorage(service uint32, k *[]byte) []byte {
 	// not init case
 	tree := s.GetTrie()
 	storage, ok, err := tree.GetServiceStorage(service, k)
 	if err != nil {
 		if !ok {
-			fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
+			fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, *k, storage, err)
 		}
 		return nil
 	} else { //fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
@@ -123,9 +123,9 @@ func (s *StateDB) ReadServiceStorage(service uint32, k common.Hash) []byte {
 	}
 }
 
-func (s *StateDB) WriteServiceStorage(service uint32, k common.Hash, storage []byte) {
+func (s *StateDB) WriteServiceStorage(service uint32, rk *[]byte, storage []byte) {
 	tree := s.GetTrie()
-	tree.SetServiceStorage(service, k, storage)
+	tree.SetServiceStorage(service, rk, storage)
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) []byte {
@@ -215,11 +215,11 @@ func (s *StateDB) HistoricalLookup(service uint32, t uint32, blob_hash common.Ha
 	}
 }
 
-func (s *StateDB) DeleteServiceStorageKey(service uint32, k common.Hash) error {
+func (s *StateDB) DeleteServiceStorageKey(service uint32, k *[]byte) error {
 	tree := s.GetTrie()
 	err := tree.DeleteServiceStorage(service, k)
 	if err != nil {
-		fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %x, error: %v\n", k, err)
+		fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %x, error: %v\n", *k, err)
 		return err
 	}
 	return nil

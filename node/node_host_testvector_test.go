@@ -1444,8 +1444,8 @@ func ConvertToServiceAccount(saft *ServiceAccountForTest) (*types.ServiceAccount
 
 	// Convert Storage map
 	for k, v := range saft.Storage {
-		keyHash := common.HexToHash(k)
-		sa.Storage[keyHash] = types.StorageObject{Value: v}
+		keyByte := common.Hex2Hash(k)
+		sa.Storage[keyByte] = types.StorageObject{Value: v}
 	}
 
 	// Convert Lookup map
@@ -1477,6 +1477,7 @@ func ConvertToServiceAccountForTest(sa *types.ServiceAccount) *ServiceAccountFor
 
 	// Convert Storage map
 	for k, v := range sa.Storage {
+		// common.Hash to string
 		keyStr := k.Hex()
 		saft.Storage[keyStr] = v.Value
 	}

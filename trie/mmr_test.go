@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"fmt"
 	"github.com/colorfulnotion/jam/common"
 	"testing"
 )
@@ -90,5 +89,4 @@ func TestMMRAppend(t *testing.T) {
 			t.Fatalf("Test4 FAIL")
 		}
 	*/
-	fmt.Printf("SUCCESS\n")
 }

@@ -44,6 +44,10 @@ const (
 )
 
 const (
+	Debug_Service_Storage = false
+)
+
+const (
 	g = 10
 )
 
@@ -620,8 +624,7 @@ func (vm *VM) hostRead() uint64 {
 		vm.WriteRegister(7, OOB)
 		return OOB
 	}
-
-	key := common.Compute_storageKey_internal(s, k)
+	// k for original raw key
 	var a *types.ServiceAccount
 	var ok bool
 	if uint32(w7) == s || w7 == 0xFFFFFFFF {
@@ -633,9 +636,19 @@ func (vm *VM) hostRead() uint64 {
 			return OOB
 		}
 	}
-
 	var val []byte
-	_, val = a.ReadStorage(key, vm.hostenv)
+	/*
+		The `s` of this function is different from the `a.ServiceIndex`
+		We have to check it which one is correct
+		If we use s.ServiceIndex megetron will work, and if we use a.ServiceIndex, it still works
+		So we have to check which one is correct
+		I pass the `s` to the `ReadStorage` function for now, but we have to check it
+	*/
+	if Debug_Service_Storage {
+		fmt.Printf("ServiceAccount.ReadStorage: s=%d a.ServiceIndex=%d\n", s, a.ServiceIndex)
+	}
+	// a.ServiceIndex = s // Stanley: Need to check
+	_, val = a.ReadStorage(s, k, vm.hostenv)
 	l := uint64(len(val))
 	if bz < l {
 		l = bz
@@ -669,7 +682,7 @@ func (vm *VM) hostWrite() uint64 {
 		vm.WriteRegister(7, OOB)
 		return OOB
 	}
-	key := common.Compute_storageKey_internal(s, k)
+
 	// fmt.Printf("hostWrite s=%d, k=%v (%d) => Key: %v (hash(E_4(s)+k))\n", s, k, len(k), key)
 
 	// C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i ) ,
@@ -680,7 +693,20 @@ func (vm *VM) hostWrite() uint64 {
 		if vz > 0 {
 			v, _ = vm.Ram.ReadRAMBytes(uint32(vo), uint32(vz))
 		}
-		xs.WriteStorage(key, v)
+
+		if Debug_Service_Storage {
+			fmt.Printf("ServiceAccount.WriteStorage: s=%d xs.ServiceIndex=%d\n", s, xs.ServiceIndex)
+		}
+
+		/*
+			The `s` of this function is different from the `xs.ServiceIndex`
+			We have to check it which one is correct
+			If we use s.ServiceIndex megetron will work, and if we use a.ServiceIndex, it still works
+			So we have to check which one is correct
+			I pass the `s` to the `WriteStorage` function for now, but we have to check it
+		*/
+		// xs.ServiceIndex = s // Stanley: Need to check, if we set xs.ServiceIndex to s, it will not work
+		xs.WriteStorage(s, k, v)
 		vm.WriteRegister(7, uint64(len(v)))
 		//fmt.Printf("hostwrite: WriteStorage(%d, %v => %v) len(v)=%d Dirty: %v\n", s, key, v, len(v), xs.Dirty)
 		return 0

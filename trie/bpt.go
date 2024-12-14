@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"reflect"
 	"strings"
 
@@ -59,7 +60,8 @@ const (
 	LevelDBNull  = "null"
 	LevelDBEmpty = ""
 
-	debug = false
+	debug    = false
+	debugCDT = false
 )
 
 /*
@@ -106,12 +108,29 @@ func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 	}
 	stateDBStorage, err := storage.NewStateDBStorage(path)
 	//db, err := leveldb.OpenFile(path, nil)
-	fmt.Printf("Initailized levelDB at: %s\n", path)
+	if debug {
+		fmt.Printf("Initialized levelDB at: %s\n", path)
+	}
 	return stateDBStorage, err
 }
 
 func InitLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 	return initLevelDB(optionalPath...)
+}
+
+func DeleteLevelDB(optionalPath ...string) error {
+	path := "/tmp/log/leveldb/bpt"
+	if len(optionalPath) > 0 {
+		path = optionalPath[0]
+	}
+
+	//fmt.Printf("Deleting LevelDB at: %s\n", path)
+	err := os.RemoveAll(path)
+	if err != nil {
+		return fmt.Errorf("failed to delete LevelDB at %s: %v", path, err)
+	}
+	//fmt.Println("LevelDB deleted successfully")
+	return nil
 }
 
 // NewMerkleTree creates a new Merkle Tree from the provided data
@@ -170,12 +189,22 @@ func buildMerkleTree(kvs [][2][]byte, i int) *Node {
 	return &Node{Hash: computeHash(encoded), Left: left, Right: right}
 }
 
+//	func branch(left, right []byte) []byte {
+//		if len(left) != 32 || len(right) != 32 {
+//			panic("branch: input hashes must be 32 bytes")
+//		}
+//		head := left[0] & 0x7f                           // Set the LSB of the first byte of the left hash to 0
+//		left255bits := append([]byte{head}, left[1:]...) // Left: last 255 bits of
+//		concatenated := append(left255bits, right...)    // (l,r): 512 bits
+//		return concatenated
+//	}
+
 // branch concatenates the left and right node hashes with a modified head
 func branch(left, right []byte) []byte {
 	if len(left) != 32 || len(right) != 32 {
 		panic("branch: input hashes must be 32 bytes")
 	}
-	head := left[0] & 0x7f                           // Set the LSB of the first byte of the left hash to 0
+	head := left[0] & 0xfe                           // Set the LSB of the first byte of the left hash to 0
 	left255bits := append([]byte{head}, left[1:]...) // Left: last 255 bits of
 	concatenated := append(left255bits, right...)    // (l,r): 512 bits
 	return concatenated
@@ -185,7 +214,8 @@ func branch(left, right []byte) []byte {
 func leaf(k, v []byte) []byte {
 	// Embedded-value leaf node
 	if len(v) <= 32 {
-		head := byte(0b10000000 | len(v))
+		// head := byte(0b10000000 | len(v))
+		head := byte(0b01 | (len(v) << 2))
 		tmpk := make([]byte, len(k))
 		copy(tmpk, k)
 		if len(tmpk) > 31 {
@@ -197,7 +227,8 @@ func leaf(k, v []byte) []byte {
 		return append([]byte{head}, append(tmpk, value...)...)
 	} else {
 		// Regular leaf node
-		head := byte(0b11000000)
+		// head := byte(0b11000000)
+		head := byte(0b11)
 		tmpk := make([]byte, len(k))
 		copy(tmpk, k)
 		if len(tmpk) > 31 {
@@ -211,6 +242,29 @@ func leaf(k, v []byte) []byte {
 }
 
 // decodeLeaf decodes a leaf node into its key and value/hash
+// func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
+// 	if len(leaf) != 64 {
+// 		return nil, nil, false, fmt.Errorf("invalid leaf length %v", len(leaf))
+// 	}
+
+// 	head := leaf[0]
+// 	key := leaf[1:32]
+
+// 	if head&0b11000000 == 0b10000000 {
+// 		// Embedded-value leaf node
+// 		valueSize := int(head & 0b00111111) // Extract the value size from the lower 6 bits
+// 		value := leaf[32 : 32+valueSize]
+// 		return key, value, true, nil
+// 	} else if head&0b11000000 == 0b11000000 {
+// 		// Regular leaf node
+// 		hash := leaf[32:64]
+// 		return key, hash, false, nil
+// 	} else {
+// 		return nil, nil, false, fmt.Errorf("invalid leaf node header")
+// 	}
+// }
+
+// decodeLeaf decodes a leaf node into its key and value/hash
 func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 	if len(leaf) != 64 {
 		return nil, nil, false, fmt.Errorf("invalid leaf length %v", len(leaf))
@@ -219,12 +273,12 @@ func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 	head := leaf[0]
 	key := leaf[1:32]
 
-	if head&0b11000000 == 0b10000000 {
+	if head&0b11 == 0b01 {
 		// Embedded-value leaf node
-		valueSize := int(head & 0b00111111) // Extract the value size from the lower 6 bits
+		valueSize := int(head >> 2)
 		value := leaf[32 : 32+valueSize]
 		return key, value, true, nil
-	} else if head&0b11000000 == 0b11000000 {
+	} else if head&0b11 == 0b11 {
 		// Regular leaf node
 		hash := leaf[32:64]
 		return key, hash, false, nil
@@ -233,12 +287,23 @@ func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 	}
 }
 
+//	func bit(k []byte, i int) bool {
+//		byteIndex := i / 8 // the byte index in the array where the bit is located
+//		if byteIndex >= len(k) {
+//			return false // return false if index is out of range
+//		}
+//		bitIndex := 7 - (i % 8)       // the bit position within the byte
+//		b := k[byteIndex]             // target byte
+//		mask := byte(1 << (bitIndex)) // least significant bit first
+//		return (b & mask) != 0        // return set (1) or not (0)
+//	}
+
 func bit(k []byte, i int) bool {
 	byteIndex := i / 8 // the byte index in the array where the bit is located
 	if byteIndex >= len(k) {
 		return false // return false if index is out of range
 	}
-	bitIndex := 7 - (i % 8)       // the bit position within the byte
+	bitIndex := i % 8             // the bit position within the byte
 	b := k[byteIndex]             // target byte
 	mask := byte(1 << (bitIndex)) // least significant bit first
 	return (b & mask) != 0        // return set (1) or not (0)
@@ -895,11 +960,13 @@ func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_
 }
 
 // Insert Storage Value into the trie
-func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []byte) {
-	account_storage_key := common.ComputeC_sh(s, k)
+func (t *MerkleTree) SetServiceStorage(s uint32, k *[]byte, storageValue []byte) {
+	storageKey := common.Compute_storageKey_internal_byte(s, *k)
+
+	account_storage_key := common.ComputeC_sh_Byte(s, storageKey)
 	stateKey := account_storage_key.Bytes()
 	if debug {
-		fmt.Printf("SetServiceStorage s = %d, k = %v\n", s, k)
+		fmt.Printf("SetServiceStorage s = %d, hk = %x, k = %x\n", s, storageKey, k)
 		fmt.Printf("SetServiceStorage stateKey=%x, storageValue=%x\n", stateKey, storageValue)
 	}
 
@@ -908,7 +975,7 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 	if err != nil {
 		fmt.Printf("SetServiceStorage Encode Error: %v\n", err)
 	}
-	metaVal := fmt.Sprintf("account_storage|s=%d|k=%s|vlen=%d", s, k, len(storageValue))
+	metaVal := fmt.Sprintf("account_storage|s=%d|hk=%x k=%x|vlen=%d klen=%d", s, storageKey, *k, len(storageValue), len(*k))
 	metaValBytes, err := types.Encode(metaVal)
 	if err != nil {
 		fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)
@@ -917,8 +984,10 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 	t.Insert(stateKey, storageValue)
 }
 
-func (t *MerkleTree) GetServiceStorage(s uint32, k common.Hash) ([]byte, bool, error) {
-	account_storage_key := common.ComputeC_sh(s, k)
+func (t *MerkleTree) GetServiceStorage(s uint32, k *[]byte) ([]byte, bool, error) {
+	storageKey := common.Compute_storageKey_internal_byte(s, *k)
+
+	account_storage_key := common.ComputeC_sh_Byte(s, storageKey)
 	stateKey := account_storage_key.Bytes()
 
 	// Get Storage from trie
@@ -931,8 +1000,9 @@ func (t *MerkleTree) GetServiceStorage(s uint32, k common.Hash) ([]byte, bool, e
 }
 
 // Delete Storage key(hash)
-func (t *MerkleTree) DeleteServiceStorage(s uint32, k common.Hash) error {
-	account_storage_key := common.ComputeC_sh(s, k)
+func (t *MerkleTree) DeleteServiceStorage(s uint32, k *[]byte) error {
+	storageKey := common.Compute_storageKey_internal_byte(s, *k)
+	account_storage_key := common.ComputeC_sh_Byte(s, storageKey)
 	stateKey := account_storage_key.Bytes()
 	err := t.Delete(stateKey)
 	return err

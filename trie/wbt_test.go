@@ -21,7 +21,9 @@ func TestWBMerkleTree(t *testing.T) {
 	}
 	tree := NewWellBalancedTree(values, types.Blake2b)
 	// Print the tree structure
-	tree.PrintTree()
+	if bptDebug {
+		tree.PrintTree()
+	}
 	if tree.Root() == nil {
 		t.Errorf("Root is nil")
 	}
@@ -78,11 +80,11 @@ func TestWBTGet(t *testing.T) {
 	}
 	tree := NewWellBalancedTree(values, types.Keccak)
 
-	fmt.Printf("Root: %s\n", common.Bytes2Hex(tree.Root()))
-	fmt.Printf("Total leaves: %d\n", len(tree.leaves))
-
-	// Print the tree structure
-	tree.PrintTree()
+	if bptDebug {
+		fmt.Printf("Root: %s\n", common.Bytes2Hex(tree.Root()))
+		fmt.Printf("Total leaves: %d\n", len(tree.leaves))
+		tree.PrintTree()
+	}
 
 	// Test Get
 	for i := 0; i <= len(values); i++ {
@@ -90,14 +92,18 @@ func TestWBTGet(t *testing.T) {
 			if i < len(values) {
 				leaf, err := tree.Get(i)
 				if err == nil {
-					fmt.Printf("Get [%d]: %s\n", i, string(leaf))
+					if bptDebug {
+						fmt.Printf("Get [%d]: %s\n", i, string(leaf))
+					}
 				} else {
 					t.Errorf("Get [%d] should be Error: %v\n", i, err)
 				}
 			} else {
 				_, err := tree.Get(i)
 				if err != nil {
-					fmt.Printf("Get [%d]: %v\n", i, err)
+					if bptDebug {
+						fmt.Printf("Get [%d]: %v\n", i, err)
+					}
 				} else {
 					t.Errorf("Get [%d] should be Error: %v\n", i, err)
 				}

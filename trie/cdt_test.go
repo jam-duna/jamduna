@@ -70,8 +70,9 @@ func testJustify(t *testing.T, numSegments int) {
 	leaves := segments
 	// Build Merkle Tree
 	tree := NewCDMerkleTree(leaves)
-	tree.PrintTree()
-
+	if bptDebug {
+		tree.PrintTree()
+	}
 	segmentLen := len(segments)
 	treeLen := tree.Length()
 	t.Logf("Input segments Len: %v (Padded CDT length: %v)\n", segmentLen, treeLen)
@@ -106,7 +107,9 @@ func testVerifyJustifyX(t *testing.T, numSegments int) {
 	leaves := segments
 	// Build Merkle Tree
 	tree := NewCDMerkleTree(leaves)
-	tree.PrintTree()
+	if debugCDT {
+		tree.PrintTree()
+	}
 
 	segmentLen := len(segments)
 	treeLen := tree.Length()
@@ -130,7 +133,9 @@ func testVerifyJustifyX(t *testing.T, numSegments int) {
 	if !compareBytes(computedRoot, expectedRoot) {
 		t.Errorf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
 	} else {
-		t.Logf("Root hash verified: %x\n", computedRoot)
+		if debugCDT {
+			t.Logf("Root hash verified: %x\n", computedRoot)
+		}
 	}
 }
 
@@ -146,7 +151,9 @@ func testCDTGet(t *testing.T, numSegments int) {
 	leaves := segments
 	// Build Merkle Tree
 	tree := NewCDMerkleTree(leaves)
-	tree.PrintTree()
+	if bptDebug {
+		tree.PrintTree()
+	}
 
 	segmentLen := len(segments)
 	treeLen := tree.Length()
@@ -155,7 +162,9 @@ func testCDTGet(t *testing.T, numSegments int) {
 	for i := 0; i < segmentLen; i++ {
 		leaf, err := tree.Get(i)
 		if err == nil {
-			t.Logf("Get %d: %s\n", i, string(leaf))
+			if debugCDT {
+				t.Logf("Get %d: %s\n", i, string(leaf))
+			}
 		} else {
 			t.Errorf("Getting %d but got Error: %v\n", i, err)
 		}
@@ -163,7 +172,9 @@ func testCDTGet(t *testing.T, numSegments int) {
 
 	leaf, err := tree.Get(treeLen)
 	if err != nil {
-		t.Logf("Error: %v\n", err)
+		if debugCDT {
+			t.Logf("Error: %v\n", err)
+		}
 	} else {
 		t.Errorf("Get %d should be Error: %v but got %v\n", treeLen, err, leaf)
 	}
@@ -176,7 +187,9 @@ func testPageProof(t *testing.T, numSegments int) {
 
 	// Initialize segments
 	for _, TestingSegmentsNum := range TestingSegmentsNums {
-		fmt.Printf("-------------------%d-------------------\n", TestingSegmentsNum)
+		if bptDebug {
+			fmt.Printf("-------------------%d-------------------\n", TestingSegmentsNum)
+		}
 		segments = nil
 		for i := 0; i < TestingSegmentsNum+1; i++ {
 			data := []byte(fmt.Sprintf("segment%d", i))
@@ -200,7 +213,9 @@ func testPageProof(t *testing.T, numSegments int) {
 				t.Fatalf("Failed to decode page proof: %v", err)
 			}
 			decodedSegments := decodedData.([][]byte)
-			t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
+			if debugCDT {
+				t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
+			}
 			// Compare decoded segments with original
 			start := i * 64
 			end := start + 64
@@ -229,7 +244,9 @@ func testPageProof(t *testing.T, numSegments int) {
 			if err != nil {
 				t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
 			} else if result {
-				t.Logf("Page %d PageProof Verified\n", i)
+				if debugCDT {
+					t.Logf("Page %d PageProof Verified\n", i)
+				}
 			} else {
 				t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
 			}

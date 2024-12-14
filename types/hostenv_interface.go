@@ -10,9 +10,9 @@ type HostEnv interface {
 	WriteServiceBytes(s uint32, v []byte)
 
 	// ∀(s↦a)∈δ,(h↦v)∈as
-	ReadServiceStorage(s uint32, k common.Hash) []byte
-	WriteServiceStorage(s uint32, k common.Hash, storage []byte)
-	DeleteServiceStorageKey(s uint32, k common.Hash) error
+	ReadServiceStorage(s uint32, rk *[]byte) []byte
+	WriteServiceStorage(s uint32, rk *[]byte, storage []byte)
+	DeleteServiceStorageKey(s uint32, rk *[]byte) error
 
 	// ∀(s ↦ a) ∈ δ, (h ↦ p) ∈ a p ∶
 	ReadServicePreimageBlob(s uint32, blob_hash common.Hash) []byte
