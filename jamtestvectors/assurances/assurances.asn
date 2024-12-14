@@ -9,9 +9,8 @@ IMPORTS
 
 
 State ::= SEQUENCE {
-    -- [ρ†] rho dagger, which is the pending reports (ϱ) after that any
-    -- work report judged as uncertain or invalid has been removed from it.
-    -- On success, mutated to get [ϱ‡].
+    -- [ρ†] Intermediate pending reports after that any work report judged as
+    -- uncertain or invalid has been removed from it. Mutated to ϱ‡.
     avail-assignments AvailabilityAssignments,
 
     -- [κ'] Posterior active validators.
@@ -33,11 +32,11 @@ Input ::= SEQUENCE {
 -- Error codes **are not specified** in the the Graypaper.
 -- Feel free to ignore the actual value.
 ErrorCode ::= ENUMERATED {
-    report-timeout (0),
-    bad-attestation-parent (1),
-    bad-validator-index (2),
-    core-not-engaged (3),
-    bad-signature (4)
+    bad-attestation-parent (0),
+    bad-validator-index (1),
+    core-not-engaged (2),
+    bad-signature (3),
+    not-sorted-or-unique-assurers (4)
 }
 
 OutputData ::= SEQUENCE {

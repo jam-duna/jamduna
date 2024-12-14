@@ -1088,7 +1088,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) error {
 	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
-	s2 := cloneSafroleState(*s)
+	s2 := cloneSafroleState(*s) // CHECK: why cloning here?
 	if currPhase >= types.TicketSubmissionEndSlot && len(tickets) > 0 {
 		return jamerrors.ErrTEpochLotteryOver
 	}
@@ -1112,18 +1112,14 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 			return jamerrors.ErrTBadTicketAttemptNumber
 		}
 		ticket_id, err := s2.ValidateProposedTicket(&t, isShifted)
+		if err != nil {
+			return jamerrors.ErrTBadRingProof
+		}
 		ticketBodies = append(ticketBodies, types.TicketBody{
 			Id:      ticket_id,
 			Attempt: t.Attempt,
 		})
 		for _, a := range s2.NextEpochTicketsAccumulator {
-
-			if err != nil {
-				return jamerrors.ErrTBadRingProof
-			}
-			if err != nil {
-				return fmt.Errorf("Unexpected error: %v", err)
-			}
 			if ticket_id == a.Id {
 				return jamerrors.ErrTTicketAlreadyInState
 			}

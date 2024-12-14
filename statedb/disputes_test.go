@@ -108,7 +108,7 @@ func VerifyDisputes(jsonFile string, exceptErr error) error {
 
 }
 
-func TestDisputesTiny(t *testing.T) {
+func TestVerifyDisputesTiny(t *testing.T) {
 	testCases := []struct {
 		jsonFile    string
 		expectedErr error

@@ -287,7 +287,11 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	// fmt.Printf("retrieved C8 CurrentEpochValidators%v\n", currEpochValidatorsEncode)
 	// fmt.Printf("retrieved C9 PriorEpochValidators%v\n", priorEpochValidatorEncode)
 
+	// HAZARDOUS PROBLEM: WE SHOULD NOT be DEPENDENT ON ANYTHING IN MEMORY ie PriorServiceAccountState
 	d := s.GetJamState() // this will copy PriorServiceAccountState from the previous state. but can be optimized
+
+	d.PriorServiceAccountState = make(map[uint32]types.ServiceAccount)
+
 	d.SetAuthPool(coreAuthPoolEncode)
 	d.SetAuthQueue(authQueueEncode)
 	d.SetRecentBlocks(recentBlocksEncode)

@@ -3,14 +3,11 @@
 We offer two types of test vectors:
 
 - Tiny: These are designed for quick adjustments and prototyping, with reduced validators (6)
-  and cores count (2). They are provided in both JSON format for easy inspection and modification,
-  and in SCALE format, which is the production binary codec.
-
+  and cores count (2).
 - Full: These vectors use production validators (1023) and cores count (341)
-  Similar to the tiny vectors, they are available in JSON and SCALE format.
 
-Both JSON and SCALE formats conform to the JAM types ASN.1 [schema](../jam-types-asn/jam-types.asn)
-and the Assurances test vectors specific [schema](./assurances.asn).
+Both JSON and SCALE formats conform to the JAM ASN.1 [schema](../jam-types-asn/jam-types.asn)
+and this subsystem STF specific [schema](./assurances.asn).
 
 ## STF Output
 
@@ -35,7 +32,7 @@ subsystem.
     of the cores.
 - [no_assurances_with_stale_report-1](tiny/no_assurances_with_stale_report-1.json) 🟢
 	- Progress with an empty assurances extrinsic.
-	- Drops a stale work report assignment.
+	- Stale work report assignment is removed (but not returned in the output).
 - [assurances_with_bad_signature-1](tiny/assurances_with_bad_signature-1.json)🔴
   - One assurance has a bad signature.
 - [assurances_with_bad_validator_index-1](tiny/assurances_with_bad_validator_index-1.json)🔴
@@ -46,6 +43,11 @@ subsystem.
   - One assurance has a bad attestation parent hash.
 - [assurances_for_stale_report-1](tiny/assurances_for_stale_report-1.json)🔴
   - One assurance targets a core with a stale report.
+  - We are lenient on the stale report as far as it is available.
+- [assurers_not_sorted_or_unique-1](tiny/assurers_not_sorted_or_unique-1.json)🔴
+  - Assurers not sorted.
+- [assurers_not_sorted_or_unique-2](tiny/assurers_not_sorted_or_unique-2.json)🔴
+  - Duplicate assurer.
 
 ## Full Vectors
 

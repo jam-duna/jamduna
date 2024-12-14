@@ -258,6 +258,7 @@ func TestReportVerifyTiny(t *testing.T) {
 		bad_beefy_mmr 🔴	reports	ErrGBadBeefyMMRRoot
 		bad_service_id 🔴	reports	ErrGBadServiceID
 		bad_state_root 🔴	reports	ErrGBadStateRoot
+		service_item_gas_too_low 🔴 reports ErrGServiceItemTooLow
 		duplicate_package_in_recent_history 🔴	reports	ErrGDuplicatePackageRecentHistory
 		report_before_last_rotation 🔴	reports	ErrGReportEpochBeforeLast
 		segment_root_lookup_invalid 🔴	reports	ErrGSegmentRootLookupInvalidNotRecentBlocks
@@ -292,6 +293,7 @@ func TestReportVerifyTiny(t *testing.T) {
 		{"segment_root_lookup_invalid-2.json", jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue},
 		{"not_authorized-1.json", jamerrors.ErrGCoreWithoutAuthorizer},
 		{"not_authorized-2.json", jamerrors.ErrGCoreUnexpectedAuthorizer},
+		{"service_item_gas_too_low-1.json", jamerrors.ErrGServiceItemTooLow},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
@@ -337,42 +339,72 @@ func TestReportVerifyTinyStanley(t *testing.T) {
 	}
 }
 
-// func TestReportVerifyTinyStanley(t *testing.T) {
-// 	// run throgh all the json files in the tiny folder
+// These cases should NOT return any errorduring STF check
+func TestReportValidReportCaseTiny(t *testing.T) {
+	/* should cover the following cases
 
-// 	// stanley cover
-// 	/*
-// 		anchor_not_recent 🔴
-// 		bad_beefy_mmr 🔴
-// 		bad_service_id 🔴
-// 		bad_state_root 🔴
-// 		duplicate_package_in_recent_history 🔴
-// 		report_before_last_rotation 🔴
-// 		segment_root_lookup_invalid 🔴
-// 		segment_root_lookup_invalid 🔴
-// 	*/
-// 	testCases := []struct {
-// 		jsonFile string
-// 		except   bool
-// 	}{
-// 		{"anchor_not_recent-1.json", true},
-// 		{"bad_beefy_mmr-1.json", true},
-// 		{"bad_service_id-1.json", true},
-// 		{"bad_state_root-1.json", true},
-// 		{"duplicate_package_in_recent_history-1.json", true},
-// 		{"report_before_last_rotation-1.json", true},
-// 		{"segment_root_lookup_invalid-1.json", true},
-// 		{"segment_root_lookup_invalid-2.json", true},
-// 	}
-// 	for _, tc := range testCases {
-// 		t.Run(tc.jsonFile, func(t *testing.T) {
-// 			err := ReportVerify(tc.jsonFile, true)
-// 			if err == nil {
-// 				t.Fatalf("Expected error, but got none for %s", tc.jsonFile)
-// 			}
+	   report_curr_rotation 🟢
+	   Report uses current guarantors rotation.
 
-// 			fmt.Printf("===Finish %s===\n", tc.jsonFile)
-// 		})
-// 	}
+	   report_prev_rotation 🟢
+	   Report uses previous guarantors rotation.
+	   Previous rotation falls within previous epoch, thus previous epoch validators set is used to construct report core assignment to pick expected guarantors.
 
-// }
+	   multiple_reports 🟢
+	   Multiple good work reports.
+
+	   high_work_report_gas 🟢
+	   Work report per core gas is very high, still less than the limit.
+
+	   many_dependencies 🟢
+	   Work report has many dependencies, still less than the limit.
+
+	   reports_with_dependencies 🟢
+	   Simple report dependency satisfied by another work report in the same extrinsic.
+
+	   reports_with_dependencies 🟢
+	   Work reports mutual dependency (indirect self-referential dependencies).
+
+	   reports_with_dependencies 🟢
+	   Work report direct self-referential dependency.
+
+	   reports_with_dependencies 🟢
+	   Work report dependency satisfied by recent blocks history.
+
+	   reports_with_dependencies 🟢
+	   Work report segments tree root lookup dependency satisfied by another work report in the same extrinsic.
+
+	   reports_with_dependencies 🟢
+	   Work report segments tree root lookup dependency satisfied by recent blocks history.
+
+	   big_work_report_output 🟢
+	   Work report output is very big, still less than the limit.
+	*/
+	testCases := []struct {
+		jsonFile string
+		except   error
+		message  string
+	}{
+		{"report_curr_rotation-1.json", nil, "Report uses current guarantors rotation."},
+		{"report_prev_rotation-1.json", nil, "Report uses previous guarantors rotation. Previous rotation falls within previous epoch, thus previous epoch validators set is used to construct report core assignment to pick expected guarantors."},
+		{"multiple_reports-1.json", nil, "Multiple good work reports."},
+		{"high_work_report_gas-1.json", nil, "Work report per core gas is very high, still less than the limit."},
+		{"many_dependencies-1.json", nil, "Work report has many dependencies, still less than the limit."},
+		{"reports_with_dependencies-1.json", nil, "Simple report dependency satisfied by another work report in the same extrinsic."},
+		{"reports_with_dependencies-2.json", nil, "Work reports mutual dependency (indirect self-referential dependencies)."},
+		{"reports_with_dependencies-3.json", nil, "Work report direct self-referential dependency."},
+		{"reports_with_dependencies-4.json", nil, "Work report dependency satisfied by recent blocks history."},
+		{"reports_with_dependencies-5.json", nil, "Work report segments tree root lookup dependency satisfied by another work report in the same extrinsic."},
+		{"reports_with_dependencies-6.json", nil, "Work report segments tree root lookup dependency satisfied by recent blocks history."},
+		{"big_work_report_output-1.json", nil, "Work report output is very big, still less than the limit."},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.jsonFile, func(t *testing.T) {
+			err := ReportVerify(tc.jsonFile, tc.except)
+			if err != nil {
+				t.Fatalf("\nCASE: %v\n🟢[Expected] %v\n🔴[Actual]   %v\n", tc.jsonFile, tc.message, err)
+			}
+			fmt.Printf("===Finish %s ===\n", tc.jsonFile)
+		})
+	}
+}

@@ -44,21 +44,21 @@ extern "C" fn refine() -> u64 {
 #[polkavm_derive::polkavm_export]
 extern "C" fn accumulate() -> u64 {
     let mut omega_7: u64 = 0xFEFF0000; // CHECK
-    let omega_8: u64 = unsafe { *(0xFEFF0020 as *const u32) }; // CHECK
+    let omega_8: u64 = unsafe { ( *(0xFEFF0020 as *const u64)).into() }; // get code length
     let omega_9: u64 = 100;  // g -  the minimum gas required in order to execute the Accumulate entry-point of the service's code
     let omega_10: u64 = 100; // m -  the minimum required for the On Transfer entry-point
     // new: create service host call
     let result = unsafe { new(omega_7, omega_8, omega_9, omega_10) };
     unsafe {
-        let ptr1 = 0xFEFDE000 as *mut u32; // 2^32 − 2*ZZ − ZI − P (s) (Writable address)
+        let ptr1 = 0xFEFDE000 as *mut u64; // 2^32 − 2*ZZ − ZI − P (s) (Writable address)
         *ptr1 = 0;
 
-        let ptr2 = 0xFEFDE004 as *mut u32; // 2^32 − 2*ZZ − ZI − P (s) + 4 (Writable address)
+        let ptr2 = 0xFEFDE004 as *mut u64; // 2^32 − 2*ZZ − ZI − P (s) + 4 (Writable address)
         *ptr2 = result;
     }
-    let mut omega_7: u64 = 0xFEFDE000; // 2^32 − 2*ZZ − ZI − P (s) (Writable address)
+    let mut omega_7: u64 = 0xFEFDE000; // 2^32 − 2*ZZ − ZI − P (s) (Writable address), storage key {0,0,0,0}
     let omega_8: u64 = 4;
-    let omega_9: u64 = 0xFEFDE004; // 2^32 − 2*ZZ − ZI − P (s) + 4 (Writable address)
+    let omega_9: u64 = 0xFEFDE004; // 2^32 − 2*ZZ − ZI − P (s) + 4 (Writable address), new service index u32
     let omega_10: u64 = 4;
     // write: create service host call
     let result = unsafe { write(omega_7, omega_8, omega_9, omega_10) };

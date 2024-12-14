@@ -66,7 +66,7 @@ func (s *StateDB) Verify_Guarantees() error {
 		// v0.5 eq 11.38
 		err := s.checkPrereq(guarantee, s.Block.Extrinsic.Guarantees)
 		if err != nil {
-			return jamerrors.ErrGDependencyMissing
+			return err // INSTEAD of jamerrors.ErrGDependencyMissing
 		}
 	}
 
@@ -92,7 +92,7 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	// v0.5 eq 11.24 - check index
 	err := CheckSorting_EG(guarantee)
 	if err != nil {
-		return jamerrors.ErrGDuplicateGuarantors
+		return err // CHECK: instead of jamerrors.ErrGDuplicateGuarantors
 	}
 
 	// v0.5 eq 11.25 - check signature, core assign check,C_v ...
@@ -106,7 +106,7 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	err = s.AreValidatorsAssignedToCore_MakeBlock(guarantee)
 	if err != nil {
 		fmt.Printf("Verify_Guarantee error MakeBlock: %v\n", err)
-		return jamerrors.ErrGWrongAssignment
+		return err // CHECK: instead of jamerrors.ErrGWrongAssignment
 	}
 	j := s.JamState
 	// v0.5 eq 11.28
@@ -120,7 +120,7 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	// v.05 eq 11.29 - check gas
 	err = s.checkGas(guarantee)
 	if err != nil {
-		return jamerrors.ErrGWorkReportGasTooHigh
+		return err // CHECK: instead of jamerrors.ErrGWorkReportGasTooHigh
 	}
 
 	// v0.5 eq 11.33
@@ -367,20 +367,20 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 					break
 				}
 			}
-			if !find_and_correct {
-				fmt.Printf("%s\n", guarantee.String())
-				if debugG {
-					fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
-				}
-				for _, assignment := range s.GuarantorAssignments {
-					if assignment.CoreIndex == guarantee.Report.CoreIndex {
-						fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
-					}
-				}
-				return jamerrors.ErrGWrongAssignment
-			}
 		}
-
+		// REVIEW
+		if !find_and_correct {
+			fmt.Printf("%s\n", guarantee.String())
+			if debugG {
+				fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
+			}
+			for _, assignment := range s.GuarantorAssignments {
+				if assignment.CoreIndex == guarantee.Report.CoreIndex {
+					fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
+				}
+			}
+			return jamerrors.ErrGWrongAssignment
+		}
 	}
 	return nil
 }
@@ -403,6 +403,15 @@ func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
 					find_and_correct = true
 					break
+				}
+			}
+			// QUERY for Shawn: shouldn't we also do this  -- pls explain
+			if false {
+				for i, assignment := range s.GuarantorAssignments {
+					if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
+						find_and_correct = true
+						break
+					}
 				}
 			}
 			if !find_and_correct {
@@ -488,15 +497,12 @@ func (j *JamState) CheckReportTimeOut(g types.Guarantee, ts uint32) error {
 	if j.AvailabilityAssignments[int(g.Report.CoreIndex)] == nil {
 		return nil
 	}
-
 	timeoutbool := ts >= (j.AvailabilityAssignments[int(g.Report.CoreIndex)].Timeslot)+uint32(types.UnavailableWorkReplacementPeriod)
 	if timeoutbool {
 		return nil
-	}
-	if j.AvailabilityAssignments[int(g.Report.CoreIndex)] != nil {
+	} else {
 		return jamerrors.ErrGCoreEngaged
 	}
-	return fmt.Errorf("CheckReportTimeOut: invalid pending report on core %v, package hash:%v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 }
 
 // v0.5 eq 11.28
@@ -548,14 +554,14 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	}
 	// current gas allocation is unlimited
 	if sum_rg <= types.AccumulationGasAllocation {
-
 		for _, results := range g.Report.Results {
 			serviceID := results.ServiceID
 			if _, exists := s.JamState.PriorServiceAccountState[serviceID]; exists {
 				gas_limitG := s.JamState.PriorServiceAccountState[serviceID].GasLimitG
-
 				if results.Gas >= gas_limitG {
 					return nil
+				} else {
+					return jamerrors.ErrGServiceItemTooLow
 				}
 			} else if s.trie == nil {
 				return jamerrors.ErrGBadServiceID
@@ -579,7 +585,7 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 			if results.Gas >= gas_limitG {
 				return nil
 			} else {
-				fmt.Printf("gas limit %d\n", gas_limitG)
+				return jamerrors.ErrGServiceItemTooLow
 			}
 		}
 	}
@@ -679,9 +685,6 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 
 // v0.5 eq 11.33
 func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
-	if s.Block == nil {
-		return fmt.Errorf("invalid lookup anchor slot: block is nil")
-	}
 	var valid_anchor uint32
 	valid_anchor = s.Block.TimeSlot() - types.LookupAnchorMaxAge
 	if types.LookupAnchorMaxAge > s.Block.TimeSlot() {
@@ -717,6 +720,7 @@ func (s *StateDB) checkAncestorSetA(g types.Guarantee) error {
 	if !includeTimeSlot {
 		fmt.Printf("[N%d] timeslot %d not in ancestor set %d\n", s.Id, timeslot, storeTimeSlot)
 		fmt.Printf("Ancestor Set didn't include the current timeslot\n")
+		// TODO: REVIEW Non-standard error
 		return fmt.Errorf("ancestor set didn't include the current timeslot")
 	}
 
@@ -741,6 +745,7 @@ func (s *StateDB) checkAncestorSetA(g types.Guarantee) error {
 		if !includeWorkPackageHash {
 			fmt.Printf("work package hash %v not in ancestor set %v\n", currentWorkPackage, storeWorkPackageHash)
 			fmt.Printf("Ancestor Set didn't include the current work package hash\n")
+			// TODO: REVIEW non-standard error
 			return fmt.Errorf("ancestor set didn't include the current work package hash")
 		}
 	}
@@ -784,6 +789,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	// }
 	workPackageHash := g.Report.AvailabilitySpec.WorkPackageHash
 	if workPackageHash == (common.Hash{}) {
+		// TODO: REVIEW non-standard error
 		return fmt.Errorf("invalid work package hash")
 	}
 	// _, exists := prereqSetFromQueue[workPackageHash]
@@ -809,6 +815,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	}
 	_, exists := prereqSetFromAccumulationHistory[workPackageHash]
 	if exists {
+		// TODO: REVIEW non-standard error
 		return fmt.Errorf("invalid prerequisite work package(from accumulation history), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
 
@@ -821,6 +828,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	}
 	_, exists = readyWorkPackagesHashMap[workPackageHash]
 	if exists {
+		// TODO: REVIEW non-standard error
 		return fmt.Errorf("invalid prerequisite work package(from ready work package), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
 
@@ -831,6 +839,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	}
 	_, exists = prereqSetFromRho[workPackageHash]
 	if exists {
+		// TODO: REVIEW non-standard error
 		return fmt.Errorf("invalid prerequisite work package(from rho), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
 	return nil

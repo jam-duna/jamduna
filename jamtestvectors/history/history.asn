@@ -1,59 +1,33 @@
--- Syntax for Blocks History STF test vectors
+-- Recent blocks history STF test vectors schema
 
 HistoryModule DEFINITIONS ::= BEGIN
 
--- Define constants
-IMPORTS core-count FROM Constants;
+IMPORTS
+    OpaqueHash, ReportedWorkPackage, BlocksHistory, HeaderHash, StateRoot
+        FROM JamTypes;
 
--- Define basic types
-Hash ::= OCTET STRING(SIZE(32))
-
-MmrPeak ::= CHOICE {
-    none [0] NULL,
-    some [1] Hash
-}
-
-Mmr ::= SEQUENCE {
-    peaks  SEQUENCE OF MmrPeak
-}
-
-Reports ::= SEQUENCE OF Hash
-
--- Recorded disputes sequences and offenders
-BlockInfo ::= SEQUENCE {
-    header-hash    Hash,
-    mmr            Mmr,
-    state-root     Hash,
-    reported       Reports
-}
-
--- State relevant to History STF
 State ::= SEQUENCE {
-    -- Blocks history
-    beta     SEQUENCE OF BlockInfo
+    -- [β] Prior recent blocks history. Mutated to ϐ'.
+    beta BlocksHistory
 }
 
--- Input for History STF.
 Input ::= SEQUENCE {
-    -- Current block's header hash
-    header-hash          Hash,
-    parent-state-root    Hash,
-    accumulate-root      Hash,
-    work-packages        Reports
+    -- [Hash(H)] Header hash
+    header-hash HeaderHash,
+    -- [H_r] Parent state root
+    parent-state-root StateRoot,
+    -- [r] Accumulation result Merkle tree root
+    accumulate-root OpaqueHash,
+    -- [(((g_w)_s)_h, ((g_w)_s)_e) | g ∈ E_G] Sequence of reported work packages
+    work-packages SEQUENCE OF ReportedWorkPackage
 }
 
--- Output from History STF
 Output ::= NULL
 
--- History STF execution dump
 TestCase ::= SEQUENCE {
-    -- Input.
-    input Input,
-    -- Pre-execution state.
-    pre-state State,
-    -- Output.
-    output Output,
-    -- Post-execution state.
+    input      Input,
+    pre-state  State,
+    output     Output,
     post-state State
 }
 

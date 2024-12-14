@@ -8,65 +8,92 @@ import (
 )
 
 /*
-type Ticket struct {
-  Attempt   uint8                     `json:"attempt"`
-  Signature BandersnatchRingSignature `json:"signature"`
-}
-*/
-// safrole fuzzers
-func randomTicket(block *types.Block) *types.Ticket {
-	return &(block.Extrinsic.Tickets[rand.Intn(len(block.Extrinsic.Tickets))])
-}
+TODO: Sourabh
 
-// Sourabh
-func fuzzBlockTBadTicketAttemptNumber(block *types.Block) error {
-	// TODO: Implement fuzzing logic for TBadTicketAttemptNumber
-	t := randomTicket(block)
-	if t != nil {
-		t.Attempt = types.TicketEntriesPerValidator + uint8(rand.Intn(100))
-		return jamerrors.ErrTBadTicketAttemptNumber
+	fuzzBlockTTicketAlreadyInState
+	fuzzBlockTEpochLotteryOver
+	fuzzBlockTTimeslotNotMonotonic
+
+	type Ticket struct {
+	  Attempt   uint8                     `json:"attempt"`
+	  Signature BandersnatchRingSignature `json:"signature"`
 	}
-	return nil
+*/
+func randomTicket(block *types.Block) (*types.Ticket, int) {
+	idx := rand.Intn(len(block.Extrinsic.Tickets))
+	return &(block.Extrinsic.Tickets[idx]), idx
 }
 
-// Sean
-func fuzzBlockTTicketAlreadyInState(block *types.Block, statedb *statedb.StateDB) error {
-	// TODO: Implement fuzzing logic for TTicketAlreadyInState - find a ticket in the state and add that to the block
+// Submit an extrinsic with a bad ticket attempt number.
+func fuzzBlockTBadTicketAttemptNumber(block *types.Block) error {
+
+	t, _ := randomTicket(block)
+	if t == nil {
+		return nil
+	}
+	t.Attempt = types.TicketEntriesPerValidator + uint8(rand.Intn(100))
+	return jamerrors.ErrTBadTicketAttemptNumber
+}
+
+// Submit one ticket already recorded in the state.
+func fuzzBlockTTicketAlreadyInState(block *types.Block, s *statedb.StateDB) error {
+	t, idx := randomTicket(block)
+	if t == nil {
+		return nil
+	}
+	sf := s.JamState.SafroleState
+	if len(sf.NextEpochTicketsAccumulator) == 0 {
+		return nil
+	}
+	// take a random ticket t2 in the accumulator with a specific index idx2
+	idx2 := rand.Intn(len(sf.NextEpochTicketsAccumulator))
+	if idx2 == idx {
+		return nil
+	}
+	// TODO: Sourabh fix TicketBody <> Ticket mismatch
+	// block.Extrinsic.Tickets[idx] = sf.NextEpochTicketsAccumulator[idx2]
 	return jamerrors.ErrTTicketAlreadyInState
 }
 
-// Sourabh
+// Submit tickets in bad order.
 func fuzzBlockTTicketsBadOrder(block *types.Block) error {
 	if len(block.Extrinsic.Tickets) < 2 {
 		return nil
 	}
 	// Reverse the order of tickets
-	for i, j := 0, len(block.Extrinsic.Tickets)-1; i < j; i, j = i+1, j-1 {
-		block.Extrinsic.Tickets[i], block.Extrinsic.Tickets[j] = block.Extrinsic.Tickets[j], block.Extrinsic.Tickets[i]
-	}
-	return nil
+	i := rand.Intn(len(block.Extrinsic.Tickets))
+	j := (i + 1) % len(block.Extrinsic.Tickets)
+	block.Extrinsic.Tickets[i], block.Extrinsic.Tickets[j] = block.Extrinsic.Tickets[j], block.Extrinsic.Tickets[i]
+	return jamerrors.ErrTTicketsBadOrder
 }
 
-// Sourabh
+// Submit tickets with bad ring proof.
 func fuzzBlockTBadRingProof(block *types.Block) error {
-	t := randomTicket(block)
-	if t != nil {
-		// TOD
-		b := rand.Intn(len(t.Signature))
-		t.Signature[b] = t.Signature[b] ^ 0xFF
-		return jamerrors.ErrTBadRingProof
+	t, _ := randomTicket(block)
+	if t == nil {
+		return nil
 	}
-	return nil
+	b := rand.Intn(len(t.Signature))
+	t.Signature[b] = t.Signature[b] ^ 0xFF
+	return jamerrors.ErrTBadRingProof
 }
 
-// Sean
-func fuzzBlockTEpochLotteryOver(block *types.Block) error {
-	// TODO: Implement fuzzing logic for TEpochLotteryOver -- advance the slot of the block past the ticket contest period
-	return nil
+// Submit tickets when epoch's lottery is over.
+func fuzzBlockTEpochLotteryOver(block *types.Block, s *statedb.StateDB) error {
+	t, _ := randomTicket(block)
+	if t == nil {
+		return nil
+	}
+	_, currPhase := s.JamState.SafroleState.EpochAndPhase(block.Header.Slot)
+	altPhase := uint32(types.TicketSubmissionEndSlot)
+
+	// advance the slot of the block past the ticket contest period
+	block.Header.Slot += (altPhase - currPhase) * types.SecondsPerEpoch
+	return jamerrors.ErrTEpochLotteryOver
 }
 
-// Sean
+// Progress from slot X to slot X. Timeslot must be strictly monotonic.
 func fuzzBlockTTimeslotNotMonotonic(block *types.Block) error {
-	// TODO: Implement fuzzing logic for TTimeslotNotMonotonic -- take the block timeslot and make it the one before
+	block.Header.Slot -= uint32(types.SecondsPerEpoch) * uint32(1+rand.Intn(10))
 	return nil
 }

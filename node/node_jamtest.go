@@ -267,9 +267,9 @@ func ImportBlocks(config *types.ConfigJamBlocks) {
 		safrole(false)
 	case "safrole":
 		safrole(true)
-	case "fib":
+	case "assurances":
 		jamtest("fib")
-	case "megatron":
+	case "orderedaccumulation":
 		jamtest("megatron")
 	}
 }

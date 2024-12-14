@@ -1,57 +1,62 @@
 package main
 
 import (
-	"errors"
+	//"errors"
 	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
 // Error map for each mode
 var ErrorMap = map[string][]error{
 	"safrole": {
-		jamerrors.ErrTBadTicketAttemptNumber, // Sourabh
-		jamerrors.ErrTTicketAlreadyInState,   // Sean
-		jamerrors.ErrTTicketsBadOrder,        // Sourabh
-		jamerrors.ErrTBadRingProof,           // Sourabh
-		jamerrors.ErrTEpochLotteryOver,       // Sean
-		jamerrors.ErrTTimeslotNotMonotonic,   // Sean
+		jamerrors.ErrTBadTicketAttemptNumber,
+		jamerrors.ErrTTicketAlreadyInState,
+		jamerrors.ErrTTicketsBadOrder,
+		jamerrors.ErrTBadRingProof,
+		jamerrors.ErrTEpochLotteryOver,
+		jamerrors.ErrTTimeslotNotMonotonic,
 	},
 	"reports": {
-		jamerrors.ErrGBadCodeHash,                // Sean
-		jamerrors.ErrGBadCoreIndex,               // Sourabh
-		jamerrors.ErrGBadSignature,               // Sourabh
-		jamerrors.ErrGCoreEngaged,                // Sean
-		jamerrors.ErrGDependencyMissing,          // Sean
-		jamerrors.ErrGDuplicatePackageTwoReports, // Sean
-		jamerrors.ErrGFutureReportSlot,           // Sean
-		jamerrors.ErrGInsufficientGuarantees,     // Sourabh
-		jamerrors.ErrGDuplicateGuarantors,        // Sourabh
-		jamerrors.ErrGOutOfOrderGuarantee,        // Sourabh
-		jamerrors.ErrGWorkReportGasTooHigh,       // Sean
-		jamerrors.ErrGBadValidatorIndex,          // Sourabh
-		jamerrors.ErrGWrongAssignment,            // Sean
-		jamerrors.ErrGAnchorNotRecent,
-		jamerrors.ErrGBadBeefyMMRRoot,
-		jamerrors.ErrGBadServiceID, // Sourabh
-		jamerrors.ErrGBadStateRoot,
-		jamerrors.ErrGReportEpochBeforeLast, // Sean
-		jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks,
-		jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue,
-		jamerrors.ErrGCoreWithoutAuthorizer,
-		jamerrors.ErrGCoreUnexpectedAuthorizer},
-	"assurances": {jamerrors.ErrABadSignature, // Sourabh
-		jamerrors.ErrABadValidatorIndex, // Sourabh
-		jamerrors.ErrABadCore,           // Sourabh
-		jamerrors.ErrABadParentHash,     // Sourabh
-		jamerrors.ErrAStaleReport,       // Sean
+		jamerrors.ErrGBadCodeHash,
+		jamerrors.ErrGBadCoreIndex,
+		jamerrors.ErrGBadSignature,
+		jamerrors.ErrGCoreEngaged,
+		jamerrors.ErrGDependencyMissing, // Michael
+		jamerrors.ErrGDuplicatePackageTwoReports,
+		jamerrors.ErrGFutureReportSlot,
+		jamerrors.ErrGInsufficientGuarantees,
+		jamerrors.ErrGDuplicateGuarantors,
+		jamerrors.ErrGOutOfOrderGuarantee,
+		jamerrors.ErrGWorkReportGasTooHigh, // Michael
+		jamerrors.ErrGServiceItemTooLow,    // Michael
+		jamerrors.ErrGBadValidatorIndex,
+		jamerrors.ErrGBadValidatorIndex,
+		jamerrors.ErrGWrongAssignment,
+		jamerrors.ErrGAnchorNotRecent, // Michael
+		jamerrors.ErrGBadBeefyMMRRoot, // Michael
+		jamerrors.ErrGBadServiceID,
+		jamerrors.ErrGBadStateRoot,                            // Michael
+		jamerrors.ErrGReportEpochBeforeLast,                   // Michael
+		jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks, // Michael
+		jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue, // Michael
+		jamerrors.ErrGCoreWithoutAuthorizer,                   // Michael
+		jamerrors.ErrGCoreUnexpectedAuthorizer,                // Michael
+	},
+	"assurances": {jamerrors.ErrABadSignature,
+		jamerrors.ErrABadValidatorIndex,
+		jamerrors.ErrABadCore,
+		jamerrors.ErrABadParentHash,
+		jamerrors.ErrAStaleReport, // Michael
 	},
 	"disputes": {
 		jamerrors.ErrDNotSortedWorkReports,
@@ -74,48 +79,21 @@ var ErrorMap = map[string][]error{
 		jamerrors.ErrDAgeTooOldInVerdicts},
 }
 
-func selectImportBlocksError(modes []string, block *types.Block, statedb *statedb.StateDB) error {
-	var aggregatedErrors []error
-
-	for _, mode := range modes {
-		if mode == "safrole" && len(block.Extrinsic.Tickets) == 0 {
-			continue
-		}
-		if mode == "reports" && len(block.Extrinsic.Guarantees) == 0 {
-			continue
-		}
-		if mode == "assurances" && len(block.Extrinsic.Assurances) == 0 {
-			continue
-		}
-		if mode == "preimages" && len(block.Extrinsic.Preimages) == 0 {
-			continue
-		}
-		// TODO: add disputes filter
-		if errorsForMode, exists := ErrorMap[mode]; exists {
-			aggregatedErrors = append(aggregatedErrors, errorsForMode...)
-		}
-	}
-
-	if len(aggregatedErrors) == 0 {
-		return nil
-	}
-
-	rand.Seed(time.Now().UnixNano())
-	selectedError := aggregatedErrors[rand.Intn(len(aggregatedErrors))]
-
+func possibleError(selectedError error, block *types.Block, s *statedb.StateDB) error {
 	// Dispatch to the appropriate fuzzBlock function based on the selected error
 	switch selectedError {
+
 	// safrole errors
 	case jamerrors.ErrTBadTicketAttemptNumber:
 		return fuzzBlockTBadTicketAttemptNumber(block)
 	case jamerrors.ErrTTicketAlreadyInState:
-		return fuzzBlockTTicketAlreadyInState(block, statedb)
+		return fuzzBlockTTicketAlreadyInState(block, s)
 	case jamerrors.ErrTTicketsBadOrder:
 		return fuzzBlockTTicketsBadOrder(block)
 	case jamerrors.ErrTBadRingProof:
 		return fuzzBlockTBadRingProof(block)
 	case jamerrors.ErrTEpochLotteryOver:
-		return fuzzBlockTEpochLotteryOver(block)
+		return fuzzBlockTEpochLotteryOver(block, s)
 	case jamerrors.ErrTTimeslotNotMonotonic:
 		return fuzzBlockTTimeslotNotMonotonic(block)
 
@@ -127,13 +105,13 @@ func selectImportBlocksError(modes []string, block *types.Block, statedb *stated
 	case jamerrors.ErrGBadSignature:
 		return fuzzBlockGBadSignature(block)
 	case jamerrors.ErrGCoreEngaged:
-		return fuzzBlockGCoreEngaged(block)
+		return fuzzBlockGCoreEngaged(block, s)
 	case jamerrors.ErrGDependencyMissing:
-		return fuzzBlockGDependencyMissing(block)
+		return fuzzBlockGDependencyMissing(block, s)
 	case jamerrors.ErrGDuplicatePackageTwoReports:
-		return fuzzBlockGDuplicatePackageTwoReports(block, statedb)
+		return fuzzBlockGDuplicatePackageTwoReports(block, s)
 	case jamerrors.ErrGFutureReportSlot:
-		return fuzzBlockGFutureReportSlot(block, statedb)
+		return fuzzBlockGFutureReportSlot(block)
 	case jamerrors.ErrGInsufficientGuarantees:
 		return fuzzBlockGInsufficientGuarantees(block)
 	case jamerrors.ErrGDuplicateGuarantors:
@@ -142,30 +120,32 @@ func selectImportBlocksError(modes []string, block *types.Block, statedb *stated
 		return fuzzBlockGOutOfOrderGuarantee(block)
 	case jamerrors.ErrGWorkReportGasTooHigh:
 		return fuzzBlockGWorkReportGasTooHigh(block)
+	case jamerrors.ErrGServiceItemTooLow:
+		return fuzzBlockGServiceItemTooLow(block, s)
 	case jamerrors.ErrGBadValidatorIndex:
 		return fuzzBlockGBadValidatorIndex(block)
 	case jamerrors.ErrGWrongAssignment:
-		return fuzzBlockGWrongAssignment(block)
+		return fuzzBlockGWrongAssignment(block, s)
 	case jamerrors.ErrGAnchorNotRecent:
-		return fuzzBlockGAnchorNotRecent(block)
+		return fuzzBlockGAnchorNotRecent(block, s)
 	case jamerrors.ErrGBadBeefyMMRRoot:
-		return fuzzBlockGBadBeefyMMRRoot(block)
+		return fuzzBlockGBadBeefyMMRRoot(block, s)
 	case jamerrors.ErrGBadServiceID:
-		return fuzzBlockGBadServiceID(block, statedb)
+		return fuzzBlockGBadServiceID(block, s)
 	case jamerrors.ErrGBadStateRoot:
-		return fuzzBlockGBadStateRoot(block, statedb)
-	case jamerrors.ErrGBadStateRoot:
-		return fuzzBlockGDuplicatePackageRecentHistory(statedb)
+		return fuzzBlockGBadStateRoot(block, s)
+	case jamerrors.ErrGReportEpochBeforeLast:
+		return fuzzBlockGReportEpochBeforeLast(block, s)
 	case jamerrors.ErrGDuplicatePackageRecentHistory:
-		return fuzzBlockGReportEpochBeforeLast(block, statedb)
+		return fuzzBlockGDuplicatePackageRecentHistory(block, s)
 	case jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks:
 		return fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks(block)
 	case jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue:
 		return fuzzBlockGSegmentRootLookupInvalidUnexpectedValue(block)
 	case jamerrors.ErrGCoreWithoutAuthorizer:
-		return fuzzBlockGCoreWithoutAuthorizer(block, statedb)
+		return fuzzBlockGCoreWithoutAuthorizer(block, s)
 	case jamerrors.ErrGCoreUnexpectedAuthorizer:
-		return fuzzBlockGCoreUnexpectedAuthorizer(block, statedb)
+		return fuzzBlockGCoreUnexpectedAuthorizer(block, s)
 
 	// assurances errors
 	case jamerrors.ErrABadSignature:
@@ -177,7 +157,7 @@ func selectImportBlocksError(modes []string, block *types.Block, statedb *stated
 	case jamerrors.ErrABadParentHash:
 		return fuzzBlockABadParentHash(block)
 	case jamerrors.ErrAStaleReport:
-		return fuzzBlockAStaleReport(block)
+		return fuzzBlockAStaleReport(block, s)
 
 	// disputes errors
 	case jamerrors.ErrDNotSortedWorkReports:
@@ -218,8 +198,72 @@ func selectImportBlocksError(modes []string, block *types.Block, statedb *stated
 		return fuzzBlockDAgeTooOldInVerdicts(block)
 
 	default:
-		return errors.New("unhandled error type")
+		return nil
 	}
+}
+
+func selectImportBlocksError(modes []string, stf *statedb.StateTransition) error {
+	var aggregatedErrors []error
+	block := stf.Block
+	stdb, err := storage.NewStateDBStorage("/tmp/testImportBlocksError")
+	if err != nil {
+		return err
+	}
+	sdb, err := statedb.NewStateDBFromSnapshotRaw(stdb, &stf.PreState)
+	if err != nil {
+		return err
+	}
+	for _, mode := range modes {
+		if mode == "safrole" && len(block.Extrinsic.Tickets) == 0 {
+			continue
+		}
+		if mode == "reports" && len(block.Extrinsic.Guarantees) == 0 {
+			continue
+		}
+		if mode == "assurances" && len(block.Extrinsic.Assurances) == 0 {
+			continue
+		}
+		if mode == "preimages" && len(block.Extrinsic.Preimages) == 0 {
+			continue
+		}
+		// TODO: add disputes filter
+		if errorsForMode, exists := ErrorMap[mode]; exists {
+			aggregatedErrors = append(aggregatedErrors, errorsForMode...)
+		}
+	}
+
+	if len(aggregatedErrors) == 0 {
+		return nil
+	}
+	errorList := make([]error, 0)
+	for _, selectedError := range aggregatedErrors {
+		blockCopy := block.Copy()
+		statedbCopy := sdb.Copy()
+		err := possibleError(selectedError, blockCopy, statedbCopy)
+		if err == nil {
+
+		} else {
+			stfMutated := statedb.StateTransition{
+				PreState:  stf.PreState,
+				Block:     *blockCopy,
+				PostState: stf.PreState,
+			}
+			// need ancestorSet, accumulationRoot
+			errActual := statedb.CheckStateTransition(stdb, &stfMutated, nil, common.Hash{})
+			if errActual == err {
+				fmt.Printf("Error %v is expected", err)
+				errorList = append(errorList, err)
+			} else {
+				fmt.Printf("Error %v is not expected", jamerrors.GetErrorStr(err))
+			}
+		}
+	}
+	// pick a random error based on our success
+	if len(errorList) > 0 {
+		rand.Seed(time.Now().UnixNano())
+		return errorList[rand.Intn(len(errorList))]
+	}
+	return nil
 }
 
 func validateConfig(config types.ConfigJamBlocks) {

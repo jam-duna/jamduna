@@ -93,7 +93,7 @@ assurance_with_bad_attestation_parent-1🔴		ErrABadParentHash
 assurances_for_stale_report-1🔴		ErrAStaleReport
 */
 
-func TestVerifyAssurance(t *testing.T) {
+func TestVerifyAssuranceTiny(t *testing.T) {
 	testCase := []struct {
 		jsonFile  string
 		exceptErr error

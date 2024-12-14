@@ -5,113 +5,110 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// disputes fuzzBlocks
-
-// Sourabh
+// Not sorted work reports within a verdict
 func fuzzBlockDNotSortedWorkReports(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DNotSortedWorkReports
-
+	// TODO: Sourabh
 	return jamerrors.ErrDNotSortedWorkReports
 }
 
-// Shawn
+// Not unique votes within a verdict
 func fuzzBlockDNotUniqueVotes(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DNotUniqueVotes
+	// TODO: Michael
 	return nil
 }
 
-// Sourabh
+// Not sorted, valid verdicts
 func fuzzBlockDNotSortedValidVerdicts(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DNotSortedValidVerdicts
+	// TODO: Sourabh
 	return nil
 }
 
-// Shawn
+// Not homogeneous judgements, but positive votes count is not correct
 func fuzzBlockDNotHomogenousJudgements(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DNotHomogenousJudgements
+	// TODO: Michael
 	return nil
 }
 
-// Sourabh
+// Missing culprits for bad verdict
 func fuzzBlockDMissingCulpritsBadVerdict(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DMissingCulpritsBadVerdict
+	// TODO: Sourabh
 	return nil
 }
 
-// Shawn
+// Single culprit for bad verdict
 func fuzzBlockDSingleCulpritBadVerdict(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DSingleCulpritBadVerdict
+	// TODO: Michael
 	return nil
 }
 
-// Sourabh
+// Two culprits for bad verdict, not sorted
 func fuzzBlockDTwoCulpritsBadVerdictNotSorted(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DTwoCulpritsBadVerdictNotSorted
+	// TODO: Sourabh
 	return nil
 }
 
-// Shawn
+// Report an already recorded verdict, with culprits
 func fuzzBlockDAlreadyRecordedVerdict(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DAlreadyRecordedVerdict
+	// TODO: Michael
 	return nil
 }
 
-// Shawn
+// Culprit offender already in the offenders list
 func fuzzBlockDCulpritAlreadyInOffenders(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DCulpritAlreadyInOffenders
+	// TODO: Michael
 	return nil
 }
 
-// Shawn
+// Offender relative to a not present verdict
 func fuzzBlockDOffenderNotPresentVerdict(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DOffenderNotPresentVerdict
+	// TODO: Michael
 	return nil
 }
 
-// Sourabh
+// Missing faults for good verdict
 func fuzzBlockDMissingFaultsGoodVerdict(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DMissingFaultsGoodVerdict
+	// TODO: Sourabh
 	return nil
 }
 
-// Michael
+// Two fault offenders for a good verdict, not sorted
 func fuzzBlockDTwoFaultOffendersGoodVerdict(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DTwoFaultOffendersGoodVerdict
+	// TODO: Sourabh
 	return nil
 }
 
-// Shawn
+// Report an already recorded verdict, with faults
 func fuzzBlockDAlreadyRecordedVerdictWithFaults(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DAlreadyRecordedVerdictWithFaults
+	// TODO: Michael
 	return nil
 }
 
-// Michael
+// Fault offender already in the offenders list
 func fuzzBlockDFaultOffenderInOffendersList(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DFaultOffenderInOffendersList
+	// TODO: Michael
 	return nil
 }
 
-// Shawn
+// Auditor marked as offender, but vote matches the verdict.
 func fuzzBlockDAuditorMarkedOffender(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DAuditorMarkedOffender
+	// TODO: Michael
 	return nil
 }
 
-// Sourabh
+// Bad signature within the verdict judgements
 func fuzzBlockDBadSignatureInVerdict(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DBadSignatureInVerdict
+	// TODO: Sourabh
 	return nil
 }
 
-// Sourabh
+// Bad signature within the culprits sequence
 func fuzzBlockDBadSignatureInCulprits(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DBadSignatureInCulprits
+	// TODO: Sourabh
 	return nil
 }
 
-// Shawn
+// Age too old for verdicts judgements
 func fuzzBlockDAgeTooOldInVerdicts(block *types.Block) error {
-	// TODO: Implement fuzzing logic for DAgeTooOldInVerdicts
+	// TODO: Michael
 	return nil
 }
