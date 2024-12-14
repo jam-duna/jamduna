@@ -91,7 +91,6 @@ func TestReportParsing(t *testing.T) {
 
 			targetedStructType := reflect.TypeOf(tc.expectedType)
 
-			fmt.Printf("\n\n\nTesting %v\n", targetedStructType)
 			// Read and unmarshal JSON file
 			jsonData, err := os.ReadFile(jsonPath)
 			if err != nil {
@@ -102,10 +101,12 @@ func TestReportParsing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
-			fmt.Printf("Unmarshaled %s\n", jsonPath)
 			// marshal the struct to JSON
 			expectedJson, err := json.MarshalIndent(tc.expectedType, "", "  ")
-			fmt.Printf("Expected: %s\n", expectedJson)
+			if debugG {
+				fmt.Printf("Unmarshaled %s\n", jsonPath)
+				fmt.Printf("Expected: %s\n", expectedJson)
+			}
 			// Encode the struct to bytes
 			encodedBytes, err := types.Encode(tc.expectedType)
 			if err != nil {
@@ -122,7 +123,9 @@ func TestReportParsing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
-			fmt.Printf("Encoded JSON:\n%s\n", encodedJSON)
+			if debugG {
+				fmt.Printf("Encoded JSON:\n%s\n", encodedJSON)
+			}
 
 			// Unmarshal again to compare
 			var decodedStruct2 TestReport
@@ -142,7 +145,7 @@ func TestReportParsing(t *testing.T) {
 func TestSignature(t *testing.T) {
 	jsonFile := "reports_with_dependencies-1.json"
 	jsonPath := filepath.Join("../jamtestvectors/reports/tiny", jsonFile)
-	fmt.Printf("===Start to verify %s===\n", jsonPath)
+
 	// Read and unmarshal JSON file
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
@@ -169,13 +172,14 @@ func TestSignature(t *testing.T) {
 	CurrV := db.GetSafrole().CurrValidators
 	guarantee := db.Block.Extrinsic.Guarantees[0]
 	err = guarantee.Verify(CurrV) // errBadSignature
-	fmt.Printf("Expected error: %v\n", err)
-
+	if debugG {
+		fmt.Printf("Expected error: %v\n", err)
+	}
 }
 
 func ReportVerify(jsonFile string, exceptErr error) error {
 	jsonPath := filepath.Join("../jamtestvectors/reports/tiny", jsonFile)
-	fmt.Printf("===Start to verify %s===\n", jsonPath)
+
 	// Read and unmarshal JSON file
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
@@ -187,7 +191,6 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal JSON data: %v", err)
 	}
-	// fmt.Println("unmarshal json data:", report)
 
 	var db StateDB
 	state := NewJamState()
@@ -200,18 +203,20 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	db.JamState.SafroleState.Timeslot = uint32(report.Input.Slot)
 	db.Block.Header.OffendersMark = report.PreState.Offenders
 	db.Block.Extrinsic.Guarantees = report.Input.Guarantee
-	db.AssignGuarantors(true)
-	db.PreviousGuarantors(true)
+	db.AssignGuarantors(false)
+	db.PreviousGuarantors(false)
 
 	err = db.Verify_Guarantees()
 	if err != nil && exceptErr == nil {
-		return fmt.Errorf("failed to verify guarantee: %v", err)
+		return fmt.Errorf("Reports FAIL: failed to verify guarantee: %v", err)
 	}
 	if err == nil && exceptErr != nil {
-		return fmt.Errorf("Expected have error:%v", exceptErr)
+		return fmt.Errorf("Reports FAIL: Expected have error:%v", exceptErr)
 	}
 	if err != nil && exceptErr != nil {
-		fmt.Printf("Get error: %v\n", err)
+		if debug {
+			fmt.Printf("Get error: %v\n", err)
+		}
 		//check error prefix vs json file name
 		// read string until the first '-'
 		// if the prefix is not the same as the json file name, return error
@@ -219,7 +224,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 		if err == exceptErr {
 			return nil
 		} else {
-			return fmt.Errorf("Expected error: %v, but get %v\n", exceptErr, err)
+			return fmt.Errorf("Reports FAIL: Expected error: %v, but get %v\n", exceptErr, err)
 		}
 	}
 	post_state := NewJamState()
@@ -237,35 +242,8 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 }
 
 func TestReportVerifyTiny(t *testing.T) {
-	// run throgh all the json files in the tiny folder
 
-	// shawn cover
-	/*
-		bad_code_hash 🔴	reports	ErrGBadCodeHash
-		bad_core_index 🔴	reports	ErrGBadCoreIndex
-		bad_signature 🔴	reports	ErrGBadSignature
-		core_engaged 🔴	reports	ErrGCoreEngaged
-		dependency_missing 🔴	reports	ErrGDependencyMissing
-		duplicated_package_in_report 🔴	reports	ErrGDuplicatePackageTwoReports
-		future_report_slot 🔴	reports	ErrGFutureReportSlot
-		no_enough_guarantees 🔴	reports	ErrGInsufficientGuarantees
-		not_sorted_guarantor 🔴	reports	ErrGDuplicateGuarantors
-		out_of_order_guarantees 🔴	reports	ErrGOutOfOrderGuarantee
-		too_high_work_report_gas 🔴	reports	ErrGWorkReportGasTooHigh
-		bad_validator_index 🔴	reports	ErrGBadValidatorIndex
-		wrong_assignment 🔴	reports	ErrGWrongAssignment
-		anchor_not_recent 🔴	reports	ErrGAnchorNotRecent
-		bad_beefy_mmr 🔴	reports	ErrGBadBeefyMMRRoot
-		bad_service_id 🔴	reports	ErrGBadServiceID
-		bad_state_root 🔴	reports	ErrGBadStateRoot
-		service_item_gas_too_low 🔴 reports ErrGServiceItemTooLow
-		duplicate_package_in_recent_history 🔴	reports	ErrGDuplicatePackageRecentHistory
-		report_before_last_rotation 🔴	reports	ErrGReportEpochBeforeLast
-		segment_root_lookup_invalid 🔴	reports	ErrGSegmentRootLookupInvalidNotRecentBlocks
-		segment_root_lookup_invalid 🔴	reports	ErrGSegmentRootLookupInvalidUnexpectedValue
-		not_authorized 🔴	reports	ErrGCoreWithoutAuthorizer
-		not_authorized 🔴	reports	ErrGCoreUnexpectedAuthorizer
-	*/
+	// run throgh all the json files in the tiny folder
 	testCases := []struct {
 		jsonFile string
 		except   error
@@ -299,29 +277,20 @@ func TestReportVerifyTiny(t *testing.T) {
 		t.Run(tc.jsonFile, func(t *testing.T) {
 			err := ReportVerify(tc.jsonFile, tc.except)
 			if err != nil {
-				t.Fatalf("failed : %v", err)
+				t.Fatalf("Reports FAIL: %v", err)
 			}
-			fmt.Printf("===Finish %s===\n", tc.jsonFile)
 		})
 	}
+
 }
 
-func TestReportVerifyTinyStanley(t *testing.T) {
-	// run throgh all the json files in the tiny folder
-
-	// shawn cover
-	/*
-		bad_state_root 🔴	reports	ErrGBadStateRoot
-		duplicate_package_in_recent_history 🔴	reports	ErrGDuplicatePackageRecentHistory
-		segment_root_lookup_invalid 🔴	reports	ErrGSegmentRootLookupInvalidNotRecentBlocks
-		segment_root_lookup_invalid 🔴	reports	ErrGSegmentRootLookupInvalidUnexpectedValue
-	*/
+func TestReportVerifyTinyFailed(t *testing.T) {
+	// run through all the json files in the tiny folder
 	testCases := []struct {
 		jsonFile string
 		except   error
 	}{
 		// {"anchor_not_recent-1.json", jamerrors.ErrGAnchorNotRecent},
-
 		{"bad_beefy_mmr-1.json", jamerrors.ErrGBadBeefyMMRRoot},
 		{"bad_state_root-1.json", jamerrors.ErrGBadStateRoot},
 		{"duplicate_package_in_recent_history-1.json", jamerrors.ErrGDuplicatePackageRecentHistory},
@@ -334,52 +303,14 @@ func TestReportVerifyTinyStanley(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed : %v", err)
 			}
-			fmt.Printf("===Finish %s===\n", tc.jsonFile)
+			fmt.Printf("Reports PASS: %s\n", tc.jsonFile)
 		})
 	}
+
 }
 
 // These cases should NOT return any errorduring STF check
 func TestReportValidReportCaseTiny(t *testing.T) {
-	/* should cover the following cases
-
-	   report_curr_rotation 🟢
-	   Report uses current guarantors rotation.
-
-	   report_prev_rotation 🟢
-	   Report uses previous guarantors rotation.
-	   Previous rotation falls within previous epoch, thus previous epoch validators set is used to construct report core assignment to pick expected guarantors.
-
-	   multiple_reports 🟢
-	   Multiple good work reports.
-
-	   high_work_report_gas 🟢
-	   Work report per core gas is very high, still less than the limit.
-
-	   many_dependencies 🟢
-	   Work report has many dependencies, still less than the limit.
-
-	   reports_with_dependencies 🟢
-	   Simple report dependency satisfied by another work report in the same extrinsic.
-
-	   reports_with_dependencies 🟢
-	   Work reports mutual dependency (indirect self-referential dependencies).
-
-	   reports_with_dependencies 🟢
-	   Work report direct self-referential dependency.
-
-	   reports_with_dependencies 🟢
-	   Work report dependency satisfied by recent blocks history.
-
-	   reports_with_dependencies 🟢
-	   Work report segments tree root lookup dependency satisfied by another work report in the same extrinsic.
-
-	   reports_with_dependencies 🟢
-	   Work report segments tree root lookup dependency satisfied by recent blocks history.
-
-	   big_work_report_output 🟢
-	   Work report output is very big, still less than the limit.
-	*/
 	testCases := []struct {
 		jsonFile string
 		except   error
@@ -404,7 +335,8 @@ func TestReportValidReportCaseTiny(t *testing.T) {
 			if err != nil {
 				t.Fatalf("\nCASE: %v\n🟢[Expected] %v\n🔴[Actual]   %v\n", tc.jsonFile, tc.message, err)
 			}
-			fmt.Printf("===Finish %s ===\n", tc.jsonFile)
+			fmt.Printf("Reports PASS: %s\n", tc.jsonFile)
 		})
 	}
+
 }

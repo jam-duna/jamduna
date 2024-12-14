@@ -50,6 +50,8 @@ var (
 	ErrABadCore           = errors.New("BadCore: One assurance targets a core without any assigned work report.")
 	ErrABadParentHash     = errors.New("BadParentHash: One assurance has a bad attestation parent hash.")
 	ErrAStaleReport       = errors.New("StaleReport: One assurance targets a core with a stale report.")
+	ErrADuplicateAssurer  = errors.New("Duplicate assurer.")
+	ErrANotSortedAssurers = errors.New("Assurers not sorted.")
 )
 
 // disputes errors

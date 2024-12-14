@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -57,18 +56,15 @@ func TestStateTransitionCodec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("encoded len: %d\n", len(encoded))
-	decoded, decoded_len, err := types.Decode(encoded, reflect.TypeOf(StateTransition{}))
+	decoded, _, err := types.Decode(encoded, reflect.TypeOf(StateTransition{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("decoded len: %d\n", decoded_len)
 
 	encoded2, err := types.Encode(decoded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("encoded2 len: %d\n", len(encoded2))
 
 	if !reflect.DeepEqual(encoded, encoded2) {
 		t.Fatal("encoded and encoded2 are not equal")

@@ -1,3 +1,6 @@
+//go:build specialtest && network
+// +build specialtest,network
+
 package node
 
 import (

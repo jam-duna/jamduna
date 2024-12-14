@@ -10,14 +10,6 @@ import (
 )
 
 // chapter 11
-const (
-// TODO: Stanley - ensure that all 5 of these are used
-// jamerrors.ErrAnchorNotRecent: Context anchor is not recent enough.
-// jamerrors.ErrGBadStateRoot: Context state root doesn't match the one at anchor.
-// jamerrors.ErrGDuplicatePackageRecentHistory: Package was already available in recent history.
-// jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue
-// jamerrors.ErrGCoreWithoutAuthorizer: Target core without any authorizer.
-)
 
 // v0.5 eq 11.42 - the rho state transition function
 func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
@@ -64,6 +56,10 @@ func (s *StateDB) Verify_Guarantees() error {
 	// for recent history and extrinsics in the block, so it should be here
 	for _, guarantee := range s.Block.Extrinsic.Guarantees {
 		// v0.5 eq 11.38
+		err = s.checkRecentWorkPackage(guarantee, s.Block.Extrinsic.Guarantees)
+		if err != nil {
+			return err
+		}
 		err := s.checkPrereq(guarantee, s.Block.Extrinsic.Guarantees)
 		if err != nil {
 			return err // INSTEAD of jamerrors.ErrGDependencyMissing
@@ -162,6 +158,13 @@ func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee) ([]types.Gu
 			EGs = append(EGs[:i], EGs[i+1:]...)
 			valid = false
 		}
+		// v0.4.5 eq 155
+		err = s.checkRecentWorkPackage(guarantee, EGs)
+		if err != nil {
+			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
+			EGs = append(EGs[:i], EGs[i+1:]...)
+			valid = false
+		}
 	}
 	if valid {
 		return EGs, nil, true
@@ -213,9 +216,17 @@ func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
 
 	// v0.5 eq 11.25 - check signature, core assign check,C_v ...
 	CurrV := s.JamState.SafroleState.CurrValidators
-	err = guarantee.Verify(CurrV) // errBadSignature
-	if err != nil {
-		return jamerrors.ErrGBadSignature
+	PrevV := s.JamState.SafroleState.PrevValidators
+	if !s.IsPreviousValidators(guarantee.Slot) {
+		err = guarantee.Verify(CurrV) // errBadSignature
+		if err != nil {
+			return jamerrors.ErrGBadSignature
+		}
+	} else {
+		err = guarantee.Verify(PrevV) // errBadSignature
+		if err != nil {
+			return jamerrors.ErrGBadSignature
+		}
 	}
 
 	// v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
@@ -268,12 +279,6 @@ func (s *StateDB) VerifyGuarantee_RecentHistory(guarantee types.Guarantee) error
 	// v0.4.5 eq 152
 	// beefy root have fucking problem
 	err = s.checkAnyPrereq(guarantee)
-	if err != nil {
-		return err
-	}
-
-	// v0.4.5 eq 155
-	err = s.checkRecentWorkPackage(guarantee)
 	if err != nil {
 		return err
 	}
@@ -357,9 +362,6 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 					break
 				}
 			}
-			if !find_and_correct {
-				return jamerrors.ErrGWrongAssignment
-			}
 		} else {
 			for i, assignment := range s.GuarantorAssignments {
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
@@ -370,13 +372,13 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 		}
 		// REVIEW
 		if !find_and_correct {
-			fmt.Printf("%s\n", guarantee.String())
 			if debugG {
-				fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
-			}
-			for _, assignment := range s.GuarantorAssignments {
-				if assignment.CoreIndex == guarantee.Report.CoreIndex {
-					fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
+				fmt.Printf("%s\n", guarantee.String())
+				s.GuarantorsAssignmentsPrint()
+				if timeSlotPeriod != reportTime {
+					fmt.Printf("We are using prev core assignment\n")
+				} else {
+					fmt.Printf("We are using curr core assignment\n")
 				}
 			}
 			return jamerrors.ErrGWrongAssignment
@@ -415,21 +417,9 @@ func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 				}
 			}
 			if !find_and_correct {
-				fmt.Printf("prev core assignment\n")
-				for _, assignment := range s.PreviousGuarantorAssignments {
-					fmt.Printf("[core%d]validator %d\n", assignment.CoreIndex, s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
-				}
-
-				fmt.Printf("curr core assignment\n")
-				for _, assignment := range s.GuarantorAssignments {
-					fmt.Printf("[core%d]validator %d\n", assignment.CoreIndex, s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
-				}
 				if debugG {
-					fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
-					fmt.Printf("guarantors\n")
-					for _, g := range guarantee.Signatures {
-						fmt.Printf("validator %d\n", g.ValidatorIndex)
-					}
+					fmt.Printf("%s\n", guarantee.String())
+					s.GuarantorsAssignmentsPrint()
 				}
 				return jamerrors.ErrGWrongAssignment
 
@@ -442,15 +432,8 @@ func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 				}
 			}
 			if !find_and_correct {
-				if debugG {
-					fmt.Printf("%s\n", guarantee.String())
-					fmt.Printf("core %d has\n", guarantee.Report.CoreIndex)
-					for _, assignment := range s.GuarantorAssignments {
-						if assignment.CoreIndex == guarantee.Report.CoreIndex {
-							fmt.Printf("validator %d\n", s.GetSafrole().GetCurrValidatorIndex(assignment.Validator.Ed25519))
-						}
-					}
-				}
+				fmt.Printf("%s\n", guarantee.String())
+				s.GuarantorsAssignmentsPrint()
 				return jamerrors.ErrGWrongAssignment
 			}
 		}
@@ -589,6 +572,9 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 			}
 		}
 	}
+	if debugG {
+		fmt.Printf("sum_rg %d\n", sum_rg)
+	}
 	return jamerrors.ErrGWorkReportGasTooHigh
 }
 
@@ -641,7 +627,9 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 		}
 	}
 	if !anchor {
-		fmt.Printf("anchor not in recent blocks refine.Anchor: %v\n", refine.Anchor)
+		if debugG {
+			fmt.Printf("anchor not in recent blocks refine.Anchor: %v\n", refine.Anchor)
+		}
 		return jamerrors.ErrGAnchorNotRecent
 	}
 
@@ -658,7 +646,9 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	}
 	if !stateroot {
 		// CHECK
-		fmt.Printf("state root not in recent blocks refine.StateRoot: %v\n", refine.StateRoot)
+		if debugG {
+			fmt.Printf("state root not in recent blocks refine.StateRoot: %v\n", refine.StateRoot)
+		}
 		return jamerrors.ErrGBadStateRoot
 	}
 	beefyroot := true
@@ -865,7 +855,8 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 	}
 
 	for _, guarantee := range EGs {
-		prereqSet[guarantee.Report.AvailabilitySpec.WorkPackageHash] = struct{}{}
+		workPackageHash := guarantee.Report.AvailabilitySpec.WorkPackageHash
+		prereqSet[workPackageHash] = struct{}{}
 	}
 
 	if len(p) == 0 {
@@ -906,7 +897,7 @@ func getPresentBlock(s *StateDB) types.SegmentRootLookup {
 // v0.5 eq 11.40
 // v0.5.2 eq 11.42
 // TODO:stanley
-func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
+func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarantee) error {
 	currentSegmentRootLookUp := g.Report.SegmentRootLookup
 	if len(currentSegmentRootLookUp) == 0 {
 		// fmt.Printf("Error currentSegmentRootLookUp is nil, must have segmentRootLookup into it!\n")
@@ -947,6 +938,20 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee) error {
 			segmentLookUpIncluded[i] = false
 		}
 	}
+	for _, guarantee := range egs {
+		wp_hash := guarantee.Report.AvailabilitySpec.WorkPackageHash
+		segment_root := guarantee.Report.AvailabilitySpec.ExportedSegmentRoot
+		for i, lookup := range currentSegmentRootLookUp {
+			if wp_hash == lookup.WorkPackageHash {
+				if segment_root != lookup.SegmentRoot {
+					return jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue
+				} else {
+					segmentLookUpIncluded[i] = true
+				}
+			}
+		}
+	}
+
 	// Check if all the segmentRootLookup are included
 	for _, included := range segmentLookUpIncluded {
 		if !included {
@@ -992,4 +997,21 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 		}
 	}
 	return nil
+}
+
+func (s *StateDB) IsPreviousValidators(eg_timeslot uint32) bool {
+	curr_timeslot := s.GetTimeslot()
+	assignment_idx := curr_timeslot / types.ValidatorCoreRotationPeriod
+	previous_assignment_idx := assignment_idx - 1
+	eg_assignment_idx := eg_timeslot / types.ValidatorCoreRotationPeriod
+	if eg_assignment_idx == curr_timeslot {
+		return false
+	} else if eg_assignment_idx == previous_assignment_idx {
+		if eg_timeslot/types.EpochLength+1 == curr_timeslot/types.EpochLength {
+			return true
+		} else {
+			return false
+		}
+	}
+	return false
 }

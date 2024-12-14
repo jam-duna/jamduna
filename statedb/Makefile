@@ -3,8 +3,8 @@ TIMEOUT := 5m
 
 
 safrole:
-	@echo "Running TestSafrole with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestSafrole$
+	@echo "Running TestSafroleVerify with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run ^TestSafroleVerify$
 
 report:
 	@echo "Running TestReportVerifyTiny with timeout $(TIMEOUT)..."

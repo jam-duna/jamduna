@@ -15,5 +15,7 @@ func TestRho(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error decoding: %v", err)
 	}
-	fmt.Println(decoded)
+	if debug {
+		fmt.Println(decoded)
+	}
 }

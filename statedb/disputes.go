@@ -59,6 +59,21 @@ func (j *JamState) IsValidateDispute(input *types.Dispute) ([]VerdictResult, err
 			return []VerdictResult{}, err
 		}
 	}
+	//gp 0.5.0 (10.7) v: v should index by the work report hash and no duplicates
+	err := checkVerdicts(input.Verdict)
+	if err != nil {
+		return []VerdictResult{}, err
+	}
+	//gp 0.5.0 (10.8) c: should be index by key and no duplicates
+	err = checkCulprit(input.Culprit)
+	if err != nil {
+		return []VerdictResult{}, err
+	}
+	//gp 0.5.0 (10.8) f: should be index by key and no duplicates
+	err = checkFault(input.Fault)
+	if err != nil {
+		return []VerdictResult{}, err
+	}
 	// gp 0.5.0 (10.5)
 	for _, c := range input.Culprit {
 		err := j.checkIfKeyOffend(c.Key)
@@ -76,21 +91,6 @@ func (j *JamState) IsValidateDispute(input *types.Dispute) ([]VerdictResult, err
 		} else if err != nil {
 			return []VerdictResult{}, err
 		}
-	}
-	//gp 0.5.0 (10.7) v: v should index by the work report hash and no duplicates
-	err := checkVerdicts(input.Verdict)
-	if err != nil {
-		return []VerdictResult{}, err
-	}
-	//gp 0.5.0 (10.8) c: should be index by key and no duplicates
-	err = checkCulprit(input.Culprit)
-	if err != nil {
-		return []VerdictResult{}, err
-	}
-	//gp 0.5.0 (10.8) f: should be index by key and no duplicates
-	err = checkFault(input.Fault)
-	if err != nil {
-		return []VerdictResult{}, err
 	}
 	//gp 0.5.0 (10.9) v: work report hash should not be in the psi_g, psi_b, psi_w set
 	err = checkWorkReportHash(input.Verdict, j.DisputesState.Psi_g, j.DisputesState.Psi_b, j.DisputesState.Psi_w)
@@ -261,7 +261,9 @@ func (j *JamState) checkSignature(v types.Verdict) error {
 			return jamerrors.ErrDBadSignatureInVerdict
 		}
 	} else {
-		fmt.Printf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v\n", v.Epoch, j.SafroleState.Timeslot/E)
+		if debugAudit {
+			fmt.Printf("Verdict Error: the epoch of the verdict %v is invalid, current epoch %v\n", v.Epoch, j.SafroleState.Timeslot/E)
+		}
 		return jamerrors.ErrDAgeTooOldInVerdicts
 	}
 	return nil
@@ -383,11 +385,15 @@ func checkWorkReportHash(v []types.Verdict, psi_g [][]byte, psi_b [][]byte, psi_
 			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
 		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_b) {
-			fmt.Printf("Verdict Error: WorkReportHash %x already in psi_b\n", verdict.Target)
+			if debugAudit {
+				fmt.Printf("Verdict Error: WorkReportHash %x already in psi_b\n", verdict.Target)
+			}
 			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
 		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_w) {
-			fmt.Printf("Verdict Error: WorkReportHash %x already in psi_w\n", verdict.Target)
+			if debugAudit {
+				fmt.Printf("Verdict Error: WorkReportHash %x already in psi_w\n", verdict.Target)
+			}
 			return jamerrors.ErrDAlreadyRecordedVerdictWithFaults
 		}
 	}
@@ -415,7 +421,9 @@ func checkVote(v []types.Verdict) error {
 					continue
 				}
 				if vote2.Index == vote.Index {
-					fmt.Printf("Vote Error: duplicate index %v in index %v\n", vote.Index, j)
+					if debugAudit {
+						fmt.Printf("Vote Error: duplicate index %v in index %v\n", vote.Index, j)
+					}
 					return jamerrors.ErrDNotUniqueVotes
 				}
 			}
@@ -424,14 +432,18 @@ func checkVote(v []types.Verdict) error {
 				continue
 			}
 			if vote.Index < verdict.Votes[i-1].Index {
-				fmt.Printf("Vote Error: index %v should be bigger than %v\n", vote.Index, verdict.Votes[i-1].Index)
+				if debugAudit {
+					fmt.Printf("Vote Error: index %v should be bigger than %v\n", vote.Index, verdict.Votes[i-1].Index)
+				}
 				return jamerrors.ErrDNotSortedWorkReports
 			}
 		}
 		if vote_counter == 0 || vote_counter == types.ValidatorsSuperMajority || vote_counter == types.WonkyTrueThreshold {
 			continue
 		} else {
-			fmt.Printf("Vote Error: vote count %v is invalid\n", vote_counter)
+			if debugAudit {
+				fmt.Printf("Vote Error: vote count %v is invalid\n", vote_counter)
+			}
 			return jamerrors.ErrDNotHomogenousJudgements
 		}
 	}
@@ -580,7 +592,9 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 	found := false
 	for _, f := range f {
 		if f.Voting {
-			fmt.Printf("Fault Error: fault should be false, invalid key: %v\n", f.Key)
+			if debugAudit {
+				fmt.Printf("Fault Error: fault should be false, invalid key: %v\n", f.Key)
+			}
 			return jamerrors.ErrDAuditorMarkedOffender
 		}
 		for _, s := range state_prime.DisputesState.Psi_g {
@@ -606,7 +620,9 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 			return jamerrors.ErrDMissingCulpritsBadVerdict
 		}
 		if counter < 2 {
-			fmt.Printf("Culprit Error: work report hash %x in psi_b should have at least two culprit\n", s)
+			if debugA {
+				fmt.Printf("Culprit Error: work report hash %x in psi_b should have at least two culprit\n", s)
+			}
 			return jamerrors.ErrDSingleCulpritBadVerdict
 		}
 	}
@@ -618,7 +634,9 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 			}
 		}
 		if !found {
-			fmt.Printf("Culprit Error: work report hash %x should be in bad set\n", c.Target)
+			if debugAudit {
+				fmt.Printf("Culprit Error: work report hash %x should be in bad set\n", c.Target)
+			}
 			return jamerrors.ErrDOffenderNotPresentVerdict
 		}
 	}

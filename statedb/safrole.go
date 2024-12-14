@@ -443,6 +443,16 @@ func (s *SafroleState) GetCurrValidatorIndex(key types.Ed25519Key) int {
 	return -1
 }
 
+func (s *SafroleState) GetPrevValidatorIndex(key types.Ed25519Key) int {
+	for i, v := range s.PrevValidators {
+		if v.Ed25519 == key {
+			return i
+		}
+	}
+	// If not found, return -1
+	return -1
+}
+
 func (s *SafroleState) GetCurrValidator(index int) types.Validator {
 	return s.CurrValidators[index]
 }
@@ -973,6 +983,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	currEpoch, _ := s.EpochAndPhase(targetJCE)
 	err := s.ValidateSaforle(tickets, targetJCE, header)
 	if err != nil {
+		fmt.Printf("ValidateSaforle ERR %v\n", err)
 		return *s, err
 	}
 	s2 := cloneSafroleState(*s)
@@ -1100,7 +1111,6 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 	isShifted := false
 	if currEpoch > prevEpoch {
 		// New Epoch
-		s2.PhasingEntropyAndValidator(&s2, new_entropy_0)
 		isShifted = true
 	} else {
 		// Epoch in progress

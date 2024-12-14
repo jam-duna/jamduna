@@ -3,37 +3,38 @@ TIMEOUT := 5m
 
 fallback:
 	@echo "Running TestFallback with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestFallback$
+	go test -timeout $(TIMEOUT) -v -run TestFallback -tags network
 
 safrole:
 	@echo "Running TestNodeSafrole with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestSafrole$
+	go test -timeout $(TIMEOUT) -v -run TestSafrole -tags network
 
 fib:
 	@echo "Running TestFib with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestFib$
+	go test -timeout $(TIMEOUT) -v -run TestFib -tags network
 
 megatron:
 	@echo "Running TestMegatron with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestMegatron$
+	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags network
 
 disputes:
 	@echo "Running TestDisputes with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestDisputes$
+	go test -timeout $(TIMEOUT) -v -run TestDisputes -tags network
+
 # Target for running a specific test function with the timeout
-testwgTransfer:
+transfer:
 	@echo "Running TestTransfer with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestTransfer$
+	go test -timeout $(TIMEOUT) -v -run TestTransfer -tags network
 
 # Target for running a specific test function with the timeout
 testRefine:
 	@echo "Running TestRefine with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestRefine$
+	go test -timeout $(TIMEOUT) -v -run TestRefine -tags network
 
 # Target for running a specific test function with the timeout
 testAccumulate:
 	@echo "Running TestAccumulate with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestAccumulate$
+	go test -timeout $(TIMEOUT) -v -run TestAccumulate -tags network
 
 # Target for running a specific test function with the timeout
 testGeneral:

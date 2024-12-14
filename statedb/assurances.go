@@ -12,7 +12,9 @@ import (
 func (s *StateDB) VerifyAssurance(a types.Assurance) error {
 	// 0.5.0 11.9 Verify the anchor
 	if a.Anchor != s.ParentHeaderHash {
-		fmt.Printf("[N%d] VerifyAssurance Fail  a.Anchor %v != s.ParentHeaderHash %v (ValidatorIndex %d)\n", s.Id, a.Anchor, s.ParentHeaderHash, a.ValidatorIndex)
+		if debugA {
+			fmt.Printf("[N%d] VerifyAssurance Fail  a.Anchor %v != s.ParentHeaderHash %v (ValidatorIndex %d)\n", s.Id, a.Anchor, s.ParentHeaderHash, a.ValidatorIndex)
+		}
 		return jamerrors.ErrABadParentHash
 	}
 
@@ -125,7 +127,10 @@ func SortAssurances(assurances []types.Assurance) {
 // Strong Verification
 func (s *StateDB) ValidateAssurances(assurances []types.Assurance) error {
 	// Sort the assurances by validator index
-	CheckSortingEAs(assurances)
+	err := CheckSortingEAs(assurances)
+	if err != nil {
+		return err
+	}
 	// Verify each assurance
 	for _, a := range assurances {
 		if err := s.VerifyAssurance(a); err != nil {
@@ -138,8 +143,13 @@ func (s *StateDB) ValidateAssurances(assurances []types.Assurance) error {
 func CheckSortingEAs(assurances []types.Assurance) error {
 	// Check the SortAssurances is correct
 	for i := 0; i < len(assurances)-1; i++ {
-		if assurances[i].ValidatorIndex >= assurances[i+1].ValidatorIndex {
-			return errors.New(fmt.Sprintf("assurances are not sorted: V%v and V%v", assurances[i].ValidatorIndex, assurances[i+1].ValidatorIndex))
+		if assurances[i].ValidatorIndex > assurances[i+1].ValidatorIndex {
+			return jamerrors.ErrANotSortedAssurers
+		}
+		for j := i + 1; j < len(assurances); j++ {
+			if assurances[i].ValidatorIndex == assurances[j].ValidatorIndex {
+				return jamerrors.ErrADuplicateAssurer
+			}
 		}
 	}
 	return nil

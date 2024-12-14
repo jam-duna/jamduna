@@ -104,13 +104,13 @@ func TestSafroleCodec(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	// fmt.Printf("Unmarshalled SafroleBasicState=%v\n", inputSafrole)
-
 	encoded, err := types.Encode(safrole1)
 	if err != nil {
 		t.Error(err)
 	}
-	fmt.Printf("Encoded SafroleBasicState=%x\n", encoded)
+	if debug {
+		fmt.Printf("Encoded SafroleBasicState=%x\n", encoded)
+	}
 
 	decoded, _, err := types.Decode(encoded, reflect.TypeOf(SafroleBasicState{}))
 	if err != nil {
@@ -121,8 +121,9 @@ func TestSafroleCodec(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	fmt.Printf("Marshal SafroleBasicState=%s\n", ourputSafrole)
-
+	if debug {
+		fmt.Printf("Marshal SafroleBasicState=%s\n", ourputSafrole)
+	}
 	// unmarshal again to compare
 	var safrole2 SafroleBasicState
 	err = json.Unmarshal(ourputSafrole, &safrole2)

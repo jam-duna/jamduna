@@ -52,7 +52,9 @@ func TestAssuranceParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal JSON: %v", err)
 	}
-	fmt.Printf("Expected: %s\n", expectedJson)
+	if debugA {
+		fmt.Printf("Expected: %s\n", expectedJson)
+	}
 }
 
 func VerifyAssurances(jsonFile string, exceptErr error) error {
@@ -81,16 +83,33 @@ func VerifyAssurances(jsonFile string, exceptErr error) error {
 	if err != exceptErr {
 		return fmt.Errorf("expected error %v, got %v", exceptErr, err)
 	}
-	fmt.Printf("File Passed: %s\n", jsonFile)
+	fmt.Printf("Assurances PASS: %s\n", jsonFile)
 	return nil
 }
 
 /*
-assurances_with_bad_signature-1🔴		ErrABadSignature
-assurances_with_bad_validator_index-1🔴		ErrABadValidatorIndex
-assurance_for_not_engaged_core-1🔴		ErrABadCore
-assurance_with_bad_attestation_parent-1🔴		ErrABadParentHash
-assurances_for_stale_report-1🔴		ErrAStaleReport
+no_assurances-1🟢
+Progress with an empty assurances extrinsic.
+some_assurances-1 🟢
+Several assurances contributing to establishing availability supermajority for some of the cores.
+no_assurances_with_stale_report-1 🟢
+Progress with an empty assurances extrinsic.
+Stale work report assignment is removed (but not returned in the output).
+assurances_with_bad_signature-1🔴
+One assurance has a bad signature.
+assurances_with_bad_validator_index-1🔴
+One assurance has a bad validator index.
+assurance_for_not_engaged_core-1🔴
+One assurance targets a core without any assigned work report.
+assurance_with_bad_attestation_parent-1🔴
+One assurance has a bad attestation parent hash.
+assurances_for_stale_report-1🔴
+One assurance targets a core with a stale report.
+We are lenient on the stale report as far as it is available.
+assurers_not_sorted_or_unique-1🔴
+Assurers not sorted.
+assurers_not_sorted_or_unique-2🔴
+Duplicate assurer.
 */
 
 func TestVerifyAssuranceTiny(t *testing.T) {
@@ -98,11 +117,16 @@ func TestVerifyAssuranceTiny(t *testing.T) {
 		jsonFile  string
 		exceptErr error
 	}{
+		{"no_assurances-1.json", nil},
+		{"some_assurances-1.json", nil},
+		{"no_assurances_with_stale_report-1.json", nil},
 		{"assurances_with_bad_signature-1.json", jamerrors.ErrABadSignature},
 		{"assurances_with_bad_validator_index-1.json", jamerrors.ErrABadValidatorIndex},
 		{"assurance_for_not_engaged_core-1.json", jamerrors.ErrABadCore},
 		{"assurance_with_bad_attestation_parent-1.json", jamerrors.ErrABadParentHash},
 		{"assurances_for_stale_report-1.json", jamerrors.ErrAStaleReport},
+		{"assurers_not_sorted_or_unique-1.json", jamerrors.ErrANotSortedAssurers},
+		{"assurers_not_sorted_or_unique-2.json", jamerrors.ErrADuplicateAssurer},
 	}
 	for _, tc := range testCase {
 		t.Run(tc.jsonFile, func(t *testing.T) {

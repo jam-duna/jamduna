@@ -19,7 +19,7 @@ type ShuffleTestCase struct {
 // shuffle_test reads a JSON file of test cases and performs the tests.
 func TestShuffle(t *testing.T) {
 	// Read the input file
-	fn := common.GetFilePath("/jamtestvectors/shuffle/shuffle_tests.json")
+	fn := common.GetFilePath("../jamtestvectors/shuffle/shuffle_tests.json")
 	file, err := os.Open(fn)
 	if err != nil {
 		t.Fatalf("Failed to open testcases file: %v", err)
@@ -72,6 +72,6 @@ func TestShuffle(t *testing.T) {
 				break
 			}
 		}
-		fmt.Printf("Passed len=%d\n", len(shuffled))
+		fmt.Printf("Shuffle PASS: len=%d\n", len(shuffled))
 	}
 }

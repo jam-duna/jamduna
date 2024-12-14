@@ -57,7 +57,7 @@ const (
 	BaseServiceBalance               = 100            // B_S = 100: The basic minimum balance which all services require.
 	PreimageExpiryPeriod             = 28800          // D = 28,800: The period in timeslots after which an unreferenced preimage may be expunged.
 	AuditBiasFactor                  = 2              // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.
-	AccumulationGasAllocation        = 100000         // G_A: The total gas allocated to a core for Accumulation.
+	AccumulationGasAllocation        = 10000000       // G_A: The total gas allocated to a core for Accumulation.
 	IsAuthorizedGasAllocation        = 1000000        // G_I: The gas allocated to invoke a work-package’s Is-Authorized logic.
 	RefineGasAllocation              = 500000000      // G_R: The total gas allocated for a work-package’s Refine logic.
 	AccumulateGasAllocation          = 341000000      //GT = 341, 000, 000: The total gas allocated across all cores for Accumulation. Should be no smaller than GA ⋅ C +∑g∈V(χg )(g).

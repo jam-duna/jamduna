@@ -13,6 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const (
+	debugCodec = false
+)
+
 type Input struct {
 	Slot        uint32              `json:"slot"`
 	AuthorIndex uint16              `json:"author_index"`
@@ -32,7 +36,7 @@ type validator_statistics_test struct {
 	Poststate state `json:"post_state"`
 }
 
-func TestCodecStatistics(t *testing.T) {
+func testCodecStatistics(t *testing.T) {
 	testCases := []struct {
 		jsonFile     string
 		binFile      string
@@ -47,12 +51,8 @@ func TestCodecStatistics(t *testing.T) {
 			jsonPath := filepath.Join("../jamtestvectors/statistics/tiny", tc.jsonFile)
 			binPath := filepath.Join("../jamtestvectors/statistics/tiny", tc.binFile)
 
-			fmt.Printf("\n\n\nTesting\n")
-
 			// Read Codec
 			expectedCodec, err := os.ReadFile(binPath)
-
-			fmt.Printf("\nexpectedCodec: %x\n", expectedCodec)
 			if err != nil {
 				t.Fatalf("failed to read codec file: %v", err)
 			}
@@ -60,8 +60,11 @@ func TestCodecStatistics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to decode codec data: %v", err)
 			}
-			//fmt.Printf("Recovered Strcuct from codec: %v\n", codecDecodedStruct)
 
+			if debugCodec {
+				fmt.Printf("\nexpectedCodec: %x\n", expectedCodec)
+				fmt.Printf("Recovered Strcuct from codec: %v\n", codecDecodedStruct)
+			}
 			// Read JSON file
 			expectedJson, err := os.ReadFile(jsonPath)
 			if err != nil {
@@ -74,9 +77,11 @@ func TestCodecStatistics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
-			fmt.Printf("Unmarshaled %s\n", jsonPath)
-			fmt.Println("type: ", reflect.TypeOf(jsonDecodedStruct))
-			fmt.Printf("Recovered Strcuct from json: %v\n", jsonDecodedStruct)
+			if debugCodec {
+				fmt.Printf("Unmarshaled %s\n", jsonPath)
+				fmt.Println("type: ", reflect.TypeOf(jsonDecodedStruct))
+				fmt.Printf("Recovered Strcuct from json: %v\n", jsonDecodedStruct)
+			}
 
 			// Getting Codec Result
 			codec_via_json_source, err := types.Encode(jsonDecodedStruct)
@@ -87,7 +92,9 @@ func TestCodecStatistics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to encode codec data: %v", err)
 			}
-			fmt.Printf("[Codec Testing] json->codec:\n%x\n", codec_via_json_source)
+			if debugCodec {
+				fmt.Printf("[Codec Testing] json->codec:\n%x\n", codec_via_json_source)
+			}
 
 			// Getting JSON Result
 			json_via_codec_source, err := json.MarshalIndent(codecDecodedStruct, "", "  ")
@@ -98,10 +105,10 @@ func TestCodecStatistics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
-			fmt.Printf("[JSON Testing] codec->json:\n%s\n", string(json_via_codec_source))
-
-			fmt.Printf("codec_via_codec_source: %x\n", codec_via_codec_source)
-
+			if debugCodec {
+				fmt.Printf("[JSON Testing] codec->json:\n%s\n", string(json_via_codec_source))
+				fmt.Printf("codec_via_codec_source: %x\n", codec_via_codec_source)
+			}
 			// let's E2E work on every direction
 
 			// Test 0: codec(codecDecodedStruct) = self

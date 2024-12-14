@@ -1,6 +1,8 @@
 package statedb
 
 import (
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -126,4 +128,36 @@ func (s *StateDB) PreviousGuarantors(lock bool) {
 		s.PreviousGuarantorAssignments = assignments
 	}
 
+}
+
+func (s *StateDB) GuarantorsAssignmentsPrint() {
+	sf := s.GetSafrole()
+	fmt.Printf("CurrGuarantorAssignments:\n")
+	for _, v := range s.GuarantorAssignments {
+		validator_index := sf.GetCurrValidatorIndex(v.Validator.Ed25519)
+		if validator_index == -1 {
+			fmt.Printf("Validator not found for %v\n", v.Validator.Ed25519)
+			continue
+		}
+		core_index := v.CoreIndex
+		fmt.Printf("CoreIndex: %v => Validator: %v, key: %v\n", core_index, validator_index, v.Validator.Ed25519)
+	}
+	fmt.Printf("PrevGuarantorAssignments:\n")
+	if (s.JamState.SafroleState.Timeslot-types.ValidatorCoreRotationPeriod)/types.EpochLength == s.JamState.SafroleState.Timeslot/types.EpochLength {
+		fmt.Printf("using entropy[2]\n")
+	} else {
+		fmt.Printf("using entropy[3]\n")
+	}
+	for _, v := range s.PreviousGuarantorAssignments {
+		validator_index := sf.GetCurrValidatorIndex(v.Validator.Ed25519)
+		if (s.JamState.SafroleState.Timeslot-types.ValidatorCoreRotationPeriod)/types.EpochLength < s.JamState.SafroleState.Timeslot/types.EpochLength {
+			validator_index = sf.GetPrevValidatorIndex(v.Validator.Ed25519)
+		}
+		if validator_index == -1 {
+			fmt.Printf("Validator not found for %v\n", v.Validator.Ed25519)
+			continue
+		}
+		core_index := v.CoreIndex
+		fmt.Printf("CoreIndex: %v => Validator: %v, key: %v\n", core_index, validator_index, v.Validator.Ed25519)
+	}
 }

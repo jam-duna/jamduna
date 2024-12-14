@@ -26,34 +26,43 @@ func TestKV(t *testing.T) {
 	a := StateSnapshotRaw{}
 	err := json.Unmarshal([]byte(jsonStr), &a)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatalf("TestKV %v\n", err)
 	}
 
 	// encode
 	encoded, err := types.Encode(a)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatalf("TestKV Encode %v\n", err)
 	}
-	fmt.Printf("\n\nEncoded: %x\n\n\n", encoded)
+	if debug {
+		fmt.Printf("\n\nEncoded: %x\n\n\n", encoded)
+	}
 
 	// decode
 	decoded, _, err := types.Decode(encoded, reflect.TypeOf(a))
 	if err != nil {
-		fmt.Println(err)
+		t.Fatalf("TestKV Decode %v\n", err)
 	}
-	fmt.Printf("\n\nDecoded: %v\n\n\n", decoded)
+	if debug {
+		fmt.Printf("\n\nDecoded: %v\n\n\n", decoded)
+	}
 
 	// marshal the struct
 	b, err := json.Marshal(decoded)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatalf("TestKV json.Marshal %v\n", err)
 	}
-	fmt.Println(string(b))
+	if debug {
+		fmt.Printf("TestKV: %v", b)
+	}
+
 }
 
 func TestE(t *testing.T) {
 	a := []byte{0x80, 0x93}
 	decoded, l := types.DecodeE(a)
-	fmt.Printf("Decoded: %v\n", decoded)
-	fmt.Printf("Length: %v\n", l)
+	if debug {
+		fmt.Printf("Decoded: %v\n", decoded)
+		fmt.Printf("Length: %v\n", l)
+	}
 }

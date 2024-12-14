@@ -1,7 +1,7 @@
 name: Jam non-node package test
 
 env:
-  JAM_PATH: .
+  JAM_PATH: ${{ github.workspace }}
   LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
   CARGO_MANIFEST_DIR: ${{ github.workspace }}
 
@@ -10,6 +10,11 @@ on:
     branches:
       - main
       - dev
+      - dev_sourabh
+      - dev_michael
+      - dev_shawn
+      - dev_william
+      - dev_stanley
     paths:
       - .github/workflows/deploy.yml
       - bls/*.go
@@ -44,7 +49,7 @@ jobs:
 
       - name: Set environment variables
         run: |
-          echo "JAM_PATH=." >> $GITHUB_ENV
+          echo "JAM_PATH=${{ github.workspace }}" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=./bls/target/release: ./bandersnatch/target/release" >> $GITHUB_ENV
           echo "CARGO_MANIFEST_DIR=${{ github.workspace }}" >> $GITHUB_ENV
 
@@ -72,14 +77,14 @@ jobs:
 
       - name: Run test common
         run: |
-          go test ./common || echo "Test failed but continuing."
+          go test ./common 
           mkdir -p "$CARGO_MANIFEST_DIR"
 
       - name: Run test bls
-        run: go test ./bls || echo "Test failed but continuing."
+        run: go test ./bls 
 
       - name: Run test bandersnatch
-        run: go test ./bandersnatch || echo "Test failed but continuing."
+        run: go test ./bandersnatch 
 
       - name: Run test trie
         run: go test ./trie || echo "Test failed but continuing."
@@ -94,12 +99,12 @@ jobs:
         run: go test ./erasurecoding || echo "Test failed but continuing."
 
       - name: Run test pvm
-        run: go test ./pvm || echo "Test failed but continuing."
+        run: go test ./pvm
 
       - name: Run test fib
-        run: go test ./node -timeout 5m -v -run ^TestFib$ || echo "Test failed but continuing."
+        run: go test ./node -timeout 5m -v -run TestFib -tags network || echo "Test failed but continuing."
 
       - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ || echo "Test failed but continuing."
+        run: go test ./node -timeout 5m -v -run TestMegatron -tags network || echo "Test failed but continuing."
 
 

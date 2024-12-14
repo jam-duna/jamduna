@@ -3,6 +3,8 @@ package statedb
 import (
 	"errors"
 
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
@@ -520,7 +522,7 @@ func (s *StateDB) ProcessDeferredTransfers(delta_dager map[uint32]*types.Service
 	for i := range delta_dager {
 		updated_service, err := s.HostTransfer(delta_dager, time_slot, uint32(i), t)
 		if err != nil {
-			return delta_dager, errors.New("Service index: " + string(i) + " failed to process deferred transfers")
+			return delta_dager, fmt.Errorf("Service index:%d failed to process deferred transfers", i)
 		} else {
 			delta_dager_dager[i] = updated_service
 		}
