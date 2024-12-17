@@ -4,9 +4,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 )
 

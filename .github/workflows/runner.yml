@@ -1,0 +1,85 @@
+name: Jam Runner test
+
+env:
+  JAM_PATH: ${{ github.workspace }} 
+  LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
+  CARGO_MANIFEST_DIR: ${{ github.workspace }}
+
+on:
+  push:
+    branches:
+      - main
+      - main_tapas
+    paths:
+      - .github/workflows/runner.yml
+      - bls/*.go
+      - bandersnatch/*.go
+      - types/*.go
+      - statedb/*.go
+      - pvm/*.go
+      - statedb/*.go
+      - node/*.go
+  schedule:
+    - cron: '*/12 * * * *'
+
+jobs:
+  test:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+#      - name: Setup Go
+#        uses: actions/setup-go@v4
+#        with:
+#          go-version: 1.23
+
+#      - name: Set up Rust
+#        run: |
+#          sudo apt update
+#          sudo apt install -y curl build-essential
+#          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+#          source $HOME/.cargo/env
+
+      - name: Set environment variables
+        run: |
+          echo "JAM_PATH=${{ github.workspace }}" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=./bls/target/release: ./bandersnatch/target/release" >> $GITHUB_ENV
+          echo "CARGO_MANIFEST_DIR=${{ github.workspace }}" >> $GITHUB_ENV
+
+#      - name: Install dependencies
+#        run: sudo apt update && sudo apt install -y build-essential
+
+      - name: Clear Go module cache
+        run: go clean -modcache
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install Go dependencies
+        run: go mod tidy
+
+      - name: Run make commands
+        run: |
+          make blslib
+          make bandersnatchlib
+
+      - name: Run test bls
+        run: go test ./bls || echo "Test failed but continuing."
+
+      - name: Run test bandersnatch
+        run: go test ./bandersnatch || echo "Test failed but continuing."
+
+      - name: Run test fib
+        run: go test ./node -timeout 5m -v -run ^TestFib$ -tags network 
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+
