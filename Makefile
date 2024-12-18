@@ -2,8 +2,7 @@ OUTPUT_DIR := bin
 BINARY := jam
 SRC := jam.go
 
-# Phony targets to ensure they always run
-.PHONY: bls bandersnatch ffi jam clean beauty fmt-check
+.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean
 
 jam:
 	@echo "Building JAM..."
@@ -70,24 +69,34 @@ fmt-check:
 	@diff -u <(echo -n) <(gofmt -d .)
 
 
-# List of packages
-PACKAGES = bandersnatch bls common erasurecoding node pvm statedb trie types
+# List of packages (missing node)
+PACKAGES := $(shell go list ./... | grep -E "bandersnatch|bls|common|erasurecoding|pvm|statedb|trie|types")
 
-# Default target: Run all tests
-.PHONY: all
-all: $(PACKAGES)
 
-# Targets for individual packages
-.PHONY: $(PACKAGES)
-$(PACKAGES):
-	go test ./$(shell echo $@ | tr '_' '/')
-
-# Target to run all tests at once
-.PHONY: test-all
-test-all:
-	go test ./...
-
-# Clean target (optional)
-.PHONY: clean
 clean:
 	go clean -testcache
+
+
+COVERAGE_FILE=coverage.out
+COVERAGE_HTML=coverage.html
+
+# Default target
+allcoverage: coveragetest coverage
+
+# Run tests with coverage
+coveragetest:
+	@echo "Running tests with coverage..."
+	@go test -coverprofile=$(COVERAGE_FILE) $(PACKAGES)
+
+# Generate coverage HTML
+coverage: coveragetest
+	@echo "Generating HTML coverage report..."
+	@go tool cover -html=$(COVERAGE_FILE) -o $(COVERAGE_HTML)
+	@echo "Coverage report generated: $(COVERAGE_HTML)"
+
+# Clean up
+cleancoverage:
+	@echo "Cleaning up..."
+	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML)
+	@echo "Done."
+

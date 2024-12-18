@@ -73,11 +73,21 @@ func (p *Page) ensureData() {
 }
 
 func (p *Page) zero() {
-	// TODO
+	p.Value = make([]byte, PageSize)
+	p.Access = AccessMode{
+		Inaccessible: false,
+		Writable:     true,
+		Readable:     true,
+	}
 }
 
 func (p *Page) void() {
-	// TODO
+	p.Value = make([]byte, PageSize)
+	p.Access = AccessMode{
+		Inaccessible: true,
+		Writable:     false,
+		Readable:     false,
+	}
 }
 
 // Get or allocate a specific page
@@ -2464,6 +2474,7 @@ func (vm *VM) CreateVM(serviceAcct uint32, code []byte, i uint32) uint32 {
 	if vm.VMs == nil {
 		vm.VMs = make(map[uint32]*VM)
 	}
+	fmt.Printf("CreateVM: %d\n", maxN)
 	vm.VMs[maxN+1] = NewVMFromCode(serviceAcct, code, i, vm.hostenv)
 	return maxN + 1
 }
@@ -2495,18 +2506,21 @@ func (vm *VM) SetRegisterValue(registerIndex int, value uint64) uint64 {
 	return vm.WriteRegister(registerIndex, value)
 }
 
-func (vm *VM) HostCheat(input string) {
+func (vm *VM) HostCheat(input string) (errcode uint64) {
 	if input == "machine" {
-		vm.hostMachine()
+		errcode = vm.hostMachine()
 	} else if input == "poke" {
-		vm.hostPoke()
+		errcode = vm.hostPoke()
 	} else if input == "peek" {
-		vm.hostPeek()
+		errcode = vm.hostPeek()
 	} else if input == "invoke" {
-		vm.hostInvoke()
+		errcode = vm.hostInvoke()
 	} else if input == "expunge" {
-		vm.hostExpunge()
+		errcode = vm.hostExpunge()
+	} else if input == "zero" {
+		errcode = vm.hostZero()
 	}
+	return errcode
 }
 
 func (vm *VM) Instructions_with_Arguments_of_One_Register_and_One_Extended_Width_Immediate(opcode byte, operands []byte) uint64 {

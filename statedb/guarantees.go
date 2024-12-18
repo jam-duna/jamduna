@@ -95,14 +95,22 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	}
 
 	// v0.5 eq 11.25 - check signature, core assign check,C_v ...
-	// CurrV := s.JamState.SafroleState.CurrValidators
-	// err = guarantee.Verify(CurrV) // errBadSignature
-	// if err != nil {
-	// 	return jamerrors.ErrGBadSignature
-	// }
+	if !s.IsPreviousValidators(guarantee.Slot) {
+		CurrV := s.JamState.SafroleState.CurrValidators
+		err = guarantee.Verify(CurrV) // errBadSignature
+		if err != nil {
+			return jamerrors.ErrGBadSignature
+		}
+	} else {
+		PrevV := s.JamState.SafroleState.PrevValidators
+		err = guarantee.Verify(PrevV) // errBadSignature
+		if err != nil {
+			return jamerrors.ErrGBadSignature
+		}
+	}
 	// v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
 	// custom function for make block
-	err = s.AreValidatorsAssignedToCore_MakeBlock(guarantee)
+	err = s.areValidatorsAssignedToCore_MakeBlock(guarantee)
 	if err != nil {
 		fmt.Printf("Verify_Guarantee error MakeBlock: %v\n", err)
 		return err // CHECK: instead of jamerrors.ErrGWrongAssignment
@@ -110,7 +118,7 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	j := s.JamState
 	// v0.5 eq 11.28
 	if s.Block != nil {
-		err = j.CheckReportTimeOut(guarantee, s.Block.TimeSlot())
+		err = j.checkReportTimeOut(guarantee, s.Block.TimeSlot())
 		if err != nil {
 			return err
 		}
@@ -127,7 +135,21 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	if err != nil {
 		return err
 	}
-
+	// v0.5 eq 11.34
+	err = s.checkRecentBlock(guarantee)
+	if err != nil {
+		return err
+	}
+	// v0.5 eq 11.38
+	err = s.checkAnyPrereq(guarantee)
+	if err != nil {
+		return err
+	}
+	// v0.5 eq 11.39
+	// err = s.checkAncestorSetA(guarantee)
+	// if err != nil {
+	// 	return err
+	// }
 	// v0.5 eq 11.41 - check code hash
 	err = s.checkCodeHash(guarantee)
 	if err != nil {
@@ -238,19 +260,19 @@ func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
 	}
 
 	// v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
-	err = s.AreValidatorsAssignedToCore(guarantee)
+	err = s.areValidatorsAssignedToCore(guarantee)
 	if err != nil {
 		return err
 	}
 	j := s.JamState
 	// v0.5 eq 11.28
-	err = j.CheckReportPendingOnCore(guarantee)
+	err = j.checkReportPendingOnCore(guarantee)
 	if err != nil {
 		return err
 	}
 	// v0.5 eq 11.28
 	if s.Block != nil {
-		err = j.CheckReportTimeOut(guarantee, s.Block.TimeSlot())
+		err = j.checkReportTimeOut(guarantee, s.Block.TimeSlot())
 		if err != nil {
 			return err
 		}
@@ -352,7 +374,7 @@ func CheckSorting_EGs(guarantees []types.Guarantee) error {
 }
 
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
-func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
+func (s *StateDB) areValidatorsAssignedToCore(guarantee types.Guarantee) error {
 	assignment_idx := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
 	previous_assignment_idx := assignment_idx - 1
 	previous_assignment_slot := previous_assignment_idx * types.ValidatorCoreRotationPeriod
@@ -396,7 +418,7 @@ func (s *StateDB) AreValidatorsAssignedToCore(guarantee types.Guarantee) error {
 }
 
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
-func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarantee) error {
+func (s *StateDB) areValidatorsAssignedToCore_MakeBlock(guarantee types.Guarantee) error {
 	ts := s.Block.TimeSlot()
 	assignment_idx := ts / types.ValidatorCoreRotationPeriod
 	previous_assignment_idx := assignment_idx - 1
@@ -473,7 +495,7 @@ func (s *StateDB) getWorkReport() []types.WorkReport {
 }
 
 // v0.5 eq 11.28 - check pending report
-func (j *JamState) CheckReportTimeOut(g types.Guarantee, ts uint32) error {
+func (j *JamState) checkReportTimeOut(g types.Guarantee, ts uint32) error {
 	if g.Slot > ts {
 		return jamerrors.ErrGFutureReportSlot
 	}
@@ -489,7 +511,7 @@ func (j *JamState) CheckReportTimeOut(g types.Guarantee, ts uint32) error {
 }
 
 // v0.5 eq 11.28
-func (j *JamState) CheckReportPendingOnCore(g types.Guarantee) error {
+func (j *JamState) checkReportPendingOnCore(g types.Guarantee) error {
 
 	authorizations_pool := j.AuthorizationsPool[int(g.Report.CoreIndex)]
 	find := false

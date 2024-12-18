@@ -1301,22 +1301,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			fmt.Println("Error verifying guarantee (in Make Block): ", err)
 			continue
 		}
-		//142 check pending report
-		err = tmpState.CheckReportTimeOut(guarantee, s.GetTimeslot())
-		if err != nil {
-			fmt.Println("Error checking report timeout: ", err)
-			continue
-		}
-		err = tmpState.CheckReportPendingOnCore(g)
-		if err != nil {
-			fmt.Println("Error checking report pending on core: ", err)
-			continue
-		}
-		err = CheckCoreIndex(extrinsicData.Guarantees, g)
-		if err != nil {
-			fmt.Println("Error checking core index: ", err)
-			continue
-		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
 		if debugG {
 			fmt.Printf("[N%d] Include Guarantee (Package Hash : %v)\n", s.Id, g.Report.GetWorkPackageHash())

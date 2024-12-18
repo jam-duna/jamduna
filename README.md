@@ -9,14 +9,23 @@ We are developing [JAM](https://jam.web3.foundation/) in Go in Summer 2024/Fall 
 
 ## Documentation:
 
-* [Parent-Child VMs](https://hackmd.io/ldPJih0ISMCP6pU5aXzaWg)
-* [Ordered Accumulation](https://hackmd.io/jeZLW09nRse8q3t_PavyrA)
-* [JAM Trustless Supercomputing Test Suite](https://hackmd.io/nk0Tr0iIQHmLm7WIXe_OoQ)
-* [JAM0 @ Bangkok](https://hackmd.io/qA7NNyjyQIil8oSq3aafjw)
-* [docs.jamcha.in] (https://docs.jamcha.in/)
+* [docs.jamcha.in](https://docs.jamcha.in/)
 * [graypaper](https://graypaper.fluffylabs.dev/#/293bf5a/348e00348e00)
+* [JAM Setup Service Guide](https://hackmd.io/@clw98/Hy5xvMYxJg)
+* [JAM Trustless Supercomputing Test Suite](https://hackmd.io/nk0Tr0iIQHmLm7WIXe_OoQ)
 * [JAM TestNet repo](https://github.com/jam-duna/jamtestnet/tree/main/traces/assurances/jam_duna) | [sheet](https://docs.google.com/spreadsheets/d/1ueAisCMOx7B-m_fXMLT0FXBxfVzydJyr-udE8jKwDN8/edit?gid=615049643#gid=615049643)
 * [JAM-NP](https://github.com/zdave-parity/jam-np/blob/main/simple.md)
+* [JAM SDK](https://hackmd.io/@polkadot/jamsdk)
+
+Supporting docs:
+
+* [JAM DA](https://hackmd.io/NDwqmV_XTjukvCxC98kLmg?view) - Stanley
+* [Discussion topics](https://hackmd.io/2y70ehKYS3aLzKvqZPWhog?edit)
+* [RAM Model](https://hackmd.io/cAXPsZt1StWI4dbPk_UWAQ?view) - William
+* [Parent-Child VMs](https://hackmd.io/ldPJih0ISMCP6pU5aXzaWg)  - Shawn
+* [Ordered Accumulation](https://hackmd.io/jeZLW09nRse8q3t_PavyrA) - Stanley
+* [Recent History Test](https://hackmd.io/H_vBBOR-RS-r3tdpS2AHOA) - Stanley
+* [JAM0 @ Bangkok](https://hackmd.io/qA7NNyjyQIil8oSq3aafjw) - Sourabh
 
 ## Building JAM
 

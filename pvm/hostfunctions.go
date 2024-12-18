@@ -550,7 +550,7 @@ func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
 	vm.register = registers
 }
 
-// Invoke
+// Invoke5
 func (vm *VM) hostInvoke() uint64 {
 	n, _ := vm.ReadRegister(7)
 	o, _ := vm.ReadRegister(8)
@@ -571,7 +571,7 @@ func (vm *VM) hostInvoke() uint64 {
 	}
 	// intialize invoke
 
-	registerBytes, _ := vm.Ram.ReadRAMBytes(uint32(o)+8, 13*4)
+	registerBytes, _ := vm.Ram.ReadRAMBytes(uint32(o)+8, 13*8)
 	m, ok := vm.GetVM(uint32(n))
 	if !ok {
 		return WHO
@@ -943,16 +943,16 @@ func (vm *VM) hostMachine() uint64 {
 	po, _ := vm.ReadRegister(7)
 	pz, _ := vm.ReadRegister(8)
 	i, _ := vm.ReadRegister(9)
-
 	p, errCode := vm.Ram.ReadRAMBytes(uint32(po), uint32(pz))
 	if errCode != OK {
-		vm.WriteRegister(7, uint64(errCode))
+		vm.WriteRegister(7, errCode)
+		fmt.Printf("hostMachine: Read RAM Error\n")
 		return errCode
 	}
-
 	// need service account here??
 	serviceAcct := uint32(0)
 	n := vm.CreateVM(serviceAcct, p, uint32(i))
+	fmt.Printf("hostMachine: Created VM %d\n", n)
 	vm.WriteRegister(7, uint64(n))
 	return uint64(n)
 }
@@ -1031,6 +1031,10 @@ func (vm *VM) hostVoid() uint64 {
 	if !ok {
 		return WHO
 	}
+	if p+c >= (1<<32)/Z_P {
+		return OOB
+	}
+
 	for i := uint32(0); i < uint32(c); i++ {
 		page, err := m.Ram.getOrAllocatePage(uint32(p) + i)
 		if err != nil {
@@ -1039,32 +1043,29 @@ func (vm *VM) hostVoid() uint64 {
 		page.void()
 	}
 	// TODO
-	access_mode := AccessMode{Inaccessible: true, Writable: false, Readable: false}
-	m.Ram.SetPageAccess(uint32(p), uint32(c), access_mode)
-	return WHO
+	return OK
 }
 
 func (vm *VM) hostZero() uint64 {
 	n, _ := vm.ReadRegister(7)
 	p, _ := vm.ReadRegister(8)
 	c, _ := vm.ReadRegister(9)
-
+	if p < 16 || p+c > (1<<32)/Z_P {
+		return OOB
+	}
 	m, ok := vm.GetVM(uint32(n))
 	if !ok {
 		return WHO
 	}
-
 	for i := uint32(0); i < uint32(c); i++ {
 		page, err := m.Ram.getOrAllocatePage(uint32(p) + uint32(i))
 		if err != nil {
 			return OOB // TODO
 		}
+		fmt.Printf("Zeroing page %d\n", uint32(p)+i)
 		page.zero()
 	}
-	// TODO
-	access_mode := AccessMode{Inaccessible: false, Writable: true, Readable: true}
-	m.Ram.SetPageAccess(uint32(p), uint32(c), access_mode)
-	return WHO
+	return OK
 }
 
 func (vm *VM) hostSP1Groth16Verify() uint64 {
@@ -1146,7 +1147,7 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 	for i, reg := range regs {
 		regBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint64(regBytes, reg)
-		errCode = vm.Ram.WriteRAMBytes(input_address+8+uint32(i*4), regBytes)
+		errCode = vm.Ram.WriteRAMBytes(input_address+8+uint32(i*8), regBytes)
 		if errCode != OK {
 			return errCode
 		}
@@ -1162,11 +1163,12 @@ func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, re
 	gas = binary.LittleEndian.Uint64(gasBytes)
 	regs = make([]uint64, 13)
 	for i := 0; i < 13; i++ {
-		regBytes, errCode := vm.Ram.ReadRAMBytes(input_address+8+uint32(i*4), 4)
+		regBytes, errCode := vm.Ram.ReadRAMBytes(input_address+8+uint32(i*8), 8)
 		if errCode != OK {
 			return 0, nil, errCode
 		}
 		regs[i] = binary.LittleEndian.Uint64(regBytes)
+		fmt.Printf("Register %d: %d\n", i, regs[i])
 	}
 	return gas, regs, OK
 }
