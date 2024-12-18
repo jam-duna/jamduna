@@ -109,30 +109,34 @@ func (n *Node) WriteKVByte(key []byte, val []byte) error {
 	return nil
 }
 
-func (n *Node) ReadRawKV(key []byte) ([]byte, error) {
+func (n *Node) ReadRawKV(key []byte) ([]byte, bool, error) {
 	store, err := n.GetStorage()
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, false, err
 	}
-	val, err := store.ReadRawKV([]byte(key))
+	val, ok, err := store.ReadRawKV([]byte(key))
 	if err != nil {
-		return []byte{}, fmt.Errorf("ReadRawKV K=%v not found\n", key)
+		return []byte{}, false, fmt.Errorf("ReadRawKV Err:%v\n", err)
+	} else if !ok {
+		return []byte{}, false, fmt.Errorf("ReadRawKV K=%v not found\n", key)
 	}
 	//fmt.Printf("Read key %s | val %x\n", key, val)
-	return val, nil
+	return val, true, nil
 }
 
-func (n *Node) ReadKVByte(key []byte) ([]byte, error) {
+func (n *Node) ReadKVByte(key []byte) ([]byte, bool, error) {
 	store, err := n.GetStorage()
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, false, err
 	}
-	val, err := store.ReadRawKV(key)
+	val, ok, err := store.ReadRawKV(key)
 	if err != nil {
-		return []byte{}, fmt.Errorf("ReadRawKV K=%v not found\n", key)
+		return []byte{}, false, fmt.Errorf("ReadKVByte Err:%v\n", err)
+	} else if !ok {
+		return []byte{}, false, fmt.Errorf("ReadKVByte K=%v not found\n", key)
 	}
 	//fmt.Printf("Read key %s | val %x\n", key, val)
-	return val, nil
+	return val, true, nil
 }
 
 func (n *Node) encode(data []byte, isFixed bool, data_len int) ([][][]byte, error) {

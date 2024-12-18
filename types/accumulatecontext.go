@@ -17,7 +17,7 @@ type AccumulationHistory struct {
 
 // Types for Kai
 type Kai_state struct {
-	Kai_m uint32            `json:"chi_m"` // The index of the empower service
+	Kai_m uint32            `json:"chi_m"` // The index of the bless service
 	Kai_a uint32            `json:"chi_a"` // The index of the designate service
 	Kai_v uint32            `json:"chi_v"` // The index of the assign service
 	Kai_g map[uint32]uint32 `json:"chi_g"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
@@ -42,6 +42,22 @@ func (U PartialState) Dump(prefix string, id uint16) {
 	fmt.Printf("[N%d]\n\n", id)
 }
 
+/*
+   func (U *PartialState) Clone() (V *PartialState) {
+	V = &PartialState{
+		D: make(map[uint32]*ServiceAccount),
+	}
+	for serviceIndex, serviceAccount := range U.D {
+		V.D[serviceIndex] = serviceAccount.Clone()
+	}
+	newV := U.UpcomingValidators
+	V.UpcomingValidators = newV
+	tmpPrivilegedState := U.PrivilegedState
+	V.PrivilegedState = tmpPrivilegedState
+	return V
+}
+*/
+
 type XContext struct {
 	D map[uint32]*ServiceAccount `json:"D"`
 	I uint32                     `json:"I"`
@@ -50,24 +66,10 @@ type XContext struct {
 	T []DeferredTransfer         `json:"T"`
 }
 
-// returns back X.U.D[s] but if there is a miss, uses
-func (X *XContext) GetMutableServiceAccount(serviceIndex uint32, hostenv HostEnv) (xs *ServiceAccount, ok bool) {
-	if account, exists := X.U.D[serviceIndex]; exists {
-		return account, true
-	}
-
-	// If not found, get it from the host environment
-	service, err := hostenv.GetService(serviceIndex)
-	if err != nil {
-		return nil, false
-	}
-	X.D[serviceIndex] = service.Clone() // doesn't change
-	if X.U.D == nil {
-		X.U.D = make(map[uint32]*ServiceAccount)
-	}
-	X.U.D[serviceIndex] = service.Clone() // changes
-	return X.U.D[serviceIndex], true
-
+// returns back X.U.D[s] where s is the current service index
+func (X *XContext) GetX_s() (xs *ServiceAccount, s uint32) {
+	// This is Mutable
+	return X.U.D[X.S], X.S
 }
 func (X *XContext) Clone() (Y XContext) {
 	Y = XContext{

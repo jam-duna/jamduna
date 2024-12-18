@@ -64,12 +64,14 @@ func (store *StateDBStorage) Close() error {
 	return store.db.Close()
 }
 
-func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, error) {
+func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
 	data, err := store.db.Get(key, nil)
-	if err != nil {
-		return nil, fmt.Errorf("ReadRawKV %v Err: %v", key, err)
+	if err == leveldb.ErrNotFound {
+		return nil, false, nil
+	} else if err != nil {
+		return nil, false, fmt.Errorf("ReadRawKV %v Err: %v", key, err)
 	}
-	return data, nil
+	return data, true, nil
 }
 
 func (store *StateDBStorage) ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, error) {

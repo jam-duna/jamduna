@@ -43,6 +43,11 @@ bandersnatchlib:
 	@cd bandersnatch && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release
 	@echo "Built Bandersnatch library!"
 
+sp1lib:
+	@echo "Building SP1..."
+	@cd sp1 && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release
+	@echo "Built SP1 library!"
+
 cargo_clean:
 	@echo "Clean Up FFI libraries (BLS + Bandersnatch)!"
 	@cd bandersnatch && cargo clean
@@ -53,7 +58,7 @@ cargo_clean:
 ffi_force: cargo_clean ffi
 
 # Target to build both BLS and Bandersnatch FFI libraries
-ffi: blslib bandersnatchlib
+ffi: blslib bandersnatchlib sp1lib
 	@echo "Built all FFI libraries (BLS + Bandersnatch)!"
 
 beauty:

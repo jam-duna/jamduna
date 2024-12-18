@@ -375,10 +375,10 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]by
 
 	// p - workPackage
 	// x - [extrinsic data] for some workitem argument w
-	extrinsicData := make([]types.ExtrinsicsBlobs, len(workItems))
-	for workIdx, workItem := range workItems {
-		extrinsicData[workIdx] = workItem.ExtrinsicsBlobs
-	}
+	// extrinsicData := make([]types.ExtrinsicsBlobs, len(workItems))
+	// for workIdx, workItem := range workItems {
+	// 	extrinsicData[workIdx] = workItem.ExtrinsicsBlobs
+	// }
 
 	// s - [ImportSegmentData] should be size of G = W_E * W_S
 	importedSegmentData := importSegments
@@ -409,8 +409,8 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]by
 		justifications = append(justifications, tmpJustifications)
 	}
 	workPackageBundle := types.WorkPackageBundle{
-		WorkPackage:       p,
-		ExtrinsicData:     extrinsicData,
+		WorkPackage: p,
+		// ExtrinsicData:     extrinsicData,
 		ImportSegmentData: importedSegmentData,
 		Justification:     justifications,
 	}
@@ -634,10 +634,8 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, 
 		}
 
 		service_index = workItem.Service
-		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
-		if len(code) == 0 {
-			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
-			fmt.Println(err)
+		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
+		if err0 != nil || !ok || len(code) == 0 {
 			return
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
@@ -653,8 +651,8 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, 
 			vm.SetImports(imports)
 		}
 
-		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, workItem.ExtrinsicsBlobs)
+		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
+		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization)
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		if debugSegments {
 			fmt.Printf("[N%d] [%d] len(exports) %d, exports %x\n", n.id, index, len(exports), exports)
@@ -815,10 +813,10 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage, importSegments 
 			workItemImportSegments = importSegments[workItemIdx]
 		}
 		service_index = workItem.Service
-		code := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
-		if len(code) == 0 {
-			err = fmt.Errorf("code not found in bpt. C(%v, %v)", service_index, workItem.CodeHash)
-			fmt.Println(err)
+		var code []byte
+		var ok bool
+		code, ok, err = targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
+		if err != nil || !ok || len(code) == 0 {
 			return
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
@@ -832,8 +830,8 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage, importSegments 
 			vm.SetImports(workItemImportSegments)
 		}
 
-		vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, workItem.ExtrinsicsBlobs)
+		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
+		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization)
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		workItemExports := make([][]byte, 0)
 		for i := 0; i < len(exports); i += types.W_E * types.W_S {

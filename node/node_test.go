@@ -53,10 +53,6 @@ func TestDisputes(t *testing.T) {
 		}
 	}
 
-	for _, n := range nodes {
-		n.statedb.PreviousGuarantors(noRotation)
-		n.statedb.AssignGuarantors(noRotation)
-	}
 	// code length: 206
 	bootstrapCode, err := os.ReadFile(statedb.BootstrapServiceFile)
 	if err != nil {
@@ -93,12 +89,13 @@ func TestDisputes(t *testing.T) {
 			RefineContext: types.RefineContext{},
 			WorkItems: []types.WorkItem{
 				{
-					Service:          bootstrapService,
-					CodeHash:         bootstrapCodeHash,
-					Payload:          append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
-					GasLimit:         10000000,
-					ImportedSegments: make([]types.ImportSegment, 0),
-					ExportCount:      0,
+					Service:            bootstrapService,
+					CodeHash:           bootstrapCodeHash,
+					Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
 				},
 			},
 		}
@@ -115,11 +112,8 @@ func TestDisputes(t *testing.T) {
 				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
 				k := []byte{0, 0, 0, 0}
-				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, &k)
-				if err != nil {
-					if !ok {
-						fmt.Printf("t.GetServiceStorage unexpected %v Error\n", k)
-					}
+				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, k)
+				if err != nil || !ok {
 					time.Sleep(1 * time.Second)
 					continue
 				}
@@ -142,10 +136,6 @@ func TestDisputes(t *testing.T) {
 			}
 		}
 	}
-	for _, n := range nodes {
-		n.statedb.PreviousGuarantors(noRotation)
-		n.statedb.AssignGuarantors(noRotation)
-	}
 
 	fmt.Printf("All services are ready, Send preimage announcement\n")
 	for _, service := range testServices {
@@ -161,8 +151,9 @@ func TestDisputes(t *testing.T) {
 			for _, n := range nodes {
 				targetStateDB := n.getState()
 				if targetStateDB != nil {
-					code := targetStateDB.ReadServicePreimageBlob(service.ServiceCode, service.CodeHash)
-					if len(code) > 0 && bytes.Equal(code, service.Code) {
+					code, ok, err := targetStateDB.ReadServicePreimageBlob(service.ServiceCode, service.CodeHash)
+					if err != nil || !ok {
+					} else if len(code) > 0 && bytes.Equal(code, service.Code) {
 						ready++
 					}
 					// fmt.Printf(" check %s len(code)=%d expect %d => ready=%d\n", service.CodeHash, len(code), len(service.Code), ready)
@@ -177,9 +168,5 @@ func TestDisputes(t *testing.T) {
 		}
 	}
 
-	for _, n := range nodes {
-		n.statedb.PreviousGuarantors(noRotation)
-		n.statedb.AssignGuarantors(noRotation)
-	}
 	time.Sleep(50 * time.Second)
 }

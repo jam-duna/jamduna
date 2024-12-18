@@ -3,12 +3,11 @@ package pvm
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/sp1"
 	"github.com/colorfulnotion/jam/types"
-
-	"github.com/ethereum/go-ethereum/crypto"
-	//"github.com/ethereum/go-ethereum/crypto/secp256k1"
 )
 
 // Appendix B - Host function
@@ -19,7 +18,7 @@ const (
 	READ              = 2
 	WRITE             = 3
 	INFO              = 4
-	EMPOWER           = 5
+	BLESS             = 5
 	ASSIGN            = 6
 	DESIGNATE         = 7
 	CHECKPOINT        = 8
@@ -35,13 +34,16 @@ const (
 	MACHINE           = 18
 	PEEK              = 19
 	POKE              = 20
-	INVOKE            = 21
-	EXPUNGE           = 22
-	EXTRINSIC         = 23
-	PAYLOAD           = 24
-	ECRECOVER         = 25
+	ZERO              = 21
+	VOID              = 22
+	INVOKE            = 23
+	EXPUNGE           = 24
+	LOG               = 100
+	SP1GROTH16VERIFY  = 101
 	FOR_TEST          = 105
 )
+
+const maxUint64 = ^uint64(0)
 
 const (
 	Debug_Service_Storage = false
@@ -53,50 +55,71 @@ const (
 
 // Mapping of host function names to their error cases
 var errorCases = map[string][]uint64{
-	"Machine":  {OK, OOB},
-	"Peek":     {OK, OOB, WHO},
-	"Poke":     {OK, OOB, WHO},
-	"Invoke":   {OK, OOB, WHO, HOST, FAULT, OOB, PANIC},
-	"Expunge":  {OK, WHO},
-	"Import":   {OK, OOB, NONE},
-	"Export":   {OK, OOB, NONE},
-	"New":      {OK, OOB, CASH},
-	"Read":     {OK, OOB, NONE},
-	"Write":    {OK, OOB, NONE, FULL},
-	"Solicit":  {OK, OOB, FULL, HUH},
-	"Forget":   {OK, OOB, HUH},
-	"Transfer": {OK, WHO, CASH, LOW, HIGH},
+	// B.6 General Functions
+	"Gas":              {OK},
+	"Lookup":           {OK, NONE, OOB},
+	"Read":             {OK, OOB, NONE},
+	"Write":            {OK, OOB, NONE, FULL},
+	"Info":             {OK, OOB, NONE},
+	"Sp1Groth16Verify": {OK, OOB, HUH},
+	// B.7 Accumulate Functions
+	"Bless":      {OK, OOB, WHO},
+	"Assign":     {OK, OOB, CORE},
+	"Designate":  {OK, OOB},
+	"Checkpoint": {OK},
+	"New":        {OK, OOB, CASH},
+	"Upgrade":    {OK, OOB},
+	"Transfer":   {OK, WHO, CASH, LOW, HIGH},
+	"Quit":       {OK, OOB, WHO, LOW},
+	"Solicit":    {OK, OOB, FULL, HUH},
+	"Forget":     {OK, OOB, HUH},
+	// B.8 Refine Functions
+	"Historical_lookup": {OK, OOB},
+	"Import":            {OK, OOB, NONE},
+	"Export":            {OK, OOB, NONE},
+	"Machine":           {OK, OOB},
+	"Peek":              {OK, OOB, WHO},
+	"Poke":              {OK, OOB, WHO},
+	"Zero":              {OK, OOB, WHO},
+	"Void":              {OK, OOB, WHO},
+	"Invoke":            {OK, OOB, WHO, HOST, FAULT, OOB, PANIC},
+	"Expunge":           {OK, OOB, WHO},
 }
 
 // Mapping of host function names to their indexes
 var hostIndexMap = map[string]int{
-	"Gas":               GAS,
-	"Lookup":            LOOKUP,
-	"Read":              READ,
-	"Write":             WRITE,
-	"Info":              INFO,
-	"Empower":           EMPOWER,
-	"Assign":            ASSIGN,
-	"Designate":         DESIGNATE,
-	"Checkpoint":        CHECKPOINT,
-	"New":               NEW,
-	"Upgrade":           UPGRADE,
-	"Transfer":          TRANSFER,
-	"Quit":              QUIT,
-	"Solicit":           SOLICIT,
-	"Forget":            FORGET,
+	// B.6 General Functions
+	"Gas":              GAS,
+	"Lookup":           LOOKUP,
+	"Read":             READ,
+	"Write":            WRITE,
+	"Info":             INFO,
+	"Sp1Groth16Verify": SP1GROTH16VERIFY,
+	// B.7 Accumulate Functions
+	"Bless":      BLESS,
+	"Assign":     ASSIGN,
+	"Designate":  DESIGNATE,
+	"Checkpoint": CHECKPOINT,
+	"New":        NEW,
+	"Upgrade":    UPGRADE,
+	"Transfer":   TRANSFER,
+	"Quit":       QUIT,
+	"Solicit":    SOLICIT,
+	"Forget":     FORGET,
+	// B.8 Refine Functions
 	"Historical_lookup": HISTORICAL_LOOKUP,
 	"Import":            IMPORT,
 	"Export":            EXPORT,
 	"Machine":           MACHINE,
 	"Peek":              PEEK,
 	"Poke":              POKE,
+	"Zero":              ZERO,
+	"Void":              VOID,
 	"Invoke":            INVOKE,
 	"Expunge":           EXPUNGE,
-	"Extrinsic":         EXTRINSIC,
-	"Payload":           PAYLOAD,
-	"Ecrecover":         ECRECOVER,
-	"For_test":          FOR_TEST,
+	// Other
+	"Log":      LOG,
+	"For_test": FOR_TEST,
 }
 
 // Function to retrieve index and error cases
@@ -172,16 +195,16 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.hostInfo()
 		return true, nil
 
-	case EMPOWER:
-		vm.hostEmpower(vm.X.U)
+	case BLESS:
+		vm.hostBless()
 		return true, nil
 
 	case ASSIGN:
-		vm.hostAssign(vm.X.U)
+		vm.hostAssign()
 		return true, nil
 
 	case DESIGNATE:
-		vm.hostDesignate(vm.X.U)
+		vm.hostDesignate()
 		return true, nil
 
 	case CHECKPOINT:
@@ -239,12 +262,28 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.hostPoke()
 		return true, nil
 
+	case ZERO:
+		vm.hostZero()
+		return true, nil
+
+	case VOID:
+		vm.hostVoid()
+		return true, nil
+
 	case INVOKE:
 		vm.hostInvoke()
 		return true, nil
 
 	case EXPUNGE:
 		vm.hostExpunge()
+		return true, nil
+
+	case LOG:
+		vm.hostLog()
+		return true, nil
+
+	case SP1GROTH16VERIFY:
+		vm.hostSP1Groth16Verify()
 		return true, nil
 
 	default:
@@ -262,20 +301,13 @@ func min(x, y int) int {
 
 // Information-on-Service
 func (vm *VM) hostInfo() uint64 {
-	//s := vm.X.S
-	//d := vm.X.U.D
 	omega_7, _ := vm.ReadRegister(7)
-	var service uint32
-	if omega_7 == (1<<32 - 1) {
-		service = vm.Service_index
-	} else {
-		service = uint32(omega_7)
+
+	t, errCode := vm.getXUDS(omega_7)
+	if errCode != OK {
+		return errCode
 	}
 	bo, _ := vm.ReadRegister(8)
-	t, err := vm.hostenv.GetService(service)
-	if err != nil {
-		return NONE
-	}
 
 	e := []interface{}{t.CodeHash, t.Balance, t.GasLimitG, t.GasLimitM}
 	m, err := types.Encode(e)
@@ -287,20 +319,20 @@ func (vm *VM) hostInfo() uint64 {
 	return OK
 }
 
-// Empower updates
-func (vm *VM) hostEmpower(X_U *types.PartialState) uint32 {
+// Bless updates
+func (vm *VM) hostBless() uint64 {
 	m, _ := vm.ReadRegister(7)
 	a, _ := vm.ReadRegister(8)
 	v, _ := vm.ReadRegister(9)
 	// Set (x'p)_m, (x'p)_a, (x'p)_v
-	X_U.PrivilegedState.Kai_m = uint32(m)
-	X_U.PrivilegedState.Kai_a = uint32(a)
-	X_U.PrivilegedState.Kai_v = uint32(v)
+	vm.X.U.PrivilegedState.Kai_m = uint32(m)
+	vm.X.U.PrivilegedState.Kai_a = uint32(a)
+	vm.X.U.PrivilegedState.Kai_v = uint32(v)
 	return OK
 }
 
 // Assign Core x_c[i]
-func (vm *VM) hostAssign(X_U *types.PartialState) uint64 {
+func (vm *VM) hostAssign() uint64 {
 	core, _ := vm.ReadRegister(7)
 	if core >= numCores {
 		return CORE
@@ -311,12 +343,12 @@ func (vm *VM) hostAssign(X_U *types.PartialState) uint64 {
 	for i := 0; i < 32; i++ {
 		qi[i] = common.BytesToHash(c[i:(i + 32)])
 	}
-	copy(X_U.QueueWorkReport[core][:], qi[:])
+	copy(vm.X.U.QueueWorkReport[core][:], qi[:])
 	return OK
 }
 
 // Designate validators
-func (vm *VM) hostDesignate(X_U *types.PartialState) uint64 {
+func (vm *VM) hostDesignate() uint64 {
 	o, _ := vm.ReadRegister(7)
 	v, errCode := vm.Ram.ReadRAMBytes(uint32(o), 176*V)
 	if errCode == OOB {
@@ -332,7 +364,7 @@ func (vm *VM) hostDesignate(X_U *types.PartialState) uint64 {
 
 		qi[i] = newv
 	}
-	X_U.UpcomingValidators = qi
+	vm.X.U.UpcomingValidators = qi
 	return OK
 }
 
@@ -375,12 +407,8 @@ func check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
 // New service
 func (vm *VM) hostNew() uint64 {
 	xContext := vm.X
-	s := xContext.S
-	xs, ok := xContext.GetMutableServiceAccount(s, vm.hostenv)
-	if !ok {
-		fmt.Printf("hostNew: %d not found\n", s)
-		return OOB
-	}
+	xs, _ := xContext.GetX_s()
+
 	// put 'g' and 'm' together
 	o, _ := vm.ReadRegister(7)
 	c, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
@@ -396,6 +424,8 @@ func (vm *VM) hostNew() uint64 {
 
 	// simulate a with c, g, m
 	a := &types.ServiceAccount{
+		ServiceIndex:    xi,
+		Mutable:         true,
 		Dirty:           true,
 		CodeHash:        common.BytesToHash(c),
 		GasLimitG:       uint64(g),
@@ -406,16 +436,15 @@ func (vm *VM) hostNew() uint64 {
 		Lookup:          make(map[common.Hash]types.LookupObject),
 		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
-	// fmt.Printf("Service %d hostNew %v => %d, code hash: %v\n", s, a.CodeHash, a.GetServiceIndex(), common.BytesToHash(c))
-	a.SetServiceIndex(xi)
 	a.Balance = a.ComputeThreshold()
+	// fmt.Printf("Service %d hostNew %v => %d, code hash: %v\n", s, a.CodeHash, a.GetServiceIndex(), common.BytesToHash(c))
 
 	if debug_host {
-		fmt.Printf("Service %d hostNew %v => %d\n", s, a.CodeHash, a.GetServiceIndex())
+		fmt.Printf("Service %d hostNew %v => %d\n", xContext.S, a.CodeHash, a.GetServiceIndex())
 	}
 	// Compute footprint & threshold: a_l, a_s, a-t
 
-	xs.Balance = xs.Balance - a.Balance
+	xs.DecBalance(a.Balance)
 	if xs.Balance >= xs.ComputeThreshold() {
 		//xs has enough balance to fund the creation of a AND covering its own threshold
 		// xi' <- check(bump(xi))
@@ -425,13 +454,13 @@ func (vm *VM) hostNew() uint64 {
 
 		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
 		// a.WriteLookup(common.BytesToHash(c), l, []uint32{common.ComputeCurrenTS()})
-		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // CHECK
+		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
 
 		// (x's)b <- (xs)b - at
 		// xContext.S = a.ServiceIndex()
 
+		// Here we are adding the new service account to the map
 		xContext.U.D[xi] = a
-		xContext.U.D[s] = xs
 
 		vm.X = xContext
 		vm.WriteRegister(7, uint64(xi))
@@ -448,8 +477,7 @@ func (vm *VM) hostNew() uint64 {
 // Upgrade service
 func (vm *VM) hostUpgrade() uint64 {
 	xContext := vm.X
-	s := xContext.S
-	xs := xContext.U.D[s]
+	xs, s := xContext.GetX_s()
 	o, _ := vm.ReadRegister(7)
 	gl, _ := vm.ReadRegister(8)
 	gh, _ := vm.ReadRegister(9)
@@ -473,14 +501,10 @@ func (vm *VM) hostUpgrade() uint64 {
 // Transfer host call
 func (vm *VM) hostTransfer() uint64 {
 	d, _ := vm.ReadRegister(7)
-	al, _ := vm.ReadRegister(8)
-	ah, _ := vm.ReadRegister(9)
-	gl, _ := vm.ReadRegister(10)
-	gh, _ := vm.ReadRegister(11)
-	o, _ := vm.ReadRegister(12)
+	a, _ := vm.ReadRegister(8)
+	g, _ := vm.ReadRegister(9)
+	o, _ := vm.ReadRegister(10)
 
-	a := uint64(ah)<<32 + uint64(al)
-	g := uint64(gh)<<32 + uint64(gl)
 	// TODO check d -- WHO; check g -- LOW, HIGH
 	m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
 	if errCode == OOB {
@@ -500,22 +524,20 @@ func (vm *VM) hostGas() uint32 {
 
 // Quit Service
 func (vm *VM) hostQuit() uint32 {
-	/*
-		d, _ := vm.ReadRegister(0)
-		s := vm.hostenv.GetService(vm.S)
-		a := s.Balance + types.BaseServiceBalance // TODO: (x_s)_t
+	/*	d, _ := vm.ReadRegister(7)
+		o, _ := vm.ReadRegister(8)
+		xs, s := vm.X.GetX_s()
+		a := xs.Balance - xs.StorageSize + types.BaseServiceBalance // TODO: (x_s)_t
 		var transferMemo *TransferMemo
-		if d == vm.S || d == 0xFFFFFFFF {
+		if d == vm.X.S || d == maxUint64 {
 			transferMemo = nil
 		} else {
 			o, _ := vm.ReadRegister(1)
-			transferMemo := types.TransferMemoFromBytes(transferMemoBytes)
+			transferMemo, _ := types.TransferMemoFromBytes(transferMemoBytes)
 			transferBytes, _ := vm.ReadRAMBytes(o, types.TransferMemoSize)
 		}
 		g := vm.ξ
 	*/
-	// return WHO
-	// return LOW
 	return OK
 }
 func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
@@ -575,8 +597,14 @@ func (vm *VM) hostLookup() uint64 {
 		return OOB
 	}
 	h := common.Blake2Hash(k_bytes)
-	v := vm.hostenv.ReadServicePreimageBlob(uint32(s), h)
-
+	a, errCode := vm.getXUDS(s)
+	if errCode != OK {
+		return NONE
+	}
+	ok, v := a.ReadPreimage(h, vm.hostenv)
+	if !ok {
+		return NONE
+	}
 	l := uint64(len(v))
 	if bz < l {
 		l = bz
@@ -598,20 +626,28 @@ func uint32ToBytes(s uint32) []byte {
 	return sbytes
 }
 
+// Key Idea: fetch potential mutated (with Mutable=true) ServiceAccount from the XContext Partial State (X.U.D),
+// which may have been changed
+func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uint64) {
+	var ok bool
+	var err error
+	s := uint32(serviceindex)
+	if serviceindex == maxUint64 || uint32(serviceindex) == vm.X.S {
+		return vm.X.U.D[s], OK
+	}
+	a, ok = vm.X.D[s]
+	if !ok {
+		a, ok, err = vm.hostenv.GetService(s)
+		if err != nil || !ok {
+			return nil, NONE
+		}
+		vm.X.D[s] = a
+	}
+	return a, OK
+}
+
 // Read Storage
 func (vm *VM) hostRead() uint64 {
-	var s uint32
-	var d map[uint32]*types.ServiceAccount
-	var service *types.ServiceAccount
-	if vm.X == nil {
-		s = vm.Service_index
-		d = vm.Delta
-		service = vm.ServiceAccount
-	} else {
-		s = vm.X.S
-		d = vm.X.U.D
-		service = d[s]
-	}
 	// Assume that all ram can be read and written
 	w7, _ := vm.ReadRegister(7)
 	ko, _ := vm.ReadRegister(8)
@@ -625,30 +661,14 @@ func (vm *VM) hostRead() uint64 {
 		return OOB
 	}
 	// k for original raw key
-	var a *types.ServiceAccount
-	var ok bool
-	if uint32(w7) == s || w7 == 0xFFFFFFFF {
-		a = service
-	} else {
-		a, ok = d[uint32(w7)]
-		if !ok {
-			vm.WriteRegister(7, OOB)
-			return OOB
-		}
+	a, errCode := vm.getXUDS(w7)
+	if errCode != OK {
+		vm.WriteRegister(7, OOB)
+		return OOB
 	}
+
 	var val []byte
-	/*
-		The `s` of this function is different from the `a.ServiceIndex`
-		We have to check it which one is correct
-		If we use s.ServiceIndex megetron will work, and if we use a.ServiceIndex, it still works
-		So we have to check which one is correct
-		I pass the `s` to the `ReadStorage` function for now, but we have to check it
-	*/
-	if Debug_Service_Storage {
-		fmt.Printf("ServiceAccount.ReadStorage: s=%d a.ServiceIndex=%d\n", s, a.ServiceIndex)
-	}
-	// a.ServiceIndex = s // Stanley: Need to check
-	_, val = a.ReadStorage(s, k, vm.hostenv)
+	_, val = a.ReadStorage(k, vm.hostenv)
 	l := uint64(len(val))
 	if bz < l {
 		l = bz
@@ -664,12 +684,7 @@ func (vm *VM) hostRead() uint64 {
 // Write Storage
 func (vm *VM) hostWrite() uint64 {
 	xContext := vm.X
-	s := xContext.S
-	xs, ok := xContext.GetMutableServiceAccount(s, vm.hostenv)
-	if !ok {
-		fmt.Printf("hostWrite: %d not found\n", s)
-		return OOB
-	}
+	xs, s := xContext.GetX_s()
 
 	// Assume that all ram can be read and written
 	// Got storage of bold S(service account in GP) by setting s = 0, k = k(from RAM)
@@ -698,14 +713,6 @@ func (vm *VM) hostWrite() uint64 {
 			fmt.Printf("ServiceAccount.WriteStorage: s=%d xs.ServiceIndex=%d\n", s, xs.ServiceIndex)
 		}
 
-		/*
-			The `s` of this function is different from the `xs.ServiceIndex`
-			We have to check it which one is correct
-			If we use s.ServiceIndex megetron will work, and if we use a.ServiceIndex, it still works
-			So we have to check which one is correct
-			I pass the `s` to the `WriteStorage` function for now, but we have to check it
-		*/
-		// xs.ServiceIndex = s // Stanley: Need to check, if we set xs.ServiceIndex to s, it will not work
 		xs.WriteStorage(s, k, v)
 		vm.WriteRegister(7, uint64(len(v)))
 		//fmt.Printf("hostwrite: WriteStorage(%d, %v => %v) len(v)=%d Dirty: %v\n", s, key, v, len(v), xs.Dirty)
@@ -725,10 +732,7 @@ func (vm *VM) GetJCETime() uint32 {
 
 // Solicit preimage
 func (vm *VM) hostSolicit(t uint32) uint64 {
-	xContext := vm.X
-	s := xContext.S
-	d := xContext.U.D
-	xs := d[s]
+	xs, _ := vm.X.GetX_s()
 	// Got l of X_s by setting s = 1, z = z(from RAM)
 	o, _ := vm.ReadRegister(7)
 	z, _ := vm.ReadRegister(8)                          // z: blob_len
@@ -757,10 +761,13 @@ func (vm *VM) hostSolicit(t uint32) uint64 {
 		}
 	}
 	*/
-
 	blobHash := common.Hash(hBytes)
-	X_s_l := vm.hostenv.ReadServicePreimageLookup(xs.GetServiceIndex(), blobHash, uint32(z))
-	fmt.Printf("xs.ServiceIndex() = %d, blobHash = %v, z = %d, X_s_l = %v\n", xs.GetServiceIndex(), blobHash, z, X_s_l)
+	ok, X_s_l := xs.ReadLookup(blobHash, uint32(z), vm.hostenv)
+	if !ok {
+		return HUH
+	}
+	// TODO: FULL
+	//fmt.Printf("xs.ServiceIndex() = %d, blobHash = %v, z = %d, X_s_l = %v\n", xs.GetServiceIndex(), blobHash, z, X_s_l)
 	if len(X_s_l) == 0 {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
 		xs.WriteLookup(blobHash, uint32(z), []uint32{})
@@ -778,8 +785,7 @@ func (vm *VM) hostSolicit(t uint32) uint64 {
 
 // Forget preimage
 func (vm *VM) hostForget(t uint32) uint64 {
-
-	s := uint32(1) // s: serviceIndex
+	x_s, _ := vm.X.GetX_s()
 	o, _ := vm.ReadRegister(7)
 	z, _ := vm.ReadRegister(8)
 	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
@@ -789,19 +795,21 @@ func (vm *VM) hostForget(t uint32) uint64 {
 	}
 
 	blobHash := common.Hash(hBytes)
-	X_s_l := vm.hostenv.ReadServicePreimageLookup(s, blobHash, uint32(z))
+	ok, X_s_l := x_s.ReadLookup(blobHash, uint32(z), vm.hostenv)
+	if !ok {
+		return HUH
+	}
 	if len(X_s_l) == 0 || (len(X_s_l) == 2 && X_s_l[1] < (t-D)) {
-		vm.hostenv.DeleteServicePreimageLookupKey(s, blobHash, uint32(z))
-		vm.hostenv.DeleteServicePreimageKey(s, blobHash)
+		x_s.WriteLookup(blobHash, uint32(z), []uint32{})
 		vm.WriteRegister(7, OK)
 		return OK
 	} else if len(X_s_l) == 1 {
-		vm.hostenv.WriteServicePreimageLookup(s, blobHash, uint32(z), append(X_s_l, []uint32{t}...))
+		x_s.WriteLookup(blobHash, uint32(z), append(X_s_l, []uint32{t}...))
 		vm.WriteRegister(7, OK)
 		return OK
 	} else if len(X_s_l) == 3 && X_s_l[1] < (t-D) {
 		X_s_l[2] = uint32(t)
-		vm.hostenv.WriteServicePreimageLookup(s, blobHash, uint32(z), X_s_l)
+		x_s.WriteLookup(blobHash, uint32(z), X_s_l)
 		vm.WriteRegister(7, OK)
 		return OK
 	} else {
@@ -879,25 +887,6 @@ func (vm *VM) hostImport() uint64 {
 		vm.WriteRegister(7, NONE)
 		return NONE
 	}
-}
-
-// ECRecover
-func (vm *VM) hostECRecover() uint32 {
-	o, _ := vm.ReadRegister(7)
-	ho, _ := vm.ReadRegister(8)
-	sig, _ := vm.Ram.ReadRAMBytes(uint32(o), 65)
-	h, _ := vm.Ram.ReadRAMBytes(uint32(ho), 32)
-	recoveredPubKey, err := crypto.SigToPub(h, sig)
-	if err != nil {
-		vm.WriteRegister(7, NONE)
-	}
-	recoveredPubKeyBytes := crypto.FromECDSAPub(recoveredPubKey)
-	p, _ := vm.ReadRegister(9)
-	vm.Ram.WriteRAMBytes(uint32(p), recoveredPubKeyBytes[:])
-
-	vm.WriteRegister(7, OK)
-	return OK
-
 }
 
 // Export segment host-call
@@ -1031,6 +1020,120 @@ func (vm *VM) hostExpunge() uint64 {
 	}
 	vm.WriteRegister(7, WHO)
 	return WHO
+}
+
+func (vm *VM) hostVoid() uint64 {
+	n, _ := vm.ReadRegister(7)
+	p, _ := vm.ReadRegister(8)
+	c, _ := vm.ReadRegister(9)
+
+	m, ok := vm.GetVM(uint32(n))
+	if !ok {
+		return WHO
+	}
+	for i := uint32(0); i < uint32(c); i++ {
+		page, err := m.Ram.getOrAllocatePage(uint32(p) + i)
+		if err != nil {
+			return OOB // TODO
+		}
+		page.void()
+	}
+	// TODO
+	access_mode := AccessMode{Inaccessible: true, Writable: false, Readable: false}
+	m.Ram.SetPageAccess(uint32(p), uint32(c), access_mode)
+	return WHO
+}
+
+func (vm *VM) hostZero() uint64 {
+	n, _ := vm.ReadRegister(7)
+	p, _ := vm.ReadRegister(8)
+	c, _ := vm.ReadRegister(9)
+
+	m, ok := vm.GetVM(uint32(n))
+	if !ok {
+		return WHO
+	}
+
+	for i := uint32(0); i < uint32(c); i++ {
+		page, err := m.Ram.getOrAllocatePage(uint32(p) + uint32(i))
+		if err != nil {
+			return OOB // TODO
+		}
+		page.zero()
+	}
+	// TODO
+	access_mode := AccessMode{Inaccessible: false, Writable: true, Readable: true}
+	m.Ram.SetPageAccess(uint32(p), uint32(c), access_mode)
+	return WHO
+}
+
+func (vm *VM) hostSP1Groth16Verify() uint64 {
+	proof, _ := vm.ReadRegister(7)
+	proof_length, _ := vm.ReadRegister(8)
+	verifierkey, _ := vm.ReadRegister(9)
+	verifierkey_length, _ := vm.ReadRegister(10)
+	public, _ := vm.ReadRegister(11)
+	public_length, _ := vm.ReadRegister(12)
+
+	proofBytes, errCode := vm.Ram.ReadRAMBytes(uint32(proof), uint32(proof_length))
+	if errCode != OK {
+		return OOB
+	}
+	verifierBytes, errCode := vm.Ram.ReadRAMBytes(uint32(verifierkey), uint32(verifierkey_length))
+	if errCode != OK {
+		return OOB
+	}
+	pubBytes, errCode := vm.Ram.ReadRAMBytes(uint32(public), uint32(public_length))
+	if errCode != OK {
+		return OOB
+	}
+
+	verified := sp1.VerifyGroth16(proofBytes, string(verifierBytes), pubBytes)
+	if verified {
+		return OK
+	}
+	return HUH
+}
+
+func getLogLevelName(level uint64) string {
+	switch level {
+	case 0:
+		return "⛔️ FATAL"
+	case 1:
+		return "⚠️ WARNING"
+	case 2:
+		return "ℹ️ INFO"
+	case 3:
+		return "💁 HELPFUL"
+	case 4:
+		return "🪡 PEDANTIC"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// JIP-1 https://hackmd.io/@polkadot/jip1
+func (vm *VM) hostLog() uint64 {
+
+	level, _ := vm.ReadRegister(7)
+	target, _ := vm.ReadRegister(8)
+	targetlen, _ := vm.ReadRegister(9)
+	message, _ := vm.ReadRegister(10)
+	messagelen, _ := vm.ReadRegister(11)
+	targetBytes, errCode := vm.Ram.ReadRAMBytes(uint32(target), uint32(targetlen))
+	if errCode != OK {
+		return errCode
+	}
+	messageBytes, errCode := vm.Ram.ReadRAMBytes(uint32(message), uint32(messagelen))
+	if errCode != OK {
+		return errCode
+	}
+	currentTime := time.Now().Format("2006-01-02 15:04:05")
+	levelName := getLogLevelName(level) // Assume a function that maps level numbers to log level names.
+
+	// <YYYY-MM-DD hh-mm-ss> <LEVEL>[@<CORE>]?[#<SERVICE_ID>]? [<TARGET>]? <MESSAGE>
+	fmt.Printf("[%s] %s [TARGET: %s] %s\n", currentTime, levelName, string(targetBytes), string(messageBytes))
+	return OK
 }
 
 func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs []uint64) (errCode uint64) {

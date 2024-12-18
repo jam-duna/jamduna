@@ -543,7 +543,7 @@ func (j *JamState) updateOffender(c []types.Culprit, f []types.Fault) {
 	//sort the key
 	j.DisputesState.Psi_o = sortByKey(j.DisputesState.Psi_o)
 }
-func processTypesOutput(VerdictResult []VerdictResult, c []types.Culprit, f []types.Fault) types.OffenderMarker {
+func processTypesOutput(_verdictResult []VerdictResult, c []types.Culprit, f []types.Fault) types.OffenderMarker {
 	var output2 types.OffenderMarker
 	for _, culprit := range c {
 		output2.OffenderKey = append(output2.OffenderKey, culprit.Key)

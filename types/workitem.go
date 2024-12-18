@@ -28,13 +28,16 @@ type WorkItem struct {
 	CodeHash common.Hash `json:"code_hash"`
 	// y: a payload blob
 	Payload []byte `json:"payload"`
-	// g: a gas limit
-	GasLimit         uint64          `json:"gas_limit"`
+	// g: a refine gas limit
+	RefineGasLimit uint64 `json:"refine_gas_limit"`
+	// a: an accumulate gas limit
+	AccumulateGasLimit uint64 `json:"accumulate_gas_limit"`
+	// i: a sequence of imported data segments
 	ImportedSegments []ImportSegment `json:"import_segments"`
 	// x: extrinsic
-	Extrinsics      []WorkItemExtrinsic `json:"extrinsic"`
-	ExtrinsicsBlobs ExtrinsicsBlobs     `json:"extrinsics"`
-	ExportCount     uint16              `json:"export_count"`
+	Extrinsics []WorkItemExtrinsic `json:"extrinsic"`
+	// ExtrinsicsBlobs ExtrinsicsBlobs     `json:"extrinsics"`
+	ExportCount uint16 `json:"export_count"`
 }
 
 // From Sec 14: Once done, then imported segments must be reconstructed. This process may in fact be lazy as the Refine function makes no usage of the data until the ${\tt import}$ hostcall is made. Fetching generally implies that, for each imported segment, erasure-coded chunks are retrieved from enough unique validators (342, including the guarantor).  Chunks must be fetched for both the data itself and for justification metadata which allows us to ensure that the data is correct.
@@ -62,13 +65,14 @@ func (E ExtrinsicsBlobs) Decode(data []byte) (interface{}, uint32) {
 
 func (a *WorkItem) UnmarshalJSON(data []byte) error {
 	var s struct {
-		Service          uint32              `json:"service"`
-		CodeHash         common.Hash         `json:"code_hash"`
-		Payload          string              `json:"payload"`
-		GasLimit         uint64              `json:"gas_limit"`
-		ImportedSegments []ImportSegment     `json:"import_segments"`
-		Extrinsics       []WorkItemExtrinsic `json:"extrinsic"`
-		ExportCount      uint16              `json:"export_count"`
+		Service            uint32              `json:"service"`
+		CodeHash           common.Hash         `json:"code_hash"`
+		Payload            string              `json:"payload"`
+		RefineGasLimit     uint64              `json:"refine_gas_limit"`
+		AccumulateGasLimit uint64              `json:"accumulate_gas_limit"`
+		ImportedSegments   []ImportSegment     `json:"import_segments"`
+		Extrinsics         []WorkItemExtrinsic `json:"extrinsic"`
+		ExportCount        uint16              `json:"export_count"`
 	}
 	err := json.Unmarshal(data, &s)
 	if err != nil {
@@ -77,7 +81,8 @@ func (a *WorkItem) UnmarshalJSON(data []byte) error {
 	a.Service = s.Service
 	a.CodeHash = s.CodeHash
 	a.Payload = common.FromHex(s.Payload)
-	a.GasLimit = s.GasLimit
+	a.RefineGasLimit = s.RefineGasLimit
+	a.AccumulateGasLimit = s.AccumulateGasLimit
 	a.ImportedSegments = s.ImportedSegments
 	a.Extrinsics = s.Extrinsics
 	a.ExportCount = s.ExportCount
@@ -86,20 +91,22 @@ func (a *WorkItem) UnmarshalJSON(data []byte) error {
 
 func (a WorkItem) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		Service          uint32              `json:"service"`
-		CodeHash         common.Hash         `json:"code_hash"`
-		Payload          string              `json:"payload"`
-		GasLimit         uint64              `json:"gas_limit"`
-		ImportedSegments []ImportSegment     `json:"import_segments"`
-		Extrinsics       []WorkItemExtrinsic `json:"extrinsic"`
-		ExportCount      uint16              `json:"export_count"`
+		Service            uint32              `json:"service"`
+		CodeHash           common.Hash         `json:"code_hash"`
+		Payload            string              `json:"payload"`
+		RefineGasLimit     uint64              `json:"refine_gas_limit"`
+		AccumulateGasLimit uint64              `json:"accumulate_gas_limit"`
+		ImportedSegments   []ImportSegment     `json:"import_segments"`
+		Extrinsics         []WorkItemExtrinsic `json:"extrinsic"`
+		ExportCount        uint16              `json:"export_count"`
 	}{
-		Service:          a.Service,
-		CodeHash:         a.CodeHash,
-		Payload:          common.HexString(a.Payload),
-		GasLimit:         a.GasLimit,
-		ImportedSegments: a.ImportedSegments,
-		Extrinsics:       a.Extrinsics,
-		ExportCount:      a.ExportCount,
+		Service:            a.Service,
+		CodeHash:           a.CodeHash,
+		Payload:            common.HexString(a.Payload),
+		RefineGasLimit:     a.RefineGasLimit,
+		AccumulateGasLimit: a.AccumulateGasLimit,
+		ImportedSegments:   a.ImportedSegments,
+		Extrinsics:         a.Extrinsics,
+		ExportCount:        a.ExportCount,
 	})
 }

@@ -39,6 +39,7 @@ func pvm_test(t *testing.T, tc TestCase) error {
 	} else {
 		fmt.Printf("Register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.register)
 	}
+	t.Log("pvm_test")
 	/*
 		// Check the status
 			if status != testCase.ExpectedStatus {

@@ -72,6 +72,14 @@ func (p *Page) ensureData() {
 	}
 }
 
+func (p *Page) zero() {
+	// TODO
+}
+
+func (p *Page) void() {
+	// TODO
+}
+
 // Get or allocate a specific page
 func (ram *RAM) getOrAllocatePage(pageIndex uint32) (*Page, error) {
 	if pageIndex >= TotalPages {
@@ -920,7 +928,7 @@ func (vm *VM) GetServiceIndex() uint32 {
 	return vm.Service_index
 }
 
-func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, codeHash common.Hash, authorizerCodeHash common.Hash, authorization []byte, extrinsicsBlobs [][]byte) (r types.Result, res uint64) {
+func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, codeHash common.Hash, authorizerCodeHash common.Hash, authorization []byte) (r types.Result, res uint64) {
 	// TODO: William -- work with Sean on encode/decode of argument inputs here
 	// Refine inputs: let a = E(s, y, p, c, a, o, ↕[↕x S x <− x])
 	a := common.Uint32ToBytes(s)                 // s - the service index
@@ -929,7 +937,7 @@ func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, cod
 	a = append(a, codeHash.Bytes()...)           //  c - the prediction of the hash of that service’s code c at the time of reporting,
 	a = append(a, authorizerCodeHash.Bytes()...) //
 	a = append(a, authorization...)              // authorization
-	a = append(a, common.ConcatenateByteSlices(extrinsicsBlobs)...)
+	// a = append(a, common.ConcatenateByteSlices(extrinsicsBlobs)...)
 	// vm.setArgumentInputs(a)
 
 	Standard_Program_Initialization(vm, a) // eq 264/265
@@ -950,13 +958,13 @@ func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *t
 	if !ok {
 		panic("decoded data is not of type []types.AccumulateOperandElements")
 	}
-	for _, argument := range arguments {
+	for _, argument := range arguments { // here I can't understand, why you encode and decode the elements. should use encoded elements directly
 		Standard_Program_Initialization(vm, argument.Results.Ok) // eq 264/265
-		vm.X = X
+		vm.X = X                                                 //⎩I(u, s), I(u, s)⎫⎭
 		vm.Y = X.Clone()
-		vm.Execute(types.EntryPointAccumulate)
+		vm.Execute(types.EntryPointAccumulate) // F ∈ Ω⟨(X, X)⟩
 	}
-
+	// where is the gas being used?
 	// return vm.getArgumentOutputs()
 	r.Err = vm.resultCode
 	r.Ok = []byte{}
@@ -1280,17 +1288,6 @@ func (vm *VM) step() error {
 			fmt.Printf("----\n")
 		}
 		return nil
-		/* Handle host call
-		halt, err := vm.handleHostCall(opcode, operands)
-		if err != nil {
-			return err
-		}
-		if halt {
-			// Host-call halt condition
-			vm.hostCall = true
-			vm.pc-- // Decrement PC to point to the host-call instruction
-			return nil
-		}*/
 	}
 
 	//vm.pc += 1 + uint32(skip(opcode))
@@ -1304,15 +1301,6 @@ func reverseBytes(b []byte) []byte {
 		b[i], b[n-1-i] = b[n-1-i], b[i]
 	}
 	return b
-}
-
-// handleHostCall handles host-call instructions
-func (vm *VM) handleHostCall(opcode byte, operands []byte) (bool, uint64) {
-	if vm.hostenv == nil {
-		return false, HUH
-	}
-	// TODO: vm.hostenv.InvokeHostCall(opcode, operands, vm)
-	return false, OOB
 }
 
 // skip calculates the skip distance based on the opcode
@@ -1805,6 +1793,8 @@ func (vm *VM) moveReg(operands []byte) uint64 {
 }
 
 func (vm *VM) sbrk(operands []byte) error {
+	// TODO
+	fmt.Printf("sbrk not implemented -- operands %v", operands)
 	/*	srcIndex, destIndex := splitRegister(operands[0])
 
 		amount := int(operands[0])

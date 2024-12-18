@@ -102,7 +102,8 @@ func main() {
 
 	// Set up peers and node
 	dataDir := filepath.Join(config.DataDir, fmt.Sprintf("node%d", validatorIndex))
-	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], &genesisConfig, peers, peerList, dataDir, int(config.Port)+int(validatorIndex))
+
+	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], genesisStateFile, 0, peers, peerList, dataDir, int(config.Port)+int(validatorIndex))
 	if err != nil {
 		fmt.Printf("---NewNodeDA %v\n", err)
 		panic(1999)

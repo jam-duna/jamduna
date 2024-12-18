@@ -332,12 +332,13 @@ func jamtest(jam string) {
 			},
 			WorkItems: []types.WorkItem{
 				{
-					Service:          bootstrapService,
-					CodeHash:         bootstrapCodeHash,
-					Payload:          append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
-					GasLimit:         10000000,
-					ImportedSegments: make([]types.ImportSegment, 0),
-					ExportCount:      0,
+					Service:            bootstrapService,
+					CodeHash:           bootstrapCodeHash,
+					Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
 				},
 			},
 		}
@@ -358,11 +359,8 @@ func jamtest(jam string) {
 				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
 				k := []byte{0, 0, 0, 0}
-				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, &k)
-				if err != nil {
-					if !ok {
-						fmt.Printf("t.GetServiceStorage %x NOT FOUND\n", k)
-					}
+				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, k)
+				if err != nil || !ok {
 					time.Sleep(1 * time.Second)
 					continue
 				}
@@ -400,8 +398,10 @@ func jamtest(jam string) {
 			for _, n := range nodes {
 				targetStateDB := n.getState()
 				if targetStateDB != nil {
-					code := targetStateDB.ReadServicePreimageBlob(service.ServiceCode, service.CodeHash)
-					if len(code) > 0 && bytes.Equal(code, service.Code) {
+					code, ok, err := targetStateDB.ReadServicePreimageBlob(service.ServiceCode, service.CodeHash)
+					if err != nil || !ok {
+						// TODO
+					} else if len(code) > 0 && bytes.Equal(code, service.Code) {
 						ready++
 					}
 					// fmt.Printf(" check %s len(code)=%d expect %d => ready=%d\n", service.CodeHash, len(code), len(service.Code), ready)
@@ -458,12 +458,13 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 			RefineContext: refine_context,
 			WorkItems: []types.WorkItem{
 				{
-					Service:          service0.ServiceCode,
-					CodeHash:         service0.CodeHash,
-					Payload:          payload,
-					GasLimit:         10000000,
-					ImportedSegments: importedSegments,
-					ExportCount:      1,
+					Service:            service0.ServiceCode,
+					CodeHash:           service0.CodeHash,
+					Payload:            payload,
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   importedSegments,
+					ExportCount:        1,
 				},
 			},
 		}
@@ -550,20 +551,22 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				RefineContext: refineContext,
 				WorkItems: []types.WorkItem{
 					{
-						Service:          service0.ServiceCode,
-						CodeHash:         service0.CodeHash,
-						Payload:          payload,
-						GasLimit:         10000000,
-						ImportedSegments: fibImportedSegments,
-						ExportCount:      1,
+						Service:            service0.ServiceCode,
+						CodeHash:           service0.CodeHash,
+						Payload:            payload,
+						RefineGasLimit:     10000000,
+						AccumulateGasLimit: 10000000,
+						ImportedSegments:   fibImportedSegments,
+						ExportCount:        1,
 					},
 					{
-						Service:          service1.ServiceCode,
-						CodeHash:         service1.CodeHash,
-						Payload:          payload,
-						GasLimit:         10000000,
-						ImportedSegments: tribImportedSegments,
-						ExportCount:      1,
+						Service:            service1.ServiceCode,
+						CodeHash:           service1.CodeHash,
+						Payload:            payload,
+						RefineGasLimit:     10000000,
+						AccumulateGasLimit: 10000000,
+						ImportedSegments:   tribImportedSegments,
+						ExportCount:        1,
 					},
 				},
 			}
@@ -577,20 +580,22 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				RefineContext: refineContext,
 				WorkItems: []types.WorkItem{
 					{
-						Service:          service0.ServiceCode,
-						CodeHash:         service0.CodeHash,
-						Payload:          payload,
-						GasLimit:         10000000,
-						ImportedSegments: fibImportedSegments,
-						ExportCount:      1,
+						Service:            service0.ServiceCode,
+						CodeHash:           service0.CodeHash,
+						Payload:            payload,
+						RefineGasLimit:     10000000,
+						AccumulateGasLimit: 10000000,
+						ImportedSegments:   fibImportedSegments,
+						ExportCount:        1,
 					},
 					{
-						Service:          service1.ServiceCode,
-						CodeHash:         service1.CodeHash,
-						Payload:          payload,
-						GasLimit:         10000000,
-						ImportedSegments: tribImportedSegments,
-						ExportCount:      1,
+						Service:            service1.ServiceCode,
+						CodeHash:           service1.CodeHash,
+						Payload:            payload,
+						RefineGasLimit:     10000000,
+						AccumulateGasLimit: 10000000,
+						ImportedSegments:   tribImportedSegments,
+						ExportCount:        1,
 					},
 				},
 			}
@@ -633,12 +638,13 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			RefineContext: refineContext,
 			WorkItems: []types.WorkItem{
 				{
-					Service:          serviceM.ServiceCode,
-					CodeHash:         serviceM.CodeHash,
-					Payload:          payloadM,
-					GasLimit:         10000000,
-					ImportedSegments: importedSegmentsM,
-					ExportCount:      0,
+					Service:            serviceM.ServiceCode,
+					CodeHash:           serviceM.CodeHash,
+					Payload:            payloadM,
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   importedSegmentsM,
+					ExportCount:        0,
 				},
 			},
 		}

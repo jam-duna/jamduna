@@ -133,12 +133,16 @@ func TestMapMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println(string(str))
+	if debugCodec {
+		fmt.Println(string(str))
+	}
 	// test unmarshal
 	var h2 Hash2Hash
 	err = json.Unmarshal(str, &h2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println(h2)
+	if debugCodec {
+		fmt.Println(h2)
+	}
 }

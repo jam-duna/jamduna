@@ -3,13 +3,17 @@ package statedb
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -34,7 +38,6 @@ type StateReport struct {
 	AuthorizationsPool       [types.TotalCores][]common.Hash `json:"auth_pools"`
 	PriorServiceAccountState []ServiceItem                   `json:"services"`
 }
-
 type ServiceItem struct {
 	ServiceID uint32  `json:"id"`
 	Service   Service `json:"info"`
@@ -49,29 +52,36 @@ type Service struct {
 	Items      uint32      `json:"items"`
 }
 
-func ServiceToSeviceAccount(s []ServiceItem) map[uint32]types.ServiceAccount {
-	result := make(map[uint32]types.ServiceAccount)
+func ServiceToSeviceAccount(s []ServiceItem) map[uint32]*types.ServiceAccount {
+	result := make(map[uint32]*types.ServiceAccount)
 	for _, value := range s {
-		result[value.ServiceID] = types.ServiceAccount{
+		result[value.ServiceID] = &types.ServiceAccount{
+			ServiceIndex:    value.ServiceID,
 			CodeHash:        value.Service.CodeHash,
 			Balance:         value.Service.Balance,
 			GasLimitG:       value.Service.MinItemGas,
 			GasLimitM:       value.Service.MinMemoGas,
 			StorageSize:     value.Service.CodeSize,
 			NumStorageItems: value.Service.Items,
+			Mutable:         true,
+			Storage:         make(map[common.Hash]types.StorageObject),
+			Lookup:          make(map[common.Hash]types.LookupObject),
+			Preimage:        make(map[common.Hash]types.PreimageObject),
 		}
+		result[value.ServiceID].WriteLookup(value.Service.CodeHash, value.Service.Items, []uint32{})
 	}
 	return result
 }
 
-func (j *JamState) GetStateFromReportState(r StateReport) {
+func (j *JamState) GetStateFromReportState(r StateReport) map[uint32]*types.ServiceAccount {
 	j.AvailabilityAssignments = r.AvailabilityAssignments
 	j.SafroleState.CurrValidators = r.CurrValidators
 	j.SafroleState.PrevValidators = r.PrevValidators
 	j.SafroleState.Entropy = r.Entropy
 	j.RecentBlocks = r.RecentBlocks
 	j.AuthorizationsPool = r.AuthorizationsPool
-	j.PriorServiceAccountState = ServiceToSeviceAccount(r.PriorServiceAccountState)
+	var serviceAccounts = ServiceToSeviceAccount(r.PriorServiceAccountState)
+	return serviceAccounts
 }
 
 // give a json file and read it into a StateReport struct
@@ -142,41 +152,6 @@ func TestReportParsing(t *testing.T) {
 	}
 }
 
-func TestSignature(t *testing.T) {
-	jsonFile := "reports_with_dependencies-1.json"
-	jsonPath := filepath.Join("../jamtestvectors/reports/tiny", jsonFile)
-
-	// Read and unmarshal JSON file
-	jsonData, err := os.ReadFile(jsonPath)
-	if err != nil {
-		t.Fatalf("failed to read JSON file: %v", err)
-	}
-	var report TestReport
-	err = json.Unmarshal(jsonData, &report)
-	if err != nil {
-		t.Fatalf("failed to unmarshal JSON data: %v", err)
-	}
-	var db StateDB
-	state := NewJamState()
-	db.JamState = state
-	var block types.Block
-	db.Block = &block
-	db.JamState.GetStateFromReportState(report.PreState)
-	db.JamState.SafroleState.Entropy = report.PreState.Entropy
-	db.Block.Header.Slot = uint32(report.Input.Slot)
-	db.JamState.SafroleState.Timeslot = uint32(report.Input.Slot)
-	db.Block.Header.OffendersMark = report.PreState.Offenders
-	db.Block.Extrinsic.Guarantees = report.Input.Guarantee
-	db.AssignGuarantors(true)
-	db.PreviousGuarantors(true)
-	CurrV := db.GetSafrole().CurrValidators
-	guarantee := db.Block.Extrinsic.Guarantees[0]
-	err = guarantee.Verify(CurrV) // errBadSignature
-	if debugG {
-		fmt.Printf("Expected error: %v\n", err)
-	}
-}
-
 func ReportVerify(jsonFile string, exceptErr error) error {
 	jsonPath := filepath.Join("../jamtestvectors/reports/tiny", jsonFile)
 
@@ -193,18 +168,31 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	}
 
 	var db StateDB
+	rand.Seed(time.Now().UnixNano()) // Seed the random number generator
+	db_path := fmt.Sprintf("/tmp/testReport_%d", rand.Intn(100000000))
+
+	sdb, err := storage.NewStateDBStorage(db_path)
+	if err != nil {
+		return fmt.Errorf("Reports FAIL: failed to create storage: %v", err)
+	}
+	db = *newEmptyStateDB(sdb)
 	state := NewJamState()
 	db.JamState = state
+	services := db.JamState.GetStateFromReportState(report.PreState)
+	for _, service := range services {
+		err := db.writeAccount(service)
+		if err != nil {
+			return fmt.Errorf("Reports FAIL: failed to write account: %v", err)
+		}
+	}
 	var block types.Block
 	db.Block = &block
-	db.JamState.GetStateFromReportState(report.PreState)
 	db.JamState.SafroleState.Entropy = report.PreState.Entropy
 	db.Block.Header.Slot = uint32(report.Input.Slot)
 	db.JamState.SafroleState.Timeslot = uint32(report.Input.Slot)
 	db.Block.Header.OffendersMark = report.PreState.Offenders
 	db.Block.Extrinsic.Guarantees = report.Input.Guarantee
-	db.AssignGuarantors(false)
-	db.PreviousGuarantors(false)
+	db.RotateGuarantors()
 
 	err = db.Verify_Guarantees()
 	if err != nil && exceptErr == nil {
@@ -238,6 +226,8 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 		}
 	}
 
+	db.trie.Close()
+	trie.DeleteLevelDB()
 	return nil
 }
 

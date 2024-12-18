@@ -10,11 +10,6 @@ on:
     branches:
       - main
       - dev
-      - dev_sourabh
-      - dev_michael
-      - dev_shawn
-      - dev_william
-      - dev_stanley
     paths:
       - .github/workflows/deploy.yml
       - bls/*.go
@@ -74,20 +69,24 @@ jobs:
         run: |
           make blslib
           make bandersnatchlib
+          make sp1lib
 
       - name: Run test common
         run: |
-          go test ./common 
+          go test ./common
           mkdir -p "$CARGO_MANIFEST_DIR"
 
       - name: Run test bls
-        run: go test ./bls 
+        run: go test ./bls
 
       - name: Run test bandersnatch
-        run: go test ./bandersnatch 
+        run: go test ./bandersnatch
+
+      - name: Run test sp1
+        run: go test ./sp1
 
       - name: Run test trie
-        run: go test ./trie || echo "Test failed but continuing."
+        run: go test ./trie
 
       - name: Run test types
         run: go test ./types || echo "Test failed but continuing."
@@ -100,11 +99,3 @@ jobs:
 
       - name: Run test pvm
         run: go test ./pvm
-
-      - name: Run test fib
-        run: go test ./node -timeout 5m -v -run TestFib -tags network || echo "Test failed but continuing."
-
-      - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run TestMegatron -tags network || echo "Test failed but continuing."
-
-

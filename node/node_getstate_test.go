@@ -46,7 +46,7 @@ func TestGetState(t *testing.T) {
 				fmt.Printf("Error in GetState %v\n", err)
 			}
 			rawKey := common.Hex2Bytes("cbf888ec0f8ef855fee845e2b986edf94da1b671efa86660dc5ce5be1dee8b05")
-			boundarynodes, keyvalues, ok, err = node.GetServiceIdxStorage(headerHash, 47, &rawKey)
+			boundarynodes, keyvalues, ok, err = node.GetServiceIdxStorage(headerHash, 47, rawKey)
 			fmt.Printf("GetServiceIdxStorage----->\n")
 			fmt.Printf("boundarynodes %x\n", boundarynodes)
 			fmt.Printf("keyvalues %x\n", keyvalues)

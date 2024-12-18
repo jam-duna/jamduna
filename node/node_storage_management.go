@@ -98,18 +98,20 @@ func (n *Node) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, erro
 	//header_<headerhash> -> blockHash
 	headerPrefix := []byte("header_")
 	storeKey := append(headerPrefix, blkHeader[:]...)
-	blockHash, err := n.ReadRawKV(storeKey)
-	if err != nil {
+	blockHash, ok, err := n.ReadRawKV(storeKey)
+	if err != nil || !ok {
 		// fmt.Printf("Error reading blockHash: %v\n", err)
 		return nil, err
 	}
 	//blk_<blockHash> -> codec(block)
 	blockPrefix := []byte("blk_")
 	blkStoreKey := append(blockPrefix, blockHash...)
-	encodedblk, err := n.ReadRawKV(blkStoreKey)
+	encodedblk, ok, err := n.ReadRawKV(blkStoreKey)
 	if err != nil {
 		fmt.Printf("Error reading block: %v\n", err)
 		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("Block not found")
 	}
 	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
 	if err != nil {
@@ -122,13 +124,14 @@ func (n *Node) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, erro
 
 func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk, err error) {
 	//TODO: should probably store erasureRoot -> pbH
+	// Stanley: Need to check this logic
 	erasure_metaKey := fmt.Sprintf("erasureMeta-%v", erasureRoot)
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasureRoot)
 	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasureRoot)
-	erasure_metaKey_val, err := n.ReadRawKV([]byte(erasure_metaKey))
-	erasure_bKey_val, err := n.ReadRawKV([]byte(erasure_bKey))
-	erasure_sKey_val, err := n.ReadRawKV([]byte(erasure_sKey))
-	if err != nil {
+	erasure_metaKey_val, _, err := n.ReadRawKV([]byte(erasure_metaKey))
+	erasure_bKey_val, _, err := n.ReadRawKV([]byte(erasure_bKey))
+	erasure_sKey_val, ok, err := n.ReadRawKV([]byte(erasure_sKey))
+	if err != nil || !ok {
 		return erasureMeta, bECChunks, sECChunksArray, fmt.Errorf("Fail to find erasure_metaKey=%v", erasureRoot)
 	}
 	// TODO: figure out the codec later
@@ -308,8 +311,8 @@ func (n *Node) StoreFullShardJustification(erasureRoot common.Hash, shardIndex u
 func (n *Node) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, justification []byte, err error) {
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	f_es_key := fmt.Sprintf("f_%v", esKey)
-	data, err := n.ReadRawKV([]byte(f_es_key))
-	if err != nil {
+	data, ok, err := n.ReadRawKV([]byte(f_es_key))
+	if err != nil || !ok {
 		return
 	}
 	if len(data) < 64 {
@@ -353,8 +356,8 @@ func generateErasureRootToRequestedHash(erasureRoot common.Hash) string {
 // h is a WorkPackageHash or ExportSegmentRoot
 func (n *Node) getErasureRootFromHash(h common.Hash) (erasureRoot common.Hash, err error) {
 	// Retrieve ErasureRoot from LevelDB
-	erasureRootRaw, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(h)))
-	if err0 != nil {
+	erasureRootRaw, ok, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(h)))
+	if err0 != nil || !ok {
 		return erasureRoot, err0
 	}
 	return common.Hash(erasureRootRaw), nil
@@ -364,16 +367,16 @@ func (n *Node) getErasureRootFromHash(h common.Hash) (erasureRoot common.Hash, e
 func (n *Node) getExportedSegmenstRootFromHash(requestedHash common.Hash) (exportedSegmentsRoot common.Hash, packageHash common.Hash, err error) {
 
 	// requestedHash -> erasureRoot
-	erasureRootRaw, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(requestedHash)))
-	if err0 != nil {
+	erasureRootRaw, ok, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(requestedHash)))
+	if err0 != nil || !ok {
 		fmt.Printf("getExportedSegmenstRootFromHash: requestedHash %v not found %v\n", requestedHash, err0)
 		return exportedSegmentsRoot, packageHash, err0
 	}
 	erasureRoot := common.Hash(erasureRootRaw)
 
 	// erasureRoot -> exportedSegmentsRoot
-	segmentRoot_packageHash, err2 := n.ReadRawKV([]byte(generateErasureRootToRequestedHash(erasureRoot)))
-	if err2 != nil || len(segmentRoot_packageHash) != 64 {
+	segmentRoot_packageHash, ok2, err2 := n.ReadRawKV([]byte(generateErasureRootToRequestedHash(erasureRoot)))
+	if err2 != nil || len(segmentRoot_packageHash) != 64 || !ok2 {
 		return exportedSegmentsRoot, packageHash, err2
 	}
 	exportedSegmentsRoot = common.Hash(segmentRoot_packageHash[:32])
@@ -392,8 +395,8 @@ func (n *Node) getImportSegment(h common.Hash, segmentIndex uint16) ([]byte, boo
 	}
 
 	// Retrieve the concatenated segments using the ErasureRoot
-	segmentsConcat, err := n.ReadRawKV([]byte(generateErasureRootToSegmentsKey(erasureRoot)))
-	if err != nil {
+	segmentsConcat, ok, err := n.ReadRawKV([]byte(generateErasureRootToSegmentsKey(erasureRoot)))
+	if err != nil || !ok {
 		return nil, false
 	}
 
@@ -504,7 +507,7 @@ func (n *Node) GetBundleShard_Assurer(erasureRoot common.Hash, shardIndex uint16
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	b_es_key := fmt.Sprintf("b_%s", esKey)
 
-	bundleShard, err = n.ReadRawKV([]byte(b_es_key))
+	bundleShard, _, err = n.ReadRawKV([]byte(b_es_key))
 	bClubH, sClubH, justification, err := n.GetFullShardJustification(erasureRoot, shardIndex)
 	if err != nil {
 		return erasureRoot, shardIndex, nil, nil, false, err
@@ -584,7 +587,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	s_es_key := fmt.Sprintf("s_%s", esKey)
 
-	concatenatedShards, err := n.ReadRawKV([]byte(s_es_key))
+	concatenatedShards, _, err := n.ReadRawKV([]byte(s_es_key))
 	segmentShards, _ := SplitToSegmentShards(concatenatedShards)
 
 	segmentTree := trie.NewWellBalancedTree(segmentShards, types.Blake2b)
@@ -639,8 +642,8 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 
 // Look up the erasureRoot for  [exportedSegmentRoot, erasureRoot and WorkPackageHash]
 func (n *Node) ErasureRootLookUP(h common.Hash) (erasureRoot common.Hash, err error) {
-	erasureRootRaw, err := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(h)))
-	if err != nil {
+	erasureRootRaw, ok, err := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(h)))
+	if err != nil || !ok {
 		if debugSegments {
 			fmt.Printf("Error reading erasureRoot: %v\n", err)
 		}

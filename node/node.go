@@ -57,7 +57,6 @@ const (
 	quicAddr      = "127.0.0.1:%d"
 	basePort      = 9000
 	godMode       = false
-	noRotation    = false
 )
 
 const (
@@ -390,8 +389,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	node.setValidatorCredential(credential)
 	node.epoch0Timestamp = epoch0Timestamp
-	node.statedb.PreviousGuarantors(noRotation)
-	node.statedb.AssignGuarantors(noRotation)
 	var validators []types.Validator
 	validators = node.statedb.GetSafrole().NextValidators
 	if len(validators) == 0 {
@@ -1263,8 +1260,8 @@ func (n *Node) runClient() {
 				n.sendGodTimeslotUsed(currJCE)
 				// we authored a block
 				oldstate := n.statedb
-				newStateDB.PreviousGuarantors(noRotation)
-				newStateDB.AssignGuarantors(noRotation)
+				//TODO: see what happens
+				//newStateDB.RotateGuarantors()
 				newStateDB.SetAncestor(newBlock.Header, oldstate)
 				if debugAncestor {
 					timeSlots1 := n.statedb.GetAncestorTimeSlot()

@@ -126,7 +126,7 @@ Represents a test case for `refinement` operations.
 ```go
 type RefineTestcase struct {
     Name                    string                `json:"name"`
-    InitalGas               uint64                `json:"initial-gas"`
+    InitialGas               uint64                `json:"initial-gas"`
     InitialRegs             []uint32              `json:"initial-regs"`
     InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
     InitialMemory           []PageForTest         `json:"initial-memory"`
@@ -153,7 +153,7 @@ Represents a test case for `accumulation` operations.
 ```go
 type AccumulateTestcase struct {
     Name                    string                `json:"name"`
-    InitalGas               uint64                `json:"initial-gas"`
+    InitialGas               uint64                `json:"initial-gas"`
     InitialRegs             []uint32              `json:"initial-regs"`
     InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
     InitialMemory           []PageForTest         `json:"initial-memory"`
@@ -178,7 +178,7 @@ Represents a test case for `general` operations.
 ```go
 type GeneralTestcase struct {
     Name                    string                `json:"name"`
-    InitalGas               uint64                `json:"initial-gas"`
+    InitialGas               uint64                `json:"initial-gas"`
     InitialRegs             []uint32              `json:"initial-regs"`
     InitialMemoryPermission []pvm.PermissionRange `json:"initial-memory-permission"`
     InitialMemory           []PageForTest         `json:"initial-memory"`
@@ -214,7 +214,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
         "Import": {pvm.OK, pvm.OOB, pvm.NONE},
         "Export": {pvm.OK, pvm.OOB, pvm.FULL},
     }
-    templateFileName := "./Templets/hostRefineTemplet.json"
+    templateFileName := "./templates/hostRefineTemplate.json"
     testCaseType := "Refine"
     GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
 }
@@ -239,7 +239,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
         "Forget":   {pvm.OK, pvm.OOB, pvm.HUH},
         "Transfer": {pvm.OK, pvm.WHO, pvm.CASH, pvm.LOW, pvm.HIGH},
     }
-    templateFileName := "./Templets/hostAccumulateTemplet.json"
+    templateFileName := "./templates/hostAccumulateTemplate.json"
     testCaseType := "Accumulate"
     GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
 }

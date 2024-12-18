@@ -26,32 +26,19 @@ transfer:
 	@echo "Running TestTransfer with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestTransfer -tags network
 
-# Target for running a specific test function with the timeout
-testRefine:
-	@echo "Running TestRefine with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestRefine -tags network
 
-# Target for running a specific test function with the timeout
-testAccumulate:
-	@echo "Running TestAccumulate with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestAccumulate -tags network
+# Host function testing
+refine:
+	@echo "Running Refine host function testing..."
+	go test -run TestGenerateRefineTestVectors -tags network
+	go test -run TestRefine -tags network
 
-# Target for running a specific test function with the timeout
-testGeneral:
-	@echo "Running TestGeneral with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestGeneral$
+accumulate:
+	@echo "Running Accumulate host function testing..."
+	go test -run TestGenerateAccumulateTestVectors -tags network
+	go test -run TestAccumulate -tags network
 
-# Target for running a specific test function with the timeout
-testGenerateRefineTestVectors:
-	@echo "Running TestGenerateRefineTestVectors with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestGenerateRefineTestVectors$
-
-# Target for running a specific test function with the timeout
-testGenerateAccumulateTestVectors:
-	@echo "Running TestGenerateAccumulateTestVectors with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestGenerateAccumulateTestVectors$
-
-# Target for running a specific test function with the timeout
-testGenerateGeneralTestVectors:
-	@echo "Running TestGenerateGeneralTestVectors with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run ^TestGenerateGeneralTestVectors$
+general:
+	@echo "Running General host function testing..."
+	go test -run TestGenerateGeneralTestVectors -tags network
+	go test -run TestGeneral -tags network

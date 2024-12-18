@@ -143,6 +143,9 @@ func (s *StateDB) ValidateAssurances(assurances []types.Assurance) error {
 func CheckSortingEAs(assurances []types.Assurance) error {
 	// Check the SortAssurances is correct
 	for i := 0; i < len(assurances)-1; i++ {
+		if assurances[i].ValidatorIndex >= types.TotalValidators {
+			return jamerrors.ErrABadValidatorIndex
+		}
 		if assurances[i].ValidatorIndex > assurances[i+1].ValidatorIndex {
 			return jamerrors.ErrANotSortedAssurers
 		}

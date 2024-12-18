@@ -21,17 +21,6 @@ const (
 	EntryPointGeneric       = 255
 )
 
-/*
-
-const (
-	PreimageRecordType          = "Preimage"
-	LookupRecordType            = "Lookup"
-	PreimageANDLookupRecordType = "PL"
-	StorageRecordType           = "Storage"
-	UnknownRecordType           = "Unknown"
-)
-*/
-
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
 	ServiceIndex    uint32      `json:"service_index"`
@@ -42,13 +31,16 @@ type ServiceAccount struct {
 	StorageSize     uint64      `json:"code_size"`    //a_l - total number of octets used in storage (9.3)
 	NumStorageItems uint32      `json:"items"`        //a_i - the number of items in storage (9.3)
 
+	// X.D will have Mutable=false, but X.D.U will have Mutable=True
+	Mutable bool `json:"mutable"`
+
 	Dirty    bool
 	Storage  map[common.Hash]StorageObject  `json:"s_map"` // arbitrary_k -> v. if v=[]byte. use as delete
 	Lookup   map[common.Hash]LookupObject   `json:"l_map"` // (h,l) -> anchor
 	Preimage map[common.Hash]PreimageObject `json:"p_map"` // H(p)  -> p
 }
 
-func (s ServiceAccount) Clone() *ServiceAccount {
+func (s *ServiceAccount) Clone() *ServiceAccount {
 	// Start by cloning primitive fields directly
 	clone := ServiceAccount{
 		ServiceIndex:    s.ServiceIndex,
@@ -59,6 +51,7 @@ func (s ServiceAccount) Clone() *ServiceAccount {
 		StorageSize:     s.StorageSize,
 		NumStorageItems: s.NumStorageItems,
 		Dirty:           s.Dirty,
+		Mutable:         false, // must use ALLOW_MUTABLE explicitly
 	}
 
 	// Clone the Storage map
@@ -232,7 +225,7 @@ func AccountStateFromBytes(service_index uint32, data []byte) (*ServiceAccount, 
 		fmt.Println("Error recovering:", err)
 		return nil, err
 	}
-	acct.SetServiceIndex(service_index)
+	acct.ServiceIndex = service_index
 	return &acct, nil
 }
 
@@ -240,8 +233,8 @@ func (s *ServiceAccount) GetServiceIndex() uint32 {
 	return s.ServiceIndex
 }
 
-func (s *ServiceAccount) SetServiceIndex(service_index uint32) {
-	s.ServiceIndex = service_index
+func (s *ServiceAccount) ALLOW_MUTABLE() {
+	s.Mutable = true
 }
 
 func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceAccount, error) {
@@ -259,7 +252,7 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 		GasLimitM:       acctState.GasLimitM,
 		StorageSize:     acctState.StorageSize,
 		NumStorageItems: acctState.NumStorageItems,
-
+		Mutable:         false, // THIS THE DEFAULT
 		// Initialize maps to avoid nil reference errors
 		Storage:  make(map[common.Hash]StorageObject),
 		Lookup:   make(map[common.Hash]LookupObject),
@@ -271,8 +264,8 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 // Convert the ServiceAccount to a human-readable string.
 func (s *ServiceAccount) String() string {
 	// Initial account information
-	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%v, G=%v M=%v L=%v, I=%v\n",
-		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems)
+	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%v, G=%v M=%v L=%v, I=%v [Mutable: %v]\n",
+		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems, s.Mutable)
 
 	// Lookup entries
 	str2 := ""
@@ -294,8 +287,8 @@ func (s *ServiceAccount) String() string {
 	return str + str2 + str3 + str4
 }
 
-func (s *ServiceAccount) ReadStorage(serviceIndex uint32, rawK []byte, sdb HostEnv) (ok bool, v []byte) {
-	// serviceIndex := s.ServiceIndex
+func (s *ServiceAccount) ReadStorage(rawK []byte, sdb HostEnv) (ok bool, v []byte) {
+	serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal(serviceIndex, rawK)
 	storageObj, ok := s.Storage[hk]
 	if storageObj.Deleted {
@@ -303,10 +296,16 @@ func (s *ServiceAccount) ReadStorage(serviceIndex uint32, rawK []byte, sdb HostE
 	}
 	if !ok {
 		var err error
-		v = sdb.ReadServiceStorage(serviceIndex, &storageObj.RawKey)
-		if err != nil {
+		v, ok, err = sdb.ReadServiceStorage(serviceIndex, rawK)
+		if err != nil || !ok {
 			return false, nil
 		}
+		s.Storage[hk] = StorageObject{
+			Dirty:  false,
+			Value:  v,
+			RawKey: rawK,
+		}
+		return true, v
 	}
 	return true, storageObj.Value
 }
@@ -317,7 +316,11 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 		return false, nil
 	}
 	if !ok {
-		preimage = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
+		var err error
+		preimage, ok, err = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
+		if err != nil || !ok {
+			return false, preimage //, err
+		}
 		s.Preimage[blobHash] = PreimageObject{
 			Dirty:    false,
 			Preimage: preimage,
@@ -333,7 +336,11 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 		return false, []uint32{}
 	}
 	if !ok {
-		anchor_timeslot = sdb.ReadServicePreimageLookup(s.GetServiceIndex(), blobHash, z)
+		var err error
+		anchor_timeslot, ok, err = sdb.ReadServicePreimageLookup(s.GetServiceIndex(), blobHash, z)
+		if err != nil || !ok {
+			return ok, anchor_timeslot
+		}
 		s.Lookup[blobHash] = LookupObject{
 			Dirty: false,
 			Z:     z,
@@ -344,7 +351,72 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 	return true, lookupObj.T
 }
 
+// a_c - account code hash c
+func (s *ServiceAccount) SetCodeHash(codeHash common.Hash) {
+	if s.Mutable == false {
+		panic("SetCodeHash")
+	}
+	s.Dirty = true
+	s.CodeHash = codeHash
+}
+
+// a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
+// Note this could be IncBalance DecBalance instead?
+func (s *ServiceAccount) DecBalance(balance uint64) {
+	if s.Mutable == false {
+		panic("SetBalance")
+	}
+	s.Dirty = true
+	s.Balance -= balance
+}
+func (s *ServiceAccount) IncBalance(balance uint64) {
+	if s.Mutable == false {
+		panic("SetBalance")
+	}
+	s.Dirty = true
+	s.Balance += balance
+}
+
+// a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
+func (s *ServiceAccount) SetGasLimitG(g uint64) {
+	if s.Mutable == false {
+		panic("SetGasLimitG")
+	}
+	s.Dirty = true
+	s.GasLimitG = g
+}
+
+// a_m - the minimum required for the On Transfer entry-point.
+func (s *ServiceAccount) SetGasLimitM(g uint64) {
+	if s.Mutable == false {
+		panic("SetGasLimitM")
+	}
+	s.Dirty = true
+	s.GasLimitM = g
+}
+
+// a_l - total number of octets used in storage (9.3)
+func (s *ServiceAccount) SetStorageSize(storageSize uint64) {
+	if s.Mutable == false {
+		panic("SetStorageSize")
+	}
+	s.Dirty = true
+	s.StorageSize = storageSize
+}
+
+// a_i - the number of items in storage (9.3)
+func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
+	if s.Mutable == false {
+		panic("SetNumStorageItems")
+	}
+	s.Dirty = true
+	s.NumStorageItems = numStorageItems
+}
+
 func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK []byte, val []byte) {
+	if s.Mutable == false {
+		panic("Called WriteStorage on immutable ServiceAccount")
+	}
 	// k for original raw key, hk for hash key
 	// serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal(serviceIndex, rawK)
@@ -358,6 +430,9 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK []byte, val []by
 }
 
 func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
+	if s.Mutable == false {
+		panic("Called WriteStorage on immutable ServiceAccount")
+	}
 	s.Dirty = true
 	s.Preimage[blobHash] = PreimageObject{
 		Dirty:    true,
@@ -367,6 +442,9 @@ func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 }
 
 func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots []uint32) {
+	if s.Mutable == false {
+		panic("Called WriteStorage on immutable ServiceAccount")
+	}
 	s.Dirty = true
 	s.Lookup[blobHash] = LookupObject{
 		Dirty:   true,
@@ -374,6 +452,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 		Z:       z,
 		T:       time_slots,
 	}
+
 }
 
 // eq 95
@@ -428,31 +507,11 @@ func convertHashMapToStringMap[T any](input map[common.Hash]T) map[string]T {
 	}
 	return output
 }
-func convertByteMapToStringMap[T any](input map[*[]byte]T) map[string]T {
-	output := make(map[string]T, len(input))
-	for k, v := range input {
-		// *[]byte to string
-		kString := fmt.Sprintf("%x", *k)
-		fmt.Printf("string k=%s\n", kString)
-		output[kString] = v
-	}
-	return output
-}
 
 func convertStringMapToHashMap[T any](input map[string]T) map[common.Hash]T {
 	output := make(map[common.Hash]T, len(input))
 	for k, v := range input {
 		output[common.HexToHash(k)] = v
-	}
-	return output
-}
-
-func convertStringMapToByteMap[T any](input map[string]T) map[*[]byte]T {
-	output := make(map[*[]byte]T, len(input))
-	for k, v := range input {
-		// string to *[]byte
-		kBytes := []byte(k)
-		output[&kBytes] = v
 	}
 	return output
 }

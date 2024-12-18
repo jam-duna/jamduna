@@ -142,13 +142,13 @@ func encodeapi(objectType string, inp string) (string, error) {
 			return "", err
 		}
 		obj = c6
-	case "C7", "C8", "C9":
-		var validators statedb.Validators
-		err = json.Unmarshal(input, &validators)
-		if err != nil {
-			return "", err
-		}
-		obj = validators
+	/*case "C7", "C8", "C9":
+	var validators statedb.Validators
+	err = json.Unmarshal(input, &validators)
+	if err != nil {
+		return "", err
+	}
+	obj = validators*/
 	case "C10":
 		var availabilityAssignments statedb.AvailabilityAssignments
 		err = json.Unmarshal(input, &availabilityAssignments)
@@ -259,12 +259,12 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Psi_state{}))
 	case "C6":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Entropy{}))
-	case "C7":
+	/*case "C7":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
 	case "C8":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
 	case "C9":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))*/
 	case "C10":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.AvailabilityAssignments{}))
 	case "C11":

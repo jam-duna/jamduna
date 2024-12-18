@@ -20,7 +20,7 @@ on:
       - statedb/*.go
       - node/*.go
   schedule:
-    - cron: '*/12 * * * *'
+    - cron: '*/30 * * * *'
 
 jobs:
   test:
@@ -69,15 +69,43 @@ jobs:
         run: |
           make blslib
           make bandersnatchlib
+          make sp1lib
 
       - name: Run test bls
-        run: go test ./bls || echo "Test failed but continuing."
+        run: go test ./bls 
 
       - name: Run test bandersnatch
-        run: go test ./bandersnatch || echo "Test failed but continuing."
+        run: go test ./bandersnatch 
+
+      - name: Run test sp1
+        run: go test ./sp1
 
       - name: Run test fib
         run: go test ./node -timeout 5m -v -run ^TestFib$ -tags network 
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
 
       - name: Run test megatron
         run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network

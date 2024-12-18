@@ -84,9 +84,12 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	if len(guarantee.Signatures) < 2 {
 		return jamerrors.ErrGInsufficientGuarantees
 	}
-
+	err := s.checkServicesExist(guarantee)
+	if err != nil {
+		return err
+	}
 	// v0.5 eq 11.24 - check index
-	err := CheckSorting_EG(guarantee)
+	err = CheckSorting_EG(guarantee)
 	if err != nil {
 		return err // CHECK: instead of jamerrors.ErrGDuplicateGuarantors
 	}
@@ -194,6 +197,11 @@ func (s *StateDB) Verify_Guarantee(guarantee types.Guarantee) error {
 }
 
 func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
+
+	err := s.checkServicesExist(guarantee)
+	if err != nil {
+		return err
+	}
 	max_core := types.TotalCores - 1
 	if guarantee.Report.CoreIndex > uint16(max_core) {
 		return jamerrors.ErrGBadCoreIndex
@@ -209,7 +217,7 @@ func (s *StateDB) VerifyGuarantee_Basic(guarantee types.Guarantee) error {
 	}
 
 	// v0.5 eq 11.24
-	err := CheckSorting_EG(guarantee)
+	err = CheckSorting_EG(guarantee)
 	if err != nil {
 		return jamerrors.ErrGDuplicateGuarantors
 	}
@@ -398,44 +406,36 @@ func (s *StateDB) AreValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 	}
 	timeSlotPeriod := s.Block.TimeSlot() / types.ValidatorCoreRotationPeriod
 	reportTime := guarantee.Slot / types.ValidatorCoreRotationPeriod
+	shift_bool := s.Block.Header.EpochMark != nil
+	prev_assignment, curr_assignment := s.CaculateAssignments(shift_bool)
 	for _, g := range guarantee.Signatures {
 		find_and_correct := false
 		if timeSlotPeriod != reportTime {
-			for i, assignment := range s.PreviousGuarantorAssignments {
+			for i, assignment := range prev_assignment {
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
 					find_and_correct = true
 					break
 				}
-			}
-			// QUERY for Shawn: shouldn't we also do this  -- pls explain
-			if false {
-				for i, assignment := range s.GuarantorAssignments {
-					if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
-						find_and_correct = true
-						break
-					}
-				}
-			}
-			if !find_and_correct {
-				if debugG {
-					fmt.Printf("%s\n", guarantee.String())
-					s.GuarantorsAssignmentsPrint()
-				}
-				return jamerrors.ErrGWrongAssignment
-
 			}
 		} else {
-			for i, assignment := range s.GuarantorAssignments {
+			for i, assignment := range curr_assignment {
 				if uint16(i) == g.ValidatorIndex && assignment.CoreIndex == guarantee.Report.CoreIndex {
 					find_and_correct = true
 					break
 				}
 			}
-			if !find_and_correct {
+		}
+		if !find_and_correct {
+			if debugG {
 				fmt.Printf("%s\n", guarantee.String())
 				s.GuarantorsAssignmentsPrint()
-				return jamerrors.ErrGWrongAssignment
+				if timeSlotPeriod != reportTime {
+					fmt.Printf("We are using prev core assignment\n")
+				} else {
+					fmt.Printf("We are using curr core assignment\n")
+				}
 			}
+			return jamerrors.ErrGWrongAssignment
 		}
 
 	}
@@ -529,6 +529,20 @@ func (j *JamState) CheckInvalidCoreIndex() {
 
 }
 
+func (s *StateDB) checkServicesExist(g types.Guarantee) error {
+	for _, result := range g.Report.Results {
+		// check if serviceID exists
+		_, ok, err := s.GetService(result.ServiceID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return jamerrors.ErrGBadServiceID
+		}
+	}
+	return nil
+}
+
 // v0.5 eq 11.29
 func (s *StateDB) checkGas(g types.Guarantee) error {
 	sum_rg := uint64(0)
@@ -539,36 +553,13 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	if sum_rg <= types.AccumulationGasAllocation {
 		for _, results := range g.Report.Results {
 			serviceID := results.ServiceID
-			if _, exists := s.JamState.PriorServiceAccountState[serviceID]; exists {
-				gas_limitG := s.JamState.PriorServiceAccountState[serviceID].GasLimitG
+			if service, ok, err := s.GetService(serviceID); ok && err == nil {
+				gas_limitG := service.GasLimitG
 				if results.Gas >= gas_limitG {
 					return nil
 				} else {
 					return jamerrors.ErrGServiceItemTooLow
 				}
-			} else if s.trie == nil {
-				return jamerrors.ErrGBadServiceID
-			}
-			v, ok, err := s.trie.GetService(255, serviceID)
-			if err != nil || !ok {
-				// true error case: serviceID is not found even in trie
-				//fmt.Printf("EEE checkCodeHash serviceID=%v not found in trie err: %v\n", serviceID, err)
-				return jamerrors.ErrGBadServiceID
-			}
-			accountState, err := types.ServiceAccountFromBytes(serviceID, v)
-			if err != nil {
-				return jamerrors.ErrGBadServiceID
-			}
-			if debugG {
-				fmt.Printf("checkGas fallback checkCodeHash serviceID=%v, accountState=%v\n", serviceID, accountState.JsonString())
-			}
-			priorAccountState := *accountState
-			s.JamState.PriorServiceAccountState[serviceID] = priorAccountState
-			gas_limitG := s.JamState.PriorServiceAccountState[serviceID].GasLimitG
-			if results.Gas >= gas_limitG {
-				return nil
-			} else {
-				return jamerrors.ErrGServiceItemTooLow
 			}
 		}
 	}
@@ -968,31 +959,14 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 	for _, result := range g.Report.Results {
 		serviceID := result.ServiceID
 		codeHash := result.CodeHash
-		priorAccountState, ok := s.JamState.PriorServiceAccountState[serviceID]
-		if !ok {
-			// test_vector will not have fallback via trie
-			if s.trie == nil {
-				return jamerrors.ErrGBadServiceID
-			}
-			// on cache miss, get service from trie. not sure if prior_trie is needed
-			v, ok, err := s.trie.GetService(255, serviceID)
-			if err != nil || !ok {
-				//fmt.Printf("EEE checkCodeHash serviceID=%v not found in trie err: %v\n", serviceID, err)
-				return jamerrors.ErrGBadServiceID
-			}
-			accountState, err := types.ServiceAccountFromBytes(serviceID, v)
-			if err != nil {
-				panic(fmt.Sprintf("FFF checkCodeHash serviceID=%v Recovering err: %v\n", serviceID, err))
-				return jamerrors.ErrGBadServiceID
-			}
-			if debugG {
-				fmt.Printf("fallback checkCodeHash serviceID=%v, accountState=%v\n", serviceID, accountState.JsonString())
-			}
-			priorAccountState = *accountState
-			s.JamState.PriorServiceAccountState[serviceID] = priorAccountState
+		service, ok, err := s.GetService(serviceID)
+		if err != nil {
+			return err
 		}
-		if codeHash != priorAccountState.CodeHash {
-			//fmt.Printf("result.ServiceID=%v result.CodeHash: %v, service.codehash: %v\n", serviceID, result.CodeHash, priorAccountState.CodeHash)
+		if !ok {
+			return jamerrors.ErrGBadCodeHash
+		}
+		if codeHash != service.CodeHash {
 			return jamerrors.ErrGBadCodeHash
 		}
 	}

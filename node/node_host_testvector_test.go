@@ -18,6 +18,15 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+func SetUpNode() (*Node, error) {
+	nodes, err := SetUpNodes(1)
+	if err != nil {
+		panic(1)
+	}
+	return nodes[0], err
+
+}
+
 type ByteSlice []byte
 
 func (b ByteSlice) MarshalJSON() ([]byte, error) {
@@ -40,22 +49,9 @@ func (b *ByteSlice) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type PageForTest struct {
-	Value  ByteSlice      `json:"value"`  // The data stored in the page
-	Access pvm.AccessMode `json:"access"` // The access mode of the page
-}
-
 type RAMForTest struct {
 	Pages map[uint32]*PageForTest `json:"pages"` // The pages in the RAM
 }
-type RefineMForTest struct {
-	P ByteSlice   `json:"P"`
-	U *RAMForTest `json:"U"`
-	I uint32      `json:"I"`
-}
-
-type RefineM_mapForTest map[uint32]*RefineMForTest
-
 type ServiceAccountForTest struct {
 	Storage  map[string]ByteSlice `json:"s_map"`
 	Lookup   map[string][]uint32  `json:"l_map"`
@@ -66,6 +62,19 @@ type ServiceAccountForTest struct {
 	GasLimitG uint64 `json:"min_item_gas"`
 	GasLimitM uint64 `json:"min_memo_gas"`
 }
+
+type PageForTest struct {
+	Value  ByteSlice      `json:"value"`  // The data stored in the page
+	Access pvm.AccessMode `json:"access"` // The access mode of the page
+}
+
+type RefineMForTest struct {
+	P ByteSlice   `json:"P"`
+	U *RAMForTest `json:"U"`
+	I uint32      `json:"I"`
+}
+
+type RefineM_mapForTest map[uint32]*RefineMForTest
 
 type PartialStateForTest struct {
 	D                  map[uint32]*ServiceAccountForTest `json:"D"`
@@ -91,10 +100,10 @@ type XContextForTest struct {
 }
 
 type RefineTestcase struct {
-	Name          string     `json:"name"`
-	InitalGas     uint64     `json:"initial-gas"`
-	InitialRegs   []uint64   `json:"initial-regs"`
-	InitialMemory RAMForTest `json:"initial-memory"`
+	Name          string            `json:"name"`
+	InitialGas    uint64            `json:"initial-gas"`
+	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
+	InitialMemory RAMForTest        `json:"initial-memory"`
 
 	InitialRefineM_map   RefineM_mapForTest `json:"initial-refine-map"` // m in refine function
 	InitialExportSegment []ByteSlice        `json:"initial-export-segment"`
@@ -102,45 +111,45 @@ type RefineTestcase struct {
 	InitialImportSegment    []ByteSlice `json:"initial-import-segment"`
 	InitialExportSegmentIdx uint32      `json:"initial-export-segment-index"`
 
-	ExpectedGas    uint64     `json:"expected-gas"`
-	ExpectedRegs   []uint64   `json:"expected-regs"`
-	ExpectedMemory RAMForTest `json:"expected-memory"`
+	ExpectedGas    uint64            `json:"expected-gas"`
+	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
+	ExpectedMemory RAMForTest        `json:"expected-memory"`
 
 	ExpectedRefineM_map   RefineM_mapForTest `json:"expected-refine-map"`
 	ExpectedExportSegment []ByteSlice        `json:"expected-export-segment"`
 }
 
 type AccumulateTestcase struct {
-	Name          string     `json:"name"`
-	InitalGas     uint64     `json:"initial-gas"`
-	InitialRegs   []uint64   `json:"initial-regs"`
-	InitialMemory RAMForTest `json:"initial-memory"`
+	Name          string            `json:"name"`
+	InitialGas    uint64            `json:"initial-gas"`
+	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
+	InitialMemory RAMForTest        `json:"initial-memory"`
 
 	InitialXcontent_x *XContextForTest `json:"initial-xcontent-x"`
 	InitialXcontent_y XContextForTest  `json:"initial-xcontent-y"`
 	InitialTimeslot   uint32           `json:"initial-timeslot"`
 
-	ExpectedGas    uint64     `json:"expected-gas"`
-	ExpectedRegs   []uint64   `json:"expected-regs"`
-	ExpectedMemory RAMForTest `json:"expected-memory"`
+	ExpectedGas    uint64            `json:"expected-gas"`
+	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
+	ExpectedMemory RAMForTest        `json:"expected-memory"`
 
 	ExpectedXcontent_x *XContextForTest `json:"expected-xcontent-x"`
 	ExpectedXcontent_y XContextForTest  `json:"expected-xcontent-y"`
 }
 
 type GeneralTestcase struct {
-	Name          string     `json:"name"`
-	InitalGas     uint64     `json:"initial-gas"`
-	InitialRegs   []uint64   `json:"initial-regs"`
-	InitialMemory RAMForTest `json:"initial-memory"`
+	Name          string            `json:"name"`
+	InitialGas    uint64            `json:"initial-gas"`
+	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
+	InitialMemory RAMForTest        `json:"initial-memory"`
 
 	InitialServiceAccount ServiceAccountForTest             `json:"initial-service-account"`
 	InitialServiceIndex   uint32                            `json:"initial-service-index"`
 	InitialDelta          map[uint32]*ServiceAccountForTest `json:"initial-delta"`
 
-	ExpectedGas    uint64     `json:"expected-gas"`
-	ExpectedRegs   []uint64   `json:"expected-regs"`
-	ExpectedMemory RAMForTest `json:"expected-memory"`
+	ExpectedGas    uint64            `json:"expected-gas"`
+	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
+	ExpectedMemory RAMForTest        `json:"expected-memory"`
 
 	ExpectedXServiceAccount ServiceAccountForTest `json:"expected-service-account"`
 }
@@ -163,12 +172,14 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 	var fileContents []string
 
 	// Walk through the directory
+	fmt.Printf("FindAndReadJSONFiles %s\n", dirPath)
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		// Check if file contains the keyword and has .json extension
 		if !info.IsDir() && strings.Contains(info.Name(), keyword) && filepath.Ext(info.Name()) == ".json" {
+			fmt.Printf("%s:%s\n", keyword, info.Name())
 			matchingFiles = append(matchingFiles, path)
 			content, err := os.ReadFile(path)
 			if err != nil {
@@ -187,43 +198,43 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 
 type Testcase interface {
 	GetInitialGas() uint64
-	GetInitialRegs() []uint64
+	GetInitialRegs() map[uint32]uint64
 	GetInitialMemory() RAMForTest
 
 	GetExpectedGas() uint64
-	GetExpectedRegs() []uint64
+	GetExpectedRegs() map[uint32]uint64
 	GetExpectedMemory() RAMForTest
 	GetName() string
 }
 
-func (tc RefineTestcase) GetInitialGas() uint64         { return tc.InitalGas }
-func (tc RefineTestcase) GetInitialRegs() []uint64      { return tc.InitialRegs }
-func (tc RefineTestcase) GetInitialMemory() RAMForTest  { return tc.InitialMemory }
-func (tc RefineTestcase) GetExpectedGas() uint64        { return tc.ExpectedGas }
-func (tc RefineTestcase) GetExpectedRegs() []uint64     { return tc.ExpectedRegs }
-func (tc RefineTestcase) GetExpectedMemory() RAMForTest { return tc.ExpectedMemory }
-func (tc RefineTestcase) GetName() string               { return tc.Name }
+func (tc RefineTestcase) GetInitialGas() uint64              { return tc.InitialGas }
+func (tc RefineTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
+func (tc RefineTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
+func (tc RefineTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc RefineTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
+func (tc RefineTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
+func (tc RefineTestcase) GetName() string                    { return tc.Name }
 
-func (tc AccumulateTestcase) GetInitialGas() uint64         { return tc.InitalGas }
-func (tc AccumulateTestcase) GetInitialRegs() []uint64      { return tc.InitialRegs }
-func (tc AccumulateTestcase) GetInitialMemory() RAMForTest  { return tc.InitialMemory }
-func (tc AccumulateTestcase) GetExpectedGas() uint64        { return tc.ExpectedGas }
-func (tc AccumulateTestcase) GetExpectedRegs() []uint64     { return tc.ExpectedRegs }
-func (tc AccumulateTestcase) GetExpectedMemory() RAMForTest { return tc.ExpectedMemory }
-func (tc AccumulateTestcase) GetName() string               { return tc.Name }
+func (tc AccumulateTestcase) GetInitialGas() uint64              { return tc.InitialGas }
+func (tc AccumulateTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
+func (tc AccumulateTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
+func (tc AccumulateTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc AccumulateTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
+func (tc AccumulateTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
+func (tc AccumulateTestcase) GetName() string                    { return tc.Name }
 
-func (tc GeneralTestcase) GetInitialGas() uint64         { return tc.InitalGas }
-func (tc GeneralTestcase) GetInitialRegs() []uint64      { return tc.InitialRegs }
-func (tc GeneralTestcase) GetInitialMemory() RAMForTest  { return tc.InitialMemory }
-func (tc GeneralTestcase) GetExpectedGas() uint64        { return tc.ExpectedGas }
-func (tc GeneralTestcase) GetExpectedRegs() []uint64     { return tc.ExpectedRegs }
-func (tc GeneralTestcase) GetExpectedMemory() RAMForTest { return tc.ExpectedMemory }
-func (tc GeneralTestcase) GetName() string               { return tc.Name }
+func (tc GeneralTestcase) GetInitialGas() uint64              { return tc.InitialGas }
+func (tc GeneralTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
+func (tc GeneralTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
+func (tc GeneralTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc GeneralTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
+func (tc GeneralTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
+func (tc GeneralTestcase) GetName() string                    { return tc.Name }
 
 func InitPvmBase(vm *pvm.VM, tc Testcase) {
 	vm.Gas = int64(tc.GetInitialGas())
 	for i, reg := range tc.GetInitialRegs() {
-		vm.WriteRegister(i, reg)
+		vm.WriteRegister(int(i), reg)
 	}
 	for page_addr, page := range tc.GetInitialMemory().Pages {
 		vm.Ram.SetPageAccess(page_addr, 1, page.Access)
@@ -426,16 +437,25 @@ func CompareGeneral(vm *pvm.VM, testcase GeneralTestcase) {
 // Main test functions
 // Test all refine test vectors
 func TestRefine(t *testing.T) {
-	nodes, err := SetUpNodes(1)
+	node, err := SetUpNode()
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	node := nodes[0]
 
 	functions := []string{
-		"Import", "Export",
+		"Historical_lookup", // William
+		"Import",            // William
+		"Export",            // William
+		"Machine",           // Shawn
+		"Peek",              // Shawn
+		"Poke",              // Shawn
+		"Zero",              // Shawn
+		"Void",              // Shawn
+		"Invoke",            // Shawn
+		"Expunge",           // Shawn
 	}
 	for _, name := range functions {
+		fmt.Printf("%s\n", name)
 		hostidx, _ := pvm.GetHostFunctionDetails(name)
 		dirPath := "../jamtestvectors/host_function"
 
@@ -467,14 +487,24 @@ func TestRefine(t *testing.T) {
 
 // Test all accumulate test vectors
 func TestAccumulate(t *testing.T) {
-	nodes, err := SetUpNodes(1)
+	node, err := SetUpNode()
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	node := nodes[0]
 
-	functions := []string{"New", "Solicit", "Forget", "Transfer"}
-	functions = []string{"New"}
+	functions := []string{
+		// "Bless", // Michael+Sourabh
+		// "Assign", // Michael+Sourabh
+		// "Designate", // Michael+Sourabh
+		// "Checkpoint", // Michael+Sourabh
+		"New",      // William
+		"Upgrade",  // William
+		"Transfer", // William
+		"Quit",     // William
+		"Solicit",  // William
+		"Forget",   // William
+	}
+
 	for _, name := range functions {
 		hostidx, _ := pvm.GetHostFunctionDetails(name)
 		dirPath := "../jamtestvectors/host_function"
@@ -506,14 +536,18 @@ func TestAccumulate(t *testing.T) {
 
 // Test all general test vectors
 func TestGeneral(t *testing.T) {
-	nodes, err := SetUpNodes(1)
+	node, err := SetUpNode()
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	node := nodes[0]
 
 	functions := []string{
-		"Read", "Write",
+		// "Gas", // Michael
+		"Lookup",           // William
+		"Read",             // William
+		"Write",            // William
+		"Info",             // Shawn
+		"Sp1Groth16Verify", // Sourabh
 	}
 	for _, name := range functions {
 		hostidx, errcase := pvm.GetHostFunctionDetails(name)
@@ -677,489 +711,35 @@ func WriteJSONFile(filePath string, data interface{}) error {
 	return nil
 }
 
-func TestGenerateRefineTestVectors(t *testing.T) {
-	dirPath := "../jamtestvectors/host_function"
-	functions := []string{"Import", "Export"}
-	errorCases := map[string][]uint64{
-		"Import": {pvm.OK, pvm.OOB, pvm.NONE},
-		"Export": {pvm.OK, pvm.OOB, pvm.FULL},
-	}
-	templateFileName := "./Templets/hostRefineTemplet.json"
-	testCaseType := "Refine"
-	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
-
-	var (
-		testcase RefineTestcase
-		filename string
-		filePath string
-		err      error
-	)
-
-	// Modify hostImportOK.json here
-	// Clear the test case
-	testcase = RefineTestcase{}
-	filename = "hostImportOK.json"
-	filePath = filepath.Join(dirPath, filename)
-
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-
-	testcase.InitialRegs[7] = 0 // the 0th import segment
-	testcase.ExpectedRegs[7] = pvm.OK
-
-	testcase.InitialRegs[8] = 32 * pvm.PageSize // 131072
-	testcase.ExpectedRegs[8] = 32 * pvm.PageSize
-
-	testcase.InitialRegs[9] = 12 // segement length
-	testcase.ExpectedRegs[9] = 12
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Writable: true}},
-		},
-	}
-
-	testcase.InitialRefineM_map = RefineM_mapForTest{}
-	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
-
-	testcase.InitialImportSegment = []ByteSlice{
-		{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15},
-	}
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-
-	// Modify hostImportOOB.json here
-	// Clear the test case
-	testcase = RefineTestcase{}
-	filename = "hostImportOOB.json"
-	filePath = filepath.Join(dirPath, filename)
-
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-
-	testcase.InitialRegs[7] = 0 // the 0th import segment
-	testcase.ExpectedRegs[7] = pvm.OOB
-
-	testcase.InitialRegs[8] = 32 * pvm.PageSize // 131072
-	testcase.ExpectedRegs[8] = 32 * pvm.PageSize
-
-	testcase.InitialRegs[9] = 12 // segement length
-	testcase.ExpectedRegs[9] = 12
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Inaccessible: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Inaccessible: true}},
-		},
-	}
-
-	testcase.InitialRefineM_map = RefineM_mapForTest{}
-	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
-
-	testcase.InitialImportSegment = []ByteSlice{
-		{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15},
-	}
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-
-	// Modify hostImportNONE.json here
-	// Clear the test case
-	testcase = RefineTestcase{}
-	filename = "hostImportNONE.json"
-	filePath = filepath.Join(dirPath, filename)
-
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-
-	testcase.InitialRegs[7] = 9999 // Simulate NONE error
-	testcase.ExpectedRegs[7] = pvm.NONE
-
-	testcase.InitialRegs[8] = 32 * pvm.PageSize  // 131072
-	testcase.ExpectedRegs[8] = 32 * pvm.PageSize // 131072
-
-	testcase.InitialRegs[9] = 12 // segement length
-	testcase.ExpectedRegs[9] = 12
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
-		},
-	}
-
-	testcase.InitialRefineM_map = RefineM_mapForTest{}
-	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
-
-	testcase.InitialImportSegment = []ByteSlice{
-		{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15},
-	}
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-
-	// Modify hostExportOK.json here
-	// Clear the test case
-	testcase = RefineTestcase{}
-	filename = "hostExportOK.json"
-	filePath = filepath.Join(dirPath, filename)
-
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-
-	testcase.InitialRegs[7] = 32 * pvm.PageSize                                                                      // 12                                                                     // 0xFEFF0000
-	testcase.ExpectedRegs[7] = uint64(testcase.InitialExportSegmentIdx) + uint64(len(testcase.InitialExportSegment)) // 0 + 1
-
-	testcase.InitialRegs[8] = 12 // Export segment length
-	testcase.ExpectedRegs[8] = 12
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-
-	testcase.InitialRefineM_map = RefineM_mapForTest{}
-	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
-
-	testcase.InitialExportSegment = []ByteSlice{
-		{},
-	}
-	testcase.ExpectedExportSegment = []ByteSlice{
-		{}, {10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-	}
-	testcase.InitialExportSegmentIdx = 0
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-
-	// Modify hostExportOOB.json here
-	// Clear the test case
-	testcase = RefineTestcase{}
-	filename = "hostExportOOB.json"
-	filePath = filepath.Join(dirPath, filename)
-
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-
-	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
-	testcase.ExpectedRegs[7] = pvm.OOB
-
-	testcase.InitialRegs[8] = 12 // Export segment length
-	testcase.ExpectedRegs[8] = 12
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Inaccessible: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Inaccessible: true}},
-		},
-	}
-
-	testcase.InitialRefineM_map = RefineM_mapForTest{}
-	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
-
-	testcase.InitialExportSegment = []ByteSlice{{}}
-	testcase.ExpectedExportSegment = []ByteSlice{{}}
-	testcase.InitialExportSegmentIdx = 0
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-
-	// Modify hostExportFULL.json here
-	// Clear the test case
-	testcase = RefineTestcase{}
-	filename = "hostExportFULL.json"
-	filePath = filepath.Join(dirPath, filename)
-
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-
-	testcase.InitialRegs[7] = 4278124544 // 0xFEFF0000
-	testcase.ExpectedRegs[7] = pvm.FULL
-
-	testcase.InitialRegs[8] = 12 // Export segment length
-	testcase.ExpectedRegs[8] = 12
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-
-	testcase.InitialRefineM_map = RefineM_mapForTest{}
-	testcase.ExpectedRefineM_map = RefineM_mapForTest{}
-
-	testcase.InitialExportSegment = []ByteSlice{{}}
-	testcase.ExpectedExportSegment = []ByteSlice{{}}
-	testcase.InitialExportSegmentIdx = 9999 // Simulate FULL error
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-}
-
-// Generate Accumulate test vectors
-func TestGenerateAccumulateTestVectors(t *testing.T) {
-	dirPath := "../jamtestvectors/host_function"
-	functions := []string{"New"}
-	errorCases := map[string][]uint64{
-		"New":      {pvm.OK, pvm.OOB, pvm.CASH},
-		"Solicit":  {pvm.OK, pvm.OOB, pvm.FULL, pvm.HUH},
-		"Forget":   {pvm.OK, pvm.OOB, pvm.HUH},
-		"Transfer": {pvm.OK, pvm.WHO, pvm.CASH, pvm.LOW, pvm.HIGH},
-	}
-	templateFileName := "./Templets/hostAccumulateTemplet.json"
-	testCaseType := "Accumulate"
-	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
-
-	var (
-		testcase AccumulateTestcase
-		filename string
-		filePath string
-		err      error
-		s        *ServiceAccountForTest
-		a        *ServiceAccountForTest
-		s_edited *ServiceAccountForTest
-	)
-
-	// Modify hostNewOK.json here
-	// Clear the test case
-	testcase = AccumulateTestcase{}
-	filename = "hostNewOK.json"
-	filePath = filepath.Join(dirPath, filename)
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
-	testcase.ExpectedRegs[7] = 1                // new service index (should be check)
-
-	testcase.InitialRegs[8] = 12 // code length (should be check)
-	testcase.ExpectedRegs[8] = 12
-
-	testcase.InitialRegs[9] = 100 // Gas limit g
-	testcase.ExpectedRegs[9] = 100
-
-	testcase.InitialRegs[10] = 200 // Gas limit m
-	testcase.ExpectedRegs[10] = 200
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-
-	a = &ServiceAccountForTest{}
-	a.Storage = map[string]ByteSlice{}
-	a.Preimage = map[string]ByteSlice{}
-	a.Lookup = map[string][]uint32{
-		"0x0000000000000000000000000000000000000000000000000000000000000000": {},
-	} // E4(l) ⌢ H(h)2...30
-	a.CodeHash = "0x0000000000000000000000000000000000000000000000000000000000000000"
-	a.Balance = 213
-	a.GasLimitG = 100
-	a.GasLimitM = 200
-
-	s = testcase.InitialXcontent_x.U.D[0]
-
-	testcase.ExpectedXcontent_x = &XContextForTest{
-		D: make(map[uint32]*ServiceAccountForTest),
-		I: 555,
-		S: 0,
-		U: &PartialStateForTest{
-			D: make(map[uint32]*ServiceAccountForTest),
-		},
-		T: []DeferredTransferForTest{},
-	}
-	s_edited = DeepCopyServiceAccount(s)
-	testcase.ExpectedXcontent_x.U.D[1] = a
-	testcase.ExpectedXcontent_x.U.D[0] = s_edited
-	testcase.ExpectedXcontent_x.U.D[0].Balance -= a.Balance
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-
-	// Modify hostNewOOB.json here
-	// Clear the test case
-	testcase = AccumulateTestcase{}
-	filename = "hostNewOOB.json"
-	filePath = filepath.Join(dirPath, filename)
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
-	testcase.ExpectedRegs[7] = pvm.OOB          // new service index (should be check)
-
-	testcase.InitialRegs[8] = 12 // code length (should be check)
-	testcase.ExpectedRegs[8] = 12
-
-	testcase.InitialRegs[9] = 100 // Gas limit g
-	testcase.ExpectedRegs[9] = 100
-
-	testcase.InitialRegs[10] = 200 // Gas limit m
-	testcase.ExpectedRegs[10] = 200
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
-		},
-	}
-
-	testcase.ExpectedXcontent_x = testcase.InitialXcontent_x
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-
-	// Modify hostNewCASH.json here
-	// Clear the test case
-	testcase = AccumulateTestcase{}
-	filename = "hostNewCASH.json"
-	filePath = filepath.Join(dirPath, filename)
-	err = ReadJSONFile(filePath, &testcase)
-	if err != nil {
-		fmt.Printf("Failed to read test case: %v\n", err)
-		return
-	}
-	testcase.InitialRegs[7] = 32 * pvm.PageSize // 131072
-	testcase.ExpectedRegs[7] = pvm.CASH         // new service index (should be check)
-
-	testcase.InitialRegs[8] = 12 // code length (should be check)
-	testcase.ExpectedRegs[8] = 12
-
-	testcase.InitialRegs[9] = 100 // Gas limit g
-	testcase.ExpectedRegs[9] = 100
-
-	testcase.InitialRegs[10] = 200 // Gas limit m
-	testcase.ExpectedRegs[10] = 200
-
-	testcase.InitialMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-	testcase.ExpectedMemory = RAMForTest{
-		Pages: map[uint32]*PageForTest{
-			32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
-		},
-	}
-
-	a = &ServiceAccountForTest{}
-	a.Storage = map[string]ByteSlice{}
-	a.Preimage = map[string]ByteSlice{}
-	a.Lookup = map[string][]uint32{
-		"0x0000000000000000000000000000000000000000000000000000000000000000": {},
-	} // E4(l) ⌢ H(h)2...30
-	a.CodeHash = "0x0000000000000000000000000000000000000000000000000000000000000000"
-	a.Balance = 213
-	a.GasLimitG = 100
-	a.GasLimitM = 200
-
-	testcase.InitialXcontent_x.U.D[0].Balance = 300 // Simulate CASH error
-
-	testcase.ExpectedXcontent_x = DeepCopyXContextForTest(testcase.InitialXcontent_x)
-
-	testcase.ExpectedXcontent_x.U.D[0].Balance = 300 - 213 // Simulate CASH error
-
-	err = WriteJSONFile(filePath, testcase)
-	if err != nil {
-		fmt.Printf("Failed to write test case: %v\n", err)
-		return
-	}
-}
-
 // Generate General test vectors
 func TestGenerateGeneralTestVectors(t *testing.T) {
 	dirPath := "../jamtestvectors/host_function"
-	functions := []string{"Read", "Write"}
+	functions := []string{"Lookup", "Read", "Write", "Info", "Sp1Groth16Verify"}
 	errorCases := map[string][]uint64{
-		"Read":  {pvm.OK, pvm.OOB, pvm.NONE},
-		"Write": {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
+		// B.6 General Functions
+		"Gas":              {pvm.OK},
+		"Lookup":           {pvm.OK, pvm.NONE, pvm.OOB},
+		"Read":             {pvm.OK, pvm.OOB, pvm.NONE},
+		"Write":            {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
+		"Info":             {pvm.OK, pvm.OOB, pvm.NONE},
+		"Sp1Groth16Verify": {pvm.OK, pvm.OOB, pvm.HUH},
 	}
-	templateFileName := "./Templets/hostGeneralTemplet.json"
+	templateFileName := "./templates/hostGeneralTemplate.json"
 	testCaseType := "General"
 	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
+
+	// LATER: "Gas":      {pvm.OK},
+	// TODO: William
+	// "Lookup":   {pvm.OK, pvm.NONE, pvm.OOB},
+	// "Read":  {pvm.OK, pvm.OOB, pvm.NONE},
+	// "Write": {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
+
+	// TODO: Shawn
+	// "Info":     {pvm.OK, pvm.OOB, pvm.NONE},
+
+	// TODO: Sourabh
+	// "Sp1Groth16Verify":  {pvm.OK, pvm.OOB, pvm.HUH},
+
 }
 
 // some useful functions
@@ -1621,4 +1201,394 @@ func TestComputePreimageLookupKey(t *testing.T) {
 	al_internal_key := common.Compute_preimageLookup_internal(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), 12)
 	account_lookuphash := common.ComputeC_sh(1, al_internal_key)
 	fmt.Printf("account_lookuphash: %v\n", account_lookuphash)
+}
+
+func TestGenerateRefineTestVectors(t *testing.T) {
+	dirPath := "../jamtestvectors/host_function"
+	templateFileName := "./templates/hostRefineTemplate.json"
+	testCaseType := "Refine"
+	functions := []string{"Historical_lookup", "Import", "Export", "Machine", "Peek", "Poke", "Zero", "Void", "Invoke", "Expunge"}
+	errorCases := map[string][]uint64{
+		// B.8 Refine Functions
+		"Historical_lookup": {pvm.OK, pvm.OOB},
+		"Import":            {pvm.OK, pvm.OOB, pvm.NONE},
+		"Export":            {pvm.OK, pvm.OOB, pvm.FULL},
+		"Machine":           {pvm.OK, pvm.OOB},
+		"Peek":              {pvm.OK, pvm.OOB, pvm.WHO},
+		"Poke":              {pvm.OK, pvm.OOB, pvm.WHO},
+		"Zero":              {pvm.OK, pvm.OOB, pvm.WHO},
+		"Void":              {pvm.OK, pvm.OOB, pvm.WHO},
+		"Invoke":            {pvm.OK, pvm.OOB, pvm.WHO, pvm.HOST, pvm.FAULT, pvm.OOB, pvm.PANIC},
+		"Expunge":           {pvm.OK, pvm.OOB, pvm.WHO},
+	}
+
+	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
+
+	testCases := []struct {
+		filename          string
+		initialRegs       map[uint32]uint64
+		expectedRegs      map[uint32]uint64
+		initialMemory     RAMForTest
+		expectedMemory    RAMForTest
+		initialSegment    []ByteSlice
+		expectedSegment   []ByteSlice
+		initialSegmentIdx uint64
+	}{
+		// TODO: William
+		// "Historical_lookup":  {pvm.OK, pvm.OOB},
+		// "Import": {pvm.OK, pvm.OOB, pvm.NONE},
+		{
+			filename: "hostImportOK.json",
+			initialRegs: map[uint32]uint64{
+				7: 0,
+				8: 32 * pvm.PageSize,
+				9: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.OK,
+				8: 32 * pvm.PageSize,
+				9: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			initialSegment: []ByteSlice{{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
+		},
+		{
+			filename: "hostImportOOB.json",
+			initialRegs: map[uint32]uint64{
+				7: 0,
+				8: 32 * pvm.PageSize,
+				9: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.OOB,
+				8: 32 * pvm.PageSize,
+				9: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialSegment: []ByteSlice{{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
+		},
+		{
+			filename: "hostImportNONE.json",
+			initialRegs: map[uint32]uint64{
+				7: 9999, // Simulate NONE error
+				8: 32 * pvm.PageSize,
+				9: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.NONE,
+				8: 32 * pvm.PageSize,
+				9: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			initialSegment: []ByteSlice{{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
+		},
+		// "Export": {pvm.OK, pvm.OOB, pvm.FULL},
+		{
+			filename: "hostExportOK.json",
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: 1, // Initial index + length
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialSegment:    []ByteSlice{{}},
+			expectedSegment:   []ByteSlice{{}, {10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+			initialSegmentIdx: 0,
+		},
+		{
+			filename: "hostExportOOB.json",
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.OOB,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialSegment:    []ByteSlice{{}},
+			expectedSegment:   []ByteSlice{{}},
+			initialSegmentIdx: 0,
+		},
+		{
+			filename: "hostExportFULL.json",
+			initialRegs: map[uint32]uint64{
+				7: 4278124544, // 0xFEFF0000
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.FULL,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialSegment:    []ByteSlice{{}},
+			expectedSegment:   []ByteSlice{{}},
+			initialSegmentIdx: 9999, // Simulate FULL error
+		},
+		// TODO: Shawn: 7 host functions
+		// "Machine":  {pvm.OK, pvm.OOB},
+		// "Peek":     {pvm.OK, pvm.OOB, pvm.WHO},
+		// "Poke":     {pvm.OK, pvm.OOB, pvm.WHO},
+		// "Zero":     {pvm.OK, pvm.OOB, pvm.WHO},
+		// "Void":     {pvm.OK, pvm.OOB, pvm.WHO},
+		// "Invoke":   {pvm.OK, pvm.OOB, pvm.WHO, pvm.HOST, pvm.FAULT, pvm.OOB, pvm.PANIC},
+		// "Expunge":  {pvm.OK, pvm.OOB, pvm.WHO},
+	}
+
+	for _, tc := range testCases {
+		filePath := filepath.Join(dirPath, tc.filename)
+
+		var testcase RefineTestcase
+		if err := ReadJSONFile(filePath, &testcase); err != nil {
+			fmt.Printf("Failed to read test case %s: %v\n", tc.filename, err)
+			continue
+		}
+
+		updateRefineTestCase(&testcase, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.initialSegment, tc.expectedSegment, tc.initialSegmentIdx)
+
+		if err := WriteJSONFile(filePath, testcase); err != nil {
+			fmt.Printf("Failed to write test case %s: %v\n", tc.filename, err)
+		}
+	}
+}
+
+func updateRefineTestCase(testcase *RefineTestcase, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialSegment, expectedSegment []ByteSlice, initialSegmentIdx uint64) {
+	testcase.InitialRegs = initialRegs
+	testcase.ExpectedRegs = expectedRegs
+	testcase.InitialMemory = initialMemory
+	testcase.ExpectedMemory = expectedMemory
+	testcase.InitialImportSegment = initialSegment
+	testcase.InitialExportSegmentIdx = uint32(initialSegmentIdx)
+	testcase.ExpectedExportSegment = expectedSegment
+}
+
+func TestGenerateAccumulateTestVectors(t *testing.T) {
+	dirPath := "../jamtestvectors/host_function"
+	templateFileName := "./templates/hostAccumulateTemplate.json"
+	testCaseType := "Accumulate"
+	functions := []string{"New", "Upgrade", "Solicit", "Forget", "Quit", "Transfer"}
+	errorCases := map[string][]uint64{
+		// B.7 Accumulate Functions
+		//"Bless":    {pvm.OK, pvm.OOB, pvm.WHO},
+		//"Assign":   {pvm.OK, pvm.OOB, pvm.CORE},
+		//"Designate":   {pvm.OK, pvm.OOB},
+		//"Checkpoint":   {pvm.OK},
+		"New":      {pvm.OK, pvm.OOB, pvm.CASH},
+		"Upgrade":  {pvm.OK, pvm.OOB},
+		"Solicit":  {pvm.OK, pvm.OOB, pvm.FULL, pvm.HUH},
+		"Forget":   {pvm.OK, pvm.OOB, pvm.HUH},
+		"Quit":     {pvm.OK, pvm.OOB, pvm.WHO, pvm.LOW},
+		"Transfer": {pvm.OK, pvm.WHO, pvm.CASH, pvm.LOW, pvm.HIGH},
+	}
+
+	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
+
+	testCases := []struct {
+		filename       string
+		initialRegs    map[uint32]uint64
+		expectedRegs   map[uint32]uint64
+		initialMemory  RAMForTest
+		expectedMemory RAMForTest
+		sourceAccount  *ServiceAccountForTest
+		targetAccount  *ServiceAccountForTest
+		balanceChange  uint64
+	}{
+		// 		"New":      {pvm.OK, pvm.OOB, pvm.CASH},
+		{
+			filename: "hostNewOK.json",
+			initialRegs: map[uint32]uint64{
+				7:  32 * pvm.PageSize,
+				8:  12,
+				9:  100,
+				10: 200,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  1,
+				8:  12,
+				9:  100,
+				10: 200,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			sourceAccount: &ServiceAccountForTest{
+				Balance: 300,
+			},
+			targetAccount: &ServiceAccountForTest{
+				Balance: 213,
+			},
+			balanceChange: 213,
+		},
+		{
+			filename: "hostNewOOB.json",
+			initialRegs: map[uint32]uint64{
+				7:  32 * pvm.PageSize,
+				8:  12,
+				9:  100,
+				10: 200,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.OOB,
+				8:  12,
+				9:  100,
+				10: 200,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			sourceAccount: nil,
+			targetAccount: nil,
+			balanceChange: 0,
+		},
+		{
+			filename: "hostNewCASH.json",
+			initialRegs: map[uint32]uint64{
+				7:  32 * pvm.PageSize,
+				8:  12,
+				9:  100,
+				10: 200,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.CASH,
+				8:  12,
+				9:  100,
+				10: 200,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			sourceAccount: &ServiceAccountForTest{
+				Balance: 300,
+			},
+			targetAccount: &ServiceAccountForTest{
+				Balance: 213,
+			},
+			balanceChange: 213,
+		},
+		// William 1 (first) => 5 (last)
+		// 5 "Upgrade":      {pvm.OK, pvm.OOB},
+		// 2 "Solicit":  {pvm.OK, pvm.OOB, pvm.FULL, pvm.HUH},
+		// 3 "Forget":   {pvm.OK, pvm.OOB, pvm.HUH},
+		// 4 "Quit": {pvm.OK, pvm.OOB, pvm.WHO, pvm.LOW},
+		// 1 "Transfer": {pvm.OK, pvm.WHO, pvm.CASH, pvm.LOW, pvm.HIGH},
+	}
+
+	for _, tc := range testCases {
+		filePath := filepath.Join(dirPath, tc.filename)
+
+		var testcase AccumulateTestcase
+		if err := ReadJSONFile(filePath, &testcase); err != nil {
+			fmt.Printf("Failed to read test case %s: %v\n", tc.filename, err)
+			continue
+		}
+
+		updateAccumulateTestCase(&testcase, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.sourceAccount, tc.targetAccount, tc.balanceChange)
+
+		if err := WriteJSONFile(filePath, testcase); err != nil {
+			fmt.Printf("Failed to write test case %s: %v\n", tc.filename, err)
+		}
+	}
+}
+
+func updateAccumulateTestCase(testcase *AccumulateTestcase, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, sourceAccount, targetAccount *ServiceAccountForTest, balanceChange uint64) {
+	testcase.InitialRegs = initialRegs
+	testcase.ExpectedRegs = expectedRegs
+	testcase.InitialMemory = initialMemory
+	testcase.ExpectedMemory = expectedMemory
+
+	if sourceAccount != nil && targetAccount != nil {
+		if testcase.InitialXcontent_x == nil {
+			testcase.InitialXcontent_x = &XContextForTest{
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{},
+				},
+			}
+		}
+		if testcase.ExpectedXcontent_x == nil {
+			testcase.ExpectedXcontent_x = DeepCopyXContextForTest(testcase.InitialXcontent_x)
+		}
+		if testcase.ExpectedXcontent_x.U != nil && testcase.ExpectedXcontent_x.U.D != nil {
+			testcase.ExpectedXcontent_x.U.D[0] = sourceAccount
+			testcase.ExpectedXcontent_x.U.D[1] = targetAccount
+			testcase.ExpectedXcontent_x.U.D[0].Balance -= balanceChange
+		}
+	}
 }

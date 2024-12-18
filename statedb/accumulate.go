@@ -299,7 +299,6 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			services = append(services, workResult.ServiceID)
 		}
 	}
-
 	output_u = 0
 	// get services from f key
 	for k := range f {
@@ -369,16 +368,16 @@ func (sdb *StateDB) Check(i uint32) uint32 {
 
 func (sdb *StateDB) k_exist(i uint32) bool {
 	//check i not in K(δ†) or c(255,i)
-	_, err := sdb.GetService(i)
-	if err == nil {
+	_, ok, err := sdb.GetService(i)
+	if err == nil && ok {
 		// account found
 		return true
 	}
 	return false
 }
 
+// 0.5.2 (B.9)
 func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, u *types.PartialState) *types.XContext {
-	serviceAccount.SetServiceIndex(s)
 
 	// Calculate i for X_i eq(277)
 	encoded_service, _ := types.Encode(s)
@@ -393,7 +392,8 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 		S: s,
 		I: sdb.Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
-	x.D[s] = serviceAccount
+	x.D[s] = serviceAccount // this the immutable service account and cannot have Set{...}
+
 	js := sdb.JamState
 	if u != nil {
 		x.U = u
@@ -405,6 +405,10 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 			PrivilegedState:    js.PrivilegedServiceIndices,
 		}
 	}
+	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
+	mutableServiceAccount := serviceAccount.Clone()
+	mutableServiceAccount.ALLOW_MUTABLE()
+	x.U.D[s] = mutableServiceAccount // NOTE: this is a distinct COPY of serviceAccount and CAN have Set{...}
 	return x
 }
 
@@ -455,10 +459,19 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		}
 	}
 
-	serviceAccount, _ := sd.GetService(s)
+	// this is immutable going into NewXContext
+	serviceAccount, ok, err := sd.GetService(s)
+	if err != nil || !ok {
+		// how did we even get here
+		panic("Unknown service")
+	}
 	xContext := sd.NewXContext(s, serviceAccount, o)
-	code := sd.ReadServicePreimageBlob(s, codeHash)
+	code, ok, err := sd.ReadServicePreimageBlob(s, codeHash)
+	if err != nil || !ok {
+		panic("Could not read blob")
+	}
 	//o.Dump("SingleAccumulate", sd.Id)
+	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
 	r, _ := vm.ExecuteAccumulate(p, xContext)
 	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
@@ -482,7 +495,7 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 	return output
 }
 
-func (s *StateDB) HostTransfer(delta_dager map[uint32]*types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (*types.ServiceAccount, error) {
+func (s *StateDB) HostTransfer(delta_dager map[uint32]*types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (sa *types.ServiceAccount, err error) {
 	// check if self_index is in delta_dager
 	if _, ok := delta_dager[self_index]; !ok {
 		return &types.ServiceAccount{}, errors.New("HostTransfer Error: service not found")
@@ -495,7 +508,10 @@ func (s *StateDB) HostTransfer(delta_dager map[uint32]*types.ServiceAccount, tim
 	}
 
 	self := delta_dager[self_index]
-	code := s.ReadServicePreimageBlob(self_index, self.CodeHash)
+	code, ok, err := s.ReadServicePreimageBlob(self_index, self.CodeHash)
+	if err != nil || !ok {
+		return sa, fmt.Errorf("No blob")
+	}
 	vm := pvm.NewVMFromCode(self_index, code, 0, s)
 
 	var input_argument []byte

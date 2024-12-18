@@ -74,10 +74,6 @@ func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
 	return nil
 }
 
-func (s *StateDB) GetVMMutex() sync.Mutex {
-	return s.vmMutex
-}
-
 // IsAuthorizedPVM performs the is-authorized PVM function.
 func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 	// Ensure the work-package warrants the needed core-time
@@ -105,7 +101,6 @@ const (
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
 	errPreimageBlobSet        = "PreimageBlob already set"
-	noRotation                = false
 )
 
 func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
@@ -113,8 +108,8 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	t := s.GetTrie()
 	a_p := l.AccountPreimageHash()
 	//a_l := l.AccountLookupHash()
-	preimage_blob, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
-	if err == nil { // key found
+	preimage_blob, ok, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
+	if err == nil && ok { // key found
 		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
 			//H(p) = p
 			fmt.Printf("Fail at 157 - (1) preimage already integrated\n")
@@ -123,9 +118,15 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	}
 
 	//fmt.Printf("Validating E_p %v\n",l.String())
-	anchors, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
+	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
 		fmt.Printf("Fail at anchor not set, service idx %v, blob hash %v, blob length %v\n", l.Service_Index(), l.BlobHash(), l.BlobLength())
+		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
+		t.PrintAllKeyValues()
+		t.PrintTree(t.Root, 0)
+		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
+	} else if !ok {
+		fmt.Printf("Can't find the anchor, service idx %v, blob hash %v, blob length %v\n", l.Service_Index(), l.BlobHash(), l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
 		t.PrintAllKeyValues()
 		t.PrintTree(t.Root, 0)
@@ -287,11 +288,7 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	// fmt.Printf("retrieved C8 CurrentEpochValidators%v\n", currEpochValidatorsEncode)
 	// fmt.Printf("retrieved C9 PriorEpochValidators%v\n", priorEpochValidatorEncode)
 
-	// HAZARDOUS PROBLEM: WE SHOULD NOT be DEPENDENT ON ANYTHING IN MEMORY ie PriorServiceAccountState
-	d := s.GetJamState() // this will copy PriorServiceAccountState from the previous state. but can be optimized
-
-	d.PriorServiceAccountState = make(map[uint32]types.ServiceAccount)
-
+	d := s.GetJamState()
 	d.SetAuthPool(coreAuthPoolEncode)
 	d.SetAuthQueue(authQueueEncode)
 	d.SetRecentBlocks(recentBlocksEncode)
@@ -504,8 +501,8 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 			metaValues[1] = ""
 
 		default:
-			metaValueBytes, err := t.LevelDBGet(metaKeyBytes)
-			if err != nil {
+			metaValueBytes, ok, err := t.LevelDBGet(metaKeyBytes)
+			if err != nil || !ok {
 				fmt.Printf("PrintAllKeyValues levelDBGet Error: %v\n", err)
 			}
 			if metaValueBytes != nil {
@@ -810,8 +807,8 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 
 		*/
 	}
-	newStateDB.AssignGuarantors(noRotation)
-	newStateDB.PreviousGuarantors(noRotation)
+	// copy instead of recalculate
+	newStateDB.RotateGuarantors()
 	return newStateDB
 }
 
@@ -837,6 +834,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
+				fmt.Printf("Error applying state transition: %v\n", err)
 				return nil, nil, err
 			}
 			var validators []types.Validator
@@ -863,6 +861,25 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 func (s *StateDB) SetID(id uint16) {
 	s.Id = id
 	s.JamState.SafroleState.Id = id
+}
+
+// TODO: REMOVE THESE and use service account object methods INSTEAD!
+func (s *StateDB) WriteServicePreimageBlob(service uint32, blob []byte) {
+	tree := s.GetTrie()
+	tree.SetPreImageBlob(service, blob)
+}
+func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
+	tree := s.GetTrie()
+	tree.SetPreImageLookup(service, blob_hash, blob_length, time_slots)
+}
+func (s *StateDB) DeleteServicePreimageKey(service uint32, blob_hash common.Hash) error {
+	tree := s.GetTrie()
+	err := tree.DeletePreImageBlob(service, blob_hash)
+	if err != nil {
+		fmt.Printf("DeleteServicePreimageKey: Failed to delete blob_hash: %x, error: %v\n", blob_hash.Bytes(), err)
+		return err
+	}
+	return nil
 }
 
 func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, targetJCE uint32) (uint32, uint32, error) {
@@ -925,7 +942,7 @@ func (s *StateDB) remove_guarantees_authhash(pool []common.Hash, m map[common.Ha
 func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, error) {
 	t := s.GetTrie()
 	v, ok, err := t.GetService(types.ServiceAccountPrefix, c)
-	if err != nil {
+	if err != nil || !ok {
 		if !ok {
 			// fmt.Printf("getServiceAccount: ServiceAccount not found for core %d\n", c)
 		}
@@ -944,8 +961,8 @@ func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, erro
 
 func (s *StateDB) getPreimageBlob(c uint32, codeHash common.Hash) ([]byte, error) {
 	t := s.GetTrie()
-	preimage_blob, err := t.GetPreImageBlob(c, codeHash)
-	if err != nil {
+	preimage_blob, ok, err := t.GetPreImageBlob(c, codeHash)
+	if err != nil || !ok {
 		return []byte{}, err
 	}
 	return preimage_blob, nil
@@ -1052,7 +1069,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if debug {
 		fmt.Printf("[N%d] ApplyStateTransitionFromBlock (%v <== %v) s.StateRoot=%v\n", s.Id, s.ParentHeaderHash, s.HeaderHash, s.StateRoot)
 	}
-
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// 19-22 - Safrole last
@@ -1065,20 +1081,22 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s.GetJamState().ResetTallyStatistics()
 	}
 	sf := s.GetSafrole()
+	var vs []types.Validator
+	vs = sf.PrevValidators
+	if len(vs) == 0 {
+		panic("No validators")
+	}
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
 		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", err)
 		panic(1)
-		return s, err
 	}
-	var vs []types.Validator
-	vs = s2.NextValidators
+	vs = s2.PrevValidators
 	if len(vs) == 0 {
 		panic("No validators")
 	}
 	s.JamState.SafroleState = &s2
-	s.AssignGuarantors(noRotation)
-	s.PreviousGuarantors(noRotation)
+	s.RotateGuarantors()
 	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
 	elapsed := time.Since(start).Microseconds()
@@ -1118,22 +1136,19 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}
 	}
 	// we get the service into JamState by AvailableWorkReport
-	rho_wr := s.AvailableWorkReport
-	if err != nil {
-		fmt.Printf("Error getting work report from rho: %v\n", err)
-	}
-	for _, workreport := range rho_wr {
-		for _, result := range workreport.Results {
-			serviceID := result.ServiceID
-			v, ok, err := s.trie.GetService(255, serviceID)
-			if err != nil || !ok {
-				fmt.Printf("Error getting service from rho: %v\n", err)
-			}
-			accountState, err := types.ServiceAccountFromBytes(serviceID, v)
-			priorAccountState := *accountState
-			s.JamState.PriorServiceAccountState[serviceID] = priorAccountState
+	/*	rho_wr := s.AvailableWorkReport
+		if err != nil {
+			fmt.Printf("Error getting work report from rho: %v\n", err)
 		}
-	}
+		for _, workreport := range rho_wr {
+			for _, result := range workreport.Results {
+				serviceID := result.ServiceID
+				v, ok, err := s.trie.GetService(255, serviceID)
+				if err != nil || !ok {
+					fmt.Printf("Error getting service from rho: %v\n", err)
+				}
+			}
+		}*/
 
 	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
 	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
@@ -1151,7 +1166,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	var b []BeefyCommitment
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, t, b := s.OuterAccumulate(g, accumulate_input_wr, &o, f)
+	n, t, b := s.OuterAccumulate(g, accumulate_input_wr, o, f)
 	if debug {
 		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
 	}
@@ -1162,7 +1177,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s.ProcessDeferredTransfers(o.D, tau, t)
 	}
 
-	s.ApplyXContext(&o)
+	s.ApplyXContext(o)
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	s.ApplyStateTransitionAuthorizations()
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)

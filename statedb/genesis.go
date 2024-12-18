@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+
 	//"io/ioutil"
 	"os"
 	//"path/filepath"
@@ -114,7 +115,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			NumStorageItems: 2*1 + 0,                    //a_i = 2⋅∣al∣+∣as∣
 		}
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
-		statedb.WriteService(service.ServiceCode, &bootstrapServiceAccount)
+		statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
 	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()

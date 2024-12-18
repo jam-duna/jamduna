@@ -300,14 +300,11 @@ func TestGet(t *testing.T) {
 	}
 	for _, key := range validKeys {
 		value, ok, err := tree.Get(key)
-		if err != nil {
+		if err != nil || !ok {
 			if bptDebug {
 				fmt.Printf("Key: %x not found, error: %s\n", key, err)
 			}
 		} else {
-			if !ok {
-				fmt.Printf("Key: %x not found\n", key)
-			}
 			t.Errorf("Key: %x, Value: %x\n", key, value)
 		}
 	}
@@ -446,10 +443,13 @@ func TestStateKey(t *testing.T) {
 		fmt.Printf("Root Hash=%x \n", rootHash)
 	}
 
-	value, err := tree.GetPreImageBlob(0, common.Hash(hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7")))
+	value, ok, err := tree.GetPreImageBlob(0, common.Hash(hex2Bytes("e6f0db7107765905cfdc1f19af6eb8ff07d89626f47429556d9a52b4e8b001d7")))
 
 	if bptDebug {
 		fmt.Printf("get value=%x, err=%v\n", value, err)
+		if !ok {
+			fmt.Printf("get key not found: %v\n", err)
+		}
 		tree.printTree(tree.Root, 0)
 	}
 	tree.Close()
@@ -513,9 +513,6 @@ func TestService(t *testing.T) {
 	tree.SetService(255, 43, value2)
 	tree.SetService(255, 44, value3)
 
-	if bptDebug {
-		tree.printTree(tree.Root, 0)
-	}
 	s1, _, _ := tree.GetService(255, 42)
 	s2, _, _ := tree.GetService(255, 43)
 	s3, _, _ := tree.GetService(255, 44)
@@ -548,10 +545,10 @@ func TestServicePreImage_lookup(t *testing.T) {
 		tree.printTree(tree.Root, 0)
 	}
 
-	ts1, _ := tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
-	ts2, _ := tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
-	ts3, _ := tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
-	ts4, _ := tree.GetPreImageLookup(45, common.Blake2Hash(case_c), uint32(len(case_c)))
+	ts1, _, _ := tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
+	ts2, _, _ := tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
+	ts3, _, _ := tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
+	ts4, _, _ := tree.GetPreImageLookup(45, common.Blake2Hash(case_c), uint32(len(case_c)))
 
 	if bptDebug {
 		fmt.Println("ts1:", ts1)
@@ -563,9 +560,9 @@ func TestServicePreImage_lookup(t *testing.T) {
 	_ = tree.DeletePreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
 	_ = tree.DeletePreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
 
-	ts1, _ = tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
-	ts2, _ = tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
-	ts3, _ = tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
+	ts1, _, _ = tree.GetPreImageLookup(42, common.Blake2Hash(case_a), uint32(len(case_a)))
+	ts2, _, _ = tree.GetPreImageLookup(43, common.Blake2Hash(case_b), uint32(len(case_b)))
+	ts3, _, _ = tree.GetPreImageLookup(44, common.Blake2Hash(case_c), uint32(len(case_c)))
 	if bptDebug {
 		fmt.Println("ts1:", ts1)
 		fmt.Println("ts2:", ts2)
@@ -588,10 +585,10 @@ func TestServicePreImage_blob(t *testing.T) {
 		tree.printTree(tree.Root, 0)
 	}
 
-	blob1, _ := tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
-	blob2, _ := tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
-	blob3, _ := tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
-	blob4, _ := tree.GetPreImageBlob(45, common.BytesToHash([]byte{1, 2, 3}))
+	blob1, _, _ := tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
+	blob2, _, _ := tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
+	blob3, _, _ := tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
+	blob4, _, _ := tree.GetPreImageBlob(45, common.BytesToHash([]byte{1, 2, 3}))
 
 	if bptDebug {
 		fmt.Println("blob1:", blob1)
@@ -603,9 +600,9 @@ func TestServicePreImage_blob(t *testing.T) {
 	_ = tree.DeletePreImageBlob(43, common.BytesToHash([]byte{1, 2}))
 	_ = tree.DeletePreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
 
-	blob1, _ = tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
-	blob2, _ = tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
-	blob3, _ = tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
+	blob1, _, _ = tree.GetPreImageBlob(42, common.BytesToHash([]byte{1}))
+	blob2, _, _ = tree.GetPreImageBlob(43, common.BytesToHash([]byte{1, 2}))
+	blob3, _, _ = tree.GetPreImageBlob(44, common.BytesToHash([]byte{1, 2, 3}))
 	if bptDebug {
 		fmt.Println("blob1:", blob1)
 		fmt.Println("blob2:", blob2)
@@ -621,18 +618,18 @@ func TestServiceStorage(t *testing.T) {
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
 
-	tree.SetServiceStorage(42, &[]byte{1}, []byte{1})
-	tree.SetServiceStorage(43, &[]byte{1, 2}, []byte{1, 2})
-	tree.SetServiceStorage(44, &[]byte{1, 2, 3}, []byte{1, 2, 3})
+	tree.SetServiceStorage(42, []byte{1}, []byte{1})
+	tree.SetServiceStorage(43, []byte{1, 2}, []byte{1, 2})
+	tree.SetServiceStorage(44, []byte{1, 2, 3}, []byte{1, 2, 3})
 
 	if bptDebug {
 		tree.printTree(tree.Root, 0)
 	}
 
-	Storage1, _, _ := tree.GetServiceStorage(42, &[]byte{1})
-	Storage2, _, _ := tree.GetServiceStorage(43, &[]byte{1, 2})
-	Storage3, _, _ := tree.GetServiceStorage(44, &[]byte{1, 2, 3})
-	Storage4, _, _ := tree.GetServiceStorage(45, &[]byte{1, 2, 3})
+	Storage1, _, _ := tree.GetServiceStorage(42, []byte{1})
+	Storage2, _, _ := tree.GetServiceStorage(43, []byte{1, 2})
+	Storage3, _, _ := tree.GetServiceStorage(44, []byte{1, 2, 3})
+	Storage4, _, _ := tree.GetServiceStorage(45, []byte{1, 2, 3})
 
 	if bptDebug {
 		fmt.Println("Storage1", Storage1)
@@ -640,16 +637,66 @@ func TestServiceStorage(t *testing.T) {
 		fmt.Println("Storage3", Storage3)
 		fmt.Println("Storage4", Storage4)
 	}
-	_ = tree.DeleteServiceStorage(42, &[]byte{1})
-	_ = tree.DeleteServiceStorage(43, &[]byte{1, 2})
-	_ = tree.DeleteServiceStorage(44, &[]byte{1, 2, 3})
+	_ = tree.DeleteServiceStorage(42, []byte{1})
+	_ = tree.DeleteServiceStorage(43, []byte{1, 2})
+	_ = tree.DeleteServiceStorage(44, []byte{1, 2, 3})
 
-	Storage1, _, _ = tree.GetServiceStorage(42, &[]byte{1})
-	Storage2, _, _ = tree.GetServiceStorage(43, &[]byte{1, 2})
-	Storage3, _, _ = tree.GetServiceStorage(44, &[]byte{1, 2, 3})
+	Storage1, _, _ = tree.GetServiceStorage(42, []byte{1})
+	Storage2, _, _ = tree.GetServiceStorage(43, []byte{1, 2})
+	Storage3, _, _ = tree.GetServiceStorage(44, []byte{1, 2, 3})
 	if bptDebug {
 		fmt.Println("Storage1", Storage1)
 		fmt.Println("Storage2", Storage2)
 		fmt.Println("Storage3", Storage3)
 	}
+	tree.Close()
+	DeleteLevelDB()
+}
+
+// Test TestLevelDB
+func TestLevelDB(t *testing.T) {
+	// Initialize the LevelDB
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
+
+	// Test data
+	data := [][2][]byte{
+		{hex2Bytes("A1"), []byte{1}},
+		{hex2Bytes("A2"), []byte{1, 2}},
+		{hex2Bytes("A3"), []byte{1, 2, 3}},
+	}
+
+	// Insert key-value pairs into the LevelDB
+	for _, kv := range data {
+		err := tree.levelDBSet(kv[0], kv[1])
+		if err != nil {
+			t.Fatalf("Failed to set key: %x, error: %v", kv[0], err)
+		}
+	}
+
+	// Retrieve and verify key-value pairs from the LevelDB
+	for _, kv := range data {
+		value, ok, err := tree.levelDBGet(kv[0])
+		if err != nil {
+			t.Fatalf("Failed to get key: %x, error: %v", kv[0], err)
+		}
+		if !ok {
+			t.Fatalf("Key: %x not found", kv[0])
+		}
+		if !compareBytes(value, kv[1]) {
+			t.Fatalf("Value mismatch for key: %x, got: %x, want: %x", kv[0], value, kv[1])
+		}
+	}
+
+	// Test non-existent key
+	nonExistentKey := hex2Bytes("a411")
+	_, ok, err := tree.levelDBGet(nonExistentKey)
+	fmt.Printf("ok %v, err %v\n", ok, err)
+	if err != nil {
+		t.Fatalf("Error while getting non-existent key: %v", err)
+	}
+	if ok {
+		t.Fatalf("Expected key: %x to be non-existent", nonExistentKey)
+	}
+
 }

@@ -25,39 +25,23 @@ func NewMockHostEnv() *MockHostEnv {
 	return &MockHostEnv{db: test_db}
 }
 
-func (mh *MockHostEnv) GetXContext() *types.XContext {
-	return new(types.XContext)
-}
+// func (mh *MockHostEnv) GetXContext() *types.XContext {
+// 	return new(types.XContext)
+// }
 
-func (mh *MockHostEnv) SetXContext(x *types.XContext) {}
+// func (mh *MockHostEnv) SetXContext(x *types.XContext) {}
 
-func (mh *MockHostEnv) UpdateXContext(x *types.XContext) {}
+// func (mh *MockHostEnv) UpdateXContext(x *types.XContext) {}
 
 func (mh *MockHostEnv) GetDB() *storage.StateDBStorage {
 	return mh.db
 }
 
-func (mh *MockHostEnv) ReadServiceBytes(s uint32) []byte {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
-	value, ok, err := tree.GetService(255, s)
-	if err != nil {
-		if !ok {
-			fmt.Printf("ReadServiceBytes unexpected error: %v\n", err)
-		}
-		fmt.Printf("ReadServiceBytes key=%v, value=%x, err=%v\n", s, value, err)
-		return nil
-	}
-	return value
+func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, bool, error) {
+	return nil, false, nil
 }
 
-func (mh *MockHostEnv) WriteServiceBytes(s uint32, v []byte) {
+func (mh *MockHostEnv) ReadServiceStorage(s uint32, k []byte) (storage []byte, ok bool, err error) {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -66,31 +50,16 @@ func (mh *MockHostEnv) WriteServiceBytes(s uint32, v []byte) {
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	tree.SetService(255, s, v)
-}
-
-func (mh *MockHostEnv) ReadServiceStorage(s uint32, k *[]byte) []byte {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
-	storage, ok, err := tree.GetServiceStorage(s, k)
-	if err != nil {
-		if !ok {
-			fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", s, *k, storage, err)
-		}
-		return nil
+	storage, ok, err = tree.GetServiceStorage(s, k)
+	if err != nil || !ok {
+		return
 	} else {
 		fmt.Printf("get value=%x, err=%v\n", storage, err)
-		return storage
+		return
 	}
 }
 
-func (mh *MockHostEnv) WriteServiceStorage(s uint32, k *[]byte, storage []byte) {
+func (mh *MockHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) (blob []byte, ok bool, err error) {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -99,28 +68,16 @@ func (mh *MockHostEnv) WriteServiceStorage(s uint32, k *[]byte, storage []byte) 
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	tree.SetServiceStorage(s, k, storage)
-}
-
-func (mh *MockHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) []byte {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
-	blob, err := tree.GetPreImageBlob(s, blob_hash)
-	if err != nil {
-		return nil
+	blob, ok, err = tree.GetPreImageBlob(s, blob_hash)
+	if err != nil || !ok {
+		return
 	} else {
 		fmt.Printf("get value=%x, err=%v\n", blob, err)
-		return blob
+		return
 	}
 }
 
-func (mh *MockHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) {
+func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32) (time_slots []uint32, ok bool, err error) {
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -129,38 +86,13 @@ func (mh *MockHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) {
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	tree.SetPreImageBlob(s, blob)
-}
-
-func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32) []uint32 {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
-	time_slots, err := tree.GetPreImageLookup(s, blob_hash, blob_length)
-	if err != nil {
-		return nil
+	time_slots, ok, err = tree.GetPreImageLookup(s, blob_hash, blob_length)
+	if err != nil || !ok {
+		return
 	} else {
 		fmt.Printf("get value=%x, err=%v\n", time_slots, err)
-		return time_slots
+		return
 	}
-}
-
-func (mh *MockHostEnv) WriteServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
-	tree.SetPreImageLookup(s, blob_hash, blob_length, time_slots)
-
 }
 
 func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Hash) []byte {
@@ -172,8 +104,8 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
-	blob, err_v := tree.GetPreImageBlob(s, blob_hash)
-	if err_v != nil {
+	blob, ok, err_v := tree.GetPreImageBlob(s, blob_hash)
+	if err_v != nil || !ok {
 		return nil
 	}
 
@@ -184,8 +116,8 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	//lbytes := uint32ToBytes(blob_length)
 	//key := append(lbytes, hbytes...)
 	//timeslots, err_t := tree.GetPreImageLookup(s, key)
-	timeslots, err_t := tree.GetPreImageLookup(s, blob_hash, blob_length)
-	if err_t != nil {
+	timeslots, ok, err_t := tree.GetPreImageLookup(s, blob_hash, blob_length)
+	if err_t != nil || !ok {
 		return nil
 	}
 
@@ -218,65 +150,14 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 	}
 }
 
-func (mh *MockHostEnv) DeleteServiceStorageKey(s uint32, k *[]byte) error {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = tree.DeleteServiceStorage(s, k)
-	if err != nil {
-		log.Fatalf("Failed to delete rk: %x, error: %v", *k, err)
-		return err
-	}
-	return nil
-}
-
-func (mh *MockHostEnv) DeleteServicePreimageKey(s uint32, blob_hash common.Hash) error {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = tree.DeletePreImageBlob(s, blob_hash)
-	if err != nil {
-		log.Fatalf("Failed to delete blob_hash: %x, error: %v", blob_hash.Bytes(), err)
-		return err
-	}
-	return nil
-}
-
-func (mh *MockHostEnv) DeleteServicePreimageLookupKey(s uint32, blob_hash common.Hash, blob_length uint32) error {
-	db := mh.GetDB()
-	rootHash, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
-	defer tree.Close()
-	fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = tree.DeletePreImageLookup(s, blob_hash, blob_length)
-	if err != nil {
-		log.Fatalf("Failed to delete blob_hash: %v, blob_lookup_len: %d, error: %v", blob_hash, blob_length, err)
-		return err
-	}
-	return nil
-}
-
 func (mh *MockHostEnv) GetTimeslot() uint32 {
 	return uint32(0)
 }
 
-func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, error) {
-	return nil, nil
+func (mh *MockHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) {
+	// TODO: elimnate the need for this by adjusting genesis.go
 }
 
-func (mh *MockHostEnv) Check(c uint32) uint32 {
-	return 47
+func (mh *MockHostEnv) WriteServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
+	// TODO: elimnate the need for this by adjusting genesis.go
 }

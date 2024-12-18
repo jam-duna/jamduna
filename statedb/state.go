@@ -17,7 +17,6 @@ type JamState struct {
 	RecentBlocks             RecentBlocks                                 `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
 	SafroleStateGamma        SafroleBasicState                            `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
 	SafroleState             *SafroleState                                `json:"safrole"`
-	PriorServiceAccountState map[uint32]types.ServiceAccount              `json:"prior_service_account_state"` // delta - The (prior) state of the service accounts. δ eq 89
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
 	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
 	PrivilegedServiceIndices types.Kai_state                              `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
@@ -159,7 +158,6 @@ type Pi_state struct {
 
 func NewJamState() *JamState {
 	return &JamState{
-		PriorServiceAccountState: make(map[uint32]types.ServiceAccount),
 		//AvailabilityAssignments:  make([types.TotalCores]*Rho_state),
 		SafroleState: NewSafroleState(),
 	}
@@ -175,15 +173,10 @@ func (original *JamState) Copy() *JamState {
 		PrivilegedServiceIndices: original.PrivilegedServiceIndices,
 		ValidatorStatistics:      original.ValidatorStatistics,
 		SafroleState:             original.SafroleState.Copy(),
-		PriorServiceAccountState: make(map[uint32]types.ServiceAccount),
 		//AvailabilityAssignments:  make([types.TotalCores]*Rho_state),
 		AuthorizationQueue:  original.AuthorizationQueue,
 		AccumulationQueue:   original.AccumulationQueue,
 		AccumulationHistory: original.AccumulationHistory,
-	}
-
-	for key, value := range original.PriorServiceAccountState {
-		copyState.PriorServiceAccountState[key] = value
 	}
 
 	for i, rhoState := range original.AvailabilityAssignments {
@@ -239,13 +232,9 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 	}
 }
 
-func (j *JamState) newPartialState() types.PartialState {
-	d := make(map[uint32]*types.ServiceAccount)
-	for k, v := range j.PriorServiceAccountState {
-		d[k] = &v
-	}
-	return types.PartialState{
-		D:                  d,
+func (j *JamState) newPartialState() *types.PartialState {
+	return &types.PartialState{
+		D:                  make(map[uint32]*types.ServiceAccount),
 		UpcomingValidators: j.SafroleState.DesignedValidators,
 		QueueWorkReport:    j.AuthorizationQueue,
 		PrivilegedState:    j.PrivilegedServiceIndices,
