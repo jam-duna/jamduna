@@ -1399,10 +1399,13 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	if err != nil {
 		return bl, err
 	}
-
-	epochType := sf.CheckEpochType()
+	sf_tmp, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{}) // freshness not needed as we are not applying state transition yet
+	if err != nil {
+		fmt.Printf("Error applying state transition safrole in MakeBlock: %v\n", err)
+	}
+	epochType := sf_tmp.CheckEpochType()
 	if epochType == "fallback" {
-		blockseal, fresh_vrfSig, err := sf.SignFallBack(auth_secret_key, unsignHeader)
+		blockseal, fresh_vrfSig, err := sf_tmp.SignFallBack(auth_secret_key, unsignHeader)
 		if err != nil {
 			return bl, err
 		}
@@ -1414,8 +1417,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			fmt.Printf("  EntropySource: %x\n", h.EntropySource)
 		}
 	} else {
-		attempt, err := sf.GetBindedAttempt(targetJCE)
-		blockseal, fresh_vrfSig, err := sf.SignPrimary(auth_secret_key, unsignHeader, attempt)
+		attempt, err := sf_tmp.GetBindedAttempt(targetJCE)
+		blockseal, fresh_vrfSig, err := sf_tmp.SignPrimary(auth_secret_key, unsignHeader, attempt)
 		if err != nil {
 			return bl, err
 		}

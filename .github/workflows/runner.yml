@@ -24,7 +24,7 @@ on:
 
 jobs:
   test:
-    runs-on: self-hosted
+    runs-on: jamops-16-core
     timeout-minutes: 10
     steps:
       - name: Checkout code

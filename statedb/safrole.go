@@ -979,14 +979,13 @@ func (s *SafroleState) GetEpoch() uint32 {
 
 // statefrole_stf is the function to be tested
 func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) (SafroleState, error) {
-	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, _ := s.EpochAndPhase(targetJCE)
+
 	err := s.ValidateSaforle(tickets, targetJCE, header)
 	if err != nil {
 		fmt.Printf("ValidateSaforle ERR %v\n", err)
 		return *s, err
 	}
-	s2 := cloneSafroleState(*s)
+
 	// tally existing ticketIDs
 	ticketIDs := make(map[common.Hash]uint8)
 	for _, a := range s.NextEpochTicketsAccumulator {
@@ -998,55 +997,12 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	//fmt.Printf("Current Slot: %d => Input Slot: %d \n", s.Timeslot, targetJCE)
 	fresh_randomness, err := s.GetFreshRandomness(header.EntropySource[:])
 	if err != nil {
-
 		fmt.Printf("GetFreshRandomness ERR %v (len=%d)", err, len(header.EntropySource[:]))
-		return s2, fmt.Errorf("GetFreshRandomness %v", err)
+		return *s, fmt.Errorf("GetFreshRandomness %v", err)
 	}
-	// in the tail slot with a full set of tickets
-	if prevEpoch < currEpoch { //MK check EpochNumSlots-1 ?
-		//TODO this is Winning ticket elgible. Check if header has marker, if yes, verify it
-		if debug {
-			fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
-		}
-		// eq 68 primary mode
-		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength {
-			winning_tickets, err := s2.GenerateWinningMarker()
-			if err != nil {
-				return s2, fmt.Errorf("Get Winning Tickets Failed: %v", err)
-			}
-			expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
-			verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(winning_tickets), expected_tickets)
-			if !verified || err != nil {
-				return s2, fmt.Errorf("VerifyWinningMarker Failed:%s", err)
-			}
-			// do something to set this marker
-			ticketsOrKeys := TicketsOrKeys{
-				Tickets: winning_tickets,
-			}
-			s2.TicketsOrKeys = ticketsOrKeys
-			s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)
-		} else { // eq 68 fallback mode
-			chosenkeys, err := s.ChooseFallBackValidator()
-			if err != nil {
-				return s2, fmt.Errorf("ChooseFallBackValidator %v", err)
-			}
-			ticketsOrKeys := TicketsOrKeys{
-				Keys: chosenkeys,
-			}
-			s2.TicketsOrKeys = ticketsOrKeys
-		}
-
-	}
-	// entropy phasing eq 67 & 57
-	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)
-	isShifted := false
-	if currEpoch > prevEpoch {
-		// New Epoch
-		s2.PhasingEntropyAndValidator(s, new_entropy_0)
-		isShifted = true
-	} else {
-		// Epoch in progress
-		s2.StableEntropy(s, new_entropy_0)
+	s2, epochShifted, err := s.ValidateTicketTransition(targetJCE, fresh_randomness)
+	if err != nil {
+		return *s, fmt.Errorf("error applying state transition safrole in MakeBlock: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -1060,7 +1016,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 			defer wg.Done()
 
 			// Validate the ticket in parallel
-			ticket_id, err := s.ValidateProposedTicket(&e, isShifted)
+			ticket_id, err := s.ValidateProposedTicket(&e, epochShifted)
 			if err != nil {
 				errCh <- jamerrors.ErrTBadRingProof
 				return
@@ -1092,6 +1048,62 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	s2.Timeslot = targetJCE
 
 	return s2, nil
+}
+
+func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomness common.Hash) (s2 SafroleState, epochShifted bool, err error) {
+	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	currEpoch, _ := s.EpochAndPhase(targetJCE)
+	epochShifted = false
+	if currEpoch > prevEpoch {
+		// New Epoch
+		epochShifted = true
+	}
+	s2 = cloneSafroleState(*s)
+	// in the tail slot with a full set of tickets
+	if prevEpoch < currEpoch { //MK check EpochNumSlots-1 ?
+		//this is Winning ticket eligible. Check if header has marker, if yes, verify it
+		if debug {
+			fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
+		}
+		// eq 68 primary mode
+		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength {
+			winning_tickets, err := s2.GenerateWinningMarker()
+			if err != nil {
+				return s2, epochShifted, fmt.Errorf("GenerateWinningMarker Failed: %v", err)
+			}
+			expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
+			verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(winning_tickets), expected_tickets)
+			if !verified || err != nil {
+				return s2, epochShifted, fmt.Errorf("VerifyWinningMarker Failed:%s", err)
+			}
+			// do something to set this marker
+			ticketsOrKeys := TicketsOrKeys{
+				Tickets: winning_tickets,
+			}
+			s2.TicketsOrKeys = ticketsOrKeys
+			s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)
+		} else { // eq 68 fallback mode
+			chosenkeys, err := s.ChooseFallBackValidator()
+			if err != nil {
+				return s2, epochShifted, fmt.Errorf("ChooseFallBackValidator %v", err)
+			}
+			ticketsOrKeys := TicketsOrKeys{
+				Keys: chosenkeys,
+			}
+			s2.TicketsOrKeys = ticketsOrKeys
+		}
+
+	}
+	// entropy phasing eq 67 & 57
+	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)
+	if currEpoch > prevEpoch {
+		// New Epoch
+		s2.PhasingEntropyAndValidator(s, new_entropy_0)
+	} else {
+		// Epoch in progress
+		s2.StableEntropy(s, new_entropy_0)
+	}
+	return s2, epochShifted, nil
 }
 
 // this function is for validate the block input is correct or not

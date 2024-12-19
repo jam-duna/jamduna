@@ -293,7 +293,7 @@ func decodeapi(objectType, input string) (string, error) {
 }
 
 func main() {
-	port := 8080
+	port := 8079
 	mux := http.NewServeMux()
 
 	// Serve static files from the "./static" directory

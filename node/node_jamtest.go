@@ -201,7 +201,7 @@ func SetUpNodes(numNodes int) ([]*Node, error) {
 		}
 		nodes[i] = node
 		if i == 0 {
-			go node.runWebService(8080)
+			go node.runWebService(8079)
 		}
 	}
 	go func() {

@@ -607,7 +607,7 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, 
 			fmt.Printf("[N%v] WP=%v | updated ImportedSegments: %x\n", n.id, package_bundle.PackageHash(), package_bundle.ImportSegmentData)
 
 		} else {
-			fmt.Printf("[N%v] WP=%v Justification Verification Passed\n", n.id, package_bundle.PackageHash())
+			//fmt.Printf("[N%v] WP=%v Justification Verification Passed\n", n.id, package_bundle.PackageHash())
 		}
 	}
 
