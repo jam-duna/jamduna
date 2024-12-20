@@ -77,10 +77,10 @@ type RefineMForTest struct {
 type RefineM_mapForTest map[uint32]*RefineMForTest
 
 type PartialStateForTest struct {
-	D                  map[uint32]*ServiceAccountForTest `json:"D"`
-	UpcomingValidators types.Validators                  `json:"upcoming_validators"`
-	QueueWorkReport    types.AuthorizationQueue          `json:"authorizations_pool"`
-	PrivilegedState    types.Kai_state                   `json:"privileged_state"`
+	D map[uint32]*ServiceAccountForTest `json:"D"`
+	I types.Validators                  `json:"I"`
+	Q types.AuthorizationQueue          `json:"Q"`
+	X types.Kai_state                   `json:"X"`
 }
 
 type DeferredTransferForTest struct {
@@ -101,17 +101,20 @@ type XContextForTest struct {
 
 type RefineTestcase struct {
 	Name          string            `json:"name"`
-	InitialGas    uint64            `json:"initial-gas"`
+	InitialGas    int64             `json:"initial-gas"`
 	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
 	InitialMemory RAMForTest        `json:"initial-memory"`
 
 	InitialRefineM_map   RefineM_mapForTest `json:"initial-refine-map"` // m in refine function
 	InitialExportSegment []ByteSlice        `json:"initial-export-segment"`
 
-	InitialImportSegment    []ByteSlice `json:"initial-import-segment"`
-	InitialExportSegmentIdx uint32      `json:"initial-export-segment-index"`
+	InitialImportSegment    []ByteSlice                       `json:"initial-import-segment"`
+	InitialExportSegmentIdx uint32                            `json:"initial-export-segment-index"`
+	InitialServiceIndex     uint32                            `json:"initial-service-index"`
+	InitialDelta            map[uint32]*ServiceAccountForTest `json:"initial-delta"`
+	InitialTimeslot         uint32                            `json:"initial-timeslot"`
 
-	ExpectedGas    uint64            `json:"expected-gas"`
+	ExpectedGas    int64             `json:"expected-gas"`
 	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
 	ExpectedMemory RAMForTest        `json:"expected-memory"`
 
@@ -121,7 +124,7 @@ type RefineTestcase struct {
 
 type AccumulateTestcase struct {
 	Name          string            `json:"name"`
-	InitialGas    uint64            `json:"initial-gas"`
+	InitialGas    int64             `json:"initial-gas"`
 	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
 	InitialMemory RAMForTest        `json:"initial-memory"`
 
@@ -129,7 +132,7 @@ type AccumulateTestcase struct {
 	InitialXcontent_y XContextForTest  `json:"initial-xcontent-y"`
 	InitialTimeslot   uint32           `json:"initial-timeslot"`
 
-	ExpectedGas    uint64            `json:"expected-gas"`
+	ExpectedGas    int64             `json:"expected-gas"`
 	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
 	ExpectedMemory RAMForTest        `json:"expected-memory"`
 
@@ -139,7 +142,7 @@ type AccumulateTestcase struct {
 
 type GeneralTestcase struct {
 	Name          string            `json:"name"`
-	InitialGas    uint64            `json:"initial-gas"`
+	InitialGas    int64             `json:"initial-gas"`
 	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
 	InitialMemory RAMForTest        `json:"initial-memory"`
 
@@ -147,7 +150,7 @@ type GeneralTestcase struct {
 	InitialServiceIndex   uint32                            `json:"initial-service-index"`
 	InitialDelta          map[uint32]*ServiceAccountForTest `json:"initial-delta"`
 
-	ExpectedGas    uint64            `json:"expected-gas"`
+	ExpectedGas    int64             `json:"expected-gas"`
 	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
 	ExpectedMemory RAMForTest        `json:"expected-memory"`
 
@@ -197,36 +200,36 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 }
 
 type Testcase interface {
-	GetInitialGas() uint64
+	GetInitialGas() int64
 	GetInitialRegs() map[uint32]uint64
 	GetInitialMemory() RAMForTest
 
-	GetExpectedGas() uint64
+	GetExpectedGas() int64
 	GetExpectedRegs() map[uint32]uint64
 	GetExpectedMemory() RAMForTest
 	GetName() string
 }
 
-func (tc RefineTestcase) GetInitialGas() uint64              { return tc.InitialGas }
+func (tc RefineTestcase) GetInitialGas() int64               { return tc.InitialGas }
 func (tc RefineTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
 func (tc RefineTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
-func (tc RefineTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc RefineTestcase) GetExpectedGas() int64              { return tc.ExpectedGas }
 func (tc RefineTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
 func (tc RefineTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
 func (tc RefineTestcase) GetName() string                    { return tc.Name }
 
-func (tc AccumulateTestcase) GetInitialGas() uint64              { return tc.InitialGas }
+func (tc AccumulateTestcase) GetInitialGas() int64               { return tc.InitialGas }
 func (tc AccumulateTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
 func (tc AccumulateTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
-func (tc AccumulateTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc AccumulateTestcase) GetExpectedGas() int64              { return tc.ExpectedGas }
 func (tc AccumulateTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
 func (tc AccumulateTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
 func (tc AccumulateTestcase) GetName() string                    { return tc.Name }
 
-func (tc GeneralTestcase) GetInitialGas() uint64              { return tc.InitialGas }
+func (tc GeneralTestcase) GetInitialGas() int64               { return tc.InitialGas }
 func (tc GeneralTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
 func (tc GeneralTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
-func (tc GeneralTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc GeneralTestcase) GetExpectedGas() int64              { return tc.ExpectedGas }
 func (tc GeneralTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
 func (tc GeneralTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
 func (tc GeneralTestcase) GetName() string                    { return tc.Name }
@@ -237,8 +240,9 @@ func InitPvmBase(vm *pvm.VM, tc Testcase) {
 		vm.WriteRegister(int(i), reg)
 	}
 	for page_addr, page := range tc.GetInitialMemory().Pages {
-		vm.Ram.SetPageAccess(page_addr, 1, page.Access)
+		vm.Ram.SetPageAccess(page_addr, 1, pvm.AccessMode{Writable: true})
 		vm.Ram.WriteRAMBytes(page_addr*pvm.PageSize, page.Value)
+		vm.Ram.SetPageAccess(page_addr, 1, page.Access)
 	}
 }
 
@@ -262,6 +266,17 @@ func InitPvmRefine(vm *pvm.VM, testcase RefineTestcase) {
 	}
 
 	vm.ExportSegmentIndex = testcase.InitialExportSegmentIdx
+	vm.Service_index = testcase.InitialServiceIndex
+	vm.Delta = make(map[uint32]*types.ServiceAccount)
+	for k, v := range testcase.InitialDelta {
+		sa, err := ConvertToServiceAccount(v)
+		if err != nil {
+			fmt.Printf("Error converting ServiceAccount: %v\n", err)
+			return
+		}
+		vm.Delta[k] = sa
+	}
+	vm.Timeslot = testcase.InitialTimeslot
 }
 
 func InitPvmAccumulate(vm *pvm.VM, testcase AccumulateTestcase) {
@@ -277,6 +292,8 @@ func InitPvmAccumulate(vm *pvm.VM, testcase AccumulateTestcase) {
 	}
 
 	// Initialize vm.XContext and vm.XContextY
+	service_account, _ := XContext.GetX_s()
+	service_account.Mutable = true
 	vm.X = XContext
 	vm.Timeslot = testcase.InitialTimeslot
 }
@@ -315,15 +332,10 @@ func CompareBase(vm *pvm.VM, testcase Testcase) {
 	expectedRegs := testcase.GetExpectedRegs()
 	if len(expectedRegs) > 0 {
 		vmRegs := vm.ReadRegisters()
-		if len(vmRegs) != len(expectedRegs) {
-			fmt.Printf("Registers length mismatch. Expected: %d, Got: %d\n", len(expectedRegs), len(vmRegs))
-			passed = false
-		} else {
-			for i, reg := range expectedRegs {
-				if vmRegs[i] != reg {
-					fmt.Printf("Register[%d] mismatch. Expected: %d, Got: %d\n", i, reg, vmRegs[i])
-					passed = false
-				}
+		for i, reg := range expectedRegs {
+			if vmRegs[i] != reg {
+				fmt.Printf("Register[%d] mismatch. Expected: %d, Got: %d\n", i, reg, vmRegs[i])
+				passed = false
 			}
 		}
 	}
@@ -331,6 +343,7 @@ func CompareBase(vm *pvm.VM, testcase Testcase) {
 	expectedMemory := testcase.GetExpectedMemory().Pages
 	if len(expectedMemory) > 0 {
 		for page_addr, page := range expectedMemory {
+			vm.Ram.SetPageAccess(page_addr, 1, pvm.AccessMode{Readable: true})
 			actualMemory, _ := vm.Ram.ReadRAMBytes(page_addr*pvm.PageSize, uint32(len(page.Value)))
 			if !equalByteSlices(actualMemory, page.Value) {
 				fmt.Printf("Memory mismatch at address %d. Expected: %v, Got: %v\n", page_addr*pvm.PageSize, page.Value, actualMemory)
@@ -378,6 +391,22 @@ func CompareAccumulate(vm *pvm.VM, testcase AccumulateTestcase) {
 		passed = false
 		return
 	}
+
+	// jsonData, err := json.Marshal(actualXContext_x)
+	// if err != nil {
+	// 	fmt.Println("Error formatting JSON:", err)
+	// 	return
+	// }
+	// fmt.Printf("ActualXContext_x: %s\n", string(jsonData))
+
+	// fmt.Println("=====================================================")
+
+	// jsonData, err = json.Marshal(testcase.ExpectedXcontent_x)
+	// if err != nil {
+	// 	fmt.Println("Error formatting JSON:", err)
+	// 	return
+	// }
+	// fmt.Printf("ExpectedXcontent_x: %s\n", string(jsonData))
 
 	if !reflect.DeepEqual(actualXContext_x, testcase.ExpectedXcontent_x) {
 		fmt.Printf("XContext_x mismatch. Expected: %v, Got: %v\n", testcase.ExpectedXcontent_x, actualXContext_x)
@@ -446,13 +475,13 @@ func TestRefine(t *testing.T) {
 		"Historical_lookup", // William
 		"Import",            // William
 		"Export",            // William
-		"Machine",           // Shawn
-		"Peek",              // Shawn
-		"Poke",              // Shawn
-		"Zero",              // Shawn
-		"Void",              // Shawn
-		"Invoke",            // Shawn
-		"Expunge",           // Shawn
+		// "Machine",           // Shawn
+		// "Peek",              // Shawn
+		// "Poke",              // Shawn
+		// "Zero",              // Shawn
+		// "Void",              // Shawn
+		// "Invoke",            // Shawn
+		// "Expunge",           // Shawn
 	}
 	for _, name := range functions {
 		fmt.Printf("%s\n", name)
@@ -467,6 +496,11 @@ func TestRefine(t *testing.T) {
 		for i, content := range contents {
 			targetStateDB := node.getPVMStateDB()
 			vm := pvm.NewVMFortest(targetStateDB)
+
+			// if !strings.Contains(files[i], "OK") {
+			// 	continue
+			// }
+
 			fmt.Println("--------------------------------------------------")
 			fmt.Printf("Testing file %s\n", files[i])
 			var testcase RefineTestcase
@@ -477,7 +511,7 @@ func TestRefine(t *testing.T) {
 			}
 			InitPvmBase(vm, testcase)
 			InitPvmRefine(vm, testcase)
-			vm.InvokeHostCall(hostidx)
+			vm.InvokeHostCall(hostidx, true)
 			CompareBase(vm, testcase)
 			CompareRefine(vm, testcase)
 
@@ -497,12 +531,12 @@ func TestAccumulate(t *testing.T) {
 		// "Assign", // Michael+Sourabh
 		// "Designate", // Michael+Sourabh
 		// "Checkpoint", // Michael+Sourabh
-		"New",      // William
-		"Upgrade",  // William
-		"Transfer", // William
-		"Quit",     // William
-		"Solicit",  // William
-		"Forget",   // William
+		// "New",      // William
+		// "Upgrade",  // William
+		// "Transfer", // William
+		// "Quit", // William
+		// "Solicit", // William
+		"Forget", // William
 	}
 
 	for _, name := range functions {
@@ -527,7 +561,7 @@ func TestAccumulate(t *testing.T) {
 			}
 			InitPvmBase(vm, testcase)
 			InitPvmAccumulate(vm, testcase)
-			vm.InvokeHostCall(hostidx)
+			vm.InvokeHostCall(hostidx, true)
 			CompareBase(vm, testcase)
 			CompareAccumulate(vm, testcase)
 		}
@@ -572,7 +606,7 @@ func TestGeneral(t *testing.T) {
 			}
 			InitPvmBase(vm, testcase)
 			InitPvmGeneral(vm, testcase)
-			vm.InvokeHostCall(hostidx)
+			vm.InvokeHostCall(hostidx, true)
 			CompareBase(vm, testcase)
 			CompareGeneral(vm, testcase)
 		}
@@ -591,6 +625,12 @@ func GenerateTestVectors(t *testing.T, dirPath string, functions []string, error
 	for _, name := range functions {
 		hostidx, _ := pvm.GetHostFunctionDetails(name)
 		fmt.Printf("hostidx: %d\n", hostidx)
+
+		functionDir := filepath.Join(dirPath, name)
+		if err := os.MkdirAll(functionDir, os.ModePerm); err != nil {
+			fmt.Printf("Failed to create directory for function %s: %v\n", name, err)
+			continue
+		}
 
 		// Get error cases for the function
 		errCaseList, exists := errorCases[name]
@@ -674,7 +714,7 @@ func GenerateTestVectors(t *testing.T, dirPath string, functions []string, error
 			// Save to file
 			errcaseName, _ := errorCaseNames[errcase]
 			filename := fmt.Sprintf("host%s%s.json", name, errcaseName)
-			outputPath := filepath.Join(dirPath, filename)
+			outputPath := filepath.Join(functionDir, filename)
 			err = os.WriteFile(outputPath, modifiedContent, 0644)
 			if err != nil {
 				fmt.Printf("Failed to write modified test case to file: %v\n", err)
@@ -709,37 +749,6 @@ func WriteJSONFile(filePath string, data interface{}) error {
 		return fmt.Errorf("failed to write file: %v", err)
 	}
 	return nil
-}
-
-// Generate General test vectors
-func TestGenerateGeneralTestVectors(t *testing.T) {
-	dirPath := "../jamtestvectors/host_function"
-	functions := []string{"Lookup", "Read", "Write", "Info", "Sp1Groth16Verify"}
-	errorCases := map[string][]uint64{
-		// B.6 General Functions
-		"Gas":              {pvm.OK},
-		"Lookup":           {pvm.OK, pvm.NONE, pvm.OOB},
-		"Read":             {pvm.OK, pvm.OOB, pvm.NONE},
-		"Write":            {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
-		"Info":             {pvm.OK, pvm.OOB, pvm.NONE},
-		"Sp1Groth16Verify": {pvm.OK, pvm.OOB, pvm.HUH},
-	}
-	templateFileName := "./templates/hostGeneralTemplate.json"
-	testCaseType := "General"
-	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
-
-	// LATER: "Gas":      {pvm.OK},
-	// TODO: William
-	// "Lookup":   {pvm.OK, pvm.NONE, pvm.OOB},
-	// "Read":  {pvm.OK, pvm.OOB, pvm.NONE},
-	// "Write": {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
-
-	// TODO: Shawn
-	// "Info":     {pvm.OK, pvm.OOB, pvm.NONE},
-
-	// TODO: Sourabh
-	// "Sp1Groth16Verify":  {pvm.OK, pvm.OOB, pvm.HUH},
-
 }
 
 // some useful functions
@@ -974,9 +983,9 @@ func ConvertToXContextForTest(xc *types.XContext) (*XContextForTest, error) {
 func ConvertToPartialState(psft *PartialStateForTest) (*types.PartialState, error) {
 	ps := &types.PartialState{
 		D:                  make(map[uint32]*types.ServiceAccount),
-		UpcomingValidators: psft.UpcomingValidators,
-		QueueWorkReport:    psft.QueueWorkReport,
-		PrivilegedState:    psft.PrivilegedState,
+		UpcomingValidators: psft.I,
+		QueueWorkReport:    psft.Q,
+		PrivilegedState:    psft.X,
 	}
 
 	// Convert D map
@@ -994,10 +1003,10 @@ func ConvertToPartialState(psft *PartialStateForTest) (*types.PartialState, erro
 // Convert types.PartialState to PartialStateForTest
 func ConvertToPartialStateForTest(ps *types.PartialState) *PartialStateForTest {
 	psft := &PartialStateForTest{
-		D:                  make(map[uint32]*ServiceAccountForTest),
-		UpcomingValidators: ps.UpcomingValidators,
-		QueueWorkReport:    ps.QueueWorkReport,
-		PrivilegedState:    ps.PrivilegedState,
+		D: make(map[uint32]*ServiceAccountForTest),
+		I: ps.UpcomingValidators,
+		Q: ps.QueueWorkReport,
+		X: ps.PrivilegedState,
 	}
 
 	// Convert D map
@@ -1142,10 +1151,10 @@ func DeepCopyServiceAccount(sa *ServiceAccountForTest) *ServiceAccountForTest {
 
 func DeepCopyPartialStateForTest(psft *PartialStateForTest) *PartialStateForTest {
 	newPSFT := &PartialStateForTest{
-		D:                  make(map[uint32]*ServiceAccountForTest),
-		UpcomingValidators: psft.UpcomingValidators,
-		QueueWorkReport:    psft.QueueWorkReport,
-		PrivilegedState:    psft.PrivilegedState,
+		D: make(map[uint32]*ServiceAccountForTest),
+		I: psft.I,
+		Q: psft.Q,
+		X: psft.X,
 	}
 	for k, v := range psft.D {
 		newPSFT.D[k] = DeepCopyServiceAccount(v)
@@ -1182,35 +1191,89 @@ func DeepCopyXContextForTest(xcft *XContextForTest) *XContextForTest {
 func ComputeStorageKey(s uint32, key []byte) {
 	h := common.Compute_storageKey_internal(s, key)
 	account_storage_key := common.ComputeC_sh(s, h)
+	fmt.Printf("account_storage_key: %v\n", account_storage_key)
 	fmt.Printf("account_storage_key: %v\n", account_storage_key.Bytes())
 }
 
-func ComputePreimageBlobKey(s uint32, blob_hash common.Hash) {
+func TestComputeStorageKey(t *testing.T) {
+	service_index := uint32(1)
+	key := []byte{0, 0, 0, 0}
+	ComputeStorageKey(service_index, key)
+}
+
+func ComputePreimageBlobKey(s uint32, blob_hash common.Hash) common.Hash {
 	ap_internal_key := common.Compute_preimageBlob_internal(blob_hash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
 	fmt.Printf("account_preimage_hash: %v\n", account_preimage_hash)
+	fmt.Printf("account_preimage_hash: in bytes: %v\n", account_preimage_hash.Bytes())
+	return account_preimage_hash
+}
+func TestComputePreimageBlobKey(t *testing.T) {
+	service_index := uint32(0)
+	blob := []byte{15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10}
+	blob_hash := common.Blake2Hash(blob)
+	_ = ComputePreimageBlobKey(service_index, blob_hash)
 }
 
-func ComputePreimageLookupKey(s uint32, blob_hash common.Hash, blob_len uint32) {
+func ComputePreimageLookupKey(s uint32, blob_hash common.Hash, blob_len uint32) common.Hash {
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key)
 	fmt.Printf("account_lookuphash: %v\n", account_lookuphash)
+	fmt.Printf("account_lookuphash: in bytes: %v\n", account_lookuphash.Bytes())
+	return account_lookuphash
 }
 
 func TestComputePreimageLookupKey(t *testing.T) {
-	al_internal_key := common.Compute_preimageLookup_internal(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), 12)
-	account_lookuphash := common.ComputeC_sh(1, al_internal_key)
-	fmt.Printf("account_lookuphash: %v\n", account_lookuphash)
+	service_index := uint32(0)
+	blob := []byte{15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10}
+	blob_hash := common.Blake2Hash(blob)
+	fmt.Printf("blob_hash: %v\n", blob_hash)
+	fmt.Printf("blob_hash: in bytes: %v\n", blob_hash.Bytes())
+	serialized_blob_hash := ComputePreimageBlobKey(service_index, blob_hash)
+	_ = serialized_blob_hash
+	_ = ComputePreimageLookupKey(service_index, blob_hash, uint32(len(blob)))
+}
+
+// Generate General test vectors
+func TestGenerateGeneralTestVectors(t *testing.T) {
+	dirPath := "../jamtestvectors/host_function"
+	functions := []string{"Lookup", "Read", "Write", "Info", "Sp1Groth16Verify"}
+	errorCases := map[string][]uint64{
+		// B.6 General Functions
+		"Gas":              {pvm.OK},
+		"Lookup":           {pvm.OK, pvm.NONE, pvm.OOB},
+		"Read":             {pvm.OK, pvm.OOB, pvm.NONE},
+		"Write":            {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
+		"Info":             {pvm.OK, pvm.OOB, pvm.NONE},
+		"Sp1Groth16Verify": {pvm.OK, pvm.OOB, pvm.HUH},
+	}
+	templateFileName := "./templates/hostGeneralTemplate.json"
+	testCaseType := "General"
+	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
+
+	// LATER: "Gas":      {pvm.OK},
+	// TODO: William
+	// "Lookup":   {pvm.OK, pvm.NONE, pvm.OOB},
+	// "Read":  {pvm.OK, pvm.OOB, pvm.NONE},
+	// "Write": {pvm.OK, pvm.OOB, pvm.FULL, pvm.OOB},
+
+	// TODO: Shawn
+	// "Info":     {pvm.OK, pvm.OOB, pvm.NONE},
+
+	// TODO: Sourabh
+	// "Sp1Groth16Verify":  {pvm.OK, pvm.OOB, pvm.HUH},
+
 }
 
 func TestGenerateRefineTestVectors(t *testing.T) {
 	dirPath := "../jamtestvectors/host_function"
 	templateFileName := "./templates/hostRefineTemplate.json"
 	testCaseType := "Refine"
-	functions := []string{"Historical_lookup", "Import", "Export", "Machine", "Peek", "Poke", "Zero", "Void", "Invoke", "Expunge"}
+	// functions := []string{"Historical_lookup", "Import", "Export", "Machine", "Peek", "Poke", "Zero", "Void", "Invoke", "Expunge"}
+	functions := []string{"Historical_lookup"}
 	errorCases := map[string][]uint64{
 		// B.8 Refine Functions
-		"Historical_lookup": {pvm.OK, pvm.OOB},
+		"Historical_lookup": {pvm.OK, pvm.OOB, pvm.NONE},
 		"Import":            {pvm.OK, pvm.OOB, pvm.NONE},
 		"Export":            {pvm.OK, pvm.OOB, pvm.FULL},
 		"Machine":           {pvm.OK, pvm.OOB},
@@ -1225,20 +1288,25 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
 
 	testCases := []struct {
-		filename          string
-		initialRegs       map[uint32]uint64
-		expectedRegs      map[uint32]uint64
-		initialMemory     RAMForTest
-		expectedMemory    RAMForTest
-		initialSegment    []ByteSlice
-		expectedSegment   []ByteSlice
-		initialSegmentIdx uint64
+		filename            string
+		initialRegs         map[uint32]uint64
+		expectedRegs        map[uint32]uint64
+		initialMemory       RAMForTest
+		expectedMemory      RAMForTest
+		InitialRefineM_map  map[uint32]*RefineMForTest
+		ExpectedRefineM_map map[uint32]*RefineMForTest
+		initialSegment      []ByteSlice
+		expectedSegment     []ByteSlice
+		initialSegmentIdx   uint64
+		initialServiceIndex uint32
+		initialDelta        map[uint32]*ServiceAccountForTest
+		InitialTimeslot     uint32
 	}{
 		// TODO: William
 		// "Historical_lookup":  {pvm.OK, pvm.OOB},
 		// "Import": {pvm.OK, pvm.OOB, pvm.NONE},
 		{
-			filename: "hostImportOK.json",
+			filename: "./Import/hostImportOK.json",
 			initialRegs: map[uint32]uint64{
 				7: 0,
 				8: 32 * pvm.PageSize,
@@ -1262,7 +1330,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialSegment: []ByteSlice{{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
 		},
 		{
-			filename: "hostImportOOB.json",
+			filename: "./Import/hostImportOOB.json",
 			initialRegs: map[uint32]uint64{
 				7: 0,
 				8: 32 * pvm.PageSize,
@@ -1286,7 +1354,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialSegment: []ByteSlice{{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}},
 		},
 		{
-			filename: "hostImportNONE.json",
+			filename: "./Import/hostImportNONE.json",
 			initialRegs: map[uint32]uint64{
 				7: 9999, // Simulate NONE error
 				8: 32 * pvm.PageSize,
@@ -1311,7 +1379,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 		},
 		// "Export": {pvm.OK, pvm.OOB, pvm.FULL},
 		{
-			filename: "hostExportOK.json",
+			filename: "./Export/hostExportOK.json",
 			initialRegs: map[uint32]uint64{
 				7: 32 * pvm.PageSize,
 				8: 12,
@@ -1335,7 +1403,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialSegmentIdx: 0,
 		},
 		{
-			filename: "hostExportOOB.json",
+			filename: "./Export/hostExportOOB.json",
 			initialRegs: map[uint32]uint64{
 				7: 32 * pvm.PageSize,
 				8: 12,
@@ -1359,9 +1427,9 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialSegmentIdx: 0,
 		},
 		{
-			filename: "hostExportFULL.json",
+			filename: "./Export/hostExportFULL.json",
 			initialRegs: map[uint32]uint64{
-				7: 4278124544, // 0xFEFF0000
+				7: 32 * pvm.PageSize,
 				8: 12,
 			},
 			expectedRegs: map[uint32]uint64{
@@ -1382,6 +1450,140 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			expectedSegment:   []ByteSlice{{}},
 			initialSegmentIdx: 9999, // Simulate FULL error
 		},
+
+		// "Historical_lookup": {pvm.OK, pvm.OOB, pvm.FULL},
+		{
+			filename: "./Historical_lookup/hostHistorical_lookupOK.json",
+			initialRegs: map[uint32]uint64{
+				7:  0,
+				8:  32 * pvm.PageSize,
+				9:  32 * pvm.PageSize,
+				10: 100,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  12, // v length
+				8:  32 * pvm.PageSize,
+				9:  32 * pvm.PageSize,
+				10: 100,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			initialServiceIndex: 0,
+			initialDelta: map[uint32]*ServiceAccountForTest{
+				0: {
+					Storage: map[string]ByteSlice{
+						"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+					},
+					Lookup: map[string][]uint32{
+						"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{0},
+					},
+					Preimage: map[string]ByteSlice{
+						"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+					},
+					CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+					Balance:   100,
+					GasLimitG: 100,
+					GasLimitM: 100,
+				},
+			},
+			InitialTimeslot: 1000,
+		},
+		{
+			filename: "./Historical_lookup/hostHistorical_lookupOOB.json",
+			initialRegs: map[uint32]uint64{
+				7:  0,
+				8:  32 * pvm.PageSize,
+				9:  32 * pvm.PageSize,
+				10: 100,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.OOB,
+				8:  32 * pvm.PageSize,
+				9:  32 * pvm.PageSize,
+				10: 100,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialServiceIndex: 0,
+			initialDelta: map[uint32]*ServiceAccountForTest{
+				0: {
+					Storage: map[string]ByteSlice{
+						"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+					},
+					Lookup: map[string][]uint32{
+						"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{0},
+					},
+					Preimage: map[string]ByteSlice{
+						"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+					},
+					CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+					Balance:   100,
+					GasLimitG: 100,
+					GasLimitM: 100,
+				},
+			},
+			InitialTimeslot: 1000,
+		},
+		{
+			filename: "./Historical_lookup/hostHistorical_lookupNONE.json",
+			initialRegs: map[uint32]uint64{
+				7:  0,
+				8:  32 * pvm.PageSize,
+				9:  32 * pvm.PageSize,
+				10: 100,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.NONE,
+				8:  32 * pvm.PageSize,
+				9:  32 * pvm.PageSize,
+				10: 100,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Writable: true}},
+				},
+			},
+			initialServiceIndex: 0,
+			initialDelta: map[uint32]*ServiceAccountForTest{
+				0: {
+					Storage: map[string]ByteSlice{
+						"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+					},
+					Lookup: map[string][]uint32{
+						"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+					},
+					Preimage: map[string]ByteSlice{
+						"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+					},
+					CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+					Balance:   100,
+					GasLimitG: 100,
+					GasLimitM: 100,
+				},
+			},
+			InitialTimeslot: 1000,
+		},
 		// TODO: Shawn: 7 host functions
 		// "Machine":  {pvm.OK, pvm.OOB},
 		// "Peek":     {pvm.OK, pvm.OOB, pvm.WHO},
@@ -1401,7 +1603,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			continue
 		}
 
-		updateRefineTestCase(&testcase, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.initialSegment, tc.expectedSegment, tc.initialSegmentIdx)
+		updateRefineTestCase(&testcase, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.initialSegment, tc.expectedSegment, tc.initialSegmentIdx, tc.initialServiceIndex, tc.initialDelta, tc.InitialTimeslot)
 
 		if err := WriteJSONFile(filePath, testcase); err != nil {
 			fmt.Printf("Failed to write test case %s: %v\n", tc.filename, err)
@@ -1409,7 +1611,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	}
 }
 
-func updateRefineTestCase(testcase *RefineTestcase, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialSegment, expectedSegment []ByteSlice, initialSegmentIdx uint64) {
+func updateRefineTestCase(testcase *RefineTestcase, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialSegment, expectedSegment []ByteSlice, initialSegmentIdx uint64, initialServiceIndex uint32, initialDelta map[uint32]*ServiceAccountForTest, InitialTimeslot uint32) {
 	testcase.InitialRegs = initialRegs
 	testcase.ExpectedRegs = expectedRegs
 	testcase.InitialMemory = initialMemory
@@ -1417,6 +1619,9 @@ func updateRefineTestCase(testcase *RefineTestcase, initialRegs, expectedRegs ma
 	testcase.InitialImportSegment = initialSegment
 	testcase.InitialExportSegmentIdx = uint32(initialSegmentIdx)
 	testcase.ExpectedExportSegment = expectedSegment
+	testcase.InitialServiceIndex = initialServiceIndex
+	testcase.InitialDelta = initialDelta
+	testcase.InitialTimeslot = InitialTimeslot
 }
 
 func TestGenerateAccumulateTestVectors(t *testing.T) {
@@ -1435,24 +1640,28 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 		"Solicit":  {pvm.OK, pvm.OOB, pvm.FULL, pvm.HUH},
 		"Forget":   {pvm.OK, pvm.OOB, pvm.HUH},
 		"Quit":     {pvm.OK, pvm.OOB, pvm.WHO, pvm.LOW},
-		"Transfer": {pvm.OK, pvm.WHO, pvm.CASH, pvm.LOW, pvm.HIGH},
+		"Transfer": {pvm.OK, pvm.OOB, pvm.WHO, pvm.CASH, pvm.LOW, pvm.HIGH},
 	}
 
 	GenerateTestVectors(t, dirPath, functions, errorCases, templateFileName, testCaseType)
 
 	testCases := []struct {
-		filename       string
-		initialRegs    map[uint32]uint64
-		expectedRegs   map[uint32]uint64
-		initialMemory  RAMForTest
-		expectedMemory RAMForTest
-		sourceAccount  *ServiceAccountForTest
-		targetAccount  *ServiceAccountForTest
-		balanceChange  uint64
+		filename           string
+		initialGas         int64
+		expectedGas        int64
+		initialRegs        map[uint32]uint64
+		expectedRegs       map[uint32]uint64
+		initialMemory      RAMForTest
+		expectedMemory     RAMForTest
+		initialXcontent_x  *XContextForTest
+		expectedXcontent_x *XContextForTest
+		InitialTimeslot    uint32
 	}{
 		// 		"New":      {pvm.OK, pvm.OOB, pvm.CASH},
 		{
-			filename: "hostNewOK.json",
+			filename:    "./New/hostNewOK.json",
+			initialGas:  10000,
+			expectedGas: 9990,
 			initialRegs: map[uint32]uint64{
 				7:  32 * pvm.PageSize,
 				8:  12,
@@ -1467,24 +1676,90 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 			},
 			initialMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
 				},
 			},
 			expectedMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
 				},
 			},
-			sourceAccount: &ServiceAccountForTest{
-				Balance: 300,
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
 			},
-			targetAccount: &ServiceAccountForTest{
-				Balance: 213,
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 555,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   787,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+						1: {
+							Storage:  map[string]ByteSlice{},
+							Preimage: map[string]ByteSlice{},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   213,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
 			},
-			balanceChange: 213,
 		},
 		{
-			filename: "hostNewOOB.json",
+			filename:    "./New/hostNewOOB.json",
+			initialGas:  10000,
+			expectedGas: 9990,
 			initialRegs: map[uint32]uint64{
 				7:  32 * pvm.PageSize,
 				8:  12,
@@ -1499,20 +1774,79 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 			},
 			initialMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
 				},
 			},
 			expectedMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Inaccessible: true}},
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
 				},
 			},
-			sourceAccount: nil,
-			targetAccount: nil,
-			balanceChange: 0,
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
 		},
 		{
-			filename: "hostNewCASH.json",
+			filename:    "./New/hostNewCASH.json",
+			initialGas:  10000,
+			expectedGas: 9990,
 			initialRegs: map[uint32]uint64{
 				7:  32 * pvm.PageSize,
 				8:  12,
@@ -1527,21 +1861,1992 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 			},
 			initialMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
 				},
 			},
 			expectedMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Access: pvm.AccessMode{Readable: true}},
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
 				},
 			},
-			sourceAccount: &ServiceAccountForTest{
-				Balance: 300,
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   300,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
 			},
-			targetAccount: &ServiceAccountForTest{
-				Balance: 213,
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   300,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
 			},
-			balanceChange: 213,
+		},
+		// 		"Upgrade":  {pvm.OK, pvm.OOB},
+		{
+			filename:    "./Upgrade/hostUpgradeOK.json",
+			initialGas:  10000,
+			expectedGas: 9990,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 1000,
+				9: 2000,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: 0,
+				8: 1000,
+				9: 2000,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   300,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0000000000000000000000000000000000000000000000000000000000000000",
+							Balance:   300,
+							GasLimitG: 1000,
+							GasLimitM: 2000,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:    "./Upgrade/hostUpgradeOOB.json",
+			initialGas:  10000,
+			expectedGas: 9990,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 1000,
+				9: 2000,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.OOB,
+				8: 1000,
+				9: 2000,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   300,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   300,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		// 		"Transfer":  {pvm.OK, pvm.OOB, pvm.WHO, pvm.CASH, pvm.LOW, pvm.HIGH},
+		{
+			filename:    "./Transfer/hostTransferOK.json",
+			initialGas:  10000000000000,
+			expectedGas: 10000000000000 - 10 - 100 - (1<<32)*100,
+			initialRegs: map[uint32]uint64{
+				7:  1,
+				8:  100,
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  0,
+				8:  100,
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   900,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{
+					{
+						SenderIndex:   0,
+						ReceiverIndex: 1,
+						Amount:        100,
+						GasLimit:      100,
+						Memo:          make(ByteSlice, 128),
+					},
+				},
+			},
+		},
+		{
+			filename:    "./Transfer/hostTransferOOB.json",
+			initialGas:  10000000000000,
+			expectedGas: 10000000000000 - 10 - 100 - (1<<32)*100,
+			initialRegs: map[uint32]uint64{
+				7:  1,
+				8:  100,
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.OOB,
+				8:  100,
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:    "./Transfer/hostTransferWHO.json",
+			initialGas:  10000000000000,
+			expectedGas: 10000000000000 - 10 - 100 - (1<<32)*100,
+			initialRegs: map[uint32]uint64{
+				7:  999, // WHO
+				8:  100,
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.WHO,
+				8:  100,
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:    "./Transfer/hostTransferLOW.json",
+			initialGas:  10000000000000,
+			expectedGas: 10000000000000 - 10 - 100 - (1<<32)*10,
+			initialRegs: map[uint32]uint64{
+				7:  1,
+				8:  100,
+				9:  10, // LOW
+				10: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.LOW,
+				8:  100,
+				9:  10,
+				10: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:    "./Transfer/hostTransferHIGH.json",
+			initialGas:  10000000000000,
+			expectedGas: 10000000000000 - 10 - 100 - (1<<32)*3000,
+			initialRegs: map[uint32]uint64{
+				7:  1,
+				8:  100,
+				9:  3000,
+				10: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.HIGH,
+				8:  100,
+				9:  3000, // HIGH
+				10: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:    "./Transfer/hostTransferCASH.json",
+			initialGas:  10000000000000,
+			expectedGas: 10000000000000 - 10 - 1000 - (1<<32)*100,
+			initialRegs: map[uint32]uint64{
+				7:  1,
+				8:  1000, // CASH
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7:  pvm.CASH,
+				8:  1000,
+				9:  100,
+				10: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 32), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		//     Quit
+		{
+			filename:    "./Quit/hostQuitOK.json",
+			initialGas:  10000,
+			expectedGas: 9990,
+			initialRegs: map[uint32]uint64{
+				7: 1,
+				8: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: 0,
+				8: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{
+					{
+						SenderIndex:   0,
+						ReceiverIndex: 1,
+						Amount:        1000,
+						GasLimit:      9990,
+						Memo:          make(ByteSlice, 128),
+					},
+				},
+			},
+		},
+		{
+			filename:    "./Quit/hostQuitOOB.json",
+			initialGas:  10000,
+			expectedGas: 9990,
+			initialRegs: map[uint32]uint64{
+				7: 1,
+				8: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.OOB,
+				8: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:    "./Quit/hostQuitWHO.json",
+			initialGas:  10000,
+			expectedGas: 9990,
+			initialRegs: map[uint32]uint64{
+				7: 999, // WHO
+				8: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.WHO,
+				8: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 100,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:    "./Quit/hostQuitLOW.json",
+			initialGas:  10000,
+			expectedGas: 9990,
+			initialRegs: map[uint32]uint64{
+				7: 1,
+				8: 32 * pvm.PageSize,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.LOW,
+				8: 32 * pvm.PageSize,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: make(ByteSlice, 128), Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 999999, // LOW error
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+						1: {
+							Storage: map[string]ByteSlice{
+								"0x011d00bd007d000b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x010c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{100000},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x01fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 999999, // LOW error
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		//    Solicit
+		{
+			filename:        "./Solicit/hostSolicitOK.json",
+			initialGas:      10000,
+			expectedGas:     9990,
+			InitialTimeslot: 100,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: 0,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2, 100},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:        "./Solicit/hostSolicitOOB.json",
+			initialGas:      10000,
+			expectedGas:     9990,
+			InitialTimeslot: 100,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.OOB,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:        "./Solicit/hostSolicitHUH.json",
+			initialGas:      10000,
+			expectedGas:     9990,
+			InitialTimeslot: 100,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.HUH,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:        "./Solicit/hostSolicitFULL.json",
+			initialGas:      10000,
+			expectedGas:     9990,
+			InitialTimeslot: 100,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.FULL,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   90, // FULL error
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   90, // FULL error
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		//   Forget
+		{
+			filename:        "./Forget/hostForgetOK.json",
+			initialGas:      10000,
+			expectedGas:     9990,
+			InitialTimeslot: 100,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: 0,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 100},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:        "./Forget/hostForgetOOB.json",
+			initialGas:      10000,
+			expectedGas:     9990,
+			InitialTimeslot: 100,
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.OOB,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Inaccessible: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1},
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+		},
+		{
+			filename:        "./Forget/hostForgetHUH.json",
+			initialGas:      10000,
+			expectedGas:     9990,
+			InitialTimeslot: 28800, // HUH error
+			initialRegs: map[uint32]uint64{
+				7: 32 * pvm.PageSize,
+				8: 12,
+			},
+			expectedRegs: map[uint32]uint64{
+				7: pvm.HUH,
+				8: 12,
+			},
+			initialMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			expectedMemory: RAMForTest{
+				Pages: map[uint32]*PageForTest{
+					32: {Value: ByteSlice{11, 232, 2, 193, 53, 168, 198, 113, 170, 34, 217, 144, 251, 178, 97, 22, 217, 132, 74, 69, 141, 137, 208, 90, 160, 19, 39, 42, 100, 22, 3, 55}, Access: pvm.AccessMode{Readable: true}},
+				},
+			},
+			initialXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2}, // HUH error
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
+			expectedXcontent_x: &XContextForTest{
+				D: map[uint32]*ServiceAccountForTest{},
+				I: 1,
+				S: 0,
+				U: &PartialStateForTest{
+					D: map[uint32]*ServiceAccountForTest{
+						0: {
+							Storage: map[string]ByteSlice{
+								"0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": {0, 0, 0, 0},
+							},
+							Lookup: map[string][]uint32{
+								"0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": []uint32{1, 2}, // HUH error
+							},
+							Preimage: map[string]ByteSlice{
+								"0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": {15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10},
+							},
+							CodeHash:  "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
+							Balance:   1000,
+							GasLimitG: 100,
+							GasLimitM: 200,
+						},
+					},
+					I: types.Validators{},
+					Q: types.AuthorizationQueue{},
+					X: types.Kai_state{
+						Kai_g: map[uint32]uint32{},
+					},
+				},
+				T: []DeferredTransferForTest{},
+			},
 		},
 		// William 1 (first) => 5 (last)
 		// 5 "Upgrade":      {pvm.OK, pvm.OOB},
@@ -1560,7 +3865,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 			continue
 		}
 
-		updateAccumulateTestCase(&testcase, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.sourceAccount, tc.targetAccount, tc.balanceChange)
+		updateAccumulateTestCase(&testcase, tc.initialGas, tc.expectedGas, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.initialXcontent_x, tc.expectedXcontent_x, tc.InitialTimeslot)
 
 		if err := WriteJSONFile(filePath, testcase); err != nil {
 			fmt.Printf("Failed to write test case %s: %v\n", tc.filename, err)
@@ -1568,27 +3873,19 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 	}
 }
 
-func updateAccumulateTestCase(testcase *AccumulateTestcase, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, sourceAccount, targetAccount *ServiceAccountForTest, balanceChange uint64) {
+func updateAccumulateTestCase(testcase *AccumulateTestcase, initialGas int64, expectedGas int64, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialXcontent_x, expectedXcontent_x *XContextForTest, initialTimeslot uint32) {
+	testcase.InitialGas = initialGas
+	testcase.ExpectedGas = expectedGas
 	testcase.InitialRegs = initialRegs
 	testcase.ExpectedRegs = expectedRegs
 	testcase.InitialMemory = initialMemory
 	testcase.ExpectedMemory = expectedMemory
+	testcase.InitialTimeslot = initialTimeslot
 
-	if sourceAccount != nil && targetAccount != nil {
-		if testcase.InitialXcontent_x == nil {
-			testcase.InitialXcontent_x = &XContextForTest{
-				U: &PartialStateForTest{
-					D: map[uint32]*ServiceAccountForTest{},
-				},
-			}
-		}
-		if testcase.ExpectedXcontent_x == nil {
-			testcase.ExpectedXcontent_x = DeepCopyXContextForTest(testcase.InitialXcontent_x)
-		}
-		if testcase.ExpectedXcontent_x.U != nil && testcase.ExpectedXcontent_x.U.D != nil {
-			testcase.ExpectedXcontent_x.U.D[0] = sourceAccount
-			testcase.ExpectedXcontent_x.U.D[1] = targetAccount
-			testcase.ExpectedXcontent_x.U.D[0].Balance -= balanceChange
-		}
+	if initialXcontent_x != nil {
+		testcase.InitialXcontent_x = initialXcontent_x
+	}
+	if expectedXcontent_x != nil {
+		testcase.ExpectedXcontent_x = expectedXcontent_x
 	}
 }

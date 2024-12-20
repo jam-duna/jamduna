@@ -71,11 +71,11 @@
 				
 				<option value="file7">github.com/colorfulnotion/jam/erasurecoding/erasurecoding.go (85.5%)</option>
 				
-				<option value="file8">github.com/colorfulnotion/jam/pvm/hostfunctions.go (0.0%)</option>
+				<option value="file8">github.com/colorfulnotion/jam/pvm/hostfunctions.go (0.3%)</option>
 				
-				<option value="file9">github.com/colorfulnotion/jam/pvm/mockenv.go (0.0%)</option>
+				<option value="file9">github.com/colorfulnotion/jam/pvm/mockenv.go (9.8%)</option>
 				
-				<option value="file10">github.com/colorfulnotion/jam/pvm/pvm.go (4.3%)</option>
+				<option value="file10">github.com/colorfulnotion/jam/pvm/pvm.go (52.0%)</option>
 				
 				<option value="file11">github.com/colorfulnotion/jam/statedb/accumulate.go (16.0%)</option>
 				
@@ -99,7 +99,7 @@
 				
 				<option value="file21">github.com/colorfulnotion/jam/statedb/rotation.go (41.0%)</option>
 				
-				<option value="file22">github.com/colorfulnotion/jam/statedb/safrole.go (17.1%)</option>
+				<option value="file22">github.com/colorfulnotion/jam/statedb/safrole.go (16.9%)</option>
 				
 				<option value="file23">github.com/colorfulnotion/jam/statedb/shuffle.go (100.0%)</option>
 				
@@ -113,7 +113,7 @@
 				
 				<option value="file28">github.com/colorfulnotion/jam/statedb/statedb.go (1.2%)</option>
 				
-				<option value="file29">github.com/colorfulnotion/jam/statedb/statedb_hostenv.go (25.3%)</option>
+				<option value="file29">github.com/colorfulnotion/jam/statedb/statedb_hostenv.go (28.1%)</option>
 				
 				<option value="file30">github.com/colorfulnotion/jam/statedb/statetransition.go (0.0%)</option>
 				
@@ -1595,6 +1595,17 @@ var hostIndexMap = map[string]int{
         "For_test": FOR_TEST,
 }
 
+func Merge_d(map1, map2 map[uint32]*types.ServiceAccount) map[uint32]*types.ServiceAccount <span class="cov0" title="0">{
+        mergedMap := make(map[uint32]*types.ServiceAccount)
+        for k, v := range map1 </span><span class="cov0" title="0">{
+                mergedMap[k] = v
+        }</span>
+        <span class="cov0" title="0">for k, v := range map2 </span><span class="cov0" title="0">{
+                mergedMap[k] = v
+        }</span>
+        <span class="cov0" title="0">return mergedMap</span>
+}
+
 // Function to retrieve index and error cases
 func GetHostFunctionDetails(name string) (int, []uint64) <span class="cov0" title="0">{
         index, exists := hostIndexMap[name]
@@ -1642,7 +1653,7 @@ func falseBytes(data []byte) []byte <span class="cov0" title="0">{
 
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
-func (vm *VM) InvokeHostCall(host_fn int) (bool, error) <span class="cov0" title="0">{
+func (vm *VM) InvokeHostCall(host_fn int, testvectormode bool) (bool, error) <span class="cov0" title="0">{
         if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
         }</span>
@@ -1685,7 +1696,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) <span class="cov0" title
                 return true, nil</span>
 
         case NEW:<span class="cov0" title="0">
-                vm.hostNew()
+                vm.hostNew(testvectormode)
                 return true, nil</span>
 
         case UPGRADE:<span class="cov0" title="0">
@@ -1693,6 +1704,9 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) <span class="cov0" title
                 return true, nil</span>
 
         case TRANSFER:<span class="cov0" title="0">
+                omega_8, _ := vm.ReadRegister(8)
+                omega_9, _ := vm.ReadRegister(9)
+                vm.Gas = vm.Gas - int64(omega_8) - int64(omega_9)*(1&lt;&lt;32)
                 vm.hostTransfer()
                 return true, nil</span>
 
@@ -1701,13 +1715,12 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) <span class="cov0" title
                 return true, nil</span>
 
         case SOLICIT:<span class="cov0" title="0">
-                t := vm.hostenv.GetTimeslot()
-                vm.hostSolicit(t)
+                vm.hostSolicit(testvectormode)
                 return true, nil</span>
 
         case FORGET:<span class="cov0" title="0">
-                t := vm.hostenv.GetTimeslot()
-                vm.hostForget(t)
+                // t := vm.hostenv.GetTimeslot()
+                vm.hostForget(testvectormode)
                 return true, nil</span>
 
         // Refine functions
@@ -1765,11 +1778,11 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) <span class="cov0" title
         }
 }
 
-func min(x, y int) int <span class="cov0" title="0">{
+func min(x, y int) int <span class="cov8" title="1">{
         if x &lt; y </span><span class="cov0" title="0">{
                 return x
         }</span>
-        <span class="cov0" title="0">return y</span>
+        <span class="cov8" title="1">return y</span>
 }
 
 // Information-on-Service
@@ -1878,7 +1891,7 @@ func check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 <span class="c
 }
 
 // New service
-func (vm *VM) hostNew() uint64 <span class="cov0" title="0">{
+func (vm *VM) hostNew(testvector_mode bool) uint64 <span class="cov0" title="0">{
         xContext := vm.X
         xs, _ := xContext.GetX_s()
 
@@ -1927,22 +1940,29 @@ func (vm *VM) hostNew() uint64 <span class="cov0" title="0">{
 
                 // I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
                 // a.WriteLookup(common.BytesToHash(c), l, []uint32{common.ComputeCurrenTS()})
-                a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
+                if testvector_mode </span><span class="cov0" title="0">{
+                        al_internal_key := common.Compute_preimageLookup_internal(common.BytesToHash(c), uint32(l))
+                        account_lookuphash := common.ComputeC_sh(xi, al_internal_key)
+                        a.WriteLookup(account_lookuphash, uint32(l), []uint32{})
+                }</span> else<span class="cov0" title="0"> {
+                        a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
+                }</span>
 
                 // (x's)b &lt;- (xs)b - at
                 // xContext.S = a.ServiceIndex()
 
                 // Here we are adding the new service account to the map
-                xContext.U.D[xi] = a
+                <span class="cov0" title="0">xContext.U.D[xi] = a
 
                 vm.X = xContext
                 vm.WriteRegister(7, uint64(xi))
-                return OK
-        }</span> else<span class="cov0" title="0"> {
+                return OK</span>
+        } else<span class="cov0" title="0"> {
                 if debug_host </span><span class="cov0" title="0">{
                         fmt.Println("Balance insufficient")
                 }</span>
-                <span class="cov0" title="0">vm.WriteRegister(7, CASH)
+                <span class="cov0" title="0">xs.IncBalance(a.Balance)
+                vm.WriteRegister(7, CASH)
                 return CASH</span> //balance insufficient
         }
 }
@@ -1950,24 +1970,24 @@ func (vm *VM) hostNew() uint64 <span class="cov0" title="0">{
 // Upgrade service
 func (vm *VM) hostUpgrade() uint64 <span class="cov0" title="0">{
         xContext := vm.X
-        xs, s := xContext.GetX_s()
+        xs, _ := xContext.GetX_s()
         o, _ := vm.ReadRegister(7)
-        gl, _ := vm.ReadRegister(8)
-        gh, _ := vm.ReadRegister(9)
-        ml, _ := vm.ReadRegister(10)
-        mh, _ := vm.ReadRegister(11)
+        g, _ := vm.ReadRegister(8)
+        m, _ := vm.ReadRegister(9)
+
         c, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
         if errCode == OOB </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, OOB)
                 return errCode
         }</span>
-        <span class="cov0" title="0">g := uint64(gh)&lt;&lt;32 + uint64(gl)
-        m := uint64(mh)&lt;&lt;32 + uint64(ml)
 
-        xs.Dirty = true
+        <span class="cov0" title="0">xs.Dirty = true
         xs.CodeHash = common.BytesToHash(c)
         xs.GasLimitG = g
         xs.GasLimitM = m
-        xContext.D[s] = xs
+        fmt.Printf("Write Register 7: %d\n", OK)
+        vm.WriteRegister(7, OK)
+        // xContext.D[s] = xs // not sure if this is needed
         return OK</span>
 }
 
@@ -1978,14 +1998,45 @@ func (vm *VM) hostTransfer() uint64 <span class="cov0" title="0">{
         g, _ := vm.ReadRegister(9)
         o, _ := vm.ReadRegister(10)
 
-        // TODO check d -- WHO; check g -- LOW, HIGH
-        m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
+        xs, _ := vm.X.GetX_s()
+
+        D := Merge_d(vm.X.U.D, vm.X.D)
+
+        receiver, founded := D[uint32(d)]
+        if !founded </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, WHO)
+                return WHO
+        }</span>
+
+        <span class="cov0" title="0">m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
         if errCode == OOB </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, OOB)
                 return OOB
         }</span>
         <span class="cov0" title="0">t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.S, ReceiverIndex: uint32(d)} // CHECK
-        copy(t.Memo[:], m[:])
+
+        if g &lt; receiver.GasLimitM </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, LOW)
+                return LOW
+        }</span>
+
+        <span class="cov0" title="0">if vm.Gas &lt; int64(g) </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, HIGH)
+                return HIGH
+        }</span>
+
+        <span class="cov0" title="0">xs.DecBalance(a)
+        b := xs.Balance
+
+        if b &lt; xs.ComputeThreshold() </span><span class="cov0" title="0">{
+                xs.IncBalance(a)
+                vm.WriteRegister(7, CASH)
+                return CASH
+        }</span>
+
+        <span class="cov0" title="0">copy(t.Memo[:], m[:])
         vm.X.T = append(vm.X.T, t)
+        vm.WriteRegister(7, OK)
         return OK</span>
 }
 
@@ -1996,23 +2047,39 @@ func (vm *VM) hostGas() uint32 <span class="cov0" title="0">{
 }</span>
 
 // Quit Service
-func (vm *VM) hostQuit() uint32 <span class="cov0" title="0">{
-        /*        d, _ := vm.ReadRegister(7)
-                o, _ := vm.ReadRegister(8)
-                xs, s := vm.X.GetX_s()
-                a := xs.Balance - xs.StorageSize + types.BaseServiceBalance // TODO: (x_s)_t
-                var transferMemo *TransferMemo
-                if d == vm.X.S || d == maxUint64 {
-                        transferMemo = nil
-                } else {
-                        o, _ := vm.ReadRegister(1)
-                        transferMemo, _ := types.TransferMemoFromBytes(transferMemoBytes)
-                        transferBytes, _ := vm.ReadRAMBytes(o, types.TransferMemoSize)
-                }
-                g := vm.ξ
-        */
-        return OK
-}</span>
+func (vm *VM) hostQuit() uint64 <span class="cov0" title="0">{
+        d, _ := vm.ReadRegister(7)
+        o, _ := vm.ReadRegister(8)
+        xs, s := vm.X.GetX_s()
+        a := xs.Balance - xs.ComputeThreshold() + Bs
+        g := vm.Gas
+        D := Merge_d(vm.X.U.D, vm.X.D)
+        m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
+        if errCode == OOB </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, OOB)
+                return OOB
+        }</span>
+
+        <span class="cov0" title="0">receiver, founded := D[uint32(d)]
+        if !founded </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, WHO)
+                return WHO
+        }</span>
+
+        <span class="cov0" title="0">if g &lt; int64(receiver.GasLimitM) </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, LOW)
+                return LOW
+        }</span>
+
+        <span class="cov0" title="0">if !(uint32(d) == s || d == maxUint64) </span><span class="cov0" title="0">{
+                t := types.DeferredTransfer{Amount: a, GasLimit: uint64(g), SenderIndex: s, ReceiverIndex: uint32(d)}
+                copy(t.Memo[:], m[:])
+                vm.X.T = append(vm.X.T, t)
+        }</span>
+        <span class="cov0" title="0">delete(vm.X.U.D, uint32(s))
+        vm.WriteRegister(7, OK)
+        return OK</span>
+}
 func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) <span class="cov0" title="0">{
 
         // gas todo
@@ -2204,85 +2271,93 @@ func (vm *VM) GetJCETime() uint32 <span class="cov0" title="0">{
 }</span>
 
 // Solicit preimage
-func (vm *VM) hostSolicit(t uint32) uint64 <span class="cov0" title="0">{
-        xs, _ := vm.X.GetX_s()
+func (vm *VM) hostSolicit(testvector_mode bool) uint64 <span class="cov0" title="0">{
+        xs, s := vm.X.GetX_s()
         // Got l of X_s by setting s = 1, z = z(from RAM)
         o, _ := vm.ReadRegister(7)
         z, _ := vm.ReadRegister(8)                          // z: blob_len
         hBytes, err_h := vm.Ram.ReadRAMBytes(uint32(o), 32) // h: blobHash
         if err_h == OOB </span><span class="cov0" title="0">{
-                fmt.Println("Read RAM Error")
                 vm.WriteRegister(7, OOB)
                 return OOB
         }</span>
 
-        // check balance a_t &lt;= a_b
-        /* TODO: william to figure out proper struct
-        service_data := vm.hostenv.ReadServiceBytes(s) // read service account(X_s) where service index = 1
-        if len(service_data) &gt; 0 {
-                a_b_byte := service_data[len(service_data)-36 : len(service_data)-28]
-                a_l_byte := service_data[len(service_data)-12 : len(service_data)-4]
-                a_i_byte := service_data[len(service_data)-4:]
-                a_b := binary.LittleEndian.Uint64(a_b_byte)
-                a_l := binary.LittleEndian.Uint64(a_l_byte)
-                a_i := binary.LittleEndian.Uint32(a_i_byte)
-                a_t := 10 + uint64(1*a_i) + 100*a_l
-                if a_b &lt; a_t {
-                        fmt.Println("a_b &lt; a_t")
-                        vm.WriteRegister(0, FULL)
-                        return FULL
-                }
-        }
-        */
-        <span class="cov0" title="0">blobHash := common.Hash(hBytes)
-        ok, X_s_l := xs.ReadLookup(blobHash, uint32(z), vm.hostenv)
+        <span class="cov0" title="0">var account_lookuphash common.Hash
+        if testvector_mode </span><span class="cov0" title="0">{
+                al_internal_key := common.Compute_preimageLookup_internal(common.BytesToHash(hBytes), uint32(z))
+                account_lookuphash = common.ComputeC_sh(s, al_internal_key)
+        }</span> else<span class="cov0" title="0"> {
+                account_lookuphash = common.BytesToHash(hBytes)
+        }</span>
+        <span class="cov0" title="0">ok, X_s_l := xs.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
         if !ok </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, HUH)
                 return HUH
         }</span>
         // TODO: FULL
         //fmt.Printf("xs.ServiceIndex() = %d, blobHash = %v, z = %d, X_s_l = %v\n", xs.GetServiceIndex(), blobHash, z, X_s_l)
         <span class="cov0" title="0">if len(X_s_l) == 0 </span><span class="cov0" title="0">{
                 // when preimagehash is not found, put it into solicit request - so we can ask other DAs
-                xs.WriteLookup(blobHash, uint32(z), []uint32{})
-                vm.WriteRegister(7, OK)
-                return OK
-        }</span> else<span class="cov0" title="0"> if X_s_l[0] == 2 </span><span class="cov0" title="0">{ // [x, y]
-                xs.WriteLookup(blobHash, uint32(z), append(X_s_l, []uint32{t}...))
-                vm.WriteRegister(7, OK)
-                return OK
+                xs.WriteLookup(account_lookuphash, uint32(z), []uint32{})
+        }</span> else<span class="cov0" title="0"> if len(X_s_l) == 2 </span><span class="cov0" title="0">{ // [x, y]
+                xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
         }</span> else<span class="cov0" title="0"> {
                 vm.WriteRegister(7, HUH)
                 return HUH
         }</span>
+        <span class="cov0" title="0">if xs.Balance &lt; xs.ComputeThreshold() </span><span class="cov0" title="0">{
+                xs.WriteLookup(account_lookuphash, uint32(z), X_s_l)
+                vm.WriteRegister(7, FULL)
+                return FULL
+        }</span>
+
+        <span class="cov0" title="0">vm.WriteRegister(7, OK)
+        return OK</span>
 }
 
 // Forget preimage
-func (vm *VM) hostForget(t uint32) uint64 <span class="cov0" title="0">{
-        x_s, _ := vm.X.GetX_s()
+func (vm *VM) hostForget(testvector_mode bool) uint64 <span class="cov0" title="0">{
+        x_s, s := vm.X.GetX_s()
         o, _ := vm.ReadRegister(7)
         z, _ := vm.ReadRegister(8)
         hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
         if errCode == OOB </span><span class="cov0" title="0">{
-                fmt.Println("Read RAM Error")
+                vm.WriteRegister(7, OOB)
                 return OOB
         }</span>
 
-        <span class="cov0" title="0">blobHash := common.Hash(hBytes)
-        ok, X_s_l := x_s.ReadLookup(blobHash, uint32(z), vm.hostenv)
+        <span class="cov0" title="0">var account_lookuphash common.Hash
+        var account_blobhash common.Hash
+        if testvector_mode </span><span class="cov0" title="0">{
+                al_internal_key := common.Compute_preimageLookup_internal(common.BytesToHash(hBytes), uint32(z))
+                account_lookuphash = common.ComputeC_sh(s, al_internal_key)
+
+                ap_internal_key := common.Compute_preimageBlob_internal(common.BytesToHash(hBytes))
+                account_blobhash = common.ComputeC_sh(s, ap_internal_key)
+
+        }</span> else<span class="cov0" title="0"> {
+                account_lookuphash = common.BytesToHash(hBytes)
+                account_blobhash = common.BytesToHash(hBytes)
+        }</span>
+
+        <span class="cov0" title="0">ok, X_s_l := x_s.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
         if !ok </span><span class="cov0" title="0">{
+                vm.WriteRegister(7, HUH)
                 return HUH
         }</span>
-        <span class="cov0" title="0">if len(X_s_l) == 0 || (len(X_s_l) == 2 &amp;&amp; X_s_l[1] &lt; (t-D)) </span><span class="cov0" title="0">{
-                x_s.WriteLookup(blobHash, uint32(z), []uint32{})
+
+        <span class="cov0" title="0">if len(X_s_l) == 0 || (len(X_s_l) == 2) &amp;&amp; X_s_l[1] &lt; (vm.Timeslot-D) </span><span class="cov0" title="0">{
+                delete(x_s.Lookup, account_lookuphash) // Not sure whether this is correct
+                delete(x_s.Preimage, account_blobhash) // Not sure whether this is correct
                 vm.WriteRegister(7, OK)
                 return OK
         }</span> else<span class="cov0" title="0"> if len(X_s_l) == 1 </span><span class="cov0" title="0">{
-                x_s.WriteLookup(blobHash, uint32(z), append(X_s_l, []uint32{t}...))
+                x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
                 vm.WriteRegister(7, OK)
                 return OK
-        }</span> else<span class="cov0" title="0"> if len(X_s_l) == 3 &amp;&amp; X_s_l[1] &lt; (t-D) </span><span class="cov0" title="0">{
-                X_s_l[2] = uint32(t)
-                x_s.WriteLookup(blobHash, uint32(z), X_s_l)
+        }</span> else<span class="cov0" title="0"> if len(X_s_l) == 3 &amp;&amp; X_s_l[1] &lt; (vm.Timeslot-D) </span><span class="cov0" title="0">{
+                X_s_l[2] = uint32(vm.Timeslot)
+                x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l)
                 vm.WriteRegister(7, OK)
                 return OK
         }</span> else<span class="cov0" title="0"> {
@@ -2294,20 +2369,30 @@ func (vm *VM) hostForget(t uint32) uint64 <span class="cov0" title="0">{
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
 func (vm *VM) hostHistoricalLookup(t uint32) uint64 <span class="cov0" title="0">{
         // take a service s (from \omega_0 ),
+        var a = &amp;types.ServiceAccount{}
+        delta := vm.Delta
         s := vm.Service_index
+        omega_7, _ := vm.ReadRegister(7)
         ho, _ := vm.ReadRegister(8)
         bo, _ := vm.ReadRegister(9)
         bz, _ := vm.ReadRegister(10)
 
-        hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(ho), 32)
-        if errCode == OOB </span><span class="cov0" title="0">{
-                fmt.Println("Read RAM Error")
-                vm.WriteRegister(0, OOB)
-                return errCode
+        if omega_7 == NONE </span><span class="cov0" title="0">{
+                a = delta[s]
+        }</span> else<span class="cov0" title="0"> {
+                a = delta[uint32(omega_7)]
         }</span>
-        <span class="cov0" title="0">h := common.Hash(hBytes)
-        fmt.Println(h)
-        v := vm.hostenv.HistoricalLookup(s, t, h)
+
+        <span class="cov0" title="0">hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(ho), 32)
+        if errCode == OOB </span><span class="cov0" title="0">{
+                if debug_host </span><span class="cov0" title="0">{
+                        fmt.Println("Read RAM Error")
+                }</span>
+                <span class="cov0" title="0">vm.WriteRegister(7, OOB)
+                return errCode</span>
+        }
+        // h := common.Hash(hBytes) not sure whether this is needed
+        <span class="cov0" title="0">v := vm.hostenv.HistoricalLookup(a, t, common.BytesToHash(hBytes))
         vLength := uint64(len(v))
         if vLength == 0 </span><span class="cov0" title="0">{
                 vm.WriteRegister(7, NONE)
@@ -2321,7 +2406,6 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint64 <span class="cov0" title="0"
                 }</span>
                 <span class="cov0" title="0">vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
                 vm.WriteRegister(7, vLength)
-                fmt.Println(v[:l])
                 return vLength</span>
         } else<span class="cov0" title="0"> {
                 vm.WriteRegister(7, NONE)
@@ -2664,12 +2748,12 @@ type MockHostEnv struct {
         db *storage.StateDBStorage
 }
 
-func NewMockHostEnvDB() *storage.StateDBStorage <span class="cov0" title="0">{
+func NewMockHostEnvDB() *storage.StateDBStorage <span class="cov8" title="1">{
         test_db, _ := trie.InitLevelDB()
         return test_db
 }</span>
 
-func NewMockHostEnv() *MockHostEnv <span class="cov0" title="0">{
+func NewMockHostEnv() *MockHostEnv <span class="cov8" title="1">{
         test_db := NewMockHostEnvDB()
         return &amp;MockHostEnv{db: test_db}
 }</span>
@@ -2744,21 +2828,22 @@ func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
         }</span>
 }
 
-func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Hash) []byte <span class="cov0" title="0">{
+func (mh *MockHostEnv) HistoricalLookup(s *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte <span class="cov0" title="0">{
+        /*
         db := mh.GetDB()
         rootHash, tree, err := trie.Initial_bpt(db)
         //tree := trie.NewMerkleTree(nil, db)
         defer tree.Close()
         fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
-        if err != nil </span><span class="cov0" title="0">{
+        if err != nil {
                 log.Fatal("fail to connect to BPT")
-        }</span>
-        <span class="cov0" title="0">blob, ok, err_v := tree.GetPreImageBlob(s, blob_hash)
-        if err_v != nil || !ok </span><span class="cov0" title="0">{
+        }
+        blob, ok, err_v := tree.GetPreImageBlob(s, blob_hash)
+        if err_v != nil || !ok {
                 return nil
-        }</span>
+        }
 
-        <span class="cov0" title="0">blob_length := uint32(len(blob))
+        blob_length := uint32(len(blob))
 
         //MK: william to fix &amp; verify
         //hbytes := falseBytes(h.Bytes()[4:])
@@ -2766,38 +2851,40 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
         //key := append(lbytes, hbytes...)
         //timeslots, err_t := tree.GetPreImageLookup(s, key)
         timeslots, ok, err_t := tree.GetPreImageLookup(s, blob_hash, blob_length)
-        if err_t != nil || !ok </span><span class="cov0" title="0">{
+        if err_t != nil || !ok {
                 return nil
-        }</span>
+        }
 
-        <span class="cov0" title="0">if timeslots[0] == 0 </span><span class="cov0" title="0">{
+        if timeslots[0] == 0 {
                 return nil
-        }</span> else<span class="cov0" title="0"> if len(timeslots) == (12 + 1) </span><span class="cov0" title="0">{
+        } else if len(timeslots) == (12 + 1) {
                 x := timeslots[0]
                 y := timeslots[1]
                 z := timeslots[2]
-                if (x &lt;= t &amp;&amp; t &lt; y) || (z &lt;= t) </span><span class="cov0" title="0">{
+                if (x &lt;= t &amp;&amp; t &lt; y) || (z &lt;= t) {
                         return blob
-                }</span> else<span class="cov0" title="0"> {
+                } else {
                         return nil
-                }</span>
-        } else<span class="cov0" title="0"> if len(timeslots) == (8 + 1) </span><span class="cov0" title="0">{
+                }
+        } else if len(timeslots) == (8 + 1) {
                 x := timeslots[0]
                 y := timeslots[1]
-                if x &lt;= t &amp;&amp; t &lt; y </span><span class="cov0" title="0">{
+                if x &lt;= t &amp;&amp; t &lt; y {
                         return blob
-                }</span> else<span class="cov0" title="0"> {
+                } else {
                         return nil
-                }</span>
-        } else<span class="cov0" title="0"> {
+                }
+        } else {
                 x := timeslots[0]
-                if x &lt;= t </span><span class="cov0" title="0">{
+                if x &lt;= t {
                         return blob
-                }</span> else<span class="cov0" title="0"> {
+                } else {
                         return nil
-                }</span>
+                }
         }
-}
+        */
+        return nil
+}</span>
 
 func (mh *MockHostEnv) GetTimeslot() uint32 <span class="cov0" title="0">{
         return uint32(0)
@@ -2818,7 +2905,7 @@ import (
         "encoding/binary"
         "errors"
         "fmt"
-        "math"
+        "math/big"
         "reflect"
 
         //        "reflect"
@@ -2840,6 +2927,7 @@ const (
         W_S      = types.W_S
         W_X      = 1024
         M        = 128
+        Bs       = 100
         V        = 1023
         D        = 28800
         Z_A      = 2
@@ -2956,11 +3044,11 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 <span class="c
                 }
 
                 // Check if the page is writable
-                <span class="cov8" title="1">if page.Access.Inaccessible || !page.Access.Writable </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if !page.Access.Writable </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
                                 fmt.Printf("Page %d is not writable, addess is %d\n", currentPage, address)
                         }</span>
-                        <span class="cov0" title="0">return OOB</span>
+                        <span class="cov8" title="1">return OOB</span>
                 }
 
                 // Ensure data allocation before writing
@@ -3000,11 +3088,11 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) <sp
                         }</span>
                         <span class="cov0" title="0">return nil, OOB</span>
                 }
-                <span class="cov8" title="1">if page.Access.Inaccessible || !page.Access.Readable </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if page.Access.Inaccessible </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
                                 fmt.Printf("Page %d is not readable, addess is %d, length is %d\n", currentPage, address, length)
                         }</span>
-                        <span class="cov0" title="0">return nil, OOB</span>
+                        <span class="cov8" title="1">return nil, OOB</span>
                 }
 
                 // Calculate how much data can be read from the current page
@@ -3303,14 +3391,14 @@ var T = map[int]struct{}{
 
 const (
         NONE = (1 &lt;&lt; 64) - 1  // 2^32 - 1
-        OOB  = (1 &lt;&lt; 64) - 2  // 2^32 - 2
-        WHO  = (1 &lt;&lt; 64) - 3  // 2^32 - 3
-        FULL = (1 &lt;&lt; 64) - 4  // 2^32 - 4
-        CORE = (1 &lt;&lt; 64) - 5  // 2^32 - 5
-        CASH = (1 &lt;&lt; 64) - 6  // 2^32 - 6
-        LOW  = (1 &lt;&lt; 64) - 7  // 2^32 - 7
-        HIGH = (1 &lt;&lt; 64) - 8  // 2^32 - 8
-        WAT  = (1 &lt;&lt; 64) - 9  // 2^32 - 9
+        WHAT = (1 &lt;&lt; 64) - 2  // 2^32 - 2
+        OOB  = (1 &lt;&lt; 64) - 3  // 2^32 - 3
+        WHO  = (1 &lt;&lt; 64) - 4  // 2^32 - 4
+        FULL = (1 &lt;&lt; 64) - 5  // 2^32 - 5
+        CORE = (1 &lt;&lt; 64) - 6  // 2^32 - 6
+        CASH = (1 &lt;&lt; 64) - 7  // 2^32 - 7
+        LOW  = (1 &lt;&lt; 64) - 8  // 2^32 - 8
+        HIGH = (1 &lt;&lt; 64) - 9  // 2^32 - 9
         HUH  = (1 &lt;&lt; 64) - 10 // 2^32 - 10
         OK   = 0              // 0
 
@@ -3324,7 +3412,7 @@ const (
 // BIG = 3333
 )
 
-func extractBytes(input []byte) ([]byte, []byte) <span class="cov0" title="0">{
+func extractBytes(input []byte) ([]byte, []byte) <span class="cov8" title="1">{
         /*
                 In GP_0.36 (272):
                 If the input value of (272) is large, "l" will also increase and vice versa.
@@ -3337,12 +3425,12 @@ func extractBytes(input []byte) ([]byte, []byte) <span class="cov0" title="0">{
                 return nil, input
         }</span>
 
-        <span class="cov0" title="0">firstByte := input[0]
+        <span class="cov8" title="1">firstByte := input[0]
         var numBytes int
 
         // Determine the number of bytes to extract based on the value of the 0th byte.
         switch </span>{
-        case firstByte &gt;= 1 &amp;&amp; firstByte &lt; 128:<span class="cov0" title="0">
+        case firstByte &gt;= 1 &amp;&amp; firstByte &lt; 128:<span class="cov8" title="1">
                 numBytes = 1</span>
         case firstByte &gt;= 128 &amp;&amp; firstByte &lt; 192:<span class="cov0" title="0">
                 numBytes = 2</span>
@@ -3358,17 +3446,17 @@ func extractBytes(input []byte) ([]byte, []byte) <span class="cov0" title="0">{
                 numBytes = 7</span>
         case firstByte &gt;= 254:<span class="cov0" title="0">
                 numBytes = 8</span>
-        default:<span class="cov0" title="0">
+        default:<span class="cov8" title="1">
                 numBytes = 1</span>
         }
 
         // If the input length is insufficient to extract the specified number of bytes, return the original input.
-        <span class="cov0" title="0">if len(input) &lt; numBytes </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if len(input) &lt; numBytes </span><span class="cov0" title="0">{
                 return input, nil
         }</span>
 
         // Extract the specified number of bytes and return the remaining bytes.
-        <span class="cov0" title="0">extracted := input[:numBytes]
+        <span class="cov8" title="1">extracted := input[:numBytes]
         remaining := input[numBytes:]
 
         return extracted, remaining</span>
@@ -3392,12 +3480,12 @@ func PrintProgam(p *Program) <span class="cov0" title="0">{
         }</span>
 }
 
-func reverseString(s string) string <span class="cov0" title="0">{
+func reverseString(s string) string <span class="cov8" title="1">{
         runes := []rune(s)
-        for i, j := 0, len(runes)-1; i &lt; j; i, j = i+1, j-1 </span><span class="cov0" title="0">{
+        for i, j := 0, len(runes)-1; i &lt; j; i, j = i+1, j-1 </span><span class="cov8" title="1">{
                 runes[i], runes[j] = runes[j], runes[i]
         }</span>
-        <span class="cov0" title="0">return string(runes)</span>
+        <span class="cov8" title="1">return string(runes)</span>
 }
 
 func binaryStringToByte(binaryStr string) byte <span class="cov0" title="0">{
@@ -3541,6 +3629,61 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 
 }
 
+func DecodeProgram_pure_pvm_blob(p []byte) *Program <span class="cov8" title="1">{
+        var pure_code []byte
+        pure_code = p
+
+        var j_size_byte, z_byte, c_size_byte []byte
+        j_size_byte, pure_code = extractBytes(pure_code)
+        z_byte, pure_code = extractBytes(pure_code)
+        c_size_byte, pure_code = extractBytes(pure_code)
+        j_size, _ := types.DecodeE(j_size_byte)
+        z, _ := types.DecodeE(z_byte)
+        c_size, _ := types.DecodeE(c_size_byte)
+        j_byte := pure_code[:j_size*z]
+        c_byte := pure_code[j_size*z : j_size*z+c_size]
+        k_bytes := pure_code[j_size*z+c_size:]
+        var kCombined string
+        for _, b := range k_bytes </span><span class="cov8" title="1">{
+                binaryStr := fmt.Sprintf("%08b", b)
+                kCombined += reverseString(binaryStr)
+        }</span>
+        <span class="cov8" title="1">if len(kCombined) &gt; int(c_size) </span><span class="cov8" title="1">{
+                kCombined = kCombined[:int(c_size)]
+        }</span>
+        // process j_array
+        <span class="cov8" title="1">var j_array []uint32
+        for i := uint64(0); i &lt; uint64(len(j_byte)); i += z </span><span class="cov8" title="1">{
+                end := i + z
+                if end &gt; uint64(len(j_byte)) </span><span class="cov0" title="0">{
+                        end = uint64(len(j_byte))
+                }</span>
+                <span class="cov8" title="1">slice := j_byte[i:end]
+                decodedValue := types.DecodeE_l(slice)
+                j_array = append(j_array, uint32(decodedValue))</span>
+        }
+
+        <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
+                fmt.Printf("JSize=%d\n", j_size)
+                fmt.Printf("Z=%d\n", z)
+                fmt.Printf("CSize=%d\n", c_size)
+                fmt.Println("Jump Table: ", j_array)
+                fmt.Printf("Code: %x\n", c_byte)
+                fmt.Printf("K(bitmask): %v\n", kCombined)
+                fmt.Println("================================================================")
+        }</span>
+        <span class="cov8" title="1">program := &amp;Program{
+                JSize: j_size,
+                Z:     uint8(z),
+                CSize: c_size,
+                J:     j_array,
+                Code:  c_byte,
+                K:     []string{kCombined},
+        }
+        return program</span>
+
+}
+
 func CelingDevide(a, b uint32) uint32 <span class="cov0" title="0">{
         return (a + b - 1) / b
 }</span>
@@ -3640,20 +3783,32 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) <span class
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint32, hostENV types.HostEnv) *VM <span class="cov0" title="0">{
+func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint32, hostENV types.HostEnv, jam_ready_blob bool) *VM <span class="cov8" title="1">{
         if len(code) == 0 </span><span class="cov0" title="0">{
                 panic("NO CODE\n")</span>
         }
-        <span class="cov0" title="0">p, o_size, w_size, z, s, o_byte, w_byte := DecodeProgram(code)
-        _ = o_byte
-        _ = w_byte
+        <span class="cov8" title="1">var p *Program
+        var o_size, w_size, z, s uint32
+        var o_byte, w_byte []byte
+
+        if jam_ready_blob </span><span class="cov0" title="0">{
+                p, o_size, w_size, z, s, o_byte, w_byte = DecodeProgram(code)
+        }</span> else<span class="cov8" title="1"> {
+                p = DecodeProgram_pure_pvm_blob(code)
+                o_size = 0
+                w_size = 0
+                z = 0
+                s = 0
+                o_byte = []byte{}
+                w_byte = []byte{}
+        }</span>
 
         // TODO: William - initialize RAM "a" @ 0xFEFF0000 (2^32 - Z_Q - Z_I) based on entrypoint:
         //  Refine a = E(s, y, p, c, a, o, x bar ...) Eq 271
         //  Accumulate a = E(o) Eq 275
         //  IsAuthorized - E(p,c) Eq 268
         //  Transfer - E(t) Eq 282
-        vm := &amp;VM{
+        <span class="cov8" title="1">vm := &amp;VM{
                 JSize:         p.JSize,
                 Z:             p.Z,
                 J:             p.J,
@@ -3721,7 +3876,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 // }
 
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv) *VM <span class="cov0" title="0">{
-        return NewVM(serviceIndex, code, []uint64{}, i, hostENV)
+        return NewVM(serviceIndex, code, []uint64{}, i, hostENV, false)
 }</span>
 
 // func NewVMFromCode_With_EntryPoint(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv, Entrypoint uint32, IsMalicious bool) *VM {
@@ -3817,30 +3972,30 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint32) (r types.Resul
 }</span>
 
 // Execute runs the program until it terminates
-func (vm *VM) Execute(entryPoint int) error <span class="cov0" title="0">{
+func (vm *VM) Execute(entryPoint int) error <span class="cov8" title="1">{
         vm.pc = uint32(entryPoint)
-        for !vm.terminated </span><span class="cov0" title="0">{
-                if err := vm.step(); err != nil </span><span class="cov0" title="0">{
+        for !vm.terminated </span><span class="cov8" title="1">{
+                if err := vm.step(); err != nil </span><span class="cov8" title="1">{
                         return err
                 }</span>
                 // host call invocation
-                <span class="cov0" title="0">if vm.hostCall </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if vm.hostCall </span><span class="cov0" title="0">{
                         if debug_pvm </span><span class="cov0" title="0">{
                                 fmt.Println("Invocate Host Function: ", vm.host_func_id)
                         }</span>
-                        <span class="cov0" title="0">vm.InvokeHostCall(vm.host_func_id)
+                        <span class="cov0" title="0">vm.InvokeHostCall(vm.host_func_id, false)
                         vm.hostCall = false
                         vm.terminated = false</span>
                 }
-                <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("-----------------------------------------------------------------------")
                 }</span>
         }
-        <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Println("last pc: ", vm.pc)
         }</span>
         // if vm finished without error, set result code to OK
-        <span class="cov0" title="0">vm.resultCode = types.RESULT_OK
+        <span class="cov8" title="1">vm.resultCode = types.RESULT_OK
         return nil</span>
 }
 
@@ -3887,39 +4042,39 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) <span class="cov
 }
 
 // step performs a single step in the PVM
-func (vm *VM) step() error <span class="cov0" title="0">{
-        if vm.pc &gt;= uint32(len(vm.code)) </span><span class="cov0" title="0">{
+func (vm *VM) step() error <span class="cov8" title="1">{
+        if vm.pc &gt;= uint32(len(vm.code)) </span><span class="cov8" title="1">{
                 return errors.New("program counter out of bounds")
         }</span>
 
-        <span class="cov0" title="0">instr := vm.code[vm.pc]
+        <span class="cov8" title="1">instr := vm.code[vm.pc]
         opcode := instr
         len_operands := skip(vm.pc, vm.bitmask)
         x := vm.pc + 4
-        if x &gt; uint32(len(vm.code)) </span><span class="cov0" title="0">{
+        if x &gt; uint32(len(vm.code)) </span><span class="cov8" title="1">{
                 x = uint32(len(vm.code))
         }</span>
-        <span class="cov0" title="0">operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
+        <span class="cov8" title="1">operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
         if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("pc: %d opcode: %d - operands: %v, len(operands) = %d\n", vm.pc, opcode, operands, len_operands)
         }</span>
-        <span class="cov0" title="0">switch instr </span>{
-        case TRAP:<span class="cov0" title="0">
+        <span class="cov8" title="1">switch instr </span>{
+        case TRAP:<span class="cov8" title="1">
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("TERMINATED\n")
                 }</span>
-                <span class="cov0" title="0">if instr == TRAP </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if instr == TRAP </span><span class="cov8" title="1">{
                         vm.resultCode = types.RESULT_PANIC
                 }</span> else<span class="cov0" title="0"> {
                         vm.resultCode = types.RESULT_OK
                 }</span>
-                <span class="cov0" title="0">vm.terminated = true</span>
-        case FALLTHROUGH:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.terminated = true</span>
+        case FALLTHROUGH:<span class="cov8" title="1">
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("FALLTHROUGH")
                 }</span>
-                <span class="cov0" title="0">vm.pc += 1</span>
-        case JUMP:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1</span>
+        case JUMP:<span class="cov8" title="1">
                 // handle no operand means 0
                 originalOperands := make([]byte, len(operands))
                 copy(originalOperands, operands)
@@ -3928,58 +4083,58 @@ func (vm *VM) step() error <span class="cov0" title="0">{
                         lx = 1
                         originalOperands = append(originalOperands, 0)
                 }</span>
-                <span class="cov0" title="0">vx := z_encode(types.DecodeE_l(originalOperands[0:lx]), uint32(lx))
+                <span class="cov8" title="1">vx := z_encode(types.DecodeE_l(originalOperands[0:lx]), uint32(lx))
 
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Jump to: ", uint32(int64(vm.pc)+vx))
                 }</span>
-                <span class="cov0" title="0">errCode := vm.branch(uint32(int64(vm.pc)+vx), true)
+                <span class="cov8" title="1">errCode := vm.branch(uint32(int64(vm.pc)+vx), true)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-        case JUMP_IND:<span class="cov0" title="0">
+        case JUMP_IND:<span class="cov8" title="1">
                 // handle no operand means 0
                 originalOperands := make([]byte, len(operands))
                 copy(originalOperands, operands)
 
                 registerIndexA := min(12, int(originalOperands[0])%16)
                 lx := min(4, max(0, len(originalOperands))-1)
-                if lx == 0 </span><span class="cov0" title="0">{
+                if lx == 0 </span><span class="cov8" title="1">{
                         lx = 1
                         originalOperands = append(originalOperands, 0)
                 }</span>
-                <span class="cov0" title="0">vx := uint32(types.DecodeE_l(originalOperands[1 : 1+lx]))
+                <span class="cov8" title="1">vx := uint32(types.DecodeE_l(originalOperands[1 : 1+lx]))
 
                 valueA, errCode := vm.ReadRegister(registerIndexA)
                 j := uint32(valueA) + uint32(vx)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Djump to: ", j)
                 }</span>
-                <span class="cov0" title="0">vm.djump(j)
+                <span class="cov8" title="1">vm.djump(j)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-        case LOAD_IMM_JUMP:<span class="cov0" title="0">
+        case LOAD_IMM_JUMP:<span class="cov8" title="1">
                 errCode := vm.loadImmJump(operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-        case LOAD_IMM_JUMP_IND:<span class="cov0" title="0">
+        case LOAD_IMM_JUMP_IND:<span class="cov8" title="1">
                 errCode := vm.loadImmJumpInd(operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-        case BRANCH_EQ, BRANCH_NE, BRANCH_LT_U, BRANCH_LT_S, BRANCH_GE_U, BRANCH_GE_S:<span class="cov0" title="0">
+        case BRANCH_EQ, BRANCH_NE, BRANCH_LT_U, BRANCH_LT_S, BRANCH_GE_U, BRANCH_GE_S:<span class="cov8" title="1">
                 errCode := vm.branchReg(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-        case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:<span class="cov0" title="0">
+        case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:<span class="cov8" title="1">
                 errCode := vm.branchCond(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
@@ -4000,92 +4155,92 @@ func (vm *VM) step() error <span class="cov0" title="0">{
                         vm.resultCode = types.RESULT_FAULT
                         vm.terminated = true
                 }</span>
-        case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32, STORE_IMM_U64:<span class="cov0" title="0">
+        case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32, STORE_IMM_U64:<span class="cov8" title="1">
                 errCode := vm.storeImm(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case LOAD_IMM:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case LOAD_IMM:<span class="cov8" title="1">
                 errCode := vm.loadImm(operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case LOAD_U8, LOAD_U16, LOAD_U32, LOAD_U64, LOAD_I8, LOAD_I16, LOAD_I32:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case LOAD_U8, LOAD_U16, LOAD_U32, LOAD_U64, LOAD_I8, LOAD_I16, LOAD_I32:<span class="cov8" title="1">
                 errCode := vm.load(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case STORE_U8, STORE_U16, STORE_U32:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case STORE_U8, STORE_U16, STORE_U32:<span class="cov8" title="1">
                 errCode := vm.store(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case STORE_IMM_IND_U8, STORE_IMM_IND_U16, STORE_IMM_IND_U32, STORE_IMM_IND_U64:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case STORE_IMM_IND_U8, STORE_IMM_IND_U16, STORE_IMM_IND_U32, STORE_IMM_IND_U64:<span class="cov8" title="1">
                 errCode := vm.storeImmInd(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case STORE_IND_U8, STORE_IND_U16, STORE_IND_U32, STORE_IND_U64:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case STORE_IND_U8, STORE_IND_U16, STORE_IND_U32, STORE_IND_U64:<span class="cov8" title="1">
                 errCode := vm.storeInd(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case LOAD_IND_U8, LOAD_IND_I8, LOAD_IND_U16, LOAD_IND_I16, LOAD_IND_U32, LOAD_IND_I32, LOAD_IND_U64:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case LOAD_IND_U8, LOAD_IND_I8, LOAD_IND_U16, LOAD_IND_I16, LOAD_IND_U32, LOAD_IND_I32, LOAD_IND_U64:<span class="cov8" title="1">
                 errCode := vm.loadInd(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
                 // MUL_UPPER_S_S_IMM, MUL_UPPER_S_S_IMM
-        case ADD_IMM_32, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, SET_LT_U_IMM, SET_LT_S_IMM:<span class="cov0" title="0">
+        case ADD_IMM_32, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, SET_LT_U_IMM, SET_LT_S_IMM:<span class="cov8" title="1">
                 errCode := vm.aluImm(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case CMOV_IZ_IMM, CMOV_NZ_IMM:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case CMOV_IZ_IMM, CMOV_NZ_IMM:<span class="cov8" title="1">
                 errCode := vm.cmovImm(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
 
-        case SHLO_R_IMM_32, SHLO_L_IMM_32, SHAR_R_IMM_32, NEG_ADD_IMM_32, SET_GT_U_IMM, SET_GT_S_IMM, SHLO_R_IMM_ALT_32, SHLO_L_IMM_ALT_32, SHAR_R_IMM_ALT_32:<span class="cov0" title="0">
+        case SHLO_R_IMM_32, SHLO_L_IMM_32, SHAR_R_IMM_32, NEG_ADD_IMM_32, SET_GT_U_IMM, SET_GT_S_IMM, SHLO_R_IMM_ALT_32, SHLO_L_IMM_ALT_32, SHAR_R_IMM_ALT_32:<span class="cov8" title="1">
                 errCode := vm.shiftImm(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case ADD_32, ADD_64, SUB_32, SUB_64, AND, XOR, OR, MUL_32, MUL_64, MUL_UPPER_S_S, MUL_UPPER_U_U, MUL_UPPER_S_U, DIV_U_32, DIV_U_64, DIV_S_32, DIV_S_64, REM_U_32, REM_U_64, REM_S_32, REM_S_64, CMOV_IZ, CMOV_NZ, SHLO_L_32, SHLO_L_64, SHLO_R_32, SHLO_R_64, SHAR_R_32, SHAR_R_64, SET_LT_U, SET_LT_S:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case ADD_32, ADD_64, SUB_32, SUB_64, AND, XOR, OR, MUL_32, MUL_64, MUL_UPPER_S_S, MUL_UPPER_U_U, MUL_UPPER_S_U, DIV_U_32, DIV_U_64, DIV_S_32, DIV_S_64, REM_U_32, REM_U_64, REM_S_32, REM_S_64, CMOV_IZ, CMOV_NZ, SHLO_L_32, SHLO_L_64, SHLO_R_32, SHLO_R_64, SHAR_R_32, SHAR_R_64, SET_LT_U, SET_LT_S:<span class="cov8" title="1">
                 errCode := vm.aluReg(opcode, operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
-        case MOVE_REG:<span class="cov0" title="0">
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
+        case MOVE_REG:<span class="cov8" title="1">
                 errCode := vm.moveReg(operands)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Println("Error: ", errCode)
                 }</span>
                 // vm.writeRegister(0, errCode)
-                <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
+                <span class="cov8" title="1">vm.pc += 1 + len_operands</span>
         case SBRK:<span class="cov0" title="0">
                 vm.sbrk(operands)
                 break</span>
@@ -4104,19 +4259,19 @@ func (vm *VM) step() error <span class="cov0" title="0">{
                 }</span>
                 <span class="cov0" title="0">vm.pc += 1 + len_operands</span>
 
-        default:<span class="cov0" title="0">
+        default:<span class="cov8" title="1">
                 vm.terminated = true
                 vm.resultCode = types.RESULT_PANIC
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("Unknown opcode: %d\n", opcode)
                         fmt.Printf("----\n")
                 }</span>
-                <span class="cov0" title="0">return nil</span>
+                <span class="cov8" title="1">return nil</span>
         }
 
         //vm.pc += 1 + uint32(skip(opcode))
 
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov8" title="1">return nil</span>
 }
 
 func reverseBytes(b []byte) []byte <span class="cov0" title="0">{
@@ -4142,20 +4297,20 @@ func reverseBytes(b []byte) []byte <span class="cov0" title="0">{
 // }
 
 // skip function calculates the distance to the next instruction
-func skip(pc uint32, bitmask string) uint32 <span class="cov0" title="0">{
+func skip(pc uint32, bitmask string) uint32 <span class="cov8" title="1">{
         // Convert the bitmask string to a slice of bytes
         bitmaskBytes := []byte(bitmask)
 
         // Iterate through the bitmask starting from the given pc position
         var i uint32
-        for i = pc + 1; i &lt; pc+25 &amp;&amp; i &lt; uint32(len(bitmaskBytes)); i++ </span><span class="cov0" title="0">{
+        for i = pc + 1; i &lt; pc+25 &amp;&amp; i &lt; uint32(len(bitmaskBytes)); i++ </span><span class="cov8" title="1">{
                 // Ensure we do not access out of bounds
-                if bitmaskBytes[i] == '1' </span><span class="cov0" title="0">{
+                if bitmaskBytes[i] == '1' </span><span class="cov8" title="1">{
                         return i - pc - 1
                 }</span>
         }
         // If no '1' is found within the next 24 positions, check the last index
-        <span class="cov0" title="0">if i &lt; pc+25 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if i &lt; pc+25 </span><span class="cov8" title="1">{
                 return i - pc - 1
         }</span>
         <span class="cov0" title="0">return uint32(24)</span>
@@ -4221,34 +4376,34 @@ func (vm *VM) get_varpi(opcodes []byte, bitmask string) map[int]struct{} <span c
 //         return OK
 // }
 
-func (vm *VM) djump(a uint32) <span class="cov0" title="0">{
-        if a == uint32((1&lt;&lt;32)-(1&lt;&lt;16)) </span><span class="cov0" title="0">{
+func (vm *VM) djump(a uint32) <span class="cov8" title="1">{
+        if a == uint32((1&lt;&lt;32)-(1&lt;&lt;16)) </span><span class="cov8" title="1">{
                 vm.terminated = true
-        }</span> else<span class="cov0" title="0"> if a == 0 || a &gt; uint32(len(vm.J)*Z_A) || a%Z_A != 0 </span><span class="cov0" title="0">{
+        }</span> else<span class="cov8" title="1"> if a == 0 || a &gt; uint32(len(vm.J)*Z_A) || a%Z_A != 0 </span><span class="cov8" title="1">{
                 vm.terminated = true
                 // panic("OOB")
-        }</span> else<span class="cov0" title="0"> {
+        }</span> else<span class="cov8" title="1"> {
                 vm.pc = uint32(vm.J[(a/Z_A)-1])
         }</span>
 }
 
-func (vm *VM) ReadRegister(index int) (uint64, uint64) <span class="cov0" title="0">{
+func (vm *VM) ReadRegister(index int) (uint64, uint64) <span class="cov8" title="1">{
         if index &lt; 0 || index &gt;= len(vm.register) </span><span class="cov0" title="0">{
                 return 0, OOB
         }</span>
         // fmt.Printf(" REGISTERS %v (index=%d =&gt; %d)\n", vm.register, index, vm.register[index])
-        <span class="cov0" title="0">return vm.register[index], OK</span>
+        <span class="cov8" title="1">return vm.register[index], OK</span>
 }
 
-func (vm *VM) WriteRegister(index int, value uint64) uint64 <span class="cov0" title="0">{
+func (vm *VM) WriteRegister(index int, value uint64) uint64 <span class="cov8" title="1">{
         if index &lt; 0 || index &gt;= len(vm.register) </span><span class="cov0" title="0">{
                 return OOB
         }</span>
-        <span class="cov0" title="0">vm.register[index] = value
+        <span class="cov8" title="1">vm.register[index] = value
         if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("Register[%d] = %d\n", index, value)
         }</span>
-        <span class="cov0" title="0">return OK</span>
+        <span class="cov8" title="1">return OK</span>
 }
 
 func (vm *VM) ReadRegisters() []uint64 <span class="cov0" title="0">{
@@ -4286,7 +4441,7 @@ func (vm *VM) ecalli(operands []byte) uint64 <span class="cov0" title="0">{
 }</span>
 
 // Implement storeImm logic
-func (vm *VM) storeImm(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) storeImm(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4297,28 +4452,28 @@ func (vm *VM) storeImm(opcode byte, operands []byte) uint64 <span class="cov0" t
                 ly = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
         vy := x_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly))
 
         switch opcode </span>{
-        case STORE_IMM_U8:<span class="cov0" title="0">
+        case STORE_IMM_U8:<span class="cov8" title="1">
                 value := vy % (1 &lt;&lt; 8)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("STORE_IMM_U8: %d %v\n", vx, []byte{byte(value)})
                 }</span>
-                <span class="cov0" title="0">return vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})</span>
-        case STORE_IMM_U16:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})</span>
+        case STORE_IMM_U16:<span class="cov8" title="1">
                 value := types.E_l(uint64(vy%(1&lt;&lt;16)), 2)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("STORE_IMM_U16: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
-        case STORE_IMM_U32:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
+        case STORE_IMM_U32:<span class="cov8" title="1">
                 value := types.E_l(uint64(vy), 4)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("STORE_IMM_U32: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
+                <span class="cov8" title="1">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
         case STORE_IMM_U64:<span class="cov0" title="0">
                 // TODO: NEW - check this
                 value := types.E_l(uint64(vy), 8)
@@ -4332,23 +4487,23 @@ func (vm *VM) storeImm(opcode byte, operands []byte) uint64 <span class="cov0" t
 }
 
 // load_imm (opcode 4)
-func (vm *VM) loadImm(operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) loadImm(operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
 
         registerIndexA := min(12, int(originalOperands[0])%16)
         lx := min(4, max(0, len(originalOperands)-1))
-        if lx == 0 </span><span class="cov0" title="0">{
+        if lx == 0 </span><span class="cov8" title="1">{
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
         return vm.WriteRegister(registerIndexA, uint64(vx))</span>
 }
 
 // LOAD_U8, LOAD_U16, LOAD_U32, LOAD_U64, LOAD_I8, LOAD_I16, LOAD_I32
-func (vm *VM) load(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) load(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4359,36 +4514,65 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 <span class="cov0" title
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
         switch opcode </span>{
-        case LOAD_U8, LOAD_I8:<span class="cov0" title="0"> // TODO: CHECK NEW LOAD_I8
+        case LOAD_U8:<span class="cov8" title="1">
+                value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
+                if errCode != OK </span><span class="cov8" title="1">{
+                        return errCode
+                }</span>
+                <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
+                        fmt.Printf("LOAD_U8: %d %v\n", vx, value)
+                }</span>
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, uint64(value[0]))</span>
+
+        case LOAD_I8:<span class="cov8" title="1">
                 value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
-                        fmt.Printf("LOAD_U8: %d %v\n", vx, value)
+                <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
+                        fmt.Printf("LOAD_I8: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, uint64(value[0]))</span>
-        case LOAD_U16, LOAD_I16:<span class="cov0" title="0"> // TODO: CHECK NEW LOAD_I16
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, x_encode(uint64(value[0]), 1))</span>
+        case LOAD_U16:<span class="cov8" title="1">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("LOAD_U16: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, uint64(types.DecodeE_l(value)))</span>
-        case LOAD_U32, LOAD_I32:<span class="cov0" title="0"> // TODO: CHECK NEW LOAD_I32
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))</span>
+
+        case LOAD_I16:<span class="cov8" title="1">
+                value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
+                if errCode != OK </span><span class="cov0" title="0">{
+                        return errCode
+                }</span>
+                <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
+                        fmt.Printf("LOAD_I16: %d %v\n", vx, value)
+                }</span>
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 2))</span>
+        case LOAD_U32:<span class="cov8" title="1">
+                value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
+                if errCode != OK </span><span class="cov0" title="0">{
+                        return errCode
+                }</span>
+                <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
+                        fmt.Printf("LOAD_U32: %d %v\n", vx, value)
+                }</span>
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))</span>
+        case LOAD_I32:<span class="cov0" title="0">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
                 <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
-                        fmt.Printf("LOAD_U32: %d %v\n", vx, value)
+                        fmt.Printf("LOAD_I32: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, uint64(types.DecodeE_l(value)))</span>
+                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 4))</span>
         case LOAD_U64:<span class="cov0" title="0"> // TODO: NEW, check this
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 8)
                 if errCode != OK </span><span class="cov0" title="0">{
@@ -4397,7 +4581,7 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 <span class="cov0" title
                 <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("LOAD_U64: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, uint64(types.DecodeE_l(value)))</span>
+                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))</span>
         }
         <span class="cov0" title="0">return OK</span>
 }
@@ -4461,7 +4645,7 @@ func get_elided_int32(o []byte) int32 <span class="cov0" title="0">{
 }
 
 // STORE_U8, STORE_U16, STORE_U32
-func (vm *VM) store(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) store(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4471,38 +4655,38 @@ func (vm *VM) store(opcode byte, operands []byte) uint64 <span class="cov0" titl
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">lx := min(4, max(0, len(originalOperands)-1))
+        <span class="cov8" title="1">lx := min(4, max(0, len(originalOperands)-1))
         if lx == 0 </span><span class="cov0" title="0">{
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
         switch opcode </span>{
-        case STORE_U8:<span class="cov0" title="0">
+        case STORE_U8:<span class="cov8" title="1">
                 value := valueA % (1 &lt;&lt; 8)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("STORE_u8: %d %v\n", vx, []byte{byte(value)})
                 }</span>
-                <span class="cov0" title="0">return vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})</span>
-        case STORE_U16:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})</span>
+        case STORE_U16:<span class="cov8" title="1">
                 value := types.E_l(uint64(valueA%(1&lt;&lt;16)), 2)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("STORE_U16: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
-        case STORE_U32:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
+        case STORE_U32:<span class="cov8" title="1">
                 value := types.E_l(uint64(valueA), 4)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("STORE_U32: %d %v\n", vx, value)
                 }</span>
-                <span class="cov0" title="0">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
+                <span class="cov8" title="1">return vm.Ram.WriteRAMBytes(uint32(vx), value)</span>
         }
         <span class="cov0" title="0">return OOB</span>
 }
 
 // storeImmInd implements STORE_IMM_{U8, U16, U32}
-func (vm *VM) storeImmInd(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) storeImmInd(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4515,26 +4699,26 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) uint64 <span class="cov0
                 originalOperands = append(originalOperands, 0)
         }</span>
 
-        <span class="cov0" title="0">valueA, errCode := vm.ReadRegister(registerIndexA)
+        <span class="cov8" title="1">valueA, errCode := vm.ReadRegister(registerIndexA)
         if errCode != OK </span><span class="cov0" title="0">{
                 return OOB
         }</span>
 
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
         vy := x_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly))
 
         switch opcode </span>{
-        case STORE_IMM_IND_U8:<span class="cov0" title="0">
+        case STORE_IMM_IND_U8:<span class="cov8" title="1">
                 // if debug_pvm {
                 //         fmt.Printf("STORE_IMM_IND_U8: %d %v\n", valueA+vx, []byte{byte(vy % 8)})
                 // }
                 return vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), []byte{byte(vy % 8)})</span>
-        case STORE_IMM_IND_U16:<span class="cov0" title="0">
+        case STORE_IMM_IND_U16:<span class="cov8" title="1">
                 // if debug_pvm {
                 //         fmt.Printf("STORE_IMM_IND_U16: %d %v\n", valueA+vx, types.E_l(uint64(vy%1&lt;&lt;16), 2))
                 // }
                 return vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1&lt;&lt;16), 2))</span>
-        case STORE_IMM_IND_U32:<span class="cov0" title="0">
+        case STORE_IMM_IND_U32:<span class="cov8" title="1">
                 // if debug_pvm {
                 //         fmt.Printf("STORE_IMM_IND_U32: %d %v\n", valueA+vx, types.E_l(uint64(vy), 4))
                 // }
@@ -4546,7 +4730,7 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) uint64 <span class="cov0
 }
 
 // Implement loadImmJump logic
-func (vm *VM) loadImmJump(operands []byte) uint32 <span class="cov0" title="0">{
+func (vm *VM) loadImmJump(operands []byte) uint32 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4559,7 +4743,7 @@ func (vm *VM) loadImmJump(operands []byte) uint32 <span class="cov0" title="0">{
                 originalOperands = append(originalOperands, 0)
         }</span>
 
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
         vy := uint32(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)))
 
         vm.WriteRegister(registerIndexA, uint64(vx))
@@ -4569,7 +4753,7 @@ func (vm *VM) loadImmJump(operands []byte) uint32 <span class="cov0" title="0">{
 }
 
 // Implement loadImmJumpInd logic
-func (vm *VM) loadImmJumpInd(operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) loadImmJumpInd(operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4578,12 +4762,12 @@ func (vm *VM) loadImmJumpInd(operands []byte) uint64 <span class="cov0" title="0
         registerIndexB := min(12, int(originalOperands[0])/16)
         lx := min(4, (int(originalOperands[1]) % 8))
         ly := min(4, max(0, len(originalOperands)-lx-2))
-        if ly == 0 </span><span class="cov0" title="0">{
+        if ly == 0 </span><span class="cov8" title="1">{
                 ly = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
 
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[2:2+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[2:2+lx]), uint32(lx))
         vy := x_encode(types.DecodeE_l(originalOperands[2+lx:2+lx+ly]), uint32(ly))
 
         valueB, errCode := vm.ReadRegister(registerIndexB)
@@ -4591,14 +4775,14 @@ func (vm *VM) loadImmJumpInd(operands []byte) uint64 <span class="cov0" title="0
                 return errCode
         }</span>
 
-        <span class="cov0" title="0">vm.WriteRegister(registerIndexA, uint64(vx))
+        <span class="cov8" title="1">vm.WriteRegister(registerIndexA, uint64(vx))
         vm.djump(uint32(valueB) + uint32(vy))
 
         return OK</span>
 }
 
 // move_reg (opcode 82)
-func (vm *VM) moveReg(operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) moveReg(operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4610,10 +4794,10 @@ func (vm *VM) moveReg(operands []byte) uint64 <span class="cov0" title="0">{
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("MOVE_REG: %d %d\n", registerIndexA, registerIndexD)
         }</span>
-        <span class="cov0" title="0">return vm.WriteRegister(registerIndexD, valueA)</span>
+        <span class="cov8" title="1">return vm.WriteRegister(registerIndexD, valueA)</span>
 }
 
 func (vm *VM) sbrk(operands []byte) error <span class="cov0" title="0">{
@@ -4628,14 +4812,14 @@ func (vm *VM) sbrk(operands []byte) error <span class="cov0" title="0">{
         return nil
 }</span>
 
-func (vm *VM) branch(vx uint32, condition bool) uint32 <span class="cov0" title="0">{
-        if condition </span><span class="cov0" title="0">{
+func (vm *VM) branch(vx uint32, condition bool) uint32 <span class="cov8" title="1">{
+        if condition </span><span class="cov8" title="1">{
                 vm.pc = uint32(vx)
         }</span>
-        <span class="cov0" title="0">return OK</span>
+        <span class="cov8" title="1">return OK</span>
 }
 
-func (vm *VM) branchCond(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) branchCond(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4643,12 +4827,12 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 <span class="cov0"
         registerIndexA := min(12, int(originalOperands[0])%16)
         lx := min(4, (int(originalOperands[0]) / 16 % 8))
         ly := min(4, max(0, len(originalOperands)-lx-1))
-        if ly == 0 </span><span class="cov0" title="0">{
+        if ly == 0 </span><span class="cov8" title="1">{
                 ly = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
 
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
         vy := uint32(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)))
 
         valueA, errCode := vm.ReadRegister(registerIndexA)
@@ -4656,113 +4840,113 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 <span class="cov0"
                 return errCode
         }</span>
 
-        <span class="cov0" title="0">switch opcode </span>{
-        case BRANCH_EQ_IMM:<span class="cov0" title="0">
-                if valueA == uint64(vx) </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">switch opcode </span>{
+        case BRANCH_EQ_IMM:<span class="cov8" title="1">
+                if valueA == uint64(vx) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_EQ_IMM: %valueA=%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_EQ_IMM: %d, valueA=%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_NE_IMM:<span class="cov0" title="0">
-                if valueA != uint64(vx) </span><span class="cov0" title="0">{
+        case BRANCH_NE_IMM:<span class="cov8" title="1">
+                if valueA != uint64(vx) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_NE_IMM: %valueA!=%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_NE_IMM: %d, valueA!=%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_LT_U_IMM:<span class="cov0" title="0">
-                if valueA &lt; uint64(vx) </span><span class="cov0" title="0">{
+        case BRANCH_LT_U_IMM:<span class="cov8" title="1">
+                if valueA &lt; uint64(vx) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_LT_U_IMM: %valueA&lt;%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_LT_U_IMM: %d, valueA&lt;%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_LT_S_IMM:<span class="cov0" title="0">
-                if z_encode(valueA, 4) &lt; z_encode(vx, 4) </span><span class="cov0" title="0">{
+        case BRANCH_LT_S_IMM:<span class="cov8" title="1">
+                if z_encode(valueA, 4) &lt; z_encode(vx, 4) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_LT_S_IMM: %valueA&lt;%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_LT_S_IMM: %d, valueA&lt;%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_LE_U_IMM:<span class="cov0" title="0">
-                if valueA &lt;= uint64(vx) </span><span class="cov0" title="0">{
+        case BRANCH_LE_U_IMM:<span class="cov8" title="1">
+                if valueA &lt;= uint64(vx) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_LE_U_IMM: %valueA&lt;=%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_LE_U_IMM: %d, valueA&lt;=%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_LE_S_IMM:<span class="cov0" title="0">
-                if z_encode(valueA, 4) &lt;= z_encode(vx, 4) </span><span class="cov0" title="0">{
+        case BRANCH_LE_S_IMM:<span class="cov8" title="1">
+                if z_encode(valueA, 4) &lt;= z_encode(vx, 4) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_LE_S_IMM: %valueA&lt;=%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_LE_S_IMM: %d, valueA&lt;=%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_GE_U_IMM:<span class="cov0" title="0">
-                if valueA &gt;= uint64(vx) </span><span class="cov0" title="0">{
+        case BRANCH_GE_U_IMM:<span class="cov8" title="1">
+                if valueA &gt;= uint64(vx) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_GE_U_IMM: %valueA&gt;=%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_GE_U_IMM: %d, valueA&gt;=%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_GE_S_IMM:<span class="cov0" title="0">
-                if z_encode(valueA, 4) &gt;= z_encode(vx, 4) </span><span class="cov0" title="0">{
+        case BRANCH_GE_S_IMM:<span class="cov8" title="1">
+                if z_encode(valueA, 4) &gt;= z_encode(vx, 4) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_GE_S_IMM: %valueA&gt;=%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_GE_S_IMM: %d, valueA&gt;=%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_GT_U_IMM:<span class="cov0" title="0">
-                if valueA &gt; uint64(vx) </span><span class="cov0" title="0">{
+        case BRANCH_GT_U_IMM:<span class="cov8" title="1">
+                if valueA &gt; uint64(vx) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_GT_U_IMM: %valueA&gt;%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_GT_U_IMM: %d, valueA&gt;%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_GT_S_IMM:<span class="cov0" title="0">
-                if z_encode(valueA, 4) &gt; z_encode(vx, 4) </span><span class="cov0" title="0">{
+        case BRANCH_GT_S_IMM:<span class="cov8" title="1">
+                if z_encode(valueA, 4) &gt; z_encode(vx, 4) </span><span class="cov8" title="1">{
                         if debug_pvm </span><span class="cov0" title="0">{
-                                fmt.Printf("BRANCH_GT_S_IMM: %valueA&gt;%d, jump to %d\n", valueA, vx, vy)
+                                fmt.Printf("BRANCH_GT_S_IMM: %d, valueA&gt;%d, jump to %d\n", valueA, vx, vy)
                         }</span>
-                        <span class="cov0" title="0">vm.branch(vy, true)</span>
-                } else<span class="cov0" title="0"> {
+                        <span class="cov8" title="1">vm.branch(vy, true)</span>
+                } else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
         }
-        <span class="cov0" title="0">return OK</span>
+        <span class="cov8" title="1">return OK</span>
 
 }
 
-func (vm *VM) storeInd(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) storeInd(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4770,34 +4954,34 @@ func (vm *VM) storeInd(opcode byte, operands []byte) uint64 <span class="cov0" t
         registerIndexA := min(12, int(originalOperands[0])%16)
         registerIndexB := min(12, int(originalOperands[0])/16)
         lx := min(4, max(0, len(originalOperands)-1))
-        if lx == 0 </span><span class="cov0" title="0">{
+        if lx == 0 </span><span class="cov8" title="1">{
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
 
-        <span class="cov0" title="0">valueA, errCode := vm.ReadRegister(registerIndexA)
+        <span class="cov8" title="1">valueA, errCode := vm.ReadRegister(registerIndexA)
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">valueB, errCode := vm.ReadRegister(registerIndexB)
+        <span class="cov8" title="1">valueB, errCode := vm.ReadRegister(registerIndexB)
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
 
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
         switch opcode </span>{
-        case STORE_IND_U8:<span class="cov0" title="0">
+        case STORE_IND_U8:<span class="cov8" title="1">
                 // if debug_pvm {
                 //         fmt.Printf("STORE_IND_U8: %d %v\n", valueB+vx, []byte{byte(valueA % 8)})
                 // }
                 return vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), []byte{byte(valueA % 8)})</span>
-        case STORE_IND_U16:<span class="cov0" title="0">
+        case STORE_IND_U16:<span class="cov8" title="1">
                 // if debug_pvm {
                 //         fmt.Printf("STORE_IND_U16: %d %v\n", valueB+vx, types.E_l(uint64(valueA%1&lt;&lt;16), 2))
                 // }
                 return vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 2))</span>
-        case STORE_IND_U32:<span class="cov0" title="0">
+        case STORE_IND_U32:<span class="cov8" title="1">
                 // if debug_pvm {
                 //         fmt.Printf("STORE_IND_U32: %d %v\n", valueB+vx, types.E_l(uint64(valueA), 4))
                 // }
@@ -4810,7 +4994,7 @@ func (vm *VM) storeInd(opcode byte, operands []byte) uint64 <span class="cov0" t
 
 }
 
-func (vm *VM) loadInd(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) loadInd(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4821,69 +5005,69 @@ func (vm *VM) loadInd(opcode byte, operands []byte) uint64 <span class="cov0" ti
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">lx := min(4, max(0, len(originalOperands)-1))
-        if lx == 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">lx := min(4, max(0, len(originalOperands)-1))
+        if lx == 0 </span><span class="cov8" title="1">{
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
         switch opcode </span>{
-        case LOAD_IND_U8:<span class="cov0" title="0">
+        case LOAD_IND_U8:<span class="cov8" title="1">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 1)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">result := uint64(value[0])
+                <span class="cov8" title="1">result := uint64(value[0])
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("LOAD_IND_U8: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
-        case LOAD_IND_I8:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
+        case LOAD_IND_I8:<span class="cov8" title="1">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 1)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">result := uint64(z_decode(z_encode(uint64(value[0]), 1), 4))
+                <span class="cov8" title="1">result := uint64(z_decode(z_encode(uint64(value[0]), 1), 8))
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("LOAD_IND_I8: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
-        case LOAD_IND_U16:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
+        case LOAD_IND_U16:<span class="cov8" title="1">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">result := uint64(types.DecodeE_l(value))
+                <span class="cov8" title="1">result := uint64(types.DecodeE_l(value))
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("LOAD_IND_U16: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
-        case LOAD_IND_I16:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
+        case LOAD_IND_I16:<span class="cov8" title="1">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">result := z_decode(z_encode(types.DecodeE_l(value), 2), 4)
+                <span class="cov8" title="1">result := z_decode(z_encode(types.DecodeE_l(value), 2), 8)
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("LOAD_IND_I16: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
-        case LOAD_IND_U32:<span class="cov0" title="0">
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
+        case LOAD_IND_U32:<span class="cov8" title="1">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">result := uint64(types.DecodeE_l(value))
+                <span class="cov8" title="1">result := uint64(types.DecodeE_l(value))
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf("LOAD_IND_U32: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
                 }</span>
-                <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
+                <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
         case LOAD_IND_I32:<span class="cov0" title="0">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
                 if errCode != OK </span><span class="cov0" title="0">{
                         return errCode
                 }</span>
-                <span class="cov0" title="0">result := z_decode(z_encode(types.DecodeE_l(value), 4), 4)
+                <span class="cov0" title="0">result := z_decode(z_encode(types.DecodeE_l(value), 4), 8)
                 return vm.WriteRegister(registerIndexA, result)</span>
         case LOAD_IND_U64:<span class="cov0" title="0">
                 value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 8)
@@ -4903,7 +5087,7 @@ func splitRegister(operand byte) (int, int) <span class="cov0" title="0">{
 }</span>
 
 // Implement ALU operations with immediate values
-func (vm *VM) aluImm(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) aluImm(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4914,52 +5098,52 @@ func (vm *VM) aluImm(opcode byte, operands []byte) uint64 <span class="cov0" tit
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">lx := min(4, max(0, len(originalOperands)-1))
+        <span class="cov8" title="1">lx := min(4, max(0, len(originalOperands)-1))
         if lx == 0 </span><span class="cov0" title="0">{
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := uint64(x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))) // CHECK
+        <span class="cov8" title="1">vx := uint64(x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))) // CHECK
 
         var result uint64
         switch opcode </span>{
-        case ADD_IMM_32:<span class="cov0" title="0">
+        case ADD_IMM_32:<span class="cov8" title="1">
                 result = uint64(valueB) + vx</span>
-        case AND_IMM:<span class="cov0" title="0">
+        case AND_IMM:<span class="cov8" title="1">
                 result = valueB &amp; vx</span>
-        case XOR_IMM:<span class="cov0" title="0">
+        case XOR_IMM:<span class="cov8" title="1">
                 result = valueB ^ vx</span>
-        case OR_IMM:<span class="cov0" title="0">
+        case OR_IMM:<span class="cov8" title="1">
                 result = valueB | vx</span>
-        case MUL_IMM:<span class="cov0" title="0">
+        case MUL_IMM:<span class="cov8" title="1">
                 result = valueB * vx</span>
         //case MUL_UPPER_S_S_IMM:
         //        result = uint32(z_decode((z_encode(valueB, 4) * z_encode(vx, 4)), 4))
         //case MUL_UPPER_U_U_IMM:
         //        result = valueB * vx
-        case SET_LT_U_IMM:<span class="cov0" title="0">
-                if uint32(valueB) &lt; uint32(vx) </span><span class="cov0" title="0">{
+        case SET_LT_U_IMM:<span class="cov8" title="1">
+                if uint32(valueB) &lt; uint32(vx) </span><span class="cov8" title="1">{
                         result = 1
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = 0
                 }</span>
-        case SET_LT_S_IMM:<span class="cov0" title="0">
-                if z_encode(valueB, 4) &lt; z_encode(vx, 4) </span><span class="cov0" title="0">{ // CHECK
+        case SET_LT_S_IMM:<span class="cov8" title="1">
+                if z_encode(valueB, 4) &lt; z_encode(vx, 4) </span><span class="cov8" title="1">{ // CHECK
                         result = 1
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = 0
                 }</span>
         default:<span class="cov0" title="0">
                 return OOB</span>
         }
-        <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("aluImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
         }</span>
-        <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
+        <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
 }
 
 // Implement cmov_nz_imm, cmov_nz_imm
-func (vm *VM) cmovImm(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) cmovImm(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -4970,23 +5154,23 @@ func (vm *VM) cmovImm(opcode byte, operands []byte) uint64 <span class="cov0" ti
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">valueB, errCode := vm.ReadRegister(registerIndexB)
+        <span class="cov8" title="1">valueB, errCode := vm.ReadRegister(registerIndexB)
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">lx := min(4, max(0, len(originalOperands)-1))
+        <span class="cov8" title="1">lx := min(4, max(0, len(originalOperands)-1))
         if lx == 0 </span><span class="cov0" title="0">{
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := uint64(x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx)))
+        <span class="cov8" title="1">vx := uint64(x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx)))
 
         var result uint64
         switch opcode </span>{
-        case CMOV_IZ_IMM:<span class="cov0" title="0">
-                if valueB == 0 </span><span class="cov0" title="0">{
+        case CMOV_IZ_IMM:<span class="cov8" title="1">
+                if valueB == 0 </span><span class="cov8" title="1">{
                         result = vx
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = valueA
                 }</span>
         case CMOV_NZ_IMM:<span class="cov0" title="0">
@@ -4998,14 +5182,14 @@ func (vm *VM) cmovImm(opcode byte, operands []byte) uint64 <span class="cov0" ti
         default:<span class="cov0" title="0">
                 return OOB</span>
         }
-        <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("cmovImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
         }</span>
-        <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
+        <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
 }
 
 // Implement shift operations with immediate values
-func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -5018,75 +5202,103 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 <span class="cov0" t
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+        <span class="cov8" title="1">vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
         valueB, errCode := vm.ReadRegister(registerIndexB)
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
 
-        <span class="cov0" title="0">var result uint64
+        <span class="cov8" title="1">var result uint64
         switch opcode </span>{
-        case SHLO_R_IMM_32:<span class="cov0" title="0">
-                result = valueB / (1 &lt;&lt; (vx % 32))</span>
-        case SHLO_L_IMM_32:<span class="cov0" title="0">
-                result = valueB * (1 &lt;&lt; (vx % 32))</span>
-        case SHAR_R_IMM_32:<span class="cov0" title="0">
-                result = uint64(z_decode(z_encode(valueB, 4)/(1&lt;&lt;(vx%32)), 4))</span> // CHECK
-        case NEG_ADD_IMM_32:<span class="cov0" title="0">
-                result = uint64(uint64(vx) + uint64(1&lt;&lt;32) - uint64(valueB))</span>
-        case SET_GT_U_IMM:<span class="cov0" title="0">
-                if valueB &gt; vx </span><span class="cov0" title="0">{
+        case SHLO_R_IMM_32:<span class="cov8" title="1">
+                result = x_encode(valueB%(1&lt;&lt;32)/(1&lt;&lt;(vx%32)), 4)</span>
+        case SHLO_L_IMM_32:<span class="cov8" title="1">
+                result = x_encode(valueB*(1&lt;&lt;(vx%32))%(1&lt;&lt;32), 4)</span>
+        case SHAR_R_IMM_32:<span class="cov8" title="1">
+                result = z_decode(z_encode(valueB%(1&lt;&lt;32), 4)/(1&lt;&lt;(vx%32)), 8)</span>
+        case NEG_ADD_IMM_32:<span class="cov8" title="1">
+                result = x_encode(uint64(vx)+uint64(1&lt;&lt;32)-uint64(valueB)%uint64(1&lt;&lt;32), 4)</span>
+        case SET_GT_U_IMM:<span class="cov8" title="1">
+                if valueB &gt; vx </span><span class="cov8" title="1">{
                         result = 1
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = 0
                 }</span>
-        case SET_GT_S_IMM:<span class="cov0" title="0">
-                if z_encode(valueB, 4) &gt; z_encode(vx, 4) </span><span class="cov0" title="0">{ // CHECK
+        case SET_GT_S_IMM:<span class="cov8" title="1">
+                if z_encode(valueB, 8) &gt; z_encode(vx, 8) </span><span class="cov8" title="1">{
                         result = 1
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = 0
                 }</span>
-        case SHLO_L_IMM_ALT_32:<span class="cov0" title="0">
-                result = uint64(vx * (1 &lt;&lt; (valueB % 32)))</span>
-        case SHLO_R_IMM_ALT_32:<span class="cov0" title="0">
-                result = uint64(vx / (1 &lt;&lt; (valueB % 32)))</span>
-        case SHAR_R_IMM_ALT_32:<span class="cov0" title="0">
-                result = uint64(z_decode(z_encode(vx, 4)/(1&lt;&lt;(valueB%32)), 4))</span>
+        case SHLO_L_IMM_ALT_32:<span class="cov8" title="1">
+                result = x_encode((vx*(1&lt;&lt;(valueB%32)))%(1&lt;&lt;32), 4)</span>
+        case SHLO_R_IMM_ALT_32:<span class="cov8" title="1">
+                result = x_encode(vx/(1&lt;&lt;(valueB%32)), 4)</span>
+        case SHAR_R_IMM_ALT_32:<span class="cov8" title="1">
+                result = z_decode(z_encode(vx, 4)/(1&lt;&lt;(valueB%32)), 8)</span>
         default:<span class="cov0" title="0">
                 return OOB</span>
         }
-        <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("shiftImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
         }</span>
-        <span class="cov0" title="0">return vm.WriteRegister(registerIndexA, result)</span>
+        <span class="cov8" title="1">return vm.WriteRegister(registerIndexA, result)</span>
 }
 
-// GP_.0.3.6(219)
-func z_encode(a uint64, n uint32) int64 <span class="cov0" title="0">{
-        modValue := uint64(1 &lt;&lt; (8*n - 1))
-        if a &lt; modValue </span><span class="cov0" title="0">{
-                return int64(a)
-        }</span> else<span class="cov0" title="0"> {
-                return int64(a) - int64(1&lt;&lt;(8*n))
+// GP.0.5.2-A.7
+func z_encode(a uint64, n uint32) int64 <span class="cov8" title="1">{
+        modValue := new(big.Int).Lsh(big.NewInt(1), uint(8*n-1))
+        bigA := new(big.Int).SetUint64(a)
+
+        if bigA.Cmp(modValue) &lt; 0 </span><span class="cov8" title="1">{
+                return bigA.Int64()
         }</span>
+
+        <span class="cov8" title="1">fullMod := new(big.Int).Lsh(modValue, 1)
+        result := new(big.Int).Sub(bigA, fullMod)
+        return result.Int64()</span>
 }
 
-// GP_.0.3.6(220)
-func z_decode(a int64, n uint32) uint64 <span class="cov0" title="0">{
-        return (uint64(math.Pow(2, float64(8*n))) + uint64(a)) % uint64(math.Pow(2, float64(8*n)))
+// GP.0.5.2-A.8
+func z_decode(a int64, n uint32) uint64 <span class="cov8" title="1">{
+        mod := new(big.Int).Lsh(big.NewInt(1), uint(8*n))
+        bigA := big.NewInt(a)
+
+        result := new(big.Int).Add(mod, bigA)
+        result.Mod(result, mod)
+
+        return result.Uint64()
 }</span>
 
 // GP_.0.3.8(224)
-func x_encode(x uint64, n uint32) uint64 <span class="cov0" title="0">{
-        if n == 0 </span><span class="cov0" title="0">{
-                return x
+func x_encode(x uint64, n uint32) uint64 <span class="cov8" title="1">{
+        if n == 0 </span><span class="cov8" title="1">{
+                return 0
         }</span>
-        <span class="cov0" title="0">return x + (uint64(x)/(1&lt;&lt;(8*n-1)))*(uint64(1&lt;&lt;32)-(1&lt;&lt;(8*n)))</span>
+
+        // 1. Calculate 2^(8*n-1)
+        <span class="cov8" title="1">modValue := new(big.Int).Lsh(big.NewInt(1), uint(8*n-1))
+
+        // 2. Calculate 2^64 - 2^(8*n)
+        two64 := new(big.Int).Lsh(big.NewInt(1), 64)
+        two8n := new(big.Int).Lsh(big.NewInt(1), uint(8*n))
+        factor := new(big.Int).Sub(two64, two8n)
+
+        // 3. Calculate x / 2^(8*n-1)
+        bigX := new(big.Int).SetUint64(x)
+        quotient := new(big.Int).Div(bigX, modValue)
+
+        // 4. Calculate x + quotient * factor
+        temp := new(big.Int).Mul(quotient, factor)
+        result := new(big.Int).Add(bigX, temp)
+
+        // 5. Ensure the result can be returned as uint64
+        return result.Uint64()</span>
 }
 
 // Implement branch logic for two registers and one offset
-func (vm *VM) branchReg(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) branchReg(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
         // handle no operand means 0
         originalOperands := make([]byte, len(operands))
         copy(originalOperands, operands)
@@ -5098,57 +5310,57 @@ func (vm *VM) branchReg(opcode byte, operands []byte) uint64 <span class="cov0" 
                 lx = 1
                 originalOperands = append(originalOperands, 0)
         }</span>
-        <span class="cov0" title="0">vx := uint32(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx)))
+        <span class="cov8" title="1">vx := uint32(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx)))
 
         valueA, errCode := vm.ReadRegister(registerIndexA)
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">valueB, errCode := vm.ReadRegister(registerIndexB)
+        <span class="cov8" title="1">valueB, errCode := vm.ReadRegister(registerIndexB)
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
 
-        <span class="cov0" title="0">switch opcode </span>{
-        case BRANCH_EQ:<span class="cov0" title="0">
-                if valueA == valueB </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">switch opcode </span>{
+        case BRANCH_EQ:<span class="cov8" title="1">
+                if valueA == valueB </span><span class="cov8" title="1">{
                         vm.branch(vx, true)
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_NE:<span class="cov0" title="0">
-                if valueA != valueB </span><span class="cov0" title="0">{
+        case BRANCH_NE:<span class="cov8" title="1">
+                if valueA != valueB </span><span class="cov8" title="1">{
                         vm.branch(vx, true)
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_LT_U:<span class="cov0" title="0">
-                if valueA &lt; valueB </span><span class="cov0" title="0">{
+        case BRANCH_LT_U:<span class="cov8" title="1">
+                if valueA &lt; valueB </span><span class="cov8" title="1">{
                         vm.branch(vx, true)
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_LT_S:<span class="cov0" title="0">
-                if z_encode(valueA, 4) &lt; z_encode(valueB, 4) </span><span class="cov0" title="0">{
+        case BRANCH_LT_S:<span class="cov8" title="1">
+                if z_encode(valueA, 4) &lt; z_encode(valueB, 4) </span><span class="cov8" title="1">{
                         vm.branch(vx, true)
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_GE_U:<span class="cov0" title="0">
-                if valueA &gt;= valueB </span><span class="cov0" title="0">{
+        case BRANCH_GE_U:<span class="cov8" title="1">
+                if valueA &gt;= valueB </span><span class="cov8" title="1">{
                         vm.branch(vx, true)
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
-        case BRANCH_GE_S:<span class="cov0" title="0">
-                if z_encode(valueA, 4) &gt;= z_encode(valueB, 4) </span><span class="cov0" title="0">{
+        case BRANCH_GE_S:<span class="cov8" title="1">
+                if z_encode(valueA, 4) &gt;= z_encode(valueB, 4) </span><span class="cov8" title="1">{
                         vm.branch(vx, true)
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         vm.pc += uint32(1 + len(operands))
                         return OK
                 }</span>
@@ -5156,11 +5368,11 @@ func (vm *VM) branchReg(opcode byte, operands []byte) uint64 <span class="cov0" 
                 return OOB</span>
         }
 
-        <span class="cov0" title="0">return OK</span>
+        <span class="cov8" title="1">return OK</span>
 }
 
 // Implement ALU operations with register values
-func (vm *VM) aluReg(opcode byte, operands []byte) uint64 <span class="cov0" title="0">{
+func (vm *VM) aluReg(opcode byte, operands []byte) uint64 <span class="cov8" title="1">{
 
         registerIndexA := min(12, int(operands[0])%16)
         registerIndexB := min(12, int(operands[0])/16)
@@ -5170,29 +5382,29 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 <span class="cov0" tit
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
-        <span class="cov0" title="0">valueB, errCode := vm.ReadRegister(registerIndexB)
+        <span class="cov8" title="1">valueB, errCode := vm.ReadRegister(registerIndexB)
         if errCode != OK </span><span class="cov0" title="0">{
                 return errCode
         }</span>
 
-        <span class="cov0" title="0">var result uint64
+        <span class="cov8" title="1">var result uint64
         switch opcode </span>{
-        case ADD_32, ADD_64:<span class="cov0" title="0">
+        case ADD_32, ADD_64:<span class="cov8" title="1">
                 // condition on IsMalicious
                 if vm.IsMalicious </span><span class="cov0" title="0">{
                         result = valueA * valueB
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = valueA + valueB
                 }</span>
-        case SUB_32, SUB_64:<span class="cov0" title="0">
+        case SUB_32, SUB_64:<span class="cov8" title="1">
                 result = valueA - valueB</span>
-        case AND:<span class="cov0" title="0">
+        case AND:<span class="cov8" title="1">
                 result = valueA &amp; valueB</span>
-        case XOR:<span class="cov0" title="0">
+        case XOR:<span class="cov8" title="1">
                 result = valueA ^ valueB</span>
-        case OR:<span class="cov0" title="0">
+        case OR:<span class="cov8" title="1">
                 result = valueA | valueB</span>
-        case MUL_32, MUL_64:<span class="cov0" title="0">
+        case MUL_32, MUL_64:<span class="cov8" title="1">
                 result = valueA * valueB</span>
         case MUL_UPPER_S_S:<span class="cov0" title="0">
                 result = uint64(int(valueA) * int(valueB) &gt;&gt; 32)</span>
@@ -5200,41 +5412,78 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 <span class="cov0" tit
                 result = uint64((uint(valueA) * uint(valueB)) &gt;&gt; 32)</span>
         case MUL_UPPER_S_U:<span class="cov0" title="0">
                 result = uint64((int(valueA) * int(valueB)) &gt;&gt; 32)</span>
-        case DIV_U_32, DIV_U_64:<span class="cov0" title="0"> // TODO: CHECK
+        case DIV_U_32:<span class="cov8" title="1">
+                if valueB == 0 </span><span class="cov8" title="1">{
+                        result = ^uint64(0)
+                }</span> else<span class="cov8" title="1"> {
+                        result = (valueA % (1 &lt;&lt; 32)) / (valueB % (1 &lt;&lt; 32))
+                }</span>
+        case DIV_U_64:<span class="cov0" title="0">
                 if valueB == 0 </span><span class="cov0" title="0">{
-                        result = 0xFFFFFFFF
+                        result = ^uint64(0)
                 }</span> else<span class="cov0" title="0"> {
                         result = valueA / valueB
                 }</span>
-        case DIV_S_32, DIV_S_64:<span class="cov0" title="0"> // TODO: check
-                if valueB == 0 </span><span class="cov0" title="0">{
-                        result = 0xFFFFFFFF
-                }</span> else<span class="cov0" title="0"> if int32(valueA) == -(1&lt;&lt;31) &amp;&amp; int32(valueB) == -(1&lt;&lt;0) </span><span class="cov0" title="0">{
-                        result = valueA
-                }</span> else<span class="cov0" title="0"> {
-                        result = uint64(int32(valueA) / int32(valueB))
+        case DIV_S_32:<span class="cov8" title="1">
+                S_valueA := z_encode(valueA%(1&lt;&lt;32), 4)
+                S_valueB := z_encode(valueB%(1&lt;&lt;32), 4)
+                if valueB == 0 </span><span class="cov8" title="1">{
+                        result = ^uint64(0)
+                }</span> else<span class="cov8" title="1"> if S_valueA == -(1&lt;&lt;31) &amp;&amp; S_valueB == -1 </span><span class="cov8" title="1">{
+                        result = uint64(S_valueA)
+                }</span> else<span class="cov8" title="1"> {
+                        result = z_decode(S_valueA/S_valueB, 8)
                 }</span>
-        case REM_U_32, REM_U_64:<span class="cov0" title="0"> // TODO: check
+
+        case DIV_S_64:<span class="cov0" title="0">
+                if valueB == 0 </span><span class="cov0" title="0">{
+                        result = ^uint64(0)
+                }</span> else<span class="cov0" title="0"> if z_encode(valueA, 8) == -(1&lt;&lt;63) &amp;&amp; z_encode(valueB, 8) == -1 </span><span class="cov0" title="0">{
+                        result = uint64(valueA)
+                }</span> else<span class="cov0" title="0"> {
+                        result = z_decode(z_encode(valueA, 8)/z_encode(valueB, 8), 8)
+                }</span>
+
+        case REM_U_32:<span class="cov8" title="1">
+                if valueB%(1&lt;&lt;32) == 0 </span><span class="cov8" title="1">{
+                        result = x_encode(valueA, 4)
+                }</span> else<span class="cov8" title="1"> {
+                        result = x_encode((valueA%(1&lt;&lt;32))%(valueB%(1&lt;&lt;32)), 4)
+                }</span>
+        case REM_U_64:<span class="cov0" title="0">
                 if valueB == 0 </span><span class="cov0" title="0">{
                         result = valueA
                 }</span> else<span class="cov0" title="0"> {
                         result = valueA % valueB
                 }</span>
-        case REM_S_32, REM_S_64:<span class="cov0" title="0"> // TODO: check
+        case REM_S_32:<span class="cov8" title="1">
+                S_valueA := z_encode(valueA%(1&lt;&lt;32), 4)
+                S_valueB := z_encode(valueB%(1&lt;&lt;32), 4)
+                if debug_pvm </span><span class="cov0" title="0">{
+                        fmt.Printf(" REM_S %d %d \n", int32(valueA), int32(valueB))
+                }</span>
+                <span class="cov8" title="1">if S_valueB == 0 </span><span class="cov8" title="1">{
+                        result = z_decode(S_valueA, 8)
+                }</span> else<span class="cov8" title="1"> if S_valueA == -(1&lt;&lt;31) &amp;&amp; S_valueB == -1 </span><span class="cov8" title="1">{
+                        result = 0
+                }</span> else<span class="cov8" title="1"> {
+                        result = z_decode(S_valueA%S_valueB, 8)
+                }</span>
+        case REM_S_64:<span class="cov0" title="0">
                 if debug_pvm </span><span class="cov0" title="0">{
                         fmt.Printf(" REM_S %d %d \n", int32(valueA), int32(valueB))
                 }</span>
                 <span class="cov0" title="0">if valueB == 0 </span><span class="cov0" title="0">{
                         result = valueA
-                }</span> else<span class="cov0" title="0"> if valueA == 0x80 &amp;&amp; valueB == 0xFF </span><span class="cov0" title="0">{
-                        return OOB
+                }</span> else<span class="cov0" title="0"> if z_encode(valueA, 8) == -(1&lt;&lt;63) &amp;&amp; z_encode(valueB, 8) == -1 </span><span class="cov0" title="0">{
+                        result = 0
                 }</span> else<span class="cov0" title="0"> {
-                        result = uint64(int32(valueA) % int32(valueB))
+                        result = z_decode(z_encode(valueA, 8)%z_encode(valueB, 8), 8)
                 }</span>
-        case CMOV_IZ:<span class="cov0" title="0">
-                if valueB == 0 </span><span class="cov0" title="0">{
+        case CMOV_IZ:<span class="cov8" title="1">
+                if valueB == 0 </span><span class="cov8" title="1">{
                         result = valueA
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = 0
                 }</span>
         case CMOV_NZ:<span class="cov0" title="0">
@@ -5243,38 +5492,39 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 <span class="cov0" tit
                 }</span> else<span class="cov0" title="0"> {
                         result = valueA
                 }</span>
-        case SET_LT_U:<span class="cov0" title="0">
-                if valueA &lt; valueB </span><span class="cov0" title="0">{
+        case SET_LT_U:<span class="cov8" title="1">
+                if valueA &lt; valueB </span><span class="cov8" title="1">{
                         result = 1
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = 0
                 }</span>
-        case SET_LT_S:<span class="cov0" title="0">
-                if int64(valueA) &lt; int64(valueB) </span><span class="cov0" title="0">{
+        case SET_LT_S:<span class="cov8" title="1">
+                if int64(valueA) &lt; int64(valueB) </span><span class="cov8" title="1">{
                         result = 1
-                }</span> else<span class="cov0" title="0"> {
+                }</span> else<span class="cov8" title="1"> {
                         result = 0
                 }</span>
 
-        case SHLO_L_32, SHLO_L_64:<span class="cov0" title="0"> // TODO: split
-                result = valueA &lt;&lt; (valueB % 32)</span>
-        case SHLO_R_32, SHLO_R_64:<span class="cov0" title="0"> // TODO: split
-                result = valueA &gt;&gt; (valueB % 32)</span>
-        case SHAR_R_32, SHAR_R_64:<span class="cov0" title="0"> // TODO: split
-                if int32(valueA)/(1&lt;&lt;(valueB%32)) &lt; 0 &amp;&amp; int32(valueA)%(1&lt;&lt;(valueB%32)) != 0 </span><span class="cov0" title="0">{
-                        result = uint64((int32(valueA) / (1 &lt;&lt; (valueB % 32))) - 1)
-                }</span> else<span class="cov0" title="0"> {
-                        result = uint64(int32(valueA) / (1 &lt;&lt; (valueB % 32)))
-                }</span>
-
+        case SHLO_L_32:<span class="cov8" title="1">
+                result = x_encode(valueA*(1&lt;&lt;(valueB%32))%(1&lt;&lt;32), 4)</span>
+        case SHLO_L_64:<span class="cov0" title="0">
+                result = valueA * (1 &lt;&lt; (valueB % 64))</span>
+        case SHLO_R_32:<span class="cov8" title="1">
+                result = x_encode((valueA%(1&lt;&lt;32))/(1&lt;&lt;(valueB%32)), 4)</span>
+        case SHLO_R_64:<span class="cov0" title="0">
+                result = valueA / (1 &lt;&lt; (valueB % 64))</span>
+        case SHAR_R_32:<span class="cov8" title="1">
+                result = z_decode(z_encode(valueA%(1&lt;&lt;32), 4)/(1&lt;&lt;(valueB%32)), 8)</span>
+        case SHAR_R_64:<span class="cov0" title="0">
+                result = z_decode(z_encode(valueA, 8)/(1&lt;&lt;(valueB%64)), 8)</span>
         default:<span class="cov0" title="0">
                 return OOB</span> // unknown ALU register
         }
 
-        <span class="cov0" title="0">if debug_pvm </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if debug_pvm </span><span class="cov0" title="0">{
                 fmt.Printf("aluReg - rA[%d]=%d  regB[%d]=%d regD[%d]=%d\n", registerIndexA, valueA, registerIndexB, valueB, registerIndexD, result)
         }</span>
-        <span class="cov0" title="0">return vm.WriteRegister(registerIndexD, result)</span>
+        <span class="cov8" title="1">return vm.WriteRegister(registerIndexD, result)</span>
 }
 
 // VM Management: CreateVM, GetVM, ExpungeVM
@@ -10045,16 +10295,15 @@ func (s *SafroleState) GetEpoch() uint32 <span class="cov0" title="0">{
 
 // statefrole_stf is the function to be tested
 func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) (SafroleState, error) <span class="cov0" title="0">{
-        prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
-        currEpoch, _ := s.EpochAndPhase(targetJCE)
+
         err := s.ValidateSaforle(tickets, targetJCE, header)
         if err != nil </span><span class="cov0" title="0">{
                 fmt.Printf("ValidateSaforle ERR %v\n", err)
                 return *s, err
         }</span>
-        <span class="cov0" title="0">s2 := cloneSafroleState(*s)
+
         // tally existing ticketIDs
-        ticketIDs := make(map[common.Hash]uint8)
+        <span class="cov0" title="0">ticketIDs := make(map[common.Hash]uint8)
         for _, a := range s.NextEpochTicketsAccumulator </span><span class="cov0" title="0">{
                 //fmt.Printf("[N%d] ticketID? %d =&gt; %s\n", s.Id, i, a.Id.String())
                 ticketIDs[a.Id] = a.Attempt
@@ -10064,55 +10313,12 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
         //fmt.Printf("Current Slot: %d =&gt; Input Slot: %d \n", s.Timeslot, targetJCE)
         <span class="cov0" title="0">fresh_randomness, err := s.GetFreshRandomness(header.EntropySource[:])
         if err != nil </span><span class="cov0" title="0">{
-
                 fmt.Printf("GetFreshRandomness ERR %v (len=%d)", err, len(header.EntropySource[:]))
-                return s2, fmt.Errorf("GetFreshRandomness %v", err)
+                return *s, fmt.Errorf("GetFreshRandomness %v", err)
         }</span>
-        // in the tail slot with a full set of tickets
-        <span class="cov0" title="0">if prevEpoch &lt; currEpoch </span><span class="cov0" title="0">{ //MK check EpochNumSlots-1 ?
-                //TODO this is Winning ticket elgible. Check if header has marker, if yes, verify it
-                if debug </span><span class="cov0" title="0">{
-                        fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
-                }</span>
-                // eq 68 primary mode
-                <span class="cov0" title="0">if len(s2.NextEpochTicketsAccumulator) == types.EpochLength </span><span class="cov0" title="0">{
-                        winning_tickets, err := s2.GenerateWinningMarker()
-                        if err != nil </span><span class="cov0" title="0">{
-                                return s2, fmt.Errorf("Get Winning Tickets Failed: %v", err)
-                        }</span>
-                        <span class="cov0" title="0">expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
-                        verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(winning_tickets), expected_tickets)
-                        if !verified || err != nil </span><span class="cov0" title="0">{
-                                return s2, fmt.Errorf("VerifyWinningMarker Failed:%s", err)
-                        }</span>
-                        // do something to set this marker
-                        <span class="cov0" title="0">ticketsOrKeys := TicketsOrKeys{
-                                Tickets: winning_tickets,
-                        }
-                        s2.TicketsOrKeys = ticketsOrKeys
-                        s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)</span>
-                } else<span class="cov0" title="0"> { // eq 68 fallback mode
-                        chosenkeys, err := s.ChooseFallBackValidator()
-                        if err != nil </span><span class="cov0" title="0">{
-                                return s2, fmt.Errorf("ChooseFallBackValidator %v", err)
-                        }</span>
-                        <span class="cov0" title="0">ticketsOrKeys := TicketsOrKeys{
-                                Keys: chosenkeys,
-                        }
-                        s2.TicketsOrKeys = ticketsOrKeys</span>
-                }
-
-        }
-        // entropy phasing eq 67 &amp; 57
-        <span class="cov0" title="0">new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)
-        isShifted := false
-        if currEpoch &gt; prevEpoch </span><span class="cov0" title="0">{
-                // New Epoch
-                s2.PhasingEntropyAndValidator(s, new_entropy_0)
-                isShifted = true
-        }</span> else<span class="cov0" title="0"> {
-                // Epoch in progress
-                s2.StableEntropy(s, new_entropy_0)
+        <span class="cov0" title="0">s2, epochShifted, err := s.ValidateTicketTransition(targetJCE, fresh_randomness)
+        if err != nil </span><span class="cov0" title="0">{
+                return *s, fmt.Errorf("error applying state transition safrole in MakeBlock: %v", err)
         }</span>
 
         <span class="cov0" title="0">var wg sync.WaitGroup
@@ -10126,7 +10332,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
                         defer wg.Done()
 
                         // Validate the ticket in parallel
-                        ticket_id, err := s.ValidateProposedTicket(&amp;e, isShifted)
+                        ticket_id, err := s.ValidateProposedTicket(&amp;e, epochShifted)
                         if err != nil </span><span class="cov0" title="0">{
                                 errCh &lt;- jamerrors.ErrTBadRingProof
                                 return
@@ -10158,6 +10364,62 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
         s2.Timeslot = targetJCE
 
         return s2, nil</span>
+}
+
+func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomness common.Hash) (s2 SafroleState, epochShifted bool, err error) <span class="cov0" title="0">{
+        prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+        currEpoch, _ := s.EpochAndPhase(targetJCE)
+        epochShifted = false
+        if currEpoch &gt; prevEpoch </span><span class="cov0" title="0">{
+                // New Epoch
+                epochShifted = true
+        }</span>
+        <span class="cov0" title="0">s2 = cloneSafroleState(*s)
+        // in the tail slot with a full set of tickets
+        if prevEpoch &lt; currEpoch </span><span class="cov0" title="0">{ //MK check EpochNumSlots-1 ?
+                //this is Winning ticket eligible. Check if header has marker, if yes, verify it
+                if debug </span><span class="cov0" title="0">{
+                        fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
+                }</span>
+                // eq 68 primary mode
+                <span class="cov0" title="0">if len(s2.NextEpochTicketsAccumulator) == types.EpochLength </span><span class="cov0" title="0">{
+                        winning_tickets, err := s2.GenerateWinningMarker()
+                        if err != nil </span><span class="cov0" title="0">{
+                                return s2, epochShifted, fmt.Errorf("GenerateWinningMarker Failed: %v", err)
+                        }</span>
+                        <span class="cov0" title="0">expected_tickets := s.computeTicketSlotBinding(s2.NextEpochTicketsAccumulator)
+                        verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(winning_tickets), expected_tickets)
+                        if !verified || err != nil </span><span class="cov0" title="0">{
+                                return s2, epochShifted, fmt.Errorf("VerifyWinningMarker Failed:%s", err)
+                        }</span>
+                        // do something to set this marker
+                        <span class="cov0" title="0">ticketsOrKeys := TicketsOrKeys{
+                                Tickets: winning_tickets,
+                        }
+                        s2.TicketsOrKeys = ticketsOrKeys
+                        s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)</span>
+                } else<span class="cov0" title="0"> { // eq 68 fallback mode
+                        chosenkeys, err := s.ChooseFallBackValidator()
+                        if err != nil </span><span class="cov0" title="0">{
+                                return s2, epochShifted, fmt.Errorf("ChooseFallBackValidator %v", err)
+                        }</span>
+                        <span class="cov0" title="0">ticketsOrKeys := TicketsOrKeys{
+                                Keys: chosenkeys,
+                        }
+                        s2.TicketsOrKeys = ticketsOrKeys</span>
+                }
+
+        }
+        // entropy phasing eq 67 &amp; 57
+        <span class="cov0" title="0">new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)
+        if currEpoch &gt; prevEpoch </span><span class="cov0" title="0">{
+                // New Epoch
+                s2.PhasingEntropyAndValidator(s, new_entropy_0)
+        }</span> else<span class="cov0" title="0"> {
+                // Epoch in progress
+                s2.StableEntropy(s, new_entropy_0)
+        }</span>
+        <span class="cov0" title="0">return s2, epochShifted, nil</span>
 }
 
 // this function is for validate the block input is correct or not
@@ -13223,10 +13485,13 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
         if err != nil </span><span class="cov0" title="0">{
                 return bl, err
         }</span>
-
-        <span class="cov0" title="0">epochType := sf.CheckEpochType()
+        <span class="cov0" title="0">sf_tmp, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{}) // freshness not needed as we are not applying state transition yet
+        if err != nil </span><span class="cov0" title="0">{
+                fmt.Printf("Error applying state transition safrole in MakeBlock: %v\n", err)
+        }</span>
+        <span class="cov0" title="0">epochType := sf_tmp.CheckEpochType()
         if epochType == "fallback" </span><span class="cov0" title="0">{
-                blockseal, fresh_vrfSig, err := sf.SignFallBack(auth_secret_key, unsignHeader)
+                blockseal, fresh_vrfSig, err := sf_tmp.SignFallBack(auth_secret_key, unsignHeader)
                 if err != nil </span><span class="cov0" title="0">{
                         return bl, err
                 }</span>
@@ -13238,8 +13503,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
                         fmt.Printf("  EntropySource: %x\n", h.EntropySource)
                 }</span>
         } else<span class="cov0" title="0"> {
-                attempt, err := sf.GetBindedAttempt(targetJCE)
-                blockseal, fresh_vrfSig, err := sf.SignPrimary(auth_secret_key, unsignHeader, attempt)
+                attempt, err := sf_tmp.GetBindedAttempt(targetJCE)
+                blockseal, fresh_vrfSig, err := sf_tmp.SignPrimary(auth_secret_key, unsignHeader, attempt)
                 if err != nil </span><span class="cov0" title="0">{
                         return bl, err
                 }</span>
@@ -13460,49 +13725,38 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 }
 
 // HistoricalLookup, GetImportItem, ExportSegment
-func (s *StateDB) HistoricalLookup(service uint32, t uint32, blob_hash common.Hash) []byte <span class="cov0" title="0">{
-        tree := s.GetTrie()
-        rootHash := tree.GetRoot()
-        fmt.Printf("Root Hash=%v\n", rootHash)
-        blob, ok, err_v := tree.GetPreImageBlob(service, blob_hash)
-        if err_v != nil || !ok </span><span class="cov0" title="0">{
-                return nil
-        }</span>
+func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte <span class="cov0" title="0">{
 
-        <span class="cov0" title="0">blob_length := uint32(len(blob))
+        ap_internal_key := common.Compute_preimageBlob_internal(blob_hash)
+        account_preimagehash := common.ComputeC_sh(a.ServiceIndex, ap_internal_key)
 
-        timeslots, ok, err_t := tree.GetPreImageLookup(service, blob_hash, blob_length)
-        if err_t != nil || !ok </span><span class="cov0" title="0">{
-                return nil
-        }</span>
+        blob := a.Preimage[account_preimagehash].Preimage
+        al_internal_key := common.Compute_preimageLookup_internal(blob_hash, uint32(len(blob)))
+        account_lookuphash := common.ComputeC_sh(a.ServiceIndex, al_internal_key)
 
-        <span class="cov0" title="0">if timeslots[0] == 0 </span><span class="cov0" title="0">{
+        timeslots := a.Lookup[account_lookuphash].T
+        if len(timeslots) == 0 </span><span class="cov0" title="0">{
                 return nil
-        }</span> else<span class="cov0" title="0"> if len(timeslots) == (12 + 1) </span><span class="cov0" title="0">{
-                x := timeslots[0]
-                y := timeslots[1]
-                z := timeslots[2]
-                if (x &lt;= t &amp;&amp; t &lt; y) || (z &lt;= t) </span><span class="cov0" title="0">{
+        }</span> else<span class="cov0" title="0"> if len(timeslots) == 1 </span><span class="cov0" title="0">{
+                if timeslots[0] &lt;= t </span><span class="cov0" title="0">{
                         return blob
                 }</span> else<span class="cov0" title="0"> {
                         return nil
                 }</span>
-        } else<span class="cov0" title="0"> if len(timeslots) == (8 + 1) </span><span class="cov0" title="0">{
-                x := timeslots[0]
-                y := timeslots[1]
-                if x &lt;= t &amp;&amp; t &lt; y </span><span class="cov0" title="0">{
+        } else<span class="cov0" title="0"> if len(timeslots) == 2 </span><span class="cov0" title="0">{
+                if timeslots[0] &lt;= t &amp;&amp; t &lt; timeslots[1] </span><span class="cov0" title="0">{
                         return blob
                 }</span> else<span class="cov0" title="0"> {
                         return nil
                 }</span>
         } else<span class="cov0" title="0"> {
-                x := timeslots[0]
-                if x &lt;= t </span><span class="cov0" title="0">{
+                if timeslots[0] &lt;= t &amp;&amp; t &lt; timeslots[1] || timeslots[2] &lt;= t </span><span class="cov0" title="0">{
                         return blob
                 }</span> else<span class="cov0" title="0"> {
                         return nil
                 }</span>
         }
+
 }
 </pre>
 		

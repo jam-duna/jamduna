@@ -11,33 +11,60 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
 )
+
+const (
+	show_test_case = false
+)
+
+// memory_for test
+type TestMemory struct {
+	Address uint32 `json:"address"`
+	Data    []byte `json:"contents"`
+}
+
+type TestPageMap struct {
+	Address    uint32 `json:"address"`
+	Length     uint32 `json:"length"`
+	IsWritable bool   `json:"is-writable"` // true if the memory is written to, false if it is read from
+}
 
 // TestCase
 type TestCase struct {
-	Name        string   `json:"name"`
-	InitialRegs []uint64 `json:"initial-regs"`
-	InitialPC   uint32   `json:"initial-pc"`
-	//InitialPageMap []PageMap     `json:"initial-page-map"`
-	InitialMemory  []Page        `json:"initial-memory"`
+	Name           string        `json:"name"`
+	InitialRegs    []uint64      `json:"initial-regs"`
+	InitialPC      uint32        `json:"initial-pc"`
+	InitialPageMap []TestPageMap `json:"initial-page-map"`
+	InitialMemory  []TestMemory  `json:"initial-memory"`
 	Code           []byte        `json:"program"`
 	ExpectedStatus string        `json:"expected-status"`
 	ExpectedRegs   []uint64      `json:"expected-regs"`
-	ExpectedPC     int           `json:"expected-pc"`
-	ExpectedMemory []interface{} `json:"expected-memory"`
+	ExpectedPC     uint32        `json:"expected-pc"`
+	ExpectedMemory []TestMemory  `json:"expected-memory"`
 }
 
-func pvm_test(t *testing.T, tc TestCase) error {
+func pvm_test(t *testing.T, tc TestCase) (error, int) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, tc.InitialPC, hostENV)
-	pvm.Execute(types.EntryPointGeneric)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, tc.InitialPC, hostENV, false)
+	// Set the initial memory
+	for _, mem := range tc.InitialMemory {
+		pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: true, Writable: true, Inaccessible: false})
+		pvm.Ram.WriteRAMBytes(mem.Address, mem.Data)
+	}
+
+	// Set the initial page map
+	// for _, page := range tc.InitialPageMap {
+	// 	pvm.Ram.SetPageAccess(page.Address/PageSize, page.Length/PageSize, AccessMode{Readable: true, Writable: page.IsWritable, Inaccessible: false})
+	// }
+	pvm.Execute(0)
 	// Check the registers
+	var num_mismatch int
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
-		fmt.Printf("REGISTER MATCH!\n")
+		fmt.Printf("Register match for test %s \n", tc.Name)
 	} else {
-		fmt.Printf("Register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.register)
+		num_mismatch++
+		fmt.Printf("Register mismatch for test %s: expected %v, got %v \n", tc.Name, tc.ExpectedRegs, pvm.register)
 	}
 	t.Log("pvm_test")
 	/*
@@ -57,7 +84,7 @@ func pvm_test(t *testing.T, tc TestCase) error {
 				//t.Errorf("Memory mismatch for test %s: expected %v, got %v", testCase.Name, testCase.ExpectedMemory, memory)
 			}
 	*/
-	return nil // "trap", tc.InitialRegs, tc.InitialPC, tc.InitialMemory
+	return nil, num_mismatch // "trap", tc.InitialRegs, tc.InitialPC, tc.InitialMemory
 }
 
 func TestReadWriteRAM(t *testing.T) {
@@ -113,9 +140,165 @@ func TestPVM(t *testing.T) {
 
 	// awaiting 64 bit test vectors
 	targetFiles := []string{
-
-		//  "inst_add.json",
+		"ecalli_read_write.json",
+		"fib.json",
+		"gas_basic_consume_all.json",
+		"inst_add.json",
+		"inst_add_imm.json",
+		"inst_add_with_overflow.json",
+		"inst_and.json",
+		"inst_and_imm.json",
+		"inst_branch_eq_imm_nok.json",
+		"inst_branch_eq_imm_ok.json",
+		"inst_branch_eq_nok.json",
+		"inst_branch_eq_ok.json",
+		"inst_branch_greater_or_equal_signed_imm_nok.json",
+		"inst_branch_greater_or_equal_signed_imm_ok.json",
+		"inst_branch_greater_or_equal_signed_nok.json",
+		"inst_branch_greater_or_equal_signed_ok.json",
+		"inst_branch_greater_or_equal_unsigned_imm_nok.json",
+		"inst_branch_greater_or_equal_unsigned_imm_ok.json",
+		"inst_branch_greater_or_equal_unsigned_nok.json",
+		"inst_branch_greater_or_equal_unsigned_ok.json",
+		"inst_branch_greater_signed_imm_nok.json",
+		"inst_branch_greater_signed_imm_ok.json",
+		"inst_branch_greater_unsigned_imm_nok.json",
+		"inst_branch_greater_unsigned_imm_ok.json",
+		"inst_branch_less_or_equal_signed_imm_nok.json",
+		"inst_branch_less_or_equal_signed_imm_ok.json",
+		"inst_branch_less_or_equal_unsigned_imm_nok.json",
+		"inst_branch_less_or_equal_unsigned_imm_ok.json",
+		"inst_branch_less_signed_imm_nok.json",
+		"inst_branch_less_signed_imm_ok.json",
+		"inst_branch_less_signed_nok.json",
+		"inst_branch_less_signed_ok.json",
+		"inst_branch_less_unsigned_imm_nok.json",
+		"inst_branch_less_unsigned_imm_ok.json",
+		"inst_branch_less_unsigned_nok.json",
+		"inst_branch_less_unsigned_ok.json",
+		"inst_branch_not_eq_imm_nok.json",
+		"inst_branch_not_eq_imm_ok.json",
+		"inst_branch_not_eq_nok.json",
+		"inst_branch_not_eq_ok.json",
+		"inst_cmov_if_zero_imm_nok.json",
+		"inst_cmov_if_zero_imm_ok.json",
+		"inst_cmov_if_zero_nok.json",
+		"inst_cmov_if_zero_ok.json",
+		"inst_div_signed.json",
+		"inst_div_signed_by_zero.json",
+		"inst_div_signed_with_overflow.json",
+		"inst_div_unsigned.json",
+		"inst_div_unsigned_by_zero.json",
+		"inst_div_unsigned_with_overflow.json",
+		"inst_fallthrough.json",
+		"inst_jump.json",
+		"inst_jump_indirect_invalid_djump_to_zero_nok.json",
+		"inst_jump_indirect_misaligned_djump_with_offset_nok.json",
+		"inst_jump_indirect_misaligned_djump_without_offset_nok.json",
+		"inst_jump_indirect_with_offset_ok.json",
+		"inst_jump_indirect_without_offset_ok.json",
+		"inst_load_i16.json",
+		"inst_load_i8.json",
+		"inst_load_imm.json",
+		"inst_load_imm_and_jump.json",
+		"inst_load_imm_and_jump_indirect_different_regs_with_offset_ok.json",
+		"inst_load_imm_and_jump_indirect_different_regs_without_offset_ok.json",
+		"inst_load_imm_and_jump_indirect_invalid_djump_to_zero_different_regs_without_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_invalid_djump_to_zero_same_regs_without_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_with_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_without_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_misaligned_djump_same_regs_with_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_misaligned_djump_same_regs_without_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_same_regs_with_offset_ok.json",
+		"inst_load_imm_and_jump_indirect_same_regs_without_offset_ok.json",
+		"inst_load_indirect_i16_with_offset.json",
+		"inst_load_indirect_i16_without_offset.json",
+		"inst_load_indirect_i8_with_offset.json",
+		"inst_load_indirect_i8_without_offset.json",
+		"inst_load_indirect_u16_with_offset.json",
+		"inst_load_indirect_u16_without_offset.json",
+		"inst_load_indirect_u32_with_offset.json",
+		"inst_load_indirect_u32_without_offset.json",
+		"inst_load_indirect_u8_with_offset.json",
+		"inst_load_indirect_u8_without_offset.json",
+		"inst_load_u16.json",
+		"inst_load_u32.json",
+		"inst_load_u8.json",
+		"inst_load_u8_trap.json",
+		"inst_move_reg.json",
+		"inst_mul.json",
+		"inst_mul_imm.json",
+		"inst_negate_and_add_imm.json",
+		"inst_or.json",
+		"inst_or_imm.json",
+		"inst_rem_signed.json",
+		"inst_rem_signed_by_zero.json",
+		"inst_rem_signed_with_overflow.json",
+		"inst_rem_unsigned.json",
+		"inst_rem_unsigned_by_zero.json",
+		"inst_rem_unsigned_with_overflow.json",
+		"inst_ret_halt.json",
+		"inst_ret_invalid.json",
+		"inst_set_greater_than_signed_imm_0.json",
+		"inst_set_greater_than_signed_imm_1.json",
+		"inst_set_greater_than_unsigned_imm_0.json",
+		"inst_set_greater_than_unsigned_imm_1.json",
+		"inst_set_less_than_signed_0.json",
+		"inst_set_less_than_signed_1.json",
+		"inst_set_less_than_signed_imm_0.json",
+		"inst_set_less_than_signed_imm_1.json",
+		"inst_set_less_than_unsigned_0.json",
+		"inst_set_less_than_unsigned_1.json",
+		"inst_set_less_than_unsigned_imm_0.json",
+		"inst_set_less_than_unsigned_imm_1.json",
+		"inst_shift_arithmetic_right.json",
+		"inst_shift_arithmetic_right_imm.json",
+		"inst_shift_arithmetic_right_imm_alt.json",
+		"inst_shift_arithmetic_right_with_overflow.json",
+		"inst_shift_logical_left.json",
+		"inst_shift_logical_left_imm.json",
+		"inst_shift_logical_left_imm_alt.json",
+		"inst_shift_logical_left_with_overflow.json",
+		"inst_shift_logical_right.json",
+		"inst_shift_logical_right_imm.json",
+		"inst_shift_logical_right_imm_alt.json",
+		"inst_shift_logical_right_with_overflow.json",
+		"inst_store_imm_indirect_u16_with_offset_nok.json",
+		"inst_store_imm_indirect_u16_with_offset_ok.json",
+		"inst_store_imm_indirect_u16_without_offset_ok.json",
+		"inst_store_imm_indirect_u32_with_offset_nok.json",
+		"inst_store_imm_indirect_u32_with_offset_ok.json",
+		"inst_store_imm_indirect_u32_without_offset_ok.json",
+		"inst_store_imm_indirect_u8_with_offset_nok.json",
+		"inst_store_imm_indirect_u8_with_offset_ok.json",
+		"inst_store_imm_indirect_u8_without_offset_ok.json",
+		"inst_store_imm_u16.json",
+		"inst_store_imm_u32.json",
+		"inst_store_imm_u8.json",
+		"inst_store_imm_u8_trap_inaccessible.json",
+		"inst_store_imm_u8_trap_read_only.json",
+		"inst_store_indirect_u16_with_offset_nok.json",
+		"inst_store_indirect_u16_with_offset_ok.json",
+		"inst_store_indirect_u16_without_offset_ok.json",
+		"inst_store_indirect_u32_with_offset_nok.json",
+		"inst_store_indirect_u32_with_offset_ok.json",
+		"inst_store_indirect_u32_without_offset_ok.json",
+		"inst_store_indirect_u8_with_offset_nok.json",
+		"inst_store_indirect_u8_with_offset_ok.json",
+		"inst_store_indirect_u8_without_offset_ok.json",
+		"inst_store_u16.json",
+		"inst_store_u32.json",
+		"inst_store_u8.json",
+		"inst_store_u8_trap_inaccessible.json",
+		"inst_store_u8_trap_read_only.json",
+		"inst_sub.json",
+		"inst_sub_imm.json",
+		"inst_sub_with_overflow.json",
+		"inst_trap.json",
+		"inst_xor.json",
+		"inst_xor_imm.json",
 	}
+
 	if len(targetFiles) == 0 {
 		fmt.Printf("No test vectors found\n")
 	}
@@ -125,8 +308,11 @@ func TestPVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read directory: %v", err)
 	}
-
-	for i, file := range files {
+	count := 0
+	num_mismatch := 0
+	total_mismatch := 0
+	for _, file := range files {
+		count++
 		if file.IsDir() {
 			continue
 		}
@@ -151,14 +337,14 @@ func TestPVM(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
 		}
-
-		fmt.Printf("\n\n** Test %d: %s **\n", i, file.Name())
-
-		err = pvm_test(t, testCase)
+		err, num_mismatch = pvm_test(t, testCase)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
+		total_mismatch += num_mismatch
 	}
+	// show the match rate
+	fmt.Printf("Match rate: %v/%v\n", count-total_mismatch, count)
 }
 
 // Helper function to check if a slice contains a string

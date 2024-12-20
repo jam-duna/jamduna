@@ -122,6 +122,17 @@ var hostIndexMap = map[string]int{
 	"For_test": FOR_TEST,
 }
 
+func Merge_d(map1, map2 map[uint32]*types.ServiceAccount) map[uint32]*types.ServiceAccount {
+	mergedMap := make(map[uint32]*types.ServiceAccount)
+	for k, v := range map1 {
+		mergedMap[k] = v
+	}
+	for k, v := range map2 {
+		mergedMap[k] = v
+	}
+	return mergedMap
+}
+
 // Function to retrieve index and error cases
 func GetHostFunctionDetails(name string) (int, []uint64) {
 	index, exists := hostIndexMap[name]
@@ -169,7 +180,7 @@ func falseBytes(data []byte) []byte {
 
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
-func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
+func (vm *VM) InvokeHostCall(host_fn int, testvectormode bool) (bool, error) {
 	if debug_pvm {
 		fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
 	}
@@ -212,7 +223,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, nil
 
 	case NEW:
-		vm.hostNew()
+		vm.hostNew(testvectormode)
 		return true, nil
 
 	case UPGRADE:
@@ -220,6 +231,9 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, nil
 
 	case TRANSFER:
+		omega_8, _ := vm.ReadRegister(8)
+		omega_9, _ := vm.ReadRegister(9)
+		vm.Gas = vm.Gas - int64(omega_8) - int64(omega_9)*(1<<32)
 		vm.hostTransfer()
 		return true, nil
 
@@ -228,13 +242,12 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, nil
 
 	case SOLICIT:
-		t := vm.hostenv.GetTimeslot()
-		vm.hostSolicit(t)
+		vm.hostSolicit(testvectormode)
 		return true, nil
 
 	case FORGET:
-		t := vm.hostenv.GetTimeslot()
-		vm.hostForget(t)
+		// t := vm.hostenv.GetTimeslot()
+		vm.hostForget(testvectormode)
 		return true, nil
 
 	// Refine functions
@@ -405,7 +418,7 @@ func check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
 }
 
 // New service
-func (vm *VM) hostNew() uint64 {
+func (vm *VM) hostNew(testvector_mode bool) uint64 {
 	xContext := vm.X
 	xs, _ := xContext.GetX_s()
 
@@ -454,7 +467,13 @@ func (vm *VM) hostNew() uint64 {
 
 		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
 		// a.WriteLookup(common.BytesToHash(c), l, []uint32{common.ComputeCurrenTS()})
-		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
+		if testvector_mode {
+			al_internal_key := common.Compute_preimageLookup_internal(common.BytesToHash(c), uint32(l))
+			account_lookuphash := common.ComputeC_sh(xi, al_internal_key)
+			a.WriteLookup(account_lookuphash, uint32(l), []uint32{})
+		} else {
+			a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
+		}
 
 		// (x's)b <- (xs)b - at
 		// xContext.S = a.ServiceIndex()
@@ -469,6 +488,7 @@ func (vm *VM) hostNew() uint64 {
 		if debug_host {
 			fmt.Println("Balance insufficient")
 		}
+		xs.IncBalance(a.Balance)
 		vm.WriteRegister(7, CASH)
 		return CASH //balance insufficient
 	}
@@ -477,24 +497,24 @@ func (vm *VM) hostNew() uint64 {
 // Upgrade service
 func (vm *VM) hostUpgrade() uint64 {
 	xContext := vm.X
-	xs, s := xContext.GetX_s()
+	xs, _ := xContext.GetX_s()
 	o, _ := vm.ReadRegister(7)
-	gl, _ := vm.ReadRegister(8)
-	gh, _ := vm.ReadRegister(9)
-	ml, _ := vm.ReadRegister(10)
-	mh, _ := vm.ReadRegister(11)
+	g, _ := vm.ReadRegister(8)
+	m, _ := vm.ReadRegister(9)
+
 	c, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode == OOB {
+		vm.WriteRegister(7, OOB)
 		return errCode
 	}
-	g := uint64(gh)<<32 + uint64(gl)
-	m := uint64(mh)<<32 + uint64(ml)
 
 	xs.Dirty = true
 	xs.CodeHash = common.BytesToHash(c)
 	xs.GasLimitG = g
 	xs.GasLimitM = m
-	xContext.D[s] = xs
+	fmt.Printf("Write Register 7: %d\n", OK)
+	vm.WriteRegister(7, OK)
+	// xContext.D[s] = xs // not sure if this is needed
 	return OK
 }
 
@@ -505,14 +525,45 @@ func (vm *VM) hostTransfer() uint64 {
 	g, _ := vm.ReadRegister(9)
 	o, _ := vm.ReadRegister(10)
 
-	// TODO check d -- WHO; check g -- LOW, HIGH
+	xs, _ := vm.X.GetX_s()
+
+	D := Merge_d(vm.X.U.D, vm.X.D)
+
+	receiver, founded := D[uint32(d)]
+	if !founded {
+		vm.WriteRegister(7, WHO)
+		return WHO
+	}
+
 	m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
 	if errCode == OOB {
+		vm.WriteRegister(7, OOB)
 		return OOB
 	}
 	t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.S, ReceiverIndex: uint32(d)} // CHECK
+
+	if g < receiver.GasLimitM {
+		vm.WriteRegister(7, LOW)
+		return LOW
+	}
+
+	if vm.Gas < int64(g) {
+		vm.WriteRegister(7, HIGH)
+		return HIGH
+	}
+
+	xs.DecBalance(a)
+	b := xs.Balance
+
+	if b < xs.ComputeThreshold() {
+		xs.IncBalance(a)
+		vm.WriteRegister(7, CASH)
+		return CASH
+	}
+
 	copy(t.Memo[:], m[:])
 	vm.X.T = append(vm.X.T, t)
+	vm.WriteRegister(7, OK)
 	return OK
 }
 
@@ -523,21 +574,37 @@ func (vm *VM) hostGas() uint32 {
 }
 
 // Quit Service
-func (vm *VM) hostQuit() uint32 {
-	/*	d, _ := vm.ReadRegister(7)
-		o, _ := vm.ReadRegister(8)
-		xs, s := vm.X.GetX_s()
-		a := xs.Balance - xs.StorageSize + types.BaseServiceBalance // TODO: (x_s)_t
-		var transferMemo *TransferMemo
-		if d == vm.X.S || d == maxUint64 {
-			transferMemo = nil
-		} else {
-			o, _ := vm.ReadRegister(1)
-			transferMemo, _ := types.TransferMemoFromBytes(transferMemoBytes)
-			transferBytes, _ := vm.ReadRAMBytes(o, types.TransferMemoSize)
-		}
-		g := vm.ξ
-	*/
+func (vm *VM) hostQuit() uint64 {
+	d, _ := vm.ReadRegister(7)
+	o, _ := vm.ReadRegister(8)
+	xs, s := vm.X.GetX_s()
+	a := xs.Balance - xs.ComputeThreshold() + Bs
+	g := vm.Gas
+	D := Merge_d(vm.X.U.D, vm.X.D)
+	m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
+	if errCode == OOB {
+		vm.WriteRegister(7, OOB)
+		return OOB
+	}
+
+	receiver, founded := D[uint32(d)]
+	if !founded {
+		vm.WriteRegister(7, WHO)
+		return WHO
+	}
+
+	if g < int64(receiver.GasLimitM) {
+		vm.WriteRegister(7, LOW)
+		return LOW
+	}
+
+	if !(uint32(d) == s || d == maxUint64) {
+		t := types.DeferredTransfer{Amount: a, GasLimit: uint64(g), SenderIndex: s, ReceiverIndex: uint32(d)}
+		copy(t.Memo[:], m[:])
+		vm.X.T = append(vm.X.T, t)
+	}
+	delete(vm.X.U.D, uint32(s))
+	vm.WriteRegister(7, OK)
 	return OK
 }
 func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
@@ -731,85 +798,93 @@ func (vm *VM) GetJCETime() uint32 {
 }
 
 // Solicit preimage
-func (vm *VM) hostSolicit(t uint32) uint64 {
-	xs, _ := vm.X.GetX_s()
+func (vm *VM) hostSolicit(testvector_mode bool) uint64 {
+	xs, s := vm.X.GetX_s()
 	// Got l of X_s by setting s = 1, z = z(from RAM)
 	o, _ := vm.ReadRegister(7)
 	z, _ := vm.ReadRegister(8)                          // z: blob_len
 	hBytes, err_h := vm.Ram.ReadRAMBytes(uint32(o), 32) // h: blobHash
 	if err_h == OOB {
-		fmt.Println("Read RAM Error")
 		vm.WriteRegister(7, OOB)
 		return OOB
 	}
 
-	// check balance a_t <= a_b
-	/* TODO: william to figure out proper struct
-	service_data := vm.hostenv.ReadServiceBytes(s) // read service account(X_s) where service index = 1
-	if len(service_data) > 0 {
-		a_b_byte := service_data[len(service_data)-36 : len(service_data)-28]
-		a_l_byte := service_data[len(service_data)-12 : len(service_data)-4]
-		a_i_byte := service_data[len(service_data)-4:]
-		a_b := binary.LittleEndian.Uint64(a_b_byte)
-		a_l := binary.LittleEndian.Uint64(a_l_byte)
-		a_i := binary.LittleEndian.Uint32(a_i_byte)
-		a_t := 10 + uint64(1*a_i) + 100*a_l
-		if a_b < a_t {
-			fmt.Println("a_b < a_t")
-			vm.WriteRegister(0, FULL)
-			return FULL
-		}
+	var account_lookuphash common.Hash
+	if testvector_mode {
+		al_internal_key := common.Compute_preimageLookup_internal(common.BytesToHash(hBytes), uint32(z))
+		account_lookuphash = common.ComputeC_sh(s, al_internal_key)
+	} else {
+		account_lookuphash = common.BytesToHash(hBytes)
 	}
-	*/
-	blobHash := common.Hash(hBytes)
-	ok, X_s_l := xs.ReadLookup(blobHash, uint32(z), vm.hostenv)
+	ok, X_s_l := xs.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
 	if !ok {
+		vm.WriteRegister(7, HUH)
 		return HUH
 	}
 	// TODO: FULL
 	//fmt.Printf("xs.ServiceIndex() = %d, blobHash = %v, z = %d, X_s_l = %v\n", xs.GetServiceIndex(), blobHash, z, X_s_l)
 	if len(X_s_l) == 0 {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
-		xs.WriteLookup(blobHash, uint32(z), []uint32{})
-		vm.WriteRegister(7, OK)
-		return OK
-	} else if X_s_l[0] == 2 { // [x, y]
-		xs.WriteLookup(blobHash, uint32(z), append(X_s_l, []uint32{t}...))
-		vm.WriteRegister(7, OK)
-		return OK
+		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{})
+	} else if len(X_s_l) == 2 { // [x, y]
+		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
 	} else {
 		vm.WriteRegister(7, HUH)
 		return HUH
 	}
+	if xs.Balance < xs.ComputeThreshold() {
+		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l)
+		vm.WriteRegister(7, FULL)
+		return FULL
+	}
+
+	vm.WriteRegister(7, OK)
+	return OK
 }
 
 // Forget preimage
-func (vm *VM) hostForget(t uint32) uint64 {
-	x_s, _ := vm.X.GetX_s()
+func (vm *VM) hostForget(testvector_mode bool) uint64 {
+	x_s, s := vm.X.GetX_s()
 	o, _ := vm.ReadRegister(7)
 	z, _ := vm.ReadRegister(8)
 	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode == OOB {
-		fmt.Println("Read RAM Error")
+		vm.WriteRegister(7, OOB)
 		return OOB
 	}
 
-	blobHash := common.Hash(hBytes)
-	ok, X_s_l := x_s.ReadLookup(blobHash, uint32(z), vm.hostenv)
+	var account_lookuphash common.Hash
+	var account_blobhash common.Hash
+	if testvector_mode {
+		al_internal_key := common.Compute_preimageLookup_internal(common.BytesToHash(hBytes), uint32(z))
+		account_lookuphash = common.ComputeC_sh(s, al_internal_key)
+
+		ap_internal_key := common.Compute_preimageBlob_internal(common.BytesToHash(hBytes))
+		account_blobhash = common.ComputeC_sh(s, ap_internal_key)
+
+	} else {
+		account_lookuphash = common.BytesToHash(hBytes)
+		account_blobhash = common.BytesToHash(hBytes)
+	}
+
+	ok, X_s_l := x_s.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
 	if !ok {
+		vm.WriteRegister(7, HUH)
 		return HUH
 	}
-	if len(X_s_l) == 0 || (len(X_s_l) == 2 && X_s_l[1] < (t-D)) {
-		x_s.WriteLookup(blobHash, uint32(z), []uint32{})
+
+	if len(X_s_l) == 0 || (len(X_s_l) == 2) && X_s_l[1] < (vm.Timeslot-D) {
+		delete(x_s.Lookup, account_lookuphash) // Not sure whether this is correct
+		delete(x_s.Preimage, account_blobhash) // Not sure whether this is correct
 		vm.WriteRegister(7, OK)
 		return OK
 	} else if len(X_s_l) == 1 {
-		x_s.WriteLookup(blobHash, uint32(z), append(X_s_l, []uint32{t}...))
+		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.WriteRegister(7, OK)
 		return OK
-	} else if len(X_s_l) == 3 && X_s_l[1] < (t-D) {
-		X_s_l[2] = uint32(t)
-		x_s.WriteLookup(blobHash, uint32(z), X_s_l)
+	} else if len(X_s_l) == 3 && X_s_l[1] < (vm.Timeslot-D) {
+		X_s_l[2] = uint32(vm.Timeslot)
+		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l)
 		vm.WriteRegister(7, OK)
 		return OK
 	} else {
@@ -821,20 +896,30 @@ func (vm *VM) hostForget(t uint32) uint64 {
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
 func (vm *VM) hostHistoricalLookup(t uint32) uint64 {
 	// take a service s (from \omega_0 ),
+	var a = &types.ServiceAccount{}
+	delta := vm.Delta
 	s := vm.Service_index
+	omega_7, _ := vm.ReadRegister(7)
 	ho, _ := vm.ReadRegister(8)
 	bo, _ := vm.ReadRegister(9)
 	bz, _ := vm.ReadRegister(10)
 
+	if omega_7 == NONE {
+		a = delta[s]
+	} else {
+		a = delta[uint32(omega_7)]
+	}
+
 	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(ho), 32)
 	if errCode == OOB {
-		fmt.Println("Read RAM Error")
-		vm.WriteRegister(0, OOB)
+		if debug_host {
+			fmt.Println("Read RAM Error")
+		}
+		vm.WriteRegister(7, OOB)
 		return errCode
 	}
-	h := common.Hash(hBytes)
-	fmt.Println(h)
-	v := vm.hostenv.HistoricalLookup(s, t, h)
+	// h := common.Hash(hBytes) not sure whether this is needed
+	v := vm.hostenv.HistoricalLookup(a, t, common.BytesToHash(hBytes))
 	vLength := uint64(len(v))
 	if vLength == 0 {
 		vm.WriteRegister(7, NONE)
@@ -848,7 +933,6 @@ func (vm *VM) hostHistoricalLookup(t uint32) uint64 {
 		}
 		vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
 		vm.WriteRegister(7, vLength)
-		fmt.Println(v[:l])
 		return vLength
 	} else {
 		vm.WriteRegister(7, NONE)

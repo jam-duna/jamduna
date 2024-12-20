@@ -95,7 +95,8 @@ func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
 	}
 }
 
-func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Hash) []byte {
+func (mh *MockHostEnv) HistoricalLookup(s *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte {
+	/*
 	db := mh.GetDB()
 	rootHash, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
@@ -148,6 +149,8 @@ func (mh *MockHostEnv) HistoricalLookup(s uint32, t uint32, blob_hash common.Has
 			return nil
 		}
 	}
+	*/
+	return nil
 }
 
 func (mh *MockHostEnv) GetTimeslot() uint32 {

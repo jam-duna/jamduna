@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
+	"math/big"
 	"reflect"
 
 	//	"reflect"
@@ -26,6 +26,7 @@ const (
 	W_S      = types.W_S
 	W_X      = 1024
 	M        = 128
+	Bs       = 100
 	V        = 1023
 	D        = 28800
 	Z_A      = 2
@@ -142,7 +143,7 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 		}
 
 		// Check if the page is writable
-		if page.Access.Inaccessible || !page.Access.Writable {
+		if !page.Access.Writable {
 			if debug_pvm {
 				fmt.Printf("Page %d is not writable, addess is %d\n", currentPage, address)
 			}
@@ -186,7 +187,7 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 			}
 			return nil, OOB
 		}
-		if page.Access.Inaccessible || !page.Access.Readable {
+		if page.Access.Inaccessible {
 			if debug_pvm {
 				fmt.Printf("Page %d is not readable, addess is %d, length is %d\n", currentPage, address, length)
 			}
@@ -489,14 +490,14 @@ var T = map[int]struct{}{
 
 const (
 	NONE = (1 << 64) - 1  // 2^32 - 1
-	OOB  = (1 << 64) - 2  // 2^32 - 2
-	WHO  = (1 << 64) - 3  // 2^32 - 3
-	FULL = (1 << 64) - 4  // 2^32 - 4
-	CORE = (1 << 64) - 5  // 2^32 - 5
-	CASH = (1 << 64) - 6  // 2^32 - 6
-	LOW  = (1 << 64) - 7  // 2^32 - 7
-	HIGH = (1 << 64) - 8  // 2^32 - 8
-	WAT  = (1 << 64) - 9  // 2^32 - 9
+	WHAT = (1 << 64) - 2  // 2^32 - 2
+	OOB  = (1 << 64) - 3  // 2^32 - 3
+	WHO  = (1 << 64) - 4  // 2^32 - 4
+	FULL = (1 << 64) - 5  // 2^32 - 5
+	CORE = (1 << 64) - 6  // 2^32 - 6
+	CASH = (1 << 64) - 7  // 2^32 - 7
+	LOW  = (1 << 64) - 8  // 2^32 - 8
+	HIGH = (1 << 64) - 9  // 2^32 - 9
 	HUH  = (1 << 64) - 10 // 2^32 - 10
 	OK   = 0              // 0
 
@@ -727,6 +728,61 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 
 }
 
+func DecodeProgram_pure_pvm_blob(p []byte) *Program {
+	var pure_code []byte
+	pure_code = p
+
+	var j_size_byte, z_byte, c_size_byte []byte
+	j_size_byte, pure_code = extractBytes(pure_code)
+	z_byte, pure_code = extractBytes(pure_code)
+	c_size_byte, pure_code = extractBytes(pure_code)
+	j_size, _ := types.DecodeE(j_size_byte)
+	z, _ := types.DecodeE(z_byte)
+	c_size, _ := types.DecodeE(c_size_byte)
+	j_byte := pure_code[:j_size*z]
+	c_byte := pure_code[j_size*z : j_size*z+c_size]
+	k_bytes := pure_code[j_size*z+c_size:]
+	var kCombined string
+	for _, b := range k_bytes {
+		binaryStr := fmt.Sprintf("%08b", b)
+		kCombined += reverseString(binaryStr)
+	}
+	if len(kCombined) > int(c_size) {
+		kCombined = kCombined[:int(c_size)]
+	}
+	// process j_array
+	var j_array []uint32
+	for i := uint64(0); i < uint64(len(j_byte)); i += z {
+		end := i + z
+		if end > uint64(len(j_byte)) {
+			end = uint64(len(j_byte))
+		}
+		slice := j_byte[i:end]
+		decodedValue := types.DecodeE_l(slice)
+		j_array = append(j_array, uint32(decodedValue))
+	}
+
+	if debug_pvm {
+		fmt.Printf("JSize=%d\n", j_size)
+		fmt.Printf("Z=%d\n", z)
+		fmt.Printf("CSize=%d\n", c_size)
+		fmt.Println("Jump Table: ", j_array)
+		fmt.Printf("Code: %x\n", c_byte)
+		fmt.Printf("K(bitmask): %v\n", kCombined)
+		fmt.Println("================================================================")
+	}
+	program := &Program{
+		JSize: j_size,
+		Z:     uint8(z),
+		CSize: c_size,
+		J:     j_array,
+		Code:  c_byte,
+		K:     []string{kCombined},
+	}
+	return program
+
+}
+
 func CelingDevide(a, b uint32) uint32 {
 	return (a + b - 1) / b
 }
@@ -826,13 +882,25 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint32, hostENV types.HostEnv) *VM {
+func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint32, hostENV types.HostEnv, jam_ready_blob bool) *VM {
 	if len(code) == 0 {
 		panic("NO CODE\n")
 	}
-	p, o_size, w_size, z, s, o_byte, w_byte := DecodeProgram(code)
-	_ = o_byte
-	_ = w_byte
+	var p *Program
+	var o_size, w_size, z, s uint32
+	var o_byte, w_byte []byte
+
+	if jam_ready_blob {
+		p, o_size, w_size, z, s, o_byte, w_byte = DecodeProgram(code)
+	} else {
+		p = DecodeProgram_pure_pvm_blob(code)
+		o_size = 0
+		w_size = 0
+		z = 0
+		s = 0
+		o_byte = []byte{}
+		w_byte = []byte{}
+	}
 
 	// TODO: William - initialize RAM "a" @ 0xFEFF0000 (2^32 - Z_Q - Z_I) based on entrypoint:
 	//  Refine a = E(s, y, p, c, a, o, x bar ...) Eq 271
@@ -907,7 +975,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 // }
 
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv) *VM {
-	return NewVM(serviceIndex, code, []uint64{}, i, hostENV)
+	return NewVM(serviceIndex, code, []uint64{}, i, hostENV, true)
 }
 
 // func NewVMFromCode_With_EntryPoint(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv, Entrypoint uint32, IsMalicious bool) *VM {
@@ -1014,7 +1082,7 @@ func (vm *VM) Execute(entryPoint int) error {
 			if debug_pvm {
 				fmt.Println("Invocate Host Function: ", vm.host_func_id)
 			}
-			vm.InvokeHostCall(vm.host_func_id)
+			vm.InvokeHostCall(vm.host_func_id, false)
 			vm.hostCall = false
 			vm.terminated = false
 		}
@@ -1548,7 +1616,7 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 {
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
 	switch opcode {
-	case LOAD_U8, LOAD_I8: // TODO: CHECK NEW LOAD_I8
+	case LOAD_U8:
 		value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
 		if errCode != OK {
 			return errCode
@@ -1557,7 +1625,17 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 {
 			fmt.Printf("LOAD_U8: %d %v\n", vx, value)
 		}
 		return vm.WriteRegister(registerIndexA, uint64(value[0]))
-	case LOAD_U16, LOAD_I16: // TODO: CHECK NEW LOAD_I16
+
+	case LOAD_I8:
+		value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
+		if errCode != OK {
+			return errCode
+		}
+		if debug_pvm {
+			fmt.Printf("LOAD_I8: %d %v\n", vx, value)
+		}
+		return vm.WriteRegister(registerIndexA, x_encode(uint64(value[0]), 1))
+	case LOAD_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
 		if errCode != OK {
 			return errCode
@@ -1565,8 +1643,18 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 {
 		if debug_pvm {
 			fmt.Printf("LOAD_U16: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, uint64(types.DecodeE_l(value)))
-	case LOAD_U32, LOAD_I32: // TODO: CHECK NEW LOAD_I32
+		return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
+
+	case LOAD_I16:
+		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
+		if errCode != OK {
+			return errCode
+		}
+		if debug_pvm {
+			fmt.Printf("LOAD_I16: %d %v\n", vx, value)
+		}
+		return vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 2))
+	case LOAD_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
 		if errCode != OK {
 			return errCode
@@ -1574,7 +1662,16 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 {
 		if debug_pvm {
 			fmt.Printf("LOAD_U32: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, uint64(types.DecodeE_l(value)))
+		return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
+	case LOAD_I32:
+		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
+		if errCode != OK {
+			return errCode
+		}
+		if debug_pvm {
+			fmt.Printf("LOAD_I32: %d %v\n", vx, value)
+		}
+		return vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 4))
 	case LOAD_U64: // TODO: NEW, check this
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 8)
 		if errCode != OK {
@@ -1583,7 +1680,7 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 {
 		if debug_pvm {
 			fmt.Printf("LOAD_U64: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, uint64(types.DecodeE_l(value)))
+		return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
 	}
 	return OK
 }
@@ -1846,7 +1943,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_EQ_IMM:
 		if valueA == uint64(vx) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_EQ_IMM: %valueA=%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_EQ_IMM: %d, valueA=%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1856,7 +1953,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_NE_IMM:
 		if valueA != uint64(vx) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_NE_IMM: %valueA!=%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_NE_IMM: %d, valueA!=%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1866,7 +1963,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_LT_U_IMM:
 		if valueA < uint64(vx) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_LT_U_IMM: %valueA<%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_LT_U_IMM: %d, valueA<%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1876,7 +1973,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_LT_S_IMM:
 		if z_encode(valueA, 4) < z_encode(vx, 4) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_LT_S_IMM: %valueA<%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_LT_S_IMM: %d, valueA<%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1886,7 +1983,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_LE_U_IMM:
 		if valueA <= uint64(vx) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_LE_U_IMM: %valueA<=%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_LE_U_IMM: %d, valueA<=%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1896,7 +1993,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_LE_S_IMM:
 		if z_encode(valueA, 4) <= z_encode(vx, 4) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_LE_S_IMM: %valueA<=%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_LE_S_IMM: %d, valueA<=%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1906,7 +2003,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_GE_U_IMM:
 		if valueA >= uint64(vx) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_GE_U_IMM: %valueA>=%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_GE_U_IMM: %d, valueA>=%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1916,7 +2013,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_GE_S_IMM:
 		if z_encode(valueA, 4) >= z_encode(vx, 4) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_GE_S_IMM: %valueA>=%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_GE_S_IMM: %d, valueA>=%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1926,7 +2023,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_GT_U_IMM:
 		if valueA > uint64(vx) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_GT_U_IMM: %valueA>%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_GT_U_IMM: %d, valueA>%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -1936,7 +2033,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	case BRANCH_GT_S_IMM:
 		if z_encode(valueA, 4) > z_encode(vx, 4) {
 			if debug_pvm {
-				fmt.Printf("BRANCH_GT_S_IMM: %valueA>%d, jump to %d\n", valueA, vx, vy)
+				fmt.Printf("BRANCH_GT_S_IMM: %d, valueA>%d, jump to %d\n", valueA, vx, vy)
 			}
 			vm.branch(vy, true)
 		} else {
@@ -2029,7 +2126,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) uint64 {
 		if errCode != OK {
 			return errCode
 		}
-		result := uint64(z_decode(z_encode(uint64(value[0]), 1), 4))
+		result := uint64(z_decode(z_encode(uint64(value[0]), 1), 8))
 		if debug_pvm {
 			fmt.Printf("LOAD_IND_I8: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 		}
@@ -2049,7 +2146,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) uint64 {
 		if errCode != OK {
 			return errCode
 		}
-		result := z_decode(z_encode(types.DecodeE_l(value), 2), 4)
+		result := z_decode(z_encode(types.DecodeE_l(value), 2), 8)
 		if debug_pvm {
 			fmt.Printf("LOAD_IND_I16: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 		}
@@ -2069,7 +2166,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) uint64 {
 		if errCode != OK {
 			return errCode
 		}
-		result := z_decode(z_encode(types.DecodeE_l(value), 4), 4)
+		result := z_decode(z_encode(types.DecodeE_l(value), 4), 8)
 		return vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_U64:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 8)
@@ -2214,13 +2311,13 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 {
 	var result uint64
 	switch opcode {
 	case SHLO_R_IMM_32:
-		result = valueB / (1 << (vx % 32))
+		result = x_encode(valueB%(1<<32)/(1<<(vx%32)), 4)
 	case SHLO_L_IMM_32:
-		result = valueB * (1 << (vx % 32))
+		result = x_encode(valueB*(1<<(vx%32))%(1<<32), 4)
 	case SHAR_R_IMM_32:
-		result = uint64(z_decode(z_encode(valueB, 4)/(1<<(vx%32)), 4)) // CHECK
+		result = z_decode(z_encode(valueB%(1<<32), 4)/(1<<(vx%32)), 8)
 	case NEG_ADD_IMM_32:
-		result = uint64(uint64(vx) + uint64(1<<32) - uint64(valueB))
+		result = x_encode(uint64(vx)+uint64(1<<32)-uint64(valueB)%uint64(1<<32), 4)
 	case SET_GT_U_IMM:
 		if valueB > vx {
 			result = 1
@@ -2228,17 +2325,17 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 {
 			result = 0
 		}
 	case SET_GT_S_IMM:
-		if z_encode(valueB, 4) > z_encode(vx, 4) { // CHECK
+		if z_encode(valueB, 8) > z_encode(vx, 8) {
 			result = 1
 		} else {
 			result = 0
 		}
 	case SHLO_L_IMM_ALT_32:
-		result = uint64(vx * (1 << (valueB % 32)))
+		result = x_encode((vx*(1<<(valueB%32)))%(1<<32), 4)
 	case SHLO_R_IMM_ALT_32:
-		result = uint64(vx / (1 << (valueB % 32)))
+		result = x_encode(vx/(1<<(valueB%32)), 4)
 	case SHAR_R_IMM_ALT_32:
-		result = uint64(z_decode(z_encode(vx, 4)/(1<<(valueB%32)), 4))
+		result = z_decode(z_encode(vx, 4)/(1<<(valueB%32)), 8)
 	default:
 		return OOB
 	}
@@ -2248,27 +2345,55 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 {
 	return vm.WriteRegister(registerIndexA, result)
 }
 
-// GP_.0.3.6(219)
+// GP.0.5.2-A.7
 func z_encode(a uint64, n uint32) int64 {
-	modValue := uint64(1 << (8*n - 1))
-	if a < modValue {
-		return int64(a)
-	} else {
-		return int64(a) - int64(1<<(8*n))
+	modValue := new(big.Int).Lsh(big.NewInt(1), uint(8*n-1))
+	bigA := new(big.Int).SetUint64(a)
+
+	if bigA.Cmp(modValue) < 0 {
+		return bigA.Int64()
 	}
+
+	fullMod := new(big.Int).Lsh(modValue, 1)
+	result := new(big.Int).Sub(bigA, fullMod)
+	return result.Int64()
 }
 
-// GP_.0.3.6(220)
+// GP.0.5.2-A.8
 func z_decode(a int64, n uint32) uint64 {
-	return (uint64(math.Pow(2, float64(8*n))) + uint64(a)) % uint64(math.Pow(2, float64(8*n)))
+	mod := new(big.Int).Lsh(big.NewInt(1), uint(8*n))
+	bigA := big.NewInt(a)
+
+	result := new(big.Int).Add(mod, bigA)
+	result.Mod(result, mod)
+
+	return result.Uint64()
 }
 
 // GP_.0.3.8(224)
 func x_encode(x uint64, n uint32) uint64 {
 	if n == 0 {
-		return x
+		return 0
 	}
-	return x + (uint64(x)/(1<<(8*n-1)))*(uint64(1<<32)-(1<<(8*n)))
+
+	// 1. Calculate 2^(8*n-1)
+	modValue := new(big.Int).Lsh(big.NewInt(1), uint(8*n-1))
+
+	// 2. Calculate 2^64 - 2^(8*n)
+	two64 := new(big.Int).Lsh(big.NewInt(1), 64)
+	two8n := new(big.Int).Lsh(big.NewInt(1), uint(8*n))
+	factor := new(big.Int).Sub(two64, two8n)
+
+	// 3. Calculate x / 2^(8*n-1)
+	bigX := new(big.Int).SetUint64(x)
+	quotient := new(big.Int).Div(bigX, modValue)
+
+	// 4. Calculate x + quotient * factor
+	temp := new(big.Int).Mul(quotient, factor)
+	result := new(big.Int).Add(bigX, temp)
+
+	// 5. Ensure the result can be returned as uint64
+	return result.Uint64()
 }
 
 // Implement branch logic for two registers and one offset
@@ -2386,36 +2511,73 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 {
 		result = uint64((uint(valueA) * uint(valueB)) >> 32)
 	case MUL_UPPER_S_U:
 		result = uint64((int(valueA) * int(valueB)) >> 32)
-	case DIV_U_32, DIV_U_64: // TODO: CHECK
+	case DIV_U_32:
 		if valueB == 0 {
-			result = 0xFFFFFFFF
+			result = ^uint64(0)
+		} else {
+			result = (valueA % (1 << 32)) / (valueB % (1 << 32))
+		}
+	case DIV_U_64:
+		if valueB == 0 {
+			result = ^uint64(0)
 		} else {
 			result = valueA / valueB
 		}
-	case DIV_S_32, DIV_S_64: // TODO: check
+	case DIV_S_32:
+		S_valueA := z_encode(valueA%(1<<32), 4)
+		S_valueB := z_encode(valueB%(1<<32), 4)
 		if valueB == 0 {
-			result = 0xFFFFFFFF
-		} else if int32(valueA) == -(1<<31) && int32(valueB) == -(1<<0) {
-			result = valueA
+			result = ^uint64(0)
+		} else if S_valueA == -(1<<31) && S_valueB == -1 {
+			result = uint64(S_valueA)
 		} else {
-			result = uint64(int32(valueA) / int32(valueB))
+			result = z_decode(S_valueA/S_valueB, 8)
 		}
-	case REM_U_32, REM_U_64: // TODO: check
+
+	case DIV_S_64:
+		if valueB == 0 {
+			result = ^uint64(0)
+		} else if z_encode(valueA, 8) == -(1<<63) && z_encode(valueB, 8) == -1 {
+			result = uint64(valueA)
+		} else {
+			result = z_decode(z_encode(valueA, 8)/z_encode(valueB, 8), 8)
+		}
+
+	case REM_U_32:
+		if valueB%(1<<32) == 0 {
+			result = x_encode(valueA, 4)
+		} else {
+			result = x_encode((valueA%(1<<32))%(valueB%(1<<32)), 4)
+		}
+	case REM_U_64:
 		if valueB == 0 {
 			result = valueA
 		} else {
 			result = valueA % valueB
 		}
-	case REM_S_32, REM_S_64: // TODO: check
+	case REM_S_32:
+		S_valueA := z_encode(valueA%(1<<32), 4)
+		S_valueB := z_encode(valueB%(1<<32), 4)
+		if debug_pvm {
+			fmt.Printf(" REM_S %d %d \n", int32(valueA), int32(valueB))
+		}
+		if S_valueB == 0 {
+			result = z_decode(S_valueA, 8)
+		} else if S_valueA == -(1<<31) && S_valueB == -1 {
+			result = 0
+		} else {
+			result = z_decode(S_valueA%S_valueB, 8)
+		}
+	case REM_S_64:
 		if debug_pvm {
 			fmt.Printf(" REM_S %d %d \n", int32(valueA), int32(valueB))
 		}
 		if valueB == 0 {
 			result = valueA
-		} else if valueA == 0x80 && valueB == 0xFF {
-			return OOB
+		} else if z_encode(valueA, 8) == -(1<<63) && z_encode(valueB, 8) == -1 {
+			result = 0
 		} else {
-			result = uint64(int32(valueA) % int32(valueB))
+			result = z_decode(z_encode(valueA, 8)%z_encode(valueB, 8), 8)
 		}
 	case CMOV_IZ:
 		if valueB == 0 {
@@ -2442,17 +2604,18 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 {
 			result = 0
 		}
 
-	case SHLO_L_32, SHLO_L_64: // TODO: split
-		result = valueA << (valueB % 32)
-	case SHLO_R_32, SHLO_R_64: // TODO: split
-		result = valueA >> (valueB % 32)
-	case SHAR_R_32, SHAR_R_64: // TODO: split
-		if int32(valueA)/(1<<(valueB%32)) < 0 && int32(valueA)%(1<<(valueB%32)) != 0 {
-			result = uint64((int32(valueA) / (1 << (valueB % 32))) - 1)
-		} else {
-			result = uint64(int32(valueA) / (1 << (valueB % 32)))
-		}
-
+	case SHLO_L_32:
+		result = x_encode(valueA*(1<<(valueB%32))%(1<<32), 4)
+	case SHLO_L_64:
+		result = valueA * (1 << (valueB % 64))
+	case SHLO_R_32:
+		result = x_encode((valueA%(1<<32))/(1<<(valueB%32)), 4)
+	case SHLO_R_64:
+		result = valueA / (1 << (valueB % 64))
+	case SHAR_R_32:
+		result = z_decode(z_encode(valueA%(1<<32), 4)/(1<<(valueB%32)), 8)
+	case SHAR_R_64:
+		result = z_decode(z_encode(valueA, 8)/(1<<(valueB%64)), 8)
 	default:
 		return OOB // unknown ALU register
 	}

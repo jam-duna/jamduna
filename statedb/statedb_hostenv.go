@@ -154,47 +154,36 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 }
 
 // HistoricalLookup, GetImportItem, ExportSegment
-func (s *StateDB) HistoricalLookup(service uint32, t uint32, blob_hash common.Hash) []byte {
-	tree := s.GetTrie()
-	rootHash := tree.GetRoot()
-	fmt.Printf("Root Hash=%v\n", rootHash)
-	blob, ok, err_v := tree.GetPreImageBlob(service, blob_hash)
-	if err_v != nil || !ok {
-		return nil
-	}
+func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte {
 
-	blob_length := uint32(len(blob))
+	ap_internal_key := common.Compute_preimageBlob_internal(blob_hash)
+	account_preimagehash := common.ComputeC_sh(a.ServiceIndex, ap_internal_key)
 
-	timeslots, ok, err_t := tree.GetPreImageLookup(service, blob_hash, blob_length)
-	if err_t != nil || !ok {
-		return nil
-	}
+	blob := a.Preimage[account_preimagehash].Preimage
+	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, uint32(len(blob)))
+	account_lookuphash := common.ComputeC_sh(a.ServiceIndex, al_internal_key)
 
-	if timeslots[0] == 0 {
+	timeslots := a.Lookup[account_lookuphash].T
+	if len(timeslots) == 0 {
 		return nil
-	} else if len(timeslots) == (12 + 1) {
-		x := timeslots[0]
-		y := timeslots[1]
-		z := timeslots[2]
-		if (x <= t && t < y) || (z <= t) {
+	} else if len(timeslots) == 1 {
+		if timeslots[0] <= t {
 			return blob
 		} else {
 			return nil
 		}
-	} else if len(timeslots) == (8 + 1) {
-		x := timeslots[0]
-		y := timeslots[1]
-		if x <= t && t < y {
+	} else if len(timeslots) == 2 {
+		if timeslots[0] <= t && t < timeslots[1] {
 			return blob
 		} else {
 			return nil
 		}
 	} else {
-		x := timeslots[0]
-		if x <= t {
+		if timeslots[0] <= t && t < timeslots[1] || timeslots[2] <= t {
 			return blob
 		} else {
 			return nil
 		}
 	}
+
 }
