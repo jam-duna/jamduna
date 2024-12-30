@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +48,7 @@ type StateDB struct {
 
 	logChan chan storage.LogMessage
 
-	AncestorSet []types.BlockHeader // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
+	AncestorSet map[common.Hash]uint32 // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
 }
 
 func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {
@@ -528,6 +529,14 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		}
 		tmpKeyVals = append(tmpKeyVals, keyVal)
 	}
+	sortedKeyVals := sortKeyValsByKey(tmpKeyVals)
+	return sortedKeyVals
+}
+
+func sortKeyValsByKey(tmpKeyVals []KeyVal) []KeyVal {
+	sort.Slice(tmpKeyVals, func(i, j int) bool {
+		return bytes.Compare(tmpKeyVals[i].Key, tmpKeyVals[j].Key) < 0
+	})
 	return tmpKeyVals
 }
 
@@ -1150,9 +1159,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}*/
 
-	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
-	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
-
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "assurances", num_assurances)
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
 
@@ -1189,6 +1195,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	s.AccumulationRoot = common.Hash(tree.Root())
+
+	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
+	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
 
 	// 29 -  Update Authorization Pool alpha'
 	err = s.ApplyStateTransitionAuthorizations()
@@ -1458,19 +1467,22 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 
 func (s *StateDB) GetAncestorTimeSlot() []uint32 {
 	timeslots := make([]uint32, 0)
-	for _, h := range s.AncestorSet {
-		timeslots = append(timeslots, h.Slot)
+	for _, t := range s.AncestorSet {
+		timeslots = append(timeslots, t)
 	}
+	sort.Slice(timeslots, func(i, j int) bool {
+		return timeslots[i] < timeslots[j]
+	})
 	return timeslots
 }
 
 func (s *StateDB) SetAncestor(blockHeader types.BlockHeader, oldState *StateDB) {
-	for _, h := range oldState.AncestorSet {
-		if blockHeader.Slot-h.Slot <= types.LookupAnchorMaxAge && !HeaderContains(s.AncestorSet, h) {
-			s.AncestorSet = append(s.AncestorSet, h)
-		}
+	ancestorSet := oldState.AncestorSet
+	if ancestorSet == nil {
+		ancestorSet = make(map[common.Hash]uint32)
 	}
-	s.AncestorSet = append(s.AncestorSet, blockHeader)
+	ancestorSet[blockHeader.Hash()] = blockHeader.Slot
+	s.AncestorSet = ancestorSet
 }
 
 func HeaderContains(headers []types.BlockHeader, checkHeader types.BlockHeader) bool {

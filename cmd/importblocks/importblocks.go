@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
@@ -249,7 +248,7 @@ func selectImportBlocksError(modes []string, stf *statedb.StateTransition) error
 				PostState: stf.PreState,
 			}
 			// need ancestorSet, accumulationRoot
-			errActual := statedb.CheckStateTransition(stdb, &stfMutated, nil, common.Hash{})
+			errActual := statedb.CheckStateTransition(stdb, &stfMutated, nil)
 			if errActual == err {
 				fmt.Printf("Error %v is expected", err)
 				errorList = append(errorList, err)

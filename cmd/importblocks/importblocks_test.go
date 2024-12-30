@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -107,7 +106,7 @@ func processStateTransitions(basePath string) error {
 		for _, phase := range phases {
 			st := stateTransitions[epoch][phase]
 			// Apply the state transition
-			err := statedb.CheckStateTransition(storage, &st, nil, common.Hash{})
+			err := statedb.CheckStateTransition(storage, &st, nil)
 			if err != nil {
 				return err
 			}

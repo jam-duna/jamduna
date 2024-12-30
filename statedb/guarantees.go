@@ -711,45 +711,23 @@ func (s *StateDB) checkAncestorSetA(g types.Guarantee) error {
 	// A means ancestor set
 	ancestorSet := s.AncestorSet
 	includeTimeSlot := false
-	storeTimeSlot := make([]uint32, 0)
-	for _, header := range ancestorSet {
-		storeTimeSlot = append(storeTimeSlot, header.Slot)
-		if header.Slot == timeslot {
-			includeTimeSlot = true
-			break
-		}
-	}
-
-	if !includeTimeSlot {
-		fmt.Printf("[N%d] timeslot %d not in ancestor set %d\n", s.Id, timeslot, storeTimeSlot)
-		fmt.Printf("Ancestor Set didn't include the current timeslot\n")
-		// TODO: REVIEW Non-standard error
-		return fmt.Errorf("ancestor set didn't include the current timeslot")
-	}
-
-	// Check if the ancestor set includes the anchor
 	includeWorkPackageHash := false
 	currentWorkPackage := refine.LookupAnchor
-	storeWorkPackageHash := make([]common.Hash, 0)
-	if currentWorkPackage != (common.Hash{}) {
-		for _, header := range ancestorSet {
-			headerBytes, err := header.Bytes()
-			if err != nil {
-				fmt.Printf("In checkAncestorSetA header.Bytes error: %v\n", err)
-			}
-			headerHash := common.Hash(common.ComputeHash(headerBytes))
-			storeWorkPackageHash = append(storeWorkPackageHash, headerHash)
-			if headerHash == currentWorkPackage {
-				includeWorkPackageHash = true
-				break
+	getTimeSlot, exists := ancestorSet[currentWorkPackage]
+	if s.AncestorSet != nil {
+		if exists {
+			includeWorkPackageHash = true
+			if getTimeSlot == timeslot {
+				includeTimeSlot = true
 			}
 		}
-
-		if !includeWorkPackageHash {
-			fmt.Printf("work package hash %v not in ancestor set %v\n", currentWorkPackage, storeWorkPackageHash)
-			fmt.Printf("Ancestor Set didn't include the current work package hash\n")
+		if !includeWorkPackageHash && !includeTimeSlot {
 			// TODO: REVIEW non-standard error
-			return fmt.Errorf("ancestor set didn't include the current work package hash")
+			return fmt.Errorf("invalid ancestor set A, which is not in the ancestor set")
+		} else if !includeWorkPackageHash {
+			return fmt.Errorf("invalid ancestor set A, ancestor set A didn't include the work package hash")
+		} else if !includeTimeSlot {
+			return fmt.Errorf("invalid ancestor set A, ancestor set A didn't include the timeslot")
 		}
 	}
 	return nil

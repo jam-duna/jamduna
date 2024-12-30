@@ -1314,7 +1314,7 @@ func (n *Node) runClient() {
 				}
 
 				if debugSTF {
-					err = statedb.CheckStateTransition(n.store, &st, s.AncestorSet, oldstate.AccumulationRoot)
+					err = statedb.CheckStateTransition(n.store, &st, s.AncestorSet)
 					if err != nil {
 						panic(fmt.Sprintf("ERROR validating state transition\n"))
 					} else if debug {

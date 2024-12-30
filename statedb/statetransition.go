@@ -52,7 +52,7 @@ func makemap(p []KeyVal) (map[common.Hash][]byte, map[string]string) {
 	return kvMap, metaMap
 }
 
-func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet []types.BlockHeader, accumulationRoot common.Hash) error {
+func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32) error {
 	// Apply the state transition
 	s0, err := NewStateDBFromSnapshotRaw(storage, &(st.PreState))
 	if err != nil {
@@ -60,7 +60,6 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	}
 
 	s0.AncestorSet = ancestorSet
-	s0.AccumulationRoot = accumulationRoot
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
 	if err != nil {
 		panic(err)

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
@@ -63,7 +62,7 @@ func testFuzz(t *testing.T, modes []string, stfs []*statedb.StateTransition) {
 		//sdb, _ := statedb.NewStateDBFromSnapshotRaw(sdb_storage, &stf.PreState)
 		err := selectImportBlocksError(modes, stf)
 		if err != nil {
-			errActual := statedb.CheckStateTransition(sdb_storage, stf, nil, common.Hash{})
+			errActual := statedb.CheckStateTransition(sdb_storage, stf, nil)
 			if errActual == err {
 				t.Logf("Error %v is expected", err)
 			} else {

@@ -1,12 +1,14 @@
 package trie
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
@@ -553,7 +555,9 @@ func (t *MerkleTree) PrintAllKeyValues() {
 		}
 		keyVals = append(keyVals, keyVal)
 	}
-	fmt.Printf("GetAllKeyValues right after %v\n", keyVals)
+	sortedKeyVals := sortKeyValsByKey(keyVals)
+
+	fmt.Printf("GetAllKeyValues right after %v\n", sortedKeyVals)
 	// for _, kv := range keyVals.KeyVals {
 	// 	fmt.Printf("[Key] %x\n[Value] %x\n", kv[0], kv[1])
 	// }
@@ -1509,4 +1513,11 @@ func compareTrees(node1, node2 *Node) bool {
 // Compute the key length in bits. byte -> 8bits
 func computeKeyLengthAsBit(key []byte) int {
 	return len(key) * 8
+}
+
+func sortKeyValsByKey(tmpKeyVals []KeyVal) []KeyVal {
+	sort.Slice(tmpKeyVals, func(i, j int) bool {
+		return bytes.Compare(tmpKeyVals[i].Key, tmpKeyVals[j].Key) < 0
+	})
+	return tmpKeyVals
 }
