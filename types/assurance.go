@@ -3,10 +3,10 @@ package types
 import (
 	"crypto/ed25519"
 	"encoding/json"
-	"errors"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
 )
 
 /*
@@ -104,14 +104,14 @@ func (a *Assurance) Sign(Ed25519Secret []byte) {
 	copy(a.Signature[:], sig)
 }
 
-func (a *Assurance) Verify(validator Validator) error {
+func (a *Assurance) VerifySignature(validator Validator) error {
 	if len(a.Signature) == 0 {
-		return errors.New("signature is empty")
+		return jamerrors.ErrABadSignature
 	}
 	signtext := a.UnsignedBytesWithSalt()
 	//verify the signature
 	if !Ed25519Verify(Ed25519Key(validator.Ed25519), signtext, a.Signature) {
-		return errors.New("invalid signature")
+		return jamerrors.ErrABadSignature
 	}
 	return nil
 }

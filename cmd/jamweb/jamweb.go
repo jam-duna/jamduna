@@ -108,7 +108,7 @@ func encodeapi(objectType string, inp string) (string, error) {
 		}
 		obj = c1
 	case "C2":
-		var c2 statedb.AuthorizationQueue
+		var c2 types.AuthorizationQueue
 		err = json.Unmarshal(input, &c2)
 		if err != nil {
 			return "", err
@@ -164,7 +164,7 @@ func encodeapi(objectType string, inp string) (string, error) {
 		}
 		obj = c11
 	case "C12":
-		var kaiState statedb.Kai_state
+		var kaiState types.Kai_state
 		err = json.Unmarshal(input, &kaiState)
 		if err != nil {
 			return "", err
@@ -250,7 +250,7 @@ func decodeapi(objectType, input string) (string, error) {
 	case "C1":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.TotalCores][]common.Hash{}))
 	case "C2":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.AuthorizationQueue{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.AuthorizationQueue{}))
 	case "C3":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.RecentBlocks{}))
 	case "C4":
@@ -270,7 +270,7 @@ func decodeapi(objectType, input string) (string, error) {
 	case "C11":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(uint32(0)))
 	case "C12":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Kai_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Kai_state{}))
 	case "C13":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([2][types.TotalValidators]statedb.Pi_state{}))
 	case "JamState":

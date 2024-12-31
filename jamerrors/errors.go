@@ -76,8 +76,22 @@ var (
 	ErrDAgeTooOldInVerdicts              = errors.New("AgeTooOldInVerdicts: Age too old for verdicts judgements.")
 )
 
+func GetErrorStrs(errs []error) []string {
+	errStrs := make([]string, len(errs))
+	for i, err := range errs {
+		errStrs[i] = GetErrorStr(err)
+	}
+	return errStrs
+}
+
 func GetErrorStr(err error) string {
+	if err == nil {
+		return "No Error"
+	}
 	errStr := err.Error()
+	if err == ErrGBadCoreIndex || err == ErrGBadSignature || err == ErrGBadValidatorIndex {
+		return "codec problem"
+	}
 	if !strings.Contains(errStr, ":") {
 		return errStr
 	}

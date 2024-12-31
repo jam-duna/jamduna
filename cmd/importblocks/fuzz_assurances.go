@@ -45,24 +45,30 @@ func fuzzBlockABadValidatorIndex(block *types.Block) error {
 }
 
 // One assurance targets a core without any assigned work report.
-func fuzzBlockABadCore(block *types.Block) error {
-	a := randomAssurance(block)
-	if a == nil {
-		return nil
+func fuzzBlockABadCore(block *types.Block, s *statedb.StateDB, secrets []types.ValidatorSecret) error {
+	jamstate := s.GetJamState()
+	for coreIdx, rhoState := range jamstate.AvailabilityAssignments {
+		if rhoState == nil {
+			a := randomAssurance(block)
+			if a == nil {
+				return nil
+			}
+			a.SetBitFieldBit(uint16(coreIdx), true)
+			a.Sign(secrets[a.ValidatorIndex].Ed25519Secret[:])
+			return jamerrors.ErrABadCore
+		}
 	}
-	for x := 0; x < len(a.Bitfield); x++ {
-		a.Bitfield[x] = 0xff
-	}
-	return jamerrors.ErrABadCore
+	return nil
 }
 
 // One assurance has a bad attestation parent hash.
-func fuzzBlockABadParentHash(block *types.Block) error {
+func fuzzBlockABadParentHash(block *types.Block, secrets []types.ValidatorSecret) error {
 	a := randomAssurance(block)
 	if a == nil {
 		return nil
 	}
 	a.Anchor = a.Hash()
+	a.Sign(secrets[a.ValidatorIndex].Ed25519Secret[:])
 	return jamerrors.ErrABadParentHash
 }
 

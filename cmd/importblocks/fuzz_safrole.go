@@ -1,10 +1,11 @@
 package main
 
 import (
+	"math/rand"
+
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
-	"math/rand"
 )
 
 /*

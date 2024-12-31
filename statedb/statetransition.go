@@ -62,7 +62,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
 	if err != nil {
-		panic(err)
+		return err
 	}
 	if st.PostState.StateRoot == s1.StateRoot {
 		return nil

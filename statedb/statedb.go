@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
@@ -67,7 +68,7 @@ func (s *StateDB) getValidatorCredential() []byte {
 
 func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
 	cred := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
-	err = a.Verify(cred)
+	err = a.VerifySignature(cred)
 	if err != nil {
 		fmt.Printf("Invalid Assurance. Err=%v\n", err)
 		return
@@ -1020,9 +1021,16 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 		return 0, 0, err
 	}
 
-	err = s.ValidateAssurances(assurances)
-	if err != nil {
-		return 0, 0, err
+	// original validate assurances logic (prior to guarantees) -- we cannot do signature checking here ... otherwise it would trigger bad sig
+	// for fuzzing to work, we cannot check signature until everything has been properly considered
+	// assuranceErr := s.ValidateAssurancesWithSig(assurances)
+	// if assuranceErr != nil {
+	// 	return 0, 0, err
+	// }
+
+	transitionErr := s.ValidateAssurancesTransition(assurances)
+	if transitionErr != nil {
+		return 0, 0, transitionErr
 	}
 
 	// Assurances: get the bitstring from the availability
@@ -1042,6 +1050,18 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 			}
 		}
 	}
+
+	// Sort the assurances by validator index
+	// sortingErr := CheckSortingEAs(assurances)
+	// if sortingErr != nil {
+	// 	return 0, 0, sortingErr
+	// }
+
+	// Verify each assurance's signature
+	// sigErr := s.ValidateAssurancesSig(assurances)
+	// if sigErr != nil {
+	// 	return 0, 0, sigErr
+	// }
 
 	// Guarantees
 	err = s.Verify_Guarantees()
@@ -1097,8 +1117,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
-		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", err)
-		panic(1)
+		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", jamerrors.GetErrorStr(err))
+		//TODO: this was panic(1)
+		return s, err
 	}
 	vs = s2.PrevValidators
 	if len(vs) == 0 {

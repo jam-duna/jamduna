@@ -6369,7 +6369,7 @@ func SortAssurances(assurances []types.Assurance) <span class="cov0" title="0">{
 
 // This function is for the validator to check the assurances extrinsic when the block is received
 // Strong Verification
-func (s *StateDB) ValidateAssurances(assurances []types.Assurance) error <span class="cov8" title="1">{
+func (s *StateDB) ValidateAssurancesWithSig(assurances []types.Assurance) error <span class="cov8" title="1">{
         // Sort the assurances by validator index
         err := CheckSortingEAs(assurances)
         if err != nil </span><span class="cov8" title="1">{
@@ -13097,7 +13097,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
                 return 0, 0, err
         }</span>
 
-        <span class="cov0" title="0">err = s.ValidateAssurances(assurances)
+        <span class="cov0" title="0">err = s.ValidateAssurancesWithSig(assurances)
         if err != nil </span><span class="cov0" title="0">{
                 return 0, 0, err
         }</span>

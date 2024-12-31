@@ -36,27 +36,28 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	debugDA       = false // DA
-	debugB        = false // Blocks, Announcment
-	debugG        = false // Guaranteeing
-	debugT        = false // Tickets/Safrole
-	debugP        = false // Preimages
-	debugA        = false // Assurances
-	debugF        = false // Finality
-	debugJ        = false // Audits + Judgements
-	debug         = false // General Node Ops
-	debugAudit    = false // Audit
-	trace         = false
-	debugE        = false // monitoring fn execution time
-	debugTree     = false // trie
-	debugSegments = false // Fetch import segments
-	debugBundle   = false // Fetch WorkPackage Bundle
-	debugAncestor = false // Check Ancestor
-	debugSTF      = true  // State Transition Function
-	numNodes      = 6
-	quicAddr      = "127.0.0.1:%d"
-	basePort      = 9000
-	godMode       = false
+	debugDA           = false // DA
+	debugB            = false // Blocks, Announcment
+	debugG            = false // Guaranteeing
+	debugT            = false // Tickets/Safrole
+	debugP            = false // Preimages
+	debugA            = false // Assurances
+	debugF            = false // Finality
+	debugJ            = false // Audits + Judgements
+	debug             = false // General Node Ops
+	debugAudit        = false // Audit
+	trace             = false
+	debugE            = false // monitoring fn execution time
+	debugTree         = false // trie
+	debugSegments     = false // Fetch import segments
+	debugBundle       = false // Fetch WorkPackage Bundle
+	debugAncestor     = false // Check Ancestor
+	debugSTF          = true  // State Transition Function
+	debugPublishTrace = false // Publish Trace -- such that each node should have full state_transition
+	numNodes          = 6
+	quicAddr          = "127.0.0.1:%d"
+	basePort          = 9000
+	godMode           = false
 )
 
 const (
@@ -799,6 +800,10 @@ func (n *Node) extendChain() error {
 				recoveredStateDB := n.statedb.Copy()
 				recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
 				newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock)
+				if err != nil {
+					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
+					return err
+				}
 
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 				if debugAncestor {
@@ -807,14 +812,26 @@ func (n *Node) extendChain() error {
 					fmt.Printf("[N%d] Ancestor timeSlots1 %d\n", n.id, timeSlots1)
 					fmt.Printf("[N%d] Ancestor timeSlots2 %d\n", n.id, timeSlots2)
 				}
+				if debugPublishTrace {
+					st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
+					err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
+					if err != nil {
+						fmt.Printf("writeDebug StateTransition err: %v\n", err)
+					}
+					err := n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
+					if err != nil {
+						fmt.Printf("writeDebug Block err: %v\n", err)
+					}
+					err = n.writeDebug(newStateDB.JamState.Snapshot(), nextBlock.TimeSlot()) // StateSnapshot
+					if err != nil {
+						fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
+					}
+				}
+
 				//new_xi := newStateDB.GetXContext().GetX_i()
 				if debugTree {
 					fmt.Printf("[N%d] Author newStateDB %v\n", n.id, newStateDB.StateRoot)
 					newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
-				}
-				if err != nil {
-					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
-					return err
 				}
 
 				// Print the elapsed time in milliseconds
@@ -1118,9 +1135,9 @@ func getMessageType(obj interface{}) string {
 	case statedb.JamState:
 		return "JamState"
 	case statedb.StateSnapshot:
-		return "StateSnapshot"
+		return "state_snapshot"
 	case *statedb.StateSnapshot:
-		return "StateSnapshot"
+		return "state_snapshot"
 	case statedb.StateSnapshotRaw:
 		return "Trace"
 	case *statedb.StateSnapshotRaw:
@@ -1295,31 +1312,25 @@ func (n *Node) runClient() {
 					log.Fatalf("Error CompareStateRoot %v\n", err)
 				}
 
-				// store StateSnapshot
-				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot) // StateSnapshot
+				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
+				err = n.writeDebug(st, timeslot) // StateTransition
 				if err != nil {
-					fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
-				}
-				// store StateTransition
-				st := statedb.StateTransition{
-					PreState: statedb.StateSnapshotRaw{
-						KeyVals:   oldstate.GetAllKeyValues(),
-						StateRoot: oldstate.StateRoot,
-					},
-					Block: *newBlock,
-					PostState: statedb.StateSnapshotRaw{
-						KeyVals:   newStateDB.GetAllKeyValues(),
-						StateRoot: newStateDB.StateRoot,
-					},
+					fmt.Printf("writeDebug StateTransition err: %v\n", err)
 				}
 
 				if debugSTF {
-					err = statedb.CheckStateTransition(n.store, &st, s.AncestorSet)
+					err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
 					if err != nil {
 						panic(fmt.Sprintf("ERROR validating state transition\n"))
 					} else if debug {
 						fmt.Printf("Validated state transition\n")
 					}
+				}
+
+				// store StateSnapshot
+				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot) // StateSnapshot
+				if err != nil {
+					fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
 				}
 
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
@@ -1329,10 +1340,6 @@ func (n *Node) runClient() {
 				n.statedbMapMutex.Unlock()
 				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
-				err = n.writeDebug(st, timeslot) // StateTransition
-				if err != nil {
-					fmt.Printf("writeDebug StateTransition err: %v\n", err)
-				}
 
 			}
 
@@ -1341,6 +1348,23 @@ func (n *Node) runClient() {
 			n.WriteLog(log)
 		}
 	}
+}
+
+func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB) *statedb.StateTransition {
+
+	st := statedb.StateTransition{
+		PreState: statedb.StateSnapshotRaw{
+			KeyVals:   oldStateDB.GetAllKeyValues(),
+			StateRoot: oldStateDB.StateRoot,
+		},
+		Block: *newBlock,
+		PostState: statedb.StateSnapshotRaw{
+			KeyVals:   newStateDB.GetAllKeyValues(),
+			StateRoot: newStateDB.StateRoot,
+		},
+	}
+
+	return &st
 }
 
 func generateObject() interface{} {

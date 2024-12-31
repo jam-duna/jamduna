@@ -2,3 +2,6 @@
 /leveldb
 /node/data
 coverage.out
+/.vscode
+/cmd/importblocks/**/*.json
+/cmd/importblocks/**/*.bin

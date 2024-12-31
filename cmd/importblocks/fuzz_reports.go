@@ -221,7 +221,7 @@ func fuzzBlockGDuplicatePackageTwoReports(block *types.Block, s *statedb.StateDB
 	if len(block.Extrinsic.Guarantees) < 2 {
 		return nil
 	}
-	i := rand.Intn(len(block.Extrinsic.Guarantees) - 2)
+	i := rand.Intn(len(block.Extrinsic.Guarantees) - 1)
 	g0 := &block.Extrinsic.Guarantees[i]
 	g1 := &block.Extrinsic.Guarantees[i+1]
 
@@ -274,7 +274,7 @@ func fuzzBlockGOutOfOrderGuarantee(block *types.Block) error {
 	if len(block.Extrinsic.Guarantees) < 2 {
 		return nil
 	}
-	i := rand.Intn(len(block.Extrinsic.Guarantees) - 2)
+	i := rand.Intn(len(block.Extrinsic.Guarantees) - 1)
 	g0 := &block.Extrinsic.Guarantees[i]
 	g1 := &block.Extrinsic.Guarantees[i+1]
 	// swap g0.Report.CoreIndex and g1.Report.CoreIndex
@@ -370,7 +370,7 @@ func fuzzBlockGBadBeefyMMRRoot(block *types.Block, s *statedb.StateDB) error {
 	}
 	beefyRoot := g.Report.RefineContext.BeefyRoot
 	g.Report.RefineContext.BeefyRoot = randomDifferentHash(beefyRoot)
-	// go one step further and use recently fogetted "recentblocks"
+	// go one step further and use recently forgotten "recentblocks"
 	return jamerrors.ErrGBadBeefyMMRRoot
 }
 

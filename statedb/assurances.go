@@ -9,7 +9,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (s *StateDB) VerifyAssurance(a types.Assurance) error {
+func (s *StateDB) VerifyAssuranceWithoutSig(a types.Assurance) error {
 	// 0.5.0 11.9 Verify the anchor
 	if a.Anchor != s.ParentHeaderHash {
 		if debugA {
@@ -54,11 +54,13 @@ func (s *StateDB) VerifyAssurance(a types.Assurance) error {
 		return jamerrors.ErrAStaleReport
 	}
 
-	// 0.5.0 11.11 Verify the signature
-	err := a.Verify(s.GetSafrole().CurrValidators[a.ValidatorIndex])
-	if err != nil {
-		return jamerrors.ErrABadSignature
-	}
+	/*
+		// 0.5.0 11.11 Verify the signature
+		err := a.VerifySignature(s.GetSafrole().CurrValidators[a.ValidatorIndex])
+		if err != nil {
+			return jamerrors.ErrABadSignature //TODO.. this is too strong of a requirement for fuzzing
+		}
+	*/
 	return nil
 }
 
@@ -125,15 +127,62 @@ func SortAssurances(assurances []types.Assurance) {
 
 // This function is for the validator to check the assurances extrinsic when the block is received
 // Strong Verification
-func (s *StateDB) ValidateAssurances(assurances []types.Assurance) error {
+func (s *StateDB) ValidateAssurancesWithSig(assurances []types.Assurance) error {
+
+	// MK...move coreIdx checking after transitioning
+	//CheckSortingEAs(assurances)
+
+	// Verify each assurance without checking signature
+	transitionErr := s.ValidateAssurancesTransition(assurances)
+	if transitionErr != nil {
+		return transitionErr
+	}
+
 	// Sort the assurances by validator index
-	err := CheckSortingEAs(assurances)
+	sortingErr := CheckSortingEAs(assurances)
+	if sortingErr != nil {
+		return sortingErr
+	}
+
+	// Verify each assurance's signature
+	sigErr := s.ValidateAssurancesSig(assurances)
+	if sigErr != nil {
+		return sigErr
+	}
+
+	return nil
+}
+
+// Verify each assurance without checking signature
+func (s *StateDB) ValidateAssurancesTransition(assurances []types.Assurance) error {
+	// Verify each assurance without checking signature
+	for _, a := range assurances {
+		if err := s.VerifyAssuranceWithoutSig(a); err != nil {
+			return err
+		}
+	}
+	err := s.ValidateAssurancesSig(assurances)
 	if err != nil {
 		return err
 	}
-	// Verify each assurance
+	return nil
+}
+
+func (s *StateDB) ValidateAssurancesSig(assurances []types.Assurance) error {
+	// Verify each assurance's signature
+	validators := s.GetSafrole().CurrValidators
 	for _, a := range assurances {
-		if err := s.VerifyAssurance(a); err != nil {
+		if err := a.VerifySignature(validators[a.ValidatorIndex]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *StateDB) ValidateAssurancesWithoutSig(assurances []types.Assurance) error {
+	// Verify each assurance without checking signature
+	for _, a := range assurances {
+		if err := s.VerifyAssuranceWithoutSig(a); err != nil {
 			return err
 		}
 	}

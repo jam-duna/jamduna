@@ -2,6 +2,7 @@ package main
 
 import (
 	//"errors"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
@@ -78,7 +79,7 @@ var ErrorMap = map[string][]error{
 		jamerrors.ErrDAgeTooOldInVerdicts},
 }
 
-func possibleError(selectedError error, block *types.Block, s *statedb.StateDB) error {
+func possibleError(selectedError error, block *types.Block, s *statedb.StateDB, validatorSecrets []types.ValidatorSecret) error {
 	// Dispatch to the appropriate fuzzBlock function based on the selected error
 	switch selectedError {
 
@@ -152,9 +153,9 @@ func possibleError(selectedError error, block *types.Block, s *statedb.StateDB) 
 	case jamerrors.ErrABadValidatorIndex:
 		return fuzzBlockABadValidatorIndex(block)
 	case jamerrors.ErrABadCore:
-		return fuzzBlockABadCore(block)
+		return fuzzBlockABadCore(block, s, validatorSecrets)
 	case jamerrors.ErrABadParentHash:
-		return fuzzBlockABadParentHash(block)
+		return fuzzBlockABadParentHash(block, validatorSecrets)
 	case jamerrors.ErrAStaleReport:
 		return fuzzBlockAStaleReport(block, s)
 
@@ -201,16 +202,13 @@ func possibleError(selectedError error, block *types.Block, s *statedb.StateDB) 
 	}
 }
 
-func selectImportBlocksError(modes []string, stf *statedb.StateTransition) error {
+func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (*statedb.StateTransition, error, []error) {
 	var aggregatedErrors []error
+	var mutatedSTFs []statedb.StateTransition
 	block := stf.Block
-	stdb, err := storage.NewStateDBStorage("/tmp/testImportBlocksError")
+	sdb, err := statedb.NewStateDBFromSnapshotRaw(store, &stf.PreState)
 	if err != nil {
-		return err
-	}
-	sdb, err := statedb.NewStateDBFromSnapshotRaw(stdb, &stf.PreState)
-	if err != nil {
-		return err
+		return nil, err, nil
 	}
 	for _, mode := range modes {
 		if mode == "safrole" && len(block.Extrinsic.Tickets) == 0 {
@@ -232,15 +230,34 @@ func selectImportBlocksError(modes []string, stf *statedb.StateTransition) error
 	}
 
 	if len(aggregatedErrors) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 	errorList := make([]error, 0)
+	numNodes := 6
+	validatorSecrets := make([]types.ValidatorSecret, numNodes)
+	ringSet := make([][]byte, numNodes)
+	for i := uint32(0); i < uint32(numNodes); i++ {
+		seed := make([]byte, 32)
+		for j := 0; j < 8; j++ {
+			binary.LittleEndian.PutUint32(seed[j*4:], i)
+		}
+		ringSet[i] = seed
+	}
+	for i := 0; i < numNodes; i++ {
+		seed_i := ringSet[i]
+		bandersnatch_seed := seed_i
+		ed25519_seed := seed_i
+		bls_seed := seed_i
+		//bandersnatch_seed, ed25519_seed, bls_seed
+		validatorSecret, _ := statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, "node"+fmt.Sprintf("%d", i))
+		validatorSecrets[i] = validatorSecret
+	}
 	for _, selectedError := range aggregatedErrors {
 		blockCopy := block.Copy()
 		statedbCopy := sdb.Copy()
-		err := possibleError(selectedError, blockCopy, statedbCopy)
+		err := possibleError(selectedError, blockCopy, statedbCopy, validatorSecrets)
 		if err == nil {
-
+			continue
 		} else {
 			stfMutated := statedb.StateTransition{
 				PreState:  stf.PreState,
@@ -248,21 +265,30 @@ func selectImportBlocksError(modes []string, stf *statedb.StateTransition) error
 				PostState: stf.PreState,
 			}
 			// need ancestorSet, accumulationRoot
-			errActual := statedb.CheckStateTransition(stdb, &stfMutated, nil)
+			errActual := statedb.CheckStateTransition(store, &stfMutated, nil)
 			if errActual == err {
-				fmt.Printf("Error %v is expected", err)
+				fmt.Printf("Fuzzing yield proper err %v\n", jamerrors.GetErrorStr(err))
 				errorList = append(errorList, err)
+				mutatedSTFs = append(mutatedSTFs, stfMutated)
 			} else {
-				fmt.Printf("Error %v is not expected", jamerrors.GetErrorStr(err))
+				fmt.Printf("Fuzzing yield different err. Actual: %v | Expected:%v\n", jamerrors.GetErrorStr(errActual), jamerrors.GetErrorStr(err))
+				if jamerrors.GetErrorStr(errActual) == "BadSignature" {
+					//fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
+				}
+				if jamerrors.GetErrorStr(errActual) == "BadValidatorIndex" {
+					//	fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
+				}
 			}
 		}
 	}
 	// pick a random error based on our success
 	if len(errorList) > 0 {
 		rand.Seed(time.Now().UnixNano())
-		return errorList[rand.Intn(len(errorList))]
+		errSelectionIdx := rand.Intn(len(errorList))
+		mutatedSTF := &mutatedSTFs[errSelectionIdx]
+		return mutatedSTF, errorList[errSelectionIdx], errorList
 	}
-	return nil
+	return nil, nil, nil
 }
 
 func validateConfig(config types.ConfigJamBlocks) {
