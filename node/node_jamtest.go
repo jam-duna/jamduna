@@ -197,8 +197,16 @@ func safrole(sendtickets bool) {
 	}
 
 	//statedb.RunGraph()
+	ticker := time.NewTicker(1 * time.Second)
+	block_graph_server := types.NewGraphServer()
+	go block_graph_server.StartServer()
 	for {
-		time.Sleep(100 * time.Millisecond) // Adjust the delay as needed
+		select {
+		case <-ticker.C:
+			block_graph_server.Update(nodes[0].block_tree)
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 }
 

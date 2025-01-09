@@ -23,6 +23,11 @@ func (h Hash) String() string {
 	return ethereumCommon.Hash(h).String()
 }
 
+func (h Hash) String_short() string {
+	//
+	return fmt.Sprintf("%s..%s", h.Hex()[2:6], h.Hex()[60:64])
+}
+
 // Hex returns the hexadecimal string representation of the hash.
 func (h Hash) Hex() string {
 	return ethereumCommon.Hash(h).Hex()

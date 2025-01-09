@@ -17,6 +17,8 @@ import (
 
 const (
 	UP0_BlockAnnouncement        uint8 = iota
+	CE101_VoteMessage                  = 101
+	CE102_CommitMessage                = 102
 	CE128_BlockRequest                 = 128
 	CE129_StateRequest                 = 129
 	CE131_TicketDistribution           = 131
@@ -178,6 +180,10 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 	switch msgType {
 	case UP0_BlockAnnouncement:
 		n.onBlockAnnouncement(stream, msg, peerID)
+	case CE101_VoteMessage:
+		n.onVoteMessage(stream, msg)
+	case CE102_CommitMessage:
+		n.onCommitMessage(stream, msg)
 	case CE128_BlockRequest:
 		n.onBlockRequest(stream, msg)
 	case CE129_StateRequest:

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -58,6 +59,7 @@ const (
 	quicAddr          = "127.0.0.1:%d"
 	basePort          = 9000
 	godMode           = false
+	Grandpa           = false
 )
 
 const (
@@ -80,6 +82,8 @@ type Node struct {
 
 	extrinsic_pool *types.ExtrinsicPool
 
+	block_tree *types.BlockTree
+	grandpa    *grandpa.Grandpa
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
@@ -124,6 +128,12 @@ type Node struct {
 	announcementsCh         chan types.Announcement
 	judgementsCh            chan types.Judgement
 	auditingCh              chan *statedb.StateDB // use this to trigger auditing, block hash
+
+	// grandpa input channels
+	grandpaPreVoteMessageCh   chan grandpa.VoteMessage
+	grandpaPreCommitMessageCh chan grandpa.VoteMessage
+	grandpaPrimaryMessageCh   chan grandpa.VoteMessage
+	grandpaCommitMessageCh    chan grandpa.CommitMessage
 
 	waitingAnnouncements      []types.Announcement
 	waitingAnnouncementsMutex sync.Mutex
@@ -326,6 +336,11 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		judgementsCh:            make(chan types.Judgement, 200),
 		auditingCh:              make(chan *statedb.StateDB, 200),
 
+		grandpaPreVoteMessageCh:   make(chan grandpa.VoteMessage, 200),
+		grandpaPreCommitMessageCh: make(chan grandpa.VoteMessage, 200),
+		grandpaPrimaryMessageCh:   make(chan grandpa.VoteMessage, 200),
+		grandpaCommitMessageCh:    make(chan grandpa.CommitMessage, 200),
+
 		sendTickets: true,
 
 		timeslotUsed: make(map[uint32]bool),
@@ -400,7 +415,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	go node.runMain()
 	go node.runPreimages()
 	go node.runBlocksTickets()
-	// go node.runAudit() // disable this to pause FetchWorkPackageBundle
+	go node.runAudit() // disable this to pause FetchWorkPackageBundle
 	return node, nil
 }
 
@@ -716,6 +731,21 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
 			}
 			break
+
+		case reflect.TypeOf(grandpa.VoteMessage{}):
+			vote := obj.(grandpa.VoteMessage)
+			err := p.SendVoteMessage(vote)
+			if err != nil {
+				fmt.Printf("SendVoteMessage ERR %v\n", err)
+			}
+			break
+		case reflect.TypeOf(grandpa.CommitMessage{}):
+			commit := obj.(grandpa.CommitMessage)
+			err := p.SendCommitMessage(commit)
+			if err != nil {
+				fmt.Printf("SendCommitMessage ERR %v\n", err)
+			}
+			break
 		}
 
 	}
@@ -790,10 +820,10 @@ func (n *Node) extendChain() error {
 
 		ok := false
 		for _, b := range n.blocks {
+
 			if b.GetParentHeaderHash() == parentheaderhash {
 				ok = true
 				nextBlock := b
-
 				// Measure time taken to apply state transition
 				start := time.Now()
 				// Apply the block to the tip
@@ -847,11 +877,11 @@ func (n *Node) extendChain() error {
 				//n.finalizeBlocks()
 				parentheaderhash = nextBlock.Header.Hash()
 				n.assureNewBlock(b)
-				if false {
-					n.statedbMapMutex.Lock()
-					n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
-					n.statedbMapMutex.Unlock()
-				}
+
+				n.statedbMapMutex.Lock()
+				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+				n.statedbMapMutex.Unlock()
+
 				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(b, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
 				break
@@ -1264,10 +1294,10 @@ func (n *Node) runClient() {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				panic(0)
 			}
+
 			if newStateDB != nil && debugTree {
 				fmt.Printf("[N%d] Author PrintTree \n", n.id)
 				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
-
 			}
 			if newStateDB != nil {
 				if n.checkGodTimeslotUsed(currJCE) {
@@ -1294,6 +1324,13 @@ func (n *Node) runClient() {
 				n.cacheHeaders(headerHash, newBlock)
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				n.broadcast(*newBlock)
+				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
+
+				} else {
+					block := newBlock.Copy()
+					n.block_tree.AddBlock(block)
+					fmt.Printf("block tree block added, block %v(p:%v)\n", block.Header.Hash().String_short(), block.GetParentHeaderHash().String_short())
+				}
 
 				if debug {
 					for _, g := range newStateDB.GuarantorAssignments {

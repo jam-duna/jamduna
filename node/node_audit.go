@@ -159,8 +159,24 @@ func (n *Node) runAudit() {
 			if err != nil {
 				fmt.Printf("Audit Failed %v\n", err)
 			} else {
-				if debugE {
-					fmt.Printf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
+				// if the block is audited, we can start grandpa
+				fmt.Printf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
+				newBlock := audit_statedb.Block.Copy()
+				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
+					if Grandpa {
+						n.StartGrandpa(newBlock.Copy())
+					} else {
+						genesis_blk := newBlock.Copy()
+						n.block_tree = types.NewBlockTree(&types.BT_Node{
+							Parent:    nil,
+							Block:     genesis_blk,
+							Height:    0,
+							Finalized: true,
+						})
+					}
+				} else {
+					// every time we audited a block, we need to update the block tree
+					n.block_tree.AddBlock(newBlock)
 				}
 			}
 
@@ -205,7 +221,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				if isAudited {
 					// wait for everyone to finish auditing
 					if debugAudit {
-						fmt.Printf("%s [T:%d] Tranche %v audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche-1, auditing_statedb.Block.Hash())
+						fmt.Printf("%s [T:%d] Tranche %v audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche-1, auditing_statedb.Block.Header.Hash())
 					}
 					done = true
 					break
@@ -673,10 +689,7 @@ func (n *Node) TraceOldGuarantee(headerHash common.Hash, workpackage_hash common
 	}
 	parent_hash := auditing_statedb.Block.GetParentHeaderHash()
 	empty := common.Hash{}
-	if !n.statedbMapMutex.TryLock() {
-		fmt.Printf("Failed to acquire lock for statedbMapMutex\n")
-		return types.Guarantee{}, fmt.Errorf("Failed to acquire lock for statedbMapMutex")
-	}
+	n.statedbMapMutex.Lock()
 	defer n.statedbMapMutex.Unlock()
 	// TODO: change to eg time slots limit
 	for i := 0; i < 100; i++ {

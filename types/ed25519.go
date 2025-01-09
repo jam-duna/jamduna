@@ -41,6 +41,10 @@ func (k *Ed25519Key) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (priv Ed25519Priv) PublicKey() Ed25519Key {
+	return Ed25519Key(ed25519.PrivateKey(priv).Public().(ed25519.PublicKey))
+}
+
 func (k Ed25519Key) String() string {
 	return common.Hash(k).Hex()
 }
