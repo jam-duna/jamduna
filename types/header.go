@@ -119,8 +119,7 @@ func (b BlockHeader) Decode(data []byte) (interface{}, uint32) {
 	return b, dataLen
 }
 
-// TODO FOR SEAN: why is ticet mark empty
-// BytesWithoutSig returns the bytes of a block without the signature.
+// BytesWithoutSig returns the clean bytes of a block for sealing
 func (b *BlockHeader) BytesWithoutSig() []byte {
 	// Create an instance of the new struct without the signature fields.
 	bwoSig := BlockHeaderWithoutSig{
@@ -129,10 +128,9 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 		ExtrinsicHash:    b.ExtrinsicHash,
 		TimeSlot:         b.Slot,
 		EpochMark:        b.EpochMark,
-		// TicketsMark:    b.TicketsMark,
-		OffendersMark: b.OffendersMark,
-		AuthorIndex:   b.AuthorIndex,
-		EntropySource: b.EntropySource,
+		OffendersMark:    b.OffendersMark,
+		AuthorIndex:      b.AuthorIndex,
+		EntropySource:    b.EntropySource,
 	}
 
 	ticketMark, ok, _ := b.ConvertTicketsMark()

@@ -134,6 +134,7 @@ func TestFuzz(t *testing.T) {
 }
 
 func TestMKFuzz(t *testing.T) {
+	//testFuzzSafrole(t)
 	testFuzzAssurances(t)
 	//testFuzzSafrole(t)
 	//testFuzzReports(t)

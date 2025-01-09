@@ -175,7 +175,7 @@ impl Verifier {
         let signature = match RingVrfSignature::deserialize_compressed(signature) {
             Ok(sig) => sig,
             Err(e) => {
-                println!("Failed to deserialize signature: {:?}", e);
+                //println!("Failed to deserialize signature: {:?}", e);
                 return Err(());
             }
         };
@@ -656,10 +656,10 @@ pub extern "C" fn ietf_vrf_verify(
     let vrf_input_data_slice = unsafe { slice::from_raw_parts(vrf_input_data_bytes, vrf_input_data_len) };
     let aux_data_slice = unsafe { slice::from_raw_parts(aux_data_bytes, aux_data_len) };
 
-    println!("Prover public slice (hex): {:?}", hex::encode(prover_public_slice));
+    //println!("Prover public slice (hex): {:?}", hex::encode(prover_public_slice));
 
     // Check the length of the public key slice
-    println!("Prover public slice length: {}", prover_public_slice.len());
+    //println!("Prover public slice length: {}", prover_public_slice.len());
 
     let prover_public = match Public::deserialize_compressed(prover_public_slice) {
         Ok(public_key) => public_key,
@@ -685,9 +685,9 @@ pub extern "C" fn ietf_vrf_verify(
             unsafe {
                 std::ptr::copy_nonoverlapping(vrf_output_hash.as_ptr(), vrf_output, 32);
             }
-            1
+            return 1
         }
-        Err(_) => 0,
+        Err(_) => return 0,
     }
 }
 
@@ -716,7 +716,7 @@ fn ietf_vrf_verify_iml(
     };
     let output = signature.output;
 
-    println!("Public key: {:?}", prover_public);
+    //println!("Public key: {:?}", prover_public);
     if prover_public
         .verify(input, output, aux_data, &signature.proof)
         .is_err()
@@ -724,7 +724,7 @@ fn ietf_vrf_verify_iml(
         println!("Ietf signature verification failure");
         return Err(());
     }
-    println!("Ietf signature verified");
+    //println!("Ietf signature verified");
 
     let vrf_output_hash: [u8; 32] = match output.hash()[..32].try_into() {
         Ok(hash) => hash,
@@ -734,7 +734,7 @@ fn ietf_vrf_verify_iml(
         }
     };
 
-    println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
+    //println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
     Ok(vrf_output_hash)
 }
 
@@ -864,10 +864,10 @@ pub extern "C" fn ring_vrf_verify(
             unsafe {
                 std::ptr::copy_nonoverlapping(vrf_output_hash.as_ptr(), vrf_output, 32);
             }
-            1
+            return 1
         }
         Err(e) => {
-            0
+            return 0
         }
     }
 }

@@ -74,13 +74,17 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func (v *Validator) Print() {
+func (v *Validator) String() string {
 	// print JSON
 	jsonBytes, err := json.Marshal(v)
 	if err != nil {
-		fmt.Println(err)
+		return fmt.Sprintf("%v", err)
 	}
-	fmt.Println(string(jsonBytes))
+	return string(jsonBytes)
+}
+
+func (v *Validator) Print() {
+	fmt.Println(v.String())
 }
 
 // UnmarshalJSON custom unmarshal method to handle hex strings for byte arrays

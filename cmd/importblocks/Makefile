@@ -36,3 +36,6 @@ cpmodedata:
 	find /tmp/root/jam/$(TS)/node*/data/StateSnapshots/ -type f -exec cp {} $(MODE)/state_snapshots/ \;
 
 
+fuzz:
+	@echo "Running Fuzzing with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run ^TestMKFuzz

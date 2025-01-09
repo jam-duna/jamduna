@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/pvm"
@@ -1095,6 +1096,13 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.Block = blk
 	s.ParentHeaderHash = blk.Header.ParentHeaderHash
 	s.HeaderHash = blk.Header.Hash()
+
+	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
+	if !isValid || headerErr != nil {
+		// panic("MK validation check!! Block header is not valid")
+		return s, fmt.Errorf("Block header is not valid")
+	}
+
 	if debug {
 		fmt.Printf("[N%d] ApplyStateTransitionFromBlock (%v <== %v) s.StateRoot=%v\n", s.Id, s.ParentHeaderHash, s.HeaderHash, s.StateRoot)
 	}
@@ -1252,6 +1260,100 @@ func (s *StateDB) GetBlock() *types.Block {
 func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
 	// TODO: logic to validate the code hash prediction.
 	return true
+}
+
+func VerifySealAndSignature(block_author_ietf_pub bandersnatch.BanderSnatchKey, blockSeal []byte, entropySource []byte, sealVRFInput []byte, unsignHeader []byte) ([]byte, error) {
+	//fmt.Printf("****VerifySealAndSignature\nIETF_Pub(l=%v)=%v\nblockSeal(l=%v)=%x\nentropySource(l=%v)=%x\nsealVRFInput(l=%v)=%x\nunsignHeader(l=%v)=%x****\n", len(block_author_ietf_pub), block_author_ietf_pub, len(blockSeal), blockSeal, len(entropySource), entropySource, len(sealVRFInput), sealVRFInput, len(unsignHeader), unsignHeader)
+
+	//Step 1: Sealing Verification; blockSeal is the inner_signature from sealVRFInput
+	inner_vrfOutput, blockSealErr := bandersnatch.IetfVrfVerify(block_author_ietf_pub, blockSeal, sealVRFInput, unsignHeader)
+	if blockSealErr != nil {
+		//fmt.Printf("VerifySealAndSignature BlockSeal Err=%v\n", blockSealErr)
+		return nil, fmt.Errorf("BlockSeal ERR=%v", blockSealErr)
+	}
+
+	//Step 2: EntropySource Verification; entropySource is the outer_signature further derived from VRFOutput(blockSeal)
+	entropyVRFInput := computeEntropyVRFInput(common.BytesToHash(inner_vrfOutput))
+	freshRandomness, entropyErr := bandersnatch.IetfVrfVerify(block_author_ietf_pub, entropySource, entropyVRFInput, []byte{})
+	if entropyErr != nil {
+		//fmt.Printf("VerifySealAndSignature entropySource Err=%v\n", entropyErr)
+		return nil, fmt.Errorf("entropySource ERR=%v", entropyErr)
+	}
+	return freshRandomness, nil
+}
+
+func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx uint16, ietf_pub bandersnatch.BanderSnatchKey, verificationErr error) {
+
+	sf := s.GetSafrole()
+	targetJCE := bl.TimeSlot()
+	h := bl.GetHeader()
+	unsignHeader := h.BytesWithoutSig()
+	blockSeal := h.Seal
+	entropySource := h.EntropySource
+	validatorIdx = h.AuthorIndex
+
+	//Step1: Get sealVRFInput & Attempt
+	sf_tmp, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
+	if err != nil {
+		fmt.Printf("Error in generating sf_tmp: %v\n", err)
+	}
+	epochType := sf_tmp.CheckEpochType()
+	sealVRFInput, _, err := sf_tmp.ComputeSealVRFInput(targetJCE, epochType)
+	if err != nil {
+		fmt.Printf("Error in ComputeSealVRFInput: %v\n", err)
+		return false, validatorIdx, ietf_pub, err
+	}
+
+	// author_idx is the K' so we use the sf_tmp
+	signing_validator := sf_tmp.GetCurrValidator(int(validatorIdx))
+	//fmt.Printf("validatorIdx: %v, authority_public=%v\n", validatorIdx, signing_validator.String())
+	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
+	_, verificationErr = VerifySealAndSignature(block_author_ietf_pub, blockSeal[:], entropySource[:], sealVRFInput, unsignHeader)
+	if verificationErr != nil {
+		//fmt.Printf("Testing Entropy[n%d]=%v failed \n", n, entropy)
+		fmt.Printf("Error in VerifySealAndSignature: %v\n", verificationErr)
+		return false, validatorIdx, block_author_ietf_pub, verificationErr
+	}
+	//fmt.Printf("Testing Entropy[n%d]=%v success!! \n", n, entropy)
+	return true, validatorIdx, block_author_ietf_pub, nil
+}
+
+func (s *StateDB) SealBlockWithEntropy(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, validatorIdx uint16, targetJCE uint32, ol *types.Block) (b *types.Block, err error) {
+
+	sf := s.GetSafrole()
+
+	// provide option to potentially mutate the block signer & validator index by changing the targetJCE
+	//targetJCE := bl.TimeSlot()
+	//validatorIdx = h.AuthorIndex
+	b = ol.Copy()
+	h := b.GetHeader()
+	h.ExtrinsicHash = b.Extrinsic.Hash()
+
+	sf_tmp, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
+	if err != nil {
+		fmt.Printf("Error in generating sf_tmp: %v\n", err)
+	}
+	epochType := sf_tmp.CheckEpochType()
+	sealVRFInput, _, err := sf_tmp.ComputeSealVRFInput(targetJCE, epochType)
+	if err != nil {
+		return b, err
+	}
+
+	// Step 0: Compute H_v (entropySource) via Psuedo-Seal
+	entropySource, err := sf_tmp.ComputeHeaderEntropySource(block_author_ietf_pub, block_author_ietf_priv, sealVRFInput)
+	if err != nil {
+		return b, err
+	}
+	// Step 1: Fill in H_v in unsignHeader
+	copy(h.EntropySource[:], entropySource[:])
+	unsignHeader := h.BytesWithoutSig()
+
+	// Step 2: Sign the block seal
+	blockseal, _, err := sf_tmp.SignBlockSeal(block_author_ietf_pub, block_author_ietf_priv, sealVRFInput, unsignHeader)
+	copy(h.Seal[:], blockseal[:])
+	b.Header = h
+
+	return b, nil
 }
 
 // make block generate block prior to state execution
@@ -1423,67 +1525,21 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	h.AuthorIndex = author_index
 	b.Extrinsic = extrinsicData
 
-	unsignHeader := h.BytesWithoutSig() //signing
-
-	auth_secret_key, err := sf.ConvertBanderSnatchSecret(credential.BandersnatchSecret)
+	block_author_ietf_priv, err := ConvertBanderSnatchSecret(credential.BandersnatchSecret)
 	if err != nil {
 		return bl, err
 	}
-	sf_tmp, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{}) // freshness not needed as we are not applying state transition yet
+	block_author_ietf_pub, err := ConvertBanderSnatchPub(credential.BandersnatchPub[:])
 	if err != nil {
-		fmt.Printf("Error applying state transition safrole in MakeBlock: %v\n", err)
+		return bl, err
 	}
-	epochType := sf_tmp.CheckEpochType()
-	if epochType == "fallback" {
-		blockseal, fresh_vrfSig, err := sf_tmp.SignFallBack(auth_secret_key, unsignHeader)
-		if err != nil {
-			return bl, err
-		}
-		copy(h.Seal[:], blockseal[:])
-		copy(h.EntropySource[:], fresh_vrfSig[:])
-		if debugSeal {
-			fmt.Printf("FALLBACK:\n")
-			fmt.Printf("  Seal: %x\n", h.Seal)
-			fmt.Printf("  EntropySource: %x\n", h.EntropySource)
-		}
-	} else {
-		attempt, err := sf_tmp.GetBindedAttempt(targetJCE)
-		blockseal, fresh_vrfSig, err := sf_tmp.SignPrimary(auth_secret_key, unsignHeader, attempt)
-		if err != nil {
-			return bl, err
-		}
-		copy(h.Seal[:], blockseal[:])
-		copy(h.EntropySource[:], fresh_vrfSig[:])
-		if debugSeal {
-			fmt.Printf("SAFROLE - Attempt %d\n", attempt)
-			fmt.Printf("  Seal: %x\n", h.Seal)
-			fmt.Printf("  EntropySource: %x\n", h.EntropySource)
-		}
-	}
-	if debugSeal {
-		// Create an instance of the new struct without the signature fields.
-		bwoSig := types.BlockHeaderWithoutSig{
-			ParentHeaderHash: h.ParentHeaderHash,
-			PriorStateRoot:   h.ParentStateRoot,
-			ExtrinsicHash:    h.ExtrinsicHash,
-			TimeSlot:         h.Slot,
-			EpochMark:        h.EpochMark,
-			// TicketsMark:    b.TicketsMark,
-			OffendersMark: h.OffendersMark,
-			AuthorIndex:   h.AuthorIndex,
-			EntropySource: h.EntropySource,
-		}
 
-		ticketMark, ok, _ := h.ConvertTicketsMark()
-		if ok && ticketMark != nil {
-			bwoSig.TicketsMark = ticketMark
-		}
-		fmt.Printf("Node %d with secret key: %v\n", s.Id, auth_secret_key)
-		fmt.Printf("  Unsigned Header: %s\n", bwoSig.String())
-		fmt.Printf("  Unsigned Header Bytes: %x\n", h.BytesWithoutSig())
-	}
 	b.Header = *h
-	return b, nil
+	sealedBlock, sealErr := s.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, author_index, targetJCE, b)
+	if sealErr != nil {
+		return bl, sealErr
+	}
+	return sealedBlock, nil
 }
 
 func (s *StateDB) GetAncestorTimeSlot() []uint32 {

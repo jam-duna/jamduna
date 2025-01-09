@@ -47,18 +47,7 @@ func sendStateTransition(endpoint string, st *statedb.StateTransition) (err erro
 	return
 }
 
-func generateSeedSet(ringSize uint32) ([][]byte, error) {
-	ringSet := make([][]byte, ringSize)
-	for i := uint32(0); i < ringSize; i++ {
-		seed := make([]byte, 32)
-		for j := 0; j < 8; j++ {
-			binary.LittleEndian.PutUint32(seed[j*4:], i)
-		}
-		ringSet[i] = seed
-	}
-	return ringSet, nil
-}
-
+// Non-conformant metadata generator
 func generateMetadata(idx int) (string, error) {
 	//should be max of 128 bytes
 	var nodeName string
@@ -124,25 +113,14 @@ func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
 }
 
 func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
-	seeds, _ := generateSeedSet(numNodes)
 	peers := make([]string, numNodes)
 	peerList := make(map[uint16]*Peer)
-	validators := make([]types.Validator, numNodes)
 	nodePaths := SetLevelDBPaths(numNodes)
-	for i := 0; i < numNodes; i++ {
 
-		seed_i := seeds[i]
-		bandersnatch_seed := seed_i
-		ed25519_seed := seed_i
-		bls_seed := seed_i
-		metadata, _ := generateMetadata(i)
-
-		validator, err := statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
-		if err == nil {
-			validators[i] = validator
-		} else {
-			return 0, nil, nil, nil, nil, fmt.Errorf("Failed to init validator %d: %v", i, err)
-		}
+	// Setup QuicNetwork using test keys
+	validators, validatorSecrets, err := statedb.GenerateValidatorSecretSet(numNodes)
+	if err != nil {
+		return 0, nil, nil, nil, nil, fmt.Errorf("Failed to setup QuicNetwork")
 	}
 
 	epoch0Timestamp := statedb.NewEpoch0Timestamp()
@@ -163,21 +141,6 @@ func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []typ
 	}
 	//fmt.Printf("PeerList: %s\n", prettyPeerList)
 
-	// Compute validator secrets
-	validatorSecrets := make([]types.ValidatorSecret, numNodes)
-	for i := 0; i < numNodes; i++ {
-		seed_i := seeds[i]
-		bandersnatch_seed := seed_i
-		ed25519_seed := seed_i
-		bls_seed := seed_i
-		metadata, _ := generateMetadata(i)
-		//bandersnatch_seed, ed25519_seed, bls_seed
-		validatorSecret, err := statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
-		if err != nil {
-			return epoch0Timestamp, nil, nil, nil, nil, fmt.Errorf("Failed to Generate secrets %v", err)
-		}
-		validatorSecrets[i] = validatorSecret
-	}
 	return epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, nil
 }
 

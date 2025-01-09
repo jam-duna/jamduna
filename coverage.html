@@ -7997,7 +7997,7 @@ func NewEpoch0Timestamp() uint32 <span class="cov0" title="0">{
 
 func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata string) (types.Validator, error) <span class="cov0" title="0">{
         validator := types.Validator{}
-        banderSnatch_pub, _, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
+        banderSnatch_pub, _, err := bandersnatch.(bandersnatch_seed)
         if err != nil </span><span class="cov0" title="0">{
                 return validator, fmt.Errorf("Failed to init BanderSnatch Key")
         }</span>

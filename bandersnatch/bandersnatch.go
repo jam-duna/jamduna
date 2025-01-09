@@ -17,6 +17,45 @@ import (
 	//"github.com/colorfulnotion/jam/types"
 )
 
+/*
+Appendix G: Bandersnatch IETF Ring VRF (As defined in 3.8.1)
+
+Functionality:
+- GP uses three different expressions to specify the same idea: {auxData, vrfInputData}, {m, c}, {m, x}.
+- These are functionally equivalent:
+  F_[auxData]H⟨vrfInputData⟩ ≡ F_[m]H⟨c⟩ ≡ F_[m]H⟨x⟩
+- VRFSignedOutput(vrfSignature) outputs a 32-byte verifiably random value.
+- auxData:
+  - Does not affect vrfOutput.
+  - Mutates the signature.
+
+Behavior of auxData:
+- Let auxData1 != auxData2:
+  - VRFSig1 = F_[auxData1]H⟨vrfInputData⟩
+  - VRFSig2 = F_[auxData2]H⟨vrfInputData⟩
+- Then:
+  VRFSig1 != VRFSig2
+  VRFSignedOutput(VRFSig1) = VRFSignedOutput(VRFSig2)
+
+G.2: IETF for Block Sealing
+- Formula:
+  F_[m]H_B⟨c⟩ ⊂ Y96
+- Components:
+  - H_B: 32-byte bandersnatch_priv from Validator.
+  - C (Context): Derived from VrfInputData.
+  - M (Message): Derived from AuxData.
+  - O (Output): Y96 Bytes (IETFSignature).
+
+G.3: Ring for Ticket Generation
+- Formula:
+  F_[m]H_R⟨c⟩ ⊂ Y784
+- Components:
+  - H_R: Ringset root specific to the set of validators, derived from KZG_commitment.
+  - C (Context): Derived from VrfInputData.
+  - M (Message): Derived from AuxData.
+  - O (Output): 784 Bytes (RingSignature).
+*/
+
 type BanderSnatchSecret [PubkeyLen]byte
 type BanderSnatchKey [SecretLen]byte
 type BandersnatchVrfSignature [IETFSignatureLen]byte
@@ -43,6 +82,14 @@ func (bs BanderSnatchSecret) String() string {
 func BytesToBanderSnatchSecret(b []byte) (bs BanderSnatchSecret, err error) {
 	if len(b) != SecretLen {
 		return BanderSnatchSecret{}, fmt.Errorf("invalid byte slice length: expected %d bytes, got %d", SecretLen, len(b))
+	}
+	copy(bs[:], b)
+	return bs, nil
+}
+
+func BytesToBanderSnatchKey(b []byte) (bs BanderSnatchKey, err error) {
+	if len(b) != SecretLen {
+		return BanderSnatchKey{}, fmt.Errorf("invalid byte slice length: expected %d bytes, got %d", SecretLen, len(b))
 	}
 	copy(bs[:], b)
 	return bs, nil
@@ -104,7 +151,7 @@ func InitRingSet(ringset []BanderSnatchKey) (ringsetBytes []byte) {
 
 // Anonymous Ring VRF
 // RingVRFSign is Used for tickets submission to sign ticket anonymously. Output and Ring Proof bundled together (as per section 2.2)
-func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxData []byte /*, proverIdx int*/) ([]byte, []byte, error) {
+func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxData []byte) ([]byte, []byte, error) {
 	sig := make([]byte, RingSignatureLen) // 784 bytes
 	vrfOutput := make([]byte, 32)
 
@@ -184,8 +231,6 @@ func IetfVrfSign(privateKey BanderSnatchSecret, vrfInputData, auxData []byte) ([
 		C.size_t(len(vrfInputData)),
 		(*C.uchar)(unsafe.Pointer(&auxDataF[0])),
 		auxDataL,
-		//(*C.uchar)(unsafe.Pointer(&auxData[0])),
-		//C.size_t(len(auxData)),
 		(*C.uchar)(unsafe.Pointer(&sig[0])),
 		C.size_t(len(sig)),
 		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
@@ -199,6 +244,12 @@ func IetfVrfSign(privateKey BanderSnatchSecret, vrfInputData, auxData []byte) ([
 // NOTE: this external func should use PublicKey directly instead of index
 func IetfVrfVerify(pubKey BanderSnatchKey, signature, vrfInputData, auxData []byte) ([]byte, error) {
 	vrfOutput := make([]byte, VRFOutputLen)
+	auxDataL := C.size_t(len(auxData))
+	auxDataF := auxData
+	if len(auxData) == 0 {
+		auxDataF = []byte{1}
+		auxDataL = C.size_t(0)
+	}
 	result := C.ietf_vrf_verify(
 		(*C.uchar)(unsafe.Pointer(&pubKey[0])),
 		C.size_t(len(pubKey)),
@@ -206,11 +257,12 @@ func IetfVrfVerify(pubKey BanderSnatchKey, signature, vrfInputData, auxData []by
 		C.size_t(len(signature)),
 		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
 		C.size_t(len(vrfInputData)),
-		(*C.uchar)(unsafe.Pointer(&auxData[0])),
-		C.size_t(len(auxData)),
+		(*C.uchar)(unsafe.Pointer(&auxDataF[0])),
+		auxDataL,
 		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
 		C.size_t(len(vrfOutput)),
 	)
+	//fmt.Printf("IETF VRF Verify Result=%v | sig=%x, vrfInputData=%x, auxData=%x\n", result, signature, vrfInputData, auxData)
 	if result != 1 {
 		return nil, fmt.Errorf("verification failed")
 	}

@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 
@@ -336,7 +337,7 @@ func (s *SafroleState) ComputeCurrRandomness(fresh_randomness common.Hash) commo
 
 // 6.5.1. Ticket Identifier (Primary Method)
 // ticketSealVRFInput constructs the input for VRF based on target epoch randomness and attempt.
-func (s *SafroleState) ticketSealVRFInput(targetEpochRandomness common.Hash, attempt uint8) []byte {
+func ticketSealVRFInput(targetEpochRandomness common.Hash, attempt uint8) []byte {
 	// Concatenate sassafrasTicketSeal, targetEpochRandomness, and attemptBytes
 	ticket_vrf_input := append(append([]byte(types.X_T), targetEpochRandomness.Bytes()...), []byte{byte(attempt & 0xF)}...)
 	return ticket_vrf_input
@@ -553,7 +554,7 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, u
 }
 
 func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, error) {
-	ticket_vrf_input := s.ticketSealVRFInput(targetEpochRandomness, attempt)
+	ticket_vrf_input := ticketSealVRFInput(targetEpochRandomness, attempt)
 	//RingVrfSign(privateKey, ringsetBytes, vrfInputData, auxData []byte)
 	//During epoch N, each authority scheduled for epoch N+2 constructs a set of tickets which may be eligible (6.5.2) for on-chain submission.
 	auxData := []byte{}
@@ -589,7 +590,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 	if isTicketSubmissionClosed || shifted {
 		entroptIdx = 1
 		targetEpochRandomness = s.Entropy[entroptIdx]
-		ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
+		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 
 		//step 1: verify envelope's VRFSignature using ring verifier
 		//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
@@ -602,7 +603,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 			return common.BytesToHash(ticket_id), nil
 		}
 	} else {
-		ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
+		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 		//step 1: verify envelope's VRFSignature using ring verifier
 		//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
 		ringsetBytes := s.GetRingSet("Next")
@@ -628,7 +629,7 @@ func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int
 	}
 	for i := 1; i < 3; i++ {
 		targetEpochRandomness := s.Entropy[i]
-		ticketVRFInput := s.ticketSealVRFInput(targetEpochRandomness, t.Attempt)
+		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 		//step 1: verify envelope's VRFSignature using ring verifier
 		//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
 		ringsetBytes := s.GetRingSet("Next")
@@ -671,56 +672,85 @@ func (s *SafroleState) computeTicketSlotBinding(inp []types.TicketBody) []*types
 	return tickets
 }
 
-func (s *SafroleState) SignPrimary(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeader []byte, attempt uint8) ([]byte, []byte, error) {
-	sealVRFInput := s.ticketSealVRFInput(s.Entropy[3], attempt)
-
-	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Fallback BlockSeal ERR=%v", err)
-	}
-	// use inner_vrfOutput to to generate fresh randomness
-	entropyVRFInput := computeEntropyVRFInput(common.BytesToHash(inner_vrfOutput))
-	fresh_VRFSignature, freshRandomness, err := bandersnatch.IetfVrfSign(authority_secret_key, entropyVRFInput, []byte{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
-	}
-	if debug {
-		fmt.Printf("SignPrimary unsignHeader(len=%v)=%x, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", len(unsignHeader), unsignHeader, blockSeal, fresh_VRFSignature, freshRandomness)
-	}
-	return blockSeal, fresh_VRFSignature, nil
-}
-
-func (s *SafroleState) ConvertBanderSnatchSecret(authority_secret_key []byte) (bandersnatch.BanderSnatchSecret, error) {
+func ConvertBanderSnatchSecret(block_author_ietf_priv []byte) (bandersnatch.BanderSnatchSecret, error) {
 	//TODO: figure out a plan to standardize between bandersnatch package and types
-	return bandersnatch.BytesToBanderSnatchSecret(authority_secret_key)
+	return bandersnatch.BytesToBanderSnatchSecret(block_author_ietf_priv)
 }
 
-// 6.8.1 Primary Method for legit ticket - is it bare VRF here???
-func (s *SafroleState) SignFallBack(authority_secret_key bandersnatch.BanderSnatchSecret, unsignHeader []byte) ([]byte, []byte, error) {
-	sealVRFInput := fallbackSealVRFInput(s.Entropy[3]) // the context
-	blockSeal, inner_vrfOutput, err := s.SignBlockSeal(authority_secret_key, sealVRFInput, unsignHeader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Fallback BlockSeal ERR=%v", err)
-	}
-	// use inner_vrfOutput to to generate fresh randomness
-	entropyVRFInput := computeEntropyVRFInput(common.BytesToHash(inner_vrfOutput))
-	fresh_VRFSignature, freshRandomness, err := bandersnatch.IetfVrfSign(authority_secret_key, entropyVRFInput, []byte{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
-	}
-	if debug {
-		fmt.Printf("SignFallBack unsignHeader(len=%v)=%x, blockSeal=%x, fresh_VRFSignature=%x, freshRandomness=%x\n", len(unsignHeader), unsignHeader, blockSeal, fresh_VRFSignature, freshRandomness)
-	}
-	return blockSeal, fresh_VRFSignature, nil
+func ConvertBanderSnatchPub(block_author_ietf_pub []byte) (bandersnatch.BanderSnatchKey, error) {
+	//TODO: figure out a plan to standardize between bandersnatch package and types
+	return bandersnatch.BytesToBanderSnatchKey(block_author_ietf_pub)
 }
 
-func (s *SafroleState) SignBlockSeal(authority_secret_key bandersnatch.BanderSnatchSecret, sealVRFInput []byte, unsignHeader []byte) ([]byte, []byte, error) {
+// (6.17) H_v=F[]Ha⟨X_E++Y(H_s)⟩
+func (s *SafroleState) ComputeHeaderEntropySource(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, sealVRFInput []byte) (entropySource []byte, err error) {
+
+	//step 1: Get psuedo VRfSealOutput from Psuedo block seal;
+	m := []byte{}
+	_, psuedoVRfSealOutput, err := s.SignBlockSeal(block_author_ietf_pub, block_author_ietf_priv, sealVRFInput, m)
+	if err != nil {
+		return nil, fmt.Errorf("Fallback BlockSeal ERR=%v", err)
+	}
+	//step 2: get entropySource by sealVRF output
+	entropySource, _, err = SignBlockVRF(block_author_ietf_pub, block_author_ietf_priv, psuedoVRfSealOutput)
+	if err != nil {
+		return nil, err
+	}
+	return entropySource, nil
+}
+
+func (s *SafroleState) SignBlockSeal(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, sealVRFInput []byte, unsignHeader []byte) ([]byte, []byte, error) {
 	//IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte)
-	ietfSig, inner_vrfOutput, err := bandersnatch.IetfVrfSign(authority_secret_key, sealVRFInput, unsignHeader)
+	block_seal, inner_vrfOutput, err := bandersnatch.IetfVrfSign(block_author_ietf_priv, sealVRFInput, unsignHeader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("IetfVrfSign ERR=%v", err)
 	}
-	return ietfSig, inner_vrfOutput, err
+
+	inner_vrfOutput_recovered, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, block_seal, sealVRFInput, unsignHeader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("IetfVrfSign ERR=%v", err)
+	}
+	if bytes.Compare(inner_vrfOutput_recovered, inner_vrfOutput) != 0 {
+		return nil, nil, fmt.Errorf("Seal IetfVrfSign Mismatch Expected:%v | Actual: %x", inner_vrfOutput_recovered, inner_vrfOutput)
+	}
+	return block_seal, inner_vrfOutput, err
+}
+
+func SignBlockVRF(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, inner_vrfOutput []byte) ([]byte, []byte, error) {
+	//IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte)
+
+	// use inner_vrfOutput to to generate fresh randomness
+	entropyVRFInput := computeEntropyVRFInput(common.BytesToHash(inner_vrfOutput))
+	fresh_VRFSignature, fresh_Randomness, err := bandersnatch.IetfVrfSign(block_author_ietf_priv, entropyVRFInput, []byte{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
+	}
+
+	fresh_Randomness_recovered, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, fresh_VRFSignature, entropyVRFInput, []byte{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("IetfVrfSign ERR=%v", err)
+	}
+	if bytes.Compare(fresh_Randomness, fresh_Randomness_recovered) != 0 {
+		return nil, nil, fmt.Errorf("VRF IetfVrfSign Mismatch Expected:%v | Actual: %x", fresh_Randomness_recovered, fresh_Randomness)
+	}
+	return fresh_VRFSignature, fresh_Randomness, err
+}
+
+func (s *SafroleState) ComputeSealVRFInput(targetJCE uint32, epochType string) ([]byte, uint8, error) {
+	blockSealEntropy := s.Entropy[3]
+	if epochType == "primary" {
+		attempt, err := s.GetBindedAttempt(targetJCE)
+		if err != nil {
+			return nil, 0, err
+		}
+		safroleSealVRFInput := ticketSealVRFInput(blockSealEntropy, attempt)
+		return safroleSealVRFInput, attempt, nil
+	} else if epochType == "fallback" {
+		fallBackSealVRFOutput := fallbackSealVRFInput(blockSealEntropy)
+		return fallBackSealVRFOutput, 0, nil
+	} else {
+		return nil, 0, fmt.Errorf("Invalid epochType")
+	}
 }
 
 // 6.8.2. Secondary Method

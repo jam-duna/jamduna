@@ -2,7 +2,9 @@ package node
 
 import (
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -24,7 +26,7 @@ func (n *Node) GetSelfTicketsIDs() ([]common.Hash, error) {
 // this function is now won't broadcast the tickets to the network
 func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBucket, error) {
 	sf := n.statedb.GetSafrole()
-	auth_secret, _ := sf.ConvertBanderSnatchSecret(n.GetBandersnatchSecret())
+	auth_secret, _ := statedb.ConvertBanderSnatchSecret(n.GetBandersnatchSecret())
 	tickets := sf.GenerateTickets(auth_secret, usedEntropy)
 	n.ticketsMutex.Lock()
 	if n.selfTickets[usedEntropy] == nil {

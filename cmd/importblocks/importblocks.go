@@ -2,7 +2,7 @@ package main
 
 import (
 	//"errors"
-	"encoding/binary"
+
 	"flag"
 	"fmt"
 	"log"
@@ -233,49 +233,90 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 		return nil, nil, nil
 	}
 	errorList := make([]error, 0)
-	numNodes := 6
-	validatorSecrets := make([]types.ValidatorSecret, numNodes)
-	ringSet := make([][]byte, numNodes)
-	for i := uint32(0); i < uint32(numNodes); i++ {
-		seed := make([]byte, 32)
-		for j := 0; j < 8; j++ {
-			binary.LittleEndian.PutUint32(seed[j*4:], i)
-		}
-		ringSet[i] = seed
+
+	expectedNumNodes := 6
+	validators, validatorSecrets, err := statedb.GenerateValidatorSecretSet(expectedNumNodes)
+
+	//TODO: extract out validatorSet from stf.PreState and make sure sure validatorSecrets and validators are equal in size, opposed to hardcode numNodes
+	if len(validatorSecrets) != expectedNumNodes || len(validators) != expectedNumNodes {
+		fmt.Printf("Invalid V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
+		return nil, nil, nil
 	}
-	for i := 0; i < numNodes; i++ {
-		seed_i := ringSet[i]
-		bandersnatch_seed := seed_i
-		ed25519_seed := seed_i
-		bls_seed := seed_i
-		//bandersnatch_seed, ed25519_seed, bls_seed
-		validatorSecret, _ := statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, "node"+fmt.Sprintf("%d", i))
-		validatorSecrets[i] = validatorSecret
+
+	fmt.Printf("V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
+
+	// TODO: make sure original block passes seal test: which requires author guessing, entropy, attempt for passing
+	oStatedbCopy := sdb.Copy()
+	oBlockCopy := block.Copy()
+	oValid, oValidatorIdx, oValidatorPub, err := oStatedbCopy.VerifyBlockHeader(oBlockCopy)
+	if !oValid || err != nil || oBlockCopy.Header.AuthorIndex != oValidatorIdx {
+		panic(fmt.Sprintf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex))
+		return nil, nil, nil
 	}
+	fmt.Printf("Original block passed seal test. Author: %v (Idx:%v) ExtrinsicHash=%v, Seal=%x, EntropySource=%x\n", oValidatorPub, oValidatorIdx, oBlockCopy.Header.ExtrinsicHash, oBlockCopy.Header.Seal, oBlockCopy.GetHeader().EntropySource)
+
 	for _, selectedError := range aggregatedErrors {
 		blockCopy := block.Copy()
 		statedbCopy := sdb.Copy()
-		err := possibleError(selectedError, blockCopy, statedbCopy, validatorSecrets)
-		if err == nil {
+		stfErrExpected := possibleError(selectedError, blockCopy, statedbCopy, validatorSecrets)
+		if stfErrExpected == nil {
 			continue
 		} else {
+
+			// TODO: Step 0: Sealing each individual object????
+
+			// Step 1: re-seal here. Need to retrieve ValidatorSecret from validatorIdx
+			credential := validatorSecrets[blockCopy.Header.AuthorIndex]
+			block_author_ietf_priv, err := statedb.ConvertBanderSnatchSecret(credential.BandersnatchSecret)
+			if err != nil {
+				continue
+			}
+			block_author_ietf_pub, err := statedb.ConvertBanderSnatchPub(credential.BandersnatchPub[:])
+			if err != nil {
+				continue
+			}
+			fmt.Printf("Resealing Slot %v with: %v (Idx:%v) | priv: %v\n", blockCopy.TimeSlot(), block_author_ietf_pub, blockCopy.Header.AuthorIndex, block_author_ietf_priv)
+			mSealedBlk, sealErr := statedbCopy.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, blockCopy.Header.AuthorIndex, blockCopy.TimeSlot(), blockCopy)
+			if sealErr != nil {
+				fmt.Printf("Fuzzing failed to seal block!!!\n")
+				continue
+			}
+
+			// Step 2: make sure it passes re-seal test again..
+			mValid, mValidatorIdx, mValidatorPub, err := statedbCopy.VerifyBlockHeader(mSealedBlk)
+			if !mValid || err != nil {
+				panic(fmt.Sprintf("mutated block failed seal entropy test failed: %v | %v\n", mValid, err))
+				continue
+			} else {
+				fmt.Printf("Mutated block passed seal test. Author: %v (Idx:%v) ExtrinsicHash=%v, Seal=%x, EntropySource=%x\n", mValidatorPub, mValidatorIdx, mSealedBlk.GetHeader().ExtrinsicHash, mSealedBlk.GetHeader().Seal, mSealedBlk.GetHeader().EntropySource)
+				//fmt.Printf("MutatedBlock=%v\n", mSealedBlk.String())
+
+			}
+
+			if mValidatorIdx != oValidatorIdx && mSealedBlk.TimeSlot() == oBlockCopy.TimeSlot() {
+				fmt.Printf("Validator changed unexpectedly!!! Original=%x (Idx:%v) | Mutated=%x (Idx:%v)\n", oValidatorPub, oValidatorIdx, mValidatorPub, mValidatorIdx)
+				//continue
+			}
+
+			// TODO: Step 3: Constructing mutated state transition
 			stfMutated := statedb.StateTransition{
 				PreState:  stf.PreState,
-				Block:     *blockCopy,
+				Block:     *mSealedBlk,
 				PostState: stf.PreState,
 			}
-			// need ancestorSet, accumulationRoot
-			errActual := statedb.CheckStateTransition(store, &stfMutated, nil)
-			if errActual == err {
-				fmt.Printf("Fuzzing yield proper err %v\n", jamerrors.GetErrorStr(err))
-				errorList = append(errorList, err)
+
+			// TODO: need ancestorSet, accumulationRoot
+			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil)
+			if stfErrActual == stfErrExpected {
+				fmt.Printf("Fuzzing yield proper err %v\n", jamerrors.GetErrorStr(stfErrExpected))
+				errorList = append(errorList, stfErrExpected)
 				mutatedSTFs = append(mutatedSTFs, stfMutated)
 			} else {
-				fmt.Printf("Fuzzing yield different err. Actual: %v | Expected:%v\n", jamerrors.GetErrorStr(errActual), jamerrors.GetErrorStr(err))
-				if jamerrors.GetErrorStr(errActual) == "BadSignature" {
+				fmt.Printf("Fuzzing yield different err. Actual: %v | Expected:%v\n", jamerrors.GetErrorStr(stfErrActual), jamerrors.GetErrorStr(stfErrExpected))
+				if jamerrors.GetErrorStr(stfErrActual) == "BadSignature" {
 					//fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
 				}
-				if jamerrors.GetErrorStr(errActual) == "BadValidatorIndex" {
+				if jamerrors.GetErrorStr(stfErrActual) == "BadValidatorIndex" {
 					//	fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
 				}
 			}

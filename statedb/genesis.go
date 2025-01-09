@@ -30,11 +30,12 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	for i := uint32(0); i < uint32(chainSpec.NumValidators); i++ {
 		seed := make([]byte, 32)
 
+		bandersnatch_seed, ed25519_seed, bls_seed := seed, seed, seed
 		for j := 0; j < 8; j++ {
 			binary.LittleEndian.PutUint32(seed[j*4:], i)
 		}
 
-		v, err0 := InitValidatorSecret(seed, seed, seed, "")
+		v, err0 := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, "")
 		if err0 != nil {
 			return outfn, err0
 		}
@@ -271,4 +272,48 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metad
 
 	copy(validatorSecret.Metadata[:], []byte(metadata))
 	return validatorSecret, nil
+}
+
+func generateSeedSet(ringSize int) ([][]byte, error) {
+	ringSet := make([][]byte, ringSize)
+	for i := uint32(0); i < uint32(ringSize); i++ {
+		seed := make([]byte, 32)
+		for j := 0; j < 8; j++ {
+			binary.LittleEndian.PutUint32(seed[j*4:], i)
+		}
+		ringSet[i] = seed
+	}
+	return ringSet, nil
+}
+
+func GenerateValidatorSecretSet(numNodes int) ([]types.Validator, []types.ValidatorSecret, error) {
+
+	seeds, _ := generateSeedSet(numNodes)
+	validators := make([]types.Validator, numNodes)
+	validatorSecrets := make([]types.ValidatorSecret, numNodes)
+
+	for i := 0; i < int(numNodes); i++ {
+
+		seed_i := seeds[i]
+		bandersnatch_seed := seed_i
+		ed25519_seed := seed_i
+		bls_seed := seed_i
+		metadata := ""
+		//metadata, _ := generateMetadata(i) // this is NOT used by other teams. somehow we agreed on empty metadata for now
+
+		validator, err := InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
+		if err != nil {
+			return validators, validatorSecrets, fmt.Errorf("Failed to init validator %v", i)
+		}
+		validators[i] = validator
+
+		//bandersnatch_seed, ed25519_seed, bls_seed
+		validatorSecret, err := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
+		if err != nil {
+			return validators, validatorSecrets, fmt.Errorf("Failed to init validator secret=%v", i)
+		}
+		validatorSecrets[i] = validatorSecret
+	}
+
+	return validators, validatorSecrets, nil
 }
