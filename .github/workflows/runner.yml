@@ -8,8 +8,7 @@ env:
 on:
   push:
     branches:
-      - main
-      - main_tapas
+      - dev
     paths:
       - .github/workflows/runner.yml
       - bls/*.go
@@ -21,6 +20,8 @@ on:
       - node/*.go
   schedule:
     - cron: '*/30 * * * *'
+      branches: 
+        - dev
 
 jobs:
   test:
@@ -29,6 +30,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with: { ref: dev }
 
 #      - name: Setup Go
 #        uses: actions/setup-go@v4
