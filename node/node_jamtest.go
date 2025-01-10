@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"testing"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
@@ -186,17 +187,47 @@ func SetUpNodes(numNodes int) ([]*Node, error) {
 	return nodes, nil
 }
 
+// Monitor the Timeslot & Epoch Progression & Kill as Necessary
+func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, error) {
+	fmt.Printf("*** TimeSlot Watcher on N%v ***\n", n.id)
+	initialTimeSlot := uint32(0)
+	startTime := time.Now()
+
+	// Terminate it at epoch N
+	statusTicker := time.NewTicker(3 * time.Second)
+	defer statusTicker.Stop()
+
+	for done := false; !done; {
+		<-statusTicker.C
+		currTimeSlot := n.statedb.GetSafrole().Timeslot
+		if initialTimeSlot == 0 && currTimeSlot > 0 {
+			currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
+			initialTimeSlot = uint32(currEpoch) * types.EpochLength
+			fmt.Printf("[WATCH START] H_t=%v e'=%v,m'=%v | Terminated after %v slots (MaxAllowed:%v Sec)\n", initialTimeSlot, currEpoch, 0, offsetTimeSlot, maxTimeAllowed)
+
+		}
+		currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
+		if currTimeSlot-initialTimeSlot >= offsetTimeSlot {
+			fmt.Printf("[WATCH DONE] H_t=%v e'=%v,m'=%v | Elapsed: %v Sec\n", currTimeSlot, currEpoch, currPhase, int(time.Since(startTime).Seconds()))
+			done = true
+			continue
+		}
+		if time.Since(startTime).Seconds() >= float64(maxTimeAllowed) {
+			s := fmt.Sprintf("[TIMEOUT] H_t=%v e'=%v,m'=%v | missing %v Slot!", currTimeSlot, currEpoch, currPhase, currTimeSlot-initialTimeSlot)
+			return false, fmt.Errorf(s)
+		}
+	}
+	return true, nil
+}
+
 func safrole(sendtickets bool) {
 	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
 		panic(err)
 	}
-
 	for _, n := range nodes {
 		n.SetSendTickets(sendtickets)
 	}
-
-	//statedb.RunGraph()
 	ticker := time.NewTicker(1 * time.Second)
 	block_graph_server := types.NewGraphServer()
 	go block_graph_server.StartServer()
@@ -233,19 +264,12 @@ func getServices(serviceNames []string) (services map[string]*types.TestService,
 }
 
 func ImportBlocks(config *types.ConfigJamBlocks) {
-	switch config.Mode {
-	case "fallback":
-		safrole(false)
-	case "safrole":
-		safrole(true)
-	case "assurances":
-		jamtest("fib")
-	case "orderedaccumulation":
-		jamtest("megatron")
-	}
+	// MK: DO NOT COMBINE importblock with jamtest or safrole generation!!!
+	// assurances - jamtest("fib")
+	// orderedaccumulation - jamtest("megatron")
 }
 
-func jamtest(jam string) {
+func jamtest(t *testing.T, jam string, targetedEpochLen int) {
 	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
 		panic("Error setting up nodes: %v\n")

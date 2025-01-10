@@ -54,7 +54,7 @@ const (
 	debugBundle       = false // Fetch WorkPackage Bundle
 	debugAncestor     = false // Check Ancestor
 	debugSTF          = true  // State Transition Function
-	debugPublishTrace = false // Publish Trace -- such that each node should have full state_transition
+	debugPublishTrace = true  // Publish Trace -- such that each node should have full state_transition
 	numNodes          = 6
 	quicAddr          = "127.0.0.1:%d"
 	basePort          = 9000

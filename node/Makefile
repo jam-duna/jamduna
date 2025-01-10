@@ -1,5 +1,5 @@
 # Set variables for testing
-TIMEOUT := 5m
+TIMEOUT := 10m
 
 fallback:
 	@echo "Running TestFallback with timeout $(TIMEOUT)..."

@@ -160,7 +160,9 @@ func (n *Node) runAudit() {
 				fmt.Printf("Audit Failed %v\n", err)
 			} else {
 				// if the block is audited, we can start grandpa
-				fmt.Printf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
+				if debugAudit {
+					fmt.Printf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
+				}
 				newBlock := audit_statedb.Block.Copy()
 				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
 					if Grandpa {

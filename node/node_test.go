@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"os"
 	"testing"
 	"time"
@@ -17,20 +18,69 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+func safroleTest(t *testing.T, caseType string, targetedEpochLen int, bufferTime int) {
+	nodes, err := SetUpNodes(numNodes)
+	if err != nil {
+		panic(err)
+	}
+
+	var sendtickets bool
+	if caseType == "safrole" {
+		sendtickets = true
+	} else {
+		sendtickets = false
+	}
+
+	for _, n := range nodes {
+		n.SetSendTickets(sendtickets)
+	}
+
+	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
+	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
+
+	watchNode := nodes[len(nodes)-1]
+
+	done := make(chan bool)
+	errChan := make(chan error)
+
+	go RunGrandpaGraphServer(watchNode)
+
+	go func() {
+		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
+		if err != nil {
+			errChan <- err
+		} else if ok {
+			done <- true
+		}
+	}()
+
+	select {
+	case <-done:
+		log.Printf("[%v] Completed successfully", caseType)
+	case err := <-errChan:
+		t.Fatalf("[%v] Failed: %v", caseType, err)
+	}
+}
+
+const SafroleTestEpochLen = 4 // Safrole
+const FallbackEpochLen = 2    // Fallback
+const FibTestEpochLen = 1     // Assurance
+const MegaTronEpochLen = 5    // Orderaccumalation
+
 func TestFallback(t *testing.T) {
-	safrole(false)
+	safroleTest(t, "fallback", FallbackEpochLen, 0)
 }
 
 func TestSafrole(t *testing.T) {
-	safrole(true)
+	safroleTest(t, "safrole", SafroleTestEpochLen, 0)
 }
 
 func TestFib(t *testing.T) {
-	jamtest("fib")
+	jamtest(t, "fib", FibTestEpochLen)
 }
 
 func TestMegatron(t *testing.T) {
-	jamtest("megatron")
+	jamtest(t, "megatron", MegaTronEpochLen)
 }
 
 func TestDisputes(t *testing.T) {
@@ -169,4 +219,20 @@ func TestDisputes(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Second)
+}
+
+func RunGrandpaGraphServer(watchNode *Node) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	block_graph_server := types.NewGraphServer()
+	go block_graph_server.StartServer()
+	for {
+		select {
+		case <-ticker.C:
+			block_graph_server.Update(watchNode.block_tree)
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 }
