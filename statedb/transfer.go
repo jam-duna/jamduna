@@ -18,7 +18,7 @@ func (s *StateDB) OnTransfer() error {
 			fmt.Printf("OnTransfers %d\n", core.WorkReport.CoreIndex)
 			vm := pvm.NewVMFromCode(uint32(core.WorkReport.CoreIndex), code, 0, s)
 			argument_input, _ := types.Encode(s.X.T)
-			vm.ExecuteTransfer(argument_input, s.X.D[s.X.S])
+			vm.ExecuteTransfer(argument_input, s.X.U.D[s.X.S])
 		}
 	}
 	return nil

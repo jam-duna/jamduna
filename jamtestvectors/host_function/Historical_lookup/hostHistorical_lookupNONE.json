@@ -52,31 +52,15 @@
       }
     }
   },
-  "initial-refine-map": {
-    "0": {
-      "P": [
-        0,
-        1,
-        2,
-        3,
-        4
-      ],
-      "U": {
-        "pages": null
-      },
-      "I": 0
-    }
-  },
-  "initial-export-segment": [
-    []
-  ],
+  "initial-refine-map": null,
+  "initial-export-segment": null,
   "initial-import-segment": null,
   "initial-export-segment-index": 0,
   "initial-service-index": 0,
   "initial-delta": {
     "0": {
       "s_map": {
-        "0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": [
+        "0x81e47a19e6b29b0a65b9591762ce5143ed30d0261e5d24a3201752506b20f15c": [
           0,
           0,
           0,
@@ -84,12 +68,13 @@
         ]
       },
       "l_map": {
-        "0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": [
-          100000
-        ]
+        "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337": {
+          "t": [],
+          "l": 12
+        }
       },
       "p_map": {
-        "0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": [
+        "0x3ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371eca76dc72785cc5ad": [
           15,
           15,
           14,
@@ -105,9 +90,9 @@
         ]
       },
       "code_hash": "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
-      "balance": 100,
-      "min_item_gas": 100,
-      "min_memo_gas": 100
+      "balance": 1000,
+      "g": 100,
+      "m": 200
     }
   },
   "initial-timeslot": 1000,
@@ -163,20 +148,6 @@
       }
     }
   },
-  "expected-refine-map": {
-    "0": {
-      "P": [
-        0,
-        1,
-        2,
-        3,
-        4
-      ],
-      "U": {
-        "pages": null
-      },
-      "I": 0
-    }
-  },
+  "expected-refine-map": null,
   "expected-export-segment": null
 }

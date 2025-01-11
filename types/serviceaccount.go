@@ -289,8 +289,8 @@ func (s *ServiceAccount) String() string {
 
 func (s *ServiceAccount) ReadStorage(rawK []byte, sdb HostEnv) (ok bool, v []byte) {
 	serviceIndex := s.ServiceIndex
-	hk := common.Compute_storageKey_internal(serviceIndex, rawK)
-	storageObj, ok := s.Storage[hk]
+	hk := common.Compute_storageKey_internal_byte(serviceIndex, rawK)
+	storageObj, ok := s.Storage[common.BytesToHash(hk)]
 	if storageObj.Deleted {
 		return false, nil
 	}
@@ -300,7 +300,7 @@ func (s *ServiceAccount) ReadStorage(rawK []byte, sdb HostEnv) (ok bool, v []byt
 		if err != nil || !ok {
 			return false, nil
 		}
-		s.Storage[hk] = StorageObject{
+		s.Storage[common.BytesToHash(hk)] = StorageObject{
 			Dirty:  false,
 			Value:  v,
 			RawKey: rawK,
@@ -413,15 +413,20 @@ func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 	s.NumStorageItems = numStorageItems
 }
 
+func (s *ServiceAccount) WriteForget(serviceIndex uint32, rawK []byte, val []byte) {
+	// mark a_p as deleted
+	// mark a_l as deleted -- note that we need this to differentiate the empty marker case from the hostSolicit
+}
+
 func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK []byte, val []byte) {
 	if s.Mutable == false {
 		panic("Called WriteStorage on immutable ServiceAccount")
 	}
 	// k for original raw key, hk for hash key
 	// serviceIndex := s.ServiceIndex
-	hk := common.Compute_storageKey_internal(serviceIndex, rawK)
+	hk := common.Compute_storageKey_internal_byte(serviceIndex, rawK)
 	s.Dirty = true
-	s.Storage[hk] = StorageObject{
+	s.Storage[common.BytesToHash(hk)] = StorageObject{
 		Dirty:   true,
 		Deleted: len(val) == 0,
 		Value:   val,
@@ -448,18 +453,52 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 	s.Dirty = true
 	s.Lookup[blobHash] = LookupObject{
 		Dirty:   true,
-		Deleted: false, // WAS len(time_slots) == 0,
+		Deleted: time_slots == nil,
 		Z:       z,
 		T:       time_slots,
 	}
 
 }
 
-// eq 95
+// eq 9.8
 func (s *ServiceAccount) ComputeThreshold() uint64 {
 	//BS +BI ⋅ai +BL ⋅al
-	account_threshold := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
+	account_threshold := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.ComputeNumStorageItems()) + MinElectiveServiceOctetBalance*s.ComputeStorageSize()
 	return account_threshold
+}
+
+// eq 9.8
+func (s *ServiceAccount) ComputeNumStorageItems() uint32 {
+	var l, i uint32
+	if s.Lookup == nil {
+		l = 0
+	} else {
+		l = uint32(len(s.Lookup))
+	}
+	if s.Storage == nil {
+		i = 0
+	} else {
+		i = uint32(len(s.Storage))
+	}
+	s.NumStorageItems = 2*l + i
+	return s.NumStorageItems
+}
+
+// eq 9.8
+func (s *ServiceAccount) ComputeStorageSize() uint64 {
+
+	if s.Storage != nil {
+		for _, LookupValue := range s.Lookup {
+			s.StorageSize += 81 + uint64(LookupValue.Z)
+		}
+
+	}
+	if s.Lookup != nil {
+		for _, StorageValue := range s.Storage {
+			s.StorageSize += 32 + uint64(len(StorageValue.Value))
+		}
+	}
+	return s.StorageSize
 }
 
 func (s *ServiceAccount) MarshalJSON() ([]byte, error) {

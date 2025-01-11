@@ -388,11 +388,10 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 	decoded := uint32(types.DecodeE_l(hash[:4]))
 
 	x := &types.XContext{
-		D: make(map[uint32]*types.ServiceAccount, 0), // this is NOT mutated but holds the state that could get mutatted
+		// D: make(map[uint32]*types.ServiceAccount, 0), // this is NOT mutated but holds the state that could get mutatted
 		S: s,
 		I: sdb.Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
-	x.D[s] = serviceAccount // this the immutable service account and cannot have Set{...}
 
 	js := sdb.JamState
 	if u != nil {
@@ -405,6 +404,7 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 			PrivilegedState:    js.PrivilegedServiceIndices,
 		}
 	}
+	x.U.D[s] = serviceAccount // this the immutable service account and cannot have Set{...}
 	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
 	mutableServiceAccount := serviceAccount.Clone()
 	mutableServiceAccount.ALLOW_MUTABLE()
@@ -480,6 +480,11 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if r.Err == types.RESULT_OK {
 		output_b = common.Blake2Hash(r.Ok)
 	}
+	for service, service_account := range vm.X.U.D {
+		o.D[service] = service_account
+	}
+	output_t = xContext.T
+	output_u = uint64(gas)
 	return
 }
 
@@ -502,15 +507,20 @@ func (s *StateDB) HostTransfer(delta_dager map[uint32]*types.ServiceAccount, tim
 	}
 
 	// select transfers eq 12.23
+	var self *types.ServiceAccount
 	selectedTransfers := TransferSelect(t, self_index)
 	if len(selectedTransfers) == 0 {
 		return delta_dager[self_index], nil
+	} else {
+		self = delta_dager[self_index]
+		for _, transfer := range selectedTransfers {
+			self.Balance += transfer.Amount
+		}
 	}
 
-	self := delta_dager[self_index]
 	code, ok, err := s.ReadServicePreimageBlob(self_index, self.CodeHash)
 	if err != nil || !ok {
-		return sa, fmt.Errorf("No blob")
+		return self, nil
 	}
 	vm := pvm.NewVMFromCode(self_index, code, 0, s)
 

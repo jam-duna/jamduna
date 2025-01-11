@@ -171,6 +171,8 @@ const (
 const (
 	BootstrapServiceCode = 0
 	BootstrapServiceFile = "/services/bootstrap.pvm"
+	BankServcieIndex     = 1
+	BankServiceFile      = "/services/bank.pvm"
 )
 
 func (s *StateDB) GetHeaderHash() common.Hash {
@@ -1211,6 +1213,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if len(t) > 0 {
 		s.ProcessDeferredTransfers(o.D, tau, t)
 	}
+	// make sure all service accounts can be written
+	for _, sa := range o.D {
+		sa.Mutable = true
+		sa.Dirty = true
+	}
 
 	s.ApplyXContext(o)
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
@@ -1242,13 +1249,13 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
 	}
 
-	err = s.OnTransfer()
-	if err != nil {
-		return s, err
-	}
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
-	}
+	// err = s.OnTransfer()
+	// if err != nil {
+	// 	return s, err
+	// }
+	// if debug {
+	// 	fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
+	// }
 	s.StateRoot = s.UpdateTrieState()
 	return s, nil
 }

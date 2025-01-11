@@ -5,3 +5,4 @@ coverage.out
 /.vscode
 /cmd/importblocks/**/*.json
 /cmd/importblocks/**/*.bin
+pvm/*.out

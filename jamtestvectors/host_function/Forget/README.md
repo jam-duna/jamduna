@@ -1,180 +1,25 @@
-## Forget
+# Host Forget
 
-### Error cases
-#### `ForgetOK`
-- **Description:** Successfully executed and modify the lookup of xs.
-- **Action:** Write the value `OK` into `omega_7`.
+## hostForgetOK_3_timeslots 
+1. Read the preimage blob hash from memory.  
+2. Successfully updated new timeslots into **a**'s lookup.  
 
-#### `ForgetOOB`
-- **Description:** Access permissions error.
-- **Action:** Write `OOB` into `omega_7`.
+## hostForgetOK_2_timeslots  
+1. Read the preimage blob hash from memory.  
+2. Successfully deleted **a**'s lookup and according preimage blob. 
 
-#### `ForgetHUH`
-- **Description:** Lookup cannot be found or does not meet the conditions.
-- **Action:** Write `HUH` into `omega_7`.
+## hostForgetOK_1_timeslots  
+1. Read the preimage blob hash from memory.  
+2. Successfully inserted a new timeslot into **a**'s lookup.  
 
----
+## hostForgetOK_0_timeslots  
+1. Read the preimage blob hash from memory.  
+2. Successfully deleted **a**'s lookup and according preimage blob. 
 
-### Key Parameters
-#### Note
-**Storage, Preimage, Lookup keys in the structure are serialized keys.**
+## hostForgetOOB  
+1. Failed to read the preimage blob hash from memory.  
 
-#### Timeslot
-Initial timeslot  is as follows, will vary depending on the case
-```json
-"initial-timeslot": 100,
-```
+## hostForgetHUH  
+1. Read the preimage blob hash from memory.  
+2. Unable to obtain the service account' s lookup.
 
-#### XContent
-- There are two main x contents: **initial xcontent x** and **expected xcontent x**. The **expected xcontent x** will only change upon successful execution; otherwise, it will remain the same as **initial xcontent x**.
-
-- Within **initial xcontent x.U.D**, there is a **service account**, and the service indices is **0**.
-
-##### initial-xcontent-x
-  ```json
-  "initial-xcontent-x": {
-    "D": {},
-    "I": 1,
-    "S": 0,
-    "U": {
-      "D": {
-        "0": {
-          "s_map": {
-            "0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": [
-              0,
-              0,
-              0,
-              0
-            ]
-          },
-          "l_map": {
-            "0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": [
-              1
-            ]
-          },
-          "p_map": {
-            "0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": [
-              15,
-              15,
-              14,
-              14,
-              13,
-              13,
-              12,
-              12,
-              11,
-              11,
-              10,
-              10
-            ]
-          },
-          "code_hash": "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
-          "balance": 1000,
-          "min_item_gas": 100,
-          "min_memo_gas": 200
-        }
-      },
-      "I": [],
-      "Q": [
-        [
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000"
-        ],
-        [
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000"
-        ]
-      ],
-      "X": {
-        "chi_m": 0,
-        "chi_a": 0,
-        "chi_v": 0,
-        "chi_g": {}
-      }
-    },
-    "T": []
-  },
-  ```
-
-##### expected-xcontent-x
-
-  ```json
-"expected-xcontent-x": {
-    "D": {},
-    "I": 1,
-    "S": 0,
-    "U": {
-      "D": {
-        "0": {
-          "s_map": {
-            "0x008100e4007a0019e6b29b0a65b9591762ce5143ed30d0261e5d24a320175250": [
-              0,
-              0,
-              0,
-              0
-            ]
-          },
-          "l_map": {
-            "0x000c0000000000003ee347e16fb6594af50ce1cc49996bb7a5e39c7d60d5371e": [
-              1,
-              100
-            ]
-          },
-          "p_map": {
-            "0x00fe00ff00ff00ffe802c135a8c671aa22d990fbb26116d9844a458d89d05aa0": [
-              15,
-              15,
-              14,
-              14,
-              13,
-              13,
-              12,
-              12,
-              11,
-              11,
-              10,
-              10
-            ]
-          },
-          "code_hash": "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
-          "balance": 1000,
-          "min_item_gas": 100,
-          "min_memo_gas": 200
-        }
-      },
-      "I": [],
-      "Q": [
-        [
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000"
-        ],
-        [
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          "0x0000000000000000000000000000000000000000000000000000000000000000"
-        ]
-      ],
-      "X": {
-        "chi_m": 0,
-        "chi_a": 0,
-        "chi_v": 0,
-        "chi_g": {}
-      }
-    },
-    "T": []
-  ```

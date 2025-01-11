@@ -1,13 +1,11 @@
 package pvm
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
-
-	//	"reflect"
+	"strconv"
 
 	"strings"
 
@@ -16,24 +14,24 @@ import (
 )
 
 const (
-	debug_pvm      = false
-	debug_host     = false
-	ram_permission = true
+	debug_pvm  = false
+	debug_host = false
 
 	regSize  = 13
 	numCores = types.TotalCores
 	W_E      = types.W_E
 	W_S      = types.W_S
-	W_X      = 1024
-	M        = 128
-	Bs       = 100
-	V        = 1023
-	D        = 28800
-	Z_A      = 2
-	Z_P      = (1 << 12)
-	Z_Q      = (1 << 16)
-	Z_I      = (1 << 24)
-	Z_Z      = (1 << 16)
+
+	W_X = 1024
+	M   = 128
+	Bs  = 100
+	V   = 1023
+	D   = 28800
+	Z_A = 2
+	Z_P = (1 << 12)
+	Z_Q = (1 << 16)
+	Z_I = (1 << 24)
+	Z_Z = (1 << 16)
 )
 
 const (
@@ -147,7 +145,7 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 			if debug_pvm {
 				fmt.Printf("Page %d is not writable, addess is %d\n", currentPage, address)
 			}
-			return OOB
+			return uint64(address)
 		}
 
 		// Ensure data allocation before writing
@@ -191,7 +189,7 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 			if debug_pvm {
 				fmt.Printf("Page %d is not readable, addess is %d, length is %d\n", currentPage, address, length)
 			}
-			return nil, OOB
+			return nil, uint64(address)
 		}
 
 		// Calculate how much data can be read from the current page
@@ -200,8 +198,25 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 			bytesToRead = remaining
 		}
 
-		// Append data to the result
-		result = append(result, page.Value[pageOffset:pageOffset+bytesToRead]...)
+		// Check against the actual slice length to avoid out-of-range errors
+		pageSize := uint32(len(page.Value))
+		endPos := pageOffset + bytesToRead
+
+		if endPos <= pageSize {
+			// Entire slice is within valid range
+			result = append(result, page.Value[pageOffset:endPos]...)
+		} else {
+			// Part or all of the required range goes out of bounds
+			if pageOffset >= pageSize {
+				// Completely out of range: fill everything with zero
+				result = append(result, make([]byte, bytesToRead)...)
+			} else {
+				// Part of the data is valid, the rest should be zero
+				validLen := pageSize - pageOffset
+				result = append(result, page.Value[pageOffset:pageOffset+validLen]...)
+				result = append(result, make([]byte, bytesToRead-validLen)...)
+			}
+		}
 
 		// Update the address and remaining bytes
 		address += bytesToRead
@@ -221,23 +236,23 @@ func (ram *RAM) DebugStatus() {
 }
 
 type VM struct {
-	JSize        uint64
-	Z            uint8
-	J            []uint32
-	code         []byte
-	bitmask      string // K in GP
-	pc           uint32 // Program counter
-	resultCode   uint8
-	terminated   bool
-	hostCall     bool // ̵h in GP
-	host_func_id int  // h in GP
+	JSize          uint64
+	Z              uint8
+	J              []uint32
+	code           []byte
+	bitmask        string // K in GP
+	pc             uint64 // Program counter
+	ResultCode     uint8
+	HostResultCode uint64
+	Fault_address  uint32
+	terminated     bool
+	hostCall       bool // ̵h in GP
+	host_func_id   int  // h in GP
 	// ram                 map[uint32][4096]byte
-	Ram                 *RAM
-	register            []uint64
-	Gas                 int64
-	hostenv             types.HostEnv
-	writable_ram_start  uint32
-	writable_ram_length uint32
+	Ram      *RAM
+	register []uint64
+	Gas      int64
+	hostenv  types.HostEnv
 
 	VMs map[uint32]*VM
 
@@ -261,7 +276,7 @@ type VM struct {
 	w_byte []byte
 
 	// Refine argument
-	RefineM_map        RefineM_map
+	RefineM_map        map[uint32]*RefineM
 	Exports            [][]byte
 	ExportSegmentIndex uint32
 
@@ -327,19 +342,19 @@ const (
 
 // A.5.6. Instructions with Arguments of One Register & Two Immediates.
 const (
-	JUMP_IND  = 50 // 0x32
-	LOAD_IMM  = 51 // 0x33 NOTE: 64-bit twin = load_imm_64
+	JUMP_IND  = 50
+	LOAD_IMM  = 51
 	LOAD_U8   = 52
-	LOAD_I8   = 53 // NEW
+	LOAD_I8   = 53
 	LOAD_U16  = 54
-	LOAD_I16  = 55 // NEW
+	LOAD_I16  = 55
 	LOAD_U32  = 56
-	LOAD_I32  = 57 // NEW
+	LOAD_I32  = 57
 	LOAD_U64  = 58
 	STORE_U8  = 59
 	STORE_U16 = 60
 	STORE_U32 = 61
-	STORE_U64 = 62 // NEW, 32-bit twin = store_u32
+	STORE_U64 = 62
 )
 
 // A.5.7. Instructions with Arguments of One Register & Two Immediates.
@@ -367,100 +382,129 @@ const (
 
 // A.5.9. Instructions with Arguments of Two Registers.
 const (
-	MOVE_REG = 100 // 0x64
-	SBRK     = 101
+	MOVE_REG              = 100
+	SBRK                  = 101
+	COUNT_SET_BITS_64     = 102
+	COUNT_SET_BITS_32     = 103
+	LEADING_ZERO_BITS_64  = 104
+	LEADING_ZERO_BITS_32  = 105
+	TRAILING_ZERO_BITS_64 = 106
+	TRAILING_ZERO_BITS_32 = 107
+	SIGN_EXTEND_8         = 108
+	SIGN_EXTEND_16        = 109
+	ZERO_EXTEND_16        = 110
+	REVERSE_BYTES         = 111
 )
 
 // A.5.9. Instructions with Arguments of Two Registers & One Immediate.
 const (
-	STORE_IND_U8      = 110 // 0x6e
-	STORE_IND_U16     = 111 // 0x6f
-	STORE_IND_U32     = 112 // 0x70
-	STORE_IND_U64     = 113 // 0x71 NEW, 32-bit twin = store_ind_u32
-	LOAD_IND_U8       = 114
-	LOAD_IND_I8       = 115
-	LOAD_IND_U16      = 116
-	LOAD_IND_I16      = 117 // 0x75
-	LOAD_IND_U32      = 118 // 0x76
-	LOAD_IND_I32      = 119 // 0x77 NEW, no twin.
-	LOAD_IND_U64      = 120 // 0x78 NEW, 32-bit twin = load_ind_u32
-	ADD_IMM_32        = 121 // 0x79
-	AND_IMM           = 122
-	XOR_IMM           = 123
-	OR_IMM            = 124
-	MUL_IMM_32        = 125
-	MUL_IMM           = 125
-	SET_LT_U_IMM      = 126
-	SET_LT_S_IMM      = 127
-	SHLO_L_IMM_32     = 128
-	SHLO_R_IMM_32     = 129
-	SHAR_R_IMM_32     = 130
-	NEG_ADD_IMM_32    = 131
-	SET_GT_U_IMM      = 132
-	SET_GT_S_IMM      = 133
-	SHLO_L_IMM_ALT_32 = 134
-	SHLO_R_IMM_ALT_32 = 135
-	SHAR_R_IMM_ALT_32 = 136
-	CMOV_IZ_IMM       = 137
-	CMOV_NZ_IMM       = 138
-	ADD_IMM_64        = 139 // 0x8b NEW, 32-bit twin = add_imm_32
-	MUL_IMM_64        = 140 // 0x8c NEW, 32-bit twin = mul_imm_32
-	SHLO_L_IMM_64     = 141 // 0x8d NEW, 32-bit twin = shlo_l_imm_32
-	SHLO_R_IMM_64     = 142 // 0x8e NEW, 32-bit twin = shlo_r_imm_32
-	SHAR_R_IMM_64     = 143 // 0x8f NEW, 32-bit twin = shar_r_imm_32
-	NEG_ADD_IMM_64    = 144 // 0x90 NEW, 32-bit twin = neg_add_imm_32
-	SHLO_L_IMM_ALT_64 = 145 // 0x91 NEW, 32-bit twin = shlo_l_imm_alt_32
-	SHLO_R_IMM_ALT_64 = 146 // 0x92 NEW, 32-bit twin = shlo_r_imm_alt_32
-	SHAR_R_IMM_ALT_64 = 147 // 0x93 NEW, 32-bit twin = shar_r_imm_alt_32
+	STORE_IND_U8      = 120
+	STORE_IND_U16     = 121
+	STORE_IND_U32     = 122
+	STORE_IND_U64     = 123
+	LOAD_IND_U8       = 124
+	LOAD_IND_I8       = 125
+	LOAD_IND_U16      = 126
+	LOAD_IND_I16      = 127
+	LOAD_IND_U32      = 128
+	LOAD_IND_I32      = 129
+	LOAD_IND_U64      = 130
+	ADD_IMM_32        = 131
+	AND_IMM           = 132
+	XOR_IMM           = 133
+	OR_IMM            = 134
+	MUL_IMM_32        = 135
+	MUL_IMM           = 135
+	SET_LT_U_IMM      = 136
+	SET_LT_S_IMM      = 137
+	SHLO_L_IMM_32     = 138
+	SHLO_R_IMM_32     = 139
+	SHAR_R_IMM_32     = 140
+	NEG_ADD_IMM_32    = 141
+	SET_GT_U_IMM      = 142
+	SET_GT_S_IMM      = 143
+	SHLO_L_IMM_ALT_32 = 144
+	SHLO_R_IMM_ALT_32 = 145
+	SHAR_R_IMM_ALT_32 = 146
+	CMOV_IZ_IMM       = 147
+	CMOV_NZ_IMM       = 148
+	ADD_IMM_64        = 149
+	MUL_IMM_64        = 150
+	SHLO_L_IMM_64     = 151
+	SHLO_R_IMM_64     = 152
+	SHAR_R_IMM_64     = 153
+	NEG_ADD_IMM_64    = 154
+	SHLO_L_IMM_ALT_64 = 155
+	SHLO_R_IMM_ALT_64 = 156
+	SHAR_R_IMM_ALT_64 = 157
+
+	// GP-0.5.4 new instructions
+	ROT_R_64_IMM     = 158
+	ROT_R_64_IMM_ALT = 159
+	ROT_R_32_IMM     = 160
+	ROT_R_32_IMM_ALT = 161
 )
 
 // A.5.11. Instructions with Arguments of Two Registers & One Offset.
 const (
-	BRANCH_EQ   = 150
-	BRANCH_NE   = 151
-	BRANCH_LT_U = 152
-	BRANCH_LT_S = 153
-	BRANCH_GE_U = 154
-	BRANCH_GE_S = 155
+	BRANCH_EQ   = 170
+	BRANCH_NE   = 171
+	BRANCH_LT_U = 172
+	BRANCH_LT_S = 173
+	BRANCH_GE_U = 174
+	BRANCH_GE_S = 175
 )
 
 // A.5.12. Instruction with Arguments of Two Registers and Two Immediates.
 const (
-	LOAD_IMM_JUMP_IND = 160
+	LOAD_IMM_JUMP_IND = 180
 )
 
 // A.5.13. Instructions with Arguments of Three Registers.
 const (
-	ADD_32        = 170 // 0xaa
-	SUB_32        = 171
-	MUL_32        = 172
-	DIV_U_32      = 173
-	DIV_S_32      = 174
-	REM_U_32      = 175
-	REM_S_32      = 176
-	SHLO_L_32     = 177
-	SHLO_R_32     = 178
-	SHAR_R_32     = 179
-	ADD_64        = 180 // 0xb4 NEW, 32-bit twin = ADD_32
-	SUB_64        = 181 // NEW, 32-bit twin = SUB_32
-	MUL_64        = 182 // NEW, 32-bit twin = MUL_32
-	DIV_U_64      = 183 // NEW, 32-bit twin = DIV_U_32
-	DIV_S_64      = 184 // NEW, 32-bit twin = DIV_S_32
-	REM_U_64      = 185 // NEW, 32-bit twin = REM_U_32
-	REM_S_64      = 186 // NEW, 32-bit twin = REM_S_32
-	SHLO_L_64     = 187 // NEW, 32-bit twin =  SHLO_L_32
-	SHLO_R_64     = 188 // NEW, 32-bit twin = SHLO_R_32
-	SHAR_R_64     = 189 // NEW, 32-bit twin =  SHAR_R_32
-	AND           = 190
-	XOR           = 191 // 0xbf
-	OR            = 192
-	MUL_UPPER_S_S = 193
-	MUL_UPPER_U_U = 194
-	MUL_UPPER_S_U = 195
-	SET_LT_U      = 196
-	SET_LT_S      = 197
-	CMOV_IZ       = 198
-	CMOV_NZ       = 199
+	ADD_32        = 190
+	SUB_32        = 191
+	MUL_32        = 192
+	DIV_U_32      = 193
+	DIV_S_32      = 194
+	REM_U_32      = 195
+	REM_S_32      = 196
+	SHLO_L_32     = 197
+	SHLO_R_32     = 198
+	SHAR_R_32     = 199
+	ADD_64        = 200
+	SUB_64        = 201
+	MUL_64        = 202
+	DIV_U_64      = 203
+	DIV_S_64      = 204
+	REM_U_64      = 205
+	REM_S_64      = 206
+	SHLO_L_64     = 207
+	SHLO_R_64     = 208
+	SHAR_R_64     = 209
+	AND           = 210
+	XOR           = 211
+	OR            = 212
+	MUL_UPPER_S_S = 213
+	MUL_UPPER_U_U = 214
+	MUL_UPPER_S_U = 215
+	SET_LT_U      = 216
+	SET_LT_S      = 217
+	CMOV_IZ       = 218
+	CMOV_NZ       = 219
+
+	// GP-0.5.4 new instructions
+	ROT_L_64 = 220
+	ROT_L_32 = 221
+	ROT_R_64 = 222
+	ROT_R_32 = 223
+	AND_INV  = 224
+	OR_INV   = 225
+	XNOR     = 226
+	MAX      = 227
+	MAX_U    = 228
+	MIN      = 229
+	MIN_U    = 230
 )
 
 // Termination Instructions
@@ -501,10 +545,11 @@ const (
 	HUH  = (1 << 64) - 10 // 2^32 - 10
 	OK   = 0              // 0
 
-	HALT  = 0              // 0
-	PANIC = (1 << 64) - 12 // 2^32 - 12
-	FAULT = (1 << 64) - 13 // 2^32 - 13
-	HOST  = (1 << 64) - 14 // 2^32 - 14
+	HALT  = 0 // regular halt ∎
+	PANIC = 1 // panic ☇
+	FAULT = 2 // out-of-gas ∞
+	HOST  = 3 // host-call̵ h
+	OOG   = 4 // page-fault F
 
 // BAD = 1111
 // S   = 2222
@@ -559,24 +604,6 @@ func extractBytes(input []byte) ([]byte, []byte) {
 	remaining := input[numBytes:]
 
 	return extracted, remaining
-}
-
-func value_check(value []byte) []byte {
-	if len(value) == 0 {
-		return []byte{0}
-	}
-	return value
-}
-
-func PrintProgam(p *Program) {
-	if debug_pvm {
-		fmt.Printf("JSize=%d\n", p.JSize)
-		fmt.Printf("Z=%d\n", p.Z)
-		fmt.Printf("CSize=%d\n", p.CSize)
-		fmt.Printf("J=%v\n", p.J)
-		fmt.Printf("Code=%v\n", p.Code)
-		fmt.Printf("K=%v\n", p.K)
-	}
 }
 
 func reverseString(s string) string {
@@ -783,6 +810,13 @@ func DecodeProgram_pure_pvm_blob(p []byte) *Program {
 
 }
 
+func Floor(x int64) int64 {
+	if x < 0 {
+		return x - 1
+	}
+	return x
+}
+
 func CelingDevide(a, b uint32) uint32 {
 	return (a + b - 1) / b
 }
@@ -882,7 +916,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint32, hostENV types.HostEnv, jam_ready_blob bool) *VM {
+func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool) *VM {
 	if len(code) == 0 {
 		panic("NO CODE\n")
 	}
@@ -908,6 +942,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	//  IsAuthorized - E(p,c) Eq 268
 	//  Transfer - E(t) Eq 282
 	vm := &VM{
+		Gas:           int64(1 << 62),
 		JSize:         p.JSize,
 		Z:             p.Z,
 		J:             p.J,
@@ -974,7 +1009,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 // 	fmt.Println("================================================================")
 // }
 
-func NewVMFromCode(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv) *VM {
+func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.HostEnv) *VM {
 	return NewVM(serviceIndex, code, []uint64{}, i, hostENV, true)
 }
 
@@ -1042,9 +1077,10 @@ func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *t
 		vm.Y = X.Clone()
 		vm.Execute(types.EntryPointAccumulate) // F ∈ Ω⟨(X, X)⟩
 	}
+	// fmt.Printf("vm.X.U.D: %v\n", vm.X.U.D)
 	// where is the gas being used?
 	// return vm.getArgumentOutputs()
-	r.Err = vm.resultCode
+	r.Err = vm.ResultCode
 	r.Ok = []byte{}
 	return r, 0
 }
@@ -1055,7 +1091,7 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	Standard_Program_Initialization(vm, arguments) // eq 264/265
 	vm.Execute(types.EntryPointOnTransfer)
 	// return vm.getArgumentOutputs()
-	r.Err = vm.resultCode
+	r.Err = vm.ResultCode
 	r.Ok = []byte{}
 	return r, 0
 }
@@ -1072,7 +1108,8 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint32) (r types.Resul
 
 // Execute runs the program until it terminates
 func (vm *VM) Execute(entryPoint int) error {
-	vm.pc = uint32(entryPoint)
+	vm.terminated = false
+	vm.pc = uint64(entryPoint)
 	for !vm.terminated {
 		if err := vm.step(); err != nil {
 			return err
@@ -1082,7 +1119,7 @@ func (vm *VM) Execute(entryPoint int) error {
 			if debug_pvm {
 				fmt.Println("Invocate Host Function: ", vm.host_func_id)
 			}
-			vm.InvokeHostCall(vm.host_func_id, false)
+			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
 		}
@@ -1094,7 +1131,9 @@ func (vm *VM) Execute(entryPoint int) error {
 		fmt.Println("last pc: ", vm.pc)
 	}
 	// if vm finished without error, set result code to OK
-	vm.resultCode = types.RESULT_OK
+	if !vm.terminated {
+		vm.ResultCode = types.RESULT_OK
+	}
 	return nil
 }
 
@@ -1133,7 +1172,7 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	l, _ := vm.ReadRegister(11)
 
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
-	r.Err = vm.resultCode
+	r.Err = vm.ResultCode
 	if r.Err == types.RESULT_OK {
 		r.Ok = output
 	}
@@ -1142,7 +1181,7 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 
 // step performs a single step in the PVM
 func (vm *VM) step() error {
-	if vm.pc >= uint32(len(vm.code)) {
+	if vm.pc >= uint64(len(vm.code)) {
 		return errors.New("program counter out of bounds")
 	}
 
@@ -1150,8 +1189,8 @@ func (vm *VM) step() error {
 	opcode := instr
 	len_operands := skip(vm.pc, vm.bitmask)
 	x := vm.pc + 4
-	if x > uint32(len(vm.code)) {
-		x = uint32(len(vm.code))
+	if x > uint64(len(vm.code)) {
+		x = uint64(len(vm.code))
 	}
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
 	if debug_pvm {
@@ -1163,9 +1202,9 @@ func (vm *VM) step() error {
 			fmt.Printf("TERMINATED\n")
 		}
 		if instr == TRAP {
-			vm.resultCode = types.RESULT_PANIC
+			vm.ResultCode = PANIC
 		} else {
-			vm.resultCode = types.RESULT_OK
+			vm.ResultCode = types.RESULT_OK
 		}
 		vm.terminated = true
 	case FALLTHROUGH:
@@ -1187,11 +1226,7 @@ func (vm *VM) step() error {
 		if debug_pvm {
 			fmt.Println("Jump to: ", uint32(int64(vm.pc)+vx))
 		}
-		errCode := vm.branch(uint32(int64(vm.pc)+vx), true)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
-		}
-		// vm.writeRegister(0, errCode)
+		vm.branch(uint64(int64(vm.pc)+vx), true)
 	case JUMP_IND:
 		// handle no operand means 0
 		originalOperands := make([]byte, len(operands))
@@ -1203,164 +1238,112 @@ func (vm *VM) step() error {
 			lx = 1
 			originalOperands = append(originalOperands, 0)
 		}
-		vx := uint32(types.DecodeE_l(originalOperands[1 : 1+lx]))
+		// vx := types.DecodeE_l(originalOperands[1 : 1+lx])
+		vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
-		valueA, errCode := vm.ReadRegister(registerIndexA)
-		j := uint32(valueA) + uint32(vx)
+		valueA, _ := vm.ReadRegister(registerIndexA)
+		j := valueA + vx
 		if debug_pvm {
 			fmt.Println("Djump to: ", j)
 		}
-		vm.djump(j)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
-		}
-		// vm.writeRegister(0, errCode)
+		vm.djump(j % (1 << 32))
 	case LOAD_IMM_JUMP:
-		errCode := vm.loadImmJump(operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
-		}
-		// vm.writeRegister(0, errCode)
+		vm.loadImmJump(operands)
 	case LOAD_IMM_JUMP_IND:
-		errCode := vm.loadImmJumpInd(operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
-		}
-		// vm.writeRegister(0, errCode)
+		vm.loadImmJumpInd(operands)
 	case BRANCH_EQ, BRANCH_NE, BRANCH_LT_U, BRANCH_LT_S, BRANCH_GE_U, BRANCH_GE_S:
-		errCode := vm.branchReg(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
-		}
-		// vm.writeRegister(0, errCode)
+		vm.branchReg(opcode, operands)
 	case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:
-		errCode := vm.branchCond(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
-		}
-		// vm.writeRegister(0, errCode)
+		vm.branchCond(opcode, operands)
 	case ECALLI:
-		errCode := vm.ecalli(operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
-		}
-		// vm.writeRegister(0, errCode)
+		vm.HostResultCode = vm.ecalli(operands)
 		vm.pc += 1 + len_operands
-
-		if debug_pvm {
-			fmt.Printf("TERMINATED\n")
-		}
-		if errCode != OK {
-			vm.resultCode = types.RESULT_FAULT
-			vm.terminated = true
-		}
+		// if vm.HostResultCode != OK {
+		// 	vm.terminated = true
+		// }
 	case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32, STORE_IMM_U64:
-		errCode := vm.storeImm(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.storeImm(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case LOAD_IMM:
-		errCode := vm.loadImm(operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.loadImm(operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case LOAD_U8, LOAD_U16, LOAD_U32, LOAD_U64, LOAD_I8, LOAD_I16, LOAD_I32:
-		errCode := vm.load(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.load(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case STORE_U8, STORE_U16, STORE_U32:
-		errCode := vm.store(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.store(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case STORE_IMM_IND_U8, STORE_IMM_IND_U16, STORE_IMM_IND_U32, STORE_IMM_IND_U64:
-		errCode := vm.storeImmInd(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.storeImmInd(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case STORE_IND_U8, STORE_IND_U16, STORE_IND_U32, STORE_IND_U64:
-		errCode := vm.storeInd(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.storeInd(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case LOAD_IND_U8, LOAD_IND_I8, LOAD_IND_U16, LOAD_IND_I16, LOAD_IND_U32, LOAD_IND_I32, LOAD_IND_U64:
-		errCode := vm.loadInd(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.loadInd(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 		// MUL_UPPER_S_S_IMM, MUL_UPPER_S_S_IMM
 	case ADD_IMM_32, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, SET_LT_U_IMM, SET_LT_S_IMM:
-		errCode := vm.aluImm(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.aluImm(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case CMOV_IZ_IMM, CMOV_NZ_IMM:
-		errCode := vm.cmovImm(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.cmovImm(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
-
-	case SHLO_R_IMM_32, SHLO_L_IMM_32, SHAR_R_IMM_32, NEG_ADD_IMM_32, SET_GT_U_IMM, SET_GT_S_IMM, SHLO_R_IMM_ALT_32, SHLO_L_IMM_ALT_32, SHAR_R_IMM_ALT_32:
-		errCode := vm.shiftImm(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+	case SHLO_R_IMM_32, SHLO_L_IMM_32, SHAR_R_IMM_32, NEG_ADD_IMM_32, SET_GT_U_IMM, SET_GT_S_IMM, SHLO_R_IMM_ALT_32, SHLO_L_IMM_ALT_32, SHAR_R_IMM_ALT_32, SHAR_R_IMM_64, SHAR_R_IMM_ALT_64:
+		vm.shiftImm(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
-	case ADD_32, ADD_64, SUB_32, SUB_64, AND, XOR, OR, MUL_32, MUL_64, MUL_UPPER_S_S, MUL_UPPER_U_U, MUL_UPPER_S_U, DIV_U_32, DIV_U_64, DIV_S_32, DIV_S_64, REM_U_32, REM_U_64, REM_S_32, REM_S_64, CMOV_IZ, CMOV_NZ, SHLO_L_32, SHLO_L_64, SHLO_R_32, SHLO_R_64, SHAR_R_32, SHAR_R_64, SET_LT_U, SET_LT_S:
-		errCode := vm.aluReg(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+	case ADD_32, ADD_64, SUB_32, SUB_64, AND, XOR, OR, MUL_32, MUL_64, MUL_UPPER_S_S, MUL_UPPER_U_U, MUL_UPPER_S_U, DIV_U_32, DIV_U_64, DIV_S_32, DIV_S_64, REM_U_32, REM_U_64, REM_S_32, REM_S_64, CMOV_IZ, CMOV_NZ, SHLO_L_32, SHLO_L_64, SHLO_R_32, SHLO_R_64, SHAR_R_32, SHAR_R_64, SET_LT_U, SET_LT_S, ROT_L_64, ROT_L_32, ROT_R_64, ROT_R_32, AND_INV, OR_INV, XNOR, MAX, MAX_U, MIN, MIN_U:
+		vm.aluReg(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case MOVE_REG:
-		errCode := vm.moveReg(operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.moveReg(operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		// vm.writeRegister(0, errCode)
-		vm.pc += 1 + len_operands
 	case SBRK:
 		vm.sbrk(operands)
 		break
-
 	// New opcodes
 	case LOAD_IMM_64:
-		errCode := vm.Instructions_with_Arguments_of_One_Register_and_One_Extended_Width_Immediate(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.Instructions_with_Arguments_of_One_Register_and_One_Extended_Width_Immediate(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		vm.pc += 1 + len_operands
 	case ADD_IMM_64, SHLO_L_IMM_64, SHLO_R_IMM_64:
-		errCode := vm.Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opcode, operands)
-		if debug_pvm {
-			fmt.Println("Error: ", errCode)
+		vm.Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
 		}
-		vm.pc += 1 + len_operands
-
+	case COUNT_SET_BITS_64, COUNT_SET_BITS_32, LEADING_ZERO_BITS_64, LEADING_ZERO_BITS_32, TRAILING_ZERO_BITS_64, TRAILING_ZERO_BITS_32, SIGN_EXTEND_8, SIGN_EXTEND_16, ZERO_EXTEND_16, REVERSE_BYTES:
+		vm.Instructions_with_Arguments_of_Two_Register(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
+		}
 	default:
+		vm.ResultCode = PANIC
 		vm.terminated = true
-		vm.resultCode = types.RESULT_PANIC
 		if debug_pvm {
 			fmt.Printf("Unknown opcode: %d\n", opcode)
 			fmt.Printf("----\n")
@@ -1396,13 +1379,13 @@ func reverseBytes(b []byte) []byte {
 // }
 
 // skip function calculates the distance to the next instruction
-func skip(pc uint32, bitmask string) uint32 {
+func skip(pc uint64, bitmask string) uint64 {
 	// Convert the bitmask string to a slice of bytes
 	bitmaskBytes := []byte(bitmask)
 
 	// Iterate through the bitmask starting from the given pc position
-	var i uint32
-	for i = pc + 1; i < pc+25 && i < uint32(len(bitmaskBytes)); i++ {
+	var i uint64
+	for i = pc + 1; i < pc+25 && i < uint64(len(bitmaskBytes)); i++ {
 		// Ensure we do not access out of bounds
 		if bitmaskBytes[i] == '1' {
 			return i - pc - 1
@@ -1412,7 +1395,7 @@ func skip(pc uint32, bitmask string) uint32 {
 	if i < pc+25 {
 		return i - pc - 1
 	}
-	return uint32(24)
+	return uint64(24)
 }
 
 func (vm *VM) get_varpi(opcodes []byte, bitmask string) map[int]struct{} {
@@ -1427,62 +1410,16 @@ func (vm *VM) get_varpi(opcodes []byte, bitmask string) map[int]struct{} {
 	return result
 }
 
-// func (vm *VM) djump(operands []byte) uint32 {
-
-// 	if len(operands) != 1 {
-// 		return OOB
-// 	}
-
-// 	registerIndexA := minInt(12, int(operands[0])%16)
-// 	immIndexX := minInt(4, (len(operands)-1)%256)
-
-// 	var vx uint32
-// 	if 1+immIndexX < len(operands) {
-// 		vx = get_elided_uint32(operands[1 : 1+immIndexX])
-// 	} else {
-// 		vx = 0
-// 	}
-
-// 	valueA, errCode := vm.readRegister(registerIndexA)
-// 	if errCode != OK {
-// 		return errCode
-// 	}
-
-// 	var target uint32
-// 	Za := uint32(4)
-// 	terminationInstructions := vm.get_varpi(vm.code, vm.bitmask)
-
-// 	if (valueA/Za - 1) < uint32(len(vm.J)) {
-// 		target = uint32(vm.J[(valueA/Za - 1)])
-// 	} else {
-// 		target = uint32(99999)
-// 	}
-
-// 	_, exists := terminationInstructions[int(target)]
-
-// 	if valueA == uint32((1<<32)-(1<<16)) {
-// 		fmt.Printf("TERMINATED\n")
-// 		vm.resultCode = types.RESULT_OK
-// 		vm.terminated = true
-// 	} else if valueA == 0 || valueA > vx*Za || valueA%Za != 0 || exists {
-// 		vm.resultCode = types.RESULT_OOB
-// 		vm.terminated = true
-// 		return OOB
-// 	} else {
-// 		vm.pc = vm.pc + target
-// 	}
-
-// 	return OK
-// }
-
-func (vm *VM) djump(a uint32) {
-	if a == uint32((1<<32)-(1<<16)) {
+func (vm *VM) djump(a uint64) {
+	if a == uint64((1<<32)-(1<<16)) {
 		vm.terminated = true
-	} else if a == 0 || a > uint32(len(vm.J)*Z_A) || a%Z_A != 0 {
+		vm.ResultCode = HALT
+	} else if a == 0 || a > uint64(len(vm.J)*Z_A) || a%Z_A != 0 {
 		vm.terminated = true
+		vm.ResultCode = PANIC
 		// panic("OOB")
 	} else {
-		vm.pc = uint32(vm.J[(a/Z_A)-1])
+		vm.pc = uint64(vm.J[(a/Z_A)-1])
 	}
 }
 
@@ -1521,8 +1458,8 @@ func (vm *VM) dynamicJump(operands []byte) uint64 {
 		return OOB
 	}
 
-	targetIndex := uint32(a/ZA - 1)
-	if targetIndex >= uint32(len(vm.code)) {
+	targetIndex := uint64(a/ZA - 1)
+	if targetIndex >= uint64(len(vm.code)) {
 		return OOB
 	}
 
@@ -1536,6 +1473,7 @@ func (vm *VM) ecalli(operands []byte) uint64 {
 	lx := uint32(types.DecodeE_l(operands))
 	vm.hostCall = true
 	vm.host_func_id = int(lx)
+	vm.ResultCode = HOST
 	return HOST
 }
 
@@ -1586,7 +1524,7 @@ func (vm *VM) storeImm(opcode byte, operands []byte) uint64 {
 }
 
 // load_imm (opcode 4)
-func (vm *VM) loadImm(operands []byte) uint64 {
+func (vm *VM) loadImm(operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -1598,11 +1536,11 @@ func (vm *VM) loadImm(operands []byte) uint64 {
 		originalOperands = append(originalOperands, 0)
 	}
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
-	return vm.WriteRegister(registerIndexA, uint64(vx))
+	vm.WriteRegister(registerIndexA, uint64(vx))
 }
 
 // LOAD_U8, LOAD_U16, LOAD_U32, LOAD_U64, LOAD_I8, LOAD_I16, LOAD_I32
-func (vm *VM) load(opcode byte, operands []byte) uint64 {
+func (vm *VM) load(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -1619,141 +1557,101 @@ func (vm *VM) load(opcode byte, operands []byte) uint64 {
 	case LOAD_U8:
 		value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		if debug_pvm {
 			fmt.Printf("LOAD_U8: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, uint64(value[0]))
-
+		vm.WriteRegister(registerIndexA, uint64(value[0]))
 	case LOAD_I8:
 		value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		if debug_pvm {
 			fmt.Printf("LOAD_I8: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, x_encode(uint64(value[0]), 1))
+		vm.WriteRegister(registerIndexA, x_encode(uint64(value[0]), 1))
 	case LOAD_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		if debug_pvm {
 			fmt.Printf("LOAD_U16: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
-
+		vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
 	case LOAD_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		if debug_pvm {
 			fmt.Printf("LOAD_I16: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 2))
+		vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 2))
 	case LOAD_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		if debug_pvm {
 			fmt.Printf("LOAD_U32: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
+		vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
 	case LOAD_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		if debug_pvm {
 			fmt.Printf("LOAD_I32: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 4))
+		vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 4))
 	case LOAD_U64: // TODO: NEW, check this
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 8)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		if debug_pvm {
 			fmt.Printf("LOAD_U64: %d %v\n", vx, value)
 		}
-		return vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
+		vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
+	default:
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
-	return OK
-}
-
-func get_elided_uint32(o []byte) uint32 {
-	/* GP:
-	Immediate arguments are encoded in little-endian format with the most-significant bit being the sign bit.
-	They may be compactly encoded by eliding more significant octets. Elided octets are assumed to be zero if the MSB of the value is zero, and 255 otherwise.
-	*/
-	if len(o) == 0 {
-		return 0
-	}
-
-	if len(o) < 4 {
-		newNumbers := make([]byte, 4)
-		copy(newNumbers, o)
-		var fillValue byte
-		if o[len(o)-1] > 127 {
-			fillValue = byte(255)
-		} else {
-			fillValue = byte(0)
-		}
-		for i := len(o); i < 4; i++ {
-			newNumbers[i] = fillValue
-		}
-		o = newNumbers
-	}
-
-	x := make([]byte, 4)
-	if len(o) > 0 {
-		x[3] = o[0]
-	}
-	if len(o) > 1 {
-		x[2] = o[1]
-	}
-	if len(o) > 2 {
-		x[1] = o[2]
-	}
-	if len(o) > 3 {
-		x[0] = o[3]
-	}
-
-	if debug_pvm {
-		fmt.Printf("get_elided_uint32 %v from %v\n", x, o)
-	}
-	return binary.BigEndian.Uint32(x)
-}
-
-func get_elided_int32(o []byte) int32 {
-	x := make([]byte, 4)
-	x[0] = 0xff
-	x[1] = 0xff
-	x[2] = 0xff
-	x[3] = 0xff
-	// Copy the input bytes to the right end of x
-	copy(x[4-len(o):], o)
-	if debug_pvm {
-		fmt.Printf("get_elided_int32 %v from %v\n", x, o)
-	}
-	return int32(binary.BigEndian.Uint32(x))
 }
 
 // STORE_U8, STORE_U16, STORE_U32
-func (vm *VM) store(opcode byte, operands []byte) uint64 {
+func (vm *VM) store(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
 
 	registerIndexA := min(12, int(originalOperands[0])%16)
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
 	lx := min(4, max(0, len(originalOperands)-1))
 	if lx == 0 {
 		lx = 1
@@ -1767,25 +1665,42 @@ func (vm *VM) store(opcode byte, operands []byte) uint64 {
 		if debug_pvm {
 			fmt.Printf("STORE_u8: %d %v\n", vx, []byte{byte(value)})
 		}
-		return vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})
+		errCode := vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_U16:
 		value := types.E_l(uint64(valueA%(1<<16)), 2)
 		if debug_pvm {
 			fmt.Printf("STORE_U16: %d %v\n", vx, value)
 		}
-		return vm.Ram.WriteRAMBytes(uint32(vx), value)
+		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_U32:
 		value := types.E_l(uint64(valueA), 4)
 		if debug_pvm {
 			fmt.Printf("STORE_U32: %d %v\n", vx, value)
 		}
-		return vm.Ram.WriteRAMBytes(uint32(vx), value)
+		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
+	default:
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
-	return OOB
 }
 
 // storeImmInd implements STORE_IMM_{U8, U16, U32}
-func (vm *VM) storeImmInd(opcode byte, operands []byte) uint64 {
+func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -1798,10 +1713,7 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) uint64 {
 		originalOperands = append(originalOperands, 0)
 	}
 
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return OOB
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 	vy := x_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly))
@@ -1811,25 +1723,47 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) uint64 {
 		// if debug_pvm {
 		// 	fmt.Printf("STORE_IMM_IND_U8: %d %v\n", valueA+vx, []byte{byte(vy % 8)})
 		// }
-		return vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), []byte{byte(vy % 8)})
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), []byte{byte(vy % 8)})
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_IMM_IND_U16:
 		// if debug_pvm {
 		// 	fmt.Printf("STORE_IMM_IND_U16: %d %v\n", valueA+vx, types.E_l(uint64(vy%1<<16), 2))
 		// }
-		return vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<16), 2))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<16), 2))
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_IMM_IND_U32:
 		// if debug_pvm {
 		// 	fmt.Printf("STORE_IMM_IND_U32: %d %v\n", valueA+vx, types.E_l(uint64(vy), 4))
 		// }
-		return vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy), 4))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy), 4))
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_IMM_IND_U64:
-		return vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy), 8))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy), 8))
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
+	default:
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
-	return OOB
 }
 
 // Implement loadImmJump logic
-func (vm *VM) loadImmJump(operands []byte) uint32 {
+func (vm *VM) loadImmJump(operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -1843,16 +1777,15 @@ func (vm *VM) loadImmJump(operands []byte) uint32 {
 	}
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
-	vy := uint32(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)))
+	vy := uint64(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)))
 
 	vm.WriteRegister(registerIndexA, uint64(vx))
 
 	vm.branch(vy, true)
-	return OK
 }
 
 // Implement loadImmJumpInd logic
-func (vm *VM) loadImmJumpInd(operands []byte) uint64 {
+func (vm *VM) loadImmJumpInd(operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -1869,19 +1802,14 @@ func (vm *VM) loadImmJumpInd(operands []byte) uint64 {
 	vx := x_encode(types.DecodeE_l(originalOperands[2:2+lx]), uint32(lx))
 	vy := x_encode(types.DecodeE_l(originalOperands[2+lx:2+lx+ly]), uint32(ly))
 
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	vm.WriteRegister(registerIndexA, uint64(vx))
-	vm.djump(uint32(valueB) + uint32(vy))
-
-	return OK
+	vm.djump((valueB + vy) % (1 << 32))
 }
 
 // move_reg (opcode 82)
-func (vm *VM) moveReg(operands []byte) uint64 {
+func (vm *VM) moveReg(operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -1889,14 +1817,11 @@ func (vm *VM) moveReg(operands []byte) uint64 {
 	registerIndexD := min(12, int(originalOperands[0])%16)
 	registerIndexA := min(12, int(originalOperands[0])/16)
 
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
 	if debug_pvm {
 		fmt.Printf("MOVE_REG: %d %d\n", registerIndexA, registerIndexD)
 	}
-	return vm.WriteRegister(registerIndexD, valueA)
+	vm.WriteRegister(registerIndexD, valueA)
 }
 
 func (vm *VM) sbrk(operands []byte) error {
@@ -1911,14 +1836,16 @@ func (vm *VM) sbrk(operands []byte) error {
 	return nil
 }
 
-func (vm *VM) branch(vx uint32, condition bool) uint32 {
+func (vm *VM) branch(vx uint64, condition bool) {
 	if condition {
-		vm.pc = uint32(vx)
+		vm.pc = vx
+	} else {
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
-	return OK
 }
 
-func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
+func (vm *VM) branchCond(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -1932,12 +1859,9 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 	}
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
-	vy := uint32(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)))
+	vy := uint64(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)))
 
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
 
 	switch opcode {
 	case BRANCH_EQ_IMM:
@@ -1947,8 +1871,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_NE_IMM:
 		if valueA != uint64(vx) {
@@ -1957,8 +1880,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LT_U_IMM:
 		if valueA < uint64(vx) {
@@ -1967,8 +1889,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LT_S_IMM:
 		if z_encode(valueA, 4) < z_encode(vx, 4) {
@@ -1977,8 +1898,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LE_U_IMM:
 		if valueA <= uint64(vx) {
@@ -1987,8 +1907,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LE_S_IMM:
 		if z_encode(valueA, 4) <= z_encode(vx, 4) {
@@ -1997,8 +1916,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GE_U_IMM:
 		if valueA >= uint64(vx) {
@@ -2007,8 +1925,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GE_S_IMM:
 		if z_encode(valueA, 4) >= z_encode(vx, 4) {
@@ -2017,8 +1934,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GT_U_IMM:
 		if valueA > uint64(vx) {
@@ -2027,8 +1943,7 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GT_S_IMM:
 		if z_encode(valueA, 4) > z_encode(vx, 4) {
@@ -2037,15 +1952,12 @@ func (vm *VM) branchCond(opcode byte, operands []byte) uint64 {
 			}
 			vm.branch(vy, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	}
-	return OK
-
 }
 
-func (vm *VM) storeInd(opcode byte, operands []byte) uint64 {
+func (vm *VM) storeInd(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -2058,14 +1970,8 @@ func (vm *VM) storeInd(opcode byte, operands []byte) uint64 {
 		originalOperands = append(originalOperands, 0)
 	}
 
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
+	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
@@ -2074,36 +1980,54 @@ func (vm *VM) storeInd(opcode byte, operands []byte) uint64 {
 		// if debug_pvm {
 		// 	fmt.Printf("STORE_IND_U8: %d %v\n", valueB+vx, []byte{byte(valueA % 8)})
 		// }
-		return vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), []byte{byte(valueA % 8)})
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), []byte{byte(valueA % 8)})
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_IND_U16:
 		// if debug_pvm {
 		// 	fmt.Printf("STORE_IND_U16: %d %v\n", valueB+vx, types.E_l(uint64(valueA%1<<16), 2))
 		// }
-		return vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 2))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 2))
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_IND_U32:
 		// if debug_pvm {
 		// 	fmt.Printf("STORE_IND_U32: %d %v\n", valueB+vx, types.E_l(uint64(valueA), 4))
 		// }
-		return vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 4))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 4))
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	case STORE_IND_U64:
-		return vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 8))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 8))
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
 	default:
-		return OOB
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
 
 }
 
-func (vm *VM) loadInd(opcode byte, operands []byte) uint64 {
+func (vm *VM) loadInd(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
 
 	registerIndexA := min(12, int(originalOperands[0])%16)
 	registerIndexB := min(12, int(originalOperands[0])/16)
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueB, _ := vm.ReadRegister(registerIndexB)
 	lx := min(4, max(0, len(originalOperands)-1))
 	if lx == 0 {
 		lx = 1
@@ -2114,69 +2038,92 @@ func (vm *VM) loadInd(opcode byte, operands []byte) uint64 {
 	case LOAD_IND_U8:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 1)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		result := uint64(value[0])
 		if debug_pvm {
 			fmt.Printf("LOAD_IND_U8: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 		}
-		return vm.WriteRegister(registerIndexA, result)
+		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I8:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 1)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		result := uint64(z_decode(z_encode(uint64(value[0]), 1), 8))
 		if debug_pvm {
 			fmt.Printf("LOAD_IND_I8: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 		}
-		return vm.WriteRegister(registerIndexA, result)
+		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		result := uint64(types.DecodeE_l(value))
 		if debug_pvm {
 			fmt.Printf("LOAD_IND_U16: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 		}
-		return vm.WriteRegister(registerIndexA, result)
+		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		result := z_decode(z_encode(types.DecodeE_l(value), 2), 8)
 		if debug_pvm {
 			fmt.Printf("LOAD_IND_I16: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 		}
-		return vm.WriteRegister(registerIndexA, result)
+		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		result := uint64(types.DecodeE_l(value))
 		if debug_pvm {
 			fmt.Printf("LOAD_IND_U32: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 		}
-		return vm.WriteRegister(registerIndexA, result)
+		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		result := z_decode(z_encode(types.DecodeE_l(value), 4), 8)
-		return vm.WriteRegister(registerIndexA, result)
+		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_U64:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 8)
 		if errCode != OK {
-			return errCode
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+			return
 		}
 		result := uint64(types.DecodeE_l(value))
-		return vm.WriteRegister(registerIndexA, result)
+		vm.WriteRegister(registerIndexA, result)
+	default:
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
-	return OOB
 }
 
 func splitRegister(operand byte) (int, int) {
@@ -2186,17 +2133,14 @@ func splitRegister(operand byte) (int, int) {
 }
 
 // Implement ALU operations with immediate values
-func (vm *VM) aluImm(opcode byte, operands []byte) uint64 {
+func (vm *VM) aluImm(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
 
 	registerIndexA := min(12, int(originalOperands[0])%16)
 	registerIndexB := min(12, int(originalOperands[0])/16)
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueB, _ := vm.ReadRegister(registerIndexB)
 	lx := min(4, max(0, len(originalOperands)-1))
 	if lx == 0 {
 		lx = 1
@@ -2216,10 +2160,10 @@ func (vm *VM) aluImm(opcode byte, operands []byte) uint64 {
 		result = valueB | vx
 	case MUL_IMM:
 		result = valueB * vx
-	//case MUL_UPPER_S_S_IMM:
-	//	result = uint32(z_decode((z_encode(valueB, 4) * z_encode(vx, 4)), 4))
-	//case MUL_UPPER_U_U_IMM:
-	//	result = valueB * vx
+	// case MUL_UPPER_S_S_IMM:
+	// 	result = uint32(z_decode((z_encode(valueB, 4) * z_encode(vx, 4)), 4))
+	// case MUL_UPPER_U_U_IMM:
+	// 	result = valueB * vx
 	case SET_LT_U_IMM:
 		if uint32(valueB) < uint32(vx) {
 			result = 1
@@ -2233,30 +2177,25 @@ func (vm *VM) aluImm(opcode byte, operands []byte) uint64 {
 			result = 0
 		}
 	default:
-		return OOB
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
 	if debug_pvm {
 		fmt.Printf("aluImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 	}
-	return vm.WriteRegister(registerIndexA, result)
+	vm.WriteRegister(registerIndexA, result)
 }
 
 // Implement cmov_nz_imm, cmov_nz_imm
-func (vm *VM) cmovImm(opcode byte, operands []byte) uint64 {
+func (vm *VM) cmovImm(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
 
 	registerIndexA := min(12, int(originalOperands[0])%16)
 	registerIndexB := min(12, int(originalOperands[0])/16)
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
+	valueB, _ := vm.ReadRegister(registerIndexB)
 	lx := min(4, max(0, len(originalOperands)-1))
 	if lx == 0 {
 		lx = 1
@@ -2279,16 +2218,17 @@ func (vm *VM) cmovImm(opcode byte, operands []byte) uint64 {
 			result = valueA
 		}
 	default:
-		return OOB
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
 	if debug_pvm {
 		fmt.Printf("cmovImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 	}
-	return vm.WriteRegister(registerIndexA, result)
+	vm.WriteRegister(registerIndexA, result)
 }
 
 // Implement shift operations with immediate values
-func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 {
+func (vm *VM) shiftImm(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -2303,10 +2243,7 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 {
 	}
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	var result uint64
 	switch opcode {
@@ -2315,7 +2252,7 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 {
 	case SHLO_L_IMM_32:
 		result = x_encode(valueB*(1<<(vx%32))%(1<<32), 4)
 	case SHAR_R_IMM_32:
-		result = z_decode(z_encode(valueB%(1<<32), 4)/(1<<(vx%32)), 8)
+		result = z_decode(Floor(z_encode(valueB%(1<<32), 4)/(1<<(vx%32))), 8)
 	case NEG_ADD_IMM_32:
 		result = x_encode(uint64(vx)+uint64(1<<32)-uint64(valueB)%uint64(1<<32), 4)
 	case SET_GT_U_IMM:
@@ -2333,16 +2270,21 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) uint64 {
 	case SHLO_L_IMM_ALT_32:
 		result = x_encode((vx*(1<<(valueB%32)))%(1<<32), 4)
 	case SHLO_R_IMM_ALT_32:
-		result = x_encode(vx/(1<<(valueB%32)), 4)
+		result = x_encode((vx%(1<<32))/(1<<(valueB%32)), 4)
 	case SHAR_R_IMM_ALT_32:
-		result = z_decode(z_encode(vx, 4)/(1<<(valueB%32)), 8)
+		result = z_decode(Floor(z_encode(vx%(1<<32), 4)/(1<<(valueB%32))), 8)
+	case SHAR_R_IMM_64:
+		result = z_decode(Floor(z_encode(valueB, 8)/(1<<(vx%64))), 8)
+	case SHAR_R_IMM_ALT_64:
+		result = z_decode(Floor(z_encode(vx, 8)/(1<<(valueB%64))), 8)
 	default:
-		return OOB
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
 	if debug_pvm {
 		fmt.Printf("shiftImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 	}
-	return vm.WriteRegister(registerIndexA, result)
+	vm.WriteRegister(registerIndexA, result)
 }
 
 // GP.0.5.2-A.7
@@ -2354,7 +2296,7 @@ func z_encode(a uint64, n uint32) int64 {
 		return bigA.Int64()
 	}
 
-	fullMod := new(big.Int).Lsh(modValue, 1)
+	fullMod := new(big.Int).Lsh(big.NewInt(1), uint(8*n))
 	result := new(big.Int).Sub(bigA, fullMod)
 	return result.Int64()
 }
@@ -2368,6 +2310,17 @@ func z_decode(a int64, n uint32) uint64 {
 	result.Mod(result, mod)
 
 	return result.Uint64()
+}
+
+// GP.0.5.4-A.9
+func B_encode(n uint64) string {
+	return strconv.FormatUint(n, 2)
+}
+
+// GP.0.5.4-A.10
+func B_decode(s string) uint64 {
+	n, _ := strconv.ParseUint(s, 2, 64)
+	return n
 }
 
 // GP_.0.3.8(224)
@@ -2397,7 +2350,7 @@ func x_encode(x uint64, n uint32) uint64 {
 }
 
 // Implement branch logic for two registers and one offset
-func (vm *VM) branchReg(opcode byte, operands []byte) uint64 {
+func (vm *VM) branchReg(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -2409,82 +2362,63 @@ func (vm *VM) branchReg(opcode byte, operands []byte) uint64 {
 		lx = 1
 		originalOperands = append(originalOperands, 0)
 	}
-	vx := uint32(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx)))
+	vx := uint64(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx)))
 
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
+	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	switch opcode {
 	case BRANCH_EQ:
 		if valueA == valueB {
 			vm.branch(vx, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_NE:
 		if valueA != valueB {
 			vm.branch(vx, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LT_U:
 		if valueA < valueB {
 			vm.branch(vx, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LT_S:
 		if z_encode(valueA, 4) < z_encode(valueB, 4) {
 			vm.branch(vx, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GE_U:
 		if valueA >= valueB {
 			vm.branch(vx, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GE_S:
 		if z_encode(valueA, 4) >= z_encode(valueB, 4) {
 			vm.branch(vx, true)
 		} else {
-			vm.pc += uint32(1 + len(operands))
-			return OK
+			vm.pc += uint64(1 + len(operands))
 		}
 	default:
-		return OOB
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
-
-	return OK
 }
 
 // Implement ALU operations with register values
-func (vm *VM) aluReg(opcode byte, operands []byte) uint64 {
+func (vm *VM) aluReg(opcode byte, operands []byte) {
 
 	registerIndexA := min(12, int(operands[0])%16)
 	registerIndexB := min(12, int(operands[0])/16)
 	registerIndexD := min(12, int(operands[1]))
 
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
+	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	var result uint64
 	switch opcode {
@@ -2506,11 +2440,11 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 {
 	case MUL_32, MUL_64:
 		result = valueA * valueB
 	case MUL_UPPER_S_S:
-		result = uint64(int(valueA) * int(valueB) >> 32)
+		result = z_decode(Floor(z_encode(valueA, 8)*z_encode(valueB, 8)), 8)
 	case MUL_UPPER_U_U:
-		result = uint64((uint(valueA) * uint(valueB)) >> 32)
+		result = valueA * valueB
 	case MUL_UPPER_S_U:
-		result = uint64((int(valueA) * int(valueB)) >> 32)
+		result = z_decode(Floor(z_encode(valueA, 8)*int64(valueB)), 8)
 	case DIV_U_32:
 		if valueB == 0 {
 			result = ^uint64(0)
@@ -2540,7 +2474,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 {
 		} else if z_encode(valueA, 8) == -(1<<63) && z_encode(valueB, 8) == -1 {
 			result = uint64(valueA)
 		} else {
-			result = z_decode(z_encode(valueA, 8)/z_encode(valueB, 8), 8)
+			result = z_decode(Floor(z_encode(valueA, 8)/z_encode(valueB, 8)), 8)
 		}
 
 	case REM_U_32:
@@ -2613,21 +2547,52 @@ func (vm *VM) aluReg(opcode byte, operands []byte) uint64 {
 	case SHLO_R_64:
 		result = valueA / (1 << (valueB % 64))
 	case SHAR_R_32:
-		result = z_decode(z_encode(valueA%(1<<32), 4)/(1<<(valueB%32)), 8)
+		result = z_decode(Floor(z_encode(valueA%(1<<32), 4)/(1<<(valueB%32))), 8)
 	case SHAR_R_64:
-		result = z_decode(z_encode(valueA, 8)/(1<<(valueB%64)), 8)
+		result = z_decode(Floor(z_encode(valueA, 8)/(1<<(valueB%64))), 8)
+	case ROT_L_64:
+		b_valueA := B_encode(valueA)[:64]
+		b_valueD := b_valueA[int(valueB%64):] + b_valueA[:int(valueB%64)]
+		result = B_decode(b_valueD)
+	case ROT_L_32:
+		b_valueA := B_encode(valueA)[:32]
+		b_valueD := b_valueA[int(valueA%32):] + b_valueA[:int(valueA%32)]
+		result = x_encode(B_decode(b_valueD), 4)
+	case ROT_R_64:
+		b_valueA := B_encode(valueA)[:64]
+		b_valueD := b_valueA[64-int(valueB%64):] + b_valueA[:64-int(valueB%64)]
+		result = B_decode(b_valueD)
+	case ROT_R_32:
+		b_valueA := B_encode(valueA)[:32]
+		b_valueD := b_valueA[32-int(valueA%32):] + b_valueA[:32-int(valueA%32)]
+		result = x_encode(B_decode(b_valueD), 4)
+	case AND_INV:
+		result = valueA & (^valueB)
+	case OR_INV:
+		result = valueA | (^valueB)
+	case XNOR:
+		result = ^(valueA ^ valueB)
+	case MAX:
+		result = uint64(max(z_encode(valueA, 8), z_encode(valueB, 8)))
+	case MAX_U:
+		result = max(valueA, valueB)
+	case MIN:
+		result = uint64(min(z_encode(valueA, 8), z_encode(valueB, 8)))
+	case MIN_U:
+		result = min(valueA, valueB)
 	default:
-		return OOB // unknown ALU register
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
 
 	if debug_pvm {
 		fmt.Printf("aluReg - rA[%d]=%d  regB[%d]=%d regD[%d]=%d\n", registerIndexA, valueA, registerIndexB, valueB, registerIndexD, result)
 	}
-	return vm.WriteRegister(registerIndexD, result)
+	vm.WriteRegister(registerIndexD, result)
 }
 
 // VM Management: CreateVM, GetVM, ExpungeVM
-func (vm *VM) CreateVM(serviceAcct uint32, code []byte, i uint32) uint32 {
+func (vm *VM) CreateVM(serviceAcct uint32, code []byte, i uint64) uint32 {
 	maxN := uint32(0)
 	for n := range vm.VMs {
 		if n > maxN {
@@ -2671,22 +2636,85 @@ func (vm *VM) SetRegisterValue(registerIndex int, value uint64) uint64 {
 
 func (vm *VM) HostCheat(input string) (errcode uint64) {
 	if input == "machine" {
-		errcode = vm.hostMachine()
+		vm.hostMachine()
 	} else if input == "poke" {
-		errcode = vm.hostPoke()
+		vm.hostPoke()
 	} else if input == "peek" {
-		errcode = vm.hostPeek()
+		vm.hostPeek()
 	} else if input == "invoke" {
-		errcode = vm.hostInvoke()
+		vm.hostInvoke()
 	} else if input == "expunge" {
-		errcode = vm.hostExpunge()
+		vm.hostExpunge()
 	} else if input == "zero" {
-		errcode = vm.hostZero()
+		vm.hostZero()
 	}
 	return errcode
 }
 
-func (vm *VM) Instructions_with_Arguments_of_One_Register_and_One_Extended_Width_Immediate(opcode byte, operands []byte) uint64 {
+func (vm *VM) Instructions_with_Arguments_of_Two_Register(opcode byte, operands []byte) {
+	// handle no operand means 0
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+
+	registerIndexD := min(12, int(originalOperands[0])%16)
+	registerIndexA := min(12, int(originalOperands[0])/16)
+
+	valueA, _ := vm.ReadRegister(registerIndexA)
+
+	var result uint64
+	switch opcode {
+	case COUNT_SET_BITS_64:
+		b_valueA := B_encode(valueA)
+		count := strings.Count(b_valueA, "1")
+		result = uint64(count)
+	case COUNT_SET_BITS_32:
+		b_valueA := B_encode(valueA % (1 << 32))
+		count := strings.Count(b_valueA, "1")
+		result = uint64(count)
+	case LEADING_ZERO_BITS_64:
+		b_valueA := B_encode(valueA)
+		count := strings.LastIndex(b_valueA, "0")
+		if count == -1 || count > 64 {
+			count = 64
+		}
+		result = uint64(count)
+	case LEADING_ZERO_BITS_32:
+		b_valueA := B_encode(valueA % (1 << 32))
+		count := strings.LastIndex(b_valueA, "0")
+		if count == -1 || count > 32 {
+			count = 32
+		}
+		result = uint64(count)
+	case TRAILING_ZERO_BITS_64:
+		b_valueA := B_encode(valueA)
+		count := strings.Index(b_valueA, "1")
+		if count == -1 || count > 64 {
+			count = 64
+		}
+		result = uint64(count)
+	case TRAILING_ZERO_BITS_32:
+		b_valueA := B_encode(valueA % (1 << 32))
+		count := strings.Index(b_valueA, "1")
+		if count == -1 || count > 32 {
+			count = 32
+		}
+		result = uint64(count)
+	case SIGN_EXTEND_8:
+		result = z_decode(z_encode(valueA%(1<<8), 1), 8)
+	case SIGN_EXTEND_16:
+		result = z_decode(z_encode(valueA%(1<<16), 2), 8)
+	case ZERO_EXTEND_16:
+		result = valueA % (1 << 16)
+	case REVERSE_BYTES:
+		result = types.DecodeE_l(reverseBytes(types.E_l(valueA, 8)))
+	default:
+		vm.ResultCode = PANIC
+		vm.terminated = true
+	}
+	vm.WriteRegister(registerIndexD, result)
+}
+
+func (vm *VM) Instructions_with_Arguments_of_One_Register_and_One_Extended_Width_Immediate(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -2698,10 +2726,10 @@ func (vm *VM) Instructions_with_Arguments_of_One_Register_and_One_Extended_Width
 		originalOperands = append(originalOperands, 0)
 	}
 	vx := types.DecodeE_l(originalOperands[1 : 1+lx])
-	return vm.WriteRegister(registerIndexA, uint64(vx))
+	vm.WriteRegister(registerIndexA, uint64(vx))
 }
 
-func (vm *VM) Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opcode byte, operands []byte) uint64 {
+func (vm *VM) Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opcode byte, operands []byte) {
 	// handle no operand means 0
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
@@ -2714,14 +2742,8 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opc
 		originalOperands = append(originalOperands, 0)
 	}
 
-	valueA, errCode := vm.ReadRegister(registerIndexA)
-	if errCode != OK {
-		return errCode
-	}
-	valueB, errCode := vm.ReadRegister(registerIndexB)
-	if errCode != OK {
-		return errCode
-	}
+	valueA, _ := vm.ReadRegister(registerIndexA)
+	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
@@ -2738,8 +2760,9 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opc
 		valueA = x_encode(valueB/(1<<(vx%64)), 8)
 		result = valueA
 	default:
-		return OOB // unknown ALU register
+		vm.ResultCode = PANIC
+		vm.terminated = true
 	}
 
-	return vm.WriteRegister(registerIndexA, result)
+	vm.WriteRegister(registerIndexA, result)
 }

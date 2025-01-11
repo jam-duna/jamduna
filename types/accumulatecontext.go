@@ -59,11 +59,11 @@ func (U PartialState) Dump(prefix string, id uint16) {
 */
 
 type XContext struct {
-	D map[uint32]*ServiceAccount `json:"D"`
-	I uint32                     `json:"I"`
-	S uint32                     `json:"S"`
-	U *PartialState              `json:"U"`
-	T []DeferredTransfer         `json:"T"`
+	I uint32             `json:"I"`
+	S uint32             `json:"S"`
+	U *PartialState      `json:"U"`
+	T []DeferredTransfer `json:"T"`
+	Y *common.Hash       `json:"Y"` // Question: should this be a pointer or just common.Hash
 }
 
 // returns back X.U.D[s] where s is the current service index
@@ -73,13 +73,9 @@ func (X *XContext) GetX_s() (xs *ServiceAccount, s uint32) {
 }
 func (X *XContext) Clone() (Y XContext) {
 	Y = XContext{
-		D: make(map[uint32]*ServiceAccount),
 		I: X.I,
 		S: X.S,
 		T: make([]DeferredTransfer, len(X.T)),
-	}
-	for serviceIndex, service := range X.D {
-		Y.D[serviceIndex] = service.Clone()
 	}
 	for i, t := range X.T {
 		Y.T[i] = t.Clone()

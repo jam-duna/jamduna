@@ -1325,11 +1325,10 @@ func (n *Node) runClient() {
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				n.broadcast(*newBlock)
 				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
-
 				} else {
 					block := newBlock.Copy()
 					n.block_tree.AddBlock(block)
-					fmt.Printf("block tree block added, block %v(p:%v)\n", block.Header.Hash().String_short(), block.GetParentHeaderHash().String_short())
+					//fmt.Printf("block tree block added, block %v(p:%v)\n", block.Header.Hash().String_short(), block.GetParentHeaderHash().String_short())
 				}
 
 				if debug {

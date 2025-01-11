@@ -169,10 +169,8 @@ func TestXOR_Invoke(t *testing.T) {
 	// set up the register that can let the code run ==> pointer + length
 	//13 regs
 	regs := []uint64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, uint64(valid_memory_address + 500), uint64(valid_memory_address + 700), 0}
-	err2 := vm.PutGasAndRegistersToMemory(valid_memory_address+1500, 100, regs)
-	if err2 != pvm.OK {
-		t.Errorf("Error putting gas and registers to memory: %v", err)
-	}
+	vm.PutGasAndRegistersToMemory(valid_memory_address+1500, 100, regs)
+
 	// read it out and check
 	gas_reg, errcode := vm.Ram.ReadRAMBytes(valid_memory_address+1500, 112)
 	fmt.Printf("Gas and Registers: %v\n", gas_reg)

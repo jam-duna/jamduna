@@ -1,4 +1,4 @@
-name: Jam Runner test
+name: Jam Runner main
 
 env:
   JAM_PATH: ${{ github.workspace }} 
@@ -8,7 +8,7 @@ env:
 on:
   push:
     branches:
-      - dev
+      - main
     paths:
       - .github/workflows/runner.yml
       - bls/*.go
@@ -19,18 +19,18 @@ on:
       - statedb/*.go
       - node/*.go
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 * * * *'
       branches: 
-        - dev
+        - main
 
 jobs:
   test:
     runs-on: jamops-16-core
     timeout-minutes: 10
     steps:
-      - name: Checkout code
+      - name: Checkout main code
         uses: actions/checkout@v3
-        with: { ref: dev }
+        with: { ref: main }
 
 #      - name: Setup Go
 #        uses: actions/setup-go@v4

@@ -63,9 +63,10 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, bufferTime
 }
 
 const SafroleTestEpochLen = 4 // Safrole
-const FallbackEpochLen = 2    // Fallback
+const FallbackEpochLen = 4    // Fallback
 const FibTestEpochLen = 1     // Assurance
 const MegaTronEpochLen = 5    // Orderaccumalation
+const TransferEpochLen = 3    // Transfer
 
 func TestFallback(t *testing.T) {
 	safroleTest(t, "fallback", FallbackEpochLen, 0)
@@ -81,6 +82,10 @@ func TestFib(t *testing.T) {
 
 func TestMegatron(t *testing.T) {
 	jamtest(t, "megatron", MegaTronEpochLen)
+}
+
+func TestTransfer(t *testing.T) {
+	jamtest(t, "transfer", TransferEpochLen)
 }
 
 func TestDisputes(t *testing.T) {

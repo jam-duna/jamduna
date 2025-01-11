@@ -52,8 +52,8 @@
           },
           "code_hash": "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
           "balance": 1000,
-          "min_item_gas": 100,
-          "min_memo_gas": 100
+          "g": 100,
+          "m": 100
         }
       },
       "I": [],
@@ -108,8 +108,8 @@
           },
           "code_hash": "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
           "balance": 1000,
-          "min_item_gas": 100,
-          "min_memo_gas": 100
+          "g": 100,
+          "m": 100
         }
       },
       "I": [],
@@ -193,8 +193,8 @@
           },
           "code_hash": "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
           "balance": 1000,
-          "min_item_gas": 100,
-          "min_memo_gas": 100
+          "g": 100,
+          "m": 100
         }
       },
       "I": [],
@@ -249,8 +249,8 @@
           },
           "code_hash": "0x0be802c135a8c671aa22d990fbb26116d9844a458d89d05aa013272a64160337",
           "balance": 1000,
-          "min_item_gas": 100,
-          "min_memo_gas": 100
+          "g": 100,
+          "m": 100
         }
       },
       "I": [],

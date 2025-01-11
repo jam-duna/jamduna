@@ -30,6 +30,12 @@ type Guarantee struct {
 	Signatures []GuaranteeCredential `json:"signatures"`
 }
 
+type GuaranteeHashed struct {
+	Report     common.Hash           `json:"report"`
+	Slot       uint32                `json:"slot"`
+	Signatures []GuaranteeCredential `json:"signatures"`
+}
+
 /*
 Section 11.4 - Work Report Guarantees. See Equations 136 - 143. The guarantees extrinsic, ${\bf E}_G$, a *series* of guarantees, at most one for each core, each of which is a tuple of:
 * core index
@@ -116,6 +122,14 @@ func (g *Guarantee) Hash() common.Hash {
 	return common.Blake2Hash(data)
 }
 
+func (g *GuaranteeHashed) Bytes() []byte {
+	enc, err := Encode(g)
+	if err != nil {
+		return nil
+	}
+	return enc
+}
+
 func (g *GuaranteeCredential) UnmarshalJSON(data []byte) error {
 	type Alias GuaranteeCredential
 	aux := &struct {
@@ -180,4 +194,13 @@ func (g *Guarantee) String() string {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
 	return string(enc)
+}
+
+// helper function to convert Gurantee to GuaranteeHashed
+func (g *Guarantee) ToGuaranteeHashed() GuaranteeHashed {
+	return GuaranteeHashed{
+		Report:     g.Report.Hash(),
+		Slot:       g.Slot,
+		Signatures: g.Signatures,
+	}
 }

@@ -2,37 +2,12 @@
   "name": "hostExpungeWHO",
   "initial-gas": 10000,
   "initial-regs": {
-    "0": 4294901760,
-    "1": 4278059008,
-    "10": 0,
-    "11": 0,
-    "12": 0,
-    "2": 0,
-    "3": 0,
-    "4": 0,
-    "5": 0,
-    "6": 0,
-    "7": 4278124544,
-    "8": 12,
-    "9": 0
+    "7": 999
   },
   "initial-memory": {
     "pages": {
       "32": {
-        "value": [
-          10,
-          10,
-          11,
-          11,
-          12,
-          12,
-          13,
-          13,
-          14,
-          14,
-          15,
-          15
-        ],
+        "value": [],
         "access": {
           "inaccessible": false,
           "writable": true,
@@ -45,96 +20,70 @@
     "0": {
       "P": [
         0,
-        1,
+        0,
+        5,
+        61,
+        7,
+        0,
+        0,
         2,
-        3,
-        4
+        1
       ],
       "U": {
-        "pages": null
+        "pages": {
+          "32": {
+            "value": [],
+            "access": {
+              "inaccessible": false,
+              "writable": true,
+              "readable": false
+            }
+          }
+        }
+      },
+      "I": 0
+    },
+    "1": {
+      "P": [
+        0,
+        0,
+        5,
+        61,
+        7,
+        0,
+        0,
+        2,
+        1
+      ],
+      "U": {
+        "pages": {
+          "32": {
+            "value": [],
+            "access": {
+              "inaccessible": false,
+              "writable": true,
+              "readable": false
+            }
+          }
+        }
       },
       "I": 0
     }
   },
-  "initial-export-segment": [
-    []
-  ],
-  "initial-import-segment": [
-    []
-  ],
+  "initial-export-segment": null,
+  "initial-import-segment": null,
   "initial-export-segment-index": 0,
   "initial-service-index": 0,
-  "initial-delta": {
-    "0": {
-      "s_map": {
-        "0x00000000000000000000000000000000000000000000000000000000000000000000": [
-          0,
-          0,
-          0,
-          0
-        ]
-      },
-      "l_map": {
-        "0x00000000000000000000000000000000000000000000000000000000000000000000": [
-          0
-        ]
-      },
-      "p_map": {
-        "0x00000000000000000000000000000000000000000000000000000000000000000000": [
-          15,
-          15,
-          14,
-          14,
-          13,
-          13,
-          12,
-          12,
-          11,
-          11,
-          10,
-          10
-        ]
-      },
-      "code_hash": "0x00000000000000000000000000000000000000000000000000000000000000000000",
-      "balance": 100,
-      "min_item_gas": 100,
-      "min_memo_gas": 100
-    }
-  },
+  "initial-delta": {},
   "initial-timeslot": 0,
   "expected-gas": 9990,
   "expected-regs": {
-    "0": 4294901760,
-    "1": 4278059008,
-    "10": 0,
-    "11": 0,
-    "12": 0,
-    "2": 0,
-    "3": 0,
-    "4": 0,
-    "5": 0,
-    "6": 0,
-    "7": 18446744073709551612,
-    "8": 12,
-    "9": 0
+    "7": 18446744073709551612
   },
   "expected-memory": {
     "pages": {
       "32": {
-        "value": [
-          10,
-          10,
-          11,
-          11,
-          12,
-          12,
-          13,
-          13,
-          14,
-          14,
-          15,
-          15
-        ],
+        "value": [],
         "access": {
           "inaccessible": false,
           "writable": true,
@@ -147,18 +96,55 @@
     "0": {
       "P": [
         0,
-        1,
+        0,
+        5,
+        61,
+        7,
+        0,
+        0,
         2,
-        3,
-        4
+        1
       ],
       "U": {
-        "pages": null
+        "pages": {
+          "32": {
+            "value": [],
+            "access": {
+              "inaccessible": false,
+              "writable": true,
+              "readable": false
+            }
+          }
+        }
+      },
+      "I": 0
+    },
+    "1": {
+      "P": [
+        0,
+        0,
+        5,
+        61,
+        7,
+        0,
+        0,
+        2,
+        1
+      ],
+      "U": {
+        "pages": {
+          "32": {
+            "value": [],
+            "access": {
+              "inaccessible": false,
+              "writable": true,
+              "readable": false
+            }
+          }
+        }
       },
       "I": 0
     }
   },
-  "expected-export-segment": [
-    []
-  ]
+  "expected-export-segment": null
 }

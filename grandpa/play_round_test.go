@@ -47,7 +47,7 @@ func runNodes(nodes []*Grandpa) {
 						fmt.Printf("[v%d]Broadcast Precommit block_hash = %v\n", node.GetSelfVoterIndex(node.Last_Completed_Round), vote.SignMessage.Message.Vote.BlockHash.String_short())
 					}
 					for _, n := range nodes {
-						if n == node  {
+						if n == node {
 							continue
 						}
 						switch stage {

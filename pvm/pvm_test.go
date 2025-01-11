@@ -46,11 +46,15 @@ type TestCase struct {
 func pvm_test(t *testing.T, tc TestCase) (error, int) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, tc.InitialPC, hostENV, false)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false)
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: true, Writable: true, Inaccessible: false})
 		pvm.Ram.WriteRAMBytes(mem.Address, mem.Data)
+	}
+
+	if len(tc.InitialMemory) == 0 {
+		pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	}
 
 	// Set the initial page map
@@ -66,7 +70,7 @@ func pvm_test(t *testing.T, tc TestCase) (error, int) {
 		num_mismatch++
 		fmt.Printf("Register mismatch for test %s: expected %v, got %v \n", tc.Name, tc.ExpectedRegs, pvm.register)
 	}
-	t.Log("pvm_test")
+	// t.Log("pvm_test")
 	/*
 		// Check the status
 			if status != testCase.ExpectedStatus {
@@ -371,7 +375,7 @@ func equalIntSlices(a, b []uint64) bool {
 }
 
 // Helper function to compare two byte slices
-func equalByteSlices(a []byte, b []byte) bool {
+func equalByteSlices_simple(a []byte, b []byte) bool {
 
 	for i := range a {
 		if a[i] != b[i] {
@@ -436,10 +440,10 @@ func testPVM_invoke(t *testing.T) {
 	// set up the register that can let the code run ==> pointer + length
 	//13 regs
 	regs := []uint64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 100, 0}
-	err := vm.PutGasAndRegistersToMemory(300, 100, regs)
-	if err != OK {
-		t.Errorf("Error putting gas and registers to memory: %v", err)
-	}
+	vm.PutGasAndRegistersToMemory(300, 100, regs)
+	// if err != OK {
+	// 	t.Errorf("Error putting gas and registers to memory: %v", err)
+	// }
 	// read the input and then hash it
 	// put it back to the memory
 	// put the pointer and length to the register
