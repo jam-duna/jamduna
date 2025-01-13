@@ -96,6 +96,7 @@ type Node struct {
 	judgementMap    sync.Map // headerHash -> JudgeBucket
 	//judgementBucket types.JudgeBucket
 	judgementWRMap map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this
+	judgementWRMapMutex sync.Mutex
 
 	clients      map[string]string
 	clientsMutex sync.Mutex

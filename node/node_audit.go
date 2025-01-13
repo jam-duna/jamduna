@@ -84,6 +84,8 @@ func (n *Node) checkTrancheAnnouncement(headerHash common.Hash) bool {
 }
 
 func (n *Node) updateKnownWorkReportMapping(announcement types.Announcement) {
+	n.judgementWRMapMutex.Lock()
+	defer n.judgementWRMapMutex.Unlock()
 	for _, reportHash := range announcement.GetWorkReportHashes() {
 		n.judgementWRMap[reportHash] = announcement.HeaderHash
 	}
@@ -102,6 +104,8 @@ func (n *Node) getJudgementBucket(headerHash common.Hash) (*types.JudgeBucket, e
 }
 
 func (n *Node) getHeadHashFromWorkReportHash(workReportHash common.Hash) (common.Hash, error) {
+	n.judgementWRMapMutex.Lock()
+	defer n.judgementWRMapMutex.Unlock()
 	headerHash, exists := n.judgementWRMap[workReportHash]
 	if !exists {
 		return common.Hash{}, fmt.Errorf("workReportHash %v not found for auditing", workReportHash)
