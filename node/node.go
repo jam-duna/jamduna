@@ -95,7 +95,7 @@ type Node struct {
 	announcementMap sync.Map // headerHash -> stateDB
 	judgementMap    sync.Map // headerHash -> JudgeBucket
 	//judgementBucket types.JudgeBucket
-	judgementWRMap map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this
+	judgementWRMap      map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this
 	judgementWRMapMutex sync.Mutex
 
 	clients      map[string]string
@@ -1263,10 +1263,6 @@ func (n *Node) runClient() {
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
-			ticketIDs, err := n.GetSelfTicketsIDs()
-			if err != nil {
-				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
-			}
 			// timeslot mark
 			// currJCE := common.ComputeCurrentJCETime()
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
@@ -1289,7 +1285,10 @@ func (n *Node) runClient() {
 			//if n.checkGodTimeslotUsed(currJCE) {
 			//	return
 			//}
-
+			ticketIDs, err := n.GetSelfTicketsIDs(currPhase)
+			if err != nil {
+				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
+			}
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, n.extrinsic_pool)
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)

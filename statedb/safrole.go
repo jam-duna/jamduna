@@ -1,7 +1,6 @@
 package statedb
 
 import (
-	"bytes"
 	"fmt"
 	"reflect"
 
@@ -338,9 +337,7 @@ func (s *SafroleState) ComputeCurrRandomness(fresh_randomness common.Hash) commo
 // 6.5.1. Ticket Identifier (Primary Method)
 // ticketSealVRFInput constructs the input for VRF based on target epoch randomness and attempt.
 func ticketSealVRFInput(targetEpochRandomness common.Hash, attempt uint8) []byte {
-	// Concatenate sassafrasTicketSeal, targetEpochRandomness, and attemptBytes
-	ticket_vrf_input := append(append([]byte(types.X_T), targetEpochRandomness.Bytes()...), []byte{byte(attempt & 0xF)}...)
-	return ticket_vrf_input
+	return append(append([]byte(types.X_T), targetEpochRandomness.Bytes()...), []byte{byte(attempt & 0xF)}...)
 }
 
 func (s *SafroleState) computeTicketID(authority_secret_key bandersnatch.BanderSnatchSecret, ticket_vrf_input []byte) (common.Hash, error) {
@@ -682,90 +679,6 @@ func ConvertBanderSnatchPub(block_author_ietf_pub []byte) (bandersnatch.BanderSn
 	return bandersnatch.BytesToBanderSnatchKey(block_author_ietf_pub)
 }
 
-// (6.17) H_v=F[]Ha⟨X_E++Y(H_s)⟩
-func (s *SafroleState) ComputeHeaderEntropySource(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, sealVRFInput []byte) (entropySource []byte, err error) {
-
-	//step 1: Get psuedo VRfSealOutput from Psuedo block seal;
-	m := []byte{}
-	_, psuedoVRfSealOutput, err := s.SignBlockSeal(block_author_ietf_pub, block_author_ietf_priv, sealVRFInput, m)
-	if err != nil {
-		return nil, fmt.Errorf("Fallback BlockSeal ERR=%v", err)
-	}
-	//step 2: get entropySource by sealVRF output
-	entropySource, _, err = SignBlockVRF(block_author_ietf_pub, block_author_ietf_priv, psuedoVRfSealOutput)
-	if err != nil {
-		return nil, err
-	}
-	return entropySource, nil
-}
-
-func (s *SafroleState) SignBlockSeal(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, sealVRFInput []byte, unsignHeader []byte) ([]byte, []byte, error) {
-	//IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte)
-	block_seal, inner_vrfOutput, err := bandersnatch.IetfVrfSign(block_author_ietf_priv, sealVRFInput, unsignHeader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("IetfVrfSign ERR=%v", err)
-	}
-
-	inner_vrfOutput_recovered, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, block_seal, sealVRFInput, unsignHeader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("IetfVrfSign ERR=%v", err)
-	}
-	if bytes.Compare(inner_vrfOutput_recovered, inner_vrfOutput) != 0 {
-		return nil, nil, fmt.Errorf("Seal IetfVrfSign Mismatch Expected:%v | Actual: %x", inner_vrfOutput_recovered, inner_vrfOutput)
-	}
-	return block_seal, inner_vrfOutput, err
-}
-
-func SignBlockVRF(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, inner_vrfOutput []byte) ([]byte, []byte, error) {
-	//IetfVrfSign(privateKey PrivateKey, vrfInputData, auxData []byte)
-
-	// use inner_vrfOutput to to generate fresh randomness
-	entropyVRFInput := computeEntropyVRFInput(common.BytesToHash(inner_vrfOutput))
-	fresh_VRFSignature, fresh_Randomness, err := bandersnatch.IetfVrfSign(block_author_ietf_priv, entropyVRFInput, []byte{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("H_v ERR=%v", err)
-	}
-
-	fresh_Randomness_recovered, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, fresh_VRFSignature, entropyVRFInput, []byte{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("IetfVrfSign ERR=%v", err)
-	}
-	if bytes.Compare(fresh_Randomness, fresh_Randomness_recovered) != 0 {
-		return nil, nil, fmt.Errorf("VRF IetfVrfSign Mismatch Expected:%v | Actual: %x", fresh_Randomness_recovered, fresh_Randomness)
-	}
-	return fresh_VRFSignature, fresh_Randomness, err
-}
-
-func (s *SafroleState) ComputeSealVRFInput(targetJCE uint32, epochType string) ([]byte, uint8, error) {
-	blockSealEntropy := s.Entropy[3]
-	if epochType == "primary" {
-		attempt, err := s.GetBindedAttempt(targetJCE)
-		if err != nil {
-			return nil, 0, err
-		}
-		safroleSealVRFInput := ticketSealVRFInput(blockSealEntropy, attempt)
-		return safroleSealVRFInput, attempt, nil
-	} else if epochType == "fallback" {
-		fallBackSealVRFOutput := fallbackSealVRFInput(blockSealEntropy)
-		return fallBackSealVRFOutput, 0, nil
-	} else {
-		return nil, 0, fmt.Errorf("Invalid epochType")
-	}
-}
-
-// 6.8.2. Secondary Method
-func computeEntropyVRFInput(inner_vrfOutput common.Hash) []byte {
-	entropyPrefix := []byte(types.X_E)
-	entropyVRFInput := append(entropyPrefix, inner_vrfOutput.Bytes()...)
-	return entropyVRFInput
-}
-
-func fallbackSealVRFInput(targetRandomness common.Hash) []byte {
-	sealPrefix := []byte(types.X_F)
-	sealVRFInput := append(sealPrefix, targetRandomness.Bytes()...)
-	return sealVRFInput
-}
-
 func (s *SafroleState) GetRelativeSlotIndex(slot_index uint32) (uint32, error) {
 	//relative slot index = slot - epoch_first_slot
 	relativeSlotIndex := slot_index - s.EpochFirstSlot
@@ -854,53 +767,45 @@ func (state *SafroleState) String() string {
 	return string(jsonBytes)
 }
 
-func (s *SafroleState) GetPrimaryWinningTicket(slot_index uint32) common.Hash {
+func (s *SafroleState) GetPrimaryWinningTicket(slot_index uint32) types.TicketBody {
 	t_or_k := s.TicketsOrKeys
-	winning_tickets := t_or_k.Tickets
 	_, currPhase := s.EpochAndPhase(slot_index)
+
+	winning_tickets := t_or_k.Tickets
 	selected_ticket := winning_tickets[currPhase]
-	return selected_ticket.Id
+	//fmt.Printf("GetPrimaryWinningTicket slot_index=%v currPhase=%v ticket=%s\n", slot_index, currPhase, selected_ticket.Id)
+	return *selected_ticket
 }
 
-func (s *SafroleState) CheckEpochType() string {
-	t_or_k := s.TicketsOrKeys
-	if len(t_or_k.Tickets) > 0 {
-		return "primary"
-	} else {
-		return "fallback"
+func (s *SafroleState) GetEpochT() int {
+	if len(s.TicketsOrKeys.Tickets) > 0 {
+		return 1
 	}
-}
-
-func (s *SafroleState) GetBindedAttempt(targetJCE uint32) (uint8, error) {
-	_, currPhase := s.EpochAndPhase(targetJCE)
-	t_or_k := s.TicketsOrKeys
-	if len(t_or_k.Tickets) == types.EpochLength {
-		winning_ticket := (t_or_k.Tickets)[currPhase]
-		return uint8(winning_ticket.Attempt), nil
-	}
-	return 0, fmt.Errorf("Shouldn't be fallback")
+	return 0
 }
 
 // eq 59
-func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub common.Hash, ticketIDs []common.Hash) bool {
+func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub common.Hash, ticketIDs []common.Hash) (bool, common.Hash, uint8) {
 
 	currEpoch, currPhase := s.EpochAndPhase(slot_index)
 	//TicketsOrKeys
 	t_or_k := s.TicketsOrKeys
-
 	if len(t_or_k.Tickets) == types.EpochLength {
 		winning_ticket_id := s.GetPrimaryWinningTicket(slot_index)
 		for _, ticketID := range ticketIDs {
-			if ticketID == winning_ticket_id {
+			if ticketID == winning_ticket_id.Id {
 				if debug {
 					fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
 				}
-				return true
+				if debugSeal {
+					fmt.Printf("**** IsAuthorizedBuilder SAFROLE ticketID=%s\n", ticketID)
+				}
+				return true, ticketID, winning_ticket_id.Attempt
 			}
 		}
-		if debug {
-			fmt.Printf("[N%v] [UNAUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
-		}
+		// should not reach here if the ticket is valid
+		// fmt.Printf("[N%v] [UNAUTHORIZED] (%v, %v) slot_index=%v primary validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
+
 	} else {
 
 		//fallback mode
@@ -909,11 +814,13 @@ func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub co
 			if debug {
 				fmt.Printf("[N%v] [AUTHORIZED] (%v, %v) slot_index=%v fallback validator=%v\n", s.Id, currEpoch, currPhase, slot_index, bandersnatchPub)
 			}
-			return true
+			if debugSeal {
+				fmt.Printf("**** IsAuthorizedBuilder FALLBACK No ticket \n")
+			}
+			return true, common.Hash{}, 0
 		}
 	}
-
-	return false
+	return false, common.Hash{}, 0
 }
 
 func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {

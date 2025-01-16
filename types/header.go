@@ -132,7 +132,6 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 		AuthorIndex:      b.AuthorIndex,
 		EntropySource:    b.EntropySource,
 	}
-
 	ticketMark, ok, _ := b.ConvertTicketsMark()
 	if ok && ticketMark != nil {
 		bwoSig.TicketsMark = ticketMark
@@ -144,6 +143,15 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 		return nil
 	}
 	return enc
+}
+
+func (b *BlockHeader) String() string {
+	enc, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
 }
 
 func (b *BlockHeader) ConvertTicketsMark() (*TicketsMark, bool, error) {

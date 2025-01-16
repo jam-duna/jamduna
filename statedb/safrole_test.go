@@ -1,15 +1,19 @@
 package statedb
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/stretchr/testify/require"
 )
 
 type TestCase struct {
@@ -17,6 +21,56 @@ type TestCase struct {
 	PreState SafroleStateCodec `json:"pre_state"`
 	// Output    SOutput           `json:"output"`
 	PostState SafroleStateCodec `json:"post_state"`
+}
+
+// Example test function that scans the `seals` directory, reads each .json file,
+// and attempts to verify H_s and H_v the same way VerifyBlockHeader does.
+func TestSealBlockMaterial(t *testing.T) {
+	files, err := filepath.Glob("seals/*.json")
+	require.NoError(t, err)
+
+	for _, file := range files {
+		data, err := ioutil.ReadFile(file)
+		require.NoError(t, err, "failed reading file %s", file)
+
+		var sm SealBlockMaterial
+		err = json.Unmarshal(data, &sm)
+		require.NoError(t, err, "failed unmarshalling file %s", file)
+
+		// Reconstruct the author’s public key
+		pubBytes, err := hex.DecodeString(sm.BlockAuthorPub)
+		require.NoError(t, err)
+		var pubKey bandersnatch.BanderSnatchKey
+		copy(pubKey[:], pubBytes)
+
+		// Convert H_s, H_v from hex
+		HsBytes, err := hex.DecodeString(sm.Hs)
+		require.NoError(t, err)
+		HvBytes, err := hex.DecodeString(sm.Hv)
+		require.NoError(t, err)
+
+		// Convert c, m for H_s
+		cForHs, err := hex.DecodeString(sm.CForHs)
+		require.NoError(t, err)
+		mForHs, err := hex.DecodeString(sm.MForHs)
+		require.NoError(t, err)
+
+		// Convert c, m for H_v
+		cForHv, err := hex.DecodeString(sm.CForHv)
+		require.NoError(t, err)
+		mForHv, err := hex.DecodeString(sm.MForHv)
+		require.NoError(t, err)
+
+		// 1) Verify H_s
+		_, err = bandersnatch.IetfVrfVerify(pubKey, HsBytes, cForHs, mForHs)
+		require.NoError(t, err, "H_s verification failed for file %s", file)
+
+		// 2) Verify H_v
+		_, err = bandersnatch.IetfVrfVerify(pubKey, HvBytes, cForHv, mForHv)
+		require.NoError(t, err, "H_v verification failed for file %s", file)
+
+		fmt.Printf("%s Verified\n", file)
+	}
 }
 
 func TestSafrole(t *testing.T) {

@@ -3,9 +3,11 @@ package statedb
 import (
 	"bytes"
 	"context"
+
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -833,13 +835,17 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 	currJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady()
 	if timeSlotReady {
 		// Time to propose block if authorized
-		isAuthorizedBlockBuilder := false
 		sf := s.GetSafrole()
-		isAuthorizedBlockBuilder = sf.IsAuthorizedBuilder(currJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
+		sf0, _, err := sf.ValidateTicketTransition(currJCE, common.Hash{})
+		if err != nil {
+			fmt.Printf("Error validating ticket transition: %v\n", err)
+			return nil, nil, err
+		}
+		isAuthorizedBlockBuilder, ticketID, _ := sf0.IsAuthorizedBuilder(currJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		if isAuthorizedBlockBuilder {
 			// propose block without state transition
 			start := time.Now()
-			proposedBlk, err := s.MakeBlock(credential, currJCE, extrinsic_pool)
+			proposedBlk, err := s.MakeBlock(credential, currJCE, ticketID, extrinsic_pool)
 			if err != nil {
 				fmt.Printf("Error making block: %v\n", err)
 				return nil, nil, err
@@ -1269,103 +1275,204 @@ func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
 	return true
 }
 
-func VerifySealAndSignature(block_author_ietf_pub bandersnatch.BanderSnatchKey, blockSeal []byte, entropySource []byte, sealVRFInput []byte, unsignHeader []byte) ([]byte, error) {
-	//fmt.Printf("****VerifySealAndSignature\nIETF_Pub(l=%v)=%v\nblockSeal(l=%v)=%x\nentropySource(l=%v)=%x\nsealVRFInput(l=%v)=%x\nunsignHeader(l=%v)=%x****\n", len(block_author_ietf_pub), block_author_ietf_pub, len(blockSeal), blockSeal, len(entropySource), entropySource, len(sealVRFInput), sealVRFInput, len(unsignHeader), unsignHeader)
+// SealBlockMaterial holds all intermediate values for debug, auditing, or external verification.
+type SealBlockMaterial struct {
+	BlockAuthorPub  string `json:"bandersnatch_pub"`
+	BlockAuthorPriv string `json:"bandersnatch_priv"` // never store real priv keys in production!
+	TicketID        string `json:"ticket_id"`
 
-	//Step 1: Sealing Verification; blockSeal is the inner_signature from sealVRFInput
-	inner_vrfOutput, blockSealErr := bandersnatch.IetfVrfVerify(block_author_ietf_pub, blockSeal, sealVRFInput, unsignHeader)
-	if blockSealErr != nil {
-		//fmt.Printf("VerifySealAndSignature BlockSeal Err=%v\n", blockSealErr)
-		return nil, fmt.Errorf("BlockSeal ERR=%v", blockSealErr)
-	}
+	// We store intermediate VRF inputs: cForHs is c used for H_s; mForHs is the message used for H_s
+	// cForHv is c used for H_v; mForHv is the message used for H_v (often empty).
+	CForHs string `json:"c_for_H_s"`
+	MForHs string `json:"m_for_H_s"`
+	Hs     string `json:"H_s"`
 
-	//Step 2: EntropySource Verification; entropySource is the outer_signature further derived from VRFOutput(blockSeal)
-	entropyVRFInput := computeEntropyVRFInput(common.BytesToHash(inner_vrfOutput))
-	freshRandomness, entropyErr := bandersnatch.IetfVrfVerify(block_author_ietf_pub, entropySource, entropyVRFInput, []byte{})
-	if entropyErr != nil {
-		//fmt.Printf("VerifySealAndSignature entropySource Err=%v\n", entropyErr)
-		return nil, fmt.Errorf("entropySource ERR=%v", entropyErr)
-	}
-	return freshRandomness, nil
+	CForHv string `json:"c_for_H_v"`
+	MForHv string `json:"m_for_H_v"`
+	Hv     string `json:"H_v"`
+
+	// We also save some block info. You can store the entire header if you want,
+	// or just the necessary fields (EntropySource, Seal, etc).
+	Entropy3    string `json:"eta3"`
+	T           uint8  `json:"T"`
+	HeaderBytes string `json:"header_bytes"`
 }
 
 func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx uint16, ietf_pub bandersnatch.BanderSnatchKey, verificationErr error) {
-
 	sf := s.GetSafrole()
 	targetJCE := bl.TimeSlot()
 	h := bl.GetHeader()
-	unsignHeader := h.BytesWithoutSig()
-	blockSeal := h.Seal
-	entropySource := h.EntropySource
 	validatorIdx = h.AuthorIndex
 
-	//Step1: Get sealVRFInput & Attempt
-	sf_tmp, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
+	// ValidateTicketTransition
+	sf0, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
 	if err != nil {
 		fmt.Printf("Error in generating sf_tmp: %v\n", err)
 	}
-	epochType := sf_tmp.CheckEpochType()
-	sealVRFInput, _, err := sf_tmp.ComputeSealVRFInput(targetJCE, epochType)
-	if err != nil {
-		fmt.Printf("Error in ComputeSealVRFInput: %v\n", err)
-		return false, validatorIdx, ietf_pub, err
+	// author_idx is the K' so we use the sf_tmp
+	signing_validator := sf0.GetCurrValidator(int(validatorIdx))
+	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
+
+	// compute c within (6.15) & (6.16)
+	blockSealEntropy := sf0.Entropy[3]
+	var c []byte
+	if sf0.GetEpochT() == 1 {
+		_, currPhase := sf0.EpochAndPhase(targetJCE)
+		winning_ticket := (sf0.TicketsOrKeys.Tickets)[currPhase]
+		c = ticketSealVRFInput(blockSealEntropy, uint8(winning_ticket.Attempt))
+	} else {
+		c = append([]byte(types.X_F), blockSealEntropy.Bytes()...)
 	}
 
-	// author_idx is the K' so we use the sf_tmp
-	signing_validator := sf_tmp.GetCurrValidator(int(validatorIdx))
-	//fmt.Printf("validatorIdx: %v, authority_public=%v\n", validatorIdx, signing_validator.String())
-	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
-	_, verificationErr = VerifySealAndSignature(block_author_ietf_pub, blockSeal[:], entropySource[:], sealVRFInput, unsignHeader)
-	if verificationErr != nil {
-		//fmt.Printf("Testing Entropy[n%d]=%v failed \n", n, entropy)
-		fmt.Printf("Error in VerifySealAndSignature: %v\n", verificationErr)
-		return false, validatorIdx, block_author_ietf_pub, verificationErr
+	// H_s Verification (6.15/6.16)
+	H_s := h.Seal[:]
+	m := h.BytesWithoutSig()
+	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
+	if err != nil {
+		if debugSeal {
+			fmt.Printf("**** IETF Verify FAIL H_s(pub=%x, c=%x, m=%x)=%x\n", block_author_ietf_pub[:], c, m, H_s[:])
+		}
+		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
+		//return true, validatorIdx, block_author_ietf_pub, nil
 	}
-	//fmt.Printf("Testing Entropy[n%d]=%v success!! \n", n, entropy)
+
+	// H_v Verification (6.17)
+	H_v := h.EntropySource[:]
+	c = append([]byte(types.X_E), vrfOutput...)
+	_, err = bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_v, c, []byte{})
+	if err != nil {
+		if debugSeal {
+			fmt.Printf("**** IETF Verify FAIL H_v(pub=%x, c=%x, m=[])=%x\n", block_author_ietf_pub[:], c, H_v[:])
+		}
+		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_v Verification")
+		//return true, validatorIdx, block_author_ietf_pub, nil
+	}
 	return true, validatorIdx, block_author_ietf_pub, nil
 }
 
-func (s *StateDB) SealBlockWithEntropy(block_author_ietf_pub bandersnatch.BanderSnatchKey, block_author_ietf_priv bandersnatch.BanderSnatchSecret, validatorIdx uint16, targetJCE uint32, ol *types.Block) (b *types.Block, err error) {
-
+func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchKey, blockAuthorPriv bandersnatch.BanderSnatchSecret, validatorIdx uint16, targetJCE uint32, originalBlock *types.Block) (*types.Block, error) {
 	sf := s.GetSafrole()
+	newBlock := originalBlock.Copy()
+	header := newBlock.GetHeader()
+	header.ExtrinsicHash = newBlock.Extrinsic.Hash()
 
-	// provide option to potentially mutate the block signer & validator index by changing the targetJCE
-	//targetJCE := bl.TimeSlot()
-	//validatorIdx = h.AuthorIndex
-	b = ol.Copy()
-	h := b.GetHeader()
-	h.ExtrinsicHash = b.Extrinsic.Hash()
-
-	sf_tmp, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
+	// Validate ticket transition
+	sf0, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
 	if err != nil {
-		fmt.Printf("Error in generating sf_tmp: %v\n", err)
-	}
-	epochType := sf_tmp.CheckEpochType()
-	sealVRFInput, _, err := sf_tmp.ComputeSealVRFInput(targetJCE, epochType)
-	if err != nil {
-		return b, err
+		return nil, fmt.Errorf("error generating sf0: %w", err)
 	}
 
-	// Step 0: Compute H_v (entropySource) via Psuedo-Seal
-	entropySource, err := sf_tmp.ComputeHeaderEntropySource(block_author_ietf_pub, block_author_ietf_priv, sealVRFInput)
-	if err != nil {
-		return b, err
+	// Prepare a container to store all intermediate values for debugging / auditing
+	material := &SealBlockMaterial{
+		BlockAuthorPub:  fmt.Sprintf("%x", blockAuthorPub[:]),
+		BlockAuthorPriv: fmt.Sprintf("%x", blockAuthorPriv[:]), // do NOT store real priv keys in production
+		//TicketID:        fmt.Sprintf("%s", ticketID),
 	}
-	// Step 1: Fill in H_v in unsignHeader
-	copy(h.EntropySource[:], entropySource[:])
-	unsignHeader := h.BytesWithoutSig()
 
-	// Step 2: Sign the block seal
-	blockseal, _, err := sf_tmp.SignBlockSeal(block_author_ietf_pub, block_author_ietf_priv, sealVRFInput, unsignHeader)
-	copy(h.Seal[:], blockseal[:])
-	b.Header = h
+	blockSealEntropy := sf0.Entropy[3]
+	if sf0.GetEpochT() == 1 {
 
-	return b, nil
+		var ticketID common.Hash
+		_, currPhase := sf0.EpochAndPhase(targetJCE)
+		winning_ticket := (sf0.TicketsOrKeys.Tickets)[currPhase]
+		ticketID = winning_ticket.Id
+
+		// H_v generation (primary) 6.17
+		c := append([]byte(types.X_E), ticketID.Bytes()...)
+		H_v, _, err := bandersnatch.IetfVrfSign(blockAuthorPriv, c, []byte{})
+		if err != nil {
+			return nil, fmt.Errorf("error generating H_v for primary epoch: %w", err)
+		}
+		copy(header.EntropySource[:], H_v[:])
+		if debugSeal {
+			fmt.Printf("**** IETF SIGN 1 H_v(k=%x, c=%x, m=[])=%x\n", blockAuthorPriv[:], c, header.EntropySource[:])
+		}
+		// Save for the material
+		material.TicketID = fmt.Sprintf("%s", ticketID)
+		material.CForHv = fmt.Sprintf("%x", c[:])
+		material.MForHv = ""
+		material.Hv = fmt.Sprintf("%x", H_v[:])
+
+		// H_s generation (primary) 6.15
+		_, currPhase = sf0.EpochAndPhase(targetJCE)
+		winningTicket := sf0.TicketsOrKeys.Tickets[currPhase]
+		c = append(append([]byte(types.X_T), blockSealEntropy.Bytes()...), byte(uint8(winningTicket.Attempt)&0xF))
+		m := header.BytesWithoutSig()
+		H_s, _, err := bandersnatch.IetfVrfSign(blockAuthorPriv, c, m)
+		if err != nil {
+			return nil, fmt.Errorf("error generating H_s for primary epoch: %w", err)
+		}
+		copy(header.Seal[:], H_s[:])
+		if debugSeal {
+			fmt.Printf("**** IETF SIGN 2 H_s(k=%x, c=%x, m=%x)=%x\n", blockAuthorPriv[:], c, header.BytesWithoutSig(), header.Seal[:])
+		}
+
+		// Save for the material
+		material.T = 1
+		material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
+		material.CForHs = fmt.Sprintf("%x", c[:])
+		material.MForHs = fmt.Sprintf("%x", m[:])
+		material.Hs = fmt.Sprintf("%x", H_s[:])
+	} else {
+		// Y(H_s) generation with an *INCOMPLETE* header because it is missing H_v
+		c := append([]byte(types.X_F), blockSealEntropy.Bytes()...)
+		_, vrfOutput, err := bandersnatch.IetfVrfSign(blockAuthorPriv, c, header.BytesWithoutSig())
+		if err != nil {
+			return nil, fmt.Errorf("error generating H_s for fallback epoch: %w", err)
+		}
+
+		// H_v generation (fallback) 6.17 -- note that vrfOutput above is used
+		cHv := append([]byte(types.X_E), vrfOutput...)
+		H_v, _, err := bandersnatch.IetfVrfSign(blockAuthorPriv, cHv, []byte{})
+		if err != nil {
+			return nil, fmt.Errorf("error generating H_v for fallback epoch: %w", err)
+		}
+		copy(header.EntropySource[:], H_v[:])
+
+		// H_s generation (fallback) 6.16
+		m := header.BytesWithoutSig()
+		H_s, _, err := bandersnatch.IetfVrfSign(blockAuthorPriv, c, m)
+		if err != nil {
+			return nil, fmt.Errorf("error generating H_s for fallback epoch: %w", err)
+		}
+		copy(header.Seal[:], H_s[:])
+
+		// Save for the material
+		material.T = 0
+		material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
+		material.CForHv = fmt.Sprintf("%x", cHv[:])
+		material.MForHv = "" // empty
+		material.Hv = fmt.Sprintf("%x", H_v[:])
+
+		material.CForHs = fmt.Sprintf("%x", c[:])
+		material.MForHs = fmt.Sprintf("%x", m[:])
+		material.Hs = fmt.Sprintf("%x", H_s[:])
+	}
+
+	newBlock.Header = header
+	headerbytes, _ := header.Bytes()
+	material.HeaderBytes = fmt.Sprintf("%x", headerbytes)
+
+	if debugSeal {
+		// Write material as JSON into a file: seals/validatorIdx-targetJCE.json
+		if err := os.MkdirAll("../statedb/seals", 0o755); err != nil {
+			return nil, fmt.Errorf("failed to mkdir seals: %w", err)
+		}
+		jsonData, err := json.MarshalIndent(material, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal SealBlockMaterial: %w", err)
+		}
+		fileName := fmt.Sprintf("../statedb/seals/%d-%d.json", material.T, validatorIdx)
+		if err := ioutil.WriteFile(fileName, jsonData, 0o644); err != nil {
+			return nil, fmt.Errorf("failed to write SealBlockMaterial to file: %w", err)
+		}
+	}
+
+	return newBlock, nil
 }
 
 // make block generate block prior to state execution
-func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
-
+func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, ticketID common.Hash, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
@@ -1541,12 +1648,43 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		return bl, err
 	}
 
+	// For Primary, Verify ticketID actually matched the expected winning ticket
+	_, ticketIDErr := s.ValidateVRFSealInput(ticketID, targetJCE)
+	if ticketIDErr != nil {
+		return bl, err
+	}
+
 	b.Header = *h
 	sealedBlock, sealErr := s.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, author_index, targetJCE, b)
 	if sealErr != nil {
 		return bl, sealErr
 	}
 	return sealedBlock, nil
+}
+
+// Make sure ticketID "x_t ++ n3' ++ attempt" match the one in TicketsOrKeys. Fallback has no ticketID to check.
+func (s *StateDB) ValidateVRFSealInput(ticketID common.Hash, targetJCE uint32) (bool, error) {
+
+	// ValidateTicketTransition
+	sf := s.GetSafrole()
+	sf0, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
+	if err != nil {
+		fmt.Printf("Error in generating sf_tmp: %v\n", err)
+		return false, fmt.Errorf("%v", err)
+	}
+
+	if sf0.GetEpochT() == 0 {
+		return true, nil
+	}
+
+	_, targetPhase := sf0.EpochAndPhase(targetJCE)
+	winning_ticket := (sf0.TicketsOrKeys.Tickets)[targetPhase]
+	expectedTicketID := winning_ticket.Id
+
+	if expectedTicketID != ticketID {
+		return false, fmt.Errorf("[%v] Ticket Mismatch! Expected=%v | Actual=%v", targetJCE, expectedTicketID, ticketID)
+	}
+	return true, nil
 }
 
 func (s *StateDB) GetAncestorTimeSlot() []uint32 {
