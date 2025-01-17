@@ -101,6 +101,7 @@ const (
 	debugP                    = false
 	debugAudit                = false
 	debugSeal                 = false
+	saveSealBlockMaterial     = true
 	trace                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
@@ -1280,6 +1281,7 @@ type SealBlockMaterial struct {
 	BlockAuthorPub  string `json:"bandersnatch_pub"`
 	BlockAuthorPriv string `json:"bandersnatch_priv"` // never store real priv keys in production!
 	TicketID        string `json:"ticket_id"`
+	Attempt         uint8  `json:"attempt"`
 
 	// We store intermediate VRF inputs: cForHs is c used for H_s; mForHs is the message used for H_s
 	// cForHv is c used for H_v; mForHv is the message used for H_v (often empty).
@@ -1291,8 +1293,7 @@ type SealBlockMaterial struct {
 	MForHv string `json:"m_for_H_v"`
 	Hv     string `json:"H_v"`
 
-	// We also save some block info. You can store the entire header if you want,
-	// or just the necessary fields (EntropySource, Seal, etc).
+	// We also save some block info.
 	Entropy3    string `json:"eta3"`
 	T           uint8  `json:"T"`
 	HeaderBytes string `json:"header_bytes"`
@@ -1366,16 +1367,13 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 	material := &SealBlockMaterial{
 		BlockAuthorPub:  fmt.Sprintf("%x", blockAuthorPub[:]),
 		BlockAuthorPriv: fmt.Sprintf("%x", blockAuthorPriv[:]), // do NOT store real priv keys in production
-		//TicketID:        fmt.Sprintf("%s", ticketID),
 	}
 
 	blockSealEntropy := sf0.Entropy[3]
 	if sf0.GetEpochT() == 1 {
-
-		var ticketID common.Hash
 		_, currPhase := sf0.EpochAndPhase(targetJCE)
-		winning_ticket := (sf0.TicketsOrKeys.Tickets)[currPhase]
-		ticketID = winning_ticket.Id
+		winningTicket := sf0.TicketsOrKeys.Tickets[currPhase]
+		ticketID := winningTicket.Id
 
 		// H_v generation (primary) 6.17
 		c := append([]byte(types.X_E), ticketID.Bytes()...)
@@ -1387,15 +1385,16 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		if debugSeal {
 			fmt.Printf("**** IETF SIGN 1 H_v(k=%x, c=%x, m=[])=%x\n", blockAuthorPriv[:], c, header.EntropySource[:])
 		}
-		// Save for the material
-		material.TicketID = fmt.Sprintf("%s", ticketID)
-		material.CForHv = fmt.Sprintf("%x", c[:])
-		material.MForHv = ""
-		material.Hv = fmt.Sprintf("%x", H_v[:])
+		if saveSealBlockMaterial {
+			// Save for the material
+			material.TicketID = fmt.Sprintf("%s", ticketID)
+			material.Attempt = winningTicket.Attempt
+			material.CForHv = fmt.Sprintf("%x", c[:])
+			material.MForHv = ""
+			material.Hv = fmt.Sprintf("%x", H_v[:])
+		}
 
 		// H_s generation (primary) 6.15
-		_, currPhase = sf0.EpochAndPhase(targetJCE)
-		winningTicket := sf0.TicketsOrKeys.Tickets[currPhase]
 		c = append(append([]byte(types.X_T), blockSealEntropy.Bytes()...), byte(uint8(winningTicket.Attempt)&0xF))
 		m := header.BytesWithoutSig()
 		H_s, _, err := bandersnatch.IetfVrfSign(blockAuthorPriv, c, m)
@@ -1408,11 +1407,13 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		}
 
 		// Save for the material
-		material.T = 1
-		material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
-		material.CForHs = fmt.Sprintf("%x", c[:])
-		material.MForHs = fmt.Sprintf("%x", m[:])
-		material.Hs = fmt.Sprintf("%x", H_s[:])
+		if saveSealBlockMaterial {
+			material.T = 1
+			material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
+			material.CForHs = fmt.Sprintf("%x", c[:])
+			material.MForHs = fmt.Sprintf("%x", m[:])
+			material.Hs = fmt.Sprintf("%x", H_s[:])
+		}
 	} else {
 		// Y(H_s) generation with an *INCOMPLETE* header because it is missing H_v
 		c := append([]byte(types.X_F), blockSealEntropy.Bytes()...)
@@ -1438,31 +1439,33 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		copy(header.Seal[:], H_s[:])
 
 		// Save for the material
-		material.T = 0
-		material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
-		material.CForHv = fmt.Sprintf("%x", cHv[:])
-		material.MForHv = "" // empty
-		material.Hv = fmt.Sprintf("%x", H_v[:])
+		if saveSealBlockMaterial {
+			material.T = 0
+			material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
+			material.CForHv = fmt.Sprintf("%x", cHv[:])
+			material.MForHv = "" // empty
+			material.Hv = fmt.Sprintf("%x", H_v[:])
 
-		material.CForHs = fmt.Sprintf("%x", c[:])
-		material.MForHs = fmt.Sprintf("%x", m[:])
-		material.Hs = fmt.Sprintf("%x", H_s[:])
+			material.CForHs = fmt.Sprintf("%x", c[:])
+			material.MForHs = fmt.Sprintf("%x", m[:])
+			material.Hs = fmt.Sprintf("%x", H_s[:])
+		}
 	}
 
 	newBlock.Header = header
 	headerbytes, _ := header.Bytes()
-	material.HeaderBytes = fmt.Sprintf("%x", headerbytes)
 
-	if debugSeal {
+	if saveSealBlockMaterial {
+		material.HeaderBytes = fmt.Sprintf("%x", headerbytes)
 		// Write material as JSON into a file: seals/validatorIdx-targetJCE.json
-		if err := os.MkdirAll("../statedb/seals", 0o755); err != nil {
+		if err := os.MkdirAll("../jamtestvectors/seals", 0o755); err != nil {
 			return nil, fmt.Errorf("failed to mkdir seals: %w", err)
 		}
 		jsonData, err := json.MarshalIndent(material, "", "  ")
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal SealBlockMaterial: %w", err)
 		}
-		fileName := fmt.Sprintf("../statedb/seals/%d-%d.json", material.T, validatorIdx)
+		fileName := fmt.Sprintf("../jamtestvectors/seals/%d-%d.json", material.T, validatorIdx)
 		if err := ioutil.WriteFile(fileName, jsonData, 0o644); err != nil {
 			return nil, fmt.Errorf("failed to write SealBlockMaterial to file: %w", err)
 		}

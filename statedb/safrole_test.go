@@ -26,7 +26,7 @@ type TestCase struct {
 // Example test function that scans the `seals` directory, reads each .json file,
 // and attempts to verify H_s and H_v the same way VerifyBlockHeader does.
 func TestSealBlockMaterial(t *testing.T) {
-	files, err := filepath.Glob("seals/*.json")
+	files, err := filepath.Glob("../jamtestvectors/seals/*.json")
 	require.NoError(t, err)
 
 	for _, file := range files {
