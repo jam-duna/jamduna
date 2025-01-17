@@ -2,13 +2,13 @@ package main
 
 import (
 	"crypto/ed25519"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"os/user"
 	"path/filepath"
-	"strings"
+	"runtime"
+	"runtime/pprof"
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
@@ -17,6 +17,10 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
+
+func getGenesisFile(network string) string {
+	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network)
+}
 
 func getNextTimestampMultipleOf12() int {
 	current := time.Now().Unix()
@@ -28,21 +32,42 @@ func getNextTimestampMultipleOf12() int {
 	return int(future) + types.SecondsPerSlot
 }
 
+func startPProf(port int) *os.File {
+	// stop the pprof file before the program exits	// start the pprof file
+	filename := fmt.Sprintf("pprof_%d.prof", port)
+	file, err := os.Create(filename)
+	if err != nil {
+		fmt.Printf("Error creating pprof file: %v\n", err)
+		return nil
+	}
+
+	if err := pprof.StartCPUProfile(file); err != nil {
+		fmt.Printf("Error starting pprof: %v\n", err)
+		file.Close()
+		return nil
+	}
+
+	fmt.Printf("Started pprof profiling to file: %s\n", filename)
+	return file
+}
+
 func main() {
-	validators, secrets, err := generateValidatorNetwork()
+
+	var validatorIndex int
+	validators, secrets, err := node.GenerateValidatorNetwork()
 	if err != nil {
 		fmt.Printf("Error: %s", err)
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
+
 	defaultTS := getNextTimestampMultipleOf12()
 	// Parse the command-line flags into config
 	config := &types.CommandConfig{}
 	var help bool
-	var validatorIndex int
 	flag.BoolVar(&help, "h", false, "Displays help information about the commands and flags.")
 	flag.StringVar(&config.DataDir, "datadir", filepath.Join(os.Getenv("HOME"), ".jam"), "Specifies the directory for the blockchain, keystore, and other data.")
-	flag.IntVar(&config.Port, "port", 8000, "Specifies the network BASE port.")
+	flag.IntVar(&config.Port, "port", 9900, "Specifies the network listening port.")
 	flag.IntVar(&config.Epoch0Timestamp, "ts", defaultTS, "Epoch0 Unix timestamp (will override genesis config)")
 
 	flag.IntVar(&validatorIndex, "validatorindex", 0, "Validator Index (only for development)")
@@ -51,7 +76,24 @@ func main() {
 	flag.StringVar(&config.Bandersnatch, "bandersnatch", "", "Bandersnatch Seed (only for development)")
 	flag.StringVar(&config.Bls, "bls", "", "BLS private key (only for development)")
 	flag.StringVar(&config.NodeName, "metadata", "Alice", "Node metadata")
+	flag.StringVar(&config.Network, "network", "tiny", "Choose the network (tiny, small,... full)")
 	flag.Parse()
+
+	var pprofFile *os.File
+	lastValidatorIndex := types.TotalValidators - 1
+	// Start pprof server on specified nodes
+	if debugDAPProf {
+		runtime.SetCPUProfileRate(10000000)
+		switch config.Port {
+		case 9000, 9001, lastValidatorIndex + 9000:
+			pprofFile = startPProf(config.Port)
+		}
+	}
+
+	if debugDA {
+		fmt.Printf("Run validatorindex %d\n", validatorIndex)
+	}
+	GenesisFile := getGenesisFile(config.Network)
 
 	// If help is requested, print usage and exit
 	if help {
@@ -59,37 +101,14 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
-	peers, peerList, err := generatePeerNetwork(validators, uint16(config.Port))
-
-	// Load and parse genesis file
-	var genesisConfig statedb.GenesisConfig
-	if len(config.Genesis) == 0 {
-		// If no genesis file is provided, use default values with optional timestamp
-		genesisConfig.Authorities = validators
-	} else {
-		// Load genesis file and parse it into genesisConfig
-		data, err := ioutil.ReadFile(config.Genesis)
-		if err != nil {
-			os.Exit(0)
-		}
-
-		// Parse genesis file into genesisConfig
-		err = json.Unmarshal(data, &genesisConfig)
-		if err != nil {
-			os.Exit(0)
-		}
+	peers, peerList, err := generatePeerNetwork(validators, config.Port)
+	if err != nil {
+		fmt.Printf("generatePeerNetwork Error: %s", err)
+		panic("generatePeerNetwork Error")
 	}
-
-	currTS := uint64(time.Now().Unix())
-	if config.Epoch0Timestamp > 0 {
-		if currTS >= uint64(config.Epoch0Timestamp) {
-			fmt.Printf("Invalid Config. Now(%v) > Epoch0Timestamp (%v)", currTS, config.Epoch0Timestamp)
-			os.Exit(1)
-		}
-		genesisConfig.Epoch0Timestamp = uint64(config.Epoch0Timestamp)
-	} else if genesisConfig.Epoch0Timestamp == 0 && config.Epoch0Timestamp > 0 {
-		genesisConfig.Epoch0Timestamp = currTS + 6
-	}
+	// fmt.Printf("peers, peerList %v %v\n", peers, peerList)
+	// epoch0Timestamp := statedb.NewEpoch0Timestamp()
+	epoch0Timestamp := uint32(0)
 
 	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
 		// set up validator secrets
@@ -99,32 +118,41 @@ func main() {
 		}
 		// TODO: use the return values to check against the genesisConfig
 	}
-
+	config.Genesis = GenesisFile
 	// Set up peers and node
-	dataDir := filepath.Join(config.DataDir, fmt.Sprintf("node%d", validatorIndex))
-
-	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], genesisStateFile, 0, peers, peerList, dataDir, int(config.Port)+int(validatorIndex))
+	if debugDA {
+		fmt.Printf("Run config.Genesis %s\n", config.Genesis)
+	}
+	// _, err = node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.Genesis, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
+	paths := SetLevelDBPaths(types.TotalValidators)
+	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], config.Genesis, epoch0Timestamp, peers, peerList, paths[validatorIndex], config.Port)
 	if err != nil {
-		fmt.Printf("---NewNodeDA %v\n", err)
-		panic(1999)
+		fmt.Printf("Error: %v", err)
+		panic(1)
 	}
-	n.RunDASimulation()
+	pprofTime := 10 * time.Second
+	n.RunDASimulation(pprofFile, pprofTime)
+	// ticker := time.NewTicker(1 * time.Millisecond)
+	// defer ticker.Stop()
+	// for {
+	// 	select {
+	// 	case <-ticker.C:
 
-	ticker := time.NewTicker(1 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-
-		}
-	}
+	// 	}
+	// }
 }
 
-func generatePeerNetwork(validators []types.Validator, port uint16) (peers []string, peerList map[uint16]*node.Peer, err error) {
+func init() {
+	pprof.StopCPUProfile() // Stop the CPU profile before the program exits
+}
+
+func generatePeerNetwork(validators []types.Validator, port int) (peers []string, peerList map[uint16]*node.Peer, err error) {
 	peerList = make(map[uint16]*node.Peer)
 	for i := uint16(0); i < types.TotalValidators; i++ {
+		originalPort := uint16(9000)
+		listernerPort := originalPort + i
 		v := validators[i]
-		peerAddr := fmt.Sprintf("127.0.0.1:%d", port+i)
+		peerAddr := fmt.Sprintf("127.0.0.1:%d", listernerPort)
 		peer := fmt.Sprintf("%s", v.Ed25519)
 		peers = append(peers, peer)
 		peerList[i] = &node.Peer{
@@ -136,33 +164,9 @@ func generatePeerNetwork(validators []types.Validator, port uint16) (peers []str
 	return peers, peerList, nil
 }
 
-func generateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
-	for i := uint32(0); i < types.TotalValidators; i++ {
-		// assign metadata names for the first 6
-		// nodeName := fmt.Sprintf("node%d", i)
-		metadata := fmt.Sprintf("node%d", i)
-		// Create hex strings for keys
-		iHex := fmt.Sprintf("%x", i)
-		if len(iHex)%2 != 0 {
-			iHex = "0" + iHex
-		}
-		iHexByteLen := len(iHex) / 2
-		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes-iHexByteLen), iHex)
-		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen-iHexByteLen), iHex)
-		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes-iHexByteLen), iHex)
-
-		// Set up the secret/validator using hex values
-		v, s, err := setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata)
-		if err != nil {
-			return validators, secrets, err
-		}
-		validators = append(validators, v)
-		secrets = append(secrets, s)
-	}
-	return validators, secrets, nil
-}
-
 const debug = false
+const debugDA = false
+const debugDAPProf = true
 
 // setupValidatorSecret sets up the validator secret struct and validates input lengths
 func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) (validator types.Validator, secret types.ValidatorSecret, err error) {
@@ -202,4 +206,38 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 		return validator, secret, err
 	}
 	return validator, secret, nil
+}
+
+func SetLevelDBPaths(numNodes int) []string {
+	node_paths := make([]string, numNodes)
+	// timeslot mark
+	// currJCE := common.ComputeCurrentJCETime()
+	currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+	for i := 0; i < numNodes; i++ {
+		node_idx := fmt.Sprintf("%d", i)
+		node_path, err := computeLevelDBPath(node_idx, int(currJCE))
+		if err == nil {
+			node_paths[i] = node_path
+		}
+	}
+	return node_paths
+}
+
+func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
+	/* standardize on
+	/tmp/<user>/jam/<unixtimestamp>/testdb#
+
+	/tmp/ntust/jam/1727903082/node1/leveldb/
+	/tmp/ntust/jam/1727903082/node1/data/
+
+	/tmp/root/jam/1727903082/node1/
+
+	*/
+	currentUser, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("could not get current user: %v", err)
+	}
+	username := currentUser.Username
+	path := fmt.Sprintf("/tmp/%s/jam/%v/node%v", username, unixtimestamp, id)
+	return path, nil
 }

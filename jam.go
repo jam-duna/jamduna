@@ -5,6 +5,7 @@ import (
 
 	"flag"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/node"
@@ -13,7 +14,6 @@ import (
 
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -28,7 +28,7 @@ func getNextTimestampMultipleOf12() int {
 }
 
 func main() {
-	validators, secrets, err := generateValidatorNetwork()
+	validators, secrets, err := node.GenerateValidatorNetwork()
 	if err != nil {
 		fmt.Printf("Error: %s", err)
 		flag.PrintDefaults()
@@ -94,32 +94,6 @@ func generatePeerNetwork(validators []types.Validator, port int) (peers []string
 		}
 	}
 	return peers, peerList, nil
-}
-
-func generateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
-	for i := uint32(0); i < types.TotalValidators; i++ {
-		// assign metadata names for the first 6
-		// nodeName := fmt.Sprintf("node%d", i)
-		metadata := fmt.Sprintf("node%d", i)
-		// Create hex strings for keys
-		iHex := fmt.Sprintf("%x", i)
-		if len(iHex)%2 != 0 {
-			iHex = "0" + iHex
-		}
-		iHexByteLen := len(iHex) / 2
-		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes-iHexByteLen), iHex)
-		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen-iHexByteLen), iHex)
-		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes-iHexByteLen), iHex)
-
-		// Set up the secret/validator using hex values
-		v, s, err := setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata)
-		if err != nil {
-			return validators, secrets, err
-		}
-		validators = append(validators, v)
-		secrets = append(secrets, s)
-	}
-	return validators, secrets, nil
 }
 
 const debug = false

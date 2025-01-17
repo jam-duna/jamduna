@@ -144,7 +144,7 @@ func VerifyEpochMarker(epochMark *types.EpochMark) (bool, error) {
 }
 
 func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
-	var nextValidators [6]common.Hash
+	var nextValidators [types.TotalValidators]common.Hash
 	for i, v := range s.NextValidators {
 		nextValidators[i] = v.GetBandersnatchKey().Hash()
 	}

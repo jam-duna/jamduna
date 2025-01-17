@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"io"
 
+	"reflect"
+
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
-	"reflect"
 )
 
 /*

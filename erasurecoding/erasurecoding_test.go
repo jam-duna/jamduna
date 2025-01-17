@@ -1,465 +1,373 @@
 package erasurecoding
 
 import (
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
+	"bytes"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/klauspost/reedsolomon"
+	"github.com/colorfulnotion/jam/common"
 )
 
-// Define the structure for the JSON data
-type TestCase struct {
-	Data        string `json:"data"`
-	WorkPackage struct {
-		Chunks     []string `json:"chunks"`
-		ChunksRoot string   `json:"chunks_root"`
-	} `json:"work_package"`
-	Segment struct {
-		Segments []struct {
-			SegmentEC []string `json:"segment_ec"`
-		} `json:"segments"`
-	} `json:"segment"`
-}
-
-type AtomicShards struct {
-	Data    string `json:"data"`
-	Segment struct {
-		Segments []struct {
-			SegmentEC []string `json:"segment_ec"`
-		} `json:"segments"`
-	} `json:"segment"`
-}
-
-// GetShards with padding
-func GetSubshards(data []byte) [][][]byte {
-	segments := (len(data)) / 1026 / 12
-	shards := 1026
-	shardLength := 12
-	array := make([][][]byte, segments)
-	for i := 0; i < segments; i++ {
-		array[i] = make([][]byte, shards)
-		for j := 0; j < shards; j++ {
-			array[i][j] = make([]byte, shardLength)
-			for k := 0; k < shardLength; k++ {
-				index := i*12312 + j*12 + k
-				if index < len(data) {
-					array[i][j][k] = data[index]
-				} else {
-					array[i][j][k] = 0 // padding
-				}
-			}
-		}
+// Helper function to pad data to the nearest multiple of dataShard * shardPieces * 2
+func padData(data []byte, dataShard int, shardPieces int) ([]byte, int) {
+	originalLength := len(data)
+	segmentSize := dataShard * int(shardPieces) * 2
+	if segmentSize == 0 {
+		panic("segmentSize cannot be zero")
 	}
-	return array
+	padLength := segmentSize - (len(data) % segmentSize)
+	if len(data)%segmentSize != 0 {
+		data = append(data, make([]byte, padLength)...)
+	}
+	return data, originalLength
 }
 
-// GetShards without padding
-func GetSubshardsAtomic(data []byte, original []byte) [][][]byte {
-	segmentsNum := len(original) / 4104
-	datashardslength := (((len(original)%4104)-1)/684 + 1) * 2
-	segments := (len(data)) / 1026 / 12
-	shards := 1026
-	shardLength := 12
-	array := make([][][]byte, segments)
-	for i := 0; i < segments; i++ {
-		if i < segmentsNum {
-			array[i] = make([][]byte, shards)
-			for j := 0; j < shards; j++ {
-				array[i][j] = make([]byte, shardLength)
-				for k := 0; k < shardLength; k++ {
-					index := i*12312 + j*12 + k
-					if index < len(data) {
-						array[i][j][k] = data[index]
-					} else {
-						array[i][j][k] = 0 // padding
-					}
-				}
-			}
-		} else {
-			array[i] = make([][]byte, shards)
-			for j := 0; j < shards; j++ {
-				array[i][j] = make([]byte, datashardslength)
-				for k := 0; k < datashardslength; k++ {
-					index := i*12312 + j*12 + k
-					if index < len(data) {
-						array[i][j][k] = data[index]
-					} else {
-						array[i][j][k] = 0 // padding
-					}
-				}
-			}
-		}
+func TestEncodeDecode(t *testing.T) {
+	dataShard, _ := GetCodingRate()
 
-	}
-
-	return array
-}
-
-// Converts the 3D array to JSON with hex encoding and saves files
-func ConvertToJSON(data []byte, encodedArray [][][]byte, filePath string) error {
-	originalDataHex := hex.EncodeToString(data)
-
-	segments := make([]struct {
-		SegmentEC []string `json:"segment_ec"`
-	}, len(encodedArray))
-	for i, arr2D := range encodedArray {
-		segmentShards := make([]string, len(arr2D))
-		for j, arr1D := range arr2D {
-			hexShard := ""
-			for _, v := range arr1D {
-				hexShard += hex.EncodeToString([]byte{v})
-			}
-			segmentShards[j] = hexShard
-		}
-		segments[i] = struct {
-			SegmentEC []string `json:"segment_ec"`
-		}{SegmentEC: segmentShards}
-	}
-
-	jsonOutput := AtomicShards{
-		Data: originalDataHex,
-		Segment: struct {
-			Segments []struct {
-				SegmentEC []string `json:"segment_ec"`
-			} `json:"segments"`
-		}{
-			Segments: segments,
+	testCases := []struct {
+		name        string
+		data        []byte
+		shardPieces int
+	}{
+		{
+			name:        "Empty data",
+			data:        []byte{},
+			shardPieces: 1,
+		},
+		{
+			name:        "Small data less than one shard",
+			data:        []byte{1, 2, 3, 4}, // Needs to be even bytes (2 GFPoints)
+			shardPieces: 1,
+		},
+		{
+			name:        "Exact one shard",
+			data:        make([]byte, dataShard*2), // Each shardPiece is dataShard GFPoints, each GFPoint is 2 bytes
+			shardPieces: 1,
+		},
+		{
+			name:        "Multiple shards",
+			data:        make([]byte, dataShard*3*2), // 3 shardPieces
+			shardPieces: 1,
+		},
+		{
+			name:        "Data spanning multiple shards with remainder",
+			data:        make([]byte, dataShard*5*2+100), // 5 shardPieces + 100 bytes
+			shardPieces: 1,
+		},
+		{
+			name:        "Maximum shardPieces",
+			data:        make([]byte, dataShard*10*2), // 10 shardPieces
+			shardPieces: 10,
 		},
 	}
 
-	jsonData, err := json.MarshalIndent(jsonOutput, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Save to the specified file path
-	err = os.WriteFile(filePath, jsonData, 0644)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func EncodeTiny(original []byte) ([][]byte, error) {
-	if len(original) != 24 {
-		return nil, fmt.Errorf("original data length must be 24 bytes")
-	}
-	originalData := make([][]byte, 12)
-	for i := 0; i < 12; i++ {
-		originalData[i] = make([]byte, 64)
-	}
-	for i := 0; i < 4; i++ {
-		originalData[i][0] = original[i*2]
-		originalData[i][1] = original[i*2+1]
-		originalData[i][2] = original[8+i*2]
-		originalData[i][3] = original[8+i*2+1]
-		originalData[i][4] = original[16+i*2]
-		originalData[i][5] = original[16+i*2+1]
-	}
-	enc, err := reedsolomon.New(4, 8, reedsolomon.WithLeopardGF16(true))
-	if err != nil {
-		return nil, err
-	}
-
-	err = enc.Encode(originalData)
-	if err != nil {
-		return nil, err
-	}
-
-	encodedData := make([][]byte, 12)
-	for i := 0; i < 12; i++ {
-		encodedData[i] = originalData[i][:6]
-	}
-
-	return encodedData, nil
-}
-
-func DecodeTiny(encoded [][]byte) ([]byte, error) {
-	paddedData := make([][]byte, 12)
-	for i := 0; i < 12; i++ {
-		paddedData[i] = append(encoded[i], make([]byte, 58)...)
-	}
-
-	dec, err := reedsolomon.New(4, 8, reedsolomon.WithLeopardGF16(true))
-	if err != nil {
-		return nil, err
-	}
-
-	err = dec.Reconstruct(paddedData)
-	if err != nil {
-		return nil, err
-	}
-
-	original := make([]byte, 24)
-	for i := 0; i < 4; i++ {
-		original[i*2] = paddedData[i][0]
-		original[i*2+1] = paddedData[i][1]
-		original[8+i*2] = paddedData[i][2]
-		original[8+i*2+1] = paddedData[i][3]
-		original[16+i*2] = paddedData[i][4]
-		original[16+i*2+1] = paddedData[i][5]
-	}
-
-	return original, nil
-}
-
-// This function is used to read the test vector (old base 64 from PR4/Cheme) from the JSON file
-func readTestVector(jsonFilePath string) ([]byte, []byte, error) {
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	fullPath := filepath.Join(currentDir, jsonFilePath)
-
-	jsonData, err := ioutil.ReadFile(fullPath)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var jsonOutput TestCase
-	err = json.Unmarshal(jsonData, &jsonOutput)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	data, err := base64.StdEncoding.DecodeString(jsonOutput.Data)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var flattenedSubshards []byte
-	for _, segment := range jsonOutput.Segment.Segments {
-		for _, subshardBase64 := range segment.SegmentEC {
-			subshard, err := base64.StdEncoding.DecodeString(subshardBase64)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			paddedData, originalLength := padData(tc.data, dataShard, tc.shardPieces)
+			encoded, err := Encode(paddedData, tc.shardPieces)
 			if err != nil {
-				return nil, nil, err
+				t.Errorf("Error encoding data: %v", err)
+				return
 			}
-			flattenedSubshards = append(flattenedSubshards, subshard...)
-		}
-	}
-
-	return data, flattenedSubshards, nil
-}
-
-// This function is used to read the test vector (new hex from Gav provided) from the JSON file
-func readTestVectorAtom(jsonFilePath string) ([]byte, []byte, error) {
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	fullPath := filepath.Join(currentDir, jsonFilePath)
-
-	jsonData, err := ioutil.ReadFile(fullPath)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var jsonOutput AtomicShards
-	err = json.Unmarshal(jsonData, &jsonOutput)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	data, err := hex.DecodeString(jsonOutput.Data)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var flattenedSubshards []byte
-	for _, segment := range jsonOutput.Segment.Segments {
-		for _, subshardBase64 := range segment.SegmentEC {
-			subshard, err := hex.DecodeString(subshardBase64)
+			decoded, err := Decode(encoded, tc.shardPieces)
 			if err != nil {
-				return nil, nil, err
+				t.Errorf("Error decoding data: %v", err)
+				return
 			}
-			subshardPadded := make([]byte, 12)
-			copy(subshardPadded, subshard)
-			flattenedSubshards = append(flattenedSubshards, subshardPadded...)
-		}
-	}
 
-	return data, flattenedSubshards, nil
-}
-
-func test_encode_decode(t *testing.T, size uint32) error {
-	fmt.Printf("\nTesting size %d\n", size)
-	// Generate random byte array of the specified size
-	original := make([]byte, size)
-	_, err := rand.Read(original)
-	if err != nil {
-		t.Fatalf("Error generating random bytes: %v", err)
-	}
-	fmt.Printf("Original data %x\n", original)
-
-	// Encode the original data
-	numPiecesK := 6
-
-	// Derive K, N
-	K, N := GetCodingRate()
-
-	encodedOutput, err0 := Encode(original, numPiecesK)
-	if err0 != nil {
-		t.Fatalf("Error in Encode: %v", err0)
-	}
-	fmt.Printf("Encoded output:\n")
-	// Print3DByteArray(encodedOutput)
-
-	// Pseudo availability of all subshards, randomly "erase" some subshards according to the availableCount value
-	availability := make([][]bool, len(encodedOutput))
-	availableCount := K // number of available subshards per segment.
-	for i := 0; i < len(encodedOutput); i++ {
-		availability[i] = make([]bool, N)
-		for j := 0; j < N; j++ {
-			if j < N-availableCount {
-				availability[i][j] = false
-			} else {
-				availability[i][j] = true
+			// Slice decoded data to the original length
+			if originalLength > len(decoded) {
+				t.Errorf("Decoded data length (%d) is shorter than original data length (%d)", len(decoded), originalLength)
+				return
 			}
-		}
+			decoded = decoded[:originalLength]
 
-		// Shuffle the available subshards
-		rand.Shuffle(N, func(k, l int) {
-			availability[i][k], availability[i][l] = availability[i][l], availability[i][k]
+			if !bytes.Equal(decoded, tc.data) {
+				t.Errorf("Decoded data does not match original for case '%s'", tc.name)
+			}
 		})
-
-		// Erasure simulation
-		for j := 0; j < N; j++ {
-			if !availability[i][j] {
-				encodedOutput[i][j] = nil
-			}
-		}
 	}
-	fmt.Printf("Erased output:\n")
-	// Print3DByteArray(encodedOutput)
-
-	decodedOutput, err2 := Decode(encodedOutput, numPiecesK)
-	if err2 != nil {
-		t.Fatalf("Error in Decode: %v", err2)
-	}
-	fmt.Printf("Decoded output %x\n", decodedOutput)
-
-	// Check if the decoded output matches the original input
-	for i := 0; i < len(original); i++ {
-		if original[i] != decodedOutput[i] {
-			t.Fatalf("Decoded output does not match the original input for size %d", size)
-		}
-	}
-	fmt.Printf("Decoded output matches the original input for size %d\n", size)
-
-	return nil
 }
 
-// TestEC tests the Encode and Decode functions (also simulate the availability(erasure) of subshards)
-func TestEC(t *testing.T) {
-	sizes := []uint32{
-		1, 32, 684, // one subshard point only
-		4096,   // one page only for subshad
-		4104,   // one page padded
-		15000,  // unaligned padded 4 pages
-		21824,  // min size with full 64 byte aligned chunk.
-		21888,  // aligned full parallelized subshards.
-		100000, // larger
-		200000, // larger 2r
+func TestEncodeDecodeWithPartialShards(t *testing.T) {
+	K, N := GetCodingRate()
+	data := common.Hex2Bytes("0xeffa2e260ad2206b38ebe7cf0a7fa4892161004271be226b4131f8248560e084085305d4e82cdbd79d1ec7f0f3abfa067c519e8c82dab34a75b436e789511690c30ecb3c6dc8ea09")
+
+	originalLength := len(data)
+
+	encodedSegments, err := Encode(data, K)
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+
+	if len(encodedSegments) != 1 {
+		t.Fatalf("Expected 1 encoded segment, got %d", len(encodedSegments))
+	}
+	segment := encodedSegments[0]
+
+	if len(segment) != N {
+		t.Fatalf("Expected %d shards in the encoded segment, got %d", N, len(segment))
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	for _, size := range sizes {
-		err := test_encode_decode(t, size)
-		if err != nil {
-			t.Fatalf("ERR %v", err)
-		}
+	shardIndices := rand.Perm(N)[:K]
+	selectedShards := make([][][]byte, 1)
+	shards := make([][]byte, N)
+	for _, idx := range shardIndices {
+		shards[idx] = segment[idx]
 	}
-}
+	selectedShards[0] = shards
 
-// This function is used to generate test vectors
-func testGenerateTestVectors(t *testing.T) {
-	sizes := []uint32{
-		1, 32, 684, // one subshard point only
-		4096,   // one page only for subshad
-		4104,   // one page padded
-		15000,  // unaligned padded 4 pages
-		21824,  // min size with full 64 byte aligned chunk.
-		21888,  // aligned full parallelized subshards.
-		100000, // larger
-		200000, // larger 2r
-	}
-
-	// Encode the original data
-	numPiecesK := 6
-
-	// TODO: Stanley to check this Jerry
-	// Derive K, N
-	// K := W_E / 2
-	// N := w_s
-
-	//fixed random seed for repeatability
-	rand.Seed(1000003)
-	for _, size := range sizes {
-		original := make([]byte, size)
-		_, err := rand.Read(original)
-		if err != nil {
-			t.Fatalf("Error generating random bytes: %v", err)
-		}
-
-		encodedOutput, err0 := Encode(original, numPiecesK)
-		if err0 != nil {
-			t.Fatalf("Error in Encode: %v", err0)
-		}
-
-		//filename := fmt.Sprintf("package_%d.json", size)
-		filename := fmt.Sprintf("./vectors/atomic_testvectors/package_%d", size)
-		err = ConvertToJSON(original, encodedOutput, filename)
-		if err != nil {
-			t.Fatalf("Error in ConvertToJSON: %v", err)
-		}
-	}
-}
-
-// This function is used to test the Encode and Decode functions using the test vectors
-func testTestVectors(t *testing.T) {
-	data, encoded, err := readTestVectorAtom("./vectors/old_vector/batch_1")
+	decodedData, err := Decode(selectedShards, K)
 	if err != nil {
-		t.Fatalf("Error reading test vector: %v", err)
-	}
-	encodeddata := make([][][]byte, 1)
-	encodeddata[0] = make([][]byte, 1026)
-	for i := 0; i < 1026; i++ {
-		encodeddata[0][i] = make([]byte, 64)
-		copy(encodeddata[0][i], encoded[i*12:(i+1)*12])
+		t.Fatalf("Decode failed: %v", err)
 	}
 
-	// Encode the original data
-	numPiecesK := 6
-
-	//decode
-	decodedOutput, err2 := Decode(encodeddata, numPiecesK)
-	if err2 != nil {
-		t.Fatalf("Error in Decode: %v", err2)
+	if originalLength > len(decodedData) {
+		t.Fatalf("Decoded data length (%d) is shorter than original data length (%d)", len(decodedData), originalLength)
 	}
-	if !compareBytes(data, decodedOutput) {
-		t.Fatalf("Decoded output does not match the original input")
+	decodedData = decodedData[:originalLength]
+
+	if !bytes.Equal(decodedData, data) {
+		t.Errorf("Decoded data does not match original.\nDecoded: %v\nOriginal: %v", decodedData, data)
 	}
 }
 
-func compareBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
+func TestEncodeDecodeData(t *testing.T) {
+	dataShard, _ := GetCodingRate()
+	data := common.Hex2Bytes("0x04201b2ae248e161634d4a5a0185996efe8e2086e57de000000000000000000000000000000")
+	shardPieces := int(6)
+	paddedData, originalLength := padData(data, dataShard, shardPieces)
+	encoded, err := Encode(paddedData, shardPieces)
+	if err != nil {
+		t.Errorf("Error encoding data: %v", err)
+		return
 	}
-	for i, v := range a {
-		if v != b[i] {
-			return false
+	decoded, err := Decode(encoded, shardPieces)
+	if err != nil {
+		t.Errorf("Error decoding data: %v", err)
+		return
+	}
+	decoded = decoded[:originalLength]
+	if !bytes.Equal(decoded, data) {
+		t.Errorf("Decoded data does not match original")
+	}
+}
+
+func TestEncodeDecodeEmptyData(t *testing.T) {
+	data := []byte{}
+	shardPieces := int(1)
+	encoded, err := Encode(data, shardPieces)
+	if err != nil {
+		t.Errorf("Error encoding empty data: %v", err)
+		return
+	}
+	if len(encoded) != 0 {
+		t.Errorf("Expected encoded length 0, got %d", len(encoded))
+	}
+	decoded, err := Decode(encoded, shardPieces)
+	if err != nil {
+		t.Errorf("Error decoding empty data: %v", err)
+		return
+	}
+	if len(decoded) != 0 {
+		t.Errorf("Expected decoded data length 0, got %d", len(decoded))
+	}
+}
+
+func TestEncodeDecodeSingleShard(t *testing.T) {
+	dataShard, _ := GetCodingRate()
+	shardPieces := int(1)
+	data := make([]byte, dataShard*2)
+	for i := 0; i < dataShard*2; i++ {
+		data[i] = byte(i % 256)
+	}
+	paddedData, originalLength := padData(data, dataShard, shardPieces)
+	encoded, err := Encode(paddedData, shardPieces)
+	if err != nil {
+		t.Errorf("Error encoding single shard data: %v", err)
+		return
+	}
+	if len(encoded) != 1 {
+		t.Errorf("Expected 1 encoded segment, got %d", len(encoded))
+	}
+	for _, shard := range encoded[0] {
+		if len(shard) != int(shardPieces)*2 {
+			t.Errorf("Expected shard length %d, got %d", shardPieces*2, len(shard))
 		}
 	}
-	return true
+	decoded, err := Decode(encoded, shardPieces)
+	if err != nil {
+		t.Errorf("Error decoding single shard data: %v", err)
+		return
+	}
+	if originalLength > len(decoded) {
+		t.Errorf("Decoded data length (%d) is shorter than original data length (%d)", len(decoded), originalLength)
+		return
+	}
+	decoded = decoded[:originalLength]
+	if !bytes.Equal(decoded, data) {
+		t.Errorf("Decoded data does not match original for single shard")
+	}
+}
+
+func TestEncodeDecodeMultipleShards(t *testing.T) {
+	dataShard, _ := GetCodingRate()
+	shardPieces := int(6)
+	data := make([]byte, dataShard*3) // 3 shardPieces
+	for i := 0; i < len(data); i++ {
+		data[i] = byte(i % 256)
+	}
+	paddedData, originalLength := padData(data, dataShard, shardPieces)
+	encoded, err := Encode(paddedData, shardPieces)
+	if err != nil {
+		t.Errorf("Error encoding multiple shards data: %v", err)
+		return
+	}
+	expectedSegments := len(paddedData) / (dataShard * int(shardPieces) * 2)
+	if len(encoded) != expectedSegments {
+		t.Errorf("Expected %d encoded segments, got %d", expectedSegments, len(encoded))
+	}
+	for _, segment := range encoded {
+		_, TotalValidators := GetCodingRate()
+		if len(segment) != TotalValidators {
+			t.Errorf("Expected %d shards per segment, got %d", TotalValidators, len(segment))
+		}
+		for _, shard := range segment {
+			if len(shard) != int(shardPieces)*2 {
+				t.Errorf("Expected shard length %d, got %d", shardPieces*2, len(shard))
+			}
+		}
+	}
+	decoded, err := Decode(encoded, shardPieces)
+	if err != nil {
+		t.Errorf("Error decoding multiple shards data: %v", err)
+		return
+	}
+	if originalLength > len(decoded) {
+		t.Errorf("Decoded data length (%d) is shorter than original data length (%d)", len(decoded), originalLength)
+		return
+	}
+	decoded = decoded[:originalLength]
+	if !bytes.Equal(decoded, data) {
+		fmt.Printf("decoded = %v, data = %v\n", decoded, data)
+		t.Errorf("Decoded data does not match original for multiple shards")
+	}
+}
+
+func TestEncodeDecodeWithDifferentShardPieces(t *testing.T) {
+	dataShard, _ := GetCodingRate()
+	shardPieces := int(10)
+	data := make([]byte, dataShard*10*2) // 10 shardPieces
+	for i := 0; i < len(data); i++ {
+		data[i] = byte((i * 3) % 256)
+	}
+	paddedData, originalLength := padData(data, dataShard, shardPieces)
+	encoded, err := Encode(paddedData, shardPieces)
+	if err != nil {
+		t.Errorf("Error encoding with different shardPieces: %v", err)
+		return
+	}
+	expectedSegments := len(paddedData) / (dataShard * int(shardPieces) * 2)
+	if len(encoded) != expectedSegments {
+		t.Errorf("Expected %d encoded segments, got %d", expectedSegments, len(encoded))
+	}
+	for _, segment := range encoded {
+		_, TotalValidators := GetCodingRate()
+		if len(segment) != TotalValidators {
+			t.Errorf("Expected %d shards per segment, got %d", TotalValidators, len(segment))
+		}
+		for _, shard := range segment {
+			if len(shard) != int(shardPieces)*2 {
+				t.Errorf("Expected shard length %d, got %d", shardPieces*2, len(shard))
+			}
+		}
+	}
+	decoded, err := Decode(encoded, shardPieces)
+	if err != nil {
+		t.Errorf("Error decoding with different shardPieces: %v", err)
+		return
+	}
+	if originalLength > len(decoded) {
+		t.Errorf("Decoded data length (%d) is shorter than original data length (%d)", len(decoded), originalLength)
+		return
+	}
+	decoded = decoded[:originalLength]
+	if !bytes.Equal(decoded, data) {
+		t.Errorf("Decoded data does not match original for different shardPieces")
+	}
+}
+
+func TestEncodeDecodeLargeData(t *testing.T) {
+	dataShard, _ := GetCodingRate()
+	shardPieces := int(1)
+	data := make([]byte, dataShard*10*2) // 10 shardPieces
+	for i := 0; i < len(data); i++ {
+		data[i] = byte((i * 7) % 256)
+	}
+	paddedData, originalLength := padData(data, dataShard, shardPieces)
+	encoded, err := Encode(paddedData, shardPieces)
+	if err != nil {
+		t.Errorf("Error encoding large data: %v", err)
+		return
+	}
+	expectedSegments := len(paddedData) / (dataShard * int(shardPieces) * 2)
+	if len(encoded) != expectedSegments {
+		t.Errorf("Expected %d encoded segments, got %d", expectedSegments, len(encoded))
+	}
+	for _, segment := range encoded {
+		_, TotalValidators := GetCodingRate()
+		if len(segment) != TotalValidators {
+			t.Errorf("Expected %d shards per segment, got %d", TotalValidators, len(segment))
+		}
+		for _, shard := range segment {
+			if len(shard) != int(shardPieces)*2 {
+				t.Errorf("Expected shard length %d, got %d", shardPieces*2, len(shard))
+			}
+		}
+	}
+	decoded, err := Decode(encoded, shardPieces)
+	if err != nil {
+		t.Errorf("Error decoding large data: %v", err)
+		return
+	}
+	if originalLength > len(decoded) {
+		t.Errorf("Decoded data length (%d) is shorter than original data length (%d)", len(decoded), originalLength)
+		return
+	}
+	decoded = decoded[:originalLength]
+	if !bytes.Equal(decoded, data) {
+		t.Errorf("Decoded data does not match original for large data")
+	}
+}
+
+func TestDecodeInvalidShards(t *testing.T) {
+	dataShard, _ := GetCodingRate()
+	shardPieces := int(1)
+	data := make([]byte, dataShard*2)
+	for i := 0; i < dataShard*2; i++ {
+		data[i] = byte(i % 256)
+	}
+	paddedData, _ := padData(data, dataShard, shardPieces)
+	encoded, err := Encode(paddedData, shardPieces)
+	if err != nil {
+		t.Errorf("Error encoding data for TestDecodeInvalidShards: %v", err)
+		return
+	}
+	if len(encoded) > 0 && len(encoded[0]) > 0 {
+		encoded[0][0][0] = byte(4)
+		encoded[0][0][1] = byte(2)
+	}
+
+	decode, err := Decode(encoded, shardPieces)
+	if err != nil {
+		t.Errorf("Error decoding data for TestDecodeInvalidShards: %v", err)
+		return
+	}
+	if bytes.Equal(decode, data) {
+		t.Errorf("Decoded data does not match original for invalid shards")
+	}
 }

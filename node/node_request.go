@@ -374,7 +374,17 @@ func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
 		// handle selfRequesting case
 		isSelfRequesting := req.ShardIndex == uint16(n.id)
 		if isSelfRequesting {
-			data := peer.node.chunkMap[req.Hash]
+			value, ok := n.chunkMap.Load(req.Hash)
+			if !ok {
+				self_response := DA_response{
+					Hash:       shard_hash,
+					ShardIndex: peerID,
+					Data:       nil,
+				}
+				return self_response, fmt.Errorf("hash %v not found in chunkMap", req.Hash)
+			}
+			chunk := value.([]byte)
+			data := chunk
 			self_response := DA_response{
 				Hash:       shard_hash,
 				ShardIndex: peerID,

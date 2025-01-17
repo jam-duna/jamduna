@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"log"
+	"sync/atomic"
 
 	"crypto/tls"
 	"crypto/x509"
@@ -25,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/statedb"
@@ -38,6 +40,9 @@ import (
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
 	debugDA           = false // DA
+	debugDADist       = false // DA Distribution
+	debugDARecon      = false // DA Reconstruction
+	debugDAPProf      = true  // DA PProf profiling
 	debugB            = false // Blocks, Announcment
 	debugG            = false // Guaranteeing
 	debugT            = false // Tickets/Safrole
@@ -154,8 +159,23 @@ type Node struct {
 	epoch0Timestamp uint32
 
 	// DA testing only
-	chunkMap map[common.Hash][]byte
-	chunkBox map[common.Hash][][]byte
+	chunkMap       sync.Map
+	chunkBox       map[common.Hash][][]byte
+	lastHash       common.Hash
+	currentHash    common.Hash
+	announcement   bool
+	announcementMu sync.RWMutex
+
+	// DA Debugging
+	totalConnections     int64
+	totalIncomingStreams int64
+	connectedPeers       map[uint16]bool
+
+	// Track the number of opened streams
+	openedStreamsMu   sync.Mutex
+	openedStreams     map[quic.Stream]struct{}
+	dataHashStreamsMu sync.Mutex
+	dataHashStreams   map[common.Hash][]quic.Stream
 
 	// JamBlocks testing only
 	JAMBlocksEndpoint string
@@ -290,7 +310,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
 
-	levelDBPath := fmt.Sprintf("%v/leveldb/", dataDir)
+	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
 		return nil, fmt.Errorf("NewStateDBStorage %v", err)
@@ -348,6 +368,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		godCh:        nil,
 
 		dataDir: dataDir,
+
+		connectedPeers:  make(map[uint16]bool),
+		dataHashStreams: make(map[common.Hash][]quic.Stream),
 	}
 
 	tlsConfig := &tls.Config{
@@ -406,24 +429,38 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	node.setValidatorCredential(credential)
 	node.epoch0Timestamp = epoch0Timestamp
-	var validators []types.Validator
-	validators = node.statedb.GetSafrole().NextValidators
+	if nodeType == ValidatorDAFlag {
+		validators, _, err := generateValidatorNetwork()
+		if err != nil {
+			return nil, err
+		}
+		node.statedb.GetSafrole().NextValidators = validators
+		node.statedb.GetSafrole().CurrValidators = validators
+	}
+
+	validators := node.statedb.GetSafrole().NextValidators
 	if len(validators) == 0 {
-		panic("No validators")
+		panic("newNode No validators")
 	}
 	go node.runServer()
-	go node.runClient()
-	go node.runMain()
-	go node.runPreimages()
-	go node.runBlocksTickets()
-	go node.runAudit() // disable this to pause FetchWorkPackageBundle
+	if nodeType != ValidatorDAFlag {
+		go node.runClient()
+		go node.runMain()
+		go node.runPreimages()
+		go node.runBlocksTickets()
+		go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+	}
 	return node, nil
 }
 
 func GenerateQuicConfig() *quic.Config {
 	return &quic.Config{
-		Allow0RTT:       true,
-		KeepAlivePeriod: time.Minute,
+		Allow0RTT:                  true,
+		KeepAlivePeriod:            time.Minute,
+		MaxIdleTimeout:             2 * time.Second,
+		MaxIncomingStreams:         1000000,
+		MaxStreamReceiveWindow:     20 * 1024 * 1024,
+		MaxConnectionReceiveWindow: 100 * 1024 * 1024,
 	}
 }
 
@@ -513,6 +550,9 @@ func (n *Node) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
 
 func (n *Node) GetCurrValidatorIndex() uint32 {
 	return uint32(n.statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
+}
+func (n *Node) GetSafrole() *statedb.SafroleState {
+	return n.statedb.GetSafrole()
 }
 
 func (n *Node) GetNodeType() string {
@@ -632,11 +672,12 @@ func (n *Node) lookupPubKey(pubKey string) (uint16, bool) {
 }
 
 func (n *Node) handleConnection(conn quic.Connection) {
-
 	remoteAddr := conn.RemoteAddr().String()
+
 	n.clientsMutex.Lock()
 	pubKey, ok := n.clients[remoteAddr]
 	n.clientsMutex.Unlock()
+
 	if !ok {
 		fmt.Printf("handleConnection: UNKNOWN remoteAddr=%s unknown\n", remoteAddr)
 		return
@@ -647,15 +688,35 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		fmt.Printf("handleConnection: UNKNOWN pubkey %s from remoteAddr=%s\n", pubKey, remoteAddr)
 		return
 	}
+
+	// // Statistics for incoming connections
+	// atomic.AddInt64(&n.totalConnections, 1)
+	// n.connectedPeers[validatorIndex] = true
+
+	// defer func() {
+	// 	atomic.AddInt64(&n.totalConnections, -1)
+	// 	delete(n.connectedPeers, validatorIndex)
+	// 	if closeErr := conn.CloseWithError(0, "handle connection closed"); closeErr != nil {
+	// 		fmt.Printf("Failed to close connection from %s: %v\n", remoteAddr, closeErr)
+	// 	}
+	// }()
 	for {
 		stream, err := conn.AcceptStream(context.Background())
 		if err != nil {
-			if quicErr, ok := err.(*quic.ApplicationError); ok && quicErr.ErrorCode == 0 {
-				continue
-			}
-			fmt.Printf("handleConnection: Accept stream error: %v\n", err)
+			// if quicErr, ok := err.(*quic.ApplicationError); ok && quicErr.ErrorCode == 0 {
+			// 	continue
+			// }
+			// fmt.Printf("handleConnection: Accept stream error: %v\n", err)
+			fmt.Printf("[Node %d] AcceptStream from Node %d error: %v\n", n.id, validatorIndex, err)
+			break
 		}
-		go n.DispatchIncomingQUICStream(stream, validatorIndex)
+		atomic.AddInt64(&n.totalIncomingStreams, 1)
+		go func() {
+			defer func() {
+				atomic.AddInt64(&n.totalIncomingStreams, -1)
+			}()
+			n.DispatchIncomingQUICStream(stream, validatorIndex)
+		}()
 	}
 }
 
@@ -732,7 +793,13 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
 			}
 			break
-
+		case reflect.TypeOf([]DADistributeECChunk{}):
+			distributeECChunks := obj.([]DADistributeECChunk)
+			err := p.SendDistributionECChunks(distributeECChunks[id])
+			if err != nil {
+				fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
+			}
+			break
 		case reflect.TypeOf(grandpa.VoteMessage{}):
 			vote := obj.(grandpa.VoteMessage)
 			err := p.SendVoteMessage(vote)
@@ -1490,4 +1557,75 @@ func SplitDataIntoSegmentAndPageProofByIndex(data [][]byte, segmentIndex uint32)
 
 	// Return the segment and its corresponding page proof
 	return data[segmentIndex], data[pageProofPosition]
+}
+
+func GenerateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
+	validators, secrets, err = generateValidatorNetwork()
+	return validators, secrets, err
+}
+
+func generateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
+	for i := uint32(0); i < types.TotalValidators; i++ {
+		// assign metadata names for the first 6
+		// nodeName := fmt.Sprintf("node%d", i)
+		originalPort := uint32(9000)
+		listernerPort := originalPort + i
+		metadata := fmt.Sprintf("127.0.0.1:%d", listernerPort)
+		// Create hex strings for keys
+		iHex := fmt.Sprintf("%x", i)
+		if len(iHex)%2 != 0 {
+			iHex = "0" + iHex
+		}
+		iHexByteLen := len(iHex) / 2
+		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes-iHexByteLen), iHex)
+		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen-iHexByteLen), iHex)
+		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes-iHexByteLen), iHex)
+		// Set up the secret/validator using hex values
+		v, s, err := setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata)
+		if err != nil {
+			return validators, secrets, err
+		}
+		validators = append(validators, v)
+		secrets = append(secrets, s)
+	}
+	return validators, secrets, nil
+}
+
+func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) (validator types.Validator, secret types.ValidatorSecret, err error) {
+
+	// Decode hex inputs
+	bandersnatch_seed := common.FromHex(bandersnatchHex)
+	ed25519_seed := common.FromHex(ed25519Hex)
+	bls_secret := common.FromHex(blsHex)
+	validator_meta := []byte(metadata)
+
+	// Validate hex input lengths
+	if debug {
+		fmt.Printf("bandersnatchHex: %s\n", bandersnatchHex)
+		fmt.Printf("ed25519Hex: %s\n", ed25519Hex)
+		fmt.Printf("blsHex: %s\n", blsHex)
+		fmt.Printf("metadata: %s\n", metadata)
+	}
+	if len(bandersnatch_seed) != (bandersnatch.SecretLen) {
+		return validator, secret, fmt.Errorf("invalid input length (%d) for bandersnatch seed %s - expected len of %d", len(bandersnatch_seed), bandersnatchHex, bandersnatch.SecretLen)
+	}
+	if len(ed25519_seed) != (ed25519.SeedSize) {
+		return validator, secret, fmt.Errorf("invalid input length for ed25519 seed %s", ed25519Hex)
+	}
+	if len(bls_secret) != (types.BlsPrivInBytes) {
+		return validator, secret, fmt.Errorf("invalid input length for bls private key %s", blsHex)
+	}
+	if len(validator_meta) > types.MetadataSizeInBytes {
+		return validator, secret, fmt.Errorf("invalid input length for metadata %s", metadata)
+	}
+
+	validator, err = statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_secret, metadata)
+	if err != nil {
+		return validator, secret, err
+	}
+	secret, err = statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_secret, metadata)
+	if err != nil {
+		return validator, secret, err
+	}
+	return validator, secret, nil
 }

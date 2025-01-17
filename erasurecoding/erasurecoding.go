@@ -2,190 +2,142 @@ package erasurecoding
 
 import (
 	"fmt"
+
 	"github.com/colorfulnotion/jam/types"
-	"github.com/klauspost/reedsolomon"
 )
 
-var (
-	// Configurations for the erasure coding library. See https://pkg.go.dev/github.com/klauspost/reedsolomon#New
-	// TODO: Coding rate has been changed to 342:1023 in the latest version of the GP.
-	// CodingRate_K                int = 2 // coding rate = 342:1023. See GP, Appendix H for more details.
-	// CodingRate_N                int = 6 // coding rate = 342:1023. See GP, Appendix H for more details.
-	// numPieces int = 6 // k = 6, shard size = k * 2. See GP, Appendix H.1 for more details.
-	GFPointsSize = 2 //  little-endian Y2 (E2)
-)
-
-const (
-	dataShards   = 2
-	parityShards = 4
-)
-
+// Get the coding rate, K and N
 func GetCodingRate() (coding_rate_K int, coding_rate_N int) {
 	coding_rate_K = types.W_E / 2
 	coding_rate_N = types.TotalValidators
 	return coding_rate_K, coding_rate_N
 }
 
-// numPieces k or C_k is the number of data-parallel pieces, each of size where p ∈ ⟦Y_WC⟧ = unzip (p).
-func Encode(original []byte, numPieces int) ([][][]byte, error) {
-	// TODO: Using non-inplace operation on buffer, output is a bit memory inefficient.
+// Encode data into shards
+func Encode(data []byte, shardPieces int) ([][][]byte, error) {
+	// Get the coding rate, K and N
+	dataShard, totalValidator := GetCodingRate()
 
-	// Get coding rate K, N
-	CodingRate_K, CodingRate_N := GetCodingRate()
+	// Calculate the number of groups, which means the number of shards. we call it segments in the past
+	shardSize := shardPieces * 2
+	groupDataSize := dataShard * shardSize
+	// Calculate the number of groups
+	numGroups := (len(data) + groupDataSize - 1) / groupDataSize
+	out := make([][][]byte, numGroups)
 
-	// Calculate the shardSize
-	shardSize := numPieces * GFPointsSize                // 1 GF point = 2 bytes (E2)
-	shardSizeRounded := 64 * ((shardSize + 64 - 1) / 64) // round up to 64 bytes. See https://github.com/klauspost/reedsolomon?tab=readme-ov-file#leopard-compatible-gf16
-	dataSegmentSize := shardSize * CodingRate_K
+	// Encode the data into shards
+	for g := 0; g < numGroups; g++ {
+		start := g * groupDataSize
+		end := start + groupDataSize
+		if end > len(data) {
+			end = len(data)
+		}
 
-	// Calculate the dataShards (original) and parityShards (redundant) arguments for the RS function
-	dataShards := CodingRate_K
-	parityShards := (CodingRate_N - CodingRate_K) // N = K + parityShards
+		// Get the data of the group
+		groupData := make([]byte, groupDataSize)
+		copy(groupData, data[start:end])
 
-	// Initialize the RS encoder
-	encoder, err := reedsolomon.New(dataShards, parityShards, reedsolomon.WithLeopardGF16(true), reedsolomon.WithAutoGoroutines(shardSizeRounded))
-	if err != nil {
-		return nil, err
-	}
+		// Transform the data into GFPoints
+		m := make([]GFPoint, dataShard*shardPieces)
+		for i := 0; i < len(m); i++ {
+			b0 := groupData[2*i]
+			b1 := groupData[2*i+1]
+			m[i] = GFPoint(uint16(b1)<<8 | uint16(b0))
+		}
 
-	// Calculate the number of segments, create the buffer and output.
-	numSegments := (len(original) + dataSegmentSize - 1) / dataSegmentSize
-	buffer := make([][][]byte, numSegments) // Buffer to store the encoded data with padding. (numSegments, dataShards + parityShards, shardSizePadded)
-	output := make([][][]byte, numSegments) // Buffer to store the encoded data WITHOUT padding. (numSegments, dataShards + parityShards, shardSize)
+		// Initialize the group with N (= totalValidator) shards
+		groupShards := make([][]byte, totalValidator)
+		for s := 0; s < totalValidator; s++ {
+			groupShards[s] = make([]byte, shardSize)
+		}
 
-	// Fill the buffer/output with the original data and calculate the parity shards for each segment
-	for segmentIndex := 0; segmentIndex < numSegments; segmentIndex++ {
+		// Interpolate the data and generate the shards
+		for row := 0; row < shardPieces; row++ {
+			xs := make([]GFPoint, dataShard)
+			ys := make([]GFPoint, dataShard)
+			for i := 0; i < dataShard; i++ {
+				idxCantor := ToCantorBasis(GFPoint(i))
+				valCantor := ToCantorBasis(m[row*dataShard+i])
+				xs[i] = FromCantorBasis(idxCantor)
+				ys[i] = FromCantorBasis(valCantor)
+			}
 
-		buffer[segmentIndex] = make([][]byte, (dataShards + parityShards))
-		output[segmentIndex] = make([][]byte, (dataShards + parityShards))
-
-		for shardIndex := 0; shardIndex < (dataShards + parityShards); shardIndex++ {
-
-			// Initialize the shard filled with zeros
-			buffer[segmentIndex][shardIndex] = make([]byte, shardSizeRounded)
-			output[segmentIndex][shardIndex] = make([]byte, shardSize)
-
-			if shardIndex < dataShards {
-
-				// Assign the original data to the shard. NOTE: Only the first 6 GF points are used.
-				for GFPointIndex := 0; GFPointIndex < numPieces; GFPointIndex++ {
-
-					// Please note that the data are stored in the buffer vertically, from top to bottom and left to right.
-					leftIndex := segmentIndex*dataSegmentSize + GFPointIndex*dataShards*2 + shardIndex*2
-					rightIndex := leftIndex + 1
-
-					offset := (GFPointIndex / 32) * 64
-					index := GFPointIndex % 32
-
-					if leftIndex < len(original) {
-						buffer[segmentIndex][shardIndex][offset+index] = original[leftIndex]
-					}
-					if rightIndex < len(original) {
-						buffer[segmentIndex][shardIndex][offset+index+32] = original[rightIndex]
-					}
-				}
+			p := Interpolate(xs, ys)
+			// Evaluate polynomial and generate the shards
+			for s := 0; s < totalValidator; s++ {
+				code := Evaluate(p, GFPoint(s))
+				low := byte(code & 0xFF)
+				high := byte((code >> 8) & 0xFF)
+				offset := row * 2
+				groupShards[s][offset] = low
+				groupShards[s][offset+1] = high
 			}
 		}
-
-		// Calculate the parity shards for the i-th segment
-		err = encoder.Encode(buffer[segmentIndex])
-		if err != nil {
-			return nil, err
-		}
-
-		// Copy the buffer to the output
-		for j := 0; j < (dataShards + parityShards); j++ {
-			for GFPointIndex := 0; GFPointIndex < numPieces; GFPointIndex++ {
-
-				offset := (GFPointIndex / 32) * 64
-				index := GFPointIndex % 32
-
-				output[segmentIndex][j][GFPointIndex*2] = buffer[segmentIndex][j][offset+index]
-				output[segmentIndex][j][GFPointIndex*2+1] = buffer[segmentIndex][j][offset+index+32]
-			}
-		}
+		out[g] = groupShards
 	}
-
-	return output, nil
+	return out, nil
 }
 
-func Decode(encodedData [][][]byte, numPieces int) ([]byte, error) {
+// Decode shards into data
+func Decode(data [][][]byte, shardPieces int) ([]byte, error) {
+	dataShard, _ := GetCodingRate()
+	// Each shard is a piece of the data
+	shardSize := shardPieces * 2
+	groupDataSize := dataShard * shardSize
 
-	// Get coding rate K, N
-	CodingRate_K, CodingRate_N := GetCodingRate()
+	var result []byte
+	for g := 0; g < len(data); g++ {
+		groupShards := data[g]
+		if len(groupShards) == 0 {
+			continue
+		}
+		recovered := make([]byte, groupDataSize)
 
-	// Calculate the shardSize
-	shardSize := numPieces * GFPointsSize // 1 GF point = 2 bytes (E2)
-	dataSegmentSize := shardSize * CodingRate_K
-	shardSizeRounded := 64 * ((shardSize + 64 - 1) / 64) // round up to 64 bytes. See: 	shardSizeRounded := 64 * ((shardSize + 64 - 1) / 64) // round up to 64 bytes. See https://github.com/klauspost/reedsolomon?tab=readme-ov-file#leopard-compatible-gf16
-	numSegments := len(encodedData)
-
-	// Calculate the dataShards (original) and parityShards (redundant) arguments for the RS function
-	dataShards := CodingRate_K
-	parityShards := (CodingRate_N - CodingRate_K) // N = K + parityShards
-
-	// Initialize the RS decoder
-	decoder, err := reedsolomon.New(dataShards, parityShards, reedsolomon.WithLeopardGF16(true)) //, reedsolomon.WithAutoGoroutines(shardSizeRounded))
-	if err != nil {
-		return nil, err
-	}
-
-	// Decode the segments
-	data := make([]byte, (numSegments * dataSegmentSize))
-	for segmentIndex := 0; segmentIndex < len(encodedData); segmentIndex++ {
-		decodedSegment := make([][]byte, CodingRate_N)
-		for i := 0; i < len(encodedData[segmentIndex]); i++ {
-			decodedSegment[i] = make([]byte, shardSizeRounded)
-			if encodedData[segmentIndex][i] == nil {
-				decodedSegment[i] = nil
-			} else {
-				for GFPointIndex := 0; GFPointIndex < numPieces; GFPointIndex++ {
-
-					offset := (GFPointIndex / 32) * 64
-					index := GFPointIndex % 32
-
-					decodedSegment[i][offset+index] = encodedData[segmentIndex][i][GFPointIndex*2]
-					decodedSegment[i][offset+index+32] = encodedData[segmentIndex][i][GFPointIndex*2+1]
+		// Recover the data from the shards
+		for row := 0; row < shardPieces; row++ {
+			var available []struct {
+				Word  GFPoint
+				Index int
+			}
+			// Collect available shards
+			for idx := 0; idx < len(groupShards); idx++ {
+				if len(groupShards[idx]) < (row+1)*2 {
+					continue
 				}
+				low := groupShards[idx][row*2]
+				high := groupShards[idx][row*2+1]
+				val := GFPoint(uint16(high)<<8 | uint16(low))
+				available = append(available, struct {
+					Word  GFPoint
+					Index int
+				}{Word: val, Index: idx})
+			}
+			// If there are not enough shards to recover the data, return an error
+			if len(available) < dataShard {
+				return nil, fmt.Errorf("not enough shards to recover data")
+			}
+
+			// Lagrange interpolation
+			xs := make([]GFPoint, dataShard)
+			ys := make([]GFPoint, dataShard)
+			for i := 0; i < dataShard; i++ {
+				idx := available[i].Index
+				w := available[i].Word
+				xs[i] = FromCantorBasis(ToCantorBasis(GFPoint(idx)))
+				ys[i] = FromCantorBasis(ToCantorBasis(w))
+			}
+			p := Interpolate(xs, ys)
+
+			// Recover the data
+			for i := 0; i < dataShard; i++ {
+				code := Evaluate(p, GFPoint(i))
+				low := byte(code & 0xFF)
+				high := byte((code >> 8) & 0xFF)
+				recovered[2*(row*dataShard+i)] = low
+				recovered[2*(row*dataShard+i)+1] = high
 			}
 		}
-
-		// Decode the segment
-		err = decoder.ReconstructData(decodedSegment)
-		if err != nil {
-			return nil, err
-		}
-
-		// Copy the decoded data to the output
-		for shardIndex := 0; shardIndex < dataShards; shardIndex++ {
-			for GFPointIndex := 0; GFPointIndex < numPieces; GFPointIndex++ {
-
-				// Please note that the data are stored in the buffer vertically, from top to bottom and left to right.
-				leftIndex := segmentIndex*dataSegmentSize + GFPointIndex*dataShards*2 + shardIndex*2
-				rightIndex := leftIndex + 1
-
-				offset := (GFPointIndex / 32) * 64
-				index := GFPointIndex % 32
-
-				data[leftIndex] = decodedSegment[shardIndex][offset+index]
-				data[rightIndex] = decodedSegment[shardIndex][offset+index+32]
-			}
-		}
+		result = append(result, recovered...)
 	}
-
-	return data, nil
-}
-
-func Print3DByteArray(arr [][][]byte) {
-	for i := range arr {
-		fmt.Printf("Segment %d:\n", i)
-		fmt.Println("----------------")
-		for j := range arr[i] {
-			for k := range arr[i][j] {
-				fmt.Printf("%02x ", arr[i][j][k])
-			}
-			fmt.Println()
-		}
-		fmt.Println("----------------")
-	}
+	return result, nil
 }

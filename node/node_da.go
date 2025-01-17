@@ -888,7 +888,6 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage, importSegments 
 	// }
 
 	n.StoreMeta_Guarantor(spec, erasureMeta, bECChunks, sECChunksArray)
-
 	gc := workReport.Sign(n.GetEd25519Secret(), uint16(n.GetCurrValidatorIndex()))
 	guarantee = types.Guarantee{
 		Report:     workReport,

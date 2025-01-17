@@ -61,7 +61,9 @@ func TestDASimulation(t *testing.T) {
 		if !ok {
 			t.Fatalf("Unexpected response type: %T\n", resp)
 		}
-		fmt.Printf("DA Response: %v\n", daResp)
+		if debugDA {
+			fmt.Printf("DA Response: %x\n", daResp)
+		}
 		encoded_data[daResp.ShardIndex] = daResp.Data
 	}
 	encoded_there_dim_data := make([][][]byte, 1)
@@ -72,4 +74,18 @@ func TestDASimulation(t *testing.T) {
 	}
 	fmt.Printf("Decoded data : %v\n", decoded_data)
 	fmt.Printf("Original data: %v\n", data)
+}
+
+func (p *Peer) DA_Announcement(hash common.Hash, validator_index uint16) error {
+	stream, err := p.openStream(CE201_DA_Announcement)
+	if err != nil {
+		return err
+	}
+	an := DA_announcement{Hash: hash, PeerId: validator_index}
+	an_bytes, err := types.Encode(an)
+	if err != nil {
+		return err
+	}
+	err = sendQuicBytes(stream, an_bytes)
+	return err
 }

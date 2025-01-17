@@ -52,7 +52,44 @@ type StateDB struct {
 
 	logChan chan storage.LogMessage
 
-	AncestorSet map[common.Hash]uint32 // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
+	AncestorSet map[common.Hash]uint32 `json:"ancestorSet"` // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
+}
+
+func (s *StateDB) MarshalJSON() ([]byte, error) {
+	ancestorSet := make(map[string]uint32)
+	for k, v := range s.AncestorSet {
+		ancestorSet[k.Hex()] = v
+	}
+
+	type Alias StateDB
+	return json.Marshal(&struct {
+		*Alias
+		AncestorSet map[string]uint32 `json:"ancestorSet"`
+	}{
+		Alias:       (*Alias)(s),
+		AncestorSet: ancestorSet,
+	})
+}
+
+func (s *StateDB) UnmarshalJSON(data []byte) error {
+	type Alias StateDB
+	aux := &struct {
+		AncestorSet map[string]uint32 `json:"ancestorSet"`
+		*Alias
+	}{
+		Alias: (*Alias)(s),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	s.AncestorSet = make(map[common.Hash]uint32)
+	for k, v := range aux.AncestorSet {
+		s.AncestorSet[common.HexToHash(k)] = v
+	}
+
+	return nil
 }
 
 func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {

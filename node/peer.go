@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"time"
 
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -39,6 +40,7 @@ const (
 	CE201_DA_Announcement              = 201
 	CE202_DA_Request                   = 202
 	CE203_DA_Reconstruction            = 203
+	CE204_DA_Announcemented            = 204
 )
 
 type Peer struct {
@@ -80,9 +82,11 @@ func (p *Peer) String() string {
 }
 
 func (p *Peer) openStream(code uint8) (stream quic.Stream, err error) {
+	p.node.openedStreamsMu.Lock()
+	defer p.node.openedStreamsMu.Unlock()
 
 	if p.conn == nil {
-		//fmt.Printf("openStream: connecting %s\n", p.PeerAddr)
+		// fmt.Printf("openStream: connecting %s\n", p.PeerAddr)
 		p.conn, err = quic.DialAddr(context.Background(), p.PeerAddr, p.node.tlsConfig, GenerateQuicConfig())
 		//TODO defer p.connectionMu.Unlock()
 		if err != nil {
@@ -90,26 +94,51 @@ func (p *Peer) openStream(code uint8) (stream quic.Stream, err error) {
 			return nil, err
 		}
 	}
-	stream, err = p.conn.OpenStreamSync(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	stream, err = p.conn.OpenStreamSync(ctx)
 	if err != nil {
 		// Error opening stream, remove the connection from the cache
 		//defer n.connectionMu.Unlock()
 		//p.connectionMu.Lock()
-		fmt.Printf("OpenStreamSync ERR %v\n", err)
-		p.conn = nil
+		fmt.Printf("[%s] OpenStreamSync ERR %v\n", p.PeerAddr, err)
+		if p.conn != nil {
+			if closeErr := p.conn.CloseWithError(0, "stream open failed"); closeErr != nil {
+				fmt.Printf("Failed to close connection: %v\n", closeErr)
+			}
+			p.conn = nil
+		}
 		return nil, err
 	}
+
+	defer func() {
+		if err != nil || ctx.Err() != nil {
+			if closeErr := stream.Close(); closeErr != nil {
+				fmt.Printf("Failed to close stream: %v\n", closeErr)
+			}
+			if p.conn != nil {
+				if closeErr := p.conn.CloseWithError(0, "error occurred"); closeErr != nil {
+					fmt.Printf("Failed to close connection: %v\n", closeErr)
+				}
+				p.conn = nil
+			}
+		}
+	}()
 
 	//fmt.Printf("OpenStream wrote CODE=%d\n", code)
 	_, err = stream.Write([]byte{code})
 	if err != nil {
-		fmt.Printf("Write -- ERR %v\n", err)
-	}
+		if err == io.EOF {
+			fmt.Println("EOF encountered during write.")
+		}
 
-	// Additional check for potential EOF issue
-	if err == io.EOF {
-		fmt.Println("EOF encountered during write.")
-		return
+		_ = stream.Close()
+		if p.conn != nil {
+			_ = p.conn.CloseWithError(0, "error occurred")
+			p.conn = nil
+		}
+		return nil, err
 	}
 	return stream, nil
 }
@@ -158,8 +187,9 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 	var msgType byte
 
 	msgTypeBytes := make([]byte, 1) // code
+
 	msgLenBytes := make([]byte, 4)
-	_, err := stream.Read(msgTypeBytes)
+	_, err := io.ReadFull(stream, msgTypeBytes)
 	if err != nil {
 		fmt.Printf("DispatchIncomingQUICStream1 ERR %v\n", err)
 		return err
@@ -167,14 +197,18 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 	msgType = msgTypeBytes[0]
 	// fmt.Printf("%s DispatchIncomingQUICStream from %d bytesRead=%d CODE=%d\n", n.String(), peerID, nRead, msgType)
 
-	_, err = stream.Read(msgLenBytes)
+	_, err = io.ReadFull(stream, msgLenBytes)
 	if err != nil {
 		fmt.Printf("DispatchIncomingQUICStream2 ERR %v\n", err)
 		return err
 	}
 	msgLen := binary.BigEndian.Uint32(msgLenBytes)
 	msg := make([]byte, msgLen)
-	_, err = stream.Read(msg)
+	_, err = io.ReadFull(stream, msg)
+	if err != nil {
+		fmt.Printf("DispatchIncomingQUICStream3 ERR %v\n", err)
+		return err
+	}
 	//fmt.Printf("DispatchIncomingQUICStream3 nRead=%d msgLen=%d\n", nRead, msgLen)
 	// Dispatch based on msgType
 	switch msgType {
@@ -222,6 +256,8 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 		n.onDA_Request(stream, msg)
 	case CE203_DA_Reconstruction:
 		n.onDA_Reconstruction(stream, msg)
+	case CE204_DA_Announcemented:
+		n.onDA_Announced(stream, msg)
 	default:
 		return errors.New("unknown message type")
 	}
