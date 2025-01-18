@@ -138,7 +138,7 @@ const (
 	debugP                    = false
 	debugAudit                = false
 	debugSeal                 = false
-	saveSealBlockMaterial     = true
+	saveSealBlockMaterial     = false
 	trace                     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"

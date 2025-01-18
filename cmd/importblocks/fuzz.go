@@ -3,14 +3,12 @@ package main
 import (
 	//"errors"
 
-	"flag"
 	"fmt"
-	"log"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -77,6 +75,22 @@ var ErrorMap = map[string][]error{
 		jamerrors.ErrDBadSignatureInVerdict,
 		jamerrors.ErrDBadSignatureInCulprits,
 		jamerrors.ErrDAgeTooOldInVerdicts},
+}
+
+func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		err = os.MkdirAll(testDir, os.ModePerm)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create directory /tmp/fuzz: %v", err)
+		}
+	}
+
+	sdb_storage, err := storage.NewStateDBStorage(testDir)
+	if err != nil {
+		return nil, fmt.Errorf("Error with storage: %v", err)
+	}
+	return sdb_storage, nil
+
 }
 
 func possibleError(selectedError error, block *types.Block, s *statedb.StateDB, validatorSecrets []types.ValidatorSecret) error {
@@ -210,6 +224,7 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 	if err != nil {
 		return nil, err, nil
 	}
+
 	for _, mode := range modes {
 		if mode == "safrole" && len(block.Extrinsic.Tickets) == 0 {
 			continue
@@ -223,37 +238,45 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 		if mode == "preimages" && len(block.Extrinsic.Preimages) == 0 {
 			continue
 		}
+
 		// TODO: add disputes filter
 		if errorsForMode, exists := ErrorMap[mode]; exists {
 			aggregatedErrors = append(aggregatedErrors, errorsForMode...)
 		}
 	}
 
-	if len(aggregatedErrors) == 0 {
-		return nil, nil, nil
-	}
 	errorList := make([]error, 0)
-
 	expectedNumNodes := 6
 	validators, validatorSecrets, err := statedb.GenerateValidatorSecretSet(expectedNumNodes)
-
 	//TODO: extract out validatorSet from stf.PreState and make sure sure validatorSecrets and validators are equal in size, opposed to hardcode numNodes
-	if len(validatorSecrets) != expectedNumNodes || len(validators) != expectedNumNodes {
+	if len(validatorSecrets) != expectedNumNodes || len(validators) != expectedNumNodes || err != nil {
 		fmt.Printf("Invalid V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
 		return nil, nil, nil
 	}
 
-	fmt.Printf("V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
+	//fmt.Printf("V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
 
-	// TODO: make sure original block passes seal test: which requires author guessing, entropy, attempt for passing
+	// Create STF copy for original block
 	oStatedbCopy := sdb.Copy()
 	oBlockCopy := block.Copy()
+	oSlot := oBlockCopy.TimeSlot()
+	oEpoch, oPhase := oStatedbCopy.GetSafrole().EpochAndPhase(oSlot)
+
+	// Make sure original block passes seal test: which requires author guessing, entropy, attempt for passing
 	oValid, oValidatorIdx, oValidatorPub, err := oStatedbCopy.VerifyBlockHeader(oBlockCopy)
 	if !oValid || err != nil || oBlockCopy.Header.AuthorIndex != oValidatorIdx {
 		panic(fmt.Sprintf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex))
 		return nil, nil, nil
 	}
-	fmt.Printf("Original block passed seal test. Author: %v (Idx:%v) ExtrinsicHash=%v, Seal=%x, EntropySource=%x\n", oValidatorPub, oValidatorIdx, oBlockCopy.Header.ExtrinsicHash, oBlockCopy.Header.Seal, oBlockCopy.GetHeader().EntropySource)
+
+	if len(aggregatedErrors) == 0 {
+		fmt.Printf("[#%v e=%v,m=%03d] \033[31mNotFuzzable\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
+		//fmt.Printf("ExtrinsicHash=%v\nSeal=%x\nEntropySource=%x\n", oBlockCopy.Header.ExtrinsicHash, oBlockCopy.Header.Seal, oBlockCopy.GetHeader().EntropySource)
+		return nil, nil, nil
+	}
+
+	fmt.Printf("[#%v e=%v,m=%03d] \033[0mFuzzable!!!\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
+	//fmt.Printf("ExtrinsicHash=%v\nSeal=%x\nEntropySource=%x\n", oBlockCopy.Header.ExtrinsicHash, oBlockCopy.Header.Seal, oBlockCopy.GetHeader().EntropySource)
 
 	for _, selectedError := range aggregatedErrors {
 		blockCopy := block.Copy()
@@ -275,7 +298,7 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 			if err != nil {
 				continue
 			}
-			fmt.Printf("Resealing Slot %v with: %v (Idx:%v) | priv: %v\n", blockCopy.TimeSlot(), block_author_ietf_pub, blockCopy.Header.AuthorIndex, block_author_ietf_priv)
+			//fmt.Printf("Resealing Slot %v with: %v (Idx:%v) | priv: %v\n", blockCopy.TimeSlot(), block_author_ietf_pub, blockCopy.Header.AuthorIndex, block_author_ietf_priv)
 			mSealedBlk, sealErr := statedbCopy.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, blockCopy.Header.AuthorIndex, blockCopy.TimeSlot(), blockCopy)
 			if sealErr != nil {
 				fmt.Printf("Fuzzing failed to seal block!!!\n")
@@ -288,7 +311,7 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 				panic(fmt.Sprintf("mutated block failed seal entropy test failed: %v | %v\n", mValid, err))
 				continue
 			} else {
-				fmt.Printf("Mutated block passed seal test. Author: %v (Idx:%v) ExtrinsicHash=%v, Seal=%x, EntropySource=%x\n", mValidatorPub, mValidatorIdx, mSealedBlk.GetHeader().ExtrinsicHash, mSealedBlk.GetHeader().Seal, mSealedBlk.GetHeader().EntropySource)
+				//fmt.Printf("Mutated block passed seal test. Author: %v (Idx:%v) ExtrinsicHash=%v, Seal=%x, EntropySource=%x\n", mValidatorPub, mValidatorIdx, mSealedBlk.GetHeader().ExtrinsicHash, mSealedBlk.GetHeader().Seal, mSealedBlk.GetHeader().EntropySource)
 				//fmt.Printf("MutatedBlock=%v\n", mSealedBlk.String())
 
 			}
@@ -298,7 +321,7 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 				//continue
 			}
 
-			// TODO: Step 3: Constructing mutated state transition
+			// Step 3: Constructe mutated state transition
 			stfMutated := statedb.StateTransition{
 				PreState:  stf.PreState,
 				Block:     *mSealedBlk,
@@ -308,11 +331,11 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 			// TODO: need ancestorSet, accumulationRoot
 			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil)
 			if stfErrActual == stfErrExpected {
-				fmt.Printf("Fuzzing yield proper err %v\n", jamerrors.GetErrorStr(stfErrExpected))
+				//fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Correctly: err %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorStr(stfErrExpected))
 				errorList = append(errorList, stfErrExpected)
 				mutatedSTFs = append(mutatedSTFs, stfMutated)
 			} else {
-				fmt.Printf("Fuzzing yield different err. Actual: %v | Expected:%v\n", jamerrors.GetErrorStr(stfErrActual), jamerrors.GetErrorStr(stfErrExpected))
+				fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Failed!!  Actual: \033[32m%v\033[0m  | Expected:%v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorStr(stfErrActual), jamerrors.GetErrorStr(stfErrExpected))
 				if jamerrors.GetErrorStr(stfErrActual) == "BadSignature" {
 					//fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
 				}
@@ -327,65 +350,11 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 		rand.Seed(time.Now().UnixNano())
 		errSelectionIdx := rand.Intn(len(errorList))
 		mutatedSTF := &mutatedSTFs[errSelectionIdx]
-		return mutatedSTF, errorList[errSelectionIdx], errorList
+		expectedErr := errorList[errSelectionIdx]
+		possibleErrs := errorList
+		fmt.Printf("[#%v e=%v,m=%03d] Fuzzed with \033[32m%v\033[0m ouf of %v possible errors = %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorStr(expectedErr), len(possibleErrs), jamerrors.GetErrorStrs(possibleErrs))
+
+		return mutatedSTF, expectedErr, possibleErrs
 	}
 	return nil, nil, nil
-}
-
-func validateConfig(config types.ConfigJamBlocks) {
-	if config.HTTP == "" && config.QUIC == "" {
-		log.Fatalf("You must specify either an HTTP URL or a QUIC address")
-	}
-	if config.QUIC != "" {
-		log.Fatalf("QUIC functionality is not implemented yet. Endpoint: %s", config.Endpoint)
-	}
-	if config.Network != "tiny" {
-		log.Fatalf("Tiny network only")
-	}
-	if config.Mode != "fallback" && config.Mode != "safrole" && config.Mode != "assurances" && config.Mode != "orderedaccumulation" {
-		log.Fatalf("Invalid mode: %s. Must be one of fallback, safrole, assurances, orderedaccumulation", config.Mode)
-	}
-}
-
-func main() {
-	fmt.Printf("importblocks - JAM Import Blocks generator\n")
-
-	mode := flag.String("m", "safrole", "Block generation mode: fallback, safrole, assurances, orderedaccumulation (under development: authorization, recenthistory, blessed, basichostfunctions, disputes, gas, finalization)")
-	flag.StringVar(mode, "mode", *mode, "Block generation mode: fallback, safrole, assurances, orderedaccumulation")
-
-	httpEndpoint := flag.String("h", "", "HTTP endpoint to send blocks")
-	flag.StringVar(httpEndpoint, "http", *httpEndpoint, "HTTP endpoint to send blocks")
-
-	quicEndpoint := flag.String("q", "", "QUIC endpoint to send blocks")
-	flag.StringVar(quicEndpoint, "quic", *quicEndpoint, "QUIC endpoint to send blocks")
-
-	verbose := flag.Bool("v", false, "Enable detailed logging")
-	flag.BoolVar(verbose, "verbose", *verbose, "Enable detailed logging")
-
-	network := flag.String("n", "tiny", "JAM network size: tiny, full")
-	flag.StringVar(network, "network", *network, "JAM network size: tiny, full")
-
-	numBlocks := flag.Int("numblocks", 50, "Number of valid blocks to generate (max 600)")
-	invalidRate := flag.Int("invalidrate", 0, "Percentage of blocks that are invalid (under development)")
-	statistics := flag.Int("statistics", 10, "Number of valid blocks between statistics dumps")
-
-	flag.Parse()
-	config := types.ConfigJamBlocks{
-		Mode:        *mode,
-		HTTP:        *httpEndpoint,
-		QUIC:        *quicEndpoint,
-		Verbose:     *verbose,
-		NumBlocks:   *numBlocks,
-		InvalidRate: *invalidRate,
-		Statistics:  *statistics,
-		Network:     *network,
-	}
-	validateConfig(config)
-	// set up network with config
-	node.ImportBlocks(&config)
-
-	// TODO: adjust importblocks to send stateTransition JSON via HTTP and receive statetransition; adjust validatetraces to validatestatetransition
-	for {
-
-	}
 }

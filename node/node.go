@@ -1213,9 +1213,9 @@ func getMessageType(obj interface{}) string {
 	case *types.Ticket:
 		return "Ticket"
 	case *types.Block:
-		return "Block"
+		return "block"
 	case types.Block:
-		return "Block"
+		return "block"
 	case types.Announcement:
 		return "Announcement"
 	case types.WorkPackage:
