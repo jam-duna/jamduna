@@ -498,6 +498,19 @@ func (n *Node) GetSelfCoreIndex() (uint16, error) {
 	return 0, fmt.Errorf("core index not found")
 }
 
+func (n *Node) GetPrevCoreIndex() (uint16, error) {
+	assignments := n.statedb.PreviousGuarantorAssignments
+	if len(assignments) == 0 {
+		return 0, fmt.Errorf("NO ASSIGNMENTS")
+	}
+	for _, assignment := range assignments {
+		if assignment.Validator.GetEd25519Key() == n.GetEd25519Key() {
+			return assignment.CoreIndex, nil
+		}
+	}
+	return 0, fmt.Errorf("core index not found")
+}
+
 func (n *Node) GetCoreIndexFromEd25519Key(key types.Ed25519Key) (uint16, error) {
 	assignments := n.statedb.GuarantorAssignments
 	for _, assignment := range assignments {
@@ -553,6 +566,10 @@ func (n *Node) GetCurrValidatorIndex() uint32 {
 }
 func (n *Node) GetSafrole() *statedb.SafroleState {
 	return n.statedb.GetSafrole()
+}
+
+func (n *Node) GetPrevValidatorIndex() uint32 {
+	return uint32(n.statedb.GetSafrole().GetPrevValidatorIndex(n.GetEd25519Key()))
 }
 
 func (n *Node) GetNodeType() string {
@@ -730,6 +747,10 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				n.assurancesCh <- a
 				continue
 			} else if objType == reflect.TypeOf(types.PreimageAnnouncement{}) {
+				continue
+			} else if objType == reflect.TypeOf(grandpa.VoteMessage{}) || objType == reflect.TypeOf(grandpa.CommitMessage{}) {
+				continue
+			} else {
 				continue
 			}
 		}
@@ -1359,7 +1380,9 @@ func (n *Node) runClient() {
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, n.extrinsic_pool)
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
-				panic(0)
+				//TODO: continue as opposed to panic here
+				continue
+				//panic(0)
 			}
 
 			if newStateDB != nil && debugTree {
@@ -1391,12 +1414,6 @@ func (n *Node) runClient() {
 				n.cacheHeaders(headerHash, newBlock)
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				n.broadcast(*newBlock)
-				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
-				} else {
-					block := newBlock.Copy()
-					n.block_tree.AddBlock(block)
-					//fmt.Printf("block tree block added, block %v(p:%v)\n", block.Header.Hash().String_short(), block.GetParentHeaderHash().String_short())
-				}
 
 				if debug {
 					for _, g := range newStateDB.GuarantorAssignments {

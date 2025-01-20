@@ -987,6 +987,55 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	return s2, nil
 }
 
+// this function only do the state transition, not verify the ticket
+func (s *SafroleState) SafroleTmpTransition(targetJCE uint32, fresh_randomness common.Hash) (s2 SafroleState, epochShifted bool, err error) {
+	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	currEpoch, _ := s.EpochAndPhase(targetJCE)
+	epochShifted = false
+	if currEpoch > prevEpoch {
+		// New Epoch
+		epochShifted = true
+	}
+	s2 = cloneSafroleState(*s)
+	// here we set the sealer authority
+	if prevEpoch < currEpoch {
+		if debug {
+			fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
+		}
+		// eq 68 primary mode
+		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength {
+			winning_tickets, err := s2.GenerateWinningMarker()
+			if err != nil {
+				return s2, epochShifted, fmt.Errorf("GenerateWinningMarker Failed: %v", err)
+			}
+			// do something to set this marker
+			ticketsOrKeys := TicketsOrKeys{
+				Tickets: winning_tickets,
+			}
+			s2.TicketsOrKeys = ticketsOrKeys
+		} else { // eq 68 fallback mode
+			chosenkeys, err := s.ChooseFallBackValidator()
+			if err != nil {
+				return s2, epochShifted, fmt.Errorf("ChooseFallBackValidator %v", err)
+			}
+			ticketsOrKeys := TicketsOrKeys{
+				Keys: chosenkeys,
+			}
+			s2.TicketsOrKeys = ticketsOrKeys
+		}
+	}
+	//shifting entropy
+	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness)
+	if currEpoch > prevEpoch {
+		// New Epoch
+		s2.PhasingEntropyAndValidator(s, new_entropy_0)
+	} else {
+		// Epoch in progress
+		s2.StableEntropy(s, new_entropy_0)
+	}
+	return s2, epochShifted, nil
+}
+
 func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomness common.Hash) (s2 SafroleState, epochShifted bool, err error) {
 	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, _ := s.EpochAndPhase(targetJCE)

@@ -70,7 +70,7 @@ func (s *StateDB) Verify_Guarantees() error {
 }
 
 // this function will accept one guarantee at a time, it will be used by make block to make sure which guarantee should be included in the block
-func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
+func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee, block *types.Block, tmp_jamstate *JamState) error {
 	max_core := types.TotalCores - 1
 	if guarantee.Report.CoreIndex > uint16(max_core) {
 		return jamerrors.ErrGBadCoreIndex
@@ -110,15 +110,14 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 	}
 	// v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
 	// custom function for make block
-	err = s.areValidatorsAssignedToCore_MakeBlock(guarantee)
+	err = s.areValidatorsAssignedToCore_MakeBlock(guarantee, block)
 	if err != nil {
 		fmt.Printf("Verify_Guarantee error MakeBlock: %v\n", err)
 		return err // CHECK: instead of jamerrors.ErrGWrongAssignment
 	}
-	j := s.JamState
 	// v0.5 eq 11.28
 	if s.Block != nil {
-		err = j.checkReportTimeOut(guarantee, s.Block.TimeSlot())
+		err = tmp_jamstate.checkReportTimeOut(guarantee, s.Block.TimeSlot())
 		if err != nil {
 			return err
 		}
@@ -161,7 +160,7 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee) error {
 // this function accepts multiple guarantees at a time, it will be used by make block for dropping the invalid guarantees
 // after the first picking the valid guarantees, it will be used by remaining guarantees to make sure which guarantee should be included in the block
 // there are some verification need to be check with other guarantees, so it should be used after the first picking
-func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee) ([]types.Guarantee, error, bool) {
+func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee, new_block *types.Block) ([]types.Guarantee, error, bool) {
 	// v0.5 eq 11.23 - check index
 	var valid bool
 	err := CheckSorting_EGs(EGs)
@@ -324,12 +323,12 @@ func (s *StateDB) VerifyGuarantee_RecentHistory(guarantee types.Guarantee) error
 // this function will be used when a validator receive a block
 func (s *StateDB) ValidateGuarantees(guarantees []types.Guarantee) error {
 	for _, guarantee := range guarantees {
-		err := s.Verify_Guarantee_MakeBlock(guarantee)
+		err := s.Verify_Guarantee_MakeBlock(guarantee, s.Block, s.JamState)
 		if err != nil {
 			fmt.Printf("ValidateGuarantees error: %v\n", err)
 		}
 	}
-	_, err, valid := s.Verify_Guarantees_MakeBlock(guarantees)
+	_, err, valid := s.Verify_Guarantees_MakeBlock(guarantees, s.Block)
 	if err != nil || !valid {
 		fmt.Printf("ValidateGuarantees error: %v\n", err)
 		return err
@@ -418,18 +417,17 @@ func (s *StateDB) areValidatorsAssignedToCore(guarantee types.Guarantee) error {
 }
 
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
-func (s *StateDB) areValidatorsAssignedToCore_MakeBlock(guarantee types.Guarantee) error {
-	ts := s.Block.TimeSlot()
-	assignment_idx := ts / types.ValidatorCoreRotationPeriod
-	previous_assignment_idx := assignment_idx - 1
-	previous_assignment_slot := previous_assignment_idx * types.ValidatorCoreRotationPeriod
+func (s *StateDB) areValidatorsAssignedToCore_MakeBlock(guarantee types.Guarantee, block *types.Block) error {
+	ts := block.Header.Slot
+	previous_assignment_slot := ts - (ts % types.ValidatorCoreRotationPeriod) - types.ValidatorCoreRotationPeriod
 	if guarantee.Slot < previous_assignment_slot {
+		fmt.Printf("guarantee.Slot %d previous_assignment_slot %d\n", guarantee.Slot, previous_assignment_slot)
+		fmt.Printf("slot problem ts %d\n", ts)
 		return jamerrors.ErrGReportEpochBeforeLast
 	}
-	timeSlotPeriod := s.Block.TimeSlot() / types.ValidatorCoreRotationPeriod
+	timeSlotPeriod := ts / types.ValidatorCoreRotationPeriod
 	reportTime := guarantee.Slot / types.ValidatorCoreRotationPeriod
-	shift_bool := s.Block.Header.EpochMark != nil
-	prev_assignment, curr_assignment := s.CaculateAssignments(shift_bool)
+	prev_assignment, curr_assignment := s.CaculateAssignments(ts)
 	for _, g := range guarantee.Signatures {
 		find_and_correct := false
 		if timeSlotPeriod != reportTime {
@@ -448,15 +446,35 @@ func (s *StateDB) areValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 			}
 		}
 		if !find_and_correct {
-			if debugG {
-				fmt.Printf("%s\n", guarantee.String())
-				s.GuarantorsAssignmentsPrint()
-				if timeSlotPeriod != reportTime {
-					fmt.Printf("We are using prev core assignment\n")
-				} else {
-					fmt.Printf("We are using curr core assignment\n")
+
+			fmt.Printf("%s\n", guarantee.String())
+			sf := s.GetSafrole()
+			fmt.Printf("CurrGuarantorAssignments:\n")
+			for _, v := range curr_assignment {
+				validator_index := sf.GetCurrValidatorIndex(v.Validator.Ed25519)
+				if validator_index == -1 {
+					fmt.Printf("Validator not found for %v\n", v.Validator.Ed25519)
+					continue
 				}
+				core_index := v.CoreIndex
+				fmt.Printf("CoreIndex: %v => Validator: %v, key: %v\n", core_index, validator_index, v.Validator.Ed25519)
 			}
+			fmt.Printf("PrevGuarantorAssignments:\n")
+			for _, v := range prev_assignment {
+				validator_index := sf.GetCurrValidatorIndex(v.Validator.Ed25519)
+				if validator_index == -1 {
+					fmt.Printf("Validator not found for %v\n", v.Validator.Ed25519)
+					continue
+				}
+				core_index := v.CoreIndex
+				fmt.Printf("CoreIndex: %v => Validator: %v, key: %v\n", core_index, validator_index, v.Validator.Ed25519)
+			}
+			if timeSlotPeriod != reportTime {
+				fmt.Printf("We are using prev core assignment\n")
+			} else {
+				fmt.Printf("We are using curr core assignment\n")
+			}
+
 			return jamerrors.ErrGWrongAssignment
 		}
 
@@ -830,7 +848,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 
 // this function is for the making block
 func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
-	prereqSet := make(map[common.Hash]struct{})
+	prereqSet := make(map[common.Hash]bool)
 	p := []common.Hash{}
 	if len(g.Report.RefineContext.Prerequisites) != 0 {
 		p = append(p, g.Report.RefineContext.Prerequisites...)
@@ -839,15 +857,17 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 		p = append(p, lookupItem.WorkPackageHash)
 	}
 
+	// check if we only get her after accumulate..
 	for _, block := range s.JamState.RecentBlocks {
 		for _, segmentRootLookup := range block.Reported {
-			prereqSet[segmentRootLookup.WorkPackageHash] = struct{}{}
+			prereqSet[segmentRootLookup.WorkPackageHash] = true
 		}
 	}
+	// fmt.Printf("[checkPrereq on WP=%v, ReportHash=%v] prereqSet From s.JamState.RecentBlocks=%v\n", g.Report.Hash(), g.Report.GetWorkPackageHash(), prereqSet)
 
 	for _, guarantee := range EGs {
 		workPackageHash := guarantee.Report.AvailabilitySpec.WorkPackageHash
-		prereqSet[workPackageHash] = struct{}{}
+		prereqSet[workPackageHash] = true
 	}
 
 	if len(p) == 0 {
@@ -856,13 +876,14 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 
 	for _, hash := range p {
 		exists := false
-		for key := range prereqSet {
-			if hash == key {
+		for knownWPHash := range prereqSet {
+			if hash == knownWPHash {
 				exists = true
 				break
 			}
 		}
 		if !exists {
+			fmt.Printf("checkPrereq hash %v not found in prereqSet: %v\n", hash, prereqSet)
 			return jamerrors.ErrGDependencyMissing
 		}
 	}

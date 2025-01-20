@@ -571,7 +571,7 @@ func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup
 	return fuzz_importsegments, fuzz_segmentRootLookup
 }
 
-func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
+func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
 	fuzz := false
 	if fuzz {
 		fmt.Printf("[N%d] Before fuzzJustification package_bundle.ImportSegmentData %x segmentRootLookup %x\n", n.id, package_bundle.ImportSegmentData, segmentRootLookup)
@@ -670,14 +670,16 @@ func (n *Node) executeWorkPackageBundle(package_bundle types.WorkPackageBundle, 
 		results = append(results, result)
 	}
 	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments)
-	core, err := n.GetSelfCoreIndex()
-	if err != nil {
-		return
-	}
+	/*
+		core, err := n.GetSelfCoreIndex()
+		if err != nil {
+			return
+		}
+	*/
 	workReport := types.WorkReport{
 		AvailabilitySpec: *spec,
 		RefineContext:    workPackage.RefineContext,
-		CoreIndex:        core,
+		CoreIndex:        workPackageCoreIndex,
 		AuthorizerHash:   common.HexToHash("0x"), // SKIP
 		//AuthOutput
 		SegmentRootLookup: segmentRootLookup,
@@ -798,7 +800,7 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 }
 
 // work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error
-func (n *Node) executeWorkPackage(workPackage types.WorkPackage, importSegments [][][]byte, segmentRootLookup types.SegmentRootLookup) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
+func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPackage, importSegments [][][]byte, segmentRootLookup types.SegmentRootLookup) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
 	start := time.Now()
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
@@ -863,16 +865,24 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage, importSegments 
 		}
 	}
 	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, exportedSegments)
-	core, err := n.GetSelfCoreIndex()
+	currCoreIdx, err := n.GetSelfCoreIndex()
 	if err != nil {
 		return
+	}
+	prevCoreIdx, err := n.GetPrevCoreIndex()
+	if err != nil {
+		return
+	}
+	if debugG {
+		fmt.Printf("%s curr currCoreIdx=%v | inputCoreIdx=%v | prevCoreIdx=%d\n", n.String(), currCoreIdx, wpCoreIndex, prevCoreIdx)
 	}
 
 	workReport := types.WorkReport{
 		AvailabilitySpec: *spec,
 		RefineContext:    workPackage.RefineContext,
-		CoreIndex:        core,
-		AuthorizerHash:   common.HexToHash("0x"), // SKIP
+		//CoreIndex:        currCoreIdx,
+		CoreIndex:      wpCoreIndex,
+		AuthorizerHash: common.HexToHash("0x"), // SKIP
 		//AuthOutput
 		SegmentRootLookup: segmentRootLookup,
 		Results:           results,
@@ -888,7 +898,9 @@ func (n *Node) executeWorkPackage(workPackage types.WorkPackage, importSegments 
 	// }
 
 	n.StoreMeta_Guarantor(spec, erasureMeta, bECChunks, sECChunksArray)
-	gc := workReport.Sign(n.GetEd25519Secret(), uint16(n.GetCurrValidatorIndex()))
+	validator_idx := uint16(n.GetCurrValidatorIndex())
+	//we should figure out how to make sure the other validators are signing the same validator index by the same state
+	gc := workReport.Sign(n.GetEd25519Secret(), validator_idx)
 	guarantee = types.Guarantee{
 		Report:     workReport,
 		Signatures: []types.GuaranteeCredential{gc},

@@ -33,13 +33,13 @@ type StateDB struct {
 	ParentHeaderHash common.Hash  `json:"parentHeaderHash"`
 	HeaderHash       common.Hash  `json:"headerHash"`
 
-	StateRoot common.Hash `json:"stateRoot"`
-	JamState  *JamState   `json:"Jamstate"`
-	sdb       *storage.StateDBStorage
-	trie      *trie.MerkleTree
-
-	VMs     map[uint32]*pvm.VM
-	vmMutex sync.Mutex
+	StateRoot   common.Hash `json:"stateRoot"`
+	JamState    *JamState   `json:"Jamstate"`
+	sdb         *storage.StateDBStorage
+	trie        *trie.MerkleTree
+	tmp_safrole *SafroleState
+	VMs         map[uint32]*pvm.VM
+	vmMutex     sync.Mutex
 
 	// used in ApplyStateRecentHistory between statedbs
 	AccumulationRoot common.Hash
@@ -874,12 +874,14 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 	if timeSlotReady {
 		// Time to propose block if authorized
 		sf := s.GetSafrole()
-		sf0, _, err := sf.ValidateTicketTransition(currJCE, common.Hash{})
+
+		sf0, _, err := sf.SafroleTmpTransition(currJCE, common.Hash{})
+		s.tmp_safrole = &sf0
 		if err != nil {
 			fmt.Printf("Error validating ticket transition: %v\n", err)
 			return nil, nil, err
 		}
-		isAuthorizedBlockBuilder, ticketID, _ := sf0.IsAuthorizedBuilder(currJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
+		isAuthorizedBlockBuilder, ticketID, _ := s.tmp_safrole.IsAuthorizedBuilder(currJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		if isAuthorizedBlockBuilder {
 			// propose block without state transition
 			start := time.Now()
@@ -894,15 +896,16 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 				fmt.Printf("Error applying state transition: %v\n", err)
 				return nil, nil, err
 			}
-			var validators []types.Validator
-			validators = newStateDB.GetSafrole().NextValidators
-			if len(validators) == 0 {
-				panic("No validators")
-			}
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
-			// AddDrawBlock(common.Str(proposedBlk.Hash()), common.Str(proposedBlk.ParentHash()), int(proposedBlk.Header.AuthorIndex), fmt.Sprintf("%d", proposedBlk.Header.Slot))
-			fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
-				currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
+			if sf0.GetEpochT() == 1 {
+				fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
+					currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
+			} else {
+				// change a color
+				fmt.Printf("[N%v] \033[32m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
+					currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
+			}
+
 			elapsed := time.Since(start)
 			if trace && elapsed > 2000000 {
 				fmt.Printf("\033[31m MakeBlock / ApplyStateTransitionFromBlock\033[0m %d ms\n", elapsed/1000)
@@ -1135,6 +1138,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
+
 	start := time.Now()
 	s = oldState.Copy()
 	old_timeslot := s.GetSafrole().Timeslot
@@ -1142,7 +1146,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.Block = blk
 	s.ParentHeaderHash = blk.Header.ParentHeaderHash
 	s.HeaderHash = blk.Header.Hash()
-
+	sf_tmp, _, err := s.GetSafrole().SafroleTmpTransition(blk.TimeSlot(), common.Hash{})
+	s.tmp_safrole = &sf_tmp
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
 	if !isValid || headerErr != nil {
 		// panic("MK validation check!! Block header is not valid")
@@ -1337,16 +1342,12 @@ type SealBlockMaterial struct {
 }
 
 func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx uint16, ietf_pub bandersnatch.BanderSnatchKey, verificationErr error) {
-	sf := s.GetSafrole()
 	targetJCE := bl.TimeSlot()
 	h := bl.GetHeader()
 	validatorIdx = h.AuthorIndex
 
 	// ValidateTicketTransition
-	sf0, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
-	if err != nil {
-		fmt.Printf("Error in generating sf_tmp: %v\n", err)
-	}
+	sf0 := s.tmp_safrole
 	// author_idx is the K' so we use the sf_tmp
 	signing_validator := sf0.GetCurrValidator(int(validatorIdx))
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
@@ -1389,16 +1390,12 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 }
 
 func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchKey, blockAuthorPriv bandersnatch.BanderSnatchSecret, validatorIdx uint16, targetJCE uint32, originalBlock *types.Block) (*types.Block, error) {
-	sf := s.GetSafrole()
 	newBlock := originalBlock.Copy()
 	header := newBlock.GetHeader()
 	header.ExtrinsicHash = newBlock.Extrinsic.Hash()
 
 	// Validate ticket transition
-	sf0, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
-	if err != nil {
-		return nil, fmt.Errorf("error generating sf0: %w", err)
-	}
+	sf0 := s.tmp_safrole
 
 	// Prepare a container to store all intermediate values for debugging / auditing
 	material := &SealBlockMaterial{
@@ -1530,6 +1527,16 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	h.ParentHeaderHash = s.HeaderHash
 	h.ParentStateRoot = stateRoot
 	h.Slot = targetJCE
+	b.Header = *h
+	// eq 71
+	if isNewEpoch {
+		epochMarker := sf.GenerateEpochMarker()
+		//a tuple of the epoch randomness and a sequence of Bandersnatch keys defining the Bandersnatch valida- tor keys (kb) beginning in the next epoch
+		if debug {
+			fmt.Printf("[N%d] *** \033[32mEpochMarker\033[0m %v\n", s.Id, epochMarker)
+		}
+		h.EpochMark = epochMarker
+	}
 	// Extrinsic Data has 5 different Extrinsics
 	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
 	extrinsicData.Preimages = make([]types.Preimages, 0)
@@ -1581,7 +1588,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 				fmt.Printf("Rho %v\n", rho)
 			}
 		}
-		err = s.Verify_Guarantee_MakeBlock(g)
+		err = s.Verify_Guarantee_MakeBlock(g, b, tmpState)
 		if err != nil {
 			fmt.Printf("Node %d \n", s.Id)
 			fmt.Println("Error verifying guarantee (in Make Block): ", err)
@@ -1597,9 +1604,11 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 	SortByCoreIndex(extrinsicData.Guarantees)
 	// return duplicate guarantee err
-	extrinsicData.Guarantees, err, _ = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees)
+	extrinsicData.Guarantees, err, _ = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees, b)
 	if err != nil {
-		return nil, err
+		// Shawn -- THIS LOOKS WRONG. Do not return here
+		// extrinsicData.Guarantees = make([]types.Guarantee, 0)
+		// return nil, err
 	}
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()
@@ -1619,16 +1628,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	// TODO: 104 Offender signatures c and f must each be ordered by the validator’s Ed25519 key.
 	// TODO: 105 There may be no duplicate report hashes within the extrinsic, nor amongst any past reported hashes.
 	// target_Epoch, target_Phase := sf.EpochAndPhase(targetJCE)
-	needEpochMarker := isNewEpoch
-	// eq 71
-	if needEpochMarker {
-		epochMarker := sf.GenerateEpochMarker()
-		//a tuple of the epoch randomness and a sequence of Bandersnatch keys defining the Bandersnatch valida- tor keys (kb) beginning in the next epoch
-		if debug {
-			fmt.Printf("[N%d] *** \033[32mEpochMarker\033[0m %v\n", s.Id, epochMarker)
-		}
-		h.EpochMark = epochMarker
-	}
+
 	// eq 72
 	if needWinningMarker {
 		winningMarker, err := sf.GenerateWinningMarker()
@@ -1706,12 +1706,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 func (s *StateDB) ValidateVRFSealInput(ticketID common.Hash, targetJCE uint32) (bool, error) {
 
 	// ValidateTicketTransition
-	sf := s.GetSafrole()
-	sf0, _, err := sf.ValidateTicketTransition(targetJCE, common.Hash{})
-	if err != nil {
-		fmt.Printf("Error in generating sf_tmp: %v\n", err)
-		return false, fmt.Errorf("%v", err)
-	}
+	sf0 := s.tmp_safrole
 
 	if sf0.GetEpochT() == 0 {
 		return true, nil

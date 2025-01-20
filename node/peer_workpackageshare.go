@@ -198,20 +198,16 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, pubKey types.Ed25519Key) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
+func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, pubKey types.Ed25519Key) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
-	// tree := trie.NewCDMerkleTree(bundle.ImportSegmentData)
-	// segmentRoot := tree.Root()
-	// segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
-	// 	WorkPackageHash: bundle.WorkPackage.Hash(),
-	// 	SegmentRoot:     common.BytesToHash(segmentRoot),
-	// })
-	//   for i, h := range bundle {
-	// 	segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
-	// 		WorkPackageHash: h,
-	// 		SegmentRoot:     segmentRoot[i],
-	// 	})
-	// }
+	for _, item := range segmentRootLookup {
+		lookupItem := JAMSNPSegmentRootMapping{
+			WorkPackageHash: item.WorkPackageHash,
+			SegmentRoot:     item.SegmentRoot,
+		}
+		segmentroots = append(segmentroots, lookupItem)
+	}
+
 	bundleBytes := bundle.Bytes()
 	req := JAMSNPWorkPackageShare{
 		CoreIndex:    coreIndex,
@@ -252,6 +248,20 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 	return
 }
 
+func CompareSegmentRootLookup(a, b types.SegmentRootLookup) (bool, error) {
+	if len(a) != len(b) {
+		return false, fmt.Errorf("length mismatch")
+	}
+	mismatchIdx := []int{}
+	for i := range a {
+		if a[i].WorkPackageHash != b[i].WorkPackageHash || a[i].SegmentRoot != b[i].SegmentRoot {
+			fmt.Printf("Mismatch at index %v %v_%v | %v_%v\n", i, a[i].WorkPackageHash, a[i].SegmentRoot, b[i].WorkPackageHash, b[i].SegmentRoot)
+			mismatchIdx = append(mismatchIdx, i)
+		}
+	}
+	return len(mismatchIdx) == 0, fmt.Errorf("diff at %v", mismatchIdx)
+}
+
 func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 
@@ -269,33 +279,51 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		return
 	}
 
-	workpackagehashes := make([]common.Hash, 0)
-	segmentroots := make([]common.Hash, 0)
+	wpCoreIndex := newReq.CoreIndex
 
+	received_segmentRootLookup := types.SegmentRootLookup{}
+	received_segmentRootLookup = make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {
-		workpackagehashes = append(workpackagehashes, sr.WorkPackageHash)
-		segmentroots = append(segmentroots, sr.SegmentRoot)
+		item := types.SegmentRootLookupItem{
+			WorkPackageHash: sr.WorkPackageHash,
+			SegmentRoot:     sr.SegmentRoot,
+		}
+		received_segmentRootLookup = append(received_segmentRootLookup, item)
 	}
 
 	bp, err := types.WorkPackageBundleFromBytes(bundle)
 	if err != nil {
 		panic(123)
 	}
-	if len(segmentroots) == 0 {
-		segmentroots = append(segmentroots, common.Hash{})
-	}
+
+	//workpackagehashes := make([]common.Hash, 0)
+	//segmentroots := make([]common.Hash, 0)
+	// TODO: why Stanley?
+	// if len(segmentroots) == 0 {
+	// 	segmentroots = append(segmentroots, common.Hash{})
+	// }
+
+	// should use original's segmentRootLookup --- no need to fetch here
 	segmentRootLookup, err := n.GetSegmentRootLookup(bp.WorkPackage)
 	if err != nil {
 		fmt.Printf("[N%v] AAA [auditWorkReport:GetSegmentRootLookup] ERR %v\n", n.id, err)
 		return
 	}
-	workReport, err := n.executeWorkPackageBundle(*bp, segmentRootLookup)
+
+	matched, err := CompareSegmentRootLookup(received_segmentRootLookup, segmentRootLookup)
+	if !matched {
+		fmt.Printf("[N%v] Segment root lookup mismatch at indices: %v\n", n.id, err)
+		return fmt.Errorf("segment root lookup mismatch")
+	}
+	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, *bp, segmentRootLookup) //TODO: replace it with segmentroots
 	if err != nil {
 		return
 	} else {
 		n.workReportsCh <- workReport
 	}
-	gc := workReport.Sign(n.GetEd25519Secret(), uint16(n.GetCurrValidatorIndex()))
+	//TODO: Shawn this is potentially problematic. How can we have deterministic ValidatorIndex here???
+	signerSecret := n.GetEd25519Secret()
+	gc := workReport.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
 	guarantee := types.Guarantee{
 		Report:     workReport,
 		Signatures: []types.GuaranteeCredential{gc},
@@ -309,6 +337,8 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		Signature:      guarantee.Signatures[0].Signature,
 	}
 	if debugG {
+		fmt.Printf("%s onWorkPackageShare:selfComputed workReport %v: %v\n", n.String(), req.WorkReportHash, workReport.String())
+		//fmt.Printf("%s onWorkPackageShare:selfComputed guarantee: %v\n", n.String(), guarantee.String())
 		fmt.Printf("%s onWorkPackageShare:RefineBundle workReportHash: %v Signature: %x\n", n.String(), req.WorkReportHash, req.Signature)
 	}
 	reqBytes, err := req.ToBytes()

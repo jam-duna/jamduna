@@ -63,6 +63,8 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 	err = n.extrinsic_pool.AddGuaranteeToPool(g)
 	if err != nil {
 		fmt.Printf("processGuarantee: AddGuaranteeToPool ERR %v\n", err)
+	} else {
+		// fmt.Printf("%s received guarantee from core_%d\n", n.String(), g.Report.CoreIndex)
 	}
 	return nil // Success
 }

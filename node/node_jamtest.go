@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -670,14 +671,20 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	// set up ticker for loop
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	ticker_runtime := time.NewTicker(2 * time.Second)
+	defer ticker_runtime.Stop()
 	Fib_Tri_Chan := make(chan types.WorkPackage, 1)
 	Fib_Tri_counter := 0
+	Fib_Tri_successful := make(chan bool)
 	Fib_Tri_Ready := true
 	Fib_Tri_Keeper := false
 	Meg_Chan := make(chan types.WorkPackage, 1)
 	Meg_counter := 0
+	Meg_successful := make(chan bool)
 	Meg_Ready := true
 	Meg_Keeper := false
+	curr_Meg_WorkPackage := types.WorkPackage{}
+	curr_fib_tri_WorkPackage := types.WorkPackage{}
 	fmt.Printf("Guarantor Assignment\n")
 	for _, assign := range nodes[0].statedb.GuarantorAssignments {
 		vid := nodes[0].statedb.GetSafrole().GetCurrValidatorIndex(assign.Validator.GetEd25519Key())
@@ -721,16 +728,23 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					sentLastWorkPackage = true
 				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready) {
 					// if false{
-					// send workpackages to the network
-					Meg_Chan <- Meg_WorkPackages[Meg_counter]
-					Meg_counter++
-					Meg_Ready = false
 
-					Fib_Tri_Chan <- Fib_Trib_WorkPackages[Fib_Tri_counter]
+					// send workpackages to the network
+
+					curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
+					Fib_Tri_Chan <- curr_fib_tri_WorkPackage
 					Fib_Tri_counter++
 					Fib_Tri_Ready = false
 
+					// send workpackages to the network
+					curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
+					Meg_Chan <- curr_Meg_WorkPackage
+					Meg_counter++
+					Meg_Ready = false
+					fmt.Printf("**  Preparing Fib_Tri#%v %v Meg#%v %v **\n", Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
+					nodes[5].statedb.GuarantorsAssignmentsPrint()
 				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
+
 					Meg_Ready = false
 					Meg_Keeper = true
 					Fib_Tri_Ready = false
@@ -743,51 +757,40 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					Fib_Tri_Keeper = false
 				}
 			}
+		// case <-ticker_runtime.C:
+		// 	var stats runtime.MemStats
+		// 	runtime.ReadMemStats(&stats)
 
-			// if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready {
-			// 	// if false{
-			// 	// send workpackages to the network
-			// 	Meg_Chan <- Meg_WorkPackages[Meg_counter]
-			// 	Meg_counter++
-			// 	Meg_Ready = false
-			// } else if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil {
-			// 	Meg_Ready = false
-			// 	Meg_Keeper = true
+		// 	numGoroutine := runtime.NumGoroutine()
+		// 	numCPU := runtime.NumCPU()
+		// 	cpuPercent := float64(runtime.NumCgoCall()) / float64(numCPU)
 
-			// } else if Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil {
-			// 	Meg_Ready = true
-			// 	Meg_Keeper = false
-			// }
-			// if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready {
-			// 	if Meg_Keeper {
-			// 		Fib_Tri_Chan <- Fib_Trib_WorkPackages[Fib_Tri_counter]
-			// 		Fib_Tri_counter++
-			// 		Fib_Tri_Ready = false
-			// 	}
-			// } else if nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready {
-			// 	Fib_Tri_Ready = false
-			// 	Fib_Tri_Keeper = true
-			// } else if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper == true {
-			// 	Fib_Tri_Ready = true
-			// 	Fib_Tri_Keeper = false
-			// }
+		// 	fmt.Printf("\033[31mGoroutines: %d, CPUs: %d, CPU Usage (approx): %.2f%%\033[0m\n", numGoroutine, numCPU, cpuPercent*100)
 
 		case workPackage := <-Fib_Tri_Chan:
 			// submit to core 1
 			// v0, v3, v5 => core
-			core1_peers := nodes[0].GetCoreCoWorkersPeers(1)
+			senderIdx := 5
 			fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(workPackage.Hash()))
-			// Randomly select sender and receiver
-			senderIdx := rand.Intn(6)
-			receiverIdx := rand.Intn(3)
-			for senderIdx == int(core1_peers[receiverIdx].PeerID) {
-				receiverIdx = rand.Intn(3)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			go func() {
+				defer cancel()
+				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful)
+			}()
+		case successful := <-Fib_Tri_successful:
+			if successful {
+				fmt.Printf("Fib_Tri %d is successful\n", Fib_Tri_counter)
+			} else {
+				panic(fmt.Sprintf("Fib_Tri %d is failed\n", Fib_Tri_counter))
+			}
+		case successful := <-Meg_successful:
+
+			if successful {
+				fmt.Printf("Meg %d is successful\n", Meg_counter)
+			} else {
+				panic(fmt.Sprintf("Meg %d is failed\n", Meg_counter))
 			}
 
-			err := core1_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{}, 1)
-			if err != nil {
-				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
-			}
 		case workPackage := <-Meg_Chan:
 			// submit to core 0
 			// CE133_WorkPackageSubmission: n1 => n4
@@ -796,16 +799,64 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			// Randomly select sender and receiver
 
 			fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", Meg_counter, common.Str(workPackage.Hash()))
-			senderIdx := rand.Intn(6)
-			receiverIdx := rand.Intn(3)
-			core0_peers := nodes[senderIdx].GetCoreCoWorkersPeers(0)
-			for senderIdx == int(core0_peers[receiverIdx].PeerID) {
-				receiverIdx = rand.Intn(3)
-			}
-			err := core0_peers[receiverIdx].SendWorkPackageSubmission(workPackage, []byte{}, 0)
+			// senderIdx := rand.Intn(6)
+			// receiverIdx := rand.Intn(3)
+			// core0_peers := nodes[senderIdx].GetCoreCoWorkersPeers(0)
+			// for senderIdx == int(core0_peers[receiverIdx].PeerID) {
+			// 	receiverIdx = rand.Intn(3)
+			// }
+			megCoreIdx := uint16(0)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			go func() {
+				defer cancel()
+				sendWorkPackageTrack(ctx, nodes[5], workPackage, megCoreIdx, Meg_successful)
+			}()
+		}
+
+	}
+}
+
+func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage types.WorkPackage, receiverCore uint16, successful chan bool) {
+	ticker := time.NewTicker(6 * time.Second)
+	ticker2 := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	defer ticker2.Stop()
+	workPackageHash := workPackage.Hash()
+	trialCount := 0
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("Context cancelled for work package %v\n", workPackageHash)
+			return
+		case <-ticker.C:
+
+			// Sending the work package again
+			corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
+			randIdx := rand.Intn(len(corePeers))
+			err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, []byte{}, receiverCore)
+			fmt.Printf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
 			if err != nil {
-				fmt.Printf("SendWorkPackageSubmission ERR %v, sender:%d, receiver %d\n", err, senderIdx, receiverIdx)
+				fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
 			}
+			trialCount++
+			if trialCount > 4 {
+				successful <- false
+				return
+			}
+		case <-ticker2.C:
+			if senderNode.statedb.JamState.AvailabilityAssignments[receiverCore] != nil {
+				rho := senderNode.statedb.JamState.AvailabilityAssignments[receiverCore]
+				pendingWPHash := rho.WorkReport.AvailabilitySpec.WorkPackageHash
+				if workPackageHash == pendingWPHash {
+					fmt.Printf("Found pending work package %v at core %v!\n", workPackageHash, receiverCore)
+					successful <- true
+					return
+				} else {
+					fmt.Printf("Found different pending work package %v at core %v!\n", rho.WorkReport.String(), receiverCore)
+				}
+			}
+
 		}
 
 	}

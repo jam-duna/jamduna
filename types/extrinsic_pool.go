@@ -127,6 +127,17 @@ func (ep *ExtrinsicPool) GetGuaranteesFromPool(accepted_slot uint32) []Guarantee
 	return guarantees
 }
 
+func (ep *ExtrinsicPool) GetSpecGuaranteeFromPool(accepted_slot uint32, core_index uint16) *Guarantee {
+	ep.guaranteeMutex.Lock()
+	defer ep.guaranteeMutex.Unlock()
+	if _, exists := ep.queuedGuarantees[accepted_slot]; exists {
+		if guarantee, exists := ep.queuedGuarantees[accepted_slot][core_index]; exists {
+			return guarantee
+		}
+	}
+	return nil
+}
+
 // remove the guarantees that are already used by the block
 func (ep *ExtrinsicPool) RemoveOldGuarantees(guarantee Guarantee) error {
 	ep.guaranteeMutex.Lock()

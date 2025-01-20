@@ -572,6 +572,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 
 	erasureRoot := spec.ErasureRoot
 	bundleLength := spec.BundleLength
+	workReportCoreIdx := workReport.CoreIndex
 	workPackageHash := spec.WorkPackageHash
 	workPackageBundle, fetchErr := n.FetchWorkPackageBundle(workPackageHash, erasureRoot, bundleLength)
 	if err != nil {
@@ -587,7 +588,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	if debugAudit {
 		fmt.Printf("WP=%v | len=%v | byte=%x\n", workPackageBundle.PackageHash(), len(workPackageBundle.Bytes()), workPackageBundle.Bytes())
 	}
-	wr, err := n.executeWorkPackageBundle(workPackageBundle, segmentRootLookup)
+	wr, err := n.executeWorkPackageBundle(workReportCoreIdx, workPackageBundle, segmentRootLookup)
 	if err != nil {
 		return
 	} else {

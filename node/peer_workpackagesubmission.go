@@ -140,26 +140,20 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	// 	return err
 	// }
 	// fmt.Printf("receive workpackage: %s\n", a)
-
-	selfCoreIndex, err := n.GetSelfCoreIndex()
+	curr_statedb := n.statedb.Copy()
+	selfCoreIndex := curr_statedb.GetSelfCoreIndex()
 	if err != nil {
 		return fmt.Errorf("failed to get self core index: %w", err)
 	}
+	// reject if the work package is not for this core
 	if newReq.CoreIndex != selfCoreIndex {
-		fmt.Printf("Core index mismatch: %d != %d\n", newReq.CoreIndex, selfCoreIndex)
-		core_workers := n.GetCoreCoWorkersPeers(selfCoreIndex)
-		for _, peer := range core_workers {
-			fmt.Printf("Core %d worker: %s\n", selfCoreIndex, peer.String())
-		}
-		return fmt.Errorf("Core index mismatch: %d != %d", newReq.CoreIndex, selfCoreIndex)
-	}
-	if debugG {
-		fmt.Printf("%s received Work Package Submission [CORE %+v]\n", n.String(), newReq.CoreIndex)
+		return fmt.Errorf("work package submission for core %d received by core %d", newReq.CoreIndex, selfCoreIndex)
 	}
 	// TODO: read extrinsics
 
 	// TODO: Sourabh check if this even makes sense
 	//n.workPackagesCh <- newReq.WorkPackage
-	n.broadcastWorkpackage(newReq.WorkPackage)
+	//we use current timeslot to broadcast the workpackage, because if we it might be possible that the timeslot has changed by the time the workpackage is executed
+	n.broadcastWorkpackage(newReq.WorkPackage, newReq.CoreIndex, curr_statedb)
 	return nil
 }
