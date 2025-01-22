@@ -155,18 +155,20 @@ func (n *Node) runAudit() {
 			}
 			err := n.addAuditingStateDB(audit_statedb)
 			if err != nil {
-				fmt.Printf("Audit StateDB Error %v\n", err)
+				err_log := fmt.Sprintf("addAuditingStateDB failed %v\n", err)
+				Logger.RecordLogs(audit_error, err_log, true)
 			}
 			n.cleanWaitingAJ()
 			n.initAudit(headerHash)
 			err = n.Audit(headerHash)
 			if err != nil {
-				fmt.Printf("Audit Failed %v\n", err)
+				err_log := fmt.Sprintf("Audit Failed %v\n", err)
+				Logger.RecordLogs(audit_error, err_log, true)
 			} else {
 				// if the block is audited, we can start grandpa
-				if debugAudit {
-					fmt.Printf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
-				}
+
+				log := fmt.Sprintf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
+				Logger.RecordLogs(audit_status, log, true)
 				newBlock := audit_statedb.Block.Copy()
 				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
 					if Grandpa {
@@ -410,7 +412,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 					fmt.Printf("%s [T:%d] broadcasting announcement for %v\n", n.String(), auditing_statedb.Block.TimeSlot(), w.WorkReport.Hash())
 				}
 			}
-			n.broadcast(announcementWithProof)
+			go n.broadcast(announcementWithProof)
 		}
 
 		return a0, nil
@@ -459,7 +461,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 				}
 			}
 
-			n.broadcast(announcementWithProof)
+			go n.broadcast(announcementWithProof)
 		}
 
 		return an, nil
@@ -597,13 +599,15 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	auditPass := false
 	if workReport.AvailabilitySpec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
-		if debugAudit {
-			fmt.Printf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT PASS\n", n.String(), workPackageBundle.WorkPackage.Hash())
-		}
+
+		audit_log := fmt.Sprintf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT PASS\n", n.String(), workPackageBundle.WorkPackage.Hash())
+		Logger.RecordLogs(audit_status, audit_log, true)
+
 	} else {
-		if debugAudit {
-			fmt.Printf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT FAIL\n", n.String(), workPackageBundle.WorkPackage.Hash())
-		}
+
+		audit_log := fmt.Sprintf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT FAIL\n", n.String(), workPackageBundle.WorkPackage.Hash())
+		Logger.RecordLogs(audit_status, audit_log, true)
+
 	}
 
 	judgement, err = n.MakeJudgement(workReport, auditPass)
@@ -616,7 +620,7 @@ func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.
 		if debugAudit {
 			fmt.Printf("%s distributing judgement %v\n", n.String(), j.WorkReportHash)
 		}
-		n.broadcast(j)
+		go n.broadcast(j)
 		n.judgementsCh <- j
 	}
 }

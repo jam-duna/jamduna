@@ -150,6 +150,7 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 		Signatures: newReq.Credentials,
 	}
 	n.guaranteesCh <- guarantee
+	Logger.RecordLogs(EG_status, fmt.Sprintf("%s [onWorkReportDistribution] incoming Guarantee %s from Core %d\n", n.String(), workReport.GetWorkPackageHash().String_short(), workReport.CoreIndex), true)
 	n.workReportsCh <- workReport
 	return nil
 }

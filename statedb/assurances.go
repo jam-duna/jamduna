@@ -93,7 +93,8 @@ func (j *JamState) CountAvailableWR(assurances []types.Assurance) []uint32 {
 	return tally
 }
 
-func (j *JamState) ProcessAssuranceState(tally []uint32) (uint32, []types.WorkReport) {
+// 0.5.4 11.17
+func (j *JamState) ProcessAssuranceState(tally []uint32, timeslot uint32) (uint32, []types.WorkReport) {
 	// Update the validator's assurance state
 	numAssurances := uint32(0)
 	BigW := make([]types.WorkReport, 0) // eq 129: BigW (available work report) is the work report that has been assured by more than 2/3 validators
@@ -101,8 +102,12 @@ func (j *JamState) ProcessAssuranceState(tally []uint32) (uint32, []types.WorkRe
 		if j.AvailabilityAssignments[c] == nil {
 			continue
 		}
-		if available >= 2*types.TotalValidators/3 {
-			BigW = append(BigW, j.AvailabilityAssignments[c].WorkReport)
+		report_ts := j.AvailabilityAssignments[c].Timeslot
+		timeout := timeslot >= report_ts+uint32(types.UnavailableWorkReplacementPeriod)
+		if available >= 2*types.TotalValidators/3 || timeout {
+			if !timeout {
+				BigW = append(BigW, j.AvailabilityAssignments[c].WorkReport) // available work report
+			}
 			j.AvailabilityAssignments[c] = nil
 		}
 		numAssurances++
@@ -110,11 +115,11 @@ func (j *JamState) ProcessAssuranceState(tally []uint32) (uint32, []types.WorkRe
 	return numAssurances, BigW
 }
 
-func (j *JamState) ProcessAssurances(assurances []types.Assurance) (uint32, []types.WorkReport) {
+func (j *JamState) ProcessAssurances(assurances []types.Assurance, timeslot uint32) (uint32, []types.WorkReport) {
 	// Count the number of available assurances for each validator
 	tally := j.CountAvailableWR(assurances)
 	// Update the validator's assurance state
-	numAssurances, BigW := j.ProcessAssuranceState(tally)
+	numAssurances, BigW := j.ProcessAssuranceState(tally, timeslot)
 	return numAssurances, BigW
 }
 

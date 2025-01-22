@@ -22,7 +22,8 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		Timer2Signal: make(chan bool, 1),
 		Ticker:       time.NewTicker(100 * time.Millisecond),
 	}
-	fmt.Printf("[v%d] Playing grandpa round %d | last finalized block %v\n", g.GetSelfVoterIndex(round), round, g.block_tree.GetLastFinalizedBlock().Block.Header.Hash())
+	grandpa_string := fmt.Sprintf("[v%d] Playing grandpa round %d | last finalized block %v\n", g.GetSelfVoterIndex(round), round, g.block_tree.GetLastFinalizedBlock().Block.Header.Hash())
+	g.GrandpaStatusChan <- grandpa_string
 	go func() {
 		//create a timer for the round
 		if round == 1 {
@@ -73,7 +74,7 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 			g.BroadcastCommitChan <- primary_commit_message
 			if g.block_tree.ChildOrBrother(best_candidate_m1, g.block_tree.GetLastFinalizedBlock()) {
 				primary_precommit_message := g.NewPrimaryVoteMessage(best_candidate_m1.Block, round)
-				fmt.Printf("[v%d] primary precommit message %v\n", g.GetSelfVoterIndex(round), primary_precommit_message.SignMessage.Message.Vote.BlockHash.String_short())
+				g.GrandpaStatusChan <- fmt.Sprintf("[v%d] primary precommit message %v\n", g.GetSelfVoterIndex(round), primary_precommit_message.SignMessage.Message.Vote.BlockHash.String_short())
 				g.BroadcastVoteChan <- primary_precommit_message
 				err := g.ProcessPrimaryProposeMessage(primary_precommit_message)
 				if err != nil {

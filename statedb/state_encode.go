@@ -5,7 +5,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// C1
+// C1 - CoreAuthPool
 func (n *JamState) GetAuthPoolBytes() []byte {
 	if len(n.AuthorizationsPool) == 0 {
 		return []byte{}
@@ -17,6 +17,7 @@ func (n *JamState) GetAuthPoolBytes() []byte {
 	return codec_bytes
 }
 
+// C2 AuthQueue
 func (n *JamState) GetAuthQueueBytes() []byte {
 	if len(n.AuthorizationQueue) == 0 {
 		return []byte{}
@@ -28,7 +29,7 @@ func (n *JamState) GetAuthQueueBytes() []byte {
 	return codec_bytes
 }
 
-// C3
+// C3 RecentBlocks
 func (T Peaks) Encode() []byte {
 	if len(T) == 0 {
 		return []byte{0}
@@ -62,7 +63,8 @@ func (n *JamState) GetRecentBlocksBytes() []byte {
 	return codec_bytes
 }
 
-// C4
+// C4 safroleState Gamma
+
 func (T TicketsOrKeys) T2CT() CTicketsOrKeys {
 	var Tickets types.TicketsMark
 	var Keys [types.EpochLength]common.Hash
@@ -102,11 +104,15 @@ func (T CTicketsOrKeys) Encode() []byte {
 	encoded := []byte{}
 	if T.Tickets != nil && T.Keys == nil {
 		encoded = append(encoded, byte(0))
+		// NOTE. C4 is technically not using TicketsMark!
+		// TicketsMark is properly defined for Header H_w (winning tickets)
+		// TicketsMark has one extra byte as nil discriminator. we need to strip this byte before sending out.
+		// We took the short cur trying to represent two different encode with same type
 		encodedTickets, err := types.Encode(T.Tickets)
 		if err != nil {
 			return []byte{}
 		}
-		encoded = append(encoded, encodedTickets...)
+		encoded = append(encoded, encodedTickets[1:]...) // strip the nil discriminator
 	}
 	if T.Keys != nil && T.Tickets == nil {
 		encoded = append(encoded, byte(1))
@@ -114,7 +120,7 @@ func (T CTicketsOrKeys) Encode() []byte {
 		if err != nil {
 			return []byte{}
 		}
-		encoded = append(encoded, encodedKeys...)
+		encoded = append(encoded, encodedKeys[:]...)
 	}
 	return encoded
 }
@@ -156,7 +162,7 @@ func (s SafroleBasicState) GetSafroleStateBytes() []byte {
 	return codec_bytes
 }
 
-// C5
+// C5 - PastJudgements
 func (P Psi_state) Encode() []byte {
 	var psi_g []common.Hash
 	for _, v := range P.Psi_g {
@@ -197,7 +203,7 @@ func (j *JamState) GetPsiBytes() []byte {
 	return codec_bytes
 }
 
-// C6
+// C6 - Entropy
 func (s *SafroleState) GetEntropyBytes() []byte {
 	if s == nil {
 		return []byte{}
@@ -209,7 +215,7 @@ func (s *SafroleState) GetEntropyBytes() []byte {
 	return codec_bytes
 }
 
-// C7
+// C7 - NextEpochValidatorKeys
 func (s *SafroleState) GetNextEpochValidatorsBytes() []byte {
 	if s == nil {
 		return []byte{}
@@ -221,7 +227,7 @@ func (s *SafroleState) GetNextEpochValidatorsBytes() []byte {
 	return codec_bytes
 }
 
-// C8
+// C8 - CurrentValidatorKeys
 func (s *SafroleState) GetCurrEpochValidatorsBytes() []byte {
 	if s == nil {
 		return []byte{}
@@ -233,7 +239,7 @@ func (s *SafroleState) GetCurrEpochValidatorsBytes() []byte {
 	return codec_bytes
 }
 
-// C9
+// C9 - PriorEpochValidatorKeys
 func (s *SafroleState) GetPriorEpochValidatorsBytes() []byte {
 	if s == nil {
 		return []byte{}
@@ -245,7 +251,7 @@ func (s *SafroleState) GetPriorEpochValidatorsBytes() []byte {
 	return codec_bytes
 }
 
-// C10
+// C10 - AvailabilityAssignments
 func (T AvailabilityAssignments) Encode() []byte {
 	encoded := []byte{}
 	for i := 0; i < len(T); i++ {
@@ -271,7 +277,7 @@ func (n *JamState) GetRhoBytes() []byte {
 	return codec_bytes
 }
 
-// C11
+// C11 - MostRecentBlockTimeslot
 func (s *SafroleState) GetMostRecentBlockTimeSlotBytes() []byte {
 	if s == nil {
 		return []byte{}
@@ -283,7 +289,7 @@ func (s *SafroleState) GetMostRecentBlockTimeSlotBytes() []byte {
 	return codec_bytes
 }
 
-// C12
+// C12 - PrivilegedServiceIndices
 func (n *JamState) GetPrivilegedServicesIndicesBytes() []byte {
 	codec_bytes, err := types.Encode(n.PrivilegedServiceIndices)
 	if err != nil {
@@ -292,7 +298,7 @@ func (n *JamState) GetPrivilegedServicesIndicesBytes() []byte {
 	return codec_bytes
 }
 
-// C13
+// C13 - ValidatorStatistics
 func (n *JamState) GetPiBytes() []byte {
 	encoded, err := types.Encode(n.ValidatorStatistics)
 	if err != nil {
@@ -301,7 +307,7 @@ func (n *JamState) GetPiBytes() []byte {
 	return encoded
 }
 
-// C14
+// C14 - AccumulationQueue
 func (n *JamState) GetAccumulationQueueBytes() []byte {
 	encoded, err := types.Encode(n.AccumulationQueue)
 	if err != nil {
@@ -310,7 +316,7 @@ func (n *JamState) GetAccumulationQueueBytes() []byte {
 	return encoded
 }
 
-// C15
+// C15 - AccumulationHistory
 func (n *JamState) GetAccumulationHistoryBytes() []byte {
 	encoded, err := types.Encode(n.AccumulationHistory)
 	if err != nil {

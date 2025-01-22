@@ -140,7 +140,7 @@ func (n *Node) BroadcastTickets() {
 				fmt.Printf("[N%v] Broadcasting Ticket %x\n", n.id, ticket.Attempt)
 			}
 			if !*ticketbucket.IsBroadcasted {
-				n.broadcast(ticket)
+				go n.broadcast(ticket)
 				*ticketbucket.IsBroadcasted = true
 			}
 		}

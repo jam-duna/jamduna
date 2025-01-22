@@ -262,18 +262,18 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 func (n *JamState) Snapshot() *StateSnapshot {
 	original := n.SafroleState
 	copied := &StateSnapshot{
-		AuthorizationsPool:       n.AuthorizationsPool,                                  // C1 -- todo
-		AuthorizationQueue:       n.AuthorizationQueue,                                  // C2 -- todo
-		RecentBlocks:             n.RecentBlocks,                                        // C3 -- todo
+		AuthorizationsPool:       n.AuthorizationsPool,                                  // C1
+		AuthorizationQueue:       n.AuthorizationQueue,                                  // C2
+		RecentBlocks:             n.RecentBlocks,                                        // C3
 		Gamma:                    n.SafroleState.GetSafroleBasicState().Copy(),          // C4
-		Disputes:                 n.DisputesState,                                       // C5 -- todo
+		Disputes:                 n.DisputesState,                                       // C5
 		Entropy:                  n.SafroleState.Entropy,                                // C6
 		NextValidators:           make([]types.Validator, len(original.NextValidators)), // C7
 		CurrValidators:           make([]types.Validator, len(original.CurrValidators)), // C8
 		PrevValidators:           make([]types.Validator, len(original.PrevValidators)), // C9
-		AvailabilityAssignments:  n.AvailabilityAssignments,                             // C10 -- todo
+		AvailabilityAssignments:  n.AvailabilityAssignments,                             // C10
 		Timeslot:                 n.SafroleState.Timeslot,                               // C11
-		PrivilegedServiceIndices: n.PrivilegedServiceIndices,                            // C12 -- todo
+		PrivilegedServiceIndices: n.PrivilegedServiceIndices,                            // C12
 		ValidatorStatistics:      n.ValidatorStatistics,                                 // C13
 		AccumulationQueue:        n.AccumulationQueue,                                   // C14
 		AccumulationHistory:      n.AccumulationHistory,                                 // C15

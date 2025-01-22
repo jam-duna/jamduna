@@ -20,6 +20,7 @@ type Grandpa struct {
 	BroadcastVoteChan     chan VoteMessage
 	BroadcastCommitChan   chan CommitMessage
 	ErrorChan             chan error
+	GrandpaStatusChan     chan string
 }
 type GrandpaRound struct {
 	Round        uint64
@@ -98,10 +99,10 @@ func NewGrandpa(block_tree *types.BlockTree, selfkey types.Ed25519Priv, authorit
 	g.ScheduledAuthoritySet[0] = tempSet
 	g.BroadcastCommitChan = make(chan CommitMessage, 200)
 	g.BroadcastVoteChan = make(chan VoteMessage, 200)
+	g.GrandpaStatusChan = make(chan string, 200)
 	g.ErrorChan = make(chan error, 200)
 	g.BroadcastVoteChan <- g.NewPrecommitVoteMessage(genesis_blk, 0)
 	g.BroadcastVoteChan <- g.NewPrevoteVoteMessage(genesis_blk, 0)
-	fmt.Printf("Genesis block hash: %v\n", genesis_blk.Header.Hash().String_short())
 	commit, _ := g.NewFinalCommitMessage(genesis_blk, 0)
 	g.BroadcastCommitChan <- commit
 	return g

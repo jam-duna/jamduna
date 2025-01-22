@@ -45,6 +45,7 @@ const (
 	debugDAPProf      = true  // DA PProf profiling
 	debugB            = false // Blocks, Announcment
 	debugG            = false // Guaranteeing
+	debugL            = true  // Debug with logging
 	debugT            = false // Tickets/Safrole
 	debugP            = false // Preimages
 	debugA            = false // Assurances
@@ -64,7 +65,7 @@ const (
 	quicAddr          = "127.0.0.1:%d"
 	basePort          = 9000
 	godMode           = false
-	Grandpa           = false
+	Grandpa           = true
 )
 
 const (
@@ -561,6 +562,19 @@ func (n *Node) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
 	return coWorkers
 }
 
+func (n *Node) GetCoreCoWorkerPeersByStateDB(core uint16, using_statedb *statedb.StateDB) (coWorkers []Peer) {
+	coWorkers = make([]Peer, 0)
+	for _, assignment := range using_statedb.GuarantorAssignments {
+		if assignment.CoreIndex == core {
+			peer, err := n.GetPeerInfoByEd25519(assignment.Validator.Ed25519)
+			if err == nil {
+				coWorkers = append(coWorkers, *peer.Clone())
+			}
+		}
+	}
+	return coWorkers
+}
+
 func (n *Node) GetCurrValidatorIndex() uint32 {
 	return uint32(n.statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
 }
@@ -761,7 +775,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			epoch := uint32(0) // TODO: Shawn
 			err := p.SendTicketDistribution(epoch, t, false)
 			if err != nil {
-				fmt.Printf("SendTicketDistribution ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendTicketDistribution ERR %v\n", n.String(), err), true)
 			}
 			break
 		case reflect.TypeOf(types.Block{}):
@@ -770,7 +784,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			//fmt.Printf("%s BROADCAST SendBlockAnnouncement to %d: %v\n", n.String(), id, b.Header.Hash())
 			err := p.SendBlockAnnouncement(b, slot)
 			if err != nil {
-				fmt.Printf("SendBlockAnnouncement ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendBlockAnnouncement ERR %v\n", n.String(), err), true)
 			}
 			break
 
@@ -781,7 +795,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			}
 			err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
 			if err != nil {
-				fmt.Printf("SendWorkReportDistribution ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendWorkReportDistribution ERR %v\n", n.String(), err), true)
 			}
 
 			break
@@ -796,7 +810,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			a := obj.(JAMSNPAuditAnnouncementWithProof)
 			err := p.SendAuditAnnouncement(&a)
 			if err != nil {
-				fmt.Printf("SendAuditAnnouncement ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendAuditAnnouncement ERR %v\n", n.String(), err), true)
 			}
 			break
 		case reflect.TypeOf(types.Judgement{}):
@@ -804,35 +818,35 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			epoch := uint32(0) // TODO: Shawn
 			err := p.SendJudgmentPublication(epoch, j)
 			if err != nil {
-				fmt.Printf("SendJudgmentPublication ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendJudgmentPublication ERR %v\n", n.String(), err), true)
 			}
 			break
 		case reflect.TypeOf(types.PreimageAnnouncement{}):
 			preimageAnnouncement := obj.(types.PreimageAnnouncement)
 			err := p.SendPreimageAnnouncement(&preimageAnnouncement)
 			if err != nil {
-				fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendPreimageAnnouncement ERR %v\n", n.String(), err), true)
 			}
 			break
 		case reflect.TypeOf([]DADistributeECChunk{}):
 			distributeECChunks := obj.([]DADistributeECChunk)
 			err := p.SendDistributionECChunks(distributeECChunks[id])
 			if err != nil {
-				fmt.Printf("SendPreimageAnnouncement ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendDistributionECChunks ERR %v\n", n.String(), err), true)
 			}
 			break
 		case reflect.TypeOf(grandpa.VoteMessage{}):
 			vote := obj.(grandpa.VoteMessage)
 			err := p.SendVoteMessage(vote)
 			if err != nil {
-				fmt.Printf("SendVoteMessage ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendVoteMessage ERR %v\n", n.String(), err), true)
 			}
 			break
 		case reflect.TypeOf(grandpa.CommitMessage{}):
 			commit := obj.(grandpa.CommitMessage)
 			err := p.SendCommitMessage(commit)
 			if err != nil {
-				fmt.Printf("SendCommitMessage ERR %v\n", err)
+				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendCommitMessage ERR %v\n", n.String(), err), true)
 			}
 			break
 		}
@@ -1004,7 +1018,7 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 	if debugA {
 		fmt.Printf("%s [assureNewBlock] Broadcasting assurance bitfield=%x\n", n.String(), a.Bitfield)
 	}
-	n.broadcast(a)
+	go n.broadcast(a)
 	return nil
 }
 
@@ -1413,7 +1427,7 @@ func (n *Node) runClient() {
 				headerHash := newBlock.Header.Hash()
 				n.cacheHeaders(headerHash, newBlock)
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
-				n.broadcast(*newBlock)
+				go n.broadcast(*newBlock)
 
 				if debug {
 					for _, g := range newStateDB.GuarantorAssignments {

@@ -128,6 +128,13 @@ func encodeapi(objectType string, inp string) (string, error) {
 			return "", err
 		}
 		obj = c4
+	case "C4-Gamma_s":
+		var c4_gammas statedb.TicketsOrKeys
+		err = json.Unmarshal(input, &c4_gammas)
+		if err != nil {
+			return "", err
+		}
+		obj = c4_gammas
 	case "C5":
 		var c5 statedb.Psi_state
 		err = json.Unmarshal(input, &c5)
@@ -142,13 +149,13 @@ func encodeapi(objectType string, inp string) (string, error) {
 			return "", err
 		}
 		obj = c6
-	/*case "C7", "C8", "C9":
-	var validators statedb.Validators
-	err = json.Unmarshal(input, &validators)
-	if err != nil {
-		return "", err
-	}
-	obj = validators*/
+	case "C7", "C8", "C9":
+		var validators types.Validators
+		err = json.Unmarshal(input, &validators)
+		if err != nil {
+			return "", err
+		}
+		obj = validators
 	case "C10":
 		var availabilityAssignments statedb.AvailabilityAssignments
 		err = json.Unmarshal(input, &availabilityAssignments)
@@ -171,7 +178,7 @@ func encodeapi(objectType string, inp string) (string, error) {
 		}
 		obj = kaiState
 	case "C13":
-		var c13 [2][types.TotalValidators]statedb.Pi_state
+		var c13 statedb.ValidatorStatistics
 		err = json.Unmarshal(input, &c13)
 		if err != nil {
 			return "", err
@@ -198,6 +205,13 @@ func encodeapi(objectType string, inp string) (string, error) {
 			return "", err
 		}
 		obj = jamstate
+	case "STF":
+		var stf statedb.StateTransition
+		err = json.Unmarshal(input, &stf)
+		if err != nil {
+			return "", err
+		}
+		obj = stf
 	default:
 		return "", errors.New("Unknown object type")
 	}
@@ -255,16 +269,18 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.RecentBlocks{}))
 	case "C4":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.SafroleBasicState{}))
+	case "C4-Gamma_s":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.TicketsOrKeys{}))
 	case "C5":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Psi_state{}))
 	case "C6":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Entropy{}))
-	/*case "C7":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
+	case "C7":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Validators{}))
 	case "C8":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Validators{}))
 	case "C9":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Validators{}))*/
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Validators{}))
 	case "C10":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.AvailabilityAssignments{}))
 	case "C11":
@@ -272,9 +288,15 @@ func decodeapi(objectType, input string) (string, error) {
 	case "C12":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Kai_state{}))
 	case "C13":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([2][types.TotalValidators]statedb.Pi_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.ValidatorStatistics{}))
+	case "C14":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
+	case "C15":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength]types.AccumulationHistory{}))
 	case "JamState":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.StateSnapshot{}))
+	case "STF":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.StateTransition{}))
 	default:
 		return "", errors.New("Unknown object type")
 	}
@@ -293,7 +315,7 @@ func decodeapi(objectType, input string) (string, error) {
 }
 
 func main() {
-	port := 8079
+	port := 8099
 	mux := http.NewServeMux()
 
 	// Serve static files from the "./static" directory

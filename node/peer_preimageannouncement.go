@@ -48,7 +48,7 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 	}
 	n.processPreimage(preimageLookup)
 
-	n.broadcast(pa)
+	go n.broadcast(pa)
 	return nil
 }
 

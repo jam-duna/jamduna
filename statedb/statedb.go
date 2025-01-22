@@ -1086,7 +1086,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	// Assurances: get the bitstring from the availability
 	// core's data is now available
 	//ρ††
-	num_assurances, availableWorkReport := d.ProcessAssurances(assurances)
+	num_assurances, availableWorkReport := d.ProcessAssurances(assurances, targetJCE)
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 
@@ -1569,7 +1569,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	SortAssurances(extrinsicData.Assurances)
 
 	tmpState := s.JamState.Copy()
-	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances)
+	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances, targetJCE)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
 	queuedGuarantees := make([]types.Guarantee, 0)
@@ -1590,8 +1590,9 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		}
 		err = s.Verify_Guarantee_MakeBlock(g, b, tmpState)
 		if err != nil {
-			fmt.Printf("Node %d \n", s.Id)
-			fmt.Println("Error verifying guarantee (in Make Block): ", err)
+			if debugG {
+				fmt.Printf("[N%d] [MakeBlock] Discarding Invalid Guarantee ... (%s)\n", s.Id, err.Error())
+			}
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)

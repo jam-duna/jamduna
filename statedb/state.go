@@ -89,8 +89,8 @@ type Rho_state struct {
 
 // Types for Gamma
 type TicketsOrKeys struct {
-	Tickets []*types.TicketBody `json:"tickets,omitempty"`
-	Keys    []common.Hash       `json:"keys,omitempty"` //BandersnatchKey
+	Tickets []*types.TicketBody `json:"tickets,omitempty"` //WinningTicket for primary
+	Keys    []common.Hash       `json:"keys,omitempty"`    //BandersnatchKey for fallback
 }
 
 type CTicketsOrKeys struct {

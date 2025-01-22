@@ -376,7 +376,7 @@ func (bt *BlockTree) FinalizeBlock(hash common.Hash) error {
 		node = node.Parent
 	}
 
-	fmt.Printf("block %s finalized\n", hash.String_short())
+	// fmt.Printf("block %s finalized\n", hash.String_short())
 	return nil
 }
 

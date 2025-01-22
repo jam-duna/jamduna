@@ -12,7 +12,8 @@ import (
 
 // this function will be called when the nodes finish audited the genesis block
 func (n *Node) StartGrandpa(b *types.Block) {
-	fmt.Printf("%s StartGrandpa\n", n.String())
+	log := fmt.Sprintf("%s StartGrandpa\n", n.String())
+	Logger.RecordLogs(grandpa_status, log, true)
 	if n.block_tree != nil {
 
 		return
@@ -66,15 +67,17 @@ func (n *Node) runGrandpa() {
 			// fmt.Printf("%s get vote %v from primary\n", n.String(), vote.SignMessage.Message.Vote.BlockHash)
 		case vote := <-n.grandpa.BroadcastVoteChan:
 			// fmt.Printf("%s broadcast vote %v, for round %d, stage %v\n", n.String(), vote.SignMessage.Message.Vote.BlockHash, vote.Round, vote.SignMessage.Message.Stage)
-			n.broadcast(vote)
+			go n.broadcast(vote)
 		case commit := <-n.grandpa.BroadcastCommitChan:
 			// fmt.Printf("%s broadcast commit %v\n", n.String(), commit.Vote.BlockHash)
-			n.broadcast(commit)
+			go n.broadcast(commit)
 		case <-ticker.C:
 			// n.grandpa.OnTimeout()
 		case err := <-n.grandpa.ErrorChan:
-			_ = err
-			fmt.Println(err)
+			Logger.RecordLogs(grandpa_error, err.Error(), true)
+		case status := <-n.grandpa.GrandpaStatusChan:
+			Logger.RecordLogs(grandpa_status, status, true)
 		}
+
 	}
 }

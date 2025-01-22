@@ -394,7 +394,7 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				fmt.Printf("5X->")
 			}
 			n.announcement = true
-			n.broadcast(bECChunks)
+			go n.broadcast(bECChunks)
 			if debugDADist {
 				fmt.Printf("6X->")
 			}

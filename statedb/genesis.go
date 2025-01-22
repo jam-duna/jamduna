@@ -102,6 +102,10 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	}
 
 	for _, service := range services {
+		if service.ServiceCode != 0 {
+			// Willaim: use Bootstrap to spin up your other services to avoid frequent genesis change
+			continue
+		}
 		fn := common.GetFilePath(service.FileName)
 		code, err0 := os.ReadFile(fn)
 		if err0 != nil {
@@ -111,7 +115,11 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		if service.ServiceCode == BankServcieIndex {
 			balance = 100000
 		}
+
 		codeHash := common.Blake2Hash(code)
+		codeLen := uint32(len(codeHash))
+		bootStrapAnchor := []uint32{0}
+
 		bootstrapServiceAccount := types.ServiceAccount{
 			CodeHash:        codeHash,
 			Balance:         balance,
@@ -122,6 +130,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		}
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 		statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
+		statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
 	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()

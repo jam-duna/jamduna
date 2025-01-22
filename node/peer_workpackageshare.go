@@ -198,7 +198,7 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, pubKey types.Ed25519Key) (workReportHash common.Hash, signature types.Ed25519Signature, err error) {
+func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, pubKey types.Ed25519Key) (newReq JAMSNPWorkPackageShareResponse, err error) {
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
 	for _, item := range segmentRootLookup {
 		lookupItem := JAMSNPSegmentRootMapping{
@@ -231,21 +231,20 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 		return
 	}
 
-	var newReq JAMSNPWorkPackageShareResponse
 	err = newReq.FromBytes(respBytes)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
 		return
 	}
 
-	workReportHash = newReq.WorkReportHash
-	signature = newReq.Signature
+	workReportHash := newReq.WorkReportHash
+	signature := newReq.Signature
 	// validate the signature against the workReportHash
 	if !types.Ed25519Verify(pubKey, types.ComputeWorkReportSignBytesWithHash(workReportHash), signature) {
 		fmt.Printf("WARNING: Sig not verified: %v", workReportHash)
 		//TEMP: return
 	}
-	return
+	return newReq, nil
 }
 
 func CompareSegmentRootLookup(a, b types.SegmentRootLookup) (bool, error) {

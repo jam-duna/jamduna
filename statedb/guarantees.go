@@ -112,7 +112,6 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee, block *t
 	// custom function for make block
 	err = s.areValidatorsAssignedToCore_MakeBlock(guarantee, block)
 	if err != nil {
-		fmt.Printf("Verify_Guarantee error MakeBlock: %v\n", err)
 		return err // CHECK: instead of jamerrors.ErrGWrongAssignment
 	}
 	// v0.5 eq 11.28

@@ -1,97 +1,134 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Codec</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f9;
-            margin: 0;
-            padding: 0;
-            color: #333;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Codec</title>
+  <style>
+    /* 1) Make html/body fill the entire viewport. */
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f9;
+      color: #333;
+    }
 
-        header {
-            background-color: #007bff;
-            padding: 20px;
-            text-align: center;
-            color: white;
-        }
+    /* 2) Body is a flex container: header at top, main fills remainder */
+    body {
+      display: flex;
+      flex-direction: column;
+    }
 
-        header img {
-            height: 100px;
-        }
+    header {
+      background-color: #007bff;
+      padding: 20px;
+      text-align: center;
+      color: white;
+      flex: 0 0 auto; /* header doesn't stretch vertically */
+    }
 
-        h1 {
-            margin: 20px 0;
-            color: #333;
-            font-size: 2em;
-        }
+    header img {
+      height: 100px;
+    }
 
-        main {
-            max-width: 100%;
-            margin: 20px auto;
-            padding: 20px;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
+    /* 3) Main content is flex:1 to occupy leftover vertical space */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+    }
 
-        label,
-        select,
-        textarea,
-        button {
-            display: block;
-            width: 100%;
-            margin-bottom: 20px;
-            font-size: 1rem;
-        }
+    /* Container for the content inside main */
+    .container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      box-sizing: border-box;
+    }
 
-        textarea {
-            min-height: 150px;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 1rem;
-        }
+    /* Title spacing */
+    h1 {
+      margin: 0 0 20px;
+      font-size: 2em;
+    }
 
-        button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: background-color 0.3s ease;
-        }
+    /* The row for input (left) and output (right) */
+    .flex-row {
+      flex: 1;             /* occupy all vertical space in container */
+      display: flex;
+      flex-direction: row;
+      min-height: 0;       /* prevents overflow in flex children */
+      gap: 20px;
+    }
 
-        button:hover {
-            background-color: #0056b3;
-        }
-    </style>
+    /* Each column is flex:1 so left & right share space equally */
+    .flex-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0; /* allows columns to shrink if window is too small */
+    }
+
+    label, select, button {
+      width: 100%;
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+
+    /* textareas stretch to fill the column vertically */
+    textarea {
+      flex: 1;              /* fill vertical space */
+      resize: none;         /* optional: disable manual resizing */
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+  </style>
 </head>
 
 <body>
-    <header>
-        <img src="https://i.ibb.co/PCCmkxg/image.png" alt="Codec Logo" />
-    </header>
+  <header>
+    <img src="https://i.ibb.co/PCCmkxg/image.png" alt="Codec Logo" />
+  </header>
 
-    <main>
-        <h1>JAM Codec Testing</h1>
-
-        <label for="actionType">Action:</label>
-        <select id="actionType" onchange="updateInputText()">
+  <main>
+    <div class="container">
+      <h1>JAM Codec Testing</h1>
+      <div class="flex-row">
+        <!-- Left Column (Input) -->
+        <div class="flex-column">
+          <label for="actionType">Action:</label>
+          <select id="actionType" onchange="updateInputText()">
             <option value="encode" selected>JSON->Codec</option>
             <option value="decode">Codec->JSON</option>
-        </select>
+          </select>
 
-        <label for="objectType">Object Type:</label>
-        <select id="objectType" onchange="updateInputText()">
-            <option value="Block" selected>Block</option>
+          <label for="objectType">Object Type:</label>
+          <select id="objectType" onchange="updateInputText()">
+            <option value="STF" selected>STF</option>
+            <option value="Block">Block</option>
             <option value="Ticket">Ticket</option>
             <option value="Guarantee">Guarantee</option>
             <option value="Assurance">Assurance</option>
@@ -105,6 +142,7 @@
             <option value="C2">C2 - Authorization Queue</option>
             <option value="C3">C3 - Beefy Pool</option>
             <option value="C4">C4 - Gamma</option>
+            <option value="C4-Gamma_s">C4 - Gamma_s</option>
             <option value="C5">C5 - Psi</option>
             <option value="C6">C6 - Entropy</option>
             <option value="C7">C7 - Next Validators</option>
@@ -114,76 +152,91 @@
             <option value="C11">C11 - Timeslot</option>
             <option value="C12">C12 - PrivilegedServiceIndices</option>
             <option value="C13">C13 - Validator Statistics</option>
-            <option value="JamState">Snapshot / Genesis (C1-C13) </option>
-        </select>
+            <option value="C14">C14 - AccumulateQueue</option>
+            <option value="C15">C15 - AccumulateHistory</option>
+            <option value="JamState">Snapshot / Genesis (C1-C15)</option>
+          </select>
 
-        <label for="inputText">Input:</label>
-        <textarea id="inputText" placeholder="Enter JSON or Codec" style="min-height: 800px;"></textarea>
+          <label for="inputText">Input:</label>
+          <textarea id="inputText" placeholder="Enter JSON or Codec"></textarea>
 
-        <button id="actionButton">Encode</button>
+          <button id="actionButton">Encode</button>
+        </div>
 
-        <label for="outputText">Output:</label>
-        <textarea id="outputText" readonly placeholder="Result will appear here" style="min-height: 800px;"></textarea>
-    </main>
+        <!-- Right Column (Output) -->
+        <div class="flex-column">
+          <label for="outputText">Output:</label>
+          <textarea id="outputText" readonly placeholder="Result will appear here"></textarea>
+        </div>
+      </div>
+    </div>
+  </main>
 
-    <!-- Add reference to the external JavaScript file -->
-    <script src="/static/sampleData.js" defer></script>
-    <script>
+  <script src="/static/sampleData.js" defer></script>
+  <script>
+    function updateInputText() {
+      const objectType = document.getElementById('objectType').value;
+      const actionType = document.getElementById('actionType').value;
+      const inputTextElement = document.getElementById('inputText');
+      const outputTextElement = document.getElementById('outputText');
 
-        function updateInputText() {
-            const objectType = document.getElementById('objectType').value;
-            const actionType = document.getElementById('actionType').value;
-            const inputTextElement = document.getElementById('inputText');
-            const outputTextElement = document.getElementById('outputText');
+      let sampleData;
+      if (actionType === 'encode') {
+        sampleData = sample_encodings[objectType];
+      } else {
+        sampleData = sample_decodings[objectType];
+      }
 
-            let sampleData;
-            if (actionType === 'encode') {
-                sampleData = sample_encodings[objectType];
-            } else {
-                sampleData = sample_decodings[objectType];
-            }
+      if (sampleData) {
+        inputTextElement.value = (typeof sampleData === "string")
+          ? sampleData
+          : JSON.stringify(sampleData, null, 2);
+        outputTextElement.value = "";
+      } else {
+        inputTextElement.value = "";
+        outputTextElement.value = "";
+      }
+    }
 
-            if (sampleData) {
-                inputTextElement.value = (typeof sampleData === "string") ? sampleData : JSON.stringify(sampleData, null, 2);
-                outputTextElement.value = "";
-            } else {
-                inputTextElement.value = "";
-                outputTextElement.value = "";
-            }
+    window.onload = function () {
+      updateInputText();
+    };
+
+    document.getElementById('actionType').addEventListener('change', function () {
+      document.getElementById('actionButton').textContent =
+        this.value.charAt(0).toUpperCase() + this.value.slice(1);
+    });
+
+    document.getElementById('actionButton').addEventListener('click', function () {
+      const actionType = document.getElementById('actionType').value;
+      const objectType = document.getElementById('objectType').value;
+      const inputText = document.getElementById('inputText').value;
+
+      const requestData = {
+        objectType,
+        inputText
+      };
+
+      fetch(`/${actionType}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+      })
+      .then(response => response.json())
+      .then(data => {
+        let output = data.result;
+        try {
+          let parsed = JSON.parse(output);
+          output = JSON.stringify(parsed, null, 2);
+        } catch (err) {
+          // Not valid JSON, do nothing
         }
-
-        window.onload = function () {
-            updateInputText();
-        };
-
-        document.getElementById('actionType').addEventListener('change', function () {
-            document.getElementById('actionButton').textContent = this.value.charAt(0).toUpperCase() + this.value.slice(1);
-        });
-
-        document.getElementById('actionButton').addEventListener('click', function () {
-            const actionType = document.getElementById('actionType').value;
-            const objectType = document.getElementById('objectType').value;
-            const inputText = document.getElementById('inputText').value;
-
-            const requestData = {
-                objectType: objectType,
-                inputText: inputText
-            };
-
-            fetch(`/${actionType}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestData)
-            })
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('outputText').value = data.result;
-                })
-                .catch(error => console.error('Error:', error));
-        });
-    </script>
+        document.getElementById('outputText').value = output;
+      })
+      .catch(error => console.error('Error:', error));
+    });
+  </script>
 </body>
-
 </html>

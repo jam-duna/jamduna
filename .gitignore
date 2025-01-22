@@ -1,8 +1,10 @@
 /bin
 /leveldb
 /node/data
+/node/logs
 coverage.out
 /.vscode
 /cmd/importblocks/**/*.json
 /cmd/importblocks/**/*.bin
 pvm/*.out
+cmd/jamweb/jamweb

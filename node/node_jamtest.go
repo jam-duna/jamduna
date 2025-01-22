@@ -146,12 +146,18 @@ func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []typ
 	return epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, nil
 }
 
+var Logger *DebugLogger
+
 func SetUpNodes(numNodes int) ([]*Node, error) {
 	network := "tiny"
 	GenesisFile := getGenesisFile(network)
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network)
+
 	if err != nil {
 		return nil, err
+	}
+	if debugL {
+		Logger = InitDefaultLoggers()
 	}
 	nodes := make([]*Node, numNodes)
 	godIncomingCh := make(chan uint32, 10) // node sends timeslots to this channel when authoring
@@ -275,6 +281,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int) {
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
+	Logger.RecordLogs(testing_record, fmt.Sprintf("[JAMTEST : %s] Start!!!\n", jam), true)
 	_ = nodes
 
 	// give some time for nodes to come up
@@ -517,7 +524,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	prevWorkPackageHash := common.Hash{}
 	// ================================================
 	// make n workpackages for Fib and Trib
-	targetNMax := 6
+	targetNMax := 10
 	for n := 0; n < targetNMax; n++ {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)
@@ -708,6 +715,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				if FinalRho && FinalAssurance && FinalMeg {
 					fmt.Printf("Meg Finish\n")
 					ok = true
+					Logger.RecordLogs(testing_record, "[JAMTEST : megatron] Success!!!\n", true)
 					break
 				} else if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil {
 					FinalRho = true
@@ -723,7 +731,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 
 				}
 			} else {
-				if Fib_Tri_counter == 6 && Meg_counter == 6 {
+				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
 					fmt.Printf("All workpackages are sent\n")
 					sentLastWorkPackage = true
 				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready) {
@@ -742,7 +750,6 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					Meg_counter++
 					Meg_Ready = false
 					fmt.Printf("**  Preparing Fib_Tri#%v %v Meg#%v %v **\n", Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
-					nodes[5].statedb.GuarantorsAssignmentsPrint()
 				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
 
 					Meg_Ready = false
@@ -818,7 +825,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 }
 
 func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage types.WorkPackage, receiverCore uint16, successful chan bool) {
-	ticker := time.NewTicker(6 * time.Second)
+	ticker := time.NewTicker(types.SecondsPerSlot * time.Second)
 	ticker2 := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	defer ticker2.Stop()
@@ -835,7 +842,8 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 			corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
 			randIdx := rand.Intn(len(corePeers))
 			err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, []byte{}, receiverCore)
-			fmt.Printf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
+			log := fmt.Sprintf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
+			Logger.RecordLogs(EG_status, log, true)
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
 			}
@@ -853,7 +861,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 					successful <- true
 					return
 				} else {
-					fmt.Printf("Found different pending work package %v at core %v!\n", rho.WorkReport.String(), receiverCore)
+					fmt.Printf("Found different pending work package %s at core %v!\n", rho.WorkReport.AvailabilitySpec.WorkPackageHash.String_short(), receiverCore)
 				}
 			}
 

@@ -39,6 +39,7 @@ func (n *JamState) SetAuthPool(authPoolByte []byte) {
 	n.AuthorizationsPool = authorizationsPool.([types.TotalCores][]common.Hash)
 }
 
+// C2 AuthQueue
 func (n *JamState) SetAuthQueue(authQueueByte []byte) {
 	if len(authQueueByte) == 0 {
 		return
@@ -101,6 +102,8 @@ func (n *JamState) SetRecentBlocks(recentBlocksByte []byte) {
 }
 
 // C4 safroleState
+
+// GammaS
 func (C CTicketsOrKeys) CT2T() TicketsOrKeys {
 	var T TicketsOrKeys
 
@@ -134,17 +137,20 @@ func (T CTicketsOrKeys) Decode(data []byte) (interface{}, uint32) {
 	if len(data) == 0 {
 		return nil, 0
 	}
-	switch data[0] {
-	case 0:
-		decoded, length, err := types.Decode(data[1:], reflect.TypeOf(&types.TicketsMark{}))
+	typeIdentifier := data[0]
+	encodedData := data[1:]
+	//fmt.Printf("[type=%v, len=%v] CTicketsOrKeys rawdata=%x\n", typeIdentifier, len(data), data)
+	switch typeIdentifier {
+	case 0: // Primary
+		decoded, length, err := types.Decode(encodedData, reflect.TypeOf(types.TicketsMark{}))
 		if err != nil {
 			return nil, 0
 		}
-		ticketsMark := decoded.(*types.TicketsMark)
-		T.Tickets = ticketsMark
+		ticketsMark := decoded.(types.TicketsMark)
+		T.Tickets = &ticketsMark
 		return T, length + 1
-	case 1:
-		decoded, length, err := types.Decode(data[1:], reflect.TypeOf([types.EpochLength]common.Hash{}))
+	case 1: // Fallback
+		decoded, length, err := types.Decode(encodedData, reflect.TypeOf([types.EpochLength]common.Hash{}))
 		if err != nil {
 			return nil, 0
 		}
@@ -298,7 +304,7 @@ func (n *JamState) SetPriorEpochValidators(priorEpochValidatorsByte []byte) {
 	n.SafroleState.PrevValidators = priorEpochValidators.(types.Validators)
 }
 
-// C10 PendingReports
+// C10 - AvailabilityAssignments
 func (T AvailabilityAssignments) Decode(data []byte) (interface{}, uint32) {
 	length := uint32(0)
 	for i := 0; i < len(T); i++ {
@@ -355,7 +361,7 @@ func (n *JamState) SetPrivilegedServicesIndices(privilegedServicesIndicesByte []
 	n.PrivilegedServiceIndices = privilegedServicesIndices.(types.Kai_state)
 }
 
-// C13 ActiveValidator
+// C13 ValidatorStatistics
 func (n *JamState) SetPi(piByte []byte) {
 	if len(piByte) == 0 {
 		return

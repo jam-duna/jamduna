@@ -2,9 +2,11 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -154,6 +156,28 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	// TODO: Sourabh check if this even makes sense
 	//n.workPackagesCh <- newReq.WorkPackage
 	//we use current timeslot to broadcast the workpackage, because if we it might be possible that the timeslot has changed by the time the workpackage is executed
-	n.broadcastWorkpackage(newReq.WorkPackage, newReq.CoreIndex, curr_statedb)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go func(ctx context.Context) {
+		done := make(chan error, 1)
+		go func() {
+			_, err := n.broadcastWorkpackage(newReq.WorkPackage, newReq.CoreIndex, curr_statedb)
+			done <- err
+		}()
+
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				fmt.Printf("broadcastWorkpackage timed out | wp=%v, core=%v\n", newReq.WorkPackage.Hash(), newReq.CoreIndex)
+			} else {
+				fmt.Printf("broadcastWorkpackage was canceled  | wp=%v, core=%v\n", newReq.WorkPackage.Hash(), newReq.CoreIndex)
+			}
+		case err := <-done:
+			if err != nil {
+				fmt.Printf("%s broadcastWorkpackage Error: %v\n", n.String(), err)
+			}
+		}
+	}(ctx)
 	return nil
 }
