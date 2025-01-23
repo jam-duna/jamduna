@@ -149,7 +149,7 @@ func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []typ
 var Logger *DebugLogger
 
 func SetUpNodes(numNodes int) ([]*Node, error) {
-	network := "tiny"
+	network := types.Network
 	GenesisFile := getGenesisFile(network)
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network)
 

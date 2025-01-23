@@ -34,16 +34,16 @@ func main() {
 
 	// Process each network
 	for network, chainSpec := range networks {
-		// if network == "3xlarge" {
-		fmt.Printf("Processing network: %s\n", network)
+		if network == types.Network {
+			fmt.Printf("Processing network: %s\n", network)
 
-		// Call createGenesisState for each network
-		outputFilename, err := statedb.CreateGenesisState(sdb, chainSpec, 0, network)
-		if err != nil {
-			log.Printf("Error writing genesis file for network %s: %v", network, err)
-			panic(1)
+			// Call createGenesisState for each network
+			outputFilename, err := statedb.CreateGenesisState(sdb, chainSpec, 0, network)
+			if err != nil {
+				log.Printf("Error writing genesis file for network %s: %v", network, err)
+				panic(1)
+			}
+			fmt.Printf("Genesis state created: %s\n", outputFilename)
 		}
-		fmt.Printf("Genesis state created: %s\n", outputFilename)
-		// }
 	}
 }
