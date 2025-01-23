@@ -67,6 +67,8 @@ const FallbackEpochLen = 4    // Fallback
 const FibTestEpochLen = 1     // Assurance
 const MegaTronEpochLen = 5    // Orderaccumalation
 const TransferEpochLen = 3    // Transfer
+const BalancesEpochLen = 6    // Balance
+const ScaleBalancesEpochLen = 6
 
 func TestFallback(t *testing.T) {
 	safroleTest(t, "fallback", FallbackEpochLen, 0)
@@ -86,6 +88,14 @@ func TestMegatron(t *testing.T) {
 
 func TestTransfer(t *testing.T) {
 	jamtest(t, "transfer", TransferEpochLen)
+}
+
+func TestBalances(t *testing.T) {
+	jamtest(t, "balances", BalancesEpochLen)
+}
+
+func TestScaledBalances(t *testing.T) {
+	jamtest(t, "scaled_balances", ScaleBalancesEpochLen)
 }
 
 func TestDisputes(t *testing.T) {
@@ -154,7 +164,7 @@ func TestDisputes(t *testing.T) {
 				},
 			},
 		}
-		err = builderNode.peersInfo[4].SendWorkPackageSubmission(codeWorkPackage, []byte{}, 0)
+		err = builderNode.peersInfo[4].SendWorkPackageSubmission(codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}

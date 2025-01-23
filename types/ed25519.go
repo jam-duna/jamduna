@@ -118,6 +118,24 @@ func BytesToEd25519Priv(b []byte) (Ed25519Priv, error) {
 	return priv, nil
 }
 
+func BytesToEd25519Key(b []byte) (Ed25519Key, error) {
+	if len(b) != Ed25519PubkeySize {
+		return Ed25519Key{}, fmt.Errorf("invalid byte slice length: expected %d bytes, got %d", Ed25519PubkeySize, len(b))
+	}
+	var key Ed25519Key
+	copy(key[:], b)
+	return key, nil
+}
+
+func BytesToEd25519Signature(b []byte) (Ed25519Signature, error) {
+	if len(b) != 64 {
+		return Ed25519Signature{}, fmt.Errorf("invalid signature size: expected %d bytes, got %d", 64, len(b))
+	}
+	var sig Ed25519Signature
+	copy(sig[:], b)
+	return sig, nil
+}
+
 func Ed25519Sign(priv Ed25519Priv, msg []byte) Ed25519Signature {
 	signature := ed25519.Sign(ed25519.PrivateKey(priv), msg)
 	var ed25519Signature Ed25519Signature

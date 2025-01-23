@@ -315,7 +315,7 @@ func (n *Node) runMain() {
 		// 		// fmt.Printf("FetchWorkpackageImportSegments: %v\n", err)
 		// 	}
 		// 	fmt.Printf("[N%d] Receive workPackage executeWorkPackage\n", n.id)
-		// 	g, _, _, err := n.executeWorkPackage(workPackage, importSegments, segmentRootLookup)
+		// 	g, _, _, err := n.executeWorkPackage(workPackage, importSegments, types.ExtrinsicsBlobs{}, segmentRootLookup)
 		// 	wr := g.Report
 		// 	if err != nil {
 		// 		fmt.Printf("executeWorkPackage: %v\n", err)

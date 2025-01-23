@@ -14,7 +14,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) {
+func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte, extrinsics types.ExtrinsicsBlobs) (availabilityspecifier *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) {
 	// compile wp into b
 	// FetchWorkPackageImportSegments
 	if debugSegments {
@@ -24,7 +24,7 @@ func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage typ
 	if err != nil {
 		// fmt.Printf("FetchWorkPackageImportSegments Error: %v\n", err)
 	}
-	package_bundle := n.CompilePackageBundle(workPackage, importSegments)
+	package_bundle := n.CompilePackageBundle(workPackage, importSegments, extrinsics)
 	b := package_bundle.Bytes()
 	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(b)
 	if debugDA {
@@ -360,7 +360,7 @@ func (n *Node) FetchImportSegments(erasureRoot common.Hash, segmentIndices []uin
 }
 
 // The E(p,x,s,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
-func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]byte) types.WorkPackageBundle {
+func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]byte, extrinsics types.ExtrinsicsBlobs) types.WorkPackageBundle {
 	// imports := make([][]byte, 0)
 	// for _, segment := range importSegments {
 	// 	imports = append(imports, segment...)
@@ -409,8 +409,8 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]by
 		justifications = append(justifications, tmpJustifications)
 	}
 	workPackageBundle := types.WorkPackageBundle{
-		WorkPackage: p,
-		// ExtrinsicData:     extrinsicData,
+		WorkPackage:       p,
+		ExtrinsicData:     extrinsics,
 		ImportSegmentData: importedSegmentData,
 		Justification:     justifications,
 	}
@@ -652,7 +652,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		}
 
 		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization)
+		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, package_bundle.ExtrinsicData)
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		if debugSegments {
 			fmt.Printf("[N%d] [%d] len(exports) %d, exports %x\n", n.id, index, len(exports), exports)
@@ -669,7 +669,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		}
 		results = append(results, result)
 	}
-	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments)
+	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments, package_bundle.ExtrinsicData)
 	/*
 		core, err := n.GetSelfCoreIndex()
 		if err != nil {
@@ -800,7 +800,7 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 }
 
 // work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error
-func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPackage, importSegments [][][]byte, segmentRootLookup types.SegmentRootLookup) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
+func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPackage, importSegments [][][]byte, extrinsics types.ExtrinsicsBlobs, segmentRootLookup types.SegmentRootLookup) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
 	start := time.Now()
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
@@ -819,6 +819,7 @@ func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPack
 		var ok bool
 		code, ok, err = targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err != nil || !ok || len(code) == 0 {
+			fmt.Printf("Error in reading service preimage blob, service_index=%v, codeHash=%v\n", service_index, workItem.CodeHash)
 			return
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
@@ -833,7 +834,7 @@ func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPack
 		}
 
 		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization)
+		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, extrinsics)
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		workItemExports := make([][]byte, 0)
 		for i := 0; i < len(exports); i += types.W_E * types.W_S {
@@ -864,7 +865,7 @@ func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPack
 			fmt.Printf("[N%d] WP=%v | executeWorkPackage exportedSegments %x\n", n.id, workPackage.Hash(), exportedSegments)
 		}
 	}
-	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, exportedSegments)
+	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, exportedSegments, extrinsics)
 	currCoreIdx, err := n.GetSelfCoreIndex()
 	if err != nil {
 		return

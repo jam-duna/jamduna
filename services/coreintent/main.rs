@@ -119,16 +119,9 @@ extern "C" fn accumulate() -> u32 {
     let payload = &extrinsic[10..];
 
     match method_id {
-        b"createAsset" => self.create_asset(payload),
-        b"mintAsset" => self.mint(payload),
-        b"burnAsset" => self.burn(payload),
-        b"transferAsset" => self.transfer(payload),
-        b"transferToSvc" => self.transfer_to_service(payload),
-        b"bondFunds" => self.bond(payload),
-        b"unbondFunds" => self.unbond(payload),
-        b"requestPro" => self.request_proof(payload),
-        b"enterProof" => self.enter_proof_contest(payload),
-        b"fulfillPro" => self.fulfill_proof(payload),
+        b"submituserintent" => self.submit_user_intent(payload),
+        b"entercontest" => self.enter_contest(payload),
+        b"fulfillcontent" => self.fulfill_intent(payload),
         _ => {} // Unrecognized method ID
         _ => {} // Unrecognized method ID
     }
@@ -139,69 +132,7 @@ extern "C" fn on_transfer() -> u32 {
     0
 }
 
-
-pub fn create_asset(&mut self, payload: &[u8]) {
-    let asset_id = Self::extract_u64(&payload[0..8]);
-    let issuer = Self::extract_account(&payload[8..40]);
-    let min_balance = Self::extract_u64(&payload[40..48]);
-    let symbol = Self::extract_symbol(&payload[48..80]);
-    let decimals = payload[80];
-    let asset = Asset {
-        issuer,
-        min_balance,
-        decimals,
-        symbol,
-        total_supply: 0,
-    };
-    self.write_asset(asset_id, &asset);
-}
-
-pub fn mint(&mut self, payload: &[u8]) {
-    let asset_id = Self::extract_u64(&payload[0..8]);
-    let beneficiary = Self::extract_account(&payload[8..40]);
-    let amount = Self::extract_u64(&payload[40..48]);
-
-    let mut asset = self.read_asset(asset_id);
-    asset.total_supply += amount;
-    self.write_asset(asset_id, &asset);
-
-    let mut account = self.read_account(asset_id, &beneficiary);
-    account.free += amount;
-    self.write_account(asset_id, &beneficiary, &account);
-}
-
-pub fn burn(&mut self, payload: &[u8]) {
-    let asset_id = Self::extract_u64(&payload[0..8]);
-    let account_id = Self::extract_account(&payload[8..40]);
-    let amount = Self::extract_u64(&payload[40..48]);
-
-    let mut asset = self.read_asset(asset_id);
-    asset.total_supply -= amount;
-    self.write_asset(asset_id, &asset);
-
-    let mut account = self.read_account(asset_id, &account_id);
-    account.free -= amount;
-    self.write_account(asset_id, &account_id, &account);
-}
-
-pub fn transfer(&mut self, payload: &[u8]) {
-    let asset_id = Self::extract_u64(&payload[0..8]);
-    let sender = Self::extract_account(&payload[8..40]);
-    let beneficiary = Self::extract_account(&payload[40..72]);
-    let amount = Self::extract_u64(&payload[72..80]);
-
-    let mut sender_account = self.read_account(asset_id, &sender);
-    if sender_account.free >= amount {
-        sender_account.free -= amount;
-        self.write_account(asset_id, &sender, &sender_account);
-
-        let mut receiver_account = self.read_account(asset_id, &beneficiary);
-        receiver_account.free += amount;
-        self.write_account(asset_id, &beneficiary, &receiver_account);
-    }
-}
-
-pub fn transfer_to_service(&mut self, payload: &[u8]) {
+pub fn quit_service(&mut self, payload: &[u8]) {
     let asset_id = Self::extract_u64(&payload[0..8]);
     let amount = Self::extract_u64(&payload[8..16]);
     let service_id = Self::extract_u32(&payload[16..20]);
@@ -216,53 +147,6 @@ pub fn transfer_to_service(&mut self, payload: &[u8]) {
         let mut service_account = self.read_account(asset_id, &service_key);
         service_account.free += amount;
         self.write_account(asset_id, &service_key, &service_account);
-    }
-}
-
-pub fn bond(&mut self, payload: &[u8]) {
-    let asset_id = Self::extract_u64(&payload[0..8]);
-    let account_id = Self::extract_account(&payload[8..40]);
-    let amount = Self::extract_u64(&payload[40..48]);
-
-    let mut account = self.read_account(asset_id, &account_id);
-    if account.free >= amount {
-        account.free -= amount;
-        account.reserved += amount;
-        self.write_account(asset_id, &account_id, &account);
-    }
-}
-
-pub fn unbond(&mut self, payload: &[u8]) {
-    let asset_id = Self::extract_u64(&payload[0..8]);
-    let account_id = Self::extract_account(&payload[8..40]);
-    let amount = Self::extract_u64(&payload[40..48]);
-
-    let mut account = self.read_account(asset_id, &account_id);
-    if account.reserved >= amount {
-        account.reserved -= amount;
-        account.free += amount;
-        self.write_account(asset_id, &account_id, &account);
-    }
-}
-
-// Helper functions to read and write to service storage
-fn read_asset(&self, asset_id: AssetId) -> Asset {
-    let mut buf = [0u8; core::mem::size_of::<Asset>()];
-    unsafe {
-        read(1, asset_id.to_be_bytes().as_ptr(), 8, buf.as_mut_ptr(), buf.len() as u32);
-    }
-    unsafe { core::ptr::read(buf.as_ptr() as *const _) }
-}
-
-fn write_asset(&self, asset_id: AssetId, asset: &Asset) {
-    let asset_bytes = unsafe {
-        core::slice::from_raw_parts(
-            asset as *const _ as *const u8,
-            core::mem::size_of::<Asset>(),
-        )
-    };
-    unsafe {
-        write(asset_id.to_be_bytes().as_ptr() as u32, 8, asset_bytes.as_ptr() as u32, asset_bytes.len() as u32);
     }
 }
 
@@ -332,8 +216,7 @@ fn extract_u16(bytes: &[u8]) -> u16 {
     u16::from_be_bytes(bytes.try_into().unwrap())
 }
 
-
-pub fn request_proof(&mut self, payload: &[u8]) {
+pub fn submit_user_intent(&mut self, payload: &[u8]) {
     let user = Self::extract_account(&payload[0..32]);
     let program_id = Self::extract_program_id(&payload[32..64]);
     let deadline_contest = Self::extract_u64(&payload[64..72]);
@@ -352,10 +235,10 @@ pub fn request_proof(&mut self, payload: &[u8]) {
         ..Default::default()
     };
 
-    self.write_proof_record(&program_id, &proof_record);
+    self.write_intent(&program_id, &proof_record);
 }
 
-pub fn enter_proof_contest(&mut self, payload: &[u8]) {
+pub fn enter_contest(&mut self, payload: &[u8]) {
     let prover = Self::extract_account(&payload[0..32]);
     let program_id = Self::extract_program_id(&payload[32..64]);
     // TODO: get this right between refine (which should verify sig) and accumulate
@@ -364,17 +247,17 @@ pub fn enter_proof_contest(&mut self, payload: &[u8]) {
     let mut proof_record = self.read_proof_record(&program_id);
     proof_record.prover = prover;
     proof_record.ticket_id = ticket_id;
-    self.write_proof_record(&program_id, &proof_record);
+    self.write_intent(&program_id, &proof_record);
 }
 
-pub fn fulfill_proof(&mut self, payload: &[u8]) {
+pub fn fulfill_intent(&mut self, payload: &[u8]) {
     let prover = Self::extract_account(&payload[0..32]);
     let program_id = Self::extract_program_id(&payload[32..64]);
     let verifier_key = Self::extract_program_id(&payload[64..96]);
     let proof_data = payload[96..payload.len() / 2].to_vec();
     let public_values = payload[payload.len() / 2..].to_vec();
 
-    let mut proof_record = self.read_proof_record(&program_id);
+    let mut proof_record = self.read_intent(&program_id);
 
     // TODO: call sp1verify(proof: u32, l: u32, publicvalues: u32, publicvalues_len: u32, verifierkey: u32) -> u32;
 
@@ -382,11 +265,11 @@ pub fn fulfill_proof(&mut self, payload: &[u8]) {
     proof_record.proof_data = proof_data;
     proof_record.public_values = public_values;
 
-    self.write_proof_record(&program_id, &proof_record);
+    self.write_intent(&program_id, &proof_record);
 }
 
 // Helper functions to read and write to service storage
-fn read_proof_record(&self, program_id: &ProgramId) -> ProofRecord {
+fn read_intent(&self, program_id: &ProgramId) -> ProofRecord {
     let mut buf = vec![0u8; 1024]; // Adjust buffer size as needed for maximum expected size
     unsafe {
         read(128, program_id.as_ptr(), program_id.len() as u32, buf.as_mut_ptr(), buf.len() as u32);
@@ -394,7 +277,7 @@ fn read_proof_record(&self, program_id: &ProgramId) -> ProofRecord {
     unsafe { core::ptr::read(buf.as_ptr() as *const _) }
 }
 
-fn write_proof_record(&self, program_id: &ProgramId, record: &ProofRecord) {
+fn write_intent(&self, program_id: &ProgramId, record: &ProofRecord) {
     let record_bytes = unsafe {
         core::slice::from_raw_parts(
             record as *const _ as *const u8,

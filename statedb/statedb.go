@@ -211,7 +211,9 @@ const (
 const (
 	BootstrapServiceCode = 0
 	BootstrapServiceFile = "/services/bootstrap.pvm"
-	BankServcieIndex     = 1
+	BalancesServcieIndex = 1
+	BalancesServcieFile  = "/services/balances.pvm"
+	BankServcieIndex     = 2
 	BankServiceFile      = "/services/bank.pvm"
 )
 

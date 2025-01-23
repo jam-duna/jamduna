@@ -26,3 +26,10 @@ transfer:
 	@echo "Running TestTransfer with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestTransfer -tags network
 
+balances:
+	@echo "Running TestBalances with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run TestBalances -tags network
+
+scaled_balances:
+	@echo "Running TestScaledBalances with timeout $(TIMEOUT)..."
+	go test -timeout $(TIMEOUT) -v -run TestScaledBalances -tags network

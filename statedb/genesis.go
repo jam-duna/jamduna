@@ -97,6 +97,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	// Load services into genesis state
 	services := []types.TestService{
 		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
+		{ServiceCode: BalancesServcieIndex, FileName: BalancesServcieFile},
 		{ServiceCode: BankServcieIndex, FileName: BankServiceFile},
 		// Add more services here as needed IF they are needed for Genesis
 	}
@@ -111,7 +112,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		if err0 != nil {
 			return outfn, err
 		}
-		var balance uint64 = 10000
+		var balance uint64 = ^uint64(0)
 		if service.ServiceCode == BankServcieIndex {
 			balance = 100000
 		}

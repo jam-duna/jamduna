@@ -34,6 +34,7 @@ func main() {
 
 	// Process each network
 	for network, chainSpec := range networks {
+		// if network == "3xlarge" {
 		fmt.Printf("Processing network: %s\n", network)
 
 		// Call createGenesisState for each network
@@ -43,5 +44,6 @@ func main() {
 			panic(1)
 		}
 		fmt.Printf("Genesis state created: %s\n", outputFilename)
+		// }
 	}
 }

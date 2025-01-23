@@ -3,7 +3,6 @@ package node
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"reflect"
 	"time"
@@ -29,22 +28,20 @@ Builder -> Guarantor
 */
 
 type JAMSNPWorkPackage struct {
-	CoreIndex   uint16            `json:"coreIndex"`
-	WorkPackage types.WorkPackage `json:"workPackage"`
+	CoreIndex   uint16                `json:"coreIndex"`
+	WorkPackage types.WorkPackage     `json:"workPackage"`
+	Extrinsic   types.ExtrinsicsBlobs `json:"extrinsic"`
 }
 
 // ToBytes serializes the JAMSNPWorkPackage struct into a byte array
 func (pkg *JAMSNPWorkPackage) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
-	// Serialize CoreIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, pkg.CoreIndex); err != nil {
+	encodedData, err := types.Encode(pkg)
+	if err != nil {
 		return nil, err
 	}
-
-	// Serialize WorkPackage (dynamically sized, using WorkPackage's ToBytes method)
-	workPackageBytes := pkg.WorkPackage.Bytes()
-	if _, err := buf.Write(workPackageBytes); err != nil {
+	if _, err := buf.Write(encodedData); err != nil {
 		return nil, err
 	}
 
@@ -55,34 +52,25 @@ func (pkg *JAMSNPWorkPackage) ToBytes() ([]byte, error) {
 func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
-	// Deserialize CoreIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &pkg.CoreIndex); err != nil {
-		return fmt.Errorf("failed to read CoreIndex: %w", err)
-	}
-
-	// Deserialize WorkPackage (dynamically sized)
-	workPackageBytes := make([]byte, buf.Len()) // Remaining bytes are for the WorkPackage
-	if _, err := buf.Read(workPackageBytes); err != nil {
+	decodeDataBytes := make([]byte, buf.Len())
+	if _, err := buf.Read(decodeDataBytes); err != nil {
 		return fmt.Errorf("failed to read WorkPackage bytes: %w", err)
 	}
 
-	// Decode the WorkPackage
-	wp, _, err := types.Decode(workPackageBytes, reflect.TypeOf(types.WorkPackage{}))
+	dd, _, err := types.Decode(decodeDataBytes, reflect.TypeOf(JAMSNPWorkPackage{}))
 	if err != nil {
-		return fmt.Errorf("error in decoding WorkPackage: %w", err)
+		return fmt.Errorf("error in decoding data: %w", err)
 	}
 
-	// Type assertion for WorkPackage
-	workPackage, ok := wp.(types.WorkPackage)
-	if !ok {
-		return fmt.Errorf("decoded value is not of type WorkPackage")
-	}
+	decodedData := dd.(JAMSNPWorkPackage)
+	pkg.CoreIndex = decodedData.CoreIndex
+	pkg.WorkPackage = decodedData.WorkPackage
+	pkg.Extrinsic = decodedData.Extrinsic
 
-	// Assign decoded WorkPackage to the struct field
-	pkg.WorkPackage = workPackage
 	return nil
 }
-func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics []byte, core_idx uint16) (err error) {
+
+func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, core_idx uint16) (err error) {
 	if pkg.RefineContext.LookupAnchorSlot == 1 {
 		if len(pkg.RefineContext.Prerequisites) == 0 {
 			panic("Prerequisite is empty")
@@ -95,6 +83,7 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics []byt
 	req := JAMSNPWorkPackage{
 		CoreIndex:   core_idx,
 		WorkPackage: pkg,
+		Extrinsic:   extrinsics,
 	}
 	/*
 		Here need to setup some kind of verification for the work package
@@ -118,23 +107,22 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics []byt
 	if debugG {
 		fmt.Printf("%s submitted Workpackage %d bytes to core %d\n", p.String(), len(reqBytes), core_idx)
 	}
-	/*
-		// TODO: write extrinsics
-		err = sendQuicBytes(stream, extrinsics)
-		if err != nil {
-			return err
-		}*/
 
 	return nil
 }
+
 func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err error) {
 
 	var newReq JAMSNPWorkPackage
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
-		fmt.Println("Error deserializing:", err)
-		return
+		if debugG {
+			fmt.Println("Error deserializing:", err)
+		}
+		if err != nil {
+			return
+		}
 	}
 
 	// a, err := json.MarshalIndent(newReq, "", "  ")
@@ -151,7 +139,6 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	if newReq.CoreIndex != selfCoreIndex {
 		return fmt.Errorf("work package submission for core %d received by core %d", newReq.CoreIndex, selfCoreIndex)
 	}
-	// TODO: read extrinsics
 
 	// TODO: Sourabh check if this even makes sense
 	//n.workPackagesCh <- newReq.WorkPackage
@@ -162,7 +149,7 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	go func(ctx context.Context) {
 		done := make(chan error, 1)
 		go func() {
-			_, err := n.broadcastWorkpackage(newReq.WorkPackage, newReq.CoreIndex, curr_statedb)
+			_, err := n.broadcastWorkpackage(newReq.WorkPackage, newReq.CoreIndex, curr_statedb, newReq.Extrinsic)
 			done <- err
 		}()
 

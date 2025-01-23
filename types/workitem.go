@@ -55,13 +55,21 @@ type Segment struct {
 	Data []byte
 }
 
-func (E ExtrinsicsBlobs) Encode() []byte {
-	return []byte{}
+func (E ExtrinsicsBlobs) Bytes() []byte {
+	encode, err := Encode(E)
+	if err != nil {
+		return nil
+	}
+	return encode
 }
 
-func (E ExtrinsicsBlobs) Decode(data []byte) (interface{}, uint32) {
-	return nil, 0
-}
+// func (E ExtrinsicsBlobs) Encode() []byte {
+// 	return []byte{}
+// }
+
+// func (E ExtrinsicsBlobs) Decode(data []byte) (interface{}, uint32) {
+// 	return nil, 0
+// }
 
 func (a *WorkItem) UnmarshalJSON(data []byte) error {
 	var s struct {

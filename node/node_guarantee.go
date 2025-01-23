@@ -9,7 +9,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, curr_statedb *statedb.StateDB) (guarantee types.Guarantee, err error) {
+func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, curr_statedb *statedb.StateDB, extrinsics types.ExtrinsicsBlobs) (guarantee types.Guarantee, err error) {
 	currTimeslot := curr_statedb.GetTimeslot()
 	coreIndex := wpCoreIndex
 	if err != nil {
@@ -33,7 +33,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	if debugG {
 		fmt.Printf("%s [broadcastWorkPackage] Guarantee from self\n", n.String())
 	}
-	bundle := n.CompilePackageBundle(wp, importedSegments)
+	bundle := n.CompilePackageBundle(wp, importedSegments, extrinsics)
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
@@ -44,7 +44,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 
 			if coworker.PeerID == n.id {
 				var execErr error
-				guarantee, _, _, execErr = n.executeWorkPackage(wpCoreIndex, wp, importedSegments, segmentRootLookup)
+				guarantee, _, _, execErr = n.executeWorkPackage(wpCoreIndex, wp, importedSegments, extrinsics, segmentRootLookup)
 				if execErr != nil {
 					Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] executeWorkPackage Error: %v\n", n.String(), execErr), true)
 					return

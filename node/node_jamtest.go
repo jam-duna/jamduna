@@ -313,6 +313,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int) {
 	if jam == "transfer" {
 		serviceNames = []string{"transfer_0", "transfer_1"} // 2 transfer services share the same code
 	}
+	if jam == "balances" || jam == "scaled_balances" {
+		serviceNames = []string{"balances"}
+	}
 	testServices, err := getServices(serviceNames)
 	if err != nil {
 		panic(32)
@@ -352,7 +355,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int) {
 		core0_peers := builderNode.GetCoreCoWorkersPeers(0)
 		// ramdom pick the index from 0, 1, 2
 		randomIdx := rand.Intn(3)
-		err = core0_peers[randomIdx].SendWorkPackageSubmission(codeWorkPackage, []byte{}, 0)
+		err = core0_peers[randomIdx].SendWorkPackageSubmission(codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -429,6 +432,10 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int) {
 		fib(nodes, testServices)
 	case "transfer":
 		transfer(nodes, testServices)
+	case "balances":
+		balances(nodes, testServices)
+	case "scaled_balances":
+		scaled_balances(nodes, testServices)
 	}
 }
 
@@ -481,7 +488,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, []byte{}, 0)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -782,7 +789,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			go func() {
 				defer cancel()
-				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful)
+				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful, types.ExtrinsicsBlobs{})
 			}()
 		case successful := <-Fib_Tri_successful:
 			if successful {
@@ -817,14 +824,14 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			go func() {
 				defer cancel()
-				sendWorkPackageTrack(ctx, nodes[5], workPackage, megCoreIdx, Meg_successful)
+				sendWorkPackageTrack(ctx, nodes[5], workPackage, megCoreIdx, Meg_successful, types.ExtrinsicsBlobs{})
 			}()
 		}
 
 	}
 }
 
-func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage types.WorkPackage, receiverCore uint16, successful chan bool) {
+func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage types.WorkPackage, receiverCore uint16, successful chan bool, extrinsics types.ExtrinsicsBlobs) {
 	ticker := time.NewTicker(types.SecondsPerSlot * time.Second)
 	ticker2 := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -841,7 +848,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 			// Sending the work package again
 			corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
 			randIdx := rand.Intn(len(corePeers))
-			err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, []byte{}, receiverCore)
+			err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, extrinsics, receiverCore)
 			log := fmt.Sprintf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
 			Logger.RecordLogs(EG_status, log, true)
 			if err != nil {
@@ -875,25 +882,13 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
 
-	var previous_sa_bank_balance, previous_sa_0_balance, previous_sa_1_balance uint64
-
-	fn := common.GetFilePath(statedb.BankServiceFile)
-	bankServiceCode, err := os.ReadFile(fn)
-	if err != nil {
-		panic(0)
-	}
-	bankServiceIndex := uint32(statedb.BankServcieIndex)
-	bankServiceCodeHash := common.Blake2Hash(bankServiceCode)
+	var previous_sa_0_balance, previous_sa_1_balance uint64
 
 	n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
 
-	// Show initial balance
-	sa_bank, _, _ := n1.getState().GetService(bankServiceIndex)
-	fmt.Printf("\033[38;5;208mbank\033[0m initial balance: \033[32m%v\033[0m\n", sa_bank.Balance)
-	previous_sa_bank_balance = sa_bank.Balance
-
+	// Show initial balances
 	sa_0, _, _ := n1.getState().GetService(service0.ServiceCode)
 	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa_0.Balance)
 	previous_sa_0_balance = sa_0.Balance
@@ -908,7 +903,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 	// ================================================
 	// make n workpackages for Transfer
 	Transfer_num := 10
-	for n := 0; n <= Transfer_num; n++ {
+	for n := 1; n <= Transfer_num; n++ {
 		// timeslot := n1.statedb.GetSafrole().GetTimeSlot()
 		timeslot := nodes[1].statedb.Block.GetHeader().Slot
 		refineContext := types.RefineContext{
@@ -923,47 +918,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 		workPackage := types.WorkPackage{}
 
 		// Bank service send 1000 tokens to transfer_0 and transfer_1
-		if n == 0 {
-			amount := make([]byte, 4)
-			binary.LittleEndian.PutUint32(amount, 1000)
-
-			payload_0 := make([]byte, 8)
-			reciver_0 := make([]byte, 4)
-			binary.LittleEndian.PutUint32(reciver_0, service0.ServiceCode)
-			payload_0 = append(reciver_0, amount...)
-
-			payload_1 := make([]byte, 8)
-			reciver_1 := make([]byte, 4)
-			binary.LittleEndian.PutUint32(reciver_1, service1.ServiceCode)
-			payload_1 = append(reciver_1, amount...)
-
-			workPackage = types.WorkPackage{
-				Authorization: []byte("0x"),
-				AuthCodeHost:  bankServiceIndex,
-				Authorizer:    types.Authorizer{},
-				RefineContext: refineContext,
-				WorkItems: []types.WorkItem{
-					{
-						Service:            bankServiceIndex,
-						CodeHash:           bankServiceCodeHash,
-						Payload:            payload_0,
-						RefineGasLimit:     10000000,
-						AccumulateGasLimit: 10000000,
-						ImportedSegments:   make([]types.ImportSegment, 0),
-						ExportCount:        1,
-					},
-					{
-						Service:            bankServiceIndex,
-						CodeHash:           bankServiceCodeHash,
-						Payload:            payload_1,
-						RefineGasLimit:     10000000,
-						AccumulateGasLimit: 10000000,
-						ImportedSegments:   make([]types.ImportSegment, 0),
-						ExportCount:        1,
-					},
-				},
-			}
-		} else if n%2 == 0 {
+		if n%2 == 0 {
 			payload := make([]byte, 8)
 			reciver := make([]byte, 4)
 			binary.LittleEndian.PutUint32(reciver, service1.ServiceCode)
@@ -988,7 +943,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 					},
 				},
 			}
-		} else if n%2 == 1 {
+		} else {
 			payload := make([]byte, 8)
 			reciver := make([]byte, 4)
 			binary.LittleEndian.PutUint32(reciver, service0.ServiceCode)
@@ -1023,7 +978,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, []byte{}, 0)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -1050,17 +1005,11 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 		}
 		prevWorkPackageHash = workPackageHash
 
-		if n == 0 {
-			fmt.Printf("\n\033[38;5;208mbank\033[0m sent \033[32m1000\033[0m tokens to \033[38;5;208mtransfer_0\033[0m and \033[38;5;208mtransfer_1\033[0m\n")
-		} else if n%2 == 0 {
+		if n%2 == 0 {
 			fmt.Printf("\n\033[38;5;208mtransfer_0\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_1\033[0m\n", n*10)
-		} else if n%2 == 1 {
+		} else {
 			fmt.Printf("\n\033[38;5;208mtransfer_1\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_0\033[0m\n", n*10)
 		}
-
-		sa_bank, _, _ := n1.getState().GetService(bankServiceIndex)
-		fmt.Printf("\033[38;5;208mbank_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", previous_sa_bank_balance, sa_bank.Balance)
-		previous_sa_bank_balance = sa_bank.Balance
 
 		sa_0, _, _ := n1.getState().GetService(service0.ServiceCode)
 		fmt.Printf("\033[38;5;208mtransfer_0_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", previous_sa_0_balance, sa_0.Balance)
@@ -1071,6 +1020,1093 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 		previous_sa_1_balance = sa_1.Balance
 
 		time.Sleep(6 * time.Second)
-
 	}
+}
+
+// some useful struct, function for balances test case
+const AssetSize = 89 // 8 + 32 + 8 + 32 + 8 + 1
+
+type Asset struct {
+	AssetID     uint64
+	Issuer      [32]byte // 32 bytes
+	MinBalance  uint64
+	Symbol      [32]byte // 32 bytes
+	TotalSupply uint64
+	Decimals    uint8
+}
+
+func (a *Asset) Bytes() []byte {
+	result := make([]byte, AssetSize)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.AssetID)
+	buffer.Write(a.Issuer[:])
+	binary.Write(buffer, binary.LittleEndian, a.MinBalance)
+	buffer.Write(a.Symbol[:])
+	binary.Write(buffer, binary.LittleEndian, a.TotalSupply)
+	buffer.WriteByte(a.Decimals)
+
+	return buffer.Bytes()
+}
+
+func (a *Asset) FromBytes(data []byte) (Asset, error) {
+	if len(data) != AssetSize {
+		return Asset{}, fmt.Errorf("invalid data size: expected %d, got %d", AssetSize, len(data))
+	}
+	buffer := bytes.NewReader(data)
+	asset := Asset{}
+	binary.Read(buffer, binary.LittleEndian, &asset.AssetID)
+	buffer.Read(asset.Issuer[:])
+	binary.Read(buffer, binary.LittleEndian, &asset.MinBalance)
+	buffer.Read(asset.Symbol[:])
+	binary.Read(buffer, binary.LittleEndian, &asset.TotalSupply)
+	dec, _ := buffer.ReadByte()
+	asset.Decimals = dec
+	return asset, nil
+}
+
+const AccountSize = 24 // 8 (nonce) + 8 (free) + 8 (reserved)
+type Account struct {
+	Nonce    uint64
+	Free     uint64
+	Reserved uint64
+}
+
+func (a *Account) Bytes() []byte {
+	result := make([]byte, AccountSize)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.Nonce)
+	binary.Write(buffer, binary.LittleEndian, a.Free)
+	binary.Write(buffer, binary.LittleEndian, a.Reserved)
+	return buffer.Bytes()
+}
+
+func (a *Account) FromBytes(data []byte) (Account, error) {
+	if len(data) != AccountSize {
+		return Account{}, fmt.Errorf("invalid data size: expected %d, got %d", AccountSize, len(data))
+	}
+	buffer := bytes.NewReader(data)
+	account := Account{}
+	binary.Read(buffer, binary.LittleEndian, &account.Nonce)
+	binary.Read(buffer, binary.LittleEndian, &account.Free)
+	binary.Read(buffer, binary.LittleEndian, &account.Reserved)
+	return account, nil
+}
+
+type CreateAssetExtrinsic struct {
+	method_id uint32
+	asset     Asset
+}
+
+func (a *CreateAssetExtrinsic) Bytes() []byte {
+	result := make([]byte, 4+AssetSize)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.method_id)
+	buffer.Write(a.asset.Bytes())
+	return buffer.Bytes()
+}
+
+type MintExtrinsic struct {
+	method_id   uint32
+	asset_id    uint64
+	account_key [32]byte
+	amount      uint64
+}
+
+func (a *MintExtrinsic) Bytes() []byte {
+	result := make([]byte, 4+8+32+8)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.method_id)
+	binary.Write(buffer, binary.LittleEndian, a.asset_id)
+	buffer.Write(a.account_key[:])
+	binary.Write(buffer, binary.LittleEndian, a.amount)
+	return buffer.Bytes()
+}
+
+type BurnExtrinsic struct {
+	method_id   uint32
+	asset_id    uint64
+	account_key [32]byte
+	amount      uint64
+}
+
+func (a *BurnExtrinsic) Bytes() []byte {
+	result := make([]byte, 4+8+32+8)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.method_id)
+	binary.Write(buffer, binary.LittleEndian, a.asset_id)
+	buffer.Write(a.account_key[:])
+	binary.Write(buffer, binary.LittleEndian, a.amount)
+	return buffer.Bytes()
+}
+
+type BondExtrinsic struct {
+	method_id   uint32
+	asset_id    uint64
+	account_key [32]byte
+	amount      uint64
+}
+
+func (a *BondExtrinsic) Bytes() []byte {
+	result := make([]byte, 4+8+32+8)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.method_id)
+	binary.Write(buffer, binary.LittleEndian, a.asset_id)
+	buffer.Write(a.account_key[:])
+	binary.Write(buffer, binary.LittleEndian, a.amount)
+	return buffer.Bytes()
+}
+
+type UnbondExtrinsic struct {
+	method_id   uint32
+	asset_id    uint64
+	account_key [32]byte
+	amount      uint64
+}
+
+func (a *UnbondExtrinsic) Bytes() []byte {
+	result := make([]byte, 4+8+32+8)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.method_id)
+	binary.Write(buffer, binary.LittleEndian, a.asset_id)
+	buffer.Write(a.account_key[:])
+	binary.Write(buffer, binary.LittleEndian, a.amount)
+	return buffer.Bytes()
+}
+
+type TransferExtrinsic struct {
+	method_id uint32
+	asset_id  uint64
+	from      [32]byte
+	to        [32]byte
+	amount    uint64
+}
+
+func (a *TransferExtrinsic) Bytes() []byte {
+	result := make([]byte, 4+8+32+32+8)
+	buffer := bytes.NewBuffer(result[:0])
+	binary.Write(buffer, binary.LittleEndian, a.method_id)
+	binary.Write(buffer, binary.LittleEndian, a.asset_id)
+	buffer.Write(a.from[:])
+	buffer.Write(a.to[:])
+	binary.Write(buffer, binary.LittleEndian, a.amount)
+	return buffer.Bytes()
+}
+
+func balances(nodes []*Node, testServices map[string]*types.TestService) {
+	fmt.Printf("\n=========================Balances Test=========================\n")
+
+	// General setup
+	BalanceService := testServices["balances"]
+	balancesServiceIndex := BalanceService.ServiceCode
+	balancesServiceCodeHash := BalanceService.CodeHash
+
+	n1 := nodes[1]
+	n4 := nodes[4]
+	core := 0
+
+	timeslot := nodes[1].statedb.Block.GetHeader().Slot
+	refineContext := types.RefineContext{
+		Anchor:           common.Hash{},
+		StateRoot:        common.Hash{},
+		BeefyRoot:        common.Hash{},
+		LookupAnchor:     common.Hash{},
+		LookupAnchorSlot: timeslot,
+		Prerequisites:    []common.Hash{},
+	}
+
+	// Method ID bytes
+	create_asset_id := uint32(0)
+	mint_id := uint32(1)
+	burn_id := uint32(2)
+	bond_id := uint32(3)
+	unbond_id := uint32(4)
+	transfer_id := uint32(5)
+
+	_ = create_asset_id
+	_ = mint_id
+	_ = burn_id
+	_ = bond_id
+	_ = unbond_id
+	_ = transfer_id
+
+	v0_bytes := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	v1_bytes := []byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
+	v2_bytes := []byte{2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}
+	v3_bytes := []byte{3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}
+	v4_bytes := []byte{4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4}
+	v5_bytes := []byte{5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
+	_ = v0_bytes
+	_ = v1_bytes
+	_ = v2_bytes
+	_ = v3_bytes
+	_ = v4_bytes
+	_ = v5_bytes
+
+	asset := Asset{
+		AssetID:     1984,
+		Issuer:      [32]byte{},
+		MinBalance:  100,
+		Symbol:      [32]byte{},
+		TotalSupply: 100,
+		Decimals:    8,
+	}
+	copy(asset.Issuer[:], v1_bytes)
+	copy(asset.Symbol[:], []byte("USDT"))
+
+	// Create Asset test
+	fmt.Printf("\n\033[38;5;208mCreating Asset (\033[38;5;46m1984 USDT\033[38;5;208m)...\033[0m\n")
+
+	create_asset_workPackage := types.WorkPackage{}
+
+	// Generate the extrinsic
+	extrinsicsBytes := types.ExtrinsicsBlobs{}
+	extrinsic := CreateAssetExtrinsic{
+		method_id: create_asset_id,
+		asset:     asset,
+	}
+	extrinsicBytes_signed := AddEd25519Sign(extrinsic.Bytes())
+	extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+	extrinsics_hash := common.Blake2Hash(extrinsicBytes_signed)
+	extrinsic_len := uint32(len(extrinsicBytes_signed))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsics_hash,
+		Len:  extrinsic_len,
+	})
+
+	payload_bytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
+
+	create_asset_workPackage = types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems: []types.WorkItem{
+			{
+				Service:            balancesServiceIndex,
+				CodeHash:           balancesServiceCodeHash,
+				Payload:            payload_bytes,
+				RefineGasLimit:     10000000,
+				AccumulateGasLimit: 10000000,
+				ImportedSegments:   make([]types.ImportSegment, 0),
+				Extrinsics:         work_item_extrinsic,
+				ExportCount:        1,
+			},
+		},
+	}
+
+	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx := rand.Intn(3)
+	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(create_asset_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	time.Sleep(6 * time.Second)
+	ShowAssetDetail(n1, balancesServiceIndex, 1984)
+
+	// Mint test
+	// mint 1234 for v1, v2, v3
+
+	validators := [][]byte{v1_bytes, v2_bytes, v3_bytes}
+	fmt.Printf("\n\033[38;5;208mMinting \033[38;5;46m1234 USDT\033[38;5;208m for \033[38;5;46mV1, V2, V3\033[38;5;208m...\033[0m\n")
+
+	for _, v_key_bytes := range validators {
+		var account_key [32]byte
+		copy(account_key[:], v_key_bytes)
+
+		// Generate the extrinsic
+		extrinsicsBytes := types.ExtrinsicsBlobs{}
+		extrinsic := MintExtrinsic{
+			method_id:   mint_id,
+			asset_id:    1984,
+			account_key: account_key,
+			amount:      1234,
+		}
+		extrinsicBytes_signed := AddEd25519Sign(extrinsic.Bytes())
+		extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+		extrinsics_hash := common.Blake2Hash(extrinsicBytes_signed)
+		extrinsic_len := uint32(len(extrinsicBytes_signed))
+
+		// Put the extrinsic hash and length into the work item extrinsic
+		work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+		work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+			Hash: extrinsics_hash,
+			Len:  extrinsic_len,
+		})
+
+		payload_bytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
+
+		mint_workPackage := types.WorkPackage{
+			Authorization: []byte("0x"),
+			AuthCodeHost:  balancesServiceIndex,
+			Authorizer:    types.Authorizer{},
+			RefineContext: refineContext,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            balancesServiceIndex,
+					CodeHash:           balancesServiceCodeHash,
+					Payload:            payload_bytes,
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					Extrinsics:         work_item_extrinsic,
+					ExportCount:        1,
+				},
+			},
+		}
+
+		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+		ramdamIdx := rand.Intn(3)
+		err = core0_peers[ramdamIdx].SendWorkPackageSubmission(mint_workPackage, extrinsicsBytes, 0)
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+		// wait until the work report is pending
+		for {
+			time.Sleep(1 * time.Second)
+			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+				if false {
+					var workReport types.WorkReport
+					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+					workReport = rho_state.WorkReport
+					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+				}
+				break
+			}
+		}
+		// wait until the work report is cleared
+		for {
+			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		time.Sleep(6 * time.Second)
+	}
+
+	ShowAssetDetail(n1, balancesServiceIndex, 1984)
+	for _, v_key_bytes := range validators {
+		ShowAccountDetail(n1, balancesServiceIndex, 1984, [32]byte(v_key_bytes))
+	}
+
+	// Burn test
+	// burn 100 for v3
+	fmt.Printf("\n\033[38;5;208mBurning \033[38;5;46m234 USDT\033[38;5;208m from \033[38;5;46mV3\033[38;5;208m...\033[0m\n")
+
+	var account_key [32]byte
+	copy(account_key[:], v3_bytes)
+
+	extrinsicsBytes = types.ExtrinsicsBlobs{}
+	burnextrinsic := BurnExtrinsic{
+		method_id:   burn_id,
+		asset_id:    1984,
+		account_key: account_key,
+		amount:      234,
+	}
+	extrinsicBytes_signed = AddEd25519Sign(burnextrinsic.Bytes())
+	extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+	extrinsics_hash = common.Blake2Hash(extrinsicBytes_signed)
+	extrinsic_len = uint32(len(extrinsicBytes_signed))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic = make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsics_hash,
+		Len:  extrinsic_len,
+	})
+
+	payload_bytes = make([]byte, 8)
+	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
+
+	mint_workPackage := types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems: []types.WorkItem{
+			{
+				Service:            balancesServiceIndex,
+				CodeHash:           balancesServiceCodeHash,
+				Payload:            payload_bytes,
+				RefineGasLimit:     10000000,
+				AccumulateGasLimit: 10000000,
+				ImportedSegments:   make([]types.ImportSegment, 0),
+				Extrinsics:         work_item_extrinsic,
+				ExportCount:        1,
+			},
+		},
+	}
+
+	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx = rand.Intn(3)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(mint_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	time.Sleep(6 * time.Second)
+	ShowAssetDetail(n1, balancesServiceIndex, 1984)
+	ShowAccountDetail(n1, balancesServiceIndex, 1984, account_key)
+
+	// Bond test
+	// bond 666 for v3
+	fmt.Printf("\n\033[38;5;208mBonding \033[38;5;46m666 USDT\033[38;5;208m from \033[38;5;46mV3\033[38;5;208m...\033[0m\n")
+
+	account_key = [32]byte{}
+	copy(account_key[:], v3_bytes)
+
+	extrinsicsBytes = types.ExtrinsicsBlobs{}
+	bondextrinsic := BondExtrinsic{
+		method_id:   bond_id,
+		asset_id:    1984,
+		account_key: account_key,
+		amount:      666,
+	}
+	extrinsicBytes_signed = AddEd25519Sign(bondextrinsic.Bytes())
+	extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+	extrinsics_hash = common.Blake2Hash(extrinsicBytes_signed)
+	extrinsic_len = uint32(len(extrinsicBytes_signed))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic = make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsics_hash,
+		Len:  extrinsic_len,
+	})
+
+	payload_bytes = make([]byte, 8)
+	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
+
+	bond_workPackage := types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems: []types.WorkItem{
+			{
+				Service:            balancesServiceIndex,
+				CodeHash:           balancesServiceCodeHash,
+				Payload:            payload_bytes,
+				RefineGasLimit:     10000000,
+				AccumulateGasLimit: 10000000,
+				ImportedSegments:   make([]types.ImportSegment, 0),
+				Extrinsics:         work_item_extrinsic,
+				ExportCount:        1,
+			},
+		},
+	}
+
+	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx = rand.Intn(3)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(bond_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	time.Sleep(6 * time.Second)
+	ShowAccountDetail(n1, balancesServiceIndex, 1984, account_key)
+
+	// Unbond test
+	// unbond 333 for v3
+	fmt.Printf("\n\033[38;5;208mUnbonding \033[38;5;46m333 USDT\033[38;5;208m from \033[38;5;46mV3\033[38;5;208m...\033[0m\n")
+
+	account_key = [32]byte{}
+	copy(account_key[:], v3_bytes)
+
+	extrinsicsBytes = types.ExtrinsicsBlobs{}
+	unbondextrinsic := UnbondExtrinsic{
+		method_id:   unbond_id,
+		asset_id:    1984,
+		account_key: account_key,
+		amount:      333,
+	}
+	extrinsicBytes_signed = AddEd25519Sign(unbondextrinsic.Bytes())
+	extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+	extrinsics_hash = common.Blake2Hash(extrinsicBytes_signed)
+	extrinsic_len = uint32(len(extrinsicBytes_signed))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic = make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsics_hash,
+		Len:  extrinsic_len,
+	})
+
+	payload_bytes = make([]byte, 8)
+	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
+
+	unbond_workPackage := types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems: []types.WorkItem{
+			{
+				Service:            balancesServiceIndex,
+				CodeHash:           balancesServiceCodeHash,
+				Payload:            payload_bytes,
+				RefineGasLimit:     10000000,
+				AccumulateGasLimit: 10000000,
+				ImportedSegments:   make([]types.ImportSegment, 0),
+				Extrinsics:         work_item_extrinsic,
+				ExportCount:        1,
+			},
+		},
+	}
+
+	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx = rand.Intn(3)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(unbond_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	time.Sleep(6 * time.Second)
+	ShowAccountDetail(n1, balancesServiceIndex, 1984, account_key)
+
+	// Transfer test
+	// transfer 100 from v3 to v2
+	fmt.Printf("\n\033[38;5;208mTransferring \033[38;5;46m167 USDT\033[38;5;208m from \033[38;5;46mV3\033[38;5;208m to \033[38;5;46mV2\033[38;5;208m...\033[0m\n")
+
+	from_account := [32]byte{}
+	copy(from_account[:], v3_bytes)
+
+	to_account := [32]byte{}
+	copy(to_account[:], v2_bytes)
+
+	extrinsicsBytes = types.ExtrinsicsBlobs{}
+	transferextrinsic := TransferExtrinsic{
+		method_id: transfer_id,
+		asset_id:  1984,
+		from:      from_account,
+		to:        to_account,
+		amount:    167,
+	}
+
+	extrinsicBytes_signed = AddEd25519Sign(transferextrinsic.Bytes())
+	extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+	extrinsics_hash = common.Blake2Hash(extrinsicBytes_signed)
+	extrinsic_len = uint32(len(extrinsicBytes_signed))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic = make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsics_hash,
+		Len:  extrinsic_len,
+	})
+
+	payload_bytes = make([]byte, 8)
+	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
+
+	transfer_workPackage := types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems: []types.WorkItem{
+			{
+				Service:            balancesServiceIndex,
+				CodeHash:           balancesServiceCodeHash,
+				Payload:            payload_bytes,
+				RefineGasLimit:     10000000,
+				AccumulateGasLimit: 10000000,
+				ImportedSegments:   make([]types.ImportSegment, 0),
+				Extrinsics:         work_item_extrinsic,
+				ExportCount:        1,
+			},
+		},
+	}
+
+	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx = rand.Intn(3)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(transfer_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	time.Sleep(6 * time.Second)
+	ShowAccountDetail(n1, balancesServiceIndex, 1984, from_account)
+	ShowAccountDetail(n1, balancesServiceIndex, 1984, to_account)
+}
+
+func scaled_balances(nodes []*Node, testServices map[string]*types.TestService) {
+	fmt.Printf("\n=========================Balances Scale Test=========================\n")
+	// General setup
+	BalanceService := testServices["balances"]
+	balancesServiceIndex := BalanceService.ServiceCode
+	balancesServiceCodeHash := BalanceService.CodeHash
+
+	n1 := nodes[1]
+	n4 := nodes[4]
+	core := 0
+
+	timeslot := nodes[1].statedb.Block.GetHeader().Slot
+	refineContext := types.RefineContext{
+		Anchor:           common.Hash{},
+		StateRoot:        common.Hash{},
+		BeefyRoot:        common.Hash{},
+		LookupAnchor:     common.Hash{},
+		LookupAnchorSlot: timeslot,
+		Prerequisites:    []common.Hash{},
+	}
+
+	// Total Work Package Size in MB
+	var totalWPSizeInMB float64
+
+	// Method ID bytes
+	create_asset_id := uint32(0)
+	mint_id := uint32(1)
+	transfer_id := uint32(5)
+
+	_ = create_asset_id
+	_ = mint_id
+	_ = transfer_id
+
+	issder_bytes := [32]byte{5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
+
+	asset := Asset{
+		AssetID:     1984,
+		Issuer:      issder_bytes,
+		MinBalance:  100,
+		Symbol:      [32]byte{},
+		TotalSupply: 0,
+		Decimals:    8,
+	}
+	copy(asset.Symbol[:], []byte("USDT"))
+
+	// Create Asset test
+	fmt.Printf("\n\033[38;5;208mCreating Asset (\033[38;5;46m1984 USDT\033[38;5;208m)...\033[0m\n")
+
+	create_asset_workPackage := types.WorkPackage{}
+
+	// Generate the extrinsic
+	var extrinsicsBytes types.ExtrinsicsBlobs
+	extrinsicsBytes = types.ExtrinsicsBlobs{}
+	extrinsic := CreateAssetExtrinsic{
+		method_id: create_asset_id,
+		asset:     asset,
+	}
+	extrinsicBytes_signed := AddEd25519Sign(extrinsic.Bytes())
+	extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+	extrinsics_hash := common.Blake2Hash(extrinsicBytes_signed)
+	extrinsic_len := uint32(len(extrinsicBytes_signed))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsics_hash,
+		Len:  extrinsic_len,
+	})
+
+	payload_bytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
+
+	create_asset_workPackage = types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems: []types.WorkItem{
+			{
+				Service:            balancesServiceIndex,
+				CodeHash:           balancesServiceCodeHash,
+				Payload:            payload_bytes,
+				RefineGasLimit:     10000000,
+				AccumulateGasLimit: 10000000,
+				ImportedSegments:   make([]types.ImportSegment, 0),
+				Extrinsics:         work_item_extrinsic,
+				ExportCount:        1,
+			},
+		},
+	}
+
+	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx := rand.Intn(3)
+
+	totalWPSizeInMB = calaulateTotalWPSize(create_asset_workPackage, extrinsicsBytes)
+	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
+
+	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(create_asset_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	time.Sleep(6 * time.Second)
+	ShowAssetDetail(n1, balancesServiceIndex, 1984)
+
+	// Scaled mint test
+	num_of_mint := 110
+	fmt.Printf("\n\033[38;5;208mMinting \033[38;5;46m90000 USDT\033[38;5;208m for \033[38;5;46m%v\033[38;5;208m accounts...\033[0m\n", num_of_mint)
+
+	var mint_workPackage types.WorkPackage
+	var mint_workItems []types.WorkItem
+	extrinsicsBytes = types.ExtrinsicsBlobs{}
+	for i := 0; i < num_of_mint; i++ {
+		account_key := generateVBytes(uint64(i))
+
+		// Generate the extrinsic
+		extrinsic := MintExtrinsic{
+			method_id:   mint_id,
+			asset_id:    1984,
+			account_key: account_key,
+			amount:      90000,
+		}
+		extrinsicBytes_signed := AddEd25519Sign(extrinsic.Bytes())
+		extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+		extrinsics_hash := common.Blake2Hash(extrinsicBytes_signed)
+		extrinsic_len := uint32(len(extrinsicBytes_signed))
+
+		// Put the extrinsic hash and length into the work item extrinsic
+		work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+		work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+			Hash: extrinsics_hash,
+			Len:  extrinsic_len,
+		})
+
+		payload_bytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(payload_bytes, uint64(i)) // extrinsic index
+
+		workItem := types.WorkItem{
+			Service:            balancesServiceIndex,
+			CodeHash:           balancesServiceCodeHash,
+			Payload:            payload_bytes,
+			RefineGasLimit:     10000000,
+			AccumulateGasLimit: 10000000,
+			ImportedSegments:   make([]types.ImportSegment, 0),
+			Extrinsics:         work_item_extrinsic,
+			ExportCount:        1,
+		}
+
+		mint_workItems = append(mint_workItems, workItem)
+	}
+
+	mint_workPackage = types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems:     mint_workItems,
+	}
+
+	totalWPSizeInMB = calaulateTotalWPSize(mint_workPackage, extrinsicsBytes)
+	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
+
+	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx = rand.Intn(3)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(mint_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	time.Sleep(6 * time.Second)
+	ShowAssetDetail(n1, balancesServiceIndex, 1984)
+
+	// Scaled Transfer test
+	num_of_transfer := 110
+	fmt.Printf("\n\033[38;5;208mTransferring \033[38;5;46m1 USDT\033[38;5;208m from \033[38;5;46mV6\033[38;5;208m to \033[38;5;46m%v\033[38;5;208m accounts...\033[0m\n", num_of_transfer)
+
+	var transfer_workPackage types.WorkPackage
+	var transfer_workItems []types.WorkItem
+	extrinsicsBytes = types.ExtrinsicsBlobs{}
+
+	sender_id := uint64(6)
+	sender := generateVBytes(sender_id)
+	var receiver [32]byte
+	for i := 0; i < num_of_transfer; i++ {
+		receiver = generateVBytes(uint64(i))
+		if uint64(i) == sender_id {
+			receiver = generateVBytes(0)
+		}
+
+		// Generate the extrinsic
+		extrinsic := TransferExtrinsic{
+			method_id: transfer_id,
+			asset_id:  1984,
+			from:      sender,
+			to:        receiver,
+			amount:    1,
+		}
+		extrinsicBytes_signed := AddEd25519Sign(extrinsic.Bytes())
+		extrinsicsBytes = append(extrinsicsBytes, extrinsicBytes_signed)
+
+		extrinsics_hash := common.Blake2Hash(extrinsicBytes_signed)
+		extrinsic_len := uint32(len(extrinsicBytes_signed))
+
+		// Put the extrinsic hash and length into the work item extrinsic
+		work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+		work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+			Hash: extrinsics_hash,
+			Len:  extrinsic_len,
+		})
+
+		payload_bytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(payload_bytes, uint64(i)) // extrinsic index
+
+		workItem := types.WorkItem{
+			Service:            balancesServiceIndex,
+			CodeHash:           balancesServiceCodeHash,
+			Payload:            payload_bytes,
+			RefineGasLimit:     10000000,
+			AccumulateGasLimit: 10000000,
+			ImportedSegments:   make([]types.ImportSegment, 0),
+			Extrinsics:         work_item_extrinsic,
+			ExportCount:        1,
+		}
+
+		transfer_workItems = append(transfer_workItems, workItem)
+	}
+
+	transfer_workPackage = types.WorkPackage{
+		Authorization: []byte("0x"),
+		AuthCodeHost:  balancesServiceIndex,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems:     transfer_workItems,
+	}
+
+	totalWPSizeInMB = calaulateTotalWPSize(transfer_workPackage, extrinsicsBytes)
+	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
+
+	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx = rand.Intn(3)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(transfer_workPackage, extrinsicsBytes, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	time.Sleep(6 * time.Second)
+	ShowAccountDetail(n1, balancesServiceIndex, 1984, sender)
+
+}
+
+func AddEd25519Sign(data []byte) []byte {
+	// Generate a new key pair
+	seed := make([]byte, 32)
+	rand.Read(seed)
+	pubKey, privKey, err := types.InitEd25519Key(seed)
+	if err != nil {
+		return nil
+	}
+
+	signature := types.Ed25519Sign(types.Ed25519Priv(privKey), data)
+	combinedBytes := append(pubKey.Bytes(), data...)
+	data = append(combinedBytes, signature.Bytes()...)
+	return data
+}
+
+func generateVBytes(n uint64) [32]byte {
+	var arr [32]byte
+	binary.LittleEndian.PutUint64(arr[:8], n)
+	return arr
+}
+
+func calaulateTotalWPSize(create_asset_workPackage types.WorkPackage, extrinsicsBytes types.ExtrinsicsBlobs) float64 {
+	WPsizeInBytes := len(create_asset_workPackage.Bytes())
+	WPsizeInMB := float64(WPsizeInBytes) / 1024 / 1024
+
+	ETsizeInBytes := len(extrinsicsBytes.Bytes())
+	ETsizeInMB := float64(ETsizeInBytes) / 1024 / 1024
+
+	totalWPsizeInMB := WPsizeInMB + ETsizeInMB
+	return totalWPsizeInMB
+}
+
+func ShowAssetDetail(n *Node, balance_service_index uint32, asset_id uint64) {
+	var asset Asset
+	key_byte := make([]byte, 8)
+	binary.LittleEndian.PutUint64(key_byte, asset_id)
+	service_account_byte, _, _ := n.getState().GetTrie().GetServiceStorage(balance_service_index, key_byte)
+
+	fetched_asset, _ := asset.FromBytes(service_account_byte)
+	fmt.Printf("\n\033[38;5;13mAsset ID\033[0m: \033[32m%v\033[0m\n", fetched_asset.AssetID)
+	fmt.Printf("\033[38;5;13mAsset Issuer\033[0m: \033[32m%x\033[0m\n", fetched_asset.Issuer)
+	fmt.Printf("\033[38;5;13mAsset MinBalance\033[0m: \033[32m%v\033[0m\n", fetched_asset.MinBalance)
+	fmt.Printf("\033[38;5;13mAsset Symbol\033[0m: \033[32m%s\033[0m\n", fetched_asset.Symbol)
+	fmt.Printf("\033[38;5;13mAsset TotalSupply\033[0m: \033[32m%v\033[0m\n", fetched_asset.TotalSupply)
+	fmt.Printf("\033[38;5;13mAsset Decimals\033[0m: \033[32m%v\033[0m\n", fetched_asset.Decimals)
+}
+
+func ShowAccountDetail(n *Node, balance_service_index uint32, asset_id uint64, account_key [32]byte) {
+	var account Account
+	key_byte := make([]byte, 8+32)
+	binary.LittleEndian.PutUint64(key_byte, asset_id)
+	copy(key_byte[8:], account_key[:])
+	service_account_byte, _, _ := n.getState().GetTrie().GetServiceStorage(balance_service_index, key_byte)
+
+	fetched_account, _ := account.FromBytes(service_account_byte)
+	fmt.Printf("\n\033[38;5;13mAccount Key\033[0m: \033[32m%x\033[0m\n", account_key)
+	fmt.Printf("\033[38;5;13mAsset ID\033[0m: \033[32m%v\033[0m\n", asset_id)
+	fmt.Printf("\033[38;5;13mAccount Nonce\033[0m: \033[32m%v\033[0m\n", fetched_account.Nonce)
+	fmt.Printf("\033[38;5;13mAccount Free\033[0m: \033[32m%v\033[0m\n", fetched_account.Free)
+	fmt.Printf("\033[38;5;13mAccount Reserved\033[0m: \033[32m%v\033[0m\n", fetched_account.Reserved)
 }
