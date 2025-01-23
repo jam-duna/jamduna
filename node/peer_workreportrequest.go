@@ -1,10 +1,11 @@
 package node
 
 import (
+	"reflect"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
-	"reflect"
 )
 
 /*
@@ -28,6 +29,10 @@ Node -> Node
 
 func (p *Peer) SendWorkReportRequest(workReportHash common.Hash) (workReport types.WorkReport, err error) {
 	stream, err := p.openStream(CE136_WorkReportRequest)
+	if err != nil {
+		return workReport, err
+	}
+	defer stream.Close()
 	err = sendQuicBytes(stream, workReportHash.Bytes())
 	if err != nil {
 		return workReport, err

@@ -3,9 +3,11 @@
 *Developer*: Colorful Notion, Inc.
 *Address*: [5D58imQFuMXDTknQS2D14gDU2duiUC18MGxDnTKajjJS9F3g](https://polkadot.subscan.io/account/5D58imQFuMXDTknQS2D14gDU2duiUC18MGxDnTKajjJS9F3g)
 
-We are developing [JAM](https://jam.web3.foundation/) in Go in Summer 2024/Fall 2024. 
-
-**Goal**: Achieve **Milestone 1: IMPORTER** -- State-transitioning conformance tests pass and can import blocks.
+We are continuing development of [JAM](https://jam.web3.foundation/) in Go throughout 2025, with **Goals** of:
+* [waiting for formal pass mechanism] **Milestone 1: IMPORTER** -- State-transitioning conformance tests pass and can import blocks.
+* [waiting for formal pass mechanism] **Milestone 2: AUTHOR** -- Fully conformant and can produce blocks (including networking, off-chain).
+* [in progress, H1 2025] **Milestone 3: HALF-SPEED** -- Conformance and Kusama-level performance (including PVM implementation).
+* [in progress, H2 2025] **Milestone 4: FULL-SPEED** -- Conformance and Polkadot-level performance (including PVM implementation).
 
 ## Documentation:
 
@@ -66,6 +68,13 @@ Usage: jam [options]
 
 * [bandersnatch-vrfs-spec](https://github.com/davxy/bandersnatch-vrfs-spec) in `crypto`
 
+## Disclosures
+
+Our interactions with fellow teams:
+* JAM Chat Room and Gray Paper Chat Room
+* JAM0 Chat Room
+* JAM0 event at Devcon 7, sponsored by Colorful Notion
+* JAM Telegram room
 
 
 

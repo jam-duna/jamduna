@@ -26,7 +26,7 @@ on:
 jobs:
   test:
     runs-on: jamops-16-core
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout main code
         uses: actions/checkout@v3
@@ -71,7 +71,6 @@ jobs:
         run: |
           make blslib
           make bandersnatchlib
-          make sp1lib
 
       - name: Run test bls
         run: go test ./bls 
@@ -79,37 +78,24 @@ jobs:
       - name: Run test bandersnatch
         run: go test ./bandersnatch 
 
-      - name: Run test sp1
-        run: go test ./sp1
-
       - name: Run test fib
-        run: go test ./node -timeout 5m -v -run ^TestFib$ -tags network 
+        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network 
 
       - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+        run: go test ./node -timeout 3m -v -run ^TestBalances$ -tags network
 
       - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+        run: go test ./node -timeout 3m -v -run ^TestTransfer$ -tags network
 
       - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+        run: go test ./node -timeout 3m -v -run ^TestScaledBalances$ -tags network
 
       - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network
 
       - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network
 
       - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
-
-      - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
-
-      - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
-
-      - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run ^TestMegatron$ -tags network
-
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network
 

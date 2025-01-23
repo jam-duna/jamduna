@@ -275,6 +275,10 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 		return err
 	}
 	stream, err := p.openStream(CE144_AuditAnnouncement)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

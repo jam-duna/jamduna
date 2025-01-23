@@ -221,6 +221,10 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 		return
 	}
 	stream, err := p.openStream(CE134_WorkPackageShare)
+	if err != nil {
+		return
+	}
+	defer stream.Close()
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return
@@ -280,8 +284,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 
 	wpCoreIndex := newReq.CoreIndex
 
-	received_segmentRootLookup := types.SegmentRootLookup{}
-	received_segmentRootLookup = make([]types.SegmentRootLookupItem, 0)
+	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {
 		item := types.SegmentRootLookupItem{
 			WorkPackageHash: sr.WorkPackageHash,

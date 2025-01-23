@@ -116,6 +116,7 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 
 func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, credentials []types.GuaranteeCredential) (err error) {
 	stream, err := p.openStream(CE135_WorkReportDistribution)
+	defer stream.Close()
 	newReq := JAMSNPWorkReport{
 		Slot:        slot,
 		Len:         uint8(len(credentials)),
@@ -134,6 +135,7 @@ func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, cred
 }
 
 func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err error) {
+	defer stream.Close()
 	var newReq JAMSNPWorkReport
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)

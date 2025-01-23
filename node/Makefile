@@ -17,6 +17,10 @@ megatron:
 	@echo "Running TestMegatron with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags network
 
+megatron_pprof:
+	@echo "Running TestMegatron with timeout (building pprof mode with test binary)"
+	go test -tags network -c -o node.test
+	./node.test -test.run TestMegatron
 disputes:
 	@echo "Running TestDisputes with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestDisputes -tags network

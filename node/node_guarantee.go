@@ -41,7 +41,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		wg.Add(1)
 		go func(coworker Peer) {
 			defer wg.Done()
-
+			// if it's itself, execute the workpackage
 			if coworker.PeerID == n.id {
 				var execErr error
 				guarantee, _, _, execErr = n.executeWorkPackage(wpCoreIndex, wp, importedSegments, extrinsics, segmentRootLookup)
@@ -50,17 +50,17 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 					return
 				}
 				return
+			} else {
+				fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
+				if errfellow != nil {
+					Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] ShareWorkPackage Error: %v\n", n.String(), errfellow), true)
+					return
+				}
+				mutex.Lock()
+				fellow_responses[coworker.Validator.Ed25519] = fellow_response
+				mutex.Unlock()
 			}
 
-			fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
-			if errfellow != nil {
-				Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] ShareWorkPackage Error: %v\n", n.String(), errfellow), true)
-				return
-			}
-
-			mutex.Lock()
-			fellow_responses[coworker.Validator.Ed25519] = fellow_response
-			mutex.Unlock()
 		}(coworker)
 	}
 	wg.Wait()

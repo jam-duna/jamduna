@@ -8,7 +8,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	_ "net/http/pprof"
 	"os"
+	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -83,6 +85,29 @@ func TestFib(t *testing.T) {
 }
 
 func TestMegatron(t *testing.T) {
+	// Open file to save CPU Profile
+	cpuProfile, err := os.Create("cpu.pprof")
+	if err != nil {
+		t.Fatalf("Unable to create CPU Profile file: %v", err)
+	}
+	defer cpuProfile.Close()
+
+	// Start CPU Profile
+	if err := pprof.StartCPUProfile(cpuProfile); err != nil {
+		t.Fatalf("Unable to start CPU Profile: %v", err)
+	}
+	defer pprof.StopCPUProfile() // Stop profiling after test completion
+
+	// Generate memory Profile
+	memProfile, err := os.Create("mem.pprof")
+	if err != nil {
+		t.Fatalf("Unable to create memory Profile file: %v", err)
+	}
+	defer memProfile.Close()
+
+	if err := pprof.WriteHeapProfile(memProfile); err != nil {
+		t.Fatalf("Unable to write memory Profile: %v", err)
+	}
 	jamtest(t, "megatron", MegaTronEpochLen)
 }
 

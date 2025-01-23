@@ -2,6 +2,8 @@
 /leveldb
 /node/data
 /node/logs
+/node/*.pprof
+/node/*.test
 coverage.out
 /.vscode
 /cmd/importblocks/**/*.json

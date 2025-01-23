@@ -235,17 +235,6 @@ func safrole(sendtickets bool) {
 	for _, n := range nodes {
 		n.SetSendTickets(sendtickets)
 	}
-	ticker := time.NewTicker(1 * time.Second)
-	block_graph_server := types.NewGraphServer()
-	go block_graph_server.StartServer()
-	for {
-		select {
-		case <-ticker.C:
-			block_graph_server.Update(nodes[0].block_tree)
-		default:
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
 }
 
 func getServices(serviceNames []string) (services map[string]*types.TestService, err error) {
@@ -277,13 +266,27 @@ func ImportBlocks(config *types.ConfigJamBlocks) {
 }
 
 func jamtest(t *testing.T, jam string, targetedEpochLen int) {
+
 	nodes, err := SetUpNodes(numNodes)
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
 	Logger.RecordLogs(testing_record, fmt.Sprintf("[JAMTEST : %s] Start!!!\n", jam), true)
 	_ = nodes
+	block_graph_server := types.NewGraphServer()
 
+	go block_graph_server.StartServer()
+	ticker_blockserver := time.NewTicker(1 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ticker_blockserver.C:
+				block_graph_server.Update(nodes[0].block_tree)
+			default:
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
 	// give some time for nodes to come up
 	for {
 		time.Sleep(1 * time.Second)
@@ -519,6 +522,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 }
 
 func megatron(nodes []*Node, testServices map[string]*types.TestService) {
+
 	fmt.Printf("Start Fib_Trib\n")
 	service0 := testServices["fib"]
 	service1 := testServices["tribonacci"]

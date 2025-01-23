@@ -98,6 +98,10 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 
 func (p *Peer) SendPreimageAnnouncement(pa *types.PreimageAnnouncement) (err error) {
 	stream, err := p.openStream(CE142_PreimageAnnouncement)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
 	// --> Service ID ++ Hash ++ Preimage Length
 	paBytes, _ := pa.ToBytes()
 	err = sendQuicBytes(stream, paBytes)

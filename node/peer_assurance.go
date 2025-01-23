@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -88,6 +89,10 @@ func (p *Peer) SendAssurance(a *types.Assurance) (err error) {
 		return err
 	}
 	stream, err := p.openStream(CE141_AssuranceDistribution)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
 	// --> Assurance
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {

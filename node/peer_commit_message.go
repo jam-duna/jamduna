@@ -15,6 +15,10 @@ func (p *Peer) SendCommitMessage(req grandpa.CommitMessage) error {
 	if err != nil {
 		return err
 	}
+	defer stream.Close()
+	if err != nil {
+		return err
+	}
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
@@ -23,6 +27,7 @@ func (p *Peer) SendCommitMessage(req grandpa.CommitMessage) error {
 }
 
 func (n *Node) onCommitMessage(stream quic.Stream, msg []byte) error {
+	defer stream.Close()
 	commit := grandpa.CommitMessage{}
 	err := commit.FromBytes(msg)
 	if err != nil {

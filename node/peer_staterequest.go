@@ -122,6 +122,10 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 	}
 	stream, err := p.openStream(CE129_StateRequest)
 	// --> Header Hash ++ Start Key ++ End Key ++ Maximum Size
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

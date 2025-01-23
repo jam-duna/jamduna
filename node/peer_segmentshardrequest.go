@@ -130,6 +130,10 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 		code = CE140_SegmentShardRequestP
 	}
 	stream, err := p.openStream(code)
+	if err != nil {
+		return
+	}
+	defer stream.Close()
 	req := &JAMSNPSegmentShardRequest{
 		ErasureRoot:  erasureRoot,
 		ShardIndex:   shardIndex,

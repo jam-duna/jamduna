@@ -99,7 +99,11 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 	if err != nil {
 		return err
 	}
-	stream, _ := p.openStream(CE133_WorkPackageSubmission)
+	stream, err := p.openStream(CE133_WorkPackageSubmission)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
@@ -112,7 +116,7 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 }
 
 func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err error) {
-
+	defer stream.Close()
 	var newReq JAMSNPWorkPackage
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)

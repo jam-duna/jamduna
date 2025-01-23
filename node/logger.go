@@ -45,7 +45,7 @@ var DefaultLogger = []string{
 }
 
 const logDir = "./logs"
-const clearOnStart = false
+const clearOnStart = true
 
 func (lm *DebugLogger) SetLogger(name string) *log.Logger {
 	lm.mu.Lock()

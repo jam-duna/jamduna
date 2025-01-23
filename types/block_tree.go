@@ -177,6 +177,18 @@ func (bt *BlockTree) Copy() *BlockTree {
 	return newTree
 }
 
+func (bt *BlockTree) GetRoot() *BT_Node {
+	bt.Mutex.RLock()
+	defer bt.Mutex.RUnlock()
+	return bt.Root
+}
+
+func (bt *BlockTree) GetLeafs() map[common.Hash]*BT_Node {
+	bt.Mutex.RLock()
+	defer bt.Mutex.RUnlock()
+	return bt.Leafs
+}
+
 // this function is used to add a block to the block tree
 func (bt *BlockTree) AddBlock(newBlock *Block) error {
 	bt.Mutex.Lock()
@@ -255,6 +267,25 @@ func (bt *BlockTree) Prune(newRoot *BT_Node) {
 			node.Block = nil
 		}
 	}
+}
+
+// will remain finalized block and its ancestors(+remain_finalized_blk)
+func (bt *BlockTree) PruneBlockTree(remain_finalized_blk int) {
+	// get the last finalized block - remain_finalized_blk
+	last_finalized_blk := bt.GetLastFinalizedBlock()
+	if last_finalized_blk == nil {
+		return
+	}
+	// get the ancestor of the last finalized block
+	ancestor := last_finalized_blk
+	for i := 0; i < remain_finalized_blk; i++ {
+		if ancestor.Parent == nil {
+			break
+		}
+		ancestor = ancestor.Parent
+	}
+	// prune the block tree
+	bt.Prune(ancestor)
 }
 
 // this function is used to get the block node by hash
@@ -383,7 +414,6 @@ func (bt *BlockTree) FinalizeBlock(hash common.Hash) error {
 func (bt *BlockTree) GetLastFinalizedBlock() *BT_Node {
 	bt.Mutex.RLock()
 	defer bt.Mutex.RUnlock()
-
 	//if the block get finalized, it will be a chain
 	//so we can start from the root node
 	node := bt.Root

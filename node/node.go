@@ -82,6 +82,11 @@ type Node struct {
 	peers         []string
 	peersInfo     map[uint16]*Peer //<validatorIndex> -> Peer
 
+	UP0_HandshakeChan map[uint16]chan JAMSNP_Handshake //<validatorIndex> -> chan
+	UP0_HandshakeMu   sync.Mutex
+	UP0_stream        map[uint16]quic.Stream //<validatorIndex> -> stream (self initiated)
+	UP0_streamMu      sync.Mutex
+
 	tlsConfig *tls.Config
 
 	store *storage.StateDBStorage
@@ -125,7 +130,7 @@ type Node struct {
 	workReports      map[common.Hash]types.WorkReport
 	workReportsMutex sync.Mutex
 
-	blockAnnouncementsCh    chan types.BlockAnnouncement
+	blockAnnouncementsCh    chan JAMSNP_BlockAnnounce
 	ticketsCh               chan types.Ticket
 	workPackagesCh          chan types.WorkPackage
 	workReportsCh           chan types.WorkReport
@@ -334,6 +339,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		clients:   make(map[string]string),
 		nodeType:  nodeType,
 
+		UP0_stream: make(map[uint16]quic.Stream),
+
 		extrinsic_pool: types.NewExtrinsicPool(),
 
 		statedbMap:     make(map[common.Hash]*statedb.StateDB),
@@ -347,7 +354,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		assurancesBucket: make(map[common.Hash]bool),
 		delaysend:        make(map[common.Hash]int),
 
-		blockAnnouncementsCh:    make(chan types.BlockAnnouncement, 200),
+		blockAnnouncementsCh:    make(chan JAMSNP_BlockAnnounce, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
 		workPackagesCh:          make(chan types.WorkPackage, 200),
 		workReportsCh:           make(chan types.WorkReport, 200),
@@ -750,10 +757,11 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		}()
 	}
 }
-
 func (n *Node) broadcast(obj interface{}) []byte {
 	result := []byte{}
 	objType := reflect.TypeOf(obj)
+	var wg sync.WaitGroup
+
 	for id, p := range n.peersInfo {
 		if id == n.id {
 			if objType == reflect.TypeOf(types.Assurance{}) {
@@ -768,90 +776,89 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				continue
 			}
 		}
-		//fmt.Printf("%s BROADCAST PeerID=%v\n", n.String(), p.PeerID)
-		switch objType {
-		case reflect.TypeOf(types.Ticket{}):
-			t := obj.(types.Ticket)
-			epoch := uint32(0) // TODO: Shawn
-			err := p.SendTicketDistribution(epoch, t, false)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendTicketDistribution ERR %v\n", n.String(), err), true)
-			}
-			break
-		case reflect.TypeOf(types.Block{}):
-			b := obj.(types.Block)
-			slot := uint32(0) // TODO: Shawn
-			//fmt.Printf("%s BROADCAST SendBlockAnnouncement to %d: %v\n", n.String(), id, b.Header.Hash())
-			err := p.SendBlockAnnouncement(b, slot)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendBlockAnnouncement ERR %v\n", n.String(), err), true)
-			}
-			break
 
-		case reflect.TypeOf(types.Guarantee{}):
-			g := obj.(types.Guarantee)
-			if debugG {
-				fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d\n", n.String(), id)
+		wg.Add(1)
+		go func(id uint16, p *Peer) {
+			defer wg.Done()
+			switch objType {
+			case reflect.TypeOf(types.Ticket{}):
+				t := obj.(types.Ticket)
+				epoch := uint32(0) // TODO: Shawn
+				err := p.SendTicketDistribution(epoch, t, false)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendTicketDistribution ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf(types.Block{}):
+				b := obj.(types.Block)
+				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s GetOrInitBlockAnnouncementStream ERR %v\n", n.String(), err), true)
+				}
+				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s GetBlockAnnouncementBytes ERR %v\n", n.String(), err), true)
+				}
+				err = sendQuicBytes(up0_stream, block_a_bytes)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendBlockAnnouncement ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf(types.Guarantee{}):
+				g := obj.(types.Guarantee)
+				if debugG {
+					fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d\n", n.String(), id)
+				}
+				err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendWorkReportDistribution ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf(types.Assurance{}):
+				a := obj.(types.Assurance)
+				err := p.SendAssurance(&a)
+				if err != nil {
+					fmt.Printf("SendAssurance ERR %v\n", err)
+				}
+			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
+				a := obj.(JAMSNPAuditAnnouncementWithProof)
+				err := p.SendAuditAnnouncement(&a)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendAuditAnnouncement ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf(types.Judgement{}):
+				j := obj.(types.Judgement)
+				epoch := uint32(0) // TODO: Shawn
+				err := p.SendJudgmentPublication(epoch, j)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendJudgmentPublication ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf(types.PreimageAnnouncement{}):
+				preimageAnnouncement := obj.(types.PreimageAnnouncement)
+				err := p.SendPreimageAnnouncement(&preimageAnnouncement)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendPreimageAnnouncement ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf([]DADistributeECChunk{}):
+				distributeECChunks := obj.([]DADistributeECChunk)
+				err := p.SendDistributionECChunks(distributeECChunks[id])
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendDistributionECChunks ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf(grandpa.VoteMessage{}):
+				vote := obj.(grandpa.VoteMessage)
+				err := p.SendVoteMessage(vote)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendVoteMessage ERR %v\n", n.String(), err), true)
+				}
+			case reflect.TypeOf(grandpa.CommitMessage{}):
+				commit := obj.(grandpa.CommitMessage)
+				err := p.SendCommitMessage(commit)
+				if err != nil {
+					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendCommitMessage ERR %v\n", n.String(), err), true)
+				}
 			}
-			err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendWorkReportDistribution ERR %v\n", n.String(), err), true)
-			}
-
-			break
-		case reflect.TypeOf(types.Assurance{}):
-			a := obj.(types.Assurance)
-			err := p.SendAssurance(&a)
-			if err != nil {
-				fmt.Printf("SendAssurance ERR %v\n", err)
-			}
-			break
-		case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
-			a := obj.(JAMSNPAuditAnnouncementWithProof)
-			err := p.SendAuditAnnouncement(&a)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendAuditAnnouncement ERR %v\n", n.String(), err), true)
-			}
-			break
-		case reflect.TypeOf(types.Judgement{}):
-			j := obj.(types.Judgement)
-			epoch := uint32(0) // TODO: Shawn
-			err := p.SendJudgmentPublication(epoch, j)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendJudgmentPublication ERR %v\n", n.String(), err), true)
-			}
-			break
-		case reflect.TypeOf(types.PreimageAnnouncement{}):
-			preimageAnnouncement := obj.(types.PreimageAnnouncement)
-			err := p.SendPreimageAnnouncement(&preimageAnnouncement)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendPreimageAnnouncement ERR %v\n", n.String(), err), true)
-			}
-			break
-		case reflect.TypeOf([]DADistributeECChunk{}):
-			distributeECChunks := obj.([]DADistributeECChunk)
-			err := p.SendDistributionECChunks(distributeECChunks[id])
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendDistributionECChunks ERR %v\n", n.String(), err), true)
-			}
-			break
-		case reflect.TypeOf(grandpa.VoteMessage{}):
-			vote := obj.(grandpa.VoteMessage)
-			err := p.SendVoteMessage(vote)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendVoteMessage ERR %v\n", n.String(), err), true)
-			}
-			break
-		case reflect.TypeOf(grandpa.CommitMessage{}):
-			commit := obj.(grandpa.CommitMessage)
-			err := p.SendCommitMessage(commit)
-			if err != nil {
-				Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendCommitMessage ERR %v\n", n.String(), err), true)
-			}
-			break
-		}
-
+		}(id, p)
 	}
+
+	wg.Wait()
 	return result
 }
 
@@ -1061,18 +1068,10 @@ func (n *Node) processBlock(blk *types.Block) error {
 	}
 
 	// we got to the tip, now extend the chain, moving the tip forward, applying blocks using blockcache
-	n.extendChain()
-
-	currJCE := common.ComputeCurrentJCETime()
-	currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
-	if blk.Header.EpochMark != nil || (currEpoch == 0 && currPhase == 0) {
-		if debug {
-			fmt.Printf("[N%d]GenerateTickets currEpoch=%v, currPhase=%v\n", n.id, currEpoch, currPhase)
-		}
-		n.GenerateTickets()
-		n.BroadcastTickets()
+	err := n.extendChain()
+	if err != nil {
+		return err
 	}
-
 	return nil // Success
 }
 
@@ -1369,6 +1368,7 @@ func (n *Node) runClient() {
 			// currJCE := common.ComputeCurrentJCETime()
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
 			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
+			// bandersnatch is time consuming
 			if currEpoch != -1 {
 				if currPhase == 0 {
 					n.GenerateTickets()
@@ -1381,9 +1381,9 @@ func (n *Node) runClient() {
 					}
 					n.GenerateTickets()
 					n.BroadcastTickets()
-
 				}
 			}
+
 			//if n.checkGodTimeslotUsed(currJCE) {
 			//	return
 			//}
@@ -1391,14 +1391,15 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
+			n.statedbMutex.Lock()
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, n.extrinsic_pool)
+			n.statedbMutex.Unlock()
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				//TODO: continue as opposed to panic here
 				continue
 				//panic(0)
 			}
-
 			if newStateDB != nil && debugTree {
 				fmt.Printf("[N%d] Author PrintTree \n", n.id)
 				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
@@ -1428,7 +1429,6 @@ func (n *Node) runClient() {
 				n.cacheHeaders(headerHash, newBlock)
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				go n.broadcast(*newBlock)
-
 				if debug {
 					for _, g := range newStateDB.GuarantorAssignments {
 						fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
@@ -1469,11 +1469,9 @@ func (n *Node) runClient() {
 
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
 				n.assureNewBlock(newBlock)
-				n.statedbMapMutex.Lock()
-				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
-				n.statedbMapMutex.Unlock()
+				n.auditingCh <- newStateDB.Copy()
 				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
-				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
+				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
 
 			}
 

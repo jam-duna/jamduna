@@ -192,9 +192,9 @@ func (n *Node) IsSelfRequesting(peer_id uint16) bool {
 	return false
 }
 
-func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncement) (block *types.Block, err error) {
+func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) (block *types.Block, err error) {
 	// initiate CE128_BlockRequest
-	validatorIndex := blockAnnouncement.ValidatorIndex
+	validatorIndex := blockAnnouncement.Header.AuthorIndex
 	p, ok := n.peersInfo[validatorIndex]
 	if !ok {
 		fmt.Printf("processBlockAnnouncement %d NOT Found\n", validatorIndex)
@@ -204,7 +204,7 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement types.BlockAnnouncemen
 		panic(120)
 		return block, fmt.Errorf("Invalid validator index %d", validatorIndex)
 	}
-	headerHash := blockAnnouncement.HeaderHash
+	headerHash := blockAnnouncement.Header.HeaderHash()
 	//fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) to N%d\n", n.String(), headerHash, validatorIndex)
 	var blocksRaw []types.Block
 	for attempt := 1; attempt <= 3; attempt++ {

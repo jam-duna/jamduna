@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -110,6 +111,7 @@ func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool
 		fmt.Printf("SendTicketDistribution ERR %v\n", err)
 		return err
 	}
+	defer stream.Close()
 	//fmt.Printf("%s SendTicketDistribution %d %x\n", p.String(), t.Attempt, t.Signature)
 	// TODO: proper treatment of Proxy
 	err = sendQuicBytes(stream, reqBytes)

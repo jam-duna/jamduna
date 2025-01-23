@@ -38,6 +38,10 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 	}
 	code := uint8(CE138_BundleShardRequest)
 	stream, err := p.openStream(code)
+	if err != nil {
+		return
+	}
+	defer stream.Close()
 	req := &JAMSNPShardRequest{
 		ErasureRoot: erasureRoot,
 		ShardIndex:  shardIndex,

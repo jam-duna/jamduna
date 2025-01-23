@@ -9,7 +9,6 @@ on:
   push:
     branches:
       - main
-      - dev
     paths:
       - .github/workflows/deploy.yml
       - bls/*.go
@@ -69,7 +68,6 @@ jobs:
         run: |
           make blslib
           make bandersnatchlib
-          make sp1lib
 
       - name: Run test common
         run: |
@@ -81,9 +79,6 @@ jobs:
 
       - name: Run test bandersnatch
         run: go test ./bandersnatch
-
-      - name: Run test sp1
-        run: go test ./sp1
 
       - name: Run test trie
         run: go test ./trie

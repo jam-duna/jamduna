@@ -17,10 +17,8 @@ func (n *Node) GetSelfTicketsIDs(currPhase uint32) ([]common.Hash, error) {
 		usedEntropy = n.statedb.GetSafrole().Entropy[2]
 	}
 	for _, ticketbucket := range n.selfTickets[usedEntropy] {
-		ID, err := ticketbucket.Ticket.TicketID()
-		if err != nil {
-			return nil, err
-		}
+		//pre-calculated ticket id
+		ID := ticketbucket.TicketID
 		ticketsId = append(ticketsId, ID)
 	}
 	return ticketsId, nil

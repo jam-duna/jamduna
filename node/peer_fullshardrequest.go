@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/quic-go/quic-go"
-	"io"
 )
 
 /*
@@ -76,6 +77,10 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, concatSegmentShards []byte, justification []byte, err error) {
 	code := uint8(CE137_FullShardRequest)
 	stream, err := p.openStream(code)
+	if err != nil {
+		return
+	}
+	defer stream.Close()
 	req := &JAMSNPShardRequest{
 		ErasureRoot: erasureRoot,
 		ShardIndex:  shardIndex,

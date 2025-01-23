@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/sp1"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -32,7 +31,7 @@ const (
 	YIELD             = 16
 	HISTORICAL_LOOKUP = 17
 	IMPORT            = 18
-	FETCH             = 30 // TODO: 18 (import => fetch)
+	FETCH             = 203 // TODO: 18 (import => fetch)
 	EXPORT            = 19
 	MACHINE           = 20
 	PEEK              = 21
@@ -292,18 +291,6 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	case LOG:
 		vm.hostLog()
-		return true, nil
-
-	case SP1VERIFY:
-		vm.hostSP1Groth16Verify()
-		return true, nil
-
-	case ED25519VERIFY:
-		vm.hostEd25519Verify()
-		return true, nil
-
-	case FETCH:
-		vm.hostFetch()
 		return true, nil
 
 	default:
@@ -649,25 +636,19 @@ func (vm *VM) getPayload() []byte {
 	return []byte{}
 }
 
-func (vm *VM) getNumberOfExtrinsics() uint64 {
-	return uint64(len(vm.Extrinsics))
+func (vm *VM) getNumberOfExtrinsics() []byte {
+	// TODO
+	numExtrinsics := uint32(1)
+	return common.Uint32ToBytes(numExtrinsics)
 }
 
-func (vm *VM) getNumberOfWorkItems() uint64 {
+func (vm *VM) getNumberOfWorkItems() []byte {
 	// TODO
-	numWorkItems := uint64(0)
-	return numWorkItems
+	numWorkItems := uint32(1)
+	return common.Uint32ToBytes(numWorkItems)
 }
 func (vm *VM) getWorkPackageByWorkItemExtrinsic(workitemindex uint32, extrinsicindex uint32) (data []byte, ok bool) {
 	return []byte{}, false
-}
-
-func (vm *VM) getExtrinsicByIndex(extrinsicindex uint32) (data []byte, ok bool) {
-	data = vm.Extrinsics[extrinsicindex]
-	if data == nil {
-		return []byte{}, false
-	}
-	return data, true
 }
 
 func (vm *VM) getWorkPackageByWorkItemExtrinsicAll(workitemindex uint32) (data []byte, ok bool) {
@@ -707,34 +688,36 @@ Reading is windowed, so both a length and offset is specified for the buffer. Th
 */
 func (vm *VM) hostFetch() {
 	o, _ := vm.ReadRegister(7)
-	omega_8, _ := vm.ReadRegister(8)
-	max_data_len := omega_8 % (1 << 32)
-	// offset := omega_8 / (1 << 32)
+	len_offset, _ := vm.ReadRegister(8)
+	l := len_offset & 0xFFFFFFFF
+	offset := (len_offset >> 32) & 0xFFFFFFFF
 	datatypeID, _ := vm.ReadRegister(9)
 	switch datatypeID {
 	case 0: // The (encoded) Work Package
 		data := vm.getWorkPackage()
-		odata := data[0:max_data_len]
+		odata := data[0:l]
 		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
 		break
 	case 1: // The authorizer output
 		data := vm.getAuthorizerOutput()
-		odata := data[0:max_data_len]
+		odata := data[0:l]
 		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
 
 		break
 	case 2: // Payload data; the work-item index is ω10
 		data := vm.getPayload()
-		odata := data[0:max_data_len]
+		odata := data[0:l]
 		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
 		break
 	case 3: // number of extrinsics
 		data := vm.getNumberOfExtrinsics()
-		vm.WriteRegister(7, data)
+		odata := data[0:l]
+		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
 		break
 	case 4: // number of work items
 		data := vm.getNumberOfWorkItems()
-		vm.WriteRegister(7, data)
+		odata := data[0:l]
+		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
 		break
 	case 16: // An extrinsic; the work-item index is ω10, the extrinsic index within the sequence specified by that work-item is ω11.
 		workitemindex, _ := vm.ReadRegister(10)
@@ -745,54 +728,25 @@ func (vm *VM) hostFetch() {
 			vm.HostResultCode = NONE
 			return
 		}
-
-		var odata []byte
-		var odata_length uint64
-		if len(data) > int(max_data_len) {
-			odata = data[:max_data_len]
-			odata_length = max_data_len
-		} else {
-			odata = data[:]
-			odata_length = uint64(len(data))
+		odata := data[offset:]
+		if len(odata) > int(l) {
+			odata = odata[0:l]
 		}
-
-		result := vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		if result != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
-			return
-		}
-
-		vm.WriteRegister(7, odata_length)
-		vm.HostResultCode = OK
+		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
 		break
 	case 17: // An extrinsic by index within the sequence specified by this work-item; the index is ω10
-		extrinsicindex, _ := vm.ReadRegister(10)
-		data, ok := vm.getExtrinsicByIndex(uint32(extrinsicindex))
+		workitemindex, _ := vm.ReadRegister(10)
+		data, ok := vm.getWorkPackageByWorkItemExtrinsicAll(uint32(workitemindex))
 		if !ok {
 			vm.WriteRegister(7, NONE)
 			vm.HostResultCode = NONE
 			return
 		}
-
-		var odata []byte
-		var odata_length uint64
-		if len(data) > int(max_data_len) {
-			odata = data[:max_data_len]
-			odata_length = max_data_len
-		} else {
-			odata = data[:]
-			odata_length = uint64(len(data))
+		odata := data[offset:]
+		if len(odata) > int(l) {
+			odata = odata[0:l]
 		}
-
-		result := vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		if result != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
-			return
-		}
-		vm.WriteRegister(7, odata_length)
-		vm.HostResultCode = OK
+		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
 		break
 	case 18: // An extrinsic by hash; the data returned hashes to the 32 bytes found at ω10
 		extrinsicHash := common.Hash{}
@@ -802,26 +756,7 @@ func (vm *VM) hostFetch() {
 			vm.HostResultCode = NONE
 			return
 		}
-
-		var odata []byte
-		var odata_length uint64
-		if len(data) > int(max_data_len) {
-			odata = data[:max_data_len]
-			odata_length = max_data_len
-		} else {
-			odata = data[:]
-			odata_length = uint64(len(data))
-		}
-
-		result := vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		if result != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
-			return
-		}
-
-		vm.WriteRegister(7, odata_length)
-		vm.HostResultCode = OK
+		vm.Ram.WriteRAMBytes(uint32(o), data[offset:])
 		break
 	case 32: // An imported segment; the work-item index is ω10, the import index within the sequence specified by that work-item is ω11.
 		workitemindex, _ := vm.ReadRegister(10)
@@ -832,26 +767,7 @@ func (vm *VM) hostFetch() {
 			vm.HostResultCode = NONE
 			return
 		}
-
-		var odata []byte
-		var odata_length uint64
-		if len(data) > int(max_data_len) {
-			odata = data[:max_data_len]
-			odata_length = max_data_len
-		} else {
-			odata = data[:]
-			odata_length = uint64(len(data))
-		}
-
-		result := vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		if result != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
-			return
-		}
-
-		vm.WriteRegister(7, odata_length)
-		vm.HostResultCode = OK
+		vm.Ram.WriteRAMBytes(uint32(o), data[offset:])
 		break
 	case 33: // An imported segment by index within the sequence specified by this work-item; the index is ω10
 		workitemindex, _ := vm.ReadRegister(10)
@@ -861,26 +777,7 @@ func (vm *VM) hostFetch() {
 			vm.HostResultCode = NONE
 			return
 		}
-
-		var odata []byte
-		var odata_length uint64
-		if len(data) > int(max_data_len) {
-			odata = data[:max_data_len]
-			odata_length = max_data_len
-		} else {
-			odata = data[:]
-			odata_length = uint64(len(data))
-		}
-
-		result := vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		if result != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
-			return
-		}
-
-		vm.WriteRegister(7, odata_length)
-		vm.HostResultCode = OK
+		vm.Ram.WriteRAMBytes(uint32(o), data[offset:])
 		break
 	}
 	vm.HostResultCode = OK
@@ -1103,7 +1000,6 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 	var err error
 	s := uint32(serviceindex)
 	if serviceindex == maxUint64 || uint32(serviceindex) == vm.X.S {
-		s = vm.X.S
 		return vm.X.U.D[s], OK
 	}
 	a, ok = vm.X.U.D[s]
@@ -1123,8 +1019,9 @@ func (vm *VM) hostRead() {
 	omega_7, _ := vm.ReadRegister(7)
 
 	var a *types.ServiceAccount
-	a = vm.ServiceAccount
-	if a == nil {
+	if omega_7 == uint64(vm.Service_index) || omega_7 == maxUint64 {
+		a = vm.ServiceAccount
+	} else {
 		a, _ = vm.getXUDS(omega_7)
 	}
 
@@ -1588,36 +1485,7 @@ func (vm *VM) hostZero() {
 	vm.HostResultCode = OK
 }
 
-func (vm *VM) hostSP1Groth16Verify() {
-	proof, _ := vm.ReadRegister(7)
-	proof_length, _ := vm.ReadRegister(8)
-	verifierkey, _ := vm.ReadRegister(9)
-	verifierkey_length, _ := vm.ReadRegister(10)
-	public, _ := vm.ReadRegister(11)
-	public_length, _ := vm.ReadRegister(12)
-
-	proofBytes, errCode := vm.Ram.ReadRAMBytes(uint32(proof), uint32(proof_length))
-	if errCode != OK {
-		vm.HostResultCode = OOB
-		return
-	}
-	verifierBytes, errCode := vm.Ram.ReadRAMBytes(uint32(verifierkey), uint32(verifierkey_length))
-	if errCode != OK {
-		vm.HostResultCode = OOB
-		return
-	}
-	pubBytes, errCode := vm.Ram.ReadRAMBytes(uint32(public), uint32(public_length))
-	if errCode != OK {
-		vm.HostResultCode = OOB
-		return
-	}
-
-	verified := sp1.VerifyGroth16(proofBytes, string(verifierBytes), pubBytes)
-	if verified {
-		vm.HostResultCode = OK
-	}
-	vm.HostResultCode = HUH
-}
+// func (vm *VM) hostSP1Groth16Verify()
 
 func getLogLevelName(level uint64) string {
 	switch level {
@@ -1698,57 +1566,4 @@ func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, re
 		fmt.Printf("Register %d: %d\n", i, regs[i])
 	}
 	return gas, regs, OK
-}
-
-func (vm *VM) hostEd25519Verify() {
-	// 0: public key
-	// 1: data
-	// 2: data length
-	// 3: signature
-	publicKeyAddr, _ := vm.ReadRegister(7)
-	dataAddr, _ := vm.ReadRegister(8)
-	dataLength, _ := vm.ReadRegister(9)
-	signatureAddr, _ := vm.ReadRegister(10)
-
-	pubKey, errCode := vm.Ram.ReadRAMBytes(uint32(publicKeyAddr), types.Ed25519PubkeySize)
-	if errCode != OK {
-		vm.HostResultCode = OOB
-		vm.WriteRegister(7, OOB)
-		return
-	}
-	data, errCode := vm.Ram.ReadRAMBytes(uint32(dataAddr), uint32(dataLength))
-	if errCode != OK {
-		vm.HostResultCode = OOB
-		vm.WriteRegister(7, OOB)
-		return
-	}
-	signature, errCode := vm.Ram.ReadRAMBytes(uint32(signatureAddr), types.Ed25519SignatureSize)
-	if errCode != OK {
-		vm.HostResultCode = OOB
-		vm.WriteRegister(7, OOB)
-		return
-	}
-
-	Ed25519Key, err := types.BytesToEd25519Key(pubKey)
-	if err != nil {
-		vm.HostResultCode = NONE
-		vm.WriteRegister(7, NONE)
-		return
-	}
-
-	Ed25519Signature, err := types.BytesToEd25519Signature(signature)
-	if err != nil {
-		vm.HostResultCode = NONE
-		vm.WriteRegister(7, NONE)
-		return
-	}
-
-	verified := types.Ed25519Verify(Ed25519Key, data, Ed25519Signature)
-	if verified {
-		vm.WriteRegister(7, OK)
-		vm.HostResultCode = OK
-	} else {
-		vm.WriteRegister(7, WHAT)
-		vm.HostResultCode = WHAT
-	}
 }

@@ -124,14 +124,17 @@ func (t *Ticket) BytesWithoutSig() []byte {
 
 type TicketBucket struct {
 	Ticket         Ticket
+	TicketID       common.Hash
 	IsIncluded     *bool
 	IsBroadcasted  *bool
 	GeneratedEpoch uint32
 }
 
 func (t *Ticket) TicketToBucket(epoch uint32) TicketBucket {
+	ticketID, _ := t.TicketID()
 	return TicketBucket{
 		Ticket:         *t,
+		TicketID:       ticketID,
 		IsIncluded:     new(bool),
 		IsBroadcasted:  new(bool),
 		GeneratedEpoch: epoch,

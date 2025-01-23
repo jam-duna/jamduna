@@ -32,6 +32,11 @@ type GrandpaRound struct {
 func (g *Grandpa) InitRoundState(round uint64, block_tree *types.BlockTree) {
 	g.RoundStateMutex.Lock()
 	defer g.RoundStateMutex.Unlock()
+	// also cleanup the old round state
+	if round-10 >= 0 {
+		delete(g.RoundState, round-10)
+	}
+
 	if _, exists := g.RoundState[round]; !exists {
 		g.RoundState[round] = &RoundState{
 			GrandpaState:   NewGrandpaState(g.GetCurrentScheduledAuthoritySet(round).Authorities, g.GetCurrentScheduledAuthoritySet(round).AuthoritiesSet, round),
@@ -47,7 +52,7 @@ func (g *Grandpa) GetRoundState(round uint64) (*RoundState, error) {
 	g.RoundStateMutex.RLock()
 	defer g.RoundStateMutex.RUnlock()
 	if _, exists := g.RoundState[round]; !exists {
-		return nil, fmt.Errorf("round state not found")
+		return nil, fmt.Errorf("round %d state not found, last round=%d", round, g.Last_Completed_Round)
 	}
 	return g.RoundState[round], nil
 }
@@ -196,8 +201,9 @@ func (g *Grandpa) BestFinalCandidate(round uint64) (common.Hash, *types.BT_Node,
 	} else {
 		// get the young blocks from the tree
 		round_state, err := g.GetRoundState(round)
+		//if can't get the round state, return the ghost block
 		if err != nil {
-			return common.Hash{}, nil, err
+			return ghost_hash, ghost, nil
 		}
 		round_state.UpdatePreCommitGraph(true)
 		precommit_graph := round_state.PreCommitGraph
@@ -242,7 +248,7 @@ func (g *Grandpa) GrandpaGhost(round uint64) (common.Hash, *types.BT_Node, error
 		latest_block := best_candidate_block
 		round_state, err := g.GetRoundState(round)
 		if err != nil {
-			return common.Hash{}, nil, err
+			return latest_block.Block.Header.Hash(), latest_block, nil
 		}
 		round_state.UpdatePreVoteGraph(false)
 		prevote_graph := round_state.PreVoteGraph

@@ -201,7 +201,9 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 				if err != nil {
 					g.ErrorChan <- fmt.Errorf("[v%d] error in BestFinalCandidate: %v", g.GetSelfVoterIndex(round), err)
 				}
-
+				if best_candidate == nil {
+					panic(fmt.Sprintf("best_candidate is nil, err: %v", err))
+				}
 				if g.block_tree.ChildOrBrother(last_finalized_block, best_candidate) {
 					// fmt.Printf("last finalized %v, best candidate %v\n", last_finalized_block.Block.Header.Hash(), best_candidate.Block.Header.Hash())
 					break outerLoop4

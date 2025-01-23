@@ -18,6 +18,7 @@ func (p *Peer) SendVoteMessage(req grandpa.VoteMessage) error {
 	if err != nil {
 		return err
 	}
+	defer stream.Close()
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
@@ -26,6 +27,7 @@ func (p *Peer) SendVoteMessage(req grandpa.VoteMessage) error {
 }
 
 func (n *Node) onVoteMessage(stream quic.Stream, msg []byte) error {
+	defer stream.Close()
 	vote := grandpa.VoteMessage{}
 	err := vote.FromBytes(msg)
 	if err != nil {
