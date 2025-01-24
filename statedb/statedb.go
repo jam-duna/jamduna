@@ -27,19 +27,18 @@ import (
 )
 
 type StateDB struct {
-	Finalized        bool
-	Id               uint16       `json:"id"`
-	Block            *types.Block `json:"block"`
-	ParentHeaderHash common.Hash  `json:"parentHeaderHash"`
-	HeaderHash       common.Hash  `json:"headerHash"`
-
-	StateRoot   common.Hash `json:"stateRoot"`
-	JamState    *JamState   `json:"Jamstate"`
-	sdb         *storage.StateDBStorage
-	trie        *trie.MerkleTree
-	tmp_safrole *SafroleState
-	VMs         map[uint32]*pvm.VM
-	vmMutex     sync.Mutex
+	Finalized               bool
+	Id                      uint16       `json:"id"`
+	Block                   *types.Block `json:"block"`
+	ParentHeaderHash        common.Hash  `json:"parentHeaderHash"`
+	HeaderHash              common.Hash  `json:"headerHash"`
+	StateRoot               common.Hash  `json:"stateRoot"`
+	JamState                *JamState    `json:"Jamstate"`
+	sdb                     *storage.StateDBStorage
+	trie                    *trie.MerkleTree
+	posteriorSafroleEntropy *SafroleState // used to manage entropy, validator, and winning ticket
+	VMs                     map[uint32]*pvm.VM
+	vmMutex                 sync.Mutex
 
 	// used in ApplyStateRecentHistory between statedbs
 	AccumulationRoot common.Hash
@@ -872,22 +871,15 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 	if !genesisReady {
 		return nil, nil, nil
 	}
-	currJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady()
+	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady()
 	if timeSlotReady {
 		// Time to propose block if authorized
-		sf := s.GetSafrole()
-
-		sf0, _, err := sf.SafroleTmpTransition(currJCE, common.Hash{})
-		s.tmp_safrole = &sf0
-		if err != nil {
-			fmt.Printf("Error validating ticket transition: %v\n", err)
-			return nil, nil, err
-		}
-		isAuthorizedBlockBuilder, ticketID, _ := s.tmp_safrole.IsAuthorizedBuilder(currJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
+		sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
+		isAuthorizedBlockBuilder, ticketID, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		if isAuthorizedBlockBuilder {
 			// propose block without state transition
 			start := time.Now()
-			proposedBlk, err := s.MakeBlock(credential, currJCE, ticketID, extrinsic_pool)
+			proposedBlk, err := s.MakeBlock(credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
 				fmt.Printf("Error making block: %v\n", err)
 				return nil, nil, err
@@ -898,7 +890,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 				fmt.Printf("Error applying state transition: %v\n", err)
 				return nil, nil, err
 			}
-			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(currJCE)
+			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
 			if sf0.GetEpochT() == 1 {
 				fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
 					currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
@@ -1148,8 +1140,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.Block = blk
 	s.ParentHeaderHash = blk.Header.ParentHeaderHash
 	s.HeaderHash = blk.Header.Hash()
-	sf_tmp, _, err := s.GetSafrole().SafroleTmpTransition(blk.TimeSlot(), common.Hash{})
-	s.tmp_safrole = &sf_tmp
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
 	if !isValid || headerErr != nil {
 		// panic("MK validation check!! Block header is not valid")
@@ -1349,7 +1339,8 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	validatorIdx = h.AuthorIndex
 
 	// ValidateTicketTransition
-	sf0 := s.tmp_safrole
+	sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
+
 	// author_idx is the K' so we use the sf_tmp
 	signing_validator := sf0.GetCurrValidator(int(validatorIdx))
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
@@ -1397,7 +1388,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 	header.ExtrinsicHash = newBlock.Extrinsic.Hash()
 
 	// Validate ticket transition
-	sf0 := s.tmp_safrole
+	sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
 
 	// Prepare a container to store all intermediate values for debugging / auditing
 	material := &SealBlockMaterial{
@@ -1709,7 +1700,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 func (s *StateDB) ValidateVRFSealInput(ticketID common.Hash, targetJCE uint32) (bool, error) {
 
 	// ValidateTicketTransition
-	sf0 := s.tmp_safrole
+	sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
 
 	if sf0.GetEpochT() == 0 {
 		return true, nil

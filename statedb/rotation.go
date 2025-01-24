@@ -80,8 +80,9 @@ func (s *StateDB) RotateGuarantors() {
 // this function are using the timeslot from block header and the entropy from safrole state(shift if needed). To Calculate the guarantor assignments
 func (s *StateDB) CaculateAssignments(slot uint32) (PreviousGuarantorAssignments []types.GuarantorAssignment, GuarantorAssignments []types.GuarantorAssignment) {
 
-	// uses (a) entropy[2] and timesslot to update s.GuarantorAssignments
-	sf_tmp, _, _ := s.GetSafrole().SafroleTmpTransition(slot, common.Hash{})
+	// uses (a) entropy[2] and timeslot to update s.GuarantorAssignments
+	//sf_tmp, _, _ := s.GetSafrole().SafroleTmpTransition(slot)
+	sf_tmp := s.GetPosteriorSafroleEntropy(slot) // Not sure ...
 	assignments := make([]types.GuarantorAssignment, 0)
 	entropy := sf_tmp.Entropy[2]
 	t := slot

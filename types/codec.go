@@ -508,3 +508,11 @@ func SaveObject(path string, obj interface{}) error {
 	}
 	return nil
 }
+
+func PrintObject(obj interface{}) string {
+	switch v := obj.(type) {
+	default:
+		jsonEncode, _ := json.MarshalIndent(v, "", "    ")
+		return string(jsonEncode)
+	}
+}

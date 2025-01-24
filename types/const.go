@@ -2,6 +2,8 @@ package types
 
 import (
 	"time"
+
+	"github.com/colorfulnotion/jam/chainspecs/configs"
 )
 
 const (
@@ -20,6 +22,17 @@ const (
 	EntropySize               = 4
 	IETFSignatureLen          = 96
 	VRFOutputLen              = 32
+)
+
+// loaded via tags
+const (
+	Network                   = configs.Network
+	TotalValidators           = configs.TotalValidators
+	TotalCores                = configs.TotalCores
+	TicketEntriesPerValidator = configs.TicketEntriesPerValidator
+	EpochLength               = configs.EpochLength
+	TicketSubmissionEndSlot   = configs.TicketSubmissionEndSlot
+	MaxTicketsPerExtrinsic    = configs.MaxTicketsPerExtrinsic
 )
 
 const (

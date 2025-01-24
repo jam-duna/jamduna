@@ -6,25 +6,9 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/fuzz"
 	"github.com/colorfulnotion/jam/types"
 )
-
-type Fuzzer struct {
-	sdbStorage *storage.StateDBStorage
-}
-
-func NewFuzzer(storageDir string) (*Fuzzer, error) {
-	sdbStorage, err := storage.NewStateDBStorage(storageDir)
-	if err != nil {
-		return nil, err
-	}
-	return &Fuzzer{sdbStorage: sdbStorage}, nil
-}
-
-func (fs *Fuzzer) runRPCServer() {
-	runRPCServer(fs.sdbStorage)
-}
 
 func validateConfig(config types.ConfigJamBlocks) {
 	if config.HTTP == "" && config.QUIC == "" {
@@ -95,14 +79,14 @@ func main() {
 		}
 	}
 
-	fuzzer, err := NewFuzzer(storageDir)
+	fuzzer, err := fuzz.NewFuzzer(storageDir)
 	if err != nil {
 		log.Fatalf("Failed to initialize fuzzer: %v", err)
 	}
 
 	validateConfig(config)
 
-	go fuzzer.runRPCServer()
+	go fuzzer.RunRPCServer()
 
 	// set up network with config
 	// node.ImportBlocks(&config)
