@@ -226,7 +226,7 @@ func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
 	authorizations_queue = decoded.([TotalCores][MaxAuthorizationQueueItems]common.Hash)
 	for i := 0; i < TotalCores; i++ {
 		if len(T[i]) == 0 {
-			var temp [6]common.Hash
+			var temp [MaxAuthorizationQueueItems]common.Hash
 			T[i] = temp //	T[i] = make([]common.Hash, MaxAuthorizationQueueItems)
 		}
 

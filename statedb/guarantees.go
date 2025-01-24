@@ -401,14 +401,22 @@ func (s *StateDB) areValidatorsAssignedToCore(guarantee types.Guarantee) error {
 		// REVIEW
 		if !find_and_correct {
 			if debugG {
-				fmt.Printf("%s\n", guarantee.String())
-				s.GuarantorsAssignmentsPrint()
-				if timeSlotPeriod != reportTime {
-					fmt.Printf("We are using prev core assignment\n")
-				} else {
-					fmt.Printf("We are using curr core assignment\n")
+				g_core := guarantee.Report.CoreIndex
+				fmt.Printf("core %d can't find the correct assignment for validator %d\n", g_core, g.ValidatorIndex)
+				fmt.Printf("CurrGuarantorAssignments:\n")
+				for i, assignment := range s.GuarantorAssignments {
+					if assignment.CoreIndex == g_core {
+						fmt.Printf("core %d => validator %d\n", g_core, i)
+					}
+				}
+				fmt.Printf("PreviousGuarantorAssignments:\n")
+				for i, assignment := range s.PreviousGuarantorAssignments {
+					if assignment.CoreIndex == g_core {
+						fmt.Printf("core %d => validator %d\n", g_core, i)
+					}
 				}
 			}
+
 			return jamerrors.ErrGWrongAssignment
 		}
 	}
@@ -882,7 +890,7 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 			}
 		}
 		if !exists {
-			fmt.Printf("checkPrereq hash %v not found in prereqSet: %v\n", hash, prereqSet)
+			// fmt.Printf("checkPrereq hash %v not found in prereqSet: %v\n", hash, prereqSet)
 			return jamerrors.ErrGDependencyMissing
 		}
 	}

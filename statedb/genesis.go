@@ -81,7 +81,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	j.PrivilegedServiceIndices.Kai_m = BootstrapServiceCode
 	for i := 0; i < types.TotalCores; i++ {
 		j.AuthorizationsPool[i] = make([]common.Hash, types.MaxAuthorizationPoolItems)
-		var temp [6]common.Hash
+		var temp [types.MaxAuthorizationQueueItems]common.Hash
 		j.AuthorizationQueue[i] = temp
 		//j.AuthorizationQueue[i] = make([]common.Hash, types.MaxAuthorizationQueueItems)
 	}

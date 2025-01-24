@@ -10,3 +10,13 @@ rand = "0.8"
 
 [lib]
 crate-type = ["staticlib"]
+
+[features]
+default = []       
+tiny = []         
+small = []         
+medium = []     
+large = []     
+2xlarge = []     
+3xlarge = []     
+full = []    

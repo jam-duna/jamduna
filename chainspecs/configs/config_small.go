@@ -1,16 +1,17 @@
 //go:build small
 // +build small
 
-// go:build small
-
 package configs
 
 const (
-	Network                   = "small"
-	TotalValidators           = 24
-	TotalCores                = 8
-	TicketEntriesPerValidator = 3
-	EpochLength               = 12
-	TicketSubmissionEndSlot   = 10
-	MaxTicketsPerExtrinsic    = 3
+	Network                     = "small"
+	TotalValidators             = 24 // V: The total number of validators.
+	TotalCores                  = 8  // C: The total number of cores.
+	TicketEntriesPerValidator   = 3  // N: The number of ticket entries per validator.
+	EpochLength                 = 12 // E: The length of an epoch in timeslots.
+	TicketSubmissionEndSlot     = 10 // Y: The number of slots into an epoch at which ticket-submission ends.
+	MaxTicketsPerExtrinsic      = 3  // K: The maximum number of tickets which may be submitted in a single extrinsic.
+	MaxAuthorizationQueueItems  = 6  // Q: The maximum number of items in the authorizations queue.
+	MaxAuthorizationPoolItems   = 2  // O: The maximum number of items in the authorizations pool.
+	ValidatorCoreRotationPeriod = 4  // R: The rotation period of validator-core assignments, in timeslots.
 )

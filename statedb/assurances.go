@@ -175,8 +175,15 @@ func (s *StateDB) ValidateAssurancesTransition(assurances []types.Assurance) err
 
 func (s *StateDB) ValidateAssurancesSig(assurances []types.Assurance) error {
 	// Verify each assurance's signature
+
 	validators := s.GetSafrole().CurrValidators
 	for _, a := range assurances {
+
+		// Shawn: I have to do one more check here to make sure the validator index won't be out of range
+		//@mkchungs
+		if a.ValidatorIndex >= uint16(len(validators)) {
+			return jamerrors.ErrABadValidatorIndex
+		}
 		if err := a.VerifySignature(validators[a.ValidatorIndex]); err != nil {
 			return err
 		}

@@ -1,17 +1,18 @@
 //go:build medium
 // +build medium
 
-// go:build medium
-
 package configs
 
 const (
 	// Medium testnet : Tickets only
-	Network                   = "medium"
-	TotalValidators           = 48 // V = 1023: The total number of validators.
-	TotalCores                = 16 // C = 341: The total number of cores.
-	TicketEntriesPerValidator = 6  // N = 2: The number of ticket entries per validator.
-	EpochLength               = 60 // E = 600: The length of an epoch in timeslots.
-	TicketSubmissionEndSlot   = 50 // Y = 500: The number of slots into an epoch at which ticket-submission ends.
-	MaxTicketsPerExtrinsic    = 3  // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
+	Network                     = "medium"
+	TotalValidators             = 48 // V: The total number of validators.
+	TotalCores                  = 16 // C: The total number of cores.
+	TicketEntriesPerValidator   = 6  // N: The number of ticket entries per validator.
+	EpochLength                 = 60 // E: The length of an epoch in timeslots.
+	TicketSubmissionEndSlot     = 50 // Y: The number of slots into an epoch at which ticket-submission ends.
+	MaxTicketsPerExtrinsic      = 3  // K: The maximum number of tickets which may be submitted in a single extrinsic.
+	MaxAuthorizationQueueItems  = 6  // Q: The maximum number of items in the authorizations queue.
+	MaxAuthorizationPoolItems   = 2  // O: The maximum number of items in the authorizations pool.
+	ValidatorCoreRotationPeriod = 4  // R: The rotation period of validator-core assignments, in timeslots.
 )

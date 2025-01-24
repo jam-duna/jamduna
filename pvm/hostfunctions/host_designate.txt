@@ -1,5 +1,0 @@
-pub @main:
-    a0 = 0x10000
-    ecalli 7
-    trap
-

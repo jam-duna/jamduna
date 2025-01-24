@@ -1,6 +1,0 @@
-pub @main:
-    a0 = 0x2a
-    a1 = 0x4000
-    ecalli 12
-    trap
-

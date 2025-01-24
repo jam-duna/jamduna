@@ -39,6 +39,16 @@ type Dispute struct {
 	Fault   []Fault   `json:"faults"`
 }
 
+func (d *Dispute) String() string {
+	// json pretty print
+	enc, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
+}
+
 type Verdict struct {
 	Target common.Hash                   `json:"target"`
 	Epoch  uint32                        `json:"age"`

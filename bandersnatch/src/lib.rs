@@ -3,7 +3,20 @@ use ark_ec_vrfs::{prelude::ark_serialize, suites::bandersnatch::edwards::RingCon
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use bandersnatch::{IetfProof, Input, Output, Public, RingProof, Secret, ScalarField};
 
+#[cfg(feature = "tiny")]
 const RING_SIZE: usize = 6;
+#[cfg(feature = "small")]
+const RING_SIZE: usize = 24;
+#[cfg(feature = "medium")]
+const RING_SIZE: usize = 48;
+#[cfg(feature = "large")]
+const RING_SIZE: usize = 96;
+#[cfg(feature = "2xlarge")]
+const RING_SIZE: usize = 384;
+#[cfg(feature = "3xlarge")]
+const RING_SIZE: usize = 576;
+#[cfg(feature = "full")]
+const RING_SIZE: usize = 1023;
 
 // This is the IETF `Prove` procedure output as described in section 2.2
 // of the Bandersnatch VRFs specification

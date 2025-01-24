@@ -1,19 +1,18 @@
 OUTPUT_DIR := bin
 BINARY := jam
 SRC := jam.go
-
+NETWORK  ?= tiny
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean
 
-jam:
-	@echo "Building JAM..."
+jam: ffi_force
+	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
-	go build -o $(OUTPUT_DIR)/$(BINARY) $(SRC)
+	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) $(SRC) 
 
 da:
 	@echo "Building JAM..."
 	mkdir -p $(OUTPUT_DIR)
-	go build -o $(OUTPUT_DIR)/da da.go
-
+	go build -o $(OUTPUT_DIR)/da da.go 
 jamweb:
 		@echo "Building JAM WEB..."
 		@cd jamweb && go build
@@ -38,9 +37,11 @@ blslib:
 
 # Target to build Bandersnatch FFI library
 bandersnatchlib:
-	@echo "Building Bandersnatch..."
-	@cd bandersnatch && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release
-	@echo "Built Bandersnatch library!"
+	@echo "Building Bandersnatch For Network $(NETWORK)..."
+	@cd bandersnatch && \
+	echo "Target: $$(rustc --version --verbose | grep 'host')" && \
+	cargo build --release --features "$(NETWORK)"
+	@echo "Built Bandersnatch library For Network $(NETWORK)!"
 
 cargo_clean:
 	@echo "Clean Up FFI libraries (BLS + Bandersnatch)!"
@@ -52,7 +53,7 @@ cargo_clean:
 ffi_force: cargo_clean ffi
 
 # Target to build both BLS and Bandersnatch FFI libraries
-ffi: blslib bandersnatchlib 
+ffi: bandersnatchlib blslib  
 	@echo "Built all FFI libraries (BLS + Bandersnatch)!"
 
 beauty:

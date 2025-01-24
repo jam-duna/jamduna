@@ -1,6 +1,6 @@
 # Set variables for testing
-TIMEOUT := 10m
-TAGS := tiny
+TIMEOUT ?= 10m
+TAGS ?= tiny
 
 fallback:
 	@echo "Running TestFallback with timeout $(TIMEOUT)..."

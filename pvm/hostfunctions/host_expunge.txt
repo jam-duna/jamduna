@@ -1,5 +1,0 @@
-pub @main:
-    a0 = 0x2b
-    ecalli 22
-    trap
-

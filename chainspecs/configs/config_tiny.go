@@ -1,17 +1,17 @@
 //go:build tiny
 // +build tiny
 
-// go:build tiny
-
 package configs
 
 const (
-	// Tiny testnet : Tickets only
-	Network                   = "tiny"
-	TotalValidators           = 6  // V = 1023: The total number of validators.
-	TotalCores                = 2  // C = 341: The total number of cores.
-	TicketEntriesPerValidator = 3  // N = 2: The number of ticket entries per validator.
-	EpochLength               = 12 // E = 600: The length of an epoch in timeslots.
-	TicketSubmissionEndSlot   = 10 // Y = 500: The number of slots into an epoch at which ticket-submission ends.
-	MaxTicketsPerExtrinsic    = 3  // K = 16: The maximum number of tickets which may be submitted in a single extrinsic.
+	Network                     = "tiny"
+	TotalValidators             = 6  // V: The total number of validators.
+	TotalCores                  = 2  // C: The total number of cores.
+	TicketEntriesPerValidator   = 3  // N: The number of ticket entries per validator.
+	EpochLength                 = 12 // E: The length of an epoch in timeslots.
+	TicketSubmissionEndSlot     = 10 // Y: The number of slots into an epoch at which ticket-submission ends.
+	MaxTicketsPerExtrinsic      = 3  // K: The maximum number of tickets which may be submitted in a single extrinsic.
+	MaxAuthorizationQueueItems  = 6  // Q: The maximum number of items in the authorizations queue.
+	MaxAuthorizationPoolItems   = 2  // O: The maximum number of items in the authorizations pool.
+	ValidatorCoreRotationPeriod = 4  // R: The rotation period of validator-core assignments, in timeslots.
 )

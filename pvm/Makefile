@@ -9,14 +9,14 @@ HTML_COVERAGE_PVM=coverage_pvm.html
 coverage_host_test: clean_host
 	@clear
 	@echo "Running TestRefine (with generation)..."
-	@go test -run TestGenerateRefineTestVectors -tags network
-	@go test -cover -coverprofile=coverage1.out -run TestRefine -tags network ./ 
+	@go test -run TestGenerateRefineTestVectors -tags tiny
+	@go test -cover -coverprofile=coverage1.out -run TestRefine -tags tiny ./ 
 	@echo "Running TestAccumulate (with generation)..."
-	@go test -run TestGenerateAccumulateTestVectors -tags network
-	@go test -cover -coverprofile=coverage2.out -run TestAccumulate -tags network ./ 
+	@go test -run TestGenerateAccumulateTestVectors -tags tiny
+	@go test -cover -coverprofile=coverage2.out -run TestAccumulate -tags tiny ./ 
 	@echo "Running TestGeneral (with generation)..."
-	@go test -run TestGenerateGeneralTestVectors -tags network
-	@go test -cover -coverprofile=coverage3.out -run TestGeneral -tags network ./ 
+	@go test -run TestGenerateGeneralTestVectors -tags tiny
+	@go test -cover -coverprofile=coverage3.out -run TestGeneral -tags tiny ./ 
 	@echo "Merging coverage reports..."
 	@cat $(COVERAGE_FILES) | grep -h -v "mode: " > coverage.out
 	@echo "mode: set" | cat - coverage.out > $(FINAL_COVERAGE)
@@ -31,7 +31,7 @@ coverage_host_test: clean_host
 coverage_pvm: clean_pvm
 	@clear
 	@echo "Running PVM tests with coverage..."
-	@go test -cover -coverprofile=coverage_pvm.out -run TestPVM -tags network ./ 
+	@go test -cover -coverprofile=coverage_pvm.out -run TestPVM -tags tiny ./ 
 	@echo "Generating HTML coverage report for PVM tests..."
 	@go tool cover -html=coverage_pvm.out -o $(HTML_COVERAGE_PVM)
 	@echo "Coverage report generated: $(HTML_COVERAGE_PVM)"
@@ -61,28 +61,28 @@ clean_pvm:
 refine:
 	@clear
 	@echo "Generating Refine test vectors..."
-	@go test -run TestGenerateRefineTestVectors -tags network
+	@go test -run TestGenerateRefineTestVectors -tags tiny
 	@echo "Running Refine host function testing..."
-	@go test -run TestRefine -tags network
+	@go test -run TestRefine -tags tiny
 
 # Run accumulate test
 accumulate:
 	@clear
 	@echo "Generating Accumulate test vectors..."
-	@go test -run TestGenerateAccumulateTestVectors -tags network
+	@go test -run TestGenerateAccumulateTestVectors -tags tiny
 	@echo "Running Accumulate host function testing..."
-	@go test -run TestAccumulate -tags network
+	@go test -run TestAccumulate -tags tiny
 
 # Run general test
 general:
 	@clear
 	@echo "Generating General test vectors..."
-	@go test -run TestGenerateGeneralTestVectors -tags network
+	@go test -run TestGenerateGeneralTestVectors -tags tiny
 	@echo "Running General host function testing..."
-	@go test -run TestGeneral -tags network
+	@go test -run TestGeneral -tags tiny
 
 # Run PVM test without coverage
 pvm:
 	@clear
 	@echo "Running PVM tests..."
-	@go test -run TestPVM -tags network
+	@go test -run TestPVM -tags tiny

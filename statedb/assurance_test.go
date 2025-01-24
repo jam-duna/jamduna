@@ -87,6 +87,36 @@ func VerifyAssurances(jsonFile string, exceptErr error) error {
 	return nil
 }
 
+func VerifyAssurancesFull(jsonFile string, exceptErr error) error {
+	jsonPath := filepath.Join("../jamtestvectors/assurances/full", jsonFile)
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+
+	}
+	var testCase AssuranceTestCase
+	err = json.Unmarshal(jsonData, &testCase)
+	if err != nil {
+		return fmt.Errorf("failed to parse JSON file: %v", err)
+	}
+	var db StateDB
+	state := NewJamState()
+	db.JamState = state
+	db.JamState.GetStateFromAssuranceState(testCase.PreState)
+	db.GetSafrole().Timeslot = uint32(testCase.Input.Slot)
+	var block types.Block
+	db.Block = &block
+	db.Block.Extrinsic.Assurances = testCase.Input.Assurances
+	db.Block.Header.ParentHeaderHash = testCase.Input.ParentHash
+	db.Block.Header.Slot = uint32(testCase.Input.Slot)
+	db.ParentHeaderHash = testCase.Input.ParentHash
+	err = db.ValidateAssurancesWithSig(db.Block.Extrinsic.Assurances)
+	if err != exceptErr {
+		return fmt.Errorf("expected error %v, got %v", exceptErr, err)
+	}
+	fmt.Printf("Assurances PASS: %s\n", jsonFile)
+	return nil
+}
+
 /*
 no_assurances-1🟢
 Progress with an empty assurances extrinsic.
@@ -113,6 +143,31 @@ Duplicate assurer.
 */
 
 func TestVerifyAssuranceTiny(t *testing.T) {
+	testCase := []struct {
+		jsonFile  string
+		exceptErr error
+	}{
+		{"no_assurances-1.json", nil},
+		{"some_assurances-1.json", nil},
+		{"no_assurances_with_stale_report-1.json", nil},
+		{"assurances_with_bad_signature-1.json", jamerrors.ErrABadSignature},
+		{"assurances_with_bad_validator_index-1.json", jamerrors.ErrABadValidatorIndex},
+		{"assurance_for_not_engaged_core-1.json", jamerrors.ErrABadCore},
+		{"assurance_with_bad_attestation_parent-1.json", jamerrors.ErrABadParentHash},
+		{"assurances_for_stale_report-1.json", jamerrors.ErrAStaleReport},
+		{"assurers_not_sorted_or_unique-1.json", jamerrors.ErrANotSortedAssurers},
+		{"assurers_not_sorted_or_unique-2.json", jamerrors.ErrADuplicateAssurer},
+	}
+	for _, tc := range testCase {
+		t.Run(tc.jsonFile, func(t *testing.T) {
+			err := VerifyAssurances(tc.jsonFile, tc.exceptErr)
+			if err != nil {
+				t.Fatalf("failed to validate assurance: %v", err)
+			}
+		})
+	}
+}
+func TestVerifyAssuranceFull(t *testing.T) {
 	testCase := []struct {
 		jsonFile  string
 		exceptErr error
