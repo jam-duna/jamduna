@@ -1,3 +1,6 @@
+//go:build testing
+// +build testing
+
 package statedb
 
 import (
@@ -173,39 +176,7 @@ func TestSafrole(t *testing.T) {
 }
 
 func safrole_test(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/safrole/tiny", jsonFile)
-	jsonData, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return fmt.Errorf("failed to read JSON file: %v", err)
-	}
-
-	var tc TestCase
-	err = json.Unmarshal(jsonData, &tc)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal JSON data: %v", err)
-	}
-	var db StateDB
-	state := NewJamState()
-	var block types.Block
-	db.Block = &block
-	db.JamState = state
-	db.JamState.get_state_from_testcase(tc)
-	db.Block.Header.Slot = tc.Input.Slot
-	// db.Block.Header.EntropySource = tc.Input.Entropy
-	db.Block.Extrinsic.Tickets = tc.Input.Extrinsics
-	var sig [96]byte
-	copy(sig[0:32], tc.Input.Entropy.Bytes())
-	db.Block.Header.EntropySource = types.BandersnatchVrfSignature(sig)
-	// _, err = db.GetSafrole().ApplyStateTransitionTickets(db.Block.Tickets(), db.Block.Header.Slot, db.Block.Header)
-	err = db.GetSafrole().ValidateSaforle(db.Block.Extrinsic.Tickets, db.Block.Header.Slot, db.Block.Header)
-	if err != exceptErr {
-		return fmt.Errorf("expected error %v, got %v", exceptErr, err)
-	}
-	return nil
-}
-
-func safrole_test_full(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/safrole/full", jsonFile)
+	jsonPath := filepath.Join("../jamtestvectors/safrole/", jsonFile)
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file: %v", err)
@@ -260,7 +231,7 @@ func (j *JamState) get_state_from_testcase(tc TestCase) {
 	j.DisputesState.Psi_o = tc.PreState.PostOffenders
 }
 
-func TestSafroleVerifyTiny(t *testing.T) {
+func TestSafroleVerify(t *testing.T) {
 
 	/*
 		enact_epoch_change_with_no_tickets-1 🟢
@@ -351,77 +322,43 @@ func TestSafroleVerifyTiny(t *testing.T) {
 	publish_tickets_no_mark-7 🔴	0.5.0 6.30	safrole	ErrTEpochLotteryOver
 	enact_epoch_change_with_no_tickets-2 🔴	0.5.0 6.1	safrole	ErrTTimeslotNotMonotonic
 	*/
+	network_args := *network
+	fmt.Printf("Test Case For Safrole, Network=%s\n", network_args)
 	testcases := []struct {
 		jsonFile  string
 		exceptErr error
 	}{
-		{"enact-epoch-change-with-no-tickets-1.json", nil},
-		{"enact-epoch-change-with-no-tickets-2.json", jamerrors.ErrTTimeslotNotMonotonic},
-		{"enact-epoch-change-with-no-tickets-3.json", nil},
-		{"enact-epoch-change-with-no-tickets-4.json", nil},
-		{"enact-epoch-change-with-padding-1.json", nil},
-		{"publish-tickets-no-mark-1.json", jamerrors.ErrTBadTicketAttemptNumber},
-		{"publish-tickets-no-mark-2.json", nil},
-		{"publish-tickets-no-mark-3.json", jamerrors.ErrTTicketAlreadyInState},
-		{"publish-tickets-no-mark-4.json", jamerrors.ErrTTicketsBadOrder},
-		{"publish-tickets-no-mark-5.json", jamerrors.ErrTBadRingProof},
-		{"publish-tickets-no-mark-6.json", nil},
-		{"publish-tickets-no-mark-7.json", jamerrors.ErrTEpochLotteryOver},
-		{"publish-tickets-no-mark-8.json", nil},
-		{"publish-tickets-no-mark-9.json", nil},
-		{"publish-tickets-with-mark-1.json", nil},
-		{"publish-tickets-with-mark-2.json", nil},
-		{"publish-tickets-with-mark-3.json", nil},
-		{"publish-tickets-with-mark-4.json", nil},
-		{"publish-tickets-with-mark-5.json", nil},
-		{"skip-epoch-tail-1.json", nil},
-		{"skip-epochs-1.json", nil},
+		{fmt.Sprintf("%s/enact-epoch-change-with-no-tickets-1.json", network_args), nil},
+		{fmt.Sprintf("%s/enact-epoch-change-with-no-tickets-2.json", network_args), jamerrors.ErrTTimeslotNotMonotonic},
+		{fmt.Sprintf("%s/enact-epoch-change-with-no-tickets-3.json", network_args), nil},
+		{fmt.Sprintf("%s/enact-epoch-change-with-no-tickets-4.json", network_args), nil},
+		{fmt.Sprintf("%s/enact-epoch-change-with-padding-1.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-1.json", network_args), jamerrors.ErrTBadTicketAttemptNumber},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-2.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-3.json", network_args), jamerrors.ErrTTicketAlreadyInState},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-4.json", network_args), jamerrors.ErrTTicketsBadOrder},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-5.json", network_args), jamerrors.ErrTBadRingProof},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-6.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-7.json", network_args), jamerrors.ErrTEpochLotteryOver},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-8.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-no-mark-9.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-with-mark-1.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-with-mark-2.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-with-mark-3.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-with-mark-4.json", network_args), nil},
+		{fmt.Sprintf("%s/publish-tickets-with-mark-5.json", network_args), nil},
+		{fmt.Sprintf("%s/skip-epoch-tail-1.json", network_args), nil},
+		{fmt.Sprintf("%s/skip-epochs-1.json", network_args), nil},
 	}
 	for _, tc := range testcases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
 			err := safrole_test(tc.jsonFile, tc.exceptErr)
 			if err != nil {
 				t.Fatalf("failed: %v", err)
+			} else {
+				fmt.Printf("\033[32mSafrole Passed: %s\033[0m\n", tc.jsonFile)
 			}
-			fmt.Printf("Safrole PASS: %s\n", tc.jsonFile)
-		})
-	}
-}
 
-func TestSafroleVerifyFull(t *testing.T) {
-	testcases := []struct {
-		jsonFile  string
-		exceptErr error
-	}{
-		{"enact-epoch-change-with-no-tickets-1.json", nil},
-		{"enact-epoch-change-with-no-tickets-2.json", jamerrors.ErrTTimeslotNotMonotonic},
-		{"enact-epoch-change-with-no-tickets-3.json", nil},
-		{"enact-epoch-change-with-no-tickets-4.json", nil},
-		{"enact-epoch-change-with-padding-1.json", nil},
-		{"publish-tickets-no-mark-1.json", jamerrors.ErrTBadTicketAttemptNumber},
-		{"publish-tickets-no-mark-2.json", nil},
-		{"publish-tickets-no-mark-3.json", jamerrors.ErrTTicketAlreadyInState},
-		{"publish-tickets-no-mark-4.json", jamerrors.ErrTTicketsBadOrder},
-		{"publish-tickets-no-mark-5.json", jamerrors.ErrTBadRingProof},
-		{"publish-tickets-no-mark-6.json", nil},
-		{"publish-tickets-no-mark-7.json", jamerrors.ErrTEpochLotteryOver},
-		{"publish-tickets-no-mark-8.json", nil},
-		{"publish-tickets-no-mark-9.json", nil},
-		{"publish-tickets-with-mark-1.json", nil},
-		{"publish-tickets-with-mark-2.json", nil},
-		{"publish-tickets-with-mark-3.json", nil},
-		{"publish-tickets-with-mark-4.json", nil},
-		{"publish-tickets-with-mark-5.json", nil},
-		{"skip-epoch-tail-1.json", nil},
-		{"skip-epochs-1.json", nil},
-	}
-	for _, tc := range testcases {
-		t.Run(tc.jsonFile, func(t *testing.T) {
-			err := safrole_test_full(tc.jsonFile, tc.exceptErr)
-			if err != nil {
-				t.Fatalf("failed: %v", err)
-			}
-			fmt.Printf("Safrole PASS: %s\n", tc.jsonFile)
 		})
 	}
 }

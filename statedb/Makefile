@@ -4,7 +4,7 @@ TIMEOUT      ?= 5m
 # The list of networks you want to test by default
 NETWORKS     ?= tiny full
 NETWORK	 	 ?= tiny
-
+TESTING ?=testing
 # Bandersnatch and statedb directories (adjust if needed)
 BANDERSNATCH_DIR := ../bandersnatch
 STATEDB_DIR      := ../statedb
@@ -28,38 +28,44 @@ safrole:
 	@cd $(BANDERSNATCH_DIR) && cargo build --quiet --release --features "$(NETWORK)"
 
 	@echo "Now running Go tests in statedb with '-tags $(NETWORK)'"
-	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "TestSafroleVerify$(shell echo $(NETWORK) | awk '{print toupper(substr($$0,1,1)) substr($$0,2)}')" -tags $(NETWORK)
+	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "TestSafroleVerify" -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 report:
 	@echo "Running 'TestReportVerify' (plus valid report) with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && \
 		echo "###$(NETWORK) Case###" && \
-		go test -timeout $(TIMEOUT) -v -run "TestReportVerify$(shell echo $(NETWORK) | awk '{print toupper(substr($$0,1,1)) substr($$0,2)}')" -tags $(NETWORK) && \
-		go test -timeout $(TIMEOUT) -v -run "TestReportValidReportCase$(shell echo $(NETWORK) | awk '{print toupper(substr($$0,1,1)) substr($$0,2)}')" -tags $(NETWORK)
+		go test -timeout $(TIMEOUT) -v -run TestReportVerify  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK) && \
+		go test -timeout $(TIMEOUT) -v -run TestReportValidReportCase  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 valid_report:
 	@echo "Running 'TestReportValidReportCase' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && \
-		go test -timeout $(TIMEOUT) -v -run "^TestReportValidReportCase$(shell echo $(NETWORK) | awk '{print toupper(substr($$0,1,1)) substr($$0,2)}')$$" -tags $(NETWORK)
+		go test -timeout $(TIMEOUT) -v -run TestReportValidReportCase  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 assurance:
 	@echo "Running 'TestVerifyAssurance' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && \
 		echo "###$(NETWORK) Case###" && \
-		go test -timeout $(TIMEOUT) -v -run "TestVerifyAssurance$(shell echo $(NETWORK) | awk '{print toupper(substr($$0,1,1)) substr($$0,2)}')" -tags $(NETWORK)
+		go test -timeout $(TIMEOUT) -v -run TestVerifyAssurance -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 dispute:
 	@echo "Running 'TestVerifyDisputes' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && \
 		echo "###$(NETWORK) Case###" && \
-		go test -timeout $(TIMEOUT) -v -run "TestVerifyDisputes$(shell echo $(NETWORK) | awk '{print toupper(substr($$0,1,1)) substr($$0,2)}')" -tags $(NETWORK)
+		go test -timeout $(TIMEOUT) -v -run TestVerifyDisputes  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+
+auth:
+	@echo "Running 'TestVerifyAuth' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && \
+		echo "###$(NETWORK) Case###" && \
+		go test -timeout $(TIMEOUT) -v -run TestVerifyAuth  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 stats:
 	@echo "Running 'TestCodecStatistics' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "^TestCodecStatistics$$" -tags $(NETWORK)
 
 
-test-network: safrole report valid_report assurance dispute stats
+test-network: safrole report valid_report assurance dispute stats auth
 	@echo "Finished all tests for network='$(NETWORK)'"
 
 tiny:
@@ -75,4 +81,8 @@ test:
 		echo "TESTING NETWORK: $$net"; \
 		$(MAKE) test-network NETWORK=$$net; \
 	done
-	@echo "Done testing all networks."
+#building for the default network bandersnatch again
+	@echo "Building bandersnatch with cargo --features '$(NETWORK)'"
+	@cd $(BANDERSNATCH_DIR) && cargo build --quiet --release --features "tiny"
+	@cd $(STATEDB_DIR)
+	@echo "Done testing all networks. bandersnatchlib is built for $(NETWORK) network"

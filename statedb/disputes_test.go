@@ -1,3 +1,6 @@
+//go:build testing
+// +build testing
+
 package statedb
 
 import (
@@ -83,7 +86,7 @@ func TestDisputesJsonParse(t *testing.T) {
 }
 
 func VerifyDisputes(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/disputes/tiny", jsonFile)
+	jsonPath := filepath.Join("../jamtestvectors/disputes/", jsonFile)
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file: %v", err)
@@ -105,35 +108,6 @@ func VerifyDisputes(jsonFile string, exceptErr error) error {
 	if err != exceptErr {
 		return fmt.Errorf("got %v", err)
 	}
-	fmt.Printf("Disputes PASS: %s\n", jsonFile)
-	return nil
-
-}
-
-func VerifyDisputesFull(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/disputes/full", jsonFile)
-	jsonData, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return fmt.Errorf("failed to read JSON file: %v", err)
-	}
-	var testCase DisputeData
-	err = json.Unmarshal(jsonData, &testCase)
-	if err != nil {
-		return fmt.Errorf("failed to parse JSON file: %v", err)
-	}
-	var db StateDB
-	state := NewJamState()
-	state.GetStateFromDJamState(testCase.PreState)
-	db.JamState = state
-	var block types.Block
-	db.Block = &block
-	db.Block.Extrinsic.Disputes = testCase.Input.Disputes
-	disputes := db.Block.Extrinsic.Disputes
-	_, err = db.JamState.IsValidateDispute(&disputes)
-	if err != exceptErr {
-		return fmt.Errorf("got %v", err)
-	}
-	fmt.Printf("Disputes PASS: %s\n", jsonFile)
 	return nil
 
 }
@@ -219,84 +193,47 @@ progress_with_verdict_signatures_from_previous_set-2 🔴
 Age too old for verdicts judgements
 */
 
-func TestVerifyDisputesTiny(t *testing.T) {
+func TestVerifyDisputes(t *testing.T) {
+	network_args := *network
+	fmt.Printf("Test Case For Disputes, Network: %s\n", network_args)
 	testCases := []struct {
 		jsonFile    string
 		expectedErr error
 	}{
-		{"progress_with_no_verdicts-1.json", nil},
-		{"progress_with_verdicts-1.json", jamerrors.ErrDNotSortedWorkReports},
-		{"progress_with_verdicts-2.json", jamerrors.ErrDNotUniqueVotes},
-		{"progress_with_verdicts-3.json", jamerrors.ErrDNotSortedValidVerdicts},
-		{"progress_with_verdicts-4.json", nil},
-		{"progress_with_verdicts-5.json", jamerrors.ErrDNotHomogenousJudgements},
-		{"progress_with_verdicts-6.json", nil},
-		{"progress_with_culprits-1.json", jamerrors.ErrDMissingCulpritsBadVerdict},
-		{"progress_with_culprits-2.json", jamerrors.ErrDSingleCulpritBadVerdict},
-		{"progress_with_culprits-3.json", jamerrors.ErrDTwoCulpritsBadVerdictNotSorted},
-		{"progress_with_culprits-4.json", nil},
-		{"progress_with_culprits-5.json", jamerrors.ErrDAlreadyRecordedVerdict},
-		{"progress_with_culprits-6.json", jamerrors.ErrDCulpritAlreadyInOffenders},
-		{"progress_with_culprits-7.json", jamerrors.ErrDOffenderNotPresentVerdict},
-		{"progress_with_faults-1.json", jamerrors.ErrDMissingFaultsGoodVerdict},
-		{"progress_with_faults-2.json", nil},
-		{"progress_with_faults-3.json", jamerrors.ErrDTwoFaultOffendersGoodVerdict},
-		{"progress_with_faults-4.json", nil},
-		{"progress_with_faults-5.json", jamerrors.ErrDAlreadyRecordedVerdictWithFaults},
-		{"progress_with_faults-6.json", jamerrors.ErrDFaultOffenderInOffendersList},
-		{"progress_with_faults-7.json", jamerrors.ErrDAuditorMarkedOffender},
-		{"progress_invalidates_avail_assignments-1.json", nil},
-		{"progress_with_bad_signatures-1.json", jamerrors.ErrDBadSignatureInVerdict},
-		{"progress_with_bad_signatures-2.json", jamerrors.ErrDBadSignatureInCulprits},
-		{"progress_with_verdict_signatures_from_previous_set-1.json", nil},
-		{"progress_with_verdict_signatures_from_previous_set-2.json", jamerrors.ErrDAgeTooOldInVerdicts},
+		{fmt.Sprintf("%s/progress_with_no_verdicts-1.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_verdicts-1.json", network_args), jamerrors.ErrDNotSortedWorkReports},
+		{fmt.Sprintf("%s/progress_with_verdicts-2.json", network_args), jamerrors.ErrDNotUniqueVotes},
+		{fmt.Sprintf("%s/progress_with_verdicts-3.json", network_args), jamerrors.ErrDNotSortedValidVerdicts},
+		{fmt.Sprintf("%s/progress_with_verdicts-4.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_verdicts-5.json", network_args), jamerrors.ErrDNotHomogenousJudgements},
+		{fmt.Sprintf("%s/progress_with_verdicts-6.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_culprits-1.json", network_args), jamerrors.ErrDMissingCulpritsBadVerdict},
+		{fmt.Sprintf("%s/progress_with_culprits-2.json", network_args), jamerrors.ErrDSingleCulpritBadVerdict},
+		{fmt.Sprintf("%s/progress_with_culprits-3.json", network_args), jamerrors.ErrDTwoCulpritsBadVerdictNotSorted},
+		{fmt.Sprintf("%s/progress_with_culprits-4.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_culprits-5.json", network_args), jamerrors.ErrDAlreadyRecordedVerdict},
+		{fmt.Sprintf("%s/progress_with_culprits-6.json", network_args), jamerrors.ErrDCulpritAlreadyInOffenders},
+		{fmt.Sprintf("%s/progress_with_culprits-7.json", network_args), jamerrors.ErrDOffenderNotPresentVerdict},
+		{fmt.Sprintf("%s/progress_with_faults-1.json", network_args), jamerrors.ErrDMissingFaultsGoodVerdict},
+		{fmt.Sprintf("%s/progress_with_faults-2.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_faults-3.json", network_args), jamerrors.ErrDTwoFaultOffendersGoodVerdict},
+		{fmt.Sprintf("%s/progress_with_faults-4.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_faults-5.json", network_args), jamerrors.ErrDAlreadyRecordedVerdictWithFaults},
+		{fmt.Sprintf("%s/progress_with_faults-6.json", network_args), jamerrors.ErrDFaultOffenderInOffendersList},
+		{fmt.Sprintf("%s/progress_with_faults-7.json", network_args), jamerrors.ErrDAuditorMarkedOffender},
+		{fmt.Sprintf("%s/progress_invalidates_avail_assignments-1.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_bad_signatures-1.json", network_args), jamerrors.ErrDBadSignatureInVerdict},
+		{fmt.Sprintf("%s/progress_with_bad_signatures-2.json", network_args), jamerrors.ErrDBadSignatureInCulprits},
+		{fmt.Sprintf("%s/progress_with_verdict_signatures_from_previous_set-1.json", network_args), nil},
+		{fmt.Sprintf("%s/progress_with_verdict_signatures_from_previous_set-2.json", network_args), jamerrors.ErrDAgeTooOldInVerdicts},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
 			err := VerifyDisputes(tc.jsonFile, tc.expectedErr)
 			if err != nil {
 				t.Fatalf("Failed in File %s\nexcept error %v\nfailed to verify disputes: %v", tc.jsonFile, tc.expectedErr, err)
-			}
-		})
-	}
-}
-func TestVerifyDisputesFull(t *testing.T) {
-	testCases := []struct {
-		jsonFile    string
-		expectedErr error
-	}{
-		{"progress_with_no_verdicts-1.json", nil},
-		{"progress_with_verdicts-1.json", jamerrors.ErrDNotSortedWorkReports},
-		{"progress_with_verdicts-2.json", jamerrors.ErrDNotUniqueVotes},
-		{"progress_with_verdicts-3.json", jamerrors.ErrDNotSortedValidVerdicts},
-		{"progress_with_verdicts-4.json", nil},
-		{"progress_with_verdicts-5.json", jamerrors.ErrDNotHomogenousJudgements},
-		{"progress_with_verdicts-6.json", nil},
-		{"progress_with_culprits-1.json", jamerrors.ErrDMissingCulpritsBadVerdict},
-		{"progress_with_culprits-2.json", jamerrors.ErrDSingleCulpritBadVerdict},
-		{"progress_with_culprits-3.json", jamerrors.ErrDTwoCulpritsBadVerdictNotSorted},
-		{"progress_with_culprits-4.json", nil},
-		{"progress_with_culprits-5.json", jamerrors.ErrDAlreadyRecordedVerdict},
-		{"progress_with_culprits-6.json", jamerrors.ErrDCulpritAlreadyInOffenders},
-		{"progress_with_culprits-7.json", jamerrors.ErrDOffenderNotPresentVerdict},
-		{"progress_with_faults-1.json", jamerrors.ErrDMissingFaultsGoodVerdict},
-		{"progress_with_faults-2.json", nil},
-		{"progress_with_faults-3.json", jamerrors.ErrDTwoFaultOffendersGoodVerdict},
-		{"progress_with_faults-4.json", nil},
-		{"progress_with_faults-5.json", jamerrors.ErrDAlreadyRecordedVerdictWithFaults},
-		{"progress_with_faults-6.json", jamerrors.ErrDFaultOffenderInOffendersList},
-		{"progress_with_faults-7.json", jamerrors.ErrDAuditorMarkedOffender},
-		{"progress_invalidates_avail_assignments-1.json", nil},
-		{"progress_with_bad_signatures-1.json", jamerrors.ErrDBadSignatureInVerdict},
-		{"progress_with_bad_signatures-2.json", jamerrors.ErrDBadSignatureInCulprits},
-		{"progress_with_verdict_signatures_from_previous_set-1.json", nil},
-		{"progress_with_verdict_signatures_from_previous_set-2.json", jamerrors.ErrDAgeTooOldInVerdicts},
-	}
-	for _, tc := range testCases {
-		t.Run(tc.jsonFile, func(t *testing.T) {
-			err := VerifyDisputesFull(tc.jsonFile, tc.expectedErr)
-			if err != nil {
-				t.Fatalf("Failed in File %s\nexcept error %v\nfailed to verify disputes: %v", tc.jsonFile, tc.expectedErr, err)
+			} else {
+				fmt.Printf("\033[32mDisputs Passed: %s\033[0m\n", tc.jsonFile)
 			}
 		})
 	}

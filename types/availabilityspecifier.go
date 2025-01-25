@@ -18,7 +18,7 @@ type AvailabilitySpecifier struct {
 	BundleLength          uint32      `json:"length"`
 	ErasureRoot           common.Hash `json:"erasure_root"`
 	ExportedSegmentRoot   common.Hash `json:"exports_root"`
-	ExportedSegmentLength uint32      `json:"exports_count"`
+	ExportedSegmentLength uint16      `json:"exports_count"` //shawn: in davxy's vector it's 16
 }
 
 // sharing (justified) DA chunks:  Vec<Hash> ++ Blob ++ Vec<Hash> ++ Vec<SegmentChunk> ++ Vec<Hash>.

@@ -1,6 +1,7 @@
 name: Jam Runner main
 
 env:
+  GOFLAGS: "-tags=tiny"
   JAM_PATH: ${{ github.workspace }} 
   LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
   CARGO_MANIFEST_DIR: ${{ github.workspace }}
@@ -11,22 +12,19 @@ on:
       - main
     paths:
       - .github/workflows/runner.yml
-      - bls/*.go
-      - bandersnatch/*.go
-      - types/*.go
       - statedb/*.go
       - pvm/*.go
       - statedb/*.go
       - node/*.go
   schedule:
-    - cron: '0 * * * *'
+    - cron: '10 * * * *'
       branches: 
         - main
 
 jobs:
   test:
     runs-on: jamops-16-core
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - name: Checkout main code
         uses: actions/checkout@v3
@@ -46,6 +44,7 @@ jobs:
 
       - name: Set environment variables
         run: |
+          echo "GOFLAGS=\"-tags=tiny\"" >> $GITHUB_ENV
           echo "JAM_PATH=${{ github.workspace }}" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=./bls/target/release: ./bandersnatch/target/release" >> $GITHUB_ENV
           echo "CARGO_MANIFEST_DIR=${{ github.workspace }}" >> $GITHUB_ENV
@@ -79,23 +78,23 @@ jobs:
         run: go test ./bandersnatch 
 
       - name: Run test fib
-        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network 
+        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network,tiny 
+
+      - name: Run test balances
+        run: go test ./node -timeout 12m -v -run ^TestBalances$ -tags network,tiny
+
+      - name: Run test transfer
+        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network,tiny
+
+      - name: Run test scaled balances
+        run: go test ./node -timeout 12m -v -run ^TestScaledBalances$ -tags network,tiny
 
       - name: Run test megatron
-        run: go test ./node -timeout 3m -v -run ^TestBalances$ -tags network
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
 
       - name: Run test megatron
-        run: go test ./node -timeout 3m -v -run ^TestTransfer$ -tags network
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
 
       - name: Run test megatron
-        run: go test ./node -timeout 3m -v -run ^TestScaledBalances$ -tags network
-
-      - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network
-
-      - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network
-
-      - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
 

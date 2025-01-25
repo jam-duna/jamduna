@@ -3,6 +3,7 @@ package statedb
 import (
 	"encoding/binary"
 	"encoding/json"
+	"flag"
 	"fmt"
 
 	//"io/ioutil"
@@ -16,6 +17,8 @@ import (
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
+
+var network = flag.String("network", "", "using for change the network-spec")
 
 // 6.4.1 Startup parameters
 

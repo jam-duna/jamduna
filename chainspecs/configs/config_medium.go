@@ -12,7 +12,7 @@ const (
 	EpochLength                 = 60 // E: The length of an epoch in timeslots.
 	TicketSubmissionEndSlot     = 50 // Y: The number of slots into an epoch at which ticket-submission ends.
 	MaxTicketsPerExtrinsic      = 3  // K: The maximum number of tickets which may be submitted in a single extrinsic.
-	MaxAuthorizationQueueItems  = 6  // Q: The maximum number of items in the authorizations queue.
-	MaxAuthorizationPoolItems   = 2  // O: The maximum number of items in the authorizations pool.
+	MaxAuthorizationQueueItems  = 80 // Q: The maximum number of items in the authorizations queue.
+	MaxAuthorizationPoolItems   = 8  // O: The maximum number of items in the authorizations pool.
 	ValidatorCoreRotationPeriod = 4  // R: The rotation period of validator-core assignments, in timeslots.
 )

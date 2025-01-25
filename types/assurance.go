@@ -88,7 +88,8 @@ func (A *Assurance) GetBitFieldBit(index uint16) bool {
 }
 
 func (a *Assurance) UnsignedBytes() []byte {
-	signtext := common.ComputeHash(append(a.Anchor.Bytes(), a.Bitfield[0])) // this bitfield is a byte, TODO: check if this is correct
+	sign_text_bytes := append(a.Anchor.Bytes(), a.Bitfield[:]...)
+	signtext := common.ComputeHash(sign_text_bytes)
 	return signtext
 }
 

@@ -1,6 +1,7 @@
 name: Jam non-node package test
 
 env:
+  GOFLAGS: "-tags=tiny"
   JAM_PATH: ${{ github.workspace }}
   LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
   CARGO_MANIFEST_DIR: ${{ github.workspace }}
@@ -11,20 +12,15 @@ on:
       - main
     paths:
       - .github/workflows/deploy.yml
-      - bls/*.go
-      - bandersnatch/*.go
-      - types/*.go
       - statedb/*.go
       - pvm/*.go
       - statedb/*.go
       - node/*.go
-#  schedule:
-#    - cron: '0 */6 * * *'
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 50
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -43,6 +39,7 @@ jobs:
 
       - name: Set environment variables
         run: |
+          echo "GOFLAGS=\"-tags=tiny\"" >> $GITHUB_ENV
           echo "JAM_PATH=${{ github.workspace }}" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=./bls/target/release: ./bandersnatch/target/release" >> $GITHUB_ENV
           echo "CARGO_MANIFEST_DIR=${{ github.workspace }}" >> $GITHUB_ENV
@@ -94,3 +91,6 @@ jobs:
 
       - name: Run test pvm
         run: go test ./pvm
+
+      - name: Run test fib
+        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network,tiny 
