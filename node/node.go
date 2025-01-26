@@ -103,7 +103,11 @@ type Node struct {
 	// this is for audit
 	// announcement [headerHash -> [wr_hash]]
 	auditingMap     sync.Map
+	auditingMapMutex sync.Mutex
+	
 	announcementMap sync.Map // headerHash -> stateDB
+	announcementMapMutex sync.Mutex
+	
 	judgementMap    sync.Map // headerHash -> JudgeBucket
 	//judgementBucket types.JudgeBucket
 	judgementWRMap      map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this

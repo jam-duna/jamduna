@@ -161,8 +161,8 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		case <-ctx.Done():
 			if ctx.Err() == context.DeadlineExceeded {
 				fmt.Printf("broadcastWorkpackage timed out | wp=%v, core=%v\n", newReq.WorkPackage.Hash(), newReq.CoreIndex)
-			} else {
-				fmt.Printf("broadcastWorkpackage was canceled  | wp=%v, core=%v\n", newReq.WorkPackage.Hash(), newReq.CoreIndex)
+			} else if ctx.Err() != context.Canceled {
+				fmt.Printf("broadcastWorkpackage ERR | wp=%v, core=%v, err %v\n", newReq.WorkPackage.Hash(), newReq.CoreIndex, ctx.Err())
 			}
 		case err := <-done:
 			if err != nil {

@@ -28,42 +28,44 @@ func TestBT(t *testing.T) {
 					},
 				},
 				Height:    0,
-				Finalized: false,
+				Finalized: true,
 			}
 			bt_tree = NewBlockTree(blockNode)
 			main_chain = append(main_chain, blockNode.Block)
 			tmp_hash = blockNode.Block.Header.Hash()
-		}
-		var block = &Block{
-			Header: BlockHeader{
-				ParentHeaderHash: tmp_hash,
-				Slot:             uint32(i),
-			},
-		}
-		err := bt_tree.AddBlock(block)
-		main_chain = append(main_chain, block)
-		if err != nil {
-			t.Fatalf("Error adding block: %s", err)
-		}
-		if i > 5 {
-			if i == 6 {
-				tmp_hash2 = block.Header.Hash()
-			}
-			// create a fork from block 5
+		} else {
 			var block = &Block{
 				Header: BlockHeader{
-					ParentHeaderHash: tmp_hash2,
+					ParentHeaderHash: tmp_hash,
 					Slot:             uint32(i),
 				},
 			}
-			sub_chain = append(sub_chain, block)
 			err := bt_tree.AddBlock(block)
+			main_chain = append(main_chain, block)
 			if err != nil {
-				t.Errorf("Error adding block: %s", err)
+				t.Fatalf("Error adding block: %s", err)
 			}
-			tmp_hash2 = block.Header.Hash()
+			if i > 5 {
+				if i == 6 {
+					tmp_hash2 = block.Header.Hash()
+				}
+				// create a fork from block 5
+				var block = &Block{
+					Header: BlockHeader{
+						ParentHeaderHash: tmp_hash2,
+						Slot:             uint32(i),
+					},
+				}
+				sub_chain = append(sub_chain, block)
+				err := bt_tree.AddBlock(block)
+				if err != nil {
+					t.Errorf("Error adding block: %s", err)
+				}
+				tmp_hash2 = block.Header.Hash()
+			}
+			tmp_hash = block.Header.Hash()
+
 		}
-		tmp_hash = block.Header.Hash()
 
 	}
 	bt_tree.Print()
@@ -95,12 +97,7 @@ func TestBT(t *testing.T) {
 	if height != 4 {
 		t.Fatalf("Height is not correct")
 	}
-	err := bt_tree.FinalizeBlock(main_chain[0].Header.Hash())
-	if err != nil {
-		t.Fatalf("Error finalizing block: %s", err)
-	}
-	fmt.Printf("Finalizing block %s\n", main_chain[0].Hash().String_short())
-	err = bt_tree.FinalizeBlock(main_chain[1].Header.Hash())
+	err := bt_tree.FinalizeBlock(main_chain[1].Header.Hash())
 	if err != nil {
 		t.Fatalf("Error finalizing block: %s", err)
 	}
@@ -122,13 +119,6 @@ func TestBT(t *testing.T) {
 	}
 	for _, child := range children {
 		fmt.Printf("descending %s\n", child.String_short())
-	}
-
-	server := NewGraphServer()
-	go server.StartServer()
-	server.Update(bt_tree)
-	for {
-
 	}
 }
 

@@ -13,6 +13,9 @@ import (
 // initial setup for audit, require auditdb, announcement, and judgement
 func (n *Node) initAudit(headerHash common.Hash) {
 	// initialized auditingMap
+	n.auditingMapMutex.Lock()
+	defer n.auditingMapMutex.Unlock()
+	
 	n.auditingMap.LoadOrStore(headerHash, &statedb.StateDB{})
 
 	// initialized announcementMap
@@ -31,6 +34,9 @@ func (n *Node) initAudit(headerHash common.Hash) {
 }
 
 func (n *Node) addAuditingStateDB(auditdb *statedb.StateDB) error {
+	n.auditingMapMutex.Lock()
+	defer n.auditingMapMutex.Unlock()
+	
 	headerHash := auditdb.GetHeaderHash()
 	_, loaded := n.auditingMap.LoadOrStore(headerHash, auditdb)
 	if loaded {
@@ -40,6 +46,8 @@ func (n *Node) addAuditingStateDB(auditdb *statedb.StateDB) error {
 }
 
 func (n *Node) updateAuditingStateDB(auditdb *statedb.StateDB) error {
+	n.auditingMapMutex.Lock()
+	defer n.auditingMapMutex.Unlock()
 	headerHash := auditdb.GetHeaderHash()
 	_, exists := n.auditingMap.Load(headerHash)
 	if !exists {
@@ -50,6 +58,8 @@ func (n *Node) updateAuditingStateDB(auditdb *statedb.StateDB) error {
 }
 
 func (n *Node) getAuditingStateDB(headerHash common.Hash) (*statedb.StateDB, error) {
+	n.auditingMapMutex.Lock()
+	defer n.auditingMapMutex.Unlock()
 	value, exists := n.auditingMap.Load(headerHash)
 	if !exists {
 		return nil, fmt.Errorf("headerHash %v not found for auditing", headerHash)
@@ -62,6 +72,9 @@ func (n *Node) getAuditingStateDB(headerHash common.Hash) (*statedb.StateDB, err
 }
 
 func (n *Node) getTrancheAnnouncement(headerHash common.Hash) (*types.TrancheAnnouncement, error) {
+	n.announcementMapMutex.Lock()
+	defer n.announcementMapMutex.Unlock()
+	
 	value, exists := n.announcementMap.Load(headerHash)
 	if !exists {
 		return nil, fmt.Errorf("trancheAnnouncement %v not found for auditing", headerHash)
@@ -74,11 +87,17 @@ func (n *Node) getTrancheAnnouncement(headerHash common.Hash) (*types.TrancheAnn
 }
 
 func (n *Node) updateTrancheAnnouncement(headerHash common.Hash, trancheAnnouncement types.TrancheAnnouncement) error {
+	n.announcementMapMutex.Lock()
+	defer n.announcementMapMutex.Unlock()
+
 	n.announcementMap.Store(headerHash, trancheAnnouncement)
 	return nil
 }
 
 func (n *Node) checkTrancheAnnouncement(headerHash common.Hash) bool {
+	n.announcementMapMutex.Lock()
+	defer n.announcementMapMutex.Unlock()
+
 	_, exists := n.announcementMap.Load(headerHash)
 	return exists
 }
@@ -471,7 +490,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 
 }
 
-func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash common.Hash) bool {
+func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash common.Hash) bool {	// TODO: add mutex
 	value, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
 		return false

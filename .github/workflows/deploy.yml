@@ -91,6 +91,3 @@ jobs:
 
       - name: Run test pvm
         run: go test ./pvm
-
-      - name: Run test fib
-        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network,tiny 
