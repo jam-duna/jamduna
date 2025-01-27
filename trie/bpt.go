@@ -88,12 +88,6 @@ Regular Leaf Node (64 bytes) [K,V] -> V >= 32bytes. too long, only store Hash
 +---------------------------------------------------+
 */
 
-/*
-TODO: eleminate the "Value" from Node. we need to store this map saperately
-levelDB => Hash(apple) => apple
-Hash(hash of value that's >= 32bytes) => value
-*/
-
 // MerkleTree represents the entire Merkle Tree
 type MerkleTree struct {
 	Root *Node
@@ -190,22 +184,12 @@ func buildMerkleTree(kvs [][2][]byte, i int) *Node {
 	return &Node{Hash: computeHash(encoded), Left: left, Right: right}
 }
 
-//	func branch(left, right []byte) []byte {
-//		if len(left) != 32 || len(right) != 32 {
-//			panic("branch: input hashes must be 32 bytes")
-//		}
-//		head := left[0] & 0x7f                           // Set the LSB of the first byte of the left hash to 0
-//		left255bits := append([]byte{head}, left[1:]...) // Left: last 255 bits of
-//		concatenated := append(left255bits, right...)    // (l,r): 512 bits
-//		return concatenated
-//	}
-
 // branch concatenates the left and right node hashes with a modified head
 func branch(left, right []byte) []byte {
 	if len(left) != 32 || len(right) != 32 {
 		panic("branch: input hashes must be 32 bytes")
 	}
-	head := left[0] & 0xfe                           // Set the LSB of the first byte of the left hash to 0
+	head := left[0] & 0x7f                           // Set the LSB of the first byte of the left hash to 0
 	left255bits := append([]byte{head}, left[1:]...) // Left: last 255 bits of
 	concatenated := append(left255bits, right...)    // (l,r): 512 bits
 	return concatenated
@@ -215,8 +199,7 @@ func branch(left, right []byte) []byte {
 func leaf(k, v []byte) []byte {
 	// Embedded-value leaf node
 	if len(v) <= 32 {
-		// head := byte(0b10000000 | len(v))
-		head := byte(0b01 | (len(v) << 2))
+		head := byte(0b10000000 | len(v))
 		tmpk := make([]byte, len(k))
 		copy(tmpk, k)
 		if len(tmpk) > 31 {
@@ -228,8 +211,7 @@ func leaf(k, v []byte) []byte {
 		return append([]byte{head}, append(tmpk, value...)...)
 	} else {
 		// Regular leaf node
-		// head := byte(0b11000000)
-		head := byte(0b11)
+		head := byte(0b11000000)
 		tmpk := make([]byte, len(k))
 		copy(tmpk, k)
 		if len(tmpk) > 31 {
@@ -243,29 +225,6 @@ func leaf(k, v []byte) []byte {
 }
 
 // decodeLeaf decodes a leaf node into its key and value/hash
-// func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
-// 	if len(leaf) != 64 {
-// 		return nil, nil, false, fmt.Errorf("invalid leaf length %v", len(leaf))
-// 	}
-
-// 	head := leaf[0]
-// 	key := leaf[1:32]
-
-// 	if head&0b11000000 == 0b10000000 {
-// 		// Embedded-value leaf node
-// 		valueSize := int(head & 0b00111111) // Extract the value size from the lower 6 bits
-// 		value := leaf[32 : 32+valueSize]
-// 		return key, value, true, nil
-// 	} else if head&0b11000000 == 0b11000000 {
-// 		// Regular leaf node
-// 		hash := leaf[32:64]
-// 		return key, hash, false, nil
-// 	} else {
-// 		return nil, nil, false, fmt.Errorf("invalid leaf node header")
-// 	}
-// }
-
-// decodeLeaf decodes a leaf node into its key and value/hash
 func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 	if len(leaf) != 64 {
 		return nil, nil, false, fmt.Errorf("invalid leaf length %v", len(leaf))
@@ -274,12 +233,12 @@ func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 	head := leaf[0]
 	key := leaf[1:32]
 
-	if head&0b11 == 0b01 {
+	if head&0b11000000 == 0b10000000 {
 		// Embedded-value leaf node
-		valueSize := int(head >> 2)
+		valueSize := int(head & 0b00111111) // Extract the value size from the lower 6 bits
 		value := leaf[32 : 32+valueSize]
 		return key, value, true, nil
-	} else if head&0b11 == 0b11 {
+	} else if head&0b11000000 == 0b11000000 {
 		// Regular leaf node
 		hash := leaf[32:64]
 		return key, hash, false, nil
@@ -288,23 +247,12 @@ func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 	}
 }
 
-//	func bit(k []byte, i int) bool {
-//		byteIndex := i / 8 // the byte index in the array where the bit is located
-//		if byteIndex >= len(k) {
-//			return false // return false if index is out of range
-//		}
-//		bitIndex := 7 - (i % 8)       // the bit position within the byte
-//		b := k[byteIndex]             // target byte
-//		mask := byte(1 << (bitIndex)) // least significant bit first
-//		return (b & mask) != 0        // return set (1) or not (0)
-//	}
-
 func bit(k []byte, i int) bool {
 	byteIndex := i / 8 // the byte index in the array where the bit is located
 	if byteIndex >= len(k) {
 		return false // return false if index is out of range
 	}
-	bitIndex := i % 8             // the bit position within the byte
+	bitIndex := 7 - (i % 8)       // the bit position within the byte
 	b := k[byteIndex]             // target byte
 	mask := byte(1 << (bitIndex)) // least significant bit first
 	return (b & mask) != 0        // return set (1) or not (0)

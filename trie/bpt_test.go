@@ -30,8 +30,6 @@ func hex2Bytes(hexStr string) []byte {
 }
 
 func TestEdgeCases(t *testing.T) {
-	// t.Skip()
-	// level_db_path := "../leveldb/BPT"
 	data := [][2][]byte{
 		{hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("0000000000000000000000000000000000000000000000000000")},
 	}
@@ -458,8 +456,7 @@ func TestStateKey(t *testing.T) {
 
 // TestInitial tests the initialization of a Merkle tree from a root hash
 func TestInitial(t *testing.T) {
-	// Initialize the test data
-	// level_db_path := "../leveldb/BPT"
+
 	data := [][2][]byte{
 		{hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"), hex2Bytes("bb11c256876fe10442213dd78714793394d2016134c28a64eb27376ddc147fc6044df72bdea44d9ec66a3ea1e6d523f7de71db1d05a980e001e9fa")},
 		{hex2Bytes("df08871e8a54fde4834d83851469e635713615ab1037128df138a6cd223f1242"), hex2Bytes("b8bded4e1c")},
