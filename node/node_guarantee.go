@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -13,7 +14,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	currTimeslot := curr_statedb.GetTimeslot()
 	coreIndex := wpCoreIndex
 	if err != nil {
-		Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] GetCoreCoWorkerPeersByStateDB Error: %v\n", n.String(), err), true)
+		Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] GetCoreCoWorkerPeersByStateDB Error: %v\n", n.String(), err), true)
 	}
 	coworkers := n.GetCoreCoWorkerPeersByStateDB(wpCoreIndex, curr_statedb)
 	if debugDA {
@@ -24,11 +25,11 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	}
 	importedSegments, err := n.FetchWorkpackageImportSegments(wp)
 	if err != nil {
-		Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err), true)
+		Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err), true)
 	}
 	segmentRootLookup, err := n.GetSegmentRootLookup(wp)
 	if err != nil {
-		Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] GetSegmentRootLookup Error: %v\n", n.String(), err), true)
+		Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] GetSegmentRootLookup Error: %v\n", n.String(), err), true)
 	}
 	if debugG {
 		fmt.Printf("%s [broadcastWorkPackage] Guarantee from self\n", n.String())
@@ -46,14 +47,14 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				var execErr error
 				guarantee, _, _, execErr = n.executeWorkPackage(wpCoreIndex, wp, importedSegments, extrinsics, segmentRootLookup)
 				if execErr != nil {
-					Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] executeWorkPackage Error: %v\n", n.String(), execErr), true)
+					Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] executeWorkPackage Error: %v\n", n.String(), execErr), true)
 					return
 				}
 				return
 			} else {
 				fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
-					Logger.RecordLogs(EG_error, fmt.Sprintf("%s [broadcastWorkPackage] ShareWorkPackage Error: %v\n", n.String(), errfellow), true)
+					Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] ShareWorkPackage Error: %v\n", n.String(), errfellow), true)
 					return
 				}
 				mutex.Lock()
@@ -66,7 +67,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	wg.Wait()
 	selfReport := guarantee.Report
 	selfWorkReportHash := guarantee.Report.Hash()
-	// go Logger.RecordLogs(EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing workReport: %v\n", n.String(), selfReport.String()), true)
+	// go Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing workReport: %v\n", n.String(), selfReport.String()), true)
 	for key, fellow_response := range fellow_responses {
 
 		validator_idx := curr_statedb.GetSafrole().GetCurrValidatorIndex(key)
@@ -89,7 +90,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 			fmt.Printf("%s [broadcastWorkPackage] outgoing guarantee: %v\n", n.String(), guarantee.String())
 			error_string := fmt.Sprintf("%s [broadcastWorkPackage] Guarantee from fellow [N%d] did not match! \neg_wr: %v, fellow_wr: %v\n", n.String(), validator_idx, selfWorkReportHash, fellowWorkReportHash)
 			//panic("Guarantee from fellow did not match!")
-			Logger.RecordLogs(EG_error, error_string, true)
+			Logger.RecordLogs(storage.EG_error, error_string, true)
 			return
 		}
 	}
@@ -101,12 +102,12 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		guarantee.Slot = currTimeslot
 		go n.broadcast(guarantee)
 
-		Logger.RecordLogs(EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing guarantee(%v) for core%d\n",
+		Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing guarantee(%v) for core%d\n",
 			n.String(), guarantee.Report.GetWorkPackageHash().String_short(), guarantee.Report.CoreIndex), true)
 
 		n.processGuarantee(guarantee)
-		log := fmt.Sprintf("%s (core %d) [broadcast guarantee in slot %d]\n", n.String(), coreIndex, guarantee.Slot)
-		Logger.RecordLogs(grandpa_status, log, true)
+		log := fmt.Sprintf("%s (core %d) [broadcast guarantee in slot %d, actually slot %d]\n", n.String(), coreIndex, guarantee.Slot, n.statedb.GetTimeslot())
+		Logger.RecordLogs(storage.Grandpa_status, log, true)
 	}
 	return
 }

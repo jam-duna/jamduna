@@ -7,6 +7,7 @@ import (
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -15,7 +16,7 @@ func (n *Node) initAudit(headerHash common.Hash) {
 	// initialized auditingMap
 	n.auditingMapMutex.Lock()
 	defer n.auditingMapMutex.Unlock()
-	
+
 	n.auditingMap.LoadOrStore(headerHash, &statedb.StateDB{})
 
 	// initialized announcementMap
@@ -36,7 +37,7 @@ func (n *Node) initAudit(headerHash common.Hash) {
 func (n *Node) addAuditingStateDB(auditdb *statedb.StateDB) error {
 	n.auditingMapMutex.Lock()
 	defer n.auditingMapMutex.Unlock()
-	
+
 	headerHash := auditdb.GetHeaderHash()
 	_, loaded := n.auditingMap.LoadOrStore(headerHash, auditdb)
 	if loaded {
@@ -74,7 +75,7 @@ func (n *Node) getAuditingStateDB(headerHash common.Hash) (*statedb.StateDB, err
 func (n *Node) getTrancheAnnouncement(headerHash common.Hash) (*types.TrancheAnnouncement, error) {
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
-	
+
 	value, exists := n.announcementMap.Load(headerHash)
 	if !exists {
 		return nil, fmt.Errorf("trancheAnnouncement %v not found for auditing", headerHash)
@@ -175,19 +176,19 @@ func (n *Node) runAudit() {
 			err := n.addAuditingStateDB(audit_statedb)
 			if err != nil {
 				err_log := fmt.Sprintf("addAuditingStateDB failed %v\n", err)
-				Logger.RecordLogs(audit_error, err_log, true)
+				Logger.RecordLogs(storage.Audit_error, err_log, true)
 			}
 			n.cleanWaitingAJ()
 			n.initAudit(headerHash)
 			err = n.Audit(headerHash)
 			if err != nil {
 				err_log := fmt.Sprintf("Audit Failed %v\n", err)
-				Logger.RecordLogs(audit_error, err_log, true)
+				Logger.RecordLogs(storage.Audit_error, err_log, true)
 			} else {
 				// if the block is audited, we can start grandpa
 
 				log := fmt.Sprintf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
-				Logger.RecordLogs(audit_status, log, true)
+				Logger.RecordLogs(storage.Audit_status, log, true)
 				newBlock := audit_statedb.Block.Copy()
 				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
 					if Grandpa {
@@ -490,7 +491,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 
 }
 
-func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash common.Hash) bool {	// TODO: add mutex
+func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash common.Hash) bool { // TODO: add mutex
 	value, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
 		return false
@@ -622,12 +623,12 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		auditPass = true
 
 		audit_log := fmt.Sprintf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT PASS\n", n.String(), workPackageBundle.WorkPackage.Hash())
-		Logger.RecordLogs(audit_status, audit_log, true)
+		Logger.RecordLogs(storage.Audit_status, audit_log, true)
 
 	} else {
 
 		audit_log := fmt.Sprintf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT FAIL\n", n.String(), workPackageBundle.WorkPackage.Hash())
-		Logger.RecordLogs(audit_status, audit_log, true)
+		Logger.RecordLogs(storage.Audit_status, audit_log, true)
 
 	}
 

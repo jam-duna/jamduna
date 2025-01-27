@@ -7,13 +7,14 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
 // this function will be called when the nodes finish audited the genesis block
 func (n *Node) StartGrandpa(b *types.Block) {
 	log := fmt.Sprintf("%s StartGrandpa\n", n.String())
-	Logger.RecordLogs(grandpa_status, log, true)
+	Logger.RecordLogs(storage.Grandpa_status, log, true)
 	if n.block_tree != nil {
 
 		return
@@ -74,9 +75,9 @@ func (n *Node) runGrandpa() {
 		case <-ticker.C:
 			// n.grandpa.OnTimeout()
 		case err := <-n.grandpa.ErrorChan:
-			Logger.RecordLogs(grandpa_error, err.Error(), true)
+			Logger.RecordLogs(storage.Grandpa_error, err.Error(), true)
 		case status := <-n.grandpa.GrandpaStatusChan:
-			Logger.RecordLogs(grandpa_status, status, true)
+			Logger.RecordLogs(storage.Grandpa_status, status, true)
 		}
 
 	}

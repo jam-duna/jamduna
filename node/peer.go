@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 
@@ -215,117 +216,117 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 	case UP0_BlockAnnouncement:
 		err := n.onBlockAnnouncement(stream, msg, peerID)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [UP0_BlockAnnouncement] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [UP0_BlockAnnouncement] | %v\n", n.id, peerID, err), true)
 		}
 	case CE101_VoteMessage:
 		err := n.onVoteMessage(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE101_VoteMessage] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE101_VoteMessage] | %v\n", n.id, peerID, err), true)
 		}
 	case CE102_CommitMessage:
 		err := n.onCommitMessage(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE102_CommitMessage] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE102_CommitMessage] | %v\n", n.id, peerID, err), true)
 		}
 	case CE128_BlockRequest:
 		err := n.onBlockRequest(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE128_BlockRequest] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE128_BlockRequest] | %v\n", n.id, peerID, err), true)
 		}
 	case CE129_StateRequest:
 		err := n.onStateRequest(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE129_StateRequest] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE129_StateRequest] | %v\n", n.id, peerID, err), true)
 		}
 	case CE131_TicketDistribution, CE132_TicketDistribution:
 		err := n.onTicketDistribution(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE131_TicketDistribution, CE132_TicketDistribution] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE131_TicketDistribution, CE132_TicketDistribution] | %v\n", n.id, peerID, err), true)
 		}
 	case CE133_WorkPackageSubmission:
 		err := n.onWorkPackageSubmission(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE133_WorkPackageSubmission] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE133_WorkPackageSubmission] | %v\n", n.id, peerID, err), true)
 		}
 	case CE134_WorkPackageShare:
 		err := n.onWorkPackageShare(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE134_WorkPackageShare] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE134_WorkPackageShare] | %v\n", n.id, peerID, err), true)
 		}
 	case CE135_WorkReportDistribution:
 		err := n.onWorkReportDistribution(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE135_WorkReportDistribution] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE135_WorkReportDistribution] | %v\n", n.id, peerID, err), true)
 		}
 	case CE136_WorkReportRequest:
 		err := n.onWorkReportRequest(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE136_WorkReportRequest] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE136_WorkReportRequest] | %v\n", n.id, peerID, err), true)
 		}
 	case CE137_FullShardRequest:
 		err := n.onFullShardRequest(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE137_FullShardRequest] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE137_FullShardRequest] | %v\n", n.id, peerID, err), true)
 		}
 	case CE138_BundleShardRequest:
 		err := n.onBundleShardRequest(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE138_BundleShardRequest] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE138_BundleShardRequest] | %v\n", n.id, peerID, err), true)
 		}
 	case CE139_SegmentShardRequest:
 		err := n.onSegmentShardRequest(stream, msg, false)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE139_SegmentShardRequest] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE139_SegmentShardRequest] | %v\n", n.id, peerID, err), true)
 		}
 	case CE140_SegmentShardRequestP:
 		err := n.onSegmentShardRequest(stream, msg, true)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE140_SegmentShardRequestP] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE140_SegmentShardRequestP] | %v\n", n.id, peerID, err), true)
 		}
 	case CE141_AssuranceDistribution:
 		err := n.onAssuranceDistribution(stream, msg, peerID)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE141_AssuranceDistribution] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE141_AssuranceDistribution] | %v\n", n.id, peerID, err), true)
 		}
 	case CE142_PreimageAnnouncement:
 		err := n.onPreimageAnnouncement(stream, msg, peerID)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE142_PreimageAnnouncement] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE142_PreimageAnnouncement] | %v\n", n.id, peerID, err), true)
 		}
 	case CE143_PreimageRequest:
 		err := n.onPreimageRequest(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE143_PreimageRequest] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE143_PreimageRequest] | %v\n", n.id, peerID, err), true)
 		}
 	case CE144_AuditAnnouncement:
 		err := n.onAuditAnnouncement(stream, msg, peerID)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE144_AuditAnnouncement] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE144_AuditAnnouncement] | %v\n", n.id, peerID, err), true)
 		}
 	case CE145_JudgmentPublication:
 		err := n.onJudgmentPublication(stream, msg, peerID)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE145_JudgmentPublication] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE145_JudgmentPublication] | %v\n", n.id, peerID, err), true)
 		}
 	case CE201_DA_Announcement:
 		err := n.onDA_Announcement(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE201_DA_Announcement] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE201_DA_Announcement] | %v\n", n.id, peerID, err), true)
 		}
 	case CE202_DA_Request:
 		err := n.onDA_Request(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE202_DA_Request] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE202_DA_Request] | %v\n", n.id, peerID, err), true)
 		}
 	case CE203_DA_Reconstruction:
 		err := n.onDA_Reconstruction(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE203_DA_Reconstruction] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE203_DA_Reconstruction] | %v\n", n.id, peerID, err), true)
 		}
 	case CE204_DA_Announcemented:
 		err := n.onDA_Announced(stream, msg)
 		if err != nil {
-			Logger.RecordLogs(stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE204_DA_Announcemented] | %v\n", n.id, peerID, err), true)
+			Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("[N%d]->[N%d] | [CE204_DA_Announcemented] | %v\n", n.id, peerID, err), true)
 		}
 	default:
 		return errors.New("unknown message type")

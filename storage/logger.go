@@ -1,4 +1,4 @@
-package node
+package storage
 
 import (
 	"fmt"
@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
 )
 
 type DebugLogger struct {
@@ -23,29 +22,31 @@ func NewLoggerManager() *DebugLogger {
 }
 
 const (
-	testing_record = "testing_record"
+	Testing_record = "Testing_record"
 	EG_status      = "EG_status"
 	EG_error       = "EG_error"
-	stream_error   = "stream_error"
-	grandpa_status = "grandpa_status"
-	grandpa_error  = "grandpa_error"
-	audit_status   = "audit_status"
-	audit_error    = "audit_error"
+	Stream_error   = "Stream_error"
+	Grandpa_status = "Grandpa_status"
+	Grandpa_error  = "Grandpa_error"
+	Audit_status   = "Audit_status"
+	Audit_error    = "Audit_error"
 )
 
 var DefaultLogger = []string{
-	testing_record,
+	Testing_record,
 	EG_status,
 	EG_error,
-	stream_error,
-	grandpa_status,
-	grandpa_error,
-	audit_status,
-	audit_error,
+	Stream_error,
+	Grandpa_status,
+	Grandpa_error,
+	Audit_status,
+	Audit_error,
 }
 
 const logDir = "./logs"
-const clearOnStart = true
+const clearOnStart = false
+
+var Logger *DebugLogger
 
 func (lm *DebugLogger) SetLogger(name string) *log.Logger {
 	lm.mu.Lock()
@@ -97,7 +98,7 @@ func (lm *DebugLogger) RecordLogs(name string, log string, with_timestamp bool) 
 		return err
 	}
 	if with_timestamp {
-		currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+		currJCE := common.ComputeTimeUnit("JAM")
 		logger.Printf("[%d] %s", currJCE, log)
 	} else {
 		logger.Printf("%s", log)

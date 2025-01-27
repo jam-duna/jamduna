@@ -6,6 +6,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -166,27 +167,35 @@ func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee, new_block *
 	if err != nil {
 		return nil, err, false
 	}
-	for i, guarantee := range EGs {
+	originalEGs := append([]types.Guarantee(nil), EGs...)
+	for i, guarantee := range originalEGs {
 		// v0.5 eq 11.24  - check index
 		err := CheckSorting_EG(guarantee)
 		if err != nil {
 			EGs = append(EGs[:i], EGs[i+1:]...)
+			logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err)
+			storage.Logger.RecordLogs(storage.EG_error, logs, true)
 			valid = false
+			continue
 		}
 		// TODO: Shawn to re-enable this
 		//v0.5 eq 11.38
-		err = s.checkPrereq(guarantee, EGs)
+		err = s.checkPrereq(guarantee, originalEGs)
 		if err != nil {
-			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
+			logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err)
 			EGs = append(EGs[:i], EGs[i+1:]...)
+			storage.Logger.RecordLogs(storage.EG_error, logs, true)
 			valid = false
+			continue
 		}
 		// v0.4.5 eq 155
-		err = s.checkRecentWorkPackage(guarantee, EGs)
+		err = s.checkRecentWorkPackage(guarantee, originalEGs)
 		if err != nil {
-			fmt.Printf("Verify_Guarantees_MakeBlock error: %v\n", err)
+			logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err)
 			EGs = append(EGs[:i], EGs[i+1:]...)
+			storage.Logger.RecordLogs(storage.EG_error, logs, true)
 			valid = false
+			continue
 		}
 	}
 	if valid {
@@ -336,12 +345,25 @@ func (s *StateDB) ValidateGuarantees(guarantees []types.Guarantee) error {
 }
 
 // v0.5 eq 11.23 - this function will be used by make block
-func SortByCoreIndex(guarantees []types.Guarantee) {
-	// sort guarantees by core index
-	sort.Slice(guarantees, func(i, j int) bool {
-		return guarantees[i].Report.CoreIndex < guarantees[j].Report.CoreIndex
+func SortByCoreIndex(guarantees []types.Guarantee) []types.Guarantee {
+	// remove duplicates, keeping only the guarantee with the latest timeslot for each work package hash
+	uniqueGuarantees := make([]types.Guarantee, 0)
+	seen := make(map[uint16]types.Guarantee)
+	// we want to keep the latest (slot) guarantee for each core index
+	for _, guarantee := range guarantees {
+		coreIdx := guarantee.Report.CoreIndex
+		if existing, ok := seen[coreIdx]; !ok || guarantee.Slot > existing.Slot {
+			seen[coreIdx] = guarantee
+		}
+	}
+	for _, guarantee := range seen {
+		uniqueGuarantees = append(uniqueGuarantees, guarantee)
+	}
+	// sort the slice to maintain the original order
+	sort.Slice(uniqueGuarantees, func(i, j int) bool {
+		return uniqueGuarantees[i].Report.CoreIndex < uniqueGuarantees[j].Report.CoreIndex
 	})
-
+	return uniqueGuarantees
 }
 
 // v0.5 eq 11.23  - this function will be used by verify the block
@@ -428,8 +450,6 @@ func (s *StateDB) areValidatorsAssignedToCore_MakeBlock(guarantee types.Guarante
 	ts := block.Header.Slot
 	previous_assignment_slot := ts - (ts % types.ValidatorCoreRotationPeriod) - types.ValidatorCoreRotationPeriod
 	if guarantee.Slot < previous_assignment_slot {
-		fmt.Printf("guarantee.Slot %d previous_assignment_slot %d\n", guarantee.Slot, previous_assignment_slot)
-		fmt.Printf("slot problem ts %d\n", ts)
 		return jamerrors.ErrGReportEpochBeforeLast
 	}
 	timeSlotPeriod := ts / types.ValidatorCoreRotationPeriod

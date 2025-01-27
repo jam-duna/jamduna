@@ -1570,6 +1570,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	previousIdx := currRotationIdx - 1
 	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
 	queuedGuarantees = extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
+	storage.Logger.RecordLogs(storage.EG_status, fmt.Sprintf("MakeBlock: Queued Guarantees: %v for slot %d, acceptedTimeslot %d", len(queuedGuarantees), targetJCE, acceptedTimeslot), true)
 	for _, guarantee := range queuedGuarantees {
 		g, err := guarantee.DeepCopy()
 		if err != nil {
@@ -1583,26 +1584,25 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		}
 		err = s.Verify_Guarantee_MakeBlock(g, b, tmpState)
 		if err != nil {
-			if debugG {
-				fmt.Printf("[N%d] [MakeBlock] Discarding Invalid Guarantee ... (%s)\n", s.Id, err.Error())
-			}
+			storage.Logger.RecordLogs(storage.EG_error, fmt.Sprintf("Error in Verify_Guarantee_MakeBlock: %v", err), true)
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
 		if debugG {
-			fmt.Printf("[N%d] Include Guarantee (Package Hash : %v)\n", s.Id, g.Report.GetWorkPackageHash())
+			storage.Logger.RecordLogs(storage.EG_status, fmt.Sprintf("MakeBlock: Added Guarantee: %v", g), true)
 		}
 		// check guarantee one per core
 		// check guarantee is not a duplicate
-
 	}
-	SortByCoreIndex(extrinsicData.Guarantees)
+	extrinsicData.Guarantees = SortByCoreIndex(extrinsicData.Guarantees)
 	// return duplicate guarantee err
+	for i := 0; i < len(extrinsicData.Guarantees); i++ {
+		log := fmt.Sprintf("ExtrinsicData.Guarantees[%d] = %v, core%d", i, extrinsicData.Guarantees[i].Report.GetWorkPackageHash(), extrinsicData.Guarantees[i].Report.CoreIndex)
+		storage.Logger.RecordLogs(storage.EG_status, log, true)
+	}
 	extrinsicData.Guarantees, err, _ = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees, b)
 	if err != nil {
-		// Shawn -- THIS LOOKS WRONG. Do not return here
-		// extrinsicData.Guarantees = make([]types.Guarantee, 0)
-		// return nil, err
+		storage.Logger.RecordLogs(storage.EG_error, fmt.Sprintf("Error in Verify_Guarantees_MakeBlock: %v", err), true)
 	}
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()

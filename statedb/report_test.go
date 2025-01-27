@@ -313,3 +313,21 @@ func TestReportValidReportCase(t *testing.T) {
 	}
 
 }
+
+// test functionality of the guarantee production
+
+func TestGuaranteeProduction(t *testing.T) {
+	// make four guarantees
+	// two for core0, two for core1
+	guarantees := make([]types.Guarantee, 4)
+	for i := 0; i < 4; i++ {
+		guarantees[i] = types.Guarantee{
+			Report: types.WorkReport{
+				CoreIndex: uint16(i % 2),
+			},
+			Slot: uint32(i),
+		}
+	}
+	guarantees = SortByCoreIndex(guarantees)
+	fmt.Printf("len(guarantees)=%d\n", len(guarantees))
+}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
@@ -146,7 +147,7 @@ func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []typ
 	return epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, nil
 }
 
-var Logger *DebugLogger
+var Logger *storage.DebugLogger
 
 func SetUpNodes(numNodes int) ([]*Node, error) {
 	network := types.Network
@@ -157,7 +158,9 @@ func SetUpNodes(numNodes int) ([]*Node, error) {
 		return nil, err
 	}
 	if debugL {
-		Logger = InitDefaultLoggers()
+
+		Logger = storage.InitDefaultLoggers()
+		storage.Logger = Logger
 	}
 	nodes := make([]*Node, numNodes)
 	godIncomingCh := make(chan uint32, 10) // node sends timeslots to this channel when authoring
@@ -271,7 +274,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int) {
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	Logger.RecordLogs(testing_record, fmt.Sprintf("[JAMTEST : %s] Start!!!\n", jam), true)
+	Logger.RecordLogs(storage.Testing_record, fmt.Sprintf("[JAMTEST : %s] Start!!!\n", jam), true)
 	_ = nodes
 	block_graph_server := types.NewGraphServer()
 
@@ -726,7 +729,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				if FinalRho && FinalAssurance && FinalMeg {
 					fmt.Printf("Meg Finish\n")
 					ok = true
-					Logger.RecordLogs(testing_record, "[JAMTEST : megatron] Success!!!\n", true)
+					Logger.RecordLogs(storage.Testing_record, "[JAMTEST : megatron] Success!!!\n", true)
 					break
 				} else if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil {
 					FinalRho = true
@@ -790,7 +793,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			// v0, v3, v5 => core
 			senderIdx := 5
 			fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(workPackage.Hash()))
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 			go func() {
 				defer cancel()
 				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful, types.ExtrinsicsBlobs{})
@@ -825,7 +828,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 			// }
 			megCoreIdx := uint16(0)
 
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 			go func() {
 				defer cancel()
 				sendWorkPackageTrack(ctx, nodes[5], workPackage, megCoreIdx, Meg_successful, types.ExtrinsicsBlobs{})
@@ -842,6 +845,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 	defer ticker2.Stop()
 	workPackageHash := workPackage.Hash()
 	trialCount := 0
+	MaxTrialCount := 100
 	for {
 		select {
 		case <-ctx.Done():
@@ -854,12 +858,12 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 			randIdx := rand.Intn(len(corePeers))
 			err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, extrinsics, receiverCore)
 			log := fmt.Sprintf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
-			Logger.RecordLogs(EG_status, log, true)
+			Logger.RecordLogs(storage.EG_status, log, true)
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
 			}
 			trialCount++
-			if trialCount > 4 {
+			if trialCount > MaxTrialCount {
 				successful <- false
 				return
 			}

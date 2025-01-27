@@ -8,6 +8,7 @@ import (
 
 	"reflect"
 
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -152,7 +153,7 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 		Signatures: newReq.Credentials,
 	}
 	n.guaranteesCh <- guarantee
-	Logger.RecordLogs(EG_status, fmt.Sprintf("%s [onWorkReportDistribution] incoming Guarantee %s from Core %d\n", n.String(), workReport.GetWorkPackageHash().String_short(), workReport.CoreIndex), true)
+	Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [onWorkReportDistribution] incoming Guarantee %s from Core %d, eg slot %d\n", n.String(), workReport.GetWorkPackageHash().String_short(), workReport.CoreIndex, guarantee.Slot), true)
 	n.workReportsCh <- workReport
 	return nil
 }

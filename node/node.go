@@ -102,13 +102,13 @@ type Node struct {
 
 	// this is for audit
 	// announcement [headerHash -> [wr_hash]]
-	auditingMap     sync.Map
+	auditingMap      sync.Map
 	auditingMapMutex sync.Mutex
-	
-	announcementMap sync.Map // headerHash -> stateDB
+
+	announcementMap      sync.Map // headerHash -> stateDB
 	announcementMapMutex sync.Mutex
-	
-	judgementMap    sync.Map // headerHash -> JudgeBucket
+
+	judgementMap sync.Map // headerHash -> JudgeBucket
 	//judgementBucket types.JudgeBucket
 	judgementWRMap      map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this
 	judgementWRMapMutex sync.Mutex
@@ -790,21 +790,21 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				epoch := uint32(0) // TODO: Shawn
 				err := p.SendTicketDistribution(epoch, t, false)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendTicketDistribution ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendTicketDistribution ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(types.Block{}):
 				b := obj.(types.Block)
 				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s GetOrInitBlockAnnouncementStream ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s GetOrInitBlockAnnouncementStream ERR %v\n", n.String(), err), true)
 				}
 				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s GetBlockAnnouncementBytes ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s GetBlockAnnouncementBytes ERR %v\n", n.String(), err), true)
 				}
 				err = sendQuicBytes(up0_stream, block_a_bytes)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendBlockAnnouncement ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendBlockAnnouncement ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
@@ -813,7 +813,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				}
 				err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendWorkReportDistribution ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendWorkReportDistribution ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
@@ -825,38 +825,38 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
 				err := p.SendAuditAnnouncement(&a)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendAuditAnnouncement ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendAuditAnnouncement ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
 				epoch := uint32(0) // TODO: Shawn
 				err := p.SendJudgmentPublication(epoch, j)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendJudgmentPublication ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendJudgmentPublication ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(types.PreimageAnnouncement{}):
 				preimageAnnouncement := obj.(types.PreimageAnnouncement)
 				err := p.SendPreimageAnnouncement(&preimageAnnouncement)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendPreimageAnnouncement ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendPreimageAnnouncement ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf([]DADistributeECChunk{}):
 				distributeECChunks := obj.([]DADistributeECChunk)
 				err := p.SendDistributionECChunks(distributeECChunks[id])
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendDistributionECChunks ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendDistributionECChunks ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(grandpa.VoteMessage{}):
 				vote := obj.(grandpa.VoteMessage)
 				err := p.SendVoteMessage(vote)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendVoteMessage ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendVoteMessage ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(grandpa.CommitMessage{}):
 				commit := obj.(grandpa.CommitMessage)
 				err := p.SendCommitMessage(commit)
 				if err != nil {
-					Logger.RecordLogs(stream_error, fmt.Sprintf("%s SendCommitMessage ERR %v\n", n.String(), err), true)
+					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendCommitMessage ERR %v\n", n.String(), err), true)
 				}
 			}
 		}(id, p)

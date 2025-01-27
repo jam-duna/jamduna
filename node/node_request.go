@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	//"github.com/colorfulnotion/jam/trie"
 )
@@ -331,7 +332,7 @@ func (n *Node) runMain() {
 			err := n.processGuarantee(guarantee)
 			if err != nil {
 				fmt.Printf("%s processGuarantee: %v\n", n.String(), err)
-				Logger.RecordLogs(EG_error, fmt.Sprintf("%s processGuarantee: %v\n", n.String(), err), true)
+				Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s processGuarantee: %v\n", n.String(), err), true)
 			}
 		case assurance := <-n.assurancesCh:
 			err := n.processAssurance(assurance)

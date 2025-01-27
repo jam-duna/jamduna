@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"reflect"
+	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -107,16 +108,21 @@ func (a *Announcement) GetWorkReportHashes() []common.Hash {
 
 // eq 198
 type AnnounceBucket struct {
+	sync.Mutex
 	Tranche            uint32                         //?
 	Announcements      map[common.Hash][]Announcement `json:"reports"`
 	KnownAnnouncements map[common.Hash]bool           // use identifier to filter duplicate A
 }
 
 func (W *AnnounceBucket) GetLen(w common.Hash) int {
+	W.Lock()
+	defer W.Unlock()
 	return len(W.Announcements[w])
 }
 
 func (W *AnnounceBucket) PutAnnouncement(a Announcement) {
+	W.Lock()
+	defer W.Unlock()
 	if W.Announcements == nil {
 		W.Announcements = make(map[common.Hash][]Announcement)
 	}
@@ -134,6 +140,8 @@ func (W *AnnounceBucket) PutAnnouncement(a Announcement) {
 }
 
 func (W *AnnounceBucket) HaveMadeAnnouncement(a Announcement) bool {
+	W.Lock()
+	defer W.Unlock()
 	if W.KnownAnnouncements == nil {
 		return false
 	}
@@ -142,6 +150,8 @@ func (W *AnnounceBucket) HaveMadeAnnouncement(a Announcement) bool {
 
 // Deep copy of AnnounceBucket
 func (W *AnnounceBucket) DeepCopy() (AnnounceBucket, error) {
+	W.Lock()
+	defer W.Unlock()
 	var copiedAnnounceBucket AnnounceBucket
 
 	// Serialize the original AnnounceBucket to JSON
