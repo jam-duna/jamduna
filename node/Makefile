@@ -8,7 +8,7 @@ fallback:
 
 safrole:
 	@echo "Running TestNodeSafrole with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestSafrole -tags network,$(TAGS)
+	go test -timeout 20m -v -run TestSafrole -tags network,$(TAGS)
 
 fib:
 	@echo "Running TestFib with timeout $(TIMEOUT)..."

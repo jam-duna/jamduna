@@ -78,6 +78,8 @@ ifndef TS
 	@echo "Please ensure the directory exists or set TS=<timestamp> manually."
 	@exit 1
 endif
+	@echo "Removing old files in '$(MODE)'..."
+	rm -rf $(MODE)/state_transitions/* $(MODE)/blocks/* $(MODE)/state_snapshots/*
 	@echo "Copying data from $(JAMDIR)/$(TS) to mode folder '$(MODE)'..."
 	mkdir -p $(MODE)/state_transitions $(MODE)/blocks $(MODE)/state_snapshots
 	find "$(JAMDIR)/$(TS)" -type f -path "*/data/state_transitions/*" -exec cp {} "$(MODE)/state_transitions/" \;
@@ -85,12 +87,14 @@ endif
 	find "$(JAMDIR)/$(TS)" -type f -path "*/data/state_snapshots/*" -exec cp {} "$(MODE)/state_snapshots/" \;
 
 cpstf:
+	@echo "Removing old files in '$(MODE)'..."
+	rm -rf $(MODE)/state_transitions/* $(MODE)/blocks/* $(MODE)/state_snapshots/*
 	@echo "Copying STF data from '$(JAMDIR)' to mode folder '$(MODE)'..."
 	mkdir -p $(MODE)/state_transitions $(MODE)/blocks $(MODE)/state_snapshots
 	find "$(JAMDIR)/state_transitions" -type f -exec cp {} "$(MODE)/state_transitions/" \;
 	find "$(JAMDIR)/blocks" -type f -exec cp {} "$(MODE)/blocks/" \;
 	find "$(JAMDIR)/state_snapshots" -type f -exec cp {} "$(MODE)/state_snapshots/" \;
-
+	
 ###############################################################################
 # Fuzz Testing
 ###############################################################################

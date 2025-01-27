@@ -491,7 +491,10 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 
 }
 
-func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash common.Hash) bool { // TODO: add mutex
+func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash common.Hash) bool {
+	n.announcementMapMutex.Lock()
+	defer n.announcementMapMutex.Unlock()
+
 	value, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
 		return false
@@ -501,6 +504,9 @@ func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash 
 }
 
 func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash) (types.AnnounceBucket, error) {
+	n.announcementMapMutex.Lock()
+	defer n.announcementMapMutex.Unlock()
+
 	value, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
 		return types.AnnounceBucket{}, err
