@@ -12,12 +12,12 @@ import (
 // TrancheAnnouncement should probably just be [trancheIdx]AnnounceBucket
 // given [trancheIdx], get your currAnnouncementBucket and PrevAnnouncementBucket
 type TrancheAnnouncement struct {
-	AnnouncementBucket map[uint32]AnnounceBucket
+	AnnouncementBucket map[uint32]*AnnounceBucket
 }
 
 func (T *TrancheAnnouncement) PutAnnouncement(a Announcement) error {
 	if T.AnnouncementBucket == nil {
-		T.AnnouncementBucket = make(map[uint32]AnnounceBucket)
+		T.AnnouncementBucket = make(map[uint32]*AnnounceBucket)
 	}
 	bucket := T.AnnouncementBucket[a.Tranche]
 	bucket.PutAnnouncement(a)
@@ -137,6 +137,7 @@ func (W *AnnounceBucket) PutAnnouncement(a Announcement) {
 		W.Announcements[w.WorkReportHash] = append(W.Announcements[w.WorkReportHash], a)
 	}
 	W.KnownAnnouncements[a.Hash()] = true
+	return
 }
 
 func (W *AnnounceBucket) HaveMadeAnnouncement(a Announcement) bool {

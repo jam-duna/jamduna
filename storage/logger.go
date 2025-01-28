@@ -44,7 +44,7 @@ var DefaultLogger = []string{
 }
 
 const logDir = "./logs"
-const clearOnStart = false
+const clearOnStart = true
 
 var Logger *DebugLogger
 

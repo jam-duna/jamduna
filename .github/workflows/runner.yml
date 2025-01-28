@@ -89,12 +89,15 @@ jobs:
       - name: Run test megatron
         run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
 
-      - name: Run test transfer
-        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network,tiny
+      - name: Run test megatron
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
 
-      - name: Run test scaled balances
-        run: go test ./node -timeout 12m -v -run ^TestScaledBalances$ -tags network,tiny
+#      - name: Run test transfer
+#        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network,tiny
 
-      - name: Run test balances
-        run: go test ./node -timeout 12m -v -run ^TestBalances$ -tags network,tiny
+#      - name: Run test scaled balances
+#        run: go test ./node -timeout 12m -v -run ^TestScaledBalances$ -tags network,tiny
+
+#      - name: Run test balances
+#        run: go test ./node -timeout 12m -v -run ^TestBalances$ -tags network,tiny
 

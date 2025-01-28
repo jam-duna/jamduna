@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"reflect"
+	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -74,11 +75,14 @@ func (j *Judgement) Verify(key Ed25519Key) error {
 // }
 
 type JudgeBucket struct {
+	sync.RWMutex
 	Judgements      map[common.Hash][]Judgement `json:"judgements"`
 	KnownJudgements map[common.Hash]bool        // use identifier to filter duplicate J
 }
 
 func (J *JudgeBucket) PutJudgement(j Judgement) {
+	J.Lock()
+	defer J.Unlock()
 	//consider adding a separate judgementHash to avoid unnecessary duplication check
 	if J.Judgements == nil {
 		J.Judgements = make(map[common.Hash][]Judgement)
@@ -106,10 +110,14 @@ func (J *JudgeBucket) PutJudgement(j Judgement) {
 }
 
 func (J *JudgeBucket) GetLen(w common.Hash) int {
+	J.RLock()
+	defer J.RUnlock()
 	return len(J.Judgements[w])
 }
 
 func (J *JudgeBucket) HaveMadeJudgement(j Judgement) bool {
+	J.RLock()
+	defer J.RUnlock()
 	if J.KnownJudgements == nil {
 		return false
 	}
@@ -117,6 +125,8 @@ func (J *JudgeBucket) HaveMadeJudgement(j Judgement) bool {
 }
 
 func (J *JudgeBucket) HaveMadeJudgementByValidator(workreporthash common.Hash, validator uint16) bool {
+	J.RLock()
+	defer J.RUnlock()
 	for _, j := range J.Judgements[workreporthash] {
 		if j.Validator == validator {
 			return true
@@ -126,6 +136,8 @@ func (J *JudgeBucket) HaveMadeJudgementByValidator(workreporthash common.Hash, v
 }
 
 func (J *JudgeBucket) GetJudgementByValidator(workreporthash common.Hash, validator uint16) (Judgement, error) {
+	J.RLock()
+	defer J.RUnlock()
 	for _, j := range J.Judgements[workreporthash] {
 		if j.Validator == validator {
 			return j, nil
@@ -144,6 +156,8 @@ func (J *JudgeBucket) GetJudgementByValidator(workreporthash common.Hash, valida
 // }
 
 func (J *JudgeBucket) GetTrueCount(W common.Hash) int {
+	J.RLock()
+	defer J.RUnlock()
 	count := 0
 	for _, j := range J.Judgements[W] {
 		if j.Judge {
@@ -154,6 +168,8 @@ func (J *JudgeBucket) GetTrueCount(W common.Hash) int {
 }
 
 func (J *JudgeBucket) GetFalseCount(W common.Hash) int {
+	J.RLock()
+	defer J.RUnlock()
 	count := 0
 	for _, j := range J.Judgements[W] {
 		if !j.Judge {
@@ -164,6 +180,8 @@ func (J *JudgeBucket) GetFalseCount(W common.Hash) int {
 }
 
 func (J *JudgeBucket) GetTrueJudgement(W common.Hash) []Judgement {
+	J.RLock()
+	defer J.RUnlock()
 	judgements := make([]Judgement, 0)
 	for _, j := range J.Judgements[W] {
 		if j.Judge {
@@ -174,6 +192,8 @@ func (J *JudgeBucket) GetTrueJudgement(W common.Hash) []Judgement {
 }
 
 func (J *JudgeBucket) GetFalseJudgement(W common.Hash) []Judgement {
+	J.RLock()
+	defer J.RUnlock()
 	judgements := make([]Judgement, 0)
 	for _, j := range J.Judgements[W] {
 		if !j.Judge {
@@ -187,6 +207,8 @@ func (J *JudgeBucket) GetFalseJudgement(W common.Hash) []Judgement {
 }
 
 func (J *JudgeBucket) GetWonkeyJudgement(W common.Hash) []Judgement {
+	J.RLock()
+	defer J.RUnlock()
 	judgements := make([]Judgement, 0)
 	trueCount := 0
 	falseCount := 0

@@ -11,87 +11,87 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// initial setup for audit, require auditdb, announcement, and judgement
+// initial setup for audit, require auditdb, announcement, and judgement (need mutex)
 func (n *Node) initAudit(headerHash common.Hash) {
 	// initialized auditingMap
 	n.auditingMapMutex.Lock()
-	defer n.auditingMapMutex.Unlock()
 
-	n.auditingMap.LoadOrStore(headerHash, &statedb.StateDB{})
+	if _, exists := n.auditingMap[headerHash]; !exists {
+		n.auditingMap[headerHash] = &statedb.StateDB{}
+	}
+	n.auditingMapMutex.Unlock()
 
 	// initialized announcementMap
-	announcement := types.TrancheAnnouncement{
-		AnnouncementBucket: map[uint32]types.AnnounceBucket{
-			0: {},
-		},
+	n.announcementMapMutex.Lock()
+	if _, exists := n.announcementMap[headerHash]; !exists {
+		n.announcementMap[headerHash] = &types.TrancheAnnouncement{
+			AnnouncementBucket: map[uint32]*types.AnnounceBucket{
+				0: {},
+			},
+		}
 	}
-	n.announcementMap.LoadOrStore(headerHash, announcement)
-
+	n.announcementMapMutex.Unlock()
 	// initialized judgementMap
-	judgementBucket := types.JudgeBucket{
-		Judgements: make(map[common.Hash][]types.Judgement),
+	n.judgementMapMutex.Lock()
+	if _, exists := n.judgementMap[headerHash]; !exists {
+		n.judgementMap[headerHash] = &types.JudgeBucket{
+			Judgements: make(map[common.Hash][]types.Judgement),
+		}
 	}
-	n.judgementMap.LoadOrStore(headerHash, judgementBucket)
+	n.judgementMapMutex.Unlock()
+	return
 }
 
+// this function is used to add the auditingMap (need mutex)
 func (n *Node) addAuditingStateDB(auditdb *statedb.StateDB) error {
 	n.auditingMapMutex.Lock()
 	defer n.auditingMapMutex.Unlock()
-
 	headerHash := auditdb.GetHeaderHash()
-	_, loaded := n.auditingMap.LoadOrStore(headerHash, auditdb)
-	if loaded {
+	if _, loaded := n.auditingMap[headerHash]; loaded {
 		return nil
 	}
+	n.auditingMap[headerHash] = auditdb
 	return nil
 }
 
+// this function is used to update the auditingMap (need mutex)
 func (n *Node) updateAuditingStateDB(auditdb *statedb.StateDB) error {
 	n.auditingMapMutex.Lock()
 	defer n.auditingMapMutex.Unlock()
+
 	headerHash := auditdb.GetHeaderHash()
-	_, exists := n.auditingMap.Load(headerHash)
-	if !exists {
+	if _, exists := n.auditingMap[headerHash]; !exists {
 		return fmt.Errorf("updateAuditingStateDB failed headerHash %v missing!", headerHash)
 	}
-	n.auditingMap.Store(headerHash, auditdb)
+	n.auditingMap[headerHash] = auditdb
 	return nil
 }
 
+// this function is used to get the auditingMap (need mutex)
 func (n *Node) getAuditingStateDB(headerHash common.Hash) (*statedb.StateDB, error) {
 	n.auditingMapMutex.Lock()
 	defer n.auditingMapMutex.Unlock()
-	value, exists := n.auditingMap.Load(headerHash)
+	auditdb, exists := n.auditingMap[headerHash]
 	if !exists {
 		return nil, fmt.Errorf("headerHash %v not found for auditing", headerHash)
-	}
-	auditdb, ok := value.(*statedb.StateDB)
-	if !ok {
-		return nil, fmt.Errorf("invalid type assertion for auditingMap")
 	}
 	return auditdb, nil
 }
 
+// this function is used to get the announcementMap (don't need mutex)
 func (n *Node) getTrancheAnnouncement(headerHash common.Hash) (*types.TrancheAnnouncement, error) {
-	n.announcementMapMutex.Lock()
-	defer n.announcementMapMutex.Unlock()
 
-	value, exists := n.announcementMap.Load(headerHash)
+	trancheAnnouncement, exists := n.announcementMap[headerHash]
 	if !exists {
 		return nil, fmt.Errorf("trancheAnnouncement %v not found for auditing", headerHash)
 	}
-	trancheAnnouncement, ok := value.(types.TrancheAnnouncement)
-	if !ok {
-		return nil, fmt.Errorf("invalid type assertion for announcementMap")
-	}
-	return &trancheAnnouncement, nil
+	return trancheAnnouncement, nil
 }
 
 func (n *Node) updateTrancheAnnouncement(headerHash common.Hash, trancheAnnouncement types.TrancheAnnouncement) error {
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
-
-	n.announcementMap.Store(headerHash, trancheAnnouncement)
+	n.announcementMap[headerHash] = &trancheAnnouncement
 	return nil
 }
 
@@ -99,7 +99,7 @@ func (n *Node) checkTrancheAnnouncement(headerHash common.Hash) bool {
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
 
-	_, exists := n.announcementMap.Load(headerHash)
+	_, exists := n.announcementMap[headerHash]
 	return exists
 }
 
@@ -109,18 +109,17 @@ func (n *Node) updateKnownWorkReportMapping(announcement types.Announcement) {
 	for _, reportHash := range announcement.GetWorkReportHashes() {
 		n.judgementWRMap[reportHash] = announcement.HeaderHash
 	}
+	return
 }
 
 func (n *Node) getJudgementBucket(headerHash common.Hash) (*types.JudgeBucket, error) {
-	value, exists := n.judgementMap.Load(headerHash)
+	n.judgementMapMutex.Lock()
+	defer n.judgementMapMutex.Unlock()
+	judgementBucket, exists := n.judgementMap[headerHash]
 	if !exists {
 		return nil, fmt.Errorf("judgement_bucket %v not found for auditing", headerHash)
 	}
-	judgementBucket, ok := value.(types.JudgeBucket)
-	if !ok {
-		return nil, fmt.Errorf("invalid type assertion for judgementMap")
-	}
-	return &judgementBucket, nil
+	return judgementBucket, nil
 }
 
 func (n *Node) getHeadHashFromWorkReportHash(workReportHash common.Hash) (common.Hash, error) {
@@ -170,16 +169,20 @@ func (n *Node) runAudit() {
 
 		case audit_statedb := <-n.auditingCh:
 			headerHash := audit_statedb.GetHeaderHash()
-			if debugAudit {
-				fmt.Printf("%s [T:%d] start auditing block %v (headerHash:%v)\n", n.String(), audit_statedb.Block.TimeSlot(), audit_statedb.HeaderHash, headerHash)
-			}
+
+			log := fmt.Sprintf("%s [T:%d] start auditing block %v (headerHash:%v)\n", n.String(), audit_statedb.Block.TimeSlot(), audit_statedb.HeaderHash, headerHash)
+			Logger.RecordLogs(storage.Audit_status, log, true)
 			err := n.addAuditingStateDB(audit_statedb)
 			if err != nil {
 				err_log := fmt.Sprintf("addAuditingStateDB failed %v\n", err)
 				Logger.RecordLogs(storage.Audit_error, err_log, true)
 			}
 			n.cleanWaitingAJ()
+			log = fmt.Sprintf("%s cleanWaitingAJ done\n", n.String())
+			Logger.RecordLogs(storage.Audit_status, log, true)
 			n.initAudit(headerHash)
+			log = fmt.Sprintf("%s initAudit done\n", n.String())
+			Logger.RecordLogs(storage.Audit_status, log, true)
 			err = n.Audit(headerHash)
 			if err != nil {
 				err_log := fmt.Sprintf("Audit Failed %v\n", err)
@@ -222,6 +225,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 	paulseTicker := time.NewTicker(1 * time.Millisecond)
 	tmp := uint32(1 << 31)
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
+
 	if err != nil {
 		return err
 	}
@@ -243,22 +247,21 @@ func (n *Node) Audit(headerHash common.Hash) error {
 			if tranche != tmp && tranche != 0 {
 				// if it's the same tranche, check if the block is audited
 				// if it's audited, break the loop
-
 				isAudited, err := n.CheckBlockAudited(headerHash, tranche-1)
 				if err != nil {
 					return fmt.Errorf("CheckBlockAudited failed :%v", err)
 				}
 				if isAudited {
 					// wait for everyone to finish auditing
-					if debugAudit {
-						fmt.Printf("%s [T:%d] Tranche %v audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche-1, auditing_statedb.Block.Header.Hash())
-					}
+
+					log := fmt.Sprintf("%s [T:%d] Tranche %v audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche-1, auditing_statedb.Block.Header.Hash())
+					Logger.RecordLogs(storage.Audit_status, log, true)
 					done = true
 					break
 				} else {
-					if debugAudit {
-						fmt.Printf("%s [T:%d] Tranche %v not audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche, auditing_statedb.Block.Hash())
-					}
+
+					log := fmt.Sprintf("%s [T:%d] Tranche %v not audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche, auditing_statedb.Block.Hash())
+					Logger.RecordLogs(storage.Audit_status, log, true)
 				}
 
 				tmp = tranche
@@ -281,6 +284,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	// announce the work report
 	// reports=>work report selection need to be audited
+
 	var reports []types.WorkReportSelection
 	// "problematic" node - node that announe but didn't provide judgment. this is not necessarily malicious can be natturally occuring due to networking condition
 	// "bench/backup" node - node that does not announe nor provide judgment at tranche0. so it can be used to fulfil problematic node at tranche > 0
@@ -294,14 +298,21 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		Lying Judge saying true [LJ-T]	announces, judges True for Lying Guarantor
 	*/
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
-
+	if err != nil {
+		return err
+	}
+	logs := fmt.Sprintf("%s [T:%d] Tranche %v, start audit\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
+	Logger.RecordLogs(storage.Audit_status, logs, true)
 	// normal behavior
 	switch n.AuditNodeType {
 	case "normal":
 		reports, err = n.Announce(headerHash, tranche)
+		if err != nil {
+			return err
+		}
 		judges, err := n.Judge(headerHash, reports)
 		if err != nil {
-			fmt.Printf("Error %v\n", err)
+			return err
 		} else {
 			n.DistributeJudgements(judges, headerHash)
 		}
@@ -313,9 +324,12 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	case "lying_judger_F":
 		// Lying Judge saying false [LJ-F]: announces, judges False for Truthful Guarantor
 		reports, err = n.Announce(headerHash, tranche)
+		if err != nil {
+			return err
+		}
 		judges, err := n.Judge(headerHash, reports)
 		if err != nil {
-			fmt.Printf("Error %v\n", err)
+			return err
 		} else {
 			for i := range judges {
 				judges[i].Judge = false
@@ -326,9 +340,12 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	case "lying_judger_T":
 		// Lying Judge saying true [LJ-T]: announces, judges True for Lying Guarantor
 		reports, err = n.Announce(headerHash, tranche)
+		if err != nil {
+			return err
+		}
 		judges, err := n.Judge(headerHash, reports)
 		if err != nil {
-			fmt.Printf("Error %v\n", err)
+			return err
 		} else {
 			for i := range judges {
 				judges[i].Judge = true
@@ -343,30 +360,35 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		}
 		judges, err := n.Judge(headerHash, reports)
 		if err != nil {
-			fmt.Printf("Error %v\n", err)
+			return err
 		} else {
 			n.DistributeJudgements(judges, headerHash)
 		}
 
 	default:
 		reports, err = n.Announce(headerHash, tranche)
+		if err != nil {
+			return err
+		}
+		logs := fmt.Sprintf("%s [T:%d] selected reports len %v\n", n.String(), auditing_statedb.Block.TimeSlot(), len(reports))
+		Logger.RecordLogs(storage.Audit_status, logs, true)
 		judges, err := n.Judge(headerHash, reports)
 		if err != nil {
-			fmt.Printf("Error %v\n", err)
+			return err
 		} else {
 			n.DistributeJudgements(judges, headerHash)
 		}
 	}
-	if debugAudit && len(reports) == 0 {
-		fmt.Printf("%s [T:%d] Tranche %v, no audit reports\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
-	} else if debugAudit {
-		fmt.Printf("%s [T:%d] Tranche %v, audit reports:\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
+	if len(reports) == 0 {
+		logs = fmt.Sprintf("%s [T:%d] Tranche %v, no audit reports\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
+		Logger.RecordLogs(storage.Audit_status, logs, true)
+	} else {
+		logs = fmt.Sprintf("%s [T:%d] Tranche %v, audit reports:\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
+		Logger.RecordLogs(storage.Audit_status, logs, true)
 		for _, w := range reports {
-			fmt.Printf("%s [T:%d] selected work report %v, from core %d\n", n.String(), auditing_statedb.Block.TimeSlot(), w.WorkReport.Hash(), w.WorkReport.CoreIndex)
+			logs = fmt.Sprintf("%s [T:%d] selected work report %v, from core %d\n", n.String(), auditing_statedb.Block.TimeSlot(), w.WorkReport.Hash(), w.WorkReport.CoreIndex)
+			Logger.RecordLogs(storage.Audit_status, logs, true)
 		}
-	}
-	if err != nil {
-		fmt.Printf("Error %v\n", err)
 	}
 	// audit the work report
 
@@ -374,13 +396,12 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 }
 
 func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkReportSelection, error) {
-
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
 		return nil, err
 	}
-
 	s := auditing_statedb
+
 	judgment_bucket, err := n.getJudgementBucket(headerHash)
 	if err != nil {
 		return nil, err
@@ -402,9 +423,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 		}
 		announcement, err := n.MakeAnnouncement(headerHash, 0, a0)
 		n.updateKnownWorkReportMapping(announcement)
-
 		hasmade := n.HaveMadeAnnouncement(announcement, headerHash)
-
 		if err != nil {
 			return nil, err
 		} else if hasmade {
@@ -450,6 +469,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 		}
 		announcement, err := n.MakeAnnouncement(headerHash, tranche, an)
 		n.updateKnownWorkReportMapping(announcement)
+
 		n.announcementsCh <- announcement
 		if err != nil {
 			return nil, err
@@ -506,7 +526,6 @@ func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash 
 func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash) (types.AnnounceBucket, error) {
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
-
 	value, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
 		return types.AnnounceBucket{}, err
@@ -515,7 +534,7 @@ func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash
 	if !exists {
 		return types.AnnounceBucket{}, fmt.Errorf("tranche %v not found for auditing", tranche)
 	}
-	return bucket, nil
+	return *bucket, nil
 }
 
 func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelection) (judgements []types.Judgement, err error) {
@@ -651,6 +670,7 @@ func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.
 		go n.broadcast(j)
 		n.judgementsCh <- j
 	}
+
 }
 
 // we should have a function to check if the block is audited
@@ -806,8 +826,9 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 		return err
 	}
 	n.updateKnownWorkReportMapping(announcement)
-
+	n.announcementMapMutex.Lock()
 	trancheAnnouncement, err := n.getTrancheAnnouncement(headerHash)
+	n.announcementMapMutex.Unlock()
 	if err != nil {
 		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement not found %v \n", n.String(), headerHash)
 		return err
@@ -854,7 +875,6 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 		return err
 	}
 	judgementBucket.PutJudgement(judgement)
-	n.judgementMap.Store(headerHash, *judgementBucket)
 	if !judgement.Judge {
 		if judgementBucket.HaveMadeJudgementByValidator(judgement.WorkReportHash, uint16(n.GetCurrValidatorIndex())) {
 			return nil

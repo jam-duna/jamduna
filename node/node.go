@@ -101,14 +101,15 @@ type Node struct {
 	sendTickets  bool // when mode=fallback this is false, otherwise is true
 
 	// this is for audit
-	// announcement [headerHash -> [wr_hash]]
-	auditingMap      sync.Map
-	auditingMapMutex sync.Mutex
 
-	announcementMap      sync.Map // headerHash -> stateDB
-	announcementMapMutex sync.Mutex
+	auditingMap      map[common.Hash]*statedb.StateDB // headerHash -> stateDB
+	auditingMapMutex sync.RWMutex
 
-	judgementMap sync.Map // headerHash -> JudgeBucket
+	announcementMap      map[common.Hash]*types.TrancheAnnouncement // announcement [headerHash -> [wr_hash]]
+	announcementMapMutex sync.RWMutex
+
+	judgementMap      map[common.Hash]*types.JudgeBucket // headerHash -> JudgeBucket
+	judgementMapMutex sync.RWMutex
 	//judgementBucket types.JudgeBucket
 	judgementWRMap      map[common.Hash]common.Hash // wr_hash -> headerHash. TODO: shawn to update this
 	judgementWRMapMutex sync.Mutex
@@ -347,8 +348,12 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		extrinsic_pool: types.NewExtrinsicPool(),
 
-		statedbMap:     make(map[common.Hash]*statedb.StateDB),
-		judgementWRMap: make(map[common.Hash]common.Hash),
+		statedbMap: make(map[common.Hash]*statedb.StateDB),
+
+		auditingMap:     make(map[common.Hash]*statedb.StateDB),
+		announcementMap: make(map[common.Hash]*types.TrancheAnnouncement),
+		judgementMap:    make(map[common.Hash]*types.JudgeBucket),
+		judgementWRMap:  make(map[common.Hash]common.Hash),
 
 		blocks:    make(map[common.Hash]*types.Block),
 		headers:   make(map[common.Hash]*types.Block),
