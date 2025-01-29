@@ -80,6 +80,10 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var c3 statedb.RecentBlocks
 		err = json.Unmarshal(input, &c3)
 		obj = c3
+	case "C3-Beta":
+		var beta_state statedb.Beta_state
+		err = json.Unmarshal(input, &beta_state)
+		obj = beta_state
 	case "C4":
 		var c4 statedb.SafroleBasicState
 		err = json.Unmarshal(input, &c4)
@@ -202,6 +206,8 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.AuthorizationQueue{}))
 	case "C3":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.RecentBlocks{}))
+	case "C3-Beta":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Beta_state{}))
 	case "C4":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.SafroleBasicState{}))
 	case "C4-Gamma_s":

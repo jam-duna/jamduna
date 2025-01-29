@@ -68,6 +68,17 @@ async function updateInputText() {
 async function performTransform() {
     const actionType = document.getElementById("actionType").value;
     const objectType = document.getElementById("objectType").value;
+    
+    if (actionType === "encode") {
+        try {
+            const inputField = document.getElementById("inputText");
+            const parsed = JSON.parse(inputField.value);
+            inputField.value = JSON.stringify(parsed, null, 2);
+        } catch (err) {
+            console.warn("Could not beautify JSON input:", err);
+        }
+    }
+
     const inputText = document.getElementById("inputText");
     const outputField = document.getElementById("outputText");
     const byteSize = document.getElementById("byteSize");

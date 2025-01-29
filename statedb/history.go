@@ -37,10 +37,10 @@ func (b *Beta_state) UnmarshalJSON(data []byte) error {
 
 func (b Beta_state) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		HeaderHash common.Hash                   `json:"header_hash"`
-		B          trie.MMR                      `json:"mmr"`
-		StateRoot  common.Hash                   `json:"state_root"`
-		Report     []types.SegmentRootLookupItem `json:"reported"`
+		HeaderHash common.Hash             `json:"header_hash"`
+		B          trie.MMR                `json:"mmr"`
+		StateRoot  common.Hash             `json:"state_root"`
+		Report     types.SegmentRootLookup `json:"reported"`
 	}{
 		HeaderHash: b.HeaderHash,
 		B:          b.B,

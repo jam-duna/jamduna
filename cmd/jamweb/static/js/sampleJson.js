@@ -2318,3 +2318,26 @@ var validators_json = [
 sample_json["C7"] = validators_json;
 sample_json["C8"] = validators_json;
 sample_json["C9"] = validators_json;
+sample_json["C3-Beta"] = {
+  "header_hash": "0x39a88105418206e9d90a32cb7ef0358c5bfc7fa5628f123add12dbe1f97b427b",
+  "mmr": {
+    "Peaks": [
+      "0x00aa542e826990ac30af8d9febba3aa8e7002ddda0d89485d5854a3358f909da",
+      "0x76468240f08def004986b105ee25af7802c80800390784ca195dedbd55507c8b",
+      null,
+      null,
+      "0x4261c77845c03bd8765877351827b2c77451b9ad892755f52af5bed3355df0e7"
+    ]
+  },
+  "state_root": "0x33ae8526843cfae25c49936334949ef6c5658846ee94d7fd8db2221490901dc7",
+  "reported": [
+    {
+      "work_package_hash": "0x2990d3a03fe05994d0d70a92328c2d715c38be6208bf3101257ba72f816d8ae2",
+      "segment_tree_root": "0x4f4133d67f07772fa590a169ece5a8d7789b09e11a80ae916533c8fb180b4dcf"
+    },
+    {
+      "work_package_hash": "0x705c9a28af292289bb42b860f6bf8120e2932b86d0ab2ed8228201da7b2f66b1",
+      "segment_tree_root": "0xd2eac65cdc0ecdc0c6cdf5baea2004e2aa1a813a12a3567bd36dbf5ce730c80d"
+    }
+  ]
+};

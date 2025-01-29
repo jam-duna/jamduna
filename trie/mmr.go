@@ -3,10 +3,8 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -101,77 +99,6 @@ func R(r []*common.Hash, i int, t *common.Hash) []*common.Hash {
 		}
 	}
 	return s
-}
-
-func (M MMR) Encode() []byte {
-	T := M.Peaks
-	if len(T) == 0 {
-		return []byte{0}
-	}
-
-	encoded, err := types.Encode(uint(len(T)))
-	if err != nil {
-		return nil
-	}
-
-	for i := 0; i < len(T); i++ {
-		if T[i] == nil {
-			encoded = append(encoded, 0)
-		} else {
-			encoded = append(encoded, 1)
-			encodedTi, err := types.Encode(T[i])
-			if err != nil {
-				return nil
-			}
-			encoded = append(encoded, encodedTi...)
-		}
-	}
-	return encoded
-}
-
-func (M MMR) Decode(data []byte) (interface{}, uint32) {
-	if len(data) == 0 {
-		M.Peaks = []*common.Hash{}
-		return M, 0
-	}
-
-	peaks_len, length, err := types.Decode(data, reflect.TypeOf(uint(0)))
-	if err != nil {
-		M.Peaks = []*common.Hash{}
-		return M, 0
-	}
-
-	if peaks_len.(uint) == 0 {
-		M.Peaks = []*common.Hash{}
-		return M, length
-	}
-
-	peaks := make([]*common.Hash, peaks_len.(uint))
-	for i := 0; i < int(peaks_len.(uint)); i++ {
-		if length >= uint32(len(data)) {
-			M.Peaks = []*common.Hash{}
-			return M, 0
-		}
-
-		if data[length] == 0 {
-			peaks[i] = nil
-			length++
-		} else if data[length] == 1 {
-			length++
-			decoded, l, err := types.Decode(data[length:], reflect.TypeOf(&common.Hash{}))
-			if err != nil {
-				M.Peaks = []*common.Hash{}
-				return M, 0
-			}
-			peaks[i] = decoded.(*common.Hash)
-			length += l
-		} else {
-			M.Peaks = []*common.Hash{}
-			return M, 0
-		}
-	}
-	M.Peaks = peaks
-	return M, length
 }
 
 func (M MMR) SuperPeak() *common.Hash {

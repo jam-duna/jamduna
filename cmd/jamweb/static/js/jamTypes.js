@@ -15,6 +15,7 @@ const jamTypes = [
     {value: "C1", label: "C1 - Authorization Pool"},
     {value: "C2", label: "C2 - Authorization Queue"},
     {value: "C3", label: "C3 - RecentBlocks"},
+    {value: "C3-Beta", label: "C3 - BetaState"},
     {value: "C4", label: "C4 - Gamma"},
     {value: "C4-Gamma_s", label: "C4 - Gamma_s"},
     {value: "C5", label: "C5 - Psi"},

@@ -10,3 +10,4 @@ coverage.out
 /cmd/importblocks/**/*.bin
 pvm/*.out
 cmd/jamweb/jamweb
+cmd/importblocks/fuzzer
