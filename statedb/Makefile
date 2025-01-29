@@ -2,7 +2,7 @@
 TIMEOUT      ?= 5m
 
 # The list of networks you want to test by default
-NETWORKS     ?= tiny full
+NETWORKS     ?= full tiny
 NETWORK	 	 ?= tiny
 TESTING ?=testing
 # Bandersnatch and statedb directories (adjust if needed)

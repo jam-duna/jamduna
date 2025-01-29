@@ -30,6 +30,14 @@ func (n *JamState) GetAuthQueueBytes() []byte {
 }
 
 // C3 RecentBlocks
+func (n *JamState) GetRecentBlocksBytes() []byte {
+	codec_bytes, err := types.Encode(n.RecentBlocks)
+	if err != nil {
+		return []byte{}
+	}
+	return codec_bytes
+}
+
 func (T Peaks) Encode() []byte {
 	if len(T) == 0 {
 		return []byte{0}
@@ -53,14 +61,6 @@ func (T Peaks) Encode() []byte {
 		}
 	}
 	return encoded
-}
-
-func (n *JamState) GetRecentBlocksBytes() []byte {
-	codec_bytes, err := types.Encode(n.RecentBlocks)
-	if err != nil {
-		return []byte{}
-	}
-	return codec_bytes
 }
 
 // C4 safroleState Gamma

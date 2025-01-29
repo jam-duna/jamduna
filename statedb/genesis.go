@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -148,7 +149,45 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/traces/genesis-%s", network))
 	types.SaveObject(outfn, trace)
 
+	/*
+		tree := statedb.GetTrie()
+		tree.PrintTree(tree.Root, 0)
+	*/
+	rawOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/rawkv/genesis-%s.json", network))
+	rawByte, err := trace.CustomMarshalJSON()
+	err = os.WriteFile(rawOutfn, rawByte, 0644)
+	if err != nil {
+		return rawOutfn, fmt.Errorf("Error writing rawOut file: %v\n", err)
+	}
+	types.SaveObject(outfn, trace)
+
 	return
+}
+
+func (s StateSnapshotRaw) CustomMarshalJSON() ([]byte, error) {
+	type SnapshotOutput struct {
+		Input  map[string]string `json:"input"`
+		Output string            `json:"output"`
+	}
+
+	// Build the map of key->value from s.KeyVals.
+	inputMap := make(map[string]string)
+	for _, kv := range s.KeyVals {
+		keyHex := hex.EncodeToString(kv.Key)
+		valHex := hex.EncodeToString(kv.Value)
+		inputMap[keyHex] = valHex
+	}
+
+	stateRootHex := hex.EncodeToString(s.StateRoot[:]) // strip 0x
+
+	output := SnapshotOutput{
+		Input:  inputMap,
+		Output: stateRootHex,
+	}
+
+	outputs := make([]SnapshotOutput, 1)
+	outputs[0] = output
+	return json.MarshalIndent(outputs, "", "  ")
 }
 
 func NewStateDBFromSnapshotRawFile(sdb *storage.StateDBStorage, filename string) (statedb *StateDB, err error) {

@@ -8,7 +8,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// C2
+// C3
 type RecentBlocks []Beta_state
 
 type Beta_state struct {

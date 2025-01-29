@@ -311,6 +311,89 @@ func TestGet(t *testing.T) {
 	DeleteLevelDB()
 }
 
+func TestModifyGenesis(t *testing.T) {
+	dirPath := "../chainspecs/rawkv/"
+	files, err := ioutil.ReadDir(dirPath)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+
+	for _, file := range files {
+		if file.IsDir() || file.Name()[len(file.Name())-5:] != ".json" {
+			continue
+		}
+
+		filePath := dirPath + file.Name()
+		data, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("Failed to read JSON file %s: %v", filePath, err)
+		}
+
+		// Parse the JSON file
+		var testVectors []TestVector
+		err = json.Unmarshal(data, &testVectors)
+		if err != nil {
+			t.Fatalf("Failed to parse JSON file %s: %v", filePath, err)
+		}
+
+		// Run each test case
+		for i, testCase := range testVectors {
+			// Create the Merkle Tree input from the test case
+			if bptDebug {
+				fmt.Printf("testCase %d: %v\n", i, testCase)
+			}
+			var input [][2][]byte
+			for k, v := range testCase.Input {
+				key, _ := hex.DecodeString(k)
+				value, _ := hex.DecodeString(v)
+				input = append(input, [2][]byte{key, value})
+			}
+			if bptDebug {
+				fmt.Printf("input=%x (len=%v)\n", input, len(input))
+			}
+
+			var rootHash []byte
+
+			// Create an empty Merkle Tree
+			test_db, _ := initLevelDB()
+			tree := NewMerkleTree(nil, test_db)
+
+			if bptDebug {
+				fmt.Printf("initial rootHash:%x \n", tree.GetRootHash())
+			}
+			// Insert key-value pairs one by one
+			index := 0
+			rand.Seed(time.Now().UnixNano())
+			index = 0
+			for k, v := range testCase.Input {
+				if bptDebug {
+					fmt.Printf("insert#%d, k=%v, v=%v\n", index, k, v)
+				}
+				key, _ := hex.DecodeString(k)
+				value, _ := hex.DecodeString(v)
+				tree.Insert(key, value)
+				//tree.printTree(tree.Root, 0)
+				index++
+			}
+			rootHash = tree.GetRootHash()
+
+			// Compare the computed root hash with the expected output
+			expectedHash, _ := hex.DecodeString(testCase.Output)
+			if !compareBytes(rootHash, expectedHash) {
+				if bptDebug {
+					tree.PrintTree(tree.Root, 0)
+				}
+				t.Errorf("Test case %d in file %s: Root hash mismatch for input %v: got %s, want %s", i, filePath, testCase.Input, common.Bytes2Hex(rootHash), testCase.Output)
+			} else {
+				t.Logf("Test case %d in file %s: Vector OK, rootHash=%x", i, filePath, expectedHash)
+			}
+			tree.PrintTree(tree.Root, 0)
+			tree.Close()
+		}
+	}
+	DeleteLevelDB()
+}
+
 func TestModify(t *testing.T) {
 	filePath := "../jamtestvectors/trie/trie.json"
 	data, err := ioutil.ReadFile(filePath)
@@ -448,7 +531,7 @@ func TestStateKey(t *testing.T) {
 		if !ok {
 			fmt.Printf("get key not found: %v\n", err)
 		}
-		tree.printTree(tree.Root, 0)
+		//tree.printTree(tree.Root, 0)
 	}
 	tree.Close()
 	DeleteLevelDB()
