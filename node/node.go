@@ -61,6 +61,7 @@ const (
 	debugAncestor     = false // Check Ancestor
 	debugSTF          = true  // State Transition Function
 	debugPublishTrace = true  // Publish Trace -- such that each node should have full state_transition
+	test_prereq       = true  // Test Prerequisites Enabled
 	numNodes          = types.TotalValidators
 	quicAddr          = "127.0.0.1:%d"
 	basePort          = 9000

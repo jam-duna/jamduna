@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
@@ -11,6 +12,8 @@ import (
 )
 
 func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, curr_statedb *statedb.StateDB, extrinsics types.ExtrinsicsBlobs) (guarantee types.Guarantee, err error) {
+	// counting the time for this function execution
+	timer := time.Now()
 	currTimeslot := curr_statedb.GetTimeslot()
 	coreIndex := wpCoreIndex
 	if err != nil {
@@ -101,10 +104,9 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	} else {
 		guarantee.Slot = currTimeslot
 		go n.broadcast(guarantee)
-
-		Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing guarantee(%v) for core%d\n",
-			n.String(), guarantee.Report.GetWorkPackageHash().String_short(), guarantee.Report.CoreIndex), true)
-
+		eclapsed := time.Since(timer)
+		Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing guarantee(%v) for core%d, took %s\n",
+			n.String(), guarantee.Report.GetWorkPackageHash().String_short(), guarantee.Report.CoreIndex, eclapsed.String()), true)
 		n.processGuarantee(guarantee)
 		log := fmt.Sprintf("%s (core %d) [broadcast guarantee in slot %d, actually slot %d]\n", n.String(), coreIndex, guarantee.Slot, n.statedb.GetTimeslot())
 		Logger.RecordLogs(storage.Grandpa_status, log, true)

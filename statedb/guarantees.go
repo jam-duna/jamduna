@@ -163,46 +163,51 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee, block *t
 func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee, new_block *types.Block) ([]types.Guarantee, error, bool) {
 	// v0.5 eq 11.23 - check index
 	var valid bool
+	valid = true
+	egMap := make(map[uint16]types.Guarantee) // core index to guarantee
+	for _, eg := range EGs {
+		egMap[eg.Report.CoreIndex] = eg
+	}
+
+	for {
+		initialLen := len(egMap)
+		toDelete := make([]uint16, 0)
+		for _, eg := range egMap {
+			//v0.5 eq 11.38
+			err1 := s.checkPrereq(eg, mapToGuaranteeSlice(egMap))
+			if err1 != nil {
+				logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err1)
+				storage.Logger.RecordLogs(storage.EG_error, logs, true)
+				valid = false
+			}
+			// v0.5.2 eq 11.42
+			err2 := s.checkRecentWorkPackage(eg, mapToGuaranteeSlice(egMap))
+			if err2 != nil {
+				logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err2)
+				delete(egMap, eg.Report.CoreIndex)
+				storage.Logger.RecordLogs(storage.EG_error, logs, true)
+				valid = false
+				continue
+			}
+			if err1 != nil || err2 != nil {
+				toDelete = append(toDelete, eg.Report.CoreIndex)
+			}
+		}
+		for _, coreIndex := range toDelete {
+			delete(egMap, coreIndex)
+		}
+		if len(egMap) == initialLen {
+			break
+		}
+	}
+	EGs = mapToGuaranteeSlice(egMap)
 	err := CheckSorting_EGs(EGs)
 	if err != nil {
 		return nil, err, false
 	}
-	originalEGs := append([]types.Guarantee(nil), EGs...)
-	for i, guarantee := range originalEGs {
-		// v0.5 eq 11.24  - check index
-		err := CheckSorting_EG(guarantee)
-		if err != nil {
-			EGs = append(EGs[:i], EGs[i+1:]...)
-			logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err)
-			storage.Logger.RecordLogs(storage.EG_error, logs, true)
-			valid = false
-			continue
-		}
-		// TODO: Shawn to re-enable this
-		//v0.5 eq 11.38
-		err = s.checkPrereq(guarantee, originalEGs)
-		if err != nil {
-			logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err)
-			EGs = append(EGs[:i], EGs[i+1:]...)
-			storage.Logger.RecordLogs(storage.EG_error, logs, true)
-			valid = false
-			continue
-		}
-		// v0.4.5 eq 155
-		err = s.checkRecentWorkPackage(guarantee, originalEGs)
-		if err != nil {
-			logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err)
-			EGs = append(EGs[:i], EGs[i+1:]...)
-			storage.Logger.RecordLogs(storage.EG_error, logs, true)
-			valid = false
-			continue
-		}
-	}
-	if valid {
-		return EGs, nil, true
-	} else {
-		return EGs, nil, false
-	}
+
+	return EGs, nil, valid
+
 }
 
 // this function will be used by the state transition function in the single guarantee verification
@@ -916,6 +921,14 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 	}
 
 	return nil
+}
+
+func mapToGuaranteeSlice(m map[uint16]types.Guarantee) []types.Guarantee {
+	output := make([]types.Guarantee, 0, len(m))
+	for _, v := range m {
+		output = append(output, v)
+	}
+	return output
 }
 
 // v0.5 eq 11.39

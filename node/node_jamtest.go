@@ -685,7 +685,9 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	// setting up the delay send for the fib_tri
 	for _, n := range nodes {
 		for _, wp := range Fib_Trib_WorkPackages {
-			n.delaysend[wp.Hash()] = 1
+			if test_prereq {
+				n.delaysend[wp.Hash()] = 1
+			}
 		}
 	}
 	// =================================================
@@ -748,7 +750,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
 					fmt.Printf("All workpackages are sent\n")
 					sentLastWorkPackage = true
-				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && Meg_Ready) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Ready) {
+				} else if (nodes[0].IsCoreReady(0) && Meg_Ready) && (nodes[0].IsCoreReady(1) && Fib_Tri_Ready) {
 					// if false{
 
 					// send workpackages to the network
@@ -771,7 +773,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					Fib_Tri_Ready = false
 					Fib_Tri_Keeper = true
 
-				} else if (Meg_Keeper && nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil && Fib_Tri_Keeper) {
+				} else if (Meg_Keeper && nodes[0].IsCoreReady(0)) && (Fib_Tri_Keeper && nodes[0].IsCoreReady(1)) {
 					Meg_Ready = true
 					Meg_Keeper = false
 					Fib_Tri_Ready = true
