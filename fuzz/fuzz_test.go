@@ -2,16 +2,10 @@ package fuzz
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
 )
 
 const (
@@ -25,58 +19,13 @@ const (
 	Base_Dir       = "../cmd/importblocks/"
 )
 
-func readStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition, err error) {
-	stfs = make([]*statedb.StateTransition, 0)
-	state_transitions_dir := filepath.Join(baseDir, dir, "state_transitions")
-	stFiles, err := os.ReadDir(state_transitions_dir)
-	if err != nil {
-		//panic(fmt.Sprintf("failed to read directory: %v\n", err))
-		return stfs, fmt.Errorf("failed to read directory: %v", err)
-	}
-	fmt.Printf("Selected Dir: %v\n", dir)
-	file_idx := 0
-	for _, file := range stFiles {
-		if strings.HasSuffix(file.Name(), ".bin") {
-			file_idx++
-			// Extract epoch and phase from filename `${epoch}_${phase}.bin`
-			parts := strings.Split(strings.TrimSuffix(file.Name(), ".bin"), "_")
-			if len(parts) != 2 {
-				log.Printf("Invalid block filename format: %s\n", file.Name())
-				continue
-			}
-
-			// Read the st file
-			stPath := filepath.Join(state_transitions_dir, file.Name())
-			fmt.Printf("STF#%03d %v\n", file_idx, stPath)
-			stBytes, err := os.ReadFile(stPath)
-			if err != nil {
-				log.Printf("Error reading block file %s: %v\n", file.Name(), err)
-				continue
-			}
-
-			// Decode st from stBytes
-			b, _, err := types.Decode(stBytes, reflect.TypeOf(statedb.StateTransition{}))
-			if err != nil {
-				log.Printf("Error decoding block %s: %v\n", file.Name(), err)
-				continue
-			}
-			// Store the state transition in the stateTransitions map
-			stf := b.(statedb.StateTransition)
-			fmt.Printf("STF#%03d %s\n", file_idx, types.PrintObject(stf))
-			stfs = append(stfs, &stf)
-		}
-	}
-	fmt.Printf("Loaded %v state transitions\n", len(stfs))
-	return stfs, nil
-}
-
 func readSTF(baseDir, targeted_mode string, t *testing.T) ([]*statedb.StateTransition, error) {
-	stfs, err := readStateTransitions(baseDir, targeted_mode)
+	stfs, err := ReadStateTransitions(baseDir, targeted_mode)
 	if err == nil {
 		return stfs, nil
 	}
 	fmt.Printf("%v-mode specific data unavailable.. using STF Generic data instead", targeted_mode)
-	stfs_generic, err := readStateTransitions(baseDir, STF_Generic)
+	stfs_generic, err := ReadStateTransitions(baseDir, STF_Generic)
 	if err != nil {
 		t.Fatalf("Unable to test %v fuzzing: %v", targeted_mode, err)
 		return nil, fmt.Errorf("Error reading state transitions for STF Generic: %v", err)

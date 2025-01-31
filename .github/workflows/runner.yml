@@ -78,26 +78,26 @@ jobs:
         run: go test ./bandersnatch 
 
       - name: Run test fib
-        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network,tiny 
+        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network_test,tiny 
 
       - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
 
       - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
 
       - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
 
       - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network,tiny
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
 
 #      - name: Run test transfer
-#        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network,tiny
+#        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network_test,tiny
 
 #      - name: Run test scaled balances
-#        run: go test ./node -timeout 12m -v -run ^TestScaledBalances$ -tags network,tiny
+#        run: go test ./node -timeout 12m -v -run ^TestScaledBalances$ -tags network_test,tiny
 
 #      - name: Run test balances
-#        run: go test ./node -timeout 12m -v -run ^TestBalances$ -tags network,tiny
+#        run: go test ./node -timeout 12m -v -run ^TestBalances$ -tags network_test,tiny
 

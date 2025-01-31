@@ -1,5 +1,5 @@
-//go:build network
-// +build network
+//go:build network_test
+// +build network_test
 
 package node
 

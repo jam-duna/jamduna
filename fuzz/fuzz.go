@@ -4,8 +4,12 @@ import (
 	//"errors"
 
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/colorfulnotion/jam/jamerrors"
@@ -16,6 +20,57 @@ import (
 
 type Fuzzer struct {
 	sdbStorage *storage.StateDBStorage
+}
+
+type FuzzedStfAnswers struct {
+	Mutated bool
+	Error   error
+	STF     *statedb.StateTransition
+}
+
+var fuzzModeList = map[string]bool{
+	// Enabled by default:
+	"assurances": true,
+
+	// Planned to be enabled:
+	"fallback":            true,
+	"safrole":             true,
+	"orderedaccumulation": true,
+
+	// Good to have (under development):
+	"authorization":      false,
+	"recenthistory":      false,
+	"blessed":            false,
+	"basichostfunctions": false,
+	"disputes":           false,
+	"gas":                false,
+	"finalization":       false,
+}
+
+func getModeStatus() (enabledModes []string, disabledModes []string) {
+	enabledModes = make([]string, 0)
+	disabledModes = make([]string, 0)
+	for mode, enabled := range fuzzModeList {
+		if enabled {
+			enabledModes = append(enabledModes, mode)
+		} else {
+			disabledModes = append(disabledModes, mode)
+		}
+	}
+	return enabledModes, disabledModes
+}
+func CheckModes(mode string) (bool, error) {
+	enabledModes, _ := getModeStatus()
+	modeEnabled, found := fuzzModeList[mode]
+	if !found {
+		errMsg := fmt.Sprintf("Mode Unknown. Must be one of %v", enabledModes)
+		return false, fmt.Errorf(errMsg)
+	}
+	if found && !modeEnabled {
+		errMsg := fmt.Sprintf("Mode Suppressed. Must be one of %v", enabledModes)
+		return false, fmt.Errorf(errMsg)
+	}
+	return true, nil
 }
 
 func NewFuzzer(storageDir string) (*Fuzzer, error) {
@@ -107,6 +162,139 @@ func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
 	}
 	return sdb_storage, nil
 
+}
+
+func Shuffle[T any](data []T) {
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(data), func(i, j int) {
+		data[i], data[j] = data[j], data[i]
+	})
+}
+
+func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.StateTransition, invalidRate float64, numBlocks int) (finalSTFs []FuzzedStfAnswers, err error) {
+
+	sdbStorage := f.sdbStorage
+	numInvalidBlocks := int(float64(numBlocks) * invalidRate)
+	numValidBlocks := numBlocks - numInvalidBlocks
+	fmt.Printf("InvalidRate=%.2f -> invalidBlocks=%d | validBlocks=%d | total=%d\n",
+		invalidRate, numInvalidBlocks, numValidBlocks, numBlocks,
+	)
+
+	Shuffle(stfs)
+
+	var fuzzedSTFs []FuzzedStfAnswers
+	var notFuzzedSTFs []FuzzedStfAnswers
+
+	fuzzableCandidates := make([]*statedb.StateTransition, 0, len(stfs))
+	for _, stf := range stfs {
+		_, expectedErr, possibleErrs := selectImportBlocksError(sdbStorage, modes, stf)
+		if expectedErr != nil || len(possibleErrs) > 0 {
+			fuzzableCandidates = append(fuzzableCandidates, stf)
+		} else {
+			notFuzzedSTFs = append(notFuzzedSTFs, FuzzedStfAnswers{
+				Mutated: false,
+				Error:   nil,
+				STF:     stf,
+			})
+		}
+	}
+
+	if numInvalidBlocks > 0 && len(fuzzableCandidates) == 0 {
+		log.Println("No STFs are fuzzable.")
+		return nil, fmt.Errorf("no STFs are fuzzable")
+	}
+
+	if numInvalidBlocks > 0 {
+		count := 0
+		for _, stf := range fuzzableCandidates {
+			if count >= numInvalidBlocks {
+				break
+			}
+			mutated, expectedErr, _ := selectImportBlocksError(sdbStorage, modes, stf)
+			fuzzedSTFs = append(fuzzedSTFs, FuzzedStfAnswers{
+				Mutated: true,
+				Error:   expectedErr,
+				STF:     mutated,
+			})
+			count++
+		}
+
+		if len(fuzzableCandidates) > 0 && len(fuzzedSTFs) < numInvalidBlocks {
+			idx := 0
+			for len(fuzzedSTFs) < numInvalidBlocks {
+				stf := fuzzableCandidates[idx%len(fuzzableCandidates)]
+				mutated, expectedErr, _ := selectImportBlocksError(sdbStorage, modes, stf)
+				fuzzedSTFs = append(fuzzedSTFs, FuzzedStfAnswers{
+					Mutated: true,
+					Error:   expectedErr,
+					STF:     mutated,
+				})
+				idx++
+			}
+		}
+	}
+
+	if len(notFuzzedSTFs) < numValidBlocks {
+		needed := numValidBlocks - len(notFuzzedSTFs)
+		idx := 0
+		for i := 0; i < needed; i++ {
+			notFuzzedSTFs = append(notFuzzedSTFs, notFuzzedSTFs[idx%len(notFuzzedSTFs)])
+			idx++
+		}
+	} else if len(notFuzzedSTFs) > numValidBlocks {
+		notFuzzedSTFs = notFuzzedSTFs[:numValidBlocks]
+	}
+
+	finalSTFs = append(fuzzedSTFs, notFuzzedSTFs...)
+	Shuffle(finalSTFs)
+
+	log.Printf("Fuzz completed: %d invalid blocks, %d valid blocks", len(fuzzedSTFs), len(notFuzzedSTFs))
+	return finalSTFs, nil
+}
+
+func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition, err error) {
+	stfs = make([]*statedb.StateTransition, 0)
+	state_transitions_dir := filepath.Join(baseDir, dir, "state_transitions")
+	stFiles, err := os.ReadDir(state_transitions_dir)
+	if err != nil {
+		//panic(fmt.Sprintf("failed to read directory: %v\n", err))
+		return stfs, fmt.Errorf("failed to read directory: %v", err)
+	}
+	fmt.Printf("Selected Dir: %v\n", dir)
+	file_idx := 0
+	for _, file := range stFiles {
+		if strings.HasSuffix(file.Name(), ".bin") {
+			file_idx++
+			// Extract epoch and phase from filename `${epoch}_${phase}.bin`
+			parts := strings.Split(strings.TrimSuffix(file.Name(), ".bin"), "_")
+			if len(parts) != 2 {
+				log.Printf("Invalid block filename format: %s\n", file.Name())
+				continue
+			}
+
+			// Read the st file
+			stPath := filepath.Join(state_transitions_dir, file.Name())
+			//fmt.Printf("STF#%03d %v\n", file_idx, stPath)
+			stBytes, err := os.ReadFile(stPath)
+			if err != nil {
+				log.Printf("Error reading block file %s: %v\n", file.Name(), err)
+				continue
+			}
+
+			// Decode st from stBytes
+			b, _, err := types.Decode(stBytes, reflect.TypeOf(statedb.StateTransition{}))
+			if err != nil {
+				log.Printf("Error decoding block %s: %v\n", file.Name(), err)
+				continue
+			}
+			// Store the state transition in the stateTransitions map
+			stf := b.(statedb.StateTransition)
+			//fmt.Printf("STF#%03d %s\n", file_idx, types.PrintObject(stf))
+			stfs = append(stfs, &stf)
+		}
+	}
+	fmt.Printf("Loaded %v state transitions\n", len(stfs))
+	return stfs, nil
 }
 
 func possibleError(selectedError error, block *types.Block, s *statedb.StateDB, validatorSecrets []types.ValidatorSecret) error {

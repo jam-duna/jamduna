@@ -4,37 +4,37 @@ TAGS ?= tiny
 
 fallback:
 	@echo "Running TestFallback with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestFallback -tags network,$(TAGS)
+	go test -timeout $(TIMEOUT) -v -run TestFallback -tags network_test,$(TAGS)
 
 safrole:
 	@echo "Running TestNodeSafrole with timeout $(TIMEOUT)..."
-	go test -timeout 20m -v -run TestSafrole -tags network,$(TAGS)
+	go test -timeout 20m -v -run TestSafrole -tags network_test,$(TAGS)
 
 fib:
 	@echo "Running TestFib with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestFib -tags network,$(TAGS)
+	go test -timeout $(TIMEOUT) -v -run TestFib -tags network_test,$(TAGS)
 
 megatron:
 	@echo "Running TestMegatron with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags network,$(TAGS)
+	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags network_test,$(TAGS)
 
 megatron_pprof:
 	@echo "Running TestMegatron with timeout (building pprof mode with test binary)"
-	go test -tags network -c -o node.test
+	go test -tags network_test -c -o node.test
 	./node.test -test.run TestMegatron
 disputes:
 	@echo "Running TestDisputes with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestDisputes -tags network,$(TAGS)
+	go test -timeout $(TIMEOUT) -v -run TestDisputes -tags network_test,$(TAGS)
 
 # Target for running a specific test function with the timeout
 transfer:
 	@echo "Running TestTransfer with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestTransfer -tags network,$(TAGS)
+	go test -timeout $(TIMEOUT) -v -run TestTransfer -tags network_test,$(TAGS)
 
 balances:
 	@echo "Running TestBalances with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestBalances -tags network
+	go test -timeout $(TIMEOUT) -v -run TestBalances -tags network_test
 
 scaled_balances:
 	@echo "Running TestScaledBalances with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestScaledBalances -tags network
+	go test -timeout $(TIMEOUT) -v -run TestScaledBalances -tags network_test
