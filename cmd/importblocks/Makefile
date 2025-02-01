@@ -22,6 +22,9 @@ all: build
 build:
 	go build -tags=$(NETWORK) -o $(BINARY_NAME) .
 
+importblocks: build
+	./$(BINARY_NAME)
+
 run:
 	go build -tags=$(NETWORK) -o $(BINARY_NAME_FUZZ) ../fuzzer
 	./$(BINARY_NAME_FUZZ)

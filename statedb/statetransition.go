@@ -2,12 +2,23 @@ package statedb
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
+
+type StateTransitionChallenge struct {
+	PreState StateSnapshotRaw `json:"pre_state"`
+	Block    types.Block      `json:"block"`
+}
+
+func (s *StateTransitionChallenge) String() string {
+	jsonEncode, _ := json.Marshal(s)
+	return string(jsonEncode)
+}
 
 type StateTransition struct {
 	PreState  StateSnapshotRaw `json:"pre_state"`
@@ -50,6 +61,29 @@ func makemap(p []KeyVal) (map[common.Hash][]byte, map[string]string) {
 		metaMap[metaKey] = fmt.Sprintf("%s|%s", kvs.StructType, kvs.Metadata)
 	}
 	return kvMap, metaMap
+}
+
+func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitionChallenge) (ok bool, postStateSnapshot *StateSnapshotRaw, jamErr error, miscErr error) {
+	scPreState := stc.PreState
+	scBlock := stc.Block
+	preState, miscErr := NewStateDBFromSnapshotRaw(storage, &scPreState)
+	if miscErr != nil {
+		// Invalid pre-state
+		return false, nil, nil, fmt.Errorf("PreState Error")
+	}
+	postState, jamErr := ApplyStateTransitionFromBlock(preState, context.Background(), &scBlock)
+	if jamErr != nil {
+		// When validating Fuzzed STC, we shall expect jamError
+		return true, nil, jamErr, nil
+	}
+
+	postState.StateRoot = postState.UpdateTrieState()
+	postStateSnapshot = &StateSnapshotRaw{
+		StateRoot: postState.StateRoot,
+		KeyVals:   postState.GetAllKeyValues(),
+	}
+	return true, postStateSnapshot, nil, nil
+
 }
 
 func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32) error {

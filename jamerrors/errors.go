@@ -90,7 +90,7 @@ func GetErrorStr(err error) string {
 	}
 	errStr := err.Error()
 	if err == ErrGBadCoreIndex || err == ErrGBadSignature || err == ErrGBadValidatorIndex {
-		return "codec problem"
+		//return "codec problem"
 	}
 	if !strings.Contains(errStr, ":") {
 		return errStr

@@ -51,10 +51,10 @@ func main() {
 
 	jConfig := types.ConfigJamBlocks{
 		Mode:        "assurances",
-		HTTP:        "http://localhost:8088/fuzz_json",
+		HTTP:        "http://localhost:8088/challenge",
 		QUIC:        "",
 		Verbose:     false,
-		NumBlocks:   500,
+		NumBlocks:   100,
 		InvalidRate: 0.14285,
 		Statistics:  20,
 		Network:     "tiny",
@@ -71,6 +71,7 @@ func main() {
 	fReg.RegisterFlag("statistics", nil, jConfig.Statistics, "Print statistics interval", &jConfig.Statistics)
 	fReg.RegisterFlag("dir", nil, dir, "Storage directory", &dir)
 	//fReg.RegisterFlag("rpc", nil, enableRPC, "Start RPC server", &enableRPC)
+	//fReg.RegisterFlag("genesis", nil, genesis, "Initial Genesis State", &genesis) // not planned
 	fReg.ProcessRegistry()
 	fmt.Printf("%v\n", jConfig)
 
@@ -88,19 +89,16 @@ func main() {
 		}()
 	}
 
-	// Handle interrupts for graceful shutdown
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 
 	startTime := time.Now()
-	generatedBlockCnt := 0
 	numBlocks := jConfig.NumBlocks
 	nonStopFlagSet := jConfig.NumBlocks == magicConst
 	mode := jConfig.Mode
 
 	log.Printf("[INFO] Starting block generation: mode=%s, numBlocks=%d, dir=%s\n", mode, numBlocks, dir)
 
-	// load stf
 	baseDir := "./"
 	stfs, err := fuzz.ReadStateTransitions(baseDir, mode)
 	if err != nil || len(stfs) == 0 {
@@ -109,13 +107,15 @@ func main() {
 	}
 
 	fmt.Printf("Fuzz ready! sources=%v\n", len(stfs))
-	fuzzAnswer, fuzzErr := fuzzer.FuzzWithTargetedInvalidRate([]string{mode}, stfs, jConfig.InvalidRate, numBlocks)
+	stfTestBank, fuzzErr := fuzzer.FuzzWithTargetedInvalidRate([]string{mode}, stfs, jConfig.InvalidRate, numBlocks)
 	if fuzzErr != nil {
 		log.Fatal(fuzzErr)
 	}
 
 	mutatedBlks := make([]common.Hash, 0)
 	originalBlks := make([]common.Hash, 0)
+
+	fStat := fuzz.FuzzStats{}
 
 	for i := 0; i < numBlocks || nonStopFlagSet; i++ {
 		select {
@@ -124,32 +124,85 @@ func main() {
 			goto finish
 		default:
 			time.Sleep(50 * time.Millisecond)
-			if numBlocks >= generatedBlockCnt {
-				stfAns := fuzzAnswer[generatedBlockCnt]
-				identifierHash := stfAns.STF.Block.Hash()
-				//TODO: Send to client's RPC or Quic
-				if stfAns.Mutated {
-					log.Printf("B#%.3d Fuzzed: %v\n", i, jamerrors.GetErrorStr(stfAns.Error))
-					mutatedBlks = append(mutatedBlks, identifierHash)
+			if i >= len(stfTestBank) {
+				log.Println("No more state transitions available.")
+				break
+			}
+			stfQA := stfTestBank[i]
+			identifierHash := stfQA.STF.Block.Hash()
+			challengerFuzzed := stfQA.Mutated // Challenger's belief.
+
+			// Basic Metrics
+			fStat.TotalBlocks++
+			if challengerFuzzed {
+				fStat.FuzzedBlocks++
+			} else {
+				fStat.OriginalBlocks++
+			}
+
+			if challengerFuzzed {
+				log.Printf("B#%.3d Fuzzed: %v\n", i, jamerrors.GetErrorStr(stfQA.Error))
+				mutatedBlks = append(mutatedBlks, identifierHash)
+			} else {
+				//log.Printf("B#%.3d Original\n", i)
+				originalBlks = append(originalBlks, identifierHash)
+			}
+
+			// Send challenge to HTTP endpoint.
+			/*
+				FuzzTruePositives      int `json:"fuzz_true_positives"`     // Fuzzed blocks correctly detected.
+				FuzzFalseNegatives     int `json:"fuzz_false_negatives"`    // Fuzzed blocks that were missed.
+				FuzzResponseErrors     int `json:"fuzz_response_errors"`    // Response errors in fuzzed blocks.
+				FuzzMisclassifications int `json:"fuzz_misclassifications"` // Fuzzed blocks misclassified.
+				OrigFalsePositives     int `json:"orig_false_positives"`    // Original blocks wrongly flagged.
+				OrigTrueNegatives      int `json:"orig_true_negatives"`     // Original blocks correctly validated.
+				OrigResponseErrors     int `json:"orig_response_errors"`    // Response errors in original blocks.
+				OrigMisclassifications int `json:"orig_misclassifications"` // Original blocks misclassified.
+			*/
+			stfChallenge := stfQA.ToChallenge()
+			postSTResp, respOK, _ := fuzzer.SendStateTransitionChallenge(jConfig.HTTP, stfChallenge)
+			if respOK {
+				solverFuzzed := postSTResp.Mutated // Solver's belief.
+				isMatch, validationErr := fuzzer.ValidateStateTransitionChallengeResponse(&stfQA, postSTResp)
+				if jConfig.Verbose {
+					log.Printf("B#%.3d respOK. isMatch:%v. vErr:%v\n", i, isMatch, validationErr)
+				}
+				switch {
+				case challengerFuzzed && solverFuzzed && isMatch:
+					// Fuzzed blocks correctly detected.
+					fStat.FuzzTruePositives++
+				case challengerFuzzed && solverFuzzed && !isMatch:
+					// Fuzzed blocks misclassified.
+					fStat.FuzzMisclassifications++
+				case challengerFuzzed && !solverFuzzed:
+					// Fuzzed blocks that were missed.
+					fStat.FuzzFalseNegatives++
+				case !challengerFuzzed && !solverFuzzed && isMatch:
+					// Original blocks correctly validated.
+					fStat.OrigTrueNegatives++
+				case !challengerFuzzed && !solverFuzzed && !isMatch:
+					// Original blocks misclassified.
+					fStat.OrigMisclassifications++
+				case !challengerFuzzed && solverFuzzed:
+					// Original blocks wrongly flagged.
+					fStat.OrigFalsePositives++
+				}
+			} else {
+				// Handle response errors.
+				if challengerFuzzed {
+					fStat.FuzzResponseErrors++
 				} else {
-					//log.Printf("B#%.3d Original\n", i)
-					originalBlks = append(originalBlks, identifierHash)
+					fStat.OrigResponseErrors++
 				}
-				generatedBlockCnt++
-				if generatedBlockCnt%jConfig.Statistics == 0 {
-					validCnt := len(originalBlks)
-					invalidCnt := len(mutatedBlks)
-					actualInvalidRate := float64(invalidCnt) / float64(validCnt+invalidCnt)
-					log.Printf("[Stats] Generated %d blocks. Fuzzed=%v Original=%v InvalidRate=%f (mode=%s)", generatedBlockCnt, validCnt, invalidCnt, actualInvalidRate, mode)
-				}
+			}
+
+			if fStat.TotalBlocks%jConfig.Statistics == 0 {
+				log.Printf("[%s Mode]\nStats:\n%s\n", mode, fStat.DumpMetrics())
 			}
 		}
 	}
 
 finish:
 	elapsed := time.Since(startTime).Seconds()
-	validCnt := len(originalBlks)
-	invalidCnt := len(mutatedBlks)
-	actualInvalidRate := float64(invalidCnt) / float64(validCnt+invalidCnt)
-	log.Printf("Done in %.2fs. Generated %d blocks Fuzzed=%v Original=%v, InvalidRate=%f (mode=%s)\n", elapsed, generatedBlockCnt, validCnt, invalidCnt, actualInvalidRate, mode)
+	log.Printf("[%s Mode] Done in %.2fs\n%s\n", mode, elapsed, fStat.DumpMetrics())
 }
