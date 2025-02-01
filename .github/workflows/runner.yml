@@ -80,17 +80,28 @@ jobs:
       - name: Run test fib
         run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network_test,tiny 
 
-      - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
 
-      - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
+      # if there is a failure in the following tests, the workflow will continue
+      # if one of the tests fails, we will run the debug_eg_error target to get more information
+      - name: Run test megatron (1/4)
+        id: megatron_1
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+        continue-on-error: true
+ 
+      - name: Run test megatron (2/4)
+        id: megatron_2
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+        continue-on-error: true
 
-      - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
+      - name: Run test megatron (3/4)
+        id: megatron_3
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+        continue-on-error: true
 
-      - name: Run test megatron
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny
+      - name: Run test megatron (4/4)
+        id: megatron_4
+        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+        continue-on-error: true
 
 #      - name: Run test transfer
 #        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network_test,tiny

@@ -22,6 +22,14 @@ megatron_pprof:
 	@echo "Running TestMegatron with timeout (building pprof mode with test binary)"
 	go test -tags network_test -c -o node.test
 	./node.test -test.run TestMegatron
+
+debug_eg_error:
+	@echo "see the error and status from guarantees"
+	@echo "EG_error : "
+	cat ./logs/EG_error.log
+	@echo "EG_status : "
+	cat ./logs/EG_status.log
+
 disputes:
 	@echo "Running TestDisputes with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestDisputes -tags network_test,$(TAGS)

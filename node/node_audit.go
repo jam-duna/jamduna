@@ -515,22 +515,21 @@ func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash 
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
 
-	value, err := n.getTrancheAnnouncement(headerHash)
+	tranche_announcement, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
 		return false
 	}
-	bucket := value.AnnouncementBucket[announcement.Tranche]
-	return bucket.HaveMadeAnnouncement(announcement)
+	return tranche_announcement.HaveMadeAnnouncement(announcement)
 }
 
 func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash) (types.AnnounceBucket, error) {
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
-	value, err := n.getTrancheAnnouncement(headerHash)
+	tranche_announcement, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
 		return types.AnnounceBucket{}, err
 	}
-	bucket, exists := value.AnnouncementBucket[tranche]
+	bucket, exists := tranche_announcement.AnnouncementBucket[tranche]
 	if !exists {
 		return types.AnnounceBucket{}, fmt.Errorf("tranche %v not found for auditing", tranche)
 	}

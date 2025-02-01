@@ -12,10 +12,13 @@ import (
 // TrancheAnnouncement should probably just be [trancheIdx]AnnounceBucket
 // given [trancheIdx], get your currAnnouncementBucket and PrevAnnouncementBucket
 type TrancheAnnouncement struct {
+	sync.Mutex
 	AnnouncementBucket map[uint32]*AnnounceBucket
 }
 
 func (T *TrancheAnnouncement) PutAnnouncement(a Announcement) error {
+	T.Lock()
+	defer T.Unlock()
 	if T.AnnouncementBucket == nil {
 		T.AnnouncementBucket = make(map[uint32]*AnnounceBucket)
 	}
@@ -23,6 +26,16 @@ func (T *TrancheAnnouncement) PutAnnouncement(a Announcement) error {
 	bucket.PutAnnouncement(a)
 	T.AnnouncementBucket[a.Tranche] = bucket
 	return nil
+}
+
+func (T *TrancheAnnouncement) HaveMadeAnnouncement(a Announcement) bool {
+	T.Lock()
+	defer T.Unlock()
+	if T.AnnouncementBucket == nil {
+		return false
+	}
+	bucket := T.AnnouncementBucket[a.Tranche]
+	return bucket.HaveMadeAnnouncement(a)
 }
 
 // Announcement  Section 17.3 Equations (196)-(199) TBD
