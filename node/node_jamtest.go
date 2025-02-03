@@ -25,6 +25,10 @@ import (
 	"time"
 )
 
+const (
+	webServicePort = 8079
+)
+
 func sendStateTransition(endpoint string, st *statedb.StateTransition) (err error, check *statedb.StateTransitionCheck) {
 	client := &http.Client{}
 	req, err := http.NewRequest("POST", endpoint, nil)
@@ -115,7 +119,7 @@ func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
 	return path, nil
 }
 
-func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
+func SetupQuicNetwork(network string, basePort uint16) (uint32, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
 	peers := make([]string, numNodes)
 	peerList := make(map[uint16]*Peer)
 	nodePaths := SetLevelDBPaths(numNodes)
@@ -128,7 +132,7 @@ func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []typ
 
 	epoch0Timestamp := statedb.NewEpoch0Timestamp()
 	for i := uint16(0); i < numNodes; i++ {
-		addr := fmt.Sprintf(quicAddr, 9000+i)
+		addr := fmt.Sprintf(quicAddr, basePort+i)
 		peers[i] = addr
 		peerList[i] = &Peer{
 			PeerID:    i,
@@ -149,10 +153,25 @@ func SetupQuicNetwork(network string) (uint32, []string, map[uint16]*Peer, []typ
 
 var Logger *storage.DebugLogger
 
-func SetUpNodes(numNodes int) ([]*Node, error) {
+func GenerateRandomBasePort() uint16 {
+
+	// New seed every time
+	seed := uint64(time.Now().UnixNano())
+	r := rand.New(rand.NewSource(seed))
+
+	// Generate base port in the 1xx00 - 6xx range to support multi-running
+	region := r.Intn(6) + 1
+	mid := r.Intn(100)
+	basePort := uint16(region*10000 + mid*100)
+	return basePort
+}
+
+func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
 	GenesisFile := getGenesisFile(network)
-	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network)
+	fmt.Printf("Using BasePort: %v\n", basePort)
+
+	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
 
 	if err != nil {
 		return nil, err
@@ -162,10 +181,11 @@ func SetUpNodes(numNodes int) ([]*Node, error) {
 		Logger = storage.InitDefaultLoggers()
 		storage.Logger = Logger
 	}
+
 	nodes := make([]*Node, numNodes)
 	godIncomingCh := make(chan uint32, 10) // node sends timeslots to this channel when authoring
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], GenesisFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], basePort+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], GenesisFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i)
 		if err != nil {
 			panic(err)
 			return nil, fmt.Errorf("Failed to create node %d: %v", i, err)
@@ -175,7 +195,7 @@ func SetUpNodes(numNodes int) ([]*Node, error) {
 		}
 		nodes[i] = node
 		if i == 0 {
-			go node.runWebService(8079)
+			go node.runWebService(webServicePort + basePort)
 		}
 	}
 	go func() {
@@ -231,7 +251,7 @@ func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, 
 }
 
 func safrole(sendtickets bool) {
-	nodes, err := SetUpNodes(numNodes)
+	nodes, err := SetUpNodes(numNodes, 10000)
 	if err != nil {
 		panic(err)
 	}
@@ -268,16 +288,15 @@ func ImportBlocks(config *types.ConfigJamBlocks) {
 	// orderedaccumulation - jamtest("megatron")
 }
 
-func jamtest(t *testing.T, jam string, targetedEpochLen int) {
+func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 
-	nodes, err := SetUpNodes(numNodes)
+	nodes, err := SetUpNodes(numNodes, basePort)
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
 	Logger.RecordLogs(storage.Testing_record, fmt.Sprintf("[JAMTEST : %s] Start!!!\n", jam), true)
 	_ = nodes
-	block_graph_server := types.NewGraphServer()
-
+	block_graph_server := types.NewGraphServer(basePort)
 	go block_graph_server.StartServer()
 	ticker_blockserver := time.NewTicker(1 * time.Second)
 	go func() {

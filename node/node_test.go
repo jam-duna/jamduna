@@ -20,8 +20,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func safroleTest(t *testing.T, caseType string, targetedEpochLen int, bufferTime int) {
-	nodes, err := SetUpNodes(numNodes)
+func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
+	nodes, err := SetUpNodes(numNodes, basePort)
 	if err != nil {
 		panic(err)
 	}
@@ -45,7 +45,7 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, bufferTime
 	done := make(chan bool)
 	errChan := make(chan error)
 
-	go RunGrandpaGraphServer(watchNode)
+	go RunGrandpaGraphServer(watchNode, basePort)
 
 	go func() {
 		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
@@ -73,15 +73,18 @@ const BalancesEpochLen = 6    // Balance
 const ScaleBalancesEpochLen = 6
 
 func TestFallback(t *testing.T) {
-	safroleTest(t, "fallback", FallbackEpochLen, 0)
+	basePort := GenerateRandomBasePort()
+	safroleTest(t, "fallback", FallbackEpochLen, basePort, 0)
 }
 
 func TestSafrole(t *testing.T) {
-	safroleTest(t, "safrole", SafroleTestEpochLen, 0)
+	basePort := GenerateRandomBasePort()
+	safroleTest(t, "safrole", SafroleTestEpochLen, basePort, 0)
 }
 
 func TestFib(t *testing.T) {
-	jamtest(t, "fib", FibTestEpochLen)
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "fib", FibTestEpochLen, basePort)
 }
 
 func TestMegatron(t *testing.T) {
@@ -108,23 +111,28 @@ func TestMegatron(t *testing.T) {
 	if err := pprof.WriteHeapProfile(memProfile); err != nil {
 		t.Fatalf("Unable to write memory Profile: %v", err)
 	}
-	jamtest(t, "megatron", MegaTronEpochLen)
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "megatron", MegaTronEpochLen, basePort)
 }
 
 func TestTransfer(t *testing.T) {
-	jamtest(t, "transfer", TransferEpochLen)
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "transfer", TransferEpochLen, basePort)
 }
 
 func TestBalances(t *testing.T) {
-	jamtest(t, "balances", BalancesEpochLen)
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "balances", BalancesEpochLen, basePort)
 }
 
 func TestScaledBalances(t *testing.T) {
-	jamtest(t, "scaled_balances", ScaleBalancesEpochLen)
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "scaled_balances", ScaleBalancesEpochLen, basePort)
 }
 
 func TestDisputes(t *testing.T) {
-	nodes, err := SetUpNodes(numNodes)
+	basePort := GenerateRandomBasePort()
+	nodes, err := SetUpNodes(numNodes, basePort)
 	if err != nil {
 		t.Fatalf("Failed to set up nodes: %v", err)
 	}
@@ -261,11 +269,11 @@ func TestDisputes(t *testing.T) {
 	time.Sleep(50 * time.Second)
 }
 
-func RunGrandpaGraphServer(watchNode *Node) {
+func RunGrandpaGraphServer(watchNode *Node, basePort uint16) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	block_graph_server := types.NewGraphServer()
+	block_graph_server := types.NewGraphServer(basePort)
 	go block_graph_server.StartServer()
 	for {
 		select {

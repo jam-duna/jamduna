@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
 	"html/template"
 	"log"
 	"net/http"
 	"path"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 )
 
 type SerializedBlock struct {
@@ -174,6 +175,6 @@ func (n *Node) runWebService(port uint16) {
 	})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	fmt.Printf("Starting server on %s\n", addr)
+	fmt.Printf("Starting webservice server on %s\n", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

@@ -11,15 +11,21 @@ import (
 	"github.com/go-echarts/go-echarts/v2/types"
 )
 
+const (
+	graphServerPort uint16 = 3030
+)
+
 type GraphServer struct {
-	Graph  *charts.Graph
-	Server *http.Server
+	BasePort uint16
+	Graph    *charts.Graph
+	Server   *http.Server
 }
 
 // NewGraphServer initializes a new GraphServer instance.
-func NewGraphServer() *GraphServer {
+func NewGraphServer(basePort uint16) *GraphServer {
 	return &GraphServer{
-		Graph: charts.NewGraph(),
+		BasePort: basePort,
+		Graph:    charts.NewGraph(),
 	}
 }
 
@@ -32,9 +38,9 @@ func (gs *GraphServer) StartServer() {
 		}
 		page.Render(rw)
 	})
-
-	log.Println("Starting server at :3030")
-	if err := http.ListenAndServe(":3030", nil); err != nil && err != http.ErrServerClosed {
+	portStr := fmt.Sprintf(":%d", graphServerPort+gs.BasePort)
+	log.Printf("Starting Graph server at %s", portStr)
+	if err := http.ListenAndServe(portStr, nil); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

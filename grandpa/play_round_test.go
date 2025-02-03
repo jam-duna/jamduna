@@ -126,7 +126,8 @@ func TestPlayRound(t *testing.T) {
 		node.PlayGrandpaRound(ctx, 1)
 	}
 	tmp_blk := genesis_blk
-	graph_server := types.NewGraphServer()
+	basePort := 10000
+	graph_server := types.NewGraphServer(basePort)
 	go graph_server.StartServer()
 	ticker := time.NewTicker(6 * time.Second)
 	ticker2 := time.NewTicker(1 * time.Second)

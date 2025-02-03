@@ -322,6 +322,6 @@ func main() {
 	})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	fmt.Printf("Starting server on %s\n", addr)
+	fmt.Printf("Starting JAMweb server on %s\n", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
