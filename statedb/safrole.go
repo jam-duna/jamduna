@@ -1084,7 +1084,7 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 			s2.TicketsOrKeys = ticketsOrKeys
 			s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)
 		} else { // eq 68 fallback mode
-			chosenkeys, err := s.ChooseFallBackValidator()
+			chosenkeys, err := s2.ChooseFallBackValidator()
 			if err != nil {
 				return s2, epochAdvanced, fmt.Errorf("ChooseFallBackValidator %v", err)
 			}

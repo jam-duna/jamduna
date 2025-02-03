@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -54,10 +55,9 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 func (n *Node) processGuarantee(g types.Guarantee) error {
 	// Store the guarantee in the tip's queued guarantees
 	s := n.getState()
-	CurrV := s.GetSafrole().CurrValidators
-	err := g.Verify(CurrV)
+	err := s.ValidateSingleGuarantee(g)
 	if err != nil {
-		fmt.Printf("processGuarantee: Invalid guarantee %s. Err=%v\n", g.String(), err)
+		Logger.RecordLogs(storage.EG_status, fmt.Sprintf("ValidateSingleGuarantee ERR %v", err), true)
 		return err
 	}
 	err = n.extrinsic_pool.AddGuaranteeToPool(g)

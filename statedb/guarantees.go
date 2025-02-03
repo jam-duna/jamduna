@@ -349,6 +349,67 @@ func (s *StateDB) ValidateGuarantees(guarantees []types.Guarantee) error {
 	return nil
 }
 
+// this function will be used in process incoming guarantee
+func (s *StateDB) ValidateSingleGuarantee(guarantee types.Guarantee) error {
+	max_core := types.TotalCores - 1
+	if guarantee.Report.CoreIndex > uint16(max_core) {
+		return jamerrors.ErrGBadCoreIndex
+	}
+	max_validator := types.TotalValidators - 1
+	for _, g := range guarantee.Signatures {
+		if g.ValidatorIndex > uint16(max_validator) {
+			return jamerrors.ErrGBadValidatorIndex
+		}
+	}
+	if len(guarantee.Signatures) < 2 {
+		return jamerrors.ErrGInsufficientGuarantees
+	}
+	err := s.checkServicesExist(guarantee)
+	if err != nil {
+		return err
+	}
+	// v0.5 eq 11.24 - check index
+	err = CheckSorting_EG(guarantee)
+	if err != nil {
+		return err // CHECK: instead of jamerrors.ErrGDuplicateGuarantors
+	}
+	// v0.5 eq 11.25 - check signature, core assign check,C_v ...
+	if !s.IsPreviousValidators(guarantee.Slot) {
+		CurrV := s.JamState.SafroleState.CurrValidators
+		err = guarantee.Verify(CurrV) // errBadSignature
+		if err != nil {
+			return jamerrors.ErrGBadSignature
+		}
+	} else {
+		PrevV := s.JamState.SafroleState.PrevValidators
+		err = guarantee.Verify(PrevV) // errBadSignature
+		if err != nil {
+			return jamerrors.ErrGBadSignature
+		}
+	}
+	// v.05 eq 11.29 - check gas
+	err = s.checkGas(guarantee)
+	if err != nil {
+		return err // CHECK: instead of jamerrors.ErrGWorkReportGasTooHigh
+	}
+	// v0.5 eq 11.34
+	err = s.checkRecentBlock(guarantee)
+	if err != nil {
+		return err
+	}
+	// v0.5 eq 11.38
+	err = s.checkAnyPrereq(guarantee)
+	if err != nil {
+		return err
+	}
+	// v0.5 eq 11.41 - check code hash
+	err = s.checkCodeHash(guarantee)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // v0.5 eq 11.23 - this function will be used by make block
 func SortByCoreIndex(guarantees []types.Guarantee) []types.Guarantee {
 	// remove duplicates, keeping only the guarantee with the latest timeslot for each work package hash

@@ -331,7 +331,6 @@ func (n *Node) runMain() {
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {
-				fmt.Printf("%s processGuarantee: %v\n", n.String(), err)
 				Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s processGuarantee: %v\n", n.String(), err), true)
 			}
 		case assurance := <-n.assurancesCh:

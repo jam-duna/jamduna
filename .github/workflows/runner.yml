@@ -17,14 +17,16 @@ on:
       - statedb/*.go
       - node/*.go
   schedule:
-    - cron: '10,40 * * * *'
+    - cron: '30 * * * *'
       branches: 
         - main
 
 jobs:
   test:
     runs-on: jamops-16-core
-    timeout-minutes: 30
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 2 
     steps:
       - name: Checkout main code
         uses: actions/checkout@v3
@@ -83,32 +85,33 @@ jobs:
 
       # if there is a failure in the following tests, the workflow will continue
       # if one of the tests fails, we will run the debug_eg_error target to get more information
-      - name: Run test megatron (1/4)
+      - name: Run test megatron (1/2)
         id: megatron_1
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+        run: go test ./node -timeout 8m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
         continue-on-error: true
  
-      - name: Run test megatron (2/4)
+      - name: Run test megatron (2/2)
         id: megatron_2
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+        run: go test ./node -timeout 8m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
         continue-on-error: true
 
-      - name: Run test megatron (3/4)
-        id: megatron_3
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+      - name: Run test transfer (1/2)
+        id: transfer_1
+        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network_test,tiny || make -C ./node debug_eg_error
+        continue-on-error: true
+        
+      - name: Run test transfer (2/2)
+        id: transfer_2
+        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network_test,tiny || make -C ./node debug_eg_error
         continue-on-error: true
 
-      - name: Run test megatron (4/4)
-        id: megatron_4
-        run: go test ./node -timeout 15m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+      - name: Run test scaled balances
+        id: scaled
+        run: go test ./node -timeout 12m -v -run ^TestScaledBalances$ -tags network_test,tiny || make -C ./node debug_eg_error
         continue-on-error: true
 
-#      - name: Run test transfer
-#        run: go test ./node -timeout 12m -v -run ^TestTransfer$ -tags network_test,tiny
-
-#      - name: Run test scaled balances
-#        run: go test ./node -timeout 12m -v -run ^TestScaledBalances$ -tags network_test,tiny
-
-#      - name: Run test balances
-#        run: go test ./node -timeout 12m -v -run ^TestBalances$ -tags network_test,tiny
+      - name: Run test balances
+        id: balances
+        run: go test ./node -timeout 12m -v -run ^TestBalances$ -tags network_test,tiny || make -C ./node debug_eg_error
+        continue-on-error: true
 
