@@ -21,8 +21,8 @@ type JamState struct {
 	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
 	PrivilegedServiceIndices types.Kai_state                              `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
 	ValidatorStatistics      ValidatorStatistics                          `json:"pi"`                          // pi The validator statistics. π eq 171
-	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"accumulate_queue"`            // theta - The accumulation queue  θ eq 164
-	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulate_history"`          // xi - The accumulation history  ξ eq 162
+	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"ready_queue"`                 // theta - The accumulation queue  θ eq 164
+	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulated"`                 // xi - The accumulation history  ξ eq 162
 }
 
 type ValidatorStatistics struct {

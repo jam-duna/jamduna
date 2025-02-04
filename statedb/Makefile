@@ -60,12 +60,19 @@ auth:
 		echo "###$(NETWORK) Case###" && \
 		go test -timeout $(TIMEOUT) -v -run TestVerifyAuth  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
+accumulate:
+	@echo "Running 'TestAccumulate' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && \
+		echo "###$(NETWORK) Case###" && \
+		go test -timeout $(TIMEOUT) -v -run TestAccumulateSTF  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+
+
 stats:
 	@echo "Running 'TestCodecStatistics' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "^TestCodecStatistics$$" -tags $(NETWORK)
 
 
-test-network: safrole report valid_report assurance dispute stats auth
+test-network: safrole report valid_report assurance dispute stats auth accumulate
 	@echo "Finished all tests for network='$(NETWORK)'"
 
 tiny:

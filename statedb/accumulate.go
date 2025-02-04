@@ -1,7 +1,9 @@
 package statedb
 
 import (
+	"bytes"
 	"errors"
+	"sort"
 
 	"fmt"
 
@@ -56,7 +58,7 @@ func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQue
 // v0.4.5 eq.167 - D(w)
 func Depandancy(w types.WorkReport) types.AccumulationQueue {
 	result := types.AccumulationQueue{}
-	result.WorkReports = append(result.WorkReports, w)
+	result.WorkReport = w
 	// w.RefineContext.Prerequisite union key(w.SegmentRootLookup)
 	hashSet := make(map[common.Hash]struct{})
 	for _, p := range w.RefineContext.Prerequisites {
@@ -85,7 +87,7 @@ func Depandancy(w types.WorkReport) types.AccumulationQueue {
 
 // v0.4.5 eq.168 - function E
 func QueueEditing(r []types.AccumulationQueue, x []common.Hash) []types.AccumulationQueue {
-	var result []types.AccumulationQueue
+	result := make([]types.AccumulationQueue, 0)
 	hashSet := make(map[common.Hash]struct{}, len(x))
 	for _, h := range x {
 		hashSet[h] = struct{}{}
@@ -93,12 +95,9 @@ func QueueEditing(r []types.AccumulationQueue, x []common.Hash) []types.Accumula
 
 	for _, item := range r {
 		found := false
-		for _, report := range item.WorkReports {
-			h := report.AvailabilitySpec.WorkPackageHash
-			if _, exists := hashSet[h]; exists {
-				found = true
-				break
-			}
+		h := item.WorkReport.AvailabilitySpec.WorkPackageHash
+		if _, exists := hashSet[h]; exists {
+			found = true
 		}
 		if !found {
 			new_wp_hash := []common.Hash{}
@@ -119,25 +118,28 @@ func PriorityQueue(r []types.AccumulationQueue) []types.WorkReport {
 	g := []types.WorkReport{}
 	for _, item := range r {
 		if len(item.WorkPackageHash) == 0 {
-			g = append(g, item.WorkReports...)
+			g = append(g, item.WorkReport)
 		}
 	}
 	if len(g) == 0 {
 		return []types.WorkReport{}
-	} else {
-		result := g
-		result = append(result, PriorityQueue(QueueEditing(r, Mapping(g)))...)
-		return result
 	}
+	round_result := PriorityQueue(QueueEditing(r, Mapping(g)))
+	g = append(g, round_result...)
+	return g
 }
 
 // v0.4.5 eq.170 - function P
 func Mapping(w []types.WorkReport) []common.Hash {
-	result := []common.Hash{}
+	result := make([]common.Hash, 0)
 	for _, workReport := range w {
 		result = append(result, workReport.AvailabilitySpec.WorkPackageHash)
 	}
-	return result
+	if len(result) > 0 {
+		return result
+	} else {
+		return nil
+	}
 }
 
 // v0.4.5 eq.171 - m
@@ -152,7 +154,9 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 	result := accumulated_immediately
 	j := s.GetJamState()
 	queued_execution := j.QueuedExecution(W)
-	result = append(result, PriorityQueue(s.ComputeReadyQueue(queued_execution, accumulated_immediately))...)
+	q := s.ComputeReadyQueue(queued_execution, accumulated_immediately)
+	Q_q := PriorityQueue(q)
+	result = append(result, Q_q...)
 	return result
 }
 
@@ -170,6 +174,7 @@ func (s *StateDB) GetReadyQueue(W []types.WorkReport) []common.Hash {
 }
 
 // v0.4.5 eq.173 - q
+// v0.6.1 12.12
 func (s *StateDB) ComputeReadyQueue(queued_execution []types.AccumulationQueue, accumulated_immediately []types.WorkReport) []types.AccumulationQueue {
 	j := s.GetJamState()
 	ready_state := j.AccumulationQueue
@@ -577,15 +582,22 @@ func (j *JamState) UpdateLatestHistory(w_star []types.WorkReport, num int) {
 	}
 	// eq 186 0.4.5
 	j.AccumulationHistory[types.EpochLength-1].WorkPackageHash = Mapping(accumulated_wr)
+	SortByHash(j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 	// if len(j.AccumulationHistory[types.EpochLength-1].WorkPackageHash) > 0 {
 	// 	fmt.Printf("UpdateLatestHistory WorkPackageHash=%v\n", j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 	// }
 }
 
+func SortByHash(hashes []common.Hash) {
+	// sort the hashes
+	sort.Slice(hashes, func(i, j int) bool {
+		return bytes.Compare(hashes[i][:], hashes[j][:]) < 0
+	})
+}
+
 func (j *JamState) UpdateReadyQueuedReport(w_q []types.AccumulationQueue, previous_t uint32) {
 	timeslot := j.SafroleState.Timeslot
 	_, phase := j.SafroleState.EpochAndPhase(timeslot)
-	// fmt.Printf("UpdateReadyQueuedReport timeslot=%d phase=%d, previous= %d\n", timeslot, phase, previous_t)
 	if previous_t == 0 {
 		return
 	}
@@ -595,7 +607,7 @@ func (j *JamState) UpdateReadyQueuedReport(w_q []types.AccumulationQueue, previo
 		if i == 0 {
 			j.AccumulationQueue[num] = QueueEditing(w_q, j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 		} else if i >= 1 && i < timeslot-previous_t {
-			j.AccumulationQueue[num] = []types.AccumulationQueue{}
+			j.AccumulationQueue[num] = make([]types.AccumulationQueue, 0)
 		} else {
 			j.AccumulationQueue[num] = QueueEditing(j.AccumulationQueue[num], j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 		}

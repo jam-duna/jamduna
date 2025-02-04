@@ -7,8 +7,8 @@ import (
 )
 
 type AccumulationQueue struct {
-	WorkReports     []WorkReport  `json:"work_reports"`
-	WorkPackageHash []common.Hash `json:"work_package_hash"`
+	WorkReport      WorkReport    `json:"report"`
+	WorkPackageHash []common.Hash `json:"dependencies"`
 }
 
 type AccumulationHistory struct {

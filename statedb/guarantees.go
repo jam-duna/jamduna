@@ -850,10 +850,9 @@ func (s *StateDB) getPrereqFromAccumulationQueue() []common.Hash {
 	fmt.Printf("s.JamState.AccumulationQueue %v\n", s.JamState.AccumulationQueue)
 	for i := 0; i < types.EpochLength; i++ {
 		for _, queues := range s.JamState.AccumulationQueue[i] {
-			for _, workreport := range queues.WorkReports {
-				if len(workreport.RefineContext.Prerequisites) != 0 {
-					result = append(result, workreport.RefineContext.Prerequisites...)
-				}
+			workreport := queues.WorkReport
+			if len(workreport.RefineContext.Prerequisites) != 0 {
+				result = append(result, workreport.RefineContext.Prerequisites...)
 			}
 		}
 	}

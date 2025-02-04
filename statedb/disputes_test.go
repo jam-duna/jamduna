@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,6 +193,7 @@ progress_with_verdict_signatures_from_previous_set-2 🔴
 
 Age too old for verdicts judgements
 */
+var network = flag.String("network", "", "using for change the network-spec")
 
 func TestVerifyDisputes(t *testing.T) {
 	network_args := *network
