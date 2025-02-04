@@ -77,8 +77,8 @@ jobs:
       - name: Run test bandersnatch
         run: go test ./bandersnatch
 
-#      - name: Run test trie
-#        run: go test ./trie
+      - name: Run test trie
+        run: go test ./trie
 
       - name: Run test types
         run: go test ./types || echo "Test failed but continuing."

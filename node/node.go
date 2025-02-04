@@ -42,7 +42,7 @@ const (
 	debugDA           = false // DA
 	debugDADist       = false // DA Distribution
 	debugDARecon      = false // DA Reconstruction
-	debugDAPProf      = true  // DA PProf profiling
+	debugDAPProf      = false // DA PProf profiling
 	debugB            = false // Blocks, Announcment
 	debugG            = false // Guaranteeing
 	debugL            = true  // Debug with logging
@@ -472,12 +472,13 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 func GenerateQuicConfig() *quic.Config {
 	return &quic.Config{
+		EnableDatagrams:            true,
 		Allow0RTT:                  true,
-		KeepAlivePeriod:            time.Minute,
-		MaxIdleTimeout:             2 * time.Second,
-		MaxIncomingStreams:         1000000,
-		MaxStreamReceiveWindow:     20 * 1024 * 1024,
-		MaxConnectionReceiveWindow: 100 * 1024 * 1024,
+		KeepAlivePeriod:            30 * time.Second,
+		MaxIdleTimeout:             1 * time.Minute,
+		MaxIncomingStreams:         1000 * 1024, // 10 times of connection window
+		MaxStreamReceiveWindow:     1000 * 1024, // 10 times of connection window
+		MaxConnectionReceiveWindow: 100 * 1024,
 	}
 }
 
@@ -754,7 +755,9 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			// 	continue
 			// }
 			// fmt.Printf("handleConnection: Accept stream error: %v\n", err)
-			fmt.Printf("[Node %d] AcceptStream from Node %d error: %v\n", n.id, validatorIndex, err)
+			if debugDA {
+				fmt.Printf("[Node %d] AcceptStream from Node %d error: %v\n", n.id, validatorIndex, err)
+			}
 			break
 		}
 		atomic.AddInt64(&n.totalIncomingStreams, 1)

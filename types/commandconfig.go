@@ -16,6 +16,7 @@ type CommandConfig struct {
 	Bls             string `json:"bls"`
 	Bandersnatch    string `json:"bandersnatch"`
 	Network         string `json:"network"`
+	HostnamePrefix  string `json:"hp"`
 }
 
 // String method returns the CommandConfig as a formatted JSON string

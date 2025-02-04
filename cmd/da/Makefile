@@ -1,15 +1,22 @@
 .PHONY: da
-
+TAGS ?= small
 
 da:
 	@echo "Building JAM..."
-	go build -o da da.go
+	go build -tags $(TAGS) -o da da.go
 
 
 network:
-	@for i in $(shell seq 0 5); do \
+	@for i in $(shell seq 0 23); do \
 		# echo "Starting validator index $$i"; \
-		./da -network_test tiny \
+		./da \
+		-validatorindex $$i -port 9000 -metadata da- -hp jam- & \
+	done
+
+network_local:
+	@for i in $(shell seq 0 23); do \
+		# echo "Starting validator index $$i"; \
+		./da \
 		-validatorindex $$i -port $$((9000 + $$i)) -metadata 127.0.0.1:$$((9000 + $$i)) & \
 	done
 

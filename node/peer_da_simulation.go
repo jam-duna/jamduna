@@ -2,14 +2,16 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
 	"reflect"
 	"runtime/pprof"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -27,6 +29,7 @@ type DADistributeECChunks []DADistributeECChunk
 
 type DAAnnouncement struct {
 	SegmentRoot []byte `json:"segment_root"`
+	State       bool   `json:"state"`
 }
 type DABroadcasted struct {
 	SegmentRoot []byte `json:"segment_root"`
@@ -38,6 +41,10 @@ func (ann *DAAnnouncement) ToBytes() ([]byte, error) {
 	if _, err := buf.Write(ann.SegmentRoot); err != nil {
 		return nil, err
 	}
+	if err := binary.Write(buf, binary.LittleEndian, ann.State); err != nil {
+		return nil, err
+	}
+
 	return buf.Bytes(), nil
 }
 func (ann *DABroadcasted) ToBytes() ([]byte, error) {
@@ -55,6 +62,9 @@ func (ann *DAAnnouncement) FromBytes(data []byte) error {
 	// Deserialize HeaderHash (32 bytes)
 	ann.SegmentRoot = make([]byte, 32)
 	if _, err := buf.Read(ann.SegmentRoot); err != nil {
+		return err
+	}
+	if err := binary.Read(buf, binary.LittleEndian, &ann.State); err != nil {
 		return err
 	}
 	return nil
@@ -119,12 +129,6 @@ func (n *Node) onDA_Announcement(stream quic.Stream, msg []byte) (err error) {
 		fmt.Printf("Node %d Get newReq[%d].Data: %v\n", n.id, n.id, newReq.Data)
 	}
 	n.chunkMap.Store(common.Hash(newReq.SegmentRoot), newReq.Data)
-
-	if n.id == types.TotalValidators-1 {
-		n.currentHash = common.BytesToHash(newReq.SegmentRoot)
-		n.announcement = true
-
-	}
 	return nil
 }
 
@@ -234,13 +238,23 @@ func (n *Node) onDA_Announced(stream quic.Stream, msg []byte) (err error) {
 		panic(11114)
 		return
 	}
-	n.announcement = false
+	// if n.id == 0 {
+	// 	for !common.CompareBytes(newReq.SegmentRoot, n.currentHash[:]) {
+	// 		time.Sleep(10 * time.Millisecond)
+	// 	}
+	// }
+	// for !common.CompareBytes(newReq.SegmentRoot, n.currentHash[:]) {
+	// 	time.Sleep(10 * time.Millisecond)
+	// }
+	n.currentHash = common.Hash(newReq.SegmentRoot)
+	n.announcement = newReq.State
 	return nil
 }
 
 func getRandomSize() int {
 	// sizes := []int{2, 128, 1024, 10240, 1048576} // {2Byte, 128Bytes, 1KBytes, 10KBytes, 1MBytes}
 	sizes := []int{129, 1025, 4105, 10241, 66666, 129999, 258000, 520000, 1048577}
+	// sizes := []int{129, 1025}
 	sizes = oddToEven(sizes)
 	idx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(sizes))))
 	size := sizes[idx.Int64()]
@@ -268,39 +282,76 @@ func generateRandomData(size int) []byte {
 	return data
 }
 
+var errorStats = struct {
+	mu       sync.Mutex
+	category map[string]int
+	count    int64
+}{category: make(map[string]int)}
+
 func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) error {
 	// n.chunkMap = make(map[common.Hash][]byte)
 	lastValidator := types.TotalValidators - 1
 	n.announcement = false
 	time1 := time.Now()
-	time3 := time.Now()
+	// resetTime := time.Now()
+	timeSerachStart := time.Now()
+	checkTime := 1 * time.Second
 	closedPProf := false
 	n.currentHash = common.Hash{}
 	var dataHash common.Hash
-	dataHash = common.Hash{}
-	currentTotalIncomingStreams := int64(0)
+	dataHash = common.Hash{0}
+	setAnnouncement := false
+	// currentTotalIncomingStreams := int64(0)
+	reconnectTimes := 0
+	iterationCounter := 0
 	for {
-		if debugDA {
-			if n.id == 0 || n.id == uint16(lastValidator) {
-				fmt.Printf("Node %d closed: %v n.curre: %v dataHash: %v n.announ: %v\n", n.id, closedPProf, n.currentHash, dataHash, n.announcement)
-			}
-		}
-		if n.id == 0 || n.id == uint16(lastValidator) {
+		timeSerachCurrent := time.Now()
+		if timeSerachCurrent.Sub(timeSerachStart) > checkTime {
 			if debugDA {
-				time4 := time.Now()
-				if time4.Sub(time3) > time.Second {
-					fmt.Printf("Node %d n.announcement: %v\n", n.id, n.announcement)
-					time3 = time4
+				if n.id == 0 || n.id == uint16(lastValidator) {
+					fmt.Printf("Node %d closed: %v n.curre: %v dataHash: %v n.announ: %v\n", n.id, closedPProf, n.currentHash, dataHash, n.announcement)
 				}
 			}
-		}
-		if atomic.LoadInt64(&n.totalIncomingStreams) > 10 {
-			if currentTotalIncomingStreams != atomic.LoadInt64(&n.totalIncomingStreams) {
-				fmt.Printf("Current Node %d total totalIncomingStreams: %d\n", n.id, atomic.LoadInt64(&n.totalIncomingStreams))
-				currentTotalIncomingStreams = atomic.LoadInt64(&n.totalIncomingStreams)
+			err := n.checkAndReconnect(reconnectTimes)
+			timeSerachStart = timeSerachCurrent
+			if err != nil {
+				reconnectTimes++
+				reconnectTimes = 0
+				continue
+			} else {
+				checkTime = 30 * time.Second
+				reconnectTimes = 0
 			}
 		}
+
+		// if n.id == 0 || n.id == uint16(lastValidator) {
+		// 	err := n.checkAndReconnect(reconnectTimes)
+		// 	timeSerachStart = timeSerachCurrent
+		// 	if err != nil {
+		// 		continue
+		// 	}
+		// 	if debugDA {
+		// 		time4 := time.Now()
+		// 		if time4.Sub(time3) > time.Second {
+		// 			fmt.Printf("Node %d n.announcement: %v\n", n.id, n.announcement)
+		// 			time3 = time4
+		// 		}
+		// 	}
+		// }
+		// if atomic.LoadInt64(&n.totalIncomingStreams) > 10 {
+		// 	if currentTotalIncomingStreams != atomic.LoadInt64(&n.totalIncomingStreams) {
+		// 		fmt.Printf("Current Node %d total totalIncomingStreams: %d\n", n.id, atomic.LoadInt64(&n.totalIncomingStreams))
+		// 		currentTotalIncomingStreams = atomic.LoadInt64(&n.totalIncomingStreams)
+		// 	}
+		// }
 		// Main logic to simulate DA
+		if setAnnouncement {
+			err := n.setAnnouncement(dataHash, 0, false)
+			if err != nil {
+				continue
+			}
+			setAnnouncement = false
+		}
 		if n.id == 0 && !n.announcement {
 			if debugDADist {
 				fmt.Printf("1X->")
@@ -329,7 +380,8 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			timeB := time.Now()
 			if err != nil {
 				fmt.Printf("Error encoding data: %v\n", err)
-				panic(5)
+				categorizeAndCountError(err)
+				continue
 			}
 			if debugDA {
 				fmt.Printf("Node %d generated data chunk[%d][%d][%d]\n", n.id, len(chunks), len(chunks[0]), len(chunks[0][0]))
@@ -394,25 +446,36 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				fmt.Printf("5X->")
 			}
 			n.announcement = true
-			go n.broadcast(bECChunks)
+			n.currentHash = dataHash
+			n.broadcast(bECChunks)
+			err = n.setAnnouncement(dataHash, lastValidator, true)
+			if err != nil {
+				categorizeAndCountError(err)
+				checkTime = 1 * time.Second
+				n.announcement = false
+				n.currentHash = common.Hash{0}
+				continue
+			}
 			if debugDADist {
 				fmt.Printf("6X->")
 			}
 			if debugDADist {
 				fmt.Printf("7X\n")
 			}
-
 			timeC := time.Now()
 			encTime := timeB.Sub(timeA).Milliseconds()
 			distTime := timeC.Sub(timeB).Milliseconds()
 			fmt.Printf("Node %d broadcasted the hash\t%x...%x, len(data) %d, enc=%dms dist=%dms\n", n.id, dataHash[:4], dataHash[len(dataHash)-4:], len(b), encTime, distTime)
 		} else if n.id == uint16(lastValidator) {
-			reconstructReqs := make([]DA_request, types.TotalValidators)
-			if len(n.currentHash) == 0 || !n.announcement {
+			if !n.announcement {
 				continue
 			} else {
 				dataHash = n.currentHash
 			}
+
+			// Reset the setting
+			n.announcement = false
+			setAnnouncement = false
 			if debugDARecon {
 				fmt.Printf("1->")
 			}
@@ -420,6 +483,7 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				fmt.Printf("[N%d] Try to get data_hash: %x\n", n.id, dataHash)
 			}
 			timeX := time.Now()
+			reconstructReqs := make([]DA_request, types.TotalValidators)
 			for j := range reconstructReqs {
 				reconstructReqs[j].Hash = dataHash
 				reconstructReqs[j].ShardIndex = uint16(j)
@@ -432,7 +496,9 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			for j, req := range reconstructReqs {
 				reqs[j] = req
 				if reqs[j].(DA_request).Hash != dataHash {
-					fmt.Printf("Hash mismatch: %x\n", reqs[j].(DA_request).Hash)
+					// fmt.Printf("Hash mismatch: %x\n", reqs[j].(DA_request).Hash)
+					err := fmt.Errorf("hash mismatch: %x", reqs[j].(DA_request).Hash)
+					categorizeAndCountError(err)
 					continue
 				}
 			}
@@ -442,7 +508,8 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			}
 			resps, err := n.makeRequests(reqs, types.TotalValidators/3, time.Duration(20)*time.Second, time.Duration(50)*time.Second)
 			if err != nil {
-				fmt.Printf("Error making requests: %v\n", err)
+				categorizeAndCountError(err)
+				checkTime = 1 * time.Second
 				continue
 			}
 
@@ -451,7 +518,10 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			for _, resp := range resps {
 				daResp, ok := resp.(DA_response)
 				if !ok {
-					fmt.Printf("Unexpected response type: %T\n", resp)
+					if debugDA {
+						fmt.Printf("Unexpected response type: %T\n", resp)
+					}
+					categorizeAndCountError(fmt.Errorf("unexpected response type: %T", resp))
 					continue
 				}
 
@@ -481,6 +551,7 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				if debugDA {
 					fmt.Printf("Error decoding data: %v\n", err)
 				}
+				categorizeAndCountError(err)
 				continue
 			}
 			if debugDARecon {
@@ -489,20 +560,8 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 
 			timeZ := time.Now()
 			decodeDataHash := common.Blake2Hash(decodedData)
-			var da DAAnnouncement
-			da.SegmentRoot = dataHash[:]
 			if debugDARecon {
 				fmt.Printf("7->")
-			}
-
-			// Reset the setting
-			n.announcement = false
-			err = n.resetAnnouncement(da, 0)
-			if err != nil {
-				continue
-			}
-			if debugDARecon {
-				fmt.Printf("8\n")
 			}
 			reqTime := timeY.Sub(timeX).Milliseconds()
 			decTime := timeZ.Sub(timeY).Milliseconds()
@@ -522,14 +581,32 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				if debugDA {
 					fmt.Printf("[N%d] Decoded data:  %x\n", n.id, decodedData)
 				}
+				err := fmt.Errorf("decoded data hash %x is not equal to original data hash %x", decodeDataHash, dataHash)
+				categorizeAndCountError(err)
 				fmt.Printf("Node %d Decoded data is not equal to original data, when data length = %d\n", n.id, len(decodedData))
 			}
-		}
-		if n.id == uint16(lastValidator) && n.announcement {
-			var da DAAnnouncement
-			da.SegmentRoot = dataHash[:]
-			n.resetAnnouncement(da, 0)
-			fmt.Printf("Reset Node 0 announcement sccessfully\n")
+			n.currentHash = common.Hash{0}
+			if err != nil {
+				categorizeAndCountError(err)
+				continue
+			}
+			if debugDARecon {
+				fmt.Printf("8\n")
+			}
+			if iterationCounter >= 1000 {
+				printErrorStatistics()
+				iterationCounter = 0
+			} else {
+				iterationCounter++
+			}
+			setAnnouncement = true
+			err = n.setAnnouncement(dataHash, 0, false)
+			if err != nil {
+				categorizeAndCountError(err)
+				checkTime = 1 * time.Second
+				continue
+			}
+			setAnnouncement = false
 		}
 		if debugDAPProf {
 			if pprofFile != nil && !closedPProf {
@@ -547,9 +624,11 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 }
 
 // set node n announcement to false
-func (n *Node) resetAnnouncement(da DAAnnouncement, nodeIndex int) error {
-	dataHash := common.BytesToHash(da.SegmentRoot)
-
+func (n *Node) setAnnouncement(dataHash common.Hash, nodeIndex int, state bool) error {
+	da := DAAnnouncement{
+		SegmentRoot: dataHash[:],
+		State:       state,
+	}
 	n.dataHashStreamsMu.Lock()
 	streams, found := n.dataHashStreams[dataHash]
 	if found {
@@ -622,4 +701,119 @@ func (p *Peer) SendDistributionECChunks(distributeECChunk DADistributeECChunk) (
 		return fmt.Errorf("SendDistributionECChunks: sendQuicBytes error: %v", err)
 	}
 	return nil
+}
+
+func (n *Node) checkAndReconnect(reconnectTimes int) error {
+	connections := make([]bool, types.TotalValidators)
+	const retryPrintTimes = 500
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstError error
+
+	// Timeout context for connection attempts
+	const connectionTimeout = 400 * time.Millisecond
+
+	for id, p := range n.peersInfo {
+		if n.id == uint16(id) {
+			continue
+		}
+		wg.Add(1)
+
+		go func(id uint16, p *Peer) {
+			defer wg.Done()
+
+			quicConfig := GenerateQuicConfig()
+			ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+			defer cancel()
+
+			// Connection check and handling
+			if p.conn == nil || p.conn.Context().Err() != nil {
+				// Lock to safely update connection state
+				p.connectionMu.Lock()
+				defer p.connectionMu.Unlock()
+
+				if reconnectTimes > retryPrintTimes {
+					fmt.Printf("Connection lost with %s after %d seconds, reconnecting...\n",
+						p.PeerAddr, reconnectTimes*100/1000)
+				}
+
+				// Attempt to close existing connection if it exists
+				if p.conn != nil {
+					_ = p.conn.CloseWithError(0, "Connection lost, reconnecting...")
+				}
+
+				// Try to reconnect
+				conn, err := quic.DialAddr(ctx, p.PeerAddr, p.node.tlsConfig, quicConfig)
+				if err != nil {
+					if reconnectTimes > retryPrintTimes {
+						fmt.Printf("Reconnection failed for %s: %v\n", p.PeerAddr, err)
+					}
+
+					// Capture the first error safely
+					mu.Lock()
+					if firstError == nil {
+						firstError = fmt.Errorf("failed to reconnect to %s: %v", p.PeerAddr, err)
+					}
+					mu.Unlock()
+					return
+				}
+
+				p.conn = conn
+				if reconnectTimes > retryPrintTimes {
+					fmt.Printf("Reconnected to %s successfully\n", p.PeerAddr)
+				}
+
+				mu.Lock()
+				connections[p.PeerID] = true
+				mu.Unlock()
+			} else {
+				if reconnectTimes > retryPrintTimes {
+					fmt.Printf("Connection with %s is still alive\n", p.PeerAddr)
+				}
+
+				mu.Lock()
+				connections[p.PeerID] = true
+				mu.Unlock()
+			}
+		}(id, p)
+	}
+
+	wg.Wait()
+
+	// Check if any connection is still down
+	for i, connected := range connections {
+		if !connected {
+			return fmt.Errorf("Node %d connection lost with %d", n.id, i)
+		}
+	}
+
+	// Return the first reconnection error encountered, if any
+	if firstError != nil {
+		return firstError
+	}
+
+	return nil
+}
+
+func printErrorStatistics() {
+	errorStats.mu.Lock()
+	defer errorStats.mu.Unlock()
+	fmt.Println("----- Error Statistics -----")
+	for category, count := range errorStats.category {
+		fmt.Printf("%s: %d occurrences\n", category, count)
+	}
+	fmt.Println("----------------------------")
+}
+
+func categorizeAndCountError(err error) {
+	if err == nil {
+		return
+	}
+	errorStr := err.Error()
+
+	// Remove the error message after the colon
+	errorStats.mu.Lock()
+	errorStats.category[errorStr]++
+	errorStats.count++
+	errorStats.mu.Unlock()
 }

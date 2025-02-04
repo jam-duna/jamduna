@@ -67,7 +67,7 @@ func main() {
 	var help bool
 	flag.BoolVar(&help, "h", false, "Displays help information about the commands and flags.")
 	flag.StringVar(&config.DataDir, "datadir", filepath.Join(os.Getenv("HOME"), ".jam"), "Specifies the directory for the blockchain, keystore, and other data.")
-	flag.IntVar(&config.Port, "port", 9900, "Specifies the network listening port.")
+	flag.IntVar(&config.Port, "port", 9000, "Specifies the network listening port.")
 	flag.IntVar(&config.Epoch0Timestamp, "ts", defaultTS, "Epoch0 Unix timestamp (will override genesis config)")
 
 	flag.IntVar(&validatorIndex, "validatorindex", 0, "Validator Index (only for development)")
@@ -76,7 +76,8 @@ func main() {
 	flag.StringVar(&config.Bandersnatch, "bandersnatch", "", "Bandersnatch Seed (only for development)")
 	flag.StringVar(&config.Bls, "bls", "", "BLS private key (only for development)")
 	flag.StringVar(&config.NodeName, "metadata", "Alice", "Node metadata")
-	flag.StringVar(&config.Network, "network", "tiny", "Choose the network (tiny, small,... full)")
+	// flag.StringVar(&config.Network, "network", "tiny", "Choose the network (tiny, small,... full)")
+	flag.StringVar(&config.HostnamePrefix, "hp", "", "prefix for hostname prefix")
 	flag.Parse()
 
 	var pprofFile *os.File
@@ -93,7 +94,7 @@ func main() {
 	if debugDA {
 		fmt.Printf("Run validatorindex %d\n", validatorIndex)
 	}
-	GenesisFile := getGenesisFile(config.Network)
+	GenesisFile := getGenesisFile(types.Network)
 
 	// If help is requested, print usage and exit
 	if help {
@@ -101,10 +102,21 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
-	peers, peerList, err := generatePeerNetwork(validators, config.Port)
-	if err != nil {
-		fmt.Printf("generatePeerNetwork Error: %s", err)
-		panic("generatePeerNetwork Error")
+	// Use config.HostnamePrefix flag presence to decide which one to call
+	var peers []string
+	var peerList map[uint16]*node.Peer
+	if len(config.HostnamePrefix) > 0 {
+		peers, peerList, err = generatePeerNetworkHP(validators, config.HostnamePrefix, config.Port)
+		if err != nil {
+			fmt.Printf("generatePeerNetworkHP Error: %s", err)
+			panic("generatePeerNetworkHP Error")
+		}
+	} else {
+		peers, peerList, err = generatePeerNetwork(validators, config.Port)
+		if err != nil {
+			fmt.Printf("generatePeerNetwork Error: %s", err)
+			panic("generatePeerNetwork Error")
+		}
 	}
 	// fmt.Printf("peers, peerList %v %v\n", peers, peerList)
 	// epoch0Timestamp := statedb.NewEpoch0Timestamp()
@@ -164,9 +176,26 @@ func generatePeerNetwork(validators []types.Validator, port int) (peers []string
 	return peers, peerList, nil
 }
 
+func generatePeerNetworkHP(validators []types.Validator, hp string, port int) (peers []string, peerList map[uint16]*node.Peer, err error) {
+	peerList = make(map[uint16]*node.Peer)
+	for i := uint16(0); i < types.TotalValidators; i++ {
+		v := validators[i]
+		peerAddr := fmt.Sprintf("%s%d:%d", hp, i, port)
+		fmt.Printf("generatePeerNetworkHP: %d => %s\n", i, peerAddr)
+		peer := fmt.Sprintf("%s", v.Ed25519)
+		peers = append(peers, peer)
+		peerList[i] = &node.Peer{
+			PeerID:    i,
+			PeerAddr:  peerAddr,
+			Validator: v,
+		}
+	}
+	return peers, peerList, nil
+}
+
 const debug = false
 const debugDA = false
-const debugDAPProf = true
+const debugDAPProf = false
 
 // setupValidatorSecret sets up the validator secret struct and validates input lengths
 func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) (validator types.Validator, secret types.ValidatorSecret, err error) {

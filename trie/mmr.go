@@ -127,7 +127,7 @@ func (M MMR) SuperPeak() *common.Hash {
 		// Recursive computation
 		left := computeSuperPeak(nonNilHashes[:len(nonNilHashes)-1])
 		right := nonNilHashes[len(nonNilHashes)-1]
-		combined := append([]byte("node"), append(left.Bytes(), right.Bytes()...)...)
+		combined := append([]byte("peak"), append(left.Bytes(), right.Bytes()...)...)
 		superPeakHash := keccak256(combined)
 		return &superPeakHash
 	}
