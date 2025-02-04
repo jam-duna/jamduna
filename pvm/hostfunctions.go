@@ -30,8 +30,7 @@ const (
 	FORGET            = 15
 	YIELD             = 16
 	HISTORICAL_LOOKUP = 17
-	IMPORT            = 18
-	FETCH             = 203 // TODO: 18 (import => fetch)
+	FETCH             = 18
 	EXPORT            = 19
 	MACHINE           = 20
 	PEEK              = 21
@@ -115,7 +114,6 @@ var hostIndexMap = map[string]int{
 	"Forget":     FORGET,
 	// B.8 Refine Functions
 	"Historical_lookup": HISTORICAL_LOOKUP,
-	"Import":            IMPORT,
 	"Export":            EXPORT,
 	"Machine":           MACHINE,
 	"Peek":              PEEK,
@@ -253,8 +251,8 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.hostHistoricalLookup(0)
 		return true, nil
 
-	case IMPORT:
-		vm.hostImport()
+	case FETCH:
+		vm.hostFetch()
 		return true, nil
 
 	case EXPORT:
@@ -688,99 +686,76 @@ Reading is windowed, so both a length and offset is specified for the buffer. Th
 */
 func (vm *VM) hostFetch() {
 	o, _ := vm.ReadRegister(7)
-	len_offset, _ := vm.ReadRegister(8)
-	l := len_offset & 0xFFFFFFFF
-	offset := (len_offset >> 32) & 0xFFFFFFFF
-	datatypeID, _ := vm.ReadRegister(9)
-	switch datatypeID {
-	case 0: // The (encoded) Work Package
-		data := vm.getWorkPackage()
-		odata := data[0:l]
-		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		break
-	case 1: // The authorizer output
-		data := vm.getAuthorizerOutput()
-		odata := data[0:l]
-		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-
-		break
-	case 2: // Payload data; the work-item index is ω10
-		data := vm.getPayload()
-		odata := data[0:l]
-		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		break
-	case 3: // number of extrinsics
-		data := vm.getNumberOfExtrinsics()
-		odata := data[0:l]
-		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		break
-	case 4: // number of work items
-		data := vm.getNumberOfWorkItems()
-		odata := data[0:l]
-		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		break
-	case 16: // An extrinsic; the work-item index is ω10, the extrinsic index within the sequence specified by that work-item is ω11.
-		workitemindex, _ := vm.ReadRegister(10)
-		extrinsicindex, _ := vm.ReadRegister(11)
-		data, ok := vm.getWorkPackageByWorkItemExtrinsic(uint32(workitemindex), uint32(extrinsicindex))
-		if !ok {
-			vm.WriteRegister(7, NONE)
-			vm.HostResultCode = NONE
-			return
-		}
-		odata := data[offset:]
-		if len(odata) > int(l) {
-			odata = odata[0:l]
-		}
-		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		break
-	case 17: // An extrinsic by index within the sequence specified by this work-item; the index is ω10
-		workitemindex, _ := vm.ReadRegister(10)
-		data, ok := vm.getWorkPackageByWorkItemExtrinsicAll(uint32(workitemindex))
-		if !ok {
-			vm.WriteRegister(7, NONE)
-			vm.HostResultCode = NONE
-			return
-		}
-		odata := data[offset:]
-		if len(odata) > int(l) {
-			odata = odata[0:l]
-		}
-		vm.Ram.WriteRAMBytes(uint32(o), odata[:])
-		break
-	case 18: // An extrinsic by hash; the data returned hashes to the 32 bytes found at ω10
-		extrinsicHash := common.Hash{}
-		data, ok := vm.getWorkPackageByExtrinsicHash(extrinsicHash)
-		if !ok {
-			vm.WriteRegister(7, NONE)
-			vm.HostResultCode = NONE
-			return
-		}
-		vm.Ram.WriteRAMBytes(uint32(o), data[offset:])
-		break
-	case 32: // An imported segment; the work-item index is ω10, the import index within the sequence specified by that work-item is ω11.
-		workitemindex, _ := vm.ReadRegister(10)
-		importindex, _ := vm.ReadRegister(11)
-		data, ok := vm.getWorkPackageImportSegment(uint32(workitemindex), uint32(importindex))
-		if !ok {
-			vm.WriteRegister(7, NONE)
-			vm.HostResultCode = NONE
-			return
-		}
-		vm.Ram.WriteRAMBytes(uint32(o), data[offset:])
-		break
-	case 33: // An imported segment by index within the sequence specified by this work-item; the index is ω10
-		workitemindex, _ := vm.ReadRegister(10)
-		data, ok := vm.getWorkPackageImportedSegmentAll(uint32(workitemindex))
-		if !ok {
-			vm.WriteRegister(7, NONE)
-			vm.HostResultCode = NONE
-			return
-		}
-		vm.Ram.WriteRAMBytes(uint32(o), data[offset:])
-		break
+	omega_8, _ := vm.ReadRegister(8)
+	omega_9, _ := vm.ReadRegister(9)
+	datatype, _ := vm.ReadRegister(10)
+	omega_11, _ := vm.ReadRegister(11)
+	omega_12, _ := vm.ReadRegister(12)
+	var v_Bytes []byte
+	if datatype == 0 {
+		v_Bytes, _ = types.Encode(vm.WorkPackage)
 	}
-	vm.HostResultCode = OK
+	if datatype == 1 {
+		v_Bytes = vm.Authorization
+	}
+	if datatype == 2 && omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
+		v_Bytes = vm.WorkPackage.WorkItems[omega_11].Payload
+	}
+	fmt.Printf("VM.Extrinsics: %v\n", vm.Extrinsics)
+	if datatype == 3 && omega_11 < uint64(len(vm.WorkPackage.WorkItems)) && omega_12 < uint64(len(vm.WorkPackage.WorkItems[omega_11].Extrinsics)) {
+		// get extrinsic by omega 11 and omega 12
+		extrinsicHash := common.Blake2Hash(vm.Extrinsics[omega_11][:])
+		extrinsicLength := len(vm.Extrinsics[omega_11])
+		workitemExtrinisc := types.WorkItemExtrinsic{
+			Hash: extrinsicHash,
+			Len:  uint32(extrinsicLength),
+		}
+		if vm.WorkPackage.WorkItems[omega_11].Extrinsics[omega_12] == workitemExtrinisc {
+			v_Bytes = vm.Extrinsics[omega_11][:]
+		}
+	}
+	if datatype == 4 && omega_11 < uint64(len(vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics)) {
+		// get extrinsic by index within the sequence specified by this work-item
+		extrinsicHash := common.Blake2Hash(vm.Extrinsics[vm.WorkItemIndex][:])
+		extrinsicLength := len(vm.Extrinsics[vm.WorkItemIndex])
+		workitemExtrinisc := types.WorkItemExtrinsic{
+			Hash: extrinsicHash,
+			Len:  uint32(extrinsicLength),
+		}
+		if vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics[omega_11] == workitemExtrinisc {
+			v_Bytes = vm.Extrinsics[vm.WorkItemIndex][:]
+		}
+	}
+	if datatype == 5 && len(vm.Imports) > 0 {
+		// get imported segment by omega 11 and omega 12
+		if omega_11 < uint64(len(vm.Imports)) && omega_12 < uint64(len(vm.Imports[omega_11])) {
+			v_Bytes = vm.Imports[omega_11][:]
+		}
+	}
+	if datatype == 6 && len(vm.Imports) > 0 {
+		// get imported segment by work item index
+		if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
+			v_Bytes = vm.Imports[vm.WorkItemIndex][:]
+		}
+	}
+
+	if v_Bytes == nil {
+		vm.WriteRegister(7, NONE)
+		vm.HostResultCode = NONE
+		return
+	}
+
+	f := min(uint64(len(v_Bytes)), omega_8)   // offset
+	l := min(uint64(len(v_Bytes))-f, omega_9) // max length
+
+	errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
+	if errCode != OK {
+		vm.WriteRegister(7, OOB)
+		vm.HostResultCode = OOB
+		return
+	}
+
+	vm.WriteRegister(7, uint64(l))
 }
 
 func (vm *VM) hostYield() {
@@ -1217,35 +1192,35 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 }
 
 // Import Segment
-func (vm *VM) hostImport() {
-	// import  - which copies  a specific i  (e.g. holding the bytes "9") into RAM from "ImportDA" to be "accumulated"
-	omega_0, _ := vm.ReadRegister(7) // a0 = 7
-	var v_Bytes []byte
-	if omega_0 < uint64(len(vm.Imports)) {
-		v_Bytes = vm.Imports[omega_0][:]
-	} else {
-		v_Bytes = []byte{}
-	}
-	o, _ := vm.ReadRegister(8) // a1 = 8
-	l, _ := vm.ReadRegister(9) // a2 = 9
-	if l > (W_E * W_S) {
-		l = W_E * W_S
-	}
+// func (vm *VM) hostImport() {
+// 	// import  - which copies  a specific i  (e.g. holding the bytes "9") into RAM from "ImportDA" to be "accumulated"
+// 	omega_0, _ := vm.ReadRegister(7) // a0 = 7
+// 	var v_Bytes []byte
+// 	if omega_0 < uint64(len(vm.Imports)) {
+// 		v_Bytes = vm.Imports[omega_0][:]
+// 	} else {
+// 		v_Bytes = []byte{}
+// 	}
+// 	o, _ := vm.ReadRegister(8) // a1 = 8
+// 	l, _ := vm.ReadRegister(9) // a2 = 9
+// 	if l > (W_E * W_S) {
+// 		l = W_E * W_S
+// 	}
 
-	if len(v_Bytes) != 0 {
-		errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[:])
-		if errCode != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
-			return
-		}
-		vm.WriteRegister(7, OK)
-		vm.HostResultCode = OK
-	} else {
-		vm.WriteRegister(7, NONE)
-		vm.HostResultCode = NONE
-	}
-}
+// 	if len(v_Bytes) != 0 {
+// 		errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[:])
+// 		if errCode != OK {
+// 			vm.WriteRegister(7, OOB)
+// 			vm.HostResultCode = OOB
+// 			return
+// 		}
+// 		vm.WriteRegister(7, OK)
+// 		vm.HostResultCode = OK
+// 	} else {
+// 		vm.WriteRegister(7, NONE)
+// 		vm.HostResultCode = NONE
+// 	}
+// }
 
 // Export segment host-call
 func (vm *VM) hostExport(pi uint32) [][]byte {

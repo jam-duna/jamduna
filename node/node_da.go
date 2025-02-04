@@ -647,12 +647,12 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		if debugSegments {
 			fmt.Printf("[N%d] before SetImports Importsegments %x\n", n.id, imports)
 		}
-		if len(imports) > 0 {
-			vm.SetImports(imports)
-		}
+		// if len(imports) > 0 {
+		// 	vm.SetImports(imports)
+		// }
 
 		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, package_bundle.ExtrinsicData)
+		output, _ := vm.ExecuteRefine(uint32(index), workPackage, workPackage.Authorization, imports, workItem.ExportCount, package_bundle.ExtrinsicData)
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		if debugSegments {
 			fmt.Printf("[N%d] [%d] len(exports) %d, exports %x\n", n.id, index, len(exports), exports)
@@ -829,12 +829,12 @@ func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPack
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		// set malicious mode here
 		vm.IsMalicious = false
-		if len(workItemImportSegments) > 0 {
-			vm.SetImports(workItemImportSegments)
-		}
+		// if len(workItemImportSegments) > 0 {
+		// 	vm.SetImports(workItemImportSegments)
+		// }
 
 		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		output, _ := vm.ExecuteRefine(service_index, workItem.Payload, workPackageHash, workItem.CodeHash, workPackage.Authorizer.CodeHash, workPackage.Authorization, extrinsics)
+		output, _ := vm.ExecuteRefine(uint32(workItemIdx), workPackage, workPackage.Authorization, workItemImportSegments, workItem.ExportCount, extrinsics)
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		workItemExports := make([][]byte, 0)
 		for i := 0; i < len(exports); i += types.W_E * types.W_S {

@@ -257,9 +257,11 @@ type VM struct {
 	VMs map[uint32]*VM
 
 	// Work Package Inputs
-	Extrinsics types.ExtrinsicsBlobs
-	payload    []byte
-	Imports    [][]byte
+	WorkItemIndex uint32
+	WorkPackage   types.WorkPackage
+	Extrinsics    types.ExtrinsicsBlobs
+	Authorization []byte
+	Imports       [][]byte
 
 	// Invocation funtions entry point
 	EntryPoint uint32
@@ -813,11 +815,30 @@ func DecodeProgram_pure_pvm_blob(p []byte) *Program {
 
 }
 
-func Floor(x int64) int64 {
-	if x < 0 {
-		return x - 1
+// func Floor(x int64) int64 {
+// 	if x < 0 {
+// 		return x - 1
+// 	}
+// 	return x
+// }
+
+func FloorDiv(a, b int64) int64 {
+	q := a / b
+	r := a % b
+
+	if r != 0 && (a^b) < 0 {
+		q--
 	}
-	return x
+	return q
+}
+
+func FloorDivBig(a, b *big.Int) *big.Int {
+	var quotient, remainder big.Int
+	quotient.QuoRem(a, b, &remainder)
+	if remainder.Sign() != 0 && a.Sign() < 0 {
+		quotient.Sub(&quotient, big.NewInt(1))
+	}
+	return &quotient
 }
 
 func CelingDevide(a, b uint32) uint32 {
@@ -1057,21 +1078,22 @@ func (vm *VM) GetServiceIndex() uint32 {
 	return vm.Service_index
 }
 
-func (vm *VM) ExecuteRefine(s uint32, y []byte, workPackageHash common.Hash, codeHash common.Hash, authorizerCodeHash common.Hash, authorization []byte, extrinsics types.ExtrinsicsBlobs) (r types.Result, res uint64) {
-	// TODO: William -- work with Sean on encode/decode of argument inputs here
-	// Refine inputs: let a = E(s, y, p, c, a, o, ↕[↕x S x <− x])
-	a := common.Uint32ToBytes(s)                 // s - the service index
-	a = append(a, y...)                          //  work payload, y,
-	a = append(a, workPackageHash.Bytes()...)    // p - work package hash
-	a = append(a, codeHash.Bytes()...)           //  c - the prediction of the hash of that service’s code c at the time of reporting,
-	a = append(a, authorizerCodeHash.Bytes()...) //
-	a = append(a, authorization...)              // authorization
-	// a = append(a, common.ConcatenateByteSlices(extrinsicsBlobs)...)
-	// vm.setArgumentInputs(a)
+func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization []byte, importsegments [][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs) (r types.Result, res uint64) {
+	workitem := workPackage.WorkItems[workitemIndex]
 
-	// extrinsics should be encoded along with other arguments, but it hard to extract it without using codec decode
-	// So for covinience, store it in the vm
+	a := common.Uint32ToBytes(workitem.Service)
+	a = append(a, workitem.Payload...)
+	a = append(a, workPackage.Hash().Bytes()...)
+
+	workPackage_RefineContext, _ := types.Encode(workPackage.RefineContext)
+	a = append(a, workPackage_RefineContext...)
+	a = append(a, workPackage.Authorization...)
+
+	vm.WorkItemIndex = workitemIndex
+	vm.WorkPackage = workPackage
+	vm.Authorization = authorization
 	vm.Extrinsics = extrinsics
+	vm.Imports = importsegments
 
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine)
@@ -1154,19 +1176,6 @@ func (vm *VM) Execute(entryPoint int) error {
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
 	}
-	return nil
-}
-
-// set ups extrinsics and payload
-func (vm *VM) SetExtrinsicsPayload(extrinsics [][]byte, payload []byte) error {
-	vm.Extrinsics = extrinsics
-	vm.payload = payload
-	return nil
-}
-
-// set up Imports
-func (vm *VM) SetImports(imports [][]byte) error {
-	vm.Imports = imports
 	return nil
 }
 
@@ -1296,7 +1305,7 @@ func (vm *VM) step() error {
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
-	case STORE_U8, STORE_U16, STORE_U32:
+	case STORE_U8, STORE_U16, STORE_U32, STORE_U64:
 		vm.store(opcode, operands)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
@@ -1317,7 +1326,7 @@ func (vm *VM) step() error {
 			vm.pc += 1 + len_operands
 		}
 		// MUL_UPPER_S_S_IMM, MUL_UPPER_S_S_IMM
-	case ADD_IMM_32, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, SET_LT_U_IMM, SET_LT_S_IMM:
+	case ADD_IMM_32, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, SET_LT_U_IMM, SET_LT_S_IMM, MUL_IMM_64, NEG_ADD_IMM_64, SHLO_L_IMM_ALT_64, SHLO_R_IMM_ALT_64, ROT_R_64_IMM, ROT_R_64_IMM_ALT, ROT_R_32_IMM, ROT_R_32_IMM_ALT:
 		vm.aluImm(opcode, operands)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
@@ -1703,9 +1712,20 @@ func (vm *VM) store(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_U32:
-		value := types.E_l(uint64(valueA), 4)
+		value := types.E_l(uint64(valueA%(1<<32)), 4)
 		if debug_pvm {
 			fmt.Printf("STORE_U32: %d %v\n", vx, value)
+		}
+		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
+		if errCode != OK {
+			vm.ResultCode = FAULT
+			vm.terminated = true
+			vm.Fault_address = uint32(errCode)
+		}
+	case STORE_U64:
+		value := types.E_l(uint64(valueA), 8)
+		if debug_pvm {
+			fmt.Printf("STORE_U64: %d %v\n", vx, value)
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
 		if errCode != OK {
@@ -1994,11 +2014,15 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
+	if debug_pvm {
+		fmt.Printf("STORE_IND: registerIndexA=%d registerIndexB=%d valueA=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueA, valueB, lx, vx)
+	}
+
 	switch opcode {
 	case STORE_IND_U8:
-		// if debug_pvm {
-		// 	fmt.Printf("STORE_IND_U8: %d %v\n", valueB+vx, []byte{byte(valueA % 8)})
-		// }
+		if debug_pvm {
+			fmt.Printf("STORE_IND_U8: %d %v\n", valueB+vx, []byte{byte(valueA % 8)})
+		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), []byte{byte(valueA % (1 << 8))})
 		if errCode != OK {
 			vm.ResultCode = FAULT
@@ -2006,9 +2030,9 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IND_U16:
-		// if debug_pvm {
-		// 	fmt.Printf("STORE_IND_U16: %d %v\n", valueB+vx, types.E_l(uint64(valueA%1<<16), 2))
-		// }
+		if debug_pvm {
+			fmt.Printf("STORE_IND_U16: %d %v\n", valueB+vx, types.E_l(uint64(valueA%1<<16), 2))
+		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA)%(1<<16), 2))
 		if errCode != OK {
 			vm.ResultCode = FAULT
@@ -2016,9 +2040,9 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IND_U32:
-		// if debug_pvm {
-		// 	fmt.Printf("STORE_IND_U32: %d %v\n", valueB+vx, types.E_l(uint64(valueA), 4))
-		// }
+		if debug_pvm {
+			fmt.Printf("STORE_IND_U32: %d %v\n", valueB+vx, types.E_l(uint64(valueA), 4))
+		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA)%(1<<32), 4))
 		if errCode != OK {
 			vm.ResultCode = FAULT
@@ -2026,6 +2050,9 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IND_U64:
+		if debug_pvm {
+			fmt.Printf("STORE_IND_U64: %d %v\n", valueB+vx, types.E_l(uint64(valueA), 8))
+		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 8))
 		if errCode != OK {
 			vm.ResultCode = FAULT
@@ -2170,7 +2197,7 @@ func (vm *VM) aluImm(opcode byte, operands []byte) {
 	var result uint64
 	switch opcode {
 	case ADD_IMM_32:
-		result = (valueB + vx) % (1 << 32)
+		result = x_encode((valueB+vx)%(1<<32), 4)
 	case AND_IMM:
 		result = valueB & vx
 	case XOR_IMM:
@@ -2179,10 +2206,6 @@ func (vm *VM) aluImm(opcode byte, operands []byte) {
 		result = valueB | vx
 	case MUL_IMM:
 		result = (valueB * vx) % (1 << 32)
-	// case MUL_UPPER_S_S_IMM:
-	// 	result = uint32(z_decode((z_encode(valueB, 4) * z_encode(vx, 4)), 4))
-	// case MUL_UPPER_U_U_IMM:
-	// 	result = valueB * vx
 	case SET_LT_U_IMM:
 		if uint32(valueB) < uint32(vx) {
 			result = 1
@@ -2195,6 +2218,35 @@ func (vm *VM) aluImm(opcode byte, operands []byte) {
 		} else {
 			result = 0
 		}
+	case MUL_IMM_64:
+		result = (valueB * vx)
+	case NEG_ADD_IMM_64:
+		result = vx - valueB + maxUint64 + 1
+	case SHLO_L_IMM_ALT_64:
+		result = vx * (1 << (valueB % 64))
+	case SHLO_R_IMM_ALT_64:
+		result = vx / (1 << (valueB % 64))
+	case ROT_R_64_IMM:
+		b_valueB := B_encode(valueB)
+		shift := int(vx % 64)
+		b_valueA := b_valueB[64-shift:] + b_valueB[:64-shift]
+		result = x_encode(B_decode(b_valueA), 8)
+	case ROT_R_64_IMM_ALT:
+		b_vx := B_encode(vx)
+		shift := int(valueB % 64)
+		b_valueA := b_vx[64-shift:] + b_vx[:64-shift]
+		result = x_encode(B_decode(b_valueA), 8)
+	case ROT_R_32_IMM:
+		b_valueB := B_encode(valueB)[32:]
+		shift := int(vx % 32)
+		b_valueA := b_valueB[32-shift:] + b_valueB[:32-shift]
+		result = x_encode(B_decode(b_valueA), 4)
+	case ROT_R_32_IMM_ALT:
+		b_vx := B_encode(vx)[32:]
+		shift := int(valueB % 32)
+		b_valueA := b_vx[32-shift:] + b_vx[:32-shift]
+		result = x_encode(B_decode(b_valueA), 4)
+
 	default:
 		vm.ResultCode = PANIC
 		vm.terminated = true
@@ -2271,7 +2323,10 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) {
 	case SHLO_L_IMM_32:
 		result = x_encode(valueB*(1<<(vx%32))%(1<<32), 4)
 	case SHAR_R_IMM_32:
-		result = z_decode(Floor(z_encode(valueB%(1<<32), 4)/(1<<(vx%32))), 8)
+		numerator := z_encode(valueB%(1<<32), 4)
+		denominator := int64(1 << (vx % 32))
+		floorQuotient := FloorDiv(numerator, denominator)
+		result = z_decode(floorQuotient, 8)
 	case NEG_ADD_IMM_32:
 		result = x_encode((vx+uint64(1<<32)-valueB)%uint64(1<<32), 4)
 	case SET_GT_U_IMM:
@@ -2291,11 +2346,20 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) {
 	case SHLO_R_IMM_ALT_32:
 		result = x_encode((vx%(1<<32))/(1<<(valueB%32)), 4)
 	case SHAR_R_IMM_ALT_32:
-		result = z_decode(Floor(z_encode(vx%(1<<32), 4)/(1<<(valueB%32))), 8)
+		numerator := z_encode(vx%(1<<32), 4)
+		denominator := int64(1 << (valueB % 32))
+		floorQuotient := FloorDiv(numerator, denominator)
+		result = z_decode(floorQuotient, 8)
 	case SHAR_R_IMM_64:
-		result = z_decode(Floor(z_encode(valueB, 8)/(1<<(vx%64))), 8)
+		numerator := z_encode(valueB, 8)
+		denominator := int64(1 << (vx % 64))
+		floorQuotient := FloorDiv(numerator, denominator)
+		result = z_decode(floorQuotient, 8)
 	case SHAR_R_IMM_ALT_64:
-		result = z_decode(Floor(z_encode(vx, 8)/(1<<(valueB%64))), 8)
+		numerator := z_encode(vx, 8)
+		denominator := int64(1 << (valueB % 64))
+		floorQuotient := FloorDiv(numerator, denominator)
+		result = z_decode(floorQuotient, 8)
 	default:
 		vm.ResultCode = PANIC
 		vm.terminated = true
@@ -2333,7 +2397,7 @@ func z_decode(a int64, n uint32) uint64 {
 
 // GP.0.5.4-A.9
 func B_encode(n uint64) string {
-	return strconv.FormatUint(n, 2)
+	return fmt.Sprintf("%064b", n)
 }
 
 // GP.0.5.4-A.10
@@ -2394,6 +2458,10 @@ func (vm *VM) branchReg(opcode byte, operands []byte) {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_NE:
+		if debug_pvm {
+			fmt.Printf("BRANCH_NE: %d %d %d\n", valueA, valueB, vx)
+		}
+
 		if valueA != valueB {
 			vm.branch(vx, true)
 		} else {
@@ -2438,6 +2506,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 
 	valueA, _ := vm.ReadRegister(registerIndexA)
 	valueB, _ := vm.ReadRegister(registerIndexB)
+	valueD, _ := vm.ReadRegister(registerIndexD)
 
 	var result uint64
 	switch opcode {
@@ -2465,20 +2534,32 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	case MUL_64:
 		result = valueA * valueB
 	case MUL_UPPER_S_S:
-		result = z_decode(Floor(z_encode(valueA, 8)*z_encode(valueB, 8)), 8)
+		A := new(big.Int).SetInt64(z_encode(valueA, 8))
+		B := new(big.Int).SetInt64(z_encode(valueB, 8))
+		res := new(big.Int).Mul(A, B)
+		res.Rsh(res, 64)
+		result = z_decode(res.Int64(), 8)
 	case MUL_UPPER_U_U:
-		result = valueA * valueB
+		A := new(big.Int).SetUint64(valueA)
+		B := new(big.Int).SetUint64(valueB)
+		res := new(big.Int).Mul(A, B)
+		res.Rsh(res, 64)
+		result = res.Uint64()
 	case MUL_UPPER_S_U:
-		result = z_decode(Floor(z_encode(valueA, 8)*int64(valueB)), 8)
+		A := new(big.Int).SetInt64(z_encode(valueA, 8))
+		B := new(big.Int).SetUint64(valueB)
+		res := new(big.Int).Mul(A, B)
+		res.Rsh(res, 64)
+		result = z_decode(res.Int64(), 8)
 	case DIV_U_32:
 		if valueB == 0 {
-			result = ^uint64(0)
+			result = maxUint64
 		} else {
-			result = (valueA % (1 << 32)) / (valueB % (1 << 32))
+			result = x_encode(valueA%(1<<32)/valueB%(1<<32), 4)
 		}
 	case DIV_U_64:
 		if valueB == 0 {
-			result = ^uint64(0)
+			result = maxUint64
 		} else {
 			result = valueA / valueB
 		}
@@ -2486,25 +2567,26 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 		S_valueA := z_encode(valueA%(1<<32), 4)
 		S_valueB := z_encode(valueB%(1<<32), 4)
 		if valueB == 0 {
-			result = ^uint64(0)
+			result = maxUint64
 		} else if S_valueA == -(1<<31) && S_valueB == -1 {
 			result = uint64(S_valueA)
 		} else {
 			result = z_decode(S_valueA/S_valueB, 8)
 		}
-
 	case DIV_S_64:
 		if valueB == 0 {
-			result = ^uint64(0)
+			result = maxUint64
 		} else if z_encode(valueA, 8) == -(1<<63) && z_encode(valueB, 8) == -1 {
-			result = uint64(valueA)
+			result = valueA
 		} else {
-			result = z_decode(Floor(z_encode(valueA, 8)/z_encode(valueB, 8)), 8)
+			numerator := z_encode(valueA, 8)
+			denominator := z_encode(valueB, 8)
+			floorQuotient := FloorDiv(numerator, denominator)
+			result = z_decode(floorQuotient, 8)
 		}
-
 	case REM_U_32:
 		if valueB%(1<<32) == 0 {
-			result = x_encode(valueA, 4)
+			result = x_encode(valueA%(1<<32), 4) // not sure whether this is correct
 		} else {
 			result = x_encode((valueA%(1<<32))%(valueB%(1<<32)), 4)
 		}
@@ -2542,13 +2624,13 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 		if valueB == 0 {
 			result = valueA
 		} else {
-			result = 0
+			result = valueD
 		}
 	case CMOV_NZ:
-		if valueB == 0 {
-			result = 0
-		} else {
+		if valueB != 0 {
 			result = valueA
+		} else {
+			result = valueD
 		}
 	case SET_LT_U:
 		if valueA < valueB {
@@ -2572,25 +2654,48 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	case SHLO_R_64:
 		result = valueA / (1 << (valueB % 64))
 	case SHAR_R_32:
-		result = z_decode(Floor(z_encode(valueA%(1<<32), 4)/(1<<(valueB%32))), 8)
+		numerator := z_encode(valueA%(1<<32), 4)
+		denominator := int64(1 << (valueB % 32))
+		floorQuotient := FloorDiv(numerator, denominator)
+		result = z_decode(floorQuotient, 8)
 	case SHAR_R_64:
-		result = z_decode(Floor(z_encode(valueA, 8)/(1<<(valueB%64))), 8)
+		// numerator := z_encode(valueA, 8)
+		// denominator := int64(uint64(1) << (valueB % 64))
+		// floorQuotient := FloorDiv(numerator, denominator)
+		// result = z_decode(floorQuotient, 8)
+
+		numeratorVal := z_encode(valueA, 8)
+		var bigNum big.Int
+		bigNum.SetInt64(numeratorVal)
+		shift := uint(valueB % 64)
+		var bigDen big.Int
+		bigDen.SetUint64(1)
+		bigDen.Lsh(&bigDen, shift)
+		floorQuo := FloorDivBig(&bigNum, &bigDen)
+		result = z_decode(floorQuo.Int64(), 8)
 	case ROT_L_64:
-		b_valueA := B_encode(valueA)[:64]
-		b_valueD := b_valueA[int(valueB%64):] + b_valueA[:int(valueB%64)]
+		b_valueA := B_encode(valueA)
+		shift := int(valueB % 64)
+		b_valueD := b_valueA[shift:] + b_valueA[:shift]
+		result = B_decode(b_valueD)
+	case ROT_R_64:
+		b_valueA := B_encode(valueA)
+		shift := int(valueB % 64)
+		b_valueD := b_valueA[64-shift:] + b_valueA[:64-shift]
 		result = B_decode(b_valueD)
 	case ROT_L_32:
-		b_valueA := B_encode(valueA)[:32]
-		b_valueD := b_valueA[int(valueA%32):] + b_valueA[:int(valueA%32)]
-		result = x_encode(B_decode(b_valueD), 4)
-	case ROT_R_64:
-		b_valueA := B_encode(valueA)[:64]
-		b_valueD := b_valueA[64-int(valueB%64):] + b_valueA[:64-int(valueB%64)]
-		result = B_decode(b_valueD)
+		full64 := B_encode(valueA)
+		b_low32 := full64[32:]
+		shift := int(valueB % 32)
+		b_rot32 := b_low32[shift:] + b_low32[:shift]
+		result = x_encode(B_decode(b_rot32), 4)
 	case ROT_R_32:
-		b_valueA := B_encode(valueA)[:32]
-		b_valueD := b_valueA[32-int(valueA%32):] + b_valueA[:32-int(valueA%32)]
-		result = x_encode(B_decode(b_valueD), 4)
+		full64 := B_encode(valueA)
+		b_low32 := full64[32:]
+		shift := int(valueB % 32)
+		b_rot32 := b_low32[32-shift:] + b_low32[:32-shift]
+		result = x_encode(B_decode(b_rot32), 4)
+
 	case AND_INV:
 		result = valueA & (^valueB)
 	case OR_INV:
@@ -2693,37 +2798,44 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Register(opcode byte, operands 
 		count := strings.Count(b_valueA, "1")
 		result = uint64(count)
 	case COUNT_SET_BITS_32:
-		b_valueA := B_encode(valueA % (1 << 32))
-		count := strings.Count(b_valueA, "1")
+		b_full64 := B_encode(valueA)
+		b_low32 := b_full64[32:]
+		count := strings.Count(b_low32, "1")
 		result = uint64(count)
 	case LEADING_ZERO_BITS_64:
 		b_valueA := B_encode(valueA)
-		count := strings.LastIndex(b_valueA, "0")
-		if count == -1 || count > 64 {
-			count = 64
+		idx := strings.Index(b_valueA, "1")
+		if idx == -1 {
+			result = 64
+		} else {
+			result = uint64(idx)
 		}
-		result = uint64(count)
 	case LEADING_ZERO_BITS_32:
-		b_valueA := B_encode(valueA % (1 << 32))
-		count := strings.LastIndex(b_valueA, "0")
-		if count == -1 || count > 32 {
-			count = 32
+		b_full64 := B_encode(valueA)
+		b_low32 := b_full64[32:]
+		idx := strings.Index(b_low32, "1")
+		if idx == -1 {
+			result = 32
+		} else {
+			result = uint64(idx)
 		}
-		result = uint64(count)
 	case TRAILING_ZERO_BITS_64:
 		b_valueA := B_encode(valueA)
-		count := strings.Index(b_valueA, "1")
-		if count == -1 || count > 64 {
-			count = 64
+		idx := strings.LastIndex(b_valueA, "1")
+		if idx == -1 {
+			result = 64
+		} else {
+			result = uint64(63 - idx)
 		}
-		result = uint64(count)
 	case TRAILING_ZERO_BITS_32:
-		b_valueA := B_encode(valueA % (1 << 32))
-		count := strings.Index(b_valueA, "1")
-		if count == -1 || count > 32 {
-			count = 32
+		b_full64 := B_encode(valueA)
+		b_low32 := b_full64[32:]
+		idx := strings.LastIndex(b_low32, "1")
+		if idx == -1 {
+			result = 32
+		} else {
+			result = uint64(31 - idx)
 		}
-		result = uint64(count)
 	case SIGN_EXTEND_8:
 		result = z_decode(z_encode(valueA%(1<<8), 1), 8)
 	case SIGN_EXTEND_16:
@@ -2745,11 +2857,7 @@ func (vm *VM) Instructions_with_Arguments_of_One_Register_and_One_Extended_Width
 	copy(originalOperands, operands)
 
 	registerIndexA := min(12, int(originalOperands[0])%16)
-	lx := min(4, max(0, len(originalOperands)-1))
-	if lx == 0 {
-		lx = 1
-		originalOperands = append(originalOperands, 0)
-	}
+	lx := 8
 	vx := types.DecodeE_l(originalOperands[1 : 1+lx])
 	vm.WriteRegister(registerIndexA, uint64(vx))
 }
@@ -2771,6 +2879,10 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opc
 	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+
+	if debug_pvm {
+		fmt.Printf("Opcode: %d, registerIndexA: %d, registerIndexB: %d, valueA: %d, valueB: %d, vx: %d, ", opcode, registerIndexA, registerIndexB, valueA, valueB, vx)
+	}
 
 	var result uint64
 	switch opcode {

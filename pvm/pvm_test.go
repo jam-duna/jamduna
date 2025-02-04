@@ -44,32 +44,41 @@ type TestCase struct {
 }
 
 func pvm_test(t *testing.T, tc TestCase) (error, int) {
+	var num_mismatch int
+	fmt.Printf("Test case: %s\n", tc.Name)
+
+	// if tc.Name != "inst_div_signed_64" {
+	// 	return nil, 0
+	// }
+
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false)
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
-		pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: true, Writable: true, Inaccessible: false})
-		pvm.Ram.WriteRAMBytes(mem.Address, mem.Data)
+		pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
+		pvm.Ram.WriteRAMBytes(mem.Address, mem.Data[:])
 	}
-
-	if len(tc.InitialMemory) == 0 {
-		pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
-	}
-
 	// Set the initial page map
-	// for _, page := range tc.InitialPageMap {
-	// 	pvm.Ram.SetPageAccess(page.Address/PageSize, page.Length/PageSize, AccessMode{Readable: true, Writable: page.IsWritable, Inaccessible: false})
+	for _, page := range tc.InitialPageMap {
+		pvm.Ram.SetPageAccess(page.Address/PageSize, page.Length/PageSize, AccessMode{Readable: !page.IsWritable, Writable: page.IsWritable, Inaccessible: false})
+	}
+
+	// if len(tc.InitialMemory) == 0 {
+	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
-	pvm.Execute(0)
+
+	pvm.Execute(int(tc.InitialPC))
 	// Check the registers
-	var num_mismatch int
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
 		fmt.Printf("Register match for test %s \n", tc.Name)
 	} else {
-		num_mismatch++
+		// fmt.Printf("PVM.code: %v\n", pvm.code)
+		// fmt.Printf("PVM.bitmask: %v\n", pvm.bitmask)
 		fmt.Printf("Register mismatch for test %s: expected %v, got %v \n", tc.Name, tc.ExpectedRegs, pvm.register)
+		num_mismatch++
 	}
+
 	// t.Log("pvm_test")
 	/*
 		// Check the status
