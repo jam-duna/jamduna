@@ -213,9 +213,10 @@ func SetLevelDBPaths(numNodes int) []string {
 	// timeslot mark
 	// currJCE := common.ComputeCurrentJCETime()
 	currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+	currTS := currJCE * types.SecondsPerSlot
 	for i := 0; i < numNodes; i++ {
 		node_idx := fmt.Sprintf("%d", i)
-		node_path, err := computeLevelDBPath(node_idx, int(currJCE))
+		node_path, err := computeLevelDBPath(node_idx, int(currTS))
 		if err == nil {
 			node_paths[i] = node_path
 		}

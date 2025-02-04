@@ -52,8 +52,9 @@ const (
 
 // time mode
 // three mode input => "JAM", "TimeStamp", "TimeSlot"
-const TimeUnitMode = "JAM"
-const TimeSavingMode bool = true
+var TimeUnitMode = "JAM"
+var TimeSavingMode bool = true
+
 const CoreLazyMode bool = true
 const (
 	// Medium: configure these

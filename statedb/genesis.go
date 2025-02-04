@@ -254,23 +254,32 @@ func NewEpoch0Timestamp() uint32 {
 	if types.TimeUnitMode != "TimeStamp" {
 		now = common.ComputeJCETime(now, true)
 	}
-	// epoch0Timestamp := uint64(6 * ((now + 12 + types.SecondsPerSlot) / 6))
-	// FOR JAM TESTNET:
-	// second_per_epoch := uint64(types.SecondsPerSlot * types.EpochLength)
-	// USE THIS for generating public traces with a full E for the first epoch
 	waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
 	epoch0Timestamp := uint64(now) + uint64(waitTime)
+	epoch0Phase := uint64(now) / uint64(second_per_epoch)
+	fmt.Printf("Raw now: %v\n", uint64(now))
+	fmt.Printf("Raw waitTime: %v\n", waitTime)
+	fmt.Printf("Raw epoch0P: %v\n", epoch0Phase)
+	fmt.Printf("Raw epoch0Timestamp: %v\n", epoch0Timestamp)
+
 	if types.TimeSavingMode && !(waitTime < 5) {
 		fmt.Printf("===Time Saving Mode===\n")
-		AddTime := (time.Duration(-waitTime) + 5) * time.Second
-		fmt.Printf("AddTime: %v\n", AddTime)
-		common.AddJamStart(AddTime)
-		fmt.Printf("JCE Start Time: %v\n", common.JceStart)
-		now := time.Now().Unix()
-		if types.TimeUnitMode != "TimeStamp" {
-			now = common.ComputeJCETime(now, true)
+		deDuctedTime := (time.Duration(-waitTime + 5)) * time.Second
+		driftTime := (time.Duration(int64(epoch0Phase) * int64(second_per_epoch))) * time.Second // adjust it to e'=1,m'=00
+		adjustedTime := deDuctedTime
+		if types.TimeSavingMode {
+			adjustedTime += driftTime
 		}
+		fmt.Printf("AdjustTime: %v\n", driftTime)
+		common.AddJamStart(adjustedTime)
+		fmt.Printf("JCE Start Time: %v\n", common.JceStart)
+		currTS := time.Now().Unix()
+		if types.TimeUnitMode != "TimeStamp" {
+			now = common.ComputeJCETime(currTS, true)
+		}
+		fmt.Printf("Epoch0P Drift: %v\n", now)
 		waitTime = int64(second_per_epoch) - now%int64(second_per_epoch)
+		fmt.Printf("TimeSavingMode Wait: %v\n", uint64(waitTime))
 		epoch0Timestamp = uint64(now) + uint64(waitTime)
 	}
 

@@ -41,11 +41,10 @@ func ComputeRealCurrentJCETime(TimeUnitMode string) uint32 {
 	}
 }
 
-// here if I use types.SecondPerSlot, it will be a circular import
 func ComputeTimeSlot(TimeUnitMode string) uint32 {
 	currentTime := time.Now().Unix()
 	JCE := uint32(ComputeJCETime(currentTime, true))
-	timeslot := JCE / 6
+	timeslot := JCE / 6 // 6 seconds per slot
 	return timeslot
 }
 
@@ -53,6 +52,10 @@ func ComputeTimeUnit(TimeUnitMode string) uint32 {
 	unit := ComputeTimeSlot(TimeUnitMode)
 	if TimeUnitMode == "TimeStamp" {
 		unit = ComputeRealCurrentJCETime(TimeUnitMode)
+	} else if TimeUnitMode == "JAM" {
+		unit = ComputeTimeSlot(TimeUnitMode)
+	} else if TimeUnitMode == "Raw" {
+
 	}
 	return unit
 }

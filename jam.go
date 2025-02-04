@@ -58,6 +58,7 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
+	types.TimeSavingMode = false
 	peers, peerList, err := generatePeerNetwork(validators, config.Port)
 	epoch0Timestamp := statedb.NewEpoch0Timestamp()
 
