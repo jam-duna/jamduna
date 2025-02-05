@@ -67,7 +67,7 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 const SafroleTestEpochLen = 4 // Safrole
 const FallbackEpochLen = 4    // Fallback
 const FibTestEpochLen = 1     // Assurance
-const MegaTronEpochLen = 5    // Orderaccumalation
+const MegaTronEpochLen = 50   // Orderaccumalation
 const TransferEpochLen = 3    // Transfer
 const BalancesEpochLen = 6    // Balance
 const ScaleBalancesEpochLen = 6

@@ -161,9 +161,9 @@ func GenerateRandomBasePort() uint16 {
 	r := rand.New(rand.NewSource(seed))
 
 	// Generate base port in the 1xx00 - 6xx range to support multi-running
-	region := r.Intn(6) + 1
-	mid := r.Intn(100)
-	basePort := uint16(region*10000 + mid*100)
+	region := r.Intn(4) + 1 
+	mid := r.Intn(100) + 1
+	basePort :=  uint16(region*10000 + mid*100)
 	return basePort
 }
 
@@ -555,7 +555,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	prevWorkPackageHash := common.Hash{}
 	// ================================================
 	// make n workpackages for Fib and Trib
-	targetNMax := 10
+	targetNMax := 50
 	for n := 0; n < targetNMax; n++ {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)

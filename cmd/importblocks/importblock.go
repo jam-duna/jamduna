@@ -100,12 +100,13 @@ func main() {
 	log.Printf("[INFO] Starting block generation: mode=%s, numBlocks=%d, dir=%s\n", mode, numBlocks, dir)
 
 	baseDir := os.Getenv("TEST_DATA_DIR")
+	fmt.Printf("Using BaseDir: %s\n", baseDir)
 	if baseDir == "" {
 		baseDir = "./"
 	}
 	stfs, err := fuzz.ReadStateTransitions(baseDir, mode)
 	if err != nil || len(stfs) == 0 {
-		log.Printf("No %v mode data avaialbe. Exit!", mode)
+		log.Printf("No %v mode data available. Exit!", mode)
 		return
 	}
 
