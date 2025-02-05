@@ -76,7 +76,6 @@ func main() {
 	flag.StringVar(&config.Bandersnatch, "bandersnatch", "", "Bandersnatch Seed (only for development)")
 	flag.StringVar(&config.Bls, "bls", "", "BLS private key (only for development)")
 	flag.StringVar(&config.NodeName, "metadata", "Alice", "Node metadata")
-	// flag.StringVar(&config.Network, "network", "tiny", "Choose the network (tiny, small,... full)")
 	flag.StringVar(&config.HostnamePrefix, "hp", "", "prefix for hostname prefix")
 	flag.Parse()
 
