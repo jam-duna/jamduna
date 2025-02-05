@@ -420,9 +420,6 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 	}
 
 	fmt.Printf("All services are ready, Send preimage announcement\n")
-	for _, service := range testServices {
-		builderNode.BroadcastPreimageAnnouncement(service.ServiceCode, service.CodeHash, uint32(len(service.Code)), service.Code)
-	}
 	fmt.Printf("Wait until all the preimage blobs are ready\n")
 
 	for done := false; !done; {
@@ -766,7 +763,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					}
 
 				}
-			} else {
+			} else if test_prereq {
 				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
 					fmt.Printf("All workpackages are sent\n")
 					sentLastWorkPackage = true
@@ -799,6 +796,36 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					Fib_Tri_Ready = true
 					Fib_Tri_Keeper = false
 				}
+			} else if !test_prereq {
+				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
+					fmt.Printf("All workpackages are sent\n")
+					sentLastWorkPackage = true
+				} else if (nodes[0].IsCoreReady(0) && Meg_Ready) && (nodes[0].IsCoreReady(1) && Fib_Tri_Ready) {
+					// if false{
+
+					// send workpackages to the network
+
+					curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
+					Fib_Tri_Chan <- curr_fib_tri_WorkPackage
+					Fib_Tri_counter++
+					Fib_Tri_Ready = false
+
+					// send workpackages to the network
+					curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
+					Meg_Chan <- curr_Meg_WorkPackage
+					Meg_counter++
+					Meg_Ready = false
+					fmt.Printf("**  Preparing Fib_Tri#%v %v Meg#%v %v **\n", Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
+				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil) {
+					meg_hash := curr_Meg_WorkPackage.Hash()         //core 0
+					fib_tri_hash := curr_fib_tri_WorkPackage.Hash() //core 1
+					rho_0_wphash := nodes[0].statedb.JamState.AvailabilityAssignments[0].WorkReport.AvailabilitySpec.WorkPackageHash
+					rho_1_wphash := nodes[0].statedb.JamState.AvailabilityAssignments[1].WorkReport.AvailabilitySpec.WorkPackageHash
+					if meg_hash == rho_0_wphash && fib_tri_hash == rho_1_wphash && nodes[0].IsCoreReady(0) && nodes[0].IsCoreReady(1) {
+						Meg_Ready = true
+						Fib_Tri_Ready = true
+					}
+				}
 			}
 		// case <-ticker_runtime.C:
 		// 	var stats runtime.MemStats
@@ -821,16 +848,12 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful, types.ExtrinsicsBlobs{})
 			}()
 		case successful := <-Fib_Tri_successful:
-			if successful {
-				fmt.Printf("Fib_Tri %d is successful\n", Fib_Tri_counter)
-			} else {
+			if !successful {
 				panic(fmt.Sprintf("Fib_Tri %d is failed\n", Fib_Tri_counter))
 			}
 		case successful := <-Meg_successful:
 
-			if successful {
-				fmt.Printf("Meg %d is successful\n", Meg_counter)
-			} else {
+			if !successful {
 				panic(fmt.Sprintf("Meg %d is failed\n", Meg_counter))
 			}
 
@@ -868,6 +891,16 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 	workPackageHash := workPackage.Hash()
 	trialCount := 0
 	MaxTrialCount := 100
+	// send it right away for one time
+	corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
+	randIdx := rand.Intn(len(corePeers))
+	err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, extrinsics, receiverCore)
+	log := fmt.Sprintf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
+	Logger.RecordLogs(storage.EG_status, log, true)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
+	}
+	trialCount++
 	for {
 		select {
 		case <-ctx.Done():
@@ -897,11 +930,8 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 					fmt.Printf("Found pending work package %v at core %v!\n", workPackageHash, receiverCore)
 					successful <- true
 					return
-				} else {
-					fmt.Printf("Found different pending work package %s at core %v!\n", rho.WorkReport.AvailabilitySpec.WorkPackageHash.String_short(), receiverCore)
 				}
 			}
-
 		}
 
 	}

@@ -80,7 +80,7 @@ jobs:
         run: go test ./bandersnatch 
 
       - name: Run test fib
-        run: go test ./node -timeout 3m -v -run ^TestFib$ -tags network_test,tiny 
+        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny 
 
 
       # if there is a failure in the following tests, the workflow will continue

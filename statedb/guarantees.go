@@ -160,15 +160,11 @@ func (s *StateDB) Verify_Guarantee_MakeBlock(guarantee types.Guarantee, block *t
 // this function accepts multiple guarantees at a time, it will be used by make block for dropping the invalid guarantees
 // after the first picking the valid guarantees, it will be used by remaining guarantees to make sure which guarantee should be included in the block
 // there are some verification need to be check with other guarantees, so it should be used after the first picking
-func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee, new_block *types.Block) ([]types.Guarantee, error, bool) {
+func (s *StateDB) VerifyGuaranteesMakeBlock(EGs []types.Guarantee, new_block *types.Block) ([]types.Guarantee, error, bool) {
 	// v0.5 eq 11.23 - check index
 	var valid bool
 	valid = true
-	egMap := make(map[uint16]types.Guarantee) // core index to guarantee
-	for _, eg := range EGs {
-		egMap[eg.Report.CoreIndex] = eg
-	}
-
+	egMap := UniqueCoreIndex(EGs)
 	for {
 		initialLen := len(egMap)
 		toDelete := make([]uint16, 0)
@@ -201,6 +197,7 @@ func (s *StateDB) Verify_Guarantees_MakeBlock(EGs []types.Guarantee, new_block *
 		}
 	}
 	EGs = mapToGuaranteeSlice(egMap)
+	EGs = SortByCoreIndex(EGs)
 	err := CheckSorting_EGs(EGs)
 	if err != nil {
 		return nil, err, false
@@ -341,7 +338,7 @@ func (s *StateDB) ValidateGuarantees(guarantees []types.Guarantee) error {
 			fmt.Printf("ValidateGuarantees error: %v\n", err)
 		}
 	}
-	_, err, valid := s.Verify_Guarantees_MakeBlock(guarantees, s.Block)
+	_, err, valid := s.VerifyGuaranteesMakeBlock(guarantees, s.Block)
 	if err != nil || !valid {
 		fmt.Printf("ValidateGuarantees error: %v\n", err)
 		return err
@@ -412,8 +409,15 @@ func (s *StateDB) ValidateSingleGuarantee(guarantee types.Guarantee) error {
 
 // v0.5 eq 11.23 - this function will be used by make block
 func SortByCoreIndex(guarantees []types.Guarantee) []types.Guarantee {
+	// sort the slice to maintain the original order
+	sort.Slice(guarantees, func(i, j int) bool {
+		return guarantees[i].Report.CoreIndex < guarantees[j].Report.CoreIndex
+	})
+	return guarantees
+}
+
+func UniqueCoreIndex(guarantees []types.Guarantee) map[uint16]types.Guarantee {
 	// remove duplicates, keeping only the guarantee with the latest timeslot for each work package hash
-	uniqueGuarantees := make([]types.Guarantee, 0)
 	seen := make(map[uint16]types.Guarantee)
 	// we want to keep the latest (slot) guarantee for each core index
 	for _, guarantee := range guarantees {
@@ -422,14 +426,7 @@ func SortByCoreIndex(guarantees []types.Guarantee) []types.Guarantee {
 			seen[coreIdx] = guarantee
 		}
 	}
-	for _, guarantee := range seen {
-		uniqueGuarantees = append(uniqueGuarantees, guarantee)
-	}
-	// sort the slice to maintain the original order
-	sort.Slice(uniqueGuarantees, func(i, j int) bool {
-		return uniqueGuarantees[i].Report.CoreIndex < uniqueGuarantees[j].Report.CoreIndex
-	})
-	return uniqueGuarantees
+	return seen
 }
 
 // v0.5 eq 11.23  - this function will be used by verify the block

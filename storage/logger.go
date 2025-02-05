@@ -22,14 +22,17 @@ func NewLoggerManager() *DebugLogger {
 }
 
 const (
-	Testing_record = "Testing_record"
-	EG_status      = "EG_status"
-	EG_error       = "EG_error"
-	Stream_error   = "Stream_error"
-	Grandpa_status = "Grandpa_status"
-	Grandpa_error  = "Grandpa_error"
-	Audit_status   = "Audit_status"
-	Audit_error    = "Audit_error"
+	Testing_record   = "Testing_record"
+	EG_status        = "EG_status"
+	EG_error         = "EG_error"
+	Stream_error     = "Stream_error"
+	Grandpa_status   = "Grandpa_status"
+	Grandpa_error    = "Grandpa_error"
+	Audit_status     = "Audit_status"
+	Audit_error      = "Audit_error"
+	Preimage_status  = "Preimage_status"
+	Preimage_error   = "Preimage_error"
+	Assurance_status = "Assurance_status"
 )
 
 var DefaultLogger = []string{
@@ -41,6 +44,9 @@ var DefaultLogger = []string{
 	Grandpa_error,
 	Audit_status,
 	Audit_error,
+	Preimage_status,
+	Preimage_error,
+	Assurance_status,
 }
 
 const logDir = "./logs"

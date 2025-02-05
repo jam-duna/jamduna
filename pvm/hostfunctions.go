@@ -701,7 +701,6 @@ func (vm *VM) hostFetch() {
 	if datatype == 2 && omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
 		v_Bytes = vm.WorkPackage.WorkItems[omega_11].Payload
 	}
-	fmt.Printf("VM.Extrinsics: %v\n", vm.Extrinsics)
 	if datatype == 3 && omega_11 < uint64(len(vm.WorkPackage.WorkItems)) && omega_12 < uint64(len(vm.WorkPackage.WorkItems[omega_11].Extrinsics)) {
 		// get extrinsic by omega 11 and omega 12
 		extrinsicHash := common.Blake2Hash(vm.Extrinsics[omega_11][:])

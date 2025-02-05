@@ -151,10 +151,9 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	a_p := l.AccountPreimageHash()
 	//a_l := l.AccountLookupHash()
 	preimage_blob, ok, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
-	if err == nil && ok { // key found
+	if ok { // key found
 		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
 			//H(p) = p
-			fmt.Printf("Fail at 157 - (1) preimage already integrated\n")
 			return common.Hash{}, fmt.Errorf(errPreimageBlobSet)
 		}
 	}
@@ -1535,15 +1534,20 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	extrinsicData.Preimages = make([]types.Preimages, 0)
 
 	// Make sure this Preimages is ready to be included..
-	for _, preimageLookup := range extrinsic_pool.GetPreimageFromPool() {
+	queued_preimage := extrinsic_pool.GetPreimageFromPool()
+	for _, preimageLookup := range queued_preimage {
 		_, err := s.ValidateLookup(preimageLookup)
 		if err == nil {
 			pl, err := preimageLookup.DeepCopy()
 			if err != nil {
-				extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 				continue
 			}
 			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
+			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
+		} else {
+			storage.Logger.RecordLogs(storage.Preimage_error, fmt.Sprintf("Error in ValidateLookup: %v", err), true)
+			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
+			continue
 		}
 	}
 
@@ -1594,13 +1598,11 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		// check guarantee one per core
 		// check guarantee is not a duplicate
 	}
-	extrinsicData.Guarantees = SortByCoreIndex(extrinsicData.Guarantees)
-	// return duplicate guarantee err
 	for i := 0; i < len(extrinsicData.Guarantees); i++ {
 		log := fmt.Sprintf("ExtrinsicData.Guarantees[%d] = %v, core%d", i, extrinsicData.Guarantees[i].Report.GetWorkPackageHash(), extrinsicData.Guarantees[i].Report.CoreIndex)
 		storage.Logger.RecordLogs(storage.EG_status, log, true)
 	}
-	extrinsicData.Guarantees, err, _ = s.Verify_Guarantees_MakeBlock(extrinsicData.Guarantees, b)
+	extrinsicData.Guarantees, err, _ = s.VerifyGuaranteesMakeBlock(extrinsicData.Guarantees, b)
 	if err != nil {
 		storage.Logger.RecordLogs(storage.EG_error, fmt.Sprintf("Error in Verify_Guarantees_MakeBlock: %v", err), true)
 	}

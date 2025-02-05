@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -43,9 +44,9 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 		Requester: uint32(serviceID),
 		Blob:      preimage,
 	}
-	if debugP {
-		fmt.Printf("%s BroadcastPreimageAnnouncement ==> adding to E_P %s\n", n.String(), pa.String())
-	}
+
+	log := fmt.Sprintf("%s BroadcastPreimageAnnouncement ==> adding to E_P %s\n", n.String(), pa.String())
+	Logger.RecordLogs(storage.Preimage_status, log, true)
 	n.processPreimage(preimageLookup)
 
 	go n.broadcast(pa)
@@ -79,9 +80,9 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	}
 	serviceIndex := preimageAnnouncement.ServiceIndex
 	preimageHash := preimageAnnouncement.PreimageHash
-	if debugP {
-		fmt.Printf("%s [processPreimageAnnouncements:SendPreimageRequest] to N%d for (%d, %v)\n", n.String(), validatorIndex, serviceIndex, preimageHash)
-	}
+
+	log := fmt.Sprintf("%s [processPreimageAnnouncements:SendPreimageRequest] to N%d for (%d, %v)\n", n.String(), validatorIndex, serviceIndex, preimageHash)
+	Logger.RecordLogs(storage.Preimage_status, log, true)
 	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
 	if err != nil {
 		return err

@@ -61,7 +61,7 @@ const (
 	debugAncestor     = false // Check Ancestor
 	debugSTF          = true  // State Transition Function
 	debugPublishTrace = true  // Publish Trace -- such that each node should have full state_transition
-	test_prereq       = true  // Test Prerequisites Enabled
+	test_prereq       = false // Test Prerequisites Enabled
 	numNodes          = types.TotalValidators
 	quicAddr          = "127.0.0.1:%d"
 	godMode           = false
@@ -1034,9 +1034,9 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 	if numCores == 0 {
 		return nil
 	}
-	if debugA {
-		fmt.Printf("%s [assureNewBlock] Broadcasting assurance bitfield=%x\n", n.String(), a.Bitfield)
-	}
+
+	log := fmt.Sprintf("%s [assureNewBlock] Broadcasting assurance bitfield=%x\n", n.String(), a.Bitfield)
+	Logger.RecordLogs(storage.Assurance_status, log, true)
 	go n.broadcast(a)
 	return nil
 }

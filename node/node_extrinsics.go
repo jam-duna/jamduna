@@ -49,6 +49,8 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 	if err != nil {
 		fmt.Printf("processAssurance: AddAssuranceToPool ERR %v\n", err)
 	}
+	log := fmt.Sprintf("[N%v] ProcessIncomingAssurance -- start Adding assurance form v%d\n", n.id, assurance.ValidatorIndex)
+	Logger.RecordLogs(storage.Assurance_status, log, true)
 	return nil // Success
 }
 
@@ -70,7 +72,11 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 }
 
 func (n *Node) processPreimage(l types.Preimages) {
-
-	// fmt.Printf("[N%v] ProcessIncomingLookup -- start Adding lookup: %v\n", s.Id, l.String())
+	_, err := n.statedb.ValidateLookup(&l)
+	if err != nil {
+		return
+	}
+	log := fmt.Sprintf("[N%v] ProcessIncomingLookup -- start Adding lookup: %v\n", n.id, l.String())
+	Logger.RecordLogs(storage.Preimage_status, log, true)
 	n.extrinsic_pool.AddPreimageToPool(l)
 }
