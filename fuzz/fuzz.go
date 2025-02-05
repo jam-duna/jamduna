@@ -72,8 +72,12 @@ func CheckModes(mode string) (bool, error) {
 	return true, nil
 }
 
-func (fs *Fuzzer) RunRPCServer() {
+func (fs *Fuzzer) RunImplementationRPCServer() {
 	runRPCServer(fs.sdbStorage)
+}
+
+func (fs *Fuzzer) RunInternalRPCServer() {
+	runRPCServerInternal(fs.sdbStorage)
 }
 
 func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {

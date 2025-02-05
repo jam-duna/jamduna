@@ -39,7 +39,7 @@ const (
 )
 
 const (
-	JamCommonEra = 1704100800 //1200 UTC on January 1, 2024
+	JamCommonEra = 1735732800 //1200 UTC on January 1, 2025
 )
 
 const (

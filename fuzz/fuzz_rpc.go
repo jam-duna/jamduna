@@ -7,11 +7,17 @@ import (
 	"log"
 	"net/http"
 	"reflect"
+	"time"
 
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
+)
+
+const (
+	JamDunaImplementationsRPCPort = ":8088" // Implementations RPC
+	InternalRPCPort               = ":8089" // Internal for fuzzing & validation
 )
 
 func decodeData(contentType string, bodyBytes []byte, targetType reflect.Type) (interface{}, error) {
@@ -185,10 +191,33 @@ func handleFuzz(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 	}
 }
 
+func runRPCServerInternal(sdbStorage *storage.StateDBStorage) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/fuzz", handleFuzz(sdbStorage))
+	mux.HandleFunc("/validate", handleSTFValidation(sdbStorage))
+
+	server := &http.Server{
+		Addr:         InternalRPCPort,
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	log.Println("Internal RPC server listening on", InternalRPCPort)
+	log.Fatal(server.ListenAndServe())
+}
+
 func runRPCServer(sdbStorage *storage.StateDBStorage) {
-	http.HandleFunc("/fuzz", handleFuzz(sdbStorage))
-	http.HandleFunc("/validate", handleSTFValidation(sdbStorage))
-	http.HandleFunc("/challenge", handleStateTransitionChallenge(sdbStorage))
-	log.Println("RPC server listening on :8088")
-	log.Fatal(http.ListenAndServe(":8088", nil))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleStateTransitionChallenge(sdbStorage))
+
+	server := &http.Server{
+		Addr:         JamDunaImplementationsRPCPort,
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	log.Println("Duna ImplimentationRPC server listening on", JamDunaImplementationsRPCPort)
+	log.Fatal(server.ListenAndServe())
 }

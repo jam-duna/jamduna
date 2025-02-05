@@ -34,14 +34,16 @@ blslib:
 	@echo "Building BLS..."
 	@cd bls && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release
 	@echo "Built BLS library!"
+	@echo "Copying libbls.a from $(JAM_PATH)/bls/target/release/libbls.a to $(JAM_PATH)/ffi/ For Network $(NETWORK)"
+	@cp $(JAM_PATH)/bls/target/release/libbls.a $(JAM_PATH)/ffi/
 
 # Target to build Bandersnatch FFI library
 bandersnatchlib:
 	@echo "Building Bandersnatch For Network $(NETWORK)..."
-	@cd bandersnatch && \
-	echo "Target: $$(rustc --version --verbose | grep 'host')" && \
-	cargo build --release --features "$(NETWORK)"
+	@cd bandersnatch && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release --features "$(NETWORK)"
 	@echo "Built Bandersnatch library For Network $(NETWORK)!"
+	@echo "Copying libbandersnatch.a from $(JAM_PATH)/bandersnatch/target/release/libbandersnatch.a to $(JAM_PATH)/ffi/ For Network $(NETWORK)"
+	@cp $(JAM_PATH)/bandersnatch/target/release/libbandersnatch.a $(JAM_PATH)/ffi/
 
 cargo_clean:
 	@echo "Clean Up FFI libraries (BLS + Bandersnatch)!"

@@ -297,7 +297,7 @@ func TestCumulativeWeight(t *testing.T) {
 	}
 
 	bt_tree := NewBlockTree(blockNode)
-	basePort := 10000
+	basePort := uint16(10000)
 	graph_server := NewGraphServer(basePort)
 	go graph_server.StartServer()
 	graph_server.Update(bt_tree)

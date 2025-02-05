@@ -51,7 +51,7 @@ func main() {
 
 	jConfig := types.ConfigJamBlocks{
 		Mode:        "assurances",
-		HTTP:        "http://localhost:8088/challenge",
+		HTTP:        "http://localhost:8088/",
 		QUIC:        "",
 		Verbose:     false,
 		NumBlocks:   100,
@@ -82,10 +82,10 @@ func main() {
 		log.Fatalf("Failed to initialize fuzzer: %v", err)
 	}
 
-	if enableRPC {
+	if enableRPC && false {
 		go func() {
 			log.Println("Starting RPC server...")
-			fuzzer.RunRPCServer()
+			fuzzer.RunImplementationRPCServer()
 		}()
 	}
 
@@ -99,7 +99,10 @@ func main() {
 
 	log.Printf("[INFO] Starting block generation: mode=%s, numBlocks=%d, dir=%s\n", mode, numBlocks, dir)
 
-	baseDir := "./"
+	baseDir := os.Getenv("TEST_DATA_DIR")
+	if baseDir == "" {
+		baseDir = "./"
+	}
 	stfs, err := fuzz.ReadStateTransitions(baseDir, mode)
 	if err != nil || len(stfs) == 0 {
 		log.Printf("No %v mode data avaialbe. Exit!", mode)

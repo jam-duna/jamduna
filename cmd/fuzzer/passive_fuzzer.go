@@ -19,7 +19,7 @@ func main() {
 
 	jConfig := types.ConfigJamBlocks{
 		Mode:        "assurances",
-		HTTP:        "http://localhost:8088/challenge",
+		HTTP:        "http://localhost:8088/",
 		QUIC:        "",
 		Verbose:     false,
 		NumBlocks:   500,
@@ -52,7 +52,8 @@ func main() {
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 
-	go fuzzer.RunRPCServer()
+	go fuzzer.RunImplementationRPCServer()
+	go fuzzer.RunInternalRPCServer()
 	startTime := time.Now()
 
 	for {
