@@ -58,8 +58,8 @@ var TimeSavingMode bool = true
 const CoreLazyMode bool = true
 const (
 	// Medium: configure these
-	W_S = 6                       // W_S = 6: The size of an exported segment in erasure-coded pieces.
-	W_E = TotalValidators / 3 * 2 // W_E = 684: The basic size of our erasure-coded pieces. See equation 316.
+	W_S = 6                           // W_S = 6: The size of an exported segment in erasure-coded pieces.
+	W_E = (TotalValidators/3 + 1) * 2 // W_E = 684: The basic size of our erasure-coded pieces. See equation 316.
 
 	PeriodSecond                   = 4         // A = 8 represents the period, in seconds, between audit tranches.
 	MinElectiveServiceItemBalance  = 10        // B_I represents the additional minimum balance required per item of elective service state.

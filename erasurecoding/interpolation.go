@@ -1,7 +1,6 @@
-// interpolation.go
 package erasurecoding
 
-// Add returns the sum of two GFPoints
+// polyAdd adds the coefficients of two polynomials represented as GFPoint slices.
 func polyAdd(p, q []GFPoint) []GFPoint {
 	if len(q) > len(p) {
 		p, q = q, p
@@ -14,7 +13,7 @@ func polyAdd(p, q []GFPoint) []GFPoint {
 	return trimPoly(res)
 }
 
-// Mul multiplies two field elements in the Galois Field
+// polyMul multiplies two polynomials and returns the result.
 func polyMul(p, q []GFPoint) []GFPoint {
 	rlen := len(p) + len(q) - 1
 	res := make([]GFPoint, rlen)
@@ -26,7 +25,7 @@ func polyMul(p, q []GFPoint) []GFPoint {
 	return trimPoly(res)
 }
 
-// trimPoly removes trailing zeros from a polynomial
+// trimPoly removes trailing zero coefficients from a polynomial.
 func trimPoly(p []GFPoint) []GFPoint {
 	i := len(p) - 1
 	for i > 0 && p[i] == 0 {
@@ -35,19 +34,18 @@ func trimPoly(p []GFPoint) []GFPoint {
 	return p[:i+1]
 }
 
-// Interpolate returns the polynomial that passes through the given points
+// Interpolate computes the polynomial that passes through the points (xs, ys) which using Lagrange interpolation.
 func Interpolate(xs, ys []GFPoint) []GFPoint {
 	n := len(xs)
 	if n == 0 {
 		return []GFPoint{}
 	}
 	if len(ys) != n {
-		panic("xs, ys length mismatch")
+		panic("length mismatch between xs and ys")
 	}
 	if n == 1 {
 		return []GFPoint{ys[0]}
 	}
-
 	p := make([]GFPoint, n)
 	for i := 0; i < n; i++ {
 		denom := GFPoint(1)
@@ -59,7 +57,6 @@ func Interpolate(xs, ys []GFPoint) []GFPoint {
 			denom = Mul(denom, diff)
 		}
 		invDenom := Inv(denom)
-
 		li := []GFPoint{1}
 		for j := 0; j < n; j++ {
 			if j == i {
@@ -68,25 +65,21 @@ func Interpolate(xs, ys []GFPoint) []GFPoint {
 			factor := []GFPoint{xs[j], 1}
 			li = polyMul(li, factor)
 		}
-
 		scale := Mul(ys[i], invDenom)
 		for k := range li {
 			li[k] = Mul(li[k], scale)
 		}
-
 		p = polyAdd(p, li)
 	}
-
 	return p
 }
 
-// Evaluate returns the value of the polynomial at the given point
+// Evaluate computes the value of polynomial p at x.
 func Evaluate(p []GFPoint, x GFPoint) GFPoint {
 	result := GFPoint(0)
 	power := GFPoint(1)
 	for i := 0; i < len(p); i++ {
-		term := Mul(p[i], power)
-		result = Add(result, term)
+		result = Add(result, Mul(p[i], power))
 		power = Mul(power, x)
 	}
 	return result
