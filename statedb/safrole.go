@@ -549,6 +549,9 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, u
 
 	return tickets
 }
+func (s *SafroleState) SimulateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, error) {
+	return s.generateTicket(secret, targetEpochRandomness, attempt)
+}
 
 func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, error) {
 	ticket_vrf_input := ticketSealVRFInput(targetEpochRandomness, attempt)
@@ -919,7 +922,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 
 	err := s.ValidateSaforle(tickets, targetJCE, header)
 	if err != nil {
-		fmt.Printf("ValidateSaforle ERR %v\n", jamerrors.GetErrorStr(err))
+		//fmt.Printf("ValidateSaforle ERR %v\n", jamerrors.GetErrorStr(err))
 		return *s, err
 	}
 

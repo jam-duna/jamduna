@@ -16,7 +16,7 @@ const (
 	STF_Reports    = "reports"
 	STF_Assurances = "assurances"
 	STF_Generic    = "generic"
-	Base_Dir       = "../cmd/importblocks/"
+	Base_Dir       = "../cmd/importblocks/data/"
 )
 
 func readSTF(baseDir, targeted_mode string, t *testing.T) ([]*statedb.StateTransition, error) {
@@ -77,8 +77,21 @@ func testFuzzDisputes(t *testing.T) {
 	testFuzz(t, []string{STF_Disputes}, stfs)
 }
 
+func testFuzzAll(t *testing.T) {
+	mode_list := []string{STF_Safrole, STF_Assurances}
+	combinedSTFs := make([]*statedb.StateTransition, 0)
+	for _, mode := range mode_list {
+		stfs, _ := readSTF(Base_Dir, mode, t)
+		if len(stfs) > 0 {
+			combinedSTFs = append(combinedSTFs, stfs...)
+		}
+	}
+	testFuzz(t, mode_list, combinedSTFs)
+}
+
 func TestFuzz(t *testing.T) {
-	testFuzzAssurances(t)
+	testFuzzAll(t)
+	//testFuzzAssurances(t)
 	//testFuzzSafrole(t)
 	//testFuzzReports(t)
 	//testFuzzDisputes(t)

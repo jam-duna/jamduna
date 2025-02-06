@@ -50,7 +50,7 @@ func main() {
 	enableRPC := false
 
 	jConfig := types.ConfigJamBlocks{
-		Mode:        "assurances",
+		Mode:        "safrole",
 		HTTP:        "http://localhost:8088/",
 		QUIC:        "",
 		Verbose:     false,
@@ -100,13 +100,12 @@ func main() {
 	log.Printf("[INFO] Starting block generation: mode=%s, numBlocks=%d, dir=%s\n", mode, numBlocks, dir)
 
 	baseDir := os.Getenv("TEST_DATA_DIR")
-	fmt.Printf("Using BaseDir: %s\n", baseDir)
 	if baseDir == "" {
 		baseDir = "./"
 	}
 	stfs, err := fuzz.ReadStateTransitions(baseDir, mode)
 	if err != nil || len(stfs) == 0 {
-		log.Printf("No %v mode data available. Exit!", mode)
+		log.Printf("No %v mode data available on BaseDir=%v. Exit!", mode, baseDir)
 		return
 	}
 

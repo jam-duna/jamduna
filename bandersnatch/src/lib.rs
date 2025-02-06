@@ -734,7 +734,7 @@ fn ietf_vrf_verify_iml(
         .verify(input, output, aux_data, &signature.proof)
         .is_err()
     {
-        println!("Ietf signature verification failure");
+        //println!("Ietf signature verification failure");
         return Err(());
     }
     //println!("Ietf signature verified");

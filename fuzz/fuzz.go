@@ -30,10 +30,10 @@ func NewFuzzer(storageDir string) (*Fuzzer, error) {
 var fuzzModeList = map[string]bool{
 	// Enabled by default:
 	"assurances": true,
+	"safrole":    true,
 
 	// Planned to be enabled:
 	"fallback":            true,
-	"safrole":             true,
 	"orderedaccumulation": true,
 
 	// Good to have (under development):

@@ -19,7 +19,6 @@ import (
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
@@ -1167,8 +1166,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
-		fmt.Printf("sf.ApplyStateTransitionFromBlock %v\n", jamerrors.GetErrorStr(err))
-		//TODO: this was panic(1)
+		//fmt.Printf("sf.ApplyStateTransitionTickets %v\n", jamerrors.GetErrorStr(err))
 		return s, err
 	}
 	vs = s2.PrevValidators
