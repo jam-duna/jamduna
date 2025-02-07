@@ -98,10 +98,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		}
 	}
 
-	if len(guarantee.Signatures) < 3 {
-		//TODO: Shawn - if more than 2s has passed after receiving 2nd sig, you can potentiall move on.
-		panic(222)
-	} else {
+	if len(guarantee.Signatures) >= 2 {
 		guarantee.Slot = currTimeslot
 		go n.broadcast(guarantee)
 		eclapsed := time.Since(timer)
