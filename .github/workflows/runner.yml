@@ -88,26 +88,20 @@ jobs:
       - name: Run test megatron (1/5)
         id: megatron_1
         run: go test ./node -timeout 80m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
-        continue-on-error: true
  
       - name: Run test megatron (2/5)
         id: megatron_2
         run: go test ./node -timeout 80m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
-        continue-on-error: true
 
       - name: Run test megatron (3/5)
         id: megatron_3
         run: go test ./node -timeout 80m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
-        continue-on-error: true
 
       - name: Run test megatron (4/5)
         id: megatron_4
         run: go test ./node -timeout 80m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
-        continue-on-error: true
 
       - name: Run test megatron (5/5)
         id: megatron_5
         run: go test ./node -timeout 80m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
-        continue-on-error: true
-
 

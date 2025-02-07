@@ -120,6 +120,11 @@ func TestTransfer(t *testing.T) {
 	jamtest(t, "transfer", TransferEpochLen, basePort)
 }
 
+func TestScaledTransfer(t *testing.T) {
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "scaled_transfer", TransferEpochLen, basePort)
+}
+
 func TestBalances(t *testing.T) {
 	basePort := GenerateRandomBasePort()
 	jamtest(t, "balances", BalancesEpochLen, basePort)

@@ -100,6 +100,7 @@ func main() {
 	log.Printf("[INFO] Starting block generation: mode=%s, numBlocks=%d, dir=%s\n", mode, numBlocks, dir)
 
 	baseDir := os.Getenv("TEST_DATA_DIR")
+	fmt.Printf("Using BaseDir: %s\n", baseDir)
 	if baseDir == "" {
 		baseDir = "./"
 	}

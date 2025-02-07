@@ -161,9 +161,9 @@ func GenerateRandomBasePort() uint16 {
 	r := rand.New(rand.NewSource(seed))
 
 	// Generate base port in the 1xx00 - 6xx range to support multi-running
-	region := r.Intn(4) + 1 
+	region := r.Intn(4) + 1
 	mid := r.Intn(100) + 1
-	basePort :=  uint16(region*10000 + mid*100)
+	basePort := uint16(region*10000 + mid*100)
 	return basePort
 }
 
@@ -336,7 +336,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 	if jam == "megatron" {
 		serviceNames = []string{"fib", "tribonacci", "megatron"} // Others include: "padovan", "pell", "racaman"
 	}
-	if jam == "transfer" {
+	if jam == "transfer" || jam == "scaled_transfer" {
 		serviceNames = []string{"transfer_0", "transfer_1"} // 2 transfer services share the same code
 	}
 	if jam == "balances" || jam == "scaled_balances" {
@@ -455,6 +455,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 		fib(nodes, testServices)
 	case "transfer":
 		transfer(nodes, testServices)
+	case "scaled_transfer":
+		scaled_transfer(nodes, testServices)
 	case "balances":
 		balances(nodes, testServices)
 	case "scaled_balances":
@@ -942,30 +944,21 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
 
-	var previous_sa_0_balance, previous_sa_1_balance uint64
-
 	n1 := nodes[1]
-	n4 := nodes[4]
 	core := 0
 
-	// Show initial balances
-	sa_0, _, _ := n1.getState().GetService(service0.ServiceCode)
-	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa_0.Balance)
-	previous_sa_0_balance = sa_0.Balance
+	sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
+	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa0.Balance)
+	sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+	fmt.Printf("\033[38;5;208mtransfer_1\033[0m initial balance: \033[32m%v\033[0m\n", sa1.Balance)
+	fmt.Printf("\n")
+	prevBalance0 := sa0.Balance
+	prevBalance1 := sa1.Balance
 
-	sa_1, _, _ := n1.getState().GetService(service1.ServiceCode)
-	fmt.Printf("\033[38;5;208mtransfer_1\033[0m initial balance: \033[32m%v\033[0m\n", sa_1.Balance)
-	previous_sa_1_balance = sa_1.Balance
-
-	Transfer_WorkPackages := make([]types.WorkPackage, 0)
-	prevWorkPackageHash := common.Hash{}
-	_ = prevWorkPackageHash
-	// ================================================
-	// make n workpackages for Transfer
-	Transfer_num := 10
-	for n := 1; n <= Transfer_num; n++ {
-		// timeslot := n1.statedb.GetSafrole().GetTimeSlot()
-		timeslot := nodes[1].statedb.Block.GetHeader().Slot
+	TransferNum := 10
+	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
+	for n := 1; n <= TransferNum; n++ {
+		timeslot := n1.statedb.Block.GetHeader().Slot
 		refineContext := types.RefineContext{
 			Anchor:           common.Hash{},
 			StateRoot:        common.Hash{},
@@ -975,15 +968,13 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 			Prerequisites:    []common.Hash{},
 		}
 
-		workPackage := types.WorkPackage{}
-
-		// Bank service send 1000 tokens to transfer_0 and transfer_1
+		var workPackage types.WorkPackage
 		if n%2 == 0 {
 			payload := make([]byte, 8)
 			reciver := make([]byte, 4)
-			binary.LittleEndian.PutUint32(reciver, service1.ServiceCode)
+			binary.LittleEndian.PutUint32(reciver, uint32(service1.ServiceCode))
 			amount := make([]byte, 4)
-			binary.LittleEndian.PutUint32(amount, uint32(n)*10)
+			binary.LittleEndian.PutUint32(amount, uint32(n*10))
 			payload = append(reciver, amount...)
 
 			workPackage = types.WorkPackage{
@@ -1006,9 +997,9 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 		} else {
 			payload := make([]byte, 8)
 			reciver := make([]byte, 4)
-			binary.LittleEndian.PutUint32(reciver, service0.ServiceCode)
+			binary.LittleEndian.PutUint32(reciver, uint32(service0.ServiceCode))
 			amount := make([]byte, 4)
-			binary.LittleEndian.PutUint32(amount, uint32(n)*10)
+			binary.LittleEndian.PutUint32(amount, uint32(n*10))
 			payload = append(reciver, amount...)
 
 			workPackage = types.WorkPackage{
@@ -1029,57 +1020,205 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 				},
 			}
 		}
-
 		Transfer_WorkPackages = append(Transfer_WorkPackages, workPackage)
-		workPackageHash := workPackage.Hash()
-		prevWorkPackageHash = workPackageHash
+		fmt.Printf("** \033[36mTRANSFER WorkPackage #%d\033[0m: %v **\n", n, workPackage.Hash())
+	}
 
-		fmt.Printf("\n** \033[36m TRANSFER=%v \033[0m workPackage: %v **\n", n, common.Str(workPackageHash))
+	transferChan := make(chan types.WorkPackage, 1)
+	transferSuccessful := make(chan bool)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
-		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
-		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	transferCounter := 0
+	transferReady := true
+
+	for {
+		if transferCounter >= TransferNum && transferReady {
+			fmt.Printf("All transfer work packages processed\n")
+			break
 		}
-		// wait until the work report is pending
-		for {
-			time.Sleep(1 * time.Second)
-			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-				if false {
-					var workReport types.WorkReport
-					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-					workReport = rho_state.WorkReport
-					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-				}
-				break
+
+		select {
+		case <-ticker.C:
+			if transferCounter < TransferNum && transferReady {
+				wp := Transfer_WorkPackages[transferCounter]
+				transferChan <- wp
+				transferCounter++
+				transferReady = false
+
+				fmt.Printf("\n** \033[36m TRANSFER=%v \033[0m workPackage: %v **\n", transferCounter, wp.Hash().String_short())
 			}
-		}
-
-		// wait until the work report is cleared
-		for {
-			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-				break
+		case wp := <-transferChan:
+			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			go func(wp types.WorkPackage) {
+				defer cancel()
+				sendWorkPackageTrack(ctx, n1, wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
+			}(wp)
+		case success := <-transferSuccessful:
+			if !success {
+				panic("Transfer work package failed")
 			}
-			time.Sleep(1 * time.Second)
-		}
-		prevWorkPackageHash = workPackageHash
 
+			sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
+			sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+			fmt.Printf("\033[38;5;208mtransfer_0_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance0, sa0.Balance)
+			fmt.Printf("\033[38;5;208mtransfer_1_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance1, sa1.Balance)
+			prevBalance0 = sa0.Balance
+			prevBalance1 = sa1.Balance
+
+			if transferCounter%2 == 0 {
+				fmt.Printf("\n\033[38;5;208mtransfer_0\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_1\033[0m\n", transferCounter*10)
+			} else {
+				fmt.Printf("\n\033[38;5;208mtransfer_1\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_0\033[0m\n", transferCounter*10)
+			}
+
+			transferReady = true
+		}
+	}
+}
+
+func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService) {
+	fmt.Printf("\n=========================Start Scaled Transfer=========================\n\n")
+	service0 := testServices["transfer_0"]
+	service1 := testServices["transfer_1"]
+
+	n1 := nodes[1]
+	core := 0
+
+	sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
+	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa0.Balance)
+	sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+	fmt.Printf("\033[38;5;208mtransfer_1\033[0m initial balance: \033[32m%v\033[0m\n", sa1.Balance)
+	fmt.Printf("\n")
+	prevBalance0 := sa0.Balance
+	prevBalance1 := sa1.Balance
+
+	TransferNum := 10
+	SplitTransferNum := 600 // 10000 for 0.62 MB
+	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
+
+	for n := 1; n <= TransferNum; n++ {
+		timeslot := n1.statedb.Block.GetHeader().Slot
+		refineContext := types.RefineContext{
+			Anchor:           common.Hash{},
+			StateRoot:        common.Hash{},
+			BeefyRoot:        common.Hash{},
+			LookupAnchor:     common.Hash{},
+			LookupAnchorSlot: timeslot,
+			Prerequisites:    []common.Hash{},
+		}
+
+		var workPackage types.WorkPackage
+		var Transfer_WorkItems []types.WorkItem
 		if n%2 == 0 {
-			fmt.Printf("\n\033[38;5;208mtransfer_0\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_1\033[0m\n", n*10)
+			for i := 0; i < SplitTransferNum; i++ {
+				payload := make([]byte, 8)
+				reciver := make([]byte, 4)
+				binary.LittleEndian.PutUint32(reciver, uint32(service1.ServiceCode))
+				amount := make([]byte, 4)
+				binary.LittleEndian.PutUint32(amount, uint32(n))
+				payload = append(reciver, amount...)
+
+				Transfer_WorkItems = append(Transfer_WorkItems, types.WorkItem{
+					Service:            service0.ServiceCode,
+					CodeHash:           service0.CodeHash,
+					Payload:            payload,
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        1,
+				})
+			}
+			workPackage = types.WorkPackage{
+				Authorization: []byte("0x"),
+				AuthCodeHost:  service0.ServiceCode,
+				Authorizer:    types.Authorizer{},
+				RefineContext: refineContext,
+				WorkItems:     Transfer_WorkItems,
+			}
 		} else {
-			fmt.Printf("\n\033[38;5;208mtransfer_1\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_0\033[0m\n", n*10)
+			for i := 0; i < SplitTransferNum; i++ {
+				payload := make([]byte, 8)
+				reciver := make([]byte, 4)
+				binary.LittleEndian.PutUint32(reciver, uint32(service0.ServiceCode))
+				amount := make([]byte, 4)
+				binary.LittleEndian.PutUint32(amount, uint32(n))
+				payload = append(reciver, amount...)
+
+				Transfer_WorkItems = append(Transfer_WorkItems, types.WorkItem{
+					Service:            service1.ServiceCode,
+					CodeHash:           service1.CodeHash,
+					Payload:            payload,
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        1,
+				})
+			}
+			workPackage = types.WorkPackage{
+				Authorization: []byte("0x"),
+				AuthCodeHost:  service1.ServiceCode,
+				Authorizer:    types.Authorizer{},
+				RefineContext: refineContext,
+				WorkItems:     Transfer_WorkItems,
+			}
+		}
+		Transfer_WorkPackages = append(Transfer_WorkPackages, workPackage)
+		fmt.Printf("** \033[36mTRANSFER WorkPackage #%d\033[0m: %v **\n", n, workPackage.Hash())
+		totalWPSizeInMB := calaulateTotalWPSize(workPackage, types.ExtrinsicsBlobs{})
+		fmt.Printf("Total Work Package Size: %v MB\n", totalWPSizeInMB)
+	}
+
+	transferChan := make(chan types.WorkPackage, 1)
+	transferSuccessful := make(chan bool)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	transferCounter := 0
+	transferReady := true
+
+	for {
+		if transferCounter >= TransferNum && transferReady {
+			fmt.Printf("All transfer work packages processed\n")
+			break
 		}
 
-		sa_0, _, _ := n1.getState().GetService(service0.ServiceCode)
-		fmt.Printf("\033[38;5;208mtransfer_0_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", previous_sa_0_balance, sa_0.Balance)
-		previous_sa_0_balance = sa_0.Balance
+		select {
+		case <-ticker.C:
+			if transferCounter < TransferNum && transferReady {
+				wp := Transfer_WorkPackages[transferCounter]
+				transferChan <- wp
+				transferCounter++
+				transferReady = false
 
-		sa_1, _, _ := n1.getState().GetService(service1.ServiceCode)
-		fmt.Printf("\033[38;5;208mtransfer_1_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", previous_sa_1_balance, sa_1.Balance)
-		previous_sa_1_balance = sa_1.Balance
+				fmt.Printf("\n** \033[36m TRANSFER=%v \033[0m workPackage: %v **\n", transferCounter, wp.Hash().String_short())
+			}
+		case wp := <-transferChan:
+			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			go func(wp types.WorkPackage) {
+				defer cancel()
+				sendWorkPackageTrack(ctx, n1, wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
+			}(wp)
+		case success := <-transferSuccessful:
+			if !success {
+				panic("Transfer work package failed")
+			}
 
-		time.Sleep(6 * time.Second)
+			sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
+			sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+			fmt.Printf("\033[38;5;208mtransfer_0_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance0, sa0.Balance)
+			fmt.Printf("\033[38;5;208mtransfer_1_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance1, sa1.Balance)
+			prevBalance0 = sa0.Balance
+			prevBalance1 = sa1.Balance
+
+			if transferCounter%2 == 0 {
+				fmt.Printf("\n\033[38;5;208mtransfer_0\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_1\033[0m\n", transferCounter*SplitTransferNum)
+			} else {
+				fmt.Printf("\n\033[38;5;208mtransfer_1\033[0m sent \033[32m%v\033[0m tokens to \033[38;5;208mtransfer_0\033[0m\n", transferCounter*SplitTransferNum)
+			}
+
+			transferReady = true
+		}
 	}
 }
 
