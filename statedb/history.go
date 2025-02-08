@@ -61,7 +61,6 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 		}
 		reported = append(reported, temReported)
 	}
-
 	preRecentBlocks := s.JamState.RecentBlocks
 	if len(preRecentBlocks) > 0 {
 		preRecentBlocks[len(preRecentBlocks)-1].StateRoot = s.StateRoot // ****

@@ -268,7 +268,6 @@ func (n *Node) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16
 	if debugDA {
 		fmt.Printf("[CE137_ANS Verified] erasureRoot-shardIndex: %v-%d\n", erasureRoot, shardIndex)
 	}
-
 	// Store path to Erasure Root
 	bClubH := common.Blake2Hash(bundleShard)
 	sClubH := trie.NewWellBalancedTree(segmentShards, types.Blake2b).RootHash()
@@ -284,6 +283,7 @@ func (n *Node) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16
 	}
 
 	// Long-term ImportDA (s)
+
 	_errS := n.StoreImportDA_Assurer(erasureRoot, shardIndex, segmentShards)
 	if _errS != nil {
 		return _errS
@@ -299,6 +299,9 @@ func (n *Node) StoreFullShardJustification(erasureRoot common.Hash, shardIndex u
 	// f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	f_es_key := fmt.Sprintf("f_%v", esKey)
+	if debugKV {
+		fmt.Printf("N%d StoreFullShardJustification f_es_key %v\n", n.id, f_es_key)
+	}
 	bundle_segment_pair := append(bClubH.Bytes(), sClubH.Bytes()...)
 	f_es_val := append(bundle_segment_pair, justification...)
 	n.WriteRawKV(f_es_key, f_es_val)
@@ -311,6 +314,10 @@ func (n *Node) StoreFullShardJustification(erasureRoot common.Hash, shardIndex u
 func (n *Node) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, justification []byte, err error) {
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	f_es_key := fmt.Sprintf("f_%v", esKey)
+	if debugKV {
+		fmt.Printf("N%d GetFullShardJustification f_es_key %v\n", n.id, f_es_key)
+	}
+
 	data, ok, err := n.ReadRawKV([]byte(f_es_key))
 	if err != nil || !ok {
 		return
@@ -365,7 +372,6 @@ func (n *Node) getErasureRootFromHash(h common.Hash) (erasureRoot common.Hash, e
 
 // reqHash -> erasureRoot -> exportedSegmentsRoot
 func (n *Node) getExportedSegmenstRootFromHash(requestedHash common.Hash) (exportedSegmentsRoot common.Hash, packageHash common.Hash, err error) {
-
 	// requestedHash -> erasureRoot
 	erasureRootRaw, ok, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(requestedHash)))
 	if err0 != nil || !ok {
@@ -456,6 +462,10 @@ func (n *Node) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16,
 
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	s_es_key := fmt.Sprintf("s_%s", esKey)
+
+	if debugKV {
+		fmt.Printf("N%d StoreImportDA_Assurer concatenatedShards s_es_key %v\n", n.id, s_es_key)
+	}
 	concatenatedShards, err := CombineSegmentShards(segmentShards)
 	if err != nil {
 		return err
@@ -586,7 +596,9 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	s_es_key := fmt.Sprintf("s_%s", esKey)
-
+	if debugKV {
+		fmt.Printf("N%d GetSegmentShard_Assurer s_es_key %v\n", n.id, s_es_key)
+	}
 	concatenatedShards, _, err := n.ReadRawKV([]byte(s_es_key))
 	segmentShards, _ := SplitToSegmentShards(concatenatedShards)
 

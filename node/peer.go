@@ -149,7 +149,6 @@ func sendQuicBytes(stream quic.Stream, msg []byte) (err error) {
 	msgLen := uint32(len(msg))
 	lenBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lenBuf, msgLen)
-
 	// First, write the message length to the stream
 	_, err = stream.Write(lenBuf)
 	if err != nil {

@@ -557,7 +557,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	prevWorkPackageHash := common.Hash{}
 	// ================================================
 	// make n workpackages for Fib and Trib
-	targetNMax := 50
+	targetNMax := 911
 	for n := 0; n < targetNMax; n++ {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)
@@ -784,7 +784,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					Meg_Chan <- curr_Meg_WorkPackage
 					Meg_counter++
 					Meg_Ready = false
-					fmt.Printf("**  Preparing Fib_Tri#%v %v Meg#%v %v **\n", Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
+					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
 				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
 
 					Meg_Ready = false
@@ -817,7 +817,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					Meg_Chan <- curr_Meg_WorkPackage
 					Meg_counter++
 					Meg_Ready = false
-					fmt.Printf("**  Preparing Fib_Tri#%v %v Meg#%v %v **\n", Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
+					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
 				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil) {
 					meg_hash := curr_Meg_WorkPackage.Hash()         //core 0
 					fib_tri_hash := curr_fib_tri_WorkPackage.Hash() //core 1

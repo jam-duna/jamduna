@@ -900,6 +900,7 @@ func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPack
 
 	n.StoreMeta_Guarantor(spec, erasureMeta, bECChunks, sECChunksArray)
 	validator_idx := uint16(n.GetCurrValidatorIndex())
+	fmt.Printf("N%d validator_idx=%v\n", n.id, validator_idx)
 	//we should figure out how to make sure the other validators are signing the same validator index by the same state
 	gc := workReport.Sign(n.GetEd25519Secret(), validator_idx)
 	guarantee = types.Guarantee{

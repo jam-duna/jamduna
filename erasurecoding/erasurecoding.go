@@ -110,7 +110,6 @@ func Encode(data []byte, shardPieces int) ([][][]byte, error) {
 		}(g)
 	}
 	wg.Wait()
-
 	return out, nil
 }
 

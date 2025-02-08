@@ -379,6 +379,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	coreAuthPoolEncode := d.GetAuthPoolBytes()
 	authQueueEncode := d.GetAuthQueueBytes()
 	privilegedServiceIndicesEncode := d.GetPrivilegedServicesIndicesBytes()
+
 	recentBlocksEncode := d.GetRecentBlocksBytes()
 
 	accunulateQueueEncode := d.GetAccumulationQueueBytes()
@@ -390,6 +391,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	verify := true
 	t.SetState(C1, coreAuthPoolEncode)
 	t.SetState(C2, authQueueEncode)
+
 	t.SetState(C3, recentBlocksEncode)
 	t.SetState(C4, safroleStateEncode)
 	t.SetState(C5, disputeState)
@@ -629,7 +631,7 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	sf := s.GetSafrole()
 	if sf == nil {
 		fmt.Printf("NO SAFROLE %v", s)
-		panic(222)
+		panic(223)
 	}
 
 	if debug {
@@ -1130,7 +1132,6 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
-
 	start := time.Now()
 	s = oldState.Copy()
 	old_timeslot := s.GetSafrole().Timeslot

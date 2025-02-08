@@ -283,6 +283,21 @@ func (n *Node) runBlocksTickets() {
 		select {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
+		case ticket := <-n.ticketsCh:
+			n.processTicket(ticket)
+		}
+	}
+}
+
+func (n *Node) runReceiveBlock() {
+	// ticker here to avoid high CPU usage
+	pulseTicker := time.NewTicker(20 * time.Millisecond)
+	defer pulseTicker.Stop()
+
+	for {
+		select {
+		case <-pulseTicker.C:
+			// Small pause to reduce CPU load when channels are quiet
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
 			//fmt.Printf("[N%d] received Block Announcement from %d\n", n.id, blockAnnouncement.ValidatorIndex)
 			b, err := n.processBlockAnnouncement(blockAnnouncement)
@@ -291,8 +306,6 @@ func (n *Node) runBlocksTickets() {
 			} else {
 				n.processBlock(b)
 			}
-		case ticket := <-n.ticketsCh:
-			n.processTicket(ticket)
 		}
 	}
 }

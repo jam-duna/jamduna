@@ -59,6 +59,7 @@ const (
 	debugSegments     = false // Fetch import segments
 	debugBundle       = false // Fetch WorkPackage Bundle
 	debugAncestor     = false // Check Ancestor
+	debugKV           = false // WriteRawKV, ReadRawKV
 	debugSTF          = true  // State Transition Function
 	debugPublishTrace = true  // Publish Trace -- such that each node should have full state_transition
 	test_prereq       = false // Test Prerequisites Enabled
@@ -326,7 +327,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	if err != nil {
 		return nil, fmt.Errorf("NewStateDBStorage %v", err)
 	}
-
 	var cert tls.Certificate
 	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
@@ -465,6 +465,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runMain()
 		go node.runPreimages()
 		go node.runBlocksTickets()
+		go node.runReceiveBlock()
 		go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 	}
 	return node, nil
@@ -472,13 +473,13 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 func GenerateQuicConfig() *quic.Config {
 	return &quic.Config{
-		EnableDatagrams:            true,
 		Allow0RTT:                  true,
-		KeepAlivePeriod:            30 * time.Second,
-		MaxIdleTimeout:             1 * time.Minute,
-		MaxIncomingStreams:         1000 * 1024, // 10 times of connection window
-		MaxStreamReceiveWindow:     1000 * 1024, // 10 times of connection window
-		MaxConnectionReceiveWindow: 100 * 1024,
+		KeepAlivePeriod:            5 * time.Second,
+		MaxIdleTimeout:             10 * time.Second,
+		MaxIncomingUniStreams:      2 * 1023 * 1023,
+		MaxIncomingStreams:         2 * 1023 * 1023,
+		MaxStreamReceiveWindow:     100 * 1024 * 1024,
+		MaxConnectionReceiveWindow: 500 * 1024 * 1024,
 	}
 }
 
@@ -737,17 +738,6 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		return
 	}
 
-	// // Statistics for incoming connections
-	// atomic.AddInt64(&n.totalConnections, 1)
-	// n.connectedPeers[validatorIndex] = true
-
-	// defer func() {
-	// 	atomic.AddInt64(&n.totalConnections, -1)
-	// 	delete(n.connectedPeers, validatorIndex)
-	// 	if closeErr := conn.CloseWithError(0, "handle connection closed"); closeErr != nil {
-	// 		fmt.Printf("Failed to close connection from %s: %v\n", remoteAddr, closeErr)
-	// 	}
-	// }()
 	for {
 		stream, err := conn.AcceptStream(context.Background())
 		if err != nil {
@@ -769,11 +759,11 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		}()
 	}
 }
+
 func (n *Node) broadcast(obj interface{}) []byte {
 	result := []byte{}
 	objType := reflect.TypeOf(obj)
 	var wg sync.WaitGroup
-
 	for id, p := range n.peersInfo {
 		if id == n.id {
 			if objType == reflect.TypeOf(types.Assurance{}) {
@@ -804,20 +794,23 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				b := obj.(types.Block)
 				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
 				if err != nil {
+					fmt.Printf("GetOrInitBlockAnnouncementStream ERR %v\n", err)
 					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s GetOrInitBlockAnnouncementStream ERR %v\n", n.String(), err), true)
 				}
 				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
 				if err != nil {
+					fmt.Printf("GetBlockAnnouncementBytes ERR %v\n", err)
 					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s GetBlockAnnouncementBytes ERR %v\n", n.String(), err), true)
 				}
 				err = sendQuicBytes(up0_stream, block_a_bytes)
 				if err != nil {
+					fmt.Printf("[Block] sendQuicBytes ERR %v\n", err)
 					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendBlockAnnouncement ERR %v\n", n.String(), err), true)
 				}
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
 				if debugG {
-					fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d\n", n.String(), id)
+					fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d %v\n", n.String(), id, time.Now().Format("04:05.000"))
 				}
 				err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
 				if err != nil {
@@ -942,7 +935,6 @@ func (n *Node) extendChain() error {
 
 		ok := false
 		for _, b := range n.blocks {
-
 			if b.GetParentHeaderHash() == parentheaderhash {
 				ok = true
 				nextBlock := b
@@ -1027,6 +1019,7 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 			n.assureData(g)
 		}
 	}
+
 	a, numCores, err := n.generateAssurance(b.Header.Hash())
 	if err != nil {
 		return err
@@ -1048,14 +1041,17 @@ func (n *Node) processBlock(blk *types.Block) error {
 	n.StoreBlock(blk, n.id, false)
 	n.cacheBlock(blk)
 	n.cacheHeaders(b.Header.Hash(), blk)
+	// Sometimes this loop will get in deadlock
 	for {
 		if b.GetParentHeaderHash() == (common.Hash{}) {
+
 			//fmt.Printf("[N%d] processBlock: hit genesis (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else if n.statedb != nil && b.GetParentHeaderHash() == n.statedb.HeaderHash {
 			//fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else {
+
 			parentBlock, ok := n.cacheBlockRead(b.GetParentHeaderHash())
 			if !ok {
 				parentBlocks, err := n.fetchBlocks(b.GetParentHeaderHash(), 1, 1)
@@ -1363,7 +1359,6 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 }
 
 func (n *Node) runClient() {
-
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
 
@@ -1373,6 +1368,8 @@ func (n *Node) runClient() {
 		select {
 
 		case <-ticker_pulse.C:
+			// fmt.Printf("N%d runClient %v\n", n.id, time.Now().Format("04:05.000"))
+
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
@@ -1395,7 +1392,6 @@ func (n *Node) runClient() {
 					n.BroadcastTickets()
 				}
 			}
-
 			//if n.checkGodTimeslotUsed(currJCE) {
 			//	return
 			//}
@@ -1412,10 +1408,12 @@ func (n *Node) runClient() {
 				continue
 				//panic(0)
 			}
+
 			if newStateDB != nil && debugTree {
 				fmt.Printf("[N%d] Author PrintTree \n", n.id)
 				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
 			}
+
 			if newStateDB != nil {
 				if n.checkGodTimeslotUsed(currJCE) {
 					fmt.Printf("%s could author but blocked by god\n", n.String())
@@ -1437,6 +1435,7 @@ func (n *Node) runClient() {
 				n.addStateDB(newStateDB)
 				n.StoreBlock(newBlock, n.id, true)
 				n.cacheBlock(newBlock)
+
 				headerHash := newBlock.Header.Hash()
 				n.cacheHeaders(headerHash, newBlock)
 				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
@@ -1446,6 +1445,7 @@ func (n *Node) runClient() {
 						fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
 					}
 				}
+
 				timeslot := newStateDB.GetSafrole().Timeslot
 				err := n.writeDebug(newBlock, timeslot)
 				if err != nil {

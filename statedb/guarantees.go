@@ -889,6 +889,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 		if len(block.Reported) != 0 {
 			for _, segmentRootLookup := range block.Reported {
 				if segmentRootLookup.WorkPackageHash == workPackageHash {
+					// panic("invalid prerequisite work package(ErrGDuplicatePackageRecentHistory)")
 					return jamerrors.ErrGDuplicatePackageRecentHistory
 				}
 			}

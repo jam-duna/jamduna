@@ -154,6 +154,7 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	segmentShards, err = receiveQuicBytes(stream)
 	if err != nil {
 		fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] ERR %v\n", p.String(), err)
+		// panic(11060)
 		return
 	}
 	//fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] %d bytes\n", p.String(), len(segmentShards))
@@ -186,11 +187,12 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 	}
 	if err != nil {
 		fmt.Printf("%s [onSegmentShardRequest:GetSegmentShard_Assurer] ERR %v\n", n.String(), err)
+		// panic(212131212)
 		return err
 	}
 	if !ok {
 		fmt.Printf("%s [onSegmentShardRequest:GetSegmentShard_Assurer] erasureRoot %v shardIndex %d SegmentIndex %v NOT FOUND\n", n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
-		panic(1107)
+		// panic(1107)
 		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard

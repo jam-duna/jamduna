@@ -1,5 +1,5 @@
 # Set variables for testing
-TIMEOUT ?= 10m
+TIMEOUT ?= 40m
 TAGS ?= tiny
 
 fallback:

@@ -42,6 +42,10 @@ func Bytes2Hex(d []byte) string {
 	return "0x" + ethereumCommon.Bytes2Hex(d)
 }
 
+func Bytes2String(d []byte) string {
+	return ethereumCommon.Bytes2Hex(d)
+}
+
 // Hex2Bytes converts a byte slice to a Hash.
 func Hex2Bytes(b string) []byte {
 	return ethereumCommon.FromHex(b)

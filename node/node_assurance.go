@@ -83,6 +83,9 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 		fmt.Printf("%s [assureData:VerifyFullShard] %v verified %v\n", n.String(), verified, fullshard_identifier)
 	}
 
+	if debugKV {
+		fmt.Printf("N%d StoreFullShard_AssurererasureRoot %v\n", n.id, erasureRoot)
+	}
 	err = n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
 	if err != nil {
 		return
