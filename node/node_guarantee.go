@@ -99,6 +99,9 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	}
 
 	if len(guarantee.Signatures) >= 2 {
+		if len(guarantee.Signatures) == 2 {
+			fmt.Printf("WARNING: ABNORMAL- Only 2 signatures, expected 3! This is not normal!")
+		}
 		guarantee.Slot = currTimeslot
 		go n.broadcast(guarantee)
 		eclapsed := time.Since(timer)

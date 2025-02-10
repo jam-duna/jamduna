@@ -610,7 +610,8 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 		return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
 	}
 	if recoveredSclubH != sClubH {
-		panic("Invalid GetSegmentShard ERROR??")
+		// TODO: add log.Warn() -- do not panic
+		return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, fmt.Errorf("GetSegmentShard_Assurer: Invalid GetSegmentShard ERROR")
 	}
 
 	if debugDA {
