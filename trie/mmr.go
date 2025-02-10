@@ -5,22 +5,17 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/colorfulnotion/jam/types"
 )
 
 type MMR struct {
-	Peaks []*common.Hash
+	Peaks types.Peaks `json:"peaks"`
 }
 
 func NewMMR() *MMR {
 	return &MMR{
 		Peaks: make([]*common.Hash, 0),
 	}
-}
-
-func keccak256(data []byte) common.Hash {
-	hash := crypto.Keccak256(data)
-	return common.Hash(hash)
 }
 
 func hashConcat(left, right *common.Hash) *common.Hash {
@@ -34,7 +29,7 @@ func hashConcat(left, right *common.Hash) *common.Hash {
 		right = &common.Hash{}
 	}
 	combined := append(left.Bytes(), right.Bytes()...)
-	r := keccak256(combined)
+	r := common.Keccak256(combined)
 	return &r
 }
 
@@ -116,7 +111,7 @@ func (M MMR) SuperPeak() *common.Hash {
 		// Base cases
 		if len(nonNilHashes) == 0 {
 			// Return empty hash (e.g., zero hash)
-			zeroHash := keccak256([]byte{})
+			zeroHash := common.Keccak256([]byte{})
 			return &zeroHash
 		}
 		if len(nonNilHashes) == 1 {
@@ -128,7 +123,7 @@ func (M MMR) SuperPeak() *common.Hash {
 		left := computeSuperPeak(nonNilHashes[:len(nonNilHashes)-1])
 		right := nonNilHashes[len(nonNilHashes)-1]
 		combined := append([]byte("peak"), append(left.Bytes(), right.Bytes()...)...)
-		superPeakHash := keccak256(combined)
+		superPeakHash := common.Keccak256(combined)
 		return &superPeakHash
 	}
 

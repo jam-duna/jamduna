@@ -18,11 +18,6 @@ type BeefyCommitment struct {
 	Commitment common.Hash `json:"commitment"`
 }
 
-type Peaks []*common.Hash
-type MMR struct {
-	Peaks Peaks `json:"peaks"`
-}
-
 // v0.4.5 eq.165 - W^!
 func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
 	outputWorkReports := []types.WorkReport{}

@@ -1,17 +1,14 @@
 package types
 
 import (
-	"github.com/colorfulnotion/jam/common"
 	"reflect"
-)
 
-type MMR struct {
-	Peaks Peaks `json:"peaks"`
-}
+	"github.com/colorfulnotion/jam/common"
+)
 
 type Peaks []*common.Hash
 
-// C3 RecentBlocks
+// C3 Peaks
 func (T Peaks) Decode(data []byte) (interface{}, uint32) {
 	if len(data) == 0 {
 		return Peaks{}, 0
@@ -37,12 +34,12 @@ func (T Peaks) Decode(data []byte) (interface{}, uint32) {
 			peak := decoded.(common.Hash)
 			peaks[i] = &peak
 			length += l
+
 		}
 	}
 	return peaks, length
 }
 
-// C3
 func (T Peaks) Encode() []byte {
 	if len(T) == 0 {
 		return []byte{0}

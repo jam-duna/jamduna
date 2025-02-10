@@ -52,44 +52,6 @@ func (n *JamState) SetAuthQueue(authQueueByte []byte) {
 }
 
 // C3 RecentBlocks
-func (T Peaks) Decode(data []byte) (interface{}, uint32) {
-	if len(data) == 0 {
-		return Peaks{}, 0
-	}
-
-	peaks_len, length, err := types.Decode(data, reflect.TypeOf(uint(0)))
-	if err != nil {
-		return Peaks{}, 0
-	}
-
-	if peaks_len.(uint) == 0 {
-		return Peaks{}, length
-	}
-
-	peaks := make([]*common.Hash, peaks_len.(uint))
-	for i := 0; i < int(peaks_len.(uint)); i++ {
-		if length >= uint32(len(data)) {
-			return Peaks{}, 0
-		}
-
-		if data[length] == 0 {
-			peaks[i] = nil
-			length++
-		} else if data[length] == 1 {
-			length++
-			decoded, l, err := types.Decode(data[length:], reflect.TypeOf(&common.Hash{}))
-			if err != nil {
-				return Peaks{}, 0
-			}
-			peaks[i] = decoded.(*common.Hash)
-			length += l
-		} else {
-			return Peaks{}, 0
-		}
-	}
-	return peaks, length
-}
-
 func (n *JamState) SetRecentBlocks(recentBlocksByte []byte) {
 	if len(recentBlocksByte) == 0 {
 		return

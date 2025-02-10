@@ -38,33 +38,7 @@ func (n *JamState) GetRecentBlocksBytes() []byte {
 	return codec_bytes
 }
 
-func (T Peaks) Encode() []byte {
-	if len(T) == 0 {
-		return []byte{0}
-	}
-
-	encoded, err := types.Encode(uint(len(T)))
-	if err != nil {
-		return nil
-	}
-
-	for i := 0; i < len(T); i++ {
-		if T[i] == nil {
-			encoded = append(encoded, 0)
-		} else {
-			encoded = append(encoded, 1)
-			encodedTi, err := types.Encode(T[i])
-			if err != nil {
-				return nil
-			}
-			encoded = append(encoded, encodedTi...)
-		}
-	}
-	return encoded
-}
-
 // C4 safroleState Gamma
-
 func (T TicketsOrKeys) T2CT() CTicketsOrKeys {
 	var Tickets types.TicketsMark
 	var Keys [types.EpochLength]common.Hash
