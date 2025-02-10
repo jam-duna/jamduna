@@ -725,8 +725,10 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	Meg_successful := make(chan bool)
 	Meg_Ready := true
 	Meg_Keeper := false
-	curr_Meg_WorkPackage := types.WorkPackage{}
-	curr_fib_tri_WorkPackage := types.WorkPackage{}
+	curr_Meg_WorkPackage := Meg_WorkPackages[Meg_counter]
+	var curr_Meg_prereqs []common.Hash
+	curr_fib_tri_WorkPackage := Fib_Trib_WorkPackages[Fib_Tri_counter]
+	var curr_fib_tri_prereqs []common.Hash
 	fmt.Printf("Guarantor Assignment\n")
 	for _, assign := range nodes[0].statedb.GuarantorAssignments {
 		vid := nodes[0].statedb.GetSafrole().GetCurrValidatorIndex(assign.Validator.GetEd25519Key())
@@ -766,23 +768,30 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 
 				}
 			} else if test_prereq {
-				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
+				if Fib_Tri_counter == targetNMax-1 && Meg_counter == targetNMax-1 {
 					fmt.Printf("All workpackages are sent\n")
 					sentLastWorkPackage = true
-				} else if (nodes[0].IsCoreReady(0) && Meg_Ready) && (nodes[0].IsCoreReady(1) && Fib_Tri_Ready) {
+				} else if (nodes[0].IsCoreReady(0, curr_Meg_prereqs) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
 					// if false{
 
 					// send workpackages to the network
 
-					curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
 					Fib_Tri_Chan <- curr_fib_tri_WorkPackage
 					Fib_Tri_counter++
+					curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
+					curr_fib_tri_prereqs = []common.Hash{}
+					for _, item := range curr_fib_tri_WorkPackage.WorkItems {
+						for _, seg := range item.ImportedSegments {
+							curr_fib_tri_prereqs = append(curr_fib_tri_prereqs, seg.RequestedHash)
+						}
+					}
 					Fib_Tri_Ready = false
 
 					// send workpackages to the network
-					curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
 					Meg_Chan <- curr_Meg_WorkPackage
 					Meg_counter++
+					curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
+					curr_Meg_prereqs = []common.Hash{}
 					Meg_Ready = false
 					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
 				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
@@ -792,41 +801,38 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 					Fib_Tri_Ready = false
 					Fib_Tri_Keeper = true
 
-				} else if (Meg_Keeper && nodes[0].IsCoreReady(0)) && (Fib_Tri_Keeper && nodes[0].IsCoreReady(1)) {
+				} else if (Meg_Keeper && nodes[0].IsCoreReady(0, curr_Meg_prereqs)) && (Fib_Tri_Keeper && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs)) {
 					Meg_Ready = true
 					Meg_Keeper = false
 					Fib_Tri_Ready = true
 					Fib_Tri_Keeper = false
 				}
 			} else if !test_prereq {
-				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
+				if Fib_Tri_counter == targetNMax-1 && Meg_counter == targetNMax-1 {
 					fmt.Printf("All workpackages are sent\n")
 					sentLastWorkPackage = true
-				} else if (nodes[0].IsCoreReady(0) && Meg_Ready) && (nodes[0].IsCoreReady(1) && Fib_Tri_Ready) {
-					// if false{
-
+				} else if (nodes[0].IsCoreReady(0, curr_Meg_prereqs) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
 					// send workpackages to the network
-
-					curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
+					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
 					Fib_Tri_Chan <- curr_fib_tri_WorkPackage
 					Fib_Tri_counter++
 					Fib_Tri_Ready = false
-
+					curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
+					curr_fib_tri_prereqs = []common.Hash{}
+					for _, item := range curr_fib_tri_WorkPackage.WorkItems {
+						for _, seg := range item.ImportedSegments {
+							curr_fib_tri_prereqs = append(curr_fib_tri_prereqs, seg.RequestedHash)
+						}
+					}
 					// send workpackages to the network
-					curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
 					Meg_Chan <- curr_Meg_WorkPackage
 					Meg_counter++
 					Meg_Ready = false
-					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
-				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) && (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil) {
-					meg_hash := curr_Meg_WorkPackage.Hash()         //core 0
-					fib_tri_hash := curr_fib_tri_WorkPackage.Hash() //core 1
-					rho_0_wphash := nodes[0].statedb.JamState.AvailabilityAssignments[0].WorkReport.AvailabilitySpec.WorkPackageHash
-					rho_1_wphash := nodes[0].statedb.JamState.AvailabilityAssignments[1].WorkReport.AvailabilitySpec.WorkPackageHash
-					if meg_hash == rho_0_wphash && fib_tri_hash == rho_1_wphash && nodes[0].IsCoreReady(0) && nodes[0].IsCoreReady(1) {
-						Meg_Ready = true
-						Fib_Tri_Ready = true
-					}
+					curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
+					curr_Meg_prereqs = []common.Hash{}
+				} else if nodes[0].IsCoreReady(0, curr_Meg_prereqs) && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) {
+					Meg_Ready = true
+					Fib_Tri_Ready = true
 				}
 			}
 		// case <-ticker_runtime.C:

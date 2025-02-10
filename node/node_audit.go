@@ -569,7 +569,6 @@ func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelec
 
 func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Hash) (judgement types.Judgement, err error) {
 	judgement = types.Judgement{}
-	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
 		return
 	}
@@ -577,13 +576,13 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	if err != nil {
 		return
 	}
-
+	judgment_bucket.RLock()
 	for _, j := range judgment_bucket.Judgements[workReport.Hash()] {
 		if j.Validator == n.id {
-			fmt.Printf("%s [T:%d] has made judgement %v\n", n.String(), auditing_statedb.GetTimeslot(), j.WorkReportHash)
 			return j, nil
 		}
 	}
+	judgment_bucket.RUnlock()
 
 	n.workReportsMutex.Lock()
 	if wr, exists := n.workReports[workReport.Hash()]; exists {
@@ -600,6 +599,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 			return
 		}
 	}
+
 	n.workReportsMutex.Unlock()
 	/* think about it - part A
 
