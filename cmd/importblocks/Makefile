@@ -35,13 +35,13 @@ ifndef TS
 	@echo "ERROR: 'TS' is not set and no valid folder found in '$(JAMDIR)'." && \
 	echo "Please ensure the directory exists or set TS=<timestamp> manually." && exit 1
 endif
-	mkdir -p $(MODE)/state_transitions $(MODE)/blocks ${DATADIR}/$(MODE)/state_snapshots
+	mkdir -p ${DATADIR}/$(MODE)/state_transitions ${DATADIR}/$(MODE)/blocks ${DATADIR}/$(MODE)/state_snapshots
 	find "$(JAMDIR)/$(TS)" -type f -path "*/data/state_transitions/*" -exec cp {} "${DATADIR}/$(MODE)/state_transitions/" \;
 	find "$(JAMDIR)/$(TS)" -type f -path "*/data/blocks/*" -exec cp {} "${DATADIR}/$(MODE)/blocks/" \;
-	find "$(JAMDIR)/$(TS)" -type f -path "*/data/state_snapshots/*" -exec cp {} "${DATADIR}$(MODE)/state_snapshots/" \;
+	find "$(JAMDIR)/$(TS)" -type f -path "*/data/state_snapshots/*" -exec cp {} "${DATADIR}/$(MODE)/state_snapshots/" \;
 
 cpstf:
-	mkdir -p $(MODE)/state_transitions $(MODE)/blocks ${DATADIR}/$(MODE)/state_snapshots
+	mkdir -p ${DATADIR}/$(MODE)/state_transitions ${DATADIR}/$(MODE)/blocks ${DATADIR}/$(MODE)/state_snapshots
 	find "$(JAMDIR)/state_transitions" -type f -exec cp {} "${DATADIR}/$(MODE)/state_transitions/" \;
 	find "$(JAMDIR)/blocks" -type f -exec cp {} "${DATADIR}/$(MODE)/blocks/" \;
 	find "$(JAMDIR)/state_snapshots" -type f -exec cp {} "${DATADIR}/$(MODE)/state_snapshots/" \;

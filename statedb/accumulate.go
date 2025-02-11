@@ -130,11 +130,7 @@ func Mapping(w []types.WorkReport) []common.Hash {
 	for _, workReport := range w {
 		result = append(result, workReport.AvailabilitySpec.WorkPackageHash)
 	}
-	if len(result) > 0 {
-		return result
-	} else {
-		return nil
-	}
+	return result
 }
 
 // v0.4.5 eq.171 - m

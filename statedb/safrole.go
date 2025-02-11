@@ -1019,6 +1019,13 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 SafroleState
 	s2 = cloneSafroleState(*s)
 	// here we set the sealer authority
 	if epochAdvanced {
+		// New Epoch change! Shift entropy
+		// [fresh, η0, η1, η2] - > [η0', η1', η2', η3']. η0' doesn't matter as it would be updated after STF
+		s2.AdvanceEntropyAndValidator(s, common.Hash{})
+	} else {
+		// Epoch in progress ... no change. entropy0 is unimportant
+	}
+	if epochAdvanced {
 		if debug {
 			fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
 		}
@@ -1044,13 +1051,6 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 SafroleState
 			s2.TicketsOrKeys = ticketsOrKeys
 		}
 	}
-	if epochAdvanced {
-		// New Epoch change! Shift entropy
-		// [fresh, η0, η1, η2] - > [η0', η1', η2', η3']. η0' doesn't matter as it would be updated after STF
-		s2.AdvanceEntropyAndValidator(s, common.Hash{})
-	} else {
-		// Epoch in progress ... no change. entropy0 is unimportant
-	}
 	return s2, epochAdvanced, nil
 }
 
@@ -1063,6 +1063,15 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 		epochAdvanced = true
 	}
 	s2 = cloneSafroleState(*s)
+	// entropy phasing eq 67 & 57
+	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness_H_v)
+	if epochAdvanced {
+		// New Epoch
+		s2.AdvanceEntropyAndValidator(s, new_entropy_0)
+	} else {
+		// Epoch in progress
+		s2.StableEntropy(s, new_entropy_0)
+	}
 	// in the tail slot with a full set of tickets
 	if epochAdvanced {
 		//this is Winning ticket eligible. Check if header has marker, if yes, verify it
@@ -1071,6 +1080,7 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 		}
 		// eq 68 primary mode
 		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength {
+			// not using any entropy for primary mode
 			winning_tickets, err := s2.GenerateWinningMarker()
 			if err != nil {
 				return s2, epochAdvanced, fmt.Errorf("GenerateWinningMarker Failed: %v", err)
@@ -1098,15 +1108,7 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 		}
 
 	}
-	// entropy phasing eq 67 & 57
-	new_entropy_0 := s.ComputeCurrRandomness(fresh_randomness_H_v)
-	if epochAdvanced {
-		// New Epoch
-		s2.AdvanceEntropyAndValidator(s, new_entropy_0)
-	} else {
-		// Epoch in progress
-		s2.StableEntropy(s, new_entropy_0)
-	}
+
 	return s2, epochAdvanced, nil
 }
 
@@ -1221,7 +1223,8 @@ func (s *SafroleState) ChooseFallBackValidator() ([]common.Hash, error) {
 	chosenkeys := make([]common.Hash, 0)
 	for i := 0; i < types.EpochLength; i++ {
 		// get the authority index
-		authority_idx, err := s.computeFallbackAuthorityIndex(s.Entropy[2], uint32(i), len(s.CurrValidators))
+		using_entropy := s.Entropy[2]
+		authority_idx, err := s.computeFallbackAuthorityIndex(using_entropy, uint32(i), len(s.CurrValidators))
 		if err != nil {
 			return nil, err
 		}
