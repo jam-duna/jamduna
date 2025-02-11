@@ -922,7 +922,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 
 	err := s.ValidateSaforle(tickets, targetJCE, header)
 	if err != nil {
-		//fmt.Printf("ValidateSaforle ERR %v\n", jamerrors.GetErrorStr(err))
+		//fmt.Printf("ValidateSaforle ERR %v\n", jamerrors.GetErrorName(err))
 		return *s, err
 	}
 

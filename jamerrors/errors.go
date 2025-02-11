@@ -5,96 +5,140 @@ import (
 	"strings"
 )
 
-// T-safrole errors
+// Ticket (T) Errors
 var (
-	ErrTBadTicketAttemptNumber = errors.New("BadTicketAttemptNumber: Submit an extrinsic with a bad ticket attempt number.")
-	ErrTTicketAlreadyInState   = errors.New("TicketAlreadyInState: Submit one ticket already recorded in the state.")
-	ErrTTicketsBadOrder        = errors.New("TicketsBadOrder: Submit tickets in bad order.")
-	ErrTBadRingProof           = errors.New("BadRingProof: Submit tickets with bad ring proof.")
-	ErrTEpochLotteryOver       = errors.New("EpochLotteryOver: Submit tickets when epoch's lottery is over.")
-	ErrTTimeslotNotMonotonic   = errors.New("TimeslotNotMonotonic: Progress from slot X to slot X. Timeslot must be strictly monotonic.")
+	ErrTBadTicketAttemptNumber = errors.New("T1|BadTicketAttemptNumber: Submit an extrinsic with a bad ticket attempt number.")
+	ErrTTicketAlreadyInState   = errors.New("T2|TicketAlreadyInState: Submit one ticket already recorded in the state.")
+	ErrTTicketsBadOrder        = errors.New("T3|TicketsBadOrder: Submit tickets in bad order.")
+	ErrTBadRingProof           = errors.New("T4|BadRingProof: Submit tickets with a bad ring proof.")
+	ErrTEpochLotteryOver       = errors.New("T5|EpochLotteryOver: Submit tickets when the epoch's lottery is over.")
+	ErrTTimeslotNotMonotonic   = errors.New("T6|TimeslotNotMonotonic: Progress from slot X to slot X. Timeslot must be strictly monotonic.")
 )
 
-// G-reports errors
+// Assurances Errors
 var (
-	ErrGBadCodeHash                             = errors.New("BadCodeHash: Work result code hash doesn't match the one expected for the service.")
-	ErrGBadCoreIndex                            = errors.New("BadCoreIndex: Core index is too big.")
-	ErrGBadSignature                            = errors.New("BadSignature: Invalid report guarantee signature.")
-	ErrGCoreEngaged                             = errors.New("CoreEngaged: A core is not available.")
-	ErrGDependencyMissing                       = errors.New("DependencyMissing: Prerequisite is missing.")
-	ErrGDuplicatePackageTwoReports              = errors.New("DuplicatePackageTwoReports: Report contains a duplicate package (send two reports from same package).")
-	ErrGFutureReportSlot                        = errors.New("FutureReportSlot: Report refers to a slot in the future with respect to container block slot.")
-	ErrGInsufficientGuarantees                  = errors.New("InsufficientGuarantees: Report with no enough guarantors signatures.")
-	ErrGDuplicateGuarantors                     = errors.New("DuplicateGuarantors: Guarantors indices are not sorted or unique.")
-	ErrGOutOfOrderGuarantee                     = errors.New("OutOfOrderGuarantee: Reports cores are not sorted or unique.")
-	ErrGWorkReportGasTooHigh                    = errors.New("WorkReportGasTooHigh: Work report per core gas is too much high.")
-	ErrGServiceItemTooLow                       = errors.New("ServiceItemTooLow: Accumulate gas is below the service minimum.")
-	ErrGBadValidatorIndex                       = errors.New("BadValidatorIndex: Validator index is too big.")
-	ErrGWrongAssignment                         = errors.New("WrongAssignment: Unexpected guarantor for work report core.")
-	ErrGAnchorNotRecent                         = errors.New("AnchorNotRecent: Context anchor is not recent enough.")
-	ErrGBadBeefyMMRRoot                         = errors.New("BadBeefyMMRRoot: Context Beefy MMR root doesn't match the one at anchor.")
-	ErrGBadServiceID                            = errors.New("BadServiceID: Work result service identifier doesn't have any associated account in state.")
-	ErrGBadStateRoot                            = errors.New("BadStateRoot: Context state root doesn't match the one at anchor.")
-	ErrGDuplicatePackageRecentHistory           = errors.New("DuplicatePackageRecentHistory: Package was already available in recent history.")
-	ErrGReportEpochBeforeLast                   = errors.New("ReportEpochBeforeLast: Report guarantee slot is too old with respect to block slot.")
-	ErrGSegmentRootLookupInvalidNotRecentBlocks = errors.New("SegmentRootLookupInvalidNotRecentBlocks: Segments tree root lookup item not found in recent blocks history.")
-	ErrGSegmentRootLookupInvalidUnexpectedValue = errors.New("SegmentRootLookupInvalidUnexpectedValue: Segments tree root lookup item found in recent blocks history but with an unexpected value.")
-	ErrGCoreWithoutAuthorizer                   = errors.New("CoreWithoutAuthorizer: Target core without any authorizer.")
-	ErrGCoreUnexpectedAuthorizer                = errors.New("CoreUnexpectedAuthorizer: Target core with unexpected authorizer.")
+	ErrABadSignature      = errors.New("A1|BadSignature: One assurance has a bad signature.")
+	ErrABadValidatorIndex = errors.New("A2|BadValidatorIndex: One assurance has a bad validator index.")
+	ErrABadCore           = errors.New("A3|BadCore: One assurance targets a core without any assigned work report.")
+	ErrABadParentHash     = errors.New("A4|BadParentHash: One assurance has a bad attestation parent hash.")
+	ErrAStaleReport       = errors.New("A5|StaleReport: One assurance targets a core with a stale report.")
+	ErrADuplicateAssurer  = errors.New("A6|DuplicateAssurer: Duplicate assurer.")
+	ErrANotSortedAssurers = errors.New("A7|NotSortedAssurers: Assurers not sorted.")
 )
 
-// A-assurances
+// Guarantee & Work Reports Errors
 var (
-	ErrABadSignature      = errors.New("BadSignature: One assurance has a bad signature.")
-	ErrABadValidatorIndex = errors.New("BadValidatorIndex: One assurance has a bad validator index.")
-	ErrABadCore           = errors.New("BadCore: One assurance targets a core without any assigned work report.")
-	ErrABadParentHash     = errors.New("BadParentHash: One assurance has a bad attestation parent hash.")
-	ErrAStaleReport       = errors.New("StaleReport: One assurance targets a core with a stale report.")
-	ErrADuplicateAssurer  = errors.New("Duplicate assurer.")
-	ErrANotSortedAssurers = errors.New("Assurers not sorted.")
+	ErrGBadCodeHash                             = errors.New("G1|BadCodeHash: Work result code hash doesn't match the one expected for the service.")
+	ErrGBadCoreIndex                            = errors.New("G2|BadCoreIndex: Core index is too big.")
+	ErrGBadSignature                            = errors.New("G3|BadSignature: Invalid report guarantee signature.")
+	ErrGCoreEngaged                             = errors.New("G4|CoreEngaged: A core is not available.")
+	ErrGDependencyMissing                       = errors.New("G5|DependencyMissing: Prerequisite is missing.")
+	ErrGDuplicatePackageTwoReports              = errors.New("G6|DuplicatePackageTwoReports: Report contains a duplicate package (two reports from the same package).")
+	ErrGFutureReportSlot                        = errors.New("G7|FutureReportSlot: Report refers to a slot in the future with respect to container block slot.")
+	ErrGInsufficientGuarantees                  = errors.New("G8|InsufficientGuarantees: Report without enough guarantors' signatures.")
+	ErrGDuplicateGuarantors                     = errors.New("G9|DuplicateGuarantors: Guarantors' indices are not sorted or unique.")
+	ErrGOutOfOrderGuarantee                     = errors.New("G10|OutOfOrderGuarantee: Reports' cores are not sorted or unique.")
+	ErrGWorkReportGasTooHigh                    = errors.New("G11|WorkReportGasTooHigh: Work report per-core gas is too high.")
+	ErrGServiceItemTooLow                       = errors.New("G12|ServiceItemTooLow: Accumulated gas is below the service minimum.")
+	ErrGBadValidatorIndex                       = errors.New("G13|BadValidatorIndex: Validator index is too big.")
+	ErrGWrongAssignment                         = errors.New("G14|WrongAssignment: Unexpected guarantor for work report core.")
+	ErrGAnchorNotRecent                         = errors.New("G15|AnchorNotRecent: Context anchor is not recent enough.")
+	ErrGBadBeefyMMRRoot                         = errors.New("G16|BadBeefyMMRRoot: Context Beefy MMR root doesn't match the one at anchor.")
+	ErrGBadServiceID                            = errors.New("G17|BadServiceID: Work result service identifier doesn't have any associated account in state.")
+	ErrGBadStateRoot                            = errors.New("G18|BadStateRoot: Context state root doesn't match the one at anchor.")
+	ErrGDuplicatePackageRecentHistory           = errors.New("G19|DuplicatePackageRecentHistory: Package was already available in recent history.")
+	ErrGReportEpochBeforeLast                   = errors.New("G20|ReportEpochBeforeLast: Report guarantee slot is too old with respect to block slot.")
+	ErrGSegmentRootLookupInvalidNotRecentBlocks = errors.New("G21|SegmentRootLookupInvalidNotRecentBlocks: Segments tree root lookup item not found in recent blocks history.")
+	ErrGSegmentRootLookupInvalidUnexpectedValue = errors.New("G22|SegmentRootLookupInvalidUnexpectedValue: Segments tree root lookup found in recent blocks history but with an unexpected value.")
+	ErrGCoreWithoutAuthorizer                   = errors.New("G23|CoreWithoutAuthorizer: Target core without any authorizer.")
+	ErrGCoreUnexpectedAuthorizer                = errors.New("G24|CoreUnexpectedAuthorizer: Target core with an unexpected authorizer.")
 )
 
-// disputes errors
+// Disputes Errors
 var (
-	ErrDNotSortedWorkReports             = errors.New("NotSortedWorkReports: Not sorted work reports within a verdict.")
-	ErrDNotUniqueVotes                   = errors.New("NotUniqueVotes: Not unique votes within a verdict.")
-	ErrDNotSortedValidVerdicts           = errors.New("NotSortedValidVerdicts: Not sorted, valid verdicts.")
-	ErrDNotHomogenousJudgements          = errors.New("NotHomogenousJudgements: Not homogeneous judgements, but positive votes count is not correct.")
-	ErrDMissingCulpritsBadVerdict        = errors.New("MissingCulpritsBadVerdict: Missing culprits for bad verdict.")
-	ErrDSingleCulpritBadVerdict          = errors.New("SingleCulpritBadVerdict: Single culprit for bad verdict.")
-	ErrDTwoCulpritsBadVerdictNotSorted   = errors.New("TwoCulpritsBadVerdictNotSorted: Two culprits for bad verdict, not sorted.")
-	ErrDAlreadyRecordedVerdict           = errors.New("AlreadyRecordedVerdict: Report an already recorded verdict, with culprits.")
-	ErrDCulpritAlreadyInOffenders        = errors.New("CulpritAlreadyInOffenders: Culprit offender already in the offenders list.")
-	ErrDOffenderNotPresentVerdict        = errors.New("OffenderNotPresentVerdict: Offender relative to a not present verdict.")
-	ErrDMissingFaultsGoodVerdict         = errors.New("MissingFaultsGoodVerdict: Missing faults for good verdict.")
-	ErrDTwoFaultOffendersGoodVerdict     = errors.New("TwoFaultOffendersGoodVerdict: Two fault offenders for a good verdict, not sorted.")
-	ErrDAlreadyRecordedVerdictWithFaults = errors.New("AlreadyRecordedVerdictWithFaults: Report an already recorded verdict, with faults.")
-	ErrDFaultOffenderInOffendersList     = errors.New("FaultOffenderInOffendersList: Fault offender already in the offenders list.")
-	ErrDAuditorMarkedOffender            = errors.New("AuditorMarkedOffender: Auditor marked as offender, but vote matches the verdict.")
-	ErrDBadSignatureInVerdict            = errors.New("BadSignatureInVerdict: Bad signature within the verdict judgements.")
-	ErrDBadSignatureInCulprits           = errors.New("BadSignatureInCulprits: Bad signature within the culprits sequence.")
-	ErrDAgeTooOldInVerdicts              = errors.New("AgeTooOldInVerdicts: Age too old for verdicts judgements.")
+	ErrDNotSortedWorkReports             = errors.New("D1|NotSortedWorkReports: Not sorted work reports within a verdict.")
+	ErrDNotUniqueVotes                   = errors.New("D2|NotUniqueVotes: Not unique votes within a verdict.")
+	ErrDNotSortedValidVerdicts           = errors.New("D3|NotSortedValidVerdicts: Not sorted, valid verdicts.")
+	ErrDNotHomogenousJudgements          = errors.New("D4|NotHomogenousJudgements: Not homogeneous judgements; positive votes count is incorrect.")
+	ErrDMissingCulpritsBadVerdict        = errors.New("D5|MissingCulpritsBadVerdict: Missing culprits for bad verdict.")
+	ErrDSingleCulpritBadVerdict          = errors.New("D6|SingleCulpritBadVerdict: Single culprit for bad verdict.")
+	ErrDTwoCulpritsBadVerdictNotSorted   = errors.New("D7|TwoCulpritsBadVerdictNotSorted: Two culprits for bad verdict, not sorted.")
+	ErrDAlreadyRecordedVerdict           = errors.New("D8|AlreadyRecordedVerdict: Report an already recorded verdict with culprits.")
+	ErrDCulpritAlreadyInOffenders        = errors.New("D9|CulpritAlreadyInOffenders: Culprit offender already in the offenders list.")
+	ErrDOffenderNotPresentVerdict        = errors.New("D10|OffenderNotPresentVerdict: Offender relative to a not-present verdict.")
+	ErrDMissingFaultsGoodVerdict         = errors.New("D11|MissingFaultsGoodVerdict: Missing faults for good verdict.")
+	ErrDTwoFaultOffendersGoodVerdict     = errors.New("D12|TwoFaultOffendersGoodVerdict: Two fault offenders for a good verdict, not sorted.")
+	ErrDAlreadyRecordedVerdictWithFaults = errors.New("D13|AlreadyRecordedVerdictWithFaults: Report an already recorded verdict with faults.")
+	ErrDFaultOffenderInOffendersList     = errors.New("D14|FaultOffenderInOffendersList: Fault offender already in the offenders list.")
+	ErrDAuditorMarkedOffender            = errors.New("D15|AuditorMarkedOffender: Auditor marked as offender, but vote matches the verdict.")
+	ErrDBadSignatureInVerdict            = errors.New("D16|BadSignatureInVerdict: Bad signature within the verdict judgements.")
+	ErrDBadSignatureInCulprits           = errors.New("D17|BadSignatureInCulprits: Bad signature within the culprits sequence.")
+	ErrDAgeTooOldInVerdicts              = errors.New("D18|AgeTooOldInVerdicts: Age too old for verdicts judgements.")
 )
 
-func GetErrorStrs(errs []error) []string {
-	errStrs := make([]string, len(errs))
-	for i, err := range errs {
-		errStrs[i] = GetErrorStr(err)
-	}
-	return errStrs
-}
-
-func GetErrorStr(err error) string {
+// GetErrorName extracts the error name from the error message.
+func GetErrorName(err error) string {
 	if err == nil {
 		return "No Error"
 	}
 	errStr := err.Error()
-	if err == ErrGBadCoreIndex || err == ErrGBadSignature || err == ErrGBadValidatorIndex {
-		//return "codec problem"
-	}
-	if !strings.Contains(errStr, ":") {
+	if !strings.Contains(errStr, "|") || !strings.Contains(errStr, ":") {
 		return errStr
 	}
-	errStr = strings.Split(errStr, ":")[0]
-	return errStr
+	parts := strings.SplitN(errStr, "|", 2)
+	if len(parts) < 2 {
+		return errStr
+	}
+	nameDesc := parts[1]
+	// Split on ':' to separate the error name from its description.
+	nameParts := strings.SplitN(nameDesc, ":", 2)
+	if len(nameParts) < 1 {
+		return errStr
+	}
+	return strings.TrimSpace(nameParts[0])
+}
+
+func GetErrorNames(errs []error) []string {
+	errStrs := make([]string, len(errs))
+	for i, err := range errs {
+		errStrs[i] = GetErrorName(err)
+	}
+	return errStrs
+}
+
+// GetErrorCode extracts the error code from the error message.
+func GetErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := err.Error()
+	// Check if the error string contains '|'.
+	if !strings.Contains(errStr, "|") {
+		return ""
+	}
+	parts := strings.SplitN(errStr, "|", 2)
+	return strings.TrimSpace(parts[0])
+}
+
+// GetErrorCodeWithName returns the error code and name in the format "Code_ErrorName".
+func GetErrorCodeWithName(err error) string {
+	code := GetErrorCode(err)
+	name := GetErrorName(err)
+	if code == "" || name == "" {
+		return ""
+	}
+	return code + "_" + name
+}
+
+// GetErrorDesc extracts the error description from the error message.
+func GetErrorDesc(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := err.Error()
+	parts := strings.SplitN(errStr, ":", 2)
+	if len(parts) < 2 {
+		return "DESC NOT SET"
+	}
+	return strings.TrimSpace(parts[1])
 }

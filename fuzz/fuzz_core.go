@@ -288,13 +288,13 @@ func possibleError(selectedError error, block *types.Block, s *statedb.StateDB, 
 	}
 }
 
-func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (*statedb.StateTransition, error, []error) {
+func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (oSlot uint32, oEpoch int32, oPhase uint32, mutated_STFs []statedb.StateTransition, fuzzable_errors []error) {
 	var aggregatedErrors []error
 	var mutatedSTFs []statedb.StateTransition
 	block := stf.Block
 	sdb, err := statedb.NewStateDBFromSnapshotRaw(store, &stf.PreState)
 	if err != nil {
-		return nil, err, nil
+		return 0, 0, 0, nil, nil
 	}
 
 	for _, mode := range modes {
@@ -323,7 +323,7 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 	//TODO: extract out validatorSet from stf.PreState and make sure sure validatorSecrets and validators are equal in size, opposed to hardcode numNodes
 	if len(validatorSecrets) != expectedNumNodes || len(validators) != expectedNumNodes || err != nil {
 		fmt.Printf("Invalid V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
-		return nil, nil, nil
+		return 0, 0, 0, nil, nil
 	}
 
 	//fmt.Printf("V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
@@ -331,20 +331,20 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 	// Create STF copy for original block
 	oStatedbCopy := sdb.Copy()
 	oBlockCopy := block.Copy()
-	oSlot := oBlockCopy.TimeSlot()
-	oEpoch, oPhase := oStatedbCopy.GetSafrole().EpochAndPhase(oSlot)
+	oSlot = oBlockCopy.TimeSlot()
+	oEpoch, oPhase = oStatedbCopy.GetSafrole().EpochAndPhase(oSlot)
 
 	// Make sure original block passes seal test: which requires author guessing, entropy, attempt for passing
 	oValid, oValidatorIdx, oValidatorPub, err := oStatedbCopy.VerifyBlockHeader(oBlockCopy)
 	if !oValid || err != nil || oBlockCopy.Header.AuthorIndex != oValidatorIdx {
 		panic(fmt.Sprintf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex))
-		return nil, nil, nil
+		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
 	if len(aggregatedErrors) == 0 {
 		fmt.Printf("[#%v e=%v,m=%03d] \033[31mNotFuzzable\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
 		//fmt.Printf("ExtrinsicHash=%v\nSeal=%x\nEntropySource=%x\n", oBlockCopy.Header.ExtrinsicHash, oBlockCopy.Header.Seal, oBlockCopy.GetHeader().EntropySource)
-		return nil, nil, nil
+		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
 	fmt.Printf("[#%v e=%v,m=%03d] \033[0mFuzzable!!!\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
@@ -453,15 +453,15 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 			// TODO: need ancestorSet, accumulationRoot
 			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil)
 			if stfErrActual == stfErrExpected {
-				//fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Correctly: err %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorStr(stfErrExpected))
+				//fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Correctly: err %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorName(stfErrExpected))
 				errorList = append(errorList, stfErrExpected)
 				mutatedSTFs = append(mutatedSTFs, stfMutated)
 			} else {
-				fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Failed!!  Actual: \033[32m%v\033[0m  | Expected:%v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorStr(stfErrActual), jamerrors.GetErrorStr(stfErrExpected))
-				if jamerrors.GetErrorStr(stfErrActual) == "BadSignature" {
+				fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Failed!!  Actual: \033[32m%v\033[0m  | Expected:%v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorName(stfErrActual), jamerrors.GetErrorName(stfErrExpected))
+				if jamerrors.GetErrorName(stfErrActual) == "BadSignature" {
 					//fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
 				}
-				if jamerrors.GetErrorStr(stfErrActual) == "BadValidatorIndex" {
+				if jamerrors.GetErrorName(stfErrActual) == "BadValidatorIndex" {
 					//	fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
 				}
 			}
@@ -469,13 +469,24 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 	}
 	// pick a random error based on our success
 	if len(errorList) > 0 {
+		possibleErrs := errorList
+		fmt.Printf("[#%v e=%v,m=%03d] Fuzzed. %v possible errors = \033[32m%v\033[0m\n", oSlot, oEpoch, oPhase, len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
+		return oSlot, oEpoch, oPhase, mutatedSTFs, possibleErrs
+	}
+	return oSlot, oEpoch, oPhase, nil, nil
+
+}
+
+func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (*statedb.StateTransition, error, []error) {
+	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(store, modes, stf)
+	// pick a random error based on our success
+	if len(errorList) > 0 {
 		rand.Seed(time.Now().UnixNano())
 		errSelectionIdx := rand.Intn(len(errorList))
 		mutatedSTF := &mutatedSTFs[errSelectionIdx]
 		expectedErr := errorList[errSelectionIdx]
 		possibleErrs := errorList
-		fmt.Printf("[#%v e=%v,m=%03d] Fuzzed with \033[32m%v\033[0m ouf of %v possible errors = %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorStr(expectedErr), len(possibleErrs), jamerrors.GetErrorStrs(possibleErrs))
-
+		fmt.Printf("[#%v e=%v,m=%03d] Fuzzed with \033[32m%v\033[0m ouf of %v possible errors = %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorName(expectedErr), len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
 		return mutatedSTF, expectedErr, possibleErrs
 	}
 	return nil, nil, nil

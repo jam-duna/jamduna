@@ -262,9 +262,12 @@ func NewEpoch0Timestamp() uint32 {
 	fmt.Printf("Raw epoch0P: %v\n", epoch0Phase)
 	fmt.Printf("Raw epoch0Timestamp: %v\n", epoch0Timestamp)
 
-	if types.TimeSavingMode && !(waitTime < 5) {
+	if types.TimeSavingMode {
 		fmt.Printf("===Time Saving Mode===\n")
-		deDuctedTime := (time.Duration(-waitTime + 5)) * time.Second
+		deDuctedTime := (time.Duration(0)) * time.Second
+		if !(waitTime < 5) {
+			deDuctedTime = (time.Duration(-waitTime + 5)) * time.Second
+		}
 		driftTime := (time.Duration(int64(epoch0Phase) * int64(second_per_epoch))) * time.Second // adjust it to e'=1,m'=00
 		adjustedTime := deDuctedTime
 		if types.TimeSavingMode {

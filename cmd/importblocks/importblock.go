@@ -145,7 +145,7 @@ func main() {
 			}
 
 			if challengerFuzzed {
-				log.Printf("B#%.3d Fuzzed: %v\n", i, jamerrors.GetErrorStr(stfQA.Error))
+				log.Printf("B#%.3d Fuzzed: %v\n", i, jamerrors.GetErrorName(stfQA.Error))
 				mutatedBlks = append(mutatedBlks, identifierHash)
 			} else {
 				//log.Printf("B#%.3d Original\n", i)

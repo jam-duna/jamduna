@@ -2,7 +2,7 @@
 set -e
 
 # Define variables for the target folder and temporary directory.
-DATA_DIR="data"
+DATA_DIR="fuzzed"
 DATA_TEMP="${DATA_DIR}_temp"
 
 echo "Cleaning up old ${DATA_DIR}.zip..."

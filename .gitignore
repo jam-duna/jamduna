@@ -13,3 +13,6 @@ cmd/jamweb/jamweb
 cmd/importblocks/fuzzer
 ffi/libbls.a
 ffi/libbandersnatch.a
+cmd/importblocks/data.zip
+cmd/importblocks/fuzzed.zip
+cmd/importblocks/core.zip

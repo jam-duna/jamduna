@@ -83,7 +83,7 @@ func handleSTFValidation(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 		}
 		stfErr := statedb.CheckStateTransition(sdb_storage, &stf, nil)
 		if stfErr != nil {
-			errorStr := jamerrors.GetErrorStr(stfErr)
+			errorStr := jamerrors.GetErrorName(stfErr)
 			sendValidateResult(w, http.StatusBadRequest, ValidationResult{Valid: false, Error: errorStr})
 			return
 		}
@@ -170,13 +170,13 @@ func handleFuzz(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 		modes := []string{"assurances"}
 		mutatedStf, expectedErr, possibleErrs := selectImportBlocksError(sdb_storage, modes, &stf)
 		if expectedErr != nil {
-			fmt.Printf("Expected error: %v | %v possibleErrs = %v\n", jamerrors.GetErrorStr(expectedErr), len(possibleErrs), jamerrors.GetErrorStrs(possibleErrs))
+			fmt.Printf("Expected error: %v | %v possibleErrs = %v\n", jamerrors.GetErrorName(expectedErr), len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
 			errActual := statedb.CheckStateTransition(sdb_storage, mutatedStf, nil)
 			if errActual == expectedErr {
 				fuzzed = true
-				log.Printf("[fuzzed!] %v", jamerrors.GetErrorStr(errActual))
+				log.Printf("[fuzzed!] %v", jamerrors.GetErrorName(errActual))
 			} else {
-				log.Printf("[fuzzed failed!] Actual %v | Expected %v", jamerrors.GetErrorStr(errActual), jamerrors.GetErrorStr(expectedErr))
+				log.Printf("[fuzzed failed!] Actual %v | Expected %v", jamerrors.GetErrorName(errActual), jamerrors.GetErrorName(expectedErr))
 			}
 		}
 		fuzzRes := FuzzedResult{
