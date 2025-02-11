@@ -88,6 +88,9 @@ type Node struct {
 	UP0_stream        map[uint16]quic.Stream //<validatorIndex> -> stream (self initiated)
 	UP0_streamMu      sync.Mutex
 
+	// Jamweb
+	hub     *Hub
+
 	tlsConfig *tls.Config
 
 	store *storage.StateDBStorage
@@ -467,6 +470,10 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
 		go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+		if id == 0 {
+			go node.runJamWeb(uint16(port + 1000))
+		}
+
 	}
 	return node, nil
 }
@@ -888,6 +895,13 @@ func (n *Node) dumpstatedbmap() {
 	}
 }
 
+func (n *Node) getStateDBByHeaderHash(headerHash common.Hash) (statedb *statedb.StateDB, ok bool) {
+	n.statedbMapMutex.Lock()
+	defer n.statedbMapMutex.Unlock()
+	statedb, ok = n.statedbMap[headerHash]
+	return statedb, ok
+}
+
 func randomKey(m map[string]*Peer) string {
 	rand0.Seed(time.Now().UnixNano())
 	keys := make([]string, 0, len(m))
@@ -987,8 +1001,12 @@ func (n *Node) extendChain() error {
 				// Extend the tip of the chain
 				n.addStateDB(newStateDB)
 
-				// simulated finality
-				//n.finalizeBlocks()
+				announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", b.Hash(), b.Header.Hash())
+				if n.hub != nil {
+					//log.Println("Broadcasting:", announcement)
+					n.hub.broadcast <- []byte(announcement)
+				}
+
 				parentheaderhash = nextBlock.Header.Hash()
 				n.assureNewBlock(b)
 

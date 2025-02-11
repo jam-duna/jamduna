@@ -195,9 +195,6 @@ func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 			node.setGodCh(&godIncomingCh)
 		}
 		nodes[i] = node
-		if i == 0 {
-			go node.runWebService(webServicePort + basePort)
-		}
 	}
 	go func() {
 		ticker := time.NewTicker(10 * time.Millisecond)
