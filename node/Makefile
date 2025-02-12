@@ -1,7 +1,7 @@
 # Set variables for testing
 TIMEOUT ?= 40m
 TAGS ?= tiny
-
+MEG_PACKAGES_NUM ?= 911
 fallback:
 	@echo "Running TestFallback with timeout $(TIMEOUT)..."
 	go test -timeout $(TIMEOUT) -v -run TestFallback -tags network_test,$(TAGS)
@@ -16,7 +16,7 @@ fib:
 
 megatron:
 	@echo "Running TestMegatron with timeout $(TIMEOUT)..."
-	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags network_test,$(TAGS)
+	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -packages_num=$(MEG_PACKAGES_NUM)
 
 megatron_pprof:
 	@echo "Running TestMegatron with timeout (building pprof mode with test binary)"

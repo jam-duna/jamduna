@@ -29,7 +29,8 @@ type WellBalancedTree struct {
 func (wbt *WellBalancedTree) buildWellBalancedTree() {
 	if len(wbt.leaves) == 0 {
 		// If no leaves, return hash of 0
-		wbt.root = &WBTNode{Hash: computeHash([]byte{0}, wbt.hashType)}
+		hash0 := common.Hash{}
+		wbt.root = &WBTNode{Hash: hash0[:]}
 		return
 	}
 	wbt.root = buildTreeRecursive(wbt.leaves, wbt.hashType)

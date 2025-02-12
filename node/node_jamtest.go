@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"testing"
@@ -286,8 +287,10 @@ func ImportBlocks(config *types.ConfigJamBlocks) {
 	// orderedaccumulation - jamtest("megatron")
 }
 
-func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
+var packagesNum = flag.Int("packages_num", 911, "number of work packages to generate")
 
+func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
+	flag.Parse()
 	nodes, err := SetUpNodes(numNodes, basePort)
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
@@ -447,7 +450,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 
 	switch jam {
 	case "megatron":
-		megatron(nodes, testServices)
+		megatron(nodes, testServices, *packagesNum)
 	case "fib":
 		fib(nodes, testServices)
 	case "transfer":
@@ -540,7 +543,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 
 }
 
-func megatron(nodes []*Node, testServices map[string]*types.TestService) {
+func megatron(nodes []*Node, testServices map[string]*types.TestService, workpackages_num int) {
 
 	fmt.Printf("Start Fib_Trib\n")
 	service0 := testServices["fib"]
@@ -554,7 +557,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService) {
 	prevWorkPackageHash := common.Hash{}
 	// ================================================
 	// make n workpackages for Fib and Trib
-	targetNMax := 911
+	targetNMax := workpackages_num
 	for n := 0; n < targetNMax; n++ {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)

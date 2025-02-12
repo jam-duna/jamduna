@@ -1165,10 +1165,15 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if len(vs) == 0 {
 		panic("No validators")
 	}
+
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
 		//fmt.Printf("sf.ApplyStateTransitionTickets %v\n", jamerrors.GetErrorName(err))
 		return s, err
+	}
+	err = VerifySafroleSTF(sf, &s2, blk)
+	if err != nil {
+		panic(fmt.Sprintf("VerifySafroleSTF %v\n", err))
 	}
 	vs = s2.PrevValidators
 	if len(vs) == 0 {

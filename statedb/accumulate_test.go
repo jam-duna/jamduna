@@ -37,7 +37,6 @@ type AccumulateState struct {
 	AccumulationHistory [types.EpochLength][]common.Hash             `json:"accumulated"` // xi - The accumulation history  ξ eq 162
 	Privileges          tmpKaiState                                  `json:"privileges"`  // kai - The privileges
 	Accounts            []TmpAccount                                 `json:"accounts"`    // a - The accounts
-
 }
 
 //	type Kai_state struct {
@@ -103,7 +102,7 @@ func (c *CodeImage) UnmarshalJSON(data []byte) error {
 func TestParseAccumulateVector(t *testing.T) {
 	// read the json file
 	// parse the json file
-	json_file := "../jamtestvectors/accumulate/tiny/enqueue_and_unlock_chain-3.json"
+	json_file := "../jamtestvectors/accumulate/tiny/enqueue_and_unlock_chain-1.json"
 	jsonData, err := os.ReadFile(json_file)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -163,7 +162,7 @@ func TestAccumulateSTF(t *testing.T) {
 }
 
 func TestSingleAccumulateSTF(t *testing.T) {
-	filepath := "../jamtestvectors/accumulate/tiny/enqueue_and_unlock_chain-4.json"
+	filepath := "../jamtestvectors/accumulate/tiny/enqueue_and_unlock_chain-1.json"
 	jsonData, err := os.ReadFile(filepath)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -183,6 +182,7 @@ func (j *JamState) GetStateFromAccumulateState(state AccumulateState) (services 
 	}
 
 	for i, historyfromprestate := range state.AccumulationHistory {
+		j.AccumulationHistory[i].WorkPackageHash = make([]common.Hash, 0)
 		j.AccumulationHistory[i].WorkPackageHash = append(j.AccumulationHistory[i].WorkPackageHash, historyfromprestate...)
 	}
 

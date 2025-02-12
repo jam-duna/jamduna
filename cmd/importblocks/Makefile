@@ -9,7 +9,7 @@
 TIMEOUT          := 1m
 BINARY_NAME      := importblocks
 BINARY_NAME_FUZZ := fuzzer
-JAMDIR           ?= /tmp/root/jam
+JAMDIR           ?= /tmp/ntust/jam
 MODE             ?= generic
 DATADIR		  	 ?= data
 NETWORK          ?= tiny

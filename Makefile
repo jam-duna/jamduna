@@ -2,7 +2,7 @@ OUTPUT_DIR := bin
 BINARY := jam
 SRC := jam.go
 NETWORK  ?= tiny
-.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean
+.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean publish
 
 jam: ffi_force
 	@echo "Building JAM... $(NETWORK)"
@@ -97,4 +97,24 @@ cleancoverage:
 	@echo "Cleaning up..."
 	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML)
 	@echo "Done."
+
+
+publish:
+	@echo "Publishing JAM..."
+	@make -C node fallback
+	@make -C cmd/importblocks cpnode MODE=fallback
+	@echo "fallback data finished..."
+	@make -C node safrole
+	@make -C cmd/importblocks cpnode MODE=safrole
+	@echo "safrole data finished..."
+	@make -C node fib
+	@make -C cmd/importblocks cpnode MODE=assurances
+	@echo "assurances data finished..."
+	@make -C node megatron MEG_PACKAGES_NUM=30
+	@make -C cmd/importblocks cpnode MODE=orderedaccumulation
+	@echo "orderedaccumulation data finished..."
+	@make -C cmd/importblocks fuzz TIMEOUT=30m
+	@echo "fuzzing finished..."
+	@cd cmd/importblocks&&./data_zipper.sh
+
 

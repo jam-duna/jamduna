@@ -573,7 +573,9 @@ func (j *JamState) UpdateLatestHistory(w_star []types.WorkReport, num int) {
 	}
 	// eq 186 0.4.5
 	j.AccumulationHistory[types.EpochLength-1].WorkPackageHash = Mapping(accumulated_wr)
+
 	SortByHash(j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
+
 	// if len(j.AccumulationHistory[types.EpochLength-1].WorkPackageHash) > 0 {
 	// 	fmt.Printf("UpdateLatestHistory WorkPackageHash=%v\n", j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 	// }

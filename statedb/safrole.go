@@ -990,14 +990,14 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	return s2, nil
 }
 
-func (s *StateDB) GetPosteriorSafroleEntropy(targetJCE uint32) SafroleState {
+func (s *StateDB) GetPosteriorSafroleEntropy(targetJCE uint32) *SafroleState {
 	epochChanged := s.GetSafrole().EpochChanged(targetJCE)
 	if s.posteriorSafroleEntropy != nil && !epochChanged {
-		return *s.posteriorSafroleEntropy
+		return s.posteriorSafroleEntropy
 	}
 	sf := s.GetSafrole()
 	simulated_posteriorSafroleEntropy, _, _ := sf.SimulatePostiorEntropy(targetJCE)
-	s.posteriorSafroleEntropy = &simulated_posteriorSafroleEntropy
+	s.posteriorSafroleEntropy = simulated_posteriorSafroleEntropy
 	return simulated_posteriorSafroleEntropy
 }
 
@@ -1008,7 +1008,7 @@ func (s *SafroleState) EpochChanged(targetJCE uint32) bool {
 }
 
 // (6.23) Simulate a Detached PostiorEntropy for Block Signing and Verification
-func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 SafroleState, epochAdvanced bool, err error) {
+func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 *SafroleState, epochAdvanced bool, err error) {
 	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, _ := s.EpochAndPhase(targetJCE)
 	epochAdvanced = false
@@ -1016,7 +1016,7 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 SafroleState
 		// New Epoch e' > e
 		epochAdvanced = true
 	}
-	s2 = cloneSafroleState(*s)
+	s2 = s.Copy()
 	// here we set the sealer authority
 	if epochAdvanced {
 		// New Epoch change! Shift entropy
@@ -1026,9 +1026,6 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 SafroleState
 		// Epoch in progress ... no change. entropy0 is unimportant
 	}
 	if epochAdvanced {
-		if debug {
-			fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
-		}
 		// eq 68 primary mode
 		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength {
 			winning_tickets, err := s2.GenerateWinningMarker()
@@ -1041,7 +1038,7 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 SafroleState
 			}
 			s2.TicketsOrKeys = ticketsOrKeys
 		} else { // eq 68 fallback mode
-			chosenkeys, err := s.ChooseFallBackValidator()
+			chosenkeys, err := s2.ChooseFallBackValidator()
 			if err != nil {
 				return s2, epochAdvanced, fmt.Errorf("ChooseFallBackValidator %v", err)
 			}
@@ -1050,12 +1047,13 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 SafroleState
 			}
 			s2.TicketsOrKeys = ticketsOrKeys
 		}
+		s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)
 	}
 	return s2, epochAdvanced, nil
 }
 
 func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomness_H_v common.Hash) (s2 SafroleState, epochAdvanced bool, err error) {
-	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, _ := s.EpochAndPhase(targetJCE)
 	epochAdvanced = false
 	if currEpoch > prevEpoch {
@@ -1079,7 +1077,7 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 			fmt.Printf("[N%d] ApplyStateTransitionTickets: Winning Tickets %d\n", s2.Id, len(s2.NextEpochTicketsAccumulator))
 		}
 		// eq 68 primary mode
-		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength {
+		if len(s2.NextEpochTicketsAccumulator) == types.EpochLength && prevPhase >= types.TicketSubmissionEndSlot && prevEpoch+1 == currEpoch {
 			// not using any entropy for primary mode
 			winning_tickets, err := s2.GenerateWinningMarker()
 			if err != nil {
@@ -1095,7 +1093,7 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 				Tickets: winning_tickets,
 			}
 			s2.TicketsOrKeys = ticketsOrKeys
-			s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)
+
 		} else { // eq 68 fallback mode
 			chosenkeys, err := s2.ChooseFallBackValidator()
 			if err != nil {
@@ -1106,6 +1104,7 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 			}
 			s2.TicketsOrKeys = ticketsOrKeys
 		}
+		s2.NextEpochTicketsAccumulator = make([]types.TicketBody, 0)
 
 	}
 
@@ -1178,7 +1177,6 @@ func (s2 *SafroleState) AdvanceEntropyAndValidator(s *SafroleState, new_entropy_
 	s2.Entropy[2] = s.Entropy[1]
 	s2.Entropy[3] = s.Entropy[2]
 	s2.Entropy[0] = new_entropy_0
-	s2.NextEpochTicketsAccumulator = s2.NextEpochTicketsAccumulator[0:0]
 	if debug {
 		fmt.Printf("[N%d] ApplyStateTransitionTickets: ENTROPY shifted new epoch\nη0:%v\nη1:%v\nη2:%v\nη3:%v\nη0:%v (original)\n", s2.Id, s2.Entropy[0], s2.Entropy[1], s2.Entropy[2], s2.Entropy[3], prev_n0)
 	}
@@ -1347,4 +1345,216 @@ func SortTicketsById(tickets []types.Ticket) {
 		b_id, _ := tickets[j].TicketID()
 		return compareTickets(a_id, b_id) < 0
 	})
+}
+
+// shawn: this function is for safrole ultimate verfication
+// ver 0.6.2
+func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, block_origin *types.Block) error {
+	// use the copy of the state to be safe
+	old_sf := old_sf_origin.Copy()
+	new_sf := new_sf_origin.Copy()
+	block := block_origin.Copy()
+	// 6.1
+	slot_header := block.Header.Slot
+	new_slot := new_sf.Timeslot
+	if slot_header != new_slot {
+		return fmt.Errorf("slot_header != new_slot")
+	}
+	header := block.Header
+	// 6.2
+	old_epoch, old_phase := old_sf.EpochAndPhase(uint32(old_sf.Timeslot))
+	new_epoch, new_phase := new_sf.EpochAndPhase(uint32(new_sf.Timeslot))
+	is_epoch_changed := old_epoch < new_epoch
+	// 6.22
+	fresh_randomness, err := old_sf.GetFreshRandomness(header.EntropySource[:])
+	if err != nil {
+		return fmt.Errorf("GetFreshRandomness %v", err)
+	}
+	new_entropy_0 := old_sf.ComputeCurrRandomness(fresh_randomness)
+	new_entropy := new_sf.Entropy
+	if !reflect.DeepEqual(new_entropy[0], new_entropy_0) {
+		return fmt.Errorf("new_entropy[0] mismatch")
+	}
+	if !is_epoch_changed {
+		// 6.27
+		//6.13
+		// TODO offender
+		switch {
+		case !reflect.DeepEqual(new_sf.CurrValidators, old_sf.CurrValidators):
+			return fmt.Errorf("CurrValidators mismatch")
+		case !reflect.DeepEqual(new_sf.PrevValidators, old_sf.PrevValidators):
+			return fmt.Errorf("PrevValidators mismatch")
+		case !reflect.DeepEqual(new_sf.DesignedValidators, old_sf.DesignedValidators):
+			return fmt.Errorf("DesignedValidators mismatch")
+		case !reflect.DeepEqual(new_sf.NextValidators, old_sf.NextValidators):
+			return fmt.Errorf("NextValidators mismatch")
+		}
+		// entropy
+		// 6.23
+		old_entropy := old_sf.Entropy
+		new_entropy := new_sf.Entropy
+		switch {
+		case old_entropy[1] != new_entropy[1]:
+			return fmt.Errorf("Entropy[1] mismatch")
+		case old_entropy[2] != new_entropy[2]:
+			return fmt.Errorf("Entropy[2] mismatch")
+		case old_entropy[3] != new_entropy[3]:
+			return fmt.Errorf("Entropy[3] mismatch")
+		}
+
+	} else { // !!! here is epoch changed case
+		if block.Header.EpochMark == nil {
+			return fmt.Errorf("EpochMark is nil")
+		}
+		//6.13
+		switch {
+		case !reflect.DeepEqual(new_sf.PrevValidators, old_sf.CurrValidators):
+			return fmt.Errorf("PrevValidators mismatch")
+		case !reflect.DeepEqual(new_sf.CurrValidators, old_sf.NextValidators):
+			return fmt.Errorf("CurrValidators mismatch")
+		case !reflect.DeepEqual(new_sf.NextValidators, old_sf.DesignedValidators):
+			return fmt.Errorf("NextValidators mismatch")
+		}
+		// entropy
+		// 6.23
+		old_entropy := old_sf.Entropy
+		new_entropy := new_sf.Entropy
+		switch {
+		case old_entropy[0] != new_entropy[1]:
+			return fmt.Errorf("Entropy[1] mismatch")
+		case old_entropy[1] != new_entropy[2]:
+			return fmt.Errorf("Entropy[2] mismatch")
+		case old_entropy[2] != new_entropy[3]:
+			return fmt.Errorf("Entropy[3] mismatch")
+		}
+	}
+	// gamma s verification
+	old_gamma_a := old_sf.NextEpochTicketsAccumulator
+	if new_epoch == old_epoch+1 && old_phase > types.TicketSubmissionEndSlot && len(old_gamma_a) == types.EpochLength {
+		new_gamma_s := new_sf.TicketsOrKeys
+		winning_tickets, err := old_sf.GenerateWinningMarker()
+		if err != nil {
+			return fmt.Errorf("GenerateWinningMarker Failed: %v", err)
+		}
+		ticketsOrKeys := TicketsOrKeys{
+			Tickets: winning_tickets,
+		}
+		if !reflect.DeepEqual(new_gamma_s, ticketsOrKeys) {
+			return fmt.Errorf("TicketsOrKeys mismatch")
+		}
+
+	} else if !is_epoch_changed {
+		old_gamma_s := old_sf.TicketsOrKeys
+		new_gamma_s := new_sf.TicketsOrKeys
+		if !reflect.DeepEqual(old_gamma_s, new_gamma_s) {
+			return fmt.Errorf("TicketsOrKeys mismatch")
+		}
+	} else {
+		// fallback mode
+		new_gamma_s := new_sf.TicketsOrKeys
+		// we use n3' so it has to be after we check the entropy state transition
+		choosenkeys, err := new_sf.ChooseFallBackValidator()
+		if err != nil {
+			return fmt.Errorf("ChooseFallBackValidator %v", err)
+		}
+		ticketsOrKeys := TicketsOrKeys{
+			Keys: choosenkeys,
+		}
+		if !reflect.DeepEqual(new_gamma_s, ticketsOrKeys) {
+			return fmt.Errorf("TicketsOrKeys mismatch")
+		}
+
+	}
+	//6.28
+	if !is_epoch_changed && old_phase < types.TicketSubmissionEndSlot && new_phase >= types.TicketSubmissionEndSlot && len(old_gamma_a) == types.EpochLength {
+		// winning ticket mark required
+		winning_ticket_mark := block.Header.TicketsMark
+		expect_winning_ticket, err := old_sf.GenerateWinningMarker()
+		if err != nil {
+			return fmt.Errorf("GenerateWinningMarker Failed: %v", err)
+		}
+		for index, t := range expect_winning_ticket {
+			if t.Id != winning_ticket_mark[index].Id {
+				return fmt.Errorf("winning ticket mark mismatch")
+			}
+		}
+	}
+	// 6.15~6.20
+	blockSealEntropy := new_sf.Entropy[3]
+	var c []byte
+	if new_sf.GetEpochT() == 1 {
+		winning_ticket := (new_sf.TicketsOrKeys.Tickets)[new_phase]
+		c = ticketSealVRFInput(blockSealEntropy, uint8(winning_ticket.Attempt))
+	} else {
+		c = append([]byte(types.X_F), blockSealEntropy.Bytes()...)
+	}
+
+	// H_s Verification (6.15/6.16)
+	H_s := header.Seal[:]
+	m := header.BytesWithoutSig()
+	// author_idx is the K' so we use the sf_tmp
+	validatorIdx := block.Header.AuthorIndex
+	signing_validator := new_sf.GetCurrValidator(int(validatorIdx))
+	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
+	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
+	if err != nil {
+		return fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
+	}
+	// H_v Verification (6.17)
+	H_v := header.EntropySource[:]
+	c = append([]byte(types.X_E), vrfOutput...)
+	_, err = bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_v, c, []byte{})
+	if err != nil {
+		return fmt.Errorf("VerifyBlockHeader Failed: H_v Verification")
+	}
+	// 6.33
+	tickets := block.Extrinsic.Tickets
+	for _, block_ticket := range tickets {
+		for _, a := range old_gamma_a {
+			block_ticket_id, _ := block_ticket.TicketID()
+			if block_ticket_id == a.Id {
+				return fmt.Errorf("ticket already in state")
+			}
+		}
+	}
+	// 6.34
+	if is_epoch_changed {
+		gamma_a_len := len(new_sf.NextEpochTicketsAccumulator)
+		if gamma_a_len != 0 {
+			for _, block_ticket := range tickets {
+				found := false
+				for _, a := range new_sf.NextEpochTicketsAccumulator {
+					block_ticket_id, _ := block_ticket.TicketID()
+					if block_ticket_id == a.Id {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("ticket not in state")
+				}
+			}
+		}
+	}
+	gamma_a_len := len(new_sf.NextEpochTicketsAccumulator)
+	if gamma_a_len > types.EpochLength {
+		return fmt.Errorf("too many tickets in accumulator")
+	}
+	for i := 1; i < gamma_a_len; i++ {
+		if compareTickets(new_sf.NextEpochTicketsAccumulator[i].Id, new_sf.NextEpochTicketsAccumulator[i-1].Id) < 0 {
+			return fmt.Errorf("tickets not sorted")
+		}
+	}
+	// tickets verification
+	// using n2'
+	for _, t := range tickets {
+		targetEpochRandomness := new_sf.Entropy[2]
+		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
+		ringsetBytes := old_sf.GetRingSet("Next")
+		_, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
+		if err != nil {
+			return fmt.Errorf("VRFSignature verification failed")
+		}
+	}
+	return nil
 }

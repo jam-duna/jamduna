@@ -9,6 +9,12 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+func TestZeroLeaves(t *testing.T) {
+	var values [][]byte
+	tree := NewWellBalancedTree(values, types.Keccak)
+	fmt.Printf("%x\n", tree.Root())
+}
+
 // TestWellBalancedTree tests the MerkleB method of the WellBalancedTree
 func TestWBMerkleTree(t *testing.T) {
 	values := [][]byte{
