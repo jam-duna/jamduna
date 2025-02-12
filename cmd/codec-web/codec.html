@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JAM Codec Analyzer</title>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="/static/css/style.css" />
+
+  <script src="/static/js/jamTypes.js" defer></script>
+  <script src="/static/js/sampleJson.js" defer></script>
+  <script src="/static/js/sampleCodec.js" defer></script>
+  <script src="/static/js/main.js" defer></script>
+</head>
+<body>
+  <header>
+    <h2>JAM Codec Analyzer</h2>
+    <nav>
+      <div class="settings-menu">
+        <!-- <a href="https://github.com/jam-duna/jamtestnet" target="_blank" rel="noopener">Documentation</a> -->
+        <select id="apiEndpointSelect">
+          <option value="http://localhost:8099">Endpoint (Default)</option>
+          <option value="custom">Custom...</option>
+        </select>
+        <input type="text" id="customEndpointInput" style="display: none;" placeholder="Enter custom endpoint (e.g., http://localhost:8099)" />
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <div class="content">
+      <div class="flex-row">
+        <div class="column">
+          <div class="control-group">
+            <div class="input-header">
+              <label for="inputText" id="inputLabel">JSON</label>
+              <div class="input-direction">→ Codec</div>
+            </div>
+            <select id="actionType" style="display: none">
+              <option value="encode" selected>JSON → Codec</option>
+              <option value="decode">Codec → JSON</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label for="objectType">JAM Type</label>
+            <select id="objectType">
+              <!-- Populated by main.js -> populateObjectTypes() -->
+            </select>
+          </div>
+
+          <div class="control-group textarea-grow">
+            <label for="inputText">Data</label>
+            <textarea
+              id="inputText"
+              placeholder="Paste your payload here..."
+            ></textarea>
+          </div>
+
+          <div class="button-group">
+            <button id="actionButton">Encode</button>
+            <button type="button" onclick="clearFields()" class="secondary">
+              Clear All
+            </button>
+          </div>
+        </div>
+
+        <div class="swap-column">
+          <button type="button" onclick="swapAction()" class="swap-button">
+            <span class="swap-icon"> ⇆ </span>
+          </button>
+        </div>
+
+        <div class="column">
+          <div class="control-group textarea-grow">
+            <div class="output-header">
+              <label for="outputText">Result</label>
+              <div id="byteSize" class="byte-size-info"></div>
+            </div>
+            <textarea
+              id="outputText"
+              readonly
+              placeholder="Your result will appear here..."
+            ></textarea>
+          </div>
+
+          <div class="button-group">
+            <button type="button" onclick="copyOutput()" class="secondary">
+              📋 Copy Result
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>© 2025 Jam Duna. All rights reserved.</p>
+  </footer>
+</body>
+</html>
