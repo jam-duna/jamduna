@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
@@ -12,7 +13,7 @@ type AccumulationQueue struct {
 }
 
 type AccumulationHistory struct {
-	WorkPackageHash []common.Hash `json:"work_package_hash"`
+	WorkPackageHash []common.Hash `json:"-"`
 }
 
 // Types for Kai
@@ -32,6 +33,11 @@ type PartialState struct {
 	UpcomingValidators Validators                 `json:"upcoming_validators"`
 	QueueWorkReport    AuthorizationQueue         `json:"authorizations_pool"`
 	PrivilegedState    Kai_state                  `json:"privileged_state"`
+}
+
+// MarshalJSON makes an AccumulationHistory serialize as just the array of hashes.
+func (ah AccumulationHistory) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ah.WorkPackageHash)
 }
 
 func (U PartialState) Dump(prefix string, id uint16) {
