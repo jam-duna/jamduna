@@ -811,7 +811,7 @@ func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
 		fmt.Printf("SetService AccountStateFromBytes Error: %v\n", err)
 	}
 
-	metaVal := fmt.Sprintf("service_account|s=%d|b=%d g=%d m=%d l=%d i=%d|clen=%d", s, acctState.Balance, acctState.GasLimitG, acctState.GasLimitM, acctState.StorageSize, acctState.NumStorageItems, len(acctState.CodeHash))
+	metaVal := fmt.Sprintf("service_account|s=%d|c=%s b=%d g=%d m=%d l=%d i=%d|clen=%d", s, acctState.CodeHash, acctState.Balance, acctState.GasLimitG, acctState.GasLimitM, acctState.StorageSize, acctState.NumStorageItems, len(acctState.CodeHash))
 	metaValBytes, err := types.Encode(metaVal)
 	if err != nil {
 		fmt.Printf("SetService metaValBytes Encode Error: %v\n", err)
