@@ -89,7 +89,7 @@ type Node struct {
 	UP0_streamMu      sync.Mutex
 
 	// Jamweb
-	hub     *Hub
+	hub *Hub
 
 	tlsConfig *tls.Config
 
@@ -980,7 +980,7 @@ func (n *Node) extendChain() error {
 					if err != nil {
 						fmt.Printf("writeDebug Block err: %v\n", err)
 					}
-					err = n.writeDebug(newStateDB.JamState.Snapshot(), nextBlock.TimeSlot()) // StateSnapshot
+					err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
 					if err != nil {
 						fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
 					}
@@ -1492,7 +1492,7 @@ func (n *Node) runClient() {
 				}
 
 				// store StateSnapshot
-				err = n.writeDebug(newStateDB.JamState.Snapshot(), timeslot) // StateSnapshot
+				err = n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot) // StateSnapshot
 				if err != nil {
 					fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
 				}

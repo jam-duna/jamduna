@@ -1,13 +1,14 @@
 package node
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
 	"time"
-	"encoding/json"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/gorilla/websocket"
 )
 
 // upgrader upgrades HTTP connections to WebSocket connections.
@@ -171,7 +172,6 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	go client.readPump()
 }
 
-
 func (n *Node) runJamWeb(basePort uint16) {
 	addr := fmt.Sprintf("0.0.0.0:9999") // for now just node 0 will handle all
 
@@ -219,7 +219,7 @@ func (n *Node) runJamWeb(basePort uint16) {
 				return
 			}
 			headerHash := common.HexToHash(req.Params[0])
-			sdb, ok := n.getStateDBByHeaderHash(headerHash) 
+			sdb, ok := n.getStateDBByHeaderHash(headerHash)
 			if ok && sdb.Block != nil {
 				result = sdb.Block.String()
 			} else {
@@ -233,9 +233,9 @@ func (n *Node) runJamWeb(basePort uint16) {
 				return
 			}
 			headerHash := common.HexToHash(req.Params[0])
-			sdb, ok := n.getStateDBByHeaderHash(headerHash) 
+			sdb, ok := n.getStateDBByHeaderHash(headerHash)
 			if ok {
-				result = sdb.JamState.Snapshot().String()
+				result = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).String()
 			} else {
 				http.Error(w, "State not found", http.StatusNotFound)
 				return
@@ -250,7 +250,6 @@ func (n *Node) runJamWeb(basePort uint16) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Write([]byte(result))
 	})
-
 
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal("ListenAndServe error: ", err)

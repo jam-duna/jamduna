@@ -252,10 +252,6 @@ func (s *StateDB) SetJamState(jamState *JamState) {
 	s.JamState = jamState
 }
 
-func (s *StateDB) GetJamSnapshot() *StateSnapshot {
-	return s.JamState.Snapshot()
-}
-
 func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	// Now read C1.....C15 from the trie and put it back into JamState
 	//t := s.GetTrie()

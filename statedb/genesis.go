@@ -89,7 +89,9 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	// setup the initial state of the accumulate state
 	for i := 0; i < types.EpochLength; i++ {
 		j.AccumulationQueue[i] = make([]types.AccumulationQueue, 0)
-		j.AccumulationHistory[i] = types.AccumulationHistory{}
+		j.AccumulationHistory[i] = types.AccumulationHistory{
+			WorkPackageHash: make([]common.Hash, 0),
+		}
 	}
 
 	statedb.JamState = j
@@ -137,12 +139,12 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 
 	statedb.StateRoot = statedb.UpdateTrieState()
 	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/state_snapshots/genesis-%s", network))
-	types.SaveObject(outfn, statedb.JamState.Snapshot())
 
 	trace := StateSnapshotRaw{
 		StateRoot: statedb.StateRoot,
 		KeyVals:   statedb.GetAllKeyValues(),
 	}
+	types.SaveObject(outfn, statedb.JamState.Snapshot(&trace))
 	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/traces/genesis-%s", network))
 	types.SaveObject(outfn, trace)
 

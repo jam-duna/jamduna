@@ -28,22 +28,22 @@ var orderedStateList = []string{
 
 // C1 - C15
 type StateSnapshot struct {
-	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`           // c1
-	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"`          // c2
-	RecentBlocks             RecentBlocks                                 `json:"beta"`            // c3
-	Gamma                    SafroleBasicState                            `json:"gamma"`           // c4
-	Disputes                 Psi_state                                    `json:"psi"`             // c5
-	Entropy                  Entropy                                      `json:"eta"`             // c6
-	NextValidators           types.Validators                             `json:"iota"`            // c7
-	CurrValidators           types.Validators                             `json:"kappa"`           // c8
-	PrevValidators           types.Validators                             `json:"lambda"`          // c9
-	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`             // c10
-	Timeslot                 uint32                                       `json:"tau"`             // c11
-	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`             // c12
-	ValidatorStatistics      ValidatorStatistics                          `json:"pi"`              // c13
-	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`           // c14 Accumulation Queue
-	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`              // c15 Accumulation History
-	ServiceAccount           KeyVals                                      `json:"service_account"` // Other C
+	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`    // c1
+	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"`   // c2
+	RecentBlocks             RecentBlocks                                 `json:"beta"`     // c3
+	Gamma                    SafroleBasicState                            `json:"gamma"`    // c4
+	Disputes                 Psi_state                                    `json:"psi"`      // c5
+	Entropy                  Entropy                                      `json:"eta"`      // c6
+	NextValidators           types.Validators                             `json:"iota"`     // c7
+	CurrValidators           types.Validators                             `json:"kappa"`    // c8
+	PrevValidators           types.Validators                             `json:"lambda"`   // c9
+	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`      // c10
+	Timeslot                 uint32                                       `json:"tau"`      // c11
+	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`      // c12
+	ValidatorStatistics      ValidatorStatistics                          `json:"pi"`       // c13
+	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`    // c14 Accumulation Queue
+	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`       // c15 Accumulation History
+	ServiceAccounts          []*SAccount                                  `json:"accounts"` // service accounts
 }
 
 type KeyVal struct {
@@ -259,7 +259,7 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 	return &sn
 }
 
-func (n *JamState) Snapshot() *StateSnapshot {
+func (n *JamState) Snapshot(state *StateSnapshotRaw) *StateSnapshot {
 	original := n.SafroleState
 	copied := &StateSnapshot{
 		AuthorizationsPool:       n.AuthorizationsPool,                                  // C1
@@ -277,6 +277,7 @@ func (n *JamState) Snapshot() *StateSnapshot {
 		ValidatorStatistics:      n.ValidatorStatistics,                                 // C13
 		AccumulationQueue:        n.AccumulationQueue,                                   // C14
 		AccumulationHistory:      n.AccumulationHistory,                                 // C15
+		ServiceAccounts:          getServiceAccounts(state.KeyVals),
 	}
 	copy(copied.Entropy[:], original.Entropy[:])
 	copy(copied.PrevValidators, original.PrevValidators)
