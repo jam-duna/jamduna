@@ -35,9 +35,30 @@ type PartialState struct {
 	PrivilegedState    Kai_state                  `json:"privileged_state"`
 }
 
+func (ah AccumulationHistory) String() string {
+	jsonBytes, err := json.Marshal(ah)
+	if err != nil {
+		return fmt.Sprintf("%v", err)
+	}
+	return string(jsonBytes)
+}
+
 // MarshalJSON makes an AccumulationHistory serialize as just the array of hashes.
 func (ah AccumulationHistory) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ah.WorkPackageHash)
+}
+
+func (ah *AccumulationHistory) UnmarshalJSON(data []byte) error {
+	var rawHashes []string
+	if err := json.Unmarshal(data, &rawHashes); err != nil {
+		return err
+	}
+
+	ah.WorkPackageHash = make([]common.Hash, len(rawHashes))
+	for i, hashStr := range rawHashes {
+		ah.WorkPackageHash[i] = common.HexToHash(hashStr)
+	}
+	return nil
 }
 
 func (U PartialState) Dump(prefix string, id uint16) {

@@ -157,3 +157,39 @@ func TestMapMarshal(t *testing.T) {
 		fmt.Println(h2)
 	}
 }
+
+func TestAccumulateHistoryJson(t *testing.T) {
+	example_json := `[
+  [
+    "0x7c6845fc0cc3f79490528713ca8c4e301be6d99b65dcad8950fdb4b5fd8ecb3e",
+    "0xdcd83ca57a97a766fca5ba37987d31bfba80520a111a4d301f58cd79f01ee30d"
+  ],
+  [
+    "0x0e4a8686815f94af46524df5d4ad88b457fdcddd9521975c173387d33435d2c7",
+    "0xc7bea4c4d8dbb0f11f48625fd4438941b58278f2863876d328d773794c642375"
+  ],
+  [
+    "0x8e6a12ed8500c0f6b48d125eac7a3e5b7c005b79214688474d084b8999b1dccd",
+    "0x9e3cb9fc51842f3ba0273cfad9cb9fae7f35a142eccfdf40178fa1fc611a69a2"
+  ],
+  [
+    "0x22efeab1be79dc0f7ff26832cdb8cd53f866a48423c7ec6420fcc7f3f95ccded",
+    "0x2b1cf51be1dca3ffeefa46a9bf611fb204646cbbf32c94303abdfc1e0024d69b"
+  ],
+  [],
+  [],
+  [],
+  [],
+  [],
+  [],
+  [],
+  []
+]`
+	var c15 [EpochLength]AccumulationHistory
+	err := json.Unmarshal([]byte(example_json), &c15)
+	if err != nil {
+		t.Error(err)
+	}
+	out, _ := json.Marshal(c15)
+	fmt.Printf("C15: %s\n", string(out))
+}
