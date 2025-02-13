@@ -6,6 +6,7 @@ package node
 import (
 	"bytes"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"log"
 	_ "net/http/pprof"
@@ -19,6 +20,28 @@ import (
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
+
+const (
+	SafroleTestEpochLen   = 4  // Safrole
+	FallbackEpochLen      = 4  // Fallback
+	FibTestEpochLen       = 1  // Assurance
+	MegaTronEpochLen      = 50 // Orderaccumalation
+	TransferEpochLen      = 3  // Transfer
+	BalancesEpochLen      = 6  // Balance
+	ScaleBalancesEpochLen = 6
+)
+
+const (
+	TargetedN_Mega_L          = 911 // Long  megaTron for rebustness test
+	TargetedN_Mega_S          = 20  // Short megaTron for data publishing
+	TargetedN_Fib             = 10
+	TargetedN_Transfer        = 10
+	TargetedN_Balances        = 20 // not used !!
+	TargetedN_Scaled_Transfer = 600
+	Targetedn_Scaled_Balances = 100
+)
+
+var targetNum = flag.Int("targetN", -1, "targetN")
 
 func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
 	nodes, err := SetUpNodes(numNodes, basePort)
@@ -64,27 +87,26 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 	}
 }
 
-const SafroleTestEpochLen = 4 // Safrole
-const FallbackEpochLen = 4    // Fallback
-const FibTestEpochLen = 1     // Assurance
-const MegaTronEpochLen = 50   // Orderaccumalation
-const TransferEpochLen = 3    // Transfer
-const BalancesEpochLen = 6    // Balance
-const ScaleBalancesEpochLen = 6
-
 func TestFallback(t *testing.T) {
+	bufferTime := 30
 	basePort := GenerateRandomBasePort()
-	safroleTest(t, "fallback", FallbackEpochLen, basePort, 0)
+	safroleTest(t, "fallback", FallbackEpochLen, basePort, bufferTime)
 }
 
 func TestSafrole(t *testing.T) {
+	bufferTime := 30
 	basePort := GenerateRandomBasePort()
-	safroleTest(t, "safrole", SafroleTestEpochLen, basePort, 0)
+	safroleTest(t, "safrole", SafroleTestEpochLen, basePort, bufferTime)
 }
 
 func TestFib(t *testing.T) {
+	targetN := TargetedN_Fib
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	fmt.Printf("fib targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
-	jamtest(t, "fib", FibTestEpochLen, basePort)
+	jamtest(t, "fib", FibTestEpochLen, basePort, targetN)
 }
 
 func TestMegatron(t *testing.T) {
@@ -111,28 +133,54 @@ func TestMegatron(t *testing.T) {
 	if err := pprof.WriteHeapProfile(memProfile); err != nil {
 		t.Fatalf("Unable to write memory Profile: %v", err)
 	}
+
+	targetN := TargetedN_Mega_S
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	fmt.Printf("megatron targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
-	jamtest(t, "megatron", MegaTronEpochLen, basePort)
+	jamtest(t, "megatron", MegaTronEpochLen, basePort, targetN)
 }
 
 func TestTransfer(t *testing.T) {
+	targetN := TargetedN_Transfer
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	fmt.Printf("transfer targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
-	jamtest(t, "transfer", TransferEpochLen, basePort)
+	jamtest(t, "transfer", TransferEpochLen, basePort, targetN)
 }
 
 func TestScaledTransfer(t *testing.T) {
+	targetN := TargetedN_Scaled_Transfer
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	fmt.Printf("scaled_transfer targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
-	jamtest(t, "scaled_transfer", TransferEpochLen, basePort)
+	jamtest(t, "scaled_transfer", TransferEpochLen, basePort, targetN)
 }
 
 func TestBalances(t *testing.T) {
+	targetN := TargetedN_Balances
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	fmt.Printf("balances targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
-	jamtest(t, "balances", BalancesEpochLen, basePort)
+	jamtest(t, "balances", BalancesEpochLen, basePort, targetN)
 }
 
 func TestScaledBalances(t *testing.T) {
+	targetN := Targetedn_Scaled_Balances
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	fmt.Printf("scaled_balances targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
-	jamtest(t, "scaled_balances", ScaleBalancesEpochLen, basePort)
+	jamtest(t, "scaled_balances", ScaleBalancesEpochLen, basePort, targetN)
 }
 
 func TestDisputes(t *testing.T) {

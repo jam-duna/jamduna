@@ -60,10 +60,6 @@ func testFuzz(t *testing.T, Base_Dir string, modes []string, stfs []*statedb.Sta
 						PreState: mutatedStf.PreState,
 						Block:    mutatedStf.Block,
 					}
-					dumpMode := modes[0]
-					if len(modes) > 1 {
-						dumpMode = "generic"
-					}
 					writeDebug(Base_Dir, dumpMode, jamerrors.GetErrorCodeWithName(errActual), uint32(oEpoch), oPhase, stChallenge)
 					fmt.Printf("[#%v e=%v,m=%03d] Fuzzed ready for dump %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorCodeWithName(errActual))
 				} else {
@@ -151,6 +147,6 @@ func Cleanup(baseDir string, fuzz_mode string) {
 func getFuzzDir(baseDir string, fuzz_mode string) string {
 	parentDir := filepath.Dir(filepath.Dir(baseDir))
 	fuzzedDir := filepath.Join(parentDir, "fuzzed")
-	structDir := fmt.Sprintf("%s/%vs", fuzzedDir, fuzz_mode)
+	structDir := fmt.Sprintf("%s/%v", fuzzedDir, fuzz_mode)
 	return structDir
 }

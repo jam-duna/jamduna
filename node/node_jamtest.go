@@ -91,10 +91,11 @@ func SetLevelDBPaths(numNodes int) []string {
 	// timeslot mark
 	currJCE := common.ComputeCurrentJCETime()
 	//currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+	jobID := generateJobID()
 	currTS := currJCE * 6
 	for i := 0; i < numNodes; i++ {
 		node_idx := fmt.Sprintf("%d", i)
-		node_path, err := computeLevelDBPath(node_idx, int(currTS))
+		node_path, err := computeLevelDBPath(node_idx, int(currTS), jobID)
 		if err == nil {
 			node_paths[i] = node_path
 		}
@@ -102,14 +103,14 @@ func SetLevelDBPaths(numNodes int) []string {
 	return node_paths
 }
 
-func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
+func computeLevelDBPath(id string, unixtimestamp int, jobID string) (string, error) {
 	/* standardize on
-	/tmp/<user>/jam/<unixtimestamp>/testdb#
+	/tmp/<user>/jam/<unixtimestamp>_<jobID>/testdb#
 
-	/tmp/ntust/jam/1727903082/node1/leveldb/
-	/tmp/ntust/jam/1727903082/node1/data/
+	/tmp/ntust/jam/1727903082_<jID>/node1/leveldb/
+	/tmp/ntust/jam/1727903082_<jID>/node1/data/
 
-	/tmp/root/jam/1727903082/node1/
+	/tmp/root/jam/1727903082_<jID>/node1/
 
 	*/
 	currentUser, err := user.Current()
@@ -117,7 +118,7 @@ func computeLevelDBPath(id string, unixtimestamp int) (string, error) {
 		return "", fmt.Errorf("could not get current user: %v", err)
 	}
 	username := currentUser.Username
-	path := fmt.Sprintf("/tmp/%s/jam/%v/node%v", username, unixtimestamp, id)
+	path := fmt.Sprintf("/tmp/%s/jam/%v_%v/node%v", username, unixtimestamp, jobID, id)
 	return path, nil
 }
 
@@ -281,21 +282,13 @@ func getServices(serviceNames []string) (services map[string]*types.TestService,
 	return
 }
 
-func ImportBlocks(config *types.ConfigJamBlocks) {
-	// MK: DO NOT COMBINE importblock with jamtest or safrole generation!!!
-	// assurances - jamtest("fib")
-	// orderedaccumulation - jamtest("megatron")
-}
-
-var packagesNum = flag.Int("packages_num", 911, "number of work packages to generate")
-
-func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
+func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
 	flag.Parse()
 	nodes, err := SetUpNodes(numNodes, basePort)
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	Logger.RecordLogs(storage.Testing_record, fmt.Sprintf("[JAMTEST : %s] Start!!!\n", jam), true)
+	Logger.RecordLogs(storage.Testing_record, fmt.Sprintf("[Start JAMTEST : %s, targetN=%v]\n", jam, targetN), true)
 	_ = nodes
 	block_graph_server := types.NewGraphServer(basePort)
 	go block_graph_server.StartServer()
@@ -317,7 +310,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 			break
 		}
 	}
-	time.Sleep(7 * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	// code length: 206
 	fn := common.GetFilePath(statedb.BootstrapServiceFile)
 	bootstrapCode, err := os.ReadFile(fn)
@@ -352,7 +345,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 		builderNode.preimages[service.CodeHash] = service.Code
 	}
 	fmt.Printf("Waiting for the first block to be ready...\n")
-	time.Sleep(6 * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		fmt.Printf("Builder storing TestService %s (%v)\n", serviceName, common.Str(service.CodeHash))
@@ -450,21 +443,27 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16) {
 
 	switch jam {
 	case "megatron":
-		megatron(nodes, testServices, *packagesNum)
+		megatron(nodes, testServices, targetN)
 	case "fib":
-		fib(nodes, testServices)
+		fib(nodes, testServices, targetN)
 	case "transfer":
-		transfer(nodes, testServices)
+		transferNum := targetN
+		transfer(nodes, testServices, transferNum)
 	case "scaled_transfer":
-		scaled_transfer(nodes, testServices)
+		transferNum := 10
+		splitTransferNum := targetN
+		scaled_transfer(nodes, testServices, transferNum, splitTransferNum)
 	case "balances":
-		balances(nodes, testServices)
+		// not using anything
+		balances(nodes, testServices, targetN)
 	case "scaled_balances":
-		scaled_balances(nodes, testServices)
+		targetN_mint := targetN
+		targetN_transfer := targetN
+		scaled_balances(nodes, testServices, targetN_mint, targetN_transfer)
 	}
 }
 
-func fib(nodes []*Node, testServices map[string]*types.TestService) {
+func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
 	fmt.Printf("Start FIB\n")
 
 	service0 := testServices["fib"]
@@ -472,7 +471,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 	n4 := nodes[4]
 	core := 0
 	prevWorkPackageHash := common.Hash{}
-	for fibN := 1; fibN <= 10; fibN++ {
+	for fibN := 1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 1 {
 			importedSegment := types.ImportSegment{
@@ -543,7 +542,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService) {
 
 }
 
-func megatron(nodes []*Node, testServices map[string]*types.TestService, workpackages_num int) {
+func megatron(nodes []*Node, testServices map[string]*types.TestService, targetMegatronN int) {
 
 	fmt.Printf("Start Fib_Trib\n")
 	service0 := testServices["fib"]
@@ -555,9 +554,9 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, workpac
 	Fib_Trib_WorkPackages := make([]types.WorkPackage, 0)
 	Meg_WorkPackages := make([]types.WorkPackage, 0)
 	prevWorkPackageHash := common.Hash{}
+	targetNMax := targetMegatronN
 	// ================================================
 	// make n workpackages for Fib and Trib
-	targetNMax := workpackages_num
 	for n := 0; n < targetNMax; n++ {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)
@@ -969,7 +968,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 	}
 }
 
-func transfer(nodes []*Node, testServices map[string]*types.TestService) {
+func transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int) {
 	fmt.Printf("\n=========================Start Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
@@ -985,7 +984,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 	prevBalance0 := sa0.Balance
 	prevBalance1 := sa1.Balance
 
-	TransferNum := 10
+	TransferNum := transferNum
 	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
 	for n := 1; n <= TransferNum; n++ {
 		timeslot := n1.statedb.Block.GetHeader().Slot
@@ -1107,7 +1106,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService) {
 	}
 }
 
-func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService) {
+func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int, splitTransferNum int) {
 	fmt.Printf("\n=========================Start Scaled Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
@@ -1123,8 +1122,8 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService) 
 	prevBalance0 := sa0.Balance
 	prevBalance1 := sa1.Balance
 
-	TransferNum := 10
-	SplitTransferNum := 600 // 10000 for 0.62 MB
+	TransferNum := transferNum           // 10
+	SplitTransferNum := splitTransferNum // 600. 10000 for 0.62 MB
 	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
 
 	for n := 1; n <= TransferNum; n++ {
@@ -1421,7 +1420,9 @@ func (a *TransferExtrinsic) Bytes() []byte {
 	return buffer.Bytes()
 }
 
-func balances(nodes []*Node, testServices map[string]*types.TestService) {
+func balances(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+
+	// !!!! targetN is NOT USED - need to wire this up
 	fmt.Printf("\n=========================Balances Test=========================\n")
 
 	// General setup
@@ -1966,7 +1967,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService) {
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, to_account)
 }
 
-func scaled_balances(nodes []*Node, testServices map[string]*types.TestService) {
+func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, targetN_mint int, targetN_transfer int) {
 	fmt.Printf("\n=========================Balances Scale Test=========================\n")
 	// General setup
 	BalanceService := testServices["balances"]
@@ -2093,7 +2094,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService) 
 	ShowAssetDetail(n1, balancesServiceIndex, 1984)
 
 	// Scaled mint test
-	num_of_mint := 110
+	num_of_mint := targetN_mint // 110
 	fmt.Printf("\n\033[38;5;208mMinting \033[38;5;46m90000 USDT\033[38;5;208m for \033[38;5;46m%v\033[38;5;208m accounts...\033[0m\n", num_of_mint)
 
 	var mint_workPackage types.WorkPackage
@@ -2181,7 +2182,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService) 
 	ShowAssetDetail(n1, balancesServiceIndex, 1984)
 
 	// Scaled Transfer test
-	num_of_transfer := 110
+	num_of_transfer := targetN_transfer // 100
 	fmt.Printf("\n\033[38;5;208mTransferring \033[38;5;46m1 USDT\033[38;5;208m from \033[38;5;46mV6\033[38;5;208m to \033[38;5;46m%v\033[38;5;208m accounts...\033[0m\n", num_of_transfer)
 
 	var transfer_workPackage types.WorkPackage
@@ -2338,4 +2339,14 @@ func ShowAccountDetail(n *Node, balance_service_index uint32, asset_id uint64, a
 	fmt.Printf("\033[38;5;13mAccount Nonce\033[0m: \033[32m%v\033[0m\n", fetched_account.Nonce)
 	fmt.Printf("\033[38;5;13mAccount Free\033[0m: \033[32m%v\033[0m\n", fetched_account.Free)
 	fmt.Printf("\033[38;5;13mAccount Reserved\033[0m: \033[32m%v\033[0m\n", fetched_account.Reserved)
+}
+
+func generateJobID() string {
+	seed := uint64(time.Now().UnixNano()) // nano seconds. but still not unique
+	source := rand.NewSource(seed)
+	r := rand.New(source)
+	var out [8]byte
+	binary.LittleEndian.PutUint64(out[:], r.Uint64())
+	jobID := fmt.Sprintf("%x", out)
+	return jobID
 }

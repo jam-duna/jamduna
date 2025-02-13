@@ -18,6 +18,6 @@ creategenesisstate:
 		elapsed_time=$$((end_time - start_time)); \
 		echo "Time taken for $$tag: $$elapsed_time seconds"; \
 	done;
-	@echo "Setting tag back to tiny"; 
-	@cd $(BANDERSNATCH_DIR) && cargo build --quiet --release --features tiny; \
-	@GOFLAGS=-tags=tiny;
+	@echo "Setting tag back to tiny"
+	@export GOFLAGS=-tags=tiny; \
+	cd $(BANDERSNATCH_DIR) && cargo build --quiet --release --features tiny;
