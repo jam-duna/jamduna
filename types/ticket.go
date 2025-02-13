@@ -64,6 +64,14 @@ func (t Ticket) DeepCopy() (Ticket, error) {
 	return copiedTicket, nil
 }
 
+func (t *Ticket) ToBody() TicketBody {
+	id, _ := t.TicketID()
+	return TicketBody{
+		Id:      id,
+		Attempt: t.Attempt,
+	}
+}
+
 func (t Ticket) String() string {
 	return fmt.Sprintf("Ticket{Attempt: %d, Signature: %s}", t.Attempt, common.HexString(t.Signature[:]))
 }

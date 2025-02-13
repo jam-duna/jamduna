@@ -1212,6 +1212,30 @@ func (s *SafroleState) SortAndTrimTickets() {
 	}
 }
 
+func SortTicketBodies(tickets []types.TicketBody) {
+	// Sort tickets using compareTickets
+	sort.SliceStable(tickets, func(i, j int) bool {
+		return compareTickets(tickets[i].Id, tickets[j].Id) < 0
+	})
+}
+
+func TicketInTmpAccumulator(ticketID common.Hash, tmpAccumulator []types.TicketBody) bool {
+	for _, a := range tmpAccumulator {
+		if ticketID == a.Id {
+			return true
+		}
+	}
+	return false
+}
+
+func TrimTicketBodies(tickets []types.TicketBody) []types.TicketBody {
+	// Drop useless tickets
+	if len(tickets) > types.EpochLength {
+		tickets = tickets[0:types.EpochLength]
+	}
+	return tickets
+}
+
 func (s *SafroleState) ChooseFallBackValidator() ([]common.Hash, error) {
 	// get the bandersnatch keys of the validators
 	banderkeys := make([]common.Hash, 0)
@@ -1517,23 +1541,18 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 			}
 		}
 	}
-	// 6.34
-	if is_epoch_changed {
-		gamma_a_len := len(new_sf.NextEpochTicketsAccumulator)
-		if gamma_a_len != 0 {
-			for _, block_ticket := range tickets {
-				found := false
-				for _, a := range new_sf.NextEpochTicketsAccumulator {
-					block_ticket_id, _ := block_ticket.TicketID()
-					if block_ticket_id == a.Id {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return fmt.Errorf("ticket not in state")
-				}
+	// useless key shouldn't be included in a block
+	for _, block_ticket := range tickets {
+		found := false
+		for _, a := range new_sf.NextEpochTicketsAccumulator {
+			block_ticket_id, _ := block_ticket.TicketID()
+			if block_ticket_id == a.Id {
+				found = true
+				break
 			}
+		}
+		if !found {
+			return fmt.Errorf("ticket not in state")
 		}
 	}
 	gamma_a_len := len(new_sf.NextEpochTicketsAccumulator)

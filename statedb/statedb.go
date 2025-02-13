@@ -1645,7 +1645,26 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 
 		} else {
 			next_n2 := s.JamState.SafroleState.GetNextN2()
-			for _, ticket := range extrinsic_pool.GetTicketsFromPool(next_n2) {
+			tmp_accumulator := make([]types.TicketBody, len(s.JamState.SafroleState.NextEpochTicketsAccumulator))
+			copy(tmp_accumulator, s.JamState.SafroleState.NextEpochTicketsAccumulator)
+			// remove the tickets that already in state from the pool
+			for _, ticket := range tmp_accumulator {
+				extrinsic_pool.RemoveTicketFromPool(ticket.Id, next_n2)
+			}
+			// get the clean tickets out from the pool
+			tickets := extrinsic_pool.GetTicketsFromPool(next_n2)
+			SortTicketsById(tickets) // first include the better id
+			if len(tickets) > types.MaxTicketsPerExtrinsic {
+				tickets = tickets[:types.MaxTicketsPerExtrinsic]
+			}
+			for _, ticket := range tickets {
+				ticket_body := ticket.ToBody()
+				tmp_accumulator = append(tmp_accumulator, ticket_body)
+			}
+			SortTicketBodies(tmp_accumulator)
+			tmp_accumulator = TrimTicketBodies(tmp_accumulator)
+			// only include the tickets that will be included in the accumulator
+			for _, ticket := range tickets {
 				t, err := ticket.DeepCopy()
 				if err != nil {
 					continue
@@ -1653,18 +1672,15 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 				ticketID, _ := t.TicketID()
 				if s.JamState.SafroleState.InTicketAccumulator(ticketID) {
 					continue
-				} else if len(extrinsicData.Tickets) >= types.MaxTicketsPerExtrinsic {
-					// we only allow a maxium number of tickets per block
-					continue
-				} else {
-					// fmt.Printf("[N%d] GetTicketQueue %v => %v\n", s.Id, ticketID, t)
+				}
+				if TicketInTmpAccumulator(ticketID, tmp_accumulator) {
 					extrinsicData.Tickets = append(extrinsicData.Tickets, t)
+				} else {
+					extrinsic_pool.RemoveTicketFromPool(ticketID, next_n2)
 				}
 			}
 
-			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 		}
-		SortTicketsById(extrinsicData.Tickets)
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()
