@@ -700,16 +700,6 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 }
 
 // v0.5 eq 11.30
-func (s *StateDB) getRefineContext() []types.RefineContext {
-	x := []types.RefineContext{}
-	w := s.getWorkReport()
-	for _, report := range w {
-		x = append(x, report.RefineContext)
-	}
-	return x
-}
-
-// v0.5 eq 11.30
 func (s *StateDB) getAvailibleSpecHash() []common.Hash {
 	p := []common.Hash{}
 	w := s.getWorkReport()
@@ -733,18 +723,15 @@ func (s *StateDB) checkLength() error {
 }
 
 // v0.5 eq 11.32
-// TODO:stanley
 func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	refine := g.Report.RefineContext
 	anchor := true // CHECK -- I think this should be false
-	if refine.Anchor != (common.Hash{}) {
-		for _, block := range s.JamState.RecentBlocks {
-			if block.HeaderHash == refine.Anchor {
-				anchor = true
-				break
-			} else {
-				anchor = false
-			}
+	for _, block := range s.JamState.RecentBlocks {
+		if block.HeaderHash == refine.Anchor {
+			anchor = true
+			break
+		} else {
+			anchor = false
 		}
 	}
 	if !anchor {
@@ -754,43 +741,37 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 		return jamerrors.ErrGAnchorNotRecent
 	}
 
-	stateroot := true // CHECK
-	if refine.StateRoot != (common.Hash{}) {
-		for _, block := range s.JamState.RecentBlocks {
-			if block.StateRoot != refine.StateRoot {
-				stateroot = false
-			} else {
-				stateroot = true
-				break
-			}
+	stateroot := true
+	for _, block := range s.JamState.RecentBlocks {
+		if block.StateRoot != refine.StateRoot {
+			stateroot = false
+		} else {
+			stateroot = true
+			break
 		}
 	}
+
 	if !stateroot {
-		// CHECK
 		if debugG {
 			fmt.Printf("state root not in recent blocks refine.StateRoot: %v\n", refine.StateRoot)
 		}
 		return jamerrors.ErrGBadStateRoot
 	}
 	beefyroot := true
-	if refine.BeefyRoot != (common.Hash{}) {
-		// fmt.Printf("refine.BeefyRoot %v\n", refine.BeefyRoot)
-		for _, block := range s.JamState.RecentBlocks {
-			mmr := block.B
-			superPeak := mmr.SuperPeak()
-			// fmt.Printf("superPeak %v\n", superPeak)
-			if *superPeak != refine.BeefyRoot {
-				beefyroot = false
-			} else {
-				beefyroot = true
-				break
-			}
+	for _, block := range s.JamState.RecentBlocks {
+		mmr := block.B
+		superPeak := mmr.SuperPeak()
+		// fmt.Printf("superPeak %v\n", superPeak)
+		if *superPeak != refine.BeefyRoot {
+			beefyroot = false
+		} else {
+			beefyroot = true
+			break
 		}
 	}
 	if !beefyroot {
 		return jamerrors.ErrGBadBeefyMMRRoot
 	}
-
 	return nil
 }
 

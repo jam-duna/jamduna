@@ -208,10 +208,6 @@ const (
 const (
 	BootstrapServiceCode = 0
 	BootstrapServiceFile = "/services/bootstrap.pvm"
-	BalancesServcieIndex = 1
-	BalancesServcieFile  = "/services/balances.pvm"
-	BankServcieIndex     = 2
-	BankServiceFile      = "/services/bank.pvm"
 )
 
 func (s *StateDB) GetHeaderHash() common.Hash {
@@ -906,6 +902,35 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 		}
 	}
 	return nil, nil, nil
+}
+
+// see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks
+func (s *StateDB) GetRefineContext() types.RefineContext {
+	// A) ANCHOR -- checkRecentBlock checks if Anchor is in RecentBlocks
+	anchor := common.Hash{}
+	stateRoot := common.Hash{}
+	beefyRoot := common.Hash{}
+	if len(s.JamState.RecentBlocks) > 0 {
+		anchorBlock := s.JamState.RecentBlocks[len(s.JamState.RecentBlocks)-1]
+		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
+		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks
+		beefyRoot = *(anchorBlock.B.SuperPeak()) // beefy root b must be in s.JamState.RecentBlocks
+	}
+
+	// B) LOOKUP ANCHOR -- there are NO restrictions here but we choose these to have something
+	lookupAnchorBlock := s.Block
+	lookupAnchor := lookupAnchorBlock.Header.Hash() // header hash l does NOT have to be in s.JamState.RecentBlocks
+	ts := lookupAnchorBlock.GetHeader().Slot
+	return types.RefineContext{
+		// A) ANCHOR
+		Anchor:    anchor,
+		StateRoot: stateRoot,
+		BeefyRoot: beefyRoot,
+		// B) LOOKUP ANCHOR
+		LookupAnchor:     lookupAnchor,
+		LookupAnchorSlot: ts,
+		Prerequisites:    []common.Hash{},
+	}
 }
 
 func (s *StateDB) SetID(id uint16) {

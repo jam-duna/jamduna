@@ -484,7 +484,7 @@ func (s *ServiceAccount) ComputeNumStorageItems() uint32 {
 	return s.NumStorageItems
 }
 
-// eq 9.8
+// eq 9.8 https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
 func (s *ServiceAccount) ComputeStorageSize() uint64 {
 
 	if s.Storage != nil {

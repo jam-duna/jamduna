@@ -100,14 +100,11 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	// Load services into genesis state
 	services := []types.TestService{
 		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
-		{ServiceCode: BalancesServcieIndex, FileName: BalancesServcieFile},
-		{ServiceCode: BankServcieIndex, FileName: BankServiceFile},
-		// Add more services here as needed IF they are needed for Genesis
 	}
 
 	for _, service := range services {
 		if service.ServiceCode != 0 {
-			// Willaim: use Bootstrap to spin up your other services to avoid frequent genesis change
+			// only Bootstrap
 			continue
 		}
 		fn := common.GetFilePath(service.FileName)
@@ -115,13 +112,9 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		if err0 != nil {
 			return outfn, err
 		}
-		var balance uint64 = ^uint64(0)
-		if service.ServiceCode == BankServcieIndex {
-			balance = 100000
-		}
-
+		var balance uint64 = uint64(10000000000)
 		codeHash := common.Blake2Hash(code)
-		codeLen := uint32(len(codeHash))
+		codeLen := uint32(len(code)) // z
 		bootStrapAnchor := []uint32{0}
 
 		bootstrapServiceAccount := types.ServiceAccount{
@@ -129,9 +122,10 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			Balance:         balance,
 			GasLimitG:       100,
 			GasLimitM:       100,
-			StorageSize:     uint64(81 + len(code) + 0), // a_l = ∑ 81+z per (h,z) + ∑ 32+s
-			NumStorageItems: 2*1 + 0,                    //a_i = 2⋅∣al∣+∣as∣
+			StorageSize:     uint64(81 + codeLen + 32), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+			NumStorageItems: 2*1 + 0,                   //a_i = 2⋅∣al∣+∣as∣
 		}
+		//fmt.Printf("StorageSize check: 81 + codeLen %d + 32 = %d\n", codeLen, bootstrapServiceAccount.StorageSize)
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 		statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
 		statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)

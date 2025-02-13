@@ -350,14 +350,12 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	for serviceName, service := range testServices {
 		fmt.Printf("Builder storing TestService %s (%v)\n", serviceName, common.Str(service.CodeHash))
 		// set up service using the Bootstrap service
-		slot := builderNode.statedb.GetSafrole().GetTimeSlot()
+		refine_context := builderNode.statedb.GetRefineContext()
 		codeWorkPackage := types.WorkPackage{
 			Authorization: []byte(""),
 			AuthCodeHost:  bootstrapService,
 			Authorizer:    types.Authorizer{},
-			RefineContext: types.RefineContext{
-				LookupAnchorSlot: slot,
-			},
+			RefineContext: refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            bootstrapService,
@@ -480,15 +478,8 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			}
 			importedSegments = append(importedSegments, importedSegment)
 		}
-		timeslot := nodes[1].statedb.Block.GetHeader().Slot
-		refine_context := types.RefineContext{
-			Anchor:           common.Hash{},
-			StateRoot:        common.Hash{},
-			BeefyRoot:        common.Hash{},
-			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: timeslot,
-			Prerequisites:    []common.Hash{},
-		}
+		refine_context := n1.statedb.GetRefineContext()
+
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{
@@ -560,18 +551,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	for n := 0; n < targetNMax; n++ {
 		fibImportedSegments := make([]types.ImportSegment, 0)
 		tribImportedSegments := make([]types.ImportSegment, 0)
-		timeslot := nodes[1].statedb.GetSafrole().GetTimeSlot()
-		// lastHeaderHash := nodes[1].statedb.HeaderHash
-		refineContext := types.RefineContext{
-			// These values don't matter until we have a historical lookup -- which we do not!
-			Anchor:       common.Hash{},
-			StateRoot:    common.Hash{},
-			BeefyRoot:    common.Hash{},
-			LookupAnchor: common.Hash{},
-			// LookupAnchorSlot: timeslot + 100,// TODO: check this
-			LookupAnchorSlot: timeslot,
-			Prerequisites:    []common.Hash{},
-		}
+		refineContext := nodes[1].statedb.GetRefineContext()
 		workPackage := types.WorkPackage{}
 		if n > 0 {
 			fibImportedSegments = append(fibImportedSegments, types.ImportSegment{
@@ -652,18 +632,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 		importedSegmentsM := make([]types.ImportSegment, 0)
 		prereq := make([]common.Hash, 0)
 		prereq = append(prereq, Fib_Trib_WorkPackages[megaN].Hash())
-		// prereq = append(prereq, common.BytesToHash([]byte("hack")))
-		ts := nodes[1].statedb.GetSafrole().GetTimeSlot()
-		refineContext := types.RefineContext{
-			// These values don't matter until we have a historical lookup -- which we do not!
-			Anchor:       common.Hash{},
-			StateRoot:    common.Hash{},
-			BeefyRoot:    common.Hash{},
-			LookupAnchor: common.Hash{},
-			// LookupAnchorSlot: ts + 100, // TODO: check this
-			LookupAnchorSlot: ts,
-			Prerequisites:    prereq,
-		}
+		refineContext := nodes[1].statedb.GetRefineContext()
+		refineContext.Prerequisites = prereq
 
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(megaN))
@@ -987,16 +957,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 	TransferNum := transferNum
 	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
 	for n := 1; n <= TransferNum; n++ {
-		timeslot := n1.statedb.Block.GetHeader().Slot
-		refineContext := types.RefineContext{
-			Anchor:           common.Hash{},
-			StateRoot:        common.Hash{},
-			BeefyRoot:        common.Hash{},
-			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: timeslot,
-			Prerequisites:    []common.Hash{},
-		}
-
+		refineContext := n1.statedb.GetRefineContext()
 		var workPackage types.WorkPackage
 		if n%2 == 0 {
 			payload := make([]byte, 8)
@@ -1127,16 +1088,7 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
 
 	for n := 1; n <= TransferNum; n++ {
-		timeslot := n1.statedb.Block.GetHeader().Slot
-		refineContext := types.RefineContext{
-			Anchor:           common.Hash{},
-			StateRoot:        common.Hash{},
-			BeefyRoot:        common.Hash{},
-			LookupAnchor:     common.Hash{},
-			LookupAnchorSlot: timeslot,
-			Prerequisites:    []common.Hash{},
-		}
-
+		refineContext := n1.statedb.GetRefineContext()
 		var workPackage types.WorkPackage
 		var Transfer_WorkItems []types.WorkItem
 		if n%2 == 0 {
@@ -1434,16 +1386,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	n4 := nodes[4]
 	core := 0
 
-	timeslot := nodes[1].statedb.Block.GetHeader().Slot
-	refineContext := types.RefineContext{
-		Anchor:           common.Hash{},
-		StateRoot:        common.Hash{},
-		BeefyRoot:        common.Hash{},
-		LookupAnchor:     common.Hash{},
-		LookupAnchorSlot: timeslot,
-		Prerequisites:    []common.Hash{},
-	}
-
+	refineContext := nodes[1].statedb.GetRefineContext()
 	// Method ID bytes
 	create_asset_id := uint32(0)
 	mint_id := uint32(1)
@@ -1977,16 +1920,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 	n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
-
-	timeslot := nodes[1].statedb.Block.GetHeader().Slot
-	refineContext := types.RefineContext{
-		Anchor:           common.Hash{},
-		StateRoot:        common.Hash{},
-		BeefyRoot:        common.Hash{},
-		LookupAnchor:     common.Hash{},
-		LookupAnchorSlot: timeslot,
-		Prerequisites:    []common.Hash{},
-	}
+	refineContext := nodes[1].statedb.GetRefineContext()
 
 	// Total Work Package Size in MB
 	var totalWPSizeInMB float64

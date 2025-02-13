@@ -233,11 +233,12 @@ func TestDisputes(t *testing.T) {
 	for serviceName, service := range testServices {
 		fmt.Printf("Builder storing TestService %s (%v)\n", serviceName, common.Str(service.CodeHash))
 		// set up service using the Bootstrap service
+		refineContext := builderNode.statedb.GetRefineContext()
 		codeWorkPackage := types.WorkPackage{
 			Authorization: []byte(""),
 			AuthCodeHost:  bootstrapService,
 			Authorizer:    types.Authorizer{},
-			RefineContext: types.RefineContext{},
+			RefineContext: refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            bootstrapService,
