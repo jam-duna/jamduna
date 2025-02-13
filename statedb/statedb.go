@@ -910,11 +910,13 @@ func (s *StateDB) GetRefineContext() types.RefineContext {
 	anchor := common.Hash{}
 	stateRoot := common.Hash{}
 	beefyRoot := common.Hash{}
-	if len(s.JamState.RecentBlocks) > 0 {
-		anchorBlock := s.JamState.RecentBlocks[len(s.JamState.RecentBlocks)-1]
+	if len(s.JamState.RecentBlocks) > 1 {
+		anchorBlock := s.JamState.RecentBlocks[len(s.JamState.RecentBlocks)-2]
+		//fmt.Printf("GetRefineContext (# RecentBlocks=%d) AnchorBlock: %s\n", len(s.JamState.RecentBlocks), anchorBlock.String())
 		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
 		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks
 		beefyRoot = *(anchorBlock.B.SuperPeak()) // beefy root b must be in s.JamState.RecentBlocks
+		//fmt.Printf("  ... Anchor: %s StateRoot: %s BeefyRoot: %s\n", anchor, stateRoot, beefyRoot)
 	}
 
 	// B) LOOKUP ANCHOR -- there are NO restrictions here but we choose these to have something

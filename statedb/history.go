@@ -2,7 +2,8 @@ package statedb
 
 import (
 	"encoding/json"
-
+	"fmt"
+	
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -16,6 +17,14 @@ type Beta_state struct {
 	B          trie.MMR                `json:"mmr"`
 	StateRoot  common.Hash             `json:"state_root"`
 	Reported   types.SegmentRootLookup `json:"report"` // Use the custom type
+}
+
+func (b *Beta_state) String() string {
+	enc, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
 }
 
 func (b *Beta_state) UnmarshalJSON(data []byte) error {
