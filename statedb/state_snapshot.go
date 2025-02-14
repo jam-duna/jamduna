@@ -28,15 +28,10 @@ var orderedStateList = []string{
 
 // C1 - C15
 type StateSnapshot struct {
-	AuthorizationsPool [types.TotalCores][]common.Hash `json:"alpha"`  // c1
-	AuthorizationQueue types.AuthorizationQueue        `json:"varphi"` // c2
-	RecentBlocks       RecentBlocks                    `json:"beta"`   // c3
-	Gamma              SafroleBasicState               `json:"-"`
-	GammaK             GammaK                          `json:"gamma_k"` // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	GammaZ             GammaZ                          `json:"gamma_z"` // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	GammaS             TicketsOrKeys                   `json:"gamma_s"` // γs: Current epoch’s slot-sealer series (epoch N)
-	GammaA             []types.TicketBody              `json:"gamma_a"` // γa: Ticket accumulator for the next epoch (epoch N+1)
-
+	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`    // c1
+	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"`   // c2
+	RecentBlocks             RecentBlocks                                 `json:"beta"`     // c3
+	Gamma                    SafroleBasicState                            `json:"gamma"`    // c4
 	Disputes                 Psi_state                                    `json:"psi"`      // c5
 	Entropy                  Entropy                                      `json:"eta"`      // c6
 	NextValidators           types.Validators                             `json:"iota"`     // c7
@@ -223,10 +218,6 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 		case C4:
 			gamma, _, _ := types.Decode(kv.Value, reflect.TypeOf(SafroleBasicState{}))
 			sn.Gamma = gamma.(SafroleBasicState)
-			copy(sn.GammaK[:], sn.Gamma.GammaK[:])
-			copy(sn.GammaA[:], sn.Gamma.GammaA[:])
-			copy(sn.GammaZ[:], sn.Gamma.GammaZ[:])
-			sn.GammaA = sn.Gamma.GammaA
 		case C5:
 			disputes, _, _ := types.Decode(kv.Value, reflect.TypeOf(Psi_state{}))
 			sn.Disputes = disputes.(Psi_state)
@@ -270,16 +261,11 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 
 func (n *JamState) Snapshot(state *StateSnapshotRaw) *StateSnapshot {
 	original := n.SafroleState
-	gamma := n.SafroleState.GetSafroleBasicState().Copy()
 	copied := &StateSnapshot{
-		AuthorizationsPool:       n.AuthorizationsPool, // C1
-		AuthorizationQueue:       n.AuthorizationQueue, // C2
-		RecentBlocks:             n.RecentBlocks,       // C3
-		Gamma:                    gamma,                // C4 -- nested vs flattened
-		GammaK:                   gamma.GammaK,
-		GammaZ:                   gamma.GammaZ,
-		GammaS:                   gamma.GammaS,
-		GammaA:                   gamma.GammaA,
+		AuthorizationsPool:       n.AuthorizationsPool,                                  // C1
+		AuthorizationQueue:       n.AuthorizationQueue,                                  // C2
+		RecentBlocks:             n.RecentBlocks,                                        // C3
+		Gamma:                    n.SafroleState.GetSafroleBasicState().Copy(),          // C4
 		Disputes:                 n.DisputesState,                                       // C5
 		Entropy:                  n.SafroleState.Entropy,                                // C6
 		NextValidators:           make([]types.Validator, len(original.NextValidators)), // C7
