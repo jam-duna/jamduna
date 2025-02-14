@@ -77,6 +77,14 @@ func (req *JAMSNPBlockRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, err error) {
+	// TODO: add span for block request => response here
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(p.node.store.BlockAnnouncementContext, fmt.Sprintf("[N%d] SendBlockRequest", p.node.store.NodeID))
+		// p.node.UpdateBlockContext(ctx)
+		defer span.End()
+	}
+
 	req := &JAMSNPBlockRequest{
 		HeaderHash:    headerHash,
 		Direction:     direction,

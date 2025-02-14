@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +25,8 @@ import (
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type StateDB struct {
@@ -137,7 +141,7 @@ const (
 	debugAudit                = false
 	debugSeal                 = false
 	saveSealBlockMaterial     = false
-	trace                     = false
+	debugtrace                = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
@@ -858,6 +862,13 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	return newStateDB
 }
 
+func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
+	var traceIDBytes [16]byte
+	binary.LittleEndian.PutUint32(traceIDBytes[0:4], epoch)
+	binary.LittleEndian.PutUint32(traceIDBytes[4:8], phase)
+	return hex.EncodeToString(traceIDBytes[:])
+}
+
 func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (*types.Block, *StateDB, error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady()
 	if !genesisReady {
@@ -869,13 +880,37 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 		sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
 		isAuthorizedBlockBuilder, ticketID, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		if isAuthorizedBlockBuilder {
-			// propose block without state transition
+			// Add MakeBlock span
+			if s.sdb.SendTrace {
+				tracer := s.sdb.Tp.Tracer("NodeTracer")
+				// s.InitEpochPhaseContext()
+				ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] ProcessState -> MakeBlock", s.sdb.NodeID))
+				s.sdb.UpdateBlockContext(ctx)
+				defer span.End()
+			}
+
 			start := time.Now()
 			proposedBlk, err := s.MakeBlock(credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
 				fmt.Printf("Error making block: %v\n", err)
 				return nil, nil, err
 			}
+			// Add ApplyStateTransitionFromBlock span
+			if s.sdb.Tp != nil && s.sdb.BlockContext != nil && s.sdb.SendTrace {
+				tracer := s.sdb.Tp.Tracer("NodeTracer")
+
+				var block_hash common.Hash
+				if proposedBlk == nil {
+					block_hash = common.Hash{}
+				} else {
+					block_hash = proposedBlk.Header.Hash()
+				}
+				tags := trace.WithAttributes(attribute.String("BlockHash", common.Str(block_hash)))
+				_, span := tracer.Start(s.sdb.BlockContext, fmt.Sprintf("[N%d] ProcessState -> ApplyStateTransitionFromBlock", s.sdb.NodeID), tags)
+				// oldState.sdbs.UpdateBlockContext(ctx)
+				defer span.End()
+			}
+
 			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
@@ -893,7 +928,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 			}
 
 			elapsed := time.Since(start)
-			if trace && elapsed > 2000000 {
+			if debugtrace && elapsed > 2000000 {
 				fmt.Printf("\033[31m MakeBlock / ApplyStateTransitionFromBlock\033[0m %d ms\n", elapsed/1000)
 			}
 			return proposedBlk, newStateDB, nil
@@ -1205,7 +1240,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
 	elapsed := time.Since(start).Microseconds()
-	if trace && elapsed > 1000000 { // OPTIMIZED ApplyStateTransitionTickets/ValidateProposedTicket
+	if debugtrace && elapsed > 1000000 { // OPTIMIZED ApplyStateTransitionTickets/ValidateProposedTicket
 		fmt.Printf("\033[31mApplyStateTransitionFromBlock:Tickets\033[0m %d ms\n", elapsed/1000)
 	}
 

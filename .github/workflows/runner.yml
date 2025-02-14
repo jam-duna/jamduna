@@ -2,7 +2,7 @@ name: Jam Runner main
 
 env:
   GOFLAGS: "-tags=tiny"
-  JAM_PATH: ${{ github.workspace }} 
+  JAM_PATH: ${{ github.workspace }}
   LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
   CARGO_MANIFEST_DIR: ${{ github.workspace }}
 
@@ -18,7 +18,7 @@ on:
       - node/*.go
   schedule:
     - cron: '0 */2 * * *'
-      branches: 
+      branches:
         - main
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
     runs-on: jamops-16-core
     timeout-minutes: 120
     strategy:
-      max-parallel: 2 
+      max-parallel: 2
     steps:
       - name: Checkout main code
         uses: actions/checkout@v3
@@ -74,13 +74,13 @@ jobs:
           make bandersnatchlib
 
       - name: Run test bls
-        run: go test ./bls 
+        run: go test ./bls
 
       - name: Run test bandersnatch
-        run: go test ./bandersnatch 
+        run: go test ./bandersnatch
 
       - name: Run test fib
-        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny 
+        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
 
 
       # if there is a failure in the following tests, the workflow will continue
@@ -88,4 +88,3 @@ jobs:
       - name: Run test megatron (1/5)
         id: megatron_250
         run: go test ./node -timeout 115m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
-

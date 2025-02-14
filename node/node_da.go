@@ -801,6 +801,12 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 
 // work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error
 func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPackage, importSegments [][][]byte, extrinsics types.ExtrinsicsBlobs, segmentRootLookup types.SegmentRootLookup) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
+	if n.store.SendTrace {
+		tracer := n.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(n.store.WorkPackageContext, fmt.Sprintf("[N%d] executeWorkPackage", n.store.NodeID))
+		// n.UpdateWorkPackageContext(ctx)
+		defer span.End()
+	}
 	start := time.Now()
 	// Create a new PVM instance with mock code and execute it
 	results := []types.WorkResult{}
@@ -834,6 +840,10 @@ func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPack
 		// }
 
 		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
+		// ctx := context.TODO()
+		// ctx, parentSpan := tracer.Start(ctx, "ExecuteRefine")
+		// defer parentSpan.End()
+
 		output, _ := vm.ExecuteRefine(uint32(workItemIdx), workPackage, workPackage.Authorization, workItemImportSegments, workItem.ExportCount, extrinsics)
 		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
 		workItemExports := make([][]byte, 0)

@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -125,6 +126,14 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error) {
+	// TODO: add span for SendSegmentShardRequest => get [Segment Shard] back here
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendSegmentShardRequest", p.node.store.NodeID))
+		// p.node.UpdateSegmentShardContext(ctx)
+		defer span.End()
+	}
+
 	code := uint8(CE139_SegmentShardRequest)
 	if withJustification {
 		code = CE140_SegmentShardRequestP

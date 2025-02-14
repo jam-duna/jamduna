@@ -543,7 +543,7 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, u
 	wg.Wait() // Wait for all goroutines to finish
 
 	elapsed := time.Since(start).Microseconds()
-	if trace && elapsed > 1000000 { // OPTIMIZED generateTicket
+	if debugtrace && elapsed > 1000000 { // OPTIMIZED generateTicket
 		fmt.Printf(" --- GenerateTickets took %d ms\n", elapsed/1000)
 	}
 

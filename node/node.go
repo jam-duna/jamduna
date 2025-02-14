@@ -53,7 +53,7 @@ const (
 	debugJ            = false // Audits + Judgements
 	debug             = false // General Node Ops
 	debugAudit        = false // Audit
-	trace             = false
+	debugtrace        = false
 	debugE            = false // monitoring fn execution time
 	debugTree         = false // trie
 	debugSegments     = false // Fetch import segments
@@ -201,6 +201,22 @@ type Node struct {
 	timeslotUsed map[uint32]bool
 }
 
+func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
+	wpHashBytes := wp.Hash().Bytes()
+	wpHashHex := hex.EncodeToString(wpHashBytes)
+
+	if len(wpHashHex) > 2 && wpHashHex[:2] == "0x" {
+		wpHashHex = wpHashHex[2:]
+	}
+
+	// TraceID is 16 bytes, so we need to trim the hash to 16 bytes
+	if len(wpHashHex) == 64 {
+		wpHashHex = wpHashHex[:16] + wpHashHex[48:]
+
+	}
+	return wpHashHex
+}
+
 /*
 A Tip StateDB is held in the node structure
 When a block comes in, we validate whether the block identified by parenthash and its extrinsics gets to this block.
@@ -330,6 +346,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	if err != nil {
 		return nil, fmt.Errorf("NewStateDBStorage %v", err)
 	}
+	store.NodeID = id
 	var cert tls.Certificate
 	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
@@ -392,7 +409,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		connectedPeers:  make(map[uint16]bool),
 		dataHashStreams: make(map[common.Hash][]quic.Stream),
 	}
-
 	tlsConfig := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
 		ClientAuth:         tls.RequireAnyClientCert,
@@ -950,6 +966,8 @@ func (n *Node) extendChain() error {
 		ok := false
 		for _, b := range n.blocks {
 			if b.GetParentHeaderHash() == parentheaderhash {
+				// TODO: add span here to capture ApplyStateTransitionFromBlock
+
 				ok = true
 				nextBlock := b
 				// Measure time taken to apply state transition
@@ -994,7 +1012,7 @@ func (n *Node) extendChain() error {
 
 				// Print the elapsed time in milliseconds
 				elapsed := time.Since(start).Microseconds()
-				if elapsed > 1000000 && trace {
+				if elapsed > 1000000 && debugtrace {
 					fmt.Printf("[N%d] extendChain %v <- %v \033[ApplyStateTransitionFromBlock\033[0m took %d ms\n", n.id, common.Str(parentheaderhash), common.Str(nextBlock.Hash()), elapsed/1000)
 				}
 

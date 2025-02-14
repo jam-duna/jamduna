@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -118,6 +119,14 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, credentials []types.GuaranteeCredential) (err error) {
 	stream, err := p.openStream(CE135_WorkReportDistribution)
 	defer stream.Close()
+
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendWorkReportDistribution", p.node.store.NodeID))
+		// p.node.UpdateWorkReportContext(ctx)
+		defer span.End()
+	}
+
 	newReq := JAMSNPWorkReport{
 		Slot:        slot,
 		Len:         uint8(len(credentials)),

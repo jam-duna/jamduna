@@ -1,11 +1,30 @@
 package storage
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/syndtr/goleveldb/leveldb"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
+
+// go get go.opentelemetry.io/otel
+// go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp
+// go get go.opentelemetry.io/otel/propagation
+// go get go.opentelemetry.io/otel/sdk/trace
+// go get go.opentelemetry.io/otel/sdk/resource
+// go get go.opentelemetry.io/otel/trace
+// go get go.opentelemetry.io/otel/semconv/v1.26.0
+// go mod tidy
 
 type LogMessage struct {
 	Payload  interface{}
@@ -17,6 +36,14 @@ type LogMessage struct {
 type StateDBStorage struct {
 	db      *leveldb.DB
 	logChan chan LogMessage
+
+	// OpenTelemetry stuff
+	Tp                       *sdktrace.TracerProvider
+	WorkPackageContext       context.Context
+	BlockContext             context.Context
+	BlockAnnouncementContext context.Context
+	SendTrace                bool
+	NodeID                   uint16
 }
 
 const (
@@ -37,6 +64,7 @@ func NewStateDBStorage(path string) (*StateDBStorage, error) {
 		db:      db,
 		logChan: make(chan LogMessage, 100),
 	}
+	s.InitTracer("JAM")
 	return &s, nil
 }
 
@@ -110,4 +138,67 @@ func (store *StateDBStorage) WriteLog(obj interface{}, timeslot uint32) {
 
 func (store *StateDBStorage) GetChan() chan LogMessage {
 	return store.logChan
+}
+
+func TestTrace(host string) bool {
+	resp, err := http.Post(fmt.Sprintf("http://%s/v1/traces", host), "application/json", bytes.NewBuffer([]byte(`{}`)))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+func (store *StateDBStorage) InitTracer(serviceName string) error {
+	// run jaeger web locally:
+	// docker run --rm --name jaeger -p 16686:16686 -p 4317:4317 -p 4318:4318 -p 5778:5778 -p 9411:9411 jaegertracing/jaeger:2.3.0
+	// http://localhost:16686/search
+
+	host := "jaeger.jamduna.com:4318" // localhost:4318 // jaeger.jamduna.com:4318
+	store.SendTrace = TestTrace(host)
+
+	exporter, err := otlptracehttp.New(
+		context.Background(),
+		otlptracehttp.WithEndpoint(host),
+		otlptracehttp.WithInsecure())
+	if err != nil {
+		return err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		// sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName))),
+	)
+
+	store.Tp = tp
+
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	return nil
+}
+
+func (store *StateDBStorage) UpdateWorkPackageContext(ctx context.Context) {
+	store.WorkPackageContext = ctx
+}
+
+func (store *StateDBStorage) UpdateBlockContext(ctx context.Context) {
+	store.BlockContext = ctx
+}
+
+func (store *StateDBStorage) UpdateBlockAnnouncementContext(ctx context.Context) {
+	store.BlockAnnouncementContext = ctx
+}
+
+func (store *StateDBStorage) CleanWorkPackageContext() {
+	store.WorkPackageContext = context.Background()
+}
+
+func (store *StateDBStorage) CleanBlockContext() {
+	store.BlockContext = context.Background()
+}
+
+func (store *StateDBStorage) CleanBlockAnnouncementContext() {
+	store.BlockAnnouncementContext = context.Background()
 }

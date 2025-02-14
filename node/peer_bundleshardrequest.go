@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
@@ -31,7 +32,14 @@ Auditor -> Assurer
 */
 
 func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (erasure_root common.Hash, shard_index uint16, bundleShard []byte, justification []byte, err error) {
-	//isSelfRequesting := req.ShardIndex == uint16(p.PeerID)
+	// TODO: add span for SendBundleShardRequest => get Bundle Shard/Justification back here
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendBundleShardRequest", p.node.store.NodeID))
+		// p.node.UpdateBundleShardContext(ctx)
+		defer span.End()
+	}
+
 	isSelfRequesting := false
 	if isSelfRequesting {
 

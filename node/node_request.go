@@ -194,6 +194,13 @@ func (n *Node) IsSelfRequesting(peer_id uint16) bool {
 }
 
 func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) (block *types.Block, err error) {
+	if n.store.SendTrace {
+		tracer := n.store.Tp.Tracer("NodeTracer")
+		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] processBlockAnnouncement", n.store.NodeID))
+		n.store.UpdateBlockAnnouncementContext(ctx)
+		defer span.End()
+	}
+
 	// initiate CE128_BlockRequest
 	validatorIndex := blockAnnouncement.Header.AuthorIndex
 	p, ok := n.peersInfo[validatorIndex]
@@ -299,7 +306,9 @@ func (n *Node) runReceiveBlock() {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
-			//fmt.Printf("[N%d] received Block Announcement from %d\n", n.id, blockAnnouncement.ValidatorIndex)
+			// TODO: receive block
+			// fmt.Printf("[N%d] received Block Announcement from %d\n", n.id, blockAnnouncement.ValidatorIndex)
+
 			b, err := n.processBlockAnnouncement(blockAnnouncement)
 			if err != nil {
 				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)

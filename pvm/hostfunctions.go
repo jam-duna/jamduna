@@ -44,6 +44,7 @@ const (
 	ED25519VERIFY = 65
 	LOG           = 100
 	FOR_TEST      = 105
+	DELAY         = 99
 )
 
 const maxUint64 = ^uint64(0)
@@ -289,6 +290,10 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	case LOG:
 		vm.hostLog()
+		return true, nil
+
+	case DELAY:
+		vm.hostDelay()
 		return true, nil
 
 	default:
@@ -1458,6 +1463,14 @@ func (vm *VM) hostZero() {
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
+}
+
+// For empty test case
+func (vm *VM) hostDelay() {
+	delay_seconds, _ := vm.ReadRegister(7)
+	time.Sleep(time.Duration(delay_seconds) * time.Second)
+	vm.HostResultCode = OK
+	vm.WriteRegister(7, OK)
 }
 
 // func (vm *VM) hostSP1Groth16Verify()

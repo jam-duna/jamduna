@@ -1,17 +1,29 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, curr_statedb *statedb.StateDB, extrinsics types.ExtrinsicsBlobs) (guarantee types.Guarantee, err error) {
+	if n.store.SendTrace {
+		tracer := n.store.Tp.Tracer("NodeTracer")
+		// n.InitWPContext(wp)
+		tags := trace.WithAttributes(attribute.String("WorkpackageHash", common.Str(wp.Hash())))
+		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] broadcastWorkpackage", n.store.NodeID), tags)
+		n.store.UpdateWorkPackageContext(ctx)
+		defer span.End()
+	}
 	// counting the time for this function execution
 	timer := time.Now()
 	currTimeslot := curr_statedb.GetTimeslot()

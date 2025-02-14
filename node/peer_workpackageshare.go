@@ -199,6 +199,13 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 }
 
 func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, pubKey types.Ed25519Key) (newReq JAMSNPWorkPackageShareResponse, err error) {
+	// TODO: add span for share work package => get  Work Report Hash  back here
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(p.node.store.WorkPackageContext, fmt.Sprintf("[N%d] ShareWorkPackage", p.node.store.NodeID))
+		// p.node.UpdateWorkPackageContext(ctx)
+		defer span.End()
+	}
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
 	for _, item := range segmentRootLookup {
 		lookupItem := JAMSNPSegmentRootMapping{

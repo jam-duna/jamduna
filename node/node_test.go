@@ -29,6 +29,7 @@ const (
 	TransferEpochLen      = 3  // Transfer
 	BalancesEpochLen      = 6  // Balance
 	ScaleBalancesEpochLen = 6
+	EmptyEpochLen         = 10
 )
 
 const (
@@ -39,6 +40,7 @@ const (
 	TargetedN_Balances        = 20 // not used !!
 	TargetedN_Scaled_Transfer = 600
 	Targetedn_Scaled_Balances = 100
+	TargetedN_Empty           = 8
 )
 
 var targetNum = flag.Int("targetN", -1, "targetN")
@@ -181,6 +183,16 @@ func TestScaledBalances(t *testing.T) {
 	fmt.Printf("scaled_balances targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
 	jamtest(t, "scaled_balances", ScaleBalancesEpochLen, basePort, targetN)
+}
+
+func TestEmpty(t *testing.T) {
+	targetN := TargetedN_Empty
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	fmt.Printf("empty targetNum: %v\n", targetN)
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "empty", EmptyEpochLen, basePort, targetN)
 }
 
 func TestDisputes(t *testing.T) {

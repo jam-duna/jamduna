@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -75,6 +76,14 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, concatSegmentShards []byte, justification []byte, err error) {
+	// TODO: add span for SendFullShardRequest => [Segment Shard]+Justification here
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendFullShardRequest", p.node.store.NodeID))
+		// p.node.UpdateFullShardContext(ctx)
+		defer span.End()
+	}
+
 	code := uint8(CE137_FullShardRequest)
 	stream, err := p.openStream(code)
 	if err != nil {

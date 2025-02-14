@@ -335,6 +335,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if jam == "balances" || jam == "scaled_balances" {
 		serviceNames = []string{"balances"}
 	}
+	if jam == "empty" {
+		serviceNames = []string{"delay"}
+	}
 	testServices, err := getServices(serviceNames)
 	if err != nil {
 		panic(32)
@@ -458,6 +461,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		targetN_mint := targetN
 		targetN_transfer := targetN
 		scaled_balances(nodes, testServices, targetN_mint, targetN_transfer)
+	case "empty":
+		empty(nodes, testServices)
 	}
 }
 
@@ -2137,6 +2142,171 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 
 }
 
+func empty(nodes []*Node, testServices map[string]*types.TestService) {
+	delayservice := testServices["delay"]
+
+	n1 := nodes[1]
+	core := 0
+
+	mbs := []int{1, 3, 6, 12}
+	seconds := []int{1, 2, 3, 6}
+
+	fmt.Printf("\n=========================Start Size Test=========================\n")
+	SizeWorkPackages := make([]types.WorkPackage, 0, len(mbs))
+	SizeExtrinsicsBlobs := make([]types.ExtrinsicsBlobs, 0, len(mbs))
+	for _, mb := range mbs {
+		refineContext := n1.statedb.GetRefineContext()
+		var workPackage types.WorkPackage
+
+		payload_bytes := make([]byte, 8)
+		second_bytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(second_bytes, uint32(0))
+		mb_bytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(mb_bytes, uint32(mb))
+		payload_bytes = append(second_bytes, mb_bytes...)
+
+		workPackage = types.WorkPackage{
+			Authorization: []byte("0x"),
+			AuthCodeHost:  delayservice.ServiceCode,
+			Authorizer:    types.Authorizer{},
+			RefineContext: refineContext,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            delayservice.ServiceCode,
+					CodeHash:           delayservice.CodeHash,
+					Payload:            payload_bytes,
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        1,
+				},
+			},
+		}
+		ExtrinsicsBlobs := make(types.ExtrinsicsBlobs, 1)
+		ExtrinsicsBlobs[0] = GenerateNMBFilledBytes(mb)
+
+		SizeWorkPackages = append(SizeWorkPackages, workPackage)
+		SizeExtrinsicsBlobs = append(SizeExtrinsicsBlobs, ExtrinsicsBlobs)
+		fmt.Printf("** \033[36m %d MB \033[0m workPackage: %v \033[0m\n", mb, workPackage.Hash().String_short())
+	}
+
+	SizeChan := make(chan types.WorkPackage, 1)
+	SizeSuccessful := make(chan bool)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	SizeCounter := 0
+	SizeReady := true
+
+	for {
+		if SizeCounter >= len(mbs) && SizeReady {
+			fmt.Printf("All Size work packages processed\n\n")
+			break
+		}
+
+		select {
+		case <-ticker.C:
+			if SizeCounter < len(mbs) && SizeReady {
+				wp := SizeWorkPackages[SizeCounter]
+				SizeChan <- wp
+				SizeCounter++
+				SizeReady = false
+				fmt.Printf("\n** \033[36m %d MB \033[0m workPackage: %v \033[0m \033[38;5;208m actual size: \033[0m %.2f MB **\n", mbs[SizeCounter-1], wp.Hash().String_short(), calaulateTotalWPSize(wp, SizeExtrinsicsBlobs[SizeCounter-1]))
+
+			}
+		case wp := <-SizeChan:
+			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			go func(wp types.WorkPackage) {
+				defer cancel()
+				sendWorkPackageTrack(ctx, n1, wp, uint16(core), SizeSuccessful, SizeExtrinsicsBlobs[SizeCounter-1])
+			}(wp)
+		case success := <-SizeSuccessful:
+			if !success {
+				panic("%d MB work package failed\n")
+			}
+			SizeReady = true
+		}
+	}
+
+	time.Sleep(12 * time.Second)
+
+	fmt.Printf("\n=========================Start Time Test=========================\n")
+	SecondsWorkPackages := make([]types.WorkPackage, 0, len(seconds))
+	SecondsExtrinsicsBlobs := make([]types.ExtrinsicsBlobs, 0, len(seconds))
+	for _, second := range seconds {
+		refineContext := n1.statedb.GetRefineContext()
+		var workPackage types.WorkPackage
+
+		payload_bytes := make([]byte, 8)
+		second_bytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(second_bytes, uint32(second))
+		mb_bytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(mb_bytes, uint32(0))
+		payload_bytes = append(second_bytes, mb_bytes...)
+
+		workPackage = types.WorkPackage{
+			Authorization: []byte("0x"),
+			AuthCodeHost:  delayservice.ServiceCode,
+			Authorizer:    types.Authorizer{},
+			RefineContext: refineContext,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            delayservice.ServiceCode,
+					CodeHash:           delayservice.CodeHash,
+					Payload:            payload_bytes,
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        1,
+				},
+			},
+		}
+		ExtrinsicsBlobs := make(types.ExtrinsicsBlobs, 1)
+		ExtrinsicsBlobs[0] = GenerateNMBFilledBytes(0)
+
+		SecondsWorkPackages = append(SecondsWorkPackages, workPackage)
+		SecondsExtrinsicsBlobs = append(SecondsExtrinsicsBlobs, ExtrinsicsBlobs)
+		fmt.Printf("** \033[36m %d seconds \033[0m workPackage: %v \033[0m\n", second, workPackage.Hash().String_short())
+	}
+
+	SecondsChan := make(chan types.WorkPackage, 1)
+	SecondsSuccessful := make(chan bool)
+
+	SecondsCounter := 0
+	SecondsReady := true
+
+	for {
+		if SecondsCounter >= len(seconds) && SecondsReady {
+			fmt.Printf("All Seconds work packages processed\n")
+			break
+		}
+
+		select {
+		case <-ticker.C:
+			if SecondsCounter < len(seconds) && SecondsReady {
+				wp := SecondsWorkPackages[SecondsCounter]
+				SecondsChan <- wp
+				SecondsCounter++
+				SecondsReady = false
+				fmt.Printf("\n** \033[36m %d seconds \033[0m workPackage: %v \033[0m\n", seconds[SecondsCounter-1], wp.Hash().String_short())
+			}
+		case wp := <-SecondsChan:
+			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			go func(wp types.WorkPackage) {
+				defer cancel()
+				sendWorkPackageTrack(ctx, n1, wp, uint16(core), SecondsSuccessful, SecondsExtrinsicsBlobs[SecondsCounter-1])
+			}(wp)
+		case success := <-SecondsSuccessful:
+			if !success {
+				panic("%d seconds work package failed\n")
+			}
+			SecondsReady = true
+		}
+	}
+
+	time.Sleep(12 * time.Second)
+}
+
 func AddEd25519Sign(data []byte) []byte {
 	// Generate a new key pair
 	seed := make([]byte, 32)
@@ -2207,4 +2377,9 @@ func generateJobID() string {
 	binary.LittleEndian.PutUint64(out[:], r.Uint64())
 	jobID := fmt.Sprintf("%x", out)
 	return jobID
+}
+
+func GenerateNMBFilledBytes(n int) []byte {
+	size := n * 1024 * 1024
+	return bytes.Repeat([]byte{1}, size)
 }

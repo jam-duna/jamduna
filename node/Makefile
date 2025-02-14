@@ -74,3 +74,8 @@ scaled_balances:
 	@echo "Running TestScaledBalances$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
 	@echo "go test -timeout $(TIMEOUT) -v -run TestScaledBalances -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
 	@go test -timeout $(TIMEOUT) -v -run TestScaledBalances -tags "network_test,$(TAGS)" $(TARGET_PARAM)
+
+empty:
+	@echo "Running TestEmpty$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestEmpty -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run TestEmpty -tags "network_test,$(TAGS)" $(TARGET_PARAM)

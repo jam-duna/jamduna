@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -21,10 +22,11 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 		return err
 	}
 	elapsed := time.Since(start).Microseconds()
-	if trace && elapsed > 500000 {
+	if debugtrace && elapsed > 500000 {
 		fmt.Printf("[N%v] ProcessIncomingTicket -- Adding ticketID=%v [%d ms]\n", s.Id, ticketID, time.Since(start).Microseconds()/1000)
 	}
 	used_entropy := s.GetSafrole().Entropy[entropy_idx]
+	// TODO: add tracer event
 	err = n.extrinsic_pool.AddTicketToPool(ticket, used_entropy)
 	if err != nil {
 		fmt.Printf("processTicket: AddTicketToPool ERR %v\n", err)
@@ -45,10 +47,19 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 	}
 
 	// store it into extrinsic pool
+	// TODO: add tracer event
+	if n.store.SendTrace {
+		tracer := n.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] AddAssuranceToPool", n.store.NodeID))
+		// n.UpdateAssuranceContext(ctx)
+		defer span.End()
+	}
+
 	err := n.extrinsic_pool.AddAssuranceToPool(assurance)
 	if err != nil {
 		fmt.Printf("processAssurance: AddAssuranceToPool ERR %v\n", err)
 	}
+
 	log := fmt.Sprintf("[N%v] ProcessIncomingAssurance -- start Adding assurance form v%d\n", n.id, assurance.ValidatorIndex)
 	Logger.RecordLogs(storage.Assurance_status, log, true)
 	return nil // Success
@@ -62,6 +73,14 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 		Logger.RecordLogs(storage.EG_status, fmt.Sprintf("ValidateSingleGuarantee ERR %v", err), true)
 		return err
 	}
+	// TODO: add tracer event
+	if n.store.SendTrace {
+		tracer := n.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] AddGuaranteeToPool", n.store.NodeID))
+		// n.UpdateGuaranteeContext(ctx)
+		defer span.End()
+	}
+
 	err = n.extrinsic_pool.AddGuaranteeToPool(g)
 	if err != nil {
 		fmt.Printf("processGuarantee: AddGuaranteeToPool ERR %v\n", err)
