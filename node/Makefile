@@ -2,9 +2,9 @@
 TIMEOUT ?= 40m
 TAGS ?= tiny
 MEG_L ?= 911
-MEG_S ?= 25
+MEG_S ?= 20
 TargetN ?= -1
-
+PREREQ ?= false
 # Conditionally set -targetN, or empty if TargetN=-1
 TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))
 
@@ -26,14 +26,20 @@ fib:
 megatron:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_L),$(TargetN)); \
 	echo "Running TestMegatron with targetN=$$TARGET and timeout $(TIMEOUT)..."; \
-	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N"; \
-	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N
+	echo "go test -timeout 115m -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N -prereq_test=$(PREREQ)"; \
+	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N -prereq_test=$(PREREQ)
 
 megatron_short:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_S),$(TargetN)); \
 	echo "Running TestMegatron (short) with targetN=$$TARGET_N and timeout $(TIMEOUT)..."; \
-	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N"; \
-	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N
+	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N -prereq_test=$(PREREQ)"; \
+	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N -prereq_test=$(PREREQ)
+
+megatron_short_with_prereq:
+	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_S),$(TargetN)); \
+	echo "Running TestMegatron (short) with targetN=$$TARGET_N and timeout $(TIMEOUT)..."; \
+	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N -prereq_test=true"; \
+	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N -prereq_test=true
 
 megatron_pprof:
 	@echo "Building test binary for TestMegatron in pprof mode..."

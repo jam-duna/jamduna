@@ -62,13 +62,13 @@ const (
 	debugKV           = false // WriteRawKV, ReadRawKV
 	debugSTF          = true  // State Transition Function
 	debugPublishTrace = true  // Publish Trace -- such that each node should have full state_transition
-	test_prereq       = false // Test Prerequisites Enabled
 	numNodes          = types.TotalValidators
 	quicAddr          = "127.0.0.1:%d"
 	godMode           = false
 	Grandpa           = true
 )
 
+var test_prereq = false // Test Prerequisites Enabled
 const (
 	ValidatorFlag   = "VALIDATOR"
 	ValidatorDAFlag = "VALIDATOR&DA"

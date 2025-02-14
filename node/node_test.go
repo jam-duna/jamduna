@@ -44,6 +44,7 @@ const (
 )
 
 var targetNum = flag.Int("targetN", -1, "targetN")
+var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
 
 func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
 	nodes, err := SetUpNodes(numNodes, basePort)
@@ -113,6 +114,12 @@ func TestFib(t *testing.T) {
 
 func TestMegatron(t *testing.T) {
 	// Open file to save CPU Profile
+	fmt.Printf("prereq_test: %v\n", *prereq_test)
+	if *prereq_test {
+		test_prereq = true
+	} else {
+		test_prereq = false
+	}
 	cpuProfile, err := os.Create("cpu.pprof")
 	if err != nil {
 		t.Fatalf("Unable to create CPU Profile file: %v", err)

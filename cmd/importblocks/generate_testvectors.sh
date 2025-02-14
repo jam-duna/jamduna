@@ -80,7 +80,7 @@ test_pairs=(
   "fib assurances"
   "fallback fallback"
   "safrole safrole"
-  "megatron_short orderedaccumulation"
+  "megatron_short_with_prereq orderedaccumulation"
 )
 
 processed_modes=""

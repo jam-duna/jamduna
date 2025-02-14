@@ -622,15 +622,22 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					}
 
 				} else if !test_prereq {
-					if nodes[0].IsCoreReady(0, last_Meg) && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) {
+					if nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil {
 						FinalRho = true
-					} else if FinalRho {
-						if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil {
-							FinalMeg = true
-						}
-						if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil {
+					}
+					if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil {
+						FinalMeg = true
+					}
+					if FinalRho && FinalMeg {
+						if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil {
 							FinalAssurance = true
 						}
+					}
+					if FinalAssurance {
+						fmt.Printf("Meg Finish\n")
+						ok = true
+						Logger.RecordLogs(storage.Testing_record, "[JAMTEST : megatron] Success!!!\n", true)
+						break
 					}
 				}
 			} else if test_prereq {

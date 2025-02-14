@@ -86,5 +86,5 @@ jobs:
       # if there is a failure in the following tests, the workflow will continue
       # if one of the tests fails, we will run the debug_eg_error target to get more information
       - name: Run test megatron (1/5)
-        id: megatron_250
-        run: go test ./node -timeout 115m -v -run ^TestMegatron$ -tags network_test,tiny || make -C ./node debug_eg_error
+        id: megatron_911
+        run: make -C ./node megatron PREREQ=false|| make -C ./node debug_eg_error
