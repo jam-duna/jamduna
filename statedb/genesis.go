@@ -122,10 +122,10 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			Balance:         balance,
 			GasLimitG:       100,
 			GasLimitM:       100,
-			StorageSize:     uint64(81 + codeLen + 32), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
-			NumStorageItems: 2*1 + 0,                   //a_i = 2⋅∣al∣+∣as∣
+			StorageSize:     uint64(81 + codeLen), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+			NumStorageItems: 2*1 + 0,              //a_i = 2⋅∣al∣+∣as∣
 		}
-		//fmt.Printf("StorageSize check: 81 + codeLen %d + 32 = %d\n", codeLen, bootstrapServiceAccount.StorageSize)
+
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 		statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
 		statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)

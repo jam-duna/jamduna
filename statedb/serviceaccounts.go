@@ -22,9 +22,9 @@ type SServiceData struct {
 
 type SService struct {
 	CodeHash   string `json:"code_hash"`
-	Balance    uint32 `json:"balance"`
-	MinItemGas uint32 `json:"min_item_gas"`
-	MinMemoGas uint32 `json:"min_memo_gas"`
+	Balance    uint64 `json:"balance"`
+	MinItemGas uint64 `json:"min_item_gas"`
+	MinMemoGas uint64 `json:"min_memo_gas"`
 	Bytes      uint32 `json:"bytes"`
 	Items      uint32 `json:"items"`
 }
@@ -117,17 +117,17 @@ func parse_SSService(md string) (uint32, SService) {
 	sVal, _ := strconv.ParseUint(sStr, 10, 32)
 
 	codeHash, _ := m["c"]
-	balance, _ := strconv.ParseUint(m["b"], 10, 32)
-	minItemGas, _ := strconv.ParseUint(m["g"], 10, 32)
-	minMemoGas, _ := strconv.ParseUint(m["m"], 10, 32)
+	balance, _ := strconv.ParseUint(m["b"], 10, 64)
+	minItemGas, _ := strconv.ParseUint(m["g"], 10, 64)
+	minMemoGas, _ := strconv.ParseUint(m["m"], 10, 64)
 	bytesVal, _ := strconv.ParseUint(m["l"], 10, 32)
 	items, _ := strconv.ParseUint(m["i"], 10, 32)
 
 	svc := SService{
 		CodeHash:   codeHash,
-		Balance:    uint32(balance),
-		MinItemGas: uint32(minItemGas),
-		MinMemoGas: uint32(minMemoGas),
+		Balance:    uint64(balance),
+		MinItemGas: uint64(minItemGas),
+		MinMemoGas: uint64(minMemoGas),
 		Bytes:      uint32(bytesVal),
 		Items:      uint32(items),
 	}

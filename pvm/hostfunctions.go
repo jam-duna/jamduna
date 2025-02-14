@@ -995,7 +995,9 @@ func (vm *VM) hostRead() {
 	var a *types.ServiceAccount
 	if omega_7 == uint64(vm.Service_index) || omega_7 == maxUint64 {
 		a = vm.ServiceAccount
-	} else {
+
+	}
+	if a == nil {
 		a, _ = vm.getXUDS(omega_7)
 	}
 
@@ -1009,7 +1011,6 @@ func (vm *VM) hostRead() {
 		vm.HostResultCode = OOB
 		return
 	}
-
 	// var account_storagehash common.Hash
 	var val []byte
 	_, val = a.ReadStorage(k, vm.hostenv)

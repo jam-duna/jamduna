@@ -542,142 +542,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	fmt.Printf("service0: %v, codehash: %v (len=%v) | %v\n", service0.ServiceCode, service0.CodeHash, len(service0.Code), service0.ServiceName)
 	fmt.Printf("service1: %v, codehash: %v (len=%v) | %v\n", service1.ServiceCode, service1.CodeHash, len(service0.Code), service1.ServiceName)
 	fmt.Printf("serviceM: %v, codehash: %v (len=%v) | %v\n", serviceM.ServiceCode, serviceM.CodeHash, len(service0.Code), serviceM.ServiceName)
-	Fib_Trib_WorkPackages := make([]types.WorkPackage, 0)
-	Meg_WorkPackages := make([]types.WorkPackage, 0)
-	prevWorkPackageHash := common.Hash{}
 	targetNMax := targetMegatronN
-	// ================================================
-	// make n workpackages for Fib and Trib
-	for n := 0; n < targetNMax; n++ {
-		fibImportedSegments := make([]types.ImportSegment, 0)
-		tribImportedSegments := make([]types.ImportSegment, 0)
-		refineContext := nodes[1].statedb.GetRefineContext()
-		workPackage := types.WorkPackage{}
-		if n > 0 {
-			fibImportedSegments = append(fibImportedSegments, types.ImportSegment{
-				RequestedHash: prevWorkPackageHash,
-				Index:         0,
-			})
-			tribImportedSegments = append(tribImportedSegments, types.ImportSegment{
-				RequestedHash: prevWorkPackageHash,
-				Index:         1, // TODO: check
-			})
-			payload := make([]byte, 4)
-			binary.LittleEndian.PutUint32(payload, uint32(n+1))
-			workPackage = types.WorkPackage{
-				Authorization: []byte("0x"), // TODO: set up null-authorizer
-				AuthCodeHost:  service0.ServiceCode,
-				Authorizer:    types.Authorizer{},
-				RefineContext: refineContext,
-				WorkItems: []types.WorkItem{
-					{
-						Service:            service0.ServiceCode,
-						CodeHash:           service0.CodeHash,
-						Payload:            payload,
-						RefineGasLimit:     10000000,
-						AccumulateGasLimit: 10000000,
-						ImportedSegments:   fibImportedSegments,
-						ExportCount:        1,
-					},
-					{
-						Service:            service1.ServiceCode,
-						CodeHash:           service1.CodeHash,
-						Payload:            payload,
-						RefineGasLimit:     10000000,
-						AccumulateGasLimit: 10000000,
-						ImportedSegments:   tribImportedSegments,
-						ExportCount:        1,
-					},
-				},
-			}
-		} else {
-			payload := make([]byte, 4)
-			binary.LittleEndian.PutUint32(payload, uint32(n+1))
-			workPackage = types.WorkPackage{
-				Authorization: []byte("0x"), // TODO: set up null-authorizer
-				AuthCodeHost:  service0.ServiceCode,
-				Authorizer:    types.Authorizer{},
-				RefineContext: refineContext,
-				WorkItems: []types.WorkItem{
-					{
-						Service:            service0.ServiceCode,
-						CodeHash:           service0.CodeHash,
-						Payload:            payload,
-						RefineGasLimit:     10000000,
-						AccumulateGasLimit: 10000000,
-						ImportedSegments:   fibImportedSegments,
-						ExportCount:        1,
-					},
-					{
-						Service:            service1.ServiceCode,
-						CodeHash:           service1.CodeHash,
-						Payload:            payload,
-						RefineGasLimit:     10000000,
-						AccumulateGasLimit: 10000000,
-						ImportedSegments:   tribImportedSegments,
-						ExportCount:        1,
-					},
-				},
-			}
-		}
-
-		Fib_Trib_WorkPackages = append(Fib_Trib_WorkPackages, workPackage)
-		workPackageHash := workPackage.Hash()
-		prevWorkPackageHash = workPackageHash
-
-	}
-	// =================================================
-	// make n workpackages for Megatron
-	for megaN := 0; megaN < targetNMax; megaN++ {
-		importedSegmentsM := make([]types.ImportSegment, 0)
-		prereq := make([]common.Hash, 0)
-		prereq = append(prereq, Fib_Trib_WorkPackages[megaN].Hash())
-		refineContext := nodes[1].statedb.GetRefineContext()
-		refineContext.Prerequisites = prereq
-
-		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(megaN))
-		payloadM := make([]byte, 8)
-		binary.LittleEndian.PutUint32(payloadM[0:4], uint32(service0.ServiceCode))
-		binary.LittleEndian.PutUint32(payloadM[4:8], uint32(service1.ServiceCode))
-
-		workPackage := types.WorkPackage{
-			Authorization: []byte("0x"), // TODO: set up null-authorizer
-			AuthCodeHost:  serviceM.ServiceCode,
-			Authorizer:    types.Authorizer{},
-			RefineContext: refineContext,
-			WorkItems: []types.WorkItem{
-				{
-					Service:            serviceM.ServiceCode,
-					CodeHash:           serviceM.CodeHash,
-					Payload:            payloadM,
-					RefineGasLimit:     10000000,
-					AccumulateGasLimit: 10000000,
-					ImportedSegments:   importedSegmentsM,
-					ExportCount:        0,
-				},
-			},
-		}
-		workPackageHash := workPackage.Hash()
-		Meg_WorkPackages = append(Meg_WorkPackages, workPackage)
-		prevWorkPackageHash = workPackageHash
-	}
-	fmt.Printf("%v Fib_Trib_WorkPackages:\n", len(Fib_Trib_WorkPackages))
-	for wp_idx, wp := range Fib_Trib_WorkPackages {
-		fmt.Printf("  Fib_Trib_WorkPackage #%v: %v\n", wp_idx, wp.Hash())
-	}
-	fmt.Printf("%v Megatron_WorkPackages:\n", len(Meg_WorkPackages))
-	for wp_idx, wp := range Meg_WorkPackages {
-		fmt.Printf("  Meg_WorkPackage #%v %v. PreReqs=%v\n", wp_idx, wp.Hash(), wp.RefineContext.Prerequisites)
-	}
-	// setting up the delay send for the fib_tri
-	for _, n := range nodes {
-		for _, wp := range Fib_Trib_WorkPackages {
-			if test_prereq {
-				n.delaysend[wp.Hash()] = 1
-			}
-		}
-	}
+	time.Sleep(1 * time.Second)
 	// =================================================
 	// set up ticker for loop
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -694,10 +560,25 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	Meg_successful := make(chan bool)
 	Meg_Ready := true
 	Meg_Keeper := false
-	curr_Meg_WorkPackage := Meg_WorkPackages[Meg_counter]
-	var curr_Meg_prereqs []common.Hash
-	curr_fib_tri_WorkPackage := Fib_Trib_WorkPackages[Fib_Tri_counter]
+	// =================================================
+	// set up the workpackages
+	fib_importedSegments := make([]types.ImportSegment, 0)
+	trib_importedSegments := make([]types.ImportSegment, 0)
+	fib_trib_items := buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
+	curr_fib_tri_WorkPackage, err := nodes[0].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
+	if err != nil {
+		fmt.Printf("MakeWorkPackage ERR %v\n", err)
+	}
+	for _, n := range nodes {
+		n.delaysend[curr_fib_tri_WorkPackage.Hash()] = 1
+	}
 	var curr_fib_tri_prereqs []common.Hash
+	meg_no_import_segment := make([]types.ImportSegment, 0)
+	meg_items := buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, serviceM.CodeHash)
+	meg_preq := []common.Hash{curr_fib_tri_WorkPackage.Hash()}
+	curr_Meg_WorkPackage, err := nodes[0].MakeWorkPackage(meg_preq, serviceM.ServiceCode, meg_items)
+	var last_Meg []common.Hash
+
 	fmt.Printf("Guarantor Assignment\n")
 	for _, assign := range nodes[0].statedb.GuarantorAssignments {
 		vid := nodes[0].statedb.GetSafrole().GetCurrValidatorIndex(assign.Validator.GetEd25519Key())
@@ -736,7 +617,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					}
 
 				} else if !test_prereq {
-					if nodes[0].IsCoreReady(0, curr_Meg_prereqs) && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) {
+					if nodes[0].IsCoreReady(0, last_Meg) && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) {
 						FinalRho = true
 					} else if FinalRho {
 						if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil {
@@ -751,7 +632,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
 					fmt.Printf("All workpackages are sent\n")
 					sentLastWorkPackage = true
-				} else if (nodes[0].IsCoreReady(0, curr_Meg_prereqs) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
+				} else if (nodes[0].IsCoreReady(0, last_Meg) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
 					// if false{
 
 					// send workpackages to the network
@@ -762,18 +643,42 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					Meg_Chan <- curr_Meg_WorkPackage
 					Meg_counter++
 					if Meg_counter <= targetNMax-1 {
-						curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
+						// build the next workpackage
+						// fib
+						fib_importedSegments := []types.ImportSegment{
+							{
+								RequestedHash: curr_fib_tri_WorkPackage.Hash(),
+								Index:         0,
+							},
+						}
+						trib_importedSegments := []types.ImportSegment{
+							{
+								RequestedHash: curr_fib_tri_WorkPackage.Hash(),
+								Index:         1,
+							},
+						}
+						fib_trib_items = buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
+						curr_fib_tri_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
+						if err != nil {
+							panic(err)
+						}
 						curr_fib_tri_prereqs = []common.Hash{}
 						for _, item := range curr_fib_tri_WorkPackage.WorkItems {
 							for _, seg := range item.ImportedSegments {
 								curr_fib_tri_prereqs = append(curr_fib_tri_prereqs, seg.RequestedHash)
 							}
 						}
+						for _, n := range nodes {
+							n.delaysend[curr_fib_tri_WorkPackage.Hash()] = 1
+						}
+
 						Fib_Tri_Ready = false
+						// meg
 						previous_workpackage_hash := curr_Meg_WorkPackage.Hash()
-						curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
-						curr_Meg_prereqs = []common.Hash{}
-						curr_Meg_prereqs = append(curr_Meg_prereqs, previous_workpackage_hash)
+						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, serviceM.CodeHash)
+						curr_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{curr_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
+						last_Meg = []common.Hash{}
+						last_Meg = append(last_Meg, previous_workpackage_hash)
 						Meg_Ready = false
 					}
 					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
@@ -784,7 +689,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					Fib_Tri_Ready = false
 					Fib_Tri_Keeper = true
 
-				} else if (Meg_Keeper && nodes[0].IsCoreReady(0, curr_Meg_prereqs)) && (Fib_Tri_Keeper && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs)) {
+				} else if (Meg_Keeper && nodes[0].IsCoreReady(0, last_Meg)) && (Fib_Tri_Keeper && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs)) {
 					Meg_Ready = true
 					Meg_Keeper = false
 					Fib_Tri_Ready = true
@@ -794,32 +699,51 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
 					fmt.Printf("All workpackages are sent\n")
 					sentLastWorkPackage = true
-				} else if (nodes[0].IsCoreReady(0, curr_Meg_prereqs) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
+				} else if (nodes[0].IsCoreReady(0, last_Meg) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
 					// send workpackages to the network
 					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, curr_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, curr_Meg_WorkPackage.Hash().String_short())
 					fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(curr_fib_tri_WorkPackage.Hash()))
 					Fib_Tri_Chan <- curr_fib_tri_WorkPackage
 					Fib_Tri_counter++
 					if Fib_Tri_counter <= targetNMax-1 {
-						Fib_Tri_Ready = false
-						curr_fib_tri_WorkPackage = Fib_Trib_WorkPackages[Fib_Tri_counter]
+						fib_importedSegments := []types.ImportSegment{
+							{
+								RequestedHash: curr_fib_tri_WorkPackage.Hash(),
+								Index:         0,
+							},
+						}
+						trib_importedSegments := []types.ImportSegment{
+							{
+								RequestedHash: curr_fib_tri_WorkPackage.Hash(),
+								Index:         1,
+							},
+						}
+						fib_trib_items = buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
+						curr_fib_tri_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
+						if err != nil {
+							panic(err)
+						}
 						curr_fib_tri_prereqs = []common.Hash{}
 						for _, item := range curr_fib_tri_WorkPackage.WorkItems {
 							for _, seg := range item.ImportedSegments {
 								curr_fib_tri_prereqs = append(curr_fib_tri_prereqs, seg.RequestedHash)
 							}
 						}
+						Fib_Tri_Ready = false
 					}
 					// send workpackages to the network
 					fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", Meg_counter, common.Str(curr_Meg_WorkPackage.Hash()))
 					Meg_Chan <- curr_Meg_WorkPackage
 					Meg_counter++
 					if Meg_counter <= targetNMax-1 {
+						previous_workpackage_hash := curr_Meg_WorkPackage.Hash()
+						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, serviceM.CodeHash)
+						curr_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{curr_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
+						last_Meg = []common.Hash{}
+						last_Meg = append(last_Meg, previous_workpackage_hash)
 						Meg_Ready = false
-						curr_Meg_WorkPackage = Meg_WorkPackages[Meg_counter]
-						curr_Meg_prereqs = []common.Hash{}
 					}
-				} else if nodes[0].IsCoreReady(0, curr_Meg_prereqs) && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) {
+				} else if nodes[0].IsCoreReady(0, last_Meg) && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) {
 					Meg_Ready = true
 					Fib_Tri_Ready = true
 				}

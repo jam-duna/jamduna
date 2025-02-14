@@ -1070,22 +1070,21 @@ func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (uint32, uint32, error) {
+func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances uint32, err error) {
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
 	//apply the dispute
-	var err error
 	result, err := d.IsValidateDispute(&disputes)
 	if err != nil {
-		return 0, 0, err
+		return
 	}
 	//state changing here
 	//cores reading the old jam state
 	//ρ†
 	d.ProcessDispute(result, disputes.Culprit, disputes.Fault)
 	if err != nil {
-		return 0, 0, err
+		return
 	}
 
 	// original validate assurances logic (prior to guarantees) -- we cannot do signature checking here ... otherwise it would trigger bad sig
@@ -1095,9 +1094,9 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	// 	return 0, 0, err
 	// }
 
-	transitionErr := s.ValidateAssurancesTransition(assurances)
-	if transitionErr != nil {
-		return 0, 0, transitionErr
+	err = s.ValidateAssurancesTransition(assurances)
+	if err != nil {
+		return
 	}
 
 	// Assurances: get the bitstring from the availability
@@ -1133,11 +1132,10 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	// Guarantees
 	err = s.Verify_Guarantees()
 	if err != nil {
-		return 0, 0, err
+		return
 	}
-	num_reports := uint32(len(guarantees))
 
-	d.ProcessGuarantees(guarantees)
+	num_reports = d.ProcessGuarantees(guarantees)
 	if debug {
 		fmt.Printf("Rho State Update - Guarantees\n")
 		for i, rho := range s.JamState.AvailabilityAssignments {
@@ -1258,7 +1256,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}*/
 
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "assurances", num_assurances)
-	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "reports", num_reports)
+	for validatorIndex, nreports := range num_reports {
+		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", uint32(nreports))
+	}
 
 	// 28 -- ACCUMULATE
 	var g uint64 = 10000

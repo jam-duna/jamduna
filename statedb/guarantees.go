@@ -13,8 +13,18 @@ import (
 // chapter 11
 
 // v0.5 eq 11.42 - the rho state transition function
-func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
+func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) (numReports map[uint16]uint16) {
+	numReports = make(map[uint16]uint16)
 	for _, guarantee := range guarantees {
+		for _, g := range guarantee.Signatures {
+			_, ok := numReports[g.ValidatorIndex]
+			if !ok {
+				numReports[g.ValidatorIndex] = 1
+			} else {
+				numReports[g.ValidatorIndex]++
+			}
+		}
+
 		if guarantee.Report.CoreIndex >= types.TotalCores {
 			fmt.Printf("ProcessGuarantees: invalid core index %v\n", guarantee.Report.CoreIndex)
 			continue
@@ -26,6 +36,7 @@ func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) {
 			}
 		}
 	}
+	return numReports
 }
 
 // setRhoByWorkReport sets the Rho state for a specific core with a WorkReport and timeslot

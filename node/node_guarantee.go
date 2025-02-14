@@ -29,6 +29,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	importedSegments, err := n.FetchWorkpackageImportSegments(wp)
 	if err != nil {
 		Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err), true)
+		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err)
 	}
 	segmentRootLookup, err := n.GetSegmentRootLookup(wp)
 	if err != nil {
@@ -48,11 +49,15 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 			// if it's itself, execute the workpackage
 			if coworker.PeerID == n.id {
 				var execErr error
-				guarantee, _, _, execErr = n.executeWorkPackage(wpCoreIndex, wp, importedSegments, extrinsics, segmentRootLookup)
+				report, execErr := n.executeWorkPackageBundle(wpCoreIndex, bundle, segmentRootLookup)
 				if execErr != nil {
 					Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] executeWorkPackage Error: %v\n", n.String(), execErr), true)
 					return
 				}
+				guarantee.Report = report
+				signerSecret := n.GetEd25519Secret()
+				gc := report.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
+				guarantee.Signatures = append(guarantee.Signatures, gc)
 				return
 			} else {
 				fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)

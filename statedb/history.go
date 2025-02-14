@@ -3,7 +3,7 @@ package statedb
 import (
 	"encoding/json"
 	"fmt"
-	
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"

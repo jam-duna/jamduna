@@ -1,6 +1,8 @@
 package node
 
 import (
+	"encoding/binary"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -70,4 +72,63 @@ func IsWorkPackageInHistory(latestdb *statedb.StateDB, workPackageHash common.Ha
 		return true
 	}
 	return false
+}
+
+func (n *Node) MakeWorkPackage(prereq []common.Hash, service_code uint32, WorkItems []types.WorkItem) (types.WorkPackage, error) {
+	refineContext := n.statedb.GetRefineContext()
+	refineContext.Prerequisites = prereq
+	workPackage := types.WorkPackage{
+		Authorization: []byte("0x"), // TODO: set up null-authorizer
+		AuthCodeHost:  service_code,
+		Authorizer:    types.Authorizer{},
+		RefineContext: refineContext,
+		WorkItems:     WorkItems,
+	}
+	return workPackage, nil
+}
+
+func buildMegItem(importedSegmentsM []types.ImportSegment, megaN int, service_code uint32, codehash common.Hash) []types.WorkItem {
+	payload := make([]byte, 4)
+	binary.LittleEndian.PutUint32(payload, uint32(megaN))
+	payloadM := make([]byte, 8)
+	binary.LittleEndian.PutUint32(payloadM[0:4], service_code)
+	binary.LittleEndian.PutUint32(payloadM[4:8], service_code)
+	WorkItems := []types.WorkItem{
+		{
+			Service:            service_code,
+			CodeHash:           codehash,
+			Payload:            payloadM,
+			RefineGasLimit:     10000000,
+			AccumulateGasLimit: 10000000,
+			ImportedSegments:   importedSegmentsM,
+			ExportCount:        0,
+		},
+	}
+	return WorkItems
+}
+
+func buildFibTribItem(fibImportSegments []types.ImportSegment, tribImportSegments []types.ImportSegment, n int, service_code_fib uint32, codehash_fib common.Hash, service_code_trib uint32, codehash_trib common.Hash) []types.WorkItem {
+	payload := make([]byte, 4)
+	binary.LittleEndian.PutUint32(payload, uint32(n+1))
+	WorkItems := []types.WorkItem{
+		{
+			Service:            service_code_fib,
+			CodeHash:           codehash_fib,
+			Payload:            payload,
+			RefineGasLimit:     10000000,
+			AccumulateGasLimit: 10000000,
+			ImportedSegments:   fibImportSegments,
+			ExportCount:        1,
+		},
+		{
+			Service:            service_code_trib,
+			CodeHash:           codehash_trib,
+			Payload:            payload,
+			RefineGasLimit:     10000000,
+			AccumulateGasLimit: 10000000,
+			ImportedSegments:   tribImportSegments,
+			ExportCount:        1,
+		},
+	}
+	return WorkItems
 }
