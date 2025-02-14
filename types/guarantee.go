@@ -56,7 +56,7 @@ func (cred *GuaranteeCredential) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize ValidatorIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, cred.ValidatorIndex); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, cred.ValidatorIndex); err != nil {
 		return nil, err
 	}
 
@@ -73,7 +73,7 @@ func (cred *GuaranteeCredential) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
 	// Deserialize ValidatorIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &cred.ValidatorIndex); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &cred.ValidatorIndex); err != nil {
 		return err
 	}
 

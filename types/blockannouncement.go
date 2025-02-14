@@ -24,7 +24,7 @@ func (ann *BlockAnnouncement) ToBytes() ([]byte, error) {
 	}
 
 	// Serialize Timeslot (4 bytes)
-	if err := binary.Write(buf, binary.BigEndian, ann.Timeslot); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, ann.Timeslot); err != nil {
 		return nil, err
 	}
 
@@ -50,7 +50,7 @@ func (ann *BlockAnnouncement) FromBytes(data []byte) error {
 	}
 
 	// Deserialize Timeslot (4 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &ann.Timeslot); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &ann.Timeslot); err != nil {
 		return err
 	}
 

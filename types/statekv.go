@@ -33,7 +33,7 @@ func (kvs *StateKeyValueList) ToBytes() ([]byte, error) {
 
 		// Serialize Value length (4 bytes for uint32 length)
 		valueLength := uint32(len(kv.Value))
-		if err := binary.Write(buf, binary.BigEndian, valueLength); err != nil {
+		if err := binary.Write(buf, binary.LittleEndian, valueLength); err != nil {
 			return nil, err
 		}
 
@@ -63,7 +63,7 @@ func (kv *StateKeyValue) FromBytes(data []byte) error {
 
 	// Deserialize Value length (4 bytes)
 	var valueLength uint32
-	if err := binary.Read(buf, binary.BigEndian, &valueLength); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &valueLength); err != nil {
 		return err
 	}
 
