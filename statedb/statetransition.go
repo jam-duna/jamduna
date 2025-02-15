@@ -50,6 +50,39 @@ func compareKeyVals(p0 []KeyVal, p1 []KeyVal) {
 	}
 }
 
+type DiffState struct {
+	Prestate          []byte
+	PoststateCompared []byte
+	Poststate         []byte
+}
+
+func compareKeyValsWithOutput(org []KeyVal, p0 []KeyVal, p1 []KeyVal) (diffs map[string]DiffState) {
+	if len(p0) != len(p1) {
+		fmt.Printf("len pre %d != len post %d\n", len(p0), len(p1))
+	}
+	diffs = make(map[string]DiffState)
+	kvog, _ := makemap(org)
+	kv0, m0 := makemap(p0)
+	kv1, _ := makemap(p1)
+
+	for k0, v0 := range kv0 {
+		v_og := kvog[k0]
+		v1 := kv1[k0]
+
+		if !common.CompareBytes(v0, v1) {
+			metaKey := fmt.Sprintf("meta_%v", k0)
+			metaData0 := m0[metaKey]
+			diffs[metaData0] = DiffState{
+				Prestate:          v_og,
+				PoststateCompared: v0,
+				Poststate:         v1,
+			}
+
+		}
+	}
+	return diffs
+}
+
 func makemap(p []KeyVal) (map[common.Hash][]byte, map[string]string) {
 	kvMap := make(map[common.Hash][]byte)
 	metaMap := make(map[string]string)
@@ -105,5 +138,26 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	fmt.Printf("STATEROOT does not match: s1: %v st.PostState: %v FAIL\n", s1.StateRoot, st.PostState.StateRoot)
 	compareKeyVals(s1.GetAllKeyValues(), st.PostState.KeyVals)
 	return fmt.Errorf("mismatch")
+
+}
+
+func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32) (diffs map[string]DiffState, err error) {
+	// Apply the state transition
+	s0, err := NewStateDBFromSnapshotRaw(storage, &(st.PreState))
+	if err != nil {
+		return nil, err
+	}
+
+	s0.AncestorSet = ancestorSet
+	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
+	if err != nil {
+		return nil, err
+	}
+	if st.PostState.StateRoot == s1.StateRoot {
+		return nil, nil
+	}
+
+	fmt.Printf("STATEROOT does not match: s1: %v st.PostState: %v FAIL\n", s1.StateRoot, st.PostState.StateRoot)
+	return compareKeyValsWithOutput(st.PreState.KeyVals, s1.GetAllKeyValues(), st.PostState.KeyVals), fmt.Errorf("mismatch")
 
 }

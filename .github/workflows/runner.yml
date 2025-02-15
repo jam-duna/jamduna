@@ -87,4 +87,4 @@ jobs:
       # if one of the tests fails, we will run the debug_eg_error target to get more information
       - name: Run test megatron (1/5)
         id: megatron_911
-        run: make -C ./node megatron PREREQ=false|| make -C ./node debug_eg_error
+        run: make -C ./node megatron PREREQ=false TIMEOUT=120m|| make -C ./node debug_eg_error

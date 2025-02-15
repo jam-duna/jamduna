@@ -1,7 +1,7 @@
 use ark_ec_vrfs::suites::bandersnatch::edwards as bandersnatch;
 use ark_ec_vrfs::{prelude::ark_serialize, suites::bandersnatch::edwards::RingContext};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use bandersnatch::{IetfProof, Input, Output, Public, RingProof, Secret, ScalarField};
+use bandersnatch::{IetfProof, Input, Output, Public, RingProof, Secret};
 
 #[cfg(feature = "tiny")]
 const RING_SIZE: usize = 6;
@@ -74,13 +74,13 @@ struct Prover {
 }
 
 impl Prover {
-    pub fn new(ring: Vec<Public>, prover_idx: usize, seed: &[u8]) -> Self {
+/*    pub fn new(ring: Vec<Public>, prover_idx: usize, seed: &[u8]) -> Self {
         Self {
             prover_idx,
             secret: Secret::from_seed(seed), //Check: seed is being hash again before being turned into ScalarField. Not sure if this is corret
             ring,
         }
-    }
+    }*/
 
     /// Anonymous VRF signature.
     ///
@@ -128,35 +128,6 @@ impl Prover {
         Ok((vrf_output_hash, buf))
     }
 
-    /// Non-Anonymous VRF signature.
-    ///
-    /// Used for ticket claiming during block production.
-    /// Not used with Safrole test vectors.
-    pub fn ietf_vrf_sign(&self, vrf_input_data: &[u8], aux_data: &[u8]) -> Result<Vec<u8>, ()> {
-        use ark_ec_vrfs::ietf::Prover as _;
-
-        let input = match vrf_input_point(vrf_input_data) {
-            Some(input) => input,
-            None => {
-                eprintln!("Failed to create VRF input point");
-                return Err(()); // or handle the error accordingly
-            }
-        };
-        let output = self.secret.output(input);
-
-        let proof = self.secret.prove(input, output, aux_data);
-
-        // Output and IETF Proof bundled together (as per section 2.2)
-        let signature = IetfVrfSignature { output, proof };
-        let mut buf = Vec::new();
-        if let Err(_) = signature.serialize_compressed(&mut buf) {
-            eprintln!("Failed to serialize signature");
-            return Err(());
-        }
-        Ok(buf)
-    }
-
-
 }
 
 type RingCommitment = ark_ec_vrfs::ring::RingCommitment<bandersnatch::BandersnatchSha512Ell2>;
@@ -187,7 +158,7 @@ impl Verifier {
         // Gracefully handle invalid signature
         let signature = match RingVrfSignature::deserialize_compressed(signature) {
             Ok(sig) => sig,
-            Err(e) => {
+            Err(_e) => {
                 //println!("Failed to deserialize signature: {:?}", e);
                 return Err(());
             }
@@ -225,6 +196,7 @@ impl Verifier {
         Ok(vrf_output_hash)
     }
 
+/*
     /// Non-Anonymous VRF signature verification.
     ///
     /// Used for ticket claim verification during block import.
@@ -280,9 +252,10 @@ impl Verifier {
         //println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
         Ok(vrf_output_hash)
     }
+     */
 }
 
-use hex;
+//use hex;
 use std::os::raw::{c_int, c_uchar};
 use std::slice;
 
@@ -294,9 +267,9 @@ pub extern "C" fn get_public_key(
     pub_key_len: usize,
 ) {
     use std::ptr;
-    use std::slice;
-    use ark_serialize::CanonicalSerialize;
-    use ark_serialize::CanonicalDeserialize;
+ //   use std::slice;
+ //   use ark_serialize::CanonicalSerialize;
+ //   use ark_serialize::CanonicalDeserialize;
 
     // Convert seed bytes to a slice
     let seed_slice = unsafe { slice::from_raw_parts(seed_bytes, seed_len) };
@@ -328,7 +301,7 @@ pub extern "C" fn get_public_key(
     }
 
     // Convert the public key bytes to a hex string
-    let pk_hex = hex::encode(&pk_bytes);
+    //let pk_hex = hex::encode(&pk_bytes);
     //println!("Public Key(hex): {}", pk_hex);
 
     // Ensure the provided buffer is large enough to hold the public key bytes
@@ -351,9 +324,9 @@ pub extern "C" fn get_private_key(
     secret_len: usize,
 ) {
     use std::ptr;
-    use std::slice;
-    use ark_serialize::CanonicalSerialize;
-    use ark_serialize::CanonicalDeserialize;
+    //use std::slice;
+    //use ark_serialize::CanonicalSerialize;
+    //use ark_serialize::CanonicalDeserialize;
 
     // Convert seed bytes to a slice
     let seed_slice = unsafe { slice::from_raw_parts(seed_bytes, seed_len) };
@@ -381,7 +354,7 @@ pub extern "C" fn get_private_key(
     }
 
     // Convert the priv key bytes to a hex string
-    let priv_hex = hex::encode(&secret_bytes_vec);
+    //let priv_hex = hex::encode(&secret_bytes_vec);
     //println!("Priv Key(hex): {}", priv_hex);
 
     // Ensure the provided buffer is large enough to hold the secret bytes
@@ -410,9 +383,9 @@ pub extern "C" fn ietf_vrf_sign(
     vrf_output: *mut c_uchar,
     vrf_output_len: usize,
 ) {
-    use std::slice;
+    //use std::slice;
     use std::ptr;
-    use ark_serialize::CanonicalDeserialize;
+    //use ark_serialize::CanonicalDeserialize;
 
     // Convert private key bytes to a slice
     let private_key_slice = unsafe { slice::from_raw_parts(private_key_bytes, private_key_len) };
@@ -545,9 +518,9 @@ pub extern "C" fn ring_vrf_sign(
     vrf_output_len: usize,
     //prover_idx: usize,
 ) {
-    use std::slice;
+    //use std::slice;
     use std::ptr;
-    use ark_serialize::CanonicalDeserialize;
+    //use ark_serialize::CanonicalDeserialize;
 
     // Convert private key bytes to a slice
     let private_key_slice = unsafe { slice::from_raw_parts(private_key_bytes, private_key_len) };
@@ -659,10 +632,10 @@ pub extern "C" fn ietf_vrf_verify(
     vrf_output: *mut c_uchar,
     vrf_output_len: usize
 ) -> c_int {
-    use std::slice;
-    use ark_ec_vrfs::suites::bandersnatch::edwards::Public;
-    use ark_serialize::CanonicalDeserialize;
-    use std::os::raw::c_uchar;
+    //use std::slice;
+    //use ark_ec_vrfs::suites::bandersnatch::edwards::Public;
+    //use ark_serialize::CanonicalDeserialize;
+   // use std::os::raw::c_uchar;
 
     let prover_public_slice = unsafe { slice::from_raw_parts(prover_public_bytes, prover_public_len) };
     let signature_slice = unsafe { slice::from_raw_parts(signature_bytes, signature_len) };
@@ -758,9 +731,9 @@ pub extern "C" fn get_ring_commitment(
     commitment: *mut c_uchar,
     commitment_len: usize,
 ) {
-    use std::slice;
+    //use std::slice;
     use std::ptr;
-    use ark_serialize::CanonicalDeserialize;
+    //use ark_serialize::CanonicalDeserialize;
 
     // Deserialize the ring set from the provided bytes
     let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
@@ -879,7 +852,7 @@ pub extern "C" fn ring_vrf_verify(
             }
             return 1
         }
-        Err(e) => {
+        Err(_e) => {
             return 0
         }
     }

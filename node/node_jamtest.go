@@ -171,7 +171,7 @@ func GenerateRandomBasePort() uint16 {
 
 func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
-	GenesisFile := getGenesisFile(network)
+	GenesisStateFile, GenesisBlockFile := getGenesisFile(network)
 	fmt.Printf("Using BasePort: %v\n", basePort)
 
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
@@ -188,7 +188,7 @@ func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 	nodes := make([]*Node, numNodes)
 	godIncomingCh := make(chan uint32, 10) // node sends timeslots to this channel when authoring
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], GenesisFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, GenesisBlockFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i)
 		if err != nil {
 			panic(err)
 			return nil, fmt.Errorf("Failed to create node %d: %v", i, err)

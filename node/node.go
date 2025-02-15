@@ -321,23 +321,23 @@ func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
 	return stateSnapshotRaw, nil
 }
 
-func getGenesisFile(network string) string {
-	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network)
+func getGenesisFile(network string) (string, string) {
+	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network), fmt.Sprintf("/chainspecs/blocks/genesis-%s.bin", network)
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
-	return newNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, flag, dataDir, port)
+func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
+	return newNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, flag, dataDir, port)
 }
 
-func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorFlag)
+func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorFlag)
 }
 
-func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorDAFlag)
+func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorDAFlag)
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint32, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
 
@@ -443,6 +443,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	node.tlsConfig = tlsConfig
 
+	
 	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
 	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
 	if err != nil {
@@ -455,7 +456,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
 	}
 
+	block := statedb.NewBlockFromFile(genesisBlockFile)
 	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
+	_statedb.Block = block
 	if err == nil {
 		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)

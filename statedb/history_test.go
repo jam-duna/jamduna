@@ -40,15 +40,6 @@ type HistoryData struct {
 
 type HOutput struct{}
 
-func (b Beta_state) String() string {
-	enc, err := json.MarshalIndent(b, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
-}
-
 func HistorySTF(input HInput, s HState) (poststate HState) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees

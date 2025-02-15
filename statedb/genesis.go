@@ -1,10 +1,13 @@
 package statedb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"sort"
 
 	//"io/ioutil"
 	"os"
@@ -26,7 +29,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	if err != nil {
 		return
 	}
-
+	var validatorshashes [types.TotalValidators]common.Hash
 	validators := make(types.Validators, chainSpec.NumValidators)
 	for i := uint32(0); i < uint32(chainSpec.NumValidators); i++ {
 		seed := make([]byte, 32)
@@ -45,6 +48,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		copy(vpub.Ed25519[:], v.Ed25519Pub[:])
 		copy(vpub.Bls[:], v.BlsPub[:])
 		copy(vpub.Metadata[:], v.Metadata[:])
+		copy(validatorshashes[i][:], v.BandersnatchPub[:])
 		validators[i] = vpub
 	}
 
@@ -95,7 +99,6 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	}
 
 	statedb.JamState = j
-	statedb.Block = nil
 
 	// Load services into genesis state
 	services := []types.TestService{
@@ -132,25 +135,62 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	}
 
 	statedb.StateRoot = statedb.UpdateTrieState()
-	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/state_snapshots/genesis-%s", network))
+	statefn := common.GetFilePath(fmt.Sprintf("chainspecs/state_snapshots/genesis-%s", network))
+	blockfn := common.GetFilePath(fmt.Sprintf("chainspecs/blocks/genesis-%s", network))
 
 	trace := StateSnapshotRaw{
 		StateRoot: statedb.StateRoot,
 		KeyVals:   statedb.GetAllKeyValues(),
 	}
-	types.SaveObject(outfn, statedb.JamState.Snapshot(&trace))
+	types.SaveObject(statefn, statedb.JamState.Snapshot(&trace))
+	b := types.Block{
+		Header: types.BlockHeader{
+			ParentHeaderHash: common.Hash{},
+			ParentStateRoot:  common.Hash{},
+			Slot:             0,
+			ExtrinsicHash:    common.Hash{},
+			EpochMark: &types.EpochMark{
+				Entropy:        common.Hash{},
+				TicketsEntropy: common.Hash{},
+				Validators:     validatorshashes,
+			},
+			//TicketsMark: types.TicketsMark{},
+			//OffendersMark: [],
+			AuthorIndex: 65535,
+		},
+		Extrinsic: types.ExtrinsicData{
+			Tickets:    make([]types.Ticket, 0),
+			Preimages:  make([]types.Preimages, 0),
+			Guarantees: make([]types.Guarantee, 0),
+			Assurances: make([]types.Assurance, 0),
+			Disputes: types.Dispute{
+				Verdict: make([]types.Verdict, 0),
+				Culprit: make([]types.Culprit, 0),
+				Fault:   make([]types.Fault, 0),
+			},
+		},
+	}
+	statedb.Block = &b
+
+	blockfn = common.GetFilePath(fmt.Sprintf("chainspecs/blocks/genesis-%s", network))
+	fmt.Printf("Genesis %s: %s\n", blockfn, b.String())
+	fmt.Printf("Genesis Header Hash: %s\n", b.Header.Hash().String())
+	types.SaveObject(blockfn, b)
+
 	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/traces/genesis-%s", network))
 	types.SaveObject(outfn, trace)
 
-	/*
-		tree := statedb.GetTrie()
-		tree.PrintTree(tree.Root, 0)
-	*/
 	rawOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/rawkv/genesis-%s.json", network))
+	rawBinOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/rawkv/genesis-%s.bin", network))
 	rawByte, err := trace.CustomMarshalJSON()
+	rawCodec, err := trace.CustomCodecEncode()
 	err = os.WriteFile(rawOutfn, rawByte, 0644)
 	if err != nil {
 		return rawOutfn, fmt.Errorf("Error writing rawOut file: %v\n", err)
+	}
+	err = os.WriteFile(rawBinOutfn, rawCodec, 0644)
+	if err != nil {
+		return rawBinOutfn, fmt.Errorf("Error writing rawBinOut file: %v\n", err)
 	}
 	types.SaveObject(outfn, trace)
 
@@ -183,8 +223,48 @@ func (s StateSnapshotRaw) CustomMarshalJSON() ([]byte, error) {
 	return json.MarshalIndent(outputs, "", "  ")
 }
 
-func NewStateDBFromSnapshotRawFile(sdb *storage.StateDBStorage, filename string) (statedb *StateDB, err error) {
-	fn := common.GetFilePath(filename)
+func (s *StateSnapshotRaw) CustomCodecEncode() ([]byte, error) {
+	type KeyVal struct {
+		Key []byte
+		Val []byte
+	}
+	type SnapshotOutput struct {
+		Input  []KeyVal    `json:"input"`
+		Output common.Hash `json:"output"`
+	}
+	input := make([]KeyVal, len(s.KeyVals))
+	for _, kv := range s.KeyVals {
+		input = append(input, KeyVal{Key: kv.Key, Val: kv.Value})
+	}
+	// sort it by key
+	sort.Slice(input, func(i, j int) bool {
+		return bytes.Compare(input[i].Key, input[j].Key) < 0
+	})
+	output := SnapshotOutput{
+		Input:  input,
+		Output: s.StateRoot,
+	}
+	bytes, err := types.Encode(output)
+	return bytes, err
+}
+
+func NewBlockFromFile(blockfilename string) *types.Block {
+	fn := common.GetFilePath(blockfilename)
+	expectedCodec, err := os.ReadFile(fn)
+	if err != nil {
+		panic("failed to read codec file")
+	}
+	r, _, err := types.Decode(expectedCodec, reflect.TypeOf(types.Block{}))
+	if err != nil {
+		fmt.Printf("%s - %v", fn, err)
+		panic("failed to decode codec data")
+	}
+	b := r.(types.Block)
+	return &b
+}
+
+func NewStateDBFromSnapshotRawFile(sdb *storage.StateDBStorage, statefilename string) (statedb *StateDB, err error) {
+	fn := common.GetFilePath(statefilename)
 	snapshotRawBytes, err := os.ReadFile(fn)
 	if err != nil {
 		return statedb, err

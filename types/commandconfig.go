@@ -11,8 +11,9 @@ type CommandConfig struct {
 	DataDir         string `json:"datadir"`
 	Epoch0Timestamp int    `json:"ts"`
 	Port            int    `json:"port"`
-	Genesis         string `json:"genesis"`
-	Ed25519         string `json:"genesis"`
+	GenesisState    string `json:"genesis_state"`
+	GenesisBlock    string `json:"genesis_block"`
+	Ed25519         string `json:"ed25519"`
 	Bls             string `json:"bls"`
 	Bandersnatch    string `json:"bandersnatch"`
 	Network         string `json:"network"`

@@ -22,22 +22,23 @@ func TestCodec(t *testing.T) {
 		binFile      string
 		expectedType interface{}
 	}{
-		// {"assurances_extrinsic.json", "assurances_extrinsic.bin", []Assurance{}},
+		{"assurances_extrinsic.json", "assurances_extrinsic.bin", []Assurance{}},
 		{"block.json", "block.bin", Block{}},
-		// {"disputes_extrinsic.json", "disputes_extrinsic.bin", Dispute{}},
-		// {"extrinsic.json", "extrinsic.bin", ExtrinsicData{}},
-		// {"guarantees_extrinsic.json", "guarantees_extrinsic.bin", []Guarantee{}},
-		// {"header_0.json", "header_0.bin", BlockHeader{}},
-		// {"header_1.json", "header_1.bin", BlockHeader{}},
-		// {"preimages_extrinsic.json", "preimages_extrinsic.bin", []Preimages{}},
-		// {"refine_context.json", "refine_context.bin", RefineContext{}},
-		// {"tickets_extrinsic.json", "tickets_extrinsic.bin", []Ticket{}},
-		// {"work_item.json", "work_item.bin", WorkItem{}},
-		// {"work_package.json", "work_package.bin", WorkPackage{}},
-		// {"work_report.json", "work_report.bin", WorkReport{}},
-		// {"work_result_0.json", "work_result_0.bin", WorkResult{}},
-		// {"work_result_1.json", "work_result_1.bin", WorkResult{}},
+		{"disputes_extrinsic.json", "disputes_extrinsic.bin", Dispute{}},
+		{"extrinsic.json", "extrinsic.bin", ExtrinsicData{}},
+		{"guarantees_extrinsic.json", "guarantees_extrinsic.bin", []Guarantee{}},
+		{"header_0.json", "header_0.bin", BlockHeader{}},
+		{"header_1.json", "header_1.bin", BlockHeader{}},
+		{"preimages_extrinsic.json", "preimages_extrinsic.bin", []Preimages{}},
+		{"refine_context.json", "refine_context.bin", RefineContext{}},
+		{"tickets_extrinsic.json", "tickets_extrinsic.bin", []Ticket{}},
+		{"work_item.json", "work_item.bin", WorkItem{}},
+		{"work_package.json", "work_package.bin", WorkPackage{}},
+		{"work_report.json", "work_report.bin", WorkReport{}},
+		{"work_result_0.json", "work_result_0.bin", WorkResult{}},
+		{"work_result_1.json", "work_result_1.bin", WorkResult{}},
 	}
+
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
 			jsonPath := filepath.Join("../jamtestvectors/codec/data", tc.jsonFile)

@@ -331,3 +331,54 @@ func (a Psi_state) MarshalJSON() ([]byte, error) {
 		Psi_o: psi_o,
 	})
 }
+
+func StateDecodeToJson(encodedBytes []byte, state string) (string, error) {
+	var decodedStruct interface{}
+	var err error
+	switch state {
+	case "c1":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.TotalCores][]common.Hash{}))
+	case "c2":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.AuthorizationQueue{}))
+	case "c3":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(RecentBlocks{}))
+	case "c3-beta":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(Beta_state{}))
+	case "c4":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(SafroleBasicState{}))
+	case "c4-gamma_s":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(TicketsOrKeys{}))
+	case "c5":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(Psi_state{}))
+	case "c6":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(Entropy{}))
+	case "c7":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Validators{}))
+	case "c8":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Validators{}))
+	case "c9":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Validators{}))
+	case "c10":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(AvailabilityAssignments{}))
+	case "c11":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(uint32(0)))
+	case "c12":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Kai_state{}))
+	case "c13":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(ValidatorStatistics{}))
+	case "c14":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
+	case "c15":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength]types.AccumulationHistory{}))
+	}
+	if err != nil {
+		return "", err
+	}
+	// Convert decoded structure → JSON (indented)
+	decodedJSON, err := json.MarshalIndent(decodedStruct, "", "    ")
+	if err != nil {
+		return "", err
+	}
+
+	return string(decodedJSON), nil
+}

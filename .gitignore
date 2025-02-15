@@ -17,3 +17,4 @@ cmd/importblocks/data.zip
 cmd/importblocks/fuzzed.zip
 cmd/importblocks/core.zip
 cmd/codec-web/codec-web
+/statedb/testdata

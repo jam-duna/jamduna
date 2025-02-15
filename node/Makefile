@@ -26,7 +26,7 @@ fib:
 megatron:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_L),$(TargetN)); \
 	echo "Running TestMegatron with targetN=$$TARGET and timeout $(TIMEOUT)..."; \
-	echo "go test -timeout 115m -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N -prereq_test=$(PREREQ)"; \
+	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N -prereq_test=$(PREREQ)"; \
 	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N -prereq_test=$(PREREQ)
 
 megatron_short:

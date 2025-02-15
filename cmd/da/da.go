@@ -18,8 +18,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func getGenesisFile(network string) string {
-	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network)
+func getGenesisFile(network string) (string, string) {
+	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network), fmt.Sprintf("/chainspecs/blocks/genesis-%s.json", network)
 }
 
 func getNextTimestampMultipleOf12() int {
@@ -71,7 +71,7 @@ func main() {
 	flag.IntVar(&config.Epoch0Timestamp, "ts", defaultTS, "Epoch0 Unix timestamp (will override genesis config)")
 
 	flag.IntVar(&validatorIndex, "validatorindex", 0, "Validator Index (only for development)")
-	flag.StringVar(&config.Genesis, "genesis", "", "Specifies the genesis state json file.")
+	flag.StringVar(&config.GenesisState, "genesis", "", "Specifies the genesis state json file.")
 	flag.StringVar(&config.Ed25519, "ed25519", "", "Ed25519 Seed (only for development)")
 	flag.StringVar(&config.Bandersnatch, "bandersnatch", "", "Bandersnatch Seed (only for development)")
 	flag.StringVar(&config.Bls, "bls", "", "BLS private key (only for development)")
@@ -93,7 +93,7 @@ func main() {
 	if debugDA {
 		fmt.Printf("Run validatorindex %d\n", validatorIndex)
 	}
-	GenesisFile := getGenesisFile(types.Network)
+	GenesisStateFile, GenesisBlockFile := getGenesisFile(types.Network)
 
 	// If help is requested, print usage and exit
 	if help {
@@ -129,14 +129,15 @@ func main() {
 		}
 		// TODO: use the return values to check against the genesisConfig
 	}
-	config.Genesis = GenesisFile
+	config.GenesisState = GenesisStateFile
+	config.GenesisBlock = GenesisBlockFile
 	// Set up peers and node
 	if debugDA {
-		fmt.Printf("Run config.Genesis %s\n", config.Genesis)
+		fmt.Printf("Run config.Genesis %s\n", config.GenesisState)
 	}
 	// _, err = node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.Genesis, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
 	paths := SetLevelDBPaths(types.TotalValidators)
-	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], config.Genesis, epoch0Timestamp, peers, peerList, paths[validatorIndex], config.Port)
+	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, config.GenesisBlock, epoch0Timestamp, peers, peerList, paths[validatorIndex], config.Port)
 	if err != nil {
 		fmt.Printf("Error: %v", err)
 		panic(1)
