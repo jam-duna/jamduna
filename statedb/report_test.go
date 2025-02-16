@@ -39,13 +39,15 @@ type StateReport struct {
 	Offenders                []types.Ed25519Key              `json:"offenders"`
 	RecentBlocks             RecentBlocks                    `json:"recent_blocks"`
 	AuthorizationsPool       [types.TotalCores][]common.Hash `json:"auth_pools"`
-	PriorServiceAccountState []ServiceItem                   `json:"services"`
+	PriorServiceAccountState []ServiceItem                   `json:"accounts"`
 }
 type ServiceItem struct {
-	ServiceID uint32  `json:"id"`
-	Service   Service `json:"info"`
+	ServiceID uint32      `json:"id"`
+	Service   WrapService `json:"data"`
 }
-
+type WrapService struct {
+	Service `json:"service"`
+}
 type Service struct {
 	CodeHash   common.Hash `json:"code_hash"`
 	Balance    uint64      `json:"balance"`

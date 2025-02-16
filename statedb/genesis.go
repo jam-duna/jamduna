@@ -19,6 +19,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/google/go-cmp/cmp"
 )
 
 // 6.4.1 Startup parameters
@@ -223,28 +224,45 @@ func (s StateSnapshotRaw) CustomMarshalJSON() ([]byte, error) {
 	return json.MarshalIndent(outputs, "", "  ")
 }
 
+type KeyVal_custom struct {
+	Key common.Hash
+	Val []byte
+}
+type SnapshotOutput_custum struct {
+	Input  []KeyVal_custom `json:"input"`
+	Output common.Hash     `json:"output"`
+}
+
 func (s *StateSnapshotRaw) CustomCodecEncode() ([]byte, error) {
-	type KeyVal struct {
-		Key []byte
-		Val []byte
-	}
-	type SnapshotOutput struct {
-		Input  []KeyVal    `json:"input"`
-		Output common.Hash `json:"output"`
-	}
-	input := make([]KeyVal, len(s.KeyVals))
+
+	input := make([]KeyVal_custom, 0)
 	for _, kv := range s.KeyVals {
-		input = append(input, KeyVal{Key: kv.Key, Val: kv.Value})
+		if len(kv.Key) != 32 {
+			return nil, fmt.Errorf("Key %x length is not 32 bytes", kv.Key)
+		}
+		key := common.BytesToHash(kv.Key)
+		input = append(input, KeyVal_custom{Key: key, Val: kv.Value})
 	}
 	// sort it by key
 	sort.Slice(input, func(i, j int) bool {
-		return bytes.Compare(input[i].Key, input[j].Key) < 0
+		return bytes.Compare(input[i].Key.Bytes(), input[j].Key.Bytes()) < 0
 	})
-	output := SnapshotOutput{
+	output := SnapshotOutput_custum{
 		Input:  input,
 		Output: s.StateRoot,
 	}
 	bytes, err := types.Encode(output)
+	decoded, _, err := types.Decode(bytes, reflect.TypeOf(SnapshotOutput_custum{}))
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	}
+	// transform it back to the original struct
+	// see if it is the same
+	outputdecoded := decoded.(SnapshotOutput_custum)
+	if !reflect.DeepEqual(output, outputdecoded) {
+		diff := cmp.Diff(output, outputdecoded)
+		fmt.Printf("Diff: %s\n", diff)
+	}
 	return bytes, err
 }
 

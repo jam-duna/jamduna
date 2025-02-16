@@ -64,7 +64,7 @@ type TmpAccount struct {
 
 type Data struct {
 	Service ServiceData `json:"service"`
-	Image   CodeImage   `json:"code_image"`
+	Images  []CodeImage `json:"preimages"`
 }
 
 type ServiceData struct {
@@ -77,6 +77,10 @@ type ServiceData struct {
 }
 
 type CodeImage struct {
+	PreimageHash common.Hash `json:"hash"`
+	Blob         Blob        `json:"blob"`
+}
+type Blob struct {
 	byte []byte
 }
 
@@ -84,11 +88,11 @@ type CodeImage struct {
 // use string read into and hex decode to []byte
 // use hex encode and string to write out
 // use hex decode and string to read in
-func (c *CodeImage) MarshalJSON() ([]byte, error) {
+func (c *Blob) MarshalJSON() ([]byte, error) {
 	return json.Marshal(common.Bytes2Hex(c.byte))
 }
 
-func (c *CodeImage) UnmarshalJSON(data []byte) error {
+func (c *Blob) UnmarshalJSON(data []byte) error {
 	var hexStr string
 	if err := json.Unmarshal(data, &hexStr); err != nil {
 		return err
@@ -202,7 +206,11 @@ func (j *JamState) GetStateFromAccumulateState(state AccumulateState) (services 
 			NumStorageItems: data.Service.NumStorageItems,
 			Mutable:         true,
 		}
-		codes[key] = data.Image.byte
+		for _, image := range account.Data.Images {
+			if image.PreimageHash == data.Service.CodeHash {
+				codes[key] = image.Blob.byte
+			}
+		}
 	}
 	return services, codes
 }
