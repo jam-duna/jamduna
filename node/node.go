@@ -443,7 +443,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	node.tlsConfig = tlsConfig
 
-	
 	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
 	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
 	if err != nil {
@@ -459,6 +458,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	block := statedb.NewBlockFromFile(genesisBlockFile)
 	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
 	_statedb.Block = block
+	_statedb.HeaderHash = block.Header.Hash()
 	if err == nil {
 		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)

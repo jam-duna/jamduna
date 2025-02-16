@@ -207,9 +207,11 @@ func (n *Node) runAudit() {
 					}
 				} else {
 					// every time we audited a block, we need to update the block tree
-					n.block_tree.AddBlock(newBlock)
-					// also prune the block tree
-					n.block_tree.PruneBlockTree(10)
+					if newBlock != nil && n.block_tree != nil { // check
+						n.block_tree.AddBlock(newBlock)
+						// also prune the block tree
+						n.block_tree.PruneBlockTree(10)
+					}
 				}
 			}
 
