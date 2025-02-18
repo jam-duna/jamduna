@@ -14,9 +14,9 @@ const (
 )
 
 const (
-	EntryPointRefine        = 5
-	EntryPointAccumulate    = 10
-	EntryPointOnTransfer    = 15
+	EntryPointRefine        = 0
+	EntryPointAccumulate    = 5
+	EntryPointOnTransfer    = 10
 	EntryPointAuthorization = 0
 	EntryPointGeneric       = 255
 )

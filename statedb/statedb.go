@@ -1105,7 +1105,7 @@ func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances uint32, err error) {
+func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
@@ -1275,22 +1275,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
-	// we get the service into JamState by AvailableWorkReport
-	/*	rho_wr := s.AvailableWorkReport
-		if err != nil {
-			fmt.Printf("Error getting work report from rho: %v\n", err)
-		}
-		for _, workreport := range rho_wr {
-			for _, result := range workreport.Results {
-				serviceID := result.ServiceID
-				v, ok, err := s.trie.GetService(255, serviceID)
-				if err != nil || !ok {
-					fmt.Printf("Error getting service from rho: %v\n", err)
-				}
-			}
-		}*/
-
-	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "assurances", num_assurances)
+	for validatorIndex, nassurances := range num_assurances {
+		s.JamState.tallyStatistics(uint32(validatorIndex), "assurances", uint32(nassurances))
+	}
 	for validatorIndex, nreports := range num_reports {
 		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", uint32(nreports))
 	}

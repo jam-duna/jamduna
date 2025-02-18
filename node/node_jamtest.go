@@ -534,6 +534,9 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			time.Sleep(1 * time.Second)
 		}
 		prevWorkPackageHash = workPackageHash
+
+		service_account_byte, _, _ := n1.getState().GetTrie().GetServiceStorage(service0.ServiceCode, []byte{0})
+		fmt.Printf("Fib(%v) = %v\n", fibN, service_account_byte)
 	}
 
 }
@@ -579,7 +582,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	}
 	var curr_fib_tri_prereqs []common.Hash
 	meg_no_import_segment := make([]types.ImportSegment, 0)
-	meg_items := buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, serviceM.CodeHash)
+	meg_items := buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
 	meg_preq := []common.Hash{curr_fib_tri_WorkPackage.Hash()}
 	curr_Meg_WorkPackage, err := nodes[0].MakeWorkPackage(meg_preq, serviceM.ServiceCode, meg_items)
 	var last_Meg []common.Hash
@@ -687,7 +690,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 						Fib_Tri_Ready = false
 						// meg
 						previous_workpackage_hash := curr_Meg_WorkPackage.Hash()
-						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, serviceM.CodeHash)
+						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
 						curr_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{curr_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
 						last_Meg = []common.Hash{}
 						last_Meg = append(last_Meg, previous_workpackage_hash)
@@ -749,7 +752,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					Meg_counter++
 					if Meg_counter <= targetNMax-1 {
 						previous_workpackage_hash := curr_Meg_WorkPackage.Hash()
-						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, serviceM.CodeHash)
+						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
 						curr_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{curr_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
 						last_Meg = []common.Hash{}
 						last_Meg = append(last_Meg, previous_workpackage_hash)
@@ -783,12 +786,16 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			if !successful {
 				panic(fmt.Sprintf("Fib_Tri %d is failed\n", Fib_Tri_counter))
 			}
+			service_account_byte, _, _ := nodes[1].getState().GetTrie().GetServiceStorage(service0.ServiceCode, []byte{0})
+			fmt.Printf("Fib %d = %v\n", Fib_Tri_counter, service_account_byte)
+			service_account_byte, _, _ = nodes[1].getState().GetTrie().GetServiceStorage(service1.ServiceCode, []byte{0})
+			fmt.Printf("Tri %d = %v\n", Fib_Tri_counter, service_account_byte)
 		case successful := <-Meg_successful:
-
 			if !successful {
 				panic(fmt.Sprintf("Meg %d is failed\n", Meg_counter))
 			}
-
+			service_account_byte, _, _ := nodes[1].getState().GetTrie().GetServiceStorage(serviceM.ServiceCode, []byte{0})
+			fmt.Printf("Meg %d = %v\n", Meg_counter, service_account_byte)
 		case workPackage := <-Meg_Chan:
 			// submit to core 0
 			// CE133_WorkPackageSubmission: n1 => n4

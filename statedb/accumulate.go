@@ -333,32 +333,12 @@ func UniqueUint32Slice(slice []uint32) []uint32 {
 	return list
 }
 
-func (sdb *StateDB) Check(i uint32) uint32 {
-	const lowerLimit uint32 = 1 << 8               // 2^8 = 256
-	const upperLimit uint32 = (1 << 32) - (1 << 9) // 2^32 - 2^9 = 4294966784
-
-	// Base case: return i if it is not in the set K(delta)
-	// if !vm.k_exist(i) {
-	// 	return i
-	// }
-	// // Correct handling of the adjustment to prevent negative values:
-	// // Convert the expression to int64 to handle potential negatives safely.
-	// adjusted := int64(i) - int64(lowerLimit) + 1
-
-	// // Ensure the adjusted value is non-negative and within the valid range:
-	// // modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
-	// modResult := (adjusted % int64(upperLimit)) + int64(lowerLimit)
-
-	// // Return check with the adjusted result, adding lowerLimit back to align the range
-	// // (i−2^8 +1)mod(2^32 −2^9)+2^8
-	// // return vm.check(lowerLimit + uint32(modResult))
-	// return vm.check(uint32(modResult))
+// Implements B13 recursive check https://graypaper.fluffylabs.dev/#/5f542d7/2e0d032e0d03
+func (sdb *StateDB) NewXContext_Check(i uint32) uint32 {
 	for sdb.k_exist(i) {
-		adjusted := int64(i) - int64(lowerLimit) + 1
-		modResult := (adjusted % int64(upperLimit)) + int64(lowerLimit)
-		i = uint32(modResult)
+		// 2^8 = 256, 2^32 - 2^9 = 4294966784
+		i = (uint32(i-uint32(256)+1) % uint32(4294966784)) + uint32(256)
 	}
-
 	return i
 }
 
@@ -372,10 +352,9 @@ func (sdb *StateDB) k_exist(i uint32) bool {
 	return false
 }
 
-// 0.5.2 (B.9)
 func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, u *types.PartialState) *types.XContext {
 
-	// Calculate i for X_i eq(277)
+	// Calculate x.I 0.6.2 (B.9) https://graypaper.fluffylabs.dev/#/5f542d7/2efd002efd00
 	encoded_service, _ := types.Encode(s)
 	encoded_entropy, _ := types.Encode(sdb.JamState.SafroleState.Entropy[0].Bytes())
 	encoded_timeslot, _ := types.Encode(sdb.JamState.SafroleState.Timeslot)
@@ -386,7 +365,18 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 	x := &types.XContext{
 		// D: make(map[uint32]*types.ServiceAccount, 0), // this is NOT mutated but holds the state that could get mutatted
 		S: s,
-		I: sdb.Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
+		I: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
+	}
+	if debug {
+		fmt.Printf("\nInit XContext:\n")
+		fmt.Printf("s = %d\n", s)
+		fmt.Printf("eta_0 = %x\n", sdb.JamState.SafroleState.Entropy[0].Bytes())
+		fmt.Printf("timeslot = %d\n", sdb.JamState.SafroleState.Timeslot)
+		fmt.Printf("encode(s, eta_0, timeslot)_ = %x\n", encoded)
+		fmt.Printf("hash(encoded) = %x\n", hash)
+		fmt.Printf("hashed[:4] = %x\n", hash[:4])
+		fmt.Printf("decode(hashed[:4]) = %d\n", decoded)
+		fmt.Printf("decoded mod 4294966784 + 256= %d\n\n", x.I)
 	}
 
 	js := sdb.JamState
@@ -473,14 +463,24 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
 
 	// BeefyCommitment represents a service accumulation result.
-	if r.Err == types.RESULT_OK {
-		output_b = common.Blake2Hash(r.Ok)
-	}
 	for service, service_account := range vm.X.U.D {
 		o.D[service] = service_account
 	}
+
+	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {
+		output_t = vm.Y.T
+		output_b = vm.Y.Y
+		output_u = uint64(vm.Gas)
+		return
+	} else if len(r.Ok) == 32 {
+		output_t = xContext.T
+		output_b = common.BytesToHash(r.Ok)
+		output_u = uint64(vm.Gas)
+		return
+	}
 	output_t = xContext.T
-	output_u = uint64(gas)
+	output_b = vm.X.Y
+	output_u = uint64(vm.Gas)
 	return
 }
 

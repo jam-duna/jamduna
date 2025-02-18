@@ -90,7 +90,7 @@ type XContext struct {
 	S uint32             `json:"S"`
 	U *PartialState      `json:"U"`
 	T []DeferredTransfer `json:"T"`
-	Y *common.Hash       `json:"Y"` // Question: should this be a pointer or just common.Hash
+	Y common.Hash        `json:"Y"` // Question: should this be a pointer or just common.Hash
 }
 
 // returns back X.U.D[s] where s is the current service index
@@ -103,6 +103,7 @@ func (X *XContext) Clone() (Y XContext) {
 		I: X.I,
 		S: X.S,
 		T: make([]DeferredTransfer, len(X.T)),
+		Y: X.Y,
 	}
 	for i, t := range X.T {
 		Y.T[i] = t.Clone()

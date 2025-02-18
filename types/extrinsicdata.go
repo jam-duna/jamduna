@@ -119,4 +119,3 @@ func (e *ExtrinsicData) Hash() common.Hash {
 	}
 	return finalHash
 }
-

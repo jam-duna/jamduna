@@ -56,9 +56,12 @@ func ComputeC_is(i uint8, s uint32) Hash {
 	stateKey[0] = i
 	byteSlice := make([]byte, 4)
 	binary.LittleEndian.PutUint32(byteSlice, s)
-	for i := 1; i < 5; i++ {
-		stateKey[i] = byteSlice[i-1]
-	}
+	stateKey[1] = byteSlice[0]
+	stateKey[3] = byteSlice[1]
+	stateKey[5] = byteSlice[2]
+	stateKey[7] = byteSlice[3]
+	//fmt.Printf("C(255, s=%d (hex=%x))=%s\n", s, s, BytesToHash(stateKey))
+
 	return BytesToHash(stateKey)
 }
 

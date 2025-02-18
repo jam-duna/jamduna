@@ -87,15 +87,15 @@ func (n *Node) MakeWorkPackage(prereq []common.Hash, service_code uint32, WorkIt
 	return workPackage, nil
 }
 
-func buildMegItem(importedSegmentsM []types.ImportSegment, megaN int, service_code uint32, codehash common.Hash) []types.WorkItem {
+func buildMegItem(importedSegmentsM []types.ImportSegment, megaN int, service_code_mega uint32, service_code0 uint32, service_code1 uint32, codehash common.Hash) []types.WorkItem {
 	payload := make([]byte, 4)
 	binary.LittleEndian.PutUint32(payload, uint32(megaN))
 	payloadM := make([]byte, 8)
-	binary.LittleEndian.PutUint32(payloadM[0:4], service_code)
-	binary.LittleEndian.PutUint32(payloadM[4:8], service_code)
+	binary.LittleEndian.PutUint32(payloadM[0:4], service_code0)
+	binary.LittleEndian.PutUint32(payloadM[4:8], service_code1)
 	WorkItems := []types.WorkItem{
 		{
-			Service:            service_code,
+			Service:            service_code_mega,
 			CodeHash:           codehash,
 			Payload:            payloadM,
 			RefineGasLimit:     10000000,

@@ -397,32 +397,16 @@ func (vm *VM) hostCheckpoint() {
 	vm.HostResultCode = OK
 }
 
-func bump(i uint32) uint32 {
-	const lowerLimit uint32 = 1 << 8               // 2^8 = 256
-	const upperLimit uint32 = (1 << 32) - (1 << 9) // 2^32 - 2^9 = 4294966784
-
-	//(i - 256 + 42) =  (i - 241)??
-	adjusted := int64(i) - int64(lowerLimit) + 42
-
-	// need to make sure the result of the modulus operation is non-negative.
-	// This is done by: ((adjusted % upperLimit) + upperLimit) % upperLimit.
-	// This expression guarantees that if `adjusted` is negative, adding `upperLimit` first makes it positive.
-	// Then, applying `% upperLimit` again ensures the result is within the range [0, upperLimit).
-	// modResult := ((adjusted % int64(upperLimit)) + int64(upperLimit)) % int64(upperLimit)
-	modResult := lowerLimit + uint32(adjusted)%upperLimit
-
-	// Step 3: Return the result by adding `lowerLimit` back.
-	// This aligns the final result with the desired range: [2^8, 2^32 - 2^9].
-	// return lowerLimit + uint32(modResult)
-	return uint32(modResult)
-}
-
-func check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
+// implements https://graypaper.fluffylabs.dev/#/5f542d7/313103313103
+func new_check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
+	bump := uint32(1)
 	for {
 		if _, ok := u_d[i]; !ok {
 			return i
 		}
-		i = ((i - 256 + 1) % (4294967296 - 512)) + 256 // 2^32 - 2^9 + 2^8
+		// aligns the final result with the desired range: [2^8, 2^32 - 2^9] = [256, 4294966784]
+		i = uint32(256) + uint32(i-256+bump)%(uint32(4294966784))
+		// ump = 1 // initially 42 coming in from hostNew
 	}
 }
 
@@ -444,7 +428,6 @@ func (vm *VM) hostNew() {
 	m, _ := vm.ReadRegister(10)
 
 	xi := xContext.I
-
 	// simulate a with c, g, m
 	a := &types.ServiceAccount{
 		ServiceIndex:    xi,
@@ -470,10 +453,9 @@ func (vm *VM) hostNew() {
 	xs.DecBalance(a.Balance)
 	if xs.Balance >= xs.ComputeThreshold() {
 		//xs has enough balance to fund the creation of a AND covering its own threshold
-		// xi' <- check(bump(xi))
 		// vm.WriteRegister(7, xi)
-		// xContext.I = vm.hostenv.Check(bump(xi)) // this is the next xi
-		xContext.I = check(bump(xi), xContext.U.D)
+		i := uint32(256) + uint32(xi-256+42)%(uint32(4294966784))
+		xContext.I = new_check(i, xContext.U.D)
 
 		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
 		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
@@ -486,6 +468,9 @@ func (vm *VM) hostNew() {
 
 		vm.X = xContext
 		vm.WriteRegister(7, uint64(xi))
+		if debug_host {
+			fmt.Printf("\nHostNew: initial xi: %d, initial xi(hex): %x, new xi: %d, new xi(hex): %x\n\n", xi, xi, xContext.I, xContext.I)
+		}
 		vm.HostResultCode = OK
 	} else {
 		if debug_host {
@@ -771,7 +756,7 @@ func (vm *VM) hostYield() {
 		return
 	}
 	y := common.BytesToHash(h)
-	vm.X.Y = &y
+	vm.X.Y = y
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
@@ -862,7 +847,7 @@ func (vm *VM) hostInvoke() {
 		Z:       program.Z,
 		J:       program.J,
 		code:    program.Code,
-		bitmask: program.K[0],
+		bitmask: program.K,
 
 		pc:       m_n.I,
 		Gas:      int64(g),
@@ -1075,7 +1060,6 @@ func (vm *VM) hostWrite() {
 			}
 		}
 		a.WriteStorage(a.ServiceIndex, k, v)
-
 		vm.WriteRegister(7, l)
 		vm.HostResultCode = OK
 	} else {

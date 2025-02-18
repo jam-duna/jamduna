@@ -311,7 +311,7 @@ type Program struct {
 	J     []uint32
 	Code  []byte
 	//K     []byte
-	K []string
+	K string
 }
 
 // Appendix A - Instuctions
@@ -648,12 +648,12 @@ func EncodeProgram(p *Program) []byte {
 	encoded = append(encoded, p.Code...)
 
 	var k_bytes []byte
-	for i := 0; i < len(p.K[0]); i += 8 {
+	for i := 0; i < len(p.K); i += 8 {
 		end := i + 8
-		if end > len(p.K[0]) {
-			end = len(p.K[0])
+		if end > len(p.K) {
+			end = len(p.K)
 		}
-		group := p.K[0][i:end]
+		group := p.K[i:end]
 		reversedGroup := reverseString(group)
 		if len(reversedGroup) < 8 {
 			reversedGroup = strings.Repeat("1", 8-len(reversedGroup)) + reversedGroup
@@ -739,22 +739,13 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 		j_array = append(j_array, uint32(decodedValue))
 	}
 
-	if debug_pvm {
-		fmt.Printf("JSize=%d\n", j_size)
-		fmt.Printf("Z=%d\n", z)
-		fmt.Printf("CSize=%d\n", c_size)
-		fmt.Println("Jump Table: ", j_array)
-		fmt.Printf("Code: %x\n", c_byte)
-		fmt.Printf("K(bitmask): %v\n", kCombined)
-		fmt.Println("================================================================")
-	}
 	program := &Program{
 		JSize: j_size,
 		Z:     uint8(z),
 		CSize: c_size,
 		J:     j_array,
 		Code:  c_byte,
-		K:     []string{kCombined},
+		K:     kCombined,
 	}
 	return program, uint32(o_size), uint32(w_size), uint32(types.DecodeE_l(standard_z_byte)), uint32(types.DecodeE_l(standard_s_byte)), o_byte, w_byte
 
@@ -809,7 +800,7 @@ func DecodeProgram_pure_pvm_blob(p []byte) *Program {
 		CSize: c_size,
 		J:     j_array,
 		Code:  c_byte,
-		K:     []string{kCombined},
+		K:     kCombined,
 	}
 	return program
 
@@ -984,7 +975,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		Z:             p.Z,
 		J:             p.J,
 		code:          p.Code,
-		bitmask:       p.K[0], // pass in bitmask K
+		bitmask:       p.K, // pass in bitmask K
 		register:      make([]uint64, regSize),
 		pc:            initialPC,
 		Ram:           NewRAM(),
@@ -1090,6 +1081,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	a = append(a, workPackage.Authorization...)
 
 	vm.WorkItemIndex = workitemIndex
+	vm.Gas = int64(workitem.RefineGasLimit)
 	vm.WorkPackage = workPackage
 	vm.Authorization = authorization
 	vm.Extrinsics = extrinsics
@@ -1122,9 +1114,9 @@ func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *t
 	// fmt.Printf("vm.X.U.D: %v\n", vm.X.U.D)
 	// where is the gas being used?
 	// return vm.getArgumentOutputs()
-	r.Err = vm.ResultCode
-	r.Ok = []byte{}
-	return r, 0
+	// r.Err = vm.ResultCode
+	// r.Ok = []byte{}
+	return vm.getArgumentOutputs()
 }
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
 	// a = E(t)   take transfer memos t and encode them
@@ -1151,6 +1143,26 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint32) (r types.Resul
 // Execute runs the program until it terminates
 func (vm *VM) Execute(entryPoint int) error {
 	vm.terminated = false
+
+	// A.2 deblob
+	if vm.code == nil {
+		vm.ResultCode = PANIC
+		vm.terminated = true
+		return errors.New("No code to execute")
+	}
+
+	if len(vm.code) == 0 {
+		vm.ResultCode = PANIC
+		vm.terminated = true
+		return errors.New("No code to execute")
+	}
+
+	if len(vm.bitmask) == 0 {
+		vm.ResultCode = PANIC
+		vm.terminated = true
+		return errors.New("Failed to decode bitmask")
+	}
+
 	vm.pc = uint64(entryPoint)
 	for !vm.terminated {
 		if err := vm.step(); err != nil {
@@ -1197,14 +1209,22 @@ func (vm *VM) setArgumentInputs(a []byte) error {
 }
 
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
-	o, _ := vm.ReadRegister(10)
-	l, _ := vm.ReadRegister(11)
-
-	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
-	r.Err = vm.ResultCode
-	if r.Err == types.RESULT_OK {
-		r.Ok = output
+	if vm.ResultCode == types.RESULT_OOG {
+		r.Err = types.RESULT_OOG
+		return r, 0
 	}
+	o, _ := vm.ReadRegister(7)
+	l, _ := vm.ReadRegister(8)
+	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
+	if r.Err == types.RESULT_OK && res == 0 {
+		r.Ok = output
+		return r, res
+	}
+	if r.Err == types.RESULT_OK && res != 0 {
+		r.Ok = []byte{}
+		return r, res
+	}
+	r.Err = types.RESULT_PANIC
 	return r, res
 }
 

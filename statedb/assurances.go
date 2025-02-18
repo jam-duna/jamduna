@@ -80,8 +80,12 @@ func CheckDuplicate(assurances []types.Assurance, new types.Assurance) error {
 }
 
 // State transition function
-func (j *JamState) CountAvailableWR(assurances []types.Assurance) []uint32 {
+func (j *JamState) CountAvailableWR(assurances []types.Assurance) ([]uint32, map[uint16]uint16) {
 	// Count the number of available assurances for each validator
+	num_assurances := make(map[uint16]uint16)
+	for _, a := range assurances {
+		num_assurances[a.ValidatorIndex] = 1
+	}
 	tally := make([]uint32, types.TotalCores)
 	for c := 0; c < types.TotalCores; c++ {
 		for _, a := range assurances {
@@ -90,13 +94,13 @@ func (j *JamState) CountAvailableWR(assurances []types.Assurance) []uint32 {
 			}
 		}
 	}
-	return tally
+	return tally, num_assurances
 }
 
 // 0.5.4 11.17
-func (j *JamState) ProcessAssuranceState(tally []uint32, timeslot uint32) (uint32, []types.WorkReport) {
+func (j *JamState) ProcessAssuranceState(tally []uint32, timeslot uint32) []types.WorkReport {
 	// Update the validator's assurance state
-	numAssurances := uint32(0)
+
 	BigW := make([]types.WorkReport, 0) // eq 129: BigW (available work report) is the work report that has been assured by more than 2/3 validators
 	for c, available := range tally {
 		if j.AvailabilityAssignments[c] == nil {
@@ -110,17 +114,16 @@ func (j *JamState) ProcessAssuranceState(tally []uint32, timeslot uint32) (uint3
 			}
 			j.AvailabilityAssignments[c] = nil
 		}
-		numAssurances++
 	}
-	return numAssurances, BigW
+	return BigW
 }
 
-func (j *JamState) ProcessAssurances(assurances []types.Assurance, timeslot uint32) (uint32, []types.WorkReport) {
+func (j *JamState) ProcessAssurances(assurances []types.Assurance, timeslot uint32) (map[uint16]uint16, []types.WorkReport) {
 	// Count the number of available assurances for each validator
-	tally := j.CountAvailableWR(assurances)
+	tally, num_assurances := j.CountAvailableWR(assurances)
 	// Update the validator's assurance state
-	numAssurances, BigW := j.ProcessAssuranceState(tally, timeslot)
-	return numAssurances, BigW
+	BigW := j.ProcessAssuranceState(tally, timeslot)
+	return num_assurances, BigW
 }
 
 func SortAssurances(assurances []types.Assurance) {
