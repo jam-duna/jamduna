@@ -550,12 +550,6 @@ const (
 	HUH  = (1 << 64) - 10 // 2^32 - 10
 	OK   = 0              // 0
 
-	HALT  = 0 // regular halt ∎
-	PANIC = 1 // panic ☇
-	FAULT = 2 // out-of-gas ∞
-	HOST  = 3 // host-call̵ h
-	OOG   = 4 // page-fault F
-
 // BAD = 1111
 // S   = 2222
 // BIG = 3333
@@ -1146,19 +1140,19 @@ func (vm *VM) Execute(entryPoint int) error {
 
 	// A.2 deblob
 	if vm.code == nil {
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 		return errors.New("No code to execute")
 	}
 
 	if len(vm.code) == 0 {
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 		return errors.New("No code to execute")
 	}
 
 	if len(vm.bitmask) == 0 {
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 		return errors.New("Failed to decode bitmask")
 	}
@@ -1216,11 +1210,11 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	o, _ := vm.ReadRegister(7)
 	l, _ := vm.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
-	if r.Err == types.RESULT_OK && res == 0 {
+	if vm.ResultCode == types.RESULT_OK && res == 0 {
 		r.Ok = output
 		return r, res
 	}
-	if r.Err == types.RESULT_OK && res != 0 {
+	if vm.ResultCode == types.RESULT_OK && res != 0 {
 		r.Ok = []byte{}
 		return r, res
 	}
@@ -1251,7 +1245,7 @@ func (vm *VM) step() error {
 			fmt.Printf("TERMINATED\n")
 		}
 		if instr == TRAP {
-			vm.ResultCode = PANIC
+			vm.ResultCode = types.RESULT_PANIC
 		} else {
 			vm.ResultCode = types.RESULT_OK
 		}
@@ -1391,7 +1385,7 @@ func (vm *VM) step() error {
 			vm.pc += 1 + len_operands
 		}
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 		if debug_pvm {
 			fmt.Printf("Unknown opcode: %d\n", opcode)
@@ -1462,11 +1456,11 @@ func (vm *VM) get_varpi(opcodes []byte, bitmask string) map[int]struct{} {
 func (vm *VM) djump(a uint64) {
 	if a == uint64((1<<32)-(1<<16)) {
 		vm.terminated = true
-		vm.ResultCode = HALT
+		vm.ResultCode = types.PVM_HALT
 	} else if a == 0 || a > uint64(len(vm.J)*Z_A) || a%Z_A != 0 {
 		vm.terminated = true
-		vm.ResultCode = PANIC
-		// panic("OOB")
+		vm.ResultCode = types.PVM_PANIC
+		// types.PVM_PANIC("OOB")
 	} else {
 		vm.pc = uint64(vm.J[(a/Z_A)-1])
 	}
@@ -1522,8 +1516,8 @@ func (vm *VM) ecalli(operands []byte) uint64 {
 	lx := uint32(types.DecodeE_l(operands))
 	vm.hostCall = true
 	vm.host_func_id = int(lx)
-	vm.ResultCode = HOST
-	return HOST
+	vm.ResultCode = types.PVM_HOST
+	return types.PVM_HOST
 }
 
 // Implement storeImm logic
@@ -1606,7 +1600,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 	case LOAD_U8:
 		value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1618,7 +1612,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 	case LOAD_I8:
 		value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1630,7 +1624,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 	case LOAD_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1642,7 +1636,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 	case LOAD_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1654,7 +1648,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 	case LOAD_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1666,7 +1660,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 	case LOAD_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1678,7 +1672,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 	case LOAD_U64: // TODO: NEW, check this
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 8)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1688,7 +1682,7 @@ func (vm *VM) load(opcode byte, operands []byte) {
 		}
 		vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 }
@@ -1716,7 +1710,7 @@ func (vm *VM) store(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1727,7 +1721,7 @@ func (vm *VM) store(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1738,7 +1732,7 @@ func (vm *VM) store(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1749,12 +1743,12 @@ func (vm *VM) store(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 }
@@ -1785,7 +1779,7 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 		// }
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), []byte{byte(vy % (1 << 8))})
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1795,7 +1789,7 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 		// }
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<16), 2))
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1805,19 +1799,19 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 		// }
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<32), 4))
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U64:
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy), 8))
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 }
@@ -1900,7 +1894,7 @@ func (vm *VM) branch(vx uint64, condition bool) {
 	if condition {
 		vm.pc = vx
 	} else {
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 }
@@ -2045,7 +2039,7 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), []byte{byte(valueA % (1 << 8))})
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -2055,7 +2049,7 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA)%(1<<16), 2))
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -2065,7 +2059,7 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA)%(1<<32), 4))
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -2075,12 +2069,12 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 8))
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 
@@ -2104,7 +2098,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 	case LOAD_IND_U8:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 1)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -2117,7 +2111,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 	case LOAD_IND_I8:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 1)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -2130,7 +2124,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 	case LOAD_IND_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -2143,7 +2137,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 	case LOAD_IND_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -2156,7 +2150,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 	case LOAD_IND_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -2169,7 +2163,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 	case LOAD_IND_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -2179,7 +2173,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 	case LOAD_IND_U64:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 8)
 		if errCode != OK {
-			vm.ResultCode = FAULT
+			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -2187,7 +2181,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 		result := uint64(types.DecodeE_l(value))
 		vm.WriteRegister(registerIndexA, result)
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 }
@@ -2268,7 +2262,7 @@ func (vm *VM) aluImm(opcode byte, operands []byte) {
 		result = x_encode(B_decode(b_valueA), 4)
 
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 	if debug_pvm {
@@ -2309,7 +2303,7 @@ func (vm *VM) cmovImm(opcode byte, operands []byte) {
 			result = valueA
 		}
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 	if debug_pvm {
@@ -2381,7 +2375,7 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) {
 		floorQuotient := FloorDiv(numerator, denominator)
 		result = z_decode(floorQuotient, 8)
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 	if debug_pvm {
@@ -2512,7 +2506,7 @@ func (vm *VM) branchReg(opcode byte, operands []byte) {
 			vm.pc += uint64(1 + len(operands))
 		}
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 }
@@ -2731,7 +2725,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	case MIN_U:
 		result = min(valueA, valueB)
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 
@@ -2865,7 +2859,7 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Register(opcode byte, operands 
 	case REVERSE_BYTES:
 		result = types.DecodeE_l(reverseBytes(types.E_l(valueA, 8)))
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 	vm.WriteRegister(registerIndexD, result)
@@ -2916,7 +2910,7 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opc
 		valueA = x_encode(valueB/(1<<(vx%64)), 8)
 		result = valueA
 	default:
-		vm.ResultCode = PANIC
+		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
 

@@ -86,7 +86,7 @@ var errorCases = map[string][]uint64{
 	"Poke":              {OK, OOB, WHO},
 	"Zero":              {OK, OOB, WHO},
 	"Void":              {OK, OOB, WHO},
-	"Invoke":            {OK, OOB, WHO, HOST, FAULT, OOB, PANIC},
+	"Invoke":            {OK, OOB, WHO, types.PVM_HOST, types.PVM_FAULT, OOB, types.PVM_PANIC},
 	"Expunge":           {OK, OOB, WHO},
 }
 
@@ -169,7 +169,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	}
 
 	if vm.Gas-g < 0 {
-		vm.ResultCode = OOG
+		vm.ResultCode = types.PVM_OOG
 		return true, fmt.Errorf("Out of gas\n")
 	} else {
 		vm.Gas = vm.Gas - g
@@ -879,30 +879,30 @@ func (vm *VM) hostInvoke() {
 		}
 	}
 
-	if new_machine.ResultCode == HOST {
-		vm.WriteRegister(7, HOST)
+	if new_machine.ResultCode == types.PVM_HOST {
+		vm.WriteRegister(7, types.PVM_HOST)
 		vm.WriteRegister(8, uint64(new_machine.host_func_id))
 		return
 	}
 
-	if new_machine.ResultCode == FAULT {
-		vm.WriteRegister(7, FAULT)
+	if new_machine.ResultCode == types.PVM_FAULT {
+		vm.WriteRegister(7, types.PVM_FAULT)
 		vm.WriteRegister(8, uint64(new_machine.Fault_address))
 		return
 	}
 
-	if new_machine.ResultCode == OOG {
-		vm.WriteRegister(7, OOG)
+	if new_machine.ResultCode == types.PVM_OOG {
+		vm.WriteRegister(7, types.PVM_OOG)
 		return
 	}
 
-	if new_machine.ResultCode == PANIC {
-		vm.WriteRegister(7, PANIC)
+	if new_machine.ResultCode == types.PVM_PANIC {
+		vm.WriteRegister(7, types.PVM_PANIC)
 		return
 	}
 
-	if new_machine.ResultCode == HALT {
-		vm.WriteRegister(7, HALT)
+	if new_machine.ResultCode == types.PVM_HALT {
+		vm.WriteRegister(7, types.PVM_HALT)
 		return
 	}
 

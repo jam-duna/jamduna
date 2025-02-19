@@ -17,6 +17,14 @@ const (
 	RESULT_FAULT    = 5
 )
 
+const (
+	PVM_HALT  = 0 // regular halt ∎
+	PVM_PANIC = 1 // panic ☇
+	PVM_FAULT = 2 // out-of-gas ∞
+	PVM_HOST  = 3 // host-call̵ h
+	PVM_OOG   = 4 // page-fault F
+)
+
 // 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
 type WorkResult struct {
 	ServiceID   uint32      `json:"service_id"`

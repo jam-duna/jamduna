@@ -501,11 +501,11 @@ var HosterrorCaseNames = map[uint64]string{
 }
 
 var PVMerrorCaseNames = map[uint64]string{
-	HALT:  "HALT",
-	PANIC: "PANIC",
-	FAULT: "FAULT",
-	HOST:  "HOST",
-	OOG:   "OOG",
+	types.PVM_HALT:  "HALT",
+	types.PVM_PANIC: "PANIC",
+	types.PVM_FAULT: "FAULT",
+	types.PVM_HOST:  "HOST",
+	types.PVM_OOG:   "OOG",
 }
 
 func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
@@ -3675,7 +3675,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 				8: 32 * PageSize,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: HALT,
+				7: types.PVM_HALT,
 				8: 32 * PageSize,
 			},
 			initialMemory: RAMForTest{
@@ -3721,7 +3721,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 				8: 32 * PageSize,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: PANIC,
+				7: types.PVM_PANIC,
 				8: 32 * PageSize,
 			},
 			initialMemory: RAMForTest{
@@ -3767,7 +3767,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 				8: 32 * PageSize,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: OOG,
+				7: types.PVM_OOG,
 				8: 32 * PageSize,
 			},
 			initialMemory: RAMForTest{
@@ -3813,7 +3813,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 				8: 32 * PageSize,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: FAULT,
+				7: types.PVM_FAULT,
 				8: 32 * PageSize,
 			},
 			initialMemory: RAMForTest{
@@ -3859,7 +3859,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 				8: 32 * PageSize,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: HOST,
+				7: types.PVM_HOST,
 				8: GAS,
 			},
 			initialMemory: RAMForTest{
