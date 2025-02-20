@@ -490,9 +490,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runReceiveBlock()
 		go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 		if id == 0 {
-			go node.runJamWeb(uint16(port + 1000))
+			go node.runJamWeb(uint16(port+1000) + id)
 		}
-
 	}
 	return node, nil
 }

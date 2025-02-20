@@ -66,6 +66,7 @@ func computeNode(data []byte, hashType ...string) []byte {
 }
 
 // computeLeaf hashes the data with $leaf on CDT using Blake2b-256
+// related about Equation(E.6) in GP 0.6.2
 func computeLeaf(data []byte, hashType ...string) []byte {
 	var h hash.Hash
 	// Check if "keccak" is passed in hashType, else use default Blake2b-256.

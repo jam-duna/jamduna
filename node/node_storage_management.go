@@ -222,7 +222,7 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	if err != nil {
 		return false, err
 	}
-	verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
+	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
 	if !verified {
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
@@ -501,7 +501,7 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 	path := sclub_path[1:]
 	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
 	leafHash := common.ComputeLeafHash_WBT_Blake2B(bundle_segment_pair)
-	verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
+	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
 	if !verified {
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
@@ -568,7 +568,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	}
 	segmentLeafHash := common.ComputeLeafHash_WBT_Blake2B(segmentShard)
 
-	_, recovered_sClub := VerifyJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentLeafHash, bPath)
+	_, recovered_sClub := VerifyWBTJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentLeafHash, bPath)
 
 	bundle_segment_pair := append(bClub.Bytes(), recovered_sClub.Bytes()...)
 	if debugDA {
@@ -576,7 +576,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	}
 	erasureLeafHash := common.ComputeLeafHash_WBT_Blake2B(bundle_segment_pair)
 
-	verified, recovered_erasureRoot := VerifyJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), erasureLeafHash, fPath)
+	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), erasureLeafHash, fPath)
 	if debugDA {
 		fmt.Printf("VerifySegmentShard Step 3: shardIndex=%x recovered_sClub:%v -> erasureRoot:%v | verified:%v\n", shardIndex, recovered_sClub, erasureRoot, verified)
 	}

@@ -87,9 +87,9 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 	erasureRoot := erasureTree.RootHash()
 	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
 		treeLen, leafHash, path, isFound, _ := erasureTree.Trace(shardIdx)
-		verified, _ := VerifyJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
+		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
 		if !verified {
-			return shardJustifications, fmt.Errorf("Justification Failure")
+			return shardJustifications, fmt.Errorf("VerifyWBTJustification Failure")
 		}
 		shardJustifications[shardIdx] = types.Justification{
 			Root:     erasureRoot,
@@ -106,10 +106,10 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 }
 
 // Verify T(s,i,H)
-func VerifyJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash common.Hash, path []common.Hash) (bool, common.Hash) {
+func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash common.Hash, path []common.Hash) (bool, common.Hash) {
 	recoveredRoot, verified, _ := trie.VerifyWBT(treeLen, int(shardIndex), root, leafHash, path)
-	if root != recoveredRoot {
-		fmt.Sprintf("VerifyJustification Failure! Expected:%v | Recovered: %v\n", root, recoveredRoot)
+	if root != recoveredRoot && false {
+		//errStr := fmt.Sprintf("VerifyJustification Failure! Expected:%v | Recovered: %v\n", root, recoveredRoot)
 		//panic("VerifyJustification")
 		return verified, recoveredRoot
 	}
@@ -120,7 +120,7 @@ func VerifyJustification(treeLen int, root common.Hash, shardIndex uint16, leafH
 // s: [(b♣T,s♣T)...] -  sequence of (work-package bundle shard hash, segment shard root) pairs satisfying u = MB(s)
 // i: shardIdx or ChunkIdx
 // H: Blake2b
-func GenerateJustification(root common.Hash, shardIndex uint16, leaves [][]byte) (treeLen int, leafHash common.Hash, path []common.Hash, isFound bool) {
+func GenerateWBTJustification(root common.Hash, shardIndex uint16, leaves [][]byte) (treeLen int, leafHash common.Hash, path []common.Hash, isFound bool) {
 	wbt := trie.NewWellBalancedTree(leaves, types.Blake2b)
 	//treeLen, leafHash, path, isFound, nil
 	treeLen, leafHash, path, isFound, _ = wbt.Trace(int(shardIndex))
@@ -310,8 +310,8 @@ func (n *Node) generateErasureRoot(b []common.Hash, s []common.Hash) common.Hash
 	}
 
 	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
-		treeLen, leafHash, path, isFound := GenerateJustification(erasureRoot, uint16(shardIdx), bundle_segment_pairs)
-		verified, _ := VerifyJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
+		treeLen, leafHash, path, isFound := GenerateWBTJustification(erasureRoot, uint16(shardIdx), bundle_segment_pairs)
+		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
 		if debugDA {
 			if !verified {
 				fmt.Printf("ErasureRootPath shardIdx=%v, treeLen=%v leafHash=%v, path=%v, isFound=%v | verified=%v\n", shardIdx, treeLen, leafHash, path, isFound, verified)
@@ -361,10 +361,7 @@ func (n *Node) FetchImportSegments(erasureRoot common.Hash, segmentIndices []uin
 
 // The E(p,x,s,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
 func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]byte, extrinsics types.ExtrinsicsBlobs) types.WorkPackageBundle {
-	// imports := make([][]byte, 0)
-	// for _, segment := range importSegments {
-	// 	imports = append(imports, segment...)
-	// }
+
 	workItems := p.WorkItems
 	workItemCnt := 0
 	for _, workItem := range workItems {
@@ -388,6 +385,7 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]by
 	}
 
 	// j - justifications
+	// (14.14) J(W in I)
 	verifyIndex := 0
 	justifications := make([][][]common.Hash, 0)
 	for itemIndex := range len(importSegments) {
@@ -395,9 +393,10 @@ func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]by
 		//cdtTree.PrintTree()
 		tmpJustifications := make([][]common.Hash, 0)
 		for i := 0; i < len(importSegments[itemIndex]); i++ {
-			justification, err := cdtTree.Justify(verifyIndex)
+			//justification, err := cdtTree.Justify(verifyIndex) //J0
+			justification, err := cdtTree.GenerateCDTJustificationX(verifyIndex, 0) // supposedly now calling GenerateCDTJustificationX, not Justify
 			if err != nil {
-				fmt.Printf("Justification Error: %v\n", err)
+				fmt.Printf("GenerateCDTJustificationX Error: %v\n", err)
 			}
 			justificationHashes := make([]common.Hash, 0)
 			for _, j := range justification {
@@ -588,6 +587,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		ok, verifyErr := VerifyBundleJustification(package_bundle.ImportSegmentData, package_bundle.Justification, package_bundle.WorkPackage, segmentRootLookup)
 		if verifyErr != nil || !ok {
 			if verifyErr != nil {
+				// panic(5678)
 				fmt.Printf("Justification Verification Error %v\n", verifyErr)
 			}
 			if !ok {
@@ -944,7 +944,7 @@ func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]c
 			for _, justification := range justifications[itemIndex][segmentIdx] {
 				transferJustifications = append(transferJustifications, justification[:])
 			}
-			computedRoot := trie.VerifyJustification(segmentHash[:], verifyIndex, transferJustifications)
+			computedRoot := trie.VerifyCDTJustificationX(segmentHash[:], verifyIndex, transferJustifications, 0) // replaced from VerifyJustification0
 			if !common.CompareBytes(root[:], computedRoot) && !common.CompareBytes(root[:], segmentHash[:]) {
 				fmt.Printf("segmentData %x, segmentHash %v, transferJustifications %x\n", segmentData, segmentHash, transferJustifications)
 				fmt.Printf("expected root %x, computed root %x\n", root[:], computedRoot)

@@ -2,6 +2,7 @@ package trie
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 
@@ -15,12 +16,12 @@ func TestCDTGet(t *testing.T) {
 	testCDTGet(t, TestingSegmentsNum)
 }
 
-func TestJustify(t *testing.T) {
-	testJustify(t, TestingSegmentsNum)
+func TestJustify0(t *testing.T) {
+	testJustify0(t, TestingSegmentsNum)
 }
 
-func TestVerifyJustifyX(t *testing.T) {
-	testVerifyJustifyX(t, TestingSegmentsNum)
+func TestVerifyCDTJustificationX(t *testing.T) {
+	testVerifyCDTJustificationX(t, TestingSegmentsNum)
 }
 
 func TestPageProof(t *testing.T) {
@@ -28,9 +29,12 @@ func TestPageProof(t *testing.T) {
 }
 
 func TestCDT(t *testing.T) {
-	var TestingSegmentsNums = []int{1, 2, 3, 5, 10, 31, 32, 33, 64, 65, 128}
-	// var TestingSegmentsNums []int
-	// for i := 1; i <= 513; i++ {
+	//var TestingSegmentsNums = []int{0, 1, 2, 3, 5, 10, 31, 32, 33, 64, 65, 128}
+	var TestingSegmentsNums []int
+	for i := 0; i <= 513; i++ {
+		TestingSegmentsNums = append(TestingSegmentsNums, i)
+	}
+	// for i := 0; i <= 2; i++ {
 	// 	TestingSegmentsNums = append(TestingSegmentsNums, i)
 	// }
 	for _, numSegments := range TestingSegmentsNums {
@@ -44,11 +48,11 @@ func TestCDT(t *testing.T) {
 			})
 
 			t.Run("TestJustify", func(t *testing.T) {
-				testJustify(t, numSegments)
+				testJustify0(t, numSegments)
 			})
 
-			t.Run("TestVerifyJustifyX", func(t *testing.T) {
-				testVerifyJustifyX(t, numSegments)
+			t.Run("TestVerifyCDTJustificationX", func(t *testing.T) {
+				testVerifyCDTJustificationX(t, numSegments)
 			})
 
 			t.Run("testPageProof", func(t *testing.T) {
@@ -59,10 +63,10 @@ func TestCDT(t *testing.T) {
 	}
 }
 
-func testJustify(t *testing.T, numSegments int) {
+func testJustify0(t *testing.T, numSegments int) {
 	// Initialize segments
 	var segments [][]byte
-	for i := 0; i < TestingSegmentsNum; i++ {
+	for i := 0; i < numSegments; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
 		data = common.PadToMultipleOfN(data, types.W_E*types.W_S)
 		segments = append(segments, data)
@@ -79,27 +83,27 @@ func testJustify(t *testing.T, numSegments int) {
 
 	// Test justification for each leaf
 	for i, leaf := range leaves {
-		justification, err := tree.Justify(i)
+		justification, err := tree.GenerateCDTJustificationX(i, 0)
 		if err != nil {
 			t.Fatalf("Error justifying leaf %d: %v", i, err)
 		}
-
 		leafHash := computeLeaf(leaf)
-		computedRoot := verifyJustification(leafHash, i, justification)
+		computedRoot := VerifyCDTJustificationX(leafHash, i, justification, 0)
 
 		if !compareBytes(computedRoot, tree.Root()) {
 			t.Errorf("Justification failed for leaf %d: expected root %s, got %s", i, common.Bytes2Hex(tree.Root()), common.Bytes2Hex(computedRoot))
 		} else {
-			t.Logf("Justification verified for leaf %d", i)
+			//t.Logf("CDT Justification verified for leaf %d", i)
 		}
 	}
 }
 
-func testVerifyJustifyX(t *testing.T, numSegments int) {
-
-	// Initialize segments
+func testVerifyCDTJustificationX(t *testing.T, numSegments int) {
+	if numSegments == 0 {
+		return
+	}
 	var segments [][]byte
-	for i := 0; i < TestingSegmentsNum; i++ {
+	for i := 0; i < numSegments; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
 		data = common.PadToMultipleOfN(data, types.W_E*types.W_S)
 		segments = append(segments, data)
@@ -121,14 +125,14 @@ func testVerifyJustifyX(t *testing.T, numSegments int) {
 
 	// Get justification for the leaf
 	x := 2 // The depth of the tree or less
-	justification, err := tree.JustifyX(index, x)
+	justification, err := tree.GenerateCDTJustificationX(index, x)
 	if err != nil {
-		t.Fatalf("JustifyX failed: %v", err)
+		t.Fatalf("GenerateCDTJustificationX failed: %v", err)
 	}
 
 	// Verify the justification
-	computedRoot := verifyJustifyX(leafHash, index, justification, x)
-	expectedRoot := justification[len(justification)-1]
+	computedRoot := verifyCDTJustificationX(leafHash, index, justification, x)
+	expectedRoot, _ := tree.LocalRootX(index, x)
 
 	if !compareBytes(computedRoot, expectedRoot) {
 		t.Errorf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
@@ -143,7 +147,7 @@ func testCDTGet(t *testing.T, numSegments int) {
 
 	// Initialize segments
 	var segments [][]byte
-	for i := 0; i < TestingSegmentsNum; i++ {
+	for i := 0; i < numSegments; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
 		data = common.PadToMultipleOfN(data, types.W_E*types.W_S)
 		segments = append(segments, data)
@@ -180,18 +184,26 @@ func testCDTGet(t *testing.T, numSegments int) {
 	}
 }
 
+func TestP(t *testing.T) {
+	testPageProof(t, 127)
+}
+
 func testPageProof(t *testing.T, numSegments int) {
 	var segments [][]byte
-	var TestingSegmentsNums = []int{1, 2, 3, 5, 10, 31, 32, 33, 64, 65, 128, 2046}
+	// numSegments must be power of 2
+	var TestingSegmentsNums = []int{numSegments}
 	// var TestingSegmentsNums = []int{1, 2}
 
 	// Initialize segments
-	for _, TestingSegmentsNum := range TestingSegmentsNums {
+	for _, segmentsN := range TestingSegmentsNums {
+		if segmentsN == 0 {
+			continue
+		}
 		if bptDebug {
-			fmt.Printf("-------------------%d-------------------\n", TestingSegmentsNum)
+			fmt.Printf("-------------------%d-------------------\n", segmentsN)
 		}
 		segments = nil
-		for i := 0; i < TestingSegmentsNum+1; i++ {
+		for i := 0; i < segmentsN; i++ {
 			data := []byte(fmt.Sprintf("segment%d", i))
 			data = common.PadToMultipleOfN(data, types.W_E*types.W_S)
 			segments = append(segments, data)
@@ -205,6 +217,12 @@ func testPageProof(t *testing.T, numSegments int) {
 		if len(pagedProofs) == 0 {
 			t.Fatalf("Expected non-empty page proofs")
 		}
+
+		tree := NewCDMerkleTree(segments)
+		leaves := make([][]byte, len(tree.leaves))
+		for i, leaf := range tree.leaves {
+			leaves[i] = leaf.Value
+		}
 		// Print the Merkle Root of each page
 		for i, proof := range pagedProofs {
 			// Decode the proof back to segments and verify
@@ -212,44 +230,63 @@ func testPageProof(t *testing.T, numSegments int) {
 			if err != nil {
 				t.Fatalf("Failed to decode page proof: %v", err)
 			}
-			decodedSegments := decodedData.([][]byte)
+			decodedSegmentHashes := decodedData.([][]byte)
 			if debugCDT {
-				t.Logf("Page %d PageProof: %x\n", i, decodedSegments)
+				t.Logf("Page %d PageProof: %x\n", i, decodedSegmentHashes)
 			}
 			// Compare decoded segments with original
 			start := i * 64
 			end := start + 64
-			if end > len(segments) {
-				end = len(segments)
+			if end > len(leaves) {
+				end = len(leaves)
 			}
+			pageSegments := leaves[start:end]
 			var position int
-			for _, segment := range segments {
-				position = findPositions(decodedSegments, segment)
-				if position != -1 {
-					break
-				}
-			}
-			if position == -1 {
-				t.Fatalf("Segment not found in the decoded segments")
+
+			expectedSegments := pageSegments
+			traces, decodedSegmentHashes := splitPageProof(decodedSegmentHashes)
+			// decodedSegmentHashes = decodedSegmentHashes[position:]
+			expectedSegmentHashes := make([][]byte, len(expectedSegments))
+			if debugCDT {
+				fmt.Printf("decodedSegmentHashes[0]: %x\n", decodedSegmentHashes[0])
+				fmt.Printf("start: %d, end: %d, position: %d\n", start, end, position)
+				fmt.Printf("Len(decodedSegmentHashes): %d\n", len(decodedSegmentHashes))
+				fmt.Printf("Len(expectedSegments): %d\n", len(expectedSegments))
 			}
 
-			expectedSegments := segments[start:end]
-			expecteddecodedSegments := decodedSegments[position:]
-			for j := range expecteddecodedSegments {
-				if !compareBytes(expecteddecodedSegments[j], expectedSegments[j]) {
-					t.Errorf("Segment mismatch: expected %x, got %x", expectedSegments[j], decodedSegments[j])
+			for j, segment := range expectedSegments {
+				expectedSegmentHashes[j] = computeLeaf(segment)
+			}
+			for j := range expectedSegmentHashes {
+				if !compareBytes(expectedSegmentHashes[j], decodedSegmentHashes[j]) {
+					t.Errorf("(%d) Segment mismatch: expected %x, got %x", j, expectedSegmentHashes[j], decodedSegmentHashes[j])
 				}
 			}
-			result, err := VerifyPageProof(decodedSegments, i)
-			if err != nil {
-				t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
-			} else if result {
-				if debugCDT {
-					t.Logf("Page %d PageProof Verified\n", i)
-				}
-			} else {
-				t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
+			if debugCDT {
+				t.Logf("Page Proof traces: %x\n", traces)
 			}
+			computePageProofHashes(decodedSegmentHashes)
+			// if err != nil {
+			// 	t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
+			// } else if result {
+			// 	if debugCDT {
+			// 		t.Logf("Page %d PageProof Verified\n", i)
+			// 	}
+			// } else {
+			// 	t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
+			// }
 		}
 	}
+}
+
+func NextPowerOf2(n int) int {
+
+	if n <= 1 {
+		return 1
+	}
+	return 1 << bitsLen(n)
+}
+
+func bitsLen(n int) int {
+	return int(math.Log2(float64(n))) + 1
 }

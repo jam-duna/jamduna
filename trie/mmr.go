@@ -33,6 +33,7 @@ func hashConcat(left, right *common.Hash) *common.Hash {
 	return &r
 }
 
+// Equation(E.8) A in GP 0.6.2
 // Append function for the MMR (as described in the image)
 func (m *MMR) Append(data *common.Hash) {
 	m.Peaks = appendToMMR(m.Peaks, data)
@@ -72,6 +73,7 @@ func appendToMMR(Peaks []*common.Hash, l *common.Hash) []*common.Hash {
 	return P(Peaks, l, 0)
 }
 
+// Equation(E.8) P in GP 0.6.2
 // Recursive function P, combining roots
 func P(r []*common.Hash, l *common.Hash, n int) []*common.Hash {
 	if n >= len(r) {
@@ -83,6 +85,7 @@ func P(r []*common.Hash, l *common.Hash, n int) []*common.Hash {
 	return P(R(r, n, nil), hashConcat(r[n], l), n+1)
 }
 
+// Equation(E.8) R in GP 0.6.2
 // Function R for updating Peaks
 func R(r []*common.Hash, i int, t *common.Hash) []*common.Hash {
 	s := make([]*common.Hash, len(r))
@@ -100,6 +103,7 @@ func R(r []*common.Hash, i int, t *common.Hash) []*common.Hash {
 	return s
 }
 
+// Equation(E.10) A in GP 0.6.2
 func (M MMR) SuperPeak() *common.Hash {
 	// Helper function to compute SuperPeak recursively
 	var computeSuperPeak func(hashes []*common.Hash) *common.Hash

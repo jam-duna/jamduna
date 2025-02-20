@@ -184,6 +184,7 @@ func buildMerkleTree(kvs [][2][]byte, i int) *Node {
 	return &Node{Hash: computeHash(encoded), Left: left, Right: right}
 }
 
+// Equation(D.3) in GP 0.6.2
 // branch concatenates the left and right node hashes with a modified head
 func branch(left, right []byte) []byte {
 	if len(left) != 32 || len(right) != 32 {
@@ -195,6 +196,7 @@ func branch(left, right []byte) []byte {
 	return concatenated
 }
 
+// Equation(D.4) in GP 0.6.2
 // leaf encodes a key-value pair into a leaf node
 func leaf(k, v []byte) []byte {
 	// Embedded-value leaf node
@@ -862,19 +864,17 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	t.Insert(stateKey, vBytes)
 }
 
-
 func BytesToTimeSlots(vByte []byte) (time_slots []uint32) {
 	if len(vByte) == 0 {
 		return make([]uint32, 0)
-	} 
+	}
 	vByte = vByte[1:]
 	time_slots = make([]uint32, (len(vByte) / 4))
 	for i := 0; i < len(time_slots); i++ {
-	   time_slots[i] = binary.LittleEndian.Uint32(vByte[i*4 : (i+1)*4])
+		time_slots[i] = binary.LittleEndian.Uint32(vByte[i*4 : (i+1)*4])
 	}
-	return 
+	return
 }
-
 
 // lookup a_l .. returning time slot. For GP_0.3.5(157)
 func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) ([]uint32, bool, error) {

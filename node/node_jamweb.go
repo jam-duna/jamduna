@@ -3,12 +3,13 @@ package node
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/gorilla/websocket"
 )
 
 // upgrader upgrades HTTP connections to WebSocket connections.
@@ -173,7 +174,8 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 }
 
 func (n *Node) runJamWeb(basePort uint16) {
-	addr := fmt.Sprintf("0.0.0.0:9999") // for now just node 0 will handle all
+	basePort += 999
+	addr := fmt.Sprintf("0.0.0.0:%v", basePort) // for now just node 0 will handle all
 
 	n.hub = newHub()
 	go n.hub.run()

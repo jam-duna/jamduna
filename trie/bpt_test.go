@@ -387,7 +387,7 @@ func TestModifyGenesis(t *testing.T) {
 			} else {
 				t.Logf("Test case %d in file %s: Vector OK, rootHash=%x", i, filePath, expectedHash)
 			}
-			tree.PrintTree(tree.Root, 0)
+			//tree.PrintTree(tree.Root, 0)
 			tree.Close()
 		}
 	}

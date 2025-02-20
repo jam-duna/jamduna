@@ -25,6 +25,7 @@ type WellBalancedTree struct {
 	hashType string
 }
 
+// Equation(E.3) in GP 0.6.2
 // buildWellBalancedTree constructs a well-balanced binary tree from the given leaves
 func (wbt *WellBalancedTree) buildWellBalancedTree() {
 	if len(wbt.leaves) == 0 {
