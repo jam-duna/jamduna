@@ -1471,7 +1471,7 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 		old_gamma_s := old_sf.TicketsOrKeys
 		new_gamma_s := new_sf.TicketsOrKeys
 		if !reflect.DeepEqual(old_gamma_s, new_gamma_s) {
-			return fmt.Errorf("TicketsOrKeys mismatch")
+			return fmt.Errorf("TicketsOrKeys mismatch: old: %s new: %s", old_gamma_s, new_gamma_s)
 		}
 	} else {
 		// fallback mode

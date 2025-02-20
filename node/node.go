@@ -992,7 +992,7 @@ func (n *Node) extendChain() error {
 					fmt.Printf("[N%d] Ancestor timeSlots2 %d\n", n.id, timeSlots2)
 				}
 				if debugPublishTrace {
-					st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
+					st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB, recoveredStateDB.AccumulationRoot)
 					err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
 					if err != nil {
 						fmt.Printf("writeDebug StateTransition err: %v\n", err)
@@ -1461,8 +1461,6 @@ func (n *Node) runClient() {
 				n.sendGodTimeslotUsed(currJCE)
 				// we authored a block
 				oldstate := n.statedb
-				//TODO: see what happens
-				//newStateDB.RotateGuarantors()
 				newStateDB.SetAncestor(newBlock.Header, oldstate)
 				if debugAncestor {
 					timeSlots1 := n.statedb.GetAncestorTimeSlot()
@@ -1497,7 +1495,7 @@ func (n *Node) runClient() {
 					log.Fatalf("Error CompareStateRoot %v\n", err)
 				}
 
-				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
+				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB, oldstate.AccumulationRoot)
 				err = n.writeDebug(st, timeslot) // StateTransition
 				if err != nil {
 					fmt.Printf("writeDebug StateTransition err: %v\n", err)
@@ -1506,7 +1504,7 @@ func (n *Node) runClient() {
 				if debugSTF {
 					err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
 					if err != nil {
-						panic(fmt.Sprintf("ERROR validating state transition\n"))
+						panic(fmt.Sprintf("%s ERROR validating state transition", n.String()))
 					} else if debug {
 						fmt.Printf("Validated state transition\n")
 					}
@@ -1533,7 +1531,7 @@ func (n *Node) runClient() {
 	}
 }
 
-func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB) *statedb.StateTransition {
+func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB, accumulationRoot common.Hash) *statedb.StateTransition {
 
 	st := statedb.StateTransition{
 		PreState: statedb.StateSnapshotRaw{
@@ -1545,6 +1543,7 @@ func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Blo
 			KeyVals:   newStateDB.GetAllKeyValues(),
 			StateRoot: newStateDB.StateRoot,
 		},
+		AccumulationRoot: accumulationRoot,
 	}
 
 	return &st

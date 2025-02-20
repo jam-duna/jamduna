@@ -877,11 +877,10 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	// 	fmt.Printf("invalid prerequisite work package(from queue), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	// 	return jamerrors.ErrGDuplicatePackageRecentHistory
 	// }
-	for _, block := range s.JamState.RecentBlocks {
-		if len(block.Reported) != 0 {
+	for i, block := range s.JamState.RecentBlocks {
+		if i < len(s.JamState.RecentBlocks)-1 && len(block.Reported) != 0 { // we can't look at the last block
 			for _, segmentRootLookup := range block.Reported {
 				if segmentRootLookup.WorkPackageHash == workPackageHash {
-					// panic("invalid prerequisite work package(ErrGDuplicatePackageRecentHistory)")
 					return jamerrors.ErrGDuplicatePackageRecentHistory
 				}
 			}
@@ -998,7 +997,6 @@ func getPresentBlock(s *StateDB) types.SegmentRootLookup {
 
 // v0.5 eq 11.40
 // v0.5.2 eq 11.42
-// TODO:stanley
 func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarantee) error {
 	currentSegmentRootLookUp := g.Report.SegmentRootLookup
 	if len(currentSegmentRootLookUp) == 0 {

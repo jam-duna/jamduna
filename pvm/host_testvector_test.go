@@ -126,7 +126,7 @@ var (
 		GasLimitM: Service_0_GasLimitM,
 	}
 	t                 = ServiceAccount_0
-	e                 = []interface{}{t.CodeHash, t.Balance, t.ComputeThreshold(), t.GasLimitG, t.GasLimitM, t.ComputeNumStorageItems(), t.ComputeStorageSize()}
+	e                 = []interface{}{t.CodeHash, t.Balance, t.ComputeThreshold(), t.GasLimitG, t.GasLimitM, t.NumStorageItems, t.StorageSize}
 	m_for_hostinfo, _ = types.Encode(e)
 )
 

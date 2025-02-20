@@ -774,7 +774,7 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	if !ok || err != nil {
 		fmt.Printf("GetState stateKey=%x Error %v, %v\n", stateKey, ok, err)
 		if debug {
-			fmt.Printf("GetState %v stateKey=%x | RecovedValue=%x, err=%v\n", _stateIdentifier, stateKey, value, err)
+			fmt.Printf("GetState %v stateKey=%x | RecovedValue=%x, ok=%v err=%v\n", _stateIdentifier, stateKey, value, ok, err)
 		}
 	}
 	return value, err
@@ -806,12 +806,7 @@ func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
 		fmt.Printf("SetService metaKey Encode Error: %v\n", err)
 	}
 
-	acctState, err := types.AccountStateFromBytes(s, v)
-	if err != nil {
-		fmt.Printf("SetService AccountStateFromBytes Error: %v\n", err)
-	}
-
-	metaVal := fmt.Sprintf("service_account|s=%d|c=%s b=%d g=%d m=%d l=%d i=%d|clen=%d", s, acctState.CodeHash, acctState.Balance, acctState.GasLimitG, acctState.GasLimitM, acctState.StorageSize, acctState.NumStorageItems, len(acctState.CodeHash))
+	metaVal := fmt.Sprintf("service_account|s=%d", s)
 	metaValBytes, err := types.Encode(metaVal)
 	if err != nil {
 		fmt.Printf("SetService metaValBytes Encode Error: %v\n", err)
@@ -858,7 +853,7 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	if err != nil {
 		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
 	}
-	metaVal := fmt.Sprintf("account_lookup|s=%d|h=%s l=%d t=%d|tlen=%d", s, blob_hash, blob_len, time_slots, len(time_slots))
+	metaVal := fmt.Sprintf("account_lookup|s=%d|h=%s l=%d", s, blob_hash, blob_len)
 	metaValBytes, err := types.Encode(metaVal)
 	if err != nil {
 		fmt.Printf("SetPreImageLookup metaValBytes Encode Error: %v\n", err)
@@ -866,6 +861,20 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, vBytes)
 }
+
+
+func BytesToTimeSlots(vByte []byte) (time_slots []uint32) {
+	if len(vByte) == 0 {
+		return make([]uint32, 0)
+	} 
+	vByte = vByte[1:]
+	time_slots = make([]uint32, (len(vByte) / 4))
+	for i := 0; i < len(time_slots); i++ {
+	   time_slots[i] = binary.LittleEndian.Uint32(vByte[i*4 : (i+1)*4])
+	}
+	return 
+}
+
 
 // lookup a_l .. returning time slot. For GP_0.3.5(157)
 func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) ([]uint32, bool, error) {
@@ -931,7 +940,7 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) 
 	if err != nil {
 		fmt.Printf("SetServiceStorage Encode Error: %v\n", err)
 	}
-	metaVal := fmt.Sprintf("account_storage|s=%d|hk=%x k=%x|vlen=%d klen=%d", s, storageKey, k, len(storageValue), len(k))
+	metaVal := fmt.Sprintf("account_storage|s=%d|hk=%x k=%x", s, storageKey, k)
 	metaValBytes, err := types.Encode(metaVal)
 	if err != nil {
 		fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)

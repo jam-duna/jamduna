@@ -321,7 +321,7 @@ func (vm *VM) hostInfo() {
 	}
 	bo, _ := vm.ReadRegister(8)
 
-	e := []interface{}{t.CodeHash, t.Balance, t.ComputeThreshold(), t.GasLimitG, t.GasLimitM, t.ComputeNumStorageItems(), t.ComputeStorageSize()}
+	e := []interface{}{t.CodeHash, t.Balance, t.ComputeThreshold(), t.GasLimitG, t.GasLimitM, t.NumStorageItems, t.StorageSize}
 	m, err := types.Encode(e)
 	if err != nil {
 		vm.WriteRegister(7, NONE)
@@ -443,40 +443,22 @@ func (vm *VM) hostNew() {
 		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
 	a.Balance = a.ComputeThreshold()
-	// fmt.Printf("Service %d hostNew %v => %d, code hash: %v\n", s, a.CodeHash, a.GetServiceIndex(), common.BytesToHash(c))
 
-	if debug_host {
-		fmt.Printf("Service %d hostNew %v => %d\n", xContext.S, a.CodeHash, a.GetServiceIndex())
-	}
-	// Compute footprint & threshold: a_l, a_s, a-t
-
-	xs.DecBalance(a.Balance)
 	if xs.Balance >= xs.ComputeThreshold() {
+		xs.DecBalance(a.Balance)
 		//xs has enough balance to fund the creation of a AND covering its own threshold
-		// vm.WriteRegister(7, xi)
 		i := uint32(256) + uint32(xi-256+42)%(uint32(4294966784))
 		xContext.I = new_check(i, xContext.U.D)
-
-		// I believe this is the same as solicit. where l∶{(c, l)↦[]} need to be set, which will later be provided by E_P
 		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
 
 		// (x's)b <- (xs)b - at
-		// xContext.S = a.ServiceIndex()
-
-		// Here we are adding the new service account to the map
 		xContext.U.D[xi] = a
-
-		vm.X = xContext
 		vm.WriteRegister(7, uint64(xi))
-		if debug_host {
-			fmt.Printf("\nHostNew: initial xi: %d, initial xi(hex): %x, new xi: %d, new xi(hex): %x\n\n", xi, xi, xContext.I, xContext.I)
-		}
 		vm.HostResultCode = OK
 	} else {
 		if debug_host {
 			fmt.Println("Balance insufficient")
 		}
-		xs.IncBalance(a.Balance)
 		vm.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH //balance insufficient
 	}
@@ -777,10 +759,10 @@ func (vm *VM) hostEject() {
 		vm.HostResultCode = WHO
 		return
 	}
-	l := max(81, bold_d.ComputeStorageSize()) - 81
+	l := max(81, bold_d.StorageSize) - 81
 
 	ok, D_lookup := bold_d.ReadLookup(common.BytesToHash(h), uint32(l), vm.hostenv)
-	if !ok || bold_d.ComputeNumStorageItems() != 2 {
+	if !ok || bold_d.NumStorageItems != 2 {
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
 		return

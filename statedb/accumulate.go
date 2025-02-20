@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"bytes"
-	"errors"
 	"sort"
 
 	"fmt"
@@ -363,7 +362,6 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 	decoded := uint32(types.DecodeE_l(hash[:4]))
 
 	x := &types.XContext{
-		// D: make(map[uint32]*types.ServiceAccount, 0), // this is NOT mutated but holds the state that could get mutatted
 		S: s,
 		I: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
@@ -390,11 +388,11 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 			PrivilegedState:    js.PrivilegedServiceIndices,
 		}
 	}
-	x.U.D[s] = serviceAccount // this the immutable service account and cannot have Set{...}
 	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
 	mutableServiceAccount := serviceAccount.Clone()
 	mutableServiceAccount.ALLOW_MUTABLE()
 	x.U.D[s] = mutableServiceAccount // NOTE: this is a distinct COPY of serviceAccount and CAN have Set{...}
+	//fmt.Printf("NewXContext D[%d]=%s", s, mutableServiceAccount.String())
 	return x
 }
 
@@ -459,13 +457,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	//o.Dump("SingleAccumulate", sd.Id)
 	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
-	r, _ := vm.ExecuteAccumulate(p, xContext)
+	r, _, serviceAccount := vm.ExecuteAccumulate(p, xContext)
 	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
 
-	// BeefyCommitment represents a service accumulation result.
-	for service, service_account := range vm.X.U.D {
-		o.D[service] = service_account
-	}
+	o.D[s] = serviceAccount
 
 	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {
 		output_t = vm.Y.T
@@ -496,27 +491,19 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 	return output
 }
 
-func (s *StateDB) HostTransfer(delta_dager map[uint32]*types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (sa *types.ServiceAccount, err error) {
-	// check if self_index is in delta_dager
-	if _, ok := delta_dager[self_index]; !ok {
-		return &types.ServiceAccount{}, errors.New("HostTransfer Error: service not found")
-	}
-
+func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (err error) {
 	// select transfers eq 12.23
-	var self *types.ServiceAccount
 	selectedTransfers := TransferSelect(t, self_index)
 	if len(selectedTransfers) == 0 {
-		return delta_dager[self_index], nil
-	} else {
-		self = delta_dager[self_index]
-		for _, transfer := range selectedTransfers {
-			self.Balance += transfer.Amount
-		}
+		return nil
+	}
+	for _, transfer := range selectedTransfers {
+		self.Balance += transfer.Amount
 	}
 
 	code, ok, err := s.ReadServicePreimageBlob(self_index, self.CodeHash)
 	if err != nil || !ok {
-		return self, nil
+		return nil
 	}
 	vm := pvm.NewVMFromCode(self_index, code, 0, s)
 
@@ -530,27 +517,18 @@ func (s *StateDB) HostTransfer(delta_dager map[uint32]*types.ServiceAccount, tim
 	input_argument = append(input_argument, encodeSelectedTransfers...)
 
 	vm.ExecuteTransfer(input_argument, self)
-
-	return vm.ServiceAccount, nil
+	return nil
 }
 
 // eq 12.24
-func (s *StateDB) ProcessDeferredTransfers(delta_dager map[uint32]*types.ServiceAccount, time_slot uint32, t []types.DeferredTransfer) (map[uint32]*types.ServiceAccount, error) {
-	delta_dager_dager := make(map[uint32]*types.ServiceAccount)
-	for k, v := range delta_dager {
-		delta_dager_dager[k] = v
-	}
-
-	for i := range delta_dager {
-		updated_service, err := s.HostTransfer(delta_dager, time_slot, uint32(i), t)
+func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint32, t []types.DeferredTransfer) (err error) {
+	for service, serviceAccount := range o.D {
+		err = s.HostTransfer(serviceAccount, time_slot, uint32(service), t)
 		if err != nil {
-			return delta_dager, fmt.Errorf("Service index:%d failed to process deferred transfers", i)
-		} else {
-			delta_dager_dager[i] = updated_service
+			return err
 		}
-
 	}
-	return delta_dager_dager, nil
+	return nil
 }
 
 func (s *StateDB) ApplyStateTransitionAccumulation(w_star []types.WorkReport, num uint64, previousTimeslot uint32) {

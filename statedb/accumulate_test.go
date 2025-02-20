@@ -259,7 +259,7 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o.D, tau, T)
+		s.ProcessDeferredTransfers(o, tau, T)
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.D {
@@ -393,7 +393,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o.D, tau, T)
+		s.ProcessDeferredTransfers(o, tau, T)
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.D {

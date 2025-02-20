@@ -1086,7 +1086,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	return vm.getArgumentOutputs()
 }
 
-func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64) {
+func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
 	var arguments []types.AccumulateOperandElements
 	a, _ := types.Encode(elements)
 	// need to figure out how the encoded elements are used in the PVM
@@ -1099,18 +1099,16 @@ func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *t
 	if !ok {
 		panic("decoded data is not of type []types.AccumulateOperandElements")
 	}
-	for _, argument := range arguments { // here I can't understand, why you encode and decode the elements. should use encoded elements directly
+	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
+	vm.Y = X.Clone()
+	for _, argument := range arguments {
+		// NEED EXPLANATION for this: here I can't understand, why you encode and decode the elements. should use encoded elements directly
 		Standard_Program_Initialization(vm, argument.Results.Ok) // eq 264/265
-		vm.X = X                                                 //⎩I(u, s), I(u, s)⎫⎭
-		vm.Y = X.Clone()
-		vm.Execute(types.EntryPointAccumulate) // F ∈ Ω⟨(X, X)⟩
+		vm.Execute(types.EntryPointAccumulate)                   // F ∈ Ω⟨(X, X)⟩
 	}
-	// fmt.Printf("vm.X.U.D: %v\n", vm.X.U.D)
-	// where is the gas being used?
-	// return vm.getArgumentOutputs()
-	// r.Err = vm.ResultCode
-	// r.Ok = []byte{}
-	return vm.getArgumentOutputs()
+	xs, _ = vm.X.GetX_s()
+	r, res = vm.getArgumentOutputs()
+	return r, res, xs
 }
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
 	// a = E(t)   take transfer memos t and encode them

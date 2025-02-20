@@ -58,8 +58,14 @@ func (b Beta_state) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func dump_recent_blocks(prefix string, arr RecentBlocks) {
+	for i, b := range arr {
+		fmt.Printf(" %s[%d]=%s\n", prefix, i, b.String())
+	}
+}
+
 // Recent History : see Section 7
-func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
+func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash, previousStateRoot common.Hash) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
 	reported := []types.SegmentRootLookupItem{}
@@ -72,7 +78,7 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 	preRecentBlocks := s.JamState.RecentBlocks
 	if len(preRecentBlocks) > 0 {
-		preRecentBlocks[len(preRecentBlocks)-1].StateRoot = s.StateRoot // ****
+		preRecentBlocks[len(preRecentBlocks)-1].StateRoot = previousStateRoot
 	}
 
 	// Eq 83 n.b
@@ -80,6 +86,7 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	if len(preRecentBlocks) > 0 {
 		mmr.Peaks = preRecentBlocks[len(preRecentBlocks)-1].B.Peaks
 	}
+
 	mmr.Append(accumulationRoot)
 	n := Beta_state{
 		Reported:   reported,          // p
@@ -94,5 +101,5 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 		postRecentBlocks = postRecentBlocks[1 : types.RecentHistorySize+1]
 	}
 	s.JamState.RecentBlocks = postRecentBlocks
-	// return
+
 }

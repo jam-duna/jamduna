@@ -226,6 +226,7 @@ func AccountStateFromBytes(service_index uint32, data []byte) (*ServiceAccount, 
 		return nil, err
 	}
 	acct.ServiceIndex = service_index
+	//fmt.Printf(" AccountStateFromBytes(s=%d, data=%x) =>>>>> SERVICE_ACCOUNT %s\n", service_index, data, acct.String())
 	return &acct, nil
 }
 
@@ -460,45 +461,9 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 
 }
 
-// eq 9.8
 func (s *ServiceAccount) ComputeThreshold() uint64 {
 	//BS +BI ⋅ai +BL ⋅al
-	account_threshold := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.ComputeNumStorageItems()) + MinElectiveServiceOctetBalance*s.ComputeStorageSize()
-	return account_threshold
-}
-
-// eq 9.8
-func (s *ServiceAccount) ComputeNumStorageItems() uint32 {
-	var l, i uint32
-	if s.Lookup == nil {
-		l = 0
-	} else {
-		l = uint32(len(s.Lookup))
-	}
-	if s.Storage == nil {
-		i = 0
-	} else {
-		i = uint32(len(s.Storage))
-	}
-	s.NumStorageItems = 2*l + i
-	return s.NumStorageItems
-}
-
-// eq 9.8 https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
-func (s *ServiceAccount) ComputeStorageSize() uint64 {
-
-	if s.Storage != nil {
-		for _, LookupValue := range s.Lookup {
-			s.StorageSize += 81 + uint64(LookupValue.Z)
-		}
-
-	}
-	if s.Lookup != nil {
-		for _, StorageValue := range s.Storage {
-			s.StorageSize += 32 + uint64(len(StorageValue.Value))
-		}
-	}
-	return s.StorageSize
+	return BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
 }
 
 func (s *ServiceAccount) MarshalJSON() ([]byte, error) {

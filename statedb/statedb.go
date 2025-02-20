@@ -15,6 +15,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -387,7 +388,6 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	verify := true
 	t.SetState(C1, coreAuthPoolEncode)
 	t.SetState(C2, authQueueEncode)
-
 	t.SetState(C3, recentBlocksEncode)
 	t.SetState(C4, safroleStateEncode)
 	t.SetState(C5, disputeState)
@@ -407,7 +407,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		fmt.Printf("[N%v] UpdateTrieState - after root:%v\n", s.Id, updated_root)
 		// fmt.Printf("C1 coreAuthPoolEncode %x \n", coreAuthPoolEncode)
 		// fmt.Printf("C2 authQueueEncode %x \n", authQueueEncode)
-		// fmt.Printf("C3 recentBlocksEncode %x \n", recentBlocksEncode)
+		// fmt.Printf("C3 recentBlocksEncode %x \n\n\n", s.Id, recentBlocksEncode)
 		// fmt.Printf("C4 safroleStateEncode %x \n", safroleStateEncode)
 		// fmt.Printf("C5 disputeState %x \n", disputeState)
 		// fmt.Printf("C6 entropyEncode %x \n", entropyEncode)
@@ -553,12 +553,47 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 					fmt.Printf("PrintAllKeyValues Decode Error: %v\n", err)
 				}
 				metaValue = metaValueDecode.(string)
-				metaValues = strings.SplitN(metaValue, "|", 2)
-				//metaValues[1] = metaValue
-				//metaValues = strings.SplitN(metaValue, "|", 2)
-			} else {
-				metaValues = append(metaValues, "")
-				metaValues = append(metaValues, "")
+				metaValues = strings.SplitN(metaValue, "|", 4)
+				for len(metaValues) < 2 {
+					metaValues = append(metaValues, "")
+				}
+				switch metaValues[0] {
+				case "account_storage":
+					// take the realValue, decode it => append |vlen=%d
+					if len(metaValues) > 2 {
+						metaValues[1] += "|" + metaValues[2]
+					}
+					break
+				case "account_lookup":
+					// take the realValue, decode it => append t=%s tlen=%d
+					if len(metaValues) > 2 {
+						timeslots := trie.BytesToTimeSlots(realValue)
+						tstr := fmt.Sprintf("|tlen=%d", len(timeslots))
+						metaValues[1] += "|" + metaValues[2] + tstr
+					}
+					break
+				case "service_account":
+					if len(metaValues[1]) >= 2 {
+						sValues := strings.SplitN(metaValues[1], "=", 2)
+						if len(sValues) > 1 {
+							sStr := sValues[1]
+							s, err := strconv.ParseUint(sStr, 10, 32)
+							if err == nil {
+								acctState, _ := types.AccountStateFromBytes(uint32(s), realValue)
+								// take the realValue, decode it
+								metaValues[1] += fmt.Sprintf("|c=%s b=%d g=%d m=%d l=%d i=%d|clen=32", acctState.CodeHash, acctState.Balance, acctState.GasLimitG, acctState.GasLimitM, acctState.StorageSize, acctState.NumStorageItems)
+							}
+						}
+					}
+					break
+				case "account_preimage":
+					// nothing to do
+					if len(metaValues) > 2 {
+						metaValues[1] += "|" + metaValues[2] + fmt.Sprintf("|plen=%d", len(realValue))
+					}
+					break
+				}
+
 			}
 		}
 
@@ -835,18 +870,18 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
 	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 	newStateDB = &StateDB{
-		Id:                  s.Id,
-		Block:               s.Block.Copy(), // You might need to deep copy the Block if it's mutable
-		ParentHeaderHash:    s.ParentHeaderHash,
-		HeaderHash:          s.HeaderHash,
-		StateRoot:           s.StateRoot,
-		JamState:            s.JamState.Copy(), // DisputesState has a Copy method
-		sdb:                 s.sdb,
-		trie:                s.CopyTrieState(s.StateRoot),
-		logChan:             make(chan storage.LogMessage, 100),
-		AccumulationRoot:    s.AccumulationRoot, // compressed C
+		Id:               s.Id,
+		Block:            s.Block.Copy(), // You might need to deep copy the Block if it's mutable
+		ParentHeaderHash: s.ParentHeaderHash,
+		HeaderHash:       s.HeaderHash,
+		StateRoot:        s.StateRoot,
+		JamState:         s.JamState.Copy(), // DisputesState has a Copy method
+		sdb:              s.sdb,
+		trie:             s.CopyTrieState(s.StateRoot),
+		logChan:          make(chan storage.LogMessage, 100),
+		AccumulationRoot:    s.AccumulationRoot, // MUST be copied!
 		AvailableWorkReport: tmpAvailableWorkReport,
-		AncestorSet:         s.AncestorSet,
+		AncestorSet:         s.AncestorSet,      // TODO: CHECK why we have this in CheckStateTransition
 		/*
 			Following flds are not copied over..?
 
@@ -1222,6 +1257,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		panic("No validators")
 	}
 
+	// Eq 4.6/4.7 uses r (derived from accumulation result) and PREVIOUS oldState.StateRoot to append "n" to MMR "Beta" s.JamState.RecentBlocks
+	// see https://github.com/jam-duna/jamtestnet/issues/77
+	s.ApplyStateRecentHistory(blk, &(oldState.AccumulationRoot), oldState.StateRoot)
+
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
 		//fmt.Printf("sf.ApplyStateTransitionTickets %v\n", jamerrors.GetErrorName(err))
@@ -1300,7 +1339,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(t) > 0 {
-		s.ProcessDeferredTransfers(o.D, tau, t)
+		s.ProcessDeferredTransfers(o, tau, t)
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.D {
@@ -1321,9 +1360,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	s.AccumulationRoot = common.Hash(tree.Root())
 
-	// appends "n" to MMR "Beta" s.JamState.RecentBlocks
-	s.ApplyStateRecentHistory(blk, &(s.AccumulationRoot))
-
 	// 29 -  Update Authorization Pool alpha'
 	err = s.ApplyStateTransitionAuthorizations()
 	if err != nil {
@@ -1338,14 +1374,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
 	}
 
-	// err = s.OnTransfer()
-	// if err != nil {
-	// 	return s, err
-	// }
-	// if debug {
-	// 	fmt.Printf("ApplyStateTransitionFromBlock - OnTransfer\n")
-	// }
 	s.StateRoot = s.UpdateTrieState()
+	//fmt.Printf("[N%d] ACCUMULATION ROOT=%s => StateRoot=%s\n", s.Id, s.AccumulationRoot, s.StateRoot)
 	return s, nil
 }
 

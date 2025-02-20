@@ -38,14 +38,18 @@ func (m *MMR) Append(data *common.Hash) {
 	m.Peaks = appendToMMR(m.Peaks, data)
 }
 
-func (m *MMR) Print() {
+func (m *MMR) String() string {
+	out := ""
+	q := ""
 	for i, peak := range m.Peaks {
 		if peak == nil {
-			fmt.Printf("Peak %d: nil\n", i)
+			out += fmt.Sprintf("%s%d: nil", q, i)
 		} else {
-			fmt.Printf("Peak %d: %v\n", i, *peak)
+			out += fmt.Sprintf("%s%d: %v", q, i, *peak)
 		}
+		q = ", "
 	}
+	return out
 }
 
 func (m *MMR) ComparePeaks(compare MMR) bool {
