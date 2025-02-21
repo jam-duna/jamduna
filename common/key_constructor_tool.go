@@ -2,6 +2,7 @@ package common
 
 import (
 	"encoding/binary"
+	//"fmt"
 )
 
 // (h,l) -> E4(l)++H(h) for a_l
@@ -35,11 +36,10 @@ func Compute_storageKey_internal(key_hash Hash) Hash {
 	return BytesToHash(as_internal_key)
 }
 
-func Compute_storageKey_internal_byte(s uint32, k []byte) []byte {
-	sBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sBytes, s)     // E4(s)
-	raw_key := ComputeHash(append(sBytes, k...)) // H(E4(s) ⌢ vk ⋅⋅⋅+k )
-	return raw_key
+func Compute_storageKey_internal_byte(s uint32, k []byte) Hash {
+	kh := make([]byte, 32)
+	copy(kh[:], k[:])
+	return Compute_storageKey_internal(BytesToHash(kh))
 }
 
 // EQ 290 - state-key constructor functions C
@@ -50,64 +50,38 @@ func ComputeC_i(i uint8) Hash {
 	return BytesToHash(stateKey)
 }
 
-func ComputeC_is(i uint8, s uint32) Hash {
-	//(i,s ∈ N_S) ↦ [i,n0,n1,n2,n3,0,0,...] where n = E4(s)
+// used in GetService + SetService (1/4) https://graypaper.fluffylabs.dev/#/5f542d7/382b03382b03
+func ComputeC_is(s uint32) Hash {
+	// (i,s ∈ N_S) ↦ [i, n0, n1, n2, n3, 0, 0, ...] where n = E4(s)
 	stateKey := make([]byte, 32)
-	stateKey[0] = i
-	byteSlice := make([]byte, 4)
-	binary.LittleEndian.PutUint32(byteSlice, s)
-	stateKey[1] = byteSlice[0]
-	stateKey[3] = byteSlice[1]
-	stateKey[5] = byteSlice[2]
-	stateKey[7] = byteSlice[3]
-	//fmt.Printf("C(255, s=%d (hex=%x))=%s\n", s, s, BytesToHash(stateKey))
-
+	stateKey[0] = 255
+	stateKey[1] = byte(s)
+	stateKey[3] = byte(s >> 8)
+	stateKey[5] = byte(s >> 16)
+	stateKey[7] = byte(s >> 24)
 	return BytesToHash(stateKey)
 }
 
 func ComputeC_sh(s uint32, h0 Hash) Hash {
-	//s: service_index
-	//h: hash_component (assumed to be exact 32bytes)
-	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
+	// (s,h) ↦ [n0, h0, n1, h1, n2, h2, n3, h3, h4, h5, ... , h27]
 	h := h0.Bytes()
-	stateKey := make([]byte, 32)
-	nBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
 
+	// n0, h0, n1, h1, n2, h2, n3, h3
+	var stateKey [32]byte
 	for i := 0; i < 4; i++ {
-		stateKey[2*i] = nBytes[i]
-		if i < 32 {
-			stateKey[2*i+1] = h[i]
-		}
+		stateKey[2*i] = byte(s >> (8 * i)) // compute the little-endian byte for s
+		stateKey[2*i+1] = h[i]
 	}
-	for i := 4; i < 28; i++ {
-		if i < len(h) {
-			stateKey[i+4] = h[i]
-		}
-	}
-	return BytesToHash(stateKey)
+
+	// h4..h7
+	copy(stateKey[8:32], h[4:28])
+
+	// fmt.Printf("ComputeC_sh(s=%d, h=%s)=%x\n", s, h0, stateKey)
+	return BytesToHash(stateKey[:])
 }
 
-func ComputeC_sh_Byte(s uint32, h0 []byte) Hash {
-	//s: service_index
-	//h: hash_component (assumed to be exact 32bytes)
-	//(s,h) ↦ [n0,h0,n1,h1,n2,h2,n3,h3,h4,h5,...,h27] where n = E4(s)
-	h := make([]byte, 32)
-	copy(h, h0)
-	stateKey := make([]byte, 32)
-	nBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(nBytes, s) // n = E4(s)
-
-	for i := 0; i < 4; i++ {
-		stateKey[2*i] = nBytes[i]
-		if i < 32 {
-			stateKey[2*i+1] = h[i]
-		}
-	}
-	for i := 4; i < 28; i++ {
-		if i < len(h) {
-			stateKey[i+4] = h[i]
-		}
-	}
-	return BytesToHash(stateKey)
+func ComputeC_sh_Byte(s uint32, k []byte) Hash {
+	var stateKey [32]byte
+	copy(stateKey[:], k)
+	return ComputeC_sh(s, BytesToHash(stateKey[:]))
 }

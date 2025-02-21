@@ -2,7 +2,7 @@
 TIMEOUT ?= 40m
 TAGS ?= tiny
 MEG_L ?= 911
-MEG_S ?= 20
+MEG_S ?= 8
 TargetN ?= -1
 PREREQ ?= false
 # Conditionally set -targetN, or empty if TargetN=-1

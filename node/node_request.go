@@ -175,7 +175,7 @@ func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, 
 	stateTrie := s.CopyTrieState(stateRoot)
 
 	storageKey := common.Compute_storageKey_internal_byte(service_idx, rawKey)
-	service_account := common.ComputeC_sh_Byte(service_idx, storageKey)
+	service_account := common.ComputeC_sh(service_idx, storageKey)
 	maxSize := uint32(1000000)
 	foundKeyVal, boundaryNode, err := stateTrie.GetStateByRange(service_account[:], common.Hex2Bytes("0xFFFFFFFFFF"), maxSize)
 	if err != nil {

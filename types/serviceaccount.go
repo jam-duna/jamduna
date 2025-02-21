@@ -291,7 +291,7 @@ func (s *ServiceAccount) String() string {
 func (s *ServiceAccount) ReadStorage(rawK []byte, sdb HostEnv) (ok bool, v []byte) {
 	serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal_byte(serviceIndex, rawK)
-	storageObj, ok := s.Storage[common.BytesToHash(hk)]
+	storageObj, ok := s.Storage[hk]
 	if storageObj.Deleted {
 		return false, nil
 	}
@@ -301,7 +301,7 @@ func (s *ServiceAccount) ReadStorage(rawK []byte, sdb HostEnv) (ok bool, v []byt
 		if err != nil || !ok {
 			return false, nil
 		}
-		s.Storage[common.BytesToHash(hk)] = StorageObject{
+		s.Storage[hk] = StorageObject{
 			Dirty:  false,
 			Value:  v,
 			RawKey: rawK,
@@ -427,7 +427,7 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK []byte, val []by
 	// serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal_byte(serviceIndex, rawK)
 	s.Dirty = true
-	s.Storage[common.BytesToHash(hk)] = StorageObject{
+	s.Storage[hk] = StorageObject{
 		Dirty:   true,
 		Deleted: len(val) == 0,
 		Value:   val,

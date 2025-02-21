@@ -1088,7 +1088,7 @@ func (s *StateDB) remove_guarantees_authhash(pool []common.Hash, m map[common.Ha
 
 func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, error) {
 	t := s.GetTrie()
-	v, ok, err := t.GetService(types.ServiceAccountPrefix, c)
+	v, ok, err := t.GetService(c)
 	if err != nil || !ok {
 		if !ok {
 			// fmt.Printf("getServiceAccount: ServiceAccount not found for core %d\n", c)

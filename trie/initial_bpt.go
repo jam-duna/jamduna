@@ -128,7 +128,7 @@ func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {
 		if err != nil {
 			fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
 		}
-		tree.SetService(255, uint32(s), service_account_info_byte)
+		tree.SetService(uint32(s), service_account_info_byte)
 	}
 	// Insert service index, hash, storage value
 	for s, hexString := range service_account_storage {

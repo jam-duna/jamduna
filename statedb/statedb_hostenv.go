@@ -27,7 +27,8 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	}
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
-	//fmt.Printf("[N%d] WriteAccount BEFORE %v\n", s.Id, sa.String())
+	start_StorageSize := sa.StorageSize
+	start_NumStorageItems := sa.NumStorageItems
 	for k, storage := range sa.Storage {
 		if storage.Dirty {
 			oldValue, exists, err := tree.GetServiceStorage(service_idx, storage.RawKey)
@@ -82,7 +83,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 				}
 				if !existsLookup {
 					sa.NumStorageItems += 2
-					sa.StorageSize += 32 + uint64(v.Z)
+					sa.StorageSize += 81 + uint64(v.Z)
 				}
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {
@@ -93,32 +94,26 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	}
 	for blobHash, v := range sa.Preimage {
 		if v.Dirty {
-			oldValue, exists, err := tree.GetPreImageBlob(service_idx, blobHash)
-			if err != nil {
-				return err
-			}
-
 			if len(v.Preimage) == 0 || v.Deleted {
 				err = tree.DeletePreImageBlob(service_idx, blobHash)
 				if err != nil {
 					return err
-				}
-				if exists {
-					sa.StorageSize -= 32 + uint64(len(oldValue))
 				}
 			} else {
 				err = tree.SetPreImageBlob(service_idx, v.Preimage)
 				if err != nil {
 					return err
 				}
-				if !exists {
-					sa.StorageSize += 32 + uint64(len(v.Preimage))
-				}
 			}
 		}
 	}
-	//fmt.Printf("[N%d] WriteAccount AFTER %v\n", s.Id, sa.String())
 	err = s.writeService(service_idx, sa)
+	if sa.NumStorageItems != start_NumStorageItems {
+		fmt.Printf(" a_i [s=%d] changed from %d to %d\n", sa.ServiceIndex, start_NumStorageItems, sa.NumStorageItems)
+	}
+	if sa.StorageSize != start_StorageSize {
+		fmt.Printf(" a_o [s=%d] changed from %d to %d\n", sa.ServiceIndex, start_StorageSize, sa.StorageSize)
+	}
 	return err
 }
 
@@ -157,7 +152,7 @@ func (s *StateDB) GetTimeslot() uint32 {
 func (s *StateDB) GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error) {
 	tree := s.GetTrie()
 	var serviceBytes []byte
-	serviceBytes, ok, err = tree.GetService(255, service)
+	serviceBytes, ok, err = tree.GetService(service)
 	if err != nil {
 		return
 	}
@@ -174,7 +169,7 @@ func (s *StateDB) GetService(service uint32) (sa *types.ServiceAccount, ok bool,
 func (s *StateDB) writeService(service uint32, sa *types.ServiceAccount) (err error) {
 	v, _ := sa.Bytes()
 	tree := s.GetTrie()
-	return tree.SetService(255, service, v)
+	return tree.SetService(service, v)
 }
 
 func (s *StateDB) ReadServiceStorage(service uint32, k []byte) (storage []byte, ok bool, err error) {
