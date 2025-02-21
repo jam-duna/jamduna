@@ -568,7 +568,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 					// take the realValue, decode it => append t=%s tlen=%d
 					if len(metaValues) > 2 {
 						timeslots := trie.BytesToTimeSlots(realValue)
-						tstr := fmt.Sprintf("|tlen=%d", len(timeslots))
+						tstr := fmt.Sprintf("|t=%v tlen=%d", timeslots, len(timeslots))
 						metaValues[1] += "|" + metaValues[2] + tstr
 					}
 					break
