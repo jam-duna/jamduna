@@ -457,7 +457,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	//o.Dump("SingleAccumulate", sd.Id)
 	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
-	r, _, serviceAccount := vm.ExecuteAccumulate(p, xContext)
+	t := sd.JamState.SafroleState.Timeslot
+	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, p, xContext)
 	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
 
 	o.D[s] = serviceAccount

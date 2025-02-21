@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 	"strconv"
 
 	"strings"
@@ -1086,26 +1085,20 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	return vm.getArgumentOutputs()
 }
 
-func (vm *VM) ExecuteAccumulate(elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
-	var arguments []types.AccumulateOperandElements
-	a, _ := types.Encode(elements)
-	// need to figure out how the encoded elements are used in the PVM
-	decoded, _, err := types.Decode(a, reflect.TypeOf(arguments))
-	if err != nil {
-		panic(err)
-	}
-
-	arguments, ok := decoded.([]types.AccumulateOperandElements)
-	if !ok {
-		panic("decoded data is not of type []types.AccumulateOperandElements")
-	}
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
-	for _, argument := range arguments {
-		// NEED EXPLANATION for this: here I can't understand, why you encode and decode the elements. should use encoded elements directly
-		Standard_Program_Initialization(vm, argument.Results.Ok) // eq 264/265
-		vm.Execute(types.EntryPointAccumulate)                   // F ∈ Ω⟨(X, X)⟩
-	}
+	// for _, argument := range elements {
+	input_bytes := make([]byte, 0)
+	t_bytes := common.Uint32ToBytes(t)
+	s_bytes := common.Uint32ToBytes(s)
+	encoded_elements, _ := types.Encode(elements)
+	input_bytes = append(input_bytes, t_bytes...)
+	input_bytes = append(input_bytes, s_bytes...)
+	input_bytes = append(input_bytes, encoded_elements...)
+	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
+	vm.Execute(types.EntryPointAccumulate)           // F ∈ Ω⟨(X, X)⟩
+	// }
 	xs, _ = vm.X.GetX_s()
 	r, res = vm.getArgumentOutputs()
 	return r, res, xs
