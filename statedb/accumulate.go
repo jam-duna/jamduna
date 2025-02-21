@@ -366,15 +366,15 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 		I: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
 	if debug {
-		fmt.Printf("\nInit XContext:\n")
+		fmt.Printf("\n\nNewXContext: x_i computation [0.6.2 (B.9)](https://graypaper.fluffylabs.dev/#/5f542d7/2efd002efd00)\n")
 		fmt.Printf("s = %d\n", s)
-		fmt.Printf("eta_0 = %x\n", sdb.JamState.SafroleState.Entropy[0].Bytes())
+		fmt.Printf("eta_0' = %x\n", sdb.JamState.SafroleState.Entropy[0].Bytes())
 		fmt.Printf("timeslot = %d\n", sdb.JamState.SafroleState.Timeslot)
-		fmt.Printf("encode(s, eta_0, timeslot)_ = %x\n", encoded)
+		fmt.Printf("encode(s, eta_0', timeslot)_ = %x\n", encoded)
 		fmt.Printf("hash(encoded) = %x\n", hash)
 		fmt.Printf("hashed[:4] = %x\n", hash[:4])
 		fmt.Printf("decode(hashed[:4]) = %d\n", decoded)
-		fmt.Printf("decoded mod 4294966784 + 256= %d\n\n", x.I)
+		fmt.Printf("decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
 	}
 
 	js := sdb.JamState

@@ -427,30 +427,43 @@ func (vm *VM) hostNew() {
 	g, _ := vm.ReadRegister(9)
 	m, _ := vm.ReadRegister(10)
 
+	if debug_host {
+		fmt.Printf("hostNew() [jam-duna #74 check]\n")
+		fmt.Printf("code_hash_ptr=%x\n", o)
+		fmt.Printf("  ==> code_hash_ptr=%x\n", c)
+		fmt.Printf("code_len (w8)=%d\n", l)
+		fmt.Printf("min_item_gas (w9)=%d\n", g)
+		fmt.Printf("min_memo_gas (w10)=%d\n", m)
+	}
+
 	xi := xContext.I
 	// simulate a with c, g, m
 	a := &types.ServiceAccount{
-		ServiceIndex:    xi,
-		Mutable:         true,
-		Dirty:           true,
-		CodeHash:        common.BytesToHash(c),
-		GasLimitG:       uint64(g),
-		GasLimitM:       uint64(m),
-		NumStorageItems: 2*1 + 0,            //a_s = 2⋅∣al∣+∣as∣
-		StorageSize:     uint64(81 + l + 0), //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
+		ServiceIndex: xi,
+		Mutable:      true,
+		Dirty:        true,
+		CodeHash:     common.BytesToHash(c),
+		GasLimitG:    uint64(g),
+		GasLimitM:    uint64(m),
+		// these are adjusted in writeAccount.  DO NOT INITIALIZE THEM HERE
+		NumStorageItems: 0,         //a_s = 2⋅∣al∣+∣as∣
+		StorageSize:     uint64(0), //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
 		Storage:         make(map[common.Hash]types.StorageObject),
 		Lookup:          make(map[common.Hash]types.LookupObject),
 		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
 	a.Balance = a.ComputeThreshold()
+	//fmt.Printf("... Service Balance %d >= threshold = %d [9.3 a_t](https://graypaper.fluffylabs.dev/#/293bf5a/111801111b01) \n", xs.Balance, a.Balance)
 
 	if xs.Balance >= xs.ComputeThreshold() {
 		xs.DecBalance(a.Balance)
 		//xs has enough balance to fund the creation of a AND covering its own threshold
 		i := uint32(256) + uint32(xi-256+42)%(uint32(4294966784))
 		xContext.I = new_check(i, xContext.U.D)
-		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}) // *** CHECK
+		//fmt.Printf("  [ALSO: next xi is check(%d) = %d (not used)]\n", i, xContext.I)
+		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{})
 
+		//fmt.Printf(" New Service xi (w7)=%d to be stored %s\n", xi, a.String())
 		// (x's)b <- (xs)b - at
 		xContext.U.D[xi] = a
 		vm.WriteRegister(7, uint64(xi))
@@ -490,6 +503,7 @@ func (vm *VM) hostUpgrade() {
 
 // Transfer host call
 func (vm *VM) hostTransfer() {
+	return
 	d, _ := vm.ReadRegister(7)
 	a, _ := vm.ReadRegister(8)
 	g, _ := vm.ReadRegister(9)
@@ -1001,7 +1015,6 @@ func (vm *VM) hostRead() {
 // Write Storage
 func (vm *VM) hostWrite() {
 	var a *types.ServiceAccount
-
 	a = vm.ServiceAccount
 	if a == nil {
 		a, _ = vm.getXUDS(uint64(vm.Service_index))
@@ -1028,8 +1041,10 @@ func (vm *VM) hostWrite() {
 		vm.HostResultCode = NONE
 		return
 	}
+	at := a.ComputeThreshold()
+	b := a.Balance
 
-	if a.ComputeThreshold() <= a.Balance {
+	if at <= b || true { // TEMPORARILY -- we need a hostTransfer
 		// adjust S
 		v := []byte{}
 		err := uint64(0)
@@ -1048,6 +1063,7 @@ func (vm *VM) hostWrite() {
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
 	}
+
 }
 
 // Solicit preimage

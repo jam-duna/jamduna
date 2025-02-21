@@ -458,12 +458,16 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 		Z:       z,
 		T:       time_slots,
 	}
-
 }
 
 func (s *ServiceAccount) ComputeThreshold() uint64 {
-	//BS +BI ⋅ai +BL ⋅al
-	return BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
+	res := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
+	/*
+	   fmt.Printf("a_t (BS+BI*ai +BL*al)=%d+%d*%d+%d*%d=%d\n",
+	       BaseServiceBalance, MinElectiveServiceItemBalance, s.NumStorageItems,
+	       MinElectiveServiceOctetBalance, s.StorageSize, res)
+	*/
+	return res
 }
 
 func (s *ServiceAccount) MarshalJSON() ([]byte, error) {

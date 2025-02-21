@@ -17,6 +17,8 @@ const (
 	x_t = "T"
 	x_n = "N"
 	x_p = "P"
+
+	debugStorageCalc = false
 )
 
 func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
@@ -25,18 +27,44 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	}
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
-	//fmt.Printf("[N%d] WriteAccount %v\n", s.Id, sa.String())
+	//fmt.Printf("[N%d] WriteAccount BEFORE %v\n", s.Id, sa.String())
 	for k, storage := range sa.Storage {
 		if storage.Dirty {
+			oldValue, exists, err := tree.GetServiceStorage(service_idx, storage.RawKey)
+			if err != nil {
+				fmt.Printf("GetServiceStorage err %v\n", err)
+				panic(err)
+				return err
+			}
+			if debugStorageCalc {
+				fmt.Printf(" STORAGE key=%x value exists %v ==> trying to update from %v to %v\n", storage.RawKey, exists, oldValue, storage.Value)
+			}
 			if len(storage.Value) == 0 || storage.Deleted {
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
 					fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %x, error: %v\n", k, err)
 					return err
 				}
+				if exists {
+					if sa.NumStorageItems > 0 {
+						sa.NumStorageItems--
+					}
+					sa.StorageSize -= 32 + uint64(len(storage.Value))
+				}
 			} else {
-				tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
-
+				if !exists {
+					sa.NumStorageItems++
+					sa.StorageSize += 32 + uint64(len(storage.Value))
+					//fmt.Printf("DOES NOT EXIST ==> updating NumStorageItems %d StorageSize %d\n", sa.NumStorageItems, sa.StorageSize)
+				} else {
+					sa.StorageSize += uint64(len(storage.Value)) - uint64(len(oldValue))
+					//fmt.Printf("EXISTS ==> updating StorageSize %d\n")
+				}
+				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
+				if err != nil {
+					fmt.Printf("SetServiceStorage err %v\n", err)
+					return err
+				}
 			}
 		}
 	}
@@ -45,24 +73,53 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 			if v.Deleted {
 				panic("check this case as [] is natural -- does it exist")
 			} else {
-				tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
+				t, existsLookup, err := tree.GetPreImageLookup(service_idx, blob_hash, uint32(v.Z))
+				if err != nil {
+					return err
+				}
+				if debugStorageCalc {
+					fmt.Printf(" LOOKUP %s value exists %v %v\n", blob_hash, existsLookup, t)
+				}
+				if !existsLookup {
+					sa.NumStorageItems += 2
+					sa.StorageSize += 32 + uint64(v.Z)
+				}
+				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
 	for blobHash, v := range sa.Preimage {
 		if v.Dirty {
+			oldValue, exists, err := tree.GetPreImageBlob(service_idx, blobHash)
+			if err != nil {
+				return err
+			}
+
 			if len(v.Preimage) == 0 || v.Deleted {
 				err = tree.DeletePreImageBlob(service_idx, blobHash)
 				if err != nil {
 					return err
 				}
+				if exists {
+					sa.StorageSize -= 32 + uint64(len(oldValue))
+				}
 			} else {
-				tree.SetPreImageBlob(service_idx, v.Preimage)
+				err = tree.SetPreImageBlob(service_idx, v.Preimage)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					sa.StorageSize += 32 + uint64(len(v.Preimage))
+				}
 			}
 		}
 	}
-	s.writeService(service_idx, sa)
-	return nil
+	//fmt.Printf("[N%d] WriteAccount AFTER %v\n", s.Id, sa.String())
+	err = s.writeService(service_idx, sa)
+	return err
 }
 
 func (s *StateDB) ApplyXContext(U *types.PartialState) {
@@ -73,7 +130,10 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) {
 			fmt.Printf("ApplyXContext -- Immutable %d in U.X\n", sa.ServiceIndex)
 			panic("Immutable Service account in X.U.D")
 		} else if sa.Dirty {
-			s.writeAccount(sa)
+			err := s.writeAccount(sa)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 	// p - Bless => Kai_state 12.4.1 (164)
@@ -111,10 +171,10 @@ func (s *StateDB) GetService(service uint32) (sa *types.ServiceAccount, ok bool,
 	return
 }
 
-func (s *StateDB) writeService(service uint32, sa *types.ServiceAccount) {
+func (s *StateDB) writeService(service uint32, sa *types.ServiceAccount) (err error) {
 	v, _ := sa.Bytes()
 	tree := s.GetTrie()
-	tree.SetService(255, service, v)
+	return tree.SetService(255, service, v)
 }
 
 func (s *StateDB) ReadServiceStorage(service uint32, k []byte) (storage []byte, ok bool, err error) {

@@ -870,18 +870,18 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
 	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 	newStateDB = &StateDB{
-		Id:               s.Id,
-		Block:            s.Block.Copy(), // You might need to deep copy the Block if it's mutable
-		ParentHeaderHash: s.ParentHeaderHash,
-		HeaderHash:       s.HeaderHash,
-		StateRoot:        s.StateRoot,
-		JamState:         s.JamState.Copy(), // DisputesState has a Copy method
-		sdb:              s.sdb,
-		trie:             s.CopyTrieState(s.StateRoot),
-		logChan:          make(chan storage.LogMessage, 100),
+		Id:                  s.Id,
+		Block:               s.Block.Copy(), // You might need to deep copy the Block if it's mutable
+		ParentHeaderHash:    s.ParentHeaderHash,
+		HeaderHash:          s.HeaderHash,
+		StateRoot:           s.StateRoot,
+		JamState:            s.JamState.Copy(), // DisputesState has a Copy method
+		sdb:                 s.sdb,
+		trie:                s.CopyTrieState(s.StateRoot),
+		logChan:             make(chan storage.LogMessage, 100),
 		AccumulationRoot:    s.AccumulationRoot, // MUST be copied!
 		AvailableWorkReport: tmpAvailableWorkReport,
-		AncestorSet:         s.AncestorSet,      // TODO: CHECK why we have this in CheckStateTransition
+		AncestorSet:         s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
 		/*
 			Following flds are not copied over..?
 

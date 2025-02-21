@@ -782,7 +782,7 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	return value, err
 }
 
-func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
+func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) (err error) {
 	/*
 		∀(s ↦ a) ∈ δ ∶ C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i )
 		i: 255
@@ -815,6 +815,7 @@ func (t *MerkleTree) SetService(i uint8, s uint32, v []byte) {
 	}
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, v)
+	return nil // TODO
 }
 
 func (t *MerkleTree) GetService(i uint8, s uint32) ([]byte, bool, error) {
@@ -830,7 +831,7 @@ func (t *MerkleTree) GetService(i uint8, s uint32) ([]byte, bool, error) {
 }
 
 // set a_l (with timeslot if we have E_P). For GP_0.3.5(158)
-func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) {
+func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) (err error) {
 
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
@@ -862,6 +863,7 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	}
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, vBytes)
+	return nil
 }
 
 func BytesToTimeSlots(vByte []byte) (time_slots []uint32) {
@@ -925,7 +927,7 @@ func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_
 }
 
 // Insert Storage Value into the trie
-func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) {
+func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) (err error) {
 	storageKey := common.Compute_storageKey_internal_byte(s, k)
 
 	account_storage_key := common.ComputeC_sh_Byte(s, storageKey)
@@ -947,6 +949,7 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) 
 	}
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, storageValue)
+	return nil
 }
 
 func (t *MerkleTree) GetServiceStorage(s uint32, k []byte) ([]byte, bool, error) {
@@ -974,7 +977,7 @@ func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) error {
 }
 
 // Set PreImage Blob for GP_0.3.5(158)
-func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) {
+func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) (err error) {
 	/*
 		∀(s ↦ a) ∈ δ, (h ↦ p) ∈ a p ∶ C(s, h) ↦ p
 		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
@@ -1003,6 +1006,7 @@ func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) {
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	// Insert Preimage Blob into trie
 	t.Insert(stateKey, blob)
+	return
 }
 
 func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []byte, ok bool, err error) {
