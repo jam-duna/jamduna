@@ -98,14 +98,17 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			WorkPackageHash: make([]common.Hash, 0),
 		}
 	}
-
-	statedb.JamState = j
-
 	// Load services into genesis state
 	services := []types.TestService{
 		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
 	}
-
+	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
+	auth_code, err0 := os.ReadFile(auth_pvm)
+	if err0 != nil {
+		return outfn, err
+	}
+	auth_code_hash := common.Blake2Hash(auth_code)
+	auth_code_len := uint32(len(auth_code))
 	for _, service := range services {
 		if service.ServiceCode != 0 {
 			// only Bootstrap
@@ -116,6 +119,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		if err0 != nil {
 			return outfn, err
 		}
+
 		var balance uint64 = uint64(10000000000)
 		codeHash := common.Blake2Hash(code)
 		codeLen := uint32(len(code)) // z
@@ -126,15 +130,23 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			Balance:         balance,
 			GasLimitG:       100,
 			GasLimitM:       100,
-			StorageSize:     uint64(81 + codeLen), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
-			NumStorageItems: 2*1 + 0,              //a_i = 2⋅∣al∣+∣as∣
+			StorageSize:     uint64(81 + codeLen + auth_code_len), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+			NumStorageItems: 2*2 + 0,                              //a_i = 2⋅∣al∣+∣as∣
 		}
 
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
+		statedb.WriteServicePreimageBlob(service.ServiceCode, auth_code)
 		statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
 		statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
+		statedb.WriteServicePreimageLookup(service.ServiceCode, auth_code_hash, auth_code_len, bootStrapAnchor)
 	}
-
+	fmt.Printf("Bootstrap Author CodeHash: %v\n", auth_code_hash)
+	for idx := range j.AuthorizationQueue {
+		for i := range j.AuthorizationQueue[idx] {
+			j.AuthorizationQueue[idx][i] = auth_code_hash
+		}
+	}
+	statedb.JamState = j
 	statedb.StateRoot = statedb.UpdateTrieState()
 	statefn := common.GetFilePath(fmt.Sprintf("chainspecs/state_snapshots/genesis-%s", network))
 	blockfn := common.GetFilePath(fmt.Sprintf("chainspecs/blocks/genesis-%s", network))

@@ -64,7 +64,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				report, execErr := n.executeWorkPackageBundle(wpCoreIndex, bundle, segmentRootLookup)
 				if execErr != nil {
 					Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] executeWorkPackage Error: %v\n", n.String(), execErr), true)
-					return
+					panic(fmt.Sprintf("executeWorkPackage Error: %v", execErr))
 				}
 				guarantee.Report = report
 				signerSecret := n.GetEd25519Secret()
@@ -86,6 +86,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	}
 	wg.Wait()
 	selfReport := guarantee.Report
+
 	selfWorkReportHash := guarantee.Report.Hash()
 	// go Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing workReport: %v\n", n.String(), selfReport.String()), true)
 	for key, fellow_response := range fellow_responses {
@@ -124,9 +125,12 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		eclapsed := time.Since(timer)
 		Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing guarantee(%v) for core%d, took %s\n",
 			n.String(), guarantee.Report.GetWorkPackageHash().String_short(), guarantee.Report.CoreIndex, eclapsed.String()), true)
-		n.processGuarantee(guarantee)
+		err := n.processGuarantee(guarantee)
+		if err != nil {
+			Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] processGuarantee Error: %v\n", n.String(), err), true)
+		}
 		log := fmt.Sprintf("%s (core %d) [broadcast guarantee in slot %d, actually slot %d]\n", n.String(), coreIndex, guarantee.Slot, n.statedb.GetTimeslot())
-		Logger.RecordLogs(storage.Grandpa_status, log, true)
+		Logger.RecordLogs(storage.EG_status, log, true)
 	}
 	return
 }

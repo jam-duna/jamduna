@@ -1061,7 +1061,8 @@ func (vm *VM) GetServiceIndex() uint32 {
 	return vm.Service_index
 }
 
-func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization []byte, importsegments [][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs) (r types.Result, res uint64) {
+// input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
+func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64) {
 	workitem := workPackage.WorkItems[workitemIndex]
 
 	a := common.Uint32ToBytes(workitem.Service)
@@ -1070,12 +1071,14 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 
 	workPackage_RefineContext, _ := types.Encode(workPackage.RefineContext)
 	a = append(a, workPackage_RefineContext...)
-	a = append(a, workPackage.Authorization...)
+	a = append(a, p_a.Bytes()...)
 
 	vm.WorkItemIndex = workitemIndex
 	vm.Gas = workitem.RefineGasLimit
 	vm.WorkPackage = workPackage
-	vm.Authorization = authorization
+	// Sourabh , William pls validate this
+	vm.Authorization = authorization.Ok
+	//===================================
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
 
@@ -1117,13 +1120,14 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 }
 
 // E(p, c)
-func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint32) (r types.Result, res uint64) {
+func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
 	a := p.Bytes()
-	a = append(a, common.Uint32ToBytes(c)...)
+	a = append(a, common.Uint16ToBytes(c)...)
 	// vm.setArgumentInputs(a)
 	Standard_Program_Initialization(vm, a) // eq 264/265
-	vm.Execute(types.EntryPointOnTransfer)
-	return vm.getArgumentOutputs()
+	vm.Execute(types.EntryPointAuthorization)
+	r, _ = vm.getArgumentOutputs()
+	return r
 }
 
 // Execute runs the program until it terminates

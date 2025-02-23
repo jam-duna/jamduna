@@ -81,7 +81,7 @@ const (
 	MaxServiceCodeSize               = 4000000        // W_C = 4,000,000: The maximum size of service code in octets.
 	MaxManifestEntries               = 1 << 11        // W_M = 2^11: The maximum number of entries in a work-package manifest.
 	MaxEncodedWorkPackageSize        = 12 * (1 << 20) // W_P = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
-	MaxEncodedWorkReportSize         = 96 * (1 << 10) // W_R = 96 * 2^10: The maximum size of an encoded work-report in octets.
+	MaxEncodedWorkReportSize         = 48 * (1 << 10) // W_R = 96 * 2^10: The maximum size of an encoded work-report in octets.
 	PVMDynamicAddressAlignmentFactor = 2              // Z_A = 2: The pvm dynamic address alignment factor. See equation 227.
 	PVMInitInputDataSize             = 1 << 24        // Z_I = 2^24: The standard pvm program initialization input data size. See equation A.7.
 	PVMInitPageSize                  = 1 << 14        // Z_P = 2^14: The standard pvm program initialization page size. See section A.7.

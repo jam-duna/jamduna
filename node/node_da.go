@@ -6,9 +6,9 @@ import (
 
 	"encoding/json"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm"
 
-	"github.com/colorfulnotion/jam/common"
 	//"github.com/colorfulnotion/jam/erasurecoding"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -431,10 +431,10 @@ func compareWorkPackages(wp1, wp2 types.WorkPackage) bool {
 	}
 
 	// Compare Authorizer struct
-	if !common.CompareBytes(wp1.Authorizer.CodeHash[:], wp2.Authorizer.CodeHash[:]) {
+	if !common.CompareBytes(wp1.AuthorizationCodeHash[:], wp2.AuthorizationCodeHash[:]) {
 		return false
 	}
-	if !common.CompareBytes(wp1.Authorizer.Params, wp2.Authorizer.Params) {
+	if !common.CompareBytes(wp1.ParameterizationBlob, wp2.ParameterizationBlob) {
 		return false
 	}
 
@@ -570,6 +570,7 @@ func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup
 	return fuzz_importsegments, fuzz_segmentRootLookup
 }
 
+// now we only have executeWorkPackageBundle now
 func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
 	fuzz := false
 	if fuzz {
@@ -587,7 +588,6 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		ok, verifyErr := VerifyBundleJustification(package_bundle.ImportSegmentData, package_bundle.Justification, package_bundle.WorkPackage, segmentRootLookup)
 		if verifyErr != nil || !ok {
 			if verifyErr != nil {
-				// panic(5678)
 				fmt.Printf("Justification Verification Error %v\n", verifyErr)
 			}
 			if !ok {
@@ -625,18 +625,25 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		}
 		importsegments[workItemIdx] = workItem_segments
 	}
-
+	authcode, authindex, err := n.statedb.GetAuthorizeCode(workPackage)
+	if err != nil {
+		return
+	}
+	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, targetStateDB)
+	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
+	p_p := workPackage.ParameterizationBlob
+	p_a := common.Blake2Hash(append(authcode, p_p...))
+	// fmt.Printf("p_a:%v\n", p_a)
 	var segments [][]byte
 	for index, workItem := range workPackage.WorkItems {
 		imports := make([][]byte, 0)
 		if len(workItem.ImportedSegments) > 0 {
 			imports = importsegments[index]
 		}
-
 		service_index = workItem.Service
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
-			return
+			return work_report, fmt.Errorf("executeWorkPackageBundle: Code not found")
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
 			fmt.Printf("Code and CodeHash Mismatch\n")
@@ -652,14 +659,19 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		// }
 
 		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		output, _ := vm.ExecuteRefine(uint32(index), workPackage, workPackage.Authorization, imports, workItem.ExportCount, package_bundle.ExtrinsicData)
-		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
-		if debugSegments {
-			fmt.Printf("[N%d] [%d] len(exports) %d, exports %x\n", n.id, index, len(exports), exports)
+		// todo: export segment it's not result from refine
+		output, _ := vm.ExecuteRefine(uint32(index), workPackage, r, imports, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
+		// fmt.Printf("[service%d,item#%d]output:%x\n", service_index, index, output)
+		if workItem.ExportCount != 0 {
+			exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
+			if debugSegments {
+				fmt.Printf("[N%d] [%d] len(exports) %d, exports %x\n", n.id, index, len(exports), exports)
+			}
+			for i := 0; i < len(exports); i += types.W_E * types.W_S {
+				segments = append(segments, exports[i:i+types.W_E*types.W_S])
+			}
 		}
-		for i := 0; i < len(exports); i += types.W_E * types.W_S {
-			segments = append(segments, exports[i:i+types.W_E*types.W_S])
-		}
+		// fmt.Printf("after item#%d segments %x\n", index, segments)
 		result := types.WorkResult{
 			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
@@ -676,12 +688,13 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 			return
 		}
 	*/
+
 	workReport := types.WorkReport{
-		AvailabilitySpec: *spec,
-		RefineContext:    workPackage.RefineContext,
-		CoreIndex:        workPackageCoreIndex,
-		AuthorizerHash:   common.HexToHash("0x"), // SKIP
-		//AuthOutput
+		AvailabilitySpec:  *spec,
+		RefineContext:     workPackage.RefineContext,
+		CoreIndex:         workPackageCoreIndex,
+		AuthorizerHash:    p_a,
+		AuthOutput:        r.Ok,
 		SegmentRootLookup: segmentRootLookup,
 		Results:           results,
 	}
@@ -725,6 +738,7 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 		}
 	}
 	if !needFetch {
+		// @mk - pls verify the rest of the code 2025/2/20
 		return importSegments, nil
 	}
 
@@ -799,134 +813,23 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 	return importSegments, nil
 }
 
-// work types.GuaranteeReport, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error
-func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPackage, importSegments [][][]byte, extrinsics types.ExtrinsicsBlobs, segmentRootLookup types.SegmentRootLookup) (guarantee types.Guarantee, spec *types.AvailabilitySpecifier, treeRoot common.Hash, err error) {
-	if n.store.SendTrace {
-		tracer := n.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(n.store.WorkPackageContext, fmt.Sprintf("[N%d] executeWorkPackage", n.store.NodeID))
-		// n.UpdateWorkPackageContext(ctx)
-		defer span.End()
-	}
-	start := time.Now()
-	// Create a new PVM instance with mock code and execute it
-	results := []types.WorkResult{}
-	targetStateDB := n.getPVMStateDB()
-	service_index := uint32(workPackage.AuthCodeHost)
-	workPackageHash := workPackage.Hash()
+// item 1 => 1 segment
+// item 2 => 0 segment
+// importSegments [][][]byte
+// importSegments [0][1][x]byte=>item 1 => 1 segment
+// importSegments [1][0][0]byte=>item 2 => 0 segment
 
-	exportedSegments := make([][]byte, 0)
-	for workItemIdx, workItem := range workPackage.WorkItems {
-		workItemImportSegments := make([][]byte, 0)
-		if len(workItem.ImportedSegments) > 0 {
-			workItemImportSegments = importSegments[workItemIdx]
-		}
-		service_index = workItem.Service
-		var code []byte
-		var ok bool
-		code, ok, err = targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
-		if err != nil || !ok || len(code) == 0 {
-			fmt.Printf("Error in reading service preimage blob, service_index=%v, codeHash=%v\n", service_index, workItem.CodeHash)
-			return
-		}
-		if common.Blake2Hash(code) != workItem.CodeHash {
-			fmt.Printf("Code and CodeHash Mismatch\n")
-			panic(0)
-		}
-		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
-		// set malicious mode here
-		vm.IsMalicious = false
-		// if len(workItemImportSegments) > 0 {
-		// 	vm.SetImports(workItemImportSegments)
-		// }
-
-		// vm.SetExtrinsicsPayload(workItem.ExtrinsicsBlobs, workItem.Payload)
-		// ctx := context.TODO()
-		// ctx, parentSpan := tracer.Start(ctx, "ExecuteRefine")
-		// defer parentSpan.End()
-
-		output, _ := vm.ExecuteRefine(uint32(workItemIdx), workPackage, workPackage.Authorization, workItemImportSegments, workItem.ExportCount, extrinsics)
-		exports := common.PadToMultipleOfN(output.Ok, types.W_E*types.W_S)
-		workItemExports := make([][]byte, 0)
-		for i := 0; i < len(exports); i += types.W_E * types.W_S {
-			workItemExports = append(workItemExports, exports[i:i+types.W_E*types.W_S])
-		}
-		exportedSegments = append(exportedSegments, workItemExports...)
-
-		// Decode the Exports Segments to FIB format
-		if len(exports) > 0 && service_index != 0 {
-			if debugSegments {
-				fmt.Printf("[N%d] executeWorkPackage WP=%v workItemIdx#%v | workItem_ExportedSegment: %x\n", n.id, workPackage.Hash(), workItemIdx, workItemExports)
-			}
-		}
-
-		result := types.WorkResult{
-			ServiceID:   workItem.Service,
-			CodeHash:    workItem.CodeHash,
-			PayloadHash: common.Blake2Hash(workItem.Payload),
-			Gas:         911411,
-			Result:      output,
-		}
-		results = append(results, result)
-	}
-
-	// Step 2:  Now create a WorkReport with AvailabilitySpecification and RefinementContext
-	if debugSegments {
-		if len(exportedSegments) > 0 && service_index != 0 {
-			fmt.Printf("[N%d] WP=%v | executeWorkPackage exportedSegments %x\n", n.id, workPackage.Hash(), exportedSegments)
-		}
-	}
-	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, exportedSegments, extrinsics)
-	currCoreIdx, err := n.GetSelfCoreIndex()
-	if err != nil {
-		return
-	}
-	prevCoreIdx, err := n.GetPrevCoreIndex()
-	if err != nil {
-		return
-	}
-	if debugG {
-		fmt.Printf("%s curr currCoreIdx=%v | inputCoreIdx=%v | prevCoreIdx=%d\n", n.String(), currCoreIdx, wpCoreIndex, prevCoreIdx)
-	}
-
-	workReport := types.WorkReport{
-		AvailabilitySpec: *spec,
-		RefineContext:    workPackage.RefineContext,
-		//CoreIndex:        currCoreIdx,
-		CoreIndex:      wpCoreIndex,
-		AuthorizerHash: common.HexToHash("0x"), // SKIP
-		//AuthOutput
-		SegmentRootLookup: segmentRootLookup,
-		Results:           results,
-	}
-	if debugG {
-		fmt.Printf("%s executeWorkPackage  workreporthash %v => erasureRoot: %v\n", n.String(), common.Str(workReport.Hash()), spec.ErasureRoot)
-	}
-
-	// a guarantor uses StoreImportDAErasureRootToSegments store segments but proper solution is with getImportSegment using CE139
-	// err = n.StoreImportDAErasureRootToSegments(spec, common.ConcatenateByteSlices(segments))
-	// if err != nil {
-	// 	panic(1349)
-	// }
-
-	n.StoreMeta_Guarantor(spec, erasureMeta, bECChunks, sECChunksArray)
-	validator_idx := uint16(n.GetCurrValidatorIndex())
-	//we should figure out how to make sure the other validators are signing the same validator index by the same state
-	gc := workReport.Sign(n.GetEd25519Secret(), validator_idx)
-	guarantee = types.Guarantee{
-		Report:     workReport,
-		Signatures: []types.GuaranteeCredential{gc},
-	}
-	if debugE {
-		fmt.Printf("%s executeWorkPackage took %v\n", n.String(), time.Since(start))
-	}
-	return
-}
+// item 1 => 1 segment
+// item 2 => 1 segment
+// importSegments [][][]byte
+// importSegments [0][1][x]byte=>item 1 => 1 segment
+// importSegments [1][1][x]byte=>item 2 => 1 segment
 
 func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]common.Hash, workPackage types.WorkPackage, segmentRootLookup types.SegmentRootLookup) (ok bool, err error) {
 	// Verify the justifications
-	if !CheckSegmentJustificationSize(importSegments, justifications) {
-		return false, fmt.Errorf("importSegments and justification length mismatch")
-	}
+	// if !CheckSegmentJustificationSize(importSegments, justifications) {
+	// 	return false, fmt.Errorf("importSegments and justification length mismatch")
+	// }
 	verifyIndex := 0
 	for itemIndex, workItem := range workPackage.WorkItems {
 		for segmentIdx := range justifications[itemIndex] {
@@ -945,7 +848,7 @@ func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]c
 				transferJustifications = append(transferJustifications, justification[:])
 			}
 			computedRoot := trie.VerifyCDTJustificationX(segmentHash[:], verifyIndex, transferJustifications, 0) // replaced from VerifyJustification0
-			if !common.CompareBytes(root[:], computedRoot) && !common.CompareBytes(root[:], segmentHash[:]) {
+			if !common.CompareBytes(root[:], computedRoot) {
 				fmt.Printf("segmentData %x, segmentHash %v, transferJustifications %x\n", segmentData, segmentHash, transferJustifications)
 				fmt.Printf("expected root %x, computed root %x\n", root[:], computedRoot)
 				return false, fmt.Errorf("justification failure")
@@ -959,12 +862,14 @@ func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]c
 // Check importSegments and justifications
 func CheckSegmentJustificationSize(importSegments [][][]byte, justifications [][][]common.Hash) bool {
 	if len(importSegments) != len(justifications) {
+		fmt.Printf("1\n")
 		return false
 	}
 	for i := range importSegments {
 		if len(importSegments[i]) != len(justifications[i]) {
 			return false
 		}
+		// MK review this part is this needed?
 		if len(importSegments[i]) == 0 || len(importSegments[i][0]) == 0 {
 			return false
 		}

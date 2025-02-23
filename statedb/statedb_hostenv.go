@@ -111,8 +111,10 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) {
 
 	// c - Designate => AuthorizationQueue
 	for i := 0; i < types.TotalCores; i++ {
+		// fmt.Printf("ApplyXContext -- U.QueueWorkReport[%d] = %x\n", i, U.QueueWorkReport[i])
 		copy(s.JamState.AuthorizationQueue[i][:], U.QueueWorkReport[i][:])
 	}
+
 	// v - Assign => DesignatedValidators
 	s.JamState.SafroleState.DesignedValidators = U.UpcomingValidators
 }

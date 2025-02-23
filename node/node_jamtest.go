@@ -325,18 +325,18 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	builderNode.preimages[bootstrapCodeHash] = bootstrapCode
 	new_service_idx := uint32(0)
 	// Load testServices
-	serviceNames := []string{"fib"}
+	serviceNames := []string{"auth_copy", "fib"}
 	if jam == "megatron" {
-		serviceNames = []string{"fib", "tribonacci", "megatron"} // Others include: "padovan", "pell", "racaman"
+		serviceNames = []string{"fib", "tribonacci", "megatron", "auth_copy"} // Others include: "padovan", "pell", "racaman"
 	}
 	if jam == "transfer" || jam == "scaled_transfer" {
-		serviceNames = []string{"transfer_0", "transfer_1"} // 2 transfer services share the same code
+		serviceNames = []string{"transfer_0", "transfer_1", "auth_copy"} // 2 transfer services share the same code
 	}
 	if jam == "balances" || jam == "scaled_balances" {
-		serviceNames = []string{"balances"}
+		serviceNames = []string{"balances", "auth_copy"}
 	}
 	if jam == "empty" {
-		serviceNames = []string{"delay"}
+		serviceNames = []string{"delay", "auth_copy"}
 	}
 	if jam == "blake2b" {
 		serviceNames = []string{"blake2b"}
@@ -358,10 +358,11 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		// set up service using the Bootstrap service
 		refine_context := builderNode.statedb.GetRefineContext()
 		codeWorkPackage := types.WorkPackage{
-			Authorization: []byte(""),
-			AuthCodeHost:  bootstrapService,
-			Authorizer:    types.Authorizer{},
-			RefineContext: refine_context,
+			Authorization:         []byte(""),
+			AuthCodeHost:          bootstrapService,
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            bootstrapService,
@@ -475,6 +476,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 	fmt.Printf("Start FIB\n")
 
 	service0 := testServices["fib"]
+	service_authcopy := testServices["auth_copy"]
 	n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
@@ -493,9 +495,11 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{
-			Authorization: []byte("0x"), // TODO: set up null-authorizer
-			Authorizer:    types.Authorizer{},
-			RefineContext: refine_context,
+			AuthCodeHost:          0,
+			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,
@@ -505,6 +509,15 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 					AccumulateGasLimit: 10000000,
 					ImportedSegments:   importedSegments,
 					ExportCount:        1,
+				},
+				{
+					Service:            service_authcopy.ServiceCode,
+					CodeHash:           service_authcopy.CodeHash,
+					Payload:            []byte{},
+					RefineGasLimit:     10000000,
+					AccumulateGasLimit: 10000000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
 				},
 			},
 		}
@@ -552,6 +565,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	service0 := testServices["fib"]
 	service1 := testServices["tribonacci"]
 	serviceM := testServices["megatron"]
+	service_authcopy := testServices["auth_copy"]
 	fmt.Printf("service0: %v, codehash: %v (len=%v) | %v\n", service0.ServiceCode, service0.CodeHash, len(service0.Code), service0.ServiceName)
 	fmt.Printf("service1: %v, codehash: %v (len=%v) | %v\n", service1.ServiceCode, service1.CodeHash, len(service1.Code), service1.ServiceName)
 	fmt.Printf("serviceM: %v, codehash: %v (len=%v) | %v\n", serviceM.ServiceCode, serviceM.CodeHash, len(serviceM.Code), serviceM.ServiceName)
@@ -696,6 +710,15 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 						// meg
 						previous_workpackage_hash := curr_Meg_WorkPackage.Hash()
 						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
+						meg_items = append(meg_items, types.WorkItem{
+							Service:            service_authcopy.ServiceCode,
+							CodeHash:           service_authcopy.CodeHash,
+							Payload:            []byte{},
+							RefineGasLimit:     10000000,
+							AccumulateGasLimit: 10000000,
+							ImportedSegments:   make([]types.ImportSegment, 0),
+							ExportCount:        2,
+						})
 						curr_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{curr_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
 						last_Meg = []common.Hash{}
 						last_Meg = append(last_Meg, previous_workpackage_hash)
@@ -758,6 +781,16 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					if Meg_counter <= targetNMax-1 {
 						previous_workpackage_hash := curr_Meg_WorkPackage.Hash()
 						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
+						meg_items = append(meg_items, types.WorkItem{
+
+							Service:            service_authcopy.ServiceCode,
+							CodeHash:           service_authcopy.CodeHash,
+							Payload:            []byte{},
+							RefineGasLimit:     10000000,
+							AccumulateGasLimit: 10000000,
+							ImportedSegments:   make([]types.ImportSegment, 0),
+							ExportCount:        2,
+						})
 						curr_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{curr_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
 						last_Meg = []common.Hash{}
 						last_Meg = append(last_Meg, previous_workpackage_hash)
@@ -894,7 +927,16 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 	fmt.Printf("\n=========================Start Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
-
+	service_authcopy := testServices["auth_copy"]
+	auth_copy_item := types.WorkItem{
+		Service:            service_authcopy.ServiceCode,
+		CodeHash:           service_authcopy.CodeHash,
+		Payload:            []byte{},
+		RefineGasLimit:     10000000,
+		AccumulateGasLimit: 10000000,
+		ImportedSegments:   make([]types.ImportSegment, 0),
+		ExportCount:        0,
+	}
 	n1 := nodes[1]
 	core := 0
 
@@ -920,10 +962,11 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 			payload = append(reciver, amount...)
 
 			workPackage = types.WorkPackage{
-				Authorization: []byte("0x"),
-				AuthCodeHost:  service0.ServiceCode,
-				Authorizer:    types.Authorizer{},
-				RefineContext: refineContext,
+				Authorization:         []byte("0x"),
+				AuthCodeHost:          0,
+				AuthorizationCodeHash: bootstrap_auth_codehash,
+				ParameterizationBlob:  []byte{},
+				RefineContext:         refineContext,
 				WorkItems: []types.WorkItem{
 					{
 						Service:            service0.ServiceCode,
@@ -934,6 +977,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 						ImportedSegments:   make([]types.ImportSegment, 0),
 						ExportCount:        1,
 					},
+					auth_copy_item,
 				},
 			}
 		} else {
@@ -945,10 +989,11 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 			payload = append(reciver, amount...)
 
 			workPackage = types.WorkPackage{
-				Authorization: []byte("0x"),
-				AuthCodeHost:  service1.ServiceCode,
-				Authorizer:    types.Authorizer{},
-				RefineContext: refineContext,
+				Authorization:         []byte("0x"),
+				AuthCodeHost:          0,
+				AuthorizationCodeHash: bootstrap_auth_codehash,
+				ParameterizationBlob:  []byte{},
+				RefineContext:         refineContext,
 				WorkItems: []types.WorkItem{
 					{
 						Service:            service1.ServiceCode,
@@ -959,6 +1004,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 						ImportedSegments:   make([]types.ImportSegment, 0),
 						ExportCount:        1,
 					},
+					auth_copy_item,
 				},
 			}
 		}
@@ -1023,6 +1069,16 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 	fmt.Printf("\n=========================Start Scaled Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
+	service_authcopy := testServices["auth_copy"]
+	auth_copy_item := types.WorkItem{
+		Service:            service_authcopy.ServiceCode,
+		CodeHash:           service_authcopy.CodeHash,
+		Payload:            []byte{},
+		RefineGasLimit:     10000000,
+		AccumulateGasLimit: 10000000,
+		ImportedSegments:   make([]types.ImportSegment, 0),
+		ExportCount:        0,
+	}
 
 	n1 := nodes[1]
 	core := 0
@@ -1061,13 +1117,15 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        1,
 				})
+				Transfer_WorkItems = append(Transfer_WorkItems, auth_copy_item)
 			}
 			workPackage = types.WorkPackage{
-				Authorization: []byte("0x"),
-				AuthCodeHost:  service0.ServiceCode,
-				Authorizer:    types.Authorizer{},
-				RefineContext: refineContext,
-				WorkItems:     Transfer_WorkItems,
+				Authorization:         []byte("0x"),
+				AuthCodeHost:          0,
+				AuthorizationCodeHash: bootstrap_auth_codehash,
+				ParameterizationBlob:  []byte{},
+				RefineContext:         refineContext,
+				WorkItems:             Transfer_WorkItems,
 			}
 		} else {
 			for i := 0; i < SplitTransferNum; i++ {
@@ -1087,13 +1145,15 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        1,
 				})
+				Transfer_WorkItems = append(Transfer_WorkItems, auth_copy_item)
 			}
 			workPackage = types.WorkPackage{
-				Authorization: []byte("0x"),
-				AuthCodeHost:  service1.ServiceCode,
-				Authorizer:    types.Authorizer{},
-				RefineContext: refineContext,
-				WorkItems:     Transfer_WorkItems,
+				Authorization:         []byte("0x"),
+				AuthCodeHost:          0,
+				AuthorizationCodeHash: bootstrap_auth_codehash,
+				ParameterizationBlob:  []byte{},
+				RefineContext:         refineContext,
+				WorkItems:             Transfer_WorkItems,
 			}
 		}
 		Transfer_WorkPackages = append(Transfer_WorkPackages, workPackage)
@@ -1331,6 +1391,16 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 
 	// General setup
 	BalanceService := testServices["balances"]
+	service_authcopy := testServices["auth_copy"]
+	auth_copy_item := types.WorkItem{
+		Service:            service_authcopy.ServiceCode,
+		CodeHash:           service_authcopy.CodeHash,
+		Payload:            []byte{},
+		RefineGasLimit:     10000000,
+		AccumulateGasLimit: 10000000,
+		ImportedSegments:   make([]types.ImportSegment, 0),
+		ExportCount:        0,
+	}
 	balancesServiceIndex := BalanceService.ServiceCode
 	balancesServiceCodeHash := BalanceService.CodeHash
 
@@ -1406,10 +1476,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	create_asset_workPackage = types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1421,6 +1492,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 				Extrinsics:         work_item_extrinsic,
 				ExportCount:        1,
 			},
+			auth_copy_item,
 		},
 	}
 
@@ -1489,10 +1561,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 		mint_workPackage := types.WorkPackage{
-			Authorization: []byte("0x"),
-			AuthCodeHost:  balancesServiceIndex,
-			Authorizer:    types.Authorizer{},
-			RefineContext: refineContext,
+			Authorization:         []byte("0x"),
+			AuthCodeHost:          0,
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            balancesServiceIndex,
@@ -1504,6 +1577,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 					Extrinsics:         work_item_extrinsic,
 					ExportCount:        1,
 				},
+				auth_copy_item,
 			},
 		}
 
@@ -1573,10 +1647,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	mint_workPackage := types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1588,6 +1663,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 				Extrinsics:         work_item_extrinsic,
 				ExportCount:        1,
 			},
+			auth_copy_item,
 		},
 	}
 
@@ -1652,10 +1728,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	bond_workPackage := types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          balancesServiceIndex,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1667,6 +1744,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 				Extrinsics:         work_item_extrinsic,
 				ExportCount:        1,
 			},
+			auth_copy_item,
 		},
 	}
 
@@ -1730,10 +1808,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	unbond_workPackage := types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1745,6 +1824,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 				Extrinsics:         work_item_extrinsic,
 				ExportCount:        1,
 			},
+			auth_copy_item,
 		},
 	}
 
@@ -1813,10 +1893,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	transfer_workPackage := types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1828,6 +1909,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 				Extrinsics:         work_item_extrinsic,
 				ExportCount:        1,
 			},
+			auth_copy_item,
 		},
 	}
 
@@ -1868,7 +1950,16 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 	BalanceService := testServices["balances"]
 	balancesServiceIndex := BalanceService.ServiceCode
 	balancesServiceCodeHash := BalanceService.CodeHash
-
+	service_authcopy := testServices["auth_copy"]
+	auth_copy_item := types.WorkItem{
+		Service:            service_authcopy.ServiceCode,
+		CodeHash:           service_authcopy.CodeHash,
+		Payload:            []byte{},
+		RefineGasLimit:     10000000,
+		AccumulateGasLimit: 10000000,
+		ImportedSegments:   make([]types.ImportSegment, 0),
+		ExportCount:        0,
+	}
 	n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
@@ -1927,10 +2018,11 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	create_asset_workPackage = types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1942,6 +2034,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 				Extrinsics:         work_item_extrinsic,
 				ExportCount:        1,
 			},
+			auth_copy_item,
 		},
 	}
 
@@ -2024,14 +2117,16 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		}
 
 		mint_workItems = append(mint_workItems, workItem)
+		mint_workItems = append(mint_workItems, auth_copy_item)
 	}
 
 	mint_workPackage = types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
-		WorkItems:     mint_workItems,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
+		WorkItems:             mint_workItems,
 	}
 
 	totalWPSizeInMB = calaulateTotalWPSize(mint_workPackage, extrinsicsBytes)
@@ -2120,14 +2215,17 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		}
 
 		transfer_workItems = append(transfer_workItems, workItem)
+		transfer_workItems = append(transfer_workItems, auth_copy_item)
+
 	}
 
 	transfer_workPackage = types.WorkPackage{
-		Authorization: []byte("0x"),
-		AuthCodeHost:  balancesServiceIndex,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
-		WorkItems:     transfer_workItems,
+		Authorization:         []byte("0x"),
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		ParameterizationBlob:  []byte{},
+		RefineContext:         refineContext,
+		WorkItems:             transfer_workItems,
 	}
 
 	totalWPSizeInMB = calaulateTotalWPSize(transfer_workPackage, extrinsicsBytes)
@@ -2173,7 +2271,16 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 
 	mbs := []int{1, 3, 6, 12}
 	seconds := []int{1, 2, 3, 6}
-
+	service_authcopy := testServices["auth_copy"]
+	auth_copy_item := types.WorkItem{
+		Service:            service_authcopy.ServiceCode,
+		CodeHash:           service_authcopy.CodeHash,
+		Payload:            []byte{},
+		RefineGasLimit:     10000000,
+		AccumulateGasLimit: 10000000,
+		ImportedSegments:   make([]types.ImportSegment, 0),
+		ExportCount:        0,
+	}
 	fmt.Printf("\n=========================Start Size Test=========================\n")
 	SizeWorkPackages := make([]types.WorkPackage, 0, len(mbs))
 	SizeExtrinsicsBlobs := make([]types.ExtrinsicsBlobs, 0, len(mbs))
@@ -2189,10 +2296,11 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 		payload_bytes = append(second_bytes, mb_bytes...)
 
 		workPackage = types.WorkPackage{
-			Authorization: []byte("0x"),
-			AuthCodeHost:  delayservice.ServiceCode,
-			Authorizer:    types.Authorizer{},
-			RefineContext: refineContext,
+			Authorization:         []byte("0x"),
+			AuthCodeHost:          0,
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            delayservice.ServiceCode,
@@ -2203,6 +2311,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        1,
 				},
+				auth_copy_item,
 			},
 		}
 		ExtrinsicsBlobs := make(types.ExtrinsicsBlobs, 1)
@@ -2268,10 +2377,11 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 		payload_bytes = append(second_bytes, mb_bytes...)
 
 		workPackage = types.WorkPackage{
-			Authorization: []byte("0x"),
-			AuthCodeHost:  delayservice.ServiceCode,
-			Authorizer:    types.Authorizer{},
-			RefineContext: refineContext,
+			Authorization:         []byte("0x"),
+			AuthCodeHost:          0,
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            delayservice.ServiceCode,
@@ -2282,6 +2392,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        1,
 				},
+				auth_copy_item,
 			},
 		}
 		ExtrinsicsBlobs := make(types.ExtrinsicsBlobs, 1)
@@ -2427,9 +2538,10 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 	payload = append(payload, input...)
 
 	workPackage := types.WorkPackage{
-		Authorization: []byte("0x"), // TODO: set up null-authorizer
-		Authorizer:    types.Authorizer{},
-		RefineContext: refine_context,
+		Authorization:         []byte("0x"), // TODO: set up null-authorizer
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		RefineContext:         refine_context,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            service0.ServiceCode,

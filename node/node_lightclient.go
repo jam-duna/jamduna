@@ -78,11 +78,11 @@ func (n *Node) MakeWorkPackage(prereq []common.Hash, service_code uint32, WorkIt
 	refineContext := n.statedb.GetRefineContext()
 	refineContext.Prerequisites = prereq
 	workPackage := types.WorkPackage{
-		Authorization: []byte("0x"), // TODO: set up null-authorizer
-		AuthCodeHost:  service_code,
-		Authorizer:    types.Authorizer{},
-		RefineContext: refineContext,
-		WorkItems:     WorkItems,
+		Authorization:         []byte("0x"), // TODO: set up null-authorizer
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		RefineContext:         refineContext,
+		WorkItems:             WorkItems,
 	}
 	return workPackage, nil
 }

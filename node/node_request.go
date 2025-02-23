@@ -328,23 +328,6 @@ func (n *Node) runMain() {
 		select {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
-		// case workPackage := <-n.workPackagesCh:
-		// 	segmentRootLookup, err := n.GetSegmentRootLookup(workPackage)
-		// 	if err != nil {
-		// 		fmt.Printf("[N%d] Receive workPackage GetSegmentRootLookup Error: %v\n", n.id, err)
-		// 	}
-		// 	importSegments, err := n.FetchWorkpackageImportSegments(workPackage)
-		// 	if err != nil {
-		// 		// fmt.Printf("FetchWorkpackageImportSegments: %v\n", err)
-		// 	}
-		// 	fmt.Printf("[N%d] Receive workPackage executeWorkPackage\n", n.id)
-		// 	g, _, _, err := n.executeWorkPackage(workPackage, importSegments, types.ExtrinsicsBlobs{}, segmentRootLookup)
-		// 	wr := g.Report
-		// 	if err != nil {
-		// 		fmt.Printf("executeWorkPackage: %v\n", err)
-		// 	} else {
-		// 		n.workReportsCh <- wr
-		// 	}
 		case workReport := <-n.workReportsCh:
 			if n.workReports == nil {
 				n.workReports = make(map[common.Hash]types.WorkReport)

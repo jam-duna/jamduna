@@ -68,6 +68,7 @@ const (
 	Grandpa           = true
 )
 
+var bootstrap_auth_codehash = common.Hash(common.FromHex("0x8c30f2c101674af1da31769e96ce72e81a4a44c89526d7d3ff0a1a511d5f3c9f"))
 var test_prereq = false // Test Prerequisites Enabled
 const (
 	ValidatorFlag   = "VALIDATOR"

@@ -121,14 +121,15 @@ func ComputeWorkReportSignBytesWithHash(a common.Hash) []byte {
 
 func (a *WorkReport) Sign(Ed25519Secret []byte, validatorIndex uint16) (gc GuaranteeCredential) {
 	gc.ValidatorIndex = validatorIndex
-	sig := ed25519.Sign(Ed25519Secret, a.computeWorkReportBytes())
+	unsign_bytes := a.computeWorkReportBytes()
+	// fmt.Printf("unsign_bytes: %x\n", unsign_bytes)
+	sig := ed25519.Sign(Ed25519Secret, unsign_bytes)
 	copy(gc.Signature[:], sig[:])
 	return gc
 }
 
 func (a *WorkReport) ValidateSignature(publicKey []byte, signature []byte) error {
 	workReportBytes := a.computeWorkReportBytes()
-
 	if !ed25519.Verify(publicKey, workReportBytes, signature) {
 		return errors.New("invalid signature")
 	}

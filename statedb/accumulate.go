@@ -432,10 +432,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 				codeHash = workResult.CodeHash
 				g += workResult.Gas
 				p = append(p, types.AccumulateOperandElements{
-					Results: types.Result{
-						Ok:  workResult.Result.Ok[:],
-						Err: types.RESULT_OK,
-					},
+					Results:         workResult.Result,
 					Payload:         workResult.PayloadHash,
 					WorkPackageHash: workReport.AvailabilitySpec.WorkPackageHash,
 					AuthOutput:      workReport.AuthOutput,
@@ -463,7 +460,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
 	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
-
+	// fmt.Printf("[service%d] accumulat output: %x\n", s, r.Ok)
 	o.D[s] = serviceAccount
 
 	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {

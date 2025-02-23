@@ -211,8 +211,9 @@ const (
 
 // Initial services
 const (
-	BootstrapServiceCode = 0
-	BootstrapServiceFile = "/services/bootstrap.pvm"
+	BootstrapServiceCode  = 0
+	BootstrapServiceFile  = "/services/bootstrap.pvm"
+	BootStrapNullAuthFile = "/services/null_authorizer.pvm"
 )
 
 func (s *StateDB) GetHeaderHash() common.Hash {

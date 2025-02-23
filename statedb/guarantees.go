@@ -386,12 +386,14 @@ func (s *StateDB) ValidateSingleGuarantee(guarantee types.Guarantee) error {
 		CurrV := s.JamState.SafroleState.CurrValidators
 		err = guarantee.Verify(CurrV) // errBadSignature
 		if err != nil {
+			fmt.Printf("ValidateSingleGuarantee error: %v\n", err)
 			return jamerrors.ErrGBadSignature
 		}
 	} else {
 		PrevV := s.JamState.SafroleState.PrevValidators
 		err = guarantee.Verify(PrevV) // errBadSignature
 		if err != nil {
+			fmt.Printf("ValidateSingleGuarantee error: %v\n", err)
 			return jamerrors.ErrGBadSignature
 		}
 	}
@@ -690,6 +692,7 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	for _, results := range g.Report.Results {
 		sum_rg += results.Gas
 	}
+	// fmt.Printf("report :%s \n", g.Report.String())
 	// current gas allocation is unlimited
 	if sum_rg <= types.AccumulationGasAllocation {
 		for _, results := range g.Report.Results {
@@ -704,9 +707,9 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 			}
 		}
 	}
-	if debugG {
-		fmt.Printf("sum_rg %d\n", sum_rg)
-	}
+
+	fmt.Printf("sum_rg %d\n", sum_rg)
+
 	return jamerrors.ErrGWorkReportGasTooHigh
 }
 

@@ -266,10 +266,10 @@ func TestDisputes(t *testing.T) {
 		// set up service using the Bootstrap service
 		refineContext := builderNode.statedb.GetRefineContext()
 		codeWorkPackage := types.WorkPackage{
-			Authorization: []byte(""),
-			AuthCodeHost:  bootstrapService,
-			Authorizer:    types.Authorizer{},
-			RefineContext: refineContext,
+			Authorization:         []byte(""),
+			AuthCodeHost:          0,
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			RefineContext:         refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            bootstrapService,

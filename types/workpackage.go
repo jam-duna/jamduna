@@ -24,11 +24,13 @@ type WorkPackage struct {
 	Authorization []byte `json:"authorization"`
 	// $h$ - the index of the service which hosts the authorization code
 	AuthCodeHost uint32 `json:"auth_code_host"`
-	// $c$ - an authorization code hash
-	Authorizer Authorizer `json:"authorizer"`
+	// $u$ - an authorization code hash
+	AuthorizationCodeHash common.Hash `json:"authorization_code_hash"`
+	// $p$ - a parameterization blob
+	ParameterizationBlob []byte `json:"parameterization_blob"`
 	// $x$ - context
 	RefineContext RefineContext `json:"context"`
-	// $i$ - a sequence of work items
+	// $w$ - a sequence of work items
 	WorkItems []WorkItem `json:"items"`
 }
 
@@ -105,11 +107,12 @@ func (a *WorkPackage) Hash() common.Hash {
 
 func (a *WorkPackage) UnmarshalJSON(data []byte) error {
 	var s struct {
-		Authorization string        `json:"authorization"`
-		AuthCodeHost  uint32        `json:"auth_code_host"`
-		Authorizer    Authorizer    `json:"authorizer"`
-		RefineContext RefineContext `json:"context"`
-		WorkItems     []WorkItem    `json:"items"`
+		Authorization         string        `json:"authorization"`
+		AuthCodeHost          uint32        `json:"auth_code_host"`
+		AuthorizationCodeHash common.Hash   `json:"authorization_code_hash"`
+		ParameterizationBlob  []byte        `json:"parameterization_blob"`
+		RefineContext         RefineContext `json:"context"`
+		WorkItems             []WorkItem    `json:"items"`
 	}
 	err := json.Unmarshal(data, &s)
 	if err != nil {
@@ -118,7 +121,8 @@ func (a *WorkPackage) UnmarshalJSON(data []byte) error {
 
 	a.Authorization = common.FromHex(s.Authorization)
 	a.AuthCodeHost = s.AuthCodeHost
-	a.Authorizer = s.Authorizer
+	a.AuthorizationCodeHash = s.AuthorizationCodeHash
+	a.ParameterizationBlob = s.ParameterizationBlob
 	a.RefineContext = s.RefineContext
 	a.WorkItems = s.WorkItems
 
@@ -145,17 +149,19 @@ func (a WorkPackage) MarshalJSON() ([]byte, error) {
 	authorization := common.HexString(a.Authorization)
 
 	return json.Marshal(&struct {
-		Authorization string        `json:"authorization"`
-		AuthCodeHost  uint32        `json:"auth_code_host"`
-		Authorizer    Authorizer    `json:"authorizer"`
-		RefineContext RefineContext `json:"context"`
-		WorkItems     []WorkItem    `json:"items"`
+		Authorization         string        `json:"authorization"`
+		AuthCodeHost          uint32        `json:"auth_code_host"`
+		AuthorizationCodeHash common.Hash   `json:"authorization_code_hash"`
+		ParameterizationBlob  []byte        `json:"parameterization_blob"`
+		RefineContext         RefineContext `json:"context"`
+		WorkItems             []WorkItem    `json:"items"`
 	}{
-		Authorization: authorization,
-		AuthCodeHost:  a.AuthCodeHost,
-		Authorizer:    a.Authorizer,
-		RefineContext: a.RefineContext,
-		WorkItems:     a.WorkItems,
+		Authorization:         authorization,
+		AuthCodeHost:          a.AuthCodeHost,
+		AuthorizationCodeHash: a.AuthorizationCodeHash,
+		ParameterizationBlob:  a.ParameterizationBlob,
+		RefineContext:         a.RefineContext,
+		WorkItems:             a.WorkItems,
 	})
 }
 

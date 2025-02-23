@@ -16,10 +16,10 @@ import (
 */
 
 type RefineContext struct {
-	Anchor           common.Hash   `json:"anchor"`
-	StateRoot        common.Hash   `json:"state_root"`
-	BeefyRoot        common.Hash   `json:"beefy_root"`
-	LookupAnchor     common.Hash   `json:"lookup_anchor"`
-	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"`
-	Prerequisites    []common.Hash `json:"prerequisites"`
+	Anchor           common.Hash   `json:"anchor"`             // a
+	StateRoot        common.Hash   `json:"state_root"`         // s
+	BeefyRoot        common.Hash   `json:"beefy_root"`         // b
+	LookupAnchor     common.Hash   `json:"lookup_anchor"`      // l
+	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"` // t
+	Prerequisites    []common.Hash `json:"prerequisites"`      //p
 }

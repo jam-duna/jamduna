@@ -368,14 +368,20 @@ func (vm *VM) hostBless() {
 func (vm *VM) hostAssign() {
 	core, _ := vm.ReadRegister(7)
 	if core >= numCores {
+		vm.WriteRegister(7, CORE)
 		vm.HostResultCode = CORE
 		return
 	}
 	o, _ := vm.ReadRegister(8)
-	c, _ := vm.Ram.ReadRAMBytes(uint32(o), 32*types.MaxAuthorizationQueueItems)
-	qi := make([]common.Hash, 32)
-	for i := 0; i < 32; i++ {
-		qi[i] = common.BytesToHash(c[i:(i + 32)])
+	c, errcode := vm.Ram.ReadRAMBytes(uint32(o), 32*types.MaxAuthorizationQueueItems)
+	if errcode != OK {
+		vm.WriteRegister(7, OOB)
+		vm.HostResultCode = types.PVM_PANIC
+		return
+	}
+	qi := make([]common.Hash, types.MaxAuthorizationQueueItems)
+	for i := 0; i < types.MaxAuthorizationQueueItems; i++ {
+		qi[i] = common.BytesToHash(c[i*32 : (i+1)*32])
 	}
 	copy(vm.X.U.QueueWorkReport[core][:], qi[:])
 	vm.HostResultCode = OK
