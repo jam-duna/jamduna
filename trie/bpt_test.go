@@ -698,18 +698,22 @@ func TestServiceStorage(t *testing.T) {
 	test_db, _ := initLevelDB()
 	tree := NewMerkleTree(nil, test_db)
 
-	tree.SetServiceStorage(42, []byte{1}, []byte{1})
-	tree.SetServiceStorage(43, []byte{1, 2}, []byte{1, 2})
-	tree.SetServiceStorage(44, []byte{1, 2, 3}, []byte{1, 2, 3})
+	k42 := common.ServiceStorageKey(42, []byte{1})
+	k43 := common.ServiceStorageKey(43, []byte{1, 2})
+	k44 := common.ServiceStorageKey(44, []byte{1, 2, 3})
+	k45 := common.ServiceStorageKey(45, []byte{1, 2, 3})
+	tree.SetServiceStorage(42, k42, []byte{1})
+	tree.SetServiceStorage(43, k43, []byte{1, 2})
+	tree.SetServiceStorage(44, k44, []byte{1, 2, 3})
 
 	if bptDebug {
 		tree.printTree(tree.Root, 0)
 	}
 
-	Storage1, _, _ := tree.GetServiceStorage(42, []byte{1})
-	Storage2, _, _ := tree.GetServiceStorage(43, []byte{1, 2})
-	Storage3, _, _ := tree.GetServiceStorage(44, []byte{1, 2, 3})
-	Storage4, _, _ := tree.GetServiceStorage(45, []byte{1, 2, 3})
+	Storage1, _, _ := tree.GetServiceStorage(42, k42)
+	Storage2, _, _ := tree.GetServiceStorage(43, k43)
+	Storage3, _, _ := tree.GetServiceStorage(44, k44)
+	Storage4, _, _ := tree.GetServiceStorage(45, k45)
 
 	if bptDebug {
 		fmt.Println("Storage1", Storage1)
@@ -717,13 +721,13 @@ func TestServiceStorage(t *testing.T) {
 		fmt.Println("Storage3", Storage3)
 		fmt.Println("Storage4", Storage4)
 	}
-	_ = tree.DeleteServiceStorage(42, []byte{1})
-	_ = tree.DeleteServiceStorage(43, []byte{1, 2})
-	_ = tree.DeleteServiceStorage(44, []byte{1, 2, 3})
+	_ = tree.DeleteServiceStorage(42, k42)
+	_ = tree.DeleteServiceStorage(43, k43)
+	_ = tree.DeleteServiceStorage(44, k44)
 
-	Storage1, _, _ = tree.GetServiceStorage(42, []byte{1})
-	Storage2, _, _ = tree.GetServiceStorage(43, []byte{1, 2})
-	Storage3, _, _ = tree.GetServiceStorage(44, []byte{1, 2, 3})
+	Storage1, _, _ = tree.GetServiceStorage(42, k42)
+	Storage2, _, _ = tree.GetServiceStorage(43, k43)
+	Storage3, _, _ = tree.GetServiceStorage(44, k44)
 	if bptDebug {
 		fmt.Println("Storage1", Storage1)
 		fmt.Println("Storage2", Storage2)

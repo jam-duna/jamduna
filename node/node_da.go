@@ -664,7 +664,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
 			PayloadHash: common.Blake2Hash(workItem.Payload),
-			Gas:         101,
+			Gas:         9111,
 			Result:      output,
 		}
 		results = append(results, result)
@@ -863,7 +863,7 @@ func (n *Node) executeWorkPackage(wpCoreIndex uint16, workPackage types.WorkPack
 			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
 			PayloadHash: common.Blake2Hash(workItem.Payload),
-			Gas:         101,
+			Gas:         911411,
 			Result:      output,
 		}
 		results = append(results, result)

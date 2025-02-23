@@ -425,10 +425,12 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 
 	var codeHash common.Hash
 	p := make([]types.AccumulateOperandElements, 0)
+	g := uint64(0)
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
 			if workResult.ServiceID == s {
 				codeHash = workResult.CodeHash
+				g += workResult.Gas
 				p = append(p, types.AccumulateOperandElements{
 					Results: types.Result{
 						Ok:  workResult.Result.Ok[:],
@@ -458,7 +460,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
 	t := sd.JamState.SafroleState.Timeslot
-	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, p, xContext)
+
+	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
 	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
 
 	o.D[s] = serviceAccount

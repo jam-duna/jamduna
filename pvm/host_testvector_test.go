@@ -579,7 +579,7 @@ func (tc GeneralTestcase) GetExpectedMemory() RAMForTest      { return tc.Expect
 func (tc GeneralTestcase) GetName() string                    { return tc.Name }
 
 func InitPvmBase(vm *VM, tc Testcase) {
-	vm.Gas = int64(tc.GetInitialGas())
+	vm.Gas = tc.GetInitialGas()
 	for i, reg := range tc.GetInitialRegs() {
 		vm.WriteRegister(int(i), reg)
 	}

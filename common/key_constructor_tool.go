@@ -31,15 +31,7 @@ func Compute_storageKey_internal(key_hash Hash) Hash {
 	prefixBytes := make([]byte, 4)
 	prefix := uint32((1 << 32) - 1)
 	binary.LittleEndian.PutUint32(prefixBytes, prefix)
-
-	as_internal_key := append(prefixBytes, key_hash[0:28]...)
-	return BytesToHash(as_internal_key)
-}
-
-func Compute_storageKey_internal_byte(s uint32, k []byte) Hash {
-	kh := make([]byte, 32)
-	copy(kh[:], k[:])
-	return Compute_storageKey_internal(BytesToHash(kh))
+	return BytesToHash(append(prefixBytes, key_hash[0:28]...))
 }
 
 // EQ 290 - state-key constructor functions C
@@ -84,4 +76,10 @@ func ComputeC_sh_Byte(s uint32, k []byte) Hash {
 	var stateKey [32]byte
 	copy(stateKey[:], k)
 	return ComputeC_sh(s, BytesToHash(stateKey[:]))
+}
+
+func ServiceStorageKey(s uint32, k []byte) Hash {
+	sb := make([]byte, 4)
+	binary.LittleEndian.PutUint32(sb, uint32(s))
+	return Blake2Hash(append(sb, k...))
 }

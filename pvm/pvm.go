@@ -250,7 +250,7 @@ type VM struct {
 	// ram                 map[uint32][4096]byte
 	Ram      *RAM
 	register []uint64
-	Gas      int64
+	Gas      uint64
 	hostenv  types.HostEnv
 
 	VMs map[uint32]*VM
@@ -963,7 +963,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	//  IsAuthorized - E(p,c) Eq 268
 	//  Transfer - E(t) Eq 282
 	vm := &VM{
-		Gas:           int64(1 << 62),
+		Gas:           0,
 		JSize:         p.JSize,
 		Z:             p.Z,
 		J:             p.J,
@@ -1074,7 +1074,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	a = append(a, workPackage.Authorization...)
 
 	vm.WorkItemIndex = workitemIndex
-	vm.Gas = int64(workitem.RefineGasLimit)
+	vm.Gas = workitem.RefineGasLimit
 	vm.WorkPackage = workPackage
 	vm.Authorization = authorization
 	vm.Extrinsics = extrinsics
@@ -1085,7 +1085,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	return vm.getArgumentOutputs()
 }
 
-func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
 	// for _, argument := range elements {
@@ -1097,7 +1097,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateO
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, encoded_elements...)
 	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
-	vm.Execute(types.EntryPointAccumulate)           // F ∈ Ω⟨(X, X)⟩
+	vm.Gas = g
+	vm.Execute(types.EntryPointAccumulate) // F ∈ Ω⟨(X, X)⟩
 	// }
 	xs, _ = vm.X.GetX_s()
 	r, res = vm.getArgumentOutputs()

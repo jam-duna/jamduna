@@ -40,7 +40,7 @@ func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, bool, error)
 	return nil, false, nil
 }
 
-func (mh *MockHostEnv) ReadServiceStorage(s uint32, k []byte) (storage []byte, ok bool, err error) {
+func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) (storage []byte, ok bool, err error) {
 	db := mh.GetDB()
 	_, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)

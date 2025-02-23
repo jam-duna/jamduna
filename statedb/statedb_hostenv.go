@@ -46,21 +46,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 					fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %x, error: %v\n", k, err)
 					return err
 				}
-				if exists {
-					if sa.NumStorageItems > 0 {
-						sa.NumStorageItems--
-					}
-					sa.StorageSize -= 32 + uint64(len(storage.Value))
-				}
 			} else {
-				if !exists {
-					sa.NumStorageItems++
-					sa.StorageSize += 32 + uint64(len(storage.Value))
-					//fmt.Printf("DOES NOT EXIST ==> updating NumStorageItems %d StorageSize %d\n", sa.NumStorageItems, sa.StorageSize)
-				} else {
-					sa.StorageSize += uint64(len(storage.Value)) - uint64(len(oldValue))
-					//fmt.Printf("EXISTS ==> updating StorageSize %d\n")
-				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
 					fmt.Printf("SetServiceStorage err %v\n", err)
@@ -74,17 +60,6 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 			if v.Deleted {
 				panic("check this case as [] is natural -- does it exist")
 			} else {
-				t, existsLookup, err := tree.GetPreImageLookup(service_idx, blob_hash, uint32(v.Z))
-				if err != nil {
-					return err
-				}
-				if debugStorageCalc {
-					fmt.Printf(" LOOKUP %s value exists %v %v\n", blob_hash, existsLookup, t)
-				}
-				if !existsLookup {
-					sa.NumStorageItems += 2
-					sa.StorageSize += 81 + uint64(v.Z)
-				}
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {
 					return err
@@ -172,7 +147,7 @@ func (s *StateDB) writeService(service uint32, sa *types.ServiceAccount) (err er
 	return tree.SetService(service, v)
 }
 
-func (s *StateDB) ReadServiceStorage(service uint32, k []byte) (storage []byte, ok bool, err error) {
+func (s *StateDB) ReadServiceStorage(service uint32, k common.Hash) (storage []byte, ok bool, err error) {
 	// not init case
 	tree := s.GetTrie()
 	storage, ok, err = tree.GetServiceStorage(service, k)

@@ -387,7 +387,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 			if stateDB != nil && stateDB.Block != nil {
 				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
-				k := []byte{0, 0, 0, 0}
+				k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
 				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, k)
 				if err != nil || !ok {
 					time.Sleep(1 * time.Second)
@@ -534,8 +534,8 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			time.Sleep(1 * time.Second)
 		}
 		prevWorkPackageHash = workPackageHash
-
-		service_account_byte, _, _ := n1.getState().GetTrie().GetServiceStorage(service0.ServiceCode, []byte{0})
+		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
+		service_account_byte, _, _ := n1.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
 		fmt.Printf("Fib(%v) = %v\n", fibN, service_account_byte)
 	}
 
@@ -548,8 +548,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	service1 := testServices["tribonacci"]
 	serviceM := testServices["megatron"]
 	fmt.Printf("service0: %v, codehash: %v (len=%v) | %v\n", service0.ServiceCode, service0.CodeHash, len(service0.Code), service0.ServiceName)
-	fmt.Printf("service1: %v, codehash: %v (len=%v) | %v\n", service1.ServiceCode, service1.CodeHash, len(service0.Code), service1.ServiceName)
-	fmt.Printf("serviceM: %v, codehash: %v (len=%v) | %v\n", serviceM.ServiceCode, serviceM.CodeHash, len(service0.Code), serviceM.ServiceName)
+	fmt.Printf("service1: %v, codehash: %v (len=%v) | %v\n", service1.ServiceCode, service1.CodeHash, len(service1.Code), service1.ServiceName)
+	fmt.Printf("serviceM: %v, codehash: %v (len=%v) | %v\n", serviceM.ServiceCode, serviceM.CodeHash, len(serviceM.Code), serviceM.ServiceName)
 	targetNMax := targetMegatronN
 	time.Sleep(1 * time.Second)
 	// =================================================
@@ -786,15 +786,19 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			if !successful {
 				panic(fmt.Sprintf("Fib_Tri %d is failed\n", Fib_Tri_counter))
 			}
-			service_account_byte, _, _ := nodes[1].getState().GetTrie().GetServiceStorage(service0.ServiceCode, []byte{0})
+			k0 := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
+			k1 := common.ServiceStorageKey(service1.ServiceCode, []byte{0})
+
+			service_account_byte, _, _ := nodes[1].getState().GetTrie().GetServiceStorage(service0.ServiceCode, k0)
 			fmt.Printf("Fib %d = %v\n", Fib_Tri_counter, service_account_byte)
-			service_account_byte, _, _ = nodes[1].getState().GetTrie().GetServiceStorage(service1.ServiceCode, []byte{0})
+			service_account_byte, _, _ = nodes[1].getState().GetTrie().GetServiceStorage(service1.ServiceCode, k1)
 			fmt.Printf("Tri %d = %v\n", Fib_Tri_counter, service_account_byte)
 		case successful := <-Meg_successful:
 			if !successful {
 				panic(fmt.Sprintf("Meg %d is failed\n", Meg_counter))
 			}
-			service_account_byte, _, _ := nodes[1].getState().GetTrie().GetServiceStorage(serviceM.ServiceCode, []byte{0})
+			km := common.ServiceStorageKey(serviceM.ServiceCode, []byte{0})
+			service_account_byte, _, _ := nodes[1].getState().GetTrie().GetServiceStorage(serviceM.ServiceCode, km)
 			fmt.Printf("Meg %d = %v\n", Meg_counter, service_account_byte)
 		case workPackage := <-Meg_Chan:
 			// submit to core 0
@@ -2357,8 +2361,8 @@ func ShowAssetDetail(n *Node, balance_service_index uint32, asset_id uint64) {
 	var asset Asset
 	key_byte := make([]byte, 8)
 	binary.LittleEndian.PutUint64(key_byte, asset_id)
-	service_account_byte, _, _ := n.getState().GetTrie().GetServiceStorage(balance_service_index, key_byte)
-
+	ka := common.ServiceStorageKey(balance_service_index, key_byte)
+	service_account_byte, _, _ := n.getState().GetTrie().GetServiceStorage(balance_service_index, ka)
 	fetched_asset, _ := asset.FromBytes(service_account_byte)
 	fmt.Printf("\n\033[38;5;13mAsset ID\033[0m: \033[32m%v\033[0m\n", fetched_asset.AssetID)
 	fmt.Printf("\033[38;5;13mAsset Issuer\033[0m: \033[32m%x\033[0m\n", fetched_asset.Issuer)
@@ -2373,7 +2377,8 @@ func ShowAccountDetail(n *Node, balance_service_index uint32, asset_id uint64, a
 	key_byte := make([]byte, 8+32)
 	binary.LittleEndian.PutUint64(key_byte, asset_id)
 	copy(key_byte[8:], account_key[:])
-	service_account_byte, _, _ := n.getState().GetTrie().GetServiceStorage(balance_service_index, key_byte)
+	ka := common.ServiceStorageKey(balance_service_index, key_byte)
+	service_account_byte, _, _ := n.getState().GetTrie().GetServiceStorage(balance_service_index, ka)
 
 	fetched_account, _ := account.FromBytes(service_account_byte)
 	fmt.Printf("\n\033[38;5;13mAccount Key\033[0m: \033[32m%x\033[0m\n", account_key)

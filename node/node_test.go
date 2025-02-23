@@ -282,7 +282,7 @@ func TestDisputes(t *testing.T) {
 			if stateDB != nil && stateDB.Block != nil {
 				stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 				t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), builderNode.store)
-				k := []byte{0, 0, 0, 0}
+				k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
 				service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, k)
 				if err != nil || !ok {
 					time.Sleep(1 * time.Second)

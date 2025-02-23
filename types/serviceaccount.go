@@ -78,8 +78,8 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 type StorageObject struct {
 	Deleted bool
 	Dirty   bool
-	Value   []byte `json:"value"`  // v
-	RawKey  []byte `json:"rawkey"` // rawKey
+	Value   []byte      `json:"value"`  // v
+	RawKey  common.Hash `json:"rawkey"` // rawKey
 }
 
 func (o StorageObject) Clone() StorageObject {
@@ -288,9 +288,9 @@ func (s *ServiceAccount) String() string {
 	return str + str2 + str3 + str4
 }
 
-func (s *ServiceAccount) ReadStorage(rawK []byte, sdb HostEnv) (ok bool, v []byte) {
+func (s *ServiceAccount) ReadStorage(rawK common.Hash, sdb HostEnv) (ok bool, v []byte) {
 	serviceIndex := s.ServiceIndex
-	hk := common.Compute_storageKey_internal_byte(serviceIndex, rawK)
+	hk := common.Compute_storageKey_internal(rawK)
 	storageObj, ok := s.Storage[hk]
 	if storageObj.Deleted {
 		return false, nil
@@ -419,13 +419,13 @@ func (s *ServiceAccount) WriteForget(serviceIndex uint32, rawK []byte, val []byt
 	// mark a_l as deleted -- note that we need this to differentiate the empty marker case from the hostSolicit
 }
 
-func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK []byte, val []byte) {
+func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK common.Hash, val []byte) {
 	if s.Mutable == false {
 		panic("Called WriteStorage on immutable ServiceAccount")
 	}
 	// k for original raw key, hk for hash key
 	// serviceIndex := s.ServiceIndex
-	hk := common.Compute_storageKey_internal_byte(serviceIndex, rawK)
+	hk := common.Compute_storageKey_internal(rawK)
 	s.Dirty = true
 	s.Storage[hk] = StorageObject{
 		Dirty:   true,
@@ -461,13 +461,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 }
 
 func (s *ServiceAccount) ComputeThreshold() uint64 {
-	res := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
-	/*
-	   fmt.Printf("a_t (BS+BI*ai +BL*al)=%d+%d*%d+%d*%d=%d\n",
-	       BaseServiceBalance, MinElectiveServiceItemBalance, s.NumStorageItems,
-	       MinElectiveServiceOctetBalance, s.StorageSize, res)
-	*/
-	return res
+	return BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
 }
 
 func (s *ServiceAccount) MarshalJSON() ([]byte, error) {

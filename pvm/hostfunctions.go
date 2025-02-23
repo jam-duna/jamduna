@@ -161,19 +161,43 @@ type Refine_parameters struct {
 	C_t                  uint32
 }
 
+func (vm *VM) chargeGas(host_fn int) {
+
+	beforeGas := vm.Gas
+	chargedGas := uint64(10)
+	exp := fmt.Sprintf("HOSTFUNC %d", host_fn)
+	if host_fn == TRANSFER {
+		omega_9, _ := vm.ReadRegister(9)
+		chargedGas = omega_9
+		exp = "TRANSFER"
+	} else if host_fn == READ {
+		exp = "READ"
+	} else if host_fn == WRITE {
+		exp = "WRITE"
+	} else if host_fn == NEW {
+		exp = "NEW"
+	} else if host_fn == FETCH {
+		exp = "FETCH"
+	} else if host_fn == EXPORT {
+		exp = "EXPOR"
+	}
+
+	vm.Gas = beforeGas - chargedGas
+	fmt.Printf(" %s charge gas %d  (Gas %d=>%d)\n", exp, chargedGas, beforeGas, vm.Gas)
+}
+
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	if debug_pvm {
 		fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
 	}
-
 	if vm.Gas-g < 0 {
 		vm.ResultCode = types.PVM_OOG
 		return true, fmt.Errorf("Out of gas\n")
-	} else {
-		vm.Gas = vm.Gas - g
 	}
+	vm.chargeGas(host_fn)
+
 	switch host_fn {
 	case GAS:
 		vm.hostGas()
@@ -220,9 +244,6 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, nil
 
 	case TRANSFER:
-		omega_8, _ := vm.ReadRegister(8)
-		omega_9, _ := vm.ReadRegister(9)
-		vm.Gas = vm.Gas - int64(omega_8) - int64(omega_9)*(1<<32)
 		vm.hostTransfer()
 		return true, nil
 
@@ -301,13 +322,6 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return false, fmt.Errorf("unknown host call: %d\n", host_fn)
 	}
 }
-
-// func min(x, y uint64) uint64 {
-// 	if x < y {
-// 		return x
-// 	}
-// 	return y
-// }
 
 // Information-on-Service
 func (vm *VM) hostInfo() {
@@ -435,6 +449,17 @@ func (vm *VM) hostNew() {
 		fmt.Printf("min_item_gas (w9)=%d\n", g)
 		fmt.Printf("min_memo_gas (w10)=%d\n", m)
 	}
+	x_s_t := xs.ComputeThreshold()
+	if xs.Balance < x_s_t {
+		fmt.Println("")
+		vm.WriteRegister(7, CASH)
+		vm.HostResultCode = CASH //balance insufficient
+		fmt.Printf("hostNew: Balance insufficient (x_s)_t  %d < threshold = %d  \n", xs.Balance, x_s_t)
+		panic(555555) // TEMPORARY, in our test cases this does not happen
+		return
+	}
+
+	// xs has enough balance to fund service creation of a AND covering its own threshold
 
 	xi := xContext.I
 	// simulate a with c, g, m
@@ -445,36 +470,23 @@ func (vm *VM) hostNew() {
 		CodeHash:     common.BytesToHash(c),
 		GasLimitG:    uint64(g),
 		GasLimitM:    uint64(m),
+		// b: a_t https://graypaper.fluffylabs.dev/#/5f542d7/31c80231c802
 		// these are adjusted in writeAccount.  DO NOT INITIALIZE THEM HERE
-		NumStorageItems: 0,         //a_s = 2⋅∣al∣+∣as∣
-		StorageSize:     uint64(0), //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
+		NumStorageItems: 2,              //a_s = 2⋅∣al∣+∣as∣
+		StorageSize:     uint64(81 + l), //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
 		Storage:         make(map[common.Hash]types.StorageObject),
 		Lookup:          make(map[common.Hash]types.LookupObject),
 		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
 	a.Balance = a.ComputeThreshold()
-	//fmt.Printf("... Service Balance %d >= threshold = %d [9.3 a_t](https://graypaper.fluffylabs.dev/#/293bf5a/111801111b01) \n", xs.Balance, a.Balance)
+	a.Balance += 5000000     // TEMPORARY HACK -- should have a hostTransfer instead...
+	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
+	xContext.I = new_check(uint32(256)+uint32(xi-256+42)%(uint32(4294966784)), xContext.U.D)
+	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{})
 
-	if xs.Balance >= xs.ComputeThreshold() {
-		xs.DecBalance(a.Balance)
-		//xs has enough balance to fund the creation of a AND covering its own threshold
-		i := uint32(256) + uint32(xi-256+42)%(uint32(4294966784))
-		xContext.I = new_check(i, xContext.U.D)
-		//fmt.Printf("  [ALSO: next xi is check(%d) = %d (not used)]\n", i, xContext.I)
-		a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{})
-
-		//fmt.Printf(" New Service xi (w7)=%d to be stored %s\n", xi, a.String())
-		// (x's)b <- (xs)b - at
-		xContext.U.D[xi] = a
-		vm.WriteRegister(7, uint64(xi))
-		vm.HostResultCode = OK
-	} else {
-		if debug_host {
-			fmt.Println("Balance insufficient")
-		}
-		vm.WriteRegister(7, CASH)
-		vm.HostResultCode = CASH //balance insufficient
-	}
+	xContext.U.D[xi] = a
+	vm.WriteRegister(7, uint64(xi))
+	vm.HostResultCode = OK
 }
 
 // Upgrade service
@@ -503,7 +515,6 @@ func (vm *VM) hostUpgrade() {
 
 // Transfer host call
 func (vm *VM) hostTransfer() {
-	return
 	d, _ := vm.ReadRegister(7)
 	a, _ := vm.ReadRegister(8)
 	g, _ := vm.ReadRegister(9)
@@ -540,16 +551,13 @@ func (vm *VM) hostTransfer() {
 		return
 	}
 
-	xs.DecBalance(a)
-	b := xs.Balance
-
-	if b < xs.ComputeThreshold() {
-		xs.IncBalance(a)
+	if xs.Balance < xs.ComputeThreshold() {
 		vm.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH
 		return
 	}
 
+	xs.DecBalance(a)
 	copy(t.Memo[:], m[:])
 	vm.X.T = append(vm.X.T, t)
 	vm.WriteRegister(7, OK)
@@ -846,7 +854,7 @@ func (vm *VM) hostInvoke() {
 		bitmask: program.K,
 
 		pc:       m_n.I,
-		Gas:      int64(g),
+		Gas:      uint64(g),
 		register: m_n_reg,
 		Ram:      m_n.U,
 	}
@@ -981,7 +989,6 @@ func (vm *VM) hostRead() {
 	var a *types.ServiceAccount
 	if omega_7 == uint64(vm.Service_index) || omega_7 == maxUint64 {
 		a = vm.ServiceAccount
-
 	}
 	if a == nil {
 		a, _ = vm.getXUDS(omega_7)
@@ -990,26 +997,29 @@ func (vm *VM) hostRead() {
 	ko, _ := vm.ReadRegister(8)
 	kz, _ := vm.ReadRegister(9)
 	bo, _ := vm.ReadRegister(10)
-	bz, _ := vm.ReadRegister(11)
-	k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
+	f, _ := vm.ReadRegister(11)
+	l, _ := vm.ReadRegister(12)
+	mu_k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
 	if err_k != OK {
 		vm.WriteRegister(7, OOB)
 		vm.HostResultCode = OOB
 		return
 	}
-	// var account_storagehash common.Hash
-	var val []byte
-	_, val = a.ReadStorage(k, vm.hostenv)
-
-	l := uint64(len(val))
-	l = min(l, uint64(bz))
-	if l != 0 {
-		vm.Ram.WriteRAMBytes(uint32(bo), val[:l])
-		vm.WriteRegister(7, l)
-	} else {
+	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
+	ok, val := a.ReadStorage(k, vm.hostenv)
+	fmt.Printf("hostRead (%d, %x => %s) ok=%v %x (%d bytes)\n", a.ServiceIndex, mu_k, k, ok, val, len(val))
+	if !ok {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
+		return
 	}
+	lenval := uint64(len(val))
+	f = min(f, lenval)
+	l = min(l, lenval-f)
+	// TODO: check for OOB case again using o, f + l
+	vm.Ram.WriteRAMBytes(uint32(bo), val[f:])
+	vm.WriteRegister(7, l)
+
 }
 
 // Write Storage
@@ -1019,21 +1029,27 @@ func (vm *VM) hostWrite() {
 	if a == nil {
 		a, _ = vm.getXUDS(uint64(vm.Service_index))
 	}
-
 	ko, _ := vm.ReadRegister(7)
 	kz, _ := vm.ReadRegister(8)
 	vo, _ := vm.ReadRegister(9)
 	vz, _ := vm.ReadRegister(10)
-	k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz))
+	mu_k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz))
 	if err_k != OK {
 		vm.WriteRegister(7, OOB)
 		vm.HostResultCode = OOB
 		return
 	}
+	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
+	a_t := a.ComputeThreshold()
+	if a_t > a.Balance {
+		vm.WriteRegister(7, FULL)
+		vm.HostResultCode = FULL
+		fmt.Printf("hostWrite: a_t=%d > balance=%d\n", a_t, a.Balance)
+		panic(6666666)
+	}
 
-	var l uint64
-	_, storage := a.ReadStorage(k, vm.hostenv)
-	l = uint64(len(storage))
+	exists, oldValue := a.ReadStorage(k, vm.hostenv)
+	l := uint64(len(oldValue))
 
 	if vz == 0 {
 		a.WriteStorage(a.ServiceIndex, k, []byte{})
@@ -1041,27 +1057,36 @@ func (vm *VM) hostWrite() {
 		vm.HostResultCode = NONE
 		return
 	}
-	at := a.ComputeThreshold()
-	b := a.Balance
 
-	if at <= b || true { // TEMPORARILY -- we need a hostTransfer
-		// adjust S
-		v := []byte{}
-		err := uint64(0)
-		if vz > 0 {
-			v, err = vm.Ram.ReadRAMBytes(uint32(vo), uint32(vz))
-			if err != OK {
-				vm.WriteRegister(7, OOB)
-				vm.HostResultCode = OOB
-				return
-			}
+	// adjust S
+	v := []byte{}
+	err := uint64(0)
+	if vz > 0 {
+		v, err = vm.Ram.ReadRAMBytes(uint32(vo), uint32(vz))
+		if err != OK {
+			vm.WriteRegister(7, OOB)
+			vm.HostResultCode = OOB
+			return
 		}
-		a.WriteStorage(a.ServiceIndex, k, v)
-		vm.WriteRegister(7, l)
-		vm.HostResultCode = OK
+	}
+	a.WriteStorage(a.ServiceIndex, k, v)
+	fmt.Printf("hostWrite (%d, %x => %s) %x (%d bytes)\n", a.ServiceIndex, mu_k, k, v, len(v))
+	vm.WriteRegister(7, l)
+	vm.HostResultCode = OK
+	if !exists {
+		a.NumStorageItems++
+		a.StorageSize += 32 + uint64(len(v))
+		//fmt.Printf("DOES NOT EXIST ==> updating NumStorageItems %d StorageSize %d\n", sa.NumStorageItems, sa.StorageSize)
 	} else {
-		vm.WriteRegister(7, FULL)
-		vm.HostResultCode = FULL
+		//fmt.Printf("EXISTS ==> updating StorageSize %d\n")
+		if len(v) == 0 {
+			if a.NumStorageItems > 0 {
+				a.NumStorageItems--
+			}
+			a.StorageSize -= 32 + uint64(len(oldValue))
+		} else {
+			a.StorageSize += uint64(len(v)) - uint64(len(oldValue))
+		}
 	}
 
 }
@@ -1085,6 +1110,8 @@ func (vm *VM) hostSolicit() {
 	if !ok {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{})
+		xs.NumStorageItems += 2
+		xs.StorageSize += 81 + uint64(z)
 	} else if len(X_s_l) == 2 { // [x, y]
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
 	} else {
@@ -1098,6 +1125,9 @@ func (vm *VM) hostSolicit() {
 		vm.HostResultCode = FULL
 		return
 	}
+	if !ok {
+	}
+
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
@@ -1127,6 +1157,9 @@ func (vm *VM) hostForget() {
 	if len(X_s_l) == 0 || (len(X_s_l) == 2) && X_s_l[1] < (vm.Timeslot-D) {
 		x_s.WriteLookup(account_lookuphash, uint32(z), nil) // nil means delete the lookup
 		x_s.WritePreimage(account_blobhash, []byte{})       // []byte{} means delete the preimage
+		// storage accounting
+		x_s.NumStorageItems -= 2
+		x_s.StorageSize -= 81 + uint64(z)
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 	} else if len(X_s_l) == 1 {
