@@ -418,7 +418,6 @@ const (
 	XOR_IMM           = 133
 	OR_IMM            = 134
 	MUL_IMM_32        = 135
-	MUL_IMM           = 135
 	SET_LT_U_IMM      = 136
 	SET_LT_S_IMM      = 137
 	SHLO_L_IMM_32     = 138
@@ -1082,7 +1081,8 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine)
-	return vm.getArgumentOutputs()
+	r, res = vm.getArgumentOutputs()
+	return r, res
 }
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
@@ -1211,7 +1211,7 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		return r, res
 	}
 	r.Err = types.RESULT_PANIC
-	return r, res
+	return r, 0
 }
 
 // step performs a single step in the PVM
@@ -1332,7 +1332,7 @@ func (vm *VM) step() error {
 			vm.pc += 1 + len_operands
 		}
 		// MUL_UPPER_S_S_IMM, MUL_UPPER_S_S_IMM
-	case ADD_IMM_32, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM, SET_LT_U_IMM, SET_LT_S_IMM, MUL_IMM_64, NEG_ADD_IMM_64, SHLO_L_IMM_ALT_64, SHLO_R_IMM_ALT_64, ROT_R_64_IMM, ROT_R_64_IMM_ALT, ROT_R_32_IMM, ROT_R_32_IMM_ALT:
+	case ADD_IMM_32, AND_IMM, XOR_IMM, OR_IMM, MUL_IMM_32, SET_LT_U_IMM, SET_LT_S_IMM, MUL_IMM_64, NEG_ADD_IMM_64, SHLO_L_IMM_ALT_64, SHLO_R_IMM_ALT_64, ROT_R_64_IMM, ROT_R_64_IMM_ALT, ROT_R_32_IMM, ROT_R_32_IMM_ALT:
 		vm.aluImm(opcode, operands)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
@@ -2210,10 +2210,10 @@ func (vm *VM) aluImm(opcode byte, operands []byte) {
 		result = valueB ^ vx
 	case OR_IMM:
 		result = valueB | vx
-	case MUL_IMM:
-		result = (valueB * vx) % (1 << 32)
+	case MUL_IMM_32:
+		result = x_encode((valueB*vx)%(1<<32), 4)
 	case SET_LT_U_IMM:
-		if uint32(valueB) < uint32(vx) {
+		if valueB < vx {
 			result = 1
 		} else {
 			result = 0

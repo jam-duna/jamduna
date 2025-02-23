@@ -85,3 +85,8 @@ empty:
 	@echo "Running TestEmpty$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
 	@echo "go test -timeout $(TIMEOUT) -v -run TestEmpty -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
 	@go test -timeout $(TIMEOUT) -v -run TestEmpty -tags "network_test,$(TAGS)" $(TARGET_PARAM)
+
+blake2b:
+	@echo "Running TestBlake2b$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestBlake2b -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run TestBlake2b -tags "network_test,$(TAGS)" $(TARGET_PARAM)

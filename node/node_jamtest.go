@@ -338,6 +338,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if jam == "empty" {
 		serviceNames = []string{"delay"}
 	}
+	if jam == "blake2b" {
+		serviceNames = []string{"blake2b"}
+	}
 	testServices, err := getServices(serviceNames)
 	if err != nil {
 		panic(32)
@@ -463,6 +466,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		scaled_balances(nodes, testServices, targetN_mint, targetN_transfer)
 	case "empty":
 		empty(nodes, testServices)
+	case "blake2b":
+		blake2b(nodes, testServices, targetN)
 	}
 }
 
@@ -2401,4 +2406,74 @@ func generateJobID() string {
 func GenerateNMBFilledBytes(n int) []byte {
 	size := n * 1024 * 1024
 	return bytes.Repeat([]byte{1}, size)
+}
+
+func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+	fmt.Printf("Start Blake2b Test\n")
+
+	service0 := testServices["blake2b"]
+	n1 := nodes[1]
+	n4 := nodes[4]
+	core := 0
+
+	refine_context := n1.statedb.GetRefineContext()
+
+	payload := make([]byte, 0)
+	input := []byte("Hello, Blake2b!")
+	input_length := uint32(len(input))
+	input_length_bytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(input_length_bytes, input_length)
+	payload = append(payload, input_length_bytes...)
+	payload = append(payload, input...)
+
+	workPackage := types.WorkPackage{
+		Authorization: []byte("0x"), // TODO: set up null-authorizer
+		Authorizer:    types.Authorizer{},
+		RefineContext: refine_context,
+		WorkItems: []types.WorkItem{
+			{
+				Service:            service0.ServiceCode,
+				CodeHash:           service0.CodeHash,
+				Payload:            payload,
+				RefineGasLimit:     10000000,
+				AccumulateGasLimit: 10000000,
+				ImportedSegments:   []types.ImportSegment{},
+				ExportCount:        1,
+			},
+		},
+	}
+	workPackageHash := workPackage.Hash()
+
+	fmt.Printf("\n** \033[36m Blake2b=%v \033[0m workPackage: %v **\n", 1, common.Str(workPackageHash))
+	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+	ramdamIdx := rand.Intn(3)
+	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
+	if err != nil {
+		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+	}
+	// wait until the work report is pending
+	for {
+		time.Sleep(1 * time.Second)
+		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+			if false {
+				var workReport types.WorkReport
+				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+				workReport = rho_state.WorkReport
+				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			}
+			break
+		}
+	}
+
+	// wait until the work report is cleared
+	for {
+		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	fmt.Printf("\nBlake2b Expected Result: %x\n", common.Blake2Hash(input).Bytes())
+	k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
+	hash_result, _, _ := n1.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
+	fmt.Printf("Blake2b Actual Result:   %x\n", hash_result)
 }
