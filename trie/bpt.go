@@ -941,7 +941,7 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 	if err != nil {
 		fmt.Printf("SetServiceStorage Encode Error: %v\n", err)
 	}
-	metaVal := fmt.Sprintf("account_storage|s=%d|hk=%s k=%x", s, storageKey, k)
+	metaVal := fmt.Sprintf("account_storage|s=%d|hk=%s k=%s", s, storageKey, k)
 	metaValBytes, err := types.Encode(metaVal)
 	if err != nil {
 		fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)

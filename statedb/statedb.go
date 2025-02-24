@@ -1353,13 +1353,19 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.ApplyStateTransitionAuthorizations()
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	var leaves [][]byte
-	for _, sa := range b {
+	for i, sa := range b {
 		// put (s,h) of C  into leaves
 		leaf := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
 		leaves = append(leaves, leaf)
+		fmt.Printf("Leaf %d s=%d commitment: %s\n", i, sa.Service, sa.Commitment)
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	s.AccumulationRoot = common.Hash(tree.Root())
+	if len(leaves) > 0 {
+		fmt.Printf(" ===> AccumulationRoot %s\n", s.AccumulationRoot)
+	}
+
+	// 29 -  Update Aut
 
 	// 29 -  Update Authorization Pool alpha'
 	err = s.ApplyStateTransitionAuthorizations()
