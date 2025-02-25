@@ -289,7 +289,6 @@ func TestAvailabilityReconstruction(t *testing.T) {
 				}
 			*/
 			//TODO: in it consider success when we get here??
-			//fmt.Printf("✅✅ [N%v] reconstructing FIB=%v\n", n.id, fibN)
 
 			// isValid, err := senderNode.IsValidAvailabilitySpecifier(bClubHash, int(originalAS.BundleLength), sClubHash, originalAS)
 			// if err != nil {

@@ -63,7 +63,6 @@ func fuzzBlockTTicketAlreadyInState(block *types.Block, s *statedb.StateDB, vali
 			if tIDErr == nil {
 				if ticketCandidateID == existingTicketID || simpleFuzz {
 					existingTicket = &ticketCandidate
-					//fmt.Printf("fuzzBlockTTicketAlreadyInState: Found existing ticketID %v!!!\n", ticketCandidateID)
 					continue
 				}
 			}
@@ -115,9 +114,6 @@ func fuzzBlockTEpochLotteryOver(block *types.Block, s *statedb.StateDB) error {
 	altSlot := currSlot - currPhase + altPhase
 
 	// advance the slot of the block past the ticket contest period ... need to loop through entire authorset to find a properkey
-	// fmt.Printf("altPhase: %v\n", altPhase)
-	// fmt.Printf("currSlot: %v |  e=%v, m=%.3d | AuthorIndex=%v\n", currSlot, currSlot/types.EpochLength, currPhase, block.Header.AuthorIndex)
-	// fmt.Printf("altSlot : %v |  e=%v, m=%.3d | AuthorIndex=%v\n", altSlot, altSlot/types.EpochLength, altPhase, block.Header.AuthorIndex)
 	block.Header.Slot = altSlot
 	return jamerrors.ErrTEpochLotteryOver
 }

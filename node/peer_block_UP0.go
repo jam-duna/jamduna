@@ -254,9 +254,7 @@ func (n *Node) runBlockAnnouncement(stream quic.Stream) {
 			fmt.Println("Error deserializing block announcement:", err)
 			return
 		}
-		// TODO do something with the received block announcement
 		n.blockAnnouncementsCh <- blockannounce
-		// fmt.Printf("%s received block announcement (slot=%d,Header=%v)\n", n.String(), blockannounce.FinalizedBlock.Slot, blockannounce.Header.Hash())
 	}
 }
 

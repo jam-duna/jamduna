@@ -73,8 +73,6 @@ func pvm_test(t *testing.T, tc TestCase) (error, int) {
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
 		fmt.Printf("Register match for test %s \n", tc.Name)
 	} else {
-		// fmt.Printf("PVM.code: %v\n", pvm.code)
-		// fmt.Printf("PVM.bitmask: %v\n", pvm.bitmask)
 		fmt.Printf("Register mismatch for test %s: expected %v, got %v \n", tc.Name, tc.ExpectedRegs, pvm.register)
 		num_mismatch++
 	}

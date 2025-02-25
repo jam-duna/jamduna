@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
@@ -12,6 +13,7 @@ type ExtrinsicPool struct {
 	assuranceMutex   sync.Mutex
 	// guarantees queue storage
 	queuedGuarantees map[uint32]map[uint16]*Guarantee // use timeslot to store guarantees, and core index to distinguish
+	knownGuarantees  map[common.Hash]*uint32          // use package hash to store guarantees
 	guaranteeMutex   sync.Mutex
 	// tickets queue storage
 	queuedTickets map[common.Hash]map[common.Hash]*Ticket // use entropy hash to store tickets, and ticket id to distinguish
@@ -26,6 +28,7 @@ func NewExtrinsicPool() *ExtrinsicPool {
 	return &ExtrinsicPool{
 		queuedAssurances: make(map[common.Hash]map[uint16]*Assurance),
 		queuedGuarantees: make(map[uint32]map[uint16]*Guarantee),
+		knownGuarantees:  make(map[common.Hash]*uint32),
 		queuedTickets:    make(map[common.Hash]map[common.Hash]*Ticket),
 		queuedPreimages:  make(map[common.Hash]*Preimages),
 		knownPreimages:   make(map[common.Hash]*uint32),
@@ -100,6 +103,9 @@ func (ep *ExtrinsicPool) AddGuaranteeToPool(guarantee Guarantee) error {
 	ep.guaranteeMutex.Lock()
 	defer ep.guaranteeMutex.Unlock()
 	// Store the guarantee in the tip's queued guarantee
+	if _, exists := ep.knownGuarantees[guarantee.Report.AvailabilitySpec.WorkPackageHash]; exists {
+		return fmt.Errorf("guarantee %s already exists", guarantee.Report.AvailabilitySpec.WorkPackageHash.String_short())
+	}
 	if _, exists := ep.queuedGuarantees[guarantee.Slot]; !exists {
 		ep.queuedGuarantees[guarantee.Slot] = make(map[uint16]*Guarantee)
 	}
@@ -147,6 +153,8 @@ func (ep *ExtrinsicPool) RemoveOldGuarantees(guarantee Guarantee) error {
 			delete(ep.queuedGuarantees[guarantee.Slot], guarantee.Report.CoreIndex)
 		}
 	}
+	known_guarantee_hash := guarantee.Report.AvailabilitySpec.WorkPackageHash
+	ep.knownGuarantees[known_guarantee_hash] = &guarantee.Slot
 	return nil // Success
 }
 
@@ -156,6 +164,11 @@ func (ep *ExtrinsicPool) RemoveGuaranteesFromPool(accepted_slot uint32) error {
 	defer ep.guaranteeMutex.Unlock()
 	if _, exists := ep.queuedGuarantees[accepted_slot]; exists {
 		delete(ep.queuedGuarantees, accepted_slot)
+	}
+	for guarantee_hash, slot := range ep.knownGuarantees {
+		if *slot < accepted_slot-2*EpochLength {
+			delete(ep.knownGuarantees, guarantee_hash)
+		}
 	}
 	return nil // Success
 }

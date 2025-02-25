@@ -51,12 +51,6 @@ func TestWBTTrace(t *testing.T) {
 		if err != nil || !isFound {
 			t.Errorf("Trace error: %v", err)
 		}
-		// wbt.PrintTree()
-		// fmt.Printf("Trace path:%s\n", path)
-		// fmt.Printf("Trace path for index %d:\n", shardIndex)
-		// for i, hash := range path {
-		// 	fmt.Printf("Step %d: %x\n", i, hash.Bytes())
-		// }
 
 		derivedRoot, verified, err := VerifyWBT(treeLen, shardIndex, wbt.RootHash(), leafHash, path, wbt.hashType)
 

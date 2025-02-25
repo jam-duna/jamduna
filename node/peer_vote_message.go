@@ -33,7 +33,6 @@ func (n *Node) onVoteMessage(stream quic.Stream, msg []byte) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("%s onVoteMessage %d %x\n", p.String(), vote.Round, vote.Signature)
 	if vote.SignMessage.Message.Stage == grandpa.PrecommitStage {
 		n.grandpaPreCommitMessageCh <- vote
 	} else if vote.SignMessage.Message.Stage == grandpa.PrevoteStage {

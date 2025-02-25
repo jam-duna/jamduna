@@ -2,10 +2,10 @@ package statedb
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -34,17 +34,11 @@ func TestKV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TestKV Encode %v\n", err)
 	}
-	if debug {
-		fmt.Printf("\n\nEncoded: %x\n\n\n", encoded)
-	}
 
 	// decode
 	decoded, _, err := types.Decode(encoded, reflect.TypeOf(a))
 	if err != nil {
 		t.Fatalf("TestKV Decode %v\n", err)
-	}
-	if debug {
-		fmt.Printf("\n\nDecoded: %v\n\n\n", decoded)
 	}
 
 	// marshal the struct
@@ -52,17 +46,11 @@ func TestKV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TestKV json.Marshal %v\n", err)
 	}
-	if debug {
-		fmt.Printf("TestKV: %v", b)
-	}
 
 }
 
 func TestE(t *testing.T) {
 	a := []byte{0x80, 0x93}
 	decoded, l := types.DecodeE(a)
-	if debug {
-		fmt.Printf("Decoded: %v\n", decoded)
-		fmt.Printf("Length: %v\n", l)
-	}
+	log.Debug(module, "TestE", "Decoded", decoded, "Length", l)
 }

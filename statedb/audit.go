@@ -17,6 +17,7 @@ import (
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -169,8 +170,8 @@ func (s *StateDB) GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.Ju
 			}
 		}
 		// check the last one
-		if a.ValidatorIndex != uint32(tmp.Validator) && debugAudit {
-			fmt.Printf("[N%d] [T:%d] Validator %d didn't judge in Tranche %d\n", s.Id, s.Block.TimeSlot(), a.ValidatorIndex, a.Tranche)
+		if a.ValidatorIndex != uint32(tmp.Validator) {
+			log.Trace(debugAudit, "Validator didn't judge in Tranche", "n", s.Id, "ts", s.Block.TimeSlot(), "validatorIndex", a.ValidatorIndex, "tranche", a.Tranche)
 			count++
 			announcements = append(announcements, a)
 		}

@@ -24,7 +24,7 @@ func (e EpochMark) String() string {
 		validatorsShort += q + common.Str(validator)
 		q = ", "
 	} */
-	return fmt.Sprintf("\033[32m EpochMarker\033[0m(η1'=%s, η2'=%s)", entropyShort, ticketsEntropyShort) // validatorsShort
+	return fmt.Sprintf(" EpochMarker(η1'=%s, η2'=%s)", entropyShort, ticketsEntropyShort) // validatorsShort
 }
 
 func (E *EpochMark) Encode() []byte {

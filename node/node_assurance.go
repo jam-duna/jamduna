@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -66,26 +67,20 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 	bundleShard, concatSegmentShards, justification, err := n.peersInfo[guarantor].SendFullShardRequest(erasureRoot, n.id)
 	fullshard_identifier := fmt.Sprintf("%v_%d", erasureRoot, n.id)
 	if err != nil {
-		fmt.Printf("%s [assureData: SendShardRequest] ERR %v\n", n.String(), err)
+		log.Error(debugDA, "assureData:SendFullShardRequest", "n", n.String(), "err", err)
 		return
 	}
 	segmentShards, err := SplitToSegmentShards(concatSegmentShards)
 	if err != nil {
-		fmt.Printf("%s [assureData: SplitAsSegmentShards] ERR %v\n", n.String(), err)
+		log.Error(debugDA, "assureData:SplitToSegmentShards", "n", n.String(), "err", err)
 		return
 	}
 	verified, err := VerifyFullShard(erasureRoot, n.id, bundleShard, segmentShards, justification)
 	if err != nil || !verified {
-		fmt.Printf("%s [assureData:VerifyFullShard] ERR %v verified %v\n", n.String(), err, verified)
+		log.Error(debugDA, "assureData:VerifyFullShard", "n", n.String(), "err", err)
 		return
 	}
-	if debugDA {
-		fmt.Printf("%s [assureData:VerifyFullShard] %v verified %v\n", n.String(), verified, fullshard_identifier)
-	}
-
-	if debugKV {
-		fmt.Printf("N%d StoreFullShard_AssurererasureRoot %v\n", n.id, erasureRoot)
-	}
+	log.Trace(debugDA, "assureData:VerifyFullShard", "n", n.id, "verified", verified, "fullshard_identifier", fullshard_identifier)
 	err = n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
 	if err != nil {
 		return
@@ -93,7 +88,7 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 
 	err = n.StoreImportDAWorkReportMap(spec)
 	if err != nil {
-		fmt.Printf("%s [assureData:StoreImportDAWorkReportMap] ERR %v\n", n.String(), err)
+		log.Error(debugDA, "assureData:StoreImportDAWorkReportMap", "n", n.String(), "err", err)
 		return
 	}
 

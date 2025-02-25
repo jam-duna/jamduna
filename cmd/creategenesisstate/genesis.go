@@ -33,7 +33,6 @@ func main() {
 	}
 
 	// Process each network
-	//fmt.Printf("Processing Network Setting: %v\n", types.Network)
 	for network, chainSpec := range networks {
 		if network == types.Network {
 			fmt.Printf("Processing network: %s\n", network)

@@ -140,12 +140,9 @@ func CheckCustomDecode(data []byte, t reflect.Type) (bool, interface{}, uint32) 
 }
 
 func Encode(data interface{}) ([]byte, error) {
-	// fmt.Printf("Encode type: %v\n", reflect.TypeOf(data))
-	// fmt.Printf("Encode data: %v\n", data)
 	v := reflect.ValueOf(data)
 	customEncodeRequired, customEncoded := CheckCustomEncode(data)
 	if customEncodeRequired {
-		// fmt.Printf("\n\nCustom Encode\n\n\n")
 		if len(customEncoded) == 0 {
 			return []byte{}, nil
 		}
@@ -260,7 +257,6 @@ func Encode(data interface{}) ([]byte, error) {
 				Value: v.MapIndex(key).Interface(),
 			})
 		}
-		// fmt.Println("sortedKVPairs:", sortedKVPairs)
 		return Encode(sortedKVPairs)
 
 	default:
@@ -269,13 +265,10 @@ func Encode(data interface{}) ([]byte, error) {
 }
 
 func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
-	// fmt.Printf("\n\nt: %v\n", t)
-	// fmt.Printf("data: %x\n\n\n", data)
 	length := uint32(0)
 	v := reflect.New(t).Elem()
 	customDecodeRequired, decoded, customLength := CheckCustomDecode(data, t)
 	if customDecodeRequired {
-		// fmt.Printf("\n\nCustom Decode\n\n\n")
 		if len(data) < int(customLength) {
 			return nil, 0, fmt.Errorf("data length insufficient for custom decode")
 		}

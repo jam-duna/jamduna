@@ -39,7 +39,6 @@ func (gs *GraphServer) StartServer() {
 		page.Render(rw)
 	})
 	portStr := fmt.Sprintf(":%d", graphServerPort+gs.BasePort)
-	log.Printf("Starting Graph server at %s", portStr)
 	if err := http.ListenAndServe(portStr, nil); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Failed to start server: %v", err)
 	}

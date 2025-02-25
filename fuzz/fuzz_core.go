@@ -326,8 +326,6 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 		return 0, 0, 0, nil, nil
 	}
 
-	//fmt.Printf("V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))
-
 	// Create STF copy for original block
 	oStatedbCopy := sdb.Copy()
 	oBlockCopy := block.Copy()
@@ -343,12 +341,10 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 
 	if len(aggregatedErrors) == 0 {
 		fmt.Printf("[#%v e=%v,m=%03d] \033[31mNotFuzzable\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
-		//fmt.Printf("ExtrinsicHash=%v\nSeal=%x\nEntropySource=%x\n", oBlockCopy.Header.ExtrinsicHash, oBlockCopy.Header.Seal, oBlockCopy.GetHeader().EntropySource)
 		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
 	fmt.Printf("[#%v e=%v,m=%03d] \033[0mFuzzable!!!\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
-	//fmt.Printf("ExtrinsicHash=%v\nSeal=%x\nEntropySource=%x\n", oBlockCopy.Header.ExtrinsicHash, oBlockCopy.Header.Seal, oBlockCopy.GetHeader().EntropySource)
 
 	for _, selectedError := range aggregatedErrors {
 		blockCopy := block.Copy()
@@ -378,7 +374,6 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 				if err != nil {
 					continue
 				}
-				//fmt.Printf("Resealing Slot %v with: %v (Idx:%v) | priv: %v\n", blockCopy.TimeSlot(), block_author_ietf_pub, blockCopy.Header.AuthorIndex, block_author_ietf_priv)
 				mSealedBlk, sealErr := statedbCopy.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, blockCopy.Header.AuthorIndex, blockCopy.TimeSlot(), blockCopy)
 				if sealErr != nil {
 					fmt.Printf("Fuzzing failed to seal block!!!\n")
@@ -390,10 +385,6 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 				if !mValid || err != nil {
 					panic(fmt.Sprintf("mutated block failed seal entropy test failed: %v |  mValidatorIdx=%v | mValidatorPub=%v | err: %v\n", mValid, mValidatorIdx, mValidatorPub, err))
 					continue
-				} else {
-					//fmt.Printf("Mutated block passed seal test. Author: %v (Idx:%v) ExtrinsicHash=%v, Seal=%x, EntropySource=%x\n", mValidatorPub, mValidatorIdx, mSealedBlk.GetHeader().ExtrinsicHash, mSealedBlk.GetHeader().Seal, mSealedBlk.GetHeader().EntropySource)
-					//fmt.Printf("MutatedBlock=%v\n", mSealedBlk.String())
-
 				}
 
 				if mValidatorIdx != oValidatorIdx && mSealedBlk.TimeSlot() == oBlockCopy.TimeSlot() {
@@ -418,24 +409,16 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 					if err != nil {
 						continue
 					}
-					//fmt.Printf("Resealing Slot %v with: %v (Idx:%v) | priv: %v\n", blockCopy.TimeSlot(), block_author_ietf_pub, blockCopy.Header.AuthorIndex, block_author_ietf_priv)
 					mSealedBlk, sealErr := statedbCopy.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, blockCopy.Header.AuthorIndex, blockCopy.TimeSlot(), blockCopy)
 					if sealErr != nil {
 						continue
 					}
 
 					// Step 2: make sure it passes re-seal test again..
-					mValid, mValidatorIdx, mValidatorPub, err := statedbCopy.VerifyBlockHeader(mSealedBlk)
+					mValid, _, _, err := statedbCopy.VerifyBlockHeader(mSealedBlk)
 					if !mValid || err != nil {
-						//panic(fmt.Sprintf("mutated block failed seal entropy test failed: %v |  mValidatorIdx=%v | mValidatorPub=%v | err: %v\n", mValid, mValidatorIdx, mValidatorPub, err))
 						continue
 					} else {
-						debugSealer := false
-						if debugSealer {
-							fmt.Printf("!!!Found Author -- mValidatorIdx=%v | mValidatorPub=%v\n", mValidatorIdx, mValidatorPub)
-							//fmt.Printf("Mutated sealerUnknown block passed seal test. Author: %v (Idx:%v) ExtrinsicHash=%v, Seal=%x, EntropySource=%x\n", mValidatorPub, mValidatorIdx, mSealedBlk.GetHeader().ExtrinsicHash, mSealedBlk.GetHeader().Seal, mSealedBlk.GetHeader().EntropySource)
-							//fmt.Printf("MutatedBlock=%v\n", mSealedBlk.String())
-						}
 						mSealedBlkFinal = *mSealedBlk
 						break
 					}
@@ -453,16 +436,13 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 			// TODO: need ancestorSet, accumulationRoot
 			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil)
 			if stfErrActual == stfErrExpected {
-				//fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Correctly: err %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorName(stfErrExpected))
 				errorList = append(errorList, stfErrExpected)
 				mutatedSTFs = append(mutatedSTFs, stfMutated)
 			} else {
 				fmt.Printf("[#%v e=%v,m=%03d] Fuzzed Failed!!  Actual: \033[32m%v\033[0m  | Expected:%v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorName(stfErrActual), jamerrors.GetErrorName(stfErrExpected))
 				if jamerrors.GetErrorName(stfErrActual) == "BadSignature" {
-					//fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
 				}
 				if jamerrors.GetErrorName(stfErrActual) == "BadValidatorIndex" {
-					//	fmt.Printf("PreState: %v\n", stf.Block.Extrinsic.Guarantees[0].String())
 				}
 			}
 		}

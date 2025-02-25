@@ -112,7 +112,6 @@ func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool
 		return err
 	}
 	defer stream.Close()
-	//fmt.Printf("%s SendTicketDistribution %d %x\n", p.String(), t.Attempt, t.Signature)
 	// TODO: proper treatment of Proxy
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
@@ -137,7 +136,6 @@ func (n *Node) onTicketDistribution(stream quic.Stream, msg []byte) (err error) 
 	var ticket types.Ticket
 	ticket.Attempt = newReq.Attempt
 	ticket.Signature = newReq.Signature
-	//fmt.Printf("%s onTicketDistribution %d %x=>%d %x\n", n.String(), newReq.Attempt, newReq.Signature, ticket.Attempt, ticket.Signature)
 
 	n.ticketsCh <- ticket
 	return

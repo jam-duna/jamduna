@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -345,11 +346,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		WorkReportHash: guarantee.Report.Hash(),
 		Signature:      guarantee.Signatures[0].Signature,
 	}
-	if debugG {
-		fmt.Printf("%s onWorkPackageShare:selfComputed workReport %v: %v\n", n.String(), req.WorkReportHash, workReport.String())
-		//fmt.Printf("%s onWorkPackageShare:selfComputed guarantee: %v\n", n.String(), guarantee.String())
-		fmt.Printf("%s onWorkPackageShare:RefineBundle workReportHash: %v Signature: %x\n", n.String(), req.WorkReportHash, req.Signature)
-	}
+	log.Debug(debugG, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature)
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return err

@@ -286,9 +286,7 @@ func computePageProofHashes(leafHashes [][]byte) [][]byte {
 		}
 		treeLevels = append(treeLevels, nextLevel)
 	}
-	if debugCDT {
-		printNodePageProof(treeLevels, len(treeLevels)-1, 0, "")
-	}
+	// printNodePageProof(treeLevels, len(treeLevels)-1, 0, "")
 
 	var allHashes [][]byte
 	for _, level := range treeLevels {

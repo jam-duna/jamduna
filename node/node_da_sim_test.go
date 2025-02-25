@@ -61,9 +61,7 @@ func TestDASimulation(t *testing.T) {
 		if !ok {
 			t.Fatalf("Unexpected response type: %T\n", resp)
 		}
-		if debugDA {
-			fmt.Printf("DA Response: %x\n", daResp)
-		}
+		fmt.Printf("DA Response: %x\n", daResp)
 		encoded_data[daResp.ShardIndex] = daResp.Data
 	}
 	encoded_there_dim_data := make([][][]byte, 1)

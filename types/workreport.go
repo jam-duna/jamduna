@@ -122,7 +122,6 @@ func ComputeWorkReportSignBytesWithHash(a common.Hash) []byte {
 func (a *WorkReport) Sign(Ed25519Secret []byte, validatorIndex uint16) (gc GuaranteeCredential) {
 	gc.ValidatorIndex = validatorIndex
 	unsign_bytes := a.computeWorkReportBytes()
-	// fmt.Printf("unsign_bytes: %x\n", unsign_bytes)
 	sig := ed25519.Sign(Ed25519Secret, unsign_bytes)
 	copy(gc.Signature[:], sig[:])
 	return gc

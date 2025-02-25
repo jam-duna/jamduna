@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -81,9 +82,7 @@ func TestDisputesJsonParse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal JSON: %v", err)
 	}
-	if debugAudit {
-		fmt.Printf("Expected: %s\n", expectedJson)
-	}
+	log.Trace(debugAudit, "TestDisputesJsonParse", "Expected", expectedJson)
 }
 
 func VerifyDisputes(jsonFile string, exceptErr error) error {
@@ -279,10 +278,6 @@ func TestDisputeState(t *testing.T) {
 
 			targetedStructType := reflect.TypeOf(tc.expectedType)
 
-			if debugAudit {
-				fmt.Printf("\n\n\nTesting %v\n", targetedStructType)
-			}
-
 			// Read and unmarshal JSON file
 			jsonData, err := os.ReadFile(jsonPath)
 			if err != nil {
@@ -293,33 +288,22 @@ func TestDisputeState(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
-			if debugAudit {
-				fmt.Printf("Unmarshaled %s\n", jsonPath)
-				fmt.Printf("Expected: %v\n", tc.expectedType)
-			}
 			// Encode the struct to bytes
 			encodedBytes, err := types.Encode(tc.expectedType)
 			if err != nil {
 				t.Fatalf("failed to encode struct: %v", err)
 			}
 
-			if debugAudit {
-				fmt.Printf("Encoded: %x\n\n", encodedBytes)
-			}
 			decodedStruct, _, err := types.Decode(encodedBytes, targetedStructType)
 			if err != nil {
 				t.Fatalf("failed to decode bytes: %v", err)
 			}
-			if debugAudit {
-				fmt.Printf("Decoded:  %v\n\n", decodedStruct)
-			}
+			fmt.Printf("Decoded:  %v\n\n", decodedStruct)
+
 			// Marshal the struct to JSON
 			encodedJSON, err := json.MarshalIndent(decodedStruct, "", "  ")
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
-			}
-			if debugAudit {
-				fmt.Printf("Encoded JSON:\n%s\n", encodedJSON)
 			}
 			// output bin file
 			// err = os.WriteFile("./output.bin", encodedBytes, 0644)

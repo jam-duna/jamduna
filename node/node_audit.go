@@ -6,8 +6,8 @@ import (
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -141,15 +141,11 @@ func (n *Node) cleanWaitingAJ() {
 	waitingJudgements := n.waitingJudgements
 
 	for _, a := range waitingAnnouncements {
-		if debugAudit {
-			fmt.Printf("%s sending waitingAnnouncements AGAIN!! a=%v\n", n.String(), a.Hash())
-		}
+		log.Trace(debugAudit, "sending waitingAnnouncements AGAIN", "n", n.String(), "a", a.Hash())
 		n.announcementsCh <- a
 	}
 	for _, j := range waitingJudgements {
-		if debugAudit {
-			fmt.Printf("%s sending waitingJudgements AGAIN!! j=%v\n", n.String(), j.Hash())
-		}
+		log.Trace(debugAudit, "sending waitingJudgements AGAIN", "n", n.String(), "j", j.Hash())
 		n.judgementsCh <- j
 	}
 
@@ -170,28 +166,22 @@ func (n *Node) runAudit() {
 		case audit_statedb := <-n.auditingCh:
 			headerHash := audit_statedb.GetHeaderHash()
 
-			log := fmt.Sprintf("%s [T:%d] start auditing block %v (headerHash:%v)\n", n.String(), audit_statedb.Block.TimeSlot(), audit_statedb.HeaderHash, headerHash)
-			Logger.RecordLogs(storage.Audit_status, log, true)
+			log.Debug(debugAudit, "runAudit:start auditing block", "n", n.String(), "ts", audit_statedb.Block.TimeSlot(), "audit_statedb.headerHash", audit_statedb.HeaderHash, "headerHash", headerHash)
 			err := n.addAuditingStateDB(audit_statedb)
 			if err != nil {
-				err_log := fmt.Sprintf("addAuditingStateDB failed %v\n", err)
-				Logger.RecordLogs(storage.Audit_error, err_log, true)
+				log.Error(debugAudit, "addAuditingStateDB", "err", err)
 			}
 			n.cleanWaitingAJ()
-			log = fmt.Sprintf("%s cleanWaitingAJ done\n", n.String())
-			Logger.RecordLogs(storage.Audit_status, log, true)
+			log.Debug(debugAudit, "runAudit: cleanWaitingAJ done", "n", n.String())
 			n.initAudit(headerHash)
-			log = fmt.Sprintf("%s initAudit done\n", n.String())
-			Logger.RecordLogs(storage.Audit_status, log, true)
+			log.Debug(debugAudit, "runAudit: initAudit done", "n", n.String())
 			err = n.Audit(headerHash)
 			if err != nil {
-				err_log := fmt.Sprintf("Audit Failed %v\n", err)
-				Logger.RecordLogs(storage.Audit_error, err_log, true)
+				log.Error(debugAudit, "Audit Failed", "err", err)
 			} else {
 				// if the block is audited, we can start grandpa
+				log.Debug(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 
-				log := fmt.Sprintf("%s Audit Done ! header = %v, timeslot = %d\n", n.String(), headerHash, audit_statedb.GetTimeslot())
-				Logger.RecordLogs(storage.Audit_status, log, true)
 				newBlock := audit_statedb.Block.Copy()
 				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
 					if Grandpa {
@@ -255,19 +245,16 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				}
 				if isAudited {
 					// wait for everyone to finish auditing
-
-					log := fmt.Sprintf("%s [T:%d] Tranche %v audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche-1, auditing_statedb.Block.Header.Hash())
-					Logger.RecordLogs(storage.Audit_status, log, true)
+					log.Debug(debugAudit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
+						"headerhash", auditing_statedb.Block.Header.Hash())
 					done = true
 					break
 				} else {
-
-					log := fmt.Sprintf("%s [T:%d] Tranche %v not audited block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche, auditing_statedb.Block.Hash())
-					Logger.RecordLogs(storage.Audit_status, log, true)
+					log.Debug(debugAudit, "Tranche not audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche,
+						"blockhash", auditing_statedb.Block.Hash())
 				}
 
 				tmp = tranche
-
 				if tranche > 5 {
 					//TODO: we should never get here under tiny case
 					panic(fmt.Sprintf("%s [T:%d] Audit still not complete after Tranche %v block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche, auditing_statedb.Block.Hash()))
@@ -303,8 +290,7 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	if err != nil {
 		return err
 	}
-	logs := fmt.Sprintf("%s [T:%d] Tranche %v, start audit\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
-	Logger.RecordLogs(storage.Audit_status, logs, true)
+	log.Debug(debugAudit, "Tranche, start audit", "n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
 	// normal behavior
 	switch n.AuditNodeType {
 	case "normal":
@@ -372,8 +358,7 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		if err != nil {
 			return err
 		}
-		logs := fmt.Sprintf("%s [T:%d] selected reports len %v\n", n.String(), auditing_statedb.Block.TimeSlot(), len(reports))
-		Logger.RecordLogs(storage.Audit_status, logs, true)
+		log.Debug(debugAudit, "selected reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "len(reports)", len(reports))
 		judges, err := n.Judge(headerHash, reports)
 		if err != nil {
 			return err
@@ -382,14 +367,11 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		}
 	}
 	if len(reports) == 0 {
-		logs = fmt.Sprintf("%s [T:%d] Tranche %v, no audit reports\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
-		Logger.RecordLogs(storage.Audit_status, logs, true)
+		log.Debug(debugAudit, "Tranche, no audit reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 	} else {
-		logs = fmt.Sprintf("%s [T:%d] Tranche %v, audit reports:\n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
-		Logger.RecordLogs(storage.Audit_status, logs, true)
+		log.Debug(debugAudit, "Tranche, audit reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 		for _, w := range reports {
-			logs = fmt.Sprintf("%s [T:%d] selected work report %v, from core %d\n", n.String(), auditing_statedb.Block.TimeSlot(), w.WorkReport.Hash(), w.WorkReport.CoreIndex)
-			Logger.RecordLogs(storage.Audit_status, logs, true)
+			log.Debug(debugAudit, "selected work report, from core", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash(), "c", w.WorkReport.CoreIndex)
 		}
 	}
 	// audit the work report
@@ -412,10 +394,8 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	if tranche == 0 {
 		banderSnatchSecret := bandersnatch.BanderSnatchSecret(n.GetBandersnatchSecret())
 		a0, s0, err := s.Select_a0(banderSnatchSecret)
-		if debugAudit {
-			for _, w := range a0 {
-				fmt.Printf("%s [T:%d] selected work report %v\n", n.String(), auditing_statedb.GetTimeslot(), w.WorkReport.Hash())
-			}
+		for _, w := range a0 {
+			log.Trace(debugAudit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "wph", w.WorkReport.Hash())
 		}
 		if len(a0) == 0 {
 			return nil, nil
@@ -450,11 +430,11 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			}
 
 			announcementWithProof.Evidence_s0 = types.BandersnatchVrfSignature(s0)
-			if debugAudit {
-				for _, w := range a0 {
-					fmt.Printf("%s [T:%d] broadcasting announcement for %v\n", n.String(), auditing_statedb.Block.TimeSlot(), w.WorkReport.Hash())
-				}
+
+			for _, w := range a0 {
+				log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash())
 			}
+
 			go n.broadcast(announcementWithProof)
 		}
 
@@ -499,10 +479,8 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			}
 			announcementWithProof.NoShowLength = no_show_len
 			announcementWithProof.Evidence_sn_no_show = no_show_a
-			if debugAudit {
-				for _, w := range an {
-					fmt.Printf("%s [T:%d] broadcasting announcement for %v\n", n.String(), auditing_statedb.GetTimeslot(), w.WorkReport.Hash())
-				}
+			for _, w := range an {
+				log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "wph", w.WorkReport.Hash())
 			}
 
 			go n.broadcast(announcementWithProof)
@@ -539,7 +517,7 @@ func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash
 }
 
 func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelection) (judgements []types.Judgement, err error) {
-	start := time.Now()
+
 	judgement_bucket, err := n.getJudgementBucket(headerHash)
 	if len(workReports) == 0 {
 		return nil, nil
@@ -562,9 +540,6 @@ func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelec
 		if err != nil {
 			return nil, err
 		}
-	}
-	if debugE {
-		fmt.Printf("%s Judge time: %v\n", n.String(), time.Since(start))
 	}
 	return
 }
@@ -610,7 +585,6 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		// you really need to reconstruct it...
 	}
 	*/
-	start := time.Now()
 
 	//TODO: use segmentRootLookup
 	spec := workReport.AvailabilitySpec
@@ -625,19 +599,16 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	workReportCoreIdx := workReport.CoreIndex
 	workPackageHash := spec.WorkPackageHash
 	workPackageBundle, fetchErr := n.FetchWorkPackageBundle(workPackageHash, erasureRoot, bundleLength)
-	if err != nil {
-		fmt.Printf("WP=%v | erasureRoot=%v|len=%v [auditWorkReport:FetchWorkPackageBundle] ERR %v\n", workPackageHash, erasureRoot, bundleLength, fetchErr)
+	if fetchErr != nil {
+		log.Error(debugAudit, "auditWorkReport:FetchWorkPackageBundle", "err", fetchErr)
 		return
 	}
 	//segmentRootLookup, err := n.GetSegmentRootLookup(workPackageBundle.WorkPackage)
 
 	segmentRootLookup := workReport.SegmentRootLookup // use workReport's segmentRootLookup
-	if debugE {
-		fmt.Printf("%s auditWorkReport:fetch and decode time: %v\n", n.String(), time.Since(start))
-	}
-	if debugAudit {
-		fmt.Printf("WP=%v | len=%v | byte=%x\n", workPackageBundle.PackageHash(), len(workPackageBundle.Bytes()), workPackageBundle.Bytes())
-	}
+
+	log.Trace(debugAudit, "wph", workPackageBundle.PackageHash(), "len", len(workPackageBundle.Bytes()), "wpb", workPackageBundle.Bytes())
+
 	wr, err := n.executeWorkPackageBundle(workReportCoreIdx, workPackageBundle, segmentRootLookup)
 	if err != nil {
 		return
@@ -647,15 +618,9 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	auditPass := false
 	if workReport.AvailabilitySpec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
-
-		audit_log := fmt.Sprintf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT PASS\n", n.String(), workPackageBundle.WorkPackage.Hash())
-		Logger.RecordLogs(storage.Audit_status, audit_log, true)
-
+		log.Debug(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	} else {
-
-		audit_log := fmt.Sprintf("%s [auditWorkReport:executeWorkPackageBundle] %s AUDIT FAIL\n", n.String(), workPackageBundle.WorkPackage.Hash())
-		Logger.RecordLogs(storage.Audit_status, audit_log, true)
-
+		log.Warn(debugAudit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	}
 
 	judgement, err = n.MakeJudgement(workReport, auditPass)
@@ -665,9 +630,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 
 func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.Hash) {
 	for _, j := range judges {
-		if debugAudit {
-			fmt.Printf("%s distributing judgement %v\n", n.String(), j.WorkReportHash)
-		}
+		log.Trace(debugAudit, "distributing judgement", "n", n.String(), n.String(), "wph", j.WorkReportHash)
 		go n.broadcast(j)
 		n.judgementsCh <- j
 	}
@@ -691,12 +654,10 @@ func (n *Node) CheckBlockAudited(headerHash common.Hash, tranche uint32) (bool, 
 		return false, err
 	}
 	isBlockAudited := auditing_statedb.IsBlockAudited(announcementBucket, *judgment_bucket)
-	if debugAudit {
-		for _, w := range auditing_statedb.AvailableWorkReport {
-			fmt.Printf("%s [T:%d] CheckBlockAudited Have %d announcement\n", n.String(), auditing_statedb.Block.TimeSlot(), len(announcementBucket.Announcements[w.Hash()]))
-			fmt.Printf("%s [T:%d] CheckBlockAudited Have %d judgement\n", n.String(), auditing_statedb.Block.TimeSlot(), len(judgment_bucket.Judgements[w.Hash()]))
 
-		}
+	for _, w := range auditing_statedb.AvailableWorkReport {
+		log.Trace(debugAudit, "CheckBlockAudited", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "len announcementBucket", len(announcementBucket.Announcements[w.Hash()]),
+			"len judgment_bucket", len(judgment_bucket.Judgements[w.Hash()]))
 	}
 	// try to form disputes if not audited
 

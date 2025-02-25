@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -108,9 +107,6 @@ func TestSafroleCodec(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if debug {
-		fmt.Printf("Encoded SafroleBasicState=%x\n", encoded)
-	}
 
 	decoded, _, err := types.Decode(encoded, reflect.TypeOf(SafroleBasicState{}))
 	if err != nil {
@@ -120,9 +116,6 @@ func TestSafroleCodec(t *testing.T) {
 	ourputSafrole, err := json.MarshalIndent(decoded, "", "  ")
 	if err != nil {
 		t.Error(err)
-	}
-	if debug {
-		fmt.Printf("Marshal SafroleBasicState=%s\n", ourputSafrole)
 	}
 	// unmarshal again to compare
 	var safrole2 SafroleBasicState

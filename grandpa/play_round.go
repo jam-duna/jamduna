@@ -34,7 +34,7 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 			}
 		}
 		defer grandpaRound.Ticker.Stop()
-		// fmt.Printf("[v%d] Playing grandpa round %d | last finalized block %v\n", g.GetSelfVoterIndex(round), round, g.block_tree.GetLastFinalizedBlock().Block.Header.Hash())
+
 		// use another goroutine to calculate the timer
 		go func() {
 			timer1 := time.NewTimer(2 * TimeOut * time.Second)
@@ -61,7 +61,6 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		primary := DerivePrimary(round, grandpa_authorities)
 		if grandpa_authorities[int(primary)] == g.selfkey.PublicKey() {
 			_, best_candidate_m1, err := g.BestFinalCandidate(round - 1)
-			// fmt.Printf("[v%d] primary best_candidate_m1: %v\n", g.GetSelfVoterIndex(round), best_candidate_m1.Block.Header.Hash())
 			if err != nil {
 				g.ErrorChan <- fmt.Errorf("[v%d] error in BestFinalCandidate: %v", g.GetSelfVoterIndex(round), err)
 				return
@@ -170,16 +169,11 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 				if err != nil {
 					g.ErrorChan <- fmt.Errorf("[v%d] error in AttemptToFinalizeAtRound: %v", g.GetSelfVoterIndex(round), err)
 				}
-				// fmt.Printf("last finalized %v, L_block %v\n", g.block_tree.GetLastFinalizedBlock().Block.Header.Hash(), L_block.Block.Header.Hash())
 				childorbro := g.block_tree.ChildOrBrother(g.block_tree.GetLastFinalizedBlock(), L_block)
 				finalizable, err := g.Finalizable(round)
 				if err != nil {
 					g.ErrorChan <- fmt.Errorf("[v%d] error in Finalizable: %v", g.GetSelfVoterIndex(round), err)
 				}
-				// fmt.Printf("[v%d] childorbro %v, finalizable %v\n", g.GetSelfVoterIndex(round), childorbro, finalizable)
-				// if !childorbro {
-				// 	fmt.Printf("[v%d] last finalized %v, L_block %v\n", g.GetSelfVoterIndex(round), g.block_tree.GetLastFinalizedBlock().Block.Header.Hash(), L_block.Block.Header.Hash())
-				// }
 				if childorbro && finalizable {
 					break outerLoop3
 				}
@@ -205,7 +199,6 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 					panic(fmt.Sprintf("best_candidate is nil, err: %v", err))
 				}
 				if g.block_tree.ChildOrBrother(last_finalized_block, best_candidate) {
-					// fmt.Printf("last finalized %v, best candidate %v\n", last_finalized_block.Block.Header.Hash(), best_candidate.Block.Header.Hash())
 					break outerLoop4
 				}
 

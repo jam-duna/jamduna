@@ -111,9 +111,6 @@ func testVerifyCDTJustificationX(t *testing.T, numSegments int) {
 	leaves := segments
 	// Build Merkle Tree
 	tree := NewCDMerkleTree(leaves)
-	if debugCDT {
-		tree.PrintTree()
-	}
 
 	segmentLen := len(segments)
 	treeLen := tree.Length()
@@ -136,11 +133,8 @@ func testVerifyCDTJustificationX(t *testing.T, numSegments int) {
 
 	if !compareBytes(computedRoot, expectedRoot) {
 		t.Errorf("Root hash mismatch: expected %x, got %x", expectedRoot, computedRoot)
-	} else {
-		if debugCDT {
-			t.Logf("Root hash verified: %x\n", computedRoot)
-		}
 	}
+	t.Logf("Root hash verified: %x\n", computedRoot)
 }
 
 func testCDTGet(t *testing.T, numSegments int) {
@@ -164,21 +158,15 @@ func testCDTGet(t *testing.T, numSegments int) {
 	t.Logf("Input segments Len: %v (Padded CDT length: %v)\n", segmentLen, treeLen)
 
 	for i := 0; i < segmentLen; i++ {
-		leaf, err := tree.Get(i)
-		if err == nil {
-			if debugCDT {
-				t.Logf("Get %d: %s\n", i, string(leaf))
-			}
-		} else {
+		_, err := tree.Get(i)
+		if err != nil {
 			t.Errorf("Getting %d but got Error: %v\n", i, err)
 		}
 	}
 
 	leaf, err := tree.Get(treeLen)
 	if err != nil {
-		if debugCDT {
-			t.Logf("Error: %v\n", err)
-		}
+		// t.Logf("Error: %v\n", err)
 	} else {
 		t.Errorf("Get %d should be Error: %v but got %v\n", treeLen, err, leaf)
 	}
@@ -231,9 +219,7 @@ func testPageProof(t *testing.T, numSegments int) {
 				t.Fatalf("Failed to decode page proof: %v", err)
 			}
 			decodedSegmentHashes := decodedData.([][]byte)
-			if debugCDT {
-				t.Logf("Page %d PageProof: %x\n", i, decodedSegmentHashes)
-			}
+
 			// Compare decoded segments with original
 			start := i * 64
 			end := start + 64
@@ -247,12 +233,6 @@ func testPageProof(t *testing.T, numSegments int) {
 			traces, decodedSegmentHashes := splitPageProof(decodedSegmentHashes)
 			// decodedSegmentHashes = decodedSegmentHashes[position:]
 			expectedSegmentHashes := make([][]byte, len(expectedSegments))
-			if debugCDT {
-				fmt.Printf("decodedSegmentHashes[0]: %x\n", decodedSegmentHashes[0])
-				fmt.Printf("start: %d, end: %d, position: %d\n", start, end, position)
-				fmt.Printf("Len(decodedSegmentHashes): %d\n", len(decodedSegmentHashes))
-				fmt.Printf("Len(expectedSegments): %d\n", len(expectedSegments))
-			}
 
 			for j, segment := range expectedSegments {
 				expectedSegmentHashes[j] = computeLeaf(segment)
@@ -262,19 +242,7 @@ func testPageProof(t *testing.T, numSegments int) {
 					t.Errorf("(%d) Segment mismatch: expected %x, got %x", j, expectedSegmentHashes[j], decodedSegmentHashes[j])
 				}
 			}
-			if debugCDT {
-				t.Logf("Page Proof traces: %x\n", traces)
-			}
 			computePageProofHashes(decodedSegmentHashes)
-			// if err != nil {
-			// 	t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
-			// } else if result {
-			// 	if debugCDT {
-			// 		t.Logf("Page %d PageProof Verified\n", i)
-			// 	}
-			// } else {
-			// 	t.Errorf("Page %d PageProof Verification failed: %v\n", i, err)
-			// }
 		}
 	}
 }

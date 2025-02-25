@@ -120,11 +120,6 @@ func TestSafrole(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
-			if debug {
-				fmt.Printf("\n\n\nTesting %v\n", targetedStructType)
-				fmt.Printf("Unmarshaled %s\n", jsonPath)
-				fmt.Printf("Expected: %v\n", tc.expectedType)
-			}
 			// Encode the struct to bytes
 			encodedBytes, err := types.Encode(tc.expectedType)
 			if err != nil {
@@ -135,18 +130,11 @@ func TestSafrole(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to decode data: %v", err)
 			}
-			if debug {
-				fmt.Printf("Encoded: %x\n\n", encodedBytes)
-				fmt.Printf("Decoded:  %v\n\n", decodedStruct)
-			}
 
 			// Marshal the struct to JSON
 			encodedJSON, err := json.MarshalIndent(decodedStruct, "", "  ")
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
-			}
-			if debug {
-				fmt.Printf("Encoded JSON:\n%s\n", encodedJSON)
 			}
 
 			// output bin file

@@ -47,20 +47,6 @@ func (n *Node) GetStorage() (*storage.StateDBStorage, error) {
 	return n.store, nil
 }
 
-func (n *Node) FakeReadKV(key common.Hash) ([]byte, error) {
-	return n.ReadKV(key)
-}
-
-func (n *Node) FakeWriteKV(key common.Hash, val []byte) error {
-	//fmt.Printf("FAKE local write detected! key=%v\n", key)
-	return n.WriteKV(key, val)
-}
-
-func (n *Node) FakeWriteRawKV(key string, val []byte) error {
-	//fmt.Printf("FAKE local write detected! key=%v\n", key)
-	return n.WriteRawKV(key, val)
-}
-
 func (n *Node) ReadKV(key common.Hash) ([]byte, error) {
 	store, err := n.GetStorage()
 	if err != nil {
@@ -90,11 +76,6 @@ func (n *Node) WriteRawKV(key string, val []byte) error {
 	if err != nil {
 		return err
 	}
-	if debugKV {
-		if len(key) == len("s_es_0x26264f24677a207fffd716d8623505d87c628a3f2ab6ad198a096f09175f88de_2") || len(key) == len("rtou_0x74f90362e4a669797585b2f6c7c7a2dbf7acd9ad2f6d64cda70bb2690b2c5c9b") {
-			fmt.Printf("WriteRawKV K=%v|V=%x\n", key, val)
-		}
-	}
 
 	err = store.WriteRawKV([]byte(key), val)
 	if err != nil {
@@ -120,9 +101,6 @@ func (n *Node) ReadRawKV(key []byte) ([]byte, bool, error) {
 	if err != nil {
 		return []byte{}, false, err
 	}
-	if debugKV {
-		fmt.Printf("N%d ReadRawKV K=%v\n", n.id, string(key))
-	}
 	val, ok, err := store.ReadRawKV([]byte(key))
 	if err != nil {
 		return []byte{}, false, fmt.Errorf("ReadRawKV Err:%v\n", err)
@@ -130,7 +108,6 @@ func (n *Node) ReadRawKV(key []byte) ([]byte, bool, error) {
 		fmt.Printf("ReadRawKV K=%v not found\n", string(key))
 		return []byte{}, false, fmt.Errorf("ReadRawKV K=%v not found\n", string(key))
 	}
-	//fmt.Printf("Read key %s | val %x\n", key, val)
 	return val, true, nil
 }
 
@@ -145,7 +122,6 @@ func (n *Node) ReadKVByte(key []byte) ([]byte, bool, error) {
 	} else if !ok {
 		return []byte{}, false, fmt.Errorf("ReadKVByte K=%v not found\n", key)
 	}
-	//fmt.Printf("Read key %s | val %x\n", key, val)
 	return val, true, nil
 }
 
@@ -252,8 +228,5 @@ func (n *Node) BuildArbitraryDataChunks(chunks [][][]byte, blobLen int) (ecChunk
 		return ecChunks, err
 	}
 
-	if debugDA {
-		fmt.Printf("allHash encode %x\n", chunksRoots)
-	}
 	return ecChunks, nil
 }

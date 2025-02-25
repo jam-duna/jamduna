@@ -760,22 +760,6 @@ func CompareAccumulate(vm *VM, testcase AccumulateTestcase) {
 		return
 	}
 
-	// jsonData, err := json.Marshal(actualXContext_x)
-	// if err != nil {
-	// 	fmt.Println("Error formatting JSON:", err)
-	// 	return
-	// }
-	// fmt.Printf("ActualXContext_x: %s\n", string(jsonData))
-
-	// fmt.Println("=====================================================")
-
-	// jsonData, err = json.Marshal(testcase.ExpectedXcontent_x)
-	// if err != nil {
-	// 	fmt.Println("Error formatting JSON:", err)
-	// 	return
-	// }
-	// fmt.Printf("ExpectedXcontent_x: %s\n", string(jsonData))
-
 	if !reflect.DeepEqual(actualXContext_x, testcase.ExpectedXcontent_x) {
 		fmt.Printf("XContext_x mismatch. Expected: %v, Got: %v\n", testcase.ExpectedXcontent_x, actualXContext_x)
 		passed = false

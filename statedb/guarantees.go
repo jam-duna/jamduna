@@ -6,7 +6,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -26,14 +26,12 @@ func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) (numReports m
 		}
 
 		if guarantee.Report.CoreIndex >= types.TotalCores {
-			fmt.Printf("ProcessGuarantees: invalid core index %v\n", guarantee.Report.CoreIndex)
+			log.Warn(debugG, "ProcessGuarantees: invalid core index", "CoreIndex", guarantee.Report.CoreIndex)
 			continue
 		}
 		if j.AvailabilityAssignments[int(guarantee.Report.CoreIndex)] == nil {
 			j.SetRhoByWorkReport(guarantee.Report.CoreIndex, guarantee.Report, j.SafroleState.GetTimeSlot())
-			if debug {
-				fmt.Printf("ProcessGuarantees Success on Core %v\n", guarantee.Report.CoreIndex)
-			}
+			log.Debug(debugG, "ProcessGuarantees Success on Core", "coreIndex", guarantee.Report.CoreIndex)
 		}
 	}
 	return numReports
@@ -183,16 +181,14 @@ func (s *StateDB) VerifyGuaranteesMakeBlock(EGs []types.Guarantee, new_block *ty
 			//v0.5 eq 11.38
 			err1 := s.checkPrereq(eg, mapToGuaranteeSlice(egMap))
 			if err1 != nil {
-				logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err1)
-				storage.Logger.RecordLogs(storage.EG_error, logs, true)
+				log.Error(debugG, "VerifyGuaranteesMakeBlock", "err", err1)
 				valid = false
 			}
 			// v0.5.2 eq 11.42
 			err2 := s.checkRecentWorkPackage(eg, mapToGuaranteeSlice(egMap))
 			if err2 != nil {
-				logs := fmt.Sprintf("Verify_Guarantees_MakeBlock error: %v\n", err2)
 				delete(egMap, eg.Report.CoreIndex)
-				storage.Logger.RecordLogs(storage.EG_error, logs, true)
+				log.Error(debugG, "VerifyGuaranteesMakeBlock", "err", err2)
 				valid = false
 				continue
 			}
@@ -498,23 +494,18 @@ func (s *StateDB) areValidatorsAssignedToCore(guarantee types.Guarantee) error {
 		}
 		// REVIEW
 		if !find_and_correct {
-			if debugG {
-				g_core := guarantee.Report.CoreIndex
-				fmt.Printf("core %d can't find the correct assignment for validator %d\n", g_core, g.ValidatorIndex)
-				fmt.Printf("CurrGuarantorAssignments:\n")
-				for i, assignment := range s.GuarantorAssignments {
-					if assignment.CoreIndex == g_core {
-						fmt.Printf("core %d => validator %d\n", g_core, i)
-					}
-				}
-				fmt.Printf("PreviousGuarantorAssignments:\n")
-				for i, assignment := range s.PreviousGuarantorAssignments {
-					if assignment.CoreIndex == g_core {
-						fmt.Printf("core %d => validator %d\n", g_core, i)
-					}
+			g_core := guarantee.Report.CoreIndex
+			log.Warn(debugG, "areValidatorsAssignedToCore", "core can't find the correct assignment for validator\n", "core", g_core, "validatorIndex", g.ValidatorIndex)
+			for i, assignment := range s.GuarantorAssignments {
+				if assignment.CoreIndex == g_core {
+					log.Warn(debugG, "CurrGuarantorAssignments", "g_core", g_core, "i", i)
 				}
 			}
-
+			for i, assignment := range s.PreviousGuarantorAssignments {
+				if assignment.CoreIndex == g_core {
+					log.Warn(debugG, "PreviousGuarantorAssignments", "g_core", g_core, "i", i)
+				}
+			}
 			return jamerrors.ErrGWrongAssignment
 		}
 	}
@@ -661,14 +652,12 @@ func (j *JamState) CheckInvalidCoreIndex() {
 	// Core 0 : receiving megatron report; Core 1 : receiving fib+trib report
 	if problem {
 		for i, rho := range j.AvailabilityAssignments {
-			fmt.Printf("[Node] CheckInvalidCoreIndex i=%d rho: (WorkReportHash:%v) CoreIndex: %d WorkReport: %v\n",
-				i, rho.WorkReport.Hash(), rho.WorkReport.CoreIndex, rho.WorkReport.String())
+			log.Debug(debugG, "CheckInvalidCoreIndex", "i", i, "rho.WorkReportHash", rho.WorkReport.Hash(),
+				"CoreIndex", rho.WorkReport.CoreIndex, "WorkReport", rho.WorkReport.String())
 		}
-		fmt.Printf("CheckInvalidCoreIndex: FAILURE\n")
-		panic(1111)
-	} else if debug {
-		fmt.Printf("CheckInvalidCoreIndex: success\n")
+		log.Crit(debugG, "CheckInvalidCoreIndex: FAILURE")
 	}
+	log.Trace(debugG, "CheckInvalidCoreIndex: success")
 
 }
 
@@ -692,7 +681,7 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	for _, results := range g.Report.Results {
 		sum_rg += results.Gas
 	}
-	// fmt.Printf("report :%s \n", g.Report.String())
+
 	// current gas allocation is unlimited
 	if sum_rg <= types.AccumulationGasAllocation {
 		for _, results := range g.Report.Results {
@@ -707,8 +696,6 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 			}
 		}
 	}
-
-	fmt.Printf("sum_rg %d\n", sum_rg)
 
 	return jamerrors.ErrGWorkReportGasTooHigh
 }
@@ -749,9 +736,7 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 		}
 	}
 	if !anchor {
-		if debugG {
-			fmt.Printf("anchor not in recent blocks refine.Anchor: %v\n", refine.Anchor)
-		}
+		log.Warn(debugG, "checkRecentBlock:anchor not in recent blocks", "refine.Anchor", refine.Anchor)
 		return jamerrors.ErrGAnchorNotRecent
 	}
 
@@ -766,16 +751,13 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	}
 
 	if !stateroot {
-		if debugG {
-			fmt.Printf("state root not in recent blocks refine.StateRoot: %v\n", refine.StateRoot)
-		}
+		log.Warn(debugG, "checkRecentBlock:state root not in recent blocks", "refine.StateRoot", refine.StateRoot)
 		return jamerrors.ErrGBadStateRoot
 	}
 	beefyroot := true
 	for _, block := range s.JamState.RecentBlocks {
 		mmr := block.B
 		superPeak := mmr.SuperPeak()
-		// fmt.Printf("superPeak %v\n", superPeak)
 		if *superPeak != refine.BeefyRoot {
 			beefyroot = false
 		} else {
@@ -880,8 +862,8 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	// 	fmt.Printf("invalid prerequisite work package(from queue), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	// 	return jamerrors.ErrGDuplicatePackageRecentHistory
 	// }
-	for i, block := range s.JamState.RecentBlocks {
-		if i < len(s.JamState.RecentBlocks)-1 && len(block.Reported) != 0 { // we can't look at the last block
+	for _, block := range s.JamState.RecentBlocks {
+		if len(block.Reported) != 0 {
 			for _, segmentRootLookup := range block.Reported {
 				if segmentRootLookup.WorkPackageHash == workPackageHash {
 					return jamerrors.ErrGDuplicatePackageRecentHistory
@@ -947,7 +929,6 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 			prereqSet[segmentRootLookup.WorkPackageHash] = true
 		}
 	}
-	// fmt.Printf("[checkPrereq on WP=%v, ReportHash=%v] prereqSet From s.JamState.RecentBlocks=%v\n", g.Report.Hash(), g.Report.GetWorkPackageHash(), prereqSet)
 
 	for _, guarantee := range EGs {
 		workPackageHash := guarantee.Report.AvailabilitySpec.WorkPackageHash
@@ -967,7 +948,6 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 			}
 		}
 		if !exists {
-			// fmt.Printf("checkPrereq hash %v not found in prereqSet: %v\n", hash, prereqSet)
 			return jamerrors.ErrGDependencyMissing
 		}
 	}
@@ -1003,7 +983,6 @@ func getPresentBlock(s *StateDB) types.SegmentRootLookup {
 func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarantee) error {
 	currentSegmentRootLookUp := g.Report.SegmentRootLookup
 	if len(currentSegmentRootLookUp) == 0 {
-		// fmt.Printf("Error currentSegmentRootLookUp is nil, must have segmentRootLookup into it!\n")
 		return nil
 	}
 
@@ -1013,19 +992,8 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarante
 		fmt.Printf("Error s.JamState.RecentBlocks is nil, must have recentblock into it!\n")
 		return nil
 	}
-	// for _, block := range s.JamState.RecentBlocks {
-	// 	for _, segmentRootLookupItem := range block.Reported {
-	// 		tmpsegmentRootLookupItem := types.SegmentRootLookupItem{
-	// 			WorkPackageHash: segmentRootLookupItem.WorkPackageHash,
-	// 			SegmentRoot:     segmentRootLookupItem.SegmentRoot,
-	// 		}
-	// 		presentBlockSegmentRootLookup = append(presentBlockSegmentRootLookup, tmpsegmentRootLookupItem)
-	// 	}
-	// }
-	if debugG {
-		fmt.Printf("presentBlockSegmentRootLookup: %v\n", presentBlockSegmentRootLookup)
-		fmt.Printf("currentSegmentRootLookUp: %v\n", currentSegmentRootLookUp)
-	}
+	log.Debug(debugG, "checkRecentWorkPackage:presentBlockSegmentRootLookup", "presentBlockSegmentRootLookup", presentBlockSegmentRootLookup, "currentSegmentRootLookUp", currentSegmentRootLookUp)
+
 	// Check presentBlockHash2Hash include currentHash2Hash or not
 	segmentLookUpIncluded := make([]bool, len(currentSegmentRootLookUp))
 	for i, currentSegmentRootLookup := range currentSegmentRootLookUp {

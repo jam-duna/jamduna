@@ -1,11 +1,11 @@
 package statedb
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -15,7 +15,5 @@ func TestRho(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error decoding: %v", err)
 	}
-	if debug {
-		fmt.Println(decoded)
-	}
+	log.Trace(module, "TestRho", decoded)
 }

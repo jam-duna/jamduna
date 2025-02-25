@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
@@ -34,7 +34,7 @@ func sendStateTransition(endpoint string, st *statedb.StateTransition) (err erro
 	client := &http.Client{}
 	req, err := http.NewRequest("POST", endpoint, nil)
 	if err != nil {
-		log.Fatalf("Failed to create HTTP request: %v", err)
+		log.Crit("stf", "Failed to create HTTP request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -42,16 +42,10 @@ func sendStateTransition(endpoint string, st *statedb.StateTransition) (err erro
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Failed to send block via HTTP: %v", err)
+		log.Error("stf", "Failed to send block via HTTP", err)
 		return
 	}
 	defer resp.Body.Close()
-
-	/*log.Printf("StateTransition sent to HTTP endpoint. Response status: %s", resp.Status)
-	data, err := json.Marshal(st)
-	if err != nil {
-			log.Fatalf("Failed to serialize StateTransition: %v", err)
-	}*/
 	return
 }
 
@@ -149,12 +143,9 @@ func SetupQuicNetwork(network string, basePort uint16) (uint32, []string, map[ui
 	if err != nil {
 		return epoch0Timestamp, nil, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
 	}
-	//fmt.Printf("PeerList: %s\n", prettyPeerList)
 
 	return epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, nil
 }
-
-var Logger *storage.DebugLogger
 
 func GenerateRandomBasePort() uint16 {
 
@@ -172,17 +163,12 @@ func GenerateRandomBasePort() uint16 {
 func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
 	GenesisStateFile, GenesisBlockFile := getGenesisFile(network)
-	fmt.Printf("Using BasePort: %v\n", basePort)
+	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
 
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
 
 	if err != nil {
 		return nil, err
-	}
-	if debugL {
-
-		Logger = storage.InitDefaultLoggers()
-		storage.Logger = Logger
 	}
 
 	nodes := make([]*Node, numNodes)
@@ -205,9 +191,7 @@ func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 			case <-ticker.C:
 				break
 			case ts := <-godIncomingCh: // Correct channel receive operation
-				//fmt.Printf("god received %d\n", ts)
 				for _, n := range nodes { // Loop through nodes
-					//fmt.Printf("god sent %d to [N%d]\n", ts, i)
 					n.receiveGodTimeslotUsed(ts)
 				}
 			}
@@ -233,12 +217,9 @@ func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, 
 		if initialTimeSlot == 0 && currTimeSlot > 0 {
 			currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
 			initialTimeSlot = uint32(currEpoch) * types.EpochLength
-			//fmt.Printf("[WATCH START] H_t=%v e'=%v,m'=%v | Terminated after %v slots (MaxAllowed:%v Sec)\n", initialTimeSlot, currEpoch, 0, offsetTimeSlot, maxTimeAllowed)
-
 		}
 		currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
 		if currTimeSlot-initialTimeSlot >= offsetTimeSlot {
-			//fmt.Printf("[WATCH DONE] H_t=%v e'=%v,m'=%v | Elapsed: %v Sec\n", currTimeSlot, currEpoch, currPhase, int(time.Since(startTime).Seconds()))
 			done = true
 			continue
 		}
@@ -277,7 +258,7 @@ func getServices(serviceNames []string) (services map[string]*types.TestService,
 			CodeHash:    codeHash,
 			Code:        code,
 		}
-		fmt.Printf("%d: %s Code Hash: %x (Code Length: %v)\n", tmpServiceCode, serviceName, codeHash.Bytes(), len(code))
+		log.Info(module, serviceName, "codeHash", codeHash, "len", len(code))
 	}
 	return
 }
@@ -288,7 +269,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	Logger.RecordLogs(storage.Testing_record, fmt.Sprintf("[Start JAMTEST : %s, targetN=%v]\n", jam, targetN), true)
+	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 	_ = nodes
 	block_graph_server := types.NewGraphServer(basePort)
 	go block_graph_server.StartServer()
@@ -350,11 +331,11 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	for _, service := range testServices {
 		builderNode.preimages[service.CodeHash] = service.Code
 	}
-	fmt.Printf("Waiting for the first block to be ready...\n")
-	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	log.Trace(module, "Waiting for the first block to be ready...")
+	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
-		fmt.Printf("Builder storing TestService %s (%v)\n", serviceName, common.Str(service.CodeHash))
+		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		// set up service using the Bootstrap service
 		refine_context := builderNode.statedb.GetRefineContext()
 		codeWorkPackage := types.WorkPackage{
@@ -385,7 +366,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		}
 
 		new_service_found := false
-		fmt.Printf("Waiting for %s service to be ready...\n", serviceName)
+		log.Trace(module, "Waiting for service to be ready", "service", serviceName)
 		for !new_service_found {
 			stateDB := builderNode.getState()
 			if stateDB != nil && stateDB.Block != nil {
@@ -402,14 +383,11 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 				if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
 					service.ServiceCode = decoded_new_service_idx
 					new_service_idx = decoded_new_service_idx
-					fmt.Printf("%s Service Index: %v\n", serviceName, service.ServiceCode)
 					new_service_found = true
 					previous_service_idx = decoded_new_service_idx
-					//fmt.Printf("t.GetServiceStorage %v FOUND  %v\n", key, service_account_byte)
-
 					err = builderNode.BroadcastPreimageAnnouncement(new_service_idx, service.CodeHash, uint32(len(service.Code)), service.Code)
 					if err != nil {
-						fmt.Printf("BroadcastPreimageAnnouncement ERR %v\n", err)
+						log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 					}
 				}
 
@@ -417,8 +395,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		}
 	}
 
-	fmt.Printf("All services are ready, Send preimage announcement\n")
-	fmt.Printf("Wait until all the preimage blobs are ready\n")
+	log.Debug(module, "All services are ready, Sending preimage announcement\n")
 
 	for done := false; !done; {
 
@@ -430,11 +407,10 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 				if targetStateDB != nil {
 					code, ok, err := targetStateDB.ReadServicePreimageBlob(service.ServiceCode, service.CodeHash)
 					if err != nil || !ok {
-						// TODO
+						log.Debug(debugDA, "ReadServicePreimageBlob", "err", err, "ok", ok)
 					} else if len(code) > 0 && bytes.Equal(code, service.Code) {
 						ready++
 					}
-					// fmt.Printf(" check %s len(code)=%d expect %d => ready=%d\n", service.CodeHash, len(code), len(service.Code), ready)
 				}
 			}
 			nservices++
@@ -473,7 +449,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 }
 
 func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
-	fmt.Printf("Start FIB\n")
+	log.Info(module, "FIB START", "targetN", targetN)
 
 	service0 := testServices["fib"]
 	service_authcopy := testServices["auth_copy"]
@@ -523,7 +499,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 		}
 		workPackageHash := workPackage.Hash()
 
-		fmt.Printf("\n** \033[36m FIB=%v \033[0m workPackage: %v **\n", fibN, common.Str(workPackageHash))
+		log.Info(module, fmt.Sprintf("FIB(%v) work package submitted", fibN), "workPackage", workPackageHash)
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
 		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
@@ -553,8 +529,8 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 		}
 		prevWorkPackageHash = workPackageHash
 		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
-		service_account_byte, _, _ := n1.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
-		fmt.Printf("Fib(%v) = %v\n", fibN, service_account_byte)
+		service_account_byte, _, _ := n4.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
+		log.Info(module, fmt.Sprintf("Fib(%v) result", fibN), "result", fmt.Sprintf("%x", service_account_byte))
 	}
 
 }
@@ -627,9 +603,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 		case <-ticker.C:
 			if sentLastWorkPackage {
 				if FinalRho && FinalAssurance && FinalMeg {
-					fmt.Printf("Meg Finish\n")
 					ok = true
-					Logger.RecordLogs(storage.Testing_record, "[JAMTEST : megatron] Success!!!\n", true)
+					log.Info(module, "megatron success")
 					break
 				} else if test_prereq && nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil {
 					FinalRho = true
@@ -656,9 +631,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 						}
 					}
 					if FinalAssurance {
-						fmt.Printf("Meg Finish\n")
 						ok = true
-						Logger.RecordLogs(storage.Testing_record, "[JAMTEST : megatron] Success!!!\n", true)
+						log.Info(module, "megatron success")
 						break
 					}
 				}
@@ -863,7 +837,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 }
 
 func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage types.WorkPackage, receiverCore uint16, successful chan bool, extrinsics types.ExtrinsicsBlobs) {
-	ticker := time.NewTicker(types.SecondsPerSlot * time.Second)
+	ticker := time.NewTicker(2 * types.SecondsPerSlot * time.Second)
 	ticker2 := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	defer ticker2.Stop()
@@ -874,8 +848,8 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 	corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
 	randIdx := rand.Intn(len(corePeers))
 	err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, extrinsics, receiverCore)
-	log := fmt.Sprintf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
-	Logger.RecordLogs(storage.EG_status, log, true)
+	log.Trace(debugG, "SendWorkPackageSubmission to core for trial/timeslot", "n", senderNode.id, "p", corePeers[randIdx].PeerID, "core", receiverCore, "wph", workPackageHash,
+		"trialCount", trialCount, "timeslot", senderNode.statedb.GetSafrole().GetTimeSlot())
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
 	}
@@ -886,13 +860,17 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage typ
 			fmt.Printf("Context cancelled for work package %v\n", workPackageHash)
 			return
 		case <-ticker.C:
-
 			// Sending the work package again
+			prereqs := workPackage.RefineContext.Prerequisites
+			newRefineContext := senderNode.statedb.GetRefineContext(prereqs...)
+			workPackage.RefineContext = newRefineContext
+			workPackageHash = workPackage.Hash()
 			corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
 			randIdx := rand.Intn(len(corePeers))
 			err := corePeers[randIdx].SendWorkPackageSubmission(workPackage, extrinsics, receiverCore)
-			log := fmt.Sprintf("[N%v -> p[%v] SendWorkPackageSubmission to core_%d for %v trial=%v for timeslot %d\n", senderNode.id, corePeers[randIdx].PeerID, receiverCore, workPackageHash, trialCount, senderNode.statedb.GetSafrole().GetTimeSlot())
-			Logger.RecordLogs(storage.EG_status, log, true)
+			log.Debug(debugG, "SendWorkPackageSubmission to core for trial/timeslot",
+				"n", senderNode.id, "p", corePeers[randIdx].PeerID, "c", receiverCore, "wph", workPackageHash,
+				"trialCount", trialCount, "ts", senderNode.statedb.GetSafrole().GetTimeSlot())
 			if err != nil {
 				fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
 			}

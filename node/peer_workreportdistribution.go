@@ -9,7 +9,7 @@ import (
 
 	"reflect"
 
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -150,8 +150,7 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
-		fmt.Println("Error deserializing onWorkReportDistribution:", err)
-		panic(11112)
+		log.Crit(debugG, "onWorkReportDistribution", "err", err)
 		return
 	}
 
@@ -162,7 +161,7 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 		Signatures: newReq.Credentials,
 	}
 	n.guaranteesCh <- guarantee
-	Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [onWorkReportDistribution] incoming Guarantee %s from Core %d, eg slot %d\n", n.String(), workReport.GetWorkPackageHash().String_short(), workReport.CoreIndex, guarantee.Slot), true)
+	log.Debug(debugG, "onWorkReportDistribution incoming Guarantee from Core on slot", "n", n.String(), "workReport", workReport.GetWorkPackageHash().String_short(), "guarantee.Slot", guarantee.Slot)
 	n.workReportsCh <- workReport
 	return nil
 }

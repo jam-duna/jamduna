@@ -43,9 +43,7 @@ func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, bool, error)
 func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) (storage []byte, ok bool, err error) {
 	db := mh.GetDB()
 	_, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
 	defer tree.Close()
-	// fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
@@ -59,9 +57,7 @@ func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) (storage []by
 func (mh *MockHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) (blob []byte, ok bool, err error) {
 	db := mh.GetDB()
 	_, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
 	defer tree.Close()
-	// fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}
@@ -77,7 +73,6 @@ func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
 	_, tree, err := trie.Initial_bpt(db)
 	//tree := trie.NewMerkleTree(nil, db)
 	defer tree.Close()
-	// fmt.Printf("Root Hash=%x, err=%v\n", rootHash, err)
 	if err != nil {
 		log.Fatal("fail to connect to BPT")
 	}

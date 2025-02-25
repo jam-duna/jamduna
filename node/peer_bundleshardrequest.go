@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/quic-go/quic-go"
 )
 
@@ -66,17 +67,12 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 	if err != nil {
 		return
 	}
-	if debugA {
-		fmt.Printf("%s SendBundleShardRequest(erasureRoot=%v, shardIndex=%d)\n", p.String(), req.ErasureRoot, req.ShardIndex)
-	}
 	// <-- Bundle Shard
 	bundleShard, err = receiveQuicBytes(stream)
 	if err != nil {
 		return
 	}
-	if debugA {
-		fmt.Printf("%s SendBundleShardRequest received %d bytes for bundleShard\n", p.String(), len(bundleShard))
-	}
+	log.Debug(debugDA, "SendBundleShardRequest", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "len", len(bundleShard))
 	// <-- Justification
 	justification, err = receiveQuicBytes(stream)
 	if err != nil {
@@ -94,9 +90,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	if debugA {
-		fmt.Printf("%s onBundleShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
-	}
+	log.Trace(debugA, "onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
 
 	_, _, bundleShard, b_justification, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 	if err != nil {

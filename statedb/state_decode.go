@@ -101,7 +101,6 @@ func (T CTicketsOrKeys) Decode(data []byte) (interface{}, uint32) {
 	}
 	typeIdentifier := data[0]
 	encodedData := data[1:]
-	//fmt.Printf("[type=%v, len=%v] CTicketsOrKeys rawdata=%x\n", typeIdentifier, len(data), data)
 	switch typeIdentifier {
 	case 0: // Primary
 		decoded, length, err := types.Decode(encodedData, reflect.TypeOf(types.TicketsMark{}))
@@ -304,7 +303,6 @@ func (n *JamState) SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotByte []byte
 		return
 	}
 	mostRecentBlockTimeSlot, _, err := types.Decode(mostRecentBlockTimeSlotByte, reflect.TypeOf(uint32(0)))
-	//fmt.Printf("Recoved C11 MostRecentBlockTimeSlot=%v (byte=%v)\n", mostRecentBlockTimeSlot, mostRecentBlockTimeSlotByte)
 	if err != nil {
 		return
 	}

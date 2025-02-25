@@ -42,7 +42,6 @@ func computeHash(data []byte, hashType ...string) []byte {
 	var h hash.Hash
 	// Check if "keccak" is passed in hashType, else use default Blake2b-256.
 	if len(hashType) > 0 && hashType[0] == types.Keccak {
-		//fmt.Printf("!!using %v\n", types.Keccak)
 		h = sha3.NewLegacyKeccak256()
 	} else {
 		h, _ = blake2b.New256(nil)

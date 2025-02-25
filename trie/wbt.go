@@ -157,7 +157,6 @@ func VerifyWBT(treeLen int, index int, erasureRoot common.Hash, leafHash common.
 	// Compute the direction of the path
 	direction := computeDirection(index, start, end, tracePath)
 	direction = reverse(direction)
-	//fmt.Printf("Index :%d, Direction: %v\n", index, direction)
 
 	// Compute the root hash
 	for i, dir := range direction {

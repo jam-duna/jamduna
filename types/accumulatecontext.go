@@ -147,3 +147,12 @@ func (a *DeferredTransfer) Bytes() []byte {
 	}
 	return enc
 }
+
+func (a *DeferredTransfer) String() string {
+	enc, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
+}

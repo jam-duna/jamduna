@@ -65,7 +65,7 @@ func dump_recent_blocks(prefix string, arr RecentBlocks) {
 }
 
 // Recent History : see Section 7
-func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash, previousStateRoot common.Hash) {
+func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
 	reported := []types.SegmentRootLookupItem{}
@@ -77,10 +77,6 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 		reported = append(reported, temReported)
 	}
 	preRecentBlocks := s.JamState.RecentBlocks
-	if len(preRecentBlocks) > 0 {
-		preRecentBlocks[len(preRecentBlocks)-1].StateRoot = previousStateRoot
-	}
-
 	// Eq 83 n.b
 	mmr := trie.NewMMR()
 	if len(preRecentBlocks) > 0 {
@@ -102,4 +98,12 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 	s.JamState.RecentBlocks = postRecentBlocks
 
+}
+
+func (s *StateDB) ApplyStateRecentHistoryDagga(previousStateRoot common.Hash) {
+	preRecentBlocks := s.JamState.RecentBlocks
+	if len(preRecentBlocks) > 0 {
+		preRecentBlocks[len(preRecentBlocks)-1].StateRoot = previousStateRoot
+	}
+	s.JamState.RecentBlocks = preRecentBlocks
 }

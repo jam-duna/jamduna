@@ -113,7 +113,6 @@ func InitBanderSnatchKey(seed []byte) (key BanderSnatchKey, secret BanderSnatchS
 	if err != nil {
 		return key, secret, fmt.Errorf("failed to get private key: %v", err)
 	}
-	//fmt.Printf("!!!!BanderSnatch Pub Len=%v, Priv Len=%v\n", len(banderSnatch_pub), len(banderSnatch_priv))
 	return banderSnatch_pub, banderSnatch_priv, nil
 }
 
@@ -262,7 +261,6 @@ func IetfVrfVerify(pubKey BanderSnatchKey, signature, vrfInputData, auxData []by
 		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
 		C.size_t(len(vrfOutput)),
 	)
-	//fmt.Printf("IETF VRF Verify Result=%v | sig=%x, vrfInputData=%x, auxData=%x\n", result, signature, vrfInputData, auxData)
 	if result != 1 {
 		return nil, fmt.Errorf("verification failed")
 	}

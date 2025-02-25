@@ -16,6 +16,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/erasurecoding"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -125,9 +126,7 @@ func (n *Node) onDA_Announcement(stream quic.Stream, msg []byte) (err error) {
 		// panic(11113)
 		return nil
 	}
-	if debugDA {
-		fmt.Printf("Node %d Get newReq[%d].Data: %v\n", n.id, n.id, newReq.Data)
-	}
+	log.Trace(debugDA, "onDA_Announcement", "n", n.id, "newReq.Data", newReq.Data)
 	n.chunkMap.Store(common.Hash(newReq.SegmentRoot), newReq.Data)
 	return nil
 }
@@ -215,9 +214,8 @@ func (n *Node) onDA_Reconstruction(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	if debugDA {
-		fmt.Printf("%s received DA_Reconstruction request for hash %v\n", n.String(), req.(DA_request).Hash)
-	}
+	log.Trace(debugDA, "onDA_Reconstruction", "n", n.String(), "h", req.(DA_request).Hash)
+
 	value, ok := n.chunkMap.Load(req.(DA_request).Hash)
 	if !ok {
 		return fmt.Errorf("hash %v not found in chunkMap", req.(DA_request).Hash)
@@ -307,10 +305,8 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 	for {
 		timeSerachCurrent := time.Now()
 		if timeSerachCurrent.Sub(timeSerachStart) > checkTime {
-			if debugDA {
-				if n.id == 0 || n.id == uint16(lastValidator) {
-					fmt.Printf("Node %d closed: %v n.curre: %v dataHash: %v n.announ: %v\n", n.id, closedPProf, n.currentHash, dataHash, n.announcement)
-				}
+			if n.id == 0 || n.id == uint16(lastValidator) {
+				log.Debug(debugDA, "RunDASimulation Node closed", "n", n.id, "closedPProf", closedPProf, "n.currentHash", n.currentHash, "dataHash", dataHash, "n.announcement", n.announcement)
 			}
 			err := n.checkAndReconnect(reconnectTimes)
 			timeSerachStart = timeSerachCurrent
@@ -324,26 +320,6 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			}
 		}
 
-		// if n.id == 0 || n.id == uint16(lastValidator) {
-		// 	err := n.checkAndReconnect(reconnectTimes)
-		// 	timeSerachStart = timeSerachCurrent
-		// 	if err != nil {
-		// 		continue
-		// 	}
-		// 	if debugDA {
-		// 		time4 := time.Now()
-		// 		if time4.Sub(time3) > time.Second {
-		// 			fmt.Printf("Node %d n.announcement: %v\n", n.id, n.announcement)
-		// 			time3 = time4
-		// 		}
-		// 	}
-		// }
-		// if atomic.LoadInt64(&n.totalIncomingStreams) > 10 {
-		// 	if currentTotalIncomingStreams != atomic.LoadInt64(&n.totalIncomingStreams) {
-		// 		fmt.Printf("Current Node %d total totalIncomingStreams: %d\n", n.id, atomic.LoadInt64(&n.totalIncomingStreams))
-		// 		currentTotalIncomingStreams = atomic.LoadInt64(&n.totalIncomingStreams)
-		// 	}
-		// }
 		// Main logic to simulate DA
 		if setAnnouncement {
 			err := n.setAnnouncement(dataHash, 0, false)
@@ -353,16 +329,6 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			setAnnouncement = false
 		}
 		if n.id == 0 && !n.announcement {
-			if debugDADist {
-				fmt.Printf("1X->")
-			}
-			currentTime := time.Now()
-			hour := currentTime.Hour()
-			minute := currentTime.Minute()
-			second := currentTime.Second()
-			millisecond := currentTime.Nanosecond() / int(time.Millisecond)
-
-			fmt.Printf("Node %d start time %02d:%02d:%02d.%03d\n", n.id, hour, minute, second, millisecond)
 			size := getRandomSize()
 			numpieces := size / 2 // One chunk have N pieces and each piece is 2 bytes
 			/*
@@ -372,9 +338,7 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			generateSize := size * types.TotalValidators / 3
 			b := generateRandomData(generateSize)
 			dataHash := common.Blake2Hash(b)
-			if debugDA {
-				fmt.Printf("Len(b)%d, size %d, numpieces %d, generateSize %d\n", len(b), size, numpieces, generateSize)
-			}
+			log.Debug(debugDA, "Len(b)%d, size %d, numpieces %d, generateSize %d\n", len(b), size, numpieces, generateSize)
 			timeA := time.Now()
 			chunks, err := erasurecoding.Encode(b, numpieces)
 			timeB := time.Now()
@@ -383,12 +347,8 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				categorizeAndCountError(err)
 				continue
 			}
-			if debugDA {
-				fmt.Printf("Node %d generated data chunk[%d][%d][%d]\n", n.id, len(chunks), len(chunks[0]), len(chunks[0][0]))
-			}
-			if debugDADist {
-				fmt.Printf("2X->")
-			}
+			log.Debug(debugDA, "Node %d generated data chunk[%d][%d][%d]\n", n.id, len(chunks), len(chunks[0]), len(chunks[0][0]))
+
 			bECChunks := make([]DADistributeECChunk, len(chunks[0]))
 
 			for j := range chunks[0] {
@@ -398,25 +358,14 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				}
 			}
 
-			if debugDADist {
-				fmt.Printf("3X->")
-			}
-			if debugDA {
-				for j, chunk := range bECChunks {
-					fmt.Printf("bECChunks[%d].SegmentRoot: %x\n", j, chunk.SegmentRoot)
-				}
+			for j, chunk := range bECChunks {
+				log.Trace(debugDA, "j", j, "SegmentRoot", chunk.SegmentRoot)
 			}
 
 			n.chunkBox = make(map[common.Hash][][]byte)
 			n.chunkBox[dataHash] = [][]byte{b}
 
-			if debugDADist {
-				fmt.Printf("4X->")
-			}
-			if debugDA {
-				fmt.Printf("WorkPackageHash: %x\n", dataHash)
-				fmt.Printf("[N%d] Encoded data: %x\n", n.id, b)
-			}
+			log.Trace(debugDA, "n", n.id, "WorkPackageHash", dataHash, "Encoded data", b)
 
 			ecChunks := make([][][]byte, 1)
 			ecChunks[0] = make([][]byte, len(bECChunks))
@@ -425,26 +374,16 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				ecChunks[0][j] = chunk.Data
 			}
 
-			if debugDA {
-				decode, err := n.decode(ecChunks, true, 6)
-				if err != nil {
-					fmt.Printf("ecChunks: %x\n", ecChunks)
-					fmt.Printf("dataHash: %v\n", dataHash)
-					fmt.Printf("Error decoding data: %v\n", err)
-				}
-				decodeHash := common.Blake2Hash(decode)
-				bHash := common.Blake2Hash(b)
-				if !common.CompareBytes(decodeHash[:], bHash[:]) {
-					if debugDA {
-						fmt.Printf("[N%d] Decoded data: %x\noriginal b: %x\n", n.id, decode, b)
-					}
-					fmt.Printf("Decoded data is not equal to original data\n")
-					fmt.Printf("Node %d Decoded data is not equal to original data, when data length = %d\n", n.id, len(b))
-				}
+			decode, err := n.decode(ecChunks, true, 6)
+			if err != nil {
+				log.Error(debugDA, "decode", "ecChunks: %x\n", ecChunks, "dataHash", dataHash, "err", err)
 			}
-			if debugDADist {
-				fmt.Printf("5X->")
+			decodeHash := common.Blake2Hash(decode)
+			bHash := common.Blake2Hash(b)
+			if !common.CompareBytes(decodeHash[:], bHash[:]) {
+				log.Error(debugDA, "Decoded data is not equal to original data", "n", n.id, "len(b)", len(b), "Decoded data", decode, "b", b)
 			}
+
 			n.announcement = true
 			n.currentHash = dataHash
 			n.broadcast(bECChunks)
@@ -456,16 +395,10 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				n.currentHash = common.Hash{0}
 				continue
 			}
-			if debugDADist {
-				fmt.Printf("6X->")
-			}
-			if debugDADist {
-				fmt.Printf("7X\n")
-			}
 			timeC := time.Now()
 			encTime := timeB.Sub(timeA).Milliseconds()
 			distTime := timeC.Sub(timeB).Milliseconds()
-			fmt.Printf("Node %d broadcasted the hash\t%x...%x, len(data) %d, enc=%dms dist=%dms\n", n.id, dataHash[:4], dataHash[len(dataHash)-4:], len(b), encTime, distTime)
+			log.Debug(debugDA, "broadcasted hash", "n", n.id, "dataHash", dataHash, "len(data)", len(b), "encTime", encTime, "distTime", distTime)
 		} else if n.id == uint16(lastValidator) {
 			if !n.announcement {
 				continue
@@ -476,12 +409,7 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			// Reset the setting
 			n.announcement = false
 			setAnnouncement = false
-			if debugDARecon {
-				fmt.Printf("1->")
-			}
-			if debugDA {
-				fmt.Printf("[N%d] Try to get data_hash: %x\n", n.id, dataHash)
-			}
+			log.Debug(debugDA, "Try to get data_hash", "n", n.id, "dataHash", dataHash)
 			timeX := time.Now()
 			reconstructReqs := make([]DA_request, types.TotalValidators)
 			for j := range reconstructReqs {
@@ -489,23 +417,17 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 				reconstructReqs[j].ShardIndex = uint16(j)
 			}
 
-			if debugDARecon {
-				fmt.Printf("2->")
-			}
 			reqs := make([]interface{}, len(reconstructReqs))
 			for j, req := range reconstructReqs {
 				reqs[j] = req
 				if reqs[j].(DA_request).Hash != dataHash {
-					// fmt.Printf("Hash mismatch: %x\n", reqs[j].(DA_request).Hash)
+
 					err := fmt.Errorf("hash mismatch: %x", reqs[j].(DA_request).Hash)
 					categorizeAndCountError(err)
 					continue
 				}
 			}
 
-			if debugDARecon {
-				fmt.Printf("3->")
-			}
 			resps, err := n.makeRequests(reqs, types.TotalValidators/3, time.Duration(20)*time.Second, time.Duration(50)*time.Second)
 			if err != nil {
 				categorizeAndCountError(err)
@@ -518,22 +440,15 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			for _, resp := range resps {
 				daResp, ok := resp.(DA_response)
 				if !ok {
-					if debugDA {
-						fmt.Printf("Unexpected response type: %T\n", resp)
-					}
+					log.Warn(debugDA, "Unexpected response type", resp)
 					categorizeAndCountError(fmt.Errorf("unexpected response type: %T", resp))
 					continue
 				}
 
-				if debugDA {
-					fmt.Printf("[N%d] Get response from node[%d] Data = %x\n", n.id, daResp.ShardIndex, daResp.Data)
-				}
+				log.Warn(debugDA, "Get response from node", "n", n.id, "shardIndex", daResp.ShardIndex, "data", daResp.Data)
 				encodedData[daResp.ShardIndex] = daResp.Data
 			}
 
-			if debugDARecon {
-				fmt.Printf("4->")
-			}
 			encodedThreeDimData := make([][][]byte, 1)
 			encodedThreeDimData[0] = encodedData
 			dataLength := 0
@@ -543,26 +458,17 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 					break
 				}
 			}
-			if debugDARecon {
-				fmt.Printf("5->")
-			}
+
 			decodedData, err := erasurecoding.Decode(encodedThreeDimData, dataLength/2)
 			if err != nil {
-				if debugDA {
-					fmt.Printf("Error decoding data: %v\n", err)
-				}
+				log.Error(debugDA, "Error decoding data", "err", err)
 				categorizeAndCountError(err)
 				continue
-			}
-			if debugDARecon {
-				fmt.Printf("6->")
 			}
 
 			timeZ := time.Now()
 			decodeDataHash := common.Blake2Hash(decodedData)
-			if debugDARecon {
-				fmt.Printf("7->")
-			}
+
 			reqTime := timeY.Sub(timeX).Milliseconds()
 			decTime := timeZ.Sub(timeY).Milliseconds()
 			fmt.Printf("Node %d decoded data hash\t%x...%x, len(data) %d, req=%dms dec=%dms\n", n.id, decodeDataHash[:4], decodeDataHash[len(decodeDataHash)-4:], len(decodedData), reqTime, decTime)
@@ -578,20 +484,14 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 
 			// Check if the decoded data is equal to the original data
 			if !common.CompareBytes(decodeDataHash[:], dataHash[:]) {
-				if debugDA {
-					fmt.Printf("[N%d] Decoded data:  %x\n", n.id, decodedData)
-				}
 				err := fmt.Errorf("decoded data hash %x is not equal to original data hash %x", decodeDataHash, dataHash)
 				categorizeAndCountError(err)
-				fmt.Printf("Node %d Decoded data is not equal to original data, when data length = %d\n", n.id, len(decodedData))
+				log.Error(debugDA, "Decoded data err", "n", n.id, "err", err)
 			}
 			n.currentHash = common.Hash{0}
 			if err != nil {
 				categorizeAndCountError(err)
 				continue
-			}
-			if debugDARecon {
-				fmt.Printf("8\n")
 			}
 			if iterationCounter >= 1000 {
 				printErrorStatistics()
@@ -608,15 +508,12 @@ func (n *Node) RunDASimulation(pprofFile *os.File, pprofTime time.Duration) erro
 			}
 			setAnnouncement = false
 		}
-		if debugDAPProf {
-			if pprofFile != nil && !closedPProf {
-				time2 := time.Now()
-				if time2.Sub(time1) > pprofTime {
-					pprof.StopCPUProfile()
-					pprofFile.Close()
-					closedPProf = true
-					// fmt.Printf("Node %d Port %d Stopped pprof profiling.\n", n.id, n.id+9000)
-				}
+		if pprofFile != nil && !closedPProf {
+			time2 := time.Now()
+			if time2.Sub(time1) > pprofTime {
+				pprof.StopCPUProfile()
+				pprofFile.Close()
+				closedPProf = true
 			}
 		}
 	}

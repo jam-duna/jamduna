@@ -118,10 +118,8 @@ func TestReportParsing(t *testing.T) {
 			}
 			// marshal the struct to JSON
 			expectedJson, err := json.MarshalIndent(tc.expectedType, "", "  ")
-			if debugG {
-				fmt.Printf("Unmarshaled %s\n", jsonPath)
-				fmt.Printf("Expected: %s\n", expectedJson)
-			}
+			log.Debug(debugG, "Unmarshaled", "jsonPath", jsonPath)
+			log.Debug(debugG, "Expected", "expected", expectedJson)
 			// Encode the struct to bytes
 			encodedBytes, err := types.Encode(tc.expectedType)
 			if err != nil {
@@ -138,9 +136,7 @@ func TestReportParsing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
-			if debugG {
-				fmt.Printf("Encoded JSON:\n%s\n", encodedJSON)
-			}
+			log.Debug(debugG, "TestReportParsing", "Encoded JSON", encodedJSON)
 
 			// Unmarshal again to compare
 			var decodedStruct2 TestReport
@@ -207,9 +203,6 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 		return fmt.Errorf("Reports FAIL: Expected have error:%v", exceptErr)
 	}
 	if err != nil && exceptErr != nil {
-		if debug {
-			fmt.Printf("Get error: %v\n", err)
-		}
 		//check error prefix vs json file name
 		// read string until the first '-'
 		// if the prefix is not the same as the json file name, return error

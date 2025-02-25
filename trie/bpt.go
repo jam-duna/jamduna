@@ -60,9 +60,6 @@ const (
 const (
 	LevelDBNull  = "null"
 	LevelDBEmpty = ""
-
-	debug    = false
-	debugCDT = false
 )
 
 /*
@@ -102,10 +99,6 @@ func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 		path = optionalPath[0]
 	}
 	stateDBStorage, err := storage.NewStateDBStorage(path)
-	//db, err := leveldb.OpenFile(path, nil)
-	if debug {
-		fmt.Printf("Initialized levelDB at: %s\n", path)
-	}
 	return stateDBStorage, err
 }
 
@@ -119,12 +112,10 @@ func DeleteLevelDB(optionalPath ...string) error {
 		path = optionalPath[0]
 	}
 
-	//fmt.Printf("Deleting LevelDB at: %s\n", path)
 	err := os.RemoveAll(path)
 	if err != nil {
 		return fmt.Errorf("failed to delete LevelDB at %s: %v", path, err)
 	}
-	//fmt.Println("LevelDB deleted successfully")
 	return nil
 }
 
@@ -363,7 +354,6 @@ func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
 
 func (t *MerkleTree) levelDBGetLeaf(nodeHash []byte) ([]byte, bool, error) {
 	encodedLeaf, ok, err := t.levelDBGet(nodeHash)
-	//TODO:
 	if err != nil {
 		return nil, false, err
 	} else if !ok {
@@ -371,7 +361,6 @@ func (t *MerkleTree) levelDBGetLeaf(nodeHash []byte) ([]byte, bool, error) {
 	}
 	//recover encodedLeaf from nodeHash
 	_, _v, isEmbedded, err := decodeLeaf(encodedLeaf)
-	// fmt.Printf("levelDBGetLeaf nodeHash=%x k=%x, v=%x, isEmbedded=%v\n", nodeHash, _K, _v, isEmbedded)
 	if err != nil {
 		return nil, false, fmt.Errorf("decodeLeaf leaf Err: %s", err)
 	}
@@ -391,7 +380,6 @@ func (t *MerkleTree) levelDBSet(k, v []byte) error {
 	if t.db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	//fmt.Printf("Len(k)=%d, k=%x\n", len(k), k)
 	err := t.db.WriteRawKV(k, v)
 	if err != nil {
 		return fmt.Errorf("failed to set key %s: %v", k, err)
@@ -428,7 +416,6 @@ func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
 		}, nil
 	}
 	leafKey, _, _ := t.levelDBGetLeaf(nodeHash)
-	// fmt.Printf("levelDBGetNode: nodeHash=%x, leafKey=%x\n", nodeHash, leafKey)
 	if leafKey != nil {
 		leafValue, _, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
 		//leafValue, _ := t.db.Get([]byte(append(nodeHash, leafKey...)), nil)
@@ -526,7 +513,6 @@ func (t *MerkleTree) GetStateByRange(starKey []byte, endKey []byte, maxSize uint
 	paddedStart := make([]byte, 32)
 	copy(paddedStart, starKey)
 	value, _, _ := t.Get(paddedStart)
-	// fmt.Printf("paddedStart: %x, value: %x\n", paddedStart, value)
 	found := false
 	end := false
 	if value != nil {
@@ -545,14 +531,12 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 	if node.Left == nil && node.Right == nil {
 		nodeType = "Leaf"
 	}
-	//fmt.Printf("%s[%s Node] Key: %x, Hash: %x\n", strings.Repeat("  ", level), nodeType, node.Key, node.Hash)
 	*boundaryNodes = append(*boundaryNodes, node.Hash)
 
 	value, _, _ := t.Get(node.Key)
 
 	// Copy the original key into the new slice
 	if value != nil {
-		//fmt.Printf("%s  [Leaf Node] Value: %x\n", strings.Repeat("  ", level), value)
 		paddedStart := make([]byte, len(node.Key))
 		paddedEnd := make([]byte, len(node.Key))
 		// Copy the original key into the new slice
@@ -582,8 +566,6 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 					Value: value,
 				}
 				addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)
-				// fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
-
 				*foundkv = append(*foundkv, stateKeyValue)
 				*currenSize += uint32(addSize)
 			}
@@ -594,9 +576,7 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 		}
 	}
 	if node.Left != nil || node.Right != nil {
-		//fmt.Printf("%s  Left:\n", strings.Repeat("  ", level))
 		t.getTreeContentIncludeKey(node.Left, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
-		//fmt.Printf("%s  Right:\n", strings.Repeat("  ", level))
 		t.getTreeContentIncludeKey(node.Right, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
 	}
 	return true
@@ -610,11 +590,9 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 	if node.Left == nil && node.Right == nil {
 		nodeType = "Leaf"
 	}
-	//fmt.Printf("%s[%s Node] Key: %x, Hash: %x\n", strings.Repeat("  ", level), nodeType, node.Key, node.Hash)
 	*boundaryNodes = append(*boundaryNodes, node.Hash)
 	value, _, _ := t.Get(node.Key)
 	if value != nil {
-		//fmt.Printf("%s  [Leaf Node] Value: %x\n", strings.Repeat("  ", level), value)
 		paddedStart := make([]byte, len(node.Key))
 		paddedEnd := make([]byte, len(node.Key))
 		// Copy the original key into the new slice
@@ -623,7 +601,6 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 		if nodeType == "Leaf" {
 			// check if the key is within range..
 			// key is expected to 31 bytes
-
 			var k_31 [31]byte
 			copy(k_31[:], node.Key[:31])
 			if len(k_31) != 31 {
@@ -635,8 +612,6 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 				Value: value,
 			}
 			addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)
-			// fmt.Printf("[%v] Adding key++Len++Val len(%v|%v=> %v)\n", nodeType, len(stateKeyValue.Key), len(stateKeyValue.Value), addSize)
-
 			*foundkv = append(*foundkv, stateKeyValue)
 			*currenSize += uint32(addSize)
 		}
@@ -645,9 +620,7 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 		}
 	}
 	if node.Left != nil || node.Right != nil {
-		//fmt.Printf("%s  Left:\n", strings.Repeat("  ", level))
 		t.getTreeContent(node.Left, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
-		//fmt.Printf("%s  Right:\n", strings.Repeat("  ", level))
 		t.getTreeContent(node.Right, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
 	}
 	return true
@@ -658,10 +631,8 @@ func (t *MerkleTree) GetRealKey(key [31]byte, value []byte) []byte {
 	nodeHash := computeHash(encodedLeaf)
 
 	leafKey, _, _ := t.levelDBGetLeaf(nodeHash)
-	// fmt.Printf("levelDBGetNode: nodeHash=%x, leafKey=%x\n", nodeHash, leafKey)
 	if leafKey != nil {
 		realKey, _, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
-		//leafValue, _ := t.db.Get([]byte(append(nodeHash, leafKey...)), nil)
 		return realKey
 	}
 	return nil
@@ -698,7 +669,7 @@ func (t *MerkleTree) SetRawKeyVal(key common.Hash, value []byte) {
 
 func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 	stateKey := make([]byte, 32)
-	debug := false
+
 	switch _stateIdentifier {
 	case C1:
 		stateKey[0] = 0x01
@@ -731,15 +702,12 @@ func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 	case C15:
 		stateKey[0] = 0x0F
 	}
-	if debug {
-		fmt.Printf("SetState %v stateKey=%x | value=%x\n", _stateIdentifier, stateKey, value)
-	}
 	t.Insert(stateKey, value)
 }
 
 func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	stateKey := make([]byte, 32)
-	debug := false
+
 	switch _stateIdentifier {
 	case C1:
 		stateKey[0] = 0x01
@@ -775,9 +743,7 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	value, ok, err := t.Get(stateKey)
 	if !ok || err != nil {
 		fmt.Printf("GetState stateKey=%x Error %v, %v\n", stateKey, ok, err)
-		if debug {
-			fmt.Printf("GetState %v stateKey=%x | RecovedValue=%x, ok=%v err=%v\n", _stateIdentifier, stateKey, value, ok, err)
-		}
+
 	}
 	return value, err
 }
@@ -798,9 +764,6 @@ func (t *MerkleTree) SetService(s uint32, v []byte) (err error) {
 	*/
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
-	if debug {
-		fmt.Printf("SetService stateKey=%x, v=%x\n", stateKey, v)
-	}
 
 	metaKey := fmt.Sprintf("meta_%x", stateKey)
 	metaKeyBytes, err := types.Encode(metaKey)
@@ -845,9 +808,6 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	vBytes, err := types.Encode(time_slots)
 	if err != nil {
 		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
-	}
-	if debug {
-		fmt.Printf("SetPreImageLookup stateKey=%x, vBytes=%v\n", stateKey, vBytes)
 	}
 	// Insert the value into the state
 
@@ -897,9 +857,6 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	} else if !ok {
 		return nil, ok, nil
 	}
-	if debug {
-		fmt.Printf("GetPreImageLookup stateKey=%x, vByte=%v\n", stateKey, vByte)
-	}
 	var time_slots []uint32
 
 	if len(vByte) == 0 {
@@ -932,9 +889,6 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 
 	account_storage_key := common.ComputeC_sh(s, storageKey)
 	stateKey := account_storage_key.Bytes()
-	if true {
-		fmt.Printf("SetServiceStorage(s=%d, k=%s, v=%x) C(s, concat(0xFFFFFFFF,k[0:28])=%s)=%x\n", s, k, storageValue, storageKey, stateKey)
-	}
 
 	metaKey := fmt.Sprintf("meta_%x", stateKey)
 	metaKeyBytes, err := types.Encode(metaKey)
@@ -960,7 +914,6 @@ func (t *MerkleTree) GetServiceStorage(s uint32, k common.Hash) ([]byte, bool, e
 	// Get Storage from trie
 	value, ok, err := t.Get(stateKey)
 	if !ok || err != nil {
-		// fmt.Printf("GetServiceStorage stateKey=%x Error %v, %v\n", stateKey, ok, err)
 		return nil, ok, err
 	}
 	return value, true, nil
@@ -1015,7 +968,6 @@ func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []by
 	stateKey := account_preimage_hash.Bytes()
 	value, ok, err = t.Get(stateKey)
 	if !ok || err != nil {
-		// fmt.Printf("GetPreImageBlob stateKey=%x Error %v, %v\n", stateKey, ok, err)
 		return nil, ok, err
 	}
 	// Get Preimage Blob from trie
@@ -1042,7 +994,6 @@ func (t *MerkleTree) Insert(key, value []byte) {
 		encodedLeaf := leaf(key, value)
 		t.levelDBSetLeaf(encodedLeaf, value, key)
 		if t.Root == nil {
-			//fmt.Printf("encodedLeaf=%x, computedHash=%x\n", encodedLeaf, computeHash(encodedLeaf))
 			t.Root = &Node{
 				Hash: computeHash(encodedLeaf),
 				Key:  key,
@@ -1232,9 +1183,7 @@ func (t *MerkleTree) getValue(node *Node, key []byte, depth int) ([]byte, bool, 
 		return nil, false, nil
 	}
 
-	// fmt.Printf("Searching key: %x at node key: %x at depth: %d\n", key, node.Key, depth)
 	if compareBytes(node.Key, key) {
-		//fmt.Printf("Found key: %x with Hash: %x/n", key, node.Hash)
 		valueLeaf, okLeaf, errLeaf := t.levelDBGetLeaf(node.Hash)
 		if errLeaf != nil {
 			return nil, false, fmt.Errorf("GetValue: Error %v", errLeaf)
@@ -1352,10 +1301,8 @@ func (t *MerkleTree) Verify(key []byte, value []byte, rootHash []byte, path [][]
 
 	for i := len(path) - 1; i >= 0; i-- {
 		if bit(key, i) {
-			// fmt.Printf("computing hash (%x, %x):%x\n", path[i], leafHash, computeHash(branch(path[i], leafHash)))
 			leafHash = computeHash(branch(path[i], leafHash))
 		} else {
-			// fmt.Printf("computing hash (%x, %x):%x\n", leafHash, path[i], computeHash(branch(leafHash, path[i])))
 			leafHash = computeHash(branch(leafHash, path[i]))
 		}
 	}

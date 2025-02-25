@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"sort"
 
-	"fmt"
-
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -245,7 +244,7 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 
 		}
 	}
-	// fmt.Printf("OuterAccumulate i=%d\n", i)
+
 	if i == 0 { // if i = 0, then nothing to do
 		num = 0
 
@@ -365,17 +364,9 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 		S: s,
 		I: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
-	if debug {
-		fmt.Printf("\n\nNewXContext: x_i computation [0.6.2 (B.9)](https://graypaper.fluffylabs.dev/#/5f542d7/2efd002efd00)\n")
-		fmt.Printf("s = %d\n", s)
-		fmt.Printf("eta_0' = %x\n", sdb.JamState.SafroleState.Entropy[0].Bytes())
-		fmt.Printf("timeslot = %d\n", sdb.JamState.SafroleState.Timeslot)
-		fmt.Printf("encode(s, eta_0', timeslot)_ = %x\n", encoded)
-		fmt.Printf("hash(encoded) = %x\n", hash)
-		fmt.Printf("hashed[:4] = %x\n", hash[:4])
-		fmt.Printf("decode(hashed[:4]) = %d\n", decoded)
-		fmt.Printf("decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
-	}
+	log.Trace(module, "s", s, "eta_0'", sdb.JamState.SafroleState.Entropy[0].Bytes(), "timeslot", sdb.JamState.SafroleState.Timeslot)
+	log.Trace(module, "encode(s, eta_0', timeslot)", encoded, "hash(encoded)", hash, "hashed[:4]", hash[:4], "decode(hashed[:4])", decoded)
+	log.Trace(module, "decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
 
 	js := sdb.JamState
 	if u != nil {
@@ -392,7 +383,6 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 	mutableServiceAccount := serviceAccount.Clone()
 	mutableServiceAccount.ALLOW_MUTABLE()
 	x.U.D[s] = mutableServiceAccount // NOTE: this is a distinct COPY of serviceAccount and CAN have Set{...}
-	//fmt.Printf("NewXContext D[%d]=%s", s, mutableServiceAccount.String())
 	return x
 }
 
@@ -437,7 +427,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					WorkPackageHash: workReport.AvailabilitySpec.WorkPackageHash,
 					AuthOutput:      workReport.AuthOutput,
 				})
-				//fmt.Printf("SingleAccumulate %d workpackagehash=%v result=%v len(result)=%d\n", s, workReport.AvailabilitySpec.WorkPackageHash, workResult.Result.Ok[:], len(workResult.Result.Ok[:]))
 			}
 		}
 	}
@@ -453,14 +442,14 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if err != nil || !ok {
 		panic("Could not read blob")
 	}
-	//o.Dump("SingleAccumulate", sd.Id)
+
 	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
 	t := sd.JamState.SafroleState.Timeslot
-
+	if sd.Authoring {
+		vm.SetLogging("authoring")
+	}
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
-	//xContext.U.Dump("POST-ExecuteAccumulate", sd.Id)
-	// fmt.Printf("[service%d] accumulat output: %x\n", s, r.Ok)
 	o.D[s] = serviceAccount
 
 	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {
@@ -533,7 +522,6 @@ func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint
 }
 
 func (s *StateDB) ApplyStateTransitionAccumulation(w_star []types.WorkReport, num uint64, previousTimeslot uint32) {
-	// fmt.Printf("ApplyStateTransitionAccumulation num=%d previousTimeslot=%d\n", num, previousTimeslot)
 	jam := s.GetJamState()
 	w_q := jam.QueuedExecution(s.AvailableWorkReport)
 	jam.UpdateLatestHistory(w_star, int(num))

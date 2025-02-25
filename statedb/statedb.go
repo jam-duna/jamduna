@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
+
 	"math"
 	"os"
 	"reflect"
@@ -18,16 +18,21 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+)
+
+const (
+	module = "statedb"
 )
 
 type StateDB struct {
@@ -46,8 +51,8 @@ type StateDB struct {
 
 	// used in ApplyStateRecentHistory between statedbs
 	AccumulationRoot common.Hash
-
-	X *types.XContext
+	Authoring        bool
+	X                *types.XContext
 
 	GuarantorAssignments         []types.GuarantorAssignment
 	PreviousGuarantorAssignments []types.GuarantorAssignment
@@ -113,7 +118,7 @@ func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
 	cred := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
 	err = a.VerifySignature(cred)
 	if err != nil {
-		fmt.Printf("Invalid Assurance. Err=%v\n", err)
+		log.Error("statedb", "CheckIncomingAssurance: Invalid Assurance", "err", err)
 		return
 	}
 	return nil
@@ -135,14 +140,14 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 
 // EP Errors
 const (
-	debug                     = false
-	debugA                    = false
-	debugG                    = false
-	debugP                    = false
-	debugAudit                = false
-	debugSeal                 = false
+	debug      = "statedb"
+	debugA     = "A"
+	debugG     = "G"
+	debugP     = "P"
+	debugAudit = "audit"
+	debugSeal  = "seal"
+
 	saveSealBlockMaterial     = false
-	debugtrace                = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
@@ -162,16 +167,15 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 		}
 	}
 
-	//fmt.Printf("Validating E_p %v\n",l.String())
 	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
-		fmt.Printf("Fail at anchor not set, service idx %v, blob hash %v, blob length %v\n", l.Service_Index(), l.BlobHash(), l.BlobLength())
+		log.Error("statedb", "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
 		t.PrintAllKeyValues()
 		t.PrintTree(t.Root, 0)
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
-		fmt.Printf("Can't find the anchor, service idx %v, blob hash %v, blob length %v\n", l.Service_Index(), l.BlobHash(), l.BlobLength())
+		log.Error("statedb", "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
 		t.PrintAllKeyValues()
 		t.PrintTree(t.Root, 0)
@@ -262,73 +266,66 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 
 	coreAuthPoolEncode, err := t.GetState(C1)
 	if err != nil {
-		fmt.Printf("Error reading C1 CoreAuthPool from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C1 CoreAuthPool from trie", err)
 	}
 	authQueueEncode, err := t.GetState(C2)
 	if err != nil {
-		fmt.Printf("Error reading C2 AuthQueue from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C2 AuthQueue from trie: %v\n", err)
 	}
 	recentBlocksEncode, err := t.GetState(C3)
 	if err != nil {
-		fmt.Printf("Error reading C3 RecentBlocks from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C3 RecentBlocks from trie: %v\n", err)
 	}
 	safroleStateEncode, err := t.GetState(C4)
 	if err != nil {
-		fmt.Printf("Error reading C4 SafroleState from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C4 SafroleState from trie: %v\n", err)
 	}
 	disputeStateEncode, err := t.GetState(C5)
 	if err != nil {
-		fmt.Printf("Error reading C5 DisputeState from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C5 DisputeState from trie: %v\n", err)
 	}
 	entropyEncode, err := t.GetState(C6)
 	if err != nil {
-		fmt.Printf("Error reading C6 Entropy from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C6 Entropy from trie: %v\n", err)
 	}
 	DesignedEpochValidatorsEncode, err := t.GetState(C7)
 	if err != nil {
-		fmt.Printf("Error reading C7 NextEpochValidators from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C7 NextEpochValidators from trie: %v\n", err)
 	}
 	currEpochValidatorsEncode, err := t.GetState(C8)
 	if err != nil {
-		fmt.Printf("Error reading C8 CurrentEpochValidators from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C8 CurrentEpochValidators from trie: %v\n", err)
 	}
 	priorEpochValidatorEncode, err := t.GetState(C9)
 	if err != nil {
-		fmt.Printf("Error reading C9 PriorEpochValidators from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C9 PriorEpochValidators from trie: %v\n", err)
 	}
 	rhoEncode, err := t.GetState(C10)
 	if err != nil {
-		fmt.Printf("Error reading C10 Rho from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C10 Rho from trie: %v\n", err)
 	}
 	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
 	if err != nil {
-		fmt.Printf("Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
 	}
 	privilegedServiceIndicesEncode, err := t.GetState(C12)
 	if err != nil {
-		fmt.Printf("Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
 	}
 	piEncode, err := t.GetState(C13)
 	if err != nil {
-		fmt.Printf("Error reading C13 ActiveValidator from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C13 ActiveValidator from trie: %v\n", err)
 	}
 	accunulateQueueEncode, err := t.GetState(C14)
 	if err != nil {
-		fmt.Printf("Error reading C14 accunulateQueue from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C14 accunulateQueue from trie: %v\n", err)
 	}
 	accunulateHistoryEncode, err := t.GetState(C15)
 	if err != nil {
-		fmt.Printf("Error reading C15 accunulateHistory from trie: %v\n", err)
+		log.Crit("statedb", "Error reading C15 accunulateHistory from trie: %v\n", err)
 	}
 	//Decode(authQueueEncode) -> AuthorizationQueue
 	//set AuthorizationQueue back to JamState
-
-	// fmt.Printf("retrieved C7 NextEpochValidators %v\n", nextEpochValidatorsEncode)
-	// fmt.Printf("retrieved C8 CurrentEpochValidators%v\n", currEpochValidatorsEncode)
-	// fmt.Printf("retrieved C9 PriorEpochValidators%v\n", priorEpochValidatorEncode)
-	// fmt.Printf("retrieved C7 NextEpochValidators %v\n", nextEpochValidatorsEncode)
-	// fmt.Printf("retrieved C8 CurrentEpochValidators%v\n", currEpochValidatorsEncode)
-	// fmt.Printf("retrieved C9 PriorEpochValidators%v\n", priorEpochValidatorEncode)
 
 	d := s.GetJamState()
 	d.SetAuthPool(coreAuthPoolEncode)
@@ -348,7 +345,6 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetAccumulateQueue(accunulateQueueEncode)
 	d.SetAccumulateHistory(accunulateHistoryEncode)
 	s.SetJamState(d)
-	//fmt.Printf("[N%v] RecoverJamState jam state: %s -- safrolestate: %s\n", s.Id, d.String(), d.SafroleState.String())
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -359,8 +355,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
 	sf := s.GetSafrole()
 	if sf == nil {
-		fmt.Printf("NO SAFROLE %v", s)
-		panic(222)
+		log.Crit("statedb", "UpdateTrieState: NO SAFROLE")
 	}
 	sb := sf.GetSafroleBasicState()
 	safroleStateEncode := sb.GetSafroleStateBytes()
@@ -384,8 +379,6 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	accunulateHistoryEncode := d.GetAccumulationHistoryBytes()
 
 	t := s.GetTrie()
-	prev_root := t.GetRoot()
-	debug := false
 	verify := true
 	t.SetState(C1, coreAuthPoolEncode)
 	t.SetState(C2, authQueueEncode)
@@ -403,60 +396,15 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C14, accunulateQueueEncode)
 	t.SetState(C15, accunulateHistoryEncode)
 	updated_root := t.GetRoot()
-	if debug {
-		fmt.Printf("[N%v] UpdateTrieState - before root:%v\n", s.Id, prev_root)
-		fmt.Printf("[N%v] UpdateTrieState - after root:%v\n", s.Id, updated_root)
-		// fmt.Printf("C1 coreAuthPoolEncode %x \n", coreAuthPoolEncode)
-		// fmt.Printf("C2 authQueueEncode %x \n", authQueueEncode)
-		// fmt.Printf("C3 recentBlocksEncode %x \n\n\n", s.Id, recentBlocksEncode)
-		// fmt.Printf("C4 safroleStateEncode %x \n", safroleStateEncode)
-		// fmt.Printf("C5 disputeState %x \n", disputeState)
-		// fmt.Printf("C6 entropyEncode %x \n", entropyEncode)
-		// fmt.Printf("C7 nextEpochValidatorsEncode %x \n", nextEpochValidatorsEncode)
-		// fmt.Printf("C8 currEpochValidatorsEncode %x \n", currEpochValidatorsEncode)
-		// fmt.Printf("C9 priorEpochValidatorEncode %x \n", priorEpochValidatorEncode)
-		// fmt.Printf("C10 rhoEncode %x \n", rhoEncode)
-		// fmt.Printf("C11 mostRecentBlockTimeSlotEncode %x \n", mostRecentBlockTimeSlotEncode)
-		// fmt.Printf("C12 privilegedServiceIndicesEncode %x \n", privilegedServiceIndicesEncode)
-		// fmt.Printf("C13 piEncode %x \n", piEncode)
-		// fmt.Printf("C14 accunulateQueueEncode %x \n", accunulateQueueEncode)
-		// fmt.Printf("C15 accunulateHistoryEncode %x \n", accunulateHistoryEncode)
-	}
 
-	if debug || verify {
+	if verify {
 		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
 		checkingResult, err := CheckingAllState(t, t2)
 		if !checkingResult || err != nil {
-			panic(fmt.Sprintf("CheckingAllState ERROR: %v\n", err))
+			log.Crit("statedb", "CheckingAllState", "err", err)
 		}
 	}
 
-	/*
-		// use C1
-		startKey := common.Hex2Bytes("0x0100000000000000000000000000000000000000000000000000000000000000")
-
-		// use C14
-		endKey := common.Hex2Bytes("0x0d00000000000000000000000000000000000000000000000000000000000000")
-
-		// maxSize
-		maxSize := uint32(10000)
-		foundKeyVal, boundaryNode, err := t.GetStateByRange(startKey, endKey, maxSize)
-		if err != nil {
-			fmt.Printf("Error getting state by range: %v\n", err)
-		}
-
-
-		fmt.Printf("foundKeyVal: ")
-		for i, kv := range foundKeyVal {
-			fmt.Printf("[%d] %x\n", i, kv)
-		}
-		fmt.Printf("\n")
-		fmt.Printf("boundaryNode: ")
-		for i, nodeHash := range boundaryNode {
-			fmt.Printf("[%d] %x\n", i, nodeHash)
-		}
-		fmt.Printf("\n")
-	*/
 	return updated_root
 }
 
@@ -478,7 +426,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		metaKey := fmt.Sprintf("meta_%x", realKey)
 		metaKeyBytes, err := types.Encode(metaKey)
 		if err != nil {
-			fmt.Printf("PrintAllKeyValues Encode Error: %v\n", err)
+			log.Crit("statedb", "GetAllKeyValues", "err", err)
 		}
 		metaValue := ""
 		metaValues := make([]string, 2)
@@ -546,12 +494,12 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		default:
 			metaValueBytes, ok, err := t.LevelDBGet(metaKeyBytes)
 			if err != nil || !ok {
-				fmt.Printf("PrintAllKeyValues levelDBGet Error: %v\n", err)
+				log.Error(module, "GetAllKeyValues: LevelDBGet", "err", err)
 			}
 			if metaValueBytes != nil {
 				metaValueDecode, _, err := types.Decode(metaValueBytes, reflect.TypeOf(""))
 				if err != nil {
-					fmt.Printf("PrintAllKeyValues Decode Error: %v\n", err)
+					log.Error(module, "GetAllKeyValues: Decode", "err", err)
 				}
 				metaValue = metaValueDecode.(string)
 				metaValues = strings.SplitN(metaValue, "|", 4)
@@ -624,13 +572,9 @@ func (s *StateDB) CompareStateRoot(genesis KeyVals, parentStateRoot common.Hash)
 		newTrie.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
 	}
 	new_root := newTrie.GetRoot()
-	//timeslot := s.GetSafrole().Timeslot
 	if !common.CompareBytes(parent_root[:], new_root[:]) {
 		return false, fmt.Errorf("Roots are not the same")
 	}
-
-	//fmt.Printf("[%d] ", timeslot)
-	//fmt.Printf("current_root, new_root %v %v parentStateRoot: %v\n", parent_root, new_root, parentStateRoot)
 
 	return true, nil
 }
@@ -643,39 +587,30 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
 	snapshotBytesRaw, err := os.ReadFile(genesis)
 	if err != nil {
-		log.Fatalf("[readSnapshot:ReadFile] %s ERR %v\n", genesis, err)
+		log.Crit(module, "UpdateAllTrieState:ReadFile", "genesis", genesis, "err", err)
 		return common.Hash{}
 	}
 	snapshotRaw := StateSnapshotRaw{}
 	json.Unmarshal(snapshotBytesRaw, &snapshotRaw)
 
 	t := s.GetTrie()
-	prev_root := t.GetRoot()
-	debug := false
 	verify := true
 
 	for _, kv := range snapshotRaw.KeyVals {
 		t.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
-		//fmt.Printf("SetRawKeyVal %v %x\n", common.Hash(kv[0]), kv[1])
 	}
 	updated_root := t.GetRoot()
 
 	sf := s.GetSafrole()
 	if sf == nil {
-		fmt.Printf("NO SAFROLE %v", s)
-		panic(223)
+		log.Crit(module, "UpdateAllTrieState:GetSafrole")
 	}
 
-	if debug {
-		fmt.Printf("[N%v] UpdateTrieState - before root:%v\n", s.Id, prev_root)
-		fmt.Printf("[N%v] UpdateTrieState - after root:%v\n", s.Id, updated_root)
-	}
-
-	if debug || verify {
+	if verify {
 		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
 		checkingResult, err := CheckingAllState(t, t2)
 		if !checkingResult || err != nil {
-			panic(fmt.Sprintf("CheckingAllState ERROR: %v\n", err))
+			log.Crit(module, "UpdateAllTrieState:CheckingAllState", "err", err)
 		}
 	}
 	return updated_root
@@ -688,19 +623,16 @@ func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Has
 			metaKey := fmt.Sprintf("meta_%x", kv.Key)
 			metaKeyBytes, err := types.Encode(metaKey)
 			if err != nil {
-				fmt.Printf("UpdateAllTrieStateRaw Encode Error: %v\n", err)
+				log.Error(module, "UpdateAllTrieStateRaw:Encode", "err", err)
 			}
 			metaData := fmt.Sprintf("%s|%s", kv.StructType, kv.Metadata)
 			metaValueBytes, err := types.Encode(metaData)
 			if err != nil {
-				fmt.Printf("UpdateAllTrieStateRaw Encode Error: %v\n", err)
+				log.Error(module, "UpdateAllTrieStateRaw:Encode", "err", err)
 			}
 			s.sdb.WriteRawKV(metaKeyBytes, metaValueBytes)
 		}
 	}
-	// bootStrapCode := common.FromHex("0x000000000000001000000084000000000072051100000005100000000518000000055f04071300040a0400fffe040b24040713000211f8031004031504050000fffe01582004070000fffe04090020040a0010040b0030040c00404e090d0503570404090400fffe04070000fffe040804040a044e03011004011502110813000407130021842a4825050922222a4190945201")
-	// bootStrapCodeHash := common.Blake2Hash(bootStrapCode)
-	// fmt.Printf("**** Adding s=0, bootStrapCodeHash=%v, len(%v), | bootStrapCode=%x\n", bootStrapCodeHash, len(bootStrapCode), bootStrapCode)
 
 	return s.trie.GetRoot()
 }
@@ -713,106 +645,95 @@ func CheckingAllState(t *trie.MerkleTree, t2 *trie.MerkleTree) (bool, error) {
 	c1a, _ := t.GetState(C1)
 	c1b, _ := t2.GetState(C1)
 	if !common.CompareBytes(c1a, c1b) {
-		fmt.Printf("C1 is not the same\n")
+		log.Error(module, "CheckingAllState: C1 is not the same")
 		return false, fmt.Errorf("C1 is not the same")
 	}
 	c2a, _ := t.GetState(C2)
 	c2b, _ := t2.GetState(C2)
 	if !common.CompareBytes(c2a, c2b) {
-		fmt.Printf("C2 is not the same\n")
+		log.Error(module, "CheckingAllState: C2 is not the same")
 		return false, fmt.Errorf("C2 is not the same")
 	}
 	c3a, _ := t.GetState(C3)
 	c3b, _ := t2.GetState(C3)
 	if !common.CompareBytes(c3a, c3b) {
-		fmt.Printf("C3 is not the same\n")
+		log.Error(module, "CheckingAllState: C3 is not the same")
 		return false, fmt.Errorf("C3 is not the same")
 	}
 	c4a, _ := t.GetState(C4)
 	c4b, _ := t2.GetState(C4)
 	if !common.CompareBytes(c4a, c4b) {
-		fmt.Printf("C4 is not the same\n")
+		log.Error(module, "CheckingAllState: C4 is not the same")
 		return false, fmt.Errorf("C4 is not the same")
 	}
 	c5a, _ := t.GetState(C5)
 	c5b, _ := t2.GetState(C5)
 	if !common.CompareBytes(c5a, c5b) {
-		fmt.Printf("C5 is not the same\n")
+		log.Error(module, "CheckingAllState: C5 is not the same")
 		return false, fmt.Errorf("C5 is not the same")
 	}
 	c6a, _ := t.GetState(C6)
 	c6b, _ := t2.GetState(C6)
 	if !common.CompareBytes(c6a, c6b) {
-		fmt.Printf("C6 is not the same\n")
+		log.Error(module, "CheckingAllState: C6 is not the same")
 		return false, fmt.Errorf("C6 is not the same")
 	}
 	c7a, _ := t.GetState(C7)
 	c7b, _ := t2.GetState(C7)
 	if !common.CompareBytes(c7a, c7b) {
-		fmt.Printf("C7 is not the same\n")
+		log.Error(module, "CheckingAllState: C7 is not the same")
 		return false, fmt.Errorf("C7 is not the same")
 	}
 	c8a, _ := t.GetState(C8)
 	c8b, _ := t2.GetState(C8)
 	if !common.CompareBytes(c8a, c8b) {
-		fmt.Printf("C8 is not the same\n")
+		log.Error(module, "CheckingAllState: C8 is not the same")
 		return false, fmt.Errorf("C8 is not the same")
 	}
 	c9a, _ := t.GetState(C9)
 	c9b, _ := t2.GetState(C9)
 	if !common.CompareBytes(c9a, c9b) {
-		fmt.Printf("C9 is not the same\n")
+		log.Error(module, "CheckingAllState: C9 is not the same")
 		return false, fmt.Errorf("C9 is not the same")
 	}
 	c10a, _ := t.GetState(C10)
 	c10b, _ := t2.GetState(C10)
 	if !common.CompareBytes(c10a, c10b) {
-		fmt.Printf("C10 is not the same\n")
+		log.Error(module, "CheckingAllState: C10 is not the same")
 		return false, fmt.Errorf("C10 is not the same")
 	}
 	c11a, _ := t.GetState(C11)
 	c11b, _ := t2.GetState(C11)
 	if !common.CompareBytes(c11a, c11b) {
-		fmt.Printf("C11 is not the same\n")
+		log.Error(module, "CheckingAllState: C11 is not the same")
 		return false, fmt.Errorf("C11 is not the same")
 	}
 	c12a, _ := t.GetState(C12)
 	c12b, _ := t2.GetState(C12)
 	if !common.CompareBytes(c12a, c12b) {
-		fmt.Printf("C12 is not the same\n")
+		log.Error(module, "CheckingAllState: C12 is not the same")
 		return false, fmt.Errorf("C12 is not the same")
 	}
 	c13a, _ := t.GetState(C13)
 	c13b, _ := t2.GetState(C13)
 	if !common.CompareBytes(c13a, c13b) {
-		fmt.Printf("C13 is not the same\n")
+		log.Error(module, "CheckingAllState: C13 is not the same")
 		return false, fmt.Errorf("C13 is not the same")
 	}
 	c14a, _ := t.GetState(C14)
 	c14b, _ := t2.GetState(C14)
 	if !common.CompareBytes(c14a, c14b) {
-		fmt.Printf("C14 is not the same\n")
+		log.Error(module, "CheckingAllState: C14 is not the same")
 		return false, fmt.Errorf("C14 is not the same")
 	}
 	c15a, _ := t.GetState(C15)
 	c15b, _ := t2.GetState(C15)
 	if !common.CompareBytes(c15a, c15b) {
-		fmt.Printf("C15 is not the same\n")
+		log.Error(module, "CheckingAllState: C15 is not the same")
 		return false, fmt.Errorf("C15 is not the same")
 	}
 	return true, nil
 }
-
-// func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {
-// 	WriteLog
-//
-//     msg := storage.LogMessage{
-//         Payload:  obj,
-//         Timeslot: timeslot,
-//     }
-// 	fmt.Printf("sending logMsg: %v\n", msg)
-//     s.logChan <- msg
-// }
 
 func (s *StateDB) String() string {
 	enc, err := json.MarshalIndent(s, "", "  ")
@@ -925,10 +846,9 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 				defer span.End()
 			}
 
-			start := time.Now()
 			proposedBlk, err := s.MakeBlock(credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
-				fmt.Printf("Error making block: %v\n", err)
+				log.Error(module, "ProcessState:MakeBlock", "err", err)
 				return nil, nil, err
 			}
 			// Add ApplyStateTransitionFromBlock span
@@ -950,23 +870,16 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
-				fmt.Printf("Error applying state transition: %v\n", err)
+				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)
 				return nil, nil, err
 			}
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
-			if sf0.GetEpochT() == 1 {
-				fmt.Printf("[N%v] \033[33m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
-					currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
-			} else {
-				// change a color
-				fmt.Printf("[N%v] \033[32m Blk %s<-%s \033[0m e'=%d,m'=%02d, len(γ_a')=%d   \t%s %s\n", s.Id, common.Str(proposedBlk.GetParentHeaderHash()), common.Str(proposedBlk.Header.Hash()),
-					currEpoch, currPhase, len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), proposedBlk.Str(), newStateDB.JamState.GetValidatorStats())
+			mode := "safrole"
+			if sf0.GetEpochT() == 0 {
+				mode = "fallback"
 			}
-
-			elapsed := time.Since(start)
-			if debugtrace && elapsed > 2000000 {
-				fmt.Printf("\033[31m MakeBlock / ApplyStateTransitionFromBlock\033[0m %d ms\n", elapsed/1000)
-			}
+			log.Info(module, fmt.Sprintf("[N%d] proposeBlock %s", s.Id, mode), "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
+				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return proposedBlk, newStateDB, nil
 		} else {
 			//waiting for block ... potentially submit ticket here
@@ -976,18 +889,16 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 }
 
 // see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks
-func (s *StateDB) GetRefineContext() types.RefineContext {
+func (s *StateDB) GetRefineContext(prereqs ...common.Hash) types.RefineContext {
 	// A) ANCHOR -- checkRecentBlock checks if Anchor is in RecentBlocks
 	anchor := common.Hash{}
 	stateRoot := common.Hash{}
 	beefyRoot := common.Hash{}
 	if len(s.JamState.RecentBlocks) > 1 {
 		anchorBlock := s.JamState.RecentBlocks[len(s.JamState.RecentBlocks)-2]
-		//fmt.Printf("GetRefineContext (# RecentBlocks=%d) AnchorBlock: %s\n", len(s.JamState.RecentBlocks), anchorBlock.String())
 		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
 		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks
 		beefyRoot = *(anchorBlock.B.SuperPeak()) // beefy root b must be in s.JamState.RecentBlocks
-		//fmt.Printf("  ... Anchor: %s StateRoot: %s BeefyRoot: %s\n", anchor, stateRoot, beefyRoot)
 	}
 
 	// B) LOOKUP ANCHOR -- there are NO restrictions here but we choose these to have something
@@ -1002,7 +913,7 @@ func (s *StateDB) GetRefineContext() types.RefineContext {
 		// B) LOOKUP ANCHOR
 		LookupAnchor:     lookupAnchor,
 		LookupAnchorSlot: ts,
-		Prerequisites:    []common.Hash{},
+		Prerequisites:    prereqs,
 	}
 }
 
@@ -1024,7 +935,7 @@ func (s *StateDB) DeleteServicePreimageKey(service uint32, blob_hash common.Hash
 	tree := s.GetTrie()
 	err := tree.DeletePreImageBlob(service, blob_hash)
 	if err != nil {
-		fmt.Printf("DeleteServicePreimageKey: Failed to delete blob_hash: %x, error: %v\n", blob_hash.Bytes(), err)
+		log.Error(module, "DeleteServicePreimageKey:DeletePreImageBlob", "blob_hash", blob_hash, "err", err)
 		return err
 	}
 	return nil
@@ -1046,7 +957,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// validate eq 157
 		_, err := s.ValidateLookup(&l)
 		if err != nil {
-			fmt.Printf("[N%d] ApplyStateTransitionPreimages ValidateLookup Error: %v\n", s.Id, err)
+			log.Error(module, "ApplyStateTransitionPreimages:ValidateLookup", "n", s.Id, "err", err)
 			return 0, 0, err
 		}
 	}
@@ -1056,9 +967,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// (eq 158)
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
-		if debugP {
-			fmt.Printf(("WriteServicePreimageBlob, Service_Index: %d, Blob: %x\n"), l.Service_Index(), l.Blob)
-		}
+		log.Debug(debugP, "WriteServicePreimageBlob", "Service_Index", l.Service_Index(), "Blob", l.Blob)
 		s.WriteServicePreimageBlob(l.Service_Index(), l.Blob)
 		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
@@ -1066,11 +975,6 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	}
 
 	return num_preimages, num_octets, nil
-}
-
-func (s *StateDB) getRhoWorkReportByWorkPackage(workPackageHash common.Hash) (types.WorkReport, uint32, bool) {
-	// TODO
-	return types.WorkReport{}, 0, false
 }
 
 // for any hits in m, remove them from pool
@@ -1092,18 +996,15 @@ func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, erro
 	v, ok, err := t.GetService(c)
 	if err != nil || !ok {
 		if !ok {
-			// fmt.Printf("getServiceAccount: ServiceAccount not found for core %d\n", c)
+			log.Trace(module, "getServiceAccount:GetService", "c", c)
 		}
 		return &types.ServiceAccount{}, false, nil
 	}
 	// v looks like: ac ⌢ E8(ab,ag,am,al) ⌢ E4(ai)
-	// TODO: William to figure out the transformation
 	a, err := types.ServiceAccountFromBytes(c, v)
 	if err != nil {
 		return &types.ServiceAccount{}, false, nil
 	}
-	//William check here!
-	//fmt.Printf("getServiceAccount s=%v, v=%v\n", c, a.String())
 	return a, false, nil
 }
 
@@ -1177,14 +1078,11 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 
-	if debugA {
-		fmt.Printf("Rho State Update - Assurances\n")
-		for i, rho := range s.JamState.AvailabilityAssignments {
-			if rho == nil {
-				fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
-			} else {
-				fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
-			}
+	for i, rho := range s.JamState.AvailabilityAssignments {
+		if rho == nil {
+			log.Trace(debugA, "ApplyStateTransitionRho before Verify_Guarantees", "core", i, "WorkPackage Hash", rho)
+		} else {
+			log.Trace(debugA, "ApplyStateTransitionRho before Verify_Guarantees", "core", i, "WorkPackage Hash", rho.WorkReport.GetWorkPackageHash())
 		}
 	}
 
@@ -1207,24 +1105,20 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	}
 
 	num_reports = d.ProcessGuarantees(guarantees)
-	if debug {
-		fmt.Printf("Rho State Update - Guarantees\n")
-		for i, rho := range s.JamState.AvailabilityAssignments {
-			if rho == nil {
-				fmt.Printf("Rho core[%d] WorkPackage Hash: nil\n", i)
-			} else {
-				fmt.Printf("Rho core[%d] WorkPackage Hash: %v\n", i, rho.WorkReport.GetWorkPackageHash())
-			}
+	for i, rho := range s.JamState.AvailabilityAssignments {
+		if rho == nil {
+			log.Trace(debugA, "ApplyStateTransitionRho after ProcessGuarantees", "core", i, "WorkPackage Hash", rho)
+		} else {
+			log.Trace(debugA, "ApplyStateTransitionRhoafter ProcessGuarantees", "core", i, "WorkPackage Hash", rho.WorkReport.GetWorkPackageHash())
 		}
 	}
-
 	return num_reports, num_assurances, nil
 }
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
-	start := time.Now()
+
 	s = oldState.Copy()
 	old_timeslot := s.GetSafrole().Timeslot
 	s.JamState = oldState.JamState.Copy()
@@ -1236,10 +1130,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		// panic("MK validation check!! Block header is not valid")
 		return s, fmt.Errorf("Block header is not valid")
 	}
-
-	if debug {
-		fmt.Printf("[N%d] ApplyStateTransitionFromBlock (%v <== %v) s.StateRoot=%v\n", s.Id, s.ParentHeaderHash, s.HeaderHash, s.StateRoot)
+	if s.Id == blk.Header.AuthorIndex {
+		s.Authoring = true
 	}
+	log.Debug(module, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// 19-22 - Safrole last
@@ -1260,11 +1154,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// Eq 4.6/4.7 uses r (derived from accumulation result) and PREVIOUS oldState.StateRoot to append "n" to MMR "Beta" s.JamState.RecentBlocks
 	// see https://github.com/jam-duna/jamtestnet/issues/77
-	s.ApplyStateRecentHistory(blk, &(oldState.AccumulationRoot), oldState.StateRoot)
+	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
 
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
-		//fmt.Printf("sf.ApplyStateTransitionTickets %v\n", jamerrors.GetErrorName(err))
+		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
 	}
 	err = VerifySafroleSTF(sf, &s2, blk)
@@ -1277,12 +1171,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	s.JamState.SafroleState = &s2
 	s.RotateGuarantors()
-	//fmt.Printf("ApplyStateTransitionFromBlock - SafroleState \n")
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
-	elapsed := time.Since(start).Microseconds()
-	if debugtrace && elapsed > 1000000 { // OPTIMIZED ApplyStateTransitionTickets/ValidateProposedTicket
-		fmt.Printf("\033[31mApplyStateTransitionFromBlock:Tickets\033[0m %d ms\n", elapsed/1000)
-	}
 
 	// 24 - Preimages
 	preimages := blk.PreimageLookups()
@@ -1290,7 +1179,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-	//fmt.Printf("ApplyStateTransitionFromBlock - Preimages\n")
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "preimages", num_preimage)
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
 	// 23,25-27 Disputes, Assurances. Guarantees
@@ -1298,22 +1186,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
 
-	if debug {
-		for _, g := range guarantees {
-			fmt.Printf("[Core: %d]ApplyStateTransitionFromBlock Guarantee W_Hash%v\n", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
-		}
-	}
 	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE)
 	if err != nil {
 		return s, err
-	}
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock - Disputes, Assurances, Guarantees\n")
-		for _, rho := range s.JamState.AvailabilityAssignments {
-			if rho != nil {
-				fmt.Printf("ApplyStateTransitionFromBlock - Rho core[%d] WorkPackage Hash: %v\n", rho.WorkReport.CoreIndex, rho.WorkReport.GetWorkPackageHash())
-			}
-		}
 	}
 	for validatorIndex, nassurances := range num_assurances {
 		s.JamState.tallyStatistics(uint32(validatorIndex), "assurances", uint32(nassurances))
@@ -1321,21 +1196,16 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	for validatorIndex, nreports := range num_reports {
 		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", uint32(nreports))
 	}
-
+	s.ApplyStateRecentHistory(blk, &(oldState.AccumulationRoot))
 	// 28 -- ACCUMULATE
 	var g uint64 = 10000
 	o := s.JamState.newPartialState()
-	if debug {
-		fmt.Printf("[N%d] s.StateRoot=%v newPartialState len=%v\n", s.Id, s.StateRoot, len(o.D))
-	}
+
 	var f map[uint32]uint32
 	var b []BeefyCommitment
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 	n, t, b := s.OuterAccumulate(g, accumulate_input_wr, o, f)
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
-	}
 
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
@@ -1357,12 +1227,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		// put (s,h) of C  into leaves
 		leaf := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
 		leaves = append(leaves, leaf)
-		fmt.Printf("Leaf %d s=%d commitment: %s\n", i, sa.Service, sa.Commitment)
+		log.Trace("beefy", "leaf", i, "service", sa.Service, "commitment", sa.Commitment)
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	s.AccumulationRoot = common.Hash(tree.Root())
 	if len(leaves) > 0 {
-		fmt.Printf(" ===> AccumulationRoot %s\n", s.AccumulationRoot)
+		log.Trace("beefy", "AccumulationRoot", s.AccumulationRoot)
 	}
 
 	// 29 -  Update Aut
@@ -1372,17 +1242,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock - Authorizations\n")
-	}
+
 	// 30 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock - Blocks\n")
-	}
 
 	s.StateRoot = s.UpdateTrieState()
-	//fmt.Printf("[N%d] ACCUMULATION ROOT=%s => StateRoot=%s\n", s.Id, s.AccumulationRoot, s.StateRoot)
 	return s, nil
 }
 
@@ -1446,11 +1310,8 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	m := h.BytesWithoutSig()
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
 	if err != nil {
-		if debugSeal {
-			fmt.Printf("**** IETF Verify FAIL H_s(pub=%x, c=%x, m=%x)=%x\n", block_author_ietf_pub[:], c, m, H_s[:])
-		}
+		log.Error(debugSeal, "IetfVrfVerify", "err", err)
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
-		//return true, validatorIdx, block_author_ietf_pub, nil
 	}
 
 	// H_v Verification (6.17)
@@ -1458,11 +1319,8 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	c = append([]byte(types.X_E), vrfOutput...)
 	_, err = bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_v, c, []byte{})
 	if err != nil {
-		if debugSeal {
-			fmt.Printf("**** IETF Verify FAIL H_v(pub=%x, c=%x, m=[])=%x\n", block_author_ietf_pub[:], c, H_v[:])
-		}
+		log.Error(debugSeal, "IetfVrfVerify", "err", err)
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_v Verification")
-		//return true, validatorIdx, block_author_ietf_pub, nil
 	}
 	return true, validatorIdx, block_author_ietf_pub, nil
 }
@@ -1494,9 +1352,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 			return nil, fmt.Errorf("error generating H_v for primary epoch: %w", err)
 		}
 		copy(header.EntropySource[:], H_v[:])
-		if debugSeal {
-			fmt.Printf("**** IETF SIGN 1 H_v(k=%x, c=%x, m=[])=%x\n", blockAuthorPriv[:], c, header.EntropySource[:])
-		}
+		log.Trace(debugSeal, "IETF SIGN 1 H_v", "k", blockAuthorPriv[:], "c", c, "header.EntropySource", header.EntropySource[:])
 		if saveSealBlockMaterial {
 			// Save for the material
 			material.TicketID = fmt.Sprintf("%s", ticketID)
@@ -1514,9 +1370,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 			return nil, fmt.Errorf("error generating H_s for primary epoch: %w", err)
 		}
 		copy(header.Seal[:], H_s[:])
-		if debugSeal {
-			fmt.Printf("**** IETF SIGN 2 H_s(k=%x, c=%x, m=%x)=%x\n", blockAuthorPriv[:], c, header.BytesWithoutSig(), header.Seal[:])
-		}
+		log.Trace(debugSeal, "IETF SIGN H_s", "k", blockAuthorPriv[:], "c", c, header.BytesWithoutSig(), "header.Seal", header.Seal[:])
 
 		// Save for the material
 		if saveSealBlockMaterial {
@@ -1593,11 +1447,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 	stateRoot := s.GetStateRoot()
 	s.JamState.CheckInvalidCoreIndex()
-	//fmt.Printf("\n\n----- MAKEBLOCK\n[N%v] MakeBlock using stateRoot %v JamState %s\n", s.Id, stateRoot, s.String())
 	s.RecoverJamState(stateRoot)
-	//fmt.Printf("[N%v] Recovered JamState %s\n", s.Id, s.String())
 	s.JamState.CheckInvalidCoreIndex()
-	//fmt.Printf("------ MAKEBLOCK\n\n")
 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()
@@ -1610,9 +1461,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	if isNewEpoch {
 		epochMarker := sf.GenerateEpochMarker()
 		//a tuple of the epoch randomness and a sequence of Bandersnatch keys defining the Bandersnatch valida- tor keys (kb) beginning in the next epoch
-		if debug {
-			fmt.Printf("[N%d] *** \033[32mEpochMarker\033[0m %v\n", s.Id, epochMarker)
-		}
 		h.EpochMark = epochMarker
 	}
 	// Extrinsic Data has 5 different Extrinsics
@@ -1631,7 +1479,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 		} else {
-			storage.Logger.RecordLogs(storage.Preimage_error, fmt.Sprintf("Error in ValidateLookup: %v", err), true)
+			log.Error(debugP, "ValidateLookup", "err", err)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 			continue
 		}
@@ -1660,37 +1508,29 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	previousIdx := currRotationIdx - 1
 	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
 	queuedGuarantees = extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
-	storage.Logger.RecordLogs(storage.EG_status, fmt.Sprintf("MakeBlock: Queued Guarantees: %v for slot %d, acceptedTimeslot %d", len(queuedGuarantees), targetJCE, acceptedTimeslot), true)
+	log.Debug(debugG, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
 	for _, guarantee := range queuedGuarantees {
 		g, err := guarantee.DeepCopy()
 		if err != nil {
 			continue
 		}
 		s.JamState.CheckInvalidCoreIndex()
-		for _, rho := range s.JamState.AvailabilityAssignments {
-			if debug {
-				fmt.Printf("Rho %v\n", rho)
-			}
-		}
 		err = s.Verify_Guarantee_MakeBlock(g, b, tmpState)
 		if err != nil {
-			storage.Logger.RecordLogs(storage.EG_error, fmt.Sprintf("Error in Verify_Guarantee_MakeBlock: %v", err), true)
+			log.Error(debugG, "Verify_Guarantee_MakeBlock", "err", err)
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
-		if debugG {
-			storage.Logger.RecordLogs(storage.EG_status, fmt.Sprintf("MakeBlock: Added Guarantee: %v", g), true)
-		}
+		log.Debug(debugG, "MakeBlock: Added Guarantee", "g", g)
 		// check guarantee one per core
 		// check guarantee is not a duplicate
 	}
 	for i := 0; i < len(extrinsicData.Guarantees); i++ {
-		log := fmt.Sprintf("ExtrinsicData.Guarantees[%d] = %v, core%d", i, extrinsicData.Guarantees[i].Report.GetWorkPackageHash(), extrinsicData.Guarantees[i].Report.CoreIndex)
-		storage.Logger.RecordLogs(storage.EG_status, log, true)
+		log.Debug(debugG, "ExtrinsicData.Guarantees", "i", i, "wph", extrinsicData.Guarantees[i].Report.GetWorkPackageHash(), "coreIndex", extrinsicData.Guarantees[i].Report.CoreIndex)
 	}
 	extrinsicData.Guarantees, err, _ = s.VerifyGuaranteesMakeBlock(extrinsicData.Guarantees, b)
 	if err != nil {
-		storage.Logger.RecordLogs(storage.EG_error, fmt.Sprintf("Error in Verify_Guarantees_MakeBlock: %v", err), true)
+		log.Error(debugG, "VerifyGuaranteesMakeBlock", "err", err)
 	}
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()
@@ -1716,9 +1556,6 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		winningMarker, err := sf.GenerateWinningMarker()
 		//block is the first after the end of the submission period for tickets and if the ticket accumulator is saturated
 		if err == nil {
-			if debug {
-				fmt.Printf("[N%d] *** \033[32mWinningTicketMarker\033[0m #Tickets=%d targetJCE=%v\n", s.Id, len(winningMarker), targetJCE)
-			}
 			h.TicketsMark = winningMarker
 		}
 	} else {

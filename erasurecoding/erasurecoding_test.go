@@ -11,10 +11,9 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
-
-const debugEC = false
 
 // Helper function to pad data to the nearest multiple of dataShard * shardPieces * 2
 func padData(data []byte, dataShard int, shardPieces int) ([]byte, int) {
@@ -119,9 +118,6 @@ func TestDifferentSizes(t *testing.T) {
 	// 1024, 4104, 1MB, 2MB, 4MB, 8MB, 12MB (4104 is segment size, W_G)
 	sizes := []int{1024, 4104, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024, 12 * 1024 * 1024}
 	for _, size := range sizes {
-		if debugEC {
-			fmt.Printf("--------------------------------------------\n")
-		}
 		b := make([]byte, size)
 		b = common.PadToMultipleOfN(b, types.W_E)
 		numpieces := len(b) / types.W_E
@@ -132,23 +128,21 @@ func TestDifferentSizes(t *testing.T) {
 		_, _ = rand.Read(b)
 		time1 := time.Now()
 		encoded, err := Encode(b, numpieces)
-		if debugEC {
-			if size <= 64 {
-				fmt.Printf("encoded %x\n", encoded)
-			}
+		if err != nil {
+			t.Fatalf(err)
 		}
-		// fmt.Printf("encoded %x\n", encoded)
+
 		originalByteUnit := ConvertSize(generateSize)
 		shardSize := len(encoded[0][0])
 		byteUnit := ConvertSize(shardSize)
-		if debugEC {
-			fmt.Printf("numpieces %d, size %d\n", numpieces, size)
-			fmt.Printf("Original Data Size %d(%s), Shard Size: %d(%s),encoded[%d][%d][%d]\n", generateSize, originalByteUnit, shardSize, byteUnit, len(encoded), len(encoded[0]), len(encoded[0][0]))
-		}
 		if err != nil {
 			t.Errorf("Error encoding data: %v", err)
 			return
 		}
+		log.Trace(module, "numpieces", numpieces, "size", size,
+			"generateSize", generateSize, "originalByteUnit", originalByteUnit, "shardSize", shardSize, "byteUnit", byteUnit,
+			"len(encoded)", len(encoded), "len(encoded[0])", len(encoded[0]), "len(encoded[0][0]", len(encoded[0][0]))
+
 		time2 := time.Now()
 		decoded, err := Decode(encoded, numpieces)
 		// _, err = Decode(encoded, numpieces)
@@ -165,29 +159,13 @@ func TestDifferentSizes(t *testing.T) {
 			}
 		}
 		parityDataLength := totalLength - generateSize
-		if debugEC {
-			fmt.Printf("Total length: %d(%s)\n", totalLength, ConvertSize(totalLength))
-			fmt.Printf(" -Data data length: %d(%s)\n", generateSize, ConvertSize(generateSize))
-			fmt.Printf(" -Parity data length: %d(%s)\n", parityDataLength, ConvertSize(parityDataLength))
-			fmt.Printf("Encode time: %vms, Decode time: %vms\n", time2.Sub(time1).Milliseconds(), time3.Sub(time2).Milliseconds())
-		}
+		log.Trace(debugEC, "Total length", totalLength, "generateSize", generateSize,
+			"Parity data length", parityDataLength, "Encode time", time2.Sub(time1).Milliseconds(), "Decode time", time3.Sub(time2).Milliseconds())
 
 		if !bytes.Equal(decoded, b) {
-			// fmt.Printf("Original data: %x, Decoded data: %x\n", b, decoded)
-			fmt.Printf("Original data: %x, Decoded data: %x\n", b, decoded)
 			t.Errorf("Decoded data does not match original for size %d", size)
-		} else {
-			if debugEC {
-				fmt.Printf("Decoded data match original for size %d\n", size)
-			}
 		}
 
-		if debugEC {
-			if size <= 64 {
-				fmt.Printf("Original data: %x, Decoded data: %x\n", b, decoded)
-			}
-			fmt.Printf("--------------------------------------------\n")
-		}
 	}
 	// When function close, close the pprof file
 	pprof.StopCPUProfile()
@@ -280,9 +258,6 @@ func TestEncodeDecodeWithPartialShards(t *testing.T) {
 			passCounter++
 		}
 		time2 := time.Now()
-		if debugEC {
-			fmt.Printf("Decode time %vms on [%d][%d][%d]\n", time2.Sub(time1).Milliseconds(), len(selectedShards), len(shardIndices), len(encodedSegments[0][0]))
-		}
 	}
 	if !notMatch {
 		t.Logf("Decoded data match original")
@@ -303,18 +278,12 @@ func TestEncodeDecodeData(t *testing.T) {
 		t.Errorf("Error encoding data: %v", err)
 		return
 	}
-	if debugEC {
-		fmt.Printf("encoded = %x\n", encoded)
-	}
 	decoded, err := Decode(encoded, shardPieces)
 	if err != nil {
 		t.Errorf("Error decoding data: %v", err)
 		return
 	}
 	decoded = decoded[:originalLength]
-	if debugEC {
-		fmt.Printf("paddedData = %x, decoded = %x\n", paddedData, decoded)
-	}
 	if !bytes.Equal(decoded, data) {
 		t.Errorf("Decoded data does not match original")
 	}
@@ -482,9 +451,6 @@ func TestEncodeDecodeLargeData(t *testing.T) {
 		t.Errorf("Error encoding large data: %v", err)
 		return
 	}
-	if debugEC {
-		fmt.Printf("encoded[%d][%d][%d]\n", len(encoded), len(encoded[0]), len(encoded[0][0]))
-	}
 	expectedSegments := len(paddedData) / (dataShard * int(shardPieces) * 2)
 	if len(encoded) != expectedSegments {
 		t.Errorf("Expected %d encoded segments, got %d", expectedSegments, len(encoded))
@@ -508,9 +474,6 @@ func TestEncodeDecodeLargeData(t *testing.T) {
 	if originalLength > len(decoded) {
 		t.Errorf("Decoded data length (%d) is shorter than original data length (%d)", len(decoded), originalLength)
 		return
-	}
-	if debugEC {
-		fmt.Printf("decoded = %x, data = %x\n", decoded, data)
 	}
 	decoded = decoded[:originalLength]
 	if !bytes.Equal(decoded, data) {

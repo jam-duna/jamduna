@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -34,18 +35,15 @@ func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBuck
 		n.selfTickets[usedEntropy] = make([]types.TicketBucket, 0)
 	}
 	n.ticketsMutex.Unlock()
-	if debug {
-		fmt.Printf("[N%v] Generating Tickets for = (%v)\n", n.id, usedEntropy)
-	}
+	log.Trace(debugT, "generateEpochTickets", "n", n.id, "usedEntropy", usedEntropy)
 	buckets := types.TicketsToBuckets(tickets, sf.GetEpoch())
 	n.ticketsMutex.Lock()
 	n.selfTickets[usedEntropy] = buckets
 	n.ticketsMutex.Unlock()
-	if debug {
-		for _, bucket := range n.selfTickets[usedEntropy] {
-			fmt.Printf("[N%v] Put Ticket %x in Bucket:%v\n", n.id, bucket.Ticket.Attempt, usedEntropy)
-		}
+	for _, bucket := range n.selfTickets[usedEntropy] {
+		log.Trace(debugT, "generateEpochTickets: Put Ticket in Bucket", "n", n.id, "r", bucket.Ticket.Attempt, "usedEntropy", usedEntropy)
 	}
+
 	return buckets, nil
 }
 
@@ -58,19 +56,14 @@ func (n *Node) GenerateTickets() {
 	currEpoch, _ := sf.EpochAndPhase(jce)
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
 	if n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetSafrole().Timeslot) {
-		if debug {
-			fmt.Printf("Using Entropy 1 for Node %v to generate tickets\n", n.id)
-		}
+		log.Trace(debugT, "GenerateTickets: Using Entropy 1 for Node to generate tickets", "n", n.id)
 		copy(usedEntropy[:], n.statedb.GetSafrole().Entropy[1][:])
 	}
 	n.ticketsMutex.Lock()
 	l := len(n.selfTickets[usedEntropy])
 	n.ticketsMutex.Unlock()
 	if l == types.TicketEntriesPerValidator {
-		if debug {
-			fmt.Printf("GenerateTickets currEpoch=%v | actualEpoch=%v selected Entropy=%v\n", currEpoch, actualEpoch, usedEntropy)
-			fmt.Printf("Node %v has generated %v tickets in epoch %v\n", n.id, types.TicketEntriesPerValidator, currEpoch)
-		}
+		log.Trace(debugT, "GenerateTickets:Node has generated tickets", "n", n.id, "l", types.TicketEntriesPerValidator, "currEpoch", currEpoch, "actualEpoch", actualEpoch, "usedEntropy", usedEntropy)
 		return
 	}
 	if !n.IsTicketGenerated(usedEntropy) {
@@ -134,9 +127,7 @@ func (n *Node) BroadcastTickets() {
 	for _, ticketbucket := range tickets {
 		if !*ticketbucket.IsIncluded {
 			ticket := ticketbucket.Ticket
-			if debug {
-				fmt.Printf("[N%v] Broadcasting Ticket %x\n", n.id, ticket.Attempt)
-			}
+			log.Trace(debugT, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt)
 			if !*ticketbucket.IsBroadcasted {
 				go n.broadcast(ticket)
 				*ticketbucket.IsBroadcasted = true

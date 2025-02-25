@@ -13,6 +13,7 @@ import (
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -37,7 +38,7 @@ func startPProf(port int) *os.File {
 	filename := fmt.Sprintf("pprof_%d.prof", port)
 	file, err := os.Create(filename)
 	if err != nil {
-		fmt.Printf("Error creating pprof file: %v\n", err)
+		log.Crit(module, "startPProf", "err", err)
 		return nil
 	}
 
@@ -82,17 +83,12 @@ func main() {
 	var pprofFile *os.File
 	lastValidatorIndex := types.TotalValidators - 1
 	// Start pprof server on specified nodes
-	if debugDAPProf {
-		runtime.SetCPUProfileRate(10000000)
-		switch config.Port {
-		case 9000, 9001, lastValidatorIndex + 9000:
-			pprofFile = startPProf(config.Port)
-		}
+	runtime.SetCPUProfileRate(10000000)
+	switch config.Port {
+	case 9000, 9001, lastValidatorIndex + 9000:
+		pprofFile = startPProf(config.Port)
 	}
 
-	if debugDA {
-		fmt.Printf("Run validatorindex %d\n", validatorIndex)
-	}
 	GenesisStateFile, GenesisBlockFile := getGenesisFile(types.Network)
 
 	// If help is requested, print usage and exit
@@ -113,12 +109,9 @@ func main() {
 	} else {
 		peers, peerList, err = generatePeerNetwork(validators, config.Port)
 		if err != nil {
-			fmt.Printf("generatePeerNetwork Error: %s", err)
 			panic("generatePeerNetwork Error")
 		}
 	}
-	// fmt.Printf("peers, peerList %v %v\n", peers, peerList)
-	// epoch0Timestamp := statedb.NewEpoch0Timestamp()
 	epoch0Timestamp := uint32(0)
 
 	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
@@ -132,9 +125,7 @@ func main() {
 	config.GenesisState = GenesisStateFile
 	config.GenesisBlock = GenesisBlockFile
 	// Set up peers and node
-	if debugDA {
-		fmt.Printf("Run config.Genesis %s\n", config.GenesisState)
-	}
+
 	// _, err = node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.Genesis, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
 	paths := SetLevelDBPaths(types.TotalValidators)
 	n, err := node.NewNodeDA(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, config.GenesisBlock, epoch0Timestamp, peers, peerList, paths[validatorIndex], config.Port)
@@ -193,10 +184,6 @@ func generatePeerNetworkHP(validators []types.Validator, hp string, port int) (p
 	return peers, peerList, nil
 }
 
-const debug = false
-const debugDA = false
-const debugDAPProf = false
-
 // setupValidatorSecret sets up the validator secret struct and validates input lengths
 func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) (validator types.Validator, secret types.ValidatorSecret, err error) {
 
@@ -207,12 +194,6 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 	validator_meta := []byte(metadata)
 
 	// Validate hex input lengths
-	if debug {
-		fmt.Printf("bandersnatchHex: %s\n", bandersnatchHex)
-		fmt.Printf("ed25519Hex: %s\n", ed25519Hex)
-		fmt.Printf("blsHex: %s\n", blsHex)
-		fmt.Printf("metadata: %s\n", metadata)
-	}
 	if len(bandersnatch_seed) != (bandersnatch.SecretLen) {
 		return validator, secret, fmt.Errorf("invalid input length (%d) for bandersnatch seed %s - expected len of %d", len(bandersnatch_seed), bandersnatchHex, bandersnatch.SecretLen)
 	}

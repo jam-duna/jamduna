@@ -21,7 +21,6 @@ const (
 )
 
 func validateImportBlockConfig(jConfig types.ConfigJamBlocks) {
-	//fmt.Printf("ImportBlockConfig %s\n", jConfig)
 	if jConfig.HTTP == "" && jConfig.QUIC == "" {
 		log.Fatalf("You must specify either an HTTP URL or a QUIC address. Use --http or --quic.")
 	}

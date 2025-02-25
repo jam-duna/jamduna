@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -101,18 +102,14 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 	defer stream.Close()
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
-		fmt.Printf("%s SendBlockRequest ERR1 %v\n", p.String(), err)
-		panic(0)
-		return blocks, err
+		log.Crit(module, "SendBlockRequest", "p", p.String(), "err", err)
 	}
-	// fmt.Printf("%s SendBlockRequest %v\n", p.String(), headerHash)
 
 	respBytes, err := receiveQuicBytes(stream)
 	if err != nil {
 		fmt.Printf("%s SendBlockRequest ERR2 %v\n", p.String(), err)
 		return blocks, err
 	}
-	//fmt.Printf("%s SendBlockRequest received %d bytes: [%x]\n", p.String(), len(respBytes), respBytes)
 	decodedBlocks, _, err := types.Decode(respBytes, reflect.TypeOf([]types.Block{}))
 	if err != nil {
 		return blocks, err
@@ -164,7 +161,6 @@ func (n *Node) onBlockRequest(stream quic.Stream, msg []byte) (err error) {
 		}
 	*/
 	// CHECK BLOCK if the blockbytes we sent are decodable and equal the headerhash
-	//fmt.Printf("%s onBlockRequest(headerHash: %v) => sending 1 block (%d bytes)=[%v => %v]\n", n.String(), newReq.HeaderHash, len(blockBytes), checkheaderHash, blockBytes)
 	err = sendQuicBytes(stream, blockBytes)
 	if err != nil {
 		fmt.Printf("%s onBlockRequest ERR %v", n.String(), err)

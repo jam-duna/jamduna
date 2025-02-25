@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
 const (
-	debug_pvm  = false
-	debug_host = false
+	debug_pvm  = "pvm"
+	debug_host = "host"
 
 	regSize  = 13
 	numCores = types.TotalCores
@@ -133,17 +134,13 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 		pageOffset := offset
 		page, err := ram.getOrAllocatePage(currentPage)
 		if err != nil {
-			if debug_pvm {
-				fmt.Printf("Fail to get or allocate page %d to access address %d\n", currentPage, address)
-			}
+			log.Debug(debug_pvm, "WriteRAMBytes: Fail to get or allocate page to access address", "currentPage", currentPage, "address", address)
 			return OOB
 		}
 
 		// Check if the page is writable
 		if !page.Access.Writable {
-			if debug_pvm {
-				fmt.Printf("Page %d is not writable, addess is %d\n", currentPage, address)
-			}
+			log.Debug(debug_pvm, "Page is not writable", "currentPage", currentPage, "address", address)
 			return uint64(address)
 		}
 
@@ -179,15 +176,11 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		// Ensure the page exists and is readable
 		page, err := ram.getOrAllocatePage(currentPage)
 		if err != nil {
-			if debug_pvm {
-				fmt.Printf("Fail to get or allocate page %d to access address %d\n", currentPage, address)
-			}
+			log.Debug(debug_pvm, "Fail to get or allocate page to access address", "currentPage", currentPage, "address", address)
 			return nil, OOB
 		}
 		if page.Access.Inaccessible {
-			if debug_pvm {
-				fmt.Printf("Page %d is not readable, addess is %d, length is %d\n", currentPage, address, length)
-			}
+			log.Debug(debug_pvm, "Page is not readable", "currentPage", currentPage, "address", address, "length", length)
 			return nil, uint64(address)
 		}
 
@@ -265,8 +258,8 @@ type VM struct {
 	// Invocation funtions entry point
 	EntryPoint uint32
 
-	// Malicious Setting
-	IsMalicious bool
+	// if logging = "author"
+	logging string
 
 	// standard program initialization parameters
 	o_size uint32
@@ -692,15 +685,8 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 		pure_code = pure_code[11+o_size+w_size+4:]
 	}
 
-	if debug_pvm {
-		fmt.Printf("OSIZE=%d\n", o_size)
-		fmt.Printf("WSIZE=%d\n", w_size)
-		fmt.Printf("Z=%d\n", types.DecodeE_l(standard_z_byte))
-		fmt.Printf("S=%d\n", types.DecodeE_l(standard_s_byte))
-		fmt.Printf("O=%v\n", o_byte)
-		fmt.Printf("W=%v\n", w_byte)
-		fmt.Printf("Code and Jump Table size: %d\n", types.DecodeE_l(standard_c_size_byte))
-	}
+	log.Debug(debug_pvm, "OSIZE", o_size, "WSIZE", w_size, "Z", types.DecodeE_l(standard_z_byte), "S", types.DecodeE_l(standard_s_byte),
+		"O", o_byte, "W", w_byte, "Code and Jump Table size: %d\n", types.DecodeE_l(standard_c_size_byte))
 	var j_size_byte, z_byte, c_size_byte []byte
 	j_size_byte, pure_code = extractBytes(pure_code)
 	z_byte, pure_code = extractBytes(pure_code)
@@ -777,15 +763,6 @@ func DecodeProgram_pure_pvm_blob(p []byte) *Program {
 		j_array = append(j_array, uint32(decodedValue))
 	}
 
-	if debug_pvm {
-		fmt.Printf("JSize=%d\n", j_size)
-		fmt.Printf("Z=%d\n", z)
-		fmt.Printf("CSize=%d\n", c_size)
-		fmt.Println("Jump Table: ", j_array)
-		fmt.Printf("Code: %x\n", c_byte)
-		fmt.Printf("K(bitmask): %v\n", kCombined)
-		fmt.Println("================================================================")
-	}
 	program := &Program{
 		JSize: j_size,
 		Z:     uint8(z),
@@ -846,11 +823,9 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 	if len(argument_data_a) == 0 {
 		argument_data_a = []byte{0}
 	}
+
 	condition := uint64(5*Z_Z+Q_func(vm.o_size)+Q_func(vm.w_size+vm.z*Z_P)+Q_func(vm.s)+Z_I) <= uint64((1 << 32))
 	if condition {
-		if debug_pvm {
-			fmt.Println("Standard Program Initialization...")
-		}
 		// set up the initial values and access mode for the RAM
 		var page_index, page_length uint32
 		var access_mode AccessMode
@@ -859,9 +834,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		page_length = CelingDevide(vm.o_size, PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		if debug_pvm {
-			fmt.Printf("0. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
-		}
+		log.Trace(vm.logging, "Standard Program Initialization", "page_index", page_index, "page_length", page_length, "access_mode", access_mode)
 
 		vm.Ram.WriteRAMBytes(Z_Z, vm.o_byte)
 
@@ -872,46 +845,37 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		page_length = CelingDevide((P_func(vm.o_size) - vm.o_size), PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: false, Readable: true}
 
+		// 1. Set Page Index and Page Length %d with Mode: page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		if debug_pvm {
-			fmt.Printf("1. Set Page Index %d and Page Length %d with Mode %v\n", page_index, page_length, access_mode)
-		}
 
 		page_index = (2*Z_Z + Z_func(vm.o_size)) / PageSize
 		page_length = CelingDevide(vm.w_size, PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
 
+		// 2. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		if debug_pvm {
-			fmt.Printf("2. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
-		}
+
 		vm.Ram.WriteRAMBytes(2*Z_Z+Z_func(vm.o_size), vm.w_byte)
 
 		page_index = (2*Z_Z + Z_func(vm.o_size) + vm.w_size) / PageSize
 		page_length = CelingDevide(P_func(vm.w_size)+vm.z*Z_P-vm.w_size, PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
 
+		// 3. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		if debug_pvm {
-			fmt.Printf("3. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
-		}
 
 		page_index = ((1 << 32) - 2*Z_Z - Z_I - P_func(vm.s)) / PageSize
 		page_length = CelingDevide(P_func(vm.s), PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
 
+		// 4. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		if debug_pvm {
-			fmt.Printf("4. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
-		}
-
 		page_index = ((1 << 32) - Z_Z - Z_I) / PageSize
 		page_length = CelingDevide(uint32(len(argument_data_a)), PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
+		// 5. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		if debug_pvm {
-			fmt.Printf("5. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
-		}
+
 		vm.Ram.WriteRAMBytes((1<<32)-Z_Z-Z_I, argument_data_a)
 
 		access_mode = AccessMode{Inaccessible: false, Writable: false, Readable: true}
@@ -921,10 +885,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		page_length = CelingDevide(P_func(uint32(len(argument_data_a)))-uint32(len(argument_data_a)), PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: false, Readable: true}
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		if debug_pvm {
-			fmt.Printf("6. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
-		}
-
+		// 6. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		// set up the initial values for the registers
 		vm.WriteRegister(0, (1<<32)-(1<<16))
 		vm.WriteRegister(1, (1<<32)-2*Z_Z-Z_I)
@@ -990,52 +951,9 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	return vm
 }
 
-// NewVM with entrypoint and IsMalicious
-// func NewVM_With_EntryPoint(service_index uint32, code []byte, initialRegs []uint32, initialPC uint32, pagemap []PageMap, pages []Page, hostENV types.HostEnv, Entrypoint uint32, IsMalicious bool) *VM {
-// 	if len(code) == 0 {
-// 		panic("NO CODE\n")
-// 	}
-// 	fmt.Println("Code: ", code)
-// 	p := DecodeProgram(code)
-// 	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
-// 	fmt.Println("================================================================")
-// 	vm := &VM{
-// 		JSize:         p.JSize,
-// 		Z:             p.Z,
-// 		J:             p.J,
-// 		code:          p.Code,
-// 		bitmask:       p.K[0], // pass in bitmask K
-// 		register:      make([]uint32, regSize),
-// 		pc:            initialPC,
-// 		ram:           make(map[uint32][4096]byte),
-// 		hostenv:       hostENV, //check if we need this
-// 		Exports:       make([][]byte, 0),
-// 		service_index: service_index,
-// 		EntryPoint:    Entrypoint,
-// 		IsMalicious:   IsMalicious,
-// 	}
-// 	// set vm.pc with entrypoint
-// 	vm.pc = Entrypoint
-// 	for _, pg := range pages {
-// 		vm.writeRAMBytes(pg.Address, pg.Contents)
-// 	}
-// 	copy(vm.register, initialRegs)
-// 	return vm
-// }
-
-// func NewVMFromParseProgramTest(code []byte) {
-// 	p := DecodeProgram(code)
-// 	fmt.Printf("Code: %v K(bitmask): %v\n", p.Code, p.K[0])
-// 	fmt.Println("================================================================")
-// }
-
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.HostEnv) *VM {
 	return NewVM(serviceIndex, code, []uint64{}, i, hostENV, true)
 }
-
-// func NewVMFromCode_With_EntryPoint(serviceIndex uint32, code []byte, i uint32, hostENV types.HostEnv, Entrypoint uint32, IsMalicious bool) *VM {
-// 	return NewVM_With_EntryPoint(serviceIndex, code, []uint32{}, i, []PageMap{}, []Page{}, hostENV, Entrypoint, IsMalicious)
-// }
 
 func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
 	return &VM{
@@ -1160,20 +1078,12 @@ func (vm *VM) Execute(entryPoint int) error {
 		}
 		// host call invocation
 		if vm.hostCall {
-			if debug_pvm {
-				fmt.Println("Invocate Host Function: ", vm.host_func_id)
-			}
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
 		}
-		if debug_pvm {
-			fmt.Println("-----------------------------------------------------------------------")
-		}
 	}
-	if debug_pvm {
-		fmt.Println("last pc: ", vm.pc)
-	}
+	log.Trace(vm.logging, "PVM Complete", "pc", vm.pc)
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
@@ -1232,14 +1142,10 @@ func (vm *VM) step() error {
 		x = uint64(len(vm.code))
 	}
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
-	if debug_pvm {
-		fmt.Printf("pc: %d opcode: %d - operands: %v, len(operands) = %d\n", vm.pc, opcode, operands, len_operands)
-	}
+	log.Trace(vm.logging, "step", "pc", vm.pc, "opcode", opcode, "operands", operands, "len(operands)", len_operands)
 	switch instr {
 	case TRAP:
-		if debug_pvm {
-			fmt.Printf("TERMINATED\n")
-		}
+		log.Trace(vm.logging, "TERMINATED")
 		if instr == TRAP {
 			vm.ResultCode = types.RESULT_PANIC
 		} else {
@@ -1247,9 +1153,6 @@ func (vm *VM) step() error {
 		}
 		vm.terminated = true
 	case FALLTHROUGH:
-		if debug_pvm {
-			fmt.Println("FALLTHROUGH")
-		}
 		vm.pc += 1
 	case JUMP:
 		// handle no operand means 0
@@ -1262,9 +1165,6 @@ func (vm *VM) step() error {
 		}
 		vx := z_encode(types.DecodeE_l(originalOperands[0:lx]), uint32(lx))
 
-		if debug_pvm {
-			fmt.Println("Jump to: ", uint32(int64(vm.pc)+vx))
-		}
 		vm.branch(uint64(int64(vm.pc)+vx), true)
 	case JUMP_IND:
 		// handle no operand means 0
@@ -1282,9 +1182,6 @@ func (vm *VM) step() error {
 
 		valueA, _ := vm.ReadRegister(registerIndexA)
 		j := valueA + vx
-		if debug_pvm {
-			fmt.Println("Djump to: ", j)
-		}
 		vm.djump(j % (1 << 32))
 	case LOAD_IMM_JUMP:
 		vm.loadImmJump(operands)
@@ -1383,10 +1280,7 @@ func (vm *VM) step() error {
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
-		if debug_pvm {
-			fmt.Printf("Unknown opcode: %d\n", opcode)
-			fmt.Printf("----\n")
-		}
+		log.Debug(vm.logging, "terminated: unknown opcode", "opcode", opcode)
 		return nil
 	}
 
@@ -1466,7 +1360,6 @@ func (vm *VM) ReadRegister(index int) (uint64, uint64) {
 	if index < 0 || index >= len(vm.register) {
 		return 0, OOB
 	}
-	// fmt.Printf(" REGISTERS %v (index=%d => %d)\n", vm.register, index, vm.register[index])
 	return vm.register[index], OK
 }
 
@@ -1475,9 +1368,6 @@ func (vm *VM) WriteRegister(index int, value uint64) uint64 {
 		return OOB
 	}
 	vm.register[index] = value
-	if debug_pvm {
-		fmt.Printf("Register[%d] = %d\n", index, value)
-	}
 	return OK
 }
 
@@ -1534,28 +1424,15 @@ func (vm *VM) storeImm(opcode byte, operands []byte) uint64 {
 	switch opcode {
 	case STORE_IMM_U8:
 		value := vy % (1 << 8)
-		if debug_pvm {
-			fmt.Printf("STORE_IMM_U8: %d %v\n", vx, []byte{byte(value)})
-		}
 		return vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})
 	case STORE_IMM_U16:
 		value := types.E_l(vy%(1<<16), 2)
-		if debug_pvm {
-			fmt.Printf("STORE_IMM_U16: %d %v\n", vx, value)
-		}
 		return vm.Ram.WriteRAMBytes(uint32(vx), value)
 	case STORE_IMM_U32:
 		value := types.E_l(vy%(1<<32), 4)
-		if debug_pvm {
-			fmt.Printf("STORE_IMM_U32: %d %v\n", vx, value)
-		}
 		return vm.Ram.WriteRAMBytes(uint32(vx), value)
 	case STORE_IMM_U64:
-		// TODO: NEW - check this
 		value := types.E_l(vy, 8)
-		if debug_pvm {
-			fmt.Printf("STORE_IMM_U64: %d %v\n", vx, value)
-		}
 		return vm.Ram.WriteRAMBytes(uint32(vx), value)
 	}
 
@@ -1601,9 +1478,6 @@ func (vm *VM) load(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		if debug_pvm {
-			fmt.Printf("LOAD_U8: %d %v\n", vx, value)
-		}
 		vm.WriteRegister(registerIndexA, uint64(value[0]))
 	case LOAD_I8:
 		value, errCode := vm.Ram.ReadRAMBytes((uint32(vx)), 1)
@@ -1612,9 +1486,6 @@ func (vm *VM) load(opcode byte, operands []byte) {
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
-		}
-		if debug_pvm {
-			fmt.Printf("LOAD_I8: %d %v\n", vx, value)
 		}
 		vm.WriteRegister(registerIndexA, x_encode(uint64(value[0]), 1))
 	case LOAD_U16:
@@ -1625,9 +1496,6 @@ func (vm *VM) load(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		if debug_pvm {
-			fmt.Printf("LOAD_U16: %d %v\n", vx, value)
-		}
 		vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
 	case LOAD_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 2)
@@ -1636,9 +1504,6 @@ func (vm *VM) load(opcode byte, operands []byte) {
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
-		}
-		if debug_pvm {
-			fmt.Printf("LOAD_I16: %d %v\n", vx, value)
 		}
 		vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 2))
 	case LOAD_U32:
@@ -1649,9 +1514,6 @@ func (vm *VM) load(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		if debug_pvm {
-			fmt.Printf("LOAD_U32: %d %v\n", vx, value)
-		}
 		vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
 	case LOAD_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 4)
@@ -1661,9 +1523,6 @@ func (vm *VM) load(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		if debug_pvm {
-			fmt.Printf("LOAD_I32: %d %v\n", vx, value)
-		}
 		vm.WriteRegister(registerIndexA, x_encode(types.DecodeE_l(value), 4))
 	case LOAD_U64: // TODO: NEW, check this
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 8)
@@ -1672,9 +1531,6 @@ func (vm *VM) load(opcode byte, operands []byte) {
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
-		}
-		if debug_pvm {
-			fmt.Printf("LOAD_U64: %d %v\n", vx, value)
 		}
 		vm.WriteRegister(registerIndexA, types.DecodeE_l(value))
 	default:
@@ -1701,9 +1557,6 @@ func (vm *VM) store(opcode byte, operands []byte) {
 	switch opcode {
 	case STORE_U8:
 		value := valueA % (1 << 8)
-		if debug_pvm {
-			fmt.Printf("STORE_u8: %d %v\n", vx, []byte{byte(value)})
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), []byte{byte(value)})
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -1712,9 +1565,6 @@ func (vm *VM) store(opcode byte, operands []byte) {
 		}
 	case STORE_U16:
 		value := types.E_l(uint64(valueA%(1<<16)), 2)
-		if debug_pvm {
-			fmt.Printf("STORE_U16: %d %v\n", vx, value)
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -1723,9 +1573,6 @@ func (vm *VM) store(opcode byte, operands []byte) {
 		}
 	case STORE_U32:
 		value := types.E_l(uint64(valueA%(1<<32)), 4)
-		if debug_pvm {
-			fmt.Printf("STORE_U32: %d %v\n", vx, value)
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -1734,9 +1581,6 @@ func (vm *VM) store(opcode byte, operands []byte) {
 		}
 	case STORE_U64:
 		value := types.E_l(uint64(valueA), 8)
-		if debug_pvm {
-			fmt.Printf("STORE_U64: %d %v\n", vx, value)
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(vx), value)
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -1770,9 +1614,6 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 
 	switch opcode {
 	case STORE_IMM_IND_U8:
-		// if debug_pvm {
-		// 	fmt.Printf("STORE_IMM_IND_U8: %d %v\n", valueA+vx, []byte{byte(vy % 8)})
-		// }
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), []byte{byte(vy % (1 << 8))})
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -1780,9 +1621,6 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U16:
-		// if debug_pvm {
-		// 	fmt.Printf("STORE_IMM_IND_U16: %d %v\n", valueA+vx, types.E_l(uint64(vy%1<<16), 2))
-		// }
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<16), 2))
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -1790,9 +1628,6 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U32:
-		// if debug_pvm {
-		// 	fmt.Printf("STORE_IMM_IND_U32: %d %v\n", valueA+vx, types.E_l(uint64(vy), 4))
-		// }
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<32), 4))
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -1868,9 +1703,6 @@ func (vm *VM) moveReg(operands []byte) {
 	registerIndexA := min(12, int(originalOperands[0])/16)
 
 	valueA, _ := vm.ReadRegister(registerIndexA)
-	if debug_pvm {
-		fmt.Printf("MOVE_REG: %d %d\n", registerIndexA, registerIndexD)
-	}
 	vm.WriteRegister(registerIndexD, valueA)
 }
 
@@ -1915,90 +1747,60 @@ func (vm *VM) branchCond(opcode byte, operands []byte) {
 	switch opcode {
 	case BRANCH_EQ_IMM:
 		if valueA == vx {
-			if debug_pvm {
-				fmt.Printf("BRANCH_EQ_IMM: %d, valueA=%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_NE_IMM:
 		if valueA != vx {
-			if debug_pvm {
-				fmt.Printf("BRANCH_NE_IMM: %d, valueA!=%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LT_U_IMM:
 		if valueA < vx {
-			if debug_pvm {
-				fmt.Printf("BRANCH_LT_U_IMM: %d, valueA<%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LT_S_IMM:
 		if z_encode(valueA, 8) < z_encode(vx, 8) {
-			if debug_pvm {
-				fmt.Printf("BRANCH_LT_S_IMM: %d, valueA<%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LE_U_IMM:
 		if valueA <= vx {
-			if debug_pvm {
-				fmt.Printf("BRANCH_LE_U_IMM: %d, valueA<=%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_LE_S_IMM:
 		if z_encode(valueA, 8) <= z_encode(vx, 8) {
-			if debug_pvm {
-				fmt.Printf("BRANCH_LE_S_IMM: %d, valueA<=%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GE_U_IMM:
 		if valueA >= vx {
-			if debug_pvm {
-				fmt.Printf("BRANCH_GE_U_IMM: %d, valueA>=%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GE_S_IMM:
 		if z_encode(valueA, 8) >= z_encode(vx, 8) {
-			if debug_pvm {
-				fmt.Printf("BRANCH_GE_S_IMM: %d, valueA>=%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GT_U_IMM:
 		if valueA > vx {
-			if debug_pvm {
-				fmt.Printf("BRANCH_GT_U_IMM: %d, valueA>%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_GT_S_IMM:
 		if z_encode(valueA, 8) > z_encode(vx, 8) {
-			if debug_pvm {
-				fmt.Printf("BRANCH_GT_S_IMM: %d, valueA>%d, jump to %d\n", valueA, vx, vy)
-			}
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
@@ -2024,15 +1826,8 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
-	if debug_pvm {
-		fmt.Printf("STORE_IND: registerIndexA=%d registerIndexB=%d valueA=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueA, valueB, lx, vx)
-	}
-
 	switch opcode {
 	case STORE_IND_U8:
-		if debug_pvm {
-			fmt.Printf("STORE_IND_U8: %d %v\n", valueB+vx, []byte{byte(valueA % 8)})
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), []byte{byte(valueA % (1 << 8))})
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -2040,9 +1835,6 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IND_U16:
-		if debug_pvm {
-			fmt.Printf("STORE_IND_U16: %d %v\n", valueB+vx, types.E_l(uint64(valueA%1<<16), 2))
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA)%(1<<16), 2))
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -2050,9 +1842,6 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IND_U32:
-		if debug_pvm {
-			fmt.Printf("STORE_IND_U32: %d %v\n", valueB+vx, types.E_l(uint64(valueA), 4))
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA)%(1<<32), 4))
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -2060,9 +1849,6 @@ func (vm *VM) storeInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IND_U64:
-		if debug_pvm {
-			fmt.Printf("STORE_IND_U64: %d %v\n", valueB+vx, types.E_l(uint64(valueA), 8))
-		}
 		errCode := vm.Ram.WriteRAMBytes(uint32(valueB)+uint32(vx), types.E_l(uint64(valueA), 8))
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
@@ -2100,9 +1886,6 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			return
 		}
 		result := uint64(value[0])
-		if debug_pvm {
-			fmt.Printf("LOAD_IND_U8: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
-		}
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I8:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 1)
@@ -2113,9 +1896,6 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			return
 		}
 		result := uint64(z_decode(z_encode(uint64(value[0]), 1), 8))
-		if debug_pvm {
-			fmt.Printf("LOAD_IND_I8: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
-		}
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
@@ -2126,9 +1906,6 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			return
 		}
 		result := uint64(types.DecodeE_l(value))
-		if debug_pvm {
-			fmt.Printf("LOAD_IND_U16: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
-		}
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
@@ -2139,9 +1916,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			return
 		}
 		result := z_decode(z_encode(types.DecodeE_l(value), 2), 8)
-		if debug_pvm {
-			fmt.Printf("LOAD_IND_I16: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
-		}
+
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
@@ -2152,9 +1927,6 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			return
 		}
 		result := uint64(types.DecodeE_l(value))
-		if debug_pvm {
-			fmt.Printf("LOAD_IND_U32: ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
-		}
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
@@ -2261,9 +2033,6 @@ func (vm *VM) aluImm(opcode byte, operands []byte) {
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
-	if debug_pvm {
-		fmt.Printf("aluImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
-	}
 	vm.WriteRegister(registerIndexA, result)
 }
 
@@ -2301,9 +2070,6 @@ func (vm *VM) cmovImm(opcode byte, operands []byte) {
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
-	}
-	if debug_pvm {
-		fmt.Printf("cmovImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 	}
 	vm.WriteRegister(registerIndexA, result)
 }
@@ -2373,9 +2139,6 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) {
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
-	}
-	if debug_pvm {
-		fmt.Printf("shiftImm ra=%d rb=%d valueB=%d lx=%d vx=%d\n", registerIndexA, registerIndexB, valueB, lx, vx)
 	}
 	vm.WriteRegister(registerIndexA, result)
 }
@@ -2468,9 +2231,6 @@ func (vm *VM) branchReg(opcode byte, operands []byte) {
 			vm.pc += uint64(1 + len(operands))
 		}
 	case BRANCH_NE:
-		if debug_pvm {
-			fmt.Printf("BRANCH_NE: %d %d %d\n", valueA, valueB, vx)
-		}
 
 		if valueA != valueB {
 			vm.branch(vx, true)
@@ -2521,12 +2281,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	var result uint64
 	switch opcode {
 	case ADD_32:
-		// condition on IsMalicious
-		if vm.IsMalicious {
-			result = valueA * valueB
-		} else {
-			result = x_encode((valueA+valueB)%(1<<32), 4)
-		}
+		result = x_encode((valueA+valueB)%(1<<32), 4)
 	case ADD_64:
 		result = valueA + valueB
 	case SUB_32:
@@ -2609,9 +2364,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	case REM_S_32:
 		S_valueA := z_encode(valueA%(1<<32), 4)
 		S_valueB := z_encode(valueB%(1<<32), 4)
-		if debug_pvm {
-			fmt.Printf(" REM_S %d %d \n", int32(valueA), int32(valueB))
-		}
+
 		if S_valueB == 0 {
 			result = z_decode(S_valueA, 8)
 		} else if S_valueA == -(1<<31) && S_valueB == -1 {
@@ -2620,9 +2373,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 			result = z_decode(S_valueA%S_valueB, 8)
 		}
 	case REM_S_64:
-		if debug_pvm {
-			fmt.Printf(" REM_S %d %d \n", int32(valueA), int32(valueB))
-		}
+
 		if valueB == 0 {
 			result = valueA
 		} else if z_encode(valueA, 8) == -(1<<63) && z_encode(valueB, 8) == -1 {
@@ -2723,10 +2474,6 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
-	}
-
-	if debug_pvm {
-		fmt.Printf("aluReg - rA[%d]=%d  regB[%d]=%d regD[%d]=%d\n", registerIndexA, valueA, registerIndexB, valueB, registerIndexD, result)
 	}
 	vm.WriteRegister(registerIndexD, result)
 }
@@ -2889,11 +2636,6 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Registers_and_One_Immediate(opc
 	valueB, _ := vm.ReadRegister(registerIndexB)
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
-
-	if debug_pvm {
-		fmt.Printf("Opcode: %d, registerIndexA: %d, registerIndexB: %d, valueA: %d, valueB: %d, vx: %d, ", opcode, registerIndexA, registerIndexB, valueA, valueB, vx)
-	}
-
 	var result uint64
 	switch opcode {
 	case ADD_IMM_64:

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -85,15 +86,7 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 		WorkPackage: pkg,
 		Extrinsic:   extrinsics,
 	}
-	/*
-		Here need to setup some kind of verification for the work package
-	*/
-
-	// a, err := json.MarshalIndent(req, "", "  ")
-	// if err != nil {
-	// 	return err
-	// }
-	// fmt.Printf("send workpackage: %s\n", a)
+	// Here need to setup some kind of verification for the work package
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
@@ -108,9 +101,7 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 	if err != nil {
 		return err
 	}
-	if debugG {
-		fmt.Printf("%s submitted Workpackage %d bytes to core %d\n", p.String(), len(reqBytes), core_idx)
-	}
+	log.Debug(debugG, "submitted Workpackage to core", "p", p.String(), "len", len(reqBytes), "core", core_idx)
 
 	return nil
 }
@@ -121,19 +112,12 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
-		if debugG {
-			fmt.Println("Error deserializing:", err)
-		}
+		log.Error(debugG, "onWorkPackageSubmission:FromBytes", "err", err)
 		if err != nil {
 			return
 		}
 	}
 
-	// a, err := json.MarshalIndent(newReq, "", "  ")
-	// if err != nil {
-	// 	return err
-	// }
-	// fmt.Printf("receive workpackage: %s\n", a)
 	curr_statedb := n.statedb.Copy()
 	selfCoreIndex := curr_statedb.GetSelfCoreIndex()
 	if err != nil {

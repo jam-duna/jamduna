@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -37,9 +38,8 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 				panic(err)
 				return err
 			}
-			if debugStorageCalc {
-				fmt.Printf(" STORAGE key=%x value exists %v ==> trying to update from %v to %v\n", storage.RawKey, exists, oldValue, storage.Value)
-			}
+			log.Trace(module, "writeAccount", "STORAGE key", storage.RawKey, "exists", exists, "oldValue", oldValue, "newValue", storage.Value)
+
 			if len(storage.Value) == 0 || storage.Deleted {
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
@@ -111,7 +111,6 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) {
 
 	// c - Designate => AuthorizationQueue
 	for i := 0; i < types.TotalCores; i++ {
-		// fmt.Printf("ApplyXContext -- U.QueueWorkReport[%d] = %x\n", i, U.QueueWorkReport[i])
 		copy(s.JamState.AuthorizationQueue[i][:], U.QueueWorkReport[i][:])
 	}
 
@@ -155,10 +154,10 @@ func (s *StateDB) ReadServiceStorage(service uint32, k common.Hash) (storage []b
 	storage, ok, err = tree.GetServiceStorage(service, k)
 	if err != nil || !ok {
 		return
-	} else {
-		//fmt.Printf("ReadServiceStorage (S,K)=(%v,%x) RESULT: storage=%x, err=%v\n", service, k, storage, err)
-		return
 	}
+
+	return
+
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) (blob []byte, ok bool, err error) {
@@ -167,9 +166,7 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 	if err != nil || !ok {
 		return
 	} else {
-		if debug {
-			fmt.Printf("ReadServicePreimageBlob (s,l)=(%v, %v) RESULT: blob=%x (len=%v), err=%v\n", service, blob_hash, blob, len(blob), err)
-		}
+		log.Trace(debugP, "ReadServicePreimageBlob", "service", service, "blob_hash", blob_hash, "len(blob)", len(blob))
 		return
 	}
 }
@@ -179,10 +176,10 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 	time_slots, ok, err = tree.GetPreImageLookup(service, blob_hash, blob_length)
 	if err != nil || !ok {
 		return
-	} else {
-		fmt.Printf("ReadServicePreimageLookup (s, (h,l))=(%v, (%v,%v))  RESULT: time_slots=%v, err=%v\n", service, blob_hash, blob_length, time_slots, err)
-		return
 	}
+	log.Trace(debugP, "ReadServicePreimageLookup", "service", service, "blob_hash", blob_hash, "blob_length", blob_length, time_slots)
+	return
+
 }
 
 // HistoricalLookup, GetImportItem, ExportSegment

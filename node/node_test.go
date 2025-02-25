@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"log"
 	_ "net/http/pprof"
 	"os"
 	"runtime/pprof"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -86,7 +86,7 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 
 	select {
 	case <-done:
-		log.Printf("[%v] Completed successfully", caseType)
+		log.Info(module, "Completed")
 	case err := <-errChan:
 		t.Fatalf("[%v] Failed: %v", caseType, err)
 	}
@@ -109,7 +109,6 @@ func TestFib(t *testing.T) {
 	if *targetNum > 0 {
 		targetN = *targetNum
 	}
-	fmt.Printf("fib targetNum: %v\n", targetN)
 	basePort := GenerateRandomBasePort()
 	jamtest(t, "fib", FibTestEpochLen, basePort, targetN)
 }
@@ -262,7 +261,7 @@ func TestDisputes(t *testing.T) {
 
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
-		fmt.Printf("Builder storing TestService %s (%v)\n", serviceName, common.Str(service.CodeHash))
+		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		// set up service using the Bootstrap service
 		refineContext := builderNode.statedb.GetRefineContext()
 		codeWorkPackage := types.WorkPackage{
@@ -288,7 +287,7 @@ func TestDisputes(t *testing.T) {
 		}
 
 		new_service_found := false
-		fmt.Printf("Waiting for %s service to be ready...\n", serviceName)
+		log.Info(module, "Waiting for service to be ready...", "service", serviceName)
 		for !new_service_found {
 			stateDB := builderNode.getState()
 			if stateDB != nil && stateDB.Block != nil {
@@ -305,10 +304,8 @@ func TestDisputes(t *testing.T) {
 				if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
 					service.ServiceCode = decoded_new_service_idx
 					new_service_idx = decoded_new_service_idx
-					fmt.Printf("%s Service Index: %v\n", serviceName, service.ServiceCode)
 					new_service_found = true
 					previous_service_idx = decoded_new_service_idx
-					//fmt.Printf("t.GetServiceStorage %v FOUND  %v\n", key, service_account_byte)
 
 					err = builderNode.BroadcastPreimageAnnouncement(new_service_idx, service.CodeHash, uint32(len(service.Code)), service.Code)
 					if err != nil {
@@ -339,7 +336,6 @@ func TestDisputes(t *testing.T) {
 					} else if len(code) > 0 && bytes.Equal(code, service.Code) {
 						ready++
 					}
-					// fmt.Printf(" check %s len(code)=%d expect %d => ready=%d\n", service.CodeHash, len(code), len(service.Code), ready)
 				}
 			}
 			nservices++

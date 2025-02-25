@@ -67,8 +67,6 @@ func ComputeC_sh(s uint32, h0 Hash) Hash {
 
 	// h4..h7
 	copy(stateKey[8:32], h[4:28])
-
-	// fmt.Printf("ComputeC_sh(s=%d, h=%s)=%x\n", s, h0, stateKey)
 	return BytesToHash(stateKey[:])
 }
 

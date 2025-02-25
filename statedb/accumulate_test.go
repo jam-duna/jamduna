@@ -386,9 +386,6 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 	n, T, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f)
-	if debug {
-		fmt.Printf("ApplyStateTransitionFromBlock - Accumulate\n")
-	}
 
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this

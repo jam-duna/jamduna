@@ -2,13 +2,13 @@ package statedb
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"testing"
 
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -61,10 +61,7 @@ func testCodecStatistics(t *testing.T) {
 				t.Fatalf("failed to decode codec data: %v", err)
 			}
 
-			if debugCodec {
-				fmt.Printf("\nexpectedCodec: %x\n", expectedCodec)
-				fmt.Printf("Recovered Strcuct from codec: %v\n", codecDecodedStruct)
-			}
+			log.Trace(module, "testCodecStatistics", "fn", tc.jsonFile, "expectedCodec", expectedCodec, "Recovered Strcuct from codec", codecDecodedStruct)
 			// Read JSON file
 			expectedJson, err := os.ReadFile(jsonPath)
 			if err != nil {
@@ -77,11 +74,6 @@ func testCodecStatistics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
-			if debugCodec {
-				fmt.Printf("Unmarshaled %s\n", jsonPath)
-				fmt.Println("type: ", reflect.TypeOf(jsonDecodedStruct))
-				fmt.Printf("Recovered Strcuct from json: %v\n", jsonDecodedStruct)
-			}
 
 			// Getting Codec Result
 			codec_via_json_source, err := types.Encode(jsonDecodedStruct)
@@ -92,9 +84,6 @@ func testCodecStatistics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to encode codec data: %v", err)
 			}
-			if debugCodec {
-				fmt.Printf("[Codec Testing] json->codec:\n%x\n", codec_via_json_source)
-			}
 
 			// Getting JSON Result
 			json_via_codec_source, err := json.MarshalIndent(codecDecodedStruct, "", "  ")
@@ -104,10 +93,6 @@ func testCodecStatistics(t *testing.T) {
 			json_via_json_source, err := json.MarshalIndent(jsonDecodedStruct, "", "  ")
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
-			}
-			if debugCodec {
-				fmt.Printf("[JSON Testing] codec->json:\n%s\n", string(json_via_codec_source))
-				fmt.Printf("codec_via_codec_source: %x\n", codec_via_codec_source)
 			}
 			// let's E2E work on every direction
 

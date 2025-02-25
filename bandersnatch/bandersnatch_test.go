@@ -381,8 +381,6 @@ func TestRingCommitment(t *testing.T) {
 		}
 		pubKeys[i] = pubKey
 		privateKeys[i] = privateKey
-		//fmt.Printf("TestRingCommitment Public Key %d: %s\n", i, hex.EncodeToString(pubKey))
-		//fmt.Printf("TestRingCommitment Private Key %d: %s\n", i, hex.EncodeToString(privateKey))
 	}
 
 	// Create a ring set by concatenating all public keys

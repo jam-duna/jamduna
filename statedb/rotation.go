@@ -38,7 +38,6 @@ func (s *StateDB) RotateGuarantors() {
 	assignments := make([]types.GuarantorAssignment, 0)
 	entropy := s.JamState.SafroleState.Entropy[2]
 	t := s.JamState.SafroleState.Timeslot
-	//fmt.Printf("[N%d] t=%d RotateGuarantors before rototation s.PreviousGuarantorAssignments=%x | s.GuarantorAssignments=%x\n", s.Id, t, s.PreviousGuarantorAssignments, s.GuarantorAssignments)
 	cores := Permute(entropy, t)
 	for i, kappa := range s.JamState.SafroleState.CurrValidators {
 		assignments = append(assignments, types.GuarantorAssignment{
@@ -73,8 +72,6 @@ func (s *StateDB) RotateGuarantors() {
 	}
 	s.PreviousGuarantorAssignments = make([]types.GuarantorAssignment, len(assignments))
 	copy(s.PreviousGuarantorAssignments, assignments)
-	//fmt.Printf("[N%d] t=%d RotateGuarantors after rototation s.PreviousGuarantorAssignments=%x | s.GuarantorAssignments=%x\n", s.Id, t, s.PreviousGuarantorAssignments, s.GuarantorAssignments)
-
 }
 
 // this function are using the timeslot from block header and the entropy from safrole state(shift if needed). To Calculate the guarantor assignments
@@ -86,7 +83,6 @@ func (s *StateDB) CaculateAssignments(slot uint32) (PreviousGuarantorAssignments
 	assignments := make([]types.GuarantorAssignment, 0)
 	entropy := sf_tmp.Entropy[2]
 	t := slot
-	//fmt.Printf("[N%d] t=%d RotateGuarantors before rototation s.PreviousGuarantorAssignments=%x | s.GuarantorAssignments=%x\n", s.Id, t, s.PreviousGuarantorAssignments, s.GuarantorAssignments)
 	cores := Permute(entropy, t)
 	for i, kappa := range sf_tmp.CurrValidators {
 		assignments = append(assignments, types.GuarantorAssignment{

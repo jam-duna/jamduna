@@ -3,11 +3,12 @@ package node
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/gorilla/websocket"
 )
@@ -101,11 +102,11 @@ func (c *Client) readPump() {
 		if err != nil {
 			// Log unexpected close errors.
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("read error: %v", err)
+				log.Crit("jamweb", "IsUnexpectedCloseError", err)
 			}
 			break
 		}
-		log.Printf("Received message from client: %s", message)
+		log.Debug("jamweb", "Received message from client", message)
 		// Optionally process incoming messages here.
 	}
 }
@@ -158,7 +159,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	// Upgrade the HTTP connection.
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("Upgrade error:", err)
+		log.Error("jamweb", "serveWs Upgrade error", err)
 		return
 	}
 	client := &Client{
@@ -181,7 +182,7 @@ func (n *Node) runJamWeb(basePort uint16) {
 	go n.hub.run()
 
 	// WebSocket endpoint at /ws.
-	log.Printf("JAM Web Server started. Listening on %s", addr)
+	log.Info("jamweb", "JAM Web Server started", "addr", addr)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(n.hub, w, r)
 	})
@@ -254,6 +255,6 @@ func (n *Node) runJamWeb(basePort uint16) {
 	})
 
 	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatal("ListenAndServe error: ", err)
+		log.Crit("jamweb", "ListenAndServe error", err)
 	}
 }

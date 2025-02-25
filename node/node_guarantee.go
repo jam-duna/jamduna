@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -29,27 +29,20 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	currTimeslot := curr_statedb.GetTimeslot()
 	coreIndex := wpCoreIndex
 	if err != nil {
-		Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] GetCoreCoWorkerPeersByStateDB Error: %v\n", n.String(), err), true)
+		log.Error(debugG, "broadcastWorkPackage:GetCoreCoWorkerPeersByStateDB", "n", n.String(), "err", err)
 	}
 	coworkers := n.GetCoreCoWorkerPeersByStateDB(wpCoreIndex, curr_statedb)
-	if debugDA {
-		fmt.Printf("%s n.Core: %d, | wpCoreIndex=%v, WorkPackageHash=%v, len(coworkers)=%x\n", n.String(), coreIndex, wpCoreIndex, wp.Hash(), len(coworkers))
-	}
-	if debugSegments {
-		fmt.Printf("[N%d] broadcastWorkpackage executeWorkPackage\n", n.id)
-	}
+	log.Debug(debugDA, "broadcastWorkpackage", "n", n.String(), "n.Core", coreIndex, "wpCoreIndex", wpCoreIndex, "WorkPackageHash", wp.Hash(), "len(coworkers)", len(coworkers))
 	importedSegments, err := n.FetchWorkpackageImportSegments(wp)
 	if err != nil {
-		Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err), true)
+		log.Error(debugG, "broadcastWorkPackage:FetchWorkpackageImportSegments", "n", n.String(), "err", err)
 		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err)
 	}
 	segmentRootLookup, err := n.GetSegmentRootLookup(wp)
 	if err != nil {
-		Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] GetSegmentRootLookup Error: %v\n", n.String(), err), true)
+		log.Error(debugG, "broadcastWorkPackage:GetSegmentRootLookup", "n", n.String(), "err", err)
 	}
-	if debugG {
-		fmt.Printf("%s [broadcastWorkPackage] Guarantee from self\n", n.String())
-	}
+	log.Debug(debugG, "broadcastWorkPackage:Guarantee from self", "id", n.String())
 	bundle := n.CompilePackageBundle(wp, importedSegments, extrinsics)
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
@@ -63,7 +56,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				var execErr error
 				report, execErr := n.executeWorkPackageBundle(wpCoreIndex, bundle, segmentRootLookup)
 				if execErr != nil {
-					Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] executeWorkPackage Error: %v\n", n.String(), execErr), true)
+					log.Error(debugG, "broadcastWorkPackage:executeWorkPackage", "n", n.String(), "err", execErr)
 					panic(fmt.Sprintf("executeWorkPackage Error: %v", execErr))
 				}
 				guarantee.Report = report
@@ -74,7 +67,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 			} else {
 				fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
-					Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] ShareWorkPackage Error: %v\n", n.String(), errfellow), true)
+					log.Error(debugG, "broadcastWorkPackage:ShareWorkPackage", "n", n.String(), "err", errfellow)
 					return
 				}
 				mutex.Lock()
@@ -88,7 +81,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	selfReport := guarantee.Report
 
 	selfWorkReportHash := guarantee.Report.Hash()
-	// go Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing workReport: %v\n", n.String(), selfReport.String()), true)
+
 	for key, fellow_response := range fellow_responses {
 
 		validator_idx := curr_statedb.GetSafrole().GetCurrValidatorIndex(key)
@@ -107,30 +100,31 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				return guarantee.Signatures[i].ValidatorIndex < guarantee.Signatures[j].ValidatorIndex
 			})
 		} else {
-			fmt.Printf("%s [broadcastWorkPackage] outgoing workReport: %v\n", n.String(), selfReport.String())
-			fmt.Printf("%s [broadcastWorkPackage] outgoing guarantee: %v\n", n.String(), guarantee.String())
-			error_string := fmt.Sprintf("%s [broadcastWorkPackage] Guarantee from fellow [N%d] did not match! \neg_wr: %v, fellow_wr: %v\n", n.String(), validator_idx, selfWorkReportHash, fellowWorkReportHash)
-			//panic("Guarantee from fellow did not match!")
-			Logger.RecordLogs(storage.EG_error, error_string, true)
+			log.Error(debugG, "broadcastWorkpackage Guarantee from fellow did not match", "n", n.String(),
+				"outgoing workReport", selfReport.String(), "outgoing guarantee", guarantee.String(),
+				"validator_idx", validator_idx,
+				"selfWorkReportHash", selfWorkReportHash,
+				"fellowWorkReportHash", fellowWorkReportHash)
+
 			return
 		}
 	}
 
 	if len(guarantee.Signatures) >= 2 {
 		if len(guarantee.Signatures) == 2 {
-			fmt.Printf("WARNING: ABNORMAL- Only 2 signatures, expected 3! This is not normal!")
+			log.Warn(debugG, "broadcastWorkpackage:Only 2 signatures, expected 3")
 		}
 		guarantee.Slot = currTimeslot
 		go n.broadcast(guarantee)
 		eclapsed := time.Since(timer)
-		Logger.RecordLogs(storage.EG_status, fmt.Sprintf("%s [broadcastWorkPackage] outgoing guarantee(%v) for core%d, took %s\n",
-			n.String(), guarantee.Report.GetWorkPackageHash().String_short(), guarantee.Report.CoreIndex, eclapsed.String()), true)
+		log.Debug(debugG, "broadcastWorkPackage: outgoing guarantee for core",
+			"n", n.String(), "wph", guarantee.Report.GetWorkPackageHash().String_short(), "core", guarantee.Report.CoreIndex,
+			"elapsed", eclapsed.String())
 		err := n.processGuarantee(guarantee)
 		if err != nil {
-			Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s [broadcastWorkPackage] processGuarantee Error: %v\n", n.String(), err), true)
+			log.Error(debugG, "processGuarantee", "n", n.String(), "err", err)
 		}
-		log := fmt.Sprintf("%s (core %d) [broadcast guarantee in slot %d, actually slot %d]\n", n.String(), coreIndex, guarantee.Slot, n.statedb.GetTimeslot())
-		Logger.RecordLogs(storage.EG_status, log, true)
+		log.Trace(debugG, "broadcast guarantee in slot", "n", n.String(), "coreIndex", coreIndex, "slot", guarantee.Slot, "actual", n.statedb.GetTimeslot())
 	}
 	return
 }

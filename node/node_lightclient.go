@@ -75,8 +75,7 @@ func IsWorkPackageInHistory(latestdb *statedb.StateDB, workPackageHash common.Ha
 }
 
 func (n *Node) MakeWorkPackage(prereq []common.Hash, service_code uint32, WorkItems []types.WorkItem) (types.WorkPackage, error) {
-	refineContext := n.statedb.GetRefineContext()
-	refineContext.Prerequisites = prereq
+	refineContext := n.statedb.GetRefineContext(prereq...)
 	workPackage := types.WorkPackage{
 		Authorization:         []byte("0x"), // TODO: set up null-authorizer
 		AuthCodeHost:          0,

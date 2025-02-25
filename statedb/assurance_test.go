@@ -12,6 +12,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -55,9 +56,7 @@ func TestAssuranceParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal JSON: %v", err)
 	}
-	if debugA {
-		fmt.Printf("Expected: %s\n", expectedJson)
-	}
+	log.Debug(debugA, "Expected", expectedJson)
 }
 
 func VerifyAssurances(jsonFile string, exceptErr error) error {

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/quic-go/quic-go"
 )
 
@@ -158,7 +159,7 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	if err != nil {
 		return
 	}
-	//fmt.Printf("%s [SendSegmentShardRequest:sendQuicBytes] %d bytes\n", p.String(), len(reqBytes))
+
 	// <-- [Segment Shard]
 	segmentShards, err = receiveQuicBytes(stream)
 	if err != nil {
@@ -166,7 +167,6 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 		// panic(11060)
 		return
 	}
-	//fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] %d bytes\n", p.String(), len(segmentShards))
 	if withJustification {
 		for j := uint8(0); j < req.Len; j++ {
 			var justification []byte
@@ -195,24 +195,20 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		return fmt.Errorf("Invalid Response")
 	}
 	if err != nil {
-		fmt.Printf("%s [onSegmentShardRequest:GetSegmentShard_Assurer] ERR %v\n", n.String(), err)
-		// panic(212131212)
+		log.Error(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", err)
 		return err
 	}
 	if !ok {
-		fmt.Printf("%s [onSegmentShardRequest:GetSegmentShard_Assurer] erasureRoot %v shardIndex %d SegmentIndex %v NOT FOUND\n", n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
-		// panic(1107)
+		log.Warn(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
 		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
 	combined_selected_segmentshards, _ := CombineSegmentShards(selected_segmentshards)
-	//fmt.Printf("%s [onSegmentShardRequest:combined_selected_segmentshards] %d\n", n.String(), len(combined_selected_segmentshards))
 	err = sendQuicBytes(stream, combined_selected_segmentshards)
 	if err != nil {
-		fmt.Printf("%s [onSegmentShardRequest:sendQuicBytes] ERR %v\n", n.String(), err)
+		log.Error("%s [onSegmentShardRequest:sendQuicBytes] ERR %v\n", n.String(), err)
 		return
 	}
-	//fmt.Printf("%s [onSegmentShardRequest:sendQuicBytes] %d bytes\n", n.String(), len(combined_selected_segmentshards))
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if withJustification {

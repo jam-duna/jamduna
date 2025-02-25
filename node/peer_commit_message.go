@@ -33,7 +33,6 @@ func (n *Node) onCommitMessage(stream quic.Stream, msg []byte) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("%s onCommitMessage %d %x\n", p.String(), commit.Round, commit.Signature)
 	n.grandpaCommitMessageCh <- commit
 	return nil
 }

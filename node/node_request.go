@@ -1,19 +1,14 @@
 package node
 
 import (
-	//"bytes"
-	//"context"
-	//"errors"
-
 	"context"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
-	//"github.com/colorfulnotion/jam/trie"
 )
 
 type CE139_request struct {
@@ -74,7 +69,6 @@ func (n *Node) GetBlockByHeaderHash(headerHash common.Hash) (*types.Block, error
 }
 
 func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
-	//fmt.Printf("%s BlocksLookup(%v) requested direction=%v, maximumBlocks=%v\n", n.String(), headerHash, direction, maximumBlocks)
 	blocks = make([]types.Block, 0)
 	if direction == 0 {
 		//Direction = 0 (Ascending exclusive)  - child, grandchild, ...
@@ -213,7 +207,6 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) 
 		return block, fmt.Errorf("Invalid validator index %d", validatorIndex)
 	}
 	headerHash := blockAnnouncement.Header.HeaderHash()
-	//fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) to N%d\n", n.String(), headerHash, validatorIndex)
 	var blocksRaw []types.Block
 	for attempt := 1; attempt <= 3; attempt++ {
 		blocksRaw, err = p.SendBlockRequest(headerHash, 1, 1)
@@ -238,7 +231,6 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) 
 	}
 	n.cacheHeaders(receivedHeaderHash, block)
 	n.cacheBlock(block)
-	//fmt.Printf("  %s received Block %v <- %v\n", n.String(), block.Hash(), block.ParentHash())
 	return block, nil
 }
 
@@ -306,9 +298,6 @@ func (n *Node) runReceiveBlock() {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
-			// TODO: receive block
-			// fmt.Printf("[N%d] received Block Announcement from %d\n", n.id, blockAnnouncement.ValidatorIndex)
-
 			b, err := n.processBlockAnnouncement(blockAnnouncement)
 			if err != nil {
 				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)
@@ -336,7 +325,7 @@ func (n *Node) runMain() {
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {
-				Logger.RecordLogs(storage.EG_error, fmt.Sprintf("%s processGuarantee: %v\n", n.String(), err), true)
+				log.Error(debugG, "runMain:processGuarantee", "n", n.String(), "err", err, "guarantee.Report", guarantee.Report.String())
 			}
 		case assurance := <-n.assurancesCh:
 			err := n.processAssurance(assurance)
@@ -544,15 +533,12 @@ func (n *Node) makeRequestInternal(ctx context.Context, obj interface{}) (interf
 	select {
 	case <-ctx.Done():
 		// Context was canceled before the request completed
-		//fmt.Printf("[N%d] %v makeRequestInternal Done\n", n.id, msgType)
 		return nil, ctx.Err()
 	case err := <-errCh:
 		// Request encountered an error
-		//fmt.Printf("[N%d] %v makeRequestInternal err: %v\n", n.id, msgType, err)
 		return nil, err
 	case response := <-responseCh:
 		// Request succeeded
-		//fmt.Printf("[N%d] %v makeRequestInternal success: %v\n", n.id, msgType, response)
 		return response, nil
 	}
 }
@@ -604,9 +590,7 @@ func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, o
 
 	// Wait for all requests to finish
 	wg.Wait()
-	if debugSegments {
-		fmt.Printf("[N%d] Receive DONE\n", n.id)
-	}
+	log.Trace(debugDA, "makeRequests: Receive DONE", "n", n.id)
 	close(results)
 	close(errorsCh)
 
@@ -614,9 +598,7 @@ func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, o
 	for res := range results {
 		finalResults = append(finalResults, res)
 	}
-	if debugSegments {
-		fmt.Println(successCount, "successCount")
-	}
+	log.Trace(debugDA, "makeRequests: successCount", successCount)
 	// If not enough successful responses
 	if successCount < minSuccess {
 		return nil, fmt.Errorf("not enough successful requests (successCount:%d < minSuccess:%d)", successCount, minSuccess)

@@ -53,10 +53,6 @@ func TestCodec(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to decode codec data: %v", err)
 			}
-			if debugCodec {
-				fmt.Printf("\nexpectedCodec: %x\n", expectedCodec)
-				fmt.Printf("Recovered Strcuct from codec: %v\n", codecDecodedStruct)
-			}
 			// Read JSON file
 			expectedJson, err := os.ReadFile(jsonPath)
 			if err != nil {
@@ -69,11 +65,6 @@ func TestCodec(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
-			if debugCodec {
-				fmt.Printf("Unmarshaled %s\n", jsonPath)
-				fmt.Println("type: ", reflect.TypeOf(jsonDecodedStruct))
-				fmt.Printf("Recovered Struct from json: %v\n", jsonDecodedStruct)
-			}
 			// Getting Codec Result
 			codec_via_json_source, err := Encode(jsonDecodedStruct)
 			if err != nil {
@@ -83,9 +74,6 @@ func TestCodec(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to encode codec data: %v", err)
 			}
-			if debugCodec {
-				fmt.Printf("[Codec Testing] json->codec:\n%x\n", codec_via_json_source)
-			}
 			// Getting JSON Result
 			json_via_codec_source, err := json.MarshalIndent(codecDecodedStruct, "", "  ")
 			if err != nil {
@@ -94,10 +82,6 @@ func TestCodec(t *testing.T) {
 			json_via_json_source, err := json.MarshalIndent(jsonDecodedStruct, "", "  ")
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
-			}
-			if debugCodec {
-				fmt.Printf("[JSON Testing] codec->json:\n%s\n", string(json_via_codec_source))
-				fmt.Printf("codec_via_codec_source: %x\n", codec_via_codec_source)
 			}
 
 			// let's E2E work on every direction
@@ -145,17 +129,11 @@ func TestMapMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if debugCodec {
-		fmt.Println(string(str))
-	}
 	// test unmarshal
 	var h2 Hash2Hash
 	err = json.Unmarshal(str, &h2)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if debugCodec {
-		fmt.Println(h2)
 	}
 }
 

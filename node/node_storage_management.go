@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 
 	"github.com/colorfulnotion/jam/common"
-
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -28,9 +28,7 @@ func (n *Node) StoreBlock(blk *types.Block, id uint16, debug bool) error {
 	headerPrefix := []byte("header_")
 	storeKey := append(headerPrefix, headerhash[:]...)
 	s.WriteRawKV(storeKey, blockHash[:])
-	if debug && false {
-		fmt.Printf("  [N%d] StoreBlock(HeaderHash %v, BlockHash %v)\n", id, headerhash, blockHash)
-	}
+
 	// blk_<blockHash> -> codec(block)
 	blockPrefix := []byte("blk_")
 	blkStoreKey := append(blockPrefix, blockHash[:]...)
@@ -100,7 +98,6 @@ func (n *Node) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, erro
 	storeKey := append(headerPrefix, blkHeader[:]...)
 	blockHash, ok, err := n.ReadRawKV(storeKey)
 	if err != nil || !ok {
-		// fmt.Printf("Error reading blockHash: %v\n", err)
 		return nil, err
 	}
 	//blk_<blockHash> -> codec(block)
@@ -147,7 +144,6 @@ func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasur
 	if err := json.Unmarshal(erasure_sKey_val, &sECChunksArray); err != nil {
 		return erasureMeta, bECChunks, sECChunksArray, err
 	}
-	//fmt.Printf("Recover Meta from levelDB. Ready for Building. %v, erasureMap=%v, bECChunks=%v, sECChunksArray=%v\n", erasureRoot, erasureMeta.String(), bECChunks, sECChunksArray)
 	return erasureMeta, bECChunks, sECChunksArray, err
 }
 
@@ -160,11 +156,7 @@ func (n *Node) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, erasureMeta 
 
 	bChunkJson, _ := json.Marshal(bECChunks)
 	sChunkJson, _ := json.Marshal(sECChunksArray)
-	if debugDA {
-		fmt.Printf("erasure_metaKey=%v, val=%s\n", erasure_metaKey, string(erasureMeta.Bytes()))
-		fmt.Printf("erasure_bKey=%v, val=%s\n", erasure_metaKey, string(bChunkJson))
-		fmt.Printf("erasure_sKey=%v, val=%s\n", erasure_metaKey, string(sChunkJson))
-	}
+	log.Trace(debugDA, "erasure_metaKey", erasure_metaKey, "val", string(erasureMeta.Bytes()), "erasure_bKey", erasure_metaKey, "val", string(bChunkJson), "erasure_sKey", erasure_metaKey, "val", string(sChunkJson))
 	n.WriteRawKV(erasure_metaKey, erasureMeta.Bytes())
 	n.WriteRawKV(erasure_bKey, bChunkJson)
 	n.WriteRawKV(erasure_sKey, sChunkJson)
@@ -244,15 +236,12 @@ func (n *Node) GetFullShard_Guarantor(erasureRoot common.Hash, shardIndex uint16
 	for segment_idx, segment_shard := range orderedSegmentShard {
 		segmentShards[segment_idx] = segment_shard.Data
 	}
-	//fmt.Printf("GetFullShard shardIndex %v segmentShards: %x\n", shardIndex, segmentShards)
 	justification = shardJustification.CompactPath()
 
 	verified, err := VerifyFullShard(erasureRoot, shardIndex, bundleShard, segmentShards, justification)
 	if !verified {
-		//DO NOT REMOVE THIS.
-		panic(err)
+		log.Crit(debugDA, "VerifyFullShard", "err", err)
 	}
-	//fmt.Printf("GetFullShard !!! ErasureRootPath shardIdx=%v, treeLen=%v leafHash=%v, path=%v | verified=%v\n", shardIndex, types.TotalValidators, leafHash, path, verified)
 	return erasureRoot, shardIndex, bundleShard, segmentShards, justification, true, nil
 }
 
@@ -265,9 +254,7 @@ func (n *Node) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16
 	if !verified || err != nil {
 		return fmt.Errorf("Received Invalid FullShard! %v", err)
 	}
-	if debugDA {
-		fmt.Printf("[CE137_ANS Verified] erasureRoot-shardIndex: %v-%d\n", erasureRoot, shardIndex)
-	}
+	log.Trace(debugDA, "StoreFullShard_Assurer [CE137_ANS Verified]", "erasureRoot", erasureRoot, "shardIndex", shardIndex)
 	// Store path to Erasure Root
 	bClubH := common.Blake2Hash(bundleShard)
 	sClubH := trie.NewWellBalancedTree(segmentShards, types.Blake2b).RootHash()
@@ -299,24 +286,18 @@ func (n *Node) StoreFullShardJustification(erasureRoot common.Hash, shardIndex u
 	// f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	f_es_key := fmt.Sprintf("f_%v", esKey)
-	if debugKV {
-		fmt.Printf("N%d StoreFullShardJustification f_es_key %v\n", n.id, f_es_key)
-	}
+	log.Trace(debugDA, "StoreFullShardJustification", "n", n.id, "f_es_key", f_es_key)
 	bundle_segment_pair := append(bClubH.Bytes(), sClubH.Bytes()...)
 	f_es_val := append(bundle_segment_pair, justification...)
 	n.WriteRawKV(f_es_key, f_es_val)
-	if debugDA {
-		fmt.Printf("f_es: %v -> %x\n", f_es_key, f_es_val)
-	}
+	log.Trace(debugDA, "StoreFullShardJustification", "f_es_key", f_es_key, "f_es_val", f_es_val)
 }
 
 // USED
 func (n *Node) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, justification []byte, err error) {
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	f_es_key := fmt.Sprintf("f_%v", esKey)
-	if debugKV {
-		fmt.Printf("N%d GetFullShardJustification f_es_key %v\n", n.id, f_es_key)
-	}
+	log.Trace(debugDA, "GetFullShardJustification", "n", n.id, "f_es_key", f_es_key)
 
 	data, ok, err := n.ReadRawKV([]byte(f_es_key))
 	if err != nil || !ok {
@@ -339,9 +320,7 @@ func (n *Node) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex uint16, 
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	b_es_key := fmt.Sprintf("b_%s", esKey)
 	n.WriteRawKV(b_es_key, bundleShard)
-	if debugDA {
-		fmt.Printf("StoreAuditDA %v -> %x\n", b_es_key, bundleShard)
-	}
+	log.Trace(debugDA, "StoreAuditDA", "b_es_key", b_es_key, "bundleShard", bundleShard)
 	return nil
 }
 
@@ -375,7 +354,7 @@ func (n *Node) getExportedSegmenstRootFromHash(requestedHash common.Hash) (expor
 	// requestedHash -> erasureRoot
 	erasureRootRaw, ok, err0 := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(requestedHash)))
 	if err0 != nil || !ok {
-		fmt.Printf("getExportedSegmenstRootFromHash: requestedHash %v not found %v\n", requestedHash, err0)
+		log.Error("getExportedSegmenstRootFromHash not found", "requestedHash", requestedHash, "err", err0)
 		return exportedSegmentsRoot, packageHash, err0
 	}
 	erasureRoot := common.Hash(erasureRootRaw)
@@ -418,7 +397,6 @@ func extractSegment(segmentsConcat []byte, segmentIndex uint16, segmentSize int)
 }
 
 func (n *Node) StoreImportDAWorkReportMap(spec types.AvailabilitySpecifier) error {
-	///fmt.Printf("!!! [N%v] StoreImportDAWorkReportMap: %v\n", n.id, spec)
 	erasureRoot := spec.ErasureRoot
 	segementRoot := spec.ExportedSegmentRoot
 	workpackageHash := spec.WorkPackageHash
@@ -463,9 +441,7 @@ func (n *Node) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16,
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	s_es_key := fmt.Sprintf("s_%s", esKey)
 
-	if debugKV {
-		fmt.Printf("N%d StoreImportDA_Assurer concatenatedShards s_es_key %v\n", n.id, s_es_key)
-	}
+	log.Trace(debugDA, "StoreImportDA_Assurer concatenatedShards", "n", n.id, "s_es_key", s_es_key)
 	concatenatedShards, err := CombineSegmentShards(segmentShards)
 	if err != nil {
 		return err
@@ -477,14 +453,10 @@ func (n *Node) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16,
 	for idx, _ := range segmentShards {
 		testShards = append(testShards, uint16(idx))
 	}
-	if debugDA {
-		fmt.Printf("setting StoreImportDA testShards: %v\n", testShards)
-	}
+	log.Trace(debugDA, "setting StoreImportDA", "testShards", testShards)
 
 	n.GetSegmentShard_Assurer(erasureRoot, shardIndex, testShards)
-	if debugDA {
-		fmt.Printf("StoreAuditDA %v -> %x (%x)\n", s_es_key, segmentShards, concatenatedShards)
-	}
+	log.Trace(debugDA, "StoreAuditDA", "s_es_key", s_es_key, "segmentShards", segmentShards, "concatenatedShards", concatenatedShards)
 	return nil
 }
 
@@ -522,29 +494,23 @@ func (n *Node) GetBundleShard_Assurer(erasureRoot common.Hash, shardIndex uint16
 	if err != nil {
 		return erasureRoot, shardIndex, nil, nil, false, err
 	}
-	if debugDA {
-		fmt.Printf("GetBundleShard %v= %x %x\n", b_es_key, bClubH, sClubH)
-	}
+	log.Trace(debugDA, "GetBundleShard_Assurer", b_es_key, bClubH, sClubH)
 	var sclub_justification []byte
 	sclub_justification = append(sClubH[:], justification...)
 
 	// proof: retrieve b_erasureRoot_<shardIdx> ++ SClub ++ default_justification
 	verified, err := VerifyBundleShard(erasureRoot, shardIndex, bundleShard, sclub_justification) // this is needed
 	if !verified {
-		panic(err)
+		log.Crit(debugDA, "VerifyBundleShard not verified")
 		return erasureRoot, shardIndex, nil, nil, false, err
 	}
-	if debugDA {
-		fmt.Printf("[CE138_QNS Verified] erasureRoot-shardIndex: %v-%d\n", erasureRoot, shardIndex)
-	}
+	log.Trace(debugDA, "[CE138_QNS Verified] erasureRoot-shardIndex: %v-%d\n", erasureRoot, shardIndex)
 	return erasureRoot, shardIndex, bundleShard, sclub_justification, true, nil
 }
 
 // Verification: CE140_SegmentShard
 func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard []byte, segmentIndex uint16, full_justification []byte, bclub_sclub_justification []byte, exportedSegmentLen int) (bool, error) {
-	if debugDA {
-		fmt.Printf("VerifySegmentShard Step 0!!!! shardIndex=%x segmentShard %v\n", shardIndex, segmentShard)
-	}
+	log.Trace(debugDA, "VerifySegmentShard Step 0", "shardIndex", shardIndex, "segmentShard", segmentShard)
 
 	//full_path & s_path MUST NEED saparation. Not sure why
 
@@ -562,24 +528,18 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 
 	bClub := bclub_path[0]
 	bPath := bclub_path[1:]
-	if debugDA {
-		fmt.Printf("bClub %v\n", bClub)
-		fmt.Printf("bPath %v\n", bPath)
-	}
+	log.Trace(debugDA, "bClub", bClub, "bPath", bPath)
 	segmentLeafHash := common.ComputeLeafHash_WBT_Blake2B(segmentShard)
 
 	_, recovered_sClub := VerifyWBTJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentLeafHash, bPath)
 
 	bundle_segment_pair := append(bClub.Bytes(), recovered_sClub.Bytes()...)
-	if debugDA {
-		fmt.Printf("VerifySegmentShard Step 2: shardIndex=%x bundle_segment_pair %x\n", shardIndex, bundle_segment_pair)
-	}
+	log.Trace(debugDA, "VerifySegmentShard Step 2: shardIndex", shardIndex, "bundle_segment_pair", bundle_segment_pair)
+
 	erasureLeafHash := common.ComputeLeafHash_WBT_Blake2B(bundle_segment_pair)
 
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), erasureLeafHash, fPath)
-	if debugDA {
-		fmt.Printf("VerifySegmentShard Step 3: shardIndex=%x recovered_sClub:%v -> erasureRoot:%v | verified:%v\n", shardIndex, recovered_sClub, erasureRoot, verified)
-	}
+	log.Trace(debugDA, "VerifySegmentShard Step 3: shardIndex", "verified", verified, shardIndex, "recovered_sClub", recovered_sClub, "erasureRoot", erasureRoot)
 	if !verified {
 		return false, fmt.Errorf("Segment Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
@@ -596,9 +556,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 
 	esKey := generateErasureRootShardIdxKey(erasureRoot, shardIndex)
 	s_es_key := fmt.Sprintf("s_%s", esKey)
-	if debugKV {
-		fmt.Printf("N%d GetSegmentShard_Assurer s_es_key %v\n", n.id, s_es_key)
-	}
+	log.Trace(debugDA, "N%d GetSegmentShard_Assurer s_es_key %v\n", n.id, s_es_key)
 	concatenatedShards, _, err := n.ReadRawKV([]byte(s_es_key))
 	segmentShards, _ := SplitToSegmentShards(concatenatedShards)
 
@@ -614,10 +572,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 		return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, fmt.Errorf("GetSegmentShard_Assurer: Invalid GetSegmentShard ERROR")
 	}
 
-	if debugDA {
-		fmt.Printf("full_justification len is %v!!!\b", len(full_justification))
-		fmt.Printf("%v GetSegmentShard_Assurer GetSegmentShard %v %v %v, %x\n", segmentIndices, s_es_key, bClubH, sClubH, full_justification)
-	}
+	log.Trace(debugDA, "GetSegmentShard_Assurer", "len(full_justification)", len(full_justification), segmentIndices, s_es_key, bClubH, sClubH, full_justification)
 
 	exportedSegmentAndPageProofLen := len(segmentShards)
 	for _, segmentIndex := range segmentIndices {
@@ -627,9 +582,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 		if err != nil || !isFound {
 			return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
 		}
-		if debugDA {
-			fmt.Printf("GetSegmentShard_Assurer foundsegment = %v\n", segmentLeafHash)
-		}
+		log.Trace(debugDA, "GetSegmentShard_Assurer", "segmentLeafHash", segmentLeafHash)
 
 		var s_justification []byte
 		for _, segmentHash := range segmentPath {
@@ -645,7 +598,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 
 		verified, err := VerifySegmentShard(erasureRoot, shardIndex, segmentShards[segmentIndex], uint16(segmentIndex), full_justification, bclub_sclub_sj, exportedSegmentAndPageProofLen)
 		if err != nil || !verified {
-			panic(err)
+			log.Crit(debugDA, "VerifySegmentShard", "err", err)
 			return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
 		}
 	}
@@ -657,9 +610,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 func (n *Node) ErasureRootLookUP(h common.Hash) (erasureRoot common.Hash, err error) {
 	erasureRootRaw, ok, err := n.ReadRawKV([]byte(generateRequestedHashToErasureRootKey(h)))
 	if err != nil || !ok {
-		if debugSegments {
-			fmt.Printf("Error reading erasureRoot: %v\n", err)
-		}
+		log.Error(debugDA, "ErasureRootLookUP", "err", err)
 		return h, nil
 	}
 	return common.Hash(erasureRootRaw), nil

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -45,8 +45,7 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 		Blob:      preimage,
 	}
 
-	log := fmt.Sprintf("%s BroadcastPreimageAnnouncement ==> adding to E_P %s\n", n.String(), pa.String())
-	Logger.RecordLogs(storage.Preimage_status, log, true)
+	log.Debug(debugP, "BroadcastPreimageAnnouncement", "n", n.String(), "p", pa.String())
 	n.processPreimage(preimageLookup)
 
 	go n.broadcast(pa)
@@ -81,8 +80,8 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 	serviceIndex := preimageAnnouncement.ServiceIndex
 	preimageHash := preimageAnnouncement.PreimageHash
 
-	log := fmt.Sprintf("%s [processPreimageAnnouncements:SendPreimageRequest] to N%d for (%d, %v)\n", n.String(), validatorIndex, serviceIndex, preimageHash)
-	Logger.RecordLogs(storage.Preimage_status, log, true)
+	log.Debug(debugP, "processPreimageAnnouncements", "n", n.String(), "validatorIndex", validatorIndex, "serviceIndex", serviceIndex, "preimageHash", preimageHash)
+
 	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
 	if err != nil {
 		return err
@@ -117,13 +116,11 @@ func (n *Node) onPreimageAnnouncement(stream quic.Stream, msg []byte, peerID uin
 	var preimageAnnouncement types.PreimageAnnouncement
 	err = preimageAnnouncement.FromBytes(msg)
 	if err != nil {
-		fmt.Println("Error deserializing:", err)
+		log.Error(debugP, "onPreimageAnnouncement", "err", err)
 		return
 	}
 	preimageAnnouncement.ValidatorIndex = peerID
-	if debugP {
-		fmt.Printf("%s received PreimageAnnouncement from %d (%s)\n", n.String(), peerID, preimageAnnouncement.String())
-	}
+	log.Trace(debugP, "onPreimageAnnouncement", "n", n.String(), "peerID", peerID, "p", preimageAnnouncement.String())
 	return n.processPreimageAnnouncements(preimageAnnouncement)
 
 }

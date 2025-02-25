@@ -148,7 +148,6 @@ func (g *GuaranteeCredential) UnmarshalJSON(data []byte) error {
 
 func (g *Guarantee) Verify(CurrV []Validator) error {
 	signtext := g.Report.computeWorkReportBytes()
-	//fmt.Printf("[guarantee:Verify] Verifying Guarantee %s\nSigntext:[%s]\n", g.String(), common.Bytes2Hex(signtext))
 	//verify the signature
 	numErrors := 0
 	for _, i := range g.Signatures {

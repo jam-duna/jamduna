@@ -3,9 +3,11 @@ package pvm
 import (
 	"encoding/binary"
 	"fmt"
+
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -183,15 +185,13 @@ func (vm *VM) chargeGas(host_fn int) {
 	}
 
 	vm.Gas = beforeGas - chargedGas
-	fmt.Printf(" %s charge gas %d  (Gas %d=>%d)\n", exp, chargedGas, beforeGas, vm.Gas)
+	log.Debug(vm.logging, fmt.Sprintf("%s chargeGas", exp), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
 }
 
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
-	if debug_pvm {
-		fmt.Printf("vm.host_fn=%v\n", vm.host_func_id) //Do you need operand here?
-	}
+
 	if vm.Gas-g < 0 {
 		vm.ResultCode = types.PVM_OOG
 		return true, fmt.Errorf("Out of gas\n")
@@ -447,21 +447,12 @@ func (vm *VM) hostNew() {
 	g, _ := vm.ReadRegister(9)
 	m, _ := vm.ReadRegister(10)
 
-	if debug_host {
-		fmt.Printf("hostNew() [jam-duna #74 check]\n")
-		fmt.Printf("code_hash_ptr=%x\n", o)
-		fmt.Printf("  ==> code_hash_ptr=%x\n", c)
-		fmt.Printf("code_len (w8)=%d\n", l)
-		fmt.Printf("min_item_gas (w9)=%d\n", g)
-		fmt.Printf("min_memo_gas (w10)=%d\n", m)
-	}
+	log.Debug(vm.logging, "NEW", "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 	x_s_t := xs.ComputeThreshold()
 	if xs.Balance < x_s_t {
-		fmt.Println("")
 		vm.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH //balance insufficient
-		fmt.Printf("hostNew: Balance insufficient (x_s)_t  %d < threshold = %d  \n", xs.Balance, x_s_t)
-		panic(555555) // TEMPORARY, in our test cases this does not happen
+		log.Crit(vm.logging, "NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t)
 		return
 	}
 
@@ -470,14 +461,12 @@ func (vm *VM) hostNew() {
 	xi := xContext.I
 	// simulate a with c, g, m
 	a := &types.ServiceAccount{
-		ServiceIndex: xi,
-		Mutable:      true,
-		Dirty:        true,
-		CodeHash:     common.BytesToHash(c),
-		GasLimitG:    uint64(g),
-		GasLimitM:    uint64(m),
-		// b: a_t https://graypaper.fluffylabs.dev/#/5f542d7/31c80231c802
-		// these are adjusted in writeAccount.  DO NOT INITIALIZE THEM HERE
+		ServiceIndex:    xi,
+		Mutable:         true,
+		Dirty:           true,
+		CodeHash:        common.BytesToHash(c),
+		GasLimitG:       uint64(g),
+		GasLimitM:       uint64(m),
 		NumStorageItems: 2,              //a_s = 2⋅∣al∣+∣as∣
 		StorageSize:     uint64(81 + l), //a_l =  ∑ 81+z per (h,z) + ∑ 32+s
 		Storage:         make(map[common.Hash]types.StorageObject),
@@ -485,7 +474,6 @@ func (vm *VM) hostNew() {
 		Preimage:        make(map[common.Hash]types.PreimageObject),
 	}
 	a.Balance = a.ComputeThreshold()
-	a.Balance += 5000000     // TEMPORARY HACK -- should have a hostTransfer instead...
 	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
 	xContext.I = new_check(uint32(256)+uint32(xi-256+42)%(uint32(4294966784)), xContext.U.D)
 	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{})
@@ -566,6 +554,7 @@ func (vm *VM) hostTransfer() {
 	xs.DecBalance(a)
 	copy(t.Memo[:], m[:])
 	vm.X.T = append(vm.X.T, t)
+	log.Debug(vm.logging, "TRANSFER", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g)
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
@@ -1013,7 +1002,8 @@ func (vm *VM) hostRead() {
 	}
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
 	ok, val := a.ReadStorage(k, vm.hostenv)
-	fmt.Printf("hostRead (%d, %x => %s) ok=%v %x (%d bytes)\n", a.ServiceIndex, mu_k, k, ok, val, len(val))
+
+	log.Debug(vm.logging, "READ", "ok", ok, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", val, "len(val)", len(val))
 	if !ok {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
@@ -1050,7 +1040,7 @@ func (vm *VM) hostWrite() {
 	if a_t > a.Balance {
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		fmt.Printf("hostWrite: a_t=%d > balance=%d\n", a_t, a.Balance)
+		log.Debug(vm.logging, "WRITE FULL", "a_t", a_t, "balance", a.Balance)
 		panic(6666666)
 	}
 
@@ -1076,15 +1066,13 @@ func (vm *VM) hostWrite() {
 		}
 	}
 	a.WriteStorage(a.ServiceIndex, k, v)
-	fmt.Printf("hostWrite (%d, %x => %s) %x (%d bytes)\n", a.ServiceIndex, mu_k, k, v, len(v))
+	log.Debug(vm.logging, "WRITE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 	vm.WriteRegister(7, l)
 	vm.HostResultCode = OK
 	if !exists {
 		a.NumStorageItems++
 		a.StorageSize += 32 + uint64(len(v))
-		//fmt.Printf("DOES NOT EXIST ==> updating NumStorageItems %d StorageSize %d\n", sa.NumStorageItems, sa.StorageSize)
 	} else {
-		//fmt.Printf("EXISTS ==> updating StorageSize %d\n")
 		if len(v) == 0 {
 			if a.NumStorageItems > 0 {
 				a.NumStorageItems--
@@ -1094,7 +1082,7 @@ func (vm *VM) hostWrite() {
 			a.StorageSize += uint64(len(v)) - uint64(len(oldValue))
 		}
 	}
-
+	log.Debug(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
 // Solicit preimage
@@ -1531,11 +1519,8 @@ func (vm *VM) hostLog() {
 		vm.HostResultCode = OOB
 		return
 	}
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
 	levelName := getLogLevelName(level) // Assume a function that maps level numbers to log level names.
-
-	// <YYYY-MM-DD hh-mm-ss> <LEVEL>[@<CORE>]?[#<SERVICE_ID>]? [<TARGET>]? <MESSAGE>
-	fmt.Printf("[%s] %s [TARGET: %s] %s\n", currentTime, levelName, string(targetBytes), string(messageBytes))
+	log.Debug(vm.logging, "log", "level", levelName, "TARGET", string(targetBytes), "msg", string(messageBytes))
 	vm.HostResultCode = OK
 }
 
@@ -1559,6 +1544,10 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 	vm.HostResultCode = OK
 }
 
+func (vm *VM) SetLogging(l string) {
+	vm.logging = l
+}
+
 func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, regs []uint64, errCode uint64) {
 	gasBytes, errCode := vm.Ram.ReadRAMBytes(input_address, 8)
 	if errCode != OK {
@@ -1572,7 +1561,6 @@ func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, re
 			return 0, nil, errCode
 		}
 		regs[i] = binary.LittleEndian.Uint64(regBytes)
-		fmt.Printf("Register %d: %d\n", i, regs[i])
 	}
 	return gas, regs, OK
 }

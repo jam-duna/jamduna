@@ -17,6 +17,7 @@ import (
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/google/go-cmp/cmp"
@@ -323,11 +324,6 @@ func NewStateDBFromSnapshotRaw(sdb *storage.StateDBStorage, stateSnapshotRaw *St
 	s.SafroleState.TicketsVerifierKey = s.SafroleStateGamma.GammaZ               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 	s.SafroleState.TicketsOrKeys = s.SafroleStateGamma.GammaS                    // γs: Current epoch’s slot-sealer series (epoch N)
 	s.SafroleState.NextValidators = types.Validators(s.SafroleStateGamma.GammaK) // γk: Next epoch’s validators (epoch N+1)
-	// fmt.Printf("GammaK: %x\n", types.Validators(s.SafroleStateGamma.GammaK))
-	// what about GammaK?
-	//fmt.Printf("JS: %s\n", statedb.JamState.String())
-	//fmt.Printf("Safrole State: %s\n", statedb.JamState.SafroleState.String())
-
 	return statedb, nil
 }
 
@@ -363,13 +359,9 @@ func NewEpoch0Timestamp() uint32 {
 	waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
 	epoch0Timestamp := uint64(now) + uint64(waitTime)
 	epoch0Phase := uint64(now) / uint64(second_per_epoch)
-	fmt.Printf("Raw now: %v\n", uint64(now))
-	fmt.Printf("Raw waitTime: %v\n", waitTime)
-	fmt.Printf("Raw epoch0P: %v\n", epoch0Phase)
-	fmt.Printf("Raw epoch0Timestamp: %v\n", epoch0Timestamp)
+	log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
 
 	if types.TimeSavingMode {
-		fmt.Printf("===Time Saving Mode===\n")
 		deDuctedTime := (time.Duration(0)) * time.Second
 		if !(waitTime < 5) {
 			deDuctedTime = (time.Duration(-waitTime + 5)) * time.Second
@@ -379,20 +371,17 @@ func NewEpoch0Timestamp() uint32 {
 		if types.TimeSavingMode {
 			adjustedTime += driftTime
 		}
-		fmt.Printf("AdjustTime: %v\n", driftTime)
 		common.AddJamStart(adjustedTime)
-		fmt.Printf("JCE Start Time: %v\n", common.JceStart)
 		currTS := time.Now().Unix()
 		if types.TimeUnitMode != "TimeStamp" {
 			now = common.ComputeJCETime(currTS, true)
 		}
-		fmt.Printf("Epoch0P Drift: %v\n", now)
 		waitTime = int64(second_per_epoch) - now%int64(second_per_epoch)
-		fmt.Printf("TimeSavingMode Wait: %v\n", uint64(waitTime))
+		log.Trace(module, "NewEpoch0Timestamp:TimeSavingMode", "AdjustTime", driftTime, "JCE Start Time", common.JceStart, "Epoch0P Drift", now, "TimeSavingMode Wait", uint64(waitTime))
 		epoch0Timestamp = uint64(now) + uint64(waitTime)
 	}
 
-	fmt.Printf("!!!NewGenesisConfig epoch0Timestamp: %v. Wait:%v Sec \n", epoch0Timestamp, uint64(waitTime))
+	log.Trace(module, "NewGenesisConfig", "epoch0Timestamp", epoch0Timestamp, "waitTime", uint64(waitTime))
 	return uint32(epoch0Timestamp)
 }
 

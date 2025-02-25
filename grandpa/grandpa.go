@@ -381,8 +381,6 @@ func (g *Grandpa) Finalizable(round uint64) (bool, error) {
 	first := g.block_tree.ChildOrBrother(best_candidate_block, best_candidate_m1_block)
 	second := g.block_tree.ChildOrBrother(ghost_block, best_candidate_block)
 	finalize := first && second
-	// fmt.Printf("Finalizable: %v, %v, %v\n", first, second, finalize)
-	// fmt.Printf("best candidate block %v, ghost block %v, best candidate m1 block %v\n", best_candidate_block.Block.Header.Hash().String_short(), ghost_block.Block.Header.Hash().String_short(), best_candidate_m1_block.Block.Header.Hash().String_short())
 	if best_candidate_block != nil && finalize {
 		return true, nil
 	} else {

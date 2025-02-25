@@ -109,12 +109,7 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 	validator_meta := []byte(metadata)
 
 	// Validate hex input lengths
-	if debug {
-		fmt.Printf("bandersnatchHex: %s\n", bandersnatchHex)
-		fmt.Printf("ed25519Hex: %s\n", ed25519Hex)
-		fmt.Printf("blsHex: %s\n", blsHex)
-		fmt.Printf("metadata: %s\n", metadata)
-	}
+
 	if len(bandersnatch_seed) != (bandersnatch.SecretLen) {
 		return validator, secret, fmt.Errorf("invalid input length (%d) for bandersnatch seed %s - expected len of %d", len(bandersnatch_seed), bandersnatchHex, bandersnatch.SecretLen)
 	}

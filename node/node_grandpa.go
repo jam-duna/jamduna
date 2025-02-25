@@ -7,14 +7,13 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
 // this function will be called when the nodes finish audited the genesis block
 func (n *Node) StartGrandpa(b *types.Block) {
-	log := fmt.Sprintf("%s StartGrandpa\n", n.String())
-	Logger.RecordLogs(storage.Grandpa_status, log, true)
+	log.Debug(debugGrandpa, "GRANDPA START")
 	if n.block_tree != nil {
 
 		return
@@ -53,31 +52,27 @@ func (n *Node) runGrandpa() {
 			if err != nil {
 				fmt.Println(err)
 			}
-			// fmt.Printf("%s get vote %v from prevote\n", n.String(), vote.SignMessage.Message.Vote.BlockHash)
 		case vote := <-n.grandpaPreCommitMessageCh:
 			err := n.grandpa.ProcessPreCommitMessage(vote)
 			if err != nil {
 				fmt.Println(err)
 			}
-			// fmt.Printf("%s get vote %v from precommit\n", n.String(), vote.SignMessage.Message.Vote.BlockHash)
 		case vote := <-n.grandpaPrimaryMessageCh:
 			err := n.grandpa.ProcessPrimaryProposeMessage(vote)
 			if err != nil {
 				fmt.Println(err)
 			}
-			// fmt.Printf("%s get vote %v from primary\n", n.String(), vote.SignMessage.Message.Vote.BlockHash)
 		case vote := <-n.grandpa.BroadcastVoteChan:
-			// fmt.Printf("%s broadcast vote %v, for round %d, stage %v\n", n.String(), vote.SignMessage.Message.Vote.BlockHash, vote.Round, vote.SignMessage.Message.Stage)
 			go n.broadcast(vote)
 		case commit := <-n.grandpa.BroadcastCommitChan:
-			// fmt.Printf("%s broadcast commit %v\n", n.String(), commit.Vote.BlockHash)
 			go n.broadcast(commit)
 		case <-ticker.C:
 			// n.grandpa.OnTimeout()
 		case err := <-n.grandpa.ErrorChan:
-			Logger.RecordLogs(storage.Grandpa_error, err.Error(), true)
+			log.Error(debugGrandpa, "GRANDPA ERROR", "err", err)
+
 		case status := <-n.grandpa.GrandpaStatusChan:
-			Logger.RecordLogs(storage.Grandpa_status, status, true)
+			log.Debug(debugGrandpa, "GRANDPA Status", "status", status)
 		}
 
 	}

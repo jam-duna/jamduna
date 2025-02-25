@@ -137,29 +137,28 @@ func (b *Block) GetParentHeaderHash() common.Hash {
 }
 
 func (b *Block) Str() string {
-	out := fmt.Sprintf("[N%d] ", b.Header.AuthorIndex)
-	out += fmt.Sprintf("H_t=%d ", b.Header.Slot)
+	out := fmt.Sprintf("H_t=%d ", b.Header.Slot)
 	out += fmt.Sprintf("H_r=%s ", common.Str(b.Header.ParentStateRoot))
 	if b.Header.EpochMark != nil {
 		out += b.Header.EpochMark.String()
 	}
 	if len(b.Header.TicketsMark) > 0 {
-		out += fmt.Sprintf(" \033[32m WinningTickets\033[0m(%d)", len(b.Header.TicketsMark))
+		out += fmt.Sprintf("  WinningTickets(%d)", len(b.Header.TicketsMark))
 	}
 	if len(b.Extrinsic.Tickets) > 0 {
-		out += fmt.Sprintf(" \033[34m |E_T|=%d\033[0m", len(b.Extrinsic.Tickets))
+		out += fmt.Sprintf(" |E_T|=%d", len(b.Extrinsic.Tickets))
 	}
 	if len(b.Extrinsic.Guarantees) > 0 {
-		out += fmt.Sprintf(" \033[31m |E_G|=%d\033[0m", len(b.Extrinsic.Guarantees))
+		out += fmt.Sprintf(" |E_G|=%d", len(b.Extrinsic.Guarantees))
 	}
 	/*if len(b.Extrinsic.Disputes) > 0 {
-		out += fmt.Sprintf(" \032[32m |E_D|=%d\033[0m %d", len(b.Extrinsic.Disputes))
+		out += fmt.Sprintf(" |E_D|=%d", len(b.Extrinsic.Disputes))
 	} */
 	if len(b.Extrinsic.Preimages) > 0 {
-		out += fmt.Sprintf(" \033[31m |E_P|=%d\033[0m", len(b.Extrinsic.Preimages))
+		out += fmt.Sprintf(" |E_P|=%d", len(b.Extrinsic.Preimages))
 	}
 	if len(b.Extrinsic.Assurances) > 0 {
-		out += fmt.Sprintf(" \033[31m |E_A|=%d\033[0m", len(b.Extrinsic.Assurances))
+		out += fmt.Sprintf(" |E_A|=%d", len(b.Extrinsic.Assurances))
 	}
 	return out
 }

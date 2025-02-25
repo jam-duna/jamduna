@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"log"
+
 	"sync/atomic"
 
 	"crypto/tls"
@@ -29,6 +29,7 @@ import (
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -39,33 +40,19 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	debugDA           = false // DA
-	debugDADist       = false // DA Distribution
-	debugDARecon      = false // DA Reconstruction
-	debugDAPProf      = false // DA PProf profiling
-	debugB            = false // Blocks, Announcment
-	debugG            = false // Guaranteeing
-	debugL            = true  // Debug with logging
-	debugT            = false // Tickets/Safrole
-	debugP            = false // Preimages
-	debugA            = false // Assurances
-	debugF            = false // Finality
-	debugJ            = false // Audits + Judgements
-	debug             = false // General Node Ops
-	debugAudit        = false // Audit
-	debugtrace        = false
-	debugE            = false // monitoring fn execution time
-	debugTree         = false // trie
-	debugSegments     = false // Fetch import segments
-	debugBundle       = false // Fetch WorkPackage Bundle
-	debugAncestor     = false // Check Ancestor
-	debugKV           = false // WriteRawKV, ReadRawKV
-	debugSTF          = true  // State Transition Function
-	debugPublishTrace = true  // Publish Trace -- such that each node should have full state_transition
-	numNodes          = types.TotalValidators
-	quicAddr          = "127.0.0.1:%d"
-	godMode           = false
-	Grandpa           = true
+	module       = "node"    // General Node Ops
+	debugDA      = "da"      // DA
+	debugG       = "g"       // Guaranteeing
+	debugT       = "t"       // Tickets/Safrole
+	debugP       = "p"       // Preimages
+	debugA       = "a"       // Assurances
+	debugAudit   = "audit"   // Audit
+	debugGrandpa = "grandpa" // Guaranteeing
+	debugStream  = "q"
+	numNodes     = types.TotalValidators
+	quicAddr     = "127.0.0.1:%d"
+	godMode      = false
+	Grandpa      = true
 )
 
 var bootstrap_auth_codehash = common.Hash(common.FromHex("0x8c30f2c101674af1da31769e96ce72e81a4a44c89526d7d3ff0a1a511d5f3c9f"))
@@ -273,9 +260,9 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	if false {
 		jsonData, err := types.Encode(credential)
 		if err != nil {
-			fmt.Printf("setValidatorCredential: %v\n", err)
+			log.Crit(module, "setValidatorCredential", "err", err)
 		}
-		fmt.Printf("[N%v] credential %s\n", n.id, jsonData)
+		log.Info(module, "[N%v] credential %s\n", n.id, jsonData)
 	}
 }
 
@@ -340,7 +327,7 @@ func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile str
 
 func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	fmt.Printf("[N%v] newNode addr=%s dataDir=%v\n", id, addr, dataDir)
+	log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	store, err := storage.NewStateDBStorage(levelDBPath)
@@ -434,7 +421,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 					node.clientsMutex.Lock()
 					node.clients[info.Conn.RemoteAddr().String()] = hex.EncodeToString(pubKey)
 					node.clientsMutex.Unlock()
-					//fmt.Printf("Client Ed25519 Public Key: %x %s\n", pubKey, info.Conn.RemoteAddr())
 					return nil
 				},
 				NextProtos: []string{"h3", "http/1.1", "ping/1.1"},
@@ -444,7 +430,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	node.tlsConfig = tlsConfig
 
-	//fmt.Printf("[N%v] OPENING %s\n", id, addr)
 	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
 	if err != nil {
 		fmt.Printf("ERR %v\n", err)
@@ -672,9 +657,6 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		if _statedb.GetBlock() != nil {
 			headerHash = _statedb.GetHeaderHash()
 		}
-		if debug {
-			fmt.Printf("[N%d] addStateDB [%v <- %v] (stateRoot: %v)\n", n.id, _statedb.ParentHeaderHash, _statedb.HeaderHash, _statedb.StateRoot)
-		}
 		n.statedb = _statedb
 		n.statedbMap[headerHash] = _statedb
 		return nil
@@ -688,9 +670,6 @@ func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
 		panic(0)
 	}
 	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() {
-		if debug {
-			fmt.Printf("[N%d] addStateDB TIP %v\n", n.id, _statedb.GetHeaderHash())
-		}
 		n.statedb = _statedb
 		n.statedbMap[_statedb.GetHeaderHash()] = _statedb
 	}
@@ -767,13 +746,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 	for {
 		stream, err := conn.AcceptStream(context.Background())
 		if err != nil {
-			// if quicErr, ok := err.(*quic.ApplicationError); ok && quicErr.ErrorCode == 0 {
-			// 	continue
-			// }
-			// fmt.Printf("handleConnection: Accept stream error: %v\n", err)
-			if debugDA {
-				fmt.Printf("[Node %d] AcceptStream from Node %d error: %v\n", n.id, validatorIndex, err)
-			}
+			log.Error(debugDA, "AcceptStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
 			break
 		}
 		atomic.AddInt64(&n.totalIncomingStreams, 1)
@@ -814,76 +787,70 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				epoch := uint32(0) // TODO: Shawn
 				err := p.SendTicketDistribution(epoch, t, false)
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendTicketDistribution ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendTicketDistribution", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.Block{}):
 				b := obj.(types.Block)
 				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
 				if err != nil {
-					fmt.Printf("GetOrInitBlockAnnouncementStream ERR %v\n", err)
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s GetOrInitBlockAnnouncementStream ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "err", err)
 				}
 				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
 				if err != nil {
-					fmt.Printf("GetBlockAnnouncementBytes ERR %v\n", err)
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s GetBlockAnnouncementBytes ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
 				}
 				err = sendQuicBytes(up0_stream, block_a_bytes)
 				if err != nil {
-					fmt.Printf("[Block] sendQuicBytes ERR %v\n", err)
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendBlockAnnouncement ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
-				if debugG {
-					fmt.Printf("%s [broadcast:SendWorkReportDistribution] to %d %v\n", n.String(), id, time.Now().Format("04:05.000"))
-				}
 				err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendWorkReportDistribution ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendWorkReportDistribution", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
 				err := p.SendAssurance(&a)
 				if err != nil {
-					fmt.Printf("SendAssurance ERR %v\n", err)
+					log.Error(debugStream, "SendAssurance", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
 				err := p.SendAuditAnnouncement(&a)
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendAuditAnnouncement ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
 				epoch := uint32(0) // TODO: Shawn
 				err := p.SendJudgmentPublication(epoch, j)
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendJudgmentPublication ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.PreimageAnnouncement{}):
 				preimageAnnouncement := obj.(types.PreimageAnnouncement)
 				err := p.SendPreimageAnnouncement(&preimageAnnouncement)
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendPreimageAnnouncement ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendPreimageAnnouncement", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf([]DADistributeECChunk{}):
 				distributeECChunks := obj.([]DADistributeECChunk)
 				err := p.SendDistributionECChunks(distributeECChunks[id])
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendDistributionECChunks ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendDistributionECChunks", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(grandpa.VoteMessage{}):
 				vote := obj.(grandpa.VoteMessage)
 				err := p.SendVoteMessage(vote)
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendVoteMessage ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendVoteMessage", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(grandpa.CommitMessage{}):
 				commit := obj.(grandpa.CommitMessage)
 				err := p.SendCommitMessage(commit)
 				if err != nil {
-					Logger.RecordLogs(storage.Stream_error, fmt.Sprintf("%s SendCommitMessage ERR %v\n", n.String(), err), true)
+					log.Error(debugStream, "SendCommitMessage", "n", n.String(), "err", err)
 				}
 			}
 		}(id, p)
@@ -973,8 +940,7 @@ func (n *Node) extendChain() error {
 
 				ok = true
 				nextBlock := b
-				// Measure time taken to apply state transition
-				start := time.Now()
+
 				// Apply the block to the tip
 				recoveredStateDB := n.statedb.Copy()
 				recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
@@ -985,38 +951,20 @@ func (n *Node) extendChain() error {
 				}
 
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
-				if debugAncestor {
-					timeSlots1 := n.statedb.GetAncestorTimeSlot()
-					timeSlots2 := newStateDB.GetAncestorTimeSlot()
-					fmt.Printf("[N%d] Ancestor timeSlots1 %d\n", n.id, timeSlots1)
-					fmt.Printf("[N%d] Ancestor timeSlots2 %d\n", n.id, timeSlots2)
-				}
-				if debugPublishTrace {
-					st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB, recoveredStateDB.AccumulationRoot)
-					err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
-					if err != nil {
-						fmt.Printf("writeDebug StateTransition err: %v\n", err)
-					}
-					err := n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
-					if err != nil {
-						fmt.Printf("writeDebug Block err: %v\n", err)
-					}
-					err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
-					if err != nil {
-						fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
-					}
-				}
 
-				//new_xi := newStateDB.GetXContext().GetX_i()
-				if debugTree {
-					fmt.Printf("[N%d] Author newStateDB %v\n", n.id, newStateDB.StateRoot)
-					newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
+				// current we always dump state transitions for every node
+				st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB, recoveredStateDB.AccumulationRoot)
+				err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
+				if err != nil {
+					log.Error(module, "writeDebug", "err", err)
 				}
-
-				// Print the elapsed time in milliseconds
-				elapsed := time.Since(start).Microseconds()
-				if elapsed > 1000000 && debugtrace {
-					fmt.Printf("[N%d] extendChain %v <- %v \033[ApplyStateTransitionFromBlock\033[0m took %d ms\n", n.id, common.Str(parentheaderhash), common.Str(nextBlock.Hash()), elapsed/1000)
+				err = n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
+				if err != nil {
+					log.Error(module, "writeDebug", "err", err)
+				}
+				err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
+				if err != nil {
+					log.Error(module, "writeDebug", "err", err)
 				}
 
 				// Extend the tip of the chain
@@ -1024,7 +972,6 @@ func (n *Node) extendChain() error {
 
 				announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", b.Hash(), b.Header.Hash())
 				if n.hub != nil {
-					//log.Println("Broadcasting:", announcement)
 					n.hub.broadcast <- []byte(announcement)
 				}
 
@@ -1044,9 +991,6 @@ func (n *Node) extendChain() error {
 
 		if !ok {
 			// If there is no next block, we're done!
-			if debug {
-				fmt.Printf("[N%d] extendChain NO further next block %v\n", n.id, parentheaderhash)
-			}
 			return nil
 		}
 	}
@@ -1067,8 +1011,7 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 		return nil
 	}
 
-	log := fmt.Sprintf("%s [assureNewBlock] Broadcasting assurance bitfield=%x\n", n.String(), a.Bitfield)
-	Logger.RecordLogs(storage.Assurance_status, log, true)
+	log.Debug(debugA, "assureNewBlock:Broadcasting assurance", "n", n.String(), "bitfield", a.Bitfield)
 	go n.broadcast(a)
 	return nil
 }
@@ -1083,11 +1026,8 @@ func (n *Node) processBlock(blk *types.Block) error {
 	// Sometimes this loop will get in deadlock
 	for {
 		if b.GetParentHeaderHash() == (common.Hash{}) {
-
-			//fmt.Printf("[N%d] processBlock: hit genesis (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else if n.statedb != nil && b.GetParentHeaderHash() == n.statedb.HeaderHash {
-			//fmt.Printf("[N%d] processBlock: hit TIP (%v <- %v)\n", n.id, b.ParentHash(), b.Hash())
 			break
 		} else {
 
@@ -1102,7 +1042,6 @@ func (n *Node) processBlock(blk *types.Block) error {
 				}
 				// got the parent block, store it in the cache
 				if parentBlock.GetParentHeaderHash() == blk.GetParentHeaderHash() {
-					//fmt.Printf("[N%d] fetchBlocks (%v<-%v) Validated --- CACHING\n", n.id, blk.GetParentHeaderHash(), blk.Hash())
 					n.StoreBlock(parentBlock, n.id, false)
 					n.cacheBlock(parentBlock)
 				} else {
@@ -1212,28 +1151,22 @@ func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength
 	for _, resp := range responses {
 		daResp, ok := resp.(CE138_response)
 		if !ok {
-			fmt.Printf("Error in convert bundle segments CE138_response: %v\n", err)
+			log.Warn(debugDA, "reconstructPackageBundleSegments:Error in convert bundle segments CE138_response", "n", n.id, "len(BundleShard)", len(daResp.BundleShard), "daResp.BundleShard", daResp.BundleShard)
 		}
 
-		if debugBundle {
-			fmt.Printf("[N%d] [%d] len(BundleShard) %d daResp.BundleShard %x\n", n.id, daResp.ShardIndex, len(daResp.BundleShard), daResp.BundleShard)
-		}
-		// segmentIdx := segmentIndex[idx]
 		bundleShards[daResp.ShardIndex] = daResp.BundleShard
 	}
 	bundleShardsRaw := make([][][]byte, 1)
 	bundleShardsRaw[0] = bundleShards
-	//fmt.Printf("blength %d, bundleShardsRaw %x\n", blength, bundleShardsRaw)
 	exported_segment, err := n.decode(bundleShardsRaw, false, int(blength))
 	if err != nil {
-		fmt.Printf("Error in fetching bundle segments decode: %v\n", err)
+		log.Error(debugDA, "decode: Error in fetching bundle segments decode", "err", err)
 	}
-	if debugBundle {
-		fmt.Printf("[N%d] decode bundle exported_segment %x\n", n.id, exported_segment)
-	}
+	log.Trace(debugDA, "reconstructPackageBundleSegments:decode", "n", n.id, "exported_segment", exported_segment)
+
 	workPackageBundleRaw, _, err := types.Decode(exported_segment, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
-		fmt.Printf("[auditWorkReport] ERR %v\n", err)
+		log.Error(debugDA, "reconstructPackageBundleSegments:Decode", "err", err)
 		return
 	}
 	workPackageBundle = workPackageBundleRaw.(types.WorkPackageBundle)
@@ -1407,7 +1340,6 @@ func (n *Node) runClient() {
 		select {
 
 		case <-ticker_pulse.C:
-			// fmt.Printf("N%d runClient %v\n", n.id, time.Now().Format("04:05.000"))
 
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
@@ -1424,9 +1356,7 @@ func (n *Node) runClient() {
 
 				} else if currPhase == types.EpochLength-1 { // you had currPhase == types.EpochLength-1
 					// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-					if debug {
-						fmt.Printf("[N%d]GenerateTickets currEpoch=%v, currPhase=%v\n", n.id, currEpoch, currPhase)
-					}
+
 					n.GenerateTickets()
 					n.BroadcastTickets()
 				}
@@ -1443,14 +1373,7 @@ func (n *Node) runClient() {
 			n.statedbMutex.Unlock()
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
-				//TODO: continue as opposed to panic here
 				continue
-				//panic(0)
-			}
-
-			if newStateDB != nil && debugTree {
-				fmt.Printf("[N%d] Author PrintTree \n", n.id)
-				newStateDB.GetTrie().PrintTree(newStateDB.GetTrie().Root, 0)
 			}
 
 			if newStateDB != nil {
@@ -1462,12 +1385,6 @@ func (n *Node) runClient() {
 				// we authored a block
 				oldstate := n.statedb
 				newStateDB.SetAncestor(newBlock.Header, oldstate)
-				if debugAncestor {
-					timeSlots1 := n.statedb.GetAncestorTimeSlot()
-					timeSlots2 := newStateDB.GetAncestorTimeSlot()
-					fmt.Printf("[N%d] Ancestor timeSlots1 %d\n", n.id, timeSlots1)
-					fmt.Printf("[N%d] Ancestor timeSlots2 %d\n", n.id, timeSlots2)
-				}
 
 				n.addStateDB(newStateDB)
 				n.StoreBlock(newBlock, n.id, true)
@@ -1475,45 +1392,36 @@ func (n *Node) runClient() {
 
 				headerHash := newBlock.Header.Hash()
 				n.cacheHeaders(headerHash, newBlock)
-				//fmt.Printf("%s BLOCK BROADCASTED: headerHash: %v (%v <- %v)\n", n.String(), headerHash, newBlock.ParentHash(), newBlock.Hash())
 				go n.broadcast(*newBlock)
-				if debug {
-					for _, g := range newStateDB.GuarantorAssignments {
-						fmt.Printf("[N%d] GUARANTOR ASSIGNMENTS: %v -> core %v \n", n.id, g.Validator.Ed25519.String(), g.CoreIndex)
-					}
-				}
 
 				timeslot := newStateDB.GetSafrole().Timeslot
 				err := n.writeDebug(newBlock, timeslot)
 				if err != nil {
-					fmt.Printf("writeDebug Block err: %v\n", err)
+					log.Error(module, "runClient:writeDebug", "err", err)
 				}
 				s := n.statedb
 				allStates := s.GetAllKeyValues()
 				ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
 				if !ok || err != nil {
-					log.Fatalf("Error CompareStateRoot %v\n", err)
+					log.Crit(module, "CompareStateRoot", "err", err)
 				}
 
 				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB, oldstate.AccumulationRoot)
 				err = n.writeDebug(st, timeslot) // StateTransition
 				if err != nil {
-					fmt.Printf("writeDebug StateTransition err: %v\n", err)
+					log.Error(module, "runClient:writeDebug", "err", err)
 				}
 
-				if debugSTF {
-					err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
-					if err != nil {
-						panic(fmt.Sprintf("%s ERROR validating state transition", n.String()))
-					} else if debug {
-						fmt.Printf("Validated state transition\n")
-					}
+				err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
+				if err != nil {
+					log.Crit(module, "runClient:CheckStateTransition", "err", err)
 				}
+				log.Trace(module, "Validated state transition")
 
 				// store StateSnapshot
 				err = n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot) // StateSnapshot
 				if err != nil {
-					fmt.Printf("writeDebug StateSnapshot err: %v\n", err)
+					log.Error(module, "runClient:writeDebug", "err", err)
 				}
 
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
@@ -1525,7 +1433,6 @@ func (n *Node) runClient() {
 			}
 
 		case log := <-logChan:
-			//fmt.Printf("IM here!!! %v\n", log)
 			n.WriteLog(log)
 		}
 	}
@@ -1679,12 +1586,6 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 	validator_meta := []byte(metadata)
 
 	// Validate hex input lengths
-	if debug {
-		fmt.Printf("bandersnatchHex: %s\n", bandersnatchHex)
-		fmt.Printf("ed25519Hex: %s\n", ed25519Hex)
-		fmt.Printf("blsHex: %s\n", blsHex)
-		fmt.Printf("metadata: %s\n", metadata)
-	}
 	if len(bandersnatch_seed) != (bandersnatch.SecretLen) {
 		return validator, secret, fmt.Errorf("invalid input length (%d) for bandersnatch seed %s - expected len of %d", len(bandersnatch_seed), bandersnatchHex, bandersnatch.SecretLen)
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/quic-go/quic-go"
 )
 
@@ -103,17 +104,13 @@ func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) 
 	if err != nil {
 		return
 	}
-	if debugA {
-		fmt.Printf("%s SendFullShardRequest(erasureRoot=%v, shardIndex=%d)\n", p.String(), req.ErasureRoot, req.ShardIndex)
-	}
+
 	// <-- Bundle Shard
 	bundleShard, err = receiveQuicBytes(stream)
 	if err != nil {
 		return
 	}
-	if debugA {
-		fmt.Printf("%s SendFullShardRequest received %d bytes for bundleShard\n", p.String(), len(bundleShard))
-	}
+	log.Trace(debugDA, "SendFullShardRequest", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "len", len(bundleShard))
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	concatSegmentShards, err = receiveQuicBytes(stream)
 	if err != nil {
@@ -138,9 +135,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	if debugA {
-		fmt.Printf("%s onFullShardRequest(erasureRoot=%v, shardIndex=%d)\n", n.String(), req.ErasureRoot, req.ShardIndex)
-	}
+
 	_, _, bundleShard, segmentShards, f_justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR0 %v\n", err)
@@ -149,6 +144,8 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	if !ok {
 		return fmt.Errorf("Not found")
 	}
+	log.Trace(debugDA, "onFullShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
+
 	// <-- Bundle Shard
 	err = sendQuicBytes(stream, bundleShard)
 	if err != nil {

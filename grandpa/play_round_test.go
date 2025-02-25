@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -54,23 +55,17 @@ func runNodes(nodes []*Grandpa) {
 						case PrevoteStage:
 							err := n.ProcessPreVoteMessage(vote)
 							if err != nil {
-								fmt.Println(err)
-							} else {
-								// fmt.Printf("[v%d]<-[v%d] get PreVote block_hash = %v\n ", n.GetSelfVoterIndex(node.Last_Completed_Round), node.GetSelfVoterIndex(node.Last_Completed_Round), vote.SignMessage.Message.Vote.BlockHash.String_short())
+								log.Error(module, "ProcessPreVoteMessage", "err", err)
 							}
 						case PrecommitStage:
 							err := n.ProcessPreCommitMessage(vote)
 							if err != nil {
 								fmt.Println(err)
-							} else {
-								// fmt.Printf("[v%d]<-[v%d] get Precommit block_hash = %v\n ", n.GetSelfVoterIndex(node.Last_Completed_Round), node.GetSelfVoterIndex(node.Last_Completed_Round), vote.SignMessage.Message.Vote.BlockHash.String_short())
 							}
 						case PrimaryProposeStage:
 							err := n.ProcessPrimaryProposeMessage(vote)
 							if err != nil && node == nodes[0] {
 								fmt.Println(err)
-							} else {
-								// fmt.Printf("[v%d]<-[v%d] get PrimaryPropose block_hash = %v\n ", n.GetSelfVoterIndex(node.Last_Completed_Round), node.GetSelfVoterIndex(node.Last_Completed_Round), vote.SignMessage.Message.Vote.BlockHash.String_short())
 							}
 						}
 

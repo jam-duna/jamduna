@@ -226,7 +226,6 @@ func AccountStateFromBytes(service_index uint32, data []byte) (*ServiceAccount, 
 		return nil, err
 	}
 	acct.ServiceIndex = service_index
-	//fmt.Printf(" AccountStateFromBytes(s=%d, data=%x) =>>>>> SERVICE_ACCOUNT %s\n", service_index, data, acct.String())
 	return &acct, nil
 }
 

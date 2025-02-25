@@ -118,7 +118,6 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 
 			// Read the st file
 			stPath := filepath.Join(state_transitions_dir, file.Name())
-			//fmt.Printf("STF#%03d %v\n", file_idx, stPath)
 			stBytes, err := os.ReadFile(stPath)
 			if err != nil {
 				log.Printf("Error reading block file %s: %v\n", file.Name(), err)
@@ -133,7 +132,6 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 			}
 			// Store the state transition in the stateTransitions map
 			stf := b.(statedb.StateTransition)
-			//fmt.Printf("STF#%03d %s\n", file_idx, types.PrintObject(stf))
 			stfs = append(stfs, &stf)
 		}
 	}

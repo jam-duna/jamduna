@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -36,49 +37,31 @@ func (e *ExtrinsicData) Hash() common.Hash {
 	if err != nil {
 		return common.Hash{}
 	}
-	if debugExtrinsicHash {
-		fmt.Printf("E_T_encoded: %x\n", E_T_encoded)
-	}
 	// Encode Preimages (E_P)
 	E_P_encoded, err := Encode(e.Preimages)
 	if err != nil {
 		return common.Hash{}
 	}
-	if debugExtrinsicHash {
-		fmt.Printf("E_P_encoded: %x\n", E_P_encoded)
-	}
 	// Process Guarantees: encode each guarantee after converting to its hashed version (E_G)
 	var guranteesHashed []GuaranteeHashed
-	for i, g := range e.Guarantees {
+	for _, g := range e.Guarantees {
 		gh := g.ToGuaranteeHashed()
 		guranteesHashed = append(guranteesHashed, gh)
-		if debugExtrinsicHash {
-			fmt.Printf("Guarantee %d Bytes: %x\n", i, gh.Bytes())
-		}
 	}
 
 	E_G_encoded, err := Encode(guranteesHashed)
 	if err != nil {
 		return common.Hash{}
 	}
-	if debugExtrinsicHash {
-		fmt.Printf("E_G_encoded: %x\n", E_G_encoded)
-	}
 	// Encode Assurances (E_A)
 	E_A_encoded, err := Encode(e.Assurances)
 	if err != nil {
 		return common.Hash{}
 	}
-	if debugExtrinsicHash {
-		fmt.Printf("E_A_encoded: %x\n", E_A_encoded)
-	}
 	// Encode Disputes (E_D)
 	E_D_encoded, err := Encode(e.Disputes)
 	if err != nil {
 		return common.Hash{}
-	}
-	if debugExtrinsicHash {
-		fmt.Printf("E_D_encoded: %x\n", E_D_encoded)
 	}
 	// Hash each component using Blake2
 	E_T_hash := common.Blake2Hash(E_T_encoded)
@@ -87,13 +70,6 @@ func (e *ExtrinsicData) Hash() common.Hash {
 	E_A_hash := common.Blake2Hash(E_A_encoded)
 	E_D_hash := common.Blake2Hash(E_D_encoded)
 
-	if debugExtrinsicHash {
-		fmt.Printf("E_T_hash: %x\n", E_T_hash.Bytes())
-		fmt.Printf("E_P_hash: %x\n", E_P_hash.Bytes())
-		fmt.Printf("E_G_hash: %x\n", E_G_hash.Bytes())
-		fmt.Printf("E_A_hash: %x\n", E_A_hash.Bytes())
-		fmt.Printf("E_D_hash: %x\n", E_D_hash.Bytes())
-	}
 	// Combine the five 32-byte hashes into a fixed array
 	var data [5][32]byte
 	copy(data[0][:], E_T_hash.Bytes()[:])
@@ -108,14 +84,8 @@ func (e *ExtrinsicData) Hash() common.Hash {
 		fmt.Printf("Error encoding combined data: %v\n", err)
 		return common.Hash{}
 	}
-	if debugExtrinsicHash {
-		fmt.Printf("Combined data encoded: %x\n", data_encoded)
-	}
 
 	// Compute the final extrinsic hash from the encoded combined data
 	finalHash := common.Blake2Hash(data_encoded)
-	if debugExtrinsicHash {
-		fmt.Printf("Final extrinsic hash: %x\n", finalHash.Bytes())
-	}
 	return finalHash
 }
