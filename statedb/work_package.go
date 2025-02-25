@@ -23,3 +23,20 @@ func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) ([]byte, uint32, error)
 	}
 	return code, p_h, nil
 }
+
+func (s *StateDB) VerifyPackage(wpb types.WorkPackageBundle) error {
+	err := wpb.Validate()
+	if err != nil {
+		return fmt.Errorf("VerifyPackage: %v", err)
+	}
+	wp := wpb.WorkPackage
+	code, _, err := s.GetAuthorizeCode(wp)
+	if err != nil {
+		return err
+	}
+	if len(code) == 0 {
+		return fmt.Errorf("VerifyPackage: Authorization code is empty")
+	}
+
+	return nil
+}

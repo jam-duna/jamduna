@@ -58,29 +58,30 @@ var TimeSavingMode bool = true
 const CoreLazyMode bool = true
 const (
 	// Medium: configure these
-	W_S = 6                           // W_S = 6: The size of an exported segment in erasure-coded pieces.
-	W_E = (TotalValidators/3 + 1) * 2 // W_E = 684: The basic size of our erasure-coded pieces. See equation 316.
-
-	PeriodSecond                   = 4         // A = 8 represents the period, in seconds, between audit tranches.
-	MinElectiveServiceItemBalance  = 10        // B_I represents the additional minimum balance required per item of elective service state.
-	MinElectiveServiceOctetBalance = 1         // B_L represents the additional minimum balance required per octet of elective service state.
-	BaseServiceBalance             = 100       // B_S = 100: The basic minimum balance which all services require.
-	PreimageExpiryPeriod           = 28800     // D = 28,800: The period in timeslots after which an unreferenced preimage may be expunged.
-	AuditBiasFactor                = 2         // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.
-	AccumulationGasAllocation      = 10000000  // G_A: The total gas allocated to a core for Accumulation.
-	IsAuthorizedGasAllocation      = 1000000   // G_I: The gas allocated to invoke a work-package’s Is-Authorized logic.
-	RefineGasAllocation            = 500000000 // G_R: The total gas allocated for a work-package’s Refine logic.
-	AccumulateGasAllocation        = 341000000 // GT = 341,000,000: The total gas allocated across all cores for Accumulation. Should be no smaller than GA ⋅ C +∑g∈V(χg )(g).
-	RecentHistorySize              = 8         // H = 8: The size of recent history, in blocks.
-	MaxWorkItemsPerPackage         = 4         // I = 4: The maximum amount of work items in a package.
-	LookupAnchorMaxAge             = 14400     // L = 14,400: The maximum age in timeslots of the lookup anchor.
-	TransferMemoSize               = 128       // M = 128: The size of a transfer memo in octets.
-	SecondsPerSlot                 = 6         // P = 6: The slot period, in seconds.
+	W_S = 6 // W_S = 6: The size of an exported segment in erasure-coded pieces.
+	// WP in 0.6.2
+	W_E                            = (TotalValidators/3 + 1) * 2 // W_E = 684: The basic size of our erasure-coded pieces. See equation 316.
+	W_G                            = W_S * W_E                   // W_G = 4,104: The size of a segment in octets.
+	PeriodSecond                   = 4                           // A = 8 represents the period, in seconds, between audit tranches.
+	MinElectiveServiceItemBalance  = 10                          // B_I represents the additional minimum balance required per item of elective service state.
+	MinElectiveServiceOctetBalance = 1                           // B_L represents the additional minimum balance required per octet of elective service state.
+	BaseServiceBalance             = 100                         // B_S = 100: The basic minimum balance which all services require.
+	PreimageExpiryPeriod           = 28800                       // D = 28,800: The period in timeslots after which an unreferenced preimage may be expunged.
+	AuditBiasFactor                = 2                           // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.
+	AccumulationGasAllocation      = 10000000                    // G_A: The total gas allocated to a core for Accumulation.
+	IsAuthorizedGasAllocation      = 1000000                     // G_I: The gas allocated to invoke a work-package’s Is-Authorized logic.
+	RefineGasAllocation            = 500000000                   // G_R: The total gas allocated for a work-package’s Refine logic.
+	AccumulateGasAllocation        = 341000000                   // GT = 341,000,000: The total gas allocated across all cores for Accumulation. Should be no smaller than GA ⋅ C +∑g∈V(χg )(g).
+	RecentHistorySize              = 8                           // H = 8: The size of recent history, in blocks.
+	MaxWorkItemsPerPackage         = 4                           // I = 4: The maximum amount of work items in a package.
+	LookupAnchorMaxAge             = 14400                       // L = 14,400: The maximum age in timeslots of the lookup anchor.
+	TransferMemoSize               = 128                         // M = 128: The size of a transfer memo in octets.
+	SecondsPerSlot                 = 6                           // P = 6: The slot period, in seconds.
 
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	MaxServiceCodeSize               = 4000000        // W_C = 4,000,000: The maximum size of service code in octets.
 	MaxManifestEntries               = 1 << 11        // W_M = 2^11: The maximum number of entries in a work-package manifest.
-	MaxEncodedWorkPackageSize        = 12 * (1 << 20) // W_P = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
+	MaxEncodedWorkPackageSize        = 12 * (1 << 20) // W_B = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
 	MaxEncodedWorkReportSize         = 48 * (1 << 10) // W_R = 96 * 2^10: The maximum size of an encoded work-report in octets.
 	PVMDynamicAddressAlignmentFactor = 2              // Z_A = 2: The pvm dynamic address alignment factor. See equation 227.
 	PVMInitInputDataSize             = 1 << 24        // Z_I = 2^24: The standard pvm program initialization input data size. See equation A.7.

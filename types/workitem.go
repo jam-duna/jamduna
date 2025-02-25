@@ -40,6 +40,19 @@ type WorkItem struct {
 	ExportCount uint16 `json:"export_count"`
 }
 
+// 0.6.2 14.5
+func (i *WorkItem) GetTotalDataLength() int {
+	total := 0
+	total += len(i.Payload)
+	import_count := len(i.ImportedSegments)
+	data_len_import := import_count * W_G
+	total += data_len_import
+	for _, extrinsic := range i.Extrinsics {
+		total += int(extrinsic.Len)
+	}
+	return total
+}
+
 // From Sec 14: Once done, then imported segments must be reconstructed. This process may in fact be lazy as the Refine function makes no usage of the data until the ${\tt import}$ hostcall is made. Fetching generally implies that, for each imported segment, erasure-coded chunks are retrieved from enough unique validators (342, including the guarantor).  Chunks must be fetched for both the data itself and for justification metadata which allows us to ensure that the data is correct.
 type ImportSegment struct {
 	RequestedHash common.Hash `json:"tree_root"`

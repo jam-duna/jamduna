@@ -125,13 +125,12 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		codeHash := common.Blake2Hash(code)
 		codeLen := uint32(len(code)) // z
 		bootStrapAnchor := []uint32{0}
-
 		bootstrapServiceAccount := types.ServiceAccount{
 			CodeHash:        codeHash,
 			Balance:         balance,
 			GasLimitG:       100,
 			GasLimitM:       100,
-			StorageSize:     uint64(81 + codeLen + auth_code_len), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+			StorageSize:     uint64(81*2 + codeLen + auth_code_len), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
 			NumStorageItems: 2*2 + 0,                              //a_i = 2⋅∣al∣+∣as∣
 		}
 

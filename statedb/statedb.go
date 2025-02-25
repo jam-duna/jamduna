@@ -1220,7 +1220,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	s.ApplyXContext(o)
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
-	s.ApplyStateTransitionAuthorizations()
+	// 29 -  Update Authorization Pool alpha'
+	err = s.ApplyStateTransitionAuthorizations()
+	if err != nil {
+		return s, err
+	}
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	var leaves [][]byte
 	for i, sa := range b {
@@ -1233,14 +1237,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.AccumulationRoot = common.Hash(tree.Root())
 	if len(leaves) > 0 {
 		log.Trace("beefy", "AccumulationRoot", s.AccumulationRoot)
-	}
-
-	// 29 -  Update Aut
-
-	// 29 -  Update Authorization Pool alpha'
-	err = s.ApplyStateTransitionAuthorizations()
-	if err != nil {
-		return s, err
 	}
 
 	// 30 - compute pi

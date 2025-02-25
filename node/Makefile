@@ -42,12 +42,13 @@ megatron_short_with_prereq:
 	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N -prereq_test=true
 
 megatron_pprof:
-	@echo "Building test binary for TestMegatron in pprof mode..."
-	@echo "go test -tags network_test -c -o node.test"
-	@go test -tags network_test -c -o node.test
-	@echo "Running TestMegatron using test binary..."
-	@echo "./node.test -test.run TestMegatron"
-	@./node.test -test.run TestMegatron
+	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_S),$(TargetN)); \
+	echo "Building test binary for TestMegatron in pprof mode..."; \
+	echo "go test -tags \"network_test $(TAGS)\" -c -o node.test"; \
+	go test -tags "network_test $(TAGS)" -c -o node.test; \
+	echo "Running TestMegatron using test binary with timeout $(TIMEOUT)..."; \
+	echo "./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=1 -prereq_test=true"; \
+	./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=1 -prereq_test=true
 
 debug_eg_error:
 	@echo "Displaying error and status logs from guarantees..."

@@ -42,6 +42,54 @@ type WorkPackageBundle struct {
 	Justification     [][][]common.Hash `json:"j"` // J: justifications of segment data build using CDT
 }
 
+func (b *WorkPackageBundle) Validate() error {
+	//0.6.2 14.2
+	work_package := b.WorkPackage
+	if len(work_package.WorkItems) < 1 {
+		return fmt.Errorf("WorkPackageBundle must have at least one WorkItem")
+	}
+	if len(work_package.WorkItems) > MaxWorkItemsPerPackage {
+		return fmt.Errorf("WorkPackageBundle has too many WorkItems")
+	}
+	// 0.6.2 14.4
+	total_exports := 0
+	total_imports := 0
+	for _, work_item := range work_package.WorkItems {
+		total_exports += int(work_item.ExportCount)
+		total_imports += len(work_item.ImportedSegments)
+	}
+	if total_exports > MaxManifestEntries {
+		return fmt.Errorf("WorkPackageBundle has too many exports")
+	}
+	if total_imports > MaxManifestEntries {
+		return fmt.Errorf("WorkPackageBundle has too many imports")
+	}
+	// 0.6.2 14.5
+	data_lens := 0
+	data_lens += len(work_package.Authorization)
+	data_lens += len(work_package.ParameterizationBlob)
+	for _, work_item := range work_package.WorkItems {
+		data_lens += work_item.GetTotalDataLength()
+	}
+	if data_lens > MaxEncodedWorkPackageSize {
+		return fmt.Errorf("WorkPackageBundle has too much data")
+	}
+	// 0.6.2 14.6
+	Gas_a := uint64(0)
+	Gas_r := uint64(0)
+	for _, work_item := range work_package.WorkItems {
+		Gas_a += work_item.AccumulateGasLimit
+		Gas_r += work_item.RefineGasLimit
+	}
+	if Gas_a > AccumulationGasAllocation {
+		return fmt.Errorf("WorkPackageBundle has too much accumulate gas")
+	}
+	if Gas_r > RefineGasAllocation {
+		return fmt.Errorf("WorkPackageBundle has too much refine gas")
+	}
+	return nil
+}
+
 func (b *WorkPackageBundle) Bytes() []byte {
 	encoded, err := Encode(b)
 	if err != nil {

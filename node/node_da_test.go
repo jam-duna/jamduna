@@ -101,7 +101,7 @@ func testWorkpackage(fibN int) (workPackage types.WorkPackage, segments [][]byte
 				Service:          47,
 				CodeHash:         codeHash,
 				Payload:          []byte("0x00000010"),
-				GasLimit:         10000000,
+				GasLimit:         1000,
 				ImportedSegments: importedSegments,
 				ExportCount:      1,
 			},

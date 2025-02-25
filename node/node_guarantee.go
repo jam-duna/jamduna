@@ -44,6 +44,11 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	}
 	log.Debug(debugG, "broadcastWorkPackage:Guarantee from self", "id", n.String())
 	bundle := n.CompilePackageBundle(wp, importedSegments, extrinsics)
+	err = curr_statedb.VerifyPackage(bundle)
+	if err != nil {
+		log.Error(debugG, "broadcastWorkPackage:CompilePackageBundle", "n", n.String(), "err", err)
+		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] CompilePackageBundle Error: %v\n", n.String(), err)
+	}
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)

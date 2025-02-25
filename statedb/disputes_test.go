@@ -305,6 +305,7 @@ func TestDisputeState(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
+			fmt.Printf("Encoded:  %s\n\n", encodedJSON)
 			// output bin file
 			// err = os.WriteFile("./output.bin", encodedBytes, 0644)
 			// if err != nil {

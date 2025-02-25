@@ -52,7 +52,7 @@ const (
 	numNodes     = types.TotalValidators
 	quicAddr     = "127.0.0.1:%d"
 	godMode      = false
-	Grandpa      = true
+	Grandpa      = false
 )
 
 var bootstrap_auth_codehash = common.Hash(common.FromHex("0x8c30f2c101674af1da31769e96ce72e81a4a44c89526d7d3ff0a1a511d5f3c9f"))
@@ -474,7 +474,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runPreimages()
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
-		go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+		// go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 		if id == 0 {
 			go node.runJamWeb(uint16(port+1000) + id)
 		}

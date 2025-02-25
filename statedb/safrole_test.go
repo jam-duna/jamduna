@@ -137,6 +137,7 @@ func TestSafrole(t *testing.T) {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
 
+			fmt.Printf("encodedJSON: %s\n", string(encodedJSON))
 			// output bin file
 			// err = os.WriteFile("./output.bin", encodedBytes, 0644)
 			// if err != nil {
