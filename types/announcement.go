@@ -22,7 +22,12 @@ func (T *TrancheAnnouncement) PutAnnouncement(a Announcement) error {
 	if T.AnnouncementBucket == nil {
 		T.AnnouncementBucket = make(map[uint32]*AnnounceBucket)
 	}
-	bucket := T.AnnouncementBucket[a.Tranche]
+
+	bucket, exists := T.AnnouncementBucket[a.Tranche]
+	if !exists {
+		T.AnnouncementBucket[a.Tranche] = &AnnounceBucket{}
+		bucket = T.AnnouncementBucket[a.Tranche]
+	}
 	bucket.PutAnnouncement(a)
 	T.AnnouncementBucket[a.Tranche] = bucket
 	return nil
@@ -34,7 +39,11 @@ func (T *TrancheAnnouncement) HaveMadeAnnouncement(a Announcement) bool {
 	if T.AnnouncementBucket == nil {
 		return false
 	}
-	bucket := T.AnnouncementBucket[a.Tranche]
+	bucket, exists := T.AnnouncementBucket[a.Tranche]
+	if !exists {
+		T.AnnouncementBucket[a.Tranche] = &AnnounceBucket{}
+		bucket = T.AnnouncementBucket[a.Tranche]
+	}
 	return bucket.HaveMadeAnnouncement(a)
 }
 

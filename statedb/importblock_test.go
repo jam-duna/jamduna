@@ -36,7 +36,7 @@ func getGithubDirFile(owner string, repo string, branch string, folderPath strin
 
 		for _, file := range dircontents {
 			// Ensure this is a file and not a folder
-			if file.GetType() == "file" {
+			if file.GetType() == "file" && file.GetName()[len(file.GetName())-5:] == ".json" {
 				fmt.Printf("📂 Reading file: %s\n", file.GetName())
 
 				// Get file content
@@ -72,7 +72,7 @@ func getGithubDirFile(owner string, repo string, branch string, folderPath strin
 		}
 
 		for _, file := range files {
-			if !file.IsDir() {
+			if !file.IsDir() && file.Name()[len(file.Name())-5:] == ".json" {
 				localFilePath := fmt.Sprintf("%s/%s", localDir, file.Name())
 				content, err := os.ReadFile(localFilePath)
 				if err != nil {

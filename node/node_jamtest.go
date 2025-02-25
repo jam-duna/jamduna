@@ -203,7 +203,6 @@ func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 
 // Monitor the Timeslot & Epoch Progression & Kill as Necessary
 func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, error) {
-	fmt.Printf("*** TimeSlot Watcher on N%v ***\n", n.id)
 	initialTimeSlot := uint32(0)
 	startTime := time.Now()
 

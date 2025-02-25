@@ -28,63 +28,13 @@ SegmentRootLookupItem ::= SEQUENCE {
 */
 
 type SegmentRootLookupItem struct {
-	WorkPackageHash common.Hash `json:"work_package_hash"`
-	SegmentRoot     common.Hash `json:"segment_tree_root"`
+	WorkPackageHash common.Hash `json:"hash"`
+	SegmentRoot     common.Hash `json:"exports_root"`
 }
 
 // SegmentRootLookup represents a list of SegmentRootLookupItem
 type SegmentRootLookup []SegmentRootLookupItem
 
-func (m *SegmentRootLookup) UnmarshalJSON(data []byte) error {
-	type SegmentRootLookupItemAlias struct {
-		WorkPackageHash *common.Hash `json:"work_package_hash"`
-		Hash            *common.Hash `json:"hash"`
-		SegmentTreeRoot *common.Hash `json:"segment_tree_root"`
-		ExportsRoot     *common.Hash `json:"exports_root"`
-	}
-
-	var temp []SegmentRootLookupItemAlias
-	if err := json.Unmarshal(data, &temp); err != nil {
-		return err
-	}
-
-	*m = make(SegmentRootLookup, len(temp))
-	for i, item := range temp {
-
-		if item.WorkPackageHash != nil {
-			(*m)[i].WorkPackageHash = *item.WorkPackageHash
-		} else if item.Hash != nil {
-			(*m)[i].WorkPackageHash = *item.Hash
-		} else {
-			return fmt.Errorf("missing both work_package_hash and hash fields at index %d", i)
-		}
-
-		if item.SegmentTreeRoot != nil {
-			(*m)[i].SegmentRoot = *item.SegmentTreeRoot
-		} else if item.ExportsRoot != nil {
-			(*m)[i].SegmentRoot = *item.ExportsRoot
-		} else {
-			return fmt.Errorf("missing both segment_tree_root and exports_root fields at index %d", i)
-		}
-	}
-
-	return nil
-}
-
-// MarshalJSON serializes the SegmentRootLookup into JSON
-func (s SegmentRootLookup) MarshalJSON() ([]byte, error) {
-	return json.Marshal([]SegmentRootLookupItem(s))
-}
-
-// // UnmarshalJSON deserializes JSON data into SegmentRootLookup
-// func (s *SegmentRootLookup) UnmarshalJSON(data []byte) error {
-// 	var items []SegmentRootLookupItem
-// 	if err := json.Unmarshal(data, &items); err != nil {
-// 		return err
-// 	}
-// 	*s = items
-// 	return nil
-// }
 
 type WorkReport struct {
 	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`

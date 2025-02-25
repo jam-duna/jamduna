@@ -16,7 +16,7 @@ type Beta_state struct {
 	HeaderHash common.Hash             `json:"header_hash"`
 	B          trie.MMR                `json:"mmr"`
 	StateRoot  common.Hash             `json:"state_root"`
-	Reported   types.SegmentRootLookup `json:"report"` // Use the custom type
+	Reported   types.SegmentRootLookup `json:"reported"` // Use the custom type
 }
 
 func (b *Beta_state) String() string {
