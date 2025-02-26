@@ -263,6 +263,44 @@ func decodeapi(objectType, input string) (string, error) {
 	return string(decodedJSON), nil
 }
 
+type Vrf_Response struct {
+	VrfOutput common.Hash `json:"vrf_output"`
+	ErrorMsg  string      `json:"errormsg"`
+}
+
+func bandersnatch_api(objectType string, input string) (string, error) {
+	var err error
+	var obj interface{}
+	var output_json_string string
+	input_byte := []byte(input)
+	switch objectType {
+	case "GetTicketVRF":
+		var ticket types.Ticket
+		err = json.Unmarshal(input_byte, &ticket)
+		obj = ticket
+		// transform ticket to types.Ticket
+		ticket_type := obj.(types.Ticket)
+		// get vrf_output
+		output, err := ticket_type.TicketID()
+		var Vrf_Response Vrf_Response
+		Vrf_Response.VrfOutput = output
+		if err != nil {
+			Vrf_Response.ErrorMsg = err.Error()
+		}
+		output_json_byte, err := json.Marshal(Vrf_Response)
+		if err != nil {
+			Vrf_Response.ErrorMsg = err.Error()
+		}
+		output_json_string = string(output_json_byte)
+	default:
+		return "", errors.New("Unknown object type")
+	}
+	if err != nil {
+		return "", err
+	}
+	return output_json_string, nil
+}
+
 // withCORS is a simple middleware that adds CORS headers.
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -335,6 +373,28 @@ func main() {
 		if err != nil {
 			log.Printf("decodeapi error: %v\n", err)
 			http.Error(w, fmt.Sprintf("Error during decoding: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": result})
+	}))
+
+	// Expose /api/bandersnatch endpoint with CORS middleware
+	mux.HandleFunc("/api/bandersnatch", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ObjectType string `json:"objectType"`
+			InputText  string `json:"inputText"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+
+		result, err := bandersnatch_api(req.ObjectType, req.InputText)
+		if err != nil {
+			log.Printf("bandersnatch_api error: %v\n", err)
+			http.Error(w, fmt.Sprintf("Error during bandersnatch: %v", err), http.StatusInternalServerError)
 			return
 		}
 
