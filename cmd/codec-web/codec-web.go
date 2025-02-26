@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"path"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -316,14 +319,35 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func initStorage(testDir string) (*storage.StateDBStorage, error) {
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		err = os.MkdirAll(testDir, os.ModePerm)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create directory /tmp/fuzz: %v", err)
+		}
+	}
+
+	sdb_storage, err := storage.NewStateDBStorage(testDir)
+	if err != nil {
+		return nil, fmt.Errorf("Error with storage: %v", err)
+	}
+	return sdb_storage, nil
+
+}
+
 func main() {
-	port := 8099
+	port := 8999
 	mux := http.NewServeMux()
 
 	// Serve all static files under /static/
 	fileServer := http.FileServer(http.Dir("./static"))
 	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
 
+	testDir := "/tmp/test_local"
+	test_storage, err := initStorage(testDir)
+	if err != nil {
+		panic(err)
+	}
 	// Serve codec.html at the root path
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Parse and serve the template
@@ -335,6 +359,57 @@ func main() {
 		}
 		tmpl.Execute(w, nil)
 	})
+
+	mux.HandleFunc("/api/stf", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		// Read the POST input into content
+		content, err := io.ReadAll(r.Body)
+		if err != nil {
+			fmt.Printf("ERR %v\n", err)
+			http.Error(w, "unable to read request body", http.StatusBadRequest)
+			return
+		}
+
+		var stf statedb.StateTransition
+		err = json.Unmarshal(content, &stf)
+		if err != nil {
+			// Return a 400 error code for invalid JSON
+			var errorsArr []map[string]interface{}
+			errorsArr = append(errorsArr, map[string]interface{}{
+				"details": err.Error(),
+			})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"errors": errorsArr,
+			})
+			return
+		}
+
+		// Perform the state transition check.
+		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			// Build an errors array from the diffs map using PoststateCompared
+			var errorsArr []map[string]interface{}
+			for key, diff := range diffs {
+				errorsArr = append(errorsArr, map[string]interface{}{
+					"title": fmt.Sprintf("%s", key),
+					"left":  fmt.Sprintf("%x", diff.Poststate),
+					"right": fmt.Sprintf("%x", diff.PoststateCompared),
+				})
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"errors": errorsArr,
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": map[string]interface{}{
+				"ok": nil,
+			},
+		})
+	}))
 
 	// Expose /api/encode endpoint with CORS middleware
 	mux.HandleFunc("/api/encode", withCORS(func(w http.ResponseWriter, r *http.Request) {

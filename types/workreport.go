@@ -35,7 +35,6 @@ type SegmentRootLookupItem struct {
 // SegmentRootLookup represents a list of SegmentRootLookupItem
 type SegmentRootLookup []SegmentRootLookupItem
 
-
 type WorkReport struct {
 	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
 	RefineContext     RefineContext         `json:"context"`

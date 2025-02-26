@@ -121,6 +121,7 @@ func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitio
 
 }
 
+// NOTE CheckStateTransition vs CheckStateTransitionWithOutput a good example of "copy-paste" coding increases in complexity
 func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32) error {
 	// Apply the state transition
 	s0, err := NewStateDBFromSnapshotRaw(storage, &(st.PreState))
@@ -137,7 +138,6 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 		return nil
 	}
 
-	fmt.Printf("STATEROOT does not match: s1: %v st.PostState: %v FAIL\n", s1.StateRoot, st.PostState.StateRoot)
 	compareKeyVals(s1.GetAllKeyValues(), st.PostState.KeyVals)
 	return fmt.Errorf("mismatch")
 
@@ -150,6 +150,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		return nil, err
 	}
 
+	s0.AccumulationRoot = st.AccumulationRoot
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
 	if err != nil {
@@ -159,7 +160,6 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		return nil, nil
 	}
 
-	fmt.Printf("STATEROOT does not match: s1: %v st.PostState: %v FAIL\n", s1.StateRoot, st.PostState.StateRoot)
 	return compareKeyValsWithOutput(st.PreState.KeyVals, s1.GetAllKeyValues(), st.PostState.KeyVals), fmt.Errorf("mismatch")
 
 }

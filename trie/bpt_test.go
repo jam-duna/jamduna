@@ -589,14 +589,14 @@ func TestService(t *testing.T) {
 	value1 := PadToMultipleOfN([]byte{1}, 68)
 	value2 := PadToMultipleOfN([]byte{1, 2}, 68)
 	value3 := PadToMultipleOfN([]byte{1, 2, 3}, 68)
-	tree.SetService(255, 42, value1)
-	tree.SetService(255, 43, value2)
-	tree.SetService(255, 44, value3)
+	tree.SetService(42, value1)
+	tree.SetService(43, value2)
+	tree.SetService(44, value3)
 
-	s1, _, _ := tree.GetService(255, 42)
-	s2, _, _ := tree.GetService(255, 43)
-	s3, _, _ := tree.GetService(255, 44)
-	s4, _, _ := tree.GetService(255, 45)
+	s1, _, _ := tree.GetService(42)
+	s2, _, _ := tree.GetService(43)
+	s3, _, _ := tree.GetService(44)
+	s4, _, _ := tree.GetService(45)
 
 	if bptDebug {
 		fmt.Println("s1:", s1)

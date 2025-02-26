@@ -131,7 +131,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			GasLimitG:       100,
 			GasLimitM:       100,
 			StorageSize:     uint64(81*2 + codeLen + auth_code_len), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
-			NumStorageItems: 2*2 + 0,                              //a_i = 2⋅∣al∣+∣as∣
+			NumStorageItems: 2*2 + 0,                                //a_i = 2⋅∣al∣+∣as∣
 		}
 
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)

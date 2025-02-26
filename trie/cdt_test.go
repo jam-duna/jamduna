@@ -227,11 +227,10 @@ func testPageProof(t *testing.T, numSegments int) {
 				end = len(leaves)
 			}
 			pageSegments := leaves[start:end]
-			var position int
 
 			expectedSegments := pageSegments
-			traces, decodedSegmentHashes := splitPageProof(decodedSegmentHashes)
-			// decodedSegmentHashes = decodedSegmentHashes[position:]
+			_, decodedSegmentHashes = splitPageProof(decodedSegmentHashes)
+
 			expectedSegmentHashes := make([][]byte, len(expectedSegments))
 
 			for j, segment := range expectedSegments {
