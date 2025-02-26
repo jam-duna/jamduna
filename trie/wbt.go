@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -57,7 +58,6 @@ func buildTreeRecursive(nodes []*WBTNode, hashType string) *WBTNode {
 
 	combinedValue := append(left.Hash, right.Hash...)
 	hash := computeNode(combinedValue, hashType)
-
 	return &WBTNode{
 		Hash:  hash,
 		Left:  left,

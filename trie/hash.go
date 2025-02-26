@@ -1,10 +1,7 @@
 package trie
 
 import (
-	//"errors"
-	//"math"
 
-	//"fmt"
 	"hash"
 
 	"github.com/colorfulnotion/jam/common"
@@ -74,7 +71,11 @@ func computeLeaf(data []byte, hashType ...string) []byte {
 	} else {
 		h, _ = blake2b.New256(nil)
 	}
-	h.Write([]byte("leaf"))
+	if len(hashType) > 0 &&  hashType[0] == "keccak" {
+		// this is the WBT case
+	} else {
+		h.Write([]byte("leaf"))
+	}
 	h.Write(data)
 	return h.Sum(nil)
 }

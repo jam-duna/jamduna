@@ -1,9 +1,12 @@
 package pvm
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strconv"
 
 	"strings"
@@ -56,6 +59,53 @@ type Page struct {
 // RAM represents the entire memory system
 type RAM struct {
 	Pages map[uint32]*Page `json:"pages"` // The pages in the RAM
+}
+
+// V1Hash computes the hash of the VM's state by combining RAM bytes and register values.
+// It copies each 64-bit register into an 8-byte slice (little-endian) and appends the Gas value as the final 8 bytes.
+func (vm *VM) V1Hash() common.Hash {
+	// Retrieve the RAM bytes.
+	ramBytes := vm.Ram.Bytes()
+
+	// Create a byte slice for registers; allocate space for each register plus an extra 8 bytes for Gas.
+	regSize := len(vm.register)
+	registerBytes := make([]byte, (regSize+1)*8)
+
+	// copy 13 **little-endian** 64 bit regs registerBytes.
+	for i, r := range vm.register {
+		binary.LittleEndian.PutUint64(registerBytes[i*8:(i+1)*8], r)
+	}
+
+	// Append vm.Gas as the last 8 bytes.
+	binary.LittleEndian.PutUint64(registerBytes[regSize*8:(regSize+1)*8], vm.Gas)
+
+	// NOTE: in v2, we include a richer X + Y context, specifically the D service map
+
+	// Return the Blake2b-256 hash of the concatenated RAM bytes and register bytes.
+	return common.Blake2Hash(append(ramBytes, registerBytes...))
+}
+
+// Bytes returns a concatenated byte slice of all pages in ascending order of keys.
+// For each page, it encodes the page key into 4 bytes (big-endian) and then appends the page's data.
+func (ram *RAM) Bytes() []byte {
+	// Collect all page keys.
+	keys := make([]uint32, 0, len(ram.Pages))
+	for k := range ram.Pages {
+		keys = append(keys, k)
+	}
+	// Sort keys in ascending order.
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	buf := new(bytes.Buffer)
+	// For each key, encode the key and then append the corresponding page data.
+	for _, k := range keys {
+		// Encode the page key into 4 bytes (big-endian).
+		keyBytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(keyBytes, k)
+		buf.Write(keyBytes)
+		buf.Write(ram.Pages[k].Value[:])
+	}
+	return buf.Bytes()
 }
 
 func NewRAM() *RAM {
@@ -240,11 +290,10 @@ type VM struct {
 	terminated     bool
 	hostCall       bool // ̵h in GP
 	host_func_id   int  // h in GP
-	// ram                 map[uint32][4096]byte
-	Ram      *RAM
-	register []uint64
-	Gas      uint64
-	hostenv  types.HostEnv
+	Ram            *RAM
+	register       []uint64
+	Gas            uint64
+	hostenv        types.HostEnv
 
 	VMs map[uint32]*VM
 
@@ -1083,7 +1132,7 @@ func (vm *VM) Execute(entryPoint int) error {
 			vm.hostCall = false
 			vm.terminated = false
 		}
-		stepn++;
+		stepn++
 	}
 	log.Trace(vm.logging, "PVM Complete", "pc", vm.pc)
 	// if vm finished without error, set result code to OK
@@ -1129,7 +1178,6 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	r.Err = types.RESULT_PANIC
 	return r, 0
 }
-
 
 func opcode_str(opcode byte) string {
 	opcodeMap := map[byte]string{
@@ -1434,9 +1482,8 @@ func (vm *VM) step(stepn int) error {
 		log.Debug(vm.logging, "terminated: unknown opcode", "opcode", opcode)
 		return nil
 	}
-
-	log.Debug(vm.logging, fmt.Sprintf("%d: PC %d %s", stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "reg", vm.ReadRegisters())
-
+	pvmHash := vm.V1Hash()
+	log.Debug(vm.logging, fmt.Sprintf("%d: PC %d %s", stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "pvmHash", common.Str(pvmHash), "reg", vm.ReadRegisters())
 	return nil
 }
 

@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 
 	"github.com/colorfulnotion/jam/common"
@@ -256,7 +257,7 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 		i = uint64(len(w))
 	}
 	g_star, t_star, b_star := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports
-	//o.Dump("OuterAccumulate", s.Id)
+
 	if i >= uint64(len(w)) { // no more reports
 		return i, t_star, b_star
 	}
@@ -304,6 +305,9 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		// this is parallelizable
 		T, B, U := s.SingleAccumulate(o, w, f, service)
 		output_u += U
+		if s.Authoring {
+			log.Debug("authoring", "BEEFY COMMITMENT", "s", fmt.Sprintf("%d", service), "B", B)
+		}
 		output_b = append(output_b, BeefyCommitment{
 			Service:    service,
 			Commitment: B,

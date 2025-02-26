@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -20,7 +21,7 @@ type Beta_state struct {
 }
 
 func (b *Beta_state) String() string {
-	enc, err := json.MarshalIndent(b, "", "  ")
+	enc, err := json.Marshal(b)
 	if err != nil {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
@@ -84,6 +85,9 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 
 	mmr.Append(accumulationRoot)
+	if s.Authoring {
+		log.Debug("authoring", "BETA computation", "BEEFY r from before", accumulationRoot, "mmr", (*mmr).Peaks)
+	}
 	n := Beta_state{
 		Reported:   reported,          // p
 		HeaderHash: blk.Header.Hash(), // h
@@ -97,6 +101,12 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 		postRecentBlocks = postRecentBlocks[1 : types.RecentHistorySize+1]
 	}
 	s.JamState.RecentBlocks = postRecentBlocks
+	if s.Authoring {
+		fmt.Printf("BETA computation n=%s\n", n.String())
+		for i, b := range s.JamState.RecentBlocks {
+			fmt.Printf("BETA computation -- rb[%d]=%s\n", i, b.String())
+		}
+	}
 
 }
 

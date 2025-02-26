@@ -1198,7 +1198,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	s.ApplyStateRecentHistory(blk, &(oldState.AccumulationRoot))
 	// 28 -- ACCUMULATE
-	var g uint64 = 10000
+	var g uint64 = 10000 // CHECK: what is this???
 	o := s.JamState.newPartialState()
 
 	var f map[uint32]uint32
@@ -1227,16 +1227,18 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	var leaves [][]byte
-	for i, sa := range b {
+	for _, sa := range b {
 		// put (s,h) of C  into leaves
-		leaf := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
-		leaves = append(leaves, leaf)
-		log.Trace("beefy", "leaf", i, "service", sa.Service, "commitment", sa.Commitment)
+		leafBytes := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
+		leaves = append(leaves, leafBytes)
+		if s.Authoring {
+			log.Debug("authoring", "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+		}
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	s.AccumulationRoot = common.Hash(tree.Root())
-	if len(leaves) > 0 {
-		log.Trace("beefy", "AccumulationRoot", s.AccumulationRoot)
+	if len(leaves) > 0 && s.Authoring {
+		log.Debug("authoring", "BEEFY r used in NEXT RecentBlocks", "AccumulationRoot", s.AccumulationRoot)
 	}
 
 	// 30 - compute pi
