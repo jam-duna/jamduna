@@ -17,6 +17,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
+const (
+	CheckStateTransition = false
+)
+
 // go get go.opentelemetry.io/otel
 // go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp
 // go get go.opentelemetry.io/otel/propagation
@@ -64,7 +68,6 @@ func NewStateDBStorage(path string) (*StateDBStorage, error) {
 		db:      db,
 		logChan: make(chan LogMessage, 100),
 	}
-	s.InitTracer("JAM")
 	return &s, nil
 }
 

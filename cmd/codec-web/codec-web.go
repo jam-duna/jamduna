@@ -410,7 +410,6 @@ func main() {
 			},
 		})
 	}))
-	
 
 	// Expose /api/encode endpoint with CORS middleware
 	mux.HandleFunc("/api/encode", withCORS(func(w http.ResponseWriter, r *http.Request) {
