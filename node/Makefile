@@ -21,7 +21,7 @@ safrole:
 fib:
 	@echo "Running TestFib$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
 	@echo "go test -timeout $(TIMEOUT) -v -run TestFib -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run TestFib -tags "network_test,$(TAGS)" $(TARGET_PARAM)
+	@go test -timeout $(TIMEOUT) -v -run '^TestFib$$' -tags "network_test,$(TAGS)" $(TARGET_PARAM)
 
 megatron:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_L),$(TargetN)); \
@@ -92,3 +92,8 @@ blake2b:
 	@echo "Running TestBlake2b$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
 	@echo "go test -timeout $(TIMEOUT) -v -run TestBlake2b -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
 	@go test -timeout $(TIMEOUT) -v -run TestBlake2b -tags "network_test,$(TAGS)" $(TARGET_PARAM)
+
+fib2:
+	@echo "Running TestFib2$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestFib2 -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run '^TestFib2$$' -tags "network_test,$(TAGS)" $(TARGET_PARAM)

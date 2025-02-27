@@ -44,6 +44,18 @@
           14,
           14,
           15,
+          15,
+          10,
+          10,
+          11,
+          11,
+          12,
+          12,
+          13,
+          13,
+          14,
+          14,
+          15,
           15
         ],
         "access": {
@@ -58,12 +70,33 @@
   "initial-export-segment": [
     []
   ],
+  "initial-work-item-index": 0,
+  "initial-work-package": {
+    "authorization": "0x",
+    "auth_code_host": 0,
+    "authorizer": {
+      "code_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "params": "0x"
+    },
+    "context": {
+      "anchor": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "state_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "beefy_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "lookup_anchor": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "lookup_anchor_slot": 0,
+      "prerequisites": null
+    },
+    "items": null
+  },
+  "initial-authorizer-output": [],
+  "initial-extrinsic": [],
   "initial-import-segment": null,
   "initial-export-segment-index": 0,
   "initial-service-index": 0,
   "initial-delta": null,
   "initial-timeslot": 0,
   "expected-gas": 9990,
+  "expected-result-code": 0,
   "expected-regs": {
     "7": 1,
     "8": 36
@@ -72,6 +105,18 @@
     "pages": {
       "32": {
         "value": [
+          10,
+          10,
+          11,
+          11,
+          12,
+          12,
+          13,
+          13,
+          14,
+          14,
+          15,
+          15,
           10,
           10,
           11,
@@ -121,6 +166,18 @@
   "expected-export-segment": [
     [],
     [
+      10,
+      10,
+      11,
+      11,
+      12,
+      12,
+      13,
+      13,
+      14,
+      14,
+      15,
+      15,
       10,
       10,
       11,

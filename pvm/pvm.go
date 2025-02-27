@@ -578,17 +578,16 @@ var T = map[int]struct{}{
 }
 
 const (
-	NONE = (1 << 64) - 1  // 2^32 - 1
-	WHAT = (1 << 64) - 2  // 2^32 - 2
-	OOB  = (1 << 64) - 3  // 2^32 - 3
-	WHO  = (1 << 64) - 4  // 2^32 - 4
-	FULL = (1 << 64) - 5  // 2^32 - 5
-	CORE = (1 << 64) - 6  // 2^32 - 6
-	CASH = (1 << 64) - 7  // 2^32 - 7
-	LOW  = (1 << 64) - 8  // 2^32 - 8
-	HIGH = (1 << 64) - 9  // 2^32 - 9
-	HUH  = (1 << 64) - 10 // 2^32 - 10
-	OK   = 0              // 0
+	NONE = (1 << 64) - 1 // 2^32 - 1
+	WHAT = (1 << 64) - 2 // 2^32 - 2
+	OOB  = (1 << 64) - 3 // 2^32 - 3
+	WHO  = (1 << 64) - 4 // 2^32 - 4
+	FULL = (1 << 64) - 5 // 2^32 - 5
+	CORE = (1 << 64) - 6 // 2^32 - 6
+	CASH = (1 << 64) - 7 // 2^32 - 7
+	LOW  = (1 << 64) - 8 // 2^32 - 8
+	HUH  = (1 << 64) - 9 // 2^32 - 9
+	OK   = 0             // 0
 
 // BAD = 1111
 // S   = 2222
@@ -2403,6 +2402,28 @@ func x_encode(x uint64, n uint32) uint64 {
 	return result.Uint64()
 }
 
+func smod(a, b int64) int64 {
+	if b == 0 {
+		return a
+	}
+
+	absA := a
+	if absA < 0 {
+		absA = -absA
+	}
+	absB := b
+	if absB < 0 {
+		absB = -absB
+	}
+
+	modVal := absA % absB
+
+	if a < 0 {
+		return -modVal
+	}
+	return modVal
+}
+
 // Implement branch logic for two registers and one offset
 func (vm *VM) branchReg(opcode byte, operands []byte) {
 	// handle no operand means 0
@@ -2544,7 +2565,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 		} else {
 			numerator := z_encode(valueA, 8)
 			denominator := z_encode(valueB, 8)
-			floorQuotient := FloorDiv(numerator, denominator)
+			floorQuotient := numerator / denominator
 			result = z_decode(floorQuotient, 8)
 		}
 	case REM_U_32:
@@ -2571,13 +2592,10 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 			result = z_decode(S_valueA%S_valueB, 8)
 		}
 	case REM_S_64:
-
-		if valueB == 0 {
-			result = valueA
-		} else if z_encode(valueA, 8) == -(1<<63) && z_encode(valueB, 8) == -1 {
+		if z_encode(valueA, 8) == -(1<<63) && z_encode(valueB, 8) == -1 {
 			result = 0
 		} else {
-			result = z_decode(z_encode(valueA, 8)%z_encode(valueB, 8), 8)
+			result = z_decode(smod(z_encode(valueA, 8), z_encode(valueB, 8)), 8)
 		}
 	case CMOV_IZ:
 		if valueB == 0 {

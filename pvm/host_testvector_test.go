@@ -1,5 +1,5 @@
-//go:build network
-// +build network
+//go:build network_test
+// +build network_test
 
 package pvm
 
@@ -23,8 +23,8 @@ type ByteSlice []byte
 
 // Gas related constants
 var (
-	InitialGas  = int64(10000)
-	ExpectedGas = int64(9990)
+	InitialGas  = uint64(10000)
+	ExpectedGas = uint64(9990)
 )
 
 // Service account related constants
@@ -156,9 +156,130 @@ var (
 	}
 )
 
+// WorkPackage related constants
+var (
+	WorkPackage        types.WorkPackage
+	EncodedWorkPackage ByteSlice
+)
+
+func init() {
+	jsonData := `
+	{
+		"authorization": "0x0102030405",
+		"auth_code_host": 305419896,
+		"authorizer": {
+			"code_hash": "0x022e5e165cc8bd586404257f5cd6f5a31177b5c951eb076c7c10174f90006eef",
+			"params": "0x00010203040506070809"
+		},
+		"context": {
+			"anchor": "0xc0564c5e0de0942589df4343ad1956da66797240e2a2f2d6f8116b5047768986",
+			"state_root": "0xf6967658df626fa39cbfb6014b50196d23bc2cfbfa71a7591ca7715472dd2b48",
+			"beefy_root": "0x9329de635d4bbb8c47cdccbbc1285e48bf9dbad365af44b205343e99dea298f3",
+			"lookup_anchor": "0x60751ab5b251361fbfd3ad5b0e84f051ccece6b00830aed31a5354e00b20b9ed",
+			"lookup_anchor_slot": 33,
+			"prerequisites": []
+		},
+		"items": [
+			{
+				"service": 16909060,
+				"code_hash": "0x70a50829851e8f6a8c80f92806ae0e95eb7c06ad064e311cc39107b3219e532e",
+				"payload": "0x0102030405",
+				"refine_gas_limit": 42,
+				"accumulate_gas_limit": 42,
+				"import_segments": [
+					{
+						"tree_root": "0x461236a7eb29dcffc1dd282ce1de0e0ed691fc80e91e02276fe8f778f088a1b8",
+						"index": 0
+					},
+					{
+						"tree_root": "0xe7cb536522c1c1b41fff8021055b774e929530941ea12c10f1213c56455f29ad",
+						"index": 1
+					},
+					{
+						"tree_root": "0xb0a487a4adf6a0eda5d69ddd2f8b241cf44204f0ff793e993e5e553b7862a1dc",
+						"index": 2
+					}
+				],
+				"extrinsic": [
+					{
+						"hash": "0x381a0e351c5593018bbc87dd6694695caa1c0c1ddb24e70995da878d89495bf1",
+						"len": 16
+					},
+					{
+						"hash": "0x6c437d85cd8327f42a35d427ede1b5871347d3aae7442f2df1ff80f834acf17a",
+						"len": 17
+					}
+				],
+				"export_count": 4
+			},
+			{
+				"service": 84281096,
+				"code_hash": "0xfcfc857dab216daf41f409c2012685846e4d34aedfeacaf84d9adfebda73fae6",
+				"payload": "0x030201",
+				"refine_gas_limit": 77,
+				"accumulate_gas_limit": 77,
+				"import_segments": [
+					{
+						"tree_root": "0x3e5d0bea78537414bd1cfdaeb0f22d743bcaba5dbffacbabce8457f4cd78f69b",
+						"index": 0
+					},
+					{
+						"tree_root": "0xb7f8dffa65971832ec9e19719debc04b1ccd9ad27187a4943807ca756962481b",
+						"index": 1
+					}
+				],
+				"extrinsic": [
+					{
+						"hash": "0x80b628780612e8928705018d1ced53b2f76607ad026a86e4f36c99ac0491f8eb",
+						"len": 32
+					},
+					{
+						"hash": "0x47f142b4488bbd34e59afc60a0daedc6020e8be52a3cedecbd75e93ee9908adf",
+						"len": 33
+					},
+					{
+						"hash": "0xcc2f47030ff8a9fe8d02e8eb87e86d4db05b57258d30f9d81acb3b280d04e877",
+						"len": 34
+					},
+					{
+						"hash": "0x8b57a796a5d07cb04cc1614dfc2acb3f73edc712d7f433619ca3bbe66bb15f49",
+						"len": 10
+					}
+				],
+				"export_count": 7
+			}
+		]
+	}
+	`
+	err := json.Unmarshal([]byte(jsonData), &WorkPackage)
+	if err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return
+	}
+
+	EncodedWorkPackage, _ = types.Encode(WorkPackage)
+}
+
+func TestWorkPackageParse(t *testing.T) {
+	fmt.Printf("WorkPackage: %s\n", WorkPackage.String())
+
+	// show hash(extrinsic)
+	fmt.Printf("common.Blake2Hash(extrinsic): %s\n", common.Blake2Hash(Extrinsic).String())
+}
+
 // import segemt
 var (
 	ImportSegment = ByteSlice{10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15}
+)
+
+// authorizer output
+var (
+	AuthorizerOutput = ByteSlice{9, 8, 7, 6, 5, 4, 3, 2, 1, 0}
+)
+
+// extrinsic
+var (
+	Extrinsic = ByteSlice{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 )
 
 // Variables for machine related test vectors
@@ -343,15 +464,6 @@ func init() {
 	}
 }
 
-// func SetUpNode() (*Node, error) {
-// 	nodes, err := SetUpNodes(1)
-// 	if err != nil {
-// 		panic(1)
-// 	}
-// 	return nodes[0], err
-
-// }
-
 func (b ByteSlice) MarshalJSON() ([]byte, error) {
 	arr := make([]int, len(b))
 	for i, v := range b {
@@ -431,12 +543,17 @@ type XContextForTest struct {
 
 type RefineTestcase struct {
 	Name          string            `json:"name"`
-	InitialGas    int64             `json:"initial-gas"`
+	InitialGas    uint64            `json:"initial-gas"`
 	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
 	InitialMemory RAMForTest        `json:"initial-memory"`
 
 	InitialRefineM_map   RefineM_mapForTest `json:"initial-refine-map"` // m in refine function
 	InitialExportSegment []ByteSlice        `json:"initial-export-segment"`
+
+	InitialWorkItemIndex    uint32            `json:"initial-work-item-index"`
+	InitialWorkPackage      types.WorkPackage `json:"initial-work-package"`
+	InitialAuthorizerOutput ByteSlice         `json:"initial-authorizer-output"`
+	InitialExtrinsic        ByteSlice         `json:"initial-extrinsic"`
 
 	InitialImportSegment    []ByteSlice                       `json:"initial-import-segment"`
 	InitialExportSegmentIdx uint32                            `json:"initial-export-segment-index"`
@@ -444,9 +561,10 @@ type RefineTestcase struct {
 	InitialDelta            map[uint32]*ServiceAccountForTest `json:"initial-delta"`
 	InitialTimeslot         uint32                            `json:"initial-timeslot"`
 
-	ExpectedGas    int64             `json:"expected-gas"`
-	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
-	ExpectedMemory RAMForTest        `json:"expected-memory"`
+	ExpectedGas        uint64            `json:"expected-gas"`
+	ExpectedResultCode uint8             `json:"expected-result-code"`
+	ExpectedRegs       map[uint32]uint64 `json:"expected-regs"`
+	ExpectedMemory     RAMForTest        `json:"expected-memory"`
 
 	ExpectedRefineM_map   RefineM_mapForTest `json:"expected-refine-map"`
 	ExpectedExportSegment []ByteSlice        `json:"expected-export-segment"`
@@ -454,7 +572,7 @@ type RefineTestcase struct {
 
 type AccumulateTestcase struct {
 	Name          string            `json:"name"`
-	InitialGas    int64             `json:"initial-gas"`
+	InitialGas    uint64            `json:"initial-gas"`
 	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
 	InitialMemory RAMForTest        `json:"initial-memory"`
 
@@ -462,9 +580,10 @@ type AccumulateTestcase struct {
 	InitialXcontent_y XContextForTest  `json:"initial-xcontent-y"`
 	InitialTimeslot   uint32           `json:"initial-timeslot"`
 
-	ExpectedGas    int64             `json:"expected-gas"`
-	ExpectedRegs   map[uint32]uint64 `json:"expected-regs"`
-	ExpectedMemory RAMForTest        `json:"expected-memory"`
+	ExpectedGas        uint64            `json:"expected-gas"`
+	ExpectedResultCode uint8             `json:"expected-result-code"`
+	ExpectedRegs       map[uint32]uint64 `json:"expected-regs"`
+	ExpectedMemory     RAMForTest        `json:"expected-memory"`
 
 	ExpectedXcontent_x *XContextForTest `json:"expected-xcontent-x"`
 	ExpectedXcontent_y XContextForTest  `json:"expected-xcontent-y"`
@@ -472,7 +591,7 @@ type AccumulateTestcase struct {
 
 type GeneralTestcase struct {
 	Name          string            `json:"name"`
-	InitialGas    int64             `json:"initial-gas"`
+	InitialGas    uint64            `json:"initial-gas"`
 	InitialRegs   map[uint32]uint64 `json:"initial-regs"`
 	InitialMemory RAMForTest        `json:"initial-memory"`
 
@@ -480,10 +599,11 @@ type GeneralTestcase struct {
 	InitialServiceIndex   uint32                            `json:"initial-service-index"`
 	InitialDelta          map[uint32]*ServiceAccountForTest `json:"initial-delta"`
 
-	ExpectedGas    int64                             `json:"expected-gas"`
-	ExpectedRegs   map[uint32]uint64                 `json:"expected-regs"`
-	ExpectedMemory RAMForTest                        `json:"expected-memory"`
-	ExpectedDelta  map[uint32]*ServiceAccountForTest `json:"expected-delta"`
+	ExpectedGas        uint64                            `json:"expected-gas"`
+	ExpectedResultCode uint8                             `json:"expected-result-code"`
+	ExpectedRegs       map[uint32]uint64                 `json:"expected-regs"`
+	ExpectedMemory     RAMForTest                        `json:"expected-memory"`
+	ExpectedDelta      map[uint32]*ServiceAccountForTest `json:"expected-delta"`
 
 	ExpectedServiceAccount *ServiceAccountForTest `json:"expected-service-account"`
 }
@@ -497,7 +617,6 @@ var HosterrorCaseNames = map[uint64]string{
 	HUH:  "HUH",
 	WHO:  "WHO",
 	LOW:  "LOW",
-	HIGH: "HIGH",
 }
 
 var PVMerrorCaseNames = map[uint64]string{
@@ -544,36 +663,40 @@ func FindAndReadJSONFiles(dirPath, keyword string) ([]string, []string, error) {
 }
 
 type Testcase interface {
-	GetInitialGas() int64
+	GetInitialGas() uint64
 	GetInitialRegs() map[uint32]uint64
 	GetInitialMemory() RAMForTest
 
-	GetExpectedGas() int64
+	GetExpectedGas() uint64
+	GetExpectedResultCode() uint8
 	GetExpectedRegs() map[uint32]uint64
 	GetExpectedMemory() RAMForTest
 	GetName() string
 }
 
-func (tc RefineTestcase) GetInitialGas() int64               { return tc.InitialGas }
+func (tc RefineTestcase) GetInitialGas() uint64              { return tc.InitialGas }
 func (tc RefineTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
 func (tc RefineTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
-func (tc RefineTestcase) GetExpectedGas() int64              { return tc.ExpectedGas }
+func (tc RefineTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc RefineTestcase) GetExpectedResultCode() uint8       { return tc.ExpectedResultCode }
 func (tc RefineTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
 func (tc RefineTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
 func (tc RefineTestcase) GetName() string                    { return tc.Name }
 
-func (tc AccumulateTestcase) GetInitialGas() int64               { return tc.InitialGas }
+func (tc AccumulateTestcase) GetInitialGas() uint64              { return tc.InitialGas }
 func (tc AccumulateTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
 func (tc AccumulateTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
-func (tc AccumulateTestcase) GetExpectedGas() int64              { return tc.ExpectedGas }
+func (tc AccumulateTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc AccumulateTestcase) GetExpectedResultCode() uint8       { return tc.ExpectedResultCode }
 func (tc AccumulateTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
 func (tc AccumulateTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
 func (tc AccumulateTestcase) GetName() string                    { return tc.Name }
 
-func (tc GeneralTestcase) GetInitialGas() int64               { return tc.InitialGas }
+func (tc GeneralTestcase) GetInitialGas() uint64              { return tc.InitialGas }
 func (tc GeneralTestcase) GetInitialRegs() map[uint32]uint64  { return tc.InitialRegs }
 func (tc GeneralTestcase) GetInitialMemory() RAMForTest       { return tc.InitialMemory }
-func (tc GeneralTestcase) GetExpectedGas() int64              { return tc.ExpectedGas }
+func (tc GeneralTestcase) GetExpectedGas() uint64             { return tc.ExpectedGas }
+func (tc GeneralTestcase) GetExpectedResultCode() uint8       { return tc.ExpectedResultCode }
 func (tc GeneralTestcase) GetExpectedRegs() map[uint32]uint64 { return tc.ExpectedRegs }
 func (tc GeneralTestcase) GetExpectedMemory() RAMForTest      { return tc.ExpectedMemory }
 func (tc GeneralTestcase) GetName() string                    { return tc.Name }
@@ -601,6 +724,18 @@ func InitPvmRefine(vm *VM, testcase RefineTestcase) {
 		vm.Exports[i] = make([]byte, len(bs))
 		copy(vm.Exports[i], bs)
 	}
+
+	// Initialize WorkPackage
+	vm.WorkItemIndex = testcase.InitialWorkItemIndex
+	vm.WorkPackage = testcase.InitialWorkPackage
+	vm.Authorization = testcase.InitialAuthorizerOutput
+	if vm.Extrinsics == nil {
+		vm.Extrinsics = make([][]byte, 0)
+	}
+	if len(vm.Extrinsics) == 0 {
+		vm.Extrinsics = append(vm.Extrinsics, []byte{})
+	}
+	vm.Extrinsics[0] = testcase.InitialExtrinsic
 
 	// Initialize Import Segments
 	vm.Imports = make([][]byte, len(testcase.InitialImportSegment))
@@ -675,10 +810,17 @@ func CompareBase(vm *VM, testcase Testcase) {
 	passed := true
 	// Compare Gas
 	expectedGas := testcase.GetExpectedGas()
-	if expectedGas != 0 && vm.Gas != int64(expectedGas) {
+	if expectedGas != 0 && vm.Gas != expectedGas {
 		fmt.Printf("Gas mismatch. Expected: %d, Got: %d\n", expectedGas, vm.Gas)
 		passed = false
 	}
+	// Compare ResultCode
+	expectedResultCode := testcase.GetExpectedResultCode()
+	if expectedResultCode != 0 && vm.ResultCode != expectedResultCode {
+		fmt.Printf("ResultCode mismatch. Expected: %d, Got: %d\n", expectedResultCode, vm.ResultCode)
+		passed = false
+	}
+
 	// Compare Registers
 	expectedRegs := testcase.GetExpectedRegs()
 	if len(expectedRegs) > 0 {
@@ -819,7 +961,7 @@ func TestRefine(t *testing.T) {
 
 	functions := []string{
 		"Historical_lookup", // William
-		"Import",            // William
+		"Fetch",             // William
 		"Export",            // William
 		"Machine",           // Shawn
 		"Peek",              // Shawn
@@ -880,7 +1022,6 @@ func TestAccumulate(t *testing.T) {
 		"New",      // William
 		"Upgrade",  // William
 		"Transfer", // William
-		// "Quit",     // William
 		"Eject",
 		"Query",
 		"Solicit", // William
@@ -1070,7 +1211,7 @@ func ConvertToXContext(xcft *XContextForTest) (*types.XContext, error) {
 
 	if xcft.Y != "" {
 		hashValue := common.HexToHash(xcft.Y)
-		xc.Y = &hashValue
+		xc.Y = hashValue
 	}
 
 	for _, dt := range xcft.T {
@@ -1105,8 +1246,8 @@ func ConvertToXContextForTest(xc *types.XContext) (*XContextForTest, error) {
 		T: []DeferredTransferForTest{},
 		U: nil,
 	}
-
-	if xc.Y != nil {
+	empty_hash := common.Hash{}
+	if xc.Y != empty_hash {
 		xcft.Y = xc.Y.String()
 	}
 
@@ -1308,8 +1449,8 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 
 	testCases := []struct {
 		filename               string
-		initialGas             int64
-		expectedGas            int64
+		initialGas             uint64
+		expectedGas            uint64
 		initialRegs            map[uint32]uint64
 		expectedRegs           map[uint32]uint64
 		initialMemory          RAMForTest
@@ -2444,7 +2585,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 
 }
 
-func updateGeneralTestCase(testcase *GeneralTestcase, name string, initialGas, expectedGas int64, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialServiceAccount, expectedServiceAccount *ServiceAccountForTest, initialDelta, expectedDelta map[uint32]*ServiceAccountForTest, initialServiceIndex uint32) {
+func updateGeneralTestCase(testcase *GeneralTestcase, name string, initialGas, expectedGas uint64, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialServiceAccount, expectedServiceAccount *ServiceAccountForTest, initialDelta, expectedDelta map[uint32]*ServiceAccountForTest, initialServiceIndex uint32) {
 	start := strings.LastIndex(name, "/") + 1
 	end := strings.LastIndex(name, ".json")
 
@@ -2467,8 +2608,9 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 
 	testCases := []struct {
 		filename              string
-		initialGas            int64
-		expectedGas           int64
+		initialGas            uint64
+		expectedGas           uint64
+		expectedResultCode    uint8
 		initialRegs           map[uint32]uint64
 		expectedRegs          map[uint32]uint64
 		initialMemory         RAMForTest
@@ -2479,24 +2621,37 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 		expectedImportSegment []ByteSlice
 		initialExportSegment  []ByteSlice
 		expectedExportSegment []ByteSlice
-		initialSegmentIdx     uint64
-		initialServiceIndex   uint32
-		initialDelta          map[uint32]*ServiceAccountForTest
-		initialTimeslot       uint32
+
+		initialWorkItemIndex    uint32
+		initialWorkPackage      types.WorkPackage
+		initialAuthorizerOutput ByteSlice
+		initialExtrinsic        ByteSlice
+
+		initialSegmentIdx   uint64
+		initialServiceIndex uint32
+		initialDelta        map[uint32]*ServiceAccountForTest
+		initialTimeslot     uint32
 	}{
 		{
-			filename:    "./Import/hostImportOK.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
+			filename:           "./Fetch/hostFetchOK_0.json",
+			initialGas:         InitialGas,
+			expectedGas:        ExpectedGas,
+			expectedResultCode: OK,
 			initialRegs: map[uint32]uint64{
-				7: 0,
-				8: 32 * PageSize,
-				9: 12,
+				7:  32 * PageSize,
+				8:  0,
+				9:  1000,
+				10: 0, // data type
+				11: 0,
+				12: 0,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: OK,
-				8: 32 * PageSize,
-				9: 12,
+				7:  uint64(len(EncodedWorkPackage)),
+				8:  0,
+				9:  1000,
+				10: 0,
+				11: 0,
+				12: 0,
 			},
 			initialMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
@@ -2505,24 +2660,35 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			},
 			expectedMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ImportSegment, Access: AccessMode{Writable: true}},
+					32: {Value: EncodedWorkPackage, Access: AccessMode{Writable: true}},
 				},
 			},
-			initialImportSegment: []ByteSlice{ImportSegment},
+			initialImportSegment:    []ByteSlice{ImportSegment},
+			initialWorkItemIndex:    0,
+			initialWorkPackage:      WorkPackage,
+			initialAuthorizerOutput: AuthorizerOutput,
+			initialExtrinsic:        Extrinsic,
 		},
 		{
-			filename:    "./Import/hostImportOK_gt_wg.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
+			filename:           "./Fetch/hostFetchOK_1.json",
+			initialGas:         InitialGas,
+			expectedGas:        ExpectedGas,
+			expectedResultCode: OK,
 			initialRegs: map[uint32]uint64{
-				7: 0,
-				8: 32 * PageSize,
-				9: uint64(len(ImportSegment)) * 3,
+				7:  32 * PageSize,
+				8:  0,
+				9:  1000,
+				10: 1, // data type
+				11: 0,
+				12: 0,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: OK,
-				8: 32 * PageSize,
-				9: uint64(len(ImportSegment)) * 3,
+				7:  uint64(len(AuthorizerOutput)),
+				8:  0,
+				9:  1000,
+				10: 1,
+				11: 0,
+				12: 0,
 			},
 			initialMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
@@ -2531,50 +2697,35 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			},
 			expectedMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: append(ImportSegment, ImportSegment...), Access: AccessMode{Writable: true}},
+					32: {Value: AuthorizerOutput, Access: AccessMode{Writable: true}},
 				},
 			},
-			initialImportSegment: []ByteSlice{append(append(ImportSegment, ImportSegment...), ImportSegment...)},
+			initialImportSegment:    []ByteSlice{ImportSegment},
+			initialWorkItemIndex:    0,
+			initialWorkPackage:      WorkPackage,
+			initialAuthorizerOutput: AuthorizerOutput,
+			initialExtrinsic:        Extrinsic,
 		},
 		{
-			filename:    "./Import/hostImportOOB.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
+			filename:           "./Fetch/hostFetchOK_2.json",
+			initialGas:         InitialGas,
+			expectedGas:        ExpectedGas,
+			expectedResultCode: OK,
 			initialRegs: map[uint32]uint64{
-				7: 0,
-				8: 32 * PageSize,
-				9: 12,
+				7:  32 * PageSize,
+				8:  0,
+				9:  1000,
+				10: 2, // data type
+				11: 0,
+				12: 0,
 			},
 			expectedRegs: map[uint32]uint64{
-				7: OOB,
-				8: 32 * PageSize,
-				9: 12,
-			},
-			initialMemory: RAMForTest{
-				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{}, Access: AccessMode{Inaccessible: true}},
-				},
-			},
-			expectedMemory: RAMForTest{
-				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{}, Access: AccessMode{Inaccessible: true}},
-				},
-			},
-			initialImportSegment: []ByteSlice{ImportSegment},
-		},
-		{
-			filename:    "./Import/hostImportNONE.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
-			initialRegs: map[uint32]uint64{
-				7: 9999, // Simulate NONE error
-				8: 32 * PageSize,
-				9: 12,
-			},
-			expectedRegs: map[uint32]uint64{
-				7: NONE,
-				8: 32 * PageSize,
-				9: 12,
+				7:  uint64(len(WorkPackage.WorkItems[0].Payload)),
+				8:  0,
+				9:  1000,
+				10: 2,
+				11: 0,
+				12: 0,
 			},
 			initialMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
@@ -2583,11 +2734,16 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			},
 			expectedMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: ByteSlice{}, Access: AccessMode{Writable: true}},
+					32: {Value: WorkPackage.WorkItems[0].Payload, Access: AccessMode{Writable: true}},
 				},
 			},
-			initialImportSegment: []ByteSlice{ImportSegment},
+			initialImportSegment:    []ByteSlice{ImportSegment},
+			initialWorkItemIndex:    0,
+			initialWorkPackage:      WorkPackage,
+			initialAuthorizerOutput: AuthorizerOutput,
+			initialExtrinsic:        Extrinsic,
 		},
+
 		// "Export": {OK, OOB, FULL},
 		{
 			filename:    "./Export/hostExportOK.json",
@@ -2612,7 +2768,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 				},
 			},
 			initialExportSegment:  []ByteSlice{{}},
-			expectedExportSegment: []ByteSlice{{}, append(ImportSegment, make(ByteSlice, 12)...)},
+			expectedExportSegment: []ByteSlice{{}, append(ImportSegment, make(ByteSlice, 24)...)},
 			initialSegmentIdx:     0,
 		},
 		{
@@ -2629,17 +2785,20 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			},
 			initialMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: append(append(ImportSegment, ImportSegment...), ImportSegment...), Access: AccessMode{Readable: true}},
+					32: {Value: append(append(append(ImportSegment, ImportSegment...), ImportSegment...), ImportSegment...), Access: AccessMode{Readable: true}},
 				},
 			},
 			expectedMemory: RAMForTest{
 				Pages: map[uint32]*PageForTest{
-					32: {Value: append(append(ImportSegment, ImportSegment...), ImportSegment...), Access: AccessMode{Readable: true}},
+					32: {Value: append(append(append(ImportSegment, ImportSegment...), ImportSegment...), ImportSegment...), Access: AccessMode{Readable: true}},
 				},
 			},
-			initialExportSegment:  []ByteSlice{{}},
-			expectedExportSegment: []ByteSlice{{}, append(ImportSegment, ImportSegment...)},
-			initialSegmentIdx:     0,
+			initialExportSegment: []ByteSlice{{}},
+			expectedExportSegment: []ByteSlice{
+				{},
+				append(append(ImportSegment, ImportSegment...), ImportSegment...),
+			},
+			initialSegmentIdx: 0,
 		},
 		{
 			filename:    "./Export/hostExportOOB.json",
@@ -2694,11 +2853,12 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialSegmentIdx:     9999, // Simulate FULL error
 		},
 
-		// "Historical_lookup": {OK, OOB, FULL},
+		// "Historical_lookup": {OK, PANIC, NONE}
 		{
-			filename:    "./Historical_lookup/hostHistorical_lookupOK_d_s.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
+			filename:           "./Historical_lookup/hostHistorical_lookupOK_d_s.json",
+			initialGas:         InitialGas,
+			expectedGas:        ExpectedGas,
+			expectedResultCode: OK,
 			initialRegs: map[uint32]uint64{
 				7:  NONE,
 				8:  32 * PageSize,
@@ -2745,9 +2905,10 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialTimeslot: 1000,
 		},
 		{
-			filename:    "./Historical_lookup/hostHistorical_lookupOK_d_omega7.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
+			filename:           "./Historical_lookup/hostHistorical_lookupOK_d_omega7.json",
+			initialGas:         InitialGas,
+			expectedGas:        ExpectedGas,
+			expectedResultCode: OK,
 			initialRegs: map[uint32]uint64{
 				7:  0,
 				8:  32 * PageSize,
@@ -2794,9 +2955,10 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialTimeslot: 1000,
 		},
 		{
-			filename:    "./Historical_lookup/hostHistorical_lookupOOB.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
+			filename:           "./Historical_lookup/hostHistorical_lookupPANIC.json",
+			initialGas:         InitialGas,
+			expectedGas:        ExpectedGas,
+			expectedResultCode: types.PVM_PANIC,
 			initialRegs: map[uint32]uint64{
 				7:  0,
 				8:  32 * PageSize,
@@ -2804,7 +2966,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 				10: 100,
 			},
 			expectedRegs: map[uint32]uint64{
-				7:  OOB,
+				7:  0,
 				8:  32 * PageSize,
 				9:  32 * PageSize,
 				10: 100,
@@ -2843,9 +3005,10 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			initialTimeslot: 1000,
 		},
 		{
-			filename:    "./Historical_lookup/hostHistorical_lookupNONE.json",
-			initialGas:  InitialGas,
-			expectedGas: ExpectedGas,
+			filename:           "./Historical_lookup/hostHistorical_lookupNONE.json",
+			initialGas:         InitialGas,
+			expectedGas:        ExpectedGas,
+			expectedResultCode: OK,
 			initialRegs: map[uint32]uint64{
 				7:  0,
 				8:  32 * PageSize,
@@ -4030,7 +4193,7 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 			}
 		}
 
-		updateRefineTestCase(&testcase, tc.filename, tc.initialGas, tc.expectedGas, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.initialRefineM_map, tc.expectedRefineM_map, tc.initialImportSegment, tc.expectedImportSegment, tc.initialExportSegment, tc.expectedExportSegment, tc.initialSegmentIdx, tc.initialServiceIndex, tc.initialDelta, tc.initialTimeslot)
+		updateRefineTestCase(&testcase, tc.filename, tc.initialGas, tc.expectedGas, tc.expectedResultCode, tc.initialRegs, tc.expectedRegs, tc.initialMemory, tc.expectedMemory, tc.initialRefineM_map, tc.expectedRefineM_map, tc.initialImportSegment, tc.expectedImportSegment, tc.initialExportSegment, tc.expectedExportSegment, tc.initialSegmentIdx, tc.initialServiceIndex, tc.initialDelta, tc.initialTimeslot, tc.initialWorkItemIndex, tc.initialWorkPackage, tc.initialAuthorizerOutput, tc.initialExtrinsic)
 
 		if err := WriteJSONFile(filePath, testcase); err != nil {
 			fmt.Printf("Failed to write test case %s: %v\n", tc.filename, err)
@@ -4038,13 +4201,14 @@ func TestGenerateRefineTestVectors(t *testing.T) {
 	}
 }
 
-func updateRefineTestCase(testcase *RefineTestcase, name string, initialGas, expectedGas int64, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialRefineM_map, expectedRefineM_map map[uint32]*RefineMForTest, initialImportSegment, expectedImportSegment, initialExportSegment, expectedExportSegment []ByteSlice, initialSegmentIdx uint64, initialServiceIndex uint32, initialDelta map[uint32]*ServiceAccountForTest, initialTimeslot uint32) {
+func updateRefineTestCase(testcase *RefineTestcase, name string, initialGas, expectedGas uint64, expectedResultCode uint8, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialRefineM_map, expectedRefineM_map map[uint32]*RefineMForTest, initialImportSegment, expectedImportSegment, initialExportSegment, expectedExportSegment []ByteSlice, initialSegmentIdx uint64, initialServiceIndex uint32, initialDelta map[uint32]*ServiceAccountForTest, initialTimeslot uint32, initialWorkItemIndex uint32, initialWorkPackage types.WorkPackage, initialAuthorizerOutput ByteSlice, initialExtrinsic ByteSlice) {
 	start := strings.LastIndex(name, "/") + 1
 	end := strings.LastIndex(name, ".json")
 
 	testcase.Name = name[start:end]
 	testcase.InitialGas = initialGas
 	testcase.ExpectedGas = expectedGas
+	testcase.ExpectedResultCode = expectedResultCode
 	testcase.InitialRegs = initialRegs
 	testcase.ExpectedRegs = expectedRegs
 	testcase.InitialMemory = initialMemory
@@ -4060,6 +4224,11 @@ func updateRefineTestCase(testcase *RefineTestcase, name string, initialGas, exp
 	testcase.InitialServiceIndex = initialServiceIndex
 	testcase.InitialDelta = initialDelta
 	testcase.InitialTimeslot = initialTimeslot
+
+	testcase.InitialWorkItemIndex = initialWorkItemIndex
+	testcase.InitialWorkPackage = initialWorkPackage
+	testcase.InitialAuthorizerOutput = initialAuthorizerOutput
+	testcase.InitialExtrinsic = initialExtrinsic
 }
 
 func TestGenerateAccumulateTestVectors(t *testing.T) {
@@ -4067,8 +4236,8 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 
 	testCases := []struct {
 		filename           string
-		initialGas         int64
-		expectedGas        int64
+		initialGas         uint64
+		expectedGas        uint64
 		initialRegs        map[uint32]uint64
 		expectedRegs       map[uint32]uint64
 		initialMemory      RAMForTest
@@ -4077,7 +4246,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 		expectedXcontent_x *XContextForTest
 		InitialTimeslot    uint32
 	}{
-		// 		"New":      {OK, OOB, CASH},
+		// 		"New":      {OK, PANIC, CASH},
 		{
 			filename:    "./New/hostNewOK.json",
 			initialGas:  InitialGas,
@@ -4131,7 +4300,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4177,14 +4346,14 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
 			},
 		},
 		{
-			filename:    "./New/hostNewOOB.json",
+			filename:    "./New/hostNewPANIC.json",
 			initialGas:  InitialGas,
 			expectedGas: ExpectedGas,
 			initialRegs: map[uint32]uint64{
@@ -4194,7 +4363,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 				10: Service_1_GasLimitM,
 			},
 			expectedRegs: map[uint32]uint64{
-				7:  OOB,
+				7:  32 * PageSize,
 				8:  uint64(PreimageBlobLen),
 				9:  Service_1_GasLimitG,
 				10: Service_1_GasLimitM,
@@ -4236,7 +4405,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4268,7 +4437,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4327,7 +4496,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4359,7 +4528,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4417,7 +4586,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4449,7 +4618,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4506,7 +4675,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4538,7 +4707,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4616,7 +4785,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4666,7 +4835,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{
@@ -4751,7 +4920,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4801,7 +4970,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4878,7 +5047,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -4928,7 +5097,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5005,7 +5174,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5055,7 +5224,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5132,7 +5301,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5182,7 +5351,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5254,7 +5423,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5286,7 +5455,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5357,7 +5526,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5405,7 +5574,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5476,7 +5645,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5524,7 +5693,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5597,7 +5766,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5647,7 +5816,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5703,7 +5872,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5735,7 +5904,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5790,7 +5959,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5822,7 +5991,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5877,7 +6046,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5909,7 +6078,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5964,7 +6133,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -5996,7 +6165,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6051,7 +6220,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6083,7 +6252,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6138,7 +6307,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6170,7 +6339,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6223,7 +6392,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6255,7 +6424,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6311,7 +6480,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6343,7 +6512,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6399,7 +6568,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6431,7 +6600,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6487,7 +6656,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6519,7 +6688,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6575,7 +6744,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6607,7 +6776,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6664,7 +6833,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6696,7 +6865,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6752,7 +6921,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6777,7 +6946,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6833,7 +7002,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6865,7 +7034,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6921,7 +7090,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -6946,7 +7115,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7002,7 +7171,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7034,7 +7203,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7085,7 +7254,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7112,7 +7281,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7146,7 +7315,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7160,7 +7329,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7195,7 +7364,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7209,7 +7378,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 					I: types.Validators{},
 					Q: types.AuthorizationQueue{},
 					X: types.Kai_state{
-						Kai_g: map[uint32]uint32{},
+						Kai_g: map[uint32]uint64{},
 					},
 				},
 				T: []DeferredTransferForTest{},
@@ -7251,7 +7420,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 	}
 }
 
-func updateAccumulateTestCase(testcase *AccumulateTestcase, name string, initialGas int64, expectedGas int64, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialXcontent_x, expectedXcontent_x *XContextForTest, initialTimeslot uint32) {
+func updateAccumulateTestCase(testcase *AccumulateTestcase, name string, initialGas, expectedGas uint64, initialRegs, expectedRegs map[uint32]uint64, initialMemory, expectedMemory RAMForTest, initialXcontent_x, expectedXcontent_x *XContextForTest, initialTimeslot uint32) {
 	start := strings.LastIndex(name, "/") + 1
 	end := strings.LastIndex(name, ".json")
 

@@ -75,7 +75,7 @@ var errorCases = map[string][]uint64{
 	"Checkpoint": {OK},
 	"New":        {OK, OOB, CASH},
 	"Upgrade":    {OK, OOB},
-	"Transfer":   {OK, WHO, CASH, LOW, HIGH},
+	"Transfer":   {OK, WHO, CASH, LOW},
 	"Quit":       {OK, OOB, WHO, LOW},
 	"Solicit":    {OK, OOB, FULL, HUH},
 	"Forget":     {OK, OOB, HUH},
@@ -344,8 +344,8 @@ func (vm *VM) hostInfo() {
 	}
 	errcode := vm.Ram.WriteRAMBytes(uint32(bo), m[:])
 	if errcode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	vm.WriteRegister(7, OK)
@@ -357,10 +357,36 @@ func (vm *VM) hostBless() {
 	m, _ := vm.ReadRegister(7)
 	a, _ := vm.ReadRegister(8)
 	v, _ := vm.ReadRegister(9)
+	o, _ := vm.ReadRegister(10)
+	n, _ := vm.ReadRegister(11)
+
+	if m > (1<<32)-1 || a > (1<<32)-1 || v > (1<<32)-1 {
+		vm.WriteRegister(7, WHO)
+		vm.HostResultCode = WHO
+		return
+	}
+
+	bold_g := make(map[uint32]uint64)
+	for i := 0; i < int(n); i++ {
+		data, err := vm.Ram.ReadRAMBytes(uint32(o)+uint32(i)*12, 12)
+		if err != OK {
+			vm.terminated = true
+			vm.ResultCode = types.PVM_PANIC
+			return
+		}
+		s := binary.LittleEndian.Uint32(data[0:4])
+		g := binary.LittleEndian.Uint64(data[4:12])
+		bold_g[s] = g
+	}
+
+	vm.X.U.PrivilegedState.Kai_g = bold_g
+
 	// Set (x'p)_m, (x'p)_a, (x'p)_v
 	vm.X.U.PrivilegedState.Kai_m = uint32(m)
 	vm.X.U.PrivilegedState.Kai_a = uint32(a)
 	vm.X.U.PrivilegedState.Kai_v = uint32(v)
+
+	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
 
@@ -392,8 +418,8 @@ func (vm *VM) hostDesignate() {
 	o, _ := vm.ReadRegister(7)
 	v, errCode := vm.Ram.ReadRAMBytes(uint32(o), 176*V)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	qi := make([]types.Validator, V)
@@ -439,8 +465,8 @@ func (vm *VM) hostNew() {
 	o, _ := vm.ReadRegister(7)
 	c, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	l, _ := vm.ReadRegister(8)
@@ -493,8 +519,8 @@ func (vm *VM) hostUpgrade() {
 
 	c, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -533,8 +559,8 @@ func (vm *VM) hostTransfer() {
 
 	m, errCode := vm.Ram.ReadRAMBytes(uint32(o), M)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.S, ReceiverIndex: uint32(d)} // CHECK
@@ -570,8 +596,8 @@ func (vm *VM) hostQuery() {
 	z, _ := vm.ReadRegister(8)
 	h, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	a, _ := vm.X.GetX_s()
@@ -738,8 +764,8 @@ func (vm *VM) hostFetch() {
 
 	errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -750,8 +776,8 @@ func (vm *VM) hostYield() {
 	o, _ := vm.ReadRegister(7)
 	h, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	y := common.BytesToHash(h)
@@ -765,8 +791,8 @@ func (vm *VM) hostEject() {
 	o, _ := vm.ReadRegister(8)
 	h, err := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if err != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -816,8 +842,8 @@ func (vm *VM) hostInvoke() {
 	o, _ := vm.ReadRegister(8)
 	gasBytes, errCodeGas := vm.Ram.ReadRAMBytes(uint32(o), 8)
 	if errCodeGas != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	g := types.DecodeE_l(gasBytes)
@@ -826,8 +852,8 @@ func (vm *VM) hostInvoke() {
 	for i := 1; i < 14; i++ {
 		reg_bytes, errCodeReg := vm.Ram.ReadRAMBytes(uint32(o)+8*uint32(i), 8)
 		if errCodeReg != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
+			vm.terminated = true
+			vm.ResultCode = types.PVM_PANIC
 			return
 		}
 		m_n_reg[i-1] = types.DecodeE_l(reg_bytes)
@@ -863,8 +889,8 @@ func (vm *VM) hostInvoke() {
 	gasBytes = types.E_l(uint64(new_machine.Gas), 8)
 	errCodeGas = vm.Ram.WriteRAMBytes(uint32(o), gasBytes)
 	if errCodeGas != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -872,8 +898,8 @@ func (vm *VM) hostInvoke() {
 		reg_bytes := types.E_l(new_machine.register[i-1], 8)
 		errCode := vm.Ram.WriteRAMBytes(uint32(o)+8*uint32(i), reg_bytes)
 		if errCode != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
+			vm.terminated = true
+			vm.ResultCode = types.PVM_PANIC
 			return
 		}
 	}
@@ -914,17 +940,19 @@ func (vm *VM) hostLookup() {
 	var a *types.ServiceAccount
 	if omega_7 == uint64(vm.Service_index) || omega_7 == maxUint64 {
 		a = vm.ServiceAccount
-	} else {
+	}
+	if a == nil {
 		a, _ = vm.getXUDS(omega_7)
 	}
 
-	ho, _ := vm.ReadRegister(8)
-	bo, _ := vm.ReadRegister(9)
-	bz, _ := vm.ReadRegister(10)
-	k_bytes, err_k := vm.Ram.ReadRAMBytes(uint32(ho), 32)
+	h, _ := vm.ReadRegister(8)
+	o, _ := vm.ReadRegister(9)
+	f, _ := vm.ReadRegister(10)
+	l, _ := vm.ReadRegister(11)
+	k_bytes, err_k := vm.Ram.ReadRAMBytes(uint32(h), 32)
 	if err_k != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -933,20 +961,20 @@ func (vm *VM) hostLookup() {
 	var v []byte
 	var ok bool
 
-	account_blobhash = common.Blake2Hash(k_bytes)
+	account_blobhash = common.Hash(k_bytes)
 	ok, v = a.ReadPreimage(account_blobhash, vm.hostenv)
 	if !ok {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
 		return
 	}
-	l := uint64(len(v))
-	l = min(l, uint64(bz))
+	f = min(f, uint64(len(v)))
+	l = min(l, uint64(len(v))-f)
 
-	err := vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
+	err := vm.Ram.WriteRAMBytes(uint32(o), v[:l])
 	if err != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -996,8 +1024,8 @@ func (vm *VM) hostRead() {
 	l, _ := vm.ReadRegister(12)
 	mu_k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
 	if err_k != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
@@ -1031,8 +1059,8 @@ func (vm *VM) hostWrite() {
 	vz, _ := vm.ReadRegister(10)
 	mu_k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz))
 	if err_k != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
@@ -1051,6 +1079,7 @@ func (vm *VM) hostWrite() {
 		a.WriteStorage(a.ServiceIndex, k, []byte{})
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
+		log.Debug(vm.logging, "WRITE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprint("deleted"))
 		return
 	}
 
@@ -1060,8 +1089,8 @@ func (vm *VM) hostWrite() {
 	if vz > 0 {
 		v, err = vm.Ram.ReadRAMBytes(uint32(vo), uint32(vz))
 		if err != OK {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
+			vm.terminated = true
+			vm.ResultCode = types.PVM_PANIC
 			return
 		}
 	}
@@ -1093,8 +1122,8 @@ func (vm *VM) hostSolicit() {
 	z, _ := vm.ReadRegister(8)                          // z: blob_len
 	hBytes, err_h := vm.Ram.ReadRAMBytes(uint32(o), 32) // h: blobHash
 	if err_h != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -1133,13 +1162,13 @@ func (vm *VM) hostForget() {
 	z, _ := vm.ReadRegister(8)
 	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(o), 32)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
-	account_lookuphash := common.BytesToHash(hBytes)
-	account_blobhash := common.Blake2Hash(hBytes)
+	account_lookuphash := common.Hash(hBytes)
+	account_blobhash := common.Hash(hBytes)
 
 	ok, X_s_l := x_s.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
 	if !ok {
@@ -1186,8 +1215,8 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 
 	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(ho), 32)
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	// h := common.Hash(hBytes) not sure whether this is needed
@@ -1200,7 +1229,12 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 	} else {
 		l := uint64(vLength)
 		l = min(l, bz)
-		vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
+		err := vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
+		if err != OK {
+			vm.terminated = true
+			vm.ResultCode = types.PVM_PANIC
+			return
+		}
 		vm.WriteRegister(7, vLength)
 	}
 }
@@ -1289,8 +1323,8 @@ func (vm *VM) hostMachine() {
 	i, _ := vm.ReadRegister(9)
 	p, errCode := vm.Ram.ReadRAMBytes(uint32(po), uint32(pz))
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 
@@ -1331,8 +1365,8 @@ func (vm *VM) hostPeek() {
 	// write l bytes to vm
 	errCode = vm.Ram.WriteRAMBytes(uint32(o), s_data[:])
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	vm.WriteRegister(7, OK)
@@ -1353,8 +1387,8 @@ func (vm *VM) hostPoke() {
 	// read data from original vm
 	s_data, errCode := vm.Ram.ReadRAMBytes(uint32(s), uint32(z))
 	if errCode != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
 		return
 	}
 	// write data to m_n
@@ -1395,45 +1429,30 @@ func (vm *VM) hostVoid() {
 		return
 	}
 	if p+c >= (1 << 32) {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.WriteRegister(7, HUH)
+		vm.HostResultCode = HUH
 		return
 	}
 
 	for _, page := range m.U.Pages {
 		if page.Access.Inaccessible {
-			vm.WriteRegister(7, OOB)
-			vm.HostResultCode = OOB
+			vm.WriteRegister(7, HUH)
+			vm.HostResultCode = HUH
 			return
 		}
 	}
-	var err uint64
 	var access_mode AccessMode
 
 	// set page access to writable to write [0,0,0,....] to the page
 	access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
-	err = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
-	if err != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
-		return
-	}
+	_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
+
 	// write [0,0,0,....] to the page
-	err = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, 0))
-	if err != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
-		return
-	}
+	_ = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, 0))
 
 	// set page access to inaccessible
 	access_mode = AccessMode{Inaccessible: true, Writable: false, Readable: false}
-	err = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
-	if err != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
-		return
-	}
+	_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -1444,8 +1463,8 @@ func (vm *VM) hostZero() {
 	p, _ := vm.ReadRegister(8)
 	c, _ := vm.ReadRegister(9)
 	if p < 16 || p+c > (1<<32)/Z_P {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
+		vm.WriteRegister(7, HUH)
+		vm.HostResultCode = HUH
 		return
 	}
 	m, ok := vm.RefineM_map[uint32(n)]
@@ -1454,21 +1473,10 @@ func (vm *VM) hostZero() {
 		vm.HostResultCode = WHO
 		return
 	}
-	var err uint64
 	access_mode := AccessMode{Inaccessible: false, Writable: true, Readable: false}
-	err = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
-	if err != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
-		return
-	}
+	_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
 
-	err = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, 0))
-	if err != OK {
-		vm.WriteRegister(7, OOB)
-		vm.HostResultCode = OOB
-		return
-	}
+	_ = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, 0))
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK

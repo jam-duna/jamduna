@@ -321,6 +321,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if jam == "blake2b" {
 		serviceNames = []string{"blake2b"}
 	}
+	if jam == "fib2" {
+		serviceNames = []string{"fib2", "auth_copy"}
+	}
 	testServices, err := getServices(serviceNames)
 	if err != nil {
 		panic(32)
@@ -426,6 +429,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		megatron(nodes, testServices, targetN)
 	case "fib":
 		fib(nodes, testServices, targetN)
+	case "fib2":
+		fib2(nodes, testServices, targetN)
 	case "transfer":
 		transferNum := targetN
 		transfer(nodes, testServices, transferNum)
@@ -2565,4 +2570,110 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 	k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
 	hash_result, _, _ := n1.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
 	fmt.Printf("Blake2b Actual Result:   %x\n", hash_result)
+}
+
+func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+	log.Info(module, "FIB2 START", "targetN", targetN)
+
+	jam_key := []byte("jam")
+	jam_key_hash := common.Blake2Hash(jam_key)
+	jam_key_length := uint32(len(jam_key))
+
+	service0 := testServices["fib2"]
+	service_authcopy := testServices["auth_copy"]
+	n1 := nodes[1]
+	n4 := nodes[4]
+	core := 0
+	prevWorkPackageHash := common.Hash{}
+	for fibN := 1; fibN <= targetN; fibN++ {
+		importedSegments := make([]types.ImportSegment, 0)
+		if fibN > 1 {
+			importedSegment := types.ImportSegment{
+				RequestedHash: prevWorkPackageHash,
+				Index:         0,
+			}
+			importedSegments = append(importedSegments, importedSegment)
+		}
+		refine_context := n1.statedb.GetRefineContext()
+
+		payload := make([]byte, 4)
+		binary.LittleEndian.PutUint32(payload, uint32(fibN))
+		workPackage := types.WorkPackage{
+			AuthCodeHost:          0,
+			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refine_context,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            service0.ServiceCode,
+					CodeHash:           service0.CodeHash,
+					Payload:            payload,
+					RefineGasLimit:     1000,
+					AccumulateGasLimit: 1000,
+					ImportedSegments:   importedSegments,
+					ExportCount:        1,
+				},
+				{
+					Service:            service_authcopy.ServiceCode,
+					CodeHash:           service_authcopy.CodeHash,
+					Payload:            []byte{},
+					RefineGasLimit:     1000,
+					AccumulateGasLimit: 1000,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
+				},
+			},
+		}
+		workPackageHash := workPackage.Hash()
+
+		log.Info(module, fmt.Sprintf("FIB2-(%v) work package submitted", fibN), "workPackage", workPackageHash)
+		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+		ramdamIdx := rand.Intn(3)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+		// wait until the work report is pending
+		i := 0
+		for {
+			time.Sleep(1 * time.Second)
+			if n4.statedb.JamState.AvailabilityAssignments[core] != nil || i > 12 {
+				if false {
+					var workReport types.WorkReport
+					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+					workReport = rho_state.WorkReport
+					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+				}
+				break
+			}
+			i += 1
+		}
+
+		// wait until the work report is cleared
+		for {
+			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		prevWorkPackageHash = workPackageHash
+		time.Sleep(1 * time.Second)
+		keys := []byte{0, 1, 2, 5, 6, 8, 9}
+		for _, key := range keys {
+			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
+			service_account_byte, _, _ := n4.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
+			log.Info(module, fmt.Sprintf("Fib2-(%v) result with key %d", fibN, key), "result", fmt.Sprintf("%x", service_account_byte))
+		}
+
+		if fibN == 3 || fibN == 6 {
+			time.Sleep(3 * time.Second)
+			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, jam_key_hash, jam_key_length, jam_key)
+			if err != nil {
+				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+			}
+			time.Sleep(3 * time.Second)
+		}
+	}
 }

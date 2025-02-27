@@ -16,7 +16,7 @@ omega7 ≠ NONE, so the service index is read as omega7 from delta.
 4. Write the preimage blob into memory.  
 5. Write the length of the preimage blob into **omega_7**.  
 
-## hostHistoricalLookupOOB  
+## hostHistoricalLookupPANIC  
 omega7 ≠ NONE, so the service index is read as omega7 from delta.  
 1. Successfully read service index = 0 from delta.  
 2. Failed to read the preimage blob hash from memory because of a permission error.  

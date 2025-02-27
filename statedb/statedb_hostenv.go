@@ -43,7 +43,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 			if len(storage.Value) == 0 || storage.Deleted {
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
-					fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %x, error: %v\n", k, err)
+					fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %v, error: %v\n", k, err)
 					return err
 				}
 			} else {
