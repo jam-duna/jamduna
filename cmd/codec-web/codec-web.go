@@ -410,40 +410,6 @@ func main() {
 			},
 		})
 	}))
-
-	// Expose /api/encode endpoint with CORS middleware
-	mux.HandleFunc("/api/stf", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		// Read the POST input into content
-		content, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "unable to read request body", http.StatusBadRequest)
-			return
-		}
-		
-		var stf statedb.StateTransition
-		err = json.Unmarshal(content, &stf)
-		if err != nil {
-			// Return a 400 error code for invalid JSON
-			http.Error(w, "invalid JSON", http.StatusBadRequest)
-			fmt.Printf("Failed to read JSON: %v\n", err)
-			return
-		}
-		
-		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil)
-		if err != nil {
-			// Return a 400 error code if state transition fails
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			fmt.Printf("Error checking state transition: %v\n", err)
-			return
-		}
-		
-		// Return a 200 OK with some data (diffs in JSON format)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(diffs); err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		}
-	}))
 	
 
 	// Expose /api/encode endpoint with CORS middleware

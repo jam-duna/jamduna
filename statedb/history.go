@@ -86,7 +86,7 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 
 	mmr.Append(accumulationRoot)
 	if s.Authoring {
-		log.Debug("authoring", "BETA computation", "BEEFY r from before", accumulationRoot, "mmr", (*mmr).Peaks)
+		log.Debug("authoring", "BETA computation", "accumulationRoot", accumulationRoot, "mmr", (*mmr).Peaks)
 	}
 	n := Beta_state{
 		Reported:   reported,          // p

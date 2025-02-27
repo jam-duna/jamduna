@@ -164,24 +164,67 @@ type Refine_parameters struct {
 }
 
 func (vm *VM) chargeGas(host_fn int) {
-
 	beforeGas := vm.Gas
 	chargedGas := uint64(10)
 	exp := fmt.Sprintf("HOSTFUNC %d", host_fn)
-	if host_fn == TRANSFER {
+
+	switch host_fn {
+	case TRANSFER:
 		omega_9, _ := vm.ReadRegister(9)
 		chargedGas = omega_9
 		exp = "TRANSFER"
-	} else if host_fn == READ {
+	case READ:
 		exp = "READ"
-	} else if host_fn == WRITE {
+	case WRITE:
 		exp = "WRITE"
-	} else if host_fn == NEW {
+	case NEW:
 		exp = "NEW"
-	} else if host_fn == FETCH {
+	case FETCH:
 		exp = "FETCH"
-	} else if host_fn == EXPORT {
-		exp = "EXPOR"
+	case EXPORT:
+		exp = "EXPORT"
+	case GAS:
+		exp = "GAS"
+	case LOOKUP:
+		exp = "LOOKUP"
+	case INFO:
+		exp = "INFO"
+	case BLESS:
+		exp = "BLESS"
+	case ASSIGN:
+		exp = "ASSIGN"
+	case DESIGNATE:
+		exp = "DESIGNATE"
+	case CHECKPOINT:
+		exp = "CHECKPOINT"
+	case UPGRADE:
+		exp = "UPGRADE"
+	case EJECT:
+		exp = "EJECT"
+	case QUERY:
+		exp = "QUERY"
+	case SOLICIT:
+		exp = "SOLICIT"
+	case FORGET:
+		exp = "FORGET"
+	case YIELD:
+		exp = "YIELD"
+	case HISTORICAL_LOOKUP:
+		exp = "HISTORICAL_LOOKUP"
+	case MACHINE:
+		exp = "MACHINE"
+	case PEEK:
+		exp = "PEEK"
+	case POKE:
+		exp = "POKE"
+	case ZERO:
+		exp = "ZERO"
+	case VOID:
+		exp = "VOID"
+	case INVOKE:
+		exp = "INVOKE"
+	case EXPUNGE:
+		exp = "EXPUNGE"
 	}
 
 	vm.Gas = beforeGas - chargedGas

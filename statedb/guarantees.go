@@ -691,6 +691,7 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 				if results.Gas >= gas_limitG {
 					return nil
 				} else {
+					log.Warn(module, "ErrGServiceItemTooLow", "service", service, "results.Gas", results.Gas, "service.GasLimitG", service.GasLimitG)
 					return jamerrors.ErrGServiceItemTooLow
 				}
 			}
