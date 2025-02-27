@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/google/go-github/v58/github"
 	"github.com/nsf/jsondiff"
 )
@@ -186,5 +187,95 @@ func TestStateTransitionjavajam(t *testing.T) {
 	}
 	if len(failedTests) > 0 {
 		t.Errorf("\n🚨 %d tests failed:\n%s", len(failedTests), failedTests)
+	}
+}
+
+func TestCompareJson(t *testing.T) {
+	var testdata1 types.Validator
+	var testdata2 types.Validator
+	testdata1 = types.Validator{
+		Ed25519: types.HexToEd25519Key("0x1"),
+	}
+	testdata2 = types.Validator{
+		Ed25519: types.HexToEd25519Key("0x2"),
+	}
+	diff := CompareJSON(testdata1, testdata2)
+	fmt.Print(diff)
+}
+
+func TestStateTranistionForPublish(t *testing.T) {
+	testDir := "/tmp/test_local"
+	test_storage, err := initStorage(testDir)
+	if err != nil {
+		t.Errorf("❌ Error initializing storage: %v", err)
+		return
+	}
+	defer test_storage.Close()
+	//../cmd/importblocks/data/orderedaccumulation/state_transitions
+	// read til ../cmd/importblocks/data
+	// and get the mode "orderedaccumulation"
+	// and get the state_transitions and read all the json file
+
+	data_dir := "../cmd/importblocks/data"
+	mode_dirs, err := os.ReadDir(data_dir)
+	if err != nil {
+		t.Errorf("❌ Error reading directory: %v", err)
+		return
+	}
+	for _, mode_dir := range mode_dirs {
+		if !mode_dir.IsDir() {
+			continue
+		}
+		mode_dir_path := fmt.Sprintf("%s/%s", data_dir, mode_dir.Name())
+		mode_dir_path = fmt.Sprintf("%s/state_transitions", mode_dir_path)
+		data_files, err := os.ReadDir(mode_dir_path)
+		if err != nil {
+			t.Errorf("❌ Error reading directory: %v", err)
+			return
+		}
+
+		for _, file := range data_files {
+			// check if the file is a json file
+			if file.IsDir() || file.Name()[len(file.Name())-5:] != ".json" {
+				continue
+			}
+
+			filepath := fmt.Sprintf("%s/%s", mode_dir_path, file.Name())
+			StateTransitionCheckForFile(t, filepath, test_storage)
+		}
+	}
+}
+
+func StateTransitionCheckForFile(t *testing.T, file string, storage *storage.StateDBStorage) {
+	t.Helper()
+	var stf StateTransition
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Errorf("❌ Failed to read JSON file: %v", err)
+		return
+	}
+	err = json.Unmarshal(data, &stf)
+	if err != nil {
+		t.Errorf("❌ Failed to read JSON file: %v", err)
+		return
+	}
+	s0, err := NewStateDBFromSnapshotRaw(storage, &(stf.PreState))
+	if err != nil {
+		t.Errorf("❌ Failed to create StateDB from snapshot: %v", err)
+		return
+	}
+	s1, err := NewStateDBFromSnapshotRaw(storage, &(stf.PostState))
+	if err != nil {
+		t.Errorf("❌ Failed to create StateDB from snapshot: %v", err)
+		return
+	}
+	errornum, diffs := ValidateSTF(s0, stf.Block, s1)
+	if errornum > 0 {
+		t.Errorf("❌ [%s] Test failed: %v", file, errornum)
+		fmt.Printf("ErrorNum:%d\n", errornum)
+	}
+	for key, value := range diffs {
+		fmt.Printf("File %s,error %s =========\n", file, key)
+		fmt.Printf("%s", value)
 	}
 }

@@ -65,3 +65,8 @@ fuzz: fuzz_only
 
 clean:
 	rm -f $(BINARY_NAME) $(BINARY_NAME_FUZZ)
+
+verify:
+	go test ../../statedb -run '^TestStateTranistionForPublish$$' -tags tiny
+
+

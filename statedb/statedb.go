@@ -1145,17 +1145,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		// s.queuedTickets = make(map[common.Hash]types.Ticket)
 		s.GetJamState().ResetTallyStatistics()
 	}
-	sf := s.GetSafrole()
-	var vs []types.Validator
-	vs = sf.PrevValidators
-	if len(vs) == 0 {
-		panic("No validators")
-	}
-
-	// Eq 4.6/4.7 uses r (derived from accumulation result) and PREVIOUS oldState.StateRoot to append "n" to MMR "Beta" s.JamState.RecentBlocks
-	// see https://github.com/jam-duna/jamtestnet/issues/77
+	// 0.6.2 4.7 - Recent History Dagga (β†) [No other state related]
 	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
-
+	// dispute should go here
+	// TODO - 4.12 - Dispute
+	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
+	sf := s.GetSafrole()
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
 		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
@@ -1165,27 +1160,17 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		panic(fmt.Sprintf("VerifySafroleSTF %v\n", err))
 	}
-	vs = s2.PrevValidators
-	if len(vs) == 0 {
-		panic("No validators")
-	}
 	s.JamState.SafroleState = &s2
-	s.RotateGuarantors()
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
+	// use post entropy state rotate the guarantors
+	s.RotateGuarantors()
 
-	// 24 - Preimages
-	preimages := blk.PreimageLookups()
-	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE)
-	if err != nil {
-		return s, err
-	}
-	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "preimages", num_preimage)
-	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
-	// 23,25-27 Disputes, Assurances. Guarantees
+	// preparing for the rho transition
 	disputes := blk.Disputes()
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
-
+	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]
+	// 4.16 available work report also updated
 	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE)
 	if err != nil {
 		return s, err
@@ -1196,19 +1181,31 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	for validatorIndex, nreports := range num_reports {
 		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", uint32(nreports))
 	}
+	// 4.7 - Recent History [No other state related, but need to do it after rho, before accumulation]
 	s.ApplyStateRecentHistory(blk, &(oldState.AccumulationRoot))
-	// 28 -- ACCUMULATE
-	var g uint64 = 10000 // CHECK: what is this???
+	// 4.17 Accmuulation [need available work report, ϑ, ξ, δ, χ, ι, φ]
+	// 12.20 gas counting
+	var gas uint64
+	var gas_counting uint64
+	gas = types.AccumulateGasAllocation_GT
+	gas_counting = types.AccumulationGasAllocation * types.TotalCores
+	// get the partial state
 	o := s.JamState.newPartialState()
-
+	kai_g := o.PrivilegedState.Kai_g
+	for _, g := range kai_g {
+		gas_counting += uint64(g)
+	}
+	if gas < gas_counting {
+		gas = gas_counting
+	}
 	var f map[uint32]uint32
 	var b []BeefyCommitment
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, t, b := s.OuterAccumulate(g, accumulate_input_wr, o, f)
-
-	// Not sure whether transfer happens here
-	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
+	n, t, b := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
+	// (χ′, δ†, ι′, φ′)
+	// 12.24 transfer δ‡
+	tau := s.GetTimeslot() // τ′
 	if len(t) > 0 {
 		s.ProcessDeferredTransfers(o, tau, t)
 	}
@@ -1217,10 +1214,19 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		sa.Mutable = true
 		sa.Dirty = true
 	}
-
 	s.ApplyXContext(o)
+	//after accumulation, we need to update the accumulate state
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
-	// 29 -  Update Authorization Pool alpha'
+	// 0.6.2 4.18 - Preimages [ δ‡, τ′]
+	preimages := blk.PreimageLookups()
+	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE)
+	if err != nil {
+		return s, err
+	}
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "preimages", num_preimage)
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
+	// Update Authorization Pool alpha
+	// 4.19 α'[need φ', so after accumulation]
 	err = s.ApplyStateTransitionAuthorizations()
 	if err != nil {
 		return s, err
@@ -1241,9 +1247,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		log.Debug("authoring", "BEEFY r used in NEXT RecentBlocks", "AccumulationRoot", s.AccumulationRoot)
 	}
 
-	// 30 - compute pi
+	// 4.20 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
-
 	s.StateRoot = s.UpdateTrieState()
 	return s, nil
 }
