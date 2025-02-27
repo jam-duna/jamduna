@@ -27,8 +27,6 @@ type StateTransition struct {
 	PreState  StateSnapshotRaw `json:"pre_state"`
 	Block     types.Block      `json:"block"`
 	PostState StateSnapshotRaw `json:"post_state"`
-
-	AccumulationRoot common.Hash `json:"r"`
 }
 
 type StateTransitionCheck struct {
@@ -131,7 +129,6 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	if err != nil {
 		return err
 	}
-	s0.AccumulationRoot = st.AccumulationRoot
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
 	if err != nil {
@@ -153,7 +150,6 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		return nil, err
 	}
 
-	s0.AccumulationRoot = st.AccumulationRoot
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
 	if err != nil {

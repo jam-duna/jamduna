@@ -49,9 +49,8 @@ type StateDB struct {
 	vmMutex                 sync.Mutex
 
 	// used in ApplyStateRecentHistory between statedbs
-	AccumulationRoot common.Hash
-	Authoring        bool
-	X                *types.XContext
+	Authoring bool
+	X         *types.XContext
 
 	GuarantorAssignments         []types.GuarantorAssignment
 	PreviousGuarantorAssignments []types.GuarantorAssignment
@@ -800,7 +799,6 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		sdb:                 s.sdb,
 		trie:                s.CopyTrieState(s.StateRoot),
 		logChan:             make(chan storage.LogMessage, 100),
-		AccumulationRoot:    s.AccumulationRoot, // MUST be copied!
 		AvailableWorkReport: tmpAvailableWorkReport,
 		AncestorSet:         s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
 		/*

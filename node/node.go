@@ -953,7 +953,7 @@ func (n *Node) extendChain() error {
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 
 				// current we always dump state transitions for every node
-				st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB, recoveredStateDB.AccumulationRoot)
+				st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
 				err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
 				if err != nil {
 					log.Error(module, "writeDebug", "err", err)
@@ -1406,7 +1406,7 @@ func (n *Node) runClient() {
 					log.Crit(module, "CompareStateRoot", "err", err)
 				}
 
-				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB, oldstate.AccumulationRoot)
+				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
 				err = n.writeDebug(st, timeslot) // StateTransition
 				if err != nil {
 					log.Error(module, "runClient:writeDebug", "err", err)
@@ -1438,7 +1438,7 @@ func (n *Node) runClient() {
 	}
 }
 
-func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB, accumulationRoot common.Hash) *statedb.StateTransition {
+func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB) *statedb.StateTransition {
 
 	st := statedb.StateTransition{
 		PreState: statedb.StateSnapshotRaw{
@@ -1450,7 +1450,6 @@ func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Blo
 			KeyVals:   newStateDB.GetAllKeyValues(),
 			StateRoot: newStateDB.StateRoot,
 		},
-		AccumulationRoot: accumulationRoot,
 	}
 
 	return &st

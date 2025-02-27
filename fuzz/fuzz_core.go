@@ -433,7 +433,7 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 				PostState: stf.PreState,
 			}
 
-			// TODO: need ancestorSet, accumulationRoot
+			// TODO: need ancestorSet
 			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil)
 			if stfErrActual == stfErrExpected {
 				errorList = append(errorList, stfErrExpected)

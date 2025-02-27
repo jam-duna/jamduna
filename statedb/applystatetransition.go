@@ -77,8 +77,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	for validatorIndex, nreports := range num_reports {
 		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", uint32(nreports))
 	}
-	// 4.7 - Recent History [No other state related, but need to do it after rho, before accumulation]
-	s.ApplyStateRecentHistory(blk, &(oldState.AccumulationRoot))
 	// 4.17 Accmuulation [need available work report, ϑ, ξ, δ, χ, ι, φ]
 	// 12.20 gas counting
 	var gas uint64
@@ -134,14 +132,16 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		leafBytes := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
 		leaves = append(leaves, leafBytes)
 		if s.Authoring {
-			log.Debug("authoring", "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+			log.Info("authoring", "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
-	s.AccumulationRoot = common.Hash(tree.Root())
+	accumulationRoot := common.Hash(tree.Root())
 	if len(leaves) > 0 && s.Authoring {
-		log.Debug("authoring", "BEEFY r used in NEXT RecentBlocks", "AccumulationRoot", s.AccumulationRoot)
+		log.Info("authoring", "BEEFY accumulation root", "r", accumulationRoot)
 	}
+	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
+	s.ApplyStateRecentHistory(blk, &(accumulationRoot))
 
 	// 4.20 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
