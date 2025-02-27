@@ -101,12 +101,6 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 		postRecentBlocks = postRecentBlocks[1 : types.RecentHistorySize+1]
 	}
 	s.JamState.RecentBlocks = postRecentBlocks
-	if s.Authoring {
-		fmt.Printf("BETA computation n=%s\n", n.String())
-		for i, b := range s.JamState.RecentBlocks {
-			fmt.Printf("BETA computation -- rb[%d]=%s\n", i, b.String())
-		}
-	}
 
 }
 

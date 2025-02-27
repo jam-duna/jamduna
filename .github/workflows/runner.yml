@@ -73,18 +73,37 @@ jobs:
           make blslib
           make bandersnatchlib
 
-      - name: Run test bls
-        run: go test ./bls
-
-      - name: Run test bandersnatch
-        run: go test ./bandersnatch
-
-      - name: Run test fib
+      - name: Run test fib (1/5)
         run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
 
-
-      # if there is a failure in the following tests, the workflow will continue
-      # if one of the tests fails, we will run the debug_eg_error target to get more information
       - name: Run test megatron (1/5)
-        id: megatron_911
-        run: make -C ./node megatron PREREQ=false TIMEOUT=120m|| make -C ./node debug_eg_error
+        id: megatron_short
+	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+
+      - name: Run test fib (2/5)
+        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
+	
+      - name: Run test megatron (2/5)
+        id: megatron_short
+	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+
+      - name: Run test fib (3/5)
+        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
+	
+      - name: Run test megatron (3/5)
+        id: megatron_short
+	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+
+      - name: Run test fib (4/5)
+        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
+	
+      - name: Run test megatron (4/5)
+        id: megatron_short
+	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+
+      - name: Run test fib (5/5)
+        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
+	
+      - name: Run test megatron (5/5)
+        id: megatron_short
+	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true

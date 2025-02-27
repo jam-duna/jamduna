@@ -49,6 +49,7 @@ megatron_pprof:
 	echo "Running TestMegatron using test binary with timeout $(TIMEOUT)..."; \
 	echo "./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=1 -prereq_test=true"; \
 	./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=1 -prereq_test=true
+	go tool pprof -http=":8080" cpu.pprof
 
 debug_eg_error:
 	@echo "Displaying error and status logs from guarantees..."

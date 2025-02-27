@@ -27,7 +27,9 @@ func Root() Logger {
 
 // --- Module management ---
 // moduleEnabled keeps track of whether a module’s logging is enabled.
-var moduleEnabled = make(map[string]bool)
+var moduleEnabled = map[string]bool{
+	"authoring": false,
+}
 
 // EnableModule enables logging for the specified module.
 func EnableModule(module string) {
@@ -41,10 +43,6 @@ func DisableModule(module string) {
 
 // isModuleEnabled checks if logging is enabled for the given module.
 func isModuleEnabled(module string) bool {
-	if module == "authoring" {
-		return true
-	}
-
 	enabled, ok := moduleEnabled[module]
 	return ok && enabled
 }

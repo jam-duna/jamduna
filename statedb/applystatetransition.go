@@ -1,0 +1,224 @@
+package statedb
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
+)
+
+// given previous safrole, applt state transition using block
+// σ'≡Υ(σ,B)
+func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
+
+	s = oldState.Copy()
+	old_timeslot := s.GetSafrole().Timeslot
+	s.JamState = oldState.JamState.Copy()
+	s.Block = blk
+	s.ParentHeaderHash = blk.Header.ParentHeaderHash
+	s.HeaderHash = blk.Header.Hash()
+	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
+	if !isValid || headerErr != nil {
+		// panic("MK validation check!! Block header is not valid")
+		return s, fmt.Errorf("Block header is not valid")
+	}
+	if s.Id == blk.Header.AuthorIndex {
+		s.Authoring = true
+	}
+	log.Debug(module, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
+	targetJCE := blk.TimeSlot()
+	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
+	// 19-22 - Safrole last
+	ticketExts := blk.Tickets()
+	sf_header := blk.GetHeader()
+	epochMark := blk.EpochMark()
+
+	if epochMark != nil {
+		// s.queuedTickets = make(map[common.Hash]types.Ticket)
+		s.GetJamState().ResetTallyStatistics()
+	}
+	// 0.6.2 4.7 - Recent History Dagga (β†) [No other state related]
+	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
+	// dispute should go here
+	// TODO - 4.12 - Dispute
+	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
+	sf := s.GetSafrole()
+	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
+	if err != nil {
+		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
+		return s, err
+	}
+	err = VerifySafroleSTF(sf, &s2, blk)
+	if err != nil {
+		panic(fmt.Sprintf("VerifySafroleSTF %v\n", err))
+	}
+	s.JamState.SafroleState = &s2
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
+	// use post entropy state rotate the guarantors
+	s.RotateGuarantors()
+
+	// preparing for the rho transition
+	disputes := blk.Disputes()
+	assurances := blk.Assurances()
+	guarantees := blk.Guarantees()
+	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]
+	// 4.16 available work report also updated
+	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE)
+	if err != nil {
+		return s, err
+	}
+	for validatorIndex, nassurances := range num_assurances {
+		s.JamState.tallyStatistics(uint32(validatorIndex), "assurances", uint32(nassurances))
+	}
+	for validatorIndex, nreports := range num_reports {
+		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", uint32(nreports))
+	}
+	// 4.7 - Recent History [No other state related, but need to do it after rho, before accumulation]
+	s.ApplyStateRecentHistory(blk, &(oldState.AccumulationRoot))
+	// 4.17 Accmuulation [need available work report, ϑ, ξ, δ, χ, ι, φ]
+	// 12.20 gas counting
+	var gas uint64
+	var gas_counting uint64
+	gas = types.AccumulateGasAllocation_GT
+	gas_counting = types.AccumulationGasAllocation * types.TotalCores
+	// get the partial state
+	o := s.JamState.newPartialState()
+	kai_g := o.PrivilegedState.Kai_g
+	for _, g := range kai_g {
+		gas_counting += uint64(g)
+	}
+	if gas < gas_counting {
+		gas = gas_counting
+	}
+	var f map[uint32]uint32
+	var b []BeefyCommitment
+	accumulate_input_wr := s.AvailableWorkReport
+	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
+	n, t, b := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
+	// (χ′, δ†, ι′, φ′)
+	// 12.24 transfer δ‡
+	tau := s.GetTimeslot() // τ′
+	if len(t) > 0 {
+		s.ProcessDeferredTransfers(o, tau, t)
+	}
+	// make sure all service accounts can be written
+	for _, sa := range o.D {
+		sa.Mutable = true
+		sa.Dirty = true
+	}
+	s.ApplyXContext(o)
+	//after accumulation, we need to update the accumulate state
+	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
+	// 0.6.2 4.18 - Preimages [ δ‡, τ′]
+	preimages := blk.PreimageLookups()
+	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE)
+	if err != nil {
+		return s, err
+	}
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "preimages", num_preimage)
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
+	// Update Authorization Pool alpha
+	// 4.19 α'[need φ', so after accumulation]
+	err = s.ApplyStateTransitionAuthorizations()
+	if err != nil {
+		return s, err
+	}
+	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
+	var leaves [][]byte
+	for _, sa := range b {
+		// put (s,h) of C  into leaves
+		leafBytes := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
+		leaves = append(leaves, leafBytes)
+		if s.Authoring {
+			log.Debug("authoring", "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+		}
+	}
+	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
+	s.AccumulationRoot = common.Hash(tree.Root())
+	if len(leaves) > 0 && s.Authoring {
+		log.Debug("authoring", "BEEFY r used in NEXT RecentBlocks", "AccumulationRoot", s.AccumulationRoot)
+	}
+
+	// 4.20 - compute pi
+	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
+	s.StateRoot = s.UpdateTrieState()
+	return s, nil
+}
+
+// Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
+func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
+
+	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
+	d := s.GetJamState()
+	//apply the dispute
+	result, err := d.IsValidateDispute(&disputes)
+	if err != nil {
+		return
+	}
+	//state changing here
+	//cores reading the old jam state
+	//ρ†
+	d.ProcessDispute(result, disputes.Culprit, disputes.Fault)
+	if err != nil {
+		return
+	}
+
+	// original validate assurances logic (prior to guarantees) -- we cannot do signature checking here ... otherwise it would trigger bad sig
+	// for fuzzing to work, we cannot check signature until everything has been properly considered
+	// assuranceErr := s.ValidateAssurancesWithSig(assurances)
+	// if assuranceErr != nil {
+	// 	return 0, 0, err
+	// }
+
+	err = s.ValidateAssurancesTransition(assurances)
+	if err != nil {
+		return
+	}
+
+	// Assurances: get the bitstring from the availability
+	// core's data is now available
+	//ρ††
+	num_assurances, availableWorkReport := d.ProcessAssurances(assurances, targetJCE)
+	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
+	s.AvailableWorkReport = availableWorkReport // every block has new available work report
+
+	for i, rho := range s.JamState.AvailabilityAssignments {
+		if rho == nil {
+			log.Trace(debugA, "ApplyStateTransitionRho before Verify_Guarantees", "core", i, "WorkPackage Hash", rho)
+		} else {
+			log.Trace(debugA, "ApplyStateTransitionRho before Verify_Guarantees", "core", i, "WorkPackage Hash", rho.WorkReport.GetWorkPackageHash())
+		}
+	}
+
+	// Sort the assurances by validator index
+	// sortingErr := CheckSortingEAs(assurances)
+	// if sortingErr != nil {
+	// 	return 0, 0, sortingErr
+	// }
+
+	// Verify each assurance's signature
+	// sigErr := s.ValidateAssurancesSig(assurances)
+	// if sigErr != nil {
+	// 	return 0, 0, sigErr
+	// }
+
+	// Guarantees
+	err = s.Verify_Guarantees()
+	if err != nil {
+		return
+	}
+
+	num_reports = d.ProcessGuarantees(guarantees)
+	for i, rho := range s.JamState.AvailabilityAssignments {
+		if rho == nil {
+			log.Trace(debugA, "ApplyStateTransitionRho after ProcessGuarantees", "core", i, "WorkPackage Hash", rho)
+		} else {
+			log.Trace(debugA, "ApplyStateTransitionRhoafter ProcessGuarantees", "core", i, "WorkPackage Hash", rho.WorkReport.GetWorkPackageHash())
+		}
+	}
+	return num_reports, num_assurances, nil
+}
