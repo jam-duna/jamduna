@@ -21,8 +21,7 @@ make fuzz_only
 # STEP 3: Zipping Data folders & Fuzzed folders
 # ---------------------------------------
 echo -e "${GREEN}STEP 3: Zipping 'Data' & 'Fuzzed' folders${NC}"
-./data_zipper.sh
-./fuzzed_zipper.sh
+./data_fuzz_zipper.sh
 
 # ---------------------------------------
 # STEP 4: Copying over to jamtestnet

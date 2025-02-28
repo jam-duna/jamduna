@@ -464,53 +464,103 @@ func TestModify(t *testing.T) {
 	DeleteLevelDB()
 }
 
+func truncateValue(value []byte) string {
+	maxLen := 8
+	if len(value) > maxLen {
+		half := maxLen / 2
+		start := value[:half]
+		end := value[len(value)-half:]
+		return fmt.Sprintf("0x%x...%x", start, end)
+	}
+	return fmt.Sprintf("0x%x", value)
+}
+
 // TestDelete tests the deletion of key-value pairs from the Merkle tree
 func TestDelete(t *testing.T) {
-	// Test data
-	data := [][2][]byte{
-		{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("24232437f5b3f2380ba9089bdbc45efaffbe386602cb1ecc2c17f1d0")},
-		{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
-		{hex2Bytes("a3dc3bed1b0727caf428961bed11c9998ae2476d8a97fad203171b628363d9a2"), hex2Bytes("8a0dafa9d6ae6177")},
-		{hex2Bytes("15207c233b055f921701fc62b41a440d01dfa488016a97cc653a84afb5f94fd5"), hex2Bytes("157b6c821169dacabcf26690df")},
-		{hex2Bytes("b05ff8a05bb23c0d7b177d47ce466ee58fd55c6a0351a3040cf3cbf5225aab19"), hex2Bytes("6a208734106f38b73880684b")},
+	bptDebug := true
+	filePath := "../jamtestvectors/trie/trie.json"
+	testData, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read JSON file: %v", err)
 	}
 
-	// Create a new Merkle Tree
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	// Parse the JSON file
+	var testVectors []TestVector
+	err = json.Unmarshal(testData, &testVectors)
+	if err != nil {
+		t.Fatalf("Failed to parse JSON file: %v", err)
+	}
 
-	// Record root hashes after each insertion
-	var rootHashes [][]byte
-
-	for _, kv := range data {
-		tree.Insert(kv[0], kv[1])
-		rootHash := tree.GetRootHash()
-		rootHashes = append(rootHashes, rootHash)
+	// Run each test case
+	for i, testCase := range testVectors {
+		// Create the Merkle Tree input from the test case
 		if bptDebug {
-			fmt.Printf("Inserted key: %x, value: %x, RootHash: %x\n", kv[0], kv[1], rootHash)
+			fmt.Printf("==== testCase %d ====\n", i)
+			//fmt.Printf("kv:%v\n", testCase)
 		}
-	}
-
-	// Check root hashes after each deletion in reverse order
-	for i := len(data) - 1; i >= 0; i-- {
-		kv := data[i]
-		err := tree.Delete(kv[0])
-		if err != nil {
-			t.Fatalf("Failed to delete key: %x, error: %v", kv[0], err)
-		}
-		rootHash := tree.GetRootHash()
-		expectedRootHash := make([]byte, 32)
-		if i > 0 {
-			expectedRootHash = rootHashes[i-1]
+		var data [][2][]byte
+		for k, v := range testCase.Input {
+			key, _ := hex.DecodeString(k)
+			value, _ := hex.DecodeString(v)
+			data = append(data, [2][]byte{key, value})
 		}
 		if bptDebug {
-			fmt.Printf("Deleted key: %x, RootHash after deletion: %x\n", kv[0], rootHash)
+			//fmt.Printf("data=%x (len=%v)\n", data, len(data))
+			for idx, kv := range data {
+				key := kv[0]
+				value := kv[1]
+				fmt.Printf("key[%d]: %x, value(len=%d): %v\n", idx, key, len(value), truncateValue(value))
+			}
 		}
-		if !compareBytes(rootHash, expectedRootHash) {
-			t.Fatalf("RootHash mismatch after deleting key: %x. Got: %x, Expected: %x", kv[0], rootHash, expectedRootHash)
+
+		test_db, _ := initLevelDB()
+		tree := NewMerkleTree(nil, test_db)
+
+		// Record root hashes after each insertion
+		var rootHashes [][]byte
+
+		if bptDebug {
+			fmt.Printf("-------- Testing Insert ---------- \n")
 		}
+		for idx, kv := range data {
+			tree.Insert(kv[0], kv[1])
+			rootHash := tree.GetRootHash()
+			rootHashes = append(rootHashes, rootHash)
+			if bptDebug || true {
+				fmt.Printf("H'=%x, Inserted key[%d]: %x, value(len=%d): %v\n", rootHash, idx, kv[0], len(kv[1]), truncateValue(kv[1]))
+			}
+		}
+
+		// Check root hashes after each deletion in reverse order
+		if bptDebug {
+			fmt.Printf("-------- Testing Deletion -------- \n")
+		}
+		isFailure := false
+		for i := len(data) - 1; i >= 0; i-- {
+			kv := data[i]
+			err := tree.Delete(kv[0])
+			if err != nil {
+				t.Fatalf("Failed to delete key: %x, error: %v", kv[0], err)
+			}
+			rootHash := tree.GetRootHash()
+			expectedRootHash := make([]byte, 32)
+			if i > 0 {
+				expectedRootHash = rootHashes[i-1]
+			}
+			if bptDebug || true {
+				fmt.Printf("H':%x, Deleted key[%d]: %x\n", rootHash, i, kv[0])
+			}
+			if !compareBytes(rootHash, expectedRootHash) {
+				isFailure = true
+				t.Fatalf("RootHash mismatch after deleting key: %x. Got: %x, Expected: %x", kv[0], rootHash, expectedRootHash)
+			}
+		}
+		if bptDebug && !isFailure {
+			fmt.Printf("testCase %d Success\n\n", i)
+		}
+		tree.Close()
 	}
-	tree.Close()
+
 	DeleteLevelDB()
 }
 

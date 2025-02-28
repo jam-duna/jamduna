@@ -18,3 +18,6 @@ cmd/importblocks/fuzzed.zip
 cmd/importblocks/core.zip
 cmd/codec-web/codec-web
 /statedb/testdata
+cmd/importblocks/data/.DS_Store
+/cmd/importblocks/data
+.DS_Store

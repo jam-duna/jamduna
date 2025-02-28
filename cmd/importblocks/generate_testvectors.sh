@@ -26,7 +26,7 @@ run_single_test() {
   # Change to node directory
   pushd ../../node/ > /dev/null || {
     echo "Error: node directory not found."
-    exit 1
+    return 1
   }
 
   # Start "make $node_target" in the background, piping to tee
@@ -42,12 +42,10 @@ run_single_test() {
   while IFS= read -r line; do
     # Regex to match dataDir=.../jam/1234_abcdef1234/node0
     if [[ "$line" =~ dataDir=(/[^[:space:]]*/jam)/([0-9]+_[a-z0-9]+)/node[0-9]+ ]]; then
-      # Capture the first occurrence only
       if [ -z "$found_jamdir" ] || [ -z "$found_jobid" ]; then
         found_jamdir="${BASH_REMATCH[1]}"
         found_jobid="${BASH_REMATCH[2]}"
 
-        # Strip everything before the underscore so "1234_abcdef1234" → "abcdef1234"
         found_jobid="${found_jobid#*_}"
 
         echo "!!!Captured JAMDIR: $found_jamdir"
@@ -60,16 +58,15 @@ run_single_test() {
   trap - EXIT  # Clear trap before removing the pipe
   rm -f "$pipe_file"
 
-  # Check we found values
   if [ -z "$found_jamdir" ] || [ -z "$found_jobid" ]; then
     echo "No JAMDIR/JOBID found in output for target '$node_target'."
-    exit 1
+    return 1
   fi
 
   # Return to original directory
   popd > /dev/null || {
     echo "Error: Could not return to original directory."
-    exit 1
+    return 1
   }
   echo "Calling cpnode with MODE=$mode, JAMDIR=$found_jamdir, JOBID=$found_jobid..."
   make cpnode JAMDIR="$found_jamdir" MODE="$mode" JOBID="$found_jobid"
@@ -90,7 +87,10 @@ for pair in "${test_pairs[@]}"; do
   node_target=$1
   cpnode_mode=$2
 
-  run_single_test "$node_target" "$cpnode_mode"
+  if ! run_single_test "$node_target" "$cpnode_mode"; then
+    echo "Test for target '$node_target' failed, continuing to next."
+    continue
+  fi
   processed_modes="$processed_modes $cpnode_mode"
 done
 

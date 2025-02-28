@@ -332,6 +332,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 
+	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
+	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir)
+
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {

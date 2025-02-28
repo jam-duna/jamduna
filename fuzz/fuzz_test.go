@@ -20,7 +20,7 @@ const (
 	STF_Reports    = "reports"
 	STF_Assurances = "assurances"
 	STF_Generic    = "generic"
-	Base_Dir       = "../cmd/importblocks/data/"
+	Base_Dir       = "../cmd/importblocks/rawdata/"
 )
 
 func readSTF(baseDir, targeted_mode string, t *testing.T) ([]*statedb.StateTransition, error) {

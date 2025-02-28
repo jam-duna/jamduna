@@ -306,7 +306,7 @@ func fuzzBlockGServiceItemTooLow(block *types.Block, s *statedb.StateDB) error {
 	work_result := randomGuaranteeResult(g)
 	service_id := work_result.ServiceID
 
-	v, ok, err := s.GetTrie().GetService(255, service_id)
+	v, ok, err := s.GetTrie().GetService(service_id)
 	if err != nil || !ok {
 		return nil
 	}
@@ -386,7 +386,7 @@ func fuzzBlockGBadServiceID(block *types.Block, s *statedb.StateDB) error {
 	}
 	// get service from trie
 	for _, result := range g.Report.Results {
-		_, ok, _ := t.GetService(255, result.ServiceID+1)
+		_, ok, _ := t.GetService(result.ServiceID + 1)
 		if !ok {
 			result.ServiceID++
 			// TODO: make sure there is no serviceID in state

@@ -45,14 +45,14 @@ popd > /dev/null
 
 # 4) Remove existing items in jamtestnet for a clean copy
 echo "Removing old data in '$JAMTESTNET_DIR' to ensure a clean copy..."
-rm -rf "${JAMTESTNET_DIR}/data.zip" \
-       "${JAMTESTNET_DIR}/fuzzed.zip" \
-       "${JAMTESTNET_DIR}/data" \
-       "${JAMTESTNET_DIR}/fuzzed"
+rm -rf "${JAMTESTNET_DIR}/data.zip"
+rm -rf "${JAMTESTNET_DIR}/data" 
+rm -rf "${JAMTESTNET_DIR}/fuzzed.zip"
+rm -rf "${JAMTESTNET_DIR}/fuzzed"
 
 # 5) Copy the new data over
-echo "Copying new data.zip, fuzzed.zip, data/, fuzzed/ to '$JAMTESTNET_DIR'..."
-cp -rv data.zip fuzzed.zip data fuzzed "$JAMTESTNET_DIR" || {
+echo "Copying new data.zip, data/ to '$JAMTESTNET_DIR'..."
+cp -rv data.zip data "$JAMTESTNET_DIR" || {
   echo -e "${RED}Warning:${NC} One or more files/folders might be missing. Check manually if needed."
 }
 
