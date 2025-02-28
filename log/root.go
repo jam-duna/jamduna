@@ -9,7 +9,8 @@ import (
 var root atomic.Value
 
 func init() {
-	root.Store(&logger{slog.New(DiscardHandler())})
+	root.Store(&logger{slog.New(DiscardHandler()), nil})
+	
 }
 
 // SetDefault sets the default global logger
@@ -58,6 +59,7 @@ func Trace(module string, msg string, ctx ...interface{}) {
 	newCtx := append([]interface{}{"module", module}, ctx...)
 	Root().Write(LevelTrace, msg, newCtx...)
 }
+
 
 // Debug logs a message at the debug level for a specific module.
 func Debug(module string, msg string, ctx ...interface{}) {

@@ -2,7 +2,9 @@ package log
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"log/syslog"
 	"math"
 	"os"
 	"runtime"
@@ -55,7 +57,6 @@ func FromLegacyLevel(lvl int) slog.Level {
 		break
 	}
 
-	// TODO: should we allow use of custom levels or force them to match existing max/min if they fall outside the range as I am doing here?
 	if lvl > legacyLevelTrace {
 		return LevelTrace
 	}
@@ -82,27 +83,8 @@ func LevelAlignedString(l slog.Level) string {
 	}
 }
 
-// LevelString returns a string containing the name of a Lvl.
-func LevelString(l slog.Level) string {
-	switch l {
-	case LevelTrace:
-		return "trace"
-	case slog.LevelDebug:
-		return "debug"
-	case slog.LevelInfo:
-		return "info"
-	case slog.LevelWarn:
-		return "warn"
-	case slog.LevelError:
-		return "error"
-	case LevelCrit:
-		return "crit"
-	default:
-		return "unknown"
-	}
-}
 
-// A Logger writes key/value pairs to a Handler
+// Logger writes key/value pairs to a Handler
 type Logger interface {
 	// With returns a new Logger that has this logger's attributes plus the given attributes
 	With(ctx ...interface{}) Logger
@@ -113,7 +95,7 @@ type Logger interface {
 	// Log logs a message at the specified level with context key/value pairs
 	Log(level slog.Level, msg string, ctx ...interface{})
 
-	// Trace log a message at the trace level with context key/value pairs
+	// Trace logs a message at the trace level with context key/value pairs
 	Trace(msg string, ctx ...interface{})
 
 	// Debug logs a message at the debug level with context key/value pairs
@@ -123,7 +105,7 @@ type Logger interface {
 	Info(msg string, ctx ...interface{})
 
 	// Warn logs a message at the warn level with context key/value pairs
-	Warn(msg string, ctx ...interface{})
+	Warn(msg string, ctx ...any)
 
 	// Error logs a message at the error level with context key/value pairs
 	Error(msg string, ctx ...interface{})
@@ -143,12 +125,16 @@ type Logger interface {
 
 type logger struct {
 	inner *slog.Logger
+	writer *syslog.Writer
 }
+
 
 // NewLogger returns a logger with the specified handler set
 func NewLogger(h slog.Handler) Logger {
-	return &logger{
-		slog.New(h),
+	writer, _ := syslog.Dial("tcp", "dev.jamduna.org:5000", syslog.LOG_INFO, "jamduna")
+     	return &logger{
+	   inner: slog.New(h),
+	   writer: writer,
 	}
 }
 
@@ -156,22 +142,62 @@ func (l *logger) Handler() slog.Handler {
 	return l.inner.Handler()
 }
 
+func LevelString(l slog.Level) string {
+	switch l {
+	case LevelTrace:
+		return "trace"
+	case slog.LevelDebug:
+		return "debug"
+	case slog.LevelInfo:
+		return "info"
+	case slog.LevelWarn:
+		return "warn"
+	case slog.LevelError:
+		return "error"
+	case LevelCrit:
+		return "crit"
+	default:
+		return "unknown"
+	}
+}
 // Write logs a message at the specified level.
 func (l *logger) Write(level slog.Level, msg string, attrs ...any) {
-
 	if !l.inner.Enabled(context.Background(), level) {
 		return
 	}
 
 	var pcs [1]uintptr
 	runtime.Callers(3, pcs[:])
-
-	//if len(attrs)%2 != 1 {
-	//	attrs = append(attrs, nil, errorKey, "Normalized even number of arguments by adding nil")
-	//}
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
 	r.Add(attrs...)
+
+	if l.writer != nil {
+		str := fmt.Sprintf("%s|%s|%v\n", LevelAlignedString(r.Level), r.Message, attrs)
+		/*for i := 0; i < len(attrs); i += 2 {
+		key := fmt.Sprintf("%v", attrs[i])
+		var value string
+		if i+1 < len(attrs) {
+			value = fmt.Sprintf("%v", attrs[i+1])
+		}
+		str += fmt.Sprintf("|%s=%s", key, value)
+		} */
+	switch r.Level {
+		case LevelCrit:
+		 l.writer.Crit(str)
+		case slog.LevelError:
+		 l.writer.Err(str)
+		case slog.LevelWarn:
+		 l.writer.Warning(str)
+		case slog.LevelInfo:
+		 l.writer.Info(str)
+		case slog.LevelDebug, LevelTrace:
+		 l.writer.Debug(str)
+		default:
+		 l.writer.Info(str)
+		}
+	}
 	l.inner.Handler().Handle(context.Background(), r)
+
 }
 
 func (l *logger) Log(level slog.Level, msg string, attrs ...any) {
@@ -179,7 +205,7 @@ func (l *logger) Log(level slog.Level, msg string, attrs ...any) {
 }
 
 func (l *logger) With(ctx ...interface{}) Logger {
-	return &logger{l.inner.With(ctx...)}
+	return &logger{l.inner.With(ctx...), nil}
 }
 
 func (l *logger) New(ctx ...interface{}) Logger {
@@ -215,3 +241,4 @@ func (l *logger) Crit(msg string, ctx ...interface{}) {
 	l.Write(LevelCrit, msg, ctx...)
 	os.Exit(1)
 }
+
