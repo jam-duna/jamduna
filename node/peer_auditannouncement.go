@@ -279,6 +279,8 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 		return err
 	}
 	defer stream.Close()
+
+	p.jamnp_test_vector("CE144", "AuditAnnouncement", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
@@ -291,6 +293,7 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 		Evidence = First Tranche Evidence (If tranche is 0) OR Subsequent Tranche Evidence (If tranche is not 0)
 	*/
 	if a.Announcement.Tranche == 0 {
+		p.jamnp_test_vector("CE141", "AssuranceDistribution_Tranch0Evidence", a.Evidence_s0[:], a.Evidence_s0[:])
 		err = sendQuicBytes(stream, a.Evidence_s0[:])
 		if err != nil {
 			return err
@@ -326,6 +329,7 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 			if err != nil {
 				return err
 			}
+			p.jamnp_test_vector("CE141", "AssuranceDistribution_TrancheNEvidence", evBytes, ev)
 			err = sendQuicBytes(stream, evBytes)
 			if err != nil {
 				return err

@@ -104,6 +104,7 @@ func (p *Peer) SendPreimageAnnouncement(pa *types.PreimageAnnouncement) (err err
 	defer stream.Close()
 	// --> Service ID ++ Hash ++ Preimage Length
 	paBytes, _ := pa.ToBytes()
+	p.jamnp_test_vector("CE142", "PreimageAnnouncement", paBytes, pa)
 	err = sendQuicBytes(stream, paBytes)
 	if err != nil {
 		return err

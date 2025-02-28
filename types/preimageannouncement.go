@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
 type PreimageAnnouncement struct {
-	ValidatorIndex uint16
-	ServiceIndex   uint32
-	PreimageHash   common.Hash
-	PreimageLen    uint32
+	ValidatorIndex uint16      `json:"validator_index"`
+	ServiceIndex   uint32      `json:"service"`
+	PreimageHash   common.Hash `json:"h"`
+	PreimageLen    uint32      `json:"z"`
 }
 
 func (req *PreimageAnnouncement) String() string {

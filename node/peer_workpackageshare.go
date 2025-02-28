@@ -46,8 +46,8 @@ Guarantor -> Guarantor
 <-- FIN
 */
 type JAMSNPSegmentRootMapping struct {
-	WorkPackageHash common.Hash `json:"workPackageHash"`
-	SegmentRoot     common.Hash `json:"segmentRoot"`
+	WorkPackageHash common.Hash `json:"work_package_hash"`
+	SegmentRoot     common.Hash `json:"segment_root"`
 }
 
 func (mapping *JAMSNPSegmentRootMapping) ToBytes() ([]byte, error) {
@@ -83,9 +83,9 @@ func (mapping *JAMSNPSegmentRootMapping) FromBytes(data []byte) error {
 }
 
 type JAMSNPWorkPackageShare struct {
-	CoreIndex    uint16                     `json:"coreIndex"`
+	CoreIndex    uint16                     `json:"core"`
 	Len          uint8                      `json:"len"`
-	SegmentRoots []JAMSNPSegmentRootMapping `json:"segmentRoots"`
+	SegmentRoots []JAMSNPSegmentRootMapping `json:"segment_roots"`
 	Bundle       []byte                     `json:"bundle"`
 }
 
@@ -161,8 +161,8 @@ func (share *JAMSNPWorkPackageShare) FromBytes(data []byte) error {
 }
 
 type JAMSNPWorkPackageShareResponse struct {
-	WorkReportHash common.Hash `json:"workReportHash"`
-	Signature      types.Ed25519Signature
+	WorkReportHash common.Hash `json:"work_report_hash"`
+	Signature      types.Ed25519Signature `json:"signature"`
 }
 
 // ToBytes serializes the JAMSNPWorkPackageShareResponse struct into a byte array
@@ -233,6 +233,7 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 		return
 	}
 	defer stream.Close()
+	p.jamnp_test_vector("CE134", "WorkPackageShare", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return
@@ -351,6 +352,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		return err
 	}
+	n.jamnp_test_vector("CE134", "WorkPackageShareResponse", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

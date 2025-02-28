@@ -155,6 +155,7 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	if err != nil {
 		return
 	}
+	p.jamnp_test_vector("CE139", "SegmentShardRequest", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return
@@ -204,6 +205,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 	}
 	// <-- Bundle Shard
 	combined_selected_segmentshards, _ := CombineSegmentShards(selected_segmentshards)
+	n.jamnp_test_vector("CE139", "BundleShard", combined_selected_segmentshards, nil)
 	err = sendQuicBytes(stream, combined_selected_segmentshards)
 	if err != nil {
 		log.Error("%s [onSegmentShardRequest:sendQuicBytes] ERR %v\n", n.String(), err)
@@ -214,10 +216,12 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 	if withJustification {
 		for item_idx, s_j := range selected_segment_justifications {
 			s_f := selected_full_justification[item_idx]
+			n.jamnp_test_vector("CE139", "BundleShardf", s_f, nil)
 			err = sendQuicBytes(stream, s_f)
 			if err != nil {
 				return
 			}
+			n.jamnp_test_vector("CE139", "BundleShardj", s_j, nil)
 			err = sendQuicBytes(stream, s_j)
 			if err != nil {
 				return

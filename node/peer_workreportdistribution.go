@@ -137,6 +137,7 @@ func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, cred
 	if err != nil {
 		return err
 	}
+	p.jamnp_test_vector("CE135", "WorkReportDistribution", reqBytes, newReq)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

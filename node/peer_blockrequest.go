@@ -28,9 +28,9 @@ Node -> Node
 <-- FIN
 */
 type JAMSNPBlockRequest struct {
-	HeaderHash    common.Hash `json:"headerHash"`
+	HeaderHash    common.Hash `json:"header_hash"`
 	Direction     uint8       `json:"direction"`
-	MaximumBlocks uint32      `json:"maximumBlocks"`
+	MaximumBlocks uint32      `json:"maximum_blocks"`
 }
 
 // Serialize function to convert the struct into a byte array
@@ -100,6 +100,7 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 		return blocks, err
 	}
 	defer stream.Close()
+	p.jamnp_test_vector("CE128", "BlockRequest", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		log.Crit(module, "SendBlockRequest", "p", p.String(), "err", err)
@@ -161,6 +162,7 @@ func (n *Node) onBlockRequest(stream quic.Stream, msg []byte) (err error) {
 		}
 	*/
 	// CHECK BLOCK if the blockbytes we sent are decodable and equal the headerhash
+	n.jamnp_test_vector("CE128", "BlockRequestBlocks", blockBytes, blocks)
 	err = sendQuicBytes(stream, blockBytes)
 	if err != nil {
 		fmt.Printf("%s onBlockRequest ERR %v", n.String(), err)

@@ -94,6 +94,7 @@ func (p *Peer) SendAssurance(a *types.Assurance) (err error) {
 	}
 	defer stream.Close()
 	// --> Assurance
+	p.jamnp_test_vector("CE141", "AssuranceDistribution", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

@@ -327,3 +327,7 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 	}
 	return nil
 }
+
+func (p *Peer) jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {
+	write_jamnp_test_vector(ce, "request", testVectorName, b, obj)
+}

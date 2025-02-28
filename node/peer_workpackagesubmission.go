@@ -29,9 +29,9 @@ Builder -> Guarantor
 */
 
 type JAMSNPWorkPackage struct {
-	CoreIndex   uint16                `json:"coreIndex"`
-	WorkPackage types.WorkPackage     `json:"workPackage"`
-	Extrinsic   types.ExtrinsicsBlobs `json:"extrinsic"`
+	CoreIndex   uint16                `json:"core_index"`
+	WorkPackage types.WorkPackage     `json:"work_package"`
+	Extrinsic   types.ExtrinsicsBlobs `json:"extrinsics"`
 }
 
 // ToBytes serializes the JAMSNPWorkPackage struct into a byte array
@@ -97,6 +97,7 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 		return err
 	}
 	defer stream.Close()
+	p.jamnp_test_vector("CE133", "WorkPackageSubmission", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

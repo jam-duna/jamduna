@@ -126,6 +126,7 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 		return err
 	}
 	defer stream.Close()
+	p.jamnp_test_vector("CE129", "StateRequest", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err
@@ -155,9 +156,11 @@ func (n *Node) onStateRequest(stream quic.Stream, msg []byte) (err error) {
 
 	}
 	//<-- [Boundary Node]
+	n.jamnp_test_vector("CE129", "BoundaryNode", common.ConcatenateByteSlices(boundarynodes), boundarynodes)
 	err = sendQuicBytes(stream, common.ConcatenateByteSlices(boundarynodes))
 	//<-- [Key ++ Value]
 	kvbytes, err := keyvalues.ToBytes()
+	n.jamnp_test_vector("CE129", "BoundaryNode", kvbytes, nil)
 	err = sendQuicBytes(stream, kvbytes)
 
 	// <-- FIN

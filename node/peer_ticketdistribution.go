@@ -113,6 +113,7 @@ func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool
 	}
 	defer stream.Close()
 	// TODO: proper treatment of Proxy
+	p.jamnp_test_vector("CE131", "TicketDistribution", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

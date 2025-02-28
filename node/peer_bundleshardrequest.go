@@ -63,6 +63,7 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 	if err != nil {
 		return
 	}
+	p.jamnp_test_vector("CE138", "BundleShardRequest", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return
@@ -101,6 +102,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
+	n.jamnp_test_vector("CE138", "BundleShard", bundleShard, nil)
 	err = sendQuicBytes(stream, bundleShard)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR1 %v\n", err)
@@ -108,6 +110,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 	}
 
 	// <-- Justification
+	n.jamnp_test_vector("CE138", "Justification", b_justification, nil)
 	err = sendQuicBytes(stream, b_justification)
 	if err != nil {
 		return err

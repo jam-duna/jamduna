@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"path/filepath"
 	"reflect"
 
 	"math/big"
@@ -53,6 +54,8 @@ const (
 	quicAddr     = "127.0.0.1:%d"
 	godMode      = false
 	Grandpa      = false
+
+	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 )
 
 var bootstrap_auth_codehash = common.Hash(common.FromHex("0x8c30f2c101674af1da31769e96ce72e81a4a44c89526d7d3ff0a1a511d5f3c9f"))
@@ -1455,8 +1458,43 @@ func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Blo
 	return &st
 }
 
-func generateObject() interface{} {
-	return nil
+// write_jamnp_test_vector writes binary and JSON test vectors
+func write_jamnp_test_vector(ce string, typ string, testVectorName string, vBytes []byte, v interface{}) {
+	if writeJAMPNTestVector == false {
+		return
+	}
+	dir := fmt.Sprintf("/tmp/jamnp/%s", ce)
+	err := os.MkdirAll(dir, 0755) // Ensure the directory exists
+	if err != nil {
+		fmt.Printf("Failed to create directory %s: %v\n", dir, err)
+		return
+	}
+
+	// Write .bin file with vBytes
+	fnBin := filepath.Join(dir, fmt.Sprintf("%s-%s.bin", testVectorName, typ))
+	err = os.WriteFile(fnBin, vBytes, 0644)
+	if err != nil {
+		fmt.Printf("Failed to write binary file %s: %v\n", fnBin, err)
+	}
+
+	// Write .json file with v if not nil
+	if v != nil {
+		fnJSON := filepath.Join(dir, fmt.Sprintf("%s-%s.json", testVectorName, typ))
+		jsonData, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			fmt.Printf("Failed to marshal JSON for %s: %v\n", fnJSON, err)
+			return
+		}
+
+		err = os.WriteFile(fnJSON, jsonData, 0644)
+		if err != nil {
+			fmt.Printf("Failed to write JSON file %s: %v\n", fnJSON, err)
+		}
+	}
+}
+
+func (n *Node) jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {
+	write_jamnp_test_vector(ce, "response", testVectorName, b, obj)
 }
 
 // Split the []byte into Hash of fixed size

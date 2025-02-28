@@ -2,8 +2,8 @@ package types
 
 import (
 	"encoding/json"
-	//"errors"
 	"fmt"
+
 	//"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -15,6 +15,11 @@ type BandersnatchRingSignature [ExtrinsicSignatureInBytes]byte
 
 func (b BandersnatchKey) Hash() common.Hash {
 	return common.Hash(b)
+}
+
+
+func (k BandersnatchRingSignature) MarshalJSON() ([]byte, error) {
+	return json.Marshal(common.Bytes2Hex(k[:]))
 }
 
 func HexToBandersnatchKey(hexStr string) BandersnatchKey {
@@ -37,9 +42,6 @@ func (k *BandersnatchKey) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (s BandersnatchVrfSignature) MarshalJSON() ([]byte, error) {
-	return json.Marshal(common.Bytes2Hex(s[:]))
-}
 
 func (s *BandersnatchVrfSignature) UnmarshalJSON(data []byte) error {
 	var hexStr string
@@ -52,4 +54,8 @@ func (s *BandersnatchVrfSignature) UnmarshalJSON(data []byte) error {
 	}
 	copy(s[:], bytes)
 	return nil
+}
+
+func (s BandersnatchVrfSignature) MarshalJSON() ([]byte, error) {
+	return json.Marshal(common.Bytes2Hex(s[:]))
 }

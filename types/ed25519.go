@@ -22,6 +22,10 @@ type Ed25519Key common.Hash
 type Ed25519Priv ed25519.PrivateKey
 type Ed25519Signature [Ed25519SignatureSize]byte
 
+func (k Ed25519Signature) MarshalJSON() ([]byte, error) {
+	return json.Marshal(common.Bytes2Hex(k[:]))
+}
+
 func (k Ed25519Key) MarshalJSON() ([]byte, error) {
 	return json.Marshal(common.Hash(k).Hex())
 }

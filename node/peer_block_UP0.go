@@ -11,8 +11,8 @@ import (
 )
 
 type JAMSNP_BlockInfo struct {
-	HeaderHash common.Hash
-	Slot       uint32
+	HeaderHash common.Hash `json:"header_hash"`
+	Slot       uint32      `json:"slot"`
 }
 
 func (bi *JAMSNP_BlockInfo) ToBytes() []byte {
@@ -34,8 +34,8 @@ func (bi *JAMSNP_BlockInfo) FromBytes(bytes []byte) error {
 }
 
 type JAMSNP_Handshake struct {
-	FinalizedBlock JAMSNP_BlockInfo
-	Leaves         []JAMSNP_BlockInfo
+	FinalizedBlock JAMSNP_BlockInfo   `json:"finalized_block"`
+	Leaves         []JAMSNP_BlockInfo `json:"leaves"`
 }
 
 func (hs *JAMSNP_Handshake) ToBytes() []byte {
@@ -146,6 +146,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 			errChan <- fmt.Errorf("handshake_bytes is nil")
 			return
 		}
+		p.jamnp_test_vector("UP0", "BlockAnnouncement", handshake_bytes, handshake)
 		err = sendQuicBytes(stream, handshake_bytes)
 		if err != nil {
 			errChan <- err
