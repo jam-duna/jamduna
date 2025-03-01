@@ -2,7 +2,7 @@ package types
 
 import (
 	"encoding/json"
-	"math"
+	//	"math"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -85,11 +85,6 @@ type AccumulationState struct {
 type GasAttributable struct {
 	ServiceIndex int     `json:"service_index"`
 	Gas          float64 `json:"gas"`
-}
-
-func ComputeC_Base(blob_length int) int {
-	c := int(math.Ceil(float64(blob_length) / float64(W_E)))
-	return c
 }
 
 // For BPT

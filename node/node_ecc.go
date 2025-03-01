@@ -4,8 +4,8 @@ import (
 	//"bytes"
 	//"context"
 
-	//"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
@@ -125,12 +125,17 @@ func (n *Node) ReadKVByte(key []byte) ([]byte, bool, error) {
 	return val, true, nil
 }
 
+func ComputeC_Base(blob_length int) int {
+	c := int(math.Ceil(float64(blob_length) / float64(types.W_E)))
+	return c
+}
+
 func (n *Node) encode(data []byte, isFixed bool, data_len int) ([][][]byte, error) {
 	// Load the file and encode them into segments of chunks. (3D byte array)
-	c_base := 6
+	c_base := types.W_P // This is segegment s_club case
 	if !isFixed {
 		// get the veriable c_base by computing roundup(|b|/Wc)
-		c_base = types.ComputeC_Base(int(data_len))
+		c_base = ComputeC_Base(int(data_len))
 	}
 	// encode the data
 	encoded_data, err := erasurecoding.Encode(data, c_base)
@@ -143,10 +148,10 @@ func (n *Node) encode(data []byte, isFixed bool, data_len int) ([][][]byte, erro
 
 func (n *Node) decode(data [][][]byte, isFixed bool, data_len int) ([]byte, error) {
 	// Load the file and encode them into segments of chunks. (3D byte array)
-	c_base := 6
+	c_base := types.W_P // This is segegment s_club case
 	if !isFixed {
 		// get the veriable c_base by computing roundup(|b|/Wc)
-		c_base = types.ComputeC_Base(int(data_len))
+		c_base = ComputeC_Base(int(data_len))
 	}
 	// encode the data
 	encoded_data, err := erasurecoding.Decode(data, c_base)

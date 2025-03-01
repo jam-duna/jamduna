@@ -1,7 +1,7 @@
 package log
 
 import (
-       "fmt"
+	"fmt"
 	"log/syslog"
 	"testing"
 )

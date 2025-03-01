@@ -7,6 +7,11 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+const (
+	debugEC = "c"
+	module  = "ec"
+)
+
 // nonZeroEntry is an auxiliary structure for the precomputed flattened Lagrange evaluation matrix,
 // recording for each row element which validator (s) has a non-negative gfLog value.
 type nonZeroEntry struct {
@@ -26,7 +31,7 @@ var (
 // GetCodingRate returns the encoding parameters: K (number of data shards) and N (total validators).
 // Example: K = types.W_E/2, N = types.TotalValidators.
 func GetCodingRate() (coding_rate_K int, coding_rate_N int) {
-	coding_rate_K = types.W_E / 2
+	coding_rate_K = 2
 	coding_rate_N = types.TotalValidators
 	return
 }

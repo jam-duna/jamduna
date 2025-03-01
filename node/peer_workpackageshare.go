@@ -161,7 +161,7 @@ func (share *JAMSNPWorkPackageShare) FromBytes(data []byte) error {
 }
 
 type JAMSNPWorkPackageShareResponse struct {
-	WorkReportHash common.Hash `json:"work_report_hash"`
+	WorkReportHash common.Hash            `json:"work_report_hash"`
 	Signature      types.Ed25519Signature `json:"signature"`
 }
 

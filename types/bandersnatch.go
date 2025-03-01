@@ -17,7 +17,6 @@ func (b BandersnatchKey) Hash() common.Hash {
 	return common.Hash(b)
 }
 
-
 func (k BandersnatchRingSignature) MarshalJSON() ([]byte, error) {
 	return json.Marshal(common.Bytes2Hex(k[:]))
 }
@@ -41,7 +40,6 @@ func (k *BandersnatchKey) UnmarshalJSON(data []byte) error {
 	*k = BandersnatchKey(common.HexToHash(hexStr))
 	return nil
 }
-
 
 func (s *BandersnatchVrfSignature) UnmarshalJSON(data []byte) error {
 	var hexStr string

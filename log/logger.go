@@ -83,7 +83,6 @@ func LevelAlignedString(l slog.Level) string {
 	}
 }
 
-
 // Logger writes key/value pairs to a Handler
 type Logger interface {
 	// With returns a new Logger that has this logger's attributes plus the given attributes
@@ -124,17 +123,16 @@ type Logger interface {
 }
 
 type logger struct {
-	inner *slog.Logger
+	inner  *slog.Logger
 	writer *syslog.Writer
 }
-
 
 // NewLogger returns a logger with the specified handler set
 func NewLogger(h slog.Handler) Logger {
 	writer, _ := syslog.Dial("tcp", "dev.jamduna.org:5000", syslog.LOG_INFO, "jamduna")
-     	return &logger{
-	   inner: slog.New(h),
-	   writer: writer,
+	return &logger{
+		inner:  slog.New(h),
+		writer: writer,
 	}
 }
 
@@ -160,6 +158,7 @@ func LevelString(l slog.Level) string {
 		return "unknown"
 	}
 }
+
 // Write logs a message at the specified level.
 func (l *logger) Write(level slog.Level, msg string, attrs ...any) {
 	if !l.inner.Enabled(context.Background(), level) {
@@ -181,19 +180,19 @@ func (l *logger) Write(level slog.Level, msg string, attrs ...any) {
 		}
 		str += fmt.Sprintf("|%s=%s", key, value)
 		} */
-	switch r.Level {
+		switch r.Level {
 		case LevelCrit:
-		 l.writer.Crit(str)
+			l.writer.Crit(str)
 		case slog.LevelError:
-		 l.writer.Err(str)
+			l.writer.Err(str)
 		case slog.LevelWarn:
-		 l.writer.Warning(str)
+			l.writer.Warning(str)
 		case slog.LevelInfo:
-		 l.writer.Info(str)
+			l.writer.Info(str)
 		case slog.LevelDebug, LevelTrace:
-		 l.writer.Debug(str)
+			l.writer.Debug(str)
 		default:
-		 l.writer.Info(str)
+			l.writer.Info(str)
 		}
 	}
 	l.inner.Handler().Handle(context.Background(), r)
@@ -241,4 +240,3 @@ func (l *logger) Crit(msg string, ctx ...interface{}) {
 	l.Write(LevelCrit, msg, ctx...)
 	os.Exit(1)
 }
-

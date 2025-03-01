@@ -1095,6 +1095,7 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uin
 		requests[i] = req
 	}
 
+	// CHECK
 	responses, err := n.makeRequests(requests, types.W_E/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
 	if err != nil {
 		fmt.Printf("Error in fetching import segments By ErasureRoot: %v\n", err)
@@ -1124,7 +1125,7 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uin
 	for return_idx, segmentShard := range receiveShard {
 		segmentShardRaw := make([][][]byte, 1)
 		segmentShardRaw[0] = segmentShard
-		exported_segment, err := n.decode(segmentShardRaw, true, types.FixedSegmentSizeG)
+		exported_segment, err := n.decode(segmentShardRaw, true, types.W_G)
 		if err != nil {
 			fmt.Printf("Error in fetching import segments decode: %v\n", err)
 		}
@@ -1148,6 +1149,7 @@ func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength
 		requests[i] = req
 	}
 
+	// CHECK W_E
 	responses, err := n.makeRequests(requests, types.W_E/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
 	if err != nil {
 		fmt.Printf("Error in fetching bundle segments makeRequests: %v\n", err)

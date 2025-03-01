@@ -178,8 +178,9 @@ func generateErasureRootShardIdxKey(erasureRoot common.Hash, shardIndex uint16) 
 	return fmt.Sprintf("es_%v_%d", erasureRoot, shardIndex)
 }
 
+// used in CE139 GetSegmentShard_Assurer
 func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, err error) {
-	fixedSegmentSize := types.W_S * 2
+	fixedSegmentSize := types.W_P * 2 // tiny 2056, full 12
 	// if len(concatenatedShards)%(fixedSegmentSize) != 0 {
 	// 	return nil, fmt.Errorf("Invalid SegmentShards Len:%v. MUST BE multiple of %v", len(concatenatedShards), fixedSegmentSize)
 	// }
@@ -191,9 +192,10 @@ func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, er
 	return segmentShards, nil
 }
 
+// used in StoreImportDA_Assurer
 func CombineSegmentShards(segmentShards [][]byte) (concatenatedShards []byte, err error) {
 	// Loop through each segment shard and append it to the combined slice
-	fixedSegmentSize := types.W_S * 2
+	fixedSegmentSize := types.W_P * 2 // tiny 2056, full 12
 	for _, shard := range segmentShards {
 		concatenatedShards = append(concatenatedShards, shard...)
 	}
@@ -386,7 +388,7 @@ func (n *Node) getImportSegment(h common.Hash, segmentIndex uint16) ([]byte, boo
 	}
 
 	// Extract and return the requested segment
-	return extractSegment(segmentsConcat, segmentIndex, types.FixedSegmentSizeG), true
+	return extractSegment(segmentsConcat, segmentIndex, types.W_G), true
 }
 
 // Helper function to extract a segment from the concatenated segments
@@ -442,7 +444,7 @@ func (n *Node) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16,
 	s_es_key := fmt.Sprintf("s_%s", esKey)
 
 	log.Trace(debugDA, "StoreImportDA_Assurer concatenatedShards", "n", n.id, "s_es_key", s_es_key)
-	concatenatedShards, err := CombineSegmentShards(segmentShards)
+	concatenatedShards, err := CombineSegmentShards(segmentShards) // REVIEW
 	if err != nil {
 		return err
 	}
@@ -558,7 +560,7 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 	s_es_key := fmt.Sprintf("s_%s", esKey)
 	log.Trace(debugDA, "N%d GetSegmentShard_Assurer s_es_key %v\n", n.id, s_es_key)
 	concatenatedShards, _, err := n.ReadRawKV([]byte(s_es_key))
-	segmentShards, _ := SplitToSegmentShards(concatenatedShards)
+	segmentShards, _ := SplitToSegmentShards(concatenatedShards) // REVIEW
 
 	segmentTree := trie.NewWellBalancedTree(segmentShards, types.Blake2b)
 	recoveredSclubH := segmentTree.RootHash()

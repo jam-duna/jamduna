@@ -1317,8 +1317,8 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 func (vm *VM) hostExport(pi uint32) [][]byte {
 	p, _ := vm.ReadRegister(7) // a0 = 7
 	z, _ := vm.ReadRegister(8) // a1 = 8
-	if z > (W_E * W_S) {
-		z = W_E * W_S
+	if z > (types.W_G) {
+		z = types.W_G
 	}
 
 	e := vm.Exports
@@ -1342,7 +1342,7 @@ func (vm *VM) hostExport(pi uint32) [][]byte {
 	zeroSequence := make([]byte, length)
 	x = append(x, zeroSequence...)
 	*/
-	x = common.PadToMultipleOfN(x, W_E*W_S)
+	x = common.PadToMultipleOfN(x, types.W_G)
 
 	ς := vm.ExportSegmentIndex   // Assume ς (sigma, Represent segment offset), need to get ς properly
 	if ς+uint32(len(e)) >= W_X { // W_X

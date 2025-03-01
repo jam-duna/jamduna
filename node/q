@@ -1,0 +1,9 @@
+;; This buffer is for text that is not saved, and for Lisp evaluation.
+;; To create a file, visit it with C-x C-f and enter text in its buffer.
+
+/*
+   func ComputeC_Base(blob_length int) int {
+	c := int(math.Ceil(float64(blob_length) / float64(W_E)))
+	return c
+}
+*/
