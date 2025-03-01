@@ -959,30 +959,31 @@ func (n *Node) extendChain() error {
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 
 				// current we always dump state transitions for every node
-				st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
-				err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
-				if err != nil {
-					log.Error(module, "writeDebug", "err", err)
-				}
-				err = n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
-				if err != nil {
-					log.Error(module, "writeDebug", "err", err)
-				}
-				err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
-				if err != nil {
-					log.Error(module, "writeDebug", "err", err)
-				}
+				go func() {
+					st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
+					err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
+					if err != nil {
+						log.Error(module, "writeDebug", "err", err)
+					}
+					err = n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
+					if err != nil {
+						log.Error(module, "writeDebug", "err", err)
+					}
+					err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
+					if err != nil {
+						log.Error(module, "writeDebug", "err", err)
+					}
+				}()
 
 				// Extend the tip of the chain
 				n.addStateDB(newStateDB)
-
+				n.assureNewBlock(b)
 				announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", b.Hash(), b.Header.Hash())
 				if n.hub != nil {
 					n.hub.broadcast <- []byte(announcement)
 				}
 
 				parentheaderhash = nextBlock.Header.Hash()
-				n.assureNewBlock(b)
 
 				n.statedbMapMutex.Lock()
 				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
@@ -1378,6 +1379,7 @@ func (n *Node) runClient() {
 			}
 			n.statedbMutex.Lock()
 			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, n.extrinsic_pool)
+
 			n.statedbMutex.Unlock()
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
@@ -1385,6 +1387,7 @@ func (n *Node) runClient() {
 			}
 
 			if newStateDB != nil {
+
 				if n.checkGodTimeslotUsed(currJCE) {
 					fmt.Printf("%s could author but blocked by god\n", n.String())
 					return
@@ -1401,37 +1404,37 @@ func (n *Node) runClient() {
 				headerHash := newBlock.Header.Hash()
 				n.cacheHeaders(headerHash, newBlock)
 				go n.broadcast(*newBlock)
+				go func() {
+					timeslot := newStateDB.GetSafrole().Timeslot
+					err := n.writeDebug(newBlock, timeslot)
+					if err != nil {
+						log.Error(module, "runClient:writeDebug", "err", err)
+					}
+					s := n.statedb
+					allStates := s.GetAllKeyValues()
+					ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
+					if !ok || err != nil {
+						log.Crit(module, "CompareStateRoot", "err", err)
+					}
 
-				timeslot := newStateDB.GetSafrole().Timeslot
-				err := n.writeDebug(newBlock, timeslot)
-				if err != nil {
-					log.Error(module, "runClient:writeDebug", "err", err)
-				}
-				s := n.statedb
-				allStates := s.GetAllKeyValues()
-				ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
-				if !ok || err != nil {
-					log.Crit(module, "CompareStateRoot", "err", err)
-				}
+					st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
+					err = n.writeDebug(st, timeslot) // StateTransition
+					if err != nil {
+						log.Error(module, "runClient:writeDebug", "err", err)
+					}
 
-				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
-				err = n.writeDebug(st, timeslot) // StateTransition
-				if err != nil {
-					log.Error(module, "runClient:writeDebug", "err", err)
-				}
+					err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
+					if err != nil {
+						log.Crit(module, "runClient:CheckStateTransition", "err", err)
+					}
+					log.Trace(module, "Validated state transition")
 
-				err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
-				if err != nil {
-					log.Crit(module, "runClient:CheckStateTransition", "err", err)
-				}
-				log.Trace(module, "Validated state transition")
-
-				// store StateSnapshot
-				err = n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot) // StateSnapshot
-				if err != nil {
-					log.Error(module, "runClient:writeDebug", "err", err)
-				}
-
+					// store StateSnapshot
+					err = n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot) // StateSnapshot
+					if err != nil {
+						log.Error(module, "runClient:writeDebug", "err", err)
+					}
+				}()
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
 				n.assureNewBlock(newBlock)
 				n.auditingCh <- newStateDB.Copy()
@@ -1441,7 +1444,7 @@ func (n *Node) runClient() {
 			}
 
 		case log := <-logChan:
-			n.WriteLog(log)
+			go n.WriteLog(log)
 		}
 	}
 }

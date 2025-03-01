@@ -78,32 +78,32 @@ jobs:
 
       - name: Run test megatron (1/5)
         id: megatron_short
-	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
 
       - name: Run test fib (2/5)
         run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
 	
       - name: Run test megatron (2/5)
         id: megatron_short
-	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
 
       - name: Run test fib (3/5)
         run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
 	
       - name: Run test megatron (3/5)
         id: megatron_short
-	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
 
       - name: Run test fib (4/5)
         run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
 	
       - name: Run test megatron (4/5)
         id: megatron_short
-	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
 
       - name: Run test fib (5/5)
         run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
 	
       - name: Run test megatron (5/5)
         id: megatron_short
-	go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true

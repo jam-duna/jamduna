@@ -30,6 +30,8 @@ func Root() Logger {
 // moduleEnabled keeps track of whether a module’s logging is enabled.
 var moduleEnabled = map[string]bool{
 	"authoring": false,
+	"G":         false,
+	"grandpa":   false,
 }
 
 // EnableModule enables logging for the specified module.

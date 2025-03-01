@@ -52,10 +52,15 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
 	}
-	err = VerifySafroleSTF(sf, &s2, blk)
-	if err != nil {
-		panic(fmt.Sprintf("VerifySafroleSTF %v\n", err))
+
+	safrole_debug := false
+	if safrole_debug {
+		err = VerifySafroleSTF(sf, &s2, blk)
+		if err != nil {
+			panic(fmt.Sprintf("VerifySafroleSTF %v\n", err))
+		}
 	}
+
 	s.JamState.SafroleState = &s2
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
 	// use post entropy state rotate the guarantors

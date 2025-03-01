@@ -47,8 +47,8 @@ megatron_pprof:
 	echo "go test -tags \"network_test $(TAGS)\" -c -o node.test"; \
 	go test -tags "network_test $(TAGS)" -c -o node.test; \
 	echo "Running TestMegatron using test binary with timeout $(TIMEOUT)..."; \
-	echo "./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=1 -prereq_test=true"; \
-	./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=1 -prereq_test=true
+	echo "./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=10 -prereq_test=true"; \
+	./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=10 -prereq_test=true
 	go tool pprof -http=":8080" cpu.pprof
 
 debug_eg_error:

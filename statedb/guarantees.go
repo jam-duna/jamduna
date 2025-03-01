@@ -949,6 +949,7 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 			}
 		}
 		if !exists {
+			log.Error(debugG, "checkPrereq", "missing hash", hash.String())
 			return jamerrors.ErrGDependencyMissing
 		}
 	}

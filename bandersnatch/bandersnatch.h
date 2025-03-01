@@ -63,6 +63,27 @@ void ring_vrf_sign(
     */
 );
 
+void ring_vrf_sign_batch(
+    const unsigned char* private_key_bytes,
+    size_t private_key_len,
+    const unsigned char* ring_set_bytes,
+    size_t ring_set_len,
+    const unsigned char* vrf_input_data_bytes,
+    size_t vrf_input_data_total_len,
+    const unsigned char* aux_data_bytes,
+    size_t aux_data_total_len,
+    size_t data_counts,
+    size_t single_vrf_input_data_len,
+    size_t single_aux_data_len,
+    unsigned char* sig_out,
+    size_t sig_out_len,
+    unsigned char* vrf_output_out,
+    size_t vrf_output_out_len
+    /*
+    ,size_t prover_idx
+    */
+);
+
 void get_ring_commitment(
     const unsigned char* ring_set_bytes,
     size_t ring_set_len,

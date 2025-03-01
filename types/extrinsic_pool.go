@@ -173,7 +173,7 @@ func (ep *ExtrinsicPool) RemoveGuaranteesFromPool(accepted_slot uint32) error {
 	return nil // Success
 }
 
-func (ep *ExtrinsicPool) AddTicketToPool(ticket Ticket, used_entropy common.Hash) error {
+func (ep *ExtrinsicPool) AddTicketToPool(ticket Ticket, id common.Hash, used_entropy common.Hash) error {
 	ep.ticketMutex.Lock()
 	defer ep.ticketMutex.Unlock()
 	// Store the ticket in the tip's queued ticket
@@ -182,10 +182,6 @@ func (ep *ExtrinsicPool) AddTicketToPool(ticket Ticket, used_entropy common.Hash
 		ep.queuedTickets[used_entropy] = make(map[common.Hash]*Ticket)
 	}
 	// Store the ticket in the appropriate map
-	id, err := ticket.TicketID()
-	if err != nil {
-		return err
-	}
 	ep.queuedTickets[used_entropy][id] = &ticket
 	return nil // Success
 }

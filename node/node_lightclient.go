@@ -2,6 +2,7 @@ package node
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
@@ -9,7 +10,16 @@ import (
 )
 
 // input : the core index and the segments lookups (workpackages hashes only)
-func (n *Node) IsCoreReady(coreIdx uint16, lookups []common.Hash) bool {
+func (n *Node) IsCoreReady(coreIdx uint16, lookups []common.Hash, parameter ...interface{}) bool {
+	printout := false
+	if len(parameter) > 0 && parameter[0].(bool) {
+		printout = true
+	}
+	var workpackagehash common.Hash
+	if len(parameter) > 1 {
+		workpackagehash = parameter[1].(common.Hash)
+	}
+
 	if test_prereq {
 		return n.statedb.JamState.AvailabilityAssignments[coreIdx] == nil
 	}
@@ -26,22 +36,40 @@ func (n *Node) IsCoreReady(coreIdx uint16, lookups []common.Hash) bool {
 	postAssuranceState := latest_statedb.JamState.Copy()
 	postAssuranceState.ProcessAssurances(assurances, targetJCE)
 	// check if the core is ready
-	if lookups == nil {
-		return postAssuranceState.AvailabilityAssignments[coreIdx] == nil
+	if len(lookups) == 0 {
+		empty_hash := common.Hash{}
+		if workpackagehash != empty_hash {
+			prestate_is_package := preState.AvailabilityAssignments[coreIdx] != nil && preState.AvailabilityAssignments[coreIdx].WorkReport.AvailabilitySpec.WorkPackageHash == workpackagehash
+			poststate_will_be_assured := postAssuranceState.AvailabilityAssignments[coreIdx] == nil
+			if prestate_is_package && poststate_will_be_assured {
+				return true
+			} else {
+				return false
+			}
+		} else {
+			return postAssuranceState.AvailabilityAssignments[coreIdx] == nil
+		}
 	}
 	for _, lookup := range lookups {
 		// first check if the work report for lookup is in the rho state
 		core_rho := preState.AvailabilityAssignments[coreIdx]
 		core_rho_post := postAssuranceState.AvailabilityAssignments[coreIdx]
 		if core_rho != nil && core_rho.WorkReport.AvailabilitySpec.WorkPackageHash == lookup {
+
 			// see if it pass the assurances
 			if core_rho_post != nil {
+				if printout {
+					fmt.Printf("core is occupied by wp=%v\n", core_rho.WorkReport.AvailabilitySpec.WorkPackageHash)
+				}
 				return false
 			}
 
 		} else {
 			// check if the work report is in the post assurance state
 			if !IsWorkPackageInHistory(latest_statedb, lookup) {
+				if printout {
+					fmt.Printf("work package lookup not in history\n")
+				}
 				return false
 			}
 		}

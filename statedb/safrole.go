@@ -565,6 +565,7 @@ func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, ta
 	return ticket, nil
 }
 
+// ringVRF
 func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (common.Hash, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
 		return common.Hash{}, jamerrors.ErrTBadTicketAttemptNumber
@@ -603,6 +604,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 	return common.Hash{}, jamerrors.ErrTBadRingProof
 }
 
+// ringVRF
 func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
 		return common.Hash{}, -1, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)

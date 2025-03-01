@@ -12,7 +12,7 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	// Store the ticket in the tip's queued tickets
 	s := n.getState()
 	sf := s.GetSafrole()
-	_, entropy_idx, err := sf.ValidateIncomingTicket(&ticket)
+	id, entropy_idx, err := sf.ValidateIncomingTicket(&ticket)
 	if err != nil {
 		log.Error(module, "processTicket:ValidateIncomingTicket", "err", err)
 		return err
@@ -20,7 +20,7 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 
 	used_entropy := s.GetSafrole().Entropy[entropy_idx]
 	// TODO: add tracer event
-	err = n.extrinsic_pool.AddTicketToPool(ticket, used_entropy)
+	err = n.extrinsic_pool.AddTicketToPool(ticket, id, used_entropy)
 	if err != nil {
 		log.Error(module, "processTicket:AddTicketToPool", "err", err)
 	}

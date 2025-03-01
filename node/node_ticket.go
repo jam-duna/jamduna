@@ -75,36 +75,6 @@ func (n *Node) IsTicketGenerated(entropy common.Hash) bool {
 	_, ok := n.selfTickets[entropy]
 	return ok
 }
-func (n *Node) CheckSelfTicketsIsIncluded(Block types.Block, currJCE uint32) {
-	n.ticketsMutex.Lock()
-	defer n.ticketsMutex.Unlock()
-	currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(currJCE)
-	if currEpoch < 0 {
-		return
-	}
-	fmt.Printf("[N%v] Checking Self Tickets for Epoch %v\n", n.id, currEpoch)
-	tickets := n.selfTickets[n.statedb.GetSafrole().Entropy[2]]
-	if n.statedb.GetSafrole().IsTicketSubmissionClosed(currJCE) {
-		tickets = n.selfTickets[n.statedb.GetSafrole().Entropy[1]]
-	}
-	if tickets == nil {
-		fmt.Printf("[N%v] No Tickets for Epoch %v\n", n.id, currEpoch)
-		return
-	}
-	for _, ticketbucket := range tickets {
-		ticket := ticketbucket.Ticket
-		extrinsic_tickets := Block.Extrinsic.Tickets
-		for _, extrinsic_ticket := range extrinsic_tickets {
-			ticket_id, _ := extrinsic_ticket.TicketID()
-			ticket_id2, _ := ticket.TicketID()
-			if ticket_id == ticket_id2 {
-				*ticketbucket.IsIncluded = true
-			}
-		}
-	}
-	return
-}
-
 func (n *Node) BroadcastTickets() {
 	if n.sendTickets == false {
 		return

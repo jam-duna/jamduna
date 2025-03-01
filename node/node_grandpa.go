@@ -12,6 +12,8 @@ import (
 )
 
 // this function will be called when the nodes finish audited the genesis block
+var genesisBlockHash = common.Hex2Hash("0x476243ad7cc4fc49cb6cb362c6568e931731d8650d917007a6037cceedd62244")
+
 func (n *Node) StartGrandpa(b *types.Block) {
 	log.Debug(debugGrandpa, "GRANDPA START")
 	if n.block_tree != nil {
@@ -19,7 +21,7 @@ func (n *Node) StartGrandpa(b *types.Block) {
 		return
 	}
 
-	if b.GetParentHeaderHash() == (common.Hash{}) {
+	if b.GetParentHeaderHash() == (genesisBlockHash) {
 		genesis_blk := b.Copy()
 		n.block_tree = types.NewBlockTree(&types.BT_Node{
 			Parent:    nil,

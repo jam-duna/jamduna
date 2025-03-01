@@ -401,3 +401,64 @@ func TestRingCommitment(t *testing.T) {
 	fmt.Printf("TestRingCommitment Ring Commitment: %x\n", ringCommitment)
 
 }
+
+func TestRingVrfBatchSignAndVerify(t *testing.T) {
+	// Generate 6 different random seeds
+	fmt.Println("TestRingVrfBatchSignAndVerify: Generating 6 random seeds")
+	seeds := make([][]byte, 6)
+	pubKeys := make([]BanderSnatchKey, 6)
+	privateKeys := make([]BanderSnatchSecret, 6)
+	for i := 0; i < 6; i++ {
+		seeds[i] = generateRandomSeed()
+		fmt.Printf("TestRingVrfBatchSignAndVerify seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
+		banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
+		if err != nil {
+			t.Fatalf("InitBanderSnatchKey failed: %v", err)
+		}
+		pubKeys[i] = banderSnatch_pub
+		privateKeys[i] = banderSnatch_priv
+		fmt.Printf("TestRingVrfBatchSignAndVerify Public Key %d: %s\n", i, hex.EncodeToString(banderSnatch_pub.Bytes()))
+		fmt.Printf("TestRingVrfBatchSignAndVerify Private Key %d: %s\n", i, hex.EncodeToString(banderSnatch_priv.Bytes()))
+	}
+
+	// Create a ring set by concatenating all public keys
+	var ringSet []byte
+	for _, pubKey := range pubKeys {
+		ringSet = append(ringSet, pubKey.Bytes()...)
+	}
+	//use RingVrfBatchSign(privateKey BanderSnatchSecret, ringsetBytes []byte, vrfInputData, auxData [][]byte) ([][]byte, [][]byte, error)
+	// instead of use RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes []byte, vrfInputData, auxData []byte) ([]byte, []byte, error)
+	// Example data to be signed
+	vrfInputData := []byte("example input data")
+	auxData := []byte("example aux data")
+	// ramdomlize the data but retain the length
+	// generate 5 random aux data
+	// generate 5 random vrfInputData
+	auxDataList := make([][]byte, 5)
+	vrfInputDataList := make([][]byte, 5)
+	for i := 0; i < 5; i++ {
+		auxDataList[i] = make([]byte, len(auxData))
+		vrfInputDataList[i] = make([]byte, len(vrfInputData))
+		if _, err := rand.Read(auxDataList[i]); err != nil {
+			panic("Failed to generate random aux data")
+		}
+		if _, err := rand.Read(vrfInputDataList[i]); err != nil {
+			panic("Failed to generate random vrfInputData")
+		}
+	}
+	// Sign the data with Ring VRF using the third private key
+	proverIdx := 2
+	ringSignatures, ringvrfOutputs, err := RingVrfBatchSign(privateKeys[proverIdx], ringSet, vrfInputDataList, auxDataList)
+	if err != nil {
+		t.Fatalf("RingVrfBatchSign failed: %v", err)
+	}
+	fmt.Printf("TestRingVrfBatchSignAndVerify RingVrfBatchSign -- VRFOutput: %x Signature: %x (%d bytes)\n", ringvrfOutputs, ringSignatures, len(ringSignatures))
+	// Verify the Ring VRF signature
+	for i := 0; i < 5; i++ {
+		ringVrfOutput, err := RingVrfVerify(ringSet, ringSignatures[i], vrfInputDataList[i], auxDataList[i])
+		if err != nil {
+			t.Fatalf("RingVrfVerify failed: %v", err)
+		}
+		fmt.Printf("TestRingVrfBatchSignAndVerify Ring VRF Output: %x\n", ringVrfOutput)
+	}
+}

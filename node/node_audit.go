@@ -183,7 +183,7 @@ func (n *Node) runAudit() {
 				log.Debug(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 
 				newBlock := audit_statedb.Block.Copy()
-				if newBlock.GetParentHeaderHash() == (common.Hash{}) {
+				if newBlock.GetParentHeaderHash() == (genesisBlockHash) {
 					if Grandpa {
 						n.StartGrandpa(newBlock.Copy())
 					} else {
