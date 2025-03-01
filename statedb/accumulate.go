@@ -425,12 +425,16 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 			if workResult.ServiceID == s {
 				codeHash = workResult.CodeHash
 				g += workResult.Gas
-				p = append(p, types.AccumulateOperandElements{
+				o := types.AccumulateOperandElements{
 					Results:         workResult.Result,
 					Payload:         workResult.PayloadHash,
 					WorkPackageHash: workReport.AvailabilitySpec.WorkPackageHash,
 					AuthOutput:      workReport.AuthOutput,
-				})
+				}
+				if sd.Authoring {
+					log.Debug("authoring", "Single Accumulate: WrangledResults", types.DecodedWrangledResults(&o))
+				}
+				p = append(p, o)
 			}
 		}
 	}

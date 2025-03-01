@@ -595,6 +595,14 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 			Result:      output,
 		}
 		results = append(results, result)
+
+		o := types.AccumulateOperandElements{
+			Results:         result.Result,
+			Payload:         result.PayloadHash,
+			WorkPackageHash: workPackageHash,
+			AuthOutput:      r.Ok,
+		}
+		log.Debug(debugDA, "DA: WrangledResults", "n", types.DecodedWrangledResults(&o))
 	}
 	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments, package_bundle.ExtrinsicData)
 
