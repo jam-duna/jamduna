@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	debug_pvm  = "pvm"
-	debug_host = "host"
+	debug_pvm  = "pvm_mod"
+	debug_host = "host_mod"
 
 	regSize  = 13
 	numCores = types.TotalCores
@@ -940,14 +940,14 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		vm.WriteRegister(7, (1<<32)-Z_Z-Z_I)
 		vm.WriteRegister(8, uint64(len(argument_data_a)))
 	} else {
-		panic("Standard Program Initialization Error\n")
+		log.Error(vm.logging, "Standard Program Initialization Error")
 	}
 }
 
 // NewVM initializes a new VM with a given program
 func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool) *VM {
 	if len(code) == 0 {
-		panic("NO CODE\n")
+		return nil
 	}
 	var p *Program
 	var o_size, w_size, z, s uint32

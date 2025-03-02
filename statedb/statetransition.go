@@ -47,8 +47,7 @@ func compareKeyVals(p0 []KeyVal, p1 []KeyVal) {
 			metaKey := fmt.Sprintf("meta_%v", k0)
 			metaData0 := m0[metaKey]
 			metaData1 := m1[metaKey]
-			fmt.Printf("K %v\ns1(Current) Meta Data: %s\nPostState Meta Data:   %s\n", k0, metaData0, metaData1)
-			fmt.Printf("s1(Current) Value: %x\nPostState   Value: %x\n", v0, v1)
+			fmt.Printf("K %v\nC: %s %x\nP: %s %x\n", k0, metaData0, v0, metaData1, v1)
 		}
 	}
 }

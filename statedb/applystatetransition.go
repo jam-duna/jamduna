@@ -3,6 +3,7 @@ package statedb
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
@@ -131,13 +132,22 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, err
 	}
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
+	sort.Slice(b, func(i, j int) bool {
+		return b[i].Service < b[j].Service
+	})
 	var leaves [][]byte
 	for _, sa := range b {
 		// put (s,h) of C  into leaves
 		leafBytes := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
-		leaves = append(leaves, leafBytes)
-		if s.Authoring {
-			log.Info("authoring", "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+		empty := common.Hash{}
+		if sa.Commitment == empty {
+			// should not have gotten here!
+			log.Warn("authoring", "BEEFY-C", "commitment", sa.Commitment)
+		} else {
+			leaves = append(leaves, leafBytes)
+			if s.Authoring {
+				log.Info("authoring", "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+			}
 		}
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)

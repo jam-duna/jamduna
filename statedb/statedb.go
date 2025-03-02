@@ -30,10 +30,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const (
-	module = "statedb"
-)
-
 type StateDB struct {
 	Finalized               bool
 	Id                      uint16       `json:"id"`
@@ -138,12 +134,11 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 
 // EP Errors
 const (
-	debug      = "statedb"
-	debugA     = "A"
-	debugG     = "G"
-	debugP     = "P"
-	debugAudit = "audit"
-	debugSeal  = "seal"
+	module     = "statedb"
+	debugA     = "a_mod"
+	debugG     = "g_mod"
+	debugP     = "p_mod"
+	debugAudit = "ad_mode"
 
 	saveSealBlockMaterial     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
@@ -1098,7 +1093,7 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	m := h.BytesWithoutSig()
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
 	if err != nil {
-		log.Error(debugSeal, "IetfVrfVerify", "err", err)
+		log.Error(module, "IetfVrfVerify", "err", err)
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
 	}
 
@@ -1107,7 +1102,7 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	c = append([]byte(types.X_E), vrfOutput...)
 	_, err = bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_v, c, []byte{})
 	if err != nil {
-		log.Error(debugSeal, "IetfVrfVerify", "err", err)
+		log.Error(module, "IetfVrfVerify", "err", err)
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_v Verification")
 	}
 	return true, validatorIdx, block_author_ietf_pub, nil
@@ -1140,7 +1135,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 			return nil, fmt.Errorf("error generating H_v for primary epoch: %w", err)
 		}
 		copy(header.EntropySource[:], H_v[:])
-		log.Trace(debugSeal, "IETF SIGN 1 H_v", "k", blockAuthorPriv[:], "c", c, "header.EntropySource", header.EntropySource[:])
+		log.Trace(module, "IETF SIGN 1 H_v", "k", blockAuthorPriv[:], "c", c, "header.EntropySource", header.EntropySource[:])
 		if saveSealBlockMaterial {
 			// Save for the material
 			material.TicketID = fmt.Sprintf("%s", ticketID)
@@ -1158,7 +1153,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 			return nil, fmt.Errorf("error generating H_s for primary epoch: %w", err)
 		}
 		copy(header.Seal[:], H_s[:])
-		log.Trace(debugSeal, "IETF SIGN H_s", "k", blockAuthorPriv[:], "c", c, header.BytesWithoutSig(), "header.Seal", header.Seal[:])
+		log.Trace(module, "IETF SIGN H_s", "k", blockAuthorPriv[:], "c", c, header.BytesWithoutSig(), "header.Seal", header.Seal[:])
 
 		// Save for the material
 		if saveSealBlockMaterial {

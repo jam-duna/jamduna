@@ -183,52 +183,6 @@ func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxD
 	return sig, vrfOutput, nil
 }
 
-func RingVrfBatchSign(privateKey BanderSnatchSecret, ringsetBytes []byte, vrfInputData, auxData [][]byte) ([][]byte, [][]byte, error) {
-	if len(ringsetBytes) == 0 {
-		return nil, nil, fmt.Errorf("No ringsetBytes")
-	}
-	if len(auxData) == 0 {
-		return nil, nil, fmt.Errorf("No auxData")
-	}
-	if len(auxData) != len(vrfInputData) {
-		return nil, nil, fmt.Errorf("auxData and vrfInputData length mismatch")
-	}
-	counts := len(auxData)
-	sig := make([][]byte, counts)
-	vrfOutput := make([][]byte, counts)
-	sigF := make([]byte, counts*RingSignatureLen)
-	vrfoutputF := make([]byte, counts*VRFOutputLen)
-	//flatten auxData and vrfInputData
-	auxDataF := make([]byte, 0)
-	vrfInputDataF := make([]byte, 0)
-	for i := 0; i < counts; i++ {
-		auxDataF = append(auxDataF, auxData[i]...)
-		vrfInputDataF = append(vrfInputDataF, vrfInputData[i]...)
-	}
-	C.ring_vrf_sign_batch(
-		(*C.uchar)(unsafe.Pointer(&privateKey[0])),
-		C.size_t(len(privateKey)),
-		(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
-		C.size_t(len(ringsetBytes)),
-		(*C.uchar)(unsafe.Pointer(&vrfInputDataF[0])),
-		C.size_t(len(vrfInputDataF)),
-		(*C.uchar)(unsafe.Pointer(&auxDataF[0])),
-		C.size_t(len(auxDataF)),
-		C.size_t(counts),
-		C.size_t(len(vrfInputData[0])),
-		C.size_t(len(auxData[0])),
-		(*C.uchar)(unsafe.Pointer(&sigF[0])),
-		C.size_t(len(sigF)),
-		(*C.uchar)(unsafe.Pointer(&vrfoutputF[0])),
-		C.size_t(len(vrfoutputF)),
-	)
-	for i := 0; i < counts; i++ {
-		sig[i] = sigF[i*RingSignatureLen : (i+1)*RingSignatureLen]
-		vrfOutput[i] = vrfoutputF[i*VRFOutputLen : (i+1)*VRFOutputLen]
-	}
-	return sig, vrfOutput, nil
-}
-
 // RingVRFVerify is Used for tickets verification, and returns vrfOutput on success
 func RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte) ([]byte, error) {
 	vrfOutput := make([]byte, VRFOutputLen)

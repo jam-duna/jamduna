@@ -41,15 +41,16 @@ func (m *MMR) Append(data *common.Hash) {
 
 func (m *MMR) String() string {
 	out := ""
-	q := ""
-	for i, peak := range m.Peaks {
+	q := "["
+	for _, peak := range m.Peaks {
 		if peak == nil {
-			out += fmt.Sprintf("%s%d: nil", q, i)
+			out += fmt.Sprintf("%snil", q)
 		} else {
-			out += fmt.Sprintf("%s%d: %v", q, i, *peak)
+			out += fmt.Sprintf("%s%v", q, *peak)
 		}
-		q = ", "
+		q = ","
 	}
+	out += "]"
 	return out
 }
 

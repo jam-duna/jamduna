@@ -59,7 +59,7 @@ func Trace(module string, msg string, ctx ...interface{}) {
 	}
 	// Prepend the module name into the context.
 	newCtx := append([]interface{}{"module", module}, ctx...)
-	Root().Write(LevelTrace, msg, newCtx...)
+	Root().Write(LevelTrace, module, msg, newCtx...)
 }
 
 // Debug logs a message at the debug level for a specific module.
@@ -69,24 +69,24 @@ func Debug(module string, msg string, ctx ...interface{}) {
 		return
 	}
 	//newCtx := append([]interface{}{"module", module}, ctx...)
-	Root().Write(slog.LevelDebug, msg, ctx...)
+	Root().Write(slog.LevelDebug, module, msg, ctx...)
 }
 
 // The rest of the logging functions (Info, Warn, Error, Crit, New) dont filter on module
 func Info(module string, msg string, ctx ...interface{}) {
-	Root().Write(slog.LevelInfo, msg, ctx...)
+	Root().Write(slog.LevelInfo, module, msg, ctx...)
 }
 
 func Warn(module string, msg string, ctx ...interface{}) {
-	Root().Write(slog.LevelWarn, msg, ctx...)
+	Root().Write(slog.LevelWarn, module, msg, ctx...)
 }
 
 func Error(module string, msg string, ctx ...interface{}) {
-	Root().Write(slog.LevelError, msg, ctx...)
+	Root().Write(slog.LevelError, module, msg, ctx...)
 }
 
-func Crit(msg string, ctx ...interface{}) {
-	Root().Write(LevelCrit, msg, ctx...)
+func Crit(module string, msg string, ctx ...interface{}) {
+	Root().Write(LevelCrit, module, msg, ctx...)
 	os.Exit(1)
 }
 

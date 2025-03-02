@@ -273,9 +273,11 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 				break
 			}
 		}
-		if !duplicate {
+
+		if b.Commitment != (common.Hash{}) && !duplicate {
 			output_b = append(output_b, b)
 		}
+
 	}
 
 	return
@@ -305,13 +307,18 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		// this is parallelizable
 		T, B, U := s.SingleAccumulate(o, w, f, service)
 		output_u += U
-		if s.Authoring {
-			log.Debug("authoring", "BEEFY COMMITMENT", "s", fmt.Sprintf("%d", service), "B", B)
+		empty := common.Hash{}
+		if B == empty {
+
+		} else {
+			if s.Authoring {
+				log.Debug("authoring", "BEEFY-B", "s", fmt.Sprintf("%d", service), "B", B)
+			}
+			output_b = append(output_b, BeefyCommitment{
+				Service:    service,
+				Commitment: B,
+			})
 		}
-		output_b = append(output_b, BeefyCommitment{
-			Service:    service,
-			Commitment: B,
-		})
 		output_t = append(output_t, T...)
 	}
 
@@ -432,7 +439,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					AuthOutput:      workReport.AuthOutput,
 				}
 				if sd.Authoring {
-					log.Debug("authoring", "Single Accumulate: WrangledResults", types.DecodedWrangledResults(&o))
+					log.Debug("authoring", "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
 				}
 				p = append(p, o)
 			}
