@@ -26,7 +26,7 @@ const (
 	NEW               = 9
 	UPGRADE           = 10
 	TRANSFER          = 11
-	EJECT             = 12 // formerly Quit
+	EJECT             = 12
 	QUERY             = 13
 	SOLICIT           = 14
 	FORGET            = 15
@@ -42,11 +42,9 @@ const (
 	INVOKE            = 25
 	EXPUNGE           = 26
 
-	SP1VERIFY     = 64
-	ED25519VERIFY = 65
-	LOG           = 100
-	FOR_TEST      = 105
-	DELAY         = 99
+	LOG      = 100
+	FOR_TEST = 105
+	DELAY    = 99
 )
 
 const maxUint64 = ^uint64(0)
@@ -95,12 +93,12 @@ var errorCases = map[string][]uint64{
 // Mapping of host function names to their indexes
 var hostIndexMap = map[string]int{
 	// B.6 General Functions
-	"Gas":       GAS,
-	"Lookup":    LOOKUP,
-	"Read":      READ,
-	"Write":     WRITE,
-	"Info":      INFO,
-	"Sp1Verify": SP1VERIFY,
+	"Gas":    GAS,
+	"Lookup": LOOKUP,
+	"Read":   READ,
+	"Write":  WRITE,
+	"Info":   INFO,
+
 	// B.7 Accumulate Functions
 	"Bless":      BLESS,
 	"Assign":     ASSIGN,
@@ -374,6 +372,7 @@ func (vm *VM) hostInfo() {
 	if errCode != OK {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
+		log.Debug(vm.logging, "INFO NONE", "s", omega_7)
 		return
 	}
 	bo, _ := vm.ReadRegister(8)
@@ -383,6 +382,7 @@ func (vm *VM) hostInfo() {
 	if err != nil {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
+		log.Debug(vm.logging, "INFO NONE", "s", omega_7)
 		return
 	}
 	errcode := vm.Ram.WriteRAMBytes(uint32(bo), m[:])
@@ -391,6 +391,7 @@ func (vm *VM) hostInfo() {
 		vm.ResultCode = types.PVM_PANIC
 		return
 	}
+	log.Debug(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", e), "bytes", fmt.Sprintf("%x", m))
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
@@ -406,6 +407,7 @@ func (vm *VM) hostBless() {
 	if m > (1<<32)-1 || a > (1<<32)-1 || v > (1<<32)-1 {
 		vm.WriteRegister(7, WHO)
 		vm.HostResultCode = WHO
+		log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
 		return
 	}
 
@@ -430,6 +432,7 @@ func (vm *VM) hostBless() {
 	vm.X.U.PrivilegedState.Kai_v = uint32(v)
 
 	vm.WriteRegister(7, OK)
+	log.Debug(vm.logging, "BLESS OK", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v), "g", fmt.Sprintf("%v", bold_g))
 	vm.HostResultCode = OK
 }
 
@@ -439,6 +442,7 @@ func (vm *VM) hostAssign() {
 	if core >= numCores {
 		vm.WriteRegister(7, CORE)
 		vm.HostResultCode = CORE
+		log.Debug(vm.logging, "ASSIGN CORE", "c", core)
 		return
 	}
 	o, _ := vm.ReadRegister(8)
@@ -453,6 +457,7 @@ func (vm *VM) hostAssign() {
 		qi[i] = common.BytesToHash(c[i*32 : (i+1)*32])
 	}
 	copy(vm.X.U.QueueWorkReport[core][:], qi[:])
+	log.Debug(vm.logging, "ASSIGN OK", "c", core)
 	vm.HostResultCode = OK
 }
 
@@ -476,6 +481,7 @@ func (vm *VM) hostDesignate() {
 		qi[i] = newv
 	}
 	vm.X.U.UpcomingValidators = qi
+	log.Debug(vm.logging, "DESIGNATE OK")
 	vm.HostResultCode = OK
 }
 
@@ -483,6 +489,7 @@ func (vm *VM) hostDesignate() {
 func (vm *VM) hostCheckpoint() {
 	vm.Y = vm.X.Clone()
 	vm.WriteRegister(7, uint64(vm.Gas)) // CHECK
+	log.Debug(vm.logging, "CHECKPOINT", "g", fmt.Sprintf("%d", vm.Gas))
 	vm.HostResultCode = OK
 }
 
@@ -516,12 +523,11 @@ func (vm *VM) hostNew() {
 	g, _ := vm.ReadRegister(9)
 	m, _ := vm.ReadRegister(10)
 
-	log.Debug(vm.logging, "NEW", "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 	x_s_t := xs.ComputeThreshold()
 	if xs.Balance < x_s_t {
 		vm.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH //balance insufficient
-		log.Crit(vm.logging, "NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t)
+		log.Debug(vm.logging, "NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t)
 		return
 	}
 
@@ -550,6 +556,7 @@ func (vm *VM) hostNew() {
 	xContext.U.D[xi] = a
 	vm.WriteRegister(7, uint64(xi))
 	vm.HostResultCode = OK
+	log.Debug(vm.logging, "NEW OK", "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 }
 
 // Upgrade service
@@ -573,6 +580,7 @@ func (vm *VM) hostUpgrade() {
 	xs.GasLimitM = m
 	vm.WriteRegister(7, OK)
 	// xContext.D[s] = xs // not sure if this is needed
+	log.Debug(vm.logging, "UPGRADE OK", "code_hash", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "min_item_gas", g, "min_memo_gas", m)
 	vm.HostResultCode = OK
 }
 
@@ -595,6 +603,7 @@ func (vm *VM) hostTransfer() {
 		if !founded {
 			vm.WriteRegister(7, WHO)
 			vm.HostResultCode = WHO
+			log.Debug(vm.logging, "TRANSFER WHO", "d", d)
 			return
 		}
 		vm.X.U.D[uint32(d)] = receiver
@@ -611,19 +620,21 @@ func (vm *VM) hostTransfer() {
 	if g < receiver.GasLimitM {
 		vm.WriteRegister(7, LOW)
 		vm.HostResultCode = LOW
+		log.Debug(vm.logging, "TRANSFER LOW", "g", g, "GasLimitM", receiver.GasLimitM)
 		return
 	}
 
 	if xs.Balance < xs.ComputeThreshold() {
 		vm.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH
+		log.Debug(vm.logging, "TRANSFER CASH", "xs.Balance", xs.Balance, "xs_t", xs.ComputeThreshold())
 		return
 	}
 
 	xs.DecBalance(a)
 	copy(t.Memo[:], m[:])
 	vm.X.T = append(vm.X.T, t)
-	log.Debug(vm.logging, "TRANSFER", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g)
+	log.Debug(vm.logging, "TRANSFER OK", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g)
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
@@ -631,6 +642,7 @@ func (vm *VM) hostTransfer() {
 // Gas Service
 func (vm *VM) hostGas() {
 	vm.WriteRegister(7, uint64(vm.Gas))
+	log.Debug(vm.logging, "GAS", "g", fmt.Sprintf("%d", vm.Gas))
 	vm.HostResultCode = OK
 }
 
@@ -644,11 +656,13 @@ func (vm *VM) hostQuery() {
 		return
 	}
 	a, _ := vm.X.GetX_s()
-	ok, anchor_timeslot := a.ReadLookup(common.BytesToHash(h), uint32(z), vm.hostenv)
+	account_lookuphash := common.BytesToHash(h)
+	ok, anchor_timeslot := a.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
 	if !ok {
 		vm.WriteRegister(7, NONE)
 		vm.WriteRegister(8, 0)
 		vm.HostResultCode = NONE
+		log.Debug(vm.logging, "QUERY NONE", "h", account_lookuphash, "z", z)
 		return
 	}
 	switch len(anchor_timeslot) {
@@ -675,55 +689,12 @@ func (vm *VM) hostQuery() {
 		vm.WriteRegister(8, uint64(y)+(1<<32)*uint64(z))
 		break
 	}
+	w7, _ := vm.ReadRegister(7)
+	w8, _ := vm.ReadRegister(8)
+	log.Debug(vm.logging, "QUERY OK", "h", account_lookuphash, "z", z, "w7", w7, "w8", w8, "len(anchor_timeslot)", len(anchor_timeslot))
 	vm.HostResultCode = OK
 }
-func (vm *VM) getWorkPackage() []byte {
-	// TODO
-	return []byte{}
-}
 
-func (vm *VM) getAuthorizerOutput() []byte {
-	// TODO
-	return []byte{}
-}
-
-func (vm *VM) getPayload() []byte {
-	// TODO
-	return []byte{}
-}
-
-func (vm *VM) getNumberOfExtrinsics() []byte {
-	// TODO
-	numExtrinsics := uint32(1)
-	return common.Uint32ToBytes(numExtrinsics)
-}
-
-func (vm *VM) getNumberOfWorkItems() []byte {
-	// TODO
-	numWorkItems := uint32(1)
-	return common.Uint32ToBytes(numWorkItems)
-}
-func (vm *VM) getWorkPackageByWorkItemExtrinsic(workitemindex uint32, extrinsicindex uint32) (data []byte, ok bool) {
-	return []byte{}, false
-}
-
-func (vm *VM) getWorkPackageByWorkItemExtrinsicAll(workitemindex uint32) (data []byte, ok bool) {
-	return []byte{}, false
-}
-
-func (vm *VM) getWorkPackageByExtrinsicHash(h common.Hash) (data []byte, ok bool) {
-	return []byte{}, false
-}
-
-func (vm *VM) getWorkPackageImportSegment(workitemindex uint32, importindex uint32) (data []byte, ok bool) {
-	return []byte{}, false
-}
-
-func (vm *VM) getWorkPackageImportedSegmentAll(workitemindex uint32) (data []byte, ok bool) {
-	return []byte{}, false
-}
-
-// TODO: Fetch (0.5.5) https://github.com/gavofyork/graypaper/issues/186
 /*
 Reading is windowed, so both a length and offset is specified for the buffer. This allows streaming and avoids allocating more data into the PVM than necessary if only a small piece of the overall data is needed.
 
@@ -826,6 +797,7 @@ func (vm *VM) hostYield() {
 	y := common.BytesToHash(h)
 	vm.X.Y = y
 	vm.WriteRegister(7, OK)
+	log.Debug(vm.logging, "YIELD OK", "h", y)
 	vm.HostResultCode = OK
 }
 
@@ -843,6 +815,7 @@ func (vm *VM) hostEject() {
 	if d == uint64(vm.X.S) || !ok || bold_d.CodeHash != common.Hash(types.E_l(uint64(vm.X.S), 32)) {
 		vm.WriteRegister(7, WHO)
 		vm.HostResultCode = WHO
+		log.Debug(vm.logging, "EJECT WHO", "d", fmt.Sprintf("%d", d))
 		return
 	}
 	l := max(81, bold_d.StorageSize) - 81
@@ -851,6 +824,7 @@ func (vm *VM) hostEject() {
 	if !ok || bold_d.NumStorageItems != 2 {
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
+		log.Debug(vm.logging, "EJECT HUH", "d", fmt.Sprintf("%d", d), "h", h, "l", l)
 		return
 	}
 
@@ -863,12 +837,14 @@ func (vm *VM) hostEject() {
 		vm.HostResultCode = OK
 		delete(vm.X.U.D, uint32(d))
 		vm.X.U.D[vm.X.S] = s
+		log.Debug(vm.logging, "EJECT OK", "d", fmt.Sprintf("%d", d))
 		return
 	}
 
 	vm.WriteRegister(7, HUH)
 	vm.HostResultCode = HUH
 }
+
 func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
 
 	// gas todo
@@ -905,6 +881,7 @@ func (vm *VM) hostInvoke() {
 	m_n, ok := vm.RefineM_map[uint32(n)]
 	if !ok {
 		vm.WriteRegister(7, WHO)
+		log.Debug(vm.logging, "INVOKE WHO", "n", n)
 		vm.HostResultCode = WHO
 		return
 	}
@@ -1008,6 +985,7 @@ func (vm *VM) hostLookup() {
 	ok, v = a.ReadPreimage(account_blobhash, vm.hostenv)
 	if !ok {
 		vm.WriteRegister(7, NONE)
+		log.Debug(vm.logging, "LOOKUP NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash)
 		vm.HostResultCode = NONE
 		return
 	}
@@ -1024,6 +1002,7 @@ func (vm *VM) hostLookup() {
 	if len(v) != 0 {
 		vm.WriteRegister(7, l)
 	}
+	log.Debug(vm.logging, "LOOKUP OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", h, "len(v)", len(v))
 	vm.HostResultCode = OK
 }
 
@@ -1074,19 +1053,19 @@ func (vm *VM) hostRead() {
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
 	ok, val := a.ReadStorage(k, vm.hostenv)
 
-	log.Debug(vm.logging, "READ", "ok", ok, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", val, "len(val)", len(val))
 	if !ok {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
+		log.Debug(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
 		return
 	}
+	log.Debug(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
 	lenval := uint64(len(val))
 	f = min(f, lenval)
 	l = min(l, lenval-f)
 	// TODO: check for OOB case again using o, f + l
 	vm.Ram.WriteRAMBytes(uint32(bo), val[f:])
 	vm.WriteRegister(7, l)
-
 }
 
 // Write Storage
@@ -1112,21 +1091,15 @@ func (vm *VM) hostWrite() {
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
 		log.Debug(vm.logging, "WRITE FULL", "a_t", a_t, "balance", a.Balance)
-		panic(6666666)
-	}
-
-	exists, oldValue := a.ReadStorage(k, vm.hostenv)
-	l := uint64(len(oldValue))
-
-	if vz == 0 {
-		a.WriteStorage(a.ServiceIndex, k, []byte{})
-		vm.WriteRegister(7, NONE)
-		vm.HostResultCode = NONE
-		log.Debug(vm.logging, "WRITE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprint("deleted"))
 		return
 	}
 
-	// adjust S
+	l := uint64(NONE)
+	exists, oldValue := a.ReadStorage(k, vm.hostenv)
+	if exists {
+		l = uint64(len(oldValue))
+	}
+
 	v := []byte{}
 	err := uint64(0)
 	if vz > 0 {
@@ -1138,7 +1111,7 @@ func (vm *VM) hostWrite() {
 		}
 	}
 	a.WriteStorage(a.ServiceIndex, k, v)
-	log.Debug(vm.logging, "WRITE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+	log.Debug(vm.logging, "WRITE OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 	vm.WriteRegister(7, l)
 	vm.HostResultCode = OK
 	if !exists {
@@ -1169,7 +1142,6 @@ func (vm *VM) hostSolicit() {
 		vm.ResultCode = types.PVM_PANIC
 		return
 	}
-
 	account_lookuphash := common.BytesToHash(hBytes)
 
 	ok, X_s_l := xs.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
@@ -1178,24 +1150,31 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{})
 		xs.NumStorageItems += 2
 		xs.StorageSize += 81 + uint64(z)
-	} else if len(X_s_l) == 2 { // [x, y]
-		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
-	} else {
-		vm.WriteRegister(7, HUH)
-		vm.HostResultCode = HUH
+		log.Debug(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{})
+		vm.WriteRegister(7, OK)
+		vm.HostResultCode = OK
 		return
 	}
+
 	if xs.Balance < xs.ComputeThreshold() {
 		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l)
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
+		log.Debug(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
 		return
 	}
-	if !ok {
+	if len(X_s_l) == 2 { // [x, y]
+		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
+		log.Debug(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		vm.WriteRegister(7, OK)
+		vm.HostResultCode = OK
+		return
+	} else {
+		vm.WriteRegister(7, HUH)
+		vm.HostResultCode = HUH
+		log.Debug(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
+		return
 	}
-
-	vm.WriteRegister(7, OK)
-	vm.HostResultCode = OK
 }
 
 // Forget preimage
@@ -1217,6 +1196,7 @@ func (vm *VM) hostForget() {
 	if !ok {
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
+		log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o)
 		return
 	}
 
@@ -1226,17 +1206,20 @@ func (vm *VM) hostForget() {
 		// storage accounting
 		x_s.NumStorageItems -= 2
 		x_s.StorageSize -= 81 + uint64(z)
+		log.Debug(vm.logging, "FORGET OK", "h", account_lookuphash, "z", z)
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 	} else if len(X_s_l) == 1 {
 		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
+		log.Debug(vm.logging, "FORGET OK", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 	} else if len(X_s_l) == 3 && X_s_l[1] < (vm.Timeslot-D) {
 		X_s_l = []uint32{X_s_l[2], vm.Timeslot}
 		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l)
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
+		log.Debug(vm.logging, "FORGET OK", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
 	}
 }
 

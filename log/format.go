@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -268,6 +269,11 @@ func appendU256(dst []byte, n *uint256.Int) []byte {
 // appendEscapeString writes the string s to the given writer, with
 // escaping/quoting if needed.
 func appendEscapeString(dst []byte, s string) []byte {
+	// If the string contains a double quote, always wrap it in single quotes.
+	if strings.Contains(s, "\"") {
+		return append(dst, []byte("'"+s+"'")...)
+	}
+
 	needsQuoting := false
 	needsEscaping := false
 	for _, r := range s {
@@ -276,9 +282,7 @@ func appendEscapeString(dst []byte, s string) []byte {
 			needsQuoting = true
 			continue
 		}
-		// We need to escape it, if it contains
-		// - character " (0x22) and lower (except space)
-		// - characters above ~ (0x7E), plus equal-sign
+		// - characters <= '"' (except space) or above '~'
 		if r <= '"' || r > '~' {
 			needsEscaping = true
 			break
@@ -287,14 +291,13 @@ func appendEscapeString(dst []byte, s string) []byte {
 	if needsEscaping {
 		return strconv.AppendQuote(dst, s)
 	}
-	// No escaping needed, but we might have to place within quote-marks, in case
-	// it contained a space
+	// If no escaping is needed but quoting is needed (e.g. for spaces), use double quotes.
 	if needsQuoting {
 		dst = append(dst, '"')
-		dst = append(dst, []byte(s)...)
+		dst = append(dst, s...)
 		return append(dst, '"')
 	}
-	return append(dst, []byte(s)...)
+	return append(dst, s...)
 }
 
 // escapeMessage checks if the provided string needs escaping/quoting, similarly

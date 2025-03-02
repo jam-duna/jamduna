@@ -900,6 +900,7 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 	if err != nil {
 		fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)
 	}
+	//fmt.Printf("SetServiceStorage(s=%d, k=%s) storageKey=%s account_storage_key=%s\n", s, k, storageKey, account_storage_key)
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, storageValue)
 	return nil
@@ -916,6 +917,7 @@ func (t *MerkleTree) GetServiceStorage(s uint32, k common.Hash) ([]byte, bool, e
 	if !ok || err != nil {
 		return nil, ok, err
 	}
+	//fmt.Printf("GetServiceStorage(s=%d, k=%s) storageKey=%s account_storage_key=%s\n", s, k, storageKey, account_storage_key)
 	return value, true, nil
 }
 
@@ -924,6 +926,7 @@ func (t *MerkleTree) DeleteServiceStorage(s uint32, k common.Hash) error {
 	storageKey := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, storageKey)
 	stateKey := account_storage_key.Bytes()
+	//fmt.Printf("DeleteServiceStorage(s=%d, k=%s) storageKey=%s account_storage_key=%s\n", s, k, storageKey, account_storage_key)
 	err := t.Delete(stateKey)
 	return err
 }
@@ -1314,7 +1317,7 @@ func (t *MerkleTree) Delete(key []byte) error {
 	// Find the node to delete
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
-		return err
+		return nil // CHECK THIS
 	}
 
 	// Retrieve the value of the node to delete

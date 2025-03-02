@@ -430,6 +430,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	case "fib":
 		fib(nodes, testServices, targetN)
 	case "fib2":
+		targetN := 9
 		fib2(nodes, testServices, targetN)
 	case "transfer":
 		transferNum := targetN

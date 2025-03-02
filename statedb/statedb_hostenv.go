@@ -32,21 +32,16 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	start_NumStorageItems := sa.NumStorageItems
 	for k, storage := range sa.Storage {
 		if storage.Dirty {
-			oldValue, exists, err := tree.GetServiceStorage(service_idx, storage.RawKey)
-			if err != nil {
-				fmt.Printf("GetServiceStorage err %v\n", err)
-				panic(err)
-				return err
-			}
-			log.Trace(module, "writeAccount", "STORAGE key", storage.RawKey, "exists", exists, "oldValue", oldValue, "newValue", storage.Value)
-
 			if len(storage.Value) == 0 || storage.Deleted {
+				// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
+				log.Debug(module, "writeAccount DELETE", "service_idx", storage.RawKey, "rawkey", storage.RawKey)
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
-					fmt.Printf("DeleteServiceStorageKey: Failed to delete k: %v, error: %v\n", k, err)
+					fmt.Printf("DeleteServiceStorage: Failed to delete k: %v, error: %v\n", k, err)
 					return err
 				}
 			} else {
+				log.Debug(module, "writeAccount SET", "service_idx", service_idx, "rawkey", storage.RawKey)
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
 					fmt.Printf("SetServiceStorage err %v\n", err)
@@ -58,7 +53,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	for blob_hash, v := range sa.Lookup {
 		if v.Dirty {
 			if v.Deleted {
-				panic("check this case as [] is natural -- does it exist")
+				err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
 			} else {
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {

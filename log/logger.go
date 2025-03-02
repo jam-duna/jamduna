@@ -3,6 +3,7 @@ package log
 import (
 	"context"
 	"fmt"
+	//"strings"
 	"log/slog"
 	"log/syslog"
 	"math"
@@ -92,28 +93,28 @@ type Logger interface {
 	New(ctx ...interface{}) Logger
 
 	// Log logs a message at the specified level with context key/value pairs
-	Log(level slog.Level, msg string, ctx ...interface{})
+	Log(level slog.Level, module string, msg string, ctx ...interface{})
 
 	// Trace logs a message at the trace level with context key/value pairs
-	Trace(msg string, ctx ...interface{})
+	Trace(module string, msg string, ctx ...interface{})
 
 	// Debug logs a message at the debug level with context key/value pairs
-	Debug(msg string, ctx ...interface{})
+	Debug(module string, msg string, ctx ...interface{})
 
 	// Info logs a message at the info level with context key/value pairs
-	Info(msg string, ctx ...interface{})
+	Info(module string, msg string, ctx ...interface{})
 
 	// Warn logs a message at the warn level with context key/value pairs
-	Warn(msg string, ctx ...any)
+	Warn(module string, msg string, ctx ...any)
 
 	// Error logs a message at the error level with context key/value pairs
-	Error(msg string, ctx ...interface{})
+	Error(module string, msg string, ctx ...interface{})
 
 	// Crit logs a message at the crit level with context key/value pairs, and exits
-	Crit(msg string, ctx ...interface{})
+	Crit(module string, msg string, ctx ...interface{})
 
 	// Write logs a message at the specified level
-	Write(level slog.Level, msg string, attrs ...any)
+	Write(level slog.Level, module string, msg string, attrs ...any)
 
 	// Enabled reports whether l emits log records at the given context and level.
 	Enabled(ctx context.Context, level slog.Level) bool
@@ -160,7 +161,7 @@ func LevelString(l slog.Level) string {
 }
 
 // Write logs a message at the specified level.
-func (l *logger) Write(level slog.Level, msg string, attrs ...any) {
+func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any) {
 	if !l.inner.Enabled(context.Background(), level) {
 		return
 	}
@@ -171,15 +172,8 @@ func (l *logger) Write(level slog.Level, msg string, attrs ...any) {
 	r.Add(attrs...)
 
 	if l.writer != nil {
-		str := fmt.Sprintf("%s|%s|%v\n", LevelAlignedString(r.Level), r.Message, attrs)
-		/*for i := 0; i < len(attrs); i += 2 {
-		key := fmt.Sprintf("%v", attrs[i])
-		var value string
-		if i+1 < len(attrs) {
-			value = fmt.Sprintf("%v", attrs[i+1])
-		}
-		str += fmt.Sprintf("|%s=%s", key, value)
-		} */
+		str := fmt.Sprintf("%s|%s|%s|%s\n", LevelAlignedString(r.Level), module, r.Message, attrs)
+		//str := fmt.Sprintf("%s|%s|%v\n", LevelAlignedString(r.Level), r.Message, attrs)
 		switch r.Level {
 		case LevelCrit:
 			l.writer.Crit(str)
@@ -199,8 +193,8 @@ func (l *logger) Write(level slog.Level, msg string, attrs ...any) {
 
 }
 
-func (l *logger) Log(level slog.Level, msg string, attrs ...any) {
-	l.Write(level, msg, attrs...)
+func (l *logger) Log(level slog.Level, module string, msg string, attrs ...any) {
+	l.Write(level, module, msg, attrs...)
 }
 
 func (l *logger) With(ctx ...interface{}) Logger {
@@ -216,27 +210,27 @@ func (l *logger) Enabled(ctx context.Context, level slog.Level) bool {
 	return l.inner.Enabled(ctx, level)
 }
 
-func (l *logger) Trace(msg string, ctx ...interface{}) {
-	l.Write(LevelTrace, msg, ctx...)
+func (l *logger) Trace(module string, msg string, ctx ...interface{}) {
+	l.Write(LevelTrace, module, msg, ctx...)
 }
 
-func (l *logger) Debug(msg string, ctx ...interface{}) {
-	l.Write(slog.LevelDebug, msg, ctx...)
+func (l *logger) Debug(module string, msg string, ctx ...interface{}) {
+	l.Write(slog.LevelDebug, module, msg, ctx...)
 }
 
-func (l *logger) Info(msg string, ctx ...interface{}) {
-	l.Write(slog.LevelInfo, msg, ctx...)
+func (l *logger) Info(module string, msg string, ctx ...interface{}) {
+	l.Write(slog.LevelInfo, module, msg, ctx...)
 }
 
-func (l *logger) Warn(msg string, ctx ...any) {
-	l.Write(slog.LevelWarn, msg, ctx...)
+func (l *logger) Warn(module string, msg string, ctx ...any) {
+	l.Write(slog.LevelWarn, module, msg, ctx...)
 }
 
-func (l *logger) Error(msg string, ctx ...interface{}) {
-	l.Write(slog.LevelError, msg, ctx...)
+func (l *logger) Error(module string, msg string, ctx ...interface{}) {
+	l.Write(slog.LevelError, module, msg, ctx...)
 }
 
-func (l *logger) Crit(msg string, ctx ...interface{}) {
-	l.Write(LevelCrit, msg, ctx...)
+func (l *logger) Crit(module string, msg string, ctx ...interface{}) {
+	l.Write(LevelCrit, module, msg, ctx...)
 	os.Exit(1)
 }

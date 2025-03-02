@@ -41,15 +41,15 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	module       = "node"    // General Node Ops
-	debugDA      = "da"      // DA
-	debugG       = "g"       // Guaranteeing
-	debugT       = "t"       // Tickets/Safrole
-	debugP       = "p"       // Preimages
-	debugA       = "a"       // Assurances
-	debugAudit   = "audit"   // Audit
-	debugGrandpa = "grandpa" // Guaranteeing
-	debugStream  = "q"
+	module       = "n_mod"  // General Node Ops
+	debugDA      = "da_mod" // DA
+	debugG       = "g_mod"  // Guaranteeing
+	debugT       = "t_mod"  // Tickets/Safrole
+	debugP       = "p_mod"  // Preimages
+	debugA       = "a_mod"  // Assurances
+	debugAudit   = "ad_mod" // Audit
+	debugGrandpa = "gp_mod" // Guaranteeing
+	debugStream  = "q_mod"
 	numNodes     = types.TotalValidators
 	quicAddr     = "127.0.0.1:%d"
 	godMode      = false
