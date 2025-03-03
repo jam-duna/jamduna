@@ -1096,10 +1096,6 @@ func (vm *VM) hostWrite() {
 
 	l := uint64(NONE)
 	exists, oldValue := a.ReadStorage(k, vm.hostenv)
-	if exists {
-		l = uint64(len(oldValue))
-	}
-
 	v := []byte{}
 	err := uint64(0)
 	if vz > 0 {
@@ -1109,6 +1105,7 @@ func (vm *VM) hostWrite() {
 			vm.ResultCode = types.PVM_PANIC
 			return
 		}
+		l = uint64(len(v))
 	}
 	a.WriteStorage(a.ServiceIndex, k, v)
 	log.Debug(vm.logging, "WRITE OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))

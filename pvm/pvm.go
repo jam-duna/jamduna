@@ -1130,6 +1130,7 @@ func (vm *VM) Execute(entryPoint int) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
+			log.Debug(vm.logging, fmt.Sprintf("%d: PC %d ECALLI COMPLETE", stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
 		}
 		stepn++
 	}
@@ -1161,6 +1162,7 @@ func (vm *VM) setArgumentInputs(a []byte) error {
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	if vm.ResultCode == types.RESULT_OOG {
 		r.Err = types.RESULT_OOG
+		log.Debug(vm.logging, "getArgumentOutputs - OOG")
 		return r, 0
 	}
 	o, _ := vm.ReadRegister(7)
@@ -1168,13 +1170,16 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
 	if vm.ResultCode == types.RESULT_OK && res == 0 {
 		r.Ok = output
+		// log.Debug(vm.logging, "getArgumentOutputs - OK ZERO", "res", res)
 		return r, res
 	}
 	if vm.ResultCode == types.RESULT_OK && res != 0 {
 		r.Ok = []byte{}
+		// log.Debug(vm.logging, "getArgumentOutputs - OK NON-ZERO", "res", res)
 		return r, res
 	}
 	r.Err = types.RESULT_PANIC
+	log.Debug(vm.logging, "getArgumentOutputs - PANIC")
 	return r, 0
 }
 

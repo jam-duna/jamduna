@@ -311,9 +311,6 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		if B == empty {
 
 		} else {
-			if s.Authoring {
-				log.Debug("authoring", "BEEFY-B", "s", fmt.Sprintf("%d", service), "B", B)
-			}
 			output_b = append(output_b, BeefyCommitment{
 				Service:    service,
 				Commitment: B,
@@ -472,16 +469,31 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_t = vm.Y.T
 		output_b = vm.Y.Y
 		output_u = uint64(vm.Gas)
+		if sd.Authoring {
+
+			if r.Err == types.RESULT_OOG {
+				log.Debug("authoring", "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+			} else {
+				log.Debug("authoring", "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+			}
+
+		}
 		return
 	} else if len(r.Ok) == 32 {
 		output_t = xContext.T
 		output_b = common.BytesToHash(r.Ok)
 		output_u = uint64(vm.Gas)
+		if sd.Authoring {
+			log.Debug("authoring", "BEEFY OK-HALT with 32 @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+		}
 		return
 	}
 	output_t = xContext.T
 	output_b = vm.X.Y
 	output_u = uint64(vm.Gas)
+	if sd.Authoring {
+		log.Debug("authoring", "BEEFY OK-HALT with yield @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+	}
 	return
 }
 

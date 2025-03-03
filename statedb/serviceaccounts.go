@@ -67,16 +67,23 @@ func (sd *SServiceData) add_SPreimage(pre SPreimage) {
 }
 
 // parseMetadata is a helper that converts a metadata string into a map.
-// It splits the string on both '|' and whitespace.
 func parseMetadata(md string) map[string]string {
 	m := make(map[string]string)
-	// Replace '|' with a space.
-	md = strings.ReplaceAll(md, "|", " ")
-	parts := strings.Fields(md)
-	for _, part := range parts {
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) == 2 {
-			m[kv[0]] = kv[1]
+	// Split on "|" to separate groups.
+	groups := strings.Split(md, "|")
+	for _, group := range groups {
+		tokens := strings.Fields(strings.TrimSpace(group))
+		var currentKey string
+		for _, token := range tokens {
+			if strings.Contains(token, "=") {
+				// If token contains "=", start a new key-value pair.
+				parts := strings.SplitN(token, "=", 2)
+				currentKey = parts[0]
+				m[currentKey] = parts[1]
+			} else if currentKey != "" {
+				// Append tokens without "=" to the previous key's value.
+				m[currentKey] += " " + token
+			}
 		}
 	}
 	return m
@@ -155,7 +162,7 @@ func parse_SLookup(md string) (uint32, SLookup) {
 		// Remove surrounding brackets and split by comma.
 		t = strings.Trim(t, "[]")
 		if t != "" {
-			parts := strings.Split(t, ",")
+			parts := strings.Split(t, " ") // fix for https://github.com/jam-duna/jamtestnet/issues/121
 			for _, part := range parts {
 				part = strings.TrimSpace(part)
 				if num, err := strconv.ParseUint(part, 10, 32); err == nil {

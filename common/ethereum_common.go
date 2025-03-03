@@ -80,7 +80,7 @@ func Hex2Hash(s string) Hash {
 
 // Skips "0x" and prints the next 8 characters
 func Str(hash Hash) string {
-	return fmt.Sprintf("%s..%s", hash.Hex()[2:6], hash.Hex()[60:64])
+	return fmt.Sprintf("%s..%s", hash.Hex()[2:6], hash.Hex()[62:66])
 }
 
 // MarshalJSON custom marshaler to convert Hash to hex string.
