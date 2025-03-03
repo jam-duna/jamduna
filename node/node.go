@@ -330,7 +330,7 @@ func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile str
 
 func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
+	//log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir)

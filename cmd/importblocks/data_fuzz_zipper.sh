@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Define variables for the data directory, temporary directory, and fuzzed directory.
+# Define directories.
 RAW_DATA_DIR="rawdata"
 FUZZED_DATA_DIR="fuzzed"
 DATA_DIR="data"
@@ -56,11 +56,17 @@ else
     echo "Fuzzed directory '${FUZZED_DATA_DIR}' does not exist. Skipping fuzzed data merge."
 fi
 
+# Generate plain text versions of .log files (stripping ANSI escape sequences)
+echo "Generating plain text versions for grepping..."
+find "${DATA_TEMP}" -type f -name "*.log" | while read logfile; do
+    txtfile="${logfile%.log}.txt"
+    echo "Creating plain text version for $logfile -> $txtfile..."
+    sed -r 's/\x1B\[[0-9;]*[mK]//g' "$logfile" > "$txtfile"
+done
+
 # Zip the entire temporary folder into data.zip with maximum compression.
 cd "${DATA_TEMP}"
 zip -r -9 "../${DATA_DIR}.zip" .
 cd ..
-# Remove the temporary directory.
-#rm -rf "${DATA_TEMP}"
 
 echo "${DATA_DIR}.zip created successfully."

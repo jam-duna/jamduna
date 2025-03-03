@@ -23,7 +23,6 @@ importblocks: build
 run:
 	go build -tags=$(NETWORK) -o $(BINARY_NAME_FUZZ) ../fuzzer
 	./$(BINARY_NAME_FUZZ)
-
 cpnode:
 ifeq ($(JOBID),)
 	@echo "Detecting latest timestamp directory in $(JAMDIR)..."
@@ -37,6 +36,7 @@ endif
 	@echo "Using directory: $(TS) with jobID: $(JOBID)"
 	@echo "Removing old data from $(DATADIR)/$(MODE)/..."
 	rm -rf "$(DATADIR)/$(MODE)/state_transitions" "$(DATADIR)/$(MODE)/blocks" "$(DATADIR)/$(MODE)/state_snapshots"
+	rm -f "$(DATADIR)/$(MODE)"/*.log
 
 	mkdir -p "$(DATADIR)/$(MODE)/state_transitions" \
 	         "$(DATADIR)/$(MODE)/blocks" \
@@ -48,6 +48,9 @@ endif
 	     -exec cp {} "$(DATADIR)/$(MODE)/blocks/" \;
 	find "$(JAMDIR)/$(TS)" -type f -path "*/data/state_snapshots/*" \
 	     -exec cp {} "$(DATADIR)/$(MODE)/state_snapshots/" \;
+
+	@echo "Copying log file from $(JAMDIR)/$(TS)/$(JOBID).log to $(DATADIR)/$(MODE)/"
+	cp "$(JAMDIR)/$(TS)/$(JOBID).log" "$(DATADIR)/$(MODE)/"
 
 cpstf:
 	mkdir -p ${DATADIR}/$(MODE)/state_transitions ${DATADIR}/$(MODE)/blocks ${DATADIR}/$(MODE)/state_snapshots

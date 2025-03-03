@@ -61,12 +61,15 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 		sendtickets = false
 	}
 
+	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
+	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
+
+	log.EnableModule("authoring")
+	log.Info(module, "JAMTEST", "jam", caseType, "targetN", targetTimeslotLength)
+
 	for _, n := range nodes {
 		n.SetSendTickets(sendtickets)
 	}
-
-	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
-	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
 
 	watchNode := nodes[len(nodes)-1]
 

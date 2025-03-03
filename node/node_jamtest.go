@@ -268,6 +268,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
+	log.EnableModule("authoring")
 	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 	_ = nodes
 	block_graph_server := types.NewGraphServer(basePort)
