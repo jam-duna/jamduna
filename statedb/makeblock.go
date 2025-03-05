@@ -45,7 +45,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 		} else {
-			log.Error(debugP, "ValidateLookup", "err", err)
+			log.Warn(debugP, "ValidateLookup", "err", err)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 			continue
 		}
@@ -83,7 +83,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		s.JamState.CheckInvalidCoreIndex()
 		err = s.Verify_Guarantee_MakeBlock(g, b, tmpState)
 		if err != nil {
-			log.Error(debugG, "Verify_Guarantee_MakeBlock", "err", err)
+			log.Debug(debugG, "Verify_Guarantee_MakeBlock", "err", err)
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
@@ -96,7 +96,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 	extrinsicData.Guarantees, err, _ = s.VerifyGuaranteesMakeBlock(extrinsicData.Guarantees, b)
 	if err != nil {
-		log.Error(debugG, "VerifyGuaranteesMakeBlock", "err", err)
+		log.Debug(debugG, "VerifyGuaranteesMakeBlock", "err", err)
 	}
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()

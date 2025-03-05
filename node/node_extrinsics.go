@@ -62,7 +62,7 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 	s := n.getState()
 	err := s.ValidateSingleGuarantee(g)
 	if err != nil {
-		log.Error(debugG, "processGuarantee:ValidateSingleGuarantee", "err", err)
+		log.Debug(debugG, "processGuarantee:ValidateSingleGuarantee", "err", err)
 		return err
 	}
 	// TODO: add tracer event
