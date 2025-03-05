@@ -305,7 +305,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	services = UniqueUint32Slice(services)
 	for _, service := range services {
 		// this is parallelizable
-		B, U, XY := s.SingleAccumulate(w, f, service)
+		B, U, XY := s.SingleAccumulate(o, w, f, service)
 		output_u += U
 		empty := common.Hash{}
 		if B == empty {
@@ -361,7 +361,7 @@ func (sdb *StateDB) k_exist(i uint32) bool {
 	return false
 }
 
-func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount) *types.XContext {
+func (sdb *StateDB) NewXContext(u *types.PartialState, s uint32, serviceAccount *types.ServiceAccount) *types.XContext {
 
 	// Calculate x.I 0.6.2 (B.9) https://graypaper.fluffylabs.dev/#/5f542d7/2efd002efd00
 	encoded_service, _ := types.Encode(s)
@@ -380,14 +380,18 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount) 
 	log.Trace(module, "decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
 
 	js := sdb.JamState
-	x.U = &types.PartialState{
-		D:                  make(map[uint32]*types.ServiceAccount), // this IS mutated
-		UpcomingValidators: js.SafroleState.NextValidators,
-		QueueWorkReport:    js.AuthorizationQueue,
-		PrivilegedState:    js.PrivilegedServiceIndices,
+	if u != nil {
+		x.U = u // IMPORTANT: writes in one service (Fib, Trib) are readable by another (Meg) in ordered accumulation
+	} else {
+		x.U = &types.PartialState{
+			D:                  make(map[uint32]*types.ServiceAccount), // this IS mutated
+			UpcomingValidators: js.SafroleState.NextValidators,
+			QueueWorkReport:    js.AuthorizationQueue,
+			PrivilegedState:    js.PrivilegedServiceIndices,
+		}
 	}
 	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
-	mutableServiceAccount := serviceAccount.Clone()
+	mutableServiceAccount := serviceAccount.Clone() // CHECK THIS -- do we need to actually clone it?
 	mutableServiceAccount.ALLOW_MUTABLE()
 	x.U.D[s] = mutableServiceAccount // NOTE: this is a distinct COPY of serviceAccount and CAN have Set{...}
 	return x
@@ -404,7 +408,7 @@ invokes pvm execution
 */
 // ∆1
 // eq 176
-func (sd *StateDB) SingleAccumulate(w []types.WorkReport, f map[uint32]uint32, s uint32) (output_b common.Hash, output_u uint64, xy *types.XContext) {
+func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32) (output_b common.Hash, output_u uint64, xy *types.XContext) {
 	// gas need to check again
 	// check if s is in f
 	gas := uint32(0)
@@ -443,12 +447,19 @@ func (sd *StateDB) SingleAccumulate(w []types.WorkReport, f map[uint32]uint32, s
 	}
 
 	// this is immutable going into NewXContext
-	serviceAccount, ok, err := sd.GetService(s)
-	if err != nil || !ok {
-		// how did we even get here
-		panic("Unknown service")
+
+	// solution:
+	//  get serviceAccount from U.D[s] FIRST
+	var err error
+	serviceAccount, ok := o.GetService(s)
+	if !ok {
+		serviceAccount, ok, err = sd.GetService(s)
+		if err != nil || !ok {
+			// how did we even get here
+			panic("Unknown service")
+		}
 	}
-	xContext := sd.NewXContext(s, serviceAccount)
+	xContext := sd.NewXContext(o, s, serviceAccount)
 	code, ok, err := sd.ReadServicePreimageBlob(s, codeHash)
 	if err != nil || !ok {
 		panic("Could not read blob")

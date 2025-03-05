@@ -35,19 +35,41 @@ type PartialState struct {
 	PrivilegedState    Kai_state                  `json:"privileged_state"`
 }
 
+func (u *PartialState) GetService(s uint32) (*ServiceAccount, bool) {
+	if sa, ok := u.D[s]; ok {
+		return sa, true
+	}
+	return nil, false
+}
+
+// IMPORTANT: have to get X vs Y correctly clone with checkpoint!
 func (u *PartialState) Clone() *PartialState {
 	v := &PartialState{
-		D: make(map[uint32]*ServiceAccount),
-		// Arrays are copied by value in Go, so this will be a deep copy
-		UpcomingValidators: u.UpcomingValidators,
+		D:                  make(map[uint32]*ServiceAccount),
+		// must have copy of the slice
+		UpcomingValidators: make([]Validator, len(u.UpcomingValidators)),
+		// Copying by value works here 
 		QueueWorkReport:    u.QueueWorkReport,
+		// Shallow copy; Kai_g handled below
 		PrivilegedState:    u.PrivilegedState,
 	}
-	for s, sa := range u.D {
-		v.D[s] = sa.Clone()
-		//log.Info("statedb", "CLONED SERVICE", "s", s, "src", sa, "clone", v.D[s])
+
+	// Copy UpcomingValidators
+	copy(v.UpcomingValidators, u.UpcomingValidators)
+
+	v.QueueWorkReport = u.QueueWorkReport
+
+	// Copy PrivilegedState fields properly
+	v.PrivilegedState.Kai_g = make(map[uint32]uint64)
+	for k, val := range u.PrivilegedState.Kai_g {
+		v.PrivilegedState.Kai_g[k] = val
 	}
-	//log.Info("statedb", "CLONED PartialState", "v.D", v.D)
+
+	// Deep copy D (ServiceAccount map) -- we do need cloning here because of X vs Y
+	for s, sa := range u.D {
+		v.D[s] = sa.Clone() // Assuming ServiceAccount has a Clone() method
+	}
+
 	return v
 }
 
