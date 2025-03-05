@@ -36,6 +36,10 @@ const (
 	MaxAuthorizationPoolItems   = configs.MaxAuthorizationPoolItems   // O = 8: The maximum number of items in the authorizations pool.
 	MaxAuthorizationQueueItems  = configs.MaxAuthorizationQueueItems  // Q = 80: The maximum number of items in the authorizations queue.
 	ValidatorCoreRotationPeriod = configs.ValidatorCoreRotationPeriod // R = 10: The rotation period of validator-core assignments, in timeslots.
+	SegmentSize                 = configs.SegmentSize
+	ECPieceSize                 = configs.ECPieceSize
+	NumECPiecesPerSegment       = configs.NumECPiecesPerSegment
+	PreimageExpiryPeriod        = configs.PreimageExpiryPeriod
 )
 
 const (
@@ -53,12 +57,10 @@ var TimeSavingMode bool = true
 
 const CoreLazyMode bool = true
 const (
-	W_G                            = 4104      // W_G = 4,104: The size of a segment in octets.
 	PeriodSecond                   = 4         // A = 8 represents the period, in seconds, between audit tranches.
 	MinElectiveServiceItemBalance  = 10        // B_I represents the additional minimum balance required per item of elective service state.
 	MinElectiveServiceOctetBalance = 1         // B_L represents the additional minimum balance required per octet of elective service state.
 	BaseServiceBalance             = 100       // B_S = 100: The basic minimum balance which all services require.
-	PreimageExpiryPeriod           = 28800     // D = 28,800: The period in timeslots after which an unreferenced preimage may be expunged.
 	AuditBiasFactor                = 2         // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.
 	AccumulationGasAllocation      = 10000000  // G_A: The total gas allocated to a core for Accumulation.
 	IsAuthorizedGasAllocation      = 1000000   // G_I: The gas allocated to invoke a work-package’s Is-Authorized logic.
@@ -82,10 +84,6 @@ const (
 )
 
 const (
-	// tiny
-	W_E = 4
-	W_P = 1026
-
 	QuicIndividualTimeout = 8000 * time.Millisecond
 	QuicOverallTimeout    = 10000 * time.Millisecond
 )

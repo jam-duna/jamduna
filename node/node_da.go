@@ -150,7 +150,7 @@ func (e *ECCErasureMap) String() string {
 
 func (n *Node) PrepareArbitaryData(b []byte) ([][][]byte, common.Hash, int) {
 	// Padding b to the length of W_G
-	paddedB := common.PadToMultipleOfN(b, types.W_E) // this makes sense
+	paddedB := common.PadToMultipleOfN(b, types.ECPieceSize) // this makes sense
 	bLength := len(b)
 
 	chunks, err := n.encode(paddedB, false, bLength)
@@ -582,9 +582,9 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 
 		output, _ := vm.ExecuteRefine(uint32(index), workPackage, r, imports, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
 		if workItem.ExportCount != 0 {
-			exports := common.PadToMultipleOfN(output.Ok, types.W_G)
-			for i := 0; i < len(exports); i += types.W_G {
-				segments = append(segments, exports[i:i+types.W_G])
+			exports := common.PadToMultipleOfN(output.Ok, types.SegmentSize)
+			for i := 0; i < len(exports); i += types.SegmentSize {
+				segments = append(segments, exports[i:i+types.SegmentSize])
 			}
 		}
 		result := types.WorkResult{

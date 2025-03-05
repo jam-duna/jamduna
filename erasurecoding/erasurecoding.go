@@ -29,7 +29,7 @@ var (
 )
 
 // GetCodingRate returns the encoding parameters: K (number of data shards) and N (total validators).
-// Example: K = types.W_E/2, N = types.TotalValidators.
+// Example: K = types.ECPieceSize/2, N = types.TotalValidators.
 func GetCodingRate() (coding_rate_K int, coding_rate_N int) {
 	coding_rate_K = 2
 	coding_rate_N = types.TotalValidators

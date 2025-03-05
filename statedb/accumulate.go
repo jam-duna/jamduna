@@ -305,7 +305,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	services = UniqueUint32Slice(services)
 	for _, service := range services {
 		// this is parallelizable
-		T, B, U := s.SingleAccumulate(o, w, f, service)
+		B, U, XY := s.SingleAccumulate(w, f, service)
 		output_u += U
 		empty := common.Hash{}
 		if B == empty {
@@ -316,7 +316,10 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 				Commitment: B,
 			})
 		}
-		output_t = append(output_t, T...)
+		for s, sa := range XY.U.D {
+			o.D[s] = sa
+		}
+		output_t = append(output_t, XY.T...)
 	}
 
 	// s ∈ K(d) ∖ s
@@ -358,7 +361,7 @@ func (sdb *StateDB) k_exist(i uint32) bool {
 	return false
 }
 
-func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, u *types.PartialState) *types.XContext {
+func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount) *types.XContext {
 
 	// Calculate x.I 0.6.2 (B.9) https://graypaper.fluffylabs.dev/#/5f542d7/2efd002efd00
 	encoded_service, _ := types.Encode(s)
@@ -377,15 +380,11 @@ func (sdb *StateDB) NewXContext(s uint32, serviceAccount *types.ServiceAccount, 
 	log.Trace(module, "decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
 
 	js := sdb.JamState
-	if u != nil {
-		x.U = u
-	} else if x.U == nil {
-		x.U = &types.PartialState{
-			D:                  make(map[uint32]*types.ServiceAccount), // this IS mutated
-			UpcomingValidators: js.SafroleState.NextValidators,
-			QueueWorkReport:    js.AuthorizationQueue,
-			PrivilegedState:    js.PrivilegedServiceIndices,
-		}
+	x.U = &types.PartialState{
+		D:                  make(map[uint32]*types.ServiceAccount), // this IS mutated
+		UpcomingValidators: js.SafroleState.NextValidators,
+		QueueWorkReport:    js.AuthorizationQueue,
+		PrivilegedState:    js.PrivilegedServiceIndices,
 	}
 	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
 	mutableServiceAccount := serviceAccount.Clone()
@@ -405,7 +404,7 @@ invokes pvm execution
 */
 // ∆1
 // eq 176
-func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32) (output_t []types.DeferredTransfer, output_b common.Hash, output_u uint64) {
+func (sd *StateDB) SingleAccumulate(w []types.WorkReport, f map[uint32]uint32, s uint32) (output_b common.Hash, output_u uint64, xy *types.XContext) {
 	// gas need to check again
 	// check if s is in f
 	gas := uint32(0)
@@ -449,7 +448,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		// how did we even get here
 		panic("Unknown service")
 	}
-	xContext := sd.NewXContext(s, serviceAccount, o)
+	xContext := sd.NewXContext(s, serviceAccount)
 	code, ok, err := sd.ReadServicePreimageBlob(s, codeHash)
 	if err != nil || !ok {
 		panic("Could not read blob")
@@ -463,14 +462,11 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	}
 	vm.Timeslot = t
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
-	o.D[s] = serviceAccount
 
 	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {
-		output_t = vm.Y.T
 		output_b = vm.Y.Y
 		output_u = uint64(vm.Gas)
 		if sd.Authoring {
-
 			if r.Err == types.RESULT_OOG {
 				log.Debug("authoring", "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 			} else {
@@ -478,21 +474,21 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 			}
 
 		}
-		return
-	} else if len(r.Ok) == 32 {
-		output_t = xContext.T
-		output_b = common.BytesToHash(r.Ok)
-		output_u = uint64(vm.Gas)
-		if sd.Authoring {
-			log.Debug("authoring", "BEEFY OK-HALT with 32 @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
-		}
+		xy = &(vm.Y)
 		return
 	}
-	output_t = xContext.T
-	output_b = vm.X.Y
+	xy = vm.X
 	output_u = uint64(vm.Gas)
+	res := ""
+	if len(r.Ok) == 32 {
+		output_b = common.BytesToHash(r.Ok)
+		res = "32byte"
+	} else {
+		output_b = vm.X.Y
+		res = "yield"
+	}
 	if sd.Authoring {
-		log.Debug("authoring", "BEEFY OK-HALT with yield @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+		log.Debug("authoring", fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
 	}
 	return
 }

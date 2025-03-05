@@ -35,6 +35,22 @@ type PartialState struct {
 	PrivilegedState    Kai_state                  `json:"privileged_state"`
 }
 
+func (u *PartialState) Clone() *PartialState {
+	v := &PartialState{
+		D: make(map[uint32]*ServiceAccount),
+		// Arrays are copied by value in Go, so this will be a deep copy
+		UpcomingValidators: u.UpcomingValidators,
+		QueueWorkReport:    u.QueueWorkReport,
+		PrivilegedState:    u.PrivilegedState,
+	}
+	for s, sa := range u.D {
+		v.D[s] = sa.Clone()
+		//log.Info("statedb", "CLONED SERVICE", "s", s, "src", sa, "clone", v.D[s])
+	}
+	//log.Info("statedb", "CLONED PartialState", "v.D", v.D)
+	return v
+}
+
 func (ah AccumulationHistory) String() string {
 	jsonBytes, err := json.Marshal(ah)
 	if err != nil {
@@ -102,12 +118,14 @@ func (X *XContext) Clone() (Y XContext) {
 	Y = XContext{
 		I: X.I,
 		S: X.S,
+		U: X.U.Clone(),
 		T: make([]DeferredTransfer, len(X.T)),
 		Y: X.Y,
 	}
 	for i, t := range X.T {
 		Y.T[i] = t.Clone()
 	}
+	//log.Info("statedb", "CLONE XContext", "X.U", X.U, "Y.U", Y.U)
 	return
 }
 

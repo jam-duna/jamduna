@@ -51,7 +51,7 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 		StorageSize:     s.StorageSize,
 		NumStorageItems: s.NumStorageItems,
 		Dirty:           s.Dirty,
-		Mutable:         false, // must use ALLOW_MUTABLE explicitly
+		Mutable:         s.Mutable, // should ALLOW_MUTABLE explicitly
 	}
 
 	// Clone the Storage map
@@ -91,6 +91,7 @@ func (o StorageObject) Clone() StorageObject {
 		Deleted: o.Deleted,
 		Dirty:   o.Dirty,
 		Value:   valueCopy,
+		RawKey:  o.RawKey,
 	}
 }
 

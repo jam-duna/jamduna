@@ -64,7 +64,6 @@ func Trace(module string, msg string, ctx ...interface{}) {
 
 // Debug logs a message at the debug level for a specific module.
 func Debug(module string, msg string, ctx ...interface{}) {
-
 	if !isModuleEnabled(module) {
 		return
 	}

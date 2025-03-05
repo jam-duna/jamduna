@@ -45,7 +45,7 @@ func (i *WorkItem) GetTotalDataLength() int {
 	total := 0
 	total += len(i.Payload)
 	import_count := len(i.ImportedSegments)
-	data_len_import := import_count * W_G
+	data_len_import := import_count * SegmentSize
 	total += data_len_import
 	for _, extrinsic := range i.Extrinsics {
 		total += int(extrinsic.Len)

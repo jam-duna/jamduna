@@ -15,13 +15,13 @@ import (
 
 // Generate the test vector by generating random data.
 func generateWorkPackageBundleTestVector(size int) (map[string]interface{}, error) {
-	numpieces := size / types.W_E
-	if size%types.W_E != 0 {
+	numpieces := size / types.ECPieceSize
+	if size%types.ECPieceSize != 0 {
 		numpieces++
 	}
 	b := node.GenerateRandomData(size)
 	originalB := b
-	b = common.PadToMultipleOfN(b, int(types.W_E))
+	b = common.PadToMultipleOfN(b, int(types.ECPieceSize))
 	chunks, err := erasurecoding.Encode(b, numpieces)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func generateWorkPackageBundleTestVector(size int) (map[string]interface{}, erro
 // Generate the test vector by generating random data.
 func generateSegmentTestVector(size int, numPieces int) (map[string]interface{}, error) {
 	b := node.GenerateRandomData(size)
-	b = common.PadToMultipleOfN(b, int(types.W_E))
+	b = common.PadToMultipleOfN(b, int(types.ECPieceSize))
 	chunks, err := erasurecoding.Encode(b, numPieces)
 	if err != nil {
 		return nil, err

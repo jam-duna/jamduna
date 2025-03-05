@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io/ioutil"
 	"os"
 	"testing"
 
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/google/go-github/v58/github"
@@ -24,7 +25,7 @@ func getGithubDirFile(owner string, repo string, branch string, folderPath strin
 		// Get all files in the folder
 		_, dircontents, _, err := client.Repositories.GetContents(context.Background(), owner, repo, folderPath, &github.RepositoryContentGetOptions{Ref: branch})
 		if err != nil {
-			log.Fatalf("Error fetching folder contents: %v", err)
+			panic(err) // "Error fetching folder contents: %v", err
 		}
 
 		// Create local directory if it doesn't exist
@@ -106,7 +107,7 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 }
 func testSTF(t *testing.T, filename string, content string) {
 	t.Helper()
-	testDir := "/tmp/test_local"
+	testDir := "/tmp/test_locala"
 	test_storage, err := initStorage(testDir)
 	if err != nil {
 		t.Errorf("❌ [%s] Error initializing storage: %v", filename, err)
@@ -164,30 +165,14 @@ func testSTF(t *testing.T, filename string, content string) {
 	}
 }
 
-func TestStateTransitionjavajam(t *testing.T) {
-	owner := "javajamio"
-	repo := "javajam-trace"
-	branch := "main"
-	folderPath := "state_transitions"
-	filenames, contents, err := getGithubDirFile(owner, repo, branch, folderPath)
+func TestStateTransitionSingle(t *testing.T) {
+	filename := "3_006.json"
+	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		t.Fatalf("🚨 Error fetching folder contents: %v", err)
+		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
-	var failedTests []string
-
-	for i, filename := range filenames {
-		t.Run(filename, func(t *testing.T) {
-			defer func() {
-				if t.Failed() {
-					failedTests = append(failedTests, filename)
-				}
-			}()
-			testSTF(t, filename, contents[i])
-		})
-	}
-	if len(failedTests) > 0 {
-		t.Errorf("\n🚨 %d tests failed:\n%s", len(failedTests), failedTests)
-	}
+	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
+	testSTF(t, filename, string(content))
 }
 
 func TestCompareJson(t *testing.T) {

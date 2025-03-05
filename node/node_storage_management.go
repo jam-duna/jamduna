@@ -180,7 +180,7 @@ func generateErasureRootShardIdxKey(erasureRoot common.Hash, shardIndex uint16) 
 
 // used in CE139 GetSegmentShard_Assurer
 func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, err error) {
-	fixedSegmentSize := types.W_P * 2 // tiny 2056, full 12
+	fixedSegmentSize := types.NumECPiecesPerSegment * 2 // tiny 2056, full 12
 	// if len(concatenatedShards)%(fixedSegmentSize) != 0 {
 	// 	return nil, fmt.Errorf("Invalid SegmentShards Len:%v. MUST BE multiple of %v", len(concatenatedShards), fixedSegmentSize)
 	// }
@@ -195,7 +195,7 @@ func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, er
 // used in StoreImportDA_Assurer
 func CombineSegmentShards(segmentShards [][]byte) (concatenatedShards []byte, err error) {
 	// Loop through each segment shard and append it to the combined slice
-	fixedSegmentSize := types.W_P * 2 // tiny 2056, full 12
+	fixedSegmentSize := types.NumECPiecesPerSegment * 2 // tiny 2056, full 12
 	for _, shard := range segmentShards {
 		concatenatedShards = append(concatenatedShards, shard...)
 	}
@@ -388,7 +388,7 @@ func (n *Node) getImportSegment(h common.Hash, segmentIndex uint16) ([]byte, boo
 	}
 
 	// Extract and return the requested segment
-	return extractSegment(segmentsConcat, segmentIndex, types.W_G), true
+	return extractSegment(segmentsConcat, segmentIndex, types.SegmentSize), true
 }
 
 // Helper function to extract a segment from the concatenated segments

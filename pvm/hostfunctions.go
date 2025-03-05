@@ -674,17 +674,20 @@ func (vm *VM) hostQuery() {
 		x := anchor_timeslot[0]
 		vm.WriteRegister(7, 1+(1<<32)*uint64(x))
 		vm.WriteRegister(8, 0)
+		log.Debug(vm.logging, "QUERY 1", "x", x)
 		break
 	case 2:
 		x := anchor_timeslot[0]
 		y := anchor_timeslot[1]
 		vm.WriteRegister(7, 2+(1<<32)*uint64(x))
 		vm.WriteRegister(8, uint64(y))
+		log.Debug(vm.logging, "QUERY 2", "x", x, "y", y)
 		break
 	case 3:
 		x := anchor_timeslot[0]
 		y := anchor_timeslot[1]
 		z := anchor_timeslot[2]
+		log.Debug(vm.logging, "QUERY 3", "x", x, "y", y, "z", z)
 		vm.WriteRegister(7, 3+(1<<32)*uint64(x))
 		vm.WriteRegister(8, uint64(y)+(1<<32)*uint64(z))
 		break
@@ -832,7 +835,7 @@ func (vm *VM) hostEject() {
 	s = s.Clone()
 	s.Balance += bold_d.Balance
 
-	if len(D_lookup) == 2 && D_lookup[1] < vm.Timeslot-uint32(D) {
+	if len(D_lookup) == 2 && D_lookup[1] < vm.Timeslot-uint32(types.PreimageExpiryPeriod) {
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		delete(vm.X.U.D, uint32(d))
@@ -1197,27 +1200,35 @@ func (vm *VM) hostForget() {
 		return
 	}
 
-	if len(X_s_l) == 0 || (len(X_s_l) == 2) && X_s_l[1] < (vm.Timeslot-D) {
+	if len(X_s_l) == 0 || (len(X_s_l) == 2) && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) {
 		x_s.WriteLookup(account_lookuphash, uint32(z), nil) // nil means delete the lookup
 		x_s.WritePreimage(account_blobhash, []byte{})       // []byte{} means delete the preimage
 		// storage accounting
 		x_s.NumStorageItems -= 2
 		x_s.StorageSize -= 81 + uint64(z)
-		log.Debug(vm.logging, "FORGET OK", "h", account_lookuphash, "z", z)
+		log.Debug(vm.logging, "FORGET OK1", "h", account_lookuphash, "z", z)
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
+		return
 	} else if len(X_s_l) == 1 {
 		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
-		log.Debug(vm.logging, "FORGET OK", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
-	} else if len(X_s_l) == 3 && X_s_l[1] < (vm.Timeslot-D) {
+		log.Debug(vm.logging, "FORGET OK2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		return
+	} else if len(X_s_l) == 3 && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) {
 		X_s_l = []uint32{X_s_l[2], vm.Timeslot}
 		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l)
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
-		log.Debug(vm.logging, "FORGET OK", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
+		log.Debug(vm.logging, "FORGET OK3", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
+		return
 	}
+	vm.WriteRegister(7, HUH)
+	vm.HostResultCode = HUH
+	log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o)
+	return
+
 }
 
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
@@ -1262,43 +1273,12 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 	}
 }
 
-// Import Segment
-// func (vm *VM) hostImport() {
-// 	// import  - which copies  a specific i  (e.g. holding the bytes "9") into RAM from "ImportDA" to be "accumulated"
-// 	omega_0, _ := vm.ReadRegister(7) // a0 = 7
-// 	var v_Bytes []byte
-// 	if omega_0 < uint64(len(vm.Imports)) {
-// 		v_Bytes = vm.Imports[omega_0][:]
-// 	} else {
-// 		v_Bytes = []byte{}
-// 	}
-// 	o, _ := vm.ReadRegister(8) // a1 = 8
-// 	l, _ := vm.ReadRegister(9) // a2 = 9
-// 	if l > (W_E * W_S) {
-// 		l = W_E * W_S
-// 	}
-
-// 	if len(v_Bytes) != 0 {
-// 		errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[:])
-// 		if errCode != OK {
-// 			vm.WriteRegister(7, OOB)
-// 			vm.HostResultCode = OOB
-// 			return
-// 		}
-// 		vm.WriteRegister(7, OK)
-// 		vm.HostResultCode = OK
-// 	} else {
-// 		vm.WriteRegister(7, NONE)
-// 		vm.HostResultCode = NONE
-// 	}
-// }
-
 // Export segment host-call
 func (vm *VM) hostExport(pi uint32) [][]byte {
 	p, _ := vm.ReadRegister(7) // a0 = 7
 	z, _ := vm.ReadRegister(8) // a1 = 8
-	if z > (types.W_G) {
-		z = types.W_G
+	if z > (types.SegmentSize) {
+		z = types.SegmentSize
 	}
 
 	e := vm.Exports
@@ -1311,18 +1291,7 @@ func (vm *VM) hostExport(pi uint32) [][]byte {
 		return e
 	}
 
-	/*  apply eq(187) zero-padding function:
-
-	And P is the zero-padding function to take an octet array to some multiple of n in length:
-	(187) 	P n∈N 1∶ ∶{ Y → Y k⋅n
-			x ↦ x ⌢ [0, 0, ...] ((∣x∣+n−1) mod n)+1...n
-
-	n := (W_E * W_S)
-	length := n - ((len(x) + n - 1) % n) + 1
-	zeroSequence := make([]byte, length)
-	x = append(x, zeroSequence...)
-	*/
-	x = common.PadToMultipleOfN(x, types.W_G)
+	x = common.PadToMultipleOfN(x, types.SegmentSize)
 
 	ς := vm.ExportSegmentIndex   // Assume ς (sigma, Represent segment offset), need to get ς properly
 	if ς+uint32(len(e)) >= W_X { // W_X

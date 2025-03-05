@@ -119,9 +119,9 @@ func TestDifferentSizes(t *testing.T) {
 	sizes := []int{1024, 4104, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024, 12 * 1024 * 1024}
 	for _, size := range sizes {
 		b := make([]byte, size)
-		b = common.PadToMultipleOfN(b, types.W_G)
-		numpieces := len(b) / types.W_G
-		if len(b)%types.W_G != 0 {
+		b = common.PadToMultipleOfN(b, types.SegmentSize)
+		numpieces := len(b) / types.SegmentSize
+		if len(b)%types.SegmentSize != 0 {
 			numpieces++
 		}
 		generateSize := size
@@ -198,9 +198,9 @@ func xTestEncodeDecodeWithPartialShards(t *testing.T) {
 	passCounter := 0
 
 	data := common.Hex2Bytes("0xeffa2e260ad220fa067c519e8c82dab3")
-	data = common.PadToMultipleOfN(data, types.W_G)
-	numpieces := len(data) / types.W_G
-	if len(data)%types.W_G != 0 {
+	data = common.PadToMultipleOfN(data, types.SegmentSize)
+	numpieces := len(data) / types.SegmentSize
+	if len(data)%types.SegmentSize != 0 {
 		numpieces++
 	}
 	originalLength := len(data)

@@ -126,13 +126,13 @@ func (n *Node) ReadKVByte(key []byte) ([]byte, bool, error) {
 }
 
 func ComputeC_Base(blob_length int) int {
-	c := int(math.Ceil(float64(blob_length) / float64(types.W_E)))
+	c := int(math.Ceil(float64(blob_length) / float64(types.ECPieceSize)))
 	return c
 }
 
 func (n *Node) encode(data []byte, isFixed bool, data_len int) ([][][]byte, error) {
 	// Load the file and encode them into segments of chunks. (3D byte array)
-	c_base := types.W_P // This is segegment s_club case
+	c_base := types.NumECPiecesPerSegment // This is segegment s_club case
 	if !isFixed {
 		// get the veriable c_base by computing roundup(|b|/Wc)
 		c_base = ComputeC_Base(int(data_len))
@@ -148,7 +148,7 @@ func (n *Node) encode(data []byte, isFixed bool, data_len int) ([][][]byte, erro
 
 func (n *Node) decode(data [][][]byte, isFixed bool, data_len int) ([]byte, error) {
 	// Load the file and encode them into segments of chunks. (3D byte array)
-	c_base := types.W_P // This is segegment s_club case
+	c_base := types.NumECPiecesPerSegment // This is segegment s_club case
 	if !isFixed {
 		// get the veriable c_base by computing roundup(|b|/Wc)
 		c_base = ComputeC_Base(int(data_len))

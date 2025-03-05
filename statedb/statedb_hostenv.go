@@ -34,14 +34,18 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
 				// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
-				log.Debug(module, "writeAccount DELETE", "service_idx", storage.RawKey, "rawkey", storage.RawKey)
+				if s.Authoring {
+					log.Debug(module, "writeAccount DELETE", "service_idx", storage.RawKey, "rawkey", storage.RawKey)
+				}
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
 					fmt.Printf("DeleteServiceStorage: Failed to delete k: %v, error: %v\n", k, err)
 					return err
 				}
 			} else {
-				log.Debug(module, "writeAccount SET", "service_idx", service_idx, "rawkey", storage.RawKey)
+				if s.Authoring {
+					log.Info(module, "writeAccount SET", "service_idx", service_idx, "rawkey", storage.RawKey, "value", storage.Value)
+				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
 					fmt.Printf("SetServiceStorage err %v\n", err)

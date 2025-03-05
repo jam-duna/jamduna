@@ -38,7 +38,7 @@ type WorkPackage struct {
 type WorkPackageBundle struct {
 	WorkPackage       WorkPackage       `json:"p"` // P: workPackage
 	ExtrinsicData     ExtrinsicsBlobs   `json:"x"` // X: extrinsic data for some workitem argument w
-	ImportSegmentData [][][]byte        `json:"s"` // M: import segment data, previouslly called m (each of segment is size of W_E*W_S)
+	ImportSegmentData [][][]byte        `json:"s"` // M: import segment data, previouslly called m (each of segment is size of W_G)
 	Justification     [][][]common.Hash `json:"j"` // J: justifications of segment data build using CDT
 }
 

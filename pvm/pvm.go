@@ -22,14 +22,11 @@ const (
 
 	regSize  = 13
 	numCores = types.TotalCores
-	//W_E      = types.W_E
-	//W_S      = types.W_S
 
 	W_X = 1024
 	M   = 128
 	Bs  = 100
 	V   = 1023
-	D   = 28800
 	Z_A = 2
 	Z_P = (1 << 12)
 	Z_Q = (1 << 16)
@@ -733,7 +730,7 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 		pure_code = pure_code[11+o_size+w_size+4:]
 	}
 
-	log.Debug(debug_pvm, "OSIZE", o_size, "WSIZE", w_size, "Z", types.DecodeE_l(standard_z_byte), "S", types.DecodeE_l(standard_s_byte),
+	log.Debug(debug_pvm, "PVM Params", "OSIZE", o_size, "WSIZE", w_size, "Z", types.DecodeE_l(standard_z_byte), "S", types.DecodeE_l(standard_s_byte),
 		"O", o_byte, "W", w_byte, "Code and Jump Table size: %d\n", types.DecodeE_l(standard_c_size_byte))
 	var j_size_byte, z_byte, c_size_byte []byte
 	j_size_byte, pure_code = extractBytes(pure_code)
@@ -1160,7 +1157,7 @@ func (vm *VM) setArgumentInputs(a []byte) error {
 }
 
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
-	if vm.ResultCode == types.RESULT_OOG {
+	if vm.ResultCode == types.PVM_OOG {
 		r.Err = types.RESULT_OOG
 		log.Debug(vm.logging, "getArgumentOutputs - OOG")
 		return r, 0

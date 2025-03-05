@@ -4,7 +4,7 @@ GENESIS_DIR := ../cmd/creategenesisstate/
 
 .PHONY: creategenesisstate
 # List of Networks
-TAGS := small medium large 2xlarge 3xlarge full tiny
+TAGS := small medium large xlarge 2xlarge 3xlarge full tiny
 
 # Dynamic rule for creating genesis state based on tags
 creategenesisstate:

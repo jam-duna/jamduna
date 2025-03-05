@@ -68,7 +68,7 @@ func testJustify0(t *testing.T, numSegments int) {
 	var segments [][]byte
 	for i := 0; i < numSegments; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
-		data = common.PadToMultipleOfN(data, types.W_G)
+		data = common.PadToMultipleOfN(data, types.SegmentSize)
 		segments = append(segments, data)
 	}
 	leaves := segments
@@ -105,7 +105,7 @@ func testVerifyCDTJustificationX(t *testing.T, numSegments int) {
 	var segments [][]byte
 	for i := 0; i < numSegments; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
-		data = common.PadToMultipleOfN(data, types.W_G)
+		data = common.PadToMultipleOfN(data, types.SegmentSize)
 		segments = append(segments, data)
 	}
 	leaves := segments
@@ -143,7 +143,7 @@ func testCDTGet(t *testing.T, numSegments int) {
 	var segments [][]byte
 	for i := 0; i < numSegments; i++ {
 		data := []byte(fmt.Sprintf("segment%d", i))
-		data = common.PadToMultipleOfN(data, types.W_G)
+		data = common.PadToMultipleOfN(data, types.SegmentSize)
 		segments = append(segments, data)
 	}
 	leaves := segments
@@ -193,7 +193,7 @@ func testPageProof(t *testing.T, numSegments int) {
 		segments = nil
 		for i := 0; i < segmentsN; i++ {
 			data := []byte(fmt.Sprintf("segment%d", i))
-			data = common.PadToMultipleOfN(data, types.W_G)
+			data = common.PadToMultipleOfN(data, types.SegmentSize)
 			segments = append(segments, data)
 		}
 		// Generate the paged proofs

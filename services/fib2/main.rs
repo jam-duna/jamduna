@@ -33,6 +33,8 @@ extern "C" {
     #[polkavm_import(index = 6)]
     pub fn assign(c: u64, o: u64) -> u64;
 
+    #[polkavm_import(index = 8)]
+    pub fn checkpoint() -> u64;
     #[polkavm_import(index = 9)]
     pub fn new(o: u64, l: u64, g: u64, m: u64) -> u64;
     #[polkavm_import(index = 10)]
@@ -291,7 +293,7 @@ extern "C" fn accumulate() -> u64 {
         let assign_result = unsafe { assign(1000, JAM_KEY_ADDRESS) }; // CORE: invalid core number
         write_result(assign_result, 6);
     } else if n == 5 {
-        let lookup_result = unsafe { lookup(SERVICE_INDEX, JAM_KEY_HASH_ADDRESS, buffer_address, 0, JAM_KEY_LENGTH) }; // OK: 3
+        let lookup_result = unsafe { lookup(SERVICE_INDEX, JAM_KEY_HASH_ADDRESS, buffer_address, 0, JAM_KEY_LENGTH) }; // OK: |v| = 3
         write_result(lookup_result, 1);
 
         let read_ok_result = unsafe { query(JAM_KEY_HASH_ADDRESS, JAM_KEY_LENGTH) }; // OK: 2
@@ -355,7 +357,7 @@ extern "C" fn accumulate() -> u64 {
         let bless_ok_result = unsafe { bless(0, 1, 1, bless_input_address, 1) };
         write_result(bless_ok_result, 5);
     } else if n == 10 {
-        let read_result = unsafe { read(SERVICE_INDEX, JAM_KEY_ADDRESS, JAM_KEY_LENGTH, buffer_address, 0, buffer_length) }; // OK |v| = 3
+        let read_result = unsafe { read(SERVICE_INDEX, JAM_KEY_ADDRESS, JAM_KEY_LENGTH, buffer_address, 0, buffer_length) }; // OK: 3
         write_result(read_result, 1);
 
         let write_result1 = unsafe { write(JAM_KEY_ADDRESS, JAM_KEY_LENGTH, 0, 0) }; // delete OK
@@ -385,6 +387,11 @@ extern "C" fn accumulate() -> u64 {
 
     // write yield
     if n % 3 == 0 {
+        if n != 9 { // n=3,6 should go through even though there is a panic, 9 does not.
+            let gas_result = unsafe { checkpoint() };
+        }
+        let result42 = n + 42;
+        write_result(result42, 7); // this should not be stored if n = 3, 6, 9 because its after the checkpoint
         unsafe {
             core::arch::asm!(
                 "li a0, 0",
@@ -392,6 +399,7 @@ extern "C" fn accumulate() -> u64 {
                 "jalr x0, a0, 0", // djump(0+0) causes panic
             );
         }
+    } else {
     }
     unsafe { oyield(omega_7); }
     // set the result length to register a1

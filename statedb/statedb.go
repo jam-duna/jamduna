@@ -162,16 +162,16 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 
 	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
-		log.Error("statedb", "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
+		log.Debug("statedb", "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
-		t.PrintAllKeyValues()
-		t.PrintTree(t.Root, 0)
+		//t.PrintAllKeyValues()
+		//t.PrintTree(t.Root, 0)
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
-		log.Error("statedb", "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
+		log.Debug("statedb", "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
-		t.PrintAllKeyValues()
-		t.PrintTree(t.Root, 0)
+		//t.PrintAllKeyValues()
+		//t.PrintTree(t.Root, 0)
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
 	if len(anchors) == 1 { // we have to forget it -- check!
