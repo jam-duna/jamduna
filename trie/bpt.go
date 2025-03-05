@@ -1317,7 +1317,8 @@ func (t *MerkleTree) Delete(key []byte) error {
 	// Find the node to delete
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
-		return nil // CHECK THIS
+		fmt.Printf("Delete: key not found: %x\n", key)
+		return err
 	}
 
 	// Retrieve the value of the node to delete
@@ -1334,9 +1335,11 @@ func (t *MerkleTree) Delete(key []byte) error {
 
 	// Remove the node from levelDB
 	nodeHash := computeHash(leaf(key, value))
-	t.db.DeleteK(common.BytesToHash(nodeHash))
+	if false {
+		fmt.Printf("Psuedo Delete: key=%x, value=%x, nodeHash=%x in accessible??\n", key, value, nodeHash)
+	}
+	//t.db.DeleteK(common.BytesToHash(nodeHash))
 	//t.Close()
-
 	// Rebuild the tree without the deleted node
 	tree := NewMerkleTree(nil, t.db)
 	for _, kv := range remainingNodes {

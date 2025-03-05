@@ -324,6 +324,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	}
 	if jam == "fib2" {
 		serviceNames = []string{"fib2", "auth_copy"}
+		log.EnableModule("statedb") //enable here to avoid concurrent map
 	}
 	testServices, err := getServices(serviceNames)
 	if err != nil {

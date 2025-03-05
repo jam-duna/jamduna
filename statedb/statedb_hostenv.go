@@ -30,25 +30,26 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	tree := s.GetTrie()
 	start_StorageSize := sa.StorageSize
 	start_NumStorageItems := sa.NumStorageItems
-	for k, storage := range sa.Storage {
+	for _, storage := range sa.Storage {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
-				// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
 				if s.Authoring {
-					log.Debug(module, "writeAccount DELETE", "service_idx", storage.RawKey, "rawkey", storage.RawKey)
+					log.Debug(module, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey)
 				}
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
-					fmt.Printf("DeleteServiceStorage: Failed to delete k: %v, error: %v\n", k, err)
+					// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
+					log.Error(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
 					return err
 				}
+				//fmt.Printf("[n%v] writeAccount DELETE OK!!! storage:%v\n", s.Id, storage)
 			} else {
 				if s.Authoring {
 					log.Info(module, "writeAccount SET", "service_idx", service_idx, "rawkey", storage.RawKey, "value", storage.Value)
 				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
-					fmt.Printf("SetServiceStorage err %v\n", err)
+					log.Error(module, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
 					return err
 				}
 			}
@@ -91,8 +92,10 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	return err
 }
 
-func (s *StateDB) ApplyXContext(U *types.PartialState) {
-
+func (s *StateDB) ApplyXContext(U *types.PartialState, caller string) {
+	if s.Authoring {
+		log.Debug(module, "ApplyXContext", "n", s.Id, "slot", s.GetTimeslot(), "caller", caller)
+	}
 	for _, sa := range U.D {
 		// U.D should only have service accounts with Mutable = true
 		if sa.Mutable == false {

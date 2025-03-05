@@ -14,7 +14,7 @@ import (
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
+func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, caller string) (s *StateDB, err error) {
 
 	s = oldState.Copy()
 	old_timeslot := s.GetSafrole().Timeslot
@@ -30,7 +30,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if s.Id == blk.Header.AuthorIndex {
 		s.Authoring = true
 	}
-	log.Debug(module, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
+	if s.Authoring {
+		log.Debug(module, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
+	}
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// 19-22 - Safrole last
@@ -114,7 +116,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		sa.Mutable = true
 		sa.Dirty = true
 	}
-	s.ApplyXContext(o)
+	s.ApplyXContext(o, caller)
 	//after accumulation, we need to update the accumulate state
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// 0.6.2 4.18 - Preimages [ δ‡, τ′]

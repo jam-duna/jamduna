@@ -1025,7 +1025,7 @@ func (vm *VM) GetServiceIndex() uint32 {
 }
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
-func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64) {
+func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	workitem := workPackage.WorkItems[workitemIndex]
 
 	a := common.Uint32ToBytes(workitem.Service)
@@ -1048,7 +1048,8 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine)
 	r, res = vm.getArgumentOutputs()
-	return r, res
+	exportedSegments = vm.Exports
+	return r, res, exportedSegments
 }
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {

@@ -859,7 +859,7 @@ func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []com
 				defer span.End()
 			}
 
-			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
+			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk, "ProcessState")
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
 				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)

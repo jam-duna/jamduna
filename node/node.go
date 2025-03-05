@@ -950,7 +950,7 @@ func (n *Node) extendChain() error {
 				// Apply the block to the tip
 				recoveredStateDB := n.statedb.Copy()
 				recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
-				newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock)
+				newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock, "extendChain")
 				if err != nil {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err
@@ -1434,6 +1434,7 @@ func (n *Node) runClient() {
 						log.Error(module, "runClient:writeDebug", "err", err)
 					}
 				}()
+
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
 				n.assureNewBlock(newBlock)
 				n.auditingCh <- newStateDB.Copy()

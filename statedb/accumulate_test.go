@@ -267,7 +267,7 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		sa.Dirty = true
 	}
 
-	s.ApplyXContext(o)
+	s.ApplyXContext(o, "testAccumulateSTF")
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// check if the state is equal to the post state
 	//use json to compare the states
@@ -398,7 +398,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 		sa.Dirty = true
 	}
 
-	s.ApplyXContext(o)
+	s.ApplyXContext(o, "AccumulateSTF")
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// check if the state is equal to the post state
 	//use json to compare the states

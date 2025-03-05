@@ -106,7 +106,7 @@ func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitio
 		// Invalid pre-state
 		return false, nil, nil, fmt.Errorf("PreState Error")
 	}
-	postState, jamErr := ApplyStateTransitionFromBlock(preState, context.Background(), &scBlock)
+	postState, jamErr := ApplyStateTransitionFromBlock(preState, context.Background(), &scBlock, "ComputeStateTransition")
 	if jamErr != nil {
 		// When validating Fuzzed STC, we shall expect jamError
 		return true, nil, jamErr, nil
@@ -128,8 +128,9 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	if err != nil {
 		return err
 	}
+	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
-	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
+	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), "CheckStateTransition")
 	if err != nil {
 		return err
 	}
@@ -148,9 +149,9 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	if err != nil {
 		return nil, err
 	}
-
+	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
-	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block))
+	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), "CheckStateTransitionWithOutput")
 	if err != nil {
 		return nil, err
 	}
