@@ -282,7 +282,7 @@ func NewBlockFromFile(blockfilename string) *types.Block {
 	fn := common.GetFilePath(blockfilename)
 	expectedCodec, err := os.ReadFile(fn)
 	if err != nil {
-		panic("failed to read codec file")
+		panic(fmt.Sprintf("failed to read codec file %s", fn))
 	}
 	r, _, err := types.Decode(expectedCodec, reflect.TypeOf(types.Block{}))
 	if err != nil {

@@ -3,6 +3,9 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 
 	"net/http"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/gorilla/websocket"
 )
 
@@ -174,8 +178,68 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	go client.readPump()
 }
 
+func (n *Node) RunApplyBlockAndWeb(block_data_dir string, port uint16, storage *storage.StateDBStorage) {
+	// read all the block json from the block_data_dir
+
+	files, err := ioutil.ReadDir(block_data_dir)
+	if err != nil {
+		log.Crit("jamweb", "ReadDir error", err)
+		return
+	}
+
+	// Filter out non-JSON files
+	var jsonFiles []os.FileInfo
+	for _, file := range files {
+		if filepath.Ext(file.Name()) == ".json" {
+			jsonFiles = append(jsonFiles, file)
+		}
+	}
+	files = jsonFiles
+	// the files need to be sorted by name
+	// so that the blocks are applied in order
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		filePath := filepath.Join(block_data_dir, file.Name())
+		data, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			log.Crit("jamweb", "ReadFile error", err)
+			continue
+		}
+		var stf statedb.StateTransition
+		if err := json.Unmarshal(data, &stf); err != nil {
+			log.Crit("jamweb", "Unmarshal error", err)
+			continue
+		}
+		err = json.Unmarshal(data, &stf)
+		if err != nil {
+			log.Crit("jamweb", "Unmarshal error", err)
+			continue
+		}
+		new_statedb, err := statedb.NewStateDBFromSnapshotRaw(storage, &(stf.PostState))
+		if err != nil {
+			log.Crit("jamweb", "NewStateDBFromSnapshotRaw error", err)
+			continue
+		}
+
+		block := stf.Block
+		new_statedb.Block = &block
+		// Apply the block to the state
+		fmt.Printf("applied block parent %v, header %v, timeslot %v\n", block.Header.ParentHeaderHash, block.Header.Hash(), block.Header.Slot)
+		n.addStateDB(new_statedb)
+	}
+	// apply the block to the state
+	go n.runJamWeb(port)
+	for {
+		time.Sleep(1 * time.Second)
+	}
+}
+
 func (n *Node) runJamWeb(basePort uint16) {
-	basePort += 999
+	// basePort += 999
 	addr := fmt.Sprintf("0.0.0.0:%v", basePort) // for now just node 0 will handle all
 
 	n.hub = newHub()

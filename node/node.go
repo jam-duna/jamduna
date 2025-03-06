@@ -312,7 +312,7 @@ func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
 	return stateSnapshotRaw, nil
 }
 
-func getGenesisFile(network string) (string, string) {
+func GetGenesisFile(network string) (string, string) {
 	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network), fmt.Sprintf("/chainspecs/blocks/genesis-%s.bin", network)
 }
 

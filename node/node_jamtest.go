@@ -162,7 +162,7 @@ func GenerateRandomBasePort() uint16 {
 
 func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
-	GenesisStateFile, GenesisBlockFile := getGenesisFile(network)
+	GenesisStateFile, GenesisBlockFile := GetGenesisFile(network)
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
 
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
