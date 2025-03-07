@@ -45,13 +45,13 @@ func (u *PartialState) GetService(s uint32) (*ServiceAccount, bool) {
 // IMPORTANT: have to get X vs Y correctly clone with checkpoint!
 func (u *PartialState) Clone() *PartialState {
 	v := &PartialState{
-		D:                  make(map[uint32]*ServiceAccount),
+		D: make(map[uint32]*ServiceAccount),
 		// must have copy of the slice
 		UpcomingValidators: make([]Validator, len(u.UpcomingValidators)),
-		// Copying by value works here 
-		QueueWorkReport:    u.QueueWorkReport,
+		// Copying by value works here
+		QueueWorkReport: u.QueueWorkReport,
 		// Shallow copy; Kai_g handled below
-		PrivilegedState:    u.PrivilegedState,
+		PrivilegedState: u.PrivilegedState,
 	}
 
 	// Copy UpcomingValidators

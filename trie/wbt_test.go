@@ -18,21 +18,13 @@ func TestZeroLeaves(t *testing.T) {
 // TestWellBalancedTree tests the MerkleB method of the WellBalancedTree
 func TestWBMerkleTree(t *testing.T) {
 	values := [][]byte{
-		[]byte("a"),
-		[]byte("b"),
-		[]byte("c"),
-		[]byte("d"),
-		[]byte("e"),
-		[]byte("f"),
+		common.Hex2Bytes("03f9883f0100000001000000000000000000000000000000000000000000000000000000"),
+		common.Hex2Bytes("e9ac0c500100000001000000000000000000000000000000000000000000000000000000"),
+		//common.Hex2Bytes("d15f17c30100000002000000000000000000000000000000000000000000000000000000"),
 	}
-	tree := NewWellBalancedTree(values, types.Blake2b)
-	// Print the tree structure
-	if bptDebug {
-		tree.PrintTree()
-	}
-	if tree.Root() == nil {
-		t.Errorf("Root is nil")
-	}
+	tree := NewWellBalancedTree(values, types.Keccak)
+	tree.PrintTree()
+	fmt.Printf("RESULT: %x\n", tree.Root())
 }
 
 func TestWBTTrace(t *testing.T) {

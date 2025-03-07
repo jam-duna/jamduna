@@ -138,6 +138,22 @@ func (s *StateDB) CurrentEpochSlot() uint32 {
 	return Ht % types.EpochLength
 }
 
+func get_workreport_workpackagehashes(W []types.WorkReport) []common.Hash {
+	wphs := make([]common.Hash, len(W))
+	for i, wr := range W {
+		wphs[i] = wr.GetWorkPackageHash()
+	}
+	return wphs
+}
+
+func get_accumulationqueue_workpackagehashes(q []types.AccumulationQueue) [][]common.Hash {
+	wphs := make([][]common.Hash, len(q))
+	for i, aq := range q {
+		wphs[i] = aq.WorkPackageHash
+	}
+	return wphs
+}
+
 // v0.4.5 eq.172 - W^*
 func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport {
 	accumulated_immediately := AccumulatedImmediately(W)
@@ -147,6 +163,13 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 	q := s.ComputeReadyQueue(queued_execution, accumulated_immediately)
 	Q_q := PriorityQueue(q)
 	result = append(result, Q_q...)
+
+	if s.Authoring && (len(accumulated_immediately) != len(result)) {
+		log.Info("authoring", "ORDERED ACCUMULATION (12.4)", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately))
+		log.Info("authoring", "ORDERED ACCUMULATION (12.12)", "q", get_accumulationqueue_workpackagehashes(q))
+		log.Info("authoring", "ORDERED ACCUMULATION (12.8)", "Q(q)-priority queue result", get_workreport_workpackagehashes(Q_q))
+		log.Info("authoring", "ORDERED ACCUMULATION (12.11)", "W^*-wphs of accumulatable work reports)", get_workreport_workpackagehashes(result))
+	}
 	return result
 }
 

@@ -51,11 +51,9 @@ func buildTreeRecursive(nodes []*WBTNode, hashType string) *WBTNode {
 	if len(nodes) == 1 {
 		return nodes[0]
 	}
-
-	mid := int(math.Round(float64(len(nodes)) / 2))
+	mid := int(math.Ceil(float64(len(nodes)) / 2))
 	left := buildTreeRecursive(nodes[:mid], hashType)
 	right := buildTreeRecursive(nodes[mid:], hashType)
-
 	combinedValue := append(left.Hash, right.Hash...)
 	hash := computeNode(combinedValue, hashType)
 	return &WBTNode{
@@ -72,10 +70,20 @@ func NewWellBalancedTree(values [][]byte, hashTypes ...string) *WellBalancedTree
 	if len(hashTypes) > 0 && hashTypes[0] == types.Keccak {
 		hashType = types.Keccak
 	}
-	for i, value := range values {
-		leaves[i] = &WBTNode{
+	if len(values) == 1 {
+		// special case H(v0) https://graypaper.fluffylabs.dev/#/85129da/3a0a013a0a01?v=0.6.3
+		value := values[0]
+		leaves[0] = &WBTNode{
 			Hash:  computeLeaf(value, hashType),
 			Value: value,
+		}
+	} else {
+		for i, value := range values {
+			leaves[i] = &WBTNode{
+				Hash:  value, // WAS: computeLeaf(value, hashType)
+				Value: value,
+			}
+			// fmt.Printf("add leaf %d: %x\n", i, leaves[i].Value)
 		}
 	}
 	wbt := &WellBalancedTree{leaves: leaves, hashType: hashType}

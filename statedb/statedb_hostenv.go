@@ -94,7 +94,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 
 func (s *StateDB) ApplyXContext(U *types.PartialState, caller string) {
 	if s.Authoring {
-		log.Debug(module, "ApplyXContext", "n", s.Id, "slot", s.GetTimeslot(), "caller", caller)
+		log.Trace(module, "ApplyXContext", "n", s.Id, "slot", s.GetTimeslot(), "caller", caller)
 	}
 	for _, sa := range U.D {
 		// U.D should only have service accounts with Mutable = true

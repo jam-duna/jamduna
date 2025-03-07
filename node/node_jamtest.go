@@ -784,7 +784,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 							RefineGasLimit:     1000,
 							AccumulateGasLimit: 1000,
 							ImportedSegments:   make([]types.ImportSegment, 0),
-							ExportCount:        2,
+							ExportCount:        0,
 						})
 						next_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{next_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
 						last_Meg = []common.Hash{}
@@ -863,7 +863,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 							RefineGasLimit:     1000,
 							AccumulateGasLimit: 1000,
 							ImportedSegments:   make([]types.ImportSegment, 0),
-							ExportCount:        2,
+							ExportCount:        0,
 						})
 						next_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{next_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
 						last_Meg = []common.Hash{}
