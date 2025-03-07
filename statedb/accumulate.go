@@ -165,10 +165,8 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 	result = append(result, Q_q...)
 
 	if s.Authoring && (len(accumulated_immediately) != len(result)) {
-		log.Info("authoring", "ORDERED ACCUMULATION (12.4)", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately))
-		log.Info("authoring", "ORDERED ACCUMULATION (12.12)", "q", get_accumulationqueue_workpackagehashes(q))
-		log.Info("authoring", "ORDERED ACCUMULATION (12.8)", "Q(q)-priority queue result", get_workreport_workpackagehashes(Q_q))
-		log.Info("authoring", "ORDERED ACCUMULATION (12.11)", "W^*-wphs of accumulatable work reports)", get_workreport_workpackagehashes(result))
+		log.Info("authoring", "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
+			"q", get_accumulationqueue_workpackagehashes(q), "Q(q)-priority queue result", get_workreport_workpackagehashes(Q_q), "W^*-wphs of accumulatable work reports)", get_workreport_workpackagehashes(result))
 	}
 	return result
 }
@@ -328,7 +326,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	services = UniqueUint32Slice(services)
 	for _, service := range services {
 		// this is parallelizable
-		B, U, XY := s.SingleAccumulate(o, w, f, service)
+		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service)
 		output_u += U
 		empty := common.Hash{}
 		if B == empty {
@@ -340,8 +338,21 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			})
 		}
 		for s, sa := range XY.U.D {
-			o.D[s] = sa
+			if exceptional {
+				if sa.Checkpointed {
+					sa.Dirty = true
+					o.D[s] = sa
+				}
+			} else {
+				sa.Dirty = true
+				o.D[s] = sa
+			}
 		}
+		//  https://graypaper.fluffylabs.dev/#/5f542d7/179301179301?v=0.6.2
+		o.QueueWorkReport = XY.U.QueueWorkReport
+		o.UpcomingValidators = XY.U.UpcomingValidators
+		o.PrivilegedState = XY.U.PrivilegedState
+
 		output_t = append(output_t, XY.T...)
 	}
 
@@ -395,26 +406,16 @@ func (sdb *StateDB) NewXContext(u *types.PartialState, s uint32, serviceAccount 
 	decoded := uint32(types.DecodeE_l(hash[:4]))
 
 	x := &types.XContext{
+		U: u.Clone(), // IMPORTANT: writes in one service (Fib, Trib) are readable by another (Meg) in ordered accumulation
 		S: s,
 		I: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
-	log.Trace(module, "s", s, "eta_0'", sdb.JamState.SafroleState.Entropy[0].Bytes(), "timeslot", sdb.JamState.SafroleState.Timeslot)
-	log.Trace(module, "encode(s, eta_0', timeslot)", encoded, "hash(encoded)", hash, "hashed[:4]", hash[:4], "decode(hashed[:4])", decoded)
-	log.Trace(module, "decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
+	//log.Trace(module, "s", s, "eta_0'", sdb.JamState.SafroleState.Entropy[0].Bytes(), "timeslot", sdb.JamState.SafroleState.Timeslot)
+	//log.Trace(module, "encode(s, eta_0', timeslot)", encoded, "hash(encoded)", hash, "hashed[:4]", hash[:4], "decode(hashed[:4])", decoded)
+	//log.Trace(module, "decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
 
-	js := sdb.JamState
-	if u != nil {
-		x.U = u // IMPORTANT: writes in one service (Fib, Trib) are readable by another (Meg) in ordered accumulation
-	} else {
-		x.U = &types.PartialState{
-			D:                  make(map[uint32]*types.ServiceAccount), // this IS mutated
-			UpcomingValidators: js.SafroleState.NextValidators,
-			QueueWorkReport:    js.AuthorizationQueue,
-			PrivilegedState:    js.PrivilegedServiceIndices,
-		}
-	}
 	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
-	mutableServiceAccount := serviceAccount.Clone() // CHECK THIS -- do we need to actually clone it?
+	mutableServiceAccount := serviceAccount.Clone()
 	mutableServiceAccount.ALLOW_MUTABLE()
 	x.U.D[s] = mutableServiceAccount // NOTE: this is a distinct COPY of serviceAccount and CAN have Set{...}
 	return x
@@ -431,7 +432,7 @@ invokes pvm execution
 */
 // ∆1
 // eq 176
-func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32) (output_b common.Hash, output_u uint64, xy *types.XContext) {
+func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32) (output_b common.Hash, output_u uint64, xy *types.XContext, exceptional bool) {
 	// gas need to check again
 	// check if s is in f
 	gas := uint32(0)
@@ -497,18 +498,19 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	vm.Timeslot = t
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
 
+	exceptional = false
 	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {
+		exceptional = true
 		output_b = vm.Y.Y
 		output_u = uint64(vm.Gas)
+		xy = &(vm.Y)
 		if sd.Authoring {
 			if r.Err == types.RESULT_OOG {
 				log.Debug("authoring", "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 			} else {
 				log.Debug("authoring", "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 			}
-
 		}
-		xy = &(vm.Y)
 		return
 	}
 	xy = vm.X

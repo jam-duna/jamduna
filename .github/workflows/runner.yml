@@ -105,5 +105,5 @@ jobs:
         run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
 
       - name: Run test megatron (5/5)
-        id: megatron_short_4
-        go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+        id: megatron_short_5
+        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true

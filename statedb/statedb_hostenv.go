@@ -26,6 +26,9 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	if sa.Mutable == false {
 		panic("WriteAccount")
 	}
+	if sa.Dirty == false {
+		return nil
+	}
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
 	start_StorageSize := sa.StorageSize
@@ -34,12 +37,12 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
 				if s.Authoring {
-					log.Debug(module, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey)
+					log.Warn(module, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey)
 				}
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
 					// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
-					log.Error(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
+					log.Warn(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
 					return err
 				}
 				//fmt.Printf("[n%v] writeAccount DELETE OK!!! storage:%v\n", s.Id, storage)
@@ -49,7 +52,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
-					log.Error(module, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
+					log.Warn(module, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
 					return err
 				}
 			}
@@ -59,9 +62,11 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 		if v.Dirty {
 			if v.Deleted {
 				err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
+				log.Warn(module, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
 			} else {
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {
+					log.Warn(module, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.T", v.T, "err", err)
 					return err
 				}
 			}
@@ -72,11 +77,13 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 			if len(v.Preimage) == 0 || v.Deleted {
 				err = tree.DeletePreImageBlob(service_idx, blobHash)
 				if err != nil {
+					log.Warn(module, "DeletePreImageBlob", "blobHash", blobHash, "err", err)
 					return err
 				}
 			} else {
 				err = tree.SetPreImageBlob(service_idx, v.Preimage)
 				if err != nil {
+					log.Warn(module, "SetPreImageBlob", "err", err)
 					return err
 				}
 			}

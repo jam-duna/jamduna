@@ -2735,4 +2735,5 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 			time.Sleep(3 * time.Second)
 		}
 	}
+	time.Sleep(6 * time.Second)
 }

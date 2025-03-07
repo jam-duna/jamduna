@@ -34,6 +34,9 @@ type ServiceAccount struct {
 	// X.D will have Mutable=false, but X.D.U will have Mutable=True
 	Mutable bool `json:"mutable"`
 
+	NewAccount   bool
+	Checkpointed bool
+
 	Dirty    bool
 	Storage  map[common.Hash]StorageObject  `json:"s_map"` // arbitrary_k -> v. if v=[]byte. use as delete
 	Lookup   map[common.Hash]LookupObject   `json:"l_map"` // (h,l) -> anchor
@@ -51,6 +54,8 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 		StorageSize:     s.StorageSize,
 		NumStorageItems: s.NumStorageItems,
 		Dirty:           s.Dirty,
+		NewAccount:      s.NewAccount,
+		Checkpointed:    s.Checkpointed,
 		Mutable:         s.Mutable, // should ALLOW_MUTABLE explicitly
 	}
 

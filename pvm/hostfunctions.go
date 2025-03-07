@@ -488,6 +488,7 @@ func (vm *VM) hostDesignate() {
 // Checkpoint gets Gas-remaining
 func (vm *VM) hostCheckpoint() {
 	vm.Y = vm.X.Clone()
+	vm.Y.U.Checkpoint()
 	vm.WriteRegister(7, uint64(vm.Gas)) // CHECK
 	log.Debug(vm.logging, "CHECKPOINT", "g", fmt.Sprintf("%d", vm.Gas))
 	vm.HostResultCode = OK
@@ -538,7 +539,7 @@ func (vm *VM) hostNew() {
 	a := &types.ServiceAccount{
 		ServiceIndex:    xi,
 		Mutable:         true,
-		Dirty:           true,
+		Dirty:           false,
 		CodeHash:        common.BytesToHash(c),
 		GasLimitG:       uint64(g),
 		GasLimitM:       uint64(m),
@@ -547,16 +548,18 @@ func (vm *VM) hostNew() {
 		Storage:         make(map[common.Hash]types.StorageObject),
 		Lookup:          make(map[common.Hash]types.LookupObject),
 		Preimage:        make(map[common.Hash]types.PreimageObject),
+		Checkpointed:    false, // this is updated to true upon Checkpoint
+		NewAccount:      true,  // with this flag, if an account is Dirty OR Checkpointed && NewAccount then it is written
 	}
 	a.Balance = a.ComputeThreshold()
 	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
 	xContext.I = new_check(uint32(256)+uint32(xi-256+42)%(uint32(4294966784)), xContext.U.D)
 	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{})
 
-	xContext.U.D[xi] = a
+	xContext.U.D[xi] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
 	vm.WriteRegister(7, uint64(xi))
 	vm.HostResultCode = OK
-	log.Debug(vm.logging, "NEW OK", "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
+	log.Debug(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", xi), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 }
 
 // Upgrade service

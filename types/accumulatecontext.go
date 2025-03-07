@@ -35,6 +35,16 @@ type PartialState struct {
 	PrivilegedState    Kai_state                  `json:"privileged_state"`
 }
 
+func (u *PartialState) Checkpoint() {
+	for _, sa := range u.D {
+		if sa.NewAccount || sa.Dirty {
+			sa.Dirty = true
+			sa.Checkpointed = true
+		}
+	}
+	return
+}
+
 func (u *PartialState) GetService(s uint32) (*ServiceAccount, bool) {
 	if sa, ok := u.D[s]; ok {
 		return sa, true
@@ -107,22 +117,6 @@ func (U PartialState) Dump(prefix string, id uint16) {
 	fmt.Printf("[N%d]\n\n", id)
 }
 
-/*
-   func (U *PartialState) Clone() (V *PartialState) {
-	V = &PartialState{
-		D: make(map[uint32]*ServiceAccount),
-	}
-	for serviceIndex, serviceAccount := range U.D {
-		V.D[serviceIndex] = serviceAccount.Clone()
-	}
-	newV := U.UpcomingValidators
-	V.UpcomingValidators = newV
-	tmpPrivilegedState := U.PrivilegedState
-	V.PrivilegedState = tmpPrivilegedState
-	return V
-}
-*/
-
 type XContext struct {
 	I uint32             `json:"I"`
 	S uint32             `json:"S"`
@@ -136,6 +130,7 @@ func (X *XContext) GetX_s() (xs *ServiceAccount, s uint32) {
 	// This is Mutable
 	return X.U.D[X.S], X.S
 }
+
 func (X *XContext) Clone() (Y XContext) {
 	Y = XContext{
 		I: X.I,
