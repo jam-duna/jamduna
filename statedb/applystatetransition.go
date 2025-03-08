@@ -171,6 +171,35 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
+	// checking the Ho
+	header := s.Block.GetHeader()
+	if len(disputes.Verdict) != 0 {
+		offendermark := header.OffendersMark
+		if offendermark == nil {
+			return nil, nil, fmt.Errorf("OffendersMark is nil")
+		}
+		// key need to be either in culprits or faults
+		// make a map of the key
+		offendermarkMap := make(map[types.Ed25519Key]bool)
+		for _, offendkey := range offendermark {
+			offendermarkMap[offendkey] = false
+		}
+		for _, culprit := range disputes.Culprit {
+			if _, ok := offendermarkMap[culprit.Key]; ok {
+				offendermarkMap[culprit.Key] = true
+			}
+		}
+		for _, fault := range disputes.Fault {
+			if _, ok := offendermarkMap[fault.Key]; ok {
+				offendermarkMap[fault.Key] = true
+			}
+		}
+		for _, isOffender := range offendermarkMap {
+			if !isOffender {
+				return nil, nil, fmt.Errorf("OffendersMark is not in Culprit or Fault")
+			}
+		}
+	}
 	//apply the dispute
 	result, err := d.IsValidateDispute(&disputes)
 	if err != nil {

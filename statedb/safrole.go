@@ -868,8 +868,8 @@ func (original *SafroleState) Copy() *SafroleState {
 }
 
 func (s *SafroleState) GetEpoch() uint32 {
-	//todo
-	return 0
+	epoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+	return uint32(epoch)
 }
 
 // statefrole_stf is the function to be tested

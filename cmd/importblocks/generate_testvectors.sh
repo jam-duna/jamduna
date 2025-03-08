@@ -102,6 +102,10 @@ for pair in "${test_pairs[@]}"; do
   fi
   processed_modes="$processed_modes $cpnode_mode"
 done
+pushd ../make_dispute > /dev/null || { echo "Error: make_dispute directory not found."; exit 1; }
+make
+popd > /dev/null || { echo "Error: Could not return to original directory."; exit 1; }
+
 
 echo "All test vectors generated successfully!"
 echo "Processed modes: $processed_modes"

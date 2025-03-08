@@ -202,3 +202,48 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	}
 	return sealedBlock, nil
 }
+
+func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret) error {
+	sf := s.GetSafrole()
+	b := s.GetBlock()
+	// also drop the assurance
+	b.Extrinsic.Assurances = make([]types.Assurance, 0)
+	extrinsicData := b.Extrinsic
+	b.Header.ExtrinsicHash = extrinsicData.Hash()
+	author_index, err := sf.GetAuthorIndex(credential.BandersnatchPub.Hash(), "Curr")
+	if err != nil {
+		return err
+	}
+	b.Header.AuthorIndex = author_index
+	b.Extrinsic = extrinsicData
+	block_author_ietf_priv, err := ConvertBanderSnatchSecret(credential.BandersnatchSecret)
+	if err != nil {
+		return err
+	}
+	block_author_ietf_pub, err := ConvertBanderSnatchPub(credential.BandersnatchPub[:])
+	if err != nil {
+		return err
+	}
+	//make offender marker
+	offenderMap := make(map[types.Ed25519Key]bool)
+	for _, cruprit := range b.Extrinsic.Disputes.Culprit {
+		offenderMap[cruprit.Key] = true
+	}
+	for _, fault := range b.Extrinsic.Disputes.Fault {
+		offenderMap[fault.Key] = true
+	}
+	offenderMark := make([]types.Ed25519Key, 0)
+	for key, _ := range offenderMap {
+		offenderMark = append(offenderMark, key)
+	}
+	b.Header.OffendersMark = offenderMark
+	author_index = b.Header.AuthorIndex
+	targetJCE := b.TimeSlot()
+	sealedBlock, sealErr := s.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, author_index, targetJCE, b)
+	if sealErr != nil {
+		return sealErr
+	}
+	s.Block = sealedBlock
+	return nil
+
+}

@@ -410,32 +410,32 @@ func (s *StateDB) GetCulprits(ts uint32, report types.WorkReport) []types.Culpri
 }
 
 // issue dispute extrinsic
-func (s *StateDB) AppendDisputes(J *types.JudgeBucket, W_hash common.Hash, old_guarantee types.Guarantee) error {
+func (s *StateDB) AppendDisputes(J *types.JudgeBucket, W_hash common.Hash, old_guarantee types.Guarantee) (*types.Block, error) {
 	true_count := J.GetTrueCount(W_hash)
 	false_count := J.GetFalseCount(W_hash)
-
+	block := s.Block.Copy()
 	if true_count+false_count < types.ValidatorsSuperMajority {
-		return fmt.Errorf("Not enough votes: true_count=%d, false_count=%d", true_count, false_count)
+		return nil, fmt.Errorf("Not enough votes: true_count=%d, false_count=%d", true_count, false_count)
 	}
 
 	if true_count >= types.ValidatorsSuperMajority {
 		if false_count == 0 {
-			return errors.New("Not Required")
+			return nil, errors.New("Not Required")
 		}
-		s.appendGoodSetDispute(J, W_hash)
-		return nil
+		s.appendGoodSetDispute(block, J, W_hash)
+		return block, nil
 	} else if false_count >= types.ValidatorsSuperMajority {
-		s.appendBadSetDispute(J, W_hash, old_guarantee)
-		return nil
+		s.appendBadSetDispute(block, J, W_hash, old_guarantee)
+		return block, nil
 	} else if true_count >= types.WonkyTrueThreshold && false_count >= types.WonkyFalseThreshold {
-		s.appendWonkySetDispute(J, W_hash)
-		return nil
+		s.appendWonkySetDispute(block, J, W_hash)
+		return block, nil
 	}
 
-	return fmt.Errorf("No need to dispute")
+	return nil, fmt.Errorf("No need to dispute")
 }
 
-func (s *StateDB) appendGoodSetDispute(J *types.JudgeBucket, W_hash common.Hash) {
+func (s *StateDB) appendGoodSetDispute(block *types.Block, J *types.JudgeBucket, W_hash common.Hash) {
 	true_votes := JudgementToVote(J.GetTrueJudgement(W_hash))
 	faults := s.JudgementToFault(J.GetFalseJudgement(W_hash), W_hash)
 	goodset_verdict := types.Verdict{
@@ -447,11 +447,11 @@ func (s *StateDB) appendGoodSetDispute(J *types.JudgeBucket, W_hash common.Hash)
 		goodset_verdict.Votes[i] = true_vote
 	}
 
-	s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, goodset_verdict)
-	s.Block.Extrinsic.Disputes.Fault = append(s.Block.Extrinsic.Disputes.Fault, faults...)
+	block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, goodset_verdict)
+	block.Extrinsic.Disputes.Fault = append(s.Block.Extrinsic.Disputes.Fault, faults...)
 }
 
-func (s *StateDB) appendBadSetDispute(J *types.JudgeBucket, W_hash common.Hash, old_guarantee types.Guarantee) {
+func (s *StateDB) appendBadSetDispute(block *types.Block, J *types.JudgeBucket, W_hash common.Hash, old_guarantee types.Guarantee) {
 	false_votes := JudgementToVote(J.GetFalseJudgement(W_hash))
 	badset_verdict := types.Verdict{
 		Target: W_hash,
@@ -462,12 +462,12 @@ func (s *StateDB) appendBadSetDispute(J *types.JudgeBucket, W_hash common.Hash, 
 		badset_verdict.Votes[i] = false_vote
 	}
 
-	s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, badset_verdict)
+	block.Extrinsic.Disputes.Verdict = append(block.Extrinsic.Disputes.Verdict, badset_verdict)
 	culprits := s.JudgementToCulprit(old_guarantee)
-	s.Block.Extrinsic.Disputes.Culprit = culprits
+	block.Extrinsic.Disputes.Culprit = culprits
 }
 
-func (s *StateDB) appendWonkySetDispute(J *types.JudgeBucket, W_hash common.Hash) {
+func (s *StateDB) appendWonkySetDispute(block *types.Block, J *types.JudgeBucket, W_hash common.Hash) {
 	wonky_votes := JudgementToVote(J.GetWonkeyJudgement(W_hash))
 	wonky_verdict := types.Verdict{
 		Target: W_hash,
@@ -490,5 +490,5 @@ func (s *StateDB) appendWonkySetDispute(J *types.JudgeBucket, W_hash common.Hash
 		wonky_verdict.Votes[i] = wonky_vote
 	}
 
-	s.Block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, wonky_verdict)
+	block.Extrinsic.Disputes.Verdict = append(block.Extrinsic.Disputes.Verdict, wonky_verdict)
 }

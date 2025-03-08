@@ -688,15 +688,17 @@ func (n *Node) MakeDisputes(headerHash common.Hash) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	var block *types.Block
 	for _, awr := range auditing_statedb.AvailableWorkReport {
 		old_eg, err := n.TraceOldGuarantee(headerHash, awr.GetWorkPackageHash())
 		if err != nil {
 			return false, err
 		}
-		err_dispute = auditing_statedb.AppendDisputes(judgement_bucket, awr.Hash(), old_eg)
+		block, err_dispute = auditing_statedb.AppendDisputes(judgement_bucket, awr.Hash(), old_eg)
 	}
 	if err_dispute == nil {
-		auditing_statedb.Block.Extrinsic.Disputes.FormatDispute()
+		block.Extrinsic.Disputes.FormatDispute()
+		// bloock done here
 		n.updateAuditingStateDB(auditing_statedb)
 		return true, nil
 	}

@@ -372,7 +372,7 @@ func SortVotes(votes [ValidatorsSuperMajority]Vote) [ValidatorsSuperMajority]Vot
 func SortCulprits(culprits []Culprit) []Culprit {
 	// Sort the culprits by target
 	sort.Slice(culprits, func(i, j int) bool {
-		return bytes.Compare(culprits[i].Target.Bytes(), culprits[j].Target.Bytes()) < 0
+		return bytes.Compare(culprits[i].Key.Bytes(), culprits[j].Key.Bytes()) < 0
 	})
 	return culprits
 }

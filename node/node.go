@@ -1339,6 +1339,27 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	return nil
 }
 
+func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string) error {
+	dataDir = fmt.Sprintf("%s", dataDir)
+	structDir := fmt.Sprintf("%s/%vs", dataDir, "state_transition")
+
+	// Check if the directories exist, if not create them
+	if _, err := os.Stat(structDir); os.IsNotExist(err) {
+		err := os.MkdirAll(structDir, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("Error creating %v directory: %v\n", "state_transition", err)
+		}
+	}
+
+	epoch, phase := statedb.ComputeEpochAndPhase(timeslot, 0)
+	path := fmt.Sprintf("%s/%v_%03d", structDir, epoch, phase)
+	if epoch == 0 && phase == 0 {
+		path = fmt.Sprintf("%s/genesis", structDir)
+	}
+	types.SaveObject(path, stf)
+	return nil
+}
+
 func (n *Node) runClient() {
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
@@ -1448,6 +1469,10 @@ func (n *Node) runClient() {
 			go n.WriteLog(log)
 		}
 	}
+}
+
+func BuildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB) *statedb.StateTransition {
+	return buildStateTransitionStruct(oldStateDB, newBlock, newStateDB)
 }
 
 func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB) *statedb.StateTransition {
