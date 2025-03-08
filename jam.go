@@ -2,12 +2,14 @@ package main
 
 import (
 	"crypto/ed25519"
+	"strconv"
 
 	"flag"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -26,8 +28,31 @@ func getNextTimestampMultipleOf12() int {
 	}
 	return int(future) + types.SecondsPerSlot
 }
-
+func setUserPort(config *types.CommandConfig) (validator_indx int, is_local bool) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		fmt.Println("Error getting current user:", err)
+		os.Exit(1)
+	}
+	userName := hostname
+	fmt.Printf("User: %s\n", userName)
+	if len(userName) >= 4 && userName[:3] == "jam" {
+		number := userName[4:]
+		intNum, err := strconv.Atoi(number)
+		if err != nil {
+			fmt.Println("Error getting the number after jam:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("User: %s, Number: %d\n", userName, intNum)
+		config.Port = 9900
+		return intNum, false
+	} else {
+		return config.Port - 9900, true
+	}
+}
 func main() {
+	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
+	log.EnableModule("blk_mod")
 	validators, secrets, err := node.GenerateValidatorNetwork()
 	if err != nil {
 		fmt.Printf("Error: %s", err)
@@ -39,29 +64,49 @@ func main() {
 	config := &types.CommandConfig{}
 	var help bool
 	var validatorIndex int
+	var network string
+	var start_time string
 	flag.BoolVar(&help, "h", false, "Displays help information about the commands and flags.")
 	flag.StringVar(&config.DataDir, "datadir", filepath.Join(os.Getenv("HOME"), ".jam"), "Specifies the directory for the blockchain, keystore, and other data.")
 	flag.IntVar(&config.Port, "port", 9900, "Specifies the network listening port.")
 	flag.IntVar(&config.Epoch0Timestamp, "ts", defaultTS, "Epoch0 Unix timestamp (will override genesis config)")
-
+	flag.StringVar(&start_time, "start_time", "", "Start time in format: YYYY-MM-DD HH:MM:SS")
 	flag.IntVar(&validatorIndex, "validatorindex", 0, "Validator Index (only for development)")
-	flag.StringVar(&config.Genesis, "genesis", "", "Specifies the genesis state json file.")
+	flag.StringVar(&network, "net_spec", "", "Specifies the genesis state json file.")
 	flag.StringVar(&config.Ed25519, "ed25519", "", "Ed25519 Seed (only for development)")
 	flag.StringVar(&config.Bandersnatch, "bandersnatch", "", "Bandersnatch Seed (only for development)")
 	flag.StringVar(&config.Bls, "bls", "", "BLS private key (only for development)")
 	flag.StringVar(&config.NodeName, "metadata", "Alice", "Node metadata")
 	flag.Parse()
+	if start_time != "" {
+		startTime, err := time.Parse("2006-01-02 15:04:05", start_time)
+		if err != nil {
+			fmt.Println("Invalid time format. Use YYYY-MM-DD HH:MM:SS")
+			return
+		}
 
+		duration := time.Until(startTime)
+		if duration <= 0 {
+			fmt.Println("Start time already passed. Running now...")
+		} else {
+			fmt.Printf("Waiting until start time: %s (%v seconds remaining)\n", startTime.Format("2006-01-02 15:04:05"), duration.Seconds())
+			time.Sleep(duration)
+		}
+	}
+	config.GenesisState, config.GenesisBlock = node.GetGenesisFile(network)
 	// If help is requested, print usage and exit
 	if help {
 		fmt.Println("Usage: jam [options]")
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
-	types.TimeSavingMode = false
-	peers, peerList, err := generatePeerNetwork(validators, config.Port)
+	validatorIndex, is_local := setUserPort(config)
+	fmt.Printf("Starting node with port %d\n", config.Port)
+	peers, peerList, err := generatePeerNetwork(validators, config.Port, is_local)
+	for _, peer := range peerList {
+		fmt.Printf("Peer %d: %s\n", peer.PeerID, peer.PeerAddr)
+	}
 	epoch0Timestamp := statedb.NewEpoch0Timestamp()
-
 	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
 		// set up validator secrets
 		if _, _, err := setupValidatorSecret(config.Bandersnatch, config.Ed25519, config.Bls, config.NodeName); err != nil {
@@ -72,26 +117,49 @@ func main() {
 	}
 
 	// Set up peers and node
-	_, err = node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.Genesis, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
+	n, err := node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, config.GenesisBlock, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
 	if err != nil {
-		panic(1)
+		fmt.Printf("New Node Err:%s", err.Error())
+		os.Exit(1)
 	}
-	for {
-		time.Sleep(10 * time.Millisecond) // Adjust the delay as needed
+	storage, err := n.GetStorage()
+	defer storage.Close()
+	if err != nil {
+		fmt.Printf("GetStorage Err:%s", err.Error())
+		os.Exit(1)
 	}
+	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String())
+	timer := time.NewTimer(45 * time.Minute)
+	<-timer.C
+	fmt.Println("Node has been running for 45 minutes. Shutting down...")
 }
 
-func generatePeerNetwork(validators []types.Validator, port int) (peers []string, peerList map[uint16]*node.Peer, err error) {
+func generatePeerNetwork(validators []types.Validator, port int, local bool) (peers []string, peerList map[uint16]*node.Peer, err error) {
 	peerList = make(map[uint16]*node.Peer)
-	for i := uint16(0); i < types.TotalValidators; i++ {
-		v := validators[i]
-		peerAddr := fmt.Sprintf("node%d:%d", i, port)
-		peer := fmt.Sprintf("%s", v.Ed25519)
-		peers = append(peers, peer)
-		peerList[i] = &node.Peer{
-			PeerID:    i,
-			PeerAddr:  peerAddr,
-			Validator: v,
+	if local {
+		for i := uint16(0); i < types.TotalValidators; i++ {
+			v := validators[i]
+			baseport := 9900
+			peerAddr := fmt.Sprintf("127.0.0.1:%d", baseport+int(i))
+			peer := fmt.Sprintf("%s", v.Ed25519)
+			peers = append(peers, peer)
+			peerList[i] = &node.Peer{
+				PeerID:    i,
+				PeerAddr:  peerAddr,
+				Validator: v,
+			}
+		}
+	} else {
+		for i := uint16(0); i < types.TotalValidators; i++ {
+			v := validators[i]
+			peerAddr := fmt.Sprintf("jam-%d:%d", i, port)
+			peer := fmt.Sprintf("%s", v.Ed25519)
+			peers = append(peers, peer)
+			peerList[i] = &node.Peer{
+				PeerID:    i,
+				PeerAddr:  peerAddr,
+				Validator: v,
+			}
 		}
 	}
 	return peers, peerList, nil

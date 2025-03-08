@@ -1,0 +1,58 @@
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Compute JAM_START_TIME on the control machine
+      set_fact:
+        JAM_START_TIME: "{{ lookup('pipe', 'date -u -d \"45 seconds\" +\"%Y-%m-%d %H:%M:%S\"') }}"
+
+    - name: Display JAM_START_TIME
+      debug:
+        msg: "Using JAM_START_TIME: {{ JAM_START_TIME }}"
+
+- hosts: all
+  serial: 1
+  become: true
+  vars:
+    NUM_NODES: 1
+    NETWORK: "tiny"
+    DEFAULT_PORT: 9900
+    JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jam"
+  tasks:
+    - name: Use the computed JAM_START_TIME
+      set_fact:
+        JAM_START_TIME: "{{ hostvars['localhost']['JAM_START_TIME'] }}"
+
+    - name: Display JAM_START_TIME on each host
+      debug:
+        msg: "Using JAM_START_TIME: {{ JAM_START_TIME }}"
+
+    - name: Create logs Directory
+      file:
+        path: /tmp/logs
+        state: directory
+        mode: 0755
+
+    - name: Copy binary jam from local to jam_hosts
+      copy: 
+        src: "{{ JAM_PATH }}"
+        dest: "{{ JAM_PATH }}"
+        mode: '0755'
+
+    - name: Run command in Instances
+      shell: |
+        echo "Using JAM_START_TIME: {{ JAM_START_TIME }}"
+        for i in $(seq 0 $(( {{ NUM_NODES }} - 1 ))); do
+          PORT=$(( {{ DEFAULT_PORT }} + i ));
+          echo "Starting instance $i on port $PORT..."
+          nohup {{ JAM_PATH }} -net_spec {{ NETWORK }} -port $PORT -start_time "{{ JAM_START_TIME }}" > /tmp/logs/jam_$PORT.log 2>&1 < /dev/null &
+          echo "Instance $i started with port $PORT";
+        done
+        sleep 2
+        pgrep -a jam
+      args: 
+        executable: /bin/bash  
+
+    - name: Display completion Message
+      debug:
+        msg: "All instances started."

@@ -2,12 +2,64 @@ OUTPUT_DIR := bin
 BINARY := jam
 SRC := jam.go
 NETWORK  ?= tiny
-.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean publish
+NUM_NODES ?= 6
+DEFAULT_PORT ?= 9900
+BRANCH ?= shawn_jam
+JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
+.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
 jam: ffi_force
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) $(SRC) 
+jam_without_ffi_build:
+	@echo "Building JAM... $(NETWORK)"
+	mkdir -p $(OUTPUT_DIR)
+	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) $(SRC)
+run_parallel_jam:
+	@mkdir -p logs 
+	@echo "Starting $(NUM_NODES) instances of bin/jam..."
+	@seq 0 $(shell echo $$(($(NUM_NODES) - 1))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); bin/jam -net_spec $(NETWORK) -port $$PORT -start_time "$(JAM_START_TIME)"; echo "Instance {} finished with port $$PORT"' sh
+	@echo "All instances started."
+kill_parallel_jam:
+	@echo "Killing all instances of bin/jam..."
+	@pgrep -f "bin/jam"
+	@pkill -f "bin/jam"
+	@echo "All instances killed."
+run_jam:
+	@echo "Starting bin/jam... with network $(NETWORK) port $(DEFAULT_PORT) start_time $(JAM_START_TIME)"
+	@$(OUTPUT_DIR)/$(BINARY) -net_spec $(NETWORK) -port $(DEFAULT_PORT) -start_time "$(JAM_START_TIME)"
+	@echo "Instance started."
+
+# env setup for remote nodes
+jam_set:
+	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && echo \"export CARGO_MANIFEST_DIR=\$(pwd)\" >> ~/.bashrc'"
+	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "source ~/.bashrc"
+# build ffi and apply latest code
+build_remote_nodes:
+	@echo "Building JAM on all remote nodes..."
+	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
+	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make bandersnatchlib NETWORK=$(NETWORK)'"
+	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make blslib NETWORK=$(NETWORK)'"
+	@echo "All remote nodes built."
+# clean the process and delete the storage
+clean_remote_nodes:
+	@echo "Cleaning JAM on all remote nodes..."
+	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'rm -rf .jam'"
+	#grep the pid from port 9900 and kill it
+	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -c 'command -v lsof >/dev/null && lsof -t -i:9900 | xargs --no-run-if-empty kill -9'"
+	@echo "All remote nodes cleaned."
+# update the latest commit on remote nodes
+reset_remote_nodes:
+	@echo "Resetting JAM on all remote nodes..."
+	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
+	@echo "All remote nodes reset."
+# run jam.go on remote nodes on port 9900
+run_jam_remote_nodes:
+	@echo "Starting run_jam on all remote nodes..."
+	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make jam_without_ffi_build NETWORK=$(NETWORK)'"
+	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'export NETWORK=$(NETWORK); export DEFAULT_PORT=$(DEFAULT_PORT); export JAM_START_TIME=\"$(shell date +'%Y-%m-%d %H:%M:%S')\"; cdj && make run_jam'"
+	@echo "All remote nodes started."
 
 da:
 	@echo "Building JAM..."
@@ -97,3 +149,12 @@ cleancoverage:
 	@echo "Cleaning up..."
 	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML)
 	@echo "Done."
+
+jamx_start:
+	ansible-playbook -u root -i hosts.txt  yaml/jam_start.yaml
+	@echo "update jam binary and start on jam instances"
+
+jamx_stop:
+	ansible-playbook -u root -i hosts.txt  yaml/jam_stop.yaml
+	@echo "stop on jam instances"
+	

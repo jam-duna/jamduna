@@ -93,7 +93,7 @@ func (p *Peer) openStream(code uint8) (stream quic.Stream, err error) {
 			return nil, err
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
 	stream, err = p.conn.OpenStreamSync(ctx)
@@ -143,6 +143,9 @@ func (p *Peer) openStream(code uint8) (stream quic.Stream, err error) {
 
 func sendQuicBytes(stream quic.Stream, msg []byte) (err error) {
 	// Create a buffer to hold the length of the message (big-endian uint32)
+	if stream == nil {
+		return errors.New("stream is nil")
+	}
 	msgLen := uint32(len(msg))
 	lenBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lenBuf, msgLen)

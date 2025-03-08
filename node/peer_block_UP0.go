@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -220,6 +221,7 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 		}
 	}()
 	wg.Wait()
+	log.Debug(debugBlock, "Received Handshake from peer", fmt.Sprintf("%d: %x", peerID, newHandshake))
 	// check if there is any error
 	select {
 	case err = <-errChan:

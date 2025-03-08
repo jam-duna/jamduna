@@ -105,7 +105,7 @@ func (n *Node) ReadRawKV(key []byte) ([]byte, bool, error) {
 	if err != nil {
 		return []byte{}, false, fmt.Errorf("ReadRawKV Err:%v\n", err)
 	} else if !ok {
-		fmt.Printf("ReadRawKV K=%v not found\n", string(key))
+		fmt.Printf("ReadRawKV K=%x not found\n", string(key))
 		return []byte{}, false, fmt.Errorf("ReadRawKV K=%v not found\n", string(key))
 	}
 	return val, true, nil

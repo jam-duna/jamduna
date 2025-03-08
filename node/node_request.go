@@ -258,6 +258,7 @@ func (n *Node) cacheHeaders(h common.Hash, block *types.Block) {
 	n.headersMutex.Lock()
 	defer n.headersMutex.Unlock()
 	n.headers[h] = block
+	// fmt.Printf("  %s cacheHeaders %v <- %v\n", n.String(), h, block.Header.ParentHeaderHash)
 }
 
 func (n *Node) cacheWorkReport(workReport types.WorkReport) {
@@ -302,6 +303,7 @@ func (n *Node) runReceiveBlock() {
 			if err != nil {
 				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)
 			} else {
+				log.Debug(debugBlock, fmt.Sprintf("%s Received Block Announcement from validator %d", n.String(), blockAnnouncement.Header.AuthorIndex), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "t", b.Header.Slot)
 				n.processBlock(b)
 			}
 		}

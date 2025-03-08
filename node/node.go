@@ -33,22 +33,23 @@ import (
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
-
 	"github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/qlog"
 )
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	module       = "n_mod"  // General Node Ops
-	debugDA      = "da_mod" // DA
-	debugG       = "g_mod"  // Guaranteeing
-	debugT       = "t_mod"  // Tickets/Safrole
-	debugP       = "p_mod"  // Preimages
-	debugA       = "a_mod"  // Assurances
-	debugAudit   = "ad_mod" // Audit
-	debugGrandpa = "gp_mod" // Guaranteeing
+	module       = "n_mod"   // General Node Ops
+	debugDA      = "da_mod"  // DA
+	debugG       = "g_mod"   // Guaranteeing
+	debugT       = "t_mod"   // Tickets/Safrole
+	debugP       = "p_mod"   // Preimages
+	debugA       = "a_mod"   // Assurances
+	debugAudit   = "ad_mod"  // Audit
+	debugGrandpa = "gp_mod"  // Guaranteeing
+	debugBlock   = "blk_mod" // Block
 	debugStream  = "q_mod"
 	numNodes     = types.TotalValidators
 	quicAddr     = "127.0.0.1:%d"
@@ -338,7 +339,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
-		return nil, fmt.Errorf("NewStateDBStorage %v", err)
+		return nil, fmt.Errorf("NewStateDBStorage[port:%d] Err %v", port, err)
 	}
 	store.NodeID = id
 	var cert tls.Certificate
@@ -349,7 +350,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	if err != nil {
 		return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
 	}
-
 	node := &Node{
 		id:        id,
 		store:     store,
@@ -491,12 +491,13 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 func GenerateQuicConfig() *quic.Config {
 	return &quic.Config{
 		Allow0RTT:                  true,
-		KeepAlivePeriod:            5 * time.Second,
-		MaxIdleTimeout:             10 * time.Second,
+		KeepAlivePeriod:            1 * time.Second,
+		MaxIdleTimeout:             60 * time.Second,
 		MaxIncomingUniStreams:      2 * 1023 * 1023,
 		MaxIncomingStreams:         2 * 1023 * 1023,
 		MaxStreamReceiveWindow:     100 * 1024 * 1024,
 		MaxConnectionReceiveWindow: 500 * 1024 * 1024,
+		Tracer:                     qlog.DefaultConnectionTracer,
 	}
 }
 
@@ -1596,30 +1597,7 @@ func GenerateValidatorNetwork() (validators []types.Validator, secrets []types.V
 }
 
 func generateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
-	for i := uint32(0); i < types.TotalValidators; i++ {
-		// assign metadata names for the first 6
-		// nodeName := fmt.Sprintf("node%d", i)
-		originalPort := uint32(9000)
-		listernerPort := originalPort + i
-		metadata := fmt.Sprintf("127.0.0.1:%d", listernerPort)
-		// Create hex strings for keys
-		iHex := fmt.Sprintf("%x", i)
-		if len(iHex)%2 != 0 {
-			iHex = "0" + iHex
-		}
-		iHexByteLen := len(iHex) / 2
-		ed25519Hex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.Ed25519SeedInBytes-iHexByteLen), iHex)
-		bandersnatchHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", bandersnatch.SecretLen-iHexByteLen), iHex)
-		blsHex := fmt.Sprintf("0x%s%s", strings.Repeat("00", types.BlsPrivInBytes-iHexByteLen), iHex)
-		// Set up the secret/validator using hex values
-		v, s, err := setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata)
-		if err != nil {
-			return validators, secrets, err
-		}
-		validators = append(validators, v)
-		secrets = append(secrets, s)
-	}
-	return validators, secrets, nil
+	return statedb.GenerateValidatorSecretSet(numNodes)
 }
 
 func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) (validator types.Validator, secret types.ValidatorSecret, err error) {

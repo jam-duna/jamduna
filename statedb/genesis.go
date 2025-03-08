@@ -349,39 +349,50 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 	return originalTime.Unix()
 }
 
-func NewEpoch0Timestamp() uint32 {
-	now := time.Now().Unix()
-	second_per_epoch := types.SecondsPerEpoch // types.EpochLength
-	if types.TimeUnitMode != "TimeStamp" {
-		now = common.ComputeJCETime(now, true)
-	}
-	waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
-	epoch0Timestamp := uint64(now) + uint64(waitTime)
-	epoch0Phase := uint64(now) / uint64(second_per_epoch)
-	log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
-
-	if types.TimeSavingMode {
-		deDuctedTime := (time.Duration(0)) * time.Second
-		if !(waitTime < 5) {
-			deDuctedTime = (time.Duration(-waitTime + 5)) * time.Second
-		}
-		driftTime := (time.Duration(int64(epoch0Phase) * int64(second_per_epoch))) * time.Second // adjust it to e'=1,m'=00
-		adjustedTime := deDuctedTime
-		if types.TimeSavingMode {
-			adjustedTime += driftTime
-		}
-		common.AddJamStart(adjustedTime)
-		currTS := time.Now().Unix()
+func NewEpoch0Timestamp(test_name ...string) uint32 {
+	if len(test_name) == 0 {
+		now := time.Now().Unix()
+		second_per_epoch := types.SecondsPerEpoch // types.EpochLength
 		if types.TimeUnitMode != "TimeStamp" {
-			now = common.ComputeJCETime(currTS, true)
+			now = common.ComputeJCETime(now, true)
 		}
-		waitTime = int64(second_per_epoch) - now%int64(second_per_epoch)
-		log.Trace(module, "NewEpoch0Timestamp:TimeSavingMode", "AdjustTime", driftTime, "JCE Start Time", common.JceStart, "Epoch0P Drift", now, "TimeSavingMode Wait", uint64(waitTime))
-		epoch0Timestamp = uint64(now) + uint64(waitTime)
-	}
+		waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
+		epoch0Timestamp := uint64(now) + uint64(waitTime)
+		epoch0Phase := uint64(now) / uint64(second_per_epoch)
+		log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
 
-	log.Trace(module, "NewGenesisConfig", "epoch0Timestamp", epoch0Timestamp, "waitTime", uint64(waitTime))
-	return uint32(epoch0Timestamp)
+		if types.TimeSavingMode && !(waitTime < 5) {
+			deDuctedTime := (time.Duration(-waitTime + 5)) * time.Second
+			driftTime := (time.Duration(int64(epoch0Phase) * int64(second_per_epoch))) * time.Second // adjust it to e'=1,m'=00
+			adjustedTime := deDuctedTime
+			if types.TimeSavingMode {
+				adjustedTime += driftTime
+			}
+			common.AddJamStart(adjustedTime)
+			currTS := time.Now().Unix()
+			if types.TimeUnitMode != "TimeStamp" {
+				now = common.ComputeJCETime(currTS, true)
+			}
+			waitTime = int64(second_per_epoch) - now%int64(second_per_epoch)
+			epoch0Timestamp = uint64(now) + uint64(waitTime)
+		}
+		log.Trace(module, "NewEpoch0Timestamp", "NewGenesisConfig epoch0Timestamp", epoch0Timestamp, "Wait", uint64(waitTime))
+		return uint32(epoch0Timestamp)
+	} else {
+		now := time.Now().Unix()
+		second_per_epoch := types.SecondsPerEpoch // types.EpochLength
+		if types.TimeUnitMode != "TimeStamp" {
+			now = common.ComputeJCETime(now, true)
+		}
+		waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
+		if waitTime < 24 {
+			panic("Wait time is less than 24 seconds")
+		}
+		epoch0Timestamp := uint64(now) + uint64(waitTime)
+		epoch0Phase := uint64(now) / uint64(second_per_epoch)
+		log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
+		return uint32(epoch0Timestamp)
+	}
 }
 
 func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata string) (types.Validator, error) {

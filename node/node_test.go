@@ -138,7 +138,6 @@ func TestMegatron(t *testing.T) {
 		t.Fatalf("Unable to create CPU Profile file: %v", err)
 	}
 	defer cpuProfile.Close()
-
 	// Start CPU Profile
 	if err := pprof.StartCPUProfile(cpuProfile); err != nil {
 		t.Fatalf("Unable to start CPU Profile: %v", err)

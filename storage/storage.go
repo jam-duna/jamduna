@@ -100,7 +100,7 @@ func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
 	if err == leveldb.ErrNotFound {
 		return nil, false, nil
 	} else if err != nil {
-		return nil, false, fmt.Errorf("ReadRawKV %v Err: %v", key, err)
+		return nil, false, fmt.Errorf("ReadRawKV %x Err: %v", key, err)
 	}
 	return data, true, nil
 }
