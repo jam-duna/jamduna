@@ -348,10 +348,23 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 				o.D[s] = sa
 			}
 		}
-		//  https://graypaper.fluffylabs.dev/#/5f542d7/179301179301?v=0.6.2
-		o.QueueWorkReport = XY.U.QueueWorkReport
-		o.UpcomingValidators = XY.U.UpcomingValidators
-		o.PrivilegedState = XY.U.PrivilegedState
+		// ASSIGN
+		if s.JamState.PrivilegedServiceIndices.Kai_a == service {
+			o.QueueWorkReport = XY.U.QueueWorkReport
+		}
+		// VALIDATE
+		if s.JamState.PrivilegedServiceIndices.Kai_v == service {
+			o.UpcomingValidators = XY.U.UpcomingValidators
+		}
+		// BLESS
+		if s.JamState.PrivilegedServiceIndices.Kai_m == service {
+			o.PrivilegedState.Kai_a = XY.U.PrivilegedState.Kai_a
+			o.PrivilegedState.Kai_v = XY.U.PrivilegedState.Kai_v
+			o.PrivilegedState.Kai_m = XY.U.PrivilegedState.Kai_m
+			for k, v := range XY.U.PrivilegedState.Kai_g {
+				o.PrivilegedState.Kai_g[k] = v
+			}
+		}
 
 		output_t = append(output_t, XY.T...)
 	}
