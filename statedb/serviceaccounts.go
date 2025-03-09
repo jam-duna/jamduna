@@ -1,9 +1,12 @@
 package statedb
 
 import (
-	"github.com/colorfulnotion/jam/common"
+	"bytes"
+	"encoding/binary"
 	"strconv"
 	"strings"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 // Solves Missing service representation in state.json -- https://github.com/jam-duna/jamtestnet/issues/51
@@ -25,7 +28,7 @@ type SService struct {
 	Balance    uint64 `json:"balance"`
 	MinItemGas uint64 `json:"min_item_gas"`
 	MinMemoGas uint64 `json:"min_memo_gas"`
-	Bytes      uint32 `json:"bytes"`
+	Bytes      uint64 `json:"bytes"`
 	Items      uint32 `json:"items"`
 }
 
@@ -135,7 +138,7 @@ func parse_SSService(md string) (uint32, SService) {
 		Balance:    uint64(balance),
 		MinItemGas: uint64(minItemGas),
 		MinMemoGas: uint64(minMemoGas),
-		Bytes:      uint32(bytesVal),
+		Bytes:      uint64(bytesVal),
 		Items:      uint32(items),
 	}
 	return uint32(sVal), svc
@@ -243,4 +246,16 @@ func getServiceAccounts(keyvals []KeyVal) []*SAccount {
 	}
 
 	return accounts
+}
+
+func (ssa SService) Encode() []byte {
+	var buffer bytes.Buffer
+	codeHashBytes := common.Hex2Bytes(ssa.CodeHash)
+	buffer.Write(codeHashBytes)
+	binary.Write(&buffer, binary.LittleEndian, ssa.Balance)
+	binary.Write(&buffer, binary.LittleEndian, ssa.MinItemGas)
+	binary.Write(&buffer, binary.LittleEndian, ssa.MinMemoGas)
+	binary.Write(&buffer, binary.LittleEndian, ssa.Bytes)
+	binary.Write(&buffer, binary.LittleEndian, ssa.Items)
+	return buffer.Bytes()
 }
