@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
 // Solves Missing service representation in state.json -- https://github.com/jam-duna/jamtestnet/issues/51
@@ -248,14 +249,61 @@ func getServiceAccounts(keyvals []KeyVal) []*SAccount {
 	return accounts
 }
 
-func (ssa SService) Encode() []byte {
+func (saa SAccount) Encode() []byte {
 	var buffer bytes.Buffer
-	codeHashBytes := common.Hex2Bytes(ssa.CodeHash)
+	// service account ID
+	id_bytes := types.E_l(uint64(saa.ID), 4)
+	buffer.Write(id_bytes)
+
+	// service account data
+	codeHashBytes := common.Hex2Bytes(saa.Data.Service.CodeHash)
 	buffer.Write(codeHashBytes)
-	binary.Write(&buffer, binary.LittleEndian, ssa.Balance)
-	binary.Write(&buffer, binary.LittleEndian, ssa.MinItemGas)
-	binary.Write(&buffer, binary.LittleEndian, ssa.MinMemoGas)
-	binary.Write(&buffer, binary.LittleEndian, ssa.Bytes)
-	binary.Write(&buffer, binary.LittleEndian, ssa.Items)
+	binary.Write(&buffer, binary.LittleEndian, saa.Data.Service.Balance)
+	binary.Write(&buffer, binary.LittleEndian, saa.Data.Service.MinItemGas)
+	binary.Write(&buffer, binary.LittleEndian, saa.Data.Service.MinMemoGas)
+	binary.Write(&buffer, binary.LittleEndian, saa.Data.Service.Bytes)
+	binary.Write(&buffer, binary.LittleEndian, saa.Data.Service.Items)
+
+	// service account preimages
+	preimage_length_bytes := types.E(uint64(len(saa.Data.Preimages)))
+	buffer.Write(preimage_length_bytes)
+
+	for _, preimage := range saa.Data.Preimages {
+		preimage_hash := common.Hex2Bytes(preimage.Hash)
+		preimage_blob := common.Hex2Bytes(preimage.Blob)
+		encoded_preimage_blob, _ := types.Encode(preimage_blob)
+
+		buffer.Write(preimage_hash)
+		buffer.Write(encoded_preimage_blob)
+	}
+
+	// service account lookup metadata
+	lookup_length_bytes := types.E(uint64(len(saa.Data.LookupMeta)))
+	buffer.Write(lookup_length_bytes)
+
+	for _, lookup := range saa.Data.LookupMeta {
+		lookup_key_hash := common.Hex2Bytes(lookup.Key.Hash)
+		lookup_key_length_bytes := types.E_l(uint64(lookup.Key.Length), 4)
+		encoded_lookup_value, _ := types.Encode(lookup.Value)
+
+		buffer.Write(lookup_key_hash)
+		buffer.Write(lookup_key_length_bytes)
+		buffer.Write(encoded_lookup_value)
+	}
+
+	// service account storage
+	storage_length_bytes := types.E(uint64(len(saa.Data.Storage)))
+	buffer.Write(storage_length_bytes)
+
+	for key, value := range saa.Data.Storage {
+		key_bytes := common.Hex2Bytes(key)
+		value_bytes := common.Hex2Bytes(value)
+		encoded_key_bytes, _ := types.Encode(key_bytes)
+		encoded_value_bytes, _ := types.Encode(value_bytes)
+
+		buffer.Write(encoded_key_bytes)
+		buffer.Write(encoded_value_bytes)
+	}
+
 	return buffer.Bytes()
 }
