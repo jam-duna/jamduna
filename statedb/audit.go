@@ -464,7 +464,7 @@ func (s *StateDB) appendBadSetDispute(block *types.Block, J *types.JudgeBucket, 
 
 	block.Extrinsic.Disputes.Verdict = append(block.Extrinsic.Disputes.Verdict, badset_verdict)
 	culprits := s.JudgementToCulprit(old_guarantee)
-	block.Extrinsic.Disputes.Culprit = culprits
+	block.Extrinsic.Disputes.Culprit = append(block.Extrinsic.Disputes.Culprit, culprits...)
 }
 
 func (s *StateDB) appendWonkySetDispute(block *types.Block, J *types.JudgeBucket, W_hash common.Hash) {

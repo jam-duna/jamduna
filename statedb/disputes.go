@@ -440,6 +440,10 @@ func checkVote(v []types.Verdict) error {
 	return nil
 }
 
+func VerdictsToResults(v []types.Verdict) []VerdictResult {
+	return verdict2result(v)
+}
+
 // process the dispute
 func verdict2result(v []types.Verdict) []VerdictResult {
 	var result []VerdictResult

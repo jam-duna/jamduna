@@ -193,13 +193,41 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	validator_secret := validator_secrerts[int(author_index)]
 	dispute_prestate := prestate.Copy()
 	dispute_prestate.Block = dispute_block.Copy()
-	err = dispute_prestate.ReSignDisputeBlock(validator_secret)
+	// also drop the assurance
+	disputed_report_map := make(map[common.Hash]struct{})
+	dispute_results := statedb.VerdictsToResults(dispute_prestate.Block.Extrinsic.Disputes.Verdict)
+	for _, dispute_result := range dispute_results {
+		if dispute_result.PositveCount <= (len(validator_secrerts) / 2) {
+			disputed_report_map[dispute_result.WorkReportHash] = struct{}{}
+		}
+	}
+	new_assurances := make([]types.Assurance, len(dispute_prestate.Block.Extrinsic.Assurances))
+	//copy
+	copy(new_assurances, dispute_prestate.Block.Extrinsic.Assurances)
+	for i, rho := range dispute_prestate.JamState.AvailabilityAssignments {
+		// see if the report hash in the disputed report map
+		if rho != nil {
+			if _, ok := disputed_report_map[rho.WorkReport.Hash()]; ok {
+				// resign the assurance
+				for index, assurance := range new_assurances {
+					assurance.SetBitFieldBit(uint16(i), false)
+					assurance_index := assurance.ValidatorIndex
+					assurance.Sign(validator_secrerts[assurance_index].Ed25519Secret[:])
+					new_assurances[index] = assurance
+				}
+			}
+		}
+	}
+
+	dispute_prestate.Block.Extrinsic.Assurances = []types.Assurance{}
+	err = dispute_prestate.ReSignDisputeBlock(validator_secret, new_assurances)
 	if err != nil {
 		return false, err, nil
 	}
 	dispute_block = dispute_prestate.Block.Copy()
 	dispute_poststate, err := statedb.ApplyStateTransitionFromBlock(dispute_prestate, context.Background(), dispute_block, "MakeDisputes")
 	if err != nil {
+		fmt.Println(dispute_block.String())
 		return false, fmt.Errorf("ApplyStateTransitionFromBlock Error:%v", err), nil
 	}
 	dispute_stf = node.BuildStateTransitionStruct(dispute_prestate, dispute_block, dispute_poststate)

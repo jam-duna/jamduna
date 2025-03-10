@@ -203,11 +203,11 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	return sealedBlock, nil
 }
 
-func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret) error {
+func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret, new_assurances []types.Assurance) error {
 	sf := s.GetSafrole()
 	b := s.GetBlock()
-	// also drop the assurance
-	b.Extrinsic.Assurances = make([]types.Assurance, 0)
+
+	b.Extrinsic.Assurances = new_assurances
 	extrinsicData := b.Extrinsic
 	b.Header.ExtrinsicHash = extrinsicData.Hash()
 	author_index, err := sf.GetAuthorIndex(credential.BandersnatchPub.Hash(), "Curr")

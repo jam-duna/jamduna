@@ -380,7 +380,7 @@ func SortCulprits(culprits []Culprit) []Culprit {
 func SortFaults(faults []Fault) []Fault {
 	// Sort the faults by target
 	sort.Slice(faults, func(i, j int) bool {
-		return bytes.Compare(faults[i].Target.Bytes(), faults[j].Target.Bytes()) < 0
+		return bytes.Compare(faults[i].Key.Bytes(), faults[j].Key.Bytes()) < 0
 	})
 	return faults
 }
