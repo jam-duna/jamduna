@@ -3,14 +3,7 @@ package node
 import (
 	"fmt"
 
-	//	"encoding/json"
-	//	"encoding/binary"
-
-	//	"github.com/colorfulnotion/jam/pvm"
-
 	"github.com/colorfulnotion/jam/common"
-	//	"github.com/colorfulnotion/jam/erasurecoding"
-	//	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -40,29 +33,6 @@ func (n *Node) processNPECChunk(chunk types.DistributeECChunk) error {
 
 	fmt.Printf(" -- [N%d] saved DistributeECChunk common.Hash(chunk.RootHash)=%s\nchunk.BlobMeta=%x\nchunk.SegmentRoot=%s\nchunk.Data=%x\n", n.id, common.Hash(chunk.RootHash), chunk.BlobMeta, common.Hash(chunk.SegmentRoot), chunk.Data)
 	return nil
-}
-
-func ComputeOrderedExportedNPChunks(ecChunksArr [][]types.DistributeECChunk) (segmentsShardsAll [][]types.ConformantECChunk) {
-	numNodes := types.TotalValidators
-
-	segmentsShardsAll = make([][]types.ConformantECChunk, numNodes)
-	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
-		segmentsShardsAll[shardIdx] = make([]types.ConformantECChunk, 0)
-	}
-
-	// len(ecChunksArr) = len(exportSegment) + ceil(len(exportSegment)/64)
-	for segment_item_idx, segment_item := range ecChunksArr {
-		if len(segment_item)%types.TotalValidators != 0 {
-			panic(fmt.Sprintf("Invalid segment_item_idx:%v Got len=%v pageChunk %v\n", segment_item_idx, len(segment_item), segment_item))
-		}
-		for chunkIdx, ecChunk := range segment_item {
-			shardIdx := uint32(chunkIdx % numNodes)
-			single_segment_shard := types.ConformantECChunk{Data: ecChunk.Data, ShardIndex: shardIdx}
-			segmentsShardsAll[shardIdx] = append(segmentsShardsAll[shardIdx], single_segment_shard)
-		}
-	}
-
-	return segmentsShardsAll
 }
 
 func ComputeOrderedNPBundleChunks(ecChunks []types.DistributeECChunk) (bundleShards []types.ConformantECChunk) {

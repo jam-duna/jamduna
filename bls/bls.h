@@ -6,6 +6,10 @@
 extern "C" {
 #endif
 
+// EC
+extern void encode(unsigned char *data, size_t data_len, size_t shard_count, unsigned char *output, size_t shard_size);
+extern void decode(unsigned char *shards, unsigned int *indexes, size_t V, size_t shard_size, unsigned char *output, size_t output_size);
+
 void get_secret_key(
     const unsigned char* seed_bytes,
     size_t seed_len,

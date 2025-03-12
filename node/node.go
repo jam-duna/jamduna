@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
+	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
@@ -1096,45 +1097,31 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uin
 	for i, req := range requests_original {
 		requests[i] = req
 	}
-
-	// CHECK
 	responses, err := n.makeRequests(requests, types.ECPieceSize/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
 	if err != nil {
 		fmt.Printf("Error in fetching import segments By ErasureRoot: %v\n", err)
 		return nil, err
 	}
-	receiveSegments := make([][]byte, len(segmentIndices))
-	receiveShard := make([][][]byte, len(segmentIndices))
-	for i := range receiveShard {
-		receiveShard[i] = make([][]byte, types.TotalValidators)
-	}
 
+	shards := make([][]byte, types.TotalCores)
+	indexes := make([]uint32, types.TotalCores)
+	numShards := 0 
 	for _, resp := range responses {
 		daResp, ok := resp.(CE139_response)
 		if !ok {
 			fmt.Printf("Error in convert import segments CE139_response: %v\n", err)
 		}
-		selected_segments, err := SplitToSegmentShards(daResp.SegmentShards)
-		if err != nil {
-			fmt.Printf("Error in fetching import segments SplitToSegmentShards: %v\n", err)
-			continue
-		}
-		for idx, selected_segment := range selected_segments {
-			// segmentIdx := segmentIndex[idx]
-			receiveShard[idx][daResp.ShardIndex] = selected_segment
+		if numShards < len(indexes) {
+			indexes[numShards] = uint32(daResp.ShardIndex)
+			shards[numShards] = daResp.SegmentShards  // this is actually multiple segments
+			numShards++;
 		}
 	}
-	for return_idx, segmentShard := range receiveShard {
-		segmentShardRaw := make([][][]byte, 1)
-		segmentShardRaw[0] = segmentShard
-		exported_segment, err := n.decode(segmentShardRaw, true, types.SegmentSize)
-		if err != nil {
-			fmt.Printf("Error in fetching import segments decode: %v\n", err)
-		}
-		receiveSegments[return_idx] = exported_segment
+	rawsegments, err := bls.Decode(shards, types.TotalValidators, indexes, len(shards[0])*2)
+	if err != nil {
+		fmt.Printf("Error in fetching import segments decode: %v\n", err)
 	}
-	segments = receiveSegments
-
+	segments = splitBytes(rawsegments, 2052)
 	return segments, nil
 }
 
@@ -1156,24 +1143,26 @@ func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength
 		fmt.Printf("Error in fetching bundle segments makeRequests: %v\n", err)
 		return types.WorkPackageBundle{}, err
 	}
-	bundleShards := make([][]byte, types.TotalValidators)
+	bundleShards := make([][]byte, types.TotalCores)
+	indexes := make([]uint32, types.TotalCores)
+	numShards := 0
 	for _, resp := range responses {
 		daResp, ok := resp.(CE138_response)
 		if !ok {
 			log.Warn(debugDA, "reconstructPackageBundleSegments:Error in convert bundle segments CE138_response", "n", n.id, "len(BundleShard)", len(daResp.BundleShard), "daResp.BundleShard", daResp.BundleShard)
 		}
-
-		bundleShards[daResp.ShardIndex] = daResp.BundleShard
+		if numShards < types.TotalCores {
+			bundleShards[numShards] = daResp.BundleShard
+			indexes[numShards] = uint32(daResp.ShardIndex)
+			numShards++
+		}
 	}
-	bundleShardsRaw := make([][][]byte, 1)
-	bundleShardsRaw[0] = bundleShards
-	exported_segment, err := n.decode(bundleShardsRaw, false, int(blength))
+	encodedBundle, err := bls.Decode(bundleShards, types.TotalValidators, indexes, int(blength))
 	if err != nil {
 		log.Error(debugDA, "decode: Error in fetching bundle segments decode", "err", err)
 	}
-	log.Trace(debugDA, "reconstructPackageBundleSegments:decode", "n", n.id, "exported_segment", exported_segment)
 
-	workPackageBundleRaw, _, err := types.Decode(exported_segment, reflect.TypeOf(types.WorkPackageBundle{}))
+	workPackageBundleRaw, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
 		log.Error(debugDA, "reconstructPackageBundleSegments:Decode", "err", err)
 		return

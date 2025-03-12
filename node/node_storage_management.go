@@ -119,7 +119,7 @@ func (n *Node) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, erro
 	return &b, nil
 }
 
-func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk, err error) {
+func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk, err error) {
 	//TODO: should probably store erasureRoot -> pbH
 	// Stanley: Need to check this logic
 	erasure_metaKey := fmt.Sprintf("erasureMeta-%v", erasureRoot)
@@ -147,7 +147,7 @@ func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasur
 	return erasureMeta, bECChunks, sECChunksArray, err
 }
 
-func (n *Node) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) {
+func (n *Node) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
 	erasure_root_u := as.ErasureRoot
 	erasure_metaKey := fmt.Sprintf("erasureMeta-%v", erasure_root_u)
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
@@ -218,26 +218,38 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	}
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), leafHash, path)
 	if !verified {
+		panic(9992)
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
+	//log.Info(module, "VerifyFullShard: Verified", "shardIndex", shardIndex, "erasureRoot", erasureRoot, "len(bs)", len(bundleShard), "len(ss)", len(segmentShards), "len(j)", len(justification))
 	return true, nil
 }
+
+
+func splitBytes(data []byte, n int) [][]byte {
+	var result [][]byte
+	for i := 0; i < len(data); i += n {
+		end := i + n
+		if end > len(data) {
+			end = len(data)
+		}
+		result = append(result, data[i:end])
+	}
+	return result
+}
+
 
 // Qns Source : CE137_FullShard -- By Assurer to Guarantor
 // Ans Source : NOT SPECIFIED by Jam_np. Stored As is
 func (n *Node) GetFullShard_Guarantor(erasureRoot common.Hash, shardIndex uint16) (erasure_root common.Hash, shardIdx uint16, bundleShard []byte, segmentShards [][]byte, justification []byte, ok bool, err error) {
-	recoveredMeta, recoveredbECChunks, recoveredsECChunksArray, err := n.GetMeta_Guarantor(erasureRoot)
+	erasureMeta, recoveredbECChunks, recoveredsECChunksArray, err := n.GetMeta_Guarantor(erasureRoot)
 	if err != nil {
 		return erasureRoot, shardIndex, bundleShard, segmentShards, justification, false, err
 	}
-	shardJustification, orderedBundleShard, orderedSegmentShard := GetShardSpecificOrderedChunks(shardIndex, recoveredMeta, recoveredbECChunks, recoveredsECChunksArray)
-
-	bundleShard = orderedBundleShard.Data
-
-	segmentShards = make([][]byte, len(orderedSegmentShard))
-	for segment_idx, segment_shard := range orderedSegmentShard {
-		segmentShards[segment_idx] = segment_shard.Data
-	}
+	shardJustifications, _ := ErasureRootDefaultJustification(erasureMeta.BClubs, erasureMeta.SClubs)
+	shardJustification := shardJustifications[shardIdx]
+	bundleShard = recoveredbECChunks[shardIdx].Data
+	segmentShards = splitBytes(recoveredsECChunksArray[shardIdx].Data, 2056)
 	justification = shardJustification.CompactPath()
 
 	verified, err := VerifyFullShard(erasureRoot, shardIndex, bundleShard, segmentShards, justification)

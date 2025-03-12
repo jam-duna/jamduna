@@ -1,6 +1,8 @@
 package types
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -19,6 +21,15 @@ type AvailabilitySpecifier struct {
 	ErasureRoot           common.Hash `json:"erasure_root"`
 	ExportedSegmentRoot   common.Hash `json:"exports_root"`
 	ExportedSegmentLength uint16      `json:"exports_count"` //shawn: in davxy's vector it's 16
+}
+
+func (as *AvailabilitySpecifier) String() string {
+	enc, err := json.MarshalIndent(as, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
 }
 
 // sharing (justified) DA chunks:  Vec<Hash> ++ Blob ++ Vec<Hash> ++ Vec<SegmentChunk> ++ Vec<Hash>.

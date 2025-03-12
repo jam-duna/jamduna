@@ -3,6 +3,8 @@ name = "bls"
 version = "0.1.0"
 edition = "2021"
 
+
+
 [dependencies]
 w3f-bls = "0.1.4" 
 arrayref = { version = "0.3", default-features = false }
@@ -25,6 +27,12 @@ zeroize = { version = "1.0", default-features = false, features = [ "zeroize_der
 serde = { version = "1.0", default-features = false, optional = true }
 thiserror = { version = "1.0", default-features = false }
 constcat = "0.3.0"
+
+reed-solomon-simd = "3"
+blake2 = "0.10"
+#libc = "0.2"
+
+
 
 [lib]
 crate-type = ["staticlib"]

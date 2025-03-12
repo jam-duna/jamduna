@@ -10,7 +10,9 @@ import "C"
 import (
 	"errors"
 	"unsafe"
+	"github.com/colorfulnotion/jam/log"
 )
+
 
 type DoublePublicKey [DoubleKeyLen]byte
 
@@ -173,4 +175,62 @@ func InitBLSKey(seed []byte) (bls_pub DoublePublicKey, bls_priv SecretKey, err e
 		return bls_pub, bls_priv, err
 	}
 	return bls_pub, bls_priv, nil
+}
+
+// Encode converts input data into V Reed-Solomon encoded shards
+func Encode(data []byte, V int) ([][]byte, error) {
+	if len(data) == 0 {
+		return nil, errors.New("input data is empty")
+	}
+	C := V / 3
+	shardSize := (len(data) / C)
+	// Allocate a single Go-managed buffer for all shards
+	output := make([]byte, shardSize*V)
+	dataPtr := (*C.uchar)(unsafe.Pointer(&data[0]))
+	outputPtr := (*C.uchar)(unsafe.Pointer(&output[0]))
+
+	C.encode(dataPtr, C.size_t(len(data)), C.size_t(V), outputPtr, C.size_t(shardSize))
+
+	// Convert the flat buffer into [][]byte
+	shards := make([][]byte, V)
+	for i := 0; i < V; i++ {
+		start := i * shardSize
+		shards[i] = output[start : start+shardSize]
+	}
+
+	return shards, nil
+}
+
+// Decode reconstructs the original data from encoded shards.
+func Decode(shards [][]byte, V int, indexes []uint32, outputSize int) ([]byte, error) {
+	C := V / 3
+	if len(shards) != C || len(shards) != len(indexes) {
+		log.Crit("bls", "Decode FAIL", "len(shards)", len(shards), "len(indexes)", len(indexes))
+		return nil, errors.New("shards and indexes length mismatch")
+	}
+
+	shardSize := len(shards[0])
+	output := make([]byte, outputSize)
+
+	// Flatten shard data into a contiguous byte slice
+	flatShards := make([]byte, len(shards)*shardSize)
+	for i := 0; i < len(shards); i++ {
+		copy(flatShards[i*shardSize:], shards[i])
+	}
+
+	// Convert indexes to a contiguous C-compatible array
+	indexesPtr := make([]C.uint, len(indexes))
+	for i, val := range indexes {
+		indexesPtr[i] = C.uint(val)
+	}
+
+	// Convert pointers to C types
+	shardsPtr := (*C.uchar)(unsafe.Pointer(&flatShards[0]))
+	outputPtr := (*C.uchar)(unsafe.Pointer(&output[0]))
+	indexesCPtr := (*C.uint)(unsafe.Pointer(&indexesPtr[0]))
+
+	// Call Rust FFI function
+	C.decode(shardsPtr, indexesCPtr, C.size_t(V), C.size_t(shardSize), outputPtr, C.size_t(outputSize))
+
+	return output, nil
 }

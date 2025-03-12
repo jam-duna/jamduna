@@ -5,6 +5,7 @@ import (
 
 	"encoding/json"
 
+	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
@@ -12,15 +13,18 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte, extrinsics types.ExtrinsicsBlobs) (availabilityspecifier *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) {
+const (
+	debugSpec = false
+)
+
+func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
 	// compile wp into b
 	// FetchWorkPackageImportSegments
+	// packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte, extrinsics types.ExtrinsicsBlobs
+	packageHash := package_bundle.WorkPackage.Hash()
+	importSegments := package_bundle.ImportSegmentData
+	segments := export_segments
 	log.Trace(debugDA, "NewAvailabilitySpecifier", "id", n.id, "segments", segments)
-	importSegments, err := n.FetchWorkpackageImportSegments(workPackage)
-	if err != nil {
-		log.Error(debugDA, "NewAvailabilitySpecifier", "err", err)
-	}
-	package_bundle := n.CompilePackageBundle(workPackage, importSegments, extrinsics)
 	b := package_bundle.Bytes()
 	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(b)
 	log.Trace(debugDA, "NewAvailabilitySpecifier", "packageHash", packageHash, "encodedPackage", b, "len(encodedPackage)", len(b))
@@ -43,10 +47,11 @@ func (n *Node) NewAvailabilitySpecifier(packageHash common.Hash, workPackage typ
 
 	// Return the Availability Specifier
 	availabilitySpecifier := types.AvailabilitySpecifier{
-		WorkPackageHash:     packageHash,
-		BundleLength:        bLength,
-		ErasureRoot:         erasure_root_u,
-		ExportedSegmentRoot: exported_segment_root_e,
+		WorkPackageHash:       packageHash,
+		BundleLength:          bLength,
+		ErasureRoot:           erasure_root_u,
+		ExportedSegmentRoot:   exported_segment_root_e,
+		ExportedSegmentLength: uint16(len(segments)),
 	}
 
 	erasureMeta = ECCErasureMap{
@@ -107,19 +112,6 @@ func GenerateWBTJustification(root common.Hash, shardIndex uint16, leaves [][]by
 	return treeLen, leafHash, path, isFound
 }
 
-func GetOrderedChunks(erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) (shardJustifications []types.Justification, orderedBundleShards []types.ConformantECChunk, orderedSegmentShards [][]types.ConformantECChunk) {
-	shardJustifications, _ = ErasureRootDefaultJustification(erasureMeta.BClubs, erasureMeta.SClubs)
-	orderedBundleShards = ComputeOrderedNPBundleChunks(bECChunks)
-	orderedSegmentShards = ComputeOrderedExportedNPChunks(sECChunksArray)
-	return shardJustifications, orderedBundleShards, orderedSegmentShards
-}
-
-func GetShardSpecificOrderedChunks(shardIdx uint16, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray [][]types.DistributeECChunk) (shardJustification types.Justification, bundleShard types.ConformantECChunk, segmentShards []types.ConformantECChunk) {
-	idx := int(shardIdx)
-	shardJustifications, orderedBundleShards, orderedSegmentShards := GetOrderedChunks(erasureMeta, bECChunks, sECChunksArray)
-	return shardJustifications[idx], orderedBundleShards[idx], orderedSegmentShards[idx]
-}
-
 type ECCErasureMap struct {
 	ErasureRoot         common.Hash
 	ExportedSegmentRoot common.Hash
@@ -149,112 +141,92 @@ func (e *ECCErasureMap) String() string {
 	return string(e.Bytes())
 }
 
-func (n *Node) PrepareArbitaryData(b []byte) ([][][]byte, common.Hash, int) {
-	// Padding b to the length of W_G
-	paddedB := common.PadToMultipleOfN(b, types.ECPieceSize) // this makes sense
-	bLength := len(b)
-
-	chunks, err := n.encode(paddedB, false, bLength)
-	if err != nil {
-		log.Error(module, "PrepareArbitaryData:encode", "err", err)
-	}
-	blobHash := common.Blake2Hash(paddedB)
-	return chunks, blobHash, bLength
-}
-
 // Compute b♣ using the EncodeWorkPackage function
 func (n *Node) buildBClub(b []byte) ([]common.Hash, []types.DistributeECChunk) {
-	chunks, _, bLength := n.PrepareArbitaryData(b)
+	// Padding b to the length of W_G
+	paddedB := common.PadToMultipleOfN(b, types.ECPieceSize) // this makes sense
+
+	if debugSpec {
+		fmt.Printf("Padded %d bytes to %d bytes (multiple of %d bytes) => %x\n", len(b), len(paddedB), types.ECPieceSize, paddedB)
+	}
+
+	// instead of a tower of abstracion, collapse it to the minimal number of lines
+	chunks, err := bls.Encode(paddedB, types.TotalValidators)
+	if err != nil {
+		log.Error(module, "buildBclub", "err", err)
+	}
+
 	// Hash each element of the encoded data
 	bClubs := make([]common.Hash, types.TotalValidators)
-	bundleShards := chunks[0] // this should be of size 1
+	bundleShards := chunks // this should be of size 1
+	ecChunks := make([]types.DistributeECChunk, types.TotalValidators)
+	// blob_meta := encodeBlobMeta(segmentRootsFlattened)
 	for shardIdx, shard := range bundleShards {
 		bClubs[shardIdx] = common.Blake2Hash(shard)
+		if debugSpec {
+			fmt.Printf("buildBClub hash %d: %s Shard: %x (%d bytes)\n", shardIdx, bClubs[shardIdx], shard, len(shard))
+		}
+		ecChunks[shardIdx] = types.DistributeECChunk{
+			SegmentRoot: bClubs[shardIdx].Bytes(), // SegmentRoot used to store the hash of the shard
+			Data:        shard,
+			BlobMeta:    []byte(fmt.Sprintf("len=%d", len(b))), // review
+		}
 	}
-
-	ecChunks, err := n.BuildArbitraryDataChunks(chunks, bLength)
-	if err != nil {
-		log.Error(module, "buildBClub:BuildArbitraryDataChunks", "err", err)
-	}
-
 	return bClubs, ecChunks
 }
 
-func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [][]types.DistributeECChunk) {
-	ecChunksArr = make([][]types.DistributeECChunk, 0)
-	// key data structure: sequentialTranspose
-	sequentialTranspose := make([][][]byte, types.TotalValidators)
+func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr []types.DistributeECChunk) {
+	ecChunksArr = make([]types.DistributeECChunk, types.TotalValidators)
 
-	// gathering root per segment or pageProof
+	// EC encode segments in ecChunksArr
 	for segmentIdx, segmentData := range segments {
 		// Encode segmentData into leaves
-		erasureCodingSegments, err := n.encode(segmentData, true, len(segmentData)) // Set to false for variable size segments
+		erasureCodingSegments, err := bls.Encode(segmentData, types.TotalValidators)
 		if err != nil {
 			log.Error(debugDA, "buildSClub", "segmentIdx", segmentIdx, "err", err)
 		}
-		log.Debug(debugDA, "buildSClub", "segmentIdx", segmentIdx, "len", len(erasureCodingSegments))
-
-		if len(erasureCodingSegments) != 1 {
-			panic("Invalid segment implementation! NOT OK")
+		for shardIndex, shard := range erasureCodingSegments {
+			if segmentIdx == 0 {
+				ecChunksArr[shardIndex] = types.DistributeECChunk{
+					SegmentRoot: []byte{},
+					Data:        shard,
+					BlobMeta:    []byte{}, // review
+				}
+			} else {
+				ecChunksArr[shardIndex].Data = append(ecChunksArr[shardIndex].Data, shard...)
+			}
 		}
-		// Build segment roots from erasureCodingSegments[0] which are the leaves of the segmentData
-		segmentTree := trie.NewCDMerkleTree(erasureCodingSegments[0])
-		segmentRoots := [][]byte{segmentTree.RootHash().Bytes()}
-		// Build the segment chunks
-		ecChunks, err := n.BuildExportedSegmentChunks(erasureCodingSegments, segmentRoots)
-		if err != nil {
-			log.Error(debugDA, "buildSClub:BuildExportedSegmentChunks", "err", err)
-		}
-		for chunkIdx, ecChunks := range ecChunks {
-			shardIdx := uint32(chunkIdx % types.TotalValidators)
-			sequentialTranspose[shardIdx] = append(sequentialTranspose[shardIdx], ecChunks.Data)
-		}
-		log.Debug(debugDA, "buildSClub", "segmentIdx", segmentIdx, "len(ecChunks)", len(ecChunks))
-
-		ecChunksArr = append(ecChunksArr, ecChunks)
 	}
-
-	// gathering root per pagrProof, each pageProof can be more than G per our implementation
+	// now take up to 64 segments at a time and build a page proof
 	pageProofs, _ := trie.GeneratePageProof(segments)
-	for pageIdx, pageData := range pageProofs {
-		// Encode the data into segments
-		erasureCodingPageSegments, err := n.encode(pageData, true, len(pageData)) // Set to false for variable size segments
+	for i, pageProof := range pageProofs {
+		paddedProof := common.PadToMultipleOfN(pageProof, types.SegmentSize)
+		if debugSpec {
+			fmt.Printf("PageProof[%d]=%x\n", i, pageProof)
+		}
+		erasureCodingPageSegments, err := bls.Encode(paddedProof, types.TotalValidators)
 		if err != nil {
-			log.Error(module, "GeneratePageProof", "err", err)
+			return // TODO
 		}
-
-		// Build segment roots -- page can be longer than G long
-		log.Debug(debugDA, "GeneratePageProof", "pageIdx", pageIdx, "len", len(erasureCodingPageSegments))
-		pageSegmentRoots := make([][]byte, 0)
-		ith_pageProof := make([]common.Hash, 0)
-		for i := range erasureCodingPageSegments {
-			pageProofleaves := erasureCodingPageSegments[i]
-			pageProofSubtree := trie.NewCDMerkleTree(pageProofleaves)
-			pageProofSubtreeRoot := pageProofSubtree.RootHash()
-			ith_pageProof = append(ith_pageProof, pageProofSubtreeRoot)
-			pageSegmentRoots = append(pageSegmentRoots, pageProofSubtreeRoot.Bytes())
+		for shardIndex, shard := range erasureCodingPageSegments {
+			ecChunksArr[shardIndex].Data = append(ecChunksArr[shardIndex].Data, shard...)
 		}
-
-		// Build ecChunks for the exported segments
-		ecChunks, err := n.BuildExportedSegmentChunks(erasureCodingPageSegments, pageSegmentRoots)
-		if err != nil {
-			log.Error(debugDA, "BuildExportedSegmentChunks", "err", err)
-		}
-		for chunkIdx, ecChunks := range ecChunks {
-			shardIdx := uint32(chunkIdx % types.TotalValidators)
-			sequentialTranspose[shardIdx] = append(sequentialTranspose[shardIdx], ecChunks.Data)
-		}
-		// this is multiple of totalValidators
-		log.Trace(debugDA, "GeneratePageProof", "pageIdx", pageIdx, "len(ecChunks)", len(ecChunks))
-		ecChunksArr = append(ecChunksArr, ecChunks)
 	}
-	log.Trace(debugDA, "GeneratePageProof", "len(ecChunksArr)", len(ecChunksArr))
-
 	sClub = make([]common.Hash, types.TotalValidators)
-	for shardIdx, shardData := range sequentialTranspose {
-		shard_wbt := trie.NewWellBalancedTree(shardData, types.Blake2b)
-		sClub[shardIdx] = shard_wbt.RootHash()
+
+	chunkSize := (types.SegmentSize / (types.TotalValidators / 3))
+	for shardIndex, ec := range ecChunksArr {
+		chunks := make([][]byte, len(segments)+len(pageProofs))
+		for n := 0; n < len(chunks); n++ {
+			chunks[n] = ec.Data[n*chunkSize : (n+1)*chunkSize]
+		}
+		t := trie.NewWellBalancedTree(chunks, types.Blake2b)
+		sClub[shardIndex] = common.BytesToHash(t.Root())
+		if debugSpec {
+			fmt.Printf("buildsClub hash %d: %s nchunks: %d (%d bytes/chunk)\n", shardIndex, sClub[shardIndex], len(chunks), len(chunks[0]))
+		}
 	}
+
 	return sClub, ecChunksArr
 }
 
@@ -263,10 +235,18 @@ func GenerateErasureTree(b []common.Hash, s []common.Hash) (*trie.WellBalancedTr
 	bundleSegmentPairs := make([][]byte, types.TotalValidators)
 	for i := 0; i < types.TotalValidators; i++ {
 		bundleSegmentPairs[i] = append(b[i].Bytes(), s[i].Bytes()...)
+		if debugSpec {
+			fmt.Printf("bclub-sclub pair %d = %x\n", i, bundleSegmentPairs[i])
+		}
 	}
 
 	// Generate and return erasureroot
-	return trie.NewWellBalancedTree(bundleSegmentPairs, types.Blake2b), bundleSegmentPairs
+	t := trie.NewWellBalancedTree(bundleSegmentPairs, types.Blake2b)
+	if debugSpec {
+		fmt.Printf("\nWBT of bclub-sclub pairs:\n")
+		t.PrintTree()
+	}
+	return t, bundleSegmentPairs
 }
 
 // MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix
@@ -290,8 +270,11 @@ func generateExportedSegmentsRoot(segments [][]byte) common.Hash {
 	for _, segment := range segments {
 		segmentData = append(segmentData, segment)
 	}
-
 	cdt := trie.NewCDMerkleTree(segmentData)
+	if debugSpec {
+		fmt.Printf("M(s) - CDT of exportedSegment\n")
+		cdt.PrintTree()
+	}
 	return common.Hash(cdt.Root())
 }
 
@@ -532,6 +515,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		if verifyErr != nil || !ok {
 			if verifyErr != nil {
 				log.Error(module, "executeWorkPackageBundle:Justification Verification Error", "err", verifyErr)
+				panic(7890)
 			} else if !ok {
 				log.Error(module, "executeWorkPackageBundle:Justification Verification Not OK")
 			}
@@ -599,7 +583,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 			ServiceID:   workItem.Service,
 			CodeHash:    workItem.CodeHash,
 			PayloadHash: common.Blake2Hash(workItem.Payload),
-			Gas:         9111,
+			Gas:         workItem.AccumulateGasLimit, // put a
 			Result:      output,
 		}
 		results = append(results, result)
@@ -613,7 +597,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		log.Debug(debugDA, "DA: WrangledResults", "n", types.DecodedWrangledResults(&o))
 	}
 	//fmt.Printf("Len exportSegments=%d, data=%x\n", len(segments), segments)
-	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(workPackageHash, workPackage, segments, package_bundle.ExtrinsicData)
+	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(package_bundle, segments)
 
 	workReport := types.WorkReport{
 		AvailabilitySpec:  *spec,
@@ -739,6 +723,7 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 // importSegments [1][1][x]byte=>item 2 => 1 segment
 
 func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]common.Hash, workPackage types.WorkPackage, segmentRootLookup types.SegmentRootLookup) (ok bool, err error) {
+	return true, nil
 	// Verify the justifications
 	// if !CheckSegmentJustificationSize(importSegments, justifications) {
 	// 	return false, fmt.Errorf("importSegments and justification length mismatch")

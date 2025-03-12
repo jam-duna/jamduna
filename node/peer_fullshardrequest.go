@@ -145,7 +145,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	if !ok {
 		return fmt.Errorf("Not found")
 	}
-	log.Trace(debugDA, "onFullShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
+	//log.Info(debugDA, "onFullShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
 
 	// <-- Bundle Shard
 	n.jamnp_test_vector("CE137", "BundleShard", bundleShard, nil)
