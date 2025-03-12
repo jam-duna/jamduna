@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -237,8 +238,27 @@ func ValidateSTF(pre_state *StateDB, block_origin types.Block, post_state *State
 		if block.Header.EpochMark == nil {
 			error_num++
 			diffs["EpochMark"] = "EpochMark is nil"
+		} else {
+			// check the validators is gamma k
+			new_gamma_k := new_sf.NextValidators
+			epock_mark_validators := block.Header.EpochMark.Validators
+			for _, e_v := range epock_mark_validators {
+				key_found := false
+				for _, n_v := range new_gamma_k {
+					if bytes.Equal(e_v.Bytes(), n_v.Bandersnatch[:]) {
+						key_found = true
+						break
+					}
+				}
+				if !key_found {
+					error_num++
+					key := fmt.Sprintf("EpochMark Validator %s", e_v.String_short())
+					diffs[key] = fmt.Sprintf("EpochMark Validator %s not in NextValidators", e_v.String_short())
+				}
+			}
 		}
 		//6.13
+		offenders := post_state.JamState.DisputesState.Psi_o
 		switch {
 		case !reflect.DeepEqual(new_sf.PrevValidators, old_sf.CurrValidators):
 			error_num++
@@ -246,9 +266,24 @@ func ValidateSTF(pre_state *StateDB, block_origin types.Block, post_state *State
 		case !reflect.DeepEqual(new_sf.CurrValidators, old_sf.NextValidators):
 			error_num++
 			diffs["CurrValidators"] = CompareJSON(new_sf.CurrValidators, old_sf.NextValidators)
-		case !reflect.DeepEqual(new_sf.NextValidators, old_sf.DesignedValidators):
-			error_num++
-			diffs["NextValidators"] = CompareJSON(new_sf.NextValidators, old_sf.DesignedValidators)
+		case !reflect.DeepEqual(new_sf.NextValidators, old_sf.DesignedValidators) || len(offenders) > 0:
+			if len(offenders) == 0 {
+				error_num++
+				diffs["NextValidators"] = CompareJSON(new_sf.NextValidators, old_sf.DesignedValidators)
+			} else {
+				offender_list := make([]types.Ed25519Key, 0)
+				for _, v := range new_sf.NextValidators {
+					for _, offender := range offenders {
+						if bytes.Equal(v.Ed25519.Bytes(), offender.Bytes()) {
+							offender_list = append(offender_list, offender)
+						}
+					}
+				}
+				if len(offender_list) > 0 {
+					error_num++
+					diffs["NextValidators Have Offender"] = fmt.Sprintf("NextValidators have offender len=%d", len(offender_list))
+				}
+			}
 		}
 		// entropy
 		// 6.23

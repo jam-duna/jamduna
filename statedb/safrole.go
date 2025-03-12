@@ -104,6 +104,8 @@ type SafroleState struct {
 	Id             uint16 `json:"Id"`
 	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
 
+	OffenderState []types.Ed25519Key `json:"offender_state"`
+
 	Timeslot uint32 `json:"timeslot"`
 
 	Entropy Entropy `json:"entropy"`
@@ -815,6 +817,7 @@ func (s *SafroleState) CheckFirstPhaseReady() (isReady bool) {
 func cloneSafroleState(original SafroleState) SafroleState {
 	copied := SafroleState{
 		Id:                          original.Id,
+		OffenderState:               make([]types.Ed25519Key, len(original.OffenderState)),
 		EpochFirstSlot:              original.EpochFirstSlot,
 		Timeslot:                    original.Timeslot,
 		Entropy:                     original.Entropy,
@@ -828,6 +831,7 @@ func cloneSafroleState(original SafroleState) SafroleState {
 	}
 
 	// Copy each field individually
+	copy(copied.OffenderState, original.OffenderState)
 	copy(copied.PrevValidators, original.PrevValidators)
 	copy(copied.CurrValidators, original.CurrValidators)
 	copy(copied.NextValidators, original.NextValidators)
@@ -1114,7 +1118,7 @@ func (s2 *SafroleState) AdvanceEntropyAndValidator(s *SafroleState, new_entropy_
 	if types.GetValidatorsLength(s2.NextValidators) == 0 {
 		panic("no NextValidators")
 	}
-	s2.NextValidators = s2.DesignedValidators
+	s2.NextValidators = s2.CleanValidators(s2.DesignedValidators)
 	if types.GetValidatorsLength(s2.DesignedValidators) == 0 {
 		panic("no DesignedValidators")
 	}
@@ -1124,6 +1128,23 @@ func (s2 *SafroleState) AdvanceEntropyAndValidator(s *SafroleState, new_entropy_
 	s2.Entropy[3] = s.Entropy[2]
 	s2.Entropy[0] = new_entropy_0
 
+}
+
+func (s2 *SafroleState) CleanValidators(validators types.Validators) types.Validators {
+	offender_set := s2.OffenderState
+	if len(offender_set) == 0 {
+		return validators
+	}
+	validators_copy := make(types.Validators, len(validators))
+	copy(validators_copy, validators)
+	for i, v := range validators_copy {
+		for _, o := range offender_set {
+			if v.Ed25519 == o {
+				validators_copy[i] = types.Validator{}
+			}
+		}
+	}
+	return validators_copy
 }
 
 func (s2 *SafroleState) StableEntropy(s *SafroleState, new_entropy_0 common.Hash) {

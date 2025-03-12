@@ -237,6 +237,26 @@ func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret, new_assur
 		offenderMark = append(offenderMark, key)
 	}
 	b.Header.OffendersMark = offenderMark
+	if b.Header.EpochMark != nil {
+		without_offenders_validators := [types.TotalValidators]common.Hash{}
+		for i, key := range b.Header.EpochMark.Validators {
+			//gamma k'
+			validator_set := s.GetSafrole().DesignedValidators
+			var ed25519Key types.Ed25519Key
+			for _, validator := range validator_set {
+				if validator.Bandersnatch.Hash() == key {
+					ed25519Key = validator.Ed25519
+					break
+				}
+			}
+			if offenderMap[ed25519Key] {
+				without_offenders_validators[i] = common.Hash{}
+			} else {
+				without_offenders_validators[i] = key
+			}
+		}
+		b.Header.EpochMark.Validators = without_offenders_validators
+	}
 	author_index = b.Header.AuthorIndex
 	targetJCE := b.TimeSlot()
 	sealedBlock, sealErr := s.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, author_index, targetJCE, b)

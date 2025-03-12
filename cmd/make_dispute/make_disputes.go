@@ -80,14 +80,14 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	if err != nil {
 		return disputable, err, dispute_stf
 	}
-	poststate, err := statedb.NewStateDBFromSnapshotRaw(store, &stf.PostState)
+	// poststate, err := statedb.NewStateDBFromSnapshotRaw(store, &stf.PostState)
 	if err != nil {
 		return disputable, err, dispute_stf
 	}
 	// Check if the block is disputable
-	poststate.Block = block.Copy()
+	prestate.Block = block.Copy()
 	prestatecopy := prestate.Copy()
-	_, availableWorkReport := prestatecopy.JamState.ProcessAssurances(poststate.Block.Extrinsic.Assurances, poststate.GetTimeslot())
+	_, availableWorkReport := prestatecopy.JamState.ProcessAssurances(prestate.Block.Extrinsic.Assurances, block.Header.Slot)
 	// start making the dispute
 	// random choose the number from 1 to availableWorkReport_len
 
@@ -113,6 +113,9 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	for _, dispute_report := range disputeWorkReports {
 		// ramdom select three mode from 0 to 2
 		mode := rand0.Intn(3)
+		if prestate.Block.TimeSlot()%12 == 0 {
+			mode = 1
+		}
 		validator_len := len(validator_secrerts)
 		ramdom_sign_sequence := rand0.Perm(validator_len)
 		var old_eg types.Guarantee
@@ -170,14 +173,14 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 				}
 			}
 		}
-		disputeblock, err_dispute := poststate.AppendDisputes(&judgement_bucket, dispute_report.Hash(), old_eg)
+		disputeblock, err_dispute := prestate.AppendDisputes(&judgement_bucket, dispute_report.Hash(), old_eg)
 		if disputeblock == nil {
 			panic(fmt.Sprintf("Error appending disputes: %v", err_dispute))
 		} else {
-			poststate.Block = disputeblock.Copy()
+			prestate.Block = disputeblock.Copy()
 		}
 		if err_dispute == nil {
-			poststate.Block.Extrinsic.Disputes.FormatDispute()
+			prestate.Block.Extrinsic.Disputes.FormatDispute()
 			// bloock done here
 		} else {
 			return disputable, err_dispute, nil
@@ -188,7 +191,7 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	}
 	// resign the dispute block
 	// use prestate as dispute state
-	dispute_block := poststate.Block.Copy()
+	dispute_block := prestate.Block.Copy()
 	author_index := dispute_block.Header.AuthorIndex
 	validator_secret := validator_secrerts[int(author_index)]
 	dispute_prestate := prestate.Copy()
@@ -229,6 +232,14 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	if err != nil {
 		fmt.Println(dispute_block.String())
 		return false, fmt.Errorf("ApplyStateTransitionFromBlock Error:%v", err), nil
+	}
+
+	errornum, diffs := statedb.ValidateSTF(dispute_prestate, *dispute_block, dispute_poststate)
+	if errornum > 0 {
+		for error_dis, diff := range diffs {
+			fmt.Printf("ERR %v, diff:%v\n", error_dis, diff)
+		}
+		return false, fmt.Errorf("ValidateSTF Error:%v", errornum), nil
 	}
 	dispute_stf = node.BuildStateTransitionStruct(dispute_prestate, dispute_block, dispute_poststate)
 	return disputable, nil, dispute_stf

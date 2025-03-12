@@ -47,15 +47,40 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 0.6.2 4.7 - Recent History Dagga (β†) [No other state related]
 	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
 	// dispute should go here
+	disputes := blk.Disputes()
+	if len(disputes.Verdict) != 0 {
+		err = s.ApplyStateTransitionDispute(disputes)
+		if err != nil {
+			return s, err
+		}
+	}
 	// TODO - 4.12 - Dispute
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	sf := s.GetSafrole()
+	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
 	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
 	if err != nil {
 		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
 	}
-
+	//the epochMark validators should be in gamma k'
+	if epochMark != nil {
+		// (6.27)Bandersnatch validator keys (kb) beginning in the next epoch.
+		bandersnatch_keys_map := make(map[common.Hash]bool)
+		for _, bandersnatch_key := range epochMark.Validators {
+			bandersnatch_keys_map[bandersnatch_key] = false
+		}
+		for _, validator := range s2.NextValidators {
+			if _, ok := bandersnatch_keys_map[validator.Bandersnatch.Hash()]; ok {
+				bandersnatch_keys_map[validator.Bandersnatch.Hash()] = true
+			}
+		}
+		for _, ok := range bandersnatch_keys_map {
+			if !ok {
+				return s, fmt.Errorf("EpochMark validators are not in NextValidators")
+			}
+		}
+	}
 	safrole_debug := false
 	if safrole_debug {
 		err = VerifySafroleSTF(sf, &s2, blk)
@@ -70,12 +95,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.RotateGuarantors()
 
 	// preparing for the rho transition
-	disputes := blk.Disputes()
+
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
 	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]
 	// 4.16 available work report also updated
-	num_reports, num_assurances, err := s.ApplyStateTransitionRho(disputes, assurances, guarantees, targetJCE)
+	num_reports, num_assurances, err := s.ApplyStateTransitionRho(assurances, guarantees, targetJCE)
 	if err != nil {
 		return s, err
 	}
@@ -166,9 +191,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	return s, nil
 }
 
-// Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
-
+func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error) {
 	// (25) / (111) We clear any work-reports which we judged as uncertain or invalid from their core
 	d := s.GetJamState()
 	// checking the Ho
@@ -176,7 +199,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	if len(disputes.Verdict) != 0 {
 		offendermark := header.OffendersMark
 		if offendermark == nil {
-			return nil, nil, fmt.Errorf("OffendersMark is nil")
+			return fmt.Errorf("OffendersMark is nil")
 		}
 		// key need to be either in culprits or faults
 		// make a map of the key
@@ -196,7 +219,7 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 		}
 		for _, isOffender := range offendermarkMap {
 			if !isOffender {
-				return nil, nil, fmt.Errorf("OffendersMark is not in Culprit or Fault")
+				return fmt.Errorf("OffendersMark is not in Culprit or Fault")
 			}
 		}
 	}
@@ -212,7 +235,12 @@ func (s *StateDB) ApplyStateTransitionRho(disputes types.Dispute, assurances []t
 	if err != nil {
 		return
 	}
+	return nil
+}
 
+// Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
+func (s *StateDB) ApplyStateTransitionRho(assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
+	d := s.GetJamState()
 	// original validate assurances logic (prior to guarantees) -- we cannot do signature checking here ... otherwise it would trigger bad sig
 	// for fuzzing to work, we cannot check signature until everything has been properly considered
 	// assuranceErr := s.ValidateAssurancesWithSig(assurances)

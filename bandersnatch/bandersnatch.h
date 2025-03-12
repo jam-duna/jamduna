@@ -45,7 +45,7 @@ int ietf_vrf_verify(
     size_t vrf_output_len
 );
 
-void ring_vrf_sign(
+int ring_vrf_sign(
     const unsigned char* private_key_bytes,
     size_t private_key_len,
     const unsigned char* ring_set_bytes,

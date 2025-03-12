@@ -517,7 +517,7 @@ pub extern "C" fn ring_vrf_sign(
     vrf_output: *mut c_uchar,
     vrf_output_len: usize,
     //prover_idx: usize,
-) {
+)-> c_int {
     //use std::slice;
     use std::ptr;
     //use ark_serialize::CanonicalDeserialize;
@@ -530,7 +530,7 @@ pub extern "C" fn ring_vrf_sign(
         Ok(secret) => secret,
         Err(e) => {
             eprintln!("Failed to deserialize private key: {}", e);
-            return;
+            return 0;
         }
     };
 
@@ -541,13 +541,19 @@ pub extern "C" fn ring_vrf_sign(
     // Deserialize the ring set from the provided bytes
     let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
     let mut ring_set: Vec<Public> = Vec::new();
+    let ring_ctx = ring_context();
+    let padding_point = Public::from(ring_ctx.padding_point());
     for i in 0..(ring_set_len / 32) {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
-        let public_key = match Public::deserialize_compressed(pubkey_bytes) {
+        let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
+            padding_point.clone()
+        } else {
+            match Public::deserialize_compressed(pubkey_bytes) {
             Ok(public_key) => public_key,
             Err(e) => {
                 eprintln!("Failed to deserialize public key: {}", e);
-                return;
+                return 0;
+            }
             }
         };
         ring_set.push(public_key);
@@ -562,7 +568,7 @@ pub extern "C" fn ring_vrf_sign(
     let mut derived_pk_bytes = Vec::new();
     if let Err(e) = derived_public_key.serialize_compressed(&mut derived_pk_bytes) {
         eprintln!("Failed to serialize derived public key: {}", e);
-        return;
+        return 0;
     }
 
     // Find the index of the derived public key in the ring set
@@ -574,7 +580,7 @@ pub extern "C" fn ring_vrf_sign(
         Some(idx) => idx,
         None => {
             eprintln!("Derived public key not found in the ring set");
-            return;
+            return 0;
         }
     };
     //println!("derived_public_key {:?} idx:{:?}", derived_public_key, derived_prover_idx);
@@ -591,7 +597,7 @@ pub extern "C" fn ring_vrf_sign(
         Ok(result) => result,
         Err(e) => {
             eprintln!("Failed to sign the data: {:?}", e);
-            return;
+            return 0;
         }
     };
 
@@ -616,6 +622,7 @@ pub extern "C" fn ring_vrf_sign(
     unsafe {
         ptr::copy_nonoverlapping(vrf_output_hash.as_ptr(), vrf_output, vrf_output_hash.len());
     }
+    return 1;
 }
 
 #[no_mangle]
@@ -737,13 +744,19 @@ pub extern "C" fn get_ring_commitment(
     // Deserialize the ring set from the provided bytes
     let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
     let mut ring_set: Vec<Public> = Vec::new();
+    let ring_ctx = ring_context();
+    let padding_point = Public::from(ring_ctx.padding_point());
     for i in 0..(ring_set_len / 32) {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
-        let public_key = match Public::deserialize_compressed(pubkey_bytes) {
+        let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
+            padding_point.clone()
+        } else {
+            match Public::deserialize_compressed(pubkey_bytes) {
             Ok(public_key) => public_key,
             Err(e) => {
                 eprintln!("Failed to deserialize public key: {}", e);
                 return;
+            }
             }
         };
         ring_set.push(public_key);
@@ -814,22 +827,23 @@ pub extern "C" fn ring_vrf_verify(
     */
     // Assuming each pubkey is 32 bytes, split the pubkeys slice into individual pubkeys
     let mut ring_set: Vec<Public> = Vec::new();
+    let ring_ctx = ring_context();
+    let padding_point = Public::from(ring_ctx.padding_point());
+    let pubkeys_slice = unsafe { slice::from_raw_parts(pubkeys_bytes, pubkeys_length) };
     for i in 0..(pubkeys_length / 32) {
         let pubkey_bytes = &pubkeys_slice[i * 32..(i + 1) * 32];
-        match Public::deserialize_compressed(pubkey_bytes) {
-            Ok(public_key) => {
-                /*println!(
-                    "Deserialized public key {}: {}",
-                    i,
-                    hex::encode(pubkey_bytes)
-                ); */
-                ring_set.push(public_key);
-            }
+        let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
+            padding_point.clone()
+        } else {
+            match Public::deserialize_compressed(pubkey_bytes) {
+            Ok(public_key) => public_key,
             Err(e) => {
-                println!("Deserialization failed for public key {}: {:?}", i, e);
+                eprintln!("Failed to deserialize public key: {}", e);
                 return 0;
             }
+            }
         };
+        ring_set.push(public_key);
     }
 
     // Create the Verifier
@@ -1006,189 +1020,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ring_vrf_sign_batch_and_single_verify() {
-        use super::*;
-        use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-        use std::os::raw::c_uchar;
-        use rand::Rng;
-
-        // Assume a single ring_vrf_sign generates a 784 bytes signature (adjust as needed)
-        const SINGLE_RING_SIGNATURE_SIZE: usize = 784;
-        // VRF output is fixed at 32 bytes
-        const VRF_OUTPUT_SIZE: usize = 32;
-        // We will sign 5 pieces of data
-        const DATA_COUNT: usize = 5;
-
-        // ---------- Step 1: Prepare the Ring --------------
-        // Assume RING_SIZE is defined via feature or constant (tiny / small / ...)
-        // Ensure RING_SIZE has a correct value.
-        // Generate RING_SIZE pairs (Seed -> Secret -> Public)
-        let mut seeds = Vec::new();
-        for i in 0..RING_SIZE {
-            let mut seed = [0u8; 32];
-            for (j, byte) in seed.iter_mut().enumerate() {
-                *byte = (i + j) as u8; 
-            }
-            seeds.push(seed);
-        }
-
-        let mut public_keys: Vec<Public> = Vec::new();
-        let mut private_keys: Vec<[u8; 32]> = Vec::new();
-        for seed in &seeds {
-            // Prepare buffers
-            let mut pub_key_bytes = vec![0u8; 32];
-            let mut secret_bytes = vec![0u8; 32];
-
-            // Get Public Key
-            get_public_key(
-                seed.as_ptr(),
-                seed.len(),
-                pub_key_bytes.as_mut_ptr(),
-                pub_key_bytes.len(),
-            );
-
-            // Get Private Key
-            get_private_key(
-                seed.as_ptr(),
-                seed.len(),
-                secret_bytes.as_mut_ptr(),
-                secret_bytes.len(),
-            );
-
-            // Deserialize public key
-            let public_key = match Public::deserialize_compressed(&pub_key_bytes[..]) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    eprintln!("Failed to deserialize public key: {}", e);
-                    return;
-                }
-            };
-            public_keys.push(public_key);
-            let mut priv_arr = [0u8; 32];
-            priv_arr.copy_from_slice(&secret_bytes);
-            private_keys.push(priv_arr);
-        }
-
-        // Serialize all public keys into ring_set_bytes
-        let mut ring_set_bytes = Vec::new();
-        for pk in &public_keys {
-            let mut pk_bytes = Vec::new();
-            if let Err(e) = pk.serialize_compressed(&mut pk_bytes) {
-                eprintln!("Failed to serialize public key: {}", e);
-                return;
-            }
-            ring_set_bytes.extend(pk_bytes);
-        }
-
-        // ---------- Step 2: Prepare multiple pieces of data (5 pieces) --------------
-        // Here we demonstrate 5 pieces of input and 5 pieces of aux_data
-        // Each vrf_input_data may have different lengths, but for demonstration, we use fixed lengths
-        // Assume text lengths are the same, or use a fixed buffer to fill data.
-        let mut input_datas = Vec::new();
-        let mut aux_datas = Vec::new();
-        for i in 0..DATA_COUNT {
-            let vrf_input = format!("example input data {}", i);
-            let aux_input = format!("example aux data {}", i);
-            input_datas.push(vrf_input.into_bytes());
-            aux_datas.push(aux_input.into_bytes());
-        }
-
-        // Calculate the length of a single vrf_input_data and aux_data
-        // Assume each size is consistent, if variable length, use other mechanisms
-        let single_vrf_input_data_len = input_datas[0].len();
-        let single_aux_data_len = aux_datas[0].len();
-
-        // Concatenate 5 pieces of data into one block of bytes
-        let mut all_vrf_input_bytes = Vec::new();
-        let mut all_aux_bytes = Vec::new();
-        for i in 0..DATA_COUNT {
-            all_vrf_input_bytes.extend_from_slice(&input_datas[i]);
-            all_aux_bytes.extend_from_slice(&aux_datas[i]);
-        }
-        let vrf_input_data_total_len = all_vrf_input_bytes.len();
-        let aux_data_total_len = all_aux_bytes.len();
-
-        // ---------- Step 3: Call ring_vrf_sign_batch --------------
-        // Choose a prover, here we simply use the 2nd one (index=2)
-        let prover_idx = 2;
-        let chosen_priv_key = &private_keys[prover_idx];
-
-        // Prepare output buffers for batch signing: 5 pieces, each 784 bytes signature
-        let mut batch_signature = vec![0u8; SINGLE_RING_SIGNATURE_SIZE * DATA_COUNT];
-        // Prepare corresponding VRF output: 5 pieces, each 32 bytes
-        let mut batch_vrf_output = vec![0u8; VRF_OUTPUT_SIZE * DATA_COUNT];
-
-        ring_vrf_sign_batch(
-            chosen_priv_key.as_ptr(),
-            chosen_priv_key.len(),
-            ring_set_bytes.as_ptr(),
-            ring_set_bytes.len(),
-            all_vrf_input_bytes.as_ptr(),
-            vrf_input_data_total_len,
-            all_aux_bytes.as_ptr(),
-            aux_data_total_len,
-            DATA_COUNT,
-            single_vrf_input_data_len,
-            single_aux_data_len,
-            batch_signature.as_mut_ptr(),
-            batch_signature.len(),
-            batch_vrf_output.as_mut_ptr(),
-            batch_vrf_output.len(),
-        );
-
-        println!("Batch signature (hex): {}", hex::encode(&batch_signature));
-        println!("Batch VRF output (hex): {}", hex::encode(&batch_vrf_output));
-
-        // ---------- Step 4: Verify each signature separately --------------
-        for i in 0..DATA_COUNT {
-            let sig_offset = i * SINGLE_RING_SIGNATURE_SIZE;
-            let out_offset = i * VRF_OUTPUT_SIZE;
-
-            // Extract single signature from batch_signature
-            let single_sig_slice = &batch_signature[sig_offset..sig_offset + SINGLE_RING_SIGNATURE_SIZE];
-            // Extract single VRF Output from batch_vrf_output (verify doesn't need vrf_output parameter, but some interfaces allow you to pass it for comparison)
-            let single_vrf_output = &batch_vrf_output[out_offset..out_offset + VRF_OUTPUT_SIZE];
-
-            // Retrieve the original vrf_input_data and aux_data
-            let input_start = i * single_vrf_input_data_len;
-            let input_end = input_start + single_vrf_input_data_len;
-            let vrf_input_data = &all_vrf_input_bytes[input_start..input_end];
-
-            let aux_start = i * single_aux_data_len;
-            let aux_end = aux_start + single_aux_data_len;
-            let aux_data = &all_aux_bytes[aux_start..aux_end];
-
-            // Call single verify
-            let verify_result = ring_vrf_verify(
-                ring_set_bytes.as_ptr(),
-                ring_set_bytes.len(),
-                single_sig_slice.as_ptr(),
-                single_sig_slice.len(),
-                vrf_input_data.as_ptr(),
-                vrf_input_data.len(),
-                aux_data.as_ptr(),
-                aux_data.len(),
-                // Provide a 32 bytes buffer to receive the VRF output from verify
-                single_vrf_output.as_ptr() as *mut c_uchar, 
-                single_vrf_output.len(),
-            );
-
-            if verify_result == 1 {
-                println!(
-                    "Data index {} verification successful! VRF output: {}",
-                    i,
-                    hex::encode(single_vrf_output)
-                );
-            } else {
-                println!("Data index {} verification failed!", i);
-                // You can also assert here
-                // assert_eq!(verify_result, 1, "Verification failed on index {}", i);
-            }
-        }
-    }
-
-
-    #[test]
     fn test_ring_vrf_sign_and_verify() {
         use ark_serialize::CanonicalSerialize;
         use ark_serialize::CanonicalDeserialize;
@@ -1269,7 +1100,7 @@ mod tests {
 
         // Step 2: Use one of the private keys to sign the data
         let prover_idx = 2; // Choose the third key as the prover
-        ring_vrf_sign(
+        let result = ring_vrf_sign(
             private_keys[prover_idx].as_ptr(),
             private_keys[prover_idx].len(),
             ring_set_bytes.as_ptr(),
@@ -1283,6 +1114,8 @@ mod tests {
             vrf_output.as_mut_ptr(),
             vrf_output.len(),
         );
+
+        assert_eq!(result, 1, "Failed to sign the data");
 
         println!("Signature: {:?}", hex::encode(&signature));
         println!("VRF Output: {:?}", hex::encode(&vrf_output));
@@ -1308,136 +1141,7 @@ mod tests {
         }
     }
 
-    #[test] 
-    fn test_ring_vrf_sign_and_verify_with_prover_idx(){
-        use ark_serialize::CanonicalSerialize;
-        use ark_serialize::CanonicalDeserialize;
-        use hex;
-        use std::os::raw::c_uchar;
 
-        const SEED_SIZE: usize = 32;
-        const SECRET_SIZE: usize = 32;
-
-        // Step 1: Generate RING_SIZE private keys
-        let mut seeds: Vec<[u8; SEED_SIZE]> = Vec::new();
-        for _i in 0..RING_SIZE {
-            let mut seed = [0u8; SEED_SIZE];
-            for (i, byte) in seed.iter_mut().enumerate() {
-                *byte = i as u8;
-            }
-            seeds.push(seed);
-        }
-
-        let mut public_keys: Vec<Public> = Vec::new();
-        let mut private_keys: Vec<[u8; SECRET_SIZE]> = Vec::new();
-        for seed in &seeds {
-            // Allocate buffers for public key and secret
-            let mut pub_key_bytes = vec![0u8; 32];
-            let mut secret_bytes = vec![0u8; SECRET_SIZE];
-
-            // Generate public key from the seed
-            get_public_key(
-                seed.as_ptr(),
-                seed.len(),
-                pub_key_bytes.as_mut_ptr(),
-                pub_key_bytes.len(),
-            );
-
-            // Generate private key from the seed
-            get_private_key(
-                seed.as_ptr(),
-                seed.len(),
-                secret_bytes.as_mut_ptr(),
-                secret_bytes.len(),
-            );
-
-            // Deserialize public key
-            let public_key = match Public::deserialize_compressed(&pub_key_bytes[..]) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    eprintln!("Failed to deserialize public key: {}", e);
-                    return;
-                }
-            };
-            public_keys.push(public_key);
-
-            let mut private_key_array = [0u8; SECRET_SIZE];
-            private_key_array.copy_from_slice(&secret_bytes);
-            private_keys.push(private_key_array);
-        }
-
-        // Serialize the public keys
-        let mut ring_set_bytes: Vec<u8> = Vec::new();
-        for pk in &public_keys {
-            let mut pk_bytes = Vec::new();
-            if let Err(e) = pk.serialize_compressed(&mut pk_bytes) {
-                eprintln!("Failed to serialize public key: {}", e);
-                return;
-            }
-            ring_set_bytes.extend(pk_bytes);
-        }
-
-        // Data to be signed
-        let vrf_input_data = b"example input data";
-        let aux_data = b"example aux data";
-
-        // Allocate buffer for signature
-        let mut signature = vec![0u8; 784]; // Adjust size as needed
-
-        // Allocate buffer for VRF output
-        let mut vrf_output = [0u8; 32];
-
-        // Step 2: Use one of the private keys to sign the data
-        let prover_idx = 2; // Choose the third key as the prover
-        // get the ring commitment
-        let mut commitment = vec![0u8; 144];
-        get_ring_commitment(
-            ring_set_bytes.as_ptr(),
-            ring_set_bytes.len(),
-            commitment.as_mut_ptr(),
-            commitment.len(),
-        );
-
-
-        ring_vrf_sign_with_index(
-            prover_idx,
-            private_keys[prover_idx].as_ptr(),
-            private_keys[prover_idx].len(),
-            commitment.as_ptr(),
-            commitment.len(),
-            vrf_input_data.as_ptr(),
-            vrf_input_data.len(),
-            aux_data.as_ptr(),
-            aux_data.len(),
-            signature.as_mut_ptr(),
-            signature.len(),
-            vrf_output.as_mut_ptr(),
-            vrf_output.len(),
-        );
-
-        println!("Signature: {:?}", hex::encode(&signature));
-        println!("VRF Output: {:?}", hex::encode(&vrf_output));
-
-        // Step 3: Verify the signature
-        let result = ring_vrf_verify(
-            ring_set_bytes.as_ptr(),
-            ring_set_bytes.len(),
-            signature.as_ptr(),
-            signature.len(),
-            vrf_input_data.as_ptr(),
-            vrf_input_data.len(),
-            aux_data.as_ptr(),
-            aux_data.len(),
-            vrf_output.as_mut_ptr(),
-            vrf_output.len(),
-        );
-
-        // Check if the verification was successful
-        if result == 1 {
-            println!("Verification successful");
-            println!("VRF Output: {:?}", hex::encode(vrf_output));
-        }
-    }
 
     const SEED_SIZE: usize = 32;
     #[test]

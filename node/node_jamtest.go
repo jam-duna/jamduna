@@ -564,12 +564,12 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	Fib_Tri_counter := 0
 	Fib_Tri_successful := make(chan string)
 	Fib_Tri_Ready := true
-	Fib_Tri_Keeper := false
+	Fib_Tri_Ok := false
 	Meg_Chan := make(chan *types.WorkPackage, 1)
 	Meg_counter := 0
 	Meg_successful := make(chan string)
 	Meg_Ready := true
-	Meg_Keeper := false
+	Meg_Ok := false
 	// =================================================
 	// set up the workpackages
 	fib_importedSegments := make([]types.ImportSegment, 0)
@@ -604,6 +604,9 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	FinalMeg := false
 	var curr_fib_tri_workpackage types.WorkPackage
 	var curr_meg_workpackage types.WorkPackage
+
+	meg_good_togo := make(chan bool, 1)
+	fib_tri_good_togo := make(chan bool, 1)
 	// =================================================
 	for {
 		if ok {
@@ -635,6 +638,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					service_account_byte, _, _ = nodes[1].getState().GetTrie().GetServiceStorage(service1.ServiceCode, k1)
 					fmt.Printf("Tri %d = %v\n", index, service_account_byte)
 				}
+				fib_tri_good_togo <- true
 			} else if successful == "trial" {
 				fmt.Printf("Fib_Tri %d sending again. wp hash=%v\n", Fib_Tri_counter-1, curr_fib_tri_workpackage.Hash())
 				currfib_trib_hash := curr_fib_tri_workpackage.Hash()
@@ -657,6 +661,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					if err != nil {
 						panic(err)
 					}
+					currfib_trib_hash := curr_fib_tri_workpackage.Hash()
+					curr_meg_workpackage.RefineContext.Prerequisites = []common.Hash{currfib_trib_hash}
 				}
 			}
 		case successful := <-Meg_successful:
@@ -672,10 +678,13 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					index := binary.LittleEndian.Uint32(index_bytes)
 					fmt.Printf("Meg %d = %v\n", index, service_account_byte)
 				}
+				meg_good_togo <- true
 			} else if successful == "trial" {
-				fmt.Printf("Meg %d sending again. wp hash=%v\n", Meg_counter-1, curr_meg_workpackage.Hash())
 				currfib_trib_hash := curr_fib_tri_workpackage.Hash()
 				curr_meg_workpackage.RefineContext.Prerequisites = []common.Hash{currfib_trib_hash}
+				fmt.Printf("Meg %d sending again. wp hash=%v\n", Meg_counter-1, curr_meg_workpackage.Hash())
+				fmt.Printf("prereq=%v\n", curr_meg_workpackage.RefineContext.Prerequisites)
+
 			}
 
 		case workPackage := <-Meg_Chan:
@@ -734,152 +743,96 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 						break
 					}
 				}
-			} else if test_prereq {
-				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
+			}
+			if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
+				if !sentLastWorkPackage {
 					fmt.Printf("All workpackages are sent\n")
-					sentLastWorkPackage = true
-				} else if (nodes[0].IsCoreReady(0, last_Meg) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
-					// if false{
-
-					// send workpackages to the network
-					curr_fib_tri_workpackage = next_fib_tri_WorkPackage
-					curr_meg_workpackage = next_Meg_WorkPackage
-					Fib_Tri_Chan <- &curr_fib_tri_workpackage
-					Fib_Tri_counter++
-					// send workpackages to the network
-					Meg_Chan <- &curr_meg_workpackage
-					Meg_counter++
-					if Meg_counter <= targetNMax-1 {
-						// build the next workpackage
-						// fib
-						fib_importedSegments := []types.ImportSegment{
-							{
-								RequestedHash: curr_fib_tri_workpackage.Hash(),
-								Index:         0,
-							},
-						}
-						trib_importedSegments := []types.ImportSegment{
-							{
-								RequestedHash: curr_fib_tri_workpackage.Hash(),
-								Index:         1,
-							},
-						}
-						fib_trib_items = buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
-						next_fib_tri_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
-						if err != nil {
-							panic(err)
-						}
-						curr_fib_tri_prereqs = []common.Hash{}
-						for _, n := range nodes {
-							n.delaysend[curr_fib_tri_workpackage.Hash()] = 1
-						}
-
-						Fib_Tri_Ready = false
-						// meg
-						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
-						meg_items = append(meg_items, types.WorkItem{
-							Service:            service_authcopy.ServiceCode,
-							CodeHash:           service_authcopy.CodeHash,
-							Payload:            []byte{},
-							RefineGasLimit:     1000,
-							AccumulateGasLimit: 1000,
-							ImportedSegments:   make([]types.ImportSegment, 0),
-							ExportCount:        0,
-						})
-						next_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{next_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
-						last_Meg = []common.Hash{}
-						Meg_Ready = false
+				}
+				sentLastWorkPackage = true
+			} else if (nodes[0].IsCoreReady(0, last_Meg) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
+				// send workpackages to the network
+				fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, next_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, next_Meg_WorkPackage.Hash().String_short())
+				fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(next_fib_tri_WorkPackage.Hash()))
+				// in case it gets stuck
+				// refine context need to be updated
+				next_fib_tri_WorkPackage.RefineContext = nodes[2].statedb.GetRefineContext()
+				next_Meg_WorkPackage.RefineContext = nodes[2].statedb.GetRefineContext()
+				next_Meg_WorkPackage.RefineContext.Prerequisites = []common.Hash{next_fib_tri_WorkPackage.Hash()}
+				// send workpackages to the network
+				curr_fib_tri_workpackage = next_fib_tri_WorkPackage
+				curr_meg_workpackage = next_Meg_WorkPackage
+				Fib_Tri_Chan <- &curr_fib_tri_workpackage
+				Fib_Tri_counter++
+				if Fib_Tri_counter <= targetNMax-1 {
+					fib_importedSegments := []types.ImportSegment{
+						{
+							RequestedHash: curr_fib_tri_workpackage.Hash(),
+							Index:         0,
+						},
 					}
-					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, next_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, next_Meg_WorkPackage.Hash().String_short())
-				} else if (nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil) || (nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil && !Fib_Tri_Ready) {
-
-					Meg_Ready = false
-					Meg_Keeper = true
+					trib_importedSegments := []types.ImportSegment{
+						{
+							RequestedHash: curr_fib_tri_workpackage.Hash(),
+							Index:         1,
+						},
+					}
+					fib_trib_items = buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
+					next_fib_tri_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
+					if err != nil {
+						panic(err)
+					}
+					curr_fib_tri_prereqs = []common.Hash{}
+					// for _, item := range next_fib_tri_WorkPackage.WorkItems {
+					// 	for _, seg := range item.ImportedSegments {
+					// 		curr_fib_tri_prereqs = append(curr_fib_tri_prereqs, seg.RequestedHash)
+					// 	}
+					// }
 					Fib_Tri_Ready = false
-					Fib_Tri_Keeper = true
-
-				} else if (Meg_Keeper && nodes[0].IsCoreReady(0, last_Meg)) && (Fib_Tri_Keeper && nodes[0].IsCoreReady(1, curr_fib_tri_prereqs, false, curr_fib_tri_workpackage.Hash())) {
-					Meg_Ready = true
-					Meg_Keeper = false
-					Fib_Tri_Ready = true
-					Fib_Tri_Keeper = false
+					Fib_Tri_Ok = false
 				}
-			} else if !test_prereq {
-				if Fib_Tri_counter == targetNMax && Meg_counter == targetNMax {
-					fmt.Printf("All workpackages are sent\n")
-					sentLastWorkPackage = true
-				} else if (nodes[0].IsCoreReady(0, last_Meg) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
-					// send workpackages to the network
-					fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, next_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, next_Meg_WorkPackage.Hash().String_short())
-					fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(next_fib_tri_WorkPackage.Hash()))
-					// in case it gets stuck
-					// refine context need to be updated
-					next_fib_tri_WorkPackage.RefineContext = nodes[2].statedb.GetRefineContext()
-					next_Meg_WorkPackage.RefineContext = nodes[2].statedb.GetRefineContext()
-					next_Meg_WorkPackage.RefineContext.Prerequisites = []common.Hash{next_fib_tri_WorkPackage.Hash()}
-					// send workpackages to the network
-					curr_fib_tri_workpackage = next_fib_tri_WorkPackage
-					curr_meg_workpackage = next_Meg_WorkPackage
-					Fib_Tri_Chan <- &curr_fib_tri_workpackage
-					Fib_Tri_counter++
-					if Fib_Tri_counter <= targetNMax-1 {
-						fib_importedSegments := []types.ImportSegment{
-							{
-								RequestedHash: curr_fib_tri_workpackage.Hash(),
-								Index:         0,
-							},
-						}
-						trib_importedSegments := []types.ImportSegment{
-							{
-								RequestedHash: curr_fib_tri_workpackage.Hash(),
-								Index:         1,
-							},
-						}
-						fib_trib_items = buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
-						next_fib_tri_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
-						if err != nil {
-							panic(err)
-						}
-						curr_fib_tri_prereqs = []common.Hash{}
-						// for _, item := range next_fib_tri_WorkPackage.WorkItems {
-						// 	for _, seg := range item.ImportedSegments {
-						// 		curr_fib_tri_prereqs = append(curr_fib_tri_prereqs, seg.RequestedHash)
-						// 	}
-						// }
-						Fib_Tri_Ready = false
-					}
-					// send workpackages to the network
-					fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", Meg_counter, common.Str(next_Meg_WorkPackage.Hash()))
-					Meg_Chan <- &curr_meg_workpackage
-					Meg_counter++
-					if Meg_counter <= targetNMax-1 {
-						// previous_workpackage_hash := curr_meg_workpackage.Hash()
-						meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
-						meg_items = append(meg_items, types.WorkItem{
+				// send workpackages to the network
+				fmt.Printf("\n** \033[36m MEGATRON %d \033[0m workPackage: %v **\n", Meg_counter, common.Str(next_Meg_WorkPackage.Hash()))
+				Meg_Chan <- &curr_meg_workpackage
+				Meg_counter++
+				if Meg_counter <= targetNMax-1 {
+					// previous_workpackage_hash := curr_meg_workpackage.Hash()
+					meg_items = buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
+					meg_items = append(meg_items, types.WorkItem{
 
-							Service:            service_authcopy.ServiceCode,
-							CodeHash:           service_authcopy.CodeHash,
-							Payload:            []byte{},
-							RefineGasLimit:     1000,
-							AccumulateGasLimit: 1000,
-							ImportedSegments:   make([]types.ImportSegment, 0),
-							ExportCount:        0,
-						})
-						next_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{next_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
-						last_Meg = []common.Hash{}
-						// last_Meg = append(last_Meg, previous_workpackage_hash)
-						Meg_Ready = false
-					}
-				} else {
-					is_0_ready := nodes[0].IsCoreReady(0, last_Meg)
-					is_1_ready := nodes[0].IsCoreReady(1, curr_fib_tri_prereqs, true, curr_fib_tri_workpackage.Hash())
-					if is_0_ready && is_1_ready {
-						Meg_Ready = true
-						Fib_Tri_Ready = true
+						Service:            service_authcopy.ServiceCode,
+						CodeHash:           service_authcopy.CodeHash,
+						Payload:            []byte{},
+						RefineGasLimit:     1000,
+						AccumulateGasLimit: 1000,
+						ImportedSegments:   make([]types.ImportSegment, 0),
+						ExportCount:        0,
+					})
+					next_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{next_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
+					last_Meg = []common.Hash{}
+					// last_Meg = append(last_Meg, previous_workpackage_hash)
+					Meg_Ready = false
+					Meg_Ok = false
+				}
+			} else {
+				select {
+				case <-fib_tri_good_togo:
+					Fib_Tri_Ok = true
+				case <-meg_good_togo:
+					Meg_Ok = true
+				default:
+					if Fib_Tri_Ok && Meg_Ok {
+						is_0_ready := nodes[0].IsCoreReady(0, last_Meg)
+						is_1_ready := nodes[0].IsCoreReady(1, curr_fib_tri_prereqs, true, curr_fib_tri_workpackage.Hash())
+						if is_0_ready && is_1_ready {
+							Meg_Ready = true
+							Fib_Tri_Ready = true
+						}
 					}
 				}
+
 			}
 		}
+
 		// case <-ticker_runtime.C:
 		// 	var stats runtime.MemStats
 		// 	runtime.ReadMemStats(&stats)
@@ -908,18 +861,18 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
 	}
-	ticker := time.NewTicker(2 * types.SecondsPerSlot * time.Second)
-	ticker2 := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	defer ticker2.Stop()
-	time.Sleep(6 * time.Second)
-	trialCount++
+
+	resend_ticker := time.NewTicker(1 * types.SecondsPerSlot * time.Second)
+	monitor_ticker := time.NewTicker(100 * time.Millisecond)
+	defer resend_ticker.Stop()
+	defer monitor_ticker.Stop()
+	resend_mode := "waiting"
 	for {
 		select {
 		case <-ctx.Done():
 			fmt.Printf("Context cancelled for work package %v\n", workPackageHash)
 			return
-		case <-ticker2.C:
+		case <-monitor_ticker.C:
 			if senderNode.statedb.JamState.AvailabilityAssignments[receiverCore] != nil {
 				rho := senderNode.statedb.JamState.AvailabilityAssignments[receiverCore]
 				pendingWPHash := rho.WorkReport.AvailabilitySpec.WorkPackageHash
@@ -937,29 +890,40 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 				}
 			}
 
-		case <-ticker.C:
+		case <-resend_ticker.C:
 			// Sending the work package again
-
-			prereqs := workPackage.RefineContext.Prerequisites
-			newRefineContext := senderNode.statedb.GetRefineContext(prereqs...)
-			workPackage.RefineContext = newRefineContext
-			workPackageHash = workPackage.Hash()
-			corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
-			randIdx := rand.Intn(len(corePeers))
-			msg <- fmt.Sprint("trial")
-			err := corePeers[randIdx].SendWorkPackageSubmission(*workPackage, extrinsics, receiverCore)
-			log.Debug(debugG, "SendWorkPackageSubmission to core for trial/timeslot",
-				"n", senderNode.id, "p", corePeers[randIdx].PeerID, "c", receiverCore, "wph", workPackageHash,
-				"trialCount", trialCount, "ts", senderNode.statedb.GetSafrole().GetTimeSlot())
-			if err != nil {
-				fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
+			switch resend_mode {
+			case "waiting":
+				if trialCount == 0 {
+					trialCount++
+					resend_mode = "rebuild"
+					continue
+				}
+			case "rebuild":
+				prereqs := workPackage.RefineContext.Prerequisites
+				newRefineContext := senderNode.statedb.GetRefineContext(prereqs...)
+				workPackage.RefineContext = newRefineContext
+				workPackageHash = workPackage.Hash()
+				msg <- fmt.Sprint("trial")
+				resend_mode = "resend"
+			case "resend":
+				corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
+				randIdx := rand.Intn(len(corePeers))
+				workPackageHash = workPackage.Hash()
+				err := corePeers[randIdx].SendWorkPackageSubmission(*workPackage, extrinsics, receiverCore)
+				log.Debug(debugG, "SendWorkPackageSubmission to core for trial/timeslot",
+					"n", senderNode.id, "p", corePeers[randIdx].PeerID, "c", receiverCore, "wph", workPackageHash,
+					"trialCount", trialCount, "ts", senderNode.statedb.GetSafrole().GetTimeSlot())
+				if err != nil {
+					fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
+				}
+				trialCount++
+				resend_mode = "rebuild"
+				if trialCount > MaxTrialCount {
+					msg <- "failed"
+					return
+				}
 			}
-			trialCount++
-			if trialCount > MaxTrialCount {
-				msg <- "failed"
-				return
-			}
-
 		}
 	}
 }

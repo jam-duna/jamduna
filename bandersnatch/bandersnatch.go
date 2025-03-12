@@ -154,7 +154,6 @@ func InitRingSet(ringset []BanderSnatchKey) (ringsetBytes []byte) {
 func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxData []byte) ([]byte, []byte, error) {
 	sig := make([]byte, RingSignatureLen) // 784 bytes
 	vrfOutput := make([]byte, 32)
-
 	auxDataL := C.size_t(len(auxData))
 	auxDataF := auxData
 	if len(auxData) == 0 {
@@ -164,7 +163,7 @@ func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxD
 	if len(ringsetBytes) == 0 {
 		return []byte{}, []byte{}, fmt.Errorf("Not able to sign without ringset bytes")
 	}
-	C.ring_vrf_sign(
+	result := C.ring_vrf_sign(
 		(*C.uchar)(unsafe.Pointer(&privateKey[0])),
 		C.size_t(len(privateKey)),
 		(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
@@ -180,6 +179,9 @@ func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxD
 		C.size_t(len(vrfOutput)),
 		//C.size_t(proverIdx),
 	)
+	if result != 1 {
+		return nil, nil, fmt.Errorf("failed to RingVrfSign")
+	}
 	return sig, vrfOutput, nil
 }
 

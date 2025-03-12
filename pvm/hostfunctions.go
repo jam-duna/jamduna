@@ -1121,23 +1121,28 @@ func (vm *VM) hostWrite() {
 			vm.ResultCode = types.PVM_PANIC
 			return
 		}
-		l = uint64(len(v))
 	}
+
 	a.WriteStorage(a.ServiceIndex, k, v)
-	log.Debug(vm.logging, "WRITE OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
-	vm.WriteRegister(7, l)
 	vm.HostResultCode = OK
 	if !exists {
 		a.NumStorageItems++
 		a.StorageSize += 32 + uint64(len(v))
+		vm.WriteRegister(7, NONE)
+		log.Debug(vm.logging, "WRITE OK l=NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 	} else {
+		l = uint64(len(oldValue))
+		vm.WriteRegister(7, l)
+		log.Debug(vm.logging, "WRITE OK", "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		if len(v) == 0 {
+			// delete
 			if a.NumStorageItems > 0 {
 				a.NumStorageItems--
 			}
-			a.StorageSize -= 32 + uint64(len(oldValue))
+			a.StorageSize -= 32 + uint64(l)
 		} else {
-			a.StorageSize += uint64(len(v)) - uint64(len(oldValue))
+			// write
+			a.StorageSize += uint64(len(v)) - uint64(l)
 		}
 	}
 	log.Debug(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
