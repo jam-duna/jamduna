@@ -56,6 +56,7 @@ const (
 	quicAddr     = "127.0.0.1:%d"
 	godMode      = false
 	Grandpa      = false
+	revalidate   = false
 
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 )
@@ -1105,7 +1106,7 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uin
 
 	shards := make([][]byte, types.TotalCores)
 	indexes := make([]uint32, types.TotalCores)
-	numShards := 0 
+	numShards := 0
 	for _, resp := range responses {
 		daResp, ok := resp.(CE139_response)
 		if !ok {
@@ -1113,8 +1114,8 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uin
 		}
 		if numShards < len(indexes) {
 			indexes[numShards] = uint32(daResp.ShardIndex)
-			shards[numShards] = daResp.SegmentShards  // this is actually multiple segments
-			numShards++;
+			shards[numShards] = daResp.SegmentShards // this is actually multiple segments
+			numShards++
 		}
 	}
 	rawsegments, err := bls.Decode(shards, types.TotalValidators, indexes, len(shards[0])*2)
@@ -1433,11 +1434,13 @@ func (n *Node) runClient() {
 						log.Error(module, "runClient:writeDebug", "err", err)
 					}
 
-					err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
-					if err != nil {
-						log.Crit(module, "runClient:CheckStateTransition", "err", err)
+					if revalidate {
+						err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
+						if err != nil {
+							log.Crit(module, "runClient:CheckStateTransition", "err", err)
+						}
+						log.Trace(module, "Validated state transition")
 					}
-					log.Trace(module, "Validated state transition")
 
 					// store StateSnapshot
 					err = n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot) // StateSnapshot

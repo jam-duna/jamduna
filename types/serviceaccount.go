@@ -300,61 +300,61 @@ func (s *ServiceAccount) ReadStorage(rawK common.Hash, sdb HostEnv) (ok bool, v 
 	if storageObj.Deleted {
 		return false, nil
 	}
-	if !ok {
-		var err error
-		v, ok, err = sdb.ReadServiceStorage(serviceIndex, rawK)
-		if err != nil || !ok {
-			return false, nil
-		}
-		s.Storage[hk] = StorageObject{
-			Dirty:  false,
-			Value:  v,
-			RawKey: rawK,
-		}
-		return true, v
+	if ok {
+		return true, storageObj.Value
 	}
-	return true, storageObj.Value
+	var err error
+	v, ok, err = sdb.ReadServiceStorage(serviceIndex, rawK)
+	if err != nil || !ok {
+		return false, nil
+	}
+	s.Storage[hk] = StorageObject{
+		Dirty:  false,
+		Value:  v,
+		RawKey: rawK,
+	}
+	return true, v
 }
 
 func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok bool, preimage []byte) {
 	preimageObj, ok := s.Preimage[blobHash]
-	if preimageObj.Deleted {
-		return false, nil
-	}
-	if !ok {
-		var err error
-		preimage, ok, err = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
-		if err != nil || !ok {
-			return false, preimage //, err
+        if preimageObj.Deleted {
+                return false, nil
+        }
+        if !ok {
+	        var err error
+                preimage, ok, err = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
+	        if err != nil || !ok {
+                        return false, preimage //, err                                                                                                                                                                        
 		}
-		s.Preimage[blobHash] = PreimageObject{
-			Dirty:    false,
-			Preimage: preimage,
-		}
-		return true, preimage
-	}
-	return true, preimageObj.Preimage
+                s.Preimage[blobHash] = PreimageObject{
+                        Dirty:    false,
+                        Preimage: preimage,
+                }
+	        return true, preimage
+        }
+        return true, preimageObj.Preimage
 }
 
 func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv) (ok bool, anchor_timeslot []uint32) {
-	lookupObj, ok := s.Lookup[blobHash]
-	if lookupObj.Deleted {
-		return false, []uint32{}
-	}
-	if !ok {
-		var err error
-		anchor_timeslot, ok, err = sdb.ReadServicePreimageLookup(s.GetServiceIndex(), blobHash, z)
+        lookupObj, ok := s.Lookup[blobHash]
+        if lookupObj.Deleted {
+                return false, []uint32{}
+        }
+        if !ok {
+                var err error
+                anchor_timeslot, ok, err = sdb.ReadServicePreimageLookup(s.GetServiceIndex(), blobHash, z)
 		if err != nil || !ok {
-			return ok, anchor_timeslot
-		}
-		s.Lookup[blobHash] = LookupObject{
-			Dirty: false,
-			Z:     z,
-			T:     anchor_timeslot,
-		}
-		return true, anchor_timeslot
-	}
-	return true, lookupObj.T
+                        return ok, anchor_timeslot
+                }
+                s.Lookup[blobHash] = LookupObject{
+                        Dirty: false,
+                        Z:     z,
+                        T:     anchor_timeslot,
+                }
+                return true, anchor_timeslot
+        }
+        return true, lookupObj.T
 }
 
 // a_c - account code hash c

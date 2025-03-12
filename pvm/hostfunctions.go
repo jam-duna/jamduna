@@ -1129,7 +1129,7 @@ func (vm *VM) hostWrite() {
 		a.NumStorageItems++
 		a.StorageSize += 32 + uint64(len(v))
 		vm.WriteRegister(7, NONE)
-		log.Debug(vm.logging, "WRITE OK l=NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+		log.Debug(vm.logging, "WRITE NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 	} else {
 		l = uint64(len(oldValue))
 		vm.WriteRegister(7, l)

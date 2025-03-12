@@ -9,10 +9,9 @@ package bls
 import "C"
 import (
 	"errors"
-	"unsafe"
 	"github.com/colorfulnotion/jam/log"
+	"unsafe"
 )
-
 
 type DoublePublicKey [DoubleKeyLen]byte
 

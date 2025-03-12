@@ -225,7 +225,6 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	return true, nil
 }
 
-
 func splitBytes(data []byte, n int) [][]byte {
 	var result [][]byte
 	for i := 0; i < len(data); i += n {
@@ -237,7 +236,6 @@ func splitBytes(data []byte, n int) [][]byte {
 	}
 	return result
 }
-
 
 // Qns Source : CE137_FullShard -- By Assurer to Guarantor
 // Ans Source : NOT SPECIFIED by Jam_np. Stored As is
