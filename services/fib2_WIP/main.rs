@@ -12,13 +12,13 @@
 use polkavm_derive::min_stack_size;
 min_stack_size!(40960); // depends on how many pages you need
 
-use utils::{NONE, OK, PAGE_SIZE, SEGMENT_SIZE, PARENT_MACHINE_INDEX, FIRST_READABLE_ADDRESS, FIRST_READABLE_PAGE};
-use utils::{parse_refine_args, parse_wrangled_operand_tuple};
-use utils::{call_info, setup_page, get_page, serialize_gas_and_registers, deserialize_gas_and_registers};
-use utils::{write_result};
+use utils::constants::{NONE, OK, PAGE_SIZE, SEGMENT_SIZE, PARENT_MACHINE_INDEX, FIRST_READABLE_ADDRESS, FIRST_READABLE_PAGE};
+use utils::functions::{parse_refine_args, parse_wrangled_operand_tuple};
+use utils::functions::{call_info, setup_page, get_page, serialize_gas_and_registers, deserialize_gas_and_registers};
+use utils::functions::{write_result};
 
-use utils::{historical_lookup, fetch, export, machine, peek, poke, zero, void, invoke, expunge};
-use utils::{gas, lookup, read, write, info, bless, assign, checkpoint, new, upgrade, eject, query, solicit, forget, oyield, log};
+use utils::host_functions::{historical_lookup, fetch, export, machine, peek, poke, zero, void, invoke, expunge};
+use utils::host_functions::{gas, lookup, read, write, info, bless, assign, checkpoint, new, upgrade, eject, query, solicit, forget, oyield, log};
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
@@ -73,17 +73,21 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         child_vm_ids[i as usize] = new_idx as u32;
     }
 
-    call_info("FIB2 WIP machine done");
-
     // fetch segments for all child VMs
     let mut segment_buf = [0u8; SEGMENT_SIZE as usize];
-    for segment_index in 0u64.. {
+    let mut segment_index = 0u64;
+    loop {
         let result = unsafe {
-            fetch(segment_buf.as_mut_ptr() as u64, 0, SEGMENT_SIZE, 6, segment_index, 0)
+            fetch(segment_buf.as_mut_ptr() as u64, 0, SEGMENT_SIZE as u64, 6, segment_index, 0)
         };
-        if result == NONE { break; }
+        if result == NONE {
+            break;
+        }
+
         setup_page(&segment_buf);
+        segment_index += 1;
     }
+    let segment_index_byte = segment_index.to_le_bytes();
 
     // invoke all child VMs
     let init_gas: u64 = 0x10000;
@@ -148,9 +152,7 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
             output[0..4].copy_from_slice(&result_buffer[8..12]);
 
             setup_page(&result_buffer);
-            call_info("FIB2 WIP invoke done");
         }
-
         unsafe{
             export(result_buffer.as_ptr() as u64, SEGMENT_SIZE);
         }
@@ -202,7 +204,6 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
 
     // first time setup: do nothing but solicit code for child VM
     if work_result_length == 36 {
-        call_info("First time solicit code for child VM");
         let code_hash_address = work_result_address;
         let code_length_address = work_result_address + 32;
         let code_length: u64 =  unsafe { ( *(code_length_address as *const u32)).into() };
@@ -214,7 +215,6 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     let key = [0u8; 1];
     let n: u64 = unsafe { ( *(work_result_address as *const u32)).into() };
     unsafe {
-        call_info("Write FIB result to storage");
         write(key.as_ptr() as u64, key.len() as u64, work_result_address, work_result_length);
     }
 
@@ -368,7 +368,6 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     //     write_result(bless_ok_result, 5);
     // }
     
-    
     // let info_result = unsafe { info(service_index, buffer_address) };
     // write_result(info_result, 8);
     
@@ -380,7 +379,7 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     let output_address = output_bytes_32.as_ptr() as u64;
     let output_length = output_bytes_32.len() as u64;
     
-    // write yield
+    // // write yield
     // if n % 3 == 0 {
     //     if n != 9 { // n=3,6 should go through even though there is a panic, 9 does not.
     //         let gas_result = unsafe { checkpoint() };
@@ -396,13 +395,11 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     //     }
     // } else {
     // }
-    // unsafe { oyield(omega_7); }
-    // set the result length to register a1
-    call_info("FIB2 WIP accumulate done");
+    unsafe { oyield(output_address); }
     return (output_address, output_length);
 }
 
 #[polkavm_derive::polkavm_export]
-extern "C" fn on_transfer(start_address: u64, length: u64) -> (u64, u64) {
+extern "C" fn on_transfer(_start_address: u64, _length: u64) -> (u64, u64) {
     return (FIRST_READABLE_ADDRESS as u64, 0);
 }

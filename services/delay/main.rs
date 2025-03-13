@@ -1,19 +1,8 @@
 #![no_std]
 #![no_main]
 
-extern crate alloc;
-
-use simplealloc::SimpleAlloc;
-
-#[global_allocator]
-static ALLOCATOR: SimpleAlloc<4096> = SimpleAlloc::new();
-
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    unsafe {
-        core::arch::asm!("unimp", options(noreturn));
-    }
-}
+use utils::constants::{FIRST_READABLE_ADDRESS};
+use utils::functions::{parse_refine_args};
 
 #[polkavm_derive::polkavm_import]
 extern "C" {
@@ -21,28 +10,34 @@ extern "C" {
     pub fn delay(seconds: u64) -> u64;
 }
 
-pub const NONE: u64 = u64::MAX;
-
 #[polkavm_derive::polkavm_export]
-extern "C" fn is_authorized() -> u32 {
-    0
-}
+extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
+    let (_wi_service_index, wi_payload_start_address, _wi_payload_length, _wphash) =
+    if let Some(args) = parse_refine_args(start_address, length)
+    {
+        (
+            args.wi_service_index,
+            args.wi_payload_start_address,
+            args.wi_payload_length,
+            args.wphash,
+        )
+    } else {
+        return (FIRST_READABLE_ADDRESS as u64, 0);
+    };
 
-#[polkavm_derive::polkavm_export]
-extern "C" fn refine() -> u32 {
-    let seconds: u64 = unsafe { *(0xFEFF0004 as *const u32) as u64 };
+    let seconds: u64 = unsafe { *(wi_payload_start_address as *const u32) as u64 };
     unsafe {
         delay(seconds);
     }
-    0
+    return (FIRST_READABLE_ADDRESS as u64, 0);
 }
 
 #[polkavm_derive::polkavm_export]
-extern "C" fn accumulate() -> u32 {
-    0
+extern "C" fn accumulate(_start_address: u64, _length: u64) -> (u64, u64) {
+    return (FIRST_READABLE_ADDRESS as u64, 0);
 }
 
 #[polkavm_derive::polkavm_export]
-extern "C" fn on_transfer() -> u32 {
-    0
+extern "C" fn on_transfer(_start_address: u64, _length: u64) -> (u64, u64) {
+    return (FIRST_READABLE_ADDRESS as u64, 0);
 }
