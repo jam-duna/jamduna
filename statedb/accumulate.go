@@ -101,9 +101,14 @@ func QueueEditing(r []types.AccumulationQueue, x []common.Hash) []types.Accumula
 				}
 			}
 			item.WorkPackageHash = new_wp_hash
+			//sort the hashes
+			sort.Slice(item.WorkPackageHash, func(i, j int) bool {
+				return bytes.Compare(item.WorkPackageHash[i][:], item.WorkPackageHash[j][:]) < 0
+			})
 			result = append(result, item)
 		}
 	}
+
 	return result
 }
 
@@ -470,10 +475,12 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 				codeHash = workResult.CodeHash
 				g += workResult.Gas
 				o := types.AccumulateOperandElements{
-					Results:         workResult.Result,
-					Payload:         workResult.PayloadHash,
-					WorkPackageHash: workReport.AvailabilitySpec.WorkPackageHash,
-					AuthOutput:      workReport.AuthOutput,
+					H: workReport.AvailabilitySpec.WorkPackageHash,
+					E: workReport.AvailabilitySpec.ExportedSegmentRoot,
+					A: workReport.AuthorizerHash,
+					O: workReport.AuthOutput,
+					Y: workResult.PayloadHash,
+					D: workResult.Result,
 				}
 				if sd.Authoring {
 					log.Debug("authoring", "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
@@ -523,6 +530,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 			} else {
 				log.Debug("authoring", "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 			}
+
 		}
 		return
 	}

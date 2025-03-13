@@ -533,28 +533,29 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage
 	service_index := uint32(workPackage.AuthCodeHost)
-	workPackageHash := workPackage.Hash()
+	//workPackageHash := workPackage.Hash()
 
 	// Import Segments
 	for workItemIdx, workItem_segments := range package_bundle.ImportSegmentData {
 		log.Debug(debugDA, "[N%d] [workItem#%d] workItem_segments %x\n", n.id, workItemIdx, workItem_segments)
 		importsegments[workItemIdx] = workItem_segments
 	}
-	authcode, authindex, err := n.statedb.GetAuthorizeCode(workPackage)
+	authcode, _, authindex, err := n.statedb.GetAuthorizeCode(workPackage)
 	if err != nil {
 		return
 	}
 	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, targetStateDB)
 	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
+	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ParameterizationBlob
-	p_a := common.Blake2Hash(append(authcode, p_p...))
+	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))
 
 	var segments [][]byte
 	for index, workItem := range workPackage.WorkItems {
-		imports := make([][]byte, 0)
-		if len(workItem.ImportedSegments) > 0 {
-			imports = importsegments[index]
-		}
+		// imports := make([][]byte, 0)
+		// if len(workItem.ImportedSegments) > 0 {
+		// 	imports = importsegments[index]
+		// }
 		service_index = workItem.Service
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
@@ -564,19 +565,26 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 			log.Crit(module, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
+		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
+		output, _ := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
+		if workItem.ExportCount != 0 {
+			exports := common.PadToMultipleOfN(output.Ok, types.SegmentSize)
+			for i := 0; i < len(exports); i += types.SegmentSize {
+				segments = append(segments, exports[i:i+types.SegmentSize])
+				/*
+					output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, imports, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
+					//fmt.Printf("refine Output.Ok=%x\n", output.Ok)
+					//fmt.Printf("refine exportsLen=%v vm=%x\n", len(exported_segments), exported_segments)
 
-		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, imports, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
-		//fmt.Printf("refine Output.Ok=%x\n", output.Ok)
-		//fmt.Printf("refine exportsLen=%v vm=%x\n", len(exported_segments), exported_segments)
+					expectedSegmentCnt := int(workItem.ExportCount)
+					if expectedSegmentCnt != len(exported_segments) {
+						log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments))
+					}
+					if expectedSegmentCnt != 0 {
+						for i := 0; i < expectedSegmentCnt; i++ {
+							segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
+							segments = append(segments, segment)*/
 
-		expectedSegmentCnt := int(workItem.ExportCount)
-		if expectedSegmentCnt != len(exported_segments) {
-			log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments))
-		}
-		if expectedSegmentCnt != 0 {
-			for i := 0; i < expectedSegmentCnt; i++ {
-				segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
-				segments = append(segments, segment)
 			}
 		}
 		result := types.WorkResult{
@@ -589,10 +597,12 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		results = append(results, result)
 
 		o := types.AccumulateOperandElements{
-			Results:         result.Result,
-			Payload:         result.PayloadHash,
-			WorkPackageHash: workPackageHash,
-			AuthOutput:      r.Ok,
+			H: common.Hash{},
+			E: common.Hash{},
+			A: p_a,
+			O: r.Ok,
+			Y: result.PayloadHash,
+			D: result.Result,
 		}
 		log.Debug(debugDA, "DA: WrangledResults", "n", types.DecodedWrangledResults(&o))
 	}

@@ -737,50 +737,54 @@ func (vm *VM) hostFetch() {
 	omega_11, _ := vm.ReadRegister(11)
 	omega_12, _ := vm.ReadRegister(12)
 	var v_Bytes []byte
-	if datatype == 0 {
+
+	switch datatype {
+	case 0:
 		v_Bytes, _ = types.Encode(vm.WorkPackage)
-	}
-	if datatype == 1 {
+	case 1:
 		v_Bytes = vm.Authorization
-	}
-	if datatype == 2 && omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
-		v_Bytes = vm.WorkPackage.WorkItems[omega_11].Payload
-	}
-	if datatype == 3 && omega_11 < uint64(len(vm.WorkPackage.WorkItems)) && omega_12 < uint64(len(vm.WorkPackage.WorkItems[omega_11].Extrinsics)) {
-		// get extrinsic by omega 11 and omega 12
-		extrinsicHash := common.Blake2Hash(vm.Extrinsics[omega_11][:])
-		extrinsicLength := len(vm.Extrinsics[omega_11])
-		workitemExtrinisc := types.WorkItemExtrinsic{
-			Hash: extrinsicHash,
-			Len:  uint32(extrinsicLength),
+	case 2:
+		if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
+			v_Bytes = vm.WorkPackage.WorkItems[omega_11].Payload
 		}
-		if vm.WorkPackage.WorkItems[omega_11].Extrinsics[omega_12] == workitemExtrinisc {
-			v_Bytes = vm.Extrinsics[omega_11][:]
+	case 3:
+		if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) && omega_12 < uint64(len(vm.WorkPackage.WorkItems[omega_11].Extrinsics)) {
+			// get extrinsic by omega 11 and omega 12
+			extrinsicHash := common.Blake2Hash(vm.Extrinsics[omega_11][:])
+			extrinsicLength := len(vm.Extrinsics[omega_11])
+			workitemExtrinisc := types.WorkItemExtrinsic{
+				Hash: extrinsicHash,
+				Len:  uint32(extrinsicLength),
+			}
+			if vm.WorkPackage.WorkItems[omega_11].Extrinsics[omega_12] == workitemExtrinisc {
+				v_Bytes = vm.Extrinsics[omega_11][:]
+			}
 		}
-	}
-	if datatype == 4 && omega_11 < uint64(len(vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics)) {
-		// get extrinsic by index within the sequence specified by this work-item
-		extrinsicHash := common.Blake2Hash(vm.Extrinsics[vm.WorkItemIndex][:])
-		extrinsicLength := len(vm.Extrinsics[vm.WorkItemIndex])
-		workitemExtrinisc := types.WorkItemExtrinsic{
-			Hash: extrinsicHash,
-			Len:  uint32(extrinsicLength),
+	case 4:
+		if omega_11 < uint64(len(vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics)) {
+			// get extrinsic by index within the sequence specified by this work-item
+			extrinsicHash := common.Blake2Hash(vm.Extrinsics[vm.WorkItemIndex][:])
+			extrinsicLength := len(vm.Extrinsics[vm.WorkItemIndex])
+			workitemExtrinisc := types.WorkItemExtrinsic{
+				Hash: extrinsicHash,
+				Len:  uint32(extrinsicLength),
+			}
+			if vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics[omega_11] == workitemExtrinisc {
+				v_Bytes = vm.Extrinsics[vm.WorkItemIndex][:]
+			}
 		}
-		if vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics[omega_11] == workitemExtrinisc {
-			v_Bytes = vm.Extrinsics[vm.WorkItemIndex][:]
-		}
-	}
-	if datatype == 5 && len(vm.Imports) > 0 {
+	case 5:
 		// get imported segment by omega 11 and omega 12
 		if omega_11 < uint64(len(vm.Imports)) && omega_12 < uint64(len(vm.Imports[omega_11])) {
-			v_Bytes = vm.Imports[omega_11][:]
+			v_Bytes = vm.Imports[omega_11][omega_12][:]
 		}
-	}
-	if datatype == 6 && len(vm.Imports) > 0 {
+	case 6:
 		// get imported segment by work item index
 		if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
-			v_Bytes = vm.Imports[vm.WorkItemIndex][:]
+			v_Bytes = vm.Imports[vm.WorkItemIndex][omega_11][:]
 		}
+	case 7:
+		v_Bytes = vm.WorkPackage.ParameterizationBlob
 	}
 
 	if v_Bytes == nil {
@@ -1121,6 +1125,7 @@ func (vm *VM) hostWrite() {
 			vm.ResultCode = types.PVM_PANIC
 			return
 		}
+		l = uint64(len(v))
 	}
 
 	a.WriteStorage(a.ServiceIndex, k, v)
@@ -1255,9 +1260,10 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 	delta := vm.Delta
 	s := vm.Service_index
 	omega_7, _ := vm.ReadRegister(7)
-	ho, _ := vm.ReadRegister(8)
-	bo, _ := vm.ReadRegister(9)
-	bz, _ := vm.ReadRegister(10)
+	h, _ := vm.ReadRegister(8)
+	o, _ := vm.ReadRegister(9)
+	omega_10, _ := vm.ReadRegister(10)
+	omega_11, _ := vm.ReadRegister(11)
 
 	if omega_7 == NONE {
 		a = delta[s]
@@ -1265,7 +1271,11 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 		a = delta[uint32(omega_7)]
 	}
 
-	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(ho), 32)
+	if a == nil {
+		a, _, _ = vm.hostenv.GetService(uint32(omega_7))
+	}
+
+	hBytes, errCode := vm.Ram.ReadRAMBytes(uint32(h), 32)
 	if errCode != OK {
 		vm.terminated = true
 		vm.ResultCode = types.PVM_PANIC
@@ -1279,9 +1289,9 @@ func (vm *VM) hostHistoricalLookup(t uint32) {
 		vm.HostResultCode = NONE
 		return
 	} else {
-		l := uint64(vLength)
-		l = min(l, bz)
-		err := vm.Ram.WriteRAMBytes(uint32(bo), v[:l])
+		f := min(omega_10, vLength)
+		l := min(omega_11, vLength-f)
+		err := vm.Ram.WriteRAMBytes(uint32(o), v[f:l])
 		if err != OK {
 			vm.terminated = true
 			vm.ResultCode = types.PVM_PANIC
@@ -1338,19 +1348,25 @@ func (vm *VM) hostMachine() {
 		return
 	}
 
+	if vm.RefineM_map == nil {
+		vm.RefineM_map = make(map[uint32]*RefineM)
+	}
+
 	min_n := uint32(0)
-	for n, _ := range vm.RefineM_map {
+	for n := range vm.RefineM_map {
 		if n == min_n {
 			min_n = n + 1
 		}
 	}
 
 	u := NewRAM()
-	vm.RefineM_map[min_n] = &RefineM{}
 
-	vm.RefineM_map[min_n].P = p
-	vm.RefineM_map[min_n].U = u
-	vm.RefineM_map[min_n].I = i
+	vm.RefineM_map[min_n] = &RefineM{
+		P: p,
+		U: u,
+		I: i,
+	}
+
 	vm.WriteRegister(7, uint64(min_n))
 }
 
@@ -1486,7 +1502,7 @@ func (vm *VM) hostZero() {
 	access_mode := AccessMode{Inaccessible: false, Writable: true, Readable: false}
 	_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
 
-	_ = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, 0))
+	_ = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, PageSize))
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -1521,24 +1537,24 @@ func getLogLevelName(level uint64) string {
 
 // JIP-1 https://hackmd.io/@polkadot/jip1
 func (vm *VM) hostLog() {
-
 	level, _ := vm.ReadRegister(7)
-	target, _ := vm.ReadRegister(8)
-	targetlen, _ := vm.ReadRegister(9)
+	//target, _ := vm.ReadRegister(8)
+	//targetlen, _ := vm.ReadRegister(9)
 	message, _ := vm.ReadRegister(10)
 	messagelen, _ := vm.ReadRegister(11)
-	targetBytes, errCode := vm.Ram.ReadRAMBytes(uint32(target), uint32(targetlen))
-	if errCode != OK {
-		vm.HostResultCode = OOB
-		return
-	}
+
+	// targetBytes, errCode := vm.Ram.ReadRAMBytes(uint32(target), uint32(targetlen))
+	// if errCode != OK {
+	// 	vm.HostResultCode = OOB
+	// 	return
+	// }
 	messageBytes, errCode := vm.Ram.ReadRAMBytes(uint32(message), uint32(messagelen))
 	if errCode != OK {
 		vm.HostResultCode = OOB
 		return
 	}
 	levelName := getLogLevelName(level) // Assume a function that maps level numbers to log level names.
-	log.Debug(vm.logging, "log", "level", levelName, "TARGET", string(targetBytes), "msg", string(messageBytes))
+	log.Debug(vm.logging, "log", "level", levelName, "msg", string(messageBytes))
 	vm.HostResultCode = OK
 }
 

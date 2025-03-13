@@ -6,7 +6,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) ([]byte, uint32, error) {
+func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) (auth_code_real []byte, package_metadata []byte, host uint32, err error) {
 	p_h := wp.AuthCodeHost
 	p_u := wp.AuthorizationCodeHash
 	// author_sevice, _, err := s.getServiceAccount(p_h)
@@ -16,12 +16,19 @@ func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) ([]byte, uint32, error)
 	// t := wp.RefineContext.LookupAnchorSlot
 
 	// code := s.HistoricalLookup(author_sevice, t, p_u)
-
 	code, _, err := s.ReadServicePreimageBlob(p_h, p_u)
-	if code == nil || len(code) == 0 || err != nil {
-		return nil, 0, fmt.Errorf("getAuthorizeCode: Authorization code(%s)not found, err: %v", p_u.String_short(), err)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: ReadServicePreimageBlob error, err %v, codehash:%v", err, p_u)
 	}
-	return code, p_h, nil
+	auth_code := AuthorizeCode{}
+	err = auth_code.Decode(code)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: Authorization code(%s) decode error, err: %v", p_u.String_short(), err)
+	}
+	if code == nil || len(code) == 0 || err != nil {
+		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: Authorization code(%s)not found, err: %v", p_u.String_short(), err)
+	}
+	return auth_code.AuthorizationCode, auth_code.PackageMetaData, p_h, nil
 }
 
 func (s *StateDB) VerifyPackage(wpb types.WorkPackageBundle) error {
@@ -30,7 +37,7 @@ func (s *StateDB) VerifyPackage(wpb types.WorkPackageBundle) error {
 		return fmt.Errorf("VerifyPackage: %v", err)
 	}
 	wp := wpb.WorkPackage
-	code, _, err := s.GetAuthorizeCode(wp)
+	code, _, _, err := s.GetAuthorizeCode(wp)
 	if err != nil {
 		return err
 	}

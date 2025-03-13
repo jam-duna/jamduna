@@ -169,10 +169,12 @@ func (d DeferredTransfer) Clone() DeferredTransfer {
 // 175
 // O: The accumulation operand element, corresponding to a single work result.
 type AccumulateOperandElements struct {
-	Results         Result      `json:"results"`           //o
-	Payload         common.Hash `json:"payload"`           //l
-	WorkPackageHash common.Hash `json:"work_package_hash"` //k
-	AuthOutput      []byte      `json:"auth_output"`       //a
+	H common.Hash `json:"H"` // h
+	E common.Hash `json:"E"` // e
+	A common.Hash `json:"A"` // a
+	O []byte      `json:"O"` // o
+	Y common.Hash `json:"Y"` // y
+	D Result      `json:"D"` // d
 }
 
 func (a *DeferredTransfer) Bytes() []byte {
@@ -193,20 +195,23 @@ func (a *DeferredTransfer) String() string {
 }
 
 func DecodedWrangledResults(o *AccumulateOperandElements) string {
-	type Alias AccumulateOperandElements
 	aux := struct {
-		Results         string      `json:"results"`
-		Payload         common.Hash `json:"payload"`
-		WorkPackageHash common.Hash `json:"work_package_hash"`
-		AuthOutput      []byte      `json:"auth_output"`
+		H common.Hash `json:"H"`
+		E common.Hash `json:"E"`
+		A common.Hash `json:"A"`
+		O []byte      `json:"O"`
+		Y common.Hash `json:"Y"`
+		D string      `json:"D"`
 	}{
-		Payload:         o.Payload,
-		WorkPackageHash: o.WorkPackageHash,
-		AuthOutput:      o.AuthOutput,
+		H: o.H,
+		E: o.E,
+		A: o.A,
+		O: o.O,
+		Y: o.Y,
 	}
 
-	ResultBytes, _ := Encode(o.Results)
-	aux.Results = fmt.Sprintf("0x%x", ResultBytes)
+	ResultBytes, _ := Encode(o.D)
+	aux.D = fmt.Sprintf("0x%x", ResultBytes)
 
 	enc, err := json.Marshal(aux)
 	if err != nil {

@@ -55,9 +55,9 @@ func HistorySTF(input HInput, s HState) (poststate HState) {
 	}
 	mmr.Append(&(input.AccumulateRoot))
 
-	reported := types.SegmentRootLookup{}
+	reported := types.SegmentRootLookupHistory{}
 	for _, g := range input.Reported {
-		reported = append(reported, types.SegmentRootLookupItem{
+		reported = append(reported, types.SegmentRootLookupItemHistory{
 			WorkPackageHash: g.WorkPackageHash,
 			SegmentRoot:     g.SegmentRoot,
 		})

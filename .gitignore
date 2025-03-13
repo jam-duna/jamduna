@@ -4,6 +4,7 @@
 /node/logs
 /node/*.pprof
 /node/*.test
+/node/refine_testvector
 coverage.out
 /.vscode
 /cmd/importblocks/**/*.json

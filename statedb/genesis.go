@@ -104,12 +104,21 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
 	}
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
-	auth_code, err0 := os.ReadFile(auth_pvm)
+	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
 	if err0 != nil {
 		return outfn, err
 	}
-	auth_code_hash := common.Blake2Hash(auth_code)
-	auth_code_len := uint32(len(auth_code))
+	auth_code := AuthorizeCode{
+		PackageMetaData:   []byte("Bootstrap"),
+		AuthorizationCode: auth_code_bytes,
+	}
+	auth_code_encoded_bytes, err := auth_code.Encode()
+	if err != nil {
+		return outfn, err
+	}
+	auth_code_hash := common.Blake2Hash(auth_code_encoded_bytes) //pu
+	auth_code_hash_hash := common.Blake2Hash(auth_code_hash[:])  //pa
+	auth_code_len := uint32(len(auth_code_encoded_bytes))
 	for _, service := range services {
 		if service.ServiceCode != 0 {
 			// only Bootstrap
@@ -135,15 +144,16 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		}
 
 		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
-		statedb.WriteServicePreimageBlob(service.ServiceCode, auth_code)
+		statedb.WriteServicePreimageBlob(service.ServiceCode, auth_code_encoded_bytes)
 		statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
 		statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
 		statedb.WriteServicePreimageLookup(service.ServiceCode, auth_code_hash, auth_code_len, bootStrapAnchor)
 	}
-	fmt.Printf("Bootstrap Author CodeHash: %v\n", auth_code_hash)
+	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a
+	fmt.Printf("Bootstrap AuthorizationCodeHash: %v\n", auth_code_hash)  //p_u
 	for idx := range j.AuthorizationQueue {
 		for i := range j.AuthorizationQueue[idx] {
-			j.AuthorizationQueue[idx][i] = auth_code_hash
+			j.AuthorizationQueue[idx][i] = auth_code_hash_hash
 		}
 	}
 	statedb.JamState = j

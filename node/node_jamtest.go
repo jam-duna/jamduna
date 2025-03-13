@@ -2598,29 +2598,67 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB2 START", "targetN", targetN)
 
-	jam_key := []byte("jam")
-	jam_key_hash := common.Blake2Hash(jam_key)
-	jam_key_length := uint32(len(jam_key))
+	// jam_key := []byte("jam")
+	// jam_key_hash := common.Blake2Hash(jam_key)
+	// jam_key_length := uint32(len(jam_key))
 
 	service0 := testServices["fib2"]
 	service_authcopy := testServices["auth_copy"]
+	fib2_child_code, _ := getServices([]string{"fib2_child"})
+	fib2_child_codehash := fib2_child_code["fib2_child"].CodeHash
+	fib2_child_code_length := uint32(len(fib2_child_code["fib2_child"].Code))
+	fib2_child_code_length_bytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
+
 	n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
 	prevWorkPackageHash := common.Hash{}
-	for fibN := 1; fibN <= targetN; fibN++ {
+
+	// Generate the extrinsic
+	extrinsics := types.ExtrinsicsBlobs{}
+
+	extrinsic := make([]byte, 0)
+	extrinsic = append(extrinsic, fib2_child_codehash.Bytes()...)
+	extrinsic = append(extrinsic, fib2_child_code_length_bytes...)
+
+	extrinsic_hash := common.Blake2Hash(extrinsic)
+	extrinsic_len := uint32(len(extrinsic))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsic_hash,
+		Len:  extrinsic_len,
+	})
+
+	extrinsics = append(extrinsics, extrinsic)
+
+	for fibN := 0; fibN <= 10; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 1 {
-			importedSegment := types.ImportSegment{
-				RequestedHash: prevWorkPackageHash,
-				Index:         0,
+			for i := 0; i < fibN-1; i++ {
+				importedSegment := types.ImportSegment{
+					RequestedHash: prevWorkPackageHash,
+					Index:         uint16(i),
+				}
+				importedSegments = append(importedSegments, importedSegment)
 			}
-			importedSegments = append(importedSegments, importedSegment)
 		}
 		refine_context := n1.statedb.GetRefineContext()
 
-		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(fibN))
+		var payload []byte
+		if fibN >= 1 {
+			for i := 0; i < fibN+1; i++ {
+				tmp := make([]byte, 4)
+				binary.LittleEndian.PutUint32(tmp, uint32(fibN))
+				payload = append(payload, tmp...)
+
+				tmp = make([]byte, 4)
+				binary.LittleEndian.PutUint32(tmp, uint32(1)) // function id
+				payload = append(payload, tmp...)
+			}
+		}
 		workPackage := types.WorkPackage{
 			AuthCodeHost:          0,
 			Authorization:         []byte("0x"), // TODO: set up null-authorizer
@@ -2635,7 +2673,8 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 					RefineGasLimit:     1000,
 					AccumulateGasLimit: 1000,
 					ImportedSegments:   importedSegments,
-					ExportCount:        1,
+					Extrinsics:         work_item_extrinsic,
+					ExportCount:        uint16(fibN),
 				},
 				{
 					Service:            service_authcopy.ServiceCode,
@@ -2653,7 +2692,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		log.Info(module, fmt.Sprintf("FIB2-(%v) work package submitted", fibN), "workPackage", workPackageHash)
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, extrinsics, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -2661,7 +2700,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		i := 0
 		for {
 			time.Sleep(1 * time.Second)
-			if n4.statedb.JamState.AvailabilityAssignments[core] != nil || i > 12 {
+			if n4.statedb.JamState.AvailabilityAssignments[core] != nil || i > 36 {
 				if false {
 					var workReport types.WorkReport
 					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
@@ -2690,13 +2729,21 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 			log.Info(module, fmt.Sprintf("Fib2-(%v) result with key %d", fibN, key), "result", fmt.Sprintf("%x", service_account_byte))
 		}
 
-		if fibN == 3 || fibN == 6 {
-			time.Sleep(3 * time.Second)
-			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, jam_key_hash, jam_key_length, jam_key)
+		// if fibN == 3 || fibN == 6 {
+		// 	time.Sleep(3 * time.Second)
+		// 	err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, jam_key_hash, jam_key_length, jam_key)
+		// 	if err != nil {
+		// 		log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+		// 	}
+		// 	time.Sleep(3 * time.Second)
+		// }
+
+		if fibN == 0 {
+			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, fib2_child_codehash, fib2_child_code_length, fib2_child_code["fib2_child"].Code)
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
-			time.Sleep(3 * time.Second)
+			time.Sleep(36 * time.Second)
 		}
 	}
 	time.Sleep(18 * time.Second)

@@ -14,10 +14,10 @@ import (
 type RecentBlocks []Beta_state
 
 type Beta_state struct {
-	HeaderHash common.Hash             `json:"header_hash"`
-	B          trie.MMR                `json:"mmr"`
-	StateRoot  common.Hash             `json:"state_root"`
-	Reported   types.SegmentRootLookup `json:"reported"` // Use the custom type
+	HeaderHash common.Hash                    `json:"header_hash"`
+	B          trie.MMR                       `json:"mmr"`
+	StateRoot  common.Hash                    `json:"state_root"`
+	Reported   types.SegmentRootLookupHistory `json:"reported"` // Use the custom type
 }
 
 func (b *Beta_state) String() string {
@@ -30,10 +30,10 @@ func (b *Beta_state) String() string {
 
 func (b *Beta_state) UnmarshalJSON(data []byte) error {
 	var s struct {
-		HeaderHash common.Hash             `json:"header_hash"`
-		B          trie.MMR                `json:"mmr"`
-		StateRoot  common.Hash             `json:"state_root"`
-		Report     types.SegmentRootLookup `json:"reported"`
+		HeaderHash common.Hash                    `json:"header_hash"`
+		B          trie.MMR                       `json:"mmr"`
+		StateRoot  common.Hash                    `json:"state_root"`
+		Report     types.SegmentRootLookupHistory `json:"reported"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
@@ -47,10 +47,10 @@ func (b *Beta_state) UnmarshalJSON(data []byte) error {
 
 func (b Beta_state) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		HeaderHash common.Hash             `json:"header_hash"`
-		B          trie.MMR                `json:"mmr"`
-		StateRoot  common.Hash             `json:"state_root"`
-		Report     types.SegmentRootLookup `json:"reported"`
+		HeaderHash common.Hash                    `json:"header_hash"`
+		B          trie.MMR                       `json:"mmr"`
+		StateRoot  common.Hash                    `json:"state_root"`
+		Report     types.SegmentRootLookupHistory `json:"reported"`
 	}{
 		HeaderHash: b.HeaderHash,
 		B:          b.B,
@@ -69,9 +69,9 @@ func dump_recent_blocks(prefix string, arr RecentBlocks) {
 func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
-	reported := []types.SegmentRootLookupItem{}
+	reported := []types.SegmentRootLookupItemHistory{}
 	for _, g := range blk.Guarantees() {
-		temReported := types.SegmentRootLookupItem{
+		temReported := types.SegmentRootLookupItemHistory{
 			WorkPackageHash: g.Report.AvailabilitySpec.WorkPackageHash,
 			SegmentRoot:     g.Report.AvailabilitySpec.ExportedSegmentRoot,
 		}

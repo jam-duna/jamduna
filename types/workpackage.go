@@ -51,18 +51,24 @@ func (b *WorkPackageBundle) Validate() error {
 	if len(work_package.WorkItems) > MaxWorkItemsPerPackage {
 		return fmt.Errorf("WorkPackageBundle has too many WorkItems")
 	}
-	// 0.6.2 14.4
+	// 0.6.3 14.4
 	total_exports := 0
 	total_imports := 0
+	total_extrinsics := 0
 	for _, work_item := range work_package.WorkItems {
 		total_exports += int(work_item.ExportCount)
 		total_imports += len(work_item.ImportedSegments)
+		total_extrinsics += len(work_item.Extrinsics)
 	}
 	if total_exports > MaxManifestEntries {
 		return fmt.Errorf("WorkPackageBundle has too many exports")
 	}
 	if total_imports > MaxManifestEntries {
 		return fmt.Errorf("WorkPackageBundle has too many imports")
+	}
+	//0.6.3 added maximum extrinsics
+	if total_extrinsics > ExtrinsicMaximumPerPackage {
+		return fmt.Errorf("WorkPackageBundle has too many extrinsics")
 	}
 	// 0.6.2 14.5
 	data_lens := 0

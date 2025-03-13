@@ -16,6 +16,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/nsf/jsondiff"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -166,7 +167,7 @@ func TestAccumulateSTF(t *testing.T) {
 }
 
 func TestSingleAccumulateSTF(t *testing.T) {
-	filepath := "../jamtestvectors/accumulate/tiny/enqueue_and_unlock_chain-1.json"
+	filepath := "../jamtestvectors/accumulate/tiny/ready_queue_editing-1.json"
 	jsonData, err := os.ReadFile(filepath)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -288,20 +289,11 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		if err != nil {
 			t.Errorf("failed to marshal JSON: %v", err)
 		}
-		// write the files to disk
-		// /testdata/accumulate_vector_test
-		testdata_dir := fmt.Sprintf("./testdata/%s", testname)
-		err = os.MkdirAll(testdata_dir, 0755)
-		if err != nil {
-			t.Errorf("failed to create directory: %v", err)
-		}
-		err = os.WriteFile(fmt.Sprintf("%s/expected_history.json", testdata_dir), expected_history_json, 0644)
-		if err != nil {
-			t.Errorf("failed to write file: %v", err)
-		}
-		err = os.WriteFile(fmt.Sprintf("%s/actual_history.json", testdata_dir), actual_history_json, 0644)
-		if err != nil {
-			t.Errorf("failed to write file: %v", err)
+		// use jsondiff to compare the files
+		opts := jsondiff.DefaultJSONOptions()
+		diff, diffStr := jsondiff.Compare([]byte(expected_history_json), []byte(actual_history_json), &opts)
+		if diff != jsondiff.FullMatch {
+			fmt.Printf("diff: %s\n", diffStr)
 		}
 	}
 	// AccumulationQueue
@@ -320,20 +312,11 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		if err != nil {
 			t.Errorf("failed to marshal JSON: %v", err)
 		}
-		// write the files to disk
-		// /testdata/accumulate_vector_test
-		testdata_dir := fmt.Sprintf("./testdata/%s", testname)
-		err = os.MkdirAll(testdata_dir, 0755)
-		if err != nil {
-			t.Errorf("failed to create directory: %v", err)
-		}
-		err = os.WriteFile(fmt.Sprintf("%s/expected_queue.json", testdata_dir), expected_queue_json, 0644)
-		if err != nil {
-			t.Errorf("failed to write file: %v", err)
-		}
-		err = os.WriteFile(fmt.Sprintf("%s/actual_queue.json", testdata_dir), actual_queue_json, 0644)
-		if err != nil {
-			t.Errorf("failed to write file: %v", err)
+		// use jsondiff to compare the files
+		opts := jsondiff.DefaultJSONOptions()
+		diff, diffStr := jsondiff.Compare([]byte(expected_queue_json), []byte(actual_queue_json), &opts)
+		if diff != jsondiff.FullMatch {
+			fmt.Printf("diff: %s\n", diffStr)
 		}
 
 	}

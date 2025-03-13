@@ -61,7 +61,7 @@ const (
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 )
 
-var bootstrap_auth_codehash = common.Hash(common.FromHex("0x8c30f2c101674af1da31769e96ce72e81a4a44c89526d7d3ff0a1a511d5f3c9f"))
+var bootstrap_auth_codehash = common.Hash(common.FromHex("0x397c392ad076df2b8f9e1522cb3554178e41200ba389a4fa4aab141a560202a2"))
 var test_prereq = false // Test Prerequisites Enabled
 const (
 	ValidatorFlag   = "VALIDATOR"

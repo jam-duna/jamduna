@@ -3,12 +3,13 @@ package pvm
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sort"
 	"strconv"
-
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
@@ -299,7 +300,7 @@ type VM struct {
 	WorkPackage   types.WorkPackage
 	Extrinsics    types.ExtrinsicsBlobs
 	Authorization []byte
-	Imports       [][]byte
+	Imports       [][][]byte
 
 	// Invocation funtions entry point
 	EntryPoint uint32
@@ -908,7 +909,6 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 
 		// 3. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-
 		page_index = ((1 << 32) - 2*Z_Z - Z_I - P_func(vm.s)) / PageSize
 		page_length = CelingDevide(P_func(vm.s), PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
@@ -1024,17 +1024,67 @@ func (vm *VM) GetServiceIndex() uint32 {
 	return vm.Service_index
 }
 
+type ExecuteRefineTestVector struct {
+	WorkItemIndex  uint32                `json:"work_item_index"`
+	WorkPackage    types.WorkPackage     `json:"work_package"`
+	Authorization  types.Result          `json:"authorization"`
+	ImportSegments [][][]byte            `json:"import_segments"`
+	ExportCount    uint16                `json:"export_count"`
+	Extrinsics     types.ExtrinsicsBlobs `json:"extrinsics"`
+	PA             common.Hash           `json:"p_a"`
+	A              []byte                `json:"a"`
+	Result         types.Result          `json:"result"`
+	GasUsed        uint64                `json:"gas_used"`
+}
+
+func recordExecuteRefineTestVector(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, a []byte, result types.Result, gasUsed uint64) {
+	testVector := ExecuteRefineTestVector{
+		WorkItemIndex:  workitemIndex,
+		WorkPackage:    workPackage,
+		Authorization:  authorization,
+		ImportSegments: importsegments,
+		ExportCount:    export_count,
+		Extrinsics:     extrinsics,
+		PA:             p_a,
+		A:              a,
+		Result:         result,
+		GasUsed:        gasUsed,
+	}
+
+	// Encode to JSON
+	data, err := json.MarshalIndent(testVector, "", "  ")
+	if err != nil {
+		fmt.Printf("Error encoding JSON: %v\n", err)
+		return
+	}
+	// check if there is a directory to write called refine_testvector
+	if _, err := os.Stat("refine_testvector"); os.IsNotExist(err) {
+		if err := os.Mkdir("refine_testvector", 0755); err != nil {
+			fmt.Printf("Error creating directory: %v\n", err)
+			return
+		}
+	}
+	// Write to file
+	filename := fmt.Sprintf("refine_testvector/refine_testvector_%s%d.json", workPackage.Hash(), workitemIndex)
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		fmt.Printf("Error writing file: %v\n", err)
+	}
+}
+
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
-func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
+func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64) {
+	// vm.SetLogging("authoring")
 	workitem := workPackage.WorkItems[workitemIndex]
 
 	a := common.Uint32ToBytes(workitem.Service)
-	a = append(a, workitem.Payload...)
+	encoded_workitem_payload, _ := types.Encode(workitem.Payload)
+	a = append(a, encoded_workitem_payload...)
 	a = append(a, workPackage.Hash().Bytes()...)
 
-	workPackage_RefineContext, _ := types.Encode(workPackage.RefineContext)
-	a = append(a, workPackage_RefineContext...)
-	a = append(a, p_a.Bytes()...)
+	encoded_workPackage_RefineContext, _ := types.Encode(workPackage.RefineContext)
+	a = append(a, encoded_workPackage_RefineContext...)
+	encoded_p_a, _ := types.Encode(p_a)
+	a = append(a, encoded_p_a...)
 
 	vm.WorkItemIndex = workitemIndex
 	vm.Gas = workitem.RefineGasLimit
@@ -1048,8 +1098,12 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine)
 	r, res = vm.getArgumentOutputs()
-	exportedSegments = vm.Exports
-	return r, res, exportedSegments
+
+	recordExecuteRefineTestVector(workitemIndex, workPackage, authorization, importsegments, export_count, extrinsics, p_a, a, r, res)
+	//exportedSegments = vm.Exports
+	//return r, res, exportedSegments
+
+	return r, res
 }
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
@@ -1821,14 +1875,14 @@ func (vm *VM) storeImmInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U16:
-		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<16), 2))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%(1<<16)), 2))
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U32:
-		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%1<<32), 4))
+		errCode := vm.Ram.WriteRAMBytes(uint32(valueA)+uint32(vx), types.E_l(uint64(vy%(1<<32)), 4))
 		if errCode != OK {
 			vm.ResultCode = types.PVM_FAULT
 			vm.terminated = true
@@ -2095,7 +2149,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		result := uint64(z_decode(z_encode(uint64(value[0]), 1), 8))
+		result := z_decode(z_encode(uint64(value[0]), 1), 8)
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
@@ -2105,7 +2159,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		result := uint64(types.DecodeE_l(value))
+		result := types.DecodeE_l(value)
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 2)
@@ -2126,7 +2180,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		result := uint64(types.DecodeE_l(value))
+		result := types.DecodeE_l(value)
 		vm.WriteRegister(registerIndexA, result)
 	case LOAD_IND_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(valueB)+uint32(vx), 4)
@@ -2146,7 +2200,7 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		result := uint64(types.DecodeE_l(value))
+		result := types.DecodeE_l(value)
 		vm.WriteRegister(registerIndexA, result)
 	default:
 		vm.ResultCode = types.PVM_PANIC
@@ -2683,11 +2737,11 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	case XNOR:
 		result = ^(valueA ^ valueB)
 	case MAX:
-		result = uint64(max(z_encode(valueA, 8), z_encode(valueB, 8)))
+		result = z_decode(max(z_encode(valueA, 8), z_encode(valueB, 8)), 8)
 	case MAX_U:
 		result = max(valueA, valueB)
 	case MIN:
-		result = uint64(min(z_encode(valueA, 8), z_encode(valueB, 8)))
+		result = z_decode(min(z_encode(valueA, 8), z_encode(valueB, 8)), 8)
 	case MIN_U:
 		result = min(valueA, valueB)
 	default:

@@ -637,6 +637,7 @@ func (j *JamState) checkReportPendingOnCore(g types.Guarantee) error {
 		}
 	}
 	if !find {
+		fmt.Printf("checkReportPendingOnCore: %v\n", g.String())
 		return jamerrors.ErrGCoreUnexpectedAuthorizer
 	}
 	return nil

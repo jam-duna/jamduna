@@ -28,12 +28,20 @@ SegmentRootLookupItem ::= SEQUENCE {
 */
 
 type SegmentRootLookupItem struct {
+	WorkPackageHash common.Hash `json:"work_package_hash"`
+	SegmentRoot     common.Hash `json:"segment_tree_root"`
+}
+
+// SegmentRootLookup represents a list of SegmentRootLookupItem
+type SegmentRootLookup []SegmentRootLookupItem
+
+type SegmentRootLookupItemHistory struct {
 	WorkPackageHash common.Hash `json:"hash"`
 	SegmentRoot     common.Hash `json:"exports_root"`
 }
 
 // SegmentRootLookup represents a list of SegmentRootLookupItem
-type SegmentRootLookup []SegmentRootLookupItem
+type SegmentRootLookupHistory []SegmentRootLookupItemHistory
 
 type WorkReport struct {
 	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`

@@ -193,15 +193,18 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 
 // HistoricalLookup, GetImportItem, ExportSegment
 func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte {
+	ok, blob := a.ReadPreimage(blob_hash, s)
+	if !ok {
+		return nil
+	}
 
-	ap_internal_key := common.Compute_preimageBlob_internal(common.Blake2Hash(blob_hash.Bytes()))
-	account_preimagehash := common.ComputeC_sh(a.ServiceIndex, ap_internal_key)
+	z := uint32(len(blob))
 
-	blob := a.Preimage[account_preimagehash].Preimage
-	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, uint32(len(blob)))
-	account_lookuphash := common.ComputeC_sh(a.ServiceIndex, al_internal_key)
+	ok, timeslots := a.ReadLookup(blob_hash, z, s)
+	if !ok {
+		return nil
+	}
 
-	timeslots := a.Lookup[account_lookuphash].T
 	if len(timeslots) == 0 {
 		return nil
 	} else if len(timeslots) == 1 {
@@ -223,5 +226,4 @@ func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash 
 			return nil
 		}
 	}
-
 }
