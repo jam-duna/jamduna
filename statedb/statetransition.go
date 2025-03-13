@@ -303,12 +303,12 @@ func ValidateSTF(pre_state *StateDB, block_origin types.Block, post_state *State
 	}
 	// gamma s verification
 	old_gamma_a := old_sf.NextEpochTicketsAccumulator
-	if new_epoch == old_epoch+1 && old_phase > types.TicketSubmissionEndSlot && len(old_gamma_a) == types.EpochLength {
+	if new_epoch == old_epoch+1 && old_phase >= types.TicketSubmissionEndSlot && len(old_gamma_a) == types.EpochLength {
 		new_gamma_s := new_sf.TicketsOrKeys
 		winning_tickets, err := old_sf.GenerateWinningMarker()
 		if err != nil {
 			error_num++
-			diffs["TicketsOrKeys"] = fmt.Sprintf("GenerateWinningMarker error: %v", err)
+			diffs["TicketsOrKeys Should Be Tickets"] = fmt.Sprintf("GenerateWinningMarker error: %v", err)
 		} else {
 			ticketsOrKeys := TicketsOrKeys{
 				Tickets: winning_tickets,
@@ -333,14 +333,22 @@ func ValidateSTF(pre_state *StateDB, block_origin types.Block, post_state *State
 		choosenkeys, err := new_sf.ChooseFallBackValidator()
 		if err != nil {
 			error_num++
-			diffs["ChooseFallBackValidator"] = fmt.Sprintf("ChooseFallBackValidator error: %v", err)
+			diffs["ChooseFallBackValidator"] = fmt.Sprintf("ChooseFallBackValidator error : %v", err)
 		} else {
 			ticketsOrKeys := TicketsOrKeys{
 				Keys: choosenkeys,
 			}
 			if !reflect.DeepEqual(new_gamma_s, ticketsOrKeys) {
 				error_num++
-				diffs["TicketsOrKeys"] = CompareJSON(new_gamma_s, ticketsOrKeys)
+				diffs[fmt.Sprintf("TicketsOrKeys Should Be Keys len(old_gamma_a)=%d", len(old_gamma_a))] = CompareJSON(new_gamma_s, ticketsOrKeys)
+				fmt.Printf("old_gamma_a len=%d\n", len(old_gamma_a))
+				fmt.Printf("new_epoch=%d\n", new_epoch)
+				fmt.Printf("old_epoch=%d\n", old_epoch)
+				fmt.Printf("old_phase=%d\n", old_phase)
+				//types.EpochLength
+				fmt.Printf("epoch_length=%d\n", types.EpochLength)
+				// types.TicketSubmissionEndSlot
+				fmt.Printf("TicketSubmissionEndSlot=%d\n", types.TicketSubmissionEndSlot)
 			}
 		}
 	}

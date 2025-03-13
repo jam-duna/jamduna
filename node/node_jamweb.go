@@ -202,7 +202,6 @@ func (n *Node) RunApplyBlockAndWeb(block_data_dir string, port uint16, storage *
 		if file.IsDir() {
 			continue
 		}
-
 		filePath := filepath.Join(block_data_dir, file.Name())
 		data, err := ioutil.ReadFile(filePath)
 		if err != nil {
