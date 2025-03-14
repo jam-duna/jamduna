@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -529,4 +530,28 @@ func (s *ServiceAccount) JsonString() string {
 		return fmt.Sprintf("Error marshalling ServiceAccount: %v", err)
 	}
 	return string(jsonBytes)
+}
+
+func CombineMetadataAndCode(service_name string, code []byte) []byte {
+	service_name_bytes := []byte(service_name)
+	service_name_length_bytes := E(uint64(len(service_name_bytes)))
+	return append(service_name_length_bytes, append(service_name_bytes, code...)...)
+}
+
+func SplitMetadataAndCode(data []byte) (service_name string, code []byte) {
+	metadata_length_byte, remaining := extractBytes(data)
+	metadata_length, _ := DecodeE(metadata_length_byte)
+
+	code = remaining[metadata_length:]
+	service_name = string(remaining[:metadata_length])
+	return
+}
+
+func ReadCodeWithMetadata(fp string, metadata string) ([]byte, error) {
+	fp = common.GetFilePath(fp)
+	raw_code, err := os.ReadFile(fp)
+	if err != nil {
+		return nil, err
+	}
+	return CombineMetadataAndCode(metadata, raw_code), nil
 }

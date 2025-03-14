@@ -333,6 +333,9 @@ type VM struct {
 
 	// Output
 	Outputs []byte
+
+	// service metadata
+	ServiceMetadata []byte
 }
 
 type Forgets struct {
@@ -610,7 +613,7 @@ func extractBytes(input []byte) ([]byte, []byte) {
 
 	// Determine the number of bytes to extract based on the value of the 0th byte.
 	switch {
-	case firstByte >= 1 && firstByte < 128:
+	case firstByte >= 0 && firstByte < 128:
 		numBytes = 1
 	case firstByte >= 128 && firstByte < 192:
 		numBytes = 2
@@ -942,7 +945,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool) *VM {
+func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte) *VM {
 	if len(code) == 0 {
 		return nil
 	}
@@ -968,24 +971,25 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	//  IsAuthorized - E(p,c) Eq 268
 	//  Transfer - E(t) Eq 282
 	vm := &VM{
-		Gas:           0,
-		JSize:         p.JSize,
-		Z:             p.Z,
-		J:             p.J,
-		code:          p.Code,
-		bitmask:       p.K, // pass in bitmask K
-		register:      make([]uint64, regSize),
-		pc:            initialPC,
-		Ram:           NewRAM(),
-		hostenv:       hostENV, //check if we need this
-		Exports:       make([][]byte, 0),
-		Service_index: service_index,
-		o_size:        o_size,
-		w_size:        w_size,
-		z:             z,
-		s:             s,
-		o_byte:        o_byte,
-		w_byte:        w_byte,
+		Gas:             0,
+		JSize:           p.JSize,
+		Z:               p.Z,
+		J:               p.J,
+		code:            p.Code,
+		bitmask:         p.K, // pass in bitmask K
+		register:        make([]uint64, regSize),
+		pc:              initialPC,
+		Ram:             NewRAM(),
+		hostenv:         hostENV, //check if we need this
+		Exports:         make([][]byte, 0),
+		Service_index:   service_index,
+		o_size:          o_size,
+		w_size:          w_size,
+		z:               z,
+		s:               s,
+		o_byte:          o_byte,
+		w_byte:          w_byte,
+		ServiceMetadata: Metadata,
 	}
 	// for _, pg := range pages {
 	// 	vm.writeRAMBytes(pg.Address, pg.Contents)
@@ -997,7 +1001,9 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 }
 
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.HostEnv) *VM {
-	return NewVM(serviceIndex, code, []uint64{}, i, hostENV, true)
+	// strip metadata
+	metadata, c := types.SplitMetadataAndCode(code)
+	return NewVM(serviceIndex, c, []uint64{}, i, hostENV, true, []byte(metadata))
 }
 
 func NewForceCreateVM(code []byte, bitmask string, hostENV types.HostEnv) *VM {
@@ -1072,8 +1078,7 @@ func recordExecuteRefineTestVector(workitemIndex uint32, workPackage types.WorkP
 }
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
-func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64) {
-	// vm.SetLogging("authoring")
+func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	workitem := workPackage.WorkItems[workitemIndex]
 
 	a := common.Uint32ToBytes(workitem.Service)
@@ -1100,10 +1105,9 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	r, res = vm.getArgumentOutputs()
 
 	recordExecuteRefineTestVector(workitemIndex, workPackage, authorization, importsegments, export_count, extrinsics, p_a, a, r, res)
-	//exportedSegments = vm.Exports
+	exportedSegments = vm.Exports
 	//return r, res, exportedSegments
-
-	return r, res
+	return r, res, exportedSegments
 }
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
@@ -1182,11 +1186,11 @@ func (vm *VM) Execute(entryPoint int) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-			log.Debug(vm.logging, fmt.Sprintf("%d: PC %d ECALLI COMPLETE", stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
+			log.Debug(vm.logging, "service", string(vm.ServiceMetadata), fmt.Sprintf("%d: PC %d ECALLI COMPLETE", stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
 		}
 		stepn++
 	}
-	log.Trace(vm.logging, "PVM Complete", "pc", vm.pc)
+	log.Trace(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
@@ -1214,7 +1218,7 @@ func (vm *VM) setArgumentInputs(a []byte) error {
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	if vm.ResultCode == types.PVM_OOG {
 		r.Err = types.RESULT_OOG
-		log.Debug(vm.logging, "getArgumentOutputs - OOG")
+		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
 	o, _ := vm.ReadRegister(7)
@@ -1231,7 +1235,7 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		return r, res
 	}
 	r.Err = types.RESULT_PANIC
-	log.Debug(vm.logging, "getArgumentOutputs - PANIC")
+	log.Debug(vm.logging, "getArgumentOutputs - PANIC", "service", string(vm.ServiceMetadata))
 	return r, 0
 }
 
@@ -1400,7 +1404,7 @@ func (vm *VM) step(stepn int) error {
 	//beforeGas := vm.Gas
 	switch instr {
 	case TRAP:
-		log.Trace(vm.logging, "TERMINATED")
+		log.Trace(vm.logging, "TERMINATED", "service", string(vm.ServiceMetadata))
 		if instr == TRAP {
 			vm.ResultCode = types.RESULT_PANIC
 		} else {
@@ -1535,11 +1539,11 @@ func (vm *VM) step(stepn int) error {
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
-		log.Debug(vm.logging, "terminated: unknown opcode", "opcode", opcode)
+		log.Debug(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
 		return nil
 	}
 	pvmHash := vm.V1Hash()
-	log.Debug(vm.logging, fmt.Sprintf("%d: PC %d %s", stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "pvmHash", common.Str(pvmHash), "reg", vm.ReadRegisters())
+	log.Debug(vm.logging, "service", string(vm.ServiceMetadata), fmt.Sprintf("%d: PC %d %s", stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "pvmHash", common.Str(pvmHash), "reg", vm.ReadRegisters())
 	return nil
 }
 

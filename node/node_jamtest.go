@@ -240,14 +240,18 @@ func safrole(sendtickets bool) {
 	}
 }
 
-func getServices(serviceNames []string) (services map[string]*types.TestService, err error) {
+func getServices(serviceNames []string, getmetadata bool) (services map[string]*types.TestService, err error) {
 	services = make(map[string]*types.TestService)
 	for i, serviceName := range serviceNames {
-		fileName := common.GetFilePath(fmt.Sprintf("/services/%s.pvm", serviceName))
-		code, err1 := os.ReadFile(fileName)
-		if err1 != nil {
-			return services, err1
+		fileName := fmt.Sprintf("/services/%s.pvm", serviceName)
+		var code []byte
+		if getmetadata {
+			code, _ = types.ReadCodeWithMetadata(fileName, serviceName)
+		} else {
+			fileName := common.GetFilePath(fmt.Sprintf("/services/%s.pvm", serviceName))
+			code, _ = os.ReadFile(fileName)
 		}
+
 		tmpServiceCode := uint32(i + 1)
 		codeHash := common.Blake2Hash(code)
 		services[serviceName] = &types.TestService{
@@ -268,7 +272,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	log.EnableModule("authoring")
+	// log.EnableModule("authoring")
+	// log.EnableModule("da_mod")
+	log.EnableModule("segment")
 	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 	_ = nodes
 	block_graph_server := types.NewGraphServer(basePort)
@@ -293,8 +299,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	}
 	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	// code length: 206
-	fn := common.GetFilePath(statedb.BootstrapServiceFile)
-	bootstrapCode, err := os.ReadFile(fn)
+	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
 		panic(0)
 	}
@@ -323,10 +328,10 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		serviceNames = []string{"blake2b"}
 	}
 	if jam == "fib2" {
-		serviceNames = []string{"fib2", "auth_copy"}
+		serviceNames = []string{"babyvm", "auth_copy"}
 		log.EnableModule("statedb") //enable here to avoid concurrent map
 	}
-	testServices, err := getServices(serviceNames)
+	testServices, err := getServices(serviceNames, true)
 	if err != nil {
 		panic(32)
 	}
@@ -2602,11 +2607,11 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 	// jam_key_hash := common.Blake2Hash(jam_key)
 	// jam_key_length := uint32(len(jam_key))
 
-	service0 := testServices["fib2"]
+	service0 := testServices["babyvm"]
 	service_authcopy := testServices["auth_copy"]
-	fib2_child_code, _ := getServices([]string{"fib2_child"})
-	fib2_child_codehash := fib2_child_code["fib2_child"].CodeHash
-	fib2_child_code_length := uint32(len(fib2_child_code["fib2_child"].Code))
+	fib2_child_code, _ := getServices([]string{"babyvm_child"}, false)
+	fib2_child_codehash := fib2_child_code["babyvm_child"].CodeHash
+	fib2_child_code_length := uint32(len(fib2_child_code["babyvm_child"].Code))
 	fib2_child_code_length_bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
 
@@ -2739,12 +2744,12 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		// }
 
 		if fibN == 0 {
-			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, fib2_child_codehash, fib2_child_code_length, fib2_child_code["fib2_child"].Code)
+			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, fib2_child_codehash, fib2_child_code_length, fib2_child_code["babyvm_child"].Code)
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
-			time.Sleep(36 * time.Second)
+			time.Sleep(18 * time.Second)
 		}
 	}
-	time.Sleep(18 * time.Second)
+	time.Sleep(3 * time.Second)
 }

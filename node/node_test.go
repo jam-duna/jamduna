@@ -260,7 +260,7 @@ func TestDisputes(t *testing.T) {
 
 	// Load testServices
 	serviceNames := []string{"fib"}
-	testServices, err := getServices(serviceNames)
+	testServices, err := getServices(serviceNames, true)
 	if err != nil {
 		panic(32)
 	}

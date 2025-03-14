@@ -512,9 +512,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
 	t := sd.JamState.SafroleState.Timeslot
-	if sd.Authoring {
-		vm.SetLogging("authoring")
-	}
+	// if sd.Authoring {
+	// 	vm.SetLogging("authoring")
+	// }
 	vm.Timeslot = t
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
 

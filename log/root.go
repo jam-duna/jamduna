@@ -34,6 +34,7 @@ var moduleEnabled = map[string]bool{
 	"authoring": false,
 	"G":         false,
 	"grandpa":   false,
+	"segment":   false,
 }
 
 // EnableModule enables logging for the specified module.

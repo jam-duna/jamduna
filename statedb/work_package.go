@@ -28,7 +28,8 @@ func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) (auth_code_real []byte,
 	if code == nil || len(code) == 0 || err != nil {
 		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: Authorization code(%s)not found, err: %v", p_u.String_short(), err)
 	}
-	return auth_code.AuthorizationCode, auth_code.PackageMetaData, p_h, nil
+	// return auth_code.AuthorizationCode, auth_code.PackageMetaData, p_h, nil
+	return code, auth_code.PackageMetaData, p_h, nil
 }
 
 func (s *StateDB) VerifyPackage(wpb types.WorkPackageBundle) error {

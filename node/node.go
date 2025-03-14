@@ -61,7 +61,21 @@ const (
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 )
 
-var bootstrap_auth_codehash = common.Hash(common.FromHex("0x397c392ad076df2b8f9e1522cb3554178e41200ba389a4fa4aab141a560202a2"))
+var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
+
+var auth_code = statedb.AuthorizeCode{
+	PackageMetaData:   []byte("bootstrap"),
+	AuthorizationCode: auth_code_bytes,
+}
+var auth_code_encoded_bytes, _ = auth_code.Encode()
+
+var auth_code_hash = common.Blake2Hash(auth_code_encoded_bytes) //pu
+var auth_code_hash_hash = common.Blake2Hash(auth_code_hash[:])  //pa
+
+var bootstrap_auth_codehash = auth_code_hash
+
+// var bootstrap_auth_codehash = common.Hash(common.FromHex("0x397c392ad076df2b8f9e1522cb3554178e41200ba389a4fa4aab141a560202a2"))
+
 var test_prereq = false // Test Prerequisites Enabled
 const (
 	ValidatorFlag   = "VALIDATOR"

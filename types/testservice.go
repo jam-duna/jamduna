@@ -5,9 +5,10 @@ import (
 )
 
 type TestService struct {
-	ServiceCode uint32
-	FileName    string
-	CodeHash    common.Hash
-	Code        []byte
-	ServiceName string
+	ServiceCode     uint32
+	FileName        string
+	CodeHash        common.Hash
+	Code            []byte
+	ServiceName     string
+	MetadataAndCode []byte
 }

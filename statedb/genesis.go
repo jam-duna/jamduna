@@ -101,7 +101,11 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	}
 	// Load services into genesis state
 	services := []types.TestService{
-		{ServiceCode: BootstrapServiceCode, FileName: BootstrapServiceFile},
+		{
+			ServiceCode: BootstrapServiceCode,
+			FileName:    BootstrapServiceFile,
+			ServiceName: "bootstrap",
+		},
 	}
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
 	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
@@ -109,7 +113,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		return outfn, err
 	}
 	auth_code := AuthorizeCode{
-		PackageMetaData:   []byte("Bootstrap"),
+		PackageMetaData:   []byte("bootstrap"),
 		AuthorizationCode: auth_code_bytes,
 	}
 	auth_code_encoded_bytes, err := auth_code.Encode()
@@ -124,8 +128,8 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			// only Bootstrap
 			continue
 		}
-		fn := common.GetFilePath(service.FileName)
-		code, err0 := os.ReadFile(fn)
+
+		code, err0 := types.ReadCodeWithMetadata(service.FileName, service.ServiceName)
 		if err0 != nil {
 			return outfn, err
 		}

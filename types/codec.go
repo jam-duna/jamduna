@@ -509,3 +509,53 @@ func PrintObject(obj interface{}) string {
 		return string(jsonEncode)
 	}
 }
+
+func extractBytes(input []byte) ([]byte, []byte) {
+	/*
+		In GP_0.36 (272):
+		If the input value of (272) is large, "l" will also increase and vice versa.
+		"l" is than be used to encode first byte and the reaming "l" bytes.
+		If the first byte is large, that means the number of the entire encoded bytes is large and vice versa.
+		So the first byte can be used to determine the number of bytes to extract and the rule is as follows:
+	*/
+
+	if len(input) == 0 {
+		return nil, input
+	}
+
+	firstByte := input[0]
+	var numBytes int
+
+	// Determine the number of bytes to extract based on the value of the 0th byte.
+	switch {
+	case firstByte >= 0 && firstByte < 128:
+		numBytes = 1
+	case firstByte >= 128 && firstByte < 192:
+		numBytes = 2
+	case firstByte >= 192 && firstByte < 224:
+		numBytes = 3
+	case firstByte >= 224 && firstByte < 240:
+		numBytes = 4
+	case firstByte >= 240 && firstByte < 248:
+		numBytes = 5
+	case firstByte >= 248 && firstByte < 252:
+		numBytes = 6
+	case firstByte >= 252 && firstByte < 254:
+		numBytes = 7
+	case firstByte >= 254:
+		numBytes = 8
+	default:
+		numBytes = 1
+	}
+
+	// If the input length is insufficient to extract the specified number of bytes, return the original input.
+	if len(input) < numBytes {
+		return input, nil
+	}
+
+	// Extract the specified number of bytes and return the remaining bytes.
+	extracted := input[:numBytes]
+	remaining := input[numBytes:]
+
+	return extracted, remaining
+}

@@ -566,24 +566,24 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		}
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
-		output, _ := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
-		if workItem.ExportCount != 0 {
-			exports := common.PadToMultipleOfN(output.Ok, types.SegmentSize)
-			for i := 0; i < len(exports); i += types.SegmentSize {
-				segments = append(segments, exports[i:i+types.SegmentSize])
-				/*
-					output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, imports, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
-					//fmt.Printf("refine Output.Ok=%x\n", output.Ok)
-					//fmt.Printf("refine exportsLen=%v vm=%x\n", len(exported_segments), exported_segments)
+		// output, _ := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
+		// if workItem.ExportCount != 0 {
+		// 	exports := common.PadToMultipleOfN(output.Ok, types.SegmentSize)
+		// 	for i := 0; i < len(exports); i += types.SegmentSize {
+		// 		segments = append(segments, exports[i:i+types.SegmentSize])
 
-					expectedSegmentCnt := int(workItem.ExportCount)
-					if expectedSegmentCnt != len(exported_segments) {
-						log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments))
-					}
-					if expectedSegmentCnt != 0 {
-						for i := 0; i < expectedSegmentCnt; i++ {
-							segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
-							segments = append(segments, segment)*/
+		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
+		//fmt.Printf("refine Output.Ok=%x\n", output.Ok)
+		//fmt.Printf("refine exportsLen=%v vm=%x\n", len(exported_segments), exported_segments)
+
+		expectedSegmentCnt := int(workItem.ExportCount)
+		if expectedSegmentCnt != len(exported_segments) {
+			log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments))
+		}
+		if expectedSegmentCnt != 0 {
+			for i := 0; i < expectedSegmentCnt; i++ {
+				segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
+				segments = append(segments, segment)
 
 			}
 		}
