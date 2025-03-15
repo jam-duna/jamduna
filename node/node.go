@@ -10,16 +10,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"os"
-
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"math"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 
 	"math/big"
 	rand0 "math/rand"
@@ -1099,12 +1098,16 @@ func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // need to actually ECdecode
 // We continuily use erasureRoot to ask the question
-func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uint16) (segments [][]byte, err error) {
+func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justifications [][]common.Hash, err error) {
 	requests_original := make([]CE139_request, types.TotalValidators)
+	allsegmentindices := make([]uint16, si.Spec.ExportedSegmentLength)
+	for i := range si.Spec.ExportedSegmentLength {
+		allsegmentindices[i] = i
+	}
 	for i := range types.TotalValidators {
 		requests_original[i] = CE139_request{
-			ErasureRoot:    erasureRoot,
-			SegmentIndices: segmentIndices,
+			ErasureRoot:    si.Spec.ErasureRoot,
+			SegmentIndices: allsegmentindices,
 			ShardIndex:     uint16(i),
 		}
 	}
@@ -1115,7 +1118,7 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uin
 	responses, err := n.makeRequests(requests, types.ECPieceSize/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
 	if err != nil {
 		fmt.Printf("Error in fetching import segments By ErasureRoot: %v\n", err)
-		return nil, err
+		return segments, justifications, err
 	}
 
 	shards := make([][]byte, types.TotalCores)
@@ -1128,16 +1131,66 @@ func (n *Node) reconstructSegments(erasureRoot common.Hash, segmentIndices []uin
 		}
 		if numShards < len(indexes) {
 			indexes[numShards] = uint32(daResp.ShardIndex)
-			shards[numShards] = daResp.SegmentShards // this is actually multiple segments
+			shards[numShards] = daResp.SegmentShards // this is actually multiple segment shards
+			if false {
+				fmt.Printf("%s EC response shardindex=%d raw=%x hash=%s (%d bytes)\n", n.String(), daResp.ShardIndex,
+					daResp.SegmentShards, common.Blake2Hash(daResp.SegmentShards), len(daResp.SegmentShards))
+			}
 			numShards++
 		}
 	}
-	rawsegments, err := bls.Decode(shards, types.TotalValidators, indexes, len(shards[0])*2)
-	if err != nil {
-		fmt.Printf("Error in fetching import segments decode: %v\n", err)
+	chunkSize := 2052 // TODO: SegmentSize / W_E * 2
+	rawshards := make([][]byte, len(indexes))
+	numsegments := len(shards[0]) / chunkSize
+	rawsegments := make([][]byte, numsegments)
+	allsegments := make([][]byte, numsegments)
+	for s := 0; s < numsegments; s++ {
+		// do a SINGLE recoveredSegment
+		for i := 0; i < numShards; i++ {
+			rawshards[i] = shards[i][s*chunkSize : (s+1)*chunkSize]
+		}
+		recoveredSegment, err := bls.Decode(rawshards, types.TotalValidators, indexes, types.SegmentSize)
+		if err != nil {
+			fmt.Printf("Error in fetching import segments decode: %v\n", err)
+			allsegments[s] = nil // ???
+		} else {
+			allsegments[s] = recoveredSegment
+			l := 20
+			if len(allsegments[s]) < l {
+				l = len(allsegments[s])
+			}
+			log.Info(debugDA, "!!!! reconstructSegments", "s", s, "si[s]", si.Indices[s], "allsegments[s]", allsegments[s][0:l], "len", len(allsegments[s]),
+				"h", common.Blake2Hash(allsegments[s]))
+		}
 	}
-	segments = splitBytes(rawsegments, 2052)
-	return segments, nil
+
+	cdtTree := trie.NewCDMerkleTree(allsegments)
+	reconRoot := common.BytesToHash(cdtTree.Root())
+	fmt.Printf("reconstructSegments: len(rawsegments)=%d len(allsegments)=%v si.indices=%v segmentroot recon=%s\n",
+		len(rawsegments), len(allsegments), si.Indices, reconRoot)
+	if reconRoot != si.Spec.ExportedSegmentRoot {
+		cdtTree.PrintTree()
+		panic("Recon failure")
+	}
+	// j - justifications  (14.14) J(W in I)
+	justifications = make([][]common.Hash, 0)
+	for itemIndex, segment := range allsegments {
+		if slices.Contains(si.Indices, uint16(itemIndex)) {
+			segments = append(segments, segment)
+			fmt.Printf("  reconstructSegments: Added %d %x\n", itemIndex, segment[0:20])
+
+			justification, err := cdtTree.GenerateCDTJustificationX(itemIndex, 0)
+			if err != nil {
+				log.Error(debugDA, "CompilePackageBundle:GenerateCDTJustificationX", "err", err)
+			}
+			justifications = append(justifications, justification)
+			// TODO: verify justification
+		} else {
+			panic("Missing segment")
+		}
+	}
+	fmt.Printf("reconstructSegments: len(segments)=%v len(justifications)=%v\n", len(segments), len(justifications))
+	return segments, justifications, nil
 }
 
 func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32) (workPackageBundle types.WorkPackageBundle, err error) {
@@ -1535,91 +1588,6 @@ func write_jamnp_test_vector(ce string, typ string, testVectorName string, vByte
 
 func (n *Node) jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {
 	write_jamnp_test_vector(ce, "response", testVectorName, b, obj)
-}
-
-// Split the []byte into Hash of fixed size
-func SplitBytesIntoHash(data []byte, hashSize int) []common.Hash {
-	// Calculate the number of hashs
-	numChunks := int(math.Ceil(float64(len(data)) / float64(hashSize)))
-	// Make a slice of hashs
-	hashs := make([]common.Hash, 0, numChunks)
-
-	// Slice the data into hashs
-	for i := 0; i < len(data); i += hashSize {
-		end := i + hashSize
-		if end > len(data) {
-			end = len(data)
-		}
-		hashs = append(hashs, common.Hash(data[i:end]))
-	}
-	return hashs
-}
-
-func splitHashes(hashes []common.Hash) ([]common.Hash, []common.Hash) {
-	// Compute the total number of segments
-	totalSegments := len(hashes)
-	// Compute the number of page proofs
-	pfCount := int(math.Ceil(float64(totalSegments) / 64))
-
-	// The part of the hashes that are segment hashes
-	segmentHashs := hashes[:totalSegments-pfCount]
-
-	// The remaining part of the hashes that are page proofs
-	pfHashs := hashes[totalSegments-pfCount:]
-
-	return segmentHashs, pfHashs
-}
-
-// SplitDataIntoSegmentAndPageProof splits the data into segment and page proof
-func SplitDataIntoSegmentAndPageProof(data [][]byte) (segment [][]byte, pageProof [][]byte) {
-	totalData := len(data)
-	var totalPageProofs int
-	var totalSegments int
-
-	// Initial estimate of totalPageProofs
-	totalPageProofs = (totalData + 63) / 65
-
-	// Iteratively compute totalPageProofs and totalSegments
-	for {
-		totalSegments = totalData - totalPageProofs
-		newTotalPageProofs := (totalSegments + 63) / 64
-		if newTotalPageProofs == totalPageProofs {
-			break
-		}
-		totalPageProofs = newTotalPageProofs
-	}
-
-	// Return the segment and its corresponding page proof
-	return data[:totalSegments+1], data[totalSegments+1:]
-}
-
-// SplitDataIntoSegmentAndPageProof splits the data into segment and page proof
-func SplitDataIntoSegmentAndPageProofByIndex(data [][]byte, segmentIndex uint32) (segment []byte, pageProof []byte) {
-	totalData := len(data)
-	var totalPageProofs int
-	var totalSegments int
-
-	// Initial estimate of totalPageProofs
-	totalPageProofs = (totalData + 63) / 65
-
-	// Iteratively compute totalPageProofs and totalSegments
-	for {
-		totalSegments = totalData - totalPageProofs
-		newTotalPageProofs := (totalSegments + 63) / 64
-		if newTotalPageProofs == totalPageProofs {
-			break
-		}
-		totalPageProofs = newTotalPageProofs
-	}
-
-	// Compute the group index
-	groupIndex := segmentIndex / 64
-
-	// Compute the page proof position
-	pageProofPosition := totalSegments + int(groupIndex)
-
-	// Return the segment and its corresponding page proof
-	return data[segmentIndex], data[pageProofPosition]
 }
 
 func GenerateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {

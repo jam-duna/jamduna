@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -303,7 +304,7 @@ func (n *Node) runReceiveBlock() {
 			if err != nil {
 				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)
 			} else {
-				log.Debug(debugBlock, fmt.Sprintf("%s Received Block Announcement from validator %d", n.String(), blockAnnouncement.Header.AuthorIndex), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "t", b.Header.Slot)
+				log.Trace(debugBlock, fmt.Sprintf("%s Received Block Announcement from validator %d", n.String(), blockAnnouncement.Header.AuthorIndex), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "t", b.Header.Slot)
 				n.processBlock(b)
 			}
 		}
@@ -478,30 +479,31 @@ func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
 		// handle selfRequesting case
 		isSelfRequesting := req.ShardIndex == uint16(n.id)
 		if isSelfRequesting {
-			//erasureRoot, shardIndex, segmentIndices, selected_segmentshards, selected_full_justification, selected_segment_justifications, exportedSegmentAndPageProofLens, ok, err
-			erasureRoot, shardIndex, _, selected_segmentshards, _, _, _, _, err := n.GetSegmentShard_Assurer(erasureRoot, peerID, segmentIndices)
+			selected_segmentshards, ok, err := n.GetSegmentShard_AssurerSimple(erasureRoot, peerID, segmentIndices)
 			if err != nil {
 				return resp, err
 			}
-			combined_segmentShards, _ := CombineSegmentShards(selected_segmentshards)
+			if !ok {
+				return resp, fmt.Errorf("GetSegmentShard_AssurerSimple failed")
+			}
+			combined_segmentShards := bytes.Join(selected_segmentshards, nil)
 			self_response := CE139_response{
 				ErasureRoot:   erasureRoot,
-				ShardIndex:    shardIndex,
+				ShardIndex:    n.id,
 				SegmentShards: combined_segmentShards,
 				//SegmentJustifications: segmentJustifications -- not ready yet
 			}
 			return self_response, nil
 		}
-		// SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error)
-		segmentShards, segmentJustifications, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, true)
+		segmentShards, _, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, false)
 		if err != nil {
 			return resp, err
 		}
 		response := CE139_response{
-			ErasureRoot:           erasureRoot,
-			ShardIndex:            peerID,
-			SegmentShards:         segmentShards,
-			SegmentJustifications: segmentJustifications,
+			ErasureRoot:   erasureRoot,
+			ShardIndex:    peerID,
+			SegmentShards: segmentShards,
+			// SegmentJustifications: segmentJustifications -- not ready yet
 		}
 		return response, nil
 

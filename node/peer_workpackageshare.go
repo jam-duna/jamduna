@@ -307,13 +307,6 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		panic(123)
 	}
 
-	//workpackagehashes := make([]common.Hash, 0)
-	//segmentroots := make([]common.Hash, 0)
-	// TODO: why Stanley?
-	// if len(segmentroots) == 0 {
-	// 	segmentroots = append(segmentroots, common.Hash{})
-	// }
-
 	// should use original's segmentRootLookup --- no need to fetch here
 	segmentRootLookup, err := n.GetSegmentRootLookup(bp.WorkPackage)
 	if err != nil {
@@ -332,6 +325,8 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	} else {
 		n.workReportsCh <- workReport
 	}
+	//fmt.Printf("WR %v\n", workReport.String())
+
 	//TODO: Shawn this is potentially problematic. How can we have deterministic ValidatorIndex here???
 	signerSecret := n.GetEd25519Secret()
 	gc := workReport.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
@@ -347,7 +342,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		WorkReportHash: guarantee.Report.Hash(),
 		Signature:      guarantee.Signatures[0].Signature,
 	}
-	log.Debug(debugG, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature)
+	log.Trace(debugG, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature)
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return err

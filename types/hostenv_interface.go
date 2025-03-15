@@ -5,6 +5,7 @@ import (
 )
 
 type HostEnv interface {
+	GetID() uint16
 	GetService(service uint32) (*ServiceAccount, bool, error)
 	ReadServiceStorage(s uint32, k common.Hash) ([]byte, bool, error)
 	ReadServicePreimageBlob(s uint32, blob_hash common.Hash) ([]byte, bool, error)

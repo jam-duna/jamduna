@@ -57,10 +57,7 @@ func (c *ConformantECChunk) String() string {
 }
 
 type DistributeECChunk struct {
-	SegmentRoot []byte      `json:"segment_root"`
-	Data        []byte      `json:"data"`
-	RootHash    common.Hash `json:"root_hash"`
-	BlobMeta    []byte      `json:"blob_meta"`
+	Data []byte `json:"data"`
 }
 
 type DistributeECChunks []DistributeECChunk

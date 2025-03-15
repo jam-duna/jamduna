@@ -578,45 +578,36 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	}
 
 	n.workReportsMutex.Unlock()
-	/* think about it - part A
-
-	workPackageBundle, exist := n.knownPackageBundle[report_hash]
-	if ! exist {
-		// you really need to reconstruct it...
-	}
-	*/
 
 	//TODO: use segmentRootLookup
 	spec := workReport.AvailabilitySpec
-	err = n.StoreImportDAWorkReportMap(spec)
+	err = n.StoreSpec(spec)
 	if err != nil {
-		fmt.Printf("%s [auditWorkReport:StoreImportDAWorkReportMap] ERR %v\n", n.String(), err)
+		fmt.Printf("%s [auditWorkReport:StoreSpec] ERR %v\n", n.String(), err)
 		return
 	}
 
-	erasureRoot := spec.ErasureRoot
-	bundleLength := spec.BundleLength
-	workReportCoreIdx := workReport.CoreIndex
 	workPackageHash := spec.WorkPackageHash
-	workPackageBundle, fetchErr := n.FetchWorkPackageBundle(workPackageHash, erasureRoot, bundleLength)
-	if fetchErr != nil {
-		log.Error(debugAudit, "auditWorkReport:FetchWorkPackageBundle", "err", fetchErr)
+
+	// now call C138 to get bundle_shard from assurer...
+	// and then do ec rescontruction for b
+	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength)
+	if err != nil {
+		log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
+	}
+	if workPackageBundle.PackageHash() != workPackageHash {
+		log.Error(debugAudit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
 		return
 	}
-	//segmentRootLookup, err := n.GetSegmentRootLookup(workPackageBundle.WorkPackage)
 
-	segmentRootLookup := workReport.SegmentRootLookup // use workReport's segmentRootLookup
-
-	log.Trace(debugAudit, "wph", workPackageBundle.PackageHash(), "len", len(workPackageBundle.Bytes()), "wpb", workPackageBundle.Bytes())
-
-	wr, err := n.executeWorkPackageBundle(workReportCoreIdx, workPackageBundle, segmentRootLookup)
+	wr, err := n.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup)
 	if err != nil {
 		return
 	} else {
 		n.workReportsCh <- workReport
 	}
 	auditPass := false
-	if workReport.AvailabilitySpec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
+	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
 		log.Debug(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	} else {

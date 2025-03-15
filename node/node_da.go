@@ -23,11 +23,8 @@ func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, 
 	// packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte, extrinsics types.ExtrinsicsBlobs
 	packageHash := package_bundle.WorkPackage.Hash()
 	importSegments := package_bundle.ImportSegmentData
-	segments := export_segments
-	log.Trace(debugDA, "NewAvailabilitySpecifier", "id", n.id, "segments", segments)
 	b := package_bundle.Bytes()
 	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(b)
-	log.Trace(debugDA, "NewAvailabilitySpecifier", "packageHash", packageHash, "encodedPackage", b, "len(encodedPackage)", len(b))
 	if !common.CompareBytes(package_bundle.Bytes(), recovered_package_bundle.Bytes()) {
 		log.Error(debugDA, "NewAvailabilitySpecifier:Original WorkPackage and Decoded WorkPackage are different")
 	}
@@ -36,14 +33,29 @@ func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, 
 
 	// Build b♣ and s♣
 	bClubs, bEcChunks := n.buildBClub(b)
-	sClubs, sEcChunksArr := n.buildSClub(segments)
-	log.Trace(debugDA, "NewAvailabilitySpecifier", "len(bEcChunks)", len(bEcChunks), "len(sEcChunksArr)", len(sEcChunksArr), "bClubs %v\n", bClubs, "sClubs", sClubs)
+	sClubs, sEcChunksArr := n.buildSClub(export_segments)
+	for i, s := range sEcChunksArr {
+		if len(s.Data) > 0 && false {
+			fmt.Printf("%s NewAvailabilitySpecifier5 shard %d %x h=%s (%d bytes)\n", n.String(), i, s.Data[0:20], common.Blake2Hash(s.Data), len(s.Data))
+		}
+	}
 	// u = (bClub, sClub)
 	erasure_root_u := n.generateErasureRoot(bClubs, sClubs)
 
 	// ExportedSegmentRoot = CDT(segments)
-	exported_segment_root_e := generateExportedSegmentsRoot(segments)
-	log.Trace(debugDA, "n", n.id, "package_bundle", package_bundle.String(), "exported_segment_root_e", exported_segment_root_e, "importSegments", importSegments, "exported Segments", segments)
+	for i, items := range importSegments {
+		for j, seg := range items {
+			log.Info(debugDA, "**** NewAvailabilitySpecifier IMPORT segment", "node", n.id, "workitem", i, "j", j, "seg", fmt.Sprintf("%x", seg[0:20]), "len", len(seg), "h", common.Blake2Hash(seg))
+		}
+	}
+
+	for i, seg := range export_segments {
+		log.Info(debugDA, "**** NewAvailabilitySpecifier EXPORT segment", "node", n.id, "seg #", i, "seg", fmt.Sprintf("%x", seg[0:20]), "len", len(seg), "h", common.Blake2Hash(seg))
+	}
+
+	cdt := trie.NewCDMerkleTree(export_segments)
+	cdt.PrintTree()
+	exported_segment_root_e := common.Hash(cdt.Root())
 
 	// Return the Availability Specifier
 	availabilitySpecifier := types.AvailabilitySpecifier{
@@ -51,7 +63,7 @@ func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, 
 		BundleLength:          bLength,
 		ErasureRoot:           erasure_root_u,
 		ExportedSegmentRoot:   exported_segment_root_e,
-		ExportedSegmentLength: uint16(len(segments)),
+		ExportedSegmentLength: uint16(len(export_segments)),
 	}
 
 	erasureMeta = ECCErasureMap{
@@ -150,7 +162,7 @@ func (n *Node) buildBClub(b []byte) ([]common.Hash, []types.DistributeECChunk) {
 		fmt.Printf("Padded %d bytes to %d bytes (multiple of %d bytes) => %x\n", len(b), len(paddedB), types.ECPieceSize, paddedB)
 	}
 
-	// instead of a tower of abstracion, collapse it to the minimal number of lines
+	// instead of a tower of abstraction, collapse it to the minimal number of lines
 	chunks, err := bls.Encode(paddedB, types.TotalValidators)
 	if err != nil {
 		log.Error(module, "buildBclub", "err", err)
@@ -160,59 +172,65 @@ func (n *Node) buildBClub(b []byte) ([]common.Hash, []types.DistributeECChunk) {
 	bClubs := make([]common.Hash, types.TotalValidators)
 	bundleShards := chunks // this should be of size 1
 	ecChunks := make([]types.DistributeECChunk, types.TotalValidators)
-	// blob_meta := encodeBlobMeta(segmentRootsFlattened)
 	for shardIdx, shard := range bundleShards {
 		bClubs[shardIdx] = common.Blake2Hash(shard)
 		if debugSpec {
 			fmt.Printf("buildBClub hash %d: %s Shard: %x (%d bytes)\n", shardIdx, bClubs[shardIdx], shard, len(shard))
 		}
 		ecChunks[shardIdx] = types.DistributeECChunk{
-			SegmentRoot: bClubs[shardIdx].Bytes(), // SegmentRoot used to store the hash of the shard
-			Data:        shard,
-			BlobMeta:    []byte(fmt.Sprintf("len=%d", len(b))), // review
+			//SegmentRoot: bClubs[shardIdx].Bytes(), // SegmentRoot used to store the hash of the shard
+			Data: shard,
 		}
 	}
 	return bClubs, ecChunks
 }
 
 func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr []types.DistributeECChunk) {
+	for i, s := range segments {
+		fmt.Printf("[N%d] buildSClub seg[%d]=%x (%d bytes) %s\n", n.id, i, s[0:20], len(s), common.Blake2Hash(s))
+	}
 	ecChunksArr = make([]types.DistributeECChunk, types.TotalValidators)
 
 	// EC encode segments in ecChunksArr
 	for segmentIdx, segmentData := range segments {
+		if segmentIdx == 0 {
+			for i := range types.TotalValidators {
+				ecChunksArr[i] = types.DistributeECChunk{
+					Data: []byte{},
+				}
+			}
+		}
+
 		// Encode segmentData into leaves
 		erasureCodingSegments, err := bls.Encode(segmentData, types.TotalValidators)
 		if err != nil {
 			log.Error(debugDA, "buildSClub", "segmentIdx", segmentIdx, "err", err)
 		}
 		for shardIndex, shard := range erasureCodingSegments {
-			if segmentIdx == 0 {
-				ecChunksArr[shardIndex] = types.DistributeECChunk{
-					SegmentRoot: []byte{},
-					Data:        shard,
-					BlobMeta:    []byte{}, // review
-				}
-			} else {
-				ecChunksArr[shardIndex].Data = append(ecChunksArr[shardIndex].Data, shard...)
-			}
+			ecChunksArr[shardIndex].Data = append(ecChunksArr[shardIndex].Data, shard...)
+			//fmt.Printf("buildSClub segment %d shard %d => %x h=%s (%d bytes)\n", segmentIdx, shardIndex, ecChunksArr[shardIndex].Data, common.Blake2Hash(ecChunksArr[shardIndex].Data),
+			//	len(ecChunksArr[shardIndex].Data))
 		}
 	}
+
 	// now take up to 64 segments at a time and build a page proof
 	pageProofs, _ := trie.GeneratePageProof(segments)
-	for i, pageProof := range pageProofs {
+	for _, pageProof := range pageProofs {
 		paddedProof := common.PadToMultipleOfN(pageProof, types.SegmentSize)
-		if debugSpec {
-			fmt.Printf("PageProof[%d]=%x\n", i, pageProof)
-		}
 		erasureCodingPageSegments, err := bls.Encode(paddedProof, types.TotalValidators)
 		if err != nil {
-			return // TODO
+			return
 		}
 		for shardIndex, shard := range erasureCodingPageSegments {
 			ecChunksArr[shardIndex].Data = append(ecChunksArr[shardIndex].Data, shard...)
 		}
 	}
 	sClub = make([]common.Hash, types.TotalValidators)
+	for i, s := range ecChunksArr {
+		if len(s.Data) > 0 && false {
+			fmt.Printf("%s buildSClub222 shard %d %x h=%s (%d bytes)\n", n.String(), i, s.Data[0:20], common.Blake2Hash(s.Data), len(s.Data))
+		}
+	}
 
 	chunkSize := (types.SegmentSize / (types.TotalValidators / 3))
 	for shardIndex, ec := range ecChunksArr {
@@ -226,7 +244,18 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 			fmt.Printf("buildsClub hash %d: %s nchunks: %d (%d bytes/chunk)\n", shardIndex, sClub[shardIndex], len(chunks), len(chunks[0]))
 		}
 	}
+	for i, s := range ecChunksArr {
+		if len(s.Data) > 0 && false {
+			fmt.Printf("%s buildSClub shard %d %x h=%s (%d bytes)\n", n.String(), i, s.Data[0:20], common.Blake2Hash(s.Data), len(s.Data))
+		}
+	}
 
+	for i, s := range sClub {
+		empty := common.Hash{}
+		if s != empty {
+			fmt.Printf("[N%d] buildSClub[%d]=%s\n", n.id, i, s)
+		}
+	}
 	return sClub, ecChunksArr
 }
 
@@ -266,99 +295,8 @@ func (n *Node) generateErasureRoot(b []common.Hash, s []common.Hash) common.Hash
 
 // M(s) - CDT of exportedSegment
 func generateExportedSegmentsRoot(segments [][]byte) common.Hash {
-	var segmentData [][]byte
-	for _, segment := range segments {
-		segmentData = append(segmentData, segment)
-	}
-	cdt := trie.NewCDMerkleTree(segmentData)
-	if debugSpec {
-		fmt.Printf("M(s) - CDT of exportedSegment\n")
-		cdt.PrintTree()
-	}
+	cdt := trie.NewCDMerkleTree(segments)
 	return common.Hash(cdt.Root())
-}
-
-func (n *Node) FetchWorkPackageBundle(expectedWorkPackageHash common.Hash, erasureRoot common.Hash, blength uint32) (pb types.WorkPackageBundle, err error) {
-	// now call C138 to get bundle_shard from assurer...
-	// and then do ec rescontruction for b
-	packageBundle, err := n.reconstructPackageBundleSegments(erasureRoot, blength)
-	if err != nil {
-		log.Error(debugDA, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
-		return pb, err
-	}
-	if packageBundle.PackageHash() != expectedWorkPackageHash {
-		return pb, fmt.Errorf("WorkPackageHash mismatch retrieved=%v | expected=%v", packageBundle.PackageHash(), expectedWorkPackageHash)
-	}
-
-	return packageBundle, nil
-}
-
-func (n *Node) FetchImportSegments(erasureRoot common.Hash, segmentIndices []uint16) (segments [][]byte, err error) {
-	// now call C139 to get segment_shard from assurer...
-	// and then do ec rescontruction for s
-	segments, err = n.reconstructSegments(erasureRoot, segmentIndices)
-	if err != nil {
-		log.Error(debugDA, "FetchImportSegments:reconstructSegments", "err", err)
-		return segments, err
-	}
-	return segments, nil
-}
-
-// The E(p,x,s,j) function is a function that takes a package and its segments and returns a result, in EQ(186)
-func (n *Node) CompilePackageBundle(p types.WorkPackage, importSegments [][][]byte, extrinsics types.ExtrinsicsBlobs) types.WorkPackageBundle {
-
-	workItems := p.WorkItems
-	workItemCnt := 0
-	for _, workItem := range workItems {
-		if len(workItem.ImportedSegments) > 0 {
-			workItemCnt++
-		}
-	}
-
-	// p - workPackage
-	// x - [extrinsic data] for some workitem argument w
-	// extrinsicData := make([]types.ExtrinsicsBlobs, len(workItems))
-	// for workIdx, workItem := range workItems {
-	// 	extrinsicData[workIdx] = workItem.ExtrinsicsBlobs
-	// }
-
-	// s - [ImportSegmentData] should be size of G = W_E * W_S
-	importedSegmentData := importSegments
-	imports := make([][]byte, 0)
-	for _, segment := range importSegments {
-		imports = append(imports, segment...)
-	}
-
-	// j - justifications
-	// (14.14) J(W in I)
-	verifyIndex := 0
-	justifications := make([][][]common.Hash, 0)
-	for itemIndex := range len(importSegments) {
-		cdtTree := trie.NewCDMerkleTree(imports)
-		//cdtTree.PrintTree()
-		tmpJustifications := make([][]common.Hash, 0)
-		for i := 0; i < len(importSegments[itemIndex]); i++ {
-			//justification, err := cdtTree.Justify(verifyIndex) //J0
-			justification, err := cdtTree.GenerateCDTJustificationX(verifyIndex, 0) // supposedly now calling GenerateCDTJustificationX, not Justify
-			if err != nil {
-				log.Error(debugDA, "CompilePackageBundle:GenerateCDTJustificationX", "err", err)
-			}
-			justificationHashes := make([]common.Hash, 0)
-			for _, j := range justification {
-				justificationHashes = append(justificationHashes, common.Hash(j))
-			}
-			tmpJustifications = append(tmpJustifications, justificationHashes)
-			verifyIndex++
-		}
-		justifications = append(justifications, tmpJustifications)
-	}
-	workPackageBundle := types.WorkPackageBundle{
-		WorkPackage:       p,
-		ExtrinsicData:     extrinsics,
-		ImportSegmentData: importedSegmentData,
-		Justification:     justifications,
-	}
-	return workPackageBundle
 }
 
 func compareWorkPackages(wp1, wp2 types.WorkPackage) bool {
@@ -426,20 +364,20 @@ func (n *Node) GetSegmentRootLookup(wp types.WorkPackage) (segmentRootLookup typ
 	segmentRootLookup = make([]types.SegmentRootLookupItem, 0)
 	for _, workItem := range wp.WorkItems {
 		for _, importedSegment := range workItem.ImportedSegments {
-			importedSegmentRoot, importedPackageHash, err := n.getExportedSegmenstRootFromHash(importedSegment.RequestedHash)
+			si := n.SpecSearch(importedSegment.RequestedHash)
 			if err != nil {
 				return nil, err
 			} else {
-				log.Debug(debugDA, "GetSegmentRootLookup:RequestedHash", "importedSegmentRoot", importedSegmentRoot, "importedPackageHash", importedPackageHash)
+				log.Debug(debugDA, "GetSegmentRootLookup:RequestedHash", "segmentRoot", si.Spec.ExportedSegmentRoot, "importedPackageHash", si.Spec.WorkPackageHash)
 			}
-			_, exists := segmentRootLookupMap[importedSegmentRoot]
+			_, exists := segmentRootLookupMap[si.Spec.ExportedSegmentRoot]
 			if !exists {
 				segmentRootLookupItem := types.SegmentRootLookupItem{
-					WorkPackageHash: importedPackageHash,
-					SegmentRoot:     importedSegmentRoot,
+					WorkPackageHash: si.Spec.WorkPackageHash,
+					SegmentRoot:     si.Spec.ExportedSegmentRoot,
 				}
 				segmentRootLookup = append(segmentRootLookup, segmentRootLookupItem)
-				segmentRootLookupMap[importedSegmentRoot] = importedPackageHash
+				segmentRootLookupMap[si.Spec.ExportedSegmentRoot] = si.Spec.WorkPackageHash
 			}
 		}
 	}
@@ -451,14 +389,12 @@ func (n *Node) GetImportedSegmentRoots(wp types.WorkPackage) (importedSegmentRoo
 	importedPackageHashes = make([]common.Hash, 0)
 	for _, workItem := range wp.WorkItems {
 		for _, importedSegment := range workItem.ImportedSegments {
-			importedSegmentRoot, importedPackageHash, err := n.getExportedSegmenstRootFromHash(importedSegment.RequestedHash)
-			if err != nil {
-				return nil, nil, err
+			si := n.SpecSearch(importedSegment.RequestedHash)
+			if si != nil {
+				log.Trace(debugDA, "GetImportedSegmentRoots", "importedSegmentRoot", si.Spec.ExportedSegmentRoot)
+				importedSegmentRoots = append(importedSegmentRoots, si.Spec.ExportedSegmentRoot)
+				importedPackageHashes = append(importedPackageHashes, si.Spec.WorkPackageHash)
 			}
-
-			log.Trace(debugDA, "GetImportedSegmentRoots", "importedSegmentRoot", importedSegmentRoot)
-			importedSegmentRoots = append(importedSegmentRoots, importedSegmentRoot)
-			importedPackageHashes = append(importedPackageHashes, importedPackageHash)
 		}
 	}
 	return importedSegmentRoots, importedPackageHashes, nil
@@ -507,38 +443,57 @@ func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup
 	return fuzz_importsegments, fuzz_segmentRootLookup
 }
 
+// Verify the justifications using segmentRootLookup
+func VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (ok bool, err error) {
+	return true, nil
+	// TODO:
+	// if !CheckSegmentJustificationSize(importSegments, justifications) {
+	//  	return false, fmt.Errorf("importSegments and justification length mismatch")
+	// }
+
+	for itemIndex, workItem := range b.WorkPackage.WorkItems {
+		for segmentIdx, is := range workItem.ImportedSegments {
+			segmentData := b.ImportSegmentData[itemIndex][segmentIdx]
+			h := workItem.ImportedSegments[segmentIdx].RequestedHash
+			for _, l := range segmentRootLookup {
+				if h == l.WorkPackageHash {
+					h = l.SegmentRoot
+					break
+				}
+			}
+			computedRoot := trie.VerifyCDTJustificationX(segmentData[:], int(is.Index), b.Justification[itemIndex][segmentIdx], 0)
+			if !common.CompareBytes(h[:], computedRoot) {
+				return false, fmt.Errorf("justification failure")
+			}
+
+		}
+	}
+	return true, nil
+}
+
 // now we only have executeWorkPackageBundle now
 func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
-	if len(package_bundle.Justification) > 0 && len(package_bundle.Justification[0]) > 0 {
-		ok, verifyErr := VerifyBundleJustification(package_bundle.ImportSegmentData, package_bundle.Justification, package_bundle.WorkPackage, segmentRootLookup)
-		if verifyErr != nil || !ok {
-			if verifyErr != nil {
-				log.Error(module, "executeWorkPackageBundle:Justification Verification Error", "err", verifyErr)
-				panic(7890)
-			} else if !ok {
-				log.Error(module, "executeWorkPackageBundle:Justification Verification Not OK")
-			}
-
-			wp := package_bundle.WorkPackage
-			fallBackImportedSegments, err := n.FetchWorkpackageImportSegments(wp)
-			if err != nil {
-				return work_report, err
-			}
-			package_bundle.ImportSegmentData = fallBackImportedSegments
-		}
+	ok, verifyErr := VerifyBundle(&package_bundle, segmentRootLookup)
+	if verifyErr != nil || !ok {
+		return work_report, verifyErr
 	}
 
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage
 	service_index := uint32(workPackage.AuthCodeHost)
-	//workPackageHash := workPackage.Hash()
 
 	// Import Segments
+
 	for workItemIdx, workItem_segments := range package_bundle.ImportSegmentData {
-		log.Debug(debugDA, "[N%d] [workItem#%d] workItem_segments %x\n", n.id, workItemIdx, workItem_segments)
 		importsegments[workItemIdx] = workItem_segments
+		if len(workItem_segments) > 0 {
+			fmt.Printf("[N%d] work item %d: %d segments\n", n.id, workItemIdx, len(workItem_segments))
+			for i, seg := range workItem_segments {
+				fmt.Printf("[N%d] [workItem#%d] imported segment %d: %x (hash %s, len=%d)\n", n.id, workItemIdx, i, seg[0:20], common.Blake2Hash(seg), len(seg))
+			}
+		}
 	}
 	authcode, _, authindex, err := n.statedb.GetAuthorizeCode(workPackage)
 	if err != nil {
@@ -552,10 +507,6 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 
 	var segments [][]byte
 	for index, workItem := range workPackage.WorkItems {
-		// imports := make([][]byte, 0)
-		// if len(workItem.ImportedSegments) > 0 {
-		// 	imports = importsegments[index]
-		// }
 		service_index = workItem.Service
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
@@ -566,15 +517,8 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		}
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
-		// output, _ := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
-		// if workItem.ExportCount != 0 {
-		// 	exports := common.PadToMultipleOfN(output.Ok, types.SegmentSize)
-		// 	for i := 0; i < len(exports); i += types.SegmentSize {
-		// 		segments = append(segments, exports[i:i+types.SegmentSize])
 
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
-		//fmt.Printf("refine Output.Ok=%x\n", output.Ok)
-		//fmt.Printf("refine exportsLen=%v vm=%x\n", len(exported_segments), exported_segments)
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
@@ -584,7 +528,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 			for i := 0; i < expectedSegmentCnt; i++ {
 				segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
 				segments = append(segments, segment)
-
+				fmt.Printf("[N%d] EXPORT #%d %x... (%d bytes) %s\n", n.id, i, segment[0:20], len(segment), common.Blake2Hash(segment))
 			}
 		}
 		result := types.WorkResult{
@@ -606,7 +550,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		}
 		log.Debug(debugDA, "DA: WrangledResults", "n", types.DecodedWrangledResults(&o))
 	}
-	//fmt.Printf("Len exportSegments=%d, data=%x\n", len(segments), segments)
+
 	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(package_bundle, segments)
 
 	workReport := types.WorkReport{
@@ -626,98 +570,91 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 }
 
 // importSegments is a 3D array of [workItemIndex][importedSegmentIndex][segmentBytes]
-func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (importSegments [][][]byte, err error) {
-
-	log.Trace(debugDA, "[N%d] FetchWorkpackageImportSegments wp=%v (with %v items)\n", n.id, workPackage.Hash(), len(workPackage.WorkItems))
-	for workItemIdx, workItem := range workPackage.WorkItems {
-		if len(workItem.ImportedSegments) > 0 {
-			for ImportedSegmentIdx, ImportedSegment := range workItem.ImportedSegments {
-				log.Trace(debugDA, "[N%d] wp-idx=%v-%d (H,I)=(%v,%v)\n", n.id, workPackage.Hash(), workItemIdx, ImportedSegment.RequestedHash, ImportedSegmentIdx)
-			}
-		} else {
-			log.Trace(debugDA, "[N%d] wp-idx=%v-%d no ImportedSegments\n", n.id, workPackage.Hash(), workItemIdx)
-		}
-	}
-
-	// Check if there are any imported segments need to be fetched
-	needFetch := false
+func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (importSegments [][][]byte, justifications [][][]common.Hash, err error) {
 	importSegments = make([][][]byte, len(workPackage.WorkItems))
-	for _, workItem := range workPackage.WorkItems {
-		if len(workItem.ImportedSegments) != 0 {
-			needFetch = true
-			// return importsegments, nil //MK: this seems wrong!
-		}
-	}
-	if !needFetch {
-		// @mk - pls verify the rest of the code 2025/2/20
-		return importSegments, nil
-	}
+	justifications = make([][][]common.Hash, len(workPackage.WorkItems))
 
-	// Colloect all unique erasureRoots
-	erasureRoots := make([]common.Hash, 0)
-	for _, workItem := range workPackage.WorkItems {
-		for _, ImportedSegment := range workItem.ImportedSegments {
-			erasureRoot, _ := n.ErasureRootLookUP(ImportedSegment.RequestedHash)
-			if !common.HashContains(erasureRoots, erasureRoot) {
-				erasureRoots = append(erasureRoots, erasureRoot)
+	// log.Trace(debugDA, "[N%d] FetchWorkpackageImportSegments wp=%v (with %v items)\n", n.id, workPackage.Hash(), len(workPackage.WorkItems))
+	// for workItemIdx, workItem := range workPackage.WorkItems {
+	// 	if len(workItem.ImportedSegments) > 0 {
+	// 		for ImportedSegmentIdx, ImportedSegment := range workItem.ImportedSegments {
+	// 			log.Trace(debugDA, "[N%d] wp-idx=%v-%d (H,I)=(%v,%v)\n", n.id, workPackage.Hash(), workItemIdx, ImportedSegment.RequestedHash, ImportedSegmentIdx)
+	// 		}
+	// 	} else {
+	// 		log.Trace(debugDA, "[N%d] wp-idx=%v-%d no ImportedSegments\n", n.id, workPackage.Hash(), workItemIdx)
+	// 	}
+	// }
+
+	// because CE139 requires erasureroot
+	erasureRootIndex := make(map[common.Hash]*SpecIndex)
+	workItemErasureRootsMapping := make([][]*SpecIndex, len(workPackage.WorkItems))
+	for workItemIdx, workItem := range workPackage.WorkItems {
+		workItemErasureRootsMapping[workItemIdx] = make([]*SpecIndex, len(workItem.ImportedSegments))
+		for idx, ImportedSegment := range workItem.ImportedSegments {
+			// these are actually work package hashes or segment roots
+			wpi := n.SpecSearch(ImportedSegment.RequestedHash)
+			if wpi != nil {
+				oldwpi, exists := erasureRootIndex[wpi.Spec.ErasureRoot]
+				if exists {
+					oldwpi.AddIndex(uint16(ImportedSegment.Index))
+					workItemErasureRootsMapping[workItemIdx][idx] = oldwpi
+					fmt.Printf("FetchWorkpackageImportSegments - Nth SpecSearch workItemIdx=%d, idx=%d h=%s wpi=%s\n",
+						workItemIdx, idx, ImportedSegment.RequestedHash, oldwpi.String())
+				} else {
+					erasureRootIndex[wpi.Spec.ErasureRoot] = wpi
+					workItemErasureRootsMapping[workItemIdx][idx] = wpi
+					wpi.AddIndex(uint16(ImportedSegment.Index))
+					fmt.Printf("FetchWorkpackageImportSegments - 1st SpecSearch workItemIdx=%d, idx=%d h=%s wpi=%s\n",
+						workItemIdx, idx, ImportedSegment.RequestedHash, wpi.String())
+				}
+			} else {
+				panic("SpecSearch returned nil1")
 			}
 		}
 	}
 
-	// the mapping of workItem -> erasureRoots -> indices (for remap the result of reconstruct)
-	workItemErasureRootsMapping := make([]map[common.Hash][]uint16, len(workPackage.WorkItems))
-
-	//the mapping of workPackageHashes -> indices (for make request)
-	erasureRootsMapping := make(map[common.Hash][]uint16, len(workPackage.WorkItems))
-
-	// the mapping of erasureRoots -> segments positions
-	for i, workItem := range workPackage.WorkItems {
-		packageIdicesMap := make(map[common.Hash][]uint16, len(workItem.ImportedSegments))
-		for _, ImportedSegment := range workItem.ImportedSegments {
-			currentIndex := uint16(ImportedSegment.Index)
-			// TODO: everything should standardized to erasureRoot ImportedSegment.WorkPackageHash can be [exportedSegmentRoot, erasureRoot and WorkPackageHash]
-			// We ask question using erasureRoot only and mapping is portentially needed for work report
-			erasureRoot, _ := n.ErasureRootLookUP(ImportedSegment.RequestedHash)
-			packageIdicesMap[erasureRoot] = append(packageIdicesMap[erasureRoot], currentIndex)
-			if !common.Uint16Contains(erasureRootsMapping[ImportedSegment.RequestedHash], currentIndex) {
-				erasureRootsMapping[erasureRoot] = append(erasureRootsMapping[erasureRoot], currentIndex)
-			}
-		}
-		workItemErasureRootsMapping[i] = packageIdicesMap
-	}
-	log.Trace(debugDA, "[N%d] workItemErasureRootsMapping: %v\n", n.id, workItemErasureRootsMapping)
-
-	// Yse makerequerst to fetch the segments by erasureRoots and indices
-	receiveSegmentMapping := make(map[common.Hash][][]byte, len(erasureRoots))
-	for erasureRoot, indices := range erasureRootsMapping {
-		receiveSegments, err := n.reconstructSegments(erasureRoot, indices)
+	// Use makerequest CE139 to fetch the segments by erasureRoots and indices
+	receiveSegmentMapping := make(map[common.Hash][][]byte)
+	justificationsMapping := make(map[common.Hash][][]common.Hash)
+	for erasureRoot, specIndex := range erasureRootIndex {
+		receiveSegments, specJustifications, err := n.reconstructSegments(specIndex)
 		if err != nil {
 			log.Error(debugDA, "reconstructSegments", "err", err)
-			return importSegments, err
+			return importSegments, justifications, err
+		}
+		if len(receiveSegments) != len(specIndex.Indices) {
+			panic("receiveSegments and specIndex.Indices length mismatch")
 		}
 		receiveSegmentMapping[erasureRoot] = receiveSegments
+		fmt.Printf("FetchWorkpackageImportSegments erasureroot %s received len(segments)=%d\n", erasureRoot, len(receiveSegments))
+		justificationsMapping[erasureRoot] = specJustifications
 	}
 
 	// Remap the segments to [workItenIndex][importedSegmentIndex][bytes]
-	for workItemIndex, erasureRootMapping := range workItemErasureRootsMapping {
-		for erasureRoot, indices := range erasureRootMapping {
-			receivedSegments, exists := receiveSegmentMapping[erasureRoot]
-			if !exists {
-				log.Error(debugDA, "Missing segments for erasureRoot %v\n", erasureRoot)
-				continue
-			}
-			for _, index := range indices {
-				if int(index) >= len(receivedSegments) {
-					log.Error(debugDA, "Index out of range: %d for erasureRoot: %v\n", index, erasureRoot)
+	for workItemIndex, workItem := range workPackage.WorkItems {
+		for idx, _ := range workItem.ImportedSegments {
+			wpi := workItemErasureRootsMapping[workItemIndex][idx]
+
+			if wpi == nil {
+				panic("wpi is nil2")
+			} else {
+				receivedSegments, exists := receiveSegmentMapping[wpi.Spec.ErasureRoot]
+				if !exists {
+					log.Error(debugDA, "Missing segments for erasureRoot %v\n", wpi.Spec.ErasureRoot)
 					continue
+				} else {
+					importSegments[workItemIndex] = receivedSegments
+					j, existJ := justificationsMapping[wpi.Spec.ErasureRoot]
+					if existJ {
+						justifications[workItemIndex] = j
+					}
 				}
-				importSegments[workItemIndex] = append(importSegments[workItemIndex], receivedSegments[index])
 			}
 		}
 	}
 	log.Trace(debugDA, "[N%d] WP=%v Final importSegments: %x\n", n.id, workPackage.Hash(), importSegments)
 
-	return importSegments, nil
+	return importSegments, justifications, nil
 }
 
 // item 1 => 1 segment
@@ -731,39 +668,6 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 // importSegments [][][]byte
 // importSegments [0][1][x]byte=>item 1 => 1 segment
 // importSegments [1][1][x]byte=>item 2 => 1 segment
-
-func VerifyBundleJustification(importSegments [][][]byte, justifications [][][]common.Hash, workPackage types.WorkPackage, segmentRootLookup types.SegmentRootLookup) (ok bool, err error) {
-	return true, nil
-	// Verify the justifications
-	// if !CheckSegmentJustificationSize(importSegments, justifications) {
-	// 	return false, fmt.Errorf("importSegments and justification length mismatch")
-	// }
-	verifyIndex := 0
-	for itemIndex, workItem := range workPackage.WorkItems {
-		for segmentIdx := range justifications[itemIndex] {
-			log.Trace(debugDA, "VerifyBundleJustification itemIndex %v, segmentIdx %v, importSegments[%x]\n", itemIndex, segmentIdx, importSegments[itemIndex])
-			segmentData := importSegments[itemIndex][segmentIdx]
-			segmentHash := common.ComputeLeafHash_WBT_Blake2B(segmentData)
-			importWorkPackageHash := workItem.ImportedSegments[segmentIdx].RequestedHash
-			root, err := GetExportSegmentRootByWorkPackageHash(segmentRootLookup, importWorkPackageHash)
-			if err != nil {
-				return false, err
-			}
-			transferJustifications := make([][]byte, 0)
-			for _, justification := range justifications[itemIndex][segmentIdx] {
-				transferJustifications = append(transferJustifications, justification[:])
-			}
-			computedRoot := trie.VerifyCDTJustificationX(segmentHash[:], verifyIndex, transferJustifications, 0) // replaced from VerifyJustification0
-			if !common.CompareBytes(root[:], computedRoot) {
-				log.Trace(debugDA, "segmentData %x, segmentHash %v, transferJustifications %x\n", segmentData, segmentHash, transferJustifications)
-				log.Trace(debugDA, "expected root %x, computed root %x\n", root[:], computedRoot)
-				return false, fmt.Errorf("justification failure")
-			}
-			verifyIndex++
-		}
-	}
-	return true, nil
-}
 
 // Check importSegments and justifications
 func CheckSegmentJustificationSize(importSegments [][][]byte, justifications [][][]common.Hash) bool {

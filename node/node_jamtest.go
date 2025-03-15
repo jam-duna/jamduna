@@ -2647,6 +2647,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 					RequestedHash: prevWorkPackageHash,
 					Index:         uint16(i),
 				}
+				fmt.Printf("fibN=%d ImportedSegment %d (%v, %d)\n", fibN, i, prevWorkPackageHash, i)
 				importedSegments = append(importedSegments, importedSegment)
 			}
 		}
@@ -2730,8 +2731,10 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		keys := []byte{0, 1, 2, 5, 6, 8, 9}
 		for _, key := range keys {
 			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
-			service_account_byte, _, _ := n4.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
-			log.Info(module, fmt.Sprintf("Fib2-(%v) result with key %d", fibN, key), "result", fmt.Sprintf("%x", service_account_byte))
+			if false {
+				service_account_byte, _, _ := n4.getState().GetTrie().GetServiceStorage(service0.ServiceCode, k)
+				log.Info(module, fmt.Sprintf("Fib2-(%v) result with key %d", fibN, key), "result", fmt.Sprintf("%x", service_account_byte))
+			}
 		}
 
 		// if fibN == 3 || fibN == 6 {

@@ -909,6 +909,10 @@ func (s *StateDB) GetRefineContext(prereqs ...common.Hash) types.RefineContext {
 	}
 }
 
+func (s *StateDB) GetID() uint16 {
+	return s.Id
+}
+
 func (s *StateDB) SetID(id uint16) {
 	s.Id = id
 	s.JamState.SafroleState.Id = id

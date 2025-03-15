@@ -53,7 +53,7 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 		log.Error(debugA, "processAssurance:AddAssuranceToPool", "err", err)
 	}
 
-	log.Debug(debugA, "processAssurance", "n.id", n.id, "assurance.ValidatorIndex", assurance.ValidatorIndex)
+	log.Trace(debugA, "processAssurance", "n.id", n.id, "assurance.ValidatorIndex", assurance.ValidatorIndex)
 	return nil // Success
 }
 

@@ -74,7 +74,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	previousIdx := currRotationIdx - 1
 	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
 	queuedGuarantees = extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
-	log.Debug(debugG, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
+	log.Trace(debugG, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
 	for _, guarantee := range queuedGuarantees {
 		g, err := guarantee.DeepCopy()
 		if err != nil {

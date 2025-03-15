@@ -1,8 +1,11 @@
 package types
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -30,6 +33,61 @@ func (as *AvailabilitySpecifier) String() string {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
 	return string(enc)
+}
+
+// ToBytes serializes the GuaranteeCredential struct into a byte array
+func (as *AvailabilitySpecifier) ToBytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	if err := binary.Write(buf, binary.LittleEndian, as.WorkPackageHash); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(buf, binary.LittleEndian, as.BundleLength); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(buf, binary.LittleEndian, as.ErasureRoot); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(buf, binary.LittleEndian, as.ExportedSegmentRoot); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(buf, binary.LittleEndian, as.ExportedSegmentLength); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// FromBytes deserializes a byte array into a GuaranteeCredential struct
+func (as *AvailabilitySpecifier) FromBytes(data []byte) error {
+	buf := bytes.NewReader(data)
+
+	// Deserialize ValidatorIndex (2 bytes)
+	if err := binary.Read(buf, binary.LittleEndian, &as.WorkPackageHash); err != nil {
+		return err
+	}
+
+	if err := binary.Read(buf, binary.LittleEndian, &as.BundleLength); err != nil {
+		return err
+	}
+
+	if err := binary.Read(buf, binary.LittleEndian, &as.ErasureRoot); err != nil {
+		return err
+	}
+
+	if err := binary.Read(buf, binary.LittleEndian, &as.ExportedSegmentRoot); err != nil {
+		return err
+	}
+
+	if err := binary.Read(buf, binary.LittleEndian, &as.ExportedSegmentLength); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // sharing (justified) DA chunks:  Vec<Hash> ++ Blob ++ Vec<Hash> ++ Vec<SegmentChunk> ++ Vec<Hash>.

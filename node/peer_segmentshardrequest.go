@@ -190,11 +190,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	erasureRoot, shardIndex, segmentIndices, selected_segmentshards, selected_full_justification, selected_segment_justifications, exportedSegmentAndPageProofLens, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
-	if erasureRoot != req.ErasureRoot || shardIndex != req.ShardIndex || len(segmentIndices) != len(req.SegmentIndex) {
-		fmt.Printf("selected_full_justifications: %v\n", exportedSegmentAndPageProofLens)
-		return fmt.Errorf("Invalid Response")
-	}
+	selected_segmentshards, ok, err := n.GetSegmentShard_AssurerSimple(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
 	if err != nil {
 		log.Error(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", err)
 		return err
@@ -204,29 +200,34 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
-	combined_selected_segmentshards, _ := CombineSegmentShards(selected_segmentshards)
-	n.jamnp_test_vector("CE139", "BundleShard", combined_selected_segmentshards, nil)
+	combined_selected_segmentshards := bytes.Join(selected_segmentshards, nil)
+	if false {
+		fmt.Printf("%s onSegmentShardRequest: GetSegmentShard_AssurerSimple erasure root %s shard %d (%v) => %d bytes h(concat)=%s\n",
+			n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex, len(combined_selected_segmentshards), common.Blake2Hash(combined_selected_segmentshards))
+	}
+
+	//n.jamnp_test_vector("CE139", "BundleShard", combined_selected_segmentshards, nil)
 	err = sendQuicBytes(stream, combined_selected_segmentshards)
 	if err != nil {
-		log.Error("%s [onSegmentShardRequest:sendQuicBytes] ERR %v\n", n.String(), err)
 		return
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if withJustification {
-		for item_idx, s_j := range selected_segment_justifications {
-			s_f := selected_full_justification[item_idx]
-			n.jamnp_test_vector("CE139", "BundleShardf", s_f, nil)
-			err = sendQuicBytes(stream, s_f)
-			if err != nil {
-				return
-			}
-			n.jamnp_test_vector("CE139", "BundleShardj", s_j, nil)
-			err = sendQuicBytes(stream, s_j)
-			if err != nil {
-				return
-			}
-		}
+		panic("not implemented")
+		/*		for item_idx, s_j := range selected_segment_justifications {
+				s_f := selected_full_justification[item_idx]
+				n.jamnp_test_vector("CE139", "BundleShardf", s_f, nil)
+				err = sendQuicBytes(stream, s_f)
+				if err != nil {
+					return
+				}
+				n.jamnp_test_vector("CE139", "BundleShardj", s_j, nil)
+				err = sendQuicBytes(stream, s_j)
+				if err != nil {
+					return
+				}
+			} */
 	}
 
 	// <-- FIN

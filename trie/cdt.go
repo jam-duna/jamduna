@@ -151,24 +151,24 @@ func (mt *CDMerkleTree) Get(index int) ([]byte, error) {
 // Equation(E.5) in GP 0.6.2
 // Equation(E.2) in GP 0.6.2(E.5 use E.2 to generate the proof)
 // GenerateCDTJustificationX returns the justification for a given index and size x (function J_x)
-func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, x int) ([][]byte, error) {
+func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, x int) ([]common.Hash, error) {
 	if _, err := mt.IsOutOfRange(index); err != nil {
 		return nil, err
 	}
 	if len(mt.leaves) == 1 {
-		return [][]byte{}, nil
+		return []common.Hash{}, nil
 	}
 
-	justification := make([][]byte, 0)
+	justification := make([]common.Hash, 0)
 	currentNode := mt.leaves[index]
 
 	for currentNode != mt.root {
 		parent := findParent(mt.root, currentNode)
 		sibling := findSibling(parent, currentNode)
 		if sibling != nil {
-			justification = append(justification, sibling.Hash)
+			justification = append(justification, common.BytesToHash(sibling.Hash))
 		} else {
-			justification = append(justification, make([]byte, 32))
+			justification = append(justification, common.Hash{})
 		}
 		currentNode = parent
 		if x > 0 {
@@ -181,7 +181,7 @@ func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, x int) ([][]byte, e
 	return justification, nil
 }
 
-func verifyCDTJustificationX(leafHash []byte, index int, justification [][]byte, x int) []byte {
+func VerifyCDTJustificationX(leafHash []byte, index int, justification []common.Hash, x int) []byte {
 	currentHash := leafHash
 	maxSteps := x
 	if x == 0 {
@@ -190,17 +190,13 @@ func verifyCDTJustificationX(leafHash []byte, index int, justification [][]byte,
 	for i := 0; i < maxSteps && i < len(justification); i++ {
 		siblingHash := justification[i]
 		if index%2 == 0 {
-			currentHash = computeNode(append(currentHash, siblingHash...))
+			currentHash = computeNode(append(currentHash, siblingHash.Bytes()...))
 		} else {
-			currentHash = computeNode(append(siblingHash, currentHash...))
+			currentHash = computeNode(append(siblingHash.Bytes(), currentHash...))
 		}
 		index /= 2
 	}
 	return currentHash
-}
-
-func VerifyCDTJustificationX(leafHash []byte, index int, justification [][]byte, x int) []byte {
-	return verifyCDTJustificationX(leafHash, index, justification, x)
 }
 
 func (mt *CDMerkleTree) LocalRootX(pageIndex int, x int) ([]byte, error) {
@@ -350,12 +346,12 @@ func generatePageProof(segments [][]byte) ([][]byte, error) {
 		if err != nil {
 			return results, err
 		}
-		leafHashes := make([][]byte, len(leaves[start:end]))
+		leafHashes := make([]common.Hash, len(leaves[start:end]))
 
 		// Equation(E.6) in GP 0.6.2
 		for j := range leafHashes {
 			hash := common.ComputeLeafHash_WBT_Blake2B(leaves[j+i])
-			leafHashes[j] = hash[:]
+			leafHashes[j] = common.BytesToHash(hash[:])
 		}
 		// Encode the trace path and the leaves
 		combinedData := append(tracePath, leafHashes...)

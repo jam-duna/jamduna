@@ -137,7 +137,7 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 		return
 	}
 
-	_, _, bundleShard, segmentShards, f_justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
+	bundleShard, segmentShards, f_justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR0 %v\n", err)
 		return err
@@ -145,25 +145,35 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	if !ok {
 		return fmt.Errorf("Not found")
 	}
-	//log.Info(debugDA, "onFullShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
+	// this should NOT include the proof pages.
+	for i, shard := range segmentShards {
+		if false {
+			fmt.Printf("onFullShardRequest ER %s ShardIndex %d piece %d=%x (%d bytes)\n", req.ErasureRoot, req.ShardIndex, i, shard[0:20], len(shard))
+		}
+	}
 
 	// <-- Bundle Shard
-	n.jamnp_test_vector("CE137", "BundleShard", bundleShard, nil)
+	//n.jamnp_test_vector("CE137", "BundleShard", bundleShard, nil)
 	err = sendQuicBytes(stream, bundleShard)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR1 %v\n", err)
 		return err
 	}
 
+	for i, sc := range segmentShards {
+		if false {
+			fmt.Printf("%s onFullShardRequest erasureroot=%s Shard %d sc.Data[0:20]=%x h=%s len=%d\n", n.String(), req.ErasureRoot, i, sc[0:20], common.Blake2Hash(sc), len(sc))
+		}
+	}
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	n.jamnp_test_vector("CE137", "BundleShard", common.ConcatenateByteSlices(segmentShards), segmentShards)
-	err = sendQuicBytes(stream, common.ConcatenateByteSlices(segmentShards))
+	//n.jamnp_test_vector("CE137", "BundleShard", bytes.Join(segmentShards, nil), segmentShards)
+	err = sendQuicBytes(stream, bytes.Join(segmentShards, nil))
 	if err != nil {
 		return err
 	}
 
 	// <-- Justification
-	n.jamnp_test_vector("CE137", "Justification", f_justification, nil)
+	//n.jamnp_test_vector("CE137", "Justification", f_justification, nil)
 	err = sendQuicBytes(stream, f_justification)
 	if err != nil {
 		return err

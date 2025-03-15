@@ -25,6 +25,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		defer span.End()
 	}
 	// counting the time for this function execution
+
 	timer := time.Now()
 	currTimeslot := curr_statedb.GetTimeslot()
 	coreIndex := wpCoreIndex
@@ -33,7 +34,8 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	}
 	coworkers := n.GetCoreCoWorkerPeersByStateDB(wpCoreIndex, curr_statedb)
 	log.Debug(debugDA, "broadcastWorkpackage", "n", n.String(), "n.Core", coreIndex, "wpCoreIndex", wpCoreIndex, "WorkPackageHash", wp.Hash(), "len(coworkers)", len(coworkers))
-	importedSegments, err := n.FetchWorkpackageImportSegments(wp)
+	// here we are a first guarantor making justifications and reconstructSegments is used inside FetchWorkpackageImportSegments
+	importedSegments, justifications, err := n.FetchWorkpackageImportSegments(wp)
 	if err != nil {
 		log.Error(debugG, "broadcastWorkPackage:FetchWorkpackageImportSegments", "n", n.String(), "err", err)
 		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err)
@@ -43,7 +45,16 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		log.Error(debugG, "broadcastWorkPackage:GetSegmentRootLookup", "n", n.String(), "err", err)
 	}
 	log.Debug(debugG, "broadcastWorkPackage:Guarantee from self", "id", n.String())
-	bundle := n.CompilePackageBundle(wp, importedSegments, extrinsics)
+
+	// s - [ImportSegmentData] should be size of G = W_E * W_S
+	// TODO: this should be codec encoded
+	bundle := types.WorkPackageBundle{
+		WorkPackage:       wp,
+		ExtrinsicData:     extrinsics,
+		ImportSegmentData: importedSegments,
+		Justification:     justifications, // this is something the recipients can check the ImportedSegmentData against the WorkItems in the WorkPackage
+	}
+
 	err = curr_statedb.VerifyPackage(bundle)
 	if err != nil {
 		log.Error(debugG, "broadcastWorkPackage:CompilePackageBundle", "n", n.String(), "err", err)
@@ -52,7 +63,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
-	for _, coworker := range coworkers {
+	for i, coworker := range coworkers {
 		wg.Add(1)
 		go func(coworker Peer) {
 			defer wg.Done()
@@ -70,6 +81,11 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				guarantee.Signatures = append(guarantee.Signatures, gc)
 				return
 			} else {
+				is := 500 * time.Millisecond
+				if i == 2 {
+					is = 1000 * time.Millisecond
+				}
+				time.Sleep(is)
 				fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
 					log.Error(debugG, "broadcastWorkPackage:ShareWorkPackage", "n", n.String(), "err", errfellow)
@@ -83,8 +99,6 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		}(coworker)
 	}
 	wg.Wait()
-	selfReport := guarantee.Report
-
 	selfWorkReportHash := guarantee.Report.Hash()
 
 	for key, fellow_response := range fellow_responses {
@@ -105,12 +119,11 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				return guarantee.Signatures[i].ValidatorIndex < guarantee.Signatures[j].ValidatorIndex
 			})
 		} else {
-			log.Error(debugG, "broadcastWorkpackage Guarantee from fellow did not match", "n", n.String(),
-				"outgoing workReport", selfReport.String(), "outgoing guarantee", guarantee.String(),
-				"validator_idx", validator_idx,
-				"selfWorkReportHash", selfWorkReportHash,
-				"fellowWorkReportHash", fellowWorkReportHash)
+			fmt.Printf("")
+			log.Crit(debugG, "broadcastWorkpackage Guarantee from fellow did not match", "n", n.String(),
+				"selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
 
+			panic(9234)
 			return
 		}
 	}
