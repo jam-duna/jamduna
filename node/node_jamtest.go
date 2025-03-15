@@ -2647,7 +2647,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 					RequestedHash: prevWorkPackageHash,
 					Index:         uint16(i),
 				}
-				fmt.Printf("fibN=%d ImportedSegment %d (%v, %d)\n", fibN, i, prevWorkPackageHash, i)
+				//fmt.Printf("fibN=%d ImportedSegment %d (%v, %d)\n", fibN, i, prevWorkPackageHash, i)
 				importedSegments = append(importedSegments, importedSegment)
 			}
 		}

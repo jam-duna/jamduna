@@ -1142,7 +1142,6 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 	chunkSize := 2052 // TODO: SegmentSize / W_E * 2
 	rawshards := make([][]byte, len(indexes))
 	numsegments := len(shards[0]) / chunkSize
-	rawsegments := make([][]byte, numsegments)
 	allsegments := make([][]byte, numsegments)
 	for s := 0; s < numsegments; s++ {
 		// do a SINGLE recoveredSegment
@@ -1159,15 +1158,11 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 			if len(allsegments[s]) < l {
 				l = len(allsegments[s])
 			}
-			log.Info(debugDA, "!!!! reconstructSegments", "s", s, "si[s]", si.Indices[s], "allsegments[s]", allsegments[s][0:l], "len", len(allsegments[s]),
-				"h", common.Blake2Hash(allsegments[s]))
 		}
 	}
 
 	cdtTree := trie.NewCDMerkleTree(allsegments)
 	reconRoot := common.BytesToHash(cdtTree.Root())
-	fmt.Printf("reconstructSegments: len(rawsegments)=%d len(allsegments)=%v si.indices=%v segmentroot recon=%s\n",
-		len(rawsegments), len(allsegments), si.Indices, reconRoot)
 	if reconRoot != si.Spec.ExportedSegmentRoot {
 		cdtTree.PrintTree()
 		panic("Recon failure")
@@ -1177,7 +1172,6 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 	for itemIndex, segment := range allsegments {
 		if slices.Contains(si.Indices, uint16(itemIndex)) {
 			segments = append(segments, segment)
-			fmt.Printf("  reconstructSegments: Added %d %x\n", itemIndex, segment[0:20])
 
 			justification, err := cdtTree.GenerateCDTJustificationX(itemIndex, 0)
 			if err != nil {
@@ -1189,7 +1183,6 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 			panic("Missing segment")
 		}
 	}
-	fmt.Printf("reconstructSegments: len(segments)=%v len(justifications)=%v\n", len(segments), len(justifications))
 	return segments, justifications, nil
 }
 

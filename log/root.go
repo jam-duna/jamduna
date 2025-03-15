@@ -31,7 +31,7 @@ func Root() Logger {
 var moduleEnabled = map[string]bool{
 	"blk_mod":   false,
 	"statedb":   false,
-	"authoring": true,
+	"authoring": false,
 	"G":         false,
 	"grandpa":   false,
 	"segment":   false,

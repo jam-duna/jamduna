@@ -1186,7 +1186,7 @@ func (vm *VM) Execute(entryPoint int) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-			log.Info(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d ECALLI COMPLETE", vm.hostenv.GetID(), string(vm.ServiceMetadata), stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
+			log.Debug(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d ECALLI COMPLETE", vm.hostenv.GetID(), string(vm.ServiceMetadata), stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
 		}
 		stepn++
 	}
@@ -1551,7 +1551,7 @@ func (vm *VM) step(stepn int) error {
 	if vm.ServiceMetadata != nil {
 		md = string(vm.ServiceMetadata)
 	}
-	log.Info(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "pvmHash", common.Str(pvmHash), "reg", vm.ReadRegisters())
+	log.Debug(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "pvmHash", common.Str(pvmHash), "reg", vm.ReadRegisters())
 	return nil
 }
 

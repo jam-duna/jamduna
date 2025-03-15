@@ -63,7 +63,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
-	for i, coworker := range coworkers {
+	for _, coworker := range coworkers {
 		wg.Add(1)
 		go func(coworker Peer) {
 			defer wg.Done()
@@ -81,11 +81,6 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				guarantee.Signatures = append(guarantee.Signatures, gc)
 				return
 			} else {
-				is := 500 * time.Millisecond
-				if i == 2 {
-					is = 1000 * time.Millisecond
-				}
-				time.Sleep(is)
 				fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
 					log.Error(debugG, "broadcastWorkPackage:ShareWorkPackage", "n", n.String(), "err", errfellow)

@@ -736,7 +736,7 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.ReadRegister(10)
 	omega_11, _ := vm.ReadRegister(11)
 	omega_12, _ := vm.ReadRegister(12)
-	log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
+	log.Debug(vm.logging, "FETCH", "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
@@ -782,22 +782,24 @@ func (vm *VM) hostFetch() {
 		// get imported segment by omega 11 and omega 12
 		if omega_11 < uint64(len(vm.Imports)) && omega_12 < uint64(len(vm.Imports[omega_11])) {
 			v_Bytes = append([]byte{}, vm.Imports[omega_11][omega_12][:]...)
-			log.Info("segment", fmt.Sprintf("%s Fetch segment hash:", vm.ServiceMetadata), "I", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)))
-			log.Info("segment", fmt.Sprintf("%s Fetch segment byte:", vm.ServiceMetadata), "I", fmt.Sprintf("%x", v_Bytes))
-			log.Info("segment", fmt.Sprintf("%s Fetch segment  len:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", len(v_Bytes)))
-			log.Info("segment", fmt.Sprintf("%s Fetch segment  idx:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", omega_12))
+			log.Debug("segment", fmt.Sprintf("%s Fetch segment hash:", vm.ServiceMetadata), "I", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)))
+			log.Debug("segment", fmt.Sprintf("%s Fetch segment byte:", vm.ServiceMetadata), "I", fmt.Sprintf("%x", v_Bytes))
+			log.Debug("segment", fmt.Sprintf("%s Fetch segment  len:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", len(v_Bytes)))
+			log.Debug("segment", fmt.Sprintf("%s Fetch segment  idx:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", omega_12))
 		}
 
 	case 6:
 		// get imported segment by work item index
 		if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
 			v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
-			log.Info("segment", fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
-				"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
-				"bytes", v_Bytes[0:20],
-				"l", len(v_Bytes),
-				"workItemIndex", vm.WorkItemIndex,
-				"w11", omega_11)
+			if vm.logging == "authoring" {
+				log.Info(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
+					"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
+					"bytes", v_Bytes[0:20],
+					"l", len(v_Bytes),
+					"workItemIndex", vm.WorkItemIndex,
+					"w11", omega_11)
+			}
 		} else {
 			// fmt.Printf("FETCH 6 FAIL omega_11 %d vs len(vm.Imports[vm.WorkItemIndex=%d])=%d\n", omega_11, vm.WorkItemIndex, len(vm.Imports[vm.WorkItemIndex]))
 		}
@@ -1341,7 +1343,7 @@ func (vm *VM) hostExport() {
 		return
 	} else {
 		vm.WriteRegister(7, uint64(vm.ExportSegmentIndex)+uint64(len(vm.Exports)))
-		log.Debug("segment", fmt.Sprintf("[NODE%d] %s Export #%d:", vm.hostenv.GetID(), vm.ServiceMetadata, uint64(len(vm.Exports))),
+		log.Debug(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
 			"p", p, "z", z, "vm.ExportSegmentIndex", vm.ExportSegmentIndex,
 			"segmenthash", fmt.Sprintf("%v", common.Blake2Hash(x)),
 			"segment20", fmt.Sprintf("%x", x[0:20]),
@@ -1367,11 +1369,12 @@ func (vm *VM) hostMachine() {
 	if vm.RefineM_map == nil {
 		vm.RefineM_map = make(map[uint32]*RefineM)
 	}
-
-	min_n := uint32(0)
-	for n := range vm.RefineM_map {
-		if n == min_n {
-			min_n = n + 1
+	min_n := uint32(16)
+	for n := uint32(1); n < min_n; n++ {
+		_, ok := vm.RefineM_map[n]
+		if !ok {
+			min_n = n
+			break
 		}
 	}
 

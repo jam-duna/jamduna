@@ -22,7 +22,7 @@ func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, 
 	// FetchWorkPackageImportSegments
 	// packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte, extrinsics types.ExtrinsicsBlobs
 	packageHash := package_bundle.WorkPackage.Hash()
-	importSegments := package_bundle.ImportSegmentData
+
 	b := package_bundle.Bytes()
 	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(b)
 	if !common.CompareBytes(package_bundle.Bytes(), recovered_package_bundle.Bytes()) {
@@ -43,18 +43,7 @@ func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, 
 	erasure_root_u := n.generateErasureRoot(bClubs, sClubs)
 
 	// ExportedSegmentRoot = CDT(segments)
-	for i, items := range importSegments {
-		for j, seg := range items {
-			log.Info(debugDA, "**** NewAvailabilitySpecifier IMPORT segment", "node", n.id, "workitem", i, "j", j, "seg", fmt.Sprintf("%x", seg[0:20]), "len", len(seg), "h", common.Blake2Hash(seg))
-		}
-	}
-
-	for i, seg := range export_segments {
-		log.Info(debugDA, "**** NewAvailabilitySpecifier EXPORT segment", "node", n.id, "seg #", i, "seg", fmt.Sprintf("%x", seg[0:20]), "len", len(seg), "h", common.Blake2Hash(seg))
-	}
-
 	cdt := trie.NewCDMerkleTree(export_segments)
-	cdt.PrintTree()
 	exported_segment_root_e := common.Hash(cdt.Root())
 
 	// Return the Availability Specifier
@@ -186,9 +175,6 @@ func (n *Node) buildBClub(b []byte) ([]common.Hash, []types.DistributeECChunk) {
 }
 
 func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr []types.DistributeECChunk) {
-	for i, s := range segments {
-		fmt.Printf("[N%d] buildSClub seg[%d]=%x (%d bytes) %s\n", n.id, i, s[0:20], len(s), common.Blake2Hash(s))
-	}
 	ecChunksArr = make([]types.DistributeECChunk, types.TotalValidators)
 
 	// EC encode segments in ecChunksArr
@@ -208,8 +194,6 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 		}
 		for shardIndex, shard := range erasureCodingSegments {
 			ecChunksArr[shardIndex].Data = append(ecChunksArr[shardIndex].Data, shard...)
-			//fmt.Printf("buildSClub segment %d shard %d => %x h=%s (%d bytes)\n", segmentIdx, shardIndex, ecChunksArr[shardIndex].Data, common.Blake2Hash(ecChunksArr[shardIndex].Data),
-			//	len(ecChunksArr[shardIndex].Data))
 		}
 	}
 
@@ -226,11 +210,6 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 		}
 	}
 	sClub = make([]common.Hash, types.TotalValidators)
-	for i, s := range ecChunksArr {
-		if len(s.Data) > 0 && false {
-			fmt.Printf("%s buildSClub222 shard %d %x h=%s (%d bytes)\n", n.String(), i, s.Data[0:20], common.Blake2Hash(s.Data), len(s.Data))
-		}
-	}
 
 	chunkSize := (types.SegmentSize / (types.TotalValidators / 3))
 	for shardIndex, ec := range ecChunksArr {
@@ -240,21 +219,6 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 		}
 		t := trie.NewWellBalancedTree(chunks, types.Blake2b)
 		sClub[shardIndex] = common.BytesToHash(t.Root())
-		if debugSpec {
-			fmt.Printf("buildsClub hash %d: %s nchunks: %d (%d bytes/chunk)\n", shardIndex, sClub[shardIndex], len(chunks), len(chunks[0]))
-		}
-	}
-	for i, s := range ecChunksArr {
-		if len(s.Data) > 0 && false {
-			fmt.Printf("%s buildSClub shard %d %x h=%s (%d bytes)\n", n.String(), i, s.Data[0:20], common.Blake2Hash(s.Data), len(s.Data))
-		}
-	}
-
-	for i, s := range sClub {
-		empty := common.Hash{}
-		if s != empty {
-			fmt.Printf("[N%d] buildSClub[%d]=%s\n", n.id, i, s)
-		}
 	}
 	return sClub, ecChunksArr
 }
@@ -485,15 +449,8 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 	service_index := uint32(workPackage.AuthCodeHost)
 
 	// Import Segments
-
 	for workItemIdx, workItem_segments := range package_bundle.ImportSegmentData {
 		importsegments[workItemIdx] = workItem_segments
-		if len(workItem_segments) > 0 {
-			fmt.Printf("[N%d] work item %d: %d segments\n", n.id, workItemIdx, len(workItem_segments))
-			for i, seg := range workItem_segments {
-				fmt.Printf("[N%d] [workItem#%d] imported segment %d: %x (hash %s, len=%d)\n", n.id, workItemIdx, i, seg[0:20], common.Blake2Hash(seg), len(seg))
-			}
-		}
 	}
 	authcode, _, authindex, err := n.statedb.GetAuthorizeCode(workPackage)
 	if err != nil {
@@ -528,7 +485,6 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 			for i := 0; i < expectedSegmentCnt; i++ {
 				segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
 				segments = append(segments, segment)
-				fmt.Printf("[N%d] EXPORT #%d %x... (%d bytes) %s\n", n.id, i, segment[0:20], len(segment), common.Blake2Hash(segment))
 			}
 		}
 		result := types.WorkResult{
@@ -598,14 +554,10 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 				if exists {
 					oldwpi.AddIndex(uint16(ImportedSegment.Index))
 					workItemErasureRootsMapping[workItemIdx][idx] = oldwpi
-					fmt.Printf("FetchWorkpackageImportSegments - Nth SpecSearch workItemIdx=%d, idx=%d h=%s wpi=%s\n",
-						workItemIdx, idx, ImportedSegment.RequestedHash, oldwpi.String())
 				} else {
 					erasureRootIndex[wpi.Spec.ErasureRoot] = wpi
 					workItemErasureRootsMapping[workItemIdx][idx] = wpi
 					wpi.AddIndex(uint16(ImportedSegment.Index))
-					fmt.Printf("FetchWorkpackageImportSegments - 1st SpecSearch workItemIdx=%d, idx=%d h=%s wpi=%s\n",
-						workItemIdx, idx, ImportedSegment.RequestedHash, wpi.String())
 				}
 			} else {
 				panic("SpecSearch returned nil1")
@@ -626,7 +578,6 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 			panic("receiveSegments and specIndex.Indices length mismatch")
 		}
 		receiveSegmentMapping[erasureRoot] = receiveSegments
-		fmt.Printf("FetchWorkpackageImportSegments erasureroot %s received len(segments)=%d\n", erasureRoot, len(receiveSegments))
 		justificationsMapping[erasureRoot] = specJustifications
 	}
 

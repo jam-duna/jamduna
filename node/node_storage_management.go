@@ -142,15 +142,6 @@ func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (erasureMeta ECCErasur
 	if err := json.Unmarshal(erasure_sKey_val, &sECChunksArray); err != nil {
 		return erasureMeta, bECChunks, sECChunksArray, err
 	}
-	for i, sc := range sECChunksArray {
-		l := 20
-		if l > len(sc.Data) {
-			l = len(sc.Data)
-		}
-		if l > 0 && false {
-			fmt.Printf("GetMeta_Guarantor %d sc.Data[0:20]=%v h=%s len=%d\n", i, sc.Data[0:l], common.Blake2Hash(sc.Data), len(sc.Data))
-		}
-	}
 	return erasureMeta, bECChunks, sECChunksArray, err
 }
 
@@ -163,15 +154,7 @@ func (n *Node) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, erasureMeta 
 
 	bChunkJson, _ := json.Marshal(bECChunks)
 	sChunkJson, _ := json.Marshal(sECChunksArray)
-	for i, sc := range sECChunksArray {
-		l := 20
-		if l > len(sc.Data) {
-			l = len(sc.Data)
-		}
-		if l > 0 && false {
-			fmt.Printf("StoreMeta_Guarantor %d sc.Data[0:20]=%v h=%s len=%d\n", i, sc.Data[0:l], common.Blake2Hash(sc.Data), len(sc.Data))
-		}
-	}
+
 	n.WriteRawKV(erasure_metaKey, erasureMeta.Bytes())
 	n.WriteRawKV(erasure_bKey, bChunkJson)
 	n.WriteRawKV(erasure_sKey, sChunkJson) // this has the segments ***AND*** proof pages
@@ -372,7 +355,7 @@ func (n *Node) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16,
 	concatenatedShards := bytes.Join(segmentShards, nil)
 	n.WriteRawKV(s_es_key, concatenatedShards) // this has segment shards AND proof page shards
 
-	log.Info(debugDA, "StoreImportDA_Assurer concatenatedShards", "n", n.id, "s_es_key", s_es_key, "len(concat)", len(concatenatedShards), "h(concat)", common.Blake2Hash(concatenatedShards))
+	log.Trace(debugDA, "StoreImportDA_Assurer concatenatedShards", "n", n.id, "s_es_key", s_es_key, "len(concat)", len(concatenatedShards), "h(concat)", common.Blake2Hash(concatenatedShards))
 	return nil
 }
 
