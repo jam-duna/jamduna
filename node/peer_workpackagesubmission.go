@@ -97,7 +97,6 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 		return err
 	}
 	defer stream.Close()
-	p.jamnp_test_vector("CE133", "WorkPackageSubmission", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

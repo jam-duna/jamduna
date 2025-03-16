@@ -233,7 +233,6 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 		return
 	}
 	defer stream.Close()
-	p.jamnp_test_vector("CE134", "WorkPackageShare", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return
@@ -347,7 +346,6 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	n.jamnp_test_vector("CE134", "WorkPackageShareResponse", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

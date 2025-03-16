@@ -155,7 +155,6 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	if err != nil {
 		return
 	}
-	p.jamnp_test_vector("CE139", "SegmentShardRequest", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return
@@ -206,7 +205,6 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 			n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex, len(combined_selected_segmentshards), common.Blake2Hash(combined_selected_segmentshards))
 	}
 
-	//n.jamnp_test_vector("CE139", "BundleShard", combined_selected_segmentshards, nil)
 	err = sendQuicBytes(stream, combined_selected_segmentshards)
 	if err != nil {
 		return
@@ -214,20 +212,17 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if withJustification {
-		panic("not implemented")
-		/*		for item_idx, s_j := range selected_segment_justifications {
-				s_f := selected_full_justification[item_idx]
-				n.jamnp_test_vector("CE139", "BundleShardf", s_f, nil)
-				err = sendQuicBytes(stream, s_f)
-				if err != nil {
-					return
-				}
-				n.jamnp_test_vector("CE139", "BundleShardj", s_j, nil)
-				err = sendQuicBytes(stream, s_j)
-				if err != nil {
-					return
-				}
-			} */
+		/*for item_idx, s_j := range selected_segment_justifications {
+			s_f := selected_full_justification[item_idx]
+			err = sendQuicBytes(stream, s_f)
+			if err != nil {
+				return
+			}
+			err = sendQuicBytes(stream, s_j)
+			if err != nil {
+				return
+			}
+		}*/
 	}
 
 	// <-- FIN

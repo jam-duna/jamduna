@@ -116,7 +116,6 @@ func (p *Peer) SendHandshake(stream quic.Stream, b types.Block, slot uint32, lea
 	if err != nil {
 		return err
 	}
-	p.jamnp_test_vector("UP0", "Handshake", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

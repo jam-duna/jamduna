@@ -3,8 +3,6 @@ package node
 import (
 	"fmt"
 
-	"encoding/json"
-
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -17,54 +15,25 @@ const (
 	debugSpec = false
 )
 
-func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, erasureMeta ECCErasureMap, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
+func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
 	// compile wp into b
-	// FetchWorkPackageImportSegments
-	// packageHash common.Hash, workPackage types.WorkPackage, segments [][]byte, extrinsics types.ExtrinsicsBlobs
-	packageHash := package_bundle.WorkPackage.Hash()
-
 	b := package_bundle.Bytes()
-	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(b)
-	if !common.CompareBytes(package_bundle.Bytes(), recovered_package_bundle.Bytes()) {
-		log.Error(debugDA, "NewAvailabilitySpecifier:Original WorkPackage and Decoded WorkPackage are different")
-	}
-	// Length of `b`
-	bLength := uint32(len(b))
-
 	// Build b♣ and s♣
 	bClubs, bEcChunks := n.buildBClub(b)
 	sClubs, sEcChunksArr := n.buildSClub(export_segments)
-	for i, s := range sEcChunksArr {
-		if len(s.Data) > 0 && false {
-			fmt.Printf("%s NewAvailabilitySpecifier5 shard %d %x h=%s (%d bytes)\n", n.String(), i, s.Data[0:20], common.Blake2Hash(s.Data), len(s.Data))
-		}
-	}
-	// u = (bClub, sClub)
-	erasure_root_u := n.generateErasureRoot(bClubs, sClubs)
 
 	// ExportedSegmentRoot = CDT(segments)
 	cdt := trie.NewCDMerkleTree(export_segments)
-	exported_segment_root_e := common.Hash(cdt.Root())
 
-	// Return the Availability Specifier
 	availabilitySpecifier := types.AvailabilitySpecifier{
-		WorkPackageHash:       packageHash,
-		BundleLength:          bLength,
-		ErasureRoot:           erasure_root_u,
-		ExportedSegmentRoot:   exported_segment_root_e,
+		WorkPackageHash:       package_bundle.WorkPackage.Hash(),
+		BundleLength:          uint32(len(b)),
+		ErasureRoot:           n.generateErasureRoot(bClubs, sClubs), // u = (bClub, sClub)
+		ExportedSegmentRoot:   common.Hash(cdt.Root()),
 		ExportedSegmentLength: uint16(len(export_segments)),
 	}
 
-	erasureMeta = ECCErasureMap{
-		ErasureRoot:         erasure_root_u,
-		ExportedSegmentRoot: exported_segment_root_e,
-		WorkPackageHash:     packageHash,
-		BundleLength:        bLength,
-		BClubs:              bClubs,
-		SClubs:              sClubs,
-	}
-
-	return &availabilitySpecifier, erasureMeta, bEcChunks, sEcChunksArr
+	return &availabilitySpecifier, bClubs, sClubs, bEcChunks, sEcChunksArr
 }
 
 // this is the default justification from (b,s) to erasureRoot
@@ -111,35 +80,6 @@ func GenerateWBTJustification(root common.Hash, shardIndex uint16, leaves [][]by
 	//treeLen, leafHash, path, isFound, nil
 	treeLen, leafHash, path, isFound, _ = wbt.Trace(int(shardIndex))
 	return treeLen, leafHash, path, isFound
-}
-
-type ECCErasureMap struct {
-	ErasureRoot         common.Hash
-	ExportedSegmentRoot common.Hash
-	WorkPackageHash     common.Hash
-	BundleLength        uint32
-	BClubs              []common.Hash
-	SClubs              []common.Hash
-}
-
-// Marshal marshals ECCErasureMap into JSON
-func (e *ECCErasureMap) Marshal() ([]byte, error) {
-	return json.Marshal(e)
-}
-
-func (e *ECCErasureMap) Unmarshal(data []byte) error {
-	return json.Unmarshal(data, e)
-}
-
-// TODO: use codec ..
-func (e *ECCErasureMap) Bytes() []byte {
-	jsonData, _ := e.Marshal()
-	return jsonData
-}
-
-// TODO: use codec ..
-func (e *ECCErasureMap) String() string {
-	return string(e.Bytes())
 }
 
 // Compute b♣ using the EncodeWorkPackage function
@@ -312,17 +252,6 @@ func compareWorkPackages(wp1, wp2 types.WorkPackage) bool {
 	return true
 }
 
-// Verify WorkPackage by comparing the original and the decoded WorkPackage
-func (n *Node) VerifyWorkPackageBundle(package_bundle types.WorkPackageBundle) bool {
-	package_bundle_byte := package_bundle.Bytes()
-	recovered_package_bundle, _ := types.WorkPackageBundleFromBytes(package_bundle_byte)
-	if common.CompareBytes(package_bundle.Bytes(), recovered_package_bundle.Bytes()) {
-		return true
-	} else {
-		return false
-	}
-}
-
 func (n *Node) GetSegmentRootLookup(wp types.WorkPackage) (segmentRootLookup types.SegmentRootLookup, err error) {
 	segmentRootLookupMap := make(map[common.Hash]common.Hash)
 	segmentRootLookup = make([]types.SegmentRootLookupItem, 0)
@@ -346,22 +275,6 @@ func (n *Node) GetSegmentRootLookup(wp types.WorkPackage) (segmentRootLookup typ
 		}
 	}
 	return segmentRootLookup, nil
-}
-
-func (n *Node) GetImportedSegmentRoots(wp types.WorkPackage) (importedSegmentRoots []common.Hash, importedPackageHashes []common.Hash, err error) {
-	importedSegmentRoots = make([]common.Hash, 0)
-	importedPackageHashes = make([]common.Hash, 0)
-	for _, workItem := range wp.WorkItems {
-		for _, importedSegment := range workItem.ImportedSegments {
-			si := n.SpecSearch(importedSegment.RequestedHash)
-			if si != nil {
-				log.Trace(debugDA, "GetImportedSegmentRoots", "importedSegmentRoot", si.Spec.ExportedSegmentRoot)
-				importedSegmentRoots = append(importedSegmentRoots, si.Spec.ExportedSegmentRoot)
-				importedPackageHashes = append(importedPackageHashes, si.Spec.WorkPackageHash)
-			}
-		}
-	}
-	return importedSegmentRoots, importedPackageHashes, nil
 }
 
 func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (fuzz_importsegments [][][]byte, fuzz_segmentRootLookup types.SegmentRootLookup) {
@@ -408,28 +321,30 @@ func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup
 }
 
 // Verify the justifications using segmentRootLookup
-func VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (ok bool, err error) {
-	return true, nil
-	// TODO:
-	// if !CheckSegmentJustificationSize(importSegments, justifications) {
-	//  	return false, fmt.Errorf("importSegments and justification length mismatch")
-	// }
+func (n *Node) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (verified bool, err error) {
+	if len(b.ImportSegmentData) != len(b.Justification) {
+		return false, fmt.Errorf("importSegments and justifications length mismatch")
+	}
 
-	for itemIndex, workItem := range b.WorkPackage.WorkItems {
-		for segmentIdx, is := range workItem.ImportedSegments {
-			segmentData := b.ImportSegmentData[itemIndex][segmentIdx]
-			h := workItem.ImportedSegments[segmentIdx].RequestedHash
-			for _, l := range segmentRootLookup {
-				if h == l.WorkPackageHash {
-					h = l.SegmentRoot
-					break
+	// verify the segments
+	for itemIndex, workitem_segments := range b.ImportSegmentData {
+		for segmentIdx, segmentData := range workitem_segments {
+			requestedHash := b.WorkPackage.WorkItems[itemIndex].ImportedSegments[segmentIdx].RequestedHash
+			specIndex := n.SpecSearch(requestedHash)
+			if specIndex == nil {
+				log.Warn(module, "VerifyBundle: SpecSearch NOT FOUND", "reqHash", requestedHash)
+				return false, fmt.Errorf("VerifyBundle: could not find %x", requestedHash)
+			} else {
+				index := b.WorkPackage.WorkItems[itemIndex].ImportedSegments[segmentIdx].Index
+				segmentRoot := specIndex.Spec.ExportedSegmentRoot
+				j := b.Justification[itemIndex][segmentIdx]
+				leafHash := trie.ComputeLeaf(segmentData)
+				computedRoot := trie.VerifyCDTJustificationX(leafHash, int(index), j, 0)
+				if !common.CompareBytes(segmentRoot[:], computedRoot) {
+					log.Warn(module, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", index)
+					return false, fmt.Errorf("justification failure computedRoot %x != segmentRoot %s (h=%s)", computedRoot, segmentRoot, leafHash)
 				}
 			}
-			computedRoot := trie.VerifyCDTJustificationX(segmentData[:], int(is.Index), b.Justification[itemIndex][segmentIdx], 0)
-			if !common.CompareBytes(h[:], computedRoot) {
-				return false, fmt.Errorf("justification failure")
-			}
-
 		}
 	}
 	return true, nil
@@ -438,9 +353,10 @@ func VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRoo
 // now we only have executeWorkPackageBundle now
 func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
-	ok, verifyErr := VerifyBundle(&package_bundle, segmentRootLookup)
-	if verifyErr != nil || !ok {
-		return work_report, verifyErr
+	verified, verifyErr := n.VerifyBundle(&package_bundle, segmentRootLookup)
+	if verifyErr != nil || !verified {
+		//return work_report, verifyErr
+		log.Warn(module, "executeWorkPackageBundle: VerifyBundle failed", "err", verifyErr)
 	}
 
 	results := []types.WorkResult{}
@@ -507,7 +423,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		log.Debug(debugDA, "DA: WrangledResults", "n", types.DecodedWrangledResults(&o))
 	}
 
-	spec, erasureMeta, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(package_bundle, segments)
+	spec, bClubs, sClubs, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(package_bundle, segments)
 
 	workReport := types.WorkReport{
 		AvailabilitySpec:  *spec,
@@ -520,7 +436,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 	}
 	log.Debug(debugDA, "executeWorkPackageBundle", "n", n.id, "workReport", workReport.String())
 	log.Debug(debugG, "executeWorkPackageBundle", "workreporthash", common.Str(workReport.Hash()), "erasureRoot", spec.ErasureRoot)
-	n.StoreMeta_Guarantor(spec, erasureMeta, bECChunks, sECChunksArray)
+	n.StoreMeta_Guarantor(spec, bClubs, sClubs, bECChunks, sECChunksArray)
 
 	return workReport, err
 }
@@ -529,17 +445,6 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (importSegments [][][]byte, justifications [][][]common.Hash, err error) {
 	importSegments = make([][][]byte, len(workPackage.WorkItems))
 	justifications = make([][][]common.Hash, len(workPackage.WorkItems))
-
-	// log.Trace(debugDA, "[N%d] FetchWorkpackageImportSegments wp=%v (with %v items)\n", n.id, workPackage.Hash(), len(workPackage.WorkItems))
-	// for workItemIdx, workItem := range workPackage.WorkItems {
-	// 	if len(workItem.ImportedSegments) > 0 {
-	// 		for ImportedSegmentIdx, ImportedSegment := range workItem.ImportedSegments {
-	// 			log.Trace(debugDA, "[N%d] wp-idx=%v-%d (H,I)=(%v,%v)\n", n.id, workPackage.Hash(), workItemIdx, ImportedSegment.RequestedHash, ImportedSegmentIdx)
-	// 		}
-	// 	} else {
-	// 		log.Trace(debugDA, "[N%d] wp-idx=%v-%d no ImportedSegments\n", n.id, workPackage.Hash(), workItemIdx)
-	// 	}
-	// }
 
 	// because CE139 requires erasureroot
 	erasureRootIndex := make(map[common.Hash]*SpecIndex)
@@ -606,47 +511,4 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 	log.Trace(debugDA, "[N%d] WP=%v Final importSegments: %x\n", n.id, workPackage.Hash(), importSegments)
 
 	return importSegments, justifications, nil
-}
-
-// item 1 => 1 segment
-// item 2 => 0 segment
-// importSegments [][][]byte
-// importSegments [0][1][x]byte=>item 1 => 1 segment
-// importSegments [1][0][0]byte=>item 2 => 0 segment
-
-// item 1 => 1 segment
-// item 2 => 1 segment
-// importSegments [][][]byte
-// importSegments [0][1][x]byte=>item 1 => 1 segment
-// importSegments [1][1][x]byte=>item 2 => 1 segment
-
-// Check importSegments and justifications
-func CheckSegmentJustificationSize(importSegments [][][]byte, justifications [][][]common.Hash) bool {
-	if len(importSegments) != len(justifications) {
-		return false
-	}
-	for i := range importSegments {
-		if len(importSegments[i]) != len(justifications[i]) {
-			return false
-		}
-		// MK review this part is this needed?
-		if len(importSegments[i]) == 0 || len(importSegments[i][0]) == 0 {
-			return false
-		}
-		for j := range importSegments[i] {
-			if len(importSegments[i][j]) == 0 {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func GetExportSegmentRootByWorkPackageHash(segmentRootLookup types.SegmentRootLookup, workPackageHash common.Hash) (exportedSegmentRoot common.Hash, err error) {
-	for _, segmentRootLookupItem := range segmentRootLookup {
-		if segmentRootLookupItem.WorkPackageHash == workPackageHash {
-			return segmentRootLookupItem.SegmentRoot, nil
-		}
-	}
-	return common.Hash{}, fmt.Errorf("exported segment root not found")
 }

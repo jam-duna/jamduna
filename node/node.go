@@ -1164,7 +1164,6 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 	cdtTree := trie.NewCDMerkleTree(allsegments)
 	reconRoot := common.BytesToHash(cdtTree.Root())
 	if reconRoot != si.Spec.ExportedSegmentRoot {
-		cdtTree.PrintTree()
 		panic("Recon failure")
 	}
 	// j - justifications  (14.14) J(W in I)
@@ -1175,10 +1174,16 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 
 			justification, err := cdtTree.GenerateCDTJustificationX(itemIndex, 0)
 			if err != nil {
-				log.Error(debugDA, "CompilePackageBundle:GenerateCDTJustificationX", "err", err)
+				log.Error(debugDA, "cdtree:GenerateCDTJustificationX", "err", err)
+			}
+			leafHash := trie.ComputeLeaf(segment)
+			computedRoot := trie.VerifyCDTJustificationX(leafHash, int(itemIndex), justification, 0)
+			if common.BytesToHash(computedRoot) != common.BytesToHash(cdtTree.Root()) {
+				cdtTree.PrintTree()
+				log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "computedRoot", computedRoot, "cdtTreeRoot", cdtTree.Root())
 			}
 			justifications = append(justifications, justification)
-			// TODO: verify justification
+
 		} else {
 			panic("Missing segment")
 		}

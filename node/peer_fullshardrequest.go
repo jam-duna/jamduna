@@ -100,7 +100,6 @@ func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) 
 	if err != nil {
 		return
 	}
-	p.jamnp_test_vector("CE137", "FullShardRequest", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return
@@ -153,7 +152,6 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	}
 
 	// <-- Bundle Shard
-	//n.jamnp_test_vector("CE137", "BundleShard", bundleShard, nil)
 	err = sendQuicBytes(stream, bundleShard)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR1 %v\n", err)
@@ -166,14 +164,12 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 		}
 	}
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	//n.jamnp_test_vector("CE137", "BundleShard", bytes.Join(segmentShards, nil), segmentShards)
 	err = sendQuicBytes(stream, bytes.Join(segmentShards, nil))
 	if err != nil {
 		return err
 	}
 
 	// <-- Justification
-	//n.jamnp_test_vector("CE137", "Justification", f_justification, nil)
 	err = sendQuicBytes(stream, f_justification)
 	if err != nil {
 		return err

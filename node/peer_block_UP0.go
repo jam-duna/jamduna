@@ -147,7 +147,6 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 			errChan <- fmt.Errorf("handshake_bytes is nil")
 			return
 		}
-		p.jamnp_test_vector("UP0", "BlockAnnouncement", handshake_bytes, handshake)
 		err = sendQuicBytes(stream, handshake_bytes)
 		if err != nil {
 			errChan <- err

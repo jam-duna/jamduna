@@ -127,7 +127,6 @@ func (p *Peer) SendJudgmentPublication(epoch uint32, j types.Judgement) (err err
 		return err
 	}
 	defer stream.Close()
-	p.jamnp_test_vector("CE145", "JudgmentPublication", reqBytes, req)
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
 		return err

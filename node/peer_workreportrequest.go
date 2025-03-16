@@ -33,7 +33,6 @@ func (p *Peer) SendWorkReportRequest(workReportHash common.Hash) (workReport typ
 		return workReport, err
 	}
 	defer stream.Close()
-	p.jamnp_test_vector("CE136", "WorkReportRequest", workReportHash.Bytes(), nil)
 	err = sendQuicBytes(stream, workReportHash.Bytes())
 	if err != nil {
 		return workReport, err
@@ -63,7 +62,6 @@ func (n *Node) onWorkReportRequest(stream quic.Stream, msg []byte) (err error) {
 		return nil
 	}
 
-	n.jamnp_test_vector("CE136", "WorkReportResponse", workReport.Bytes(), workReport)
 	err = sendQuicBytes(stream, workReport.Bytes())
 	if err != nil {
 		return err

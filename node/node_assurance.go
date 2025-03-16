@@ -1,8 +1,6 @@
 package node
 
 import (
-	"fmt"
-
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -65,7 +63,7 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 
 	guarantor := g.Signatures[0].ValidatorIndex
 	bundleShard, concatSegmentShards, justification, err := n.peersInfo[guarantor].SendFullShardRequest(erasureRoot, n.id)
-	fullshard_identifier := fmt.Sprintf("%v_%d", erasureRoot, n.id)
+
 	if err != nil {
 		log.Error(debugDA, "assureData:SendFullShardRequest", "n", n.String(), "err", err)
 		return
@@ -76,7 +74,6 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 		log.Error(debugDA, "assureData:VerifyFullShard", "n", n.String(), "err", err)
 		return
 	}
-	log.Trace(debugDA, "assureData:VerifyFullShard", "n", n.id, "verified", verified, "fullshard_identifier", fullshard_identifier)
 	err = n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
 	if err != nil {
 		return
