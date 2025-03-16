@@ -8,7 +8,6 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/quic-go/quic-go"
 )
 
@@ -76,8 +75,7 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, concatSegmentShards []byte, justification []byte, err error) {
-	// TODO: add span for SendFullShardRequest => [Segment Shard]+Justification here
+func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, concatSegmentShards []byte, encodedPath []byte, err error) {
 	if p.node.store.SendTrace {
 		tracer := p.node.store.Tp.Tracer("NodeTracer")
 		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendFullShardRequest", p.node.store.NodeID))
@@ -110,7 +108,7 @@ func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) 
 	if err != nil {
 		return
 	}
-	log.Trace(debugDA, "SendFullShardRequest", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "len", len(bundleShard))
+
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	concatSegmentShards, err = receiveQuicBytes(stream)
 	if err != nil {
@@ -118,7 +116,7 @@ func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) 
 	}
 
 	// <-- Justification
-	justification, err = receiveQuicBytes(stream)
+	encodedPath, err = receiveQuicBytes(stream)
 	if err != nil {
 		return
 	}
@@ -136,41 +134,30 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 		return
 	}
 
-	bundleShard, segmentShards, f_justification, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
+	bundleShard, exported_segments_and_proofpageShards, encodedPath, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
-		fmt.Printf("onFullShardRequest ERR0 %v\n", err)
+		fmt.Printf("onFullShardRequest ERR %v\n", err)
 		return err
 	}
 	if !ok {
 		return fmt.Errorf("Not found")
 	}
-	// this should NOT include the proof pages.
-	for i, shard := range segmentShards {
-		if false {
-			fmt.Printf("onFullShardRequest ER %s ShardIndex %d piece %d=%x (%d bytes)\n", req.ErasureRoot, req.ShardIndex, i, shard[0:20], len(shard))
-		}
-	}
 
 	// <-- Bundle Shard
 	err = sendQuicBytes(stream, bundleShard)
 	if err != nil {
-		fmt.Printf("onFullShardRequest ERR1 %v\n", err)
+		fmt.Printf("onFullShardRequest ERR %v\n", err)
 		return err
 	}
 
-	for i, sc := range segmentShards {
-		if false {
-			fmt.Printf("%s onFullShardRequest erasureroot=%s Shard %d sc.Data[0:20]=%x h=%s len=%d\n", n.String(), req.ErasureRoot, i, sc[0:20], common.Blake2Hash(sc), len(sc))
-		}
-	}
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	err = sendQuicBytes(stream, bytes.Join(segmentShards, nil))
+	err = sendQuicBytes(stream, exported_segments_and_proofpageShards)
 	if err != nil {
 		return err
 	}
 
 	// <-- Justification
-	err = sendQuicBytes(stream, f_justification)
+	err = sendQuicBytes(stream, encodedPath)
 	if err != nil {
 		return err
 	}

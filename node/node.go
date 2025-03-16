@@ -55,8 +55,9 @@ const (
 	quicAddr     = "127.0.0.1:%d"
 	godMode      = false
 	Grandpa      = false
-	revalidate   = false
+	revalidate   = false // turn off for production (or publication of traces)
 
+	paranoidVerification = true  // turn off for production
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 )
 
@@ -1218,9 +1219,17 @@ func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength
 			log.Warn(debugDA, "reconstructPackageBundleSegments:Error in convert bundle segments CE138_response", "n", n.id, "len(BundleShard)", len(daResp.BundleShard), "daResp.BundleShard", daResp.BundleShard)
 		}
 		if numShards < types.TotalCores {
-			bundleShards[numShards] = daResp.BundleShard
-			indexes[numShards] = uint32(daResp.ShardIndex)
-			numShards++
+			encodedPath := daResp.Justification
+			decodedPath, _ := common.DecodeJustification(encodedPath)
+			bClub := common.Blake2Hash(daResp.BundleShard)
+			sClub := daResp.SClub
+			leaf := append(bClub.Bytes(), sClub.Bytes()...)
+			verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
+			if verified || true {
+				bundleShards[numShards] = daResp.BundleShard
+				indexes[numShards] = uint32(daResp.ShardIndex)
+				numShards++
+			}
 		}
 	}
 	encodedBundle, err := bls.Decode(bundleShards, types.TotalValidators, indexes, int(blength))

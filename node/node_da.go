@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
@@ -28,7 +29,7 @@ func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, 
 	availabilitySpecifier := types.AvailabilitySpecifier{
 		WorkPackageHash:       package_bundle.WorkPackage.Hash(),
 		BundleLength:          uint32(len(b)),
-		ErasureRoot:           n.generateErasureRoot(bClubs, sClubs), // u = (bClub, sClub)
+		ErasureRoot:           generateErasureRoot(bClubs, sClubs), // u = (bClub, sClub)
 		ExportedSegmentRoot:   common.Hash(cdt.Root()),
 		ExportedSegmentLength: uint16(len(export_segments)),
 	}
@@ -42,8 +43,8 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 	erasureTree, _ := GenerateErasureTree(b, s)
 	erasureRoot := erasureTree.RootHash()
 	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
-		treeLen, leafHash, path, isFound, _ := erasureTree.Trace(shardIdx)
-		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
+		treeLen, leaf, path, isFound, _ := erasureTree.Trace(shardIdx)
+		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leaf, path)
 		if !verified {
 			// TEMPORARY
 			// return shardJustifications, fmt.Errorf("VerifyWBTJustification Failure")
@@ -52,19 +53,21 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 			Root:     erasureRoot,
 			ShardIdx: shardIdx,
 			TreeLen:  types.TotalValidators,
-			LeafHash: leafHash,
+			LeafHash: leaf,
 			Path:     path,
 		}
-		log.Trace(debugDA, "ErasureRootDefaultJustification:ErasureRootPath", "shardIdx", shardIdx, "treeLen", treeLen, "leafHash", leafHash, "path", path, "isFound", isFound, "verified", verified)
+		log.Trace(debugDA, "ErasureRootDefaultJustification:ErasureRootPath", "shardIdx", shardIdx, "treeLen", treeLen, "leaf", leaf, "path", path, "isFound", isFound, "verified", verified)
 	}
 	return shardJustifications, nil
 }
 
 // Verify T(s,i,H)
-func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash common.Hash, path []common.Hash) (bool, common.Hash) {
+func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash []byte, path [][]byte) (bool, common.Hash) {
 	recoveredRoot, verified, _ := trie.VerifyWBT(treeLen, int(shardIndex), root, leafHash, path)
-	if root != recoveredRoot && false {
-		//errStr := fmt.Sprintf("VerifyJustification Failure! Expected:%v | Recovered: %v\n", root, recoveredRoot)
+	if root != recoveredRoot {
+		log.Debug(debugDA, "VerifyJustification Failure : Input", "shardIdx", shardIndex, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		errStr := fmt.Sprintf("VerifyJustification Failure! Expected:%v | Recovered: %v\n", root, recoveredRoot)
+		fmt.Printf(errStr)
 		//panic("VerifyJustification")
 		return verified, recoveredRoot
 	}
@@ -75,9 +78,10 @@ func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, le
 // s: [(b♣T,s♣T)...] -  sequence of (work-package bundle shard hash, segment shard root) pairs satisfying u = MB(s)
 // i: shardIdx or ChunkIdx
 // H: Blake2b
-func GenerateWBTJustification(root common.Hash, shardIndex uint16, leaves [][]byte) (treeLen int, leafHash common.Hash, path []common.Hash, isFound bool) {
+func GenerateWBTJustification(root common.Hash, shardIndex uint16, leaves [][]byte) (treeLen int, leafHash []byte, path [][]byte, isFound bool) {
 	wbt := trie.NewWellBalancedTree(leaves, types.Blake2b)
-	//treeLen, leafHash, path, isFound, nil
+	// fmt.Printf("GenerateWBTJustification:root %v, shardIndex %v, leaves %x\n", root, shardIndex, leaves)
+	// wbt.PrintTree()
 	treeLen, leafHash, path, isFound, _ = wbt.Trace(int(shardIndex))
 	return treeLen, leafHash, path, isFound
 }
@@ -163,15 +167,20 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 	return sClub, ecChunksArr
 }
 
+func zipPairs(b []common.Hash, s []common.Hash) (pairs [][]byte) {
+	pairs = make([][]byte, len(b))
+	if len(b) != len(s) {
+		return
+	}
+	for i := 0; i < len(b); i++ {
+		pairs[i] = append(b[i].Bytes(), s[i].Bytes()...)
+	}
+	return pairs
+}
+
 func GenerateErasureTree(b []common.Hash, s []common.Hash) (*trie.WellBalancedTree, [][]byte) {
 	// Combine b and s into (work-package bundle shard hash, segment shard root) pairs
-	bundleSegmentPairs := make([][]byte, types.TotalValidators)
-	for i := 0; i < types.TotalValidators; i++ {
-		bundleSegmentPairs[i] = append(b[i].Bytes(), s[i].Bytes()...)
-		if debugSpec {
-			fmt.Printf("bclub-sclub pair %d = %x\n", i, bundleSegmentPairs[i])
-		}
-	}
+	bundleSegmentPairs := zipPairs(b, s)
 
 	// Generate and return erasureroot
 	t := trie.NewWellBalancedTree(bundleSegmentPairs, types.Blake2b)
@@ -183,15 +192,22 @@ func GenerateErasureTree(b []common.Hash, s []common.Hash) (*trie.WellBalancedTr
 }
 
 // MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix
-func (n *Node) generateErasureRoot(b []common.Hash, s []common.Hash) common.Hash {
+func generateErasureRoot(b []common.Hash, s []common.Hash) common.Hash {
 	erasureTree, bundle_segment_pairs := GenerateErasureTree(b, s)
 	erasureRoot := erasureTree.RootHash()
 
 	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
 		treeLen, leafHash, path, isFound := GenerateWBTJustification(erasureRoot, uint16(shardIdx), bundle_segment_pairs)
-		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, path)
+		encodedPath, _ := common.EncodeJustification(path)
+		decodedPath, _ := common.DecodeJustification(encodedPath)
+		if !reflect.DeepEqual(path, decodedPath) {
+			log.Error(debugDA, "generateErasureRoot:JustificationsPath mismatch", "shardIdx", shardIdx, "path", path, "decodedPath", decodedPath)
+		}
+		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, decodedPath)
 		if !verified {
-			log.Crit(debugDA, "VerifyWBTJustification ErasureRootPath NOT VERIFIED", "shardIdx", shardIdx, "treeLen", treeLen, "leafHash", leafHash, "path", path, "isFound", isFound)
+			log.Crit(debugDA, "VerifyWBTJustification ErasureRootPath NOT VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIdx, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "encodedPath", fmt.Sprintf("%x", encodedPath), "rawpath", fmt.Sprintf("%x", path), "path", fmt.Sprintf("%x", decodedPath), "isFound", isFound)
+		} else {
+			log.Trace(debugDA, "VerifyWBTJustification ErasureRootPath VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIdx, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "encodedPath", fmt.Sprintf("%x", encodedPath), "path", fmt.Sprintf("%x", path), "isFound", isFound)
 		}
 	}
 	return erasureRoot

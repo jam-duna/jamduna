@@ -59,22 +59,22 @@ func (n *Node) generateAssurance(headerHash common.Hash) (a types.Assurance, num
 // assureData, given a Guarantee with a AvailabiltySpec within a WorkReport, fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA
 func (n *Node) assureData(g types.Guarantee) (err error) {
 	spec := g.Report.AvailabilitySpec
-	erasureRoot := spec.ErasureRoot
 
+	// concatSegmentShards refers to the EC shards of the EXPORTED segments AND PROOF PAGES shards from the guaranteed work package
 	guarantor := g.Signatures[0].ValidatorIndex
-	bundleShard, concatSegmentShards, justification, err := n.peersInfo[guarantor].SendFullShardRequest(erasureRoot, n.id)
-
+	bundleShard, exported_segments_and_proofpageShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(spec.ErasureRoot, n.id)
 	if err != nil {
 		log.Error(debugDA, "assureData:SendFullShardRequest", "n", n.String(), "err", err)
 		return
 	}
-	segmentShards, _ := SplitToSegmentShards(concatSegmentShards)
-	verified, err := VerifyFullShard(erasureRoot, n.id, bundleShard, segmentShards, justification)
+	// CRITICAL: PRIOR to StoreFullShard_Assurer:  exported_segments_and_proofpageShards with the justification (provided by one of the 2-3 guarantors) to ensure it matches the erasureRoot
+	verified, err := VerifyFullShard(spec.ErasureRoot, n.id, bundleShard, exported_segments_and_proofpageShards, encodedPath)
 	if err != nil || !verified {
 		log.Error(debugDA, "assureData:VerifyFullShard", "n", n.String(), "err", err)
 		return
 	}
-	err = n.StoreFullShard_Assurer(erasureRoot, n.id, bundleShard, segmentShards, justification)
+
+	err = n.StoreFullShard_Assurer(spec.ErasureRoot, n.id, bundleShard, exported_segments_and_proofpageShards, encodedPath)
 	if err != nil {
 		return
 	}

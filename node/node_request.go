@@ -31,10 +31,10 @@ type CE138_request struct {
 }
 
 type CE138_response struct {
-	WorkPackageHash common.Hash
-	ShardIndex      uint16
-	BundleShard     []byte
-	Justification   []byte
+	ShardIndex    uint16
+	BundleShard   []byte
+	SClub         common.Hash
+	Justification []byte
 }
 
 type CE128_request struct {
@@ -437,16 +437,15 @@ func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
 		// handle selfRequesting case
 		isSelfRequesting := req.ShardIndex == uint16(n.id)
 		if isSelfRequesting {
-			//erasure_root common.Hash, shard_index uint16, bundleShard []byte, justification []byte, err error
-			erasure_root, shard_index, bundleShard, b_justification, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
+			bundleShard, sClub, encodedPath, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 			if err != nil {
 				return resp, err
 			}
 			self_response := CE138_response{
-				WorkPackageHash: erasure_root,
-				ShardIndex:      shard_index,
-				BundleShard:     bundleShard,
-				Justification:   b_justification,
+				ShardIndex:    req.ShardIndex,
+				BundleShard:   bundleShard,
+				SClub:         sClub,
+				Justification: encodedPath,
 			}
 			return self_response, nil
 		}
@@ -455,15 +454,15 @@ func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
 		if err != nil {
 			return resp, err
 		}
-		erasure_root, shard_index, bundleShard, b_justification, err := peer.SendBundleShardRequest(erasureRoot, peerID)
+		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(erasureRoot, peerID)
 		if err != nil {
 			return resp, err
 		}
 		response := CE138_response{
-			WorkPackageHash: erasure_root,
-			ShardIndex:      shard_index,
-			BundleShard:     bundleShard,
-			Justification:   b_justification,
+			ShardIndex:    req.ShardIndex,
+			BundleShard:   bundleShard,
+			SClub:         sClub,
+			Justification: encodedPath,
 		}
 		return response, nil
 

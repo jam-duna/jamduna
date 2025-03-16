@@ -15,12 +15,12 @@ type Justification struct {
 	ShardIdx int         `json:"shard_index"`
 	TreeLen  int         `json:"len"`
 	//Leaf     []byte        `json:"leaf"`
-	LeafHash common.Hash   `json:"leaf_hash"`
-	Path     []common.Hash `json:"path"`
+	LeafHash []byte   `json:"leaf_hash"`
+	Path     [][]byte `json:"path"`
 }
 
-func (j *Justification) CompactPath() []byte {
-	return common.CompactPath(j.Path)
+func (j *Justification) EncodeJustification() ([]byte, error) {
+	return common.EncodeJustification(j.Path)
 }
 
 func (j *Justification) Marshal() ([]byte, error) {

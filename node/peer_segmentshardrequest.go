@@ -191,7 +191,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 	}
 	selected_segmentshards, ok, err := n.GetSegmentShard_AssurerSimple(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
 	if err != nil {
-		log.Error(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", err)
+		log.Error(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
 		return err
 	}
 	if !ok {

@@ -32,8 +32,8 @@ Auditor -> Assurer
 <-- FIN
 */
 
-func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (erasure_root common.Hash, shard_index uint16, bundleShard []byte, justification []byte, err error) {
-	// TODO: add span for SendBundleShardRequest => get Bundle Shard/Justification back here
+func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, sClub common.Hash, encodedPath []byte, err error) {
+	// add span for SendBundleShardRequest => get Bundle Shard/Justification back here
 	if p.node.store.SendTrace {
 		tracer := p.node.store.Tp.Tracer("NodeTracer")
 		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendBundleShardRequest", p.node.store.NodeID))
@@ -56,9 +56,6 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 		ShardIndex:  shardIndex,
 	}
 
-	erasure_root = req.ErasureRoot
-	shard_index = req.ShardIndex
-
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return
@@ -74,7 +71,7 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 	}
 	log.Debug(debugDA, "SendBundleShardRequest", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "len", len(bundleShard))
 	// <-- Justification
-	justification, err = receiveQuicBytes(stream)
+	encodedPath, err = receiveQuicBytes(stream)
 	if err != nil {
 		return
 	}
@@ -92,7 +89,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 	}
 	log.Trace(debugA, "onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
 
-	_, _, bundleShard, b_justification, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
+	bundleShard, sClub, encodedPath, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onBundleShardRequest ERR0 %v\n", err)
 		return err
@@ -107,12 +104,17 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 		return err
 	}
 
-	// <-- Justification
-	err = sendQuicBytes(stream, b_justification)
+	// <-- sClub
+	err = sendQuicBytes(stream, sClub.Bytes())
 	if err != nil {
 		return err
 	}
-	// TODO: Verify justification
+
+	// <-- Justification
+	err = sendQuicBytes(stream, encodedPath)
+	if err != nil {
+		return err
+	}
 	// <-- FIN
 	return nil
 }

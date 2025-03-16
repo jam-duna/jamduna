@@ -3,6 +3,7 @@ package common
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -163,26 +164,70 @@ func ConcatenateByteSlices(slices [][]byte) []byte {
 	return result
 }
 
-func CompactPath(path []Hash) []byte {
-	combined := make([]byte, 0)
-	for _, h := range path {
-		combined = append(combined, h[:]...)
+func EncodeJustification(path [][]byte) ([]byte, error) {
+	// If path is nil or empty, return an empty slice.
+	if len(path) == 0 {
+		return []byte{}, nil
 	}
-	return combined
+	var combined []byte
+	for i, h := range path {
+		// Each element must be either 32 or 64 bytes.
+		if len(h) != 32 && len(h) != 64 {
+			return nil, fmt.Errorf("invalid hash length %d at index %d; expected 32 or 64", len(h), i)
+		}
+		// Use marker 0x01 for 64-byte, 0x00 for 32-byte.
+		if len(h) == 64 {
+			combined = append(combined, 0x01)
+		} else {
+			combined = append(combined, 0x00)
+		}
+		combined = append(combined, h...)
+	}
+	return combined, nil
 }
 
-func ExpandPath(compact []byte) ([]Hash, error) {
-	if len(compact)%32 != 0 {
-		return nil, fmt.Errorf("invalid compact path length, must be a multiple of 32")
+func DecodeJustification(compact []byte) ([][]byte, error) {
+	// If there's no data, return an empty slice.
+	if len(compact) == 0 {
+		return [][]byte{}, nil
 	}
-	hashCount := len(compact) / 32
-	hashes := make([]Hash, hashCount)
-	for i := 0; i < hashCount; i++ {
-		var hash Hash
-		copy(hash[:], compact[i*32:(i+1)*32]) // Copy 32 bytes into the hash
-		hashes[i] = hash
+	var path [][]byte
+	i := 0
+	for i < len(compact) {
+		// Ensure there's at least one marker byte.
+		if i+1 > len(compact) {
+			return nil, errors.New("unexpected end of data: missing marker")
+		}
+		marker := compact[i]
+		switch marker {
+		case 0x00:
+			// Marker 0x00 indicates a 32-byte hash.
+			if i+1+32 > len(compact) {
+				return nil, fmt.Errorf("unexpected end of data for 32-byte hash at position %d", i)
+			}
+			// Copy the hash to avoid aliasing issues.
+			h := make([]byte, 32)
+			copy(h, compact[i+1:i+1+32])
+			path = append(path, h)
+			i += 1 + 32
+		case 0x01:
+			// Marker 0x01 indicates a 64-byte hash.
+			if i+1+64 > len(compact) {
+				return nil, fmt.Errorf("unexpected end of data for 64-byte hash at position %d", i)
+			}
+			h := make([]byte, 64)
+			copy(h, compact[i+1:i+1+64])
+			path = append(path, h)
+			i += 1 + 64
+		default:
+			return nil, fmt.Errorf("invalid marker 0x%x at position %d", marker, i)
+		}
 	}
-	return hashes, nil
+	// If there's extra data, that's an error.
+	if i != len(compact) {
+		return nil, errors.New("extra data found after decoding justification")
+	}
+	return path, nil
 }
 
 func GetFilePath(fn string) string {

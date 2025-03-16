@@ -128,7 +128,7 @@ func testVerifyCDTJustificationX(t *testing.T, numSegments int) {
 	}
 
 	// Verify the justification
-	computedRoot := verifyCDTJustificationX(leafHash, index, justification, x)
+	computedRoot := VerifyCDTJustificationX(leafHash, index, justification, x)
 	expectedRoot, _ := tree.LocalRootX(index, x)
 
 	if !compareBytes(computedRoot, expectedRoot) {

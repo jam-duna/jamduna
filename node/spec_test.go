@@ -56,7 +56,7 @@ func testAvailabilitySpec(t *testing.T, exportCount uint16) {
 	bClubs, bShards := n.buildBClub(b)
 	sClubs, sShards := n.buildSClub(segments)
 	// u = (bClub, sClub)
-	erasure_root_u := n.generateErasureRoot(bClubs, sClubs)
+	erasure_root_u := generateErasureRoot(bClubs, sClubs)
 	exported_segment_root_e := generateExportedSegmentsRoot(segments)
 
 	// Return the Availability Specifier

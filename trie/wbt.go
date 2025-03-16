@@ -1,52 +1,52 @@
 package trie
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
-
 	"github.com/colorfulnotion/jam/types"
 )
 
-// WBTNode represents a node in the WBT
+// WBTNode is a node in the well-balanced tree.
+// Leaves can hold raw data (e.g. 64 bytes), and internal nodes store 32-byte hashes.
 type WBTNode struct {
-	Hash  []byte
+	Hash  []byte // NOTE: THIS IS NOT A 32-byte HASH ONLY, it can be a 64 byte leaf
 	Value []byte
 	Left  *WBTNode
 	Right *WBTNode
 }
 
-// WellBalancedTree represents the WBT structure
 type WellBalancedTree struct {
 	root     *WBTNode
 	leaves   []*WBTNode
 	hashType string
 }
 
-// Equation(E.3) in GP 0.6.2
-// buildWellBalancedTree constructs a well-balanced binary tree from the given leaves
+// Build the tree from the leaves.
 func (wbt *WellBalancedTree) buildWellBalancedTree() {
 	if len(wbt.leaves) == 0 {
-		// If no leaves, return hash of 0
-		hash0 := common.Hash{}
-		wbt.root = &WBTNode{Hash: hash0[:]}
+		var zero common.Hash
+		wbt.root = &WBTNode{Hash: zero[:]}
 		return
 	}
 	wbt.root = buildTreeRecursive(wbt.leaves, wbt.hashType)
 }
 
+// Return the root in raw bytes (32 bytes).
 func (tree *WellBalancedTree) Root() []byte {
 	return tree.root.Hash
 }
 
+// Return the root as common.Hash (32 bytes).
 func (tree *WellBalancedTree) RootHash() common.Hash {
-	return common.Hash(tree.root.Hash)
+	return common.BytesToHash(tree.root.Hash)
 }
 
-// buildTreeRecursive recursively constructs the tree and returns the root node
+// Recursively merge children with ceil-splitting.
 func buildTreeRecursive(nodes []*WBTNode, hashType string) *WBTNode {
 	if len(nodes) == 1 {
 		return nodes[0]
@@ -54,36 +54,25 @@ func buildTreeRecursive(nodes []*WBTNode, hashType string) *WBTNode {
 	mid := int(math.Ceil(float64(len(nodes)) / 2))
 	left := buildTreeRecursive(nodes[:mid], hashType)
 	right := buildTreeRecursive(nodes[mid:], hashType)
-	combinedValue := append(left.Hash, right.Hash...)
-	hash := computeNode(combinedValue, hashType)
-	return &WBTNode{
-		Hash:  hash,
-		Left:  left,
-		Right: right,
-	}
+	combined := append(left.Hash, right.Hash...)
+	parentHash := computeNode(combined, hashType)
+	return &WBTNode{Hash: parentHash, Left: left, Right: right}
 }
 
-// NewWellBalancedTree creates a new well-balanced tree with the given values
+// Build a tree from raw leaves (possibly 64 bytes). Single leaf is hashed to 32 bytes.
 func NewWellBalancedTree(values [][]byte, hashTypes ...string) *WellBalancedTree {
 	leaves := make([]*WBTNode, len(values))
 	hashType := types.Blake2b
 	if len(hashTypes) > 0 && hashTypes[0] == types.Keccak {
 		hashType = types.Keccak
 	}
+
 	if len(values) == 1 {
-		// special case H(v0) https://graypaper.fluffylabs.dev/#/85129da/3a0a013a0a01?v=0.6.3
-		value := values[0]
-		leaves[0] = &WBTNode{
-			Hash:  computeLeaf(value, hashType),
-			Value: value,
-		}
+		v := values[0]
+		leaves[0] = &WBTNode{Hash: computeLeaf(v, hashType), Value: v}
 	} else {
-		for i, value := range values {
-			leaves[i] = &WBTNode{
-				Hash:  value, // WAS: computeLeaf(value, hashType)
-				Value: value,
-			}
-			// fmt.Printf("add leaf %d: %x\n", i, leaves[i].Value)
+		for i, v := range values {
+			leaves[i] = &WBTNode{Hash: v, Value: v}
 		}
 	}
 	wbt := &WellBalancedTree{leaves: leaves, hashType: hashType}
@@ -91,15 +80,7 @@ func NewWellBalancedTree(values [][]byte, hashTypes ...string) *WellBalancedTree
 	return wbt
 }
 
-// Get returns the value of the leaf at the given index
-func (tree *WellBalancedTree) Get(index int) ([]byte, error) {
-	if index < 0 || index >= len(tree.leaves) {
-		return nil, errors.New("index out of leaf range")
-	}
-	return tree.leaves[index].Value, nil
-}
-
-// PrintTree prints the tree structure for debugging
+// Debug print.
 func (tree *WellBalancedTree) PrintTree() {
 	printNode(tree.root, 0, "Root")
 }
@@ -118,94 +99,65 @@ func printNode(node *WBTNode, level int, pos string) {
 	printNode(node.Right, level+1, "Right")
 }
 
-// Trace returns the proof path for a given value
-func (tree *WellBalancedTree) Trace(index int) (int, common.Hash, []common.Hash, bool, error) {
-	treeLen, leafHash, path, isFound, err := tree.trace(index)
-	if err != nil {
-		fmt.Printf("Get proof path error: %v\n", err)
-		return treeLen, common.Hash{}, nil, false, err
-	}
-	return treeLen, leafHash, path, isFound, nil
-}
-
-func (tree *WellBalancedTree) trace(index int) (int, common.Hash, []common.Hash, bool, error) {
-	treeLen := len(tree.leaves)
+// Get leaf data by index.
+func (tree *WellBalancedTree) Get(index int) ([]byte, error) {
 	if index < 0 || index >= len(tree.leaves) {
-		return treeLen, common.Hash{}, nil, false, errors.New("index out of leaf range")
+		return nil, errors.New("index out of range")
 	}
-
-	tracePath := make([]common.Hash, 0)
-	currentNode := tree.leaves[index]
-	leafHash := common.Hash(computeLeaf(currentNode.Value, tree.hashType))
-	for currentNode != tree.root {
-		parent := findWBTParent(tree.root, currentNode) // Find parent node
-		sibling := findWBTSibling(parent, currentNode)  // Find sibling node
-
-		if sibling != nil {
-			tracePath = append(tracePath, common.BytesToHash(sibling.Hash)) // Add sibling hash
-		} else {
-			tracePath = append(tracePath, BytesToHash(make([]byte, 32))) // If sibling is nil, add empty hash
-		}
-		currentNode = parent
-	}
-	return treeLen, leafHash, tracePath, true, nil
+	return tree.leaves[index].Value, nil
 }
 
-func VerifyWBT(treeLen int, index int, erasureRoot common.Hash, leafHash common.Hash, tracePath []common.Hash, hashTypes ...string) (common.Hash, bool, error) {
-	hashType := types.Blake2b
-	if len(hashTypes) != 0 && hashTypes[0] == types.Keccak {
-		hashType = types.Keccak
+// Trace returns the proof path (leaf->root). Leaves might be 64 bytes, siblings can be 64 or 32.
+func (tree *WellBalancedTree) Trace(index int) (int, []byte, [][]byte, bool, error) {
+	treeLen := len(tree.leaves)
+	if index < 0 || index >= treeLen {
+		return treeLen, nil, nil, false, errors.New("index out of range")
 	}
+	var path [][]byte
+	current := tree.leaves[index]
+	leafHash := current.Hash
+
+	for current != tree.root {
+		parent := findWBTParent(tree.root, current)
+		if parent == nil {
+			break
+		}
+		sibling := findWBTSibling(parent, current)
+		if sibling != nil {
+			path = append(path, sibling.Hash)
+		} else {
+			path = append(path, make([]byte, 32))
+		}
+		current = parent
+	}
+	return treeLen, leafHash, path, true, nil
+}
+
+// Verify merges the leaf and siblings using directions from top->down, then reversing them bottom->up.
+func VerifyWBT(treeLen int, index int, root common.Hash, leafHash []byte, path [][]byte) (common.Hash, bool, error) {
 	if index < 0 || index >= treeLen {
 		return common.Hash{}, false, errors.New("index out of range")
 	}
-	start, end := 0, treeLen-1
-	currentHash := leafHash
+	levels := len(path)
+	dirs := computeDirectionsForIndex(index, treeLen, levels)
+	reverseInts(dirs)
 
-	// Compute the direction of the path
-	direction := computeDirection(index, start, end, tracePath)
-	direction = reverse(direction)
-
-	// Compute the root hash
-	for i, dir := range direction {
-		siblingHash := tracePath[i]
-
+	current := leafHash
+	for i, dir := range dirs {
+		sib := path[i]
 		if dir == 0 {
-			currentHash = common.BytesToHash(computeNode(append(currentHash[:], siblingHash[:]...), hashType))
+			combined := append(current, sib...)
+			current = computeNode(combined)
 		} else {
-			currentHash = common.BytesToHash(computeNode(append(siblingHash[:], currentHash[:]...), hashType))
+			combined := append(sib, current...)
+			current = computeNode(combined)
 		}
 	}
-	isValid := erasureRoot.String() == currentHash.String()
-
-	return currentHash, isValid, nil
+	ok := bytes.Equal(root.Bytes(), current)
+	return common.BytesToHash(current), ok, nil
 }
 
-func computeDirection(index, start, end int, tracePath []common.Hash) []int {
-	direction := []int{}
-	for i := 0; i < len(tracePath); i++ {
-		mid := (start + end) / 2
-
-		if index <= mid {
-			end = mid
-			direction = append(direction, 0)
-		} else {
-			start = mid + 1
-			direction = append(direction, 1)
-		}
-	}
-	return direction
-}
-
-func reverse(direction []int) []int {
-	for i := 0; i < len(direction)/2; i++ {
-		j := len(direction) - i - 1
-		direction[i], direction[j] = direction[j], direction[i]
-	}
-	return direction
-}
-
-// findParent finds the parent of the given node
+// Parent & sibling.
 func findWBTParent(root, node *WBTNode) *WBTNode {
 	if root == nil || root == node {
 		return nil
@@ -213,9 +165,8 @@ func findWBTParent(root, node *WBTNode) *WBTNode {
 	if root.Left == node || root.Right == node {
 		return root
 	}
-
-	if leftParent := findWBTParent(root.Left, node); leftParent != nil {
-		return leftParent
+	if p := findWBTParent(root.Left, node); p != nil {
+		return p
 	}
 	return findWBTParent(root.Right, node)
 }
@@ -230,12 +181,37 @@ func findWBTSibling(parent, node *WBTNode) *WBTNode {
 	return parent.Left
 }
 
+// Directions from top->down using ceil-splitting.
+func computeDirectionsForIndex(index, totalLeaves, levels int) []int {
+	var dirs []int
+	n := totalLeaves
+	for i := 0; i < levels; i++ {
+		if n <= 1 {
+			break
+		}
+		leftCount := int(math.Ceil(float64(n) / 2))
+		if index < leftCount {
+			dirs = append(dirs, 0)
+			n = leftCount
+		} else {
+			dirs = append(dirs, 1)
+			index -= leftCount
+			n -= leftCount
+		}
+	}
+	return dirs
+}
+
+func reverseInts(a []int) {
+	for i := 0; i < len(a)/2; i++ {
+		j := len(a) - i - 1
+		a[i], a[j] = a[j], a[i]
+	}
+}
+
 func ComputeExpectedWBTCopathSize(numLeaves int) int {
 	if numLeaves <= 1 {
-		// If there's only one leaf, the co-path size is 0 (no siblings).
 		return 0
 	}
-
-	// Calculate the number of levels in the tree (log2 of the number of leaves, rounded up)
 	return int(math.Ceil(math.Log2(float64(numLeaves))))
 }
