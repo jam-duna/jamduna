@@ -1370,7 +1370,7 @@ func (vm *VM) hostMachine() {
 		vm.RefineM_map = make(map[uint32]*RefineM)
 	}
 	min_n := uint32(16)
-	for n := uint32(1); n < min_n; n++ {
+	for n := uint32(0); n < min_n; n++ {
 		_, ok := vm.RefineM_map[n]
 		if !ok {
 			min_n = n
@@ -1449,16 +1449,17 @@ func (vm *VM) hostPoke() {
 
 func (vm *VM) hostExpunge() {
 	n, _ := vm.ReadRegister(7)
-	_, ok := vm.RefineM_map[uint32(n)]
+	m, ok := vm.RefineM_map[uint32(n)]
 	if !ok {
 		vm.HostResultCode = WHO
 		vm.WriteRegister(7, WHO)
 		return
 	}
 
+	i := m.I
 	delete(vm.RefineM_map, uint32(n))
 
-	vm.WriteRegister(7, OK)
+	vm.WriteRegister(7, i)
 	vm.HostResultCode = OK
 }
 
