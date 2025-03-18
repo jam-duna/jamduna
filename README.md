@@ -66,15 +66,18 @@ Usage: jam [options]
 
 ## Libraries used
 
-* [bandersnatch-vrfs-spec](https://github.com/davxy/bandersnatch-vrfs-spec) in `crypto`
+* [bandersnatch-vrfs-spec](https://github.com/davxy/bandersnatch-vrfs-spec) in `bandersnatch`
+* [reed-solomon-simd](https://github.com/AndersTrier/reed-solomon-simd) and [w3f-bls](https://github.com/w3f/bls) in `bls`
 
 ## Disclosures
 
-Our interactions with fellow teams:
-* JAM Chat Room and Gray Paper Chat Room
-* JAM0 Chat Room
-* JAM0 event at Devcon 7, sponsored by Colorful Notion
-* JAM Telegram room
+
+Our interactions with fellow teams concerning implementation are:
+* Public [JAM Telegram room](https://t.me/jamtestnet) wherein many JAM Implementers are sharing published blocks/state transitions
+* Public [JAM DUNA JAM Testnet repo](https://github.com/jam-duna/jamtestnet/releases) on resolving discrepancies on published blocks/state_transitions/state_snapshot
+* [JAM0 event at Devcon 7, sponsored by Colorful Notion](https://forum.polkadot.network/t/jam0-jam-implementers-meetup-sub0-devcon-7-bangkok-nov-11-nov-16-2024/10866)
+* Public conversations with @koute concerning using polkatool over github to build our first services (see [here](https://forum.polkadot.network/t/building-jam-services-in-rust/10161))
+* Public + Private conversations with Jason @ JavaJAM to review how to participate in a [tiny testnet](https://github.com/jam-duna/jamtestnet/issues/69)
 
 
 

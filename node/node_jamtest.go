@@ -274,7 +274,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	}
 	// log.EnableModule("authoring")
 	// log.EnableModule("da_mod")
-	log.EnableModule("segment")
+	// log.EnableModule("segment")
 	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 	_ = nodes
 	block_graph_server := types.NewGraphServer(basePort)

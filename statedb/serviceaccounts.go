@@ -100,7 +100,7 @@ func parse_KV(md string) (uint32, string) {
 	m := parseMetadata(md)
 	sStr := m["s"]
 	sVal, _ := strconv.ParseUint(sStr, 10, 32)
-	key := m["k"]
+	key := m["hk"] // was k before 0.6.3
 	return uint32(sVal), key
 }
 
