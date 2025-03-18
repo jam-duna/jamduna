@@ -24,3 +24,4 @@ cmd/importblocks/data/.DS_Store
 .DS_Store
 node/*.txt
 *.log
+cmd/importblocks/rawdata/
