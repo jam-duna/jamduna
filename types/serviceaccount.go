@@ -294,6 +294,14 @@ func (s *ServiceAccount) String() string {
 	return str + str2 + str3 + str4
 }
 
+func (s *ServiceAccount) JsonString() string {
+	enc, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
+}
 func (s *ServiceAccount) ReadStorage(rawK common.Hash, sdb HostEnv) (ok bool, v []byte) {
 	serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal(rawK)
@@ -522,14 +530,6 @@ func convertStringMapToHashMap[T any](input map[string]T) map[common.Hash]T {
 		output[common.HexToHash(k)] = v
 	}
 	return output
-}
-
-func (s *ServiceAccount) JsonString() string {
-	jsonBytes, err := s.MarshalJSON()
-	if err != nil {
-		return fmt.Sprintf("Error marshalling ServiceAccount: %v", err)
-	}
-	return string(jsonBytes)
 }
 
 func CombineMetadataAndCode(service_name string, code []byte) []byte {

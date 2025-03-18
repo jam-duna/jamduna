@@ -122,7 +122,7 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 	return blocks, nil
 }
 
-func (n *Node) onBlockRequest(stream quic.Stream, msg []byte) (err error) {
+func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte) (err error) {
 	var newReq JAMSNPBlockRequest
 	defer stream.Close()
 	// Deserialize byte array back into the struct

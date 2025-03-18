@@ -2,11 +2,12 @@ package node
 
 import (
 	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
 )
 
-func (n *Node) GetStorage() (*storage.StateDBStorage, error) {
+func (n *NodeContent) GetStorage() (*storage.StateDBStorage, error) {
 	if n == nil {
 		return nil, fmt.Errorf("Node Not initiated")
 	}
@@ -16,7 +17,7 @@ func (n *Node) GetStorage() (*storage.StateDBStorage, error) {
 	return n.store, nil
 }
 
-func (n *Node) ReadKV(key common.Hash) ([]byte, error) {
+func (n *NodeContent) ReadKV(key common.Hash) ([]byte, error) {
 	store, err := n.GetStorage()
 	if err != nil {
 		return []byte{}, err
@@ -28,7 +29,7 @@ func (n *Node) ReadKV(key common.Hash) ([]byte, error) {
 	return val, nil
 }
 
-func (n *Node) WriteKV(key common.Hash, val []byte) error {
+func (n *NodeContent) WriteKV(key common.Hash, val []byte) error {
 	store, err := n.GetStorage()
 	if err != nil {
 		return err
@@ -40,7 +41,7 @@ func (n *Node) WriteKV(key common.Hash, val []byte) error {
 	return nil
 }
 
-func (n *Node) WriteRawKV(key string, val []byte) error {
+func (n *NodeContent) WriteRawKV(key string, val []byte) error {
 	store, err := n.GetStorage()
 	if err != nil {
 		return err
@@ -53,7 +54,7 @@ func (n *Node) WriteRawKV(key string, val []byte) error {
 	return nil
 }
 
-func (n *Node) WriteKVByte(key []byte, val []byte) error {
+func (n *NodeContent) WriteKVByte(key []byte, val []byte) error {
 	store, err := n.GetStorage()
 	if err != nil {
 		return err
@@ -65,7 +66,7 @@ func (n *Node) WriteKVByte(key []byte, val []byte) error {
 	return nil
 }
 
-func (n *Node) ReadRawKV(key []byte) ([]byte, bool, error) {
+func (n *NodeContent) ReadRawKV(key []byte) ([]byte, bool, error) {
 	store, err := n.GetStorage()
 	if err != nil {
 		return []byte{}, false, err
@@ -80,7 +81,7 @@ func (n *Node) ReadRawKV(key []byte) ([]byte, bool, error) {
 	return val, true, nil
 }
 
-func (n *Node) ReadKVByte(key []byte) ([]byte, bool, error) {
+func (n *NodeContent) ReadKVByte(key []byte) ([]byte, bool, error) {
 	store, err := n.GetStorage()
 	if err != nil {
 		return []byte{}, false, err

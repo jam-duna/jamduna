@@ -123,7 +123,7 @@ func (p *Peer) SendHandshake(stream quic.Stream, b types.Block, slot uint32, lea
 	return nil
 }
 
-func (n *Node) onHandshake(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *NodeContent) onHandshake(stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	var newReq JAMSNPHandshake
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)

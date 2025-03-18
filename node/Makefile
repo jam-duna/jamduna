@@ -51,6 +51,11 @@ megatron_pprof:
 	./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=10 -prereq_test=true
 	go tool pprof -http=":8080" cpu.pprof
 
+archive_node:
+	@echo "Running TestArchiveNode with timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestArchiveNode -tags \"network_test,$(TAGS)\""
+	@go test -timeout $(TIMEOUT) -v -run TestArchiveNode -tags "network_test,$(TAGS)"
+
 debug_eg_error:
 	@echo "Displaying error and status logs from guarantees..."
 	@echo "EG_error:"

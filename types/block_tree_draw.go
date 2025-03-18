@@ -31,7 +31,8 @@ func NewGraphServer(basePort uint16) *GraphServer {
 
 // StartServer sets up an HTTP server to serve the visualization.
 func (gs *GraphServer) StartServer() {
-	http.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
 		page := components.NewPage()
 		if gs.Graph != nil {
 			page.AddCharts(gs.Graph)
@@ -39,7 +40,9 @@ func (gs *GraphServer) StartServer() {
 		page.Render(rw)
 	})
 	portStr := fmt.Sprintf(":%d", graphServerPort+gs.BasePort)
-	if err := http.ListenAndServe(portStr, nil); err != nil && err != http.ErrServerClosed {
+	gs.Server = &http.Server{Addr: portStr, Handler: mux}
+	fmt.Printf("Graph server listening on port %d\n", graphServerPort+gs.BasePort)
+	if err := gs.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

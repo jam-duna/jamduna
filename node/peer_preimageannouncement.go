@@ -37,9 +37,9 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 		PreimageHash: preimageHash,
 		PreimageLen:  preimageLen,
 	}
-	n.preimagesMutex.Lock()
-	n.preimages[preimageHash] = preimage
-	n.preimagesMutex.Unlock()
+
+	n.StoreImage(preimageHash, preimage)
+
 	preimageLookup := types.Preimages{
 		Requester: uint32(serviceID),
 		Blob:      preimage,
@@ -50,6 +50,13 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 
 	go n.broadcast(pa)
 	return nil
+}
+
+func (n *NodeContent) StoreImage(preimageHash common.Hash, preimage []byte) {
+	n.preimagesMutex.Lock()
+	defer n.preimagesMutex.Unlock()
+	n.preimages[preimageHash] = preimage
+	return
 }
 
 func (n *Node) runPreimages() {
@@ -84,8 +91,11 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 
 	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
 	if err != nil {
+		log.Error(debugP, "processPreimageAnnouncements", "err", err)
 		return err
 	}
+
+	log.Debug(debugP, "processPreimageAnnouncements", "n", n.String(), "preimage", common.Bytes2String(preimage))
 
 	lookup := types.Preimages{
 		Requester: uint32(serviceIndex),
@@ -150,11 +160,13 @@ Node -> Node
 */
 func (p *Peer) SendPreimageRequest(preimageHash common.Hash) (preimage []byte, err error) {
 	stream, err := p.openStream(CE143_PreimageRequest)
+	if err != nil {
+		return preimage, err
+	}
 	err = sendQuicBytes(stream, preimageHash.Bytes())
 	if err != nil {
 		return preimage, err
 	}
-	time.Sleep(10 * time.Second)
 	preimage, err = receiveQuicBytes(stream)
 	if err != nil {
 		return preimage, err
@@ -162,7 +174,7 @@ func (p *Peer) SendPreimageRequest(preimageHash common.Hash) (preimage []byte, e
 	return preimage, nil
 }
 
-func (n *Node) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
+func (n *NodeContent) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 	// --> Hash
 	preimageHash := common.BytesToHash(msg)

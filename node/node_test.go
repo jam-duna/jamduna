@@ -103,10 +103,15 @@ func TestFallback(t *testing.T) {
 
 func TestSafrole(t *testing.T) {
 	bufferTime := 30
-	basePort := GenerateRandomBasePort()
+	basePort := uint16(9000)
 	safroleTest(t, "safrole", SafroleTestEpochLen, basePort, bufferTime)
 }
 
+//	func TestSafrole(t *testing.T) {
+//		bufferTime := 30
+//		basePort := GenerateRandomBasePort()
+//		safroleTest(t, "safrole", SafroleTestEpochLen, basePort, bufferTime)
+//	}
 func TestFib(t *testing.T) {
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {

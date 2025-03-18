@@ -35,6 +35,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 
 	// Make sure this Preimages is ready to be included..
 	queued_preimage := extrinsic_pool.GetPreimageFromPool()
+	log.Debug(debugP, "MakeBlock: Queued Preimages", "len", len(queued_preimage), "slot", targetJCE)
 	for _, preimageLookup := range queued_preimage {
 		_, err := s.ValidateLookup(preimageLookup)
 		if err == nil {

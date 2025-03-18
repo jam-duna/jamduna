@@ -139,7 +139,7 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 	return nil
 }
 
-func (n *Node) onStateRequest(stream quic.Stream, msg []byte) (err error) {
+func (n *NodeContent) onStateRequest(stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 
 	var newReq JAMSNPStateRequest

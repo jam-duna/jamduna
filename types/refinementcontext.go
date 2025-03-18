@@ -1,6 +1,9 @@
 package types
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -22,4 +25,13 @@ type RefineContext struct {
 	LookupAnchor     common.Hash   `json:"lookup_anchor"`      // l
 	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"` // t
 	Prerequisites    []common.Hash `json:"prerequisites"`      //p
+}
+
+func (rc *RefineContext) String() string {
+	enc, err := json.MarshalIndent(rc, "", "  ")
+	if err != nil {
+		// Handle the error according to your needs.
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
 }

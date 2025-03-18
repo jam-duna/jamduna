@@ -14,7 +14,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) StoreBlock(blk *types.Block, id uint16, debug bool) error {
+func (n *NodeContent) StoreBlock(blk *types.Block, id uint16, debug bool) error {
 	// from block, derive blockHash & headerHash
 	s, err := n.GetStorage()
 	if err != nil {
@@ -39,6 +39,12 @@ func (n *Node) StoreBlock(blk *types.Block, id uint16, debug bool) error {
 	}
 	s.WriteRawKV(blkStoreKey, encodedblk)
 
+	// store block by slot
+	// "blk_"+slot uint32 to []byte
+	slotPrefix := []byte("blk_")
+	slotStoreKey := append(slotPrefix, common.Uint32ToBytes(blk.Header.Slot)...)
+	s.WriteRawKV(slotStoreKey, encodedblk)
+
 	// child_<ParentHeaderHash>_headerhash -> blockHash and potentially use "seek"
 	childPrefix := []byte("child_")
 
@@ -59,7 +65,7 @@ func stripPrefix(key []byte, prefix []byte) ([]byte, error) {
 	return key[len(prefix):], nil
 }
 
-func (n *Node) GetAscendingBlockByHeader(headerHash common.Hash) (childBlks []*types.Block, err error) {
+func (n *NodeContent) GetAscendingBlockByHeader(headerHash common.Hash) (childBlks []*types.Block, err error) {
 
 	// child_<parentHash>_headerhash -> blockHash and potentially use "seek"
 	prefix := []byte("child_")
@@ -92,7 +98,7 @@ func (n *Node) GetAscendingBlockByHeader(headerHash common.Hash) (childBlks []*t
 	return childBlks, nil
 }
 
-func (n *Node) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, error) {
+func (n *NodeContent) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, error) {
 	//header_<headerhash> -> blockHash
 	headerPrefix := []byte("header_")
 	storeKey := append(headerPrefix, blkHeader[:]...)
@@ -118,7 +124,25 @@ func (n *Node) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, erro
 	b := blk.(types.Block)
 	return &b, nil
 }
-
+func (n *NodeContent) GetStoredBlockBySlot(slot uint32) (*types.Block, error) {
+	// "blk_"+slot uint32 to []byte
+	slotPrefix := []byte("blk_")
+	slotStoreKey := append(slotPrefix, common.Uint32ToBytes(slot)...)
+	encodedblk, ok, err := n.ReadRawKV(slotStoreKey)
+	if err != nil {
+		fmt.Printf("Error reading block: %v\n", err)
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("Block not found")
+	}
+	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
+	if err != nil {
+		fmt.Printf("Error decoding block: %v\n", err)
+		return nil, err
+	}
+	b := blk.(types.Block)
+	return &b, nil
+}
 func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk, err error) {
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasureRoot)
 	erasure_bKey_val, ok, err := n.ReadRawKV([]byte(erasure_bKey))

@@ -51,13 +51,13 @@ type CE128_response struct {
 	Blocks     []types.Block
 }
 
-func (n *Node) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
+func (n *NodeContent) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
 	// TODO: Sourabh
 	fmt.Println("OnHandshake")
 	return nil
 }
 
-func (n *Node) GetBlockByHeaderHash(headerHash common.Hash) (*types.Block, error) {
+func (n *NodeContent) GetBlockByHeaderHash(headerHash common.Hash) (*types.Block, error) {
 	blk, cachedFound := n.cacheHeadersRead(headerHash)
 	if cachedFound {
 		return blk, nil
@@ -69,7 +69,7 @@ func (n *Node) GetBlockByHeaderHash(headerHash common.Hash) (*types.Block, error
 	return blk, nil
 }
 
-func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
+func (n *NodeContent) BlocksLookup(headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, ok bool, err error) {
 	blocks = make([]types.Block, 0)
 	if direction == 0 {
 		//Direction = 0 (Ascending exclusive)  - child, grandchild, ...
@@ -115,7 +115,7 @@ func (n *Node) BlocksLookup(headerHash common.Hash, direction uint8, maximumBloc
 	return blocks, true, nil
 }
 
-func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.WorkReport, ok bool, err error) {
+func (n *NodeContent) WorkReportLookup(workReportHash common.Hash) (workReport types.WorkReport, ok bool, err error) {
 	workReport, found := n.cacheWorkReportRead(workReportHash)
 	if found {
 		return workReport, true, nil
@@ -124,7 +124,7 @@ func (n *Node) WorkReportLookup(workReportHash common.Hash) (workReport types.Wo
 
 }
 
-func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
+func (n *NodeContent) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
 	n.preimagesMutex.Lock()
 	defer n.preimagesMutex.Unlock()
 
@@ -136,7 +136,7 @@ func (n *Node) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
 	return preimage, true, nil
 }
 
-func (n *Node) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+func (n *NodeContent) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	// TODO: Stanley
 	s := n.getPVMStateDB()
 	// stateRoot := s.GetStateRoot()
@@ -158,7 +158,7 @@ func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, 
 	return n.getServiceIdxStorage(headerHash, service_idx, rawKey)
 }
 
-func (n *Node) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey common.Hash) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey common.Hash) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	s := n.getPVMStateDB()
 	// stateRoot := s.GetStateRoot()
 	blocks, ok, err := n.BlocksLookup(headerHash, 1, 1)
@@ -235,40 +235,40 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) 
 	return block, nil
 }
 
-func (n *Node) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) {
+func (n *NodeContent) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) {
 	n.blocksMutex.Lock()
 	defer n.blocksMutex.Unlock()
 	b, ok = n.blocks[parentHash]
 	return b, ok
 }
 
-func (n *Node) cacheBlock(block *types.Block) {
+func (n *NodeContent) cacheBlock(block *types.Block) {
 	n.blocksMutex.Lock()
 	defer n.blocksMutex.Unlock()
 	n.blocks[block.GetParentHeaderHash()] = block
 }
 
-func (n *Node) cacheHeadersRead(h common.Hash) (b *types.Block, ok bool) {
+func (n *NodeContent) cacheHeadersRead(h common.Hash) (b *types.Block, ok bool) {
 	n.headersMutex.Lock()
 	defer n.headersMutex.Unlock()
 	b, ok = n.headers[h]
 	return b, ok
 }
 
-func (n *Node) cacheHeaders(h common.Hash, block *types.Block) {
+func (n *NodeContent) cacheHeaders(h common.Hash, block *types.Block) {
 	n.headersMutex.Lock()
 	defer n.headersMutex.Unlock()
 	n.headers[h] = block
 	// fmt.Printf("  %s cacheHeaders %v <- %v\n", n.String(), h, block.Header.ParentHeaderHash)
 }
 
-func (n *Node) cacheWorkReport(workReport types.WorkReport) {
+func (n *NodeContent) cacheWorkReport(workReport types.WorkReport) {
 	n.workReportsMutex.Lock()
 	defer n.workReportsMutex.Unlock()
 	n.workReports[workReport.Hash()] = workReport
 }
 
-func (n *Node) cacheWorkReportRead(h common.Hash) (workReport types.WorkReport, ok bool) {
+func (n *NodeContent) cacheWorkReportRead(h common.Hash) (workReport types.WorkReport, ok bool) {
 	n.workReportsMutex.Lock()
 	defer n.workReportsMutex.Unlock()
 	workReport, ok = n.workReports[h]

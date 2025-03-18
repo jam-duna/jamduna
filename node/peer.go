@@ -45,7 +45,7 @@ const (
 
 type Peer struct {
 	// these are initialized in NewPeer
-	node      *Node
+	node      *NodeContent
 	PeerID    uint16          `json:"peer_id"`
 	PeerAddr  string          `json:"peer_addr"`
 	Validator types.Validator `json:"validator"`
@@ -70,7 +70,7 @@ func (p *Peer) Clone() *Peer {
 
 func NewPeer(n *Node, validatorIndex uint16, validator types.Validator, peerAddr string) (p *Peer) {
 	p = &Peer{
-		node:      n,
+		node:      &n.NodeContent,
 		PeerAddr:  peerAddr,
 		Validator: validator,
 		PeerID:    validatorIndex,
@@ -331,6 +331,6 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 	return nil
 }
 
-func (p *Peer) jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {
+func jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {
 	write_jamnp_test_vector(ce, "request", testVectorName, b, obj)
 }

@@ -127,6 +127,10 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 	if _, exist := n.UP0_stream[uint16(validator_index)]; exist {
 		n.UP0_streamMu.Unlock()
 		return n.UP0_stream[uint16(validator_index)], nil
+	} else if _, exist := n.UP0_stream[uint16(p.PeerID)]; exist {
+		n.UP0_streamMu.Unlock()
+		return n.UP0_stream[uint16(p.PeerID)], nil
+
 	}
 	stream, err := p.openStream(UP0_BlockAnnouncement)
 	if err != nil {
@@ -228,18 +232,18 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 
 	default:
 	}
-	// persist the stream
 
 	n.UP0_streamMu.Lock()
 	n.UP0_stream[peerID] = stream
 	n.UP0_streamMu.Unlock()
+
 	// TODO do something with the received handshake
 	go n.runBlockAnnouncement(stream)
 	return nil
 }
 
 // this function will read the block announcement from the stream persistently
-func (n *Node) runBlockAnnouncement(stream quic.Stream) {
+func (n *NodeContent) runBlockAnnouncement(stream quic.Stream) {
 	for {
 		// see if there is any stream error
 		if stream == nil {
@@ -267,7 +271,7 @@ func (n *Node) GetLatestFinalizedBlock() *types.Block {
 	return n.block_tree.GetLastFinalizedBlock().Block
 }
 
-func (n *Node) GetLatestHandshake() JAMSNP_Handshake {
+func (n *NodeContent) GetLatestHandshake() JAMSNP_Handshake {
 	if n.block_tree == nil {
 		return JAMSNP_Handshake{
 			FinalizedBlock: JAMSNP_BlockInfo{

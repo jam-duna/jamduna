@@ -154,8 +154,7 @@ func (p *Peer) DA_Request(an DA_request) ([]byte, error) {
 	return chunk_bytes, nil
 }
 
-func (n *Node) DA_Lookup(hash common.Hash, validator_idx uint32) ([]byte, error) {
-
+func (n *NodeContent) DA_Lookup(hash common.Hash, validator_idx uint32) ([]byte, error) {
 	// check the chunkbox
 	if chunks, ok := n.chunkBox[hash]; ok {
 		chunk := chunks[validator_idx]

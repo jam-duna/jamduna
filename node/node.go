@@ -82,31 +82,82 @@ const (
 	ValidatorDAFlag = "VALIDATOR&DA"
 )
 
-type Node struct {
-	id uint16
+type NodeContent struct {
+	id                   uint16
+	node_type            string
+	node_name            string
+	command_chan         chan string
+	peersInfo            map[uint16]*Peer                 //<validatorIndex> -> Peer
+	UP0_HandshakeChan    map[uint16]chan JAMSNP_Handshake //<validatorIndex> -> chan
+	UP0_HandshakeMu      sync.Mutex
+	UP0_stream           map[uint16]quic.Stream //<validatorIndex> -> stream (self initiated)
+	UP0_streamMu         sync.Mutex
+	blockAnnouncementsCh chan JAMSNP_BlockAnnounce
 
-	AuditNodeType string
-	credential    types.ValidatorSecret
-	server        quic.Listener
-	peers         []string
-	peersInfo     map[uint16]*Peer //<validatorIndex> -> Peer
+	server quic.Listener
 
-	UP0_HandshakeChan map[uint16]chan JAMSNP_Handshake //<validatorIndex> -> chan
-	UP0_HandshakeMu   sync.Mutex
-	UP0_stream        map[uint16]quic.Stream //<validatorIndex> -> stream (self initiated)
-	UP0_streamMu      sync.Mutex
-
+	epoch0Timestamp uint32
 	// Jamweb
-	hub *Hub
-
+	hub       *Hub
 	tlsConfig *tls.Config
+	store     *storage.StateDBStorage
+	// holds a map of the hash to the stateDB
+	statedbMap      map[common.Hash]*statedb.StateDB
+	statedbMapMutex sync.Mutex
+	// holds a map of the parenthash to the block
+	blocks      map[common.Hash]*types.Block
+	blocksMutex sync.Mutex
+	// holds the tip
+	statedb      *statedb.StateDB
+	statedbMutex sync.Mutex
+	headers      map[common.Hash]*types.Block
+	headersMutex sync.Mutex
+	// Track the number of opened streams
+	openedStreamsMu   sync.Mutex
+	openedStreams     map[quic.Stream]struct{}
+	dataHashStreamsMu sync.Mutex
+	dataHashStreams   map[common.Hash][]quic.Stream
 
-	store *storage.StateDBStorage
+	workReports      map[common.Hash]types.WorkReport
+	workReportsMutex sync.Mutex
+	workReportsCh    chan types.WorkReport
+	workPackagesCh   chan types.WorkPackage
 
+	preimages      map[common.Hash][]byte // preimageLookup -> preimageBlob
+	preimagesMutex sync.Mutex
+
+	chunkBox            map[common.Hash][][]byte
+	loaded_services_dir string
+	block_tree          *types.BlockTree
+}
+
+func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
+	return NodeContent{
+		id:                   id,
+		store:                store,
+		command_chan:         make(chan string, 200),
+		peersInfo:            make(map[uint16]*Peer),
+		UP0_stream:           make(map[uint16]quic.Stream),
+		statedbMap:           make(map[common.Hash]*statedb.StateDB),
+		dataHashStreams:      make(map[common.Hash][]quic.Stream),
+		blockAnnouncementsCh: make(chan JAMSNP_BlockAnnounce, 200),
+		blocks:               make(map[common.Hash]*types.Block),
+		headers:              make(map[common.Hash]*types.Block),
+		workPackagesCh:       make(chan types.WorkPackage, 200),
+		workReportsCh:        make(chan types.WorkReport, 200),
+		preimages:            make(map[common.Hash][]byte),
+	}
+}
+
+type Node struct {
+	NodeContent
+
+	AuditNodeType  string
+	credential     types.ValidatorSecret
+	peers          []string
 	extrinsic_pool *types.ExtrinsicPool
 
-	block_tree *types.BlockTree
-	grandpa    *grandpa.Grandpa
+	grandpa *grandpa.Grandpa
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
@@ -134,23 +185,8 @@ type Node struct {
 	assuranceMutex   sync.Mutex
 	delaysend        map[common.Hash]int // delaysend is a map of workpackagehash to the number of times it has been delayed
 
-	// holds a map of the parenthash to the block
-	blocks      map[common.Hash]*types.Block
-	blocksMutex sync.Mutex
+	ticketsCh chan types.Ticket
 
-	headers      map[common.Hash]*types.Block
-	headersMutex sync.Mutex
-
-	preimages      map[common.Hash][]byte // preimageLookup -> preimageBlob
-	preimagesMutex sync.Mutex
-
-	workReports      map[common.Hash]types.WorkReport
-	workReportsMutex sync.Mutex
-
-	blockAnnouncementsCh    chan JAMSNP_BlockAnnounce
-	ticketsCh               chan types.Ticket
-	workPackagesCh          chan types.WorkPackage
-	workReportsCh           chan types.WorkReport
 	guaranteesCh            chan types.Guarantee
 	assurancesCh            chan types.Assurance
 	preimageAnnouncementsCh chan types.PreimageAnnouncement
@@ -169,21 +205,11 @@ type Node struct {
 	waitingJudgements         []types.Judgement
 	waitingJudgementsMutex    sync.Mutex
 
-	// holds a map of the hash to the stateDB
-	statedbMap      map[common.Hash]*statedb.StateDB
-	statedbMapMutex sync.Mutex
-
-	// holds the tip
-	statedb      *statedb.StateDB
-	statedbMutex sync.Mutex
-
-	nodeType        string
-	dataDir         string
-	epoch0Timestamp uint32
+	nodeType string
+	dataDir  string
 
 	// DA testing only
 	chunkMap       sync.Map
-	chunkBox       map[common.Hash][][]byte
 	lastHash       common.Hash
 	currentHash    common.Hash
 	announcement   bool
@@ -193,12 +219,6 @@ type Node struct {
 	totalConnections     int64
 	totalIncomingStreams int64
 	connectedPeers       map[uint16]bool
-
-	// Track the number of opened streams
-	openedStreamsMu   sync.Mutex
-	openedStreams     map[quic.Stream]struct{}
-	dataHashStreamsMu sync.Mutex
-	dataHashStreams   map[common.Hash][]quic.Stream
 
 	// JamBlocks testing only
 	JAMBlocksEndpoint string
@@ -271,7 +291,7 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 	return tls.X509KeyPair(certPEM, privKeyPEM)
 }
 
-func (n *Node) String() string {
+func (n *NodeContent) String() string {
 	return fmt.Sprintf("[N%d]", n.id)
 }
 
@@ -367,36 +387,23 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		id:        id,
-		store:     store,
-		peers:     peers,
-		peersInfo: make(map[uint16]*Peer),
-		clients:   make(map[string]string),
-		nodeType:  nodeType,
-
-		UP0_stream: make(map[uint16]quic.Stream),
+		NodeContent: NewNodeContent(id, store),
+		peers:       peers,
+		clients:     make(map[string]string),
+		nodeType:    nodeType,
 
 		extrinsic_pool: types.NewExtrinsicPool(),
-
-		statedbMap: make(map[common.Hash]*statedb.StateDB),
 
 		auditingMap:     make(map[common.Hash]*statedb.StateDB),
 		announcementMap: make(map[common.Hash]*types.TrancheAnnouncement),
 		judgementMap:    make(map[common.Hash]*types.JudgeBucket),
 		judgementWRMap:  make(map[common.Hash]common.Hash),
 
-		blocks:    make(map[common.Hash]*types.Block),
-		headers:   make(map[common.Hash]*types.Block),
-		preimages: make(map[common.Hash][]byte),
-
 		selfTickets:      make(map[common.Hash][]types.TicketBucket),
 		assurancesBucket: make(map[common.Hash]bool),
 		delaysend:        make(map[common.Hash]int),
 
-		blockAnnouncementsCh:    make(chan JAMSNP_BlockAnnounce, 200),
 		ticketsCh:               make(chan types.Ticket, 200),
-		workPackagesCh:          make(chan types.WorkPackage, 200),
-		workReportsCh:           make(chan types.WorkReport, 200),
 		guaranteesCh:            make(chan types.Guarantee, 200),
 		assurancesCh:            make(chan types.Assurance, 200),
 		preimageAnnouncementsCh: make(chan types.PreimageAnnouncement, 200),
@@ -416,9 +423,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		dataDir: dataDir,
 
-		connectedPeers:  make(map[uint16]bool),
-		dataHashStreams: make(map[common.Hash][]quic.Stream),
+		connectedPeers: make(map[uint16]bool),
 	}
+	node.node_name = fmt.Sprintf("jam-%d", id)
 	tlsConfig := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
 		ClientAuth:         tls.RequireAnyClientCert,
@@ -470,6 +477,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	if err == nil {
 		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)
+		node.StoreBlock(block, id, false)
 	} else {
 		fmt.Printf("NewGenesisStateDB ERR %v\n", err)
 		return nil, err
@@ -496,10 +504,11 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runPreimages()
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
+		go node.StartRPCServer()
 		// go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
-		if id == 0 {
-			go node.runJamWeb(uint16(port+1000) + id)
-		}
+		// if id == 0 {
+		// 	go node.runJamWeb(uint16(port+1000) + id)
+		// }
 	}
 	return node, nil
 }
@@ -526,7 +535,7 @@ func getConnKey(identifier string, incoming bool) string {
 }
 
 // use ed25519 key to get peer info
-func (n *Node) GetPeerInfoByEd25519(key types.Ed25519Key) (*Peer, error) {
+func (n *NodeContent) GetPeerInfoByEd25519(key types.Ed25519Key) (*Peer, error) {
 	for _, peer := range n.peersInfo {
 		if peer.Validator.Ed25519 == key {
 			return peer, nil
@@ -601,7 +610,7 @@ func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 // }
 
 // this function will return the core workers of that core
-func (n *Node) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
+func (n *NodeContent) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
 	coWorkers = make([]Peer, 0)
 	for _, assignment := range n.statedb.GuarantorAssignments {
 		if assignment.CoreIndex == core {
@@ -669,7 +678,7 @@ func (n *Node) getPeerAddr(peerIdx uint16) (*Peer, error) {
 	return nil, fmt.Errorf("peer not found")
 }
 
-func (n *Node) addStateDB(_statedb *statedb.StateDB) error {
+func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 	n.statedbMutex.Lock()
 	n.statedbMapMutex.Lock()
 	defer n.statedbMutex.Unlock()
@@ -762,8 +771,17 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 	validatorIndex, ok := n.lookupPubKey(pubKey)
 	if !ok {
-		fmt.Printf("handleConnection: UNKNOWN pubkey %s from remoteAddr=%s\n", pubKey, remoteAddr)
-		return
+		fmt.Printf("handleConnection: Non-Validator pubkey %s from remoteAddr=%s\n", pubKey, remoteAddr)
+		validatorIndex = 9999
+		// remoteAddr change the port to 13000
+		// see how many number from the end
+		host, _, err := net.SplitHostPort(remoteAddr)
+		if err != nil {
+			panic(err)
+		}
+		newAddr := net.JoinHostPort(host, "13000")
+		fmt.Printf("change port to %s\n", newAddr)
+		n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
 	}
 
 	for {
@@ -787,6 +805,27 @@ func (n *Node) broadcast(obj interface{}) []byte {
 	objType := reflect.TypeOf(obj)
 	var wg sync.WaitGroup
 	for id, p := range n.peersInfo {
+
+		if id > types.TotalValidators {
+			switch objType {
+			case reflect.TypeOf(types.Block{}):
+				b := obj.(types.Block)
+				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
+				if err != nil {
+					log.Error(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "err", err)
+				}
+				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
+				if err != nil {
+					log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
+				}
+				err = sendQuicBytes(up0_stream, block_a_bytes)
+				if err != nil {
+					log.Error(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
+				}
+			}
+			continue
+		}
+
 		if id == n.id {
 			if objType == reflect.TypeOf(types.Assurance{}) {
 				a := obj.(types.Assurance)
@@ -904,7 +943,7 @@ func (n *Node) dumpstatedbmap() {
 	}
 }
 
-func (n *Node) getStateDBByHeaderHash(headerHash common.Hash) (statedb *statedb.StateDB, ok bool) {
+func (n *NodeContent) getStateDBByHeaderHash(headerHash common.Hash) (statedb *statedb.StateDB, ok bool) {
 	n.statedbMapMutex.Lock()
 	defer n.statedbMapMutex.Unlock()
 	statedb, ok = n.statedbMap[headerHash]
@@ -972,6 +1011,7 @@ func (n *Node) extendChain() error {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err
 				}
+				newStateDB.GetAllKeyValues()
 
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 
@@ -995,10 +1035,6 @@ func (n *Node) extendChain() error {
 				// Extend the tip of the chain
 				n.addStateDB(newStateDB)
 				n.assureNewBlock(b)
-				announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", b.Hash(), b.Header.Hash())
-				if n.hub != nil {
-					n.hub.broadcast <- []byte(announcement)
-				}
 
 				parentheaderhash = nextBlock.Header.Hash()
 
@@ -1246,7 +1282,7 @@ func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength
 	return workPackageBundle, nil
 }
 
-func (n *Node) getPVMStateDB() *statedb.StateDB {
+func (n *NodeContent) getPVMStateDB() *statedb.StateDB {
 	// refine's executeWorkPackage is a statelessish process
 	target_statedb := n.statedb.Copy()
 	return target_statedb
@@ -1533,6 +1569,8 @@ func (n *Node) runClient() {
 
 		case log := <-logChan:
 			go n.WriteLog(log)
+		case command := <-n.command_chan:
+			fmt.Printf("Get new command from RPC: %v\n", command)
 		}
 	}
 }

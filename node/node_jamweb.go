@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 
 	"net/http"
+	"net/rpc"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
@@ -178,7 +178,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	go client.readPump()
 }
 
-func (n *Node) RunApplyBlockAndWeb(block_data_dir string, port uint16, storage *storage.StateDBStorage) {
+func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, storage *storage.StateDBStorage) {
 	// read all the block json from the block_data_dir
 
 	files, err := ioutil.ReadDir(block_data_dir)
@@ -237,7 +237,7 @@ func (n *Node) RunApplyBlockAndWeb(block_data_dir string, port uint16, storage *
 	}
 }
 
-func (n *Node) runJamWeb(basePort uint16) {
+func (n *NodeContent) runJamWeb(basePort uint16) {
 	// basePort += 999
 	addr := fmt.Sprintf("0.0.0.0:%v", basePort) // for now just node 0 will handle all
 
@@ -270,48 +270,26 @@ func (n *Node) runJamWeb(basePort uint16) {
 			Params  []string `json:"params"`
 			ID      int      `json:"id"`
 		}
+
+		sock_name := n.node_name
+		ipcPath := fmt.Sprintf("/tmp/%s.sock", sock_name)
+		client, err := rpc.Dial("unix", ipcPath)
 		decoder := json.NewDecoder(r.Body)
 		if err := decoder.Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON request", http.StatusBadRequest)
 			return
 		}
-
+		method := req.Method
+		fmt.Printf("method %v\n", method)
+		args := req.Params
 		// Dispatch based on the method.
 		var result string
-		switch req.Method {
-		case "jam_getBlockByHash":
-			if len(req.Params) < 1 {
-				http.Error(w, "Missing parameter for jam_getBlockByHash", http.StatusBadRequest)
-				return
-			}
-			headerHash := common.HexToHash(req.Params[0])
-			sdb, ok := n.getStateDBByHeaderHash(headerHash)
-			if ok && sdb.Block != nil {
-				result = sdb.Block.String()
-			} else {
-				http.Error(w, "Block not found", http.StatusNotFound)
-				return
-			}
-			break
-		case "jam_getState":
-			if len(req.Params) < 1 {
-				http.Error(w, "Missing parameter for jam_getState", http.StatusBadRequest)
-				return
-			}
-			headerHash := common.HexToHash(req.Params[0])
-			sdb, ok := n.getStateDBByHeaderHash(headerHash)
-			if ok {
-				result = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).String()
-			} else {
-				http.Error(w, "State not found", http.StatusNotFound)
-				return
-			}
-			break
-		default:
-			http.Error(w, "Unsupported method", http.StatusBadRequest)
+		err = client.Call(method, args, &result)
+		if err != nil {
+			http.Error(w, "RPC call failed", http.StatusInternalServerError)
 			return
 		}
-
+		// Encode the JSON response.
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Write([]byte(result))

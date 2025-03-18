@@ -334,3 +334,68 @@ func TestCumulativeWeight(t *testing.T) {
 	fmt.Printf("Ghost block %s\n", ghost.Block.Header.Hash().String_short())
 	assert.Equal(t, ghost.Block.Header.Hash(), chain_a[4].Block.Header.Hash())
 }
+
+func TestConcatTwoTree(t *testing.T) {
+	// setup two tree
+	// the second tree root is the child of the first tree leaf
+	tmp_hash := common.Hash{}
+	blockNode := &BT_Node{
+		Parent:   nil,
+		Children: nil,
+		Block: &Block{
+			Header: BlockHeader{
+				ParentHeaderHash: tmp_hash,
+				Slot:             0,
+			},
+		},
+		Height:    0,
+		Finalized: false,
+	}
+
+	bt_tree := NewBlockTree(blockNode)
+	_, err := addChain(bt_tree, blockNode, 9, 0)
+	if err != nil {
+		t.Fatalf("Error adding chain: %s", err)
+	}
+	bt_tree.Print()
+
+	//get the leaf of the first tree
+	leaves_1 := bt_tree.GetLeafs()
+	leaf_1 := &BT_Node{}
+	if len(leaves_1) != 1 {
+		t.Fatalf("Error getting leaves")
+	} else {
+		for _, leaf := range leaves_1 {
+			leaf_1 = leaf
+		}
+	}
+	// create a second tree
+	concat_point_block := leaf_1.Block
+	blockNode2 := &BT_Node{
+		Parent:   nil,
+		Children: nil,
+		Block: &Block{
+			Header: BlockHeader{
+				ParentHeaderHash: concat_point_block.Header.Hash(),
+				Slot:             10000,
+			},
+		},
+		Height:    0,
+		Finalized: false,
+	}
+	bt_tree2 := NewBlockTree(blockNode2)
+
+	_, err = addChain(bt_tree2, blockNode2, 9, 10000)
+	if err != nil {
+		t.Fatalf("Error adding chain: %s", err)
+	}
+	bt_tree2.Print()
+	// concat the two tree
+	new_block_tree, err := MergeTwoBlockTree(bt_tree, bt_tree2)
+	if err != nil {
+		t.Fatalf("Error merging two tree: %s", err)
+	}
+	new_block_tree.UpdateHeight()
+	new_block_tree.Print()
+
+}

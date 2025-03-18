@@ -1,8 +1,10 @@
 package statedb
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -77,6 +79,12 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 		}
 		reported = append(reported, temReported)
 	}
+	// sort the reported by workpackagehash
+
+	sort.Slice(reported, func(i, j int) bool {
+		return bytes.Compare(reported[i].WorkPackageHash.Bytes(), reported[j].WorkPackageHash.Bytes()) < 0
+	})
+
 	preRecentBlocks := s.JamState.RecentBlocks
 	// Eq 83 n.b
 	mmr := trie.NewMMR()

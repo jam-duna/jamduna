@@ -83,6 +83,7 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 func (n *Node) processPreimage(l types.Preimages) {
 	_, err := n.statedb.ValidateLookup(&l)
 	if err != nil {
+		log.Warn(debugP, "processPreimage:ValidateLookup", "err", err)
 		return
 	}
 	log.Debug(debugP, "processPreimage", "n", n.id, "l", l.String())

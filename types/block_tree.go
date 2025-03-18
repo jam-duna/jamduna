@@ -16,6 +16,7 @@ type BT_Node struct {
 	VotesWeight            uint64
 	Cumulative_VotseWeight uint64
 	Finalized              bool
+	Applied                bool
 }
 
 func (root *BT_Node) Copy() (*BT_Node, map[common.Hash]*BT_Node, map[common.Hash]*BT_Node) {
@@ -295,6 +296,55 @@ func (bt *BlockTree) GetBlockNode(hash common.Hash) (*BT_Node, bool) {
 
 	node, ok := bt.TreeMap[hash]
 	return node, ok
+}
+
+func (bt *BlockTree) UpdateHeight() {
+	// recursive function to update the height of the node
+	var dfs func(node *BT_Node, height int)
+	dfs = func(node *BT_Node, height int) {
+		node.Height = height
+		for _, child := range node.Children {
+			dfs(child, height+1)
+		}
+	}
+	dfs(bt.Root, 0)
+}
+
+// higher tree, lower tree
+// this function is used to concat two block trees
+func MergeTwoBlockTree(tree1, tree2 *BlockTree) (*BlockTree, error) {
+	// see the root of the two trees
+	tree1.Mutex.Lock()
+	defer tree1.Mutex.Unlock()
+	tree2.Mutex.Lock()
+	defer tree2.Mutex.Unlock()
+	root2 := tree2.Root
+	leaves1 := tree1.Leafs
+	var concat_point *BT_Node
+	concat_point = nil
+	for _, leaf := range leaves1 {
+		if leaf.Block.Header.Hash() == root2.Block.Header.ParentHeaderHash {
+			concat_point = leaf
+			break
+		}
+		fmt.Printf("leaf hash: %s, root2 parent hash: %s\n", leaf.Block.Header.Hash().String(), root2.Block.Header.ParentHeaderHash.String())
+	}
+	if concat_point == nil {
+		return tree1, fmt.Errorf("no common ancestor found")
+	}
+	//put the tree2 to the tree1
+	for hash, node := range tree2.TreeMap {
+		if _, ok := tree1.TreeMap[hash]; ok {
+			return tree1, fmt.Errorf("block %s already exists", hash.String())
+		}
+		tree1.TreeMap[hash] = node
+	}
+	root2.Parent = concat_point
+	concat_point.Children = append(concat_point.Children, root2)
+	tree1.Leafs = tree2.Leafs
+	tree2 = nil
+	tree1.UpdateHeight()
+	return tree1, nil
 }
 
 func (bt *BlockTree) GetBlockHashes() []common.Hash {

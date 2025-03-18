@@ -34,6 +34,12 @@ type WorkPackage struct {
 	WorkItems []WorkItem `json:"items"`
 }
 
+type WorkPackageRequest struct {
+	CoreIndex    uint16      `json:"core_index"`
+	WorkPackage  WorkPackage `json:"work_package"`
+	ExtrinsBlobs [][]byte    `json:"extrinsic_blobs"`
+}
+
 // WorkPackageBundle represents a work package.
 type WorkPackageBundle struct {
 	WorkPackage       WorkPackage       `json:"p"` // P: workPackage
