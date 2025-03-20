@@ -459,7 +459,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 }
 
 // importSegments is a 3D array of [workItemIndex][importedSegmentIndex][segmentBytes]
-func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (importSegments [][][]byte, justifications [][][]common.Hash, err error) {
+func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage, segmentRootLookup types.SegmentRootLookup) (importSegments [][][]byte, justifications [][][]common.Hash, err error) {
 	importSegments = make([][][]byte, len(workPackage.WorkItems))
 	justifications = make([][][]common.Hash, len(workPackage.WorkItems))
 
@@ -482,7 +482,8 @@ func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage) (im
 					wpi.AddIndex(uint16(ImportedSegment.Index))
 				}
 			} else {
-				panic("SpecSearch returned nil1")
+				log.Warn(module, "SpecSearch returned nil")
+				return importSegments, justifications, fmt.Errorf("SpecSearch returned nil")
 			}
 		}
 	}

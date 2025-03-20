@@ -34,15 +34,15 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	}
 	coworkers := n.GetCoreCoWorkerPeersByStateDB(wpCoreIndex, curr_statedb)
 	log.Debug(debugDA, "broadcastWorkpackage", "n", n.String(), "n.Core", coreIndex, "wpCoreIndex", wpCoreIndex, "WorkPackageHash", wp.Hash(), "len(coworkers)", len(coworkers))
-	// here we are a first guarantor making justifications and reconstructSegments is used inside FetchWorkpackageImportSegments
-	importedSegments, justifications, err := n.FetchWorkpackageImportSegments(wp)
-	if err != nil {
-		log.Error(debugG, "broadcastWorkPackage:FetchWorkpackageImportSegments", "n", n.String(), "err", err)
-		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err)
-	}
 	segmentRootLookup, err := n.GetSegmentRootLookup(wp)
 	if err != nil {
 		log.Error(debugG, "broadcastWorkPackage:GetSegmentRootLookup", "n", n.String(), "err", err)
+	}
+	// here we are a first guarantor making justifications and reconstructSegments is used inside FetchWorkpackageImportSegments
+	importedSegments, justifications, err := n.FetchWorkpackageImportSegments(wp, segmentRootLookup)
+	if err != nil {
+		log.Error(debugG, "broadcastWorkPackage:FetchWorkpackageImportSegments", "n", n.String(), "err", err)
+		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err)
 	}
 	log.Debug(debugG, "broadcastWorkPackage:Guarantee from self", "id", n.String())
 

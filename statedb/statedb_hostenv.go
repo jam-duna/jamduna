@@ -35,7 +35,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	start_NumStorageItems := sa.NumStorageItems
 	for _, storage := range sa.Storage {
 		if storage.Dirty {
-			if len(storage.Value) == 0 || storage.Deleted {
+			if (len(storage.Value) == 0 || storage.Deleted) && storage.OnChain {
 				if s.Authoring {
 					log.Warn(module, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey)
 				}

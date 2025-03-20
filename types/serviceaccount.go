@@ -82,6 +82,7 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 }
 
 type StorageObject struct {
+	OnChain bool
 	Deleted bool
 	Dirty   bool
 	Value   []byte      `json:"value"`  // v
@@ -94,6 +95,7 @@ func (o StorageObject) Clone() StorageObject {
 	copy(valueCopy, o.Value)
 
 	return StorageObject{
+		OnChain: o.OnChain,
 		Deleted: o.Deleted,
 		Dirty:   o.Dirty,
 		Value:   valueCopy,
@@ -318,9 +320,10 @@ func (s *ServiceAccount) ReadStorage(rawK common.Hash, sdb HostEnv) (ok bool, v 
 		return false, nil
 	}
 	s.Storage[hk] = StorageObject{
-		Dirty:  false,
-		Value:  v,
-		RawKey: rawK,
+		OnChain: true,
+		Dirty:   false,
+		Value:   v,
+		RawKey:  rawK,
 	}
 	return true, v
 }
@@ -442,6 +445,7 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK common.Hash, val
 	hk := common.Compute_storageKey_internal(rawK)
 	s.Dirty = true
 	s.Storage[hk] = StorageObject{
+		OnChain: false,
 		Dirty:   true,
 		Deleted: len(val) == 0,
 		Value:   val,

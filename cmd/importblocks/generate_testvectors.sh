@@ -83,10 +83,10 @@ run_single_test() {
 }
 
 test_pairs=(
-  "fib2 assurances"
-  "fallback fallback"
-  "safrole safrole"
   "megatron_short_with_prereq orderedaccumulation"
+  "fib2 assurances"
+  "safrole safrole"
+  "fallback fallback"
 )
 
 processed_modes=""

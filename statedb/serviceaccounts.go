@@ -100,7 +100,7 @@ func parse_KV(md string) (uint32, string) {
 	m := parseMetadata(md)
 	sStr := m["s"]
 	sVal, _ := strconv.ParseUint(sStr, 10, 32)
-	key := m["hk"] // was k before 0.6.3
+	key := m["k"]
 	return uint32(sVal), key
 }
 
@@ -194,13 +194,13 @@ func getServiceAccounts(keyvals []KeyVal) []*SAccount {
 		switch kv.StructType {
 		case "account_storage":
 			// Example metadata: "s=1608995021|hk=... k=00|vlen=12 klen=1"
-			s, _ := parse_KV(md)
+			s, key := parse_KV(md)
 			servicedata, ok := services[s]
 			if !ok {
 				servicedata = newServiceData()
 				services[s] = servicedata
 			}
-			servicedata.add_KV(common.Bytes2Hex(kv.Key), kv.Value)
+			servicedata.add_KV(key, kv.Value)
 
 		case "account_lookup":
 			// Example metadata: "s=1608995021|h=0x... l=210 t=[22]|tlen=1"
