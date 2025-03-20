@@ -216,6 +216,18 @@ func generateErasureRootShardIdxKey(section string, erasureRoot common.Hash, sha
 	return fmt.Sprintf("%s_%v_%d", section, erasureRoot, shardIndex)
 }
 
+func SplitHashes(data []byte) []common.Hash {
+	var chunks []common.Hash
+	for i := 0; i < len(data); i += 32 {
+		end := i + 32
+		if end > len(data) {
+			end = len(data)
+		}
+		chunks = append(chunks, common.BytesToHash(data[i:end]))
+	}
+	return chunks
+}
+
 func SplitBytes(data []byte) [][]byte {
 	chunkSize := types.NumECPiecesPerSegment * 2
 	var chunks [][]byte
@@ -459,6 +471,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	log.Debug(debugDA, "VerifySegmentShard", "bClub", bClub, "bPath", bPath)
 	//segmentLeafHash := common.ComputeLeafHash_WBT_Blake2B(segmentShard)
 
+	// Michael: please review
 	_, recovered_sClub := VerifyWBTJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentShard, bPath)
 
 	bundle_segment_pair := append(bClub, recovered_sClub.Bytes()...)
@@ -473,16 +486,16 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	return true, nil
 }
 
-// Qns Source : CE139_SegmentShard
+// Qns Source : CE139_SegmentShard / CE140
 // Ans Source : CE137_FullShard
-func (n *Node) GetSegmentShard_AssurerSimple(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16) (selected_segments [][]byte, ok bool, err error) {
+func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16, withJustification bool) (selected_segments [][]byte, selected_justifications [][]byte, ok bool, err error) {
 	s_es_key := generateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
 	concatenatedShards, ok, err := n.ReadRawKV([]byte(s_es_key))
 	if err != nil {
-		return selected_segments, false, err
+		return selected_segments, selected_justifications, false, err
 	}
 	if !ok {
-		return selected_segments, false, nil
+		return selected_segments, selected_justifications, false, nil
 	}
 	segmentShards, _ := SplitToSegmentShards(concatenatedShards) // this has segment shards AND proof page shards
 
@@ -490,66 +503,14 @@ func (n *Node) GetSegmentShard_AssurerSimple(erasureRoot common.Hash, shardIndex
 	for i, segmentIndex := range segmentIndices {
 		selected_segments[i] = segmentShards[segmentIndex]
 	}
-	return selected_segments, true, nil
-}
-
-// Qns Source : CE140
-// Ans Source : CE137_FullShard
-func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16) (erasure_root common.Hash, shard_index uint16, segment_Indices []uint16, selected_segments [][]byte, selected_full_justifications [][]byte, selected_segments_justifications [][]byte, exportedSegmentAndPageProofLens int, ok bool, err error) {
-	//j⌢[b] <--- CE_137 shared
-	//segmentshards = []byte{}
-	//segment_justifications = [][]byte{}
-
-	s_es_key := generateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
-	concatenatedShards, _, err := n.ReadRawKV([]byte(s_es_key))
-	segmentShards, _ := SplitToSegmentShards(concatenatedShards) // REVIEW
-	// MK: this needs hashing
-	segmentShardsHashes := make([][]byte, len(segmentShards))
-	for idx, segmentShard := range segmentShards {
-		segmentShardsHashes[idx] = common.Blake2Hash(segmentShard).Bytes()
-	}
-
-	segmentTree := trie.NewWellBalancedTree(segmentShards, types.Blake2b)
-	recoveredSclubH := segmentTree.RootHash()
-
-	bClubH, sClubH, full_justification, err := n.GetFullShardJustification(erasureRoot, shardIndex)
-	if err != nil {
-		return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
-	}
-	if recoveredSclubH != sClubH {
-		log.Warn(debugDA, "GetSegmentShard_Assurer sclubMismatch", "recoveredSclubH", recoveredSclubH, "sClubH", sClubH)
-		return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, fmt.Errorf("GetSegmentShard_Assurer: Invalid GetSegmentShard ERROR")
-	}
-
-	exportedSegmentAndPageProofLen := len(segmentShards)
-	for _, segmentIndex := range segmentIndices {
-		selected_segment := segmentShards[segmentIndex]
-		selected_segments = append(selected_segments, selected_segment)
-		_, _, segmentPath, isFound, err := segmentTree.Trace(int(segmentIndex))
-		if err != nil || !isFound {
-			return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
-		}
-
-		//want b++s
-		bclub_sclub_sj := make([][]byte, 0)
-		bclub_sclub_sj = append(bclub_sclub_sj, bClubH.Bytes())
-		bclub_sclub_sj = append(bclub_sclub_sj, segmentPath...)
-		bclub_sclub_sj_encoded, err := common.EncodeJustification(bclub_sclub_sj)
+	if withJustification {
+		// return selected_justifications originally stored by assureData (in response to a guarantee)
+		_, _, encodedPath, err := n.GetFullShardJustification(erasureRoot, shardIndex)
 		if err != nil {
-			log.Error(debugDA, "GetSegmentShard_Assurer bclub_sclub_sj EncodeJustification", "err", err)
 		}
-		selected_segments_justifications = append(selected_segments_justifications, bclub_sclub_sj_encoded)
-		selected_full_justifications = append(selected_segments_justifications, full_justification)
-
-		verified, err := VerifySegmentShard(erasureRoot, shardIndex, segmentShards[segmentIndex], uint16(segmentIndex), full_justification, bclub_sclub_sj_encoded, exportedSegmentAndPageProofLen)
-		if err != nil || !verified {
-			log.Warn(debugDA, "VerifySegmentShard NOT VERIFIED", "verified", verified, "err", err, "erasureRoot", erasureRoot, "shardIndex", shardIndex)
-			return erasureRoot, shardIndex, segmentIndices, nil, nil, nil, 0, false, err
-		} else {
-			log.Info(debugDA, "VerifySegmentShard VERIFIED", "erasureRoot", erasureRoot, "shardIndex", shardIndex)
-		}
+		selected_justifications = append(selected_justifications, encodedPath)
 	}
-	return erasureRoot, shardIndex, segmentIndices, selected_segments, selected_full_justifications, selected_segments_justifications, exportedSegmentAndPageProofLens, true, nil
+	return selected_segments, selected_justifications, true, nil
 }
 
 type SpecIndex struct {

@@ -742,8 +742,7 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 	}
 	value, ok, err := t.Get(stateKey)
 	if !ok || err != nil {
-		fmt.Printf("GetState stateKey=%x Error %v, %v\n", stateKey, ok, err)
-
+		// fmt.Printf("GetState stateKey=%x Error %v, %v\n", stateKey, ok, err)
 	}
 	return value, err
 }

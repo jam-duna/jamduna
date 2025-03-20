@@ -14,14 +14,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"math/big"
+	rand0 "math/rand"
 	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
-
-	"math/big"
-	rand0 "math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -1133,13 +1132,24 @@ func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
 }
 
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
-// need to actually ECdecode
 // We continuily use erasureRoot to ask the question
 func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justifications [][]common.Hash, err error) {
 	requests_original := make([]CE139_request, types.TotalValidators)
-	allsegmentindices := make([]uint16, si.Spec.ExportedSegmentLength)
-	for i := range si.Spec.ExportedSegmentLength {
-		allsegmentindices[i] = i
+
+	// this will track the proofpages
+	proofpages := []uint16{}
+
+	// ask for the indices, and tally the proofpages needed to fetch justifications
+	allsegmentindices := make([]uint16, len(si.Indices))
+	for i, idx := range si.Indices {
+		allsegmentindices[i] = idx
+		p := idx / 64 // each proofpage is 64 segments
+		if !slices.Contains(proofpages, p) {
+			proofpages = append(proofpages, p)
+		}
+	}
+	for _, p := range proofpages {
+		allsegmentindices = append(allsegmentindices, si.Spec.ExportedSegmentLength+p)
 	}
 	for i := range types.TotalValidators {
 		requests_original[i] = CE139_request{
@@ -1178,10 +1188,9 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 	}
 	chunkSize := 2052 // TODO: SegmentSize / W_E * 2
 	rawshards := make([][]byte, len(indexes))
-	numsegments := len(shards[0]) / chunkSize
-	allsegments := make([][]byte, numsegments)
+	numsegments := len(allsegmentindices)
+	allsegments := make([][]byte, numsegments) // note that the last few are actually pageproofs
 	for s := 0; s < numsegments; s++ {
-		// do a SINGLE recoveredSegment
 		for i := 0; i < numShards; i++ {
 			rawshards[i] = shards[i][s*chunkSize : (s+1)*chunkSize]
 		}
@@ -1191,44 +1200,46 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 			allsegments[s] = nil // ???
 		} else {
 			allsegments[s] = recoveredSegment
-			l := 20
-			if len(allsegments[s]) < l {
-				l = len(allsegments[s])
-			}
 		}
 	}
 
-	cdtTree := trie.NewCDMerkleTree(allsegments)
-	reconRoot := common.BytesToHash(cdtTree.Root())
-	if reconRoot != si.Spec.ExportedSegmentRoot {
-		panic("Recon failure")
-	}
 	// j - justifications  (14.14) J(W in I)
-	justifications = make([][]common.Hash, 0)
-	for itemIndex, segment := range allsegments {
-		if slices.Contains(si.Indices, uint16(itemIndex)) {
-			segments = append(segments, segment)
 
-			justification, err := cdtTree.GenerateCDTJustificationX(itemIndex, 0)
-			if err != nil {
-				log.Error(debugDA, "cdtree:GenerateCDTJustificationX", "err", err)
-			}
-			leafHash := trie.ComputeLeaf(segment)
-			computedRoot := trie.VerifyCDTJustificationX(leafHash, int(itemIndex), justification, 0)
-			if common.BytesToHash(computedRoot) != common.BytesToHash(cdtTree.Root()) {
-				cdtTree.PrintTree()
-				log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "computedRoot", computedRoot, "cdtTreeRoot", cdtTree.Root())
-			}
-			justifications = append(justifications, justification)
-
-		} else {
-			panic("Missing segment")
+	indicesLen := len(si.Indices)
+	pageproofs := allsegments[indicesLen:]
+	segmentsonly := allsegments[0:indicesLen]
+	justifications = make([][]common.Hash, indicesLen)
+	for i, segmentIndex := range si.Indices {
+		pageSize := 1 << trie.PageFixedDepth
+		pageIdx := int(segmentIndex) / pageSize
+		pagedProofByte := pageproofs[pageIdx]
+		// Decode the proof back to segments and verify
+		decodedData, _, err := types.Decode(pagedProofByte, reflect.TypeOf(types.PageProof{}))
+		if err != nil {
+			fmt.Printf("Failed to decode page proof: %v", err)
 		}
+		recoveredPageProof := decodedData.(types.PageProof)
+		//fmt.Printf("recoveredPageProof: %v\n", recoveredPageProof)
+		subTreeIdx := int(segmentIndex) % pageSize
+		fullJustification, err := trie.PageProofToFullJustification(pagedProofByte, pageIdx, subTreeIdx)
+		if err != nil {
+			fmt.Printf("fullJustification len: %d, PageProofToFullJustification ERR: %v.", len(fullJustification), err)
+		}
+		leafHash := recoveredPageProof.LeafHashes[subTreeIdx]
+		derived_globalRoot_j0 := trie.VerifyCDTJustificationX(leafHash.Bytes(), int(segmentIndex), fullJustification, 0)
+		if common.BytesToHash(derived_globalRoot_j0) != common.BytesToHash(si.Spec.ExportedSegmentRoot[:]) {
+			log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "derived_globalRoot_j0", derived_globalRoot_j0)
+			return segments, justifications, err
+		} else {
+			log.Trace(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.Spec.ExportedSegmentRoot[:]))
+		}
+		justifications[i] = fullJustification
 	}
-	return segments, justifications, nil
+	return segmentsonly, justifications, nil
 }
 
-func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32) (workPackageBundle types.WorkPackageBundle, err error) {
+// HERE we are in a AUDITING situation, if verification fails, we can still execute the work package by using CE140?
+func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32, segmentRootLookup types.SegmentRootLookup) (workPackageBundle types.WorkPackageBundle, err error) {
 	requests_original := make([]CE138_request, types.TotalValidators)
 	for i := range types.TotalValidators {
 		requests_original[i] = CE138_request{
@@ -1279,6 +1290,13 @@ func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength
 		return
 	}
 	workPackageBundle = workPackageBundleRaw.(types.WorkPackageBundle)
+
+	// IMPORTANT: VerifyBundle checks all imported segments against the justifications contained within the bundle
+	verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup)
+	if verifyErr != nil || !verified {
+		//return work_report, verifyErr
+		log.Warn(module, "executeWorkPackageBundle: VerifyBundle failed", "err", verifyErr)
+	}
 	return workPackageBundle, nil
 }
 

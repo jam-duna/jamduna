@@ -267,3 +267,31 @@ func HashContains(slice []Hash, value Hash) bool {
 	}
 	return false
 }
+
+func FormatPaddedBytes(data []byte, minLen int) string {
+	if len(data) < minLen {
+		return "0x" + fmt.Sprintf("%x", data)
+	}
+
+	hexStr := fmt.Sprintf("%x", data[:minLen])
+	if len(data) > minLen {
+		hexStr += "..."
+	}
+	return "0x" + hexStr
+}
+
+func FormatPaddedBytesArray(data [][]byte, minLen int) []string {
+	formattedList := make([]string, len(data))
+	for i, d := range data {
+		formattedList[i] = FormatPaddedBytes(d, minLen)
+	}
+	return formattedList
+}
+
+func FormatPaddedBytes3D(data [][][]byte, minLen int) [][]string {
+	formatted := make([][]string, len(data))
+	for i, innerSlice := range data {
+		formatted[i] = FormatPaddedBytesArray(innerSlice, minLen)
+	}
+	return formatted
+}

@@ -127,7 +127,7 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error) {
-	// TODO: add span for SendSegmentShardRequest => get [Segment Shard] back here
+
 	if p.node.store.SendTrace {
 		tracer := p.node.store.Tp.Tracer("NodeTracer")
 		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendSegmentShardRequest", p.node.store.NodeID))
@@ -189,7 +189,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	selected_segmentshards, ok, err := n.GetSegmentShard_AssurerSimple(req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+	selected_segmentshards, selected_segment_justifications, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex, withJustification)
 	if err != nil {
 		log.Error(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
 		return err
@@ -212,8 +212,8 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if withJustification {
-		/*for item_idx, s_j := range selected_segment_justifications {
-			s_f := selected_full_justification[item_idx]
+		for item_idx, s_j := range selected_segment_justifications {
+			s_f := selected_segment_justifications[item_idx]
 			err = sendQuicBytes(stream, s_f)
 			if err != nil {
 				return
@@ -222,7 +222,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 			if err != nil {
 				return
 			}
-		}*/
+		}
 	}
 
 	// <-- FIN

@@ -2,6 +2,7 @@ package trie
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
@@ -9,6 +10,11 @@ import (
 )
 
 //"golang.org/x/crypto/blake2b"
+
+var H0 = make([]byte, 32)
+var H0Hash = common.BytesToHash(H0)
+var PageFixedDepth = 6
+var debugCDT = false
 
 // CDT Node structure represents a node in the CDT
 type CDTNode struct {
@@ -27,10 +33,9 @@ type CDMerkleTree struct {
 // NewCDMerkleTree creates a new constant-depth Merkle tree
 func NewCDMerkleTree(values [][]byte) *CDMerkleTree {
 	// If there are no leaves, return a tree with a hash of 0
-	emptyHash := make([]byte, 32)
 	if len(values) == 0 {
 		return &CDMerkleTree{
-			root: &CDTNode{Hash: emptyHash},
+			root: &CDTNode{Hash: H0},
 		}
 	}
 
@@ -44,10 +49,10 @@ func NewCDMerkleTree(values [][]byte) *CDMerkleTree {
 	// Creating leaf nodes
 	var leaves []*CDTNode
 	for _, value := range paddedLeaves {
-		if !compareBytes(value, emptyHash) {
+		if !compareBytes(value, H0) {
 			leaves = append(leaves, &CDTNode{Hash: computeLeaf(value), Value: value})
 		} else {
-			leaves = append(leaves, &CDTNode{Hash: emptyHash, Value: emptyHash})
+			leaves = append(leaves, &CDTNode{Hash: H0, Value: H0})
 		}
 	}
 
@@ -67,13 +72,66 @@ func padLeaves(values [][]byte) [][]byte {
 	for nextPowerOfTwo < n {
 		nextPowerOfTwo <<= 1
 	}
-
-	// Padding with zero hashes
 	for len(values) < nextPowerOfTwo {
-		values = append(values, make([]byte, 32))
+		values = append(values, H0)
+	}
+	return values
+}
+
+func ComputePageIdx(exportedSegmentCnt int, index int) (pgIdx int, isFixedPadding bool) {
+	pageSize := 1 << PageFixedDepth
+	pgIdx = index / pageSize
+	if exportedSegmentCnt > pageSize {
+		isFixedPadding = true
+	}
+	return pgIdx, isFixedPadding
+}
+
+func padLeafHashes(nonEmptyleafHashes []common.Hash, isFixedPadding bool) []common.Hash {
+	leafHashes := make([]common.Hash, len(nonEmptyleafHashes))
+	copy(leafHashes, nonEmptyleafHashes)
+	fixedSize := 1 << PageFixedDepth
+	if isFixedPadding {
+		for len(leafHashes) < fixedSize {
+			leafHashes = append(leafHashes, H0Hash)
+		}
+		return leafHashes
+	}
+	n := len(leafHashes)
+	nextPowerOfTwo := 1
+	for nextPowerOfTwo < n {
+		nextPowerOfTwo <<= 1
+	}
+	for len(leafHashes) < nextPowerOfTwo {
+		leafHashes = append(leafHashes, H0Hash)
+	}
+	return leafHashes
+}
+
+func NewCDTSubtree(nonEmptyleafHashes []common.Hash, isFixedPadding bool) *CDMerkleTree {
+	if len(nonEmptyleafHashes) == 0 {
+		return &CDMerkleTree{
+			root: &CDTNode{Hash: H0},
+		}
+	}
+	paddedLeafHashes := padLeafHashes(nonEmptyleafHashes, isFixedPadding)
+
+	// Creating leaf nodes WITHOUT hashing & value
+	var leaves []*CDTNode
+	for _, leafHash := range paddedLeafHashes {
+		leaves = append(leaves, &CDTNode{Hash: leafHash.Bytes()})
 	}
 
-	return values
+	// Build the tree recursively
+	root := buildTree(leaves)
+	subTree := CDMerkleTree{
+		root:   root,
+		leaves: leaves,
+	}
+	if debugCDT {
+		fmt.Printf("NewCDTSubtree: root=%v, leaves=%v\n", common.Bytes2Hex(subTree.Root()), len(subTree.leaves))
+	}
+	return &subTree
 }
 
 // Equation(E.4) in GP 0.6.2
@@ -102,7 +160,7 @@ func buildTree(leaves []*CDTNode) *CDTNode {
 }
 
 // PrintTree prints the tree structure for debugging
-func (tree *CDMerkleTree) PrintTree() {
+func (tree *CDMerkleTree) PrintTree2() {
 	printCDTNode(tree.root, 0, "Root")
 }
 
@@ -120,6 +178,59 @@ func printCDTNode(node *CDTNode, level int, pos string) {
 	printCDTNode(node.Right, level+1, "Right")
 }
 
+func (tree *CDMerkleTree) PrintTree() {
+	if tree.root == nil {
+		fmt.Println("Empty tree")
+		return
+	}
+
+	shortHash := func(hash []byte) string {
+		hexStr := common.Bytes2Hex(hash)
+		maxStr := 12
+		if len(hexStr) <= maxStr {
+			return hexStr
+		} else if compareBytes(hash, H0) {
+			return "H0"
+		}
+		return fmt.Sprintf("%s...%s", hexStr[:maxStr/2], hexStr[len(hexStr)-maxStr/2:])
+	}
+
+	queue := []*CDTNode{tree.root}
+	level := 0
+
+	for len(queue) > 0 {
+		levelSize := len(queue)
+		line := make([]string, 0, levelSize)
+
+		for i := 0; i < levelSize; i++ {
+			node := queue[i]
+			if node == nil {
+				continue
+			}
+
+			if node.Left == nil && node.Right == nil {
+				line = append(line, fmt.Sprintf("[Leaf: %s]", shortHash(node.Hash)))
+			} else {
+				line = append(line, fmt.Sprintf("[Branch: %s]", shortHash(node.Hash)))
+			}
+
+			if node.Left != nil {
+				queue = append(queue, node.Left)
+			}
+			if node.Right != nil {
+				queue = append(queue, node.Right)
+			}
+		}
+
+		if len(line) > 0 {
+			fmt.Printf("Level %d: %s\n", level, strings.Join(line, "  "))
+		}
+
+		queue = queue[levelSize:]
+		level++
+	}
+}
+
 // // Root returns the root of the Merkle Tree
 func (tree *CDMerkleTree) Root() []byte {
 	return tree.root.Hash
@@ -131,6 +242,16 @@ func (tree *CDMerkleTree) RootHash() common.Hash {
 
 func (mt *CDMerkleTree) Length() int {
 	return len(mt.leaves)
+}
+
+func MaxPageIndex(exportedSegmentCnt int) int {
+	pageSize := 1 << PageFixedDepth
+	return exportedSegmentCnt / pageSize
+}
+
+func (mt *CDMerkleTree) MaxPageIndex() int {
+	pageSize := 1 << PageFixedDepth
+	return mt.Length() / pageSize
 }
 
 func (mt *CDMerkleTree) IsOutOfRange(index int) (bool, error) {
@@ -148,10 +269,11 @@ func (mt *CDMerkleTree) Get(index int) ([]byte, error) {
 	return mt.leaves[index].Value, nil
 }
 
-// Equation(E.5) in GP 0.6.2
-// Equation(E.2) in GP 0.6.2(E.5 use E.2 to generate the proof)
-// GenerateCDTJustificationX returns the justification for a given index and size x (function J_x)
-func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, x int) ([]common.Hash, error) {
+// GP 0.6.4 (E.5)
+// GenerateCDTJustificationX returns the justification for a given index and xDepth (function J_x)
+func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, xDepth int) ([]common.Hash, error) {
+	x := 0
+	//x := xDepth
 	if _, err := mt.IsOutOfRange(index); err != nil {
 		return nil, err
 	}
@@ -168,7 +290,7 @@ func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, x int) ([]common.Ha
 		if sibling != nil {
 			justification = append(justification, common.BytesToHash(sibling.Hash))
 		} else {
-			justification = append(justification, common.Hash{})
+			justification = append(justification, H0Hash)
 		}
 		currentNode = parent
 		if x > 0 {
@@ -178,47 +300,93 @@ func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, x int) ([]common.Ha
 			}
 		}
 	}
+	if xDepth == 0 {
+		// full mode
+		return justification, nil
+	} else {
+		fullJustificationLen := len(justification)
+		if fullJustificationLen <= xDepth {
+			// global is empty
+			return []common.Hash{}, nil
+		}
+		//J_Depth
+		//J0 := fullJustification			     // full justification
+		//J6 := fullJustification[J_Depth:]      // global justification above the page root
+		justification = justification[xDepth:]
+	}
+
 	return justification, nil
 }
 
-func VerifyCDTJustificationX(leafHash []byte, index int, justification []common.Hash, x int) []byte {
+func VerifyCDTJustificationX(leafHash []byte, index int, justification []common.Hash, x_depth int) []byte {
+	if debugCDT {
+		fmt.Printf("VerifyCDTJustificationX:\n")
+		fmt.Printf("  Starting hash: 0x%x\n", leafHash)
+		fmt.Printf("  Starting index: %d\n", index)
+		fmt.Printf("  Justification length: %d\n", len(justification))
+		fmt.Printf("  X (max steps): %d\n", x_depth)
+	}
+
 	currentHash := leafHash
-	maxSteps := x
-	if x == 0 {
+	maxSteps := x_depth
+	if x_depth == 0 {
+		// If x==0, we interpret that as "use the entire justification"
 		maxSteps = len(justification)
 	}
+
 	for i := 0; i < maxSteps && i < len(justification); i++ {
-		siblingHash := justification[i]
-		if index%2 == 0 {
-			currentHash = computeNode(append(currentHash, siblingHash.Bytes()...))
+		siblingHash := justification[i].Bytes()
+		updatedHash := currentHash
+		isCurrLeft := index%2 == 0
+		if isCurrLeft {
+			updatedHash = computeNode(append(currentHash, siblingHash...))
 		} else {
-			currentHash = computeNode(append(siblingHash.Bytes(), currentHash...))
+			updatedHash = computeNode(append(siblingHash, currentHash...))
 		}
+		if debugCDT {
+			fmt.Printf("  Step %d:\n", i+1)
+			fmt.Printf("    Current index: %d\n", index)
+			fmt.Printf("    Current node:  0x%x\n", currentHash)
+			fmt.Printf("    Sibling node:  0x%x\n", siblingHash)
+			if isCurrLeft {
+				fmt.Printf("    Merged as: Curr || Sibl => 0x%x\n", updatedHash)
+			} else {
+				fmt.Printf("    Merged as: Sibl || Curr => 0x%x\n", updatedHash)
+			}
+		}
+		currentHash = updatedHash
 		index /= 2
+	}
+	if debugCDT {
+		fmt.Printf("  Final computed hash: 0x%x\n", currentHash)
 	}
 	return currentHash
 }
 
-func (mt *CDMerkleTree) LocalRootX(pageIndex int, x int) ([]byte, error) {
-	if _, err := mt.IsOutOfRange(pageIndex); err != nil {
-		return nil, err
+// E(6) in GP 0.6.4 - return all leaves within the 2^x subtree. Leaves
+func (mt *CDMerkleTree) GenerateLocalLeavesX(pageIndex int, x int) (hashedLeaves []common.Hash, err error) {
+
+	if mt.Length() == 0 {
+		return nil, fmt.Errorf("empty tree")
 	}
-
-	if len(mt.leaves) == 1 {
-		return mt.Root(), nil
+	if pageIndex < 0 || pageIndex > mt.MaxPageIndex() {
+		return nil, fmt.Errorf("leafIndex out of range")
 	}
-
-	index := (1 << pageIndex) * pageIndex
-	currentNode := mt.leaves[index]
-	var parent *CDTNode
-
-	for currentNode != mt.root && x > 0 {
-		parent = findParent(mt.root, currentNode)
-		currentNode = parent
-		x--
+	pageSize := 1 << PageFixedDepth
+	segIdxStart := pageIndex * pageSize
+	segIdxEnd := segIdxStart + pageSize
+	if segIdxEnd > mt.Length() {
+		segIdxEnd = mt.Length()
 	}
-
-	return parent.Hash, nil
+	//fmt.Printf("GenerateLocalLeavesX: pageIndex=%d, segIdxStart=%d, segIdxEnd=%d. Len=%d\n", pageIndex, segIdxStart, segIdxEnd, segIdxEnd-segIdxStart)
+	// Collect the non-empty hashed leaves for that page
+	for i := segIdxStart; i < segIdxEnd; i++ {
+		hashedLeaf := common.BytesToHash(mt.leaves[i].Hash)
+		if hashedLeaf != H0Hash {
+			hashedLeaves = append(hashedLeaves, hashedLeaf)
+		}
+	}
+	return hashedLeaves, nil
 }
 
 func computeMerkleRoot(hashes [][]byte) []byte {
@@ -313,13 +481,8 @@ func printNodePageProof(treeLevels [][][]byte, level, index int, indent string) 
 }
 
 // generatePageProof creates paged proofs from segments
-func GeneratePageProof(segments [][]byte) ([][]byte, error) {
-	return generatePageProof(segments)
-}
-
-// generatePageProof creates paged proofs from segments
 // Equation(14.10) in GP 0.6.2
-func generatePageProof(segments [][]byte) ([][]byte, error) {
+func GeneratePageProof(segments [][]byte) (pageProofBytes [][]byte, err error) {
 	// Build the Merkle tree
 	tree := NewCDMerkleTree(segments)
 	leaves := make([][]byte, len(tree.leaves))
@@ -327,73 +490,89 @@ func generatePageProof(segments [][]byte) ([][]byte, error) {
 		leaves[i] = leaf.Value
 	}
 	// Count the number of pages
-	pageSize := 64
-	numPages := (len(leaves) + pageSize - 1) / pageSize // ceiling function
-	results := make([][]byte, 0)
-	for page := 0; page < numPages; page++ {
+	pageSize := 1 << PageFixedDepth
+	numPages := (len(segments) + pageSize - 1) / pageSize
+	pageProofBytes = make([][]byte, numPages)
+	for pageIdx := 0; pageIdx < numPages; pageIdx++ {
 		// The start and end index of the current page
-		start := page * 64
-		end := start + 64
+		start := pageIdx * pageSize
+		end := start + pageSize
 		if end > len(leaves) {
 			end = len(leaves)
 		}
 
 		// Calculate the index of the leaf node
-		i := page * 64
+		i := pageIdx * pageSize
 
-		// Get the justification for the leaf node
-		tracePath, err := tree.GenerateCDTJustificationX(i, 6)
+		// J_PageFixedDepth ---> from page root to the global root
+		globalJustification, err := tree.GenerateCDTJustificationX(i, PageFixedDepth) //first segment within each page
 		if err != nil {
-			return results, err
+			return pageProofBytes, err
 		}
-		leafHashes := make([]common.Hash, len(leaves[start:end]))
-
-		// Equation(E.6) in GP 0.6.2
-		for j := range leafHashes {
-			hash := common.ComputeLeafHash_WBT_Blake2B(leaves[j+i])
-			leafHashes[j] = common.BytesToHash(hash[:])
+		// L_PageFixedDepth ----> collection of hashedleaves within the page (excluding empty H0)
+		localHashedLeaves, err := tree.GenerateLocalLeavesX(pageIdx, PageFixedDepth)
+		// (14.10) E(↕J6(s,i),↕L6(s,i))
+		pageProof := types.PageProof{
+			JustificationX: globalJustification,
+			LeafHashes:     localHashedLeaves,
 		}
-		// Encode the trace path and the leaves
-		combinedData := append(tracePath, leafHashes...)
-		encoded, err := types.Encode(combinedData)
-
-		if err != nil {
-			return results, err
+		pageProofByte, encodeErr := types.Encode(pageProof)
+		if encodeErr != nil {
+			return pageProofBytes, err
 		}
-
-		// Pad the encoded data to W_G
-		results = append(results, encoded)
+		pageProofBytes[pageIdx] = pageProofByte
 	}
-
-	return results, nil
+	return pageProofBytes, nil
 }
 
-// splitPageProof splits the page proof into justificationX(1-5) and leafHash(range: 1-64)
-func splitPageProof(pageProof [][]byte) (justificationX [][]byte, leafHash [][]byte) {
-	proofLen := len(pageProof)
-	switch {
-	case proofLen == 1:
-		// 0 justificationX + 1 leafHash
-		return [][]byte{}, pageProof[0:]
-	case proofLen == 3:
-		// 1 justificationX + 2 leafHash
-		return pageProof[0:1], pageProof[1:]
-	case proofLen >= 5 && proofLen <= 6:
-		// 2 justificationX & 3-4 leafHash.
-		return pageProof[0:2], pageProof[2:]
-	case proofLen >= 8 && proofLen <= 11:
-		// 3 justificationX & 5-8 leafHash.
-		return pageProof[0:3], pageProof[3:]
-	case proofLen >= 13 && proofLen <= 20:
-		// 4 justificationX & 9-16 leafHash.
-		return pageProof[0:4], pageProof[4:]
-	case proofLen >= 22 && proofLen <= 37:
-		// 5 justificationX & 17-32 leafHash.
-		return pageProof[0:5], pageProof[5:]
-	default:
-		// 6 justificationX & 33-64 leafHash.
-		return pageProof[0:6], pageProof[6:]
+func RecoverIndexFromSubtreeIdxAndPageIdx(pageIdx int, subTreeIdx int) int {
+	pageSize := 1 << PageFixedDepth
+	index := pageIdx*pageSize + subTreeIdx
+	return index
+}
+
+func PageProofToFullJustification(pageProofByte []byte, pageIdx int, subTreeIdx int) (fullJustification []common.Hash, err error) {
+	pageSize := 1 << PageFixedDepth
+	index := pageIdx*pageSize + subTreeIdx
+	// Decode the proof back to segments and verify
+	decodedData, _, err := types.Decode(pageProofByte, reflect.TypeOf(types.PageProof{}))
+	if err != nil {
+		return nil, err
 	}
+	recoveredPageProof := decodedData.(types.PageProof)
+	isFixedPadding := true
+	if pageIdx == 0 && len(recoveredPageProof.LeafHashes) != pageSize {
+		// degenerated case
+		isFixedPadding = false
+	}
+
+	// extract J6(s,i) from the proof
+	globalJustification := recoveredPageProof.JustificationX
+
+	// rebuild subtree using L6(s,i) from the proof
+	localHashedLeaves := recoveredPageProof.LeafHashes
+	subTree := NewCDTSubtree(localHashedLeaves, isFixedPadding)
+	localPageRoot := subTree.Root()
+
+	// generate subtree justification using page specific idx
+	subTreeJustification, err := subTree.GenerateCDTJustificationX(subTreeIdx, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// combine global and subtree justification
+	fullJustification = append(subTreeJustification, globalJustification...)
+
+	if debugCDT {
+		fmt.Printf("!!! decoded pagedProof[%d]: %v\n", pageIdx, recoveredPageProof)
+		fmt.Printf("PageProofToFullJustification: pageIdx=%d, index=%d, subTreeIdx=%d, isFixedPadding=%v\n", pageIdx, index, subTreeIdx, isFixedPadding)
+		fmt.Printf("PageProofToFullJustification: pageIdx=%d, index=%d, subTreeIdx=%d, isFixedPadding=%v globalJustification=%v\n", pageIdx, index, subTreeIdx, isFixedPadding, recoveredPageProof.JustificationX)
+		fmt.Printf("subTree[%d] localPageRoot: %x\n", pageIdx, localPageRoot)
+		fmt.Printf("PageProofToFullJustification: pageIdx=%d, index=%d, subTreeIdx=%d, isFixedPadding=%v subTreeJustification=%v\n", pageIdx, index, subTreeIdx, isFixedPadding, subTreeJustification)
+		fmt.Printf("PageProofToFullJustification: pageIdx=%d, index=%d, subTreeIdx=%d fullJustification=%v\n", pageIdx, index, subTreeIdx, fullJustification)
+	}
+
+	return fullJustification, nil
 }
 
 func FindPositions(nums [][]byte, target []byte) int {

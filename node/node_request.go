@@ -478,31 +478,31 @@ func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
 		// handle selfRequesting case
 		isSelfRequesting := req.ShardIndex == uint16(n.id)
 		if isSelfRequesting {
-			selected_segmentshards, ok, err := n.GetSegmentShard_AssurerSimple(erasureRoot, peerID, segmentIndices)
+			selected_segmentshards, selected_justifications, ok, err := n.GetSegmentShard_Assurer(erasureRoot, peerID, segmentIndices, false)
 			if err != nil {
 				return resp, err
 			}
 			if !ok {
-				return resp, fmt.Errorf("GetSegmentShard_AssurerSimple failed")
+				return resp, fmt.Errorf("GetSegmentShard_Assurer failed")
 			}
 			combined_segmentShards := bytes.Join(selected_segmentshards, nil)
 			self_response := CE139_response{
-				ErasureRoot:   erasureRoot,
-				ShardIndex:    n.id,
-				SegmentShards: combined_segmentShards,
-				//SegmentJustifications: segmentJustifications -- not ready yet
+				ErasureRoot:           erasureRoot,
+				ShardIndex:            n.id,
+				SegmentShards:         combined_segmentShards,
+				SegmentJustifications: selected_justifications,
 			}
 			return self_response, nil
 		}
-		segmentShards, _, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, false)
+		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, false)
 		if err != nil {
 			return resp, err
 		}
 		response := CE139_response{
-			ErasureRoot:   erasureRoot,
-			ShardIndex:    peerID,
-			SegmentShards: segmentShards,
-			// SegmentJustifications: segmentJustifications -- not ready yet
+			ErasureRoot:           erasureRoot,
+			ShardIndex:            peerID,
+			SegmentShards:         segmentShards,
+			SegmentJustifications: selected_justifications,
 		}
 		return response, nil
 

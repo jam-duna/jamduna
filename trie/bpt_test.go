@@ -13,7 +13,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 )
 
-const bptDebug = false
+const bptDebug = true
 
 // TestVector represents a test case in the JSON file
 type TestVector struct {

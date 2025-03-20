@@ -544,6 +544,7 @@ func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelec
 	return
 }
 
+// auditWorkReport reconstructs the bundle from C assurers, verifies the bundle, and executes the work package
 func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Hash) (judgement types.Judgement, err error) {
 	judgement = types.Judgement{}
 	if err != nil {
@@ -589,9 +590,9 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 
 	workPackageHash := spec.WorkPackageHash
 
-	// now call C138 to get bundle_shard from assurer...
-	// and then do ec rescontruction for b
-	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength)
+	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
+	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
+	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
 	if err != nil {
 		log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
 	}

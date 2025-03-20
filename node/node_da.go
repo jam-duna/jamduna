@@ -142,9 +142,36 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 	}
 
 	// now take up to 64 segments at a time and build a page proof
-	pageProofs, _ := trie.GeneratePageProof(segments)
-	for _, pageProof := range pageProofs {
-		paddedProof := common.PadToMultipleOfN(pageProof, types.SegmentSize)
+	// IMPORTANT: these pageProofs are provided in OTHER bundles for imported segments
+	//   The guarantor who builds the bundle must pull out a specific pageproof and verify it against the correct exported segment root
+	pageProofs, pageProofGenerationErr := trie.GeneratePageProof(segments)
+	if pageProofGenerationErr != nil {
+		log.Error(debugDA, "GeneratePageProof", "Error", pageProofGenerationErr)
+	}
+	for pageIdx, pagedProofByte := range pageProofs {
+		if paranoidVerification {
+			tree := trie.NewCDMerkleTree(segments)
+			global_segmentsRoot := tree.Root()
+			decodedData, _, decodingErr := types.Decode(pagedProofByte, reflect.TypeOf(types.PageProof{}))
+			if decodingErr != nil {
+				log.Error(debugDA, "buildSClub Proof decoding err", "Error", decodingErr)
+			}
+			recoveredPageProof := decodedData.(types.PageProof)
+			for subTreeIdx := 0; subTreeIdx < len(recoveredPageProof.LeafHashes); subTreeIdx++ {
+				leafHash := recoveredPageProof.LeafHashes[subTreeIdx]
+				pageSize := 1 << trie.PageFixedDepth
+				index := pageIdx*pageSize + subTreeIdx
+				fullJustification, err := trie.PageProofToFullJustification(pagedProofByte, pageIdx, subTreeIdx)
+				if err != nil {
+					log.Error(debugDA, "buildSClub PageProofToFullJustification ERR", "Error", err)
+				}
+				derived_global_segmentsRoot := trie.VerifyCDTJustificationX(leafHash.Bytes(), index, fullJustification, 0)
+				if !common.CompareBytes(derived_global_segmentsRoot, global_segmentsRoot) {
+					log.Error(debugDA, "buildSClub fullJustification Root hash mismatch", "expected", fmt.Sprintf("%x", global_segmentsRoot), "got", fmt.Sprintf("%x", derived_global_segmentsRoot))
+				}
+			}
+		}
+		paddedProof := common.PadToMultipleOfN(pagedProofByte, types.SegmentSize)
 		erasureCodingPageSegments, err := bls.Encode(paddedProof, types.TotalValidators)
 		if err != nil {
 			return
@@ -159,11 +186,12 @@ func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr [
 	for shardIndex, ec := range ecChunksArr {
 		chunks := make([][]byte, len(segments)+len(pageProofs))
 		for n := 0; n < len(chunks); n++ {
-			chunks[n] = ec.Data[n*chunkSize : (n+1)*chunkSize]
+			chunks[n] = ec.Data[n*chunkSize : (n+1)*chunkSize] // Michael claims this needs a hash
 		}
 		t := trie.NewWellBalancedTree(chunks, types.Blake2b)
 		sClub[shardIndex] = common.BytesToHash(t.Root())
 	}
+
 	return sClub, ecChunksArr
 }
 
@@ -193,24 +221,8 @@ func GenerateErasureTree(b []common.Hash, s []common.Hash) (*trie.WellBalancedTr
 
 // MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix
 func generateErasureRoot(b []common.Hash, s []common.Hash) common.Hash {
-	erasureTree, bundle_segment_pairs := GenerateErasureTree(b, s)
-	erasureRoot := erasureTree.RootHash()
-
-	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
-		treeLen, leafHash, path, isFound := GenerateWBTJustification(erasureRoot, uint16(shardIdx), bundle_segment_pairs)
-		encodedPath, _ := common.EncodeJustification(path)
-		decodedPath, _ := common.DecodeJustification(encodedPath)
-		if !reflect.DeepEqual(path, decodedPath) {
-			log.Error(debugDA, "generateErasureRoot:JustificationsPath mismatch", "shardIdx", shardIdx, "path", path, "decodedPath", decodedPath)
-		}
-		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leafHash, decodedPath)
-		if !verified {
-			log.Crit(debugDA, "VerifyWBTJustification ErasureRootPath NOT VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIdx, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "encodedPath", fmt.Sprintf("%x", encodedPath), "rawpath", fmt.Sprintf("%x", path), "path", fmt.Sprintf("%x", decodedPath), "isFound", isFound)
-		} else {
-			log.Trace(debugDA, "VerifyWBTJustification ErasureRootPath VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIdx, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "encodedPath", fmt.Sprintf("%x", encodedPath), "path", fmt.Sprintf("%x", path), "isFound", isFound)
-		}
-	}
-	return erasureRoot
+	erasureTree, _ := GenerateErasureTree(b, s)
+	return erasureTree.RootHash()
 }
 
 // M(s) - CDT of exportedSegment
@@ -274,8 +286,10 @@ func (n *Node) GetSegmentRootLookup(wp types.WorkPackage) (segmentRootLookup typ
 	for _, workItem := range wp.WorkItems {
 		for _, importedSegment := range workItem.ImportedSegments {
 			si := n.SpecSearch(importedSegment.RequestedHash)
-			if err != nil {
-				return nil, err
+			if si == nil {
+				ferr := fmt.Errorf("GetSegmentRootLookup:SpecSearch NOT FOUND")
+				log.Error(debugDA, "GetSegmentRootLookup:SpecSearch", "err", ferr)
+				return nil, ferr
 			} else {
 				log.Debug(debugDA, "GetSegmentRootLookup:RequestedHash", "segmentRoot", si.Spec.ExportedSegmentRoot, "importedPackageHash", si.Spec.WorkPackageHash)
 			}
@@ -336,46 +350,49 @@ func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup
 	return fuzz_importsegments, fuzz_segmentRootLookup
 }
 
-// Verify the justifications using segmentRootLookup
+// Verify the justifications (picked out of PageProofs) for the imported segments, which can come from different work packages
 func (n *Node) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (verified bool, err error) {
 	return true, nil
 	if len(b.ImportSegmentData) != len(b.Justification) {
 		return false, fmt.Errorf("importSegments and justifications length mismatch")
 	}
 
-	// verify the segments
+	// verify the segments with CDT_6 justification included by first guarantor
 	for itemIndex, workitem_segments := range b.ImportSegmentData {
 		for segmentIdx, segmentData := range workitem_segments {
 			requestedHash := b.WorkPackage.WorkItems[itemIndex].ImportedSegments[segmentIdx].RequestedHash
+			// loop through segmentRootLookup so we get the workpackage hash
+			for _, x := range segmentRootLookup {
+				if x.SegmentRoot == requestedHash {
+					requestedHash = x.WorkPackageHash
+				}
+			}
 			specIndex := n.SpecSearch(requestedHash)
 			if specIndex == nil {
 				log.Warn(module, "VerifyBundle: SpecSearch NOT FOUND", "reqHash", requestedHash)
 				return false, fmt.Errorf("VerifyBundle: could not find %x", requestedHash)
 			} else {
 				index := b.WorkPackage.WorkItems[itemIndex].ImportedSegments[segmentIdx].Index
-				segmentRoot := specIndex.Spec.ExportedSegmentRoot
+				exportedSegmentRoot := specIndex.Spec.ExportedSegmentRoot
 				j := b.Justification[itemIndex][segmentIdx]
 				leafHash := trie.ComputeLeaf(segmentData)
-				computedRoot := trie.VerifyCDTJustificationX(leafHash, int(index), j, 0)
-				if !common.CompareBytes(segmentRoot[:], computedRoot) {
+				global_segmentsRoot := trie.VerifyCDTJustificationX(leafHash, int(index), j, 0)
+				if !common.CompareBytes(exportedSegmentRoot[:], global_segmentsRoot) {
 					log.Warn(module, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", index)
-					return false, fmt.Errorf("justification failure computedRoot %x != segmentRoot %s (h=%s)", computedRoot, segmentRoot, leafHash)
+					return false, fmt.Errorf("justification failure computedRoot %x != exportedSegmentRoot %s (h=%s)", exportedSegmentRoot, exportedSegmentRoot, leafHash)
+				} else {
+					log.Info(debugDA, "VerifyBundle: Justification Verified", "index", index, "exportedSegmentRoot", exportedSegmentRoot)
 				}
 			}
 		}
 	}
+
 	return true, nil
 }
 
-// now we only have executeWorkPackageBundle now
+// executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
 func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
-	verified, verifyErr := n.VerifyBundle(&package_bundle, segmentRootLookup)
-	if verifyErr != nil || !verified {
-		//return work_report, verifyErr
-		log.Warn(module, "executeWorkPackageBundle: VerifyBundle failed", "err", verifyErr)
-	}
-
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage

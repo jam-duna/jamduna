@@ -318,6 +318,14 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		fmt.Printf("[N%v] Segment root lookup mismatch at indices: %v\n", n.id, err)
 		return fmt.Errorf("segment root lookup mismatch")
 	}
+	// Since the bundle is not trusted, do a VerifyBundle first
+	verified, err := n.VerifyBundle(bp, segmentRootLookup)
+	if !verified {
+		fmt.Printf("!!! [N%v] NOT Verified: %v\n", n.id, verified)
+	}
+	if err != nil {
+		return
+	}
 	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, *bp, segmentRootLookup) //TODO: replace it with segmentroots
 	if err != nil {
 		return
