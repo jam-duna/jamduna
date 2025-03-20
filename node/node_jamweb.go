@@ -286,7 +286,7 @@ func (n *NodeContent) runJamWeb(basePort uint16) {
 		var result string
 		err = client.Call(method, args, &result)
 		if err != nil {
-			http.Error(w, "RPC call failed", http.StatusInternalServerError)
+			http.Error(w, "RPC call failed"+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		// Encode the JSON response.

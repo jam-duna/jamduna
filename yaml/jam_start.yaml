@@ -56,3 +56,34 @@
     - name: Display completion Message
       debug:
         msg: "All instances started."
+- hosts: localhost
+  gather_facts: false
+  vars:
+    ARCHIVE_NODE_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/archive_node"
+    PEER_JSON: "/root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/peerlist/jam.json"
+    NODE_PORT: 13000
+    BLOCK_VIEWER_PORT: 14000
+    JAMWEB_PORT: 15000
+  tasks:
+    - name: Wait for all nodes to be ready
+      wait_for:
+        timeout: 10 
+
+    - name: Start archive_node on localhost
+      shell: |
+        nohup {{ ARCHIVE_NODE_PATH }} \
+          -peer {{ PEER_JSON }} \
+          -port {{ NODE_PORT }} \
+          -graph_server_port {{ BLOCK_VIEWER_PORT }} \
+          -webserverport {{ JAMWEB_PORT }} \
+          > /tmp/logs/archive_node.log 2>&1 < /dev/null &
+        echo "Archive node started."
+      args:
+        executable: /bin/bash
+
+    - name: Display archive_node start message
+      debug:
+        msg: "archive_node started on localhost with ports {{ NODE_PORT }}, {{ BLOCK_VIEWER_PORT }}, {{ JAMWEB_PORT }}"
+
+
+

@@ -129,7 +129,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String())
-	timer := time.NewTimer(45 * time.Minute)
+	timer := time.NewTimer(55 * time.Minute)
 	<-timer.C
 	fmt.Println("Node has been running for 45 minutes. Shutting down...")
 }
