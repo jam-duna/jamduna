@@ -2,15 +2,11 @@
 #![no_main]
 #![feature(asm_const)]
 
-// extern crate alloc;
-// use alloc::vec::Vec;
-// use simplealloc::SimpleAlloc;
-
 use polkavm_derive::min_stack_size;
 min_stack_size!(40960); // depends on how many pages you need
 
 use utils::constants::{FIRST_READABLE_ADDRESS, FIRST_READABLE_PAGE, NONE, PAGE_SIZE, SEGMENT_SIZE};
-use utils::functions::{write_result, call_info};
+use utils::functions::{write_result, call_log};
 use utils::functions::{deserialize_gas_and_registers, get_page, initialize_pvm_registers, serialize_gas_and_registers, setup_page};
 use utils::functions::{parse_accumulate_args, parse_refine_args};
 
@@ -251,85 +247,85 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     // Depending on what "n" is, test different host functions
     if n == 1 {
         let read_none_result = unsafe {read(service_index as u64, jam_address, jam_length, buffer_address, 0, buffer_length)};
-        call_info("read from jam, expect NONE");
         write_result(read_none_result, 1);
+        call_log(2, Some("1"), "read from jam, expect NONE");
 
         let write_result1 = unsafe { write(jam_address, jam_length, dot_address, dot_length) };
-        call_info("write to jam, expect NONE");
         write_result(write_result1, 2);
+        call_log(2, Some("2"), "write to jam, expect NONE");
 
         let read_ok_result = unsafe {read( service_index as u64, jam_address, jam_length, buffer_address, 0, buffer_length)};
-        call_info("read from jam, expect OK: 3");
         write_result(read_ok_result, 5);
+        call_log(2, Some("5"), "read from jam, expect OK: 3");
 
         let forget_result = unsafe { forget(jam_address, 0) };
-        call_info("forget, expect HUH");
         write_result(forget_result, 6);
+        call_log(2, Some("6"), "forget jam, expect HUH");
     } else if n == 2 {
         let read_result = unsafe {read(service_index as u64, jam_address, jam_length, buffer_address, 0, buffer_length)};
-        call_info("read from JAM, expect OK: 3");
         write_result(read_result, 1);
+        call_log(2, Some("1"), "read from JAM, expect OK: 3");
 
         let write_result1 = unsafe { write(jam_address, jam_length, 0, 0) };
-        call_info("write deleted JAM, expect OK: 3");
         write_result(write_result1, 2);
+        call_log(2, Some("2"), "write deleted JAM, expect OK: 3");
 
         let read_ok_result = unsafe {read(service_index as u64, jam_address, jam_length, buffer_address, 0, buffer_length)};
-        call_info("read from JAM, expect NONE");
         write_result(read_ok_result, 5);
+        call_log(2, Some("5"), "read from JAM, expect NONE");
     } else if n == 3 {
         let solicit_result = unsafe { solicit(jam_hash_address, jam_length) };
-        call_info("solicit hash(jam), expect OK");
         write_result(solicit_result, 1);
+        call_log(2, Some("1"), "solicit hash(jam), expect OK");
 
         let query_jamhash_result = unsafe { query(jam_hash_address, jam_length) };
-        call_info("query hash(jam), expect OK");
         write_result(query_jamhash_result, 2);
+        call_log(2, Some("2"), "query hash(jam), expect OK");
 
         let query_none_result = unsafe { query(dot_hash_address, dot_length) };
-        call_info("query hash(dot), expect NONE");
         write_result(query_none_result, 5);
+        call_log(2, Some("5"), "query hash(dot), expect NONE");
     } else if n == 4 {
         let forget_result = unsafe { forget(jam_hash_address, jam_length) };
-        call_info("forget hash(jam), expect OK: insert t");
         write_result(forget_result, 1);
+        call_log(2, Some("1"), "forget hash(jam), expect OK: insert t");
 
         let query_jamhash_result = unsafe { query(jam_hash_address, jam_length) };
-        call_info("query hash(jam), expect OK: 2+2^32*x");
         write_result(query_jamhash_result, 2);
+        call_log(2, Some("2"), "query hash(jam), expect OK: 2+2^32*x");
 
         let lookup_none_result = unsafe { lookup(service_index as u64, dot_hash_address, buffer_address, 0, dot_length) };
-        call_info("lookup hash(dot), expect NONE");
         write_result(lookup_none_result, 5);
+        call_log(2, Some("5"), "lookup hash(dot), expect NONE");
 
         let assign_result = unsafe { assign(1000, jam_address) };
-        call_info("assign, expect CORE");
         write_result(assign_result, 6);
+        call_log(2, Some("6"), "assign jam, expect CORE");
     } else if n == 5 {
         let lookup_result = unsafe { lookup(service_index as u64, jam_hash_address, buffer_address, 0, jam_length) };
-        call_info("lookup hash(jam), expect OK: 3");
         write_result(lookup_result, 1);
+        call_log(2, Some("1"), "lookup hash(jam), expect OK: 3");
 
         let read_ok_result = unsafe { query(jam_hash_address, jam_length) };
-        call_info("query hash(jam), expect OK: 2+2^32*x");
         write_result(read_ok_result, 2);
+        call_log(2, Some("2"), "query hash(jam), expect OK: 2+2^32*x");
 
         let eject_who_result = unsafe { eject(service_index as u64, jam_hash_address) };
-        call_info("eject, expect WHO");
         write_result(eject_who_result, 5);
+        call_log(2, Some("5"), "eject, expect WHO");
 
         let overflow_s = 0xFFFFFFFFFFFFu64;
         let bless_who_result = unsafe { bless(overflow_s, 0, 0, jam_hash_address, 0) };
-        call_info("bless, expect WHO");
         write_result(bless_who_result, 6);
+        call_log(2, Some("6"), "bless, expect WHO");
     } else if n == 6 {
         let solicit_result = unsafe { solicit(jam_hash_address, jam_length) };
-        call_info("solicit hash(jam), expect OK: insert t");
         write_result(solicit_result, 1);
+        call_log(2, Some("1"), "solicit hash(jam), expect OK: insert t");
 
         let query_jamhash_result = unsafe { query(jam_hash_address, jam_length) };
-        call_info("query hash(jam), expect OK: 3+2^32*x");
         write_result(query_jamhash_result, 2);
+        call_log(2, Some("2"), "query hash(jam), expect OK: 3+2^32*x");
 
         let core_index = 0;
 
@@ -342,34 +338,34 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
         }
 
         let assign_ok_result = unsafe { assign(core_index, auth_hashes.as_ptr() as u64) };
-        call_info("assign, expect OK");
         write_result(assign_ok_result, 5);
+        call_log(2, Some("5"), "assign, expect OK");
     } else if n == 7 {
         let forget_result = unsafe { forget(jam_hash_address, jam_length) };
-        call_info("forget hash(jam), expect OK");
         write_result(forget_result, 1);
+        call_log(2, Some("1"), "forget hash(jam), expect OK");
 
         let query_jamhash_result = unsafe { query(jam_hash_address, jam_length) };
-        call_info("query hash(jam), expect OK: 2+2^32*x");
         write_result(query_jamhash_result, 2);
+        call_log(2, Some("2"), "query hash(jam), expect OK: 2+2^32*x");
     } else if n == 8 {
         let lookup_result = unsafe { lookup(service_index as u64, jam_hash_address, buffer_address, 0, jam_length) };
-        call_info("lookup hash(jam), expect OK: 3");
         write_result(lookup_result, 1);
+        call_log(2, Some("1"), "lookup hash(jam), expect OK: 3");
 
         let query_jamhash_result = unsafe { query(jam_hash_address, jam_length) };
-        call_info("query hash(jam), expect OK: 2+2^32*x");
         write_result(query_jamhash_result, 2);
+        call_log(2, Some("2"), "query hash(jam), expect OK: 2+2^32*x");
     } else if n == 9 {
         let g: u64 = 911;
         let m: u64 = 911;
         let new_result = unsafe { new(jam_hash_address, jam_length, g, m) };
-        call_info("new, expect OK: service_index");
         write_result(new_result, 1);
+        call_log(2, Some("1"), "new, expect OK: service_index");
 
         let upgrade_result = unsafe { upgrade(jam_hash_address, g, m) };
-        call_info("upgrade, expect OK");
         write_result(upgrade_result, 2);
+        call_log(2, Some("2"), "upgrade, expect OK");
 
         let s: u32 = 911;
         let s_bytes = s.to_le_bytes();
@@ -380,37 +376,37 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
         let bless_input_address = bless_input.as_ptr() as u64;
 
         let bless_ok_result = unsafe { bless(0, 1, 1, bless_input_address, 1) };
-        call_info("bless, expect OK");
         write_result(bless_ok_result, 5);
+        call_log(2, Some("5"), "bless, expect OK");
     } else if n == 10 {
         let delete_result = unsafe { write(dot_address, dot_length, 0, 0) };
-        call_info("write deleted DOT, expect NONE");
         write_result(delete_result, 1);
+        call_log(2, Some("1"), "write deleted DOT, expect NONE");
 
         let write_result1 = unsafe { write(dot_address, dot_length, jam_address, jam_length) };
-        call_info("write to DOT, expect NONE");
         write_result(write_result1, 2);
+        call_log(2, Some("2"), "write to DOT, expect NONE");
 
         let delete_result = unsafe { write(dot_address, dot_length, 0, 0) };
-        call_info("write deleted DOT, expect OK: 3");
         write_result(delete_result, 5);
+        call_log(2, Some("5"), "write deleted DOT, expect OK: 3");
 
         let read_result = unsafe { read(service_index as u64, dot_address, dot_length, buffer_address, 0, buffer_length) };
-        call_info("read from DOT, expect NONE");
         write_result(read_result, 6);
+        call_log(2, Some("6"), "read from DOT, expect NONE");
 
         let delete_result = unsafe { write(dot_address, dot_length, 0, 0) };
-        call_info("write deleted DOT, expect NONE");
         write_result(delete_result, 7);
+        call_log(2, Some("7"), "write deleted DOT, expect NONE");
     }
 
     let info_result = unsafe { info(service_index as u64, buffer_address) };
-    call_info("info, expect OK");
     write_result(info_result, 8);
+    call_log(2, Some("8"), "info, expect OK");
 
     let gas_result = unsafe { gas() };
-    call_info("gas, expect OK: gas");
     write_result(gas_result, 9);
+    call_log(2, Some("9"), "gas, expect OK: gas");
 
     let mut output_bytes_32 = [0u8; 32];
     output_bytes_32[..work_result_length as usize]
@@ -425,7 +421,7 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
             unsafe {
                 checkpoint();
             }
-            call_info("corevm checkpoint");
+            call_log(2, None, "corevm checkpoint");
         }
         let result42 = n + 42;
         write_result(result42, 7); // this should not be stored if n = 3, 6, 9 because its after the checkpoint
@@ -434,13 +430,13 @@ extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
                 "jalr x0, a0, 0", // djump(0+0) causes panic
             );
         }
-        call_info("corevm panic");
+        call_log(2, None, "corevm PANIC");
     } else {
     }
     unsafe {
         oyield(output_address);
     }
-    call_info("yield, expect OK"); 
+    call_log(2, None, "yield, expect OK");
     return (output_address, output_length);
 }
 
