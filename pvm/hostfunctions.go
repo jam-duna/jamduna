@@ -226,7 +226,7 @@ func (vm *VM) chargeGas(host_fn int) {
 		exp = "EXPUNGE"
 	}
 
-	vm.Gas = beforeGas - chargedGas
+	vm.Gas = beforeGas - int64(chargedGas)
 	log.Debug(vm.logging, fmt.Sprintf("%s chargeGas", exp), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
 }
 
@@ -792,7 +792,7 @@ func (vm *VM) hostFetch() {
 		// get imported segment by work item index
 		if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
 			v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
-			if vm.logging == "authoring" {
+			if vm.logging == log.PvmAuthoring {
 				log.Info(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
 					"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
 					"bytes", v_Bytes[0:20],
@@ -935,7 +935,7 @@ func (vm *VM) hostInvoke() {
 		bitmask: program.K,
 
 		pc:       m_n.I,
-		Gas:      uint64(g),
+		Gas:      int64(g),
 		register: m_n_reg,
 		Ram:      m_n.U,
 	}
@@ -1538,21 +1538,27 @@ func (vm *VM) hostDelay() {
 
 // func (vm *VM) hostSP1Groth16Verify()
 
-func getLogLevelName(level uint64) string {
+func getLogLevelName(level uint64, core uint16, serviceName string) string {
+	levelName := "UNKNOWN"
 	switch level {
 	case 0:
-		return "⛔️ FATAL"
+		levelName = "CRIT"
 	case 1:
-		return "⚠️ WARNING"
+		levelName = "WARN"
 	case 2:
-		return "ℹ️ INFO"
+		levelName = "INFO"
 	case 3:
-		return "💁 HELPFUL"
+		levelName = "ERROR"
 	case 4:
-		return "🪡 PEDANTIC"
-	default:
-		return "UNKNOWN"
+		levelName = "DEBUG"
+	case 5:
+		levelName = "TRACE"
 	}
+	coreStr := ""
+	if core < 1024 {
+		coreStr = fmt.Sprintf("@%d", core)
+	}
+	return fmt.Sprintf("%s%s#%s", levelName, coreStr, serviceName)
 }
 
 // JIP-1 https://hackmd.io/@polkadot/jip1
@@ -1573,8 +1579,27 @@ func (vm *VM) hostLog() {
 		vm.HostResultCode = OOB
 		return
 	}
-	levelName := getLogLevelName(level) // Assume a function that maps level numbers to log level names.
-	log.Debug(vm.logging, "log", "level", levelName, "msg", string(messageBytes))
+	levelName := getLogLevelName(level, vm.CoreIndex, string(vm.ServiceMetadata))
+
+	switch level {
+	case 0:
+		log.Crit(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		break
+	case 1:
+		log.Warn(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		break
+	case 2:
+		if vm.firstGuarantor == log.FirstGuarantor {
+			log.Info(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		}
+		break
+	case 3:
+		log.Error(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		break
+	case 4:
+		log.Debug(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		break
+	}
 	vm.HostResultCode = OK
 }
 
@@ -1600,6 +1625,10 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 
 func (vm *VM) SetLogging(l string) {
 	vm.logging = l
+}
+
+func (vm *VM) UnSetLogging() {
+	vm.logging = ""
 }
 
 func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, regs []uint64, errCode uint64) {

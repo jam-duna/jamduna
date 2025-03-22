@@ -25,37 +25,6 @@ type JamState struct {
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulated"`                 // xi - The accumulation history  ξ eq 162
 }
 
-type ValidatorStatistics struct {
-	Current [types.TotalValidators]Pi_state `json:"current"`
-	Last    [types.TotalValidators]Pi_state `json:"last"`
-}
-
-type ValidatorStatisticsInternal [2][types.TotalValidators]Pi_state
-
-func (v *ValidatorStatistics) Encode() []byte {
-	statsInternal := ValidatorStatisticsInternal{}
-	statsInternal[0] = v.Current
-	statsInternal[1] = v.Last
-	encoded, err := types.Encode(statsInternal)
-	if err != nil {
-		return []byte{}
-	}
-	return encoded
-}
-
-func (v *ValidatorStatistics) Decode(data []byte) (interface{}, uint32) {
-	decoded, dataLen, err := types.Decode(data, reflect.TypeOf(ValidatorStatisticsInternal{}))
-	if err != nil {
-		return nil, 0
-	}
-	statsInternal := decoded.(ValidatorStatisticsInternal)
-	recoveredStats := ValidatorStatistics{}
-	recoveredStats.Current = statsInternal[0]
-	recoveredStats.Last = statsInternal[1]
-
-	return &recoveredStats, dataLen
-}
-
 /*
 ReadyState                    [types.EpochLength][]Ready
 AccumulatedHistory       [types.EpochLength]map[common.Hash]common.Hash // work-report hash to segment-root dictionary
@@ -147,7 +116,7 @@ func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 }
 
 // Types for Pi
-type Pi_state struct {
+type ValidatorStatisticState struct {
 	BlocksProduced         uint32 `json:"blocks"`          // The number of blocks produced by the validator.
 	TicketsIntroduced      uint32 `json:"tickets"`         // The number of tickets introduced by the validator.
 	PreimagesIntroduced    uint32 `json:"pre_images"`      // The number of preimages introduced by the validator.
@@ -205,7 +174,7 @@ func (state *JamState) String() string {
 func (n *JamState) ResetTallyStatistics() {
 
 	copy(n.ValidatorStatistics.Last[:], n.ValidatorStatistics.Current[:])
-	n.ValidatorStatistics.Current = [types.TotalValidators]Pi_state{
+	n.ValidatorStatistics.Current = [types.TotalValidators]ValidatorStatisticState{
 		{BlocksProduced: 0, TicketsIntroduced: 0, PreimagesIntroduced: 0, OctetsIntroduced: 0, ReportsGuaranteed: 0, AvailabilityAssurances: 0},
 	}
 }

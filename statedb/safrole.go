@@ -146,9 +146,10 @@ func VerifyEpochMarker(epochMark *types.EpochMark) (bool, error) {
 }
 
 func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
-	var nextValidators [types.TotalValidators]common.Hash
+	var nextValidators [types.TotalValidators]types.ValidatorKeyTuple
 	for i, v := range s.NextValidators {
-		nextValidators[i] = v.GetBandersnatchKey().Hash()
+		nextValidators[i].BandersnatchKey = v.GetBandersnatchKey().Hash()
+		nextValidators[i].Ed25519Key = common.Hash(v.GetEd25519Key())
 	}
 	return &types.EpochMark{ // see https://graypaper.fluffylabs.dev/#/911af30/0e72030e7203
 		Entropy:        s.Entropy[0], // this is eta1' = eta0

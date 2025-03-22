@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -86,7 +87,8 @@ type JAMSNPWorkPackageShare struct {
 	CoreIndex    uint16                     `json:"core"`
 	Len          uint8                      `json:"len"`
 	SegmentRoots []JAMSNPSegmentRootMapping `json:"segment_roots"`
-	Bundle       []byte                     `json:"bundle"`
+
+	EncodedBundle []byte `json:"bundle"`
 }
 
 func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
@@ -115,7 +117,7 @@ func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
 	}
 
 	// Serialize Bundle (dynamically sized)
-	if _, err := buf.Write(share.Bundle); err != nil {
+	if _, err := buf.Write(share.EncodedBundle); err != nil {
 		return nil, err
 	}
 
@@ -152,8 +154,8 @@ func (share *JAMSNPWorkPackageShare) FromBytes(data []byte) error {
 	}
 
 	// Deserialize Bundle (dynamically sized)
-	share.Bundle = make([]byte, buf.Len())
-	if _, err := buf.Read(share.Bundle); err != nil {
+	share.EncodedBundle = make([]byte, buf.Len())
+	if _, err := buf.Read(share.EncodedBundle); err != nil {
 		return err
 	}
 
@@ -200,7 +202,6 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 }
 
 func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, pubKey types.Ed25519Key) (newReq JAMSNPWorkPackageShareResponse, err error) {
-	// TODO: add span for share work package => get  Work Report Hash  back here
 	if p.node.store.SendTrace {
 		tracer := p.node.store.Tp.Tracer("NodeTracer")
 		_, span := tracer.Start(p.node.store.WorkPackageContext, fmt.Sprintf("[N%d] ShareWorkPackage", p.node.store.NodeID))
@@ -218,10 +219,10 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 
 	bundleBytes := bundle.Bytes()
 	req := JAMSNPWorkPackageShare{
-		CoreIndex:    coreIndex,
-		Len:          uint8(len(segmentroots)),
-		SegmentRoots: segmentroots,
-		Bundle:       bundleBytes,
+		CoreIndex:     coreIndex,
+		Len:           uint8(len(segmentroots)),
+		SegmentRoots:  segmentroots,
+		EncodedBundle: bundleBytes,
 	}
 
 	reqBytes, err := req.ToBytes()
@@ -284,13 +285,14 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		return
 	}
 	// --> Work Package Bundle
-	bundle := newReq.Bundle
+	encodedBundle := newReq.EncodedBundle
+	bundle, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-
 	wpCoreIndex := newReq.CoreIndex
+	bp := bundle.(types.WorkPackageBundle)
 
 	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {
@@ -299,11 +301,6 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 			SegmentRoot:     sr.SegmentRoot,
 		}
 		received_segmentRootLookup = append(received_segmentRootLookup, item)
-	}
-
-	bp, err := types.WorkPackageBundleFromBytes(bundle)
-	if err != nil {
-		panic(123)
 	}
 
 	// should use original's segmentRootLookup --- no need to fetch here
@@ -319,14 +316,14 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		return fmt.Errorf("segment root lookup mismatch")
 	}
 	// Since the bundle is not trusted, do a VerifyBundle first
-	verified, err := n.VerifyBundle(bp, segmentRootLookup)
+	verified, err := n.VerifyBundle(&bp, segmentRootLookup)
 	if !verified {
 		fmt.Printf("!!! [N%v] NOT Verified: %v\n", n.id, verified)
 	}
 	if err != nil {
 		return
 	}
-	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, *bp, segmentRootLookup) //TODO: replace it with segmentroots
+	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, bp, segmentRootLookup, false)
 	if err != nil {
 		return
 	} else {

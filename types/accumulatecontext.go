@@ -165,8 +165,10 @@ func (d DeferredTransfer) Clone() DeferredTransfer {
 	}
 }
 
-// wrangled operand tuples,
-// 175
+// 0.6.4
+// see 12.3 Wrangling - Eq 159
+// WrangledWorkResult
+// wrangled operand tuples
 // O: The accumulation operand element, corresponding to a single work result.
 type AccumulateOperandElements struct {
 	H common.Hash `json:"H"` // h

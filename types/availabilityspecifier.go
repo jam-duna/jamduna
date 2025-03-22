@@ -23,7 +23,7 @@ type AvailabilitySpecifier struct {
 	BundleLength          uint32      `json:"length"`
 	ErasureRoot           common.Hash `json:"erasure_root"`
 	ExportedSegmentRoot   common.Hash `json:"exports_root"`
-	ExportedSegmentLength uint16      `json:"exports_count"` //shawn: in davxy's vector it's 16
+	ExportedSegmentLength uint16      `json:"exports_count"`
 }
 
 func (as *AvailabilitySpecifier) String() string {

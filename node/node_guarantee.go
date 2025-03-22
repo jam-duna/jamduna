@@ -37,6 +37,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	segmentRootLookup, err := n.GetSegmentRootLookup(wp)
 	if err != nil {
 		log.Error(debugG, "broadcastWorkPackage:GetSegmentRootLookup", "n", n.String(), "err", err)
+		//TODO: put back into queue
 	}
 	// here we are a first guarantor making justifications and reconstructSegments is used inside FetchWorkpackageImportSegments
 	importedSegments, justifications, err := n.FetchWorkpackageImportSegments(wp, segmentRootLookup)
@@ -47,7 +48,6 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	log.Debug(debugG, "broadcastWorkPackage:Guarantee from self", "id", n.String())
 
 	// s - [ImportSegmentData] should be size of G = W_E * W_S
-	// TODO: this should be codec encoded
 	bundle := types.WorkPackageBundle{
 		WorkPackage:       wp,
 		ExtrinsicData:     extrinsics,
@@ -70,7 +70,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 			// if it's itself, execute the workpackage
 			if coworker.PeerID == n.id {
 				var execErr error
-				report, execErr := n.executeWorkPackageBundle(wpCoreIndex, bundle, segmentRootLookup)
+				report, execErr := n.executeWorkPackageBundle(wpCoreIndex, bundle, segmentRootLookup, true)
 				if execErr != nil {
 					log.Error(debugG, "broadcastWorkPackage:executeWorkPackage", "n", n.String(), "err", execErr)
 					panic(fmt.Sprintf("executeWorkPackage Error: %v", execErr))

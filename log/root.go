@@ -6,6 +6,12 @@ import (
 	"sync/atomic"
 )
 
+const (
+	GeneralAuthoring = "authoring"       // Generic Authoring log (excluding pvm)
+	PvmAuthoring     = "pvm_authoring"   // PVM Authoring log
+	FirstGuarantor   = "first_guarantor" // First Authoring Guarantor log
+)
+
 var root atomic.Value
 
 func init() {
@@ -26,19 +32,28 @@ func Root() Logger {
 	return root.Load().(Logger)
 }
 
+func init_module(moduleList []string, moduleEnabled []string) map[string]bool {
+	moduleMap := make(map[string]bool, 0)
+	for _, module := range moduleList {
+		moduleMap[module] = false
+	}
+	for _, module := range moduleEnabled {
+		moduleMap[module] = true
+	}
+	return moduleMap
+}
+
+// TODO: this list can be provided externally
+var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantor, "blk_mod", "statedb", "G", "grandpa", "segment"}
+var defaultModuleEnabled = []string{GeneralAuthoring}
+
 // --- Module management ---
 // moduleEnabled keeps track of whether a module’s logging is enabled.
-var moduleEnabled = map[string]bool{
-	"blk_mod":   false,
-	"statedb":   false,
-	"authoring": true,
-	"G":         false,
-	"grandpa":   false,
-	"segment":   false,
-}
+var moduleEnabled = init_module(defaultKnownModules, defaultModuleEnabled)
 
 // EnableModule enables logging for the specified module.
 func EnableModule(module string) {
+	//fmt.Printf("!!!! Enabling module %s\n", module)
 	moduleEnabled[module] = true
 }
 

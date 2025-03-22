@@ -18,7 +18,7 @@ const (
 
 func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
 	// compile wp into b
-	b := package_bundle.Bytes()
+	b := package_bundle.Bytes() // check
 	// Build b♣ and s♣
 	bClubs, bEcChunks := n.buildBClub(b)
 	sClubs, sEcChunksArr := n.buildSClub(export_segments)
@@ -391,7 +391,7 @@ func (n *Node) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.
 }
 
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
-func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (work_report types.WorkReport, err error) {
+func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantor bool) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
@@ -424,12 +424,12 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 		}
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
-
+		vm.SetCore(workPackageCoreIndex, firstGuarantor)
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
-			log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments))
+			log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments), "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
 		}
 		if expectedSegmentCnt != 0 {
 			for i := 0; i < expectedSegmentCnt; i++ {

@@ -1029,21 +1029,8 @@ func (s *StateDB) getServiceCoreCode(c uint32) (code []byte, err error) {
 	return code, nil
 }
 
-func (s *StateDB) getWrangledWorkResultsBytes(results []types.WrangledWorkResult) []byte {
-	output, err := types.Encode(results)
-	if err != nil {
-		return []byte{}
-	}
-	return output
-}
-
 func (s *StateDB) GetBlock() *types.Block {
 	return s.Block
-}
-
-func (s *StateDB) isCorrectCodeHash(workReport types.WorkReport) bool {
-	// TODO: logic to validate the code hash prediction.
-	return true
 }
 
 // SealBlockMaterial holds all intermediate values for debug, auditing, or external verification.

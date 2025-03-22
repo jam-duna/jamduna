@@ -75,7 +75,8 @@ var bootstrap_auth_codehash = auth_code_hash
 
 // var bootstrap_auth_codehash = common.Hash(common.FromHex("0x397c392ad076df2b8f9e1522cb3554178e41200ba389a4fa4aab141a560202a2"))
 
-var test_prereq = false // Test Prerequisites Enabled
+var test_prereq = false               // Test Prerequisites Enabled
+var pvm_authoring_log_enabled = false // PVM Authoring Log Enabled
 const (
 	ValidatorFlag   = "VALIDATOR"
 	ValidatorDAFlag = "VALIDATOR&DA"
@@ -1058,6 +1059,10 @@ func (n *Node) extendChain() error {
 func (n *Node) assureNewBlock(b *types.Block) error {
 	if len(b.Extrinsic.Guarantees) > 0 {
 		for _, g := range b.Extrinsic.Guarantees {
+			err := n.StoreSpec(g.Report.AvailabilitySpec)
+			if err != nil {
+				log.Error(debugDA, "assureData:StoreSpec", "n", n.String(), "err", err)
+			}
 			n.assureData(g)
 		}
 	}

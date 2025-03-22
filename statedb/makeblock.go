@@ -239,19 +239,19 @@ func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret, new_assur
 	}
 	b.Header.OffendersMark = offenderMark
 	if b.Header.EpochMark != nil {
-		without_offenders_validators := [types.TotalValidators]common.Hash{}
+		without_offenders_validators := [types.TotalValidators]types.ValidatorKeyTuple{}
 		for i, key := range b.Header.EpochMark.Validators {
 			//gamma k'
 			validator_set := s.GetSafrole().DesignedValidators
 			var ed25519Key types.Ed25519Key
 			for _, validator := range validator_set {
-				if validator.Bandersnatch.Hash() == key {
+				if validator.Bandersnatch.Hash() == key.BandersnatchKey {
 					ed25519Key = validator.Ed25519
 					break
 				}
 			}
 			if offenderMap[ed25519Key] {
-				without_offenders_validators[i] = common.Hash{}
+				without_offenders_validators[i] = types.ValidatorKeyTuple{}
 			} else {
 				without_offenders_validators[i] = key
 			}

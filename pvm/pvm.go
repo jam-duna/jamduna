@@ -75,7 +75,7 @@ func (vm *VM) V1Hash() common.Hash {
 	}
 
 	// Append vm.Gas as the last 8 bytes.
-	binary.LittleEndian.PutUint64(registerBytes[regSize*8:(regSize+1)*8], vm.Gas)
+	binary.LittleEndian.PutUint64(registerBytes[regSize*8:(regSize+1)*8], uint64(vm.Gas))
 
 	// NOTE: in v2, we include a richer X + Y context, specifically the D service map
 
@@ -290,7 +290,7 @@ type VM struct {
 	host_func_id   int  // h in GP
 	Ram            *RAM
 	register       []uint64
-	Gas            uint64
+	Gas            int64
 	hostenv        types.HostEnv
 
 	VMs map[uint32]*VM
@@ -306,7 +306,8 @@ type VM struct {
 	EntryPoint uint32
 
 	// if logging = "author"
-	logging string
+	logging        string
+	firstGuarantor string
 
 	// standard program initialization parameters
 	o_size uint32
@@ -326,10 +327,12 @@ type VM struct {
 	Y        types.XContext
 	Timeslot uint32
 
-	// Gereral argument
+	// General argument
 	ServiceAccount *types.ServiceAccount
 	Service_index  uint32
-	Delta          map[uint32]*types.ServiceAccount
+	CoreIndex      uint16
+
+	Delta map[uint32]*types.ServiceAccount
 
 	// Output
 	Outputs []byte
@@ -990,10 +993,8 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		o_byte:          o_byte,
 		w_byte:          w_byte,
 		ServiceMetadata: Metadata,
+		CoreIndex:       2048,
 	}
-	// for _, pg := range pages {
-	// 	vm.writeRAMBytes(pg.Address, pg.Contents)
-	// }
 	copy(vm.register, initialRegs)
 	// Standard Program Initialization
 	// Standard_Program_Initialization(vm, []byte{})
@@ -1077,8 +1078,22 @@ func recordExecuteRefineTestVector(workitemIndex uint32, workPackage types.WorkP
 	}
 }
 
+func (vm *VM) SetCore(coreIndex uint16, firstGuarantor bool) {
+	vm.CoreIndex = coreIndex
+	if firstGuarantor {
+		vm.firstGuarantor = log.FirstGuarantor
+	}
+}
+
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
 func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
+
+	if vm.firstGuarantor == log.FirstGuarantor {
+		vm.SetLogging(log.PvmAuthoring)
+	} else {
+		//vm.UnSetLogging()
+	}
+
 	workitem := workPackage.WorkItems[workitemIndex]
 
 	a := common.Uint32ToBytes(workitem.Service)
@@ -1092,7 +1107,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	a = append(a, encoded_p_a...)
 
 	vm.WorkItemIndex = workitemIndex
-	vm.Gas = workitem.RefineGasLimit
+	vm.Gas = int64(workitem.RefineGasLimit)
 	vm.WorkPackage = workPackage
 	// Sourabh , William pls validate this
 	vm.Authorization = authorization.Ok
@@ -1122,7 +1137,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, encoded_elements...)
 	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
-	vm.Gas = g
+	vm.Gas = int64(g)
 	vm.Execute(types.EntryPointAccumulate) // F ∈ Ω⟨(X, X)⟩
 	// }
 	xs, _ = vm.X.GetX_s()

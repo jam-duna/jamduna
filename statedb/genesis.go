@@ -31,7 +31,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	if err != nil {
 		return
 	}
-	var validatorshashes [types.TotalValidators]common.Hash
+	var validatorshashes [types.TotalValidators]types.ValidatorKeyTuple
 	validators := make(types.Validators, chainSpec.NumValidators)
 	for i := uint32(0); i < uint32(chainSpec.NumValidators); i++ {
 		seed := make([]byte, 32)
@@ -50,7 +50,8 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 		copy(vpub.Ed25519[:], v.Ed25519Pub[:])
 		copy(vpub.Bls[:], v.BlsPub[:])
 		copy(vpub.Metadata[:], v.Metadata[:])
-		copy(validatorshashes[i][:], v.BandersnatchPub[:])
+		copy(validatorshashes[i].BandersnatchKey[:], v.BandersnatchPub[:])
+		copy(validatorshashes[i].Ed25519Key[:], v.Ed25519Pub[:])
 		validators[i] = vpub
 	}
 

@@ -2793,7 +2793,170 @@
                 "guarantees": 0,
                 "assurances": 0
             }
-        ]
+        ],
+        "core_statistics": [
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            },
+            {
+                "throughput": 0,
+                "num_assurances": 0,
+                "num_imported_segments": 0,
+                "num_exported_segments": 0,
+                "num_bytes_extrinsics": 0,
+                "num_extrinsics": 0,
+                "total_bundle_length": 0,
+                "gas_used": 0
+            }
+        ],
+        "service_statistics": null
     },
     "theta": [
         [],

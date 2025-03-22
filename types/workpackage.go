@@ -3,7 +3,6 @@ package types
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -102,14 +101,6 @@ func (b *WorkPackageBundle) Validate() error {
 	return nil
 }
 
-func (b *WorkPackageBundle) Bytes() []byte {
-	encoded, err := Encode(b)
-	if err != nil {
-		return nil
-	}
-	return encoded
-}
-
 func (b *WorkPackageBundle) String() string {
 	jsonByte, _ := json.Marshal(b)
 	return string(jsonByte)
@@ -123,14 +114,12 @@ func (b *WorkPackageBundle) Package() WorkPackage {
 	return b.WorkPackage
 }
 
-func WorkPackageBundleFromBytes(data []byte) (*WorkPackageBundle, error) {
-	var b WorkPackageBundle
-	decoded, _, err := Decode(data, reflect.TypeOf(WorkPackageBundle{}))
+func (b *WorkPackageBundle) Bytes() []byte {
+	encode, err := Encode(b)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	b = decoded.(WorkPackageBundle)
-	return &b, nil
+	return encode
 }
 
 type Authorizer struct {

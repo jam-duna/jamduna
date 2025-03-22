@@ -245,15 +245,15 @@ func ValidateSTF(pre_state *StateDB, block_origin types.Block, post_state *State
 			for _, e_v := range epock_mark_validators {
 				key_found := false
 				for _, n_v := range new_gamma_k {
-					if bytes.Equal(e_v.Bytes(), n_v.Bandersnatch[:]) {
+					if bytes.Equal(e_v.BandersnatchKey.Bytes(), n_v.Bandersnatch[:]) {
 						key_found = true
 						break
 					}
 				}
 				if !key_found {
 					error_num++
-					key := fmt.Sprintf("EpochMark Validator %s", e_v.String_short())
-					diffs[key] = fmt.Sprintf("EpochMark Validator %s not in NextValidators", e_v.String_short())
+					key := fmt.Sprintf("EpochMark Validator %s", e_v.BandersnatchKey.String_short())
+					diffs[key] = fmt.Sprintf("EpochMark Validator %s not in NextValidators", e_v.BandersnatchKey.String_short())
 				}
 			}
 		}

@@ -47,6 +47,7 @@ const (
 
 var targetNum = flag.Int("targetN", -1, "targetN")
 var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
+var pvm_authoring_log = flag.Bool("pvm_authoring_log", false, "pvm_authoring_log")
 
 func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
 	nodes, err := SetUpNodes(numNodes, basePort)
@@ -64,7 +65,7 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
 	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
 
-	log.EnableModule("authoring")
+	log.EnableModule(log.GeneralAuthoring)
 	log.Info(module, "JAMTEST", "jam", caseType, "targetN", targetTimeslotLength)
 
 	for _, n := range nodes {
@@ -132,12 +133,9 @@ func TestFib2(t *testing.T) {
 
 func TestMegatron(t *testing.T) {
 	// Open file to save CPU Profile
-	fmt.Printf("prereq_test: %v\n", *prereq_test)
-	if *prereq_test {
-		test_prereq = true
-	} else {
-		test_prereq = false
-	}
+	//fmt.Printf("prereq_test: %v\n", *prereq_test)
+	//fmt.Printf("authoring_log: %v\n", *authoring_log)
+
 	cpuProfile, err := os.Create("cpu.pprof")
 	if err != nil {
 		t.Fatalf("Unable to create CPU Profile file: %v", err)

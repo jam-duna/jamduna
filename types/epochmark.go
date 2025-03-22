@@ -2,8 +2,9 @@ package types
 
 import (
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
 	"reflect"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 // EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch
@@ -12,7 +13,12 @@ type EpochMark struct {
 	Entropy        common.Hash `json:"entropy"`
 	TicketsEntropy common.Hash `json:"tickets_entropy"`
 	// List of authorities scheduled for next epoch
-	Validators [TotalValidators]common.Hash `json:"validators"` //bandersnatch keys
+	Validators [TotalValidators]ValidatorKeyTuple `json:"validators"` //bandersnatch keys
+}
+
+type ValidatorKeyTuple struct {
+	BandersnatchKey common.Hash `json:"bandersnatch_key"`
+	Ed25519Key      common.Hash `json:"ed25519_key"`
 }
 
 func (e EpochMark) String() string {
@@ -55,14 +61,14 @@ func (target *EpochMark) Decode(data []byte) (interface{}, uint32) {
 		return nil, length
 	}
 	length += l
-	validators, l, err := Decode(data[length:], reflect.TypeOf([TotalValidators]common.Hash{}))
+	validators, l, err := Decode(data[length:], reflect.TypeOf([TotalValidators]ValidatorKeyTuple{}))
 	if err != nil {
 		return nil, length
 	}
 	decoded := EpochMark{
 		Entropy:        entropy.(common.Hash),
 		TicketsEntropy: ticketsentropy.(common.Hash),
-		Validators:     validators.([TotalValidators]common.Hash),
+		Validators:     validators.([TotalValidators]ValidatorKeyTuple),
 	}
 	length += l
 	return &decoded, length

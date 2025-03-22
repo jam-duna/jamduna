@@ -105,7 +105,7 @@ func (c *Client) readPump() {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			// Log unexpected close errors.
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
 				log.Crit("jamweb", "IsUnexpectedCloseError", err)
 			}
 			break
@@ -280,13 +280,15 @@ func (n *NodeContent) runJamWeb(basePort uint16) {
 			return
 		}
 		method := req.Method
-		fmt.Printf("method %v\n", method)
 		args := req.Params
+		fmt.Printf("method %v, params %v\n", method, args)
+
 		// Dispatch based on the method.
 		var result string
 		err = client.Call(method, args, &result)
 		if err != nil {
-			http.Error(w, "RPC call failed"+err.Error(), http.StatusInternalServerError)
+			fmt.Printf("RPC call failed %v\n", err)
+			http.Error(w, "RPC call failed:"+err.Error(), http.StatusBadRequest)
 			return
 		}
 		// Encode the JSON response.

@@ -129,7 +129,9 @@ func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBloc
 	ArchiveNode.block_tree = genesis_block_tree
 	if err == nil {
 		_statedb.SetID(uint16(id))
-		ArchiveNode.addStateDB(_statedb)
+		ArchiveNode.statedbMapMutex.Lock()
+		ArchiveNode.statedbMap[_statedb.HeaderHash] = _statedb
+		ArchiveNode.statedbMapMutex.Unlock()
 	} else {
 		fmt.Printf("NewGenesisStateDB ERR %v\n", err)
 		return nil, err
@@ -406,7 +408,11 @@ func (n *ArchiveNode) ApplyBlock(block_node *types.BT_Node) error {
 	}
 	n.statedb = newstatedb
 	n.statedb.Block = block
-	n.addStateDB(newstatedb)
+	new_state := newstatedb.Copy()
+	new_state.Block = block
+	n.statedbMapMutex.Lock()
+	n.statedbMap[block.Header.Hash()] = new_state
+	n.statedbMapMutex.Unlock()
 	announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", block.Hash(), block.Header.Hash())
 	if n.hub != nil {
 		n.hub.broadcast <- []byte(announcement)

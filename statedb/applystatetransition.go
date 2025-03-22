@@ -17,6 +17,10 @@ import (
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, caller string) (s *StateDB, err error) {
 
 	s = oldState.Copy()
+	if s.StateRoot != blk.Header.ParentStateRoot {
+		panic(fmt.Sprintf("[%d] ParentStateRoot does not match %v %v", s.Id, s.StateRoot, blk.Header.ParentStateRoot))
+		return s, fmt.Errorf("ParentStateRoot does not match")
+	}
 	old_timeslot := s.GetSafrole().Timeslot
 	s.JamState = oldState.JamState.Copy()
 	s.Block = blk
@@ -67,8 +71,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if epochMark != nil {
 		// (6.27)Bandersnatch validator keys (kb) beginning in the next epoch.
 		bandersnatch_keys_map := make(map[common.Hash]bool)
-		for _, bandersnatch_key := range epochMark.Validators {
-			bandersnatch_keys_map[bandersnatch_key] = false
+		for _, keys := range epochMark.Validators {
+			bandersnatch_keys_map[keys.BandersnatchKey] = false
 		}
 		for _, validator := range s2.NextValidators {
 			if _, ok := bandersnatch_keys_map[validator.Bandersnatch.Hash()]; ok {
@@ -129,12 +133,17 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	var b []BeefyCommitment
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, t, b := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
+
+	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
+	accumulateStats := make(map[uint32]accumulateStatistics)
+	transferStats := make(map[uint32]*transferStatistics)
+	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
 	tau := s.GetTimeslot() // τ′
-	if len(t) > 0 {
-		s.ProcessDeferredTransfers(o, tau, t)
+	err = s.ProcessDeferredTransfers(o, tau, t)
+	if err != nil {
+		return s, err
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.D {
@@ -142,6 +151,42 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		sa.Dirty = true
 	}
 	s.ApplyXContext(o, caller)
+	// accumulate statistics
+	accumulated_workreports := accumulate_input_wr[:n]
+	for _, report := range accumulated_workreports {
+		for _, result := range report.Results {
+			service := result.ServiceID
+			stats := accumulateStats[service]
+			stats.numWorkReports++
+			accumulateStats[service] = stats
+		}
+	}
+
+	for _, gasusage := range U {
+		service := gasusage.Service
+		stats := accumulateStats[service]
+		stats.gasUsed += gasusage.Gas
+		accumulateStats[service] = stats
+		if accumulateStats[service].numWorkReports == 0 {
+			//delete the service from the map
+			delete(accumulateStats, service)
+		}
+	}
+
+	// transfer statistics
+	for _, transfer := range t {
+		service := transfer.ReceiverIndex
+		_, ok := transferStats[service]
+		if !ok {
+			transferStats[service] = &transferStatistics{
+				gasUsed:      0,
+				numTransfers: 0,
+			}
+		}
+		transferStats[service].numTransfers = transferStats[service].numTransfers + 1
+		transferStats[service].gasUsed = transferStats[service].gasUsed + 10 // TODO: get this from pvm
+	}
+
 	//after accumulation, we need to update the accumulate state
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// 0.6.2 4.18 - Preimages [ δ‡, τ′]
@@ -150,8 +195,16 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
+
+	// tally validator statistics
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "preimages", num_preimage)
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
+
+	// tally core statistics + service statistics -- the newly available work reports and incoming work reports ... along with assurances + preimages
+	//
+	s.JamState.tallyCoreStatistics(guarantees, s.AvailableWorkReport, assurances)
+	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStatistics)
+
 	// Update Authorization Pool alpha
 	// 4.19 α'[need φ', so after accumulation]
 	err = s.ApplyStateTransitionAuthorizations()
@@ -169,18 +222,18 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		empty := common.Hash{}
 		if sa.Commitment == empty {
 			// should not have gotten here!
-			log.Warn("authoring", "BEEFY-C", "commitment", sa.Commitment)
+			log.Warn(log.GeneralAuthoring, "BEEFY-C", "commitment", sa.Commitment)
 		} else {
 			leaves = append(leaves, leafBytes)
 			if s.Authoring {
-				log.Info("authoring", "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+				log.Info(log.GeneralAuthoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
 			}
 		}
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	accumulationRoot := common.Hash(tree.Root())
 	if len(leaves) > 0 && s.Authoring {
-		log.Info("authoring", "BEEFY accumulation root", "r", accumulationRoot)
+		log.Info(log.GeneralAuthoring, "BEEFY accumulation root", "r", accumulationRoot)
 	}
 	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
 	s.ApplyStateRecentHistory(blk, &(accumulationRoot))

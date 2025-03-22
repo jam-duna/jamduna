@@ -170,7 +170,7 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 	result = append(result, Q_q...)
 
 	if s.Authoring && (len(accumulated_immediately) != len(result)) {
-		log.Info("authoring", "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
+		log.Info(log.GeneralAuthoring, "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
 			"q", get_accumulationqueue_workpackagehashes(q), "Q(q)-priority queue result", get_workreport_workpackagehashes(Q_q), "W^*-wphs of accumulatable work reports)", get_workreport_workpackagehashes(result))
 	}
 	return result
@@ -244,6 +244,11 @@ func CalculateGasAttributable(
 	return gasAttributable
 }
 
+type Usage struct {
+	Service uint32
+	Gas     uint64
+}
+
 /*
 We define the outer accumulation function ∆+ which
 transforms a gas-limit, a sequence of work-reports, an
@@ -254,8 +259,7 @@ tant deferred-transfers and accumulation-output pairings:
 */
 // eq 173
 // ∆+
-func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment) {
-	// not really sure i here , the max meaning. use uint32 for now
+func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment, GasUsage []Usage) { // not really sure i here , the max meaning. use uint32 for now
 	var gas_tmp uint64
 	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
@@ -277,17 +281,18 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 
 		output_t = make([]types.DeferredTransfer, 0)
 		output_b = make([]BeefyCommitment, 0)
+		GasUsage = make([]Usage, 0)
 		return
 	}
 	if i >= uint64(len(w)) { // if i >= len(w), then all work reports are accumulated
 		i = uint64(len(w))
 	}
-	g_star, t_star, b_star := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports
+	g_star, t_star, b_star, U := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports // parallelized accumulation the 0 to i work reports
 
 	if i >= uint64(len(w)) { // no more reports
-		return i, t_star, b_star
+		return i, t_star, b_star, U
 	}
-	j, outputT, outputB := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
+	j, outputT, outputB, GasUsage := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
 	num = i + j
 
 	output_t = append(outputT, t_star...)
@@ -303,9 +308,8 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 		if b.Commitment != (common.Hash{}) && !duplicate {
 			output_b = append(output_b, b)
 		}
-
 	}
-
+	GasUsage = append(U, GasUsage...)
 	return
 }
 
@@ -315,7 +319,8 @@ privileged always-accumulate services, into a tuple of the total gas utilized in
 */
 // the parallelized accumulation function ∆*
 // eq 174
-func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32) (output_u uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment) {
+func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32) (output_u uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment, GasUsage []Usage) {
+	GasUsage = make([]Usage, 0)
 	services := make([]uint32, 0)
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
@@ -334,6 +339,10 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service)
 		output_u += U
 		empty := common.Hash{}
+		GasUsage = append(GasUsage, Usage{
+			Service: service,
+			Gas:     U,
+		})
 		if B == empty {
 
 		} else {
@@ -483,7 +492,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					D: workResult.Result,
 				}
 				if sd.Authoring {
-					log.Debug("authoring", "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
+					log.Debug(log.GeneralAuthoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
+				} else {
+					log.Debug("!!!!!!NOT authoring", "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
 				}
 				p = append(p, o)
 			}
@@ -512,9 +523,11 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
 	t := sd.JamState.SafroleState.Timeslot
-	// if sd.Authoring {
-	// 	vm.SetLogging("authoring")
-	// }
+	if sd.Authoring {
+		vm.SetLogging(log.PvmAuthoring)
+	} else {
+		//vm.UnSetLogging()
+	}
 	vm.Timeslot = t
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
 
@@ -526,11 +539,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		xy = &(vm.Y)
 		if sd.Authoring {
 			if r.Err == types.RESULT_OOG {
-				log.Debug("authoring", "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+				log.Debug(log.GeneralAuthoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 			} else {
-				log.Debug("authoring", "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+				log.Debug(log.GeneralAuthoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 			}
-
 		}
 		return
 	}
@@ -545,7 +557,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		res = "yield"
 	}
 	if sd.Authoring {
-		log.Debug("authoring", fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
+		log.Debug(log.GeneralAuthoring, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
 	}
 	return
 }
@@ -562,8 +574,7 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 	return output
 }
 
-func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (err error) {
-	// select transfers eq 12.23
+func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (err error) { // select transfers eq 12.23
 	selectedTransfers := TransferSelect(t, self_index)
 	if len(selectedTransfers) == 0 {
 		return nil
@@ -588,7 +599,7 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	input_argument = append(input_argument, encodeSelectedTransfers...)
 
 	vm.ExecuteTransfer(input_argument, self)
-	return nil
+	return nil // TODO: is this gasUsed or gasRemaining?
 }
 
 // eq 12.24

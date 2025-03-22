@@ -25,33 +25,24 @@ const (
 	PVM_OOG   = 4 // page-fault F
 )
 
-// 11.1.4. Work Result. Equation 121. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
+// 11.1.4. Work Result. Equation 11.6. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
 type WorkResult struct {
 	ServiceID   uint32      `json:"service_id"`
 	CodeHash    common.Hash `json:"code_hash"`
 	PayloadHash common.Hash `json:"payload_hash"`
 	Gas         uint64      `json:"accumulate_gas"`
 	Result      Result      `json:"result"`
+	// NEW in 0.6.4 -- see C.23 which specifies ordering of { u, i, x, z, e }
+	GasUsed             uint64 `json:"gas_used,omitempty"`    // u
+	NumImportedSegments uint32 `json:"num_imported_segments"` // i
+	NumExtrinsics       uint32 `json:"num_extrinsics"`        // x
+	NumBytesExtrinsics  uint32 `json:"num_bytes_extrinsics"`  // z
+	NumExportedSegments uint32 `json:"num_exported_segments"` // e
 }
 
 type Result struct {
 	Ok  []byte `json:"ok,omitempty"`
 	Err uint8  `json:"err,omitempty"`
-}
-
-// see 12.3 Wrangling - Eq 159
-type WrangledWorkResult struct {
-	// Note this is Output OR Error
-	// Output Result `json:"output"`
-	//Output map[string]interface{} `json:"output"`
-	Output Result `json:"output"`
-	// l
-	PayloadHash         common.Hash `json:"payload_hash"`
-	AuthorizationOutput []byte      `json:"authorization_output"`
-	WorkPackageHash     common.Hash `json:"output"`
-
-	// matched with error
-	Error string `json:"error"`
 }
 
 func (R Result) Encode() []byte {
