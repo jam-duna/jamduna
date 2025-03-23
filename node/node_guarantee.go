@@ -9,17 +9,51 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
-func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, curr_statedb *statedb.StateDB, extrinsics types.ExtrinsicsBlobs) (guarantee types.Guarantee, err error) {
+type WPQueueItem struct {
+	wp                 types.WorkPackage
+	coreIndex          uint16
+	extrinsics         types.ExtrinsicsBlobs
+	addTS              int64
+	nextAttemptAfterTS int64
+}
+
+func (n *Node) runWPQueue() {
+	pulseTicker := time.NewTicker(100 * time.Millisecond)
+	defer pulseTicker.Stop()
+	for {
+		select {
+		case <-pulseTicker.C:
+			n.workPackageQueue.Range(func(key, value interface{}) bool {
+				wpItem := value.(*WPQueueItem)
+				if time.Now().Unix() >= wpItem.nextAttemptAfterTS {
+					wpItem.nextAttemptAfterTS = time.Now().Unix()
+					if n.processWPQueueItem(wpItem) {
+						n.workPackageQueue.Delete(key)
+						return false
+					}
+				}
+				return true
+			})
+		}
+	}
+}
+
+func (n *Node) clearQueueUsingBlock(guarantees []types.Guarantee) {
+	for _, g := range guarantees {
+		n.workPackageQueue.Delete(g.Report.AvailabilitySpec.WorkPackageHash)
+	}
+}
+
+func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	if n.store.SendTrace {
 		tracer := n.store.Tp.Tracer("NodeTracer")
 		// n.InitWPContext(wp)
-		tags := trace.WithAttributes(attribute.String("WorkpackageHash", common.Str(wp.Hash())))
+		tags := trace.WithAttributes(attribute.String("WorkpackageHash", common.Str(wpItem.wp.Hash())))
 		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] broadcastWorkpackage", n.store.NodeID), tags)
 		n.store.UpdateWorkPackageContext(ctx)
 		defer span.End()
@@ -27,53 +61,53 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 	// counting the time for this function execution
 
 	timer := time.Now()
-	currTimeslot := curr_statedb.GetTimeslot()
-	coreIndex := wpCoreIndex
+	coreIndex := wpItem.coreIndex
+	wp := wpItem.wp
+	log.Debug(debugDA, "processWPQueueItem", "n", n.String(), "coreIndex", coreIndex, "workPackageHash", wp.Hash())
+	segmentRootLookup, err := n.GetSegmentRootLookup(wpItem.wp)
 	if err != nil {
-		log.Error(debugG, "broadcastWorkPackage:GetCoreCoWorkerPeersByStateDB", "n", n.String(), "err", err)
-	}
-	coworkers := n.GetCoreCoWorkerPeersByStateDB(wpCoreIndex, curr_statedb)
-	log.Debug(debugDA, "broadcastWorkpackage", "n", n.String(), "n.Core", coreIndex, "wpCoreIndex", wpCoreIndex, "WorkPackageHash", wp.Hash(), "len(coworkers)", len(coworkers))
-	segmentRootLookup, err := n.GetSegmentRootLookup(wp)
-	if err != nil {
-		log.Error(debugG, "broadcastWorkPackage:GetSegmentRootLookup", "n", n.String(), "err", err)
-		//TODO: put back into queue
+		log.Warn(debugG, "broadcastWorkPackage:GetSegmentRootLookup", "n", n.String(), "err", err)
+		wpItem.nextAttemptAfterTS = time.Now().Unix() + 6
+		return false
 	}
 	// here we are a first guarantor making justifications and reconstructSegments is used inside FetchWorkpackageImportSegments
-	importedSegments, justifications, err := n.FetchWorkpackageImportSegments(wp, segmentRootLookup)
+	importedSegments, justifications, err := n.FetchWorkpackageImportSegments(wpItem.wp, segmentRootLookup)
 	if err != nil {
-		log.Error(debugG, "broadcastWorkPackage:FetchWorkpackageImportSegments", "n", n.String(), "err", err)
-		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] FetchWorkpackageImportSegments Error: %v\n", n.String(), err)
+		log.Warn(debugG, "broadcastWorkPackage:FetchWorkpackageImportSegments", "n", n.String(), "err", err)
+		wpItem.nextAttemptAfterTS = time.Now().Unix() + 6
+		return false
 	}
-	log.Debug(debugG, "broadcastWorkPackage:Guarantee from self", "id", n.String())
 
-	// s - [ImportSegmentData] should be size of G = W_E * W_S
+	curr_statedb := n.statedb.Copy()
+	// reject if the work package is not for this core
+	if wpItem.coreIndex != curr_statedb.GetSelfCoreIndex() {
+		wpItem.nextAttemptAfterTS = time.Now().Unix() + 6
+		return false
+	}
 	bundle := types.WorkPackageBundle{
 		WorkPackage:       wp,
-		ExtrinsicData:     extrinsics,
+		ExtrinsicData:     wpItem.extrinsics,
 		ImportSegmentData: importedSegments,
-		Justification:     justifications, // this is something the recipients can check the ImportedSegmentData against the WorkItems in the WorkPackage
+		Justification:     justifications, // recipients use VerifyBundle
 	}
-
 	err = curr_statedb.VerifyPackage(bundle)
 	if err != nil {
-		log.Error(debugG, "broadcastWorkPackage:CompilePackageBundle", "n", n.String(), "err", err)
-		return types.Guarantee{}, fmt.Errorf("%s [broadcastWorkPackage] CompilePackageBundle Error: %v\n", n.String(), err)
+		return false
 	}
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
+	coworkers := n.GetCoreCoWorkerPeersByStateDB(coreIndex, curr_statedb)
+	var guarantee types.Guarantee
 	for _, coworker := range coworkers {
 		wg.Add(1)
 		go func(coworker Peer) {
 			defer wg.Done()
 			// if it's itself, execute the workpackage
 			if coworker.PeerID == n.id {
-				var execErr error
-				report, execErr := n.executeWorkPackageBundle(wpCoreIndex, bundle, segmentRootLookup, true)
+				report, execErr := n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, true)
 				if execErr != nil {
-					log.Error(debugG, "broadcastWorkPackage:executeWorkPackage", "n", n.String(), "err", execErr)
-					panic(fmt.Sprintf("executeWorkPackage Error: %v", execErr))
+					return
 				}
 				guarantee.Report = report
 				signerSecret := n.GetEd25519Secret()
@@ -81,7 +115,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				guarantee.Signatures = append(guarantee.Signatures, gc)
 				return
 			} else {
-				fellow_response, errfellow := coworker.ShareWorkPackage(wpCoreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
+				fellow_response, errfellow := coworker.ShareWorkPackage(coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
 					log.Error(debugG, "broadcastWorkPackage:ShareWorkPackage", "n", n.String(), "err", errfellow)
 					return
@@ -114,12 +148,11 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 				return guarantee.Signatures[i].ValidatorIndex < guarantee.Signatures[j].ValidatorIndex
 			})
 		} else {
-			fmt.Printf("")
 			log.Crit(debugG, "broadcastWorkpackage Guarantee from fellow did not match", "n", n.String(),
 				"selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
 
 			panic(9234)
-			return
+			return false
 		}
 	}
 
@@ -127,7 +160,7 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		if len(guarantee.Signatures) == 2 {
 			log.Warn(debugG, "broadcastWorkpackage:Only 2 signatures, expected 3")
 		}
-		guarantee.Slot = currTimeslot
+		guarantee.Slot = curr_statedb.GetTimeslot()
 		go n.broadcast(guarantee)
 		eclapsed := time.Since(timer)
 		log.Debug(debugG, "broadcastWorkPackage: outgoing guarantee for core",
@@ -139,5 +172,5 @@ func (n *Node) broadcastWorkpackage(wp types.WorkPackage, wpCoreIndex uint16, cu
 		}
 		log.Trace(debugG, "broadcast guarantee in slot", "n", n.String(), "coreIndex", coreIndex, "slot", guarantee.Slot, "actual", n.statedb.GetTimeslot())
 	}
-	return
+	return true
 }

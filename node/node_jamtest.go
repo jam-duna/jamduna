@@ -658,31 +658,6 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					fmt.Printf("Tri %d = %v\n", index, service_account_byte)
 				}
 				fib_tri_good_togo <- true
-			} else if successful == "trial" {
-				fmt.Printf("Fib_Tri %d sending again. wp hash=%v\n", Fib_Tri_counter-1, curr_fib_tri_workpackage.Hash())
-				currfib_trib_hash := curr_fib_tri_workpackage.Hash()
-				curr_meg_workpackage.RefineContext.Prerequisites = []common.Hash{currfib_trib_hash}
-				if Fib_Tri_counter <= targetNMax-1 {
-					fib_importedSegments := []types.ImportSegment{
-						{
-							RequestedHash: curr_fib_tri_workpackage.Hash(),
-							Index:         0,
-						},
-					}
-					trib_importedSegments := []types.ImportSegment{
-						{
-							RequestedHash: curr_fib_tri_workpackage.Hash(),
-							Index:         1,
-						},
-					}
-					fib_trib_items = buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
-					next_fib_tri_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
-					if err != nil {
-						panic(err)
-					}
-					currfib_trib_hash := curr_fib_tri_workpackage.Hash()
-					curr_meg_workpackage.RefineContext.Prerequisites = []common.Hash{currfib_trib_hash}
-				}
 			}
 		case successful := <-Meg_successful:
 			if successful == "ok" {
@@ -698,12 +673,6 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					fmt.Printf("Meg %d = %v\n", index, service_account_byte)
 				}
 				meg_good_togo <- true
-			} else if successful == "trial" {
-				currfib_trib_hash := curr_fib_tri_workpackage.Hash()
-				curr_meg_workpackage.RefineContext.Prerequisites = []common.Hash{currfib_trib_hash}
-				fmt.Printf("Meg %d sending again. wp hash=%v\n", Meg_counter-1, curr_meg_workpackage.Hash())
-				fmt.Printf("prereq=%v\n", curr_meg_workpackage.RefineContext.Prerequisites)
-
 			}
 
 		case workPackage := <-Meg_Chan:
@@ -851,16 +820,6 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 
 			}
 		}
-
-		// case <-ticker_runtime.C:
-		// 	var stats runtime.MemStats
-		// 	runtime.ReadMemStats(&stats)
-
-		// 	numGoroutine := runtime.NumGoroutine()
-		// 	numCPU := runtime.NumCPU()
-		// 	cpuPercent := float64(runtime.NumCgoCall()) / float64(numCPU)
-
-		// 	fmt.Printf("\033[31mGoroutines: %d, CPUs: %d, CPU Usage (approx): %.2f%%\033[0m\n", numGoroutine, numCPU, cpuPercent*100)
 
 	}
 }

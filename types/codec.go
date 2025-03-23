@@ -215,7 +215,11 @@ func Encode(data interface{}) ([]byte, error) {
 		for i := 0; i < v.NumField(); i++ {
 			encodedVi, err := Encode(v.Field(i).Interface())
 			if err != nil {
-				return nil, err
+				field := v.Type().Field(i)
+				tag := field.Tag.Get("json")
+				name := field.Name
+				typeName := field.Type.Name()
+				return nil, fmt.Errorf("[Error From Codec Encode]%s , type: %s, name: %s, tag: %s", err, typeName, name, tag)
 			}
 			encoded = append(encoded, encodedVi...)
 		}
@@ -403,7 +407,12 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 			}
 			elem, l, err := Decode(data[length:], v.Field(i).Type())
 			if err != nil {
-				return nil, 0, err
+				field := t.Field(i)
+				tag := field.Tag.Get("json")
+				name := field.Name
+				typeName := field.Type.Name()
+				return nil, 0, fmt.Errorf("[Error From Codec Decode]%s , type: %s, name: %s, tag: %s", err, typeName, name, tag)
+
 			}
 			if len(data) < int(length+l) {
 				return nil, 0, fmt.Errorf("data length insufficient for struct field decoding")

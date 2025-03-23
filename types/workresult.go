@@ -33,11 +33,19 @@ type WorkResult struct {
 	Gas         uint64      `json:"accumulate_gas"`
 	Result      Result      `json:"result"`
 	// NEW in 0.6.4 -- see C.23 which specifies ordering of { u, i, x, z, e }
-	GasUsed             uint64 `json:"gas_used,omitempty"`    // u
-	NumImportedSegments uint32 `json:"num_imported_segments"` // i
-	NumExtrinsics       uint32 `json:"num_extrinsics"`        // x
-	NumBytesExtrinsics  uint32 `json:"num_bytes_extrinsics"`  // z
-	NumExportedSegments uint32 `json:"num_exported_segments"` // e
+	GasUsed             uint64 `json:"gas_used"`        // u
+	NumImportedSegments uint16 `json:"imports"`         // i
+	NumExtrinsics       uint16 `json:"extrinsic_count"` // x
+	NumBytesExtrinsics  uint32 `json:"extrinsic_size"`  // z
+	NumExportedSegments uint16 `json:"exports"`         // e
+}
+
+type RefineLoad struct {
+	GasUsed             uint64 `json:"gas_used"`        // u
+	NumImportedSegments uint16 `json:"imports"`         // i
+	NumExtrinsics       uint16 `json:"extrinsic_count"` // x
+	NumBytesExtrinsics  uint32 `json:"extrinsic_size"`  // z
+	NumExportedSegments uint16 `json:"exports"`         // e
 }
 
 type Result struct {
@@ -123,6 +131,7 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 		PayloadHash common.Hash            `json:"payload_hash"`
 		Gas         uint64                 `json:"accumulate_gas"`
 		Result      map[string]interface{} `json:"result"`
+		RefineLoad  RefineLoad             `json:"refine_load"`
 	}
 	err := json.Unmarshal(data, &s)
 	if err != nil {
@@ -166,7 +175,11 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 	a.PayloadHash = s.PayloadHash
 	a.Gas = s.Gas
 	a.Result = result
-
+	a.GasUsed = s.RefineLoad.GasUsed
+	a.NumImportedSegments = s.RefineLoad.NumImportedSegments
+	a.NumExtrinsics = s.RefineLoad.NumExtrinsics
+	a.NumBytesExtrinsics = s.RefineLoad.NumBytesExtrinsics
+	a.NumExportedSegments = s.RefineLoad.NumExportedSegments
 	return nil
 }
 
@@ -203,12 +216,20 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 		PayloadHash common.Hash            `json:"payload_hash"`
 		Gas         uint64                 `json:"accumulate_gas"`
 		Result      map[string]interface{} `json:"result"`
+		RefineLoad  RefineLoad             `json:"refine_load"`
 	}{
 		ServiceID:   a.ServiceID,
 		CodeHash:    a.CodeHash,
 		PayloadHash: a.PayloadHash,
 		Gas:         a.Gas,
 		Result:      result,
+		RefineLoad: RefineLoad{
+			GasUsed:             a.GasUsed,
+			NumImportedSegments: a.NumImportedSegments,
+			NumExtrinsics:       a.NumExtrinsics,
+			NumBytesExtrinsics:  a.NumBytesExtrinsics,
+			NumExportedSegments: a.NumExportedSegments,
+		},
 	})
 }
 

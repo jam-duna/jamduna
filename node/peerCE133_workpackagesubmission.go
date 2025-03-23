@@ -2,7 +2,6 @@ package node
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"reflect"
 	"time"
@@ -117,42 +116,26 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 			return
 		}
 	}
-
-	curr_statedb := n.statedb.Copy()
-	selfCoreIndex := curr_statedb.GetSelfCoreIndex()
-	if err != nil {
-		return fmt.Errorf("failed to get self core index: %w", err)
-	}
-	// reject if the work package is not for this core
-	if newReq.CoreIndex != selfCoreIndex {
-		return fmt.Errorf("work package submission for core %d received by core %d", newReq.CoreIndex, selfCoreIndex)
-	}
-
-	// TODO: Sourabh check if this even makes sense
-	//n.workPackagesCh <- newReq.WorkPackage
-	//we use current timeslot to broadcast the workpackage, because if we it might be possible that the timeslot has changed by the time the workpackage is executed
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	go func(ctx context.Context) {
-		done := make(chan error, 1)
-		go func() {
-			_, err := n.broadcastWorkpackage(newReq.WorkPackage, newReq.CoreIndex, curr_statedb, newReq.Extrinsic)
-			done <- err
-		}()
-
-		select {
-		case <-ctx.Done():
-			if ctx.Err() == context.DeadlineExceeded {
-				fmt.Printf("broadcastWorkpackage timed out | wp=%v, core=%v\n", newReq.WorkPackage.Hash(), newReq.CoreIndex)
-			} else if ctx.Err() != context.Canceled {
-				fmt.Printf("broadcastWorkpackage ERR | wp=%v, core=%v, err %v\n", newReq.WorkPackage.Hash(), newReq.CoreIndex, ctx.Err())
-			}
-		case err := <-done:
-			if err != nil {
-				fmt.Printf("%s broadcastWorkpackage Error: %v\n", n.String(), err)
+	s := n.statedb
+	workPackageHash := newReq.WorkPackage.Hash()
+	for _, block := range s.JamState.RecentBlocks {
+		if len(block.Reported) != 0 {
+			for _, segmentRootLookup := range block.Reported {
+				if segmentRootLookup.WorkPackageHash == workPackageHash {
+					return nil
+				}
 			}
 		}
-	}(ctx)
+	}
+
+	newItem := &WPQueueItem{
+		wp:         newReq.WorkPackage,
+		coreIndex:  newReq.CoreIndex,
+		extrinsics: newReq.Extrinsic,
+		addTS:      time.Now().Unix(),
+		
+		nextAttemptAfterTS: time.Now().Unix(),
+	}
+	n.workPackageQueue.Store(newItem.wp.Hash(), newItem)
 	return nil
 }

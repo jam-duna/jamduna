@@ -1583,21 +1583,27 @@ func (vm *VM) hostLog() {
 
 	switch level {
 	case 0:
-		log.Crit(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		log.Crit(vm.firstGuarantor, levelName, "msg", string(messageBytes))
 		break
 	case 1:
-		log.Warn(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		if vm.firstGuarantor == log.FirstGuarantor {
+			log.Warn(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+		}
 		break
 	case 2:
 		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Info(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+			log.Info(vm.firstGuarantor, levelName, "msg", string(messageBytes))
 		}
 		break
 	case 3:
-		log.Error(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		if vm.firstGuarantor == log.FirstGuarantor {
+			log.Error(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+		}
 		break
 	case 4:
-		log.Debug(vm.firstGuarantor, levelName, "fn", "hostLog", "msg", string(messageBytes), "first", vm.firstGuarantor, "lvl", level)
+		if vm.firstGuarantor == log.FirstGuarantor {
+			log.Debug(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+		}
 		break
 	}
 	vm.HostResultCode = OK

@@ -126,6 +126,8 @@ type NodeContent struct {
 	preimages      map[common.Hash][]byte // preimageLookup -> preimageBlob
 	preimagesMutex sync.Mutex
 
+	workPackageQueue sync.Map
+
 	chunkBox            map[common.Hash][][]byte
 	loaded_services_dir string
 	block_tree          *types.BlockTree
@@ -146,6 +148,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 		workPackagesCh:       make(chan types.WorkPackage, 200),
 		workReportsCh:        make(chan types.WorkReport, 200),
 		preimages:            make(map[common.Hash][]byte),
+		workPackageQueue:     sync.Map{},
 	}
 }
 
@@ -505,6 +508,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
 		go node.StartRPCServer()
+		go node.runWPQueue()
 		// go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 		if id == 0 {
 			go node.runJamWeb(uint16(port+1000) + id)
@@ -1012,7 +1016,7 @@ func (n *Node) extendChain() error {
 					return err
 				}
 				newStateDB.GetAllKeyValues()
-
+				n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 
 				// current we always dump state transitions for every node

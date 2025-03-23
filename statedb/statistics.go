@@ -39,10 +39,10 @@ type TrueStatistics struct {
 type CoreStatistics struct {
 	DALoad              uint32 `json:"da_load"`         // d
 	NumAssurances       uint32 `json:"popularity"`      // p
-	NumImportedSegments uint32 `json:"imports"`         // i
-	NumExportedSegments uint32 `json:"exports"`         // e
+	NumImportedSegments uint16 `json:"imports"`         // i
+	NumExportedSegments uint16 `json:"exports"`         // e
 	NumBytesExtrinsics  uint32 `json:"extrinsic_size"`  // z
-	NumExtrinsics       uint32 `json:"extrinsic_count"` // x
+	NumExtrinsics       uint16 `json:"extrinsic_count"` // x
 	TotalBundleLength   uint32 `json:"bundle_size"`     // b
 	GasUsed             uint64 `json:"gas_used"`        // u
 }
@@ -53,10 +53,10 @@ type ServiceStatistics struct {
 	NumBytesPreimages        uint32 `json:"provided_size"`         //p
 	NumResults               uint32 `json:"refinement_count"`      //n
 	RefineGasUsed            uint64 `json:"refinement_gas_used"`   //u
-	NumImportedSegments      uint32 `json:"imports"`               //i
-	NumExportedSegments      uint32 `json:"exports"`               //e
+	NumImportedSegments      uint16 `json:"imports"`               //i
+	NumExportedSegments      uint16 `json:"exports"`               //e
 	NumBytesExtrinsics       uint32 `json:"extrinsic_size"`        //z
-	NumExtrinsics            uint32 `json:"extrinsic_count"`       //x
+	NumExtrinsics            uint16 `json:"extrinsic_count"`       //x
 	AccumulateNumWorkReports uint32 `json:"accumulate_count"`      //a
 	AccumulateGasUsed        uint64 `json:"accumulate_gas_used"`   //a
 	TransferNumTransfers     uint32 `json:"on_transfers_count"`    //t

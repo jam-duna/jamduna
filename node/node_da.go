@@ -281,13 +281,14 @@ func compareWorkPackages(wp1, wp2 types.WorkPackage) bool {
 }
 
 func (n *Node) GetSegmentRootLookup(wp types.WorkPackage) (segmentRootLookup types.SegmentRootLookup, err error) {
+	// TODO: check if this should actually come from n.statedb.JamState.RecentBlocks.Reported.SegmentRootLookup
 	segmentRootLookupMap := make(map[common.Hash]common.Hash)
 	segmentRootLookup = make([]types.SegmentRootLookupItem, 0)
 	for _, workItem := range wp.WorkItems {
 		for _, importedSegment := range workItem.ImportedSegments {
 			si := n.SpecSearch(importedSegment.RequestedHash)
 			if si == nil {
-				ferr := fmt.Errorf("GetSegmentRootLookup:SpecSearch NOT FOUND")
+				ferr := fmt.Errorf("GetSegmentRootLookup:SpecSearch NOT FOUND %s", importedSegment.RequestedHash)
 				log.Error(debugDA, "GetSegmentRootLookup:SpecSearch", "err", ferr)
 				return nil, ferr
 			} else {

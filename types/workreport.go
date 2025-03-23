@@ -51,6 +51,7 @@ type WorkReport struct {
 	AuthOutput        []byte                `json:"auth_output"`
 	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 	Results           []WorkResult          `json:"results"`
+	AuthGasUsed       uint64                `json:"auth_gas_used"`
 }
 
 // eq 190
@@ -119,6 +120,7 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 		AuthOutput        string                `json:"auth_output"`
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 		Results           []WorkResult          `json:"results"`
+		AuthGasUsed       uint64                `json:"auth_gas_used"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
@@ -130,6 +132,7 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 	a.AuthOutput = common.FromHex(s.AuthOutput)
 	a.SegmentRootLookup = s.SegmentRootLookup
 	a.Results = s.Results
+	a.AuthGasUsed = s.AuthGasUsed
 	return nil
 }
 
@@ -142,6 +145,7 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 		AuthOutput        string                `json:"auth_output"`
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 		Results           []WorkResult          `json:"results"`
+		AuthGasUsed       uint64                `json:"auth_gas_used"`
 	}{
 		AvailabilitySpec:  a.AvailabilitySpec,
 		RefineContext:     a.RefineContext,
@@ -150,6 +154,7 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 		AuthOutput:        common.HexString(a.AuthOutput),
 		SegmentRootLookup: a.SegmentRootLookup,
 		Results:           a.Results,
+		AuthGasUsed:       a.AuthGasUsed,
 	})
 }
 
