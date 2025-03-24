@@ -67,9 +67,12 @@ accumulate:
 		go test -timeout $(TIMEOUT) -v -run TestAccumulateSTF  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 
-stats:
+stats_codec:
 	@echo "Running 'TestCodecStatistics' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "^TestCodecStatistics$$" -tags $(NETWORK)
+stats:
+	@echo "Running 'TestStatistics' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "^TestStaticsSTFVerify$$" -tags "$(NETWORK),$(TESTING)" -network=$(NETWORK)
 
 
 test-network: safrole report valid_report assurance dispute stats auth accumulate

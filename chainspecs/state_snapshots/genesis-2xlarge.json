@@ -13835,7 +13835,7 @@
                 "metadata": "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
             }
         ],
-        "gamma_z": "0x94e12bc7c8e1128387743e888179758ce6056a355ec29e21f7881eeaa2603d6f7939c30fb476ae66ceadcfd79deaa4d0827aee26bd0a531b6f2311e37b9d15eab5a96d04f2197ce4f585a7b789bb03d0fdbfc773e1ab1016b036725c27a189a291c7ea6ca6ea24fe6c5a61ebf4e8c7c053faad1b12d999bd655418b4fbd892ac4804841e5b94345c06a45b5d22d59076",
+        "gamma_z": "0xa041276df0d41cca284831e1688124e7b01efb6d4dc994357ccf90b3839193b91083c7f3bee53c2be44b28403588f599b95d886c9b62f1b6504ecaec69af16bf5c902a7f560ec901442fb6d2c46753586fb64819d17528770c5519a232f79d7891c7ea6ca6ea24fe6c5a61ebf4e8c7c053faad1b12d999bd655418b4fbd892ac4804841e5b94345c06a45b5d22d59076",
         "gamma_s": {
             "keys": [
                 "0x9a12212d40415c3eb771fdaeea18f6106c599524bba5ff6bdae5001007af7ee9",
@@ -20454,7 +20454,7 @@
         "chi_g": null
     },
     "pi": {
-        "current": [
+        "vals_current": [
             {
                 "blocks": 0,
                 "tickets": 0,
@@ -23528,7 +23528,7 @@
                 "assurances": 0
             }
         ],
-        "last": [
+        "vals_last": [
             {
                 "blocks": 0,
                 "tickets": 0,
@@ -26602,1289 +26602,1289 @@
                 "assurances": 0
             }
         ],
-        "core_statistics": [
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
+        "cores": [
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
-            },
-            {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
+            },
+            {
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             }
         ],
-        "service_statistics": null
+        "services": null
     },
     "theta": [
         [],

@@ -140,7 +140,7 @@ func (original *JamState) Copy() *JamState {
 		SafroleStateGamma:        original.SafroleStateGamma,
 		DisputesState:            original.DisputesState,
 		PrivilegedServiceIndices: original.PrivilegedServiceIndices,
-		ValidatorStatistics:      original.ValidatorStatistics,
+		ValidatorStatistics:      *original.ValidatorStatistics.Copy(),
 		SafroleState:             original.SafroleState.Copy(),
 		//AvailabilityAssignments:  make([types.TotalCores]*Rho_state),
 		AuthorizationQueue:  original.AuthorizationQueue,

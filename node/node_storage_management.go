@@ -541,8 +541,7 @@ func (si *SpecIndex) AddIndex(idx uint16) bool {
 func (n *Node) SpecSearch(h common.Hash) (si *SpecIndex) {
 
 	// scan through recentblocks
-	
-	
+
 	specBytes, ok, err := n.ReadRawKV([]byte(generateSpecKey(h)))
 	if err != nil || !ok {
 		log.Error(debugDA, "ErasureRootLookUP", "err", err, "state", n.statedb.JamState.RecentBlocks)

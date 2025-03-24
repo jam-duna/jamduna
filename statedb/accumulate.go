@@ -535,7 +535,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {
 		exceptional = true
 		output_b = vm.Y.Y
-		output_u = uint64(vm.Gas)
+		output_u = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
 		if sd.Authoring {
 			if r.Err == types.RESULT_OOG {
@@ -547,7 +547,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		return
 	}
 	xy = vm.X
-	output_u = uint64(vm.Gas)
+	output_u = g - uint64(max(vm.Gas, 0))
 	res := ""
 	if len(r.Ok) == 32 {
 		output_b = common.BytesToHash(r.Ok)

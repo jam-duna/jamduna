@@ -237,6 +237,8 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	// write state to the jam state
 	services, codes := db.JamState.GetStateFromAccumulateState(TestCase.PreState)
 	// post_services, post_codes := post_state.GetStateFromAccumulateState(TestCase.PostState)
+	s := db
+	o := s.JamState.newPartialState()
 	post_state.GetStateFromAccumulateState(TestCase.PostState)
 	for key, service := range services {
 		// write the service to the db
@@ -248,10 +250,8 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		db.WriteServicePreimageBlob(key, codes[key])
 	}
 	var f map[uint32]uint32
-	s := db
 	s.JamState.SafroleState.Timeslot = TestCase.Input.Slot
 	var g uint64 = 1000000000000000000
-	o := s.JamState.newPartialState()
 	old_timeslot := TestCase.PreState.Slot
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports
@@ -346,12 +346,16 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	state := NewJamState()
 	post_state := NewJamState()
 	db.JamState = state
+	s := db
+	o := s.JamState.newPartialState()
 	// write state to the jam state
+	//fmt.Printf("TestAccumulateSTF %s\n", testname)
 	services, codes := db.JamState.GetStateFromAccumulateState(TestCase.PreState)
 	// post_services, post_codes := post_state.GetStateFromAccumulateState(TestCase.PostState)
 	post_state.GetStateFromAccumulateState(TestCase.PostState)
 	for key, service := range services {
 		// write the service to the db
+		o.D[key] = service
 		err := db.writeAccount(service)
 		if err != nil {
 			return fmt.Errorf("Reports FAIL: failed to write account: %v", err)
@@ -360,10 +364,8 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 		db.WriteServicePreimageBlob(key, codes[key])
 	}
 	var f map[uint32]uint32
-	s := db
 	s.JamState.SafroleState.Timeslot = TestCase.Input.Slot
 	var g uint64 = 1000000000000000000
-	o := s.JamState.newPartialState()
 	old_timeslot := TestCase.PreState.Slot
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports

@@ -51,7 +51,7 @@ type WorkReport struct {
 	AuthOutput        []byte                `json:"auth_output"`
 	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 	Results           []WorkResult          `json:"results"`
-	AuthGasUsed       uint64                `json:"auth_gas_used"`
+	AuthGasUsed       uint                  `json:"auth_gas_used"`
 }
 
 // eq 190
@@ -120,7 +120,7 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 		AuthOutput        string                `json:"auth_output"`
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 		Results           []WorkResult          `json:"results"`
-		AuthGasUsed       uint64                `json:"auth_gas_used"`
+		AuthGasUsed       uint                  `json:"auth_gas_used"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
@@ -145,7 +145,7 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 		AuthOutput        string                `json:"auth_output"`
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
 		Results           []WorkResult          `json:"results"`
-		AuthGasUsed       uint64                `json:"auth_gas_used"`
+		AuthGasUsed       uint                  `json:"auth_gas_used"`
 	}{
 		AvailabilitySpec:  a.AvailabilitySpec,
 		RefineContext:     a.RefineContext,

@@ -289,17 +289,17 @@ func TestReportValidReportCase(t *testing.T) {
 		message  string
 	}{
 		{fmt.Sprintf("%s/report_curr_rotation-1.json", network_args), nil, "Report uses current guarantors rotation."},
-		// {fmt.Sprintf("%s/report_prev_rotation-1.json", network_args), nil, "Report uses previous guarantors rotation. Previous rotation falls within previous epoch, thus previous epoch validators set is used to construct report core assignment to pick expected guarantors."},
-		// {fmt.Sprintf("%s/multiple_reports-1.json", network_args), nil, "Multiple good work reports."},
-		// {fmt.Sprintf("%s/high_work_report_gas-1.json", network_args), nil, "Work report per core gas is very high, still less than the limit."},
-		// {fmt.Sprintf("%s/many_dependencies-1.json", network_args), nil, "Work report has many dependencies, still less than the limit."},
-		// {fmt.Sprintf("%s/reports_with_dependencies-1.json", network_args), nil, "Simple report dependency satisfied by another work report in the same extrinsic."},
-		// {fmt.Sprintf("%s/reports_with_dependencies-2.json", network_args), nil, "Work reports mutual dependency (indirect self-referential dependencies)."},
-		// {fmt.Sprintf("%s/reports_with_dependencies-3.json", network_args), nil, "Work report direct self-referential dependency."},
-		// {fmt.Sprintf("%s/reports_with_dependencies-4.json", network_args), nil, "Work report dependency satisfied by recent blocks history."},
-		// {fmt.Sprintf("%s/reports_with_dependencies-5.json", network_args), nil, "Work report segments tree root lookup dependency satisfied by another work report in the same extrinsic."},
-		// {fmt.Sprintf("%s/reports_with_dependencies-6.json", network_args), nil, "Work report segments tree root lookup dependency satisfied by recent blocks history."},
-		// {fmt.Sprintf("%s/big_work_report_output-1.json", network_args), nil, "Work report output is very big, still less than the limit."},
+		{fmt.Sprintf("%s/report_prev_rotation-1.json", network_args), nil, "Report uses previous guarantors rotation. Previous rotation falls within previous epoch, thus previous epoch validators set is used to construct report core assignment to pick expected guarantors."},
+		{fmt.Sprintf("%s/multiple_reports-1.json", network_args), nil, "Multiple good work reports."},
+		{fmt.Sprintf("%s/high_work_report_gas-1.json", network_args), nil, "Work report per core gas is very high, still less than the limit."},
+		{fmt.Sprintf("%s/many_dependencies-1.json", network_args), nil, "Work report has many dependencies, still less than the limit."},
+		{fmt.Sprintf("%s/reports_with_dependencies-1.json", network_args), nil, "Simple report dependency satisfied by another work report in the same extrinsic."},
+		{fmt.Sprintf("%s/reports_with_dependencies-2.json", network_args), nil, "Work reports mutual dependency (indirect self-referential dependencies)."},
+		{fmt.Sprintf("%s/reports_with_dependencies-3.json", network_args), nil, "Work report direct self-referential dependency."},
+		{fmt.Sprintf("%s/reports_with_dependencies-4.json", network_args), nil, "Work report dependency satisfied by recent blocks history."},
+		{fmt.Sprintf("%s/reports_with_dependencies-5.json", network_args), nil, "Work report segments tree root lookup dependency satisfied by another work report in the same extrinsic."},
+		{fmt.Sprintf("%s/reports_with_dependencies-6.json", network_args), nil, "Work report segments tree root lookup dependency satisfied by recent blocks history."},
+		{fmt.Sprintf("%s/big_work_report_output-1.json", network_args), nil, "Work report output is very big, still less than the limit."},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {

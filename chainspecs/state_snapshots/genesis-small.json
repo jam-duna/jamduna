@@ -815,7 +815,7 @@
                 "metadata": "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
             }
         ],
-        "gamma_z": "0xa610e04fbf9ffcd0bda0d9d1bfcda07e1fee8a19d6eecfd23c94a5ee4b267991dcfe216daee4f321070f8b040c821c15b23cfb22c9e2895c1057d737a0b9b09799e3ec841c8dd8c05a7b77fcba6aeec2669f2818a999c72b77c0a80f1a006fde92e630ae2b14e758ab0960e372172203f4c9a41777dadd529971d7ab9d23ab29fe0e9c85ec450505dde7f5ac038274cf",
+        "gamma_z": "0xb126bd090188177cca16314ecb1d101dfa2fd2a0f58d314b6228f5448d1873e67c420f25a8ea20047cba1c15ef5a6f148ddfa9cb9efb2b22b3659a18532a0c6b2ef6223b967bfb4b995da45c711a518fac89b090183d8631a60b815ab5f2dbc892e630ae2b14e758ab0960e372172203f4c9a41777dadd529971d7ab9d23ab29fe0e9c85ec450505dde7f5ac038274cf",
         "gamma_s": {
             "keys": [
                 "0x3d5e5a51aab2b048f8686ecd79712a80e3265a114cc73f14bdb2a59233fb66d0",
@@ -1086,7 +1086,7 @@
         "chi_g": null
     },
     "pi": {
-        "current": [
+        "vals_current": [
             {
                 "blocks": 0,
                 "tickets": 0,
@@ -1280,7 +1280,7 @@
                 "assurances": 0
             }
         ],
-        "last": [
+        "vals_last": [
             {
                 "blocks": 0,
                 "tickets": 0,
@@ -1474,89 +1474,89 @@
                 "assurances": 0
             }
         ],
-        "core_statistics": [
+        "cores": [
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             },
             {
-                "throughput": 0,
-                "num_assurances": 0,
-                "num_imported_segments": 0,
-                "num_exported_segments": 0,
-                "num_bytes_extrinsics": 0,
-                "num_extrinsics": 0,
-                "total_bundle_length": 0,
-                "gas_used": 0
+                "gas_used": 0,
+                "imports": 0,
+                "extrinsic_count": 0,
+                "extrinsic_size": 0,
+                "exports": 0,
+                "bundle_size": 0,
+                "da_load": 0,
+                "popularity": 0
             }
         ],
-        "service_statistics": null
+        "services": null
     },
     "theta": [
         [],

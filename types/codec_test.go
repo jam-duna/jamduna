@@ -22,18 +22,18 @@ func TestCodec(t *testing.T) {
 		binFile      string
 		expectedType interface{}
 	}{
-		// {"assurances_extrinsic.json", "assurances_extrinsic.bin", []Assurance{}},
-		// {"block.json", "block.bin", Block{}},
-		// {"disputes_extrinsic.json", "disputes_extrinsic.bin", Dispute{}},
-		// {"extrinsic.json", "extrinsic.bin", ExtrinsicData{}},
-		// {"guarantees_extrinsic.json", "guarantees_extrinsic.bin", []Guarantee{}},
-		// {"header_0.json", "header_0.bin", BlockHeader{}},
-		// {"header_1.json", "header_1.bin", BlockHeader{}},
-		// {"preimages_extrinsic.json", "preimages_extrinsic.bin", []Preimages{}},
-		// {"refine_context.json", "refine_context.bin", RefineContext{}},
-		// {"tickets_extrinsic.json", "tickets_extrinsic.bin", []Ticket{}},
-		// {"work_item.json", "work_item.bin", WorkItem{}},
-		// {"work_package.json", "work_package.bin", WorkPackage{}},
+		{"assurances_extrinsic.json", "assurances_extrinsic.bin", []Assurance{}},
+		{"block.json", "block.bin", Block{}},
+		{"disputes_extrinsic.json", "disputes_extrinsic.bin", Dispute{}},
+		{"extrinsic.json", "extrinsic.bin", ExtrinsicData{}},
+		{"guarantees_extrinsic.json", "guarantees_extrinsic.bin", []Guarantee{}},
+		{"header_0.json", "header_0.bin", BlockHeader{}},
+		{"header_1.json", "header_1.bin", BlockHeader{}},
+		{"preimages_extrinsic.json", "preimages_extrinsic.bin", []Preimages{}},
+		{"refine_context.json", "refine_context.bin", RefineContext{}},
+		{"tickets_extrinsic.json", "tickets_extrinsic.bin", []Ticket{}},
+		{"work_item.json", "work_item.bin", WorkItem{}},
+		{"work_package.json", "work_package.bin", WorkPackage{}},
 		{"work_report.json", "work_report.bin", WorkReport{}},
 		{"work_result_0.json", "work_result_0.bin", WorkResult{}},
 		{"work_result_1.json", "work_result_1.bin", WorkResult{}},
@@ -49,72 +49,61 @@ func TestCodec(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to read codec file: %v", err)
 			}
-			codecDecodedStruct, _, err := Decode(expectedCodec, reflect.TypeOf(tc.expectedType))
-			if err != nil {
-				t.Errorf("Case %s: failed to decode codec data: %v (encode, decode)", testcase_name, err)
-			}
 			// Read JSON file
 			expectedJson, err := os.ReadFile(jsonPath)
 			if err != nil {
 				t.Fatalf("failed to read JSON file: %v", err)
 			}
 
-			jsonDecodedStruct := reflect.New(reflect.TypeOf(tc.expectedType)).Interface()
-
-			err = json.Unmarshal(expectedJson, &jsonDecodedStruct)
+			jsonDecodedStructPtr := reflect.New(reflect.TypeOf(tc.expectedType)).Interface()
+			err = json.Unmarshal(expectedJson, jsonDecodedStructPtr)
 			if err != nil {
 				t.Fatalf("failed to unmarshal JSON data: %v", err)
 			}
-			// Getting Codec Result
-			codec_via_json_source, err := Encode(jsonDecodedStruct)
-			if err != nil {
-				t.Fatalf("%s failed to encode codec data: %v (json->struct->codec)", testcase_name, err)
-			}
-			codec_via_codec_source, err := Encode(codecDecodedStruct)
-			if err != nil {
-				t.Fatalf("%s failed to encode codec data: %v(codec->struct->codec)", testcase_name, err)
-			}
-			// Getting JSON Result
-			json_via_codec_source, err := json.MarshalIndent(codecDecodedStruct, "", "  ")
+			jsonDecodedStruct := reflect.ValueOf(jsonDecodedStructPtr).Elem().Interface()
+
+			// Compare json to struct to json back is the same
+			// encode the jsonDecodedStruct to json again and compare
+			test_1 := false // make sure the structure reading from json is correct=> json decode truth
+			test_2 := false // make sure the structure reading from codec is correct=> encode truth
+			test_3 := false // make sure the structure reading from codec is correct=> use json decode truth to make sure
+
+			jsonEncoded, err := json.Marshal(jsonDecodedStruct)
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
-			json_via_json_source, err := json.MarshalIndent(jsonDecodedStruct, "", "  ")
+			test_1 = assert.JSONEq(t, string(expectedJson), string(jsonEncoded))
+			if !test_1 {
+				t.Errorf("Case %s: JSON data not equal", testcase_name)
+			}
+			// compare the json struct to codec encoded bytes
+			codecEncoded, err := Encode(jsonDecodedStruct)
+			if err != nil {
+				t.Fatalf("failed to encode JSON data: %v", err)
+			}
+			test_2 = assert.Equal(t, expectedCodec, codecEncoded)
+			if !test_2 {
+				t.Errorf("Case %s: Codec data not equal :\n Encoded=\n%x", testcase_name, codecEncoded)
+			}
+			codecDecodedStruct, _, err := Decode(expectedCodec, reflect.TypeOf(tc.expectedType))
+			if err != nil {
+				t.Errorf("Case %s: failed to decode codec data: %v (encode, decode)", testcase_name, err)
+			}
+			// use codecDecodedStrust to json to compare with jsonDecodedStruct
+			codecDecodedJson, err := json.Marshal(codecDecodedStruct)
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
-
-			// let's E2E work on every direction
-
-			// Test 0: codec(codecDecodedStruct) = self
-			assert.Equal(t, expectedCodec, codec_via_codec_source, "codec -> struct -> codec Failure")
-
-			// Test 1: json(jsonDecodedStrcut) = self
-			assert.JSONEq(t, string(expectedJson), string(json_via_codec_source), "json -> struct -> json Failure")
-
-			// Test 2: codec(codecDecodedStruct) = codec(jsonDecodedStrcut)
-			assert.Equal(t, codec_via_json_source, codec_via_codec_source, "json -> struct -> codec Failure")
-
-			// Test 3: JSON(codecDecodedStruct) = JSON(jsonDecodedStrcut)
-			assert.JSONEq(t, string(json_via_codec_source), string(json_via_json_source), "json -> struct -> codec Failure")
-
-			if reflect.DeepEqual(tc.expectedType, Block{}) {
-				var block Block
-				err = json.Unmarshal(expectedJson, &block)
-				if err != nil {
-					fmt.Println("Error unmarshalling JSON:", err)
-					return
-				}
-
-				assert.Equal(t, block.Header.ExtrinsicHash.String(), block.Extrinsic.Hash().String(), "Block.Extrinsic.Hash() is wrong")
+			test_3 = assert.JSONEq(t, string(expectedJson), string(codecDecodedJson))
+			if !test_3 {
+				t.Errorf("Case %s: JSON data not equal (encode, decode)", testcase_name)
 			}
-
-			// Test 4: codecDecodedStruct = jsonDecodedStrcut
-			// if reflect.DeepEqual(&codecDecodedStruct, &jsonDecodedStrcut) {
-			// 	fmt.Println("The structs are equal")
-			// } else {
-			// 	t.Fatalf("codecDecodedStruct <> jsonDecodedStrcut mismatch!")
-			// }
+			if test_1 && test_2 && test_3 {
+				fmt.Printf("\033[32m Passed Case %s:\033[0m\n", testcase_name)
+			} else {
+				fmt.Printf("\033[31mCase %s: Failed\033[0m\n", testcase_name)
+				fmt.Printf("Expected JSON: %s\n", string(expectedJson))
+			}
 		})
 	}
 }
@@ -135,6 +124,11 @@ func TestMapMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func JsonPrint(v interface{}) {
+	b, _ := json.MarshalIndent(v, "", "  ")
+	fmt.Println(string(b))
 }
 
 func TestAccumulateHistoryJson(t *testing.T) {

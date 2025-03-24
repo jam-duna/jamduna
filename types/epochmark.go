@@ -17,8 +17,8 @@ type EpochMark struct {
 }
 
 type ValidatorKeyTuple struct {
-	BandersnatchKey common.Hash `json:"bandersnatch_key"`
-	Ed25519Key      common.Hash `json:"ed25519_key"`
+	BandersnatchKey common.Hash `json:"bandersnatch"`
+	Ed25519Key      common.Hash `json:"ed25519"`
 }
 
 func (e EpochMark) String() string {

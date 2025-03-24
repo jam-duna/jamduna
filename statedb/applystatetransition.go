@@ -135,7 +135,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 
 	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
-	accumulateStats := make(map[uint32]accumulateStatistics)
+	accumulateStats := make(map[uint32]*accumulateStatistics)
 	transferStats := make(map[uint32]*transferStatistics)
 	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
 	// (χ′, δ†, ι′, φ′)
@@ -156,23 +156,28 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	for _, report := range accumulated_workreports {
 		for _, result := range report.Results {
 			service := result.ServiceID
-			stats := accumulateStats[service]
+			stats, ok := accumulateStats[service]
+			if !ok {
+				stats = &accumulateStatistics{}
+			}
 			stats.numWorkReports++
-			accumulateStats[service] = stats
+			if stats.numWorkReports > 0 {
+				accumulateStats[service] = stats
+			} else {
+				continue
+			}
 		}
 	}
 
 	for _, gasusage := range U {
 		service := gasusage.Service
-		stats := accumulateStats[service]
-		stats.gasUsed += gasusage.Gas
-		accumulateStats[service] = stats
-		if accumulateStats[service].numWorkReports == 0 {
-			//delete the service from the map
-			delete(accumulateStats, service)
+		stats, ok := accumulateStats[service]
+		if !ok {
+			stats = &accumulateStatistics{}
 		}
+		stats.gasUsed += uint(gasusage.Gas)
+		accumulateStats[service] = stats
 	}
-
 	// transfer statistics
 	for _, transfer := range t {
 		service := transfer.ReceiverIndex

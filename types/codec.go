@@ -215,7 +215,7 @@ func Encode(data interface{}) ([]byte, error) {
 		for i := 0; i < v.NumField(); i++ {
 			encodedVi, err := Encode(v.Field(i).Interface())
 			if err != nil {
-				field := v.Type().Field(i)
+				field := v.Type().Field(i) //good to debug
 				tag := field.Tag.Get("json")
 				name := field.Name
 				typeName := field.Type.Name()

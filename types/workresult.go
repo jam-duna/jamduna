@@ -33,19 +33,19 @@ type WorkResult struct {
 	Gas         uint64      `json:"accumulate_gas"`
 	Result      Result      `json:"result"`
 	// NEW in 0.6.4 -- see C.23 which specifies ordering of { u, i, x, z, e }
-	GasUsed             uint64 `json:"gas_used"`        // u
-	NumImportedSegments uint16 `json:"imports"`         // i
-	NumExtrinsics       uint16 `json:"extrinsic_count"` // x
-	NumBytesExtrinsics  uint32 `json:"extrinsic_size"`  // z
-	NumExportedSegments uint16 `json:"exports"`         // e
+	GasUsed             uint `json:"gas_used"`        // u
+	NumImportedSegments uint `json:"imports"`         // i
+	NumExtrinsics       uint `json:"extrinsic_count"` // x
+	NumBytesExtrinsics  uint `json:"extrinsic_size"`  // z
+	NumExportedSegments uint `json:"exports"`         // e
 }
 
 type RefineLoad struct {
-	GasUsed             uint64 `json:"gas_used"`        // u
-	NumImportedSegments uint16 `json:"imports"`         // i
-	NumExtrinsics       uint16 `json:"extrinsic_count"` // x
-	NumBytesExtrinsics  uint32 `json:"extrinsic_size"`  // z
-	NumExportedSegments uint16 `json:"exports"`         // e
+	GasUsed             uint `json:"gas_used"`        // u
+	NumImportedSegments uint `json:"imports"`         // i
+	NumExtrinsics       uint `json:"extrinsic_count"` // x
+	NumBytesExtrinsics  uint `json:"extrinsic_size"`  // z
+	NumExportedSegments uint `json:"exports"`         // e
 }
 
 type Result struct {

@@ -5,7 +5,6 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 
 	"encoding/json"
@@ -599,11 +598,16 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
 			return common.BytesToHash(ticket_id), nil
+		} else {
+			// fmt.Printf("ERR %v\n", err)
+			// fmt.Printf("target_epoch_randomness: %v\n", targetEpochRandomness)
+			// fmt.Printf("attempt: %d\n", t.Attempt)
+			// fmt.Printf("ticket_signature: %x\n", t.Signature)
 		}
 	}
 
 	ticketID, _ := t.TicketID()
-	log.Debug(module, "ValidateProposed Ticket Fail", "ticketID", ticketID)
+	fmt.Printf("Failed to validate ticket %s\n", ticketID.String())
 	return common.Hash{}, jamerrors.ErrTBadRingProof
 }
 

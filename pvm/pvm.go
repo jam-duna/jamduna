@@ -1532,9 +1532,6 @@ func (vm *VM) step(stepn int) error {
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
-	case SBRK:
-		vm.sbrk(operands)
-		break
 	// New opcodes
 	case LOAD_IMM_64:
 		vm.Instructions_with_Arguments_of_One_Register_and_One_Extended_Width_Immediate(opcode, operands)
@@ -1546,7 +1543,7 @@ func (vm *VM) step(stepn int) error {
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
-	case COUNT_SET_BITS_64, COUNT_SET_BITS_32, LEADING_ZERO_BITS_64, LEADING_ZERO_BITS_32, TRAILING_ZERO_BITS_64, TRAILING_ZERO_BITS_32, SIGN_EXTEND_8, SIGN_EXTEND_16, ZERO_EXTEND_16, REVERSE_BYTES:
+	case COUNT_SET_BITS_64, COUNT_SET_BITS_32, LEADING_ZERO_BITS_64, LEADING_ZERO_BITS_32, TRAILING_ZERO_BITS_64, TRAILING_ZERO_BITS_32, SIGN_EXTEND_8, SIGN_EXTEND_16, ZERO_EXTEND_16, REVERSE_BYTES, SBRK:
 		vm.Instructions_with_Arguments_of_Two_Register(opcode, operands)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
@@ -1987,16 +1984,8 @@ func (vm *VM) moveReg(operands []byte) {
 	vm.WriteRegister(registerIndexD, valueA)
 }
 
-func (vm *VM) sbrk(operands []byte) error {
-	// TODO
-	fmt.Printf("sbrk not implemented -- operands %v", operands)
-	/*	srcIndex, destIndex := splitRegister(operands[0])
-
-		amount := int(operands[0])
-		newRAM := make([]byte, len(vm.ram)+amount)
-		copy(newRAM, vm.ram)
-		vm.ram = newRAM */
-	return nil
+func (vm *VM) sbrk(valueA uint64) uint64 {
+	return 0
 }
 
 func (vm *VM) branch(vx uint64, condition bool) {
@@ -2850,6 +2839,9 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Register(opcode byte, operands 
 
 	var result uint64
 	switch opcode {
+	case SBRK:
+		result = vm.sbrk(valueA)
+		
 	case COUNT_SET_BITS_64:
 		b_valueA := B_encode(valueA)
 		count := strings.Count(b_valueA, "1")

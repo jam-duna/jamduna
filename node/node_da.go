@@ -438,12 +438,21 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 				segments = append(segments, segment)
 			}
 		}
+		z := 0
+		for _, extrinsic := range workItem.Extrinsics {
+			z += int(extrinsic.Len)
+		}
 		result := types.WorkResult{
-			ServiceID:   workItem.Service,
-			CodeHash:    workItem.CodeHash,
-			PayloadHash: common.Blake2Hash(workItem.Payload),
-			Gas:         workItem.AccumulateGasLimit, // put a
-			Result:      output,
+			ServiceID:           workItem.Service,
+			CodeHash:            workItem.CodeHash,
+			PayloadHash:         common.Blake2Hash(workItem.Payload),
+			Gas:                 workItem.AccumulateGasLimit, // put a
+			Result:              output,
+			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
+			NumImportedSegments: uint(len(workItem.ImportedSegments)),
+			NumExportedSegments: uint(workItem.ExportCount),
+			NumExtrinsics:       uint(len(package_bundle.ExtrinsicData)),
+			NumBytesExtrinsics:  uint(z),
 		}
 		results = append(results, result)
 

@@ -1,7 +1,11 @@
-use ark_ec_vrfs::suites::bandersnatch::edwards as bandersnatch;
-use ark_ec_vrfs::{prelude::ark_serialize, suites::bandersnatch::edwards::RingContext};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use bandersnatch::{IetfProof, Input, Output, Public, RingProof, Secret};
+use ark_ec_vrfs::reexports::{
+    ark_serialize::{self, CanonicalDeserialize, CanonicalSerialize},
+};
+use ark_ec_vrfs::{suites::bandersnatch};
+use bandersnatch::{
+    IetfProof, Input, Output, Public, RingProof,
+    RingProofParams, Secret,
+};
 
 #[cfg(feature = "tiny")]
 const RING_SIZE: usize = 6;
@@ -36,10 +40,10 @@ struct RingVrfSignature {
 }
 
 // "Static" ring context data
-fn ring_context() -> &'static RingContext {
+fn ring_proof_params() -> &'static RingProofParams {
     use std::sync::OnceLock;
-    static RING_CTX: OnceLock<RingContext> = OnceLock::new();
-    RING_CTX.get_or_init(|| {
+    static PARAMS: OnceLock<RingProofParams> = OnceLock::new();
+    PARAMS.get_or_init(|| {
         use bandersnatch::PcsParams;
         use std::{fs::File, io::Read};
         let manifest_dir =
@@ -50,7 +54,7 @@ fn ring_context() -> &'static RingContext {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).unwrap();
         let pcs_params = PcsParams::deserialize_uncompressed_unchecked(&mut &buf[..]).unwrap();
-        RingContext::from_srs(RING_SIZE, pcs_params).unwrap()
+        RingProofParams::from_pcs_params(RING_SIZE, pcs_params).unwrap()
     })
 }
 
@@ -102,9 +106,9 @@ impl Prover {
         let pts: Vec<_> = self.ring.iter().map(|pk| pk.0).collect();
 
         // Proof construction
-        let ring_ctx = ring_context();
-        let prover_key = ring_ctx.prover_key(&pts);
-        let prover = ring_ctx.prover(prover_key, self.prover_idx); //MK: this is using specific prover. Uestion: can we pass in ANY prover (e.g hardcoding prover0)
+        let params = ring_proof_params();
+        let prover_key = params.prover_key(&pts);
+        let prover = params.prover(prover_key, self.prover_idx); //MK: this is using specific prover. Uestion: can we pass in ANY prover (e.g hardcoding prover0)
         let proof = self.secret.prove(input, output, aux_data, &prover);
 
         // Output and Ring Proof bundled together (as per section 2.2)
@@ -141,7 +145,7 @@ struct Verifier {
 impl Verifier {
     fn new(ring: Vec<Public>) -> Self {
         let pts: Vec<_> = ring.iter().map(|pk| pk.0).collect();
-        let verifier_key = ring_context().verifier_key(&pts);
+        let verifier_key = ring_proof_params().verifier_key(&pts);
         let commitment = verifier_key.commitment();
 
         Self { ring, commitment }
@@ -173,9 +177,9 @@ impl Verifier {
         };
         let output = signature.output;
 
-        let ring_ctx = ring_context();
-        let verifier_key = ring_ctx.verifier_key(&self.ring.iter().map(|pk| pk.0).collect::<Vec<_>>());
-        let verifier = ring_ctx.verifier(verifier_key);
+        let params = ring_proof_params();
+        let verifier_key = params.verifier_key(&self.ring.iter().map(|pk| pk.0).collect::<Vec<_>>());
+        let verifier = params.verifier(verifier_key);
 
         if Public::verify(input, output, aux_data, &signature.proof, &verifier).is_err() {
             return Err(());
@@ -541,8 +545,8 @@ pub extern "C" fn ring_vrf_sign(
     // Deserialize the ring set from the provided bytes
     let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
     let mut ring_set: Vec<Public> = Vec::new();
-    let ring_ctx = ring_context();
-    let padding_point = Public::from(ring_ctx.padding_point());
+    let _params = ring_proof_params();
+    let  padding_point = Public::from(RingProofParams::padding_point());
     for i in 0..(ring_set_len / 32) {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
@@ -744,8 +748,8 @@ pub extern "C" fn get_ring_commitment(
     // Deserialize the ring set from the provided bytes
     let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
     let mut ring_set: Vec<Public> = Vec::new();
-    let ring_ctx = ring_context();
-    let padding_point = Public::from(ring_ctx.padding_point());
+    let _params = ring_proof_params();
+    let  padding_point = Public::from(RingProofParams::padding_point());
     for i in 0..(ring_set_len / 32) {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
@@ -806,7 +810,7 @@ pub extern "C" fn ring_vrf_verify(
     ); */
 
     // Convert input pointers to slices
-    let pubkeys_slice = unsafe { slice::from_raw_parts(pubkeys_bytes, pubkeys_length) };
+    let _pubkeys_slice = unsafe { slice::from_raw_parts(pubkeys_bytes, pubkeys_length) };
     let signature_slice = unsafe { slice::from_raw_parts(signature_bytes, signature_hex_len) };
     let vrf_input_data_slice =
         unsafe { slice::from_raw_parts(vrf_input_data_bytes, vrf_input_data_len) };
@@ -827,8 +831,8 @@ pub extern "C" fn ring_vrf_verify(
     */
     // Assuming each pubkey is 32 bytes, split the pubkeys slice into individual pubkeys
     let mut ring_set: Vec<Public> = Vec::new();
-    let ring_ctx = ring_context();
-    let padding_point = Public::from(ring_ctx.padding_point());
+    let _params = ring_proof_params();
+    let  padding_point = Public::from(RingProofParams::padding_point());
     let pubkeys_slice = unsafe { slice::from_raw_parts(pubkeys_bytes, pubkeys_length) };
     for i in 0..(pubkeys_length / 32) {
         let pubkey_bytes = &pubkeys_slice[i * 32..(i + 1) * 32];

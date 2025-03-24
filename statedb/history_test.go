@@ -11,7 +11,7 @@ import (
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 
-	"reflect"
+	//"reflect"
 )
 
 // Input struct definition
@@ -103,6 +103,7 @@ func TestRecentHistory(t *testing.T) {
 				e := expectedh.RecentBlocks[i].String()
 				p := posth.RecentBlocks[i].String()
 				if e == p {
+					fmt.Printf("Test %d %s PASS\n", i, jsonFile)
 				} else {
 					fmt.Printf("Test %d: element %d/%d expected %s got: %s\n", testnum, i, len(posth.RecentBlocks), e, p)
 				}
@@ -112,41 +113,4 @@ func TestRecentHistory(t *testing.T) {
 		})
 	}
 }
-func TestRecentHistoryWithMMR(t *testing.T) {
-	testCases := []struct {
-		jsonFile     string
-		binFile      string
-		expectedType interface{}
-	}{
-		{"progress_blocks_history-1.json", "progress_blocks_history-1.bin", &HistoryData{}},
-		{"progress_blocks_history-2.json", "progress_blocks_history-2.bin", &HistoryData{}},
-		{"progress_blocks_history-3.json", "progress_blocks_history-3.bin", &HistoryData{}},
-		{"progress_blocks_history-4.json", "progress_blocks_history-4.bin", &HistoryData{}},
-	}
-	mmr := trie.NewMMR()
-	for _, tc := range testCases {
 
-		t.Run(tc.jsonFile, func(t *testing.T) {
-
-			jsonPath := filepath.Join("../jamtestvectors/history/data", tc.jsonFile)
-
-			targetedStructType := reflect.TypeOf(tc.expectedType)
-
-			fmt.Printf("\n\n\nTesting %v\n", targetedStructType)
-			// Read and unmarshal JSON file
-			jsonData, err := os.ReadFile(jsonPath)
-			if err != nil {
-				t.Fatalf("failed to read JSON file: %v", err)
-			}
-
-			var data HistoryData
-			err = json.Unmarshal(jsonData, &data)
-
-			//mmr.PrintTree()
-			fmt.Printf("data.Input.AccumulateRoot[:] %x\n", data.Input.AccumulateRoot[:])
-			mmr.Append(&data.Input.AccumulateRoot)
-
-			//mmr.PrintTree()
-		})
-	}
-}

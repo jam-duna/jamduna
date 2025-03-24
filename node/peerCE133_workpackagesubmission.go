@@ -133,7 +133,7 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		coreIndex:  newReq.CoreIndex,
 		extrinsics: newReq.Extrinsic,
 		addTS:      time.Now().Unix(),
-		
+
 		nextAttemptAfterTS: time.Now().Unix(),
 	}
 	n.workPackageQueue.Store(newItem.wp.Hash(), newItem)
