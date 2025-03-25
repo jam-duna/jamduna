@@ -64,6 +64,9 @@ func DisableModule(module string) {
 
 // isModuleEnabled checks if logging is enabled for the given module.
 func isModuleEnabled(module string) bool {
+	//if module == "pvm_authoring" {
+	//	return true
+	//}
 	enabled, ok := moduleEnabled[module]
 	return ok && enabled
 }

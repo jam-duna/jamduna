@@ -1349,7 +1349,7 @@ func (vm *VM) hostExport() {
 			"segmenthash", fmt.Sprintf("%v", common.Blake2Hash(x)),
 			"segment20", fmt.Sprintf("%x", x[0:20]),
 			"len", fmt.Sprintf("%d", len(x)))
-		vm.ExportSegmentIndex += 1
+		// vm.ExportSegmentIndex += 1
 		vm.Exports = append(vm.Exports, x)
 		vm.HostResultCode = OK
 		return
@@ -1594,11 +1594,15 @@ func (vm *VM) hostLog() {
 	case 2:
 		if vm.firstGuarantor == log.FirstGuarantor {
 			log.Info(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+		} else if vm.logging == log.PvmAuthoring {
+			log.Info(vm.logging, levelName, "msg", string(messageBytes))
 		}
 		break
 	case 3:
 		if vm.firstGuarantor == log.FirstGuarantor {
 			log.Error(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+		} else if vm.logging == log.PvmAuthoring {
+			log.Error(vm.logging, levelName, "msg", string(messageBytes))
 		}
 		break
 	case 4:
