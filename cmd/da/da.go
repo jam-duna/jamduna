@@ -221,9 +221,7 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 func SetLevelDBPaths(numNodes int) []string {
 	node_paths := make([]string, numNodes)
 	// timeslot mark
-	// currJCE := common.ComputeCurrentJCETime()
-	currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
-	currTS := currJCE * types.SecondsPerSlot
+	currTS := common.ComputeCurrentTS()
 	for i := 0; i < numNodes; i++ {
 		node_idx := fmt.Sprintf("%d", i)
 		node_path, err := computeLevelDBPath(node_idx, int(currTS))

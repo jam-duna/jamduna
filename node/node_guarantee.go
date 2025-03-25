@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -146,6 +147,10 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 			SegmentRoot:     segmentRootHash,
 		})
 	}
+	// Sort the slice by WorkPackageHash in ascending order.
+	sort.Slice(segmentRootLookup, func(i, j int) bool {
+		return bytes.Compare(segmentRootLookup[i].WorkPackageHash.Bytes(), segmentRootLookup[j].WorkPackageHash.Bytes()) < 0
+	})
 
 	bundle = types.WorkPackageBundle{
 		WorkPackage:       workPackage,

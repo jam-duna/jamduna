@@ -352,7 +352,7 @@ func (n *Node) runMain() {
 }
 
 // process request
-func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
+func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error) {
 
 	// Get the peer ID from the object
 	msgType := getMessageType(obj)
@@ -513,7 +513,7 @@ func (n *Node) sendRequest(obj interface{}) (resp interface{}, err error) {
 }
 
 // internal makeRquest call with ctx implementation
-func (n *Node) makeRequestInternal(ctx context.Context, obj interface{}) (interface{}, error) {
+func (n *NodeContent) makeRequestInternal(ctx context.Context, obj interface{}) (interface{}, error) {
 
 	// Channel to receive the response or error
 	responseCh := make(chan interface{}, 1)
@@ -551,7 +551,7 @@ func (n *Node) makeRequestInternal(ctx context.Context, obj interface{}) (interf
 //	defer cancel()
 
 // plural makeRequest calls via makeRequestInternal, with a minSuccess required because cancelling other simantanteous req
-func (n *Node) makeRequests(objs []interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([]interface{}, error) {
+func (n *NodeContent) makeRequests(objs []interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([]interface{}, error) {
 	var wg sync.WaitGroup
 	results := make(chan interface{}, len(objs))
 	errorsCh := make(chan error, len(objs))

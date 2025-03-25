@@ -21,7 +21,7 @@ import (
 )
 
 type Jam struct {
-	*Node
+	*NodeContent
 }
 
 var MethodDiscriptionMap = map[string]string{
@@ -243,7 +243,7 @@ func (j *Jam) GetServiceStorage(req []string, res *string) error {
 	return nil
 }
 
-func (n *Node) getSegments(requestedHash common.Hash, index []uint16) (segment [][]byte, justifications [][]common.Hash, err error) {
+func (n *NodeContent) getSegments(requestedHash common.Hash, index []uint16) (segment [][]byte, justifications [][]common.Hash, err error) {
 	si := n.WorkReportSearch(requestedHash)
 	if si == nil {
 		return nil, nil, fmt.Errorf("requestedHash not found")
@@ -536,9 +536,9 @@ func (j *Jam) Decode(req []string, res *string) error {
 }
 
 // server ========================================
-func (n *Node) StartRPCServer() {
+func (n *NodeContent) StartRPCServer() {
 	jam := new(Jam)
-	jam.Node = n
+	jam.NodeContent = n
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
 	sock_name := n.node_name

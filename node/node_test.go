@@ -46,8 +46,6 @@ const (
 )
 
 var targetNum = flag.Int("targetN", -1, "targetN")
-var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
-var pvm_authoring_log = flag.Bool("pvm_authoring_log", false, "pvm_authoring_log")
 
 func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
 	nodes, err := SetUpNodes(numNodes, basePort)
@@ -243,7 +241,8 @@ func TestDisputes(t *testing.T) {
 	// give some time for nodes to come up
 	for {
 		time.Sleep(1 * time.Second)
-		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady() {
+		currJCE := nodes[0].GetCurrJCE()
+		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady(currJCE) {
 			break
 		}
 	}

@@ -143,7 +143,8 @@ func (n *NodeContent) GetStoredBlockBySlot(slot uint32) (*types.Block, error) {
 	b := blk.(types.Block)
 	return &b, nil
 }
-func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk, err error) {
+
+func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk, err error) {
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasureRoot)
 	erasure_bKey_val, ok, err := n.ReadRawKV([]byte(erasure_bKey))
 	if err != nil || !ok {
@@ -182,7 +183,7 @@ func (n *Node) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []common.Hash,
 	return
 }
 
-func (n *Node) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
+func (n *NodeContent) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
 	erasure_root_u := as.ErasureRoot
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
 	bChunkJson, _ := json.Marshal(bECChunks)
@@ -306,7 +307,7 @@ func (n *Node) GetFullShard_Guarantor(erasureRoot common.Hash, shardIndex uint16
 // Allowing CE138_BundleShard  ANS via StoreAuditDA
 // Allowing CE139_SegmentShard ANS via StoreImportDA
 // NOTE: everyone who calls this must VERIFY first
-func (n *Node) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, exported_segments_and_proofpageShards []byte, encodedPath []byte) error {
+func (n *NodeContent) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, exported_segments_and_proofpageShards []byte, encodedPath []byte) error {
 	// Store path to Erasure Root
 
 	bClubH := common.Blake2Hash(bundleShard)
@@ -333,7 +334,7 @@ func (n *Node) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex uint16
 }
 
 // USED
-func (n *Node) StoreFullShardJustification(erasureRoot common.Hash, shardIndex uint16, bClubH common.Hash, sClubH common.Hash, encodedPath []byte) {
+func (n *NodeContent) StoreFullShardJustification(erasureRoot common.Hash, shardIndex uint16, bClubH common.Hash, sClubH common.Hash, encodedPath []byte) {
 	// levelDB key->Val (* Required for multi validator case or CE200s)
 	// *f_erasureRoot_<erasureRoot> -> [f_erasureRoot_<shardIdx>]
 	// f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
@@ -345,7 +346,7 @@ func (n *Node) StoreFullShardJustification(erasureRoot common.Hash, shardIndex u
 }
 
 // USED
-func (n *Node) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, encodedPath []byte, err error) {
+func (n *NodeContent) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, encodedPath []byte, err error) {
 	f_es_key := generateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
 	log.Trace(debugDA, "GetFullShardJustification", "n", n.id, "f_es_key", f_es_key)
 
@@ -364,7 +365,7 @@ func (n *Node) GetFullShardJustification(erasureRoot common.Hash, shardIndex uin
 }
 
 // Short-term Audit DA -  Used to Store bClub(bundleShard) by Assurers (til finality)
-func (n *Node) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) (err error) {
+func (n *NodeContent) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) (err error) {
 	// *b_erasureRoot_<erasureRoot> -> [b_erasureRoot_<shardIdx>]
 	// b_erasureRoot_<shardIdx> -> bundleShard
 	b_es_key := generateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
@@ -378,7 +379,7 @@ func generateSpecKey(requestHash common.Hash) string {
 	return fmt.Sprintf("rtou_%v", requestHash)
 }
 
-func (n *Node) StoreWorkReport(wr types.WorkReport) error {
+func (n *NodeContent) StoreWorkReport(wr types.WorkReport) error {
 	spec := wr.AvailabilitySpec
 	erasureRoot := spec.ErasureRoot
 	segementRoot := spec.ExportedSegmentRoot
@@ -400,7 +401,7 @@ func (n *Node) StoreWorkReport(wr types.WorkReport) error {
 }
 
 // Long-term ImportDA - Used to Store sClub (segmentShard) by Assurers (at least 672 epochs)
-func (n *Node) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) (err error) {
+func (n *NodeContent) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) (err error) {
 	s_es_key := generateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
 	n.WriteRawKV(s_es_key, concatenatedShards) // this has segment shards AND proof page shards
 	return nil
@@ -427,7 +428,7 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 
 // Qns Source : CE138_BundleShard --  Ask to Assurer From Auditor
 // Ans Source : CE137_FullShard (via StoreAuditDA)
-func (n *Node) GetBundleShard_Assurer(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, sClub common.Hash, justification []byte, ok bool, err error) {
+func (n *NodeContent) GetBundleShard_Assurer(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, sClub common.Hash, justification []byte, ok bool, err error) {
 	bundleShard = []byte{}
 	justification = []byte{}
 
@@ -492,7 +493,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 
 // Qns Source : CE139_SegmentShard / CE140
 // Ans Source : CE137_FullShard
-func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16, withJustification bool) (selected_segments [][]byte, selected_justifications [][]byte, ok bool, err error) {
+func (n *NodeContent) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16, withJustification bool) (selected_segments [][]byte, selected_justifications [][]byte, ok bool, err error) {
 	s_es_key := generateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
 	concatenatedShards, ok, err := n.ReadRawKV([]byte(s_es_key))
 	if err != nil {
@@ -542,7 +543,7 @@ func (si *SpecIndex) AddIndex(idx uint16) bool {
 }
 
 // Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
-func (n *Node) WorkReportSearch(h common.Hash) (si *SpecIndex) {
+func (n *NodeContent) WorkReportSearch(h common.Hash) (si *SpecIndex) {
 
 	// scan through recentblocks
 

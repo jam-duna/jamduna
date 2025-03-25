@@ -16,7 +16,7 @@ const (
 	debugSpec = false
 )
 
-func (n *Node) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
+func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
 	// compile wp into b
 	b := package_bundle.Bytes() // check
 	// Build b♣ and s♣
@@ -87,7 +87,7 @@ func GenerateWBTJustification(root common.Hash, shardIndex uint16, leaves [][]by
 }
 
 // Compute b♣ using the EncodeWorkPackage function
-func (n *Node) buildBClub(b []byte) ([]common.Hash, []types.DistributeECChunk) {
+func (n *NodeContent) buildBClub(b []byte) ([]common.Hash, []types.DistributeECChunk) {
 	// Padding b to the length of W_G
 	paddedB := common.PadToMultipleOfN(b, types.ECPieceSize) // this makes sense
 
@@ -118,7 +118,7 @@ func (n *Node) buildBClub(b []byte) ([]common.Hash, []types.DistributeECChunk) {
 	return bClubs, ecChunks
 }
 
-func (n *Node) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr []types.DistributeECChunk) {
+func (n *NodeContent) buildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr []types.DistributeECChunk) {
 	ecChunksArr = make([]types.DistributeECChunk, types.TotalValidators)
 
 	// EC encode segments in ecChunksArr
@@ -324,7 +324,7 @@ func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup
 }
 
 // Verify the justifications (picked out of PageProofs) for the imported segments, which can come from different work packages
-func (n *Node) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (verified bool, err error) {
+func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (verified bool, err error) {
 	// verify the segments with CDT_6 justification included by first guarantor
 	for itemIndex, workItem := range b.WorkPackage.WorkItems {
 		importedSegments := b.ImportSegmentData[itemIndex]
@@ -355,7 +355,7 @@ func (n *Node) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.
 }
 
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
-func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantor bool) (work_report types.WorkReport, err error) {
+func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantor bool) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()

@@ -48,7 +48,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 				//fmt.Printf("[n%v] writeAccount DELETE OK!!! storage:%v\n", s.Id, storage)
 			} else {
 				if s.Authoring {
-					log.Info(module, "writeAccount SET", "service_idx", service_idx, "rawkey", storage.RawKey, "value", storage.Value)
+					log.Info(module, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "rawkey", storage.RawKey, "value", storage.Value)
 				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {

@@ -214,14 +214,16 @@ func (n *Node) runAudit() {
 func (n *Node) Audit(headerHash common.Hash) error {
 	// in normal situation, we will not have tranche1 unless we have networking problems. we can force it by setting requireTranche1 to true
 	// TODO return as bool, err to differentiate between error & audit result
-	paulseTicker := time.NewTicker(1 * time.Millisecond)
+	paulseTicker := time.NewTicker(25 * time.Millisecond)
 	tmp := uint32(1 << 31)
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 
 	if err != nil {
 		return err
 	}
-	tranche := auditing_statedb.GetTranche()
+	//TODO: not sure what JCE to use here...
+	currJCE := n.GetCurrJCE()
+	tranche := auditing_statedb.GetTranche(currJCE)
 	if tranche == 0 {
 		n.ProcessAudit(tranche, headerHash)
 	}
@@ -234,7 +236,8 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				return err
 			}
 			// use this to force tranch1 to happen but wil comsume unnecessary resource
-			tranche := auditing_statedb.GetTranche()
+			refreshedJCE := n.GetCurrJCE()
+			tranche := auditing_statedb.GetTranche(refreshedJCE)
 			// use tmp to check if it's a new tranche
 			if tranche != tmp && tranche != 0 {
 				// if it's the same tranche, check if the block is audited
@@ -445,7 +448,8 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 		if err != nil {
 			return nil, err
 		}
-		an, no_show_a, no_show_len, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, *judgment_bucket)
+		currJCE := n.GetCurrJCE()
+		an, no_show_a, no_show_len, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, *judgment_bucket, currJCE)
 		if err != nil {
 			return nil, err
 		}

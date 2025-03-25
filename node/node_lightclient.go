@@ -31,7 +31,7 @@ func (n *Node) IsCoreReady(coreIdx uint16, lookups []common.Hash, parameter ...i
 	// get the assurances from the extrinsic pool
 	assurances := n.extrinsic_pool.GetAssurancesFromPool(latest_header_hash)
 	statedb.SortAssurances(assurances)
-	targetJCE, _ := latest_statedb.JamState.SafroleState.CheckTimeSlotReady()
+	targetJCE, _ := latest_statedb.JamState.SafroleState.CheckTimeSlotReady(n.GetCurrJCE())
 	preState := latest_statedb.JamState.Copy()
 	postAssuranceState := latest_statedb.JamState.Copy()
 	postAssuranceState.ProcessAssurances(assurances, targetJCE)

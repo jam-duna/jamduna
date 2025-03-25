@@ -26,6 +26,9 @@ import (
 	"time"
 )
 
+var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
+var pvm_authoring_log = flag.Bool("pvm_authoring_log", false, "pvm_authoring_log")
+
 const (
 	webServicePort = 8079
 )
@@ -83,10 +86,8 @@ func generateMetadata(idx int) (string, error) {
 func SetLevelDBPaths(numNodes int) []string {
 	node_paths := make([]string, numNodes)
 	// timeslot mark
-	currJCE := common.ComputeCurrentJCETime()
-	//currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+	currTS := common.ComputeCurrentTS()
 	jobID := generateJobID()
-	currTS := currJCE * 6
 	for i := 0; i < numNodes; i++ {
 		node_idx := fmt.Sprintf("%d", i)
 		node_path, err := computeLevelDBPath(node_idx, int(currTS), jobID)
@@ -307,7 +308,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	// give some time for nodes to come up
 	for {
 		time.Sleep(1 * time.Second)
-		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady() {
+		currJCE := nodes[0].GetCurrJCE()
+		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady(currJCE) {
 			break
 		}
 	}

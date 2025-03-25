@@ -58,9 +58,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	j := NewJamState()
 	j.SafroleState.EpochFirstSlot = uint32(epochFirstSlot)
 	j.SafroleState.Timeslot = 0
-	if types.TimeUnitMode != "TimeStamp" {
-		j.SafroleState.Timeslot = j.SafroleState.Timeslot / types.SecondsPerSlot
-	}
+	j.SafroleState.Timeslot = j.SafroleState.Timeslot / types.SecondsPerSlot
 
 	vB := []byte{}
 	for _, v := range validators {
@@ -368,9 +366,7 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 	if len(test_name) == 0 {
 		now := time.Now().Unix()
 		second_per_epoch := types.SecondsPerEpoch // types.EpochLength
-		if types.TimeUnitMode != "TimeStamp" {
-			now = common.ComputeJCETime(now, true)
-		}
+		now = common.ComputeJCETime(now, true)
 		waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
 		epoch0Timestamp := uint64(now) + uint64(waitTime)
 		epoch0Phase := uint64(now) / uint64(second_per_epoch)
@@ -385,9 +381,7 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 			}
 			common.AddJamStart(adjustedTime)
 			currTS := time.Now().Unix()
-			if types.TimeUnitMode != "TimeStamp" {
-				now = common.ComputeJCETime(currTS, true)
-			}
+			now = common.ComputeJCETime(currTS, true)
 			waitTime = int64(second_per_epoch) - now%int64(second_per_epoch)
 			epoch0Timestamp = uint64(now) + uint64(waitTime)
 		}
@@ -396,9 +390,7 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 	} else {
 		now := time.Now().Unix()
 		second_per_epoch := types.SecondsPerEpoch // types.EpochLength
-		if types.TimeUnitMode != "TimeStamp" {
-			now = common.ComputeJCETime(now, true)
-		}
+		now = common.ComputeJCETime(now, true)
 		waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
 		if waitTime < 24 {
 			panic("Wait time is less than 24 seconds")

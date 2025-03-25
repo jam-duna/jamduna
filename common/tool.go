@@ -27,50 +27,40 @@ func DecodeUint64(data []byte) int {
 	return int(binary.LittleEndian.Uint64(data))
 }
 
-// This is FAKE
-func ComputeCurrentJCETime() uint32 {
+// This is ONLY used to setup levelDB paths
+func ComputeCurrentTS() uint32 {
 	currentTime := time.Now().Unix()
-	return uint32(currentTime) // computeJCETime(currentTime)
-}
-
-func ComputeRealCurrentJCETime(TimeUnitMode string) uint32 {
-	currentTime := time.Now().Unix()
-	if TimeUnitMode == "TimeStamp" {
-		return uint32(ComputeJCETime(currentTime, false))
-	} else {
-		return uint32(ComputeJCETime(currentTime, true))
-	}
+	return uint32(currentTime)
 }
 
 func ComputeTimeSlot(TimeUnitMode string) uint32 {
+	secondsPerSlot := uint32(6)
 	currentTime := time.Now().Unix()
 	JCE := uint32(ComputeJCETime(currentTime, true))
-	timeslot := JCE / 6 // 6 seconds per slot
+	timeslot := JCE / secondsPerSlot
 	return timeslot
 }
 
 func ComputeTimeUnit(TimeUnitMode string) uint32 {
 	unit := ComputeTimeSlot(TimeUnitMode)
-	if TimeUnitMode == "TimeStamp" {
-		unit = ComputeRealCurrentJCETime(TimeUnitMode)
-	} else if TimeUnitMode == "JAM" {
+	if TimeUnitMode == "JAM" {
 		unit = ComputeTimeSlot(TimeUnitMode)
 	} else if TimeUnitMode == "Raw" {
-
+		panic("Raw time unit mode is not supported")
 	}
 	return unit
 }
 
-var JceStart = time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+var JceStart = time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC)
 
 func AddJamStart(time time.Duration) {
 	JceStart = JceStart.Add(time)
 }
 
-// Jam Common Era: 1704110400 or Jan 01 2024 12:00:00 GMT+0000; See section 4.4
+// Jam Common Era: 173568960 or Jan 01 2025 12:00:00 GMT+0000; See section 4.4
 func ComputeJCETime(unixTimestamp int64, production bool) int64 {
 	if production {
-		// Define the start of the Jam Common Era
+		// Define the start of the Jam Common Era -- JceStart
 
 		// Convert the Unix timestamp to a Time object
 		currentTime := time.Unix(unixTimestamp, 0).UTC()

@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
@@ -88,8 +87,8 @@ func (s *StateDB) Verify_s0(pubkey bandersnatch.BanderSnatchKey) (bool, error) {
 }
 
 // func 201 TODO check double plus means
-func (s *StateDB) Get_snQuantity(V bandersnatch.BanderSnatchSecret, W types.WorkReport) ([]byte, error) {
-	signcontext := append(append([]byte(types.X_U), W.Hash().Bytes()...), common.Uint32ToBytes(s.GetTranche())...)
+func (s *StateDB) Get_snQuantity(V bandersnatch.BanderSnatchSecret, W types.WorkReport, currJCE uint32) ([]byte, error) {
+	signcontext := append(append([]byte(types.X_U), W.Hash().Bytes()...), common.Uint32ToBytes(s.GetTranche(currJCE))...)
 	signature, _, err := bandersnatch.IetfVrfSign(V, []byte{0}, signcontext)
 	if err != nil {
 		return nil, err
@@ -97,8 +96,8 @@ func (s *StateDB) Get_snQuantity(V bandersnatch.BanderSnatchSecret, W types.Work
 	return signature, nil
 }
 
-func (s *StateDB) Verify_sn(pubkey bandersnatch.BanderSnatchKey, W common.Hash, signature []byte) (bool, error) {
-	signcontext := append(append([]byte(types.X_U), W.Bytes()...), common.Uint32ToBytes(s.GetTranche())...)
+func (s *StateDB) Verify_sn(pubkey bandersnatch.BanderSnatchKey, W common.Hash, signature []byte, currJCE uint32) (bool, error) {
+	signcontext := append(append([]byte(types.X_U), W.Bytes()...), common.Uint32ToBytes(s.GetTranche(currJCE))...)
 	_, err := bandersnatch.IetfVrfVerify(pubkey, []byte{0}, signcontext, signature)
 	if err != nil {
 		return false, err
@@ -178,7 +177,7 @@ func (s *StateDB) GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.Ju
 	}
 	return announcements, count
 }
-func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 types.AnnounceBucket, J types.JudgeBucket) ([]types.WorkReportSelection, map[common.Hash][]types.Announcement, map[common.Hash]int, []bandersnatch.BandersnatchVrfSignature, error) {
+func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 types.AnnounceBucket, J types.JudgeBucket, currJCE uint32) ([]types.WorkReportSelection, map[common.Hash][]types.Announcement, map[common.Hash]int, []bandersnatch.BandersnatchVrfSignature, error) {
 	an := []types.WorkReportSelection{}
 	availible_workreport := WorkReportToSelection(s.AvailableWorkReport)
 	no_show_announcements := make(map[common.Hash][]types.Announcement)
@@ -186,7 +185,7 @@ func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 types.Anno
 	sns := make([]bandersnatch.BandersnatchVrfSignature, 0)
 	for _, W := range availible_workreport {
 		//get the number of true count
-		sn, err := s.Get_snQuantity(V, W.WorkReport)
+		sn, err := s.Get_snQuantity(V, W.WorkReport, currJCE)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -238,17 +237,17 @@ func ShuffleWorkReport(slice []types.WorkReportSelection, entropy []uint32) {
 	return
 }
 
+// TODO: tranch is potentially touching JCE logic with now() -- shawn to fix it
 // eq 195
-func (s *StateDB) GetTranche() uint32 {
+func (s *StateDB) GetTranche(currJCE uint32) uint32 {
 	// timeslot mark
-	currentTime := time.Now().Unix()
-	JCE := uint32(common.ComputeJCETime(currentTime, true))
-	// currentJCETime := common.ComputeCurrentJCETime() // Replace with the actual value or variable representing the current JCE time
+	//currentTime := time.Now().Unix()
+	//JCE := uint32(common.ComputeJCETime(currentTime, true))
 	timeslot := s.Block.TimeSlot()
 	if s.Block == nil {
 		fmt.Printf("Block is nil\n")
 	}
-	return (JCE - types.SecondsPerSlot*timeslot) / types.PeriodSecond
+	return (currJCE - types.SecondsPerSlot*timeslot) / types.PeriodSecond
 	// return 0
 }
 

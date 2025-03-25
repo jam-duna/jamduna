@@ -745,6 +745,8 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	statedb = newEmptyStateDB(sdb)
 	statedb.Finalized = false
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
+
+	// TODO: MK this potentially need a JCE to be passed in
 	statedb.JamState = NewJamState()
 
 	block := types.Block{}
@@ -818,12 +820,13 @@ func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
 	return hex.EncodeToString(traceIDBytes[:])
 }
 
-func (s *StateDB) ProcessState(credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (*types.Block, *StateDB, error) {
-	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady()
+func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (*types.Block, *StateDB, error) {
+	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady(currJCE)
 	if !genesisReady {
+		//fmt.Printf("genesis NOT Ready ProcessState: currJCE=%d\n", currJCE)
 		return nil, nil, nil
 	}
-	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady()
+	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady(currJCE)
 	if timeSlotReady {
 		// Time to propose block if authorized
 		sf0 := s.GetPosteriorSafroleEntropy(targetJCE)

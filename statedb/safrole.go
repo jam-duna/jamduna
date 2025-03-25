@@ -125,10 +125,8 @@ type SafroleState struct {
 
 func NewSafroleState() *SafroleState {
 	return &SafroleState{
-		Id: 9999,
-		// Timeslot:           uint32(common.ComputeCurrentJCETime()),
-		Timeslot: common.ComputeTimeUnit(types.TimeUnitMode),
-
+		Id:                 9999,
+		Timeslot:           0, // MK check! was common.ComputeTimeUnit(types.TimeUnitMode)
 		Entropy:            Entropy{},
 		PrevValidators:     []types.Validator{},
 		CurrValidators:     []types.Validator{},
@@ -214,24 +212,7 @@ type ClaimData struct {
 }
 
 func ComputeEpochAndPhase(ts, Epoch0Timestamp uint32) (currentEpoch uint32, currentPhase uint32) {
-
-	if types.TimeUnitMode == "TimeStamp" {
-		if ts < Epoch0Timestamp || ts == 0xFFFFFFFF {
-			currentEpoch = 0
-			currentPhase = 0
-			return currentEpoch, currentPhase
-		}
-	} else if types.TimeUnitMode == "TimeSlot" {
-		if ts < Epoch0Timestamp/types.SecondsPerSlot {
-			currentEpoch = 0
-			currentPhase = 0
-			return currentEpoch, currentPhase
-		} else {
-			currentEpoch = (ts - Epoch0Timestamp/types.SecondsPerSlot) / types.EpochLength
-			currentPhase = (ts - Epoch0Timestamp/types.SecondsPerSlot) % types.EpochLength
-			return currentEpoch, currentPhase
-		}
-	} else if types.TimeUnitMode == "JAM" {
+	if types.TimeUnitMode == "JAM" {
 		if ts < Epoch0Timestamp/types.SecondsPerSlot {
 			currentEpoch = 0
 			currentPhase = 0
@@ -249,26 +230,7 @@ func ComputeEpochAndPhase(ts, Epoch0Timestamp uint32) (currentEpoch uint32, curr
 }
 
 func (s *SafroleState) EpochAndPhase(ts uint32) (currentEpoch int32, currentPhase uint32) {
-	if types.TimeUnitMode == "TimeStamp" {
-		if ts < s.EpochFirstSlot {
-			currentEpoch = -1
-			currentPhase = 0
-			return
-		}
-		currentEpoch = int32((ts - s.EpochFirstSlot) / (types.SecondsPerSlot * types.EpochLength)) // eg. / 60
-		currentPhase = ((ts - s.EpochFirstSlot) % (types.SecondsPerSlot * types.EpochLength)) / types.SecondsPerSlot
-		return
-	} else if types.TimeUnitMode == "TimeSlot" {
-		realEpochFirstSlot := s.EpochFirstSlot / uint32(types.SecondsPerSlot)
-		if ts < realEpochFirstSlot {
-			currentEpoch = -1
-			currentPhase = 0
-			return
-		}
-		currentEpoch = int32((ts - realEpochFirstSlot) / types.EpochLength) // eg. / 60
-		currentPhase = ((ts - realEpochFirstSlot) % types.EpochLength)
-		return
-	} else if types.TimeUnitMode == "JAM" {
+	if types.TimeUnitMode == "JAM" {
 		realEpochFirstSlot := s.EpochFirstSlot / uint32(types.SecondsPerSlot)
 		if ts < realEpochFirstSlot {
 			currentEpoch = -1
@@ -285,16 +247,16 @@ func (s *SafroleState) EpochAndPhase(ts uint32) (currentEpoch int32, currentPhas
 
 }
 
-func (s *SafroleState) IsNewEpoch(currCJE uint32) bool {
+func (s *SafroleState) IsNewEpoch(currJCE uint32) bool {
 	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, _ := s.EpochAndPhase(currCJE)
+	currEpoch, _ := s.EpochAndPhase(currJCE)
 	return currEpoch > prevEpoch
 }
 
 // used for detecting the end of submission period
-func (s *SafroleState) IseWinningMarkerNeeded(currCJE uint32) bool {
+func (s *SafroleState) IseWinningMarkerNeeded(currJCE uint32) bool {
 	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, currPhase := s.EpochAndPhase(currCJE)
+	currEpoch, currPhase := s.EpochAndPhase(currJCE)
 	if currEpoch == prevEpoch && prevPhase < types.TicketSubmissionEndSlot && types.TicketSubmissionEndSlot <= currPhase && len(s.NextEpochTicketsAccumulator) == types.EpochLength {
 		return true
 	}
@@ -793,13 +755,10 @@ func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub co
 	return false, common.Hash{}, 0
 }
 
-func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
+func (s *SafroleState) CheckTimeSlotReady(currJCE uint32) (uint32, bool) {
 	// timeslot mark
-	// currJCE := common.ComputeCurrentJCETime()
-	currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
 	prevEpoch, prevPhase := s.EpochAndPhase(s.GetTimeSlot())
 	currEpoch, currPhase := s.EpochAndPhase(currJCE)
-
 	if currEpoch > prevEpoch {
 		return currJCE, true
 	} else if currEpoch == prevEpoch && currPhase > prevPhase {
@@ -809,11 +768,11 @@ func (s *SafroleState) CheckTimeSlotReady() (uint32, bool) {
 	return currJCE, false
 }
 
-func (s *SafroleState) CheckFirstPhaseReady() (isReady bool) {
+func (s *SafroleState) CheckFirstPhaseReady(currJCE uint32) (isReady bool) {
 	// timeslot mark
-	currJCE := common.ComputeRealCurrentJCETime(types.TimeUnitMode)
-
-	if currJCE < s.EpochFirstSlot*types.SecondsPerSlot {
+	phaseEnd := uint32(types.EpochLength)
+	if currJCE < phaseEnd {
+		//fmt.Printf("CheckFirstPhaseReady:FALSE currJCE: %d, phaseEnd: %d\n", currJCE, phaseEnd)
 		return false
 	}
 	return true

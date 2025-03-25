@@ -51,7 +51,7 @@ const (
 )
 
 // time mode
-// three mode input => "JAM", "TimeStamp", "TimeSlot"
+// three mode input => "JAM", "TimeSlot"
 var TimeUnitMode = "JAM"
 var TimeSavingMode bool = true
 

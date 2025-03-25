@@ -339,6 +339,11 @@ type VM struct {
 
 	// service metadata
 	ServiceMetadata []byte
+	Mode string
+}
+
+func (vm *VM) Str(logStr string) string {
+	return fmt.Sprintf("%s_%s: %s", vm.ServiceMetadata, vm.Mode, logStr)
 }
 
 type Forgets struct {
@@ -1087,7 +1092,7 @@ func (vm *VM) SetCore(coreIndex uint16, firstGuarantor bool) {
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
 func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
-
+	vm.Mode = "refine"
 	if vm.firstGuarantor == log.FirstGuarantor {
 		vm.SetLogging(log.PvmAuthoring)
 	} else {
@@ -1121,11 +1126,11 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 
 	recordExecuteRefineTestVector(workitemIndex, workPackage, authorization, importsegments, export_count, extrinsics, p_a, a, r, res)
 	exportedSegments = vm.Exports
-	//return r, res, exportedSegments
 	return r, res, exportedSegments
 }
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
+	vm.Mode = "accumulate"
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
 	// for _, argument := range elements {
@@ -1145,6 +1150,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	return r, res, xs
 }
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
+	vm.Mode = "transfer"
 	// a = E(t)   take transfer memos t and encode them
 	vm.ServiceAccount = service_account
 
@@ -1204,7 +1210,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-			log.Debug(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d ECALLI COMPLETE", vm.hostenv.GetID(), string(vm.ServiceMetadata), stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
+			log.Trace(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d ECALLI COMPLETE", vm.hostenv.GetID(), string(vm.ServiceMetadata), stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
 		}
 		stepn++
 	}
@@ -1566,7 +1572,7 @@ func (vm *VM) step(stepn int) error {
 	if vm.ServiceMetadata != nil {
 		md = string(vm.ServiceMetadata)
 	}
-	log.Debug(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "reg", vm.ReadRegisters())
+	log.Trace(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "reg", vm.ReadRegisters())
 	return nil
 }
 

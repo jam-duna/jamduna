@@ -128,6 +128,7 @@ type NodeContent struct {
 
 	workPackageQueue sync.Map
 
+	chunkMap            sync.Map
 	chunkBox            map[common.Hash][][]byte
 	loaded_services_dir string
 	block_tree          *types.BlockTree
@@ -212,7 +213,6 @@ type Node struct {
 	dataDir  string
 
 	// DA testing only
-	chunkMap       sync.Map
 	lastHash       common.Hash
 	currentHash    common.Hash
 	announcement   bool
@@ -230,6 +230,10 @@ type Node struct {
 	// god mode
 	godCh        *chan uint32
 	timeslotUsed map[uint32]bool
+
+	// JCE
+	currJCE      uint32
+	currJCEMutex sync.Mutex
 }
 
 func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
@@ -502,6 +506,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	go node.runServer()
 	if nodeType != ValidatorDAFlag {
+		go node.runJCE()
+		//go node.runFasterJCE()
 		go node.runClient()
 		go node.runMain()
 		go node.runPreimages()
@@ -664,7 +670,7 @@ func (n *Node) getTrie() *trie.MerkleTree {
 	return s.GetTrie()
 }
 
-func (n *Node) getPeerByIndex(peerIdx uint16) (*Peer, error) {
+func (n *NodeContent) getPeerByIndex(peerIdx uint16) (*Peer, error) {
 	p := n.peersInfo[peerIdx]
 	// check if peer exists
 	if p != nil {
@@ -1142,7 +1148,7 @@ func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
 
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // We continuily use erasureRoot to ask the question
-func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justifications [][]common.Hash, err error) {
+func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, justifications [][]common.Hash, err error) {
 	requests_original := make([]CE139_request, types.TotalValidators)
 
 	// this will track the proofpages
@@ -1252,7 +1258,7 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 }
 
 // HERE we are in a AUDITING situation, if verification fails, we can still execute the work package by using CE140?
-func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32, segmentRootLookup types.SegmentRootLookup) (workPackageBundle types.WorkPackageBundle, err error) {
+func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32, segmentRootLookup types.SegmentRootLookup) (workPackageBundle types.WorkPackageBundle, err error) {
 	requests_original := make([]CE138_request, types.TotalValidators)
 	for i := range types.TotalValidators {
 		requests_original[i] = CE138_request{
@@ -1491,6 +1497,64 @@ func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string) 
 	return nil
 }
 
+func (n *Node) runJCE() {
+	const tickInterval = 100
+	ticker_pulse := time.NewTicker(tickInterval * time.Millisecond)
+	defer ticker_pulse.Stop()
+	for {
+		select {
+		case <-ticker_pulse.C:
+			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+			n.SetCurrJCE(currJCE)
+			//do something with it
+		}
+	}
+}
+
+func (n *Node) runFasterJCE() {
+	const tickInterval = 100
+	ticker_pulse := time.NewTicker(tickInterval * time.Millisecond)
+	defer ticker_pulse.Stop()
+
+	const blockInterval = 2000
+	block_pulse := time.NewTicker(blockInterval * time.Millisecond)
+	defer block_pulse.Stop()
+	for {
+		select {
+		case <-ticker_pulse.C:
+			prevJCE := n.GetCurrJCE()
+			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+			if prevJCE <= types.EpochLength {
+				n.SetCurrJCE(currJCE)
+				//do something with it
+			}
+		case <-block_pulse.C:
+			prevJCE := n.GetCurrJCE()
+			if prevJCE > types.EpochLength {
+				currJCE := prevJCE + 1
+				n.SetCurrJCE(currJCE)
+			}
+		}
+	}
+}
+
+func (n *Node) GetCurrJCE() uint32 {
+	n.currJCEMutex.Lock()
+	defer n.currJCEMutex.Unlock()
+	return n.currJCE
+}
+
+func (n *Node) SetCurrJCE(currJCE uint32) {
+	n.currJCEMutex.Lock()
+	defer n.currJCEMutex.Unlock()
+	prevJCE := n.currJCE
+	if (prevJCE >= 0) && (prevJCE >= currJCE) {
+		return
+	}
+	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
+	n.currJCE = currJCE
+}
+
 func (n *Node) runClient() {
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
@@ -1506,8 +1570,7 @@ func (n *Node) runClient() {
 				return
 			}
 			// timeslot mark
-			// currJCE := common.ComputeCurrentJCETime()
-			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+			currJCE := n.GetCurrJCE()
 			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
 			// bandersnatch is time consuming
 			if currEpoch != -1 {
@@ -1517,7 +1580,6 @@ func (n *Node) runClient() {
 
 				} else if currPhase == types.EpochLength-1 { // you had currPhase == types.EpochLength-1
 					// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-
 					n.GenerateTickets()
 					n.BroadcastTickets()
 				}
@@ -1530,7 +1592,7 @@ func (n *Node) runClient() {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
 			n.statedbMutex.Lock()
-			newBlock, newStateDB, err := n.statedb.ProcessState(n.credential, ticketIDs, n.extrinsic_pool)
+			newBlock, newStateDB, err := n.statedb.ProcessState(currJCE, n.credential, ticketIDs, n.extrinsic_pool)
 
 			n.statedbMutex.Unlock()
 			if err != nil {
