@@ -378,19 +378,23 @@ func generateSpecKey(requestHash common.Hash) string {
 	return fmt.Sprintf("rtou_%v", requestHash)
 }
 
-func (n *Node) StoreSpec(spec types.AvailabilitySpecifier) error {
+func (n *Node) StoreWorkReport(wr types.WorkReport) error {
+	spec := wr.AvailabilitySpec
 	erasureRoot := spec.ErasureRoot
 	segementRoot := spec.ExportedSegmentRoot
 	workpackageHash := spec.WorkPackageHash
 
 	// write 3 mappings:
-	specBytes, _ := spec.ToBytes()
+	wrBytes, err := types.Encode(wr)
+	if err != nil {
+		return err
+	}
 	// (a) workpackageHash => spec
 	// (b) segmentRoot => spec
 	// (c) erasureRoot => spec
-	n.WriteRawKV(generateSpecKey(workpackageHash), specBytes)
-	n.WriteRawKV(generateSpecKey(segementRoot), specBytes)
-	n.WriteRawKV(generateSpecKey(erasureRoot), specBytes)
+	n.WriteRawKV(generateSpecKey(workpackageHash), wrBytes)
+	n.WriteRawKV(generateSpecKey(segementRoot), wrBytes)
+	n.WriteRawKV(generateSpecKey(erasureRoot), wrBytes)
 
 	return nil
 }
@@ -514,8 +518,8 @@ func (n *Node) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint1
 }
 
 type SpecIndex struct {
-	Spec    types.AvailabilitySpecifier `json:"spec"`
-	Indices []uint16                    `json:"indices"`
+	WorkReport types.WorkReport `json:"spec"`
+	Indices    []uint16         `json:"indices"`
 }
 
 // Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
@@ -538,23 +542,24 @@ func (si *SpecIndex) AddIndex(idx uint16) bool {
 }
 
 // Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
-func (n *Node) SpecSearch(h common.Hash) (si *SpecIndex) {
+func (n *Node) WorkReportSearch(h common.Hash) (si *SpecIndex) {
 
 	// scan through recentblocks
 
-	specBytes, ok, err := n.ReadRawKV([]byte(generateSpecKey(h)))
+	wrBytes, ok, err := n.ReadRawKV([]byte(generateSpecKey(h)))
 	if err != nil || !ok {
-		log.Error(debugDA, "ErasureRootLookUP", "err", err, "state", n.statedb.JamState.RecentBlocks)
+		log.Error(debugDA, "ErasureRootLookUP", "err", err)
 		return nil
 	}
 
-	var spec types.AvailabilitySpecifier
-	err = spec.FromBytes(specBytes)
+	wr, _, err := types.Decode(wrBytes, reflect.TypeOf(types.WorkReport{}))
 	if err != nil {
 		panic(1234431)
 	}
+
+	workReport := wr.(types.WorkReport)
 	return &SpecIndex{
-		Spec:    spec,
-		Indices: make([]uint16, 0),
+		WorkReport: workReport,
+		Indices:    make([]uint16, 0),
 	}
 }

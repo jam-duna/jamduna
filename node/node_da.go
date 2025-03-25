@@ -280,34 +280,6 @@ func compareWorkPackages(wp1, wp2 types.WorkPackage) bool {
 	return true
 }
 
-func (n *Node) GetSegmentRootLookup(wp types.WorkPackage) (segmentRootLookup types.SegmentRootLookup, err error) {
-	// TODO: check if this should actually come from n.statedb.JamState.RecentBlocks.Reported.SegmentRootLookup
-	segmentRootLookupMap := make(map[common.Hash]common.Hash)
-	segmentRootLookup = make([]types.SegmentRootLookupItem, 0)
-	for _, workItem := range wp.WorkItems {
-		for _, importedSegment := range workItem.ImportedSegments {
-			si := n.SpecSearch(importedSegment.RequestedHash)
-			if si == nil {
-				ferr := fmt.Errorf("GetSegmentRootLookup:SpecSearch NOT FOUND %s", importedSegment.RequestedHash)
-				log.Error(debugDA, "GetSegmentRootLookup:SpecSearch", "err", ferr)
-				return nil, ferr
-			} else {
-				log.Debug(debugDA, "GetSegmentRootLookup:RequestedHash", "segmentRoot", si.Spec.ExportedSegmentRoot, "importedPackageHash", si.Spec.WorkPackageHash)
-			}
-			_, exists := segmentRootLookupMap[si.Spec.ExportedSegmentRoot]
-			if !exists {
-				segmentRootLookupItem := types.SegmentRootLookupItem{
-					WorkPackageHash: si.Spec.WorkPackageHash,
-					SegmentRoot:     si.Spec.ExportedSegmentRoot,
-				}
-				segmentRootLookup = append(segmentRootLookup, segmentRootLookupItem)
-				segmentRootLookupMap[si.Spec.ExportedSegmentRoot] = si.Spec.WorkPackageHash
-			}
-		}
-	}
-	return segmentRootLookup, nil
-}
-
 func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (fuzz_importsegments [][][]byte, fuzz_segmentRootLookup types.SegmentRootLookup) {
 
 	fuzz_importsegments = package_bundle.ImportSegmentData
@@ -353,37 +325,28 @@ func fuzzJustification(package_bundle types.WorkPackageBundle, segmentRootLookup
 
 // Verify the justifications (picked out of PageProofs) for the imported segments, which can come from different work packages
 func (n *Node) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup) (verified bool, err error) {
-	return true, nil
-	if len(b.ImportSegmentData) != len(b.Justification) {
-		return false, fmt.Errorf("importSegments and justifications length mismatch")
-	}
-
 	// verify the segments with CDT_6 justification included by first guarantor
-	for itemIndex, workitem_segments := range b.ImportSegmentData {
-		for segmentIdx, segmentData := range workitem_segments {
-			requestedHash := b.WorkPackage.WorkItems[itemIndex].ImportedSegments[segmentIdx].RequestedHash
-			// loop through segmentRootLookup so we get the workpackage hash
+	for itemIndex, workItem := range b.WorkPackage.WorkItems {
+		importedSegments := b.ImportSegmentData[itemIndex]
+		if len(importedSegments) != len(workItem.ImportedSegments) {
+			fmt.Printf(" VerifyBundle %d != %d\n", len(importedSegments), len(workItem.ImportedSegments))
+			panic(111)
+		}
+		for segmentIdx, i := range workItem.ImportedSegments {
+			exportedSegmentRoot := i.RequestedHash
 			for _, x := range segmentRootLookup {
-				if x.SegmentRoot == requestedHash {
-					requestedHash = x.WorkPackageHash
+				if x.WorkPackageHash == i.RequestedHash {
+					exportedSegmentRoot = x.SegmentRoot
 				}
 			}
-			specIndex := n.SpecSearch(requestedHash)
-			if specIndex == nil {
-				log.Warn(module, "VerifyBundle: SpecSearch NOT FOUND", "reqHash", requestedHash)
-				return false, fmt.Errorf("VerifyBundle: could not find %x", requestedHash)
+			// requestedHash MUST map to exportedSegmentRoot
+			segmentData := importedSegments[segmentIdx]
+			global_segmentsRoot := trie.VerifyCDTJustificationX(trie.ComputeLeaf(segmentData), int(i.Index), b.Justification[itemIndex][segmentIdx], 0)
+			if !common.CompareBytes(exportedSegmentRoot[:], global_segmentsRoot) {
+				log.Warn(module, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", i.Index)
+				return false, fmt.Errorf("justification failure computedRoot %x != exportedSegmentRoot %s", exportedSegmentRoot, exportedSegmentRoot)
 			} else {
-				index := b.WorkPackage.WorkItems[itemIndex].ImportedSegments[segmentIdx].Index
-				exportedSegmentRoot := specIndex.Spec.ExportedSegmentRoot
-				j := b.Justification[itemIndex][segmentIdx]
-				leafHash := trie.ComputeLeaf(segmentData)
-				global_segmentsRoot := trie.VerifyCDTJustificationX(leafHash, int(index), j, 0)
-				if !common.CompareBytes(exportedSegmentRoot[:], global_segmentsRoot) {
-					log.Warn(module, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", index)
-					return false, fmt.Errorf("justification failure computedRoot %x != exportedSegmentRoot %s (h=%s)", exportedSegmentRoot, exportedSegmentRoot, leafHash)
-				} else {
-					log.Info(debugDA, "VerifyBundle: Justification Verified", "index", index, "exportedSegmentRoot", exportedSegmentRoot)
-				}
+				log.Trace(debugDA, "VerifyBundle: Justification Verified", "index", i.Index, "exportedSegmentRoot", exportedSegmentRoot)
 			}
 		}
 	}
@@ -398,7 +361,6 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage
 	service_index := uint32(workPackage.AuthCodeHost)
-
 	// Import Segments
 	for workItemIdx, workItem_segments := range package_bundle.ImportSegmentData {
 		importsegments[workItemIdx] = workItem_segments
@@ -415,6 +377,7 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 
 	var segments [][]byte
 	for index, workItem := range workPackage.WorkItems {
+		// map workItem.ImportedSegments into segment
 		service_index = workItem.Service
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
@@ -483,77 +446,4 @@ func (n *Node) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bun
 	n.StoreMeta_Guarantor(spec, bClubs, sClubs, bECChunks, sECChunksArray)
 
 	return workReport, err
-}
-
-// importSegments is a 3D array of [workItemIndex][importedSegmentIndex][segmentBytes]
-func (n *Node) FetchWorkpackageImportSegments(workPackage types.WorkPackage, segmentRootLookup types.SegmentRootLookup) (importSegments [][][]byte, justifications [][][]common.Hash, err error) {
-	importSegments = make([][][]byte, len(workPackage.WorkItems))
-	justifications = make([][][]common.Hash, len(workPackage.WorkItems))
-
-	// because CE139 requires erasureroot
-	erasureRootIndex := make(map[common.Hash]*SpecIndex)
-	workItemErasureRootsMapping := make([][]*SpecIndex, len(workPackage.WorkItems))
-	for workItemIdx, workItem := range workPackage.WorkItems {
-		workItemErasureRootsMapping[workItemIdx] = make([]*SpecIndex, len(workItem.ImportedSegments))
-		for idx, ImportedSegment := range workItem.ImportedSegments {
-			// these are actually work package hashes or segment roots
-			wpi := n.SpecSearch(ImportedSegment.RequestedHash)
-			if wpi != nil {
-				oldwpi, exists := erasureRootIndex[wpi.Spec.ErasureRoot]
-				if exists {
-					oldwpi.AddIndex(uint16(ImportedSegment.Index))
-					workItemErasureRootsMapping[workItemIdx][idx] = oldwpi
-				} else {
-					erasureRootIndex[wpi.Spec.ErasureRoot] = wpi
-					workItemErasureRootsMapping[workItemIdx][idx] = wpi
-					wpi.AddIndex(uint16(ImportedSegment.Index))
-				}
-			} else {
-				log.Warn(module, "SpecSearch returned nil")
-				return importSegments, justifications, fmt.Errorf("SpecSearch returned nil")
-			}
-		}
-	}
-
-	// Use makerequest CE139 to fetch the segments by erasureRoots and indices
-	receiveSegmentMapping := make(map[common.Hash][][]byte)
-	justificationsMapping := make(map[common.Hash][][]common.Hash)
-	for erasureRoot, specIndex := range erasureRootIndex {
-		receiveSegments, specJustifications, err := n.reconstructSegments(specIndex)
-		if err != nil {
-			log.Error(debugDA, "reconstructSegments", "err", err)
-			return importSegments, justifications, err
-		}
-		if len(receiveSegments) != len(specIndex.Indices) {
-			panic("receiveSegments and specIndex.Indices length mismatch")
-		}
-		receiveSegmentMapping[erasureRoot] = receiveSegments
-		justificationsMapping[erasureRoot] = specJustifications
-	}
-
-	// Remap the segments to [workItenIndex][importedSegmentIndex][bytes]
-	for workItemIndex, workItem := range workPackage.WorkItems {
-		for idx, _ := range workItem.ImportedSegments {
-			wpi := workItemErasureRootsMapping[workItemIndex][idx]
-
-			if wpi == nil {
-				panic("wpi is nil2")
-			} else {
-				receivedSegments, exists := receiveSegmentMapping[wpi.Spec.ErasureRoot]
-				if !exists {
-					log.Error(debugDA, "Missing segments for erasureRoot %v\n", wpi.Spec.ErasureRoot)
-					continue
-				} else {
-					importSegments[workItemIndex] = receivedSegments
-					j, existJ := justificationsMapping[wpi.Spec.ErasureRoot]
-					if existJ {
-						justifications[workItemIndex] = j
-					}
-				}
-			}
-		}
-	}
-	log.Trace(debugDA, "[N%d] WP=%v Final importSegments: %x\n", n.id, workPackage.Hash(), importSegments)
-
-	return importSegments, justifications, nil
 }

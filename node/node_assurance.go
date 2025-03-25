@@ -79,9 +79,9 @@ func (n *Node) assureData(g types.Guarantee) (err error) {
 		return
 	}
 
-	err = n.StoreSpec(spec)
+	err = n.StoreWorkReport(g.Report)
 	if err != nil {
-		log.Error(debugDA, "assureData:StoreSpec", "n", n.String(), "err", err)
+		log.Error(debugDA, "assureData:StoreWorkReport", "n", n.String(), "err", err)
 		return
 	}
 

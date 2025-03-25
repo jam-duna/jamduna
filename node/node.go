@@ -1063,9 +1063,9 @@ func (n *Node) extendChain() error {
 func (n *Node) assureNewBlock(b *types.Block) error {
 	if len(b.Extrinsic.Guarantees) > 0 {
 		for _, g := range b.Extrinsic.Guarantees {
-			err := n.StoreSpec(g.Report.AvailabilitySpec)
+			err := n.StoreWorkReport(g.Report)
 			if err != nil {
-				log.Error(debugDA, "assureData:StoreSpec", "n", n.String(), "err", err)
+				log.Error(debugDA, "assureData:StoreWorkReport", "n", n.String(), "err", err)
 			}
 			n.assureData(g)
 		}
@@ -1158,11 +1158,11 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 		}
 	}
 	for _, p := range proofpages {
-		allsegmentindices = append(allsegmentindices, si.Spec.ExportedSegmentLength+p)
+		allsegmentindices = append(allsegmentindices, si.WorkReport.AvailabilitySpec.ExportedSegmentLength+p)
 	}
 	for i := range types.TotalValidators {
 		requests_original[i] = CE139_request{
-			ErasureRoot:    si.Spec.ErasureRoot,
+			ErasureRoot:    si.WorkReport.AvailabilitySpec.ErasureRoot,
 			SegmentIndices: allsegmentindices,
 			ShardIndex:     uint16(i),
 		}
@@ -1236,14 +1236,18 @@ func (n *Node) reconstructSegments(si *SpecIndex) (segments [][]byte, justificat
 		}
 		leafHash := recoveredPageProof.LeafHashes[subTreeIdx]
 		derived_globalRoot_j0 := trie.VerifyCDTJustificationX(leafHash.Bytes(), int(segmentIndex), fullJustification, 0)
-		if common.BytesToHash(derived_globalRoot_j0) != common.BytesToHash(si.Spec.ExportedSegmentRoot[:]) {
+		if common.BytesToHash(derived_globalRoot_j0) != common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]) {
 			log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "derived_globalRoot_j0", derived_globalRoot_j0)
 			return segments, justifications, err
 		} else {
-			log.Trace(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.Spec.ExportedSegmentRoot[:]))
+			log.Trace(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))
 		}
 		justifications[i] = fullJustification
 	}
+	if len(segmentsonly) != indicesLen {
+		panic(123444)
+	}
+	fmt.Printf("reconstructSegments: %d segments, %d justifications\n", len(segmentsonly), len(justifications))
 	return segmentsonly, justifications, nil
 }
 
@@ -1300,11 +1304,11 @@ func (n *Node) reconstructPackageBundleSegments(erasureRoot common.Hash, blength
 	}
 	workPackageBundle = workPackageBundleRaw.(types.WorkPackageBundle)
 
-	// IMPORTANT: VerifyBundle checks all imported segments against the justifications contained within the bundle
+	// IMPORTANT: VerifyBundle checks all imported segments against the justifications contained within the bundle, which hash up to the segmentRoot hashes in the segmentRootLookup
 	verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup)
 	if verifyErr != nil || !verified {
-		//return work_report, verifyErr
 		log.Warn(module, "executeWorkPackageBundle: VerifyBundle failed", "err", verifyErr)
+		// TODO: reconstruct the imported segments
 	}
 	return workPackageBundle, nil
 }

@@ -580,14 +580,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 
 	n.workReportsMutex.Unlock()
 
-	//TODO: use segmentRootLookup
 	spec := workReport.AvailabilitySpec
-	err = n.StoreSpec(spec)
-	if err != nil {
-		fmt.Printf("%s [auditWorkReport:StoreSpec] ERR %v\n", n.String(), err)
-		return
-	}
-
 	workPackageHash := spec.WorkPackageHash
 
 	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
@@ -595,6 +588,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
 	if err != nil {
 		log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
+		return
 	}
 	if workPackageBundle.PackageHash() != workPackageHash {
 		log.Error(debugAudit, "auditWorkReport:FetchWorkPackageBundle package mismatch")

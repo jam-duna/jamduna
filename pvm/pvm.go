@@ -1557,7 +1557,7 @@ func (vm *VM) step(stepn int) error {
 		log.Debug(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
 		return nil
 	}
-	pvmHash := vm.V1Hash()
+
 	id := 99
 	if vm.hostenv != nil {
 		id = int(vm.hostenv.GetID())
@@ -1566,7 +1566,7 @@ func (vm *VM) step(stepn int) error {
 	if vm.ServiceMetadata != nil {
 		md = string(vm.ServiceMetadata)
 	}
-	log.Debug(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "pvmHash", common.Str(pvmHash), "reg", vm.ReadRegisters())
+	log.Debug(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "reg", vm.ReadRegisters())
 	return nil
 }
 
@@ -2844,7 +2844,7 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Register(opcode byte, operands 
 	switch opcode {
 	case SBRK:
 		result = vm.sbrk(valueA)
-		
+
 	case COUNT_SET_BITS_64:
 		b_valueA := B_encode(valueA)
 		count := strings.Count(b_valueA, "1")

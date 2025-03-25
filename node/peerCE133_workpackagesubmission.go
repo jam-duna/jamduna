@@ -128,14 +128,13 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		}
 	}
 
-	newItem := &WPQueueItem{
-		wp:         newReq.WorkPackage,
-		coreIndex:  newReq.CoreIndex,
-		extrinsics: newReq.Extrinsic,
-		addTS:      time.Now().Unix(),
-
+	// only the FIRST guarantor will receive this
+	n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
+		workPackage:        newReq.WorkPackage,
+		coreIndex:          newReq.CoreIndex,
+		extrinsics:         newReq.Extrinsic,
+		addTS:              time.Now().Unix(),
 		nextAttemptAfterTS: time.Now().Unix(),
-	}
-	n.workPackageQueue.Store(newItem.wp.Hash(), newItem)
+	})
 	return nil
 }

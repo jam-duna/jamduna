@@ -21,7 +21,7 @@ import (
 )
 
 type Jam struct {
-	*NodeContent
+	*Node
 }
 
 var MethodDiscriptionMap = map[string]string{
@@ -31,13 +31,14 @@ var MethodDiscriptionMap = map[string]string{
 	"GetBlockBySlot":           "GetBlockBySlot(slot string) -> string",
 	"GetState":                 "GetState(headerHash hexstring) -> string",
 	"GetService":               "GetService(serviceIndex string) -> string",
-	"GetServicePreimage":       "GetServicePreimage(serviceIndex string, codeHash hexstring) -> hexstring",
-	"GetServiceLookup":         "GetServiceLookup(serviceIndex string, codeHash hexstring, length string) -> json string",
-	"GetServiceStorage":        "GetServiceStorage(serviceIndex string, codeHash hexstring) -> hexstring",
+	"GetServicePreimage":       "GetServicePreimage(serviceIndex string, preimage hexstring) -> hexstring",
+	"GetServiceLookup":         "GetServiceLookup(serviceIndex string, preimage hexstring, length string) -> json string",
+	"GetServiceStorage":        "GetServiceStorage(serviceIndex string, key hexstring) -> hexstring",
 	"GetServiceCode":           "GetServiceCode(serviceIndex string) -> json string",
 	"SendPreimageAnnouncement": "SendPreimageAnnouncement(serviceIndex string, preimage hexstring) -> string",
-	"SendWorkPackage":          "SendWorkPackage(workPackage json string) -> string",
-	"GetRefineContext":         "GetRefineContext() -> string",
+	"GetWorkPackageByHash":     "GetWorkPackageByHash(workPackageHash string) -> json WorkReport",
+	"AuditWorkPackageByHash":   "AuditWorkPackageByHash(workPackageHash string) -> json WorkReport",
+	"GetSegment":               "GetSegment(requestedHash string, index int) -> hex string",
 	"NewService":               "NewService(serviceName string) -> string",
 	"Encode":                   "Encode(objectType string, input string) -> hexstring",
 	"Decode":                   "Decode(objectType string, input string) -> json string",
@@ -239,6 +240,97 @@ func (j *Jam) GetServiceStorage(req []string, res *string) error {
 		return fmt.Errorf("ReadServiceStorage failed:%v", err)
 	}
 	*res = common.Bytes2Hex(storage)
+	return nil
+}
+
+func (n *Node) getSegments(requestedHash common.Hash, index []uint16) (segment [][]byte, justifications [][]common.Hash, err error) {
+	si := n.WorkReportSearch(requestedHash)
+	if si == nil {
+		return nil, nil, fmt.Errorf("requestedHash not found")
+	}
+	for _, idx := range index {
+		si.AddIndex(idx)
+	}
+	segments, justifications, err := n.reconstructSegments(si)
+	if err != nil {
+		return nil, nil, err
+	}
+	if paranoidVerification {
+		// for each segment, verify the justification (which is a pageproof)
+
+	}
+	return segments, justifications, nil
+}
+
+// GetWorkPackageByHash(workPackageHash string) -> json WorkReport
+func (j *Jam) GetWorkPackageByHash(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("Invalid number of arguments")
+	}
+	workPackageHash := common.HexToHash(req[0])
+	si := j.WorkReportSearch(workPackageHash)
+	workReport := si.WorkReport
+	*res = workReport.String()
+	return nil
+}
+
+// AuditWorkPackageByHash(workPackageHash string) -> json WorkReport
+func (j *Jam) AuditWorkPackageByHash(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("Invalid number of arguments")
+	}
+	workPackageHash := common.HexToHash(req[0])
+	si := j.WorkReportSearch(workPackageHash)
+	workReport := si.WorkReport
+	spec := workReport.AvailabilitySpec
+	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
+	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
+	workPackageBundle, err := j.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
+	if err != nil {
+		return err
+	}
+
+	workReport2, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
+	if err != nil {
+		return nil
+	}
+
+	// TODO: check that workReport == workReport2
+	*res = workReport2.String()
+	return nil
+}
+
+// GetSegment(requestedHash string, index int) -> hex string
+func (j *Jam) GetSegments(req []string, res *string) (err error) {
+	if len(req) != 2 {
+		return fmt.Errorf("Invalid number of arguments")
+	}
+	requestedHash := common.HexToHash(req[0])
+
+	var indices []uint16
+	indicesStr := req[1]
+	err = json.Unmarshal([]byte(indicesStr), &indices)
+	if err != nil {
+		return err
+	}
+
+	segments, justifications, err := j.getSegments(requestedHash, indices)
+	if err != nil {
+		return err
+	}
+	type getSegmentsResponse struct {
+		Segments       [][]byte
+		Justifications [][]common.Hash
+	}
+	response := getSegmentsResponse{
+		Segments:       segments,
+		Justifications: justifications,
+	}
+	r, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	*res = string(r)
 	return nil
 }
 
@@ -444,9 +536,9 @@ func (j *Jam) Decode(req []string, res *string) error {
 }
 
 // server ========================================
-func (n *NodeContent) StartRPCServer() {
+func (n *Node) StartRPCServer() {
 	jam := new(Jam)
-	jam.NodeContent = n
+	jam.Node = n
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
 	sock_name := n.node_name

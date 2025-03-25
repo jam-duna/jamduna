@@ -208,6 +208,7 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 		// p.node.UpdateWorkPackageContext(ctx)
 		defer span.End()
 	}
+
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
 	for _, item := range segmentRootLookup {
 		lookupItem := JAMSNPSegmentRootMapping{
@@ -217,12 +218,18 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 		segmentroots = append(segmentroots, lookupItem)
 	}
 
-	bundleBytes := bundle.Bytes()
+	encodedBundle := bundle.Bytes()
+	//altbundle, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
+	//bp := altbundle.(types.WorkPackageBundle)
+
+	// fmt.Printf("Original WP: %s %s\n", bundle.WorkPackage.Hash(), bundle.String())
+	// fmt.Printf("Recovered WP: %s %s\n", bp.WorkPackage.Hash(), bp.String())
+
 	req := JAMSNPWorkPackageShare{
 		CoreIndex:     coreIndex,
 		Len:           uint8(len(segmentroots)),
 		SegmentRoots:  segmentroots,
-		EncodedBundle: bundleBytes,
+		EncodedBundle: encodedBundle,
 	}
 
 	reqBytes, err := req.ToBytes()
@@ -303,33 +310,22 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		received_segmentRootLookup = append(received_segmentRootLookup, item)
 	}
 
-	// should use original's segmentRootLookup --- no need to fetch here
-	segmentRootLookup, err := n.GetSegmentRootLookup(bp.WorkPackage)
-	if err != nil {
-		fmt.Printf("[N%v] AAA [auditWorkReport:GetSegmentRootLookup] ERR %v\n", n.id, err)
-		return
-	}
-
-	matched, err := CompareSegmentRootLookup(received_segmentRootLookup, segmentRootLookup)
-	if !matched {
-		fmt.Printf("[N%v] Segment root lookup mismatch at indices: %v\n", n.id, err)
-		return fmt.Errorf("segment root lookup mismatch")
-	}
 	// Since the bundle is not trusted, do a VerifyBundle first
-	verified, err := n.VerifyBundle(&bp, segmentRootLookup)
+	verified, err := n.VerifyBundle(&bp, received_segmentRootLookup)
 	if !verified {
-		fmt.Printf("!!! [N%v] NOT Verified: %v\n", n.id, verified)
+		log.Warn(module, "VerifyBundle failure", "node", n.id, "verified", verified)
+		// TODO: reconstruct the segments
 	}
 	if err != nil {
 		return
 	}
-	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, bp, segmentRootLookup, false)
+	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
 	if err != nil {
 		return
 	} else {
 		n.workReportsCh <- workReport
 	}
-	//fmt.Printf("WR %v\n", workReport.String())
+	//fmt.Printf("WR %v\n", workReport.String())z
 
 	//TODO: Shawn this is potentially problematic. How can we have deterministic ValidatorIndex here???
 	signerSecret := n.GetEd25519Secret()
