@@ -1116,7 +1116,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.Imports = importsegments
 
 	Standard_Program_Initialization(vm, a) // eq 264/265
-	vm.Execute(types.EntryPointRefine)
+	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
 
 	recordExecuteRefineTestVector(workitemIndex, workPackage, authorization, importsegments, export_count, extrinsics, p_a, a, r, res)
@@ -1138,7 +1138,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes = append(input_bytes, encoded_elements...)
 	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
 	vm.Gas = int64(g)
-	vm.Execute(types.EntryPointAccumulate) // F ∈ Ω⟨(X, X)⟩
+	vm.Execute(types.EntryPointAccumulate, false) // F ∈ Ω⟨(X, X)⟩
 	// }
 	xs, _ = vm.X.GetX_s()
 	r, res = vm.getArgumentOutputs()
@@ -1149,7 +1149,7 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	vm.ServiceAccount = service_account
 
 	Standard_Program_Initialization(vm, arguments) // eq 264/265
-	vm.Execute(types.EntryPointOnTransfer)
+	vm.Execute(types.EntryPointOnTransfer, false)
 	// return vm.getArgumentOutputs()
 	r.Err = vm.ResultCode
 	r.Ok = []byte{}
@@ -1162,13 +1162,13 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	a = append(a, common.Uint16ToBytes(c)...)
 	// vm.setArgumentInputs(a)
 	Standard_Program_Initialization(vm, a) // eq 264/265
-	vm.Execute(types.EntryPointAuthorization)
+	vm.Execute(types.EntryPointAuthorization, false)
 	r, _ = vm.getArgumentOutputs()
 	return r
 }
 
 // Execute runs the program until it terminates
-func (vm *VM) Execute(entryPoint int) error {
+func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	vm.terminated = false
 
 	// A.2 deblob
@@ -1195,6 +1195,9 @@ func (vm *VM) Execute(entryPoint int) error {
 	for !vm.terminated {
 		if err := vm.step(stepn); err != nil {
 			return err
+		}
+		if vm.hostCall && is_child {
+			return nil
 		}
 		// host call invocation
 		if vm.hostCall {

@@ -2584,9 +2584,11 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 	service_authcopy := testServices["auth_copy"]
 	fib2_child_code, _ := getServices([]string{"corevm_child"}, false)
 	fib2_child_codehash := fib2_child_code["corevm_child"].CodeHash
+
 	fib2_child_code_length := uint32(len(fib2_child_code["corevm_child"].Code))
 	fib2_child_code_length_bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
+	fmt.Printf("CHILD_CODE: %d %s\n", fib2_child_code_length, fib2_child_codehash)
 
 	n1 := nodes[1]
 	n4 := nodes[4]

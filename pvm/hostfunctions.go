@@ -940,7 +940,7 @@ func (vm *VM) hostInvoke() {
 		Ram:      m_n.U,
 	}
 
-	new_machine.Execute(0)
+	new_machine.Execute(int(new_machine.pc), true)
 	m_n.I = new_machine.pc
 	m_n.U = new_machine.Ram
 	vm.RefineM_map[uint32(n)] = m_n
@@ -967,6 +967,7 @@ func (vm *VM) hostInvoke() {
 	if new_machine.ResultCode == types.PVM_HOST {
 		vm.WriteRegister(7, types.PVM_HOST)
 		vm.WriteRegister(8, uint64(new_machine.host_func_id))
+		m_n.I = new_machine.pc + 1
 		return
 	}
 
@@ -1419,9 +1420,9 @@ func (vm *VM) hostPeek() {
 }
 
 func (vm *VM) hostPoke() {
-	n, _ := vm.ReadRegister(7)
-	s, _ := vm.ReadRegister(8)
-	o, _ := vm.ReadRegister(9)
+	n, _ := vm.ReadRegister(7) // machine
+	s, _ := vm.ReadRegister(8) // source
+	o, _ := vm.ReadRegister(9) // dest
 	z, _ := vm.ReadRegister(10)
 	m_n, ok := vm.RefineM_map[uint32(n)]
 	if !ok {

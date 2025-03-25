@@ -68,7 +68,7 @@ func pvm_test(t *testing.T, tc TestCase) (error, int) {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
 
-	pvm.Execute(int(tc.InitialPC))
+	pvm.Execute(int(tc.InitialPC), false)
 	// Check the registers
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
 		fmt.Printf("Register match for test %s \n", tc.Name)
