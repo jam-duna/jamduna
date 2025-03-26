@@ -290,7 +290,7 @@ func (j *Jam) AuditWorkPackageByHash(req []string, res *string) error {
 		return err
 	}
 
-	workReport2, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
+	workReport2, _, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
 	if err != nil {
 		return nil
 	}

@@ -16,7 +16,14 @@ const (
 	debugSpec = false
 )
 
-func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
+type AvailabilitySpecifierDerivation struct {
+	BClubs        []common.Hash             `json:"bClubs"`
+	SClubs        []common.Hash             `json:"sClubs"`
+	BundleChunks  []types.DistributeECChunk `json:"bundle_chunks"`
+	SegmentChunks []types.DistributeECChunk `json:"segment_chunks"`
+}
+
+func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, d AvailabilitySpecifierDerivation) {
 	// compile wp into b
 	b := package_bundle.Bytes() // check
 	// Build b♣ and s♣
@@ -26,6 +33,12 @@ func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageB
 	// ExportedSegmentRoot = CDT(segments)
 	cdt := trie.NewCDMerkleTree(export_segments)
 
+	d = AvailabilitySpecifierDerivation{
+		BClubs:        bClubs,
+		SClubs:        sClubs,
+		BundleChunks:  bEcChunks,
+		SegmentChunks: sEcChunksArr,
+	}
 	availabilitySpecifier := types.AvailabilitySpecifier{
 		WorkPackageHash:       package_bundle.WorkPackage.Hash(),
 		BundleLength:          uint32(len(b)),
@@ -34,7 +47,7 @@ func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageB
 		ExportedSegmentLength: uint16(len(export_segments)),
 	}
 
-	return &availabilitySpecifier, bClubs, sClubs, bEcChunks, sEcChunksArr
+	return &availabilitySpecifier, d
 }
 
 // this is the default justification from (b,s) to erasureRoot
@@ -355,7 +368,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 }
 
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
-func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantor bool) (work_report types.WorkReport, err error) {
+func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
@@ -381,7 +394,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		service_index = workItem.Service
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
-			return work_report, fmt.Errorf("executeWorkPackageBundle: Code not found")
+			return work_report, d, fmt.Errorf("executeWorkPackageBundle: Code not found")
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
 			log.Crit(module, "executeWorkPackageBundle: Code and CodeHash Mismatch")
@@ -430,7 +443,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		log.Debug(debugDA, "DA: WrangledResults", "n", types.DecodedWrangledResults(&o))
 	}
 
-	spec, bClubs, sClubs, bECChunks, sECChunksArray := n.NewAvailabilitySpecifier(package_bundle, segments)
+	spec, d := n.NewAvailabilitySpecifier(package_bundle, segments)
 
 	workReport := types.WorkReport{
 		AvailabilitySpec:  *spec,
@@ -443,7 +456,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	}
 	log.Debug(debugDA, "executeWorkPackageBundle", "n", n.id, "workReport", workReport.String())
 	log.Debug(debugG, "executeWorkPackageBundle", "workreporthash", common.Str(workReport.Hash()), "erasureRoot", spec.ErasureRoot)
-	n.StoreMeta_Guarantor(spec, bClubs, sClubs, bECChunks, sECChunksArray)
+	n.StoreMeta_Guarantor(spec, d)
 
-	return workReport, err
+	return workReport, d, err
 }

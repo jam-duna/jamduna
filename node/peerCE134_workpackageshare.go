@@ -319,7 +319,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		return
 	}
-	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
+	workReport, _, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
 	if err != nil {
 		return
 	} else {

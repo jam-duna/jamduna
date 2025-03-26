@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-
-	"time"
+	"sort"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -43,9 +42,9 @@ const (
 	INVOKE            = 25
 	EXPUNGE           = 26
 
-	LOG      = 100
-	FOR_TEST = 105
-	DELAY    = 99
+	MANIFEST = 64
+
+	LOG = 100
 )
 
 const maxUint64 = ^uint64(0)
@@ -124,9 +123,10 @@ var hostIndexMap = map[string]int{
 	"Void":              VOID,
 	"Invoke":            INVOKE,
 	"Expunge":           EXPUNGE,
+
 	// Other
 	"Log":      LOG,
-	"For_test": FOR_TEST,
+	"Manifest": MANIFEST,
 }
 
 // Function to retrieve index and error cases
@@ -357,8 +357,8 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.hostLog()
 		return true, nil
 
-	case DELAY:
-		vm.hostDelay()
+	case MANIFEST:
+		vm.hostManifest()
 		return true, nil
 
 	default:
@@ -1357,6 +1357,49 @@ func (vm *VM) hostExport() {
 	}
 }
 
+func (vm *VM) hostManifest() {
+	var manifest []uint32
+	for pageIndex, page := range vm.Ram.Pages {
+		m := uint32(0)
+		if page.Access.Accessed && page.Access.Dirty {
+			m = uint32(pageIndex) | 0xC0000000
+		} else if page.Access.Accessed {
+			// it must be imported
+			m = uint32(pageIndex) | 0x80000000
+		} else if page.Access.Dirty {
+			// it must be exported
+			m = uint32(pageIndex) | 0x40000000
+		}
+		manifest = append(manifest, m)
+	}
+	sort.Slice(manifest, func(i, j int) bool { return manifest[i] < manifest[j] })
+	manifestBytes := make([]byte, 4*len(manifest))
+	for i, m := range manifest {
+		binary.LittleEndian.PutUint32(manifestBytes[i*4:], m)
+	}
+	o, _ := vm.ReadRegister(7)
+	z, _ := vm.ReadRegister(8) // cap on the size of the manifest  (3072*4)
+	if z%4 != 0 {
+		//  should be a multiple of 4 though!
+		vm.WriteRegister(7, HUH)
+		vm.HostResultCode = HUH
+		return
+	}
+	if z < uint64(len(manifestBytes)) {
+		manifestBytes = manifestBytes[:z]
+	}
+	// write manifestBytes bytes to vm
+	errCode := vm.Ram.WriteRAMBytes(uint32(o), manifestBytes[:])
+	if errCode != OK {
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
+		return
+	}
+	vm.WriteRegister(7, uint64(len(manifestBytes)))
+	vm.HostResultCode = OK
+	return
+}
+
 func (vm *VM) hostMachine() {
 	po, _ := vm.ReadRegister(7)
 	pz, _ := vm.ReadRegister(8)
@@ -1528,14 +1571,6 @@ func (vm *VM) hostZero() {
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
-}
-
-// For empty test case
-func (vm *VM) hostDelay() {
-	delay_seconds, _ := vm.ReadRegister(7)
-	time.Sleep(time.Duration(delay_seconds) * time.Second)
-	vm.HostResultCode = OK
-	vm.WriteRegister(7, OK)
 }
 
 // func (vm *VM) hostSP1Groth16Verify()

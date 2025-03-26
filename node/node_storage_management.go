@@ -183,22 +183,22 @@ func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []commo
 	return
 }
 
-func (n *NodeContent) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk) {
+func (n *NodeContent) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, d AvailabilitySpecifierDerivation) {
 	erasure_root_u := as.ErasureRoot
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
-	bChunkJson, _ := json.Marshal(bECChunks)
+	bChunkJson, _ := json.Marshal(d.BundleChunks)
 	n.WriteRawKV(erasure_bKey, bChunkJson)
 
 	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasure_root_u)
-	sChunkJson, _ := json.Marshal(sECChunksArray)
+	sChunkJson, _ := json.Marshal(d.SegmentChunks)
 	n.WriteRawKV(erasure_sKey, sChunkJson) // this has the segments ***AND*** proof pages
 
 	erasure_bClubsKey := fmt.Sprintf("erasureBClubs-%v", erasure_root_u)
-	bClubsJson, _ := json.Marshal(bClubs)
+	bClubsJson, _ := json.Marshal(d.BClubs)
 	n.WriteRawKV(erasure_bClubsKey, bClubsJson)
 
 	erasure_sClubsKey := fmt.Sprintf("erasureSClubs-%v", erasure_root_u)
-	sClubsJson, _ := json.Marshal(sClubs)
+	sClubsJson, _ := json.Marshal(d.SClubs)
 
 	n.WriteRawKV(erasure_sClubsKey, sClubsJson)
 }

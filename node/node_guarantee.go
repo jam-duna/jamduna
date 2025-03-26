@@ -3,7 +3,9 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -161,6 +163,34 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 	return bundle, segmentRootLookup, nil
 }
 
+type GuaranteeDerivation struct {
+	Bundle            types.WorkPackageBundle         `json:"bundle"`
+	CoreIndex         uint16                          `json:"core_index"`
+	SegmentRootLookup types.SegmentRootLookup         `json:"segment_root_lookup"`
+	Guarantee         types.Guarantee                 `json:"guarantee"`
+	SpecDerivation    AvailabilitySpecifierDerivation `json:"spec_derivation"`
+}
+
+func saveGuaranteeDerivation(gd GuaranteeDerivation) (err error) {
+	// Encode to JSON
+	data, err := json.MarshalIndent(gd, "", "  ")
+	if err != nil {
+		return err
+	}
+	// check if there is a directory to write called refine_testvector
+	if _, err := os.Stat("guarantees"); os.IsNotExist(err) {
+		if err := os.Mkdir("guarantees", 0755); err != nil {
+			return err
+		}
+	}
+	// Write to file
+	filename := fmt.Sprintf("guarantees/%s.json", gd.Bundle.WorkPackage.Hash())
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	if n.store.SendTrace {
 		tracer := n.store.Tp.Tracer("NodeTracer")
@@ -171,8 +201,6 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		defer span.End()
 	}
 	// counting the time for this function execution
-
-	timer := time.Now()
 	coreIndex := wpItem.coreIndex
 
 	// here we are a first guarantor building a bundle (imported segments, justifications, extrinsics)
@@ -198,13 +226,16 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
 	coworkers := n.GetCoreCoWorkerPeersByStateDB(coreIndex, curr_statedb)
 	var guarantee types.Guarantee
+	var report types.WorkReport
+	var d AvailabilitySpecifierDerivation
 	for _, coworker := range coworkers {
 		wg.Add(1)
 		go func(coworker Peer) {
 			defer wg.Done()
 			// if it's itself, execute the workpackage
 			if coworker.PeerID == n.id {
-				report, execErr := n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, true)
+				var execErr error
+				report, d, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, true)
 				if execErr != nil {
 					return
 				}
@@ -258,10 +289,13 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		}
 		guarantee.Slot = curr_statedb.GetTimeslot()
 		go n.broadcast(guarantee)
-		eclapsed := time.Since(timer)
-		log.Debug(debugG, "processWPQueueItem: outgoing guarantee for core",
-			"n", n.String(), "wph", guarantee.Report.GetWorkPackageHash().String_short(), "core", guarantee.Report.CoreIndex,
-			"elapsed", eclapsed.String())
+		saveGuaranteeDerivation(GuaranteeDerivation{
+			Bundle:            bundle,
+			CoreIndex:         coreIndex,
+			SegmentRootLookup: segmentRootLookup,
+			Guarantee:         guarantee,
+			SpecDerivation:    d,
+		})
 		err := n.processGuarantee(guarantee)
 		if err != nil {
 			log.Error(debugG, "processWPQueueItem", "n", n.String(), "err", err)

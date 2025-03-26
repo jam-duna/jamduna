@@ -126,7 +126,7 @@ func buildMegItem(importedSegmentsM []types.ImportSegment, megaN int, service_co
 			CodeHash:           codehash,
 			Payload:            payloadM,
 			RefineGasLimit:     1000,
-			AccumulateGasLimit: 1000,
+			AccumulateGasLimit: 100000,
 			ImportedSegments:   importedSegmentsM,
 			ExportCount:        0,
 		},

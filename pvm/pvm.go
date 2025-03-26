@@ -3,11 +3,9 @@ package pvm
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +44,8 @@ type AccessMode struct {
 	Inaccessible bool `json:"inaccessible"` // Indicates if the page is inaccessible
 	Writable     bool `json:"writable"`     // Indicates if the page is writable
 	Readable     bool `json:"readable"`     // Indicates if the page is readable
+	Accessed     bool `json:"i"`            // Indicates if the page has been accessed and must be imported
+	Dirty        bool `json:"e"`            // Indicates if the page has been modified and must be exported
 }
 
 // MemoryPage represents a single memory page
@@ -191,9 +191,10 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 			log.Debug(debug_pvm, "Page is not writable", "currentPage", currentPage, "address", address)
 			return uint64(address)
 		}
-
 		// Ensure data allocation before writing
 		page.ensureData()
+
+		page.Access.Dirty = true
 
 		// Calculate how much data can be written to the current page
 		bytesToWrite := PageSize - pageOffset
@@ -241,6 +242,7 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		// Check against the actual slice length to avoid out-of-range errors
 		pageSize := uint32(len(page.Value))
 		endPos := pageOffset + bytesToRead
+		page.Access.Accessed = true
 
 		if endPos <= pageSize {
 			// Entire slice is within valid range
@@ -339,7 +341,7 @@ type VM struct {
 
 	// service metadata
 	ServiceMetadata []byte
-	Mode string
+	Mode            string
 }
 
 func (vm *VM) Str(logStr string) string {
@@ -1036,53 +1038,6 @@ func (vm *VM) GetServiceIndex() uint32 {
 	return vm.Service_index
 }
 
-type ExecuteRefineTestVector struct {
-	WorkItemIndex  uint32                `json:"work_item_index"`
-	WorkPackage    types.WorkPackage     `json:"work_package"`
-	Authorization  types.Result          `json:"authorization"`
-	ImportSegments [][][]byte            `json:"import_segments"`
-	ExportCount    uint16                `json:"export_count"`
-	Extrinsics     types.ExtrinsicsBlobs `json:"extrinsics"`
-	PA             common.Hash           `json:"p_a"`
-	A              []byte                `json:"a"`
-	Result         types.Result          `json:"result"`
-	GasUsed        uint64                `json:"gas_used"`
-}
-
-func recordExecuteRefineTestVector(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, a []byte, result types.Result, gasUsed uint64) {
-	testVector := ExecuteRefineTestVector{
-		WorkItemIndex:  workitemIndex,
-		WorkPackage:    workPackage,
-		Authorization:  authorization,
-		ImportSegments: importsegments,
-		ExportCount:    export_count,
-		Extrinsics:     extrinsics,
-		PA:             p_a,
-		A:              a,
-		Result:         result,
-		GasUsed:        gasUsed,
-	}
-
-	// Encode to JSON
-	data, err := json.MarshalIndent(testVector, "", "  ")
-	if err != nil {
-		fmt.Printf("Error encoding JSON: %v\n", err)
-		return
-	}
-	// check if there is a directory to write called refine_testvector
-	if _, err := os.Stat("refine_testvector"); os.IsNotExist(err) {
-		if err := os.Mkdir("refine_testvector", 0755); err != nil {
-			fmt.Printf("Error creating directory: %v\n", err)
-			return
-		}
-	}
-	// Write to file
-	filename := fmt.Sprintf("refine_testvector/refine_testvector_%s%d.json", workPackage.Hash(), workitemIndex)
-	if err := os.WriteFile(filename, data, 0644); err != nil {
-		fmt.Printf("Error writing file: %v\n", err)
-	}
-}
-
 func (vm *VM) SetCore(coreIndex uint16, firstGuarantor bool) {
 	vm.CoreIndex = coreIndex
 	if firstGuarantor {
@@ -1124,7 +1079,6 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
 
-	recordExecuteRefineTestVector(workitemIndex, workPackage, authorization, importsegments, export_count, extrinsics, p_a, a, r, res)
 	exportedSegments = vm.Exports
 	return r, res, exportedSegments
 }
