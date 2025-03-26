@@ -1,14 +1,21 @@
 ---
 - hosts: localhost
   gather_facts: false
+  vars:
+    MODE: "{{ MODE | default('next_hour') }}"
   tasks:
-    - name: Compute JAM_START_TIME on the control machine
+    - name: Determine JAM_START_TIME based on mode
       set_fact:
-        JAM_START_TIME: "{{ lookup('pipe', 'date -u -d \"45 seconds\" +\"%Y-%m-%d %H:%M:%S\"') }}"
+        JAM_START_TIME: >-
+          {% if MODE == "next_hour" %}
+          {{ lookup('pipe', 'date -u -d "1 hour" +"+%Y-%m-%d %H:00:00"') }}
+          {% else %}
+          {{ lookup('pipe', 'date -u -d "45 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
+          {% endif %}
 
     - name: Display JAM_START_TIME
       debug:
-        msg: "Using JAM_START_TIME: {{ JAM_START_TIME }}"
+        var: JAM_START_TIME
 
 - hosts: all
   serial: 1
@@ -56,34 +63,30 @@
     - name: Display completion Message
       debug:
         msg: "All instances started."
-- hosts: localhost
-  gather_facts: false
-  vars:
-    ARCHIVE_NODE_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/archive_node"
-    PEER_JSON: "/root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/peerlist/jam.json"
-    NODE_PORT: 13000
-    BLOCK_VIEWER_PORT: 14000
-    JAMWEB_PORT: 15000
-  tasks:
-    - name: Wait for all nodes to be ready
-      wait_for:
-        timeout: 10 
 
-    - name: Start archive_node on localhost
-      shell: |
-        nohup {{ ARCHIVE_NODE_PATH }} \
-          -peer {{ PEER_JSON }} \
-          -port {{ NODE_PORT }} \
-          -graph_server_port {{ BLOCK_VIEWER_PORT }} \
-          -webserverport {{ JAMWEB_PORT }} \
-          > /tmp/logs/archive_node.log 2>&1 < /dev/null &
-        echo "Archive node started."
-      args:
-        executable: /bin/bash
+# - hosts: localhost
+#   gather_facts: false
+#   vars:
+#     ARCHIVE_NODE_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/archive_node"
+#     PEER_JSON: "/root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/peerlist/jam.json" #cmd/archive_node/peerlist/jam.json
+#   tasks:
+#     - name: Wait for all nodes to be ready
+#       wait_for:
+#         timeout: 10 
 
-    - name: Display archive_node start message
-      debug:
-        msg: "archive_node started on localhost with ports {{ NODE_PORT }}, {{ BLOCK_VIEWER_PORT }}, {{ JAMWEB_PORT }}"
+#     - name: Start archive_node on localhost
+#       shell: |
+#         cd /root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/
+#         nohup make run > /tmp/logs/archive_node.log 2>&1 < /dev/null &
+#         echo "Archive node started."
+#       tags: restart_archive
+#       args:
+#         executable: /bin/bash
+
+#     - name: Display archive_node start message
+#       debug:
+#         msg: "archive_node started on localhost using 'make run' from archive_node directory."
+
 
 
 

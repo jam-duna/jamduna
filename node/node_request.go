@@ -306,6 +306,10 @@ func (n *Node) runReceiveBlock() {
 			} else {
 				log.Trace(debugBlock, fmt.Sprintf("%s Received Block Announcement from validator %d", n.String(), blockAnnouncement.Header.AuthorIndex), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "t", b.Header.Slot)
 				n.processBlock(b)
+				announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", b.Hash(), b.Header.Hash())
+				if n.hub != nil {
+					n.hub.broadcast <- []byte(announcement)
+				}
 			}
 		}
 	}

@@ -159,7 +159,7 @@ func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBloc
 	go ArchiveNode.runServer()
 	go ArchiveNode.SyncState()
 	go ArchiveNode.runJamWeb(uint16(web_port))
-	// go ArchiveNode.StartRPCServer()
+	go ArchiveNode.StartRPCServer()
 	return ArchiveNode, nil
 }
 

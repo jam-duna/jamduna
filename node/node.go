@@ -516,9 +516,11 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.StartRPCServer()
 		go node.runWPQueue()
 		// go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
-		if id == 0 {
+		host_name, _ := os.Hostname()
+		if id == 0 || host_name[:4] == "jam-" {
 			go node.runJamWeb(uint16(port+1000) + id)
 		}
+
 	}
 	return node, nil
 }
@@ -789,9 +791,19 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		if err != nil {
 			panic(err)
 		}
-		newAddr := net.JoinHostPort(host, "13000")
+		newAddr := net.JoinHostPort(host, "13370")
 		fmt.Printf("change port to %s\n", newAddr)
-		n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
+		if _, ok := n.peersInfo[validatorIndex]; !ok {
+			n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
+		} else {
+			for {
+				validatorIndex++
+				if _, ok := n.peersInfo[validatorIndex]; !ok {
+					n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
+					break
+				}
+			}
+		}
 	}
 
 	for {

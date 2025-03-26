@@ -79,8 +79,16 @@ func main() {
 	flag.StringVar(&config.NodeName, "metadata", "Alice", "Node metadata")
 	flag.Parse()
 	if start_time != "" {
+		for len(start_time) > 0 && (start_time[0] < '0' || start_time[0] > '9') {
+			start_time = start_time[1:]
+		}
+		if len(start_time) > 0 && start_time[len(start_time)-1] == ' ' {
+			// Remove the space at the end
+			start_time = start_time[:len(start_time)-1]
+		}
 		startTime, err := time.Parse("2006-01-02 15:04:05", start_time)
 		if err != nil {
+			fmt.Printf("start_time: %s\n", start_time)
 			fmt.Println("Invalid time format. Use YYYY-MM-DD HH:MM:SS")
 			return
 		}

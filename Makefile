@@ -4,7 +4,7 @@ SRC := jam.go
 NETWORK  ?= tiny
 NUM_NODES ?= 6
 DEFAULT_PORT ?= 9900
-BRANCH ?= shawn_jam
+BRANCH ?= jam_update
 JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 

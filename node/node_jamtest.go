@@ -1,3 +1,6 @@
+//go:build network_test
+// +build network_test
+
 package node
 
 import (

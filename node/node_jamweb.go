@@ -180,7 +180,6 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, storage *storage.StateDBStorage) {
 	// read all the block json from the block_data_dir
-
 	files, err := ioutil.ReadDir(block_data_dir)
 	if err != nil {
 		log.Crit("jamweb", "ReadDir error", err)
@@ -226,6 +225,11 @@ func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, st
 
 		block := stf.Block
 		new_statedb.Block = &block
+		err = n.StoreBlock(&block, 9999, false)
+		if err != nil {
+			log.Crit("jamweb", "StoreBlock error", err)
+			continue
+		}
 		// Apply the block to the state
 		fmt.Printf("applied block parent %v, header %v, timeslot %v\n", block.Header.ParentHeaderHash, block.Header.Hash(), block.Header.Slot)
 		n.addStateDB(new_statedb)
