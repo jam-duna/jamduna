@@ -18,6 +18,13 @@ type CBlock struct {
 	Extrinsic ExtrinsicData `json:"extrinsic"`
 }
 
+type SBlock struct {
+	Header     BlockHeader   `json:"header"`
+	Extrinsic  ExtrinsicData `json:"extrinsic"`
+	HeaderHash common.Hash   `json:"header_hash"`
+	Timestamp  uint64        `json:"timestamp"`
+}
+
 func NewBlock() *Block {
 	//var b Block
 	b := &Block{}
@@ -163,13 +170,20 @@ func (b *Block) Str() string {
 	return out
 }
 
-func (b *Block) String() string {
-	enc, err := json.MarshalIndent(b, "", "  ")
+func ToJSON(v interface{}) string {
+	enc, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		// Handle the error according to your needs.
 		return fmt.Sprintf("Error marshaling JSON: %v", err)
 	}
 	return string(enc)
+}
+
+func (b *Block) String() string {
+	return ToJSON(b)
+}
+
+func (b *SBlock) String() string {
+	return ToJSON(b)
 }
 
 func (b *Block) Tickets() []Ticket {

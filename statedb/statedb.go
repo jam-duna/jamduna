@@ -729,11 +729,7 @@ func CheckingAllState(t *trie.MerkleTree, t2 *trie.MerkleTree) (bool, error) {
 }
 
 func (s *StateDB) String() string {
-	enc, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return types.ToJSON(s)
 }
 
 func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
@@ -1204,12 +1200,9 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		if err := os.MkdirAll("../jamtestvectors/seals", 0o755); err != nil {
 			return nil, fmt.Errorf("failed to mkdir seals: %w", err)
 		}
-		jsonData, err := json.MarshalIndent(material, "", "  ")
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal SealBlockMaterial: %w", err)
-		}
+		jsonData := types.ToJSON(material)
 		fileName := fmt.Sprintf("../jamtestvectors/seals/%d-%d.json", material.T, validatorIdx)
-		if err := ioutil.WriteFile(fileName, jsonData, 0o644); err != nil {
+		if err := ioutil.WriteFile(fileName, []byte(jsonData), 0o644); err != nil {
 			return nil, fmt.Errorf("failed to write SealBlockMaterial to file: %w", err)
 		}
 	}

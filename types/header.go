@@ -146,12 +146,7 @@ func (b *BlockHeader) BytesWithoutSig() []byte {
 }
 
 func (b *BlockHeader) String() string {
-	enc, err := json.MarshalIndent(b, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(b)
 }
 
 func (b *BlockHeader) ConvertTicketsMark() (*TicketsMark, bool, error) {

@@ -75,28 +75,69 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 
 func (j *Jam) GetBlockByHash(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
 	}
-	headerHashStr := req[0]
-	headerHash := common.HexToHash(headerHashStr)
-	block, err := j.NodeContent.GetBlockByHeaderHash(headerHash)
-	if err != nil {
-		return err
+
+	input := req[0]
+	var block *types.SBlock // Replace 'Block' with the actual type returned by your methods.
+	var err error
+
+	switch input {
+	case "latest":
+		slot := j.NodeContent.GetLatestBlockSlot()
+		block, err = j.NodeContent.GetStoredBlockBySlot(slot)
+		if err != nil {
+			return fmt.Errorf("failed to get latest block by slot %d: %w", slot, err)
+		}
+	case "best":
+		slot := j.NodeContent.GetBestBlockSlot()
+		block, err = j.NodeContent.GetStoredBlockBySlot(slot)
+		if err != nil {
+			return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
+		}
+	default:
+		headerHash := common.HexToHash(input)
+		block, err = j.NodeContent.GetBlockByHeaderHash(headerHash)
+		if err != nil {
+			return fmt.Errorf("failed to get block by header hash %s: %w", headerHash.String(), err)
+		}
 	}
+
 	*res = block.String()
 	return nil
 }
 
+func (n *NodeContent) GetLatestBlockSlot() uint32 {
+	n.statedbMutex.Lock()
+	defer n.statedbMutex.Unlock()
+	return n.statedb.GetTimeslot()
+}
+
+func (n *NodeContent) GetBestBlockSlot() uint32 {
+	return n.GetLatestBlockSlot()
+}
+
 func (j *Jam) GetBlockBySlot(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
 	}
-	slotStr := req[0]
-	slot, err := strconv.ParseUint(slotStr, 10, 32)
-	if err != nil {
-		return err
+
+	var slot uint32
+	input := req[0]
+	switch input {
+	case "latest":
+		slot = j.NodeContent.GetLatestBlockSlot()
+	case "best":
+		slot = j.NodeContent.GetBestBlockSlot()
+	default:
+		parsed, err := strconv.ParseUint(input, 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid slot value %q: %w", input, err)
+		}
+		slot = uint32(parsed)
 	}
-	block, err := j.NodeContent.GetStoredBlockBySlot(uint32(slot))
+
+	block, err := j.NodeContent.GetStoredBlockBySlot(slot)
 	if err != nil {
 		return err
 	}
@@ -106,13 +147,34 @@ func (j *Jam) GetBlockBySlot(req []string, res *string) error {
 
 func (j *Jam) GetState(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
 	}
-	headerHashStr := req[0]
-	headerHash := common.HexToHash(headerHashStr)
+
+	input := req[0]
+	var headerHash common.Hash
+
+	switch input {
+	case "latest":
+		slot := j.NodeContent.GetLatestBlockSlot()
+		block, err := j.NodeContent.GetStoredBlockBySlot(slot)
+		if err != nil {
+			return fmt.Errorf("failed to get latest block by slot %d: %w", slot, err)
+		}
+		headerHash = block.Header.Hash()
+	case "best":
+		slot := j.NodeContent.GetBestBlockSlot()
+		block, err := j.NodeContent.GetStoredBlockBySlot(slot)
+		if err != nil {
+			return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
+		}
+		headerHash = block.Header.Hash()
+	default:
+		headerHash = common.HexToHash(input)
+	}
+
 	sdb, ok := j.getStateDBByHeaderHash(headerHash)
 	if !ok {
-		return fmt.Errorf("State not found")
+		return fmt.Errorf("state not found for header hash %s", headerHash.String())
 	}
 	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).String()
 	return nil
@@ -128,9 +190,12 @@ func (j *Jam) GetService(req []string, res *string) error {
 		return err
 	}
 	service, ok, err := j.statedb.GetService(uint32(serviceIndex))
-	if err != nil || !ok {
+	if err != nil {
 		return err
 	}
+	if ! ok {
+		return fmt.Errorf("Service not found %d", serviceIndex)
+	} 
 	*res = service.JsonString()
 	return nil
 }
@@ -269,6 +334,10 @@ func (j *Jam) GetWorkPackageByHash(req []string, res *string) error {
 	}
 	workPackageHash := common.HexToHash(req[0])
 	si := j.WorkReportSearch(workPackageHash)
+	if si == nil {
+		return fmt.Errorf("Work Package not found")
+	}
+
 	workReport := si.WorkReport
 	*res = workReport.String()
 	return nil

@@ -1,7 +1,6 @@
 package grandpa
 
 import (
-	"encoding/json"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -141,13 +140,7 @@ func (v *VoteMessage) FromBytes(data []byte) error {
 }
 
 func (v VoteMessage) String() string {
-	// use json.Marshal to convert struct to string
-	// be pretty
-	jsonBytes, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return ""
-	}
-	return string(jsonBytes)
+	return types.ToJSON(v)
 }
 
 func (v *VoteMessage) GetUnsignedBytesFromVoteMessage() []byte {

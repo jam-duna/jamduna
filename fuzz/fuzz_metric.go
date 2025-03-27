@@ -1,9 +1,9 @@
 package fuzz
 
 import (
-	"encoding/json"
-	"log"
 	"math"
+
+	"github.com/colorfulnotion/jam/types"
 )
 
 type FuzzStats struct {
@@ -70,9 +70,5 @@ func (fs *FuzzStats) Metrics() map[string]interface{} {
 
 func (fs *FuzzStats) DumpMetrics() string {
 	metrics := fs.Metrics()
-	jsonBytes, err := json.MarshalIndent(metrics, "", "  ")
-	if err != nil {
-		log.Fatalf("Error marshalling metrics to JSON: %v", err)
-	}
-	return string(jsonBytes)
+	return types.ToJSON(metrics)
 }

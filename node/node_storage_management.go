@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"reflect"
 
-	//"time"
 	"bytes"
 	"encoding/json"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -92,13 +92,27 @@ func (n *NodeContent) GetAscendingBlockByHeader(headerHash common.Hash) (childBl
 			fmt.Printf("Error getting child block: %v\n", err)
 			return nil, err
 		}
-		childBlks = append(childBlks, childBlk)
+		childBlks = append(childBlks, &types.Block{
+			Header:    childBlk.Header,
+			Extrinsic: childBlk.Extrinsic,
+		})
 	}
 
 	return childBlks, nil
 }
 
-func (n *NodeContent) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Block, error) {
+func (n *NodeContent) GetSlotTimestamp(slot uint32) uint64 {
+	// GP demands this, but for the testnet we should adjust not to something that relies on BRITTLE knowledge like "we are starting at the top of the hour",
+	//  because we could be starting on the 22nd minute in MANUAL TESTING so we should have something else that is NOT BRITTLE that is cognizant of the JAM_START_TIME.
+	// This might be related to:
+	// (a) n.GetCurrJCE()
+	// (b) n.epoch0Timestamp
+	t := time.Date(2025, time.January, 1, 0, 0, 1, 0, time.UTC)
+	ts := t.Unix()
+	return uint64(ts) + uint64(slot*types.SecondsPerSlot)
+}
+
+func (n *NodeContent) GetStoredBlockByHeader(blkHeader common.Hash) (*types.SBlock, error) {
 	//header_<headerhash> -> blockHash
 	headerPrefix := []byte("header_")
 	storeKey := append(headerPrefix, blkHeader[:]...)
@@ -122,9 +136,16 @@ func (n *NodeContent) GetStoredBlockByHeader(blkHeader common.Hash) (*types.Bloc
 		return nil, err
 	}
 	b := blk.(types.Block)
-	return &b, nil
+	sb := &types.SBlock{
+		Header:     b.Header,
+		Extrinsic:  b.Extrinsic,
+		HeaderHash: b.Header.Hash(),
+		Timestamp:  n.GetSlotTimestamp(b.Header.Slot),
+	}
+	return sb, nil
 }
-func (n *NodeContent) GetStoredBlockBySlot(slot uint32) (*types.Block, error) {
+
+func (n *NodeContent) GetStoredBlockBySlot(slot uint32) (*types.SBlock, error) {
 	// "blk_"+slot uint32 to []byte
 	slotPrefix := []byte("blk_")
 	slotStoreKey := append(slotPrefix, common.Uint32ToBytes(slot)...)
@@ -141,7 +162,13 @@ func (n *NodeContent) GetStoredBlockBySlot(slot uint32) (*types.Block, error) {
 		return nil, err
 	}
 	b := blk.(types.Block)
-	return &b, nil
+	sb := &types.SBlock{
+		Header:     b.Header,
+		Extrinsic:  b.Extrinsic,
+		HeaderHash: b.Header.Hash(),
+		Timestamp:  n.GetSlotTimestamp(b.Header.Slot),
+	}
+	return sb, nil
 }
 
 func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk, err error) {

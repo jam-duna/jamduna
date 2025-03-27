@@ -29,12 +29,7 @@ type AuthState struct {
 }
 
 func (a *AuthState) String() string {
-	enc, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(a)
 }
 
 type AuthTestCase struct {

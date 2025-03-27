@@ -188,12 +188,7 @@ func (a *DeferredTransfer) Bytes() []byte {
 }
 
 func (a *DeferredTransfer) String() string {
-	enc, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(a)
 }
 
 func DecodedWrangledResults(o *AccumulateOperandElements) string {

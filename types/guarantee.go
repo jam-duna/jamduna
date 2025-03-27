@@ -182,12 +182,7 @@ func (g GuaranteeCredential) MarshalJSON() ([]byte, error) {
 
 // helper function to print the Guarantee
 func (g *Guarantee) String() string {
-	enc, err := json.MarshalIndent(g, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(g)
 }
 
 // helper function to convert Gurantee to GuaranteeHashed

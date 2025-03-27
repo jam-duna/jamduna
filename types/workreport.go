@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -160,10 +159,5 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 
 // helper function to print the WorkReport
 func (a *WorkReport) String() string {
-	enc, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(a)
 }

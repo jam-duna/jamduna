@@ -33,15 +33,15 @@ type ServiceAccount struct {
 	NumStorageItems uint32      `json:"items"`        //a_i - the number of items in storage (9.3)
 
 	// X.D will have Mutable=false, but X.D.U will have Mutable=True
-	Mutable bool `json:"mutable"`
+	Mutable      bool `json:"-"`
+	NewAccount   bool `json:"-"`
+	Checkpointed bool `json:"-"`
+	Dirty        bool `json:"-"`
 
-	NewAccount   bool
-	Checkpointed bool
+	Storage  map[common.Hash]StorageObject  `json:"-"`     // arbitrary_k -> v. if v=[]byte. use as delete
+	Lookup   map[common.Hash]LookupObject   `json:"-"`     // (h,l) -> anchor
+	Preimage map[common.Hash]PreimageObject `json:"-"` // H(p)  -> p
 
-	Dirty    bool
-	Storage  map[common.Hash]StorageObject  `json:"s_map"` // arbitrary_k -> v. if v=[]byte. use as delete
-	Lookup   map[common.Hash]LookupObject   `json:"l_map"` // (h,l) -> anchor
-	Preimage map[common.Hash]PreimageObject `json:"p_map"` // H(p)  -> p
 }
 
 func (s *ServiceAccount) Clone() *ServiceAccount {
@@ -297,12 +297,7 @@ func (s *ServiceAccount) String() string {
 }
 
 func (s *ServiceAccount) JsonString() string {
-	enc, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(s)
 }
 func (s *ServiceAccount) ReadStorage(rawK common.Hash, sdb HostEnv) (ok bool, v []byte) {
 	serviceIndex := s.ServiceIndex
@@ -487,9 +482,9 @@ func (s *ServiceAccount) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		*Alias
 		CodeHash string                    `json:"code_hash"`
-		Storage  map[string]StorageObject  `json:"s_map"`
-		Lookup   map[string]LookupObject   `json:"l_map"`
-		Preimage map[string]PreimageObject `json:"p_map"`
+		Storage  map[string]StorageObject  `json:"-"`
+		Lookup   map[string]LookupObject   `json:"-"`
+		Preimage map[string]PreimageObject `json:"-"`
 	}{
 		Alias:    (*Alias)(s),
 		CodeHash: s.CodeHash.Hex(),
@@ -504,9 +499,9 @@ func (s *ServiceAccount) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 		*Alias
 		CodeHash string                    `json:"code_hash"`
-		Storage  map[string]StorageObject  `json:"s_map"`
-		Lookup   map[string]LookupObject   `json:"l_map"`
-		Preimage map[string]PreimageObject `json:"p_map"`
+		Storage  map[string]StorageObject  `json:"-"`
+		Lookup   map[string]LookupObject   `json:"-"`
+		Preimage map[string]PreimageObject `json:"-"`
 	}{
 		Alias: (*Alias)(s),
 	}

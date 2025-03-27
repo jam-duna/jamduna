@@ -705,13 +705,7 @@ func (s *SafroleState) GetFallbackValidator(slot_index uint32) common.Hash {
 }
 
 func (state *SafroleState) String() string {
-	// Marshal the JamState into indented JSON
-	jsonBytes, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return "failedmarshaling"
-	}
-	// Return the JSON as a string
-	return string(jsonBytes)
+	return types.ToJSON(state)
 }
 
 func (s *SafroleState) GetPrimaryWinningTicket(slot_index uint32) types.TicketBody {

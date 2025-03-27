@@ -1723,13 +1723,8 @@ func write_jamnp_test_vector(ce string, typ string, testVectorName string, vByte
 	// Write .json file with v if not nil
 	if v != nil {
 		fnJSON := filepath.Join(dir, fmt.Sprintf("%s-%s.json", testVectorName, typ))
-		jsonData, err := json.MarshalIndent(v, "", "  ")
-		if err != nil {
-			fmt.Printf("Failed to marshal JSON for %s: %v\n", fnJSON, err)
-			return
-		}
-
-		err = os.WriteFile(fnJSON, jsonData, 0644)
+		jsonData := types.ToJSON(v)
+		err = os.WriteFile(fnJSON, []byte(jsonData), 0644)
 		if err != nil {
 			fmt.Printf("Failed to write JSON file %s: %v\n", fnJSON, err)
 		}

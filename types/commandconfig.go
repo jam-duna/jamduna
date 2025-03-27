@@ -1,10 +1,5 @@
 package types
 
-import (
-	"encoding/json"
-	"fmt"
-)
-
 type CommandConfig struct {
 	Help            bool   `json:"help"`
 	NodeName        string `json:"nodename"`
@@ -22,9 +17,5 @@ type CommandConfig struct {
 
 // String method returns the CommandConfig as a formatted JSON string
 func (c *CommandConfig) String() string {
-	jsonData, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(jsonData)
+	return ToJSON(c)
 }

@@ -162,13 +162,7 @@ func (original *JamState) Copy() *JamState {
 
 // clearRhoByCore clears the Rho state for a specific core
 func (state *JamState) String() string {
-	// Marshal the JamState into indented JSON
-	jsonBytes, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return "failedmarshaling"
-	}
-	// Return the JSON as a string
-	return string(jsonBytes)
+	return types.ToJSON(state)
 }
 
 func (n *JamState) ResetTallyStatistics() {

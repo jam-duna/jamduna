@@ -128,12 +128,7 @@ type Authorizer struct {
 }
 
 func (a *WorkPackage) String() string {
-	enc, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(a)
 }
 
 // Bytes returns the bytes of the Assurance

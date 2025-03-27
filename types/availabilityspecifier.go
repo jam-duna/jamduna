@@ -3,8 +3,6 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
-	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -27,12 +25,7 @@ type AvailabilitySpecifier struct {
 }
 
 func (as *AvailabilitySpecifier) String() string {
-	enc, err := json.MarshalIndent(as, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(as)
 }
 
 // ToBytes serializes the GuaranteeCredential struct into a byte array

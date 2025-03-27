@@ -3,7 +3,6 @@ package node
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -173,10 +172,7 @@ type GuaranteeDerivation struct {
 
 func saveGuaranteeDerivation(gd GuaranteeDerivation) (err error) {
 	// Encode to JSON
-	data, err := json.MarshalIndent(gd, "", "  ")
-	if err != nil {
-		return err
-	}
+	data := types.ToJSON(gd)
 	// check if there is a directory to write called refine_testvector
 	if _, err := os.Stat("guarantees"); os.IsNotExist(err) {
 		if err := os.Mkdir("guarantees", 0755); err != nil {
@@ -185,7 +181,7 @@ func saveGuaranteeDerivation(gd GuaranteeDerivation) (err error) {
 	}
 	// Write to file
 	filename := fmt.Sprintf("guarantees/%s.json", gd.Bundle.WorkPackage.Hash())
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, []byte(data), 0644); err != nil {
 		return err
 	}
 	return nil

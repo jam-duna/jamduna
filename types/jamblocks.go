@@ -39,7 +39,5 @@ func (c *ConfigJamBlocks) UnmarshalJSON(data []byte) error {
 }
 
 func (c ConfigJamBlocks) String() string {
-	b, _ := json.MarshalIndent(c, "", "  ")
-	//b, _ := json.Marshal(c)
-	return string(b)
+	return ToJSON(c)
 }

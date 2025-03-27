@@ -40,13 +40,7 @@ type Dispute struct {
 }
 
 func (d *Dispute) String() string {
-	// json pretty print
-	enc, err := json.MarshalIndent(d, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(d)
 }
 
 type Verdict struct {
@@ -153,12 +147,8 @@ func (a *Dispute) Hash() common.Hash {
 }
 
 func (a *Dispute) Print() {
-	// print json
-	enc, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(string(enc))
+	enc := ToJSON(a)
+	fmt.Println(enc)
 }
 
 func (a *Culprit) UnmarshalJSON(data []byte) error {

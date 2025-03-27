@@ -57,11 +57,8 @@ func (n *NodeContent) OnHandshake(validatorIndex uint16, headerHash common.Hash,
 	return nil
 }
 
-func (n *NodeContent) GetBlockByHeaderHash(headerHash common.Hash) (*types.Block, error) {
-	blk, cachedFound := n.cacheHeadersRead(headerHash)
-	if cachedFound {
-		return blk, nil
-	}
+func (n *NodeContent) GetBlockByHeaderHash(headerHash common.Hash) (*types.SBlock, error) {
+
 	blk, err := n.GetStoredBlockByHeader(headerHash)
 	if err != nil {
 		return blk, err
@@ -105,7 +102,10 @@ func (n *NodeContent) BlocksLookup(headerHash common.Hash, direction uint8, maxi
 			if err != nil {
 				return blocks, false, err
 			}
-			blocks = append(blocks, *blk)
+			blocks = append(blocks, types.Block{
+				Header:    blk.Header,
+				Extrinsic: blk.Extrinsic,
+			})
 			if blk.Header.ParentHeaderHash == (common.Hash{}) {
 				break
 			}

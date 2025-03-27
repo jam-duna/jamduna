@@ -1,9 +1,6 @@
 package types
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"github.com/colorfulnotion/jam/common"
 )
 
@@ -28,10 +25,5 @@ type RefineContext struct {
 }
 
 func (rc *RefineContext) String() string {
-	enc, err := json.MarshalIndent(rc, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(rc)
 }

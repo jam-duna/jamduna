@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -235,18 +234,8 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 
 // helper function to print the WorkReport
 func (a *WorkResult) String() string {
-	enc, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(a)
 }
 func (a *Result) String() string {
-	enc, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		// Handle the error according to your needs.
-		return fmt.Sprintf("Error marshaling JSON: %v", err)
-	}
-	return string(enc)
+	return ToJSON(a)
 }
