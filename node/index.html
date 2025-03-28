@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Conway's Game of Life - 9 Page Variant</title>
+  <style>
+    body { margin: 0; }
+    .container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    #sidebar {
+      margin-right: 20px;
+      font-size: 24px;
+      font-family: sans-serif;
+    }
+    canvas { border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="sidebar">
+      <p>Steps: <span id="counter">0</span></p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+  </div>
+  <script>
+    const PAGE_SIZE = 4096;
+    const PAGE_DIM = 64;
+    const PAGES_PER_ROW = 3;
+    const PAGES_PER_COL = 3;
+    const TOTAL_ROWS = PAGE_DIM * PAGES_PER_COL;
+    const TOTAL_COLS = PAGE_DIM * PAGES_PER_ROW;
+    const cellSize = 4;
+
+    const canvas = document.getElementById("gameCanvas");
+    canvas.width = TOTAL_COLS * cellSize;
+    canvas.height = TOTAL_ROWS * cellSize;
+    const ctx = canvas.getContext("2d");
+
+    const counterElement = document.getElementById("counter");
+
+    let currentGridData = null;
+    let currentStep = 0;
+
+    const ws = new WebSocket("ws://" + location.host + "/wsgof");
+    ws.binaryType = "arraybuffer";
+
+    ws.onmessage = function(event) {
+      const data = new Uint8Array(event.data);
+      if (data.length < 4 + 9 * PAGE_SIZE) {
+        console.error("Received data is too short");
+        return;
+      }
+      const dv = new DataView(data.buffer);
+      currentStep = dv.getUint32(0, true);
+      counterElement.textContent = currentStep;
+
+      currentGridData = data.slice(4);
+      drawGrid(currentGridData);
+    };
+
+    function drawGrid(flatData) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let page = 0; page < 9; page++) {
+        const pageData = flatData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+        const pageRow = Math.floor(page / PAGES_PER_ROW);
+        const pageCol = page % PAGES_PER_ROW;
+        for (let i = 0; i < PAGE_DIM; i++) {
+          for (let j = 0; j < PAGE_DIM; j++) {
+            const index = i * PAGE_DIM + j;
+            ctx.fillStyle = pageData[index] === 0 ? "white" : "black";
+            ctx.fillRect((pageCol * PAGE_DIM + j) * cellSize, (pageRow * PAGE_DIM + i) * cellSize, cellSize, cellSize);
+          }
+        }
+      }
+    }
+
+    setInterval(() => {
+      if (currentGridData) {
+        drawGrid(currentGridData);
+      }
+    }, 1000);
+  </script>
+</body>
+</html>

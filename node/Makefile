@@ -107,3 +107,8 @@ megatron_short_with_prereq_log:
 
 fib2_log:
 	@$(MAKE) fib2 PVMAUTHLOG=true
+
+game_of_life:
+	@echo "Running TestGameOfLife$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestGameOfLife -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run TestGameOfLife -tags "network_test,$(TAGS)" $(TARGET_PARAM)

@@ -225,6 +225,14 @@ func TestBlake2b(t *testing.T) {
 	jamtest(t, "blake2b", Blake2bEpochLen, basePort, targetN)
 }
 
+func TestGameOfLife(t *testing.T) {
+	targetN := 10
+	GameOfLifeEpochLen := 10
+	fmt.Printf("game_of_life targetNum: %v\n", targetN)
+	basePort := GenerateRandomBasePort()
+	jamtest(t, "game_of_life", GameOfLifeEpochLen, basePort, targetN)
+}
+
 func TestDisputes(t *testing.T) {
 	basePort := GenerateRandomBasePort()
 	nodes, err := SetUpNodes(numNodes, basePort)

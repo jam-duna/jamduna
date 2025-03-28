@@ -1054,6 +1054,8 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 		//vm.UnSetLogging()
 	}
 
+	vm.UnSetLogging()
+
 	workitem := workPackage.WorkItems[workitemIndex]
 
 	a := common.Uint32ToBytes(workitem.Service)
@@ -1078,6 +1080,13 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
+	// if string(vm.ServiceMetadata) == "game_of_life" {
+	// 	fmt.Printf("Result: %v\n", r)
+	// 	fmt.Printf("VM.PC: %v\n", vm.pc)
+	// 	fmt.Printf("VM.Fault_address: %v\n", vm.Fault_address)
+	// 	fmt.Printf("VM.ResultCode: %v\n", vm.ResultCode)
+	// 	// vm.Ram.DebugStatus()
+	// }
 
 	exportedSegments = vm.Exports
 	return r, res, exportedSegments
@@ -1518,15 +1527,17 @@ func (vm *VM) step(stepn int) error {
 		return nil
 	}
 
-	id := 99
-	if vm.hostenv != nil {
-		id = int(vm.hostenv.GetID())
+	if vm.logging != "" {
+		id := 99
+		if vm.hostenv != nil {
+			id = int(vm.hostenv.GetID())
+		}
+		md := "unk"
+		if vm.ServiceMetadata != nil {
+			md = string(vm.ServiceMetadata)
+		}
+		log.Trace(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "reg", vm.ReadRegisters())
 	}
-	md := "unk"
-	if vm.ServiceMetadata != nil {
-		md = string(vm.ServiceMetadata)
-	}
-	log.Trace(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "reg", vm.ReadRegisters())
 	return nil
 }
 

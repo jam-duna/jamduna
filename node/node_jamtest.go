@@ -18,6 +18,7 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/gorilla/websocket"
 	"golang.org/x/exp/rand"
 
 	//"math/big"
@@ -350,6 +351,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		serviceNames = []string{"corevm", "auth_copy"}
 		log.EnableModule("statedb") //enable here to avoid concurrent map
 	}
+	if jam == "game_of_life" {
+		serviceNames = []string{"game_of_life", "auth_copy"}
+	}
 	testServices, err := getServices(serviceNames, true)
 	if err != nil {
 		panic(32)
@@ -476,6 +480,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		empty(nodes, testServices)
 	case "blake2b":
 		blake2b(nodes, testServices, targetN)
+	case "game_of_life":
+		game_of_life(nodes, testServices)
 	}
 }
 
@@ -2741,4 +2747,200 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
 		}
 	}
+}
+
+func game_of_life(nodes []*Node, testServices map[string]*types.TestService) {
+	// Start the websocket server
+	// http://localhost:80
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	var wsConn *websocket.Conn
+
+	go func() {
+		http.Handle("/", http.FileServer(http.Dir(".")))
+		http.HandleFunc("/wsgof", func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				fmt.Println("upgrade error:", err)
+				return
+			}
+			wsConn = conn
+			fmt.Println("Client connected")
+		})
+		go http.ListenAndServe("0.0.0.0:80", nil)
+	}()
+
+	push := func(data []byte) {
+		if wsConn != nil {
+			wsConn.WriteMessage(websocket.BinaryMessage, data)
+		}
+	}
+
+	flatten := func(data [][]byte) []byte {
+		var result []byte
+		for _, block := range data {
+			result = append(result, block[:4096]...)
+		}
+		return result
+	}
+
+	log.Info(module, "Game of Life START")
+
+	service0 := testServices["game_of_life"]
+	service_authcopy := testServices["auth_copy"]
+
+	n1 := nodes[1]
+	n4 := nodes[4]
+	core := 0
+	prevWorkPackageHash := common.Hash{}
+
+	// Generate the extrinsic
+	extrinsics := types.ExtrinsicsBlobs{}
+
+	for step_n := 1; step_n <= 30; step_n++ {
+		importedSegments := make([]types.ImportSegment, 0)
+		if step_n > 1 {
+			for i := 0; i < 9; i++ {
+				importedSegment := types.ImportSegment{
+					RequestedHash: prevWorkPackageHash,
+					Index:         uint16(i),
+				}
+				importedSegments = append(importedSegments, importedSegment)
+			}
+		}
+		refine_context := n1.statedb.GetRefineContext()
+
+		payload := make([]byte, 0, 12)
+		tmp := make([]byte, 4)
+		binary.LittleEndian.PutUint32(tmp, uint32(step_n))
+		payload = append(payload, tmp...)
+
+		binary.LittleEndian.PutUint32(tmp, uint32(10)) // num_of_gliders
+		payload = append(payload, tmp...)
+
+		binary.LittleEndian.PutUint32(tmp, uint32(10)) // total_execution_steps
+		payload = append(payload, tmp...)
+
+		workPackage := types.WorkPackage{
+			AuthCodeHost:          0,
+			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refine_context,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            service0.ServiceCode,
+					CodeHash:           service0.CodeHash,
+					Payload:            payload,
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   importedSegments,
+					ExportCount:        9,
+				},
+				{
+					Service:            service_authcopy.ServiceCode,
+					CodeHash:           service_authcopy.CodeHash,
+					Payload:            []byte{},
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
+				},
+			},
+		}
+		workPackageHash := workPackage.Hash()
+
+		log.Info(module, fmt.Sprintf("Game_of_life-(%d) work package submitted", step_n), "workPackage", workPackageHash)
+		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+		ramdamIdx := rand.Intn(3)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, extrinsics, 0)
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+		// wait until the work report is pending
+		for {
+			time.Sleep(1 * time.Second)
+			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
+				if false {
+					var workReport types.WorkReport
+					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
+					workReport = rho_state.WorkReport
+					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+				}
+				break
+			}
+		}
+
+		// wait until the work report is cleared
+		for {
+			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		if step_n > 0 {
+			vm_export, err := n4.GetImportSegments(importedSegments)
+			if err == nil {
+				stepBytes := make([]byte, 4)
+				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
+				out := append(stepBytes, flatten(vm_export)...)
+
+				push(out)
+			}
+		}
+
+		prevWorkPackageHash = workPackageHash
+	}
+}
+
+func (n *Node) GetImportSegments(importedSegments []types.ImportSegment) ([][]byte, error) {
+	workReportSearchMap := make(map[common.Hash]*SpecIndex)
+	erasureRootIndex := make(map[common.Hash]*SpecIndex)
+
+	// Step 1: resolve WorkReport for each RequestedHash
+	for _, importedSegment := range importedSegments {
+		si, ok := workReportSearchMap[importedSegment.RequestedHash]
+		if !ok {
+			si = n.WorkReportSearch(importedSegment.RequestedHash)
+			if si == nil {
+				return nil, fmt.Errorf("WorkReportSearch(%s) not found", importedSegment.RequestedHash)
+			}
+			workReportSearchMap[importedSegment.RequestedHash] = si
+		}
+
+		erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
+		oldSi, exists := erasureRootIndex[erasureRoot]
+		if exists {
+			oldSi.AddIndex(importedSegment.Index)
+		} else {
+			si.AddIndex(importedSegment.Index)
+			erasureRootIndex[erasureRoot] = si
+		}
+	}
+
+	// Step 2: reconstruct segments for each erasure root
+	segmentDataMap := make(map[common.Hash][][]byte)
+	for erasureRoot, si := range erasureRootIndex {
+		segments, _, err := n.reconstructSegments(si)
+		if err != nil {
+			return nil, fmt.Errorf("reconstructSegments failed for erasureRoot %s: %v", erasureRoot, err)
+		}
+		segmentDataMap[erasureRoot] = segments
+	}
+
+	// Step 3: map back to original import order
+	result := make([][]byte, len(importedSegments))
+	for i, importedSegment := range importedSegments {
+		si := workReportSearchMap[importedSegment.RequestedHash]
+		erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
+		segments := segmentDataMap[erasureRoot]
+		for j, idx := range si.Indices {
+			if idx == importedSegment.Index {
+				result[i] = segments[j]
+				break
+			}
+		}
+	}
+
+	return result, nil
 }
