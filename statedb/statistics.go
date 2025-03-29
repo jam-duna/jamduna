@@ -87,6 +87,7 @@ type transferStatistics struct {
 }
 
 func (n *JamState) tallyCoreStatistics(guarantees []types.Guarantee, newlyAvailable []types.WorkReport, assurances []types.Assurance) {
+	n.ValidatorStatistics.CoreStatistics = [types.TotalCores]CoreStatistics{}
 	for _, guarantee := range guarantees { // w - R(..)
 		g := guarantee.Report
 		cs := &(n.ValidatorStatistics.CoreStatistics[g.CoreIndex])

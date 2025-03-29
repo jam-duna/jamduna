@@ -602,7 +602,7 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	input_argument = append(input_argument, encode_time_slot...)
 	input_argument = append(input_argument, encodeService_index...)
 	input_argument = append(input_argument, encodeSelectedTransfers...)
-	log.Info(module, "HostTransfer", "input_argument", fmt.Sprintf("%x", input_argument))
+	//log.Info(module, "HostTransfer", "input_argument", fmt.Sprintf("%x", input_argument))
 	vm.ExecuteTransfer(input_argument, self)
 	return vm.Gas, uint(len(selectedTransfers)), nil
 }
@@ -619,7 +619,7 @@ func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint
 			gasUsed:      uint(gasUsed),
 			numTransfers: transferCount,
 		}
-		if s.Authoring {
+		if s.Authoring && false {
 			log.Info(module, "ProcessDeferredTransfers", "service", fmt.Sprintf("%d", serviceAccount.ServiceIndex), "gasUsed", gasUsed, "transferCount", transferCount)
 		}
 	}
