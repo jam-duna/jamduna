@@ -25,3 +25,7 @@ cmd/importblocks/data/.DS_Store
 node/*.txt
 *.log
 cmd/importblocks/rawdata/
+guarantees/*.json
+node/guarantees/*.json
+/refine_testvector
+node/.DS_Store

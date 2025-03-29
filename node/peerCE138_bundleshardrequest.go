@@ -6,6 +6,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
 
@@ -62,19 +63,30 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 	}
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
+		log.Error(debugDA, "SendBundleShardRequest - sedning Err", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 		return
 	}
 	// <-- Bundle Shard
 	bundleShard, err = receiveQuicBytes(stream)
 	if err != nil {
+		log.Error(debugDA, "SendBundleShardRequest - bundleShard Stream Err", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 		return
 	}
-	log.Debug(debugDA, "SendBundleShardRequest", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "len", len(bundleShard))
-	// <-- Justification
-	encodedPath, err = receiveQuicBytes(stream)
+	// <-- JAM NP Justification
+	encoded_sclub_justification, err := receiveQuicBytes(stream)
 	if err != nil {
+		log.Error(debugDA, "SendBundleShardRequest - encoded_sclub_justification Stream Err", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 		return
 	}
+	sclub_justification, sclub_justification_err := common.DecodeJustification(encoded_sclub_justification, types.NumECPiecesPerSegment)
+	if sclub_justification_err != nil || len(sclub_justification) < 1 {
+		log.Error(debugDA, "SendBundleShardRequest - encoded_sclub_justification Decoding Err", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
+		return
+	}
+	sClub = common.BytesToHash(sclub_justification[0])
+	path_justification := sclub_justification[1:]
+	encodedPath, _ = common.EncodeJustification(path_justification, types.NumECPiecesPerSegment)
+	log.Debug(debugDA, "SendBundleShardRequest DONE", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "bundleShardLen", len(bundleShard), "ecodedPathLen", len(encodedPath), "sClub", sClub, "encodedPath", fmt.Sprintf("%x", encodedPath))
 	return
 }
 
@@ -87,7 +99,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 		fmt.Println("Error deserializing:", err)
 		return
 	}
-	log.Trace(debugA, "onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
+	log.Debug(debugA, "!! onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
 
 	bundleShard, sClub, encodedPath, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
@@ -104,14 +116,14 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 		return err
 	}
 
-	// <-- sClub
-	err = sendQuicBytes(stream, sClub.Bytes())
-	if err != nil {
-		return err
-	}
-
+	// <-- Justification USDED BY JAM NP = sClub++path
+	path_justification, _ := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
+	sclub_justification := make([][]byte, 0)
+	sclub_justification = append(sclub_justification, sClub.Bytes())
+	sclub_justification = append(sclub_justification, path_justification...)
 	// <-- Justification
-	err = sendQuicBytes(stream, encodedPath)
+	encoded_sclub_justification, _ := common.EncodeJustification(sclub_justification, types.NumECPiecesPerSegment)
+	err = sendQuicBytes(stream, encoded_sclub_justification)
 	if err != nil {
 		return err
 	}

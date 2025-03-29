@@ -537,6 +537,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 		workPackageHash := workPackage.Hash()
 
 		log.Info(module, fmt.Sprintf("FIB(%v) work package submitted", fibN), "workPackage", workPackageHash)
+		log.Warn(module, fmt.Sprintf("!!! FIB(%v) work package submitted", fibN), "workPackageHash", workPackageHash)
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
 		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)

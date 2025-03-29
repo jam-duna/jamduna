@@ -59,8 +59,7 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 		treeLen, leaf, path, isFound, _ := erasureTree.Trace(shardIdx)
 		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leaf, path)
 		if !verified {
-			// TEMPORARY
-			// return shardJustifications, fmt.Errorf("VerifyWBTJustification Failure")
+			return shardJustifications, fmt.Errorf("VerifyWBTJustification Failure")
 		}
 		shardJustifications[shardIdx] = types.Justification{
 			Root:     erasureRoot,
@@ -77,12 +76,10 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 // Verify T(s,i,H)
 func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash []byte, path [][]byte) (bool, common.Hash) {
 	recoveredRoot, verified, _ := trie.VerifyWBT(treeLen, int(shardIndex), root, leafHash, path)
+	log.Debug(module, "VerifyWBTJustification CALL!!!", "Expected", root, "recovered", recoveredRoot, "verified", verified, "shardIdx", shardIndex, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 	if root != recoveredRoot {
-		log.Debug(debugDA, "VerifyJustification Failure : Input", "shardIdx", shardIndex, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
-		errStr := fmt.Sprintf("VerifyJustification Failure! Expected:%v | Recovered: %v\n", root, recoveredRoot)
-		fmt.Printf(errStr)
-		//panic("VerifyJustification")
-		return verified, recoveredRoot
+		log.Warn(module, "VerifyWBTJustification Failure", "Expected", root, "recovered", recoveredRoot, "verified", verified, "shardIdx", shardIndex, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		return false, recoveredRoot
 	}
 	return true, recoveredRoot // TEMPORARY
 }

@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -81,13 +82,13 @@ func TestWBTTrace(t *testing.T) {
 
 			// encode the justification
 			rawPath := shardJustification.Path
-			encodedPath, err := common.EncodeJustification(rawPath)
+			encodedPath, err := common.EncodeJustification(rawPath, 6)
 			if err != nil {
 				t.Fatalf("EncodeJustification error: %v", err)
 			}
 
 			// decode the justification
-			decodedPath, err := common.DecodeJustification(encodedPath)
+			decodedPath, err := common.DecodeJustification(encodedPath, 6)
 			if err != nil {
 				t.Fatalf("DecodeJustification error: %v", err)
 			}
@@ -150,6 +151,103 @@ func TestGenerateWBTJustification(t *testing.T) {
 		} else {
 			fmt.Printf("shardIndex %d, expected hash %v, got %v\n", shardIndex, expectedHash, derivedRoot)
 			fmt.Printf("treeLen=%v, leafHash=%x path: %x\n", treeLen, leafHash, path)
+		}
+	}
+}
+
+func RandomBytes(n int) ([]byte, error) {
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// TODO
+func TestWBTTrace2(t *testing.T) {
+	// List of different network setting
+	numShardsList := []int{6, 12, 18, 36, 108, 342, 684, 1023}
+	ecShardSizeList := []int{2052, 1026, 684, 342, 114, 36, 18, 12}
+	numECPiecesPerSegmentList := []int{1026, 513, 342, 171, 57, 18, 9, 6}
+	networkList := []string{"tiny", "small", "medium", "large", "xlarge", "2xlarge", "3xlarge", "full"}
+	for listIdx, numShards := range numShardsList {
+		ecShardSize := ecShardSizeList[listIdx]
+		numECPieceSize := numECPiecesPerSegmentList[listIdx]
+		network := networkList[listIdx]
+		shardJustifications := make([]types.Justification, numShards)
+		t.Logf("Testing NetWork: %v with %d shards (V=%d) | ShardByteSize=%d (WP=%d)\n", network, numShards, numShards, ecShardSize, numECPieceSize)
+		values := make([][]byte, 0, numShards)
+		for i := 0; i < numShards; i++ {
+			bclub_Raw := []byte(fmt.Sprintf("b_club_value%d", i))
+			sclub_Raw := []byte(fmt.Sprintf("s_club_value%d", i))
+			bclub_h := common.Blake2Hash(bclub_Raw)
+			sclub_h := common.Blake2Hash(sclub_Raw)
+			// Each value is the concatenation of two 32-byte hashes, making 64 bytes.
+			value := append(bclub_h[:], sclub_h[:]...)
+			values = append(values, value)
+		}
+		t.Logf("Values: %x", values)
+
+		// Build the tree using Blake2b.
+		wbt := NewWellBalancedTree(values, types.Blake2b)
+		t.Log("Tree structure:")
+		wbt.PrintTree()
+
+		erasureRoot := wbt.RootHash()
+		t.Logf("ErasureRoot: %v", erasureRoot)
+
+		// For each shard, get the proof and verify.
+		for shardIndex := 0; shardIndex < numShards; shardIndex++ {
+			treeLen, leafHash, path, isFound, err := wbt.Trace(shardIndex)
+			if err != nil || !isFound {
+				t.Errorf("Trace error for shard %d: %v", shardIndex, err)
+				continue
+			}
+
+			derivedRoot, verified, err := VerifyWBT(treeLen, shardIndex, erasureRoot, leafHash, path)
+			if err != nil || !verified {
+				t.Errorf("VerifyWBT error for shard %d: %v", shardIndex, err)
+				continue
+			}
+
+			shardJustification := types.Justification{
+				Root:     erasureRoot,
+				ShardIdx: shardIndex,
+				TreeLen:  treeLen,
+				LeafHash: leafHash,
+				Path:     path,
+			}
+			shardJustifications[shardIndex] = shardJustification
+
+			// encode the justification
+			rawPath := shardJustification.Path
+			encodedPath, err := common.EncodeJustification(rawPath, numECPieceSize)
+			if err != nil {
+				t.Fatalf("EncodeJustification error: %v", err)
+			}
+			fmt.Printf("ShardIdx=%d, numShards=%d, EncodedPath Len: %d\n", shardIndex, numShards, len(encodedPath))
+
+			// decode the justification
+			decodedPath, err := common.DecodeJustification(encodedPath, numECPieceSize)
+			if err != nil {
+				t.Fatalf("DecodeJustification error: %v", err)
+			}
+			if !reflect.DeepEqual(rawPath, decodedPath) {
+				t.Logf("ShardIndex=%v     RawPath: %x\n", shardIndex, rawPath)
+				t.Logf("ShardIndex=%v DecodedPath: %x\n", shardIndex, decodedPath)
+				t.Fatalf("shardIndex=%v justificationsPath mismatch!", shardIndex)
+			} else {
+				//t.Logf("shardIndex=%v justificationsPath match!", shardIndex)
+			}
+
+			if !bytes.Equal(derivedRoot[:], erasureRoot[:]) {
+				t.Errorf("ShardIndex %d: ErasureRoot=%v, got %v", shardIndex, erasureRoot, derivedRoot)
+				t.Logf("treeLen=%v, leafHash=%x, path=%x", treeLen, leafHash, path)
+			} else {
+				//t.Logf("ShardIndex %d verified. DerivedRoot=%v", shardIndex, derivedRoot)
+				//t.Logf("treeLen=%v, leafHash=%x, path=%x", treeLen, leafHash, path)
+			}
 		}
 	}
 }

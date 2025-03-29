@@ -198,7 +198,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 		log.Warn(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
 		return fmt.Errorf("Not found")
 	}
-	// <-- Bundle Shard
+	// <-- Segment Shard
 	combined_selected_segmentshards := bytes.Join(selected_segmentshards, nil)
 	if false {
 		fmt.Printf("%s onSegmentShardRequest: GetSegmentShard_AssurerSimple erasure root %s shard %d (%v) => %d bytes h(concat)=%s\n",

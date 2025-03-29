@@ -288,13 +288,13 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	shards := SplitBytes(exported_segments_and_proofpageShards)
 	sClub := trie.NewWellBalancedTree(shards, types.Blake2b).RootHash()
 	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
-	path, err := common.DecodeJustification(encodedPath)
+	path, err := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
 	if err != nil {
 		return false, err
 	}
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, path)
 	if !verified {
-		log.Error(debugDA, "VerifyFullShard VerifyWBTJustification FAILED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
+		log.Crit(module, "VerifyFullShard VerifyWBTJustification FAILED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
 			"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
@@ -315,9 +315,9 @@ func (n *Node) GetFullShard_Guarantor(erasureRoot common.Hash, shardIndex uint16
 	if !isFound {
 		return bundleShard, exported_segments_and_proofpageShards, justification, false, fmt.Errorf("Not found")
 	}
-	encodedPath, _ := common.EncodeJustification(path)
+	encodedPath, _ := common.EncodeJustification(path, types.NumECPiecesPerSegment)
 	if paranoidVerification {
-		decodedPath, _ := common.DecodeJustification(encodedPath)
+		decodedPath, _ := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
 		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIndex), leafHash, decodedPath)
 		if !verified {
 			log.Crit(debugDA, "GetFullShard_Guarantor")
@@ -435,20 +435,21 @@ func (n *NodeContent) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex 
 }
 
 // Verification: CE138_BundleShard_FullShard
-func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, sclub_justification []byte) (bool, error) {
+func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, sClub common.Hash, encodedPath []byte) (bool, error) {
 	// verify its validity
 	bClub := common.Blake2Hash(bundleShard)
-	sClub := sclub_justification[0:32]
-	encodedPath := sclub_justification[32:]
-	decodedPath, err := common.DecodeJustification(encodedPath)
+	decodedPath, err := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
 	if err != nil {
 		return false, err
 	}
 
-	bundle_segment_pair := append(bClub.Bytes(), sClub...)
+	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, decodedPath)
 	if !verified {
+		log.Crit(module, "VerifyBundleShard:VerifyWBTJustification VERIFICATION FAILURE", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", bundle_segment_pair, "decodedPath", fmt.Sprintf("%x", decodedPath))
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
+	} else {
+		log.Trace(module, "VerifyBundleShard:VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "decodedPath", fmt.Sprintf("%x", decodedPath))
 	}
 	return true, nil
 }
@@ -469,10 +470,13 @@ func (n *NodeContent) GetBundleShard_Assurer(erasureRoot common.Hash, shardIndex
 
 	// proof: retrieve b_erasureRoot_<shardIdx> ++ SClub ++ default_justification
 	if paranoidVerification {
-		verified, err := VerifyBundleShard(erasureRoot, shardIndex, bundleShard, encodedPath) // this is needed
-		if !verified {
-			log.Crit(debugDA, "VerifyBundleShard not verified")
-			return nil, sClub, nil, false, err
+		verified, err := VerifyBundleShard(erasureRoot, shardIndex, bundleShard, sClub, encodedPath) // this is needed
+		if err != nil {
+			log.Error(module, "[GetBundleShard_Assurer:VerifyBundleShard] err", "err", err, "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundleShard", fmt.Sprintf("%x", bundleShard), "encodedPath", "s_club", sClub, fmt.Sprintf("%x", encodedPath))
+		} else if !verified {
+			log.Warn(module, "[GetBundleShard_Assurer:VerifyBundleShard] not verified", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundleShard", fmt.Sprintf("%x", bundleShard), "encodedPath", "s_club", sClub, fmt.Sprintf("%x", encodedPath))
+		} else {
+			log.Trace(module, "[GetBundleShard_Assurer:VerifyBundleShard] VERIFIED", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundleShard", fmt.Sprintf("%x", bundleShard), "encodedPath", "s_club", sClub, fmt.Sprintf("%x", encodedPath))
 		}
 	}
 	return bundleShard, sClub, encodedPath, true, nil
@@ -485,14 +489,14 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	//full_path & s_path MUST NEED saparation. Not sure why
 
 	// verify its validity
-	fPath, err := common.DecodeJustification(full_justification)
+	fPath, err := common.DecodeJustification(full_justification, types.NumECPiecesPerSegment)
 	if err != nil {
 		fmt.Printf("DecodeJustification full_justification Error: %v\n", err)
 		return false, err
 	}
 
 	// verify its validity
-	bclub_path, err := common.DecodeJustification(bclub_sclub_justification)
+	bclub_path, err := common.DecodeJustification(bclub_sclub_justification, types.NumECPiecesPerSegment)
 	if err != nil {
 		fmt.Printf("DecodeJustification bclub_sclub_justification Error: %v\n", err)
 		return false, err
@@ -512,6 +516,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, fPath)
 	log.Debug(debugDA, "VerifySegmentShard Step 3", "shardIndex", shardIndex, "verified", verified, shardIndex, "recovered_sClub", recovered_sClub, "erasureRoot", erasureRoot)
 	if !verified {
+		panic(74828)
 		return false, fmt.Errorf("Segment Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
 
@@ -539,6 +544,7 @@ func (n *NodeContent) GetSegmentShard_Assurer(erasureRoot common.Hash, shardInde
 		// return selected_justifications originally stored by assureData (in response to a guarantee)
 		_, _, encodedPath, err := n.GetFullShardJustification(erasureRoot, shardIndex)
 		if err != nil {
+			fmt.Printf("GetSegmentShard_Assurer GetFullShardJustification Error: %v\n", err)
 		}
 		selected_justifications = append(selected_justifications, encodedPath)
 	}

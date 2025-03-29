@@ -441,8 +441,10 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 		// handle selfRequesting case
 		isSelfRequesting := req.ShardIndex == uint16(n.id)
 		if isSelfRequesting {
+			log.Debug(debugDA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
 			bundleShard, sClub, encodedPath, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 			if err != nil {
+				log.Error(debugDA, "CE138_request: selfRequesting ERROR", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(self)", n.id, "ERR", err)
 				return resp, err
 			}
 			self_response := CE138_response{
@@ -456,10 +458,13 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 
 		peer, err := n.getPeerByIndex(peerID)
 		if err != nil {
+			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on getPeerByIndex", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
 		}
+		log.Debug(debugDA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID)
 		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(erasureRoot, peerID)
 		if err != nil {
+			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
 		}
 		response := CE138_response{
@@ -468,6 +473,7 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 			SClub:         sClub,
 			Justification: encodedPath,
 		}
+		log.Debug(debugDA, "CE138_request: SendBundleShardRequest OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", response)
 		return response, nil
 
 	case "CE139_request":

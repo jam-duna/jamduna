@@ -20,7 +20,7 @@ type Justification struct {
 }
 
 func (j *Justification) EncodeJustification() ([]byte, error) {
-	return common.EncodeJustification(j.Path)
+	return common.EncodeJustification(j.Path, ECPieceSize)
 }
 
 func (j *Justification) Marshal() ([]byte, error) {

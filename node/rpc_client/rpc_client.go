@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/rpc"
 	"strings"
@@ -11,7 +12,9 @@ import (
 )
 
 func main() {
-	// Connect to the RPC server
+	// Define and parse the port flag. Default is 21100.
+	//port := flag.Int("port", 21100, "port to connect to RPC server")
+	flag.Parse()
 
 	client, err := rpc.Dial("unix", "/tmp/jam-0.sock")
 	if err != nil {
@@ -74,8 +77,6 @@ func main() {
 	// Enter Console interactive mode
 	fmt.Println("✅ Jam Console Started (Readline Mode)")
 	fmt.Println("Use JavaScript to call RPC methods, e.g.:")
-	fmt.Println("  jam.GetBlockBySlot(104)")
-	fmt.Println("  jam.GetService(123)")
 	fmt.Println("Type 'exit' to quit.")
 
 	for {

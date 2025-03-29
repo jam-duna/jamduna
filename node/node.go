@@ -138,16 +138,16 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 	return NodeContent{
 		id:                   id,
 		store:                store,
-		command_chan:         make(chan string, 200),
+		command_chan:         make(chan string, 2000), // temporary
 		peersInfo:            make(map[uint16]*Peer),
 		UP0_stream:           make(map[uint16]quic.Stream),
 		statedbMap:           make(map[common.Hash]*statedb.StateDB),
 		dataHashStreams:      make(map[common.Hash][]quic.Stream),
-		blockAnnouncementsCh: make(chan JAMSNP_BlockAnnounce, 200),
+		blockAnnouncementsCh: make(chan JAMSNP_BlockAnnounce, 2000),
 		blocks:               make(map[common.Hash]*types.Block),
 		headers:              make(map[common.Hash]*types.Block),
-		workPackagesCh:       make(chan types.WorkPackage, 200),
-		workReportsCh:        make(chan types.WorkReport, 200),
+		workPackagesCh:       make(chan types.WorkPackage, 2000),
+		workReportsCh:        make(chan types.WorkReport, 2000),
 		preimages:            make(map[common.Hash][]byte),
 		workPackageQueue:     sync.Map{},
 	}
@@ -1170,6 +1170,9 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 	allsegmentindices := make([]uint16, len(si.Indices))
 	for i, idx := range si.Indices {
 		allsegmentindices[i] = idx
+		if idx >= si.WorkReport.AvailabilitySpec.ExportedSegmentLength {
+			return segments, justifications, fmt.Errorf("requested index %d exceeds availability spec export count %d", idx, si.WorkReport.AvailabilitySpec.ExportedSegmentLength)
+		}
 		p := idx / 64 // each proofpage is 64 segments
 		if !slices.Contains(proofpages, p) {
 			proofpages = append(proofpages, p)
@@ -1213,7 +1216,8 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 			numShards++
 		}
 	}
-	chunkSize := 2052 // TODO: SegmentSize / W_E * 2
+	chunkSize := types.NumECPiecesPerSegment * 2 // MKTODO: SegmentSize / W_E * 2
+	fmt.Printf("!!! reconstructSegments: %d segments, %d shards, %d chunkSize\n", len(allsegmentindices), numShards, chunkSize)
 	rawshards := make([][]byte, len(indexes))
 	numsegments := len(allsegmentindices)
 	allsegments := make([][]byte, numsegments) // note that the last few are actually pageproofs
@@ -1294,19 +1298,22 @@ func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, 
 	for _, resp := range responses {
 		daResp, ok := resp.(CE138_response)
 		if !ok {
-			log.Warn(debugDA, "reconstructPackageBundleSegments:Error in convert bundle segments CE138_response", "n", n.id, "len(BundleShard)", len(daResp.BundleShard), "daResp.BundleShard", daResp.BundleShard)
+			log.Warn(module, "reconstructPackageBundleSegments: Error in convert bundle segments CE138_response", "n", n.id, "len(BundleShard)", len(daResp.BundleShard), "daResp.BundleShard", daResp.BundleShard)
 		}
 		if numShards < types.TotalCores {
 			encodedPath := daResp.Justification
-			decodedPath, _ := common.DecodeJustification(encodedPath)
+			decodedPath, _ := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
 			bClub := common.Blake2Hash(daResp.BundleShard)
 			sClub := daResp.SClub
 			leaf := append(bClub.Bytes(), sClub.Bytes()...)
+			log.Debug(module, "!!!! reconstructPackageBundleSegments: leaf", "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "shardIndex", daResp.ShardIndex, "decodedPath", fmt.Sprintf("%x", decodedPath))
 			verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
-			if verified || true {
+			if verified {
 				bundleShards[numShards] = daResp.BundleShard
 				indexes[numShards] = uint32(daResp.ShardIndex)
 				numShards++
+			} else {
+				log.Crit(module, "reconstructPackageBundleSegments:VerifyWBTJustification", "erasureRoot", erasureRoot, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "decodedPath", fmt.Sprintf("%x", decodedPath))
 			}
 		}
 	}

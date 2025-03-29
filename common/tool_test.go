@@ -20,13 +20,13 @@ func TestJustificationEncodeDecode(t *testing.T) {
 		justifications[i], _ = hex.DecodeString(text)
 	}
 	// encode the justification
-	encoded, err := EncodeJustification(justifications)
+	encoded, err := EncodeJustification(justifications, 1026)
 	if err != nil {
 		t.Fatalf("EncodeJustification error: %v", err)
 	}
 
 	// decode the justification
-	decoded, err := DecodeJustification(encoded)
+	decoded, err := DecodeJustification(encoded, 1026)
 	if err != nil {
 		t.Fatalf("DecodeJustification error: %v", err)
 	}

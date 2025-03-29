@@ -154,37 +154,38 @@ func ConcatenateByteSlices(slices [][]byte) []byte {
 	return result
 }
 
-func EncodeJustification(path [][]byte) ([]byte, error) {
-	// If path is nil or empty, return an empty slice.
+// Justification = [0 ++ Hash OR 1 ++ Hash ++ Hash OR 2 ++ Segment Shard] (Each discriminator is a single byte)
+func EncodeJustification(path [][]byte, numECPiecesPerSegment int) ([]byte, error) {
 	if len(path) == 0 {
 		return []byte{}, nil
 	}
 	var combined []byte
 	for i, h := range path {
-		// Each element must be either 32 or 64 bytes.
-		if len(h) != 32 && len(h) != 64 {
-			return nil, fmt.Errorf("invalid hash length %d at index %d; expected 32 or 64", len(h), i)
+		if len(h) != 32 && len(h) != 64 && len(h) != 2*numECPiecesPerSegment {
+			return nil, fmt.Errorf("invalid length %d at index %d; expected 32 or 64 or %d", len(h), i, 2*numECPiecesPerSegment)
 		}
-		// Use marker 0x01 for 64-byte, 0x00 for 32-byte.
-		if len(h) == 64 {
-			combined = append(combined, 0x01)
-		} else {
+		if len(h) == 32 {
 			combined = append(combined, 0x00)
+			combined = append(combined, h...)
+		} else if len(h) == 64 {
+			combined = append(combined, 0x01)
+			combined = append(combined, h...)
+		} else if len(h) == 2*numECPiecesPerSegment {
+			// For marker 0x02, the segment shard must be exactly shardSize bytes.
+			combined = append(combined, 0x02)
+			combined = append(combined, h...)
 		}
-		combined = append(combined, h...)
 	}
 	return combined, nil
 }
 
-func DecodeJustification(compact []byte) ([][]byte, error) {
-	// If there's no data, return an empty slice.
+func DecodeJustification(compact []byte, numECPiecesPerSegment int) ([][]byte, error) {
 	if len(compact) == 0 {
 		return [][]byte{}, nil
 	}
 	var path [][]byte
 	i := 0
 	for i < len(compact) {
-		// Ensure there's at least one marker byte.
 		if i+1 > len(compact) {
 			return nil, errors.New("unexpected end of data: missing marker")
 		}
@@ -195,7 +196,6 @@ func DecodeJustification(compact []byte) ([][]byte, error) {
 			if i+1+32 > len(compact) {
 				return nil, fmt.Errorf("unexpected end of data for 32-byte hash at position %d", i)
 			}
-			// Copy the hash to avoid aliasing issues.
 			h := make([]byte, 32)
 			copy(h, compact[i+1:i+1+32])
 			path = append(path, h)
@@ -209,11 +209,19 @@ func DecodeJustification(compact []byte) ([][]byte, error) {
 			copy(h, compact[i+1:i+1+64])
 			path = append(path, h)
 			i += 1 + 64
+		case 0x02:
+			// Marker 0x02 indicates a segment shard.
+			if i+1+2*numECPiecesPerSegment > len(compact) {
+				return nil, fmt.Errorf("unexpected end of data for segment shard at position %d", i)
+			}
+			shard := make([]byte, 2*numECPiecesPerSegment)
+			copy(shard, compact[i+1:i+1+2*numECPiecesPerSegment])
+			path = append(path, shard)
+			i += 1 + 2*numECPiecesPerSegment
 		default:
 			return nil, fmt.Errorf("invalid marker 0x%x at position %d", marker, i)
 		}
 	}
-	// If there's extra data, that's an error.
 	if i != len(compact) {
 		return nil, errors.New("extra data found after decoding justification")
 	}

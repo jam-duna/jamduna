@@ -350,10 +350,14 @@ func (j *Jam) AuditWorkPackageByHash(req []string, res *string) error {
 	}
 	workPackageHash := common.HexToHash(req[0])
 	si := j.WorkReportSearch(workPackageHash)
+	if si == nil {
+		return fmt.Errorf("Work Package not found")
+	}
 	workReport := si.WorkReport
 	spec := workReport.AvailabilitySpec
 	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
+	//fmt.Printf("AuditWorkPackageByHash: reconstructing package bundle ErasureRoot=%v | bundleLen=%d | SegmentRootLookup=%x\n", spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
 	workPackageBundle, err := j.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
 	if err != nil {
 		return err
@@ -361,39 +365,51 @@ func (j *Jam) AuditWorkPackageByHash(req []string, res *string) error {
 
 	workReport2, _, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
 	if err != nil {
-		return nil
+		return err
 	}
 
-	// TODO: check that workReport == workReport2
+	// check that workReport == workReport2
+	if workReport.Hash() == workReport2.Hash() {
+		fmt.Printf("AuditWorkPackageByHash MATCHED %s %s", workReport2.Hash(), workReport2.String())
+	} else {
+		fmt.Printf("AuditWorkPackageByHash MISMATCH (original %s %s ) != (reexecution %s %s)",
+			workReport.Hash(), workReport.String(), workReport2.Hash(), workReport2.String())
+	}
+
 	*res = workReport2.String()
 	return nil
 }
 
 // GetSegment(requestedHash string, index int) -> hex string
-func (j *Jam) GetSegments(req []string, res *string) (err error) {
+func (j *Jam) GetSegment(req []string, res *string) (err error) {
 	if len(req) != 2 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
 	requestedHash := common.HexToHash(req[0])
 
-	var indices []uint16
+	var index uint16
 	indicesStr := req[1]
-	err = json.Unmarshal([]byte(indicesStr), &indices)
+	err = json.Unmarshal([]byte(indicesStr), &index)
 	if err != nil {
-		return err
+		return fmt.Errorf("Invalid index %s (must be between 0 and export_count-1)", indicesStr)
 	}
 
+	indices := make([]uint16, 1)
+	indices[0] = index
 	segments, justifications, err := j.getSegments(requestedHash, indices)
 	if err != nil {
 		return err
 	}
-	type getSegmentsResponse struct {
-		Segments       [][]byte
-		Justifications [][]common.Hash
+	type getSegmentResponse struct {
+		Segment       []byte        `json:"segment"`
+		Justification []common.Hash `json:"justification"`
 	}
-	response := getSegmentsResponse{
-		Segments:       segments,
-		Justifications: justifications,
+	if len(segments) != 1 {
+		return fmt.Errorf("segment not found")
+	}
+	response := getSegmentResponse{
+		Segment:       segments[0],
+		Justification: justifications[0],
 	}
 	r, err := json.Marshal(response)
 	if err != nil {
