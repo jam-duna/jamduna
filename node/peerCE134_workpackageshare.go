@@ -238,16 +238,19 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 	}
 	stream, err := p.openStream(CE134_WorkPackageShare)
 	if err != nil {
+		err = fmt.Errorf("openStream[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 	defer stream.Close()
 	err = sendQuicBytes(stream, reqBytes)
 	if err != nil {
+		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 	// <-- Work Report Hash ++ Ed25519 Signature
 	respBytes, err := receiveQuicBytes(stream)
 	if err != nil {
+		err = fmt.Errorf("receiveQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 
@@ -321,6 +324,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	}
 	workReport, _, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
 	if err != nil {
+		fmt.Printf("%s error executing work package bundle: %v\n", n.String(), err)
 		return
 	} else {
 		n.workReportsCh <- workReport

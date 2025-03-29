@@ -224,7 +224,7 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 		}
 	}()
 	wg.Wait()
-	log.Debug(debugBlock, "Received Handshake from peer", fmt.Sprintf("%d: %x", peerID, newHandshake))
+	log.Debug(debugBlock, "Received Handshake from peer", "peer", fmt.Sprintf("%d: %v", peerID, newHandshake))
 	// check if there is any error
 	select {
 	case err = <-errChan:

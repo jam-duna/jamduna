@@ -58,6 +58,12 @@ type Peer struct {
 	//stream quic.Stream
 }
 
+type PeerInfo struct {
+	PeerID    uint16          `json:"peer_id"`
+	PeerAddr  string          `json:"peer_addr"`
+	Validator types.Validator `json:"validator"`
+}
+
 func (p *Peer) Clone() *Peer {
 	return &Peer{
 		node:      p.node,

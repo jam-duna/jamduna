@@ -34,9 +34,13 @@ type WorkPackage struct {
 }
 
 type WorkPackageRequest struct {
-	CoreIndex    uint16      `json:"core_index"`
-	WorkPackage  WorkPackage `json:"work_package"`
-	ExtrinsBlobs [][]byte    `json:"extrinsic_blobs"`
+	CoreIndex       uint16          `json:"core_index"`
+	WorkPackage     WorkPackage     `json:"work_package"`
+	ExtrinsicsBlobs ExtrinsicsBlobs `json:"extrinsic_blobs"`
+}
+
+func (wpReq *WorkPackageRequest) String() string {
+	return ToJSON(wpReq)
 }
 
 // WorkPackageBundle represents a work package.

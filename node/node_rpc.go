@@ -24,6 +24,128 @@ type Jam struct {
 	*NodeContent
 }
 
+type NodeClient struct {
+	PeerInfo *PeerInfo
+	Client   *rpc.Client
+}
+
+// ----------------- client side -----------------
+func (nc *NodeClient) GetCurrJCE() (uint32, error) {
+	var result uint32
+	err := nc.Client.Call("jam.GetCurrJCE", struct{}{}, &result)
+	return result, err
+}
+
+func (c *NodeClient) AddPreimage(preimage []byte) (common.Hash, error) {
+	var codeHash common.Hash
+	err := c.Client.Call("jam.AddPreimage", preimage, &codeHash)
+	return codeHash, err
+}
+
+func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
+	var jsonStr string
+	err := c.Client.Call("jam.GetRefineContext", []string{}, &jsonStr)
+	if err != nil {
+		return types.RefineContext{}, err
+	}
+
+	var context types.RefineContext
+	err = json.Unmarshal([]byte(jsonStr), &context)
+	if err != nil {
+		return types.RefineContext{}, fmt.Errorf("failed to unmarshal refine context: %w", err)
+	}
+	return context, nil
+}
+
+func (c *NodeClient) SendWorkPackage(workPackageReq types.WorkPackageRequest) error {
+	// Marshal the WorkPackageRequest to JSON
+	reqBytes, err := json.Marshal(workPackageReq)
+	if err != nil {
+		fmt.Errorf("failed to marshal work package request: %w", err)
+	}
+
+	fmt.Printf("NodeClient SendWorkPackage:%v | ExtrinsBlobs:%x | %s\n", workPackageReq.WorkPackage.Hash(), workPackageReq.ExtrinsicsBlobs, string(reqBytes))
+
+	// Prepare the request as a one-element string slice
+	req := []string{string(reqBytes)}
+
+	var res string
+	// Call the remote RPC method
+	err = c.Client.Call("jam.SendWorkPackage", req, &res)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.Hash) ([]byte, bool, error) {
+	req := []string{
+		strconv.FormatUint(uint64(serviceIndex), 10),
+		storageHash.Hex(),
+	}
+	var res string
+	err := c.Client.Call("jam.GetServiceStorage", req, &res)
+	if err != nil {
+		return nil, false, err
+	}
+	storageBytes := common.Hex2Bytes(res)
+	return storageBytes, true, nil
+}
+
+func (c *NodeClient) SendPreimageAnnouncement(serviceIndex uint32, preimage []byte) error {
+	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
+	preimageStr := common.Bytes2Hex(preimage)
+	req := []string{serviceIndexStr, preimageStr}
+
+	var res string
+	err := c.Client.Call("jam.SendPreimageAnnouncement", req, &res)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *NodeClient) GetServicePreimage(serviceIndex uint32, codeHash common.Hash) ([]byte, error) {
+	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
+	codeHashStr := codeHash.Hex()
+	req := []string{serviceIndexStr, codeHashStr}
+
+	var res string
+	err := c.Client.Call("jam.GetServicePreimage", req, &res)
+	if err != nil {
+		return nil, err
+	}
+
+	preimage := common.Hex2Bytes(res)
+	return preimage, nil
+}
+
+func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_state, error) {
+	// Convert coreIdx to a string
+	coreIdxStr := strconv.FormatUint(uint64(coreIdx), 10)
+	req := []string{coreIdxStr}
+
+	var res string
+	// Make the RPC call to "jam.GetAvailabilityAssignments"
+	err := c.Client.Call("jam.GetAvailabilityAssignments", req, &res)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal the JSON response into an AvailabilityAssignment
+	var rho_state statedb.Rho_state
+	err = json.Unmarshal([]byte(res), &rho_state)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal availability assignment: %w", err)
+	}
+	var rho_state_empty statedb.Rho_state
+	if rho_state_empty.String() == rho_state.String() {
+		return nil, err
+	}
+	//fmt.Printf("GetAvailabilityAssignments @ coreIdx=%d rho=%v\n", coreIdx, rho_state)
+	return &rho_state, nil
+}
+
 var MethodDiscriptionMap = map[string]string{
 	"GetFunctions":             "GetFunctions() -> functions description",
 	"NodeCommand":              "NodeCommand(command string) -> will pass the command to the node",
@@ -70,6 +192,34 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 	case <-time.After(5 * time.Second):
 		*res = "Timeout"
 	}
+	return nil
+}
+
+func (j *Jam) GetAvailabilityAssignments(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("Invalid number of arguments")
+	}
+	coreIdxStr := req[0]
+	codeIdx, err := strconv.ParseUint(coreIdxStr, 10, 32)
+	if err != nil {
+		return err
+	}
+	rho_state := j.statedb.JamState.AvailabilityAssignments[codeIdx]
+	rho_stateStr := rho_state.String()
+	//fmt.Printf("JAM SERVER GetAvailabilityAssignments @ coreIdx=%d rho=%v\n", codeIdx, rho_stateStr)
+	*res = rho_stateStr
+	return nil
+}
+
+func (j *Jam) GetCurrJCE(_ struct{}, res *uint32) error {
+	currJCE := j.NodeContent.nodeSelf.GetCurrJCE()
+	fmt.Printf("jam GetCurrJCE: %v\n", currJCE)
+	*res = currJCE
+	return nil
+}
+
+func (j *Jam) AddPreimage(preimage []byte, res *common.Hash) error {
+	*res = j.NodeContent.AddPreimage(preimage)
 	return nil
 }
 
@@ -176,6 +326,15 @@ func (j *Jam) GetState(req []string, res *string) error {
 	if !ok {
 		return fmt.Errorf("state not found for header hash %s", headerHash.String())
 	}
+	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).String()
+	return nil
+}
+
+func (j *Jam) GetLatestState(req []string, res *string) error {
+	if len(req) != 0 {
+		return fmt.Errorf("Invalid number of arguments")
+	}
+	sdb := j.statedb
 	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).String()
 	return nil
 }
@@ -362,6 +521,7 @@ func (j *Jam) AuditWorkPackageByHash(req []string, res *string) error {
 	if err != nil {
 		return err
 	}
+	log.Info(debugP, "!!! AuditWorkPackageByHash reconstructPackageBundleSegments", "package_bundle.ExtrinsicData", fmt.Sprintf("%x", workPackageBundle.ExtrinsicData), "workPackageHash", workPackageBundle.PackageHash())
 
 	workReport2, _, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
 	if err != nil {
@@ -458,14 +618,15 @@ func (j *Jam) SendWorkPackage(req []string, res *string) error {
 	if err != nil {
 		return err
 	}
+	fmt.Printf("JAM Server SendWorkPackage: %v | ExtrinsBlobs:%x | %s\n", workPackage_req.WorkPackage.Hash(), workPackage_req.ExtrinsicsBlobs, workpackageReq)
 	core_index := workPackage_req.CoreIndex
 	workPackage := workPackage_req.WorkPackage
-	Extrinsic := workPackage_req.ExtrinsBlobs
+	extrinsics := workPackage_req.ExtrinsicsBlobs
 	// broadcast work package
 	core_peers := j.GetCoreCoWorkersPeers(core_index)
 	// random pick the index from 0, 1, 2
 	randomIdx := rand.Intn(3)
-	err = core_peers[randomIdx].SendWorkPackageSubmission(workPackage, Extrinsic, core_index)
+	err = core_peers[randomIdx].SendWorkPackageSubmission(workPackage, extrinsics, core_index)
 	if err != nil {
 		return err
 	}
@@ -477,8 +638,12 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 	if len(req) != 0 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
-	// get the latest refine context
-	refinecontext := j.statedb.GetRefineContext()
+	// get the latest refine context....
+	//refinecontext := j.statedb.GetRefineContext()
+
+	// Access statedb via Node reference
+	refinecontext := j.statedb.GetRefineContext() // not sure
+
 	// json marshal the refine context
 	*res = refinecontext.String()
 	return nil
@@ -495,6 +660,7 @@ func (j *Jam) NewService(req []string, res *string) error {
 		return err
 	}
 	service_code_hash := common.Blake2Hash(service_code)
+	// fmt.Printf("name: %s, codelen: %d, hash: %v\n", service_name, len(service_code), service_code_hash)
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
 		*res = err.Error()
@@ -553,13 +719,14 @@ func (j *Jam) NewService(req []string, res *string) error {
 		*res = "SendWorkPackageSubmission timed out"
 		return fmt.Errorf("SendWorkPackageSubmission timed out")
 	}
-	new_service_found := false
-	previous_service_idx := uint32(0)
 	new_service_idx := uint32(0)
 	// wait for the new service to be created
-	for !new_service_found {
-		stateDB := j.statedb
-		if stateDB != nil && stateDB.Block != nil {
+
+	var stateDB *statedb.StateDB
+	stateDB = j.statedb
+	if stateDB != nil && stateDB.Block != nil {
+		for {
+			stateDB = j.statedb
 			stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 			t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), j.store)
 			k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
@@ -568,22 +735,35 @@ func (j *Jam) NewService(req []string, res *string) error {
 				time.Sleep(1 * time.Second)
 				continue
 			}
-			time.Sleep(1 * time.Second)
 			decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
-			if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
-				new_service_idx = decoded_new_service_idx
-				new_service_found = true
-				previous_service_idx = decoded_new_service_idx
-				err = j.BroadcastPreimageAnnouncement(new_service_idx, service_code_hash, uint32(len(service_code)), service_code)
-				if err != nil {
-					log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
-				}
+			service_account, ok, err := j.statedb.GetService(decoded_new_service_idx)
+			if err != nil || !ok {
+				return fmt.Errorf("GetService failed:%v", err)
 			}
-
+			service_account_code_hash := service_account.CodeHash
+			if service_code_hash == service_account_code_hash {
+				new_service_idx = decoded_new_service_idx
+				break
+			}
+			time.Sleep(1 * time.Second)
 		}
+		err = j.BroadcastPreimageAnnouncement(new_service_idx, service_code_hash, uint32(len(service_code)), service_code)
+		if err != nil {
+			log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+		}
+
 	}
 
-	*res = fmt.Sprintf("New service %v created(id %d) , code hash %v\n", service_name, new_service_idx, service_code_hash)
+	service_info := types.ServiceInfo{
+		ServiceIndex:    new_service_idx,
+		ServiceCodeHash: service_code_hash,
+	}
+	service_info_json, err := json.Marshal(service_info)
+	if err != nil {
+		*res = err.Error()
+	}
+	*res = string(service_info_json)
+	fmt.Printf("NewService %s\n", service_name)
 	return nil
 }
 
@@ -621,32 +801,86 @@ func (j *Jam) Decode(req []string, res *string) error {
 }
 
 // server ========================================
-func (n *NodeContent) StartRPCServer() {
+func (n *Node) StartRPCServer(port int) {
+	n.NodeContent.nodeSelf = n
+	n.NodeContent.startRPCServerImpl(port)
+}
+
+func (n *NodeContent) startRPCServerImpl(port int) {
 	jam := new(Jam)
 	jam.NodeContent = n
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
-	sock_name := n.node_name
-	ipcPath := fmt.Sprintf("/tmp/%s.sock", sock_name)
-
-	os.Remove(ipcPath)
-	listener, err := net.Listen("unix", ipcPath)
+	rpc_port := port + 1200
+	address := fmt.Sprintf(":%d", rpc_port)
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		fmt.Println("Failed to start IPC server:", err)
+		fmt.Println("Failed to start RPC server:", err)
 		return
 	}
 	defer listener.Close()
-	fmt.Println("RPC server started, using IPC:", ipcPath)
+	fmt.Println("RPC server started, listening on", address)
 
 	// Listen for requests
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("Failed to accept connection:", err)
+			fmt.Println("⚠️ Failed to accept connection:", err)
 			continue
 		}
 		go rpc.ServeConn(conn)
 	}
+}
+
+func ParsePeerList(peerListMapFile string) (peerInfoMap map[uint16]*PeerInfo, err error) {
+	peerListMapJson, err := os.Open(peerListMapFile)
+	if err != nil {
+		errStr := fmt.Sprintf("Error Open(peerListFile): %s\n", err)
+		return peerInfoMap, fmt.Errorf(errStr)
+	}
+
+	err = json.NewDecoder(peerListMapJson).Decode(&peerInfoMap)
+	if err != nil {
+		errStr := fmt.Sprintf("Error Decode: %s\n", err)
+		return peerInfoMap, fmt.Errorf(errStr)
+	}
+	peerListMapJson.Close()
+	return peerInfoMap, nil
+}
+
+func LoadRPCClients(peerInfoMap map[uint16]*PeerInfo) (nodeClients []*NodeClient, err error) {
+	nodeClients = make([]*NodeClient, 0)
+	for _, peerInfo := range peerInfoMap {
+		nodeClient, err := CreateNodeClient(*peerInfo)
+		if err != nil {
+			return nil, err
+		}
+		nodeClients = append(nodeClients, nodeClient)
+	}
+	return nodeClients, nil
+}
+
+func CreateNodeClient(peerInfo PeerInfo) (*NodeClient, error) {
+	address := peerInfo.PeerAddr
+	// get the port
+	host, portStr, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address: %v", err)
+	}
+	portInt, err := strconv.Atoi(portStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port: %v", err)
+	}
+	rpc_address := net.JoinHostPort(host, strconv.Itoa(portInt+1200))
+	client, err := rpc.Dial("tcp", rpc_address)
+	if err != nil {
+		return nil, err
+	}
+	nodeClient := NodeClient{
+		PeerInfo: &peerInfo,
+		Client:   client,
+	}
+	return &nodeClient, nil
 }
 
 // mk's codec api

@@ -12,3 +12,8 @@ type TestService struct {
 	ServiceName     string
 	MetadataAndCode []byte
 }
+
+type ServiceInfo struct {
+	ServiceIndex    uint32      `json:"ServiceIndex"`
+	ServiceCodeHash common.Hash `json:"ServiceCodeHash"`
+}

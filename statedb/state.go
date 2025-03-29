@@ -56,6 +56,10 @@ type Rho_state struct {
 	Timeslot   uint32           `json:"timeout"`
 }
 
+func (r *Rho_state) String() string {
+	return types.ToJSON(r)
+}
+
 // Types for Gamma
 type TicketsOrKeys struct {
 	Tickets []*types.TicketBody `json:"tickets,omitempty"` //WinningTicket for primary

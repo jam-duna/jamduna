@@ -102,7 +102,7 @@ func main() {
 		fmt.Printf("GetStorage Err:%s", err.Error())
 		os.Exit(1)
 	}
-	go n.StartRPCServer()
+	go n.StartRPCServer(9900)
 	n.RunApplyBlockAndWeb("../importblocks/data/assurances/state_transitions", 15000, storage)
 	for {
 		time.Sleep(1 * time.Second)

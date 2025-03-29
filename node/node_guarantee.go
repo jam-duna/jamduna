@@ -243,7 +243,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			} else {
 				fellow_response, errfellow := coworker.ShareWorkPackage(coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
-					log.Error(debugG, "processWPQueueItem", "n", n.String(), "err", errfellow)
+					log.Error(debugG, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
 					return
 				}
 				mutex.Lock()
@@ -294,7 +294,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		})
 		err := n.processGuarantee(guarantee)
 		if err != nil {
-			log.Error(debugG, "processWPQueueItem", "n", n.String(), "err", err)
+			log.Error(debugG, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}
 	}
 	return true

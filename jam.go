@@ -78,15 +78,20 @@ func main() {
 	flag.StringVar(&config.Bls, "bls", "", "BLS private key (only for development)")
 	flag.StringVar(&config.NodeName, "metadata", "Alice", "Node metadata")
 	flag.Parse()
+	now := time.Now()
+	loc := now.Location()
+
+	fmt.Printf("System time: %s (%s)\n", now.Format("2006-01-02 15:04:05"), loc)
+
 	if start_time != "" {
 		for len(start_time) > 0 && (start_time[0] < '0' || start_time[0] > '9') {
 			start_time = start_time[1:]
 		}
 		if len(start_time) > 0 && start_time[len(start_time)-1] == ' ' {
-			// Remove the space at the end
 			start_time = start_time[:len(start_time)-1]
 		}
-		startTime, err := time.Parse("2006-01-02 15:04:05", start_time)
+
+		startTime, err := time.ParseInLocation("2006-01-02 15:04:05", start_time, loc)
 		if err != nil {
 			fmt.Printf("start_time: %s\n", start_time)
 			fmt.Println("Invalid time format. Use YYYY-MM-DD HH:MM:SS")
@@ -97,7 +102,8 @@ func main() {
 		if duration <= 0 {
 			fmt.Println("Start time already passed. Running now...")
 		} else {
-			fmt.Printf("Waiting until start time: %s (%v seconds remaining)\n", startTime.Format("2006-01-02 15:04:05"), duration.Seconds())
+			fmt.Printf("Waiting until start time: %s (%v seconds remaining)\n",
+				startTime.Format("2006-01-02 15:04:05"), duration.Seconds())
 			time.Sleep(duration)
 		}
 	}
@@ -130,6 +136,7 @@ func main() {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)
 	}
+	n.SetServiceDir("/services")
 	storage, err := n.GetStorage()
 	defer storage.Close()
 	if err != nil {
@@ -137,7 +144,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String())
-	timer := time.NewTimer(55 * time.Minute)
+	timer := time.NewTimer(60 * time.Minute)
 	<-timer.C
 	fmt.Println("Node has been running for 45 minutes. Shutting down...")
 }

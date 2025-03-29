@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"net/rpc"
 
 	"sync/atomic"
 
@@ -54,6 +55,7 @@ const (
 	quicAddr     = "127.0.0.1:%d"
 	godMode      = false
 	Grandpa      = false
+	Audit        = false
 	revalidate   = false // turn off for production (or publication of traces)
 
 	paranoidVerification = true  // turn off for production
@@ -70,7 +72,6 @@ var auth_code_encoded_bytes, _ = auth_code.Encode()
 
 var auth_code_hash = common.Blake2Hash(auth_code_encoded_bytes) //pu
 var auth_code_hash_hash = common.Blake2Hash(auth_code_hash[:])  //pa
-
 var bootstrap_auth_codehash = auth_code_hash
 
 // var bootstrap_auth_codehash = common.Hash(common.FromHex("0x397c392ad076df2b8f9e1522cb3554178e41200ba389a4fa4aab141a560202a2"))
@@ -132,6 +133,10 @@ type NodeContent struct {
 	chunkBox            map[common.Hash][][]byte
 	loaded_services_dir string
 	block_tree          *types.BlockTree
+	nodeSelf            *Node
+
+	RPC_Client        []*rpc.Client
+	new_timeslot_chan chan uint32
 }
 
 func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
@@ -150,6 +155,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 		workReportsCh:        make(chan types.WorkReport, 2000),
 		preimages:            make(map[common.Hash][]byte),
 		workPackageQueue:     sync.Map{},
+		new_timeslot_chan:    make(chan uint32, 1),
 	}
 }
 
@@ -508,17 +514,18 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	if nodeType != ValidatorDAFlag {
 		go node.runJCE()
 		//go node.runFasterJCE()
+		// go node.runJCEManually()
 		go node.runClient()
 		go node.runMain()
 		go node.runPreimages()
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
-		go node.StartRPCServer()
+		go node.StartRPCServer(port)
 		go node.runWPQueue()
 		// go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 		host_name, _ := os.Hostname()
 		if id == 0 || host_name[:4] == "jam-" {
-			go node.runJamWeb(uint16(port+1000) + id)
+			go node.runJamWeb(uint16(port+1000)+id, port)
 		}
 
 	}
@@ -842,6 +849,12 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				}
 				err = sendQuicBytes(up0_stream, block_a_bytes)
 				if err != nil {
+					if id > types.TotalValidators {
+						n.UP0_streamMu.Lock()
+						delete(n.UP0_stream, id)
+						n.UP0_streamMu.Unlock()
+						delete(n.peersInfo, id)
+					}
 					log.Error(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
 				}
 			}
@@ -1061,7 +1074,9 @@ func (n *Node) extendChain() error {
 				parentheaderhash = nextBlock.Header.Hash()
 
 				n.statedbMapMutex.Lock()
-				n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+				if Audit {
+					n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+				}
 				n.statedbMapMutex.Unlock()
 
 				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
@@ -1344,6 +1359,14 @@ func (n *NodeContent) getPVMStateDB() *statedb.StateDB {
 	return target_statedb
 }
 
+func (n *NodeContent) AddPreimage(preimageByte []byte) (codeHash common.Hash) {
+	codeHash = common.Blake2Hash(preimageByte)
+	n.nodeSelf.preimagesMutex.Lock()
+	defer n.nodeSelf.preimagesMutex.Unlock()
+	n.nodeSelf.preimages[codeHash] = preimageByte
+	return codeHash
+}
+
 // -----Custom methods for tiny QUIC EC experiment-----
 
 func getStructType(obj interface{}) string {
@@ -1557,6 +1580,19 @@ func (n *Node) runFasterJCE() {
 	}
 }
 
+func (n *Node) runJCEManually() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+
+		case <-n.new_timeslot_chan:
+			n.SetCurrJCE(CurrentSlot)
+		}
+	}
+}
+
 func (n *Node) GetCurrJCE() uint32 {
 	n.currJCEMutex.Lock()
 	defer n.currJCEMutex.Unlock()
@@ -1574,12 +1610,22 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	n.currJCE = currJCE
 }
 
+func (n *Node) monitorCommandChannel() {
+	for {
+		time.Sleep(5 * time.Second)
+		log.Info(module, "chan monitoring", "command_chan", fmt.Sprintf("Diagnostic: command_chan has %d pending commands", len(n.command_chan)))
+	}
+}
+
 func (n *Node) runClient() {
 	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
 	defer ticker_pulse.Stop()
 
 	logChan := n.store.GetChan()
 	n.statedb.GetSafrole().EpochFirstSlot = n.epoch0Timestamp / types.SecondsPerSlot
+
+	//go n.monitorCommandChannel()
+
 	for {
 		select {
 
@@ -1672,7 +1718,9 @@ func (n *Node) runClient() {
 
 				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
 				n.assureNewBlock(newBlock)
-				n.auditingCh <- newStateDB.Copy()
+				if Audit {
+					n.auditingCh <- newStateDB.Copy()
+				}
 				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
 
@@ -1680,8 +1728,6 @@ func (n *Node) runClient() {
 
 		case log := <-logChan:
 			go n.WriteLog(log)
-		case command := <-n.command_chan:
-			fmt.Printf("Get new command from RPC: %v\n", command)
 		}
 	}
 }

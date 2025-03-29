@@ -245,6 +245,10 @@ func safrole(sendtickets bool) {
 	}
 }
 
+func GetService(serviceNames []string, getmetadata bool) (services map[string]*types.TestService, err error) {
+	return getServices(serviceNames, getmetadata)
+}
+
 func getServices(serviceNames []string, getmetadata bool) (services map[string]*types.TestService, err error) {
 	services = make(map[string]*types.TestService)
 	for i, serviceName := range serviceNames {
@@ -269,6 +273,207 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 		log.Info(module, serviceName, "codeHash", codeHash, "len", len(code))
 	}
 	return
+}
+
+func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
+	log.InitLogger()
+
+	flag.Parse()
+	peerListMapFile := "../cmd/archive_node/peerlist/local.json"
+	peerListMap, err := ParsePeerList(peerListMapFile)
+	if err != nil {
+		t.Fatalf("Error loading peerlist %v: %v", peerListMapFile, err)
+	}
+
+	nodes, err := LoadRPCClients(peerListMap)
+	if err != nil {
+		panic(fmt.Sprintf("Error setting up nodes: %v\n", err))
+	}
+	fmt.Printf("Node Clients: %v\n", nodes)
+
+	// log.EnableModule("da_mod")
+	// log.EnableModule("segment")
+	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
+
+	nodeClient := nodes[1]
+
+	if *prereq_test {
+		test_prereq = true
+	}
+	if *pvm_authoring_log {
+		pvm_authoring_log_enabled = true
+	}
+
+	fmt.Printf("Test PreReq: %v\n", test_prereq)
+	if pvm_authoring_log_enabled {
+		fmt.Printf("PVM Authoring log enabled!!\n")
+		log.EnableModule(log.PvmAuthoring)
+		log.EnableModule(log.FirstGuarantor)
+	}
+
+	// give some time for nodes to come up
+	initTicker := time.NewTicker(1 * time.Second)
+	defer initTicker.Stop()
+	for range initTicker.C {
+		currJCE, err := nodeClient.GetCurrJCE()
+		if err != nil {
+			continue
+		}
+		if currJCE >= types.EpochLength {
+			break
+		}
+	}
+
+	currJCE, _ := nodeClient.GetCurrJCE()
+	fmt.Printf("Ready @JCE: %v\n", currJCE)
+	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	// code length: 206
+	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
+	if err != nil {
+		panic(0)
+	}
+	bootstrapService := uint32(statedb.BootstrapServiceCode)
+	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
+	log.Info(module, "BootstrapCodeHash", "bootstrapCodeHash", bootstrapCodeHash, "codeLen", len(bootstrapCode), "fileName", statedb.BootstrapServiceFile)
+
+	serviceNames := []string{"auth_copy", "fib"}
+	codeHash, err := nodeClient.AddPreimage(bootstrapCode)
+	if err != nil {
+		log.Crit("Failed to add preimage %v:", "err", codeHash, err)
+	} else {
+		fmt.Printf("AddPreimage bootstrap codeHash: %v\n", codeHash)
+	}
+
+	new_service_idx := uint32(0)
+
+	// Load testServices
+	if jam == "fib2" || jam == "fib3" {
+		serviceNames = []string{"corevm", "auth_copy"}
+		log.EnableModule("statedb") //enable here to avoid concurrent map
+	}
+
+	fmt.Printf("Services to Load: %v\n", serviceNames)
+
+	testServices, err := getServices(serviceNames, true)
+	if err != nil {
+		panic(32)
+	}
+
+	// set builderNode's primages map
+	for serviceName, service := range testServices {
+		codeHash, err := nodeClient.AddPreimage(service.Code)
+		if err != nil {
+			log.Crit("Failed to add preimage %v:", "err", codeHash, err)
+		} else {
+			log.Info(module, "AddPreimage", "serviceName", serviceName, "codeHash", codeHash, "len", len(service.Code))
+		}
+	}
+
+	log.Trace(module, "Waiting for the first block to be ready...")
+	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	var previous_service_idx uint32
+	for serviceName, service := range testServices {
+		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
+		// set up service using the Bootstrap service
+		refine_context, refineCtxErr := nodeClient.GetRefineContext()
+		if refineCtxErr != nil {
+			log.Crit("Failed to get refine context", "err", refineCtxErr)
+		}
+		fmt.Printf("%v refine_context: %v\n", serviceName, refine_context)
+		codeWorkPackage := types.WorkPackage{
+			Authorization:         []byte(""),
+			AuthCodeHost:          bootstrapService,
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refine_context,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            bootstrapService,
+					CodeHash:           bootstrapCodeHash,
+					Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
+				},
+			},
+		}
+		workPackageReq := types.WorkPackageRequest{
+			CoreIndex:       0,
+			WorkPackage:     codeWorkPackage,
+			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		}
+		fmt.Printf("service:%v SendWorkPackage: %v\n", serviceName, workPackageReq.String())
+		submissionErr := nodeClient.SendWorkPackage(workPackageReq)
+		if submissionErr != nil {
+			log.Crit("SendWorkPackageSubmission ERR", "err", submissionErr)
+		}
+
+		fmt.Printf("service:%v SendWorkPackage submission DONE %v\n", serviceName, submissionErr)
+
+		new_service_found := false
+		log.Info(module, "Waiting for service to be ready", "service", serviceName)
+		for !new_service_found {
+			k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
+			service_account_byte, ok, err := nodeClient.GetServiceStorage(bootstrapService, k)
+			if err != nil || !ok {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			time.Sleep(1 * time.Second)
+			decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
+			if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
+				log.Info(module, "!!! Service Found", "service", serviceName, "service_idx", decoded_new_service_idx)
+				service.ServiceCode = decoded_new_service_idx
+				new_service_idx = decoded_new_service_idx
+				new_service_found = true
+				previous_service_idx = decoded_new_service_idx
+				err = nodeClient.SendPreimageAnnouncement(new_service_idx, service.Code)
+				if err != nil {
+					log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+				}
+			}
+		}
+	}
+	fmt.Printf("All services are ready, Sending preimage announcement\n")
+
+	log.Debug(module, "All services are ready, Sending preimage announcement\n")
+
+	for done := false; !done; {
+		ready := 0
+		nservices := 0
+		for serviceName, service := range testServices {
+			for _, nodeClient := range nodes {
+				fmt.Printf("Calling nodeClient GetServicePreimage: Name:%v service.ServiceCode:%v CodeHash:%v\n", serviceName, service.ServiceCode, service.CodeHash)
+				code, err := nodeClient.GetServicePreimage(service.ServiceCode, service.CodeHash)
+				if err != nil {
+					log.Debug(debugDA, "ReadServicePreimageBlob Pending")
+				} else if len(code) > 0 {
+					log.Info(module, "GetServicePreimage", "serviceName", serviceName, "ServiceIndex", service.ServiceCode, "codeHash", service.CodeHash, "len", len(code))
+					if bytes.Equal(code, service.Code) {
+						fmt.Printf("GetServicePreimage: %v Ready and Match\n", serviceName)
+						ready++
+					} else {
+						fmt.Printf("GetServicePreimage: %v NOT Match!!!\n", serviceName)
+					}
+				}
+			}
+			nservices++
+		}
+		if ready == types.TotalValidators*nservices {
+			done = true
+		} else {
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	fmt.Printf("Service Loaded!\n")
+
+	switch jam {
+	case "fib3":
+		targetN := 9
+		fib3(nodes, testServices, targetN)
+	}
 }
 
 func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
@@ -424,6 +629,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 				}
 
 			}
+
 		}
 	}
 
@@ -453,6 +659,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 			time.Sleep(1 * time.Second)
 		}
 	}
+
+	log.Info(module, "Service Loaded", "jam", jam, "targetN", targetN)
+	log.Info(module, "Service Loaded", "jam", jam, "testServices", testServices)
 
 	switch jam {
 	case "megatron":
@@ -2585,6 +2794,207 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 	fmt.Printf("Blake2b Actual Result:   %x\n", hash_result)
 }
 
+func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targetN int) {
+	log.Info(module, "FIB2 START")
+
+	//jam_key := []byte("jam")
+	//jam_key_hash := common.Blake2Hash(jam_key)
+	//jam_key_length := uint32(len(jam_key))
+
+	service0 := testServices["corevm"]
+	service_authcopy := testServices["auth_copy"]
+	fib2_child_code, _ := getServices([]string{"corevm_child"}, false)
+	fib2_child_codehash := fib2_child_code["corevm_child"].CodeHash
+
+	fib2_child_code_length := uint32(len(fib2_child_code["corevm_child"].Code))
+	fib2_child_code_length_bytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
+	fmt.Printf("CHILD_CODE: %d %s\n", fib2_child_code_length, fib2_child_codehash)
+
+	nodeClient := nodes[1]
+	nodeClient4 := nodes[4]
+
+	core := 0
+	prevWorkPackageHash := common.Hash{}
+
+	// Generate the extrinsic
+	extrinsics := types.ExtrinsicsBlobs{}
+
+	extrinsic := make([]byte, 0)
+	extrinsic = append(extrinsic, fib2_child_codehash.Bytes()...)
+	extrinsic = append(extrinsic, fib2_child_code_length_bytes...)
+
+	extrinsic_hash := common.Blake2Hash(extrinsic)
+	extrinsic_len := uint32(len(extrinsic))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsic_hash,
+		Len:  extrinsic_len,
+	})
+
+	extrinsics = append(extrinsics, extrinsic)
+
+	for fibN := -1; fibN <= 10; fibN++ {
+		importedSegments := make([]types.ImportSegment, 0)
+		if fibN > 0 {
+			for i := 0; i < fibN; i++ {
+				importedSegment := types.ImportSegment{
+					RequestedHash: prevWorkPackageHash,
+					Index:         uint16(i),
+				}
+				//fmt.Printf("fibN=%d ImportedSegment %d (%v, %d)\n", fibN, i, prevWorkPackageHash, i)
+				importedSegments = append(importedSegments, importedSegment)
+			}
+		}
+		refine_context, refineCtxErr := nodeClient.GetRefineContext()
+		if refineCtxErr != nil {
+			log.Crit("Failed to get refine context", "err", refineCtxErr)
+		}
+
+		var payload []byte
+		if fibN >= 0 {
+			for i := 0; i < fibN+2; i++ {
+				tmp := make([]byte, 4)
+				binary.LittleEndian.PutUint32(tmp, uint32(fibN))
+				payload = append(payload, tmp...)
+
+				tmp = make([]byte, 4)
+				binary.LittleEndian.PutUint32(tmp, uint32(1)) // function id
+				payload = append(payload, tmp...)
+			}
+		}
+		workPackage := types.WorkPackage{
+			AuthCodeHost:          0,
+			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refine_context,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            service0.ServiceCode,
+					CodeHash:           service0.CodeHash,
+					Payload:            payload,
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   importedSegments,
+					Extrinsics:         work_item_extrinsic,
+					ExportCount:        uint16(fibN + 1),
+				},
+				{
+					Service:            service_authcopy.ServiceCode,
+					CodeHash:           service_authcopy.CodeHash,
+					Payload:            []byte{},
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
+				},
+			},
+		}
+		workPackageHash := workPackage.Hash()
+
+		var fibN_string string
+		if fibN == -1 {
+			fibN_string = "init"
+		} else {
+			fibN_string = fmt.Sprintf("%d", fibN)
+		}
+
+		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackage", workPackageHash)
+		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackageContent", workPackage.String())
+		workPackageReq := types.WorkPackageRequest{
+			CoreIndex:       uint16(core),
+			WorkPackage:     workPackage,
+			ExtrinsicsBlobs: extrinsics,
+		}
+		submissionErr := nodeClient.SendWorkPackage(workPackageReq)
+		if submissionErr != nil {
+			log.Crit("SendWorkPackageSubmission ERR", "err", submissionErr)
+		}
+		/*
+			core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
+			ramdamIdx := rand.Intn(3)
+			err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, extrinsics, 0)
+			if err != nil {
+				fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+			}
+		*/
+		// wait until the work report is pending
+
+		log.Info(module, fmt.Sprintf("FIB2-(%s) work checking rho_state", fibN_string), "workPackage", workPackageHash)
+		i := 0
+		for {
+			time.Sleep(1 * time.Second)
+			rho_state, err := nodeClient4.GetAvailabilityAssignments(uint32(core))
+			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP %v\n", i, fibN_string, rho_state)
+			//log.Info(module, fmt.Sprintf("FIB2-(%s) GetAvailabilityAssignments rho_state RESP", fibN_string), "rho_state", rho_state, "err", err)
+			if err != nil {
+				//...
+			}
+			if rho_state != nil || i > 36 {
+				if false {
+					var workReport types.WorkReport
+					//rho_state := nodeClient4.statedb.JamState.AvailabilityAssignments[core]
+					workReport = rho_state.WorkReport
+					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+				}
+				break
+			}
+			i += 1
+		}
+
+		// wait until the work report is cleared
+		fmt.Printf("[FIB2-(%s)] waiting for work report to be cleared\n", fibN_string)
+		for {
+			rho_state, err := nodeClient4.GetAvailabilityAssignments(uint32(core))
+			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP2 %v ERR=%v\n", i, fibN_string, rho_state, err)
+			if err == nil {
+				if rho_state == nil {
+					fmt.Printf("FIB2-(%s) Cleared\n", fibN_string)
+					break
+				} else {
+					fmt.Printf("FIB2-(%s) NOT empty\n", fibN_string)
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		fmt.Printf("[FIB2-(%s)] ready to check storage\n", fibN_string)
+		prevWorkPackageHash = workPackageHash
+		time.Sleep(1 * time.Second)
+		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
+		for _, key := range keys {
+			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
+			if true {
+				service_account_byte, _, _ := nodeClient4.GetServiceStorage(service0.ServiceCode, k)
+				log.Info(module, fmt.Sprintf("Fib2-(%s) result with key %d", fibN_string, key), "result", fmt.Sprintf("%x", service_account_byte))
+			}
+		}
+
+		if fibN == 3 || fibN == 6 {
+			time.Sleep(3 * time.Second) // wait for the empty anchor to be set
+			err := nodeClient.SendPreimageAnnouncement(service0.ServiceCode, service0.Code)
+			if err != nil {
+				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+			}
+			time.Sleep(6 * time.Second) // make sure EP is sent and insert a time slot
+		}
+
+		if fibN == -1 {
+			err := nodeClient.SendPreimageAnnouncement(service0.ServiceCode, fib2_child_code["corevm_child"].Code)
+			if err != nil {
+				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+			}
+			if err != nil {
+				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+			}
+			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
+		}
+	}
+}
+
 func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB2 START")
 
@@ -2690,6 +3100,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		}
 
 		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackage", workPackageHash)
+		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackageContent", workPackage.String())
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
 		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, extrinsics, 0)

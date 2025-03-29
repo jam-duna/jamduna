@@ -30,6 +30,11 @@ fib2:
 	@echo "go test -timeout $(TIMEOUT) -v -run TestFib2 -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -pvm_authoring_log=$(PVMAUTHLOG)"
 	@go test -timeout $(TIMEOUT) -v -run '^TestFib2$$' -tags "network_test,$(TAGS)" $(TARGET_PARAM) -pvm_authoring_log=$(PVMAUTHLOG)
 
+fib3:
+	@echo "Running TestFib3$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestFib3 -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -pvm_authoring_log=$(PVMAUTHLOG)"
+	@go test -timeout $(TIMEOUT) -v -run '^TestFib3$$' -tags "network_test,$(TAGS)" $(TARGET_PARAM) -pvm_authoring_log=$(PVMAUTHLOG)
+
 megatron:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_L),$(TargetN)); \
 	echo "Running TestMegatron with targetN=$$TARGET and timeout $(TIMEOUT)..."; \

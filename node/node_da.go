@@ -370,6 +370,9 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage
+
+	log.Info(module, "executeWorkPackageBundle", "node_name", n.node_name, "package_bundle.ExtrinsicData", fmt.Sprintf("%x", package_bundle.ExtrinsicData), "workPackageHash", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex, "firstGuarantor", firstGuarantor)
+
 	service_index := uint32(workPackage.AuthCodeHost)
 	// Import Segments
 	for workItemIdx, workItem_segments := range package_bundle.ImportSegmentData {
@@ -391,14 +394,16 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		service_index = workItem.Service
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
-			return work_report, d, fmt.Errorf("executeWorkPackageBundle: Code not found")
+			return work_report, d, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
 			log.Crit(module, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
+		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 		vm.SetCore(workPackageCoreIndex, firstGuarantor)
+
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
 
 		expectedSegmentCnt := int(workItem.ExportCount)

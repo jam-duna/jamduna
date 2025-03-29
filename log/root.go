@@ -19,6 +19,10 @@ func init() {
 
 }
 
+func InitLogger() {
+	SetDefault(NewLogger(NewTerminalHandlerWithLevel(os.Stderr, LevelDebug, true)))
+}
+
 // SetDefault sets the default global logger
 func SetDefault(l Logger) {
 	root.Store(l)

@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	rand_math "math/rand"
-	"os"
+	"net"
+	"net/rpc"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -46,6 +48,10 @@ func (n *ArchiveNode) GetSelectedPeer() *Peer {
 
 func (n *ArchiveNode) IsSync() bool {
 	return n.is_sync
+}
+
+func (n *ArchiveNode) StartRPCServer(port int) {
+	n.NodeContent.startRPCServerImpl(port)
 }
 
 func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, startPeerList map[uint16]*Peer, dataDir string, port int, web_port int) (*ArchiveNode, error) {
@@ -158,8 +164,25 @@ func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBloc
 	go ArchiveNode.runReceiveBlock()
 	go ArchiveNode.runServer()
 	go ArchiveNode.SyncState()
-	go ArchiveNode.runJamWeb(uint16(web_port))
-	go ArchiveNode.StartRPCServer()
+	go ArchiveNode.runJamWeb(uint16(web_port), port)
+	go ArchiveNode.StartRPCServer(port)
+	go ArchiveNode.RunRPCCommand()
+	for _, peer := range ArchiveNode.peersInfo {
+		remoteAddr := peer.PeerAddr
+		host, port, err := net.SplitHostPort(remoteAddr)
+		port_int, err := strconv.Atoi(port)
+		if err != nil {
+			continue
+		}
+		rpc_port := port_int + 1200
+		rpc_address := net.JoinHostPort(host, strconv.Itoa(rpc_port))
+		rpc_client, err := rpc.Dial("tcp", rpc_address)
+		if err != nil {
+			log.Error(rpc_mod, "rpc.Dial", err)
+			continue
+		}
+		ArchiveNode.RPC_Client = append(ArchiveNode.RPC_Client, rpc_client)
+	}
 	return ArchiveNode, nil
 }
 
@@ -520,13 +543,12 @@ func (n *ArchiveNode) DispatchIncomingQUICStream(stream quic.Stream) error {
 	return nil
 }
 
-func (n *ArchiveNode) SetServiceDir(dir string) {
+func (n *NodeContent) SetServiceDir(dir string) {
 	n.loaded_services_dir = dir
 }
 
 func (n *NodeContent) LoadService(service_name string) ([]byte, error) {
 	// read the .pvm from the service directory
 	service_path := fmt.Sprintf("%s/%s.pvm", n.loaded_services_dir, service_name)
-	service, err := os.ReadFile(service_path)
-	return service, err
+	return types.ReadCodeWithMetadata(service_path, service_name)
 }

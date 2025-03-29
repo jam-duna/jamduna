@@ -351,9 +351,37 @@ func (n *Node) runMain() {
 			if err != nil {
 				fmt.Printf("%s processJudgement: %v\n", n.String(), err)
 			}
+
+		}
+
+	}
+}
+
+func (n *NodeContent) RunRPCCommand() {
+	pulseTicker := time.NewTicker(20 * time.Millisecond)
+	defer pulseTicker.Stop()
+	for {
+		select {
+		case <-pulseTicker.C:
+		case command := <-n.command_chan:
+			fmt.Printf("Get new command from RPC: %v\n", command)
+			if command == "slot_update" {
+				for i, rpc_client := range n.RPC_Client {
+					var res string
+					err := rpc_client.Call("jam.SetTimeSlotReady", []string{fmt.Sprintf("%d", CurrentSlot)}, &res)
+					if err != nil {
+						fmt.Printf("RPC call failed: %v\n", err)
+					} else {
+						fmt.Printf("[N%d] RPC call success: %v\n", i, res)
+					}
+				}
+				CurrentSlot++
+			}
 		}
 	}
 }
+
+var CurrentSlot = uint32(12)
 
 // process request
 func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error) {

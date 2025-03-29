@@ -129,6 +129,15 @@ func TestFib2(t *testing.T) {
 	jamtest(t, "fib2", FibTestEpochLen, basePort, targetN)
 }
 
+func TestFib3(t *testing.T) {
+	targetN := TargetedN_Fib
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	basePort := GenerateRandomBasePort()
+	jamtestclient(t, "fib3", FibTestEpochLen, basePort, targetN)
+}
+
 func TestMegatron(t *testing.T) {
 	// Open file to save CPU Profile
 	//fmt.Printf("prereq_test: %v\n", *prereq_test)

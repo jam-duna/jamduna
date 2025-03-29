@@ -235,13 +235,13 @@ func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, st
 		n.addStateDB(new_statedb)
 	}
 	// apply the block to the state
-	go n.runJamWeb(port)
+	go n.runJamWeb(port, 8080) // fix this if you want to use this
 	for {
 		time.Sleep(1 * time.Second)
 	}
 }
 
-func (n *NodeContent) runJamWeb(basePort uint16) {
+func (n *NodeContent) runJamWeb(basePort uint16, port int) {
 	// basePort += 999
 	addr := fmt.Sprintf("0.0.0.0:%v", basePort) // for now just node 0 will handle all
 
@@ -274,10 +274,9 @@ func (n *NodeContent) runJamWeb(basePort uint16) {
 			Params  []string `json:"params"`
 			ID      int      `json:"id"`
 		}
-
-		sock_name := n.node_name
-		ipcPath := fmt.Sprintf("/tmp/%s.sock", sock_name)
-		client, err := rpc.Dial("unix", ipcPath)
+		rpc_port := port + 1200 //base port + 1200 -- 13370+1200
+		rpc_address := fmt.Sprintf("localhost:%v", rpc_port)
+		client, err := rpc.Dial("tcp", rpc_address)
 		decoder := json.NewDecoder(r.Body)
 		if err := decoder.Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON request", http.StatusBadRequest)

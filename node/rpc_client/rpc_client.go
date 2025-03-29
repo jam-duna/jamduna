@@ -11,12 +11,15 @@ import (
 	"github.com/dop251/goja"
 )
 
+/*
+jam.GetFunctions()
+*/
 func main() {
 	// Define and parse the port flag. Default is 21100.
 	//port := flag.Int("port", 21100, "port to connect to RPC server")
 	flag.Parse()
 
-	client, err := rpc.Dial("unix", "/tmp/jam-0.sock")
+	client, err := rpc.Dial("tcp", "localhost:14570")
 	if err != nil {
 		fmt.Println("❌ Failed to connect to RPC server:", err)
 		return
@@ -72,6 +75,14 @@ func main() {
 	if err != nil {
 		fmt.Println("❌ JavaScript Error:", err)
 		return
+	}
+
+	// 🟡 Automatically call jam.GetFunctions() at startup
+	startVal, err := vm.RunString(`jam.GetFunctions()`)
+	if err != nil {
+		fmt.Println("❌ Startup JS Error:", err)
+	} else {
+		fmt.Println("▶️ jam.GetFunctions() =>", startVal)
 	}
 
 	// Enter Console interactive mode
