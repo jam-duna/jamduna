@@ -29,7 +29,7 @@ func (v *ValidatorStatistics) Copy() *ValidatorStatistics {
 }
 
 type ServiceStatisticsKeyPair struct {
-	ServiceIndex      uint32
+	ServiceIndex      uint
 	ServiceStatistics ServiceStatistics
 }
 
@@ -183,7 +183,7 @@ func (v *ValidatorStatistics) Encode() []byte {
 	trueStatistics.CoreStatistics = v.CoreStatistics
 	trueStatistics.ServiceStatics = make(ServiceStatisticsKeyPairs, 0)
 	for k, v := range v.ServiceStatistics {
-		trueStatistics.ServiceStatics = append(trueStatistics.ServiceStatics, ServiceStatisticsKeyPair{k, v})
+		trueStatistics.ServiceStatics = append(trueStatistics.ServiceStatics, ServiceStatisticsKeyPair{uint(k), v})
 	}
 	trueStatistics.ServiceStatics.Sort()
 	encoded, err := types.Encode(trueStatistics)
@@ -205,7 +205,7 @@ func (v *ValidatorStatistics) Decode(data []byte) (interface{}, uint32) {
 	recoveredStats.CoreStatistics = trueStatistics.CoreStatistics
 	recoveredStats.ServiceStatistics = make(map[uint32]ServiceStatistics)
 	for _, v := range trueStatistics.ServiceStatics {
-		recoveredStats.ServiceStatistics[v.ServiceIndex] = v.ServiceStatistics
+		recoveredStats.ServiceStatistics[uint32(v.ServiceIndex)] = v.ServiceStatistics
 	}
 	return &recoveredStats, dataLen
 }
