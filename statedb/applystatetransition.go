@@ -136,12 +136,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
 	accumulateStats := make(map[uint32]*accumulateStatistics)
-	transferStats := make(map[uint32]*transferStatistics)
+
 	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
 	tau := s.GetTimeslot() // τ′
-	err = s.ProcessDeferredTransfers(o, tau, t)
+	transferStats, err := s.ProcessDeferredTransfers(o, tau, t)
 	if err != nil {
 		return s, err
 	}
@@ -177,19 +177,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}
 		stats.gasUsed += uint(gasusage.Gas)
 		accumulateStats[service] = stats
-	}
-	// transfer statistics
-	for _, transfer := range t {
-		service := transfer.ReceiverIndex
-		_, ok := transferStats[service]
-		if !ok {
-			transferStats[service] = &transferStatistics{
-				gasUsed:      0,
-				numTransfers: 0,
-			}
-		}
-		transferStats[service].numTransfers = transferStats[service].numTransfers + 1
-		transferStats[service].gasUsed = transferStats[service].gasUsed + 10 // TODO: get this from pvm
 	}
 
 	//after accumulation, we need to update the accumulate state

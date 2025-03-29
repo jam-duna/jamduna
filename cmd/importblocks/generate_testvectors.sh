@@ -83,6 +83,7 @@ run_single_test() {
 }
 
 test_pairs=(
+  "megatron_short_with_prereq_log orderedaccumulation"
   "fib2_log assurances"
   "safrole safrole"
   "fallback fallback"

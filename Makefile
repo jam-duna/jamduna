@@ -150,6 +150,14 @@ cleancoverage:
 	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML)
 	@echo "Done."
 
+
+polkavmscp:
+	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/bootstrap/bootstrap.pvm services
+	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/megatron/megatron.pvm services
+	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/fib/fib.pvm services
+	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/tribonacci/tribonacci.pvm services
+	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/corevm/corevm.pvm services
+
 jamx_start:
 	ansible-playbook -u root -i hosts.txt  yaml/jam_start.yaml
 	@echo "update jam binary and start on jam instances"
@@ -157,4 +165,4 @@ jamx_start:
 jamx_stop:
 	ansible-playbook -u root -i hosts.txt  yaml/jam_stop.yaml
 	@echo "stop on jam instances"
-	
+

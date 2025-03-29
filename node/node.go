@@ -1577,7 +1577,6 @@ func (n *Node) runClient() {
 		select {
 
 		case <-ticker_pulse.C:
-
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}

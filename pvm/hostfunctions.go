@@ -170,7 +170,7 @@ func (vm *VM) chargeGas(host_fn int) {
 	switch host_fn {
 	case TRANSFER:
 		omega_9, _ := vm.ReadRegister(9)
-		chargedGas = omega_9
+		chargedGas = omega_9 + 10
 		exp = "TRANSFER"
 	case READ:
 		exp = "READ"
@@ -226,6 +226,7 @@ func (vm *VM) chargeGas(host_fn int) {
 		exp = "EXPUNGE"
 	case LOG:
 		exp = "LOG"
+		chargedGas = 0
 	}
 
 	vm.Gas = beforeGas - int64(chargedGas)

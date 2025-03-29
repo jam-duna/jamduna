@@ -38,8 +38,8 @@ type ServiceAccount struct {
 	Checkpointed bool `json:"-"`
 	Dirty        bool `json:"-"`
 
-	Storage  map[common.Hash]StorageObject  `json:"-"`     // arbitrary_k -> v. if v=[]byte. use as delete
-	Lookup   map[common.Hash]LookupObject   `json:"-"`     // (h,l) -> anchor
+	Storage  map[common.Hash]StorageObject  `json:"-"` // arbitrary_k -> v. if v=[]byte. use as delete
+	Lookup   map[common.Hash]LookupObject   `json:"-"` // (h,l) -> anchor
 	Preimage map[common.Hash]PreimageObject `json:"-"` // H(p)  -> p
 
 }

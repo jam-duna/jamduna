@@ -193,9 +193,9 @@ func (j *Jam) GetService(req []string, res *string) error {
 	if err != nil {
 		return err
 	}
-	if ! ok {
+	if !ok {
 		return fmt.Errorf("Service not found %d", serviceIndex)
-	} 
+	}
 	*res = service.JsonString()
 	return nil
 }

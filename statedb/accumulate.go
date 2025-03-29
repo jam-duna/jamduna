@@ -574,10 +574,15 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 	return output
 }
 
-func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (err error) { // select transfers eq 12.23
+func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (gasUsed int64, transferCount uint, err error) { // select transfers eq 12.23
 	selectedTransfers := TransferSelect(t, self_index)
+	if s.Authoring {
+		if len(selectedTransfers)>0 {
+			fmt.Printf("HostTransfer TransferSelect self_index=%d transferCount=%d selected:%v\n", self_index, len(selectedTransfers), selectedTransfers)
+		}
+	}
 	if len(selectedTransfers) == 0 {
-		return nil
+		return 0, 0, nil
 	}
 	for _, transfer := range selectedTransfers {
 		self.Balance += transfer.Amount
@@ -585,7 +590,7 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 
 	code, ok, err := s.ReadServicePreimageBlob(self_index, self.CodeHash)
 	if err != nil || !ok {
-		return nil
+		return 0, 0, nil
 	}
 	vm := pvm.NewVMFromCode(self_index, code, 0, s)
 
@@ -597,20 +602,28 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	input_argument = append(input_argument, encode_time_slot...)
 	input_argument = append(input_argument, encodeService_index...)
 	input_argument = append(input_argument, encodeSelectedTransfers...)
-
+	log.Info(module, "HostTransfer", "input_argument", fmt.Sprintf("%x", input_argument))
 	vm.ExecuteTransfer(input_argument, self)
-	return nil // TODO: is this gasUsed or gasRemaining?
+	return vm.Gas, uint(len(selectedTransfers)), nil
 }
 
 // eq 12.24
-func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint32, t []types.DeferredTransfer) (err error) {
+func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint32, t []types.DeferredTransfer) (transferStats map[uint32]*transferStatistics, err error) {
+	transferStats = make(map[uint32]*transferStatistics)
 	for service, serviceAccount := range o.D {
-		err = s.HostTransfer(serviceAccount, time_slot, uint32(service), t)
+		gasUsed, transferCount, err := s.HostTransfer(serviceAccount, time_slot, uint32(service), t)
 		if err != nil {
-			return err
+			return transferStats, err
+		}
+		transferStats[serviceAccount.ServiceIndex] = &transferStatistics{
+			gasUsed:      uint(gasUsed),
+			numTransfers: transferCount,
+		}
+		if s.Authoring {
+			log.Info(module, "ProcessDeferredTransfers", "service", fmt.Sprintf("%d", serviceAccount.ServiceIndex), "gasUsed", gasUsed, "transferCount", transferCount)
 		}
 	}
-	return nil
+	return transferStats, nil
 }
 
 func (s *StateDB) ApplyStateTransitionAccumulation(w_star []types.WorkReport, num uint64, previousTimeslot uint32) {
