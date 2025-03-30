@@ -41,8 +41,8 @@ type StateReport struct {
 	RecentBlocks             RecentBlocks                    `json:"recent_blocks"`
 	AuthorizationsPool       [types.TotalCores][]common.Hash `json:"auth_pools"`
 	PriorServiceAccountState []ServiceItem                   `json:"accounts"`
-	CoresStatistics          []CoreStatistics                `json:"cores_statistics"`
-	ServiceStatistics        ServiceStatisticsKeyPairs       `json:"services_statistics"`
+	CoresStatistics          []types.CoreStatistics          `json:"cores_statistics"`
+	ServiceStatistics        types.ServiceStatisticsKeyPairs `json:"services_statistics"`
 }
 type ServiceItem struct {
 	ServiceID uint32      `json:"id"`

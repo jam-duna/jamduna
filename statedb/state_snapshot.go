@@ -40,7 +40,7 @@ type StateSnapshot struct {
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`      // c10
 	Timeslot                 uint32                                       `json:"tau"`      // c11
 	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`      // c12
-	ValidatorStatistics      ValidatorStatistics                          `json:"pi"`       // c13
+	ValidatorStatistics      types.ValidatorStatistics                    `json:"pi"`       // c13
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`    // c14 Accumulation Queue
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`       // c15 Accumulation History
 	ServiceAccounts          []*SAccount                                  `json:"accounts"` // service accounts
@@ -243,8 +243,8 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 			privilegedServiceIndices, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.Kai_state{}))
 			sn.PrivilegedServiceIndices = privilegedServiceIndices.(types.Kai_state)
 		case C13:
-			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf(ValidatorStatistics{}))
-			sn.ValidatorStatistics = validatorStatistics.(ValidatorStatistics)
+			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.ValidatorStatistics{}))
+			sn.ValidatorStatistics = validatorStatistics.(types.ValidatorStatistics)
 		case C14:
 			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
 			sn.AccumulationQueue = validatorStatistics.([types.EpochLength][]types.AccumulationQueue)

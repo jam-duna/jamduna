@@ -326,11 +326,9 @@ func (n *JamState) SetPi(piByte []byte) {
 	if len(piByte) == 0 {
 		return
 	}
-	validatorStatistics, _, err := types.Decode(piByte, reflect.TypeOf(ValidatorStatistics{}))
-	if err != nil {
-		return
-	}
-	n.ValidatorStatistics = validatorStatistics.(ValidatorStatistics)
+	statistics := types.ValidatorStatistics{}
+	validatorStatistics, _ := statistics.Decode(piByte)
+	n.ValidatorStatistics = *(validatorStatistics.(*types.ValidatorStatistics))
 }
 
 // C14 AccumulateQueue

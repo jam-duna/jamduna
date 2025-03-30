@@ -20,7 +20,7 @@ type JamState struct {
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
 	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
 	PrivilegedServiceIndices types.Kai_state                              `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
-	ValidatorStatistics      ValidatorStatistics                          `json:"pi"`                          // pi The validator statistics. π eq 171
+	ValidatorStatistics      types.ValidatorStatistics                    `json:"pi"`                          // pi The validator statistics. π eq 171
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"ready_queue"`                 // theta - The accumulation queue  θ eq 164
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulated"`                 // xi - The accumulation history  ξ eq 162
 }
@@ -120,14 +120,6 @@ func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 }
 
 // Types for Pi
-type ValidatorStatisticState struct {
-	BlocksProduced         uint32 `json:"blocks"`          // The number of blocks produced by the validator.
-	TicketsIntroduced      uint32 `json:"tickets"`         // The number of tickets introduced by the validator.
-	PreimagesIntroduced    uint32 `json:"pre_images"`      // The number of preimages introduced by the validator.
-	OctetsIntroduced       uint32 `json:"pre_images_size"` // The total number of octets across all preimages introduced by the validator.
-	ReportsGuaranteed      uint32 `json:"guarantees"`      // The number of reports guaranteed by the validator.
-	AvailabilityAssurances uint32 `json:"assurances"`      // The number of availability assurances made by the validator.
-}
 
 func NewJamState() *JamState {
 	return &JamState{
@@ -172,7 +164,7 @@ func (state *JamState) String() string {
 func (n *JamState) ResetTallyStatistics() {
 
 	copy(n.ValidatorStatistics.Last[:], n.ValidatorStatistics.Current[:])
-	n.ValidatorStatistics.Current = [types.TotalValidators]ValidatorStatisticState{
+	n.ValidatorStatistics.Current = [types.TotalValidators]types.ValidatorStatisticState{
 		{BlocksProduced: 0, TicketsIntroduced: 0, PreimagesIntroduced: 0, OctetsIntroduced: 0, ReportsGuaranteed: 0, AvailabilityAssurances: 0},
 	}
 }
@@ -332,7 +324,7 @@ func StateDecodeToJson(encodedBytes []byte, state string) (string, error) {
 	case "c12":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Kai_state{}))
 	case "c13":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(ValidatorStatistics{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.ValidatorStatistics{}))
 	case "c14":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
 	case "c15":

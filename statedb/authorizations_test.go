@@ -32,6 +32,14 @@ func (a *AuthState) String() string {
 	return ToJSON(a)
 }
 
+func ToJSON(v interface{}) string {
+	jsonData, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	return string(jsonData)
+}
+
 type AuthTestCase struct {
 	Input     AuthInput `json:"input"`
 	PreState  AuthState `json:"pre_state"`

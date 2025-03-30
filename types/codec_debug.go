@@ -29,14 +29,19 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 		}
 		return []byte{0}, nil
 	case reflect.Uint:
+		fmt.Printf("encoding with E: %d\n", v.Uint())
 		return E(v.Uint()), nil
 	case reflect.Uint8:
+		fmt.Printf("encoding with E_l(1): %d\n", v.Uint())
 		return E_l(uint64(v.Uint()), 1), nil
 	case reflect.Uint16:
+		fmt.Printf("encoding with E_l(2): %d\n", v.Uint())
 		return E_l(uint64(v.Uint()), 2), nil
 	case reflect.Uint32:
+		fmt.Printf("encoding with E_l(4): %d\n", v.Uint())
 		return E_l(uint64(v.Uint()), 4), nil
 	case reflect.Uint64:
+		fmt.Printf("encoding with E_l(8): %d\n", v.Uint())
 		return E_l(uint64(v.Uint()), 8), nil
 	case reflect.String:
 		uint64Slice := make([]uint64, 0)
@@ -59,6 +64,17 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 				if err != nil {
 					return nil, err
 				}
+				origin_data := data_byte[len(encoded) : len(encoded)+len(encodedVi)]
+				if !reflect.DeepEqual(origin_data, encodedVi) {
+					fmt.Printf("❌ Mismatch at Field Path: %s\n", strings.Join(newPath, "."))
+					fmt.Printf("  → Origin Data:  %x\n", origin_data)
+					fmt.Printf("  → Encoded Data: %x\n", encodedVi)
+					return nil, fmt.Errorf("data mismatch at %s", strings.Join(newPath, "."))
+				} else {
+					fmt.Printf("✅ Match Field Path: %s\n", strings.Join(newPath, "."))
+					fmt.Printf("  → Origin Data:  %x\n", origin_data)
+					fmt.Printf("  → Encoded Data: %x\n", encodedVi)
+				}
 				encoded = append(encoded, encodedVi...)
 			}
 		}
@@ -73,6 +89,17 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 				encodedVi, err := encodeDebugWithPath(v.Index(i).Interface(), data_byte[len(encoded):], newPath)
 				if err != nil {
 					return nil, err
+				}
+				origin_data := data_byte[len(encoded) : len(encoded)+len(encodedVi)]
+				if !reflect.DeepEqual(origin_data, encodedVi) {
+					fmt.Printf("❌ Mismatch at Field Path: %s\n", strings.Join(newPath, "."))
+					fmt.Printf("  → Origin Data:  %x\n", origin_data)
+					fmt.Printf("  → Encoded Data: %x\n", encodedVi)
+					return nil, fmt.Errorf("data mismatch at %s", strings.Join(newPath, "."))
+				} else {
+					fmt.Printf("✅ Match Field Path: %s\n", strings.Join(newPath, "."))
+					fmt.Printf("  → Origin Data:  %x\n", origin_data)
+					fmt.Printf("  → Encoded Data: %x\n", encodedVi)
 				}
 				encoded = append(encoded, encodedVi...)
 			}

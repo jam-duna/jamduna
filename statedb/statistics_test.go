@@ -46,9 +46,9 @@ func testStaticsSTF(t *testing.T, jsonFile string) {
 	jam_state.ValidatorStatistics.Current = pi.Current
 	jam_state.ValidatorStatistics.Last = pi.Last
 	jam_state.ValidatorStatistics.CoreStatistics = pi.CoreStatistics
-	jam_state.ValidatorStatistics.ServiceStatistics = map[uint32]ServiceStatistics{}
+	jam_state.ValidatorStatistics.ServiceStatistics = map[uint32]types.ServiceStatistics{}
 	for _, service_state := range pi.ServiceStatics {
-		jam_state.ValidatorStatistics.ServiceStatistics[service_state.ServiceIndex] = service_state.ServiceStatistics
+		jam_state.ValidatorStatistics.ServiceStatistics[uint32(service_state.ServiceIndex)] = service_state.ServiceStatistics
 	}
 
 	epoch_change := (slot / types.EpochLength) > (tau / types.EpochLength)
@@ -86,13 +86,13 @@ func testStaticsSTF(t *testing.T, jsonFile string) {
 	JamState.tallyStatistics(uint32(authorIndex), "preimages", num_preimage)
 	JamState.tallyStatistics(uint32(authorIndex), "octets", num_octets)
 	JamState.tallyStatistics(uint32(authorIndex), "blocks", 1)
-	post_jam_pi := TrueStatistics{}
+	post_jam_pi := types.TrueStatistics{}
 	post_jam_pi.Current = JamState.ValidatorStatistics.Current
 	post_jam_pi.Last = JamState.ValidatorStatistics.Last
 	post_jam_pi.CoreStatistics = JamState.ValidatorStatistics.CoreStatistics
-	post_jam_pi.ServiceStatics = make(ServiceStatisticsKeyPairs, 0)
+	post_jam_pi.ServiceStatics = make(types.ServiceStatisticsKeyPairs, 0)
 	for k, v := range JamState.ValidatorStatistics.ServiceStatistics {
-		post_jam_pi.ServiceStatics = append(post_jam_pi.ServiceStatics, ServiceStatisticsKeyPair{ServiceIndex: k, ServiceStatistics: v})
+		post_jam_pi.ServiceStatics = append(post_jam_pi.ServiceStatics, types.ServiceStatisticsKeyPair{ServiceIndex: uint(k), ServiceStatistics: v})
 	}
 
 	poststate := statisticsSTF.Poststate

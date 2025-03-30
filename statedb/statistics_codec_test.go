@@ -23,9 +23,9 @@ type Input struct {
 }
 
 type state struct {
-	Pi          TrueStatistics   `json:"statistics"`
-	Tau         uint32           `json:"slot"`
-	Kappa_prime types.Validators `json:"curr_validators"`
+	Pi          types.TrueStatistics `json:"statistics"`
+	Tau         uint32               `json:"slot"`
+	Kappa_prime types.Validators     `json:"curr_validators"`
 }
 
 type validator_statistics_test struct {
