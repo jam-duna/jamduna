@@ -89,6 +89,13 @@ func (j *JamState) GetStateFromReportState(r StateReport) map[uint32]*types.Serv
 	j.RecentBlocks = r.RecentBlocks
 	j.AuthorizationsPool = r.AuthorizationsPool
 	var serviceAccounts = ServiceToSeviceAccount(r.PriorServiceAccountState)
+	for i, core := range r.CoresStatistics {
+		j.ValidatorStatistics.CoreStatistics[i] = core
+	}
+	j.ValidatorStatistics.ServiceStatistics = make(map[uint32]types.ServiceStatistics)
+	for _, service_stats := range r.ServiceStatistics {
+		j.ValidatorStatistics.ServiceStatistics[uint32(service_stats.ServiceIndex)] = service_stats.ServiceStatistics
+	}
 	return serviceAccounts
 }
 
@@ -100,7 +107,8 @@ func TestReportParsing(t *testing.T) {
 		expectedType interface{}
 	}{
 		// {"not_sorted_guarantor-1.json", "not_sorted_guarantor-1.bin", &TestReport{}},
-		{"segment_root_lookup_invalid-1.json", "segment_root_lookup_invalid-1.bin", &TestReport{}},
+		// {"segment_root_lookup_invalid-1.json", "segment_root_lookup_invalid-1.bin", &TestReport{}},
+		{"report_curr_rotation-1.json", "report_curr_rotation-1.bin", &TestReport{}},	
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
@@ -139,6 +147,7 @@ func TestReportParsing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
+			fmt.Printf("encodedJSON=%s\n", encodedJSON)
 			log.Debug(debugG, "TestReportParsing", "Encoded JSON", encodedJSON)
 
 			// Unmarshal again to compare
@@ -220,11 +229,19 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	post_state := NewJamState()
 	post_state.GetStateFromReportState(report.PostState)
 	db.JamState.ProcessGuarantees(db.Block.Guarantees())
+	db.JamState.tallyCoreStatistics(db.Block.Guarantees(), nil, nil)
+	db.JamState.tallyServiceStatistics(db.Block.Guarantees(), nil, nil, nil)
 	if exceptErr == nil {
 		for i, rho := range db.JamState.AvailabilityAssignments {
-			if rho != post_state.AvailabilityAssignments[i] {
-				return nil
+			if !reflect.DeepEqual(rho, post_state.AvailabilityAssignments[i]) {
+				return fmt.Errorf("Reports FAIL: AvailabilityAssignments not match")
 			}
+		}
+		if !reflect.DeepEqual(db.JamState.ValidatorStatistics.CoreStatistics, post_state.ValidatorStatistics.CoreStatistics) {
+			return fmt.Errorf("Reports FAIL: ValidatorStatistics CoreStatistics not match")
+		}
+		if !reflect.DeepEqual(db.JamState.ValidatorStatistics.ServiceStatistics, post_state.ValidatorStatistics.ServiceStatistics) {
+			return fmt.Errorf("Reports FAIL: ValidatorStatistics ServiceStatistics not match")
 		}
 	}
 

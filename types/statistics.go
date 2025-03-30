@@ -3,6 +3,7 @@ package types
 import (
 	"reflect"
 	"sort"
+	"encoding/json"
 )
 
 type ValidatorStatisticState struct {
@@ -33,8 +34,8 @@ func (v *ValidatorStatistics) Copy() *ValidatorStatistics {
 }
 
 type ServiceStatisticsKeyPair struct {
-	ServiceIndex      uint
-	ServiceStatistics ServiceStatistics
+	ServiceIndex      uint `json:"id"` // The index of the service.
+	ServiceStatistics ServiceStatistics `json:"record"`
 }
 
 type ServiceStatisticsKeyPairs []ServiceStatisticsKeyPair
@@ -113,4 +114,32 @@ func (v ValidatorStatistics) Decode(data []byte) (interface{}, uint32) {
 		recoveredStats.ServiceStatistics[uint32(v.ServiceIndex)] = v.ServiceStatistics
 	}
 	return &recoveredStats, dataLen
+}
+
+func (v *ValidatorStatistics) UnmarshalJSON(data []byte) error {
+	trueStatistics := TrueStatistics{}
+	if err := json.Unmarshal(data, &trueStatistics); err != nil {
+		return err
+	}
+	v.Current = trueStatistics.Current
+	v.Last = trueStatistics.Last
+	v.CoreStatistics = trueStatistics.CoreStatistics
+	v.ServiceStatistics = make(map[uint32]ServiceStatistics)
+	for _, service := range trueStatistics.ServiceStatics {
+		v.ServiceStatistics[uint32(service.ServiceIndex)] = service.ServiceStatistics
+	}
+	return nil
+}
+
+func (v ValidatorStatistics) MarshalJSON() ([]byte, error) {
+	trueStatistics := TrueStatistics{}
+	trueStatistics.Current = v.Current
+	trueStatistics.Last = v.Last
+	trueStatistics.CoreStatistics = v.CoreStatistics
+	trueStatistics.ServiceStatics = make(ServiceStatisticsKeyPairs, 0)
+	for k, v := range v.ServiceStatistics {
+		trueStatistics.ServiceStatics = append(trueStatistics.ServiceStatics, ServiceStatisticsKeyPair{uint(k), v})
+	}
+	trueStatistics.ServiceStatics.Sort()
+	return json.Marshal(trueStatistics)
 }
