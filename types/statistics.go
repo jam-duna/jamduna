@@ -1,9 +1,9 @@
 package types
 
 import (
+	"encoding/json"
 	"reflect"
 	"sort"
-	"encoding/json"
 )
 
 type ValidatorStatisticState struct {
@@ -34,7 +34,7 @@ func (v *ValidatorStatistics) Copy() *ValidatorStatistics {
 }
 
 type ServiceStatisticsKeyPair struct {
-	ServiceIndex      uint `json:"id"` // The index of the service.
+	ServiceIndex      uint              `json:"id"` // The index of the service.
 	ServiceStatistics ServiceStatistics `json:"record"`
 }
 

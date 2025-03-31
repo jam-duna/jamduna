@@ -32,7 +32,7 @@ func (n *JamState) tallyCoreStatistics(guarantees []types.Guarantee, newlyAvaila
 	}
 	for _, a := range newlyAvailable { // W -- D(..)
 		cs := &(n.ValidatorStatistics.CoreStatistics[a.CoreIndex])
-		cs.DALoad += uint(a.AvailabilitySpec.BundleLength + types.SegmentSize * uint32((65*a.AvailabilitySpec.ExportedSegmentLength + 63) / 64))
+		cs.DALoad += uint(a.AvailabilitySpec.BundleLength + types.SegmentSize*uint32((65*a.AvailabilitySpec.ExportedSegmentLength+63)/64))
 	}
 
 	for _, a := range assurances {

@@ -1138,7 +1138,7 @@ func (vm *VM) hostWrite() {
 	}
 
 	l := uint64(NONE)
-	exists, oldValue := a.ReadStorage(k, vm.hostenv)
+	exists, oldValue := a.ReadStorage(k, vm.hostenv) //this call may have .onchain being either true or false
 	v := []byte{}
 	err := uint64(0)
 	if vz > 0 {

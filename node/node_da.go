@@ -371,7 +371,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage
 
-	log.Info(module, "executeWorkPackageBundle", "node_name", n.node_name, "package_bundle.ExtrinsicData", fmt.Sprintf("%x", package_bundle.ExtrinsicData), "workPackageHash", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex, "firstGuarantor", firstGuarantor)
+	log.Debug(module, "executeWorkPackageBundle", "node_name", n.node_name, "package_bundle.ExtrinsicData", fmt.Sprintf("%x", package_bundle.ExtrinsicData), "workPackageHash", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex, "firstGuarantor", firstGuarantor)
 
 	service_index := uint32(workPackage.AuthCodeHost)
 	// Import Segments

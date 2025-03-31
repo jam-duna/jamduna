@@ -108,7 +108,7 @@ func TestReportParsing(t *testing.T) {
 	}{
 		// {"not_sorted_guarantor-1.json", "not_sorted_guarantor-1.bin", &TestReport{}},
 		// {"segment_root_lookup_invalid-1.json", "segment_root_lookup_invalid-1.bin", &TestReport{}},
-		{"report_curr_rotation-1.json", "report_curr_rotation-1.bin", &TestReport{}},	
+		{"report_curr_rotation-1.json", "report_curr_rotation-1.bin", &TestReport{}},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {

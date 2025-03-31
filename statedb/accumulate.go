@@ -577,7 +577,7 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (gasUsed int64, transferCount uint, err error) { // select transfers eq 12.23
 	selectedTransfers := TransferSelect(t, self_index)
 	if s.Authoring {
-		if len(selectedTransfers)>0 {
+		if len(selectedTransfers) > 0 {
 			fmt.Printf("HostTransfer TransferSelect self_index=%d transferCount=%d selected:%v\n", self_index, len(selectedTransfers), selectedTransfers)
 		}
 	}

@@ -439,12 +439,24 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK common.Hash, val
 	// serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal(rawK)
 	s.Dirty = true
-	s.Storage[hk] = StorageObject{
-		OnChain: false,
-		Dirty:   true,
-		Deleted: len(val) == 0,
-		Value:   val,
-		RawKey:  rawK,
+	storeObj, exists := s.Storage[hk]
+	// Use the OnChain flag here if already exists
+	if exists {
+		s.Storage[hk] = StorageObject{
+			OnChain: storeObj.OnChain,
+			Dirty:   true,
+			Deleted: len(val) == 0,
+			Value:   val,
+			RawKey:  rawK,
+		}
+	} else {
+		s.Storage[hk] = StorageObject{
+			OnChain: false,
+			Dirty:   true,
+			Deleted: len(val) == 0,
+			Value:   val,
+			RawKey:  rawK,
+		}
 	}
 }
 

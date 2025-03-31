@@ -35,17 +35,19 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	start_NumStorageItems := sa.NumStorageItems
 	for _, storage := range sa.Storage {
 		if storage.Dirty {
-			if (len(storage.Value) == 0 || storage.Deleted) && storage.OnChain {
+			if len(storage.Value) == 0 || storage.Deleted {
 				if s.Authoring {
-					log.Warn(module, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey)
+					log.Warn(module, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey, "storage.OnChain", storage.OnChain, "storage.Deleted", storage.Deleted)
 				}
-				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
-				if err != nil {
-					// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
-					log.Warn(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
-					return err
+				if storage.OnChain {
+					err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
+					if err != nil {
+						// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
+						log.Warn(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
+						return err
+					}
+					//fmt.Printf("[n%v] writeAccount DELETE OK!!! storage:%v\n", s.Id, storage)
 				}
-				//fmt.Printf("[n%v] writeAccount DELETE OK!!! storage:%v\n", s.Id, storage)
 			} else {
 				if s.Authoring {
 					log.Info(module, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "rawkey", storage.RawKey, "value", storage.Value)

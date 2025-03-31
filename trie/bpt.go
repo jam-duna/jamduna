@@ -1363,7 +1363,11 @@ func (t *MerkleTree) collectRemainingNodes(node *Node, deleteKey []byte, nodes *
 	// Retrieve the value for the current node
 	value, _, err := t.levelDBGetLeaf(node.Hash)
 	if err == nil && node.Key != nil {
-		*nodes = append(*nodes, [2][]byte{node.Key, value})
+		if len(value) > 0 {
+			*nodes = append(*nodes, [2][]byte{node.Key, value})
+		} else {
+			// ignore deleted leaf node from collectRemainingNodes (i.e node with value []byte being empty)
+		}
 	}
 
 	// Recursively collect from left and right subtrees
