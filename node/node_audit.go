@@ -223,7 +223,8 @@ func (n *Node) Audit(headerHash common.Hash) error {
 	}
 	//TODO: not sure what JCE to use here...
 	currJCE := n.GetCurrJCE()
-	tranche := auditing_statedb.GetTranche(currJCE)
+	start_point := n.jce_timestamp[currJCE]
+	tranche := auditing_statedb.GetTranche(start_point)
 	if tranche == 0 {
 		n.ProcessAudit(tranche, headerHash)
 	}
@@ -237,7 +238,8 @@ func (n *Node) Audit(headerHash common.Hash) error {
 			}
 			// use this to force tranch1 to happen but wil comsume unnecessary resource
 			refreshedJCE := n.GetCurrJCE()
-			tranche := auditing_statedb.GetTranche(refreshedJCE)
+			start_point := n.jce_timestamp[refreshedJCE]
+			tranche := auditing_statedb.GetTranche(start_point)
 			// use tmp to check if it's a new tranche
 			if tranche != tmp && tranche != 0 {
 				// if it's the same tranche, check if the block is audited
@@ -248,7 +250,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				}
 				if isAudited {
 					// wait for everyone to finish auditing
-					log.Debug(debugAudit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
+					log.Info(debugAudit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
 						"headerhash", auditing_statedb.Block.Header.Hash())
 					done = true
 					break
@@ -393,7 +395,6 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	if err != nil {
 		return nil, err
 	}
-
 	if tranche == 0 {
 		banderSnatchSecret := bandersnatch.BanderSnatchSecret(n.GetBandersnatchSecret())
 		a0, s0, err := s.Select_a0(banderSnatchSecret)
@@ -449,7 +450,9 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			return nil, err
 		}
 		currJCE := n.GetCurrJCE()
-		an, no_show_a, no_show_len, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, *judgment_bucket, currJCE)
+		start_point := n.jce_timestamp[currJCE]
+		tranche := auditing_statedb.GetTranche(start_point)
+		an, no_show_a, no_show_len, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, *judgment_bucket, tranche)
 		if err != nil {
 			return nil, err
 		}

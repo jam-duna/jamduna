@@ -238,8 +238,9 @@ type Node struct {
 	timeslotUsed map[uint32]bool
 
 	// JCE
-	currJCE      uint32
-	currJCEMutex sync.Mutex
+	currJCE       uint32
+	jce_timestamp map[uint32]time.Time
+	currJCEMutex  sync.Mutex
 }
 
 func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
@@ -522,7 +523,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runReceiveBlock()
 		go node.StartRPCServer(port)
 		go node.runWPQueue()
-		// go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+		if Audit {
+			go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+		}
 		host_name, _ := os.Hostname()
 		if id == 0 || host_name[:4] == "jam-" {
 			go node.runJamWeb(uint16(port+1000)+id, port)
@@ -1549,6 +1552,7 @@ func (n *Node) runJCE() {
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
 			n.SetCurrJCE(currJCE)
 			//do something with it
+
 		}
 	}
 }
@@ -1608,6 +1612,10 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	}
 	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
 	n.currJCE = currJCE
+	if n.jce_timestamp == nil {
+		n.jce_timestamp = make(map[uint32]time.Time)
+	}
+	n.jce_timestamp[currJCE] = time.Now()
 }
 
 func (n *Node) monitorCommandChannel() {

@@ -284,6 +284,9 @@ func ValidateSTF(pre_state *StateDB, block_origin types.Block, post_state *State
 					diffs["NextValidators Have Offender"] = fmt.Sprintf("NextValidators have offender len=%d", len(offender_list))
 				}
 			}
+		case !reflect.DeepEqual(new_sf.DesignedValidators, old_sf.DesignedValidators):
+			error_num++
+			diffs["DesignedValidators"] = CompareJSON(new_sf.DesignedValidators, old_sf.DesignedValidators)
 		}
 		// entropy
 		// 6.23

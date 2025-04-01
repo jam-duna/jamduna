@@ -1,7 +1,7 @@
-use ark_ec_vrfs::reexports::{
+use ark_vrf::reexports::{
     ark_serialize::{self, CanonicalDeserialize, CanonicalSerialize},
 };
-use ark_ec_vrfs::{suites::bandersnatch};
+use ark_vrf::{suites::bandersnatch};
 use bandersnatch::{
     IetfProof, Input, Output, Public, RingProof,
     RingProofParams, Secret,
@@ -59,15 +59,8 @@ fn ring_proof_params() -> &'static RingProofParams {
 }
 
 // Construct VRF Input Point from arbitrary data (section 1.2)
-fn vrf_input_point(vrf_input_data: &[u8]) -> Option<Input> {
-    let point = match <bandersnatch::BandersnatchSha512Ell2 as ark_ec_vrfs::Suite>::data_to_point(vrf_input_data) {
-        Some(point) => point,
-        None => {
-            eprintln!("Failed to convert VRF input data to point");
-            return None;
-        }
-    };
-    Some(Input::from(point))
+fn vrf_input_point(vrf_input_data: &[u8]) -> Input {
+    Input::new(vrf_input_data).unwrap()
 }
 
 // Prover actor.
@@ -91,15 +84,9 @@ impl Prover {
     /// Used for tickets submission.
     pub fn ring_vrf_sign(&self, vrf_input_data: &[u8], aux_data: &[u8]) -> Result<([u8; 32], Vec<u8>), ()>
     {
-        use ark_ec_vrfs::ring::Prover as _;
+        use ark_vrf::ring::Prover as _;
 
-        let input = match vrf_input_point(vrf_input_data) {
-            Some(input) => input,
-            None => {
-                eprintln!("Failed to create VRF input point");
-                return Err(()); // or handle the error accordingly
-            }
-        };
+       let input = vrf_input_point(vrf_input_data);
         let output = self.secret.output(input);
 
         // Backend currently requires the wrapped type (plain affine points)
@@ -134,7 +121,7 @@ impl Prover {
 
 }
 
-type RingCommitment = ark_ec_vrfs::ring::RingCommitment<bandersnatch::BandersnatchSha512Ell2>;
+type RingCommitment = ark_vrf::ring::RingCommitment<bandersnatch::BandersnatchSha512Ell2>;
 
 // Verifier actor.
 struct Verifier {
@@ -157,7 +144,7 @@ impl Verifier {
         aux_data: &[u8],
         signature: &[u8],
     ) -> Result<[u8; 32], ()> {
-        use ark_ec_vrfs::ring::Verifier as _;
+        use ark_vrf::ring::Verifier as _;
 
         // Gracefully handle invalid signature
         let signature = match RingVrfSignature::deserialize_compressed(signature) {
@@ -168,13 +155,7 @@ impl Verifier {
             }
         };
 
-        let input = match vrf_input_point(vrf_input_data) {
-            Some(input) => input,
-            None => {
-                eprintln!("Failed to create VRF input point");
-                return Err(()); // or handle the error accordingly
-            }
-        };
+        let input = vrf_input_point(vrf_input_data);
         let output = signature.output;
 
         let params = ring_proof_params();
@@ -214,7 +195,7 @@ impl Verifier {
         signature: &[u8],
         signer_key_index: usize,
     ) -> Result<[u8; 32], ()> {
-        use ark_ec_vrfs::ietf::Verifier as _;
+        use ark_vrf::ietf::Verifier as _;
 
         let signature = match IetfVrfSignature::deserialize_compressed(signature) {
             Ok(sig) => sig,
@@ -409,15 +390,9 @@ pub extern "C" fn ietf_vrf_sign(
 
     // Use the Prover instance to sign the data
     let signature = {
-        use ark_ec_vrfs::ietf::Prover as _;
+        use ark_vrf::ietf::Prover as _;
 
-        let input = match vrf_input_point(vrf_input_data) {
-            Some(input) => input,
-            None => {
-                eprintln!("Failed to create VRF input point");
-                return; // or handle the error accordingly
-            }
-        };
+        let input = vrf_input_point(vrf_input_data);
         let output = private_key.output(input);
 
         let proof =  private_key.prove(input, output, aux_data);
@@ -643,7 +618,7 @@ pub extern "C" fn ietf_vrf_verify(
     vrf_output_len: usize
 ) -> c_int {
     //use std::slice;
-    //use ark_ec_vrfs::suites::bandersnatch::edwards::Public;
+    //use ark_vrf::suites::bandersnatch::edwards::Public;
     //use ark_serialize::CanonicalDeserialize;
    // use std::os::raw::c_uchar;
 
@@ -693,7 +668,7 @@ fn ietf_vrf_verify_iml(
     aux_data: &[u8],
     signature: &[u8],
 ) -> Result<[u8; 32], ()> {
-    use ark_ec_vrfs::ietf::Verifier as _;
+    use ark_vrf::ietf::Verifier as _;
 
     let signature = match IetfVrfSignature::deserialize_compressed(signature) {
         Ok(signature) => signature,
@@ -703,13 +678,7 @@ fn ietf_vrf_verify_iml(
         }
     };
 
-    let input = match vrf_input_point(vrf_input_data) {
-        Some(input) => input,
-        None => {
-            eprintln!("Failed to create VRF input point");
-            return Err(()); // or handle the error accordingly
-        }
-    };
+    let input = vrf_input_point(vrf_input_data);
     let output = signature.output;
 
     //println!("Public key: {:?}", prover_public);

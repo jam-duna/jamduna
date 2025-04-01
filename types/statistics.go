@@ -56,22 +56,22 @@ type TrueStatistics struct {
 
 // GP 6.4 Eq 13.6
 type CoreStatistics struct {
-	GasUsed             uint `json:"gas_used"`        // u
-	NumImportedSegments uint `json:"imports"`         // i
-	NumExtrinsics       uint `json:"extrinsic_count"` // x
-	NumBytesExtrinsics  uint `json:"extrinsic_size"`  // z
-	NumExportedSegments uint `json:"exports"`         // e
-	TotalBundleLength   uint `json:"bundle_size"`     // b
 	DALoad              uint `json:"da_load"`         // d
 	NumAssurances       uint `json:"popularity"`      // p
+	NumImportedSegments uint `json:"imports"`         // i
+	NumExportedSegments uint `json:"exports"`         // e
+	NumBytesExtrinsics  uint `json:"extrinsic_size"`  // z
+	NumExtrinsics       uint `json:"extrinsic_count"` // x
+	TotalBundleLength   uint `json:"bundle_size"`     // b
+	GasUsed             uint `json:"gas_used"`        // u
 }
 
 // GP 6.4 Eq 13.7
 type ServiceStatistics struct {
 	NumPreimages             uint `json:"provided_count"`        //p
 	NumBytesPreimages        uint `json:"provided_size"`         //p
-	NumResults               uint `json:"refinement_count"`      //n
-	RefineGasUsed            uint `json:"refinement_gas_used"`   //u
+	NumResults               uint `json:"refinement_count"`      //r-n
+	RefineGasUsed            uint `json:"refinement_gas_used"`   //r-u
 	NumImportedSegments      uint `json:"imports"`               //i
 	NumExportedSegments      uint `json:"exports"`               //e
 	NumBytesExtrinsics       uint `json:"extrinsic_size"`        //z

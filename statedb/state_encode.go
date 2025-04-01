@@ -190,11 +190,11 @@ func (s *SafroleState) GetEntropyBytes() []byte {
 }
 
 // C7 - NextEpochValidatorKeys
-func (s *SafroleState) GetNextEpochValidatorsBytes() []byte {
+func (s *SafroleState) GetNextNextEpochValidatorsBytes() []byte {
 	if s == nil {
 		return []byte{}
 	}
-	codec_bytes, err := types.Encode(s.NextValidators)
+	codec_bytes, err := types.Encode(s.DesignedValidators)
 	if err != nil {
 		return []byte{}
 	}
