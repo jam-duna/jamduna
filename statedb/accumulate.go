@@ -576,11 +576,6 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 
 func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (gasUsed int64, transferCount uint, err error) { // select transfers eq 12.23
 	selectedTransfers := TransferSelect(t, self_index)
-	if s.Authoring {
-		if len(selectedTransfers) > 0 {
-			fmt.Printf("HostTransfer TransferSelect self_index=%d transferCount=%d selected:%v\n", self_index, len(selectedTransfers), selectedTransfers)
-		}
-	}
 	if len(selectedTransfers) == 0 {
 		return 0, 0, nil
 	}
@@ -606,9 +601,9 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	input_argument = append(input_argument, encode_time_slot...)
 	input_argument = append(input_argument, encodeService_index...)
 	input_argument = append(input_argument, encodeSelectedTransfers...)
-	//log.Info(module, "HostTransfer", "input_argument", fmt.Sprintf("%x", input_argument))
 	vm.ExecuteTransfer(input_argument, self)
-	return vm.Gas, uint(len(selectedTransfers)), nil
+	gasUsed = int64(gas) - vm.Gas
+	return gasUsed, uint(len(selectedTransfers)), nil
 }
 
 // eq 12.24
