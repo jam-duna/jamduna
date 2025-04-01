@@ -46,17 +46,17 @@ func (pub *JAMSNPJudgmentPublication) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize Epoch (4 bytes)
-	if err := binary.Write(buf, binary.BigEndian, pub.Epoch); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, pub.Epoch); err != nil {
 		return nil, err
 	}
 
 	// Serialize ValidatorIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, pub.ValidatorIndex); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, pub.ValidatorIndex); err != nil {
 		return nil, err
 	}
 
 	// Serialize Validity (1 byte)
-	if err := binary.Write(buf, binary.BigEndian, pub.Validity); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, pub.Validity); err != nil {
 		return nil, err
 	}
 
@@ -78,17 +78,17 @@ func (pub *JAMSNPJudgmentPublication) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
 	// Deserialize Epoch (4 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &pub.Epoch); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &pub.Epoch); err != nil {
 		return err
 	}
 
 	// Deserialize ValidatorIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &pub.ValidatorIndex); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &pub.ValidatorIndex); err != nil {
 		return err
 	}
 
 	// Deserialize Validity (1 byte)
-	if err := binary.Read(buf, binary.BigEndian, &pub.Validity); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &pub.Validity); err != nil {
 		return err
 	}
 

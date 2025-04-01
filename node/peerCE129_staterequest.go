@@ -70,7 +70,7 @@ func (req *JAMSNPStateRequest) ToBytes() ([]byte, error) {
 	}
 
 	// Serialize MaximumSize (4 bytes)
-	if err := binary.Write(buf, binary.BigEndian, req.MaximumSize); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, req.MaximumSize); err != nil {
 		return nil, err
 	}
 
@@ -97,7 +97,7 @@ func (req *JAMSNPStateRequest) FromBytes(data []byte) error {
 	}
 
 	// Deserialize MaximumSize (4 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &req.MaximumSize); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &req.MaximumSize); err != nil {
 		return err
 	}
 

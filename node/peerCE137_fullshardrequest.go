@@ -51,7 +51,7 @@ func (req *JAMSNPShardRequest) ToBytes() ([]byte, error) {
 	}
 
 	// Serialize ShardIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, req.ShardIndex); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, req.ShardIndex); err != nil {
 		return nil, err
 	}
 
@@ -68,7 +68,7 @@ func (req *JAMSNPShardRequest) FromBytes(data []byte) error {
 	}
 
 	// Deserialize ShardIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &req.ShardIndex); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &req.ShardIndex); err != nil {
 		return err
 	}
 

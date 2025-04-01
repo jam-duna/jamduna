@@ -55,12 +55,12 @@ func (ticket *JAMSNPTicketDistribution) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize Epoch (4 bytes)
-	if err := binary.Write(buf, binary.BigEndian, ticket.Epoch); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, ticket.Epoch); err != nil {
 		return nil, err
 	}
 
 	// Serialize Attempt (1 byte)
-	if err := binary.Write(buf, binary.BigEndian, ticket.Attempt); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, ticket.Attempt); err != nil {
 		return nil, err
 	}
 
@@ -77,12 +77,12 @@ func (ticket *JAMSNPTicketDistribution) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
 	// Deserialize Epoch (4 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &ticket.Epoch); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &ticket.Epoch); err != nil {
 		return err
 	}
 
 	// Deserialize Attempt (1 byte)
-	if err := binary.Read(buf, binary.BigEndian, &ticket.Attempt); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &ticket.Attempt); err != nil {
 		return err
 	}
 

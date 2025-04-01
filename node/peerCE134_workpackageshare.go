@@ -95,7 +95,7 @@ func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize CoreIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, share.CoreIndex); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, share.CoreIndex); err != nil {
 		return nil, err
 	}
 
@@ -128,7 +128,7 @@ func (share *JAMSNPWorkPackageShare) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
 	// Deserialize CoreIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &share.CoreIndex); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &share.CoreIndex); err != nil {
 		return err
 	}
 

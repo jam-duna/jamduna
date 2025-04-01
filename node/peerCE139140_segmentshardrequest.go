@@ -65,24 +65,24 @@ func (req *JAMSNPSegmentShardRequest) ToBytes() ([]byte, error) {
 	}
 
 	// Serialize ShardIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, req.ShardIndex); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, req.ShardIndex); err != nil {
 		return nil, err
 	}
 
 	// Serialize Len (1 byte)
-	if err := binary.Write(buf, binary.BigEndian, req.Len); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, req.Len); err != nil {
 		return nil, err
 	}
 
 	// Serialize the length of SegmentIndex array (2 bytes for the length)
 	segmentIndexLength := uint16(len(req.SegmentIndex))
-	if err := binary.Write(buf, binary.BigEndian, segmentIndexLength); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, segmentIndexLength); err != nil {
 		return nil, err
 	}
 
 	// Serialize each SegmentIndex entry (2 bytes each)
 	for _, segment := range req.SegmentIndex {
-		if err := binary.Write(buf, binary.BigEndian, segment); err != nil {
+		if err := binary.Write(buf, binary.LittleEndian, segment); err != nil {
 			return nil, err
 		}
 	}
@@ -100,25 +100,25 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 	}
 
 	// Deserialize ShardIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &req.ShardIndex); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &req.ShardIndex); err != nil {
 		return err
 	}
 
 	// Deserialize Len (1 byte)
-	if err := binary.Read(buf, binary.BigEndian, &req.Len); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &req.Len); err != nil {
 		return err
 	}
 
 	// Deserialize the length of SegmentIndex array (2 bytes)
 	var segmentIndexLength uint16
-	if err := binary.Read(buf, binary.BigEndian, &segmentIndexLength); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &segmentIndexLength); err != nil {
 		return err
 	}
 
 	// Deserialize each SegmentIndex entry (2 bytes each)
 	req.SegmentIndex = make([]uint16, segmentIndexLength)
 	for i := 0; i < int(segmentIndexLength); i++ {
-		if err := binary.Read(buf, binary.BigEndian, &req.SegmentIndex[i]); err != nil {
+		if err := binary.Read(buf, binary.LittleEndian, &req.SegmentIndex[i]); err != nil {
 			return err
 		}
 	}

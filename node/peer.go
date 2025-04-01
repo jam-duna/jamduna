@@ -154,7 +154,7 @@ func sendQuicBytes(stream quic.Stream, msg []byte) (err error) {
 	}
 	msgLen := uint32(len(msg))
 	lenBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(lenBuf, msgLen)
+	binary.LittleEndian.PutUint32(lenBuf, msgLen)
 	// First, write the message length to the stream
 	_, err = stream.Write(lenBuf)
 	if err != nil {
@@ -179,7 +179,7 @@ func receiveQuicBytes(stream quic.Stream) (resp []byte, err error) {
 	if err != nil {
 		return
 	}
-	messageLength := binary.BigEndian.Uint32(lengthPrefix[:])
+	messageLength := binary.LittleEndian.Uint32(lengthPrefix[:])
 	buf := make([]byte, messageLength)
 	_, err = io.ReadFull(stream, buf)
 	if err != nil {
@@ -207,7 +207,7 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 		fmt.Printf("DispatchIncomingQUICStream2 ERR %v\n", err)
 		return err
 	}
-	msgLen := binary.BigEndian.Uint32(msgLenBytes)
+	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
 	msg := make([]byte, msgLen)
 	_, err = io.ReadFull(stream, msg)
 	if err != nil {

@@ -48,7 +48,7 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize Slot (4 bytes)
-	if err := binary.Write(buf, binary.BigEndian, wr.Slot); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, wr.Slot); err != nil {
 		return nil, err
 	}
 	// Serialize Len (1 byte)
@@ -78,7 +78,7 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 	// Deserialize Slot (4 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &wr.Slot); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &wr.Slot); err != nil {
 		return fmt.Errorf("Error deserializing Slot: %v", err)
 	}
 	// Deserialize Len (1 byte)

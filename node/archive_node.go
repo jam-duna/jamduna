@@ -508,7 +508,7 @@ func (n *ArchiveNode) DispatchIncomingQUICStream(stream quic.Stream) error {
 		fmt.Printf("DispatchIncomingQUICStream2 ERR %v\n", err)
 		return err
 	}
-	msgLen := binary.BigEndian.Uint32(msgLenBytes)
+	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
 	msg := make([]byte, msgLen)
 	_, err = io.ReadFull(stream, msg)
 	if err != nil {

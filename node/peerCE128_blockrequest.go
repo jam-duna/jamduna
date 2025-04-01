@@ -43,12 +43,12 @@ func (req *JAMSNPBlockRequest) ToBytes() ([]byte, error) {
 	}
 
 	// Write Direction (1 byte)
-	if err := binary.Write(buf, binary.BigEndian, req.Direction); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, req.Direction); err != nil {
 		return nil, err
 	}
 
 	// Write MaximumBlocks (4 bytes)
-	if err := binary.Write(buf, binary.BigEndian, req.MaximumBlocks); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, req.MaximumBlocks); err != nil {
 		return nil, err
 	}
 
@@ -65,12 +65,12 @@ func (req *JAMSNPBlockRequest) FromBytes(data []byte) error {
 	}
 
 	// Read Direction (1 byte)
-	if err := binary.Read(buf, binary.BigEndian, &req.Direction); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &req.Direction); err != nil {
 		return err
 	}
 
 	// Read MaximumBlocks (4 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &req.MaximumBlocks); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &req.MaximumBlocks); err != nil {
 		return err
 	}
 

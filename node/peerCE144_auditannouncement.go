@@ -62,13 +62,13 @@ func (ann *JAMSNPAuditAnnouncement) ToBytes() ([]byte, error) {
 	}
 
 	// Serialize Tranche (1 byte)
-	if err := binary.Write(buf, binary.BigEndian, ann.Tranche); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, ann.Tranche); err != nil {
 		return nil, err
 	}
 
 	// Serialize Len (1 byte)
 	ann.Len = uint8(len(ann.Reports)) // Set the length of reports before serializing
-	if err := binary.Write(buf, binary.BigEndian, ann.Len); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, ann.Len); err != nil {
 		return nil, err
 	}
 
@@ -100,12 +100,12 @@ func (ann *JAMSNPAuditAnnouncement) FromBytes(data []byte) error {
 	}
 
 	// Deserialize Tranche (1 byte)
-	if err := binary.Read(buf, binary.BigEndian, &ann.Tranche); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &ann.Tranche); err != nil {
 		return err
 	}
 
 	// Deserialize Len (1 byte)
-	if err := binary.Read(buf, binary.BigEndian, &ann.Len); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &ann.Len); err != nil {
 		return err
 	}
 
@@ -140,7 +140,7 @@ func (noShow *JAMSNPNoShow) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize ValidatorIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, noShow.ValidatorIndex); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, noShow.ValidatorIndex); err != nil {
 		return nil, err
 	}
 
@@ -162,7 +162,7 @@ func (noShow *JAMSNPNoShow) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
 	// Deserialize ValidatorIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &noShow.ValidatorIndex); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &noShow.ValidatorIndex); err != nil {
 		return err
 	}
 
@@ -204,7 +204,7 @@ func (ann *JAMSNPAuditAnnouncementNot0) FromBytes(data []byte) error {
 	if _, err := io.ReadFull(buf, ann.Signature[:]); err != nil {
 		return err
 	}
-	if err := binary.Read(buf, binary.BigEndian, &ann.Len); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &ann.Len); err != nil {
 		return err
 	}
 	for buf.Len() > 0 {
@@ -226,7 +226,7 @@ func (report *JAMSNPAuditAnnouncementReport) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize CoreIndex (2 bytes)
-	if err := binary.Write(buf, binary.BigEndian, report.CoreIndex); err != nil {
+	if err := binary.Write(buf, binary.LittleEndian, report.CoreIndex); err != nil {
 		return nil, err
 	}
 
@@ -242,7 +242,7 @@ func (report *JAMSNPAuditAnnouncementReport) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
 	// Deserialize CoreIndex (2 bytes)
-	if err := binary.Read(buf, binary.BigEndian, &report.CoreIndex); err != nil {
+	if err := binary.Read(buf, binary.LittleEndian, &report.CoreIndex); err != nil {
 		return err
 	}
 
