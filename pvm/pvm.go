@@ -1117,6 +1117,8 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	// a = E(t)   take transfer memos t and encode them
 	vm.ServiceAccount = service_account
 
+	// vm.SetLogging(log.PvmAuthoring)
+
 	Standard_Program_Initialization(vm, arguments) // eq 264/265
 	vm.Execute(types.EntryPointOnTransfer, false)
 	// return vm.getArgumentOutputs()
@@ -1161,6 +1163,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 
 	vm.pc = uint64(entryPoint)
 	stepn := 1
+
 	for !vm.terminated {
 		if err := vm.step(stepn); err != nil {
 			return err
@@ -1170,6 +1173,9 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 		}
 		// host call invocation
 		if vm.hostCall {
+			if string(vm.ServiceMetadata) == "megatron" && vm.Mode == "transfer" {
+				fmt.Printf("vm.host_func_id: %d\n", vm.host_func_id)
+			}
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false

@@ -584,15 +584,19 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	if len(selectedTransfers) == 0 {
 		return 0, 0, nil
 	}
+	gas := uint64(0)
 	for _, transfer := range selectedTransfers {
 		self.Balance += transfer.Amount
+		gas += transfer.GasLimit
 	}
 
 	code, ok, err := s.ReadServicePreimageBlob(self_index, self.CodeHash)
 	if err != nil || !ok {
 		return 0, uint(len(selectedTransfers)), nil
 	}
+
 	vm := pvm.NewVMFromCode(self_index, code, 0, s)
+	vm.Gas = int64(gas)
 
 	var input_argument []byte
 	encode_time_slot, _ := types.Encode(time_slot)
