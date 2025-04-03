@@ -170,7 +170,7 @@ func sendQuicBytes(stream quic.Stream, msg []byte, peerID uint16, code uint8) (e
 
 	if peerID == TestPeerID {
 		if code < 200 { // TODO: add more filtering
-			log.Info(module, "*** sendQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+			log.Debug(debugQuic, "*** sendQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		}
 	}
 	return nil
@@ -193,7 +193,7 @@ func receiveQuicBytes(stream quic.Stream, peerID uint16, code uint8) (resp []byt
 	}
 	if peerID == TestPeerID {
 		if code < 200 { // TODO: add more filtering
-			log.Info(module, "*** receiveQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(buf))
+			log.Debug(debugQuic, "*** receiveQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(buf))
 		}
 	}
 
@@ -234,7 +234,7 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 		return err
 	}
 	if peerID == TestPeerID {
-		log.Info(module, "*** DispatchIncomingQUICStream - msg", "peerID", peerID, "code", msgType, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+		log.Debug(debugQuic, "*** DispatchIncomingQUICStream - msg", "peerID", peerID, "code", msgType, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 	}
 
 	// Dispatch based on msgType

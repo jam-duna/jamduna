@@ -143,7 +143,7 @@ func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte, peerID uint
 		log.Error(module, "onBlockRequest NOT OK", "headerHash", newReq.HeaderHash, "direction", newReq.Direction)
 		return nil
 	}
-	log.Info(module, "***** onBlockRequest incoming ", "peerID", peerID, "ok", ok, "HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks, "len(blocks)", len(blocks))
+	log.Debug(debugQuic, "***** onBlockRequest incoming ", "peerID", peerID, "ok", ok, "HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks, "len(blocks)", len(blocks))
 	var blockBytes []byte
 	blockBytes, err = types.Encode(blocks)
 	if err != nil {

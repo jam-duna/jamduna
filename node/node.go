@@ -51,6 +51,7 @@ const (
 	debugAudit   = "ad_mod"  // Audit
 	debugGrandpa = "gp_mod"  // Guaranteeing
 	debugBlock   = "blk_mod" // Block
+	debugQuic    = "quic"    // QUIC
 	debugStream  = "q_mod"
 	numNodes     = types.TotalValidators
 	quicAddr     = "127.0.0.1:%d"
@@ -129,6 +130,9 @@ type NodeContent struct {
 	preimages      map[common.Hash][]byte // preimageLookup -> preimageBlob
 	preimagesMutex sync.Mutex
 
+	servicesMap   map[uint32]*types.ServiceSummary
+	servicesMutex sync.Mutex
+
 	workPackageQueue sync.Map
 
 	chunkMap            sync.Map
@@ -156,6 +160,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 		workPackagesCh:       make(chan types.WorkPackage, 2000),
 		workReportsCh:        make(chan types.WorkReport, 2000),
 		preimages:            make(map[common.Hash][]byte),
+		servicesMap:          make(map[uint32]*types.ServiceSummary),
 		workPackageQueue:     sync.Map{},
 		new_timeslot_chan:    make(chan uint32, 1),
 	}
@@ -444,7 +449,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	//jamnp-s/V/H/builder. Here V is the protocol version, 0, and H is the first 8 nibbles of the hash of the chain's genesis header, in lower-case hexadecimal.
 	alpn_builder := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4])) + "/builder"
 	alpn := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4]))
-	fmt.Printf("[N%v] ALPN: %s\n", id, alpn)
+
 	node.node_name = fmt.Sprintf("jam-%d", id)
 
 	tlsConfig := &tls.Config{
@@ -755,6 +760,36 @@ func (n *Node) getPeerAddr(peerIdx uint16) (*Peer, error) {
 	return nil, fmt.Errorf("peer not found")
 }
 
+func (n *NodeContent) fetchServiceName(s uint32) string {
+	return fmt.Sprintf("service %d", s) // TODO: fetch code metadata instead
+}
+
+func (n *NodeContent) updateServiceMap(statedb *statedb.StateDB, b *types.Block) error {
+	stats := statedb.JamState.ValidatorStatistics
+	for s, stats := range stats.ServiceStatistics {
+		summ, ok := n.servicesMap[s]
+		if !ok {
+			serviceName := n.fetchServiceName(s)
+			summ = &types.ServiceSummary{
+				ServiceID:          s,
+				ServiceName:        serviceName,
+				LastRefineSlot:     0,
+				LastAccumulateSlot: 0,
+			}
+			n.servicesMap[s] = summ
+		}
+		slot := b.Header.Slot
+		if stats.AccumulateGasUsed > 0 {
+			summ.LastAccumulateSlot = slot
+		}
+		if stats.RefineGasUsed > 0 {
+			summ.LastRefineSlot = slot
+		}
+		summ.Statistics = &stats
+	}
+	return nil
+}
+
 func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 	n.statedbMutex.Lock()
 	n.statedbMapMutex.Lock()
@@ -864,13 +899,13 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		newAddr := net.JoinHostPort(host, "13370")
 		if _, ok := n.peersInfo[validatorIndex]; !ok {
 			n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
-			log.Info(module, "handleConnection: Non-Validator peer", "validatorIndex", validatorIndex, "pubKey", pubKey, "remoteAddr", remoteAddr, "newAddr", newAddr)
+			log.Debug(debugQuic, "handleConnection: Non-Validator peer", "validatorIndex", validatorIndex, "pubKey", pubKey, "remoteAddr", remoteAddr, "newAddr", newAddr)
 		} else {
 			for {
 				validatorIndex++
 				if _, ok := n.peersInfo[validatorIndex]; !ok {
 					n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
-					log.Info(module, "handleConnection: Non-Validator peer", "validatorIndex", validatorIndex, "pubKey", pubKey, "remoteAddr", remoteAddr, "newAddr", newAddr)
+					log.Debug(debugQuic, "handleConnection: Non-Validator peer", "validatorIndex", validatorIndex, "pubKey", pubKey, "remoteAddr", remoteAddr, "newAddr", newAddr)
 					break
 				}
 			}
@@ -887,7 +922,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		}
 		atomic.AddInt64(&n.totalIncomingStreams, 1)
 		if validatorIndex == TestPeerID {
-			log.Info(module, "handleConnection: Added new stream", "validatorIndex", validatorIndex, "totalIncomingStreams", n.totalIncomingStreams)
+			log.Debug(debugQuic, "handleConnection: Added new stream", "validatorIndex", validatorIndex, "totalIncomingStreams", n.totalIncomingStreams)
 		}
 		go func() {
 			defer func() {
@@ -1131,6 +1166,7 @@ func (n *Node) extendChain() error {
 
 				// Extend the tip of the chain
 				n.addStateDB(newStateDB)
+				n.updateServiceMap(newStateDB, b)
 				n.assureNewBlock(b)
 
 				parentheaderhash = nextBlock.Header.Hash()
@@ -1294,7 +1330,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		}
 	}
 	chunkSize := types.NumECPiecesPerSegment * 2 // MKTODO: SegmentSize / W_E * 2
-	fmt.Printf("!!! reconstructSegments: %d segments, %d shards, %d chunkSize\n", len(allsegmentindices), numShards, chunkSize)
+	//	fmt.Printf("!!! reconstructSegments: %d segments, %d shards, %d chunkSize\n", len(allsegmentindices), numShards, chunkSize)
 	rawshards := make([][]byte, len(indexes))
 	numsegments := len(allsegmentindices)
 	allsegments := make([][]byte, numsegments) // note that the last few are actually pageproofs
@@ -1346,7 +1382,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 	if len(segmentsonly) != indicesLen {
 		panic(123444)
 	}
-	fmt.Printf("reconstructSegments: %d segments, %d justifications\n", len(segmentsonly), len(justifications))
+	//	fmt.Printf("reconstructSegments: %d segments, %d justifications\n", len(segmentsonly), len(justifications))
 	return segmentsonly, justifications, nil
 }
 

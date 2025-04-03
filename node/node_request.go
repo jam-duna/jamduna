@@ -287,7 +287,7 @@ func (n *Node) runReceiveBlock() {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
-			log.Info(debugBlock, "runReceiveBlock", "n", n.String(), "blockAnnouncement", blockAnnouncement.Header.HeaderHash().String_short())
+			log.Debug(debugBlock, "runReceiveBlock", "n", n.String(), "blockAnnouncement", blockAnnouncement.Header.HeaderHash().String_short())
 			b, err := n.processBlockAnnouncement(blockAnnouncement)
 			if err != nil {
 				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)

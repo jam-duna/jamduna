@@ -31,10 +31,12 @@ func TestClient(t *testing.T) {
 	port := 9900 + 1200
 	// address := fmt.Sprintf("localhost:%d", port)
 	address := fmt.Sprintf("jam-0.jamduna.org:%d", port)
+	fmt.Printf("connecting %s\n", address)
 	client, err := NewNodeClient(address)
 	if err != nil {
 		t.Fatalf("Error: %s", err)
 	}
+	fmt.Printf("CONNECTED\n");
 	defer client.Close()
 	services_map, err := client.LoadServices(services)
 	if err != nil {
@@ -107,7 +109,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
-		err = client.SendWorkPackage(workpackage_req)
+		err = client.SubmitWorkPackage(workpackage_req)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -138,7 +140,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		prevWorkPackageHash = workPackageHash
 		fib_index := testServices["fib"].ServiceIndex
 		k := common.ServiceStorageKey(fib_index, []byte{0})
-		service_account_byte, ok, err := client.GetServiceStorage(fib_index, k)
+		service_account_byte, ok, err := client.ServiceValue(fib_index, k)
 		if err != nil || ok == false {
 			t.Fatalf("Error: %s", err)
 		}
@@ -147,17 +149,17 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 }
 
 func fib2(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) {
-	time.Sleep(12 * time.Second)
+//	time.Sleep(12 * time.Second)
 	jam_key := []byte("jam")
-
+fmt.Printf("1\n")
 	fib2_child_code, _ := getServices([]string{"corevm_child"}, false)
 	fib2_child_codehash := fib2_child_code["corevm_child"].CodeHash
-
+fmt.Printf("2\n")
 	fib2_child_code_length := uint32(len(fib2_child_code["corevm_child"].Code))
 	fib2_child_code_length_bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
 	fmt.Printf("CHILD_CODE: %d %s\n", fib2_child_code_length, fib2_child_codehash)
-
+fmt.Printf("3\n")
 	prevWorkPackageHash := common.Hash{}
 
 	// Generate the extrinsic
@@ -177,7 +179,8 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		Len:  extrinsic_len,
 	})
 
-	extrinsics = append(extrinsics, extrinsic)
+fmt.Printf("4\n")
+extrinsics = append(extrinsics, extrinsic)
 	for fibN := -1; fibN <= 10; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 0 {
@@ -253,7 +256,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
-		err = client.SendWorkPackage(workpackage_req)
+		err = client.SubmitWorkPackage(workpackage_req)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -282,7 +285,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		for _, key := range keys {
 			k := common.ServiceStorageKey(fib_index, []byte{key})
 			if true {
-				service_account_byte, _, _ := client.GetServiceStorage(fib_index, k)
+				service_account_byte, _, _ := client.ServiceValue(fib_index, k)
 				fmt.Printf("Fib2(%v) result %d: %x\n", fibN_string, key, service_account_byte)
 			}
 		}
@@ -296,7 +299,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 			if err != nil {
 				t.Fatalf("AddPreimage: %s", err)
 			}
-			err = client.SendPreimageAnnouncement(fibIndex, jam_key)
+			 err = client.SubmitPreimage(fibIndex, jam_key)
 			if err != nil {
 				t.Fatalf("SendPreimageAnnouncement: %s", err)
 			}
@@ -312,7 +315,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 			if err != nil {
 				t.Fatalf("AddPreimage: %s", err)
 			}
-			err = client.SendPreimageAnnouncement(fibIndex, fib2_child_code["corevm_child"].Code)
+			err = client.SubmitPreimage(fibIndex, fib2_child_code["corevm_child"].Code)
 			if err != nil {
 				t.Fatalf("SendPreimageAnnouncement: %s", err)
 			}

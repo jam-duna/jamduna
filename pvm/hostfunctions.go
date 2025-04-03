@@ -738,7 +738,7 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.ReadRegister(10)
 	omega_11, _ := vm.ReadRegister(11)
 	omega_12, _ := vm.ReadRegister(12)
-	log.Info(vm.logging, vm.Str("FETCH"), "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics))
+	log.Debug(vm.logging, vm.Str("FETCH"), "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics))
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
@@ -795,7 +795,7 @@ func (vm *VM) hostFetch() {
 		if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
 			v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
 			if vm.logging == log.PvmAuthoring {
-				log.Info(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
+				log.Debug(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
 					"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
 					"bytes", v_Bytes[0:20],
 					"l", len(v_Bytes),
@@ -1625,6 +1625,10 @@ func (vm *VM) hostLog() {
 	}
 	levelName := getLogLevelName(level, vm.CoreIndex, string(vm.ServiceMetadata))
 
+	vm.HostResultCode = OK
+	if log.DisablePVMLogging {
+		return
+	}
 	switch level {
 	case 0:
 		log.Crit(vm.firstGuarantor, levelName, "msg", string(messageBytes))
@@ -1654,7 +1658,6 @@ func (vm *VM) hostLog() {
 		}
 		break
 	}
-	vm.HostResultCode = OK
 }
 
 func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs []uint64) {

@@ -10,6 +10,7 @@ const (
 	GeneralAuthoring = "authoring"       // Generic Authoring log (excluding pvm)
 	PvmAuthoring     = "pvm_authoring"   // PVM Authoring log
 	FirstGuarantor   = "first_guarantor" // First Authoring Guarantor log
+	DisablePVMLogging = true
 )
 
 var root atomic.Value

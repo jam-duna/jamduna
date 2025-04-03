@@ -146,9 +146,58 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_st
 	return &rho_state, nil
 }
 
+// OLD METHODS
+func (j *Jam) GetBlockBySlot(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
+	}
+
+	var slot uint32
+	input := req[0]
+	switch input {
+	case "latest":
+		slot = j.NodeContent.getLatestFinalizedBlockSlot()
+	case "best":
+		slot = j.NodeContent.getBestBlockSlot()
+	default:
+		parsed, err := strconv.ParseUint(input, 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid slot value %q: %w", input, err)
+		}
+		slot = uint32(parsed)
+	}
+
+	block, err := j.NodeContent.GetStoredBlockBySlot(slot)
+	if err != nil {
+		return nil
+	}
+
+	*res = block.String()
+	return nil
+}
+
+func (j *Jam) GetBlockByHash(req []string, res *string) error {
+	return j.Block(req, res)
+}
+
+func (j *Jam) GetState(req []string, res *string) error {
+	return j.State(req, res)
+}
+
+func (j *Jam) GetService(req []string, res *string) error {
+	return j.ServiceInfo(req, res)
+}
+
 var MethodDescriptionMap = map[string]string{
-	"Functions":        "Functions() -> functions description",
-	"NodeCommand":      "NodeCommand(command string) -> will pass the command to the node",
+	"Functions":   "Functions() -> functions description",
+	"NodeCommand": "NodeCommand(command string) -> will pass the command to the node",
+
+	// old RPC methods, for backwards compatibility
+	"GetBlockBySlot": "GetBlockBySlot(slot string) -> string",
+	"GetState":       "GetState(headerHash hexstring) -> string",       // synonym for State
+	"GetService":     "GetService(serviceIndex string) -> string",      // synonym for Service
+	"GetBlockByHash": "GetBlockByHash(headerHash hexstring) -> string", // synonym for Block
+
 	"Block":            "Block(headerHash hexstring) -> string",
 	"BestBlock":        "BestBlock(headerHash hexstring) -> string",
 	"FinalizedBlock":   "FinalizedBlock(headerHash hexstring) -> string",
@@ -307,27 +356,6 @@ func (n *NodeContent) getLatestFinalizedBlockSlot() uint32 {
 
 func (n *NodeContent) getBestBlockSlot() uint32 {
 	return n.getLatestFinalizedBlockSlot()
-}
-
-func (j *Jam) BlockBySlot(req []string, res *string) error {
-	if len(req) != 1 {
-		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
-	}
-
-	var slot uint32
-	input := req[0]
-	parsed, err := strconv.ParseUint(input, 10, 32)
-	if err != nil {
-		return fmt.Errorf("invalid slot value %q: %w", input, err)
-	}
-	slot = uint32(parsed)
-
-	block, err := j.NodeContent.GetStoredBlockBySlot(slot)
-	if err != nil {
-		return err
-	}
-	*res = block.String()
-	return nil
 }
 
 func (j *Jam) State(req []string, res *string) error {
@@ -742,7 +770,18 @@ func (j *Jam) ListServices(req []string, res *string) error {
 	if len(req) != 0 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
-	// TODO
+
+	j.servicesMutex.Lock()
+	knownServices := make([]*types.ServiceSummary, 0)
+	for _, si := range j.servicesMap {
+		knownServices = append(knownServices, si)
+	}
+	j.servicesMutex.Unlock()
+	s, err := json.MarshalIndent(knownServices, "", "    ")
+	if err != nil {
+		return err
+	}
+	*res = string(s)
 	return nil
 }
 

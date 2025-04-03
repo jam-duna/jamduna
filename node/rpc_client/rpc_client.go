@@ -11,15 +11,14 @@ import (
 	"github.com/dop251/goja"
 )
 
-/*
-jam.GetFunctions()
-*/
+// Usage: go run rpc_client.go -rpc=localhost:10900
+
 func main() {
-	// Define and parse the port flag. Default is 21100.
-	//port := flag.Int("port", 21100, "port to connect to RPC server")
+	// Define and parse the rpc flag. 
+	rpcEndpoint := flag.String("rpc", "localhost:21100", "RPC server")
 	flag.Parse()
 
-	client, err := rpc.Dial("tcp", "localhost:11100")
+	client, err := rpc.Dial("tcp", *rpcEndpoint)
 	if err != nil {
 		fmt.Println("❌ Failed to connect to RPC server:", err)
 		return

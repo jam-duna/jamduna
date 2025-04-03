@@ -2902,8 +2902,7 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 			fibN_string = fmt.Sprintf("%d", fibN)
 		}
 
-		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackage", workPackageHash)
-		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackageContent", workPackage.String())
+		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackage", workPackageHash) // "workPackageContent", workPackage.String()
 		workPackageReq := types.WorkPackageRequest{
 			CoreIndex:       uint16(core),
 			WorkPackage:     workPackage,
