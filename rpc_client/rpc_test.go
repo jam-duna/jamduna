@@ -36,7 +36,7 @@ func TestClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error: %s", err)
 	}
-	fmt.Printf("CONNECTED\n");
+
 	defer client.Close()
 	services_map, err := client.LoadServices(services)
 	if err != nil {
@@ -149,17 +149,15 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 }
 
 func fib2(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) {
-//	time.Sleep(12 * time.Second)
+	//	time.Sleep(12 * time.Second)
 	jam_key := []byte("jam")
-fmt.Printf("1\n")
+
 	fib2_child_code, _ := getServices([]string{"corevm_child"}, false)
 	fib2_child_codehash := fib2_child_code["corevm_child"].CodeHash
-fmt.Printf("2\n")
 	fib2_child_code_length := uint32(len(fib2_child_code["corevm_child"].Code))
 	fib2_child_code_length_bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
 	fmt.Printf("CHILD_CODE: %d %s\n", fib2_child_code_length, fib2_child_codehash)
-fmt.Printf("3\n")
 	prevWorkPackageHash := common.Hash{}
 
 	// Generate the extrinsic
@@ -179,8 +177,7 @@ fmt.Printf("3\n")
 		Len:  extrinsic_len,
 	})
 
-fmt.Printf("4\n")
-extrinsics = append(extrinsics, extrinsic)
+	extrinsics = append(extrinsics, extrinsic)
 	for fibN := -1; fibN <= 10; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 0 {
@@ -299,7 +296,7 @@ extrinsics = append(extrinsics, extrinsic)
 			if err != nil {
 				t.Fatalf("AddPreimage: %s", err)
 			}
-			 err = client.SubmitPreimage(fibIndex, jam_key)
+			err = client.SubmitPreimage(fibIndex, jam_key)
 			if err != nil {
 				t.Fatalf("SendPreimageAnnouncement: %s", err)
 			}

@@ -14,7 +14,7 @@ import (
 // Usage: go run rpc_client.go -rpc=localhost:10900
 
 func main() {
-	// Define and parse the rpc flag. 
+	// Define and parse the rpc flag.
 	rpcEndpoint := flag.String("rpc", "localhost:21100", "RPC server")
 	flag.Parse()
 

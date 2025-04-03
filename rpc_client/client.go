@@ -136,7 +136,7 @@ func (c *NodeClient) LoadServices(services []string) (map[string]types.ServiceIn
 	for _, service_name := range services {
 		service_info, err := c.NewService(service_name)
 		if err != nil {
-		panic(err)
+			panic(err)
 			return nil, err
 		}
 		// Wait for the service to be ready
@@ -145,7 +145,7 @@ func (c *NodeClient) LoadServices(services []string) (map[string]types.ServiceIn
 		for {
 			new_service_index, err := c.GetBootstrapService()
 			if err != nil {
-			fmt.Printf("%v\n", err)
+				fmt.Printf("%v\n", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}

@@ -1155,10 +1155,12 @@ func (vm *VM) hostWrite() {
 	vm.HostResultCode = OK
 	val_len := uint64(len(v))
 	if !exists {
-		a.NumStorageItems++
-		a.StorageSize += (32 + val_len)
-		vm.WriteRegister(7, NONE)
-		log.Debug(vm.logging, vm.Str("WRITE NONE"), "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+		if val_len > 0 {
+			a.NumStorageItems++
+			a.StorageSize += (32 + val_len)
+			vm.WriteRegister(7, NONE)
+			log.Debug(vm.logging, vm.Str("WRITE NONE"), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+		}
 	} else {
 		prev_l := uint64(len(oldValue))
 		if val_len == 0 {
@@ -1169,14 +1171,14 @@ func (vm *VM) hostWrite() {
 			a.StorageSize -= (32 + prev_l)
 			l = uint64(NONE)
 			vm.WriteRegister(7, l)
-			log.Debug(vm.logging, vm.Str("WRITE (as DELETE) NONE "), "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Debug(vm.logging, vm.Str("WRITE (as DELETE) NONE "), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		} else {
 			// write
 			a.StorageSize += val_len
 			a.StorageSize -= prev_l
 			l = prev_l
 			vm.WriteRegister(7, l)
-			log.Debug(vm.logging, vm.Str("WRITE OK"), "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Debug(vm.logging, vm.Str("WRITE OK"), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		}
 	}
 	log.Debug(vm.logging, vm.Str("WRITE storage"), "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
