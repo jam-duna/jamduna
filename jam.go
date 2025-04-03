@@ -36,6 +36,10 @@ func setUserPort(config *types.CommandConfig) (validator_indx int, is_local bool
 	}
 	userName := hostname
 	fmt.Printf("User: %s\n", userName)
+	if userName == "rise" || userName == "jam-6" {
+		config.Port = 9900
+		return 4, false
+	}
 	if len(userName) >= 4 && userName[:3] == "jam" {
 		number := userName[4:]
 		intNum, err := strconv.Atoi(number)
@@ -83,6 +87,29 @@ func main() {
 
 	fmt.Printf("System time: %s (%s)\n", now.Format("2006-01-02 15:04:05"), loc)
 
+	config.GenesisState, config.GenesisBlock = node.GetGenesisFile(network)
+	// If help is requested, print usage and exit
+	if help {
+		fmt.Println("Usage: jam [options]")
+		flag.PrintDefaults()
+		os.Exit(0)
+	}
+	validatorIndex, is_local := setUserPort(config)
+	fmt.Printf("Starting node with port %d\n", config.Port)
+	peers, peerList, err := generatePeerNetwork(validators, config.Port, is_local)
+	for _, peer := range peerList {
+		fmt.Printf("Peer %d: %s\n", peer.PeerID, peer.PeerAddr)
+	}
+
+	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
+		// set up validator secrets
+		if _, _, err := setupValidatorSecret(config.Bandersnatch, config.Ed25519, config.Bls, config.NodeName); err != nil {
+			fmt.Println("Error setting up validator secrets:", err)
+			os.Exit(1)
+		}
+		// TODO: use the return values to check against the genesisConfig
+	}
+	// to make sure our genesis timestamp is not too far from javajam setup
 	if start_time != "" {
 		for len(start_time) > 0 && (start_time[0] < '0' || start_time[0] > '9') {
 			start_time = start_time[1:]
@@ -104,38 +131,28 @@ func main() {
 		} else {
 			fmt.Printf("Waiting until start time: %s (%v seconds remaining)\n",
 				startTime.Format("2006-01-02 15:04:05"), duration.Seconds())
-			time.Sleep(duration)
-		}
-	}
-	config.GenesisState, config.GenesisBlock = node.GetGenesisFile(network)
-	// If help is requested, print usage and exit
-	if help {
-		fmt.Println("Usage: jam [options]")
-		flag.PrintDefaults()
-		os.Exit(0)
-	}
-	validatorIndex, is_local := setUserPort(config)
-	fmt.Printf("Starting node with port %d\n", config.Port)
-	peers, peerList, err := generatePeerNetwork(validators, config.Port, is_local)
-	for _, peer := range peerList {
-		fmt.Printf("Peer %d: %s\n", peer.PeerID, peer.PeerAddr)
-	}
-	epoch0Timestamp := statedb.NewEpoch0Timestamp()
-	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
-		// set up validator secrets
-		if _, _, err := setupValidatorSecret(config.Bandersnatch, config.Ed25519, config.Bls, config.NodeName); err != nil {
-			fmt.Println("Error setting up validator secrets:", err)
-			os.Exit(1)
-		}
-		// TODO: use the return values to check against the genesisConfig
-	}
+			const logInterval = 20 * time.Second
 
+			for time.Until(startTime) > logInterval {
+				fmt.Printf("Time remaining: %v\n", time.Until(startTime).Truncate(time.Second))
+				time.Sleep(logInterval)
+			}
+
+			finalSleep := time.Until(startTime)
+			if finalSleep > 0 {
+				time.Sleep(finalSleep)
+			}
+			fmt.Println("Start time reached. Running now...")
+		}
+	}
+	epoch0Timestamp := statedb.NewEpoch0Timestamp("jamtestnet")
 	// Set up peers and node
 	n, err := node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, config.GenesisBlock, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
 	if err != nil {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)
 	}
+	n.SetSendTickets(false)
 	n.SetServiceDir("/services")
 	storage, err := n.GetStorage()
 	defer storage.Close()
@@ -167,7 +184,13 @@ func generatePeerNetwork(validators []types.Validator, port int, local bool) (pe
 	} else {
 		for i := uint16(0); i < types.TotalValidators; i++ {
 			v := validators[i]
-			peerAddr := fmt.Sprintf("jam-%d:%d", i, port)
+			peerAddr := fmt.Sprintf("jam-%d.jamduna.org:%d", i, port)
+			if i == 4 {
+				peerAddr = "jam-6.jamduna.org:9900" // poland
+			}
+			if i == 5 {
+				peerAddr = "jamtestnet-6.javajam.io:30300" // javajam
+			}
 			peer := fmt.Sprintf("%s", v.Ed25519)
 			peers = append(peers, peer)
 			peerList[i] = &node.Peer{

@@ -42,10 +42,6 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 		defer span.End()
 	}
 
-	isSelfRequesting := false
-	if isSelfRequesting {
-
-	}
 	code := uint8(CE138_BundleShardRequest)
 	stream, err := p.openStream(code)
 	if err != nil {
@@ -61,19 +57,19 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 	if err != nil {
 		return
 	}
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		log.Error(debugDA, "SendBundleShardRequest - sedning Err", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 		return
 	}
 	// <-- Bundle Shard
-	bundleShard, err = receiveQuicBytes(stream)
+	bundleShard, err = receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		log.Error(debugDA, "SendBundleShardRequest - bundleShard Stream Err", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 		return
 	}
 	// <-- JAM NP Justification
-	encoded_sclub_justification, err := receiveQuicBytes(stream)
+	encoded_sclub_justification, err := receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		log.Error(debugDA, "SendBundleShardRequest - encoded_sclub_justification Stream Err", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 		return
@@ -101,6 +97,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 	}
 	log.Debug(debugA, "!! onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
 
+	code := uint8(CE138_BundleShardRequest)
 	bundleShard, sClub, encodedPath, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		fmt.Printf("onBundleShardRequest ERR0 %v\n", err)
@@ -110,7 +107,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 		return fmt.Errorf("Not found")
 	}
 	// <-- Bundle Shard
-	err = sendQuicBytes(stream, bundleShard)
+	err = sendQuicBytes(stream, bundleShard, n.id, code)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR1 %v\n", err)
 		return err
@@ -123,7 +120,7 @@ func (n *Node) onBundleShardRequest(stream quic.Stream, msg []byte) (err error) 
 	sclub_justification = append(sclub_justification, path_justification...)
 	// <-- Justification
 	encoded_sclub_justification, _ := common.EncodeJustification(sclub_justification, types.NumECPiecesPerSegment)
-	err = sendQuicBytes(stream, encoded_sclub_justification)
+	err = sendQuicBytes(stream, encoded_sclub_justification, n.id, code)
 	if err != nil {
 		return err
 	}

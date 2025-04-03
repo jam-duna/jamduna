@@ -38,14 +38,12 @@ type CE138_response struct {
 }
 
 type CE128_request struct {
-	ShardIndex    uint16
 	HeaderHash    common.Hash `json:"headerHash"`
 	Direction     uint8       `json:"direction"`
 	MaximumBlocks uint32      `json:"maximumBlocks"`
 }
 
 type CE128_response struct {
-	ShardIndex uint16
 	HeaderHash common.Hash `json:"headerHash"`
 	Direction  uint8       `json:"direction"`
 	Blocks     []types.Block
@@ -70,7 +68,6 @@ func (n *NodeContent) BlocksLookup(headerHash common.Hash, direction uint8, maxi
 	blocks = make([]types.Block, 0)
 	if direction == 0 {
 		//Direction = 0 (Ascending exclusive)  - child, grandchild, ...
-		//panic("does not support Ascending exclusive fetch")
 
 		currentHash := headerHash
 		for i := uint32(0); i < maximumBlocks; i++ {
@@ -79,10 +76,6 @@ func (n *NodeContent) BlocksLookup(headerHash common.Hash, direction uint8, maxi
 				return blocks, false, err
 			}
 
-			// not sure which path to ascend to ... pick first one for now...
-			if len(childBlksWithFork) > 1 {
-				panic(fmt.Sprintf("BlocksLookup: multiple childBlksWithFork found %v\n", childBlksWithFork))
-			}
 			if len(childBlksWithFork) == 0 {
 				break
 			}
@@ -91,6 +84,9 @@ func (n *NodeContent) BlocksLookup(headerHash common.Hash, direction uint8, maxi
 				blocks = append(blocks, *childBlk)
 				childHeaderHash := childBlk.Header.Hash()
 				currentHash = childHeaderHash
+			}
+			if len(childBlksWithFork) > 1 {
+				return blocks, false, fmt.Errorf("BlocksLookup: multiple childBlksWithFork found %d", len(childBlksWithFork))
 			}
 		}
 	} else {
@@ -181,13 +177,6 @@ func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx u
 	return boundaryNode, keyvalues, true, nil
 }
 
-func (n *Node) IsSelfRequesting(peer_id uint16) bool {
-	if peer_id == n.id {
-		return true
-	}
-	return false
-}
-
 func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) (block *types.Block, err error) {
 	if n.store.SendTrace {
 		tracer := n.store.Tp.Tracer("NodeTracer")
@@ -200,12 +189,9 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) 
 	validatorIndex := blockAnnouncement.Header.AuthorIndex
 	p, ok := n.peersInfo[validatorIndex]
 	if !ok {
-		fmt.Printf("processBlockAnnouncement %d NOT Found\n", validatorIndex)
-		for i, p := range n.peersInfo {
-			fmt.Printf("%d => %s\n", i, p.PeerAddr)
-		}
-		panic(120)
-		return block, fmt.Errorf("Invalid validator index %d", validatorIndex)
+		err := fmt.Errorf("Invalid validator index %d", validatorIndex)
+		log.Error(module, "processBlockAnnouncement", "err", err)
+		return block, err
 	}
 	headerHash := blockAnnouncement.Header.HeaderHash()
 	var blocksRaw []types.Block
@@ -227,8 +213,9 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) 
 	block = &blocksRaw[0]
 	receivedHeaderHash := block.Header.Hash()
 	if receivedHeaderHash != headerHash {
-		panic(6665)
-		return block, fmt.Errorf("failed header hash retrieval")
+		err := fmt.Errorf("failed header hash retrieval")
+		log.Error(module, "processBlockAnnouncement", "err", err)
+		return block, err
 	}
 	n.cacheHeaders(receivedHeaderHash, block)
 	n.cacheBlock(block)
@@ -300,6 +287,7 @@ func (n *Node) runReceiveBlock() {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
+			log.Info(debugBlock, "runReceiveBlock", "n", n.String(), "blockAnnouncement", blockAnnouncement.Header.HeaderHash().String_short())
 			b, err := n.processBlockAnnouncement(blockAnnouncement)
 			if err != nil {
 				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)
@@ -332,7 +320,8 @@ func (n *Node) runMain() {
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {
-				log.Error(debugG, "runMain:processGuarantee", "n", n.String(), "err", err, "guarantee.Report", guarantee.Report.String())
+				log.Error(debugG, "runMain:processGuarantee", "n", n.String(), "err", err)
+				// COMMON ERROR: G15|AnchorNotRecent
 			}
 		case assurance := <-n.assurancesCh:
 			err := n.processAssurance(assurance)
@@ -384,8 +373,7 @@ func (n *NodeContent) RunRPCCommand() {
 var CurrentSlot = uint32(12)
 
 // process request
-func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error) {
-
+func (n *NodeContent) sendRequest(peer uint16, obj interface{}) (resp interface{}, err error) {
 	// Get the peer ID from the object
 	msgType := getMessageType(obj)
 	var peerID uint16
@@ -393,55 +381,13 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 		return nil, fmt.Errorf("unknown type: %s", msgType)
 	}
 	switch msgType {
-	case "DA_request":
-		req := obj.(DA_request)
-		peerID = req.ShardIndex
-		shard_hash := req.Hash
-		peer, err := n.getPeerByIndex(peerID)
-		if err != nil {
-			return resp, err
-		}
-		// handle selfRequesting case
-		isSelfRequesting := req.ShardIndex == uint16(n.id)
-		if isSelfRequesting {
-			value, ok := n.chunkMap.Load(req.Hash)
-			if !ok {
-				self_response := DA_response{
-					Hash:       shard_hash,
-					ShardIndex: peerID,
-					Data:       nil,
-				}
-				return self_response, fmt.Errorf("hash %v not found in chunkMap", req.Hash)
-			}
-			chunk := value.([]byte)
-			data := chunk
-			self_response := DA_response{
-				Hash:       shard_hash,
-				ShardIndex: peerID,
-				Data:       data,
-			}
-			return self_response, nil
-		}
-		data, shard_idx, err := peer.DA_Reconstruction(req)
-		if err != nil {
-			return resp, err
-		}
-		response := DA_response{
-			Hash:       shard_hash,
-			ShardIndex: shard_idx,
-			Data:       data,
-		}
-		return response, nil
 
 	case "CE128_request":
 		req := obj.(CE128_request)
-		peerID = req.ShardIndex
 		headerHash := req.HeaderHash
 		direction := req.Direction
 		maximumBlocks := req.MaximumBlocks
-		// handle selfRequesting case
-		isSelfRequesting := req.ShardIndex == uint16(n.id)
-		if isSelfRequesting {
+		if peerID == uint16(n.id) { // selfRequesting case
 			// no reason to even get here
 			return nil, fmt.Errorf("selfRequesting not supported")
 		}
@@ -455,7 +401,6 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 		}
 		response := CE128_response{
 			HeaderHash: headerHash,
-			ShardIndex: peerID,
 			Direction:  direction,
 			Blocks:     blocks,
 		}
@@ -463,12 +408,10 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 
 	case "CE138_request":
 		req := obj.(CE138_request)
-		peerID = req.ShardIndex
 		erasureRoot := req.ErasureRoot
 
 		// handle selfRequesting case
-		isSelfRequesting := req.ShardIndex == uint16(n.id)
-		if isSelfRequesting {
+		if peerID == uint16(n.id) {
 			log.Debug(debugDA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
 			bundleShard, sClub, encodedPath, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 			if err != nil {
@@ -476,7 +419,6 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 				return resp, err
 			}
 			self_response := CE138_response{
-				ShardIndex:    req.ShardIndex,
 				BundleShard:   bundleShard,
 				SClub:         sClub,
 				Justification: encodedPath,
@@ -514,8 +456,7 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 			return resp, err
 		}
 		// handle selfRequesting case
-		isSelfRequesting := req.ShardIndex == uint16(n.id)
-		if isSelfRequesting {
+		if req.ShardIndex == uint16(n.id) {
 			selected_segmentshards, selected_justifications, ok, err := n.GetSegmentShard_Assurer(erasureRoot, peerID, segmentIndices, false)
 			if err != nil {
 				return resp, err
@@ -551,7 +492,7 @@ func (n *NodeContent) sendRequest(obj interface{}) (resp interface{}, err error)
 }
 
 // internal makeRquest call with ctx implementation
-func (n *NodeContent) makeRequestInternal(ctx context.Context, obj interface{}) (interface{}, error) {
+func (n *NodeContent) makeRequestInternal(ctx context.Context, peerID uint16, obj interface{}) (interface{}, error) {
 
 	// Channel to receive the response or error
 	responseCh := make(chan interface{}, 1)
@@ -559,7 +500,7 @@ func (n *NodeContent) makeRequestInternal(ctx context.Context, obj interface{}) 
 
 	// Goroutine to handle the request
 	go func() {
-		response, err := n.sendRequest(obj)
+		response, err := n.sendRequest(peerID, obj)
 		if err != nil {
 			errCh <- err
 		} else {
@@ -589,7 +530,7 @@ func (n *NodeContent) makeRequestInternal(ctx context.Context, obj interface{}) 
 //	defer cancel()
 
 // plural makeRequest calls via makeRequestInternal, with a minSuccess required because cancelling other simantanteous req
-func (n *NodeContent) makeRequests(objs []interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([]interface{}, error) {
+func (n *NodeContent) makeRequests(objs map[uint16]interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([]interface{}, error) {
 	var wg sync.WaitGroup
 	results := make(chan interface{}, len(objs))
 	errorsCh := make(chan error, len(objs))
@@ -599,7 +540,7 @@ func (n *NodeContent) makeRequests(objs []interface{}, minSuccess int, singleTim
 	// Create a cancellable context -- this is the parent ctx
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
-	for _, obj := range objs {
+	for peerID, obj := range objs {
 		wg.Add(1)
 		go func(obj interface{}) {
 			defer wg.Done()
@@ -609,7 +550,7 @@ func (n *NodeContent) makeRequests(objs []interface{}, minSuccess int, singleTim
 			reqCtx, reqCancel := context.WithTimeout(ctx, singleTimeout)
 			defer reqCancel()
 
-			res, err := n.makeRequestInternal(reqCtx, obj)
+			res, err := n.makeRequestInternal(reqCtx, peerID, obj)
 			if err != nil {
 				errorsCh <- err
 				return

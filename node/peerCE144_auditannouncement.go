@@ -274,13 +274,14 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 	if err != nil {
 		return err
 	}
-	stream, err := p.openStream(CE144_AuditAnnouncement)
+	code := uint8(CE144_AuditAnnouncement)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
 
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,7 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 		Evidence = First Tranche Evidence (If tranche is 0) OR Subsequent Tranche Evidence (If tranche is not 0)
 	*/
 	if a.Announcement.Tranche == 0 {
-		err = sendQuicBytes(stream, a.Evidence_s0[:])
+		err = sendQuicBytes(stream, a.Evidence_s0[:], p.PeerID, code)
 		if err != nil {
 			return err
 		}
@@ -327,7 +328,7 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 			if err != nil {
 				return err
 			}
-			err = sendQuicBytes(stream, evBytes)
+			err = sendQuicBytes(stream, evBytes, p.PeerID, code)
 			if err != nil {
 				return err
 			}
@@ -352,6 +353,7 @@ func AnnouncementToNoShow(a *types.Announcement) (JAMSNPNoShow, error) {
 // TODO: Shawn CHECK
 func (n *Node) onAuditAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	defer stream.Close()
+	code := uint8(CE144_AuditAnnouncement)
 	var newReq JAMSNPAuditAnnouncement
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
@@ -385,7 +387,7 @@ func (n *Node) onAuditAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 	*/
 	if newReq.Tranche == 0 {
 		var evidence_s0 types.BandersnatchVrfSignature
-		req, err := receiveQuicBytes(stream)
+		req, err := receiveQuicBytes(stream, n.id, code)
 		if err != nil {
 			return err
 		}
@@ -396,7 +398,7 @@ func (n *Node) onAuditAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 		evidence_sn_no_show := make(map[common.Hash][]JAMSNPNoShow)
 		for _, r := range newReq.Reports {
 			var ev_not0 JAMSNPAuditAnnouncementNot0
-			req, err := receiveQuicBytes(stream)
+			req, err := receiveQuicBytes(stream, n.id, code)
 			if err != nil {
 				return err
 			}

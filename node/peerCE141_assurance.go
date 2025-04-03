@@ -88,13 +88,14 @@ func (p *Peer) SendAssurance(a *types.Assurance) (err error) {
 	if err != nil {
 		return err
 	}
-	stream, err := p.openStream(CE141_AssuranceDistribution)
+	code := uint8(CE141_AssuranceDistribution)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
 	// --> Assurance
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}

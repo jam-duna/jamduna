@@ -107,14 +107,15 @@ func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageA
 }
 
 func (p *Peer) SendPreimageAnnouncement(pa *types.PreimageAnnouncement) (err error) {
-	stream, err := p.openStream(CE142_PreimageAnnouncement)
+	code := uint8(CE142_PreimageAnnouncement)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
 	// --> Service ID ++ Hash ++ Preimage Length
 	paBytes, _ := pa.ToBytes()
-	err = sendQuicBytes(stream, paBytes)
+	err = sendQuicBytes(stream, paBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}
@@ -159,15 +160,16 @@ Node -> Node
 <-- FIN
 */
 func (p *Peer) SendPreimageRequest(preimageHash common.Hash) (preimage []byte, err error) {
-	stream, err := p.openStream(CE143_PreimageRequest)
+	code := uint8(CE143_PreimageRequest)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return preimage, err
 	}
-	err = sendQuicBytes(stream, preimageHash.Bytes())
+	err = sendQuicBytes(stream, preimageHash.Bytes(), p.PeerID, code)
 	if err != nil {
 		return preimage, err
 	}
-	preimage, err = receiveQuicBytes(stream)
+	preimage, err = receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		return preimage, err
 	}
@@ -185,7 +187,8 @@ func (n *NodeContent) onPreimageRequest(stream quic.Stream, msg []byte) (err err
 	if !ok {
 		return nil
 	}
-	err = sendQuicBytes(stream, preimage)
+	code := uint8(CE143_PreimageRequest)
+	err = sendQuicBytes(stream, preimage, n.id, code)
 	if err != nil {
 		return err
 	}

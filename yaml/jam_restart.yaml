@@ -1,0 +1,100 @@
+---
+- hosts: localhost
+  gather_facts: false
+  vars:
+    MODE: "{{ MODE | default('next_hour') }}"
+  tasks:
+    - name: Determine JAM_START_TIME based on mode
+      set_fact:
+        JAM_START_TIME: >-
+          {% if MODE == "next_hour" %}
+          {{ lookup('pipe', 'date -u -d "1 hour" +"+%Y-%m-%d %H:00:00"') }}
+          {% else %}
+          {{ lookup('pipe', 'date -u -d "45 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
+          {% endif %}
+    - name: Display JAM_START_TIME
+      debug:
+        var: JAM_START_TIME
+
+- hosts: all
+  serial: 1
+  become: true
+  vars:
+    NUM_NODES: 1
+    NETWORK: "tiny"
+    DEFAULT_PORT: 9900
+    JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jam"
+  tasks:
+    - name: Kill Jam
+      shell: "pkill -f '{{ JAM_PATH }}'"
+      ignore_errors: yes
+
+    - name: Remove Jam directory
+      file:
+        path: /root/.jam
+        state: absent
+
+    - name: Use the computed JAM_START_TIME
+      set_fact:
+        JAM_START_TIME: "{{ hostvars['localhost']['JAM_START_TIME'] }}"
+
+    - name: Display JAM_START_TIME on each host
+      debug:
+        msg: "Using JAM_START_TIME: {{ JAM_START_TIME }}"
+
+    - name: Create logs Directory
+      file:
+        path: /tmp/logs
+        state: directory
+        mode: 0755
+
+    - name: Copy binary jam from local to jam_hosts
+      copy: 
+        src: "{{ JAM_PATH }}"
+        dest: "{{ JAM_PATH }}"
+        mode: '0755'
+
+    - name: Run command in Instances
+      shell: |
+        echo "Using JAM_START_TIME: {{ JAM_START_TIME }}"
+        for i in $(seq 0 $(( {{ NUM_NODES }} - 1 ))); do
+          PORT=$(( {{ DEFAULT_PORT }} + i ));
+          echo "Starting instance $i on port $PORT..."
+          nohup {{ JAM_PATH }} -net_spec {{ NETWORK }} -port $PORT -start_time "{{ JAM_START_TIME }}" > /tmp/logs/jam_$PORT.log 2>&1 < /dev/null &
+          echo "Instance $i started with port $PORT";
+        done
+        sleep 2
+        pgrep -a jam
+      args: 
+        executable: /bin/bash  
+
+    - name: Display completion Message
+      debug:
+        msg: "All instances started."
+
+# - hosts: localhost
+#   gather_facts: false
+#   vars:
+#     ARCHIVE_NODE_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/archive_node"
+#     PEER_JSON: "/root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/peerlist/jam.json" #cmd/archive_node/peerlist/jam.json
+#   tasks:
+#     - name: Wait for all nodes to be ready
+#       wait_for:
+#         timeout: 10 
+
+#     - name: Start archive_node on localhost
+#       shell: |
+#         cd /root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/
+#         nohup make run > /tmp/logs/archive_node.log 2>&1 < /dev/null &
+#         echo "Archive node started."
+#       tags: restart_archive
+#       args:
+#         executable: /bin/bash
+
+#     - name: Display archive_node start message
+#       debug:
+#         msg: "archive_node started on localhost using 'make run' from archive_node directory."
+
+
+
+

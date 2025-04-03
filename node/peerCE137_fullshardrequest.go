@@ -98,25 +98,25 @@ func (p *Peer) SendFullShardRequest(erasureRoot common.Hash, shardIndex uint16) 
 	if err != nil {
 		return
 	}
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return
 	}
 
 	// <-- Bundle Shard
-	bundleShard, err = receiveQuicBytes(stream)
+	bundleShard, err = receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		return
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	concatSegmentShards, err = receiveQuicBytes(stream)
+	concatSegmentShards, err = receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		return
 	}
 
 	// <-- Justification
-	encodedPath, err = receiveQuicBytes(stream)
+	encodedPath, err = receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		return
 	}
@@ -144,20 +144,20 @@ func (n *Node) onFullShardRequest(stream quic.Stream, msg []byte) (err error) {
 	}
 
 	// <-- Bundle Shard
-	err = sendQuicBytes(stream, bundleShard)
+	err = sendQuicBytes(stream, bundleShard, n.id, CE137_FullShardRequest)
 	if err != nil {
 		fmt.Printf("onFullShardRequest ERR %v\n", err)
 		return err
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	err = sendQuicBytes(stream, exported_segments_and_proofpageShards)
+	err = sendQuicBytes(stream, exported_segments_and_proofpageShards, n.id, CE137_FullShardRequest)
 	if err != nil {
 		return err
 	}
 
 	// <-- Justification
-	err = sendQuicBytes(stream, encodedPath)
+	err = sendQuicBytes(stream, encodedPath, n.id, CE137_FullShardRequest)
 	if err != nil {
 		return err
 	}

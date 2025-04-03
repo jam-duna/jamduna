@@ -8,18 +8,25 @@ BRANCH ?= jam_update
 JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
-jam: ffi_force
+jam_with_ffi_build: ffi_force
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) $(SRC) 
-jam_without_ffi_build:
+jam:
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) $(SRC)
+tiny: jam
+	ansible-playbook -u root -i /root/go/src/github.com/colorfulnotion/jam/hosts.txt -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml 
 run_parallel_jam:
 	@mkdir -p logs 
 	@echo "Starting $(NUM_NODES) instances of bin/jam..."
 	@seq 0 $(shell echo $$(($(NUM_NODES) - 1))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); bin/jam -net_spec $(NETWORK) -port $$PORT -start_time "$(JAM_START_TIME)"; echo "Instance {} finished with port $$PORT"' sh
+	@echo "All instances started."
+run_parallel_jam_with_deadnode:
+	@mkdir -p logs 
+	@echo "Starting $(NUM_NODES) instances of bin/jam..."
+	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); bin/jam -net_spec $(NETWORK) -port $$PORT -start_time "$(JAM_START_TIME)"; echo "Instance {} finished with port $$PORT"' sh
 	@echo "All instances started."
 kill_parallel_jam:
 	@echo "Killing all instances of bin/jam..."

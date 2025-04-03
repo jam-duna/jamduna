@@ -91,12 +91,13 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 	if err != nil {
 		return err
 	}
-	stream, err := p.openStream(CE133_WorkPackageSubmission)
+	code := uint8(CE133_WorkPackageSubmission)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}

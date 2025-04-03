@@ -120,7 +120,7 @@ func encodeapi(objectType string, inp string) (string, error) {
 		err = json.Unmarshal(input, &kaiState)
 		obj = kaiState
 	case "C13":
-		var c13 statedb.ValidatorStatistics
+		var c13 types.ValidatorStatistics
 		err = json.Unmarshal(input, &c13)
 		obj = c13
 	case "C14":
@@ -236,7 +236,7 @@ func decodeapi(objectType, input string) (string, error) {
 	case "C12":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Kai_state{}))
 	case "C13":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.ValidatorStatistics{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.ValidatorStatistics{}))
 	case "C14":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
 	case "C15":

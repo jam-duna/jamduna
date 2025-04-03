@@ -70,28 +70,37 @@ func (n *NodeContent) GetAscendingBlockByHeader(headerHash common.Hash) (childBl
 	// child_<parentHash>_headerhash -> blockHash and potentially use "seek"
 	prefix := []byte("child_")
 	childStoreKey := append(prefix, headerHash[:]...)
-
+	// fmt.Printf("childe store key: %x\n", childStoreKey)
 	s, _ := n.GetStorage()
 	keyvals, rErr := s.ReadRawKVWithPrefix(childStoreKey)
 	if rErr != nil {
 		return nil, fmt.Errorf("Error reading childStoreKey: %v\n", rErr)
 	}
+	// for _, keyval := range keyvals {
+	// 	fmt.Printf("============================================\n")
+	// 	key := keyval[0]
+	// 	fmt.Printf("%x%x\n", key[:len(prefix)], key[len(prefix):])
+	// 	val := keyval[1]
+	// 	fmt.Printf("%x\n", val)
+	// }
 
+	log.Info(module, "GetAscendingBlockByHeader", "headerHash", headerHash, "keyvals", fmt.Sprintf("%v", keyvals))
 	// childBlks may contain forks !!!
 	childBlks = make([]*types.Block, 0)
-	for _, keyval := range keyvals {
-		strippedKey, err := stripPrefix(keyval[0], prefix)
-		if err != nil && len(strippedKey) != 64 {
-			fmt.Printf("Error stripping prefix: %v\n", err)
+	for i, keyval := range keyvals {
+		child_header_hash_byte, err := stripPrefix(keyval[0], childStoreKey)
+		if err != nil {
+			log.Error(module, "GetAscendingBlockByHeader - Error stripping prefix", "err", err, "keyval", common.Bytes2Hex(keyval[0]), "prefix", common.Bytes2Hex(prefix))
 			return nil, err
 		}
-		//headerHash := strippedKey[:32]
-		childHeaderHash := common.Hash(strippedKey[32:])
+		childHeaderHash := common.BytesToHash(child_header_hash_byte)
+		log.Info(module, "GetAscendingBlockByHeader", "i", i, "strippedKey", common.Bytes2Hex(child_header_hash_byte), "childHeaderHash", childHeaderHash)
 		childBlk, err := n.GetStoredBlockByHeader(childHeaderHash)
 		if err != nil {
-			fmt.Printf("Error getting child block: %v\n", err)
+			log.Error(module, "GetAscendingBlockByHeader: GetStoredBlockByHeader - Error getting child block", "err", err)
 			return nil, err
 		}
+		log.Info(module, "GetAscendingBlockByHeader - found child", "i", "childHeaderHash", childHeaderHash, "blk", childBlk.String())
 		childBlks = append(childBlks, &types.Block{
 			Header:    childBlk.Header,
 			Extrinsic: childBlk.Extrinsic,

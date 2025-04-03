@@ -28,16 +28,17 @@ Node -> Node
 */
 
 func (p *Peer) SendWorkReportRequest(workReportHash common.Hash) (workReport types.WorkReport, err error) {
-	stream, err := p.openStream(CE136_WorkReportRequest)
+	code := uint8(CE136_WorkReportRequest)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return workReport, err
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, workReportHash.Bytes())
+	err = sendQuicBytes(stream, workReportHash.Bytes(), p.PeerID, code)
 	if err != nil {
 		return workReport, err
 	}
-	workReportBytes, err := receiveQuicBytes(stream)
+	workReportBytes, err := receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		return workReport, err
 	}
@@ -62,7 +63,7 @@ func (n *NodeContent) onWorkReportRequest(stream quic.Stream, msg []byte) (err e
 		return nil
 	}
 
-	err = sendQuicBytes(stream, workReport.Bytes())
+	err = sendQuicBytes(stream, workReport.Bytes(), n.id, CE136_WorkReportRequest)
 	if err != nil {
 		return err
 	}

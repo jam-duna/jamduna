@@ -236,19 +236,20 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 	if err != nil {
 		return
 	}
-	stream, err := p.openStream(CE134_WorkPackageShare)
+	code := uint8(CE134_WorkPackageShare)
+	stream, err := p.openStream(code)
 	if err != nil {
 		err = fmt.Errorf("openStream[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 	// <-- Work Report Hash ++ Ed25519 Signature
-	respBytes, err := receiveQuicBytes(stream)
+	respBytes, err := receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		err = fmt.Errorf("receiveQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
@@ -351,7 +352,7 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, n.id, CE134_WorkPackageShare)
 	if err != nil {
 		return err
 	}

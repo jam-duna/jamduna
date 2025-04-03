@@ -367,18 +367,16 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 		now := time.Now().Unix()
 		second_per_epoch := types.SecondsPerEpoch // types.EpochLength
 		now = common.ComputeJCETime(now, true)
-		waitTime := int64(second_per_epoch) - now%int64(second_per_epoch)
+		waitTime := int64(second_per_epoch) - now%int64(second_per_epoch) // how far is next epoch (sec)
 		epoch0Timestamp := uint64(now) + uint64(waitTime)
 		epoch0Phase := uint64(now) / uint64(second_per_epoch)
 		log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
 
-		if types.TimeSavingMode && !(waitTime < 5) {
-			deDuctedTime := (time.Duration(-waitTime + 5)) * time.Second
+		if types.TimeSavingMode { //always be five second
+			deDuctedTime := (time.Duration(-waitTime + 5)) * time.Second                             // how much time we have to deduct
 			driftTime := (time.Duration(int64(epoch0Phase) * int64(second_per_epoch))) * time.Second // adjust it to e'=1,m'=00
 			adjustedTime := deDuctedTime
-			if types.TimeSavingMode {
-				adjustedTime += driftTime
-			}
+			adjustedTime += driftTime
 			common.AddJamStart(adjustedTime)
 			currTS := time.Now().Unix()
 			now = common.ComputeJCETime(currTS, true)
@@ -387,6 +385,13 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 		}
 		log.Trace(module, "NewEpoch0Timestamp", "NewGenesisConfig epoch0Timestamp", epoch0Timestamp, "Wait", uint64(waitTime))
 		return uint32(epoch0Timestamp)
+	} else if test_name[0] == "jamtestnet" { // make sure the timestamp is 72
+		now := time.Now().Unix()
+		second_per_epoch := types.SecondsPerEpoch
+		adjustedTime := time.Duration(now - int64(second_per_epoch))
+		common.AddJamStart(adjustedTime)
+		now = common.ComputeJCETime(now, true)
+		return uint32(now)
 	} else {
 		now := time.Now().Unix()
 		second_per_epoch := types.SecondsPerEpoch // types.EpochLength

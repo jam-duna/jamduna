@@ -122,12 +122,13 @@ func (p *Peer) SendJudgmentPublication(epoch uint32, j types.Judgement) (err err
 	if err != nil {
 		return err
 	}
-	stream, err := p.openStream(CE145_JudgmentPublication)
+	code := uint8(CE145_JudgmentPublication)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}

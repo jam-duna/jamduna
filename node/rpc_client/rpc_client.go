@@ -19,7 +19,7 @@ func main() {
 	//port := flag.Int("port", 21100, "port to connect to RPC server")
 	flag.Parse()
 
-	client, err := rpc.Dial("tcp", "localhost:14570")
+	client, err := rpc.Dial("tcp", "localhost:11100")
 	if err != nil {
 		fmt.Println("❌ Failed to connect to RPC server:", err)
 		return

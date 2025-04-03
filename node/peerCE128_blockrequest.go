@@ -95,17 +95,19 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 	if err != nil {
 		return blocks, err
 	}
-	stream, err := p.openStream(CE128_BlockRequest)
+	code := uint8(CE128_BlockRequest)
+	stream, err := p.openStream(code)
 	if err != nil {
 		return blocks, err
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes)
+
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
-		log.Crit(module, "SendBlockRequest", "p", p.String(), "err", err)
+		log.Error(module, "SendBlockRequest", "p", p.String(), "err", err)
 	}
 
-	respBytes, err := receiveQuicBytes(stream)
+	respBytes, err := receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		fmt.Printf("%s SendBlockRequest ERR2 %v\n", p.String(), err)
 		return blocks, err
@@ -122,7 +124,7 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 	return blocks, nil
 }
 
-func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte) (err error) {
+func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	var newReq JAMSNPBlockRequest
 	defer stream.Close()
 	// Deserialize byte array back into the struct
@@ -134,15 +136,15 @@ func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte) (err error)
 	// read the request and response with a set of blocks
 	blocks, ok, err := n.BlocksLookup(newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
 	if err != nil {
-		fmt.Printf("%s onBlockRequest (headerHash=%v)  BlocksLookup ERR %v\n", n.String(), newReq.HeaderHash, err)
+		log.Error(module, "onBlockRequest", "headerHash", newReq.HeaderHash, "err", err)
 		return err
 	}
 	if !ok {
-		panic(314)
+		log.Error(module, "onBlockRequest NOT OK", "headerHash", newReq.HeaderHash, "direction", newReq.Direction)
 		return nil
 	}
+	log.Info(module, "***** onBlockRequest incoming ", "peerID", peerID, "ok", ok, "HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks, "len(blocks)", len(blocks))
 	var blockBytes []byte
-
 	blockBytes, err = types.Encode(blocks)
 	if err != nil {
 		return err
@@ -153,15 +155,9 @@ func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte) (err error)
 		fmt.Printf("%s SendBlockRequest ERR3 %v\n", n.String(), err)
 		return err
 	}
-	/*
-		checkBlock := c.(types.Block)
-		checkheaderHash := checkBlock.Header.Hash()
-		if checkheaderHash != newReq.HeaderHash {
-			panic(9999)
-		}
-	*/
+
 	// CHECK BLOCK if the blockbytes we sent are decodable and equal the headerhash
-	err = sendQuicBytes(stream, blockBytes)
+	err = sendQuicBytes(stream, blockBytes, n.id, CE128_BlockRequest)
 	if err != nil {
 		fmt.Printf("%s onBlockRequest ERR %v", n.String(), err)
 		return err

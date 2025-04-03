@@ -120,13 +120,14 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 	if err != nil {
 		return err
 	}
-	stream, err := p.openStream(CE129_StateRequest)
+	code := uint8(CE129_StateRequest)
+	stream, err := p.openStream(code)
 	// --> Header Hash ++ Start Key ++ End Key ++ Maximum Size
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}
@@ -155,10 +156,10 @@ func (n *NodeContent) onStateRequest(stream quic.Stream, msg []byte) (err error)
 
 	}
 	//<-- [Boundary Node]
-	err = sendQuicBytes(stream, common.ConcatenateByteSlices(boundarynodes))
+	err = sendQuicBytes(stream, common.ConcatenateByteSlices(boundarynodes), n.id, CE129_StateRequest)
 	//<-- [Key ++ Value]
 	kvbytes, err := keyvalues.ToBytes()
-	err = sendQuicBytes(stream, kvbytes)
+	err = sendQuicBytes(stream, kvbytes, n.id, CE129_StateRequest)
 
 	// <-- FIN
 	return

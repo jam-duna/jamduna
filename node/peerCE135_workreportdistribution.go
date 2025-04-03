@@ -117,7 +117,14 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, credentials []types.GuaranteeCredential) (err error) {
-	stream, err := p.openStream(CE135_WorkReportDistribution)
+	code := uint8(CE135_WorkReportDistribution)
+	stream, err := p.openStream(code)
+	if err != nil {
+		if stream != nil {
+			stream.Close()
+		}
+		return err
+	}
 	defer stream.Close()
 
 	if p.node.store.SendTrace {
@@ -137,7 +144,7 @@ func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, cred
 	if err != nil {
 		return err
 	}
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}
@@ -150,7 +157,7 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
-		log.Crit(debugG, "onWorkReportDistribution", "err", err)
+		log.Error(debugG, "onWorkReportDistribution", "err", err)
 		return
 	}
 

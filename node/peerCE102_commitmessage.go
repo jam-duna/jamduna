@@ -19,7 +19,7 @@ func (p *Peer) SendCommitMessage(req grandpa.CommitMessage) error {
 	if err != nil {
 		return err
 	}
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}

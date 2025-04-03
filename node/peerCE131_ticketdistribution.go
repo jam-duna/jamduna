@@ -108,12 +108,12 @@ func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool
 	}
 	stream, err := p.openStream(code)
 	if err != nil {
-		fmt.Printf("SendTicketDistribution ERR %v\n", err)
+		// fmt.Printf("SendTicketDistribution ERR %v\n", err)
 		return err
 	}
 	defer stream.Close()
 	// TODO: proper treatment of Proxy
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}

@@ -143,3 +143,8 @@ func (v ValidatorStatistics) MarshalJSON() ([]byte, error) {
 	trueStatistics.ServiceStatics.Sort()
 	return json.Marshal(trueStatistics)
 }
+
+func (v *ValidatorStatistics) String() string {
+
+	return ToJSON(v)
+}

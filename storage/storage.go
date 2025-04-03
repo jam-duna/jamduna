@@ -110,12 +110,14 @@ func (store *StateDBStorage) ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, er
 	defer iter.Release()
 
 	var keyvals [][2][]byte
-	for iter.Next() {
+
+	for iter.Seek(prefix); iter.Valid(); iter.Next() {
 		key := iter.Key()
-		if len(key) >= len(prefix) && string(key[:len(prefix)]) == string(prefix) {
-			keyval := [2][]byte{key, iter.Value()}
-			keyvals = append(keyvals, keyval)
+		if !bytes.HasPrefix(key, prefix) {
+			break
 		}
+		keyval := [2][]byte{append([]byte{}, key...), append([]byte{}, iter.Value()...)}
+		keyvals = append(keyvals, keyval)
 	}
 	if err := iter.Error(); err != nil {
 		return nil, fmt.Errorf("ReadRawKVWithPrefix %v Err: %v", prefix, err)

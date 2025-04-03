@@ -146,36 +146,42 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_st
 	return &rho_state, nil
 }
 
-var MethodDiscriptionMap = map[string]string{
-	"GetFunctions":             "GetFunctions() -> functions description",
-	"NodeCommand":              "NodeCommand(command string) -> will pass the command to the node",
-	"GetBlockByHash":           "GetBlockByHash(headerHash hexstring) -> string",
-	"GetBlockBySlot":           "GetBlockBySlot(slot string) -> string",
-	"GetState":                 "GetState(headerHash hexstring) -> string",
-	"GetService":               "GetService(serviceIndex string) -> string",
-	"GetServicePreimage":       "GetServicePreimage(serviceIndex string, preimage hexstring) -> hexstring",
-	"GetServiceLookup":         "GetServiceLookup(serviceIndex string, preimage hexstring, length string) -> json string",
-	"GetServiceStorage":        "GetServiceStorage(serviceIndex string, key hexstring) -> hexstring",
-	"GetServiceCode":           "GetServiceCode(serviceIndex string) -> json string",
-	"SendPreimageAnnouncement": "SendPreimageAnnouncement(serviceIndex string, preimage hexstring) -> string",
-	"GetWorkPackageByHash":     "GetWorkPackageByHash(workPackageHash string) -> json WorkReport",
-	"AuditWorkPackageByHash":   "AuditWorkPackageByHash(workPackageHash string) -> json WorkReport",
-	"GetSegment":               "GetSegment(requestedHash string, index int) -> hex string",
-	"NewService":               "NewService(serviceName string) -> string",
-	"Encode":                   "Encode(objectType string, input string) -> hexstring",
-	"Decode":                   "Decode(objectType string, input string) -> json string",
+var MethodDescriptionMap = map[string]string{
+	"Functions":        "Functions() -> functions description",
+	"NodeCommand":      "NodeCommand(command string) -> will pass the command to the node",
+	"Block":            "Block(headerHash hexstring) -> string",
+	"BestBlock":        "BestBlock(headerHash hexstring) -> string",
+	"FinalizedBlock":   "FinalizedBlock(headerHash hexstring) -> string",
+	"Parent":           "Parent(headerHash hexstring) -> string",
+	"StateRoot":        "StateRoot(headerHash hexstring) -> string",
+	"BeefyRoot":        "BeefyRoot(headerHash hexstring) -> string",
+	"State":            "State(headerHash hexstring) -> string",
+	"Statistics":       "Statistics(headerHash hexstring) -> string",
+	"ServiceInfo":      "ServiceInfo(serviceIndex string) -> string",
+	"ServicePreimage":  "ServicePreimage(serviceIndex string, preimage hexstring) -> hexstring",
+	"ServiceRequest":   "ServiceRequest(serviceIndex string, preimage hexstring, length string) -> json string",
+	"SubmitPreimage":   "SubmitPreimage(serviceIndex string, preimage hexstring) -> string",
+	"ServiceValue":     "ServiceRequest(serviceIndex string, key hexstring) -> hexstring",
+	"WorkPackage":      "WorkPackage(workPackageHash string) -> json WorkReport",
+	"GetServiceCode":   "GetServiceCode(serviceIndex string) -> json string",
+	"ListServices":     "ListServices(serviceIndex string) -> json string",
+	"AuditWorkPackage": "AuditWorkPackage(workPackageHash string) -> json WorkReport",
+	"Segment":          "GetSegment(requestedHash string, index int) -> hex string",
+	"NewService":       "NewService(serviceName string) -> string",
+	"Encode":           "Encode(objectType string, input string) -> hexstring",
+	"Decode":           "Decode(objectType string, input string) -> json string",
 }
 
-func (j *Jam) GetFunctions(req []string, res *string) error {
+func (j *Jam) Functions(req []string, res *string) error {
 	*res = ""
 	maxKeyLen := 0
-	for k := range MethodDiscriptionMap {
+	for k := range MethodDescriptionMap {
 		if len(k) > maxKeyLen {
 			maxKeyLen = len(k)
 		}
 	}
 	format := fmt.Sprintf("%%-%ds: %%s\n", maxKeyLen)
-	for k, v := range MethodDiscriptionMap {
+	for k, v := range MethodDescriptionMap {
 		*res += fmt.Sprintf(format, k, v)
 	}
 	return nil
@@ -223,7 +229,7 @@ func (j *Jam) AddPreimage(preimage []byte, res *common.Hash) error {
 	return nil
 }
 
-func (j *Jam) GetBlockByHash(req []string, res *string) error {
+func (j *Jam) Block(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
 	}
@@ -234,13 +240,13 @@ func (j *Jam) GetBlockByHash(req []string, res *string) error {
 
 	switch input {
 	case "latest":
-		slot := j.NodeContent.GetLatestBlockSlot()
+		slot := j.NodeContent.getLatestFinalizedBlockSlot()
 		block, err = j.NodeContent.GetStoredBlockBySlot(slot)
 		if err != nil {
 			return fmt.Errorf("failed to get latest block by slot %d: %w", slot, err)
 		}
 	case "best":
-		slot := j.NodeContent.GetBestBlockSlot()
+		slot := j.NodeContent.getBestBlockSlot()
 		block, err = j.NodeContent.GetStoredBlockBySlot(slot)
 		if err != nil {
 			return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
@@ -257,35 +263,64 @@ func (j *Jam) GetBlockByHash(req []string, res *string) error {
 	return nil
 }
 
-func (n *NodeContent) GetLatestBlockSlot() uint32 {
+func (j *Jam) FinalizedBlock(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
+	}
+
+	var block *types.SBlock // Replace 'Block' with the actual type returned by your methods.
+	var err error
+
+	slot := j.NodeContent.getBestBlockSlot()
+	block, err = j.NodeContent.GetStoredBlockBySlot(slot)
+	if err != nil {
+		return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
+	}
+
+	*res = block.Header.Hash().String()
+	return nil
+}
+
+func (j *Jam) BestBlock(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
+	}
+
+	var block *types.SBlock // Replace 'Block' with the actual type returned by your methods.
+	var err error
+
+	slot := j.NodeContent.getBestBlockSlot()
+	block, err = j.NodeContent.GetStoredBlockBySlot(slot)
+	if err != nil {
+		return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
+	}
+
+	*res = block.Header.Hash().String()
+	return nil
+}
+
+func (n *NodeContent) getLatestFinalizedBlockSlot() uint32 {
 	n.statedbMutex.Lock()
 	defer n.statedbMutex.Unlock()
 	return n.statedb.GetTimeslot()
 }
 
-func (n *NodeContent) GetBestBlockSlot() uint32 {
-	return n.GetLatestBlockSlot()
+func (n *NodeContent) getBestBlockSlot() uint32 {
+	return n.getLatestFinalizedBlockSlot()
 }
 
-func (j *Jam) GetBlockBySlot(req []string, res *string) error {
+func (j *Jam) BlockBySlot(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
 	}
 
 	var slot uint32
 	input := req[0]
-	switch input {
-	case "latest":
-		slot = j.NodeContent.GetLatestBlockSlot()
-	case "best":
-		slot = j.NodeContent.GetBestBlockSlot()
-	default:
-		parsed, err := strconv.ParseUint(input, 10, 32)
-		if err != nil {
-			return fmt.Errorf("invalid slot value %q: %w", input, err)
-		}
-		slot = uint32(parsed)
+	parsed, err := strconv.ParseUint(input, 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid slot value %q: %w", input, err)
 	}
+	slot = uint32(parsed)
 
 	block, err := j.NodeContent.GetStoredBlockBySlot(slot)
 	if err != nil {
@@ -295,7 +330,7 @@ func (j *Jam) GetBlockBySlot(req []string, res *string) error {
 	return nil
 }
 
-func (j *Jam) GetState(req []string, res *string) error {
+func (j *Jam) State(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
 	}
@@ -305,14 +340,14 @@ func (j *Jam) GetState(req []string, res *string) error {
 
 	switch input {
 	case "latest":
-		slot := j.NodeContent.GetLatestBlockSlot()
+		slot := j.NodeContent.getLatestFinalizedBlockSlot()
 		block, err := j.NodeContent.GetStoredBlockBySlot(slot)
 		if err != nil {
 			return fmt.Errorf("failed to get latest block by slot %d: %w", slot, err)
 		}
 		headerHash = block.Header.Hash()
 	case "best":
-		slot := j.NodeContent.GetBestBlockSlot()
+		slot := j.NodeContent.getBestBlockSlot()
 		block, err := j.NodeContent.GetStoredBlockBySlot(slot)
 		if err != nil {
 			return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
@@ -330,6 +365,41 @@ func (j *Jam) GetState(req []string, res *string) error {
 	return nil
 }
 
+func (j *Jam) Statistics(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
+	}
+
+	input := req[0]
+	var headerHash common.Hash
+
+	switch input {
+	case "latest":
+		slot := j.NodeContent.getLatestFinalizedBlockSlot()
+		block, err := j.NodeContent.GetStoredBlockBySlot(slot)
+		if err != nil {
+			return fmt.Errorf("failed to get latest block by slot %d: %w", slot, err)
+		}
+		headerHash = block.Header.Hash()
+	case "best":
+		slot := j.NodeContent.getBestBlockSlot()
+		block, err := j.NodeContent.GetStoredBlockBySlot(slot)
+		if err != nil {
+			return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
+		}
+		headerHash = block.Header.Hash()
+	default:
+		headerHash = common.HexToHash(input)
+	}
+
+	sdb, ok := j.getStateDBByHeaderHash(headerHash)
+	if !ok {
+		return fmt.Errorf("state not found for header hash %s", headerHash.String())
+	}
+	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).ValidatorStatistics.String()
+	return nil
+}
+
 func (j *Jam) GetLatestState(req []string, res *string) error {
 	if len(req) != 0 {
 		return fmt.Errorf("Invalid number of arguments")
@@ -339,7 +409,7 @@ func (j *Jam) GetLatestState(req []string, res *string) error {
 	return nil
 }
 
-func (j *Jam) GetService(req []string, res *string) error {
+func (j *Jam) ServiceInfo(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -359,7 +429,7 @@ func (j *Jam) GetService(req []string, res *string) error {
 	return nil
 }
 
-func (j *Jam) GetServiceCode(req []string, res *string) error {
+func (j *Jam) Code(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -396,7 +466,7 @@ type ServiceCodeResponse struct {
 	//Optional parameters return the history of code.
 }
 
-func (j *Jam) GetServicePreimage(req []string, res *string) error {
+func (j *Jam) ServicePreimage(req []string, res *string) error {
 	if len(req) != 2 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -416,7 +486,7 @@ func (j *Jam) GetServicePreimage(req []string, res *string) error {
 }
 
 // req = [serviceIndex, preimage hash]
-func (j *Jam) GetServiceLookup(req []string, res *string) error {
+func (j *Jam) ServiceRequest(req []string, res *string) error {
 	if len(req) != 3 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -448,7 +518,7 @@ func (j *Jam) GetServiceLookup(req []string, res *string) error {
 }
 
 // req = [serviceIndex, preimage hash]
-func (j *Jam) GetServiceStorage(req []string, res *string) error {
+func (j *Jam) ServiceValue(req []string, res *string) error {
 	if len(req) != 2 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -487,7 +557,7 @@ func (n *NodeContent) getSegments(requestedHash common.Hash, index []uint16) (se
 }
 
 // GetWorkPackageByHash(workPackageHash string) -> json WorkReport
-func (j *Jam) GetWorkPackageByHash(req []string, res *string) error {
+func (j *Jam) WorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -503,7 +573,7 @@ func (j *Jam) GetWorkPackageByHash(req []string, res *string) error {
 }
 
 // AuditWorkPackageByHash(workPackageHash string) -> json WorkReport
-func (j *Jam) AuditWorkPackageByHash(req []string, res *string) error {
+func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -541,7 +611,7 @@ func (j *Jam) AuditWorkPackageByHash(req []string, res *string) error {
 }
 
 // GetSegment(requestedHash string, index int) -> hex string
-func (j *Jam) GetSegment(req []string, res *string) (err error) {
+func (j *Jam) Segment(req []string, res *string) (err error) {
 	if len(req) != 2 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -579,7 +649,7 @@ func (j *Jam) GetSegment(req []string, res *string) (err error) {
 	return nil
 }
 
-func (j *Jam) SendPreimageAnnouncement(req []string, res *string) error {
+func (j *Jam) SubmitPreimage(req []string, res *string) error {
 	if len(req) != 2 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -608,7 +678,26 @@ func (j *Jam) SendPreimageAnnouncement(req []string, res *string) error {
 	return nil
 }
 
-func (j *Jam) SendWorkPackage(req []string, res *string) error {
+func (j *Jam) QueryAscendingBlocks(req []string, res *string) error {
+	if len(req) == 1 {
+		// get number from req
+		num, err := strconv.Atoi(req[0])
+		if err != nil {
+			return fmt.Errorf("Invalid number of arguments")
+		}
+		// get the latest block
+		blocks, err := j.peersInfo[3].SendBlockRequest(genesisBlockHash, 0, uint32(num))
+		if err != nil {
+			*res = fmt.Sprintf("block not found err=%v", err)
+		}
+		// convert to json
+		*res = types.ToJSON(blocks)
+		return nil
+	}
+	return fmt.Errorf("Invalid number of arguments")
+}
+
+func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
@@ -646,6 +735,14 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 
 	// json marshal the refine context
 	*res = refinecontext.String()
+	return nil
+}
+
+func (j *Jam) ListServices(req []string, res *string) error {
+	if len(req) != 0 {
+		return fmt.Errorf("Invalid number of arguments")
+	}
+	// TODO
 	return nil
 }
 
@@ -714,8 +811,8 @@ func (j *Jam) NewService(req []string, res *string) error {
 			*res = err.Error()
 			return err
 		}
-	case <-time.After(10 * time.Second):
-		fmt.Println("SendWorkPackageSubmission timed out")
+	case <-time.After(2 * time.Second):
+		// fmt.Println("SendWorkPackageSubmission timed out")
 		*res = "SendWorkPackageSubmission timed out"
 		return fmt.Errorf("SendWorkPackageSubmission timed out")
 	}

@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -99,9 +100,10 @@ type NodeContent struct {
 
 	epoch0Timestamp uint32
 	// Jamweb
-	hub       *Hub
-	tlsConfig *tls.Config
-	store     *storage.StateDBStorage
+	hub             *Hub
+	tlsConfig       *tls.Config
+	clientTLSConfig *tls.Config
+	store           *storage.StateDBStorage
 	// holds a map of the hash to the stateDB
 	statedbMap      map[common.Hash]*statedb.StateDB
 	statedbMapMutex sync.Mutex
@@ -269,7 +271,9 @@ When a block is authored, we take the latest block identified by some parenthash
 */
 
 func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.PrivateKey) (tls.Certificate, error) {
-	// Create a self-signed certificate
+	b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
+	san := "e" + strings.ToLower(b32.EncodeToString(ed25519_pub))
+
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
@@ -277,31 +281,26 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 		},
 		NotBefore: time.Now(),
 		NotAfter:  time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{
-			x509.ExtKeyUsageServerAuth,
-		},
-		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+
+		DNSNames: []string{san},
 	}
 
+	// Create self-signed certificate
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, ed25519_pub, ed25519_priv)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
 
-	// PEM encode the certificate
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-
-	// Convert a generated ed25519 key into a PEM block
 	privKeyBytes, err := x509.MarshalPKCS8PrivateKey(ed25519_priv)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-
-	// PEM encode the private key
 	privKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privKeyBytes})
 
-	// Load the certificate
 	return tls.X509KeyPair(certPEM, privKeyPEM)
 }
 
@@ -439,43 +438,100 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		connectedPeers: make(map[uint16]bool),
 	}
+
+	block := statedb.NewBlockFromFile(genesisBlockFile)
+	genesisBlockHash = block.Header.HeaderHash()
+	//jamnp-s/V/H/builder. Here V is the protocol version, 0, and H is the first 8 nibbles of the hash of the chain's genesis header, in lower-case hexadecimal.
+	alpn_builder := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4])) + "/builder"
+	alpn := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4]))
+	fmt.Printf("[N%v] ALPN: %s\n", id, alpn)
 	node.node_name = fmt.Sprintf("jam-%d", id)
+
 	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		ClientAuth:         tls.RequireAnyClientCert,
-		InsecureSkipVerify: true,
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAnyClientCert,
+		NextProtos:   []string{alpn},
 		GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) {
+			remoteAddr := info.Conn.RemoteAddr().String()
 			return &tls.Config{
 				Certificates:       []tls.Certificate{cert},
 				ClientAuth:         tls.RequireAnyClientCert,
+				NextProtos:         []string{alpn, alpn_builder},
 				InsecureSkipVerify: true,
-				VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 					if len(rawCerts) == 0 {
-						return fmt.Errorf("no client certificate provided")
+						err := fmt.Errorf("no client certificate provided")
+						log.Error(module, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "err", err)
+						return err
 					}
 					cert, err := x509.ParseCertificate(rawCerts[0])
 					if err != nil {
-						return fmt.Errorf("failed to parse client certificate: %v", err)
+						err := fmt.Errorf("failed to parse client certificate: %v", err)
+						log.Error(module, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "err", err)
+						return err
 					}
 					pubKey, ok := cert.PublicKey.(ed25519.PublicKey)
 					if !ok {
-						return fmt.Errorf("client public key is not Ed25519")
+						err := fmt.Errorf("client public key is not Ed25519")
+						log.Error(module, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "err", err)
+						return err
+					}
+					b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
+					expectedSAN := "e" + strings.ToLower(b32.EncodeToString(pubKey))
+					if len(cert.DNSNames) != 1 || cert.DNSNames[0] != expectedSAN {
+						err := fmt.Errorf("SAN mismatch: expected %s, got %v", expectedSAN, cert.DNSNames)
+						log.Error(module, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "err", err)
+						return err
 					}
 					node.clientsMutex.Lock()
-					node.clients[info.Conn.RemoteAddr().String()] = hex.EncodeToString(pubKey)
+					node.clients[remoteAddr] = hex.EncodeToString(pubKey)
 					node.clientsMutex.Unlock()
+					log.Trace(module, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "pubKey", hex.EncodeToString(pubKey))
 					return nil
 				},
-				NextProtos: []string{"h3", "http/1.1", "ping/1.1"},
 			}, nil
 		},
-		NextProtos: []string{"h3", "http/1.1", "ping/1.1"},
 	}
 	node.tlsConfig = tlsConfig
 
+	clientTLS := &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				err := fmt.Errorf("no server certificate provided")
+				log.Error(module, "VerifyPeerCertificate2", "err", err)
+				return err
+			}
+			cert, err := x509.ParseCertificate(rawCerts[0])
+			if err != nil {
+				err := fmt.Errorf("failed to parse server certificate: %v", err)
+				log.Error(module, "VerifyPeerCertificate2", "err", err)
+				return err
+			}
+			pubKey, ok := cert.PublicKey.(ed25519.PublicKey)
+			if !ok {
+				err := fmt.Errorf("server public key is not Ed25519")
+				log.Error(module, "VerifyPeerCertificate2", "err", err)
+				return err
+			}
+			b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
+			expectedSAN := "e" + strings.ToLower(b32.EncodeToString(pubKey))
+			if len(cert.DNSNames) != 1 || cert.DNSNames[0] != expectedSAN {
+				err := fmt.Errorf("SAN mismatch: expected %s, got %v", expectedSAN, cert.DNSNames)
+				log.Error(module, "VerifyPeerCertificate2", "pubKey", pubKey, "expectedSAN", expectedSAN, "cert.DNSNames", cert.DNSNames, "err", err)
+				return err
+			}
+			//log.Info(module, "VerifyPeerCertificate2 SUCCESS", "expectedSAN", expectedSAN, "cert.DNSNames", cert.DNSNames)
+			return nil
+		},
+		NextProtos: []string{alpn},
+	}
+	node.clientTLSConfig = clientTLS
+
 	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
 	if err != nil {
-		fmt.Printf("ERR %v\n", err)
+		log.Error(module, "quic.ListenAddr", "err", err)
 		return nil, err
 	}
 	node.server = *listener
@@ -484,7 +540,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
 	}
 
-	block := statedb.NewBlockFromFile(genesisBlockFile)
 	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
 	_statedb.Block = block
 	_statedb.HeaderHash = block.Header.Hash()
@@ -781,19 +836,24 @@ func (n *Node) lookupPubKey(pubKey string) (uint16, bool) {
 
 func (n *Node) handleConnection(conn quic.Connection) {
 	remoteAddr := conn.RemoteAddr().String()
-
+	log.Trace(module, "handleConnection", "remoteAddr", remoteAddr)
+	host, port, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		log.Error(module, "handleConnection", "remoteAddr", remoteAddr, "host", host, "port", port)
+		return
+	}
 	n.clientsMutex.Lock()
 	pubKey, ok := n.clients[remoteAddr]
 	n.clientsMutex.Unlock()
 
 	if !ok {
-		fmt.Printf("handleConnection: UNKNOWN remoteAddr=%s unknown\n", remoteAddr)
+		log.Warn(module, "handleConnection DROPPING - not found in n.client", "remoteAddr", remoteAddr)
 		return
 	}
 
 	validatorIndex, ok := n.lookupPubKey(pubKey)
 	if !ok {
-		fmt.Printf("handleConnection: Non-Validator pubkey %s from remoteAddr=%s\n", pubKey, remoteAddr)
+		log.Info(module, "handleConnection - found n.clients but unknown pubkey", "remoteAddr", remoteAddr, "port", port, "pubKey", pubKey)
 		validatorIndex = 9999
 		// remoteAddr change the port to 13000
 		// see how many number from the end
@@ -802,18 +862,21 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			panic(err)
 		}
 		newAddr := net.JoinHostPort(host, "13370")
-		fmt.Printf("change port to %s\n", newAddr)
 		if _, ok := n.peersInfo[validatorIndex]; !ok {
 			n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
+			log.Info(module, "handleConnection: Non-Validator peer", "validatorIndex", validatorIndex, "pubKey", pubKey, "remoteAddr", remoteAddr, "newAddr", newAddr)
 		} else {
 			for {
 				validatorIndex++
 				if _, ok := n.peersInfo[validatorIndex]; !ok {
 					n.peersInfo[validatorIndex] = NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
+					log.Info(module, "handleConnection: Non-Validator peer", "validatorIndex", validatorIndex, "pubKey", pubKey, "remoteAddr", remoteAddr, "newAddr", newAddr)
 					break
 				}
 			}
 		}
+	} else {
+		log.Trace(module, "handleConnection - KNOWN pubkey", "validatorIndex", validatorIndex, "remoteAddr", remoteAddr, "port", port, "pubKey", pubKey)
 	}
 
 	for {
@@ -823,6 +886,9 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			break
 		}
 		atomic.AddInt64(&n.totalIncomingStreams, 1)
+		if validatorIndex == TestPeerID {
+			log.Info(module, "handleConnection: Added new stream", "validatorIndex", validatorIndex, "totalIncomingStreams", n.totalIncomingStreams)
+		}
 		go func() {
 			defer func() {
 				atomic.AddInt64(&n.totalIncomingStreams, -1)
@@ -835,7 +901,6 @@ func (n *Node) handleConnection(conn quic.Connection) {
 func (n *Node) broadcast(obj interface{}) []byte {
 	result := []byte{}
 	objType := reflect.TypeOf(obj)
-	var wg sync.WaitGroup
 	for id, p := range n.peersInfo {
 
 		if id > types.TotalValidators {
@@ -844,13 +909,13 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				b := obj.(types.Block)
 				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
 				if err != nil {
-					log.Error(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "err", err)
+					log.Error(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
 				}
 				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
 				if err != nil {
 					log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
 				}
-				err = sendQuicBytes(up0_stream, block_a_bytes)
+				err = sendQuicBytes(up0_stream, block_a_bytes, id, CE128_BlockRequest) // ?
 				if err != nil {
 					if id > types.TotalValidators {
 						n.UP0_streamMu.Lock()
@@ -878,30 +943,32 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			}
 		}
 
-		wg.Add(1)
 		go func(id uint16, p *Peer) {
-			defer wg.Done()
 			switch objType {
 			case reflect.TypeOf(types.Ticket{}):
 				t := obj.(types.Ticket)
 				epoch := uint32(0) // TODO: Shawn
 				err := p.SendTicketDistribution(epoch, t, false)
 				if err != nil {
-					log.Error(debugStream, "SendTicketDistribution", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", p.PeerID, "err", err)
+					return
 				}
 			case reflect.TypeOf(types.Block{}):
 				b := obj.(types.Block)
 				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
 				if err != nil {
-					log.Error(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "err", err)
+					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
+					return
 				}
 				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
 				if err != nil {
-					log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
+					log.Warn(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
+					return
 				}
-				err = sendQuicBytes(up0_stream, block_a_bytes)
+				err = sendQuicBytes(up0_stream, block_a_bytes, id, CE128_BlockRequest)
 				if err != nil {
-					log.Error(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
+					return
 				}
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
@@ -934,12 +1001,6 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				if err != nil {
 					log.Error(debugStream, "SendPreimageAnnouncement", "n", n.String(), "err", err)
 				}
-			case reflect.TypeOf([]DADistributeECChunk{}):
-				distributeECChunks := obj.([]DADistributeECChunk)
-				err := p.SendDistributionECChunks(distributeECChunks[id])
-				if err != nil {
-					log.Error(debugStream, "SendDistributionECChunks", "n", n.String(), "err", err)
-				}
 			case reflect.TypeOf(grandpa.VoteMessage{}):
 				vote := obj.(grandpa.VoteMessage)
 				err := p.SendVoteMessage(vote)
@@ -955,8 +1016,6 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			}
 		}(id, p)
 	}
-
-	wg.Wait()
 	return result
 }
 
@@ -1001,15 +1060,14 @@ func (n *Node) fetchBlocks(headerHash common.Hash, direction uint8, maximumBlock
 	requests_original := make([]CE128_request, types.TotalValidators)
 	for i := range types.TotalValidators {
 		requests_original[i] = CE128_request{
-			ShardIndex:    uint16(i),
 			HeaderHash:    headerHash,
 			Direction:     direction,
 			MaximumBlocks: maximumBlocks,
 		}
 	}
-	requests := make([]interface{}, types.TotalValidators)
+	requests := make(map[uint16]interface{})
 	for i, req := range requests_original {
-		requests[i] = req
+		requests[uint16(i)] = req
 	}
 
 	resps, err := n.makeRequests(requests, 1, time.Duration(3*maximumBlocks)*time.Second, time.Duration(6*maximumBlocks)*time.Second)
@@ -1049,6 +1107,7 @@ func (n *Node) extendChain() error {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err
 				}
+				log.Info(module, fmt.Sprintf("[N%d] extendChain", n.id), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "blk", b.Str())
 				newStateDB.GetAllKeyValues()
 				n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
@@ -1206,9 +1265,9 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 			ShardIndex:     uint16(i),
 		}
 	}
-	requests := make([]interface{}, types.TotalValidators)
+	requests := make(map[uint16]interface{})
 	for i, req := range requests_original {
-		requests[i] = req
+		requests[uint16(i)] = req
 	}
 	responses, err := n.makeRequests(requests, types.ECPieceSize/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
 	if err != nil {
@@ -1300,9 +1359,9 @@ func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, 
 			ShardIndex:  uint16(i),
 		}
 	}
-	requests := make([]interface{}, types.TotalValidators)
+	requests := make(map[uint16]interface{}, types.TotalValidators)
 	for i, req := range requests_original {
-		requests[i] = req
+		requests[uint16(i)] = req
 	}
 
 	responses, err := n.makeRequests(requests, types.ECPieceSize/2, time.Duration(3)*time.Second, time.Duration(10)*time.Second)
@@ -1449,12 +1508,6 @@ func getMessageType(obj interface{}) string {
 		return "state_transition"
 	case *statedb.StateTransition:
 		return "state_transition"
-	case DA_announcement:
-		return "DA_announcement"
-	case DA_request:
-		return "DA_request"
-	case DA_response:
-		return "DA_response"
 	case CE128_request:
 		return "CE128_request"
 	case CE128_response:

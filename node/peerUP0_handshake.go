@@ -116,7 +116,8 @@ func (p *Peer) SendHandshake(stream quic.Stream, b types.Block, slot uint32, lea
 	if err != nil {
 		return err
 	}
-	err = sendQuicBytes(stream, reqBytes)
+	code := uint8(UP0_BlockAnnouncement)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}

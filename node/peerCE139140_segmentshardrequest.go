@@ -155,13 +155,13 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	if err != nil {
 		return
 	}
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return
 	}
 
 	// <-- [Segment Shard]
-	segmentShards, err = receiveQuicBytes(stream)
+	segmentShards, err = receiveQuicBytes(stream, p.PeerID, code)
 	if err != nil {
 		fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] ERR %v\n", p.String(), err)
 		// panic(11060)
@@ -170,7 +170,7 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 	if withJustification {
 		for j := uint8(0); j < req.Len; j++ {
 			var justification []byte
-			justification, err = receiveQuicBytes(stream)
+			justification, err = receiveQuicBytes(stream, p.PeerID, code)
 			if err != nil {
 				return
 			}
@@ -183,6 +183,10 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustification bool) (err error) {
 	defer stream.Close()
 	var req JAMSNPSegmentShardRequest
+	code := uint8(CE139_SegmentShardRequest)
+	if withJustification {
+		code = uint8(CE140_SegmentShardRequestP)
+	}
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)
 	if err != nil {
@@ -205,7 +209,7 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 			n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex, len(combined_selected_segmentshards), common.Blake2Hash(combined_selected_segmentshards))
 	}
 
-	err = sendQuicBytes(stream, combined_selected_segmentshards)
+	err = sendQuicBytes(stream, combined_selected_segmentshards, n.id, code)
 	if err != nil {
 		return
 	}
@@ -214,11 +218,11 @@ func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustifi
 	if withJustification {
 		for item_idx, s_j := range selected_segment_justifications {
 			s_f := selected_segment_justifications[item_idx]
-			err = sendQuicBytes(stream, s_f)
+			err = sendQuicBytes(stream, s_f, n.id, code)
 			if err != nil {
 				return
 			}
-			err = sendQuicBytes(stream, s_j)
+			err = sendQuicBytes(stream, s_j, n.id, code)
 			if err != nil {
 				return
 			}

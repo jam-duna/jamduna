@@ -122,8 +122,8 @@ func (n *Node) GetBlockAnnouncementBytes(block types.Block) ([]byte, error) {
 // it will either init a new stream or use an existing stream
 func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 	n := p.node
-	n.UP0_streamMu.Lock()
 	validator_index := n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519)
+	n.UP0_streamMu.Lock()
 	if _, exist := n.UP0_stream[uint16(validator_index)]; exist {
 		n.UP0_streamMu.Unlock()
 		return n.UP0_stream[uint16(validator_index)], nil
@@ -132,10 +132,14 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 		return n.UP0_stream[uint16(p.PeerID)], nil
 
 	}
-	stream, err := p.openStream(UP0_BlockAnnouncement)
+	n.UP0_streamMu.Unlock()
+	code := uint8(UP0_BlockAnnouncement)
+	stream, err := p.openStream(code)
 	if err != nil {
+
 		return nil, err
 	}
+	n.UP0_streamMu.Lock()
 	n.UP0_stream[uint16(validator_index)] = stream
 	n.UP0_streamMu.Unlock()
 	var wg sync.WaitGroup
@@ -151,7 +155,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 			errChan <- fmt.Errorf("handshake_bytes is nil")
 			return
 		}
-		err = sendQuicBytes(stream, handshake_bytes)
+		err = sendQuicBytes(stream, handshake_bytes, p.PeerID, code)
 		if err != nil {
 			errChan <- err
 			return
@@ -162,7 +166,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		req, err := receiveQuicBytes(stream)
+		req, err := receiveQuicBytes(stream, p.PeerID, code)
 		if err != nil {
 			errChan <- fmt.Errorf("receiveQuicBytes err: %v", err)
 			return
@@ -196,6 +200,7 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 	// Deserialize byte array back into the struct
 	var wg sync.WaitGroup
 	var errChan = make(chan error, 2)
+	code := uint8(UP0_BlockAnnouncement)
 	// send and receive handshake parallelly
 	wg.Add(1)
 	go func() {
@@ -217,14 +222,16 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 			errChan <- err
 			return
 		}
-		err = sendQuicBytes(stream, handshake_bytes)
+		err = sendQuicBytes(stream, handshake_bytes, n.id, code)
 		if err != nil {
 			errChan <- err
 			return
 		}
 	}()
 	wg.Wait()
-	log.Debug(debugBlock, "Received Handshake from peer", "peer", fmt.Sprintf("%d: %v", peerID, newHandshake))
+	if peerID == TestPeerID {
+		log.Debug(debugBlock, "Received Handshake from peer", "peer", peerID)
+	}
 	// check if there is any error
 	select {
 	case err = <-errChan:
@@ -244,12 +251,13 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 
 // this function will read the block announcement from the stream persistently
 func (n *NodeContent) runBlockAnnouncement(stream quic.Stream) {
+	code := uint8(UP0_BlockAnnouncement)
 	for {
 		// see if there is any stream error
 		if stream == nil {
 			return
 		}
-		req, err := receiveQuicBytes(stream)
+		req, err := receiveQuicBytes(stream, n.id, code)
 		if err != nil {
 			fmt.Println("Error receiving block announcement:", err)
 			return

@@ -20,7 +20,7 @@ func (p *Peer) SendVoteMessage(req grandpa.VoteMessage) error {
 	}
 	defer stream.Close()
 
-	err = sendQuicBytes(stream, reqBytes)
+	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}

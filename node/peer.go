@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -37,10 +38,6 @@ const (
 	CE143_PreimageRequest              = 143
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
-	CE201_DA_Announcement              = 201
-	CE202_DA_Request                   = 202
-	CE203_DA_Reconstruction            = 203
-	CE204_DA_Announcemented            = 204
 )
 
 type Peer struct {
@@ -88,18 +85,18 @@ func (p *Peer) String() string {
 }
 
 func (p *Peer) openStream(code uint8) (stream quic.Stream, err error) {
-	p.node.openedStreamsMu.Lock()
-	defer p.node.openedStreamsMu.Unlock()
-
+	p.connectionMu.Lock()
 	if p.conn == nil {
-		p.conn, err = quic.DialAddr(context.Background(), p.PeerAddr, p.node.tlsConfig, GenerateQuicConfig())
+		p.conn, err = quic.DialAddr(context.Background(), p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
 		//TODO defer p.connectionMu.Unlock()
 		if err != nil {
-			fmt.Printf("-- openStream ERR %v peerAddr=%s\n", err, p.PeerAddr)
+			// fmt.Printf("-- openStream ERR %v peerAddr=%s\n", err, p.PeerAddr)
 			return nil, err
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	p.connectionMu.Unlock()
+	timeout := 45 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	stream, err = p.conn.OpenStreamSync(ctx)
@@ -147,7 +144,9 @@ func (p *Peer) openStream(code uint8) (stream quic.Stream, err error) {
 	return stream, nil
 }
 
-func sendQuicBytes(stream quic.Stream, msg []byte) (err error) {
+const TestPeerID = 5
+
+func sendQuicBytes(stream quic.Stream, msg []byte, peerID uint16, code uint8) (err error) {
 	// Create a buffer to hold the length of the message (big-endian uint32)
 	if stream == nil {
 		return errors.New("stream is nil")
@@ -158,33 +157,46 @@ func sendQuicBytes(stream quic.Stream, msg []byte) (err error) {
 	// First, write the message length to the stream
 	_, err = stream.Write(lenBuf)
 	if err != nil {
-		log.Error(debugStream, "sendQuicBytes", "err", err)
+		log.Error(module, "!!! sendQuicBytes-length", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		return err
 	}
 
 	// Then, write the actual message to the stream
 	_, err = stream.Write(msg)
 	if err != nil {
-		log.Error(debugStream, "sendQuicBytes", "err", err)
+		log.Error(module, "!!! sendQuicBytes-msg", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		return err
 	}
 
+	if peerID == TestPeerID {
+		if code < 200 { // TODO: add more filtering
+			log.Info(module, "*** sendQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+		}
+	}
 	return nil
 }
 
-func receiveQuicBytes(stream quic.Stream) (resp []byte, err error) {
+func receiveQuicBytes(stream quic.Stream, peerID uint16, code uint8) (resp []byte, err error) {
 
 	var lengthPrefix [4]byte
 	_, err = io.ReadFull(stream, lengthPrefix[:])
 	if err != nil {
+		log.Error(module, "!!! receiveQuicBytes-length", "peerID", peerID, "err", err, "code", code)
 		return
 	}
-	messageLength := binary.LittleEndian.Uint32(lengthPrefix[:])
-	buf := make([]byte, messageLength)
+	msgLen := binary.LittleEndian.Uint32(lengthPrefix[:])
+	buf := make([]byte, msgLen)
 	_, err = io.ReadFull(stream, buf)
 	if err != nil {
+		log.Error(module, "!!! receiveQuicBytes-msg", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
 		return
 	}
+	if peerID == TestPeerID {
+		if code < 200 { // TODO: add more filtering
+			log.Info(module, "*** receiveQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(buf))
+		}
+	}
+
 	return buf, nil
 }
 
@@ -194,26 +206,37 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 
 	msgTypeBytes := make([]byte, 1) // code
 
-	msgLenBytes := make([]byte, 4)
 	_, err := io.ReadFull(stream, msgTypeBytes)
 	if err != nil {
-		fmt.Printf("DispatchIncomingQUICStream1 ERR %v\n", err)
+		log.Error(module, "!!!1 DispatchIncomingQUICStream - code", "err", err)
 		return err
 	}
 	msgType = msgTypeBytes[0]
+	if peerID == TestPeerID {
+		log.Trace(module, "***1 DispatchIncomingQUICStream - code", "peerID", peerID, "code", msgType)
+	}
 
+	msgLenBytes := make([]byte, 4)
 	_, err = io.ReadFull(stream, msgLenBytes)
 	if err != nil {
-		fmt.Printf("DispatchIncomingQUICStream2 ERR %v\n", err)
+		log.Error(module, "!!!2 DispatchIncomingQUICStream - msgLen", "err", err)
 		return err
 	}
 	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
+	if peerID == TestPeerID {
+		log.Trace(module, "***2 DispatchIncomingQUICStream - msgLen", "peerID", peerID, "code", msgType, "msgLen", msgLen)
+	}
+
 	msg := make([]byte, msgLen)
 	_, err = io.ReadFull(stream, msg)
 	if err != nil {
-		fmt.Printf("DispatchIncomingQUICStream3 ERR %v\n", err)
+		log.Error(module, "!!!3 DispatchIncomingQUICStream - msg", "peerID", peerID, "code", msgType)
 		return err
 	}
+	if peerID == TestPeerID {
+		log.Info(module, "*** DispatchIncomingQUICStream - msg", "peerID", peerID, "code", msgType, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+	}
+
 	// Dispatch based on msgType
 	switch msgType {
 	case UP0_BlockAnnouncement:
@@ -232,7 +255,7 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 			log.Warn(debugStream, "CE102_CommitMessage", "n", n.id, "p", peerID, "err", err)
 		}
 	case CE128_BlockRequest:
-		err := n.onBlockRequest(stream, msg)
+		err := n.onBlockRequest(stream, msg, peerID)
 		if err != nil {
 			log.Warn(debugStream, "CE128_BlockRequest", "n", n.id, "p", peerID, "err", err)
 		}
@@ -310,26 +333,6 @@ func (n *Node) DispatchIncomingQUICStream(stream quic.Stream, peerID uint16) err
 		err := n.onJudgmentPublication(stream, msg, peerID)
 		if err != nil {
 			log.Warn(debugStream, "CE145_JudgmentPublication", "n", n.id, "p", peerID, "err", err)
-		}
-	case CE201_DA_Announcement:
-		err := n.onDA_Announcement(stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE201_DA_Announcement", "n", n.id, "p", peerID, "err", err)
-		}
-	case CE202_DA_Request:
-		err := n.onDA_Request(stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE202_DA_Request", "n", n.id, "p", peerID, "err", err)
-		}
-	case CE203_DA_Reconstruction:
-		err := n.onDA_Reconstruction(stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE203_DA_Reconstruction", "n", n.id, "p", peerID, "err", err)
-		}
-	case CE204_DA_Announcemented:
-		err := n.onDA_Announced(stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE204_DA_Announcemented", "n", n.id, "p", peerID, "err", err)
 		}
 	default:
 		return errors.New("unknown message type")

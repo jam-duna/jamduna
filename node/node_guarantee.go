@@ -243,7 +243,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			} else {
 				fellow_response, errfellow := coworker.ShareWorkPackage(coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
-					log.Error(debugG, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
+					log.Trace(debugG, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
 					return
 				}
 				mutex.Lock()
@@ -281,7 +281,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 
 	if len(guarantee.Signatures) >= 2 {
 		if len(guarantee.Signatures) == 2 {
-			log.Warn(debugG, "processWPQueueItem:Only 2 signatures, expected 3")
+			log.Trace(debugG, "processWPQueueItem:Only 2 signatures, expected 3")
 		}
 		guarantee.Slot = curr_statedb.GetTimeslot()
 		go n.broadcast(guarantee)

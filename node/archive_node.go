@@ -518,7 +518,7 @@ func (n *ArchiveNode) DispatchIncomingQUICStream(stream quic.Stream) error {
 	// Dispatch based on msgType
 	switch msgType {
 	case CE128_BlockRequest:
-		err := n.onBlockRequest(stream, msg)
+		err := n.onBlockRequest(stream, msg, 0)
 		if err != nil {
 			log.Warn(debugStream, "CE128_BlockRequest", "n", n.id, "err", err)
 		}
