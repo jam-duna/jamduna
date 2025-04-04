@@ -166,7 +166,7 @@ func testSTF(t *testing.T, filename string, content string) {
 }
 
 func TestStateTransitionSingle(t *testing.T) {
-	filename := "4_004.json"
+	filename := "4_005.json"
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)

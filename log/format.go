@@ -19,6 +19,12 @@ const (
 	floatFormat       = 'f'
 	termMsgJust       = 40
 	termCtxMaxPadding = 40
+
+	Icon0 = "⛔️"
+	Icon1 = "⚠️"
+	Icon2 = "ℹ️"
+	Icon3 = "💁"
+	Icon4 = "🪡"
 )
 
 // 40 spaces

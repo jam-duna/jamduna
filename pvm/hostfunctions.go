@@ -1160,9 +1160,9 @@ func (vm *VM) hostWrite() {
 		if val_len > 0 {
 			a.NumStorageItems++
 			a.StorageSize += (32 + val_len)
-			vm.WriteRegister(7, NONE)
 			log.Debug(vm.logging, vm.Str("WRITE NONE"), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		}
+		vm.WriteRegister(7, NONE)
 	} else {
 		prev_l := uint64(len(oldValue))
 		if val_len == 0 {
@@ -1596,9 +1596,9 @@ func getLogLevelName(level uint64, core uint16, serviceName string) string {
 	case 2:
 		levelName = "INFO"
 	case 3:
-		levelName = "ERROR"
-	case 4:
 		levelName = "DEBUG"
+	case 4:
+		levelName = "TRACE"
 	case 5:
 		levelName = "TRACE"
 	}
@@ -1631,36 +1631,36 @@ func (vm *VM) hostLog() {
 
 	vm.HostResultCode = OK
 	if log.DisablePVMLogging {
-		return
+		//return
 	}
 	switch level {
-	case 0:
-		log.Crit(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+	case 0: // 0: User agent displays as fatal error
+		log.Crit(vm.firstGuarantor, levelName, "m", string(messageBytes))
 		break
-	case 1:
+	case 1: // 1: User agent displays as warning
 		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Warn(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+			log.Warn(vm.firstGuarantor, levelName, "m", string(messageBytes))
 		}
 		break
-	case 2:
-		if VM_LOG_FLAG {
-			if vm.firstGuarantor == log.FirstGuarantor {
-				log.Info(vm.firstGuarantor, levelName, "msg", string(messageBytes))
-			} else if vm.logging == log.PvmAuthoring {
-				log.Info(vm.logging, levelName, "msg", string(messageBytes))
+	case 2: // 2: User agent displays as important information
+		if VM_LOG_FLAG || true {
+			if vm.firstGuarantor == log.FirstGuarantor || true {
+				log.Info(vm.firstGuarantor, levelName, "m", string(messageBytes))
+			} else if vm.logging == log.PvmAuthoring || true {
+				log.Info(vm.logging, levelName, "m", string(messageBytes))
 			}
 		}
 		break
-	case 3:
+	case 3: // 3: User agent displays as helpful information
 		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Error(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+			log.Debug(vm.firstGuarantor, levelName, "m", string(messageBytes))
 		} else if vm.logging == log.PvmAuthoring {
-			log.Error(vm.logging, levelName, "msg", string(messageBytes))
+			log.Debug(vm.logging, levelName, "m", string(messageBytes))
 		}
 		break
-	case 4:
+	case 4: // 4: User agent displays as pedantic information
 		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Debug(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+			log.Trace(vm.firstGuarantor, levelName, "m", string(messageBytes))
 		}
 		break
 	}
