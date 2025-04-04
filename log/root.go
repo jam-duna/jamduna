@@ -50,7 +50,7 @@ func init_module(moduleList []string, moduleEnabled []string) map[string]bool {
 
 // TODO: this list can be provided externally
 var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantor, "blk_mod", "statedb", "G", "grandpa", "segment"}
-var defaultModuleEnabled = []string{GeneralAuthoring}
+var defaultModuleEnabled = []string{}
 
 // --- Module management ---
 // moduleEnabled keeps track of whether a module’s logging is enabled.

@@ -166,7 +166,7 @@ func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBloc
 	go ArchiveNode.SyncState()
 	go ArchiveNode.runJamWeb(uint16(web_port), port)
 	go ArchiveNode.StartRPCServer(port)
-	go ArchiveNode.RunRPCCommand()
+	// go ArchiveNode.RunRPCCommand()
 	for _, peer := range ArchiveNode.peersInfo {
 		remoteAddr := peer.PeerAddr
 		host, port, err := net.SplitHostPort(remoteAddr)

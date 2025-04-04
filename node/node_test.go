@@ -387,6 +387,7 @@ func RunGrandpaGraphServer(watchNode *Node, basePort uint16) {
 	block_graph_server := types.NewGraphServer(basePort)
 	go block_graph_server.StartServer()
 	for {
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-ticker.C:
 			block_graph_server.Update(watchNode.block_tree)

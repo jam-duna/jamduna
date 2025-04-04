@@ -170,7 +170,7 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 	result = append(result, Q_q...)
 
 	if s.Authoring && (len(accumulated_immediately) != len(result)) {
-		log.Info(log.GeneralAuthoring, "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
+		log.Debug(log.GeneralAuthoring, "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
 			"q", get_accumulationqueue_workpackagehashes(q), "Q(q)-priority queue result", get_workreport_workpackagehashes(Q_q), "W^*-wphs of accumulatable work reports)", get_workreport_workpackagehashes(result))
 	}
 	return result

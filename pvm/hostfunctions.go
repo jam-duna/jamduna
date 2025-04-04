@@ -738,7 +738,9 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.ReadRegister(10)
 	omega_11, _ := vm.ReadRegister(11)
 	omega_12, _ := vm.ReadRegister(12)
-	log.Debug(vm.logging, vm.Str("FETCH"), "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics))
+	if VM_LOG_FLAG {
+		log.Debug(vm.logging, vm.Str("FETCH"), "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics))
+	}
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
@@ -1641,10 +1643,12 @@ func (vm *VM) hostLog() {
 		}
 		break
 	case 2:
-		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Info(vm.firstGuarantor, levelName, "msg", string(messageBytes))
-		} else if vm.logging == log.PvmAuthoring {
-			log.Info(vm.logging, levelName, "msg", string(messageBytes))
+		if VM_LOG_FLAG {
+			if vm.firstGuarantor == log.FirstGuarantor {
+				log.Info(vm.firstGuarantor, levelName, "msg", string(messageBytes))
+			} else if vm.logging == log.PvmAuthoring {
+				log.Info(vm.logging, levelName, "msg", string(messageBytes))
+			}
 		}
 		break
 	case 3:

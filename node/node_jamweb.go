@@ -55,6 +55,7 @@ func newHub() *Hub {
 // run listens on the hub channels and manages client connections.
 func (h *Hub) run() {
 	for {
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
@@ -102,6 +103,7 @@ func (c *Client) readPump() {
 		return nil
 	})
 	for {
+		time.Sleep(10 * time.Millisecond)
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			// Log unexpected close errors.
@@ -123,6 +125,7 @@ func (c *Client) writePump() {
 		c.conn.Close()
 	}()
 	for {
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case message, ok := <-c.send:
 			// Set a deadline for writing.

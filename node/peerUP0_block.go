@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -253,6 +254,7 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 func (n *NodeContent) runBlockAnnouncement(stream quic.Stream) {
 	code := uint8(UP0_BlockAnnouncement)
 	for {
+		time.Sleep(5 * time.Millisecond)
 		// see if there is any stream error
 		if stream == nil {
 			return

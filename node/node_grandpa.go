@@ -22,14 +22,6 @@ func (n *Node) StartGrandpa(b *types.Block) {
 	}
 
 	if b.GetParentHeaderHash() == (genesisBlockHash) {
-		genesis_blk := b.Copy()
-		n.block_tree = types.NewBlockTree(&types.BT_Node{
-			Parent:    nil,
-			Block:     genesis_blk,
-			Height:    0,
-			Finalized: true,
-		})
-
 		authorities := make([]types.Ed25519Key, 0)
 		for _, validator := range n.statedb.GetSafrole().CurrValidators {
 			authorities = append(authorities, validator.Ed25519)
@@ -38,7 +30,6 @@ func (n *Node) StartGrandpa(b *types.Block) {
 		go n.runGrandpa()
 		ctx := context.Background()
 		n.grandpa.PlayGrandpaRound(ctx, 1)
-
 	}
 }
 

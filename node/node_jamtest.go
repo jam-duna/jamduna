@@ -15,6 +15,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -200,6 +201,7 @@ func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 					n.receiveGodTimeslotUsed(ts)
 				}
 			}
+			time.Sleep(10 * time.Millisecond)
 		}
 
 	}()
@@ -491,6 +493,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	}
 	if *pvm_authoring_log {
 		pvm_authoring_log_enabled = true
+		pvm.VM_LOG_FLAG = true
 	}
 
 	fmt.Printf("Test PreReq: %v\n", test_prereq)
@@ -498,6 +501,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		fmt.Printf("PVM Authoring log enabled!!\n")
 		log.EnableModule(log.PvmAuthoring)
 		log.EnableModule(log.FirstGuarantor)
+		log.EnableModule(log.GeneralAuthoring)
 	}
 
 	_ = nodes
@@ -853,6 +857,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			break
 		}
 		select {
+
 		case workPackage := <-Fib_Tri_Chan:
 			// submit to core 1
 			// v0, v3, v5 => core
@@ -1040,6 +1045,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 				}
 
 			}
+		default:
+			time.Sleep(10 * time.Millisecond)
 		}
 
 	}
@@ -1123,6 +1130,8 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 					return
 				}
 			}
+		default:
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
@@ -1229,7 +1238,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 			fmt.Printf("All transfer work packages processed\n")
 			break
 		}
-
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-ticker.C:
 			if transferCounter < TransferNum && transferReady {
@@ -1379,7 +1388,7 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 			fmt.Printf("All transfer work packages processed\n")
 			break
 		}
-
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-ticker.C:
 			if transferCounter < TransferNum && transferReady {
@@ -2539,7 +2548,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 			fmt.Printf("All Size work packages processed\n\n")
 			break
 		}
-
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-ticker.C:
 			if SizeCounter < len(mbs) && SizeReady {
@@ -2618,7 +2627,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 			fmt.Printf("All Seconds work packages processed\n")
 			break
 		}
-
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-ticker.C:
 			if SecondsCounter < len(seconds) && SecondsReady {

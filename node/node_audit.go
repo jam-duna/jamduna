@@ -183,25 +183,8 @@ func (n *Node) runAudit() {
 				log.Debug(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 
 				newBlock := audit_statedb.Block.Copy()
-				if newBlock.GetParentHeaderHash() == (genesisBlockHash) {
-					if Grandpa {
-						n.StartGrandpa(newBlock.Copy())
-					} else {
-						genesis_blk := newBlock.Copy()
-						n.block_tree = types.NewBlockTree(&types.BT_Node{
-							Parent:    nil,
-							Block:     genesis_blk,
-							Height:    0,
-							Finalized: true,
-						})
-					}
-				} else {
-					// every time we audited a block, we need to update the block tree
-					if newBlock != nil && n.block_tree != nil { // check
-						n.block_tree.AddBlock(newBlock)
-						// also prune the block tree
-						n.block_tree.PruneBlockTree(10)
-					}
+				if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
+					n.StartGrandpa(newBlock.Copy())
 				}
 			}
 
@@ -251,7 +234,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				if isAudited {
 					// wait for everyone to finish auditing
 					log.Info(debugAudit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
-						"headerhash", auditing_statedb.Block.Header.Hash())
+						"headerhash", auditing_statedb.Block.Header.Hash().String_short())
 					done = true
 					break
 				} else {

@@ -217,38 +217,31 @@ func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) 
 		log.Error(module, "processBlockAnnouncement", "err", err)
 		return block, err
 	}
-	n.cacheHeaders(receivedHeaderHash, block)
-	n.cacheBlock(block)
+	n.processBlock(block)
 	return block, nil
 }
+func (n *NodeContent) cacheBlock(block *types.Block) error {
 
-func (n *NodeContent) cacheBlockRead(parentHash common.Hash) (b *types.Block, ok bool) {
-	n.blocksMutex.Lock()
-	defer n.blocksMutex.Unlock()
-	b, ok = n.blocks[parentHash]
-	return b, ok
+	if block.GetParentHeaderHash() == (genesisBlockHash) {
+		first_blk := block.Copy()
+		n.block_tree = types.NewBlockTree(&types.BT_Node{
+			Parent:    nil,
+			Block:     first_blk,
+			Height:    0,
+			Finalized: true,
+		})
+	} else {
+		if block != nil && n.block_tree != nil { // check
+			err := n.block_tree.AddBlock(block)
+			if err != nil {
+				return fmt.Errorf("cacheBlock: AddBlock failed %v", err)
+			}
+			// also prune the block tree
+			n.block_tree.PruneBlockTree(10)
+		}
+	}
+	return nil
 }
-
-func (n *NodeContent) cacheBlock(block *types.Block) {
-	n.blocksMutex.Lock()
-	defer n.blocksMutex.Unlock()
-	n.blocks[block.GetParentHeaderHash()] = block
-}
-
-func (n *NodeContent) cacheHeadersRead(h common.Hash) (b *types.Block, ok bool) {
-	n.headersMutex.Lock()
-	defer n.headersMutex.Unlock()
-	b, ok = n.headers[h]
-	return b, ok
-}
-
-func (n *NodeContent) cacheHeaders(h common.Hash, block *types.Block) {
-	n.headersMutex.Lock()
-	defer n.headersMutex.Unlock()
-	n.headers[h] = block
-	// fmt.Printf("  %s cacheHeaders %v <- %v\n", n.String(), h, block.Header.ParentHeaderHash)
-}
-
 func (n *NodeContent) cacheWorkReport(workReport types.WorkReport) {
 	n.workReportsMutex.Lock()
 	defer n.workReportsMutex.Unlock()
@@ -268,6 +261,7 @@ func (n *Node) runBlocksTickets() {
 	defer pulseTicker.Stop()
 
 	for {
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
@@ -279,13 +273,18 @@ func (n *Node) runBlocksTickets() {
 
 func (n *Node) runReceiveBlock() {
 	// ticker here to avoid high CPU usage
-	pulseTicker := time.NewTicker(20 * time.Millisecond)
+	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
 
 	for {
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
+			err := n.extendChain()
+			if err != nil {
+				// log.Warn(debugBlock, "runReceiveBlock:extendChain", "n", n.String(), "err", err)
+			}
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
 			log.Debug(debugBlock, "runReceiveBlock", "n", n.String(), "blockAnnouncement", blockAnnouncement.Header.HeaderHash().String_short())
 			b, err := n.processBlockAnnouncement(blockAnnouncement)
@@ -293,12 +292,15 @@ func (n *Node) runReceiveBlock() {
 				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)
 			} else {
 				log.Trace(debugBlock, fmt.Sprintf("%s Received Block Announcement from validator %d", n.String(), blockAnnouncement.Header.AuthorIndex), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "t", b.Header.Slot)
-				n.processBlock(b)
 				announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", b.Hash(), b.Header.Hash())
 				if n.hub != nil {
 					n.hub.broadcast <- []byte(announcement)
 				}
 			}
+		case <-n.stop_receive_blk:
+			fmt.Printf("%s runReceiveBlock: stop_receive_blk\n", n.String())
+			<-n.restart_receive_blk
+			fmt.Printf("%s runReceiveBlock: restart_receive_blk\n", n.String())
 		}
 	}
 }
@@ -309,6 +311,7 @@ func (n *Node) runMain() {
 	defer pulseTicker.Stop()
 
 	for {
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet
@@ -346,15 +349,17 @@ func (n *Node) runMain() {
 	}
 }
 
-func (n *NodeContent) RunRPCCommand() {
+func (n *Node) RunRPCCommand() {
 	pulseTicker := time.NewTicker(20 * time.Millisecond)
 	defer pulseTicker.Stop()
 	for {
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-pulseTicker.C:
 		case command := <-n.command_chan:
 			fmt.Printf("Get new command from RPC: %v\n", command)
-			if command == "slot_update" {
+			switch command {
+			case "slot_update":
 				for i, rpc_client := range n.RPC_Client {
 					var res string
 					err := rpc_client.Call("jam.SetTimeSlotReady", []string{fmt.Sprintf("%d", CurrentSlot)}, &res)
@@ -365,6 +370,15 @@ func (n *NodeContent) RunRPCCommand() {
 					}
 				}
 				CurrentSlot++
+
+			case "stop":
+				fmt.Printf("Stop block receive\n")
+				n.restart_receive_blk = make(chan string)
+				n.stop_receive_blk = make(chan string)
+				n.stop_receive_blk <- "stop"
+			case "restart":
+				fmt.Printf("Restart block receive\n")
+				n.restart_receive_blk <- "restart"
 			}
 		}
 	}

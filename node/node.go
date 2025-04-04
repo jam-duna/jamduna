@@ -1,6 +1,7 @@
 package node
 
 import (
+	"container/list"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -172,15 +173,15 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 
 type Node struct {
 	NodeContent
-
-	commitHash string
-
+	block_waiting  list.List
+	commitHash     string
 	AuditNodeType  string
 	credential     types.ValidatorSecret
 	peers          []string
 	extrinsic_pool *types.ExtrinsicPool
 
-	grandpa *grandpa.Grandpa
+	latest_block *common.Hash
+	grandpa      *grandpa.Grandpa
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
@@ -254,6 +255,9 @@ type Node struct {
 	currJCE       uint32
 	jce_timestamp map[uint32]time.Time
 	currJCEMutex  sync.Mutex
+
+	stop_receive_blk    chan string
+	restart_receive_blk chan string
 }
 
 func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
@@ -555,6 +559,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
 	_statedb.Block = block
 	_statedb.HeaderHash = block.Header.Hash()
+	genesisBlockHash = block.Header.Hash()
 	if err == nil {
 		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)
@@ -589,6 +594,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
 		go node.StartRPCServer(port)
+		go node.RunRPCCommand()
 		go node.runWPQueue()
 		if Audit {
 			go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
@@ -1136,72 +1142,137 @@ func (n *Node) fetchBlocks(headerHash common.Hash, direction uint8, maximumBlock
 }
 
 func (n *Node) extendChain() error {
-	parentheaderhash := n.statedb.HeaderHash
-	for {
-
-		ok := false
-		for _, b := range n.blocks {
-			if b.GetParentHeaderHash() == parentheaderhash {
-				// TODO: add span here to capture ApplyStateTransitionFromBlock
-
-				ok = true
-				nextBlock := b
-
-				// Apply the block to the tip
-				recoveredStateDB := n.statedb.Copy()
-				recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
-				newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock, "extendChain")
-				if err != nil {
-					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
-					return err
-				}
-				log.Debug(debugBlock, fmt.Sprintf("[N%d] extendChain", n.id), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "blk", b.Str())
-				newStateDB.GetAllKeyValues()
-				n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
-				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
-
-				// current we always dump state transitions for every node
-				go func() {
-					st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
-					err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
-					if err != nil {
-						log.Error(module, "writeDebug", "err", err)
-					}
-					err = n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
-					if err != nil {
-						log.Error(module, "writeDebug", "err", err)
-					}
-					err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
-					if err != nil {
-						log.Error(module, "writeDebug", "err", err)
-					}
-				}()
-
-				// Extend the tip of the chain
-				n.addStateDB(newStateDB)
-				n.updateServiceMap(newStateDB, b)
-				n.assureNewBlock(b)
-
-				parentheaderhash = nextBlock.Header.Hash()
-
-				n.statedbMapMutex.Lock()
-				if Audit {
-					n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
-				}
-				n.statedbMapMutex.Unlock()
-
-				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
-				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(b, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
-				break
-			}
-
-		}
-
-		if !ok {
-			// If there is no next block, we're done!
+	if n.block_tree != nil {
+		// check the latest statedb
+		n.statedbMutex.Lock()
+		latest_statedb := n.statedb
+		if latest_statedb.Block == nil {
+			n.statedbMutex.Unlock()
 			return nil
 		}
+		current_block_hash := latest_statedb.Block.Header.Hash()
+		curr_node, ok := n.block_tree.GetBlockNode(current_block_hash)
+		if !ok {
+			if n.block_tree.Root.Block.Header.ParentHeaderHash == current_block_hash {
+				curr_node = n.block_tree.Root
+			}
+			if curr_node == nil {
+				n.statedbMutex.Unlock()
+				return nil
+			}
+			if !curr_node.Applied {
+				n.statedbMutex.Unlock()
+				err := n.ApplyFirstBlock(curr_node)
+				return err
+			}
+			n.statedbMutex.Unlock()
+			return fmt.Errorf("extendChain: current block not found in block tree %v", current_block_hash)
+		}
+
+		n.statedbMutex.Unlock()
+		var applyChildren func(node *types.BT_Node) error
+		applyChildren = func(node *types.BT_Node) error {
+			if len(node.Children) != 0 {
+				for _, child := range node.Children {
+					if child.Applied {
+						continue
+					}
+					err := n.ApplyBlock(child)
+					if err != nil {
+						return err
+					}
+					err = applyChildren(child)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+
+		err := applyChildren(curr_node)
+		if err != nil {
+			log.Error("SyncState", "applyChildren", err)
+		}
+
 	}
+	return nil
+}
+
+func (n *Node) ApplyFirstBlock(nextBlockNode *types.BT_Node) error {
+	nextBlock := nextBlockNode.Block
+	recoveredStateDB := n.statedb
+	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock, "extendChain")
+	if err != nil {
+		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
+		return err
+	}
+	newStateDB.GetAllKeyValues()
+	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
+	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
+	newStateDB.Block = nextBlock
+	n.addStateDB(newStateDB)
+	n.statedbMapMutex.Lock()
+	if nextBlock.Header.Hash() == *n.latest_block {
+		n.assureNewBlock(nextBlock)
+		if Audit {
+			n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+		}
+	}
+	nextBlockNode.Applied = true
+	n.statedbMapMutex.Unlock()
+
+	return nil
+}
+
+func (n *Node) ApplyBlock(nextBlockNode *types.BT_Node) error {
+	nextBlock := nextBlockNode.Block
+	recoveredStateDB := n.statedb.Copy()
+	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock, "extendChain")
+	if err != nil {
+		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
+		return err
+	}
+
+	newStateDB.GetAllKeyValues()
+	newStateDB.Block = nextBlock
+	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
+	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
+
+	// current we always dump state transitions for every node
+	go func() {
+		st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
+		err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
+		if err != nil {
+			log.Error(module, "writeDebug", "err", err)
+		}
+		err = n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
+		if err != nil {
+			log.Error(module, "writeDebug", "err", err)
+		}
+		err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
+		if err != nil {
+			log.Error(module, "writeDebug", "err", err)
+		}
+	}()
+
+	// Extend the tip of the chain
+	n.addStateDB(newStateDB)
+	n.statedbMapMutex.Lock()
+	if nextBlock.Header.Hash() == *n.latest_block {
+		n.assureNewBlock(nextBlock)
+		if Audit {
+			n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+		}
+	}
+	nextBlockNode.Applied = true
+	n.statedbMapMutex.Unlock()
+
+	IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
+	n.extrinsic_pool.RemoveUsedExtrinsicFromPool(nextBlock, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
+	return nil
 }
 
 func (n *Node) assureNewBlock(b *types.Block) error {
@@ -1231,44 +1302,15 @@ func (n *Node) assureNewBlock(b *types.Block) error {
 // we arrive here when we receive a block from another node
 func (n *Node) processBlock(blk *types.Block) error {
 	// walk blk backwards, up to the tip, if possible -- but if encountering an unknown parenthash, immediately fetch the block.  Give up if we can't do anything
-	b := blk
 	n.StoreBlock(blk, n.id, false)
-	n.cacheBlock(blk)
-	n.cacheHeaders(b.Header.Hash(), blk)
+	err := n.cacheBlock(blk)
 	// Sometimes this loop will get in deadlock
-	for {
-		if b.GetParentHeaderHash() == (common.Hash{}) {
-			break
-		} else if n.statedb != nil && b.GetParentHeaderHash() == n.statedb.HeaderHash {
-			break
-		} else {
-
-			parentBlock, ok := n.cacheBlockRead(b.GetParentHeaderHash())
-			if !ok {
-				parentBlocks, err := n.fetchBlocks(b.GetParentHeaderHash(), 1, 1)
-				if err != nil || parentBlocks == nil {
-					// have to give up right now (could try again though!)
-					return err
-				} else {
-					parentBlock = &(*parentBlocks)[0]
-				}
-				// got the parent block, store it in the cache
-				if parentBlock.GetParentHeaderHash() == blk.GetParentHeaderHash() {
-					n.StoreBlock(parentBlock, n.id, false)
-					n.cacheBlock(parentBlock)
-				} else {
-					return nil
-				}
-
-			}
-			b = parentBlock
-		}
-	}
-
-	// we got to the tip, now extend the chain, moving the tip forward, applying blocks using blockcache
-	err := n.extendChain()
+	blk_hash := blk.Header.Hash()
+	n.latest_block = &blk_hash
 	if err != nil {
-		return err
+		log.Warn(debugBlock, "processBlock:cacheBlock", "n", n.String(), "err", err, "sync", "start")
+		n.InsertOrphan(blk)
+		go n.SyncornizedBlocks()
 	}
 	return nil // Success
 }
@@ -1649,6 +1691,7 @@ func (n *Node) runJCE() {
 	ticker_pulse := time.NewTicker(tickInterval * time.Millisecond)
 	defer ticker_pulse.Stop()
 	for {
+		time.Sleep(1 * time.Millisecond)
 		select {
 		case <-ticker_pulse.C:
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
@@ -1668,6 +1711,7 @@ func (n *Node) runFasterJCE() {
 	block_pulse := time.NewTicker(blockInterval * time.Millisecond)
 	defer block_pulse.Stop()
 	for {
+		time.Sleep(1 * time.Millisecond)
 		select {
 		case <-ticker_pulse.C:
 			prevJCE := n.GetCurrJCE()
@@ -1737,6 +1781,7 @@ func (n *Node) runClient() {
 	//go n.monitorCommandChannel()
 
 	for {
+		time.Sleep(1 * time.Millisecond)
 		select {
 
 		case <-ticker_pulse.C:
@@ -1787,10 +1832,12 @@ func (n *Node) runClient() {
 
 				n.addStateDB(newStateDB)
 				n.StoreBlock(newBlock, n.id, true)
-				n.cacheBlock(newBlock)
-
-				headerHash := newBlock.Header.Hash()
-				n.cacheHeaders(headerHash, newBlock)
+				n.processBlock(newBlock)
+				nodee, ok := n.block_tree.GetBlockNode(newBlock.Header.Hash())
+				if !ok {
+					return
+				}
+				nodee.Applied = true
 				go n.broadcast(*newBlock)
 				go func() {
 					timeslot := newStateDB.GetSafrole().Timeslot

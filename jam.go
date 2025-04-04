@@ -145,14 +145,15 @@ func main() {
 			fmt.Println("Start time reached. Running now...")
 		}
 	}
-	epoch0Timestamp := statedb.NewEpoch0Timestamp("jamtestnet")
+	epoch0Timestamp := statedb.NewEpoch0Timestamp("jamtestnet", start_time)
+	fmt.Printf("Epoch0Timestamp: %d\n", epoch0Timestamp)
 	// Set up peers and node
 	n, err := node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, config.GenesisBlock, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
 	if err != nil {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)
 	}
-	n.SetSendTickets(false)
+	n.SetSendTickets(true)
 	n.SetServiceDir("/services")
 	storage, err := n.GetStorage()
 	defer storage.Close()
@@ -161,9 +162,9 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String(), n.GetBuild())
-	timer := time.NewTimer(60 * time.Minute)
+	timer := time.NewTimer(180 * time.Minute)
 	<-timer.C
-	fmt.Println("Node has been running for 45 minutes. Shutting down...")
+	fmt.Println("Node has been running for 180 minutes. Shutting down...")
 }
 
 func generatePeerNetwork(validators []types.Validator, port int, local bool) (peers []string, peerList map[uint16]*node.Peer, err error) {

@@ -10,7 +10,7 @@
           {% if MODE == "next_hour" %}
           {{ lookup('pipe', 'date -u -d "1 hour" +"+%Y-%m-%d %H:00:00"') }}
           {% else %}
-          {{ lookup('pipe', 'date -u -d "45 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
+          {{ lookup('pipe', 'date -u -d "55 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
           {% endif %}
 
     - name: Display JAM_START_TIME

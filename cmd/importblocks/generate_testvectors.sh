@@ -4,6 +4,19 @@ set -euo pipefail
 GREEN="\033[0;32m"
 NC="\033[0m"
 
+data_dir="rawdata"
+#remove old data
+if [ -d "$data_dir" ]; then
+  echo -e "${GREEN}Removing old data directory...${NC}"
+  rm -rf "$data_dir"
+fi
+mkdir -p "$data_dir"
+echo -e "${GREEN}Data directory created: $data_dir${NC}"
+echo -e "${GREEN}Generating test vectors...${NC}"
+echo -e "${GREEN}----------------------------------------------------------${NC}"
+echo -e "${GREEN}Starting test vector generation...${NC}"
+echo -e "${GREEN}----------------------------------------------------------${NC}"
+
 create_temp_log_file() {
   local tmpfile
   if [[ "$(uname)" == "Darwin" ]]; then

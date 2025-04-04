@@ -65,6 +65,7 @@ func (n *Node) runPreimages() {
 	defer pulseTicker.Stop()
 
 	for {
+		time.Sleep(1 * time.Millisecond)
 		select {
 		case <-pulseTicker.C:
 			// Small pause to reduce CPU load when channels are quiet

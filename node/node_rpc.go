@@ -975,6 +975,7 @@ func (n *NodeContent) startRPCServerImpl(port int) {
 
 	// Listen for requests
 	for {
+		time.Sleep(1 * time.Millisecond)
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Println("⚠️ Failed to accept connection:", err)

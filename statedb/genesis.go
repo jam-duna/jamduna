@@ -386,12 +386,32 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 		log.Trace(module, "NewEpoch0Timestamp", "NewGenesisConfig epoch0Timestamp", epoch0Timestamp, "Wait", uint64(waitTime))
 		return uint32(epoch0Timestamp)
 	} else if test_name[0] == "jamtestnet" { // make sure the timestamp is 72
-		now := time.Now().Unix()
-		second_per_epoch := types.SecondsPerEpoch
-		adjustedTime := time.Duration(now - int64(second_per_epoch))
+		if len(test_name) != 2 {
+			panic("jamtestnet should have two parameters")
+		}
+		now := time.Now()
+		loc := now.Location()
+		start_time := test_name[1]
+		startTime, err := time.ParseInLocation("2006-01-02 15:04:05", start_time, loc)
+		if err != nil {
+			fmt.Printf("start_time: %s\n", start_time)
+			fmt.Println("Invalid time format. Use YYYY-MM-DD HH:MM:SS")
+			return 0
+		}
+		starting := startTime.Unix()
+		starting = common.ComputeJCETime(starting, true)
+		second_per_epoch := types.SecondsPerEpoch //72
+		diff_seconds := starting - int64(second_per_epoch)
+		fmt.Printf("Current time: %v\n", now)
+		fmt.Printf("Seconds per epoch: %v\n", second_per_epoch)
+		fmt.Printf("Difference in seconds: %v\n", diff_seconds)
+		adjustedTime := time.Duration(diff_seconds) * time.Second
+		fmt.Printf("Adjusted time: %v\n", adjustedTime)
 		common.AddJamStart(adjustedTime)
-		now = common.ComputeJCETime(now, true)
-		return uint32(now)
+		fmt.Printf("JAM start now: %v\n", common.JceStart)
+		starting = time.Now().Unix()
+		starting = common.ComputeJCETime(starting, true)
+		return uint32(starting)
 	} else {
 		now := time.Now().Unix()
 		second_per_epoch := types.SecondsPerEpoch // types.EpochLength

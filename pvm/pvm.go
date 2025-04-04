@@ -344,6 +344,8 @@ type VM struct {
 	Mode            string
 }
 
+var VM_LOG_FLAG bool
+
 func (vm *VM) Str(logStr string) string {
 	return fmt.Sprintf("%s_%s: %s", vm.ServiceMetadata, vm.Mode, logStr)
 }

@@ -38,8 +38,8 @@ fib3:
 megatron:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_L),$(TargetN)); \
 	echo "Running TestMegatron with targetN=$$TARGET and timeout $(TIMEOUT)..."; \
-	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N -prereq_test=$(PREREQ) -pvm_authoring_log=$(PVMAUTHLOG)"; \
-	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N -prereq_test=$(PREREQ) -pvm_authoring_log=$(PVMAUTHLOG)
+	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N -prereq_test=$(PREREQ) -pvm_authoring_log=false"; \
+	go test -timeout $(TIMEOUT) -v -run TestMegatron -tags "network_test,$(TAGS)" -targetN=$$TARGET_N -prereq_test=$(PREREQ) -pvm_authoring_log=false
 
 megatron_short:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_S),$(TargetN)); \
@@ -53,7 +53,7 @@ megatron_pprof:
 	echo "go test -tags \"network_test $(TAGS)\" -c -o node.test"; \
 	go test -tags "network_test $(TAGS)" -c -o node.test; \
 	echo "Running TestMegatron using test binary with timeout $(TIMEOUT)..."; \
-	echo "./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=10 -prereq_test=true"; \
+	echo "./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=10 -prereq_test=false -pvm_authoring_log=false"; \
 	./node.test -test.run TestMegatron -test.timeout $(TIMEOUT) -targetN=10 -prereq_test=true
 	go tool pprof -http=":8080" cpu.pprof
 
