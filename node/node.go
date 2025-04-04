@@ -1155,7 +1155,7 @@ func (n *Node) extendChain() error {
 					fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 					return err
 				}
-				log.Info(module, fmt.Sprintf("[N%d] extendChain", n.id), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "blk", b.Str())
+				log.Debug(debugBlock, fmt.Sprintf("[N%d] extendChain", n.id), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "blk", b.Str())
 				newStateDB.GetAllKeyValues()
 				n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 				newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)

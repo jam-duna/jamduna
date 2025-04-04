@@ -1169,7 +1169,7 @@ func (vm *VM) hostWrite() {
 				a.NumStorageItems--
 			}
 			a.StorageSize -= (32 + prev_l)
-			l = uint64(NONE)
+			l = uint64(prev_l) // this should not be NONE
 			vm.WriteRegister(7, l)
 			log.Debug(vm.logging, vm.Str("WRITE (as DELETE) NONE "), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		} else {

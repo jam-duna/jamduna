@@ -28,6 +28,7 @@ run_single_test() {
   local filtered_log="${log_file}.filtered"
 
   cleanup() {
+    rm -r rawdata/*
     rm -f "$pipe_file"
     [ -f "$log_file" ] && rm -f "$log_file"
     [ -f "$filtered_log" ] && rm -f "$filtered_log"
