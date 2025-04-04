@@ -338,6 +338,7 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 func main() {
 	port := 8999
 	mux := http.NewServeMux()
+	buildV := common.GetCommitHash()
 
 	// Serve all static files under /static/
 	fileServer := http.FileServer(http.Dir("./static"))
@@ -357,7 +358,8 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		tmpl.Execute(w, nil)
+		// Pass build version to the template
+		tmpl.Execute(w, map[string]interface{}{"BuildVersion": buildV})
 	})
 
 	mux.HandleFunc("/api/stf", withCORS(func(w http.ResponseWriter, r *http.Request) {
@@ -478,6 +480,6 @@ func main() {
 	}))
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	fmt.Printf("Starting JAMweb server on %s\n", addr)
+	fmt.Printf("Starting Codec-Web server on %s. Build=%v\n", addr, buildV)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

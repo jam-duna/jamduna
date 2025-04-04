@@ -11,11 +11,11 @@ JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
 jam_with_ffi_build: ffi_force
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
-	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) $(SRC) 
+	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) .
 jam:
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
-	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) $(SRC)
+	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) .
 tiny: jam
 	ansible-playbook -u root -i /root/go/src/github.com/colorfulnotion/jam/hosts.txt -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml 
 run_parallel_jam:

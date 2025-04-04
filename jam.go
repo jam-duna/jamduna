@@ -160,7 +160,7 @@ func main() {
 		fmt.Printf("GetStorage Err:%s", err.Error())
 		os.Exit(1)
 	}
-	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String())
+	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String(), n.GetBuild())
 	timer := time.NewTimer(60 * time.Minute)
 	<-timer.C
 	fmt.Println("Node has been running for 45 minutes. Shutting down...")

@@ -30,9 +30,20 @@ type NodeClient struct {
 }
 
 // ----------------- client side -----------------
+func (nc *NodeClient) GetBuildVersion() (string, error) {
+	var result string
+	err := nc.Client.Call("jam.GetBuildVersion", []string{}, &result)
+	return result, err
+}
+
 func (nc *NodeClient) GetCurrJCE() (uint32, error) {
+	var resultStr string
+	err := nc.Client.Call("jam.GetCurrJCE", []string{}, &resultStr)
+	if err != nil {
+		return 0, err
+	}
 	var result uint32
-	err := nc.Client.Call("jam.GetCurrJCE", struct{}{}, &result)
+	_, err = fmt.Sscanf(resultStr, "%d", &result)
 	return result, err
 }
 
@@ -266,10 +277,15 @@ func (j *Jam) GetAvailabilityAssignments(req []string, res *string) error {
 	return nil
 }
 
-func (j *Jam) GetCurrJCE(_ struct{}, res *uint32) error {
+func (j *Jam) GetBuildVersion(req []string, res *string) error {
+	commitHash := j.NodeContent.nodeSelf.GetBuild()
+	*res = commitHash
+	return nil
+}
+
+func (j *Jam) GetCurrJCE(req []string, res *string) error {
 	currJCE := j.NodeContent.nodeSelf.GetCurrJCE()
-	fmt.Printf("jam GetCurrJCE: %v\n", currJCE)
-	*res = currJCE
+	*res = fmt.Sprintf("%d", currJCE)
 	return nil
 }
 

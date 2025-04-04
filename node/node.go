@@ -36,6 +36,7 @@ import (
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
+
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/qlog"
 )
@@ -70,6 +71,7 @@ var auth_code = statedb.AuthorizeCode{
 	PackageMetaData:   []byte("bootstrap"),
 	AuthorizationCode: auth_code_bytes,
 }
+
 var auth_code_encoded_bytes, _ = auth_code.Encode()
 
 var auth_code_hash = common.Blake2Hash(auth_code_encoded_bytes) //pu
@@ -143,6 +145,8 @@ type NodeContent struct {
 
 	RPC_Client        []*rpc.Client
 	new_timeslot_chan chan uint32
+
+	commitHash string
 }
 
 func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
@@ -168,6 +172,8 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 
 type Node struct {
 	NodeContent
+
+	commitHash string
 
 	AuditNodeType  string
 	credential     types.ValidatorSecret
@@ -443,7 +449,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		connectedPeers: make(map[uint16]bool),
 	}
-
+	node.commitHash = common.GetCommitHash()
+	fmt.Printf("[N%v] running on buildV: %s\n", id, node.GetBuild())
 	block := statedb.NewBlockFromFile(genesisBlockFile)
 	genesisBlockHash = block.Header.HeaderHash()
 	//jamnp-s/V/H/builder. Here V is the protocol version, 0, and H is the first 8 nibbles of the hash of the chain's genesis header, in lower-case hexadecimal.
@@ -614,6 +621,12 @@ func getConnKey(identifier string, incoming bool) string {
 	} else {
 		return fmt.Sprintf("%v-out", identifier)
 	}
+}
+
+func (n *Node) GetBuild() string {
+	info := n.commitHash
+	//TODO: add extra info here
+	return info
 }
 
 // use ed25519 key to get peer info
