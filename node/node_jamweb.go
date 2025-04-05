@@ -17,6 +17,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	debugWeb = log.JamwebMonitoring
+)
+
 // upgrader upgrades HTTP connections to WebSocket connections.
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -108,11 +112,11 @@ func (c *Client) readPump() {
 		if err != nil {
 			// Log unexpected close errors.
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
-				log.Crit("jamweb", "IsUnexpectedCloseError", err)
+				log.Crit(debugWeb, "IsUnexpectedCloseError", err)
 			}
 			break
 		}
-		log.Debug("jamweb", "Received message from client", message)
+		log.Debug(debugWeb, "Received message from client", message)
 		// Optionally process incoming messages here.
 	}
 }
@@ -166,7 +170,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	// Upgrade the HTTP connection.
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error("jamweb", "serveWs Upgrade error", err)
+		log.Error(debugWeb, "serveWs Upgrade error", err)
 		return
 	}
 	client := &Client{
@@ -185,7 +189,7 @@ func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, st
 	// read all the block json from the block_data_dir
 	files, err := ioutil.ReadDir(block_data_dir)
 	if err != nil {
-		log.Crit("jamweb", "ReadDir error", err)
+		log.Crit(debugWeb, "ReadDir error", err)
 		return
 	}
 
@@ -207,22 +211,22 @@ func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, st
 		filePath := filepath.Join(block_data_dir, file.Name())
 		data, err := ioutil.ReadFile(filePath)
 		if err != nil {
-			log.Crit("jamweb", "ReadFile error", err)
+			log.Crit(debugWeb, "ReadFile error", err)
 			continue
 		}
 		var stf statedb.StateTransition
 		if err := json.Unmarshal(data, &stf); err != nil {
-			log.Crit("jamweb", "Unmarshal error", err)
+			log.Crit(debugWeb, "Unmarshal error", err)
 			continue
 		}
 		err = json.Unmarshal(data, &stf)
 		if err != nil {
-			log.Crit("jamweb", "Unmarshal error", err)
+			log.Crit(debugWeb, "Unmarshal error", err)
 			continue
 		}
 		new_statedb, err := statedb.NewStateDBFromSnapshotRaw(storage, &(stf.PostState))
 		if err != nil {
-			log.Crit("jamweb", "NewStateDBFromSnapshotRaw error", err)
+			log.Crit(debugWeb, "NewStateDBFromSnapshotRaw error", err)
 			continue
 		}
 
@@ -230,7 +234,7 @@ func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, st
 		new_statedb.Block = &block
 		err = n.StoreBlock(&block, 9999, false)
 		if err != nil {
-			log.Crit("jamweb", "StoreBlock error", err)
+			log.Crit(debugWeb, "StoreBlock error", err)
 			continue
 		}
 		// Apply the block to the state
@@ -252,7 +256,7 @@ func (n *NodeContent) runJamWeb(basePort uint16, port int) {
 	go n.hub.run()
 
 	// WebSocket endpoint at /ws.
-	log.Info("jamweb", "JAM Web Server started", "addr", addr)
+	log.Info(debugWeb, "JAM Web Server started", "addr", addr)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(n.hub, w, r)
 	})
@@ -304,6 +308,6 @@ func (n *NodeContent) runJamWeb(basePort uint16, port int) {
 	})
 
 	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Crit("jamweb", "ListenAndServe error", err)
+		log.Crit(debugWeb, "ListenAndServe error", err)
 	}
 }

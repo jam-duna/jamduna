@@ -170,7 +170,7 @@ func sendQuicBytes(stream quic.Stream, msg []byte, peerID uint16, code uint8) (e
 
 	if peerID == TestPeerID {
 		if code < 200 { // TODO: add more filtering
-			log.Debug(debugQuic, "*** sendQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+			log.Trace(module, "*** sendQuicBytes", "peerID", peerID, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		}
 	}
 	return nil

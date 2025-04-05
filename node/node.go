@@ -44,17 +44,19 @@ import (
 
 const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
-	module       = "n_mod"   // General Node Ops
-	debugDA      = "da_mod"  // DA
-	debugG       = "g_mod"   // Guaranteeing
-	debugT       = "t_mod"   // Tickets/Safrole
-	debugP       = "p_mod"   // Preimages
-	debugA       = "a_mod"   // Assurances
-	debugAudit   = "ad_mod"  // Audit
-	debugGrandpa = "gp_mod"  // Guaranteeing
-	debugBlock   = "blk_mod" // Block
-	debugQuic    = "quic"    // QUIC
-	debugStream  = "q_mod"
+	module       = log.NodeMonitoring       // General Node Ops
+	debugDA      = log.DAMonitoring         // DA
+	debugSeg     = log.SegmentMonitoring    // Segment
+	debugJamweb  = log.JamwebMonitoring     // Jamweb
+	debugG       = log.GuaranteeMonitoring  // Guaranteeing
+	debugT       = "t_mod"                  // Tickets/Safrole
+	debugP       = "p_mod"                  // Preimages
+	debugA       = "a_mod"                  // Assurances
+	debugAudit   = "ad_mod"                 // Audit
+	debugGrandpa = "gp_mod"                 // Guaranteeing
+	debugBlock   = log.BlockMonitoring      // Block
+	debugStream  = log.QuicStreamMonitoring // Quicstream
+	debugQuic    = log.QuicStreamMonitoring // QUIC
 	numNodes     = types.TotalValidators
 	quicAddr     = "127.0.0.1:%d"
 	godMode      = false
@@ -1474,14 +1476,15 @@ func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, 
 			bClub := common.Blake2Hash(daResp.BundleShard)
 			sClub := daResp.SClub
 			leaf := append(bClub.Bytes(), sClub.Bytes()...)
-			log.Debug(module, "!!!! reconstructPackageBundleSegments: leaf", "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "shardIndex", daResp.ShardIndex, "decodedPath", fmt.Sprintf("%x", decodedPath))
+			//log.Info(module, "!!!! reconstructPackageBundleSegments: leaf", "callerIdx", n.id, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "decodedPath", fmt.Sprintf("%x", decodedPath))
 			verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
 			if verified {
+				log.Debug(module, "reconstructPackageBundleSegments:VerifyWBTJustification SUCC", "callerIdx", n.id, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "decodedPath", fmt.Sprintf("%x", decodedPath))
 				bundleShards[numShards] = daResp.BundleShard
 				indexes[numShards] = uint32(daResp.ShardIndex)
 				numShards++
 			} else {
-				log.Crit(module, "reconstructPackageBundleSegments:VerifyWBTJustification", "erasureRoot", erasureRoot, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "decodedPath", fmt.Sprintf("%x", decodedPath))
+				log.Crit(module, "reconstructPackageBundleSegments:VerifyWBTJustification FAILURE", "callerIdx", n.id, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "decodedPath", fmt.Sprintf("%x", decodedPath))
 			}
 		}
 	}

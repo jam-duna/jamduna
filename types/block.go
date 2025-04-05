@@ -170,6 +170,16 @@ func (b *Block) Str() string {
 	return out
 }
 
+// base64 -> hex
+func ToJSONHex(v interface{}) string {
+	converted := common.BytesToHexStr(v)
+	enc, err := json.Marshal(converted)
+	if err != nil {
+		return fmt.Sprintf("Error marshaling JSON: %v", err)
+	}
+	return string(enc)
+}
+
 func ToJSON(v interface{}) string {
 	enc, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

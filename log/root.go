@@ -1,16 +1,27 @@
 package log
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync/atomic"
 )
 
 const (
-	GeneralAuthoring  = "authoring"       // Generic Authoring log (excluding pvm)
-	PvmAuthoring      = "pvm_authoring"   // PVM Authoring log
-	FirstGuarantor    = "first_guarantor" // First Authoring Guarantor log
-	DisablePVMLogging = false
+	GeneralAuthoring     = "authoring"       // Generic Authoring log (excluding pvm)
+	PvmAuthoring         = "pvm_authoring"   // PVM Authoring log
+	FirstGuarantor       = "first_guarantor" // First Authoring Guarantor log
+	BlockMonitoring      = "blk_mod"         // Block module log
+	DAMonitoring         = "da_mod"          // Data Availability module log
+	NodeMonitoring       = "n_mod"           // General Node Ops
+	SegmentMonitoring    = "seg_mod"         // Segment module log
+	StateDBMonitoring    = "statedb_mod"     // stateDB module log
+	GrandpaMonitoring    = "grandpa_mod"     // Grandpa module log
+	JamwebMonitoring     = "jamweb_mod"      // Jamweb module log
+	QuicStreamMonitoring = "q_mod"           // Quicstream module log
+	GuaranteeMonitoring  = "g_mod"           // Guarantee module log
+	DisablePVMLogging    = false
 )
 
 var root atomic.Value
@@ -20,8 +31,34 @@ func init() {
 
 }
 
-func InitLogger() {
-	SetDefault(NewLogger(NewTerminalHandlerWithLevel(os.Stderr, LevelDebug, true)))
+func ParseLevel(lvl string) (slog.Level, error) {
+	switch strings.ToUpper(lvl) {
+	case "MAX", "MAXVERBOSITY":
+		return levelMaxVerbosity, nil
+	case "TRACE":
+		return LevelTrace, nil
+	case "DEBUG":
+		return LevelDebug, nil
+	case "INFO":
+		return LevelInfo, nil
+	case "WARN", "WARNING":
+		return LevelWarn, nil
+	case "ERROR":
+		return LevelError, nil
+	case "CRIT", "CRITICAL":
+		return LevelCrit, nil
+	default:
+		return 0, fmt.Errorf("invalid level: %s", lvl)
+	}
+}
+
+func InitLogger(logLevel string) {
+	logLvl, err := ParseLevel(logLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing logger: %v\n", err)
+		os.Exit(1)
+	}
+	SetDefault(NewLogger(NewTerminalHandlerWithLevel(os.Stderr, logLvl, true)))
 }
 
 // SetDefault sets the default global logger
@@ -48,8 +85,7 @@ func init_module(moduleList []string, moduleEnabled []string) map[string]bool {
 	return moduleMap
 }
 
-// TODO: this list can be provided externally
-var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantor, "blk_mod", "statedb", "G", "grandpa", "segment"}
+var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantor, BlockMonitoring, DAMonitoring, NodeMonitoring, SegmentMonitoring, StateDBMonitoring, GrandpaMonitoring, JamwebMonitoring, "G"} // no idea what is G
 var defaultModuleEnabled = []string{}
 
 // --- Module management ---

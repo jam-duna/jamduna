@@ -387,10 +387,9 @@ func (n *Node) RunRPCCommand() {
 var CurrentSlot = uint32(12)
 
 // process request
-func (n *NodeContent) sendRequest(peer uint16, obj interface{}) (resp interface{}, err error) {
+func (n *NodeContent) sendRequest(peerID uint16, obj interface{}) (resp interface{}, err error) {
 	// Get the peer ID from the object
 	msgType := getMessageType(obj)
-	var peerID uint16
 	if msgType == "unknown" {
 		return nil, fmt.Errorf("unknown type: %s", msgType)
 	}
@@ -426,17 +425,19 @@ func (n *NodeContent) sendRequest(peer uint16, obj interface{}) (resp interface{
 
 		// handle selfRequesting case
 		if peerID == uint16(n.id) {
-			log.Debug(debugDA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
+			log.Trace(debugDA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
 			bundleShard, sClub, encodedPath, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 			if err != nil {
 				log.Error(debugDA, "CE138_request: selfRequesting ERROR", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(self)", n.id, "ERR", err)
 				return resp, err
 			}
 			self_response := CE138_response{
+				ShardIndex:    n.id,
 				BundleShard:   bundleShard,
 				SClub:         sClub,
 				Justification: encodedPath,
 			}
+			log.Trace(debugDA, "CE138_request: selfRequesting OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(self_response))
 			return self_response, nil
 		}
 
@@ -445,7 +446,7 @@ func (n *NodeContent) sendRequest(peer uint16, obj interface{}) (resp interface{
 			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on getPeerByIndex", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
 		}
-		log.Debug(debugDA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID)
+		log.Trace(debugDA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
 		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(erasureRoot, peerID)
 		if err != nil {
 			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
@@ -457,7 +458,7 @@ func (n *NodeContent) sendRequest(peer uint16, obj interface{}) (resp interface{
 			SClub:         sClub,
 			Justification: encodedPath,
 		}
-		log.Debug(debugDA, "CE138_request: SendBundleShardRequest OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", response)
+		log.Trace(debugDA, "CE138_request: SendBundleShardRequest OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(response))
 		return response, nil
 
 	case "CE139_request":

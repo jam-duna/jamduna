@@ -458,7 +458,7 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 		log.Crit(module, "VerifyBundleShard:VerifyWBTJustification VERIFICATION FAILURE", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", bundle_segment_pair, "decodedPath", fmt.Sprintf("%x", decodedPath))
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	} else {
-		log.Trace(module, "VerifyBundleShard:VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "decodedPath", fmt.Sprintf("%x", decodedPath))
+		log.Debug(module, "VerifyBundleShard:VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "decodedPath", fmt.Sprintf("%x", decodedPath))
 	}
 	return true, nil
 }

@@ -52,7 +52,7 @@ func setUserPort(config *types.CommandConfig) (validator_indx int, is_local bool
 }
 
 func main() {
-	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
+	log.InitLogger("debug")
 	validators, secrets, err := node.GenerateValidatorNetwork()
 	if err != nil {
 		fmt.Printf("Error: %s", err)

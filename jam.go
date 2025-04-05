@@ -55,8 +55,8 @@ func setUserPort(config *types.CommandConfig) (validator_indx int, is_local bool
 	}
 }
 func main() {
-	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
-	log.EnableModule("blk_mod")
+	var logLevel string
+	flag.StringVar(&logLevel, "log", "debug", "Logging level (e.g., debug, info, warn, error, crit)")
 	validators, secrets, err := node.GenerateValidatorNetwork()
 	if err != nil {
 		fmt.Printf("Error: %s", err)
@@ -86,6 +86,9 @@ func main() {
 	loc := now.Location()
 
 	fmt.Printf("System time: %s (%s)\n", now.Format("2006-01-02 15:04:05"), loc)
+
+	log.InitLogger(logLevel)
+	log.EnableModule(log.BlockMonitoring)
 
 	config.GenesisState, config.GenesisBlock = node.GetGenesisFile(network)
 	// If help is requested, print usage and exit

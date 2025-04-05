@@ -30,6 +30,16 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const (
+	module                = log.StateDBMonitoring
+	debugSDB              = log.StateDBMonitoring
+	debugA                = "a_mod"
+	debugG                = log.GuaranteeMonitoring
+	debugP                = "p_mod"
+	debugAudit            = "ad_mode"
+	saveSealBlockMaterial = false
+)
+
 type StateDB struct {
 	Finalized               bool
 	Id                      uint16       `json:"id"`
@@ -112,7 +122,7 @@ func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
 	cred := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
 	err = a.VerifySignature(cred)
 	if err != nil {
-		log.Error("statedb", "CheckIncomingAssurance: Invalid Assurance", "err", err)
+		log.Error(debugSDB, "CheckIncomingAssurance: Invalid Assurance", "err", err)
 		return
 	}
 	return nil
@@ -134,13 +144,6 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 
 // EP Errors
 const (
-	module     = "statedb"
-	debugA     = "a_mod"
-	debugG     = "g_mod"
-	debugP     = "p_mod"
-	debugAudit = "ad_mode"
-
-	saveSealBlockMaterial     = false
 	errServiceIndices         = "ServiceIndices duplicated or not ordered"
 	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
 	errPreimageLookupNotEmpty = "Preimagelookup not empty"
@@ -162,13 +165,13 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 
 	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
-		log.Debug("statedb", "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
+		log.Debug(debugSDB, "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
 		//t.PrintAllKeyValues()
 		//t.PrintTree(t.Root, 0)
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
-		log.Debug("statedb", "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
+		log.Debug(debugSDB, "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
 		//t.PrintAllKeyValues()
 		//t.PrintTree(t.Root, 0)
@@ -259,63 +262,63 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 
 	coreAuthPoolEncode, err := t.GetState(C1)
 	if err != nil {
-		log.Crit("statedb", "Error reading C1 CoreAuthPool from trie", err)
+		log.Crit(debugSDB, "Error reading C1 CoreAuthPool from trie", err)
 	}
 	authQueueEncode, err := t.GetState(C2)
 	if err != nil {
-		log.Crit("statedb", "Error reading C2 AuthQueue from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C2 AuthQueue from trie: %v\n", err)
 	}
 	recentBlocksEncode, err := t.GetState(C3)
 	if err != nil {
-		log.Crit("statedb", "Error reading C3 RecentBlocks from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C3 RecentBlocks from trie: %v\n", err)
 	}
 	safroleStateEncode, err := t.GetState(C4)
 	if err != nil {
-		log.Crit("statedb", "Error reading C4 SafroleState from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C4 SafroleState from trie: %v\n", err)
 	}
 	disputeStateEncode, err := t.GetState(C5)
 	if err != nil {
-		log.Crit("statedb", "Error reading C5 DisputeState from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C5 DisputeState from trie: %v\n", err)
 	}
 	entropyEncode, err := t.GetState(C6)
 	if err != nil {
-		log.Crit("statedb", "Error reading C6 Entropy from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C6 Entropy from trie: %v\n", err)
 	}
 	DesignedEpochValidatorsEncode, err := t.GetState(C7)
 	if err != nil {
-		log.Crit("statedb", "Error reading C7 NextEpochValidators from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C7 NextEpochValidators from trie: %v\n", err)
 	}
 	currEpochValidatorsEncode, err := t.GetState(C8)
 	if err != nil {
-		log.Crit("statedb", "Error reading C8 CurrentEpochValidators from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C8 CurrentEpochValidators from trie: %v\n", err)
 	}
 	priorEpochValidatorEncode, err := t.GetState(C9)
 	if err != nil {
-		log.Crit("statedb", "Error reading C9 PriorEpochValidators from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C9 PriorEpochValidators from trie: %v\n", err)
 	}
 	rhoEncode, err := t.GetState(C10)
 	if err != nil {
-		log.Crit("statedb", "Error reading C10 Rho from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C10 Rho from trie: %v\n", err)
 	}
 	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
 	if err != nil {
-		log.Crit("statedb", "Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
 	}
 	privilegedServiceIndicesEncode, err := t.GetState(C12)
 	if err != nil {
-		log.Crit("statedb", "Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
 	}
 	piEncode, err := t.GetState(C13)
 	if err != nil {
-		log.Crit("statedb", "Error reading C13 ActiveValidator from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C13 ActiveValidator from trie: %v\n", err)
 	}
 	accunulateQueueEncode, err := t.GetState(C14)
 	if err != nil {
-		log.Crit("statedb", "Error reading C14 accunulateQueue from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C14 accunulateQueue from trie: %v\n", err)
 	}
 	accunulateHistoryEncode, err := t.GetState(C15)
 	if err != nil {
-		log.Crit("statedb", "Error reading C15 accunulateHistory from trie: %v\n", err)
+		log.Crit(debugSDB, "Error reading C15 accunulateHistory from trie: %v\n", err)
 	}
 	//Decode(authQueueEncode) -> AuthorizationQueue
 	//set AuthorizationQueue back to JamState
@@ -348,7 +351,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
 	sf := s.GetSafrole()
 	if sf == nil {
-		log.Crit("statedb", "UpdateTrieState: NO SAFROLE")
+		log.Crit(debugSDB, "UpdateTrieState: NO SAFROLE")
 	}
 	sb := sf.GetSafroleBasicState()
 	safroleStateEncode := sb.GetSafroleStateBytes()
@@ -394,7 +397,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
 		checkingResult, err := CheckingAllState(t, t2)
 		if !checkingResult || err != nil {
-			log.Crit("statedb", "CheckingAllState", "err", err)
+			log.Crit(debugSDB, "CheckingAllState", "err", err)
 		}
 	}
 
@@ -419,7 +422,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		metaKey := fmt.Sprintf("meta_%x", realKey)
 		metaKeyBytes, err := types.Encode(metaKey)
 		if err != nil {
-			log.Crit("statedb", "GetAllKeyValues", "err", err)
+			log.Crit(debugSDB, "GetAllKeyValues", "err", err)
 		}
 		metaValue := ""
 		metaValues := make([]string, 2)

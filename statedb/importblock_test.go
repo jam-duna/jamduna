@@ -171,7 +171,7 @@ func TestStateTransitionSingle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
-	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
+	log.InitLogger("debug")
 	testSTF(t, filename, string(content))
 }
 

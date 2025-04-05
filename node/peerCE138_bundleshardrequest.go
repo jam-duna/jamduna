@@ -82,7 +82,7 @@ func (p *Peer) SendBundleShardRequest(erasureRoot common.Hash, shardIndex uint16
 	sClub = common.BytesToHash(sclub_justification[0])
 	path_justification := sclub_justification[1:]
 	encodedPath, _ = common.EncodeJustification(path_justification, types.NumECPiecesPerSegment)
-	log.Debug(debugDA, "SendBundleShardRequest DONE", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "bundleShardLen", len(bundleShard), "ecodedPathLen", len(encodedPath), "sClub", sClub, "encodedPath", fmt.Sprintf("%x", encodedPath))
+	log.Trace(debugDA, "SendBundleShardRequest DONE", "p", p.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "bundleShardLen", len(bundleShard), "ecodedPathLen", len(encodedPath), "sClub", sClub, "encodedPath", fmt.Sprintf("%x", encodedPath))
 	return
 }
 

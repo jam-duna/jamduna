@@ -169,7 +169,7 @@ func GenerateRandomBasePort() uint16 {
 func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
 	GenesisStateFile, GenesisBlockFile := GetGenesisFile(network)
-	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
+	log.InitLogger("debug")
 
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
 
@@ -278,8 +278,9 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 }
 
 func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
-	log.InitLogger()
 
+	var logLevel string
+	flag.StringVar(&logLevel, "log", "debug", "Logging level (e.g., debug, info, warn, error, crit)")
 	flag.Parse()
 	peerListMapFile := "../cmd/archive_node/peerlist/local.json"
 	peerListMap, err := ParsePeerList(peerListMapFile)
@@ -293,8 +294,9 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	}
 	fmt.Printf("Node Clients: %v\n", nodes)
 
-	// log.EnableModule("da_mod")
-	// log.EnableModule("segment")
+	log.InitLogger(logLevel)
+	log.EnableModule(debugDA)
+	// log.EnableModule(debugSeg)
 	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 
 	nodeClient := nodes[1]
@@ -351,7 +353,7 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	// Load testServices
 	if jam == "fib2" || jam == "fib3" {
 		serviceNames = []string{"corevm", "auth_copy"}
-		log.EnableModule("statedb") //enable here to avoid concurrent map
+		log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
 	}
 
 	fmt.Printf("Services to Load: %v\n", serviceNames)
@@ -449,7 +451,7 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 				fmt.Printf("Calling nodeClient GetServicePreimage: Name:%v service.ServiceCode:%v CodeHash:%v\n", serviceName, service.ServiceCode, service.CodeHash)
 				code, err := nodeClient.GetServicePreimage(service.ServiceCode, service.CodeHash)
 				if err != nil {
-					log.Debug(debugDA, "ReadServicePreimageBlob Pending")
+					log.Trace(debugDA, "ReadServicePreimageBlob Pending")
 				} else if len(code) > 0 {
 					log.Info(module, "GetServicePreimage", "serviceName", serviceName, "ServiceIndex", service.ServiceCode, "codeHash", service.CodeHash, "len", len(code))
 					if bytes.Equal(code, service.Code) {
@@ -484,8 +486,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
-	// log.EnableModule("da_mod")
-	// log.EnableModule("segment")
+	log.EnableModule(debugDA)
+	//log.EnableModule(debugSeg)
 	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 
 	if *prereq_test {
@@ -558,7 +560,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	}
 	if jam == "fib2" {
 		serviceNames = []string{"corevm", "auth_copy"}
-		log.EnableModule("statedb") //enable here to avoid concurrent map
+		log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
 	}
 	if jam == "game_of_life" {
 		serviceNames = []string{"game_of_life", "auth_copy"}
@@ -649,7 +651,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 				if targetStateDB != nil {
 					code, ok, err := targetStateDB.ReadServicePreimageBlob(service.ServiceCode, service.CodeHash)
 					if err != nil || !ok {
-						log.Debug(debugDA, "ReadServicePreimageBlob", "err", err, "ok", ok)
+						log.Trace(debugDA, "ReadServicePreimageBlob", "err", err, "ok", ok)
 					} else if len(code) > 0 && bytes.Equal(code, service.Code) {
 						ready++
 					}

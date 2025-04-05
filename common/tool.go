@@ -3,6 +3,7 @@ package common
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -292,4 +293,46 @@ func FormatPaddedBytes3D(data [][][]byte, minLen int) [][]string {
 		formatted[i] = FormatPaddedBytesArray(innerSlice, minLen)
 	}
 	return formatted
+}
+
+func BytesToHexStr(v interface{}) interface{} {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr:
+		if rv.IsNil() {
+			return nil
+		}
+		return BytesToHexStr(rv.Elem().Interface())
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			if b, ok := v.([]byte); ok {
+				return "0x" + hex.EncodeToString(b)
+			}
+		}
+		result := make([]interface{}, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			result[i] = BytesToHexStr(rv.Index(i).Interface())
+		}
+		return result
+	case reflect.Map:
+		result := make(map[string]interface{})
+		for _, key := range rv.MapKeys() {
+			keyStr := fmt.Sprintf("%v", key.Interface())
+			result[keyStr] = BytesToHexStr(rv.MapIndex(key).Interface())
+		}
+		return result
+	case reflect.Struct:
+		result := make(map[string]interface{})
+		rt := rv.Type()
+		for i := 0; i < rv.NumField(); i++ {
+			field := rt.Field(i)
+			if field.PkgPath != "" {
+				continue
+			}
+			result[field.Name] = BytesToHexStr(rv.Field(i).Interface())
+		}
+		return result
+	default:
+		return v
+	}
 }

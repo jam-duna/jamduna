@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
+	log.InitLogger("debug")
 	log.EnableModule("block_sync")
 	log.EnableModule("block")
 	log.EnableModule("rpc")
