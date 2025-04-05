@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -112,16 +111,8 @@ func (p *Peer) SendBlockRequest(headerHash common.Hash, direction uint8, maximum
 		fmt.Printf("%s SendBlockRequest ERR2 %v\n", p.String(), err)
 		return blocks, err
 	}
-	decodedBlocks, _, err := types.Decode(respBytes, reflect.TypeOf([]types.Block{}))
-	if err != nil {
-		return blocks, err
-	}
-	blocks = decodedBlocks.([]types.Block)
-	if err != nil {
-		fmt.Printf("%s SendBlockRequest ERR3 %v\n", p.String(), err)
-		return blocks, err
-	}
-	return blocks, nil
+	decodedBlocks, err := types.DecodeBlocks(respBytes)
+	return decodedBlocks, err
 }
 
 func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte, peerID uint16) (err error) {
@@ -143,20 +134,28 @@ func (n *NodeContent) onBlockRequest(stream quic.Stream, msg []byte, peerID uint
 		log.Error(module, "onBlockRequest NOT OK", "headerHash", newReq.HeaderHash, "direction", newReq.Direction)
 		return nil
 	}
-	log.Debug(debugQuic, "***** onBlockRequest incoming ", "peerID", peerID, "ok", ok, "HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks, "len(blocks)", len(blocks))
+
 	var blockBytes []byte
-	blockBytes, err = types.Encode(blocks)
-	if err != nil {
-		return err
-	}
-	// CHECK BLOCK if the blockbytes we sent are decodable and equal the headerhash
-	_, _, err = types.Decode(blockBytes, reflect.TypeOf([]types.Block{}))
-	if err != nil {
-		fmt.Printf("%s SendBlockRequest ERR3 %v\n", n.String(), err)
-		return err
+	for _, b := range blocks {
+		bBytes, err := types.Encode(b)
+		if err != nil {
+			return err
+		}
+		blockBytes = append(blockBytes, bBytes...)
 	}
 
-	// CHECK BLOCK if the blockbytes we sent are decodable and equal the headerhash
+	// check BLOCK if the blockbytes we sent are decodable
+	decodedBlocks, err := types.DecodeBlocks(blockBytes)
+	if len(decodedBlocks) != len(blocks) {
+		log.Warn(debugQuic, "***** onBlockRequest DecodeBlocks mismatch", "peerID", peerID, "ok", ok, "HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks, "len(blocks)", len(blocks), "len(blockBytes)", len(blockBytes), "len(decodedBlocks)", len(decodedBlocks))
+	} else {
+		for i, decodedBlock := range decodedBlocks {
+			origBlock := blocks[i]
+			if origBlock.Header.Hash() != decodedBlock.Header.Hash() {
+				log.Warn(debugQuic, "***** onBlockRequest decodedBlock != origBlock header hash", "i", i, "peerID", peerID, "ok", ok, "HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks, "len(blocks)", len(blocks))
+			}
+		}
+	}
 	err = sendQuicBytes(stream, blockBytes, n.id, CE128_BlockRequest)
 	if err != nil {
 		fmt.Printf("%s onBlockRequest ERR %v", n.String(), err)

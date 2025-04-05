@@ -261,3 +261,32 @@ func (b *Block) UnmarshalJSON(data []byte) error {
 	b.fromCBlock(&cb)
 	return nil
 }
+
+// USED in CE128
+func DecodeBlocks(respBytes []byte) ([]Block, error) {
+	var (
+		decodedBlocks []Block
+		offset        uint32
+	)
+
+	for offset < uint32(len(respBytes)) {
+		blockVal, bytesRead, err := Decode(respBytes[offset:], reflect.TypeOf(Block{}))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode block at offset %d: %w", offset, err)
+		}
+
+		block, ok := blockVal.(Block)
+		if !ok {
+			return nil, fmt.Errorf("decoded value at offset %d is not of type Block", offset)
+		}
+
+		if bytesRead <= 0 || offset+bytesRead > uint32(len(respBytes)) {
+			return nil, fmt.Errorf("invalid number of bytes read: %d at offset %d", bytesRead, offset)
+		}
+
+		decodedBlocks = append(decodedBlocks, block)
+		offset += bytesRead
+	}
+
+	return decodedBlocks, nil
+}

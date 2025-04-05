@@ -1643,10 +1643,10 @@ func (vm *VM) hostLog() {
 		}
 		break
 	case 2: // 2: User agent displays as important information
-		if VM_LOG_FLAG || true {
-			if vm.firstGuarantor == log.FirstGuarantor || true {
+		if VM_LOG_FLAG {
+			if vm.firstGuarantor == log.FirstGuarantor {
 				log.Info(vm.firstGuarantor, levelName, "m", string(messageBytes))
-			} else if vm.logging == log.PvmAuthoring || true {
+			} else if vm.logging == log.PvmAuthoring {
 				log.Info(vm.logging, levelName, "m", string(messageBytes))
 			}
 		}
