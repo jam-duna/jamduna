@@ -1152,6 +1152,7 @@ func (n *Node) extendChain() error {
 			n.statedbMutex.Unlock()
 			return nil
 		}
+
 		current_block_hash := latest_statedb.Block.Header.Hash()
 		curr_node, ok := n.block_tree.GetBlockNode(current_block_hash)
 		if !ok {
@@ -1243,6 +1244,7 @@ func (n *Node) ApplyBlock(nextBlockNode *types.BT_Node) error {
 	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 
+	n.updateServiceMap(newStateDB, nextBlock)
 	// current we always dump state transitions for every node
 	go func() {
 		st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)

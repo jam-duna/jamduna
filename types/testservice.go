@@ -25,3 +25,7 @@ type ServiceSummary struct {
 	LastAccumulateSlot uint32             `json:"last_accumulate_slot"`
 	Statistics         *ServiceStatistics `json:"statistics"`
 }
+
+func (s *ServiceSummary) String() string {
+	return ToJSON(s)
+}

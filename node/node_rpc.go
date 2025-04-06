@@ -176,7 +176,7 @@ var MethodDescriptionMap = map[string]string{
 	"ServiceValue":     "ServiceRequest(serviceIndex string, key hexstring) -> hexstring",
 	"WorkPackage":      "WorkPackage(workPackageHash string) -> json WorkReport",
 	"GetServiceCode":   "GetServiceCode(serviceIndex string) -> json string",
-	"ListServices":     "ListServices(serviceIndex string) -> json string",
+	"ListServices":     "ListServices() -> json string",
 	"AuditWorkPackage": "AuditWorkPackage(workPackageHash string) -> json WorkReport",
 	"Segment":          "GetSegment(requestedHash string, index int) -> hex string",
 	"NewService":       "NewService(serviceName string) -> string",
@@ -831,7 +831,9 @@ func (j *Jam) ListServices(req []string, res *string) error {
 
 	j.servicesMutex.Lock()
 	knownServices := make([]*types.ServiceSummary, 0)
-	for _, si := range j.servicesMap {
+	log.Info(module, "ListServices")
+	for i, si := range j.servicesMap {
+		log.Info(module, "ListServices", "i", i, "si", si.String())
 		knownServices = append(knownServices, si)
 	}
 	j.servicesMutex.Unlock()
