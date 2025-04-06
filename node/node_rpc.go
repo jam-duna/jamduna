@@ -764,15 +764,52 @@ func (j *Jam) SubmitPreimage(req []string, res *string) error {
 	return nil
 }
 
-func (j *Jam) QueryAscendingBlocks(req []string, res *string) error {
-	if len(req) == 1 {
-		// get number from req
-		num, err := strconv.Atoi(req[0])
+// req1= mode like: "latest","genesis", or blockhash hexstring, req2= number of blocks, req3 = direction
+func (j *Jam) FetchBlocks(req []string, res *string) error {
+	if len(req) == 2 {
+		mode := req[0]
+		num, err := strconv.Atoi(req[1])
 		if err != nil {
 			return fmt.Errorf("Invalid number of arguments")
 		}
-		// get the latest block
-		blocks, err := j.peersInfo[3].SendBlockRequest(genesisBlockHash, 0, uint32(num))
+		switch mode {
+		case "genesis":
+			// get number from req
+
+			// get the latest block
+			blocks, err := j.nodeSelf.fetchBlocks(genesisBlockHash, 0, uint32(num))
+			if err != nil {
+				*res = fmt.Sprintf("block not found err=%v", err)
+			}
+			// convert to json
+			*res = types.ToJSON(blocks)
+			return nil
+		case "latest":
+			// get the latest blockhash
+			latestBlockHash := j.statedb.HeaderHash
+			blocks, err := j.nodeSelf.fetchBlocks(latestBlockHash, 1, uint32(num))
+			if err != nil {
+				*res = fmt.Sprintf("block not found err=%v", err)
+			}
+			// convert to json
+			*res = types.ToJSON(blocks)
+			return nil
+		default:
+			*res = fmt.Sprintf("Invalid mode %s", mode)
+		}
+	} else if len(req) == 3 {
+		blockhashhex := req[0]
+		block_hash := common.HexToHash(blockhashhex)
+		num, err := strconv.Atoi(req[1])
+		if err != nil {
+			return fmt.Errorf("Invalid number of arguments")
+		}
+		direction := req[2]
+		direction_num, err := strconv.Atoi(direction)
+		if err != nil {
+			return fmt.Errorf("Invalid number of arguments")
+		}
+		blocks, err := j.nodeSelf.fetchBlocks(block_hash, uint8(direction_num), uint32(num))
 		if err != nil {
 			*res = fmt.Sprintf("block not found err=%v", err)
 		}
@@ -780,7 +817,8 @@ func (j *Jam) QueryAscendingBlocks(req []string, res *string) error {
 		*res = types.ToJSON(blocks)
 		return nil
 	}
-	return fmt.Errorf("Invalid number of arguments")
+	*res = fmt.Sprintf("Invalid Request")
+	return fmt.Errorf("Invalid Request")
 }
 
 func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
