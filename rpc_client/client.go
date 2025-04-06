@@ -136,7 +136,6 @@ func (c *NodeClient) LoadServices(services []string) (map[string]types.ServiceIn
 	for _, service_name := range services {
 		service_info, err := c.NewService(service_name)
 		if err != nil {
-			panic(err)
 			return nil, err
 		}
 		// Wait for the service to be ready

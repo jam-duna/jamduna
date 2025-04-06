@@ -3,23 +3,23 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/colorfulnotion/jam/common"
 	"io/ioutil"
 	"os"
 	"testing"
-	"github.com/colorfulnotion/jam/common"
 )
 
 func TestDecodeBlocks(t *testing.T) {
 	// Read the file "assurances.bin" from a concatenated array of blocks (forming a chain)
 	// cat ../../../jam-duna/jamtestnet/data/assurances/blocks/*.bin  > assurances.bin
 	// cat ../../../jam-duna/jamtestnet/data/orderedaccumulation/blocks/*.bin > orderedaccumulation.bin
-	filePaths := []string{"assurances.bin", "orderedaccumulation.bin" }
+	filePaths := []string{"assurances.bin", "orderedaccumulation.bin"}
 	for _, filePath := range filePaths {
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			t.Fatalf("Failed to read file %s: %v", filePath, err)
 		}
-		
+
 		// Unmarshal the JSON into a CBlock
 		blocks, err := DecodeBlocks(data)
 		if err != nil {

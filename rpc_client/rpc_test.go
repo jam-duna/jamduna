@@ -38,9 +38,18 @@ func TestClient(t *testing.T) {
 	}
 
 	defer client.Close()
-	services_map, err := client.LoadServices(services)
-	if err != nil {
-		t.Fatalf("Error: %s", err)
+
+	done := false
+	var services_map map[string]types.ServiceInfo
+	for !done {
+		fmt.Printf("LoadServices\n")
+		services_map, err = client.LoadServices(services)
+		if err != nil {
+			fmt.Printf("LoadServices err %v\n", err)
+			time.Sleep(15 * time.Second)
+		} else {
+			done = true
+		}
 	}
 	go client.RunState()
 	switch *mode {

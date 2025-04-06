@@ -34,6 +34,7 @@ var upgrader = websocket.Upgrader{
 // Hub maintains the set of active clients and broadcasts messages to them.
 type Hub struct {
 	// Registered clients.
+	// TODO: model WHAT they are subscribing to [bestBlock, finalizedBlock, statistics, serviceInfo(serviceID), serviceValue(serviceID, key), servicePreimage(serviceID, hash), serviceRequest(serviceID, hash)
 	clients map[*Client]bool
 
 	// Inbound messages to be broadcast to all clients.

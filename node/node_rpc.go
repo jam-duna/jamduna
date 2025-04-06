@@ -157,57 +157,9 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_st
 	return &rho_state, nil
 }
 
-// OLD METHODS
-func (j *Jam) GetBlockBySlot(req []string, res *string) error {
-	if len(req) != 1 {
-		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
-	}
-
-	var slot uint32
-	input := req[0]
-	switch input {
-	case "latest":
-		slot = j.NodeContent.getLatestFinalizedBlockSlot()
-	case "best":
-		slot = j.NodeContent.getBestBlockSlot()
-	default:
-		parsed, err := strconv.ParseUint(input, 10, 32)
-		if err != nil {
-			return fmt.Errorf("invalid slot value %q: %w", input, err)
-		}
-		slot = uint32(parsed)
-	}
-
-	block, err := j.NodeContent.GetStoredBlockBySlot(slot)
-	if err != nil {
-		return nil
-	}
-
-	*res = block.String()
-	return nil
-}
-
-func (j *Jam) GetBlockByHash(req []string, res *string) error {
-	return j.Block(req, res)
-}
-
-func (j *Jam) GetState(req []string, res *string) error {
-	return j.State(req, res)
-}
-
-func (j *Jam) GetService(req []string, res *string) error {
-	return j.ServiceInfo(req, res)
-}
-
 var MethodDescriptionMap = map[string]string{
 	"Functions":   "Functions() -> functions description",
 	"NodeCommand": "NodeCommand(command string) -> will pass the command to the node",
-
-	// old RPC methods, for backwards compatibility
-	"GetBlockBySlot": "GetBlockBySlot(slot string) -> string",
-	"GetState":       "GetState(headerHash hexstring) -> string",       // synonym for State
-	"GetService":     "GetService(serviceIndex string) -> string",      // synonym for Service
-	"GetBlockByHash": "GetBlockByHash(headerHash hexstring) -> string", // synonym for Block
 
 	"Block":            "Block(headerHash hexstring) -> string",
 	"BestBlock":        "BestBlock(headerHash hexstring) -> string",
@@ -294,6 +246,83 @@ func (j *Jam) AddPreimage(preimage []byte, res *common.Hash) error {
 	return nil
 }
 
+// Returns the header hash and slot of the parent of the block with the given header hash, or null if this is not known.
+func (j *Jam) Parent(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
+	}
+
+	input := req[0]
+	headerHash := common.HexToHash(input)
+
+	block, err := j.NodeContent.GetBlockByHeaderHash(headerHash)
+	if err != nil {
+		return fmt.Errorf("failed to get block by header hash %s: %w", headerHash.String(), err)
+	}
+
+	parentHeaderHash := block.Header.ParentHeaderHash
+	parentBlock, err := j.NodeContent.GetBlockByHeaderHash(parentHeaderHash)
+	if err != nil {
+		return fmt.Errorf("failed to get parent of header hash %s: %w", headerHash.String(), err)
+	}
+	parentBlockSlot := parentBlock.Header.Slot
+
+	type getParentResponse struct {
+		ParentHeaderHash common.Hash `json:"parent_header_hash"`
+		ParentBlockSlot  uint32      `json:"parent_block_slot"`
+	}
+	response := getParentResponse{
+		ParentHeaderHash: parentHeaderHash,
+		ParentBlockSlot:  parentBlockSlot,
+	}
+	resp, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+
+	*res = string(resp)
+	return nil
+}
+
+// Returns the posterior state root of the block with the given header hash, or null if this is not known.
+func (j *Jam) StateRoot(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
+	}
+
+	input := req[0]
+	headerHash := common.HexToHash(input)
+
+	sdb, ok := j.statedbMap[headerHash]
+	if ok {
+		*res = fmt.Sprintf("%s", sdb.StateRoot)
+		return nil
+	}
+	return fmt.Errorf("Unknown header hash %s", headerHash)
+}
+
+// Returns the BEEFY root of the block with the given header hash, or null if this is not known.
+func (j *Jam) BeefyRoot(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
+	}
+
+	input := req[0]
+	headerHash := common.HexToHash(input)
+
+	sdb, ok := j.getStateDBByHeaderHash(headerHash)
+	if !ok {
+		return fmt.Errorf("state not found for header hash %s", headerHash.String())
+	}
+
+	recentBlocks := sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).RecentBlocks
+	if len(recentBlocks) > 0 {
+		*res = recentBlocks[len(recentBlocks)-1].String()
+		return nil
+	}
+	return fmt.Errorf("No recent blocks")
+}
+
 func (j *Jam) Block(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
@@ -317,10 +346,23 @@ func (j *Jam) Block(req []string, res *string) error {
 			return fmt.Errorf("failed to get best block by slot %d: %w", slot, err)
 		}
 	default:
-		headerHash := common.HexToHash(input)
-		block, err = j.NodeContent.GetBlockByHeaderHash(headerHash)
-		if err != nil {
-			return fmt.Errorf("failed to get block by header hash %s: %w", headerHash.String(), err)
+		if len(input) < 20 {
+			var slot uint32
+			parsed, err := strconv.ParseUint(input, 10, 32)
+			if err != nil {
+				return fmt.Errorf("invalid slot value %q: %w", input, err)
+			}
+			slot = uint32(parsed)
+			block, err = j.NodeContent.GetStoredBlockBySlot(slot)
+			if err != nil {
+				return fmt.Errorf("failed to get block by slot %s: %w", input, err)
+			}
+		} else {
+			headerHash := common.HexToHash(input)
+			block, err = j.NodeContent.GetBlockByHeaderHash(headerHash)
+			if err != nil {
+				return fmt.Errorf("failed to get block by header hash %s: %w", headerHash.String(), err)
+			}
 		}
 	}
 

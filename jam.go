@@ -156,7 +156,7 @@ func main() {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)
 	}
-	n.SetSendTickets(true)
+	n.SetSendTickets(false)
 	n.SetServiceDir("/services")
 	storage, err := n.GetStorage()
 	defer storage.Close()
