@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Game of Life</title>
+  <style>
+    html {
+      height: 100%;
+      box-sizing: border-box;
+    }
+    *, *:before, *:after {
+      box-sizing: inherit;
+    }
+    body {
+      height: 100vh;
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+      background-color: #eef1f5;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      padding: 25px;
+    }
+    #appBanner {
+      color: #4a5568;
+      padding: 5px 25px 10px 25px;
+      text-align: center;
+      flex-shrink: 0;
+      margin-bottom: 20px;
+    }
+    #appBanner h1 {
+      margin: 0;
+      font-size: 50px;
+      font-weight: 600;
+      line-height: 1.1;
+    }
+    .container {
+      display: flex;
+      flex: 1;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 25px;
+      min-height: 0;
+    }
+    .left-panel, .right-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background-color: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      padding: 20px;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .left-panel {
+       gap: 15px;
+    }
+    #sidebar {
+      font-size: 2.75em;
+      line-height: 1.1;
+      color: #555;
+      font-weight: 300;
+      flex-shrink: 0;
+      text-align: center;
+      padding: 10px 0;
+    }
+    #sidebar #counter {
+      font-weight: 600;
+      color: #000;
+      margin-left: 0.2em;
+    }
+    #canvasContainer {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+        min-height: 0;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        background-color: #f8f9fa;
+    }
+    #gameCanvas {
+      display: block;
+      border: 1px solid #ccc;
+      background-color: white;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .right-panel {
+        gap: 15px;
+    }
+    .right-panel h2 {
+      font-size: 18px;
+      margin: 0;
+      color: #333;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 8px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+     #lastMessage {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #4a5568;
+      background-color: #f8f9fa;
+      padding: 10px 12px;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+      word-wrap: break-word;
+      overflow-y: auto;
+      min-height: 4.5em;
+      max-height: 120px;
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    #eventLog {
+      flex: 1;
+      background: #f8f9fa;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 12px;
+      overflow-y: auto;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #444;
+      min-height: 50px;
+    }
+    #eventLog p {
+        margin: 0 0 6px 0;
+        word-wrap: break-word;
+    }
+    #eventLog p:last-child {
+        margin-bottom: 0;
+    }
+    #eventLog p.ok { color: #b6cec2; }
+    #eventLog p.success { color: #2f855a; }
+    #eventLog p.error { color: #c53030; }
+  </style>
+</head>
+<body>
+  <header id="appBanner">
+    <h1>Game of Life</h1>
+  </header>
+  <div class="container">
+    <div class="left-panel">
+      <div id="sidebar">
+        Steps:<span id="counter">0</span>
+      </div>
+      <div id="canvasContainer">
+         <canvas id="gameCanvas"></canvas>
+      </div>
+    </div>
+    <div class="right-panel">
+       <h2>Last Message</h2>
+       <div id="lastMessage">Waiting for data...</div>
+       <h2>Event Log</h2>
+       <div id="eventLog"></div>
+    </div>
+  </div>
+  <script>
+    const PAGE_SIZE = 4096;
+    const PAGE_DIM = 64;
+    const PAGES_PER_ROW = 3;
+    const PAGES_PER_COL = 3;
+    const TOTAL_ROWS = PAGE_DIM * PAGES_PER_COL;
+    const TOTAL_COLS = PAGE_DIM * PAGES_PER_ROW;
+    const canvas = document.getElementById("gameCanvas");
+    const canvasContainer = document.getElementById("canvasContainer");
+    const ctx = canvas.getContext("2d");
+    const counterElement = document.getElementById("counter");
+    const eventLog = document.getElementById("eventLog");
+    const lastMessage = document.getElementById("lastMessage");
+    let currentGridData = null;
+    let currentStep = 0;
+    let cellSize = 1;
+    let resizeTimeout;
+    function toHexString(byteArray) {
+      return Array.from(byteArray, byte => ('0' + (byte & 0xFF).toString(16)).slice(-2)).join('');
+    }
+    function adjustCanvasSizeAndRedraw() {
+      const containerStyle = window.getComputedStyle(canvasContainer);
+      const availableWidth = canvasContainer.clientWidth - parseFloat(containerStyle.paddingLeft) - parseFloat(containerStyle.paddingRight) - 2;
+      const availableHeight = canvasContainer.clientHeight - parseFloat(containerStyle.paddingTop) - parseFloat(containerStyle.paddingBottom) - 2;
+      if (availableWidth <= 0 || availableHeight <= 0) return;
+      const cellWidth = Math.floor(availableWidth / TOTAL_COLS);
+      const cellHeight = Math.floor(availableHeight / TOTAL_ROWS);
+      cellSize = Math.max(1, Math.min(cellWidth, cellHeight));
+      canvas.width = TOTAL_COLS * cellSize;
+      canvas.height = TOTAL_ROWS * cellSize;
+      canvas.style.width = `${canvas.width}px`;
+      canvas.style.height = `${canvas.height}px`;
+      if (currentGridData) {
+        drawGrid(currentGridData);
+      }
+    }
+    function drawGrid(flatData) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const aliveColor = "#333";
+      const deadColor = "#ffffff";
+      for (let page = 0; page < 9; page++) {
+        const pageData = flatData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+        const pageRowOffset = Math.floor(page / PAGES_PER_ROW) * PAGE_DIM;
+        const pageColOffset = (page % PAGES_PER_ROW) * PAGE_DIM;
+        for (let i = 0; i < PAGE_DIM; i++) {
+          for (let j = 0; j < PAGE_DIM; j++) {
+            const index = i * PAGE_DIM + j;
+            ctx.fillStyle = pageData[index] === 0 ? deadColor : aliveColor;
+            const x = (pageColOffset + j) * cellSize;
+            const y = (pageRowOffset + i) * cellSize;
+            const drawSize = Math.max(1, cellSize);
+            ctx.fillRect(x, y, drawSize, drawSize);
+          }
+        }
+      }
+    }
+    const ws = new WebSocket("ws://" + location.host + "/wsgof_rpc");
+    ws.binaryType = "arraybuffer";
+    ws.onopen = function() {
+      const now = new Date().toLocaleTimeString();
+      const newLog = document.createElement('p');
+      newLog.className = 'success';
+      newLog.textContent = `[${now}] WebSocket connection established on ${location.host}`;
+      eventLog.insertBefore(newLog, eventLog.firstChild);
+    };
+    ws.onerror = function(error) {
+      const now = new Date().toLocaleTimeString();
+      console.error("WebSocket Error: ", error);
+      const newLog = document.createElement('p');
+      newLog.className = 'error';
+      newLog.textContent = `[${now}] WebSocket error occurred. Check console.`;
+      eventLog.insertBefore(newLog, eventLog.firstChild);
+    };
+    ws.onclose = function(event) {
+      const now = new Date().toLocaleTimeString();
+      let reason = event.reason ? ` Reason: ${event.reason}` : '';
+      let code = event.code ? ` Code: ${event.code}` : '';
+      const newLog = document.createElement('p');
+      newLog.className = 'error';
+      newLog.textContent = `[${now}] WebSocket connection closed.${code}${reason}`;
+      eventLog.insertBefore(newLog, eventLog.firstChild);
+    };
+    ws.onmessage = function(event) {
+      const data = new Uint8Array(event.data);
+      const now = new Date().toLocaleTimeString();
+      let logClass = "success";
+      let logText = `Received message: ${data.length} bytes`;
+      const expectedLength = 4 + 9 * PAGE_SIZE;
+      if (data.length == 4) {
+        logText = `Keep-alive or empty segment received`;
+        logClass = "ok";
+        lastMessage.textContent = 'Waiting for next step...';
+        lastMessage.style.color = '#888';
+      } else if (data.length < expectedLength) {
+        logText = `Error: Received data too short (${data.length} bytes). Expected at least ${expectedLength}.`;
+        logClass = "error";
+        lastMessage.textContent = 'Error receiving data.';
+        lastMessage.style.color = '#c53030';
+        currentGridData = null;
+      } else {
+        logClass = "success";
+        const dv = new DataView(data.buffer);
+        currentStep = dv.getUint32(0, true);
+        counterElement.textContent = currentStep;
+        currentGridData = data.slice(4);
+        adjustCanvasSizeAndRedraw();
+        lastMessage.textContent = `Step: ${currentStep}, Data: ${data.length} bytes, Preview: ${toHexString(data.slice(0, 16))}...`;
+        lastMessage.style.color = '#4a5568';
+      }
+      const newLog = document.createElement('p');
+      newLog.className = logClass;
+      newLog.textContent = `[${now}] ${logText}`;
+      eventLog.insertBefore(newLog, eventLog.firstChild);
+      const maxLogEntries = 100;
+      while (eventLog.childElementCount > maxLogEntries) {
+          eventLog.removeChild(eventLog.lastChild);
+      }
+    };
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(adjustCanvasSizeAndRedraw, 150);
+    });
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(adjustCanvasSizeAndRedraw, 50);
+    });
+  </script>
+</body>
+</html>

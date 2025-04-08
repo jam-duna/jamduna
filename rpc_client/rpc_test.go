@@ -9,35 +9,50 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
 var modeToServices = map[string][]string{
-	"fib":  {"fib", "auth_copy"},
-	"fib2": {"corevm", "auth_copy"},
+	"fib":          {"fib", "auth_copy"},
+	"fib2":         {"corevm", "auth_copy"},
+	"game_of_life": {"game_of_life", "auth_copy"},
 }
 var mode = flag.String("mode", "fib", "Mode to run the test client")
+var isLocal = flag.Bool("isLocal", false, "Run local version")
 
 func TestClient(t *testing.T) {
-	//9900+1200
 
 	flag.Parse()
+	testMode := *mode
+	local := *isLocal
 
-	services, ok := modeToServices[*mode]
+	services, ok := modeToServices[testMode]
 	if !ok {
-		t.Fatalf("Invalid mode: %s", *mode)
+		t.Fatalf("Invalid mode: %s", testMode)
 	}
+
+	var address string
 	port := 9900 + 1200
-	// address := fmt.Sprintf("localhost:%d", port)
-	address := fmt.Sprintf("jam-0.jamduna.org:%d", port)
-	fmt.Printf("connecting %s\n", address)
+	if local {
+		address = fmt.Sprintf("localhost:%d", port)
+		fmt.Printf("[Local Mode] connecting to %s\n", address)
+	} else {
+		address = fmt.Sprintf("jam-0.jamduna.org:%d", port)
+		fmt.Printf("[Remote Mode] connecting to %s\n", address)
+	}
 	client, err := NewNodeClient(address)
 	if err != nil {
 		t.Fatalf("Error: %s", err)
 	}
-
 	defer client.Close()
+
+	var game_of_life_ws_push func([]byte)
+	if testMode == "game_of_life" {
+		//this is local
+		game_of_life_ws_push = node.StartGameOfLifeServer("localhost:8080", "../rpc_client/game_of_life.html")
+	}
 
 	done := false
 	var services_map map[string]types.ServiceInfo
@@ -52,13 +67,15 @@ func TestClient(t *testing.T) {
 		}
 	}
 	go client.RunState()
-	switch *mode {
+	switch testMode {
 	case "fib":
 		fib(t, client, services_map, 10)
 	case "fib2":
 		fib2(t, client, services_map, 10)
+	case "game_of_life":
+		game_of_life(t, client, services_map, game_of_life_ws_push)
 	default:
-		t.Fatalf("Invalid mode: %s", *mode)
+		t.Fatalf("Invalid mode: %s", testMode)
 	}
 }
 
@@ -327,6 +344,181 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 			}
 			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
 		}
+
+		for i := 0; i <= int(fibN); i++ {
+			segment, _ := client.Segment(workPackageHash, uint16(i))
+			fmt.Printf("segment %d %v\n", i, segment[:24])
+		}
+	}
+}
+
+func game_of_life(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, ws_push func([]byte)) {
+
+	flatten := func(data [][]byte) []byte {
+		var result []byte
+		for _, block := range data {
+			result = append(result, block[8:]...)
+		}
+		return result
+	}
+
+	fmt.Printf("Game of Life START\n")
+
+	service0_child_code, _ := getServices([]string{"game_of_life_child"}, false)
+	service0_child_codehash := service0_child_code["game_of_life_child"].CodeHash
+
+	service0_child_code_length := uint32(len(service0_child_code["game_of_life_child"].Code))
+	service0_child_code_length_bytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(service0_child_code_length_bytes, service0_child_code_length)
+	fmt.Printf("game_of_life_CHILD_CODE: %d %s\n", service0_child_code_length, service0_child_codehash)
+
+	// Generate the extrinsic
+	extrinsics := types.ExtrinsicsBlobs{}
+
+	extrinsic := make([]byte, 0)
+	extrinsic = append(extrinsic, service0_child_codehash.Bytes()...)
+	extrinsic = append(extrinsic, service0_child_code_length_bytes...)
+
+	extrinsic_hash := common.Blake2Hash(extrinsic)
+	extrinsic_len := uint32(len(extrinsic))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsic_hash,
+		Len:  extrinsic_len,
+	})
+
+	extrinsics = append(extrinsics, extrinsic)
+	prevWorkPackageHash := common.Hash{}
+
+	export_count := uint16(0)
+	for step_n := 0; step_n <= 30; step_n++ {
+		importedSegments := make([]types.ImportSegment, 0)
+		if step_n > 1 {
+			for i := 0; i < 9; i++ {
+				importedSegment := types.ImportSegment{
+					RequestedHash: prevWorkPackageHash,
+					Index:         uint16(i),
+				}
+				importedSegments = append(importedSegments, importedSegment)
+			}
+		}
+		refine_context, err := client.GetRefineContext()
+		if err != nil {
+			t.Fatalf("Error: %s", err)
+		}
+
+		var payload []byte
+		if step_n > 0 {
+			payload = make([]byte, 0, 12)
+			tmp := make([]byte, 4)
+			binary.LittleEndian.PutUint32(tmp, uint32(step_n))
+			payload = append(payload, tmp...)
+
+			binary.LittleEndian.PutUint32(tmp, uint32(10)) // num_of_gliders
+			payload = append(payload, tmp...)
+
+			binary.LittleEndian.PutUint32(tmp, uint32(10)) // total_execution_steps
+			payload = append(payload, tmp...)
+
+			export_count = 9
+		} else {
+			payload = []byte{}
+		}
+
+		game_of_life_index := testServices["game_of_life"].ServiceIndex
+		game_of_life_code_hash := testServices["game_of_life"].ServiceCodeHash
+		service_authcopy_index := testServices["auth_copy"].ServiceIndex
+		service_authcopy_code_hash := testServices["auth_copy"].ServiceCodeHash
+
+		workPackage := types.WorkPackage{
+			AuthCodeHost:          0,
+			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			RefineContext:         refine_context,
+			WorkItems: []types.WorkItem{
+				{
+					Service:            game_of_life_index,
+					CodeHash:           game_of_life_code_hash,
+					Payload:            payload,
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   importedSegments,
+					Extrinsics:         work_item_extrinsic,
+					ExportCount:        export_count,
+				},
+				{
+					Service:            service_authcopy_index,
+					CodeHash:           service_authcopy_code_hash,
+					Payload:            []byte{},
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
+				},
+			},
+		}
+		workPackageHash := workPackage.Hash()
+
+		fmt.Printf("Game_of_life-(%d) work package submitted %v\n", step_n, workPackageHash)
+
+		workpackage_req := types.WorkPackageRequest{
+			CoreIndex:       0,
+			WorkPackage:     workPackage,
+			ExtrinsicsBlobs: extrinsics,
+		}
+
+		err = client.SubmitWorkPackage(workpackage_req)
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+
+		// wait until the work report is pending
+		for {
+			time.Sleep(1 * time.Second)
+			if client.GetState() == nil {
+				continue
+			}
+			find := false
+			for _, packagehash := range client.GetState().AccumulationHistory[types.EpochLength-1].WorkPackageHash {
+				if packagehash == workPackageHash {
+					find = true
+					break
+				}
+			}
+			if find {
+				break
+			}
+		}
+
+		if step_n > 0 {
+			var vm_export [][]byte
+			for i := 0; i < int(export_count); i++ {
+				segment, err := client.Segment(workPackageHash, uint16(i))
+				if err == nil {
+					vm_export = append(vm_export, segment)
+				}
+			}
+			stepBytes := make([]byte, 4)
+			binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
+			out := append(stepBytes, flatten(vm_export)...)
+
+			ws_push(out)
+
+		} else {
+			_, err := client.AddPreimage(service0_child_code["game_of_life_child"].Code)
+			if err != nil {
+				t.Fatalf("AddPreimage: %s", err)
+			}
+			err = client.SubmitPreimage(game_of_life_index, service0_child_code["game_of_life_child"].Code)
+			if err != nil {
+				t.Fatalf("SendPreimageAnnouncement: %s", err)
+			}
+			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
+		}
+		prevWorkPackageHash = workPackageHash
 	}
 }
 

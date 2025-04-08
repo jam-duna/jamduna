@@ -217,3 +217,29 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_st
 	}
 	return &rho_state, nil
 }
+
+func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, error) {
+	// Convert the segment index to a string
+	segmentIndexStr := strconv.FormatUint(uint64(segmentIndex), 10)
+	req := []string{wphash.Hex(), segmentIndexStr}
+
+	var res string
+	err := c.Client.Call("jam.Segment", req, &res)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert the hex string back to bytes
+	// segmentBytes := common.Hex2Bytes(res)
+
+	type getSegmentResponse struct {
+		Segment       []byte        `json:"segment"`
+		Justification []common.Hash `json:"justification"`
+	}
+	var parsed getSegmentResponse
+	_ = json.Unmarshal([]byte(res), &parsed)
+
+	segmentBytes := parsed.Segment
+
+	return segmentBytes, nil
+}

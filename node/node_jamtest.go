@@ -505,6 +505,10 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		log.EnableModule(log.FirstGuarantor)
 		log.EnableModule(log.GeneralAuthoring)
 	}
+	var game_of_life_ws_push func([]byte)
+	if jam == "game_of_life" {
+		game_of_life_ws_push = StartGameOfLifeServer("localhost:8080", "../rpc_client/game_of_life.html")
+	}
 
 	_ = nodes
 	block_graph_server := types.NewGraphServer(basePort)
@@ -542,6 +546,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	builderNode.preimages[bootstrapCodeHash] = bootstrapCode
 	new_service_idx := uint32(0)
 	// Load testServices
+
 	serviceNames := []string{"auth_copy", "fib"}
 	if jam == "megatron" {
 		serviceNames = []string{"fib", "tribonacci", "megatron", "auth_copy"} // Others include: "padovan", "pell", "racaman"
@@ -696,7 +701,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	case "blake2b":
 		blake2b(nodes, testServices, targetN)
 	case "game_of_life":
-		game_of_life(nodes, testServices)
+		game_of_life(nodes, testServices, game_of_life_ws_push)
 	}
 }
 
@@ -3171,15 +3176,17 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 	}
 }
 
-func game_of_life(nodes []*Node, testServices map[string]*types.TestService) {
-	// Start the websocket server
-	// http://localhost:80
+func StartGameOfLifeServer(addr string, path string) func(data []byte) {
+	//addr := "localhost:8080"
+	//path := "../rpc_client/game_of_life.html"
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	var wsConn *websocket.Conn
 
 	go func() {
-		http.Handle("/", http.FileServer(http.Dir(".")))
-		http.HandleFunc("/wsgof", func(w http.ResponseWriter, r *http.Request) {
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, path)
+		})
+		http.HandleFunc("/wsgof_rpc", func(w http.ResponseWriter, r *http.Request) {
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				fmt.Println("upgrade error:", err)
@@ -3188,19 +3195,26 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService) {
 			wsConn = conn
 			fmt.Println("Client connected")
 		})
-		go http.ListenAndServe("0.0.0.0:80", nil)
+		go http.ListenAndServe(addr, nil)
+		fmt.Printf("Starting Game of Life on %v\n", addr)
 	}()
 
-	push := func(data []byte) {
+	return func(data []byte) {
 		if wsConn != nil {
+			fmt.Printf("Sending data to WebSocket client len(%d)\n", len(data))
 			wsConn.WriteMessage(websocket.BinaryMessage, data)
+		} else {
+			fmt.Println("WebSocket connection not established")
 		}
 	}
+}
+
+func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_push func([]byte)) {
 
 	flatten := func(data [][]byte) []byte {
 		var result []byte
 		for _, block := range data {
-			result = append(result, block[:4096]...)
+			result = append(result, block[8:]...)
 		}
 		return result
 	}
@@ -3210,16 +3224,41 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService) {
 	service0 := testServices["game_of_life"]
 	service_authcopy := testServices["auth_copy"]
 
+	service0_child_code, _ := getServices([]string{"game_of_life_child"}, false)
+	service0_child_codehash := service0_child_code["game_of_life_child"].CodeHash
+
+	service0_child_code_length := uint32(len(service0_child_code["game_of_life_child"].Code))
+	service0_child_code_length_bytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(service0_child_code_length_bytes, service0_child_code_length)
+	fmt.Printf("game_of_life_CHILD_CODE: %d %s\n", service0_child_code_length, service0_child_codehash)
+
+	// Generate the extrinsic
+	extrinsics := types.ExtrinsicsBlobs{}
+
+	extrinsic := make([]byte, 0)
+	extrinsic = append(extrinsic, service0_child_codehash.Bytes()...)
+	extrinsic = append(extrinsic, service0_child_code_length_bytes...)
+
+	extrinsic_hash := common.Blake2Hash(extrinsic)
+	extrinsic_len := uint32(len(extrinsic))
+
+	// Put the extrinsic hash and length into the work item extrinsic
+	work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
+	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
+		Hash: extrinsic_hash,
+		Len:  extrinsic_len,
+	})
+
+	extrinsics = append(extrinsics, extrinsic)
+
 	n1 := nodes[1]
 	n4 := nodes[4]
 	core := 0
 	prevWorkPackageHash := common.Hash{}
 
-	// Generate the extrinsic
-	extrinsics := types.ExtrinsicsBlobs{}
-
-	for step_n := 1; step_n <= 30; step_n++ {
+	for step_n := 0; step_n <= 30; step_n++ {
 		importedSegments := make([]types.ImportSegment, 0)
+		export_count := uint16(0)
 		if step_n > 1 {
 			for i := 0; i < 9; i++ {
 				importedSegment := types.ImportSegment{
@@ -3231,16 +3270,23 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService) {
 		}
 		refine_context := n1.statedb.GetRefineContext()
 
-		payload := make([]byte, 0, 12)
-		tmp := make([]byte, 4)
-		binary.LittleEndian.PutUint32(tmp, uint32(step_n))
-		payload = append(payload, tmp...)
+		var payload []byte
+		if step_n > 0 {
+			payload = make([]byte, 0, 12)
+			tmp := make([]byte, 4)
+			binary.LittleEndian.PutUint32(tmp, uint32(step_n))
+			payload = append(payload, tmp...)
 
-		binary.LittleEndian.PutUint32(tmp, uint32(10)) // num_of_gliders
-		payload = append(payload, tmp...)
+			binary.LittleEndian.PutUint32(tmp, uint32(10)) // num_of_gliders
+			payload = append(payload, tmp...)
 
-		binary.LittleEndian.PutUint32(tmp, uint32(10)) // total_execution_steps
-		payload = append(payload, tmp...)
+			binary.LittleEndian.PutUint32(tmp, uint32(10)) // total_execution_steps
+			payload = append(payload, tmp...)
+
+			export_count = 9
+		} else {
+			payload = []byte{}
+		}
 
 		workPackage := types.WorkPackage{
 			AuthCodeHost:          0,
@@ -3256,7 +3302,8 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService) {
 					RefineGasLimit:     5678,
 					AccumulateGasLimit: 9876,
 					ImportedSegments:   importedSegments,
-					ExportCount:        9,
+					Extrinsics:         work_item_extrinsic,
+					ExportCount:        export_count,
 				},
 				{
 					Service:            service_authcopy.ServiceCode,
@@ -3307,8 +3354,14 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService) {
 				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
 				out := append(stepBytes, flatten(vm_export)...)
 
-				push(out)
+				ws_push(out)
 			}
+		} else {
+			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, service0_child_codehash, service0_child_code_length, service0_child_code["game_of_life_child"].Code)
+			if err != nil {
+				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+			}
+			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
 		}
 
 		prevWorkPackageHash = workPackageHash
