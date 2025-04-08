@@ -227,10 +227,16 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	for _, coworker := range coworkers {
 		wg.Add(1)
 		go func(coworker Peer) {
-			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error(debugG, "panic in coworker goroutine", "err", r)
+				}
+				wg.Done()
+			}()
 			// if it's itself, execute the workpackage
 			if coworker.PeerID == n.id {
 				var execErr error
+				// TODO: PROBLEM report, d are SHARED variables across coworker
 				report, d, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, true)
 				if execErr != nil {
 					return
@@ -241,7 +247,9 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				guarantee.Signatures = append(guarantee.Signatures, gc)
 				return
 			} else {
-				fellow_response, errfellow := coworker.ShareWorkPackage(coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
+				ctx, cancel := context.WithTimeout(context.Background(), LargeTimeout)
+				defer cancel()
+				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
 					log.Trace(debugG, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
 					return
@@ -280,11 +288,13 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	}
 
 	if len(guarantee.Signatures) >= 2 {
-		if len(guarantee.Signatures) == 2 {
-			log.Trace(debugG, "processWPQueueItem:Only 2 signatures, expected 3")
-		}
 		guarantee.Slot = curr_statedb.GetTimeslot()
-		go n.broadcast(guarantee)
+		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+		go func() {
+			defer cancel() // ensures context is released
+			_ = n.broadcast(ctx, guarantee)
+		}()
+
 		saveGuaranteeDerivation(GuaranteeDerivation{
 			Bundle:            bundle,
 			CoreIndex:         coreIndex,

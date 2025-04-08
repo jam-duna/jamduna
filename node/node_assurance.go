@@ -1,6 +1,9 @@
 package node
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -56,33 +59,36 @@ func (n *Node) generateAssurance(headerHash common.Hash) (a types.Assurance, num
 	return
 }
 
-// assureData, given a Guarantee with a AvailabiltySpec within a WorkReport, fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA
-func (n *Node) assureData(g types.Guarantee) (err error) {
+// assureData, given a Guarantee with an AvailabilitySpec within a WorkReport,
+// fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA.
+func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	spec := g.Report.AvailabilitySpec
-
-	// concatSegmentShards refers to the EC shards of the EXPORTED segments AND PROOF PAGES shards from the guaranteed work package
 	guarantor := g.Signatures[0].ValidatorIndex
-	bundleShard, exported_segments_and_proofpageShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(spec.ErasureRoot, n.id)
+
+	bundleShard, exportedShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, n.id)
 	if err != nil {
-		log.Error(debugDA, "assureData:SendFullShardRequest", "n", n.String(), "err", err)
-		return
-	}
-	// CRITICAL: PRIOR to StoreFullShard_Assurer:  exported_segments_and_proofpageShards with the justification (provided by one of the 2-3 guarantors) to ensure it matches the erasureRoot
-	verified, err := VerifyFullShard(spec.ErasureRoot, n.id, bundleShard, exported_segments_and_proofpageShards, encodedPath)
-	if err != nil || !verified {
-		log.Error(debugDA, "assureData:VerifyFullShard", "n", n.String(), "err", err)
-		return
+		log.Error(debugDA, "assureData: SendFullShardRequest failed", "n", n.String(), "erasureRoot", spec.ErasureRoot, "guarantor", guarantor, "err", err)
+		return fmt.Errorf("SendFullShardRequest: %w", err)
 	}
 
-	err = n.StoreFullShard_Assurer(spec.ErasureRoot, n.id, bundleShard, exported_segments_and_proofpageShards, encodedPath)
+	// CRITICAL: verify justification matches the erasure root before storage
+	verified, err := VerifyFullShard(spec.ErasureRoot, n.id, bundleShard, exportedShards, encodedPath)
 	if err != nil {
-		return
+		log.Error(debugDA, "assureData: VerifyFullShard error", "n", n.String(), "err", err)
+		return fmt.Errorf("VerifyFullShard: %w", err)
+	}
+	if !verified {
+		log.Error(debugDA, "assureData: VerifyFullShard failed", "n", n.String(), "verified", false)
+		return fmt.Errorf("VerifyFullShard: failed verification")
 	}
 
-	err = n.StoreWorkReport(g.Report)
-	if err != nil {
-		log.Error(debugDA, "assureData:StoreWorkReport", "n", n.String(), "err", err)
-		return
+	if err := n.StoreFullShard_Assurer(spec.ErasureRoot, n.id, bundleShard, exportedShards, encodedPath); err != nil {
+		return fmt.Errorf("StoreFullShard_Assurer: %w", err)
+	}
+
+	if err := n.StoreWorkReport(g.Report); err != nil {
+		log.Error(debugDA, "assureData: StoreWorkReport failed", "n", n.String(), "err", err)
+		return fmt.Errorf("StoreWorkReport: %w", err)
 	}
 
 	n.markAssuring(spec.WorkPackageHash)

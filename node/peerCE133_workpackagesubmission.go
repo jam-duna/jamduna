@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"reflect"
 	"time"
@@ -70,7 +71,7 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, core_idx uint16) (err error) {
+func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, core_idx uint16) (err error) {
 	if pkg.RefineContext.LookupAnchorSlot == 1 {
 		if len(pkg.RefineContext.Prerequisites) == 0 {
 			panic("Prerequisite is empty")
@@ -92,12 +93,12 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 		return err
 	}
 	code := uint8(CE133_WorkPackageSubmission)
-	stream, err := p.openStream(code)
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}
@@ -106,19 +107,29 @@ func (p *Peer) SendWorkPackageSubmission(pkg types.WorkPackage, extrinsics types
 	return nil
 }
 
-func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err error) {
+func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
+
 	var newReq JAMSNPWorkPackage
+
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		log.Error(debugG, "onWorkPackageSubmission:FromBytes", "err", err)
-		if err != nil {
-			return
-		}
+		return fmt.Errorf("onWorkPackageSubmission: decode failed: %w", err)
 	}
+
 	s := n.statedb
 	workPackageHash := newReq.WorkPackage.Hash()
+
+	// Respect context cancellation early if already expired
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Avoid duplicating work package submissions already in RecentBlocks
 	for _, block := range s.JamState.RecentBlocks {
 		if len(block.Reported) != 0 {
 			for _, segmentRootLookup := range block.Reported {
@@ -129,7 +140,7 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		}
 	}
 
-	// only the FIRST guarantor will receive this
+	// Only the FIRST guarantor will receive this
 	n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
 		workPackage:        newReq.WorkPackage,
 		coreIndex:          newReq.CoreIndex,
@@ -137,5 +148,6 @@ func (n *Node) onWorkPackageSubmission(stream quic.Stream, msg []byte) (err erro
 		addTS:              time.Now().Unix(),
 		nextAttemptAfterTS: time.Now().Unix(),
 	})
+
 	return nil
 }

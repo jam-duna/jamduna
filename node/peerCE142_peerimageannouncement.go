@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -48,7 +49,11 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 	log.Debug(debugP, "BroadcastPreimageAnnouncement", "n", n.String(), "p", pa.String())
 	n.processPreimage(preimageLookup)
 
-	go n.broadcast(pa)
+	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+	go func() {
+		defer cancel() // ensures context is released
+		_ = n.broadcast(ctx, pa)
+	}()
 	return nil
 }
 
@@ -60,81 +65,106 @@ func (n *NodeContent) StoreImage(preimageHash common.Hash, preimage []byte) {
 }
 
 func (n *Node) runPreimages() {
-	// ticker here to avoid high CPU usage
 	pulseTicker := time.NewTicker(20 * time.Millisecond)
 	defer pulseTicker.Stop()
 
 	for {
-		time.Sleep(1 * time.Millisecond)
 		select {
 		case <-pulseTicker.C:
-			// Small pause to reduce CPU load when channels are quiet
+			// avoid spinning
+
 		case preimageAnnouncement := <-n.preimageAnnouncementsCh:
-			err := n.processPreimageAnnouncements(preimageAnnouncement)
+			// 3s timeout for each announcement
+			ctx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
+
+			err := n.processPreimageAnnouncements(ctx, preimageAnnouncement)
 			if err != nil {
 				fmt.Printf("%s processPreimages: %v\n", n.String(), err)
 			}
+			cancel()
 		}
 	}
 }
 
-func (n *Node) processPreimageAnnouncements(preimageAnnouncement types.PreimageAnnouncement) (err error) {
-	// initiate CE143_PreimageRequest
+func (n *Node) processPreimageAnnouncements(ctx context.Context, preimageAnnouncement types.PreimageAnnouncement) error {
 	validatorIndex := preimageAnnouncement.ValidatorIndex
 	p, ok := n.peersInfo[validatorIndex]
 	if !ok {
-		return fmt.Errorf("Invalid validator index %d", validatorIndex)
+		return fmt.Errorf("invalid validator index %d", validatorIndex)
 	}
+
 	serviceIndex := preimageAnnouncement.ServiceIndex
 	preimageHash := preimageAnnouncement.PreimageHash
 
-	log.Debug(debugP, "processPreimageAnnouncements", "n", n.String(), "validatorIndex", validatorIndex, "serviceIndex", serviceIndex, "preimageHash", preimageHash)
+	log.Debug(debugP, "processPreimageAnnouncements",
+		"n", n.String(),
+		"validatorIndex", validatorIndex,
+		"serviceIndex", serviceIndex,
+		"preimageHash", preimageHash,
+	)
 
-	preimage, err := p.SendPreimageRequest(preimageAnnouncement.PreimageHash)
+	preimage, err := p.SendPreimageRequest(ctx, preimageHash)
 	if err != nil {
-		log.Error(debugP, "processPreimageAnnouncements", "err", err)
-		return err
+		log.Error(debugP, "SendPreimageRequest failed", "err", err)
+		return fmt.Errorf("SendPreimageRequest failed: %w", err)
 	}
 
-	log.Debug(debugP, "processPreimageAnnouncements", "n", n.String(), "preimage", common.Bytes2String(preimage))
+	log.Debug(debugP, "received preimage", "n", n.String(), "size", len(preimage), "preview", fmt.Sprintf("%.64s...", common.Bytes2String(preimage)))
 
-	lookup := types.Preimages{
+	n.processPreimage(types.Preimages{
 		Requester: uint32(serviceIndex),
 		Blob:      preimage,
-	}
-	n.processPreimage(lookup)
+	})
 
 	return nil
 }
 
-func (p *Peer) SendPreimageAnnouncement(pa *types.PreimageAnnouncement) (err error) {
+func (p *Peer) SendPreimageAnnouncement(ctx context.Context, pa *types.PreimageAnnouncement) error {
 	code := uint8(CE142_PreimageAnnouncement)
-	stream, err := p.openStream(code)
+
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendPreimageAnnouncement", p.node.store.NodeID))
+		defer span.End()
+	}
+
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return err
+		return fmt.Errorf("openStream[CE142_PreimageAnnouncement]: %w", err)
 	}
 	defer stream.Close()
-	// --> Service ID ++ Hash ++ Preimage Length
-	paBytes, _ := pa.ToBytes()
-	err = sendQuicBytes(stream, paBytes, p.PeerID, code)
+
+	paBytes, err := pa.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("ToBytes[CE142_PreimageAnnouncement]: %w", err)
 	}
+
+	if err := sendQuicBytes(ctx, stream, paBytes, p.PeerID, code); err != nil {
+		return fmt.Errorf("sendQuicBytes[CE142_PreimageAnnouncement]: %w", err)
+	}
+
 	return nil
 }
 
-func (n *Node) onPreimageAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
-	var preimageAnnouncement types.PreimageAnnouncement
-	err = preimageAnnouncement.FromBytes(msg)
-	if err != nil {
-		log.Error(debugP, "onPreimageAnnouncement", "err", err)
-		return
-	}
-	preimageAnnouncement.ValidatorIndex = peerID
-	log.Trace(debugP, "onPreimageAnnouncement", "n", n.String(), "peerID", peerID, "p", preimageAnnouncement.String())
-	return n.processPreimageAnnouncements(preimageAnnouncement)
 
+	var preimageAnnouncement types.PreimageAnnouncement
+	if err := preimageAnnouncement.FromBytes(msg); err != nil {
+		log.Error(debugP, "onPreimageAnnouncement: failed to decode", "err", err)
+		return fmt.Errorf("onPreimageAnnouncement: decode failed: %w", err)
+	}
+
+	preimageAnnouncement.ValidatorIndex = peerID
+
+	log.Trace(debugP, "onPreimageAnnouncement",
+		"n", n.String(),
+		"peerID", peerID,
+		"serviceIndex", preimageAnnouncement.ServiceIndex,
+		"preimageHash", preimageAnnouncement.PreimageHash,
+	)
+
+	return n.processPreimageAnnouncements(ctx, preimageAnnouncement)
 }
 
 /*
@@ -160,39 +190,46 @@ Node -> Node
 <-- Preimage
 <-- FIN
 */
-func (p *Peer) SendPreimageRequest(preimageHash common.Hash) (preimage []byte, err error) {
+func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash) ([]byte, error) {
 	code := uint8(CE143_PreimageRequest)
-	stream, err := p.openStream(code)
+
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return preimage, err
+		return nil, fmt.Errorf("openStream[CE143_PreimageRequest]: %w", err)
 	}
-	err = sendQuicBytes(stream, preimageHash.Bytes(), p.PeerID, code)
+	defer stream.Close()
+
+	if err := sendQuicBytes(ctx, stream, preimageHash.Bytes(), p.PeerID, code); err != nil {
+		return nil, fmt.Errorf("sendQuicBytes[CE143_PreimageRequest]: %w", err)
+	}
+
+	preimage, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
-		return preimage, err
+		return nil, fmt.Errorf("receiveQuicBytes[CE143_PreimageRequest]: %w", err)
 	}
-	preimage, err = receiveQuicBytes(stream, p.PeerID, code)
-	if err != nil {
-		return preimage, err
-	}
+
 	return preimage, nil
 }
 
-func (n *NodeContent) onPreimageRequest(stream quic.Stream, msg []byte) (err error) {
+func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
-	// --> Hash
+
 	preimageHash := common.BytesToHash(msg)
 	preimage, ok, err := n.PreimageLookup(preimageHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("onPreimageRequest: PreimageLookup failed: %w", err)
 	}
 	if !ok {
+		log.Warn(debugP, "onPreimageRequest", "n", n.id, "hash", preimageHash, "msg", "preimage not found")
 		return nil
 	}
+
 	code := uint8(CE143_PreimageRequest)
-	err = sendQuicBytes(stream, preimage, n.id, code)
-	if err != nil {
-		return err
+
+	if err := sendQuicBytes(ctx, stream, preimage, n.id, code); err != nil {
+		return fmt.Errorf("onPreimageRequest: sendQuicBytes failed: %w", err)
 	}
-	// <-- FIN
+
+	log.Trace(debugP, "onPreimageRequest", "n", n.id, "hash", preimageHash, "size", len(preimage))
 	return nil
 }

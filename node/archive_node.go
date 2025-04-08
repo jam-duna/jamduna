@@ -152,7 +152,7 @@ func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBloc
 	ArchiveNode.statedb.GetSafrole().CurrValidators = validators
 	// go ArchiveNode.runJamWeb(uint16(port+1000) + id)
 	for _, peer := range ArchiveNode.peersInfo {
-		peer.GetOrInitBlockAnnouncementStream()
+		peer.GetOrInitBlockAnnouncementStream(context.Background())
 	}
 
 	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
@@ -301,7 +301,7 @@ func (n *ArchiveNode) runReceiveBlock() {
 							if diffs >= 1 {
 								// send the request to the selected peer
 								// get the blocks from the selected peer
-								blocksRaw, err := n.selected_peer.SendBlockRequest(block_trees[i+1].GetRoot().Block.Header.ParentHeaderHash, 1, diffs)
+								blocksRaw, err := n.selected_peer.SendBlockRequest(context.Background(), block_trees[i+1].GetRoot().Block.Header.ParentHeaderHash, 1, diffs)
 								if err != nil {
 									log.Error(blk, "SendBlockRequest", "err", err)
 								}
@@ -332,7 +332,7 @@ func (n *ArchiveNode) runReceiveBlock() {
 			time.Sleep(500 * time.Millisecond)
 			author_index := header.AuthorIndex
 			for attempt := 1; attempt <= 3; attempt++ {
-				blocksRaw, err = n.peersInfo[author_index].SendBlockRequest(headerHash, 1, 1)
+				blocksRaw, err = n.peersInfo[author_index].SendBlockRequest(context.Background(), headerHash, 1, 1)
 				if err == nil {
 					if attempt > 1 {
 						log.Info(blk, "processBlockAnnouncement", "SendBlockRequest", fmt.Sprintf("attempt %d succeeded", attempt))
@@ -455,7 +455,7 @@ func (n *NodeContent) BroadcastPreimageAnnouncement(serviceID uint32, preimageHa
 
 	for _, peer := range n.peersInfo {
 		go func(peer *Peer) {
-			err := peer.SendPreimageAnnouncement(&pa)
+			err := peer.SendPreimageAnnouncement(context.Background(), &pa)
 			if err != nil {
 				log.Error(rpc_mod, "SendPreimageAnnouncement", err)
 			}
@@ -516,24 +516,25 @@ func (n *ArchiveNode) DispatchIncomingQUICStream(stream quic.Stream) error {
 		return err
 	}
 	// Dispatch based on msgType
+	ctx := context.TODO()
 	switch msgType {
 	case CE128_BlockRequest:
-		err := n.onBlockRequest(stream, msg, 0)
+		err := n.onBlockRequest(ctx, stream, msg, 0)
 		if err != nil {
 			log.Warn(debugStream, "CE128_BlockRequest", "n", n.id, "err", err)
 		}
 	case CE129_StateRequest:
-		err := n.onStateRequest(stream, msg)
+		err := n.onStateRequest(ctx, stream, msg)
 		if err != nil {
 			log.Warn(debugStream, "CE129_StateRequest", "n", n.id, "err", err)
 		}
 	case CE136_WorkReportRequest:
-		err := n.onWorkReportRequest(stream, msg)
+		err := n.onWorkReportRequest(ctx, stream, msg)
 		if err != nil {
 			log.Warn(debugStream, "CE136_WorkReportRequest", "n", n.id, "err", err)
 		}
 	case CE143_PreimageRequest:
-		err := n.onPreimageRequest(stream, msg)
+		err := n.onPreimageRequest(ctx, stream, msg)
 		if err != nil {
 			log.Warn(debugStream, "CE143_PreimageRequest", "n", n.id, "err", err)
 		}

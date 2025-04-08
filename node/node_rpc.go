@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -823,26 +824,32 @@ func (j *Jam) FetchBlocks(req []string, res *string) error {
 
 func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
-	workpackageReq := req[0]
-	var workPackage_req types.WorkPackageRequest
-	err := json.Unmarshal([]byte(workpackageReq), &workPackage_req)
-	if err != nil {
-		return err
+
+	var wpReq types.WorkPackageRequest
+	if err := json.Unmarshal([]byte(req[0]), &wpReq); err != nil {
+		return fmt.Errorf("failed to decode WorkPackageRequest: %w", err)
 	}
-	fmt.Printf("JAM Server SendWorkPackage: %v | ExtrinsBlobs:%x | %s\n", workPackage_req.WorkPackage.Hash(), workPackage_req.ExtrinsicsBlobs, workpackageReq)
-	core_index := workPackage_req.CoreIndex
-	workPackage := workPackage_req.WorkPackage
-	extrinsics := workPackage_req.ExtrinsicsBlobs
-	// broadcast work package
-	core_peers := j.GetCoreCoWorkersPeers(core_index)
-	// random pick the index from 0, 1, 2
-	randomIdx := rand.Intn(3)
-	err = core_peers[randomIdx].SendWorkPackageSubmission(workPackage, extrinsics, core_index)
-	if err != nil {
-		return err
+
+	fmt.Printf("JAM Server SendWorkPackage: %v | ExtrinsBlobs:%x | %s\n",
+		wpReq.WorkPackage.Hash(), wpReq.ExtrinsicsBlobs, req[0])
+
+	coreIndex := wpReq.CoreIndex
+	corePeers := j.GetCoreCoWorkersPeers(coreIndex)
+	if len(corePeers) == 0 {
+		return fmt.Errorf("no available peers for core index %d", coreIndex)
 	}
+
+	randomIdx := rand.Intn(len(corePeers)) // safe against len < 3
+
+	ctx, cancel := context.WithTimeout(context.Background(), LargeTimeout)
+	defer cancel()
+
+	if err := corePeers[randomIdx].SendWorkPackageSubmission(ctx, wpReq.WorkPackage, wpReq.ExtrinsicsBlobs, coreIndex); err != nil {
+		return fmt.Errorf("SendWorkPackageSubmission failed: %w", err)
+	}
+
 	*res = "OK"
 	return nil
 }
@@ -882,122 +889,120 @@ func (j *Jam) ListServices(req []string, res *string) error {
 	*res = string(s)
 	return nil
 }
-
 func (j *Jam) NewService(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
-	service_name := req[0]
-	service_code, err := j.LoadService(service_name)
+	serviceName := req[0]
+
+	serviceCode, err := j.LoadService(serviceName)
 	if err != nil {
 		*res = err.Error()
 		return err
 	}
-	service_code_hash := common.Blake2Hash(service_code)
-	// fmt.Printf("name: %s, codelen: %d, hash: %v\n", service_name, len(service_code), service_code_hash)
+	serviceCodeHash := common.Blake2Hash(serviceCode)
+
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
 		*res = err.Error()
 		return err
 	}
-	bootstrapService := uint32(statedb.BootstrapServiceCode)
 	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-	refine_context := j.statedb.GetRefineContext()
-	codeWorkPackage := types.WorkPackage{
+	bootstrapService := uint32(statedb.BootstrapServiceCode)
+
+	refineContext := j.statedb.GetRefineContext()
+	codeWP := types.WorkPackage{
 		Authorization:         []byte(""),
 		AuthCodeHost:          bootstrapService,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refine_context,
-		WorkItems: []types.WorkItem{
-			{
-				Service:            bootstrapService,
-				CodeHash:           bootstrapCodeHash,
-				Payload:            append(service_code_hash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service_code)))...),
-				RefineGasLimit:     1000,
-				AccumulateGasLimit: 1000,
-				ImportedSegments:   make([]types.ImportSegment, 0),
-				ExportCount:        0,
-			},
-		},
+		RefineContext:         refineContext,
+		WorkItems: []types.WorkItem{{
+			Service:            bootstrapService,
+			CodeHash:           bootstrapCodeHash,
+			Payload:            append(serviceCodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(serviceCode)))...),
+			RefineGasLimit:     1000,
+			AccumulateGasLimit: 1000,
+			ImportedSegments:   nil,
+			ExportCount:        0,
+		}},
 	}
+
+	// Store preimage
 	j.preimagesMutex.Lock()
-	j.preimages[service_code_hash] = service_code
+	j.preimages[serviceCodeHash] = serviceCode
 	j.preimagesMutex.Unlock()
+
 	if len(j.statedb.GuarantorAssignments) == 0 {
-		*res = fmt.Sprintf("No guarantor assignments, current state on %v\n", j.statedb.Block.Header.Hash())
+		*res = fmt.Sprintf("No guarantor assignments, current state on %v", j.statedb.Block.Header.Hash())
 		return nil
 	}
 
-	core0_peers := j.GetCoreCoWorkersPeers(0)
-	// ramdom pick the index from 0, 1, 2
-	if len(core0_peers) < 3 {
-		*res = "Not enough core peers"
+	corePeers := j.GetCoreCoWorkersPeers(0)
+	if len(corePeers) == 0 {
+		*res = "no core peers available"
 		return nil
 	}
-	randomIdx := rand.Intn(3)
-	done := make(chan error, 1)
-	go func() {
-		done <- core0_peers[randomIdx].SendWorkPackageSubmission(codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
-	}()
+	selectedPeer := corePeers[rand.Intn(len(corePeers))]
 
-	select {
-	case err = <-done:
-		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-			*res = err.Error()
-			return err
-		}
-	case <-time.After(2 * time.Second):
-		// fmt.Println("SendWorkPackageSubmission timed out")
-		*res = "SendWorkPackageSubmission timed out"
-		return fmt.Errorf("SendWorkPackageSubmission timed out")
+	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+	defer cancel()
+
+	submitCtx, submitCancel := context.WithTimeout(ctx, LargeTimeout)
+	err = selectedPeer.SendWorkPackageSubmission(submitCtx, codeWP, types.ExtrinsicsBlobs{}, 0)
+	submitCancel()
+	if err != nil {
+		*res = fmt.Sprintf("SendWorkPackageSubmission ERR: %v", err)
+		return err
 	}
-	new_service_idx := uint32(0)
-	// wait for the new service to be created
 
-	var stateDB *statedb.StateDB
-	stateDB = j.statedb
-	if stateDB != nil && stateDB.Block != nil {
-		for {
-			stateDB = j.statedb
+	var newServiceIdx uint32
+pollLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			*res = "Timed out waiting for service registration"
+			return fmt.Errorf("NewService timed out: %w", ctx.Err())
+
+		case <-time.After(1 * time.Second):
+			stateDB := j.statedb
+			if stateDB == nil || stateDB.Block == nil {
+				continue
+			}
 			stateRoot := stateDB.Block.GetHeader().ParentStateRoot
 			t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), j.store)
 			k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
-			service_account_byte, ok, err := t.GetServiceStorage(bootstrapService, k)
+			serviceAccountBytes, ok, err := t.GetServiceStorage(bootstrapService, k)
 			if err != nil || !ok {
-				time.Sleep(1 * time.Second)
 				continue
 			}
-			decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
-			service_account, ok, err := j.statedb.GetService(decoded_new_service_idx)
+			decodedIdx := uint32(types.DecodeE_l(serviceAccountBytes))
+			serviceAccount, ok, err := j.statedb.GetService(decodedIdx)
 			if err != nil || !ok {
-				return fmt.Errorf("GetService failed:%v", err)
+				continue
 			}
-			service_account_code_hash := service_account.CodeHash
-			if service_code_hash == service_account_code_hash {
-				new_service_idx = decoded_new_service_idx
-				break
+			if serviceAccount.CodeHash == serviceCodeHash {
+				newServiceIdx = decodedIdx
+				break pollLoop
 			}
-			time.Sleep(1 * time.Second)
 		}
-		err = j.BroadcastPreimageAnnouncement(new_service_idx, service_code_hash, uint32(len(service_code)), service_code)
-		if err != nil {
-			log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
-		}
-
 	}
 
-	service_info := types.ServiceInfo{
-		ServiceIndex:    new_service_idx,
-		ServiceCodeHash: service_code_hash,
+	if err := j.BroadcastPreimageAnnouncement(newServiceIdx, serviceCodeHash, uint32(len(serviceCode)), serviceCode); err != nil {
+		log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 	}
-	service_info_json, err := json.Marshal(service_info)
+
+	serviceInfo := types.ServiceInfo{
+		ServiceIndex:    newServiceIdx,
+		ServiceCodeHash: serviceCodeHash,
+	}
+	jsonBytes, err := json.Marshal(serviceInfo)
 	if err != nil {
 		*res = err.Error()
+		return err
 	}
-	*res = string(service_info_json)
-	fmt.Printf("NewService %s\n", service_name)
+	*res = string(jsonBytes)
+	log.Info(debugP, "NewService created", "name", serviceName, "index", newServiceIdx)
 	return nil
 }
 

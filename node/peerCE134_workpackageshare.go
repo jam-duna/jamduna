@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -201,30 +202,38 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, pubKey types.Ed25519Key) (newReq JAMSNPWorkPackageShareResponse, err error) {
+func (p *Peer) ShareWorkPackage(
+	ctx context.Context,
+	coreIndex uint16,
+	bundle types.WorkPackageBundle,
+	segmentRootLookup types.SegmentRootLookup,
+	pubKey types.Ed25519Key,
+) (newReq JAMSNPWorkPackageShareResponse, err error) {
+
 	if p.node.store.SendTrace {
 		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(p.node.store.WorkPackageContext, fmt.Sprintf("[N%d] ShareWorkPackage", p.node.store.NodeID))
-		// p.node.UpdateWorkPackageContext(ctx)
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] ShareWorkPackage", p.node.store.NodeID))
 		defer span.End()
 	}
 
-	segmentroots := make([]JAMSNPSegmentRootMapping, 0)
+	// Respect cancellation early
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+		return
+	default:
+	}
+
+	// Prepare the request
+	segmentroots := make([]JAMSNPSegmentRootMapping, 0, len(segmentRootLookup))
 	for _, item := range segmentRootLookup {
-		lookupItem := JAMSNPSegmentRootMapping{
+		segmentroots = append(segmentroots, JAMSNPSegmentRootMapping{
 			WorkPackageHash: item.WorkPackageHash,
 			SegmentRoot:     item.SegmentRoot,
-		}
-		segmentroots = append(segmentroots, lookupItem)
+		})
 	}
 
 	encodedBundle := bundle.Bytes()
-	//altbundle, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
-	//bp := altbundle.(types.WorkPackageBundle)
-
-	// fmt.Printf("Original WP: %s %s\n", bundle.WorkPackage.Hash(), bundle.String())
-	// fmt.Printf("Recovered WP: %s %s\n", bp.WorkPackage.Hash(), bp.String())
-
 	req := JAMSNPWorkPackageShare{
 		CoreIndex:     coreIndex,
 		Len:           uint8(len(segmentroots)),
@@ -236,38 +245,40 @@ func (p *Peer) ShareWorkPackage(coreIndex uint16, bundle types.WorkPackageBundle
 	if err != nil {
 		return
 	}
+
 	code := uint8(CE134_WorkPackageShare)
-	stream, err := p.openStream(code)
-	if err != nil {
-		err = fmt.Errorf("openStream[CE134_WorkPackageShare]: %v", err)
+
+	stream, streamErr := p.openStream(ctx, code)
+	if streamErr != nil {
+		err = fmt.Errorf("openStream[CE134_WorkPackageShare]: %v", streamErr)
 		return
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
+
+	// Send request
+	if err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
-	// <-- Work Report Hash ++ Ed25519 Signature
-	respBytes, err := receiveQuicBytes(stream, p.PeerID, code)
+
+	// Receive response
+	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
 		err = fmt.Errorf("receiveQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 
-	err = newReq.FromBytes(respBytes)
-	if err != nil {
-		fmt.Println("Error deserializing:", err)
+	// Deserialize and verify signature against the workReportHash
+	if err = newReq.FromBytes(respBytes); err != nil {
+		err = fmt.Errorf("FromBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
-
 	workReportHash := newReq.WorkReportHash
 	signature := newReq.Signature
-	// validate the signature against the workReportHash
 	if !types.Ed25519Verify(pubKey, types.ComputeWorkReportSignBytesWithHash(workReportHash), signature) {
-		fmt.Printf("WARNING: Sig not verified: %v", workReportHash)
-		//TEMP: return
+		return newReq, fmt.Errorf("invalid signature on WorkReportHash: %x", workReportHash)
 	}
+
 	return newReq, nil
 }
 
@@ -285,7 +296,7 @@ func CompareSegmentRootLookup(a, b types.SegmentRootLookup) (bool, error) {
 	return len(mismatchIdx) == 0, fmt.Errorf("diff at %v", mismatchIdx)
 }
 
-func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
+func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 
 	// --> Core Index ++ Segment Root Mappings
@@ -293,14 +304,15 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
-		return
+		return fmt.Errorf("onWorkPackageShare: decode share message: %w", err)
 	}
+
 	// --> Work Package Bundle
 	encodedBundle := newReq.EncodedBundle
 	bundle, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
-		return
+		return fmt.Errorf("onWorkPackageShare: decode bundle: %w", err)
 	}
 	wpCoreIndex := newReq.CoreIndex
 	bp := bundle.(types.WorkPackageBundle)
@@ -314,6 +326,13 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		received_segmentRootLookup = append(received_segmentRootLookup, item)
 	}
 
+	// Respect context before expensive operations
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("onWorkPackageShare: context cancelled before VerifyBundle")
+	default:
+	}
+
 	// Since the bundle is not trusted, do a VerifyBundle first
 	verified, err := n.VerifyBundle(&bp, received_segmentRootLookup)
 	if !verified {
@@ -321,16 +340,30 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		// TODO: reconstruct the segments
 	}
 	if err != nil {
-		return
+		return fmt.Errorf("onWorkPackageShare: VerifyBundle err: %w", err)
 	}
+
+	// Respect context again before executing
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("onWorkPackageShare: context cancelled before executing work package")
+	default:
+	}
+
 	workReport, _, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
 	if err != nil {
 		fmt.Printf("%s error executing work package bundle: %v\n", n.String(), err)
-		return
+		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	} else {
 		n.workReportsCh <- workReport
 	}
-	//fmt.Printf("WR %v\n", workReport.String())z
+
+	// Respect context again before executing
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("onWorkPackageShare: context cancelled before executing work package")
+	default:
+	}
 
 	//TODO: Shawn this is potentially problematic. How can we have deterministic ValidatorIndex here???
 	signerSecret := n.GetEd25519Secret()
@@ -348,15 +381,17 @@ func (n *Node) onWorkPackageShare(stream quic.Stream, msg []byte) (err error) {
 		Signature:      guarantee.Signatures[0].Signature,
 	}
 	log.Trace(debugG, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature)
+
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("onWorkPackageShare: ToBytes failed: %w", err)
 	}
-	err = sendQuicBytes(stream, reqBytes, n.id, CE134_WorkPackageShare)
-	if err != nil {
-		return err
-	}
-	// <-- FIN
 
+	err = sendQuicBytes(ctx, stream, reqBytes, n.id, CE134_WorkPackageShare)
+	if err != nil {
+		return fmt.Errorf("onWorkPackageShare: sendQuicBytes failed: %w", err)
+	}
+
+	// <-- FIN
 	return nil
 }

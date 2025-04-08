@@ -608,7 +608,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		core0_peers := builderNode.GetCoreCoWorkersPeers(0)
 		// ramdom pick the index from 0, 1, 2
 		randomIdx := rand.Intn(3)
-		err = core0_peers[randomIdx].SendWorkPackageSubmission(codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
+		err = core0_peers[randomIdx].SendWorkPackageSubmission(context.Background(), codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -760,7 +760,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 		log.Warn(module, fmt.Sprintf("!!! FIB(%v) work package submitted", fibN), "workPackageHash", workPackageHash)
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, types.ExtrinsicsBlobs{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -869,7 +869,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			// submit to core 1
 			// v0, v3, v5 => core
 			senderIdx := 5
-			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 			go func() {
 				defer cancel()
 				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful, types.ExtrinsicsBlobs{})
@@ -922,7 +922,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			// }
 			megCoreIdx := uint16(0)
 
-			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 			go func() {
 				defer cancel()
 				sendWorkPackageTrack(ctx, nodes[5], workPackage, megCoreIdx, Meg_successful, types.ExtrinsicsBlobs{})
@@ -1067,7 +1067,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 	// send it right away for one time
 	corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
 	randIdx := rand.Intn(len(corePeers))
-	err := corePeers[randIdx].SendWorkPackageSubmission(*workPackage, extrinsics, receiverCore)
+	err := corePeers[randIdx].SendWorkPackageSubmission(context.Background(), *workPackage, extrinsics, receiverCore)
 
 	log.Trace(debugG, "SendWorkPackageSubmission to core for trial/timeslot", "n", senderNode.id, "p", corePeers[randIdx].PeerID, "core", receiverCore, "wph", workPackageHash,
 		"trialCount", trialCount, "timeslot", senderNode.statedb.GetSafrole().GetTimeSlot())
@@ -1123,7 +1123,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 				corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
 				randIdx := rand.Intn(len(corePeers))
 				workPackageHash = workPackage.Hash()
-				err := corePeers[randIdx].SendWorkPackageSubmission(*workPackage, extrinsics, receiverCore)
+				err := corePeers[randIdx].SendWorkPackageSubmission(context.Background(), *workPackage, extrinsics, receiverCore)
 				log.Debug(debugG, "SendWorkPackageSubmission to core for trial/timeslot",
 					"n", senderNode.id, "p", corePeers[randIdx].PeerID, "c", receiverCore, "wph", workPackageHash,
 					"trialCount", trialCount, "ts", senderNode.statedb.GetSafrole().GetTimeSlot())
@@ -1257,7 +1257,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 				fmt.Printf("\n** \033[36m TRANSFER=%v \033[0m workPackage: %v **\n", transferCounter, wp.Hash().String_short())
 			}
 		case wp := <-transferChan:
-			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
@@ -1407,7 +1407,7 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 				fmt.Printf("\n** \033[36m TRANSFER=%v \033[0m workPackage: %v **\n", transferCounter, wp.Hash().String_short())
 			}
 		case wp := <-transferChan:
-			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
@@ -1718,7 +1718,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 
 	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx := rand.Intn(3)
-	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(create_asset_workPackage, extrinsicsBytes, 0)
+	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), create_asset_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -1803,7 +1803,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err = core0_peers[ramdamIdx].SendWorkPackageSubmission(mint_workPackage, extrinsicsBytes, 0)
+		err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), mint_workPackage, extrinsicsBytes, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -1889,7 +1889,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 
 	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(mint_workPackage, extrinsicsBytes, 0)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), mint_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -1970,7 +1970,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 
 	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(bond_workPackage, extrinsicsBytes, 0)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), bond_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -2050,7 +2050,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 
 	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(unbond_workPackage, extrinsicsBytes, 0)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), unbond_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -2135,7 +2135,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 
 	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(transfer_workPackage, extrinsicsBytes, 0)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), transfer_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -2264,7 +2264,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 	totalWPSizeInMB = calaulateTotalWPSize(create_asset_workPackage, extrinsicsBytes)
 	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
 
-	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(create_asset_workPackage, extrinsicsBytes, 0)
+	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), create_asset_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -2354,7 +2354,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 
 	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(mint_workPackage, extrinsicsBytes, 0)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), mint_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -2453,7 +2453,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 
 	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(transfer_workPackage, extrinsicsBytes, 0)
+	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), transfer_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -2567,7 +2567,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 
 			}
 		case wp := <-SizeChan:
-			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), SizeSuccessful, SizeExtrinsicsBlobs[SizeCounter-1])
@@ -2645,7 +2645,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 				fmt.Printf("\n** \033[36m %d seconds \033[0m workPackage: %v \033[0m\n", seconds[SecondsCounter-1], wp.Hash().String_short())
 			}
 		case wp := <-SecondsChan:
-			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), SecondsSuccessful, SecondsExtrinsicsBlobs[SecondsCounter-1])
@@ -2779,7 +2779,7 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 	fmt.Printf("\n** \033[36m Blake2b=%v \033[0m workPackage: %v **\n", 1, common.Str(workPackageHash))
 	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 	ramdamIdx := rand.Intn(3)
-	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, types.ExtrinsicsBlobs{}, 0)
+	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, types.ExtrinsicsBlobs{}, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
@@ -3118,7 +3118,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackageContent", workPackage.String())
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, extrinsics, 0)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, extrinsics, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -3321,7 +3321,7 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 		log.Info(module, fmt.Sprintf("Game_of_life-(%d) work package submitted", step_n), "workPackage", workPackageHash)
 		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
 		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, extrinsics, 0)
+		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, extrinsics, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}

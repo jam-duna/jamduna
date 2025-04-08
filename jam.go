@@ -193,9 +193,6 @@ func generatePeerNetwork(validators []types.Validator, port int, local bool) (pe
 				if i == 4 {
 					peerAddr = "jam-6.jamduna.org:9900" // poland
 				}
-				if i == 5 {
-					peerAddr = "jamtestnet-6.javajam.io:30300" // javajam
-				}
 			*/
 			peer := fmt.Sprintf("%s", v.Ed25519)
 			peers = append(peers, peer)

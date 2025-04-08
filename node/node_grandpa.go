@@ -56,9 +56,9 @@ func (n *Node) runGrandpa() {
 				fmt.Println(err)
 			}
 		case vote := <-n.grandpa.BroadcastVoteChan:
-			go n.broadcast(vote)
+			go n.broadcast(context.TODO(), vote)
 		case commit := <-n.grandpa.BroadcastCommitChan:
-			go n.broadcast(commit)
+			go n.broadcast(context.TODO(), commit)
 		case <-ticker.C:
 			// n.grandpa.OnTimeout()
 		case err := <-n.grandpa.ErrorChan:

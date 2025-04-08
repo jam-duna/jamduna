@@ -66,6 +66,13 @@ const (
 
 	paranoidVerification = true  // turn off for production
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
+
+	TinyTimeout      = 1000 * time.Millisecond
+	SmallTimeout     = 3 * time.Second
+	NormalTimeout    = 6 * time.Second
+	MediumTimeout    = 10 * time.Second
+	LargeTimeout     = 12 * time.Second
+	VeryLargeTimeout = 600 * time.Second
 )
 
 var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
@@ -891,6 +898,10 @@ func (n *Node) lookupPubKey(pubKey string) (uint16, bool) {
 }
 
 func (n *Node) handleConnection(conn quic.Connection) {
+	defer conn.CloseWithError(0, "closing connection")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	remoteAddr := conn.RemoteAddr().String()
 	log.Trace(module, "handleConnection", "remoteAddr", remoteAddr)
 	host, port, err := net.SplitHostPort(remoteAddr)
@@ -936,25 +947,32 @@ func (n *Node) handleConnection(conn quic.Connection) {
 	}
 
 	for {
-		stream, err := conn.AcceptStream(context.Background())
+		stream, err := conn.AcceptStream(ctx)
 		if err != nil {
 			log.Error(debugDA, "AcceptStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
 			break
 		}
 		atomic.AddInt64(&n.totalIncomingStreams, 1)
-		if validatorIndex == TestPeerID {
-			log.Debug(debugQuic, "handleConnection: Added new stream", "validatorIndex", validatorIndex, "totalIncomingStreams", n.totalIncomingStreams)
-		}
-		go func() {
+
+		go func(stream quic.Stream) {
 			defer func() {
+				if r := recover(); r != nil {
+					log.Error("Recovered from panic in QUIC stream handler", "err", r)
+				}
 				atomic.AddInt64(&n.totalIncomingStreams, -1)
 			}()
-			n.DispatchIncomingQUICStream(stream, validatorIndex)
-		}()
+
+			streamCtx, cancel := context.WithTimeout(ctx, NormalTimeout)
+			defer cancel()
+
+			n.DispatchIncomingQUICStream(streamCtx, stream, validatorIndex)
+
+		}(stream)
 	}
 }
 
-func (n *Node) broadcast(obj interface{}) []byte {
+// TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
+func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 	result := []byte{}
 	objType := reflect.TypeOf(obj)
 	for id, p := range n.peersInfo {
@@ -963,7 +981,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 			switch objType {
 			case reflect.TypeOf(types.Block{}):
 				b := obj.(types.Block)
-				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
+				up0_stream, err := p.GetOrInitBlockAnnouncementStream(context.Background())
 				if err != nil {
 					log.Error(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
 				}
@@ -971,7 +989,7 @@ func (n *Node) broadcast(obj interface{}) []byte {
 				if err != nil {
 					log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
 				}
-				err = sendQuicBytes(up0_stream, block_a_bytes, id, CE128_BlockRequest) // ?
+				err = sendQuicBytes(context.TODO(), up0_stream, block_a_bytes, id, CE128_BlockRequest) // ?
 				if err != nil {
 					if id > types.TotalValidators {
 						n.UP0_streamMu.Lock()
@@ -1000,18 +1018,28 @@ func (n *Node) broadcast(obj interface{}) []byte {
 		}
 
 		go func(id uint16, p *Peer) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("panic in broadcast", "id", id, "err", r)
+				}
+			}()
+
+			//
+			ctx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
+			defer cancel()
+
 			switch objType {
 			case reflect.TypeOf(types.Ticket{}):
 				t := obj.(types.Ticket)
 				epoch := uint32(0) // TODO: Shawn
-				err := p.SendTicketDistribution(epoch, t, false)
+				err := p.SendTicketDistribution(ctx, epoch, t, false)
 				if err != nil {
 					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", p.PeerID, "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Block{}):
 				b := obj.(types.Block)
-				up0_stream, err := p.GetOrInitBlockAnnouncementStream()
+				up0_stream, err := p.GetOrInitBlockAnnouncementStream(ctx)
 				if err != nil {
 					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
 					return
@@ -1021,51 +1049,51 @@ func (n *Node) broadcast(obj interface{}) []byte {
 					log.Warn(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
 					return
 				}
-				err = sendQuicBytes(up0_stream, block_a_bytes, id, CE128_BlockRequest)
+				err = sendQuicBytes(ctx, up0_stream, block_a_bytes, id, CE128_BlockRequest)
 				if err != nil {
 					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
-				err := p.SendWorkReportDistribution(g.Report, g.Slot, g.Signatures)
+				err := p.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures)
 				if err != nil {
 					log.Error(debugStream, "SendWorkReportDistribution", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
-				err := p.SendAssurance(&a)
+				err := p.SendAssurance(ctx, &a)
 				if err != nil {
 					log.Error(debugStream, "SendAssurance", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
-				err := p.SendAuditAnnouncement(&a)
+				err := p.SendAuditAnnouncement(ctx, &a)
 				if err != nil {
 					log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
 				epoch := uint32(0) // TODO: Shawn
-				err := p.SendJudgmentPublication(epoch, j)
+				err := p.SendJudgmentPublication(ctx, epoch, j)
 				if err != nil {
 					log.Error(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(types.PreimageAnnouncement{}):
 				preimageAnnouncement := obj.(types.PreimageAnnouncement)
-				err := p.SendPreimageAnnouncement(&preimageAnnouncement)
+				err := p.SendPreimageAnnouncement(ctx, &preimageAnnouncement)
 				if err != nil {
 					log.Error(debugStream, "SendPreimageAnnouncement", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(grandpa.VoteMessage{}):
 				vote := obj.(grandpa.VoteMessage)
-				err := p.SendVoteMessage(vote)
+				err := p.SendVoteMessage(ctx, vote)
 				if err != nil {
 					log.Error(debugStream, "SendVoteMessage", "n", n.String(), "err", err)
 				}
 			case reflect.TypeOf(grandpa.CommitMessage{}):
 				commit := obj.(grandpa.CommitMessage)
-				err := p.SendCommitMessage(commit)
+				err := p.SendCommitMessage(ctx, commit)
 				if err != nil {
 					log.Error(debugStream, "SendCommitMessage", "n", n.String(), "err", err)
 				}
@@ -1143,163 +1171,236 @@ func (n *Node) fetchBlocks(headerHash common.Hash, direction uint8, maximumBlock
 	return nil, fmt.Errorf("fetchBlocks - No response")
 }
 
-func (n *Node) extendChain() error {
-	if n.block_tree != nil {
-		// check the latest statedb
-		n.statedbMutex.Lock()
-		latest_statedb := n.statedb
-		if latest_statedb.Block == nil {
-			n.statedbMutex.Unlock()
-			return nil
-		}
+func (n *Node) extendChain(ctx context.Context) error {
+	if n.block_tree == nil {
+		return nil
+	}
 
-		current_block_hash := latest_statedb.Block.Header.Hash()
-		curr_node, ok := n.block_tree.GetBlockNode(current_block_hash)
-		if !ok {
-			if n.block_tree.Root.Block.Header.ParentHeaderHash == current_block_hash {
-				curr_node = n.block_tree.Root
-			}
-			if curr_node == nil {
-				n.statedbMutex.Unlock()
-				return nil
-			}
-			if !curr_node.Applied {
-				n.statedbMutex.Unlock()
-				err := n.ApplyFirstBlock(curr_node)
-				return err
-			}
-			n.statedbMutex.Unlock()
-			return fmt.Errorf("extendChain: current block not found in block tree %v", current_block_hash)
-		}
-
+	n.statedbMutex.Lock()
+	latestStateDB := n.statedb
+	if latestStateDB.Block == nil {
 		n.statedbMutex.Unlock()
-		var applyChildren func(node *types.BT_Node) error
-		applyChildren = func(node *types.BT_Node) error {
-			if len(node.Children) != 0 {
-				for _, child := range node.Children {
-					if child.Applied {
-						continue
-					}
-					err := n.ApplyBlock(child)
-					if err != nil {
-						return err
-					}
-					err = applyChildren(child)
-					if err != nil {
-						return err
-					}
-				}
-			}
+		return nil
+	}
+	currentHash := latestStateDB.Block.Header.Hash()
+	n.statedbMutex.Unlock()
+
+	currNode, ok := n.block_tree.GetBlockNode(currentHash)
+	if !ok {
+		// Handle edge case: maybe we're at genesis
+		if n.block_tree.Root.Block.Header.ParentHeaderHash == currentHash {
+			currNode = n.block_tree.Root
+		}
+		if currNode == nil {
 			return nil
 		}
-
-		err := applyChildren(curr_node)
-		if err != nil {
-			log.Error("SyncState", "applyChildren", err)
+		if !currNode.Applied {
+			if err := n.ApplyFirstBlock(ctx, currNode); err != nil {
+				return fmt.Errorf("extendChain: ApplyFirstBlock failed: %w", err)
+			}
 		}
+		return nil
+	}
 
+	// Traverse and apply all descendants
+	if err := n.applyChildrenRecursively(ctx, currNode); err != nil {
+		log.Error("SyncState", "applyChildren", err)
+		return err
+	}
+
+	return nil
+}
+
+func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node) error {
+	for _, child := range node.Children {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if child.Applied {
+			continue
+		}
+		if err := n.ApplyBlock(ctx, child); err != nil {
+			return fmt.Errorf("applyChildrenRecursively: ApplyBlock failed for %v: %w", child.Block.Header.Hash(), err)
+		}
+		if err := n.applyChildrenRecursively(ctx, child); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (n *Node) ApplyFirstBlock(nextBlockNode *types.BT_Node) error {
+func (n *Node) ApplyFirstBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
 	nextBlock := nextBlockNode.Block
+
+	// Use the current statedb, set correct root
 	recoveredStateDB := n.statedb
 	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock, "extendChain")
+
+	// apply with caller's ctx, not Background
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, "extendChain")
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
-		return err
+		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
+
 	newStateDB.GetAllKeyValues()
 	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 	newStateDB.Block = nextBlock
+
+	// Extend chain tip
 	n.addStateDB(newStateDB)
+
 	n.statedbMapMutex.Lock()
+	defer n.statedbMapMutex.Unlock()
+
 	if nextBlock.Header.Hash() == *n.latest_block {
-		n.assureNewBlock(nextBlock)
+		if err := n.assureNewBlock(ctx, nextBlock); err != nil {
+			log.Error(debugA, "ApplyFirstBlock: assureNewBlock failed", "n", n.String(), "err", err)
+			return fmt.Errorf("assureNewBlock failed: %w", err)
+		}
 		if Audit {
-			n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+			if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
+				n.auditingCh <- snap.Copy()
+			}
 		}
 	}
-	nextBlockNode.Applied = true
-	n.statedbMapMutex.Unlock()
 
+	nextBlockNode.Applied = true
 	return nil
 }
 
-func (n *Node) ApplyBlock(nextBlockNode *types.BT_Node) error {
+func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
 	nextBlock := nextBlockNode.Block
+
+	// 1. Prepare recovered state from parent
 	recoveredStateDB := n.statedb.Copy()
 	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, context.Background(), nextBlock, "extendChain")
+
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, "extendChain")
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
-		return err
+		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
 
 	newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
-	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
+	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 
+	// 2. Update services for new state
 	n.updateServiceMap(newStateDB, nextBlock)
-	// current we always dump state transitions for every node
+
+	// 3. Async write of debug state — optionally cancelable
 	go func() {
 		st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
-		err = n.writeDebug(st, nextBlock.TimeSlot()) // StateTransition
-		if err != nil {
-			log.Error(module, "writeDebug", "err", err)
+
+		// Optional: Respect ctx cancel
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
-		err = n.writeDebug(nextBlock, nextBlock.TimeSlot()) // Blocks
-		if err != nil {
-			log.Error(module, "writeDebug", "err", err)
+
+		if err := n.writeDebug(st, nextBlock.TimeSlot()); err != nil {
+			log.Error(module, "writeDebug: StateTransition", "err", err)
 		}
-		err = n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()) // StateSnapshot
-		if err != nil {
-			log.Error(module, "writeDebug", "err", err)
+		if err := n.writeDebug(nextBlock, nextBlock.TimeSlot()); err != nil {
+			log.Error(module, "writeDebug: Block", "err", err)
+		}
+		if err := n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()); err != nil {
+			log.Error(module, "writeDebug: Snapshot", "err", err)
 		}
 	}()
 
-	// Extend the tip of the chain
+	// 4. Extend the chain
 	n.addStateDB(newStateDB)
+
+	// 5. Finalization logic
 	n.statedbMapMutex.Lock()
+	defer n.statedbMapMutex.Unlock()
+
 	if nextBlock.Header.Hash() == *n.latest_block {
-		n.assureNewBlock(nextBlock)
+		if err := n.assureNewBlock(ctx, nextBlock); err != nil {
+			log.Error(debugA, "ApplyBlock: assureNewBlock failed", "n", n.String(), "err", err)
+			return fmt.Errorf("assureNewBlock failed: %w", err)
+		}
+
 		if Audit {
-			n.auditingCh <- n.statedbMap[n.statedb.HeaderHash].Copy()
+			if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
+				n.auditingCh <- snap.Copy()
+			}
 		}
 	}
-	nextBlockNode.Applied = true
-	n.statedbMapMutex.Unlock()
 
-	IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
-	n.extrinsic_pool.RemoveUsedExtrinsicFromPool(nextBlock, n.statedb.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
+	nextBlockNode.Applied = true
+
+	// 6. Cleanup used extrinsics
+	isClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
+	n.extrinsic_pool.RemoveUsedExtrinsicFromPool(nextBlock, n.statedb.GetSafrole().Entropy[2], isClosed)
+
 	return nil
 }
 
-func (n *Node) assureNewBlock(b *types.Block) error {
+func (n *Node) assureNewBlock(ctx context.Context, b *types.Block) error {
 	if len(b.Extrinsic.Guarantees) > 0 {
+		var wg sync.WaitGroup
+		errCh := make(chan error, len(b.Extrinsic.Guarantees))
+
 		for _, g := range b.Extrinsic.Guarantees {
-			err := n.StoreWorkReport(g.Report)
-			if err != nil {
-				log.Error(debugDA, "assureData:StoreWorkReport", "n", n.String(), "err", err)
+			// First, store the work report (independent of assurance)
+			if err := n.StoreWorkReport(g.Report); err != nil {
+				log.Error(debugDA, "assureNewBlock: StoreWorkReport failed", "n", n.String(), "err", err)
 			}
-			n.assureData(g)
+
+			wg.Add(1)
+			go func(g types.Guarantee) {
+				defer wg.Done()
+
+				if ctx.Err() != nil {
+					errCh <- ctx.Err()
+					return
+				}
+
+				if err := n.assureData(ctx, g); err != nil {
+					log.Error(debugDA, "assureNewBlock: assureData failed", "n", n.String(), "err", err)
+					errCh <- err
+				}
+			}(g)
 		}
+
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("assureNewBlock cancelled: %w", ctx.Err())
+		case err := <-errCh:
+			return fmt.Errorf("assureNewBlock encountered error: %w", err)
+		case <-done:
+			// All assurances completed successfully
+		}
+	}
+
+	// Context check before continuing to assure
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	a, numCores, err := n.generateAssurance(b.Header.Hash())
 	if err != nil {
-		return err
+		return fmt.Errorf("generateAssurance failed: %w", err)
 	}
 	if numCores == 0 {
 		return nil
 	}
 
-	log.Debug(debugA, "assureNewBlock:Broadcasting assurance", "n", n.String(), "bitfield", a.Bitfield)
-	go n.broadcast(a)
+	log.Debug(debugA, "assureNewBlock: Broadcasting assurance", "n", n.String(), "bitfield", a.Bitfield)
+	go n.broadcast(ctx, a)
+
 	return nil
 }
 
@@ -1314,7 +1415,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 	if err != nil {
 		log.Warn(debugBlock, "processBlock:cacheBlock", "n", n.String(), "err", err, "sync", "start")
 		n.InsertOrphan(blk)
-		go n.SyncornizedBlocks()
+		go n.SynchronizedBlocks(context.Background())
 	}
 	return nil // Success
 }
@@ -1777,116 +1878,108 @@ func (n *Node) monitorCommandChannel() {
 }
 
 func (n *Node) runClient() {
-	ticker_pulse := time.NewTicker(TickTime * time.Millisecond)
-	defer ticker_pulse.Stop()
+	tickerPulse := time.NewTicker(TickTime * time.Millisecond)
+	defer tickerPulse.Stop()
 
 	logChan := n.store.GetChan()
 	n.statedb.GetSafrole().EpochFirstSlot = n.epoch0Timestamp / types.SecondsPerSlot
 
-	//go n.monitorCommandChannel()
-
 	for {
-		time.Sleep(1 * time.Millisecond)
 		select {
-
-		case <-ticker_pulse.C:
+		case <-tickerPulse.C:
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
-			// timeslot mark
+
 			currJCE := n.GetCurrJCE()
 			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
-			// bandersnatch is time consuming
-			if currEpoch != -1 {
-				if currPhase == 0 {
-					n.GenerateTickets()
-					n.BroadcastTickets()
 
-				} else if currPhase == types.EpochLength-1 { // you had currPhase == types.EpochLength-1
-					// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-					n.GenerateTickets()
-					n.BroadcastTickets()
-				}
+			if currEpoch != -1 && (currPhase == 0 || currPhase == types.EpochLength-1) {
+				n.GenerateTickets()
+				n.BroadcastTickets()
 			}
-			//if n.checkGodTimeslotUsed(currJCE) {
-			//	return
-			//}
+
 			ticketIDs, err := n.GetSelfTicketsIDs(currPhase)
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
+
 			n.statedbMutex.Lock()
 			newBlock, newStateDB, err := n.statedb.ProcessState(currJCE, n.credential, ticketIDs, n.extrinsic_pool)
-
 			n.statedbMutex.Unlock()
+
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
 				continue
 			}
 
-			if newStateDB != nil {
-
-				if n.checkGodTimeslotUsed(currJCE) {
-					fmt.Printf("%s could author but blocked by god\n", n.String())
-					return
-				}
-				n.sendGodTimeslotUsed(currJCE)
-				// we authored a block
-				oldstate := n.statedb
-				newStateDB.SetAncestor(newBlock.Header, oldstate)
-
-				n.addStateDB(newStateDB)
-				n.StoreBlock(newBlock, n.id, true)
-				n.processBlock(newBlock)
-				nodee, ok := n.block_tree.GetBlockNode(newBlock.Header.Hash())
-				if !ok {
-					return
-				}
-				nodee.Applied = true
-				go n.broadcast(*newBlock)
-				go func() {
-					timeslot := newStateDB.GetSafrole().Timeslot
-					err := n.writeDebug(newBlock, timeslot)
-					if err != nil {
-						log.Error(module, "runClient:writeDebug", "err", err)
-					}
-					s := n.statedb
-					allStates := s.GetAllKeyValues()
-					ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
-					if !ok || err != nil {
-						log.Crit(module, "CompareStateRoot", "err", err)
-					}
-
-					st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
-					err = n.writeDebug(st, timeslot) // StateTransition
-					if err != nil {
-						log.Error(module, "runClient:writeDebug", "err", err)
-					}
-
-					if revalidate {
-						err = statedb.CheckStateTransition(n.store, st, s.AncestorSet)
-						if err != nil {
-							log.Crit(module, "runClient:CheckStateTransition", "err", err)
-						}
-						log.Trace(module, "Validated state transition")
-					}
-
-					// store StateSnapshot
-					err = n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot) // StateSnapshot
-					if err != nil {
-						log.Error(module, "runClient:writeDebug", "err", err)
-					}
-				}()
-
-				// Author is assuring the new block, resulting in a broadcast assurance with anchor = newBlock.Hash()
-				n.assureNewBlock(newBlock)
-				if Audit {
-					n.auditingCh <- newStateDB.Copy()
-				}
-				IsTicketSubmissionClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
-				n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsTicketSubmissionClosed)
-
+			if newStateDB == nil {
+				continue
 			}
+
+			if n.checkGodTimeslotUsed(currJCE) {
+				fmt.Printf("%s could author but blocked by god\n", n.String())
+				return
+			}
+			n.sendGodTimeslotUsed(currJCE)
+
+			oldstate := n.statedb
+			newStateDB.SetAncestor(newBlock.Header, oldstate)
+
+			n.addStateDB(newStateDB)
+			n.StoreBlock(newBlock, n.id, true)
+			n.processBlock(newBlock)
+
+			nodee, ok := n.block_tree.GetBlockNode(newBlock.Header.Hash())
+			if !ok {
+				return
+			}
+			nodee.Applied = true
+			ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+			go func() {
+				defer cancel() // ensures context is released
+				_ = n.broadcast(ctx, *newBlock)
+			}()
+
+			go func() {
+				timeslot := newStateDB.GetSafrole().Timeslot
+				if err := n.writeDebug(newBlock, timeslot); err != nil {
+					log.Error(module, "runClient:writeDebug", "err", err)
+				}
+				s := n.statedb
+				allStates := s.GetAllKeyValues()
+				ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
+				if !ok || err != nil {
+					log.Crit(module, "CompareStateRoot", "err", err)
+				}
+				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
+				if err := n.writeDebug(st, timeslot); err != nil {
+					log.Error(module, "runClient:writeDebug", "err", err)
+				}
+				if revalidate {
+					if err := statedb.CheckStateTransition(n.store, st, s.AncestorSet); err != nil {
+						log.Crit(module, "runClient:CheckStateTransition", "err", err)
+					}
+				}
+				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot); err != nil {
+					log.Error(module, "runClient:writeDebug", "err", err)
+				}
+			}()
+
+			assureCtx, cancelAssure := context.WithTimeout(context.Background(), NormalTimeout)
+			n.assureNewBlock(assureCtx, newBlock)
+			cancelAssure()
+
+			if Audit {
+				select {
+				case n.auditingCh <- newStateDB.Copy():
+				default:
+					log.Warn(module, "auditingCh full, dropping state")
+				}
+			}
+
+			IsClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
+			n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsClosed)
 
 		case log := <-logChan:
 			go n.WriteLog(log)

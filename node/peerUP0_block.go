@@ -1,16 +1,35 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
+
+/*
+UP 0 UP 0: Block announcement
+
+Header Hash = [u8; 32]
+Slot = u32
+Final = Header Hash ++ Slot
+Leaf = Header Hash ++ Slot
+Handshake = Final ++ len++[Leaf]
+Header = As in GP
+Announcement = Header ++ Final
+
+Node -> Node
+
+--> Handshake AND <-- Handshake (In parallel)
+loop {
+    --> Announcement OR <-- Announcement (Either side may send)
+}
+*/
 
 type JAMSNP_BlockInfo struct {
 	HeaderHash common.Hash `json:"header_hash"`
@@ -121,7 +140,7 @@ func (n *Node) GetBlockAnnouncementBytes(block types.Block) ([]byte, error) {
 
 // this function is called by the node to send a block announcement to a peer
 // it will either init a new stream or use an existing stream
-func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
+func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Stream, error) {
 	n := p.node
 	validator_index := n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519)
 	n.UP0_streamMu.Lock()
@@ -135,9 +154,8 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 	}
 	n.UP0_streamMu.Unlock()
 	code := uint8(UP0_BlockAnnouncement)
-	stream, err := p.openStream(code)
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-
 		return nil, err
 	}
 	n.UP0_streamMu.Lock()
@@ -146,8 +164,8 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 	var wg sync.WaitGroup
 	var errChan = make(chan error, 2)
 
+	wg.Add(2)
 	// send handshake and receive parallelly
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		handshake := n.GetLatestHandshake()
@@ -156,18 +174,16 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 			errChan <- fmt.Errorf("handshake_bytes is nil")
 			return
 		}
-		err = sendQuicBytes(stream, handshake_bytes, p.PeerID, code)
+		err = sendQuicBytes(ctx, stream, handshake_bytes, p.PeerID, code)
 		if err != nil {
 			errChan <- err
-			return
 		}
 	}()
 
 	// receive handshake
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		req, err := receiveQuicBytes(stream, p.PeerID, code)
+		req, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 		if err != nil {
 			errChan <- fmt.Errorf("receiveQuicBytes err: %v", err)
 			return
@@ -176,26 +192,30 @@ func (p *Peer) GetOrInitBlockAnnouncementStream() (quic.Stream, error) {
 		err = handshake_peer.FromBytes(req)
 		if err != nil {
 			errChan <- fmt.Errorf("handshake_peer.FromBytes err: %v", err)
-			return
 		}
 	}()
 
-	wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 
-	// check if there is any error
 	select {
-	case err = <-errChan:
-		return nil, fmt.Errorf("GetOrInitBlockAnnouncementStream err: %v", err)
-	default:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("handshake timeout")
+	case err := <-errChan:
+		return nil, fmt.Errorf("handshake failed: %v", err)
+	case <-done:
+		// successful
 	}
-	// TODO do something with the received handshake
-	// persist the stream
-	go n.runBlockAnnouncement(stream)
+	// ctx, cancel := context.WithCancel(p.node.ctx)
+	go n.runBlockAnnouncement(ctx, stream) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
 	return stream, nil
 }
 
 // this function is for the accepting side of the block announcement
-func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onBlockAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	//don't close the stream here
 	var newHandshake JAMSNP_Handshake
 	// Deserialize byte array back into the struct
@@ -223,16 +243,13 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 			errChan <- err
 			return
 		}
-		err = sendQuicBytes(stream, handshake_bytes, n.id, code)
+		err = sendQuicBytes(ctx, stream, handshake_bytes, n.id, code)
 		if err != nil {
 			errChan <- err
 			return
 		}
 	}()
 	wg.Wait()
-	if peerID == TestPeerID {
-		log.Debug(debugBlock, "Received Handshake from peer", "peer", peerID)
-	}
 	// check if there is any error
 	select {
 	case err = <-errChan:
@@ -246,12 +263,12 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 	n.UP0_streamMu.Unlock()
 
 	// TODO do something with the received handshake
-	go n.runBlockAnnouncement(stream)
+	go n.runBlockAnnouncement(ctx, stream)
 	return nil
 }
 
 // this function will read the block announcement from the stream persistently
-func (n *NodeContent) runBlockAnnouncement(stream quic.Stream) {
+func (n *NodeContent) runBlockAnnouncement(ctx context.Context, stream quic.Stream) {
 	code := uint8(UP0_BlockAnnouncement)
 	for {
 		time.Sleep(5 * time.Millisecond)
@@ -259,7 +276,7 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream) {
 		if stream == nil {
 			return
 		}
-		req, err := receiveQuicBytes(stream, n.id, code)
+		req, err := receiveQuicBytes(ctx, stream, n.id, code)
 		if err != nil {
 			fmt.Println("Error receiving block announcement:", err)
 			return

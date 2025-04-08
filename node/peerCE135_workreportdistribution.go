@@ -116,23 +116,25 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, credentials []types.GuaranteeCredential) (err error) {
+func (p *Peer) SendWorkReportDistribution(
+	ctx context.Context,
+	wr types.WorkReport,
+	slot uint32,
+	credentials []types.GuaranteeCredential,
+) error {
 	code := uint8(CE135_WorkReportDistribution)
-	stream, err := p.openStream(code)
-	if err != nil {
-		if stream != nil {
-			stream.Close()
-		}
-		return err
-	}
-	defer stream.Close()
 
 	if p.node.store.SendTrace {
 		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendWorkReportDistribution", p.node.store.NodeID))
-		// p.node.UpdateWorkReportContext(ctx)
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendWorkReportDistribution", p.node.store.NodeID))
 		defer span.End()
 	}
+
+	stream, err := p.openStream(ctx, code)
+	if err != nil {
+		return fmt.Errorf("openStream[CE135_WorkReportDistribution]: %w", err)
+	}
+	defer stream.Close()
 
 	newReq := JAMSNPWorkReport{
 		Slot:        slot,
@@ -142,23 +144,25 @@ func (p *Peer) SendWorkReportDistribution(wr types.WorkReport, slot uint32, cred
 	}
 	reqBytes, err := newReq.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("ToBytes[CE135_WorkReportDistribution]: %w", err)
 	}
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return err
+
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
 	}
+
 	return nil
 }
 
-func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err error) {
+func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
+
 	var newReq JAMSNPWorkReport
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		log.Error(debugG, "onWorkReportDistribution", "err", err)
-		return
+		return fmt.Errorf("onWorkReportDistribution: failed to decode message: %w", err)
 	}
 
 	workReport := newReq.WorkReport
@@ -167,8 +171,26 @@ func (n *Node) onWorkReportDistribution(stream quic.Stream, msg []byte) (err err
 		Slot:       newReq.Slot,
 		Signatures: newReq.Credentials,
 	}
-	n.guaranteesCh <- guarantee
-	log.Debug(debugG, "onWorkReportDistribution incoming Guarantee from Core on slot", "n", n.String(), "workReport", workReport.GetWorkPackageHash().String_short(), "guarantee.Slot", guarantee.Slot)
-	n.workReportsCh <- workReport
+
+	// Send guarantee to channel (non-blocking with guaranteesCh full check)
+	select {
+	case n.guaranteesCh <- guarantee:
+	default:
+		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
+	}
+
+	log.Debug(debugG, "onWorkReportDistribution incoming Guarantee from Core on slot",
+		"n", n.String(),
+		"workReport", workReport.GetWorkPackageHash().String_short(),
+		"guarantee.Slot", guarantee.Slot,
+	)
+
+	// Send WorkReport to channel
+	select {
+	case n.workReportsCh <- workReport:
+	default:
+		log.Warn(debugG, "onWorkReportDistribution", "msg", "workReportsCh full, dropping work report")
+	}
+
 	return nil
 }

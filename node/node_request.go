@@ -49,12 +49,6 @@ type CE128_response struct {
 	Blocks     []types.Block
 }
 
-func (n *NodeContent) OnHandshake(validatorIndex uint16, headerHash common.Hash, timeslot uint32, leaves []types.ChainLeaf) (err error) {
-	// TODO: Sourabh
-	fmt.Println("OnHandshake")
-	return nil
-}
-
 func (n *NodeContent) GetBlockByHeaderHash(headerHash common.Hash) (*types.SBlock, error) {
 
 	blk, err := n.GetStoredBlockByHeader(headerHash)
@@ -177,49 +171,64 @@ func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx u
 	return boundaryNode, keyvalues, true, nil
 }
 
-func (n *Node) processBlockAnnouncement(blockAnnouncement JAMSNP_BlockAnnounce) (block *types.Block, err error) {
+func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement JAMSNP_BlockAnnounce) (*types.Block, error) {
 	if n.store.SendTrace {
 		tracer := n.store.Tp.Tracer("NodeTracer")
-		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] processBlockAnnouncement", n.store.NodeID))
-		n.store.UpdateBlockAnnouncementContext(ctx)
+		traceCtx, span := tracer.Start(ctx, fmt.Sprintf("[N%d] processBlockAnnouncement", n.store.NodeID))
+		n.store.UpdateBlockAnnouncementContext(traceCtx)
 		defer span.End()
+		ctx = traceCtx // Use the span context for everything that follows
 	}
 
-	// initiate CE128_BlockRequest
 	validatorIndex := blockAnnouncement.Header.AuthorIndex
 	p, ok := n.peersInfo[validatorIndex]
 	if !ok {
-		err := fmt.Errorf("Invalid validator index %d", validatorIndex)
+		err := fmt.Errorf("invalid validator index %d", validatorIndex)
 		log.Error(module, "processBlockAnnouncement", "err", err)
-		return block, err
+		return nil, err
 	}
+
 	headerHash := blockAnnouncement.Header.HeaderHash()
+
+	var lastErr error
 	var blocksRaw []types.Block
 	for attempt := 1; attempt <= 3; attempt++ {
-		blocksRaw, err = p.SendBlockRequest(headerHash, 1, 1)
-		if err == nil {
-			if attempt > 1 {
-				fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) attempt %d success\n", n.String(), headerHash, attempt)
-			}
-			break // exit loop if request succeeds
+		// Respect cancellation early
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("processBlockAnnouncement canceled: %w", ctx.Err())
+		default:
 		}
-		//time.Sleep(100)
+
+		// Small timeout context per attempt
+		attemptCtx, cancel := context.WithTimeout(ctx, SmallTimeout)
+		blocksRaw, lastErr = p.SendBlockRequest(attemptCtx, headerHash, 1, 1)
+		cancel()
+
+		if lastErr == nil && len(blocksRaw) > 0 {
+			if attempt > 1 {
+				log.Info(module, "SendBlockRequest succeeded", "attempt", attempt, "blockHash", headerHash)
+			}
+			break
+		}
+
 		if attempt == 3 {
-			fmt.Printf("%s processBlockAnnouncement:SendBlockRequest(%v) failed after 3 attempts\n", n.String(), headerHash)
-			return nil, err
+			log.Warn(module, "SendBlockRequest failed after 3 attempts", "blockHash", headerHash, "lastErr", lastErr)
+			return nil, fmt.Errorf("SendBlockRequest failed after 3 attempts: %w", lastErr)
 		}
 	}
 
-	block = &blocksRaw[0]
-	receivedHeaderHash := block.Header.Hash()
-	if receivedHeaderHash != headerHash {
-		err := fmt.Errorf("failed header hash retrieval")
+	block := &blocksRaw[0]
+	if receivedHash := block.Header.Hash(); receivedHash != headerHash {
+		err := fmt.Errorf("block hash mismatch: expected %s, got %s", headerHash.String_short(), receivedHash.String_short())
 		log.Error(module, "processBlockAnnouncement", "err", err)
-		return block, err
+		return nil, err
 	}
+
 	n.processBlock(block)
 	return block, nil
 }
+
 func (n *NodeContent) cacheBlock(block *types.Block) error {
 
 	if block.GetParentHeaderHash() == (genesisBlockHash) {
@@ -272,35 +281,52 @@ func (n *Node) runBlocksTickets() {
 }
 
 func (n *Node) runReceiveBlock() {
-	// ticker here to avoid high CPU usage
 	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
 
 	for {
-		time.Sleep(10 * time.Millisecond)
 		select {
+
 		case <-pulseTicker.C:
-			// Small pause to reduce CPU load when channels are quiet
-			err := n.extendChain()
-			if err != nil {
-				// log.Warn(debugBlock, "runReceiveBlock:extendChain", "n", n.String(), "err", err)
+			// MediumTimeout to extend the chain
+			extendCtx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+			if err := n.extendChain(extendCtx); err != nil {
+				log.Warn(debugBlock, "runReceiveBlock: extendChain failed", "n", n.String(), "err", err)
 			}
+			cancel()
+
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
-			log.Debug(debugBlock, "runReceiveBlock", "n", n.String(), "blockAnnouncement", blockAnnouncement.Header.HeaderHash().String_short())
-			b, err := n.processBlockAnnouncement(blockAnnouncement)
+			log.Debug(debugBlock, "runReceiveBlock: received block announcement",
+				"n", n.String(), "blockHash", blockAnnouncement.Header.HeaderHash().String_short())
+			// SmallTimeout to processBlockAnnouncement
+			blockCtx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
+			block, err := n.processBlockAnnouncement(blockCtx, blockAnnouncement)
+			cancel()
+
 			if err != nil {
-				fmt.Printf("%s processBlockAnnouncement ERR %v\n", n.String(), err)
+				log.Warn(debugBlock, "processBlockAnnouncement failed", "n", n.String(), "err", err)
 			} else {
-				log.Trace(debugBlock, fmt.Sprintf("%s Received Block Announcement from validator %d", n.String(), blockAnnouncement.Header.AuthorIndex), "p", common.Str(b.GetParentHeaderHash()), "h", common.Str(b.Header.Hash()), "t", b.Header.Slot)
-				announcement := fmt.Sprintf("{\"method\":\"BlockAnnouncement\",\"result\":{\"blockHash\":\"%s\",\"headerHash\":\"%s\"}}", b.Hash(), b.Header.Hash())
+				log.Trace(debugBlock, "processed block",
+					"author", blockAnnouncement.Header.AuthorIndex,
+					"parent", block.GetParentHeaderHash(),
+					"hash", block.Header.Hash(),
+					"slot", block.Header.Slot)
+
 				if n.hub != nil {
+					announcement := fmt.Sprintf(
+						`{"method":"BlockAnnouncement","result":{"blockHash":"%s","headerHash":"%s"}}`,
+						block.Hash(), block.Header.Hash(),
+					)
 					n.hub.broadcast <- []byte(announcement)
 				}
 			}
+
 		case <-n.stop_receive_blk:
-			fmt.Printf("%s runReceiveBlock: stop_receive_blk\n", n.String())
-			<-n.restart_receive_blk
-			fmt.Printf("%s runReceiveBlock: restart_receive_blk\n", n.String())
+			log.Trace(debugBlock, "runReceiveBlock: received stop signal", "n", n.String())
+			select {
+			case <-n.restart_receive_blk:
+				log.Trace(debugBlock, "runReceiveBlock: restart signal received", "n", n.String())
+			}
 		}
 	}
 }
@@ -387,7 +413,7 @@ func (n *Node) RunRPCCommand() {
 var CurrentSlot = uint32(12)
 
 // process request
-func (n *NodeContent) sendRequest(peerID uint16, obj interface{}) (resp interface{}, err error) {
+func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interface{}) (resp interface{}, err error) {
 	// Get the peer ID from the object
 	msgType := getMessageType(obj)
 	if msgType == "unknown" {
@@ -408,7 +434,7 @@ func (n *NodeContent) sendRequest(peerID uint16, obj interface{}) (resp interfac
 		if err != nil {
 			return resp, err
 		}
-		blocks, err := peer.SendBlockRequest(headerHash, direction, maximumBlocks)
+		blocks, err := peer.SendBlockRequest(ctx, headerHash, direction, maximumBlocks)
 		if err != nil {
 			return resp, err
 		}
@@ -447,7 +473,7 @@ func (n *NodeContent) sendRequest(peerID uint16, obj interface{}) (resp interfac
 			return resp, err
 		}
 		log.Trace(debugDA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
-		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(erasureRoot, peerID)
+		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, peerID)
 		if err != nil {
 			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
@@ -488,7 +514,7 @@ func (n *NodeContent) sendRequest(peerID uint16, obj interface{}) (resp interfac
 			}
 			return self_response, nil
 		}
-		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(erasureRoot, peerID, segmentIndices, false)
+		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(ctx, erasureRoot, peerID, segmentIndices, false)
 		if err != nil {
 			return resp, err
 		}
@@ -505,46 +531,35 @@ func (n *NodeContent) sendRequest(peerID uint16, obj interface{}) (resp interfac
 
 	}
 }
-
-// internal makeRquest call with ctx implementation
 func (n *NodeContent) makeRequestInternal(ctx context.Context, peerID uint16, obj interface{}) (interface{}, error) {
-
-	// Channel to receive the response or error
-	responseCh := make(chan interface{}, 1)
-	errCh := make(chan error, 1)
-
-	// Goroutine to handle the request
-	go func() {
-		response, err := n.sendRequest(peerID, obj)
-		if err != nil {
-			errCh <- err
-		} else {
-			responseCh <- response
-		}
-	}()
-
 	msgType := getMessageType(obj)
 	if msgType == "unknown" {
-		return nil, fmt.Errorf("unsupported type")
+		return nil, fmt.Errorf("unsupported message type")
 	}
+
+	type result struct {
+		val interface{}
+		err error
+	}
+
+	resultCh := make(chan result, 1)
+
+	go func() {
+		// Let sendRequest respect the same context
+		response, err := n.sendRequest(ctx, peerID, obj)
+		resultCh <- result{val: response, err: err}
+	}()
+
 	select {
 	case <-ctx.Done():
-		// Context was canceled before the request completed
+		// Ensure any goroutines can exit if sendRequest is also context-aware
 		return nil, ctx.Err()
-	case err := <-errCh:
-		// Request encountered an error
-		return nil, err
-	case response := <-responseCh:
-		// Request succeeded
-		return response, nil
+	case res := <-resultCh:
+		return res.val, res.err
 	}
 }
 
 // single makeRequest call via makeRequestInternal
-//	ctx, cancel := context.WithTimeout(context.Background(), singleTimeout)
-//	defer cancel()
-
-// plural makeRequest calls via makeRequestInternal, with a minSuccess required because cancelling other simantanteous req
 func (n *NodeContent) makeRequests(objs map[uint16]interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([]interface{}, error) {
 	var wg sync.WaitGroup
 	results := make(chan interface{}, len(objs))
@@ -552,22 +567,23 @@ func (n *NodeContent) makeRequests(objs map[uint16]interface{}, minSuccess int, 
 	var mu sync.Mutex
 	successCount := 0
 
-	// Create a cancellable context -- this is the parent ctx
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
+
 	for peerID, obj := range objs {
 		wg.Add(1)
-		go func(obj interface{}) {
+		go func(peerID uint16, obj interface{}) {
 			defer wg.Done()
 
-			// Create a context with a 2-second timeout for each individual request
-			// This is the child context derived from ctx.
 			reqCtx, reqCancel := context.WithTimeout(ctx, singleTimeout)
 			defer reqCancel()
 
 			res, err := n.makeRequestInternal(reqCtx, peerID, obj)
 			if err != nil {
-				errorsCh <- err
+				select {
+				case errorsCh <- err:
+				default:
+				}
 				return
 			}
 
@@ -575,19 +591,17 @@ func (n *NodeContent) makeRequests(objs map[uint16]interface{}, minSuccess int, 
 			case results <- res:
 				mu.Lock()
 				successCount++
-				if successCount >= minSuccess {
-					cancel() // Cancel remaining requests once minSuccess is reached, include its childCtx
+				if successCount >= minSuccess && ctx.Err() == nil {
+					cancel()
 				}
 				mu.Unlock()
 			case <-ctx.Done():
 				return
 			}
-		}(obj)
+		}(peerID, obj)
 	}
 
-	// Wait for all requests to finish
 	wg.Wait()
-	log.Trace(debugDA, "makeRequests: Receive DONE", "n", n.id)
 	close(results)
 	close(errorsCh)
 
@@ -595,11 +609,14 @@ func (n *NodeContent) makeRequests(objs map[uint16]interface{}, minSuccess int, 
 	for res := range results {
 		finalResults = append(finalResults, res)
 	}
-	log.Trace(debugDA, "makeRequests: successCount", successCount)
-	// If not enough successful responses
-	if successCount < minSuccess {
-		return nil, fmt.Errorf("not enough successful requests (successCount:%d < minSuccess:%d)", successCount, minSuccess)
+
+	mu.Lock()
+	sc := successCount
+	mu.Unlock()
+
+	log.Trace(debugDA, "makeRequests: successCount", sc)
+	if sc < minSuccess {
+		return nil, fmt.Errorf("not enough successful requests (successCount:%d < minSuccess:%d)", sc, minSuccess)
 	}
-	//TODO..need somekind of sorting here..
 	return finalResults, nil
 }

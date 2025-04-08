@@ -126,24 +126,35 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint16, segmentIndex []uint16, withJustification bool) (segmentShards []byte, justifications [][]byte, err error) {
+func (p *Peer) SendSegmentShardRequest(
+	ctx context.Context,
+	erasureRoot common.Hash,
+	shardIndex uint16,
+	segmentIndex []uint16,
+	withJustification bool,
+) (segmentShards []byte, justifications [][]byte, err error) {
 
 	if p.node.store.SendTrace {
 		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] SendSegmentShardRequest", p.node.store.NodeID))
-		// p.node.UpdateSegmentShardContext(ctx)
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendSegmentShardRequest", p.node.store.NodeID))
 		defer span.End()
+	}
+
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
 	}
 
 	code := uint8(CE139_SegmentShardRequest)
 	if withJustification {
 		code = CE140_SegmentShardRequestP
 	}
-	stream, err := p.openStream(code)
+
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return
+		return nil, nil, fmt.Errorf("openStream[%d]: %w", code, err)
 	}
 	defer stream.Close()
+
 	req := &JAMSNPSegmentShardRequest{
 		ErasureRoot:  erasureRoot,
 		ShardIndex:   shardIndex,
@@ -153,78 +164,86 @@ func (p *Peer) SendSegmentShardRequest(erasureRoot common.Hash, shardIndex uint1
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return
+		return nil, nil, fmt.Errorf("ToBytes[SegmentShardRequest]: %w", err)
 	}
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return
+
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		return nil, nil, fmt.Errorf("sendQuicBytes[%d]: %w", code, err)
 	}
 
 	// <-- [Segment Shard]
-	segmentShards, err = receiveQuicBytes(stream, p.PeerID, code)
+	segmentShards, err = receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
-		fmt.Printf("%s [SendSegmentShardRequest:receiveQuicBytes] ERR %v\n", p.String(), err)
-		// panic(11060)
-		return
+		return nil, nil, fmt.Errorf("receiveQuicBytes[SegmentShard]: %w", err)
 	}
+
+	// Optionally receive justifications
 	if withJustification {
-		for j := uint8(0); j < req.Len; j++ {
-			var justification []byte
-			justification, err = receiveQuicBytes(stream, p.PeerID, code)
-			if err != nil {
-				return
-			}
-			justifications = append(justifications, justification)
+		justifications, err = receiveMultiple(ctx, stream, len(segmentIndex), p.PeerID, code)
+		if err != nil {
+			return nil, nil, fmt.Errorf("receiveMultiple[Justifications]: %w", err)
 		}
 	}
-	return
+
+	return segmentShards, justifications, nil
 }
 
-func (n *Node) onSegmentShardRequest(stream quic.Stream, msg []byte, withJustification bool) (err error) {
+func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, msg []byte, withJustification bool) (err error) {
 	defer stream.Close()
+
 	var req JAMSNPSegmentShardRequest
 	code := uint8(CE139_SegmentShardRequest)
 	if withJustification {
 		code = uint8(CE140_SegmentShardRequestP)
 	}
+
 	// Deserialize byte array back into the struct
 	err = req.FromBytes(msg)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
-		return
+		return fmt.Errorf("onSegmentShardRequest: FromBytes failed: %w", err)
 	}
+
 	selected_segmentshards, selected_segment_justifications, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex, withJustification)
 	if err != nil {
 		log.Error(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
-		return err
+		return fmt.Errorf("onSegmentShardRequest: GetSegmentShard_Assurer failed: %w", err)
 	}
 	if !ok {
 		log.Warn(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
-		return fmt.Errorf("Not found")
+		return fmt.Errorf("onSegmentShardRequest: segment shard not found")
 	}
+
 	// <-- Segment Shard
 	combined_selected_segmentshards := bytes.Join(selected_segmentshards, nil)
+
 	if false {
 		fmt.Printf("%s onSegmentShardRequest: GetSegmentShard_AssurerSimple erasure root %s shard %d (%v) => %d bytes h(concat)=%s\n",
 			n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex, len(combined_selected_segmentshards), common.Blake2Hash(combined_selected_segmentshards))
 	}
 
-	err = sendQuicBytes(stream, combined_selected_segmentshards, n.id, code)
-	if err != nil {
-		return
+	// Respect cancellation before sending large blob
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("onSegmentShardRequest: context cancelled before sending shard: %w", ctx.Err())
+	default:
 	}
 
-	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
+	err = sendQuicBytes(ctx, stream, combined_selected_segmentshards, n.id, code)
+	if err != nil {
+		return fmt.Errorf("onSegmentShardRequest: sendQuicBytes segment shard failed: %w", err)
+	}
+
+	// <-- [Segment Justifications] (if requested)
 	if withJustification {
 		for item_idx, s_j := range selected_segment_justifications {
 			s_f := selected_segment_justifications[item_idx]
-			err = sendQuicBytes(stream, s_f, n.id, code)
-			if err != nil {
-				return
+
+			if err = sendQuicBytes(ctx, stream, s_f, n.id, code); err != nil {
+				return fmt.Errorf("onSegmentShardRequest: sendQuicBytes justification s_f failed (idx %d): %w", item_idx, err)
 			}
-			err = sendQuicBytes(stream, s_j, n.id, code)
-			if err != nil {
-				return
+			if err = sendQuicBytes(ctx, stream, s_j, n.id, code); err != nil {
+				return fmt.Errorf("onSegmentShardRequest: sendQuicBytes justification s_j failed (idx %d): %w", item_idx, err)
 			}
 		}
 	}

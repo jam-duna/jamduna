@@ -2,8 +2,8 @@ package node
 
 import (
 	"container/list"
+	"context"
 	"fmt"
-	rand0 "math/rand"
 
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -30,43 +30,70 @@ func (n *Node) InsertOrphan(block *types.Block) {
 		n.block_waiting.PushBack(new_list)
 	}
 }
-
-func (n *Node) SyncornizedBlocks() {
+func (n *Node) SynchronizedBlocks(ctx context.Context) {
 	for e := n.block_waiting.Front(); e != nil; e = e.Next() {
-		tail_block := e.Value.(*list.List).Back().Value.(*types.Block)
-		slot1 := tail_block.Header.Slot
-		root := n.block_tree.GetRoot()
-		slot2 := root.Block.Header.Slot
+		// Respect cancellation early
+		select {
+		case <-ctx.Done():
+			log.Info(blk, "SynchronizedBlocks: context canceled, exiting sync loop")
+			return
+		default:
+		}
 
-		diffs := slot2 - slot1
+		blockList, ok := e.Value.(*list.List)
+		if !ok || blockList.Len() == 0 {
+			continue
+		}
+
+		tailBlock := blockList.Back().Value.(*types.Block)
+		slotTail := tailBlock.Header.Slot
+		root := n.block_tree.GetRoot()
+		slotRoot := root.Block.Header.Slot
+
+		diffs := slotRoot - slotTail
 		if diffs >= 1 {
-			// send the request to the selected peer
-			// get the blocks from the selected peer
-			selected_peer := n.peersInfo[uint16(rand0.Intn(types.TotalValidators))]
-			blocksRaw, err := selected_peer.SendBlockRequest(root.Block.Header.ParentHeaderHash, 1, diffs)
-			if err != nil {
-				log.Error(blk, "SendBlockRequest", "err", err)
+			// Randomly select a peer (defensively)
+			if len(n.peersInfo) == 0 {
+				log.Warn(blk, "SynchronizedBlocks: no peers available to request blocks")
+				continue
 			}
-			for i := 0; i < len(blocksRaw); i++ {
-				front_block := e.Value.(*list.List).Front().Value.(*types.Block)
-				if front_block.Header.ParentHeaderHash == blocksRaw[i].Header.Hash() {
-					e.Value.(*list.List).PushFront(blocksRaw[i])
+			var selectedPeer *Peer
+			for _, p := range n.peersInfo {
+				selectedPeer = p
+				break
+			}
+
+			if selectedPeer == nil {
+				log.Warn(blk, "SynchronizedBlocks: peer selection failed")
+				continue
+			}
+
+			blocksRaw, err := selectedPeer.SendBlockRequest(ctx, root.Block.Header.ParentHeaderHash, 1, diffs)
+			if err != nil {
+				log.Error(blk, "SendBlockRequest failed", "peer", selectedPeer.String(), "err", err)
+				continue
+			}
+
+			for _, newBlock := range blocksRaw {
+				frontBlock := blockList.Front().Value.(*types.Block)
+				if frontBlock.Header.ParentHeaderHash == newBlock.Header.Hash() {
+					blockList.PushFront(newBlock)
 				} else {
-					log.Error(blk, "SyncornizedBlocks", "err", "block not found")
+					log.Warn(blk, "SynchronizedBlocks: mismatched parent", "expected", frontBlock.Header.ParentHeaderHash, "got", newBlock.Header.Hash())
 				}
 			}
-			block_list := e.Value.(*list.List)
-			for e := block_list.Front(); e != nil; e = e.Next() {
-				block := e.Value.(*types.Block)
-				err := n.block_tree.AddBlock(block)
-				if err != nil {
-					log.Error(blk, "AddBlock", "err", err)
+
+			// Add all blocks to the block tree
+			for blockElem := blockList.Front(); blockElem != nil; blockElem = blockElem.Next() {
+				block := blockElem.Value.(*types.Block)
+				if err := n.block_tree.AddBlock(block); err != nil {
+					log.Error(blk, "AddBlock failed", "block", block.Header.Hash(), "err", err)
 				}
 			}
 		} else {
-			err := n.block_tree.AddBlock(tail_block)
-			if err != nil {
-				log.Error(blk, "AddBlock", "err", err)
+			// Just add the tail block
+			if err := n.block_tree.AddBlock(tailBlock); err != nil {
+				log.Error(blk, "AddBlock failed", "block", tailBlock.Header.Hash(), "err", err)
 			}
 		}
 	}

@@ -2,9 +2,11 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -90,8 +92,7 @@ func (ticket *JAMSNPTicketDistribution) FromBytes(data []byte) error {
 	copy(ticket.Signature[:], data[5:])
 	return nil
 }
-
-func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool) (err error) {
+func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types.Ticket, isProxy bool) error {
 	req := &JAMSNPTicketDistribution{
 		Epoch:     epoch,
 		Attempt:   t.Attempt,
@@ -100,35 +101,33 @@ func (p *Peer) SendTicketDistribution(epoch uint32, t types.Ticket, isProxy bool
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("ToBytes failed: %w", err)
 	}
+
 	code := uint8(CE131_TicketDistribution)
 	if isProxy {
 		code = CE132_TicketDistribution
 	}
-	stream, err := p.openStream(code)
+
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		// fmt.Printf("SendTicketDistribution ERR %v\n", err)
-		return err
+		return fmt.Errorf("openStream failed: %w", err)
 	}
 	defer stream.Close()
-	// TODO: proper treatment of Proxy
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return err
+
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		return fmt.Errorf("sendQuicBytes failed: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Node) onTicketDistribution(stream quic.Stream, msg []byte) (err error) {
+func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct
-	err = newReq.FromBytes(msg)
-	if err != nil {
-		fmt.Println("Error deserializing:", err)
-		return
+	if err := newReq.FromBytes(msg); err != nil {
+		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w", err)
 	}
 
 	// <-- FIN
@@ -137,6 +136,14 @@ func (n *Node) onTicketDistribution(stream quic.Stream, msg []byte) (err error) 
 	ticket.Attempt = newReq.Attempt
 	ticket.Signature = newReq.Signature
 
-	n.ticketsCh <- ticket
-	return
+	select {
+	case n.ticketsCh <- ticket:
+		// successfully sent ticket
+	case <-ctx.Done():
+		return fmt.Errorf("onTicketDistribution: context cancelled while sending ticket: %w", ctx.Err())
+	default:
+		// IMPORTANT: avoid blocking if ticketsCh full
+		log.Warn(module, "onTicketDistribution: tickets channel full, dropped ticket")
+	}
+	return nil
 }

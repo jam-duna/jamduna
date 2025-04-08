@@ -1,6 +1,8 @@
 package node
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -26,47 +28,57 @@ Node -> Node
 <-- Work Report
 <-- FIN
 */
-
-func (p *Peer) SendWorkReportRequest(workReportHash common.Hash) (workReport types.WorkReport, err error) {
+func (p *Peer) SendWorkReportRequest(ctx context.Context, workReportHash common.Hash) (types.WorkReport, error) {
 	code := uint8(CE136_WorkReportRequest)
-	stream, err := p.openStream(code)
+
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendWorkReportRequest", p.node.store.NodeID))
+		defer span.End()
+	}
+
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return workReport, err
+		return types.WorkReport{}, fmt.Errorf("openStream[CE136_WorkReportRequest]: %w", err)
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, workReportHash.Bytes(), p.PeerID, code)
-	if err != nil {
-		return workReport, err
-	}
-	workReportBytes, err := receiveQuicBytes(stream, p.PeerID, code)
-	if err != nil {
-		return workReport, err
+
+	if err := sendQuicBytes(ctx, stream, workReportHash.Bytes(), p.PeerID, code); err != nil {
+		return types.WorkReport{}, fmt.Errorf("sendQuicBytes[CE136_WorkReportRequest]: %w", err)
 	}
 
-	wr, _, err := types.Decode(workReportBytes, reflect.TypeOf(types.WorkReport{}))
+	workReportBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
-		return workReport, err
+		return types.WorkReport{}, fmt.Errorf("receiveQuicBytes[CE136_WorkReportRequest]: %w", err)
 	}
-	workReport = wr.(types.WorkReport)
 
-	return workReport, nil
+	decoded, _, err := types.Decode(workReportBytes, reflect.TypeOf(types.WorkReport{}))
+	if err != nil {
+		return types.WorkReport{}, fmt.Errorf("decode[WorkReport]: %w", err)
+	}
+
+	return decoded.(types.WorkReport), nil
 }
 
-func (n *NodeContent) onWorkReportRequest(stream quic.Stream, msg []byte) (err error) {
+func (n *NodeContent) onWorkReportRequest(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
+	// --> Hash
 	h := common.BytesToHash(msg)
 	workReport, ok, err := n.WorkReportLookup(h)
 	if err != nil {
-		return err
+		return fmt.Errorf("onWorkReportRequest: WorkReportLookup failed: %w", err)
 	}
 	if !ok {
+		// work report not found; gracefully ignore
 		return nil
 	}
 
-	err = sendQuicBytes(stream, workReport.Bytes(), n.id, CE136_WorkReportRequest)
+	// <-- WorkReport
+	err = sendQuicBytes(ctx, stream, workReport.Bytes(), n.id, CE136_WorkReportRequest)
 	if err != nil {
-		return err
+		return fmt.Errorf("onWorkReportRequest: sendQuicBytes failed: %w", err)
 	}
 
+	// <-- FIN
 	return nil
 }

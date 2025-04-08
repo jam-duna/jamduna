@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -422,7 +423,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 				log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash())
 			}
 
-			go n.broadcast(announcementWithProof)
+			go n.broadcast(context.TODO(), announcementWithProof)
 		}
 
 		return a0, nil
@@ -473,7 +474,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 				log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "wph", w.WorkReport.Hash())
 			}
 
-			go n.broadcast(announcementWithProof)
+			go n.broadcast(context.TODO(), announcementWithProof)
 		}
 
 		return an, nil
@@ -607,7 +608,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.Hash) {
 	for _, j := range judges {
 		log.Trace(debugAudit, "distributing judgement", "n", n.String(), n.String(), "wph", j.WorkReportHash)
-		go n.broadcast(j)
+		go n.broadcast(context.TODO(), j)
 		n.judgementsCh <- j
 	}
 

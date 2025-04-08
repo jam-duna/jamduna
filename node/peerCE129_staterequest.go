@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"encoding/binary"
 	"io"
 
@@ -8,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -109,7 +111,7 @@ type JAMSNPStateResponse struct {
 	KeyValues []types.StateKeyValue `json:"keyValues"`
 }
 
-func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (err error) {
+func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (err error) {
 	req := &JAMSNPStateRequest{
 		HeaderHash:  headerHash,
 		StartKey:    startKey,
@@ -121,13 +123,13 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 		return err
 	}
 	code := uint8(CE129_StateRequest)
-	stream, err := p.openStream(code)
+	stream, err := p.openStream(ctx, code)
 	// --> Header Hash ++ Start Key ++ End Key ++ Maximum Size
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}
@@ -140,7 +142,7 @@ func (p *Peer) SendStateRequest(headerHash common.Hash, startKey [31]byte, endKe
 	return nil
 }
 
-func (n *NodeContent) onStateRequest(stream quic.Stream, msg []byte) (err error) {
+func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 
 	var newReq JAMSNPStateRequest
@@ -148,19 +150,41 @@ func (n *NodeContent) onStateRequest(stream quic.Stream, msg []byte) (err error)
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
-		return
+		return fmt.Errorf("onStateRequest: failed to decode request: %w", err)
 	}
 
+	// Pull state data: boundary nodes + key-value pairs within given size and range
 	boundarynodes, keyvalues, ok, err := n.GetState(newReq.HeaderHash, newReq.StartKey, newReq.EndKey, newReq.MaximumSize)
-	if !ok {
-
+	if err != nil {
+		return fmt.Errorf("onStateRequest: GetState error: %w", err)
 	}
-	//<-- [Boundary Node]
-	err = sendQuicBytes(stream, common.ConcatenateByteSlices(boundarynodes), n.id, CE129_StateRequest)
-	//<-- [Key ++ Value]
+	if !ok {
+		// No state found for the given range — optional: log and return nil to skip sending
+		log.Warn(module, "onStateRequest: state not found", "headerHash", newReq.HeaderHash)
+		return nil
+	}
+
+	// <-- [Boundary Node]
+	err = sendQuicBytes(ctx, stream, common.ConcatenateByteSlices(boundarynodes), n.id, CE129_StateRequest)
+	if err != nil {
+		return fmt.Errorf("onStateRequest: failed to send boundarynodes: %w", err)
+	}
+
+	// <-- [Key ++ Value]
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("onStateRequest: context cancelled before sending keyvalues: %w", ctx.Err())
+	default:
+	}
 	kvbytes, err := keyvalues.ToBytes()
-	err = sendQuicBytes(stream, kvbytes, n.id, CE129_StateRequest)
+	if err != nil {
+		return fmt.Errorf("onStateRequest: failed to encode keyvalues: %w", err)
+	}
+	err = sendQuicBytes(ctx, stream, kvbytes, n.id, CE129_StateRequest)
+	if err != nil {
+		return fmt.Errorf("onStateRequest: failed to send keyvalues: %w", err)
+	}
 
 	// <-- FIN
-	return
+	return nil
 }

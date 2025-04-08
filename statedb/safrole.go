@@ -483,7 +483,12 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, u
 
 		// Launch a goroutine for each attempt
 		go func(attempt uint8) {
-			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("Recovered from panic in ticket generation (attempt %d): %v\n", attempt, r)
+				}
+				wg.Done()
+			}()
 
 			entropy := usedEntropy
 			ticket, err := s.generateTicket(secret, entropy, attempt)

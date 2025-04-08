@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
@@ -92,17 +93,22 @@ func (n *Node) BroadcastTickets() {
 		usingEntropy = n.statedb.GetSafrole().Entropy[1]
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	tickets := n.selfTickets[usingEntropy]
 	for _, ticketbucket := range tickets {
 		if !*ticketbucket.IsIncluded {
 			ticket := ticketbucket.Ticket
 			log.Trace(debugT, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt)
 			if !*ticketbucket.IsBroadcasted {
-				go n.broadcast(ticket)
+				go func() {
+					defer cancel() // ensures context is released
+					_ = n.broadcast(ctx, ticket)
+				}()
 				*ticketbucket.IsBroadcasted = true
 			}
 		}
 	}
+
 }
 
 func (n *Node) CleanUpSelfTickets(currJCE uint32) {

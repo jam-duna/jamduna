@@ -2,7 +2,9 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
@@ -104,12 +106,12 @@ func (pub *JAMSNPJudgmentPublication) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendJudgmentPublication(epoch uint32, j types.Judgement) (err error) {
-	//--> Epoch Index ++ Validator Index ++ Validity ++ Work Report Hash ++ Ed25519 Signature
+func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j types.Judgement) error {
 	validity := uint8(0)
 	if j.Judge {
 		validity = 1
 	}
+
 	req := &JAMSNPJudgmentPublication{
 		Epoch:          epoch,
 		ValidatorIndex: j.Validator,
@@ -120,24 +122,32 @@ func (p *Peer) SendJudgmentPublication(epoch uint32, j types.Judgement) (err err
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("ToBytes[CE145_JudgmentPublication]: %w", err)
 	}
+
 	code := uint8(CE145_JudgmentPublication)
-	stream, err := p.openStream(code)
+
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendJudgmentPublication", p.node.store.NodeID))
+		defer span.End()
+	}
+
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return err
+		return fmt.Errorf("openStream[CE145_JudgmentPublication]: %w", err)
 	}
 	defer stream.Close()
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return err
+
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		return fmt.Errorf("sendQuicBytes[CE145_JudgmentPublication]: %w", err)
 	}
 
 	return nil
 }
 
 // Node has received a JudgementPublication message to act on
-func (n *Node) onJudgmentPublication(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	defer stream.Close()
 	var jp JAMSNPJudgmentPublication
 	err = jp.FromBytes(msg)

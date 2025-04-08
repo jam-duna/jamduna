@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -253,15 +254,30 @@ func (report *JAMSNPAuditAnnouncementReport) FromBytes(data []byte) error {
 
 	return nil
 }
-
-func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err error) {
-	reports := make([]JAMSNPAuditAnnouncementReport, 0)
-	for _, report := range a.Announcement.Reports {
-		var jam_ann_report JAMSNPAuditAnnouncementReport
-		jam_ann_report.CoreIndex = report.CoreIndex
-		jam_ann_report.WorkReportHash = report.WorkReportHash
-		reports = append(reports, jam_ann_report)
+func (p *Peer) SendAuditAnnouncement(ctx context.Context, a *JAMSNPAuditAnnouncementWithProof) error {
+	// Start span if tracing is enabled
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendAuditAnnouncement", p.node.store.NodeID))
+		defer span.End()
 	}
+
+	code := uint8(CE144_AuditAnnouncement)
+	stream, err := p.openStream(ctx, code)
+	if err != nil {
+		return fmt.Errorf("openStream[CE144_AuditAnnouncement]: %w", err)
+	}
+	defer stream.Close()
+
+	// Build the basic audit announcement
+	reports := make([]JAMSNPAuditAnnouncementReport, len(a.Announcement.Reports))
+	for i, report := range a.Announcement.Reports {
+		reports[i] = JAMSNPAuditAnnouncementReport{
+			CoreIndex:      report.CoreIndex,
+			WorkReportHash: report.WorkReportHash,
+		}
+	}
+
 	req := &JAMSNPAuditAnnouncement{
 		HeaderHash: a.Announcement.HeaderHash,
 		Tranche:    uint8(a.Announcement.Tranche),
@@ -272,68 +288,55 @@ func (p *Peer) SendAuditAnnouncement(a *JAMSNPAuditAnnouncementWithProof) (err e
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("ToBytes[AUDIT_ANNOUNCEMENT]: %w", err)
 	}
-	code := uint8(CE144_AuditAnnouncement)
-	stream, err := p.openStream(code)
-	if err != nil {
-		return err
-	}
-	defer stream.Close()
 
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return err
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		return fmt.Errorf("sendQuicBytes[AUDIT_ANNOUNCEMENT]: %w", err)
 	}
-	/*
-		Bandersnatch Signature = [u8; 96]
-		First Tranche Evidence = Bandersnatch Signature (s_0 in GP)
-		No-Show = Validator Index ++ Announcement (From the previous tranche)
-		Subsequent Tranche Evidence = [Bandersnatch Signature (s_n(w) in GP) ++ len++[No-Show]] (One entry per announced work-report)
-		Evidence = First Tranche Evidence (If tranche is 0) OR Subsequent Tranche Evidence (If tranche is not 0)
-	*/
+
 	if a.Announcement.Tranche == 0 {
-		err = sendQuicBytes(stream, a.Evidence_s0[:], p.PeerID, code)
-		if err != nil {
-			return err
+		// Send s_0 signature
+		if err := sendQuicBytes(ctx, stream, a.Evidence_s0[:], p.PeerID, code); err != nil {
+			return fmt.Errorf("sendQuicBytes[EVIDENCE_S0]: %w", err)
 		}
 	} else {
-		ev_not0 := make([]JAMSNPAuditAnnouncementNot0, 0)
+		// Build and send evidence_sn+no-show blocks
 		for i, report := range req.Reports {
 			noShow := a.Evidence_sn_no_show[report.WorkReportHash]
-			var jam_noshow []JAMSNPNoShow
-			for _, a := range noShow {
-				jam_noshow = append(jam_noshow, JAMSNPNoShow{
-					ValidatorIndex: uint16(a.ValidatorIndex),
-					Reports:        make([]JAMSNPAuditAnnouncementReport, 0),
-				})
-				for _, report := range a.Selected_WorkReport {
-					var jam_ann_report JAMSNPAuditAnnouncementReport
-					jam_ann_report.CoreIndex = report.Core
-					jam_ann_report.WorkReportHash = report.WorkReportHash
-					jam_noshow[len(jam_noshow)-1].Reports = append(jam_noshow[len(jam_noshow)-1].Reports, jam_ann_report)
+			jamNoShows := make([]JAMSNPNoShow, len(noShow))
+
+			for j, ns := range noShow {
+				reports := make([]JAMSNPAuditAnnouncementReport, len(ns.Selected_WorkReport))
+				for k, wr := range ns.Selected_WorkReport {
+					reports[k] = JAMSNPAuditAnnouncementReport{
+						CoreIndex:      wr.Core,
+						WorkReportHash: wr.WorkReportHash,
+					}
+				}
+				jamNoShows[j] = JAMSNPNoShow{
+					ValidatorIndex: uint16(ns.ValidatorIndex),
+					Reports:        reports,
 				}
 			}
-			if err != nil {
-				return err
-			}
-			ev_not0 = append(ev_not0, JAMSNPAuditAnnouncementNot0{
+
+			ev := JAMSNPAuditAnnouncementNot0{
 				Len:       uint8(len(noShow)),
 				Signature: a.Evidence_sn[i],
-				NoShows:   jam_noshow,
-			})
-		}
-		for _, ev := range ev_not0 {
+				NoShows:   jamNoShows,
+			}
+
 			evBytes, err := ev.ToBytes()
 			if err != nil {
-				return err
+				return fmt.Errorf("ToBytes[AUDIT_NOT0_EVIDENCE #%d]: %w", i, err)
 			}
-			err = sendQuicBytes(stream, evBytes, p.PeerID, code)
-			if err != nil {
-				return err
+
+			if err := sendQuicBytes(ctx, stream, evBytes, p.PeerID, code); err != nil {
+				return fmt.Errorf("sendQuicBytes[AUDIT_NOT0_EVIDENCE #%d]: %w", i, err)
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -350,30 +353,28 @@ func AnnouncementToNoShow(a *types.Announcement) (JAMSNPNoShow, error) {
 	return noShow, nil
 }
 
-// TODO: Shawn CHECK
-func (n *Node) onAuditAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
 	code := uint8(CE144_AuditAnnouncement)
+
 	var newReq JAMSNPAuditAnnouncement
-	// Deserialize byte array back into the struct
-	err = newReq.FromBytes(msg)
-	if err != nil {
-		fmt.Println("Error deserializing:", err)
-		return
+	if err := newReq.FromBytes(msg); err != nil {
+		return fmt.Errorf("onAuditAnnouncement: failed to deserialize announcement: %w", err)
 	}
 
-	selected_work_report := make([]types.AnnouncementReport, 0)
-	for _, report := range newReq.Reports {
-		selected_work_report = append(selected_work_report, types.AnnouncementReport{
+	// Convert reports to internal format
+	selectedReports := make([]types.AnnouncementReport, len(newReq.Reports))
+	for i, report := range newReq.Reports {
+		selectedReports[i] = types.AnnouncementReport{
 			Core:           report.CoreIndex,
 			WorkReportHash: report.WorkReportHash,
-		})
+		}
 	}
-	// <-- FIN
+
 	announcement := types.Announcement{
 		HeaderHash:          newReq.HeaderHash,
 		Tranche:             uint32(newReq.Tranche),
-		Selected_WorkReport: selected_work_report,
+		Selected_WorkReport: selectedReports,
 		ValidatorIndex:      uint32(peerID),
 		Signature:           newReq.Signature,
 	}
@@ -386,36 +387,34 @@ func (n *Node) onAuditAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 		Evidence = First Tranche Evidence (If tranche is 0) OR Subsequent Tranche Evidence (If tranche is not 0)
 	*/
 	if newReq.Tranche == 0 {
-		var evidence_s0 types.BandersnatchVrfSignature
-		req, err := receiveQuicBytes(stream, n.id, code)
+		var evidenceS0 types.BandersnatchVrfSignature
+		evidenceBytes, err := receiveQuicBytes(ctx, stream, n.id, code)
 		if err != nil {
-			return err
+			return fmt.Errorf("onAuditAnnouncement: receive evidence_s0 failed: %w", err)
 		}
-		copy(evidence_s0[:], req)
-		// TODO verify evidence_s0
+		copy(evidenceS0[:], evidenceBytes)
+		// TODO: verify evidenceS0
 	} else {
-		evidence_sn := make([]types.BandersnatchVrfSignature, 0)
-		evidence_sn_no_show := make(map[common.Hash][]JAMSNPNoShow)
+		evidenceSN := make([]types.BandersnatchVrfSignature, 0, len(newReq.Reports))
+		evidenceSNNoShow := make(map[common.Hash][]JAMSNPNoShow)
+
 		for _, r := range newReq.Reports {
-			var ev_not0 JAMSNPAuditAnnouncementNot0
-			req, err := receiveQuicBytes(stream, n.id, code)
+			evidenceBytes, err := receiveQuicBytes(ctx, stream, n.id, code)
 			if err != nil {
-				return err
+				return fmt.Errorf("onAuditAnnouncement: receive evidence_sn for report %x failed: %w", r.WorkReportHash[:4], err)
 			}
-			err = ev_not0.FromBytes(req)
-			if err != nil {
-				return err
+
+			var evNot0 JAMSNPAuditAnnouncementNot0
+			if err := evNot0.FromBytes(evidenceBytes); err != nil {
+				return fmt.Errorf("onAuditAnnouncement: decode evidence_sn not0: %w", err)
 			}
-			evidence_sn = append(evidence_sn, ev_not0.Signature)
-			for _, noShow := range ev_not0.NoShows {
-				if err != nil {
-					return err
-				}
-				evidence_sn_no_show[r.WorkReportHash] = append(evidence_sn_no_show[r.WorkReportHash], noShow)
-			}
+
+			evidenceSN = append(evidenceSN, evNot0.Signature)
+			evidenceSNNoShow[r.WorkReportHash] = append(evidenceSNNoShow[r.WorkReportHash], evNot0.NoShows...)
 		}
-		// TODO verify evidence_sn
+
+		// TODO: verify evidenceSN and evidenceSNNoShow
 	}
 
-	return
+	return nil
 }

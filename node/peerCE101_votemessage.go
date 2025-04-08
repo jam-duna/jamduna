@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/grandpa"
@@ -8,40 +9,56 @@ import (
 )
 
 // CE101_VoteMessage
-func (p *Peer) SendVoteMessage(req grandpa.VoteMessage) error {
+func (p *Peer) SendVoteMessage(ctx context.Context, req grandpa.VoteMessage) error {
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("SendVoteMessage: ToBytes failed: %w", err)
 	}
+
 	code := uint8(CE101_VoteMessage)
-	stream, err := p.openStream(code)
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return err
+		return fmt.Errorf("SendVoteMessage: openStream failed: %w", err)
 	}
 	defer stream.Close()
 
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return err
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		return fmt.Errorf("SendVoteMessage: sendQuicBytes failed: %w", err)
 	}
 	return nil
 }
 
-func (n *Node) onVoteMessage(stream quic.Stream, msg []byte) error {
+func (n *Node) onVoteMessage(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
-	vote := grandpa.VoteMessage{}
-	err := vote.FromBytes(msg)
-	if err != nil {
-		return err
+
+	var vote grandpa.VoteMessage
+	if err := vote.FromBytes(msg); err != nil {
+		return fmt.Errorf("onVoteMessage: failed to decode vote: %w", err)
 	}
-	if vote.SignMessage.Message.Stage == grandpa.PrecommitStage {
-		n.grandpaPreCommitMessageCh <- vote
-	} else if vote.SignMessage.Message.Stage == grandpa.PrevoteStage {
-		n.grandpaPreVoteMessageCh <- vote
-	} else if vote.SignMessage.Message.Stage == grandpa.PrimaryProposeStage {
-		n.grandpaPrimaryMessageCh <- vote
-	} else {
-		return fmt.Errorf("Invalid stage")
+
+	stage := vote.SignMessage.Message.Stage
+	switch stage {
+	case grandpa.PrecommitStage:
+		select {
+		case n.grandpaPreCommitMessageCh <- vote:
+		case <-ctx.Done():
+			return fmt.Errorf("onVoteMessage: context canceled while sending precommit")
+		}
+	case grandpa.PrevoteStage:
+		select {
+		case n.grandpaPreVoteMessageCh <- vote:
+		case <-ctx.Done():
+			return fmt.Errorf("onVoteMessage: context canceled while sending prevote")
+		}
+	case grandpa.PrimaryProposeStage:
+		select {
+		case n.grandpaPrimaryMessageCh <- vote:
+		case <-ctx.Done():
+			return fmt.Errorf("onVoteMessage: context canceled while sending primary propose")
+		}
+	default:
+		return fmt.Errorf("onVoteMessage: invalid stage: %d", stage)
 	}
+
 	return nil
 }

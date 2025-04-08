@@ -2,9 +2,11 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 
@@ -77,41 +79,46 @@ func (assurance *JAMSNPAssuranceDistribution) FromBytes(data []byte) error {
 
 	return nil
 }
-
-func (p *Peer) SendAssurance(a *types.Assurance) (err error) {
+func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance) error {
 	req := &JAMSNPAssuranceDistribution{
 		Anchor:    a.Anchor,
 		Bitfield:  a.Bitfield,
 		Signature: a.Signature,
 	}
+
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return fmt.Errorf("ToBytes[CE141_AssuranceDistribution]: %w", err)
 	}
+
 	code := uint8(CE141_AssuranceDistribution)
-	stream, err := p.openStream(code)
+
+	if p.node.store.SendTrace {
+		tracer := p.node.store.Tp.Tracer("NodeTracer")
+		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendAssurance", p.node.store.NodeID))
+		defer span.End()
+	}
+
+	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return err
+		return fmt.Errorf("openStream[CE141_AssuranceDistribution]: %w", err)
 	}
 	defer stream.Close()
-	// --> Assurance
-	err = sendQuicBytes(stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return err
+
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		return fmt.Errorf("sendQuicBytes[CE141_AssuranceDistribution]: %w", err)
 	}
+
 	return nil
 }
 
-func (n *Node) onAssuranceDistribution(stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onAssuranceDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
+
 	var newReq JAMSNPAssuranceDistribution
-	// Deserialize byte array back into the struct
-	err = newReq.FromBytes(msg)
-	if err != nil {
-		fmt.Println("Error deserializing:", err)
-		return
+	if err := newReq.FromBytes(msg); err != nil {
+		return fmt.Errorf("onAssuranceDistribution: failed to decode message: %w", err)
 	}
-	// <-- FIN
 
 	assurance := types.Assurance{
 		Anchor:         newReq.Anchor,
@@ -119,6 +126,15 @@ func (n *Node) onAssuranceDistribution(stream quic.Stream, msg []byte, peerID ui
 		ValidatorIndex: peerID,
 		Signature:      newReq.Signature,
 	}
-	n.assurancesCh <- assurance
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("onAssuranceDistribution: context cancelled: %w", ctx.Err())
+	case n.assurancesCh <- assurance:
+		log.Trace(debugStream, "onAssuranceDistribution received", "peerID", peerID, "anchor", newReq.Anchor)
+	default:
+		log.Warn(debugStream, "onAssuranceDistribution: assurance channel full, dropping", "peerID", peerID)
+	}
+
 	return nil
 }

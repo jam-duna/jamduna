@@ -5,6 +5,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -311,7 +312,7 @@ func TestDisputes(t *testing.T) {
 				},
 			},
 		}
-		err = builderNode.peersInfo[4].SendWorkPackageSubmission(codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
+		err = builderNode.peersInfo[4].SendWorkPackageSubmission(context.Background(), codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
