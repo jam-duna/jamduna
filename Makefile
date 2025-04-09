@@ -3,7 +3,7 @@ BINARY := jam
 SRC := jam.go
 NETWORK  ?= tiny
 NUM_NODES ?= 6
-DEFAULT_PORT ?= 9900
+DEFAULT_PORT ?= 9800
 BRANCH ?= jam_update
 JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
@@ -53,7 +53,7 @@ build_remote_nodes:
 clean_remote_nodes:
 	@echo "Cleaning JAM on all remote nodes..."
 	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'rm -rf .jam'"
-	#grep the pid from port 9900 and kill it
+	#grep the pid from port  and kill it
 	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -c 'command -v lsof >/dev/null && lsof -t -i:9900 | xargs --no-run-if-empty kill -9'"
 	@echo "All remote nodes cleaned."
 # update the latest commit on remote nodes
@@ -61,7 +61,7 @@ reset_remote_nodes:
 	@echo "Resetting JAM on all remote nodes..."
 	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
 	@echo "All remote nodes reset."
-# run jam.go on remote nodes on port 9900
+# run jam.go on remote nodes 
 run_jam_remote_nodes:
 	@echo "Starting run_jam on all remote nodes..."
 	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make jam_without_ffi_build NETWORK=$(NETWORK)'"

@@ -262,7 +262,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			log.Warn(debugStream, "CE129_StateRequest", "n", n.id, "p", peerID, "err", err)
 		}
 	case CE131_TicketDistribution, CE132_TicketDistribution:
-		err := n.onTicketDistribution(ctx, stream, msg)
+		err := n.onTicketDistribution(ctx, stream, msg, peerID)
 		if err != nil {
 			log.Warn(debugStream, "CE131_TicketDistribution, CE132_TicketDistribution", "n", n.id, "p", peerID, "err", err)
 		}

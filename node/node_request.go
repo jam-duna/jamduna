@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -231,24 +232,15 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 
 func (n *NodeContent) cacheBlock(block *types.Block) error {
 
-	if block.GetParentHeaderHash() == (genesisBlockHash) {
-		first_blk := block.Copy()
-		n.block_tree = types.NewBlockTree(&types.BT_Node{
-			Parent:    nil,
-			Block:     first_blk,
-			Height:    0,
-			Finalized: true,
-		})
-	} else {
-		if block != nil && n.block_tree != nil { // check
-			err := n.block_tree.AddBlock(block)
-			if err != nil {
-				return fmt.Errorf("cacheBlock: AddBlock failed %v", err)
-			}
-			// also prune the block tree
-			n.block_tree.PruneBlockTree(10)
+	if block != nil && n.block_tree != nil { // check
+		err := n.block_tree.AddBlock(block)
+		if err != nil {
+			return fmt.Errorf("cacheBlock: AddBlock failed %v", err)
 		}
+		// also prune the block tree
+		n.block_tree.PruneBlockTree(10)
 	}
+
 	return nil
 }
 func (n *NodeContent) cacheWorkReport(workReport types.WorkReport) {
@@ -296,8 +288,6 @@ func (n *Node) runReceiveBlock() {
 			cancel()
 
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
-			log.Debug(debugBlock, "runReceiveBlock: received block announcement",
-				"n", n.String(), "blockHash", blockAnnouncement.Header.HeaderHash().String_short())
 			// SmallTimeout to processBlockAnnouncement
 			blockCtx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
 			block, err := n.processBlockAnnouncement(blockCtx, blockAnnouncement)
@@ -306,13 +296,15 @@ func (n *Node) runReceiveBlock() {
 			if err != nil {
 				log.Warn(debugBlock, "processBlockAnnouncement failed", "n", n.String(), "err", err)
 			} else {
-				log.Trace(debugBlock, "processed block",
+				log.Info(debugBlock, "processBlock",
 					"author", blockAnnouncement.Header.AuthorIndex,
-					"parent", block.GetParentHeaderHash(),
-					"hash", block.Header.Hash(),
-					"slot", block.Header.Slot)
+					"p", common.Str(block.GetParentHeaderHash()),
+					"h", common.Str(block.Header.Hash()),
+					"H_t", fmt.Sprintf("%d", block.Header.Slot),
+					"goroutines", runtime.NumGoroutine())
 
 				if n.hub != nil {
+					// SUBSCRIPTION HERE
 					announcement := fmt.Sprintf(
 						`{"method":"BlockAnnouncement","result":{"blockHash":"%s","headerHash":"%s"}}`,
 						block.Hash(), block.Header.Hash(),

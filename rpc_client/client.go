@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/rpc"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -16,32 +17,45 @@ type NodeClient struct {
 	*rpc.Client
 	server_address string
 	state          *statedb.StateSnapshot
+	mu             sync.Mutex
 }
 
-func NewNodeClient(server_address string) (*NodeClient, error) {
-	client, err := rpc.Dial("tcp", server_address)
+func NewNodeClient(serverAddress string) (*NodeClient, error) {
+	client, err := rpc.Dial("tcp", serverAddress)
 	if err != nil {
 		return nil, err
 	}
-	return &NodeClient{client, server_address, nil}, nil
+
+	return &NodeClient{
+		Client:         client,
+		server_address: serverAddress,
+		state:          nil,
+	}, nil
 }
 
 func (c *NodeClient) RunState() {
 	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ticker.C:
-			res := string("")
-			c.Call("jam.GetLatestState", []string{}, &res)
-			//unmarshal the json string into a state snapshot
-			state := &statedb.StateSnapshot{}
-			err := json.Unmarshal([]byte(res), state)
+			var res string
+			err := c.Call("jam.GetLatestState", []string{}, &res)
 			if err != nil {
+				fmt.Printf("RPC Error: %s\n", err)
+				continue
+			}
+
+			var state statedb.StateSnapshot
+			if err := json.Unmarshal([]byte(res), &state); err != nil {
 				fmt.Printf("State Parse Error: %s\n", err)
 				continue
-			} else {
-				c.state = state
 			}
+
+			c.mu.Lock() // optional: ensure thread-safe access
+			c.state = &state
+			c.mu.Unlock()
 		}
 	}
 }
@@ -52,6 +66,8 @@ func (c *NodeClient) Close() error {
 
 // ----------------- client side -----------------
 func (c *NodeClient) GetState() *statedb.StateSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.state
 }
 
@@ -133,6 +149,7 @@ func (c *NodeClient) NewService(serviceName string) (types.ServiceInfo, error) {
 func (c *NodeClient) LoadServices(services []string) (map[string]types.ServiceInfo, error) {
 	old_service_index := uint32(0)
 	new_service_map := make(map[string]types.ServiceInfo)
+	fmt.Printf("LoadServices: NewServices %v\n", services)
 	for _, service_name := range services {
 		service_info, err := c.NewService(service_name)
 		if err != nil {
@@ -140,7 +157,7 @@ func (c *NodeClient) LoadServices(services []string) (map[string]types.ServiceIn
 		}
 		// Wait for the service to be ready
 		time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
-		fmt.Printf("NewService %s %v\n", service_name, service_info)
+		fmt.Printf("LoadServices: NewService %s %v\n", service_name, service_info)
 		for {
 			new_service_index, err := c.GetBootstrapService()
 			if err != nil {
@@ -157,6 +174,7 @@ func (c *NodeClient) LoadServices(services []string) (map[string]types.ServiceIn
 			}
 		}
 	}
+	fmt.Printf("LoadServices: DONE\n")
 	return new_service_map, nil
 }
 func (c *NodeClient) GetBootstrapService() (service_index uint32, err error) {
@@ -182,7 +200,7 @@ func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) error 
 	return nil
 }
 
-func (c *NodeClient) ServicePreimage(serviceIndex uint32, codeHash common.Hash) ([]byte, error) {
+func (c *NodeClient) ServicePreimage(serviceIndex uint32, codeHash common.Hash) ([]byte, string, uint32, error) {
 	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
 	codeHashStr := codeHash.Hex()
 	req := []string{serviceIndexStr, codeHashStr}
@@ -190,11 +208,21 @@ func (c *NodeClient) ServicePreimage(serviceIndex uint32, codeHash common.Hash) 
 	var res string
 	err := c.Client.Call("jam.ServicePreimage", req, &res)
 	if err != nil {
-		return nil, err
+		return nil, "", 0, err
 	}
 
-	preimage := common.Hex2Bytes(res)
-	return preimage, nil
+	type servicePreimageResponse struct {
+		Metadata string `json:"metadata"`
+		RawBytes string `json:"rawbytes"`
+		Length   uint32 `json:"length"`
+	}
+	var parsed servicePreimageResponse
+	_ = json.Unmarshal([]byte(res), &parsed)
+
+	metadata := parsed.Metadata
+	length := parsed.Length
+	rawBytes := common.Hex2Bytes(parsed.RawBytes)
+	return rawBytes, metadata, length, nil
 }
 
 func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_state, error) {

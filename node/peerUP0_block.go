@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -210,7 +211,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 		// successful
 	}
 	// ctx, cancel := context.WithCancel(p.node.ctx)
-	go n.runBlockAnnouncement(ctx, stream) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
+	go n.runBlockAnnouncement(ctx, stream, p.PeerID) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
 	return stream, nil
 }
 
@@ -263,12 +264,12 @@ func (n *Node) onBlockAnnouncement(ctx context.Context, stream quic.Stream, msg 
 	n.UP0_streamMu.Unlock()
 
 	// TODO do something with the received handshake
-	go n.runBlockAnnouncement(ctx, stream)
+	go n.runBlockAnnouncement(ctx, stream, peerID)
 	return nil
 }
 
 // this function will read the block announcement from the stream persistently
-func (n *NodeContent) runBlockAnnouncement(ctx context.Context, stream quic.Stream) {
+func (n *NodeContent) runBlockAnnouncement(ctx context.Context, stream quic.Stream, peerID uint16) {
 	code := uint8(UP0_BlockAnnouncement)
 	for {
 		time.Sleep(5 * time.Millisecond)
@@ -287,6 +288,7 @@ func (n *NodeContent) runBlockAnnouncement(ctx context.Context, stream quic.Stre
 			fmt.Println("Error deserializing block announcement:", err)
 			return
 		}
+		log.Trace(module, "runBlockAnnouncement", "peerID", peerID, "slot", blockannounce.Header.Slot, "headerHash", blockannounce.Header.Hash().String_short(), "parentHash", blockannounce.Header.ParentHeaderHash.String_short(), "author", blockannounce.Header.AuthorIndex)
 		n.blockAnnouncementsCh <- blockannounce
 	}
 }

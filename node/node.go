@@ -111,7 +111,7 @@ type NodeContent struct {
 
 	server quic.Listener
 
-	epoch0Timestamp uint32
+	epoch0Timestamp uint64
 	// Jamweb
 	hub             *Hub
 	tlsConfig       *tls.Config
@@ -182,6 +182,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 
 type Node struct {
 	NodeContent
+	IsSync         bool
 	block_waiting  list.List
 	commitHash     string
 	AuditNodeType  string
@@ -390,19 +391,19 @@ func GetGenesisFile(network string) (string, string) {
 	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network), fmt.Sprintf("/chainspecs/blocks/genesis-%s.bin", network)
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
+func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
 	return newNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, flag, dataDir, port)
 }
 
-func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
 	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorFlag)
 }
 
-func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
 	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorDAFlag)
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	//log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 
@@ -425,6 +426,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	node := &Node{
 		NodeContent: NewNodeContent(id, store),
+		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),
 		nodeType:    nodeType,
@@ -462,15 +464,23 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		connectedPeers: make(map[uint16]bool),
 	}
+	block := statedb.NewBlockFromFile(genesisBlockFile)
+	node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
+		Parent:    nil,
+		Block:     block,
+		Height:    0,
+		Finalized: true,
+		Applied:   true,
+	})
 	node.commitHash = common.GetCommitHash()
 	fmt.Printf("[N%v] running on buildV: %s\n", id, node.GetBuild())
-	block := statedb.NewBlockFromFile(genesisBlockFile)
+
 	genesisBlockHash = block.Header.HeaderHash()
 	//jamnp-s/V/H/builder. Here V is the protocol version, 0, and H is the first 8 nibbles of the hash of the chain's genesis header, in lower-case hexadecimal.
 	alpn_builder := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4])) + "/builder"
 	alpn := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4]))
 
-	node.node_name = fmt.Sprintf("jam-%d", id)
+	node.node_name = fmt.Sprintf("%s-%d", common.GetJAMNetwork(), id)
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -797,12 +807,14 @@ func (n *NodeContent) updateServiceMap(statedb *statedb.StateDB, b *types.Block)
 	for s, stats := range stats.ServiceStatistics {
 		summ, ok := n.servicesMap[s]
 		if !ok {
-			serviceName := n.fetchServiceName(s)
 			summ = &types.ServiceSummary{
 				ServiceID:          s,
-				ServiceName:        serviceName,
+				ServiceName:        "",
 				LastRefineSlot:     0,
 				LastAccumulateSlot: 0,
+			}
+			if s == 0 {
+				summ.ServiceName = "bootstrap" // temp hack
 			}
 			n.servicesMap[s] = summ
 		}
@@ -814,6 +826,34 @@ func (n *NodeContent) updateServiceMap(statedb *statedb.StateDB, b *types.Block)
 			summ.LastRefineSlot = slot
 		}
 		summ.Statistics = &stats
+	}
+	for _, p := range b.Extrinsic.Preimages {
+		s := p.Requester
+		service, ok, err := statedb.GetService(uint32(s))
+		if err == nil && ok {
+			//check if the p.Blob hash is the requesters codehash before doing this serviceName
+			codeHash := common.Blake2Hash(p.Blob)
+			if service.CodeHash == codeHash {
+				metadata, _ := types.SplitMetadataAndCode(p.Blob)
+				if len(metadata) > 0 {
+					summ, ok := n.servicesMap[s]
+					if !ok {
+						summ = &types.ServiceSummary{
+							ServiceID:          s,
+							ServiceName:        metadata,
+							LastRefineSlot:     0,
+							LastAccumulateSlot: 0,
+						}
+						n.servicesMap[s] = summ
+					} else {
+						if len(n.servicesMap[s].ServiceName) == 0 {
+							n.servicesMap[s].ServiceName = metadata
+						}
+					}
+					log.Info(module, "updateServiceMap", "s", fmt.Sprintf("%d", s), "serviceName", metadata, "codeHash", codeHash, "len", len(p.Blob))
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -1282,7 +1322,12 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
-
+	log.Trace(log.BlockMonitoring, "Applied Block", "n", n.String(),
+		"p", nextBlock.Header.ParentHeaderHash.String_short(),
+		"->block", nextBlock.Header.Hash().String_short(),
+		"slot", nextBlock.Header.Slot,
+		"stateRoot", newStateDB.StateRoot.String_short(),
+	)
 	newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
@@ -1415,7 +1460,10 @@ func (n *Node) processBlock(blk *types.Block) error {
 	if err != nil {
 		log.Warn(debugBlock, "processBlock:cacheBlock", "n", n.String(), "err", err, "sync", "start")
 		n.InsertOrphan(blk)
-		go n.SynchronizedBlocks(context.Background())
+		if n.IsSync {
+			n.IsSync = false
+			go n.SynchronizedBlocks(context.Background())
+		}
 	}
 	return nil // Success
 }
@@ -1882,7 +1930,7 @@ func (n *Node) runClient() {
 	defer tickerPulse.Stop()
 
 	logChan := n.store.GetChan()
-	n.statedb.GetSafrole().EpochFirstSlot = n.epoch0Timestamp / types.SecondsPerSlot
+	n.statedb.GetSafrole().EpochFirstSlot = uint32(n.epoch0Timestamp / types.SecondsPerSlot)
 
 	for {
 		select {

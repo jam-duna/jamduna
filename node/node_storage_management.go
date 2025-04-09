@@ -94,13 +94,13 @@ func (n *NodeContent) GetAscendingBlockByHeader(headerHash common.Hash) (childBl
 			return nil, err
 		}
 		childHeaderHash := common.BytesToHash(child_header_hash_byte)
-		log.Info(module, "GetAscendingBlockByHeader", "i", i, "strippedKey", common.Bytes2Hex(child_header_hash_byte), "childHeaderHash", childHeaderHash)
+		log.Trace(module, "GetAscendingBlockByHeader", "i", i, "strippedKey", common.Bytes2Hex(child_header_hash_byte), "childHeaderHash", childHeaderHash)
 		childBlk, err := n.GetStoredBlockByHeader(childHeaderHash)
 		if err != nil {
 			log.Error(module, "GetAscendingBlockByHeader: GetStoredBlockByHeader - Error getting child block", "err", err)
 			return nil, err
 		}
-		log.Info(module, "GetAscendingBlockByHeader - found child", "i", "childHeaderHash", childHeaderHash, "blk", childBlk.String())
+		log.Trace(module, "GetAscendingBlockByHeader - found child", "i", "childHeaderHash", childHeaderHash, "blk", childBlk.String())
 		childBlks = append(childBlks, &types.Block{
 			Header:    childBlk.Header,
 			Extrinsic: childBlk.Extrinsic,

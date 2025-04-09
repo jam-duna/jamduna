@@ -1,6 +1,7 @@
 package rpcclient
 
 import (
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -34,12 +35,13 @@ func TestClient(t *testing.T) {
 	}
 
 	var address string
-	port := 9900 + 1200
+	port := common.GetJAMNetworkPort() + 1300
 	if local {
 		address = fmt.Sprintf("localhost:%d", port)
 		fmt.Printf("[Local Mode] connecting to %s\n", address)
 	} else {
-		address = fmt.Sprintf("jam-0.jamduna.org:%d", port)
+		address = fmt.Sprintf("%s-0.jamduna.org:%d", common.GetJAMNetwork(), port)
+
 		fmt.Printf("[Remote Mode] connecting to %s\n", address)
 	}
 	client, err := NewNodeClient(address)
@@ -69,9 +71,9 @@ func TestClient(t *testing.T) {
 	go client.RunState()
 	switch testMode {
 	case "fib":
-		fib(t, client, services_map, 10)
+		fib(t, client, services_map, 314159)
 	case "fib2":
-		fib2(t, client, services_map, 10)
+		fib2(t, client, services_map, 1000)
 	case "game_of_life":
 		game_of_life(t, client, services_map, game_of_life_ws_push)
 	default:
@@ -79,7 +81,8 @@ func TestClient(t *testing.T) {
 	}
 }
 
-func fib(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) {
+func fib(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) (err error) {
+	ctx := context.Background()
 	time.Sleep(12 * time.Second)
 	prevWorkPackageHash := common.Hash{}
 	for fibN := 1; fibN <= targetN; fibN++ {
@@ -129,9 +132,10 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 				},
 			},
 		}
+		coreIndex := uint16(0)
 		workPackageHash := workPackage.Hash()
 		workpackage_req := types.WorkPackageRequest{
-			CoreIndex:       0,
+			CoreIndex:       coreIndex,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
@@ -139,29 +143,42 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
-		// wait until the work report is pending
+		fmt.Printf("Submitted Fib(%d) to core %d\n", fibN, coreIndex)
+
+		ctxWait, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	waitPending:
 		for {
-			time.Sleep(1 * time.Second)
-			if client.GetState() == nil {
-				continue
-			}
-			if client.GetState().AvailabilityAssignments[0] != nil {
-				if false {
-					var workReport types.WorkReport
-					rho_state := client.GetState().AvailabilityAssignments[0]
-					workReport = rho_state.WorkReport
-					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
+			select {
+			case <-ctxWait.Done():
+				t.Fatalf("Timed out waiting for work report to become pending")
+			case <-time.After(1 * time.Second):
+				if client.GetState() == nil {
+					continue
 				}
-				break
+				x := client.GetState().AvailabilityAssignments[coreIndex]
+				if x != nil {
+					break waitPending
+				}
 			}
 		}
 
-		// wait until the work report is cleared
+		// Wait until the work report is cleared (1-minute timeout)
+		ctxClear, cancelClear := context.WithTimeout(ctx, 30*time.Second)
+		defer cancelClear()
+
+	waitClear:
 		for {
-			if client.GetState().AvailabilityAssignments[0] == nil {
-				break
+			select {
+			case <-ctxClear.Done():
+				t.Fatalf("Timed out waiting for work report to clear")
+			case <-time.After(1 * time.Second):
+				x := client.GetState().AvailabilityAssignments[coreIndex]
+				if x == nil {
+
+					break waitClear
+				}
 			}
-			time.Sleep(1 * time.Second)
 		}
 		prevWorkPackageHash = workPackageHash
 		fib_index := testServices["fib"].ServiceIndex
@@ -172,6 +189,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		}
 		fmt.Printf("Fib(%v) result: %x\n", fibN, service_account_byte)
 	}
+	return nil
 }
 
 func fib2(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) {
@@ -204,7 +222,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 	})
 
 	extrinsics = append(extrinsics, extrinsic)
-	for fibN := -1; fibN <= 10; fibN++ {
+	for fibN := -1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 0 {
 			for i := 0; i < fibN; i++ {

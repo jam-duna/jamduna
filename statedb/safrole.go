@@ -211,15 +211,15 @@ type ClaimData struct {
 	RandomnessSource []byte `json:"randomness_source"`
 }
 
-func ComputeEpochAndPhase(ts, Epoch0Timestamp uint32) (currentEpoch uint32, currentPhase uint32) {
+func ComputeEpochAndPhase(ts uint32, Epoch0Timestamp uint64) (currentEpoch uint32, currentPhase uint32) {
 	if types.TimeUnitMode == "JAM" {
-		if ts < Epoch0Timestamp/types.SecondsPerSlot {
+		if ts < uint32(Epoch0Timestamp/types.SecondsPerSlot) {
 			currentEpoch = 0
 			currentPhase = 0
 			return currentEpoch, currentPhase
 		}
-		currentEpoch = ts / types.EpochLength
-		currentPhase = ts % types.EpochLength
+		currentEpoch = uint32(ts / types.EpochLength)
+		currentPhase = uint32(ts % types.EpochLength)
 		return currentEpoch, currentPhase
 
 	} else {
@@ -630,12 +630,6 @@ func ConvertBanderSnatchSecret(block_author_ietf_priv []byte) (bandersnatch.Band
 func ConvertBanderSnatchPub(block_author_ietf_pub []byte) (bandersnatch.BanderSnatchKey, error) {
 	//TODO: figure out a plan to standardize between bandersnatch package and types
 	return bandersnatch.BytesToBanderSnatchKey(block_author_ietf_pub)
-}
-
-func (s *SafroleState) GetRelativeSlotIndex(slot_index uint32) (uint32, error) {
-	//relative slot index = slot - epoch_first_slot
-	relativeSlotIndex := slot_index - s.EpochFirstSlot
-	return relativeSlotIndex, nil
 }
 
 func (s *SafroleState) GetAuthorIndex(authorkey common.Hash, phase string) (uint16, error) {

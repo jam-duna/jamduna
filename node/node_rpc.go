@@ -534,9 +534,20 @@ func (j *Jam) Code(req []string, res *string) error {
 	if err != nil || !ok {
 		return fmt.Errorf("ReadServicePreimageBlob failed:%v", err)
 	}
-	service_code_response := ServiceCodeResponse{
-		ServiceCode: common.Bytes2Hex(preimage),
-		ServiceHash: common.Bytes2Hex(code_hash.Bytes()),
+
+	type serviceCodeResponse struct {
+		CodeHash string `json:"code_hash"`
+		Metadata string `json:"metadata"`
+		Code     string `json:"rawbytes"`
+		Length   uint32 `json:"length"`
+	}
+	metadata, rawBytes := types.SplitMetadataAndCode(preimage)
+	length := uint32(len(rawBytes))
+	service_code_response := serviceCodeResponse{
+		Metadata: metadata,
+		Code:     common.Bytes2Hex(rawBytes),
+		CodeHash: common.Bytes2Hex(code_hash.Bytes()),
+		Length:   length,
 	}
 	service_code_response_json, err := json.Marshal(service_code_response)
 	if err != nil {
@@ -545,12 +556,6 @@ func (j *Jam) Code(req []string, res *string) error {
 	*res = string(service_code_response_json)
 
 	return nil
-}
-
-type ServiceCodeResponse struct {
-	ServiceCode string `json:"service_code"`
-	ServiceHash string `json:"service_code_hash"`
-	//Optional parameters return the history of code.
 }
 
 func (j *Jam) ServicePreimage(req []string, res *string) error {
@@ -568,7 +573,24 @@ func (j *Jam) ServicePreimage(req []string, res *string) error {
 	if err != nil || !ok {
 		return err
 	}
-	*res = common.Bytes2Hex(preimage)
+	metadata, rawBytes := types.SplitMetadataAndCode(preimage)
+	length := uint32(len(preimage))
+
+	type servicePreimageResponse struct {
+		Metadata string `json:"metadata"`
+		RawBytes string `json:"rawbytes"`
+		Length   uint32 `json:"length"`
+	}
+	response := servicePreimageResponse{
+		Metadata: metadata,
+		RawBytes: common.Bytes2Hex(rawBytes),
+		Length:   length,
+	}
+	r, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	*res = string(r)
 	return nil
 }
 
@@ -832,9 +854,6 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 		return fmt.Errorf("failed to decode WorkPackageRequest: %w", err)
 	}
 
-	fmt.Printf("JAM Server SendWorkPackage: %v | ExtrinsBlobs:%x | %s\n",
-		wpReq.WorkPackage.Hash(), wpReq.ExtrinsicsBlobs, req[0])
-
 	coreIndex := wpReq.CoreIndex
 	corePeers := j.GetCoreCoWorkersPeers(coreIndex)
 	if len(corePeers) == 0 {
@@ -876,9 +895,7 @@ func (j *Jam) ListServices(req []string, res *string) error {
 
 	j.servicesMutex.Lock()
 	knownServices := make([]*types.ServiceSummary, 0)
-	log.Info(module, "ListServices")
-	for i, si := range j.servicesMap {
-		log.Info(module, "ListServices", "i", i, "si", si.String())
+	for _, si := range j.servicesMap {
 		knownServices = append(knownServices, si)
 	}
 	j.servicesMutex.Unlock()
@@ -945,7 +962,7 @@ func (j *Jam) NewService(req []string, res *string) error {
 	}
 	selectedPeer := corePeers[rand.Intn(len(corePeers))]
 
-	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 	defer cancel()
 
 	submitCtx, submitCancel := context.WithTimeout(ctx, LargeTimeout)
@@ -1002,7 +1019,7 @@ pollLoop:
 		return err
 	}
 	*res = string(jsonBytes)
-	log.Info(debugP, "NewService created", "name", serviceName, "index", newServiceIdx)
+	log.Info(debugP, "NewService created", "name", serviceName, "index", fmt.Sprintf("%d", newServiceIdx))
 	return nil
 }
 
@@ -1050,7 +1067,7 @@ func (n *NodeContent) startRPCServerImpl(port int) {
 	jam.NodeContent = n
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
-	rpc_port := port + 1200
+	rpc_port := port + 1300
 	address := fmt.Sprintf(":%d", rpc_port)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -1111,7 +1128,7 @@ func CreateNodeClient(peerInfo PeerInfo) (*NodeClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid port: %v", err)
 	}
-	rpc_address := net.JoinHostPort(host, strconv.Itoa(portInt+1200))
+	rpc_address := net.JoinHostPort(host, strconv.Itoa(portInt+1300))
 	client, err := rpc.Dial("tcp", rpc_address)
 	if err != nil {
 		return nil, err

@@ -142,7 +142,6 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 		log.Error(module, "onBlockRequest NOT OK", "headerHash", newReq.HeaderHash, "direction", newReq.Direction)
 		return nil
 	}
-
 	var blockBytes []byte
 	for _, b := range blocks {
 		bBytes, err := types.Encode(b)

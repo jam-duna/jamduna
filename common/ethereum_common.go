@@ -25,7 +25,7 @@ func (h Hash) String() string {
 
 func (h Hash) String_short() string {
 	//
-	return fmt.Sprintf("%s..%s", h.Hex()[2:6], h.Hex()[60:64])
+	return fmt.Sprintf("%s..%s", h.Hex()[2:6], h.Hex()[62:66])
 }
 
 // Hex returns the hexadecimal string representation of the hash.
@@ -80,7 +80,7 @@ func Hex2Hash(s string) Hash {
 
 // Skips "0x" and prints the next 8 characters
 func Str(hash Hash) string {
-	return fmt.Sprintf("%s..%s", hash.Hex()[2:6], hash.Hex()[62:66])
+	return fmt.Sprintf("%s..%s", hash.Hex()[2:6], hash.Hex()[len(hash.Hex())-4:len(hash.Hex())])
 }
 
 // MarshalJSON custom marshaler to convert Hash to hex string.

@@ -362,7 +362,7 @@ func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 	return originalTime.Unix()
 }
 
-func NewEpoch0Timestamp(test_name ...string) uint32 {
+func NewEpoch0Timestamp(test_name ...string) uint64 {
 	if len(test_name) == 0 {
 		now := time.Now().Unix()
 		second_per_epoch := types.SecondsPerEpoch // types.EpochLength
@@ -384,7 +384,7 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 			epoch0Timestamp = uint64(now) + uint64(waitTime)
 		}
 		log.Trace(module, "NewEpoch0Timestamp", "NewGenesisConfig epoch0Timestamp", epoch0Timestamp, "Wait", uint64(waitTime))
-		return uint32(epoch0Timestamp)
+		return epoch0Timestamp
 	} else if test_name[0] == "jamtestnet" { // make sure the timestamp is 72
 		if len(test_name) != 2 {
 			panic("jamtestnet should have two parameters")
@@ -411,7 +411,14 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 		fmt.Printf("JAM start now: %v\n", common.JceStart)
 		starting = time.Now().Unix()
 		starting = common.ComputeJCETime(starting, true)
-		return uint32(starting)
+		return uint64(starting)
+	} else if test_name[0] == "jam" {
+
+		epoch0Timestampint64 := common.JceStart.Unix()
+		epoch0Timestamp := uint64(epoch0Timestampint64)
+		fmt.Printf("JAM start now: %v\n", common.JceStart)
+		fmt.Printf("JAM start Timestamp: %v\n", epoch0Timestamp)
+		return 0
 	} else {
 		now := time.Now().Unix()
 		second_per_epoch := types.SecondsPerEpoch // types.EpochLength
@@ -423,7 +430,7 @@ func NewEpoch0Timestamp(test_name ...string) uint32 {
 		epoch0Timestamp := uint64(now) + uint64(waitTime)
 		epoch0Phase := uint64(now) / uint64(second_per_epoch)
 		log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
-		return uint32(epoch0Timestamp)
+		return uint64(epoch0Timestamp)
 	}
 }
 

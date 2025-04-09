@@ -282,7 +282,7 @@ func (n *NodeContent) runJamWeb(basePort uint16, port int) {
 			Params  []string `json:"params"`
 			ID      int      `json:"id"`
 		}
-		rpc_port := port + 1200 //base port + 1200 -- 13370+1200
+		rpc_port := port + 1300
 		rpc_address := fmt.Sprintf("localhost:%v", rpc_port)
 		client, err := rpc.Dial("tcp", rpc_address)
 		decoder := json.NewDecoder(r.Body)

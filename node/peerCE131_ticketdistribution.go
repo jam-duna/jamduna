@@ -122,7 +122,7 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	return nil
 }
 
-func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte) error {
+func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct

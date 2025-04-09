@@ -54,7 +54,7 @@ func (n *ArchiveNode) StartRPCServer(port int) {
 	n.NodeContent.startRPCServerImpl(port)
 }
 
-func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint32, startPeerList map[uint16]*Peer, dataDir string, port int, web_port int) (*ArchiveNode, error) {
+func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, startPeerList map[uint16]*Peer, dataDir string, port int, web_port int) (*ArchiveNode, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	//log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 
@@ -174,7 +174,7 @@ func NewArchiveNode(id uint16, seed []byte, genesisStateFile string, genesisBloc
 		if err != nil {
 			continue
 		}
-		rpc_port := port_int + 1200
+		rpc_port := port_int + 1300
 		rpc_address := net.JoinHostPort(host, strconv.Itoa(rpc_port))
 		rpc_client, err := rpc.Dial("tcp", rpc_address)
 		if err != nil {

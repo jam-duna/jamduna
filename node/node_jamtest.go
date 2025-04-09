@@ -122,7 +122,7 @@ func computeLevelDBPath(id string, unixtimestamp int, jobID string) (string, err
 	return path, nil
 }
 
-func SetupQuicNetwork(network string, basePort uint16) (uint32, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
+func SetupQuicNetwork(network string, basePort uint16) (uint64, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
 	peers := make([]string, numNodes)
 	peerList := make(map[uint16]*Peer)
 	nodePaths := SetLevelDBPaths(numNodes)

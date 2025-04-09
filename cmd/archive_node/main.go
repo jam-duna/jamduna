@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
@@ -81,7 +82,7 @@ func generatePeerNetwork(validators []types.Validator, port int, local bool) (pe
 	if local {
 		for i := uint16(0); i < types.TotalValidators; i++ {
 			v := validators[i]
-			baseport := 9900
+			baseport := common.GetJAMNetworkPort()
 			peerAddr := fmt.Sprintf("127.0.0.1:%d", baseport+int(i))
 			peer := fmt.Sprintf("%s", v.Ed25519)
 			peers = append(peers, peer)
@@ -94,7 +95,7 @@ func generatePeerNetwork(validators []types.Validator, port int, local bool) (pe
 	} else {
 		for i := uint16(0); i < types.TotalValidators; i++ {
 			v := validators[i]
-			peerAddr := fmt.Sprintf("jam-%d:%d", i, port)
+			peerAddr := fmt.Sprintf("%s-%d:%d", common.GetJAMNetwork(), i, port)
 			peer := fmt.Sprintf("%s", v.Ed25519)
 			peers = append(peers, peer)
 			peerList[i] = &node.Peer{

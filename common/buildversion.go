@@ -41,3 +41,17 @@ func computeHashFromPath(path string) string {
 	}
 	return head.Hash().String()
 }
+
+func GetJAMNetwork() string {
+	if val := os.Getenv("JAM_NETWORK"); val != "" {
+		return val
+	}
+	return "jam"
+}
+
+func GetJAMNetworkPort() int {
+	if val := os.Getenv("JAM_NETWORK"); val != "" {
+		return 9800
+	}
+	return 9800
+}

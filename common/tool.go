@@ -52,7 +52,7 @@ func ComputeTimeUnit(TimeUnitMode string) uint32 {
 	return unit
 }
 
-var JceStart = time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC)
+var JceStart = time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC) //TODO: make sure this is correct
 
 func AddJamStart(time time.Duration) {
 	JceStart = JceStart.Add(time)

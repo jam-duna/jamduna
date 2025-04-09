@@ -37,21 +37,21 @@ func setUserPort(config *types.CommandConfig) (validator_indx int, is_local bool
 	userName := hostname
 	fmt.Printf("User: %s\n", userName)
 	if userName == "rise" || userName == "jam-6" {
-		config.Port = 9900
+		config.Port = common.GetJAMNetworkPort()
 		return 4, false
 	}
-	if len(userName) >= 4 && userName[:3] == "jam" {
+	if len(userName) >= 4 && (userName[:3] == "jam" || userName[:3] == "dot") {
 		number := userName[4:]
 		intNum, err := strconv.Atoi(number)
 		if err != nil {
-			fmt.Println("Error getting the number after jam:", err)
+			fmt.Println("Error getting the number after jam/dot:", err)
 			os.Exit(1)
 		}
 		fmt.Printf("User: %s, Number: %d\n", userName, intNum)
-		config.Port = 9900
+		config.Port = common.GetJAMNetworkPort()
 		return intNum, false
 	} else {
-		return config.Port - 9900, true
+		return config.Port - common.GetJAMNetworkPort(), true
 	}
 }
 func main() {
@@ -72,7 +72,7 @@ func main() {
 	var start_time string
 	flag.BoolVar(&help, "h", false, "Displays help information about the commands and flags.")
 	flag.StringVar(&config.DataDir, "datadir", filepath.Join(os.Getenv("HOME"), ".jam"), "Specifies the directory for the blockchain, keystore, and other data.")
-	flag.IntVar(&config.Port, "port", 9900, "Specifies the network listening port.")
+	flag.IntVar(&config.Port, "port", common.GetJAMNetworkPort(), "Specifies the network listening port.")
 	flag.IntVar(&config.Epoch0Timestamp, "ts", defaultTS, "Epoch0 Unix timestamp (will override genesis config)")
 	flag.StringVar(&start_time, "start_time", "", "Start time in format: YYYY-MM-DD HH:MM:SS")
 	flag.IntVar(&validatorIndex, "validatorindex", 0, "Validator Index (only for development)")
@@ -148,7 +148,7 @@ func main() {
 			fmt.Println("Start time reached. Running now...")
 		}
 	}
-	epoch0Timestamp := statedb.NewEpoch0Timestamp("jamtestnet", start_time)
+	epoch0Timestamp := statedb.NewEpoch0Timestamp("jam", start_time)
 	fmt.Printf("Epoch0Timestamp: %d\n", epoch0Timestamp)
 	// Set up peers and node
 	n, err := node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, config.GenesisBlock, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
@@ -156,7 +156,11 @@ func main() {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)
 	}
-	n.SetSendTickets(false)
+	if validatorIndex == 0 {
+		n.SetSendTickets(true)
+	} else {
+		n.SetSendTickets(false)
+	}
 	n.SetServiceDir("/services")
 	storage, err := n.GetStorage()
 	defer storage.Close()
@@ -165,9 +169,9 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String(), n.GetBuild())
-	timer := time.NewTimer(180 * time.Minute)
+	timer := time.NewTimer(2400 * time.Hour)
 	<-timer.C
-	fmt.Println("Node has been running for 180 minutes. Shutting down...")
+	fmt.Println("Node has been running for 100 days. Shutting down...")
 }
 
 func generatePeerNetwork(validators []types.Validator, port int, local bool) (peers []string, peerList map[uint16]*node.Peer, err error) {
@@ -175,7 +179,7 @@ func generatePeerNetwork(validators []types.Validator, port int, local bool) (pe
 	if local {
 		for i := uint16(0); i < types.TotalValidators; i++ {
 			v := validators[i]
-			baseport := 9900
+			baseport := common.GetJAMNetworkPort()
 			peerAddr := fmt.Sprintf("127.0.0.1:%d", baseport+int(i))
 			peer := fmt.Sprintf("%s", v.Ed25519)
 			peers = append(peers, peer)
@@ -188,12 +192,7 @@ func generatePeerNetwork(validators []types.Validator, port int, local bool) (pe
 	} else {
 		for i := uint16(0); i < types.TotalValidators; i++ {
 			v := validators[i]
-			peerAddr := fmt.Sprintf("jam-%d.jamduna.org:%d", i, port)
-			/*
-				if i == 4 {
-					peerAddr = "jam-6.jamduna.org:9900" // poland
-				}
-			*/
+			peerAddr := fmt.Sprintf("%s-%d.jamduna.org:%d", common.GetJAMNetwork(), i, port)
 			peer := fmt.Sprintf("%s", v.Ed25519)
 			peers = append(peers, peer)
 			peerList[i] = &node.Peer{
