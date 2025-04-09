@@ -619,8 +619,14 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 		}
 		host_name, _ := os.Hostname()
-		if id == 0 || host_name[:4] == "jam-" {
-			go node.runJamWeb(uint16(port+1000)+id, port)
+		if id == 0 || host_name[:4] == "jam-" || host_name[:4] == "dot-" {
+			wg := &sync.WaitGroup{}
+			wg.Add(1)
+			go node.runJamWeb(context.Background(), wg, uint16(port+1000)+id, port)
+			go func() {
+				wg.Wait()
+				log.Info("jamweb", "Node 0", "shutdown complete")
+			}()
 		}
 
 	}

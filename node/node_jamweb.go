@@ -1,14 +1,14 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-
 	"net/http"
 	"net/rpc"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/log"
@@ -17,51 +17,48 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const (
-	debugWeb = log.JamwebMonitoring
-)
+const debugWeb = log.JamwebMonitoring
 
-// upgrader upgrades HTTP connections to WebSocket connections.
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// In production, adjust the CheckOrigin function as needed.
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
 }
 
-// Hub maintains the set of active clients and broadcasts messages to them.
+// Hub manages client registration and broadcasting
 type Hub struct {
-	// Registered clients.
-	// TODO: model WHAT they are subscribing to [bestBlock, finalizedBlock, statistics, serviceInfo(serviceID), serviceValue(serviceID, key), servicePreimage(serviceID, hash), serviceRequest(serviceID, hash)
-	clients map[*Client]bool
-
-	// Inbound messages to be broadcast to all clients.
-	broadcast chan []byte
-
-	// Register requests from clients.
-	register chan *Client
-
-	// Unregister requests from clients.
+	clients    map[*Client]bool
+	register   chan *Client
 	unregister chan *Client
+	broadcast  chan []byte
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
-// newHub creates a new Hub.
-func newHub() *Hub {
+func newHub(ctx context.Context) *Hub {
+	cctx, cancel := context.WithCancel(ctx)
 	return &Hub{
-		broadcast:  make(chan []byte),
+		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		clients:    make(map[*Client]bool),
+		broadcast:  make(chan []byte),
+		ctx:        cctx,
+		cancel:     cancel,
 	}
 }
 
-// run listens on the hub channels and manages client connections.
-func (h *Hub) run() {
+func (h *Hub) run(wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
-		time.Sleep(10 * time.Millisecond)
 		select {
+		case <-h.ctx.Done():
+			for client := range h.clients {
+				close(client.send)
+			}
+			return
+
 		case client := <-h.register:
 			h.clients[client] = true
 
@@ -73,7 +70,6 @@ func (h *Hub) run() {
 
 		case message := <-h.broadcast:
 			for client := range h.clients {
-				// Nonblocking send; if the client's send channel is full, drop the client.
 				select {
 				case client.send <- message:
 				default:
@@ -85,79 +81,73 @@ func (h *Hub) run() {
 	}
 }
 
-// Client represents a single WebSocket connection.
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
-	// Buffered channel of outbound messages.
 	send chan []byte
 }
 
-// readPump pumps messages from the WebSocket connection to the hub.
-// (In this example we simply log any messages received.)
-func (c *Client) readPump() {
+func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
 	defer func() {
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(512)
-	// Set a deadline to detect dead connections.
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
+
 	for {
-		time.Sleep(10 * time.Millisecond)
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			// Log unexpected close errors.
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
-				log.Crit(debugWeb, "IsUnexpectedCloseError", err)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			_, message, err := c.conn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err) {
+					log.Trace(debugWeb, "WebSocket close error", err)
+				}
+				return
 			}
-			break
+			log.Info(debugWeb, "Received message from client", message)
 		}
-		log.Debug(debugWeb, "Received message from client", message)
-		// Optionally process incoming messages here.
 	}
 }
 
-// writePump pumps messages from the hub to the WebSocket connection.
-func (c *Client) writePump() {
+func (c *Client) writePump(ctx context.Context, wg *sync.WaitGroup) {
 	ticker := time.NewTicker(54 * time.Second)
 	defer func() {
 		ticker.Stop()
 		c.conn.Close()
+		wg.Done()
 	}()
+
 	for {
-		time.Sleep(10 * time.Millisecond)
 		select {
+		case <-ctx.Done():
+			return
+
 		case message, ok := <-c.send:
-			// Set a deadline for writing.
 			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
-				// The hub closed the channel.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			// Write the message as a text message.
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
 				return
 			}
 			w.Write(message)
-
-			// Write any queued messages in the same WebSocket message.
-			n := len(c.send)
-			for i := 0; i < n; i++ {
+			for len(c.send) > 0 {
 				w.Write([]byte{'\n'})
 				w.Write(<-c.send)
 			}
-			if err := w.Close(); err != nil {
-				return
-			}
+			w.Close()
+
 		case <-ticker.C:
-			// Send a ping to maintain the connection.
 			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
@@ -166,51 +156,32 @@ func (c *Client) writePump() {
 	}
 }
 
-// serveWs upgrades the HTTP request to a WebSocket connection and registers the client.
-func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
-	// Upgrade the HTTP connection.
+func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, wg *sync.WaitGroup) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error(debugWeb, "serveWs Upgrade error", err)
 		return
 	}
-	client := &Client{
-		hub:  hub,
-		conn: conn,
-		send: make(chan []byte, 256),
-	}
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
 	hub.register <- client
 
-	// Launch goroutines to handle reading and writing.
-	go client.writePump()
-	go client.readPump()
+	wg.Add(2)
+	go client.writePump(hub.ctx, wg)
+	go client.readPump(hub.ctx, wg)
 }
 
-func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, storage *storage.StateDBStorage) {
-	// read all the block json from the block_data_dir
-	files, err := ioutil.ReadDir(block_data_dir)
+func (n *NodeContent) RunApplyBlockAndWeb(ctx context.Context, blockDataDir string, port uint16, storage *storage.StateDBStorage) {
+	files, err := os.ReadDir(blockDataDir)
 	if err != nil {
 		log.Crit(debugWeb, "ReadDir error", err)
 		return
 	}
 
-	// Filter out non-JSON files
-	var jsonFiles []os.FileInfo
 	for _, file := range files {
-		if filepath.Ext(file.Name()) == ".json" {
-			jsonFiles = append(jsonFiles, file)
-		}
-	}
-	files = jsonFiles
-	// the files need to be sorted by name
-	// so that the blocks are applied in order
-
-	for _, file := range files {
-		if file.IsDir() {
+		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
 			continue
 		}
-		filePath := filepath.Join(block_data_dir, file.Name())
-		data, err := ioutil.ReadFile(filePath)
+		data, err := os.ReadFile(filepath.Join(blockDataDir, file.Name()))
 		if err != nil {
 			log.Crit(debugWeb, "ReadFile error", err)
 			continue
@@ -220,49 +191,42 @@ func (n *NodeContent) RunApplyBlockAndWeb(block_data_dir string, port uint16, st
 			log.Crit(debugWeb, "Unmarshal error", err)
 			continue
 		}
-		err = json.Unmarshal(data, &stf)
+		newStateDB, err := statedb.NewStateDBFromSnapshotRaw(storage, &stf.PostState)
 		if err != nil {
-			log.Crit(debugWeb, "Unmarshal error", err)
+			log.Crit(debugWeb, "StateDB init error", err)
 			continue
 		}
-		new_statedb, err := statedb.NewStateDBFromSnapshotRaw(storage, &(stf.PostState))
-		if err != nil {
-			log.Crit(debugWeb, "NewStateDBFromSnapshotRaw error", err)
-			continue
-		}
-
-		block := stf.Block
-		new_statedb.Block = &block
-		err = n.StoreBlock(&block, 9999, false)
-		if err != nil {
+		newStateDB.Block = &stf.Block
+		if err := n.StoreBlock(&stf.Block, 9999, false); err != nil {
 			log.Crit(debugWeb, "StoreBlock error", err)
 			continue
 		}
-		// Apply the block to the state
-		fmt.Printf("applied block parent %v, header %v, timeslot %v\n", block.Header.ParentHeaderHash, block.Header.Hash(), block.Header.Slot)
-		n.addStateDB(new_statedb)
+		n.addStateDB(newStateDB)
 	}
-	// apply the block to the state
-	go n.runJamWeb(port, 8080) // fix this if you want to use this
-	for {
-		time.Sleep(1 * time.Second)
-	}
+
+	wg := &sync.WaitGroup{}
+	go n.runJamWeb(ctx, wg, port, 8080)
+
+	<-ctx.Done()
+	wg.Wait()
+	log.Info(debugWeb, "Graceful shutdown complete")
 }
 
-func (n *NodeContent) runJamWeb(basePort uint16, port int) {
-	// basePort += 999
-	addr := fmt.Sprintf("0.0.0.0:%v", basePort) // for now just node 0 will handle all
+func (n *NodeContent) runJamWeb(ctx context.Context, wg *sync.WaitGroup, basePort uint16, port int) {
+	addr := fmt.Sprintf("0.0.0.0:%v", basePort)
+	n.hub = newHub(ctx)
 
-	n.hub = newHub()
-	go n.hub.run()
+	wg.Add(1)
+	go n.hub.run(wg)
 
-	// WebSocket endpoint at /ws.
-	log.Info(debugWeb, "JAM Web Server started", "addr", addr)
+	server := &http.Server{
+		Addr: addr,
+	}
+
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		serveWs(n.hub, w, r)
+		serveWs(n.hub, w, r, wg)
 	})
 
-	// HTTP endpoint at "/" to process JSON-RPC requests like these https://docs.jamcha.in/basics/rpc
 	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -275,40 +239,51 @@ func (n *NodeContent) runJamWeb(basePort uint16, port int) {
 			return
 		}
 
-		// Decode the JSON request.
 		var req struct {
 			JSONRPC string   `json:"jsonrpc"`
 			Method  string   `json:"method"`
 			Params  []string `json:"params"`
 			ID      int      `json:"id"`
 		}
-		rpc_port := port + 1300
-		rpc_address := fmt.Sprintf("localhost:%v", rpc_port)
-		client, err := rpc.Dial("tcp", rpc_address)
-		decoder := json.NewDecoder(r.Body)
-		if err := decoder.Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON request", http.StatusBadRequest)
-			return
-		}
-		method := req.Method
-		args := req.Params
-		fmt.Printf("method %v, params %v\n", method, args)
-
-		// Dispatch based on the method.
-		var result string
-		err = client.Call(method, args, &result)
+		rpcAddr := fmt.Sprintf("localhost:%d", port+1300)
+		client, err := rpc.Dial("tcp", rpcAddr)
 		if err != nil {
-			fmt.Printf("RPC call failed %v\n", err)
-			http.Error(w, "RPC call failed:"+err.Error(), http.StatusBadRequest)
+			http.Error(w, "RPC dial error", http.StatusInternalServerError)
 			return
 		}
-		// Encode the JSON response.
+		defer client.Close()
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		var result string
+		if err := client.Call(req.Method, req.Params, &result); err != nil {
+			http.Error(w, "RPC error: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Write([]byte(result))
 	})
 
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Crit(debugWeb, "ListenAndServe error", err)
-	}
+	log.Info(debugWeb, "JAM Web Server started", "addr", addr)
+
+	// Run server in a goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Crit(debugWeb, "ListenAndServe error", err)
+		}
+	}()
+
+	// Wait for context to be canceled and shut down the server
+	<-ctx.Done()
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server.Shutdown(ctxShutdown)
+	n.hub.cancel()
 }
