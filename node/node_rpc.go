@@ -681,6 +681,49 @@ func (j *Jam) WorkPackage(req []string, res *string) error {
 	return nil
 }
 
+func (j *Jam) TraceBlock(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("Invalid number of arguments")
+	}
+	headerHash := common.HexToHash(req[0])
+	sblk, err := j.NodeContent.GetBlockByHeaderHash(headerHash)
+	if err != nil {
+		return fmt.Errorf("failed to get block by header hash %s: %w", headerHash.String(), err)
+	}
+	log.SetLogging()
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule(log.FirstGuarantor)
+	log.EnableModule(log.GeneralAuthoring)
+	pvm_authoring_log_enabled = true
+
+	block := &types.Block{
+		Header: sblk.Header,
+		Extrinsic: sblk.Extrinsic,
+	}
+	sdb, err := statedb.NewStateDBFromBlock(j.NodeContent.store, block)
+	if err != nil {
+		return fmt.Errorf("NewStateDBBlock %s %s", headerHash.String(), err)
+	}
+
+	sdb.Id = block.Header.AuthorIndex
+	
+	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+	defer cancel()
+	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, "TraceBlock")
+	if err != nil {
+		log.Error(module, "TraceBlock", "err", err)
+		return err
+	}
+	logs, err := log.GetRecordedLogs()
+	if err != nil {
+		log.Error(module, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "err", err)
+		return err
+	}
+	log.Info(module, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "s1.StateRoot", s1.StateRoot)
+	*res = string(logs)
+	return nil
+}
+
 // AuditWorkPackageByHash(workPackageHash string) -> json WorkReport
 func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
@@ -910,6 +953,7 @@ func (j *Jam) ListServices(req []string, res *string) error {
 	*res = string(s)
 	return nil
 }
+
 func (j *Jam) NewService(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("invalid number of arguments")

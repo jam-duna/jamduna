@@ -735,6 +735,24 @@ func (s *StateDB) String() string {
 	return types.ToJSON(s)
 }
 
+func NewStateDBFromBlock(sdb *storage.StateDBStorage, block *types.Block) (statedb *StateDB, err error) {
+	statedb = newEmptyStateDB(sdb)
+	statedb.Finalized = false
+	statedb.trie = trie.NewMerkleTree(nil, sdb)
+	statedb.JamState = NewJamState()
+	statedb.Block = block
+	statedb.ParentHeaderHash = block.Header.ParentHeaderHash
+	statedb.StateRoot = block.Header.ParentStateRoot
+	statedb.RecoverJamState(statedb.StateRoot)
+	// Because we have safrolestate as internal state, JamState is NOT enough.
+	s := statedb.JamState
+	s.SafroleState.NextEpochTicketsAccumulator = s.SafroleStateGamma.GammaA      // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
+	s.SafroleState.TicketsVerifierKey = s.SafroleStateGamma.GammaZ               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	s.SafroleState.TicketsOrKeys = s.SafroleStateGamma.GammaS                    // γs: Current epoch’s slot-sealer series (epoch N)
+	s.SafroleState.NextValidators = types.Validators(s.SafroleStateGamma.GammaK) // γk: Next epoch’s validators (epoch N+1)
+	return statedb, nil
+}
+
 func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	return newStateDB(sdb, blockHash)
 }
