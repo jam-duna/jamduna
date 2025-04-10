@@ -35,7 +35,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 
 	// Make sure this Preimages is ready to be included..
 	queued_preimage := extrinsic_pool.GetPreimageFromPool()
-	log.Debug(debugP, "MakeBlock: Queued Preimages", "len", len(queued_preimage), "slot", targetJCE)
+	log.Trace(debugP, "MakeBlock: Queued Preimages", "len", len(queued_preimage), "slot", targetJCE)
 	for _, preimageLookup := range queued_preimage {
 		_, err := s.ValidateLookup(preimageLookup)
 		if err == nil {
@@ -84,20 +84,20 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		s.JamState.CheckInvalidCoreIndex()
 		err = s.Verify_Guarantee_MakeBlock(g, b, tmpState)
 		if err != nil {
-			log.Debug(debugG, "Verify_Guarantee_MakeBlock", "err", err)
+			log.Trace(debugG, "Verify_Guarantee_MakeBlock", "err", err)
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
-		log.Debug(debugG, "MakeBlock: Added Guarantee", "g", g)
+		log.Trace(debugG, "MakeBlock: Added Guarantee", "g", g)
 		// check guarantee one per core
 		// check guarantee is not a duplicate
 	}
 	for i := 0; i < len(extrinsicData.Guarantees); i++ {
-		log.Debug(debugG, "ExtrinsicData.Guarantees", "i", i, "wph", extrinsicData.Guarantees[i].Report.GetWorkPackageHash(), "coreIndex", extrinsicData.Guarantees[i].Report.CoreIndex)
+		log.Trace(debugG, "ExtrinsicData.Guarantees", "i", i, "wph", extrinsicData.Guarantees[i].Report.GetWorkPackageHash(), "coreIndex", extrinsicData.Guarantees[i].Report.CoreIndex)
 	}
 	extrinsicData.Guarantees, err, _ = s.VerifyGuaranteesMakeBlock(extrinsicData.Guarantees, b)
 	if err != nil {
-		log.Debug(debugG, "VerifyGuaranteesMakeBlock", "err", err)
+		log.Trace(debugG, "VerifyGuaranteesMakeBlock", "err", err)
 	}
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()

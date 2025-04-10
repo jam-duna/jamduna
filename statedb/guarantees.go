@@ -31,7 +31,7 @@ func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) (numReports m
 		}
 		if j.AvailabilityAssignments[int(guarantee.Report.CoreIndex)] == nil {
 			j.SetRhoByWorkReport(guarantee.Report.CoreIndex, guarantee.Report, j.SafroleState.GetTimeSlot())
-			log.Debug(debugG, "ProcessGuarantees Success on Core", "coreIndex", guarantee.Report.CoreIndex)
+			log.Trace(debugG, "ProcessGuarantees Success on Core", "coreIndex", guarantee.Report.CoreIndex)
 		}
 	}
 	return numReports
@@ -653,7 +653,7 @@ func (j *JamState) CheckInvalidCoreIndex() {
 	// Core 0 : receiving megatron report; Core 1 : receiving fib+trib report
 	if problem {
 		for i, rho := range j.AvailabilityAssignments {
-			log.Debug(debugG, "CheckInvalidCoreIndex", "i", i, "rho.WorkReportHash", rho.WorkReport.Hash(),
+			log.Trace(debugG, "CheckInvalidCoreIndex", "i", i, "rho.WorkReportHash", rho.WorkReport.Hash(),
 				"CoreIndex", rho.WorkReport.CoreIndex, "WorkReport", rho.WorkReport.String())
 		}
 		log.Crit(debugG, "CheckInvalidCoreIndex: FAILURE")
@@ -995,7 +995,7 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarante
 		fmt.Printf("Error s.JamState.RecentBlocks is nil, must have recentblock into it!\n")
 		return nil
 	}
-	log.Debug(debugG, "checkRecentWorkPackage:presentBlockSegmentRootLookup", "presentBlockSegmentRootLookup", presentBlockSegmentRootLookup, "currentSegmentRootLookUp", currentSegmentRootLookUp)
+	log.Trace(debugG, "checkRecentWorkPackage:presentBlockSegmentRootLookup", "presentBlockSegmentRootLookup", presentBlockSegmentRootLookup, "currentSegmentRootLookUp", currentSegmentRootLookUp)
 
 	// Check presentBlockHash2Hash include currentHash2Hash or not
 	segmentLookUpIncluded := make([]bool, len(currentSegmentRootLookUp))

@@ -499,7 +499,7 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	}
 	fmt.Printf("All services are ready, Sending preimage announcement\n")
 
-	log.Debug(module, "All services are ready, Sending preimage announcement\n")
+	log.Trace(module, "All services are ready, Sending preimage announcement\n")
 
 	for done := false; !done; {
 		ready := 0
@@ -699,8 +699,6 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 
 		}
 	}
-
-	log.Debug(module, "All services are ready, Sending preimage announcement\n")
 
 	for done := false; !done; {
 
@@ -1180,9 +1178,6 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 				randIdx := rand.Intn(len(corePeers))
 				workPackageHash = workPackage.Hash()
 				err := corePeers[randIdx].SendWorkPackageSubmission(context.Background(), *workPackage, extrinsics, receiverCore)
-				log.Debug(debugG, "SendWorkPackageSubmission to core for trial/timeslot",
-					"n", senderNode.id, "p", corePeers[randIdx].PeerID, "c", receiverCore, "wph", workPackageHash,
-					"trialCount", trialCount, "ts", senderNode.statedb.GetSafrole().GetTimeSlot())
 				if err != nil {
 					fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
 				}

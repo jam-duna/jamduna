@@ -39,6 +39,7 @@ func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageB
 		BundleChunks:  bEcChunks,
 		SegmentChunks: sEcChunksArr,
 	}
+	log.Debug(debugG, "executeWorkPackageBundle", "derivation", d)
 	availabilitySpecifier := types.AvailabilitySpecifier{
 		WorkPackageHash:       package_bundle.WorkPackage.Hash(),
 		BundleLength:          uint32(len(b)),
@@ -56,7 +57,7 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 	erasureTree, _ := GenerateErasureTree(b, s)
 	erasureRoot := erasureTree.RootHash()
 	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
-		treeLen, leaf, path, isFound, _ := erasureTree.Trace(shardIdx)
+		treeLen, leaf, path, _, _ := erasureTree.Trace(shardIdx)
 		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leaf, path)
 		if !verified {
 			return shardJustifications, fmt.Errorf("VerifyWBTJustification Failure")
@@ -68,7 +69,6 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 			LeafHash: leaf,
 			Path:     path,
 		}
-		log.Trace(debugDA, "ErasureRootDefaultJustification:ErasureRootPath", "shardIdx", shardIdx, "treeLen", treeLen, "leaf", leaf, "path", path, "isFound", isFound, "verified", verified)
 	}
 	return shardJustifications, nil
 }
@@ -372,8 +372,6 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage
 
-	log.Debug(module, "executeWorkPackageBundle", "node_name", n.node_name, "package_bundle.ExtrinsicData", fmt.Sprintf("%x", package_bundle.ExtrinsicData), "workPackageHash", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex, "firstGuarantor", firstGuarantor)
-
 	service_index := uint32(workPackage.AuthCodeHost)
 	// Import Segments
 	for workItemIdx, workItem_segments := range package_bundle.ImportSegmentData {
@@ -404,7 +402,6 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 		vm.SetCore(workPackageCoreIndex, firstGuarantor)
-
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
 
 		expectedSegmentCnt := int(workItem.ExportCount)
@@ -443,7 +440,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			Y: result.PayloadHash,
 			D: result.Result,
 		}
-		log.Debug(debugDA, "DA: WrangledResults", "n", types.DecodedWrangledResults(&o))
+		log.Debug(debugG, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
 	}
 
 	spec, d := n.NewAvailabilitySpecifier(package_bundle, segments)
@@ -457,8 +454,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		SegmentRootLookup: segmentRootLookup,
 		Results:           results,
 	}
-	log.Debug(debugDA, "executeWorkPackageBundle", "n", n.id, "workReport", workReport.String())
-	log.Debug(debugG, "executeWorkPackageBundle", "workreporthash", common.Str(workReport.Hash()), "erasureRoot", spec.ErasureRoot)
+	log.Debug(debugG, "executeWorkPackageBundle", "workreporthash", common.Str(workReport.Hash()), "workReport", workReport.String())
 	n.StoreMeta_Guarantor(spec, d)
 
 	return workReport, d, err

@@ -15,7 +15,7 @@ import (
 var genesisBlockHash common.Hash
 
 func (n *Node) StartGrandpa(b *types.Block) {
-	log.Debug(debugGrandpa, "GRANDPA START")
+	log.Trace(debugGrandpa, "GRANDPA START")
 	if n.block_tree != nil {
 
 		return
@@ -65,7 +65,7 @@ func (n *Node) runGrandpa() {
 			log.Error(debugGrandpa, "GRANDPA ERROR", "err", err)
 
 		case status := <-n.grandpa.GrandpaStatusChan:
-			log.Debug(debugGrandpa, "GRANDPA Status", "status", status)
+			log.Trace(debugGrandpa, "GRANDPA Status", "status", status)
 		}
 
 	}

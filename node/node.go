@@ -1935,7 +1935,7 @@ func (n *Node) runJCEManually() {
 		select {
 		case <-ticker.C:
 		case newJCE := <-n.new_timeslot_chan:
-			//log.Debug(module, "runJCEManually: received JCE", "newJCE", newJCE)
+			//log.Trace(module, "runJCEManually: received JCE", "newJCE", newJCE)
 			time.Sleep(1000 * time.Millisecond)
 			n.SetCurrJCE(newJCE)
 		}

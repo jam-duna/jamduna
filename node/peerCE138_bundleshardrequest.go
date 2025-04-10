@@ -106,7 +106,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 		return fmt.Errorf("onBundleShardRequest: failed to deserialize: %w", err)
 	}
 
-	log.Debug(debugA, "onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
+	log.Trace(debugA, "onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
 
 	code := uint8(CE138_BundleShardRequest)
 	bundleShard, sClub, encodedPath, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)

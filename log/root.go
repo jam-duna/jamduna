@@ -27,8 +27,7 @@ const (
 var root atomic.Value
 
 func init() {
-	root.Store(&logger{slog.New(DiscardHandler()), nil})
-
+	root.Store(&logger{slog.New(DiscardHandler()), nil, false, make([]slog.Record, 0)})
 }
 
 func ParseLevel(lvl string) (slog.Level, error) {
@@ -105,9 +104,9 @@ func DisableModule(module string) {
 
 // isModuleEnabled checks if logging is enabled for the given module.
 func isModuleEnabled(module string) bool {
-	//if module == "pvm_authoring" {
-	//	return true
-	//}
+	if module == PvmAuthoring || module == FirstGuarantor {
+		return true
+	}
 	enabled, ok := moduleEnabled[module]
 	return ok && enabled
 }
@@ -149,6 +148,14 @@ func Error(module string, msg string, ctx ...interface{}) {
 func Crit(module string, msg string, ctx ...interface{}) {
 	Root().Write(LevelCrit, module, msg, ctx...)
 	os.Exit(1)
+}
+
+func SetLogging() {
+	Root().SetLogging()
+}
+
+func GetRecordedLogs() ([]byte, error) {
+	return Root().GetRecordedLogs()
 }
 
 func New(ctx ...interface{}) Logger {

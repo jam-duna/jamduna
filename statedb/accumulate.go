@@ -493,8 +493,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 				}
 				if sd.Authoring {
 					log.Debug(log.GeneralAuthoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
-				} else {
-					log.Debug("!!!!!!NOT authoring", "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
 				}
 				p = append(p, o)
 			}

@@ -46,7 +46,7 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 		Blob:      preimage,
 	}
 
-	log.Debug(debugP, "BroadcastPreimageAnnouncement", "n", n.String(), "p", pa.String())
+	log.Trace(debugP, "BroadcastPreimageAnnouncement", "n", n.String(), "p", pa.String())
 	n.processPreimage(preimageLookup)
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
@@ -96,7 +96,7 @@ func (n *Node) processPreimageAnnouncements(ctx context.Context, preimageAnnounc
 	serviceIndex := preimageAnnouncement.ServiceIndex
 	preimageHash := preimageAnnouncement.PreimageHash
 
-	log.Debug(debugP, "processPreimageAnnouncements",
+	log.Trace(debugP, "processPreimageAnnouncements",
 		"n", n.String(),
 		"validatorIndex", validatorIndex,
 		"serviceIndex", serviceIndex,
@@ -109,7 +109,7 @@ func (n *Node) processPreimageAnnouncements(ctx context.Context, preimageAnnounc
 		return fmt.Errorf("SendPreimageRequest failed: %w", err)
 	}
 
-	log.Debug(debugP, "received preimage", "n", n.String(), "size", len(preimage), "preview", fmt.Sprintf("%.64s...", common.Bytes2String(preimage)))
+	log.Trace(debugP, "received preimage", "n", n.String(), "size", len(preimage), "preview", fmt.Sprintf("%.64s...", common.Bytes2String(preimage)))
 
 	n.processPreimage(types.Preimages{
 		Requester: uint32(serviceIndex),

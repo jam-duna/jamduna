@@ -56,7 +56,7 @@ func TestAssuranceParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal JSON: %v", err)
 	}
-	log.Debug(debugA, "Expected", expectedJson)
+	log.Trace(debugA, "Expected", expectedJson)
 }
 
 func VerifyAssurances(jsonFile string, exceptErr error) error {

@@ -179,7 +179,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Debug(debugG, "onWorkReportDistribution incoming Guarantee from Core on slot",
+	log.Trace(debugG, "onWorkReportDistribution incoming Guarantee from Core on slot",
 		"n", n.String(),
 		"workReport", workReport.GetWorkPackageHash().String_short(),
 		"guarantee.Slot", guarantee.Slot,

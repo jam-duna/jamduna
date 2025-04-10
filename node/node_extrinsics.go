@@ -62,7 +62,7 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 	s := n.getState()
 	err := s.ValidateSingleGuarantee(g)
 	if err != nil {
-		log.Debug(debugG, "processGuarantee:ValidateSingleGuarantee", "err", err)
+		log.Warn(debugG, "processGuarantee:ValidateSingleGuarantee", "err", err)
 		return err
 	}
 	// TODO: add tracer event
@@ -86,6 +86,6 @@ func (n *Node) processPreimage(l types.Preimages) {
 		log.Warn(debugP, "processPreimage:ValidateLookup", "err", err)
 		return
 	}
-	log.Debug(debugP, "processPreimage", "n", n.id, "l", l.String())
+	log.Trace(debugP, "processPreimage", "n", n.id, "l", l.String())
 	n.extrinsic_pool.AddPreimageToPool(l)
 }

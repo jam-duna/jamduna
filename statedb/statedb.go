@@ -165,13 +165,13 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 
 	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
 	if err != nil {
-		log.Debug(debugSDB, "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
+		log.Warn(debugSDB, "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
 		//t.PrintAllKeyValues()
 		//t.PrintTree(t.Root, 0)
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
-		log.Debug(debugSDB, "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
+		log.Trace(debugSDB, "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
 		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
 		//t.PrintAllKeyValues()
 		//t.PrintTree(t.Root, 0)
@@ -965,7 +965,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// (eq 158)
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
-		log.Debug(debugP, "WriteServicePreimageBlob", "Service_Index", l.Service_Index(), "Blob", l.Blob)
+		log.Trace(debugP, "WriteServicePreimageBlob", "Service_Index", l.Service_Index(), "Blob", l.Blob)
 		s.WriteServicePreimageBlob(l.Service_Index(), l.Blob)
 		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++

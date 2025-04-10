@@ -470,7 +470,7 @@ func (vm *VM) hostAssign() {
 		qi[i] = common.BytesToHash(c[i*32 : (i+1)*32])
 	}
 	copy(vm.X.U.QueueWorkReport[core][:], qi[:])
-	log.Debug(vm.logging, "ASSIGN OK", "c", core)
+	log.Debug(vm.logging, vm.Str("ASSIGN OK"), "c", core)
 	vm.HostResultCode = OK
 }
 
@@ -1653,9 +1653,9 @@ func (vm *VM) hostLog() {
 		break
 	case 3: // 3: User agent displays as helpful information
 		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Debug(vm.firstGuarantor, levelName, "m", string(messageBytes))
+			log.Debug(log.FirstGuarantor, levelName, "m", string(messageBytes))
 		} else if vm.logging == log.PvmAuthoring {
-			log.Debug(vm.logging, levelName, "m", string(messageBytes))
+			log.Debug(log.PvmAuthoring, levelName, "m", string(messageBytes))
 		}
 		break
 	case 4: // 4: User agent displays as pedantic information

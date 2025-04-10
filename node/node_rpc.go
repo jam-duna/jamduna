@@ -176,10 +176,10 @@ var MethodDescriptionMap = map[string]string{
 	"SubmitPreimage":   "SubmitPreimage(serviceIndex string, preimage hexstring) -> string",
 	"ServiceValue":     "ServiceRequest(serviceIndex string, key hexstring) -> hexstring",
 	"WorkPackage":      "WorkPackage(workPackageHash string) -> json WorkReport",
-	"GetServiceCode":   "GetServiceCode(serviceIndex string) -> json string",
+	"Code":             "Code(serviceIndex string) -> json string",
 	"ListServices":     "ListServices() -> json string",
 	"AuditWorkPackage": "AuditWorkPackage(workPackageHash string) -> json WorkReport",
-	"Segment":          "GetSegment(requestedHash string, index int) -> hex string",
+	"Segment":          "Segment(requestedHash string, index int) -> hex string",
 	"NewService":       "NewService(serviceName string) -> string",
 	"Encode":           "Encode(objectType string, input string) -> hexstring",
 	"Decode":           "Decode(objectType string, input string) -> json string",
@@ -695,27 +695,31 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	spec := workReport.AvailabilitySpec
 	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
-	//fmt.Printf("AuditWorkPackageByHash: reconstructing package bundle ErasureRoot=%v | bundleLen=%d | SegmentRootLookup=%x\n", spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
 	workPackageBundle, err := j.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
 	if err != nil {
 		return err
 	}
-	log.Info(debugP, "!!! AuditWorkPackageByHash reconstructPackageBundleSegments", "package_bundle.ExtrinsicData", fmt.Sprintf("%x", workPackageBundle.ExtrinsicData), "workPackageHash", workPackageBundle.PackageHash())
+	log.SetLogging()
+	pvm_authoring_log_enabled = true
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule(log.FirstGuarantor)
 
-	workReport2, _, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
+	workReport2, _, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, true)
 	if err != nil {
 		return err
 	}
 
 	// check that workReport == workReport2
 	if workReport.Hash() == workReport2.Hash() {
-		fmt.Printf("AuditWorkPackageByHash MATCHED %s %s", workReport2.Hash(), workReport2.String())
+		log.Info(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport)
 	} else {
-		fmt.Printf("AuditWorkPackageByHash MISMATCH (original %s %s ) != (reexecution %s %s)",
-			workReport.Hash(), workReport.String(), workReport2.Hash(), workReport2.String())
+		log.Error(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport)
 	}
-
-	*res = workReport2.String()
+	logs, err := log.GetRecordedLogs()
+	if err != nil {
+		return err
+	}
+	*res = string(logs)
 	return nil
 }
 

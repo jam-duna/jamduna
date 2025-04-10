@@ -1,9 +1,9 @@
 package log
 
 import (
+	"bytes"
 	"context"
-	"fmt"
-	//"strings"
+	"encoding/json"
 	"log/slog"
 	"log/syslog"
 	"math"
@@ -121,19 +121,26 @@ type Logger interface {
 
 	// Handler returns the underlying handler of the inner logger.
 	Handler() slog.Handler
+
+	SetLogging()
+	GetRecordedLogs() ([]byte, error)
 }
 
 type logger struct {
-	inner  *slog.Logger
-	writer *syslog.Writer
+	inner        *slog.Logger
+	writer       *syslog.Writer
+	recordingLog bool
+	recordedLogs []slog.Record
 }
 
 // NewLogger returns a logger with the specified handler set
 func NewLogger(h slog.Handler) Logger {
 	writer, _ := syslog.Dial("tcp", "dev.jamduna.org:5000", syslog.LOG_INFO, "jamduna")
 	return &logger{
-		inner:  slog.New(h),
-		writer: writer,
+		inner:        slog.New(h),
+		writer:       writer,
+		recordingLog: false,
+		recordedLogs: make([]slog.Record, 0),
 	}
 }
 
@@ -160,6 +167,13 @@ func LevelString(l slog.Level) string {
 	}
 }
 
+func getJSONLogString(record slog.Record) string {
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, nil)
+	_ = handler.Handle(context.Background(), record)
+	return buf.String()
+}
+
 // Write logs a message at the specified level.
 func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any) {
 	if !l.inner.Enabled(context.Background(), level) {
@@ -172,8 +186,7 @@ func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any
 	r.Add(attrs...)
 
 	if l.writer != nil {
-		str := fmt.Sprintf("%s|%s|%s|%s\n", LevelAlignedString(r.Level), module, r.Message, attrs)
-		//str := fmt.Sprintf("%s|%s|%v\n", LevelAlignedString(r.Level), r.Message, attrs)
+		str := getJSONLogString(r)
 		switch r.Level {
 		case LevelCrit:
 			l.writer.Crit(str)
@@ -190,7 +203,32 @@ func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any
 		}
 	}
 	l.inner.Handler().Handle(context.Background(), r)
+	if l.recordingLog {
+		l.addLog(r)
+	}
+}
 
+func (l *logger) SetLogging() {
+	l.recordingLog = true
+}
+
+func (l *logger) GetRecordedLogs() ([]byte, error) {
+	var rawJSONs []json.RawMessage
+	for _, r := range l.recordedLogs {
+		str := getJSONLogString(r)
+		var raw json.RawMessage
+		if err := json.Unmarshal([]byte(str), &raw); err != nil {
+			return nil, err
+		}
+		rawJSONs = append(rawJSONs, raw)
+	}
+	l.recordedLogs = make([]slog.Record, 0)
+	l.recordingLog = false
+	return json.Marshal(rawJSONs)
+}
+
+func (l *logger) addLog(r slog.Record) {
+	l.recordedLogs = append(l.recordedLogs, r)
 }
 
 func (l *logger) Log(level slog.Level, module string, msg string, attrs ...any) {
@@ -198,7 +236,7 @@ func (l *logger) Log(level slog.Level, module string, msg string, attrs ...any) 
 }
 
 func (l *logger) With(ctx ...interface{}) Logger {
-	return &logger{l.inner.With(ctx...), nil}
+	return &logger{l.inner.With(ctx...), nil, false, make([]slog.Record, 0)}
 }
 
 func (l *logger) New(ctx ...interface{}) Logger {

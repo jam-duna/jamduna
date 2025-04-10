@@ -11,7 +11,7 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Usage: go run rpc_client.go -rpc=localhost:10900
+// Usage: go run rpc_client.go -rpc=dot-0.jamduna.org:11100
 
 func main() {
 	// Define and parse the rpc flag.
@@ -76,12 +76,12 @@ func main() {
 		return
 	}
 
-	// 🟡 Automatically call jam.GetFunctions() at startup
-	startVal, err := vm.RunString(`jam.GetFunctions()`)
+	// 🟡 Automatically call jam.Functions() at startup
+	startVal, err := vm.RunString(`jam.Functions()`)
 	if err != nil {
 		fmt.Println("❌ Startup JS Error:", err)
 	} else {
-		fmt.Println("▶️ jam.GetFunctions() =>", startVal)
+		fmt.Println("▶️ jam.Functions() =>", startVal)
 	}
 
 	// Enter Console interactive mode

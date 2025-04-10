@@ -1044,6 +1044,7 @@ func (vm *VM) SetCore(coreIndex uint16, firstGuarantor bool) {
 	vm.CoreIndex = coreIndex
 	if firstGuarantor {
 		vm.firstGuarantor = log.FirstGuarantor
+		vm.logging = log.FirstGuarantor
 	}
 }
 
@@ -1051,12 +1052,10 @@ func (vm *VM) SetCore(coreIndex uint16, firstGuarantor bool) {
 func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = "refine"
 	if vm.firstGuarantor == log.FirstGuarantor {
-		vm.SetLogging(log.PvmAuthoring)
+		vm.SetLogging(log.FirstGuarantor)
 	} else {
-		//vm.UnSetLogging()
+		vm.UnSetLogging()
 	}
-
-	vm.UnSetLogging()
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
@@ -1175,17 +1174,14 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 		}
 		// host call invocation
 		if vm.hostCall {
-			if string(vm.ServiceMetadata) == "megatron" && vm.Mode == "transfer" {
-				fmt.Printf("vm.host_func_id: %d\n", vm.host_func_id)
-			}
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-			log.Trace(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d ECALLI COMPLETE", vm.hostenv.GetID(), string(vm.ServiceMetadata), stepn, vm.pc), "g", vm.Gas, "reg", vm.ReadRegisters())
+			log.Debug(vm.logging, string(vm.ServiceMetadata), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
 		}
 		stepn++
 	}
-	log.Trace(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)
+	log.Debug(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
@@ -1221,12 +1217,10 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
 	if vm.ResultCode == types.RESULT_OK && res == 0 {
 		r.Ok = output
-		// log.Debug(vm.logging, "getArgumentOutputs - OK ZERO", "res", res)
 		return r, res
 	}
 	if vm.ResultCode == types.RESULT_OK && res != 0 {
 		r.Ok = []byte{}
-		// log.Debug(vm.logging, "getArgumentOutputs - OK NON-ZERO", "res", res)
 		return r, res
 	}
 	r.Err = types.RESULT_PANIC
@@ -1536,15 +1530,11 @@ func (vm *VM) step(stepn int) error {
 	}
 
 	if vm.logging != "" {
-		id := 99
-		if vm.hostenv != nil {
-			id = int(vm.hostenv.GetID())
-		}
 		md := "unk"
 		if vm.ServiceMetadata != nil {
 			md = string(vm.ServiceMetadata)
 		}
-		log.Trace(vm.logging, fmt.Sprintf("[N%d] %s %d: PC %d %s", id, md, stepn, startPC, opcode_str(opcode)), "g", vm.Gas, "reg", vm.ReadRegisters())
+		log.Debug(vm.logging, md, "step", stepn, "pc", startPC, "opcode", opcode_str(opcode), "g", vm.Gas, "reg", vm.ReadRegisters())
 	}
 	return nil
 }

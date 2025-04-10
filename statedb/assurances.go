@@ -6,14 +6,12 @@ import (
 	"sort"
 
 	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
 func (s *StateDB) VerifyAssuranceWithoutSig(a types.Assurance) error {
 	// 0.5.0 11.9 Verify the anchor
 	if a.Anchor != s.ParentHeaderHash {
-		log.Debug(debugA, "VerifyAssuranceWithoutSig a.Anchor != s.ParentHeaderHash", "n", s.Id, "Anchor", a.Anchor, "ParentHeaderHash", s.ParentHeaderHash, "validatorIndex", a.ValidatorIndex)
 		return jamerrors.ErrABadParentHash
 	}
 
