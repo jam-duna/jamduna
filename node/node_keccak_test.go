@@ -21,7 +21,7 @@ func TestKeccak256(t *testing.T) {
 		t.Errorf("Error reading file: %v", err1)
 	}
 
-	nodes, err := SetUpNodes(numNodes)
+	nodes, err := SetUpNodes(JCEDefault, numNodes)
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
@@ -57,7 +57,7 @@ func TestXOR(t *testing.T) {
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
-	nodes, err := SetUpNodes(numNodes)
+	nodes, err := SetUpNodes(JCEDefault, numNodes)
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
@@ -99,7 +99,7 @@ func TestXOR_Invoke(t *testing.T) {
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
-	nodes, err := SetUpNodes(numNodes)
+	nodes, err := SetUpNodes(JCEDefault, numNodes)
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}
@@ -234,7 +234,7 @@ func TestAdd(t *testing.T) {
 	if err1 != nil {
 		t.Errorf("Error reading file: %v", err1)
 	}
-	nodes, err := SetUpNodes(numNodes)
+	nodes, err := SetUpNodes(JCEDefault, numNodes)
 	if err != nil {
 		t.Fatalf("Error setting up nodes: %v\n", err)
 	}

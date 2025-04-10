@@ -48,53 +48,6 @@ const (
 
 var targetNum = flag.Int("targetN", -1, "targetN")
 
-func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
-	nodes, err := SetUpNodes(numNodes, basePort)
-	if err != nil {
-		panic(err)
-	}
-
-	var sendtickets bool
-	if caseType == "safrole" {
-		sendtickets = true
-	} else {
-		sendtickets = false
-	}
-
-	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
-	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
-
-	log.EnableModule(log.GeneralAuthoring)
-	log.Info(module, "JAMTEST", "jam", caseType, "targetN", targetTimeslotLength)
-
-	for _, n := range nodes {
-		n.SetSendTickets(sendtickets)
-	}
-
-	watchNode := nodes[len(nodes)-1]
-
-	done := make(chan bool)
-	errChan := make(chan error)
-
-	go RunGrandpaGraphServer(watchNode, basePort)
-
-	go func() {
-		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
-		if err != nil {
-			errChan <- err
-		} else if ok {
-			done <- true
-		}
-	}()
-
-	select {
-	case <-done:
-		log.Info(module, "Completed")
-	case err := <-errChan:
-		t.Fatalf("[%v] Failed: %v", caseType, err)
-	}
-}
-
 func TestFallback(t *testing.T) {
 	bufferTime := 30
 	basePort := GenerateRandomBasePort()
@@ -107,11 +60,6 @@ func TestSafrole(t *testing.T) {
 	safroleTest(t, "safrole", SafroleTestEpochLen, basePort, bufferTime)
 }
 
-//	func TestSafrole(t *testing.T) {
-//		bufferTime := 30
-//		basePort := GenerateRandomBasePort()
-//		safroleTest(t, "safrole", SafroleTestEpochLen, basePort, bufferTime)
-//	}
 func TestFib(t *testing.T) {
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
@@ -245,7 +193,7 @@ func TestGameOfLife(t *testing.T) {
 
 func TestDisputes(t *testing.T) {
 	basePort := GenerateRandomBasePort()
-	nodes, err := SetUpNodes(numNodes, basePort)
+	nodes, err := SetUpNodes(JCEDefault, numNodes, basePort)
 	if err != nil {
 		t.Fatalf("Failed to set up nodes: %v", err)
 	}
@@ -379,21 +327,4 @@ func TestDisputes(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Second)
-}
-
-func RunGrandpaGraphServer(watchNode *Node, basePort uint16) {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-
-	block_graph_server := types.NewGraphServer(basePort)
-	go block_graph_server.StartServer()
-	for {
-		time.Sleep(10 * time.Millisecond)
-		select {
-		case <-ticker.C:
-			block_graph_server.Update(watchNode.block_tree)
-		default:
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
 }

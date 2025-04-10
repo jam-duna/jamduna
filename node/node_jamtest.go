@@ -19,7 +19,6 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/gorilla/websocket"
 	"golang.org/x/exp/rand"
 
 	//"math/big"
@@ -31,6 +30,7 @@ import (
 	"time"
 )
 
+var jamManualSimple = flag.Bool("jce_manual_simple", false, "jce_manual_simple")
 var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
 var pvm_authoring_log = flag.Bool("pvm_authoring_log", false, "pvm_authoring_log")
 
@@ -166,7 +166,7 @@ func GenerateRandomBasePort() uint16 {
 	return basePort
 }
 
-func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
+func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
 	GenesisStateFile, GenesisBlockFile := GetGenesisFile(network)
 	log.InitLogger("debug")
@@ -180,7 +180,7 @@ func SetUpNodes(numNodes int, basePort uint16) ([]*Node, error) {
 	nodes := make([]*Node, numNodes)
 	godIncomingCh := make(chan uint32, 10) // node sends timeslots to this channel when authoring
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, GenesisBlockFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i)
+		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, GenesisBlockFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
 			panic(err)
 			return nil, fmt.Errorf("Failed to create node %d: %v", i, err)
@@ -238,7 +238,7 @@ func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, 
 }
 
 func safrole(sendtickets bool) {
-	nodes, err := SetUpNodes(numNodes, 10000)
+	nodes, err := SetUpNodes(JCEDefault, numNodes, 10000)
 	if err != nil {
 		panic(err)
 	}
@@ -275,6 +275,64 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 		log.Info(module, serviceName, "codeHash", codeHash, "len", len(code))
 	}
 	return
+}
+
+func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
+	nodes, err := SetUpNodes(JCEDefault, numNodes, basePort) // TODO change this to JCEManual
+	if err != nil {
+		panic(err)
+	}
+
+	var sendtickets bool
+	if caseType == "safrole" {
+		sendtickets = true
+	} else {
+		sendtickets = false
+	}
+
+	initialJCE := uint32(11)
+	switch nodes[0].jceMode {
+	case JCEManual:
+		go UpdateJCESignalUniversal(nodes, initialJCE)
+	case JCESimple:
+		go UpdateJCESignalSimple(nodes, initialJCE)
+		time.Sleep(2 * types.SecondsPerSlot * time.Second)
+	default:
+		time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	}
+
+	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
+	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
+
+	log.EnableModule(log.GeneralAuthoring)
+	log.Info(module, "JAMTEST", "jam", caseType, "targetN", targetTimeslotLength)
+
+	for _, n := range nodes {
+		n.SetSendTickets(sendtickets)
+	}
+
+	watchNode := nodes[len(nodes)-1]
+
+	done := make(chan bool)
+	errChan := make(chan error)
+
+	go RunGrandpaGraphServer(watchNode, basePort)
+
+	go func() {
+		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
+		if err != nil {
+			errChan <- err
+		} else if ok {
+			done <- true
+		}
+	}()
+
+	select {
+	case <-done:
+		log.Info(module, "Completed")
+	case err := <-errChan:
+		t.Fatalf("[%v] Failed: %v", caseType, err)
+	}
 }
 
 func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
@@ -482,7 +540,7 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 
 func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
 	flag.Parse()
-	nodes, err := SetUpNodes(numNodes, basePort)
+	nodes, err := SetUpNodes(JCEDefault, numNodes, basePort) // TODO change this to JCEManual
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
@@ -510,21 +568,19 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		game_of_life_ws_push = StartGameOfLifeServer("localhost:8080", "../rpc_client/game_of_life.html")
 	}
 
-	_ = nodes
-	block_graph_server := types.NewGraphServer(basePort)
-	go block_graph_server.StartServer()
-	ticker_blockserver := time.NewTicker(1 * time.Second)
-	go func() {
-		for {
-			select {
-			case <-ticker_blockserver.C:
-				block_graph_server.Update(nodes[0].block_tree)
-			default:
-				time.Sleep(100 * time.Millisecond)
-			}
-		}
-	}()
-	// give some time for nodes to come up
+	// Run the JCE updater (it will run indefinitely).
+	initialJCE := uint32(11)
+	switch nodes[0].jceMode {
+	case JCEManual:
+		go UpdateJCESignalUniversal(nodes, initialJCE)
+	case JCESimple:
+		go UpdateJCESignalSimple(nodes, initialJCE)
+		time.Sleep(2 * types.SecondsPerSlot * time.Second)
+	default:
+		time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	}
+
+	//go RunGrandpaGraphServer(nodes[0], basePort)
 	for {
 		time.Sleep(1 * time.Second)
 		currJCE := nodes[0].GetCurrJCE()
@@ -532,7 +588,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 			break
 		}
 	}
-	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+
 	// code length: 206
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
@@ -563,11 +619,11 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if jam == "blake2b" {
 		serviceNames = []string{"blake2b"}
 	}
-	if jam == "fib2" {
+	if jam == "fib2" { // TODO
 		serviceNames = []string{"corevm", "auth_copy"}
 		log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
 	}
-	if jam == "game_of_life" {
+	if jam == "game_of_life" { //TODO
 		serviceNames = []string{"game_of_life", "auth_copy"}
 	}
 	testServices, err := getServices(serviceNames, true)
@@ -580,7 +636,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		builderNode.preimages[service.CodeHash] = service.Code
 	}
 	log.Trace(module, "Waiting for the first block to be ready...")
-	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
@@ -766,7 +822,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 		}
 		// wait until the work report is pending
 		for {
-			time.Sleep(1 * time.Second)
+			time.Sleep(10 * time.Millisecond)
 			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
 				if false {
 					var workReport types.WorkReport
@@ -783,7 +839,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
 				break
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(10 * time.Millisecond)
 		}
 		prevWorkPackageHash = workPackageHash
 		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
@@ -2939,16 +2995,17 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 		// wait until the work report is pending
 
 		log.Info(module, fmt.Sprintf("FIB2-(%s) work checking rho_state", fibN_string), "workPackage", workPackageHash)
-		i := 0
+		startJCE, _ := nodeClient4.GetCurrJCE()
 		for {
 			time.Sleep(1 * time.Second)
+			currJCE, _ := nodeClient4.GetCurrJCE()
 			rho_state, err := nodeClient4.GetAvailabilityAssignments(uint32(core))
-			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP %v\n", i, fibN_string, rho_state)
+			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP %v\n", startJCE, fibN_string, rho_state)
 			//log.Info(module, fmt.Sprintf("FIB2-(%s) GetAvailabilityAssignments rho_state RESP", fibN_string), "rho_state", rho_state, "err", err)
 			if err != nil {
 				//...
 			}
-			if rho_state != nil || i > 36 {
+			if rho_state != nil || startJCE-currJCE > 6 {
 				if false {
 					var workReport types.WorkReport
 					//rho_state := nodeClient4.statedb.JamState.AvailabilityAssignments[core]
@@ -2957,14 +3014,13 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 				}
 				break
 			}
-			i += 1
 		}
 
 		// wait until the work report is cleared
 		fmt.Printf("[FIB2-(%s)] waiting for work report to be cleared\n", fibN_string)
 		for {
 			rho_state, err := nodeClient4.GetAvailabilityAssignments(uint32(core))
-			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP2 %v ERR=%v\n", i, fibN_string, rho_state, err)
+			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP2 %v ERR=%v\n", startJCE, fibN_string, rho_state, err)
 			if err == nil {
 				if rho_state == nil {
 					fmt.Printf("FIB2-(%s) Cleared\n", fibN_string)
@@ -3123,10 +3179,11 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
 		// wait until the work report is pending
-		i := 0
+		startJCE := n4.GetCurrJCE()
 		for {
-			time.Sleep(1 * time.Second)
-			if n4.statedb.JamState.AvailabilityAssignments[core] != nil || i > 36 {
+			time.Sleep(200 * time.Millisecond)
+			currJCE := n4.GetCurrJCE()
+			if n4.statedb.JamState.AvailabilityAssignments[core] != nil || currJCE-startJCE > 6 {
 				if false {
 					var workReport types.WorkReport
 					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
@@ -3135,7 +3192,6 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 				}
 				break
 			}
-			i += 1
 		}
 
 		// wait until the work report is cleared
@@ -3172,39 +3228,6 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
 			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
-		}
-	}
-}
-
-func StartGameOfLifeServer(addr string, path string) func(data []byte) {
-	//addr := "localhost:8080"
-	//path := "../rpc_client/game_of_life.html"
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	var wsConn *websocket.Conn
-
-	go func() {
-		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			http.ServeFile(w, r, path)
-		})
-		http.HandleFunc("/wsgof_rpc", func(w http.ResponseWriter, r *http.Request) {
-			conn, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				fmt.Println("upgrade error:", err)
-				return
-			}
-			wsConn = conn
-			fmt.Println("Client connected")
-		})
-		go http.ListenAndServe(addr, nil)
-		fmt.Printf("Starting Game of Life on %v\n", addr)
-	}()
-
-	return func(data []byte) {
-		if wsConn != nil {
-			fmt.Printf("Sending data to WebSocket client len(%d)\n", len(data))
-			wsConn.WriteMessage(websocket.BinaryMessage, data)
-		} else {
-			fmt.Println("WebSocket connection not established")
 		}
 	}
 }
@@ -3327,7 +3350,7 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 		}
 		// wait until the work report is pending
 		for {
-			time.Sleep(1 * time.Second)
+			time.Sleep(100 * time.Millisecond)
 			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
 				if false {
 					var workReport types.WorkReport
@@ -3361,10 +3384,32 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
-			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
+			for {
+				time.Sleep(100 * time.Millisecond)
+				if len(n1.statedb.Block.Extrinsic.Preimages) > 0 {
+					break
+				}
+			}
 		}
 
 		prevWorkPackageHash = workPackageHash
+	}
+}
+
+func RunGrandpaGraphServer(watchNode *Node, basePort uint16) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	block_graph_server := types.NewGraphServer(basePort)
+	go block_graph_server.StartServer()
+	for {
+		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ticker.C:
+			block_graph_server.Update(watchNode.block_tree)
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 }
 

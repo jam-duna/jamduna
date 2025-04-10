@@ -43,6 +43,13 @@ import (
 )
 
 const (
+	JCEManual  = "manual"
+	JCESimple  = "simple"
+	JCEDefault = "normal"
+	JCEFast    = "fast"
+	JCEAUTO    = "auto"
+)
+const (
 	// immediate-term: bundle=WorkPackage.Bytes(); short-term: bundle=WorkPackageBundle.Bytes() without justification; medium-term= same with proofs; long-term: push method
 	module       = log.NodeMonitoring       // General Node Ops
 	debugDA      = log.DAMonitoring         // DA
@@ -262,9 +269,12 @@ type Node struct {
 	timeslotUsed map[uint32]bool
 
 	// JCE
-	currJCE       uint32
-	jce_timestamp map[uint32]time.Time
-	currJCEMutex  sync.Mutex
+	jceMode           string
+	currJCE           uint32 // the JCE to be processed
+	completedJCE      uint32 // the JCE that the node has finished processing
+	currJCEMutex      sync.Mutex
+	completedJCEMutex sync.Mutex
+	jce_timestamp     map[uint32]time.Time
 
 	stop_receive_blk    chan string
 	restart_receive_blk chan string
@@ -391,19 +401,19 @@ func GetGenesisFile(network string) (string, string) {
 	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network), fmt.Sprintf("/chainspecs/blocks/genesis-%s.bin", network)
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string) (*Node, error) {
-	return newNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, flag, dataDir, port)
+func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string, jceMode string) (*Node, error) {
+	return newNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, flag, dataDir, port, jceMode)
 }
 
 func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorFlag)
+	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorFlag, JCEDefault)
 }
 
 func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorDAFlag)
+	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorDAFlag, JCEDefault)
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int, jceMode string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	//log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 
@@ -604,9 +614,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 	go node.runServer()
 	if nodeType != ValidatorDAFlag {
-		go node.runJCE()
-		//go node.runFasterJCE()
-		// go node.runJCEManually()
 		go node.runClient()
 		go node.runMain()
 		go node.runPreimages()
@@ -619,7 +626,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 		}
 		host_name, _ := os.Hostname()
-		if id == 0 || host_name[:4] == "jam-" || host_name[:4] == "dot-" {
+		if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
 			wg := &sync.WaitGroup{}
 			wg.Add(1)
 			go node.runJamWeb(context.Background(), wg, uint16(port+1000)+id, port)
@@ -628,9 +635,29 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 				log.Info("jamweb", "Node 0", "shutdown complete")
 			}()
 		}
-
+		node.jceMode = jceMode
+		node.runJCE()
 	}
+
 	return node, nil
+}
+
+func (n *Node) runJCE() {
+	mode := n.jceMode
+	switch mode {
+	case JCEManual, JCESimple:
+		initialJCE := uint32(11)
+		n.SetCompletedJCE(initialJCE)
+		go n.runJCEManually()
+	case JCEFast:
+		go n.runFasterJCE()
+	case JCEAUTO, JCEDefault:
+		go n.runJCEDefault()
+	default:
+		log.Error(module, "runJCE", "mode", mode, "err", fmt.Errorf("unknown mode"))
+		return
+	}
+	fmt.Printf("[N%v] runJCE %v mode\n", n.id, mode)
 }
 
 func GenerateQuicConfig() *quic.Config {
@@ -1276,6 +1303,7 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 }
 
 func (n *Node) ApplyFirstBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
+	log.Info(module, "ENTERING ApplyFirstBlock", "n", n.String())
 	nextBlock := nextBlockNode.Block
 
 	// Use the current statedb, set correct root
@@ -1305,6 +1333,11 @@ func (n *Node) ApplyFirstBlock(ctx context.Context, nextBlockNode *types.BT_Node
 			log.Error(debugA, "ApplyFirstBlock: assureNewBlock failed", "n", n.String(), "err", err)
 			return fmt.Errorf("assureNewBlock failed: %w", err)
 		}
+
+		// MK: NOT sure if this is the proper place to set this completedJCE
+		log.Info(module, "ApplyFirstBlock: SetCompletedJCE !!!!", "n", n.String(), "slot", nextBlock.Header.Slot)
+		n.SetCompletedJCE(nextBlock.Header.Slot)
+
 		if Audit {
 			if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
 				n.auditingCh <- snap.Copy()
@@ -1376,6 +1409,10 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 			log.Error(debugA, "ApplyBlock: assureNewBlock failed", "n", n.String(), "err", err)
 			return fmt.Errorf("assureNewBlock failed: %w", err)
 		}
+
+		// MK: NOT sure if this is the proper place to set this completedJCE
+		log.Debug(module, "ApplyBlock: SetCompletedJCE !!!!", "n", n.String(), "slot", nextBlock.Header.Slot)
+		n.SetCompletedJCE(nextBlock.Header.Slot)
 
 		if Audit {
 			if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
@@ -1846,7 +1883,7 @@ func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string) 
 	return nil
 }
 
-func (n *Node) runJCE() {
+func (n *Node) runJCEDefault() {
 	const tickInterval = 100
 	ticker_pulse := time.NewTicker(tickInterval * time.Millisecond)
 	defer ticker_pulse.Stop()
@@ -1863,7 +1900,7 @@ func (n *Node) runJCE() {
 }
 
 func (n *Node) runFasterJCE() {
-	const tickInterval = 100
+	const tickInterval = 200
 	ticker_pulse := time.NewTicker(tickInterval * time.Millisecond)
 	defer ticker_pulse.Stop()
 
@@ -1871,7 +1908,7 @@ func (n *Node) runFasterJCE() {
 	block_pulse := time.NewTicker(blockInterval * time.Millisecond)
 	defer block_pulse.Stop()
 	for {
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-ticker_pulse.C:
 			prevJCE := n.GetCurrJCE()
@@ -1891,14 +1928,16 @@ func (n *Node) runFasterJCE() {
 }
 
 func (n *Node) runJCEManually() {
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
+		time.Sleep(100 * time.Millisecond)
 		select {
 		case <-ticker.C:
-
-		case <-n.new_timeslot_chan:
-			n.SetCurrJCE(CurrentSlot)
+		case newJCE := <-n.new_timeslot_chan:
+			//log.Debug(module, "runJCEManually: received JCE", "newJCE", newJCE)
+			time.Sleep(1000 * time.Millisecond)
+			n.SetCurrJCE(newJCE)
 		}
 	}
 }
@@ -1913,7 +1952,8 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	n.currJCEMutex.Lock()
 	defer n.currJCEMutex.Unlock()
 	prevJCE := n.currJCE
-	if (prevJCE >= 0) && (prevJCE >= currJCE) {
+	if (prevJCE >= 0) && (prevJCE > currJCE) {
+		log.Error(module, "Invalid JCE: currJCE is less than previous JCE", "prevJCE", prevJCE, "currJCE", currJCE)
 		return
 	}
 	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
@@ -1922,6 +1962,32 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 		n.jce_timestamp = make(map[uint32]time.Time)
 	}
 	n.jce_timestamp[currJCE] = time.Now()
+}
+
+func (n *Node) SetCompletedJCE(completedCurrJCE uint32) {
+	n.completedJCEMutex.Lock()
+	defer n.completedJCEMutex.Unlock()
+	prevCompletedJCE := n.completedJCE
+	if (prevCompletedJCE >= 0) && (prevCompletedJCE > completedCurrJCE) {
+		log.Error(module, "Invalid JCE: currJCE is less than previous JCE", "prevCompletedJCE", prevCompletedJCE, "completedCurrJCE", completedCurrJCE)
+		return
+	}
+	//fmt.Printf("Node %d: Update completed CurrJCE %d\n", n.id, completedCurrJCE)
+	n.completedJCE = completedCurrJCE
+}
+
+func (n *Node) GetCompletedJCE() uint32 {
+	n.completedJCEMutex.Lock()
+	defer n.completedJCEMutex.Unlock()
+	return n.completedJCE
+}
+
+func (nc *NodeContent) SendNewJCE(targetJCE uint32) error {
+	if nc.new_timeslot_chan == nil {
+		return fmt.Errorf("new_timeslot_chan is nil, cannot send new timeslot")
+	}
+	nc.new_timeslot_chan <- targetJCE
+	return nil
 }
 
 func (n *Node) monitorCommandChannel() {
@@ -2022,6 +2088,10 @@ func (n *Node) runClient() {
 
 			assureCtx, cancelAssure := context.WithTimeout(context.Background(), NormalTimeout)
 			n.assureNewBlock(assureCtx, newBlock)
+			//MK: Shawn to check
+			log.Debug(module, "runClient:ProcessState Proposer !!!!", "n", n.String(), "slot", newBlock.Header.Slot)
+			n.SetCompletedJCE(newBlock.Header.Slot)
+
 			cancelAssure()
 
 			if Audit {

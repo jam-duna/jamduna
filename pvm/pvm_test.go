@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/types"
 )
 
 const (
@@ -53,7 +54,8 @@ func pvm_test(t *testing.T, tc TestCase) (error, int) {
 
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false)
+	metadata, c := types.SplitMetadataAndCode(tc.Code)
+	pvm := NewVM(serviceAcct, c, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte(metadata))
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})

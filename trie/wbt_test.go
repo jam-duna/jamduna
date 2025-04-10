@@ -180,19 +180,20 @@ func TestWBTTrace2(t *testing.T) {
 		values := make([][]byte, 0, numShards)
 		for i := 0; i < numShards; i++ {
 			bclub_Raw := []byte(fmt.Sprintf("b_club_value%d", i))
-			sclub_Raw := []byte(fmt.Sprintf("s_club_value%d", i))
+			sclub_Raw := fmt.Appendf(nil, "s_club_value%d", i)
 			bclub_h := common.Blake2Hash(bclub_Raw)
 			sclub_h := common.Blake2Hash(sclub_Raw)
 			// Each value is the concatenation of two 32-byte hashes, making 64 bytes.
 			value := append(bclub_h[:], sclub_h[:]...)
 			values = append(values, value)
 		}
-		t.Logf("Values: %x", values)
+		bclub_sclub_len := len(values[0])
+		//t.Logf("Values: %x", values)
 
 		// Build the tree using Blake2b.
 		wbt := NewWellBalancedTree(values, types.Blake2b)
 		t.Log("Tree structure:")
-		wbt.PrintTree()
+		//wbt.PrintTree()
 
 		erasureRoot := wbt.RootHash()
 		t.Logf("ErasureRoot: %v", erasureRoot)
@@ -226,7 +227,15 @@ func TestWBTTrace2(t *testing.T) {
 			if err != nil {
 				t.Fatalf("EncodeJustification error: %v", err)
 			}
-			fmt.Printf("ShardIdx=%d, numShards=%d, EncodedPath Len: %d\n", shardIndex, numShards, len(encodedPath))
+			encodedPathLen := len(encodedPath)
+			upperPathLen := ComputeEncodedProofSize(shardIndex, numShards, bclub_sclub_len)
+			segPathLen := ComputeEncodedProofSize(shardIndex, numShards, numECPieceSize*2)
+			segPathLen2 := ComputeEncodedProofSize(shardIndex, numShards, numECPieceSize*2*2)
+			fmt.Printf("ShardIdx=%d, numShards=%d, EncodedPath Len: %d | UpperProofLen=%d | SegProofLen=%d | %d\n", shardIndex, numShards, encodedPathLen, upperPathLen, segPathLen, segPathLen2)
+
+			if upperPathLen != encodedPathLen {
+				t.Fatalf("EncodedPath length mismatch: %d != %d", upperPathLen, encodedPathLen)
+			}
 
 			// decode the justification
 			decodedPath, err := common.DecodeJustification(encodedPath, numECPieceSize)

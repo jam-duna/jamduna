@@ -55,7 +55,7 @@ func runNodes(nodes []*Grandpa) {
 						case PrevoteStage:
 							err := n.ProcessPreVoteMessage(vote)
 							if err != nil {
-								log.Error(module, "ProcessPreVoteMessage", "err", err)
+								log.Error("G", "ProcessPreVoteMessage", "err", err)
 							}
 						case PrecommitStage:
 							err := n.ProcessPreCommitMessage(vote)

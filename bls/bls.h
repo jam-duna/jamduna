@@ -1,6 +1,10 @@
 
 #include <stdint.h>
+#include <stddef.h>   // for size_t
 #include <stdlib.h>
+
+typedef uint8_t uchar;
+typedef uint32_t uint;
 
 #ifdef __cplusplus
 extern "C" {

@@ -209,9 +209,56 @@ func reverseInts(a []int) {
 	}
 }
 
-func ComputeExpectedWBTCopathSize(numLeaves int) int {
-	if numLeaves <= 1 {
+func computeProofPath(targetIdx int, currentStart int, currentEnd int, leafSize int) (pathLength int, rawDataSizeSum int) {
+	if currentStart == currentEnd {
+		return 0, 0
+	}
+
+	if targetIdx < currentStart || targetIdx > currentEnd || currentStart > currentEnd {
+		return 0, 0
+	}
+	n := currentEnd - currentStart + 1
+	if n <= 1 {
+		return 0, 0
+	}
+
+	midOffset := int(math.Ceil(float64(n) / 2.0))
+	leftEnd := currentStart + midOffset - 1
+	rightStart := currentStart + midOffset
+
+	var currentRawSiblingSize int
+	var nextStart, nextEnd int
+
+	// differentiate leaf vs internal sibling
+	hashSize := 32
+	if targetIdx <= leftEnd {
+		nextStart, nextEnd = currentStart, leftEnd
+		if rightStart == currentEnd {
+			currentRawSiblingSize = leafSize
+		} else {
+
+			currentRawSiblingSize = hashSize
+		}
+	} else {
+		nextStart, nextEnd = rightStart, currentEnd
+		if currentStart == leftEnd {
+			currentRawSiblingSize = leafSize
+		} else {
+			currentRawSiblingSize = hashSize
+		}
+	}
+	lengthFromDeeper, sizeSumFromDeeper := computeProofPath(targetIdx, nextStart, nextEnd, leafSize)
+	pathLength = lengthFromDeeper + 1
+	rawDataSizeSum = sizeSumFromDeeper + currentRawSiblingSize
+
+	return pathLength, rawDataSizeSum
+}
+
+func ComputeEncodedProofSize(shardIdx int, numShards int, leafSize int) (proofSize int) {
+	if numShards <= 0 || leafSize <= 0 || (shardIdx < 0 || shardIdx >= numShards) || numShards == 1 {
 		return 0
 	}
-	return int(math.Ceil(math.Log2(float64(numLeaves))))
+	totalPathLength, totalRawDataSizeSum := computeProofPath(shardIdx, 0, numShards-1, leafSize)
+	proofSize = totalPathLength + totalRawDataSizeSum
+	return proofSize
 }

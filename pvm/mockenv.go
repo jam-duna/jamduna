@@ -11,6 +11,7 @@ import (
 
 // MockHostEnv struct implements the HostEnv interface with mock responses
 type MockHostEnv struct {
+	id uint16
 	db *storage.StateDBStorage
 }
 
@@ -31,6 +32,10 @@ func NewMockHostEnv() *MockHostEnv {
 // func (mh *MockHostEnv) SetXContext(x *types.XContext) {}
 
 // func (mh *MockHostEnv) UpdateXContext(x *types.XContext) {}
+
+func (mh *MockHostEnv) GetID() uint16 {
+	return mh.id
+}
 
 func (mh *MockHostEnv) GetDB() *storage.StateDBStorage {
 	return mh.db

@@ -6,6 +6,7 @@ MEG_S ?= 8
 TargetN ?= -1
 PREREQ ?= false
 PVMAUTHLOG ?= false
+JCE_MANUAL_SIMPLE ?= true
 
 # Conditionally set -targetN, or empty if TargetN=-1
 TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))

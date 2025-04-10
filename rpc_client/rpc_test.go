@@ -534,7 +534,8 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 			if err != nil {
 				t.Fatalf("SendPreimageAnnouncement: %s", err)
 			}
-			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
+			time.Sleep(1 * time.Second)
+			//time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
 		}
 		prevWorkPackageHash = workPackageHash
 	}
