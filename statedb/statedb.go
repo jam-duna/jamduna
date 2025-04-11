@@ -890,7 +890,7 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 			if sf0.GetEpochT() == 0 {
 				mode = "fallback"
 			}
-			log.Info(module, fmt.Sprintf("[N%d] proposeBlock %s", s.Id, mode), "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
+			log.Info(module, "proposeBlock", "mode", mode, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return proposedBlk, newStateDB, nil
 		} else {

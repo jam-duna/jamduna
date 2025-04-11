@@ -524,7 +524,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if sd.Authoring {
 		vm.SetLogging(log.PvmAuthoring)
 	} else {
-		//vm.UnSetLogging()
+		vm.UnSetLogging()
 	}
 	vm.Timeslot = t
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)

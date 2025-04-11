@@ -1,7 +1,6 @@
 package rpcclient
 
 import (
-	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -34,17 +33,19 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Invalid mode: %s", testMode)
 	}
 
-	var address string
+	addresses := make([]string, 6)
 	port := common.GetJAMNetworkPort() + 1300
 	if local {
-		address = fmt.Sprintf("localhost:%d", port)
-		fmt.Printf("[Local Mode] connecting to %s\n", address)
+		for i := 0; i < 6; i++ {
+			addresses[i] = fmt.Sprintf("localhost:%d", port+i)
+		}
 	} else {
-		address = fmt.Sprintf("%s-0.jamduna.org:%d", common.GetJAMNetwork(), port)
-
-		fmt.Printf("[Remote Mode] connecting to %s\n", address)
+		for i := 0; i < 6; i++ {
+			addresses[i] = fmt.Sprintf("%s-%d.jamduna.org:%d", common.GetJAMNetwork(), i, port)
+		}
 	}
-	client, err := NewNodeClient(address)
+	coreIndex := uint16(0)
+	client, err := NewNodeClient(coreIndex, addresses)
 	if err != nil {
 		t.Fatalf("Error: %s", err)
 	}
@@ -68,7 +69,7 @@ func TestClient(t *testing.T) {
 			done = true
 		}
 	}
-	go client.RunState()
+
 	switch testMode {
 	case "fib":
 		fib(t, client, services_map, 314159)
@@ -82,8 +83,8 @@ func TestClient(t *testing.T) {
 }
 
 func fib(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) (err error) {
-	ctx := context.Background()
-	time.Sleep(12 * time.Second)
+
+	//	time.Sleep(12 * time.Second)
 	prevWorkPackageHash := common.Hash{}
 	for fibN := 1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
@@ -107,7 +108,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		authCodeHash := testServices["auth_copy"].ServiceCodeHash
 		workPackage := types.WorkPackage{
 			AuthCodeHost:          0,
-			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			Authorization:         []byte(""),
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
 			RefineContext:         refine_context,
@@ -145,40 +146,9 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		}
 		fmt.Printf("Submitted Fib(%d) to core %d\n", fibN, coreIndex)
 
-		ctxWait, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	waitPending:
-		for {
-			select {
-			case <-ctxWait.Done():
-				t.Fatalf("Timed out waiting for work report to become pending")
-			case <-time.After(1 * time.Second):
-				if client.GetState() == nil {
-					continue
-				}
-				x := client.GetState().AvailabilityAssignments[coreIndex]
-				if x != nil {
-					break waitPending
-				}
-			}
-		}
-
-		// Wait until the work report is cleared (1-minute timeout)
-		ctxClear, cancelClear := context.WithTimeout(ctx, 30*time.Second)
-		defer cancelClear()
-
-	waitClear:
-		for {
-			select {
-			case <-ctxClear.Done():
-				t.Fatalf("Timed out waiting for work report to clear")
-			case <-time.After(1 * time.Second):
-				x := client.GetState().AvailabilityAssignments[coreIndex]
-				if x == nil {
-
-					break waitClear
-				}
-			}
+		err = client.WaitForWorkPackage(coreIndex, workPackageHash)
+		if err != nil {
+			panic(err)
 		}
 		prevWorkPackageHash = workPackageHash
 		fib_index := testServices["fib"].ServiceIndex

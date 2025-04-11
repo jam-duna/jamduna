@@ -300,7 +300,7 @@ func (n *Node) runReceiveBlock() {
 					"author", blockAnnouncement.Header.AuthorIndex,
 					"p", common.Str(block.GetParentHeaderHash()),
 					"h", common.Str(block.Header.Hash()),
-					"H_t", fmt.Sprintf("%d", block.Header.Slot),
+					"b", block.Str(),
 					"goroutines", runtime.NumGoroutine())
 
 				if n.hub != nil {
