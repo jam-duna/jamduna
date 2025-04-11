@@ -278,16 +278,41 @@ func SplitBytes(data []byte) [][]byte {
 	return chunks
 }
 
-// used in CE139 GetSegmentShard_Assurer
-func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, proofShards [][]byte) {
-	fixedSegmentSize := types.NumECPiecesPerSegment * 2 // tiny 2052, full 12
+// used in CE139/CE140 GetSegmentShard_Assurer
+func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte) {
+	fixedSegmentSize := types.NumECPiecesPerSegment * 2
 	for i := 0; i < len(concatenatedShards); i += fixedSegmentSize {
 		shard := concatenatedShards[i : i+fixedSegmentSize]
 		segmentShards = append(segmentShards, shard)
 	}
-	proofPageSegments := len(segmentShards) / 65
-	segmentShards = segmentShards[0 : len(segmentShards)-proofPageSegments] // this has just the segment shards now
-	proofShards = segmentShards[proofPageSegments:]
+	return segmentShards
+}
+
+func SplitCompletExportToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, proofShards [][]byte) {
+	numSegmentPerPageProof := 64
+	fixedSegmentSize := types.NumECPiecesPerSegment * 2
+	dataLen := len(concatenatedShards)
+	numTotalShards := dataLen / fixedSegmentSize
+	numProofShards := (numTotalShards + numSegmentPerPageProof) / (1 + numSegmentPerPageProof)
+	numSegmentShards := numTotalShards - numProofShards
+
+	if numSegmentShards < 0 || numProofShards < 0 || numSegmentShards+numProofShards != numTotalShards || dataLen%fixedSegmentSize != 0 {
+		log.Error(module, "SplitCompletExportToSegmentShards: invalid Seg Computation", "dataLen", dataLen, "fixedSegmentSize", fixedSegmentSize, "numSegmentShards", numSegmentShards, "numProofShards", numProofShards, "numTotalShards", numTotalShards)
+		return segmentShards, proofShards
+	}
+
+	segmentShards = make([][]byte, 0, numSegmentShards)
+	proofShards = make([][]byte, 0, numProofShards)
+	currentShardIndex := 0
+	for i := 0; i < dataLen; i += fixedSegmentSize {
+		shard := concatenatedShards[i : i+fixedSegmentSize]
+		if currentShardIndex < numSegmentShards {
+			segmentShards = append(segmentShards, shard)
+		} else {
+			proofShards = append(proofShards, shard)
+		}
+		currentShardIndex++
+	}
 	return segmentShards, proofShards
 }
 
@@ -539,10 +564,12 @@ func (n *NodeContent) GetSegmentShard_Assurer(erasureRoot common.Hash, shardInde
 	if !ok {
 		return selected_segments, selected_justifications, false, nil
 	}
-	segmentShards, _ := SplitToSegmentShards(concatenatedShards) // this has segment shards AND proof page shards
+	segmentShards := SplitToSegmentShards(concatenatedShards)
 
 	selected_segments = make([][]byte, len(segmentIndices))
 	for i, segmentIndex := range segmentIndices {
+		// segmentShards & proofShards are all accessible by its raw segmentIndex
+		//fmt.Printf("GetSegmentShard_Assurer: selected_segments[%d] segmentIndex: %v\n", i, segmentIndex)
 		selected_segments[i] = segmentShards[segmentIndex]
 	}
 	if withJustification {

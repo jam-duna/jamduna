@@ -1529,6 +1529,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 
 	// this will track the proofpages
 	proofpages := []uint16{}
+	segmentsPerPageProof := uint16(64)
 
 	// ask for the indices, and tally the proofpages needed to fetch justifications
 	allsegmentindices := make([]uint16, len(si.Indices))
@@ -1537,7 +1538,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		if idx >= si.WorkReport.AvailabilitySpec.ExportedSegmentLength {
 			return segments, justifications, fmt.Errorf("requested index %d exceeds availability spec export count %d", idx, si.WorkReport.AvailabilitySpec.ExportedSegmentLength)
 		}
-		p := idx / 64 // each proofpage is 64 segments
+		p := idx / segmentsPerPageProof
 		if !slices.Contains(proofpages, p) {
 			proofpages = append(proofpages, p)
 		}

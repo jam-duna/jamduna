@@ -3102,7 +3102,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 
 	extrinsics = append(extrinsics, extrinsic)
 
-	for fibN := -1; fibN <= 10; fibN++ {
+	for fibN := -1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 0 {
 			for i := 0; i < fibN; i++ {
