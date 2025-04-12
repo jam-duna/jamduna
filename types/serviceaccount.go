@@ -41,7 +41,14 @@ type ServiceAccount struct {
 	Storage  map[common.Hash]StorageObject  `json:"-"` // arbitrary_k -> v. if v=[]byte. use as delete
 	Lookup   map[common.Hash]LookupObject   `json:"-"` // (h,l) -> anchor
 	Preimage map[common.Hash]PreimageObject `json:"-"` // H(p)  -> p
+}
 
+type ServiceSubscription struct {
+	ServiceInfo     *ServiceAccount
+	ServiceValue    map[common.Hash][]byte
+	ServicePreimage map[common.Hash][]byte
+	ServiceRequest  map[common.Hash][]uint32
+	WorkPackage     map[common.Hash]string
 }
 
 func (s *ServiceAccount) Clone() *ServiceAccount {

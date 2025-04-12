@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -211,12 +210,12 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 		// successful
 	}
 	// ctx, cancel := context.WithCancel(p.node.ctx)
-	go n.runBlockAnnouncement(ctx, stream, p.PeerID) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
+	go n.runBlockAnnouncement(stream, p.PeerID) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
 	return stream, nil
 }
 
 // this function is for the accepting side of the block announcement
-func (n *Node) onBlockAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onBlockAnnouncement( stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	//don't close the stream here
 	var newHandshake JAMSNP_Handshake
 	// Deserialize byte array back into the struct
@@ -244,7 +243,7 @@ func (n *Node) onBlockAnnouncement(ctx context.Context, stream quic.Stream, msg 
 			errChan <- err
 			return
 		}
-		err = sendQuicBytes(ctx, stream, handshake_bytes, n.id, code)
+		err = sendQuicBytes(context.TODO(), stream, handshake_bytes, n.id, code)
 		if err != nil {
 			errChan <- err
 			return
@@ -264,32 +263,45 @@ func (n *Node) onBlockAnnouncement(ctx context.Context, stream quic.Stream, msg 
 	n.UP0_streamMu.Unlock()
 
 	// TODO do something with the received handshake
-	go n.runBlockAnnouncement(ctx, stream, peerID)
+	go n.runBlockAnnouncement(stream, peerID)
 	return nil
 }
 
 // this function will read the block announcement from the stream persistently
-func (n *NodeContent) runBlockAnnouncement(ctx context.Context, stream quic.Stream, peerID uint16) {
+// it does a non-blocking send into blockAnnouncementsCh and warns when the channel is full
+func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
+	if stream == nil {
+		log.Warn(module, "runBlockAnnouncement", "peerID", peerID, "err", "nil stream")
+		return
+	}
 	code := uint8(UP0_BlockAnnouncement)
+	ctx := context.Background()
 	for {
-		time.Sleep(5 * time.Millisecond)
-		// see if there is any stream error
-		if stream == nil {
-			return
+		select {
+			//		case <-ctx.Done():
+			//log.Info(module, "runBlockAnnouncement stopped", "peerID", peerID, "reason", "context cancelled")
+		//return
+		default:
+			req, err := receiveQuicBytes(ctx, stream, n.id, code)
+			if err != nil {
+				log.Warn(module, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
+				return
+			}
+
+			var blockannounce JAMSNP_BlockAnnounce
+			if err := blockannounce.FromBytes(req); err != nil {
+				log.Warn(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
+				return
+			}
+
+			select {
+			case n.blockAnnouncementsCh <- blockannounce:
+				// success!
+			default:
+				log.Warn(module, "runBlockAnnouncement: channel full", "peerID", peerID, "headerHash", blockannounce.Header.Hash().String_short())
+				// you could also drop oldest, backpressure, or track drops here
+			}
 		}
-		req, err := receiveQuicBytes(ctx, stream, n.id, code)
-		if err != nil {
-			fmt.Println("Error receiving block announcement:", err)
-			return
-		}
-		blockannounce := JAMSNP_BlockAnnounce{}
-		err = blockannounce.FromBytes(req)
-		if err != nil {
-			fmt.Println("Error deserializing block announcement:", err)
-			return
-		}
-		log.Trace(module, "runBlockAnnouncement", "peerID", peerID, "slot", blockannounce.Header.Slot, "headerHash", blockannounce.Header.Hash().String_short(), "parentHash", blockannounce.Header.ParentHeaderHash.String_short(), "author", blockannounce.Header.AuthorIndex)
-		n.blockAnnouncementsCh <- blockannounce
 	}
 }
 

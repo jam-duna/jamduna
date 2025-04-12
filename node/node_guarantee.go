@@ -226,10 +226,10 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	var d AvailabilitySpecifierDerivation
 	for _, coworker := range coworkers {
 		wg.Add(1)
-		go func(coworker Peer) {
+		go func(coworker *Peer) {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Error(debugG, "panic in coworker goroutine", "err", r)
+					log.Error(debugG, "coworker goroutine", "err", r)
 				}
 				wg.Done()
 			}()
@@ -290,10 +290,8 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	if len(guarantee.Signatures) >= 2 {
 		guarantee.Slot = curr_statedb.GetTimeslot()
 		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-		go func() {
-			defer cancel() // ensures context is released
-			_ = n.broadcast(ctx, guarantee)
-		}()
+		defer cancel() // ensures context is released
+		n.broadcast(ctx, guarantee)
 
 		saveGuaranteeDerivation(GuaranteeDerivation{
 			Bundle:            bundle,

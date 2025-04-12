@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/grandpa"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/quic-go/quic-go"
 )
 
@@ -41,21 +42,36 @@ func (n *Node) onVoteMessage(ctx context.Context, stream quic.Stream, msg []byte
 	case grandpa.PrecommitStage:
 		select {
 		case n.grandpaPreCommitMessageCh <- vote:
+			// success
 		case <-ctx.Done():
 			return fmt.Errorf("onVoteMessage: context canceled while sending precommit")
+		default:
+			log.Warn(module, "onVoteMessage: grandpaPreCommitMessageCh full, dropping vote")
+				
 		}
+
 	case grandpa.PrevoteStage:
 		select {
 		case n.grandpaPreVoteMessageCh <- vote:
+			// success
 		case <-ctx.Done():
 			return fmt.Errorf("onVoteMessage: context canceled while sending prevote")
+		default:
+			log.Warn(module, "onVoteMessage: grandpaPreVoteMessageCh full, dropping vote")
+
 		}
+
 	case grandpa.PrimaryProposeStage:
 		select {
 		case n.grandpaPrimaryMessageCh <- vote:
+			// success
 		case <-ctx.Done():
 			return fmt.Errorf("onVoteMessage: context canceled while sending primary propose")
+		default:
+			log.Warn(module, "onVoteMessage: grandpaPrimaryMessageCh full, dropping vote")
+
 		}
+
 	default:
 		return fmt.Errorf("onVoteMessage: invalid stage: %d", stage)
 	}

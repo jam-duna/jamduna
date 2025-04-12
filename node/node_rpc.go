@@ -730,7 +730,7 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	defer cancel()
-	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, "TraceBlock")
+	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, nil)
 	if err != nil {
 		log.Error(module, "TraceBlock", "err", err)
 		return err
@@ -1030,7 +1030,6 @@ func (n *NodeContent) startRPCServerImpl(port int) {
 
 	// Listen for requests
 	for {
-		time.Sleep(1 * time.Millisecond)
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Println("⚠️ Failed to accept connection:", err)

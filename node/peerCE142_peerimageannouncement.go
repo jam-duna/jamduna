@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -50,10 +49,8 @@ func (n *Node) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash comm
 	n.processPreimage(preimageLookup)
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-	go func() {
-		defer cancel() // ensures context is released
-		_ = n.broadcast(ctx, pa)
-	}()
+	defer cancel() // ensures context is released
+	n.broadcast(ctx, pa)
 	return nil
 }
 
@@ -62,28 +59,6 @@ func (n *NodeContent) StoreImage(preimageHash common.Hash, preimage []byte) {
 	defer n.preimagesMutex.Unlock()
 	n.preimages[preimageHash] = preimage
 	return
-}
-
-func (n *Node) runPreimages() {
-	pulseTicker := time.NewTicker(20 * time.Millisecond)
-	defer pulseTicker.Stop()
-
-	for {
-		select {
-		case <-pulseTicker.C:
-			// avoid spinning
-
-		case preimageAnnouncement := <-n.preimageAnnouncementsCh:
-			// 3s timeout for each announcement
-			ctx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
-
-			err := n.processPreimageAnnouncements(ctx, preimageAnnouncement)
-			if err != nil {
-				fmt.Printf("%s processPreimages: %v\n", n.String(), err)
-			}
-			cancel()
-		}
-	}
 }
 
 func (n *Node) processPreimageAnnouncements(ctx context.Context, preimageAnnouncement types.PreimageAnnouncement) error {
@@ -105,7 +80,7 @@ func (n *Node) processPreimageAnnouncements(ctx context.Context, preimageAnnounc
 
 	preimage, err := p.SendPreimageRequest(ctx, preimageHash)
 	if err != nil {
-		log.Error(debugP, "SendPreimageRequest failed", "err", err)
+		log.Warn(debugP, "SendPreimageRequest failed", "err", err)
 		return fmt.Errorf("SendPreimageRequest failed: %w", err)
 	}
 

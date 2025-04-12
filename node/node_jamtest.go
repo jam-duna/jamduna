@@ -635,13 +635,15 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	for _, service := range testServices {
 		builderNode.preimages[service.CodeHash] = service.Code
 	}
-	log.Trace(module, "Waiting for the first block to be ready...")
-	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	log.Info(module, "Waiting for the first block to be ready...")
+	time.Sleep( 2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
-		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		// set up service using the Bootstrap service
 		refine_context := builderNode.statedb.GetRefineContext()
+		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash, "rc", refine_context)
+		
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),
 			AuthCodeHost:          bootstrapService,
@@ -761,7 +763,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 
 func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB START", "targetN", targetN)
-
+	time.Sleep(20*time.Second)
 	service0 := testServices["fib"]
 	service_authcopy := testServices["auth_copy"]
 	n1 := nodes[1]
@@ -778,7 +780,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			importedSegments = append(importedSegments, importedSegment)
 		}
 		refine_context := n1.statedb.GetRefineContext()
-
+		fmt.Printf("rc %s\n", refine_context.String())
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{
@@ -3062,6 +3064,7 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 }
 
 func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+
 	log.Info(module, "FIB2 START")
 
 	jam_key := []byte("jam")

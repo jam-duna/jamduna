@@ -13,9 +13,20 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 
-	//	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/gorilla/websocket"
+)
+
+const (
+	SubBestBlock       = "subscribeBestBlock"
+	SubFinalizedBlock  = "subscribeFinalizedBlock"
+	SubStatistics      = "subscribeStatistics"
+	SubServiceInfo     = "subscribeServiceInfo"
+	SubServiceValue    = "subscribeServiceValue"
+	SubServicePreimage = "subscribeServicePreimage"
+	SubServiceRequest  = "subscribeServiceRequest"
+	SubWorkPackage     = "subscribeWorkPackage"
 )
 
 type NodeClient struct {
@@ -24,6 +35,9 @@ type NodeClient struct {
 	baseClient *rpc.Client
 	baseIdx    uint16
 	servers    []string
+
+	wsConn  *websocket.Conn // websocket connection
+	wsMutex sync.Mutex      // to protect writes
 
 	mu sync.Mutex
 }
@@ -39,6 +53,156 @@ func NewNodeClient(coreIndex uint16, servers []string) (*NodeClient, error) {
 		coreIndex:  coreIndex,
 		servers:    servers,
 	}, nil
+}
+
+func (c *NodeClient) ConnectWebSocket(url string) error {
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect websocket: %w", err)
+	}
+	c.wsConn = conn
+	go c.listenWebSocket()
+	return nil
+}
+
+func (c *NodeClient) listenWebSocket() {
+	for {
+		if c.wsConn == nil {
+			return
+		}
+		_, msg, err := c.wsConn.ReadMessage()
+		if err != nil {
+			fmt.Printf("WebSocket read error: %v\n", err)
+			return
+		}
+
+		var envelope struct {
+			Method string          `json:"method"`
+			Result json.RawMessage `json:"result"`
+		}
+
+		if err := json.Unmarshal(msg, &envelope); err != nil {
+			fmt.Printf("Failed to parse WebSocket envelope: %v\n", err)
+			continue
+		}
+
+		switch envelope.Method {
+		case SubBestBlock:
+			var result struct {
+				BlockHash  string `json:"blockHash"`
+				HeaderHash string `json:"headerHash"`
+			}
+			if err := json.Unmarshal(envelope.Result, &result); err != nil {
+				fmt.Printf("Failed to parse BlockAnnouncement: %v\n", err)
+				continue
+			}
+			fmt.Printf("BlockAnnouncement received: HeaderHash=%s\n", result.HeaderHash)
+			//go c.GetState(result.HeaderHash)
+
+		case SubStatistics:
+			var payload struct {
+				HeaderHash string                    `json:"headerHash"`
+				Statistics types.ValidatorStatistics `json:"statistics"`
+			}
+			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+				fmt.Printf("Failed to parse StatisticsUpdate: %v\n", err)
+				continue
+			}
+			fmt.Printf("Statistics update for %s: %+v\n", payload.HeaderHash, payload.Statistics)
+
+		case SubServiceInfo:
+			var payload struct {
+				ServiceID uint32            `json:"service_id"`
+				Info      types.ServiceInfo `json:"info"`
+			}
+			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				continue
+			}
+			fmt.Printf("ServiceInfo update for service %d: %+v\n", payload.ServiceID, payload.Info)
+
+		case SubServiceValue:
+			var payload struct {
+				ServiceID uint32 `json:"service_id"`
+				Value     string `json:"value"`
+			}
+			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				continue
+			}
+			fmt.Printf("ServiceInfo update for service %d: %+v\n", payload.ServiceID, payload.Value)
+			break
+
+		case SubServicePreimage:
+			var payload struct {
+				ServiceID uint32 `json:"service_id"`
+				Preimage  string `json:"preimage"`
+			}
+			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				continue
+			}
+			fmt.Printf("ServicePreimage for service %d: %+v\n", payload.ServiceID, payload.Preimage)
+			break
+
+		case SubServiceRequest:
+			var payload struct {
+				ServiceID uint32   `json:"service_id"`
+				Timeslots []uint32 `json:"timeslots"`
+			}
+			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				continue
+			}
+			fmt.Printf("ServiceRequest update for service %d: %+v\n", payload.ServiceID, payload.Timeslots)
+			break
+
+		case SubWorkPackage:
+			var payload struct {
+				WorkPackageHash common.Hash `json:"service_id"`
+				Status          string      `json:"status"`
+			}
+			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				continue
+			}
+			fmt.Printf("WorkPackage update for workpackage %d: %+v\n", payload.WorkPackageHash, payload.Status)
+			break
+		default:
+			fmt.Printf("Unknown method: %s\n", envelope.Method)
+		}
+	}
+}
+
+func (c *NodeClient) Subscribe(method string, params map[string]interface{}) error {
+	c.wsMutex.Lock()
+	defer c.wsMutex.Unlock()
+
+	if c.wsConn == nil {
+		return fmt.Errorf("WebSocket not connected")
+	}
+	msg := map[string]interface{}{
+		"method": method,
+		"params": params,
+	}
+	return c.wsConn.WriteJSON(msg)
+}
+
+func (c *NodeClient) Unsubscribe(method string, params map[string]interface{}) error {
+	c.wsMutex.Lock()
+	defer c.wsMutex.Unlock()
+
+	if c.wsConn == nil {
+		return fmt.Errorf("WebSocket not connected")
+	}
+	msg := map[string]interface{}{
+		"method": "unsubscribe",
+		"params": map[string]interface{}{
+			"method": method,
+			"params": params,
+		},
+	}
+	return c.wsConn.WriteJSON(msg)
 }
 
 func (c *NodeClient) GetClient() *rpc.Client {
@@ -182,50 +346,26 @@ func HasReport(s *statedb.StateSnapshot, workPackageHash common.Hash) bool {
 }
 
 func (c *NodeClient) WaitForWorkPackage(coreIndex uint16, workPackageHash common.Hash) (err error) {
-	ctxWait, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	ctxWait, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-waitPending:
-	for {
-		select {
-		case <-ctxWait.Done():
-			return fmt.Errorf("Timed out waiting for work report to appear")
-		case <-time.After(1 * time.Second):
-			s := c.GetState()
-			if s != nil {
-				if HasReport(s, workPackageHash) {
-					break waitPending
-				}
-				core0 := s.AvailabilityAssignments[coreIndex]
-				if core0 != nil {
-					if core0.WorkReport.AvailabilitySpec.WorkPackageHash == workPackageHash {
-
-						break waitPending
-					}
-				}
-			} else {
-
-			}
-		}
-	}
-	fmt.Printf("Found WPH in reported..")
-waitClear:
 	for {
 		select {
 		case <-ctxWait.Done():
 			return fmt.Errorf("Timed out waiting for work report to clear")
 		case <-time.After(1 * time.Second):
-			s := c.GetState()
+			s := c.GetState() // TODO: make this work with the ws instead of polling every second!
 			if s != nil {
-				core0 := s.AvailabilityAssignments[coreIndex]
-				if core0 == nil {
-					break waitClear
+				for _, history := range s.AccumulationHistory {
+					for _, packagehash := range history.WorkPackageHash {
+						if packagehash == workPackageHash {
+							fmt.Printf("cleared\n")
+							return nil
+						}
+					}
 				}
-			} else {
-
 			}
 		}
 	}
-	fmt.Printf("cleared\n")
 	return nil
 }
 

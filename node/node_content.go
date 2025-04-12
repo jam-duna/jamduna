@@ -1,13 +1,56 @@
 package node
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
+
+const (
+	blk_sync = "block_sync"
+	blk      = "block"
+	rpc_mod  = "rpc"
+)
+
+func (n *NodeContent) GetBlockTree() *types.BlockTree {
+	return n.block_tree
+}
+
+func (n *NodeContent) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash common.Hash, preimageLen uint32, preimage []byte) (err error) {
+	pa := types.PreimageAnnouncement{
+		ServiceIndex: serviceID,
+		PreimageHash: preimageHash,
+		PreimageLen:  preimageLen,
+	}
+
+	n.StoreImage(preimageHash, preimage)
+
+	for _, peer := range n.peersInfo {
+		go func(peer *Peer) {
+			err := peer.SendPreimageAnnouncement(context.Background(), &pa)
+			if err != nil {
+				log.Error(rpc_mod, "SendPreimageAnnouncement", err)
+			}
+		}(peer)
+	}
+
+	return nil
+}
+
+func (n *NodeContent) SetServiceDir(dir string) {
+	n.loaded_services_dir = dir
+}
+
+func (n *NodeContent) LoadService(service_name string) ([]byte, error) {
+	// read the .pvm from the service directory
+	service_path := fmt.Sprintf("%s/%s.pvm", n.loaded_services_dir, service_name)
+	return types.ReadCodeWithMetadata(service_path, service_name)
+}
 
 // input : the core index and the segments lookups (workpackages hashes only)
 func (n *Node) IsCoreReady(coreIdx uint16, lookups []common.Hash, parameter ...interface{}) bool {

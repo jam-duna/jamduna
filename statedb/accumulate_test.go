@@ -242,7 +242,7 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	post_state.GetStateFromAccumulateState(TestCase.PostState)
 	for key, service := range services {
 		// write the service to the db
-		err := db.writeAccount(service)
+		err := db.writeAccount(service, nil)
 		if err != nil {
 			t.Errorf("Reports FAIL: failed to write account: %v", err)
 		}
@@ -268,7 +268,7 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		sa.Dirty = true
 	}
 
-	s.ApplyXContext(o, "testAccumulateSTF")
+	s.ApplyXContext(o, nil)
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// check if the state is equal to the post state
 	//use json to compare the states
@@ -356,7 +356,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	for key, service := range services {
 		// write the service to the db
 		o.D[key] = service
-		err := db.writeAccount(service)
+		err := db.writeAccount(service, nil)
 		if err != nil {
 			return fmt.Errorf("Reports FAIL: failed to write account: %v", err)
 		}
@@ -383,7 +383,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 		sa.Dirty = true
 	}
 
-	s.ApplyXContext(o, "AccumulateSTF")
+	s.ApplyXContext(o, nil)
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// check if the state is equal to the post state
 	//use json to compare the states

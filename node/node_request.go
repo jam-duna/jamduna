@@ -51,7 +51,6 @@ type CE128_response struct {
 }
 
 func (n *NodeContent) GetBlockByHeaderHash(headerHash common.Hash) (*types.SBlock, error) {
-
 	blk, err := n.GetStoredBlockByHeader(headerHash)
 	if err != nil {
 		return blk, err
@@ -128,9 +127,7 @@ func (n *NodeContent) PreimageLookup(preimageHash common.Hash) ([]byte, bool, er
 }
 
 func (n *NodeContent) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
-	// TODO: Stanley
 	s := n.getPVMStateDB()
-	// stateRoot := s.GetStateRoot()
 	blocks, ok, err := n.BlocksLookup(headerHash, 1, 1)
 	if !ok || err != nil {
 		return boundarynodes, keyvalues, false, err
@@ -257,15 +254,8 @@ func (n *NodeContent) cacheWorkReportRead(h common.Hash) (workReport types.WorkR
 }
 
 func (n *Node) runBlocksTickets() {
-	// ticker here to avoid high CPU usage
-	pulseTicker := time.NewTicker(20 * time.Millisecond)
-	defer pulseTicker.Stop()
-
 	for {
-		time.Sleep(10 * time.Millisecond)
 		select {
-		case <-pulseTicker.C:
-			// Small pause to reduce CPU load when channels are quiet
 		case ticket := <-n.ticketsCh:
 			n.processTicket(ticket)
 		}
@@ -302,15 +292,6 @@ func (n *Node) runReceiveBlock() {
 					"h", common.Str(block.Header.Hash()),
 					"b", block.Str(),
 					"goroutines", runtime.NumGoroutine())
-
-				if n.hub != nil {
-					// SUBSCRIPTION HERE
-					announcement := fmt.Sprintf(
-						`{"method":"BlockAnnouncement","result":{"blockHash":"%s","headerHash":"%s"}}`,
-						block.Hash(), block.Header.Hash(),
-					)
-					n.hub.broadcast <- []byte(announcement)
-				}
 			}
 
 		case <-n.stop_receive_blk:
@@ -324,15 +305,8 @@ func (n *Node) runReceiveBlock() {
 }
 
 func (n *Node) runMain() {
-	// ticker here to avoid high CPU usage
-	pulseTicker := time.NewTicker(20 * time.Millisecond)
-	defer pulseTicker.Stop()
-
 	for {
-		time.Sleep(10 * time.Millisecond)
 		select {
-		case <-pulseTicker.C:
-			// Small pause to reduce CPU load when channels are quiet
 		case workReport := <-n.workReportsCh:
 			if n.workReports == nil {
 				n.workReports = make(map[common.Hash]types.WorkReport)
@@ -350,30 +324,22 @@ func (n *Node) runMain() {
 				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
 			}
 		case announcement := <-n.announcementsCh:
-			// TODO: Shawn to review
 			err := n.processAnnouncement(announcement)
 			if err != nil {
 				fmt.Printf("%s processAnnouncement: %v\n", n.String(), err)
 			}
 		case judgement := <-n.judgementsCh:
-			// TODO: Shawn to review
 			err := n.processJudgement(judgement)
 			if err != nil {
 				fmt.Printf("%s processJudgement: %v\n", n.String(), err)
 			}
-
 		}
-
 	}
 }
 
 func (n *Node) RunRPCCommand() {
-	pulseTicker := time.NewTicker(20 * time.Millisecond)
-	defer pulseTicker.Stop()
 	for {
-		time.Sleep(10 * time.Millisecond)
 		select {
-		case <-pulseTicker.C:
 		case command := <-n.command_chan:
 			fmt.Printf("Get new command from RPC: %v\n", command)
 			switch command {
@@ -523,46 +489,27 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 
 	}
 }
-func (n *NodeContent) makeRequestInternal(ctx context.Context, peerID uint16, obj interface{}) (interface{}, error) {
-	msgType := getMessageType(obj)
-	if msgType == "unknown" {
-		return nil, fmt.Errorf("unsupported message type")
-	}
 
-	type result struct {
-		val interface{}
-		err error
-	}
-
-	resultCh := make(chan result, 1)
-
-	go func() {
-		// Let sendRequest respect the same context
-		response, err := n.sendRequest(ctx, peerID, obj)
-		resultCh <- result{val: response, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		// Ensure any goroutines can exit if sendRequest is also context-aware
-		return nil, ctx.Err()
-	case res := <-resultCh:
-		return res.val, res.err
-	}
-}
-
-// single makeRequest call via makeRequestInternal
-func (n *NodeContent) makeRequests(objs map[uint16]interface{}, minSuccess int, singleTimeout, overallTimeout time.Duration) ([]interface{}, error) {
-	var wg sync.WaitGroup
-	results := make(chan interface{}, len(objs))
-	errorsCh := make(chan error, len(objs))
-	var mu sync.Mutex
-	successCount := 0
-
+func (n *NodeContent) makeRequests(
+	objs map[uint16]interface{},
+	minSuccess int,
+	singleTimeout, overallTimeout time.Duration,
+) ([]interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
 
+	var (
+		wg           sync.WaitGroup
+		resultsCh    = make(chan interface{}, len(objs))
+		successCount int
+		mu           sync.Mutex
+	)
+
 	for peerID, obj := range objs {
+		if getMessageType(obj) == "unknown" {
+			continue
+		}
+
 		wg.Add(1)
 		go func(peerID uint16, obj interface{}) {
 			defer wg.Done()
@@ -570,35 +517,31 @@ func (n *NodeContent) makeRequests(objs map[uint16]interface{}, minSuccess int, 
 			reqCtx, reqCancel := context.WithTimeout(ctx, singleTimeout)
 			defer reqCancel()
 
-			res, err := n.makeRequestInternal(reqCtx, peerID, obj)
+			res, err := n.sendRequest(reqCtx, peerID, obj)
 			if err != nil {
-				select {
-				case errorsCh <- err:
-				default:
-				}
 				return
 			}
 
 			select {
-			case results <- res:
+			case resultsCh <- res:
 				mu.Lock()
 				successCount++
+				// NOTE: some of successCount could be "malicious" so this is not the right criteria --
+				// INSTEAD: (a) reconstruct the bundle/segment and (b) verify the bundle (CE137), segment (CE139+140) or block (CE128)
 				if successCount >= minSuccess && ctx.Err() == nil {
-					cancel()
+					cancel() // IMPORTANT: this results in ALL the reqCancel() since reqCtx has ctx as its parent
 				}
 				mu.Unlock()
 			case <-ctx.Done():
-				return
 			}
 		}(peerID, obj)
 	}
 
 	wg.Wait()
-	close(results)
-	close(errorsCh)
+	close(resultsCh)
 
 	var finalResults []interface{}
-	for res := range results {
+	for res := range resultsCh {
 		finalResults = append(finalResults, res)
 	}
 

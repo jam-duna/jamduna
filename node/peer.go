@@ -12,7 +12,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 
-	//"bytes"
 	"sync"
 )
 
@@ -37,6 +36,9 @@ const (
 	CE143_PreimageRequest              = 143
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
+
+
+	useQuicDeadline = false
 )
 
 type Peer struct {
@@ -145,7 +147,7 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	// First, write the message length to the stream
 	_, err = stream.Write(lenBuf)
 	if err != nil {
-		log.Error(module, "!!! sendQuicBytes-length", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+		log.Warn(module, "sendQuicBytes-length", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		return err
 	}
 
@@ -159,182 +161,149 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	// Then, write the actual message to the stream
 	_, err = stream.Write(msg)
 	if err != nil {
-		log.Error(module, "!!! sendQuicBytes-msg", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+		log.Warn(module, "sendQuicBytes-msg", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		return err
 	}
 
 	return nil
 }
 
+// receiveMultiple reads `count` messages from a QUIC stream and returns a slice of received byte slices.
 func receiveMultiple(ctx context.Context, stream quic.Stream, count int, peerID uint16, code uint8) ([][]byte, error) {
 	results := make([][]byte, 0, count)
 
 	for i := 0; i < count; i++ {
-		data, err := receiveQuicBytes(ctx, stream, peerID, code)
-		if err != nil {
-			return nil, fmt.Errorf("receiveQuicBytes[%d/%d]: %w", i+1, count, err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			data, err := receiveQuicBytes(ctx, stream, peerID, code)
+			if err != nil {
+				return nil, fmt.Errorf("receiveQuicBytes[%d/%d]: %w", i+1, count, err)
+			}
+			results = append(results, data)
 		}
-		results = append(results, data)
 	}
 
 	return results, nil
 }
+
 func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, code uint8) ([]byte, error) {
 	var lengthPrefix [4]byte
 
-	// Apply context deadline if it exists
-	/*if deadline, ok := ctx.Deadline(); ok {
-		//log.Info(module, "receiveQuicBytes: applying deadline", "peerID", peerID, "deadline", deadline, "now", time.Now())
-		_ = stream.SetReadDeadline(deadline)
-		defer stream.SetReadDeadline(time.Time{}) // clear deadline afterward
-	}*/
+	// Set read deadline from context if present
+	if useQuicDeadline {
+		if deadline, ok := ctx.Deadline(); ok {
+			if err := stream.SetReadDeadline(deadline); err != nil {
+				log.Warn(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				return nil, err
+			}
+		}
+	}
 
 	// Read length prefix
 	if _, err := io.ReadFull(stream, lengthPrefix[:]); err != nil {
-		//log.Error(module, "!!! receiveQuicBytes-length", "peerID", peerID, "err", err, "code", code)
+		log.Warn(module, "receiveQuicBytes-length prefix", "peerID", peerID, "err", err, "code", code)
 		return nil, err
 	}
-
 	msgLen := binary.LittleEndian.Uint32(lengthPrefix[:])
 	buf := make([]byte, msgLen)
 
+	/*  do we really need to do this AGAIN?? */
+	if useQuicDeadline {
+		if deadline, ok := ctx.Deadline(); ok {
+			if err := stream.SetReadDeadline(deadline); err != nil {
+				log.Warn(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				return nil, err
+			}
+		}
+	}
+
 	// Read message body
 	if _, err := io.ReadFull(stream, buf); err != nil {
-		log.Error(module, "!!! receiveQuicBytes-msg", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
+		log.Warn(module, "receiveQuicBytes-message body", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
 		return nil, err
 	}
+
 	return buf, nil
 }
 
-// jamsnp_dispatch reads from QUIC and dispatches based on message type
-// TODO: use ctx and support cancellation/timeouts!
+// DispatchIncomingQUICStream reads from QUIC and dispatches based on message type
 func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Stream, peerID uint16) error {
-	var msgType byte
+	// Respect context by setting read deadline if present
+	/*if deadline, ok := ctx.Deadline(); ok {
+		if err := stream.SetReadDeadline(deadline); err != nil {
+			log.Warn(module, "SetReadDeadline failed", "err", err)
+			return err
+		}
+	}*/
 
-	msgTypeBytes := make([]byte, 1) // code
-
-	_, err := io.ReadFull(stream, msgTypeBytes)
-	if err != nil {
-		log.Error(module, "DispatchIncomingQUICStream - code", "err", err)
+	// Read message type (1 byte)
+	msgTypeBytes := make([]byte, 1)
+	if _, err := io.ReadFull(stream, msgTypeBytes); err != nil {
+		log.Warn(module, "DispatchIncomingQUICStream - code", "err", err)
 		return err
 	}
-	msgType = msgTypeBytes[0]
+	msgType := msgTypeBytes[0]
+
+	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
-	_, err = io.ReadFull(stream, msgLenBytes)
-	if err != nil {
-		log.Error(module, "DispatchIncomingQUICStream - msgLen", "err", err)
+	if _, err := io.ReadFull(stream, msgLenBytes); err != nil {
+		log.Warn(module, "DispatchIncomingQUICStream - length prefix", "err", err)
 		return err
 	}
 	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
 
+	// Read message body
 	msg := make([]byte, msgLen)
-	_, err = io.ReadFull(stream, msg)
-	if err != nil {
-		log.Error(module, "DispatchIncomingQUICStream - msg", "peerID", peerID, "code", msgType)
+	if _, err := io.ReadFull(stream, msg); err != nil {
+		log.Warn(module, "DispatchIncomingQUICStream - message body", "peerID", peerID, "code", msgType, "err", err)
 		return err
 	}
 
 	// Dispatch based on msgType
 	switch msgType {
 	case UP0_BlockAnnouncement:
-		err := n.onBlockAnnouncement(ctx, stream, msg, peerID)
-		if err != nil {
-			log.Warn(debugStream, "UP0_BlockAnnouncement", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onBlockAnnouncement(stream, msg, peerID)
 	case CE101_VoteMessage:
-		err := n.onVoteMessage(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE101_VoteMessage", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onVoteMessage(ctx, stream, msg)
 	case CE102_CommitMessage:
-		err := n.onCommitMessage(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE102_CommitMessage", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onCommitMessage(ctx, stream, msg)
 	case CE128_BlockRequest:
-		err := n.onBlockRequest(ctx, stream, msg, peerID)
-		if err != nil {
-			log.Warn(debugStream, "CE128_BlockRequest", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onBlockRequest(ctx, stream, msg, peerID)
 	case CE129_StateRequest:
-		err := n.onStateRequest(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE129_StateRequest", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onStateRequest(ctx, stream, msg)
 	case CE131_TicketDistribution, CE132_TicketDistribution:
-		err := n.onTicketDistribution(ctx, stream, msg, peerID)
-		if err != nil {
-			log.Warn(debugStream, "CE131_TicketDistribution, CE132_TicketDistribution", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onTicketDistribution(ctx, stream, msg, peerID)
 	case CE133_WorkPackageSubmission:
-		err := n.onWorkPackageSubmission(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE133_WorkPackageSubmission", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onWorkPackageSubmission(ctx, stream, msg)
 	case CE134_WorkPackageShare:
-		err := n.onWorkPackageShare(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE134_WorkPackageShare", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onWorkPackageShare(ctx, stream, msg)
 	case CE135_WorkReportDistribution:
-		err := n.onWorkReportDistribution(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE135_WorkReportDistribution", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onWorkReportDistribution(ctx, stream, msg)
 	case CE136_WorkReportRequest:
-		err := n.onWorkReportRequest(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE136_WorkReportRequest", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onWorkReportRequest(ctx, stream, msg)
 	case CE137_FullShardRequest:
-		err := n.onFullShardRequest(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE137_FullShardRequest", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onFullShardRequest(ctx, stream, msg)
 	case CE138_BundleShardRequest:
-		err := n.onBundleShardRequest(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE138_BundleShardRequest", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onBundleShardRequest(ctx, stream, msg)
 	case CE139_SegmentShardRequest:
-		err := n.onSegmentShardRequest(ctx, stream, msg, false)
-		if err != nil {
-			log.Warn(debugStream, "CE139_SegmentShardRequest", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onSegmentShardRequest(ctx, stream, msg, false)
 	case CE140_SegmentShardRequestP:
-		err := n.onSegmentShardRequest(ctx, stream, msg, true)
-		if err != nil {
-			log.Warn(debugStream, "CE140_SegmentShardRequestP", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onSegmentShardRequest(ctx, stream, msg, true)
 	case CE141_AssuranceDistribution:
-		err := n.onAssuranceDistribution(ctx, stream, msg, peerID)
-		if err != nil {
-			log.Warn(debugStream, "CE141_AssuranceDistribution", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onAssuranceDistribution(ctx, stream, msg, peerID)
 	case CE142_PreimageAnnouncement:
-		err := n.onPreimageAnnouncement(ctx, stream, msg, peerID)
-		if err != nil {
-			log.Warn(debugStream, "CE142_PreimageAnnouncement", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onPreimageAnnouncement(ctx, stream, msg, peerID)
 	case CE143_PreimageRequest:
-		err := n.onPreimageRequest(ctx, stream, msg)
-		if err != nil {
-			log.Warn(debugStream, "CE143_PreimageRequest", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onPreimageRequest(ctx, stream, msg)
 	case CE144_AuditAnnouncement:
-		err := n.onAuditAnnouncement(ctx, stream, msg, peerID)
-		if err != nil {
-			log.Warn(debugStream, "CE144_AuditAnnouncement", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onAuditAnnouncement(ctx, stream, msg, peerID)
 	case CE145_JudgmentPublication:
-		err := n.onJudgmentPublication(ctx, stream, msg, peerID)
-		if err != nil {
-			log.Warn(debugStream, "CE145_JudgmentPublication", "n", n.id, "p", peerID, "err", err)
-		}
+		return n.onJudgmentPublication(ctx, stream, msg, peerID)
 	default:
 		return errors.New("unknown message type")
 	}
-	return nil
 }
 
 func jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {

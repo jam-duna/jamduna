@@ -9,6 +9,10 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+const (
+	DefaultChannelSize = 200
+)
+
 type Grandpa struct {
 	block_tree            *types.BlockTree // hold the same block tree as the node itself
 	RoundStateMutex       sync.RWMutex
@@ -102,10 +106,10 @@ func NewGrandpa(block_tree *types.BlockTree, selfkey types.Ed25519Priv, authorit
 	tempSet.Authorities = authorities
 	tempSet.AuthoritiesSet = 0
 	g.ScheduledAuthoritySet[0] = tempSet
-	g.BroadcastCommitChan = make(chan CommitMessage, 200)
-	g.BroadcastVoteChan = make(chan VoteMessage, 200)
-	g.GrandpaStatusChan = make(chan string, 200)
-	g.ErrorChan = make(chan error, 200)
+	g.BroadcastCommitChan = make(chan CommitMessage, DefaultChannelSize)
+	g.BroadcastVoteChan = make(chan VoteMessage, DefaultChannelSize)
+	g.GrandpaStatusChan = make(chan string, DefaultChannelSize)
+	g.ErrorChan = make(chan error, DefaultChannelSize)
 	g.BroadcastVoteChan <- g.NewPrecommitVoteMessage(genesis_blk, 0)
 	g.BroadcastVoteChan <- g.NewPrevoteVoteMessage(genesis_blk, 0)
 	commit, _ := g.NewFinalCommitMessage(genesis_blk, 0)

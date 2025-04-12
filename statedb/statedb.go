@@ -879,7 +879,7 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 				defer span.End()
 			}
 
-			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk, "ProcessState")
+			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk, nil)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
 				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)

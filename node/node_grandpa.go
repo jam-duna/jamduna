@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
@@ -35,7 +34,6 @@ func (n *Node) StartGrandpa(b *types.Block) {
 
 // this function will be used in receiving the grandpa message and be the bridge between grandpa and network
 func (n *Node) runGrandpa() {
-	ticker := time.NewTicker(100 * time.Millisecond)
 	for {
 		select {
 		case commit := <-n.grandpaCommitMessageCh:
@@ -56,11 +54,9 @@ func (n *Node) runGrandpa() {
 				fmt.Println(err)
 			}
 		case vote := <-n.grandpa.BroadcastVoteChan:
-			go n.broadcast(context.TODO(), vote)
+			n.broadcast(context.TODO(), vote)
 		case commit := <-n.grandpa.BroadcastCommitChan:
-			go n.broadcast(context.TODO(), commit)
-		case <-ticker.C:
-			// n.grandpa.OnTimeout()
+			n.broadcast(context.TODO(), commit)
 		case err := <-n.grandpa.ErrorChan:
 			log.Error(debugGrandpa, "GRANDPA ERROR", "err", err)
 

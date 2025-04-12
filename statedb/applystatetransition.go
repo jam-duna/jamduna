@@ -14,11 +14,10 @@ import (
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, caller string) (s *StateDB, err error) {
+func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, subscriptions map[uint32]*types.ServiceSubscription) (s *StateDB, err error) {
 
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
-		panic(fmt.Sprintf("[%d] ParentStateRoot does not match %v %v", s.Id, s.StateRoot, blk.Header.ParentStateRoot))
 		return s, fmt.Errorf("ParentStateRoot does not match")
 	}
 	old_timeslot := s.GetSafrole().Timeslot
@@ -150,7 +149,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		sa.Mutable = true
 		sa.Dirty = true
 	}
-	s.ApplyXContext(o, caller)
+	s.ApplyXContext(o, subscriptions)
+
 	// accumulate statistics
 	accumulated_workreports := accumulate_input_wr[:n]
 	for _, report := range accumulated_workreports {
@@ -196,6 +196,31 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	//
 	s.JamState.tallyCoreStatistics(guarantees, s.AvailableWorkReport, assurances)
 	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStats)
+
+	// setup workpackage status (guaranteed, queued, accumulated) in service 0
+	if subscriptions != nil {
+		s0, ok := subscriptions[0]
+		if !ok {
+			s0 = &types.ServiceSubscription{
+				WorkPackage: make(map[common.Hash]string),
+			}
+			subscriptions[0] = s0
+		}
+		for _, g := range blk.Extrinsic.Guarantees {
+			s0.WorkPackage[g.Report.AvailabilitySpec.WorkPackageHash] = "guaranteed"
+		}
+		e := blk.Header.Slot % types.EpochLength // TODO: use correct abstraction
+		for _, q := range s.JamState.AccumulationQueue[e] {
+			for _, wph := range q.WorkPackageHash {
+				s0.WorkPackage[wph] = "queued"
+			}
+		}
+		
+		h := s.JamState.AccumulationHistory[e]
+		for _, wph := range h.WorkPackageHash {
+			s0.WorkPackage[wph] = "accumulated"
+		}
+	}
 
 	// Update Authorization Pool alpha
 	// 4.19 α'[need φ', so after accumulation]

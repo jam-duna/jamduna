@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -378,7 +379,16 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 		ValidatorIndex:      uint32(peerID),
 		Signature:           newReq.Signature,
 	}
-	n.announcementsCh <- announcement
+
+	// Non-blocking send to announcementsCh and warns when the channel is full
+	select {
+	case n.announcementsCh <- announcement:
+		// Sent successfully
+	default:
+		log.Warn(module, "onAuditAnnouncement: announcementsCh full, dropping announcement",
+			"peerID", peerID,
+			"headerHash", newReq.HeaderHash.String_short())
+	}
 	/*
 		Bandersnatch Signature = [u8; 96]
 		First Tranche Evidence = Bandersnatch Signature (s_0 in GP)

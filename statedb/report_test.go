@@ -192,7 +192,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	db.JamState = state
 	services := db.JamState.GetStateFromReportState(report.PreState)
 	for _, service := range services {
-		err := db.writeAccount(service)
+		err := db.writeAccount(service, nil)
 		if err != nil {
 			return fmt.Errorf("Reports FAIL: failed to write account: %v", err)
 		}

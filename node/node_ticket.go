@@ -94,16 +94,14 @@ func (n *Node) BroadcastTickets() {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+	defer cancel() // ensures context is released
 	tickets := n.selfTickets[usingEntropy]
 	for _, ticketbucket := range tickets {
 		if !*ticketbucket.IsIncluded {
 			ticket := ticketbucket.Ticket
 			log.Trace(debugT, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt)
 			if !*ticketbucket.IsBroadcasted {
-				go func() {
-					defer cancel() // ensures context is released
-					_ = n.broadcast(ctx, ticket)
-				}()
+				n.broadcast(ctx, ticket)
 				*ticketbucket.IsBroadcasted = true
 			}
 		}

@@ -8,16 +8,217 @@ import (
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
 )
 
-const debugWeb = log.JamwebMonitoring
+const (
+	SubBestBlock       = "subscribeBestBlock"
+	SubFinalizedBlock  = "subscribeFinalizedBlock"
+	SubStatistics      = "subscribeStatistics"
+	SubServiceInfo     = "subscribeServiceInfo"
+	SubServiceValue    = "subscribeServiceValue"
+	SubServicePreimage = "subscribeServicePreimage"
+	SubServiceRequest  = "subscribeServiceRequest"
+	SubWorkPackage     = "subscribeWorkPackage"
+	debugWeb           = log.JamwebMonitoring
+)
+
+// Struct for incoming WebSocket requests
+type SubscriptionRequest struct {
+	Method      string                 `json:"method"` //
+	Params      map[string]interface{} `json:"params"` // "serviceID", "hash" (storage key or preimage hash), "isFinalized" (true/false)
+	hash        common.Hash
+	isFinalized bool
+}
+
+// Broadcasters for each subscription type
+// subscribeBestBlock - Subscribe to updates of the head of the "best" chain, as returned by bestBlock.
+// subscribeFinalizedBlock - Subscribe to updates of the latest finalized block, as returned by finalizedBlock.
+func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFinalized bool, subscriptions map[uint32]*types.ServiceSubscription) {
+	for serviceID, upd := range subscriptions {
+		for client := range h.clients {
+			reqs, ok := client.subscriptions[serviceID]
+			if !ok {
+				continue
+			}
+			for _, req := range reqs {
+				if isFinalized != req.isFinalized {
+					continue
+				}
+
+				var data []byte
+				var err error
+
+				switch req.Method {
+				case SubBestBlock, SubFinalizedBlock:
+					payload := struct {
+						Method string `json:"method"`
+						Result struct {
+							BlockHash  common.Hash `json:"blockHash"`
+							HeaderHash common.Hash `json:"headerHash"`
+						} `json:"result"`
+					}{
+						Method: req.Method,
+						Result: struct {
+							BlockHash  common.Hash `json:"blockHash"`
+							HeaderHash common.Hash `json:"headerHash"`
+						}{
+							BlockHash:  block.Hash(),
+							HeaderHash: block.Header.Hash(),
+						},
+					}
+					data, err = json.Marshal(payload)
+
+				case SubStatistics:
+					payload := struct {
+						Method string `json:"method"`
+						Result struct {
+							HeaderHash common.Hash               `json:"headerHash"`
+							Statistics types.ValidatorStatistics `json:"statistics"`
+						} `json:"result"`
+					}{
+						Method: SubStatistics,
+						Result: struct {
+							HeaderHash common.Hash               `json:"headerHash"`
+							Statistics types.ValidatorStatistics `json:"statistics"`
+						}{
+							HeaderHash: block.Header.Hash(),
+							Statistics: sdb.JamState.ValidatorStatistics,
+						},
+					}
+					data, err = json.Marshal(payload)
+
+				case SubServiceInfo:
+					payload := struct {
+						Method string `json:"method"`
+						Result struct {
+							ServiceID uint32               `json:"service_id"`
+							Info      types.ServiceAccount `json:"info"`
+						} `json:"result"`
+					}{
+						Method: SubServiceInfo,
+						Result: struct {
+							ServiceID uint32               `json:"service_id"`
+							Info      types.ServiceAccount `json:"info"`
+						}{
+							ServiceID: serviceID,
+							Info:      *upd.ServiceInfo,
+						},
+					}
+					data, err = json.Marshal(payload)
+
+				case SubServiceValue:
+					v, ok := upd.ServiceValue[req.hash]
+					if !ok {
+						continue
+					}
+					payload := struct {
+						Method string `json:"method"`
+						Result struct {
+							ServiceID uint32 `json:"service_id"`
+							Value     string `json:"value"`
+						} `json:"result"`
+					}{
+						Method: SubServiceValue,
+						Result: struct {
+							ServiceID uint32 `json:"service_id"`
+							Value     string `json:"value"`
+						}{
+							ServiceID: serviceID,
+							Value:     common.Bytes2Hex(v),
+						},
+					}
+					data, err = json.Marshal(payload)
+
+				case SubServicePreimage:
+					preimage, ok := upd.ServicePreimage[req.hash]
+					if !ok {
+						continue
+					}
+					payload := struct {
+						Method string `json:"method"`
+						Result struct {
+							ServiceID uint32 `json:"service_id"`
+							Preimage  string `json:"preimage"`
+						} `json:"result"`
+					}{
+						Method: SubServicePreimage,
+						Result: struct {
+							ServiceID uint32 `json:"service_id"`
+							Preimage  string `json:"preimage"`
+						}{
+							ServiceID: serviceID,
+							Preimage:  common.Bytes2Hex(preimage),
+						},
+					}
+					data, err = json.Marshal(payload)
+
+				case SubServiceRequest:
+					timeslots, ok := upd.ServiceRequest[req.hash]
+					if !ok {
+						continue
+					}
+					payload := struct {
+						Method string `json:"method"`
+						Result struct {
+							ServiceID uint32   `json:"service_id"`
+							Timeslots []uint32 `json:"timeslots"`
+						} `json:"result"`
+					}{
+						Method: SubServiceRequest,
+						Result: struct {
+							ServiceID uint32   `json:"service_id"`
+							Timeslots []uint32 `json:"timeslots"`
+						}{
+							ServiceID: serviceID,
+							Timeslots: timeslots,
+						},
+					}
+					data, err = json.Marshal(payload)
+
+				case SubWorkPackage:
+					status, ok := upd.WorkPackage[req.hash]
+					if !ok {
+						continue
+					}
+					payload := struct {
+						Method string `json:"method"`
+						Result struct {
+							WorkPackageHash common.Hash `json:"work_package_hash"`
+							Status          string      `json:"status"`
+						} `json:"result"`
+					}{
+						Method: SubWorkPackage,
+						Result: struct {
+							WorkPackageHash common.Hash `json:"work_package_hash"`
+							Status          string      `json:"status"`
+						}{
+							WorkPackageHash: req.hash,
+							Status:          status,
+						},
+					}
+					data, err = json.Marshal(payload)
+				}
+
+				if err != nil {
+					fmt.Printf("JSON marshal error for %s: %v\n", req.Method, err)
+					continue
+				}
+
+				client.sendData(data)
+			}
+		}
+	}
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -29,7 +230,7 @@ var upgrader = websocket.Upgrader{
 
 // Hub manages client registration and broadcasting
 type Hub struct {
-	clients    map[*Client]bool
+	clients    map[*Client]map[uint32]*types.ServiceSubscription
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan []byte
@@ -40,7 +241,7 @@ type Hub struct {
 func newHub(ctx context.Context) *Hub {
 	cctx, cancel := context.WithCancel(ctx)
 	return &Hub{
-		clients:    make(map[*Client]bool),
+		clients:    make(map[*Client]map[uint32]*types.ServiceSubscription),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		broadcast:  make(chan []byte),
@@ -54,13 +255,13 @@ func (h *Hub) run(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-h.ctx.Done():
-			for client := range h.clients {
+			for client, _ := range h.clients {
 				close(client.send)
 			}
 			return
 
 		case client := <-h.register:
-			h.clients[client] = true
+			h.clients[client] = make(map[uint32]*types.ServiceSubscription)
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
@@ -82,11 +283,33 @@ func (h *Hub) run(wg *sync.WaitGroup) {
 }
 
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
+	hub           *Hub
+	conn          *websocket.Conn
+	send          chan []byte
+	subscriptions map[uint32][]*SubscriptionRequest
 }
 
+// readPump handles WebSocket reads and subscription management
+func (c *Client) sendData(data []byte) {
+	select {
+	case c.send <- data:
+	default:
+	}
+}
+
+// readPump handles WebSocket reads and subscription management
+func (c *Client) addSubscription(serviceID uint32, req *SubscriptionRequest) {
+	log.Info(module, "addSubscription", "serviceID", serviceID, "method", req.Method)
+	if c.subscriptions == nil {
+		c.subscriptions = make(map[uint32][]*SubscriptionRequest)
+	}
+	if _, ok := c.subscriptions[serviceID]; !ok {
+		c.subscriptions[serviceID] = make([]*SubscriptionRequest, 0)
+	}
+	c.subscriptions[serviceID] = append(c.subscriptions[serviceID], req)
+}
+
+// readPump handles WebSocket reads and subscription management
 func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() {
@@ -113,6 +336,83 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 				return
 			}
 			log.Info(debugWeb, "Received message from client", message)
+
+			var req SubscriptionRequest
+			if err := json.Unmarshal(message, &req); err != nil {
+				log.Warn(debugWeb, "Invalid subscription message", err)
+				continue
+			}
+			req.isFinalized = false
+			serviceID := uint32(0)
+			if req.Method == SubServiceInfo || req.Method == SubServiceValue || req.Method == SubServicePreimage || req.Method == SubServiceRequest {
+				// Handle isFinalized (string vs bool)
+				switch v := req.Params["isFinalized"].(type) {
+				case bool:
+					req.isFinalized = v
+				case string:
+					req.isFinalized = (v == "true")
+				default:
+					req.isFinalized = false // or leave as-is
+				}
+
+				// Handle serviceID (string vs int or float64??)
+				switch v := req.Params["serviceID"].(type) {
+				case int:
+					serviceID = uint32(v)
+				case float64:
+					serviceID = uint32(v)
+				case string:
+					val, err := strconv.ParseUint(v, 10, 32)
+					if err != nil {
+						log.Warn(debugWeb, "invalid serviceID", v)
+						return
+					}
+					serviceID = uint32(val)
+				default:
+					log.Warn(debugWeb, "unexpected serviceID type", fmt.Sprintf("%T", v))
+					return
+				}
+			}
+
+			switch req.Method {
+			case SubServiceInfo:
+				// Handle subscription to service info
+				c.addSubscription(serviceID, &req)
+				break
+			case SubServiceValue:
+				// Handle subscription to service value
+				req.hash = common.HexToHash(req.Params["hash"].(string))
+				c.addSubscription(serviceID, &req)
+				break
+			case SubServicePreimage:
+				// Handle subscription to service preimage
+				req.hash = common.HexToHash(req.Params["hash"].(string))
+				c.addSubscription(serviceID, &req)
+				break
+			case SubServiceRequest:
+				// Handle subscription to service request
+				req.hash = common.HexToHash(req.Params["hash"].(string))
+				c.addSubscription(serviceID, &req)
+				break
+			case SubBestBlock:
+				// Handle subscription to best block
+				req.isFinalized = false
+				c.addSubscription(0, &req)
+			case SubFinalizedBlock:
+				// Handle subscription to finalized block
+				req.isFinalized = true
+				c.addSubscription(0, &req)
+			case SubStatistics:
+				// Handle subscription to statistics
+				c.addSubscription(0, &req)
+			case SubWorkPackage:
+				// Handle subscription to work package
+				req.hash = common.HexToHash(req.Params["hash"].(string))
+				c.addSubscription(0, &req)
+			default:
+				log.Warn(debugWeb, "Unknown subscription method", req.Method)
+			}
+			log.Info(debugWeb, "Subscribed", "method", req.Method)
 		}
 	}
 }

@@ -51,6 +51,15 @@ func TestClient(t *testing.T) {
 	}
 	defer client.Close()
 
+	wsUrl := "ws://dot-0.jamduna.org:10800/ws"
+	err = client.ConnectWebSocket(wsUrl)
+	if err != nil {
+		fmt.Println("WebSocket connection failed:", err)
+		return
+	}
+
+	// TODO _ = client.Subscribe("subscribeBestBlock", map[string]interface{}{"finalized": false})
+
 	var game_of_life_ws_push func([]byte)
 	if testMode == "game_of_life" {
 		//this is local
@@ -83,8 +92,6 @@ func TestClient(t *testing.T) {
 }
 
 func fib(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) (err error) {
-
-	//	time.Sleep(12 * time.Second)
 	prevWorkPackageHash := common.Hash{}
 	for fibN := 1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
@@ -94,10 +101,6 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 				Index:         0,
 			}
 			importedSegments = append(importedSegments, importedSegment)
-		}
-		refine_context, err := client.GetRefineContext()
-		if err != nil {
-			t.Fatalf("Error: %s", err)
 		}
 
 		payload := make([]byte, 4)
@@ -111,7 +114,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 			Authorization:         []byte(""),
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
+			//RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            fibIndex,
@@ -140,15 +143,11 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
-		err = client.SubmitWorkPackage(workpackage_req)
-		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-		fmt.Printf("Submitted Fib(%d) to core %d\n", fibN, coreIndex)
 
-		err = client.WaitForWorkPackage(coreIndex, workPackageHash)
+		fmt.Printf("Submitted Fib(%d) to core %d\n", fibN, coreIndex)
+		workPackageHash, err := client.RobustSubmitWorkPackage(workpackage_req, 5)
 		if err != nil {
-			panic(err)
+			t.Fatalf("Error: %s", err)
 		}
 		prevWorkPackageHash = workPackageHash
 		fib_index := testServices["fib"].ServiceIndex
@@ -161,9 +160,31 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 	}
 	return nil
 }
+func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req types.WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
+	tries := 0
+	for ; tries < maxTries; {
+		refine_context, err := client.GetRefineContext()
+		if err != nil {
+			return workPackageHash, err
+		}
+		workpackage_req.WorkPackage.RefineContext = refine_context
+		err = client.SubmitWorkPackage(workpackage_req)
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+		workPackageHash = workpackage_req.WorkPackage.Hash()
+		err = client.WaitForWorkPackage(workpackage_req.CoreIndex, workPackageHash)
+		if err != nil {
+			fmt.Printf("Trial %d failed %v\n", tries, err)
+			tries = tries + 1
+		} else {
+			return workPackageHash, nil
+		}
+	}
+	return workPackageHash, fmt.Errorf("Timeout after maxTries %d", maxTries)
+}
 
 func fib2(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) {
-	//	time.Sleep(12 * time.Second)
 	jam_key := []byte("jam")
 
 	fib2_child_code, _ := getServices([]string{"corevm_child"}, false)

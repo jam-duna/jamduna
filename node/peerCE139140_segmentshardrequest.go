@@ -206,7 +206,7 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 
 	selected_segmentshards, selected_segment_justifications, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex, withJustification)
 	if err != nil {
-		log.Error(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
+		log.Warn(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
 		return fmt.Errorf("onSegmentShardRequest: GetSegmentShard_Assurer failed: %w", err)
 	}
 	if !ok {

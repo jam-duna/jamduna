@@ -22,7 +22,7 @@ const (
 	debugStorageCalc = false
 )
 
-func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
+func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint32]*types.ServiceSubscription) (err error) {
 	if sa.Mutable == false {
 		panic("WriteAccount")
 	}
@@ -52,6 +52,15 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 				if s.Authoring {
 					log.Info(module, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "rawkey", storage.RawKey, "value", storage.Value)
 				}
+				if subscriptions != nil {
+					subscription, ok := subscriptions[service_idx]
+					if ok {
+						if subscription.ServiceValue == nil {
+							subscription.ServiceValue = make(map[common.Hash][]byte)
+						}
+						subscription.ServiceValue[storage.RawKey] = storage.Value
+					}
+				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
 					log.Warn(module, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
@@ -71,6 +80,15 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 					log.Warn(module, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.T", v.T, "err", err)
 					return err
 				}
+				if subscriptions != nil {
+					subscription, ok := subscriptions[service_idx]
+					if ok {
+						if subscription.ServiceRequest == nil {
+							subscription.ServiceRequest = make(map[common.Hash][]uint32)
+						}
+						subscription.ServiceRequest[blob_hash] = v.T
+					}
+				}
 			}
 		}
 	}
@@ -88,6 +106,15 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 					log.Warn(module, "SetPreImageBlob", "err", err)
 					return err
 				}
+				if subscriptions != nil {
+					subscription, ok := subscriptions[service_idx]
+					if ok {
+						if subscription.ServicePreimage == nil {
+							subscription.ServicePreimage = make(map[common.Hash][]byte)
+						}
+						subscription.ServicePreimage[blobHash] = v.Preimage
+					}
+				}
 			}
 		}
 	}
@@ -98,22 +125,25 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (err error) {
 	if sa.StorageSize != start_StorageSize {
 		fmt.Printf(" a_o [s=%d] changed from %d to %d\n", sa.ServiceIndex, start_StorageSize, sa.StorageSize)
 	}
+	if subscriptions != nil {
+		subscription, ok := subscriptions[service_idx]
+		if ok {
+			subscription.ServiceInfo = sa
+		}
+	}
+
 	return err
 }
 
-func (s *StateDB) ApplyXContext(U *types.PartialState, caller string) {
-	if s.Authoring {
-		log.Trace(module, "ApplyXContext", "n", s.Id, "slot", s.GetTimeslot(), "caller", caller)
-	}
+func (s *StateDB) ApplyXContext(U *types.PartialState, subscriptions map[uint32]*types.ServiceSubscription) {
 	for _, sa := range U.D {
 		// U.D should only have service accounts with Mutable = true
 		if sa.Mutable == false {
-			fmt.Printf("ApplyXContext -- Immutable %d in U.X\n", sa.ServiceIndex)
-			panic("Immutable Service account in X.U.D")
+			log.Crit(module, "Immutable Service account in X.U.D", "s", sa.ServiceIndex)
 		} else if sa.Dirty {
-			err := s.writeAccount(sa)
+			err := s.writeAccount(sa, subscriptions)
 			if err != nil {
-				panic(err)
+				log.Crit(module, "ApplyXContext", "err", err)
 			}
 		}
 	}

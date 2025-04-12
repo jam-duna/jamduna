@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 
@@ -169,7 +170,17 @@ func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, ms
 		Signature:      jp.Signature,
 	}
 	copy(judgement.Signature[:], jp.Signature[:])
-	n.judgementsCh <- judgement
+
+	// Non-blocking send to judgementsCh, log warning if channel full
+	select {
+	case n.judgementsCh <- judgement:
+		// success
+	default:
+		log.Warn(module, "onJudgmentPublication: judgementsCh full, dropping judgement",
+			"peerID", peerID,
+			"workReportHash", jp.WorkReportHash.String_short(),
+			"validator", jp.ValidatorIndex)
+	}
 
 	return nil
 }
