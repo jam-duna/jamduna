@@ -215,7 +215,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 }
 
 // this function is for the accepting side of the block announcement
-func (n *Node) onBlockAnnouncement( stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	//don't close the stream here
 	var newHandshake JAMSNP_Handshake
 	// Deserialize byte array back into the struct
@@ -278,8 +278,8 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 	ctx := context.Background()
 	for {
 		select {
-			//		case <-ctx.Done():
-			//log.Info(module, "runBlockAnnouncement stopped", "peerID", peerID, "reason", "context cancelled")
+		//		case <-ctx.Done():
+		//log.Info(module, "runBlockAnnouncement stopped", "peerID", peerID, "reason", "context cancelled")
 		//return
 		default:
 			req, err := receiveQuicBytes(ctx, stream, n.id, code)

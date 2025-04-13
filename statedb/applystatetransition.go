@@ -202,24 +202,44 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s0, ok := subscriptions[0]
 		if !ok {
 			s0 = &types.ServiceSubscription{
-				WorkPackage: make(map[common.Hash]string),
+				WorkPackage: make(map[common.Hash]*string),
 			}
 			subscriptions[0] = s0
 		}
+		gr := "guaranteed"
+		qu := "queued"
+		ac := "accumulated"
+
 		for _, g := range blk.Extrinsic.Guarantees {
-			s0.WorkPackage[g.Report.AvailabilitySpec.WorkPackageHash] = "guaranteed"
+			s0.WorkPackage[g.Report.AvailabilitySpec.WorkPackageHash] = &gr
 		}
-		e := blk.Header.Slot % types.EpochLength // TODO: use correct abstraction
-		for _, q := range s.JamState.AccumulationQueue[e] {
+		_, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
+		for _, q := range s.JamState.AccumulationQueue[currPhase] {
 			for _, wph := range q.WorkPackageHash {
-				s0.WorkPackage[wph] = "queued"
+				s0.WorkPackage[wph] = &qu
 			}
 		}
-		
-		h := s.JamState.AccumulationHistory[e]
+
+		h := s.JamState.AccumulationHistory[currPhase]
 		for _, wph := range h.WorkPackageHash {
-			s0.WorkPackage[wph] = "accumulated"
+			s0.WorkPackage[wph] = &ac
 		}
+
+		for _, p := range blk.Extrinsic.Preimages {
+			serviceID := p.Requester
+			hash := common.Blake2Hash(p.Blob)
+			sp, ok := subscriptions[serviceID]
+			if !ok {
+				sp = &types.ServiceSubscription{}
+				subscriptions[serviceID] = sp
+			}
+			log.Warn(module, "adding sub preimage", "s", serviceID, "hash", hash, "l", len(p.Blob))
+			if sp.ServicePreimage == nil {
+				sp.ServicePreimage = make(map[common.Hash][]byte)
+			}
+			sp.ServicePreimage[hash] = p.Blob
+		}
+
 	}
 
 	// Update Authorization Pool alpha

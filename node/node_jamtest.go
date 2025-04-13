@@ -636,14 +636,14 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		builderNode.preimages[service.CodeHash] = service.Code
 	}
 	log.Info(module, "Waiting for the first block to be ready...")
-	time.Sleep( 2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		// set up service using the Bootstrap service
 		refine_context := builderNode.statedb.GetRefineContext()
 		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash, "rc", refine_context)
-		
+
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),
 			AuthCodeHost:          bootstrapService,
@@ -763,7 +763,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 
 func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB START", "targetN", targetN)
-	time.Sleep(20*time.Second)
+	time.Sleep(20 * time.Second)
 	service0 := testServices["fib"]
 	service_authcopy := testServices["auth_copy"]
 	n1 := nodes[1]

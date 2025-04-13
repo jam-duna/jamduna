@@ -47,7 +47,7 @@ func (n *Node) onVoteMessage(ctx context.Context, stream quic.Stream, msg []byte
 			return fmt.Errorf("onVoteMessage: context canceled while sending precommit")
 		default:
 			log.Warn(module, "onVoteMessage: grandpaPreCommitMessageCh full, dropping vote")
-				
+
 		}
 
 	case grandpa.PrevoteStage:

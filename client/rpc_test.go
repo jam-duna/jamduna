@@ -58,7 +58,7 @@ func TestClient(t *testing.T) {
 		return
 	}
 
-	// TODO _ = client.Subscribe("subscribeBestBlock", map[string]interface{}{"finalized": false})
+	client.Subscribe("subscribeBestBlock", map[string]interface{}{"finalized": false})
 
 	var game_of_life_ws_push func([]byte)
 	if testMode == "game_of_life" {
@@ -152,7 +152,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		prevWorkPackageHash = workPackageHash
 		fib_index := testServices["fib"].ServiceIndex
 		k := common.ServiceStorageKey(fib_index, []byte{0})
-		service_account_byte, ok, err := client.ServiceValue(fib_index, k)
+		service_account_byte, ok, err := client.GetServiceValue(fib_index, k)
 		if err != nil || ok == false {
 			t.Fatalf("Error: %s", err)
 		}
@@ -162,7 +162,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 }
 func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req types.WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
 	tries := 0
-	for ; tries < maxTries; {
+	for tries < maxTries {
 		refine_context, err := client.GetRefineContext()
 		if err != nil {
 			return workPackageHash, err
@@ -295,11 +295,11 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		// wait until the work report is pending
 		for {
 			time.Sleep(1 * time.Second)
-			if client.GetState() == nil {
+			if client.state == nil {
 				continue
 			}
 			find := false
-			for _, packagehash := range client.GetState().AccumulationHistory[types.EpochLength-1].WorkPackageHash {
+			for _, packagehash := range client.state.AccumulationHistory[types.EpochLength-1].WorkPackageHash {
 				if packagehash == workPackageHash {
 					find = true
 					break
@@ -317,7 +317,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		for _, key := range keys {
 			k := common.ServiceStorageKey(fib_index, []byte{key})
 			if true {
-				service_account_byte, _, _ := client.ServiceValue(fib_index, k)
+				service_account_byte, _, _ := client.GetServiceValue(fib_index, k)
 				fmt.Printf("Fib2(%v) result %d: %x\n", fibN_string, key, service_account_byte)
 			}
 		}
@@ -487,11 +487,11 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 		// wait until the work report is pending
 		for {
 			time.Sleep(1 * time.Second)
-			if client.GetState() == nil {
+			if client.state == nil {
 				continue
 			}
 			find := false
-			for _, packagehash := range client.GetState().AccumulationHistory[types.EpochLength-1].WorkPackageHash {
+			for _, packagehash := range client.state.AccumulationHistory[types.EpochLength-1].WorkPackageHash {
 				if packagehash == workPackageHash {
 					find = true
 					break

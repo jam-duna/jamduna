@@ -48,7 +48,23 @@ type ServiceSubscription struct {
 	ServiceValue    map[common.Hash][]byte
 	ServicePreimage map[common.Hash][]byte
 	ServiceRequest  map[common.Hash][]uint32
-	WorkPackage     map[common.Hash]string
+	WorkPackage     map[common.Hash]*string
+}
+
+func (s *ServiceSubscription) Clear() {
+	s.ServiceInfo = nil
+	for h, _ := range s.ServiceValue {
+		s.ServiceValue[h] = nil
+	}
+	for h, _ := range s.ServicePreimage {
+		s.ServicePreimage[h] = nil
+	}
+	for h, _ := range s.ServiceRequest {
+		s.ServiceRequest[h] = nil
+	}
+	for h, _ := range s.WorkPackage {
+		s.WorkPackage[h] = nil
+	}
 }
 
 func (s *ServiceAccount) Clone() *ServiceAccount {

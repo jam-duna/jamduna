@@ -44,6 +44,7 @@ type SubscriptionRequest struct {
 // subscribeBestBlock - Subscribe to updates of the head of the "best" chain, as returned by bestBlock.
 // subscribeFinalizedBlock - Subscribe to updates of the latest finalized block, as returned by finalizedBlock.
 func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFinalized bool, subscriptions map[uint32]*types.ServiceSubscription) {
+	log.Info(module, "ReceiveLatestBlock", "header", block.Header.Hash())
 	for serviceID, upd := range subscriptions {
 		for client := range h.clients {
 			reqs, ok := client.subscriptions[serviceID]
@@ -101,13 +102,13 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 					payload := struct {
 						Method string `json:"method"`
 						Result struct {
-							ServiceID uint32               `json:"service_id"`
+							ServiceID uint32               `json:"serviceID"`
 							Info      types.ServiceAccount `json:"info"`
 						} `json:"result"`
 					}{
 						Method: SubServiceInfo,
 						Result: struct {
-							ServiceID uint32               `json:"service_id"`
+							ServiceID uint32               `json:"serviceID"`
 							Info      types.ServiceAccount `json:"info"`
 						}{
 							ServiceID: serviceID,
@@ -118,22 +119,25 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 
 				case SubServiceValue:
 					v, ok := upd.ServiceValue[req.hash]
-					if !ok {
+					if !ok || v == nil {
 						continue
 					}
 					payload := struct {
 						Method string `json:"method"`
 						Result struct {
-							ServiceID uint32 `json:"service_id"`
-							Value     string `json:"value"`
+							ServiceID uint32      `json:"serviceID"`
+							Hash      common.Hash `json:"hash"`
+							Value     string      `json:"value"`
 						} `json:"result"`
 					}{
 						Method: SubServiceValue,
 						Result: struct {
-							ServiceID uint32 `json:"service_id"`
-							Value     string `json:"value"`
+							ServiceID uint32      `json:"serviceID"`
+							Hash      common.Hash `json:"hash"`
+							Value     string      `json:"value"`
 						}{
 							ServiceID: serviceID,
+							Hash:      req.hash,
 							Value:     common.Bytes2Hex(v),
 						},
 					}
@@ -141,22 +145,25 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 
 				case SubServicePreimage:
 					preimage, ok := upd.ServicePreimage[req.hash]
-					if !ok {
+					if !ok || preimage == nil {
 						continue
 					}
 					payload := struct {
 						Method string `json:"method"`
 						Result struct {
-							ServiceID uint32 `json:"service_id"`
-							Preimage  string `json:"preimage"`
+							ServiceID uint32      `json:"serviceID"`
+							Hash      common.Hash `json:"hash"`
+							Preimage  string      `json:"preimage"`
 						} `json:"result"`
 					}{
 						Method: SubServicePreimage,
 						Result: struct {
-							ServiceID uint32 `json:"service_id"`
-							Preimage  string `json:"preimage"`
+							ServiceID uint32      `json:"serviceID"`
+							Hash      common.Hash `json:"hash"`
+							Preimage  string      `json:"preimage"`
 						}{
 							ServiceID: serviceID,
+							Hash:      req.hash,
 							Preimage:  common.Bytes2Hex(preimage),
 						},
 					}
@@ -164,22 +171,25 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 
 				case SubServiceRequest:
 					timeslots, ok := upd.ServiceRequest[req.hash]
-					if !ok {
+					if !ok || timeslots == nil {
 						continue
 					}
 					payload := struct {
 						Method string `json:"method"`
 						Result struct {
-							ServiceID uint32   `json:"service_id"`
-							Timeslots []uint32 `json:"timeslots"`
+							ServiceID uint32      `json:"serviceID"`
+							Hash      common.Hash `json:"hash"`
+							Timeslots []uint32    `json:"timeslots"`
 						} `json:"result"`
 					}{
 						Method: SubServiceRequest,
 						Result: struct {
-							ServiceID uint32   `json:"service_id"`
-							Timeslots []uint32 `json:"timeslots"`
+							ServiceID uint32      `json:"serviceID"`
+							Hash      common.Hash `json:"hash"`
+							Timeslots []uint32    `json:"timeslots"`
 						}{
 							ServiceID: serviceID,
+							Hash:      req.hash,
 							Timeslots: timeslots,
 						},
 					}
@@ -187,23 +197,23 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 
 				case SubWorkPackage:
 					status, ok := upd.WorkPackage[req.hash]
-					if !ok {
+					if !ok || status == nil {
 						continue
 					}
 					payload := struct {
 						Method string `json:"method"`
 						Result struct {
-							WorkPackageHash common.Hash `json:"work_package_hash"`
+							WorkPackageHash common.Hash `json:"workPackageHash"`
 							Status          string      `json:"status"`
 						} `json:"result"`
 					}{
 						Method: SubWorkPackage,
 						Result: struct {
-							WorkPackageHash common.Hash `json:"work_package_hash"`
+							WorkPackageHash common.Hash `json:"workPackageHash"`
 							Status          string      `json:"status"`
 						}{
 							WorkPackageHash: req.hash,
-							Status:          status,
+							Status:          *status,
 						},
 					}
 					data, err = json.Marshal(payload)
@@ -217,6 +227,7 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 				client.sendData(data)
 			}
 		}
+		upd.Clear()
 	}
 }
 
@@ -291,6 +302,7 @@ type Client struct {
 
 // readPump handles WebSocket reads and subscription management
 func (c *Client) sendData(data []byte) {
+	log.Info(module, "sendData", "data", string(data))
 	select {
 	case c.send <- data:
 	default:
@@ -335,11 +347,11 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 				}
 				return
 			}
-			log.Info(debugWeb, "Received message from client", message)
+			log.Info(module, "Received message from client", "msg", string(message))
 
 			var req SubscriptionRequest
 			if err := json.Unmarshal(message, &req); err != nil {
-				log.Warn(debugWeb, "Invalid subscription message", err)
+				log.Warn(module, "Invalid subscription message", err)
 				continue
 			}
 			req.isFinalized = false
@@ -369,8 +381,6 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 					}
 					serviceID = uint32(val)
 				default:
-					log.Warn(debugWeb, "unexpected serviceID type", fmt.Sprintf("%T", v))
-					return
 				}
 			}
 
@@ -441,11 +451,17 @@ func (c *Client) writePump(ctx context.Context, wg *sync.WaitGroup) {
 				return
 			}
 			w.Write(message)
-			for len(c.send) > 0 {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.send)
-			}
 			w.Close()
+			for len(c.send) > 0 {
+				next := <-c.send
+				c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				w, err := c.conn.NextWriter(websocket.TextMessage)
+				if err != nil {
+					return
+				}
+				w.Write(next)
+				w.Close()
+			}
 
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))

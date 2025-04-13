@@ -36,6 +36,17 @@ type NodeClient struct {
 	baseIdx    uint16
 	servers    []string
 
+	state   *statedb.StateSnapshot
+	muState sync.Mutex
+
+	Preimage       map[common.Hash][]byte
+	WorkPackage    map[common.Hash]string
+	ServiceValue   map[common.Hash][]byte
+	ServiceInfo    map[uint32]types.ServiceAccount
+	ServiceRequest map[common.Hash][]uint32
+	HeaderHash     common.Hash
+	Statistics     types.ValidatorStatistics
+
 	wsConn  *websocket.Conn // websocket connection
 	wsMutex sync.Mutex      // to protect writes
 
@@ -48,10 +59,16 @@ func NewNodeClient(coreIndex uint16, servers []string) (*NodeClient, error) {
 		return nil, err
 	}
 	return &NodeClient{
-		baseClient: baseclient,
-		client:     nil,
-		coreIndex:  coreIndex,
-		servers:    servers,
+		baseClient:     baseclient,
+		client:         nil,
+		coreIndex:      coreIndex,
+		servers:        servers,
+		state:          nil,
+		Preimage:       make(map[common.Hash][]byte),
+		WorkPackage:    make(map[common.Hash]string),
+		ServiceValue:   make(map[common.Hash][]byte),
+		ServiceInfo:    make(map[uint32]types.ServiceAccount),
+		ServiceRequest: make(map[common.Hash][]uint32),
 	}, nil
 }
 
@@ -82,7 +99,7 @@ func (c *NodeClient) listenWebSocket() {
 		}
 
 		if err := json.Unmarshal(msg, &envelope); err != nil {
-			fmt.Printf("Failed to parse WebSocket envelope: %v\n", err)
+			fmt.Printf("Failed to parse WebSocket envelope: (%s) %v\n", string(msg), err)
 			continue
 		}
 
@@ -96,8 +113,10 @@ func (c *NodeClient) listenWebSocket() {
 				fmt.Printf("Failed to parse BlockAnnouncement: %v\n", err)
 				continue
 			}
-			fmt.Printf("BlockAnnouncement received: HeaderHash=%s\n", result.HeaderHash)
-			//go c.GetState(result.HeaderHash)
+			//fmt.Printf("BlockAnnouncement received: HeaderHash=%s\n", result.HeaderHash)
+			c.HeaderHash = common.Hex2Hash(result.HeaderHash)
+
+			go c.GetState(result.HeaderHash)
 
 		case SubStatistics:
 			var payload struct {
@@ -109,64 +128,74 @@ func (c *NodeClient) listenWebSocket() {
 				continue
 			}
 			fmt.Printf("Statistics update for %s: %+v\n", payload.HeaderHash, payload.Statistics)
+			c.Statistics = payload.Statistics
 
 		case SubServiceInfo:
 			var payload struct {
-				ServiceID uint32            `json:"service_id"`
-				Info      types.ServiceInfo `json:"info"`
+				ServiceID uint32               `json:"serviceID"`
+				Info      types.ServiceAccount `json:"info"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
 				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
 				continue
 			}
 			fmt.Printf("ServiceInfo update for service %d: %+v\n", payload.ServiceID, payload.Info)
-
+			c.ServiceInfo[payload.ServiceID] = payload.Info
+			break
 		case SubServiceValue:
 			var payload struct {
-				ServiceID uint32 `json:"service_id"`
-				Value     string `json:"value"`
+				ServiceID uint32      `json:"serviceID"`
+				Hash      common.Hash `json:"hash"`
+				Value     string      `json:"value"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
 				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
 				continue
 			}
-			fmt.Printf("ServiceInfo update for service %d: %+v\n", payload.ServiceID, payload.Value)
+			fmt.Printf("ServiceValue update for service %d %s: %+v\n", payload.ServiceID, payload.Hash, payload.Value)
+			//h := common.HexToHash(payload.Hash)
+			c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
 			break
 
 		case SubServicePreimage:
 			var payload struct {
-				ServiceID uint32 `json:"service_id"`
-				Preimage  string `json:"preimage"`
+				ServiceID uint32      `json:"serviceID"`
+				Hash      common.Hash `json:"hash"`
+				Preimage  string      `json:"preimage"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
 				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
 				continue
 			}
-			fmt.Printf("ServicePreimage for service %d: %+v\n", payload.ServiceID, payload.Preimage)
+			fmt.Printf("!!!! ServicePreimage for service %d: %+v\n", payload.ServiceID, payload.Preimage)
+			c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
 			break
 
 		case SubServiceRequest:
 			var payload struct {
-				ServiceID uint32   `json:"service_id"`
-				Timeslots []uint32 `json:"timeslots"`
+				ServiceID uint32      `json:"serviceID"`
+				Hash      common.Hash `json:"hash"`
+				Timeslots []uint32    `json:"timeslots"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				fmt.Printf("Failed to parse SubServiceRequest: %v\n", err)
 				continue
 			}
 			fmt.Printf("ServiceRequest update for service %d: %+v\n", payload.ServiceID, payload.Timeslots)
+			c.ServiceRequest[payload.Hash] = payload.Timeslots
 			break
 
 		case SubWorkPackage:
 			var payload struct {
-				WorkPackageHash common.Hash `json:"service_id"`
+				WorkPackageHash common.Hash `json:"workPackageHash"`
 				Status          string      `json:"status"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				fmt.Printf("Failed to parse SubWorkPackage: %v\n", err)
 				continue
 			}
-			fmt.Printf("WorkPackage update for workpackage %d: %+v\n", payload.WorkPackageHash, payload.Status)
+			fmt.Printf("WorkPackage update for workpackage %s: %+v\n", payload.WorkPackageHash, payload.Status)
+			c.WorkPackage[payload.WorkPackageHash] = payload.Status
 			break
 		default:
 			fmt.Printf("Unknown method: %s\n", envelope.Method)
@@ -185,6 +214,7 @@ func (c *NodeClient) Subscribe(method string, params map[string]interface{}) err
 		"method": method,
 		"params": params,
 	}
+	fmt.Printf("Subscribe %v\n", msg)
 	return c.wsConn.WriteJSON(msg)
 }
 
@@ -238,18 +268,22 @@ func (c *NodeClient) GetCoreCoWorkersPeers() (idx []uint16, err error) {
 	return idx, nil
 }
 
-func (c *NodeClient) GetState() (s *statedb.StateSnapshot) {
+func (c *NodeClient) GetState(headerHash string) (err error) {
 	var jsonStr string
-	err := c.GetClient().Call("jam.State", []string{"latest"}, &jsonStr)
+	err = c.GetClient().Call("jam.State", []string{headerHash}, &jsonStr)
 	if err != nil {
-		return nil
+		return err
 	}
 	var snapshot statedb.StateSnapshot
 	err = json.Unmarshal([]byte(jsonStr), &snapshot)
 	if err != nil {
-		return nil
+		return err
 	}
-	return &snapshot
+	c.muState.Lock()
+	c.state = &snapshot
+	c.muState.Unlock()
+
+	return nil
 }
 
 func (nc *NodeClient) GetCurrJCE() (uint32, error) {
@@ -299,7 +333,7 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq types.WorkPackageRequest) 
 	return nil
 }
 
-func (c *NodeClient) ServiceValue(serviceIndex uint32, storageHash common.Hash) ([]byte, bool, error) {
+func (c *NodeClient) GetServiceValue(serviceIndex uint32, storageHash common.Hash) ([]byte, bool, error) {
 	req := []string{
 		strconv.FormatUint(uint64(serviceIndex), 10),
 		storageHash.Hex(),
@@ -317,56 +351,64 @@ func (c *NodeClient) WaitForPreimage(serviceIndex uint32, preimage []byte) (err 
 	ctxWait, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	preimageHash := common.Blake2Hash(preimage)
+	c.Subscribe(SubServicePreimage, map[string]interface{}{"serviceID": fmt.Sprintf("%d", serviceIndex), "hash": fmt.Sprintf("%s", preimageHash)})
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctxWait.Done():
 			return fmt.Errorf("Timed out waiting for preimage to appear")
-		case <-time.After(1 * time.Second):
-			_, _, l, err := c.ServicePreimage(serviceIndex, preimageHash)
-			if err != nil {
-				continue
-			}
-			if uint32(len(preimage)) == l {
+		case <-ticker.C:
+			if _, ok := c.Preimage[preimageHash]; ok {
+				fmt.Printf("***** preimage(serviceIndex=%d, length=%d)\n", serviceIndex, len(preimage))
 				return nil
 			}
-
 		}
-	}
-}
 
-func HasReport(s *statedb.StateSnapshot, workPackageHash common.Hash) bool {
-	for _, b := range s.RecentBlocks {
-		for _, x := range b.Reported {
-			if x.WorkPackageHash == workPackageHash {
-				return true
-			}
-		}
 	}
-	return false
 }
 
 func (c *NodeClient) WaitForWorkPackage(coreIndex uint16, workPackageHash common.Hash) (err error) {
 	ctxWait, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	c.Subscribe(SubWorkPackage, map[string]interface{}{"hash": fmt.Sprintf("%s", workPackageHash)})
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctxWait.Done():
-			return fmt.Errorf("Timed out waiting for work report to clear")
-		case <-time.After(1 * time.Second):
-			s := c.GetState() // TODO: make this work with the ws instead of polling every second!
-			if s != nil {
-				for _, history := range s.AccumulationHistory {
-					for _, packagehash := range history.WorkPackageHash {
-						if packagehash == workPackageHash {
-							fmt.Printf("cleared\n")
-							return nil
-						}
-					}
-				}
+			return fmt.Errorf("Timed out waiting for work package %s to be accumulated", workPackageHash)
+		case <-ticker.C:
+			if status, ok := c.WorkPackage[workPackageHash]; ok {
+				fmt.Printf("workPackage(%d, %s): %s\n", coreIndex, workPackageHash, status)
+				return nil
 			}
 		}
 	}
-	return nil
+}
+
+func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.Hash) (service_index uint32, err error) {
+	ctxWait, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": fmt.Sprintf("%s", storageKey)})
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctxWait.Done():
+			return 0, fmt.Errorf("Timed out waiting for service value")
+		case <-ticker.C:
+			if value, ok := c.ServiceValue[storageKey]; ok {
+				service_index = uint32(types.DecodeE_l(value))
+				fmt.Printf("serviceValueCh(%d, %s): %s\n", serviceIndex, storageKey, value)
+				return service_index, nil
+			}
+		}
+	}
 }
 
 func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName string, serviceCode []byte, serviceIDs []uint32) (newServiceIdx uint32, err error) {
@@ -409,26 +451,36 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	wpr.ExtrinsicsBlobs = types.ExtrinsicsBlobs{}
 	wpHash := codeWP.Hash()
 	fmt.Printf("Submitting WP %s\n", wpHash)
+
+	// submits wp
 	err = c.SubmitWorkPackage(wpr)
 	if err != nil {
 		fmt.Printf("SubmitWorkPackage ERR %v", err)
 		return
 	}
+	// creates SubWorkPackage(wpHash) subscription, blocks for N seconds waiting for first status from subscription
 	err = c.WaitForWorkPackage(wpr.CoreIndex, wpHash)
 	if err != nil {
 		fmt.Printf("WaitForWorkPackage ERR %v", err)
 		return
 	}
-	newServiceIdx, err = c.GetBootstrapService()
+
+	// creates SubServiceValue(0, storageKey) subscription, blocks for N seconds waiting for value updates from subscription
+	storageKey := common.ServiceStorageKey(0, []byte{0, 0, 0, 0})
+
+	newServiceIdx, err = c.WaitForServiceValue(0, storageKey)
 	if err != nil {
 		fmt.Printf("GetBootstrapService ERR %v", err)
 		return
 	}
 
+	// submits preimage of service code
 	if err = c.SubmitPreimage(newServiceIdx, serviceCode); err != nil {
 		fmt.Printf("SubmitPreimage ERR %v", err)
 		return
 	}
+
+	// creates SubServicePreimage(0, preimage) subscription, blocks for N seconds waiting for preimage updates from subscription
 	err = c.WaitForPreimage(newServiceIdx, serviceCode)
 	if err != nil {
 		fmt.Printf("WaitForPreimage ERR %v", err)
@@ -466,16 +518,6 @@ func (c *NodeClient) LoadServices(services []string) (new_service_map map[string
 	}
 	fmt.Printf("LoadServices: DONE\n")
 	return new_service_map, nil
-}
-
-func (c *NodeClient) GetBootstrapService() (service_index uint32, err error) {
-	k := common.ServiceStorageKey(0, []byte{0, 0, 0, 0})
-	service_account_byte, ok, err := c.ServiceValue(0, k)
-	if err != nil || !ok {
-		return 0, fmt.Errorf("failed to get bootstrap service: %v", err)
-	}
-	service_index = uint32(types.DecodeE_l(service_account_byte))
-	return service_index, nil
 }
 
 func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) error {

@@ -37,7 +37,6 @@ const (
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
 
-
 	useQuicDeadline = false
 )
 

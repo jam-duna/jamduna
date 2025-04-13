@@ -1177,7 +1177,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-			log.Debug(vm.logging, string(vm.ServiceMetadata), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+			log.Trace(vm.logging, string(vm.ServiceMetadata), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
 		}
 		stepn++
 	}
