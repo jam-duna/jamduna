@@ -9,19 +9,24 @@ import (
 )
 
 const (
-	GeneralAuthoring     = "authoring"       // Generic Authoring log (excluding pvm)
-	PvmAuthoring         = "pvm_authoring"   // PVM Authoring log
-	FirstGuarantor       = "first_guarantor" // First Authoring Guarantor log
-	BlockMonitoring      = "blk_mod"         // Block module log
-	DAMonitoring         = "da_mod"          // Data Availability module log
-	NodeMonitoring       = "n_mod"           // General Node Ops
-	SegmentMonitoring    = "seg_mod"         // Segment module log
-	StateDBMonitoring    = "statedb_mod"     // stateDB module log
-	GrandpaMonitoring    = "grandpa_mod"     // Grandpa module log
-	JamwebMonitoring     = "jamweb_mod"      // Jamweb module log
-	QuicStreamMonitoring = "q_mod"           // Quicstream module log
-	GuaranteeMonitoring  = "g_mod"           // Guarantee module log
-	DisablePVMLogging    = false
+	// PVM Context (vm.logging)
+	PvmAuthoring            = "pvm_authoring"   // PVM Authoring
+	PvmValidating           = "pvm_validator"   // PVM Validator
+	FirstGuarantorOrAuditor = "first_guarantor" // First Guarantor or Auditor
+	OtherGuarantor          = "other_guarantor" // 2nd/3rd Guarantor
+
+	GeneralAuthoring  = "authoring"  // Generic Authoring  (excluding pvm)
+	GeneralValidating = "validating" // Generic Validating (excluding pvm)
+
+	BlockMonitoring      = "blk_mod"     // Block module log
+	DAMonitoring         = "da_mod"      // Data Availability module log
+	NodeMonitoring       = "n_mod"       // General Node Ops
+	SegmentMonitoring    = "seg_mod"     // Segment module log
+	StateDBMonitoring    = "statedb_mod" // stateDB module log
+	GrandpaMonitoring    = "grandpa_mod" // Grandpa module log
+	JamwebMonitoring     = "jamweb_mod"  // Jamweb module log
+	QuicStreamMonitoring = "q_mod"       // Quicstream module log
+	GuaranteeMonitoring  = "g_mod"       // Guarantee module log
 )
 
 var root atomic.Value
@@ -84,7 +89,7 @@ func init_module(moduleList []string, moduleEnabled []string) map[string]bool {
 	return moduleMap
 }
 
-var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantor, BlockMonitoring, DAMonitoring, NodeMonitoring, SegmentMonitoring, StateDBMonitoring, GrandpaMonitoring, JamwebMonitoring, "G"} // no idea what is G
+var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantorOrAuditor, BlockMonitoring, DAMonitoring, NodeMonitoring, SegmentMonitoring, StateDBMonitoring, GrandpaMonitoring, JamwebMonitoring, "G"} // no idea what is G
 var defaultModuleEnabled = []string{}
 
 // --- Module management ---
@@ -147,8 +152,8 @@ func Crit(module string, msg string, ctx ...interface{}) {
 	os.Exit(1)
 }
 
-func SetLogging() {
-	Root().SetLogging()
+func RecordLogs() {
+	Root().RecordLogs()
 }
 
 func GetRecordedLogs() ([]byte, error) {

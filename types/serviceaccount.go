@@ -44,11 +44,11 @@ type ServiceAccount struct {
 }
 
 type ServiceSubscription struct {
-	ServiceInfo     *ServiceAccount
-	ServiceValue    map[common.Hash][]byte
-	ServicePreimage map[common.Hash][]byte
-	ServiceRequest  map[common.Hash][]uint32
-	WorkPackage     map[common.Hash]*string
+	ServiceInfo     *SubServiceInfoResult
+	ServiceValue    map[common.Hash]*SubServiceValueResult    // storage key
+	ServicePreimage map[common.Hash]*SubServicePreimageResult // preimage hash
+	ServiceRequest  map[common.Hash]*SubServiceRequestResult  // preimage hash
+	WorkPackage     map[common.Hash]*SubWorkPackageResult     // workpackage hash
 }
 
 func (s *ServiceSubscription) Clear() {
@@ -105,11 +105,12 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 }
 
 type StorageObject struct {
-	OnChain bool
-	Deleted bool
-	Dirty   bool
-	Value   []byte      `json:"value"`  // v
-	RawKey  common.Hash `json:"rawkey"` // rawKey
+	Accessed bool
+	Deleted  bool
+	Dirty    bool
+	Key      []byte      `json:"key"`    // k
+	Value    []byte      `json:"value"`  // v
+	RawKey   common.Hash `json:"rawkey"` // rawKey
 }
 
 func (o StorageObject) Clone() StorageObject {
@@ -118,19 +119,20 @@ func (o StorageObject) Clone() StorageObject {
 	copy(valueCopy, o.Value)
 
 	return StorageObject{
-		OnChain: o.OnChain,
-		Deleted: o.Deleted,
-		Dirty:   o.Dirty,
-		Value:   valueCopy,
-		RawKey:  o.RawKey,
+		Accessed: o.Accessed,
+		Deleted:  o.Deleted,
+		Dirty:    o.Dirty,
+		Value:    valueCopy,
+		RawKey:   o.RawKey,
 	}
 }
 
 type LookupObject struct {
-	Deleted bool
-	Dirty   bool
-	Z       uint32   `json:"z"` // z
-	T       []uint32 `json:"t"` // t
+	Accessed bool
+	Deleted  bool
+	Dirty    bool
+	Z        uint32   `json:"z"` // z
+	T        []uint32 `json:"t"` // t
 }
 
 func (o LookupObject) Clone() LookupObject {
@@ -147,6 +149,7 @@ func (o LookupObject) Clone() LookupObject {
 }
 
 type PreimageObject struct {
+	Accessed bool
 	Deleted  bool
 	Dirty    bool
 	Preimage []byte `json:"preimage"` // p
@@ -158,6 +161,7 @@ func (o PreimageObject) Clone() PreimageObject {
 	copy(preimageCopy, o.Preimage)
 
 	return PreimageObject{
+		Accessed: o.Accessed,
 		Deleted:  o.Deleted,
 		Dirty:    o.Dirty,
 		Preimage: preimageCopy,
@@ -322,7 +326,7 @@ func (s *ServiceAccount) String() string {
 func (s *ServiceAccount) JsonString() string {
 	return ToJSON(s)
 }
-func (s *ServiceAccount) ReadStorage(rawK common.Hash, sdb HostEnv) (ok bool, v []byte) {
+func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv) (ok bool, v []byte) {
 	serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal(rawK)
 	storageObj, ok := s.Storage[hk]
@@ -338,10 +342,11 @@ func (s *ServiceAccount) ReadStorage(rawK common.Hash, sdb HostEnv) (ok bool, v 
 		return false, nil
 	}
 	s.Storage[hk] = StorageObject{
-		OnChain: true,
-		Dirty:   false,
-		Value:   v,
-		RawKey:  rawK,
+		Accessed: true,
+		Dirty:    false,
+		Key:      mu_k,
+		Value:    v,
+		RawKey:   rawK,
 	}
 	return true, v
 }
@@ -355,9 +360,10 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 		var err error
 		preimage, ok, err = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
 		if err != nil || !ok {
-			return false, preimage //, err
+			return false, preimage
 		}
 		s.Preimage[blobHash] = PreimageObject{
+			Accessed: true,
 			Dirty:    false,
 			Preimage: preimage,
 		}
@@ -378,9 +384,10 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 			return ok, anchor_timeslot
 		}
 		s.Lookup[blobHash] = LookupObject{
-			Dirty: false,
-			Z:     z,
-			T:     anchor_timeslot,
+			Accessed: true,
+			Dirty:    false,
+			Z:        z,
+			T:        anchor_timeslot,
 		}
 		return true, anchor_timeslot
 	}
@@ -449,12 +456,7 @@ func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 	s.NumStorageItems = numStorageItems
 }
 
-func (s *ServiceAccount) WriteForget(serviceIndex uint32, rawK []byte, val []byte) {
-	// mark a_p as deleted
-	// mark a_l as deleted -- note that we need this to differentiate the empty marker case from the hostSolicit
-}
-
-func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK common.Hash, val []byte) {
+func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK common.Hash, val []byte) {
 	if s.Mutable == false {
 		panic("Called WriteStorage on immutable ServiceAccount")
 	}
@@ -463,22 +465,24 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, rawK common.Hash, val
 	hk := common.Compute_storageKey_internal(rawK)
 	s.Dirty = true
 	storeObj, exists := s.Storage[hk]
-	// Use the OnChain flag here if already exists
+	// Use the Accessed flag here if already exists
 	if exists {
 		s.Storage[hk] = StorageObject{
-			OnChain: storeObj.OnChain,
-			Dirty:   true,
-			Deleted: len(val) == 0,
-			Value:   val,
-			RawKey:  rawK,
+			Accessed: storeObj.Accessed,
+			Dirty:    true,
+			Deleted:  len(val) == 0,
+			Key:      mu_k,
+			Value:    val,
+			RawKey:   rawK,
 		}
 	} else {
 		s.Storage[hk] = StorageObject{
-			OnChain: false,
-			Dirty:   true,
-			Deleted: len(val) == 0,
-			Value:   val,
-			RawKey:  rawK,
+			Accessed: false,
+			Dirty:    true,
+			Deleted:  len(val) == 0,
+			Key:      mu_k,
+			Value:    val,
+			RawKey:   rawK,
 		}
 	}
 }
@@ -487,12 +491,24 @@ func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 	if s.Mutable == false {
 		panic("Called WriteStorage on immutable ServiceAccount")
 	}
-	s.Dirty = true
-	s.Preimage[blobHash] = PreimageObject{
-		Dirty:    true,
-		Deleted:  len(preimage) == 0,
-		Preimage: preimage,
+
+	o, exists := s.Preimage[blobHash]
+	if exists {
+		s.Preimage[blobHash] = PreimageObject{
+			Accessed: o.Accessed,
+			Dirty:    true,
+			Deleted:  len(preimage) == 0,
+			Preimage: preimage,
+		}
+	} else {
+		s.Preimage[blobHash] = PreimageObject{
+			Accessed: false,
+			Dirty:    true,
+			Deleted:  len(preimage) == 0,
+			Preimage: preimage,
+		}
 	}
+	s.Dirty = true
 }
 
 func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots []uint32) {
@@ -500,11 +516,23 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 		panic("Called WriteStorage on immutable ServiceAccount")
 	}
 	s.Dirty = true
+	o, exists := s.Lookup[blobHash]
+	if exists {
+		s.Lookup[blobHash] = LookupObject{
+			Accessed: o.Accessed,
+			Dirty:    true,
+			Deleted:  time_slots == nil,
+			Z:        z,
+			T:        time_slots,
+		}
+		return
+	}
 	s.Lookup[blobHash] = LookupObject{
-		Dirty:   true,
-		Deleted: time_slots == nil,
-		Z:       z,
-		T:       time_slots,
+		Accessed: false,
+		Dirty:    true,
+		Deleted:  time_slots == nil,
+		Z:        z,
+		T:        time_slots,
 	}
 }
 

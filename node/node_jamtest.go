@@ -15,7 +15,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
+
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -362,16 +362,8 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	if *prereq_test {
 		test_prereq = true
 	}
-	if *pvm_authoring_log {
-		pvm_authoring_log_enabled = true
-	}
 
 	fmt.Printf("Test PreReq: %v\n", test_prereq)
-	if pvm_authoring_log_enabled {
-		fmt.Printf("PVM Authoring log enabled!!\n")
-		log.EnableModule(log.PvmAuthoring)
-		log.EnableModule(log.FirstGuarantor)
-	}
 
 	// give some time for nodes to come up
 	initTicker := time.NewTicker(1 * time.Second)
@@ -551,18 +543,8 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if *prereq_test {
 		test_prereq = true
 	}
-	if *pvm_authoring_log {
-		pvm_authoring_log_enabled = true
-		pvm.VM_LOG_FLAG = true
-	}
 
 	fmt.Printf("Test PreReq: %v\n", test_prereq)
-	if pvm_authoring_log_enabled {
-		fmt.Printf("PVM Authoring log enabled!!\n")
-		log.EnableModule(log.PvmAuthoring)
-		log.EnableModule(log.FirstGuarantor)
-		log.EnableModule(log.GeneralAuthoring)
-	}
 	var game_of_life_ws_push func([]byte)
 	if jam == "game_of_life" {
 		game_of_life_ws_push = StartGameOfLifeServer("localhost:8080", "../rpc_client/game_of_life.html")

@@ -738,9 +738,7 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.ReadRegister(10)
 	omega_11, _ := vm.ReadRegister(11)
 	omega_12, _ := vm.ReadRegister(12)
-	if VM_LOG_FLAG {
-		log.Debug(vm.logging, vm.Str("FETCH"), "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics))
-	}
+	log.Debug(vm.logging, vm.Str("FETCH"), "datatype", datatype, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics))
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
@@ -796,14 +794,12 @@ func (vm *VM) hostFetch() {
 		// get imported segment by work item index
 		if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
 			v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
-			if vm.logging == log.PvmAuthoring {
-				log.Debug(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
-					"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
-					"bytes", v_Bytes[0:20],
-					"l", len(v_Bytes),
-					"workItemIndex", vm.WorkItemIndex,
-					"w11", omega_11)
-			}
+			log.Debug(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
+				"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
+				"bytes", v_Bytes[0:20],
+				"l", len(v_Bytes),
+				"workItemIndex", vm.WorkItemIndex,
+				"w11", omega_11)
 		} else {
 			// fmt.Printf("FETCH 6 FAIL omega_11 %d vs len(vm.Imports[vm.WorkItemIndex=%d])=%d\n", omega_11, vm.WorkItemIndex, len(vm.Imports[vm.WorkItemIndex]))
 		}
@@ -1096,7 +1092,7 @@ func (vm *VM) hostRead() {
 		return
 	}
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
-	ok, val := a.ReadStorage(k, vm.hostenv)
+	ok, val := a.ReadStorage(mu_k, k, vm.hostenv)
 
 	if !ok {
 		vm.WriteRegister(7, NONE)
@@ -1140,7 +1136,7 @@ func (vm *VM) hostWrite() {
 	}
 
 	l := uint64(NONE)
-	exists, oldValue := a.ReadStorage(k, vm.hostenv) //this call may have .onchain being either true or false
+	exists, oldValue := a.ReadStorage(mu_k, k, vm.hostenv)
 	v := []byte{}
 	err := uint64(0)
 	if vz > 0 {
@@ -1153,7 +1149,7 @@ func (vm *VM) hostWrite() {
 		l = uint64(len(v))
 	}
 
-	a.WriteStorage(a.ServiceIndex, k, v)
+	a.WriteStorage(a.ServiceIndex, mu_k, k, v)
 	vm.HostResultCode = OK
 	val_len := uint64(len(v))
 	if !exists {
@@ -1630,38 +1626,21 @@ func (vm *VM) hostLog() {
 	levelName := getLogLevelName(level, vm.CoreIndex, string(vm.ServiceMetadata))
 
 	vm.HostResultCode = OK
-	if log.DisablePVMLogging {
-		//return
-	}
 	switch level {
 	case 0: // 0: User agent displays as fatal error
-		log.Crit(vm.firstGuarantor, levelName, "m", string(messageBytes))
+		log.Crit(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 1: // 1: User agent displays as warning
-		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Warn(vm.firstGuarantor, levelName, "m", string(messageBytes))
-		}
+		log.Warn(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 2: // 2: User agent displays as important information
-		if VM_LOG_FLAG {
-			if vm.firstGuarantor == log.FirstGuarantor {
-				log.Info(vm.firstGuarantor, levelName, "m", string(messageBytes))
-			} else if vm.logging == log.PvmAuthoring {
-				log.Info(vm.logging, levelName, "m", string(messageBytes))
-			}
-		}
+		log.Info(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 3: // 3: User agent displays as helpful information
-		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Debug(log.FirstGuarantor, levelName, "m", string(messageBytes))
-		} else if vm.logging == log.PvmAuthoring {
-			log.Debug(log.PvmAuthoring, levelName, "m", string(messageBytes))
-		}
+		log.Debug(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 4: // 4: User agent displays as pedantic information
-		if vm.firstGuarantor == log.FirstGuarantor {
-			log.Trace(vm.firstGuarantor, levelName, "m", string(messageBytes))
-		}
+		log.Trace(vm.logging, levelName, "m", string(messageBytes))
 		break
 	}
 }
@@ -1686,12 +1665,9 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 	vm.HostResultCode = OK
 }
 
-func (vm *VM) SetLogging(l string) {
+// This should only be called OUTSIDE pvm package
+func (vm *VM) SetPVMContext(l string) {
 	vm.logging = l
-}
-
-func (vm *VM) UnSetLogging() {
-	vm.logging = ""
 }
 
 func (vm *VM) GetGasAndRegistersFromMemory(input_address uint32) (gas uint64, regs []uint64, errCode uint64) {

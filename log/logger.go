@@ -122,7 +122,7 @@ type Logger interface {
 	// Handler returns the underlying handler of the inner logger.
 	Handler() slog.Handler
 
-	SetLogging()
+	RecordLogs()
 	GetRecordedLogs() ([]byte, error)
 }
 
@@ -208,7 +208,7 @@ func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any
 	}
 }
 
-func (l *logger) SetLogging() {
+func (l *logger) RecordLogs() {
 	l.recordingLog = true
 }
 

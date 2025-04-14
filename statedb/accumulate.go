@@ -169,8 +169,8 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 	Q_q := PriorityQueue(q)
 	result = append(result, Q_q...)
 
-	if s.Authoring && (len(accumulated_immediately) != len(result)) {
-		log.Debug(log.GeneralAuthoring, "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
+	if len(accumulated_immediately) != len(result) {
+		log.Debug(s.Authoring, "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
 			"q", get_accumulationqueue_workpackagehashes(q), "Q(q)-priority queue result", get_workreport_workpackagehashes(Q_q), "W^*-wphs of accumulatable work reports)", get_workreport_workpackagehashes(result))
 	}
 	return result
@@ -491,9 +491,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					Y: workResult.PayloadHash,
 					D: workResult.Result,
 				}
-				if sd.Authoring {
-					log.Debug(log.GeneralAuthoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
-				}
+				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
 				p = append(p, o)
 			}
 		}
@@ -513,19 +511,20 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		}
 	}
 	xContext := sd.NewXContext(o, s, serviceAccount)
-	code, ok, err := sd.ReadServicePreimageBlob(s, codeHash)
-	if err != nil || !ok {
+	ok, code := serviceAccount.ReadPreimage(codeHash, sd)
+	if !ok {
 		panic("Could not read blob")
 	}
 
 	//(B.8) start point
 	vm := pvm.NewVMFromCode(s, code, 0, sd)
-	t := sd.JamState.SafroleState.Timeslot
-	if sd.Authoring {
-		vm.SetLogging(log.PvmAuthoring)
-	} else {
-		vm.UnSetLogging()
+	pvmContext := log.PvmValidating
+	if sd.Authoring == log.GeneralAuthoring {
+		pvmContext = log.PvmAuthoring
 	}
+	vm.SetPVMContext(pvmContext)
+
+	t := sd.JamState.SafroleState.Timeslot
 	vm.Timeslot = t
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
 
@@ -535,12 +534,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_b = vm.Y.Y
 		output_u = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
-		if sd.Authoring {
-			if r.Err == types.RESULT_OOG {
-				log.Debug(log.GeneralAuthoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
-			} else {
-				log.Debug(log.GeneralAuthoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
-			}
+		if r.Err == types.RESULT_OOG {
+			log.Debug(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+		} else {
+			log.Debug(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 		}
 		return
 	}
@@ -554,9 +551,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_b = vm.X.Y
 		res = "yield"
 	}
-	if sd.Authoring {
-		log.Debug(log.GeneralAuthoring, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
-	}
+	log.Debug(sd.Authoring, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
 	return
 }
 
@@ -583,12 +578,18 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 		gas += transfer.GasLimit
 	}
 
-	code, ok, err := s.ReadServicePreimageBlob(self_index, self.CodeHash)
-	if err != nil || !ok {
+	// this create PreimageObject in ServiceAccount with Accessed = true
+	ok, code := self.ReadPreimage(self.CodeHash, s)
+	if !ok {
 		return 0, uint(len(selectedTransfers)), nil
 	}
 
 	vm := pvm.NewVMFromCode(self_index, code, 0, s)
+	pvmContext := log.PvmValidating
+	if s.Authoring == log.GeneralAuthoring {
+		pvmContext = log.PvmAuthoring
+	}
+	vm.SetPVMContext(pvmContext)
 	vm.Gas = int64(gas)
 
 	var input_argument []byte
@@ -616,9 +617,7 @@ func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint
 			gasUsed:      uint(gasUsed),
 			numTransfers: transferCount,
 		}
-		if s.Authoring && false {
-			log.Info(module, "ProcessDeferredTransfers", "service", fmt.Sprintf("%d", serviceAccount.ServiceIndex), "gasUsed", gasUsed, "transferCount", transferCount)
-		}
+		log.Debug(s.Authoring, "ProcessDeferredTransfers", "service", fmt.Sprintf("%d", serviceAccount.ServiceIndex), "gasUsed", gasUsed, "transferCount", transferCount)
 	}
 	return transferStats, nil
 }

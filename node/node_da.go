@@ -366,7 +366,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 }
 
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
-func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, err error) {
+func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
@@ -381,7 +381,12 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	if err != nil {
 		return
 	}
+	pvmContext := log.OtherGuarantor
+	if firstGuarantorOrAuditor {
+		pvmContext = log.FirstGuarantorOrAuditor
+	}
 	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, targetStateDB)
+	vm_auth.SetPVMContext(pvmContext)
 	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ParameterizationBlob
@@ -401,7 +406,8 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
-		vm.SetCore(workPackageCoreIndex, firstGuarantor)
+		vm.SetCore(workPackageCoreIndex)
+		vm.SetPVMContext(pvmContext)
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
 
 		expectedSegmentCnt := int(workItem.ExportCount)

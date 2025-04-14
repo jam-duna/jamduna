@@ -36,29 +36,31 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 	for _, storage := range sa.Storage {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
-				if s.Authoring {
-					log.Warn(module, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey, "storage.OnChain", storage.OnChain, "storage.Deleted", storage.Deleted)
-				}
-				if storage.OnChain {
+				log.Debug(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "rawkey", storage.RawKey, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted)
+				if storage.Accessed {
 					err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 					if err != nil {
 						// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
 						log.Warn(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
 						return err
 					}
-					//fmt.Printf("[n%v] writeAccount DELETE OK!!! storage:%v\n", s.Id, storage)
 				}
 			} else {
-				if s.Authoring {
-					log.Info(module, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "rawkey", storage.RawKey, "value", storage.Value)
-				}
+				log.Debug(s.Authoring, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "rawkey", storage.RawKey, "value", storage.Value)
 				if subscriptions != nil {
 					subscription, ok := subscriptions[service_idx]
 					if ok {
 						if subscription.ServiceValue == nil {
-							subscription.ServiceValue = make(map[common.Hash][]byte)
+							subscription.ServiceValue = make(map[common.Hash]*types.SubServiceValueResult)
 						}
-						subscription.ServiceValue[storage.RawKey] = storage.Value
+						// Here we are returning ALL storage values written
+						subscription.ServiceValue[storage.RawKey] = &types.SubServiceValueResult{
+							HeaderHash: s.HeaderHash,
+							Slot:       s.GetTimeslot(),
+							Hash:       storage.RawKey,
+							Key:        common.Bytes2Hex(storage.Key),
+							Value:      common.Bytes2Hex(storage.Value),
+						}
 					}
 				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
@@ -84,9 +86,15 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 					subscription, ok := subscriptions[service_idx]
 					if ok {
 						if subscription.ServiceRequest == nil {
-							subscription.ServiceRequest = make(map[common.Hash][]uint32)
+							subscription.ServiceRequest = make(map[common.Hash]*types.SubServiceRequestResult)
 						}
-						subscription.ServiceRequest[blob_hash] = v.T
+						subscription.ServiceRequest[blob_hash] = &types.SubServiceRequestResult{
+							HeaderHash: s.HeaderHash,
+							Slot:       s.GetTimeslot(),
+							Hash:       blob_hash,
+							ServiceID:  service_idx,
+							Timeslots:  v.T,
+						}
 					}
 				}
 			}
@@ -110,9 +118,15 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 					subscription, ok := subscriptions[service_idx]
 					if ok {
 						if subscription.ServicePreimage == nil {
-							subscription.ServicePreimage = make(map[common.Hash][]byte)
+							subscription.ServicePreimage = make(map[common.Hash]*types.SubServicePreimageResult)
 						}
-						subscription.ServicePreimage[blobHash] = v.Preimage
+						subscription.ServicePreimage[blobHash] = &types.SubServicePreimageResult{
+							HeaderHash: s.HeaderHash,
+							Slot:       s.GetTimeslot(),
+							Hash:       blobHash,
+							ServiceID:  service_idx,
+							Preimage:   common.Bytes2Hex(v.Preimage),
+						}
 					}
 				}
 			}
@@ -128,7 +142,12 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 	if subscriptions != nil {
 		subscription, ok := subscriptions[service_idx]
 		if ok {
-			subscription.ServiceInfo = sa
+			subscription.ServiceInfo = &types.SubServiceInfoResult{
+				HeaderHash: s.HeaderHash,
+				Slot:       s.GetTimeslot(),
+				ServiceID:  service_idx,
+				Info:       *sa,
+			}
 		}
 	}
 

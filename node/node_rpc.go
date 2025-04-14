@@ -711,11 +711,9 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get block by header hash %s: %w", headerHash.String(), err)
 	}
-	log.SetLogging()
+	log.RecordLogs()
 	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule(log.FirstGuarantor)
 	log.EnableModule(log.GeneralAuthoring)
-	pvm_authoring_log_enabled = true
 
 	block := &types.Block{
 		Header:    sblk.Header,
@@ -763,10 +761,8 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	if err != nil {
 		return err
 	}
-	log.SetLogging()
-	pvm_authoring_log_enabled = true
-	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule(log.FirstGuarantor)
+	log.RecordLogs()
+	log.EnableModule(log.FirstGuarantorOrAuditor)
 
 	workReport2, _, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, true)
 	if err != nil {

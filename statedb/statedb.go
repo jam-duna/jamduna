@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 
@@ -55,7 +54,7 @@ type StateDB struct {
 	vmMutex                 sync.Mutex
 
 	// used in ApplyStateRecentHistory between statedbs
-	Authoring bool
+	Authoring string
 	X         *types.XContext
 
 	GuarantorAssignments         []types.GuarantorAssignment
@@ -154,7 +153,6 @@ func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
 	// check 157 - (1) a_p not equal to P (2) a_l is empty
 	t := s.GetTrie()
 	a_p := l.AccountPreimageHash()
-	//a_l := l.AccountLookupHash()
 	preimage_blob, ok, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
 	if ok { // key found
 		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
@@ -1022,31 +1020,6 @@ func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, erro
 		return &types.ServiceAccount{}, false, nil
 	}
 	return a, false, nil
-}
-
-func (s *StateDB) getPreimageBlob(c uint32, codeHash common.Hash) ([]byte, error) {
-	t := s.GetTrie()
-	preimage_blob, ok, err := t.GetPreImageBlob(c, codeHash)
-	if err != nil || !ok {
-		return []byte{}, err
-	}
-	return preimage_blob, nil
-}
-
-func (s *StateDB) getServiceCoreCode(c uint32) (code []byte, err error) {
-	serviceAccount, ok, err := s.getServiceAccount(c)
-	if err != nil {
-		return []byte{}, err
-	}
-	if !ok {
-		return []byte{}, errors.New("Service Account/Core not found")
-	}
-	codeHash := serviceAccount.CodeHash
-	code, err = s.getPreimageBlob(c, codeHash)
-	if err != nil {
-		return []byte{}, errors.New("Code not found")
-	}
-	return code, nil
 }
 
 func (s *StateDB) GetBlock() *types.Block {

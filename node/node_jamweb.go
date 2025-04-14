@@ -44,7 +44,7 @@ type SubscriptionRequest struct {
 // subscribeBestBlock - Subscribe to updates of the head of the "best" chain, as returned by bestBlock.
 // subscribeFinalizedBlock - Subscribe to updates of the latest finalized block, as returned by finalizedBlock.
 func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFinalized bool, subscriptions map[uint32]*types.ServiceSubscription) {
-	log.Info(module, "ReceiveLatestBlock", "header", block.Header.Hash())
+
 	for serviceID, upd := range subscriptions {
 		for client := range h.clients {
 			reqs, ok := client.subscriptions[serviceID]
@@ -61,18 +61,9 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 
 				switch req.Method {
 				case SubBestBlock, SubFinalizedBlock:
-					payload := struct {
-						Method string `json:"method"`
-						Result struct {
-							BlockHash  common.Hash `json:"blockHash"`
-							HeaderHash common.Hash `json:"headerHash"`
-						} `json:"result"`
-					}{
+					payload := types.WSPayload{
 						Method: req.Method,
-						Result: struct {
-							BlockHash  common.Hash `json:"blockHash"`
-							HeaderHash common.Hash `json:"headerHash"`
-						}{
+						Result: types.SubBlockResult{
 							BlockHash:  block.Hash(),
 							HeaderHash: block.Header.Hash(),
 						},
@@ -80,18 +71,9 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 					data, err = json.Marshal(payload)
 
 				case SubStatistics:
-					payload := struct {
-						Method string `json:"method"`
-						Result struct {
-							HeaderHash common.Hash               `json:"headerHash"`
-							Statistics types.ValidatorStatistics `json:"statistics"`
-						} `json:"result"`
-					}{
+					payload := types.WSPayload{
 						Method: SubStatistics,
-						Result: struct {
-							HeaderHash common.Hash               `json:"headerHash"`
-							Statistics types.ValidatorStatistics `json:"statistics"`
-						}{
+						Result: types.SubStatisticsResult{
 							HeaderHash: block.Header.Hash(),
 							Statistics: sdb.JamState.ValidatorStatistics,
 						},
@@ -99,20 +81,11 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 					data, err = json.Marshal(payload)
 
 				case SubServiceInfo:
-					payload := struct {
-						Method string `json:"method"`
-						Result struct {
-							ServiceID uint32               `json:"serviceID"`
-							Info      types.ServiceAccount `json:"info"`
-						} `json:"result"`
-					}{
+					payload := types.WSPayload{
 						Method: SubServiceInfo,
-						Result: struct {
-							ServiceID uint32               `json:"serviceID"`
-							Info      types.ServiceAccount `json:"info"`
-						}{
+						Result: types.SubServiceInfoResult{
 							ServiceID: serviceID,
-							Info:      *upd.ServiceInfo,
+							Info:      upd.ServiceInfo.Info,
 						},
 					}
 					data, err = json.Marshal(payload)
@@ -122,99 +95,42 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 					if !ok || v == nil {
 						continue
 					}
-					payload := struct {
-						Method string `json:"method"`
-						Result struct {
-							ServiceID uint32      `json:"serviceID"`
-							Hash      common.Hash `json:"hash"`
-							Value     string      `json:"value"`
-						} `json:"result"`
-					}{
+					payload := types.WSPayload{
 						Method: SubServiceValue,
-						Result: struct {
-							ServiceID uint32      `json:"serviceID"`
-							Hash      common.Hash `json:"hash"`
-							Value     string      `json:"value"`
-						}{
-							ServiceID: serviceID,
-							Hash:      req.hash,
-							Value:     common.Bytes2Hex(v),
-						},
+						Result: v,
 					}
 					data, err = json.Marshal(payload)
 
 				case SubServicePreimage:
-					preimage, ok := upd.ServicePreimage[req.hash]
-					if !ok || preimage == nil {
+					res, ok := upd.ServicePreimage[req.hash]
+					if !ok || res == nil {
 						continue
 					}
-					payload := struct {
-						Method string `json:"method"`
-						Result struct {
-							ServiceID uint32      `json:"serviceID"`
-							Hash      common.Hash `json:"hash"`
-							Preimage  string      `json:"preimage"`
-						} `json:"result"`
-					}{
+					payload := types.WSPayload{
 						Method: SubServicePreimage,
-						Result: struct {
-							ServiceID uint32      `json:"serviceID"`
-							Hash      common.Hash `json:"hash"`
-							Preimage  string      `json:"preimage"`
-						}{
-							ServiceID: serviceID,
-							Hash:      req.hash,
-							Preimage:  common.Bytes2Hex(preimage),
-						},
+						Result: res,
 					}
 					data, err = json.Marshal(payload)
 
 				case SubServiceRequest:
-					timeslots, ok := upd.ServiceRequest[req.hash]
-					if !ok || timeslots == nil {
+					res, ok := upd.ServiceRequest[req.hash]
+					if !ok || res == nil {
 						continue
 					}
-					payload := struct {
-						Method string `json:"method"`
-						Result struct {
-							ServiceID uint32      `json:"serviceID"`
-							Hash      common.Hash `json:"hash"`
-							Timeslots []uint32    `json:"timeslots"`
-						} `json:"result"`
-					}{
+					payload := types.WSPayload{
 						Method: SubServiceRequest,
-						Result: struct {
-							ServiceID uint32      `json:"serviceID"`
-							Hash      common.Hash `json:"hash"`
-							Timeslots []uint32    `json:"timeslots"`
-						}{
-							ServiceID: serviceID,
-							Hash:      req.hash,
-							Timeslots: timeslots,
-						},
+						Result: res,
 					}
 					data, err = json.Marshal(payload)
 
 				case SubWorkPackage:
-					status, ok := upd.WorkPackage[req.hash]
-					if !ok || status == nil {
+					res, ok := upd.WorkPackage[req.hash]
+					if !ok || res == nil {
 						continue
 					}
-					payload := struct {
-						Method string `json:"method"`
-						Result struct {
-							WorkPackageHash common.Hash `json:"workPackageHash"`
-							Status          string      `json:"status"`
-						} `json:"result"`
-					}{
+					payload := types.WSPayload{
 						Method: SubWorkPackage,
-						Result: struct {
-							WorkPackageHash common.Hash `json:"workPackageHash"`
-							Status          string      `json:"status"`
-						}{
-							WorkPackageHash: req.hash,
-							Status:          *status,
-						},
+						Result: res,
 					}
 					data, err = json.Marshal(payload)
 				}

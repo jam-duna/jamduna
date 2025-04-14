@@ -93,9 +93,7 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 
 	mmr.Append(accumulationRoot)
-	if s.Authoring {
-		log.Info(log.GeneralAuthoring, "BETA computation", "n", s.Id, "accumulationRoot", accumulationRoot, "mmr", (*mmr).String())
-	}
+	log.Trace(s.Authoring, "BETA computation", "n", s.Id, "accumulationRoot", accumulationRoot, "mmr", (*mmr).String())
 	n := Beta_state{
 		Reported:   reported,          // p
 		HeaderHash: blk.Header.Hash(), // h

@@ -31,11 +31,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, fmt.Errorf("Block header is not valid")
 	}
 	if s.Id == blk.Header.AuthorIndex {
-		s.Authoring = true
+		s.Authoring = log.GeneralAuthoring
+	} else {
+		s.Authoring = log.GeneralValidating
 	}
-	if s.Authoring {
-		log.Trace(module, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
-	}
+	log.Trace(s.Authoring, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// 19-22 - Safrole last
@@ -202,27 +202,44 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s0, ok := subscriptions[0]
 		if !ok {
 			s0 = &types.ServiceSubscription{
-				WorkPackage: make(map[common.Hash]*string),
+				WorkPackage: make(map[common.Hash]*types.SubWorkPackageResult),
 			}
 			subscriptions[0] = s0
 		}
-		gr := "guaranteed"
-		qu := "queued"
-		ac := "accumulated"
 
 		for _, g := range blk.Extrinsic.Guarantees {
-			s0.WorkPackage[g.Report.AvailabilitySpec.WorkPackageHash] = &gr
+			wph := g.Report.AvailabilitySpec.WorkPackageHash
+			log.Info(module, "ApplyStateTransitionFromBlock: SubWorkPackageResult guaranteed", "s", 0, "hash", wph)
+			s0.WorkPackage[wph] = &types.SubWorkPackageResult{
+				WorkPackageHash: wph,
+				HeaderHash:      s.HeaderHash,
+				Slot:            s.GetTimeslot(),
+				Status:          "guaranteed",
+			}
+
 		}
 		_, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
 		for _, q := range s.JamState.AccumulationQueue[currPhase] {
 			for _, wph := range q.WorkPackageHash {
-				s0.WorkPackage[wph] = &qu
+				log.Info(module, "ApplyStateTransitionFromBlock: SubWorkPackageResult queued", "s", 0, "hash", wph)
+				s0.WorkPackage[wph] = &types.SubWorkPackageResult{
+					WorkPackageHash: wph,
+					HeaderHash:      s.HeaderHash,
+					Slot:            s.GetTimeslot(),
+					Status:          "queued",
+				}
 			}
 		}
 
 		h := s.JamState.AccumulationHistory[currPhase]
 		for _, wph := range h.WorkPackageHash {
-			s0.WorkPackage[wph] = &ac
+			log.Info(module, "ApplyStateTransitionFromBlock: SubWorkPackageResult accumulated", "s", 0, "hash", wph)
+			s0.WorkPackage[wph] = &types.SubWorkPackageResult{
+				WorkPackageHash: wph,
+				HeaderHash:      s.HeaderHash,
+				Slot:            s.GetTimeslot(),
+				Status:          "accumulated",
+			}
 		}
 
 		for _, p := range blk.Extrinsic.Preimages {
@@ -233,13 +250,20 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 				sp = &types.ServiceSubscription{}
 				subscriptions[serviceID] = sp
 			}
-			log.Warn(module, "adding sub preimage", "s", serviceID, "hash", hash, "l", len(p.Blob))
+			log.Info(module, "ApplyStateTransitionFromBlock: adding sub preimage", "s", serviceID, "hash", hash, "l", len(p.Blob))
 			if sp.ServicePreimage == nil {
-				sp.ServicePreimage = make(map[common.Hash][]byte)
+				sp.ServicePreimage = make(map[common.Hash]*types.SubServicePreimageResult)
 			}
-			sp.ServicePreimage[hash] = p.Blob
+			sp.ServicePreimage[hash] = &types.SubServicePreimageResult{
+				HeaderHash: s.HeaderHash,
+				Slot:       s.GetTimeslot(),
+				Hash:       hash,
+				ServiceID:  serviceID,
+				Preimage:   common.Bytes2Hex(p.Blob),
+			}
 		}
-
+	} else {
+		log.Info(module, "ApplyStateTransitionFromBlock", "subscriptions", "nil")
 	}
 
 	// Update Authorization Pool alpha
@@ -262,15 +286,13 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			log.Warn(log.GeneralAuthoring, "BEEFY-C", "commitment", sa.Commitment)
 		} else {
 			leaves = append(leaves, leafBytes)
-			if s.Authoring {
-				log.Info(log.GeneralAuthoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
-			}
+			log.Info(s.Authoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	accumulationRoot := common.Hash(tree.Root())
-	if len(leaves) > 0 && s.Authoring {
-		log.Info(log.GeneralAuthoring, "BEEFY accumulation root", "r", accumulationRoot)
+	if len(leaves) > 0 {
+		log.Debug(log.GeneralAuthoring, "BEEFY accumulation root", "r", accumulationRoot)
 	}
 	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
 	s.ApplyStateRecentHistory(blk, &(accumulationRoot))

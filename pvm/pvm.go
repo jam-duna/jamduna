@@ -308,8 +308,7 @@ type VM struct {
 	EntryPoint uint32
 
 	// if logging = "author"
-	logging        string
-	firstGuarantor string
+	logging string
 
 	// standard program initialization parameters
 	o_size uint32
@@ -343,8 +342,6 @@ type VM struct {
 	ServiceMetadata []byte
 	Mode            string
 }
-
-var VM_LOG_FLAG bool
 
 func (vm *VM) Str(logStr string) string {
 	return fmt.Sprintf("%s_%s: %s", vm.ServiceMetadata, vm.Mode, logStr)
@@ -1040,22 +1037,13 @@ func (vm *VM) GetServiceIndex() uint32 {
 	return vm.Service_index
 }
 
-func (vm *VM) SetCore(coreIndex uint16, firstGuarantor bool) {
+func (vm *VM) SetCore(coreIndex uint16) {
 	vm.CoreIndex = coreIndex
-	if firstGuarantor {
-		vm.firstGuarantor = log.FirstGuarantor
-		vm.logging = log.FirstGuarantor
-	}
 }
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
 func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = "refine"
-	if vm.firstGuarantor == log.FirstGuarantor {
-		vm.SetLogging(log.FirstGuarantor)
-	} else {
-		vm.UnSetLogging()
-	}
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
@@ -1097,7 +1085,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.Mode = "accumulate"
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
-	// for _, argument := range elements {
+
 	input_bytes := make([]byte, 0)
 	t_bytes := common.Uint32ToBytes(t)
 	s_bytes := common.Uint32ToBytes(s)
@@ -1108,7 +1096,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
 	vm.Gas = int64(g)
 	vm.Execute(types.EntryPointAccumulate, false) // F ∈ Ω⟨(X, X)⟩
-	// }
+
 	xs, _ = vm.X.GetX_s()
 	r, res = vm.getArgumentOutputs()
 	return r, res, xs
@@ -1117,8 +1105,6 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	vm.Mode = "transfer"
 	// a = E(t)   take transfer memos t and encode them
 	vm.ServiceAccount = service_account
-
-	// vm.SetLogging(log.PvmAuthoring)
 
 	Standard_Program_Initialization(vm, arguments) // eq 264/265
 	vm.Execute(types.EntryPointOnTransfer, false)
@@ -1177,7 +1163,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-			log.Trace(vm.logging, string(vm.ServiceMetadata), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+			log.Debug(vm.logging, string(vm.ServiceMetadata), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
 		}
 		stepn++
 	}
@@ -1529,13 +1515,11 @@ func (vm *VM) step(stepn int) error {
 		return nil
 	}
 
-	if vm.logging != "" {
-		md := "unk"
-		if vm.ServiceMetadata != nil {
-			md = string(vm.ServiceMetadata)
-		}
-		log.Debug(vm.logging, md, "step", stepn, "pc", startPC, "opcode", opcode_str(opcode), "g", vm.Gas, "reg", vm.ReadRegisters())
+	md := "unk"
+	if vm.ServiceMetadata != nil {
+		md = string(vm.ServiceMetadata)
 	}
+	log.Trace(vm.logging, md, "step", stepn, "pc", startPC, "opcode", opcode_str(opcode), "g", vm.Gas, "reg", vm.ReadRegisters())
 	return nil
 }
 
@@ -2752,6 +2736,7 @@ func (vm *VM) CreateVM(serviceAcct uint32, code []byte, i uint64) uint32 {
 	}
 	fmt.Printf("CreateVM: %d\n", maxN)
 	vm.VMs[maxN+1] = NewVMFromCode(serviceAcct, code, i, vm.hostenv)
+	vm.VMs[maxN+1].logging = vm.logging
 	return maxN + 1
 }
 
