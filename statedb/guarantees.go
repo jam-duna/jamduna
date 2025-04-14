@@ -728,46 +728,42 @@ func (s *StateDB) checkLength() error {
 // v0.5 eq 11.32
 func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	refine := g.Report.RefineContext
-	anchor := true // CHECK -- I think this should be false
-	for _, block := range s.JamState.RecentBlocks {
-		if block.HeaderHash == refine.Anchor {
+	// check if the refine context anchor/stateroot/beefy root is in the recent blocks
+	anchor := false
+	stateroot := false
+	beefyroot := false
+	// goes backwards, short-circuits each of above 3 conditions
+	for i := len(s.JamState.RecentBlocks) - 1; i >= 0; i-- {
+		block := s.JamState.RecentBlocks[i]
+
+		if !anchor && block.HeaderHash == refine.Anchor {
 			anchor = true
-			break
-		} else {
-			anchor = false
+		}
+		if !stateroot && block.StateRoot == refine.StateRoot {
+			stateroot = true
+		}
+		if !beefyroot {
+			superPeak := block.B.SuperPeak()
+			if *superPeak == refine.BeefyRoot {
+				beefyroot = true
+			}
+		}
+
+		if anchor && stateroot && beefyroot {
+			return nil
 		}
 	}
+
 	if !anchor {
 		log.Warn(debugG, "checkRecentBlock:anchor not in recent blocks", "refine.Anchor", refine.Anchor)
 		return jamerrors.ErrGAnchorNotRecent
 	}
-
-	stateroot := true
-	for _, block := range s.JamState.RecentBlocks {
-		if block.StateRoot != refine.StateRoot {
-			stateroot = false
-		} else {
-			stateroot = true
-			break
-		}
-	}
-
 	if !stateroot {
 		log.Warn(debugG, "checkRecentBlock:state root not in recent blocks", "refine.StateRoot", refine.StateRoot)
 		return jamerrors.ErrGBadStateRoot
 	}
-	beefyroot := true
-	for _, block := range s.JamState.RecentBlocks {
-		mmr := block.B
-		superPeak := mmr.SuperPeak()
-		if *superPeak != refine.BeefyRoot {
-			beefyroot = false
-		} else {
-			beefyroot = true
-			break
-		}
-	}
 	if !beefyroot {
+		log.Warn(debugG, "checkRecentBlock:beefy root not in recent blocks", "refine.BeefyRoot", refine.BeefyRoot)
 		return jamerrors.ErrGBadBeefyMMRRoot
 	}
 	return nil
