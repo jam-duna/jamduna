@@ -171,7 +171,7 @@ var MethodDescriptionMap = map[string]string{
 	"ServicePreimage":  "ServicePreimage(serviceIndex string, preimage hexstring) -> hexstring",
 	"ServiceRequest":   "ServiceRequest(serviceIndex string, preimage hexstring, length string) -> json string",
 	"SubmitPreimage":   "SubmitPreimage(serviceIndex string, preimage hexstring) -> string",
-	"ServiceValue":     "ServiceRequest(serviceIndex string, key hexstring) -> hexstring",
+	"ServiceValue":     "ServiceValue(serviceIndex string, key hexstring) -> hexstring",
 	"WorkPackage":      "WorkPackage(workPackageHash string) -> json WorkReport",
 	"Code":             "Code(serviceIndex string) -> json string",
 	"ListServices":     "ListServices() -> json string",
@@ -660,8 +660,11 @@ func (j *Jam) ServiceValue(req []string, res *string) error {
 	}
 	storage_hash := common.HexToHash(storage_hashStr)
 	storage, ok, err := j.statedb.ReadServiceStorage(uint32(serviceIndex), storage_hash)
-	if err != nil || !ok {
-		return fmt.Errorf("ReadServiceStorage failed:%v", err)
+	if err != nil {
+		return fmt.Errorf("ReadServiceStorage failed (serviceID=%d, h=%s) %v", serviceIndex, storage_hash, err)
+	}
+	if !ok {
+		return fmt.Errorf("ReadServiceStorage not found (serviceID=%d, h=%s) %v", serviceIndex, storage_hash)
 	}
 	*res = common.Bytes2Hex(storage)
 	return nil
@@ -728,7 +731,7 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	defer cancel()
-	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, nil)
+	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block)
 	if err != nil {
 		log.Error(module, "TraceBlock", "err", err)
 		return err
@@ -931,7 +934,7 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 		addTS:              time.Now().Unix(),
 		nextAttemptAfterTS: time.Now().Unix(),
 	})
-	log.Info(module, "SubmitWorkPackage succ")
+	log.Info(module, "SubmitWorkPackage succ", "wph", workPackageHash)
 
 	*res = "OK"
 	return nil

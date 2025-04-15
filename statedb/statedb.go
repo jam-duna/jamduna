@@ -61,7 +61,8 @@ type StateDB struct {
 	PreviousGuarantorAssignments []types.GuarantorAssignment
 	AvailableWorkReport          []types.WorkReport // every block has its own available work report
 
-	logChan chan storage.LogMessage
+	stateUpdate *types.StateUpdate
+	logChan     chan storage.LogMessage
 
 	AncestorSet map[common.Hash]uint32 `json:"ancestorSet"` // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
 }
@@ -246,6 +247,10 @@ func (s *StateDB) GetSafrole() *SafroleState {
 
 func (s *StateDB) GetJamState() *JamState {
 	return s.JamState
+}
+
+func (s *StateDB) GetStateUpdates() *types.StateUpdate {
+	return s.stateUpdate
 }
 
 func (s *StateDB) SetJamState(jamState *JamState) {
@@ -877,7 +882,7 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 				defer span.End()
 			}
 
-			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk, nil)
+			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
 				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)
@@ -905,7 +910,14 @@ func (s *StateDB) GetRefineContext(prereqs ...common.Hash) types.RefineContext {
 	stateRoot := common.Hash{}
 	beefyRoot := common.Hash{}
 	if len(s.JamState.RecentBlocks) > 1 {
-		anchorBlock := s.JamState.RecentBlocks[len(s.JamState.RecentBlocks)-2]
+		idx := len(s.JamState.RecentBlocks)/2 - 1
+		if idx < 0 {
+			idx = 0
+		}
+		if idx > len(s.JamState.RecentBlocks)-1 {
+			idx = len(s.JamState.RecentBlocks) - 1
+		}
+		anchorBlock := s.JamState.RecentBlocks[idx]
 		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
 		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks
 		beefyRoot = *(anchorBlock.B.SuperPeak()) // beefy root b must be in s.JamState.RecentBlocks

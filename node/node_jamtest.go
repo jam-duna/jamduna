@@ -762,7 +762,6 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			importedSegments = append(importedSegments, importedSegment)
 		}
 		refine_context := n1.statedb.GetRefineContext()
-		fmt.Printf("rc %s\n", refine_context.String())
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{

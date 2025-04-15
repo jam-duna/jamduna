@@ -33,6 +33,9 @@ var root atomic.Value
 
 func init() {
 	root.Store(&logger{slog.New(DiscardHandler()), nil, false, make([]slog.Record, 0)})
+	DisableModule(PvmValidating)
+	DisableModule(OtherGuarantor)
+	DisableModule(GeneralValidating)
 }
 
 func ParseLevel(lvl string) (slog.Level, error) {
@@ -98,7 +101,6 @@ var moduleEnabled = init_module(defaultKnownModules, defaultModuleEnabled)
 
 // EnableModule enables logging for the specified module.
 func EnableModule(module string) {
-	//fmt.Printf("!!!! Enabling module %s\n", module)
 	moduleEnabled[module] = true
 }
 

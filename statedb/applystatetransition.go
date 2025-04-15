@@ -14,7 +14,7 @@ import (
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, subscriptions map[uint32]*types.ServiceSubscription) (s *StateDB, err error) {
+func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
 
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
@@ -149,7 +149,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		sa.Mutable = true
 		sa.Dirty = true
 	}
-	s.ApplyXContext(o, subscriptions)
+	// writeAccount and initializes s.stateUpdate
+	s.stateUpdate = s.ApplyXContext(o)
+	// finalize stateUpdates
+	s.computeStateUpdates(blk, targetJCE) // review targetJCE input
 
 	// accumulate statistics
 	accumulated_workreports := accumulate_input_wr[:n]
@@ -197,75 +200,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyCoreStatistics(guarantees, s.AvailableWorkReport, assurances)
 	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStats)
 
-	// setup workpackage status (guaranteed, queued, accumulated) in service 0
-	if subscriptions != nil {
-		s0, ok := subscriptions[0]
-		if !ok {
-			s0 = &types.ServiceSubscription{
-				WorkPackage: make(map[common.Hash]*types.SubWorkPackageResult),
-			}
-			subscriptions[0] = s0
-		}
-
-		for _, g := range blk.Extrinsic.Guarantees {
-			wph := g.Report.AvailabilitySpec.WorkPackageHash
-			log.Info(module, "ApplyStateTransitionFromBlock: SubWorkPackageResult guaranteed", "s", 0, "hash", wph)
-			s0.WorkPackage[wph] = &types.SubWorkPackageResult{
-				WorkPackageHash: wph,
-				HeaderHash:      s.HeaderHash,
-				Slot:            s.GetTimeslot(),
-				Status:          "guaranteed",
-			}
-
-		}
-		_, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
-		for _, q := range s.JamState.AccumulationQueue[currPhase] {
-			for _, wph := range q.WorkPackageHash {
-				log.Info(module, "ApplyStateTransitionFromBlock: SubWorkPackageResult queued", "s", 0, "hash", wph)
-				s0.WorkPackage[wph] = &types.SubWorkPackageResult{
-					WorkPackageHash: wph,
-					HeaderHash:      s.HeaderHash,
-					Slot:            s.GetTimeslot(),
-					Status:          "queued",
-				}
-			}
-		}
-
-		h := s.JamState.AccumulationHistory[currPhase]
-		for _, wph := range h.WorkPackageHash {
-			log.Info(module, "ApplyStateTransitionFromBlock: SubWorkPackageResult accumulated", "s", 0, "hash", wph)
-			s0.WorkPackage[wph] = &types.SubWorkPackageResult{
-				WorkPackageHash: wph,
-				HeaderHash:      s.HeaderHash,
-				Slot:            s.GetTimeslot(),
-				Status:          "accumulated",
-			}
-		}
-
-		for _, p := range blk.Extrinsic.Preimages {
-			serviceID := p.Requester
-			hash := common.Blake2Hash(p.Blob)
-			sp, ok := subscriptions[serviceID]
-			if !ok {
-				sp = &types.ServiceSubscription{}
-				subscriptions[serviceID] = sp
-			}
-			log.Info(module, "ApplyStateTransitionFromBlock: adding sub preimage", "s", serviceID, "hash", hash, "l", len(p.Blob))
-			if sp.ServicePreimage == nil {
-				sp.ServicePreimage = make(map[common.Hash]*types.SubServicePreimageResult)
-			}
-			sp.ServicePreimage[hash] = &types.SubServicePreimageResult{
-				HeaderHash: s.HeaderHash,
-				Slot:       s.GetTimeslot(),
-				Hash:       hash,
-				ServiceID:  serviceID,
-				Preimage:   common.Bytes2Hex(p.Blob),
-			}
-		}
-	} else {
-		log.Info(module, "ApplyStateTransitionFromBlock", "subscriptions", "nil")
-	}
-
 	// Update Authorization Pool alpha
 	// 4.19 α'[need φ', so after accumulation]
 	err = s.ApplyStateTransitionAuthorizations()
@@ -286,7 +220,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			log.Warn(log.GeneralAuthoring, "BEEFY-C", "commitment", sa.Commitment)
 		} else {
 			leaves = append(leaves, leafBytes)
-			log.Info(s.Authoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+			log.Debug(s.Authoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
@@ -300,7 +234,64 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 4.20 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
 	s.StateRoot = s.UpdateTrieState()
+
 	return s, nil
+}
+
+func (s *StateDB) computeStateUpdates(blk *types.Block, targetJCE uint32) {
+	// setup workpackage updates (guaranteed, queued, accumulated)
+	for _, g := range blk.Extrinsic.Guarantees {
+		wph := g.Report.AvailabilitySpec.WorkPackageHash
+		log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: SubWorkPackageResult guaranteed", "s", 0, "hash", wph)
+		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
+			WorkPackageHash: wph,
+			HeaderHash:      s.HeaderHash,
+			Slot:            s.GetTimeslot(),
+			Status:          "guaranteed",
+		}
+	}
+	/*
+		_, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE) // REVIEW
+		for _, q := range s.JamState.AccumulationQueue[currPhase] {
+			for _, wph := range q.WorkPackageHash {
+				log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: SubWorkPackageResult queued", "s", 0, "hash", wph)
+				s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
+					WorkPackageHash: wph,
+					HeaderHash:      s.HeaderHash,
+					Slot:            s.GetTimeslot(),
+					Status:          "queued",
+				}
+			}
+		}
+	*/
+	h := s.JamState.AccumulationHistory[types.EpochLength-1]
+	for _, wph := range h.WorkPackageHash {
+		log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: SubWorkPackageResult accumulated", "s", 0, "hash", wph)
+		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
+			WorkPackageHash: wph,
+			HeaderHash:      s.HeaderHash,
+			Slot:            s.GetTimeslot(),
+			Status:          "accumulated",
+		}
+	}
+
+	for _, p := range blk.Extrinsic.Preimages {
+		serviceID := p.Requester
+		hash := common.Blake2Hash(p.Blob)
+		sp, ok := s.stateUpdate.ServiceUpdates[serviceID]
+		if !ok {
+			sp = types.NewServiceUpdate(serviceID)
+			s.stateUpdate.ServiceUpdates[serviceID] = sp
+		}
+		log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: adding sub preimage", "s", serviceID, "hash", hash, "l", len(p.Blob))
+		sp.ServicePreimage[hash] = &types.SubServicePreimageResult{
+			HeaderHash: s.HeaderHash,
+			Slot:       s.GetTimeslot(),
+			Hash:       hash,
+			ServiceID:  serviceID,
+			Preimage:   common.Bytes2Hex(p.Blob),
+		}
+	}
 }
 
 func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error) {

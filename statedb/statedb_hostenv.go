@@ -22,17 +22,18 @@ const (
 	debugStorageCalc = false
 )
 
-func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint32]*types.ServiceSubscription) (err error) {
+func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.ServiceUpdate, err error) {
 	if sa.Mutable == false {
 		panic("WriteAccount")
 	}
 	if sa.Dirty == false {
-		return nil
+		return nil, nil
 	}
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
 	start_StorageSize := sa.StorageSize
 	start_NumStorageItems := sa.NumStorageItems
+	serviceUpdate = types.NewServiceUpdate(service_idx)
 	for _, storage := range sa.Storage {
 		if storage.Dirty {
 			if len(storage.Value) == 0 || storage.Deleted {
@@ -42,31 +43,23 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 					if err != nil {
 						// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
 						log.Warn(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
-						return err
+						return
 					}
 				}
 			} else {
 				log.Debug(s.Authoring, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "rawkey", storage.RawKey, "value", storage.Value)
-				if subscriptions != nil {
-					subscription, ok := subscriptions[service_idx]
-					if ok {
-						if subscription.ServiceValue == nil {
-							subscription.ServiceValue = make(map[common.Hash]*types.SubServiceValueResult)
-						}
-						// Here we are returning ALL storage values written
-						subscription.ServiceValue[storage.RawKey] = &types.SubServiceValueResult{
-							HeaderHash: s.HeaderHash,
-							Slot:       s.GetTimeslot(),
-							Hash:       storage.RawKey,
-							Key:        common.Bytes2Hex(storage.Key),
-							Value:      common.Bytes2Hex(storage.Value),
-						}
-					}
+				// Here we are returning ALL storage values written
+				serviceUpdate.ServiceValue[storage.RawKey] = &types.SubServiceValueResult{
+					HeaderHash: s.HeaderHash,
+					Slot:       s.GetTimeslot(),
+					Hash:       storage.RawKey,
+					Key:        common.Bytes2Hex(storage.Key),
+					Value:      common.Bytes2Hex(storage.Value),
 				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
 					log.Warn(module, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
-					return err
+					return
 				}
 			}
 		}
@@ -80,22 +73,14 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {
 					log.Warn(module, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.T", v.T, "err", err)
-					return err
+					return
 				}
-				if subscriptions != nil {
-					subscription, ok := subscriptions[service_idx]
-					if ok {
-						if subscription.ServiceRequest == nil {
-							subscription.ServiceRequest = make(map[common.Hash]*types.SubServiceRequestResult)
-						}
-						subscription.ServiceRequest[blob_hash] = &types.SubServiceRequestResult{
-							HeaderHash: s.HeaderHash,
-							Slot:       s.GetTimeslot(),
-							Hash:       blob_hash,
-							ServiceID:  service_idx,
-							Timeslots:  v.T,
-						}
-					}
+				serviceUpdate.ServiceRequest[blob_hash] = &types.SubServiceRequestResult{
+					HeaderHash: s.HeaderHash,
+					Slot:       s.GetTimeslot(),
+					Hash:       blob_hash,
+					ServiceID:  service_idx,
+					Timeslots:  v.T,
 				}
 			}
 		}
@@ -106,28 +91,20 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 				err = tree.DeletePreImageBlob(service_idx, blobHash)
 				if err != nil {
 					log.Warn(module, "DeletePreImageBlob", "blobHash", blobHash, "err", err)
-					return err
+					return
 				}
 			} else {
 				err = tree.SetPreImageBlob(service_idx, v.Preimage)
 				if err != nil {
 					log.Warn(module, "SetPreImageBlob", "err", err)
-					return err
+					return
 				}
-				if subscriptions != nil {
-					subscription, ok := subscriptions[service_idx]
-					if ok {
-						if subscription.ServicePreimage == nil {
-							subscription.ServicePreimage = make(map[common.Hash]*types.SubServicePreimageResult)
-						}
-						subscription.ServicePreimage[blobHash] = &types.SubServicePreimageResult{
-							HeaderHash: s.HeaderHash,
-							Slot:       s.GetTimeslot(),
-							Hash:       blobHash,
-							ServiceID:  service_idx,
-							Preimage:   common.Bytes2Hex(v.Preimage),
-						}
-					}
+				serviceUpdate.ServicePreimage[blobHash] = &types.SubServicePreimageResult{
+					HeaderHash: s.HeaderHash,
+					Slot:       s.GetTimeslot(),
+					Hash:       blobHash,
+					ServiceID:  service_idx,
+					Preimage:   common.Bytes2Hex(v.Preimage),
 				}
 			}
 		}
@@ -139,31 +116,27 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount, subscriptions map[uint3
 	if sa.StorageSize != start_StorageSize {
 		fmt.Printf(" a_o [s=%d] changed from %d to %d\n", sa.ServiceIndex, start_StorageSize, sa.StorageSize)
 	}
-	if subscriptions != nil {
-		subscription, ok := subscriptions[service_idx]
-		if ok {
-			subscription.ServiceInfo = &types.SubServiceInfoResult{
-				HeaderHash: s.HeaderHash,
-				Slot:       s.GetTimeslot(),
-				ServiceID:  service_idx,
-				Info:       *sa,
-			}
-		}
+	serviceUpdate.ServiceInfo = &types.SubServiceInfoResult{
+		HeaderHash: s.HeaderHash,
+		Slot:       s.GetTimeslot(),
+		ServiceID:  service_idx,
+		Info:       *sa,
 	}
-
-	return err
+	return
 }
 
-func (s *StateDB) ApplyXContext(U *types.PartialState, subscriptions map[uint32]*types.ServiceSubscription) {
+func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.StateUpdate) {
+	stateUpdate = types.NewStateUpdate()
 	for _, sa := range U.D {
 		// U.D should only have service accounts with Mutable = true
 		if sa.Mutable == false {
 			log.Crit(module, "Immutable Service account in X.U.D", "s", sa.ServiceIndex)
 		} else if sa.Dirty {
-			err := s.writeAccount(sa, subscriptions)
+			serviceUpdate, err := s.writeAccount(sa)
 			if err != nil {
 				log.Crit(module, "ApplyXContext", "err", err)
 			}
+			stateUpdate.AddServiceUpdate(sa.ServiceIndex, serviceUpdate)
 		}
 	}
 	// p - Bless => Kai_state 12.4.1 (164)
@@ -176,6 +149,7 @@ func (s *StateDB) ApplyXContext(U *types.PartialState, subscriptions map[uint32]
 
 	// v - Assign => DesignatedValidators
 	s.JamState.SafroleState.DesignedValidators = U.UpcomingValidators
+	return
 }
 
 func (s *StateDB) GetTimeslot() uint32 {

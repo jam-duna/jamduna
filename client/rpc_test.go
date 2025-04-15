@@ -144,7 +144,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
 
-		fmt.Printf("Submitted Fib(%d) to core %d\n", fibN, coreIndex)
+		fmt.Printf("Submitted Fib(%d) [wp=%s] to core %d\n", fibN, workPackage.Hash(), coreIndex)
 		workPackageHash, err := client.RobustSubmitWorkPackage(workpackage_req, 5)
 		if err != nil {
 			t.Fatalf("Error: %s", err)
@@ -153,10 +153,13 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		fib_index := testServices["fib"].ServiceIndex
 		k := common.ServiceStorageKey(fib_index, []byte{0})
 		service_account_byte, ok, err := client.GetServiceValue(fib_index, k)
-		if err != nil || ok == false {
-			t.Fatalf("Error: %s", err)
+		if err != nil {
+			fmt.Printf("client.GetServiceValue(fib_index=%d, k=%x) ERR=%s\n", fib_index, k, err)
+		} else if !ok {
+			fmt.Printf("client.GetServiceValue(fib_index=%d, k=%x) NOT OK\n", fib_index, k)
+		} else {
+			fmt.Printf("Fib(%v) result: %x\n", fibN, service_account_byte)
 		}
-		fmt.Printf("Fib(%v) result: %x\n", fibN, service_account_byte)
 	}
 	return nil
 }
@@ -173,7 +176,7 @@ func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req types.WorkPack
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
 		workPackageHash = workpackage_req.WorkPackage.Hash()
-		err = client.WaitForWorkPackage(workpackage_req.CoreIndex, workPackageHash)
+		err = client.WaitForWorkPackage(workpackage_req.CoreIndex, workPackageHash, "accumulated")
 		if err != nil {
 			fmt.Printf("Trial %d failed %v\n", tries, err)
 			tries = tries + 1

@@ -43,30 +43,6 @@ type ServiceAccount struct {
 	Preimage map[common.Hash]PreimageObject `json:"-"` // H(p)  -> p
 }
 
-type ServiceSubscription struct {
-	ServiceInfo     *SubServiceInfoResult
-	ServiceValue    map[common.Hash]*SubServiceValueResult    // storage key
-	ServicePreimage map[common.Hash]*SubServicePreimageResult // preimage hash
-	ServiceRequest  map[common.Hash]*SubServiceRequestResult  // preimage hash
-	WorkPackage     map[common.Hash]*SubWorkPackageResult     // workpackage hash
-}
-
-func (s *ServiceSubscription) Clear() {
-	s.ServiceInfo = nil
-	for h, _ := range s.ServiceValue {
-		s.ServiceValue[h] = nil
-	}
-	for h, _ := range s.ServicePreimage {
-		s.ServicePreimage[h] = nil
-	}
-	for h, _ := range s.ServiceRequest {
-		s.ServiceRequest[h] = nil
-	}
-	for h, _ := range s.WorkPackage {
-		s.WorkPackage[h] = nil
-	}
-}
-
 func (s *ServiceAccount) Clone() *ServiceAccount {
 	// Start by cloning primitive fields directly
 	clone := ServiceAccount{

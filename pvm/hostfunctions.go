@@ -1176,7 +1176,7 @@ func (vm *VM) hostWrite() {
 			a.StorageSize -= prev_l
 			l = prev_l
 			vm.WriteRegister(7, l)
-			log.Debug(vm.logging, vm.Str("WRITE OK"), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Info("temp", vm.Str("WRITE OK"), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		}
 	}
 	log.Debug(vm.logging, vm.Str("WRITE storage"), "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)

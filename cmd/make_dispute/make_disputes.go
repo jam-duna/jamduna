@@ -228,7 +228,7 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 		return false, err, nil
 	}
 	dispute_block = dispute_prestate.Block.Copy()
-	dispute_poststate, err := statedb.ApplyStateTransitionFromBlock(dispute_prestate, context.Background(), dispute_block, nil)
+	dispute_poststate, err := statedb.ApplyStateTransitionFromBlock(dispute_prestate, context.Background(), dispute_block)
 	if err != nil {
 		fmt.Println(dispute_block.String())
 		return false, fmt.Errorf("ApplyStateTransitionFromBlock Error:%v", err), nil

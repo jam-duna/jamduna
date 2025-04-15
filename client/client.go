@@ -167,8 +167,8 @@ func (c *NodeClient) listenWebSocket() {
 				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
 				continue
 			}
-			fmt.Printf("!!!! ServicePreimage for service %d: %+v\n", payload.ServiceID, payload.Preimage)
 			c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
+			fmt.Printf("NodeClient received: ServicePreimage for service %d (h=%s, l=%d)\n", payload.ServiceID, payload.Hash, len(c.Preimage[payload.Hash]))
 			break
 
 		case SubServiceRequest:
@@ -352,6 +352,7 @@ func (c *NodeClient) WaitForPreimage(serviceIndex uint32, preimage []byte) (err 
 	defer cancel()
 	preimageHash := common.Blake2Hash(preimage)
 	c.Subscribe(SubServicePreimage, map[string]interface{}{"serviceID": fmt.Sprintf("%d", serviceIndex), "hash": fmt.Sprintf("%s", preimageHash)})
+	fmt.Printf("\n*WaitForPreimage*: subscribe(serviceIndex=%d, h=%s, l=%d)\n", serviceIndex, preimageHash, len(preimage))
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -359,10 +360,10 @@ func (c *NodeClient) WaitForPreimage(serviceIndex uint32, preimage []byte) (err 
 	for {
 		select {
 		case <-ctxWait.Done():
-			return fmt.Errorf("Timed out waiting for preimage to appear")
+			return fmt.Errorf("*WaitForPreimage*: Timed out waiting for preimage(serviceID=%d, h=%s, l=%d) to appear", serviceIndex, preimageHash, len(preimage))
 		case <-ticker.C:
 			if _, ok := c.Preimage[preimageHash]; ok {
-				fmt.Printf("***** preimage(serviceIndex=%d, length=%d)\n", serviceIndex, len(preimage))
+				fmt.Printf("*WaitForPreimage*: received(serviceID=%d, h=%s, lh=%d) DONE\n\n", serviceIndex, preimageHash, len(preimage))
 				return nil
 			}
 		}
@@ -370,10 +371,11 @@ func (c *NodeClient) WaitForPreimage(serviceIndex uint32, preimage []byte) (err 
 	}
 }
 
-func (c *NodeClient) WaitForWorkPackage(coreIndex uint16, workPackageHash common.Hash) (err error) {
+func (c *NodeClient) WaitForWorkPackage(coreIndex uint16, workPackageHash common.Hash, statusTarget string) (err error) {
 	ctxWait, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	c.Subscribe(SubWorkPackage, map[string]interface{}{"hash": fmt.Sprintf("%s", workPackageHash)})
+	fmt.Printf("\n*WaitForWorkPackage* subscribeWaitForWorkPackage(%s)\n", workPackageHash)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -383,8 +385,12 @@ func (c *NodeClient) WaitForWorkPackage(coreIndex uint16, workPackageHash common
 			return fmt.Errorf("Timed out waiting for work package %s to be accumulated", workPackageHash)
 		case <-ticker.C:
 			if status, ok := c.WorkPackage[workPackageHash]; ok {
-				fmt.Printf("workPackage(%d, %s): %s\n", coreIndex, workPackageHash, status)
-				return nil
+				if status == statusTarget {
+					fmt.Printf("*WaitForWorkPackage* DONE!!! %s => STATUS %s\n\n", workPackageHash, status)
+					return nil
+				} else {
+					fmt.Printf("*WaitForWorkPackage* NOT done.... %s => STATUS %s\n\n", workPackageHash, status)
+				}
 			}
 		}
 	}
@@ -394,6 +400,7 @@ func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.
 	ctxWait, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": fmt.Sprintf("%s", storageKey)})
+	fmt.Printf("\n*WaitForServiceValue* subscribeServiceValue(%d, %s)\n", serviceIndex, storageKey)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -404,7 +411,7 @@ func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.
 		case <-ticker.C:
 			if value, ok := c.ServiceValue[storageKey]; ok {
 				service_index = uint32(types.DecodeE_l(value))
-				fmt.Printf("serviceValueCh(%d, %s): %s\n", serviceIndex, storageKey, value)
+				fmt.Printf("*WaitForServiceValue* serviceValue(%d, %s): %x\n\n", serviceIndex, storageKey, value)
 				return service_index, nil
 			}
 		}
@@ -459,20 +466,19 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 		return
 	}
 	// creates SubWorkPackage(wpHash) subscription, blocks for N seconds waiting for first status from subscription
-	err = c.WaitForWorkPackage(wpr.CoreIndex, wpHash)
+	err = c.WaitForWorkPackage(wpr.CoreIndex, wpHash, "accumulated")
 	if err != nil {
 		fmt.Printf("WaitForWorkPackage ERR %v", err)
 		return
 	}
 
-	// creates SubServiceValue(0, storageKey) subscription, blocks for N seconds waiting for value updates from subscription
 	storageKey := common.ServiceStorageKey(0, []byte{0, 0, 0, 0})
-
-	newServiceIdx, err = c.WaitForServiceValue(0, storageKey)
+	value, _, err := c.GetServiceValue(0, storageKey)
 	if err != nil {
 		fmt.Printf("GetBootstrapService ERR %v", err)
 		return
 	}
+	newServiceIdx = uint32(types.DecodeE_l(value))
 
 	// submits preimage of service code
 	if err = c.SubmitPreimage(newServiceIdx, serviceCode); err != nil {
@@ -483,10 +489,11 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	// creates SubServicePreimage(0, preimage) subscription, blocks for N seconds waiting for preimage updates from subscription
 	err = c.WaitForPreimage(newServiceIdx, serviceCode)
 	if err != nil {
-		fmt.Printf("WaitForPreimage ERR %v", err)
+		fmt.Printf("WaitForPreimage ERR %v\n", err)
 		return
 	}
-	fmt.Printf("NewService %d\n", newServiceIdx)
+
+	fmt.Printf("NewService %d\n--------\n\n", newServiceIdx)
 	return
 }
 

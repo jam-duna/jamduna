@@ -160,7 +160,6 @@ type NodeContent struct {
 	block_tree          *types.BlockTree
 	nodeSelf            *Node
 
-	subscriptions     map[uint32]*types.ServiceSubscription
 	RPC_Client        []*rpc.Client
 	new_timeslot_chan chan uint32
 
@@ -185,7 +184,6 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 		servicesMap:          make(map[uint32]*types.ServiceSummary),
 		workPackageQueue:     sync.Map{},
 		new_timeslot_chan:    make(chan uint32, 1),
-		subscriptions:        make(map[uint32]*types.ServiceSubscription),
 	}
 }
 
@@ -884,7 +882,6 @@ func (n *NodeContent) updateServiceMap(statedb *statedb.StateDB, b *types.Block)
 							n.servicesMap[s].ServiceName = metadata
 						}
 					}
-					log.Info(module, "updateServiceMap", "s", fmt.Sprintf("%d", s), "serviceName", metadata, "codeHash", codeHash, "len", len(p.Blob))
 				}
 			}
 		}
@@ -1323,7 +1320,7 @@ func (n *Node) ApplyFirstBlock(ctx context.Context, nextBlockNode *types.BT_Node
 	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
 
 	// apply with caller's ctx, not Background
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, nil)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock)
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
@@ -1372,7 +1369,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	recoveredStateDB := n.statedb.Copy()
 	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
 
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, n.subscriptions)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock)
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
@@ -1422,7 +1419,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 
 	if nextBlock.Header.Hash() == *n.latest_block {
 		if n.hub != nil {
-			go n.hub.ReceiveLatestBlock(nextBlock, newStateDB, false, n.subscriptions)
+			go n.hub.ReceiveLatestBlock(nextBlock, newStateDB, false)
 		}
 
 		if err := n.assureNewBlock(ctx, nextBlock); err != nil {

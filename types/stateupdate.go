@@ -2,6 +2,38 @@ package types
 
 import "github.com/colorfulnotion/jam/common"
 
+type StateUpdate struct {
+	WorkPackageUpdates map[common.Hash]*SubWorkPackageResult // workpackage hash
+	ServiceUpdates     map[uint32]*ServiceUpdate
+}
+
+func NewStateUpdate() *StateUpdate {
+	return &StateUpdate{
+		ServiceUpdates:     make(map[uint32]*ServiceUpdate),
+		WorkPackageUpdates: make(map[common.Hash]*SubWorkPackageResult),
+	}
+}
+
+type ServiceUpdate struct {
+	ServiceInfo     *SubServiceInfoResult
+	ServiceValue    map[common.Hash]*SubServiceValueResult    // storage key
+	ServicePreimage map[common.Hash]*SubServicePreimageResult // preimage hash
+	ServiceRequest  map[common.Hash]*SubServiceRequestResult  // preimage hash
+}
+
+func NewServiceUpdate(s uint32) *ServiceUpdate {
+	return &ServiceUpdate{
+		ServiceInfo:     nil,
+		ServiceValue:    make(map[common.Hash]*SubServiceValueResult),
+		ServicePreimage: make(map[common.Hash]*SubServicePreimageResult),
+		ServiceRequest:  make(map[common.Hash]*SubServiceRequestResult),
+	}
+}
+
+func (su *StateUpdate) AddServiceUpdate(serviceIndex uint32, serviceUpdate *ServiceUpdate) {
+	su.ServiceUpdates[serviceIndex] = serviceUpdate
+}
+
 type WSPayload struct {
 	Method string      `json:"method"`
 	Result interface{} `json:"result"`

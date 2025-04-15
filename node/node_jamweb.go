@@ -43,43 +43,69 @@ type SubscriptionRequest struct {
 // Broadcasters for each subscription type
 // subscribeBestBlock - Subscribe to updates of the head of the "best" chain, as returned by bestBlock.
 // subscribeFinalizedBlock - Subscribe to updates of the latest finalized block, as returned by finalizedBlock.
-func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFinalized bool, subscriptions map[uint32]*types.ServiceSubscription) {
+func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFinalized bool) (err error) {
+	var data []byte
+	update := sdb.GetStateUpdates()
+	for client, _ := range h.clients {
+		log.Trace(debugWeb, "ReceiveLatestBlock", "clientsubs", client.String())
+		if client.BestBlock != nil {
+			req := client.BestBlock
+			payload := types.WSPayload{
+				Method: req.Method,
+				Result: types.SubBlockResult{
+					BlockHash:  block.Hash(),
+					HeaderHash: block.Header.Hash(),
+				},
+			}
+			data, err = json.Marshal(payload)
+			client.sendData(data)
+		}
+		if client.FinalizedBlock != nil {
+			req := client.FinalizedBlock
+			payload := types.WSPayload{
+				Method: req.Method,
+				Result: types.SubBlockResult{
+					BlockHash:  block.Hash(),
+					HeaderHash: block.Header.Hash(),
+				},
+			}
+			data, err = json.Marshal(payload)
+			client.sendData(data)
+		}
+		if client.Statistics != nil {
+			req := client.Statistics
+			payload := types.WSPayload{
+				Method: req.Method,
+				Result: types.SubStatisticsResult{
+					HeaderHash: block.Header.Hash(),
+					Statistics: sdb.JamState.ValidatorStatistics,
+				},
+			}
+			data, err = json.Marshal(payload)
+			client.sendData(data)
+		}
+		for wph, req := range client.WorkPackages {
+			if req != nil {
+				res, ok := update.WorkPackageUpdates[wph]
+				if !ok || res == nil {
+					continue
+				}
+				payload := types.WSPayload{
+					Method: req.Method,
+					Result: res,
+				}
+				data, err = json.Marshal(payload)
+				client.sendData(data)
+			}
+		}
 
-	for serviceID, upd := range subscriptions {
-		for client := range h.clients {
-			reqs, ok := client.subscriptions[serviceID]
-			if !ok {
+		for serviceID, reqs := range client.Services {
+			upd := update.ServiceUpdates[serviceID]
+			if upd == nil {
 				continue
 			}
 			for _, req := range reqs {
-				if isFinalized != req.isFinalized {
-					continue
-				}
-
-				var data []byte
-				var err error
-
 				switch req.Method {
-				case SubBestBlock, SubFinalizedBlock:
-					payload := types.WSPayload{
-						Method: req.Method,
-						Result: types.SubBlockResult{
-							BlockHash:  block.Hash(),
-							HeaderHash: block.Header.Hash(),
-						},
-					}
-					data, err = json.Marshal(payload)
-
-				case SubStatistics:
-					payload := types.WSPayload{
-						Method: SubStatistics,
-						Result: types.SubStatisticsResult{
-							HeaderHash: block.Header.Hash(),
-							Statistics: sdb.JamState.ValidatorStatistics,
-						},
-					}
-					data, err = json.Marshal(payload)
-
 				case SubServiceInfo:
 					payload := types.WSPayload{
 						Method: SubServiceInfo,
@@ -89,8 +115,11 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 						},
 					}
 					data, err = json.Marshal(payload)
-
+					client.sendData(data)
 				case SubServiceValue:
+					if upd.ServiceValue == nil {
+						continue
+					}
 					v, ok := upd.ServiceValue[req.hash]
 					if !ok || v == nil {
 						continue
@@ -100,8 +129,12 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 						Result: v,
 					}
 					data, err = json.Marshal(payload)
+					client.sendData(data)
 
 				case SubServicePreimage:
+					if upd.ServicePreimage == nil {
+						continue
+					}
 					res, ok := upd.ServicePreimage[req.hash]
 					if !ok || res == nil {
 						continue
@@ -111,8 +144,12 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 						Result: res,
 					}
 					data, err = json.Marshal(payload)
+					client.sendData(data)
 
 				case SubServiceRequest:
+					if upd.ServiceRequest == nil {
+						continue
+					}
 					res, ok := upd.ServiceRequest[req.hash]
 					if !ok || res == nil {
 						continue
@@ -122,29 +159,12 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 						Result: res,
 					}
 					data, err = json.Marshal(payload)
-
-				case SubWorkPackage:
-					res, ok := upd.WorkPackage[req.hash]
-					if !ok || res == nil {
-						continue
-					}
-					payload := types.WSPayload{
-						Method: SubWorkPackage,
-						Result: res,
-					}
-					data, err = json.Marshal(payload)
+					client.sendData(data)
 				}
-
-				if err != nil {
-					fmt.Printf("JSON marshal error for %s: %v\n", req.Method, err)
-					continue
-				}
-
-				client.sendData(data)
 			}
 		}
-		upd.Clear()
 	}
+	return nil
 }
 
 var upgrader = websocket.Upgrader{
@@ -155,9 +175,52 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type Client struct {
+	hub  *Hub            `json:"-"` // cannot marshal functions or pointers to complex structs
+	conn *websocket.Conn `json:"-"`
+	send chan []byte     `json:"-"`
+
+	// subscription requests
+	BestBlock      *SubscriptionRequest                 `json:"bestBlock,omitempty"`
+	FinalizedBlock *SubscriptionRequest                 `json:"finalizedBlock,omitempty"`
+	Statistics     *SubscriptionRequest                 `json:"statistics,omitempty"`
+	WorkPackages   map[common.Hash]*SubscriptionRequest `json:"workPackages,omitempty"`
+	Services       map[uint32][]*SubscriptionRequest    `json:"services,omitempty"`
+}
+
+func (c *Client) String() string {
+	type clientView struct {
+		BestBlock      *SubscriptionRequest              `json:"bestBlock,omitempty"`
+		FinalizedBlock *SubscriptionRequest              `json:"finalizedBlock,omitempty"`
+		Statistics     *SubscriptionRequest              `json:"statistics,omitempty"`
+		WorkPackages   map[string]*SubscriptionRequest   `json:"workPackages,omitempty"`
+		Services       map[uint32][]*SubscriptionRequest `json:"services,omitempty"`
+	}
+
+	// Convert WorkPackages keys to string (assuming common.Hash implements String())
+	workPackages := make(map[string]*SubscriptionRequest, len(c.WorkPackages))
+	for k, v := range c.WorkPackages {
+		workPackages[k.String()] = v
+	}
+
+	view := clientView{
+		BestBlock:      c.BestBlock,
+		FinalizedBlock: c.FinalizedBlock,
+		Statistics:     c.Statistics,
+		WorkPackages:   workPackages,
+		Services:       c.Services,
+	}
+
+	b, err := json.MarshalIndent(view, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("Client{error: %v}", err)
+	}
+	return string(b)
+}
+
 // Hub manages client registration and broadcasting
 type Hub struct {
-	clients    map[*Client]map[uint32]*types.ServiceSubscription
+	clients    map[*Client]bool
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan []byte
@@ -168,7 +231,7 @@ type Hub struct {
 func newHub(ctx context.Context) *Hub {
 	cctx, cancel := context.WithCancel(ctx)
 	return &Hub{
-		clients:    make(map[*Client]map[uint32]*types.ServiceSubscription),
+		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		broadcast:  make(chan []byte),
@@ -188,7 +251,7 @@ func (h *Hub) run(wg *sync.WaitGroup) {
 			return
 
 		case client := <-h.register:
-			h.clients[client] = make(map[uint32]*types.ServiceSubscription)
+			h.clients[client] = true
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
@@ -209,16 +272,9 @@ func (h *Hub) run(wg *sync.WaitGroup) {
 	}
 }
 
-type Client struct {
-	hub           *Hub
-	conn          *websocket.Conn
-	send          chan []byte
-	subscriptions map[uint32][]*SubscriptionRequest
-}
-
 // readPump handles WebSocket reads and subscription management
 func (c *Client) sendData(data []byte) {
-	log.Info(module, "sendData", "data", string(data))
+	log.Trace(debugWeb, "sendData", "data", string(data))
 	select {
 	case c.send <- data:
 	default:
@@ -227,14 +283,17 @@ func (c *Client) sendData(data []byte) {
 
 // readPump handles WebSocket reads and subscription management
 func (c *Client) addSubscription(serviceID uint32, req *SubscriptionRequest) {
-	log.Info(module, "addSubscription", "serviceID", serviceID, "method", req.Method)
-	if c.subscriptions == nil {
-		c.subscriptions = make(map[uint32][]*SubscriptionRequest)
+	log.Trace(debugWeb, "addSubscription", "serviceID", serviceID, "method", req.Method, "h", req.hash)
+	if _, ok := c.Services[serviceID]; !ok {
+		c.Services[serviceID] = make([]*SubscriptionRequest, 0)
 	}
-	if _, ok := c.subscriptions[serviceID]; !ok {
-		c.subscriptions[serviceID] = make([]*SubscriptionRequest, 0)
+	// make sure its unique
+	for _, r := range c.Services[serviceID] {
+		if r.hash == req.hash {
+			return
+		}
 	}
-	c.subscriptions[serviceID] = append(c.subscriptions[serviceID], req)
+	c.Services[serviceID] = append(c.Services[serviceID], req)
 }
 
 // readPump handles WebSocket reads and subscription management
@@ -323,22 +382,22 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 			case SubBestBlock:
 				// Handle subscription to best block
 				req.isFinalized = false
-				c.addSubscription(0, &req)
+				c.BestBlock = &req
 			case SubFinalizedBlock:
 				// Handle subscription to finalized block
 				req.isFinalized = true
-				c.addSubscription(0, &req)
+				c.FinalizedBlock = &req
 			case SubStatistics:
 				// Handle subscription to statistics
-				c.addSubscription(0, &req)
+				c.Statistics = &req
 			case SubWorkPackage:
 				// Handle subscription to work package
 				req.hash = common.HexToHash(req.Params["hash"].(string))
-				c.addSubscription(0, &req)
+				c.WorkPackages[req.hash] = &req
 			default:
 				log.Warn(debugWeb, "Unknown subscription method", req.Method)
 			}
-			log.Info(debugWeb, "Subscribed", "method", req.Method)
+			log.Trace(debugWeb, "Subscribed", "method", req.Method, "h", req.hash)
 		}
 	}
 }
@@ -394,7 +453,15 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, wg *sync.WaitGrou
 		log.Error(debugWeb, "serveWs Upgrade error", err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client := &Client{
+		hub:            hub,
+		conn:           conn,
+		send:           make(chan []byte, 256),
+		BestBlock:      nil,
+		FinalizedBlock: nil,
+		WorkPackages:   make(map[common.Hash]*SubscriptionRequest),
+		Services:       make(map[uint32][]*SubscriptionRequest),
+	}
 	hub.register <- client
 
 	wg.Add(2)
