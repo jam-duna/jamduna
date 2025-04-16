@@ -29,6 +29,10 @@ const (
 	SubWorkPackage     = "subscribeWorkPackage"
 )
 
+const (
+	RefineTimeout = 30 * time.Second
+)
+
 type NodeClient struct {
 	coreIndex  uint16
 	client     *rpc.Client
@@ -144,12 +148,12 @@ func (c *NodeClient) listenWebSocket() {
 			break
 		case SubServiceValue:
 			var payload struct {
-				ServiceID uint32      `json:"serviceID"`
+				ServiceID  uint32      `json:"serviceID"`
 				HeaderHash common.Hash `json:"headerHash"`
-				Slot   uint32 `json:"slot"`
-				Hash      common.Hash `json:"hash"`
-				Key     string      `json:"key"`
-				Value     string      `json:"value"`
+				Slot       uint32      `json:"slot"`
+				Hash       common.Hash `json:"hash"`
+				Key        string      `json:"key"`
+				Value      string      `json:"value"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
 				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
@@ -410,7 +414,7 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 		}
 	}()
 
-	// Submit preimage (inline)
+	// Submit preimage
 	if err := c.SubmitPreimage(serviceIndex, preimage); err != nil {
 		// cancel wait if Submit fails
 		errCh <- fmt.Errorf("SubmitPreimage: %w", err)
@@ -442,10 +446,9 @@ func (c *NodeClient) GetServiceValue(serviceIndex uint32, storageHash common.Has
 }
 
 func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.Hash) (service_index uint32, err error) {
-	ctxWait, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctxWait, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": fmt.Sprintf("%s", storageKey)})
-	fmt.Printf("\n*WaitForServiceValue* subscribeServiceValue(%d, %s)\n", serviceIndex, storageKey)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -456,7 +459,6 @@ func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.
 		case <-ticker.C:
 			if value, ok := c.ServiceValue[storageKey]; ok {
 				service_index = uint32(types.DecodeE_l(value))
-				fmt.Printf("*WaitForServiceValue* serviceValue(%d, %s): %x\n\n", serviceIndex, storageKey, value)
 				return service_index, nil
 			}
 		}
@@ -505,7 +507,7 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	fmt.Printf("Submitting WP %s\n", wpHash)
 
 	// submits wp
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	err = c.SubmitAndWaitForWorkPackage(ctx, wpr)
 	if err != nil {
@@ -522,7 +524,7 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	newServiceIdx = uint32(types.DecodeE_l(value))
 
 	// submits preimage of service code
-	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	if err = c.SubmitAndWaitForPreimage(ctx, newServiceIdx, serviceCode); err != nil {
 		fmt.Printf("SubmitPreimage ERR %v", err)
@@ -563,16 +565,10 @@ func (c *NodeClient) LoadServices(services []string) (new_service_map map[string
 	return new_service_map, nil
 }
 
-func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) error {
+func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) (err error) {
 	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
 	preimageStr := common.Bytes2Hex(preimage)
 	req := []string{serviceIndexStr, preimageStr}
-
-	var codeHash common.Hash
-	err := c.GetClient().Call("jam.AddPreimage", preimage, &codeHash)
-	if err != nil {
-		return err
-	}
 
 	var res string
 	err = c.GetClient().Call("jam.SubmitPreimage", req, &res)

@@ -223,7 +223,6 @@ func TestDisputes(t *testing.T) {
 
 	builderIdx := 1
 	builderNode := nodes[builderIdx]
-	builderNode.preimages[bootstrapCodeHash] = bootstrapCode
 	new_service_idx := uint32(0)
 
 	// Load testServices
@@ -231,11 +230,6 @@ func TestDisputes(t *testing.T) {
 	testServices, err := getServices(serviceNames, true)
 	if err != nil {
 		panic(32)
-	}
-
-	// set builderNode's primages map
-	for _, service := range testServices {
-		builderNode.preimages[service.CodeHash] = service.Code
 	}
 
 	var previous_service_idx uint32
@@ -260,7 +254,13 @@ func TestDisputes(t *testing.T) {
 				},
 			},
 		}
-		err = builderNode.peersInfo[4].SendWorkPackageSubmission(context.Background(), codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		_, err = builderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+			WorkPackage:     codeWorkPackage,
+			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+			CoreIndex:       0,
+		})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}

@@ -1,12 +1,10 @@
 package node
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -19,27 +17,6 @@ const (
 
 func (n *NodeContent) GetBlockTree() *types.BlockTree {
 	return n.block_tree
-}
-
-func (n *NodeContent) BroadcastPreimageAnnouncement(serviceID uint32, preimageHash common.Hash, preimageLen uint32, preimage []byte) (err error) {
-	pa := types.PreimageAnnouncement{
-		ServiceIndex: serviceID,
-		PreimageHash: preimageHash,
-		PreimageLen:  preimageLen,
-	}
-
-	n.StoreImage(preimageHash, preimage)
-
-	for _, peer := range n.peersInfo {
-		go func(peer *Peer) {
-			err := peer.SendPreimageAnnouncement(context.Background(), &pa)
-			if err != nil {
-				log.Error(rpc_mod, "SendPreimageAnnouncement", err)
-			}
-		}(peer)
-	}
-
-	return nil
 }
 
 func (n *NodeContent) SetServiceDir(dir string) {

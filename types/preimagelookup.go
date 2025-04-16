@@ -1,7 +1,7 @@
 package types
 
 import (
-	//"encoding/binary"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -20,8 +20,12 @@ type Preimages struct {
 	Blob      []byte `json:"blob"`
 }
 
-func (p *Preimages) BlobHash() common.Hash {
-	return common.BytesToHash(common.ComputeHash(p.Blob))
+func (p *Preimages) Hash() common.Hash {
+	return common.Blake2Hash(p.Blob)
+}
+
+func (p *Preimages) AccountHash() common.Hash {
+	return common.Blake2Hash(append(p.Blob, binary.LittleEndian.AppendUint32(nil, uint32(p.Requester))...))
 }
 
 func (p *Preimages) BlobLength() uint32 {
@@ -33,37 +37,7 @@ func (p *Preimages) Service_Index() uint32 {
 }
 
 func (p *Preimages) String() string {
-	s := fmt.Sprintf("ServiceIndex=%v, (h,z)=(%v,%v), a_l=%v, a_p=%v\n", p.Service_Index(), p.BlobHash(), p.BlobLength(), p.AccountLookupHash(), p.AccountPreimageHash())
-	return s
-}
-
-// A_l --- C(s, (E4(l) ⌢ (¬h4:))
-func (p *Preimages) AccountLookupHash() common.Hash {
-	s := p.Requester
-	blob_hash := p.BlobHash().Bytes()
-	blob_len := p.BlobLength()
-	return ComputeAL(s, blob_hash, blob_len)
-}
-
-// A_p --- c(s, H(p))
-func (p *Preimages) AccountPreimageHash() common.Hash {
-	s := p.Requester
-	blob_hash := p.BlobHash().Bytes()
-	return ComputeAP(s, blob_hash)
-}
-
-func ComputeAP(s uint32, blob_hash []byte) common.Hash {
-	blobHash := common.Blake2Hash(blob_hash)
-	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
-	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
-	return account_preimage_hash
-}
-
-func ComputeAL(s uint32, blob_hash []byte, blob_len uint32) common.Hash {
-	blobHash := common.Blake2Hash(blob_hash)
-	al_internal_key := common.Compute_preimageLookup_internal(blobHash, blob_len)
-	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
-	return account_lookuphash
+	return fmt.Sprintf("ServiceIndex=%v, (h,z)=(%v,%v)", p.Service_Index(), p.Hash(), p.BlobLength())
 }
 
 func (p Preimages) DeepCopy() (Preimages, error) {
@@ -83,24 +57,6 @@ func (p Preimages) DeepCopy() (Preimages, error) {
 	copiedPreimageLookup = decoded.(Preimages)
 
 	return copiedPreimageLookup, nil
-}
-
-// Bytes returns the bytes of the PreimageLookup.
-func (p *Preimages) Bytes() []byte {
-	enc, err := Encode(p)
-	if err != nil {
-		return nil
-	}
-	return enc
-}
-
-func (p *Preimages) Hash() common.Hash {
-	data := p.Bytes()
-	if data == nil {
-		// Handle the error case
-		return common.Hash{}
-	}
-	return common.Blake2Hash(data)
 }
 
 func (a *Preimages) UnmarshalJSON(data []byte) error {

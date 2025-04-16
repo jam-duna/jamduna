@@ -80,6 +80,7 @@ const (
 	NormalTimeout    = 9 * time.Second
 	MediumTimeout    = 10 * time.Second
 	LargeTimeout     = 12 * time.Second
+	RefineTimeout    = 30 * time.Second
 	VeryLargeTimeout = 600 * time.Second
 
 	DefaultChannelSize = 200
@@ -146,8 +147,7 @@ type NodeContent struct {
 	workReportsCh    chan types.WorkReport
 	workPackagesCh   chan types.WorkPackage
 
-	preimages      map[common.Hash][]byte // preimageLookup -> preimageBlob
-	preimagesMutex sync.Mutex
+	extrinsic_pool *types.ExtrinsicPool
 
 	servicesMap   map[uint32]*types.ServiceSummary
 	servicesMutex sync.Mutex
@@ -180,22 +180,21 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 		headers:              make(map[common.Hash]*types.Block),
 		workPackagesCh:       make(chan types.WorkPackage, DefaultChannelSize),
 		workReportsCh:        make(chan types.WorkReport, DefaultChannelSize),
-		preimages:            make(map[common.Hash][]byte),
 		servicesMap:          make(map[uint32]*types.ServiceSummary),
 		workPackageQueue:     sync.Map{},
 		new_timeslot_chan:    make(chan uint32, 1),
+		extrinsic_pool:       types.NewExtrinsicPool(),
 	}
 }
 
 type Node struct {
 	NodeContent
-	IsSync         bool
-	block_waiting  list.List
-	commitHash     string
-	AuditNodeType  string
-	credential     types.ValidatorSecret
-	peers          []string
-	extrinsic_pool *types.ExtrinsicPool
+	IsSync        bool
+	block_waiting list.List
+	commitHash    string
+	AuditNodeType string
+	credential    types.ValidatorSecret
+	peers         []string
 
 	latest_block *common.Hash
 	grandpa      *grandpa.Grandpa
@@ -203,8 +202,6 @@ type Node struct {
 	selfTickets  map[common.Hash][]types.TicketBucket
 	ticketsMutex sync.Mutex
 	sendTickets  bool // when mode=fallback this is false, otherwise is true
-
-	// this is for audit
 
 	auditingMap      map[common.Hash]*statedb.StateDB // headerHash -> stateDB
 	auditingMapMutex sync.RWMutex
@@ -439,8 +436,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		peers:       peers,
 		clients:     make(map[string]string),
 		nodeType:    nodeType,
-
-		extrinsic_pool: types.NewExtrinsicPool(),
 
 		auditingMap:     make(map[common.Hash]*statedb.StateDB),
 		announcementMap: make(map[common.Hash]*types.TrancheAnnouncement),
@@ -693,6 +688,55 @@ func (n *NodeContent) GetPeerInfoByEd25519(key types.Ed25519Key) (*Peer, error) 
 		}
 	}
 	return nil, fmt.Errorf("peer not found")
+}
+
+func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32, preimage []byte) error {
+	errCh := make(chan error, 1)
+	preimageHash := common.Blake2Hash(preimage)
+
+	// Submit preimage
+	n.AddPreimageToPool(serviceIndex, preimage)
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			errCh <- fmt.Errorf("*SubmitAndWaitForPreimage*: context canceled or timed out (serviceID=%d, h=%s, l=%d)", serviceIndex, preimageHash, len(preimage))
+			return nil
+		case <-ticker.C:
+			time_slots, ok, err := n.statedb.ReadServicePreimageLookup(serviceIndex, preimageHash, uint32(len(preimage)))
+			if err != nil {
+				return err
+			}
+			if len(time_slots) > 0 && ok {
+				return nil
+			}
+		}
+	}
+
+}
+
+func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *types.WorkPackageRequest) (workPackageHash common.Hash, err error) {
+	core_peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
+	wp.WorkPackage.RefineContext = n.statedb.GetRefineContext()
+	err = core_peers[rand0.Intn(3)].SendWorkPackageSubmission(ctx, wp.WorkPackage, wp.ExtrinsicsBlobs, wp.CoreIndex)
+	workPackageHash = wp.WorkPackage.Hash()
+	for {
+		select {
+		case <-ctx.Done():
+			return workPackageHash, ctx.Err()
+		default:
+			time.Sleep(1 * time.Second)
+			history := n.statedb.JamState.AccumulationHistory[types.EpochLength-1]
+			for _, h := range history.WorkPackageHash {
+				if h == workPackageHash {
+					return workPackageHash, nil
+				}
+			}
+		}
+	}
 }
 
 func (n *Node) GetBandersnatchSecret() []byte {
@@ -1732,12 +1776,14 @@ func (n *NodeContent) getPVMStateDB() *statedb.StateDB {
 	return target_statedb
 }
 
-func (n *NodeContent) AddPreimage(preimageByte []byte) (codeHash common.Hash) {
-	codeHash = common.Blake2Hash(preimageByte)
-	n.nodeSelf.preimagesMutex.Lock()
-	defer n.nodeSelf.preimagesMutex.Unlock()
-	n.nodeSelf.preimages[codeHash] = preimageByte
-	return codeHash
+// AddPreimageToPool adds a new preimage to the extrinsic pool NO VALIDATION IS REQUIRED
+func (n *NodeContent) AddPreimageToPool(serviceID uint32, preimage []byte) (err error) {
+	// here we check that it has been solicited (or new)
+	n.extrinsic_pool.AddPreimageToPool(types.Preimages{
+		Requester: serviceID,
+		Blob:      preimage,
+	})
+	return nil
 }
 
 // -----Custom methods for tiny QUIC EC experiment-----

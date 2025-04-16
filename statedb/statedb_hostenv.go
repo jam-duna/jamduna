@@ -47,10 +47,10 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					}
 				}
 			} else {
-				log.Info(module, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "k", fmt.Sprintf("%x", storage.Key), "rawkey", storage.RawKey, "value", storage.Value)
+				log.Trace(module, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "k", fmt.Sprintf("%x", storage.Key), "rawkey", storage.RawKey, "value", storage.Value)
 				// Here we are returning ALL storage values written
 				serviceUpdate.ServiceValue[storage.RawKey] = &types.SubServiceValueResult{
-					ServiceID:   service_idx,
+					ServiceID:  service_idx,
 					HeaderHash: s.HeaderHash,
 					Slot:       s.GetTimeslot(),
 					Hash:       storage.RawKey,

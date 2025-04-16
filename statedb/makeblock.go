@@ -37,7 +37,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 	queued_preimage := extrinsic_pool.GetPreimageFromPool()
 	log.Trace(debugP, "MakeBlock: Queued Preimages", "len", len(queued_preimage), "slot", targetJCE)
 	for _, preimageLookup := range queued_preimage {
-		_, err := s.ValidateLookup(preimageLookup)
+		_, err := s.ValidateAddPreimage(preimageLookup.Requester, preimageLookup.Blob)
 		if err == nil {
 			pl, err := preimageLookup.DeepCopy()
 			if err != nil {
@@ -46,7 +46,7 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 		} else {
-			log.Warn(debugP, "ValidateLookup", "err", err)
+			log.Warn(debugP, "ValidateAddPreimage", "err", err)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 			continue
 		}

@@ -150,36 +150,27 @@ const (
 	errPreimageBlobSet        = "PreimageBlob already set"
 )
 
-func (s *StateDB) ValidateLookup(l *types.Preimages) (common.Hash, error) {
-	// check 157 - (1) a_p not equal to P (2) a_l is empty
-	t := s.GetTrie()
-	a_p := l.AccountPreimageHash()
-	preimage_blob, ok, err := t.GetPreImageBlob(l.Service_Index(), l.BlobHash())
-	if ok { // key found
-		if l.BlobHash() == common.Blake2Hash(preimage_blob) {
-			//H(p) = p
-			return common.Hash{}, fmt.Errorf(errPreimageBlobSet)
-		}
+// ValidateAddPreimage checks that the
+func (s *StateDB) ValidateAddPreimage(serviceID uint32, blob []byte) (common.Hash, error) {
+	l := &types.Preimages{
+		Requester: serviceID,
+		Blob:      blob,
 	}
-
-	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength())
+	// check 157 - (1) a_p not equal to P (2) a_l is empty
+	preimageHash := common.Blake2Hash(blob)
+	t := s.GetTrie()
+	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.Hash(), l.BlobLength())
 	if err != nil {
-		log.Warn(debugSDB, "[ValidateLookup:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
-		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
-		//t.PrintAllKeyValues()
-		//t.PrintTree(t.Root, 0)
+		log.Warn(debugSDB, "[ValidateAddPreimage:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
-		log.Trace(debugSDB, "[ValidateLookup:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.BlobHash(), "blob length", l.BlobLength())
-		// va := s.GetAllKeyValues() // ISSUE: this does NOT show 00 but PrintTree does!
-		//t.PrintAllKeyValues()
-		//t.PrintTree(t.Root, 0)
+		log.Trace(debugSDB, "[ValidateAddPreimage:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
 	if len(anchors) == 1 { // we have to forget it -- check!
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotEmpty)
 	}
-	return a_p, nil
+	return preimageHash, nil
 }
 func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
@@ -967,6 +958,9 @@ func (s *StateDB) DeleteServicePreimageKey(service uint32, blob_hash common.Hash
 	return nil
 }
 
+// 1 bring back AccountPreimageHash for use in extrinsic pool maps
+// 2 ONLY do ValidateAddPreimage at the VERY END (MakeBlock and ApplyStateTransitionPreimages)
+
 func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, targetJCE uint32) (uint32, uint32, error) {
 	num_preimages := uint32(0)
 	num_octets := uint32(0)
@@ -981,9 +975,9 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 
 	for _, l := range preimages {
 		// validate eq 157
-		_, err := s.ValidateLookup(&l)
+		_, err := s.ValidateAddPreimage(l.Requester, l.Blob)
 		if err != nil {
-			log.Error(module, "ApplyStateTransitionPreimages:ValidateLookup", "n", s.Id, "err", err)
+			log.Error(module, "ApplyStateTransitionPreimages:ValidateAddPreimage", "n", s.Id, "err", err)
 			return 0, 0, err
 		}
 	}
@@ -995,7 +989,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// δ†[s]l[H(p),∣p∣] = [τ′]
 		log.Trace(debugP, "WriteServicePreimageBlob", "Service_Index", l.Service_Index(), "Blob", l.Blob)
 		s.WriteServicePreimageBlob(l.Service_Index(), l.Blob)
-		s.WriteServicePreimageLookup(l.Service_Index(), l.BlobHash(), l.BlobLength(), []uint32{targetJCE})
+		s.WriteServicePreimageLookup(l.Service_Index(), l.Hash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
 		num_octets += l.BlobLength()
 	}

@@ -111,19 +111,6 @@ func (n *NodeContent) WorkReportLookup(workReportHash common.Hash) (workReport t
 		return workReport, true, nil
 	}
 	return workReport, false, nil
-
-}
-
-func (n *NodeContent) PreimageLookup(preimageHash common.Hash) ([]byte, bool, error) {
-	n.preimagesMutex.Lock()
-	defer n.preimagesMutex.Unlock()
-
-	preimage, ok := n.preimages[preimageHash]
-	if !ok {
-		fmt.Printf("%s preimageHash not ok\n", n.String())
-		return []byte{}, false, nil
-	}
-	return preimage, true, nil
 }
 
 func (n *NodeContent) GetState(headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {

@@ -242,13 +242,13 @@ func (ep *ExtrinsicPool) RemoveTicketsFromPool(used_entropy common.Hash) error {
 func (ep *ExtrinsicPool) AddPreimageToPool(preimage Preimages) error {
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
-	// Store the preimage in the tip's queued preimage
-	account_preimage_hash := preimage.AccountPreimageHash()
-	// if already known, do not add it to the pool
-	if _, exists := ep.knownPreimages[account_preimage_hash]; exists {
+	// Store the preimage in the tip's queued preimage -- TODO: use AccountHash instead
+	h := preimage.Hash()
+	if _, exists := ep.knownPreimages[h]; exists {
 		return nil
 	}
-	ep.queuedPreimages[account_preimage_hash] = &preimage
+	ep.queuedPreimages[h] = &preimage
+
 	return nil // Success
 }
 
@@ -257,7 +257,7 @@ func (ep *ExtrinsicPool) GetPreimageFromPool() []*Preimages {
 	defer ep.preimageMutex.Unlock()
 	preimages := make([]*Preimages, 0)
 	for _, preimage := range ep.queuedPreimages {
-		if _, exists := ep.knownPreimages[preimage.AccountPreimageHash()]; exists {
+		if _, exists := ep.knownPreimages[preimage.Hash()]; exists {
 			continue
 		}
 		preimages = append(preimages, preimage)
@@ -265,20 +265,31 @@ func (ep *ExtrinsicPool) GetPreimageFromPool() []*Preimages {
 	return preimages
 }
 
+func (ep *ExtrinsicPool) GetPreimageByHash(preimageHash common.Hash) (*Preimages, bool) {
+	ep.preimageMutex.Lock()
+	defer ep.preimageMutex.Unlock()
+	p, ok := ep.queuedPreimages[preimageHash]
+	if ok {
+		return p, true
+	}
+
+	return nil, false
+}
+
 // remove preimages from the pool that are already known or used by the block
 func (ep *ExtrinsicPool) RemoveOldPreimages(block_EPs []Preimages, timeslot uint32) error {
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
 	for _, block_EP := range block_EPs {
-		account_preimage_hash := block_EP.AccountPreimageHash()
-		if _, exists := ep.queuedPreimages[account_preimage_hash]; exists {
-			delete(ep.queuedPreimages, account_preimage_hash)
+		preimage_hash := block_EP.Hash()
+		if _, exists := ep.queuedPreimages[preimage_hash]; exists {
+			delete(ep.queuedPreimages, preimage_hash)
 		}
-		if _, exists := ep.knownPreimages[account_preimage_hash]; exists {
-			delete(ep.knownPreimages, account_preimage_hash)
+		if _, exists := ep.knownPreimages[preimage_hash]; exists {
+			delete(ep.knownPreimages, preimage_hash)
 		}
 		timeslot_tmp := timeslot
-		ep.knownPreimages[account_preimage_hash] = &timeslot_tmp
+		ep.knownPreimages[preimage_hash] = &timeslot_tmp
 	}
 	// remove the known preimages by time slot
 	for account_preimage_hash, ts := range ep.knownPreimages {

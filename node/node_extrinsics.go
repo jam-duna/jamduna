@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -79,14 +78,4 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 		log.Error(debugG, "processGuarantee:AddGuaranteeToPool", "err", err)
 	}
 	return nil // Success
-}
-
-func (n *Node) processPreimage(l types.Preimages) {
-	_, err := n.statedb.ValidateLookup(&l)
-	if err != nil {
-		log.Warn(debugP, "processPreimage:ValidateLookup", "err", err, "requester", l.Requester, "len", len(l.Blob), "h", common.Blake2Hash(l.Blob))
-		return
-	}
-	log.Trace(debugP, "processPreimage", "n", n.id, "l", l.String())
-	n.extrinsic_pool.AddPreimageToPool(l)
 }

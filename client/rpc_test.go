@@ -172,7 +172,7 @@ func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req types.WorkPack
 		}
 		workpackage_req.WorkPackage.RefineContext = refine_context
 		workPackageHash = workpackage_req.WorkPackage.Hash()
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
 		err = client.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
 		if err != nil {
@@ -304,19 +304,19 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		}
 
 		if fibN == -1 {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
 			err := client.SubmitAndWaitForPreimage(ctx, fibIndex, fib2_child_code["corevm_child"].Code)
 			if err != nil {
-				t.Fatalf("SendPreimageAnnouncement: %s", err)
+				t.Fatalf("SubmitAndWaitForPreimage: %s", err)
 			}
 		}
 		if fibN == 3 || fibN == 6 {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
 			err = client.SubmitAndWaitForPreimage(ctx, fibIndex, jam_key)
 			if err != nil {
-				t.Fatalf("SendPreimageAnnouncement: %s", err)
+				t.Fatalf("SubmitAndWaitForPreimage: %s", err)
 			}
 		}
 
@@ -447,7 +447,7 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 			ExtrinsicsBlobs: extrinsics,
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
 		err := client.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
 		if err != nil {
@@ -469,7 +469,7 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 			ws_push(out)
 
 		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
 			code := service0_child_code["game_of_life_child"].Code
 			err = client.SubmitAndWaitForPreimage(ctx, game_of_life_index, code)

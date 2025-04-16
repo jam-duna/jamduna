@@ -183,7 +183,6 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, GenesisBlockFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
 			panic(err)
-			return nil, fmt.Errorf("Failed to create node %d: %v", i, err)
 		}
 		if godMode {
 			node.setGodCh(&godIncomingCh)
@@ -391,13 +390,6 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	log.Info(module, "BootstrapCodeHash", "bootstrapCodeHash", bootstrapCodeHash, "codeLen", len(bootstrapCode), "fileName", statedb.BootstrapServiceFile)
 
 	serviceNames := []string{"auth_copy", "fib"}
-	codeHash, err := nodeClient.AddPreimage(bootstrapCode)
-	if err != nil {
-		log.Crit("Failed to add preimage %v:", "err", codeHash, err)
-	} else {
-		fmt.Printf("AddPreimage bootstrap codeHash: %v\n", codeHash)
-	}
-
 	new_service_idx := uint32(0)
 
 	// Load testServices
@@ -413,33 +405,17 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 		panic(32)
 	}
 
-	// set builderNode's primages map
-	for serviceName, service := range testServices {
-		codeHash, err := nodeClient.AddPreimage(service.Code)
-		if err != nil {
-			log.Crit("Failed to add preimage %v:", "err", codeHash, err)
-		} else {
-			log.Info(module, "AddPreimage", "serviceName", serviceName, "codeHash", codeHash, "len", len(service.Code))
-		}
-	}
-
 	log.Trace(module, "Waiting for the first block to be ready...")
 	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		// set up service using the Bootstrap service
-		refine_context, refineCtxErr := nodeClient.GetRefineContext()
-		if refineCtxErr != nil {
-			log.Crit("Failed to get refine context", "err", refineCtxErr)
-		}
-		fmt.Printf("%v refine_context: %v\n", serviceName, refine_context)
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),
 			AuthCodeHost:          bootstrapService,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            bootstrapService,
@@ -452,15 +428,16 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 				},
 			},
 		}
-		workPackageReq := types.WorkPackageRequest{
+
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		_, submissionErr := nodeClient.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     codeWorkPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
-		}
-		fmt.Printf("service:%v SendWorkPackage: %v\n", serviceName, workPackageReq.String())
-		submissionErr := nodeClient.SendWorkPackage(workPackageReq)
+		})
 		if submissionErr != nil {
-			log.Crit("SendWorkPackageSubmission ERR", "err", submissionErr)
+			log.Crit("SubmitAndWaitForWorkpackage ERR", "err", submissionErr)
 		}
 
 		fmt.Printf("service:%v SendWorkPackage submission DONE %v\n", serviceName, submissionErr)
@@ -482,7 +459,7 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 				new_service_idx = decoded_new_service_idx
 				new_service_found = true
 				previous_service_idx = decoded_new_service_idx
-				err = nodeClient.SendPreimageAnnouncement(new_service_idx, service.Code)
+				err = nodeClient.SubmitPreimage(new_service_idx, service.Code)
 				if err != nil {
 					log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 				}
@@ -491,7 +468,8 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	}
 	fmt.Printf("All services are ready, Sending preimage announcement\n")
 
-	log.Trace(module, "All services are ready, Sending preimage announcement\n")
+	// CLAIM: the above SubmitPreimage should be using a SubmitAndWaitForPreimage abstraction to avoid the below
+	log.Trace(module, "All services are ready, checking for inclusion\n")
 
 	for done := false; !done; {
 		ready := 0
@@ -581,7 +559,7 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 
 	builderIdx := 1
 	builderNode := nodes[builderIdx]
-	builderNode.preimages[bootstrapCodeHash] = bootstrapCode
+	//builderNode.AddPreimageToPool(0, bootstrapCode)
 	new_service_idx := uint32(0)
 	// Load testServices
 
@@ -612,26 +590,22 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	if err != nil {
 		panic(32)
 	}
+	// for _, service := range testServices {
+	// 	builderNode.AddPreimageToPool(0, service.Code) // TODO: check 0?
+	// }
 
-	// set builderNode's primages map
-	for _, service := range testServices {
-		builderNode.preimages[service.CodeHash] = service.Code
-	}
 	log.Info(module, "Waiting for the first block to be ready...")
 	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		// set up service using the Bootstrap service
-		refine_context := builderNode.statedb.GetRefineContext()
-		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash, "rc", refine_context)
-
+		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),
 			AuthCodeHost:          bootstrapService,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            bootstrapService,
@@ -644,11 +618,13 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 				},
 			},
 		}
-		// use get coworkers peers
-		core0_peers := builderNode.GetCoreCoWorkersPeers(0)
-		// ramdom pick the index from 0, 1, 2
-		randomIdx := rand.Intn(3)
-		err = core0_peers[randomIdx].SendWorkPackageSubmission(context.Background(), codeWorkPackage, types.ExtrinsicsBlobs{}, 0)
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		_, err := builderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+			WorkPackage:     codeWorkPackage,
+			CoreIndex:       0,
+			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -750,7 +726,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 	service_authcopy := testServices["auth_copy"]
 	n1 := nodes[1]
 	n4 := nodes[4]
-	core := 0
+
 	prevWorkPackageHash := common.Hash{}
 	for fibN := 1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
@@ -761,7 +737,6 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			}
 			importedSegments = append(importedSegments, importedSegment)
 		}
-		refine_context := n1.statedb.GetRefineContext()
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 		workPackage := types.WorkPackage{
@@ -769,7 +744,6 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 			Authorization:         []byte("0x"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,
@@ -791,36 +765,17 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 				},
 			},
 		}
-		workPackageHash := workPackage.Hash()
 
-		log.Info(module, fmt.Sprintf("FIB(%v) work package submitted", fibN), "workPackage", workPackageHash)
-		log.Warn(module, fmt.Sprintf("!!! FIB(%v) work package submitted", fibN), "workPackageHash", workPackageHash)
-		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, types.ExtrinsicsBlobs{}, 0)
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+
+		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+			CoreIndex:       0,
+			WorkPackage:     workPackage,
+			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		})
 		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-		// wait until the work report is pending
-		for {
-			time.Sleep(10 * time.Millisecond)
-			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-				if false {
-					var workReport types.WorkReport
-					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-					workReport = rho_state.WorkReport
-					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-				}
-				break
-			}
-		}
-
-		// wait until the work report is cleared
-		for {
-			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
+			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
 		}
 		prevWorkPackageHash = workPackageHash
 		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
@@ -906,7 +861,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			// submit to core 1
 			// v0, v3, v5 => core
 			senderIdx := 5
-			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func() {
 				defer cancel()
 				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful, types.ExtrinsicsBlobs{})
@@ -959,7 +914,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			// }
 			megCoreIdx := uint16(0)
 
-			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func() {
 				defer cancel()
 				sendWorkPackageTrack(ctx, nodes[5], workPackage, megCoreIdx, Meg_successful, types.ExtrinsicsBlobs{})
@@ -1013,8 +968,6 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 				fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(next_fib_tri_WorkPackage.Hash()))
 				// in case it gets stuck
 				// refine context need to be updated
-				next_fib_tri_WorkPackage.RefineContext = nodes[2].statedb.GetRefineContext()
-				next_Meg_WorkPackage.RefineContext = nodes[2].statedb.GetRefineContext()
 				next_Meg_WorkPackage.RefineContext.Prerequisites = []common.Hash{next_fib_tri_WorkPackage.Hash()}
 				// send workpackages to the network
 				curr_fib_tri_workpackage = next_fib_tri_WorkPackage
@@ -1097,19 +1050,17 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 }
 
 func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *types.WorkPackage, receiverCore uint16, msg chan string, extrinsics types.ExtrinsicsBlobs) {
-
 	workPackageHash := workPackage.Hash()
 	trialCount := 0
 	MaxTrialCount := 100
 	// send it right away for one time
-	corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
-	randIdx := rand.Intn(len(corePeers))
-	err := corePeers[randIdx].SendWorkPackageSubmission(context.Background(), *workPackage, extrinsics, receiverCore)
-
-	log.Trace(debugG, "SendWorkPackageSubmission to core for trial/timeslot", "n", senderNode.id, "p", corePeers[randIdx].PeerID, "core", receiverCore, "wph", workPackageHash,
-		"trialCount", trialCount, "timeslot", senderNode.statedb.GetSafrole().GetTimeSlot())
+	_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       receiverCore,
+		WorkPackage:     *workPackage,
+		ExtrinsicsBlobs: extrinsics,
+	})
 	if err != nil {
-		fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
+		fmt.Printf("SendWorkPackageSubmission ERR %v", err)
 	}
 
 	resend_ticker := time.NewTicker(1 * types.SecondsPerSlot * time.Second)
@@ -1157,12 +1108,15 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 				msg <- fmt.Sprint("trial")
 				resend_mode = "resend"
 			case "resend":
-				corePeers := senderNode.GetCoreCoWorkersPeers(receiverCore)
-				randIdx := rand.Intn(len(corePeers))
-				workPackageHash = workPackage.Hash()
-				err := corePeers[randIdx].SendWorkPackageSubmission(context.Background(), *workPackage, extrinsics, receiverCore)
+				ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+				defer cancel()
+				_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+					WorkPackage:     *workPackage,
+					ExtrinsicsBlobs: extrinsics,
+					CoreIndex:       receiverCore,
+				})
 				if err != nil {
-					fmt.Printf("SendWorkPackageSubmission ERR %v, sender: %d, receiver %d\n", err, senderNode.id, corePeers[randIdx].PeerID)
+					fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 				}
 				trialCount++
 				resend_mode = "rebuild"
@@ -1205,7 +1159,6 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 	TransferNum := transferNum
 	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
 	for n := 1; n <= TransferNum; n++ {
-		refineContext := n1.statedb.GetRefineContext()
 		var workPackage types.WorkPackage
 		if n%2 == 0 {
 			payload := make([]byte, 8)
@@ -1220,7 +1173,6 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
 				ParameterizationBlob:  []byte{},
-				RefineContext:         refineContext,
 				WorkItems: []types.WorkItem{
 					{
 						Service:            service0.ServiceCode,
@@ -1247,7 +1199,6 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
 				ParameterizationBlob:  []byte{},
-				RefineContext:         refineContext,
 				WorkItems: []types.WorkItem{
 					{
 						Service:            service1.ServiceCode,
@@ -1291,7 +1242,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 				fmt.Printf("\n** \033[36m TRANSFER=%v \033[0m workPackage: %v **\n", transferCounter, wp.Hash().String_short())
 			}
 		case wp := <-transferChan:
-			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
@@ -1350,7 +1301,6 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 	Transfer_WorkPackages := make([]types.WorkPackage, 0, TransferNum)
 
 	for n := 1; n <= TransferNum; n++ {
-		refineContext := n1.statedb.GetRefineContext()
 		var workPackage types.WorkPackage
 		var Transfer_WorkItems []types.WorkItem
 		if n%2 == 0 {
@@ -1378,7 +1328,6 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
 				ParameterizationBlob:  []byte{},
-				RefineContext:         refineContext,
 				WorkItems:             Transfer_WorkItems,
 			}
 		} else {
@@ -1406,7 +1355,6 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
 				ParameterizationBlob:  []byte{},
-				RefineContext:         refineContext,
 				WorkItems:             Transfer_WorkItems,
 			}
 		}
@@ -1441,7 +1389,7 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 				fmt.Printf("\n** \033[36m TRANSFER=%v \033[0m workPackage: %v **\n", transferCounter, wp.Hash().String_short())
 			}
 		case wp := <-transferChan:
-			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
@@ -1659,10 +1607,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	balancesServiceCodeHash := BalanceService.CodeHash
 
 	n1 := nodes[1]
-	n4 := nodes[4]
-	core := 0
 
-	refineContext := nodes[1].statedb.GetRefineContext()
 	// Method ID bytes
 	create_asset_id := uint32(0)
 	mint_id := uint32(1)
@@ -1734,7 +1679,6 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1749,35 +1693,18 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 			auth_copy_item,
 		},
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+	defer cancel()
+	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     create_asset_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
 
-	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx := rand.Intn(3)
-	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), create_asset_workPackage, extrinsicsBytes, 0)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
 
-	time.Sleep(6 * time.Second)
 	ShowAssetDetail(n1, balancesServiceIndex, 1984)
 
 	// Mint test
@@ -1819,7 +1746,6 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 			AuthCodeHost:          0,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            balancesServiceIndex,
@@ -1835,33 +1761,14 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 			},
 		}
 
-		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-		ramdamIdx := rand.Intn(3)
-		err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), mint_workPackage, extrinsicsBytes, 0)
+		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+			CoreIndex:       0,
+			WorkPackage:     mint_workPackage,
+			ExtrinsicsBlobs: extrinsicsBytes,
+		})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
-		// wait until the work report is pending
-		for {
-			time.Sleep(1 * time.Second)
-			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-				if false {
-					var workReport types.WorkReport
-					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-					workReport = rho_state.WorkReport
-					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-				}
-				break
-			}
-		}
-		// wait until the work report is cleared
-		for {
-			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-				break
-			}
-			time.Sleep(1 * time.Second)
-		}
-
 		time.Sleep(6 * time.Second)
 	}
 
@@ -1905,7 +1812,6 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -1921,33 +1827,15 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), mint_workPackage, extrinsicsBytes, 0)
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     mint_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-	time.Sleep(6 * time.Second)
+
 	ShowAssetDetail(n1, balancesServiceIndex, 1984)
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, account_key)
 
@@ -1986,7 +1874,6 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		AuthCodeHost:          balancesServiceIndex,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -2002,33 +1889,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), bond_workPackage, extrinsicsBytes, 0)
-	if err != nil {
-		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-	time.Sleep(6 * time.Second)
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     bond_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, account_key)
 
 	// Unbond test
@@ -2066,7 +1931,6 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -2082,33 +1946,11 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), unbond_workPackage, extrinsicsBytes, 0)
-	if err != nil {
-		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-	time.Sleep(6 * time.Second)
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     unbond_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, account_key)
 
 	// Transfer test
@@ -2151,7 +1993,6 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -2167,33 +2008,12 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), transfer_workPackage, extrinsicsBytes, 0)
-	if err != nil {
-		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-	time.Sleep(6 * time.Second)
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     transfer_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
+
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, from_account)
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, to_account)
 }
@@ -2215,9 +2035,6 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		ExportCount:        0,
 	}
 	n1 := nodes[1]
-	n4 := nodes[4]
-	core := 0
-	refineContext := nodes[1].statedb.GetRefineContext()
 
 	// Total Work Package Size in MB
 	var totalWPSizeInMB float64
@@ -2276,7 +2093,6 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -2292,38 +2108,16 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		},
 	}
 
-	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx := rand.Intn(3)
-
 	totalWPSizeInMB = calaulateTotalWPSize(create_asset_workPackage, extrinsicsBytes)
 	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
 
-	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), create_asset_workPackage, extrinsicsBytes, 0)
-	if err != nil {
-		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	time.Sleep(6 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+	defer cancel()
+	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     create_asset_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
 	ShowAssetDetail(n1, balancesServiceIndex, 1984)
 
 	// Scaled mint test
@@ -2379,41 +2173,22 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems:             mint_workItems,
 	}
 
 	totalWPSizeInMB = calaulateTotalWPSize(mint_workPackage, extrinsicsBytes)
 	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
 
-	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), mint_workPackage, extrinsicsBytes, 0)
+	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
+	defer cancel()
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     mint_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	time.Sleep(6 * time.Second)
 	ShowAssetDetail(n1, balancesServiceIndex, 1984)
 
 	// Scaled Transfer test
@@ -2478,43 +2253,24 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 		ParameterizationBlob:  []byte{},
-		RefineContext:         refineContext,
 		WorkItems:             transfer_workItems,
 	}
 
 	totalWPSizeInMB = calaulateTotalWPSize(transfer_workPackage, extrinsicsBytes)
 	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
 
-	core0_peers = n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx = rand.Intn(3)
-	err = core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), transfer_workPackage, extrinsicsBytes, 0)
+	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
+	defer cancel()
+
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     transfer_workPackage,
+		ExtrinsicsBlobs: extrinsicsBytes,
+	})
 	if err != nil {
-		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
 	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	time.Sleep(6 * time.Second)
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, sender)
-
 }
 
 func empty(nodes []*Node, testServices map[string]*types.TestService) {
@@ -2539,7 +2295,6 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 	SizeWorkPackages := make([]types.WorkPackage, 0, len(mbs))
 	SizeExtrinsicsBlobs := make([]types.ExtrinsicsBlobs, 0, len(mbs))
 	for _, mb := range mbs {
-		refineContext := n1.statedb.GetRefineContext()
 		var workPackage types.WorkPackage
 
 		payload_bytes := make([]byte, 8)
@@ -2554,7 +2309,6 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 			AuthCodeHost:          0,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            delayservice.ServiceCode,
@@ -2601,7 +2355,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 
 			}
 		case wp := <-SizeChan:
-			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), SizeSuccessful, SizeExtrinsicsBlobs[SizeCounter-1])
@@ -2620,7 +2374,6 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 	SecondsWorkPackages := make([]types.WorkPackage, 0, len(seconds))
 	SecondsExtrinsicsBlobs := make([]types.ExtrinsicsBlobs, 0, len(seconds))
 	for _, second := range seconds {
-		refineContext := n1.statedb.GetRefineContext()
 		var workPackage types.WorkPackage
 
 		payload_bytes := make([]byte, 8)
@@ -2635,7 +2388,6 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 			AuthCodeHost:          0,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refineContext,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            delayservice.ServiceCode,
@@ -2679,7 +2431,7 @@ func empty(nodes []*Node, testServices map[string]*types.TestService) {
 				fmt.Printf("\n** \033[36m %d seconds \033[0m workPackage: %v \033[0m\n", seconds[SecondsCounter-1], wp.Hash().String_short())
 			}
 		case wp := <-SecondsChan:
-			ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func(wp types.WorkPackage) {
 				defer cancel()
 				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), SecondsSuccessful, SecondsExtrinsicsBlobs[SecondsCounter-1])
@@ -2778,10 +2530,6 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 
 	service0 := testServices["blake2b"]
 	n1 := nodes[1]
-	n4 := nodes[4]
-	core := 0
-
-	refine_context := n1.statedb.GetRefineContext()
 
 	payload := make([]byte, 0)
 	input := []byte("Hello, Blake2b!")
@@ -2795,7 +2543,7 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 		Authorization:         []byte("0x"), // TODO: set up null-authorizer
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		RefineContext:         refine_context,
+
 		WorkItems: []types.WorkItem{
 			{
 				Service:            service0.ServiceCode,
@@ -2811,32 +2559,15 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 	workPackageHash := workPackage.Hash()
 
 	fmt.Printf("\n** \033[36m Blake2b=%v \033[0m workPackage: %v **\n", 1, common.Str(workPackageHash))
-	core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-	ramdamIdx := rand.Intn(3)
-	err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, types.ExtrinsicsBlobs{}, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+	defer cancel()
+	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		CoreIndex:       0,
+		WorkPackage:     workPackage,
+		ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+	})
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-	}
-	// wait until the work report is pending
-	for {
-		time.Sleep(1 * time.Second)
-		if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-			if false {
-				var workReport types.WorkReport
-				rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-				workReport = rho_state.WorkReport
-				fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-			}
-			break
-		}
-	}
-
-	// wait until the work report is cleared
-	for {
-		if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
 	}
 	fmt.Printf("\nBlake2b Expected Result: %x\n", common.Blake2Hash(input).Bytes())
 	k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
@@ -2898,11 +2629,6 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 				importedSegments = append(importedSegments, importedSegment)
 			}
 		}
-		refine_context, refineCtxErr := nodeClient.GetRefineContext()
-		if refineCtxErr != nil {
-			log.Crit("Failed to get refine context", "err", refineCtxErr)
-		}
-
 		var payload []byte
 		if fibN >= 0 {
 			for i := 0; i < fibN+2; i++ {
@@ -2920,7 +2646,6 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 			Authorization:         []byte("0x"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,
@@ -2952,67 +2677,19 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 			fibN_string = fmt.Sprintf("%d", fibN)
 		}
 
-		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackage", workPackageHash) // "workPackageContent", workPackage.String()
-		workPackageReq := types.WorkPackageRequest{
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		_, err := nodeClient.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
 			CoreIndex:       uint16(core),
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
-		}
-		submissionErr := nodeClient.SendWorkPackage(workPackageReq)
-		if submissionErr != nil {
-			log.Crit("SendWorkPackageSubmission ERR", "err", submissionErr)
-		}
-		/*
-			core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-			ramdamIdx := rand.Intn(3)
-			err := core0_peers[ramdamIdx].SendWorkPackageSubmission(workPackage, extrinsics, 0)
-			if err != nil {
-				fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-			}
-		*/
-		// wait until the work report is pending
-
-		log.Info(module, fmt.Sprintf("FIB2-(%s) work checking rho_state", fibN_string), "workPackage", workPackageHash)
-		startJCE, _ := nodeClient4.GetCurrJCE()
-		for {
-			time.Sleep(1 * time.Second)
-			currJCE, _ := nodeClient4.GetCurrJCE()
-			rho_state, err := nodeClient4.GetAvailabilityAssignments(uint32(core))
-			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP %v\n", startJCE, fibN_string, rho_state)
-			//log.Info(module, fmt.Sprintf("FIB2-(%s) GetAvailabilityAssignments rho_state RESP", fibN_string), "rho_state", rho_state, "err", err)
-			if err != nil {
-				//...
-			}
-			if rho_state != nil || startJCE-currJCE > 6 {
-				if false {
-					var workReport types.WorkReport
-					//rho_state := nodeClient4.statedb.JamState.AvailabilityAssignments[core]
-					workReport = rho_state.WorkReport
-					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-				}
-				break
-			}
-		}
-
-		// wait until the work report is cleared
-		fmt.Printf("[FIB2-(%s)] waiting for work report to be cleared\n", fibN_string)
-		for {
-			rho_state, err := nodeClient4.GetAvailabilityAssignments(uint32(core))
-			fmt.Printf("[counter:%d] FIB2-(%s) GetAvailabilityAssignments rho_state RESP2 %v ERR=%v\n", startJCE, fibN_string, rho_state, err)
-			if err == nil {
-				if rho_state == nil {
-					fmt.Printf("FIB2-(%s) Cleared\n", fibN_string)
-					break
-				} else {
-					fmt.Printf("FIB2-(%s) NOT empty\n", fibN_string)
-				}
-			}
-			time.Sleep(1 * time.Second)
+		})
+		if err != nil {
+			log.Crit("SendWorkPackageSubmission ERR", "err", err)
 		}
 
 		fmt.Printf("[FIB2-(%s)] ready to check storage\n", fibN_string)
 		prevWorkPackageHash = workPackageHash
-		time.Sleep(1 * time.Second)
 		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
 		for _, key := range keys {
 			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
@@ -3024,7 +2701,7 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 
 		if fibN == 3 || fibN == 6 {
 			time.Sleep(3 * time.Second) // wait for the empty anchor to be set
-			err := nodeClient.SendPreimageAnnouncement(service0.ServiceCode, service0.Code)
+			err := nodeClient.SubmitPreimage(service0.ServiceCode, service0.Code)
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
@@ -3032,7 +2709,7 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 		}
 
 		if fibN == -1 {
-			err := nodeClient.SendPreimageAnnouncement(service0.ServiceCode, fib2_child_code["corevm_child"].Code)
+			err := nodeClient.SubmitPreimage(service0.ServiceCode, fib2_child_code["corevm_child"].Code)
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
@@ -3049,8 +2726,8 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 	log.Info(module, "FIB2 START")
 
 	jam_key := []byte("jam")
-	jam_key_hash := common.Blake2Hash(jam_key)
-	jam_key_length := uint32(len(jam_key))
+	// jam_key_hash := common.Blake2Hash(jam_key)
+	// jam_key_length := uint32(len(jam_key))
 
 	service0 := testServices["corevm"]
 	service_authcopy := testServices["auth_copy"]
@@ -3064,7 +2741,6 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 
 	n1 := nodes[1]
 	n4 := nodes[4]
-	core := 0
 	prevWorkPackageHash := common.Hash{}
 
 	// Generate the extrinsic
@@ -3098,8 +2774,6 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 				importedSegments = append(importedSegments, importedSegment)
 			}
 		}
-		refine_context := n1.statedb.GetRefineContext()
-
 		var payload []byte
 		if fibN >= 0 {
 			for i := 0; i < fibN+2; i++ {
@@ -3117,7 +2791,6 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 			Authorization:         []byte("0x"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,
@@ -3151,34 +2824,16 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 
 		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackage", workPackageHash)
 		log.Info(module, fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string), "workPackageContent", workPackage.String())
-		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, extrinsics, 0)
+
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+			CoreIndex:       0,
+			WorkPackage:     workPackage,
+			ExtrinsicsBlobs: extrinsics,
+		})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-		// wait until the work report is pending
-		startJCE := n4.GetCurrJCE()
-		for {
-			time.Sleep(200 * time.Millisecond)
-			currJCE := n4.GetCurrJCE()
-			if n4.statedb.JamState.AvailabilityAssignments[core] != nil || currJCE-startJCE > 6 {
-				if false {
-					var workReport types.WorkReport
-					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-					workReport = rho_state.WorkReport
-					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-				}
-				break
-			}
-		}
-
-		// wait until the work report is cleared
-		for {
-			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-				break
-			}
-			time.Sleep(1 * time.Second)
 		}
 
 		prevWorkPackageHash = workPackageHash
@@ -3193,8 +2848,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		}
 
 		if fibN == 3 || fibN == 6 {
-			time.Sleep(3 * time.Second) // wait for the empty anchor to be set
-			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, jam_key_hash, jam_key_length, jam_key)
+			err = n1.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, jam_key)
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
@@ -3202,7 +2856,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		}
 
 		if fibN == -1 {
-			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, fib2_child_codehash, fib2_child_code_length, fib2_child_code["corevm_child"].Code)
+			err = n1.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, fib2_child_code["corevm_child"].Code)
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
@@ -3255,7 +2909,6 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 
 	n1 := nodes[1]
 	n4 := nodes[4]
-	core := 0
 	prevWorkPackageHash := common.Hash{}
 
 	for step_n := 0; step_n <= 30; step_n++ {
@@ -3270,8 +2923,6 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 				importedSegments = append(importedSegments, importedSegment)
 			}
 		}
-		refine_context := n1.statedb.GetRefineContext()
-
 		var payload []byte
 		if step_n > 0 {
 			payload = make([]byte, 0, 12)
@@ -3295,7 +2946,6 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 			Authorization:         []byte("0x"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,
@@ -3320,33 +2970,16 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 		}
 		workPackageHash := workPackage.Hash()
 
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
 		log.Info(module, fmt.Sprintf("Game_of_life-(%d) work package submitted", step_n), "workPackage", workPackageHash)
-		core0_peers := n1.GetCoreCoWorkersPeers(uint16(core))
-		ramdamIdx := rand.Intn(3)
-		err := core0_peers[ramdamIdx].SendWorkPackageSubmission(context.Background(), workPackage, extrinsics, 0)
+		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+			CoreIndex:       0,
+			WorkPackage:     workPackage,
+			ExtrinsicsBlobs: extrinsics,
+		})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-		// wait until the work report is pending
-		for {
-			time.Sleep(100 * time.Millisecond)
-			if n4.statedb.JamState.AvailabilityAssignments[core] != nil {
-				if false {
-					var workReport types.WorkReport
-					rho_state := n4.statedb.JamState.AvailabilityAssignments[core]
-					workReport = rho_state.WorkReport
-					fmt.Printf(" expecting to audit %v\n", workReport.Hash())
-				}
-				break
-			}
-		}
-
-		// wait until the work report is cleared
-		for {
-			if n4.statedb.JamState.AvailabilityAssignments[core] == nil {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
 		}
 
 		if step_n > 0 {

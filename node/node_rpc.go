@@ -45,12 +45,19 @@ func (nc *NodeClient) GetCurrJCE() (uint32, error) {
 	return result, err
 }
 
-func (c *NodeClient) AddPreimage(preimage []byte) (common.Hash, error) {
-	var codeHash common.Hash
-	err := c.Client.Call("jam.AddPreimage", preimage, &codeHash)
-	return codeHash, err
+func (c *NodeClient) GetState() (*statedb.StateSnapshot, error) {
+	var jsonStr string
+	err := c.Client.Call("jam.State", []string{}, &jsonStr)
+	if err != nil {
+		return &statedb.StateSnapshot{}, err
+	}
+	var sdb statedb.StateSnapshot
+	err = json.Unmarshal([]byte(jsonStr), &sdb)
+	if err != nil {
+		return &statedb.StateSnapshot{}, fmt.Errorf("failed to unmarshal refine context: %w", err)
+	}
+	return &sdb, nil
 }
-
 func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	var jsonStr string
 	err := c.Client.Call("jam.GetRefineContext", []string{}, &jsonStr)
@@ -66,7 +73,42 @@ func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	return context, nil
 }
 
-func (c *NodeClient) SendWorkPackage(workPackageReq types.WorkPackageRequest) error {
+func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *types.WorkPackageRequest) (wph common.Hash, err error) {
+	workPackage := workPackageReq.WorkPackage
+
+	rc, err := c.GetRefineContext()
+	if err != nil {
+		return wph, err
+	}
+	workPackage.RefineContext = rc
+	wph = workPackage.Hash()
+	err = c.SendWorkPackage(workPackageReq)
+	if err != nil {
+		return wph, err
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return wph, fmt.Errorf("Timed out waiting for work package %s to be accumulated", wph)
+		case <-ticker.C:
+			sdb, err := c.GetState()
+			if err != nil {
+				return wph, err
+			}
+			history := sdb.AccumulationHistory[types.EpochLength-1]
+			for _, h := range history.WorkPackageHash {
+				if h == wph {
+					return wph, nil
+				}
+			}
+		}
+	}
+}
+
+func (c *NodeClient) SendWorkPackage(workPackageReq *types.WorkPackageRequest) error {
 	// Marshal the WorkPackageRequest to JSON
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
@@ -101,13 +143,13 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.H
 	return storageBytes, true, nil
 }
 
-func (c *NodeClient) SendPreimageAnnouncement(serviceIndex uint32, preimage []byte) error {
+func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) error {
 	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
 	preimageStr := common.Bytes2Hex(preimage)
 	req := []string{serviceIndexStr, preimageStr}
 
 	var res string
-	err := c.Client.Call("jam.SendPreimageAnnouncement", req, &res)
+	err := c.Client.Call("jam.SubmitPreimage", req, &res)
 	if err != nil {
 		return err
 	}
@@ -235,11 +277,6 @@ func (j *Jam) GetBuildVersion(req []string, res *string) error {
 func (j *Jam) GetCurrJCE(req []string, res *string) error {
 	currJCE := j.NodeContent.nodeSelf.GetCurrJCE()
 	*res = fmt.Sprintf("%d", currJCE)
-	return nil
-}
-
-func (j *Jam) AddPreimage(preimage []byte, res *common.Hash) error {
-	*res = j.NodeContent.AddPreimage(preimage)
 	return nil
 }
 
@@ -840,13 +877,11 @@ func (j *Jam) SubmitPreimage(req []string, res *string) error {
 	service_index := uint32(serviceIndex)
 	preimage_hash := common.Blake2Hash(preimage)
 	log.Info(module, "SubmitPreimage", "service", service_index, "preimage", common.Blake2Hash(preimage), "len", preimage_length)
-	/*preimage_hash, err := j.statedb.ValidateLookup(&types.Preimages{Requester: service_index, Blob: preimage})
-	if err != nil {
-		log.Error(module, "SubmitPreimage ERR1", "err", err)
-		*res = err.Error()
-		return err
-	}*/
-	// preimage announcement
+
+	// Add it to your own pool
+	j.AddPreimageToPool(service_index, preimage)
+
+	// Announce it everyone else with CE142 (and they will request it with CE143, which will be available in the pool from the above)
 	err = j.BroadcastPreimageAnnouncement(service_index, preimage_hash, preimage_length, preimage)
 	if err != nil {
 		log.Error(module, "SubmitPreimage ERR2", "err", err)
@@ -939,13 +974,11 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 	*res = "OK"
 	return nil
 }
+
 func (j *Jam) GetRefineContext(req []string, res *string) error {
 	if len(req) != 0 {
 		return fmt.Errorf("Invalid number of arguments")
 	}
-	// get the latest refine context....
-	//refinecontext := j.statedb.GetRefineContext()
-
 	// Access statedb via Node reference
 	refinecontext := j.statedb.GetRefineContext() // not sure
 
