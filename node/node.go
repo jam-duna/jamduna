@@ -1338,7 +1338,7 @@ func (n *Node) ApplyFirstBlock(ctx context.Context, nextBlockNode *types.BT_Node
 	defer n.statedbMapMutex.Unlock()
 
 	if nextBlock.Header.Hash() == *n.latest_block {
-		if err := n.assureNewBlock(ctx, nextBlock); err != nil {
+		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
 			log.Error(debugA, "ApplyFirstBlock: assureNewBlock failed", "n", n.String(), "err", err)
 			return fmt.Errorf("assureNewBlock failed: %w", err)
 		}
@@ -1418,11 +1418,8 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	defer n.statedbMapMutex.Unlock()
 
 	if nextBlock.Header.Hash() == *n.latest_block {
-		if n.hub != nil {
-			go n.hub.ReceiveLatestBlock(nextBlock, newStateDB, false)
-		}
 
-		if err := n.assureNewBlock(ctx, nextBlock); err != nil {
+		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
 			log.Error(debugA, "ApplyBlock: assureNewBlock failed", "n", n.String(), "err", err)
 			return fmt.Errorf("assureNewBlock failed: %w", err)
 		}
@@ -1451,7 +1448,11 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	return nil
 }
 
-func (n *Node) assureNewBlock(ctx context.Context, b *types.Block) error {
+func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.StateDB) error {
+	if n.hub != nil {
+		go n.hub.ReceiveLatestBlock(b, sdb, false)
+	}
+
 	if len(b.Extrinsic.Guarantees) > 0 {
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(b.Extrinsic.Guarantees))
@@ -2091,7 +2092,7 @@ func (n *Node) runClient() {
 			}()
 
 			assureCtx, cancelAssure := context.WithTimeout(context.Background(), NormalTimeout)
-			n.assureNewBlock(assureCtx, newBlock)
+			n.assureNewBlock(assureCtx, newBlock, newStateDB)
 			//MK: Shawn to check
 			log.Debug(module, "runClient:ProcessState Proposer !!!!", "n", n.String(), "slot", newBlock.Header.Slot)
 			n.SetCompletedJCE(newBlock.Header.Slot)

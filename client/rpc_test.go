@@ -1,6 +1,7 @@
 package rpcclient
 
 import (
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -114,7 +115,6 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 			Authorization:         []byte(""),
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			//RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            fibIndex,
@@ -171,14 +171,12 @@ func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req types.WorkPack
 			return workPackageHash, err
 		}
 		workpackage_req.WorkPackage.RefineContext = refine_context
-		err = client.SubmitWorkPackage(workpackage_req)
+		workPackageHash = workpackage_req.WorkPackage.Hash()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		err = client.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-		workPackageHash = workpackage_req.WorkPackage.Hash()
-		err = client.WaitForWorkPackage(workpackage_req.CoreIndex, workPackageHash, "accumulated")
-		if err != nil {
-			fmt.Printf("Trial %d failed %v\n", tries, err)
 			tries = tries + 1
 		} else {
 			return workPackageHash, nil
@@ -214,6 +212,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		Hash: extrinsic_hash,
 		Len:  extrinsic_len,
 	})
+	//fibIndex := testServices["corevm"].ServiceIndex
 
 	extrinsics = append(extrinsics, extrinsic)
 	for fibN := -1; fibN <= targetN; fibN++ {
@@ -227,10 +226,6 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 				//fmt.Printf("fibN=%d ImportedSegment %d (%v, %d)\n", fibN, i, prevWorkPackageHash, i)
 				importedSegments = append(importedSegments, importedSegment)
 			}
-		}
-		refine_context, err := client.GetRefineContext()
-		if err != nil {
-			t.Fatalf("Error: %s", err)
 		}
 
 		var payload []byte
@@ -255,7 +250,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 			Authorization:         []byte("0x"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
+			//			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            fibIndex,
@@ -291,30 +286,12 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
-		err = client.SubmitWorkPackage(workpackage_req)
+		workPackageHash, err := client.RobustSubmitWorkPackage(workpackage_req, 5)
 		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-		// wait until the work report is pending
-		for {
-			time.Sleep(1 * time.Second)
-			if client.state == nil {
-				continue
-			}
-			find := false
-			for _, packagehash := range client.state.AccumulationHistory[types.EpochLength-1].WorkPackageHash {
-				if packagehash == workPackageHash {
-					find = true
-					break
-				}
-			}
-			if find {
-				break
-			}
+			t.Fatalf("Error: %s", err)
 		}
 
 		prevWorkPackageHash = workPackageHash
-		time.Sleep(1 * time.Second)
 		fib_index := fibIndex
 		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
 		for _, key := range keys {
@@ -324,42 +301,35 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 				fmt.Printf("Fib2(%v) result %d: %x\n", fibN_string, key, service_account_byte)
 			}
 		}
-		if fibN == 3 || fibN == 6 {
-			time.Sleep(3 * time.Second) // wait for the empty anchor to be set
-			// err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, jam_key_hash, jam_key_length, jam_key)
-			// if err != nil {
-			// 	log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
-			// }
-			_, err := client.AddPreimage(jam_key)
-			if err != nil {
-				t.Fatalf("AddPreimage: %s", err)
-			}
-			err = client.SubmitPreimage(fibIndex, jam_key)
-			if err != nil {
-				t.Fatalf("SendPreimageAnnouncement: %s", err)
-			}
-			time.Sleep(6 * time.Second) // make sure EP is sent and insert a time slot
-		}
 
 		if fibN == -1 {
-			// err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, fib2_child_codehash, fib2_child_code_length, fib2_child_code["corevm_child"].Code)
-			// if err != nil {
-			// 	log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
-			// }
-			_, err := client.AddPreimage(fib2_child_code["corevm_child"].Code)
-			if err != nil {
-				t.Fatalf("AddPreimage: %s", err)
-			}
-			err = client.SubmitPreimage(fibIndex, fib2_child_code["corevm_child"].Code)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			err := client.SubmitAndWaitForPreimage(ctx, fibIndex, fib2_child_code["corevm_child"].Code)
 			if err != nil {
 				t.Fatalf("SendPreimageAnnouncement: %s", err)
 			}
-			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
+		}
+		if fibN == 3 || fibN == 6 {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			err = client.SubmitAndWaitForPreimage(ctx, fibIndex, jam_key)
+			if err != nil {
+				t.Fatalf("SendPreimageAnnouncement: %s", err)
+			}
 		}
 
 		for i := 0; i <= int(fibN); i++ {
-			segment, _ := client.Segment(workPackageHash, uint16(i))
-			fmt.Printf("segment %d %v\n", i, segment[:24])
+			segment, err := client.Segment(workPackageHash, uint16(i))
+			if err != nil {
+				fmt.Printf("Segment Err i=%d @ FibN %d ERR %v\n", i, fibN, err)
+			} else {
+				if len(segment) > 24 {
+					fmt.Printf("segment %d %v\n", i, segment[:24])
+				} else {
+
+				}
+			}
 		}
 	}
 }
@@ -416,11 +386,6 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 				importedSegments = append(importedSegments, importedSegment)
 			}
 		}
-		refine_context, err := client.GetRefineContext()
-		if err != nil {
-			t.Fatalf("Error: %s", err)
-		}
-
 		var payload []byte
 		if step_n > 0 {
 			payload = make([]byte, 0, 12)
@@ -449,7 +414,6 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 			Authorization:         []byte("0x"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			RefineContext:         refine_context,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            game_of_life_index,
@@ -482,27 +446,11 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 			ExtrinsicsBlobs: extrinsics,
 		}
 
-		err = client.SubmitWorkPackage(workpackage_req)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := client.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
 		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-
-		// wait until the work report is pending
-		for {
-			time.Sleep(1 * time.Second)
-			if client.state == nil {
-				continue
-			}
-			find := false
-			for _, packagehash := range client.state.AccumulationHistory[types.EpochLength-1].WorkPackageHash {
-				if packagehash == workPackageHash {
-					find = true
-					break
-				}
-			}
-			if find {
-				break
-			}
+			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
 		}
 
 		if step_n > 0 {
@@ -520,16 +468,13 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 			ws_push(out)
 
 		} else {
-			_, err := client.AddPreimage(service0_child_code["game_of_life_child"].Code)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			code := service0_child_code["game_of_life_child"].Code
+			err = client.SubmitAndWaitForPreimage(ctx, game_of_life_index, code)
 			if err != nil {
-				t.Fatalf("AddPreimage: %s", err)
+				t.Fatalf("SubmitAndWaitPreimage: %s", err)
 			}
-			err = client.SubmitPreimage(game_of_life_index, service0_child_code["game_of_life_child"].Code)
-			if err != nil {
-				t.Fatalf("SendPreimageAnnouncement: %s", err)
-			}
-			time.Sleep(1 * time.Second)
-			//time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
 		}
 		prevWorkPackageHash = workPackageHash
 	}

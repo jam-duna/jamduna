@@ -664,7 +664,7 @@ func (j *Jam) ServiceValue(req []string, res *string) error {
 		return fmt.Errorf("ReadServiceStorage failed (serviceID=%d, h=%s) %v", serviceIndex, storage_hash, err)
 	}
 	if !ok {
-		return fmt.Errorf("ReadServiceStorage not found (serviceID=%d, h=%s) %v", serviceIndex, storage_hash)
+		return fmt.Errorf("ReadServiceStorage not found (serviceID=%d, h=%s)", serviceIndex, storage_hash)
 	}
 	*res = common.Bytes2Hex(storage)
 	return nil

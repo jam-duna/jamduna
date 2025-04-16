@@ -96,6 +96,12 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 				}
 				data, err = json.Marshal(payload)
 				client.sendData(data)
+				if res.Status == "accumulated" {
+					log.Info(module, "WORKPACKAGE ACCUMULATED", "wph", wph, "data", string(data))
+					delete(client.WorkPackages, wph)
+				} else {
+					log.Trace(module, "WORKPACKAGE UPDATED", "wph", wph, "data", string(data))
+				}
 			}
 		}
 
@@ -104,6 +110,7 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 			if upd == nil {
 				continue
 			}
+			// TODO: delete
 			for _, req := range reqs {
 				switch req.Method {
 				case SubServiceInfo:
@@ -135,6 +142,7 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 					if upd.ServicePreimage == nil {
 						continue
 					}
+
 					res, ok := upd.ServicePreimage[req.hash]
 					if !ok || res == nil {
 						continue

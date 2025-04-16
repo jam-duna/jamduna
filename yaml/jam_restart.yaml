@@ -12,7 +12,7 @@
           {% elif MODE == "next_2min_start" %}
           {{ lookup('pipe', 'date -u -d "120 seconds" +"+%Y-%m-%d %H:%M:%S"') }}          
           {% else %}
-          {{ lookup('pipe', 'date -u -d "55 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
+          {{ lookup('pipe', 'date -u -d "60 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
           {% endif %}
     - name: Display JAM_START_TIME
       debug:

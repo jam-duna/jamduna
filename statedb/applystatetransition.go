@@ -240,9 +240,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 func (s *StateDB) computeStateUpdates(blk *types.Block, targetJCE uint32) {
 	// setup workpackage updates (guaranteed, queued, accumulated)
+	log.Trace(module, "computeStateUpdates", "len(e_p)", len(blk.Extrinsic.Preimages), "len(e_g)", len(blk.Extrinsic.Guarantees), "len(ah)", len(s.JamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
 	for _, g := range blk.Extrinsic.Guarantees {
 		wph := g.Report.AvailabilitySpec.WorkPackageHash
-		log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: SubWorkPackageResult guaranteed", "s", 0, "hash", wph)
+		log.Trace(s.Authoring, "computeStateUpdates-G", "hash", wph)
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,
@@ -266,7 +267,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block, targetJCE uint32) {
 	*/
 	h := s.JamState.AccumulationHistory[types.EpochLength-1]
 	for _, wph := range h.WorkPackageHash {
-		log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: SubWorkPackageResult accumulated", "s", 0, "hash", wph)
+		log.Trace(s.Authoring, "computeStateUpdates-A", "hash", wph)
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,
@@ -274,7 +275,6 @@ func (s *StateDB) computeStateUpdates(blk *types.Block, targetJCE uint32) {
 			Status:          "accumulated",
 		}
 	}
-
 	for _, p := range blk.Extrinsic.Preimages {
 		serviceID := p.Requester
 		hash := common.Blake2Hash(p.Blob)
@@ -283,7 +283,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block, targetJCE uint32) {
 			sp = types.NewServiceUpdate(serviceID)
 			s.stateUpdate.ServiceUpdates[serviceID] = sp
 		}
-		log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: adding sub preimage", "s", serviceID, "hash", hash, "l", len(p.Blob))
+		log.Trace(s.Authoring, "computeStateUpdates-P", "s", serviceID, "hash", hash, "l", len(p.Blob))
 		sp.ServicePreimage[hash] = &types.SubServicePreimageResult{
 			HeaderHash: s.HeaderHash,
 			Slot:       s.GetTimeslot(),
