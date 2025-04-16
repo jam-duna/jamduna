@@ -84,7 +84,7 @@ func TestClient(t *testing.T) {
 	case "fib":
 		fib(t, client, services_map, 314159)
 	case "fib2":
-		fib2(t, client, services_map, 1000)
+		fib2(t, client, services_map, 50)
 	case "game_of_life":
 		game_of_life(t, client, services_map, game_of_life_ws_push)
 	default:
@@ -212,7 +212,9 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		Hash: extrinsic_hash,
 		Len:  extrinsic_len,
 	})
-	//fibIndex := testServices["corevm"].ServiceIndex
+
+	fibIndex := testServices["corevm"].ServiceIndex
+	client.Subscribe(SubServiceValue, map[string]interface{}{"serviceID": fmt.Sprintf("%d", fibIndex)})
 
 	extrinsics = append(extrinsics, extrinsic)
 	for fibN := -1; fibN <= targetN; fibN++ {
@@ -241,7 +243,6 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 			}
 		}
 
-		fibIndex := testServices["corevm"].ServiceIndex
 		fibCodeHash := testServices["corevm"].ServiceCodeHash
 		authIndex := testServices["auth_copy"].ServiceIndex
 		authCodeHash := testServices["auth_copy"].ServiceCodeHash

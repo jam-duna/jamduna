@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 )
 
 const (
@@ -90,14 +91,18 @@ type StorageObject struct {
 }
 
 func (o StorageObject) Clone() StorageObject {
-	// Deep copy the Value slice
+	// Deep copy the Key+Value slice
+	keyCopy := make([]byte, len(o.Key))
+	copy(keyCopy, o.Key)
 	valueCopy := make([]byte, len(o.Value))
 	copy(valueCopy, o.Value)
 
 	return StorageObject{
+		
 		Accessed: o.Accessed,
 		Deleted:  o.Deleted,
 		Dirty:    o.Dirty,
+		Key: keyCopy,
 		Value:    valueCopy,
 		RawKey:   o.RawKey,
 	}
@@ -441,6 +446,7 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK com
 	hk := common.Compute_storageKey_internal(rawK)
 	s.Dirty = true
 	storeObj, exists := s.Storage[hk]
+	log.Info("nnod", "writeStorage", "mu_k", fmt.Sprintf("%x", mu_k))
 	// Use the Accessed flag here if already exists
 	if exists {
 		s.Storage[hk] = StorageObject{

@@ -127,16 +127,28 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 					if upd.ServiceValue == nil {
 						continue
 					}
-					v, ok := upd.ServiceValue[req.hash]
-					if !ok || v == nil {
-						continue
+					if req.hash == (common.Hash{}) {
+						for k, v := range upd.ServiceValue {
+							payload := types.WSPayload{
+								Method: SubServiceValue,
+								Result: v,
+							}
+							data, err = json.Marshal(payload)
+							client.sendData(data)
+							log.Info(module, SubServiceValue, "gen", string(data), "k", k, "v", v)
+						}
+					} else {
+						v, ok := upd.ServiceValue[req.hash]
+						if !ok || v == nil {
+							continue
+						}
+						payload := types.WSPayload{
+							Method: SubServiceValue,
+							Result: v,
+						}
+						data, err = json.Marshal(payload)
+						client.sendData(data)
 					}
-					payload := types.WSPayload{
-						Method: SubServiceValue,
-						Result: v,
-					}
-					data, err = json.Marshal(payload)
-					client.sendData(data)
 
 				case SubServicePreimage:
 					if upd.ServicePreimage == nil {
@@ -304,6 +316,54 @@ func (c *Client) addSubscription(serviceID uint32, req *SubscriptionRequest) {
 	c.Services[serviceID] = append(c.Services[serviceID], req)
 }
 
+func fetchHashAttr(req *SubscriptionRequest, key string) common.Hash {
+	if val, ok := req.Params[key]; ok {
+		if str, ok := val.(string); ok {
+			return common.HexToHash(str)
+		}
+	}
+	return common.Hash{}
+}
+
+func fetchUint32Attr(req *SubscriptionRequest, key string) (uint32, bool) {
+	val, ok := req.Params[key]
+	if !ok {
+		return 0, false
+	}
+
+	switch v := val.(type) {
+	case int:
+		return uint32(v), true
+	case float64:
+		return uint32(v), true
+	case string:
+		n, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		return uint32(n), true
+	default:
+		return 0, false
+	}
+}
+
+func fetchBoolAttr(req *SubscriptionRequest, key string) (bool, bool) {
+	val, ok := req.Params[key]
+	if !ok {
+		return false, false
+	}
+
+	switch v := val.(type) {
+	case bool:
+		return v, true
+	case string:
+		return v == "true", true
+	default:
+		log.Warn(debugWeb, "unsupported bool attr type", key, fmt.Sprintf("%T", val))
+		return false, false
+	}
+}
+
 // readPump handles WebSocket reads and subscription management
 func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -340,31 +400,8 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 			req.isFinalized = false
 			serviceID := uint32(0)
 			if req.Method == SubServiceInfo || req.Method == SubServiceValue || req.Method == SubServicePreimage || req.Method == SubServiceRequest {
-				// Handle isFinalized (string vs bool)
-				switch v := req.Params["isFinalized"].(type) {
-				case bool:
-					req.isFinalized = v
-				case string:
-					req.isFinalized = (v == "true")
-				default:
-					req.isFinalized = false // or leave as-is
-				}
-
-				// Handle serviceID (string vs int or float64??)
-				switch v := req.Params["serviceID"].(type) {
-				case int:
-					serviceID = uint32(v)
-				case float64:
-					serviceID = uint32(v)
-				case string:
-					val, err := strconv.ParseUint(v, 10, 32)
-					if err != nil {
-						log.Warn(debugWeb, "invalid serviceID", v)
-						return
-					}
-					serviceID = uint32(val)
-				default:
-				}
+				req.isFinalized, _ = fetchBoolAttr(&req, "isFinalized")
+				serviceID, _ = fetchUint32Attr(&req, "serviceID")
 			}
 
 			switch req.Method {
@@ -374,17 +411,18 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 				break
 			case SubServiceValue:
 				// Handle subscription to service value
-				req.hash = common.HexToHash(req.Params["hash"].(string))
+				req.hash = fetchHashAttr(&req, "hash")
+				log.Info(module, "fetchHashAttr", "method", req.Method, "h", req.hash)
 				c.addSubscription(serviceID, &req)
 				break
 			case SubServicePreimage:
 				// Handle subscription to service preimage
-				req.hash = common.HexToHash(req.Params["hash"].(string))
+				req.hash = fetchHashAttr(&req, "hash")
 				c.addSubscription(serviceID, &req)
 				break
 			case SubServiceRequest:
 				// Handle subscription to service request
-				req.hash = common.HexToHash(req.Params["hash"].(string))
+				req.hash = fetchHashAttr(&req, "hash")
 				c.addSubscription(serviceID, &req)
 				break
 			case SubBestBlock:

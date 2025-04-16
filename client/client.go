@@ -145,14 +145,17 @@ func (c *NodeClient) listenWebSocket() {
 		case SubServiceValue:
 			var payload struct {
 				ServiceID uint32      `json:"serviceID"`
+				HeaderHash common.Hash `json:"headerHash"`
+				Slot   uint32 `json:"slot"`
 				Hash      common.Hash `json:"hash"`
+				Key     string      `json:"key"`
 				Value     string      `json:"value"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
 				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
 				continue
 			}
-			//fmt.Printf("ServiceValue update for service %d %s: %+v\n", payload.ServiceID, payload.Hash, payload.Value)
+			fmt.Printf("ServiceValue update for service %d %s: key %+v val %+v\n", payload.ServiceID, payload.Hash, payload.Key, payload.Value)
 			//h := common.HexToHash(payload.Hash)
 			c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
 			break
@@ -214,7 +217,7 @@ func (c *NodeClient) Subscribe(method string, params map[string]interface{}) err
 		"method": method,
 		"params": params,
 	}
-	//fmt.Printf("Subscribe %v\n", msg)
+
 	return c.wsConn.WriteJSON(msg)
 }
 
@@ -343,7 +346,6 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 		c.Subscribe(SubWorkPackage, map[string]interface{}{
 			"hash": fmt.Sprintf("%s", workPackageHash),
 		})
-		fmt.Printf("\n*SubmitAndWaitForWorkPackage* subscribed to %s\n", workPackageHash)
 
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -356,10 +358,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 			case <-ticker.C:
 				if status, ok := c.WorkPackage[workPackageHash]; ok {
 					if status == "accumulated" {
-						fmt.Printf("*WorkPackage* DONE!!! %s => STATUS %s\n\n", workPackageHash, status)
 						return
-					} else {
-						fmt.Printf("*WorkPackage* NOT done.... %s => STATUS %s\n", workPackageHash, status)
 					}
 				}
 			}
@@ -394,7 +393,6 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 			"serviceID": fmt.Sprintf("%d", serviceIndex),
 			"hash":      fmt.Sprintf("%s", preimageHash),
 		})
-		fmt.Printf("\n*SubmitAndWaitForPreimage*: subscribe(serviceIndex=%d, h=%s, l=%d)\n", serviceIndex, preimageHash, len(preimage))
 
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -406,7 +404,6 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 				return
 			case <-ticker.C:
 				if _, ok := c.Preimage[preimageHash]; ok {
-					fmt.Printf("*WaitForPreimage*: received(serviceID=%d, h=%s, lh=%d) DONE\n\n", serviceIndex, preimageHash, len(preimage))
 					return
 				}
 			}
@@ -532,7 +529,7 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 		return
 	}
 
-	fmt.Printf("NewService %d\n--------\n\n", newServiceIdx)
+	fmt.Printf("NewService %s %d\n--------\n\n", serviceName, newServiceIdx)
 	return
 }
 
@@ -570,7 +567,6 @@ func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) error 
 	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
 	preimageStr := common.Bytes2Hex(preimage)
 	req := []string{serviceIndexStr, preimageStr}
-	fmt.Printf("NodeClient: SubmitPreimage(service=%d, preimage=%s, %d bytes)\n", serviceIndex, common.Blake2Hash(preimage), len(preimage))
 
 	var codeHash common.Hash
 	err := c.GetClient().Call("jam.AddPreimage", preimage, &codeHash)
