@@ -4,12 +4,12 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"strings"
 
 	"testing"
 
@@ -33,7 +33,7 @@ type JNode interface {
 	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
 }
 
-var jamManualSimple = flag.Bool("jce_manual_simple", false, "jce_manual_simple")
+var jce_manual_mode = flag.Bool("jce_manual_mode", false, "jce_manual_mode")
 var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
 var pvm_authoring_log = flag.Bool("pvm_authoring_log", false, "pvm_authoring_log")
 
@@ -141,35 +141,6 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	return nodes, nil
 }
 
-// Monitor the Timeslot & Epoch Progression & Kill as Necessary
-func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, error) {
-	initialTimeSlot := uint32(0)
-	startTime := time.Now()
-
-	// Terminate it at epoch N
-	statusTicker := time.NewTicker(3 * time.Second)
-	defer statusTicker.Stop()
-
-	for done := false; !done; {
-		<-statusTicker.C
-		currTimeSlot := n.statedb.GetSafrole().Timeslot
-		if initialTimeSlot == 0 && currTimeSlot > 0 {
-			currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
-			initialTimeSlot = uint32(currEpoch) * types.EpochLength
-		}
-		currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
-		if currTimeSlot-initialTimeSlot >= offsetTimeSlot {
-			done = true
-			continue
-		}
-		if time.Since(startTime).Seconds() >= float64(maxTimeAllowed) {
-			s := fmt.Sprintf("[TIMEOUT] H_t=%v e'=%v,m'=%v | missing %v Slot!", currTimeSlot, currEpoch, currPhase, currTimeSlot-initialTimeSlot)
-			return false, fmt.Errorf(s)
-		}
-	}
-	return true, nil
-}
-
 func GetService(serviceNames []string, getmetadata bool) (services map[string]*types.TestService, err error) {
 	return getServices(serviceNames, getmetadata)
 }
@@ -200,247 +171,81 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 	return
 }
 
-func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
-	nodes, err := SetUpNodes(JCEManual, numNodes, basePort) // TODO change this to JCEManual
-	if err != nil {
-		panic(err)
-	}
-
-	var sendtickets bool
-	if caseType == "safrole" {
-		sendtickets = true
+// run any test with dispute using testName_dispute (i.e fib_dispute)
+func testWithDispute(s string) (jam string, isDisputeMode bool) {
+	const suffix = "_dispute"
+	if strings.HasSuffix(s, suffix) {
+		jam = strings.TrimSuffix(s, suffix)
+		isDisputeMode = true
 	} else {
-		sendtickets = false
+		jam = s
+		isDisputeMode = false
 	}
-
-	// Run the JCE updater (it will run indefinitely).
-	initialJCE := uint32(11)
-	jceMode, jceManager, managerCancel, err := SetupJceManager(nodes, initialJCE, nodes[0].jceMode)
-	if err != nil && jceManager == nil {
-		t.Fatalf("JCE Manager setup failed: %v", err)
-	}
-
-	if managerCancel != nil {
-		// TODO Schedule the cancel function call for when jamtest exits
-		defer managerCancel()
-	}
-	if jceManager != nil {
-		fmt.Printf("jamtest: Manual JCE Manager (%p) is set up and running.\n", jceManager)
-		go jceManager.Replenish()
-	} else {
-		fmt.Printf("jamtest: JCE Mode: %s\n", jceMode)
-	}
-	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
-	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
-
-	log.Info(module, "JAMTEST", "jam", caseType, "targetN", targetTimeslotLength)
-
-	for _, n := range nodes {
-		n.SetSendTickets(sendtickets)
-	}
-
-	watchNode := nodes[len(nodes)-1]
-
-	done := make(chan bool)
-	errChan := make(chan error)
-
-	go RunGrandpaGraphServer(watchNode, basePort)
-
-	go func() {
-		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
-		if err != nil {
-			errChan <- err
-		} else if ok {
-			done <- true
-		}
-	}()
-
-	select {
-	case <-done:
-		log.Info(module, "Completed")
-	case err := <-errChan:
-		t.Fatalf("[%v] Failed: %v", caseType, err)
-	}
+	return
 }
 
-func jamtestclient(t *testing.T, jam string, targetN int) {
-
-	var logLevel string
-	flag.StringVar(&logLevel, "log", "trace", "Logging level (e.g., debug, info, warn, error, crit)")
+func jamtest(t *testing.T, jam_raw string, targetN int) {
 	flag.Parse()
-	peerListMapFile := "../cmd/archive_node/peerlist/local.json"
-	peerListMap, err := ParsePeerList(peerListMapFile)
-	if err != nil {
-		t.Fatalf("Error loading peerlist %v: %v", peerListMapFile, err)
+
+	JCEMode := JCEDefault
+	if *jce_manual_mode {
+		JCEMode = JCEManual
 	}
 
-	nodes, err := LoadRPCClients(peerListMap)
-	if err != nil {
-		panic(fmt.Sprintf("Error setting up nodes: %v\n", err))
-	}
-	fmt.Printf("Node Clients: %v\n", nodes)
+	sendTickets := true //set this to false to run WP without E_T interference
+	jam, isDisputeMode := testWithDispute(jam_raw)
 
-	log.InitLogger(logLevel)
-	//log.EnableModule(debugDA)
-	// log.EnableModule(debugSeg)
-	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
-
-	nodeClient := nodes[1]
-
-	if *prereq_test {
-		test_prereq = true
-	}
-
-	fmt.Printf("Test PreReq: %v\n", test_prereq)
-
-	// give some time for nodes to come up
-	initTicker := time.NewTicker(1 * time.Second)
-	defer initTicker.Stop()
-	for range initTicker.C {
-		currJCE, err := nodeClient.GetCurrJCE()
-		if err != nil {
-			continue
-		}
-		if currJCE >= types.EpochLength {
-			break
-		}
-	}
-
-	currJCE, _ := nodeClient.GetCurrJCE()
-	fmt.Printf("Ready @JCE: %v\n", currJCE)
-	time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
-	// code length: 206
-	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
-	if err != nil {
-		panic(0)
-	}
-	bootstrapService := uint32(statedb.BootstrapServiceCode)
-	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-	log.Info(module, "BootstrapCodeHash", "bootstrapCodeHash", bootstrapCodeHash, "codeLen", len(bootstrapCode), "fileName", statedb.BootstrapServiceFile)
-
-	serviceNames := []string{"auth_copy", "fib"}
-	new_service_idx := uint32(0)
-
-	// Load testServices
-	if jam == "fib2" || jam == "fib3" {
-		serviceNames = []string{"corevm", "auth_copy"}
-		log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
-	}
-
-	fmt.Printf("Services to Load: %v\n", serviceNames)
-
-	testServices, err := getServices(serviceNames, true)
-	if err != nil {
-		panic(32)
-	}
-
-	log.Trace(module, "Waiting for the first block to be ready...")
-	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
-	var previous_service_idx uint32
-	for serviceName, service := range testServices {
-		// set up service using the Bootstrap service
-		codeWorkPackage := types.WorkPackage{
-			Authorization:         []byte(""),
-			AuthCodeHost:          bootstrapService,
-			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
-			WorkItems: []types.WorkItem{
-				{
-					Service:            bootstrapService,
-					CodeHash:           bootstrapCodeHash,
-					Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
-					ImportedSegments:   make([]types.ImportSegment, 0),
-					ExportCount:        0,
-				},
-			},
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-		defer cancel()
-		_, submissionErr := nodeClient.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-			CoreIndex:       0,
-			WorkPackage:     codeWorkPackage,
-			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
-		})
-		if submissionErr != nil {
-			log.Crit("SubmitAndWaitForWorkpackage ERR", "err", submissionErr)
-		}
-
-		new_service_found := false
-		log.Info(module, "Waiting for service to be ready", "service", serviceName)
-		for !new_service_found {
-			k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
-			service_account_byte, ok, err := nodeClient.GetServiceStorage(bootstrapService, k)
-			if err != nil || !ok {
-				time.Sleep(1 * time.Second)
-				continue
-			}
-			time.Sleep(1 * time.Second)
-			decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
-			if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
-				log.Info(module, "!!! Service Found", "service", serviceName, "service_idx", decoded_new_service_idx)
-				service.ServiceCode = decoded_new_service_idx
-				new_service_idx = decoded_new_service_idx
-				new_service_found = true
-				previous_service_idx = decoded_new_service_idx
-				err = nodeClient.SubmitAndWaitForPreimage(ctx, new_service_idx, service.Code)
-				if err != nil {
-					log.Error(debugP, "SubmitAndWaitForPreimage", "err", err)
-				} else {
-					log.Info(module, "SubmitAndWaitFor Preimage DONE", "service", serviceName, "service_idx", new_service_idx)
-				}
-			}
-		}
-	}
-	fmt.Printf("All services are ready, Sending preimage announcement\n")
-
-	for done := false; !done; {
-		ready := 0
-		nservices := 0
-		for serviceName, service := range testServices {
-			for _, nodeClient := range nodes {
-				fmt.Printf("Calling nodeClient GetServicePreimage: Name:%v service.ServiceCode:%v CodeHash:%v\n", serviceName, service.ServiceCode, service.CodeHash)
-				code, err := nodeClient.GetServicePreimage(service.ServiceCode, service.CodeHash)
-				if err != nil {
-					log.Trace(debugDA, "ReadServicePreimageBlob Pending")
-				} else if len(code) > 0 {
-					log.Info(module, "GetServicePreimage", "serviceName", serviceName, "ServiceIndex", service.ServiceCode, "codeHash", service.CodeHash, "len", len(code))
-					if bytes.Equal(code, service.Code) {
-						fmt.Printf("GetServicePreimage: %v Ready and Match\n", serviceName)
-						ready++
-					} else {
-						fmt.Printf("GetServicePreimage: %v NOT Match!!!\n", serviceName)
-					}
-				}
-			}
-			nservices++
-		}
-		if ready == types.TotalValidators*nservices {
-			done = true
-		} else {
-			time.Sleep(1 * time.Second)
-		}
-	}
-
-	fmt.Printf("Service Loaded!\n")
-
+	// Specify testServices
+	defaultDelay := 2 * types.SecondsPerSlot * time.Second
+	var serviceNames []string
 	switch jam {
-	case "fib3":
-		targetN := 9
-		fib3(nodes[1], testServices, targetN)
+	case "safrole", "fallback":
+		JCEMode = JCEFast
+		defaultDelay = 0 * types.SecondsPerSlot * time.Second
+		sendTickets = (jam == "safrole")
+	case "megatron":
+		serviceNames = []string{"fib", "tribonacci", "megatron", "auth_copy"} // Others include: "padovan", "pell", "racaman"
+	case "transfer", "scaled_transfer":
+		serviceNames = []string{"transfer_0", "transfer_1", "auth_copy"} // 2 transfer services share the same code
+	case "balances", "scaled_balances":
+		serviceNames = []string{"balances", "auth_copy"}
+	case "empty":
+		serviceNames = []string{"delay", "auth_copy"}
+	case "blake2b":
+		serviceNames = []string{"blake2b"}
+	case "fib":
+		serviceNames = []string{"fib", "auth_copy"}
+	case "fib2":
+		serviceNames = []string{"corevm", "auth_copy"}
+		//log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
+	case "game_of_life":
+		serviceNames = []string{"game_of_life", "auth_copy"}
+	default:
+		serviceNames = []string{"auth_copy", "fib"}
 	}
-}
-
-func jamtest(t *testing.T, jam string, targetN int) {
-	flag.Parse()
 
 	basePort := GenerateRandomBasePort()
-	nodes, err := SetUpNodes(JCEDefault, numNodes, basePort) // TODO change this to JCEManual
+	nodes, err := SetUpNodes(JCEMode, numNodes, basePort) // TODO change this to JCEManual
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
+
+	// Handling Safrole
+	for _, n := range nodes {
+		n.SetSendTickets(sendTickets)
+	}
+
+	// Handling Dispute Mode
+	if isDisputeMode {
+		nodeTypeList := []string{"lying_judger_F", "lying_judger_T", "lying_judger_T", "lying_judger_T", "lying_judger_T", "lying_judger_T"}
+		fmt.Printf("****** DisputeMode! ******\n")
+		for i, node := range nodes {
+			fmt.Printf("N%d ---- %s\n", i, nodeTypeList[i])
+			node.AuditNodeType = nodeTypeList[i]
+		}
+		fmt.Printf("**************************\n")
+	}
+
 	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 
 	if *prereq_test {
@@ -491,38 +296,14 @@ func jamtest(t *testing.T, jam string, targetN int) {
 
 	builderNode := nodes[1]
 	new_service_idx := uint32(0)
-	// Load testServices
 
-	serviceNames := []string{"auth_copy", "fib"}
-	if jam == "megatron" {
-		serviceNames = []string{"fib", "tribonacci", "megatron", "auth_copy"} // Others include: "padovan", "pell", "racaman"
-	}
-	if jam == "transfer" || jam == "scaled_transfer" {
-		serviceNames = []string{"transfer_0", "transfer_1", "auth_copy"} // 2 transfer services share the same code
-	}
-	if jam == "balances" || jam == "scaled_balances" {
-		serviceNames = []string{"balances", "auth_copy"}
-	}
-	if jam == "empty" {
-		serviceNames = []string{"delay", "auth_copy"}
-	}
-	if jam == "blake2b" {
-		serviceNames = []string{"blake2b"}
-	}
-	if jam == "fib2" {
-		serviceNames = []string{"corevm", "auth_copy"}
-		//log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
-	}
-	if jam == "game_of_life" {
-		serviceNames = []string{"game_of_life", "auth_copy"}
-	}
 	testServices, err := getServices(serviceNames, true)
 	if err != nil {
 		t.Fatalf("GetServices %v", err)
 	}
 
 	log.Info(module, "Waiting for the first block to be ready...")
-	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	time.Sleep(defaultDelay) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
@@ -581,12 +362,21 @@ func jamtest(t *testing.T, jam string, targetN int) {
 		log.Info(module, "----- NEW SERVICE", "service", serviceName, "service_idx", new_service_idx)
 
 	}
-
-	log.Info(module, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
+	if len(testServices) > 0 {
+		log.Info(module, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
+	}
 
 	switch jam {
-	// case "megatron":
-	// 	megatron(nodes, testServices, targetN)
+	case "safrole":
+		SafroleTestEpochLen := 4
+		SafroleBufferTime := 30
+		safrole(nodes[1], jceManager)
+		waitForTermination(nodes[1], "safrole", SafroleTestEpochLen, SafroleBufferTime, t)
+	case "fallback":
+		FallbackEpochLen := 3
+		FallbackBufferTime := 10
+		safrole(nodes[1], jceManager)
+		waitForTermination(nodes[1], "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "fib":
 		fib(nodes[1], testServices, targetN, jceManager)
 	case "fib2":
@@ -610,5 +400,7 @@ func jamtest(t *testing.T, jam string, targetN int) {
 		blake2b(nodes[1], testServices)
 	case "game_of_life":
 		game_of_life(nodes[1], testServices, jceManager)
+	case "megatron":
+		//megatron(nodes, testServices, targetN)
 	}
 }

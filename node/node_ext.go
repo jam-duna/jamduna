@@ -555,12 +555,13 @@ func StartGameOfLifeServer(addr string, path string) func(data []byte) {
 }
 
 func SetupJceManager(nodes []*Node, initialJCE uint32, jceMode string) (string, *ManualJCEManager, context.CancelFunc, error) {
-	var manager *ManualJCEManager = nil
-	var cancelFunc context.CancelFunc = nil
-	var setupErr error = nil
+	var manager *ManualJCEManager
+	var cancelFunc context.CancelFunc
+	var setupErr error
 
 	if len(nodes) == 0 {
-		return jceMode, nil, nil, errors.New("SetupJceManager: cannot setup JCE Manager with zero nodes")
+		return jceMode, nil, nil,
+			errors.New("SetupJceManager: cannot setup JCE Manager with zero nodes")
 	}
 
 	fmt.Printf("SetupJceManager: Detected JCE Mode '%v'\n", jceMode)
@@ -568,60 +569,47 @@ func SetupJceManager(nodes []*Node, initialJCE uint32, jceMode string) (string, 
 	switch jceMode {
 	case JCEManual:
 		fmt.Println("SetupJceManager: Setting up Manual JCE Manager...")
-		var ctx context.Context
-		ctx, cancelFunc = context.WithCancel(context.Background())
-		defer cancelFunc()
+		// Create a cancellable context and return its cancelFunc
+		ctx, cf := context.WithCancel(context.Background())
+		cancelFunc = cf
+
 		managerChan := make(chan *ManualJCEManager, 1)
-
 		go func(innerCtx context.Context) {
-
 			defer close(managerChan)
 
 			fmt.Println("Goroutine: Creating ManualJCEManager...")
 			m := NewManualJCEManager(nodes, initialJCE)
-			if m == nil {
-
-				fmt.Println("Goroutine Error: Failed to create ManualJCEManager (nil returned)")
-
-				return
-			}
 
 			fmt.Println("Goroutine: Sending manager instance back...")
 			select {
 			case managerChan <- m:
 				fmt.Println("Goroutine: Manager instance sent.")
 			case <-innerCtx.Done():
-				fmt.Println("Goroutine: Context cancelled before manager instance could be sent.")
+				fmt.Println("Goroutine: Context cancelled before sending instance.")
 				return
 			}
 
 			fmt.Println("Goroutine: Starting ManualJCEManager loop...")
-
 			m.Start(innerCtx)
 			fmt.Println("Goroutine: ManualJCEManager loop finished.")
-
 		}(ctx)
 
 		fmt.Println("SetupJceManager: Waiting for Manual JCE Manager instance...")
-
 		select {
 		case receivedManager, ok := <-managerChan:
 			if !ok || receivedManager == nil {
-				fmt.Println("SetupJceManager: Failed to receive manager instance (channel closed or nil received).")
-				if cancelFunc != nil {
-					cancelFunc()
-				}
+				fmt.Println("SetupJceManager: Failed to receive manager instance.")
 				setupErr = errors.New("SetupJceManager: failed to setup ManualJCEManager")
+				// Cancel the context since setup failed
+				cancelFunc()
 			} else {
 				manager = receivedManager
 				fmt.Printf("SetupJceManager: Manual JCE Manager (%p) setup complete.\n", manager)
 			}
 		case <-time.After(10 * time.Second):
 			fmt.Println("SetupJceManager: Timeout waiting for manager instance.")
-			if cancelFunc != nil {
-				cancelFunc()
-			}
 			setupErr = errors.New("SetupJceManager: timeout waiting for ManualJCEManager")
+			cancelFunc()
 		}
 
 	case JCESimple:
@@ -629,14 +617,12 @@ func SetupJceManager(nodes []*Node, initialJCE uint32, jceMode string) (string, 
 		go UpdateJCESignalSimple(nodes, initialJCE)
 
 	default:
-		fmt.Printf("SetupJceManager: Unknown JCE Mode '%s'. Using default delay behavior...\n", jceMode)
-
+		fmt.Printf("SetupJceManager: Unknown JCE Mode '%s'. Using default delay...\n", jceMode)
 		time.Sleep(types.SecondsPerSlot * time.Second)
 	}
 
 	if setupErr != nil {
 		return jceMode, nil, nil, setupErr
 	}
-
 	return jceMode, manager, cancelFunc, nil
 }

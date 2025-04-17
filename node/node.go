@@ -1972,7 +1972,7 @@ func (n *Node) runFasterJCE() {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
-	blockTicker := time.NewTicker(2000 * time.Millisecond)
+	blockTicker := time.NewTicker(1500 * time.Millisecond)
 	defer blockTicker.Stop()
 
 	for {
@@ -1997,7 +1997,7 @@ func (n *Node) runJCEManually() {
 	for {
 		select {
 		case newJCE := <-n.new_timeslot_chan:
-			time.Sleep(2500 * time.Millisecond)
+			time.Sleep(1500 * time.Millisecond)
 			n.SetCurrJCE(newJCE)
 		}
 	}
