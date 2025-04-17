@@ -66,7 +66,6 @@ const (
 	debugQuic    = log.QuicStreamMonitoring // QUIC
 	numNodes     = types.TotalValidators
 	quicAddr     = "127.0.0.1:%d"
-	godMode      = false
 	Grandpa      = false
 	Audit        = false
 	revalidate   = false // turn off for production (or publication of traces)
@@ -259,10 +258,6 @@ type Node struct {
 	JAMBlocksEndpoint string
 	JAMBlocksPort     uint16
 
-	// god mode
-	godCh        *chan uint32
-	timeslotUsed map[uint32]bool
-
 	// JCE
 	jceMode           string
 	currJCE           uint32 // the JCE to be processed
@@ -349,34 +344,6 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func (n *Node) setGodCh(c *chan uint32) {
-	n.godCh = c
-}
-
-func (n *Node) sendGodTimeslotUsed(timeslot uint32) {
-	if n.godCh == nil {
-		return
-	}
-
-	*n.godCh <- timeslot
-}
-
-func (n *Node) receiveGodTimeslotUsed(timeslot uint32) {
-	if n.godCh == nil {
-		return
-	}
-	n.timeslotUsed[timeslot] = true
-}
-
-func (n *Node) checkGodTimeslotUsed(timeslot uint32) bool {
-	if n.godCh == nil {
-		return false
-	}
-
-	_, ok := n.timeslotUsed[timeslot]
-	return ok
-}
-
 func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
 	snapshotRawBytes, err := os.ReadFile(filePath)
 	if err != nil {
@@ -458,9 +425,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		grandpaCommitMessageCh:    make(chan grandpa.CommitMessage, DefaultChannelSize),
 
 		sendTickets: true,
-
-		timeslotUsed: make(map[uint32]bool),
-		godCh:        nil,
 
 		dataDir: dataDir,
 
@@ -689,12 +653,93 @@ func (n *NodeContent) GetPeerInfoByEd25519(key types.Ed25519Key) (*Peer, error) 
 	return nil, fmt.Errorf("peer not found")
 }
 
-func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32, preimage []byte) error {
+func RunGrandpaGraphServer(watchNode *Node, basePort uint16) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	block_graph_server := types.NewGraphServer(basePort)
+	go block_graph_server.StartServer()
+	for {
+		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ticker.C:
+			block_graph_server.Update(watchNode.block_tree)
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+func (n *Node) GetImportSegments(importedSegments []types.ImportSegment) ([][]byte, error) {
+	workReportSearchMap := make(map[common.Hash]*SpecIndex)
+	erasureRootIndex := make(map[common.Hash]*SpecIndex)
+
+	// Step 1: resolve WorkReport for each RequestedHash
+	for _, importedSegment := range importedSegments {
+		si, ok := workReportSearchMap[importedSegment.RequestedHash]
+		if !ok {
+			si = n.WorkReportSearch(importedSegment.RequestedHash)
+			if si == nil {
+				return nil, fmt.Errorf("WorkReportSearch(%s) not found", importedSegment.RequestedHash)
+			}
+			workReportSearchMap[importedSegment.RequestedHash] = si
+		}
+
+		erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
+		oldSi, exists := erasureRootIndex[erasureRoot]
+		if exists {
+			oldSi.AddIndex(importedSegment.Index)
+		} else {
+			si.AddIndex(importedSegment.Index)
+			erasureRootIndex[erasureRoot] = si
+		}
+	}
+
+	// Step 2: reconstruct segments for each erasure root
+	segmentDataMap := make(map[common.Hash][][]byte)
+	for erasureRoot, si := range erasureRootIndex {
+		segments, _, err := n.reconstructSegments(si)
+		if err != nil {
+			return nil, fmt.Errorf("reconstructSegments failed for erasureRoot %s: %v", erasureRoot, err)
+		}
+		segmentDataMap[erasureRoot] = segments
+	}
+
+	// Step 3: map back to original import order
+	result := make([][]byte, len(importedSegments))
+	for i, importedSegment := range importedSegments {
+		si := workReportSearchMap[importedSegment.RequestedHash]
+		erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
+		segments := segmentDataMap[erasureRoot]
+		for j, idx := range si.Indices {
+			if idx == importedSegment.Index {
+				result[i] = segments[j]
+				break
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (n *Node) GetServiceStorage(serviceIndex uint32, k common.Hash) ([]byte, bool, error) {
+	return n.getState().GetTrie().GetServiceStorage(serviceIndex, k)
+}
+
+func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32, preimage []byte) (err error) {
 	errCh := make(chan error, 1)
 	preimageHash := common.Blake2Hash(preimage)
 
+	log.Info(module, "SubmitAndWaitForPreimage SUBMITTED", "id", serviceIndex, "preimageHash", preimageHash, "len", len(preimage))
+
 	// Submit preimage
 	n.AddPreimageToPool(serviceIndex, preimage)
+	// Announce it everyone else with CE142 (and they will request it with CE143, which will be available in the pool from the above)
+	err = n.BroadcastPreimageAnnouncement(serviceIndex, preimageHash, uint32(len(preimage)), preimage)
+	if err != nil {
+		log.Error(module, "SubmitAndWaitForPreimage ERR", "err", err)
+		return err
+	}
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -710,6 +755,7 @@ func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32
 				return err
 			}
 			if len(time_slots) > 0 && ok {
+				log.Info(module, "SubmitAndWaitForPreimage ON-CHAIN", "id", serviceIndex, "preimageHash", preimageHash, "len", len(preimage))
 				return nil
 			}
 		}
@@ -726,12 +772,11 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 		log.Warn(module, "SubmitAndWaitForWorkPackage", "err", err)
 		return common.Hash{}, err
 	}
-
 	workPackageHash = wp.WorkPackage.Hash()
+	log.Info(module, "SubmitAndWaitForWorkPackage SUBMITTED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex(), "coreIndex", wp.CoreIndex)
 	if wp.JCEManager != nil {
 		jceManager := wp.JCEManager
 		jceManager.SendWP(workPackageHash)
-		identifier := wp.Identifier
 
 		initialJCE := n.GetCurrJCE()
 		refineDone := false
@@ -754,7 +799,7 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 					for coreIdx, segmentRootInfo := range beta.Reported {
 						wpHash := segmentRootInfo.WorkPackageHash
 						if workPackageHash == wpHash {
-							fmt.Printf("[***JCE=%d] core-%d c=%v WP=%v Refine Complete! \n", currJCE, coreIdx, identifier, workPackageHash)
+							fmt.Printf("[***JCE=%d] core-%d c=%v WP=%v Refine Complete! \n", currJCE, coreIdx, wp.Identifier, workPackageHash)
 							refineDone = true
 							// if refineOnly {
 							// 	return workPackageHash, nil
@@ -768,7 +813,7 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 				accumulationHistory_i := accumulationHistory[i]
 				for _, accumulatedWPHash := range accumulationHistory_i.WorkPackageHash {
 					if workPackageHash == accumulatedWPHash {
-						fmt.Printf("[***JCE=%d] c=%v WP=%v Accumulate Complete! \n", currJCE, identifier, workPackageHash)
+						fmt.Printf("[***JCE=%d] c=%v WP=%v Accumulate Complete! \n", currJCE, wp.Identifier, workPackageHash)
 						//return true
 						return workPackageHash, nil
 					}
@@ -776,22 +821,24 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 			}
 
 			if currJCE-initialJCE >= types.RecentHistorySize {
-				fmt.Printf("[***JCE=%d] c=%v WP=%v Expired! \n", currJCE, identifier, workPackageHash)
+				fmt.Printf("[***JCE=%d] c=%v WP=%v Expired! \n", currJCE, wp.Identifier, workPackageHash)
 				//TODO: ctx.Done()??
 				//return false
 			}
 		}
 
 	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return workPackageHash, ctx.Err()
-		default:
-			time.Sleep(1 * time.Second)
+		case <-ticker.C:
 			history := n.statedb.JamState.AccumulationHistory[types.EpochLength-1]
 			for _, h := range history.WorkPackageHash {
 				if h == workPackageHash {
+					log.Info(module, "SubmitAndWaitForWorkPackage ACCUMULATED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex(), "coreIndex", wp.CoreIndex)
 					return workPackageHash, nil
 				}
 			}
@@ -2153,13 +2200,6 @@ func (n *Node) runClient() {
 			if newStateDB == nil {
 				continue
 			}
-
-			if n.checkGodTimeslotUsed(currJCE) {
-				fmt.Printf("%s could author but blocked by god\n", n.String())
-				return
-			}
-			n.sendGodTimeslotUsed(currJCE)
-
 			oldstate := n.statedb
 			newStateDB.SetAncestor(newBlock.Header, oldstate)
 

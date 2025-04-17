@@ -1202,7 +1202,7 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{})
 		xs.NumStorageItems += 2
 		xs.StorageSize += 81 + uint64(z)
-		log.Info(vm.logging, vm.Str("SOLICIT OK AAA"), "h", account_lookuphash, "z", z, "newvalue", []uint32{})
+		log.Debug(vm.logging, vm.Str("SOLICIT OK"), "h", account_lookuphash, "z", z, "newvalue", []uint32{})
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
@@ -1212,19 +1212,19 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l)
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		log.Info(vm.logging, vm.Str("SOLICIT FULL"), "h", account_lookuphash, "z", z)
+		log.Debug(vm.logging, vm.Str("SOLICIT FULL"), "h", account_lookuphash, "z", z)
 		return
 	}
 	if len(X_s_l) == 2 { // [x, y]
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
-		log.Info(vm.logging, vm.Str("SOLICIT OK BBB"), "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		log.Debug(vm.logging, vm.Str("SOLICIT OK BBB"), "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
 	} else {
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Info(vm.logging, vm.Str("SOLICIT HUH"), "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
+		log.Debug(vm.logging, vm.Str("SOLICIT HUH"), "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
 		return
 	}
 }

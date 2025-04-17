@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -154,6 +155,30 @@ func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) error 
 		return err
 	}
 	return nil
+}
+
+func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32, preimage []byte) error {
+	err := c.SubmitPreimage(serviceIndex, preimage)
+	if err != nil {
+		return err
+	}
+	preimageHash := common.Blake2Hash(preimage)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("Timed out waiting for preimage")
+		case <-ticker.C:
+			img, err := c.GetServicePreimage(serviceIndex, preimageHash)
+			if err != nil {
+				log.Error(module, "SubmitAndWaitForPreimage", "err", err)
+			}
+			if bytes.Compare(img, preimage) == 0 {
+				return nil
+			}
+		}
+	}
 }
 
 func (c *NodeClient) GetServicePreimage(serviceIndex uint32, codeHash common.Hash) ([]byte, error) {

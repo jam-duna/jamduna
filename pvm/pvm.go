@@ -1069,7 +1069,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
-	if string(vm.ServiceMetadata) == "game_of_life" || true {
+	if string(vm.ServiceMetadata) == "game_of_life" {
 		fmt.Printf("Result: %v\n", r)
 		fmt.Printf("VM.PC: %v\n", vm.pc)
 		fmt.Printf("VM.Fault_address: %v\n", vm.Fault_address)
