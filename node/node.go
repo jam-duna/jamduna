@@ -75,14 +75,13 @@ const (
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 
 	// GOAL: centralize use of context timeout parameters here, avoid hard
-	TinyTimeout      = 2000 * time.Millisecond
-	SmallTimeout     = 6 * time.Second
-	NormalTimeout    = 9 * time.Second
-	MediumTimeout    = 10 * time.Second
-	LargeTimeout     = 12 * time.Second
-	RefineTimeout    = 30 * time.Second
-	VeryLargeTimeout = 600 * time.Second
-
+	TinyTimeout        = 2000 * time.Millisecond
+	SmallTimeout       = 60 * time.Second
+	NormalTimeout      = 90 * time.Second
+	MediumTimeout      = 100 * time.Second
+	LargeTimeout       = 120 * time.Second
+	VeryLargeTimeout   = 6000 * time.Second
+	RefineTimeout      = 30 * time.Second
 	DefaultChannelSize = 200
 )
 
@@ -718,11 +717,72 @@ func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32
 
 }
 
-func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *types.WorkPackageRequest) (workPackageHash common.Hash, err error) {
-	core_peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
+func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (workPackageHash common.Hash, err error) {
+
 	wp.WorkPackage.RefineContext = n.statedb.GetRefineContext()
+	core_peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
 	err = core_peers[rand0.Intn(3)].SendWorkPackageSubmission(ctx, wp.WorkPackage, wp.ExtrinsicsBlobs, wp.CoreIndex)
+	if err != nil {
+		log.Warn(module, "SubmitAndWaitForWorkPackage", "err", err)
+		return common.Hash{}, err
+	}
+
 	workPackageHash = wp.WorkPackage.Hash()
+	if wp.JCEManager != nil {
+		jceManager := wp.JCEManager
+		jceManager.SendWP(workPackageHash)
+		identifier := wp.Identifier
+
+		initialJCE := n.GetCurrJCE()
+		refineDone := false
+		for {
+			time.Sleep(10 * time.Millisecond)
+			recentBlocks := n.statedb.JamState.RecentBlocks
+			//availabilityAssignments := n.statedb.JamState.AvailabilityAssignments
+			accumulationHistory := n.statedb.JamState.AccumulationHistory
+			c15Bytes, _ := types.Encode(accumulationHistory)
+			c3Bytes, _ := types.Encode(recentBlocks)
+			if jceManager != nil {
+				jceManager.UpdateAccumulationState(c15Bytes)
+				jceManager.UpdateRefineState(c3Bytes)
+			}
+
+			currJCE := n.GetCurrJCE()
+			if !refineDone {
+				for i := len(recentBlocks) - 1; i >= 0; i-- {
+					beta := recentBlocks[i]
+					for coreIdx, segmentRootInfo := range beta.Reported {
+						wpHash := segmentRootInfo.WorkPackageHash
+						if workPackageHash == wpHash {
+							fmt.Printf("[***JCE=%d] core-%d c=%v WP=%v Refine Complete! \n", currJCE, coreIdx, identifier, workPackageHash)
+							refineDone = true
+							// if refineOnly {
+							// 	return workPackageHash, nil
+							// }
+						}
+					}
+				}
+			}
+
+			for i := len(accumulationHistory) - 1; i >= 0; i-- {
+				accumulationHistory_i := accumulationHistory[i]
+				for _, accumulatedWPHash := range accumulationHistory_i.WorkPackageHash {
+					if workPackageHash == accumulatedWPHash {
+						fmt.Printf("[***JCE=%d] c=%v WP=%v Accumulate Complete! \n", currJCE, identifier, workPackageHash)
+						//return true
+						return workPackageHash, nil
+					}
+				}
+			}
+
+			if currJCE-initialJCE >= types.RecentHistorySize {
+				fmt.Printf("[***JCE=%d] c=%v WP=%v Expired! \n", currJCE, identifier, workPackageHash)
+				//TODO: ctx.Done()??
+				//return false
+			}
+		}
+
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -737,6 +797,10 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *types.WorkPa
 			}
 		}
 	}
+}
+
+func MonitorAccumalate(n *Node, jceManager *ManualJCEManager, workpackageHash common.Hash, identifier string, refineOnly bool) bool {
+	return false
 }
 
 func (n *Node) GetBandersnatchSecret() []byte {
@@ -1996,7 +2060,7 @@ func (n *Node) runJCEManually() {
 	for {
 		select {
 		case newJCE := <-n.new_timeslot_chan:
-			time.Sleep(1 * time.Second) // why?
+			time.Sleep(2500 * time.Millisecond)
 			n.SetCurrJCE(newJCE)
 		}
 	}

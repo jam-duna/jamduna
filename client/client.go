@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/node"
 
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -314,7 +315,7 @@ func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	return context, nil
 }
 
-func (c *NodeClient) SubmitWorkPackage(workPackageReq types.WorkPackageRequest) error {
+func (c *NodeClient) SubmitWorkPackage(workPackageReq node.WorkPackageRequest) error {
 	// Marshal the WorkPackageRequest to JSON
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
@@ -334,7 +335,7 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq types.WorkPackageRequest) 
 	return nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq types.WorkPackageRequest) error {
+func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq node.WorkPackageRequest) error {
 	refineContext, err := c.GetRefineContext()
 	if err != nil {
 		return err
@@ -499,7 +500,7 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 		}},
 	}
 
-	var wpr types.WorkPackageRequest
+	var wpr node.WorkPackageRequest
 	wpr.CoreIndex = 0 // this is OK
 	wpr.WorkPackage = codeWP
 	wpr.ExtrinsicsBlobs = types.ExtrinsicsBlobs{}

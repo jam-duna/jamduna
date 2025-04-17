@@ -49,7 +49,7 @@ func (n *NodeContent) WriteRawKV(key string, val []byte) error {
 
 	err = store.WriteRawKV([]byte(key), val)
 	if err != nil {
-		return fmt.Errorf("WriteRawKV K=%v|V=%x Err:%v\n", key, val, err)
+		return fmt.Errorf("WriteRawKV K=%v|V=%x Err:%v", key, val, err)
 	}
 	return nil
 }
@@ -61,7 +61,7 @@ func (n *NodeContent) WriteKVByte(key []byte, val []byte) error {
 	}
 	err = store.WriteRawKV(key, val)
 	if err != nil {
-		return fmt.Errorf("WriteKVByte K=%v|V=%x Err:%v\n", key, val, err)
+		return fmt.Errorf("WriteKVByte K=%v|V=%x Err:%v", key, val, err)
 	}
 	return nil
 }
@@ -73,9 +73,9 @@ func (n *NodeContent) ReadRawKV(key []byte) ([]byte, bool, error) {
 	}
 	val, ok, err := store.ReadRawKV([]byte(key))
 	if err != nil {
-		return []byte{}, false, fmt.Errorf("ReadRawKV Err:%v\n", err)
+		return []byte{}, false, fmt.Errorf("ReadRawKV Err:%v", err)
 	} else if !ok {
-		return []byte{}, false, fmt.Errorf("ReadRawKV K=%x not found\n", key)
+		return []byte{}, false, fmt.Errorf("ReadRawKV K=%v not found", fmt.Sprintf("%s", key))
 	}
 	return val, true, nil
 }
@@ -87,9 +87,9 @@ func (n *NodeContent) ReadKVByte(key []byte) ([]byte, bool, error) {
 	}
 	val, ok, err := store.ReadRawKV(key)
 	if err != nil {
-		return []byte{}, false, fmt.Errorf("ReadKVByte Err:%v\n", err)
+		return []byte{}, false, fmt.Errorf("ReadKVByte Err:%v", err)
 	} else if !ok {
-		return []byte{}, false, fmt.Errorf("ReadKVByte K=%v not found\n", key)
+		return []byte{}, false, fmt.Errorf("ReadKVByte K=%v not found", key)
 	}
 	return val, true, nil
 }

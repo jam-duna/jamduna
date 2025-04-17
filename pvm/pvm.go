@@ -892,7 +892,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		page_length = CelingDevide(vm.o_size, PageSize)
 		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
-		log.Trace(vm.logging, "Standard Program Initialization", "page_index", page_index, "page_length", page_length, "access_mode", access_mode)
+		log.Debug(vm.logging, "Standard Program Initialization", "page_index", page_index, "page_length", page_length, "access_mode", access_mode)
 
 		vm.Ram.WriteRAMBytes(Z_Z, vm.o_byte)
 
@@ -1069,13 +1069,13 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
-	// if string(vm.ServiceMetadata) == "game_of_life" {
-	// 	fmt.Printf("Result: %v\n", r)
-	// 	fmt.Printf("VM.PC: %v\n", vm.pc)
-	// 	fmt.Printf("VM.Fault_address: %v\n", vm.Fault_address)
-	// 	fmt.Printf("VM.ResultCode: %v\n", vm.ResultCode)
-	// 	// vm.Ram.DebugStatus()
-	// }
+	if string(vm.ServiceMetadata) == "game_of_life" || true {
+		fmt.Printf("Result: %v\n", r)
+		fmt.Printf("VM.PC: %v\n", vm.pc)
+		fmt.Printf("VM.Fault_address: %v\n", vm.Fault_address)
+		fmt.Printf("VM.ResultCode: %v\n", vm.ResultCode)
+		// vm.Ram.DebugStatus()
+	}
 
 	exportedSegments = vm.Exports
 	return r, res, exportedSegments
@@ -1379,7 +1379,7 @@ func (vm *VM) step(stepn int) error {
 	//beforeGas := vm.Gas
 	switch instr {
 	case TRAP:
-		log.Trace(vm.logging, "TERMINATED", "service", string(vm.ServiceMetadata))
+		log.Debug(vm.logging, "TERMINATED", "service", string(vm.ServiceMetadata))
 		if instr == TRAP {
 			vm.ResultCode = types.RESULT_PANIC
 		} else {

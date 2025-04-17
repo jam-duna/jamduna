@@ -73,7 +73,7 @@ func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	return context, nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *types.WorkPackageRequest) (wph common.Hash, err error) {
+func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *WorkPackageRequest) (wph common.Hash, err error) {
 	workPackage := workPackageReq.WorkPackage
 
 	rc, err := c.GetRefineContext()
@@ -108,7 +108,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 	}
 }
 
-func (c *NodeClient) SendWorkPackage(workPackageReq *types.WorkPackageRequest) error {
+func (c *NodeClient) SendWorkPackage(workPackageReq *WorkPackageRequest) error {
 	// Marshal the WorkPackageRequest to JSON
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
@@ -955,7 +955,7 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 		return fmt.Errorf("invalid number of arguments")
 	}
 
-	var newReq types.WorkPackageRequest
+	var newReq WorkPackageRequest
 	if err := json.Unmarshal([]byte(req[0]), &newReq); err != nil {
 		log.Error(module, "SubmitWorkPackage", "err", err)
 		return fmt.Errorf("failed to decode WorkPackageRequest: %w", err)

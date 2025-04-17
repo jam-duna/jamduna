@@ -33,15 +33,20 @@ type WorkPackage struct {
 	WorkItems []WorkItem `json:"items"`
 }
 
+/*
 type WorkPackageRequest struct {
 	CoreIndex       uint16          `json:"core_index"`
 	WorkPackage     WorkPackage     `json:"work_package"`
 	ExtrinsicsBlobs ExtrinsicsBlobs `json:"extrinsic_blobs"`
+	JCEManager  *JCEManager `json:"jce_manager"`
+	Identifier string
 }
+
 
 func (wpReq *WorkPackageRequest) String() string {
 	return ToJSON(wpReq)
 }
+*/
 
 // WorkPackageBundle represents a work package.
 type WorkPackageBundle struct {

@@ -230,7 +230,7 @@ func TestWBTTrace2(t *testing.T) {
 			encodedPathLen := len(encodedPath)
 			upperPathLen := ComputeEncodedProofSize(shardIndex, numShards, bclub_sclub_len)
 			segPathLen := ComputeEncodedProofSize(shardIndex, numShards, numECPieceSize*2)
-			segPathLen2 := ComputeEncodedProofSize(shardIndex, numShards, numECPieceSize*2*2)
+			segPathLen2 := ComputeEncodedProofSize(shardIndex, numShards, numECPieceSize*2*1000)
 			fmt.Printf("ShardIdx=%d, numShards=%d, EncodedPath Len: %d | UpperProofLen=%d | SegProofLen=%d | %d\n", shardIndex, numShards, encodedPathLen, upperPathLen, segPathLen, segPathLen2)
 
 			if upperPathLen != encodedPathLen {

@@ -12,11 +12,11 @@ import (
 type AvailabilityAssignments [types.TotalCores]*Rho_state
 
 type JamState struct {
-	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"authorizations_pool"` // alpha The core αuthorizations pool. α eq 85
-	AuthorizationQueue       types.AuthorizationQueue                     `json:"authorization_queue"` // phi - The authorization queue  φ eq 85
-	RecentBlocks             RecentBlocks                                 `json:"beefy_pool"`          // beta - The core βeefy pool. β eq 81
-	SafroleStateGamma        SafroleBasicState                            `json:"safrole_state_gamma"` // gamma - SafroleBasicState γ eq 48
-	SafroleState             *SafroleState                                `json:"safrole"`
+	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"authorizations_pool"`         // alpha The core αuthorizations pool. α eq 85
+	AuthorizationQueue       types.AuthorizationQueue                     `json:"authorization_queue"`         // phi - The authorization queue  φ eq 85
+	RecentBlocks             RecentBlocks                                 `json:"beefy_pool"`                  // beta - The core βeefy pool. β eq 81
+	SafroleStateGamma        SafroleBasicState                            `json:"safrole_state_gamma"`         // gamma - SafroleBasicState γ eq 48
+	SafroleState             *SafroleState                                `json:"safrole"`                     // safrole - SafroleState
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
 	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
 	PrivilegedServiceIndices types.Kai_state                              `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
@@ -54,6 +54,20 @@ type Psi_state struct {
 type Rho_state struct {
 	WorkReport types.WorkReport `json:"report"`
 	Timeslot   uint32           `json:"timeout"`
+}
+
+func (r *Rho_state) ShortString() string {
+	if r == nil {
+		return "null"
+	}
+	tmp := struct {
+		WPHash   common.Hash `json:"wp_hash"`
+		Timeslot uint32      `json:"timeout"`
+	}{
+		WPHash:   r.WorkReport.GetWorkPackageHash(),
+		Timeslot: r.Timeslot,
+	}
+	return types.ToJSON(tmp)
 }
 
 func (r *Rho_state) String() string {

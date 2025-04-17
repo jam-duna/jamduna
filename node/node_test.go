@@ -256,7 +256,7 @@ func TestDisputes(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		_, err = builderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		_, err = builderNode.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 			WorkPackage:     codeWorkPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 			CoreIndex:       0,

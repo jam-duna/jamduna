@@ -277,7 +277,7 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 }
 
 func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort uint16, bufferTime int) {
-	nodes, err := SetUpNodes(JCEDefault, numNodes, basePort) // TODO change this to JCEManual
+	nodes, err := SetUpNodes(JCEManual, numNodes, basePort) // TODO change this to JCEManual
 	if err != nil {
 		panic(err)
 	}
@@ -289,17 +289,23 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 		sendtickets = false
 	}
 
+	// Run the JCE updater (it will run indefinitely).
 	initialJCE := uint32(11)
-	switch nodes[0].jceMode {
-	case JCEManual:
-		go UpdateJCESignalUniversal(nodes, initialJCE)
-	case JCESimple:
-		go UpdateJCESignalSimple(nodes, initialJCE)
-		time.Sleep(2 * types.SecondsPerSlot * time.Second)
-	default:
-		time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	jceMode, jceManager, managerCancel, err := SetupJceManager(nodes, initialJCE, nodes[0].jceMode)
+	if err != nil && jceManager == nil {
+		t.Fatalf("JCE Manager setup failed: %v", err)
 	}
 
+	if managerCancel != nil {
+		// TODO Schedule the cancel function call for when jamtest exits
+		defer managerCancel()
+	}
+	if jceManager != nil {
+		fmt.Printf("jamtest: Manual JCE Manager (%p) is set up and running.\n", jceManager)
+		go jceManager.Replenish()
+	} else {
+		fmt.Printf("jamtest: JCE Mode: %s\n", jceMode)
+	}
 	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
 	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
 
@@ -363,6 +369,13 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	}
 
 	fmt.Printf("Test PreReq: %v\n", test_prereq)
+	/*
+		if pvm_authoring_log_enabled {
+			//fmt.Printf("PVM Authoring log enabled!!\n")
+			//log.EnableModule(log.PvmAuthoring)
+			//log.EnableModule(log.FirstGuarantor)
+		}
+	*/
 
 	// give some time for nodes to come up
 	initTicker := time.NewTicker(1 * time.Second)
@@ -431,7 +444,7 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		_, submissionErr := nodeClient.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		_, submissionErr := nodeClient.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     codeWorkPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
@@ -510,12 +523,13 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 
 func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
 	flag.Parse()
+
+	/// TODO: use JCEManual;
 	nodes, err := SetUpNodes(JCEDefault, numNodes, basePort) // TODO change this to JCEManual
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
 	}
 	log.EnableModule(debugDA)
-	//log.EnableModule(debugSeg)
 	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
 
 	if *prereq_test {
@@ -523,21 +537,40 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	}
 
 	fmt.Printf("Test PreReq: %v\n", test_prereq)
+	/*
+		if pvm_authoring_log_enabled {
+			fmt.Printf("PVM Authoring log enabled!!\n")
+			//log.EnableModule(log.PvmAuthoring)
+			//log.EnableModule(log.FirstGuarantor)
+			//log.EnableModule(log.GeneralAuthoring)
+		}
+	*/
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule(log.FirstGuarantorOrAuditor)
+	log.EnableModule(log.GeneralAuthoring)
 	var game_of_life_ws_push func([]byte)
 	if jam == "game_of_life" {
-		game_of_life_ws_push = StartGameOfLifeServer("localhost:8080", "../rpc_client/game_of_life.html")
+		game_of_life_ws_push = StartGameOfLifeServer("localhost:8080", "../client/game_of_life.html")
 	}
 
 	// Run the JCE updater (it will run indefinitely).
 	initialJCE := uint32(11)
-	switch nodes[0].jceMode {
-	case JCEManual:
-		go UpdateJCESignalUniversal(nodes, initialJCE)
-	case JCESimple:
-		go UpdateJCESignalSimple(nodes, initialJCE)
-		time.Sleep(2 * types.SecondsPerSlot * time.Second)
-	default:
-		time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	jceMode, jceManager, managerCancel, err := SetupJceManager(nodes, initialJCE, nodes[0].jceMode)
+	fmt.Println("jamtest: setupJceManager returned.")
+
+	if err != nil && jceManager == nil {
+		t.Fatalf("JCE Manager setup failed: %v", err)
+	}
+
+	if managerCancel != nil {
+		// TODO Schedule the cancel function call for when jamtest exits
+		defer managerCancel()
+	}
+
+	if jceManager != nil {
+		fmt.Printf("jamtest: Manual JCE Manager (%p) is set up and running.\n", jceManager)
+	} else {
+		fmt.Printf("jamtest: JCE Mode: %s\n", jceMode)
 	}
 
 	//go RunGrandpaGraphServer(nodes[0], basePort)
@@ -620,11 +653,19 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		_, err := builderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		log.Warn(module, fmt.Sprintf("BootStrap Service=%v work package submitted", serviceName), "workPackageHash", codeWorkPackage.Hash())
+		log.Info(module, fmt.Sprintf("BootStrap Service=%v work package submitted", serviceName), "workPackageContent", codeWorkPackage.String())
+		wpr := &WorkPackageRequest{
 			WorkPackage:     codeWorkPackage,
 			CoreIndex:       0,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
-		})
+		}
+		if jceManager != nil {
+			wpr.Identifier = fmt.Sprintf("BootStrap Service=%v work package submitted", serviceName)
+			wpr.JCEManager = jceManager
+		}
+
+		_, err := builderNode.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -654,14 +695,11 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 						log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 					}
 				}
-
 			}
-
 		}
 	}
 
 	for done := false; !done; {
-
 		ready := 0
 		nservices := 0
 		for _, service := range testServices {
@@ -690,36 +728,37 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 
 	switch jam {
 	case "megatron":
-		megatron(nodes, testServices, targetN)
+		megatron(nodes, testServices, targetN, jceManager)
 	case "fib":
-		fib(nodes, testServices, targetN)
+		fib(nodes, testServices, targetN, jceManager)
 	case "fib2":
-		targetN := 9
-		fib2(nodes, testServices, targetN)
+		targetN := 100
+		fib2(nodes, testServices, targetN, jceManager)
 	case "transfer":
 		transferNum := targetN
-		transfer(nodes, testServices, transferNum)
+		transfer(nodes, testServices, transferNum, jceManager)
 	case "scaled_transfer":
 		transferNum := 10
 		splitTransferNum := targetN
-		scaled_transfer(nodes, testServices, transferNum, splitTransferNum)
+		scaled_transfer(nodes, testServices, transferNum, splitTransferNum, jceManager)
 	case "balances":
 		// not using anything
-		balances(nodes, testServices, targetN)
+		balances(nodes, testServices, targetN, jceManager)
 	case "scaled_balances":
 		targetN_mint := targetN
 		targetN_transfer := targetN
-		scaled_balances(nodes, testServices, targetN_mint, targetN_transfer)
+		scaled_balances(nodes, testServices, targetN_mint, targetN_transfer, jceManager)
 	case "empty":
-		empty(nodes, testServices)
+		empty(nodes, testServices, jceManager)
 	case "blake2b":
-		blake2b(nodes, testServices, targetN)
+		blake2b(nodes, testServices, targetN, jceManager)
 	case "game_of_life":
-		game_of_life(nodes, testServices, game_of_life_ws_push)
+		time.Sleep(10 * time.Second)
+		game_of_life(nodes, testServices, game_of_life_ws_push, jceManager)
 	}
 }
 
-func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
 	log.Info(module, "FIB START", "targetN", targetN)
 	time.Sleep(20 * time.Second)
 	service0 := testServices["fib"]
@@ -768,12 +807,16 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-
-		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		wpr := &WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
-		})
+		}
+		if jceManager != nil {
+			wpr.Identifier = fmt.Sprintf("FIB-(%v) work package submitted", fibN)
+			wpr.JCEManager = jceManager
+		}
+		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
 		}
@@ -785,7 +828,7 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int)
 
 }
 
-func megatron(nodes []*Node, testServices map[string]*types.TestService, targetMegatronN int) {
+func megatron(nodes []*Node, testServices map[string]*types.TestService, targetMegatronN int, jceManager *ManualJCEManager) {
 
 	fmt.Printf("Start Fib_Trib\n")
 	service0 := testServices["fib"]
@@ -1054,11 +1097,13 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 	trialCount := 0
 	MaxTrialCount := 100
 	// send it right away for one time
-	_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
-		CoreIndex:       receiverCore,
+	wpr := &WorkPackageRequest{
 		WorkPackage:     *workPackage,
+		CoreIndex:       receiverCore,
 		ExtrinsicsBlobs: extrinsics,
-	})
+	}
+
+	_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, wpr)
 	if err != nil {
 		fmt.Printf("SendWorkPackageSubmission ERR %v", err)
 	}
@@ -1110,7 +1155,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 			case "resend":
 				ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 				defer cancel()
-				_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+				_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 					WorkPackage:     *workPackage,
 					ExtrinsicsBlobs: extrinsics,
 					CoreIndex:       receiverCore,
@@ -1131,7 +1176,7 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 	}
 }
 
-func transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int) {
+func transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int, jceManager *ManualJCEManager) {
 	fmt.Printf("\n=========================Start Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
@@ -1270,7 +1315,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 	}
 }
 
-func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int, splitTransferNum int) {
+func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int, splitTransferNum int, jceManager *ManualJCEManager) {
 	fmt.Printf("\n=========================Start Scaled Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
@@ -1586,7 +1631,7 @@ func (a *TransferExtrinsic) Bytes() []byte {
 	return buffer.Bytes()
 }
 
-func balances(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+func balances(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
 
 	// !!!! targetN is NOT USED - need to wire this up
 	fmt.Printf("\n=========================Balances Test=========================\n")
@@ -1695,7 +1740,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     create_asset_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -1761,7 +1806,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 			},
 		}
 
-		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     mint_workPackage,
 			ExtrinsicsBlobs: extrinsicsBytes,
@@ -1827,7 +1872,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     mint_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -1889,7 +1934,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     bond_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -1946,7 +1991,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     unbond_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -2008,7 +2053,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 		},
 	}
 
-	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     transfer_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -2018,7 +2063,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, to_account)
 }
 
-func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, targetN_mint int, targetN_transfer int) {
+func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, targetN_mint int, targetN_transfer int, jceManager *ManualJCEManager) {
 	fmt.Printf("\n=========================Balances Scale Test=========================\n")
 	// General setup
 	BalanceService := testServices["balances"]
@@ -2113,7 +2158,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     create_asset_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -2181,7 +2226,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 
 	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     mint_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -2262,7 +2307,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 
-	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     transfer_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
@@ -2273,7 +2318,7 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, sender)
 }
 
-func empty(nodes []*Node, testServices map[string]*types.TestService) {
+func empty(nodes []*Node, testServices map[string]*types.TestService, jceManager *ManualJCEManager) {
 	delayservice := testServices["delay"]
 
 	n1 := nodes[1]
@@ -2525,7 +2570,7 @@ func GenerateNMBFilledBytes(n int) []byte {
 	return bytes.Repeat([]byte{1}, size)
 }
 
-func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
 	fmt.Printf("Start Blake2b Test\n")
 
 	service0 := testServices["blake2b"]
@@ -2561,7 +2606,7 @@ func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN 
 	fmt.Printf("\n** \033[36m Blake2b=%v \033[0m workPackage: %v **\n", 1, common.Str(workPackageHash))
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 		CoreIndex:       0,
 		WorkPackage:     workPackage,
 		ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
@@ -2679,7 +2724,7 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		_, err := nodeClient.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		_, err := nodeClient.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
 			CoreIndex:       uint16(core),
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
@@ -2716,13 +2761,12 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 			if err != nil {
 				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
 			}
-			time.Sleep(18 * time.Second) // make sure EP is sent and insert a time slot
+			time.Sleep(2 * types.SecondsPerSlot * time.Second) // make sure EP is sent and insert a time slot
 		}
 	}
 }
 
-func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int) {
-
+func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
 	log.Info(module, "FIB2 START")
 
 	jam_key := []byte("jam")
@@ -2796,8 +2840,8 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 					Service:            service0.ServiceCode,
 					CodeHash:           service0.CodeHash,
 					Payload:            payload,
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     56789,
+					AccumulateGasLimit: 98765,
 					ImportedSegments:   importedSegments,
 					Extrinsics:         work_item_extrinsic,
 					ExportCount:        uint16(fibN + 1),
@@ -2806,8 +2850,8 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 					Service:            service_authcopy.ServiceCode,
 					CodeHash:           service_authcopy.CodeHash,
 					Payload:            []byte{},
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     56789,
+					AccumulateGasLimit: 98765,
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        0,
 				},
@@ -2827,11 +2871,16 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		wpr := &WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
-		})
+		}
+		if jceManager != nil {
+			wpr.Identifier = fmt.Sprintf("FIB2-(%s) work package submitted", fibN_string)
+			wpr.JCEManager = jceManager
+		}
+		_, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
@@ -2865,7 +2914,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 	}
 }
 
-func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_push func([]byte)) {
+func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_push func([]byte), jceManager *ManualJCEManager) {
 
 	flatten := func(data [][]byte) []byte {
 		var result []byte
@@ -2938,6 +2987,7 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 
 			export_count = 9
 		} else {
+			//export_count = 0
 			payload = []byte{}
 		}
 
@@ -2951,8 +3001,8 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 					Service:            service0.ServiceCode,
 					CodeHash:           service0.CodeHash,
 					Payload:            payload,
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     56789,
+					AccumulateGasLimit: 98765,
 					ImportedSegments:   importedSegments,
 					Extrinsics:         work_item_extrinsic,
 					ExportCount:        export_count,
@@ -2961,8 +3011,8 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 					Service:            service_authcopy.ServiceCode,
 					CodeHash:           service_authcopy.CodeHash,
 					Payload:            []byte{},
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     56789,
+					AccumulateGasLimit: 98765,
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        0,
 				},
@@ -2972,17 +3022,46 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		log.Info(module, fmt.Sprintf("Game_of_life-(%d) work package submitted", step_n), "workPackage", workPackageHash)
-		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &types.WorkPackageRequest{
+		log.Info(module, fmt.Sprintf("Game_of_life-(%d) work package submitted", step_n), "workPackageContent", workPackage.String())
+		wpr := &WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
-		})
+		}
+		if jceManager != nil {
+			// isRefineOnly := true
+			wpr.Identifier = fmt.Sprintf("Game_of_life-(%d) work package submitted", step_n)
+			wpr.JCEManager = jceManager
+		}
+
+		_, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
 
-		if step_n > 0 {
+		if step_n == 0 {
+			// TODO: SubmitAndWaitForPreimage
+
+			// time.Sleep(5 * time.Second)
+			err = n4.BroadcastPreimageAnnouncement(service0.ServiceCode, service0_child_codehash, service0_child_code_length, service0_child_code["game_of_life_child"].Code)
+			if err != nil {
+				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
+			}
+			time.Sleep(18 * time.Second)
+			/*
+				ok := MonitorPreimage(n4, jceManager, service0.ServiceCode, service0_child_codehash, fmt.Sprintf("Game_of_life preimage=%v | len=%d", service0_child_codehash, service0_child_code_length))
+				if !ok {
+					panic("TODO:Need to resend WP")
+				}
+			*/
+			// time.Sleep(5 * time.Second) // make sure EP is sent and insert a time slot
+			// for {
+			// 	time.Sleep(500 * time.Millisecond)
+			// 	if len(n1.statedb.Block.Extrinsic.Preimages) > 0 {
+			// 		break
+			// 	}
+			// }
+		} else {
 			vm_export, err := n4.GetImportSegments(importedSegments)
 			if err == nil {
 				stepBytes := make([]byte, 4)
@@ -2991,19 +3070,7 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 
 				ws_push(out)
 			}
-		} else {
-			err = n1.BroadcastPreimageAnnouncement(service0.ServiceCode, service0_child_codehash, service0_child_code_length, service0_child_code["game_of_life_child"].Code)
-			if err != nil {
-				log.Error(debugP, "BroadcastPreimageAnnouncement", "err", err)
-			}
-			for {
-				time.Sleep(100 * time.Millisecond)
-				if len(n1.statedb.Block.Extrinsic.Preimages) > 0 {
-					break
-				}
-			}
 		}
-
 		prevWorkPackageHash = workPackageHash
 	}
 }

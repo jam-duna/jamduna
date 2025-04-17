@@ -64,7 +64,7 @@ func TestClient(t *testing.T) {
 	var game_of_life_ws_push func([]byte)
 	if testMode == "game_of_life" {
 		//this is local
-		game_of_life_ws_push = node.StartGameOfLifeServer("localhost:8080", "../rpc_client/game_of_life.html")
+		game_of_life_ws_push = node.StartGameOfLifeServer("localhost:8080", "../client/game_of_life.html")
 	}
 
 	done := false
@@ -138,7 +138,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		}
 		coreIndex := uint16(0)
 		workPackageHash := workPackage.Hash()
-		workpackage_req := types.WorkPackageRequest{
+		workpackage_req := WorkPackageRequest{
 			CoreIndex:       coreIndex,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
@@ -163,7 +163,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 	}
 	return nil
 }
-func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req types.WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
+func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
 	tries := 0
 	for tries < maxTries {
 		refine_context, err := client.GetRefineContext()
@@ -282,7 +282,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		} else {
 			fibN_string = fmt.Sprintf("%d", fibN)
 		}
-		workpackage_req := types.WorkPackageRequest{
+		workpackage_req := WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
@@ -420,8 +420,8 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 					Service:            game_of_life_index,
 					CodeHash:           game_of_life_code_hash,
 					Payload:            payload,
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     56789,
+					AccumulateGasLimit: 98765,
 					ImportedSegments:   importedSegments,
 					Extrinsics:         work_item_extrinsic,
 					ExportCount:        export_count,
@@ -430,8 +430,8 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 					Service:            service_authcopy_index,
 					CodeHash:           service_authcopy_code_hash,
 					Payload:            []byte{},
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     56789,
+					AccumulateGasLimit: 98765,
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        0,
 				},
@@ -441,7 +441,7 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 
 		fmt.Printf("Game_of_life-(%d) work package submitted %v\n", step_n, workPackageHash)
 
-		workpackage_req := types.WorkPackageRequest{
+		workpackage_req := WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,

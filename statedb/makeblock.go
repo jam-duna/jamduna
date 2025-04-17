@@ -46,8 +46,8 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 		} else {
-			log.Warn(debugP, "ValidateAddPreimage", "err", err)
-			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
+			log.Warn(debugP, "ValidateLookup", "err", err)
+			//extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 			continue
 		}
 	}

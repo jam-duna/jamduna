@@ -204,6 +204,9 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 		return fmt.Errorf("onSegmentShardRequest: FromBytes failed: %w", err)
 	}
 
+	fmt.Printf("%s onSegmentShardRequest: GetSegmentShard_Assurer erasure root %s shard %d (%v)\n",
+		n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+
 	selected_segmentshards, selected_segment_justifications, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex, withJustification)
 	if err != nil {
 		log.Warn(debugDA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
