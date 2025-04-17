@@ -152,7 +152,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// writeAccount and initializes s.stateUpdate
 	s.stateUpdate = s.ApplyXContext(o)
 	// finalize stateUpdates
-	s.computeStateUpdates(blk, targetJCE) // review targetJCE input
+	s.computeStateUpdates(blk) // review targetJCE input
 
 	// accumulate statistics
 	accumulated_workreports := accumulate_input_wr[:n]
@@ -238,7 +238,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	return s, nil
 }
 
-func (s *StateDB) computeStateUpdates(blk *types.Block, targetJCE uint32) {
+func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	// setup workpackage updates (guaranteed, queued, accumulated)
 	log.Trace(module, "computeStateUpdates", "len(e_p)", len(blk.Extrinsic.Preimages), "len(e_g)", len(blk.Extrinsic.Guarantees), "len(ah)", len(s.JamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
 	for _, g := range blk.Extrinsic.Guarantees {

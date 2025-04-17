@@ -300,16 +300,6 @@ func ticketSealVRFInput(targetEpochRandomness common.Hash, attempt uint8) []byte
 	return append(append([]byte(types.X_T), targetEpochRandomness.Bytes()...), []byte{byte(attempt & 0xF)}...)
 }
 
-func (s *SafroleState) computeTicketID(authority_secret_key bandersnatch.BanderSnatchSecret, ticket_vrf_input []byte) (common.Hash, error) {
-	//ticket_id := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input)
-	auxData := []byte{}
-	ticket_id, err := bandersnatch.VRFOutput(authority_secret_key, ticket_vrf_input, auxData)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("signTicket failed")
-	}
-	return common.BytesToHash(ticket_id), nil
-}
-
 func (s *SafroleState) EntropyToBytes() []byte {
 	var entropyBytes []byte
 	for _, hash := range s.Entropy {

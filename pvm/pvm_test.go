@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -44,7 +42,7 @@ type TestCase struct {
 	ExpectedMemory []TestMemory  `json:"expected-memory"`
 }
 
-func pvm_test(t *testing.T, tc TestCase) (error, int) {
+func pvm_test(tc TestCase) (error, int) {
 	var num_mismatch int
 	fmt.Printf("Test case: %s\n", tc.Name)
 
@@ -180,7 +178,7 @@ func TestPVM(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
 		}
-		err, num_mismatch = pvm_test(t, testCase)
+		err, num_mismatch = pvm_test(testCase)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
@@ -188,16 +186,6 @@ func TestPVM(t *testing.T) {
 	}
 	// show the match rate
 	fmt.Printf("Match rate: %v/%v\n", count-total_mismatch, count)
-}
-
-// Helper function to check if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 // Helper function to compare two integer slices
@@ -211,104 +199,4 @@ func equalIntSlices(a, b []uint64) bool {
 		}
 	}
 	return true
-}
-
-// Helper function to compare two byte slices
-func equalByteSlices_simple(a []byte, b []byte) bool {
-
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// Helper function to compare two slices of interfaces
-func equalInterfaceSlices(a, b []interface{}) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func testPVM_invoke(t *testing.T) {
-
-	// put code into ram
-	// get the address of the code and length (po, pz)
-	// put it into the register (7,8,9) = (po, pz, program counter)
-	code, err1 := os.ReadFile(common.GetFilePath("/services/xor.pvm"))
-	vm := NewVMFromCode(0, code, 0, nil)
-	// put the code into the ram and get the address and length
-	if err1 != nil {
-		t.Errorf("Error reading file: %v", err1)
-	}
-	var code_length = uint64(len(code))
-	vm.Ram.WriteRAMBytes(100, code)
-	vm.SetRegisterValue(7, 100)
-	vm.SetRegisterValue(8, code_length)
-	vm.SetRegisterValue(9, 0)
-	vm.hostMachine()
-	// get the vm number
-	vm2_num, _ := vm.GetRegisterValue(7)
-	fmt.Printf("New VM number: %v\n", vm2_num)
-	// set up the register for Poke and put the input data into the ram
-	//let [n, s, o, z] = ω7...11,, n= which vm, s = start address, o = n start address, z = length
-	// we should set o to other register
-	test_bytes := []byte{0x01, 0x02, 0x03, 0x04}
-	vm.Ram.WriteRAMBytes(25, test_bytes)
-	vm.SetRegisterValue(7, vm2_num)
-	vm.SetRegisterValue(8, 25)
-	vm.SetRegisterValue(9, 25)
-	vm.SetRegisterValue(10, 4)
-	vm.hostPoke()
-
-	test_bytes2 := []byte{0x05, 0x06, 0x07, 0x08}
-	vm.Ram.WriteRAMBytes(100, test_bytes2)
-	vm.SetRegisterValue(7, vm2_num)
-	vm.SetRegisterValue(8, 100)
-	vm.SetRegisterValue(9, 100)
-	vm.SetRegisterValue(10, 4)
-
-	// set up the memory for the vm (gas + register)
-	// set up the register that can let the code run ==> pointer + length
-	//13 regs
-	regs := []uint64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 100, 0}
-	vm.PutGasAndRegistersToMemory(300, 100, regs)
-	// if err != OK {
-	// 	t.Errorf("Error putting gas and registers to memory: %v", err)
-	// }
-	// read the input and then hash it
-	// put it back to the memory
-	// put the pointer and length to the register
-	// it will return back to the parent vm memory
-	vm.SetRegisterValue(7, vm2_num)
-	vm.SetRegisterValue(8, 300)
-	vm.hostInvoke()
-	// use that pointer and length to read the memory
-	gas2, regs2, errCode := vm.GetGasAndRegistersFromMemory(300)
-	if errCode != OK {
-		t.Errorf("Error getting gas and registers from memory: %v", errCode)
-	}
-	fmt.Printf("Gas: %v\n", gas2)
-	fmt.Printf("Registers: %v\n", regs2[10])
-	fmt.Printf("Registers: %v\n", regs2[11])
-	vm.SetRegisterValue(7, vm2_num)
-	vm.SetRegisterValue(8, regs2[10])
-	vm.SetRegisterValue(9, regs2[10])
-	vm.SetRegisterValue(10, regs2[11])
-	vm.hostPeek()
-	data, errcode := vm.Ram.ReadRAMBytes(uint32(regs2[10]), uint32(regs2[11]))
-	if errcode != OK {
-		t.Errorf("Error reading data from memory: %v", errcode)
-	}
-	fmt.Printf("Data: %v\n", data)
-	// except (4,4,4,12)
-	vm.SetRegisterValue(7, vm2_num)
-	vm.hostExpunge()
 }

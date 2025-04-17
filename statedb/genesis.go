@@ -339,19 +339,6 @@ func NewStateDBFromSnapshotRaw(sdb *storage.StateDBStorage, stateSnapshotRaw *St
 	return statedb, nil
 }
 
-// The current time expressed in seconds after the start of the Jam Common Era. See section 4.4
-func computeJCETime(unixTimestamp int64) uint32 {
-	// Define the start of the Jam Common Era
-	jceStart := time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC)
-
-	// Convert the Unix timestamp to a Time object
-	currentTime := time.Unix(unixTimestamp, 0).UTC()
-
-	// Calculate the difference in seconds
-	diff := currentTime.Sub(jceStart)
-	return uint32(diff.Seconds())
-}
-
 // Function to convert JCETime back to the original Unix timestamp
 func JCETimeToUnixTimestamp(jceTime uint32) int64 {
 	// Define the start of the Jam Common Era

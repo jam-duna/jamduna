@@ -708,7 +708,7 @@ func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32
 	errCh := make(chan error, 1)
 	preimageHash := common.Blake2Hash(preimage)
 
-	log.Info(module, "SubmitAndWaitForPreimage SUBMITTED", "id", serviceIndex, "preimageHash", preimageHash, "len", len(preimage))
+	log.Info(module, "SubmitAndWaitForPreimage SUBMITTED", "id", fmt.Sprintf("%d", serviceIndex), "preimageHash", preimageHash, "len", len(preimage))
 
 	// Submit preimage
 	n.AddPreimageToPool(serviceIndex, preimage)
@@ -733,7 +733,7 @@ func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32
 				return err
 			}
 			if len(time_slots) > 0 && ok {
-				log.Info(module, "SubmitAndWaitForPreimage ON-CHAIN", "id", serviceIndex, "preimageHash", preimageHash, "len", len(preimage))
+				log.Info(module, "SubmitAndWaitForPreimage ON-CHAIN", "id", fmt.Sprintf("%d", serviceIndex), "preimageHash", preimageHash, "len", len(preimage))
 				return nil
 			}
 		}
@@ -1423,6 +1423,8 @@ func (n *Node) ApplyFirstBlock(ctx context.Context, nextBlockNode *types.BT_Node
 	defer n.statedbMapMutex.Unlock()
 
 	if nextBlock.Header.Hash() == *n.latest_block {
+		n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
+
 		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
 			log.Error(debugA, "ApplyFirstBlock: assureNewBlock failed", "n", n.String(), "err", err)
 			return fmt.Errorf("assureNewBlock failed: %w", err)
@@ -1503,7 +1505,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	defer n.statedbMapMutex.Unlock()
 
 	if nextBlock.Header.Hash() == *n.latest_block {
-
+		n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
 		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
 			log.Error(debugA, "ApplyBlock: assureNewBlock failed", "n", n.String(), "err", err)
 			return fmt.Errorf("assureNewBlock failed: %w", err)
@@ -2131,7 +2133,7 @@ func (n *Node) runClient() {
 
 			assureCtx, cancelAssure := context.WithTimeout(context.Background(), NormalTimeout)
 			n.assureNewBlock(assureCtx, newBlock, newStateDB)
-			//MK: Shawn to check
+			n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
 			log.Debug(module, "runClient:ProcessState Proposer !!!!", "n", n.String(), "slot", newBlock.Header.Slot)
 			n.SetCompletedJCE(newBlock.Header.Slot)
 

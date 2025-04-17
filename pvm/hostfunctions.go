@@ -315,7 +315,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	// Refine functions
 	case HISTORICAL_LOOKUP:
-		vm.hostHistoricalLookup(0)
+		vm.hostHistoricalLookup()
 		return true, nil
 
 	case FETCH:
@@ -885,17 +885,7 @@ func (vm *VM) hostEject() {
 	vm.HostResultCode = HUH
 }
 
-func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
-
-	// gas todo
-	registers := make([]uint64, 13)
-	for i := 0; i < 13; i++ {
-		registers[i] = binary.LittleEndian.Uint64(registerBytes[i*8 : (i+1)*8])
-	}
-	vm.register = registers
-}
-
-// Invoke5
+// Invoke
 func (vm *VM) hostInvoke() {
 	n, _ := vm.ReadRegister(7)
 	o, _ := vm.ReadRegister(8)
@@ -1218,7 +1208,7 @@ func (vm *VM) hostSolicit() {
 		log.Debug(vm.logging, vm.Str("SOLICIT FULL"), "h", account_lookuphash, "z", z)
 		return
 	}
-	if len(X_s_l) == 2 { // [x, y]
+	if len(X_s_l) == 2 { // [x, y] => [x, y, t]
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
 		log.Debug(vm.logging, vm.Str("SOLICIT OK BBB"), "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.WriteRegister(7, OK)
@@ -1254,8 +1244,9 @@ func (vm *VM) hostForget() {
 		log.Debug(vm.logging, vm.Str("FORGET HUH"), "h", account_lookuphash, "o", o)
 		return
 	}
-
-	if len(X_s_l) == 0 || (len(X_s_l) == 2) && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) {
+	// 0 [] case is when we solicited but never got a preimage, so we can forget it
+	// 2 [x,y] case is when we have a forgotten a preimage and have PASSED the preimage expiry period, so we can forget it
+	if len(X_s_l) == 0 || (len(X_s_l) == 2) && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) { // D = types.PreimageExpiryPeriod
 		x_s.WriteLookup(account_lookuphash, uint32(z), nil) // nil means delete the lookup
 		x_s.WritePreimage(account_blobhash, []byte{})       // []byte{} means delete the preimage
 		// storage accounting
@@ -1266,14 +1257,16 @@ func (vm *VM) hostForget() {
 		vm.HostResultCode = OK
 		return
 	} else if len(X_s_l) == 1 {
-		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
+		// preimage exists [x] => [x, y] where y is the current time, the time we are forgetting
+		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...)) // [x, t]
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		log.Debug(vm.logging, vm.Str("FORGET OK2"), "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		return
 	} else if len(X_s_l) == 3 && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) {
-		X_s_l = []uint32{X_s_l[2], vm.Timeslot}
-		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l)
+		// [x,y,w] => [w, t] where y is the current time, the time we are forgetting
+		X_s_l = []uint32{X_s_l[2], vm.Timeslot}               // w = X_s_l[2], t = vm.Timeslot
+		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l) // [w, t]
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		log.Debug(vm.logging, vm.Str("FORGET OK3"), "h", account_lookuphash, "z", z, "newvalue", X_s_l)
@@ -1287,7 +1280,7 @@ func (vm *VM) hostForget() {
 }
 
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
-func (vm *VM) hostHistoricalLookup(t uint32) {
+func (vm *VM) hostHistoricalLookup() {
 	var a = &types.ServiceAccount{}
 	delta := vm.Delta
 	s := vm.Service_index

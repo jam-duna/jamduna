@@ -19,7 +19,6 @@
         var: JAM_START_TIME
 
 - hosts: all
-  serial: 1
   become: true
   vars:
     NUM_NODES: 1

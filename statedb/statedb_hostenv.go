@@ -65,11 +65,23 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
+
 	for blob_hash, v := range sa.Lookup {
 		if v.Dirty {
 			if v.Deleted {
 				err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
-				log.Warn(module, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
+				if err != nil {
+					log.Warn(module, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
+					return
+				}
+				log.Info("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
+				serviceUpdate.ServiceRequest[blob_hash] = &types.SubServiceRequestResult{
+					HeaderHash: s.HeaderHash,
+					Slot:       s.GetTimeslot(),
+					Hash:       blob_hash,
+					ServiceID:  service_idx,
+					Timeslots:  nil,
+				}
 			} else {
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {
@@ -94,6 +106,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					log.Warn(module, "DeletePreImageBlob", "blobHash", blobHash, "err", err)
 					return
 				}
+				log.Info("authoring", "DeletePreImageBlob [FORGET OK]", "blobHash", blobHash)
 			} else {
 				err = tree.SetPreImageBlob(service_idx, v.Preimage)
 				if err != nil {
@@ -190,9 +203,7 @@ func (s *StateDB) ReadServiceStorage(service uint32, k common.Hash) (storage []b
 	if err != nil || !ok {
 		return
 	}
-
 	return
-
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) (blob []byte, ok bool, err error) {
@@ -252,4 +263,8 @@ func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash 
 			return nil
 		}
 	}
+}
+
+func (s *StateDB) GetForgets() []*types.SubServiceRequestResult {
+	return s.stateUpdate.GetForgets()
 }

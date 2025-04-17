@@ -122,7 +122,7 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int, jce
 	for fibN := -1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 0 {
-			for i := 0; i < fibN; i++ {
+			for i := range fibN {
 				importedSegment := types.ImportSegment{
 					RequestedHash: prevWorkPackageHash,
 					Index:         uint16(i),
@@ -133,7 +133,7 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int, jce
 		}
 		var payload []byte
 		if fibN >= 0 {
-			for i := 0; i < fibN+2; i++ {
+			for range fibN + 2 {
 				tmp := make([]byte, 4)
 				binary.LittleEndian.PutUint32(tmp, uint32(fibN))
 				payload = append(payload, tmp...)

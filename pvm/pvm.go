@@ -119,6 +119,7 @@ func (p *Page) ensureData() {
 	}
 }
 
+/*
 func (p *Page) zero() {
 	p.Value = make([]byte, PageSize)
 	p.Access = AccessMode{
@@ -136,7 +137,7 @@ func (p *Page) void() {
 		Readable:     false,
 	}
 }
-
+*/
 // Get or allocate a specific page
 func (ram *RAM) getOrAllocatePage(pageIndex uint32) (*Page, error) {
 	if pageIndex >= TotalPages {
@@ -345,14 +346,6 @@ type VM struct {
 
 func (vm *VM) Str(logStr string) string {
 	return fmt.Sprintf("%s_%s: %s", vm.ServiceMetadata, vm.Mode, logStr)
-}
-
-type Forgets struct {
-}
-
-type Solicit struct {
-	BlobHash common.Hash
-	Length   uint32
 }
 
 type Program struct {
@@ -1147,7 +1140,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	stepn := 1
 
 	for !vm.terminated {
-		if err := vm.step(stepn); err != nil {
+		if err := vm.step(); err != nil {
 			return err
 		}
 		if vm.hostCall && is_child {
@@ -1167,23 +1160,6 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
 	}
-	return nil
-}
-
-// copy a into 2^32 - Z_Q - Z_I and initialize registers
-func (vm *VM) setArgumentInputs(a []byte) error {
-	vm.WriteRegister(0, 0)
-	vm.WriteRegister(1, 0xFFFF0000) // 2^32 - 2^16
-	vm.WriteRegister(2, 0xFEFE0000) // 2^32 - 2 * 2^16 - 2^24
-	for r := 3; r < 10; r++ {
-		vm.WriteRegister(r, 0)
-	}
-	vm.WriteRegister(10, 0xFEFF0000) // 2^32 - 2^16 - 2^24
-	vm.WriteRegister(11, uint64(len(a)))
-	for r := 12; r < 16; r++ {
-		vm.WriteRegister(r, 0)
-	}
-	vm.Ram.WriteRAMBytes(0xFEFF0000, a)
 	return nil
 }
 
@@ -1209,6 +1185,7 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	return r, 0
 }
 
+/*
 func opcode_str(opcode byte) string {
 	opcodeMap := map[byte]string{
 		10:  "ECALLI",
@@ -1354,10 +1331,10 @@ func opcode_str(opcode byte) string {
 		return name
 	}
 	return fmt.Sprintf("OPCODE %d", opcode)
-}
+}*/
 
 // step performs a single step in the PVM
-func (vm *VM) step(stepn int) error {
+func (vm *VM) step() error {
 	if vm.pc >= uint64(len(vm.code)) {
 		return errors.New("program counter out of bounds")
 	}
@@ -1560,18 +1537,6 @@ func skip(pc uint64, bitmask string) uint64 {
 	return uint64(24)
 }
 
-func (vm *VM) get_varpi(opcodes []byte, bitmask string) map[int]struct{} {
-	result := make(map[int]struct{})
-	for i, opcode := range opcodes {
-		if bitmask[i] == '1' {
-			if _, exists := T[int(opcode)]; exists {
-				result[int(opcode)] = struct{}{}
-			}
-		}
-	}
-	return result
-}
-
 func (vm *VM) djump(a uint64) {
 	if a == uint64((1<<32)-(1<<16)) {
 		vm.terminated = true
@@ -1602,27 +1567,6 @@ func (vm *VM) WriteRegister(index int, value uint64) uint64 {
 
 func (vm *VM) ReadRegisters() []uint64 {
 	return vm.register
-}
-
-// Implement the dynamic jump logic
-func (vm *VM) dynamicJump(operands []byte) uint64 {
-	if len(operands) != 1 {
-		return OOB
-	}
-	a := int(operands[0])
-	const ZA = 4
-
-	if a == 0 || a > 0x7FFFFFFF {
-		return OOB
-	}
-
-	targetIndex := uint64(a/ZA - 1)
-	if targetIndex >= uint64(len(vm.code)) {
-		return OOB
-	}
-
-	vm.pc = targetIndex
-	return OK
 }
 
 // Implement ecall logic
@@ -1936,6 +1880,8 @@ func (vm *VM) moveReg(operands []byte) {
 }
 
 func (vm *VM) sbrk(valueA uint64) uint64 {
+	// TODO
+	log.Debug(vm.logging, "sbrk", "valueA", valueA)
 	return 0
 }
 
@@ -2173,12 +2119,6 @@ func (vm *VM) loadInd(opcode byte, operands []byte) {
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 	}
-}
-
-func splitRegister(operand byte) (int, int) {
-	registerIndexA := int(operand & 0xF)
-	registerIndexB := int((operand >> 4) & 0xF)
-	return registerIndexA, registerIndexB
 }
 
 // Implement ALU operations with immediate values

@@ -1,7 +1,6 @@
 package statedb
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,85 +10,11 @@ import (
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/google/go-github/v58/github"
 	"github.com/nsf/jsondiff"
 )
 
 var update_from_git = false
 
-func getGithubDirFile(owner string, repo string, branch string, folderPath string) (filenames []string, contents []string, err error) {
-	client := github.NewClient(nil)
-	localDir := fmt.Sprintf("testdata/%s/%s", owner, repo)
-
-	if update_from_git {
-		// Get all files in the folder
-		_, dircontents, _, err := client.Repositories.GetContents(context.Background(), owner, repo, folderPath, &github.RepositoryContentGetOptions{Ref: branch})
-		if err != nil {
-			panic(err) // "Error fetching folder contents: %v", err
-		}
-
-		// Create local directory if it doesn't exist
-		if _, err := os.Stat(localDir); os.IsNotExist(err) {
-			err = os.MkdirAll(localDir, os.ModePerm)
-			if err != nil {
-				return nil, nil, fmt.Errorf("Failed to create directory %s: %v", localDir, err)
-			}
-		}
-
-		for _, file := range dircontents {
-			// Ensure this is a file and not a folder
-			if file.GetType() == "file" && file.GetName()[len(file.GetName())-5:] == ".json" {
-				fmt.Printf("📂 Reading file: %s\n", file.GetName())
-
-				// Get file content
-				fileContent, _, _, err := client.Repositories.GetContents(context.Background(), owner, repo, file.GetPath(), &github.RepositoryContentGetOptions{Ref: branch})
-				if err != nil {
-					return nil, nil, fmt.Errorf("Error fetching file content: %v", err)
-				}
-
-				// Decode content
-				content, err := fileContent.GetContent()
-				if err != nil {
-					return nil, nil, fmt.Errorf("Error decoding file content: %v", err)
-				}
-
-				// Write content to local file
-				localFilePath := fmt.Sprintf("%s/%s", localDir, file.GetName())
-				err = os.WriteFile(localFilePath, []byte(content), 0644)
-				if err != nil {
-					return nil, nil, fmt.Errorf("Error writing file %s: %v", localFilePath, err)
-				}
-
-				fmt.Printf("✅ Successfully read and stored: %s\n", file.GetName())
-
-				filenames = append(filenames, file.GetName())
-				contents = append(contents, content)
-			}
-		}
-	} else {
-		// Read files from local directory
-		files, err := os.ReadDir(localDir)
-		if err != nil {
-			return nil, nil, fmt.Errorf("Error reading local directory %s: %v", localDir, err)
-		}
-
-		for _, file := range files {
-			if !file.IsDir() && file.Name()[len(file.Name())-5:] == ".json" {
-				localFilePath := fmt.Sprintf("%s/%s", localDir, file.Name())
-				content, err := os.ReadFile(localFilePath)
-				if err != nil {
-					return nil, nil, fmt.Errorf("Error reading file %s: %v", localFilePath, err)
-				}
-
-				fmt.Printf("✅ Successfully read from local: %s\n", file.Name())
-
-				filenames = append(filenames, file.Name())
-				contents = append(contents, string(content))
-			}
-		}
-	}
-	return filenames, contents, nil
-}
 func initStorage(testDir string) (*storage.StateDBStorage, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		err = os.MkdirAll(testDir, os.ModePerm)

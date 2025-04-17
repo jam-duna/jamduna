@@ -224,7 +224,6 @@ func TestDisputes(t *testing.T) {
 
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
-		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		// set up service using the Bootstrap service
 		refineContext := builderNode.statedb.GetRefineContext()
 		codeWorkPackage := types.WorkPackage{
@@ -250,6 +249,7 @@ func TestDisputes(t *testing.T) {
 			WorkPackage:     codeWorkPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 			CoreIndex:       0,
+			Identifier:      fmt.Sprintf("NewService(%s, %s)", serviceName, common.Str(service.CodeHash)),
 		})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)

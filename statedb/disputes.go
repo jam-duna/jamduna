@@ -209,7 +209,7 @@ func (j *JamState) GetOffenderMark(input types.Dispute) (types.OffenderMarker, e
 	if err != nil {
 		return types.OffenderMarker{}, err
 	}
-	o_out := processTypesOutput(result, input.Culprit, input.Fault)
+	o_out := processTypesOutput(input.Culprit, input.Fault)
 	return o_out, nil
 }
 
@@ -240,12 +240,6 @@ func (j *JamState) Disputes(input *types.Dispute) (types.OffenderMarker, error) 
 	//state changing here
 	j.ProcessDispute(result, input.Culprit, input.Fault)
 	return o_out, nil
-}
-
-// eq 99
-// gp 0.5.0 (10.4)
-func getPublicKey(K []types.Validator, Index uint32) types.Ed25519Key {
-	return K[Index].Ed25519
 }
 
 func (j *JamState) checkSignature(v types.Verdict) error {
@@ -537,7 +531,7 @@ func (j *JamState) updateOffender(c []types.Culprit, f []types.Fault) {
 	//sort the key
 	j.DisputesState.Psi_o = sortByKey(j.DisputesState.Psi_o)
 }
-func processTypesOutput(_verdictResult []VerdictResult, c []types.Culprit, f []types.Fault) types.OffenderMarker {
+func processTypesOutput(c []types.Culprit, f []types.Fault) types.OffenderMarker {
 	var output2 types.OffenderMarker
 	for _, culprit := range c {
 		output2.OffenderKey = append(output2.OffenderKey, culprit.Key)

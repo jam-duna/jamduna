@@ -61,12 +61,6 @@ func (b Beta_state) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func dump_recent_blocks(prefix string, arr RecentBlocks) {
-	for i, b := range arr {
-		fmt.Printf(" %s[%d]=%s\n", prefix, i, b.String())
-	}
-}
-
 // Recent History : see Section 7
 func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
 	// Eq 83 n

@@ -338,7 +338,6 @@ func jamtestclient(t *testing.T, jam string, targetN int) {
 	time.Sleep(2 * types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
-		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		// set up service using the Bootstrap service
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),
@@ -368,8 +367,6 @@ func jamtestclient(t *testing.T, jam string, targetN int) {
 		if submissionErr != nil {
 			log.Crit("SubmitAndWaitForWorkpackage ERR", "err", submissionErr)
 		}
-
-		fmt.Printf("service:%v SendWorkPackage submission DONE %v\n", serviceName, submissionErr)
 
 		new_service_found := false
 		log.Info(module, "Waiting for service to be ready", "service", serviceName)
@@ -530,7 +527,6 @@ func jamtest(t *testing.T, jam string, targetN int) {
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		// set up service using the Bootstrap service
-		log.Info(module, "Builder storing TestService", "serviceName", serviceName, "codeHash", service.CodeHash)
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),
 			AuthCodeHost:          bootstrapService,
@@ -551,7 +547,7 @@ func jamtest(t *testing.T, jam string, targetN int) {
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
 		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("Builder storing TestService %s", serviceName),
+			Identifier:      fmt.Sprintf("NewService(%s, %s)", serviceName, common.Str(service.CodeHash)),
 			WorkPackage:     codeWorkPackage,
 			CoreIndex:       0,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},

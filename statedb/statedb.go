@@ -104,18 +104,9 @@ func (s *StateDB) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (s *StateDB) writeLog(obj interface{}, timeslot uint32) {
-	s.sdb.WriteLog(obj, timeslot)
-}
-
 func (s *StateDB) ProcessIncomingJudgement(j types.Judgement) {
 	// get the disputes state
 
-}
-
-func (s *StateDB) getValidatorCredential() []byte {
-	// TODO
-	return nil
 }
 
 func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
@@ -995,37 +986,6 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	}
 
 	return num_preimages, num_octets, nil
-}
-
-// for any hits in m, remove them from pool
-func (s *StateDB) remove_guarantees_authhash(pool []common.Hash, m map[common.Hash]bool) []common.Hash {
-	p := make([]common.Hash, 0)
-	for _, h := range p {
-		_, ok := m[h]
-		if ok {
-
-		} else {
-			p = append(p, h)
-		}
-	}
-	return p
-}
-
-func (s *StateDB) getServiceAccount(c uint32) (*types.ServiceAccount, bool, error) {
-	t := s.GetTrie()
-	v, ok, err := t.GetService(c)
-	if err != nil || !ok {
-		if !ok {
-			log.Trace(module, "getServiceAccount:GetService", "c", c)
-		}
-		return &types.ServiceAccount{}, false, nil
-	}
-	// v looks like: ac ⌢ E8(ab,ag,am,al) ⌢ E4(ai)
-	a, err := types.ServiceAccountFromBytes(c, v)
-	if err != nil {
-		return &types.ServiceAccount{}, false, nil
-	}
-	return a, false, nil
 }
 
 func (s *StateDB) GetBlock() *types.Block {

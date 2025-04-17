@@ -105,18 +105,18 @@ var (
 var (
 	ServiceAccount_0 = &types.ServiceAccount{
 		Storage: map[common.Hash]types.StorageObject{
-			Service_0_StorageKeyForHost: types.StorageObject{
+			Service_0_StorageKeyForHost: {
 				Value: StorageValue,
 			},
 		},
 		Lookup: map[common.Hash]types.LookupObject{
-			PreimageBlobHash: types.LookupObject{
+			PreimageBlobHash: {
 				T: LookupValue,
 				Z: PreimageBlobLen,
 			},
 		},
 		Preimage: map[common.Hash]types.PreimageObject{
-			Service_0_PreimageBLobKeyForHost: types.PreimageObject{
+			Service_0_PreimageBLobKeyForHost: {
 				Preimage: PreimageBlob,
 			},
 		},
@@ -134,18 +134,18 @@ var (
 var (
 	ServiceAccount_1 = &types.ServiceAccount{
 		Storage: map[common.Hash]types.StorageObject{
-			Service_1_StorageKeyForHost: types.StorageObject{
+			Service_1_StorageKeyForHost: {
 				Value: StorageValue,
 			},
 		},
 		Lookup: map[common.Hash]types.LookupObject{
-			PreimageBlobHash: types.LookupObject{
+			PreimageBlobHash: {
 				T: LookupValue,
 				Z: PreimageBlobLen,
 			},
 		},
 		Preimage: map[common.Hash]types.PreimageObject{
-			Service_1_PreimageBlobKeyForHost: types.PreimageObject{
+			Service_1_PreimageBlobKeyForHost: {
 				Preimage: PreimageBlob,
 			},
 		},
@@ -1133,29 +1133,6 @@ func WriteJSONFile(filePath string, data interface{}) error {
 	return nil
 }
 
-// some useful functions
-func equal2DByte(a, b [][]byte) bool {
-	// Check for nil or different lengths
-	if a == nil && b == nil {
-		return true // Both are nil, considered equal
-	}
-	if a == nil || b == nil {
-		return false // One is nil, the other is not
-	}
-	if len(a) != len(b) {
-		return false // Different number of inner slices
-	}
-
-	// Compare each inner slice
-	for i := range a {
-		if !equalByteSlices(a[i], b[i]) {
-			return false // Found a mismatch
-		}
-	}
-
-	return true
-}
-
 func equal2DByteSlices(a [][]byte, b []ByteSlice) bool {
 	// Check for nil or different lengths
 	if a == nil && b == nil {
@@ -1492,7 +1469,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -1510,7 +1487,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -1569,7 +1546,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1589,7 +1566,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1647,7 +1624,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1667,7 +1644,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1725,7 +1702,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1745,7 +1722,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1794,7 +1771,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -1812,7 +1789,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -1873,7 +1850,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1893,7 +1870,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 						Service_0_StorageKeyForHost.String(): StorageValue,
 					},
 					Lookup: map[string]LookupObjectForTest{
-						PreimageBlobHash.String(): LookupObjectForTest{
+						PreimageBlobHash.String(): {
 							T: LookupValue,
 							L: PreimageBlobLen,
 						},
@@ -1942,7 +1919,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -1960,7 +1937,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -2010,7 +1987,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -2028,7 +2005,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -2096,7 +2073,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): ByteSlice{1, 2, 3, 4},
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -2214,7 +2191,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -2282,7 +2259,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 					Service_0_StorageKeyForHost.String(): StorageValue,
 				},
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -2298,7 +2275,7 @@ func TestGenerateGeneralTestVectors(t *testing.T) {
 			expectedServiceAccount: &ServiceAccountForTest{
 				Storage: map[string]ByteSlice{}, // the storage was deleted
 				Lookup: map[string]LookupObjectForTest{
-					PreimageBlobHash.String(): LookupObjectForTest{
+					PreimageBlobHash.String(): {
 						T: LookupValue,
 						L: PreimageBlobLen,
 					},
@@ -6671,7 +6648,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 								Service_0_StorageKeyForHost.String(): StorageValue,
 							},
 							Lookup: map[string]LookupObjectForTest{
-								PreimageBlobHash.String(): LookupObjectForTest{
+								PreimageBlobHash.String(): {
 									T: []uint32{10}, // HUH error
 									L: PreimageBlobLen,
 								},
@@ -7186,7 +7163,7 @@ func TestGenerateAccumulateTestVectors(t *testing.T) {
 								Service_0_StorageKeyForHost.String(): StorageValue,
 							},
 							Lookup: map[string]LookupObjectForTest{
-								PreimageBlobHash.String(): LookupObjectForTest{
+								PreimageBlobHash.String(): {
 									T: []uint32{10},
 									L: PreimageBlobLen,
 								},

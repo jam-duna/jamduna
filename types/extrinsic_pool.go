@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 )
 
 type ExtrinsicPool struct {
@@ -239,12 +240,26 @@ func (ep *ExtrinsicPool) RemoveTicketsFromPool(used_entropy common.Hash) error {
 	return nil // Success
 }
 
+func (ep *ExtrinsicPool) ForgetPreimages(preimages []*SubServiceRequestResult) error {
+	ep.preimageMutex.Lock()
+	defer ep.preimageMutex.Unlock()
+	for _, preimage := range preimages {
+		// TODO: instead of preimageHash, use AccountHash() (combines serviceID + preimageHash)
+		if _, exists := ep.knownPreimages[preimage.Hash]; exists {
+			delete(ep.knownPreimages, preimage.Hash)
+			return nil
+		}
+	}
+	return nil // Success
+}
+
 func (ep *ExtrinsicPool) AddPreimageToPool(preimage Preimages) error {
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
 	// Store the preimage in the tip's queued preimage -- TODO: use AccountHash instead
 	h := preimage.Hash()
 	if _, exists := ep.knownPreimages[h]; exists {
+		log.Warn("authoring", "AddPreimageToPool: EXISTS -- DID we have a forget or is this actual spam")
 		return nil
 	}
 	ep.queuedPreimages[h] = &preimage

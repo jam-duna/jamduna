@@ -234,7 +234,7 @@ func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret, new_assur
 		offenderMap[fault.Key] = true
 	}
 	offenderMark := make([]types.Ed25519Key, 0)
-	for key, _ := range offenderMap {
+	for key := range offenderMap {
 		offenderMark = append(offenderMark, key)
 	}
 	b.Header.OffendersMark = offenderMark

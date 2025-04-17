@@ -1,10 +1,13 @@
 package types
 
-import "github.com/colorfulnotion/jam/common"
+import (
+	"github.com/colorfulnotion/jam/common"
+)
 
 type StateUpdate struct {
 	WorkPackageUpdates map[common.Hash]*SubWorkPackageResult // workpackage hash
 	ServiceUpdates     map[uint32]*ServiceUpdate
+	ForgetPreimages    map[uint32]common.Hash
 }
 
 func NewStateUpdate() *StateUpdate {
@@ -28,10 +31,6 @@ func NewServiceUpdate(s uint32) *ServiceUpdate {
 		ServicePreimage: make(map[common.Hash]*SubServicePreimageResult),
 		ServiceRequest:  make(map[common.Hash]*SubServiceRequestResult),
 	}
-}
-
-func (su *StateUpdate) AddServiceUpdate(serviceIndex uint32, serviceUpdate *ServiceUpdate) {
-	su.ServiceUpdates[serviceIndex] = serviceUpdate
 }
 
 type WSPayload struct {
@@ -86,4 +85,19 @@ type SubWorkPackageResult struct {
 	Status          string      `json:"status"`
 	HeaderHash      common.Hash `json:"headerHash"`
 	Slot            uint32      `json:"slot"`
+}
+
+func (su *StateUpdate) AddServiceUpdate(serviceIndex uint32, serviceUpdate *ServiceUpdate) {
+	su.ServiceUpdates[serviceIndex] = serviceUpdate
+}
+func (su *StateUpdate) GetForgets() []*SubServiceRequestResult {
+	forgets := make([]*SubServiceRequestResult, 0)
+	for _, upd := range su.ServiceUpdates {
+		for _, v := range upd.ServiceRequest {
+			if v != nil && (v.Timeslots == nil || len(v.Timeslots) == 2) {
+				forgets = append(forgets, v)
+			}
+		}
+	}
+	return forgets
 }

@@ -594,18 +594,6 @@ func CheckSorting_EG(g types.Guarantee) error {
 	return nil
 }
 
-// v0.5 eq 11.27
-func (s *StateDB) getWorkReport() []types.WorkReport {
-	w := []types.WorkReport{}
-
-	if s.Block != nil {
-		for _, guarantee := range s.Block.Extrinsic.Guarantees {
-			w = append(w, guarantee.Report)
-		}
-	}
-	return w
-}
-
 // v0.5 eq 11.28 - check pending report
 func (j *JamState) checkReportTimeOut(g types.Guarantee, ts uint32) error {
 	if g.Slot > ts {
@@ -774,39 +762,8 @@ func (s *StateDB) checkTimeSlotHeader(g types.Guarantee) error {
 	}
 }
 
-// TODO: v0.5 eq 11.34
-// TODO:stanley
-func (s *StateDB) checkAncestorSetA(g types.Guarantee) error {
-	// ancestor set A
-	refine := g.Report.RefineContext
-	// x_t := refine.Anchor.timeslot
-	timeslot := refine.LookupAnchorSlot
-	// A means ancestor set
-	ancestorSet := s.AncestorSet
-	includeTimeSlot := false
-	includeWorkPackageHash := false
-	currentWorkPackage := refine.LookupAnchor
-	getTimeSlot, exists := ancestorSet[currentWorkPackage]
-	if s.AncestorSet != nil {
-		if exists {
-			includeWorkPackageHash = true
-			if getTimeSlot == timeslot {
-				includeTimeSlot = true
-			}
-		}
-		if !includeWorkPackageHash && !includeTimeSlot {
-			// TODO: REVIEW non-standard error
-			return fmt.Errorf("invalid ancestor set A, which is not in the ancestor set")
-		} else if !includeWorkPackageHash {
-			return fmt.Errorf("invalid ancestor set A, ancestor set A didn't include the work package hash")
-		} else if !includeTimeSlot {
-			return fmt.Errorf("invalid ancestor set A, ancestor set A didn't include the timeslot")
-		}
-	}
-	return nil
-}
-
 // TODO: v0.5 eq 11.35
+/*
 func (s *StateDB) getPrereqFromAccumulationQueue() []common.Hash {
 	result := []common.Hash{}
 	fmt.Printf("s.JamState.AccumulationQueue %v\n", s.JamState.AccumulationQueue)
@@ -820,7 +777,7 @@ func (s *StateDB) getPrereqFromAccumulationQueue() []common.Hash {
 	}
 	return result
 }
-
+*/
 // TODO: v0.5 eq 11.36
 func (s *StateDB) getPrereqFromRho() []common.Hash {
 	result := []common.Hash{}
