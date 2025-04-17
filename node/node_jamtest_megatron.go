@@ -4,19 +4,73 @@
 package node
 
 import (
-	"context"
-	"encoding/binary"
-	"fmt"
+	_ "net/http/pprof"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
-
-	_ "net/http/pprof"
-	"time"
 )
 
-func megatron(nodes []*Node, testServices map[string]*types.TestService, targetMegatronN int, jceManager *ManualJCEManager) {
+func (n *Node) MakeWorkPackage(prereq []common.Hash, service_code uint32, WorkItems []types.WorkItem) (types.WorkPackage, error) {
+	refineContext := n.statedb.GetRefineContext(prereq...)
+	workPackage := types.WorkPackage{
+		Authorization:         []byte("0x"), // TODO: set up null-authorizer
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		RefineContext:         refineContext,
+		WorkItems:             WorkItems,
+	}
+	return workPackage, nil
+}
+
+/*
+
+func buildMegItem(importedSegmentsM []types.ImportSegment, megaN int, service_code_mega uint32, service_code0 uint32, service_code1 uint32, codehash common.Hash) []types.WorkItem {
+	payload := make([]byte, 4)
+	binary.LittleEndian.PutUint32(payload, uint32(megaN))
+	payloadM := make([]byte, 8)
+	binary.LittleEndian.PutUint32(payloadM[0:4], service_code0)
+	binary.LittleEndian.PutUint32(payloadM[4:8], service_code1)
+	WorkItems := []types.WorkItem{
+		{
+			Service:            service_code_mega,
+			CodeHash:           codehash,
+			Payload:            payloadM,
+			RefineGasLimit:     1000,
+			AccumulateGasLimit: 100000,
+			ImportedSegments:   importedSegmentsM,
+			ExportCount:        0,
+		},
+	}
+	return WorkItems
+}
+
+func buildFibTribItem(fibImportSegments []types.ImportSegment, tribImportSegments []types.ImportSegment, n int, service_code_fib uint32, codehash_fib common.Hash, service_code_trib uint32, codehash_trib common.Hash) []types.WorkItem {
+	payload := make([]byte, 4)
+	binary.LittleEndian.PutUint32(payload, uint32(n+1))
+	WorkItems := []types.WorkItem{
+		{
+			Service:            service_code_fib,
+			CodeHash:           codehash_fib,
+			Payload:            payload,
+			RefineGasLimit:     1000,
+			AccumulateGasLimit: 1000,
+			ImportedSegments:   fibImportSegments,
+			ExportCount:        1,
+		},
+		{
+			Service:            service_code_trib,
+			CodeHash:           codehash_trib,
+			Payload:            payload,
+			RefineGasLimit:     1000,
+			AccumulateGasLimit: 1000,
+			ImportedSegments:   tribImportSegments,
+			ExportCount:        1,
+		},
+	}
+	return WorkItems
+}
+
+func megatron(n1 JNode, testServices map[string]*types.TestService, targetMegatronN int, jceManager *ManualJCEManager) {
 	fmt.Printf("Start Fib_Trib\n")
 	service0 := testServices["fib"]
 	service1 := testServices["tribonacci"]
@@ -48,7 +102,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	fib_importedSegments := make([]types.ImportSegment, 0)
 	trib_importedSegments := make([]types.ImportSegment, 0)
 	fib_trib_items := buildFibTribItem(fib_importedSegments, trib_importedSegments, Fib_Tri_counter, service0.ServiceCode, service0.CodeHash, service1.ServiceCode, service1.CodeHash)
-	next_fib_tri_WorkPackage, err := nodes[0].MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
+	next_fib_tri_WorkPackage, err := n1.MakeWorkPackage([]common.Hash{}, service0.ServiceCode, fib_trib_items)
 	if err != nil {
 		fmt.Printf("MakeWorkPackage ERR %v\n", err)
 	}
@@ -59,17 +113,16 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	meg_no_import_segment := make([]types.ImportSegment, 0)
 	meg_items := buildMegItem(meg_no_import_segment, Meg_counter, serviceM.ServiceCode, service0.ServiceCode, service1.ServiceCode, serviceM.CodeHash)
 	meg_preq := []common.Hash{next_fib_tri_WorkPackage.Hash()}
-	next_Meg_WorkPackage, err := nodes[0].MakeWorkPackage(meg_preq, serviceM.ServiceCode, meg_items)
+	next_Meg_WorkPackage, err := n1.MakeWorkPackage(meg_preq, serviceM.ServiceCode, meg_items)
 	var last_Meg []common.Hash
 
 	fmt.Printf("Guarantor Assignment\n")
-	for _, assign := range nodes[0].statedb.GuarantorAssignments {
-		vid := nodes[0].statedb.GetSafrole().GetCurrValidatorIndex(assign.Validator.GetEd25519Key())
+	for _, assign := range n1.statedb.GuarantorAssignments {
+		vid := n1.GetCurrValidatorIndex(assign.Validator.GetEd25519Key())
 		fmt.Printf("v%d->c%v\n", vid, assign.CoreIndex)
 	}
-	/*
-	 get the core index every time before we send the workpackage
-	*/
+	// get the core index every time before we send the workpackage
+
 	ok := false
 	sentLastWorkPackage := false
 	FinalRho := false
@@ -90,17 +143,16 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 		case workPackage := <-Fib_Tri_Chan:
 			// submit to core 1
 			// v0, v3, v5 => core
-			senderIdx := 5
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func() {
 				defer cancel()
-				sendWorkPackageTrack(ctx, nodes[senderIdx], workPackage, uint16(1), Fib_Tri_successful, types.ExtrinsicsBlobs{})
+				sendWorkPackageTrack(ctx, n1, workPackage, uint16(1), Fib_Tri_successful, types.ExtrinsicsBlobs{})
 			}()
 		case successful := <-Fib_Tri_successful:
 			if successful == "ok" {
 				k0 := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
 				k1 := common.ServiceStorageKey(service1.ServiceCode, []byte{0})
-				service_account_byte, _, _ := nodes[1].GetServiceStorage(service0.ServiceCode, k0)
+				service_account_byte, _, _ := n1.GetServiceStorage(service0.ServiceCode, k0)
 				// get the first four byte of the result
 				if len(service_account_byte) < 4 {
 					fmt.Printf("Fib %d = %v\n", 0, service_account_byte)
@@ -109,7 +161,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					index := binary.LittleEndian.Uint32(index_bytes)
 
 					fmt.Printf("Fib %d = %v\n", index, service_account_byte)
-					service_account_byte, _, _ = nodes[1].GetServiceStorage(service1.ServiceCode, k1)
+					service_account_byte, _, _ = n1.GetServiceStorage(service1.ServiceCode, k1)
 					fmt.Printf("Tri %d = %v\n", index, service_account_byte)
 				}
 				fib_tri_good_togo <- true
@@ -117,7 +169,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 		case successful := <-Meg_successful:
 			if successful == "ok" {
 				km := common.ServiceStorageKey(serviceM.ServiceCode, []byte{0})
-				service_account_byte, _, _ := nodes[1].GetServiceStorage(serviceM.ServiceCode, km)
+				service_account_byte, _, _ := n1.GetServiceStorage(serviceM.ServiceCode, km)
 
 				// get the first four byte of the result
 				if len(service_account_byte) < 4 {
@@ -147,7 +199,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			go func() {
 				defer cancel()
-				sendWorkPackageTrack(ctx, nodes[5], workPackage, megCoreIdx, Meg_successful, types.ExtrinsicsBlobs{})
+				sendWorkPackageTrack(ctx, n1, workPackage, megCoreIdx, Meg_successful, types.ExtrinsicsBlobs{})
 			}()
 
 		case <-ticker.C:
@@ -156,11 +208,11 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					ok = true
 					log.Info(module, "megatron success")
 					break
-				} else if test_prereq && nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil {
+				} else if test_prereq && n1.statedb.JamState.AvailabilityAssignments[0] != nil && n1.statedb.JamState.AvailabilityAssignments[1] != nil {
 					FinalRho = true
 				} else if test_prereq && FinalRho {
 					if FinalAssurance {
-						if nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil {
+						if n1.statedb.JamState.AvailabilityAssignments[1] == nil {
 							FinalMeg = true
 						}
 
@@ -169,14 +221,14 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					}
 
 				} else if !test_prereq {
-					if nodes[0].statedb.JamState.AvailabilityAssignments[1] != nil {
+					if n1.statedb.JamState.AvailabilityAssignments[1] != nil {
 						FinalRho = true
 					}
-					if nodes[0].statedb.JamState.AvailabilityAssignments[0] != nil {
+					if n1.statedb.JamState.AvailabilityAssignments[0] != nil {
 						FinalMeg = true
 					}
 					if FinalRho && FinalMeg {
-						if nodes[0].statedb.JamState.AvailabilityAssignments[0] == nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil {
+						if n1.statedb.JamState.AvailabilityAssignments[0] == nil && nodes[0].statedb.JamState.AvailabilityAssignments[1] == nil {
 							FinalAssurance = true
 						}
 					}
@@ -192,7 +244,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					fmt.Printf("All workpackages are sent\n")
 				}
 				sentLastWorkPackage = true
-			} else if (nodes[0].IsCoreReady(0, last_Meg) && Meg_Ready) && (nodes[0].IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
+			} else if (n1.IsCoreReady(0, last_Meg) && Meg_Ready) && (n1.IsCoreReady(1, curr_fib_tri_prereqs) && Fib_Tri_Ready) {
 				// send workpackages to the network
 				fmt.Printf("**  %v  Preparing Fib_Tri#%v %v Meg#%v %v **\n", time.Now().Format("04:05.000"), Fib_Tri_counter, next_fib_tri_WorkPackage.Hash().String_short(), Meg_counter, next_Meg_WorkPackage.Hash().String_short())
 				fmt.Printf("\n** \033[32m Fib_Tri %d \033[0m workPackage: %v **\n", Fib_Tri_counter, common.Str(next_fib_tri_WorkPackage.Hash()))
@@ -248,7 +300,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 						ImportedSegments:   make([]types.ImportSegment, 0),
 						ExportCount:        0,
 					})
-					next_Meg_WorkPackage, err = nodes[2].MakeWorkPackage([]common.Hash{next_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
+					next_Meg_WorkPackage, err = n1.MakeWorkPackage([]common.Hash{next_fib_tri_WorkPackage.Hash()}, serviceM.ServiceCode, meg_items)
 					last_Meg = []common.Hash{}
 					// last_Meg = append(last_Meg, previous_workpackage_hash)
 					Meg_Ready = false
@@ -262,8 +314,8 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 					Meg_Ok = true
 				default:
 					if Fib_Tri_Ok && Meg_Ok {
-						is_0_ready := nodes[0].IsCoreReady(0, last_Meg)
-						is_1_ready := nodes[0].IsCoreReady(1, curr_fib_tri_prereqs, true, curr_fib_tri_workpackage.Hash())
+						is_0_ready := n1.IsCoreReady(0, last_Meg)
+						is_1_ready := n1.IsCoreReady(1, curr_fib_tri_prereqs, true, curr_fib_tri_workpackage.Hash())
 						if is_0_ready && is_1_ready {
 							Meg_Ready = true
 							Fib_Tri_Ready = true
@@ -279,8 +331,7 @@ func megatron(nodes []*Node, testServices map[string]*types.TestService, targetM
 	}
 }
 
-func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *types.WorkPackage, receiverCore uint16, msg chan string, extrinsics types.ExtrinsicsBlobs) {
-	workPackageHash := workPackage.Hash()
+func sendWorkPackageTrack(ctx context.Context, senderNode JNode, workPackage *types.WorkPackage, receiverCore uint16, msg chan string, extrinsics types.ExtrinsicsBlobs) {
 	trialCount := 0
 	MaxTrialCount := 100
 	// send it right away for one time
@@ -289,76 +340,13 @@ func sendWorkPackageTrack(ctx context.Context, senderNode *Node, workPackage *ty
 		CoreIndex:       receiverCore,
 		ExtrinsicsBlobs: extrinsics,
 	}
-
-	_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, wpr)
-	if err != nil {
-		fmt.Printf("SendWorkPackageSubmission ERR %v", err)
-	}
-
-	resend_ticker := time.NewTicker(1 * types.SecondsPerSlot * time.Second)
-	monitor_ticker := time.NewTicker(100 * time.Millisecond)
-	defer resend_ticker.Stop()
-	defer monitor_ticker.Stop()
-	resend_mode := "waiting"
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Printf("Context cancelled for work package %v\n", workPackageHash)
-			return
-		case <-monitor_ticker.C:
-			if senderNode.statedb.JamState.AvailabilityAssignments[receiverCore] != nil {
-				rho := senderNode.statedb.JamState.AvailabilityAssignments[receiverCore]
-				pendingWPHash := rho.WorkReport.AvailabilitySpec.WorkPackageHash
-				if workPackageHash == pendingWPHash {
-					fmt.Printf("Found pending work package %v at core %v!\n", workPackageHash, receiverCore)
-					msg <- "ok"
-					return
-				}
-				//or it's in the history or the accumulate history
-				is_core_ready := senderNode.IsCoreReady(receiverCore, []common.Hash{workPackageHash})
-				if is_core_ready {
-					fmt.Printf("Found work package %v in the history of core %v!\n", workPackageHash, receiverCore)
-					msg <- "ok"
-					return
-				}
-			}
-
-		case <-resend_ticker.C:
-			// Sending the work package again
-			switch resend_mode {
-			case "waiting":
-				if trialCount == 0 {
-					trialCount++
-					resend_mode = "rebuild"
-					continue
-				}
-			case "rebuild":
-				prereqs := workPackage.RefineContext.Prerequisites
-				newRefineContext := senderNode.statedb.GetRefineContext(prereqs...)
-				workPackage.RefineContext = newRefineContext
-				workPackageHash = workPackage.Hash()
-				msg <- fmt.Sprint("trial")
-				resend_mode = "resend"
-			case "resend":
-				ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-				defer cancel()
-				_, err := senderNode.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-					WorkPackage:     *workPackage,
-					ExtrinsicsBlobs: extrinsics,
-					CoreIndex:       receiverCore,
-				})
-				if err != nil {
-					fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-				}
-				trialCount++
-				resend_mode = "rebuild"
-				if trialCount > MaxTrialCount {
-					msg <- "failed"
-					return
-				}
-			}
-		default:
-			time.Sleep(10 * time.Millisecond)
+	for trialCount < MaxTrialCount {
+		workPackageHash, err := senderNode.SubmitAndWaitForWorkPackage(ctx, wpr)
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v", err)
+		} else {
+			return nil
 		}
 	}
 }
+*/

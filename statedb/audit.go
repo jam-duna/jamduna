@@ -154,7 +154,7 @@ func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkRepo
 	return a0, s0Signature, nil
 }
 
-func (s *StateDB) GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.JudgeBucket, W_hash common.Hash) ([]types.Announcement, int) {
+func (s *StateDB) GetAnnouncementWithoutJtrue(A *types.AnnounceBucket, J *types.JudgeBucket, W_hash common.Hash) ([]types.Announcement, int) {
 	count := 0
 	var announcements = make([]types.Announcement, 0)
 	for _, a := range A.Announcements[W_hash] {
@@ -178,7 +178,7 @@ func (s *StateDB) GetAnnouncementWithoutJtrue(A types.AnnounceBucket, J types.Ju
 	}
 	return announcements, count
 }
-func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 types.AnnounceBucket, J types.JudgeBucket, tranche uint32) ([]types.WorkReportSelection, map[common.Hash][]types.Announcement, map[common.Hash]int, []bandersnatch.BandersnatchVrfSignature, error) {
+func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 *types.AnnounceBucket, J *types.JudgeBucket, tranche uint32) ([]types.WorkReportSelection, map[common.Hash][]types.Announcement, map[common.Hash]int, []bandersnatch.BandersnatchVrfSignature, error) {
 	an := []types.WorkReportSelection{}
 	availible_workreport := WorkReportToSelection(s.AvailableWorkReport)
 	no_show_announcements := make(map[common.Hash][]types.Announcement)
@@ -286,7 +286,7 @@ func (s *StateDB) ValidateWorkReport(wp types.WorkPackage) bool {
 }
 
 // eq 205
-func (a *StateDB) IsReportAudited(A types.AnnounceBucket, J types.JudgeBucket, W_hash common.Hash) bool {
+func (a *StateDB) IsReportAudited(A *types.AnnounceBucket, J *types.JudgeBucket, W_hash common.Hash) bool {
 	_, length := a.GetAnnouncementWithoutJtrue(A, J, W_hash)
 	if length == 0 {
 		//double check no invalid
@@ -303,7 +303,7 @@ func (a *StateDB) IsReportAudited(A types.AnnounceBucket, J types.JudgeBucket, W
 	return false
 }
 
-func (s *StateDB) IsReportAuditedTiny(A types.AnnounceBucket, J types.JudgeBucket, W_hash common.Hash) error {
+func (s *StateDB) IsReportAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBucket, W_hash common.Hash) error {
 	_, length := s.GetAnnouncementWithoutJtrue(A, J, W_hash)
 	if length == 0 {
 		//double check no invalid
@@ -322,7 +322,7 @@ func (s *StateDB) IsReportAuditedTiny(A types.AnnounceBucket, J types.JudgeBucke
 }
 
 // 206 big U
-func (s *StateDB) IsBlockAudited(A types.AnnounceBucket, J types.JudgeBucket) bool {
+func (s *StateDB) IsBlockAudited(A *types.AnnounceBucket, J *types.JudgeBucket) bool {
 
 	for _, av := range s.AvailableWorkReport {
 		if s.IsReportAudited(A, J, av.Hash()) {
@@ -334,7 +334,7 @@ func (s *StateDB) IsBlockAudited(A types.AnnounceBucket, J types.JudgeBucket) bo
 	return true
 }
 
-func (s *StateDB) IsBlockAuditedTiny(A types.AnnounceBucket, J types.JudgeBucket) error {
+func (s *StateDB) IsBlockAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBucket) error {
 	for _, av := range s.AvailableWorkReport {
 		if s.IsReportAuditedTiny(A, J, av.GetWorkPackageHash()) == nil {
 			continue

@@ -222,10 +222,7 @@ func ComputeEpochAndPhase(ts uint32, Epoch0Timestamp uint64) (currentEpoch uint3
 		currentPhase = uint32(ts % types.EpochLength)
 		return currentEpoch, currentPhase
 
-	} else {
-		return 0, 0
 	}
-
 	return 0, 0
 }
 

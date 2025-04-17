@@ -65,8 +65,7 @@ func TestFib(t *testing.T) {
 	if *targetNum > 0 {
 		targetN = *targetNum
 	}
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "fib", FibTestEpochLen, basePort, targetN)
+	jamtest(t, "fib", targetN)
 }
 
 func TestFib2(t *testing.T) {
@@ -74,8 +73,7 @@ func TestFib2(t *testing.T) {
 	if *targetNum > 0 {
 		targetN = *targetNum
 	}
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "fib2", FibTestEpochLen, basePort, targetN)
+	jamtest(t, "fib2", targetN)
 }
 
 func TestFib3(t *testing.T) {
@@ -83,8 +81,7 @@ func TestFib3(t *testing.T) {
 	if *targetNum > 0 {
 		targetN = *targetNum
 	}
-	basePort := GenerateRandomBasePort()
-	jamtestclient(t, "fib3", FibTestEpochLen, basePort, targetN)
+	jamtestclient(t, "fib3", targetN)
 }
 
 func TestMegatron(t *testing.T) {
@@ -119,8 +116,8 @@ func TestMegatron(t *testing.T) {
 		targetN = *targetNum
 	}
 	fmt.Printf("megatron targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "megatron", MegaTronEpochLen, basePort, targetN)
+
+	jamtest(t, "megatron", targetN)
 }
 
 func TestTransfer(t *testing.T) {
@@ -129,8 +126,8 @@ func TestTransfer(t *testing.T) {
 		targetN = *targetNum
 	}
 	fmt.Printf("transfer targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "transfer", TransferEpochLen, basePort, targetN)
+
+	jamtest(t, "transfer", targetN)
 }
 
 func TestScaledTransfer(t *testing.T) {
@@ -139,8 +136,7 @@ func TestScaledTransfer(t *testing.T) {
 		targetN = *targetNum
 	}
 	fmt.Printf("scaled_transfer targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "scaled_transfer", TransferEpochLen, basePort, targetN)
+	jamtest(t, "scaled_transfer", targetN)
 }
 
 func TestBalances(t *testing.T) {
@@ -149,8 +145,7 @@ func TestBalances(t *testing.T) {
 		targetN = *targetNum
 	}
 	fmt.Printf("balances targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "balances", BalancesEpochLen, basePort, targetN)
+	jamtest(t, "balances", targetN)
 }
 
 func TestScaledBalances(t *testing.T) {
@@ -159,8 +154,7 @@ func TestScaledBalances(t *testing.T) {
 		targetN = *targetNum
 	}
 	fmt.Printf("scaled_balances targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "scaled_balances", ScaleBalancesEpochLen, basePort, targetN)
+	jamtest(t, "scaled_balances", targetN)
 }
 
 func TestEmpty(t *testing.T) {
@@ -169,8 +163,7 @@ func TestEmpty(t *testing.T) {
 		targetN = *targetNum
 	}
 	fmt.Printf("empty targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "empty", EmptyEpochLen, basePort, targetN)
+	jamtest(t, "empty", targetN)
 }
 
 func TestBlake2b(t *testing.T) {
@@ -179,16 +172,13 @@ func TestBlake2b(t *testing.T) {
 		targetN = *targetNum
 	}
 	fmt.Printf("blake2b targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "blake2b", Blake2bEpochLen, basePort, targetN)
+	jamtest(t, "blake2b", targetN)
 }
 
 func TestGameOfLife(t *testing.T) {
 	targetN := 10
-	GameOfLifeEpochLen := 10
 	fmt.Printf("game_of_life targetNum: %v\n", targetN)
-	basePort := GenerateRandomBasePort()
-	jamtest(t, "game_of_life", GameOfLifeEpochLen, basePort, targetN)
+	jamtest(t, "game_of_life", targetN)
 }
 
 func TestDisputes(t *testing.T) {

@@ -13,15 +13,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_push func([]byte), jceManager *ManualJCEManager) {
-
-	flatten := func(data [][]byte) []byte {
-		var result []byte
-		for _, block := range data {
-			result = append(result, block[8:]...)
-		}
-		return result
-	}
+func game_of_life(n1 JNode, testServices map[string]*types.TestService, jceManager *ManualJCEManager) {
 
 	log.Info(module, "Game of Life START")
 
@@ -34,7 +26,6 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 	service0_child_code_length := uint32(len(service0_child_code["game_of_life_child"].Code))
 	service0_child_code_length_bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(service0_child_code_length_bytes, service0_child_code_length)
-	fmt.Printf("game_of_life_CHILD_CODE: %d %s\n", service0_child_code_length, service0_child_codehash)
 
 	// Generate the extrinsic
 	extrinsics := types.ExtrinsicsBlobs{}
@@ -54,9 +45,6 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 	})
 
 	extrinsics = append(extrinsics, extrinsic)
-
-	n1 := nodes[1]
-	n4 := nodes[4]
 	prevWorkPackageHash := common.Hash{}
 
 	for step_n := 0; step_n <= 30; step_n++ {
@@ -86,7 +74,6 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 
 			export_count = 9
 		} else {
-			//export_count = 0
 			payload = []byte{}
 		}
 
@@ -138,21 +125,34 @@ func game_of_life(nodes []*Node, testServices map[string]*types.TestService, ws_
 		if step_n == 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
-			err = n4.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, service0_child_code["game_of_life_child"].Code)
+			err = n1.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, service0_child_code["game_of_life_child"].Code)
 			if err != nil {
 				log.Error(module, "SubmitAndWaitForPreimage", "err", err)
 			} else {
 				log.Info(module, "GAME OF LIFE CHILD LOADED")
 			}
 		} else {
-			vm_export, err := n4.GetImportSegments(importedSegments)
-			if err == nil {
-				stepBytes := make([]byte, 4)
-				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
-				out := append(stepBytes, flatten(vm_export)...)
+			/*
+				ws_push := StartGameOfLifeServer("localhost:8080", "../client/game_of_life.html")
 
-				ws_push(out)
-			}
+				flatten := func(data [][]byte) []byte {
+					var result []byte
+					for _, block := range data {
+						result = append(result, block[8:]...)
+					}
+					return result
+				}
+
+				vm_export, err := n1.GetSegments(importedSegments)
+				if err == nil {
+					stepBytes := make([]byte, 4)
+					binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
+					out := append(stepBytes, flatten(vm_export)...)
+					if false {
+						ws_push(out)
+					}
+				}
+			*/
 		}
 		prevWorkPackageHash = workPackageHash
 	}

@@ -899,12 +899,14 @@ func (vm *VM) setGasRegister(gasBytes, registerBytes []byte) {
 func (vm *VM) hostInvoke() {
 	n, _ := vm.ReadRegister(7)
 	o, _ := vm.ReadRegister(8)
+
 	gasBytes, errCodeGas := vm.Ram.ReadRAMBytes(uint32(o), 8)
 	if errCodeGas != OK {
 		vm.terminated = true
 		vm.ResultCode = types.PVM_PANIC
 		return
 	}
+
 	g := types.DecodeE_l(gasBytes)
 
 	m_n_reg := make([]uint64, 13)
@@ -917,7 +919,6 @@ func (vm *VM) hostInvoke() {
 		}
 		m_n_reg[i-1] = types.DecodeE_l(reg_bytes)
 	}
-
 	m_n, ok := vm.RefineM_map[uint32(n)]
 	if !ok {
 		vm.WriteRegister(7, WHO)
@@ -940,7 +941,9 @@ func (vm *VM) hostInvoke() {
 		Ram:      m_n.U,
 	}
 
+	new_machine.logging = vm.logging
 	new_machine.Execute(int(new_machine.pc), true)
+
 	m_n.I = new_machine.pc
 	m_n.U = new_machine.Ram
 	vm.RefineM_map[uint32(n)] = m_n
@@ -1608,16 +1611,9 @@ func getLogLevelName(level uint64, core uint16, serviceName string) string {
 // JIP-1 https://hackmd.io/@polkadot/jip1
 func (vm *VM) hostLog() {
 	level, _ := vm.ReadRegister(7)
-	//target, _ := vm.ReadRegister(8)
-	//targetlen, _ := vm.ReadRegister(9)
 	message, _ := vm.ReadRegister(10)
 	messagelen, _ := vm.ReadRegister(11)
 
-	// targetBytes, errCode := vm.Ram.ReadRAMBytes(uint32(target), uint32(targetlen))
-	// if errCode != OK {
-	// 	vm.HostResultCode = OOB
-	// 	return
-	// }
 	messageBytes, errCode := vm.Ram.ReadRAMBytes(uint32(message), uint32(messagelen))
 	if errCode != OK {
 		vm.HostResultCode = OOB

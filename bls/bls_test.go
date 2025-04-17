@@ -47,6 +47,7 @@ func TestSignAndVerify(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to generate double public key: %v", err)
 	}
+	fmt.Printf("pub=%x\n", pub)
 	if len(pub) != DoubleKeyLen {
 		t.Errorf("invalid double public key length: expected %d bytes, got %d", DoubleKeyLen, len(pub))
 	}
@@ -79,7 +80,7 @@ func TestAggregateSignatures(t *testing.T) {
 
 	var secrets []SecretKey
 	var pubs []DoublePublicKey
-	var pubsG2 []G2PublicKey
+	//var pubsG2 []G2PublicKey
 	for i := 0; i < 6; i++ {
 		seed := make([]byte, SecretKeyLen)
 		rand.Read(seed)
@@ -106,7 +107,8 @@ func TestAggregateSignatures(t *testing.T) {
 		if len(pubG2) != G2Len {
 			t.Errorf("invalid G2 public key length for key %d: expected %d bytes, got %d", i, G2Len, len(pubG2))
 		}
-		pubsG2 = append(pubsG2, pubG2)
+		fmt.Printf("pubG2=%v\n", pubG2)
+		//pubsG2 = append(pubsG2, pubG2)
 
 	}
 	message := []byte("colorful notion")

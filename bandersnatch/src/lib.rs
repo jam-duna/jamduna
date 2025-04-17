@@ -1,7 +1,7 @@
 use ark_vrf::reexports::{
     ark_serialize::{self, CanonicalDeserialize, CanonicalSerialize},
 };
-use ark_vrf::{suites::bandersnatch};
+use ark_vrf::suites::bandersnatch;
 use bandersnatch::{
     IetfProof, Input, Output, Public, RingProof,
     RingProofParams, Secret,
@@ -887,16 +887,14 @@ pub extern "C" fn get_ring_vrf_output(
 mod tests {
     use super::*;
     use hex;
-    use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::Rng;
     const SCALAR_SIZE: usize = 32;
     const PUB_KEY_SIZE: usize = 32;
-    const IETF_SIGNATURE_SIZE: usize = 96;
-    const RING_SIGNATURE_SIZE: usize = 784;
-    const VRF_OUTPUT_SIZE: usize = 32;
+    // const IETF_SIGNATURE_SIZE: usize = 96;
+    // const RING_SIGNATURE_SIZE: usize = 784;
+    // const VRF_OUTPUT_SIZE: usize = 32;
     const SECRET_SIZE: usize = 64; // Adjust as per the actual size of the compressed secret
-
-    macro_rules! measure_time {
+    macro_rules! _measure_time {
         ($func_name:expr, $func_call:expr) => {{
             let start = std::time::Instant::now();
             let result = $func_call;
@@ -908,8 +906,6 @@ mod tests {
 
     #[test]
     fn test_ietf_vrf_sign_and_verify() {
-        use ark_serialize::CanonicalSerialize;
-        use ark_serialize::CanonicalDeserialize;
         use hex;
         use rand::Rng;
 
@@ -997,7 +993,6 @@ mod tests {
         use ark_serialize::CanonicalSerialize;
         use ark_serialize::CanonicalDeserialize;
         use hex;
-        use std::os::raw::c_uchar;
 
         const SEED_SIZE: usize = 32;
         const SECRET_SIZE: usize = 32;

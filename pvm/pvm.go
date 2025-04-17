@@ -1069,13 +1069,8 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
-	if string(vm.ServiceMetadata) == "game_of_life" {
-		fmt.Printf("Result: %v\n", r)
-		fmt.Printf("VM.PC: %v\n", vm.pc)
-		fmt.Printf("VM.Fault_address: %v\n", vm.Fault_address)
-		fmt.Printf("VM.ResultCode: %v\n", vm.ResultCode)
-		// vm.Ram.DebugStatus()
-	}
+
+	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r, "pc", vm.pc, "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 
 	exportedSegments = vm.Exports
 	return r, res, exportedSegments
@@ -1375,7 +1370,7 @@ func (vm *VM) step(stepn int) error {
 		x = uint64(len(vm.code))
 	}
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
-	startPC := vm.pc
+	// startPC := vm.pc
 	//beforeGas := vm.Gas
 	switch instr {
 	case TRAP:
@@ -1515,11 +1510,11 @@ func (vm *VM) step(stepn int) error {
 		return nil
 	}
 
-	md := "unk"
-	if vm.ServiceMetadata != nil {
-		md = string(vm.ServiceMetadata)
-	}
-	log.Trace(vm.logging, md, "step", stepn, "pc", startPC, "opcode", opcode_str(opcode), "g", vm.Gas, "reg", vm.ReadRegisters())
+	// md := "unk"
+	// if vm.ServiceMetadata != nil {
+	// 	md = string(vm.ServiceMetadata)
+	// }
+	// log.Debug(vm.logging, md, "step", stepn, "pc", startPC, "opcode", opcode_str(opcode), "g", vm.Gas, "reg", vm.ReadRegisters())
 	return nil
 }
 

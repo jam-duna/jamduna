@@ -20,12 +20,18 @@ import (
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
 
-	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/user"
 	"time"
 )
+
+type JNode interface {
+	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
+	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
+	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
+	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
+}
 
 var jamManualSimple = flag.Bool("jce_manual_simple", false, "jce_manual_simple")
 var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
@@ -34,56 +40,6 @@ var pvm_authoring_log = flag.Bool("pvm_authoring_log", false, "pvm_authoring_log
 const (
 	webServicePort = 8079
 )
-
-func sendStateTransition(endpoint string, st *statedb.StateTransition) (err error, check *statedb.StateTransitionCheck) {
-	client := &http.Client{}
-	req, err := http.NewRequest("POST", endpoint, nil)
-	if err != nil {
-		log.Crit("stf", "Failed to create HTTP request", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	//req.Body = os.NopCloser(http.NoBody)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Error("stf", "Failed to send block via HTTP", err)
-		return
-	}
-	defer resp.Body.Close()
-	return
-}
-
-// Non-conformant metadata generator
-func generateMetadata(idx int) (string, error) {
-	//should be max of 128 bytes
-	var nodeName string
-	// assign metadata names for the first 6
-	switch idx {
-	case 0:
-		nodeName = "Alice"
-	case 1:
-		nodeName = "Bob"
-	case 2:
-		nodeName = "Charlie"
-	case 3:
-		nodeName = "Dave"
-	case 4:
-		nodeName = "Eve"
-	case 5:
-		nodeName = "Fergie"
-	default:
-		nodeName = fmt.Sprintf("Node%d", idx)
-	}
-	remoteAddr := fmt.Sprintf("127.0.0.1:%d", 9900+idx)
-	metadata := fmt.Sprintf("%s:%s", remoteAddr, nodeName)
-	metadata_byte := []byte(metadata)
-
-	if len(metadata_byte) > types.MetadataSizeInBytes {
-		return metadata, fmt.Errorf("invalid input length for metadata %s", metadata)
-	}
-	return metadata, nil
-}
 
 func SetLevelDBPaths(numNodes int) []string {
 	node_paths := make([]string, numNodes)
@@ -166,7 +122,7 @@ func GenerateRandomBasePort() uint16 {
 func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
 	GenesisStateFile, GenesisBlockFile := GetGenesisFile(network)
-	log.InitLogger("debug")
+	log.InitLogger("trace")
 
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
 
@@ -212,16 +168,6 @@ func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, 
 		}
 	}
 	return true, nil
-}
-
-func safrole(sendtickets bool) {
-	nodes, err := SetUpNodes(JCEDefault, numNodes, 10000)
-	if err != nil {
-		panic(err)
-	}
-	for _, n := range nodes {
-		n.SetSendTickets(sendtickets)
-	}
 }
 
 func GetService(serviceNames []string, getmetadata bool) (services map[string]*types.TestService, err error) {
@@ -287,7 +233,6 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
 	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
 
-	//log.EnableModule(log.GeneralAuthoring)
 	log.Info(module, "JAMTEST", "jam", caseType, "targetN", targetTimeslotLength)
 
 	for _, n := range nodes {
@@ -318,10 +263,10 @@ func safroleTest(t *testing.T, caseType string, targetedEpochLen int, basePort u
 	}
 }
 
-func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
+func jamtestclient(t *testing.T, jam string, targetN int) {
 
 	var logLevel string
-	flag.StringVar(&logLevel, "log", "debug", "Logging level (e.g., debug, info, warn, error, crit)")
+	flag.StringVar(&logLevel, "log", "trace", "Logging level (e.g., debug, info, warn, error, crit)")
 	flag.Parse()
 	peerListMapFile := "../cmd/archive_node/peerlist/local.json"
 	peerListMap, err := ParsePeerList(peerListMapFile)
@@ -347,10 +292,6 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	}
 
 	fmt.Printf("Test PreReq: %v\n", test_prereq)
-	/*
-		//log.EnableModule(log.PvmAuthoring)
-		//log.EnableModule(log.FirstGuarantor)
-	*/
 
 	// give some time for nodes to come up
 	initTicker := time.NewTicker(1 * time.Second)
@@ -491,14 +432,14 @@ func jamtestclient(t *testing.T, jam string, targetedEpochLen int, basePort uint
 	switch jam {
 	case "fib3":
 		targetN := 9
-		fib3(nodes, testServices, targetN)
+		fib3(nodes[1], testServices, targetN)
 	}
 }
 
-func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, targetN int) {
+func jamtest(t *testing.T, jam string, targetN int) {
 	flag.Parse()
 
-	/// TODO: use JCEManual;
+	basePort := GenerateRandomBasePort()
 	nodes, err := SetUpNodes(JCEDefault, numNodes, basePort) // TODO change this to JCEManual
 	if err != nil {
 		panic("Error setting up nodes: %v\n")
@@ -510,14 +451,6 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	}
 
 	fmt.Printf("Test PreReq: %v\n", test_prereq)
-	// log.EnableModule(log.PvmAuthoring)
-	// log.EnableModule(log.FirstGuarantorOrAuditor)
-	//log.EnableModule(debugDA)
-	//log.EnableModule(log.GeneralAuthoring)
-	var game_of_life_ws_push func([]byte)
-	if jam == "game_of_life" {
-		game_of_life_ws_push = StartGameOfLifeServer("localhost:8080", "../client/game_of_life.html")
-	}
 
 	// Run the JCE updater (it will run indefinitely).
 	initialJCE := uint32(11)
@@ -538,6 +471,9 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	} else {
 		fmt.Printf("jamtest: JCE Mode: %s\n", jceMode)
 	}
+	//log.EnableModule(log.PvmAuthoring)
+	//log.EnableModule(log.FirstGuarantorOrAuditor)
+	//log.EnableModule(log.PvmAuthoring)
 
 	//go RunGrandpaGraphServer(nodes[0], basePort)
 	for {
@@ -653,31 +589,30 @@ func jamtest(t *testing.T, jam string, targetedEpochLen int, basePort uint16, ta
 	log.Info(module, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
 
 	switch jam {
-	case "megatron":
-		megatron(nodes, testServices, targetN, jceManager)
+	// case "megatron":
+	// 	megatron(nodes, testServices, targetN)
 	case "fib":
-		fib(nodes, testServices, targetN, jceManager)
+		fib(nodes[1], testServices, targetN, jceManager)
 	case "fib2":
 		targetN := 100
-		fib2(nodes, testServices, targetN, jceManager)
+		fib2(nodes[1], testServices, targetN, jceManager)
 	case "transfer":
 		transferNum := targetN
-		transfer(nodes, testServices, transferNum, jceManager)
+		transfer(nodes[1], testServices, transferNum)
 	case "scaled_transfer":
 		transferNum := 10
 		splitTransferNum := targetN
-		scaled_transfer(nodes, testServices, transferNum, splitTransferNum, jceManager)
+		scaled_transfer(nodes[1], testServices, transferNum, splitTransferNum)
 	case "balances":
 		// not using anything
-		balances(nodes, testServices, targetN, jceManager)
+		balances(nodes[1], testServices)
 	case "scaled_balances":
 		targetN_mint := targetN
 		targetN_transfer := targetN
-		scaled_balances(nodes, testServices, targetN_mint, targetN_transfer, jceManager)
+		scaled_balances(nodes[1], testServices, targetN_mint, targetN_transfer)
 	case "blake2b":
-		blake2b(nodes, testServices, targetN, jceManager)
+		blake2b(nodes[1], testServices)
 	case "game_of_life":
-		time.Sleep(10 * time.Second)
-		game_of_life(nodes, testServices, game_of_life_ws_push, jceManager)
+		game_of_life(nodes[1], testServices, jceManager)
 	}
 }

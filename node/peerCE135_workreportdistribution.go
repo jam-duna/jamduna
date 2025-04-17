@@ -154,13 +154,11 @@ func (p *Peer) SendWorkReportDistribution(
 	return nil
 }
 
-func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
+func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
 
 	var newReq JAMSNPWorkReport
-	// Deserialize byte array back into the struct
-	err = newReq.FromBytes(msg)
-	if err != nil {
+	if err := newReq.FromBytes(msg); err != nil {
 		log.Error(debugG, "onWorkReportDistribution", "err", err)
 		return fmt.Errorf("onWorkReportDistribution: failed to decode message: %w", err)
 	}
@@ -172,9 +170,11 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		Signatures: newReq.Credentials,
 	}
 
-	// Send guarantee to channel (non-blocking with guaranteesCh full check)
 	select {
 	case n.guaranteesCh <- guarantee:
+	case <-ctx.Done():
+		log.Warn(debugG, "onWorkReportDistribution", "ctx", "canceled before sending guarantee")
+		return ctx.Err()
 	default:
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
@@ -185,9 +185,11 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		"guarantee.Slot", guarantee.Slot,
 	)
 
-	// Send WorkReport to channel
 	select {
 	case n.workReportsCh <- workReport:
+	case <-ctx.Done():
+		log.Warn(debugG, "onWorkReportDistribution", "ctx", "canceled before sending work report")
+		return ctx.Err()
 	default:
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "workReportsCh full, dropping work report")
 	}

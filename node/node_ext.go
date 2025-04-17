@@ -570,6 +570,7 @@ func SetupJceManager(nodes []*Node, initialJCE uint32, jceMode string) (string, 
 		fmt.Println("SetupJceManager: Setting up Manual JCE Manager...")
 		var ctx context.Context
 		ctx, cancelFunc = context.WithCancel(context.Background())
+		defer cancelFunc()
 		managerChan := make(chan *ManualJCEManager, 1)
 
 		go func(innerCtx context.Context) {

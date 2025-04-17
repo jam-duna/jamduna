@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int, jceManager *ManualJCEManager) {
+func transfer(n1 JNode, testServices map[string]*types.TestService, transferNum int) {
 	fmt.Printf("\n=========================Start Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
@@ -32,12 +32,11 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 		ImportedSegments:   make([]types.ImportSegment, 0),
 		ExportCount:        0,
 	}
-	n1 := nodes[1]
 	core := 0
 
-	sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
+	sa0, _, _ := n1.GetService(service0.ServiceCode)
 	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa0.Balance)
-	sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+	sa1, _, _ := n1.GetService(service1.ServiceCode)
 	fmt.Printf("\033[38;5;208mtransfer_1\033[0m initial balance: \033[32m%v\033[0m\n", sa1.Balance)
 	fmt.Printf("\n")
 	prevBalance0 := sa0.Balance
@@ -130,17 +129,19 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 			}
 		case wp := <-transferChan:
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-			go func(wp types.WorkPackage) {
-				defer cancel()
-				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
-			}(wp)
+			defer cancel()
+			n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
+				WorkPackage:     wp,
+				CoreIndex:       uint16(core),
+				ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+			})
 		case success := <-transferSuccessful:
 			if success != "ok" {
 				fmt.Println("Transfer work package failed")
 			}
 
-			sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
-			sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+			sa0, _, _ := n1.GetService(service0.ServiceCode)
+			sa1, _, _ := n1.GetService(service1.ServiceCode)
 			fmt.Printf("\033[38;5;208mtransfer_0_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance0, sa0.Balance)
 			fmt.Printf("\033[38;5;208mtransfer_1_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance1, sa1.Balance)
 			prevBalance0 = sa0.Balance
@@ -157,7 +158,7 @@ func transfer(nodes []*Node, testServices map[string]*types.TestService, transfe
 	}
 }
 
-func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, transferNum int, splitTransferNum int, jceManager *ManualJCEManager) {
+func scaled_transfer(n1 JNode, testServices map[string]*types.TestService, transferNum int, splitTransferNum int) {
 	fmt.Printf("\n=========================Start Scaled Transfer=========================\n\n")
 	service0 := testServices["transfer_0"]
 	service1 := testServices["transfer_1"]
@@ -172,12 +173,11 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 		ExportCount:        0,
 	}
 
-	n1 := nodes[1]
 	core := 0
 
-	sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
+	sa0, _, _ := n1.GetService(service0.ServiceCode)
 	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa0.Balance)
-	sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+	sa1, _, _ := n1.GetService(service1.ServiceCode)
 	fmt.Printf("\033[38;5;208mtransfer_1\033[0m initial balance: \033[32m%v\033[0m\n", sa1.Balance)
 	fmt.Printf("\n")
 	prevBalance0 := sa0.Balance
@@ -277,17 +277,19 @@ func scaled_transfer(nodes []*Node, testServices map[string]*types.TestService, 
 			}
 		case wp := <-transferChan:
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-			go func(wp types.WorkPackage) {
-				defer cancel()
-				sendWorkPackageTrack(ctx, n1, &wp, uint16(core), transferSuccessful, types.ExtrinsicsBlobs{})
-			}(wp)
+			defer cancel()
+			n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
+				CoreIndex:       uint16(core),
+				WorkPackage:     wp,
+				ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+			})
 		case success := <-transferSuccessful:
 			if success != "ok" {
 				fmt.Println("Transfer work package failed")
 			}
 
-			sa0, _, _ := n1.getState().GetService(service0.ServiceCode)
-			sa1, _, _ := n1.getState().GetService(service1.ServiceCode)
+			sa0, _, _ := n1.GetService(service0.ServiceCode)
+			sa1, _, _ := n1.GetService(service1.ServiceCode)
 			fmt.Printf("\033[38;5;208mtransfer_0_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance0, sa0.Balance)
 			fmt.Printf("\033[38;5;208mtransfer_1_balance\033[0m: \033[32m%v\033[0m -> \033[32m%v\033[0m\n", prevBalance1, sa1.Balance)
 			prevBalance0 = sa0.Balance
@@ -473,7 +475,7 @@ func (a *TransferExtrinsic) Bytes() []byte {
 	return buffer.Bytes()
 }
 
-func balances(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
+func balances(n1 JNode, testServices map[string]*types.TestService) {
 
 	// !!!! targetN is NOT USED - need to wire this up
 	fmt.Printf("\n=========================Balances Test=========================\n")
@@ -492,8 +494,6 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	}
 	balancesServiceIndex := BalanceService.ServiceCode
 	balancesServiceCodeHash := BalanceService.CodeHash
-
-	n1 := nodes[1]
 
 	// Method ID bytes
 	create_asset_id := uint32(0)
@@ -905,7 +905,7 @@ func balances(nodes []*Node, testServices map[string]*types.TestService, targetN
 	ShowAccountDetail(n1, balancesServiceIndex, 1984, to_account)
 }
 
-func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, targetN_mint int, targetN_transfer int, jceManager *ManualJCEManager) {
+func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targetN_mint int, targetN_transfer int) {
 	fmt.Printf("\n=========================Balances Scale Test=========================\n")
 	// General setup
 	BalanceService := testServices["balances"]
@@ -921,7 +921,6 @@ func scaled_balances(nodes []*Node, testServices map[string]*types.TestService, 
 		ImportedSegments:   make([]types.ImportSegment, 0),
 		ExportCount:        0,
 	}
-	n1 := nodes[1]
 
 	// Total Work Package Size in MB
 	var totalWPSizeInMB float64
@@ -1192,7 +1191,7 @@ func calaulateTotalWPSize(create_asset_workPackage types.WorkPackage, extrinsics
 	return totalWPsizeInMB
 }
 
-func ShowAssetDetail(n *Node, balance_service_index uint32, asset_id uint64) {
+func ShowAssetDetail(n JNode, balance_service_index uint32, asset_id uint64) {
 	var asset Asset
 	key_byte := make([]byte, 8)
 	binary.LittleEndian.PutUint64(key_byte, asset_id)
@@ -1207,7 +1206,7 @@ func ShowAssetDetail(n *Node, balance_service_index uint32, asset_id uint64) {
 	fmt.Printf("\033[38;5;13mAsset Decimals\033[0m: \033[32m%v\033[0m\n", fetched_asset.Decimals)
 }
 
-func ShowAccountDetail(n *Node, balance_service_index uint32, asset_id uint64, account_key [32]byte) {
+func ShowAccountDetail(n JNode, balance_service_index uint32, asset_id uint64, account_key [32]byte) {
 	var account Account
 	key_byte := make([]byte, 8+32)
 	binary.LittleEndian.PutUint64(key_byte, asset_id)
@@ -1238,11 +1237,10 @@ func GenerateNMBFilledBytes(n int) []byte {
 	return bytes.Repeat([]byte{1}, size)
 }
 
-func blake2b(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
+func blake2b(n1 JNode, testServices map[string]*types.TestService) {
 	fmt.Printf("Start Blake2b Test\n")
 
 	service0 := testServices["blake2b"]
-	n1 := nodes[1]
 
 	payload := make([]byte, 0)
 	input := []byte("Hello, Blake2b!")

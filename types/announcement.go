@@ -3,7 +3,6 @@ package types
 import (
 	"crypto/ed25519"
 	"fmt"
-	"reflect"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
@@ -172,23 +171,38 @@ func (W *AnnounceBucket) HaveMadeAnnouncement(a Announcement) bool {
 }
 
 // Deep copy of AnnounceBucket
-func (W *AnnounceBucket) DeepCopy() (AnnounceBucket, error) {
+
+func (W *AnnounceBucket) DeepCopy() (*AnnounceBucket, error) {
 	W.Lock()
 	defer W.Unlock()
-	var copiedAnnounceBucket AnnounceBucket
 
-	// Serialize the original AnnounceBucket to JSON
-	data, err := Encode(W)
-	if err != nil {
-		return copiedAnnounceBucket, err
+	type announceBucketSerializable struct {
+		Tranche            uint32
+		Announcements      map[common.Hash][]Announcement
+		KnownAnnouncements map[common.Hash]bool
 	}
 
-	// Deserialize the JSON back into a new AnnounceBucket instance
-	decoded, _, err := Decode(data, reflect.TypeOf(AnnounceBucket{}))
-	if err != nil {
-		return copiedAnnounceBucket, err
+	// Copy fields manually to a serializable version
+	serializable := announceBucketSerializable{
+		Tranche:            W.Tranche,
+		Announcements:      make(map[common.Hash][]Announcement, len(W.Announcements)),
+		KnownAnnouncements: make(map[common.Hash]bool, len(W.KnownAnnouncements)),
 	}
-	copiedAnnounceBucket = decoded.(AnnounceBucket)
 
-	return copiedAnnounceBucket, nil
+	// Deep copy maps
+	for k, v := range W.Announcements {
+		copied := make([]Announcement, len(v))
+		copy(copied, v)
+		serializable.Announcements[k] = copied
+	}
+	for k, v := range W.KnownAnnouncements {
+		serializable.KnownAnnouncements[k] = v
+	}
+
+	// Construct the result
+	return &AnnounceBucket{
+		Tranche:            serializable.Tranche,
+		Announcements:      serializable.Announcements,
+		KnownAnnouncements: serializable.KnownAnnouncements,
+	}, nil
 }

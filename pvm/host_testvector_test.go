@@ -702,7 +702,7 @@ func (tc GeneralTestcase) GetExpectedMemory() RAMForTest      { return tc.Expect
 func (tc GeneralTestcase) GetName() string                    { return tc.Name }
 
 func InitPvmBase(vm *VM, tc Testcase) {
-	vm.Gas = tc.GetInitialGas()
+	vm.Gas = int64(tc.GetInitialGas())
 	for i, reg := range tc.GetInitialRegs() {
 		vm.WriteRegister(int(i), reg)
 	}
@@ -738,10 +738,10 @@ func InitPvmRefine(vm *VM, testcase RefineTestcase) {
 	vm.Extrinsics[0] = testcase.InitialExtrinsic
 
 	// Initialize Import Segments
-	vm.Imports = make([][]byte, len(testcase.InitialImportSegment))
+	vm.Imports = make([][][]byte, len(testcase.InitialImportSegment))
 	for i, bs := range testcase.InitialImportSegment {
-		vm.Imports[i] = make([]byte, len(bs))
-		copy(vm.Imports[i], bs)
+		vm.Imports[i] = make([][]byte, len(bs))
+		// TODO:copy(vm.Imports[i][:], bs[:])
 	}
 
 	vm.ExportSegmentIndex = testcase.InitialExportSegmentIdx
@@ -809,7 +809,7 @@ func InitPvmGeneral(vm *VM, testcase GeneralTestcase) {
 func CompareBase(vm *VM, testcase Testcase) {
 	passed := true
 	// Compare Gas
-	expectedGas := testcase.GetExpectedGas()
+	expectedGas := int64(testcase.GetExpectedGas())
 	if expectedGas != 0 && vm.Gas != expectedGas {
 		fmt.Printf("Gas mismatch. Expected: %d, Got: %d\n", expectedGas, vm.Gas)
 		passed = false

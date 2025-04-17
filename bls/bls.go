@@ -9,8 +9,9 @@ package bls
 import "C"
 import (
 	"errors"
-	"github.com/colorfulnotion/jam/log"
 	"unsafe"
+
+	"github.com/colorfulnotion/jam/log"
 )
 
 type DoublePublicKey [DoubleKeyLen]byte
@@ -158,10 +159,7 @@ func AggregateVerify(pubkeys []DoublePublicKey, agg_sig Signature, message []byt
 		(*C.uchar)(unsafe.Pointer(&agg_sig[0])),
 		(C.size_t)(SigLen),
 	)
-	if result == C.int(1) {
-		return true
-	}
-	return false
+	return result == C.int(1)
 }
 
 func InitBLSKey(seed []byte) (bls_pub DoublePublicKey, bls_priv SecretKey, err error) {
@@ -181,8 +179,8 @@ func Encode(data []byte, V int) ([][]byte, error) {
 	if len(data) == 0 {
 		return nil, errors.New("input data is empty")
 	}
-	C := V / 3
-	shardSize := (len(data) / C)
+	Cores := V / 3
+	shardSize := (len(data) / Cores)
 	// Allocate a single Go-managed buffer for all shards
 	output := make([]byte, shardSize*V)
 	dataPtr := (*C.uchar)(unsafe.Pointer(&data[0]))
@@ -202,8 +200,8 @@ func Encode(data []byte, V int) ([][]byte, error) {
 
 // Decode reconstructs the original data from encoded shards.
 func Decode(shards [][]byte, V int, indexes []uint32, outputSize int) ([]byte, error) {
-	C := V / 3
-	if len(shards) != C || len(shards) != len(indexes) {
+	Cores := V / 3
+	if len(shards) != Cores || len(shards) != len(indexes) {
 		log.Crit("bls", "Decode FAIL", "len(shards)", len(shards), "len(indexes)", len(indexes))
 		return nil, errors.New("shards and indexes length mismatch")
 	}

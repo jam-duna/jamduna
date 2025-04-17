@@ -16,12 +16,10 @@ import (
 	_ "net/http/pprof"
 )
 
-func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
+func fib(n1 JNode, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
 	log.Info(module, "FIB START", "targetN", targetN)
 	service0 := testServices["fib"]
 	service_authcopy := testServices["auth_copy"]
-	n1 := nodes[1]
-	n4 := nodes[4]
 
 	prevWorkPackageHash := common.Hash{}
 	for fibN := 1; fibN <= targetN; fibN++ {
@@ -79,12 +77,12 @@ func fib(nodes []*Node, testServices map[string]*types.TestService, targetN int,
 		}
 		prevWorkPackageHash = workPackageHash
 		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
-		service_account_byte, _, _ := n4.GetServiceStorage(service0.ServiceCode, k)
+		service_account_byte, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
 		log.Info(module, wpr.Identifier, "result", fmt.Sprintf("%x", service_account_byte))
 	}
 }
 
-func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
+func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
 	log.Info(module, "FIB2 START")
 
 	jam_key := []byte("jam")
@@ -100,8 +98,6 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 	fib2_child_code_length_bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
 
-	n1 := nodes[1]
-	n4 := nodes[4]
 	prevWorkPackageHash := common.Hash{}
 
 	// Generate the extrinsic
@@ -202,7 +198,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
 		for _, key := range keys {
 			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
-			service_account_byte, _, _ := n4.GetServiceStorage(service0.ServiceCode, k)
+			service_account_byte, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
 			log.Info(module, fmt.Sprintf("Fib2-(%s) result with key %d", fibN_string, key), "result", fmt.Sprintf("%x", service_account_byte))
 		}
 
@@ -228,7 +224,7 @@ func fib2(nodes []*Node, testServices map[string]*types.TestService, targetN int
 	}
 }
 
-func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targetN int) {
+func fib3(nodeClient JNode, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB2 START")
 
 	jam_key := []byte("jam")
@@ -243,9 +239,6 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 	fib2_child_code_length := uint32(len(fib2_child_code["corevm_child"].Code))
 	fib2_child_code_length_bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
-
-	nodeClient := nodes[1]
-	nodeClient4 := nodes[4]
 
 	core := 0
 	prevWorkPackageHash := common.Hash{}
@@ -269,7 +262,7 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 
 	extrinsics = append(extrinsics, extrinsic)
 
-	for fibN := -1; fibN <= 10; fibN++ {
+	for fibN := -1; fibN <= targetN; fibN++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		if fibN > 0 {
 			for i := 0; i < fibN; i++ {
@@ -344,7 +337,7 @@ func fib3(nodes []*NodeClient, testServices map[string]*types.TestService, targe
 		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
 		for _, key := range keys {
 			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
-			service_account_byte, _, _ := nodeClient4.GetServiceStorage(service0.ServiceCode, k)
+			service_account_byte, _, _ := nodeClient.GetServiceStorage(service0.ServiceCode, k)
 			log.Info(module, fmt.Sprintf("Fib2(%s) result with key %d", fibN_string, key), "result", fmt.Sprintf("%x", service_account_byte))
 		}
 

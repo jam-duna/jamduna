@@ -89,10 +89,10 @@ func (n *Node) getTrancheAnnouncement(headerHash common.Hash) (*types.TrancheAnn
 	return trancheAnnouncement, nil
 }
 
-func (n *Node) updateTrancheAnnouncement(headerHash common.Hash, trancheAnnouncement types.TrancheAnnouncement) error {
+func (n *Node) updateTrancheAnnouncement(headerHash common.Hash, trancheAnnouncement *types.TrancheAnnouncement) error {
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
-	n.announcementMap[headerHash] = &trancheAnnouncement
+	n.announcementMap[headerHash] = trancheAnnouncement
 	return nil
 }
 
@@ -437,7 +437,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	currJCE := n.GetCurrJCE()
 	start_point := n.jce_timestamp[currJCE]
 	tranche = auditing_statedb.GetTranche(start_point)
-	an, no_show_a, no_show_len, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, *judgment_bucket, tranche)
+	an, no_show_a, no_show_len, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, judgment_bucket, tranche)
 	if err != nil {
 		return nil, err
 	}
@@ -492,18 +492,18 @@ func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash 
 	return tranche_announcement.HaveMadeAnnouncement(announcement)
 }
 
-func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash) (types.AnnounceBucket, error) {
+func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash) (*types.AnnounceBucket, error) {
 	n.announcementMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
 	tranche_announcement, err := n.getTrancheAnnouncement(headerHash)
 	if err != nil {
-		return types.AnnounceBucket{}, err
+		return nil, err
 	}
 	bucket, exists := tranche_announcement.AnnouncementBucket[tranche]
 	if !exists {
-		return types.AnnounceBucket{}, fmt.Errorf("tranche %v not found for auditing", tranche)
+		return nil, fmt.Errorf("tranche %v not found for auditing", tranche)
 	}
-	return *bucket, nil
+	return bucket, nil
 }
 
 func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelection) (judgements []types.Judgement, err error) {
@@ -537,9 +537,7 @@ func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelec
 // auditWorkReport reconstructs the bundle from C assurers, verifies the bundle, and executes the work package
 func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Hash) (judgement types.Judgement, err error) {
 	judgement = types.Judgement{}
-	if err != nil {
-		return
-	}
+
 	judgment_bucket, err := n.getJudgementBucket(headerHash)
 	if err != nil {
 		return
@@ -637,7 +635,7 @@ func (n *Node) CheckBlockAudited(headerHash common.Hash, tranche uint32) (bool, 
 	if err != nil {
 		return false, err
 	}
-	isBlockAudited := auditing_statedb.IsBlockAudited(announcementBucket, *judgment_bucket)
+	isBlockAudited := auditing_statedb.IsBlockAudited(announcementBucket, judgment_bucket)
 
 	for _, w := range auditing_statedb.AvailableWorkReport {
 		log.Trace(debugAudit, "CheckBlockAudited", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "len announcementBucket", len(announcementBucket.Announcements[w.Hash()]),
@@ -786,7 +784,7 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement.PutAnnouncement failed %v \n", n.String(), headerHash)
 		return err
 	}
-	n.updateTrancheAnnouncement(headerHash, *trancheAnnouncement)
+	n.updateTrancheAnnouncement(headerHash, trancheAnnouncement)
 	return nil
 }
 

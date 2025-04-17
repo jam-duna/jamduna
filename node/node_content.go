@@ -1,7 +1,6 @@
 package node
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
@@ -120,62 +119,4 @@ func IsWorkPackageInHistory(latestdb *statedb.StateDB, workPackageHash common.Ha
 		return true
 	}
 	return false
-}
-
-func (n *Node) MakeWorkPackage(prereq []common.Hash, service_code uint32, WorkItems []types.WorkItem) (types.WorkPackage, error) {
-	refineContext := n.statedb.GetRefineContext(prereq...)
-	workPackage := types.WorkPackage{
-		Authorization:         []byte("0x"), // TODO: set up null-authorizer
-		AuthCodeHost:          0,
-		AuthorizationCodeHash: bootstrap_auth_codehash,
-		RefineContext:         refineContext,
-		WorkItems:             WorkItems,
-	}
-	return workPackage, nil
-}
-
-func buildMegItem(importedSegmentsM []types.ImportSegment, megaN int, service_code_mega uint32, service_code0 uint32, service_code1 uint32, codehash common.Hash) []types.WorkItem {
-	payload := make([]byte, 4)
-	binary.LittleEndian.PutUint32(payload, uint32(megaN))
-	payloadM := make([]byte, 8)
-	binary.LittleEndian.PutUint32(payloadM[0:4], service_code0)
-	binary.LittleEndian.PutUint32(payloadM[4:8], service_code1)
-	WorkItems := []types.WorkItem{
-		{
-			Service:            service_code_mega,
-			CodeHash:           codehash,
-			Payload:            payloadM,
-			RefineGasLimit:     1000,
-			AccumulateGasLimit: 100000,
-			ImportedSegments:   importedSegmentsM,
-			ExportCount:        0,
-		},
-	}
-	return WorkItems
-}
-
-func buildFibTribItem(fibImportSegments []types.ImportSegment, tribImportSegments []types.ImportSegment, n int, service_code_fib uint32, codehash_fib common.Hash, service_code_trib uint32, codehash_trib common.Hash) []types.WorkItem {
-	payload := make([]byte, 4)
-	binary.LittleEndian.PutUint32(payload, uint32(n+1))
-	WorkItems := []types.WorkItem{
-		{
-			Service:            service_code_fib,
-			CodeHash:           codehash_fib,
-			Payload:            payload,
-			RefineGasLimit:     1000,
-			AccumulateGasLimit: 1000,
-			ImportedSegments:   fibImportSegments,
-			ExportCount:        1,
-		},
-		{
-			Service:            service_code_trib,
-			CodeHash:           codehash_trib,
-			Payload:            payload,
-			RefineGasLimit:     1000,
-			AccumulateGasLimit: 1000,
-			ImportedSegments:   tribImportSegments,
-			ExportCount:        1,
-		},
-	}
-	return WorkItems
 }

@@ -239,16 +239,6 @@ func (n *NodeContent) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, d Ava
 	n.WriteRawKV(erasure_sClubsKey, sClubsJson)
 }
 
-// Helper function to generate a key using a prefix, erasureRoot, and shardIndex
-func generateKey(prefix string, erasureRoot common.Hash, shardIndex uint16) []byte {
-	var buffer bytes.Buffer
-	buffer.WriteString(prefix)
-	buffer.Write(erasureRoot.Bytes())
-	buffer.WriteByte(byte(shardIndex >> 8))   // high byte
-	buffer.WriteByte(byte(shardIndex & 0xff)) // low byte
-	return buffer.Bytes()
-}
-
 func generateErasureRootShardIdxKey(section string, erasureRoot common.Hash, shardIndex uint16) string {
 	return fmt.Sprintf("%s_%v_%d", section, erasureRoot, shardIndex)
 }

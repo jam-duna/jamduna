@@ -127,7 +127,7 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct
 	if err := newReq.FromBytes(msg); err != nil {
-		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w", err)
+		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w %d", err, peerID)
 	}
 
 	// <-- FIN

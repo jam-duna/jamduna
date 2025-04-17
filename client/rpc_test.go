@@ -138,7 +138,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 		}
 		coreIndex := uint16(0)
 		workPackageHash := workPackage.Hash()
-		workpackage_req := WorkPackageRequest{
+		workpackage_req := node.WorkPackageRequest{
 			CoreIndex:       coreIndex,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
@@ -163,7 +163,7 @@ func fib(t *testing.T, client *NodeClient, testServices map[string]types.Service
 	}
 	return nil
 }
-func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
+func (client *NodeClient) RobustSubmitWorkPackage(workpackage_req node.WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
 	tries := 0
 	for tries < maxTries {
 		refine_context, err := client.GetRefineContext()
@@ -274,7 +274,6 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 				},
 			},
 		}
-		workPackageHash := workPackage.Hash()
 
 		var fibN_string string
 		if fibN == -1 {
@@ -282,7 +281,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		} else {
 			fibN_string = fmt.Sprintf("%d", fibN)
 		}
-		workpackage_req := WorkPackageRequest{
+		workpackage_req := node.WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
@@ -437,11 +436,8 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 				},
 			},
 		}
-		workPackageHash := workPackage.Hash()
 
-		fmt.Printf("Game_of_life-(%d) work package submitted %v\n", step_n, workPackageHash)
-
-		workpackage_req := WorkPackageRequest{
+		workpackage_req := node.WorkPackageRequest{
 			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
@@ -453,6 +449,7 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 		if err != nil {
 			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
 		}
+		workPackageHash := workPackage.Hash()
 
 		if step_n > 0 {
 			var vm_export [][]byte

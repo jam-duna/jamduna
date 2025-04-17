@@ -14,21 +14,18 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base32"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
 	rand0 "math/rand"
 	"net"
 	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
@@ -344,21 +341,6 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func loadStateSnapshot(filePath string) (statedb.StateSnapshotRaw, error) {
-	snapshotRawBytes, err := os.ReadFile(filePath)
-	if err != nil {
-		return statedb.StateSnapshotRaw{}, fmt.Errorf("error reading JSON file %s: %v", filePath, err)
-	}
-
-	var stateSnapshotRaw statedb.StateSnapshotRaw
-	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
-	if err != nil {
-		return statedb.StateSnapshotRaw{}, fmt.Errorf("error unmarshaling JSON file %s: %v", filePath, err)
-	}
-
-	return stateSnapshotRaw, nil
-}
-
 func GetGenesisFile(network string) (string, string) {
 	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network), fmt.Sprintf("/chainspecs/blocks/genesis-%s.bin", network)
 }
@@ -629,14 +611,6 @@ func GenerateQuicConfig() *quic.Config {
 	}
 }
 
-func getConnKey(identifier string, incoming bool) string {
-	if incoming {
-		return fmt.Sprintf("%v-in", identifier)
-	} else {
-		return fmt.Sprintf("%v-out", identifier)
-	}
-}
-
 func (n *Node) GetBuild() string {
 	info := n.commitHash
 	//TODO: add extra info here
@@ -720,6 +694,10 @@ func (n *Node) GetImportSegments(importedSegments []types.ImportSegment) ([][]by
 	}
 
 	return result, nil
+}
+
+func (n *Node) GetService(serviceIndex uint32) (sa *types.ServiceAccount, ok bool, err error) {
+	return n.getState().GetService(serviceIndex)
 }
 
 func (n *Node) GetServiceStorage(serviceIndex uint32, k common.Hash) ([]byte, bool, error) {
@@ -962,11 +940,6 @@ func (n *Node) getState() *statedb.StateDB {
 	return n.statedb
 }
 
-func (n *Node) getTrie() *trie.MerkleTree {
-	s := n.getState()
-	return s.GetTrie()
-}
-
 func (n *NodeContent) getPeerByIndex(peerIdx uint16) (*Peer, error) {
 	p := n.peersInfo[peerIdx]
 	// check if peer exists
@@ -974,19 +947,6 @@ func (n *NodeContent) getPeerByIndex(peerIdx uint16) (*Peer, error) {
 		return p, nil
 	}
 	return nil, fmt.Errorf("peer %v not found", peerIdx)
-}
-
-func (n *Node) getPeerAddr(peerIdx uint16) (*Peer, error) {
-	peer, exist := n.peersInfo[peerIdx]
-	if exist {
-		return peer, nil
-	}
-	fmt.Printf("getPeerAddr not found %v\n", peerIdx)
-	return nil, fmt.Errorf("peer not found")
-}
-
-func (n *NodeContent) fetchServiceName(s uint32) string {
-	return fmt.Sprintf("service %d", s) // TODO: fetch code metadata instead
 }
 
 func (n *NodeContent) updateServiceMap(statedb *statedb.StateDB, b *types.Block) error {
@@ -1217,7 +1177,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 					log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
 					continue
 				}
-				err = sendQuicBytes(context.TODO(), up0_stream, block_a_bytes, id, CE128_BlockRequest) // ?
+				err = sendQuicBytes(ctxParent, up0_stream, block_a_bytes, id, CE128_BlockRequest) // ?
 				if err != nil {
 					if id > types.TotalValidators {
 						n.UP0_streamMu.Lock()
@@ -1339,41 +1299,11 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 	return result
 }
 
-// Helper function to determine if the error is a timeout error
-func isTimeoutError(err error) bool {
-	// Add more specific error handling as needed
-	return strings.Contains(err.Error(), "timeout")
-}
-
-func (n *Node) dumpstatedbmap() {
-	n.statedbMapMutex.Lock()
-	defer n.statedbMapMutex.Unlock()
-
-	for hash, statedb := range n.statedbMap {
-		fmt.Printf("dumpstatedbmap: statedbMap[%v] => statedb (%v<=parent=%v) StateRoot %v\n", hash, statedb.ParentHeaderHash, statedb.HeaderHash, statedb.StateRoot)
-	}
-
-	n.blocksMutex.Lock()
-	defer n.blocksMutex.Unlock()
-	for hash, blk := range n.blocks {
-		fmt.Printf("dumpstatedbmap: blocks[%v] => %v\n", hash, blk.Hash())
-	}
-}
-
 func (n *NodeContent) getStateDBByHeaderHash(headerHash common.Hash) (statedb *statedb.StateDB, ok bool) {
 	n.statedbMapMutex.Lock()
 	defer n.statedbMapMutex.Unlock()
 	statedb, ok = n.statedbMap[headerHash]
 	return statedb, ok
-}
-
-func randomKey(m map[string]*Peer) string {
-	rand0.Seed(time.Now().UnixNano())
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	return keys[rand0.Intn(len(keys))]
 }
 
 func (n *Node) fetchBlocks(headerHash common.Hash, direction uint8, maximumBlocks uint32) (*[]types.Block, error) {
@@ -1688,17 +1618,6 @@ func (n *Node) processBlock(blk *types.Block) error {
 	return nil // Success
 }
 
-func setupSegmentsShards(segmentLen int) (segmentShards [][][]byte) {
-	// setup proper arr for reconstruction
-	segmentShards = make([][][]byte, segmentLen)
-	for j := 0; j < segmentLen; j++ {
-		for shardIdx := uint16(0); shardIdx < types.TotalValidators; shardIdx++ {
-			segmentShards[j] = make([][]byte, types.TotalValidators)
-		}
-	}
-	return segmentShards
-}
-
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // We continuily use erasureRoot to ask the question
 func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, justifications [][]common.Hash, err error) {
@@ -1895,37 +1814,6 @@ func (n *NodeContent) AddPreimageToPool(serviceID uint32, preimage []byte) (err 
 		Blob:      preimage,
 	})
 	return nil
-}
-
-// -----Custom methods for tiny QUIC EC experiment-----
-
-func getStructType(obj interface{}) string {
-	v := reflect.TypeOf(obj)
-
-	// If the type is a pointer, get the underlying element type
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-
-	// Get the type name (if available) and the package path
-	structType := v.Name()
-	pkgPath := v.PkgPath()
-
-	// If there's no name, handle unexported types differently
-	if structType == "" {
-		structType = fmt.Sprintf("%v", v) // Fallback to full type description
-	}
-
-	// Check if there's a package path (means it's an exported type)
-	if pkgPath != "" {
-		parts := strings.Split(structType, ".")
-		structType = strings.ToLower(parts[len(parts)-1])
-	} else {
-		structType = strings.ToLower(structType)
-	}
-
-	fmt.Printf("!!!!getStructType=%v\n", structType)
-	return structType
 }
 
 func getMessageType(obj interface{}) string {
@@ -2287,40 +2175,6 @@ func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Blo
 	return &st
 }
 
-// write_jamnp_test_vector writes binary and JSON test vectors
-func write_jamnp_test_vector(ce string, typ string, testVectorName string, vBytes []byte, v interface{}) {
-	if writeJAMPNTestVector == false {
-		return
-	}
-	dir := fmt.Sprintf("/tmp/jamnp/%s", ce)
-	err := os.MkdirAll(dir, 0755) // Ensure the directory exists
-	if err != nil {
-		fmt.Printf("Failed to create directory %s: %v\n", dir, err)
-		return
-	}
-
-	// Write .bin file with vBytes
-	fnBin := filepath.Join(dir, fmt.Sprintf("%s-%s.bin", testVectorName, typ))
-	err = os.WriteFile(fnBin, vBytes, 0644)
-	if err != nil {
-		fmt.Printf("Failed to write binary file %s: %v\n", fnBin, err)
-	}
-
-	// Write .json file with v if not nil
-	if v != nil {
-		fnJSON := filepath.Join(dir, fmt.Sprintf("%s-%s.json", testVectorName, typ))
-		jsonData := types.ToJSON(v)
-		err = os.WriteFile(fnJSON, []byte(jsonData), 0644)
-		if err != nil {
-			fmt.Printf("Failed to write JSON file %s: %v\n", fnJSON, err)
-		}
-	}
-}
-
-func (n *Node) jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {
-	write_jamnp_test_vector(ce, "response", testVectorName, b, obj)
-}
-
 func GenerateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
 	validators, secrets, err = generateValidatorNetwork()
 	return validators, secrets, err
@@ -2328,37 +2182,4 @@ func GenerateValidatorNetwork() (validators []types.Validator, secrets []types.V
 
 func generateValidatorNetwork() (validators []types.Validator, secrets []types.ValidatorSecret, err error) {
 	return statedb.GenerateValidatorSecretSet(numNodes)
-}
-
-func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) (validator types.Validator, secret types.ValidatorSecret, err error) {
-
-	// Decode hex inputs
-	bandersnatch_seed := common.FromHex(bandersnatchHex)
-	ed25519_seed := common.FromHex(ed25519Hex)
-	bls_secret := common.FromHex(blsHex)
-	validator_meta := []byte(metadata)
-
-	// Validate hex input lengths
-	if len(bandersnatch_seed) != (bandersnatch.SecretLen) {
-		return validator, secret, fmt.Errorf("invalid input length (%d) for bandersnatch seed %s - expected len of %d", len(bandersnatch_seed), bandersnatchHex, bandersnatch.SecretLen)
-	}
-	if len(ed25519_seed) != (ed25519.SeedSize) {
-		return validator, secret, fmt.Errorf("invalid input length for ed25519 seed %s", ed25519Hex)
-	}
-	if len(bls_secret) != (types.BlsPrivInBytes) {
-		return validator, secret, fmt.Errorf("invalid input length for bls private key %s", blsHex)
-	}
-	if len(validator_meta) > types.MetadataSizeInBytes {
-		return validator, secret, fmt.Errorf("invalid input length for metadata %s", metadata)
-	}
-
-	validator, err = statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_secret, metadata)
-	if err != nil {
-		return validator, secret, err
-	}
-	secret, err = statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_secret, metadata)
-	if err != nil {
-		return validator, secret, err
-	}
-	return validator, secret, nil
 }

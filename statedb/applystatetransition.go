@@ -335,9 +335,6 @@ func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error
 	//cores reading the old jam state
 	//ρ†
 	d.ProcessDispute(result, disputes.Culprit, disputes.Fault)
-	if err != nil {
-		return
-	}
 	return nil
 }
 

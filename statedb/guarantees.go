@@ -192,7 +192,7 @@ func (s *StateDB) VerifyGuaranteesMakeBlock(EGs []types.Guarantee, new_block *ty
 				valid = false
 				continue
 			}
-			if err1 != nil || err2 != nil {
+			if err1 != nil {
 				toDelete = append(toDelete, eg.Report.CoreIndex)
 			}
 		}
@@ -700,16 +700,6 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	}
 
 	return jamerrors.ErrGWorkReportGasTooHigh
-}
-
-// v0.5 eq 11.30
-func (s *StateDB) getAvailibleSpecHash() []common.Hash {
-	p := []common.Hash{}
-	w := s.getWorkReport()
-	for _, report := range w {
-		p = append(p, report.AvailabilitySpec.WorkPackageHash)
-	}
-	return p
 }
 
 // v0.5 eq 11.31

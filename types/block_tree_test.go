@@ -141,9 +141,7 @@ func addChain(blk_tree *BlockTree, merge_point *BT_Node, num int, start_slot uin
 			return nil, fmt.Errorf("Block not found")
 		}
 		main_chain = append(main_chain, btnode)
-		if err != nil {
-			fmt.Printf("Error adding block: %s\n", err)
-		}
+
 		tmp_hash = block.Header.Hash()
 
 	}

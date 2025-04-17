@@ -148,33 +148,31 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 }
 
 // Node has received a JudgementPublication message to act on
-func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
-	var jp JAMSNPJudgmentPublication
-	err = jp.FromBytes(msg)
-	if err != nil {
-		return err
-	}
-	// <-- FIN
 
-	judge := true
-	if jp.Validity == 0 {
-		judge = false
+	var jp JAMSNPJudgmentPublication
+	if err := jp.FromBytes(msg); err != nil {
+		return fmt.Errorf("onJudgmentPublication: failed to decode: %w", err)
 	}
+
+	judge := jp.Validity != 0
 	judgement := types.Judgement{
-		//Epoch: jp.Epoch,
-		Judge: judge,
-		// TODO: Shawn CHECK
+		Judge:          judge,
 		WorkReportHash: jp.WorkReportHash,
 		Validator:      jp.ValidatorIndex,
-		Signature:      jp.Signature,
 	}
 	copy(judgement.Signature[:], jp.Signature[:])
 
-	// Non-blocking send to judgementsCh, log warning if channel full
 	select {
 	case n.judgementsCh <- judgement:
 		// success
+	case <-ctx.Done():
+		log.Warn(module, "onJudgmentPublication: context canceled before sending judgement",
+			"peerID", peerID,
+			"workReportHash", jp.WorkReportHash.String_short(),
+			"validator", jp.ValidatorIndex)
+		return ctx.Err()
 	default:
 		log.Warn(module, "onJudgmentPublication: judgementsCh full, dropping judgement",
 			"peerID", peerID,

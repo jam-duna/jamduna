@@ -304,7 +304,3 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 		return errors.New("unknown message type")
 	}
 }
-
-func jamnp_test_vector(ce string, testVectorName string, b []byte, obj interface{}) {
-	write_jamnp_test_vector(ce, "request", testVectorName, b, obj)
-}

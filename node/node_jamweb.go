@@ -46,7 +46,7 @@ type SubscriptionRequest struct {
 func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFinalized bool) (err error) {
 	var data []byte
 	update := sdb.GetStateUpdates()
-	for client, _ := range h.clients {
+	for client := range h.clients {
 		log.Trace(debugWeb, "ReceiveLatestBlock", "clientsubs", client.String())
 		if client.BestBlock != nil {
 			req := client.BestBlock
@@ -265,7 +265,7 @@ func (h *Hub) run(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-h.ctx.Done():
-			for client, _ := range h.clients {
+			for client := range h.clients {
 				close(client.send)
 			}
 			return
