@@ -68,9 +68,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int, jceM
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
-		if jceManager != nil {
-			wpr.JCEManager = jceManager
-		}
+
 		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
@@ -186,9 +184,7 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int, jce
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
-		if jceManager != nil {
-			wpr.JCEManager = jceManager
-		}
+
 		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)

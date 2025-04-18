@@ -336,6 +336,7 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq node.WorkPackageRequest) e
 }
 
 func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq node.WorkPackageRequest) error {
+	fmt.Printf("NodeClient SubmitAndWaitForWorkPackage %s\n", workPackageReq.WorkPackage.Hash())
 	refineContext, err := c.GetRefineContext()
 	if err != nil {
 		return err

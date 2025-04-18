@@ -27,6 +27,8 @@ import (
 )
 
 type JNode interface {
+	SetJCEManager(jceManager *ManualJCEManager) (err error)
+	GetJCEManager() (jceManager *ManualJCEManager, err error)
 	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
 	SubmitAndWaitForWorkPackages(ctx context.Context, wpr []*WorkPackageRequest) ([]common.Hash, error)
 	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
@@ -264,8 +266,10 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		t.Fatalf("JCE Manager setup failed: %v", err)
 	}
 
+	bNode := nodes[1]
 	if managerCancel != nil {
 		// TODO Schedule the cancel function call for when jamtest exits
+		bNode.SetJCEManager(jceManager)
 		defer managerCancel()
 	}
 
@@ -295,7 +299,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	bootstrapService := uint32(statedb.BootstrapServiceCode)
 	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
 
-	builderNode := nodes[1]
 	new_service_idx := uint32(0)
 
 	testServices, err := getServices(serviceNames, true)
@@ -334,16 +337,13 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			CoreIndex:       0,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
-		if jceManager != nil {
-			wpr.JCEManager = jceManager
-		}
 
-		_, err := builderNode.SubmitAndWaitForWorkPackage(ctx, wpr)
+		_, err := bNode.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			t.Fatalf("SendWorkPackageSubmission ERR %v\n", err)
 		}
 		k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
-		service_account_byte, ok, err := builderNode.GetServiceStorage(0, k)
+		service_account_byte, ok, err := bNode.GetServiceStorage(0, k)
 		if err != nil {
 			t.Fatalf("SendWorkPackageSubmission ERR %v", err)
 		}
@@ -356,7 +356,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			new_service_idx = decoded_new_service_idx
 		}
 
-		err = builderNode.SubmitAndWaitForPreimage(ctx, new_service_idx, service.Code)
+		err = bNode.SubmitAndWaitForPreimage(ctx, new_service_idx, service.Code)
 		if err != nil {
 			log.Error(module, "SubmitAndWaitForPreimage", "err", err)
 		}
@@ -372,35 +372,35 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		SafroleTestEpochLen := 4
 		SafroleBufferTime := 30
 		safrole(jceManager)
-		waitForTermination(nodes[1], "safrole", SafroleTestEpochLen, SafroleBufferTime, t)
+		waitForTermination(bNode, "safrole", SafroleTestEpochLen, SafroleBufferTime, t)
 	case "fallback":
 		FallbackEpochLen := 3
 		FallbackBufferTime := 10
 		safrole(jceManager)
-		waitForTermination(nodes[1], "fallback", FallbackEpochLen, FallbackBufferTime, t)
+		waitForTermination(bNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "fib":
-		fib(nodes[1], testServices, targetN, jceManager)
+		fib(bNode, testServices, targetN, jceManager)
 	case "fib2":
 		targetN := 100
-		fib2(nodes[1], testServices, targetN, jceManager)
+		fib2(bNode, testServices, targetN, jceManager)
 	case "transfer":
 		transferNum := targetN
-		transfer(nodes[1], testServices, transferNum)
+		transfer(bNode, testServices, transferNum)
 	case "scaled_transfer":
 		transferNum := 10
 		splitTransferNum := targetN
-		scaled_transfer(nodes[1], testServices, transferNum, splitTransferNum)
+		scaled_transfer(bNode, testServices, transferNum, splitTransferNum)
 	case "balances":
 		// not using anything
-		balances(nodes[1], testServices)
+		balances(bNode, testServices)
 	case "scaled_balances":
 		targetN_mint := targetN
 		targetN_transfer := targetN
-		scaled_balances(nodes[1], testServices, targetN_mint, targetN_transfer)
+		scaled_balances(bNode, testServices, targetN_mint, targetN_transfer)
 	case "blake2b":
-		blake2b(nodes[1], testServices)
+		blake2b(bNode, testServices)
 	case "game_of_life":
-		game_of_life(nodes[1], testServices, jceManager)
+		game_of_life(bNode, testServices, jceManager)
 	case "megatron":
 		megatron(nodes[1], testServices, targetN, jceManager)
 	}

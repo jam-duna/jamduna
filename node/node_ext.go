@@ -19,9 +19,8 @@ type WorkPackageRequest struct {
 	CoreIndex       uint16                `json:"core_index"`
 	WorkPackage     types.WorkPackage     `json:"work_package"`
 	ExtrinsicsBlobs types.ExtrinsicsBlobs `json:"extrinsic_blobs"`
-	JCEManager      *ManualJCEManager     `json:"-"`
-	Identifier      string                `json:"identifier"`
 	Prerequisites   []string              `json:"prequisites"`
+	Identifier      string                `json:"_"`
 }
 
 func (wpReq *WorkPackageRequest) String() string {

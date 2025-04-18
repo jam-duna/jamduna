@@ -159,6 +159,9 @@ type NodeContent struct {
 	new_timeslot_chan chan uint32
 
 	commitHash string
+
+	jceManagerMutex sync.Mutex
+	jceManager      *ManualJCEManager
 }
 
 func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
@@ -816,91 +819,91 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 	return workPackageHashes, nil
 }
 
-func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (workPackageHash common.Hash, err error) {
-
+func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (common.Hash, error) {
+	fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
 	wp.WorkPackage.RefineContext = n.statedb.GetRefineContext()
-	core_peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
-	err = core_peers[rand0.Intn(3)].SendWorkPackageSubmission(ctx, wp.WorkPackage, wp.ExtrinsicsBlobs, wp.CoreIndex)
-	if err != nil {
+	peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
+	if err := peers[rand0.Intn(len(peers))].SendWorkPackageSubmission(ctx, wp.WorkPackage, wp.ExtrinsicsBlobs, wp.CoreIndex); err != nil {
 		log.Warn(module, "SubmitAndWaitForWorkPackage", "err", err)
 		return common.Hash{}, err
 	}
-	workPackageHash = wp.WorkPackage.Hash()
+	workPackageHash := wp.WorkPackage.Hash()
 	log.Info(module, "SubmitAndWaitForWorkPackage SUBMITTED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex(), "coreIndex", wp.CoreIndex)
-	if wp.JCEManager != nil {
-		jceManager := wp.JCEManager
-		jceManager.SendWP(workPackageHash)
 
-		initialJCE := n.GetCurrJCE()
-		refineDone := false
-		for {
-			time.Sleep(10 * time.Millisecond)
+	jceManager, _ := n.GetJCEManager()
+	if jceManager != nil {
+		jceManager.SendWP(workPackageHash)
+	}
+	initialJCE := n.GetCurrJCE()
+	refineDone := false
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return workPackageHash, ctx.Err()
+		case <-ticker.C:
 			recentBlocks := n.statedb.JamState.RecentBlocks
-			//availabilityAssignments := n.statedb.JamState.AvailabilityAssignments
 			accumulationHistory := n.statedb.JamState.AccumulationHistory
-			c15Bytes, _ := types.Encode(accumulationHistory)
-			c3Bytes, _ := types.Encode(recentBlocks)
+
 			if jceManager != nil {
-				jceManager.UpdateAccumulationState(c15Bytes)
-				jceManager.UpdateRefineState(c3Bytes)
+				if c15, e := types.Encode(accumulationHistory); e == nil {
+					jceManager.UpdateAccumulationState(c15)
+				}
+				if c3, e := types.Encode(recentBlocks); e == nil {
+					jceManager.UpdateRefineState(c3)
+				}
 			}
 
 			currJCE := n.GetCurrJCE()
 			if !refineDone {
 				for i := len(recentBlocks) - 1; i >= 0; i-- {
-					beta := recentBlocks[i]
-					for coreIdx, segmentRootInfo := range beta.Reported {
-						wpHash := segmentRootInfo.WorkPackageHash
-						if workPackageHash == wpHash {
-							fmt.Printf("[***JCE=%d] core-%d c=%v WP=%v Refine Complete! \n", currJCE, coreIdx, wp.Identifier, workPackageHash)
+					for _, info := range recentBlocks[i].Reported {
+						if info.WorkPackageHash == workPackageHash {
+							fmt.Printf("[***JCE=%d] WP %s Refine Complete\n", currJCE, workPackageHash)
 							refineDone = true
-							// if refineOnly {
-							// 	return workPackageHash, nil
-							// }
 						}
 					}
 				}
 			}
 
 			for i := len(accumulationHistory) - 1; i >= 0; i-- {
-				accumulationHistory_i := accumulationHistory[i]
-				for _, accumulatedWPHash := range accumulationHistory_i.WorkPackageHash {
-					if workPackageHash == accumulatedWPHash {
-						fmt.Printf("[***JCE=%d] c=%v WP=%v Accumulate Complete! \n", currJCE, wp.Identifier, workPackageHash)
-						//return true
+				for _, h := range accumulationHistory[i].WorkPackageHash {
+					if h == workPackageHash {
+						log.Info(module, "SubmitAndWaitForWorkPackage ACCUMULATED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex(), "coreIndex", wp.CoreIndex)
 						return workPackageHash, nil
 					}
 				}
 			}
 
 			if currJCE-initialJCE >= types.RecentHistorySize {
-				fmt.Printf("[***JCE=%d] c=%v WP=%v Expired! \n", currJCE, wp.Identifier, workPackageHash)
-				//TODO: ctx.Done()??
-				//return false
-			}
-		}
-
-	}
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return workPackageHash, ctx.Err()
-		case <-ticker.C:
-			history := n.statedb.JamState.AccumulationHistory[types.EpochLength-1]
-			for _, h := range history.WorkPackageHash {
-				if h == workPackageHash {
-					log.Info(module, "SubmitAndWaitForWorkPackage ACCUMULATED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex(), "coreIndex", wp.CoreIndex)
-					return workPackageHash, nil
-				}
+				return workPackageHash, fmt.Errorf("SubmitAndWaitForWorkPackage: expired after %d JCEs", types.RecentHistorySize)
 			}
 		}
 	}
 }
+func (n *NodeContent) SetJCEManager(jceManager *ManualJCEManager) (err error) {
+	n.jceManagerMutex.Lock()
+	defer n.jceManagerMutex.Unlock()
+	if n.jceManager != nil {
+		err = fmt.Errorf("jceManager already set")
+		log.Error(module, "SetJCEManager", "err", err)
+		return err
+	}
+	n.jceManager = jceManager
+	return nil
+}
 
-func MonitorAccumalate(n *Node, jceManager *ManualJCEManager, workpackageHash common.Hash, identifier string, refineOnly bool) bool {
-	return false
+func (n *NodeContent) GetJCEManager() (jceManager *ManualJCEManager, err error) {
+	n.jceManagerMutex.Lock()
+	defer n.jceManagerMutex.Unlock()
+	if n.jceManager != nil {
+		jceManager = n.jceManager
+		return jceManager, nil
+	}
+	return nil, nil
 }
 
 func (n *Node) GetBandersnatchSecret() []byte {

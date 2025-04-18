@@ -13,6 +13,14 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+func flatten(data [][]byte) []byte {
+	var result []byte
+	for _, block := range data {
+		result = append(result, block[8:]...)
+	}
+	return result
+}
+
 func game_of_life(n1 JNode, testServices map[string]*types.TestService, jceManager *ManualJCEManager) {
 
 	log.Info(module, "Game of Life START")
@@ -113,9 +121,6 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, jceManag
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
-		if jceManager != nil {
-			wpr.JCEManager = jceManager
-		}
 
 		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
@@ -134,14 +139,6 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, jceManag
 		} else {
 			/*
 				ws_push := StartGameOfLifeServer("localhost:8080", "../client/game_of_life.html")
-
-				flatten := func(data [][]byte) []byte {
-					var result []byte
-					for _, block := range data {
-						result = append(result, block[8:]...)
-					}
-					return result
-				}
 
 				vm_export, err := n1.GetSegments(importedSegments)
 				if err == nil {
