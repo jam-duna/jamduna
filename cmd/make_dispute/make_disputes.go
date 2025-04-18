@@ -80,14 +80,11 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	if err != nil {
 		return disputable, err, dispute_stf
 	}
-	// poststate, err := statedb.NewStateDBFromSnapshotRaw(store, &stf.PostState)
-	if err != nil {
-		return disputable, err, dispute_stf
-	}
+
 	// Check if the block is disputable
 	prestate.Block = block.Copy()
 	prestatecopy := prestate.Copy()
-	_, availableWorkReport := prestatecopy.JamState.ProcessAssurances(prestate.Block.Extrinsic.Assurances, block.Header.Slot)
+	availableWorkReport := prestatecopy.JamState.ComputeAvailabilityAssignments(prestate.Block.Extrinsic.Assurances, block.Header.Slot)
 	// start making the dispute
 	// random choose the number from 1 to availableWorkReport_len
 

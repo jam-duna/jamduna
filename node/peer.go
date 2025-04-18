@@ -107,7 +107,7 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 	// Open stream with context
 	stream, err := p.conn.OpenStreamSync(ctx)
 	if err != nil {
-		fmt.Printf("[%s] OpenStreamSync ERR %v\n", p.PeerAddr, err)
+		//fmt.Printf("[%s] OpenStreamSync ERR %v\n", p.PeerAddr, err)
 		_ = p.conn.CloseWithError(0, "stream open failed")
 		p.conn = nil
 		if stream != nil {
@@ -201,7 +201,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 	if useQuicDeadline {
 		if deadline, ok := ctx.Deadline(); ok {
 			if err := stream.SetReadDeadline(deadline); err != nil {
-				log.Warn(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				log.Trace(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
 				return nil, err
 			}
 		}
@@ -209,7 +209,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 
 	// Read length prefix
 	if _, err := io.ReadFull(stream, lengthPrefix[:]); err != nil {
-		log.Warn(module, "receiveQuicBytes-length prefix", "peerID", peerID, "err", err, "code", code)
+		log.Trace(module, "receiveQuicBytes-length prefix", "peerID", peerID, "err", err, "code", code)
 		return nil, err
 	}
 	msgLen := binary.LittleEndian.Uint32(lengthPrefix[:])
@@ -219,7 +219,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 	if useQuicDeadline {
 		if deadline, ok := ctx.Deadline(); ok {
 			if err := stream.SetReadDeadline(deadline); err != nil {
-				log.Warn(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				log.Trace(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
 				return nil, err
 			}
 		}
@@ -227,7 +227,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 
 	// Read message body
 	if _, err := io.ReadFull(stream, buf); err != nil {
-		log.Warn(module, "receiveQuicBytes-message body", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
+		log.Trace(module, "receiveQuicBytes-message body", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
 		return nil, err
 	}
 
@@ -247,7 +247,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	// Read message type (1 byte)
 	msgTypeBytes := make([]byte, 1)
 	if _, err := io.ReadFull(stream, msgTypeBytes); err != nil {
-		log.Warn(module, "DispatchIncomingQUICStream - code", "err", err)
+		log.Trace(module, "DispatchIncomingQUICStream - code", "err", err)
 		_ = stream.Close()
 		return err
 	}
@@ -256,7 +256,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
 	if _, err := io.ReadFull(stream, msgLenBytes); err != nil {
-		log.Warn(module, "DispatchIncomingQUICStream - length prefix", "err", err)
+		log.Trace(module, "DispatchIncomingQUICStream - length prefix", "err", err)
 		_ = stream.Close()
 		return err
 	}
@@ -265,7 +265,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	// Read message body
 	msg := make([]byte, msgLen)
 	if _, err := io.ReadFull(stream, msg); err != nil {
-		log.Warn(module, "DispatchIncomingQUICStream - message body", "peerID", peerID, "code", msgType, "err", err)
+		log.Trace(module, "DispatchIncomingQUICStream - message body", "peerID", peerID, "code", msgType, "err", err)
 		_ = stream.Close()
 		return err
 	}

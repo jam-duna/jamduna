@@ -61,13 +61,14 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 		}
 	}
 
-	// E_A - Assurances
-	// 126 - The assurances must ordered by validator index
-	extrinsicData.Assurances = extrinsic_pool.GetAssurancesFromPool(h.ParentHeaderHash)
-	SortAssurances(extrinsicData.Assurances)
+	// E_A - Assurances -- these have already been signature checked and the response is ordered by validator index
+	//   HOWEVER, the bitfield needs to be validated with respect to rho (nil vs timeslot)
+	unvalidatedAssurances := extrinsic_pool.GetAssurancesFromPool(h.ParentHeaderHash)
+	// HERE we use rho validate all assurances and sort them
+	extrinsicData.Assurances = s.GetValidAssurances(unvalidatedAssurances, h.ParentHeaderHash)
 
 	tmpState := s.JamState.Copy()
-	_, _ = tmpState.ProcessAssurances(extrinsicData.Assurances, targetJCE)
+	tmpState.ComputeAvailabilityAssignments(extrinsicData.Assurances, targetJCE)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
 	queuedGuarantees := make([]types.Guarantee, 0)

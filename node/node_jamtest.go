@@ -181,7 +181,7 @@ func testWithDispute(s string) (jam string, isDisputeMode bool) {
 		jam = strings.TrimSuffix(s, suffix)
 		return jam, true
 	}
-	return jam, false
+	return s, false
 }
 
 func jamtest(t *testing.T, jam_raw string, targetN int) {

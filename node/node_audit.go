@@ -274,7 +274,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				}
 				if isAudited {
 					// wait for everyone to finish auditing
-					log.Info(debugAudit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
+					log.Trace(debugAudit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
 						"headerhash", auditing_statedb.Block.Header.Hash().String_short(),
 						"author", auditing_statedb.Block.Header.AuthorIndex,
 					)

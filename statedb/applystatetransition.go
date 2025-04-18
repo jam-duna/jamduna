@@ -343,22 +343,16 @@ func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
 func (s *StateDB) ApplyStateTransitionRho(assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
 	d := s.GetJamState()
-	// original validate assurances logic (prior to guarantees) -- we cannot do signature checking here ... otherwise it would trigger bad sig
-	// for fuzzing to work, we cannot check signature until everything has been properly considered
-	// assuranceErr := s.ValidateAssurancesWithSig(assurances)
-	// if assuranceErr != nil {
-	// 	return 0, 0, err
-	// }
-
-	err = s.ValidateAssurancesTransition(assurances)
-	if err != nil {
-		return
+	assuranceErr := s.ValidateAssurances(assurances, s.Block.Header.ParentHeaderHash)
+	if assuranceErr != nil {
+		log.Error(module, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
+		return nil, nil, err
 	}
 
 	// Assurances: get the bitstring from the availability
 	// core's data is now available
 	//ρ††
-	num_assurances, availableWorkReport := d.ProcessAssurances(assurances, targetJCE)
+	availableWorkReport := d.ComputeAvailabilityAssignments(assurances, targetJCE)
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 
@@ -369,18 +363,6 @@ func (s *StateDB) ApplyStateTransitionRho(assurances []types.Assurance, guarante
 			log.Trace(debugA, "ApplyStateTransitionRho before Verify_Guarantees", "core", i, "WorkPackage Hash", rho.WorkReport.GetWorkPackageHash())
 		}
 	}
-
-	// Sort the assurances by validator index
-	// sortingErr := CheckSortingEAs(assurances)
-	// if sortingErr != nil {
-	// 	return 0, 0, sortingErr
-	// }
-
-	// Verify each assurance's signature
-	// sigErr := s.ValidateAssurancesSig(assurances)
-	// if sigErr != nil {
-	// 	return 0, 0, sigErr
-	// }
 
 	// Guarantees
 	err = s.Verify_Guarantees()

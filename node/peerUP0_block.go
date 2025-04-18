@@ -148,7 +148,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 	var err error
 	if conn == nil {
 		p.conn, err = quic.DialAddr(ctx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
-		log.Info(debugBlock, "Dial From Up0", "peer", p.PeerID, "err", err)
+		log.Trace(debugBlock, "Dial From Up0", "peer", p.PeerID, "err", err)
 		if err != nil {
 			n.UP0_streamMu.Lock()
 			delete(n.UP0_stream, uint16(p.PeerID))
@@ -179,7 +179,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 	}
 	n.UP0_streamMu.Lock()
 	n.UP0_stream[uint16(validator_index)] = stream
-	log.Info(debugBlock, "InitBlockAnnouncementStream", "node", n.id, "->peer", p.PeerID)
+	log.Trace(debugBlock, "InitBlockAnnouncementStream", "node", n.id, "->peer", p.PeerID)
 	n.UP0_streamMu.Unlock()
 	var wg sync.WaitGroup
 	var errChan = make(chan error, 2)
@@ -330,13 +330,13 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		default:
 			req, err := receiveQuicBytes(ctx, stream, n.id, code)
 			if err != nil {
-				log.Warn(module, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
+				log.Trace(module, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
 				return
 			}
 
 			var blockannounce JAMSNP_BlockAnnounce
 			if err := blockannounce.FromBytes(req); err != nil {
-				log.Warn(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
+				log.Trace(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
 				return
 			}
 

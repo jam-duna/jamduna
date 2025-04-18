@@ -21,25 +21,23 @@ func (n *Node) isAssuring(workPackageHash common.Hash) bool {
 	return ok
 }
 
-func (n *Node) generateAssurance(headerHash common.Hash) (a types.Assurance, numCores uint16, err error) {
-	reports, err := n.statedb.GetJamState().GetWorkReportFromRho()
-	if err != nil {
-		return
-	}
+// For generating assurance extrinsic
+func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a types.Assurance, numCores uint16) {
+	// this will generate an assurance based on RECENT work packages (based on some block timeslot)
+	wph := n.statedb.GetJamState().GetRecentWorkPackagesFromRho(timeslot)
 	numCores = 0
-	for _, r := range reports {
-		if n.isAssuring(r.AvailabilitySpec.WorkPackageHash) {
-			a.SetBitFieldBit(r.CoreIndex, true)
+	for core, wph := range wph {
+		if n.isAssuring(wph) {
+			a.SetBitFieldBit(core, true)
 			numCores++
 		}
 	}
 	if numCores == 0 {
-		return a, numCores, nil
+		return a, numCores
 	}
 	a.Anchor = headerHash
 	a.ValidatorIndex = n.id
 	a.Sign(n.GetEd25519Secret())
-
 	return
 }
 

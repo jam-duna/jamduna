@@ -192,7 +192,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 func (n *Node) Clean(block_hashes []common.Hash) {
 	n.statedbMapMutex.Lock()
 	for _, block_hash := range block_hashes { //here is header hash
-		log.Info(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
+		log.Debug(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
 		//TOCHECK
 		if _, ok := n.statedbMap[block_hash]; ok {
 			delete(n.statedbMap, block_hash)
@@ -1337,7 +1337,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 	for {
 		stream, err := conn.AcceptStream(ctx)
 		if err != nil {
-			log.Warn(debugDA, "AcceptStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
+			log.Trace(debugDA, "AcceptStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
 			if stream != nil {
 				stream.Close()
 			}
@@ -1679,7 +1679,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	if nextBlock.Header.Hash() == latest_block_info.HeaderHash {
 		n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
 		if len(n.UP0_stream) > mini_peers {
-			log.Info(debugStream, "ApplyBlock: UP0_stream", "n", n.String(), "len", len(n.UP0_stream))
+			log.Trace(debugStream, "ApplyBlock: UP0_stream", "n", n.String(), "len", len(n.UP0_stream))
 			n.SetIsSync(true)
 		}
 		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
@@ -1763,10 +1763,7 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 		return ctx.Err()
 	}
 
-	a, numCores, err := n.generateAssurance(b.Header.Hash())
-	if err != nil {
-		return fmt.Errorf("generateAssurance failed: %w", err)
-	}
+	a, numCores := n.generateAssurance(b.Header.Hash(), b.TimeSlot())
 	if numCores == 0 {
 		return nil
 	}
