@@ -412,6 +412,12 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetAccumulateQueue(accunulateQueueEncode)
 	d.SetAccumulateHistory(accunulateHistoryEncode)
 	s.SetJamState(d)
+
+	// Because we have safrolestate as internal state, JamState is NOT enough.
+	d.SafroleState.NextEpochTicketsAccumulator = d.SafroleStateGamma.GammaA      // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
+	d.SafroleState.TicketsVerifierKey = d.SafroleStateGamma.GammaZ               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	d.SafroleState.TicketsOrKeys = d.SafroleStateGamma.GammaS                    // γs: Current epoch’s slot-sealer series (epoch N)
+	d.SafroleState.NextValidators = types.Validators(d.SafroleStateGamma.GammaK) // γk: Next epoch’s validators (epoch N+1)
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {

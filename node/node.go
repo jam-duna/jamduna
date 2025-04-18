@@ -191,14 +191,16 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 
 func (n *Node) Clean(block_hashes []common.Hash) {
 	n.statedbMapMutex.Lock()
-	for _, block_hash := range block_hashes {
+	for _, block_hash := range block_hashes { //here is header hash
 		log.Info(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
 		//TOCHECK
 		if _, ok := n.statedbMap[block_hash]; ok {
 			delete(n.statedbMap, block_hash)
 		}
+		n.ba_checker.Clear(block_hash)
 	}
 	n.statedbMapMutex.Unlock()
+
 	// cleaning process
 	n.ticketsMutex.Lock()
 	for entropy := range n.selfTickets {
@@ -504,12 +506,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 				log.Error(module, "AddBlock", "err", err)
 				return nil, err
 			}
-			// TODO->don't apply twice
-			// node.statedb.RecoverJamStateWithError(b.Header.ParentStateRoot)
-			// block_node, ok := node.block_tree.GetBlockNode(b.Header.ParentHeaderHash)
-			// if ok {
-			// 	block_node.Applied = true
-			// }
 		}
 	}
 	node.commitHash = common.GetCommitHash()
@@ -654,29 +650,27 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		node.statedb.GetSafrole().CurrValidators = validators
 	}
 
-	// catch up state
-	// tmp_statedb := node.statedb.Copy()
-	// for _, b := range old_blocks {
-	// 	err = tmp_statedb.RecoverJamStateWithError(b.Header.ParentStateRoot)
-	// 	if err == nil {
-	// 		blockNode, ok := node.block_tree.GetBlockNode(b.Header.ParentHeaderHash)
-	// 		if ok {
-	// 			blockNode.Applied = true
-	// 		}
-	// 	}
-	// }
 	if len(old_blocks) > 0 {
 		// also prune the block tree
-		useless_header_hashes := node.block_tree.PruneBlockTree(10)
-		node.WorkerManager.StartWorker("node_cleaning", func() {
-			node.Clean(useless_header_hashes)
-		})
+
+		for i := 0; i < len(old_blocks)-1; i++ {
+			block_node, ok := node.block_tree.GetBlockNode(old_blocks[i].Header.Hash())
+			if ok {
+				block_node.Applied = true
+				log.Info(module, "runReceiveBlock: applied", "n", node.String(), "block_hash", old_blocks[i].Header.Hash())
+			}
+			node.statedb.Block = &old_blocks[i]
+		}
 		err = node.extendChain(context.Background())
 		if err != nil {
 			log.Error(module, "extendChain", "err", err)
 		} else {
 			log.Info(module, "extendChain", "blockHash", node.statedb.HeaderHash.Hex())
 		}
+		useless_header_hashes := node.block_tree.PruneBlockTree(10)
+		node.WorkerManager.StartWorker("node_cleaning", func() {
+			node.Clean(useless_header_hashes)
+		})
 	}
 	if id == 5 {
 		node.SetIsSync(false) // node 5 can't produce the first block
@@ -1621,6 +1615,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	recoveredStateDB := n.statedb.Copy()
 	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
 	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
+	recoveredStateDB.Block = nextBlock
 	var used_entropy common.Hash
 	if nextBlock.EpochMark() != nil {
 		used_entropy = nextBlock.EpochMark().TicketsEntropy
