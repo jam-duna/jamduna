@@ -69,7 +69,7 @@ func (p *Peer) SendBundleShardRequest(
 
 	parts, err := receiveMultiple(ctx, stream, 2, p.PeerID, code)
 	if err != nil {
-		log.Warn(debugDA, "SendBundleShardRequest - receive error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
+		log.Trace(debugDA, "SendBundleShardRequest - receive error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		return nil, common.Hash{}, nil, fmt.Errorf("receiveMultiple[CE138]: %w", err)
 	}
 

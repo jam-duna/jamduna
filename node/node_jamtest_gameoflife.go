@@ -21,7 +21,7 @@ func flatten(data [][]byte) []byte {
 	return result
 }
 
-func game_of_life(n1 JNode, testServices map[string]*types.TestService, jceManager *ManualJCEManager) {
+func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 
 	log.Info(module, "Game of Life START")
 

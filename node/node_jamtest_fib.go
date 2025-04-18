@@ -16,7 +16,7 @@ import (
 	_ "net/http/pprof"
 )
 
-func fib(n1 JNode, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
+func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB START", "targetN", targetN)
 	service0 := testServices["fib"]
 	service_authcopy := testServices["auth_copy"]
@@ -80,7 +80,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int, jceM
 	}
 }
 
-func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
+func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB2 START")
 
 	jam_key := []byte("jam")

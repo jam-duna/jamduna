@@ -29,10 +29,7 @@ func makeWorkPackageRequest(coreIndex uint16, identifier string, prerequisites [
 	}
 }
 
-func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int, jceManager *ManualJCEManager) {
-	if jceManager != nil {
-		panic("not implemented")
-	}
+func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	serviceFib := testServices["fib"]
 	serviceTrib := testServices["tribonacci"]
 	serviceMeg := testServices["megatron"]

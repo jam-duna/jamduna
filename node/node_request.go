@@ -502,7 +502,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 		rtt := time.Since(startTime)
 		log.Debug(debugDA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "peerID", peerID, "rtt", rtt)
 		if err != nil {
-			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
+			log.Trace(debugDA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
 		}
 		response := CE138_response{

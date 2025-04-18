@@ -18,14 +18,13 @@ const (
 	GeneralAuthoring  = "authoring"  // Generic Authoring  (excluding pvm)
 	GeneralValidating = "validating" // Generic Validating (excluding pvm)
 
-
 	BlockMonitoring      = "blk_mod"     // Block module log
 	DAMonitoring         = "da_mod"      // Data Availability module log
 	NodeMonitoring       = "n_mod"       // General Node Ops
 	SegmentMonitoring    = "seg_mod"     // Segment module log
 	StateDBMonitoring    = "statedb_mod" // stateDB module log
 	GrandpaMonitoring    = "grandpa_mod" // Grandpa module log
-	AuditMonitoring      = "audit_mod"       // Audit module log
+	AuditMonitoring      = "audit_mod"   // Audit module log
 	JamwebMonitoring     = "jamweb_mod"  // Jamweb module log
 	QuicStreamMonitoring = "q_mod"       // Quicstream module log
 	GuaranteeMonitoring  = "g_mod"       // Guarantee module log

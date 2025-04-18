@@ -175,58 +175,13 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 }
 
 // run any test with dispute using testName_dispute (i.e fib_dispute)
-func testWithDispute(t *testing.T, nodes []*Node, s string) (jam string, isDisputeMode bool) {
+func testWithDispute(s string) (jam string, isDisputeMode bool) {
 	const suffix = "_dispute"
 	if strings.HasSuffix(s, suffix) {
 		jam = strings.TrimSuffix(s, suffix)
-		isDisputeMode = true
+		return jam, true
 	}
-	sendtickets := false
-
-	initialJCE := uint32(11)
-	switch nodes[0].jceMode {
-	case JCEManual:
-		go UpdateJCESignalUniversal(nodes, initialJCE)
-	case JCESimple:
-		go UpdateJCESignalSimple(nodes, initialJCE)
-		time.Sleep(2 * types.SecondsPerSlot * time.Second)
-	default:
-		time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
-	}
-
-	targetTimeslotLength := uint32(12 * types.EpochLength)
-	maxTimeAllowed := (targetTimeslotLength + 1) * types.SecondsPerSlot
-
-	log.EnableModule(log.GeneralAuthoring)
-	log.Info(module, "JAMTEST", "targetN", targetTimeslotLength)
-
-	for _, n := range nodes {
-		n.SetSendTickets(sendtickets)
-	}
-
-	watchNode := nodes[len(nodes)-1]
-
-	done := make(chan bool)
-	errChan := make(chan error)
-
-	//go RunGrandpaGraphServer(watchNode, basePort+2000)
-
-	go func() {
-		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
-		if err != nil {
-			errChan <- err
-		} else if ok {
-			done <- true
-		}
-	}()
-
-	select {
-	case <-done:
-		log.Info(module, "Completed")
-	case err := <-errChan:
-		t.Fatalf("Failed: %v", err)
-	}
-	return
+	return jam, false
 }
 
 func jamtest(t *testing.T, jam_raw string, targetN int) {
@@ -238,8 +193,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	}
 
 	sendTickets := true //set this to false to run WP without E_T interference
-	var nodes []*Node
-	jam, isDisputeMode := testWithDispute(t, nodes, jam_raw)
+	jam, isDisputeMode := testWithDispute(jam_raw)
 
 	// Specify testServices
 	defaultDelay := 2 * types.SecondsPerSlot * time.Second
@@ -410,6 +364,12 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		log.Info(module, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
 	}
 
+	if isDisputeMode {
+		targetTimeslotLength := (12 * types.EpochLength)
+		maxTimeAllowed := (targetTimeslotLength + 1) * types.SecondsPerSlot
+		waitForTermination(bNode, "jam", targetTimeslotLength, maxTimeAllowed, t)
+	}
+
 	switch jam {
 	case "safrole":
 		SafroleTestEpochLen := 4
@@ -422,10 +382,10 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		safrole(jceManager)
 		waitForTermination(bNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "fib":
-		fib(bNode, testServices, targetN, jceManager)
+		fib(bNode, testServices, targetN)
 	case "fib2":
 		targetN := 100
-		fib2(bNode, testServices, targetN, jceManager)
+		fib2(bNode, testServices, targetN)
 	case "transfer":
 		transferNum := targetN
 		transfer(bNode, testServices, transferNum)
@@ -443,8 +403,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "blake2b":
 		blake2b(bNode, testServices)
 	case "game_of_life":
-		game_of_life(bNode, testServices, jceManager)
+		game_of_life(bNode, testServices)
 	case "megatron":
-		megatron(nodes[1], testServices, targetN, jceManager)
+		megatron(nodes[1], testServices, targetN)
 	}
 }
