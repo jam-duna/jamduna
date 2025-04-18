@@ -738,7 +738,82 @@ func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32
 			}
 		}
 	}
+}
 
+func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
+	workPackageHashes := make([]common.Hash, len(reqs))
+	accumulated := make(map[common.Hash]bool)
+	identifierToIndex := make(map[string]int)
+
+	// Initialize refine context and identifier map
+	refineCtx := n.statedb.GetRefineContext()
+	for i, req := range reqs {
+		identifierToIndex[req.Identifier] = i
+		rc := refineCtx.Clone()
+		req.WorkPackage.RefineContext = *rc
+	}
+
+	// Populate prerequisite hashes
+	for _, req := range reqs {
+		if len(req.Prerequisites) == 0 {
+			continue
+		}
+		prereqHashes := make([]common.Hash, 0, len(req.Prerequisites))
+		for _, prereqID := range req.Prerequisites {
+			if idx, ok := identifierToIndex[prereqID]; ok {
+				prereqHashes = append(prereqHashes, reqs[idx].WorkPackage.Hash())
+			} else {
+				log.Warn(module, "Unknown prerequisite identifier", "identifier", prereqID)
+			}
+		}
+		req.WorkPackage.RefineContext.Prerequisites = prereqHashes
+	}
+
+	// Compute hashes and track accumulation status
+	for i, req := range reqs {
+		hash := req.WorkPackage.Hash()
+		workPackageHashes[i] = hash
+		accumulated[hash] = false
+	}
+
+	// Submit each work package to a random peer on the assigned core
+	for _, req := range reqs {
+		peers := n.GetCoreCoWorkersPeers(uint16(req.CoreIndex))
+		if len(peers) == 0 {
+			return workPackageHashes, fmt.Errorf("no peers available for core index %d", req.CoreIndex)
+		}
+		selectedPeer := peers[rand0.Intn(len(peers))]
+
+		if err := selectedPeer.SendWorkPackageSubmission(ctx, req.WorkPackage, req.ExtrinsicsBlobs, req.CoreIndex); err != nil {
+			log.Warn(module, "Failed to submit work package", "identifier", req.Identifier, "err", err)
+			return workPackageHashes, err
+		}
+
+		log.Info(module, "Work package submitted", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex(), "core", req.CoreIndex)
+	}
+
+	// Wait for accumulation
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for accumulatedCount := 0; accumulatedCount < len(reqs); {
+		select {
+		case <-ctx.Done():
+			return workPackageHashes, ctx.Err()
+		case <-ticker.C:
+			history := n.statedb.JamState.AccumulationHistory[types.EpochLength-1]
+			for _, hash := range history.WorkPackageHash {
+				if seen, exists := accumulated[hash]; exists && !seen {
+					accumulated[hash] = true
+					accumulatedCount++
+					log.Info(module, "Work package accumulated", "hash", hash.Hex(), "count", accumulatedCount)
+				}
+			}
+		}
+	}
+
+	log.Info(module, "All work packages accumulated")
+	return workPackageHashes, nil
 }
 
 func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (workPackageHash common.Hash, err error) {
@@ -894,13 +969,13 @@ func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 // }
 
 // this function will return the core workers of that core
-func (n *NodeContent) GetCoreCoWorkersPeers(core uint16) (coWorkers []Peer) {
-	coWorkers = make([]Peer, 0)
+func (n *NodeContent) GetCoreCoWorkersPeers(core uint16) (coWorkers []*Peer) {
+	coWorkers = make([]*Peer, 0)
 	for _, assignment := range n.statedb.GuarantorAssignments {
 		if assignment.CoreIndex == core {
 			peer, err := n.GetPeerInfoByEd25519(assignment.Validator.Ed25519)
 			if err == nil {
-				coWorkers = append(coWorkers, *peer.Clone())
+				coWorkers = append(coWorkers, peer.Clone())
 			}
 		}
 	}

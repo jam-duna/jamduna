@@ -81,6 +81,10 @@ func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok 
 	return &service, true, nil
 
 }
+func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, workPackageReq []*WorkPackageRequest) (wph []common.Hash, err error) {
+	wph = make([]common.Hash, len(workPackageReq))
+	return wph, nil
+}
 
 func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *WorkPackageRequest) (wph common.Hash, err error) {
 	workPackage := workPackageReq.WorkPackage

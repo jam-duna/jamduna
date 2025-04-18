@@ -24,6 +24,17 @@ type RefineContext struct {
 	Prerequisites    []common.Hash `json:"prerequisites"`      //p
 }
 
+func (rc *RefineContext) Clone() *RefineContext {
+	return &RefineContext{
+		Anchor:           rc.Anchor,
+		StateRoot:        rc.StateRoot,
+		BeefyRoot:        rc.BeefyRoot,
+		LookupAnchor:     rc.LookupAnchor,
+		LookupAnchorSlot: rc.LookupAnchorSlot,
+		Prerequisites:    rc.Prerequisites,
+	}
+}
+
 func (rc *RefineContext) String() string {
 	return ToJSON(rc)
 }

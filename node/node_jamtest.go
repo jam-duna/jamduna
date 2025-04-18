@@ -28,6 +28,7 @@ import (
 
 type JNode interface {
 	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
+	SubmitAndWaitForWorkPackages(ctx context.Context, wpr []*WorkPackageRequest) ([]common.Hash, error)
 	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
@@ -370,12 +371,12 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "safrole":
 		SafroleTestEpochLen := 4
 		SafroleBufferTime := 30
-		safrole(nodes[1], jceManager)
+		safrole(jceManager)
 		waitForTermination(nodes[1], "safrole", SafroleTestEpochLen, SafroleBufferTime, t)
 	case "fallback":
 		FallbackEpochLen := 3
 		FallbackBufferTime := 10
-		safrole(nodes[1], jceManager)
+		safrole(jceManager)
 		waitForTermination(nodes[1], "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "fib":
 		fib(nodes[1], testServices, targetN, jceManager)
@@ -401,6 +402,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "game_of_life":
 		game_of_life(nodes[1], testServices, jceManager)
 	case "megatron":
-		//megatron(nodes, testServices, targetN)
+		megatron(nodes[1], testServices, targetN, jceManager)
 	}
 }
