@@ -141,8 +141,28 @@ func (n *Node) GetBlockAnnouncementBytes(block types.Block) ([]byte, error) {
 // this function is called by the node to send a block announcement to a peer
 // it will either init a new stream or use an existing stream
 func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Stream, error) {
+	p.connectionMu.Lock()
+	conn := p.conn
+	p.connectionMu.Unlock()
 	n := p.node
-	validator_index := n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519)
+	var err error
+	if conn == nil {
+		p.conn, err = quic.DialAddr(ctx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
+		log.Info(debugBlock, "Dial From Up0", "peer", p.PeerID, "err", err)
+		if err != nil {
+			n.UP0_streamMu.Lock()
+			delete(n.UP0_stream, uint16(p.PeerID))
+			n.UP0_streamMu.Unlock()
+			return nil, fmt.Errorf("peer connection is nil")
+		} else {
+			conn = p.conn
+		}
+	}
+	validator_index := p.PeerID
+	if n.statedb != nil {
+		validator_index = uint16(n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519))
+	}
+
 	n.UP0_streamMu.Lock()
 	if _, exist := n.UP0_stream[uint16(validator_index)]; exist {
 		n.UP0_streamMu.Unlock()
@@ -150,7 +170,6 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 	} else if _, exist := n.UP0_stream[uint16(p.PeerID)]; exist {
 		n.UP0_streamMu.Unlock()
 		return n.UP0_stream[uint16(p.PeerID)], nil
-
 	}
 	n.UP0_streamMu.Unlock()
 	code := uint8(UP0_BlockAnnouncement)
@@ -160,6 +179,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 	}
 	n.UP0_streamMu.Lock()
 	n.UP0_stream[uint16(validator_index)] = stream
+	log.Info(debugBlock, "InitBlockAnnouncementStream", "node", n.id, "->peer", p.PeerID)
 	n.UP0_streamMu.Unlock()
 	var wg sync.WaitGroup
 	var errChan = make(chan error, 2)
@@ -177,6 +197,8 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 		err = sendQuicBytes(ctx, stream, handshake_bytes, p.PeerID, code)
 		if err != nil {
 			errChan <- err
+		} else {
+			log.Debug(debugBlock, "sendQuicBytes", "peer", p.PeerID, "handshake", handshake)
 		}
 	}()
 
@@ -192,6 +214,24 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 		err = handshake_peer.FromBytes(req)
 		if err != nil {
 			errChan <- fmt.Errorf("handshake_peer.FromBytes err: %v", err)
+		} else {
+			log.Debug(debugBlock, "receiveQuicBytes", "peer", p.PeerID, "handshake", handshake_peer)
+			n := p.node.nodeSelf
+			if n == nil {
+				return
+			}
+			sync := n.GetIsSync()
+			if !sync {
+				latest_block_info := n.GetLatestBlockInfo()
+				for _, leaf := range handshake_peer.Leaves {
+					if latest_block_info != nil {
+						if leaf.Slot > latest_block_info.Slot {
+							newinfo := leaf
+							n.SetLatestBlockInfo(&newinfo)
+						}
+					}
+				}
+			}
 		}
 	}()
 
@@ -274,6 +314,12 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		log.Warn(module, "runBlockAnnouncement", "peerID", peerID, "err", "nil stream")
 		return
 	}
+	defer func() {
+		n.UP0_streamMu.Lock()
+		delete(n.UP0_stream, peerID)
+		n.UP0_streamMu.Unlock()
+		log.Info(module, "runBlockAnnouncement cleanup", "peerID", peerID)
+	}()
 	code := uint8(UP0_BlockAnnouncement)
 	ctx := context.Background()
 	for {
@@ -296,6 +342,7 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 
 			select {
 			case n.blockAnnouncementsCh <- blockannounce:
+				n.ba_checker.Set(blockannounce.Header.Hash(), uint16(peerID))
 				// success!
 			default:
 				log.Warn(module, "runBlockAnnouncement: channel full", "peerID", peerID, "headerHash", blockannounce.Header.Hash().String_short())

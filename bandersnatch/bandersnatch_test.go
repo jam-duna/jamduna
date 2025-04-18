@@ -476,3 +476,46 @@ func TestRingCommitment(t *testing.T) {
 	fmt.Printf("TestRingCommitment Ring Commitment: %x\n", ringCommitment)
 
 }
+
+func TestVRFSign(t *testing.T) {
+	// Generate 6 different random seeds
+	seeds := make([][]byte, 6)
+	pubKeys := make([]BanderSnatchKey, 6)
+	privateKeys := make([]BanderSnatchSecret, 6)
+	for i := 0; i < 6; i++ {
+		seeds[i] = generateRandomSeed()
+		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
+		banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
+		if err != nil {
+			t.Fatalf("InitBanderSnatchKey failed: %v", err)
+		}
+		pubKeys[i] = banderSnatch_pub
+		privateKeys[i] = banderSnatch_priv
+		fmt.Printf("TestVRFOperations Public Key %d: %s\n", i, banderSnatch_pub.String())
+		fmt.Printf("TestVRFOperations Private Key %d: %s\n", i, banderSnatch_priv.String())
+	}
+
+	// Create a ring set by concatenating all public keys
+	var ringSet []byte
+	for _, pubKey := range pubKeys {
+		ringSet = append(ringSet, pubKey.Bytes()...)
+	}
+
+	// Example data to be signed
+	vrfInputData := []byte("example input data")
+	auxData := []byte("example aux data")
+	// auxData := []byte("")
+	// Use the third seed to sign the data with IETF VRF
+	proverIdx := 5
+	// Sign the data with Ring VRF
+	for i := 0; i < 10; i++ {
+		// Sign the data with Ring VRF using the third private key
+		ringSignature, ringvrfOutput, err := RingVrfSign(privateKeys[proverIdx], ringSet, vrfInputData, auxData)
+		if err != nil {
+			fmt.Printf("RingVrfSign failed: %v\n", err)
+			continue
+		}
+		fmt.Printf("TestVRFOperations RingVrfSign -- VRFOutput: %x Signature: %x (%d bytes)\n", ringvrfOutput, ringSignature, len(ringSignature))
+		fmt.Printf("first 32 bytes of ringSignature: %x\n", ringSignature[:64])
+	}
+}

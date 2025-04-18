@@ -175,14 +175,56 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 }
 
 // run any test with dispute using testName_dispute (i.e fib_dispute)
-func testWithDispute(s string) (jam string, isDisputeMode bool) {
+func testWithDispute(t *testing.T, nodes []*Node, s string) (jam string, isDisputeMode bool) {
 	const suffix = "_dispute"
 	if strings.HasSuffix(s, suffix) {
 		jam = strings.TrimSuffix(s, suffix)
 		isDisputeMode = true
-	} else {
-		jam = s
-		isDisputeMode = false
+	}
+	sendtickets := false
+
+	initialJCE := uint32(11)
+	switch nodes[0].jceMode {
+	case JCEManual:
+		go UpdateJCESignalUniversal(nodes, initialJCE)
+	case JCESimple:
+		go UpdateJCESignalSimple(nodes, initialJCE)
+		time.Sleep(2 * types.SecondsPerSlot * time.Second)
+	default:
+		time.Sleep(types.SecondsPerSlot * time.Second) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
+	}
+
+	targetTimeslotLength := uint32(12 * types.EpochLength)
+	maxTimeAllowed := (targetTimeslotLength + 1) * types.SecondsPerSlot
+
+	log.EnableModule(log.GeneralAuthoring)
+	log.Info(module, "JAMTEST", "targetN", targetTimeslotLength)
+
+	for _, n := range nodes {
+		n.SetSendTickets(sendtickets)
+	}
+
+	watchNode := nodes[len(nodes)-1]
+
+	done := make(chan bool)
+	errChan := make(chan error)
+
+	//go RunGrandpaGraphServer(watchNode, basePort+2000)
+
+	go func() {
+		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
+		if err != nil {
+			errChan <- err
+		} else if ok {
+			done <- true
+		}
+	}()
+
+	select {
+	case <-done:
+		log.Info(module, "Completed")
+	case err := <-errChan:
+		t.Fatalf("Failed: %v", err)
 	}
 	return
 }
@@ -196,7 +238,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	}
 
 	sendTickets := true //set this to false to run WP without E_T interference
-	jam, isDisputeMode := testWithDispute(jam_raw)
+	var nodes []*Node
+	jam, isDisputeMode := testWithDispute(t, nodes, jam_raw)
 
 	// Specify testServices
 	defaultDelay := 2 * types.SecondsPerSlot * time.Second

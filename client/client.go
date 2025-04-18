@@ -257,6 +257,55 @@ func (c *NodeClient) GetClient() *rpc.Client {
 	return client
 }
 
+func (c *NodeClient) SendCommand(command []string, nodeID int) {
+	addr := c.servers[nodeID]
+	client, err := rpc.Dial("tcp", addr)
+	if err != nil {
+		fmt.Printf("Error connecting to server %s: %v\n", addr, err)
+		return
+	}
+	defer client.Close()
+
+	var response string
+	err = client.Call("jam.NodeCommand", command, &response)
+	if err != nil {
+		fmt.Printf("Error calling command on server %s: %v\n", addr, err)
+		return
+	}
+	fmt.Printf("Response from server %s: %s\n", addr, response)
+}
+
+func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {
+	var wg sync.WaitGroup
+	for i, address := range c.servers {
+
+		wg.Add(1)
+		go func(addr string, i int) {
+			defer wg.Done()
+			for _, except := range exceptNode {
+				if i == except {
+					return
+				}
+			}
+			client, err := rpc.Dial("tcp", addr)
+			if err != nil {
+				fmt.Printf("Error connecting to server %s: %v\n", addr, err)
+				return
+			}
+			defer client.Close()
+
+			var response string
+			err = client.Call("jam.NodeCommand", command, &response)
+			if err != nil {
+				fmt.Printf("Error calling command on server %s: %v\n", addr, err)
+				return
+			}
+			fmt.Printf("Response from server %s: %s\n", addr, response)
+		}(address, i)
+	}
+	wg.Wait()
+}
+
 func (c *NodeClient) Close() error {
 	//return c.Client.Close()
 	return nil

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -226,10 +227,11 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	var d AvailabilitySpecifierDerivation
 	for _, coworker := range coworkers {
 		wg.Add(1)
-		go func(coworker *Peer) {
+		n.WorkerManager.StartWorker("make-eg", func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Error(debugG, "coworker goroutine", "err", r)
+					log.Error(debugG, "panic in coworker goroutine", "err", r)
+					fmt.Printf("stack trace: %s\n", string(debug.Stack()))
 				}
 				wg.Done()
 			}()
@@ -259,7 +261,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				mutex.Unlock()
 			}
 
-		}(coworker)
+		})
 	}
 	wg.Wait()
 	selfWorkReportHash := guarantee.Report.Hash()

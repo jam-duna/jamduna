@@ -48,14 +48,13 @@ func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBuck
 	return buckets, nil
 }
 
-func (n *Node) GenerateTickets() {
+func (n *Node) GenerateTickets(jce uint32) {
 	sf := n.statedb.GetSafrole()
-	actualEpoch, _ := sf.EpochAndPhase(n.statedb.GetSafrole().Timeslot)
+	actualEpoch, _ := sf.EpochAndPhase(jce)
 	// timeslot mark
-	jce := n.GetCurrJCE()
 	currEpoch, _ := sf.EpochAndPhase(jce)
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
-	if n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetSafrole().Timeslot) {
+	if n.statedb.GetSafrole().IsTicketSubmissionClosed(jce) {
 		log.Trace(debugT, "GenerateTickets: Using Entropy 1 for Node to generate tickets", "n", n.id)
 		copy(usedEntropy[:], n.statedb.GetSafrole().Entropy[1][:])
 	}
@@ -72,17 +71,18 @@ func (n *Node) GenerateTickets() {
 }
 
 func (n *Node) IsTicketGenerated(entropy common.Hash) bool {
+	n.ticketsMutex.Lock()
+	defer n.ticketsMutex.Unlock()
 	_, ok := n.selfTickets[entropy]
 	return ok
 }
-func (n *Node) BroadcastTickets() {
+func (n *Node) BroadcastTickets(currJCE uint32) {
 	if n.sendTickets == false {
 		return
 	}
 	n.ticketsMutex.Lock()
 	defer n.ticketsMutex.Unlock()
 	sf := n.statedb.GetSafrole()
-	currJCE := sf.Timeslot
 	currEpoch, _ := sf.EpochAndPhase(currJCE)
 	if currEpoch < 0 {
 		return
@@ -92,16 +92,25 @@ func (n *Node) BroadcastTickets() {
 	if n.statedb.GetSafrole().IsTicketSubmissionClosed(currJCE) {
 		usingEntropy = n.statedb.GetSafrole().Entropy[1]
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	defer cancel() // ensures context is released
 	tickets := n.selfTickets[usingEntropy]
 	for _, ticketbucket := range tickets {
-		if !*ticketbucket.IsIncluded {
-			ticket := ticketbucket.Ticket
+		ticket := ticketbucket.Ticket
+		if !*ticketbucket.IsBroadcasted {
 			log.Trace(debugT, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt)
-			if !*ticketbucket.IsBroadcasted {
-				n.broadcast(ctx, ticket)
+			go func() {
+				defer cancel() // ensures context is released
+				_ = n.broadcast(ctx, ticket)
+			}()
+			*ticketbucket.IsBroadcasted = true
+		} else {
+			if !*ticketbucket.IsIncluded && n.resendTickets {
+				go func() {
+					defer cancel() // ensures context is released
+					_ = n.broadcast(ctx, ticket)
+					fmt.Printf("[N%v] Broadcasted Ticket %v\n", n.id, ticket.Attempt)
+				}()
 				*ticketbucket.IsBroadcasted = true
 			}
 		}

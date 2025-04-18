@@ -1,10 +1,12 @@
 package node
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"math"
 	"net/rpc"
 
 	"sync/atomic"
@@ -30,6 +32,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/node/gosafe"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
@@ -56,7 +59,7 @@ const (
 	debugT       = "t_mod"                  // Tickets/Safrole
 	debugP       = "p_mod"                  // Preimages
 	debugA       = "a_mod"                  // Assurances
-	debugAudit   = "ad_mod"                 // Audit
+	debugAudit   = log.AuditMonitoring      // Audit
 	debugGrandpa = "gp_mod"                 // Guaranteeing
 	debugBlock   = log.BlockMonitoring      // Block
 	debugStream  = log.QuicStreamMonitoring // Quicstream
@@ -64,7 +67,8 @@ const (
 	numNodes     = types.TotalValidators
 	quicAddr     = "127.0.0.1:%d"
 	Grandpa      = false
-	Audit        = false
+	GrandpaEasy  = true
+	Audit        = true
 	revalidate   = false // turn off for production (or publication of traces)
 
 	paranoidVerification = true  // turn off for production
@@ -104,6 +108,7 @@ type NodeContent struct {
 	id                   uint16
 	node_type            string
 	node_name            string
+	AuditFlag            bool
 	command_chan         chan string
 	peersInfo            map[uint16]*Peer                 //<validatorIndex> -> Peer
 	UP0_HandshakeChan    map[uint16]chan JAMSNP_Handshake //<validatorIndex> -> chan
@@ -111,6 +116,7 @@ type NodeContent struct {
 	UP0_stream           map[uint16]quic.Stream //<validatorIndex> -> stream (self initiated)
 	UP0_streamMu         sync.Mutex
 	blockAnnouncementsCh chan JAMSNP_BlockAnnounce
+	ba_checker           *BlockAnnouncementChecker
 
 	server quic.Listener
 
@@ -129,8 +135,6 @@ type NodeContent struct {
 	// holds the tip
 	statedb      *statedb.StateDB
 	statedbMutex sync.Mutex
-	headers      map[common.Hash]*types.Block
-	headersMutex sync.Mutex
 	// Track the number of opened streams
 	openedStreamsMu   sync.Mutex
 	openedStreams     map[quic.Stream]struct{}
@@ -174,8 +178,8 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 		statedbMap:           make(map[common.Hash]*statedb.StateDB),
 		dataHashStreams:      make(map[common.Hash][]quic.Stream),
 		blockAnnouncementsCh: make(chan JAMSNP_BlockAnnounce, DefaultChannelSize),
+		ba_checker:           InitBlockAnnouncementChecker(),
 		blocks:               make(map[common.Hash]*types.Block),
-		headers:              make(map[common.Hash]*types.Block),
 		workPackagesCh:       make(chan types.WorkPackage, DefaultChannelSize),
 		workReportsCh:        make(chan types.WorkReport, DefaultChannelSize),
 		servicesMap:          make(map[uint32]*types.ServiceSummary),
@@ -185,21 +189,56 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 	}
 }
 
+func (n *Node) Clean(block_hashes []common.Hash) {
+	n.statedbMapMutex.Lock()
+	for _, block_hash := range block_hashes {
+		log.Info(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
+		//TOCHECK
+		if _, ok := n.statedbMap[block_hash]; ok {
+			delete(n.statedbMap, block_hash)
+		}
+	}
+	n.statedbMapMutex.Unlock()
+	// cleaning process
+	n.ticketsMutex.Lock()
+	for entropy := range n.selfTickets {
+		find := false
+		for _, safrole_entropy := range n.statedb.GetSafrole().Entropy {
+			if bytes.Equal(entropy[:], safrole_entropy[:]) {
+				find = true
+				break
+			}
+		}
+		if !find {
+			log.Trace(debugT, "runReceiveBlock: cleaning ticket", "n", n.String(), "entropy", entropy)
+			delete(n.selfTickets, entropy)
+		}
+	}
+	n.ticketsMutex.Unlock()
+}
+
 type Node struct {
 	NodeContent
-	IsSync        bool
+	IsSync            bool
+	IsSyncMu          sync.RWMutex
+	appliedFirstBlock bool
+
+	WorkerManager *gosafe.WorkerManager
 	block_waiting list.List
 	commitHash    string
 	AuditNodeType string
 	credential    types.ValidatorSecret
 	peers         []string
 
-	latest_block *common.Hash
-	grandpa      *grandpa.Grandpa
+	latest_block_mutex sync.Mutex
+	latest_block       *JAMSNP_BlockInfo
+
+	grandpa *grandpa.Grandpa
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
-	selfTickets  map[common.Hash][]types.TicketBucket
-	ticketsMutex sync.Mutex
-	sendTickets  bool // when mode=fallback this is false, otherwise is true
+	selfTickets   map[common.Hash][]types.TicketBucket
+	ticketsMutex  sync.Mutex
+	sendTickets   bool // when mode=fallback this is false, otherwise is true
+	resendTickets bool
 
 	auditingMap      map[common.Hash]*statedb.StateDB // headerHash -> stateDB
 	auditingMapMutex sync.RWMutex
@@ -259,15 +298,41 @@ type Node struct {
 	JAMBlocksPort     uint16
 
 	// JCE
-	jceMode           string
-	currJCE           uint32 // the JCE to be processed
-	completedJCE      uint32 // the JCE that the node has finished processing
-	currJCEMutex      sync.Mutex
-	completedJCEMutex sync.Mutex
-	jce_timestamp     map[uint32]time.Time
+	jceMode             string
+	currJCE             uint32 // the JCE to be processed
+	completedJCE        uint32 // the JCE that the node has finished processing
+	currJCEMutex        sync.Mutex
+	completedJCEMutex   sync.Mutex
+	jce_timestamp       map[uint32]time.Time
+	jce_timestamp_mutex sync.Mutex
 
 	stop_receive_blk    chan string
 	restart_receive_blk chan string
+}
+
+func (n *Node) GetIsSync() bool {
+	n.IsSyncMu.RLock()
+	defer n.IsSyncMu.RUnlock()
+	return n.IsSync
+}
+func (n *Node) SetIsSync(isSync bool) {
+	n.IsSyncMu.Lock()
+	defer n.IsSyncMu.Unlock()
+	n.IsSync = isSync
+}
+
+func (n *Node) GetLatestBlockInfo() *JAMSNP_BlockInfo {
+	// n.latest_block_mutex.Lock()
+	// defer n.latest_block_mutex.Unlock()
+	return n.latest_block
+}
+
+func (n *Node) SetLatestBlockInfo(block *JAMSNP_BlockInfo) {
+	// n.latest_block_mutex.Lock()
+	// defer n.latest_block_mutex.Unlock()
+	log.Debug(debugBlock, "SetLatestBlockInfo", "n", n.String(), "block_hash", block.HeaderHash.Hex())
+	n.latest_block = block
+	return
 }
 
 func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
@@ -409,7 +474,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		grandpaPrimaryMessageCh:   make(chan grandpa.VoteMessage, DefaultChannelSize),
 		grandpaCommitMessageCh:    make(chan grandpa.CommitMessage, DefaultChannelSize),
 
-		sendTickets: true,
+		sendTickets:   true,
+		resendTickets: false, // activate this when you want to resend tickets
 
 		dataDir: dataDir,
 
@@ -423,6 +489,29 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		Finalized: true,
 		Applied:   true,
 	})
+	old_blocks := make([]types.Block, 0)
+	old_blocks, ok, err := node.BlocksLookup(block.Header.Hash(), 0, math.MaxUint32)
+	if err != nil || !ok {
+		log.Error(module, "fetchBlocks", "err", err)
+		return nil, err
+	}
+	if len(old_blocks) > 0 {
+		node.SetIsSync(false)
+		log.Info(log.BlockMonitoring, "fetchBlocks", "old_blocks", len(old_blocks), "blockHash", block.Header.Hash().Hex())
+		for _, b := range old_blocks {
+			err := node.block_tree.AddBlock(&b)
+			if err != nil {
+				log.Error(module, "AddBlock", "err", err)
+				return nil, err
+			}
+			// TODO->don't apply twice
+			// node.statedb.RecoverJamStateWithError(b.Header.ParentStateRoot)
+			// block_node, ok := node.block_tree.GetBlockNode(b.Header.ParentHeaderHash)
+			// if ok {
+			// 	block_node.Applied = true
+			// }
+		}
+	}
 	node.commitHash = common.GetCommitHash()
 	fmt.Printf("[N%v] running on buildV: %s\n", id, node.GetBuild())
 
@@ -524,8 +613,15 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 	for validatorIndex, p := range startPeerList {
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
-	}
 
+		if validatorIndex != id && len(old_blocks) > 0 {
+			_, err = node.peersInfo[validatorIndex].GetOrInitBlockAnnouncementStream(context.Background())
+			if err != nil {
+				log.Error(module, "GetOrInitBlockAnnouncementStream", "err", err)
+				return nil, err
+			}
+		}
+	}
 	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
 	_statedb.Block = block
 	_statedb.HeaderHash = block.Header.Hash()
@@ -538,6 +634,15 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		fmt.Printf("NewGenesisStateDB ERR %v\n", err)
 		return nil, err
 	}
+
+	validators := node.statedb.GetSafrole().NextValidators
+	if len(validators) == 0 {
+		panic("newNode No validators")
+	}
+
+	go node.runServer()
+	node.WorkerManager = gosafe.NewWorkerManager()
+
 	node.setValidatorCredential(credential)
 	node.epoch0Timestamp = epoch0Timestamp
 	if nodeType == ValidatorDAFlag {
@@ -549,11 +654,33 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		node.statedb.GetSafrole().CurrValidators = validators
 	}
 
-	validators := node.statedb.GetSafrole().NextValidators
-	if len(validators) == 0 {
-		panic("newNode No validators")
+	// catch up state
+	// tmp_statedb := node.statedb.Copy()
+	// for _, b := range old_blocks {
+	// 	err = tmp_statedb.RecoverJamStateWithError(b.Header.ParentStateRoot)
+	// 	if err == nil {
+	// 		blockNode, ok := node.block_tree.GetBlockNode(b.Header.ParentHeaderHash)
+	// 		if ok {
+	// 			blockNode.Applied = true
+	// 		}
+	// 	}
+	// }
+	if len(old_blocks) > 0 {
+		// also prune the block tree
+		useless_header_hashes := node.block_tree.PruneBlockTree(10)
+		node.WorkerManager.StartWorker("node_cleaning", func() {
+			node.Clean(useless_header_hashes)
+		})
+		err = node.extendChain(context.Background())
+		if err != nil {
+			log.Error(module, "extendChain", "err", err)
+		} else {
+			log.Info(module, "extendChain", "blockHash", node.statedb.HeaderHash.Hex())
+		}
 	}
-	go node.runServer()
+	if id == 5 {
+		node.SetIsSync(false) // node 5 can't produce the first block
+	}
 	if nodeType != ValidatorDAFlag {
 		go node.runClient()
 		go node.runMain()
@@ -564,7 +691,10 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		go node.RunRPCCommand()
 		go node.runWPQueue()
 		if Audit {
+			node.AuditFlag = true
 			go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+		} else {
+			node.AuditFlag = false
 		}
 		host_name, _ := os.Hostname()
 		if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
@@ -605,11 +735,11 @@ func GenerateQuicConfig() *quic.Config {
 	return &quic.Config{
 		Allow0RTT:                  true,
 		KeepAlivePeriod:            1 * time.Second,
-		MaxIdleTimeout:             60 * time.Second,
-		MaxIncomingUniStreams:      2 * 1023 * 1023,
-		MaxIncomingStreams:         2 * 1023 * 1023,
-		MaxStreamReceiveWindow:     100 * 1024 * 1024,
-		MaxConnectionReceiveWindow: 500 * 1024 * 1024,
+		MaxIdleTimeout:             20 * time.Second,
+		MaxIncomingUniStreams:      5000, // TODO
+		MaxIncomingStreams:         5000,
+		MaxStreamReceiveWindow:     8 * 1024 * 1024,
+		MaxConnectionReceiveWindow: 200 * 1024 * 1024,
 		Tracer:                     qlog.DefaultConnectionTracer,
 	}
 }
@@ -1105,7 +1235,7 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 		fmt.Printf("node statedb: NO BLOCK!!! %v\n", n.statedb)
 		panic(0)
 	}
-	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() {
+	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() && _statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash() {
 		n.statedb = _statedb
 		n.statedbMap[_statedb.GetHeaderHash()] = _statedb
 	}
@@ -1214,6 +1344,9 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		stream, err := conn.AcceptStream(ctx)
 		if err != nil {
 			log.Warn(debugDA, "AcceptStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
+			if stream != nil {
+				stream.Close()
+			}
 			break
 		}
 		atomic.AddInt64(&n.totalIncomingStreams, 1)
@@ -1229,7 +1362,10 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			streamCtx, cancel := context.WithTimeout(ctx, NormalTimeout)
 			defer cancel()
 
-			n.DispatchIncomingQUICStream(streamCtx, stream, validatorIndex)
+			err := n.DispatchIncomingQUICStream(streamCtx, stream, validatorIndex)
+			if err != nil {
+				log.Error(debugDA, "DispatchIncomingQUICStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
+			}
 
 		}(stream)
 	}
@@ -1239,76 +1375,68 @@ func (n *Node) handleConnection(conn quic.Connection) {
 func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 	result := []byte{}
 	objType := reflect.TypeOf(obj)
-	for id, p := range n.peersInfo {
 
+	for id, p := range n.peersInfo {
 		if id > types.TotalValidators {
-			switch objType {
-			case reflect.TypeOf(types.Block{}):
+			if objType == reflect.TypeOf(types.Block{}) {
 				b := obj.(types.Block)
-				up0_stream, err := p.GetOrInitBlockAnnouncementStream(context.Background())
-				if err != nil {
-					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
-					continue
-				}
-				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
-				if err != nil {
-					log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
-					continue
-				}
-				err = sendQuicBytes(ctxParent, up0_stream, block_a_bytes, id, CE128_BlockRequest) // ?
-				if err != nil {
-					if id > types.TotalValidators {
+				go func() { // review
+					up0_stream, err := p.GetOrInitBlockAnnouncementStream(context.Background())
+					if err != nil {
+						log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
+						return
+					}
+					block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
+					if err != nil {
+						log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
+						return
+					}
+					err = sendQuicBytes(ctxParent, up0_stream, block_a_bytes, id, CE128_BlockRequest)
+					if err != nil {
 						n.UP0_streamMu.Lock()
 						delete(n.UP0_stream, id)
 						n.UP0_streamMu.Unlock()
 						delete(n.peersInfo, id)
+						log.Error(debugStream, "SendBlockAnnouncement:sendQuicBytes (broadcast2)", "n", n.String(), "err", err)
 					}
-					log.Error(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
-					continue
-				}
+				}()
 			}
 			continue
 		}
 
 		if id == n.id {
-			if objType == reflect.TypeOf(types.Assurance{}) {
+			switch objType {
+			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
 				n.assurancesCh <- a
-				continue
-			} else if objType == reflect.TypeOf(types.PreimageAnnouncement{}) {
-				continue
-			} else if objType == reflect.TypeOf(grandpa.VoteMessage{}) || objType == reflect.TypeOf(grandpa.CommitMessage{}) {
-				continue
-			} else {
-				continue
 			}
+			continue
 		}
 
-		go func(id uint16, p *Peer) {
+		peerID := id
+		peer := p
+		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Error(module, "broadcast error", "id", id, "err", r)
 				}
 			}()
 
-			//
 			ctx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
 			defer cancel()
 
 			switch objType {
 			case reflect.TypeOf(types.Ticket{}):
 				t := obj.(types.Ticket)
-				epoch := uint32(0) // TODO: Shawn
-				err := p.SendTicketDistribution(ctx, epoch, t, false)
-				if err != nil {
-					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", p.PeerID, "err", err)
-					return
+				epoch := uint32(0)
+				if err := peer.SendTicketDistribution(ctx, epoch, t, false); err != nil {
+					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
 			case reflect.TypeOf(types.Block{}):
 				b := obj.(types.Block)
-				up0_stream, err := p.GetOrInitBlockAnnouncementStream(ctx)
+				up0_stream, err := peer.GetOrInitBlockAnnouncementStream(context.Background())
 				if err != nil {
-					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
+					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.PeerID, "err", err)
 					return
 				}
 				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
@@ -1316,63 +1444,57 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 					log.Warn(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
 					return
 				}
-				err = sendQuicBytes(ctx, up0_stream, block_a_bytes, id, CE128_BlockRequest)
+				err = sendQuicBytes(ctx, up0_stream, block_a_bytes, peerID, UP0_BlockAnnouncement)
 				if err != nil {
-					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes", "n", n.String(), "err", err)
-					return
+					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes (broadcast)", "n", n.String(), "err", err)
 				}
+				n.ba_checker.Set(b.Header.Hash(), peerID)
+
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
-				err := p.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures)
-				if err != nil {
+				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures); err != nil {
 					log.Error(debugStream, "SendWorkReportDistribution", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
-				err := p.SendAssurance(ctx, &a)
-				if err != nil {
+				if err := peer.SendAssurance(ctx, &a); err != nil {
 					log.Error(debugStream, "SendAssurance", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
-				err := p.SendAuditAnnouncement(ctx, &a)
-				if err != nil {
+				if err := peer.SendAuditAnnouncement(ctx, &a); err != nil {
 					log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
-				epoch := uint32(0) // TODO: Shawn
-				err := p.SendJudgmentPublication(ctx, epoch, j)
-				if err != nil {
+				epoch := uint32(0)
+				if err := peer.SendJudgmentPublication(ctx, epoch, j); err != nil {
 					log.Error(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.PreimageAnnouncement{}):
-				preimageAnnouncement := obj.(types.PreimageAnnouncement)
-				err := p.SendPreimageAnnouncement(ctx, &preimageAnnouncement)
-				if err != nil {
+				announcement := obj.(types.PreimageAnnouncement)
+				if err := peer.SendPreimageAnnouncement(ctx, &announcement); err != nil {
 					log.Error(debugStream, "SendPreimageAnnouncement", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(grandpa.VoteMessage{}):
 				vote := obj.(grandpa.VoteMessage)
-				err := p.SendVoteMessage(ctx, vote)
-				if err != nil {
+				if err := peer.SendVoteMessage(ctx, vote); err != nil {
 					log.Error(debugStream, "SendVoteMessage", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(grandpa.CommitMessage{}):
 				commit := obj.(grandpa.CommitMessage)
-				err := p.SendCommitMessage(ctx, commit)
-				if err != nil {
+				if err := peer.SendCommitMessage(ctx, commit); err != nil {
 					log.Error(debugStream, "SendCommitMessage", "n", n.String(), "err", err)
 					return
 				}
 			}
-		}(id, p)
+		}()
 	}
 	return result
 }
@@ -1428,19 +1550,34 @@ func (n *Node) extendChain(ctx context.Context) error {
 		return nil
 	}
 	currentHash := latestStateDB.Block.Header.Hash()
+	// if current block tree is forked, we need to apply from the common ancestor
+	currNode, ok := n.block_tree.GetBlockNode(currentHash)
+	if len(n.block_tree.GetLeafs()) > 1 {
+		leafs := n.block_tree.GetLeafs()
+		leafs_slice := make([]*types.BT_Node, 0)
+		for _, leaf := range leafs {
+			if leaf.Applied {
+				continue
+			}
+			leafs_slice = append(leafs_slice, leaf)
+		}
+		if len(leafs_slice) > 1 {
+			currNode = n.block_tree.GetCommonAncestor(leafs_slice[0], leafs_slice[1])
+		}
+	}
 	n.statedbMutex.Unlock()
 
-	currNode, ok := n.block_tree.GetBlockNode(currentHash)
 	if !ok {
 		// Handle edge case: maybe we're at genesis
 		if n.block_tree.Root.Block.Header.ParentHeaderHash == currentHash {
 			currNode = n.block_tree.Root
 		}
 		if currNode == nil {
-			return nil
+			currNode = n.block_tree.Root
 		}
 		if !currNode.Applied {
-			if err := n.ApplyFirstBlock(ctx, currNode); err != nil {
+			if err := n.ApplyBlock(ctx, currNode); err != nil {
+				log.Error(debugBlock, "SyncState", "ApplyFirstBlock", "block", currNode.Block.Header.Hash().String_short(), "err", err)
 				return fmt.Errorf("extendChain: ApplyFirstBlock failed: %w", err)
 			}
 		}
@@ -1452,7 +1589,6 @@ func (n *Node) extendChain(ctx context.Context) error {
 		log.Error(module, "SyncState", "applyChildren", err)
 		return err
 	}
-
 	return nil
 }
 
@@ -1474,78 +1610,36 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 	return nil
 }
 
-func (n *Node) ApplyFirstBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
-	log.Info(module, "ENTERING ApplyFirstBlock", "n", n.String())
-	nextBlock := nextBlockNode.Block
-
-	// Use the current statedb, set correct root
-	recoveredStateDB := n.statedb
-	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
-
-	// apply with caller's ctx, not Background
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock)
-	if err != nil {
-		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
-		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
-	}
-
-	newStateDB.GetAllKeyValues()
-	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
-	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
-	newStateDB.Block = nextBlock
-
-	// Extend chain tip
-	n.addStateDB(newStateDB)
-
-	n.statedbMapMutex.Lock()
-	defer n.statedbMapMutex.Unlock()
-
-	if nextBlock.Header.Hash() == *n.latest_block {
-		n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
-
-		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
-			log.Error(debugA, "ApplyFirstBlock: assureNewBlock failed", "n", n.String(), "err", err)
-			return fmt.Errorf("assureNewBlock failed: %w", err)
-		}
-
-		// MK: NOT sure if this is the proper place to set this completedJCE
-		log.Info(module, "ApplyFirstBlock: SetCompletedJCE !!!!", "n", n.String(), "slot", nextBlock.Header.Slot)
-		n.SetCompletedJCE(nextBlock.Header.Slot)
-
-		if Audit {
-			if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
-				select {
-				case n.auditingCh <- snap.Copy():
-				default:
-					log.Warn(module, "auditingCh full, skipping audit")
-				}
-			}
-		}
-	}
-
-	nextBlockNode.Applied = true
-	return nil
-}
-
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
 	nextBlock := nextBlockNode.Block
-
+	// if !n.appliedFirstBlock {
+	// 	if nextBlock.Header.ParentHeaderHash == genesisBlockHash {
+	// 		n.appliedFirstBlock = true
+	// 	}
+	// }
 	// 1. Prepare recovered state from parent
 	recoveredStateDB := n.statedb.Copy()
 	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
-
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock)
+	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
+	var used_entropy common.Hash
+	if nextBlock.EpochMark() != nil {
+		used_entropy = nextBlock.EpochMark().TicketsEntropy
+	} else {
+		used_entropy = recoveredStateDB.GetSafrole().Entropy[2]
+	}
+	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, valid_tickets)
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
-	log.Trace(log.BlockMonitoring, "Applied Block", "n", n.String(),
+	log.Debug(log.BlockMonitoring, "Applied Block", "n", n.String(),
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
 		"->block", nextBlock.Header.Hash().String_short(),
 		"slot", nextBlock.Header.Slot,
 		"stateRoot", newStateDB.StateRoot.String_short(),
 	)
-	newStateDB.GetAllKeyValues()
+	// newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
@@ -1581,9 +1675,18 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// 5. Finalization logic
 	n.statedbMapMutex.Lock()
 	defer n.statedbMapMutex.Unlock()
-
-	if nextBlock.Header.Hash() == *n.latest_block {
+	mini_peers := 2
+	latest_block_info := n.GetLatestBlockInfo()
+	if latest_block_info == nil {
+		log.Info(debugBlock, "ApplyBlock: latest_block_info is nil", "n", n.String())
+		return nil
+	}
+	if nextBlock.Header.Hash() == latest_block_info.HeaderHash {
 		n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
+		if len(n.UP0_stream) > mini_peers {
+			log.Info(debugStream, "ApplyBlock: UP0_stream", "n", n.String(), "len", len(n.UP0_stream))
+			n.SetIsSync(true)
+		}
 		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
 			log.Error(debugA, "ApplyBlock: assureNewBlock failed", "n", n.String(), "err", err)
 			return fmt.Errorf("assureNewBlock failed: %w", err)
@@ -1593,7 +1696,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		log.Debug(module, "ApplyBlock: SetCompletedJCE !!!!", "n", n.String(), "slot", nextBlock.Header.Slot)
 		n.SetCompletedJCE(nextBlock.Header.Slot)
 
-		if Audit {
+		if n.AuditFlag {
 			if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
 				select {
 				case n.auditingCh <- snap.Copy():
@@ -1602,14 +1705,14 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 				}
 			}
 		}
+	} else {
+		log.Info(debugStream, "ApplyBlock: latest_block not equal to nextBlock", "n", n.String(), "latest_block", latest_block_info.HeaderHash.String_short(), "nextBlock", nextBlock.Header.Hash().String_short())
 	}
-
 	nextBlockNode.Applied = true
 
 	// 6. Cleanup used extrinsics
 	isClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 	n.extrinsic_pool.RemoveUsedExtrinsicFromPool(nextBlock, n.statedb.GetSafrole().Entropy[2], isClosed)
-
 	return nil
 }
 
@@ -1685,17 +1788,8 @@ func (n *Node) processBlock(blk *types.Block) error {
 	n.StoreBlock(blk, n.id, false)
 	err := n.cacheBlock(blk)
 	// Sometimes this loop will get in deadlock
-	blk_hash := blk.Header.Hash()
-	n.latest_block = &blk_hash
-	if err != nil {
-		log.Warn(debugBlock, "processBlock:cacheBlock", "n", n.String(), "err", err, "sync", "start")
-		n.InsertOrphan(blk)
-		if n.IsSync {
-			n.IsSync = false
-			go n.SynchronizedBlocks(context.Background())
-		}
-	}
-	return nil // Success
+
+	return err
 }
 
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
@@ -2041,7 +2135,6 @@ func (n *Node) runJCEDefault() {
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
 			n.SetCurrJCE(currJCE)
 			//do something with it
-
 		}
 	}
 }
@@ -2097,10 +2190,26 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	}
 	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
 	n.currJCE = currJCE
+	n.jce_timestamp_mutex.Lock()
 	if n.jce_timestamp == nil {
 		n.jce_timestamp = make(map[uint32]time.Time)
 	}
 	n.jce_timestamp[currJCE] = time.Now()
+	n.jce_timestamp_mutex.Unlock()
+
+	if n.sendTickets {
+		stateslot := n.statedb.GetSafrole().Timeslot
+		currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(stateslot)
+		_, realPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
+
+		if currEpoch > 0 && (realPhase == 0 || realPhase == types.EpochLength-1) {
+			// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
+			n.GenerateTickets(stateslot)
+			n.BroadcastTickets(stateslot)
+		}
+
+	}
+
 }
 
 func (n *Node) SetCompletedJCE(completedCurrJCE uint32) {
@@ -2138,24 +2247,32 @@ func (n *Node) runClient() {
 
 	for {
 		select {
+
 		case <-tickerPulse.C:
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
-
-			currJCE := n.GetCurrJCE()
-			currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
-
-			if currEpoch != -1 && (currPhase == 0 || currPhase == types.EpochLength-1) {
-				n.GenerateTickets()
-				n.BroadcastTickets()
+			if !n.GetIsSync() {
+				continue
 			}
-
+			currJCE := n.GetCurrJCE()
+			_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
 			ticketIDs, err := n.GetSelfTicketsIDs(currPhase)
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
-
+			// isAuthorizedBlockBuilder, _, _ := n.statedb.GetSafrole().IsAuthorizedBuilder(currJCE, common.Hash(n.credential.BandersnatchPub), ticketIDs)
+			// if !isAuthorizedBlockBuilder {
+			// 	continue
+			// }
+			// if !n.appliedFirstBlock {
+			// 	if n.CanProposeFirstBlock() {
+			// 		n.appliedFirstBlock = true
+			// 		log.Info(module, "runClient: Propose first block", "n", n.String(), "slot", currJCE)
+			// 	} else {
+			// 		continue
+			// 	}
+			// }
 			n.statedbMutex.Lock()
 			newBlock, newStateDB, err := n.statedb.ProcessState(currJCE, n.credential, ticketIDs, n.extrinsic_pool)
 			n.statedbMutex.Unlock()
@@ -2174,7 +2291,12 @@ func (n *Node) runClient() {
 			n.addStateDB(newStateDB)
 			n.StoreBlock(newBlock, n.id, true)
 			n.processBlock(newBlock)
-
+			n.SetLatestBlockInfo(
+				&JAMSNP_BlockInfo{
+					HeaderHash: newBlock.Header.Hash(),
+					Slot:       newBlock.Header.Slot,
+				},
+			)
 			nodee, ok := n.block_tree.GetBlockNode(newBlock.Header.Hash())
 			if !ok {
 				return
@@ -2217,7 +2339,7 @@ func (n *Node) runClient() {
 
 			cancelAssure()
 
-			if Audit {
+			if n.AuditFlag {
 				select {
 				case n.auditingCh <- newStateDB.Copy():
 				default:
@@ -2227,7 +2349,6 @@ func (n *Node) runClient() {
 
 			IsClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 			n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsClosed)
-
 		case log := <-logChan:
 			go n.WriteLog(log)
 		}

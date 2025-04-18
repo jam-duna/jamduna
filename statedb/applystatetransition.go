@@ -14,10 +14,11 @@ import (
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block) (s *StateDB, err error) {
+func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash) (s *StateDB, err error) {
 
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
+		fmt.Printf("Apply Block %v\n", blk.Header.Hash())
 		return s, fmt.Errorf("ParentStateRoot does not match")
 	}
 	old_timeslot := s.GetSafrole().Timeslot
@@ -28,7 +29,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
 	if !isValid || headerErr != nil {
 		// panic("MK validation check!! Block header is not valid")
-		return s, fmt.Errorf("Block header is not valid")
+		return s, fmt.Errorf("Block header is not valid err=%v", headerErr)
 	}
 	if s.Id == blk.Header.AuthorIndex {
 		s.Authoring = log.GeneralAuthoring
@@ -61,7 +62,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	sf := s.GetSafrole()
 	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
-	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header) // Entropy computed!
+	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {
 		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
@@ -234,7 +235,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 4.20 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
 	s.StateRoot = s.UpdateTrieState()
-
+	//duration := time.Since(timer)
+	//log.Debug(log.StateDBMonitoring, "ApplyStateTransitionFromBlock", "duration", duration, "block", blk.Header.Hash().String_short(), "stateroot", s.StateRoot.String_short(), "accumulationRoot", accumulationRoot.String_short())
 	return s, nil
 }
 

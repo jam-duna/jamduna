@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -54,4 +55,18 @@ func GetJAMNetworkPort() int {
 		return 9800
 	}
 	return 9800
+}
+
+func GetAddresses(local bool, port int) []string {
+	addresses := make([]string, 6)
+	if local {
+		for i := 0; i < 6; i++ {
+			addresses[i] = fmt.Sprintf("localhost:%d", port+i)
+		}
+	} else {
+		for i := 0; i < 6; i++ {
+			addresses[i] = fmt.Sprintf("%s-%d.jamduna.org:%d", GetJAMNetwork(), i, port)
+		}
+	}
+	return addresses
 }

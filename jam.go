@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/ed25519"
+	"runtime"
 	"strconv"
 
 	"flag"
@@ -87,7 +88,7 @@ func main() {
 
 	fmt.Printf("System time: %s (%s)\n", now.Format("2006-01-02 15:04:05"), loc)
 
-	log.InitLogger(logLevel)
+	log.InitLogger("debug")
 	log.EnableModule(log.BlockMonitoring)
 
 	config.GenesisState, config.GenesisBlock = node.GetGenesisFile(network)
@@ -103,7 +104,9 @@ func main() {
 	for _, peer := range peerList {
 		fmt.Printf("Peer %d: %s\n", peer.PeerID, peer.PeerAddr)
 	}
-
+	if is_local {
+		config.DataDir = filepath.Join(config.DataDir, "jam-"+strconv.Itoa(validatorIndex))
+	}
 	if validatorIndex >= 0 && validatorIndex < types.TotalValidators && len(config.Bandersnatch) > 0 || len(config.Ed25519) > 0 {
 		// set up validator secrets
 		if _, _, err := setupValidatorSecret(config.Bandersnatch, config.Ed25519, config.Bls, config.NodeName); err != nil {
@@ -169,9 +172,10 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String(), n.GetBuild())
-	timer := time.NewTimer(2400 * time.Hour)
+	StartRuntimeMonitor(3 * time.Second)
+	timer := time.NewTimer(72 * time.Hour)
 	<-timer.C
-	fmt.Println("Node has been running for 100 days. Shutting down...")
+	fmt.Println("Node has been running for 3 days. Shutting down...")
 }
 
 func generatePeerNetwork(validators []types.Validator, port int, local bool) (peers []string, peerList map[uint16]*node.Peer, err error) {
@@ -240,4 +244,37 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 		return validator, secret, err
 	}
 	return validator, secret, nil
+}
+
+func StartRuntimeMonitor(interval time.Duration) {
+	go func() {
+		var mem runtime.MemStats
+		var routineCount int
+		var historyHighest int
+		for {
+			runtime.ReadMemStats(&mem)
+
+			routineCount = runtime.NumGoroutine()
+			if routineCount > historyHighest {
+				historyHighest = routineCount
+				fmt.Printf("[MONITOR New Record] 🧠 Memory = %d MB | 💾 TotalAlloc = %d MB | 📦 Sys = %d MB | ♻️ GC = %d | 🧵 Goroutines = %d\n",
+					mem.Alloc/1024/1024,
+					mem.TotalAlloc/1024/1024,
+					mem.Sys/1024/1024,
+					mem.NumGC,
+					routineCount,
+				)
+			} else {
+				fmt.Printf("[MONITOR] 🧠 Memory = %d MB | 💾 TotalAlloc = %d MB | 📦 Sys = %d MB | ♻️ GC = %d | 🧵 Goroutines = %d\n",
+					mem.Alloc/1024/1024,
+					mem.TotalAlloc/1024/1024,
+					mem.Sys/1024/1024,
+					mem.NumGC,
+					routineCount,
+				)
+			}
+
+			time.Sleep(interval)
+		}
+	}()
 }

@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -156,7 +157,7 @@ func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx u
 	return boundaryNode, keyvalues, true, nil
 }
 
-func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement JAMSNP_BlockAnnounce) (*types.Block, error) {
+func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement JAMSNP_BlockAnnounce) ([]types.Block, error) {
 	if n.store.SendTrace {
 		tracer := n.store.Tp.Tracer("NodeTracer")
 		traceCtx, span := tracer.Start(ctx, fmt.Sprintf("[N%d] processBlockAnnouncement", n.store.NodeID))
@@ -174,7 +175,23 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 	}
 
 	headerHash := blockAnnouncement.Header.HeaderHash()
-
+	parentHash := blockAnnouncement.Header.ParentHeaderHash
+	var mode int
+	var num uint32
+	if _, ok := n.block_tree.GetBlockNode(parentHash); ok {
+		mode = 0
+	} else if len(n.block_tree.TreeMap) == 1 {
+		mode = 1
+	} else {
+		finalized_block := n.block_tree.GetLastFinalizedBlock()
+		finalized_block_slot := finalized_block.Block.Header.Slot
+		if finalized_block_slot < blockAnnouncement.Header.Slot {
+			num = blockAnnouncement.Header.Slot - finalized_block_slot
+			mode = 2
+		} else {
+			return nil, errors.New("block announcement is too old")
+		}
+	}
 	var lastErr error
 	var blocksRaw []types.Block
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -186,8 +203,24 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		}
 
 		// Small timeout context per attempt
-		attemptCtx, cancel := context.WithTimeout(ctx, SmallTimeout)
-		blocksRaw, lastErr = p.SendBlockRequest(attemptCtx, headerHash, 1, 1)
+		attemptCtx, cancel := context.WithTimeout(ctx, NormalTimeout)
+		defer cancel()
+		switch mode {
+		case 0:
+			blocksRaw, lastErr = p.GetOneBlock(headerHash, attemptCtx)
+		case 1:
+			blocksRaw, lastErr = p.GetAllBlocks(headerHash, attemptCtx)
+			log.Warn(log.BlockMonitoring, "GetAllBlocks", "blockHash", headerHash, "blocksRaw", len(blocksRaw), "isSync", false)
+			n.SetIsSync(false)
+		case 2:
+			blocksRaw, lastErr = p.GetMiddleBlocks(headerHash, num, attemptCtx)
+			log.Warn(log.BlockMonitoring, "GetMiddleBlocks",
+				"num", num,
+				"blockHash", headerHash, "blocksRaw", blocksRaw, "isSync", false)
+			n.SetIsSync(false)
+		default:
+			return nil, fmt.Errorf("invalid mode %d", mode)
+		}
 		cancel()
 
 		if lastErr == nil && len(blocksRaw) > 0 {
@@ -202,16 +235,37 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 			return nil, fmt.Errorf("SendBlockRequest failed after 3 attempts: %w", lastErr)
 		}
 	}
-
-	block := &blocksRaw[0]
-	if receivedHash := block.Header.Hash(); receivedHash != headerHash {
-		err := fmt.Errorf("block hash mismatch: expected %s, got %s", headerHash.String_short(), receivedHash.String_short())
-		log.Error(module, "processBlockAnnouncement", "err", err)
-		return nil, err
+	for i := len(blocksRaw) - 1; i >= 0; i-- {
+		block := &blocksRaw[i]
+		err := n.processBlock(block)
+		if err != nil {
+			log.Error(module, "processBlockAnnouncement", "err", err, "mode", mode, "blockHash", block.Header.Hash())
+			return nil, err
+		}
 	}
-
-	n.processBlock(block)
-	return block, nil
+	for _, peer := range n.peersInfo {
+		n.WorkerManager.StartWorker("node_send_block_announcement", func() {
+			if peer.PeerID == n.id {
+				return
+			}
+			peer_id := peer.PeerID
+			if !n.ba_checker.CheckAndSet(headerHash, peer_id) {
+				up0_stream, err := peer.GetOrInitBlockAnnouncementStream(context.Background())
+				if err != nil {
+					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.PeerID, "err", err)
+				}
+				block_a_bytes := blockAnnouncement.ToBytes()
+				if err != nil {
+					log.Warn(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
+				}
+				err = sendQuicBytes(context.Background(), up0_stream, block_a_bytes, peer_id, CE128_BlockRequest)
+				if err != nil {
+					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes (whisper)", "n", n.String(), "err", err)
+				}
+			}
+		})
+	}
+	return blocksRaw, nil
 }
 
 func (n *NodeContent) cacheBlock(block *types.Block) error {
@@ -219,10 +273,19 @@ func (n *NodeContent) cacheBlock(block *types.Block) error {
 	if block != nil && n.block_tree != nil { // check
 		err := n.block_tree.AddBlock(block)
 		if err != nil {
-			return fmt.Errorf("cacheBlock: AddBlock failed %v", err)
+			if block.Header.Hash() == genesisBlockHash {
+				return nil
+			}
+			if err.Error() == "already exists" {
+				return nil
+			}
+			return err
 		}
 		// also prune the block tree
-		n.block_tree.PruneBlockTree(10)
+		useless_header_hashes := n.block_tree.PruneBlockTree(10)
+		n.nodeSelf.WorkerManager.StartWorker("node_cleaning", func() {
+			n.nodeSelf.Clean(useless_header_hashes)
+		})
 	}
 
 	return nil
@@ -258,29 +321,44 @@ func (n *Node) runReceiveBlock() {
 
 		case <-pulseTicker.C:
 			// MediumTimeout to extend the chain
-			extendCtx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-			if err := n.extendChain(extendCtx); err != nil {
-				log.Warn(debugBlock, "runReceiveBlock: extendChain failed", "n", n.String(), "err", err)
+			if GrandpaEasy {
+				n.block_tree.EasyFinalization()
 			}
-			cancel()
 
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
 			// SmallTimeout to processBlockAnnouncement
+			blk_hash := blockAnnouncement.Header.Hash()
+
+			latest_block := n.GetLatestBlockInfo()
+			newinfo := JAMSNP_BlockInfo{
+				HeaderHash: blk_hash,
+				Slot:       blockAnnouncement.Header.Slot,
+			}
+			if latest_block == nil || blockAnnouncement.Header.Slot > latest_block.Slot {
+				n.SetLatestBlockInfo(&newinfo)
+			}
 			blockCtx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
-			block, err := n.processBlockAnnouncement(blockCtx, blockAnnouncement)
+			blocks, err := n.processBlockAnnouncement(blockCtx, blockAnnouncement)
 			cancel()
 
 			if err != nil {
 				log.Warn(debugBlock, "processBlockAnnouncement failed", "n", n.String(), "err", err)
 			} else {
-				log.Debug(debugBlock, "processBlock",
-					"author", blockAnnouncement.Header.AuthorIndex,
-					"p", common.Str(block.GetParentHeaderHash()),
-					"h", common.Str(block.Header.Hash()),
-					"b", block.Str(),
-					"goroutines", runtime.NumGoroutine())
+				if len(blocks) == 0 {
+					block := blocks[0]
+					log.Info(debugBlock, "processBlock",
+						"author", blockAnnouncement.Header.AuthorIndex,
+						"p", common.Str(block.GetParentHeaderHash()),
+						"h", common.Str(block.Header.Hash()),
+						"b", block.Str(),
+						"goroutines", runtime.NumGoroutine())
+				}
 			}
-
+			extendCtx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+			if err := n.extendChain(extendCtx); err != nil {
+				log.Warn(debugBlock, "runReceiveBlock: extendChain failed", "n", n.String(), "err", err)
+			}
+			cancel()
 		case <-n.stop_receive_blk:
 			log.Trace(debugBlock, "runReceiveBlock: received stop signal", "n", n.String())
 			select {
@@ -418,7 +496,11 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			return resp, err
 		}
 		log.Trace(debugDA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
+
+		startTime := time.Now()
 		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, peerID)
+		rtt := time.Since(startTime)
+		log.Debug(debugDA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "peerID", peerID, "rtt", rtt)
 		if err != nil {
 			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err

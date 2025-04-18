@@ -189,7 +189,7 @@ func safrole_test(jsonFile string, exceptErr error) error {
 	copy(sig[0:32], tc.Input.Entropy.Bytes())
 	db.Block.Header.EntropySource = types.BandersnatchVrfSignature(sig)
 	// _, err = db.GetSafrole().ApplyStateTransitionTickets(db.Block.Tickets(), db.Block.Header.Slot, db.Block.Header)
-	err = db.GetSafrole().ValidateSaforle(db.Block.Extrinsic.Tickets, db.Block.Header.Slot, db.Block.Header)
+	_, err = db.GetSafrole().ValidateSaforle(db.Block.Extrinsic.Tickets, db.Block.Header.Slot, db.Block.Header, nil)
 	if err != exceptErr {
 		return fmt.Errorf("expected error %v, got %v", exceptErr, err)
 	}

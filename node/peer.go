@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -109,6 +110,9 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 		fmt.Printf("[%s] OpenStreamSync ERR %v\n", p.PeerAddr, err)
 		_ = p.conn.CloseWithError(0, "stream open failed")
 		p.conn = nil
+		if stream != nil {
+			_ = stream.Close()
+		}
 		return nil, fmt.Errorf("OpenStreamSync failed: %w", err)
 	}
 
@@ -126,7 +130,6 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 
 	return stream, nil
 }
-
 func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16, code uint8) (err error) {
 	// Create a buffer to hold the length of the message (big-endian uint32)
 	if stream == nil {
@@ -135,19 +138,23 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	msgLen := uint32(len(msg))
 	lenBuf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(lenBuf, msgLen)
-
 	// Respect context before sending
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("onPreimageRequest: context cancelled before send: %w", ctx.Err())
+		return fmt.Errorf("sendQuicBytes: context cancelled before send: %w", ctx.Err())
 	default:
 	}
-
+	if code == UP0_BlockAnnouncement {
+		stream.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	}
 	// First, write the message length to the stream
 	_, err = stream.Write(lenBuf)
 	if err != nil {
 		log.Warn(module, "sendQuicBytes-length", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		return err
+	} else if code == UP0_BlockAnnouncement {
+		// remove the deadline
+		stream.SetWriteDeadline(time.Time{})
 	}
 
 	// Respect context before sending
@@ -241,6 +248,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	msgTypeBytes := make([]byte, 1)
 	if _, err := io.ReadFull(stream, msgTypeBytes); err != nil {
 		log.Warn(module, "DispatchIncomingQUICStream - code", "err", err)
+		_ = stream.Close()
 		return err
 	}
 	msgType := msgTypeBytes[0]
@@ -249,6 +257,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	msgLenBytes := make([]byte, 4)
 	if _, err := io.ReadFull(stream, msgLenBytes); err != nil {
 		log.Warn(module, "DispatchIncomingQUICStream - length prefix", "err", err)
+		_ = stream.Close()
 		return err
 	}
 	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
@@ -257,6 +266,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	msg := make([]byte, msgLen)
 	if _, err := io.ReadFull(stream, msg); err != nil {
 		log.Warn(module, "DispatchIncomingQUICStream - message body", "peerID", peerID, "code", msgType, "err", err)
+		_ = stream.Close()
 		return err
 	}
 

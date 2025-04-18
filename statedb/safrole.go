@@ -821,9 +821,9 @@ func (s *SafroleState) GetEpoch() uint32 {
 }
 
 // statefrole_stf is the function to be tested
-func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) (SafroleState, error) {
+func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, validated_tickets map[common.Hash]common.Hash) (SafroleState, error) {
 
-	err := s.ValidateSaforle(tickets, targetJCE, header)
+	ticketBodies, err := s.ValidateSaforle(tickets, targetJCE, header, validated_tickets)
 	if err != nil {
 		return *s, err
 	}
@@ -840,44 +840,15 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 		fmt.Printf("GetFreshRandomness ERR %v (len=%d)", err, len(header.EntropySource[:]))
 		return *s, fmt.Errorf("GetFreshRandomness %v", err)
 	}
-	s2, epochShifted, err := s.ValidateTicketTransition(targetJCE, fresh_randomness)
+	s2, _, err := s.ValidateTicketTransition(targetJCE, fresh_randomness)
 	if err != nil {
 		return *s, fmt.Errorf("error applying state transition safrole in MakeBlock: %v", err)
 	}
 
-	var wg sync.WaitGroup
-	ticketMutex := &sync.Mutex{}
-	errCh := make(chan error, len(tickets))
-	// Iterate over tickets in parallel
-	for _, e := range tickets {
-		wg.Add(1)
-
-		go func(e types.Ticket) {
-			defer wg.Done()
-
-			// Validate the ticket in parallel
-			ticket_id, err := s.ValidateProposedTicket(&e, epochShifted)
-			if err != nil {
-				errCh <- jamerrors.ErrTBadRingProof
-				return
-			}
-
-			// Protect access to shared resources (map) with a mutex
-			ticketMutex.Lock()
-			defer ticketMutex.Unlock()
-
-			_, exists := ticketIDs[ticket_id]
-			if exists {
-				return
-			}
-
-			// If the ticket is valid, add it to the accumulator
-			s2.PutTicketInAccumulator(ticket_id, e.Attempt)
-		}(e)
+	// If the ticket is valid, add it to the accumulator
+	for _, ticket := range ticketBodies {
+		s2.PutTicketInAccumulator(ticket)
 	}
-
-	// Wait for all goroutines to finish
-	wg.Wait()
 
 	// Sort and trim tickets
 	s2.SortAndTrimTickets()
@@ -1008,15 +979,18 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 
 // this function is for validate the block input is correct or not
 // should use the s3
-func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader) error {
+func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, valid_tickets map[common.Hash]common.Hash) ([]types.TicketBody, error) {
+	if valid_tickets == nil {
+		valid_tickets = make(map[common.Hash]common.Hash)
+	}
 	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 	s2 := cloneSafroleState(*s) // CHECK: why cloning here?
 	if currPhase >= types.TicketSubmissionEndSlot && len(tickets) > 0 {
-		return jamerrors.ErrTEpochLotteryOver
+		return nil, jamerrors.ErrTEpochLotteryOver
 	}
 	if s.Timeslot >= targetJCE {
-		return jamerrors.ErrTTimeslotNotMonotonic
+		return nil, jamerrors.ErrTTimeslotNotMonotonic
 	}
 	new_entropy_0 := common.Hash{} // use empty hash as entropy 0, since it's not useful in validation
 	isShifted := false
@@ -1028,32 +1002,71 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		s2.StableEntropy(s, new_entropy_0)
 	}
 	ticketBodies := make([]types.TicketBody, 0) // n
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(tickets))
+	var ticketMutex sync.Mutex
 	for _, t := range tickets {
-		if t.Attempt >= types.TicketEntriesPerValidator {
-			return jamerrors.ErrTBadTicketAttemptNumber
-		}
-		ticket_id, err := s2.ValidateProposedTicket(&t, isShifted)
-		if err != nil {
-			return jamerrors.ErrTBadRingProof
-		}
-		ticketBodies = append(ticketBodies, types.TicketBody{
-			Id:      ticket_id,
-			Attempt: t.Attempt,
-		})
-		for _, a := range s2.NextEpochTicketsAccumulator {
-			if ticket_id == a.Id {
-				return jamerrors.ErrTTicketAlreadyInState
+		wg.Add(1)
+
+		go func(t types.Ticket) {
+			defer wg.Done()
+			if t.Attempt >= types.TicketEntriesPerValidator {
+				errCh <- jamerrors.ErrTBadTicketAttemptNumber
+				return
 			}
+			// see if ticket exists in valid_tickets
+			ticket_hash := t.Hash()
+			ticket_id, ticketWasValid := valid_tickets[ticket_hash]
+			var err error
+			if !ticketWasValid {
+				ticket_id, err = s2.ValidateProposedTicket(&t, isShifted)
+				if err != nil {
+					errCh <- jamerrors.ErrTBadRingProof
+					return
+				}
+				ticketMutex.Lock()
+				valid_tickets[ticket_hash] = ticket_id
+				ticketMutex.Unlock()
+			}
+
+			for _, a := range s2.NextEpochTicketsAccumulator {
+				if ticket_id == a.Id {
+					errCh <- jamerrors.ErrTTicketAlreadyInState
+					return
+				}
+
+			}
+		}(t)
+	}
+	wg.Wait()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return nil, err
 		}
+	default:
+		// No error
+	}
+	for _, t := range tickets {
+		ticketId, ok := valid_tickets[t.Hash()]
+		if !ok {
+			return nil, fmt.Errorf("ticket not found in valid_tickets")
+		}
+		ticketBody := types.TicketBody{
+			Id:      ticketId,
+			Attempt: t.Attempt,
+		}
+		ticketBodies = append(ticketBodies, ticketBody)
 	}
 	// check ticketBodies sorted by Id
 	// use bytes to compare
 	for i, a := range ticketBodies {
 		if i > 0 && compareTickets(a.Id, ticketBodies[i-1].Id) < 0 {
-			return jamerrors.ErrTTicketsBadOrder
+			return nil, jamerrors.ErrTTicketsBadOrder
 		}
 	}
-	return nil
+	return ticketBodies, nil
 }
 
 func (s2 *SafroleState) AdvanceEntropyAndValidator(s *SafroleState, new_entropy_0 common.Hash) {
@@ -1099,11 +1112,7 @@ func (s2 *SafroleState) StableEntropy(s *SafroleState, new_entropy_0 common.Hash
 
 }
 
-func (s2 *SafroleState) PutTicketInAccumulator(tickeID common.Hash, attempt uint8) {
-	newa := types.TicketBody{
-		Id:      tickeID,
-		Attempt: attempt,
-	}
+func (s2 *SafroleState) PutTicketInAccumulator(newa types.TicketBody) {
 	s2.NextEpochTicketsAccumulator = append(s2.NextEpochTicketsAccumulator, newa)
 }
 

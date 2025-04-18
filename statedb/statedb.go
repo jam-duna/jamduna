@@ -238,11 +238,97 @@ func (s *StateDB) GetStateUpdates() *types.StateUpdate {
 func (s *StateDB) SetJamState(jamState *JamState) {
 	s.JamState = jamState
 }
+func (s *StateDB) RecoverJamStateWithError(stateRoot common.Hash) error {
+	// Now read C1.....C15 from the trie and put it back into JamState
+	//t := s.GetTrie()
+	t := s.CopyTrieState(stateRoot)
 
+	coreAuthPoolEncode, err := t.GetState(C1)
+	if err != nil {
+		return fmt.Errorf("error reading C1 CoreAuthPool from trie: %w", err)
+	}
+	authQueueEncode, err := t.GetState(C2)
+	if err != nil {
+		return fmt.Errorf("error reading C2 AuthQueue from trie: %w", err)
+	}
+	recentBlocksEncode, err := t.GetState(C3)
+	if err != nil {
+		return fmt.Errorf("error reading C3 RecentBlocks from trie: %w", err)
+	}
+	safroleStateEncode, err := t.GetState(C4)
+	if err != nil {
+		return fmt.Errorf("error reading C4 SafroleState from trie: %w", err)
+	}
+	disputeStateEncode, err := t.GetState(C5)
+	if err != nil {
+		return fmt.Errorf("error reading C5 DisputeState from trie: %w", err)
+	}
+	entropyEncode, err := t.GetState(C6)
+	if err != nil {
+		return fmt.Errorf("error reading C6 Entropy from trie: %w", err)
+	}
+	DesignedEpochValidatorsEncode, err := t.GetState(C7)
+	if err != nil {
+		return fmt.Errorf("error reading C7 NextEpochValidators from trie: %w", err)
+	}
+	currEpochValidatorsEncode, err := t.GetState(C8)
+	if err != nil {
+		return fmt.Errorf("error reading C8 CurrentEpochValidators from trie: %w", err)
+	}
+	priorEpochValidatorEncode, err := t.GetState(C9)
+	if err != nil {
+		return fmt.Errorf("error reading C9 PriorEpochValidators from trie: %w", err)
+	}
+	rhoEncode, err := t.GetState(C10)
+	if err != nil {
+		return fmt.Errorf("error reading C10 Rho from trie: %w", err)
+	}
+	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
+	if err != nil {
+		return fmt.Errorf("error reading C11 MostRecentBlockTimeSlot from trie: %w", err)
+	}
+	privilegedServiceIndicesEncode, err := t.GetState(C12)
+	if err != nil {
+		return fmt.Errorf("error reading C12 PrivilegedServiceIndices from trie: %w", err)
+	}
+	piEncode, err := t.GetState(C13)
+	if err != nil {
+		return fmt.Errorf("error reading C13 ActiveValidator from trie: %w", err)
+	}
+	accunulateQueueEncode, err := t.GetState(C14)
+	if err != nil {
+		return fmt.Errorf("error reading C14 accunulateQueue from trie: %w", err)
+	}
+	accunulateHistoryEncode, err := t.GetState(C15)
+	if err != nil {
+		return fmt.Errorf("error reading C15 accunulateHistory from trie: %w", err)
+	}
+	//Decode(authQueueEncode) -> AuthorizationQueue
+	//set AuthorizationQueue back to JamState
+
+	d := s.GetJamState()
+	d.SetAuthPool(coreAuthPoolEncode)
+	d.SetAuthQueue(authQueueEncode)
+	d.SetRecentBlocks(recentBlocksEncode)
+	d.SetSafroleState(safroleStateEncode)
+	d.SetPsi(disputeStateEncode)
+	d.SetEntropy(entropyEncode)
+	d.SetDesignedValidators(DesignedEpochValidatorsEncode)
+	d.SetCurrEpochValidators(currEpochValidatorsEncode)
+	d.SetPriorEpochValidators(priorEpochValidatorEncode)
+	d.SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotEncode)
+	d.SetRho(rhoEncode)
+
+	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
+	d.SetPi(piEncode)
+	d.SetAccumulateQueue(accunulateQueueEncode)
+	d.SetAccumulateHistory(accunulateHistoryEncode)
+	s.SetJamState(d)
+	return err
+}
 func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	// Now read C1.....C15 from the trie and put it back into JamState
 	//t := s.GetTrie()
-
 	t := s.CopyTrieState(stateRoot)
 
 	coreAuthPoolEncode, err := t.GetState(C1)
@@ -864,7 +950,7 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 				defer span.End()
 			}
 
-			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk)
+			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk, nil)
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
 				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)
@@ -1044,6 +1130,11 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
 	if err != nil {
 		log.Error(module, "IetfVrfVerify", "err", err)
+		log.Error(module, "IetfVrfVerify",
+			"H_s", common.BytesToHexStr(H_s),
+			"c", common.BytesToHexStr(c),
+			"m", common.BytesToHexStr(m),
+			"block_author_ietf_pub", common.BytesToHexStr(block_author_ietf_pub[:]))
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
 	}
 

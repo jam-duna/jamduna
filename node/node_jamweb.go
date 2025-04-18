@@ -602,7 +602,6 @@ func (n *NodeContent) runJamWeb(ctx context.Context, wg *sync.WaitGroup, basePor
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
-
 		var result string
 		if err := client.Call(req.Method, req.Params, &result); err != nil {
 			http.Error(w, "RPC error: "+err.Error(), http.StatusBadRequest)

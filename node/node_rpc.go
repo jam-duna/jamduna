@@ -9,6 +9,7 @@ import (
 	"net/rpc"
 	"os"
 	"reflect"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -64,15 +65,45 @@ func (j *Jam) Functions(req []string, res *string) error {
 }
 
 func (j *Jam) NodeCommand(req []string, res *string) error {
-	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
-	}
-	select {
-	case j.command_chan <- req[0]:
-		fmt.Printf("NodeCommand: %s\n", req[0])
-		*res = "OK"
-	case <-time.After(5 * time.Second):
-		*res = "Timeout"
+	command := req[0]
+	switch command {
+	case "SetFlag":
+		flag := req[1]
+		value := req[2]
+		flagValue, err := strconv.ParseBool(value)
+		if err != nil {
+			*res = fmt.Sprintf("Invalid value for flag %s: %s", flag, value)
+			return err
+		}
+		switch flag {
+		case "audit":
+			j.nodeSelf.AuditFlag = flagValue
+		case "ticket_send":
+			j.nodeSelf.SetSendTickets(flagValue)
+		default:
+			*res = fmt.Sprintf("Unknown flag %s", flag)
+		}
+	case "SetLog":
+		module := req[1]
+		value := req[2]
+		BoolVal, err := strconv.ParseBool(value)
+		if err != nil {
+			*res = fmt.Sprintf("Invalid value for flag %s: %s", module, value)
+			return err
+		}
+		if BoolVal {
+			log.EnableModule(module)
+		} else {
+			log.DisableModule(module)
+		}
+	case "StackTrace":
+		debugtrace := make([]byte, 1<<20)
+		runtime.Stack(debugtrace, true)
+		*res = string(debugtrace)
+		return nil
+	default:
+		*res = fmt.Sprintf("Unknown command %s", command)
+		return fmt.Errorf("Unknown command %s", command)
 	}
 	return nil
 }
@@ -593,7 +624,7 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	defer cancel()
-	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block)
+	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, nil)
 	if err != nil {
 		log.Error(module, "TraceBlock", "err", err)
 		return err

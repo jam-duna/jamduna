@@ -19,6 +19,7 @@ var modeToServices = map[string][]string{
 	"fib":          {"fib", "auth_copy"},
 	"fib2":         {"corevm", "auth_copy"},
 	"game_of_life": {"game_of_life", "auth_copy"},
+	"auth_copy":    {"auth_copy"},
 }
 var mode = flag.String("mode", "fib", "Mode to run the test client")
 var isLocal = flag.Bool("isLocal", false, "Run local version")
@@ -34,17 +35,9 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Invalid mode: %s", testMode)
 	}
 
-	addresses := make([]string, 6)
 	port := common.GetJAMNetworkPort() + 1300
-	if local {
-		for i := 0; i < 6; i++ {
-			addresses[i] = fmt.Sprintf("localhost:%d", port+i)
-		}
-	} else {
-		for i := 0; i < 6; i++ {
-			addresses[i] = fmt.Sprintf("%s-%d.jamduna.org:%d", common.GetJAMNetwork(), i, port)
-		}
-	}
+	addresses := common.GetAddresses(local, port)
+
 	coreIndex := uint16(0)
 	client, err := NewNodeClient(coreIndex, addresses)
 	if err != nil {
@@ -87,6 +80,8 @@ func TestClient(t *testing.T) {
 		fib2(t, client, services_map, 50)
 	case "game_of_life":
 		game_of_life(t, client, services_map, game_of_life_ws_push)
+	case "auth_copy":
+		auth_copy(t, client, services_map, 1000)
 	default:
 		t.Fatalf("Invalid mode: %s", testMode)
 	}
@@ -290,7 +285,7 @@ func fib2(t *testing.T, client *NodeClient, testServices map[string]types.Servic
 		if err != nil {
 			t.Fatalf("Error: %s", err)
 		}
-
+		fmt.Printf("Submitted Fib2(%s) to core %d\n", fibN_string, 0)
 		prevWorkPackageHash = workPackageHash
 		fib_index := fibIndex
 		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
@@ -477,6 +472,49 @@ func game_of_life(t *testing.T, client *NodeClient, testServices map[string]type
 		prevWorkPackageHash = workPackageHash
 	}
 }
+func auth_copy(t *testing.T, client *NodeClient, testServices map[string]types.ServiceInfo, targetN int) {
+	auth_copy := testServices["auth_copy"]
+
+	auth_copy_item := types.WorkItem{
+		Service:            auth_copy.ServiceIndex,
+		CodeHash:           auth_copy.ServiceCodeHash,
+		Payload:            []byte{},
+		RefineGasLimit:     5678,
+		AccumulateGasLimit: 9876,
+		ImportedSegments:   make([]types.ImportSegment, 0),
+		ExportCount:        0,
+	}
+	for i := 0; i < targetN; i++ {
+
+		workPackage := types.WorkPackage{
+			AuthCodeHost:          0,
+			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			WorkItems:             []types.WorkItem{auth_copy_item},
+		}
+		refine_context, err := client.GetRefineContext()
+		workPackage.RefineContext = refine_context
+		if err != nil {
+			t.Fatalf("Error: %s", err)
+		}
+		workPackageHash := workPackage.Hash()
+
+		fmt.Printf("Auth_copy work package submitted %v\n", workPackageHash)
+
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		err = client.SubmitAndWaitForWorkPackage(ctx, node.WorkPackageRequest{
+			CoreIndex:       0,
+			WorkPackage:     workPackage,
+			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		})
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+		}
+
+	}
+}
 
 var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
 var auth_code = statedb.AuthorizeCode{
@@ -511,4 +549,23 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 		}
 	}
 	return
+}
+
+func TestCommands(t *testing.T) {
+	flag.Parse()
+	local := true
+	port := common.GetJAMNetworkPort() + 1300
+	addresses := common.GetAddresses(local, port)
+
+	coreIndex := uint16(0)
+	client, err := NewNodeClient(coreIndex, addresses)
+	if err != nil {
+		t.Fatalf("Error: %s", err)
+	}
+	defer client.Close()
+	// client.BroadcastCommand([]string{"SetFlag", "audit", "true"}, []int{5})
+	// client.BroadcastCommand([]string{"SetFlag", "audit", "false"}, []int{5})
+	// client.BroadcastCommand([]string{"SetFlag", "ticket_send", "true"}, []int{})
+	// client.BroadcastCommand([]string{"SetLog", log.GeneralAuthoring, "true"}, []int{})
+	client.SendCommand([]string{"StackTrace"}, 1)
 }

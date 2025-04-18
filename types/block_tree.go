@@ -201,7 +201,7 @@ func (bt *BlockTree) AddBlock(newBlock *Block) error {
 	}
 	_, ok = bt.TreeMap[newBlock.Header.Hash()]
 	if ok {
-		return fmt.Errorf("block %v already exists", newBlock.Header.Hash())
+		return fmt.Errorf("already exists")
 	}
 	childNode := parentNode.AddChild(newBlock)
 	bt.TreeMap[newBlock.Header.Hash()] = childNode
@@ -213,69 +213,61 @@ func (bt *BlockTree) AddBlock(newBlock *Block) error {
 	}
 	return nil
 }
-func (bt *BlockTree) Prune(newRoot *BT_Node) {
+
+// Prune prunes the BlockTree and returns pruned block hashes
+func (bt *BlockTree) Prune(newRoot *BT_Node) []common.Hash {
 	bt.Mutex.Lock()
 	defer bt.Mutex.Unlock()
 
-	// Check if the newRoot is valid and if TreeMap is initialized
 	if newRoot == nil || bt.TreeMap == nil {
-		return
+		return nil
 	}
 
-	// Store old TreeMap and Leafs for cleanup
 	oldTreeMap := bt.TreeMap
+	prunedHashes := make([]common.Hash, 0)
 
-	// Initialize new TreeMap and Leafs
 	bt.TreeMap = make(map[common.Hash]*BT_Node)
 	bt.Leafs = make(map[common.Hash]*BT_Node)
 
-	// Recursive function to rebuild the TreeMap and Leafs from the new root
 	var dfs func(node *BT_Node)
 	dfs = func(node *BT_Node) {
 		if node == nil {
 			return
 		}
-
-		// Calculate the hash for the current node (needs implementation)
 		nodeHash := node.Block.Header.Hash()
-
-		// Add the current node to the new TreeMap
 		bt.TreeMap[nodeHash] = node
-
-		// If the node has no children, add it to Leafs
 		if len(node.Children) == 0 {
 			bt.Leafs[nodeHash] = node
 		}
-
-		// Recursively process children
 		for _, child := range node.Children {
 			dfs(child)
 		}
 	}
 
-	// Start rebuilding the tree from the new root
 	dfs(newRoot)
 
-	// Update the root of the BlockTree
 	bt.Root = newRoot
 	bt.Root.Parent = nil
-	// Cleanup unused nodes to free memory
+
+	// collect pruned hashes
 	for hash, node := range oldTreeMap {
 		if _, exists := bt.TreeMap[hash]; !exists {
-			// Remove references to help with memory cleanup
+			prunedHashes = append(prunedHashes, hash)
 			node.Parent = nil
 			node.Children = nil
 			node.Block = nil
 		}
 	}
+
+	return prunedHashes
 }
 
 // will remain finalized block and its ancestors(+remain_finalized_blk)
-func (bt *BlockTree) PruneBlockTree(remain_finalized_blk int) {
+func (bt *BlockTree) PruneBlockTree(remain_finalized_blk int) []common.Hash {
 	// get the last finalized block - remain_finalized_blk
 	last_finalized_blk := bt.GetLastFinalizedBlock()
 	if last_finalized_blk == nil {
-		return
+		return nil
 	}
 	// get the ancestor of the last finalized block
 	ancestor := last_finalized_blk
@@ -286,7 +278,7 @@ func (bt *BlockTree) PruneBlockTree(remain_finalized_blk int) {
 		ancestor = ancestor.Parent
 	}
 	// prune the block tree
-	bt.Prune(ancestor)
+	return bt.Prune(ancestor)
 }
 
 // this function is used to get the block node by hash
@@ -595,4 +587,22 @@ func (bt *BlockTree) FindGhost(startHash common.Hash, threshold uint64) (*BT_Nod
 	}
 
 	return resultNode, nil
+}
+
+// if a block has five descendants, it will be finalized
+func (bt *BlockTree) EasyFinalization() {
+	bt.Mutex.Lock()
+	defer bt.Mutex.Unlock()
+	var countDescendants func(node *BT_Node) int
+	countDescendants = func(node *BT_Node) int {
+		count := 0
+		for _, child := range node.Children {
+			count += 1 + countDescendants(child)
+		}
+		if count >= 5 && !node.Finalized && node.Applied {
+			node.Finalized = true
+		}
+		return count
+	}
+	countDescendants(bt.Root)
 }

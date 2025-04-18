@@ -10,7 +10,7 @@
           {% if MODE == "next_hour" %}
           {{ lookup('pipe', 'date -u -d "1 hour" +"+%Y-%m-%d %H:00:00"') }}
           {% elif MODE == "next_2min_start" %}
-          {{ lookup('pipe', 'date -u -d "120 seconds" +"+%Y-%m-%d %H:%M:%S"') }}          
+          {{ lookup('pipe', 'date -u -d "120 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
           {% else %}
           {{ lookup('pipe', 'date -u -d "60 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
           {% endif %}
@@ -50,7 +50,7 @@
         mode: 0755
 
     - name: Copy binary jam from local to jam_hosts
-      copy: 
+      copy:
         src: "{{ JAM_PATH }}"
         dest: "{{ JAM_PATH }}"
         mode: '0755'
@@ -66,8 +66,8 @@
         done
         sleep 2
         pgrep -a jam
-      args: 
-        executable: /bin/bash  
+      args:
+        executable: /bin/bash
 
     - name: Display completion Message
       debug:
@@ -81,7 +81,7 @@
 #   tasks:
 #     - name: Wait for all nodes to be ready
 #       wait_for:
-#         timeout: 10 
+#         timeout: 10
 
 #     - name: Start archive_node on localhost
 #       shell: |
@@ -95,7 +95,3 @@
 #     - name: Display archive_node start message
 #       debug:
 #         msg: "archive_node started on localhost using 'make run' from archive_node directory."
-
-
-
-

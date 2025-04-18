@@ -4,6 +4,7 @@ SRC := jam.go
 NETWORK  ?= tiny
 NUM_NODES ?= 6
 DEFAULT_PORT ?= 9800
+SINGLE_NODE_PORT ?= 9805
 BRANCH ?= jam_update
 JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
@@ -23,6 +24,11 @@ run_parallel_jam:
 	@echo "Starting $(NUM_NODES) instances of bin/jam..."
 	@seq 0 $(shell echo $$(($(NUM_NODES) - 1))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); bin/jam -net_spec $(NETWORK) -port $$PORT -start_time "$(JAM_START_TIME)"; echo "Instance {} finished with port $$PORT"' sh
 	@echo "All instances started."
+run_single_node:
+	@echo "Starting single node JAM instance..."
+	@echo "Starting bin/jam... with network $(NETWORK) port $(SINGLE_NODE_PORT) start_time $(JAM_START_TIME)"
+	@$(OUTPUT_DIR)/$(BINARY) -net_spec $(NETWORK) -port $(SINGLE_NODE_PORT) -start_time "$(JAM_START_TIME)"
+	@echo "Instance started."
 run_parallel_jam_with_deadnode:
 	@mkdir -p logs 
 	@echo "Starting $(NUM_NODES) instances of bin/jam..."
@@ -67,6 +73,9 @@ run_jam_remote_nodes:
 	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make jam_without_ffi_build NETWORK=$(NETWORK)'"
 	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'export NETWORK=$(NETWORK); export DEFAULT_PORT=$(DEFAULT_PORT); export JAM_START_TIME=\"$(shell date +'%Y-%m-%d %H:%M:%S')\"; cdj && make run_jam'"
 	@echo "All remote nodes started."
+
+
+
 
 da:
 	@echo "Building JAM..."

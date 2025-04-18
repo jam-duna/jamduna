@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
@@ -18,6 +19,7 @@ type ExtrinsicPool struct {
 	guaranteeMutex   sync.Mutex
 	// tickets queue storage
 	queuedTickets map[common.Hash]map[common.Hash]*Ticket // use entropy hash to store tickets, and ticket id to distinguish
+	knownTickets  map[common.Hash]struct{}                // use first 32 bytes of ticket signature to distinguish
 	ticketMutex   sync.Mutex
 	// preimage queue storage
 	queuedPreimages map[common.Hash]*Preimages // use AccountPreimageHash hash to store preimages
@@ -31,6 +33,7 @@ func NewExtrinsicPool() *ExtrinsicPool {
 		queuedGuarantees: make(map[uint32]map[uint16]*Guarantee),
 		knownGuarantees:  make(map[common.Hash]*uint32),
 		queuedTickets:    make(map[common.Hash]map[common.Hash]*Ticket),
+		knownTickets:     make(map[common.Hash]struct{}),
 		queuedPreimages:  make(map[common.Hash]*Preimages),
 		knownPreimages:   make(map[common.Hash]*uint32),
 	}
@@ -52,7 +55,6 @@ func (ep *ExtrinsicPool) RemoveUsedExtrinsicFromPool(block *Block, used_entropy 
 	}
 	// Remove preimages
 	ep.RemoveOldPreimages(block.Extrinsic.Preimages, block.Header.Slot)
-
 }
 
 func (ep *ExtrinsicPool) AddAssuranceToPool(assurance Assurance) error {
@@ -174,15 +176,37 @@ func (ep *ExtrinsicPool) RemoveGuaranteesFromPool(accepted_slot uint32) error {
 	return nil // Success
 }
 
+func (ep *ExtrinsicPool) IsSeenTicket(ticket Ticket) bool {
+	ep.ticketMutex.Lock()
+	defer ep.ticketMutex.Unlock()
+	// Check if the ticket is already known
+	ticket_short := ticket.Signature[:32]
+	hash := common.Hash(ticket_short)
+	if _, exists := ep.knownTickets[hash]; exists {
+		return true
+	}
+	return false
+}
+
 func (ep *ExtrinsicPool) AddTicketToPool(ticket Ticket, id common.Hash, used_entropy common.Hash) error {
 	ep.ticketMutex.Lock()
 	defer ep.ticketMutex.Unlock()
+
+	ticket_short := ticket.Signature[:32]
+	hash := common.Hash(ticket_short)
+	if _, exists := ep.knownTickets[hash]; exists {
+		return fmt.Errorf("ticket %s already exists", ticket.String())
+	} else {
+		ep.knownTickets[hash] = struct{}{}
+	}
 	// Store the ticket in the tip's queued ticket
 	// Ensure the map for this anchor exists
+
 	if _, exists := ep.queuedTickets[used_entropy]; !exists {
 		ep.queuedTickets[used_entropy] = make(map[common.Hash]*Ticket)
 	}
 	// Store the ticket in the appropriate map
+	// TODO: id to blake2b hash
 	ep.queuedTickets[used_entropy][id] = &ticket
 	return nil // Success
 }
@@ -195,6 +219,18 @@ func (ep *ExtrinsicPool) GetTicketsFromPool(used_entropy common.Hash) []Ticket {
 	if _, exists := ep.queuedTickets[used_entropy]; exists {
 		for _, ticket := range ep.queuedTickets[used_entropy] {
 			tickets = append(tickets, *ticket)
+		}
+	}
+	return tickets
+}
+
+func (ep *ExtrinsicPool) GetTicketIDPairFromPool(used_entropy common.Hash) map[common.Hash]common.Hash {
+	tickets := make(map[common.Hash]common.Hash)
+	ep.ticketMutex.Lock()
+	defer ep.ticketMutex.Unlock()
+	if _, exists := ep.queuedTickets[used_entropy]; exists {
+		for id, ticket := range ep.queuedTickets[used_entropy] {
+			tickets[ticket.Hash()] = id
 		}
 	}
 	return tickets
@@ -216,6 +252,23 @@ func (ep *ExtrinsicPool) RemoveOldTickets(tickets []Ticket, entropy common.Hash)
 		}
 	}
 	return nil // Success
+}
+
+// get the tickets from the pool that are the same as the given ticket
+func (ep *ExtrinsicPool) GetSameTicketsFromPool(ticket []Ticket, used_entropy common.Hash) []Ticket {
+	tickets := make([]Ticket, 0)
+	ep.ticketMutex.Lock()
+	defer ep.ticketMutex.Unlock()
+	if _, exists := ep.queuedTickets[used_entropy]; exists {
+		for _, ticket_ := range ep.queuedTickets[used_entropy] {
+			for _, ticket_2 := range ticket {
+				if reflect.DeepEqual(*ticket_, ticket_2) {
+					tickets = append(tickets, *ticket_)
+				}
+			}
+		}
+	}
+	return tickets
 }
 
 // remove specific ticket from the pool

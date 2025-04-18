@@ -12,12 +12,16 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	// Store the ticket in the tip's queued tickets
 	s := n.getState()
 	sf := s.GetSafrole()
+	// todo shallow check : check if the ticket is already in the pool
 	id, entropy_idx, err := sf.ValidateIncomingTicket(&ticket)
 	if err != nil {
 		log.Error(module, "processTicket:ValidateIncomingTicket", "err", err)
 		return err
 	}
-
+	if n.extrinsic_pool.IsSeenTicket(ticket) {
+		log.Warn(module, "processTicket:IsSeenTicket", "ticket", ticket.TicketID)
+		return nil // Already seen
+	}
 	used_entropy := s.GetSafrole().Entropy[entropy_idx]
 	// TODO: add tracer event
 	err = n.extrinsic_pool.AddTicketToPool(ticket, id, used_entropy)
