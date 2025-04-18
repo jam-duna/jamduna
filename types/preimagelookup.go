@@ -24,8 +24,12 @@ func (p *Preimages) Hash() common.Hash {
 	return common.Blake2Hash(p.Blob)
 }
 
+func ComputeAccountHash(s uint32, preimageHash common.Hash) common.Hash {
+	return common.Blake2Hash(append(preimageHash.Bytes(), binary.LittleEndian.AppendUint32(nil, s)...))
+}
+
 func (p *Preimages) AccountHash() common.Hash {
-	return common.Blake2Hash(append(p.Blob, binary.LittleEndian.AppendUint32(nil, uint32(p.Requester))...))
+	return ComputeAccountHash(p.Requester, common.Blake2Hash(p.Blob))
 }
 
 func (p *Preimages) BlobLength() uint32 {

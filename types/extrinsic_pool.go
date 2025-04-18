@@ -23,7 +23,7 @@ type ExtrinsicPool struct {
 	ticketMutex   sync.Mutex
 	// preimage queue storage
 	queuedPreimages map[common.Hash]*Preimages // use AccountPreimageHash hash to store preimages
-	knownPreimages  map[common.Hash]*uint32    // use AccountPreimageHash hash to store preimages
+	knownPreimages  map[common.Hash]uint32     // use AccountPreimageHash hash to store preimages
 	preimageMutex   sync.Mutex
 }
 
@@ -35,7 +35,7 @@ func NewExtrinsicPool() *ExtrinsicPool {
 		queuedTickets:    make(map[common.Hash]map[common.Hash]*Ticket),
 		knownTickets:     make(map[common.Hash]struct{}),
 		queuedPreimages:  make(map[common.Hash]*Preimages),
-		knownPreimages:   make(map[common.Hash]*uint32),
+		knownPreimages:   make(map[common.Hash]uint32),
 	}
 }
 
@@ -151,9 +151,10 @@ func (ep *ExtrinsicPool) GetSpecGuaranteeFromPool(accepted_slot uint32, core_ind
 func (ep *ExtrinsicPool) RemoveOldGuarantees(guarantee Guarantee) error {
 	ep.guaranteeMutex.Lock()
 	defer ep.guaranteeMutex.Unlock()
-	if _, exists := ep.queuedGuarantees[guarantee.Slot]; exists {
-		if _, exists := ep.queuedGuarantees[guarantee.Slot][guarantee.Report.CoreIndex]; exists {
-			delete(ep.queuedGuarantees[guarantee.Slot], guarantee.Report.CoreIndex)
+	if slotMap, exists := ep.queuedGuarantees[guarantee.Slot]; exists {
+		delete(slotMap, guarantee.Report.CoreIndex)
+		if len(slotMap) == 0 {
+			delete(ep.queuedGuarantees, guarantee.Slot)
 		}
 	}
 	known_guarantee_hash := guarantee.Report.AvailabilitySpec.WorkPackageHash
@@ -208,6 +209,7 @@ func (ep *ExtrinsicPool) AddTicketToPool(ticket Ticket, id common.Hash, used_ent
 	// Store the ticket in the appropriate map
 	// TODO: id to blake2b hash
 	ep.queuedTickets[used_entropy][id] = &ticket
+
 	return nil // Success
 }
 
@@ -246,9 +248,10 @@ func (ep *ExtrinsicPool) RemoveOldTickets(tickets []Ticket, entropy common.Hash)
 			if err != nil {
 				return err
 			}
-			if _, exists := ep.queuedTickets[entropy][id]; exists {
-				delete(ep.queuedTickets[entropy], id)
-			}
+			delete(ep.queuedTickets[entropy], id)
+		}
+		if len(ep.queuedTickets[entropy]) == 0 {
+			delete(ep.queuedTickets, entropy)
 		}
 	}
 	return nil // Success
@@ -276,8 +279,9 @@ func (ep *ExtrinsicPool) RemoveTicketFromPool(ticket_id common.Hash, used_entrop
 	ep.ticketMutex.Lock()
 	defer ep.ticketMutex.Unlock()
 	if _, exists := ep.queuedTickets[used_entropy]; exists {
-		if _, exists := ep.queuedTickets[used_entropy][ticket_id]; exists {
-			delete(ep.queuedTickets[used_entropy], ticket_id)
+		delete(ep.queuedTickets[used_entropy], ticket_id)
+		if len(ep.queuedTickets[used_entropy]) == 0 {
+			delete(ep.queuedTickets, used_entropy)
 		}
 	}
 	return nil // Success
@@ -297,10 +301,10 @@ func (ep *ExtrinsicPool) ForgetPreimages(preimages []*SubServiceRequestResult) e
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
 	for _, preimage := range preimages {
-		// TODO: instead of preimageHash, use AccountHash() (combines serviceID + preimageHash)
-		if _, exists := ep.knownPreimages[preimage.Hash]; exists {
-			delete(ep.knownPreimages, preimage.Hash)
-			return nil
+		// use AccountHash - combines serviceID + preimageHash
+		ah := ComputeAccountHash(preimage.ServiceID, preimage.Hash)
+		if _, exists := ep.knownPreimages[ah]; exists {
+			delete(ep.knownPreimages, ah)
 		}
 	}
 	return nil // Success
@@ -310,12 +314,12 @@ func (ep *ExtrinsicPool) AddPreimageToPool(preimage Preimages) error {
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
 	// Store the preimage in the tip's queued preimage -- TODO: use AccountHash instead
-	h := preimage.Hash()
-	if _, exists := ep.knownPreimages[h]; exists {
+	ah := ComputeAccountHash(preimage.Requester, preimage.Hash())
+	if _, exists := ep.knownPreimages[ah]; exists {
 		log.Warn("authoring", "AddPreimageToPool: EXISTS -- DID we have a forget or is this actual spam")
 		return nil
 	}
-	ep.queuedPreimages[h] = &preimage
+	ep.queuedPreimages[ah] = &preimage
 
 	return nil // Success
 }
@@ -324,8 +328,8 @@ func (ep *ExtrinsicPool) GetPreimageFromPool() []*Preimages {
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
 	preimages := make([]*Preimages, 0)
-	for _, preimage := range ep.queuedPreimages {
-		if _, exists := ep.knownPreimages[preimage.Hash()]; exists {
+	for ah, preimage := range ep.queuedPreimages {
+		if _, exists := ep.knownPreimages[ah]; exists {
 			continue
 		}
 		preimages = append(preimages, preimage)
@@ -336,11 +340,11 @@ func (ep *ExtrinsicPool) GetPreimageFromPool() []*Preimages {
 func (ep *ExtrinsicPool) GetPreimageByHash(preimageHash common.Hash) (*Preimages, bool) {
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
-	p, ok := ep.queuedPreimages[preimageHash]
-	if ok {
-		return p, true
+	for _, x := range ep.queuedPreimages {
+		if x.Hash() == preimageHash {
+			return x, true
+		}
 	}
-
 	return nil, false
 }
 
@@ -349,19 +353,19 @@ func (ep *ExtrinsicPool) RemoveOldPreimages(block_EPs []Preimages, timeslot uint
 	ep.preimageMutex.Lock()
 	defer ep.preimageMutex.Unlock()
 	for _, block_EP := range block_EPs {
-		preimage_hash := block_EP.Hash()
-		if _, exists := ep.queuedPreimages[preimage_hash]; exists {
-			delete(ep.queuedPreimages, preimage_hash)
+		ah := block_EP.AccountHash()
+		if _, exists := ep.queuedPreimages[ah]; exists {
+			delete(ep.queuedPreimages, ah)
 		}
-		if _, exists := ep.knownPreimages[preimage_hash]; exists {
-			delete(ep.knownPreimages, preimage_hash)
+		if _, exists := ep.knownPreimages[ah]; exists {
+			delete(ep.knownPreimages, ah)
 		}
 		timeslot_tmp := timeslot
-		ep.knownPreimages[preimage_hash] = &timeslot_tmp
+		ep.knownPreimages[ah] = timeslot_tmp
 	}
 	// remove the known preimages by time slot
 	for account_preimage_hash, ts := range ep.knownPreimages {
-		if *ts < timeslot-2*EpochLength {
+		if ts < timeslot-2*EpochLength {
 			delete(ep.knownPreimages, account_preimage_hash)
 		}
 	}
