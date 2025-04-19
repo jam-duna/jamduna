@@ -808,6 +808,7 @@ func (j *Jam) FetchBlocks(req []string, res *string) error {
 
 func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
+		log.Info(module, "SubmitWorkPackage error", "err", req)
 		return fmt.Errorf("invalid number of arguments")
 	}
 
@@ -896,18 +897,17 @@ func (j *Jam) Decode(req []string, res *string) error {
 }
 
 // server ========================================
-func (n *Node) StartRPCServer(port int) {
+func (n *Node) StartRPCServer(validatorIndex int) {
 	n.NodeContent.nodeSelf = n
-	n.NodeContent.startRPCServerImpl(port)
+	n.NodeContent.startRPCServerImpl(validatorIndex)
 }
 
-func (n *NodeContent) startRPCServerImpl(port int) {
+func (n *NodeContent) startRPCServerImpl(validatorIndex int) {
 	jam := new(Jam)
 	jam.NodeContent = n
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
-	rpc_port := port + 1300
-	address := fmt.Sprintf(":%d", rpc_port)
+	address := fmt.Sprintf(":%d", DefaultTCPPort+validatorIndex)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		fmt.Println("Failed to start RPC server:", err)
@@ -941,41 +941,6 @@ func ParsePeerList(peerListMapFile string) (peerInfoMap map[uint16]*PeerInfo, er
 	}
 	peerListMapJson.Close()
 	return peerInfoMap, nil
-}
-
-func LoadRPCClients(peerInfoMap map[uint16]*PeerInfo) (nodeClients []*NodeClient, err error) {
-	nodeClients = make([]*NodeClient, 0)
-	for _, peerInfo := range peerInfoMap {
-		nodeClient, err := CreateNodeClient(*peerInfo)
-		if err != nil {
-			return nil, err
-		}
-		nodeClients = append(nodeClients, nodeClient)
-	}
-	return nodeClients, nil
-}
-
-func CreateNodeClient(peerInfo PeerInfo) (*NodeClient, error) {
-	address := peerInfo.PeerAddr
-	// get the port
-	host, portStr, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, fmt.Errorf("invalid address: %v", err)
-	}
-	portInt, err := strconv.Atoi(portStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid port: %v", err)
-	}
-	rpc_address := net.JoinHostPort(host, strconv.Itoa(portInt+1300))
-	client, err := rpc.Dial("tcp", rpc_address)
-	if err != nil {
-		return nil, err
-	}
-	nodeClient := NodeClient{
-		PeerInfo: &peerInfo,
-		Client:   client,
-	}
-	return &nodeClient, nil
 }
 
 // mk's codec api

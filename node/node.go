@@ -81,7 +81,7 @@ const (
 	MediumTimeout      = 100 * time.Second
 	LargeTimeout       = 120 * time.Second
 	VeryLargeTimeout   = 6000 * time.Second
-	RefineTimeout      = 30 * time.Second
+	RefineTimeout      = 30 * time.Second //MK; check this
 	DefaultChannelSize = 200
 )
 
@@ -191,7 +191,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 
 func (n *Node) Clean(block_hashes []common.Hash) {
 	n.statedbMapMutex.Lock()
-	for _, block_hash := range block_hashes { //here is header hash
+	for _, block_hash := range block_hashes {
 		log.Debug(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
 		//TOCHECK
 		if _, ok := n.statedbMap[block_hash]; ok {
@@ -516,7 +516,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	alpn_builder := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4])) + "/builder"
 	alpn := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4]))
 
-	node.node_name = fmt.Sprintf("%s-%d", common.GetJAMNetwork(), id)
+	node.node_name = fmt.Sprintf("%s-%d", GetJAMNetwork(), id)
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -681,7 +681,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
-		go node.StartRPCServer(port)
+		go node.StartRPCServer(int(id))
 		go node.RunRPCCommand()
 		go node.runWPQueue()
 		if Audit {
@@ -694,7 +694,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
 			wg := &sync.WaitGroup{}
 			wg.Add(1)
-			go node.runJamWeb(context.Background(), wg, uint16(port+1000)+id, port)
+			go node.runJamWeb(context.Background(), wg, uint16(10800)+id, port)
 			go func() {
 				wg.Wait()
 				log.Info("jamweb", "Node 0", "shutdown complete")
@@ -771,7 +771,7 @@ func RunGrandpaGraphServer(watchNode *Node, basePort uint16) {
 	}
 }
 
-func (n *Node) GetImportSegments(importedSegments []types.ImportSegment) ([][]byte, error) {
+func (n *Node) GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error) {
 	workReportSearchMap := make(map[common.Hash]*SpecIndex)
 	erasureRootIndex := make(map[common.Hash]*SpecIndex)
 
@@ -807,20 +807,19 @@ func (n *Node) GetImportSegments(importedSegments []types.ImportSegment) ([][]by
 	}
 
 	// Step 3: map back to original import order
-	result := make([][]byte, len(importedSegments))
+	raw_segments = make([][]byte, len(importedSegments))
 	for i, importedSegment := range importedSegments {
 		si := workReportSearchMap[importedSegment.RequestedHash]
 		erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
 		segments := segmentDataMap[erasureRoot]
 		for j, idx := range si.Indices {
 			if idx == importedSegment.Index {
-				result[i] = segments[j]
+				raw_segments[i] = segments[j]
 				break
 			}
 		}
 	}
-
-	return result, nil
+	return raw_segments, nil
 }
 
 func (n *Node) GetService(serviceIndex uint32) (sa *types.ServiceAccount, ok bool, err error) {

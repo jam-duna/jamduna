@@ -412,7 +412,6 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 			case SubServiceValue:
 				// Handle subscription to service value
 				req.hash = fetchHashAttr(&req, "hash")
-				log.Info(module, "fetchHashAttr", "method", req.Method, "h", req.hash)
 				c.addSubscription(serviceID, &req)
 				break
 			case SubServicePreimage:

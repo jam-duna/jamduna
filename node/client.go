@@ -1,6 +1,7 @@
-package rpcclient
+package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -12,29 +13,14 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/node"
-
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
 )
 
-const (
-	SubBestBlock       = "subscribeBestBlock"
-	SubFinalizedBlock  = "subscribeFinalizedBlock"
-	SubStatistics      = "subscribeStatistics"
-	SubServiceInfo     = "subscribeServiceInfo"
-	SubServiceValue    = "subscribeServiceValue"
-	SubServicePreimage = "subscribeServicePreimage"
-	SubServiceRequest  = "subscribeServiceRequest"
-	SubWorkPackage     = "subscribeWorkPackage"
-)
-
-const (
-	RefineTimeout = 30 * time.Second
-)
-
 type NodeClient struct {
+	// PeerInfo *PeerInfo
+	// Client   *rpc.Client
 	coreIndex  uint16
 	client     *rpc.Client
 	baseClient *rpc.Client
@@ -58,12 +44,14 @@ type NodeClient struct {
 	mu sync.Mutex
 }
 
-func NewNodeClient(coreIndex uint16, servers []string) (*NodeClient, error) {
+func NewNodeClient(coreIndex uint16, servers []string, wsUrl string) (*NodeClient, error) {
 	baseclient, err := rpc.Dial("tcp", servers[0])
 	if err != nil {
+		fmt.Printf("Error connecting to server %s: %v\n", servers[0], err)
 		return nil, err
 	}
-	return &NodeClient{
+
+	c := &NodeClient{
 		baseClient:     baseclient,
 		client:         nil,
 		coreIndex:      coreIndex,
@@ -74,12 +62,22 @@ func NewNodeClient(coreIndex uint16, servers []string) (*NodeClient, error) {
 		ServiceValue:   make(map[common.Hash][]byte),
 		ServiceInfo:    make(map[uint32]types.ServiceAccount),
 		ServiceRequest: make(map[common.Hash][]uint32),
-	}, nil
+	}
+	c.ConnectWebSocket(wsUrl)
+	return c, nil
+}
+
+func (c *NodeClient) SetJCEManager(jceManager *ManualJCEManager) (err error) {
+	return nil
+}
+func (c *NodeClient) GetJCEManager() (jceManager *ManualJCEManager, err error) {
+	return nil, nil
 }
 
 func (c *NodeClient) ConnectWebSocket(url string) error {
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
+		panic(99)
 		return fmt.Errorf("failed to connect websocket: %w", err)
 	}
 	c.wsConn = conn
@@ -176,7 +174,7 @@ func (c *NodeClient) listenWebSocket() {
 				continue
 			}
 			c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
-			//fmt.Printf("NodeClient received: ServicePreimage for service %d (h=%s, l=%d)\n", payload.ServiceID, payload.Hash, len(c.Preimage[payload.Hash]))
+			//fmt.Printf("NodeCServicePreimage for service %d (h=%s, l=%d)\n", payload.ServiceID, payload.Hash, len(c.Preimage[payload.Hash]))
 			break
 
 		case SubServiceRequest:
@@ -246,11 +244,13 @@ func (c *NodeClient) Unsubscribe(method string, params map[string]interface{}) e
 func (c *NodeClient) GetClient() *rpc.Client {
 	idx, err := c.GetCoreCoWorkersPeers()
 	if err != nil {
+		fmt.Printf("GetCoreCoWorkersPeers ERR %v\n", err)
 		return c.baseClient
 	}
 
 	client, err := rpc.Dial("tcp", c.servers[idx[0]])
 	if err != nil {
+		fmt.Printf("Dial ERR %v\n", err)
 		return c.baseClient
 	}
 	c.client = client
@@ -311,7 +311,6 @@ func (c *NodeClient) Close() error {
 	return nil
 }
 
-// ----------------- client side -----------------
 func (c *NodeClient) GetCoreCoWorkersPeers() (idx []uint16, err error) {
 	var jsonStr string
 	err = c.baseClient.Call("jam.GetCoreCoWorkersPeers", []string{fmt.Sprintf("%d", c.coreIndex)}, &jsonStr)
@@ -325,33 +324,32 @@ func (c *NodeClient) GetCoreCoWorkersPeers() (idx []uint16, err error) {
 	return idx, nil
 }
 
-func (c *NodeClient) GetState(headerHash string) (err error) {
+func (c *NodeClient) GetState(headerHash string) (sdb *statedb.StateSnapshot, err error) {
 	var jsonStr string
 	err = c.GetClient().Call("jam.State", []string{headerHash}, &jsonStr)
 	if err != nil {
-		return err
+		return
 	}
 	var snapshot statedb.StateSnapshot
 	err = json.Unmarshal([]byte(jsonStr), &snapshot)
 	if err != nil {
-		return err
+		return sdb, err
 	}
 	c.muState.Lock()
 	c.state = &snapshot
 	c.muState.Unlock()
 
-	return nil
+	return &snapshot, nil
 }
 
-func (nc *NodeClient) GetCurrJCE() (uint32, error) {
-	var result uint32
-	err := nc.GetClient().Call("jam.GetCurrJCE", struct{}{}, &result)
+func (c *NodeClient) GetCurrJCE() (result uint32, err error) {
+	err = c.GetClient().Call("jam.GetCurrJCE", struct{}{}, &result)
 	return result, err
 }
 
 func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	var jsonStr string
-	err := c.GetClient().Call("jam.GetRefineContext", []string{}, &jsonStr)
+	err := c.baseClient.Call("jam.GetRefineContext", []string{}, &jsonStr)
 	if err != nil {
 		return types.RefineContext{}, err
 	}
@@ -364,12 +362,15 @@ func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	return context, nil
 }
 
-func (c *NodeClient) SubmitWorkPackage(workPackageReq node.WorkPackageRequest) error {
+// WORK PACKAGE
+func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error {
 	// Marshal the WorkPackageRequest to JSON
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
 		return fmt.Errorf("failed to marshal work package request: %w", err)
 	}
+
+	//fmt.Printf("SubmitWorkPackage:%v | ExtrinsicBlobs:%x | %s\n", workPackageReq.WorkPackage.Hash(), workPackageReq.ExtrinsicsBlobs, string(reqBytes))
 
 	// Prepare the request as a one-element string slice
 	req := []string{string(reqBytes)}
@@ -378,20 +379,21 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq node.WorkPackageRequest) e
 	// Call the remote RPC method
 	err = c.GetClient().Call("jam.SubmitWorkPackage", req, &res)
 	if err != nil {
-		fmt.Printf("SubmitWorkPackage err2%v", err)
+		fmt.Printf("SubmitWorkPackage ERR %v\n", err)
 		return err
 	}
 	return nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq node.WorkPackageRequest) error {
-	fmt.Printf("NodeClient SubmitAndWaitForWorkPackage %s\n", workPackageReq.WorkPackage.Hash())
+func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *WorkPackageRequest) (workPackageHash common.Hash, err error) {
 	refineContext, err := c.GetRefineContext()
 	if err != nil {
-		return err
+		fmt.Printf("GetRefineContext ERR %s\n", err)
+		return workPackageHash, err
 	}
 	workPackageReq.WorkPackage.RefineContext = refineContext
-	workPackageHash := workPackageReq.WorkPackage.Hash()
+	workPackageHash = workPackageReq.WorkPackage.Hash()
+	fmt.Printf("SubmitAndWaitForWorkPackage %s\n", workPackageHash)
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
 
@@ -413,6 +415,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 			case <-ticker.C:
 				if status, ok := c.WorkPackage[workPackageHash]; ok {
 					if status == "accumulated" {
+						fmt.Printf("SubmitAndWaitForWorkPackage %s ACC\n", workPackageReq.WorkPackage.Hash())
 						return
 					}
 				}
@@ -424,13 +427,55 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 	if err := c.SubmitWorkPackage(workPackageReq); err != nil {
 		// cancel() would go here if you passed a cancellable context
 		wg.Wait()
-		return fmt.Errorf("SubmitWorkPackage: %w", err)
+		return workPackageHash, fmt.Errorf("SubmitWorkPackage: %w", err)
 	}
 
 	wg.Wait()
 	close(errCh)
 
 	for err := range errCh {
+		return workPackageHash, err
+	}
+	return workPackageHash, nil
+}
+
+func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, workPackageReq []*WorkPackageRequest) (wph []common.Hash, err error) {
+	wph = make([]common.Hash, len(workPackageReq))
+	// TODO
+	return wph, nil
+}
+
+func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
+	tries := 0
+	for tries < maxTries {
+		refine_context, err := c.GetRefineContext()
+		if err != nil {
+			return workPackageHash, err
+		}
+		workpackage_req.WorkPackage.RefineContext = refine_context
+		workPackageHash = workpackage_req.WorkPackage.Hash()
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		_, err = c.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
+		if err != nil {
+			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+			tries = tries + 1
+		} else {
+			return workPackageHash, nil
+		}
+	}
+	return workPackageHash, fmt.Errorf("Timeout after maxTries %d", maxTries)
+}
+
+// PREIMAGES
+func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) (err error) {
+	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
+	preimageStr := common.Bytes2Hex(preimage)
+	req := []string{serviceIndexStr, preimageStr}
+
+	var res string
+	err = c.GetClient().Call("jam.SubmitPreimage", req, &res)
+	if err != nil {
 		return err
 	}
 	return nil
@@ -458,7 +503,10 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 				errCh <- fmt.Errorf("*WaitForPreimage*: context canceled or timed out (serviceID=%d, h=%s, l=%d)", serviceIndex, preimageHash, len(preimage))
 				return
 			case <-ticker.C:
-				if _, ok := c.Preimage[preimageHash]; ok {
+				if img, ok := c.Preimage[preimageHash]; ok {
+					if bytes.Compare(img, preimage) == 0 {
+						return
+					}
 					return
 				}
 			}
@@ -482,38 +530,111 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 	return nil
 }
 
-func (c *NodeClient) GetServiceValue(serviceIndex uint32, storageHash common.Hash) ([]byte, bool, error) {
-	req := []string{
-		strconv.FormatUint(uint64(serviceIndex), 10),
-		storageHash.Hex(),
-	}
+func (c *NodeClient) GetServicePreimage(serviceIndex uint32, codeHash common.Hash) ([]byte, string, uint32, error) {
+	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
+	codeHashStr := codeHash.Hex()
+	req := []string{serviceIndexStr, codeHashStr}
+
 	var res string
-	err := c.GetClient().Call("jam.ServiceValue", req, &res)
+	err := c.GetClient().Call("jam.ServicePreimage", req, &res)
 	if err != nil {
-		return nil, false, err
+		return nil, "", 0, err
 	}
-	storageBytes := common.Hex2Bytes(res)
-	return storageBytes, true, nil
+
+	type servicePreimageResponse struct {
+		Metadata string `json:"metadata"`
+		RawBytes string `json:"rawbytes"`
+		Length   uint32 `json:"length"`
+	}
+	var parsed servicePreimageResponse
+	_ = json.Unmarshal([]byte(res), &parsed)
+
+	metadata := parsed.Metadata
+	length := parsed.Length
+	rawBytes := common.Hex2Bytes(parsed.RawBytes)
+	return rawBytes, metadata, length, nil
 }
 
-func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.Hash) (service_index uint32, err error) {
-	ctxWait, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-	defer cancel()
-	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": fmt.Sprintf("%s", storageKey)})
+func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_state, error) {
+	// Convert coreIdx to a string
+	coreIdxStr := strconv.FormatUint(uint64(coreIdx), 10)
+	req := []string{coreIdxStr}
 
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctxWait.Done():
-			return 0, fmt.Errorf("Timed out waiting for service value")
-		case <-ticker.C:
-			if value, ok := c.ServiceValue[storageKey]; ok {
-				service_index = uint32(types.DecodeE_l(value))
-				return service_index, nil
-			}
-		}
+	var res string
+	// Make the RPC call to "jam.GetAvailabilityAssignments"
+	err := c.GetClient().Call("jam.GetAvailabilityAssignments", req, &res)
+	if err != nil {
+		return nil, err
 	}
+
+	// Unmarshal the JSON response into an AvailabilityAssignment
+	var rho_state statedb.Rho_state
+	err = json.Unmarshal([]byte(res), &rho_state)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal availability assignment: %w", err)
+	}
+	return &rho_state, nil
+}
+
+func (c *NodeClient) GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error) {
+	raw_segments = make([][]byte, len(importedSegments))
+	for idx, segment := range importedSegments {
+		segmentBytes, err := c.Segment(segment.RequestedHash, segment.Index)
+		if err != nil {
+			return nil, err
+		}
+		raw_segments[idx] = segmentBytes
+	}
+	return raw_segments, nil
+}
+
+func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, error) {
+	// Convert the segment index to a string
+	segmentIndexStr := strconv.FormatUint(uint64(segmentIndex), 10)
+	req := []string{wphash.Hex(), segmentIndexStr}
+
+	var res string
+	err := c.GetClient().Call("jam.Segment", req, &res)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert the hex string back to bytes
+	// segmentBytes := common.Hex2Bytes(res)
+
+	type getSegmentResponse struct {
+		Segment       []byte        `json:"segment"`
+		Justification []common.Hash `json:"justification"`
+	}
+	var parsed getSegmentResponse
+	_ = json.Unmarshal([]byte(res), &parsed)
+
+	segmentBytes := parsed.Segment
+
+	return segmentBytes, nil
+}
+
+func (nc *NodeClient) GetBuildVersion() (string, error) {
+	var result string
+	err := nc.GetClient().Call("jam.GetBuildVersion", []string{}, &result)
+	return result, err
+}
+
+// SERVICE
+func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok bool, err error) {
+	var jsonStr string
+	err = c.GetClient().Call("jam.Service", []string{}, &jsonStr)
+	if err != nil {
+		return &types.ServiceAccount{}, false, err
+	}
+
+	var service types.ServiceAccount
+	err = json.Unmarshal([]byte(jsonStr), &service)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal refine context: %w", err)
+	}
+	return &service, true, nil
+
 }
 
 func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName string, serviceCode []byte, serviceIDs []uint32) (newServiceIdx uint32, err error) {
@@ -550,7 +671,7 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 		}},
 	}
 
-	var wpr node.WorkPackageRequest
+	var wpr WorkPackageRequest
 	wpr.CoreIndex = 0 // this is OK
 	wpr.WorkPackage = codeWP
 	wpr.ExtrinsicsBlobs = types.ExtrinsicsBlobs{}
@@ -560,14 +681,14 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	// submits wp
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	err = c.SubmitAndWaitForWorkPackage(ctx, wpr)
+	_, err = c.SubmitAndWaitForWorkPackage(ctx, &wpr)
 	if err != nil {
 		fmt.Printf("SubmitWorkPackage ERR %v", err)
 		return
 	}
 
 	storageKey := common.ServiceStorageKey(0, []byte{0, 0, 0, 0})
-	value, _, err := c.GetServiceValue(0, storageKey)
+	value, _, err := c.GetServiceStorage(0, storageKey)
 	if err != nil {
 		fmt.Printf("GetBootstrapService ERR %v", err)
 		return
@@ -616,87 +737,37 @@ func (c *NodeClient) LoadServices(services []string) (new_service_map map[string
 	return new_service_map, nil
 }
 
-func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) (err error) {
-	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
-	preimageStr := common.Bytes2Hex(preimage)
-	req := []string{serviceIndexStr, preimageStr}
-
-	var res string
-	err = c.GetClient().Call("jam.SubmitPreimage", req, &res)
-	if err != nil {
-		return err
+// SERVICE STORAGE
+func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.Hash) ([]byte, bool, error) {
+	req := []string{
+		strconv.FormatUint(uint64(serviceIndex), 10),
+		storageHash.Hex(),
 	}
-	return nil
+	var res string
+	err := c.GetClient().Call("jam.ServiceValue", req, &res)
+	if err != nil {
+		return nil, false, err
+	}
+	storageBytes := common.Hex2Bytes(res)
+	return storageBytes, true, nil
 }
 
-func (c *NodeClient) ServicePreimage(serviceIndex uint32, codeHash common.Hash) ([]byte, string, uint32, error) {
-	serviceIndexStr := strconv.FormatUint(uint64(serviceIndex), 10)
-	codeHashStr := codeHash.Hex()
-	req := []string{serviceIndexStr, codeHashStr}
+func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.Hash) (service_index uint32, err error) {
+	ctxWait, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+	defer cancel()
+	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": fmt.Sprintf("%s", storageKey)})
 
-	var res string
-	err := c.GetClient().Call("jam.ServicePreimage", req, &res)
-	if err != nil {
-		return nil, "", 0, err
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctxWait.Done():
+			return 0, fmt.Errorf("Timed out waiting for service value")
+		case <-ticker.C:
+			if value, ok := c.ServiceValue[storageKey]; ok {
+				service_index = uint32(types.DecodeE_l(value))
+				return service_index, nil
+			}
+		}
 	}
-
-	type servicePreimageResponse struct {
-		Metadata string `json:"metadata"`
-		RawBytes string `json:"rawbytes"`
-		Length   uint32 `json:"length"`
-	}
-	var parsed servicePreimageResponse
-	_ = json.Unmarshal([]byte(res), &parsed)
-
-	metadata := parsed.Metadata
-	length := parsed.Length
-	rawBytes := common.Hex2Bytes(parsed.RawBytes)
-	return rawBytes, metadata, length, nil
-}
-
-func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_state, error) {
-	// Convert coreIdx to a string
-	coreIdxStr := strconv.FormatUint(uint64(coreIdx), 10)
-	req := []string{coreIdxStr}
-
-	var res string
-	// Make the RPC call to "jam.GetAvailabilityAssignments"
-	err := c.GetClient().Call("jam.GetAvailabilityAssignments", req, &res)
-	if err != nil {
-		return nil, err
-	}
-
-	// Unmarshal the JSON response into an AvailabilityAssignment
-	var rho_state statedb.Rho_state
-	err = json.Unmarshal([]byte(res), &rho_state)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal availability assignment: %w", err)
-	}
-	return &rho_state, nil
-}
-
-func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, error) {
-	// Convert the segment index to a string
-	segmentIndexStr := strconv.FormatUint(uint64(segmentIndex), 10)
-	req := []string{wphash.Hex(), segmentIndexStr}
-
-	var res string
-	err := c.GetClient().Call("jam.Segment", req, &res)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert the hex string back to bytes
-	// segmentBytes := common.Hex2Bytes(res)
-
-	type getSegmentResponse struct {
-		Segment       []byte        `json:"segment"`
-		Justification []common.Hash `json:"justification"`
-	}
-	var parsed getSegmentResponse
-	_ = json.Unmarshal([]byte(res), &parsed)
-
-	segmentBytes := parsed.Segment
-
-	return segmentBytes, nil
 }

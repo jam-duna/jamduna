@@ -344,9 +344,9 @@ func (n *Node) runReceiveBlock() {
 			if err != nil {
 				log.Warn(debugBlock, "processBlockAnnouncement failed", "n", n.String(), "err", err)
 			} else {
-				if len(blocks) == 0 {
+				if len(blocks) == 0 { // check
 					block := blocks[0]
-					log.Info(debugBlock, "processBlock",
+					log.Trace(debugBlock, "processBlock",
 						"author", blockAnnouncement.Header.AuthorIndex,
 						"p", common.Str(block.GetParentHeaderHash()),
 						"h", common.Str(block.Header.Hash()),

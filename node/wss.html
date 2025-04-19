@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JAM WebSocket Subscription Tester</title>
+</head>
+<body>
+  <h1>JAM WebSocket Tester</h1>
+  <button id="connect">Connect WebSocket</button>
+
+  <h3>Endpoint:</h3>
+  <code>ws://dot-0.jamduna.org:10800/ws</code>
+
+  <h2>subscribeFinalizedBlock</h2>
+  <button id="subscribeBestBlock">Subscribe Best Block</button>
+  <button id="subscribeFinalizedBlock">Subscribe Finalized Block</button>
+
+  <h2>subscribeStatistics</h2>
+  <button id="subscribeStatistics">Subscribe Global Statistics</button>
+
+  <hr/>
+
+  <h2>subscribeServiceInfo</h2>
+  <input type="text" id="serviceID_info" placeholder="Service ID (required)" value="0">
+  <button id="subscribeServiceInfo">Subscribe Service Info</button>
+
+  <h2>subscribeServiceValue</h2>
+  <input type="text" id="serviceID_value" placeholder="Service ID (required)" value="0">
+  <input type="text" id="valueHash" placeholder="Value Hash" value="0x81e47a19e6b29b0a65b9591762ce5143ed30d0261e5d24a3201752506b20f15c">
+  <button id="subscribeServiceValue">Subscribe Service Value</button>
+
+  <h2>subscribeServicePreimage</h2>
+  <input type="text" id="serviceID_preimage" placeholder="Service ID  (required)" value="0">
+  <input type="text" id="preimageHash" placeholder="Preimage Hash (required)" value="0x1f7374e285ae5f1bb11d009737d45716c744b88a1c3fef7c3c25a419d7618ad6">
+  <button id="subscribeServicePreimage">Subscribe Service Preimage</button>
+
+  <h2>subscribeServiceRequest</h2>
+  <input type="text" id="serviceID_request" placeholder="Service ID" value="0">
+  <input type="text" id="requestHash" placeholder="Request Hash (required)"  value="0x1f7374e285ae5f1bb11d009737d45716c744b88a1c3fef7c3c25a419d7618ad6">
+  <button id="subscribeServiceRequest">Subscribe Service Request</button>
+
+  <hr/>
+  
+  <h2>subscribeWorkPackage</h2>
+  <input type="text" id="workPackageHash" placeholder="WorkPackage Hash (required)">
+  <button id="subscribeWorkPackage">Subscribe Work Package</button>
+
+
+  <script>
+    let socket;
+
+    function sendMessage(message) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+        console.log("Sent:", message);
+      } else {
+        console.warn("WebSocket not connected.");
+      }
+    }
+
+    document.getElementById("connect").onclick = () => {
+      socket = new WebSocket("ws://dot-0.jamduna.org:10800/ws");
+
+      socket.onopen = () => console.log("WebSocket connected.");
+      socket.onmessage = (event) => console.log("Received:", event.data);
+      socket.onerror = (e) => console.error("WebSocket error:", e);
+      socket.onclose = () => console.log("WebSocket closed.");
+    };
+
+    document.getElementById("subscribeBestBlock").onclick = () => {
+      sendMessage({ method: "subscribeBestBlock" });
+    };
+
+    document.getElementById("subscribeFinalizedBlock").onclick = () => {
+      const dummyHash = "0x097246bfb1819dc427e503faaa41f1cb7af52bbfbea6254498ff33a44aab1edc";
+      sendMessage({ method: "subscribeFinalizedBlock", params: { headerHash: dummyHash } });
+    };
+
+    document.getElementById("subscribeStatistics").onclick = () => {
+      sendMessage({ method: "subscribeStatistics", params: {} });
+    };
+
+    document.getElementById("subscribeWorkPackage").onclick = () => {
+      const hash = document.getElementById("workPackageHash").value.trim() || "0x82f8102e2d0d11915843b7fdf2181d9ac7719b515766fe1db1c32bf076b92a46";
+      if (hash) {
+        sendMessage({ method: "subscribeWorkPackage", params: { hash } });
+      } else {
+        console.warn("WorkPackage hash is required");
+      }
+    };
+
+    document.getElementById("subscribeServiceInfo").onclick = () => {
+      const serviceID = document.getElementById("serviceID_info").value.trim() || "0";
+      sendMessage({ method: "subscribeServiceInfo", params: { serviceID } });
+    };
+
+    document.getElementById("subscribeServiceValue").onclick = () => {
+      const serviceID = document.getElementById("serviceID_value").value.trim() || "0x00000000";
+      const hash = document.getElementById("valueHash").value.trim() ;
+      const params = { serviceID };
+      if (hash) params.hash = hash;
+      sendMessage({ method: "subscribeServiceValue", params });
+    };
+
+    document.getElementById("subscribeServicePreimage").onclick = () => {
+      const serviceID = document.getElementById("serviceID_preimage").value.trim() || "0x1f7374e285ae5f1bb11d009737d45716c744b88a1c3fef7c3c25a419d7618ad6";
+      const hash = document.getElementById("preimageHash").value.trim();
+      if (hash) {
+        sendMessage({ method: "subscribeServicePreimage", params: { serviceID, hash } });
+      } else {
+        console.warn("Preimage hash is required");
+      }
+    };
+
+    document.getElementById("subscribeServiceRequest").onclick = () => {
+      const serviceID = document.getElementById("serviceID_request").value.trim() || "0x1f7374e285ae5f1bb11d009737d45716c744b88a1c3fef7c3c25a419d7618ad6";
+      const hash = document.getElementById("requestHash").value.trim();
+      if (hash) {
+        sendMessage({ method: "subscribeServiceRequest", params: { serviceID, hash } });
+      } else {
+        console.warn("Request hash is required");
+      }
+    };
+  </script>
+</body>
+</html>

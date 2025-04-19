@@ -84,7 +84,7 @@ func (n *NodeContent) GetAscendingBlockByHeader(headerHash common.Hash) (childBl
 	// 	fmt.Printf("%x\n", val)
 	// }
 
-	log.Info(module, "GetAscendingBlockByHeader", "headerHash", headerHash, "keyvals", fmt.Sprintf("%v", keyvals))
+	log.Info(module, "GetAscendingBlockByHeader", "headerHash", headerHash, "keyvals", fmt.Sprintf("%x", keyvals))
 	// childBlks may contain forks !!!
 	childBlks = make([]*types.Block, 0)
 	for i, keyval := range keyvals {

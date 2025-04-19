@@ -1,4 +1,4 @@
-package rpcclient
+package main
 
 import (
 	"encoding/json"
@@ -15,7 +15,7 @@ import (
 
 func main() {
 	// Define and parse the rpc flag.
-	rpcEndpoint := flag.String("rpc", "jam-0.jamduna.org:11100", "RPC server")
+	rpcEndpoint := flag.String("rpc", "jam-0.jamduna.org:11100", "RPC server") //
 	flag.Parse()
 
 	client, err := rpc.Dial("tcp", *rpcEndpoint)

@@ -23,6 +23,8 @@ func flatten(data [][]byte) []byte {
 
 func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 
+	ws_push := StartGameOfLifeServer("localhost:8080", "../node/game_of_life.html")
+
 	log.Info(module, "Game of Life START")
 
 	service0 := testServices["game_of_life"]
@@ -137,19 +139,14 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 				log.Info(module, "GAME OF LIFE CHILD LOADED")
 			}
 		} else {
-			/*
-				ws_push := StartGameOfLifeServer("localhost:8080", "../client/game_of_life.html")
+			vm_export, err := n1.GetSegments(importedSegments)
+			if err == nil {
+				stepBytes := make([]byte, 4)
+				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
+				out := append(stepBytes, flatten(vm_export)...)
+				ws_push(out)
+			}
 
-				vm_export, err := n1.GetSegments(importedSegments)
-				if err == nil {
-					stepBytes := make([]byte, 4)
-					binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
-					out := append(stepBytes, flatten(vm_export)...)
-					if false {
-						ws_push(out)
-					}
-				}
-			*/
 		}
 		prevWorkPackageHash = workPackageHash
 	}

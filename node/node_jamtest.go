@@ -34,11 +34,11 @@ type JNode interface {
 	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
+	GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error)
 }
 
-var jce_manual_mode = flag.Bool("jce_manual_mode", false, "jce_manual_mode")
-var prereq_test = flag.Bool("prereq_test", false, "prereq_test")
-var pvm_authoring_log = flag.Bool("pvm_authoring_log", false, "pvm_authoring_log")
+var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
+var jam_local = flag.Bool("jam_local", false, "jam_local")
 
 const (
 	webServicePort = 8079
@@ -175,32 +175,27 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 }
 
 // run any test with dispute using testName_dispute (i.e fib_dispute)
-func testWithDispute(s string) (jam string, isDisputeMode bool) {
+func testWithDispute(raw_jam string) (jam string, isDisputeMode bool) {
 	const suffix = "_dispute"
-	if strings.HasSuffix(s, suffix) {
-		jam = strings.TrimSuffix(s, suffix)
+	if strings.HasSuffix(raw_jam, suffix) {
+		jam = strings.TrimSuffix(raw_jam, suffix)
 		return jam, true
 	}
-	return s, false
+	return raw_jam, false
 }
 
 func jamtest(t *testing.T, jam_raw string, targetN int) {
 	flag.Parse()
 
-	JCEMode := JCEDefault
-	if *jce_manual_mode {
-		JCEMode = JCEManual
-	}
-
 	sendTickets := true //set this to false to run WP without E_T interference
 	jam, isDisputeMode := testWithDispute(jam_raw)
+	//fmt.Printf("jamtest: jam=%s | isDisputeMode=%v | raw=%v\n", jam, isDisputeMode, jam_raw)
 
 	// Specify testServices
 	defaultDelay := 2 * types.SecondsPerSlot * time.Second
 	var serviceNames []string
 	switch jam {
 	case "safrole", "fallback":
-		JCEMode = JCEFast
 		defaultDelay = 0 * types.SecondsPerSlot * time.Second
 		sendTickets = (jam == "safrole")
 	case "megatron":
@@ -224,71 +219,105 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		serviceNames = []string{"auth_copy", "fib"}
 	}
 
-	basePort := GenerateRandomBasePort()
-	nodes, err := SetUpNodes(JCEMode, numNodes, basePort) // TODO change this to JCEManual
-	if err != nil {
-		panic("Error setting up nodes: %v\n")
-	}
+	var bNode JNode
+	var tNode *Node
 
-	// Handling Safrole
-	for _, n := range nodes {
-		n.SetSendTickets(sendTickets)
-	}
-
-	// Handling Dispute Mode
-	if isDisputeMode {
-		nodeTypeList := []string{"lying_judger_F", "lying_judger_T", "lying_judger_T", "lying_judger_T", "lying_judger_T", "lying_judger_T"}
-		fmt.Printf("****** DisputeMode! ******\n")
-		for i, node := range nodes {
-			fmt.Printf("N%d ---- %s\n", i, nodeTypeList[i])
-			node.AuditNodeType = nodeTypeList[i]
+	if !*jam_local { // NodeClient -- remote scenario (could be dot-0 OR localhost:____ )
+		if isDisputeMode {
+			t.Fatalf("Dispute mode is not supported for remote test\n")
 		}
-		fmt.Printf("**************************\n")
+		if jam == "safrole" || jam == "fallback" {
+			t.Logf("Nothing to test for %s-remote\n", jam)
+			return
+		}
+
+		fmt.Printf("jamtest: %s-remote\n", jam)
+		var err error
+		/*
+			We can simulate local 6 nodes setup with isLocalParallelMode = true.
+			local 6 nodes: 11100....11006 | jamduna.org: 10800....10806
+		*/
+		isLocalParallelMode := false // need better naming for the localhost:__ case
+		// change this to **true** to run local parallel test
+		// make run_parallel_jam (uses 11100)
+		tcpServers, wsUrl := GetAddresses(isLocalParallelMode)
+		bNode, err = NewNodeClient(0, tcpServers, wsUrl)
+		if err != nil {
+			t.Fatalf("NewNodeClient ERR %v\n", err)
+		}
+		fmt.Printf("%s tcp:%v\n", wsUrl, tcpServers)
+		client := bNode.(*NodeClient)
+		err = client.ConnectWebSocket(wsUrl)
+	} else { // Node
+
+		fmt.Printf("jamtest: %s-local\n", jam)
+		basePort := GenerateRandomBasePort()
+
+		JCEMode := JCEDefault
+		if *jce_manual {
+			JCEMode = JCEManual
+		}
+		if jam == "safrole" || jam == "fallback" {
+			JCEMode = JCEFast
+		}
+
+		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
+		if err != nil {
+			panic("Error setting up nodes: %v\n")
+		}
+
+		// Handling Safrole
+		for _, n := range nodes {
+			n.SetSendTickets(sendTickets)
+		}
+
+		// Handling Dispute Mode
+		if isDisputeMode {
+			nodeTypeList := []string{"lying_judger_F", "lying_judger_T", "lying_judger_T", "lying_judger_T", "lying_judger_T", "lying_judger_T"}
+			fmt.Printf("****** DisputeMode! ******\n")
+			for i, node := range nodes {
+				fmt.Printf("N%d ---- %s\n", i, nodeTypeList[i])
+				node.AuditNodeType = nodeTypeList[i]
+			}
+			fmt.Printf("**************************\n")
+		}
+		log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
+
+		fmt.Printf("Test PreReq: %v\n", test_prereq)
+
+		// Run the JCE updater (it will run indefinitely).
+		initialJCE := uint32(11)
+		jceMode, jceManager, managerCancel, err := SetupJceManager(nodes, initialJCE, JCEMode)
+		fmt.Println("jamtest: setupJceManager returned.")
+
+		if err != nil && jceManager == nil {
+			t.Fatalf("JCE Manager setup failed: %v", err)
+		}
+
+		tNode = nodes[1]
+		if managerCancel != nil {
+			tNode.SetJCEManager(jceManager)
+			defer managerCancel()
+		}
+		if jceManager != nil {
+			fmt.Printf("jamtest: Manual JCE Manager (%p) is set up and running.\n", jceManager)
+		} else {
+			fmt.Printf("jamtest: JCE Mode: %s\n", jceMode)
+		}
+		//go RunGrandpaGraphServer(n1, basePort)
+		for {
+			time.Sleep(1 * time.Second)
+			currJCE := tNode.GetCurrJCE()
+			if tNode.statedb.GetSafrole().CheckFirstPhaseReady(currJCE) {
+				break
+			}
+		}
+		bNode = nodes[1]
 	}
 
-	log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
-
-	if *prereq_test {
-		test_prereq = true
-	}
-
-	fmt.Printf("Test PreReq: %v\n", test_prereq)
-
-	// Run the JCE updater (it will run indefinitely).
-	initialJCE := uint32(11)
-	jceMode, jceManager, managerCancel, err := SetupJceManager(nodes, initialJCE, nodes[0].jceMode)
-	fmt.Println("jamtest: setupJceManager returned.")
-
-	if err != nil && jceManager == nil {
-		t.Fatalf("JCE Manager setup failed: %v", err)
-	}
-
-	bNode := nodes[1]
-	if managerCancel != nil {
-		// TODO Schedule the cancel function call for when jamtest exits
-		bNode.SetJCEManager(jceManager)
-		defer managerCancel()
-	}
-
-	if jceManager != nil {
-		fmt.Printf("jamtest: Manual JCE Manager (%p) is set up and running.\n", jceManager)
-	} else {
-		fmt.Printf("jamtest: JCE Mode: %s\n", jceMode)
-	}
 	//log.EnableModule(log.PvmAuthoring)
 	//log.EnableModule(log.FirstGuarantorOrAuditor)
-	//log.EnableModule(log.PvmAuthoring)
 
-	//go RunGrandpaGraphServer(nodes[0], basePort)
-	for {
-		time.Sleep(1 * time.Second)
-		currJCE := nodes[0].GetCurrJCE()
-		if nodes[0].statedb.GetSafrole().CheckFirstPhaseReady(currJCE) {
-			break
-		}
-	}
-
-	// code length: 206
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
 		panic(0)
@@ -306,6 +335,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	log.Info(module, "Waiting for the first block to be ready...")
 	time.Sleep(defaultDelay) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 
+	var jceManager *ManualJCEManager
+	jceManager = nil
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
 		// set up service using the Bootstrap service
@@ -367,7 +398,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	if isDisputeMode {
 		targetTimeslotLength := (12 * types.EpochLength)
 		maxTimeAllowed := (targetTimeslotLength + 1) * types.SecondsPerSlot
-		waitForTermination(bNode, "jam", targetTimeslotLength, maxTimeAllowed, t)
+		waitForTermination(tNode, "jam", targetTimeslotLength, maxTimeAllowed, t)
 	}
 
 	switch jam {
@@ -375,17 +406,26 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		SafroleTestEpochLen := 4
 		SafroleBufferTime := 30
 		safrole(jceManager)
-		waitForTermination(bNode, "safrole", SafroleTestEpochLen, SafroleBufferTime, t)
+		if tNode == nil {
+			t.Fatalf("tNode is nil")
+		}
+		waitForTermination(tNode, "safrole", SafroleTestEpochLen, SafroleBufferTime, t)
 	case "fallback":
 		FallbackEpochLen := 3
 		FallbackBufferTime := 10
 		safrole(jceManager)
-		waitForTermination(bNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
+		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "fib":
 		fib(bNode, testServices, targetN)
 	case "fib2":
-		targetN := 100
+		//targetN := 100
 		fib2(bNode, testServices, targetN)
+	case "game_of_life":
+		game_of_life(bNode, testServices)
+	case "megatron":
+		megatron(bNode, testServices, targetN)
+
+	// TODO: modernize those tests?
 	case "transfer":
 		transferNum := targetN
 		transfer(bNode, testServices, transferNum)
@@ -402,9 +442,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		scaled_balances(bNode, testServices, targetN_mint, targetN_transfer)
 	case "blake2b":
 		blake2b(bNode, testServices)
-	case "game_of_life":
-		game_of_life(bNode, testServices)
-	case "megatron":
-		megatron(nodes[1], testServices, targetN)
+
 	}
 }

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BLAKE2b-256 Service Key Generator</title>
+  <style>
+    body { font-family: sans-serif; padding: 2em; background: #f9f9f9; }
+    pre { background: #fff; padding: 1em; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>ServiceStorageKey &amp; StorageKeyInternal</h1>
+  <pre id="output">Calculating...</pre>
+
+  <script type="module">
+    import { blake2b } from 'https://esm.sh/@noble/hashes/blake2b';
+
+    // Convert bytes to hex string
+    function bytesToHex(bytes) {
+      return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Encode a uint32 into a 4-byte Uint8Array in little-endian order
+    function putUint32LE(value) {
+      const buffer = new ArrayBuffer(4);
+      const view = new DataView(buffer);
+      view.setUint32(0, value, true); // true = little endian
+      return new Uint8Array(buffer);
+    }
+
+    // Go-style ServiceStorageKey in JS
+    function ServiceStorageKey(serviceIndex, keyBytes) {
+      const sb = putUint32LE(serviceIndex);
+      const combined = new Uint8Array(sb.length + keyBytes.length);
+      combined.set(sb);
+      combined.set(keyBytes, sb.length);
+      return blake2b(combined, { dkLen: 32 }); // returns Uint8Array(32)
+    }
+
+    // Go-style Compute_storageKey_internal in JS
+    function ComputeStorageKeyInternal(keyHash) {
+      const prefix = putUint32LE(0xFFFFFFFF);
+      const sliced = keyHash.slice(0, 28); // use first 28 bytes
+      const final = new Uint8Array(prefix.length + sliced.length);
+      final.set(prefix);
+      final.set(sliced, prefix.length);
+      return final; // Uint8Array(32)
+    }
+
+    // Example usage
+    const serviceIndex = 0;
+    const mu_k = new Uint8Array([0x00,0x00,0x00,0x00]);
+
+    const rawK = ServiceStorageKey(serviceIndex, mu_k);
+    const hk = ComputeStorageKeyInternal(rawK);
+
+    // Output
+    const out = document.getElementById('output');
+    out.textContent = `rawK (ServiceStorageKey):  ${bytesToHex(rawK)}\nhk   (StorageKeyInternal): ${bytesToHex(hk)}`;
+  </script>
+</body>
+</html>
