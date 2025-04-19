@@ -914,11 +914,11 @@ func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
 	return hex.EncodeToString(traceIDBytes[:])
 }
 
-func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (*types.Block, *StateDB, error) {
+func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady(currJCE)
 	if !genesisReady {
 		//fmt.Printf("genesis NOT Ready ProcessState: currJCE=%d\n", currJCE)
-		return nil, nil, nil
+		return false, nil, nil, nil
 	}
 	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady(currJCE)
 	if timeSlotReady {
@@ -938,7 +938,7 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 			proposedBlk, err := s.MakeBlock(credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
 				log.Error(module, "ProcessState:MakeBlock", "err", err)
-				return nil, nil, err
+				return true, nil, nil, err
 			}
 			// Add ApplyStateTransitionFromBlock span
 			if s.sdb.Tp != nil && s.sdb.BlockContext != nil && s.sdb.SendTrace {
@@ -960,7 +960,7 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 			if err != nil {
 				// HOW could this happen, we made the block ourselves!
 				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)
-				return nil, nil, err
+				return true, nil, nil, err
 			}
 			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
 			mode := "safrole"
@@ -969,12 +969,12 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 			}
 			log.Info(module, "proposeBlock", "mode", mode, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
-			return proposedBlk, newStateDB, nil
+			return true, proposedBlk, newStateDB, nil
 		} else {
 			//waiting for block ... potentially submit ticket here
 		}
 	}
-	return nil, nil, nil
+	return false, nil, nil, nil
 }
 
 // see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks

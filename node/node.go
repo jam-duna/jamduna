@@ -2236,6 +2236,7 @@ func (n *Node) runClient() {
 
 	logChan := n.store.GetChan()
 	n.statedb.GetSafrole().EpochFirstSlot = uint32(n.epoch0Timestamp / types.SecondsPerSlot)
+	lastAuthorizableJCE := uint32(0)
 
 	for {
 		select {
@@ -2253,21 +2254,23 @@ func (n *Node) runClient() {
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
-			// isAuthorizedBlockBuilder, _, _ := n.statedb.GetSafrole().IsAuthorizedBuilder(currJCE, common.Hash(n.credential.BandersnatchPub), ticketIDs)
-			// if !isAuthorizedBlockBuilder {
-			// 	continue
-			// }
-			// if !n.appliedFirstBlock {
-			// 	if n.CanProposeFirstBlock() {
-			// 		n.appliedFirstBlock = true
-			// 		log.Info(module, "runClient: Propose first block", "n", n.String(), "slot", currJCE)
-			// 	} else {
-			// 		continue
-			// 	}
-			// }
+
+			if currJCE == lastAuthorizableJCE {
+				// already proposed ... skip
+				//log.Trace(module, "runClient: Silent Authorization", "n", n.String(), "JCE", currJCE)
+				continue
+			}
+
 			n.statedbMutex.Lock()
-			newBlock, newStateDB, err := n.statedb.ProcessState(currJCE, n.credential, ticketIDs, n.extrinsic_pool)
+			isAuthorizedBlockBuilder, newBlock, newStateDB, err := n.statedb.ProcessState(currJCE, n.credential, ticketIDs, n.extrinsic_pool)
 			n.statedbMutex.Unlock()
+			if isAuthorizedBlockBuilder {
+				lastAuthorizableJCE = currJCE
+				log.Info(module, "runClient: Authorized", "n", n.String(), "JCE", currJCE)
+			} else {
+				// No work to do if not authorized
+				continue
+			}
 
 			if err != nil {
 				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
