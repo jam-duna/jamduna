@@ -244,7 +244,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		}
 	}
 	for _, peer := range n.peersInfo {
-		n.WorkerManager.StartWorker("node_send_block_announcement", func() {
+		go func(peer *Peer) {
 			if peer.PeerID == n.id {
 				return
 			}
@@ -263,7 +263,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes (whisper)", "n", n.String(), "err", err)
 				}
 			}
-		})
+		}(peer)
 	}
 	return blocksRaw, nil
 }
@@ -283,9 +283,9 @@ func (n *NodeContent) cacheBlock(block *types.Block) error {
 		}
 		// also prune the block tree
 		useless_header_hashes := n.block_tree.PruneBlockTree(10)
-		n.nodeSelf.WorkerManager.StartWorker("node_cleaning", func() {
-			n.nodeSelf.Clean(useless_header_hashes)
-		})
+
+		go n.nodeSelf.Clean(useless_header_hashes)
+
 	}
 
 	return nil

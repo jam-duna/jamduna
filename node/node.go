@@ -32,7 +32,6 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/node/gosafe"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
@@ -225,7 +224,6 @@ type Node struct {
 	IsSyncMu          sync.RWMutex
 	appliedFirstBlock bool
 
-	WorkerManager *gosafe.WorkerManager
 	block_waiting list.List
 	commitHash    string
 	AuditNodeType string
@@ -637,7 +635,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	}
 
 	go node.runServer()
-	node.WorkerManager = gosafe.NewWorkerManager()
 
 	node.setValidatorCredential(credential)
 	node.epoch0Timestamp = epoch0Timestamp
@@ -668,9 +665,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			log.Info(module, "extendChain", "blockHash", node.statedb.HeaderHash.Hex())
 		}
 		useless_header_hashes := node.block_tree.PruneBlockTree(10)
-		node.WorkerManager.StartWorker("node_cleaning", func() {
-			node.Clean(useless_header_hashes)
-		})
+		go node.Clean(useless_header_hashes)
 	}
 	if id == 5 {
 		node.SetIsSync(false) // node 5 can't produce the first block

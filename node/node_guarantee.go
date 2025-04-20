@@ -235,7 +235,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	var d AvailabilitySpecifierDerivation
 	for _, coworker := range coworkers {
 		wg.Add(1)
-		n.WorkerManager.StartWorker("make-eg", func() {
+		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Error(debugG, "panic in coworker goroutine", "err", r)
@@ -269,8 +269,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				fellow_responses[coworker.Validator.Ed25519] = fellow_response
 				mutex.Unlock()
 			}
-
-		})
+		}()
 	}
 	wg.Wait()
 	selfWorkReportHash := guarantee.Report.Hash()
