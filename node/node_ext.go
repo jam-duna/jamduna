@@ -521,13 +521,13 @@ func StartGameOfLifeServer(addr string, path string) func(data []byte) {
 
 		})
 
-		fmt.Printf("Starting Game of Life server on %s (serving %s)\n", addr, path)
+		/* fmt.Printf("Starting Game of Life server on %s (serving %s)\n", addr, path)
 		err := http.ListenAndServe(addr, mux)
 		if err != nil && err != http.ErrServerClosed {
 			fmt.Printf("ListenAndServe error: %v\n", err)
 
 		}
-		fmt.Println("Game of Life server shut down.")
+		fmt.Println("Game of Life server shut down.") */
 	}()
 
 	return func(data []byte) {

@@ -57,7 +57,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 	extrinsics = append(extrinsics, extrinsic)
 	prevWorkPackageHash := common.Hash{}
 
-	for step_n := 0; step_n <= 30; step_n++ {
+	for step_n := 0; step_n <= 300000; step_n++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		export_count := uint16(0)
 		if step_n > 1 {
@@ -144,7 +144,9 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 				stepBytes := make([]byte, 4)
 				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
 				out := append(stepBytes, flatten(vm_export)...)
-				ws_push(out)
+				if false {  // does not work on 2nd run
+					ws_push(out)
+				}
 			}
 
 		}

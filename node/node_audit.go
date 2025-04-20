@@ -652,7 +652,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	auditPass := false
 	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
-		log.Debug(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
+		log.Info(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	} else {
 		log.Warn(debugAudit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	}

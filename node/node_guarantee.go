@@ -23,6 +23,7 @@ type WPQueueItem struct {
 	extrinsics         types.ExtrinsicsBlobs
 	addTS              int64
 	nextAttemptAfterTS int64
+	numFailures        int
 }
 
 func (n *Node) runWPQueue() {
@@ -38,6 +39,13 @@ func (n *Node) runWPQueue() {
 					if n.processWPQueueItem(wpItem) {
 						n.workPackageQueue.Delete(key)
 						return false
+					} else {
+						wpItem.numFailures++
+						if wpItem.numFailures > 3 {
+							log.Warn(debugG, "runWPQueue", "n", n.String(), "numFailures", wpItem.numFailures)
+							n.workPackageQueue.Delete(key)
+							return false
+						}
 					}
 				}
 				return true
@@ -241,6 +249,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				// TODO: PROBLEM report, d are SHARED variables across coworker
 				report, d, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, true)
 				if execErr != nil {
+					log.Warn(module, "processWPQueueItem", "err", execErr)
 					return
 				}
 				guarantee.Report = report
@@ -253,7 +262,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				defer cancel()
 				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
-					log.Trace(debugG, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
+					log.Warn(module, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
 					return
 				}
 				mutex.Lock()

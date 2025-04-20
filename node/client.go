@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
@@ -45,6 +46,7 @@ type NodeClient struct {
 }
 
 func NewNodeClient(coreIndex uint16, servers []string, wsUrl string) (*NodeClient, error) {
+	log.InitLogger("debug")
 	baseclient, err := rpc.Dial("tcp", servers[0])
 	if err != nil {
 		fmt.Printf("Error connecting to server %s: %v\n", servers[0], err)
@@ -393,20 +395,18 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 	}
 	workPackageReq.WorkPackage.RefineContext = refineContext
 	workPackageHash = workPackageReq.WorkPackage.Hash()
-	fmt.Printf("SubmitAndWaitForWorkPackage %s\n", workPackageHash)
+	fmt.Printf("SubmitAndWaitForWorkPackage %s [%s]\n", workPackageHash, workPackageReq.Identifier)
+	log.Info(module, "SubmitAndWaitForWorkPackage")
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		c.Subscribe(SubWorkPackage, map[string]interface{}{
 			"hash": fmt.Sprintf("%s", workPackageHash),
 		})
-
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ctx.Done():
@@ -422,28 +422,95 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 			}
 		}
 	}()
-
-	// Submit the work package (inline, with early return on failure)
 	if err := c.SubmitWorkPackage(workPackageReq); err != nil {
 		// cancel() would go here if you passed a cancellable context
 		wg.Wait()
 		return workPackageHash, fmt.Errorf("SubmitWorkPackage: %w", err)
 	}
-
 	wg.Wait()
 	close(errCh)
-
 	for err := range errCh {
 		return workPackageHash, err
 	}
 	return workPackageHash, nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, workPackageReq []*WorkPackageRequest) (wph []common.Hash, err error) {
-	wph = make([]common.Hash, len(workPackageReq))
-	// TODO
-	return wph, nil
+func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
+	workPackageHashes := make([]common.Hash, len(reqs))
+
+	identifierToIndex := make(map[string]int)
+	fmt.Printf("1 get refine context\n")
+	// Initialize refine context and identifier map
+	refineCtx, err := c.GetRefineContext()
+	if err != nil {
+		return workPackageHashes, err
+	}
+	for i, req := range reqs {
+		identifierToIndex[req.Identifier] = i
+		rc := refineCtx.Clone()
+		req.WorkPackage.RefineContext = *rc
+		log.Info(module, "RefineContext", "req", req.Identifier);
+	}
+
+	// Populate prerequisite hashes
+	for _, req := range reqs {
+		if len(req.Prerequisites) == 0 {
+			continue
+		}
+		prereqHashes := make([]common.Hash, 0, len(req.Prerequisites))
+		for _, prereqID := range req.Prerequisites {
+			if idx, ok := identifierToIndex[prereqID]; ok {
+				prereqHashes = append(prereqHashes, reqs[idx].WorkPackage.Hash())
+				log.Info(module, "Found prereq", "req", req.Identifier, "preqreq", prereqID, "h", reqs[idx].WorkPackage.Hash())
+			} else {
+				log.Warn(module, "Unknown prerequisite identifier", "identifier", prereqID)
+			}
+		}
+		req.WorkPackage.RefineContext.Prerequisites = prereqHashes
+	}
+
+	// Compute hashes and track accumulation status
+	for i, req := range reqs {
+		hash := req.WorkPackage.Hash()
+		workPackageHashes[i] = hash
+		c.Subscribe(SubWorkPackage, map[string]interface{}{
+			"hash": fmt.Sprintf("%s", hash),
+		})
+		if err := c.SubmitWorkPackage(req); err != nil {
+			log.Warn(module, "Failed to submit work package", "identifier", req.Identifier, "err", err)
+			return workPackageHashes, err
+		}
+		log.Info(module, "Subscribe", "id", req.Identifier, "h", hash, "core", req.CoreIndex, "prereqids", req.Prerequisites, "h", req.WorkPackage.RefineContext.Prerequisites)
+	}
+
+	// Wait for accumulation
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return workPackageHashes, ctx.Err()
+		case <-ticker.C:
+			numacc :=0
+			for _, workPackageHash := range workPackageHashes {
+				if status, ok := c.WorkPackage[workPackageHash]; ok {
+					if status == "accumulated" {
+						numacc++
+					}
+				}
+			}
+			if numacc == len(workPackageHashes) {
+				log.Info(module, "All work packages accumulated")
+				return workPackageHashes, nil
+			}
+			
+		}
+	}
+	
 }
+
+
 
 func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
 	tries := 0
