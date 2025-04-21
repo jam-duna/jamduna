@@ -236,6 +236,7 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 	if err != nil {
 		return fmt.Errorf("onSegmentShardRequest: sendQuicBytes segment shard failed: %w", err)
 	}
+	n.SendTelemetry(code, combined_selected_segmentshards)
 
 	// <-- [Segment Justifications] (if requested)
 	if withJustification {
@@ -245,9 +246,12 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 			if err = sendQuicBytes(ctx, stream, s_f, n.id, code); err != nil {
 				return fmt.Errorf("onSegmentShardRequest: sendQuicBytes justification s_f failed (idx %d): %w", item_idx, err)
 			}
+			n.SendTelemetry(255, s_f)
+
 			if err = sendQuicBytes(ctx, stream, s_j, n.id, code); err != nil {
 				return fmt.Errorf("onSegmentShardRequest: sendQuicBytes justification s_j failed (idx %d): %w", item_idx, err)
 			}
+			n.SendTelemetry(255, s_j)
 		}
 	}
 

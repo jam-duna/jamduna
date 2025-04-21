@@ -66,6 +66,7 @@ func (p *Peer) SendBundleShardRequest(
 		log.Warn(debugDA, "SendBundleShardRequest - sending error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		return nil, common.Hash{}, nil, fmt.Errorf("sendQuicBytes[CE138]: %w", err)
 	}
+	p.SendTelemetry(code, reqBytes)
 
 	parts, err := receiveMultiple(ctx, stream, 2, p.PeerID, code)
 	if err != nil {
@@ -128,6 +129,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 	if err := sendQuicBytes(ctx, stream, bundleShard, n.id, code); err != nil {
 		return fmt.Errorf("onBundleShardRequest: send bundleShard failed: %w", err)
 	}
+	n.SendTelemetry(code, bundleShard)
 
 	// Build and send justification
 	pathJustification, _ := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
@@ -141,6 +143,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 	if err := sendQuicBytes(ctx, stream, encodedJustification, n.id, code); err != nil {
 		return fmt.Errorf("onBundleShardRequest: send justification failed: %w", err)
 	}
+	n.SendTelemetry(255, encodedJustification)
 
 	log.Trace(debugA, "onBundleShardRequest sent", "n", n.String(), "bundleShardLen", len(bundleShard), "justificationLen", len(encodedJustification))
 	return nil

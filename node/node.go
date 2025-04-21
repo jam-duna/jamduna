@@ -82,6 +82,9 @@ const (
 	VeryLargeTimeout   = 6000 * time.Second
 	RefineTimeout      = 30 * time.Second //MK; check this
 	DefaultChannelSize = 200
+
+	TelemetryAddress   = "explorer.jamduna.org"
+	sendTelemetry     = false
 )
 
 var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
@@ -165,9 +168,16 @@ type NodeContent struct {
 
 	jceManagerMutex sync.Mutex
 	jceManager      *ManualJCEManager
+
+	TelemetryClient *TelemetryClient
 }
 
-func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
+func NewNodeContent(id uint16, telemetryAddress string, ed25519PublicKey ed25519.PublicKey, store *storage.StateDBStorage) NodeContent {
+	telemetryClient, err := NewTelemetryClient(telemetryAddress, ed25519PublicKey)
+	if err != nil {
+		log.Error(module, "NewTelemetryClient", "err", err)
+		telemetryClient = nil
+	}
 	return NodeContent{
 		id:                   id,
 		store:                store,
@@ -185,6 +195,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage) NodeContent {
 		workPackageQueue:     sync.Map{},
 		new_timeslot_chan:    make(chan uint32, 1),
 		extrinsic_pool:       types.NewExtrinsicPool(),
+		TelemetryClient:      telemetryClient,
 	}
 }
 
@@ -335,6 +346,13 @@ func (n *Node) SetLatestBlockInfo(block *JAMSNP_BlockInfo) {
 	return
 }
 
+func (n *NodeContent) SendTelemetry(code uint8, msg []byte) {
+	if n.TelemetryClient != nil && sendTelemetry {
+		n.TelemetryClient.SendMessage(code, msg)
+	}
+	return
+}
+
 func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
 	wpHashBytes := wp.Hash().Bytes()
 	wpHashHex := hex.EncodeToString(wpHashBytes)
@@ -447,7 +465,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		NodeContent: NewNodeContent(id, store),
+		NodeContent: NewNodeContent(id, TelemetryAddress, ed25519_pub, store),
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),

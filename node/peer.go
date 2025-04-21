@@ -18,8 +18,6 @@ import (
 
 const (
 	UP0_BlockAnnouncement        uint8 = iota
-	CE101_VoteMessage                  = 101
-	CE102_CommitMessage                = 102
 	CE128_BlockRequest                 = 128
 	CE129_StateRequest                 = 129
 	CE131_TicketDistribution           = 131
@@ -37,6 +35,12 @@ const (
 	CE143_PreimageRequest              = 143
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
+	CE192_VoteMessage                  = 192
+	CE193_CommitMessage                = 193
+	CE194_NeighborMessage              = 194
+	CE195_Catchup                      = 195
+	CE224_BLSSignature                 = 224
+	CE225_BLSAggregateSignature        = 225
 
 	useQuicDeadline = false
 )
@@ -81,8 +85,16 @@ func NewPeer(n *Node, validatorIndex uint16, validator types.Validator, peerAddr
 	}
 	return p
 }
+
 func (p *Peer) String() string {
 	return fmt.Sprintf("[N%d => %d]", p.node.id, p.PeerID)
+}
+
+func (p *Peer) SendTelemetry(code uint8, m []byte) error {
+	if p.node.TelemetryClient != nil && sendTelemetry { 
+		p.node.TelemetryClient.SendMessage(code, m)
+	}
+	return nil
 }
 
 func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) {
@@ -274,10 +286,6 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	switch msgType {
 	case UP0_BlockAnnouncement:
 		return n.onBlockAnnouncement(stream, msg, peerID)
-	case CE101_VoteMessage:
-		return n.onVoteMessage(ctx, stream, msg)
-	case CE102_CommitMessage:
-		return n.onCommitMessage(ctx, stream, msg)
 	case CE128_BlockRequest:
 		return n.onBlockRequest(ctx, stream, msg, peerID)
 	case CE129_StateRequest:
@@ -310,7 +318,20 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 		return n.onAuditAnnouncement(ctx, stream, msg, peerID)
 	case CE145_JudgmentPublication:
 		return n.onJudgmentPublication(ctx, stream, msg, peerID)
+	case CE192_VoteMessage:
+		return n.onVoteMessage(ctx, stream, msg)
+	case CE193_CommitMessage:
+		return n.onCommitMessage(ctx, stream, msg)
+	case CE194_NeighborMessage:
+		//return n.onNeighborMessage(ctx, stream, msg)
+	case CE195_Catchup:
+		//return n.onCatchup(ctx, stream, msg)
+	case CE224_BLSSignature:
+		//return n.onBLSSignature(ctx, stream, msg)
+	case CE225_BLSAggregateSignature:
+		//return n.onBLSAggregateSignature(ctx, stream, msg)
 	default:
 		return errors.New("unknown message type")
 	}
+	return nil
 }

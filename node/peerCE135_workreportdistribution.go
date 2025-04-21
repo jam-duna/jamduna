@@ -150,6 +150,7 @@ func (p *Peer) SendWorkReportDistribution(
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
 	}
+	p.SendTelemetry(code, reqBytes)
 
 	return nil
 }

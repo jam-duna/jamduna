@@ -108,6 +108,7 @@ func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance) error {
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE141_AssuranceDistribution]: %w", err)
 	}
+	p.SendTelemetry(code, reqBytes)
 
 	return nil
 }

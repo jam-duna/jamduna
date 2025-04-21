@@ -133,6 +133,7 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 	if err != nil {
 		return err
 	}
+	p.SendTelemetry(CE129_StateRequest, reqBytes)
 
 	//<-- [Boundary Node]
 	// TODO
@@ -184,6 +185,7 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 	if err != nil {
 		return fmt.Errorf("onStateRequest: failed to send keyvalues: %w", err)
 	}
+	n.SendTelemetry(CE129_StateRequest, kvbytes)
 
 	// <-- FIN
 	return nil

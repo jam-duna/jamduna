@@ -73,25 +73,4 @@
       debug:
         msg: "All instances started."
 
-# - hosts: localhost
-#   gather_facts: false
-#   vars:
-#     ARCHIVE_NODE_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/archive_node"
-#     PEER_JSON: "/root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/peerlist/jam.json" #cmd/archive_node/peerlist/jam.json
-#   tasks:
-#     - name: Wait for all nodes to be ready
-#       wait_for:
-#         timeout: 10
 
-#     - name: Start archive_node on localhost
-#       shell: |
-#         cd /root/go/src/github.com/colorfulnotion/jam/cmd/archive_node/
-#         nohup make run > /tmp/logs/archive_node.log 2>&1 < /dev/null &
-#         echo "Archive node started."
-#       tags: restart_archive
-#       args:
-#         executable: /bin/bash
-
-#     - name: Display archive_node start message
-#       debug:
-#         msg: "archive_node started on localhost using 'make run' from archive_node directory."

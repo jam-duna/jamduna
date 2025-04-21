@@ -9,14 +9,14 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-// CE101_VoteMessage
+// CE192_VoteMessage
 func (p *Peer) SendVoteMessage(ctx context.Context, req grandpa.VoteMessage) error {
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return fmt.Errorf("SendVoteMessage: ToBytes failed: %w", err)
 	}
 
-	code := uint8(CE101_VoteMessage)
+	code := uint8(CE192_VoteMessage)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		return fmt.Errorf("SendVoteMessage: openStream failed: %w", err)

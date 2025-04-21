@@ -14,15 +14,15 @@ func (p *Peer) SendCommitMessage(ctx context.Context, req grandpa.CommitMessage)
 		return fmt.Errorf("CommitMessage.ToBytes failed: %w", err)
 	}
 
-	code := uint8(CE102_CommitMessage)
+	code := uint8(CE193_CommitMessage)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return fmt.Errorf("openStream[CE102_CommitMessage] failed: %w", err)
+		return fmt.Errorf("openStream[CE193_CommitMessage] failed: %w", err)
 	}
 	defer stream.Close()
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
-		return fmt.Errorf("sendQuicBytes[CE102_CommitMessage] failed: %w", err)
+		return fmt.Errorf("sendQuicBytes[CE193_CommitMessage] failed: %w", err)
 	}
 
 	return nil

@@ -143,6 +143,7 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE145_JudgmentPublication]: %w", err)
 	}
+	p.SendTelemetry(code, reqBytes)
 
 	return nil
 }

@@ -295,6 +295,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, a *JAMSNPAuditAnnounce
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[AUDIT_ANNOUNCEMENT]: %w", err)
 	}
+	p.SendTelemetry(code, reqBytes)
 
 	if a.Announcement.Tranche == 0 {
 		// Send s_0 signature
@@ -335,6 +336,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, a *JAMSNPAuditAnnounce
 			if err := sendQuicBytes(ctx, stream, evBytes, p.PeerID, code); err != nil {
 				return fmt.Errorf("sendQuicBytes[AUDIT_NOT0_EVIDENCE #%d]: %w", i, err)
 			}
+			p.SendTelemetry(255, evBytes)
 		}
 	}
 

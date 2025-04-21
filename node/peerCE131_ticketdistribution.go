@@ -118,6 +118,7 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes failed: %w", err)
 	}
+	p.SendTelemetry(code, reqBytes)
 
 	return nil
 }

@@ -102,6 +102,8 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	if err != nil {
 		return err
 	}
+	p.SendTelemetry(code, reqBytes)
+
 	log.Trace(debugG, "submitted Workpackage to core", "p", p.String(), "len", len(reqBytes), "core", core_idx)
 
 	return nil

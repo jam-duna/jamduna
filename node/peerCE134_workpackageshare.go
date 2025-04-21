@@ -260,6 +260,7 @@ func (p *Peer) ShareWorkPackage(
 		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
+	p.SendTelemetry(code, reqBytes)
 
 	// Receive response
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
@@ -391,6 +392,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	if err != nil {
 		return fmt.Errorf("onWorkPackageShare: sendQuicBytes failed: %w", err)
 	}
+	n.SendTelemetry(CE134_WorkPackageShare, reqBytes)
 
 	// <-- FIN
 	return nil
