@@ -1,0 +1,33 @@
+---
+- name: Fetch jam_9900.log from remote hosts
+  hosts: all
+  gather_facts: false
+  vars:
+    timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M') }}"
+    local_log_dir: "../logs/jam_logs_{{ timestamp }}"
+
+  tasks:
+    - name: Ensure local log directory exists
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: "{{ local_log_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check if remote log file exists
+      stat:
+        path: /tmp/logs/jam_9900.log
+      register: log_file
+
+    - name: Fetch log if it exists
+      when: log_file.stat.exists
+      fetch:
+        src: /tmp/logs/jam_9900.log
+        dest: "{{ local_log_dir }}/{{ inventory_hostname }}.log"
+        flat: yes
+
+    - name: Print warning if log was not found
+      when: not log_file.stat.exists
+      debug:
+        msg: "Log file not found on {{ inventory_hostname }}"
