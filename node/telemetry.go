@@ -21,9 +21,18 @@ func NewTelemetryClient(addr string, senderID ed25519.PublicKey) (*TelemetryClie
 		queue:    make(chan []byte, 100),
 		done:     make(chan struct{}),
 	}
-	go client.run(addr)
-	go client.senderLoop()
+	if sendTelemetry {
+		go client.run(addr)
+		go client.senderLoop()
+	}
 	return client, nil
+}
+
+func (c *TelemetryClient) Stop() {
+	close(c.done)
+	if c.Conn != nil {
+		c.Conn.Close()
+	}
 }
 
 func (c *TelemetryClient) run(addr string) {

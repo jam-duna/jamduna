@@ -38,7 +38,8 @@ type JNode interface {
 }
 
 var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
-var jam_local = flag.Bool("jam_local", false, "jam_local")
+var jam_node = flag.Bool("jam_node", false, "jam_node")
+var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
 
 const (
 	webServicePort = 8079
@@ -221,36 +222,31 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 	var bNode JNode
 	var tNode *Node
+	var err error
 
-	if !*jam_local { // NodeClient -- remote scenario (could be dot-0 OR localhost:____ )
+	if !*jam_node { // NodeClient -- client scenario (could be dot-0 OR localhost:____ )
 		if isDisputeMode {
-			t.Fatalf("Dispute mode is not supported for remote test\n")
+			t.Fatalf("Dispute mode is not supported for client test\n")
 		}
 		if jam == "safrole" || jam == "fallback" {
-			t.Logf("Nothing to test for %s-remote\n", jam)
+			t.Logf("Nothing to test for %s-client\n", jam)
 			return
 		}
 
-		fmt.Printf("jamtest: %s-remote\n", jam)
-		var err error
-		/*
-			We can simulate local 6 nodes setup with isLocalParallelMode = true.
-			local 6 nodes: 11100....11006 | jamduna.org: 10800....10806
-		*/
-		isLocalParallelMode := false // need better naming for the localhost:__ case
-		// change this to **true** to run local parallel test
-		// make run_parallel_jam (uses 11100)
-		tcpServers, wsUrl := GetAddresses(isLocalParallelMode)
-		bNode, err = NewNodeClient(0, tcpServers, wsUrl)
+		fmt.Printf("jamtest: %s-client (local=%v)\n", jam, *jam_local_client)
+		tcpServers, wsUrl := GetAddresses(*jam_local_client)
+		bNode, err = NewNodeClient(tcpServers, wsUrl)
 		if err != nil {
-			t.Fatalf("NewNodeClient ERR %v\n", err)
+			fmt.Printf("NewNodeClient ERR %v\n", err)
+			err = fmt.Errorf("‼️ jamtest: %s-client (local=%v) Failed. Connection Problem?\n", jam, *jam_local_client)
+			t.Fatalf("%v", err)
 		}
 		fmt.Printf("%s tcp:%v\n", wsUrl, tcpServers)
 		client := bNode.(*NodeClient)
 		err = client.ConnectWebSocket(wsUrl)
 	} else { // Node
 
-		fmt.Printf("jamtest: %s-local\n", jam)
+		fmt.Printf("jamtest: %s-node\n", jam)
 		basePort := GenerateRandomBasePort()
 
 		JCEMode := JCEDefault

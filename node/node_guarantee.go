@@ -41,8 +41,9 @@ func (n *Node) runWPQueue() {
 						return false
 					} else {
 						wpItem.numFailures++
-						if wpItem.numFailures > 3 {
+						if wpItem.numFailures > 0 {
 							log.Warn(debugG, "runWPQueue", "n", n.String(), "numFailures", wpItem.numFailures)
+							panic("numFailures > 0")
 							n.workPackageQueue.Delete(key)
 							return false
 						}
@@ -211,8 +212,8 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	// here we are a first guarantor building a bundle (imported segments, justifications, extrinsics)
 	bundle, segmentRootLookup, err := n.buildBundle(wpItem)
 	if err != nil {
-		log.Warn(debugG, "processWPQueueItem", "n", n.String(), "err", err)
 		wpItem.nextAttemptAfterTS = time.Now().Unix() + 6
+		log.Warn(debugG, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 
@@ -220,10 +221,13 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	// reject if the work package is not for this core
 	if wpItem.coreIndex != curr_statedb.GetSelfCoreIndex() {
 		wpItem.nextAttemptAfterTS = time.Now().Unix() + 6
+		log.Warn(debugG, "processWPQueueItem -  work package is not for this core", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.coreIndex", wpItem.coreIndex, "sdb.GetSelfCoreIndex", curr_statedb.GetSelfCoreIndex(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 	err = curr_statedb.VerifyPackage(bundle)
 	if err != nil {
+		wpItem.nextAttemptAfterTS = time.Now().Unix() + 6
+		log.Warn(debugG, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 	var wg sync.WaitGroup
@@ -289,7 +293,8 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				Signature:      fellowSignature,
 			})
 			sort.Slice(guarantee.Signatures, func(i, j int) bool {
-				return guarantee.Signatures[i].ValidatorIndex < guarantee.Signatures[j].ValidatorIndex
+				status := guarantee.Signatures[i].ValidatorIndex < guarantee.Signatures[j].ValidatorIndex
+				return status
 			})
 		} else {
 			log.Warn(debugG, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(),
@@ -314,6 +319,11 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		if err != nil {
 			log.Error(debugG, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}
+	} else {
+		wpItem.nextAttemptAfterTS = time.Now().Unix() + 6
+		log.Warn(debugG, "processWPQueueItem Guarantee not enough signatures", "n", n.String(),
+			"guarantee.Signatures", guarantee.Signatures, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		return false
 	}
 	return true
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 )
 
 const (
@@ -56,7 +57,7 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 		Dirty:           s.Dirty,
 		NewAccount:      s.NewAccount,
 		Checkpointed:    s.Checkpointed,
-		Mutable:         s.Mutable, // should ALLOW_MUTABLE explicitly
+		Mutable:         s.Mutable, // should ALLOW_MUTABLE explicitly... check??
 	}
 
 	// Clone the Storage map
@@ -250,6 +251,7 @@ func (s *ServiceAccount) GetServiceIndex() uint32 {
 }
 
 func (s *ServiceAccount) ALLOW_MUTABLE() {
+	fmt.Printf("ALLOW_MUTABLE: %v!!!\n", s.ServiceIndex)
 	s.Mutable = true
 }
 
@@ -437,7 +439,10 @@ func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 }
 
 func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK common.Hash, val []byte) {
+	log.Info(log.PvmAuthoring, "WriteStorage", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
+	fmt.Printf("WriteStorage: %v\n", serviceIndex)
 	if s.Mutable == false {
+		//log.Crit(log.PvmAuthoring, "WriteStorage Mutable Err: Called WriteStorage on immutable ServiceAccount", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
 		panic("Called WriteStorage on immutable ServiceAccount")
 	}
 	// k for original raw key, hk for hash key

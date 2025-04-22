@@ -172,7 +172,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v\n", validatorIndex, secrets[validatorIndex].Ed25519Pub, config.Port, time.Now().String(), n.GetBuild())
-	StartRuntimeMonitor(3 * time.Second)
+	StartRuntimeMonitor(30 * time.Second)
 	timer := time.NewTimer(72 * time.Hour)
 	<-timer.C
 	fmt.Println("Node has been running for 3 days. Shutting down...")
@@ -247,34 +247,39 @@ func setupValidatorSecret(bandersnatchHex, ed25519Hex, blsHex, metadata string) 
 }
 
 func StartRuntimeMonitor(interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	go func() {
+		defer ticker.Stop()
 		var mem runtime.MemStats
-		var routineCount int
-		var historyHighest int
-		for {
-			runtime.ReadMemStats(&mem)
+		var highest, count int
 
-			routineCount = runtime.NumGoroutine()
-			if routineCount > historyHighest {
-				historyHighest = routineCount
-				fmt.Printf("[MONITOR New Record] 🧠 Memory = %d MB | 💾 TotalAlloc = %d MB | 📦 Sys = %d MB | ♻️ GC = %d | 🧵 Goroutines = %d\n",
-					mem.Alloc/1024/1024,
-					mem.TotalAlloc/1024/1024,
-					mem.Sys/1024/1024,
-					mem.NumGC,
-					routineCount,
-				)
-			} else {
-				fmt.Printf("[MONITOR] 🧠 Memory = %d MB | 💾 TotalAlloc = %d MB | 📦 Sys = %d MB | ♻️ GC = %d | 🧵 Goroutines = %d\n",
-					mem.Alloc/1024/1024,
-					mem.TotalAlloc/1024/1024,
-					mem.Sys/1024/1024,
-					mem.NumGC,
-					routineCount,
-				)
+		// Immediate first report
+		const asMB = 1024 * 1024
+		runtime.ReadMemStats(&mem)
+		count = runtime.NumGoroutine()
+		highest = count
+		allocMB := mem.Alloc / asMB
+		totalAllocMB := mem.TotalAlloc / asMB
+		sysMB := mem.Sys / asMB
+		fmt.Printf("%-22s 🧠 Memory:%4dMB | 💾 TotalAlloc:%4dMB | 📦 Sys:%4dMB | ♻️ GC:%4d | 🧵 Goroutines:%4d\n",
+			"[MONITOR New Record]", allocMB, totalAllocMB, sysMB, mem.NumGC, count)
+
+		// Then on every tick
+		for range ticker.C {
+			runtime.ReadMemStats(&mem)
+			count = runtime.NumGoroutine()
+			allocMB = mem.Alloc / asMB
+			totalAllocMB = mem.TotalAlloc / asMB
+			sysMB = mem.Sys / asMB
+
+			label := "[MONITOR]"
+			if count > highest {
+				highest = count
+				label = "[MONITOR New Record]"
 			}
 
-			time.Sleep(interval)
+			fmt.Printf("%-22s 🧠 Memory:%4dMB | 💾 TotalAlloc:%4dMB | 📦 Sys:%4dMB | ♻️ GC:%4d | 🧵 Goroutines:%4d\n",
+				label, allocMB, totalAllocMB, sysMB, mem.NumGC, count)
 		}
 	}()
 }

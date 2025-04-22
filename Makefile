@@ -17,13 +17,23 @@ jam:
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) .
+
 tiny: jam
 	ansible-playbook -u root -i /root/go/src/github.com/colorfulnotion/jam/hosts.txt -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml 
+
+jam_clean:
+	@echo "Cleaning all jam data directories under ~/.jam..."
+	@rm -rf ${HOME}/.jam/jam-*
+	@echo "Done."
+
 run_parallel_jam:
 	@mkdir -p logs 
 	@echo "Starting $(NUM_NODES) instances of bin/jam..."
 	@seq 0 $(shell echo $$(($(NUM_NODES) - 1))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); bin/jam -net_spec $(NETWORK) -port $$PORT -start_time "$(JAM_START_TIME)"; echo "Instance {} finished with port $$PORT"' sh
 	@echo "All instances started."
+
+run_localclient_jam: jam_clean run_parallel_jam
+
 run_single_node:
 	@echo "Starting single node JAM instance..."
 	@echo "Starting bin/jam... with network $(NETWORK) port $(SINGLE_NODE_PORT) start_time $(JAM_START_TIME)"

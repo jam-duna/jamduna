@@ -619,7 +619,7 @@ func (n *NodeContent) runJamWeb(ctx context.Context, wg *sync.WaitGroup, basePor
 	go func() {
 		defer wg.Done()
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Crit(debugWeb, "ListenAndServe error", err)
+			log.Crit(debugWeb, "JAMWen ListenAndServe error", "err", err)
 		}
 	}()
 

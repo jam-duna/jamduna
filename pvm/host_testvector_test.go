@@ -773,7 +773,7 @@ func InitPvmAccumulate(vm *VM, testcase AccumulateTestcase) {
 	// Initialize vm.XContext and vm.XContextY
 	service_account, _ := XContext.GetX_s()
 	if service_account != nil {
-		service_account.Mutable = true
+		service_account.ALLOW_MUTABLE()
 	}
 	vm.X = XContext
 	vm.Timeslot = testcase.InitialTimeslot

@@ -16,9 +16,9 @@ func TestClient(t *testing.T) {
 	local := *isLocal
 
 	addresses, wsUrl := GetAddresses(local)
-	coreIndex := uint16(0)
+	//coreIndex := uint16(0)
 
-	client, err := NewNodeClient(coreIndex, addresses, wsUrl)
+	client, err := NewNodeClient(addresses, wsUrl)
 	if err != nil {
 		t.Fatalf("Error: %s", err)
 	}
@@ -43,8 +43,8 @@ func TestCommands(t *testing.T) {
 	local := true
 	addresses, wsUrl := GetAddresses(local)
 
-	coreIndex := uint16(0)
-	client, err := NewNodeClient(coreIndex, addresses, wsUrl)
+	//coreIndex := uint16(0)
+	client, err := NewNodeClient(addresses, wsUrl)
 	if err != nil {
 		t.Fatalf("Error: %s", err)
 	}

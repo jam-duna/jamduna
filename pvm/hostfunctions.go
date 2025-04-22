@@ -551,7 +551,7 @@ func (vm *VM) hostNew() {
 	// simulate a with c, g, m
 	a := &types.ServiceAccount{
 		ServiceIndex:    xi,
-		Mutable:         true,
+		Mutable:         false,
 		Dirty:           false,
 		CodeHash:        common.BytesToHash(c),
 		GasLimitG:       uint64(g),
@@ -564,6 +564,7 @@ func (vm *VM) hostNew() {
 		Checkpointed:    false, // this is updated to true upon Checkpoint
 		NewAccount:      true,  // with this flag, if an account is Dirty OR Checkpointed && NewAccount then it is written
 	}
+	a.ALLOW_MUTABLE()
 	a.Balance = a.ComputeThreshold()
 	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
 	xContext.I = new_check(uint32(256)+uint32(xi-256+42)%(uint32(4294966784)), xContext.U.D)

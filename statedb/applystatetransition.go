@@ -147,7 +147,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.D {
-		sa.Mutable = true
+		sa.ALLOW_MUTABLE()
 		sa.Dirty = true
 	}
 	// writeAccount and initializes s.stateUpdate

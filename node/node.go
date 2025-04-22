@@ -83,8 +83,8 @@ const (
 	RefineTimeout      = 30 * time.Second //MK; check this
 	DefaultChannelSize = 200
 
-	TelemetryAddress   = "explorer.jamduna.org"
-	sendTelemetry     = false
+	TelemetryAddress = "explorer.jamduna.org"
+	sendTelemetry    = false
 )
 
 var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
@@ -2278,7 +2278,7 @@ func (n *Node) runClient() {
 			n.statedbMutex.Unlock()
 			if isAuthorizedBlockBuilder {
 				lastAuthorizableJCE = currJCE
-				log.Info(module, "runClient: Authorized", "n", n.String(), "JCE", currJCE)
+				log.Trace(module, "runClient: Authorized", "n", n.String(), "JCE", currJCE)
 			} else {
 				// No work to do if not authorized
 				continue
