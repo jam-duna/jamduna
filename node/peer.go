@@ -91,7 +91,7 @@ func (p *Peer) String() string {
 }
 
 func (p *Peer) SendTelemetry(code uint8, m []byte) error {
-	if p.node.TelemetryClient != nil && sendTelemetry { 
+	if p.node.TelemetryClient != nil && sendTelemetry {
 		p.node.TelemetryClient.SendMessage(code, m)
 	}
 	return nil

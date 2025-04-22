@@ -1,4 +1,4 @@
-TIMEOUT            ?= 40m
+TIMEOUT            ?= 400h
 TAGS               ?= tiny
 MEG_L              ?= 911
 MEG_S              ?= 8

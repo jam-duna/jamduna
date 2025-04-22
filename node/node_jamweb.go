@@ -114,15 +114,17 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 			for _, req := range reqs {
 				switch req.Method {
 				case SubServiceInfo:
-					payload := types.WSPayload{
-						Method: SubServiceInfo,
-						Result: types.SubServiceInfoResult{
-							ServiceID: serviceID,
-							Info:      upd.ServiceInfo.Info,
-						},
+					if upd.ServiceInfo != nil {
+						payload := types.WSPayload{
+							Method: SubServiceInfo,
+							Result: types.SubServiceInfoResult{
+								ServiceID: serviceID,
+								Info:      upd.ServiceInfo.Info,
+							},
+						}
+						data, err = json.Marshal(payload)
+						client.sendData(data)
 					}
-					data, err = json.Marshal(payload)
-					client.sendData(data)
 				case SubServiceValue:
 					if upd.ServiceValue == nil {
 						continue
@@ -619,7 +621,7 @@ func (n *NodeContent) runJamWeb(ctx context.Context, wg *sync.WaitGroup, basePor
 	go func() {
 		defer wg.Done()
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Crit(debugWeb, "JAMWen ListenAndServe error", "err", err)
+			log.Crit(debugWeb, "JAMWeb ListenAndServe error", "err", err)
 		}
 	}()
 

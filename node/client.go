@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/rpc"
 	"os"
 	"strconv"
@@ -47,9 +48,9 @@ type NodeClient struct {
 
 func NewNodeClient(servers []string, wsUrl string) (*NodeClient, error) {
 	log.InitLogger("debug")
-	baseclient, err := rpc.Dial("tcp", servers[0])
+	baseclient, err := rpc.Dial("tcp", servers[0]) // TODO
 	if err != nil {
-		fmt.Printf("Error connecting to server %s: %v\n", servers[0], err)
+		log.Error(module, "NewNodeClient", "endpoint", servers[0], "err", err)
 		return nil, err
 	}
 
@@ -94,7 +95,7 @@ func (c *NodeClient) listenWebSocket() {
 		}
 		_, msg, err := c.wsConn.ReadMessage()
 		if err != nil {
-			fmt.Printf("WebSocket read error: %v\n", err)
+			log.Warn(module, "listenWebSocket read error", "err", err)
 			return
 		}
 
@@ -104,7 +105,7 @@ func (c *NodeClient) listenWebSocket() {
 		}
 
 		if err := json.Unmarshal(msg, &envelope); err != nil {
-			fmt.Printf("Failed to parse WebSocket envelope: (%s) %v\n", string(msg), err)
+			log.Warn(module, "listenWebSocket: Failed to parse WebSocket envelope", "err", err)
 			continue
 		}
 
@@ -115,10 +116,9 @@ func (c *NodeClient) listenWebSocket() {
 				HeaderHash string `json:"headerHash"`
 			}
 			if err := json.Unmarshal(envelope.Result, &result); err != nil {
-				fmt.Printf("Failed to parse BlockAnnouncement: %v\n", err)
+				log.Warn(module, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
 				continue
 			}
-			//fmt.Printf("BlockAnnouncement received: HeaderHash=%s\n", result.HeaderHash)
 			c.HeaderHash = common.Hex2Hash(result.HeaderHash)
 
 			go c.GetState(result.HeaderHash)
@@ -129,10 +129,9 @@ func (c *NodeClient) listenWebSocket() {
 				Statistics types.ValidatorStatistics `json:"statistics"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse StatisticsUpdate: %v\n", err)
+				log.Warn(module, "listenWebSocket: Failed to parse StatisticsUpdate", "err", err)
 				continue
 			}
-			//fmt.Printf("Statistics update for %s: %+v\n", payload.HeaderHash, payload.Statistics)
 			c.Statistics = payload.Statistics
 
 		case SubServiceInfo:
@@ -141,10 +140,9 @@ func (c *NodeClient) listenWebSocket() {
 				Info      types.ServiceAccount `json:"info"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
 				continue
 			}
-			//fmt.Printf("ServiceInfo update for service %d: %+v\n", payload.ServiceID, payload.Info)
 			c.ServiceInfo[payload.ServiceID] = payload.Info
 			break
 		case SubServiceValue:
@@ -157,11 +155,9 @@ func (c *NodeClient) listenWebSocket() {
 				Value      string      `json:"value"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				log.Warn(module, "listenWebSocket: Failed to parse SubServiceValue", "err", err)
 				continue
 			}
-			fmt.Printf("ServiceValue update for service %d %s: key %+v val %+v\n", payload.ServiceID, payload.Hash, payload.Key, payload.Value)
-			//h := common.HexToHash(payload.Hash)
 			c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
 			break
 
@@ -172,11 +168,10 @@ func (c *NodeClient) listenWebSocket() {
 				Preimage  string      `json:"preimage"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse ServiceInfoUpdate: %v\n", err)
+				log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
 				continue
 			}
 			c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
-			//fmt.Printf("NodeCServicePreimage for service %d (h=%s, l=%d)\n", payload.ServiceID, payload.Hash, len(c.Preimage[payload.Hash]))
 			break
 
 		case SubServiceRequest:
@@ -186,10 +181,9 @@ func (c *NodeClient) listenWebSocket() {
 				Timeslots []uint32    `json:"timeslots"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse SubServiceRequest: %v\n", err)
+				log.Warn(module, "listenWebSocket: Failed to parse SubServiceRequest", "err", err)
 				continue
 			}
-			//fmt.Printf("ServiceRequest update for service %d: %+v\n", payload.ServiceID, payload.Timeslots)
 			c.ServiceRequest[payload.Hash] = payload.Timeslots
 			break
 
@@ -199,14 +193,13 @@ func (c *NodeClient) listenWebSocket() {
 				Status          string      `json:"status"`
 			}
 			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				fmt.Printf("Failed to parse SubWorkPackage: %v\n", err)
+				log.Warn(module, "listenWebSocket: Failed to parse SubWorkPackage", "err", err)
 				continue
 			}
-			//fmt.Printf("WorkPackage update for workpackage %s: %+v\n", payload.WorkPackageHash, payload.Status)
 			c.WorkPackage[payload.WorkPackageHash] = payload.Status
 			break
 		default:
-			fmt.Printf("Unknown method: %s\n", envelope.Method)
+			log.Warn(module, "listenWebSocket: Failed to parse method", "method", envelope.Method)
 		}
 	}
 }
@@ -243,16 +236,26 @@ func (c *NodeClient) Unsubscribe(method string, params map[string]interface{}) e
 	return c.wsConn.WriteJSON(msg)
 }
 
-func (c *NodeClient) GetClient(coreIdx uint16) *rpc.Client {
+func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
+	var coreIdx uint16
+	// select random core
+	if len(possibleCores) > 0 {
+		// this should be a list of cores you have coretime for
+		coreIdx = possibleCores[rand.Intn(len(possibleCores))]
+	} else {
+		coreIdx = uint16(rand.Intn(types.TotalCores))
+	}
 	idx, err := c.GetCoreCoWorkersPeers(coreIdx)
 	if err != nil {
-		fmt.Printf("GetCoreCoWorkersPeers ERR %v\n", err)
+		log.Error(module, "GetClient: GetCoreCoWorkersPeers", "err", err)
 		return c.baseClient
 	}
 
-	client, err := rpc.Dial("tcp", c.servers[idx[0]])
+	// Select random peer
+	selected := idx[rand.Intn(len(idx))]
+	client, err := rpc.Dial("tcp", c.servers[selected])
 	if err != nil {
-		fmt.Printf("Dial ERR %v\n", err)
+		log.Error(module, "GetClient: Dial", "selected", selected, "c.servers[selected]", c.servers[selected], "err", err)
 		return c.baseClient
 	}
 	c.client = client
@@ -263,7 +266,7 @@ func (c *NodeClient) SendCommand(command []string, nodeID int) {
 	addr := c.servers[nodeID]
 	client, err := rpc.Dial("tcp", addr)
 	if err != nil {
-		fmt.Printf("Error connecting to server %s: %v\n", addr, err)
+		log.Error(module, "SendCommand: Dial", "addr", addr, "err", err)
 		return
 	}
 	defer client.Close()
@@ -271,10 +274,10 @@ func (c *NodeClient) SendCommand(command []string, nodeID int) {
 	var response string
 	err = client.Call("jam.NodeCommand", command, &response)
 	if err != nil {
-		fmt.Printf("Error calling command on server %s: %v\n", addr, err)
+		log.Error(module, "SendCommand: jam.NodeCommand", "addr", addr, "err", err)
 		return
 	}
-	fmt.Printf("Response from server %s: %s\n", addr, response)
+	log.Info(module, "SendCommand: Response", "addr", addr, "response", response)
 }
 
 func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {
@@ -291,7 +294,7 @@ func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {
 			}
 			client, err := rpc.Dial("tcp", addr)
 			if err != nil {
-				fmt.Printf("Error connecting to server %s: %v\n", addr, err)
+				log.Error(module, "BroadcastCommand", "addr", addr, "err", err)
 				return
 			}
 			defer client.Close()
@@ -299,10 +302,10 @@ func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {
 			var response string
 			err = client.Call("jam.NodeCommand", command, &response)
 			if err != nil {
-				fmt.Printf("Error calling command on server %s: %v\n", addr, err)
+				log.Error(module, "BroadcastCommand", "addr", addr, "err", err)
 				return
 			}
-			fmt.Printf("Response from server %s: %s\n", addr, response)
+			log.Info(module, "BroadcastCommand: Response", "addr", addr, "response", response)
 		}(address, i)
 	}
 	wg.Wait()
@@ -328,7 +331,7 @@ func (c *NodeClient) GetCoreCoWorkersPeers(coreIdx uint16) (idx []uint16, err er
 
 func (c *NodeClient) GetState(headerHash string) (sdb *statedb.StateSnapshot, err error) {
 	var jsonStr string
-	err = c.GetClient(0).Call("jam.State", []string{headerHash}, &jsonStr)
+	err = c.GetClient().Call("jam.State", []string{headerHash}, &jsonStr)
 	if err != nil {
 		return
 	}
@@ -345,7 +348,7 @@ func (c *NodeClient) GetState(headerHash string) (sdb *statedb.StateSnapshot, er
 }
 
 func (c *NodeClient) GetCurrJCE() (result uint32, err error) {
-	err = c.GetClient(0).Call("jam.GetCurrJCE", struct{}{}, &result)
+	err = c.GetClient().Call("jam.GetCurrJCE", struct{}{}, &result)
 	return result, err
 }
 
@@ -369,10 +372,9 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 	// Marshal the WorkPackageRequest to JSON
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
+		log.Warn(module, "SubmitWorkPackage", "err", err)
 		return fmt.Errorf("failed to marshal work package request: %w", err)
 	}
-
-	//fmt.Printf("SubmitWorkPackage:%v | ExtrinsicBlobs:%x | %s\n", workPackageReq.WorkPackage.Hash(), workPackageReq.ExtrinsicsBlobs, string(reqBytes))
 
 	// Prepare the request as a one-element string slice
 	req := []string{string(reqBytes)}
@@ -381,7 +383,7 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 	// Call the remote RPC method
 	err = c.GetClient(workPackageReq.CoreIndex).Call("jam.SubmitWorkPackage", req, &res)
 	if err != nil {
-		fmt.Printf("SubmitWorkPackage ERR %v\n", err)
+		log.Warn(module, "SubmitWorkPackage: jam.SubmitWorkPackage", "coreIndex", workPackageReq.CoreIndex, "err", err)
 		return err
 	}
 	return nil
@@ -390,13 +392,12 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *WorkPackageRequest) (workPackageHash common.Hash, err error) {
 	refineContext, err := c.GetRefineContext()
 	if err != nil {
-		fmt.Printf("GetRefineContext ERR %s\n", err)
+		log.Warn(module, "SubmitAndWaitForWorkPackage: GetRefineContext", "err", err)
 		return workPackageHash, err
 	}
 	workPackageReq.WorkPackage.RefineContext = refineContext
 	workPackageHash = workPackageReq.WorkPackage.Hash()
-	fmt.Printf("SubmitAndWaitForWorkPackage %s [%s]\n", workPackageHash, workPackageReq.Identifier)
-	log.Info(module, "SubmitAndWaitForWorkPackage")
+	log.Info(module, "SubmitAndWaitForWorkPackage", "id", workPackageReq.Identifier, "workPackageHash", workPackageHash)
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -415,7 +416,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 			case <-ticker.C:
 				if status, ok := c.WorkPackage[workPackageHash]; ok {
 					if status == "accumulated" {
-						fmt.Printf("SubmitAndWaitForWorkPackage %s ACC\n", workPackageReq.WorkPackage.Hash())
+						log.Info(module, "SubmitAndWaitForWorkPackage ACC", "wph", workPackageReq.WorkPackage.Hash())
 						return
 					}
 				}
@@ -439,7 +440,6 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 	workPackageHashes := make([]common.Hash, len(reqs))
 
 	identifierToIndex := make(map[string]int)
-	fmt.Printf("1 get refine context\n")
 	// Initialize refine context and identifier map
 	refineCtx, err := c.GetRefineContext()
 	if err != nil {
@@ -449,7 +449,6 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 		identifierToIndex[req.Identifier] = i
 		rc := refineCtx.Clone()
 		req.WorkPackage.RefineContext = *rc
-		log.Info(module, "RefineContext", "req", req.Identifier)
 	}
 
 	// Populate prerequisite hashes
@@ -461,7 +460,6 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 		for _, prereqID := range req.Prerequisites {
 			if idx, ok := identifierToIndex[prereqID]; ok {
 				prereqHashes = append(prereqHashes, reqs[idx].WorkPackage.Hash())
-				log.Info(module, "Found prereq", "req", req.Identifier, "preqreq", prereqID, "h", reqs[idx].WorkPackage.Hash())
 			} else {
 				log.Warn(module, "Unknown prerequisite identifier", "identifier", prereqID)
 			}
@@ -490,9 +488,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Printf("TODO: Context done\n")
-			return workPackageHashes, nil
-			//return workPackageHashes, ctx.Err()
+			return workPackageHashes, ctx.Err()
 		case <-ticker.C:
 			numacc := 0
 			for _, workPackageHash := range workPackageHashes {
@@ -528,7 +524,7 @@ func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *WorkPackageRequest
 		defer cancel()
 		_, err = c.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
 		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+			log.Error(module, "SendWorkPackageSubmission", "err", err)
 			tries = tries + 1
 		} else {
 			return workPackageHash, nil
@@ -544,7 +540,7 @@ func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) (err e
 	req := []string{serviceIndexStr, preimageStr}
 
 	var res string
-	err = c.GetClient(0).Call("jam.SubmitPreimage", req, &res)
+	err = c.GetClient().Call("jam.SubmitPreimage", req, &res)
 	if err != nil {
 		return err
 	}
@@ -606,7 +602,7 @@ func (c *NodeClient) GetServicePreimage(serviceIndex uint32, codeHash common.Has
 	req := []string{serviceIndexStr, codeHashStr}
 
 	var res string
-	err := c.GetClient(0).Call("jam.ServicePreimage", req, &res)
+	err := c.GetClient().Call("jam.ServicePreimage", req, &res)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -632,7 +628,7 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_st
 
 	var res string
 	// Make the RPC call to "jam.GetAvailabilityAssignments"
-	err := c.GetClient(0).Call("jam.GetAvailabilityAssignments", req, &res)
+	err := c.GetClient().Call("jam.GetAvailabilityAssignments", req, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -664,7 +660,7 @@ func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, e
 	req := []string{wphash.Hex(), segmentIndexStr}
 
 	var res string
-	err := c.GetClient(0).Call("jam.Segment", req, &res)
+	err := c.GetClient().Call("jam.Segment", req, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -686,14 +682,14 @@ func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, e
 
 func (nc *NodeClient) GetBuildVersion() (string, error) {
 	var result string
-	err := nc.GetClient(0).Call("jam.GetBuildVersion", []string{}, &result)
+	err := nc.GetClient().Call("jam.GetBuildVersion", []string{}, &result)
 	return result, err
 }
 
 // SERVICE
 func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok bool, err error) {
 	var jsonStr string
-	err = c.GetClient(0).Call("jam.Service", []string{}, &jsonStr)
+	err = c.GetClient().Call("jam.Service", []string{}, &jsonStr)
 	if err != nil {
 		return &types.ServiceAccount{}, false, err
 	}
@@ -746,21 +742,21 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	wpr.WorkPackage = codeWP
 	wpr.ExtrinsicsBlobs = types.ExtrinsicsBlobs{}
 	wpHash := codeWP.Hash()
-	fmt.Printf("Submitting WP %s\n", wpHash)
+	log.Info(module, "NewService: Submitting WP", "wph", wpHash)
 
 	// submits wp
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	_, err = c.SubmitAndWaitForWorkPackage(ctx, &wpr)
 	if err != nil {
-		fmt.Printf("SubmitWorkPackage ERR %v", err)
+		log.Error(module, "SubmitWorkPackage", "err", err)
 		return
 	}
 
 	storageKey := common.ServiceStorageKey(0, []byte{0, 0, 0, 0})
 	value, _, err := c.GetServiceStorage(0, storageKey)
 	if err != nil {
-		fmt.Printf("GetBootstrapService ERR %v", err)
+		log.Error(module, "GetServiceStorage", "err", err)
 		return
 	}
 	newServiceIdx = uint32(types.DecodeE_l(value))
@@ -769,16 +765,16 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	if err = c.SubmitAndWaitForPreimage(ctx, newServiceIdx, serviceCode); err != nil {
-		fmt.Printf("SubmitPreimage ERR %v", err)
+		log.Error(module, "SubmitAndWaitForPreimage", "err", err)
 		return
 	}
 
-	fmt.Printf("NewService %s %d\n--------\n\n", serviceName, newServiceIdx)
+	log.Info(module, "----- NewService", "name", serviceName, "serviceID", newServiceIdx)
 	return
 }
 
 func (c *NodeClient) LoadServices(services []string) (new_service_map map[string]types.ServiceInfo, err error) {
-	fmt.Printf("LoadServices: NewServices %v\n", services)
+	log.Info(module, "LoadServices: NewServices", "services", services)
 	new_service_map = make(map[string]types.ServiceInfo)
 	serviceIDs := make([]uint32, 0)
 	for _, service_name := range services {
@@ -803,7 +799,7 @@ func (c *NodeClient) LoadServices(services []string) (new_service_map map[string
 		}
 		serviceIDs = append(serviceIDs, new_serviceIdx)
 	}
-	fmt.Printf("LoadServices: DONE\n")
+	log.Info(module, "LoadServices DONE")
 	return new_service_map, nil
 }
 
@@ -814,7 +810,7 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.H
 		storageHash.Hex(),
 	}
 	var res string
-	err := c.GetClient(0).Call("jam.ServiceValue", req, &res)
+	err := c.GetClient().Call("jam.ServiceValue", req, &res)
 	if err != nil {
 		return nil, false, err
 	}
