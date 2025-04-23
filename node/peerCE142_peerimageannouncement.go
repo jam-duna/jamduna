@@ -74,7 +74,6 @@ func (p *Peer) SendPreimageAnnouncement(ctx context.Context, pa *types.PreimageA
 	if err := sendQuicBytes(ctx, stream, paBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE142_PreimageAnnouncement]: %w", err)
 	}
-	p.SendTelemetry(code, paBytes)
 
 	return nil
 }
@@ -150,7 +149,6 @@ func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash
 	if err := sendQuicBytes(ctx, stream, respBytes, p.PeerID, code); err != nil {
 		return nil, fmt.Errorf("sendQuicBytes[CE143_PreimageRequest]: %w", err)
 	}
-	p.SendTelemetry(code, respBytes)
 
 	preimage, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
@@ -176,7 +174,6 @@ func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream,
 	if err := sendQuicBytes(ctx, stream, respBytes, n.id, code); err != nil {
 		return fmt.Errorf("onPreimageRequest: sendQuicBytes failed: %w", err)
 	}
-	n.SendTelemetry(code, respBytes)
 
 	log.Trace(debugP, "onPreimageRequest", "n", n.id, "hash", preimageHash, "size", len(preimage.Blob))
 	return nil

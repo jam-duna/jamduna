@@ -107,7 +107,6 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 		log.Warn(module, "CE128 SendBlockRequest", "p", p.String(), "err", err)
 		return blocks, err
 	}
-	p.SendTelemetry(CE128_BlockRequest, reqBytes)
 
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
@@ -174,7 +173,6 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 		log.Warn(module, "onBlockRequest sendQuicBytes", "headerHash", newReq.HeaderHash, "direction", newReq.Direction, "err", err)
 		return fmt.Errorf("onBlockRequest: sendQuicBytes failed: %w", err)
 	}
-	n.SendTelemetry(CE128_BlockRequest, blockBytes)
 
 	// <-- FIN
 	return nil

@@ -64,6 +64,8 @@ type StateDB struct {
 	stateUpdate *types.StateUpdate
 	logChan     chan storage.LogMessage
 
+	ElapsedMicrosecondsValidation uint32
+
 	AncestorSet map[common.Hash]uint32 `json:"ancestorSet"` // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
 }
 

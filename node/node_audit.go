@@ -636,7 +636,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		return
 	}
 
-	wr, _, err := n.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
+	wr, _, pvmElapsed, err := n.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
 	if err != nil {
 		return
 	} else {
@@ -645,9 +645,9 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	auditPass := false
 	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
-		log.Info(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
+		log.Info(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
 	} else {
-		log.Warn(debugAudit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
+		log.Warn(debugAudit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
 	}
 
 	judgement, err = n.MakeJudgement(workReport, auditPass)

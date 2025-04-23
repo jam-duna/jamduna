@@ -82,9 +82,6 @@ const (
 	VeryLargeTimeout   = 6000 * time.Second
 	RefineTimeout      = 30 * time.Second //MK; check this
 	DefaultChannelSize = 200
-
-	TelemetryAddress = "explorer.jamduna.org"
-	sendTelemetry    = false
 )
 
 var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
@@ -168,16 +165,9 @@ type NodeContent struct {
 
 	jceManagerMutex sync.Mutex
 	jceManager      *ManualJCEManager
-
-	TelemetryClient *TelemetryClient
 }
 
-func NewNodeContent(id uint16, telemetryAddress string, ed25519PublicKey ed25519.PublicKey, store *storage.StateDBStorage) NodeContent {
-	telemetryClient, err := NewTelemetryClient(telemetryAddress, ed25519PublicKey)
-	if err != nil {
-		log.Error(module, "NewTelemetryClient", "err", err)
-		telemetryClient = nil
-	}
+func NewNodeContent(id uint16, ed25519PublicKey ed25519.PublicKey, store *storage.StateDBStorage) NodeContent {
 	return NodeContent{
 		id:                   id,
 		store:                store,
@@ -195,7 +185,6 @@ func NewNodeContent(id uint16, telemetryAddress string, ed25519PublicKey ed25519
 		workPackageQueue:     sync.Map{},
 		new_timeslot_chan:    make(chan uint32, 1),
 		extrinsic_pool:       types.NewExtrinsicPool(),
-		TelemetryClient:      telemetryClient,
 	}
 }
 
@@ -346,13 +335,6 @@ func (n *Node) SetLatestBlockInfo(block *JAMSNP_BlockInfo) {
 	return
 }
 
-func (n *NodeContent) SendTelemetry(code uint8, msg []byte) {
-	if n.TelemetryClient != nil && sendTelemetry {
-		n.TelemetryClient.SendMessage(code, msg)
-	}
-	return
-}
-
 func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
 	wpHashBytes := wp.Hash().Bytes()
 	wpHashHex := hex.EncodeToString(wpHashBytes)
@@ -465,7 +447,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		NodeContent: NewNodeContent(id, TelemetryAddress, ed25519_pub, store),
+		NodeContent: NewNodeContent(id, ed25519_pub, store),
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),
@@ -704,7 +686,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			node.AuditFlag = false
 		}
 		host_name, _ := os.Hostname()
-		if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
+		if (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
 			wg := &sync.WaitGroup{}
 			wg.Add(1)
 			go node.runJamWeb(context.Background(), wg, uint16(10800)+id, port)
@@ -1377,8 +1359,9 @@ func (n *Node) handleConnection(conn quic.Connection) {
 	}
 }
 
-// TODO IN MID-MAY: Use worker pools to limit concurrent goroutines to like a few hundred at most
-func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
+// broadcast sends the object to all peers
+// TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
+func (n *Node) broadcast(ctxParent context.Context, obj interface{}, kv ...interface{}) []byte {
 	result := []byte{}
 	objType := reflect.TypeOf(obj)
 
@@ -1435,7 +1418,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 			case reflect.TypeOf(types.Ticket{}):
 				t := obj.(types.Ticket)
 				epoch := uint32(0)
-				if err := peer.SendTicketDistribution(ctx, epoch, t, false); err != nil {
+				if err := peer.SendTicketDistribution(ctx, epoch, t, false, kv); err != nil {
 					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
 			case reflect.TypeOf(types.Block{}):
@@ -1458,13 +1441,13 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
-				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures); err != nil {
+				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures, kv); err != nil {
 					log.Error(debugStream, "SendWorkReportDistribution", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
-				if err := peer.SendAssurance(ctx, &a); err != nil {
+				if err := peer.SendAssurance(ctx, &a, kv); err != nil {
 					log.Error(debugStream, "SendAssurance", "n", n.String(), "err", err)
 					return
 				}
@@ -1476,8 +1459,9 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 				}
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
-				epoch := uint32(0)
-				if err := peer.SendJudgmentPublication(ctx, epoch, j); err != nil {
+				epoch := uint32(0) // Wrong?
+				// TODO: add variadic args to SendJudgmentPublication (time of audit)
+				if err := peer.SendJudgmentPublication(ctx, epoch, j, kv); err != nil {
 					log.Error(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 					return
 				}
@@ -1727,6 +1711,7 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 	if n.hub != nil {
 		go n.hub.ReceiveLatestBlock(b, sdb, false)
 	}
+	assureStart := time.Now()
 
 	if len(b.Extrinsic.Guarantees) > 0 {
 		var wg sync.WaitGroup
@@ -1774,14 +1759,13 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-
 	a, numCores := n.generateAssurance(b.Header.Hash(), b.TimeSlot())
 	if numCores == 0 {
 		return nil
 	}
-
+	assuredElasped := common.Elapsed(assureStart)
 	log.Debug(debugA, "assureNewBlock: Broadcasting assurance", "n", n.String(), "bitfield", a.Bitfield)
-	n.broadcast(ctx, a)
+	n.broadcast(ctx, a, "microseconds", assuredElasped)
 
 	return nil
 }
@@ -2274,6 +2258,7 @@ func (n *Node) runClient() {
 			}
 
 			n.statedbMutex.Lock()
+			makeblock_start := time.Now()
 			isAuthorizedBlockBuilder, newBlock, newStateDB, err := n.statedb.ProcessState(currJCE, n.credential, ticketIDs, n.extrinsic_pool)
 			n.statedbMutex.Unlock()
 			if isAuthorizedBlockBuilder {
@@ -2298,6 +2283,18 @@ func (n *Node) runClient() {
 			n.addStateDB(newStateDB)
 			n.StoreBlock(newBlock, n.id, true)
 			n.processBlock(newBlock)
+
+			makeblock_elapsed := common.Elapsed(makeblock_start)
+			//fmt.Printf("[N%d] ProcessState OK: %v elapsed = %d, \n", n.id, newBlock.Header.Hash().String_short(), makeblock_elapsed)
+			log.Telemetry(CE128_BlockRequest, newBlock, "msg_type", getMessageType(newBlock), "metadata", nil, "elapsed", makeblock_elapsed, "codec_encoded", types.EncodeAsHex(newBlock))
+
+			for _, p := range newBlock.Extrinsic.Preimages {
+				preimage_metadata := fmt.Sprintf("blob_len=%v|h=%v|a_p=%v|s=%v", len(p.Blob), p.Hash(), p.AccountHash(), p.Requester)
+				log.Telemetry(CE142_PreimageAnnouncement, p, "msg_type", getMessageType(p), "metadata", preimage_metadata, "elapsed", nil)
+			}
+			// TODO: do this in a core / validator / statistics
+			log.Telemetry(13, newStateDB.JamState.ValidatorStatistics, "msg_type", getMessageType(newStateDB.JamState.ValidatorStatistics), "codec_encoded", types.EncodeAsHex(newStateDB.JamState.ValidatorStatistics))
+
 			n.SetLatestBlockInfo(
 				&JAMSNP_BlockInfo{
 					HeaderHash: newBlock.Header.Hash(),

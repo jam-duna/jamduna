@@ -71,6 +71,7 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	return nil
 }
 
+// TODO: review
 func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, core_idx uint16) (err error) {
 	if pkg.RefineContext.LookupAnchorSlot == 1 {
 		if len(pkg.RefineContext.Prerequisites) == 0 {
@@ -102,7 +103,6 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	if err != nil {
 		return err
 	}
-	p.SendTelemetry(code, reqBytes)
 
 	log.Trace(debugG, "submitted Workpackage to core", "p", p.String(), "len", len(reqBytes), "core", core_idx)
 

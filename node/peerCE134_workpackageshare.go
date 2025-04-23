@@ -202,6 +202,7 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
+// TODO: REVIEW
 func (p *Peer) ShareWorkPackage(
 	ctx context.Context,
 	coreIndex uint16,
@@ -260,7 +261,6 @@ func (p *Peer) ShareWorkPackage(
 		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
-	p.SendTelemetry(code, reqBytes)
 
 	// Receive response
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
@@ -351,9 +351,9 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, _, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
+	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
 	if err != nil {
-		fmt.Printf("%s error executing work package bundle: %v\n", n.String(), err)
+		fmt.Printf("%s error executing work package bundle: %v. pvm_elapsed=%d\n", n.String(), err, pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	} else {
 		n.workReportsCh <- workReport
@@ -392,7 +392,6 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	if err != nil {
 		return fmt.Errorf("onWorkPackageShare: sendQuicBytes failed: %w", err)
 	}
-	n.SendTelemetry(CE134_WorkPackageShare, reqBytes)
 
 	// <-- FIN
 	return nil

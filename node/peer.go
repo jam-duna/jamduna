@@ -41,6 +41,7 @@ const (
 	CE195_Catchup                      = 195
 	CE224_BLSSignature                 = 224
 	CE225_BLSAggregateSignature        = 225
+	CE255_Uncategorized                = 255 // this is reserved
 
 	useQuicDeadline = false
 )
@@ -55,9 +56,6 @@ type Peer struct {
 	// these are established early on but may change
 	connectionMu sync.Mutex
 	conn         quic.Connection
-
-	// TODO: UP0 will keep this
-	//stream quic.Stream
 }
 
 type PeerInfo struct {
@@ -88,13 +86,6 @@ func NewPeer(n *Node, validatorIndex uint16, validator types.Validator, peerAddr
 
 func (p *Peer) String() string {
 	return fmt.Sprintf("[N%d => %d]", p.node.id, p.PeerID)
-}
-
-func (p *Peer) SendTelemetry(code uint8, m []byte) error {
-	if p.node.TelemetryClient != nil && sendTelemetry {
-		p.node.TelemetryClient.SendMessage(code, m)
-	}
-	return nil
 }
 
 func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) {

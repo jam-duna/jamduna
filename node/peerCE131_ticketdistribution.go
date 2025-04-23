@@ -92,7 +92,9 @@ func (ticket *JAMSNPTicketDistribution) FromBytes(data []byte) error {
 	copy(ticket.Signature[:], data[5:])
 	return nil
 }
-func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types.Ticket, isProxy bool) error {
+
+// SendTicketDistribution sends a ticket to the peer.
+func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types.Ticket, isProxy bool, kv ...interface{}) error {
 	req := &JAMSNPTicketDistribution{
 		Epoch:     epoch,
 		Attempt:   t.Attempt,
@@ -118,7 +120,6 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes failed: %w", err)
 	}
-	p.SendTelemetry(code, reqBytes)
 
 	return nil
 }

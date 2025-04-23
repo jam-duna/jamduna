@@ -80,7 +80,6 @@ func (c *NodeClient) GetJCEManager() (jceManager *ManualJCEManager, err error) {
 func (c *NodeClient) ConnectWebSocket(url string) error {
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
-		panic(99)
 		return fmt.Errorf("failed to connect websocket: %w", err)
 	}
 	c.wsConn = conn

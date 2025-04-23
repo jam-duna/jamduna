@@ -116,11 +116,13 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	return nil
 }
 
+// SendWorkReportDistribution sends a work report distribution message to the peer.  metadata variadic args
 func (p *Peer) SendWorkReportDistribution(
 	ctx context.Context,
 	wr types.WorkReport,
 	slot uint32,
 	credentials []types.GuaranteeCredential,
+	kv ...interface{},
 ) error {
 	code := uint8(CE135_WorkReportDistribution)
 
@@ -150,7 +152,6 @@ func (p *Peer) SendWorkReportDistribution(
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
 	}
-	p.SendTelemetry(code, reqBytes)
 
 	return nil
 }

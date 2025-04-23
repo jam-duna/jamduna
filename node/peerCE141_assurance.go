@@ -79,7 +79,10 @@ func (assurance *JAMSNPAssuranceDistribution) FromBytes(data []byte) error {
 
 	return nil
 }
-func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance) error {
+
+// SendAssurance sends an assurance to the peer
+// variadic kv is used to pass key-value pairs to telemetry
+func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance, kv ...interface{}) error {
 	req := &JAMSNPAssuranceDistribution{
 		Anchor:    a.Anchor,
 		Bitfield:  a.Bitfield,
@@ -108,7 +111,6 @@ func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance) error {
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE141_AssuranceDistribution]: %w", err)
 	}
-	p.SendTelemetry(code, reqBytes)
 
 	return nil
 }

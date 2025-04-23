@@ -3,6 +3,7 @@ package statedb
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/types"
@@ -460,8 +461,9 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 	return ringsetBytes
 }
 
-func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) []types.Ticket {
+func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) ([]types.Ticket, []uint32) {
 	tickets := make([]types.Ticket, types.TicketEntriesPerValidator) // Pre-allocate space for tickets
+	microseconds := make([]uint32, types.TicketEntriesPerValidator)
 	var wg sync.WaitGroup
 	var mu sync.Mutex // To synchronize access to the tickets slice
 
@@ -478,12 +480,12 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, u
 			}()
 
 			entropy := usedEntropy
-			ticket, err := s.generateTicket(secret, entropy, attempt)
-
+			ticket, ms, err := s.generateTicket(secret, entropy, attempt)
 			if err == nil {
 				// Lock to safely append to tickets
 				mu.Lock()
 				tickets[attempt] = ticket // Store the ticket at the index of the attempt
+				microseconds[attempt] = ms
 				mu.Unlock()
 			} else {
 				fmt.Printf("Error generating ticket for attempt %d: %v\n", attempt, err)
@@ -493,32 +495,37 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, u
 
 	wg.Wait() // Wait for all goroutines to finish
 
-	return tickets
+	return tickets, microseconds
 }
-func (s *SafroleState) SimulateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, error) {
+func (s *SafroleState) SimulateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, uint32, error) {
 	return s.generateTicket(secret, targetEpochRandomness, attempt)
 }
 
-func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, error) {
+func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, uint32, error) {
+	ticket_start := time.Now()
 	ticket_vrf_input := ticketSealVRFInput(targetEpochRandomness, attempt)
-	//During epoch N, each authority scheduled for epoch N+2 constructs a set of tickets which may be eligible (6.5.2) for on-chain submission.
 	auxData := []byte{}
+
 	if len(s.NextValidators) == 0 {
-		return types.Ticket{}, fmt.Errorf("No validators in NextValidators")
+		return types.Ticket{}, 0, fmt.Errorf("No validators in NextValidators")
 	}
 	ringsetBytes := s.GetRingSet("Next")
 
-	signature, _, err := bandersnatch.RingVrfSign(secret, ringsetBytes, ticket_vrf_input, auxData) // ??
+	signature, _, err := bandersnatch.RingVrfSign(secret, ringsetBytes, ticket_vrf_input, auxData)
 	if err != nil {
-		return types.Ticket{}, fmt.Errorf("signTicket failed")
+		return types.Ticket{}, 0, fmt.Errorf("signTicket failed")
 	}
+
 	var signatureArray [types.ExtrinsicSignatureInBytes]byte
 	copy(signatureArray[:], signature)
+
 	ticket := types.Ticket{
 		Attempt:   uint8(attempt),
 		Signature: signatureArray,
 	}
-	return ticket, nil
+
+	ticket_elapsed := common.Elapsed(ticket_start)
+	return ticket, ticket_elapsed, nil
 }
 
 // ringVRF

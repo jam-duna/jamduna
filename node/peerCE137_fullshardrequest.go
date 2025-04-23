@@ -112,7 +112,6 @@ func (p *Peer) SendFullShardRequest(
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return nil, nil, nil, fmt.Errorf("sendQuicBytes[CE137]: %w", err)
 	}
-	p.SendTelemetry(code, reqBytes)
 
 	// <-- Bundle Shard
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
@@ -150,19 +149,16 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 	if err := sendQuicBytes(ctx, stream, bundleShard, n.id, code); err != nil {
 		return fmt.Errorf("onFullShardRequest: send bundleShard failed: %w", err)
 	}
-	n.SendTelemetry(code, bundleShard)
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if err := sendQuicBytes(ctx, stream, exportedSegmentsAndProofShards, n.id, code); err != nil {
 		return fmt.Errorf("onFullShardRequest: send exportedSegments failed: %w", err)
 	}
-	n.SendTelemetry(255, exportedSegmentsAndProofShards)
 
 	// <-- Justification
 	if err := sendQuicBytes(ctx, stream, encodedPath, n.id, code); err != nil {
 		return fmt.Errorf("onFullShardRequest: send justification failed: %w", err)
 	}
-	n.SendTelemetry(255, encodedPath)
 
 	log.Trace(debugDA, "onFullShardRequest completed", "n", n.String(),
 		"erasureRoot", req.ErasureRoot,

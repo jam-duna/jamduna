@@ -57,7 +57,7 @@ func fuzzBlockTTicketAlreadyInState(block *types.Block, s *statedb.StateDB, vali
 	var existingTicket *types.Ticket
 	for _, secret := range validatorSecrets {
 		auth_secret, _ := statedb.ConvertBanderSnatchSecret(secret.BandersnatchSecret)
-		ticketCandidate, err := sf.SimulateTicket(auth_secret, sf.Entropy[2], existingTicketBody.Attempt)
+		ticketCandidate, _, err := sf.SimulateTicket(auth_secret, sf.Entropy[2], existingTicketBody.Attempt)
 		if err == nil {
 			ticketCandidateID, tIDErr := ticketCandidate.TicketID()
 			if tIDErr == nil {

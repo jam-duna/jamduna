@@ -267,5 +267,4 @@ func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret, new_assur
 	}
 	s.Block = sealedBlock
 	return nil
-
 }

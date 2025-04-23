@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const errorKey = "LOG_ERROR"
+//const errorKey = "LOG_ERROR"
 
 const (
 	legacyLevelCrit = iota
@@ -122,6 +122,7 @@ type Logger interface {
 	// Handler returns the underlying handler of the inner logger.
 	Handler() slog.Handler
 
+	Telemetry(s string)
 	RecordLogs()
 	GetRecordedLogs() ([]byte, error)
 }
@@ -135,7 +136,7 @@ type logger struct {
 
 // NewLogger returns a logger with the specified handler set
 func NewLogger(h slog.Handler) Logger {
-	writer, _ := syslog.Dial("tcp", "dev.jamduna.org:5000", syslog.LOG_INFO, "jamduna")
+	writer, _ := syslog.Dial("tcp", "dev.jamduna.org:5000", syslog.LOG_INFO, "jamtart")
 	return &logger{
 		inner:        slog.New(h),
 		writer:       writer,
@@ -185,7 +186,7 @@ func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
 	r.Add(attrs...)
 
-	if l.writer != nil {
+	/*	if l.writer != nil {
 		str := getJSONLogString(r)
 		switch r.Level {
 		case LevelCrit:
@@ -201,11 +202,14 @@ func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any
 		default:
 			l.writer.Info(str)
 		}
-	}
+	}*/
 	l.inner.Handler().Handle(context.Background(), r)
 	if l.recordingLog {
 		l.addLog(r)
 	}
+}
+func (l *logger) Telemetry(str string) {
+	l.writer.Info(str)
 }
 
 func (l *logger) RecordLogs() {

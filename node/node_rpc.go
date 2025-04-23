@@ -660,16 +660,16 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	log.RecordLogs()
 	log.EnableModule(log.FirstGuarantorOrAuditor)
 
-	workReport2, _, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, true)
+	workReport2, _, wr_pvm_elapsed, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, true)
 	if err != nil {
 		return err
 	}
 
 	// check that workReport == workReport2
 	if workReport.Hash() == workReport2.Hash() {
-		log.Info(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport)
+		log.Info(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
 	} else {
-		log.Error(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport)
+		log.Error(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
 	}
 	logs, err := log.GetRecordedLogs()
 	if err != nil {

@@ -30,20 +30,16 @@ func (n *Node) GetSelfTicketsIDs(currPhase uint32) ([]common.Hash, error) {
 func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBucket, error) {
 	sf := n.statedb.GetSafrole()
 	auth_secret, _ := statedb.ConvertBanderSnatchSecret(n.GetBandersnatchSecret())
-	tickets := sf.GenerateTickets(auth_secret, usedEntropy)
+	tickets, microseconds := sf.GenerateTickets(auth_secret, usedEntropy)
 	n.ticketsMutex.Lock()
 	if n.selfTickets[usedEntropy] == nil {
 		n.selfTickets[usedEntropy] = make([]types.TicketBucket, 0)
 	}
 	n.ticketsMutex.Unlock()
-	log.Trace(debugT, "generateEpochTickets", "n", n.id, "usedEntropy", usedEntropy)
-	buckets := types.TicketsToBuckets(tickets, sf.GetEpoch())
+	buckets := types.TicketsToBuckets(tickets, microseconds, sf.GetEpoch())
 	n.ticketsMutex.Lock()
 	n.selfTickets[usedEntropy] = buckets
 	n.ticketsMutex.Unlock()
-	for _, bucket := range n.selfTickets[usedEntropy] {
-		log.Trace(debugT, "generateEpochTickets: Put Ticket in Bucket", "n", n.id, "r", bucket.Ticket.Attempt, "usedEntropy", usedEntropy)
-	}
 
 	return buckets, nil
 }
@@ -101,7 +97,7 @@ func (n *Node) BroadcastTickets(currJCE uint32) {
 			log.Trace(debugT, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt)
 			go func() {
 				defer cancel() // ensures context is released
-				_ = n.broadcast(ctx, ticket)
+				_ = n.broadcast(ctx, ticket, "elapsedMicroseconds", ticketbucket.ElapsedMicroseconds)
 			}()
 			*ticketbucket.IsBroadcasted = true
 		} else {

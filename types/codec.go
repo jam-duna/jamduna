@@ -139,6 +139,15 @@ func CheckCustomDecode(data []byte, t reflect.Type) (bool, interface{}, uint32) 
 	return false, nil, 0
 }
 
+func EncodeAsHex(data interface{}) string {
+	// Ignore codec err
+	ecodedBytes, err := Encode(data)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("0x%x", ecodedBytes)
+}
+
 func Encode(data interface{}) ([]byte, error) {
 	v := reflect.ValueOf(data)
 	customEncodeRequired, customEncoded := CheckCustomEncode(data)

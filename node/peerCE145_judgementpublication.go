@@ -107,7 +107,9 @@ func (pub *JAMSNPJudgmentPublication) FromBytes(data []byte) error {
 	return nil
 }
 
-func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j types.Judgement) error {
+// SendJudgmentPublication sends a judgment publication to the peer
+// TODO: add variadic arguments
+func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j types.Judgement, kv ...interface{}) error {
 	validity := uint8(0)
 	if j.Judge {
 		validity = 1
@@ -143,8 +145,6 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE145_JudgmentPublication]: %w", err)
 	}
-	p.SendTelemetry(code, reqBytes)
-
 	return nil
 }
 

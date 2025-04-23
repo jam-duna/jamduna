@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
@@ -274,7 +275,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 }
 
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
-func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, err error) {
+func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
@@ -293,6 +294,9 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	if firstGuarantorOrAuditor {
 		pvmContext = log.FirstGuarantorOrAuditor
 	}
+
+	pvmStart := time.Now()
+
 	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, targetStateDB)
 	vm_auth.SetPVMContext(pvmContext)
 	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
@@ -306,7 +310,8 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		service_index = workItem.Service
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
-			return work_report, d, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
+			pvmFailedElapsed := common.Elapsed(pvmStart)
+			return work_report, d, pvmFailedElapsed, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
 			log.Crit(module, "executeWorkPackageBundle: Code and CodeHash Mismatch")
@@ -370,6 +375,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	}
 	log.Debug(debugG, "executeWorkPackageBundle", "workreporthash", common.Str(workReport.Hash()), "workReport", workReport.String())
 	n.StoreMeta_Guarantor(spec, d)
+	pvmElapsed := common.Elapsed(pvmStart)
 
-	return workReport, d, err
+	return workReport, d, pvmElapsed, err
 }
