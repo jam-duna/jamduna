@@ -2130,7 +2130,7 @@ func (n *Node) runFasterJCE() {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
-	blockTicker := time.NewTicker(1500 * time.Millisecond)
+	blockTicker := time.NewTicker(6000 * time.Millisecond)
 	defer blockTicker.Stop()
 
 	for {
@@ -2367,7 +2367,6 @@ func (n *Node) authorTelemetry(b *types.Block, newStateDB *statedb.StateDB, elap
 		if upd != nil && upd.ServiceInfo != nil {
 			if upd.ServiceInfo.Info.NewAccount {
 				info := upd.ServiceInfo.Info
-				log.Info(module, "authorTelemetry", "newAccount", info)
 				n.Telemetry(log.MsgTypeNewService, upd.ServiceInfo.Info, "codec_encoded", types.EncodeAsHex(info))
 			}
 		}

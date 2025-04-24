@@ -14,17 +14,17 @@ echo -e "${GREEN}STEP 1: Generate TestVectors${NC}"
 # ---------------------------------------
 # STEP 2: Fuzzing
 # ---------------------------------------
-echo -e "${GREEN}STEP 2: Fuzzing${NC}"
-make fuzz_only
+#echo -e "${GREEN}STEP 2: Fuzzing${NC}"
+#make fuzz_only
 
 # ---------------------------------------
 # STEP 3: Zipping Data folders & Fuzzed folders
 # ---------------------------------------
-echo -e "${GREEN}STEP 3: Zipping 'Data' & 'Fuzzed' folders${NC}"
-./data_fuzz_zipper.sh
+#echo -e "${GREEN}STEP 3: Zipping 'Data' & 'Fuzzed' folders${NC}"
+#./data_fuzz_zipper.sh
 
 # ---------------------------------------
 # STEP 4: Copying over to jamtestnet
 # ---------------------------------------
-echo -e "${GREEN}STEP 4: Copying over to jamtestnet${NC}"
-./moving_to_jamtestnet.sh
+#echo -e "${GREEN}STEP 4: Copying over to jamtestnet${NC}"
+#./moving_to_jamtestnet.sh

@@ -205,7 +205,7 @@ func (n *Node) runAudit() {
 				log.Debug(debugAudit, "runAudit: initAudit done", "n", n.String())
 				err = n.Audit(headerHash)
 				if err != nil {
-					log.Error(debugAudit, "Audit Failed", "err", err)
+					log.Trace(debugAudit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
 					log.Debug(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
@@ -244,7 +244,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 			log.Error(debugAudit, "ProcessAudit failed", "err", err)
 		}
 	} else {
-		log.Error(debugAudit, "Audit tranche > 0", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
+		log.Debug(debugAudit, "Audit tranche > 0", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 	}
 	done := false
 	for !done {
@@ -645,7 +645,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	auditPass := false
 	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
-		log.Info(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
+		log.Debug(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
 	} else {
 		log.Warn(debugAudit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
 	}

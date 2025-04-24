@@ -493,10 +493,10 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			for _, workPackageHash := range workPackageHashes {
 				if status, ok := c.WorkPackage[workPackageHash]; ok {
 					if status == "accumulated" {
-						log.Info(module, fmt.Sprintf("Work package status=%v", status), "hash", workPackageHash.Hex(), "status", status)
+						log.Info(module, fmt.Sprintf("Work package %s", status), "hash", workPackageHash.Hex())
 						numacc++
 					} else {
-						log.Info(module, fmt.Sprintf("Work package status=%v", status), "hash", workPackageHash.Hex(), "status", status)
+						log.Info(module, fmt.Sprintf("Work package %s", status), "hash", workPackageHash.Hex())
 					}
 				}
 			}

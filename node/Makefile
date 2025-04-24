@@ -1,8 +1,8 @@
 TIMEOUT            ?= 400h
 TAGS               ?= tiny
 MEG_L              ?= 911
-MEG_S              ?= 8
-TargetN            ?= -1
+MEG_S              ?= 911
+TargetN            ?= 911
 JCE_MANUAL         ?= true
 JAM_NODE    	   ?= true
 JAM_LOCAL_CLIENT   ?= false

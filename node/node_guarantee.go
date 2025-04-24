@@ -222,7 +222,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	curr_statedb := n.statedb.Copy()
 	// reject if the work package is not for this core
 	if wpItem.coreIndex != curr_statedb.GetSelfCoreIndex() {
-		log.Warn(debugG, "processWPQueueItem -  work package is not for this core", "n", n.String(), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.coreIndex", wpItem.coreIndex, "sdb.GetSelfCoreIndex", curr_statedb.GetSelfCoreIndex(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Trace(debugG, "processWPQueueItem -  work package is not for this core", "n", n.String(), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.coreIndex", wpItem.coreIndex, "sdb.GetSelfCoreIndex", curr_statedb.GetSelfCoreIndex(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 	err = curr_statedb.VerifyPackage(bundle)

@@ -153,13 +153,22 @@ func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkRepo
 	copy(s0Signature[:], s0)
 	return a0, s0Signature, nil
 }
-
 func (s *StateDB) GetAnnouncementWithoutJtrue(A *types.AnnounceBucket, J *types.JudgeBucket, W_hash common.Hash) ([]types.Announcement, int) {
 	count := 0
 	var announcements = make([]types.Announcement, 0)
-	for _, a := range A.Announcements[W_hash] {
+
+	// Lock for safe concurrent reads
+	A.Lock()
+	announcementsList := A.Announcements[W_hash]
+	A.Unlock()
+
+	J.RLock()
+	judgementsList := J.Judgements[W_hash]
+	J.RUnlock()
+
+	for _, a := range announcementsList {
 		var tmp types.Judgement
-		for _, j := range J.Judgements[W_hash] {
+		for _, j := range judgementsList {
 			tmp = j
 			if !j.Judge && a.ValidatorIndex == uint32(j.Validator) {
 				count++
@@ -176,8 +185,10 @@ func (s *StateDB) GetAnnouncementWithoutJtrue(A *types.AnnounceBucket, J *types.
 			announcements = append(announcements, a)
 		}
 	}
+
 	return announcements, count
 }
+
 func (s *StateDB) Select_an(V bandersnatch.BanderSnatchSecret, A_sub1 *types.AnnounceBucket, J *types.JudgeBucket, tranche uint32) ([]types.WorkReportSelection, map[common.Hash][]types.Announcement, map[common.Hash]int, []bandersnatch.BandersnatchVrfSignature, error) {
 	an := []types.WorkReportSelection{}
 	availible_workreport := WorkReportToSelection(s.AvailableWorkReport)
@@ -289,7 +300,9 @@ func (s *StateDB) ValidateWorkReport(wp types.WorkPackage) bool {
 func (a *StateDB) IsReportAudited(A *types.AnnounceBucket, J *types.JudgeBucket, W_hash common.Hash) bool {
 	_, length := a.GetAnnouncementWithoutJtrue(A, J, W_hash)
 	if length == 0 {
-		//double check no invalid
+		// double check no invalid
+		J.RLock()
+		defer J.RUnlock()
 		for _, j := range J.Judgements[W_hash] {
 			if !j.Judge {
 				return false
@@ -299,17 +312,17 @@ func (a *StateDB) IsReportAudited(A *types.AnnounceBucket, J *types.JudgeBucket,
 	} else if J.GetTrueCount(W_hash) >= types.ValidatorsSuperMajority {
 		return true
 	}
-
 	return false
 }
-
 func (s *StateDB) IsReportAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBucket, W_hash common.Hash) error {
 	_, length := s.GetAnnouncementWithoutJtrue(A, J, W_hash)
 	if length == 0 {
-		//double check no invalid
+		// double check no invalid
+		J.RLock()
+		defer J.RUnlock()
 		for _, j := range J.Judgements[W_hash] {
-			if j.Judge != true {
-				return fmt.Errorf("Validator[%d] said false /n", j.Validator)
+			if !j.Judge {
+				return fmt.Errorf("Validator[%d] said false", j.Validator)
 			}
 		}
 		return nil
@@ -318,7 +331,6 @@ func (s *StateDB) IsReportAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBuc
 		return nil
 	}
 	return fmt.Errorf("Audit not yet finished")
-
 }
 
 // 206 big U

@@ -61,12 +61,11 @@ const (
 // Mapping of host function names to their error cases
 var errorCases = map[string][]uint64{
 	// B.6 General Functions
-	"Gas":              {OK},
-	"Lookup":           {OK, NONE, OOB},
-	"Read":             {OK, OOB, NONE},
-	"Write":            {OK, OOB, NONE, FULL},
-	"Info":             {OK, OOB, NONE},
-	"Sp1Groth16Verify": {OK, OOB, HUH},
+	"Gas":    {OK},
+	"Lookup": {OK, NONE, OOB},
+	"Read":   {OK, OOB, NONE},
+	"Write":  {OK, OOB, NONE, FULL},
+	"Info":   {OK, OOB, NONE},
 	// B.7 Accumulate Functions
 	"Bless":      {OK, OOB, WHO},
 	"Assign":     {OK, OOB, CORE},
@@ -78,6 +77,7 @@ var errorCases = map[string][]uint64{
 	"Quit":       {OK, OOB, WHO, LOW},
 	"Solicit":    {OK, OOB, FULL, HUH},
 	"Forget":     {OK, OOB, HUH},
+	"Provide":    {OK, WHO, HUH},
 	// B.8 Refine Functions
 	"Historical_lookup": {OK, OOB},
 	"Import":            {OK, OOB, NONE},
@@ -114,6 +114,7 @@ var hostIndexMap = map[string]int{
 	"Yield":      YIELD,
 	"Solicit":    SOLICIT,
 	"Forget":     FORGET,
+	"Provide":    PROVIDE,
 	// B.8 Refine Functions
 	"Historical_lookup": HISTORICAL_LOOKUP,
 	"Export":            EXPORT,
@@ -209,6 +210,8 @@ func (vm *VM) chargeGas(host_fn int) {
 		exp = "FORGET"
 	case YIELD:
 		exp = "YIELD"
+	case PROVIDE:
+		exp = "PROVIDE"
 	case HISTORICAL_LOOKUP:
 		exp = "HISTORICAL_LOOKUP"
 	case MACHINE:
@@ -861,6 +864,7 @@ func (vm *VM) hostProvide() {
 	if a == nil {
 		vm.WriteRegister(7, WHO)
 		vm.HostResultCode = WHO
+		log.Debug(vm.logging, vm.Str("PROVIDE WHO"), "omega_7", omega_7)
 		return
 	}
 
@@ -876,6 +880,7 @@ func (vm *VM) hostProvide() {
 	if !ok && len(X_s_l) > 0 {
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
+		log.Debug(vm.logging, vm.Str("PROVIDE HUH"), "omega_7", omega_7, "h", h, "z", z)
 		return
 	}
 
@@ -890,6 +895,7 @@ func (vm *VM) hostProvide() {
 	if exists {
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
+		log.Debug(vm.logging, vm.Str("PROVIDE HUH"), "omega_7", omega_7, "h", h, "z", z)
 		return
 	}
 
@@ -899,6 +905,7 @@ func (vm *VM) hostProvide() {
 	})
 
 	vm.WriteRegister(7, OK)
+	log.Debug(vm.logging, vm.Str("PROVIDE OK"), "omega_7", omega_7, "h", h, "z", z)
 	vm.HostResultCode = OK
 }
 
