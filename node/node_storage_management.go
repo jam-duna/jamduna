@@ -116,7 +116,7 @@ func (n *NodeContent) GetSlotTimestamp(slot uint32) uint64 {
 	// This might be related to:
 	// (a) n.GetCurrJCE()
 	// (b) n.epoch0Timestamp
-	t := time.Date(2025, time.January, 1, 0, 0, 1, 0, time.UTC)
+	t := time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC)
 	ts := t.Unix()
 	return uint64(ts) + uint64(slot*types.SecondsPerSlot)
 }

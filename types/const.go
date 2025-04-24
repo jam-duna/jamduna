@@ -74,7 +74,8 @@ const (
 
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	MaxServiceCodeSize               = 4000000        // W_C = 4,000,000: The maximum size of service code in octets.
-	MaxManifestEntries               = 3072           // W_M = 2^11: The maximum number of entries in a work-package manifest. 0.6.3 updated
+	MaxImports                       = 3072           // W_M = 2^11: The maximum number of imports in a work-package. 0.6.5
+	MaxExports                       = 3072           // W_X = 2^11: The maximum number of exports in a work-package. 0.6.5
 	ExtrinsicMaximumPerPackage       = 128            //T = 128: The maximum number of extrinsics in a work-package.
 	MaxEncodedWorkPackageSize        = 12 * (1 << 20) // W_B = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
 	MaxEncodedWorkReportSize         = 48 * (1 << 10) // W_R = 96 * 2^10: The maximum size of an encoded work-report in octets.

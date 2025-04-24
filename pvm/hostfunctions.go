@@ -31,6 +31,7 @@ const (
 	SOLICIT           = 14
 	FORGET            = 15
 	YIELD             = 16
+	PROVIDE           = 27 // TEMPORARY
 	HISTORICAL_LOOKUP = 17
 	FETCH             = 18
 	EXPORT            = 19
@@ -311,6 +312,10 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	case YIELD:
 		vm.hostYield()
+		return true, nil
+
+	case PROVIDE:
+		vm.hostProvide()
 		return true, nil
 
 	// Refine functions
@@ -839,6 +844,61 @@ func (vm *VM) hostYield() {
 	vm.X.Y = y
 	vm.WriteRegister(7, OK)
 	log.Debug(vm.logging, vm.Str("YIELD OK"), "h", y)
+	vm.HostResultCode = OK
+}
+
+func (vm *VM) hostProvide() {
+	omega_7, _ := vm.ReadRegister(7)
+	o, _ := vm.ReadRegister(8)
+	z, _ := vm.ReadRegister(9)
+	if omega_7 == NONE {
+		omega_7 = uint64(vm.Service_index)
+	}
+
+	var a *types.ServiceAccount
+	a, _ = vm.getXUDS(omega_7)
+
+	if a == nil {
+		vm.WriteRegister(7, WHO)
+		vm.HostResultCode = WHO
+		return
+	}
+
+	i, errCode := vm.Ram.ReadRAMBytes(uint32(o), uint32(z))
+	if errCode != OK {
+		vm.terminated = true
+		vm.ResultCode = types.PVM_PANIC
+		return
+	}
+
+	h := common.Blake2Hash(i)
+	ok, X_s_l := a.ReadLookup(h, uint32(z), vm.hostenv)
+	if !ok && len(X_s_l) > 0 {
+		vm.WriteRegister(7, HUH)
+		vm.HostResultCode = HUH
+		return
+	}
+
+	exists := false
+	for _, p := range vm.X.P {
+		if p.ServiceIndex == a.ServiceIndex && bytes.Equal(p.P_data, i) {
+			exists = true
+			break
+		}
+	}
+
+	if exists {
+		vm.WriteRegister(7, HUH)
+		vm.HostResultCode = HUH
+		return
+	}
+
+	vm.X.P = append(vm.X.P, types.P{
+		ServiceIndex: a.ServiceIndex,
+		P_data:       i,
+	})
+
+	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
 
@@ -1624,7 +1684,7 @@ func (vm *VM) hostLog() {
 		log.Warn(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 2: // 2: User agent displays as important information
-		log.Info(vm.logging, levelName, "m", string(messageBytes))
+		log.Debug(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 3: // 3: User agent displays as helpful information
 		log.Debug(vm.logging, levelName, "m", string(messageBytes))

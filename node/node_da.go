@@ -358,6 +358,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			A: p_a,
 			O: r.Ok,
 			Y: result.PayloadHash,
+			G: result.Gas, // REVIEW
 			D: result.Result,
 		}
 		log.Debug(debugG, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))

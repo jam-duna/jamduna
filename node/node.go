@@ -686,7 +686,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			node.AuditFlag = false
 		}
 		host_name, _ := os.Hostname()
-		if (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
+		if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
 			wg := &sync.WaitGroup{}
 			wg.Add(1)
 			go node.runJamWeb(context.Background(), wg, uint16(10800)+id, port)
@@ -938,7 +938,7 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 }
 
 func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (common.Hash, error) {
-	fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
+	//fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
 	wp.WorkPackage.RefineContext = n.statedb.GetRefineContext()
 	peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
 	if err := peers[rand0.Intn(len(peers))].SendWorkPackageSubmission(ctx, wp.WorkPackage, wp.ExtrinsicsBlobs, wp.CoreIndex); err != nil {
@@ -980,7 +980,7 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 				for i := len(recentBlocks) - 1; i >= 0; i-- {
 					for _, info := range recentBlocks[i].Reported {
 						if info.WorkPackageHash == workPackageHash {
-							fmt.Printf("[***JCE=%d] WP %s Refine Complete\n", currJCE, workPackageHash)
+							//fmt.Printf("[***JCE=%d] WP %s Refine Complete\n", currJCE, workPackageHash)
 							refineDone = true
 						}
 					}
@@ -1352,7 +1352,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 			err := n.DispatchIncomingQUICStream(streamCtx, stream, validatorIndex)
 			if err != nil {
-				log.Error(debugDA, "DispatchIncomingQUICStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
+				log.Debug(debugDA, "DispatchIncomingQUICStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
 			}
 
 		}(stream)
@@ -2350,7 +2350,6 @@ func (n *Node) runClient() {
 
 func (n *Node) Telemetry(msgType uint8, obj interface{}, tags ...interface{}) {
 	sender_id := n.GetEd25519Key().String()
-	log.Info(module, "Telemetry", "sender_id", sender_id)
 	if len(sender_id) == 0 {
 		panic(333)
 	}

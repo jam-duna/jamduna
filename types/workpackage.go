@@ -59,10 +59,10 @@ func (b *WorkPackageBundle) Validate() error {
 		total_imports += len(work_item.ImportedSegments)
 		total_extrinsics += len(work_item.Extrinsics)
 	}
-	if total_exports > MaxManifestEntries {
+	if total_exports > MaxExports {
 		return fmt.Errorf("WorkPackageBundle has too many exports")
 	}
-	if total_imports > MaxManifestEntries {
+	if total_imports > MaxImports {
 		return fmt.Errorf("WorkPackageBundle has too many imports")
 	}
 	//0.6.3 added maximum extrinsics

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
@@ -98,7 +99,7 @@ func (m *ManualJCEManager) SendWP(wp common.Hash) {
 	select {
 	case m.wpSignalChan <- wp:
 		m.JCEBuffer = UpperJCEBuffer
-		fmt.Printf("SendWP: Signal received for WP %s. JCEBuffer reset.\n", wp.Hex())
+		//fmt.Printf("SendWP: Signal received for WP %s. JCEBuffer reset.\n", wp.Hex())
 	default:
 		fmt.Printf("Warning: WP signal channel is full, dropping WP %s\n", wp.Hex())
 	}
@@ -153,14 +154,14 @@ func (m *ManualJCEManager) Advance() {
 	wpQueueWasNonEmpty := wpQueueLenBeforeClear > 0
 
 	if wpQueueWasNonEmpty {
-		fmt.Printf("Clearing WPQueue and resetting JCEBuffer to %d.\n", UpperJCEBuffer)
+		//fmt.Printf("Clearing WPQueue and resetting JCEBuffer to %d.\n", UpperJCEBuffer)
 		m.JCEBuffer = UpperJCEBuffer
 		m.WPQueue = m.WPQueue[:0]
 	}
 
 	m.stateMu.Unlock()
 
-	fmt.Printf("Advancing to universal JCE: %d (WPQueue had %d items before potential clear)\n", m.UniversalJCE, wpQueueLenBeforeClear)
+	//fmt.Printf("Advancing to universal JCE: %d (WPQueue had %d items before potential clear)\n", m.UniversalJCE, wpQueueLenBeforeClear)
 
 	for _, node := range m.Nodes {
 		node.SendNewJCE(m.UniversalJCE)
@@ -194,29 +195,25 @@ func (m *ManualJCEManager) CheckReq() bool {
 	defer m.stateMu.Unlock()
 
 	wpQueueLen := len(m.WPQueue)
-	refinedWPLen := len(m.RefinedWP)
-	accumWPLen := len(m.AccumulatedWP)
-
-	fmt.Printf("Start CheckReq: WPQueue sz=%d %v | RefinedWP sz=%d %v | AccumWP sz=%d\n", wpQueueLen, m.WPQueue, refinedWPLen, m.RefinedWP, accumWPLen)
 
 	if wpQueueLen == 0 {
 		if m.JCEBuffer > 0 {
 			m.JCEBuffer--
-			fmt.Printf("CheckReq: WPQueue empty. Using buffer. JCEBuffer=%d. Allow advance.\n", m.JCEBuffer)
+			//fmt.Printf("CheckReq: WPQueue empty. Using buffer. JCEBuffer=%d. Allow advance.\n", m.JCEBuffer)
 			return true
 		} else {
-			fmt.Printf("CheckReq: WPQueue empty. Buffer empty. JCEBuffer=%d. PAUSE advance.\n", m.JCEBuffer)
+			//fmt.Printf("CheckReq: WPQueue empty. Buffer empty. JCEBuffer=%d. PAUSE advance.\n", m.JCEBuffer)
 			return false
 		}
 	}
 
 	if m.currentRefineState == nil || len(m.currentRefineState) == 0 {
 
-		fmt.Println("CheckReq Error: WPQueue non-empty, but currentRefineState is nil/empty. Cannot check requirements.")
+		//fmt.Println("CheckReq Error: WPQueue non-empty, but currentRefineState is nil/empty. Cannot check requirements.")
 
 		if m.JCEBuffer > 0 {
 			m.JCEBuffer--
-			fmt.Printf("CheckReq: Using buffer due to missing Beta state. JCEBuffer=%d. Allow advance.\n", m.JCEBuffer)
+			//fmt.Printf("CheckReq: Using buffer due to missing Beta state. JCEBuffer=%d. Allow advance.\n", m.JCEBuffer)
 			return true
 		} else {
 			//fmt.Printf("CheckReq: Buffer empty and missing Beta state. JCEBuffer=%d. PAUSE advance.\n", m.JCEBuffer)
@@ -242,7 +239,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 		return true
 	}
 	initialRequiredCount := len(refine_pending)
-	fmt.Printf("CheckReq: Need to find %d unique WP(s) from WPQueue: %v\n", initialRequiredCount, m.WPQueue)
+	//fmt.Printf("CheckReq: Need to find %d unique WP(s) from WPQueue: %v\n", initialRequiredCount, m.WPQueue)
 
 	refine_found_in_beta := make(map[common.Hash]struct{})
 	for i := len(m.currentRefineState) - 1; i >= 0; i-- {
@@ -251,7 +248,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 			wpHash := segmentRootInfo.WorkPackageHash
 			if _, needed := refine_pending[wpHash]; needed {
 				if _, alreadyFound := refine_found_in_beta[wpHash]; !alreadyFound {
-					fmt.Printf("CheckReq: Found required WP %s in Beta state (block index %d) on core%d.\n", wpHash.Hex(), i, coreIdx)
+					log.Trace(module, "CheckReq: Found required WP in Beta state", "wp", wpHash.Hex(), "i", i, "coreIdx", coreIdx)
 					refine_found_in_beta[wpHash] = struct{}{}
 				}
 			}
@@ -263,12 +260,12 @@ func (m *ManualJCEManager) CheckReq() bool {
 		for wp := range refine_found_in_beta {
 			refinedCompleteWP = append(refinedCompleteWP, wp)
 		}
-		fmt.Printf("CheckReq: Moving %d found WPs from WPQueue to RefinedWP: %v\n", len(refine_found_in_beta), refinedCompleteWP)
+		//fmt.Printf("CheckReq: Moving %d found WPs from WPQueue to RefinedWP: %v\n", len(refine_found_in_beta), refinedCompleteWP)
 
 		m.RefinedWP = append(m.RefinedWP, refinedCompleteWP...)
 
 		removeWPsFromSlice(&m.WPQueue, refine_found_in_beta)
-		fmt.Printf("CheckReq: WPQueue size after moving found WPs: %d\n", len(m.WPQueue))
+		//fmt.Printf("CheckReq: WPQueue size after moving found WPs: %d\n", len(m.WPQueue))
 	}
 
 	accmulated_found_in_c15 := make(map[common.Hash]struct{})
@@ -276,7 +273,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 	for _, wp := range m.WPQueue {
 		if _, found := accumalated_done[wp]; found {
 			if _, alreadyMarked := accmulated_found_in_c15[wp]; !alreadyMarked {
-				fmt.Printf("CheckReq: Found WP %s in Accumulation state. Moving WPQueue => AccumulatedWP.\n", wp.Hex())
+				//fmt.Printf("CheckReq: Found WP %s in Accumulation state. Moving WPQueue => AccumulatedWP.\n", wp.Hex())
 				accmulated_found_in_c15[wp] = struct{}{}
 			}
 		}
@@ -285,7 +282,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 	for _, wp := range m.RefinedWP {
 		if _, found := accumalated_done[wp]; found {
 			if _, alreadyMarked := accmulated_found_in_c15[wp]; !alreadyMarked {
-				fmt.Printf("CheckReq: Found WP %s in Accumulation state. Moving RefinedWP => AccumulatedWP.\n", wp.Hex())
+				//fmt.Printf("CheckReq: Found WP %s in Accumulation state. Moving RefinedWP => AccumulatedWP.\n", wp.Hex())
 				accmulated_found_in_c15[wp] = struct{}{}
 			}
 		}
@@ -296,7 +293,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 		for wp := range accmulated_found_in_c15 {
 			accumCompleteWP = append(accumCompleteWP, wp)
 		}
-		fmt.Printf("CheckReq: Moving %d found WPs to AccumulatedWP: %v\n", len(accmulated_found_in_c15), accumCompleteWP)
+		//fmt.Printf("CheckReq: Moving %d found WPs to AccumulatedWP: %v\n", len(accmulated_found_in_c15), accumCompleteWP)
 
 		m.AccumulatedWP = append(m.AccumulatedWP, accumCompleteWP...)
 
@@ -304,25 +301,25 @@ func (m *ManualJCEManager) CheckReq() bool {
 		removeWPsFromSlice(&m.RefinedWP, accmulated_found_in_c15)
 	}
 
-	fmt.Printf("After CheckReq: WPQueue sz=%d %v | RefinedWP sz=%d %v | AccumWP sz=%d\n", len(m.WPQueue), m.WPQueue, len(m.RefinedWP), m.RefinedWP, len(m.AccumulatedWP))
+	//fmt.Printf("After CheckReq: WPQueue sz=%d %v | RefinedWP sz=%d %v | AccumWP sz=%d\n", len(m.WPQueue), m.WPQueue, len(m.RefinedWP), m.RefinedWP, len(m.AccumulatedWP))
 
 	allFound := len(m.WPQueue) == 0
 
 	if allFound {
-		fmt.Printf("CheckReq: All %d required unique WP(s) processed (moved to Refined or Accumulated). Requirement met. Allow advance.\n", initialRequiredCount)
+		//fmt.Printf("CheckReq: All %d required unique WP(s) processed (moved to Refined or Accumulated). Requirement met. Allow advance.\n", initialRequiredCount)
 
 		return true
 	} else {
 
 		numFound := initialRequiredCount - len(m.WPQueue)
-		fmt.Printf("CheckReq: Only %d of %d required WP(s) processed. %d remain in WPQueue.\n", numFound, initialRequiredCount, len(m.WPQueue))
+		log.Trace(module, "CheckReq", "numFound", numFound, "irc", initialRequiredCount, "lenQ", len(m.WPQueue))
 
 		if m.JCEBuffer > 0 {
 			m.JCEBuffer--
-			fmt.Printf("CheckReq: Using buffer because not all WPs processed. JCEBuffer=%d. Allow advance.\n", m.JCEBuffer)
+			//fmt.Printf("CheckReq: Using buffer because not all WPs processed. JCEBuffer=%d. Allow advance.\n", m.JCEBuffer)
 			return true
 		} else {
-			fmt.Printf("CheckReq: Buffer empty and not all WPs processed. JCEBuffer=%d. PAUSE advance.\n", m.JCEBuffer)
+			//fmt.Printf("CheckReq: Buffer empty and not all WPs processed. JCEBuffer=%d. PAUSE advance.\n", m.JCEBuffer)
 			return false
 		}
 	}
@@ -361,7 +358,7 @@ func (m *ManualJCEManager) Start(ctx context.Context) {
 		case <-bufferTicker.C:
 
 			if m.JCEBuffer == 0 {
-				fmt.Printf("Refreshing JCEBuffer to %d.\n", UpperJCEBuffer)
+				//fmt.Printf("Refreshing JCEBuffer to %d.\n", UpperJCEBuffer)
 				m.JCEBuffer = UpperJCEBuffer
 			}
 
@@ -376,7 +373,7 @@ func (m *ManualJCEManager) Start(ctx context.Context) {
 					queueLen := len(m.WPQueue)
 					m.stateMu.Unlock()
 
-					fmt.Printf("Received WP signal, added hash '%s' to WPQueue (Queue size: %d).\n", wp.Hex(), queueLen)
+					log.Trace(module, "Received WP signal", "wp", wp.Hex(), "ql", queueLen)
 				default:
 					break drainLoop
 				}
@@ -386,12 +383,12 @@ func (m *ManualJCEManager) Start(ctx context.Context) {
 
 			c3, _, err := types.Decode(c3Bytes, reflect.TypeOf(statedb.RecentBlocks{}))
 			if err != nil {
-				fmt.Printf("Error decoding Beta state update: %v\n", err)
+				//fmt.Printf("Error decoding Beta state update: %v\n", err)
 				continue
 			}
 			recentBlocks, ok := c3.(statedb.RecentBlocks)
 			if !ok {
-				fmt.Printf("Error type asserting Beta state update\n")
+				//fmt.Printf("Error type asserting Beta state update\n")
 				continue
 			}
 
@@ -403,12 +400,12 @@ func (m *ManualJCEManager) Start(ctx context.Context) {
 
 			c15, _, err := types.Decode(c15Bytes, reflect.TypeOf([types.EpochLength]types.AccumulationHistory{}))
 			if err != nil {
-				fmt.Printf("Error decoding Accumulation state update: %v\n", err)
+				//fmt.Printf("Error decoding Accumulation state update: %v\n", err)
 				continue
 			}
 			accumulationHistories, ok := c15.([types.EpochLength]types.AccumulationHistory)
 			if !ok {
-				fmt.Printf("Error type asserting Accumulation state update\n")
+				//fmt.Printf("Error type asserting Accumulation state update\n")
 				continue
 			}
 
@@ -434,7 +431,7 @@ func UpdateJCESignalSimple(nodes []*Node, initialValue uint32) {
 				node.SendNewJCE(universalJCE)
 			}
 			lastUpdate = time.Now()
-			fmt.Printf("Simple JCE updated to: %d\n", universalJCE)
+			//fmt.Printf("Simple JCE updated to: %d\n", universalJCE)
 		}
 	}
 }
@@ -462,10 +459,10 @@ func UpdateJCESignalUniversal2(nodes []*Node, initialValue uint32, addtionalReq 
 		pendingNodes = newPending
 		numPending := len(pendingNodes)
 		if numPending > 0 {
-			fmt.Printf("Waiting for %d node(s) (%d ready) to complete JCE %d\n", numPending, nodesReady, universalJCE)
+			//fmt.Printf("Waiting for %d node(s) (%d ready) to complete JCE %d\n", numPending, nodesReady, universalJCE)
 		} else {
 			universalJCE++
-			fmt.Printf("Deploying new universal JCE: %d\n", universalJCE)
+			//fmt.Printf("Deploying new universal JCE: %d\n", universalJCE)
 			for _, node := range nodes {
 				node.SendNewJCE(universalJCE)
 			}
@@ -521,13 +518,13 @@ func StartGameOfLifeServer(addr string, path string) func(data []byte) {
 
 		})
 
-		/* fmt.Printf("Starting Game of Life server on %s (serving %s)\n", addr, path)
+		fmt.Printf("Starting Game of Life server on %s (serving %s)\n", addr, path)
 		err := http.ListenAndServe(addr, mux)
 		if err != nil && err != http.ErrServerClosed {
 			fmt.Printf("ListenAndServe error: %v\n", err)
 
 		}
-		fmt.Println("Game of Life server shut down.") */
+		fmt.Println("Game of Life server shut down.")
 	}()
 
 	return func(data []byte) {
@@ -564,7 +561,7 @@ func SetupJceManager(nodes []*Node, initialJCE uint32, jceMode string) (string, 
 			errors.New("SetupJceManager: cannot setup JCE Manager with zero nodes")
 	}
 
-	fmt.Printf("SetupJceManager: Detected JCE Mode '%v'\n", jceMode)
+	//fmt.Printf("SetupJceManager: Detected JCE Mode '%v'\n", jceMode)
 
 	switch jceMode {
 	case JCEManual:
@@ -604,7 +601,7 @@ func SetupJceManager(nodes []*Node, initialJCE uint32, jceMode string) (string, 
 				cancelFunc()
 			} else {
 				manager = receivedManager
-				fmt.Printf("SetupJceManager: Manual JCE Manager (%p) setup complete.\n", manager)
+				//fmt.Printf("SetupJceManager: Manual JCE Manager (%p) setup complete.\n", manager)
 			}
 		case <-time.After(10 * time.Second):
 			fmt.Println("SetupJceManager: Timeout waiting for manager instance.")
@@ -617,7 +614,7 @@ func SetupJceManager(nodes []*Node, initialJCE uint32, jceMode string) (string, 
 		go UpdateJCESignalSimple(nodes, initialJCE)
 
 	default:
-		fmt.Printf("SetupJceManager: Unknown JCE Mode '%s'. Using default delay...\n", jceMode)
+		//fmt.Printf("SetupJceManager: Unknown JCE Mode '%s'. Using default delay...\n", jceMode)
 		time.Sleep(types.SecondsPerSlot * time.Second)
 	}
 

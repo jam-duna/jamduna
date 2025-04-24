@@ -71,7 +71,7 @@ func TestCDT(t *testing.T) {
 	//var TestingSegmentsNums = []int{3072}
 
 	//var TestingSegmentsNums []int
-	for i := 2724; i <= types.MaxManifestEntries; i++ {
+	for i := 2724; i <= types.MaxImports; i++ {
 		//TestingSegmentsNums = append(TestingSegmentsNums, i)
 	}
 	for _, numSegments := range TestingSegmentsNums {

@@ -110,7 +110,6 @@ func Telemetry(code uint8, sender_id string, msg interface{}, kv ...interface{})
 		Error("Telemetry: Failed to marshal msg", "err", err)
 		return
 	}
-	Warn("Telemetry", "Telemetry", "sender_id", sender_id, "msg_type", log.MsgType, "msg", string(msgBytes))
 	Root().Telemetry(string(msgBytes))
 }
 

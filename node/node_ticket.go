@@ -94,7 +94,7 @@ func (n *Node) BroadcastTickets(currJCE uint32) {
 	for _, ticketbucket := range tickets {
 		ticket := ticketbucket.Ticket
 		if !*ticketbucket.IsBroadcasted {
-			log.Info(module, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt, "elapsed", ticketbucket.ElapsedMicroseconds)
+
 			go func() {
 				defer cancel()               // ensures context is released
 				_ = n.broadcast(ctx, ticket) // CE131/132

@@ -381,6 +381,23 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		}
 
 		output_t = append(output_t, XY.T...)
+
+		// apply p
+		for _, p := range XY.P {
+			ServiceIndex := p.ServiceIndex
+			P_data := p.P_data
+			if ServiceIndex == service {
+				sa, ok := o.GetService(ServiceIndex)
+				if ok {
+					lookup_ok, X_s_l := sa.ReadLookup(common.Blake2Hash(P_data), uint32(len(P_data)), s)
+					if lookup_ok && len(X_s_l) == 0 {
+						sa.WriteLookup(common.Blake2Hash(P_data), uint32(len(P_data)), []uint32{s.JamState.SafroleState.Timeslot})
+						sa.WritePreimage(common.Blake2Hash(P_data), P_data)
+						sa.Dirty = true
+					}
+				}
+			}
+		}
 	}
 
 	// s ∈ K(d) ∖ s
@@ -486,6 +503,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 				o := types.AccumulateOperandElements{
 					H: workReport.AvailabilitySpec.WorkPackageHash,
 					E: workReport.AvailabilitySpec.ExportedSegmentRoot,
+					G: workResult.Gas, // REVIEW closely
 					A: workReport.AuthorizerHash,
 					O: workReport.AuthOutput,
 					Y: workResult.PayloadHash,

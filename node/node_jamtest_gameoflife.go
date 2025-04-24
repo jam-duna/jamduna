@@ -23,7 +23,7 @@ func flatten(data [][]byte) []byte {
 
 func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 
-	ws_push := StartGameOfLifeServer("localhost:8080", "../node/game_of_life.html")
+	ws_push := StartGameOfLifeServer("localhost:80", "./game_of_life.html")
 
 	log.Info(module, "Game of Life START")
 
@@ -144,7 +144,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 				stepBytes := make([]byte, 4)
 				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
 				out := append(stepBytes, flatten(vm_export)...)
-				if false { // does not work on 2nd run
+				if true { // does not work on 2nd run
 					ws_push(out)
 				}
 			}

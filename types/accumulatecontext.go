@@ -123,6 +123,11 @@ type XContext struct {
 	U *PartialState      `json:"U"`
 	T []DeferredTransfer `json:"T"`
 	Y common.Hash        `json:"Y"` // Question: should this be a pointer or just common.Hash
+	P []P                `json:"P"`
+}
+type P struct {
+	ServiceIndex uint32 `json:"ServiceIndex"`
+	P_data       []byte `json:"P_data"`
 }
 
 // returns back X.U.D[s] where s is the current service index
@@ -176,6 +181,7 @@ type AccumulateOperandElements struct {
 	A common.Hash `json:"A"` // a
 	O []byte      `json:"O"` // o
 	Y common.Hash `json:"Y"` // y
+	G uint64      `json:"G"` // g 0.6.5 -- see (C.29)
 	D Result      `json:"D"` // d
 }
 
@@ -198,6 +204,7 @@ func DecodedWrangledResults(o *AccumulateOperandElements) string {
 		A common.Hash `json:"A"`
 		O []byte      `json:"O"`
 		Y common.Hash `json:"Y"`
+		G uint64      `json:"G"` // g 0.6.5 -- see (C.29)
 		D string      `json:"D"`
 	}{
 		H: o.H,
@@ -205,6 +212,7 @@ func DecodedWrangledResults(o *AccumulateOperandElements) string {
 		A: o.A,
 		O: o.O,
 		Y: o.Y,
+		G: o.G, // REVIEW
 	}
 
 	ResultBytes, _ := Encode(o.D)

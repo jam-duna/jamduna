@@ -104,13 +104,13 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
-		log.Warn(module, "CE128 SendBlockRequest", "p", p.String(), "err", err)
+		log.Trace(module, "CE128 SendBlockRequest", "p", p.String(), "err", err)
 		return blocks, err
 	}
 
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
-		log.Warn(module, "CE128 SendBlockRequest", "peerID", p.String(), "err", err)
+		log.Trace(module, "CE128 SendBlockRequest", "peerID", p.String(), "err", err)
 		return blocks, err
 	}
 

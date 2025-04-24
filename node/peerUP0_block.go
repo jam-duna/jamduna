@@ -318,7 +318,7 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		n.UP0_streamMu.Lock()
 		delete(n.UP0_stream, peerID)
 		n.UP0_streamMu.Unlock()
-		log.Info(module, "runBlockAnnouncement cleanup", "peerID", peerID)
+		log.Trace(module, "runBlockAnnouncement cleanup", "peerID", peerID)
 	}()
 	code := uint8(UP0_BlockAnnouncement)
 	ctx := context.Background()
