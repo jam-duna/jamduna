@@ -159,7 +159,7 @@ func main() {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)
 	}
-	if validatorIndex == 15 {
+	if validatorIndex == 5 {
 		n.SetSendTickets(true)
 	} else {
 		n.SetSendTickets(false)

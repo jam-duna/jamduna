@@ -199,8 +199,7 @@ func saveGuaranteeDerivation(gd GuaranteeDerivation) (err error) {
 }
 
 func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
-
-	var pvmElapsed uint32 // we seem to execute multiple times...keep the pvmElapsed here
+	var pvmElapsed uint32 // REVIEW: we seem to execute multiple times sometimes???
 
 	if n.store.SendTrace {
 		tracer := n.store.Tp.Tracer("NodeTracer")
@@ -219,7 +218,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		log.Warn(debugG, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
-	elapsedMicrosecondsRefine := uint32(0)
+
 	curr_statedb := n.statedb.Copy()
 	// reject if the work package is not for this core
 	if wpItem.coreIndex != curr_statedb.GetSelfCoreIndex() {
@@ -257,7 +256,6 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 					log.Warn(module, "processWPQueueItem", "err", execErr)
 					return
 				}
-				elapsedMicrosecondsRefine = pvmElapsed
 				guarantee.Report = report
 				signerSecret := n.GetEd25519Secret()
 				gc := report.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
@@ -308,7 +306,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		guarantee.Slot = curr_statedb.GetTimeslot()
 		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 		defer cancel()
-		n.broadcast(ctx, guarantee, "elapsedMicrosecondsRefine", elapsedMicrosecondsRefine) // this doesn't make sense
+		n.broadcast(ctx, guarantee) // send via CE135
 
 		saveGuaranteeDerivation(GuaranteeDerivation{
 			Bundle:            bundle,
@@ -326,7 +324,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			"guarantee.Signatures", guarantee.Signatures, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		return false
 	}
-	metadata := fmt.Sprintf("role=Guarantor|numSig=%d|id=%v", len(guarantee.Signatures), n.GetEd25519Key().String())
-	log.Telemetry(CE255_Uncategorized, guarantee.Report, "msg_type", getMessageType(guarantee.Report), "metadata", metadata, "elapsed", pvmElapsed, "codec_encoded", types.EncodeAsHex(guarantee.Report))
+	metadata := fmt.Sprintf("role=Guarantor|numSig=%d", len(guarantee.Signatures))
+	n.Telemetry(log.MsgTypeWorkReport, guarantee.Report, "msg_type", getMessageType(guarantee.Report), "metadata", metadata, "elapsed", pvmElapsed, "codec_encoded", types.EncodeAsHex(guarantee.Report))
 	return true
 }

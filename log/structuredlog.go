@@ -10,8 +10,8 @@ import (
 )
 
 type StructuredLog struct {
-	// TODO: senderid, team
 	Time     time.Time       `json:"time"`
+	Sender   string          `json:"sender_id"`
 	MsgType  string          `json:"msg_type"`
 	MsgJSON  json.RawMessage `json:"json_encoded"`
 	Metadata *string         `json:"metadata,omitempty"`
@@ -19,7 +19,7 @@ type StructuredLog struct {
 	MsgCodec string          `json:"codec_encoded,omitempty"`
 }
 
-var fieldOrder = []string{"time", "msg_type", "json_encoded", "metadata", "elapsed", "codec_encoded"}
+var fieldOrder = []string{"time", "sender_id", "msg_type", "json_encoded", "metadata", "elapsed", "codec_encoded"}
 
 // Custom JSON marshaling to preserve field order and omit zero/empty values.
 func (l StructuredLog) MarshalJSON() ([]byte, error) {
@@ -36,6 +36,9 @@ func (l StructuredLog) MarshalJSON() ([]byte, error) {
 		switch f {
 		case "time":
 			b, _ := json.Marshal(l.Time)
+			writeField(f, b)
+		case "sender_id":
+			b, _ := json.Marshal(l.Sender)
 			writeField(f, b)
 		case "msg_type":
 			b, _ := json.Marshal(l.MsgType)
@@ -63,27 +66,24 @@ func (l StructuredLog) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func Telemetry(code uint8, msg interface{}, kv ...interface{}) {
-	raw, err := json.Marshal(msg)
+func Telemetry(code uint8, sender_id string, msg interface{}, kv ...interface{}) {
+	msgJSON, err := json.Marshal(msg)
 	if err != nil {
-		fmt.Printf("!!! Failed to marshal telemetry message: %v\n", err)
+		Error("Telemetry: Failed to marshal msg", "err", err)
 		return
 	}
 
 	log := StructuredLog{
+		Sender:  sender_id,
 		Time:    time.Now().UTC(),
 		MsgType: strconv.Itoa(int(code)),
-		MsgJSON: raw,
+		MsgJSON: msgJSON,
 	}
 
 	kvMap := toMap(kv...)
 
 	// Build metadata
 	metaParts := []string{}
-	if rawCodec, ok := kvMap["codec_encoded"]; ok && rawCodec != nil {
-		hexStr := strings.TrimPrefix(fmt.Sprint(rawCodec), "0x")
-		metaParts = append(metaParts, fmt.Sprintf("team=JAMDUNA|codec_len=%d", len(hexStr)/2))
-	}
 	if userMeta, ok := kvMap["metadata"]; ok && userMeta != nil {
 		metaParts = append(metaParts, fmt.Sprint(userMeta))
 	}
@@ -105,7 +105,13 @@ func Telemetry(code uint8, msg interface{}, kv ...interface{}) {
 		}
 	}
 
-	telemetryInternal(code, log)
+	msgBytes, err := json.Marshal(log)
+	if err != nil {
+		Error("Telemetry: Failed to marshal msg", "err", err)
+		return
+	}
+	Warn("Telemetry", "Telemetry", "sender_id", sender_id, "msg_type", log.MsgType, "msg", string(msgBytes))
+	Root().Telemetry(string(msgBytes))
 }
 
 func toMap(kv ...interface{}) map[string]interface{} {
@@ -136,15 +142,4 @@ func parseUint32(v interface{}) uint32 {
 		}
 	}
 	return 0
-}
-
-func telemetryInternal(code uint8, msg any) {
-	msgBytes, err := json.Marshal(msg)
-	if err != nil {
-		fmt.Printf("Failed to marshal telemetry message: %v\n", err)
-		return
-	}
-
-	Root().Telemetry(string(msgBytes))
-
 }

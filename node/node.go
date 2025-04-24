@@ -1361,7 +1361,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 // broadcast sends the object to all peers
 // TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
-func (n *Node) broadcast(ctxParent context.Context, obj interface{}, kv ...interface{}) []byte {
+func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 	result := []byte{}
 	objType := reflect.TypeOf(obj)
 
@@ -1418,7 +1418,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, kv ...inter
 			case reflect.TypeOf(types.Ticket{}):
 				t := obj.(types.Ticket)
 				epoch := uint32(0)
-				if err := peer.SendTicketDistribution(ctx, epoch, t, false, kv); err != nil {
+				if err := peer.SendTicketDistribution(ctx, epoch, t, false); err != nil {
 					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
 			case reflect.TypeOf(types.Block{}):
@@ -1441,13 +1441,13 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, kv ...inter
 
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
-				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures, kv); err != nil {
+				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures); err != nil {
 					log.Error(debugStream, "SendWorkReportDistribution", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
-				if err := peer.SendAssurance(ctx, &a, kv); err != nil {
+				if err := peer.SendAssurance(ctx, &a); err != nil {
 					log.Error(debugStream, "SendAssurance", "n", n.String(), "err", err)
 					return
 				}
@@ -1461,7 +1461,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, kv ...inter
 				j := obj.(types.Judgement)
 				epoch := uint32(0) // Wrong?
 				// TODO: add variadic args to SendJudgmentPublication (time of audit)
-				if err := peer.SendJudgmentPublication(ctx, epoch, j, kv); err != nil {
+				if err := peer.SendJudgmentPublication(ctx, epoch, j); err != nil {
 					log.Error(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 					return
 				}
@@ -1763,9 +1763,8 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 	if numCores == 0 {
 		return nil
 	}
-	assuredElasped := common.Elapsed(assureStart)
-	log.Debug(debugA, "assureNewBlock: Broadcasting assurance", "n", n.String(), "bitfield", a.Bitfield)
-	n.broadcast(ctx, a, "microseconds", assuredElasped)
+	n.broadcast(ctx, a) // via CE141
+	n.Telemetry(log.MsgTypeAssurance, a, "elapsed", common.Elapsed(assureStart), "codec_encoded", types.EncodeAsHex(a))
 
 	return nil
 }
@@ -2284,17 +2283,7 @@ func (n *Node) runClient() {
 			n.StoreBlock(newBlock, n.id, true)
 			n.processBlock(newBlock)
 
-			makeblock_elapsed := common.Elapsed(makeblock_start)
-			//fmt.Printf("[N%d] ProcessState OK: %v elapsed = %d, \n", n.id, newBlock.Header.Hash().String_short(), makeblock_elapsed)
-			log.Telemetry(CE128_BlockRequest, newBlock, "msg_type", getMessageType(newBlock), "metadata", nil, "elapsed", makeblock_elapsed, "codec_encoded", types.EncodeAsHex(newBlock))
-
-			for _, p := range newBlock.Extrinsic.Preimages {
-				preimage_metadata := fmt.Sprintf("blob_len=%v|h=%v|a_p=%v|s=%v", len(p.Blob), p.Hash(), p.AccountHash(), p.Requester)
-				log.Telemetry(CE142_PreimageAnnouncement, p, "msg_type", getMessageType(p), "metadata", preimage_metadata, "elapsed", nil)
-			}
-			// TODO: do this in a core / validator / statistics
-			log.Telemetry(13, newStateDB.JamState.ValidatorStatistics, "msg_type", getMessageType(newStateDB.JamState.ValidatorStatistics), "codec_encoded", types.EncodeAsHex(newStateDB.JamState.ValidatorStatistics))
-
+			n.authorTelemetry(newBlock, newStateDB, common.Elapsed(makeblock_start))
 			n.SetLatestBlockInfo(
 				&JAMSNP_BlockInfo{
 					HeaderHash: newBlock.Header.Hash(),
@@ -2307,8 +2296,8 @@ func (n *Node) runClient() {
 			}
 			nodee.Applied = true
 			ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-			defer cancel() // ensures context is released
-			n.broadcast(ctx, *newBlock)
+			defer cancel()              // ensures context is released
+			n.broadcast(ctx, *newBlock) // UP0
 
 			go func() {
 				timeslot := newStateDB.GetSafrole().Timeslot
@@ -2355,6 +2344,33 @@ func (n *Node) runClient() {
 			n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsClosed)
 		case log := <-logChan:
 			go n.WriteLog(log)
+		}
+	}
+}
+
+func (n *Node) Telemetry(msgType uint8, obj interface{}, tags ...interface{}) {
+	sender_id := n.GetEd25519Key().String()
+	log.Info(module, "Telemetry", "sender_id", sender_id)
+	if len(sender_id) == 0 {
+		panic(333)
+	}
+	log.Telemetry(msgType, sender_id, obj, tags...)
+}
+
+func (n *Node) authorTelemetry(b *types.Block, newStateDB *statedb.StateDB, elapsed uint32) {
+	n.Telemetry(log.MsgTypeBlock, b, "elapsed", elapsed, "codec_encoded", types.EncodeAsHex(b))
+	for _, p := range b.Extrinsic.Preimages {
+		n.Telemetry(log.MsgTypePreimage, p, "metadata", fmt.Sprintf("blob_len=%v|h=%v|s=%v", len(p.Blob), p.Hash(), p.Requester))
+	}
+	n.Telemetry(log.MsgTypeStatistics, newStateDB.JamState.ValidatorStatistics, "codec_encoded", types.EncodeAsHex(newStateDB.JamState.ValidatorStatistics))
+	serviceUpdates := newStateDB.GetStateUpdates().GetServiceUpdates()
+	for _, upd := range serviceUpdates {
+		if upd != nil && upd.ServiceInfo != nil {
+			if upd.ServiceInfo.Info.NewAccount {
+				info := upd.ServiceInfo.Info
+				log.Info(module, "authorTelemetry", "newAccount", info)
+				n.Telemetry(log.MsgTypeNewService, upd.ServiceInfo.Info, "codec_encoded", types.EncodeAsHex(info))
+			}
 		}
 	}
 }

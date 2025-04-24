@@ -17,6 +17,10 @@ func NewStateUpdate() *StateUpdate {
 	}
 }
 
+func (su *StateUpdate) GetServiceUpdates() map[uint32]*ServiceUpdate {
+	return su.ServiceUpdates
+}
+
 type ServiceUpdate struct {
 	ServiceInfo     *SubServiceInfoResult
 	ServiceValue    map[common.Hash]*SubServiceValueResult    // storage key

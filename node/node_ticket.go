@@ -94,17 +94,19 @@ func (n *Node) BroadcastTickets(currJCE uint32) {
 	for _, ticketbucket := range tickets {
 		ticket := ticketbucket.Ticket
 		if !*ticketbucket.IsBroadcasted {
-			log.Trace(debugT, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt)
+			log.Info(module, "Broadcasting Ticket", "n", n.id, "r", ticket.Attempt, "elapsed", ticketbucket.ElapsedMicroseconds)
 			go func() {
-				defer cancel() // ensures context is released
-				_ = n.broadcast(ctx, ticket, "elapsedMicroseconds", ticketbucket.ElapsedMicroseconds)
+				defer cancel()               // ensures context is released
+				_ = n.broadcast(ctx, ticket) // CE131/132
+				// Telemetry of ticket
+				n.Telemetry(log.MsgTypeTicket, ticket, "elapsed", ticketbucket.ElapsedMicroseconds, "codec_encoded", types.EncodeAsHex(ticket))
 			}()
 			*ticketbucket.IsBroadcasted = true
 		} else {
 			if !*ticketbucket.IsIncluded && n.resendTickets {
 				go func() {
-					defer cancel() // ensures context is released
-					_ = n.broadcast(ctx, ticket)
+					defer cancel()               // ensures context is released
+					_ = n.broadcast(ctx, ticket) // CE131/132
 					fmt.Printf("[N%v] Broadcasted Ticket %v\n", n.id, ticket.Attempt)
 				}()
 				*ticketbucket.IsBroadcasted = true

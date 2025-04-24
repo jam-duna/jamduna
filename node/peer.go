@@ -41,7 +41,6 @@ const (
 	CE195_Catchup                      = 195
 	CE224_BLSSignature                 = 224
 	CE225_BLSAggregateSignature        = 225
-	CE255_Uncategorized                = 255 // this is reserved
 
 	useQuicDeadline = false
 )

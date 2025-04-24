@@ -293,6 +293,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	pvmContext := log.OtherGuarantor
 	if firstGuarantorOrAuditor {
 		pvmContext = log.FirstGuarantorOrAuditor
+		n.nodeSelf.Telemetry(log.MsgTypeWorkPackageBundle, package_bundle, "codec_encoded", types.EncodeAsHex(package_bundle))
 	}
 
 	pvmStart := time.Now()
@@ -376,6 +377,10 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	log.Debug(debugG, "executeWorkPackageBundle", "workreporthash", common.Str(workReport.Hash()), "workReport", workReport.String())
 	n.StoreMeta_Guarantor(spec, d)
 	pvmElapsed := common.Elapsed(pvmStart)
+	if firstGuarantorOrAuditor {
+		metadata := fmt.Sprintf("wph=%s|c=%d|len=%d", spec.WorkPackageHash, workReport.CoreIndex, spec.ExportedSegmentLength)
+		n.nodeSelf.Telemetry(log.MsgTypeSegment, segments, "metadata", metadata, "codec_encoded", types.EncodeAsHex(segments))
+	}
 
 	return workReport, d, pvmElapsed, err
 }

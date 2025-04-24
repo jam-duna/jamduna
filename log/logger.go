@@ -127,6 +127,18 @@ type Logger interface {
 	GetRecordedLogs() ([]byte, error)
 }
 
+const (
+	MsgTypeStatistics        = 13  // Block Author post-execution (sender of UP0)
+	MsgTypeBlock             = 128 // Block headers and extrinsics metadata
+	MsgTypeTicket            = 131 // Validator generated tickets  (sender of CE131)
+	MsgTypeWorkPackageBundle = 133 // Work package submitted for refinement (receiver of CE133)
+	MsgTypeSegment           = 135 // Export Segment (sender of CE135)
+	MsgTypeAssurance         = 141 // Validator assurances for inclusion (sender of 141)
+	MsgTypePreimage          = 142 // Preimages submitted for inclusion (sender of 142)
+	MsgTypeNewService        = 143 // Block Author post-execution (sender of UP0)
+	MsgTypeWorkReport        = 255 // Work package execution outcomes (receiver of CE133 and CE134 and CE135)
+)
+
 type logger struct {
 	inner        *slog.Logger
 	writer       *syslog.Writer

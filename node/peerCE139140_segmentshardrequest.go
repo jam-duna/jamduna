@@ -191,7 +191,7 @@ func (p *Peer) SendSegmentShardRequest(
 }
 
 // onSegmentShardRequest handles incoming segment shard requests, with kv variadic arguments
-func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, msg []byte, withJustification bool, kv ...interface{}) (err error) {
+func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, msg []byte, withJustification bool) (err error) {
 	defer stream.Close()
 
 	var req JAMSNPSegmentShardRequest

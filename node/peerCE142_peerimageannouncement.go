@@ -46,8 +46,8 @@ func (n *NodeContent) BroadcastPreimageAnnouncement(serviceID uint32, preimageHa
 	log.Trace(module, "BroadcastPreimageAnnouncement:AddPreimageToPool", "n", n.String(), "p", pa.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-	defer cancel() // ensures context is released
-	n.nodeSelf.broadcast(ctx, pa)
+	defer cancel()                // ensures context is released
+	n.nodeSelf.broadcast(ctx, pa) // CE142
 	return nil
 }
 
