@@ -111,9 +111,11 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 	code := uint8(CE138_BundleShardRequest)
 	bundleShard, sClub, encodedPath, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onBundleShardRequest: GetBundleShard_Assurer error: %w", err)
 	}
 	if !ok {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onBundleShardRequest: bundle shard not found for root=%v shardIndex=%d", req.ErasureRoot, req.ShardIndex)
 	}
 

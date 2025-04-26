@@ -1544,7 +1544,6 @@ func (vm *VM) djump(a uint64) {
 	} else if a == 0 || a > uint64(len(vm.J)*Z_A) || a%Z_A != 0 {
 		vm.terminated = true
 		vm.ResultCode = types.PVM_PANIC
-		// types.PVM_PANIC("OOB")
 	} else {
 		vm.pc = uint64(vm.J[(a/Z_A)-1])
 	}

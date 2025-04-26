@@ -1,13 +1,16 @@
 package statedb
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
 // make block generate block prior to state execution
-func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, ticketID common.Hash, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
+func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecret, targetJCE uint32, ticketID common.Hash, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
@@ -89,12 +92,12 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 			continue
 		}
 		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
-		log.Trace(debugG, "MakeBlock: Added Guarantee", "g", g)
-		// check guarantee one per core
-		// check guarantee is not a duplicate
-	}
-	for i := 0; i < len(extrinsicData.Guarantees); i++ {
-		log.Trace(debugG, "ExtrinsicData.Guarantees", "i", i, "wph", extrinsicData.Guarantees[i].Report.GetWorkPackageHash(), "coreIndex", extrinsicData.Guarantees[i].Report.CoreIndex)
+		select {
+		case <-ctx.Done():
+			return bl, fmt.Errorf("MakeBlock: Added Guarantee canceled")
+		default:
+		}
+
 	}
 	extrinsicData.Guarantees, err, _ = s.VerifyGuaranteesMakeBlock(extrinsicData.Guarantees, b)
 	if err != nil {
@@ -168,6 +171,11 @@ func (s *StateDB) MakeBlock(credential types.ValidatorSecret, targetJCE uint32, 
 					extrinsicData.Tickets = append(extrinsicData.Tickets, t)
 				} else {
 					extrinsic_pool.RemoveTicketFromPool(ticketID, next_n2)
+				}
+				select {
+				case <-ctx.Done():
+					return bl, fmt.Errorf("MakeBlock: Add ticket canceled")
+				default:
 				}
 			}
 

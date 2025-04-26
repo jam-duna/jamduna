@@ -136,6 +136,7 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 	blocks, ok, err := n.BlocksLookup(newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
 	if err != nil {
 		log.Error(module, "onBlockRequest", "headerHash", newReq.HeaderHash, "err", err)
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onBlockRequest: lookup failed: %w", err)
 	}
 	if !ok {

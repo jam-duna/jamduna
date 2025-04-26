@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	rand0 "math/rand"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -45,12 +46,30 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 // fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA.
 func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	spec := g.Report.AvailabilitySpec
-	guarantor := g.Signatures[0].ValidatorIndex
 
-	bundleShard, exportedShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, n.id)
+	const maxRetries = 3
+	var bundleShard []byte
+	var exportedShards []byte
+	var encodedPath []byte
+	var err error
+	var guarantor uint16
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		ramdamguarantor := rand0.Intn(len(g.Signatures))
+		guarantor = g.Signatures[ramdamguarantor].ValidatorIndex
+		bundleShard, exportedShards, encodedPath, err = n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, n.id)
+		if err == nil {
+			break
+		}
+		log.Warn(debugDA, "assureData: SendFullShardRequest attempt failed",
+			"attempt", attempt, "n", n.String(), "erasureRoot", spec.ErasureRoot,
+			"guarantor", guarantor, "err", err)
+	}
+
 	if err != nil {
-		log.Error(debugDA, "assureData: SendFullShardRequest failed", "n", n.String(), "erasureRoot", spec.ErasureRoot, "guarantor", guarantor, "err", err)
-		return fmt.Errorf("SendFullShardRequest: %w", err)
+		log.Error(debugDA, "assureData: SendFullShardRequest failed after retries",
+			"n", n.String(), "erasureRoot", spec.ErasureRoot,
+			"guarantor", guarantor, "err", err)
+		return fmt.Errorf("SendFullShardRequest (after retries): %w", err)
 	}
 
 	// CRITICAL: verify justification matches the erasure root before storage

@@ -10,6 +10,7 @@ import (
 	"net/rpc"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -252,6 +253,9 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 
 	// Select random peer
 	selected := idx[rand.Intn(len(idx))]
+	if selected == 5 {
+		selected = idx[0]
+	}
 	client, err := rpc.Dial("tcp", c.servers[selected])
 	if err != nil {
 		log.Error(module, "GetClient: Dial", "selected", selected, "c.servers[selected]", c.servers[selected], "err", err)
@@ -276,7 +280,12 @@ func (c *NodeClient) SendCommand(command []string, nodeID int) {
 		log.Error(module, "SendCommand: jam.NodeCommand", "addr", addr, "err", err)
 		return
 	}
-	log.Info(module, "SendCommand: Response", "addr", addr, "response", response)
+	decoded, err := strconv.Unquote(`"` + response + `"`)
+	if err != nil {
+		decoded = strings.ReplaceAll(response, `\n`, "\n")
+		decoded = strings.ReplaceAll(decoded, `\t`, "\t")
+	}
+	fmt.Printf("response: %s\n", decoded)
 }
 
 func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {

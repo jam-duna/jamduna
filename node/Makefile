@@ -37,6 +37,11 @@ game_of_life :
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)
 
+auth_copy:
+	@echo "Running TestAuthCopy$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@go test -timeout $(TIMEOUT) -v -run '^TestAuthCopy$$' \
+	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
+	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)
 megatron:
 	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_S),$(TargetN)); \
 	echo "Running TestMegatron with targetN=$$TARGET_N and timeout $(TIMEOUT)..."; \

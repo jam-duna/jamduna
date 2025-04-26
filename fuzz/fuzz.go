@@ -101,7 +101,6 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 	state_transitions_dir := filepath.Join(baseDir, dir, "state_transitions")
 	stFiles, err := os.ReadDir(state_transitions_dir)
 	if err != nil {
-		//panic(fmt.Sprintf("failed to read directory: %v\n", err))
 		return stfs, fmt.Errorf("failed to read directory: %v", err)
 	}
 	fmt.Printf("Selected Dir: %v\n", dir)

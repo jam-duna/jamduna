@@ -28,7 +28,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.HeaderHash = blk.Header.Hash()
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
 	if !isValid || headerErr != nil {
-		// panic("MK validation check!! Block header is not valid")
 		return s, fmt.Errorf("Block header is not valid err=%v", headerErr)
 	}
 	if s.Id == blk.Header.AuthorIndex {
@@ -50,6 +49,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	// 0.6.2 4.7 - Recent History Dagga (β†) [No other state related]
 	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
+	select {
+	case <-ctx.Done():
+		return s, fmt.Errorf("ApplyStateRecentHistoryDagga canceled")
+	default:
+	}
+
 	// dispute should go here
 	disputes := blk.Disputes()
 	if len(disputes.Verdict) != 0 {
@@ -62,7 +67,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	sf := s.GetSafrole()
 	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
-	s2, err := sf.ApplyStateTransitionTickets(ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
+	s2, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {
 		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
@@ -89,7 +94,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if safrole_debug {
 		err = VerifySafroleSTF(sf, &s2, blk)
 		if err != nil {
-			panic(fmt.Sprintf("VerifySafroleSTF %v\n", err))
+			fmt.Sprintf("VerifySafroleSTF %v\n", err)
 		}
 	}
 
@@ -104,7 +109,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	guarantees := blk.Guarantees()
 	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]
 	// 4.16 available work report also updated
-	num_reports, num_assurances, err := s.ApplyStateTransitionRho(assurances, guarantees, targetJCE)
+	num_reports, num_assurances, err := s.ApplyStateTransitionRho(ctx, assurances, guarantees, targetJCE)
 	if err != nil {
 		return s, err
 	}
@@ -137,7 +142,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
 	accumulateStats := make(map[uint32]*accumulateStatistics)
 
-	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
+	n, t, b, U, err := s.OuterAccumulate(ctx, gas, accumulate_input_wr, o, f)
+	if err != nil {
+		return s, err
+	}
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
 	tau := s.GetTimeslot() // τ′
@@ -224,6 +232,13 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			log.Debug(s.Authoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
+
+	select {
+	case <-ctx.Done():
+		return s, fmt.Errorf("ApplyStateRecentHistoryDagga canceled")
+	default:
+	}
+
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	accumulationRoot := common.Hash(tree.Root())
 	if len(leaves) > 0 {
@@ -341,9 +356,9 @@ func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
+func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
 	d := s.GetJamState()
-	assuranceErr := s.ValidateAssurances(assurances, s.Block.Header.ParentHeaderHash)
+	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash)
 	if assuranceErr != nil {
 		log.Error(module, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
 		return nil, nil, err
@@ -356,27 +371,16 @@ func (s *StateDB) ApplyStateTransitionRho(assurances []types.Assurance, guarante
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 
-	for i, rho := range s.JamState.AvailabilityAssignments {
-		if rho == nil {
-			log.Trace(debugA, "ApplyStateTransitionRho before Verify_Guarantees", "core", i, "WorkPackage Hash", rho)
-		} else {
-			log.Trace(debugA, "ApplyStateTransitionRho before Verify_Guarantees", "core", i, "WorkPackage Hash", rho.WorkReport.GetWorkPackageHash())
-		}
-	}
-
 	// Guarantees
-	err = s.Verify_Guarantees()
+	err = s.Verify_Guarantees(ctx)
 	if err != nil {
 		return
 	}
 
-	num_reports = d.ProcessGuarantees(guarantees)
-	for i, rho := range s.JamState.AvailabilityAssignments {
-		if rho == nil {
-			log.Trace(debugA, "ApplyStateTransitionRho after ProcessGuarantees", "core", i, "WorkPackage Hash", rho)
-		} else {
-			log.Trace(debugA, "ApplyStateTransitionRhoafter ProcessGuarantees", "core", i, "WorkPackage Hash", rho.WorkReport.GetWorkPackageHash())
-		}
+	num_reports, err = d.ProcessGuarantees(ctx, guarantees)
+	if err != nil {
+		log.Error(module, "ApplyStateTransitionRho", "GuaranteeErr", err)
+		return nil, nil, err
 	}
 	return num_reports, num_assurances, nil
 }

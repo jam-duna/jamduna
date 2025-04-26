@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ed25519"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 
 	"flag"
@@ -56,6 +57,12 @@ func setUserPort(config *types.CommandConfig) (validator_indx int, is_local bool
 	}
 }
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "❗ Program crashed with panic: %v\n", r)
+			os.Exit(2)
+		}
+	}()
 	var logLevel string
 	flag.StringVar(&logLevel, "log", "debug", "Logging level (e.g., debug, info, warn, error, crit)")
 	validators, secrets, err := node.GenerateValidatorNetwork()
@@ -89,7 +96,7 @@ func main() {
 	fmt.Printf("System time: %s (%s)\n", now.Format("2006-01-02 15:04:05"), loc)
 
 	log.InitLogger("debug")
-	//log.EnableModule(log.BlockMonitoring)
+	log.EnableModule(log.BlockMonitoring)
 
 	config.GenesisState, config.GenesisBlock = node.GetGenesisFile(network)
 	// If help is requested, print usage and exit
@@ -259,6 +266,8 @@ func StartRuntimeMonitor(interval time.Duration) {
 		count = runtime.NumGoroutine()
 		highest = count
 		allocMB := mem.Alloc / asMB
+		// if mem > 4GB panic
+
 		totalAllocMB := mem.TotalAlloc / asMB
 		sysMB := mem.Sys / asMB
 		fmt.Printf("%-22s 🧠 Memory:%4dMB | 💾 TotalAlloc:%4dMB | 📦 Sys:%4dMB | ♻️ GC:%4d | 🧵 Goroutines:%4d\n",
@@ -271,7 +280,18 @@ func StartRuntimeMonitor(interval time.Duration) {
 			allocMB = mem.Alloc / asMB
 			totalAllocMB = mem.TotalAlloc / asMB
 			sysMB = mem.Sys / asMB
-
+			if allocMB > 4096 {
+				fmt.Printf("❗ Memory usage is too high: %dMB\n", allocMB)
+				// print stack trace
+				buf := make([]byte, 1<<20)
+				stackSize := runtime.Stack(buf, true)
+				fmt.Printf("Stack trace:\n%s\n", buf[:stackSize])
+				// exit with error code
+				fmt.Println("OOM: Out of memory")
+				// os.Exit(1)
+				dumpHeapProfile(fmt.Sprintf("heap_dump_%d.pprof", time.Now().Unix()))
+				os.Exit(1)
+			}
 			label := "[MONITOR]"
 			if count > highest {
 				highest = count
@@ -282,4 +302,13 @@ func StartRuntimeMonitor(interval time.Duration) {
 				label, allocMB, totalAllocMB, sysMB, mem.NumGC, count)
 		}
 	}()
+}
+
+func dumpHeapProfile(filename string) {
+	f, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	pprof.Lookup("heap").WriteTo(f, 0)
 }

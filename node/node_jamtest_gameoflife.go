@@ -123,10 +123,15 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
-
-		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
+		var err error
+		var workPackageHash common.Hash
+		workPackageHash, err = n1.SubmitAndWaitForWorkPackage(ctx, wpr)
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+			if step_n > 0 {
+				step_n--
+			}
+			continue
 		}
 
 		if step_n == 0 {

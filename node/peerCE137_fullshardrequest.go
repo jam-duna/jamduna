@@ -137,9 +137,11 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 
 	bundleShard, exportedSegmentsAndProofShards, encodedPath, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onFullShardRequest: GetFullShard_Guarantor failed: %w", err)
 	}
 	if !ok {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onFullShardRequest: shard not found for root=%v, shardIndex=%d", req.ErasureRoot, req.ShardIndex)
 	}
 

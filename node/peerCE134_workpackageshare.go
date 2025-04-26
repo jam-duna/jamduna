@@ -355,8 +355,13 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	if err != nil {
 		fmt.Printf("%s error executing work package bundle: %v. pvm_elapsed=%d\n", n.String(), err, pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
-	} else {
-		n.workReportsCh <- workReport
+	}
+
+	select {
+	case n.workReportsCh <- workReport:
+		// successfully sent
+	default:
+		log.Warn(debugAudit, "onWorkPackageShare: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
 	}
 
 	// Respect context again before executing

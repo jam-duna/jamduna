@@ -33,7 +33,6 @@ func IsWorkPackageInHistory(latestdb *statedb.StateDB, workPackageHash common.Ha
 		if len(block.Reported) != 0 {
 			for _, segmentRootLookup := range block.Reported {
 				if segmentRootLookup.WorkPackageHash == workPackageHash {
-					// panic("invalid prerequisite work package(ErrGDuplicatePackageRecentHistory)")
 					return true
 				}
 			}

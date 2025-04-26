@@ -96,8 +96,8 @@ func (n *Node) BroadcastTickets(currJCE uint32) {
 		if !*ticketbucket.IsBroadcasted {
 
 			go func() {
-				defer cancel()               // ensures context is released
-				_ = n.broadcast(ctx, ticket) // CE131/132
+				defer cancel()           // ensures context is released
+				n.broadcast(ctx, ticket) // CE131/132
 				// Telemetry of ticket
 				n.Telemetry(log.MsgTypeTicket, ticket, "elapsed", ticketbucket.ElapsedMicroseconds, "codec_encoded", types.EncodeAsHex(ticket))
 			}()
@@ -105,8 +105,8 @@ func (n *Node) BroadcastTickets(currJCE uint32) {
 		} else {
 			if !*ticketbucket.IsIncluded && n.resendTickets {
 				go func() {
-					defer cancel()               // ensures context is released
-					_ = n.broadcast(ctx, ticket) // CE131/132
+					defer cancel()           // ensures context is released
+					n.broadcast(ctx, ticket) // CE131/132
 					fmt.Printf("[N%v] Broadcasted Ticket %v\n", n.id, ticket.Attempt)
 				}()
 				*ticketbucket.IsBroadcasted = true

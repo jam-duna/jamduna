@@ -49,6 +49,15 @@ var MethodDescriptionMap = map[string]string{
 	"Decode":           "Decode(objectType string, input string) -> json string",
 }
 
+type NodeStatusServer struct {
+	Host             string           `json:"host"`
+	IsSync           bool             `json:"is_sync"`
+	IsAuditing       bool             `json:"is_auditing"`
+	IsTicketSending  bool             `json:"is_ticket_sending"`
+	AuthoringStatus  string           `json:"authoring_status"`
+	CurrentBlockInfo JAMSNP_BlockInfo `json:"current_block_info"`
+}
+
 func (j *Jam) Functions(req []string, res *string) error {
 	*res = ""
 	maxKeyLen := 0
@@ -101,6 +110,28 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 		runtime.Stack(debugtrace, true)
 		*res = string(debugtrace)
 		return nil
+	case "GetNodeStatus":
+		host_name, err := os.Hostname()
+		if err != nil {
+			*res = fmt.Sprintf("Error getting hostname: %s", err)
+			return err
+		}
+		j.nodeSelf.latest_block_mutex.Lock()
+		nodeStatus := NodeStatusServer{
+			Host:             host_name,
+			IsSync:           j.nodeSelf.GetIsSync(),
+			IsAuditing:       j.nodeSelf.AuditFlag,
+			IsTicketSending:  j.nodeSelf.sendTickets,
+			AuthoringStatus:  j.nodeSelf.author_status,
+			CurrentBlockInfo: *j.nodeSelf.latest_block,
+		}
+		j.nodeSelf.latest_block_mutex.Unlock()
+		nodeStatusJson, err := json.Marshal(nodeStatus)
+		if err != nil {
+			*res = fmt.Sprintf("Error marshalling node status: %s", err)
+		}
+		*res = string(nodeStatusJson)
+
 	default:
 		*res = fmt.Sprintf("Unknown command %s", command)
 		return fmt.Errorf("Unknown command %s", command)
@@ -811,7 +842,10 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 		log.Info(module, "SubmitWorkPackage error", "err", req)
 		return fmt.Errorf("invalid number of arguments")
 	}
-
+	if !j.nodeSelf.GetIsSync() {
+		log.Info(module, "SubmitWorkPackage error", "err", "node not synced")
+		return fmt.Errorf("node not synced")
+	}
 	var newReq WorkPackageRequest
 	if err := json.Unmarshal([]byte(req[0]), &newReq); err != nil {
 		log.Error(module, "SubmitWorkPackage", "err", err)

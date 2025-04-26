@@ -24,7 +24,7 @@ const (
 
 func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.ServiceUpdate, err error) {
 	if sa.Mutable == false {
-		panic("WriteAccount")
+		return nil, fmt.Errorf("WriteAccount")
 	}
 	if sa.Dirty == false {
 		return nil, nil

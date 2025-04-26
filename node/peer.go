@@ -102,7 +102,7 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 
 		p.conn, err = quic.DialAddr(dialCtx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
 		if err != nil {
-			return nil, fmt.Errorf("DialAddr failed: %w", err)
+			return nil, fmt.Errorf("[P%d] DialAddr failed: %w", p.PeerID, err)
 		}
 	}
 
@@ -236,6 +236,13 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 	return buf, nil
 }
 
+const (
+	ErrStateNotSynced = 0x1000
+	ErrCECode         = 0x1001
+	ErrKeyNotFound    = 0x1002
+	ErrInvalidData    = 0x1003
+)
+
 // DispatchIncomingQUICStream reads from QUIC and dispatches based on message type
 func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Stream, peerID uint16) error {
 	// Respect context by setting read deadline if present
@@ -268,6 +275,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	msg := make([]byte, msgLen)
 	if _, err := io.ReadFull(stream, msg); err != nil {
 		log.Trace(module, "DispatchIncomingQUICStream - message body", "peerID", peerID, "code", msgType, "err", err)
+		stream.CancelRead(ErrCECode)
 		_ = stream.Close()
 		return err
 	}
@@ -281,8 +289,14 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE129_StateRequest:
 		return n.onStateRequest(ctx, stream, msg)
 	case CE131_TicketDistribution, CE132_TicketDistribution:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onTicketDistribution(ctx, stream, msg, peerID)
 	case CE133_WorkPackageSubmission:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onWorkPackageSubmission(ctx, stream, msg)
 	case CE134_WorkPackageShare:
 		return n.onWorkPackageShare(ctx, stream, msg)
@@ -291,22 +305,43 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE136_WorkReportRequest:
 		return n.onWorkReportRequest(ctx, stream, msg)
 	case CE137_FullShardRequest:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onFullShardRequest(ctx, stream, msg)
 	case CE138_BundleShardRequest:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onBundleShardRequest(ctx, stream, msg)
 	case CE139_SegmentShardRequest:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onSegmentShardRequest(ctx, stream, msg, false)
 	case CE140_SegmentShardRequestP:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onSegmentShardRequest(ctx, stream, msg, true)
 	case CE141_AssuranceDistribution:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onAssuranceDistribution(ctx, stream, msg, peerID)
 	case CE142_PreimageAnnouncement:
 		return n.onPreimageAnnouncement(ctx, stream, msg, peerID)
 	case CE143_PreimageRequest:
 		return n.onPreimageRequest(ctx, stream, msg)
 	case CE144_AuditAnnouncement:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onAuditAnnouncement(ctx, stream, msg, peerID)
 	case CE145_JudgmentPublication:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+		}
 		return n.onJudgmentPublication(ctx, stream, msg, peerID)
 	case CE192_VoteMessage:
 		return n.onVoteMessage(ctx, stream, msg)
@@ -324,4 +359,13 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 		return errors.New("unknown message type")
 	}
 	return nil
+}
+
+func (n *Node) AbortStream(stream quic.Stream, code uint64) {
+	if stream != nil {
+		stream.CancelRead(quic.StreamErrorCode(code))
+		stream.CancelWrite(quic.StreamErrorCode(code))
+		_ = stream.Close()
+	}
+	log.Trace(module, "AbortStream", "code", code, "stream", stream)
 }

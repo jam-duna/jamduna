@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -61,7 +62,8 @@ func (s *StateDB) RotateGuarantors() {
 	} else {
 		cores := Permute(s.JamState.SafroleState.Entropy[3], t)
 		if len(s.JamState.SafroleState.PrevValidators) == 0 {
-			panic("PrevValidators is empty")
+			log.Crit(module, "PrevValidators is empty")
+			return
 		}
 		for i, lambda := range s.JamState.SafroleState.PrevValidators {
 			assignments = append(assignments, types.GuarantorAssignment{

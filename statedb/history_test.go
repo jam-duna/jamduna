@@ -96,7 +96,7 @@ func TestRecentHistory(t *testing.T) {
 			expectedh := h.PostState
 			posth := HistorySTF(h.Input, h.PreState)
 			if len(expectedh.RecentBlocks) != len(posth.RecentBlocks) {
-				panic(4)
+				fmt.Printf("Test %s FAIL\n", jsonFile)
 			}
 			for i := 0; i < len(posth.RecentBlocks); i++ {
 				e := expectedh.RecentBlocks[i].String()

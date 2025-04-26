@@ -227,7 +227,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 					if latest_block_info != nil {
 						if leaf.Slot > latest_block_info.Slot {
 							newinfo := leaf
-							n.SetLatestBlockInfo(&newinfo)
+							n.SetLatestBlockInfo(&newinfo, "GetOrInitBlockAnnouncementStream")
 						}
 					}
 				}
@@ -339,7 +339,9 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 				log.Trace(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
 				return
 			}
-
+			if _, ok := n.block_tree.GetBlockNode(blockannounce.Header.Hash()); ok {
+				continue
+			}
 			select {
 			case n.blockAnnouncementsCh <- blockannounce:
 				n.ba_checker.Set(blockannounce.Header.Hash(), uint16(peerID))

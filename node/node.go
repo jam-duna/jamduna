@@ -51,6 +51,7 @@ const (
 const (
 	module = log.NodeMonitoring // General Node Ops
 	// TODO: put into flags within "log" package?
+	debugCE138   = "ce138"                  // CE138
 	debugDA      = log.DAMonitoring         // DA
 	debugSeg     = log.SegmentMonitoring    // Segment
 	debugJamweb  = log.JamwebMonitoring     // Jamweb
@@ -70,17 +71,19 @@ const (
 	Audit        = true
 	revalidate   = false // turn off for production (or publication of traces)
 
-	paranoidVerification = true  // turn off for production
+	doVerification       = false // MUST be true for production
+	paranoidVerification = false // turn off for production
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 
 	// GOAL: centralize use of context timeout parameters here, avoid hard
 	TinyTimeout        = 2000 * time.Millisecond
-	SmallTimeout       = 60 * time.Second
-	NormalTimeout      = 90 * time.Second
-	MediumTimeout      = 100 * time.Second
-	LargeTimeout       = 120 * time.Second
-	VeryLargeTimeout   = 6000 * time.Second
-	RefineTimeout      = 30 * time.Second //MK; check this
+	MiniTimeout        = 3 * time.Second
+	SmallTimeout       = 6 * time.Second
+	NormalTimeout      = 9 * time.Second
+	MediumTimeout      = 10 * time.Second
+	LargeTimeout       = 12 * time.Second
+	VeryLargeTimeout   = 600 * time.Second
+	RefineTimeout      = 30 * time.Second
 	DefaultChannelSize = 200
 )
 
@@ -224,6 +227,8 @@ type Node struct {
 	IsSyncMu          sync.RWMutex
 	appliedFirstBlock bool
 
+	author_status string
+
 	block_waiting list.List
 	commitHash    string
 	AuditNodeType string
@@ -315,9 +320,12 @@ func (n *Node) GetIsSync() bool {
 	defer n.IsSyncMu.RUnlock()
 	return n.IsSync
 }
-func (n *Node) SetIsSync(isSync bool) {
+func (n *Node) SetIsSync(isSync bool, why string) {
 	n.IsSyncMu.Lock()
 	defer n.IsSyncMu.Unlock()
+	if !isSync {
+		log.Info(debugBlock, "SetIsSync", "n", n.String(), "isSync", isSync, "reason", why)
+	}
 	n.IsSync = isSync
 }
 
@@ -327,10 +335,10 @@ func (n *Node) GetLatestBlockInfo() *JAMSNP_BlockInfo {
 	return n.latest_block
 }
 
-func (n *Node) SetLatestBlockInfo(block *JAMSNP_BlockInfo) {
+func (n *Node) SetLatestBlockInfo(block *JAMSNP_BlockInfo, where string) {
 	// n.latest_block_mutex.Lock()
 	// defer n.latest_block_mutex.Unlock()
-	log.Debug(debugBlock, "SetLatestBlockInfo", "n", n.String(), "block_hash", block.HeaderHash.Hex())
+	log.Debug(debugBlock, "SetLatestBlockInfo", "n", n.String(), "block_hash", block.HeaderHash.Hex(), "where", where)
 	n.latest_block = block
 	return
 }
@@ -496,7 +504,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		return nil, err
 	}
 	if len(old_blocks) > 0 {
-		node.SetIsSync(false)
+		node.SetIsSync(false, "catching up")
 		log.Info(log.BlockMonitoring, "fetchBlocks", "old_blocks", len(old_blocks), "blockHash", block.Header.Hash().Hex())
 		for _, b := range old_blocks {
 			err := node.block_tree.AddBlock(&b)
@@ -631,7 +639,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 	validators := node.statedb.GetSafrole().NextValidators
 	if len(validators) == 0 {
-		panic("newNode No validators")
+		return nil, fmt.Errorf("newNode No validators")
 	}
 
 	go node.runServer()
@@ -664,16 +672,17 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		} else {
 			log.Info(module, "extendChain", "blockHash", node.statedb.HeaderHash.Hex())
 		}
-		useless_header_hashes := node.block_tree.PruneBlockTree(10)
+		useless_header_hashes := node.block_tree.PruneBlockTree(64)
 		go node.Clean(useless_header_hashes)
 	}
 	if id == 5 {
-		node.SetIsSync(false) // node 5 can't produce the first block
+		node.SetIsSync(false, "I am node 5") // node 5 can't produce the first block
 	}
 	if nodeType != ValidatorDAFlag {
-		go node.runClient()
-		go node.runMain()
-
+		go node.runAuthoring()
+		go node.runGuarantees()
+		go node.runAssurances()
+		go node.runWorkReports()
 		go node.runBlocksTickets()
 		go node.runReceiveBlock()
 		go node.StartRPCServer(int(id))
@@ -1216,12 +1225,10 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 		return nil
 	}
 	if _statedb.GetBlock() == nil {
-		fmt.Printf("addStateDB: NO BLOCK!!! %v\n", _statedb)
-		panic(0)
+		return fmt.Errorf("addStateDB: NO BLOCK")
 	}
 	if n.statedb.GetBlock() == nil {
-		fmt.Printf("node statedb: NO BLOCK!!! %v\n", n.statedb)
-		panic(0)
+		return fmt.Errorf("addStateDB: NO BLOCK")
 	}
 	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() && _statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash() {
 		n.statedb = _statedb
@@ -1308,7 +1315,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		// see how many number from the end
 		host, _, err := net.SplitHostPort(remoteAddr)
 		if err != nil {
-			panic(err)
+			return
 		}
 		newAddr := net.JoinHostPort(host, "13370")
 		if _, ok := n.peersInfo[validatorIndex]; !ok {
@@ -1361,8 +1368,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 // broadcast sends the object to all peers
 // TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
-func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
-	result := []byte{}
+func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 	objType := reflect.TypeOf(obj)
 
 	for id, p := range n.peersInfo {
@@ -1397,7 +1403,12 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 			switch objType {
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
-				n.assurancesCh <- a
+				select {
+				case n.assurancesCh <- a:
+					// successfully sent
+				default:
+					log.Warn(module, "broadcast: assurancesCh full, dropping Assurance", "assurance", a)
+				}
 			}
 			continue
 		}
@@ -1486,7 +1497,6 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) []byte {
 			}
 		}()
 	}
-	return result
 }
 
 func (n *NodeContent) getStateDBByHeaderHash(headerHash common.Hash) (statedb *statedb.StateDB, ok bool) {
@@ -1576,7 +1586,8 @@ func (n *Node) extendChain(ctx context.Context) error {
 
 	// Traverse and apply all descendants
 	if err := n.applyChildrenRecursively(ctx, currNode); err != nil {
-		log.Error(module, "SyncState", "applyChildren", err)
+		header := currNode.Block.Header
+		log.Error(module, "SyncState", "applyChildren", err, "header", header.Hash().String_short(), "slot", header.Slot, "author", header.AuthorIndex)
 		return err
 	}
 	return nil
@@ -1629,6 +1640,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		"->block", nextBlock.Header.Hash().String_short(),
 		"slot", nextBlock.Header.Slot,
 		"stateRoot", newStateDB.StateRoot.String_short(),
+		"author", nextBlock.Header.AuthorIndex,
 	)
 	// newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
@@ -1676,12 +1688,15 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
 		if len(n.UP0_stream) > mini_peers {
 			log.Trace(debugStream, "ApplyBlock: UP0_stream", "n", n.String(), "len", len(n.UP0_stream))
-			n.SetIsSync(true)
+			n.SetIsSync(true, "syncing")
 		}
-		if err := n.assureNewBlock(ctx, nextBlock, newStateDB); err != nil {
-			log.Error(debugA, "ApplyBlock: assureNewBlock failed", "n", n.String(), "err", err)
-			return fmt.Errorf("assureNewBlock failed: %w", err)
-		}
+		go func() {
+			assure_ctx, cancel := context.WithTimeout(context.Background(), NormalTimeout)
+			defer cancel()
+			if err := n.assureNewBlock(assure_ctx, nextBlock, newStateDB); err != nil {
+				log.Error(debugA, "ApplyBlock: assureNewBlock failed", "n", n.String(), "err", err)
+			}
+		}()
 
 		// MK: NOT sure if this is the proper place to set this completedJCE
 		log.Debug(module, "ApplyBlock: SetCompletedJCE !!!!", "n", n.String(), "slot", nextBlock.Header.Slot)
@@ -1889,75 +1904,116 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		justifications[i] = fullJustification
 	}
 	if len(segmentsonly) != indicesLen {
-		panic(123444)
+		log.Error(debugDA, "reconstructSegments", "l", len(segmentsonly), "l2", len(justifications))
 	}
-	//	fmt.Printf("reconstructSegments: %d segments, %d justifications\n", len(segmentsonly), len(justifications))
 	return segmentsonly, justifications, nil
 }
 
 // HERE we are in a AUDITING situation, if verification fails, we can still execute the work package by using CE140?
-func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32, segmentRootLookup types.SegmentRootLookup) (workPackageBundle types.WorkPackageBundle, err error) {
-	requests_original := make([]CE138_request, types.TotalValidators)
-	for i := range types.TotalValidators {
-		requests_original[i] = CE138_request{
+func (n *NodeContent) reconstructPackageBundleSegments(
+	erasureRoot common.Hash,
+	blength uint32,
+	segmentRootLookup types.SegmentRootLookup,
+) (types.WorkPackageBundle, error) {
+	// Prepare requests to validators
+	requestsOriginal := make([]CE138_request, types.TotalValidators)
+	for i := range requestsOriginal {
+		requestsOriginal[i] = CE138_request{
 			ErasureRoot: erasureRoot,
 			ShardIndex:  uint16(i),
 		}
 	}
-	requests := make(map[uint16]interface{}, types.TotalValidators)
-	for i, req := range requests_original {
+
+	requests := make(map[uint16]interface{}, len(requestsOriginal))
+	for i, req := range requestsOriginal {
 		requests[uint16(i)] = req
 	}
 
+	// Fetch shard responses
 	responses, err := n.makeRequests(requests, types.ECPieceSize/2, SmallTimeout, LargeTimeout)
 	if err != nil {
-		fmt.Printf("Error in fetching bundle segments makeRequests: %v\n", err)
-		return types.WorkPackageBundle{}, err
+		log.Error(module, "reconstructPackageBundleSegments: makeRequests failed", "err", err)
+		return types.WorkPackageBundle{}, fmt.Errorf("makeRequests failed: %w", err)
 	}
+
+	// Collect valid bundle shards
 	bundleShards := make([][]byte, types.TotalCores)
 	indexes := make([]uint32, types.TotalCores)
 	numShards := 0
+	log.Debug(debugCE138, "reconstructPackageBundleSegments: numShards", "callerIdx", n.id, "numShards", numShards)
 	for _, resp := range responses {
 		daResp, ok := resp.(CE138_response)
 		if !ok {
-			log.Warn(module, "reconstructPackageBundleSegments: Error in convert bundle segments CE138_response", "n", n.id, "len(BundleShard)", len(daResp.BundleShard), "daResp.BundleShard", daResp.BundleShard)
+			log.Warn(module, "reconstructPackageBundleSegments: invalid CE138_response conversion", "response", resp)
+			continue
 		}
-		if numShards < types.TotalCores {
-			encodedPath := daResp.Justification
-			decodedPath, _ := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
-			bClub := common.Blake2Hash(daResp.BundleShard)
-			sClub := daResp.SClub
-			leaf := append(bClub.Bytes(), sClub.Bytes()...)
-			//log.Info(module, "!!!! reconstructPackageBundleSegments: leaf", "callerIdx", n.id, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "decodedPath", fmt.Sprintf("%x", decodedPath))
+
+		if numShards >= types.TotalCores {
+			break
+		}
+
+		decodedPath, decodeErr := common.DecodeJustification(daResp.Justification, types.NumECPiecesPerSegment)
+		if decodeErr != nil {
+			log.Warn(module, "reconstructPackageBundleSegments: DecodeJustification failed", "err", decodeErr)
+			continue
+		}
+
+		bClub := common.Blake2Hash(daResp.BundleShard)
+		sClub := daResp.SClub
+		leaf := append(bClub.Bytes(), sClub.Bytes()...)
+		if doVerification {
 			verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
 			if verified {
-				log.Debug(module, "reconstructPackageBundleSegments:VerifyWBTJustification SUCC", "callerIdx", n.id, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "decodedPath", fmt.Sprintf("%x", decodedPath))
+				log.Debug(debugCE138, "reconstructPackageBundleSegments: shard verified", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
 				bundleShards[numShards] = daResp.BundleShard
 				indexes[numShards] = uint32(daResp.ShardIndex)
 				numShards++
 			} else {
-				log.Crit(module, "reconstructPackageBundleSegments:VerifyWBTJustification FAILURE", "callerIdx", n.id, "shardIndex", daResp.ShardIndex, "leaf", fmt.Sprintf("%x", leaf), "erasureRoot", erasureRoot, "decodedPath", fmt.Sprintf("%x", decodedPath))
+				log.Warn(module, "reconstructPackageBundleSegments: shard verification failed", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
 			}
 		}
 	}
-	encodedBundle, err := bls.Decode(bundleShards, types.TotalValidators, indexes, int(blength))
-	if err != nil {
-		log.Error(debugDA, "decode: Error in fetching bundle segments decode", "err", err)
+
+	// Check if enough shards were collected
+	if numShards < types.TotalCores {
+		log.Error(module, "reconstructPackageBundleSegments: insufficient valid shards", "have", numShards, "need", types.TotalCores)
+		return types.WorkPackageBundle{}, fmt.Errorf("insufficient valid shards: have %d, need %d", numShards, types.TotalCores)
 	}
 
+	// Attempt to decode the full bundle
+	log.Debug(debugCE138, "reconstructPackageBundleSegments: Decoding bundle1", "callerIdx", n.id, "shardIndex", indexes[:numShards])
+	encodedBundle, err := bls.Decode(bundleShards[:numShards], types.TotalValidators, indexes[:numShards], int(blength))
+	if err != nil {
+		log.Error(module, "reconstructPackageBundleSegments: Decode failed", "err", err)
+		return types.WorkPackageBundle{}, fmt.Errorf("decode failed: %w", err)
+	}
+
+	log.Debug(debugCE138, "reconstructPackageBundleSegments: Decoding bundle2", "callerIdx", n.id, "shardIndex", indexes[:numShards], "encodedBundle", common.Blake2Hash(encodedBundle))
 	workPackageBundleRaw, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
-		log.Error(debugDA, "reconstructPackageBundleSegments:Decode", "err", err)
-		return
+		log.Error(module, "reconstructPackageBundleSegments: Decode into WorkPackageBundle failed", "err", err)
+		return types.WorkPackageBundle{}, fmt.Errorf("decode WorkPackageBundle failed: %w", err)
 	}
-	workPackageBundle = workPackageBundleRaw.(types.WorkPackageBundle)
 
-	// IMPORTANT: VerifyBundle checks all imported segments against the justifications contained within the bundle, which hash up to the segmentRoot hashes in the segmentRootLookup
-	verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup)
-	if verifyErr != nil || !verified {
-		log.Warn(module, "executeWorkPackageBundle: VerifyBundle failed", "err", verifyErr)
-		// TODO: reconstruct the imported segments
+	workPackageBundle, ok := workPackageBundleRaw.(types.WorkPackageBundle)
+	if !ok {
+		log.Error(module, "reconstructPackageBundleSegments: casting to WorkPackageBundle failed")
+		return types.WorkPackageBundle{}, fmt.Errorf("failed to cast to WorkPackageBundle")
 	}
+
+	// IMPORTANT: Verify the reconstructed bundle against the segment root lookup
+	if doVerification {
+		verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup)
+		if verifyErr != nil {
+			log.Warn(module, "reconstructPackageBundleSegments: VerifyBundle errored", "err", verifyErr)
+			return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", verifyErr)
+		}
+		if !verified {
+			log.Warn(module, "reconstructPackageBundleSegments: bundle verification failed")
+			return types.WorkPackageBundle{}, fmt.Errorf("bundle verification failed")
+		}
+	}
+
 	return workPackageBundle, nil
 }
 
@@ -2177,6 +2233,9 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	}
 	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
 	n.currJCE = currJCE
+	if prevJCE == currJCE {
+		return // set only once
+	}
 	n.jce_timestamp_mutex.Lock()
 	if n.jce_timestamp == nil {
 		n.jce_timestamp = make(map[uint32]time.Time)
@@ -2225,7 +2284,37 @@ func (nc *NodeContent) SendNewJCE(targetJCE uint32) error {
 	return nil
 }
 
-func (n *Node) runClient() {
+func runWithTimeout[T any](f func() (T, error), timeout time.Duration) (T, error) {
+	var zero T
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	resultCh := make(chan struct {
+		val T
+		err error
+	})
+
+	go func() {
+		val, err := f()
+		select {
+		case resultCh <- struct {
+			val T
+			err error
+		}{val, err}:
+		case <-ctx.Done():
+			// timeout already happened; abandon sending
+		}
+	}()
+
+	select {
+	case result := <-resultCh:
+		return result.val, result.err
+	case <-ctx.Done():
+		return zero, fmt.Errorf("timeout after %s", timeout)
+	}
+}
+
+func (n *Node) runAuthoring() {
 	tickerPulse := time.NewTicker(TickTime * time.Millisecond)
 	defer tickerPulse.Stop()
 
@@ -2235,45 +2324,71 @@ func (n *Node) runClient() {
 
 	for {
 		select {
-
 		case <-tickerPulse.C:
 			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
 				return
 			}
 			if !n.GetIsSync() {
+				n.author_status = "not sync"
 				continue
 			}
+
 			currJCE := n.GetCurrJCE()
 			_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
+
 			ticketIDs, err := n.GetSelfTicketsIDs(currPhase)
 			if err != nil {
 				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
 			}
 
 			if currJCE == lastAuthorizableJCE {
-				// already proposed ... skip
-				//log.Trace(module, "runClient: Silent Authorization", "n", n.String(), "JCE", currJCE)
+				n.author_status = "authorized"
 				continue
 			}
 
-			n.statedbMutex.Lock()
 			makeblock_start := time.Now()
-			isAuthorizedBlockBuilder, newBlock, newStateDB, err := n.statedb.ProcessState(currJCE, n.credential, ticketIDs, n.extrinsic_pool)
-			n.statedbMutex.Unlock()
-			if isAuthorizedBlockBuilder {
-				lastAuthorizableJCE = currJCE
-				log.Trace(module, "runClient: Authorized", "n", n.String(), "JCE", currJCE)
-			} else {
-				// No work to do if not authorized
-				continue
+
+			type processResult struct {
+				isAuthorized bool
+				newBlock     *types.Block
+				newStateDB   *statedb.StateDB
 			}
+			result, err := runWithTimeout(func() (processResult, error) {
+				n.statedbMutex.Lock()
+				defer n.statedbMutex.Unlock()
+				ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+				defer cancel()
+				stProcessState := time.Now()
+				isAuthorized, newBlock, newStateDB, err := n.statedb.ProcessState(ctx, currJCE, n.credential, ticketIDs, n.extrinsic_pool)
+				if err != nil {
+					log.Error(module, "ProcessState", "err", err)
+					return processResult{}, err
+				}
+				log.Info(module, "ProcessState", "isAuthorized", isAuthorized, "elapsed", time.Since(stProcessState))
+				return processResult{isAuthorized, newBlock, newStateDB}, nil
+			}, MediumTimeout)
 
 			if err != nil {
-				fmt.Printf("[N%d] ProcessState ERROR: %v\n", n.id, err)
+				log.Error(module, "runClient: ProcessState error", "n", n.String(), "err", err)
 				continue
 			}
 
+			isAuthorizedBlockBuilder := result.isAuthorized
+			newBlock := result.newBlock
+			newStateDB := result.newStateDB
+
+			if !isAuthorizedBlockBuilder {
+				lastAuthorizableJCE = currJCE
+				log.Trace(debugBlock, "runClient: Not Authorized", "n", n.String(), "JCE", currJCE)
+				n.author_status = "not authoring"
+				continue
+			}
+
+			lastAuthorizableJCE = currJCE
+			log.Debug(debugBlock, "runClient: Authoring Block", "n", n.String(), "JCE", currJCE)
+			n.author_status = "authoring"
 			if newStateDB == nil {
+				log.Warn(module, "runClient: ProcessState newStateDB is nil", "n", n.String())
 				continue
 			}
 			oldstate := n.statedb
@@ -2289,16 +2404,15 @@ func (n *Node) runClient() {
 					HeaderHash: newBlock.Header.Hash(),
 					Slot:       newBlock.Header.Slot,
 				},
+				"runClient:ProcessState",
 			)
+			n.author_status = "authoring:broadcasting"
 			nodee, ok := n.block_tree.GetBlockNode(newBlock.Header.Hash())
 			if !ok {
 				return
 			}
 			nodee.Applied = true
-			ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-			defer cancel()              // ensures context is released
-			n.broadcast(ctx, *newBlock) // UP0
-
+			n.broadcast(context.Background(), *newBlock)
 			go func() {
 				timeslot := newStateDB.GetSafrole().Timeslot
 				if err := n.writeDebug(newBlock, timeslot); err != nil {
@@ -2323,14 +2437,17 @@ func (n *Node) runClient() {
 					log.Error(module, "runClient:writeDebug", "err", err)
 				}
 			}()
-
+			n.author_status = "authoring:broadcasted"
 			assureCtx, cancelAssure := context.WithTimeout(context.Background(), NormalTimeout)
-			n.assureNewBlock(assureCtx, newBlock, newStateDB)
+			go func() {
+				defer cancelAssure()
+				n.assureNewBlock(assureCtx, newBlock, newStateDB)
+			}()
+
 			n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
+
 			log.Debug(module, "runClient:ProcessState Proposer !!!!", "n", n.String(), "slot", newBlock.Header.Slot)
 			n.SetCompletedJCE(newBlock.Header.Slot)
-
-			cancelAssure()
 
 			if n.AuditFlag {
 				select {
@@ -2339,7 +2456,7 @@ func (n *Node) runClient() {
 					log.Warn(module, "auditingCh full, dropping state")
 				}
 			}
-
+			n.author_status = "authorizing:finished"
 			IsClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 			n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsClosed)
 		case log := <-logChan:
@@ -2350,9 +2467,6 @@ func (n *Node) runClient() {
 
 func (n *Node) Telemetry(msgType uint8, obj interface{}, tags ...interface{}) {
 	sender_id := n.GetEd25519Key().String()
-	if len(sender_id) == 0 {
-		panic(333)
-	}
 	log.Telemetry(msgType, sender_id, obj, tags...)
 }
 

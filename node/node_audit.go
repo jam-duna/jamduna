@@ -190,6 +190,16 @@ func (n *Node) cleanUseless(header_hash common.Hash) {
 func (n *Node) runAudit() {
 	for {
 		select {
+		case announcement := <-n.announcementsCh:
+			err := n.processAnnouncement(announcement)
+			if err != nil {
+				fmt.Printf("%s processAnnouncement: %v\n", n.String(), err)
+			}
+		case judgement := <-n.judgementsCh:
+			err := n.processJudgement(judgement)
+			if err != nil {
+				fmt.Printf("%s processJudgement: %v\n", n.String(), err)
+			}
 		case audit_statedb := <-n.auditingCh:
 			go func(audit_statedb *statedb.StateDB) {
 				headerHash := audit_statedb.GetHeaderHash()
@@ -208,7 +218,7 @@ func (n *Node) runAudit() {
 					log.Trace(debugAudit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
-					log.Debug(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
+					log.Info(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 
 					newBlock := audit_statedb.Block.Copy()
 					if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
@@ -286,7 +296,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				tmp = tranche
 				if tranche > 5 {
 					//TODO: we should never get here under tiny case
-					panic(fmt.Sprintf("%s [T:%d] Audit still not complete after Tranche %v block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche, auditing_statedb.Block.Hash()))
+					return fmt.Errorf("%s [T:%d] Audit still not complete after Tranche %v block %v \n", n.String(), auditing_statedb.Block.TimeSlot(), tranche, auditing_statedb.Block.Hash())
 				}
 				n.ProcessAudit(tranche, headerHash)
 			}
@@ -620,7 +630,11 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	}
 
 	n.workReportsMutex.Unlock()
-
+	lazy := true
+	if lazy {
+		judgement, err = n.MakeJudgement(workReport, true)
+		return
+	}
 	spec := workReport.AvailabilitySpec
 	workPackageHash := spec.WorkPackageHash
 
@@ -639,9 +653,15 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	wr, _, pvmElapsed, err := n.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
 	if err != nil {
 		return
-	} else {
-		n.workReportsCh <- workReport
 	}
+
+	select {
+	case n.workReportsCh <- workReport:
+		// successfully sent
+	default:
+		log.Warn(debugAudit, "auditWorkReport: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
+	}
+
 	auditPass := false
 	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true

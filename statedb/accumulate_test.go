@@ -256,7 +256,10 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f)
+	n, T, _, _, err := s.OuterAccumulate(g, accumulate_input_wr, o, f)
+	if err != nil {
+		t.Errorf("OuterAccumulate failed: %v", err)
+	}
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(T) > 0 {
@@ -370,7 +373,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f)
+	n, T, _, _, err := s.OuterAccumulate(g, accumulate_input_wr, o, f)
 
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this

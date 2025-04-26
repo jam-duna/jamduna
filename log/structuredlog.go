@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	// Convention: Set-language-teamname
+	TeamName = "A-go-cn" // vs "A-go-jamduna"
+)
+
 type StructuredLog struct {
 	Time     time.Time       `json:"time"`
 	Sender   string          `json:"sender_id"`
@@ -19,7 +24,7 @@ type StructuredLog struct {
 	MsgCodec string          `json:"codec_encoded,omitempty"`
 }
 
-var fieldOrder = []string{"time", "sender_id", "msg_type", "json_encoded", "metadata", "elapsed", "codec_encoded"}
+var fieldOrder = []string{"time", "team", "sender_id", "msg_type", "json_encoded", "metadata", "elapsed", "codec_encoded"}
 
 // Custom JSON marshaling to preserve field order and omit zero/empty values.
 func (l StructuredLog) MarshalJSON() ([]byte, error) {
@@ -36,6 +41,9 @@ func (l StructuredLog) MarshalJSON() ([]byte, error) {
 		switch f {
 		case "time":
 			b, _ := json.Marshal(l.Time)
+			writeField(f, b)
+		case "team":
+			b, _ := json.Marshal(TeamName)
 			writeField(f, b)
 		case "sender_id":
 			b, _ := json.Marshal(l.Sender)

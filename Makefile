@@ -5,8 +5,11 @@ NETWORK  ?= tiny
 NUM_NODES ?= 6
 DEFAULT_PORT ?= 9800
 SINGLE_NODE_PORT ?= 9805
-BRANCH ?= jam_update
+BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
+RAW_HOSTS_FILE ?= hosts.txt
+HOSTS_FILE := ../$(RAW_HOSTS_FILE)
+
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
 jam_with_ffi_build: ffi_force
@@ -18,8 +21,8 @@ jam:
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) .
 
-tiny: jam
-	ansible-playbook -u root -i /root/go/src/github.com/colorfulnotion/jam/hosts.txt -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml 
+tiny: jam reset_remote_nodes
+	ansible-playbook -u root -i $(HOSTS_FILE) -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml 
 
 jam_clean:
 	@echo "Cleaning all jam data directories under ~/.jam..."
@@ -56,36 +59,33 @@ run_jam:
 
 # env setup for remote nodes
 jam_set:
-	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && echo \"export CARGO_MANIFEST_DIR=\$(pwd)\" >> ~/.bashrc'"
-	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "source ~/.bashrc"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && echo \"export CARGO_MANIFEST_DIR=\$(pwd)\" >> ~/.bashrc'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "source ~/.bashrc"
 # build ffi and apply latest code
 build_remote_nodes:
 	@echo "Building JAM on all remote nodes..."
-	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
-	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make bandersnatchlib NETWORK=$(NETWORK)'"
-	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make blslib NETWORK=$(NETWORK)'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make bandersnatchlib NETWORK=$(NETWORK)'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make blslib NETWORK=$(NETWORK)'"
 	@echo "All remote nodes built."
 # clean the process and delete the storage
 clean_remote_nodes:
 	@echo "Cleaning JAM on all remote nodes..."
-	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'rm -rf .jam'"
+	@sudo /usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'rm -rf .jam'"
 	#grep the pid from port  and kill it
-	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -c 'command -v lsof >/dev/null && lsof -t -i:9900 | xargs --no-run-if-empty kill -9'"
+	@sudo /usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -c 'command -v lsof >/dev/null && lsof -t -i:9900 | xargs --no-run-if-empty kill -9'"
 	@echo "All remote nodes cleaned."
 # update the latest commit on remote nodes
 reset_remote_nodes:
 	@echo "Resetting JAM on all remote nodes..."
-	@/usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
 	@echo "All remote nodes reset."
 # run jam.go on remote nodes 
 run_jam_remote_nodes:
 	@echo "Starting run_jam on all remote nodes..."
-	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'cdj && make jam_without_ffi_build NETWORK=$(NETWORK)'"
-	@sudo /usr/bin/parallel-ssh -h hosts.txt -l root -i "bash -i -c 'export NETWORK=$(NETWORK); export DEFAULT_PORT=$(DEFAULT_PORT); export JAM_START_TIME=\"$(shell date +'%Y-%m-%d %H:%M:%S')\"; cdj && make run_jam'"
+	@sudo /usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make jam_without_ffi_build NETWORK=$(NETWORK)'"
+	@sudo /usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'export NETWORK=$(NETWORK); export DEFAULT_PORT=$(DEFAULT_PORT); export JAM_START_TIME=\"$(shell date +'%Y-%m-%d %H:%M:%S')\"; cdj && make run_jam'"
 	@echo "All remote nodes started."
-
-
-
 
 da:
 	@echo "Building JAM..."
@@ -185,10 +185,10 @@ polkavmscp:
 	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/corevm/corevm.pvm services
 
 jamx_start:
-	ansible-playbook -u root -i hosts.txt  yaml/jam_start.yaml
+	ansible-playbook -u root -i $(HOSTS_FILE)  yaml/jam_start.yaml
 	@echo "update jam binary and start on jam instances"
 
 jamx_stop:
-	ansible-playbook -u root -i hosts.txt  yaml/jam_stop.yaml
+	ansible-playbook -u root -i $(HOSTS_FILE)  yaml/jam_stop.yaml
 	@echo "stop on jam instances"
 

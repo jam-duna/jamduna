@@ -24,18 +24,19 @@ func GetJAMNetworkPort() int {
 	}
 	return DefaultQuicPort
 }
-func GetAddresses(local bool) (addresses []string, wsUrl string) {
+func GetAddresses(local bool) (addresses []string, wsUrl []string) {
 	addresses = make([]string, 6)
+	wsUrl = make([]string, 6)
 	if local {
 		for i := 0; i < 6; i++ {
 			addresses[i] = fmt.Sprintf("localhost:%d", DefaultTCPPort+i)
+			wsUrl[i] = fmt.Sprintf("ws://localhost:%d/ws", WSPort+i)
 		}
-		wsUrl = fmt.Sprintf("ws://localhost:%d/ws", WSPort)
 	} else {
 		for i := 0; i < 6; i++ {
 			addresses[i] = fmt.Sprintf("%s-%d.jamduna.org:%d", GetJAMNetwork(), i, DefaultTCPPort+i)
+			wsUrl[i] = fmt.Sprintf("ws://%s-%d.jamduna.org:%d/ws", GetJAMNetwork(), i, WSPort+i)
 		}
-		wsUrl = fmt.Sprintf("ws://%s-%d.jamduna.org:%d/ws", GetJAMNetwork(), 0, WSPort)
 	}
 	return addresses, wsUrl
 }

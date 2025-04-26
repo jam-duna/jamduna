@@ -249,8 +249,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 	for itemIndex, workItem := range b.WorkPackage.WorkItems {
 		importedSegments := b.ImportSegmentData[itemIndex]
 		if len(importedSegments) != len(workItem.ImportedSegments) {
-			fmt.Printf(" VerifyBundle %d != %d\n", len(importedSegments), len(workItem.ImportedSegments))
-			panic(111)
+			return false, fmt.Errorf(" VerifyBundle %d != %d", len(importedSegments), len(workItem.ImportedSegments))
 		}
 		for segmentIdx, i := range workItem.ImportedSegments {
 			exportedSegmentRoot := i.RequestedHash

@@ -954,11 +954,6 @@ func CompareGeneral(vm *VM, testcase GeneralTestcase) {
 // Main test functions
 // Test all refine test vectors
 func TestRefine(t *testing.T) {
-	// node, err := SetUpNode()
-	// if err != nil {
-	// 	panic("Error setting up nodes: %v\n")
-	// }
-
 	functions := []string{
 		"Historical_lookup", // William
 		"Fetch",             // William
@@ -1009,11 +1004,6 @@ func TestRefine(t *testing.T) {
 
 // Test all accumulate test vectors
 func TestAccumulate(t *testing.T) {
-	// node, err := SetUpNode()
-	// if err != nil {
-	// 	panic("Error setting up nodes: %v\n")
-	// }
-
 	functions := []string{
 		// "Bless", // Michael+Sourabh
 		// "Assign", // Michael+Sourabh
@@ -1063,10 +1053,6 @@ func TestAccumulate(t *testing.T) {
 
 // Test all general test vectors
 func TestGeneral(t *testing.T) {
-	// node, err := SetUpNode()
-	// if err != nil {
-	// 	panic("Error setting up nodes: %v\n")
-	// }
 
 	functions := []string{
 		// "Gas", // Michael

@@ -114,7 +114,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 			return bundle, segmentRootLookup, err
 		}
 		if len(receiveSegments) != len(specIndex.Indices) {
-			panic("receiveSegments and specIndex.Indices length mismatch")
+			return bundle, segmentRootLookup, fmt.Errorf("receiveSegments and specIndex.Indices length mismatch")
 		}
 		//fmt.Printf("len %d == %d\n", len(receiveSegments), len(specIndex.Indices))
 		// ***** TODO: cache receiveSegments so that we don't have to call reconstructSegments again on another attempt
@@ -262,7 +262,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				guarantee.Signatures = append(guarantee.Signatures, gc)
 				return
 			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), LargeTimeout)
+				ctx, cancel := context.WithTimeout(context.Background(), MiniTimeout)
 				defer cancel()
 				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
 				if errfellow != nil {
@@ -282,7 +282,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 
 		validator_idx := curr_statedb.GetSafrole().GetCurrValidatorIndex(key)
 		if validator_idx == -1 {
-			panic("validator_idx not found")
+			return false // "validator_idx not found"
 		}
 
 		fellowWorkReportHash := fellow_response.WorkReportHash
@@ -308,7 +308,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		defer cancel()
 		n.broadcast(ctx, guarantee) // send via CE135
 
-		saveGuaranteeDerivation(GuaranteeDerivation{
+		go saveGuaranteeDerivation(GuaranteeDerivation{
 			Bundle:            bundle,
 			CoreIndex:         coreIndex,
 			SegmentRootLookup: segmentRootLookup,

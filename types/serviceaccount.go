@@ -13,6 +13,7 @@ import (
 
 const (
 	ServiceAccountPrefix = 255
+	module               = "types"
 )
 
 const (
@@ -379,7 +380,7 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 // a_c - account code hash c
 func (s *ServiceAccount) SetCodeHash(codeHash common.Hash) {
 	if s.Mutable == false {
-		panic("SetCodeHash")
+		log.Crit(module, "SetCodeHash")
 	}
 	s.Dirty = true
 	s.CodeHash = codeHash
@@ -389,14 +390,14 @@ func (s *ServiceAccount) SetCodeHash(codeHash common.Hash) {
 // Note this could be IncBalance DecBalance instead?
 func (s *ServiceAccount) DecBalance(balance uint64) {
 	if s.Mutable == false {
-		panic("SetBalance")
+		log.Crit(module, "SetBalance")
 	}
 	s.Dirty = true
 	s.Balance -= balance
 }
 func (s *ServiceAccount) IncBalance(balance uint64) {
 	if s.Mutable == false {
-		panic("SetBalance")
+		log.Crit(module, "SetBalance")
 	}
 	s.Dirty = true
 	s.Balance += balance
@@ -405,7 +406,7 @@ func (s *ServiceAccount) IncBalance(balance uint64) {
 // a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
 func (s *ServiceAccount) SetGasLimitG(g uint64) {
 	if s.Mutable == false {
-		panic("SetGasLimitG")
+		log.Crit(module, "SetGasLimitG")
 	}
 	s.Dirty = true
 	s.GasLimitG = g
@@ -414,7 +415,7 @@ func (s *ServiceAccount) SetGasLimitG(g uint64) {
 // a_m - the minimum required for the On Transfer entry-point.
 func (s *ServiceAccount) SetGasLimitM(g uint64) {
 	if s.Mutable == false {
-		panic("SetGasLimitM")
+		log.Crit(module, "SetGasLimitM")
 	}
 	s.Dirty = true
 	s.GasLimitM = g
@@ -423,7 +424,7 @@ func (s *ServiceAccount) SetGasLimitM(g uint64) {
 // a_l - total number of octets used in storage (9.3)
 func (s *ServiceAccount) SetStorageSize(storageSize uint64) {
 	if s.Mutable == false {
-		panic("SetStorageSize")
+		log.Crit(module, "SetStorageSize")
 	}
 	s.Dirty = true
 	s.StorageSize = storageSize
@@ -432,7 +433,7 @@ func (s *ServiceAccount) SetStorageSize(storageSize uint64) {
 // a_i - the number of items in storage (9.3)
 func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 	if s.Mutable == false {
-		panic("SetNumStorageItems")
+		log.Crit(module, "SetNumStorageItems")
 	}
 	s.Dirty = true
 	s.NumStorageItems = numStorageItems
@@ -472,7 +473,7 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK com
 
 func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 	if s.Mutable == false {
-		panic("Called WriteStorage on immutable ServiceAccount")
+		log.Crit(module, "Called WriteStorage on immutable ServiceAccount")
 	}
 
 	o, exists := s.Preimage[blobHash]
@@ -496,7 +497,8 @@ func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 
 func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots []uint32) {
 	if s.Mutable == false {
-		panic("Called WriteStorage on immutable ServiceAccount")
+		log.Crit(module, "Called WriteStorage on immutable ServiceAccount")
+
 	}
 	s.Dirty = true
 	o, exists := s.Lookup[blobHash]

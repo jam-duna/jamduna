@@ -138,7 +138,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	for i := 0; i < numNodes; i++ {
 		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, GenesisBlockFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		nodes[i] = node
 	}
@@ -216,6 +216,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		//log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
 	case "game_of_life":
 		serviceNames = []string{"game_of_life", "auth_copy"}
+	case "auth_copy":
+		serviceNames = []string{"auth_copy"}
 	default:
 		serviceNames = []string{"auth_copy", "fib"}
 	}
@@ -235,7 +237,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 		fmt.Printf("jamtest: %s-client (local=%v)\n", jam, *jam_local_client)
 		tcpServers, wsUrl := GetAddresses(*jam_local_client)
-		bNode, err = NewNodeClient(tcpServers, wsUrl)
+		bNode, err = NewNodeClient(tcpServers, wsUrl[0])
 		if err != nil {
 			fmt.Printf("NewNodeClient ERR %v\n", err)
 			err = fmt.Errorf("‼️ jamtest: %s-client (local=%v) Failed. Connection Problem?\n", jam, *jam_local_client)
@@ -243,7 +245,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		}
 		fmt.Printf("%s tcp:%v\n", wsUrl, tcpServers)
 		client := bNode.(*NodeClient)
-		err = client.ConnectWebSocket(wsUrl)
+		err = client.ConnectWebSocket(wsUrl[0])
 	} else { // Node
 
 		fmt.Printf("jamtest: %s-node\n", jam)
@@ -259,7 +261,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
 		if err != nil {
-			panic("Error setting up nodes: %v\n")
+			log.Crit(module, "Error setting up nodes: %v")
+			return
 		}
 
 		// Handling Safrole
@@ -316,7 +319,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
-		panic(0)
+		log.Error(module, "ReadCodeWithMetadata", "err", err)
+		return
 	}
 	bootstrapService := uint32(statedb.BootstrapServiceCode)
 	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
@@ -420,6 +424,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		game_of_life(bNode, testServices)
 	case "megatron":
 		megatron(bNode, testServices, targetN)
+	case "auth_copy":
+		auth_copy(bNode, testServices, targetN)
 
 	// TODO: modernize those tests?
 	case "transfer":
@@ -439,5 +445,48 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "blake2b":
 		blake2b(bNode, testServices)
 
+	}
+}
+
+func auth_copy(n1 JNode, testServices map[string]*types.TestService, targetN int) {
+	log.Info(module, "FIB START", "targetN", targetN)
+	service_authcopy := testServices["auth_copy"]
+
+	for fibN := 1; fibN <= targetN; fibN++ {
+		payload := make([]byte, 4)
+		binary.LittleEndian.PutUint32(payload, uint32(fibN))
+		workPackage := types.WorkPackage{
+			AuthCodeHost:          0,
+			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ParameterizationBlob:  []byte{},
+			WorkItems: []types.WorkItem{
+				{
+					Service:            service_authcopy.ServiceCode,
+					CodeHash:           service_authcopy.CodeHash,
+					Payload:            []byte{},
+					RefineGasLimit:     5678,
+					AccumulateGasLimit: 9876,
+					ImportedSegments:   make([]types.ImportSegment, 0),
+					ExportCount:        0,
+				},
+			},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+		wpr := &WorkPackageRequest{
+			Identifier:      fmt.Sprintf("Auth(%d)", fibN),
+			CoreIndex:       0,
+			WorkPackage:     workPackage,
+			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		}
+
+		_, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
+		if err != nil {
+			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
+		} else {
+			log.Info(module, "Authcopy Success", "N", fibN)
+		}
 	}
 }

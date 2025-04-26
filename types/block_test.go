@@ -3,10 +3,11 @@ package types
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/colorfulnotion/jam/common"
 	"io/ioutil"
 	"os"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 func TestDecodeBlocks(t *testing.T) {
@@ -31,7 +32,7 @@ func TestDecodeBlocks(t *testing.T) {
 			fmt.Printf("%s block %d/%d (Slot %d) Parent Header hash %s <= header hash %s\n", filePath, i, len(blocks), b.Header.Slot, b.Header.ParentHeaderHash, b.Header.Hash())
 			if i > 0 {
 				if b.Header.ParentHeaderHash != lastHeader {
-					panic(22)
+					t.Fatalf("Failed")
 				}
 			}
 			lastHeader = b.Header.Hash()

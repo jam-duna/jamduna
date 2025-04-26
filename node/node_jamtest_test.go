@@ -66,6 +66,13 @@ func TestFib2(t *testing.T) {
 	jamtest(t, "fib2", targetN)
 }
 
+func TestAuthCopy(t *testing.T) {
+	targetN := TargetedN_Fib
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "auth_copy", targetN)
+}
 func TestMegatron(t *testing.T) {
 	// Open file to save CPU Profile
 	//fmt.Printf("prereq_test: %v\n", *prereq_test)

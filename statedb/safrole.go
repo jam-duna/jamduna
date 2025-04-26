@@ -1,11 +1,13 @@
 package statedb
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 
 	"encoding/json"
@@ -828,7 +830,7 @@ func (s *SafroleState) GetEpoch() uint32 {
 }
 
 // statefrole_stf is the function to be tested
-func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, validated_tickets map[common.Hash]common.Hash) (SafroleState, error) {
+func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, validated_tickets map[common.Hash]common.Hash) (SafroleState, error) {
 
 	ticketBodies, err := s.ValidateSaforle(tickets, targetJCE, header, validated_tickets)
 	if err != nil {
@@ -855,6 +857,11 @@ func (s *SafroleState) ApplyStateTransitionTickets(tickets []types.Ticket, targe
 	// If the ticket is valid, add it to the accumulator
 	for _, ticket := range ticketBodies {
 		s2.PutTicketInAccumulator(ticket)
+		select {
+		case <-ctx.Done():
+			return *s, fmt.Errorf("ApplyStateTransitionTickets canceled")
+		default:
+		}
 	}
 
 	// Sort and trim tickets
@@ -1080,11 +1087,13 @@ func (s2 *SafroleState) AdvanceEntropyAndValidator(s *SafroleState, new_entropy_
 	s2.PrevValidators = s2.CurrValidators
 	s2.CurrValidators = s2.NextValidators
 	if types.GetValidatorsLength(s2.NextValidators) == 0 {
-		panic("no NextValidators")
+		log.Crit(module, "no NextValidators")
+		return
 	}
 	s2.NextValidators = s2.CleanValidators(s2.DesignedValidators)
 	if types.GetValidatorsLength(s2.DesignedValidators) == 0 {
-		panic("no DesignedValidators")
+		log.Crit(module, "no NextValidators")
+		return
 	}
 	//prev_n0 := s2.Entropy[0]
 	s2.Entropy[1] = s.Entropy[0]

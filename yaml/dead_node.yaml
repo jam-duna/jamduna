@@ -1,0 +1,53 @@
+---
+# === Part 1: Shutdown ===
+- hosts: all
+  become: true
+  vars:
+    JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jam"
+  tasks:
+    - name: Kill Jam
+      shell: "pkill -f '{{ JAM_PATH }}'"
+      ignore_errors: yes
+
+    - name: Pause for 180 seconds before restart
+      pause:
+        seconds: 180
+
+# === Part 2: Restart ===
+- hosts: all
+  become: true
+  vars:
+    NUM_NODES: 1
+    NETWORK: "tiny"
+    DEFAULT_PORT: 9900
+    JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jam"
+  tasks:
+    - name: Create logs Directory
+      file:
+        path: /tmp/logs
+        state: directory
+        mode: 0755
+
+    - name: Copy binary jam from local to jam_hosts
+      copy:
+        src: "{{ JAM_PATH }}"
+        dest: "{{ JAM_PATH }}"
+        mode: '0755'
+
+    - name: Run command in Instances
+      shell: |
+        for i in $(seq 0 $(( {{ NUM_NODES }} - 1 ))); do
+          PORT=$(( {{ DEFAULT_PORT }} + i ));
+          echo "Starting instance $i on port $PORT..."
+          export CARGO_MANIFEST_DIR=/root/go/src/github.com/colorfulnotion/jam
+          nohup {{ JAM_PATH }} -net_spec {{ NETWORK }} -port $PORT > /tmp/logs/jam_$PORT.log 2>&1 < /dev/null &
+          echo "Instance $i started with port $PORT";
+        done
+        sleep 2
+        pgrep -a jam
+      args:
+        executable: /bin/bash
+
+    - name: Display completion Message
+      debug:
+        msg: "All jam instances restarted after 3-minute pause."

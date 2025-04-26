@@ -66,6 +66,7 @@ func (n *NodeContent) onWorkReportRequest(ctx context.Context, stream quic.Strea
 	h := common.BytesToHash(msg)
 	workReport, ok, err := n.WorkReportLookup(h)
 	if err != nil {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onWorkReportRequest: WorkReportLookup failed: %w", err)
 	}
 	if !ok {

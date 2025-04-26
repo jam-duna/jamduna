@@ -62,13 +62,20 @@
           PORT=$(( {{ DEFAULT_PORT }} + i ));
           echo "Starting instance $i on port $PORT..."
           nohup {{ JAM_PATH }} -net_spec {{ NETWORK }} -port $PORT -start_time "{{ JAM_START_TIME }}" > /tmp/logs/jam_$PORT.log 2>&1 < /dev/null &
-          echo "Instance $i started with port $PORT";
+          PID=$!
+
+          sleep 1  # Give it a second to initialize
+
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "❌ Instance $i on port $PORT crashed immediately! Check /tmp/logs/jam_$PORT.log"
+          else
+            echo "✅ Instance $i started successfully with PID $PID on port $PORT."
+          fi
         done
         sleep 2
         pgrep -a jam
       args:
         executable: /bin/bash
-
     - name: Display completion Message
       debug:
         msg: "All instances started."

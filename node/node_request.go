@@ -198,7 +198,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		// Respect cancellation early
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("processBlockAnnouncement canceled: %w", ctx.Err())
+			return nil, fmt.Errorf("processBlockAnnouncement canceled: %w, attempt %v, mode %v", ctx.Err(), attempt, mode)
 		default:
 		}
 
@@ -211,13 +211,13 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		case 1:
 			blocksRaw, lastErr = p.GetAllBlocks(headerHash, attemptCtx)
 			log.Warn(log.BlockMonitoring, "GetAllBlocks", "blockHash", headerHash, "blocksRaw", len(blocksRaw), "isSync", false)
-			n.SetIsSync(false)
+			n.SetIsSync(false, "no blocks")
 		case 2:
 			blocksRaw, lastErr = p.GetMiddleBlocks(headerHash, num, attemptCtx)
 			log.Warn(log.BlockMonitoring, "GetMiddleBlocks",
 				"num", num,
 				"blockHash", headerHash, "blocksRaw", blocksRaw, "isSync", false)
-			n.SetIsSync(false)
+			n.SetIsSync(false, "behind others")
 		default:
 			return nil, fmt.Errorf("invalid mode %d", mode)
 		}
@@ -225,7 +225,15 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 
 		if lastErr == nil && len(blocksRaw) > 0 {
 			if attempt > 1 {
+				// if attempt >1, we can try to find a new peer
 				log.Info(module, "SendBlockRequest succeeded", "attempt", attempt, "blockHash", headerHash)
+				validatorIndex = uint16(len(n.peersInfo)%int(validatorIndex) - 1)
+				p, ok = n.peersInfo[validatorIndex]
+				if !ok {
+					err := fmt.Errorf("invalid validator index %d", validatorIndex)
+					log.Error(module, "processBlockAnnouncement", "err", err)
+					return nil, err
+				}
 			}
 			break
 		}
@@ -252,12 +260,11 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 			if !n.ba_checker.CheckAndSet(headerHash, peer_id) {
 				up0_stream, err := peer.GetOrInitBlockAnnouncementStream(context.Background())
 				if err != nil {
-					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.PeerID, "err", err)
+					log.Trace(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.PeerID, "err", err)
+					return
 				}
 				block_a_bytes := blockAnnouncement.ToBytes()
-				if err != nil {
-					log.Warn(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
-				}
+
 				err = sendQuicBytes(context.Background(), up0_stream, block_a_bytes, peer_id, CE128_BlockRequest)
 				if err != nil {
 					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes (whisper)", "n", n.String(), "err", err)
@@ -318,13 +325,6 @@ func (n *Node) runReceiveBlock() {
 
 	for {
 		select {
-
-		case <-pulseTicker.C:
-			// MediumTimeout to extend the chain
-			if GrandpaEasy {
-				n.block_tree.EasyFinalization()
-			}
-
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
 			// SmallTimeout to processBlockAnnouncement
 			blk_hash := blockAnnouncement.Header.Hash()
@@ -335,7 +335,7 @@ func (n *Node) runReceiveBlock() {
 				Slot:       blockAnnouncement.Header.Slot,
 			}
 			if latest_block == nil || blockAnnouncement.Header.Slot > latest_block.Slot {
-				n.SetLatestBlockInfo(&newinfo)
+				n.SetLatestBlockInfo(&newinfo, "latest block")
 			}
 			blockCtx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
 			blocks, err := n.processBlockAnnouncement(blockCtx, blockAnnouncement)
@@ -343,6 +343,8 @@ func (n *Node) runReceiveBlock() {
 
 			if err != nil {
 				log.Warn(debugBlock, "processBlockAnnouncement failed", "n", n.String(), "err", err)
+				n.SetIsSync(false, "fail to get latest block")
+				continue
 			} else {
 				if len(blocks) == 0 { // check
 					block := blocks[0]
@@ -355,10 +357,21 @@ func (n *Node) runReceiveBlock() {
 				}
 			}
 			extendCtx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+			start := time.Now()
 			if err := n.extendChain(extendCtx); err != nil {
 				log.Warn(debugBlock, "runReceiveBlock: extendChain failed", "n", n.String(), "err", err)
 			}
+			elapsed := time.Since(start)
+			n.jce_timestamp_mutex.Lock()
+			block_to_apply := time.Since(n.jce_timestamp[blockAnnouncement.Header.Slot])
+			n.jce_timestamp_mutex.Unlock()
+			log.Debug(debugBlock, "runReceiveBlock: extendChain time", "n", n.String(), "takes", elapsed, "takes to apply", block_to_apply)
+			if GrandpaEasy {
+				n.block_tree.EasyFinalization()
+			}
 			cancel()
+		case <-pulseTicker.C:
+			// MediumTimeout to extend the chain
 		case <-n.stop_receive_blk:
 			log.Trace(debugBlock, "runReceiveBlock: received stop signal", "n", n.String())
 			select {
@@ -369,7 +382,7 @@ func (n *Node) runReceiveBlock() {
 	}
 }
 
-func (n *Node) runMain() {
+func (n *Node) runWorkReports() {
 	for {
 		select {
 		case workReport := <-n.workReportsCh:
@@ -377,26 +390,30 @@ func (n *Node) runMain() {
 				n.workReports = make(map[common.Hash]types.WorkReport)
 			}
 			n.cacheWorkReport(workReport)
+		}
+	}
+
+}
+
+func (n *Node) runGuarantees() {
+	for {
+		select {
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {
 				log.Error(debugG, "runMain:processGuarantee", "n", n.String(), "err", err)
-				// COMMON ERROR: G15|AnchorNotRecent
 			}
+		}
+	}
+}
+
+func (n *Node) runAssurances() {
+	for {
+		select {
 		case assurance := <-n.assurancesCh:
 			err := n.processAssurance(assurance)
 			if err != nil {
 				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
-			}
-		case announcement := <-n.announcementsCh:
-			err := n.processAnnouncement(announcement)
-			if err != nil {
-				fmt.Printf("%s processAnnouncement: %v\n", n.String(), err)
-			}
-		case judgement := <-n.judgementsCh:
-			err := n.processJudgement(judgement)
-			if err != nil {
-				fmt.Printf("%s processJudgement: %v\n", n.String(), err)
 			}
 		}
 	}
@@ -558,7 +575,6 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 
 	}
 }
-
 func (n *NodeContent) makeRequests(
 	objs map[uint16]interface{},
 	minSuccess int,
@@ -569,9 +585,11 @@ func (n *NodeContent) makeRequests(
 
 	var (
 		wg           sync.WaitGroup
-		resultsCh    = make(chan interface{}, len(objs))
-		successCount int
+		resultsCh    = make(chan interface{}, len(objs)) // still bounded
 		mu           sync.Mutex
+		successCount int
+		finalResults []interface{}
+		doneOnce     sync.Once
 	)
 
 	for peerID, obj := range objs {
@@ -588,37 +606,48 @@ func (n *NodeContent) makeRequests(
 
 			res, err := n.sendRequest(reqCtx, peerID, obj)
 			if err != nil {
+				log.Trace(debugDA, "sendRequest failed", "peerID", peerID, "err", err)
 				return
 			}
 
 			select {
 			case resultsCh <- res:
-				mu.Lock()
-				successCount++
-				// NOTE: some of successCount could be "malicious" so this is not the right criteria --
-				// INSTEAD: (a) reconstruct the bundle/segment and (b) verify the bundle (CE137), segment (CE139+140) or block (CE128)
-				if successCount >= minSuccess && ctx.Err() == nil {
-					cancel() // IMPORTANT: this results in ALL the reqCancel() since reqCtx has ctx as its parent
-				}
-				mu.Unlock()
+				// result sent successfully
 			case <-ctx.Done():
+				// parent canceled, don't block
+				return
 			}
 		}(peerID, obj)
 	}
 
+	// Streaming collection
+	doneCh := make(chan struct{})
+	go func() {
+		for res := range resultsCh {
+			mu.Lock()
+			finalResults = append(finalResults, res)
+			successCount++
+			if successCount >= minSuccess && ctx.Err() == nil {
+				doneOnce.Do(cancel)
+			}
+			mu.Unlock()
+		}
+		close(doneCh)
+	}()
+
+	// Wait for all request goroutines to finish
 	wg.Wait()
 	close(resultsCh)
 
-	var finalResults []interface{}
-	for res := range resultsCh {
-		finalResults = append(finalResults, res)
-	}
+	// Wait for the collector goroutine to finish
+	<-doneCh
 
 	mu.Lock()
 	sc := successCount
 	mu.Unlock()
 
 	log.Trace(debugDA, "makeRequests: successCount", sc)
+
 	if sc < minSuccess {
 		return nil, fmt.Errorf("not enough successful requests (successCount:%d < minSuccess:%d)", sc, minSuccess)
 	}

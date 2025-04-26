@@ -610,7 +610,7 @@ func (n *NodeContent) WorkReportSearch(h common.Hash) (si *SpecIndex) {
 
 	wr, _, err := types.Decode(wrBytes, reflect.TypeOf(types.WorkReport{}))
 	if err != nil {
-		panic(1234431)
+		return nil
 	}
 
 	workReport := wr.(types.WorkReport)

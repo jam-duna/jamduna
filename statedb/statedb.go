@@ -25,8 +25,6 @@ import (
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -916,10 +914,10 @@ func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
 	return hex.EncodeToString(traceIDBytes[:])
 }
 
-func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
+func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady(currJCE)
 	if !genesisReady {
-		//fmt.Printf("genesis NOT Ready ProcessState: currJCE=%d\n", currJCE)
+		log.Warn(module, "ProcessState:GenesisNotReady", "currJCE", currJCE)
 		return false, nil, nil, nil
 	}
 	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady(currJCE)
@@ -929,21 +927,21 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 		isAuthorizedBlockBuilder, ticketID, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		if isAuthorizedBlockBuilder {
 			// Add MakeBlock span
-			if s.sdb.SendTrace {
-				tracer := s.sdb.Tp.Tracer("NodeTracer")
-				// s.InitEpochPhaseContext()
-				ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] ProcessState -> MakeBlock", s.sdb.NodeID))
-				s.sdb.UpdateBlockContext(ctx)
-				defer span.End()
-			}
+			// if s.sdb.SendTrace {
+			// 	tracer := s.sdb.Tp.Tracer("NodeTracer")
+			// 	// s.InitEpochPhaseContext()
+			// 	ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] ProcessState -> MakeBlock", s.sdb.NodeID))
+			// 	s.sdb.UpdateBlockContext(ctx)
+			// 	defer span.End()
+			// }
 
-			proposedBlk, err := s.MakeBlock(credential, targetJCE, ticketID, extrinsic_pool)
+			proposedBlk, err := s.MakeBlock(ctx, credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
 				log.Error(module, "ProcessState:MakeBlock", "err", err)
 				return true, nil, nil, err
 			}
 			// Add ApplyStateTransitionFromBlock span
-			if s.sdb.Tp != nil && s.sdb.BlockContext != nil && s.sdb.SendTrace {
+			/*if s.sdb.Tp != nil && s.sdb.BlockContext != nil && s.sdb.SendTrace {
 				tracer := s.sdb.Tp.Tracer("NodeTracer")
 
 				var block_hash common.Hash
@@ -956,11 +954,10 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 				_, span := tracer.Start(s.sdb.BlockContext, fmt.Sprintf("[N%d] ProcessState -> ApplyStateTransitionFromBlock", s.sdb.NodeID), tags)
 				// oldState.sdbs.UpdateBlockContext(ctx)
 				defer span.End()
-			}
+			}*/
 
-			newStateDB, err := ApplyStateTransitionFromBlock(s, context.Background(), proposedBlk, nil)
+			newStateDB, err := ApplyStateTransitionFromBlock(s, ctx, proposedBlk, nil)
 			if err != nil {
-				// HOW could this happen, we made the block ourselves!
 				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)
 				return true, nil, nil, err
 			}
@@ -972,10 +969,12 @@ func (s *StateDB) ProcessState(currJCE uint32, credential types.ValidatorSecret,
 			log.Info(module, "proposeBlock", "mode", mode, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
-		} else {
-			//waiting for block ... potentially submit ticket here
 		}
+		log.Info(module, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
+		return false, nil, nil, nil
 	}
+	//waiting for block ... potentially submit ticket here
+	log.Debug(module, "ProcessState:NotAuthorizedBlockBuilder", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
 	return false, nil, nil, nil
 }
 

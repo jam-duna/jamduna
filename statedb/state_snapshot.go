@@ -57,30 +57,6 @@ type KeyVals []KeyVal
 
 type KeyValMap map[common.Hash][]byte
 
-// func (kv KeyVals) Encode() []byte {
-// 	m := make(KeyValMap)
-// 	for _, kv := range kv {
-// 		m[common.BytesToHash(kv[0])] = kv[1]
-// 	}
-// 	encoded, err := types.Encode(m)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	return encoded
-// }
-
-// func (kv KeyVals) Decode(encoded []byte) (interface{}, uint32) {
-// 	decoded, l, err := types.Decode(encoded, reflect.TypeOf(KeyValMap{}))
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	m := decoded.(KeyValMap)
-// 	for k, v := range m {
-// 		kv = append(kv, KeyVal{k.Bytes(), v})
-// 	}
-// 	return kv, l
-// }
-
 type StateSnapshotRaw struct {
 	StateRoot common.Hash `json:"state_root"`
 	KeyVals   KeyVals     `json:"keyvals"`

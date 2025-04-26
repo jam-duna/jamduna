@@ -12,8 +12,13 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
+)
+
+const (
+	debug = "trie"
 )
 
 type KeyVal struct {
@@ -179,7 +184,7 @@ func buildMerkleTree(kvs [][2][]byte, i int) *Node {
 // branch concatenates the left and right node hashes with a modified head
 func branch(left, right []byte) []byte {
 	if len(left) != 32 || len(right) != 32 {
-		panic("branch: input hashes must be 32 bytes")
+		log.Crit(debug, "branch: input hashes must be 32 bytes")
 	}
 	head := left[0] & 0x7f                           // Set the LSB of the first byte of the left hash to 0
 	left255bits := append([]byte{head}, left[1:]...) // Left: last 255 bits of
@@ -558,7 +563,7 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 				var k_31 [31]byte
 				copy(k_31[:], node.Key[:31])
 				if len(k_31) != 31 {
-					panic(fmt.Sprintf("Key is not 31 bytes: %x", node.Key))
+					log.Crit(debug, "branch: input hashes must be 32 bytes")
 				}
 				stateKeyValue := types.StateKeyValue{
 					Key:   k_31,
@@ -604,7 +609,7 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 			var k_31 [31]byte
 			copy(k_31[:], node.Key[:31])
 			if len(k_31) != 31 {
-				panic(fmt.Sprintf("Key is not 31 bytes: %x", node.Key))
+				log.Crit(debug, "Key is not 31 bytes")
 			}
 			stateKeyValue := types.StateKeyValue{
 				Key:   k_31,
@@ -988,9 +993,6 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
 
 // Insert fixed-length hashed key with value for the BPT
 func (t *MerkleTree) Insert(key, value []byte) {
-	// if common.CompareBytes(key, common.Hex2Bytes("ff00000000000000000000000000000000000000000000000000000000000000")) {
-	// 	panic("Insert: key is ff")
-	// }
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
 		encodedLeaf := leaf(key, value)

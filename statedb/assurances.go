@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -101,13 +102,12 @@ func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common
 	return
 }
 
-func (s *StateDB) ValidateAssurances(assurances []types.Assurance, anchor common.Hash) error {
+func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Assurance, anchor common.Hash) error {
 	validators := s.GetSafrole().CurrValidators
 	hasRecentWR, hasStaleWR := s.getWRStatus()
 	// check sorting by validatorIndex
 	var prevIndex uint16
 	for i, a := range assurances {
-
 		if i > 0 {
 			if a.ValidatorIndex == prevIndex {
 				return jamerrors.ErrADuplicateAssurer
@@ -122,6 +122,11 @@ func (s *StateDB) ValidateAssurances(assurances []types.Assurance, anchor common
 	for _, a := range assurances {
 		if err := s.checkAssurance(a, anchor, validators, hasRecentWR, hasStaleWR); err != nil {
 			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("ValidateAssurances canceled")
+		default:
 		}
 	}
 

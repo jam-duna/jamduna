@@ -40,8 +40,8 @@ func main() {
 			// Call createGenesisState for each network
 			outputFilename, err := statedb.CreateGenesisState(sdb, chainSpec, 0, network)
 			if err != nil {
-				log.Printf("Error writing genesis file for network %s: %v", network, err)
-				panic(1)
+				fmt.Printf("Error writing genesis file for network %s: %v", network, err)
+				return
 			}
 			fmt.Printf("Genesis state created: %s\n", outputFilename)
 		}

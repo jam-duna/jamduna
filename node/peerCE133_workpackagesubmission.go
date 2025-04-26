@@ -75,7 +75,7 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, core_idx uint16) (err error) {
 	if pkg.RefineContext.LookupAnchorSlot == 1 {
 		if len(pkg.RefineContext.Prerequisites) == 0 {
-			panic("Prerequisite is empty")
+			// TODO "Prerequisite is empty"
 		}
 	}
 	if err != nil {

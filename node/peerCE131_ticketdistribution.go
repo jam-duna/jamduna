@@ -137,7 +137,9 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	var ticket types.Ticket
 	ticket.Attempt = newReq.Attempt
 	ticket.Signature = newReq.Signature
-
+	if !n.GetIsSync() {
+		return nil
+	}
 	select {
 	case n.ticketsCh <- ticket:
 		// successfully sent ticket

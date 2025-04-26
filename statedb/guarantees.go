@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -13,7 +14,7 @@ import (
 // chapter 11
 
 // v0.5 eq 11.42 - the rho state transition function
-func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) (numReports map[uint16]uint16) {
+func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Guarantee) (numReports map[uint16]uint16, err error) {
 	numReports = make(map[uint16]uint16)
 	for _, guarantee := range guarantees {
 		for _, g := range guarantee.Signatures {
@@ -33,8 +34,13 @@ func (j *JamState) ProcessGuarantees(guarantees []types.Guarantee) (numReports m
 			j.SetRhoByWorkReport(guarantee.Report.CoreIndex, guarantee.Report, j.SafroleState.GetTimeSlot())
 			log.Trace(debugG, "ProcessGuarantees Success on Core", "coreIndex", guarantee.Report.CoreIndex)
 		}
+		select {
+		case <-ctx.Done():
+			return numReports, fmt.Errorf("ProcessGuarantees canceled")
+		default:
+		}
 	}
-	return numReports
+	return numReports, nil
 }
 
 // setRhoByWorkReport sets the Rho state for a specific core with a WorkReport and timeslot
@@ -46,7 +52,7 @@ func (state *JamState) SetRhoByWorkReport(core uint16, w types.WorkReport, t uin
 }
 
 // this function is the strictest one, is for the verification after the state transition before the state gets updated by extrinsic guarantees
-func (s *StateDB) Verify_Guarantees() error {
+func (s *StateDB) Verify_Guarantees(ctx context.Context) error {
 	// v0.5 eq 11.23
 	err := CheckSorting_EGs(s.Block.Extrinsic.Guarantees)
 	if err != nil {
@@ -56,6 +62,11 @@ func (s *StateDB) Verify_Guarantees() error {
 		err = s.Verify_Guarantee(guarantee)
 		if err != nil {
 			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("Verify_Guarantees canceled")
+		default:
 		}
 	}
 	// v0.5 eq 11.31
@@ -74,8 +85,12 @@ func (s *StateDB) Verify_Guarantees() error {
 		if err != nil {
 			return err // INSTEAD of jamerrors.ErrGDependencyMissing
 		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("Verify_Guarantees canceled")
+		default:
+		}
 	}
-
 	return nil
 }
 
