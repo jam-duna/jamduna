@@ -365,7 +365,9 @@ func (n *Node) runReceiveBlock() {
 			n.jce_timestamp_mutex.Lock()
 			block_to_apply := time.Since(n.jce_timestamp[blockAnnouncement.Header.Slot])
 			n.jce_timestamp_mutex.Unlock()
-			log.Debug(debugBlock, "runReceiveBlock: extendChain time", "n", n.String(), "takes", elapsed, "takes to apply", block_to_apply)
+			if elapsed > time.Second {
+				log.Debug(debugBlock, "runReceiveBlock: extendChain time", "n", n.String(), "takes", elapsed, "takes to apply", block_to_apply)
+			}
 			if GrandpaEasy {
 				n.block_tree.EasyFinalization()
 			}

@@ -71,7 +71,6 @@ const (
 	Audit        = true
 	revalidate   = false // turn off for production (or publication of traces)
 
-	doVerification       = false // MUST be true for production
 	paranoidVerification = false // turn off for production
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 
@@ -194,7 +193,7 @@ func NewNodeContent(id uint16, ed25519PublicKey ed25519.PublicKey, store *storag
 func (n *Node) Clean(block_hashes []common.Hash) {
 	n.statedbMapMutex.Lock()
 	for _, block_hash := range block_hashes {
-		log.Debug(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
+		log.Trace(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
 		//TOCHECK
 		if _, ok := n.statedbMap[block_hash]; ok {
 			delete(n.statedbMap, block_hash)
@@ -1453,19 +1452,19 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
 				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures); err != nil {
-					log.Error(debugStream, "SendWorkReportDistribution", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendWorkReportDistribution", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
 				if err := peer.SendAssurance(ctx, &a); err != nil {
-					log.Error(debugStream, "SendAssurance", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendAssurance", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
 				if err := peer.SendAuditAnnouncement(ctx, &a); err != nil {
-					log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Judgement{}):
@@ -1473,25 +1472,25 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 				epoch := uint32(0) // Wrong?
 				// TODO: add variadic args to SendJudgmentPublication (time of audit)
 				if err := peer.SendJudgmentPublication(ctx, epoch, j); err != nil {
-					log.Error(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.PreimageAnnouncement{}):
 				announcement := obj.(types.PreimageAnnouncement)
 				if err := peer.SendPreimageAnnouncement(ctx, &announcement); err != nil {
-					log.Error(debugStream, "SendPreimageAnnouncement", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendPreimageAnnouncement", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(grandpa.VoteMessage{}):
 				vote := obj.(grandpa.VoteMessage)
 				if err := peer.SendVoteMessage(ctx, vote); err != nil {
-					log.Error(debugStream, "SendVoteMessage", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendVoteMessage", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(grandpa.CommitMessage{}):
 				commit := obj.(grandpa.CommitMessage)
 				if err := peer.SendCommitMessage(ctx, commit); err != nil {
-					log.Error(debugStream, "SendCommitMessage", "n", n.String(), "err", err)
+					log.Warn(debugStream, "SendCommitMessage", "n", n.String(), "err", err)
 					return
 				}
 			}
@@ -1961,17 +1960,16 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 		bClub := common.Blake2Hash(daResp.BundleShard)
 		sClub := daResp.SClub
 		leaf := append(bClub.Bytes(), sClub.Bytes()...)
-		if doVerification {
-			verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
-			if verified {
-				log.Debug(debugCE138, "reconstructPackageBundleSegments: shard verified", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
-				bundleShards[numShards] = daResp.BundleShard
-				indexes[numShards] = uint32(daResp.ShardIndex)
-				numShards++
-			} else {
-				log.Warn(module, "reconstructPackageBundleSegments: shard verification failed", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
-			}
+		verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
+		if verified {
+			log.Debug(debugCE138, "reconstructPackageBundleSegments: shard verified", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
+			bundleShards[numShards] = daResp.BundleShard
+			indexes[numShards] = uint32(daResp.ShardIndex)
+			numShards++
+		} else {
+			log.Warn(module, "reconstructPackageBundleSegments: shard verification failed", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
 		}
+
 	}
 
 	// Check if enough shards were collected
@@ -2002,16 +2000,14 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	}
 
 	// IMPORTANT: Verify the reconstructed bundle against the segment root lookup
-	if doVerification {
-		verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup)
-		if verifyErr != nil {
-			log.Warn(module, "reconstructPackageBundleSegments: VerifyBundle errored", "err", verifyErr)
-			return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", verifyErr)
-		}
-		if !verified {
-			log.Warn(module, "reconstructPackageBundleSegments: bundle verification failed")
-			return types.WorkPackageBundle{}, fmt.Errorf("bundle verification failed")
-		}
+	verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup)
+	if verifyErr != nil {
+		log.Warn(module, "reconstructPackageBundleSegments: VerifyBundle errored", "err", verifyErr)
+		return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", verifyErr)
+	}
+	if !verified {
+		log.Warn(module, "reconstructPackageBundleSegments: bundle verification failed")
+		return types.WorkPackageBundle{}, fmt.Errorf("bundle verification failed")
 	}
 
 	return workPackageBundle, nil
@@ -2338,7 +2334,7 @@ func (n *Node) runAuthoring() {
 
 			ticketIDs, err := n.GetSelfTicketsIDs(currPhase)
 			if err != nil {
-				fmt.Printf("runClient: GetSelfTicketsIDs error: %v\n", err)
+				fmt.Printf("runAuthoring: GetSelfTicketsIDs error: %v\n", err)
 			}
 
 			if currJCE == lastAuthorizableJCE {
@@ -2364,12 +2360,15 @@ func (n *Node) runAuthoring() {
 					log.Error(module, "ProcessState", "err", err)
 					return processResult{}, err
 				}
-				log.Info(module, "ProcessState", "isAuthorized", isAuthorized, "elapsed", time.Since(stProcessState))
+				elapsed := time.Since(stProcessState)
+				if elapsed > time.Second {
+					log.Info(module, "ProcessState", "isAuthorized", isAuthorized, "elapsed", elapsed)
+				}
 				return processResult{isAuthorized, newBlock, newStateDB}, nil
 			}, MediumTimeout)
 
 			if err != nil {
-				log.Error(module, "runClient: ProcessState error", "n", n.String(), "err", err)
+				log.Error(module, "runAuthoring: ProcessState error", "n", n.String(), "err", err)
 				continue
 			}
 
@@ -2379,16 +2378,16 @@ func (n *Node) runAuthoring() {
 
 			if !isAuthorizedBlockBuilder {
 				lastAuthorizableJCE = currJCE
-				log.Trace(debugBlock, "runClient: Not Authorized", "n", n.String(), "JCE", currJCE)
+				log.Trace(debugBlock, "runAuthoring: Not Authorized", "n", n.String(), "JCE", currJCE)
 				n.author_status = "not authoring"
 				continue
 			}
 
 			lastAuthorizableJCE = currJCE
-			log.Debug(debugBlock, "runClient: Authoring Block", "n", n.String(), "JCE", currJCE)
+			log.Debug(debugBlock, "runAuthoring: Authoring Block", "n", n.String(), "JCE", currJCE)
 			n.author_status = "authoring"
 			if newStateDB == nil {
-				log.Warn(module, "runClient: ProcessState newStateDB is nil", "n", n.String())
+				log.Warn(module, "runAuthoring: ProcessState newStateDB is nil", "n", n.String())
 				continue
 			}
 			oldstate := n.statedb
@@ -2404,7 +2403,7 @@ func (n *Node) runAuthoring() {
 					HeaderHash: newBlock.Header.Hash(),
 					Slot:       newBlock.Header.Slot,
 				},
-				"runClient:ProcessState",
+				"runAuthoring:ProcessState",
 			)
 			n.author_status = "authoring:broadcasting"
 			nodee, ok := n.block_tree.GetBlockNode(newBlock.Header.Hash())
@@ -2416,7 +2415,7 @@ func (n *Node) runAuthoring() {
 			go func() {
 				timeslot := newStateDB.GetSafrole().Timeslot
 				if err := n.writeDebug(newBlock, timeslot); err != nil {
-					log.Error(module, "runClient:writeDebug", "err", err)
+					log.Error(module, "runAuthoring:writeDebug", "err", err)
 				}
 				s := n.statedb
 				allStates := s.GetAllKeyValues()
@@ -2426,15 +2425,15 @@ func (n *Node) runAuthoring() {
 				}
 				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
 				if err := n.writeDebug(st, timeslot); err != nil {
-					log.Error(module, "runClient:writeDebug", "err", err)
+					log.Error(module, "runAuthoring:writeDebug", "err", err)
 				}
 				if revalidate {
 					if err := statedb.CheckStateTransition(n.store, st, s.AncestorSet); err != nil {
-						log.Crit(module, "runClient:CheckStateTransition", "err", err)
+						log.Crit(module, "runAuthoring:CheckStateTransition", "err", err)
 					}
 				}
 				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot); err != nil {
-					log.Error(module, "runClient:writeDebug", "err", err)
+					log.Error(module, "runAuthoring:writeDebug", "err", err)
 				}
 			}()
 			n.author_status = "authoring:broadcasted"
@@ -2446,7 +2445,7 @@ func (n *Node) runAuthoring() {
 
 			n.extrinsic_pool.ForgetPreimages(newStateDB.GetForgets())
 
-			log.Debug(module, "runClient:ProcessState Proposer !!!!", "n", n.String(), "slot", newBlock.Header.Slot)
+			log.Debug(module, "runAuthoring:ProcessState Proposer !!!!", "n", n.String(), "slot", newBlock.Header.Slot)
 			n.SetCompletedJCE(newBlock.Header.Slot)
 
 			if n.AuditFlag {

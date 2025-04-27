@@ -161,17 +161,29 @@ func (noShow *JAMSNPNoShow) ToBytes() ([]byte, error) {
 }
 
 func (noShow *JAMSNPNoShow) FromBytes(data []byte) error {
-	buf := bytes.NewReader(data)
-
-	// Deserialize ValidatorIndex (2 bytes)
-	if err := binary.Read(buf, binary.LittleEndian, &noShow.ValidatorIndex); err != nil {
-		return err
+	if len(data) < 66 { // 2 for ValidatorIndex + 64 for signature
+		return fmt.Errorf("not enough data for JAMSNPNoShow: got %d bytes", len(data))
 	}
 
+	// Deserialize ValidatorIndex (2 bytes)
+	noShow.ValidatorIndex = binary.LittleEndian.Uint16(data[:2])
+	data = data[2:]
+
 	// Deserialize Reports
-	for buf.Len() > 64 { // We leave 64 bytes for the signature at the end
+	reportBytes := data[:len(data)-64] // leave last 64 bytes for signature
+
+	const reportSize = 34
+	if len(reportBytes)%reportSize != 0 {
+		return fmt.Errorf("invalid reports data length: %d", len(reportBytes))
+	}
+
+	numReports := len(reportBytes) / reportSize
+	noShow.Reports = make([]JAMSNPAuditAnnouncementReport, 0, numReports)
+
+	for i := 0; i < numReports; i++ {
+		offset := i * reportSize
 		var report JAMSNPAuditAnnouncementReport
-		if err := report.FromBytes(data); err != nil {
+		if err := report.FromBytes(reportBytes[offset : offset+reportSize]); err != nil {
 			return err
 		}
 		noShow.Reports = append(noShow.Reports, report)
@@ -241,18 +253,11 @@ func (report *JAMSNPAuditAnnouncementReport) ToBytes() ([]byte, error) {
 }
 
 func (report *JAMSNPAuditAnnouncementReport) FromBytes(data []byte) error {
-	buf := bytes.NewReader(data)
-
-	// Deserialize CoreIndex (2 bytes)
-	if err := binary.Read(buf, binary.LittleEndian, &report.CoreIndex); err != nil {
-		return err
+	if len(data) < 34 {
+		return fmt.Errorf("not enough data for JAMSNPAuditAnnouncementReport: got %d bytes", len(data))
 	}
-
-	// Deserialize WorkReportHash (32 bytes)
-	if _, err := io.ReadFull(buf, report.WorkReportHash[:]); err != nil {
-		return err
-	}
-
+	report.CoreIndex = binary.LittleEndian.Uint16(data[:2])
+	copy(report.WorkReportHash[:], data[2:34])
 	return nil
 }
 

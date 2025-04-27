@@ -970,7 +970,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}
-		log.Info(module, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
+		log.Trace(module, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
 		return false, nil, nil, nil
 	}
 	//waiting for block ... potentially submit ticket here

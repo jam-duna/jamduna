@@ -291,11 +291,13 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE131_TicketDistribution, CE132_TicketDistribution:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onTicketDistribution(ctx, stream, msg, peerID)
 	case CE133_WorkPackageSubmission:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onWorkPackageSubmission(ctx, stream, msg)
 	case CE134_WorkPackageShare:
@@ -307,26 +309,31 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE137_FullShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onFullShardRequest(ctx, stream, msg)
 	case CE138_BundleShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onBundleShardRequest(ctx, stream, msg)
 	case CE139_SegmentShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onSegmentShardRequest(ctx, stream, msg, false)
 	case CE140_SegmentShardRequestP:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onSegmentShardRequest(ctx, stream, msg, true)
 	case CE141_AssuranceDistribution:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onAssuranceDistribution(ctx, stream, msg, peerID)
 	case CE142_PreimageAnnouncement:
@@ -336,11 +343,13 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE144_AuditAnnouncement:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onAuditAnnouncement(ctx, stream, msg, peerID)
 	case CE145_JudgmentPublication:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
 		}
 		return n.onJudgmentPublication(ctx, stream, msg, peerID)
 	case CE192_VoteMessage:

@@ -289,7 +289,7 @@ func StartRuntimeMonitor(interval time.Duration) {
 				// exit with error code
 				fmt.Println("OOM: Out of memory")
 				// os.Exit(1)
-				dumpHeapProfile(fmt.Sprintf("heap_dump_%d.pprof", time.Now().Unix()))
+				dumpHeapProfile(fmt.Sprintf("/tmp/heap_dump_%d.pprof", time.Now().Unix()))
 				os.Exit(1)
 			}
 			label := "[MONITOR]"

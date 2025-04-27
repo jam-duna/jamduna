@@ -630,11 +630,6 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	}
 
 	n.workReportsMutex.Unlock()
-	lazy := true
-	if lazy {
-		judgement, err = n.MakeJudgement(workReport, true)
-		return
-	}
 	spec := workReport.AvailabilitySpec
 	workPackageHash := spec.WorkPackageHash
 
