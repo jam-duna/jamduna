@@ -53,6 +53,8 @@ func (s *StateDB) GetWorkReportNeedAuditTiny() []types.WorkReport {
 	return w
 }
 
+var zerobytes = []byte{0} // TODO : How To change this to []byte{}?
+
 // eq 190
 func (s *StateDB) Get_s0Quantity(V bandersnatch.BanderSnatchSecret) ([]byte, error) {
 	if len(V) != 32 {
@@ -64,14 +66,14 @@ func (s *StateDB) Get_s0Quantity(V bandersnatch.BanderSnatchSecret) ([]byte, err
 	}
 	signtext := append([]byte(types.X_U), alias...)
 	// TODO: Check the input of IetfVrfSign, the second parameter should be empty
-	signature, _, err := bandersnatch.IetfVrfSign(V, []byte{0}, []byte(signtext))
+	signature, _, err := bandersnatch.IetfVrfSign(V, zerobytes, []byte(signtext))
 	if err != nil {
 		return nil, err
 	}
 	return signature, nil
 }
 
-func (s *StateDB) Verify_s0(pubkey bandersnatch.BanderSnatchKey) (bool, error) {
+func (s *StateDB) Verify_s0(pubkey bandersnatch.BanderSnatchKey, signature []byte) (bool, error) {
 	if len(pubkey) != 32 {
 		return false, errors.New("Invalid length of pubkey")
 	}
@@ -80,7 +82,7 @@ func (s *StateDB) Verify_s0(pubkey bandersnatch.BanderSnatchKey) (bool, error) {
 		return false, err
 	}
 	signtext := append([]byte(types.X_U), alias...)
-	_, err = bandersnatch.IetfVrfVerify(pubkey, []byte{0}, []byte(signtext), s.Block.Header.EntropySource.Bytes())
+	_, err = bandersnatch.IetfVrfVerify(pubkey, signature, zerobytes, signtext)
 	if err != nil {
 		return false, err
 	}
@@ -90,7 +92,7 @@ func (s *StateDB) Verify_s0(pubkey bandersnatch.BanderSnatchKey) (bool, error) {
 // func 201 TODO check double plus means
 func (s *StateDB) Get_snQuantity(V bandersnatch.BanderSnatchSecret, W types.WorkReport, tranche uint32) ([]byte, error) {
 	signcontext := append(append([]byte(types.X_U), W.Hash().Bytes()...), common.Uint32ToBytes(tranche)...)
-	signature, _, err := bandersnatch.IetfVrfSign(V, []byte{0}, signcontext)
+	signature, _, err := bandersnatch.IetfVrfSign(V, zerobytes, signcontext)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +101,7 @@ func (s *StateDB) Get_snQuantity(V bandersnatch.BanderSnatchSecret, W types.Work
 
 func (s *StateDB) Verify_sn(pubkey bandersnatch.BanderSnatchKey, W common.Hash, signature []byte, tranche uint32) (bool, error) {
 	signcontext := append(append([]byte(types.X_U), W.Bytes()...), common.Uint32ToBytes(tranche)...)
-	_, err := bandersnatch.IetfVrfVerify(pubkey, []byte{0}, signcontext, signature)
+	_, err := bandersnatch.IetfVrfVerify(pubkey, signature, zerobytes, signcontext)
 	if err != nil {
 		return false, err
 	}

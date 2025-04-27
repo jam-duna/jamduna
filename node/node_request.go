@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	rand0 "math/rand"
 	"runtime"
 	"sync"
 	"time"
@@ -227,7 +228,16 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 			if attempt > 1 {
 				// if attempt >1, we can try to find a new peer
 				log.Info(module, "SendBlockRequest succeeded", "attempt", attempt, "blockHash", headerHash)
-				validatorIndex = uint16(len(n.peersInfo)%int(validatorIndex) - 1)
+				origin := validatorIndex
+				// find a new peer
+				for {
+					validatorIndex = uint16(rand0.Intn(len(n.peersInfo)))
+					if validatorIndex == origin || validatorIndex == n.id {
+						continue
+					} else {
+						break
+					}
+				}
 				p, ok = n.peersInfo[validatorIndex]
 				if !ok {
 					err := fmt.Errorf("invalid validator index %d", validatorIndex)
@@ -403,7 +413,7 @@ func (n *Node) runGuarantees() {
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {
-				log.Error(debugG, "runMain:processGuarantee", "n", n.String(), "err", err)
+				log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
 			}
 		}
 	}

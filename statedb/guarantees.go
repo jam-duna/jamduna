@@ -673,6 +673,7 @@ func (s *StateDB) checkServicesExist(g types.Guarantee) error {
 			return err
 		}
 		if !ok {
+			log.Warn(debugG, "checkServicesExist: serviceID not found", "serviceID", result.ServiceID, "slot", s.GetTimeslot())
 			return jamerrors.ErrGBadServiceID
 		}
 	}

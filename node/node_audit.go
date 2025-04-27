@@ -187,6 +187,7 @@ func (n *Node) cleanUseless(header_hash common.Hash) {
 	}
 	return
 }
+
 func (n *Node) runAudit() {
 	for {
 		select {
@@ -443,7 +444,8 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 		if err != nil {
 			return nil, err
 		} else if hasmade {
-			fmt.Printf("%s [T:%d] has made announcement %v\n", n.String(), auditing_statedb.GetTimeslot(), announcement.Hash())
+			// fmt.Printf("%s [T:%d] has made announcement %v\n", n.String(), auditing_statedb.GetTimeslot(), announcement.Hash())
+			log.Warn(debugAudit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "has made announcement", "hash", announcement.Hash().String_short())
 			return a0, nil
 		} else if !hasmade {
 			n.announcementsCh <- announcement
@@ -458,19 +460,14 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			announcementWithProof.Announcement = JAMSNPAuditAnnouncement{
 				HeaderHash: s.Block.Header.Hash(),
 				Tranche:    0,
-				Len:        uint8(len(a0)),
 				Reports:    workReports,
 				Signature:  announcement.Signature,
 			}
-
-			announcementWithProof.Evidence_s0 = types.BandersnatchVrfSignature(s0)
-
+			announcementWithProof.EvidenceTranche0 = Tranche0Evidence(s0)
 			for _, w := range a0 {
 				log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash())
 			}
-
 			go n.broadcast(context.TODO(), announcementWithProof)
-
 		}
 
 		return a0, nil
@@ -486,7 +483,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	start_point := n.jce_timestamp[currJCE]
 	n.jce_timestamp_mutex.Unlock()
 	tranche = auditing_statedb.GetTranche(start_point)
-	an, no_show_a, no_show_len, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, judgment_bucket, tranche)
+	an, no_show_a, _, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, judgment_bucket, tranche)
 	if err != nil {
 		return nil, err
 	}
@@ -509,21 +506,34 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 		announcementWithProof.Announcement = JAMSNPAuditAnnouncement{
 			HeaderHash: s.Block.Header.Hash(),
 			Tranche:    uint8(tranche),
-			Len:        uint8(len(an)),
 			Reports:    workReports,
 			Signature:  announcement.Signature,
 		}
-
-		announcementWithProof.Evidence_sn = make([]types.BandersnatchVrfSignature, len(sn))
+		evidenceSn := make([]TrancheEvidence, len(sn))
 		for i, sig := range sn {
-			announcementWithProof.Evidence_sn[i] = types.BandersnatchVrfSignature(sig)
-		}
-		announcementWithProof.NoShowLength = no_show_len
-		announcementWithProof.Evidence_sn_no_show = no_show_a
-		for _, w := range an {
-			log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "wph", w.WorkReport.Hash())
-		}
+			evidenceSn[i].Signature = types.BandersnatchVrfSignature(sig)
 
+		}
+		for i, wr := range an {
+			no_show_an := no_show_a[wr.WorkReport.Hash()]
+			if no_show_an != nil {
+				for _, no_show := range no_show_an {
+					Reports := make([]JAMSNPAuditAnnouncementReport, 0)
+					for _, w := range no_show.Selected_WorkReport {
+						Reports = append(Reports, JAMSNPAuditAnnouncementReport{
+							CoreIndex:      w.Core,
+							WorkReportHash: w.WorkReportHash,
+						})
+					}
+					evidenceSn[i].NoShows = append(evidenceSn[i].NoShows, JAMSNPNoShow{
+						ValidatorIndex: uint16(no_show.ValidatorIndex),
+						Reports:        Reports,
+						Signature:      no_show.Signature,
+					})
+				}
+			}
+		}
+		announcementWithProof.EvidenceTrancheN = evidenceSn
 		go n.broadcast(context.TODO(), announcementWithProof)
 
 	}
@@ -832,6 +842,7 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 		fmt.Printf("%s [audit:processAnnouncement] auditingDB not found %v \n", n.String(), headerHash)
 		return err
 	}
+
 	index := int(announcement.ValidatorIndex)
 	pubkey := s.GetSafrole().GetCurrValidator(index).Ed25519
 

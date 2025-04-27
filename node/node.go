@@ -1463,10 +1463,19 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 				}
 			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
-				if err := peer.SendAuditAnnouncement(ctx, &a); err != nil {
-					log.Warn(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
-					return
+				tranche := a.Announcement.Tranche
+				if tranche == 0 {
+					if err := peer.SendAuditAnnouncement(ctx, a.Announcement, a.EvidenceTranche0); err != nil {
+						log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
+						return
+					}
+				} else {
+					if err := peer.SendAuditAnnouncement(ctx, a.Announcement, a.EvidenceTrancheN); err != nil {
+						log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
+						return
+					}
 				}
+
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
 				epoch := uint32(0) // Wrong?

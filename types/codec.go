@@ -63,16 +63,29 @@ func E(x uint64) []byte {
 
 // GP v0.3.6 eq(272) E - Integer Decoding: general natural number serialization up to 2^64
 func DecodeE(encoded []byte) (uint64, uint32) {
+	if len(encoded) == 0 {
+		return 0, 0
+	}
+
 	firstByte := encoded[0]
 	if firstByte == 0 {
 		return 0, 1
 	}
 	if firstByte == 255 {
+		if len(encoded) < 9 {
+			// Not enough bytes for DecodeE_l(encoded[1:9])
+			return 0, 0
+		}
 		return DecodeE_l(encoded[1:9]), 9
 	}
+
 	var l uint32
 	for l = 0; l < 8; l++ {
 		if firstByte >= byte(256-powerOfTwo(8-l)) && firstByte < byte(256-powerOfTwo(8-(l+1))) {
+			if len(encoded) < int(1+l) {
+				// Not enough bytes for DecodeE_l(encoded[1:1+l])
+				return 0, 0
+			}
 			x1 := uint64(firstByte) - uint64(256-powerOfTwo(8-l))
 			x2 := DecodeE_l(encoded[1 : 1+l])
 			x := x1*powerOfTwo(8*l) + x2
@@ -80,6 +93,7 @@ func DecodeE(encoded []byte) (uint64, uint32) {
 		}
 	}
 
+	// If no match found, return zero
 	return 0, 0
 }
 
