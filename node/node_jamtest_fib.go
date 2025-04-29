@@ -64,16 +64,16 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("FIB(%d)", fibN),
-			CoreIndex:       0,
+			CoreIndex:       1,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
 
-		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
+		workPackageHashes, err := n1.SubmitAndWaitForWorkPackages(ctx, []*WorkPackageRequest{wpr})
 		if err != nil {
 			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
 		}
-		prevWorkPackageHash = workPackageHash
+		prevWorkPackageHash = workPackageHashes[0]
 		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
 		service_account_byte, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
 		log.Info(module, wpr.Identifier, "result", fmt.Sprintf("%x", service_account_byte))
@@ -180,17 +180,17 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("FIB2(%s)", fibN_string),
-			CoreIndex:       0,
+			CoreIndex:       1,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
 
-		workPackageHash, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
+		workPackageHashes, err := n1.SubmitAndWaitForWorkPackages(ctx, []*WorkPackageRequest{wpr})
 		if err != nil {
 			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
 		}
 
-		prevWorkPackageHash = workPackageHash
+		prevWorkPackageHash = workPackageHashes[0]
 		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
 		for _, key := range keys {
 			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})

@@ -41,10 +41,16 @@ type NodeClient struct {
 	HeaderHash     common.Hash
 	Statistics     types.ValidatorStatistics
 
+	wsurl   string
 	wsConn  *websocket.Conn // websocket connection
 	wsMutex sync.Mutex      // to protect writes
 
 	mu sync.Mutex
+}
+
+type envelope struct {
+	Method string          `json:"method"`
+	Result json.RawMessage `json:"result"`
 }
 
 func NewNodeClient(servers []string, wsUrl string) (*NodeClient, error) {
@@ -56,9 +62,9 @@ func NewNodeClient(servers []string, wsUrl string) (*NodeClient, error) {
 	}
 
 	c := &NodeClient{
-		baseClient: baseclient,
-		client:     nil,
-		//coreIndex:      coreIndex,
+		baseClient:     baseclient,
+		client:         nil,
+		wsurl:          wsUrl,
 		servers:        servers,
 		state:          nil,
 		Preimage:       make(map[common.Hash][]byte),
@@ -89,6 +95,8 @@ func (c *NodeClient) ConnectWebSocket(url string) error {
 }
 
 func (c *NodeClient) listenWebSocket() {
+	reconnectDelay := time.Second
+
 	for {
 		if c.wsConn == nil {
 			return
@@ -96,144 +104,163 @@ func (c *NodeClient) listenWebSocket() {
 		_, msg, err := c.wsConn.ReadMessage()
 		if err != nil {
 			log.Warn(module, "listenWebSocket read error", "err", err)
-			return
+			c.reconnectWebSocket()
+			time.Sleep(reconnectDelay)
+			continue
 		}
 
-		var envelope struct {
-			Method string          `json:"method"`
-			Result json.RawMessage `json:"result"`
-		}
-
+		var envelope envelope
 		if err := json.Unmarshal(msg, &envelope); err != nil {
 			log.Warn(module, "listenWebSocket: Failed to parse WebSocket envelope", "err", err)
 			continue
 		}
-
-		switch envelope.Method {
-		case SubBestBlock:
-			var result struct {
-				BlockHash  string `json:"blockHash"`
-				HeaderHash string `json:"headerHash"`
-			}
-			if err := json.Unmarshal(envelope.Result, &result); err != nil {
-				log.Warn(module, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
-				continue
-			}
-			c.HeaderHash = common.Hex2Hash(result.HeaderHash)
-
-			go c.GetState(result.HeaderHash)
-
-		case SubStatistics:
-			var payload struct {
-				HeaderHash string                    `json:"headerHash"`
-				Statistics types.ValidatorStatistics `json:"statistics"`
-			}
-			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				log.Warn(module, "listenWebSocket: Failed to parse StatisticsUpdate", "err", err)
-				continue
-			}
-			c.Statistics = payload.Statistics
-
-		case SubServiceInfo:
-			var payload struct {
-				ServiceID uint32               `json:"serviceID"`
-				Info      types.ServiceAccount `json:"info"`
-			}
-			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
-				continue
-			}
-			c.ServiceInfo[payload.ServiceID] = payload.Info
-			break
-		case SubServiceValue:
-			var payload struct {
-				ServiceID  uint32      `json:"serviceID"`
-				HeaderHash common.Hash `json:"headerHash"`
-				Slot       uint32      `json:"slot"`
-				Hash       common.Hash `json:"hash"`
-				Key        string      `json:"key"`
-				Value      string      `json:"value"`
-			}
-			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				log.Warn(module, "listenWebSocket: Failed to parse SubServiceValue", "err", err)
-				continue
-			}
-			c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
-			break
-
-		case SubServicePreimage:
-			var payload struct {
-				ServiceID uint32      `json:"serviceID"`
-				Hash      common.Hash `json:"hash"`
-				Preimage  string      `json:"preimage"`
-			}
-			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
-				continue
-			}
-			c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
-			break
-
-		case SubServiceRequest:
-			var payload struct {
-				ServiceID uint32      `json:"serviceID"`
-				Hash      common.Hash `json:"hash"`
-				Timeslots []uint32    `json:"timeslots"`
-			}
-			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				log.Warn(module, "listenWebSocket: Failed to parse SubServiceRequest", "err", err)
-				continue
-			}
-			c.ServiceRequest[payload.Hash] = payload.Timeslots
-			break
-
-		case SubWorkPackage:
-			var payload struct {
-				WorkPackageHash common.Hash `json:"workPackageHash"`
-				Status          string      `json:"status"`
-			}
-			if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-				log.Warn(module, "listenWebSocket: Failed to parse SubWorkPackage", "err", err)
-				continue
-			}
-			c.WorkPackage[payload.WorkPackageHash] = payload.Status
-			break
-		default:
-			log.Warn(module, "listenWebSocket: Failed to parse method", "method", envelope.Method)
-		}
+		c.handleEnvelope(&envelope)
 	}
 }
 
-func (c *NodeClient) Subscribe(method string, params map[string]interface{}) error {
+func (c *NodeClient) reconnectWebSocket() {
 	c.wsMutex.Lock()
 	defer c.wsMutex.Unlock()
 
+	if c.wsConn != nil {
+		c.wsConn.Close()
+		c.wsConn = nil
+	}
+
+	wsUrl := os.Getenv("WS_URL") // save ws URL when connecting
+	if wsUrl == "" {
+		wsUrl = c.wsurl
+	}
+	conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
+	if err != nil {
+		log.Error(module, "reconnectWebSocket: Failed to reconnect", "err", err)
+		return
+	}
+	c.wsConn = conn
+	go c.listenWebSocket()
+}
+
+func (c *NodeClient) handleEnvelope(envelope *envelope) error {
+	switch envelope.Method {
+	case SubBestBlock:
+		var result struct {
+			BlockHash  string `json:"blockHash"`
+			HeaderHash string `json:"headerHash"`
+		}
+		if err := json.Unmarshal(envelope.Result, &result); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
+			return err
+		}
+		c.HeaderHash = common.Hex2Hash(result.HeaderHash)
+
+		go c.GetState(result.HeaderHash)
+
+	case SubStatistics:
+		var payload struct {
+			HeaderHash string                    `json:"headerHash"`
+			Statistics types.ValidatorStatistics `json:"statistics"`
+		}
+		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse StatisticsUpdate", "err", err)
+			return err
+		}
+		c.Statistics = payload.Statistics
+
+	case SubServiceInfo:
+		var payload struct {
+			ServiceID uint32               `json:"serviceID"`
+			Info      types.ServiceAccount `json:"info"`
+		}
+		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
+			return err
+		}
+		c.ServiceInfo[payload.ServiceID] = payload.Info
+		break
+	case SubServiceValue:
+		var payload struct {
+			ServiceID  uint32      `json:"serviceID"`
+			HeaderHash common.Hash `json:"headerHash"`
+			Slot       uint32      `json:"slot"`
+			Hash       common.Hash `json:"hash"`
+			Key        string      `json:"key"`
+			Value      string      `json:"value"`
+		}
+		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse SubServiceValue", "err", err)
+			return err
+		}
+		c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
+		break
+
+	case SubServicePreimage:
+		var payload struct {
+			ServiceID uint32      `json:"serviceID"`
+			Hash      common.Hash `json:"hash"`
+			Preimage  string      `json:"preimage"`
+		}
+		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
+			return err
+		}
+		c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
+		break
+
+	case SubServiceRequest:
+		var payload struct {
+			ServiceID uint32      `json:"serviceID"`
+			Hash      common.Hash `json:"hash"`
+			Timeslots []uint32    `json:"timeslots"`
+		}
+		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse SubServiceRequest", "err", err)
+			return err
+		}
+		c.ServiceRequest[payload.Hash] = payload.Timeslots
+		break
+
+	case SubWorkPackage:
+		var payload struct {
+			WorkPackageHash common.Hash `json:"workPackageHash"`
+			Status          string      `json:"status"`
+		}
+		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse SubWorkPackage", "err", err)
+			return err
+		}
+		c.WorkPackage[payload.WorkPackageHash] = payload.Status
+		break
+	default:
+		log.Warn(module, "listenWebSocket: Failed to parse method", "method", envelope.Method)
+	}
+
+	return nil
+}
+
+func (c *NodeClient) safeWriteWebSocket(msg interface{}) error {
+	c.wsMutex.Lock()
+	defer c.wsMutex.Unlock()
 	if c.wsConn == nil {
 		return fmt.Errorf("WebSocket not connected")
 	}
-	msg := map[string]interface{}{
-		"method": method,
-		"params": params,
-	}
-
 	return c.wsConn.WriteJSON(msg)
 }
 
-func (c *NodeClient) Unsubscribe(method string, params map[string]interface{}) error {
-	c.wsMutex.Lock()
-	defer c.wsMutex.Unlock()
+func (c *NodeClient) Subscribe(method string, params map[string]interface{}) error {
+	return c.safeWriteWebSocket(map[string]interface{}{
+		"method": method,
+		"params": params,
+	})
+}
 
-	if c.wsConn == nil {
-		return fmt.Errorf("WebSocket not connected")
-	}
-	msg := map[string]interface{}{
+func (c *NodeClient) Unsubscribe(method string, params map[string]interface{}) error {
+	return c.safeWriteWebSocket(map[string]interface{}{
 		"method": "unsubscribe",
 		"params": map[string]interface{}{
 			"method": method,
 			"params": params,
 		},
-	}
-	return c.wsConn.WriteJSON(msg)
+	})
 }
 
 func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
@@ -263,6 +290,34 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 	}
 	c.client = client
 	return client
+}
+
+func (c *NodeClient) CallWithRetry(method string, args interface{}, reply interface{}, possibleCores ...uint16) error {
+	const maxRetries = 3
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		client := c.GetClient(possibleCores...)
+		if client == nil {
+			return fmt.Errorf("no available RPC client")
+		}
+		err = client.Call(method, args, reply)
+		if err == nil {
+			return nil
+		}
+		if strings.Contains(err.Error(), "ReadServiceStorage not found") {
+			return nil
+		}
+		if strings.Contains(err.Error(), "connection reset") || strings.Contains(err.Error(), "broken pipe") {
+			log.Warn(module, "BaseClient broken, reconnecting")
+			c.baseClient.Close()
+			c.baseClient, _ = rpc.Dial("tcp", c.servers[0])
+		}
+
+		log.Warn(module, "CallWithRetry", "method", method, "attempt", attempt+1, "err", err)
+		// Reconnect
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("failed after %d retries: %w", maxRetries, err)
 }
 
 func (c *NodeClient) SendCommand(command []string, nodeID int) {
@@ -339,7 +394,7 @@ func (c *NodeClient) GetCoreCoWorkersPeers(coreIdx uint16) (idx []uint16, err er
 
 func (c *NodeClient) GetState(headerHash string) (sdb *statedb.StateSnapshot, err error) {
 	var jsonStr string
-	err = c.GetClient().Call("jam.State", []string{headerHash}, &jsonStr)
+	err = c.CallWithRetry("jam.State", []string{headerHash}, &jsonStr)
 	if err != nil {
 		return
 	}
@@ -356,7 +411,7 @@ func (c *NodeClient) GetState(headerHash string) (sdb *statedb.StateSnapshot, er
 }
 
 func (c *NodeClient) GetCurrJCE() (result uint32, err error) {
-	err = c.GetClient().Call("jam.GetCurrJCE", struct{}{}, &result)
+	err = c.CallWithRetry("jam.GetCurrJCE", struct{}{}, &result)
 	return result, err
 }
 
@@ -398,50 +453,11 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 }
 
 func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *WorkPackageRequest) (workPackageHash common.Hash, err error) {
-	refineContext, err := c.GetRefineContext()
+	wphs, err := c.SubmitAndWaitForWorkPackages(ctx, []*WorkPackageRequest{workPackageReq})
 	if err != nil {
-		log.Warn(module, "SubmitAndWaitForWorkPackage: GetRefineContext", "err", err)
 		return workPackageHash, err
 	}
-	workPackageReq.WorkPackage.RefineContext = refineContext
-	workPackageHash = workPackageReq.WorkPackage.Hash()
-	log.Info(module, "SubmitAndWaitForWorkPackage", "id", workPackageReq.Identifier, "workPackageHash", workPackageHash)
-	errCh := make(chan error, 1)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		c.Subscribe(SubWorkPackage, map[string]interface{}{
-			"hash": fmt.Sprintf("%s", workPackageHash),
-		})
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				errCh <- fmt.Errorf("Timed out waiting for work package %s to be accumulated", workPackageHash)
-				return
-			case <-ticker.C:
-				if status, ok := c.WorkPackage[workPackageHash]; ok {
-					if status == "accumulated" {
-						log.Info(module, "SubmitAndWaitForWorkPackage ACC", "wph", workPackageReq.WorkPackage.Hash())
-						return
-					}
-				}
-			}
-		}
-	}()
-	if err := c.SubmitWorkPackage(workPackageReq); err != nil {
-		// cancel() would go here if you passed a cancellable context
-		wg.Wait()
-		return workPackageHash, fmt.Errorf("SubmitWorkPackage: %w", err)
-	}
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		return workPackageHash, err
-	}
-	return workPackageHash, nil
+	return wphs[0], nil
 }
 
 func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
@@ -548,7 +564,7 @@ func (c *NodeClient) SubmitPreimage(serviceIndex uint32, preimage []byte) (err e
 	req := []string{serviceIndexStr, preimageStr}
 
 	var res string
-	err = c.GetClient().Call("jam.SubmitPreimage", req, &res)
+	err = c.CallWithRetry("jam.SubmitPreimage", req, &res)
 	if err != nil {
 		return err
 	}
@@ -610,7 +626,7 @@ func (c *NodeClient) GetServicePreimage(serviceIndex uint32, codeHash common.Has
 	req := []string{serviceIndexStr, codeHashStr}
 
 	var res string
-	err := c.GetClient().Call("jam.ServicePreimage", req, &res)
+	err := c.CallWithRetry("jam.ServicePreimage", req, &res)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -636,7 +652,7 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_st
 
 	var res string
 	// Make the RPC call to "jam.GetAvailabilityAssignments"
-	err := c.GetClient().Call("jam.GetAvailabilityAssignments", req, &res)
+	err := c.CallWithRetry("jam.GetAvailabilityAssignments", req, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -672,7 +688,7 @@ func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, e
 	req := []string{wphash.Hex(), segmentIndexStr}
 
 	var res string
-	err := c.GetClient().Call("jam.Segment", req, &res)
+	err := c.CallWithRetry("jam.Segment", req, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -694,14 +710,14 @@ func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, e
 
 func (nc *NodeClient) GetBuildVersion() (string, error) {
 	var result string
-	err := nc.GetClient().Call("jam.GetBuildVersion", []string{}, &result)
+	err := nc.CallWithRetry("jam.GetBuildVersion", []string{}, &result)
 	return result, err
 }
 
 // SERVICE
 func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok bool, err error) {
 	var jsonStr string
-	err = c.GetClient().Call("jam.Service", []string{}, &jsonStr)
+	err = c.CallWithRetry("jam.Service", []string{}, &jsonStr)
 	if err != nil {
 		return &types.ServiceAccount{}, false, err
 	}
@@ -822,7 +838,7 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.H
 		storageHash.Hex(),
 	}
 	var res string
-	err := c.GetClient().Call("jam.ServiceValue", req, &res)
+	err := c.CallWithRetry("jam.ServiceValue", req, &res)
 	if err != nil {
 		return nil, false, err
 	}
