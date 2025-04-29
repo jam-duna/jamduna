@@ -36,6 +36,7 @@ run_parallel_jam:
 	@echo "All instances started."
 
 run_localclient_jam: jam_clean run_parallel_jam
+run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
 
 run_single_node:
 	@echo "Starting single node JAM instance..."

@@ -329,6 +329,7 @@ func (n *Node) runBlocksTickets() {
 	}
 }
 
+
 func (n *Node) runReceiveBlock() {
 	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
@@ -337,20 +338,25 @@ func (n *Node) runReceiveBlock() {
 		select {
 		case blockAnnouncement := <-n.blockAnnouncementsCh:
 			// SmallTimeout to processBlockAnnouncement
-			blk_hash := blockAnnouncement.Header.Hash()
-
+			received_blk_hash := blockAnnouncement.Header.Hash()
+			received_blk_slot := blockAnnouncement.Header.Slot
+			if !n.ValidateJCE(received_blk_slot) {
+				// Block announcement is outside of reasonable bound
+				continue
+			}
 			latest_block := n.GetLatestBlockInfo()
 			newinfo := JAMSNP_BlockInfo{
-				HeaderHash: blk_hash,
-				Slot:       blockAnnouncement.Header.Slot,
+				HeaderHash: received_blk_hash,
+				Slot:       received_blk_slot,
 			}
-			if latest_block == nil || blockAnnouncement.Header.Slot > latest_block.Slot {
+			if latest_block == nil || received_blk_slot > latest_block.Slot {
 				n.SetLatestBlockInfo(&newinfo, "latest block")
 			}
+			start := time.Now()
 			blockCtx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
 			blocks, err := n.processBlockAnnouncement(blockCtx, blockAnnouncement)
 			cancel()
-
+			processBlockAnnouncementElapsed := common.ElapsedStr(start)
 			if err != nil {
 				log.Warn(debugBlock, "processBlockAnnouncement failed", "n", n.String(), "err", err)
 				n.SetIsSync(false, "fail to get latest block")
@@ -365,18 +371,27 @@ func (n *Node) runReceiveBlock() {
 						"b", block.Str(),
 						"goroutines", runtime.NumGoroutine())
 				}
+				for _, block := range blocks {
+					log.Debug(debugBlock, "GetBlock",
+						"author", blockAnnouncement.Header.AuthorIndex,
+						"p", common.Str(block.GetParentHeaderHash()),
+						"h", common.Str(block.Header.Hash()),
+						"t", block.Header.Slot,
+					)
+				}
+
 			}
 			extendCtx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-			start := time.Now()
+			start = time.Now()
 			if err := n.extendChain(extendCtx); err != nil {
 				log.Warn(debugBlock, "runReceiveBlock: extendChain failed", "n", n.String(), "err", err)
 			}
-			elapsed := time.Since(start)
+			extendChainElapsed := common.ElapsedStr(start)
 			n.jce_timestamp_mutex.Lock()
 			block_to_apply := time.Since(n.jce_timestamp[blockAnnouncement.Header.Slot])
 			n.jce_timestamp_mutex.Unlock()
-			if elapsed > time.Second {
-				log.Debug(debugBlock, "runReceiveBlock: extendChain time", "n", n.String(), "takes", elapsed, "takes to apply", block_to_apply)
+			if extendChainElapsed > time.Second {
+				log.Debug(debugBlock, "runReceiveBlock: extendChain time", "n", n.String(), "takes", extendChainElapsed, "takes to apply", block_to_apply, "processBlockAnnouncement", processBlockAnnouncementElapsed)
 			}
 			if GrandpaEasy {
 				n.block_tree.EasyFinalization()
@@ -393,6 +408,7 @@ func (n *Node) runReceiveBlock() {
 		}
 	}
 }
+
 
 func (n *Node) runWorkReports() {
 	for {

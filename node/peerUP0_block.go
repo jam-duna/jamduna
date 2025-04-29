@@ -13,6 +13,16 @@ import (
 )
 
 /*
+process UP0 iff announced slot is within reasonable bounds
+currentJCE-UP0LowerBound<= currentJCE <=currentJCE+UP0UpperBound
+6s delay <= now() <= 30s delay
+*/
+const (
+	UP0LowerBound = 2
+	UP0UpperBound = 15
+)
+
+/*
 UP 0 UP 0: Block announcement
 
 Header Hash = [u8; 32]

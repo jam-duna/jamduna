@@ -340,3 +340,7 @@ func BytesToHexStr(v interface{}) interface{} {
 func Elapsed(startTime time.Time) uint32 {
 	return uint32(time.Since(startTime).Microseconds())
 }
+
+func ElapsedStr(startTime time.Time) time.Duration {
+	return time.Since(startTime)
+}

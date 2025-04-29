@@ -166,11 +166,11 @@ func main() {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)
 	}
-	if validatorIndex == 15 {
-		n.SetSendTickets(true)
-	} else {
-		n.SetSendTickets(false)
-	}
+	// if validatorIndex == 15 {
+	// 	n.SetSendTickets(true)
+	// } else {
+	// 	n.SetSendTickets(false)
+	// }
 	n.SetServiceDir("/services")
 	storage, err := n.GetStorage()
 	defer storage.Close()

@@ -1,32 +1,51 @@
+# ignore custom hosts file
 hosts.txt
-/bin
-/leveldb
-/node/data
-/node/logs
-/node/*.pprof
-/node/*.test
-/node/refine_testvector
-coverage.out
-/.vscode
-/cmd/importblocks/**/*.json
-/cmd/importblocks/**/*.bin
-pvm/*.out
+
+# build output / binaries
+/bin/
+/leveldb/
+/pvm/*.out
 cmd/jamweb/jamweb
+cmd/codec-web/codec-web
+
+# node directories & artifacts
+node/data/
+node/logs/
+node/*.pprof
+node/*.test
+node/refine_testvector
+node/*.txt
+node/guarantees/*.json
+
+# coverage
+coverage.out
+
+# IDE settings
+.vscode/
+
+# importblocks inputs / artifacts
+cmd/importblocks/data/
+cmd/importblocks/rawdata/
 cmd/importblocks/fuzzer
-ffi/libbls.a
-ffi/libbandersnatch.a
+cmd/importblocks/**/*.json
+cmd/importblocks/**/*.bin
 cmd/importblocks/data.zip
 cmd/importblocks/fuzzed.zip
 cmd/importblocks/core.zip
-cmd/codec-web/codec-web
-/statedb/testdata
-cmd/importblocks/data/.DS_Store
-/cmd/importblocks/data
-.DS_Store
-node/*.txt
-*.log
-cmd/importblocks/rawdata/
+
+# FFI static libs
+ffi/libbls.a
+ffi/libbandersnatch.a
+
+# state DB test data
+/statedb/testdata/
+
+# service guarantees JSON
 guarantees/*.json
-node/guarantees/*.json
-/refine_testvector
-node/.DS_Store
+
+# general logs
+**/*.log
+
+
+# macOS metadata
+**/.DS_Store

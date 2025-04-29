@@ -2246,6 +2246,28 @@ func (n *Node) runJCEManually() {
 	}
 }
 
+func (n *Node) ValidateJCE(receivedJCE uint32) bool {
+	if n.jceMode != JCEDefault {
+		// Accept any JCE in manual/non-default mode
+		return true
+	}
+	// Only validate JCE in default mode where JCE is determinisitically computed via unixTimestamp
+	realJCE := common.ComputeTimeUnit(types.TimeUnitMode)
+	jceDiff := int32(realJCE) - int32(receivedJCE)
+
+	if jceDiff > 0 && realJCE-receivedJCE >= UP0LowerBound {
+		// receivedJCE is more than UP0LowerBound slot behind. ignore
+		log.Warn(module, "ValidateJCE Failed: received block is unreasonanly far behind", "currJCE", realJCE, "receivedJCE", receivedJCE, "diff", jceDiff)
+		return false
+	}
+	if jceDiff < 0 && receivedJCE-realJCE >= UP0UpperBound {
+		// receivedJCE is more than UP0UpperBound slot ahead. ignore
+		log.Warn(module, "ValidateJCE Failed: received block is unreasonanly far ahead", "currJCE", realJCE, "receivedJCE", receivedJCE, "diff", jceDiff)
+		return false
+	}
+	return true
+}
+
 func (n *Node) GetCurrJCE() uint32 {
 	n.currJCEMutex.Lock()
 	defer n.currJCEMutex.Unlock()
