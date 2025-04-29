@@ -108,8 +108,7 @@ func (pub *JAMSNPJudgmentPublication) FromBytes(data []byte) error {
 }
 
 // SendJudgmentPublication sends a judgment publication to the peer
-// TODO: add variadic arguments
-func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j types.Judgement, kv ...interface{}) error {
+func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j types.Judgement) error {
 	validity := uint8(0)
 	if j.Judge {
 		validity = 1
@@ -122,6 +121,7 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 		WorkReportHash: j.WorkReportHash,
 	}
 	copy(req.Signature[:], j.Signature[:])
+	p.AddKnownHash(j.WorkReportHash)
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
@@ -129,13 +129,6 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 	}
 
 	code := uint8(CE145_JudgmentPublication)
-
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendJudgmentPublication", p.node.store.NodeID))
-		defer span.End()
-	}
-
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		return fmt.Errorf("openStream[CE145_JudgmentPublication]: %w", err)
@@ -164,6 +157,9 @@ func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, ms
 		Validator:      jp.ValidatorIndex,
 	}
 	copy(judgement.Signature[:], jp.Signature[:])
+
+	n.peersInfo[peerID].AddKnownHash(judgement.WorkReportHash)
+	go n.broadcast(ctx, judgement)
 
 	select {
 	case n.judgementsCh <- judgement:

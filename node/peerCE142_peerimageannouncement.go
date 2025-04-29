@@ -53,12 +53,7 @@ func (n *NodeContent) BroadcastPreimageAnnouncement(serviceID uint32, preimageHa
 
 func (p *Peer) SendPreimageAnnouncement(ctx context.Context, pa *types.PreimageAnnouncement) error {
 	code := uint8(CE142_PreimageAnnouncement)
-
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendPreimageAnnouncement", p.node.store.NodeID))
-		defer span.End()
-	}
+	p.AddKnownHash(pa.PreimageHash)
 
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
@@ -87,11 +82,9 @@ func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, m
 		return fmt.Errorf("onPreimageAnnouncement: decode failed: %w", err)
 	}
 
-	preimageAnnouncement.ValidatorIndex = peerID
-	validatorIndex := preimageAnnouncement.ValidatorIndex
-	p, ok := n.peersInfo[validatorIndex]
+	p, ok := n.peersInfo[peerID]
 	if !ok {
-		return fmt.Errorf("invalid validator index %d", validatorIndex)
+		return fmt.Errorf("invalid validator index %d", peerID)
 	}
 
 	serviceIndex := preimageAnnouncement.ServiceIndex
@@ -109,6 +102,10 @@ func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, m
 		return err
 	}
 	log.Trace(module, "BroadcastPreimageAnnouncement:AddPreimageToPool", "n", n.String(), "serviceID", serviceIndex, "len", len(preimage), "h", common.Blake2Hash(preimage))
+	// received a preimage announcement, mark it as known
+	n.peersInfo[peerID].AddKnownHash(preimageAnnouncement.PreimageHash)
+	// broadcast the preimage announcement to other peers
+	go n.broadcast(ctx, preimageAnnouncement)
 
 	return nil
 }

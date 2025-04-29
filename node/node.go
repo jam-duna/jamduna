@@ -954,12 +954,14 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 		case <-ctx.Done():
 			return workPackageHashes, ctx.Err()
 		case <-ticker.C:
-			history := n.statedb.JamState.AccumulationHistory[types.EpochLength-1]
-			for _, hash := range history.WorkPackageHash {
-				if seen, exists := accumulated[hash]; exists && !seen {
-					accumulated[hash] = true
-					accumulatedCount++
-					log.Info(module, "Work package accumulated", "hash", hash.Hex(), "count", accumulatedCount)
+			for j := types.EpochLength - 1; j > 0; j-- {
+				history := n.statedb.JamState.AccumulationHistory[j]
+				for _, hash := range history.WorkPackageHash {
+					if seen, exists := accumulated[hash]; exists && !seen {
+						accumulated[hash] = true
+						accumulatedCount++
+						log.Info(module, "Work package accumulated", "hash", hash.Hex(), "count", accumulatedCount)
+					}
 				}
 			}
 		}
@@ -1389,13 +1391,26 @@ func (n *Node) handleConnection(conn quic.Connection) {
 	}
 }
 
+func isGridNeighbor(id, id2 uint16) bool {
+	W := uint16(3)
+	if types.TotalValidators > 6 {
+		if types.TotalValidators == 1023 {
+			W = uint16(31)
+		}
+	}
+	if id/W == id2/W || id%W == id2%W {
+		return true
+	}
+	return false
+}
+
 // broadcast sends the object to all peers
 // TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
 func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 	objType := reflect.TypeOf(obj)
 
 	for id, p := range n.peersInfo {
-		if id > types.TotalValidators {
+		if id >= types.TotalValidators {
 			if objType == reflect.TypeOf(types.Block{}) {
 				b := obj.(types.Block)
 				go func() { // review
@@ -1457,6 +1472,12 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 				}
 			case reflect.TypeOf(types.Block{}):
 				b := obj.(types.Block)
+				h := b.Header.Hash()
+				if p.IsKnownHash(h) || !isGridNeighbor(id, n.id) {
+					return
+				}
+				p.AddKnownHash(h)
+				//log.Info(module, "broadcast-BlockAnnouncement", "h", h.String(), "n", n.String(), "peerID", peerID)
 				up0_stream, err := peer.GetOrInitBlockAnnouncementStream(context.Background())
 				if err != nil {
 					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.PeerID, "err", err)
@@ -1502,14 +1523,22 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
-				epoch := uint32(0) // Wrong?
-				// TODO: add variadic args to SendJudgmentPublication (time of audit)
+				if !isGridNeighbor(id, n.id) || p.IsKnownHash(j.WorkReportHash) {
+					return
+				}
+				p.AddKnownHash(j.WorkReportHash)
+				epoch := uint32(0) // Wrong!
 				if err := peer.SendJudgmentPublication(ctx, epoch, j); err != nil {
 					log.Warn(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.PreimageAnnouncement{}):
 				announcement := obj.(types.PreimageAnnouncement)
+				h := announcement.PreimageHash
+				if !isGridNeighbor(id, n.id) || p.IsKnownHash(h) {
+					return
+				}
+				//log.Trace(module, "broadcast-PreimageAnnouncement", "h", h.String(), "n", n.String(), "peerID", peerID)
 				if err := peer.SendPreimageAnnouncement(ctx, &announcement); err != nil {
 					log.Warn(debugStream, "SendPreimageAnnouncement", "n", n.String(), "err", err)
 					return

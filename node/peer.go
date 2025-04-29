@@ -52,6 +52,8 @@ type Peer struct {
 	PeerAddr  string          `json:"peer_addr"`
 	Validator types.Validator `json:"validator"`
 
+	knownHashes []common.Hash
+
 	// these are established early on but may change
 	connectionMu sync.Mutex
 	conn         quic.Connection
@@ -75,12 +77,29 @@ func (p *Peer) Clone() *Peer {
 
 func NewPeer(n *Node, validatorIndex uint16, validator types.Validator, peerAddr string) (p *Peer) {
 	p = &Peer{
-		node:      &n.NodeContent,
-		PeerAddr:  peerAddr,
-		Validator: validator,
-		PeerID:    validatorIndex,
+		node:        &n.NodeContent,
+		PeerAddr:    peerAddr,
+		Validator:   validator,
+		PeerID:      validatorIndex,
+		knownHashes: make([]common.Hash, 0),
 	}
 	return p
+}
+
+func (p *Peer) AddKnownHash(h common.Hash) {
+	p.knownHashes = append(p.knownHashes, h)
+	if len(p.knownHashes) > 128 {
+		p.knownHashes = p.knownHashes[1:]
+	}
+}
+
+func (p *Peer) IsKnownHash(h common.Hash) bool {
+	for _, k := range p.knownHashes {
+		if k == h {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Peer) String() string {

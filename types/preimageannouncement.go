@@ -9,10 +9,9 @@ import (
 )
 
 type PreimageAnnouncement struct {
-	ValidatorIndex uint16      `json:"validator_index"`
-	ServiceIndex   uint32      `json:"service"`
-	PreimageHash   common.Hash `json:"h"`
-	PreimageLen    uint32      `json:"z"`
+	ServiceIndex uint32      `json:"service"`
+	PreimageHash common.Hash `json:"h"`
+	PreimageLen  uint32      `json:"z"`
 }
 
 func (req *PreimageAnnouncement) String() string {

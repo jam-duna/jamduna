@@ -509,10 +509,32 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	states := time.NewTicker(6 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return workPackageHashes, ctx.Err()
+		case <-states.C:
+			state, err := c.GetState("latest")
+			if err == nil {
+				numacc := 0
+				for _, workPackageHash := range workPackageHashes {
+					for _, ah := range state.AccumulationHistory {
+						for _, h := range ah.WorkPackageHash {
+							if workPackageHash == h {
+								log.Info(module, fmt.Sprintf("Work package %s accumulated", workPackageHash.Hex()))
+								numacc++
+							}
+						}
+					}
+				}
+				if numacc == len(workPackageHashes) {
+					log.Info(module, "All work packages accumulated")
+					return workPackageHashes, nil
+				}
+			}
 		case <-ticker.C:
 			numacc := 0
 			for _, workPackageHash := range workPackageHashes {

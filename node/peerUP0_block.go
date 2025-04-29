@@ -260,66 +260,80 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 		// successful
 	}
 	// ctx, cancel := context.WithCancel(p.node.ctx)
-	go n.runBlockAnnouncement(stream, p.PeerID) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
+	go n.nodeSelf.runBlockAnnouncement(stream, p.PeerID) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
 	return stream, nil
 }
 
-// this function is for the accepting side of the block announcement
-func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16) (err error) {
-	//don't close the stream here
-	var newHandshake JAMSNP_Handshake
-	// Deserialize byte array back into the struct
-	var wg sync.WaitGroup
-	var errChan = make(chan error, 2)
+// onBlockAnnouncement handles the incoming handshake (in msg) and replies in parallel,
+// then registers the stream and spins up runBlockAnnouncement.
+func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16) error {
 	code := uint8(UP0_BlockAnnouncement)
-	// send and receive handshake parallelly
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err = newHandshake.FromBytes(msg)
-		if err != nil {
-			errChan <- err
-			return
-		}
-	}()
-	// send the handshake back
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		handshake := n.GetLatestHandshake()
-		handshake_bytes := handshake.ToBytes()
-		if handshake_bytes == nil {
-			err = fmt.Errorf("handshake_bytes is nil")
-			errChan <- err
-			return
-		}
-		err = sendQuicBytes(context.TODO(), stream, handshake_bytes, n.id, code)
-		if err != nil {
-			errChan <- err
-			return
-		}
-	}()
-	wg.Wait()
-	// check if there is any error
-	select {
-	case err = <-errChan:
-		return fmt.Errorf("block announcement handshake err: %v", err)
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
 
-	default:
+	// (1) Decode peer's handshake
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var peerHS JAMSNP_Handshake
+		if decodeErr := peerHS.FromBytes(msg); decodeErr != nil {
+			errCh <- fmt.Errorf("decode handshake failed: %w", decodeErr)
+			return
+		}
+		//log.Info(module, "BlockAnnouncement received", "n", n.id, "peerID", peerID, "h", peerHS.FinalizedBlock.HeaderHash)
+
+		// If we're not synced, update latest info from their leaves
+		if !n.GetIsSync() {
+			if latest := n.GetLatestBlockInfo(); latest != nil {
+				for _, leaf := range peerHS.Leaves {
+					if leaf.Slot > latest.Slot {
+						n.SetLatestBlockInfo(&leaf, "onBlockAnnouncement")
+					}
+				}
+			}
+		}
+	}()
+
+	// (2) Send our handshake back
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		hs := n.GetLatestHandshake()
+		data := hs.ToBytes()
+		if data == nil {
+			errCh <- fmt.Errorf("handshake bytes nil")
+			return
+		}
+		if sendErr := sendQuicBytes(context.Background(), stream, data, n.id, code); sendErr != nil {
+			errCh <- fmt.Errorf("send handshake failed: %w", sendErr)
+		}
+	}()
+
+	// wait for both send & decode (or first error)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case e := <-errCh:
+		return fmt.Errorf("block announcement handshake err: %v", e)
+	case <-done:
+		// both succeeded
 	}
 
+	// register and start the persistent loop
 	n.UP0_streamMu.Lock()
 	n.UP0_stream[peerID] = stream
 	n.UP0_streamMu.Unlock()
 
-	// TODO do something with the received handshake
 	go n.runBlockAnnouncement(stream, peerID)
 	return nil
 }
 
-// this function will read the block announcement from the stream persistently
-// it does a non-blocking send into blockAnnouncementsCh and warns when the channel is full
-func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
+// runBlockAnnouncement loops reading announcements, non-blocking into the channel.
+func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 	if stream == nil {
 		log.Warn(module, "runBlockAnnouncement", "peerID", peerID, "err", "nil stream")
 		return
@@ -330,36 +344,40 @@ func (n *NodeContent) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		n.UP0_streamMu.Unlock()
 		log.Trace(module, "runBlockAnnouncement cleanup", "peerID", peerID)
 	}()
+
 	code := uint8(UP0_BlockAnnouncement)
 	ctx := context.Background()
-	for {
-		select {
-		//		case <-ctx.Done():
-		//log.Info(module, "runBlockAnnouncement stopped", "peerID", peerID, "reason", "context cancelled")
-		//return
-		default:
-			req, err := receiveQuicBytes(ctx, stream, n.id, code)
-			if err != nil {
-				log.Trace(module, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
-				return
-			}
 
-			var blockannounce JAMSNP_BlockAnnounce
-			if err := blockannounce.FromBytes(req); err != nil {
-				log.Trace(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
-				return
-			}
-			if _, ok := n.block_tree.GetBlockNode(blockannounce.Header.Hash()); ok {
-				continue
-			}
-			select {
-			case n.blockAnnouncementsCh <- blockannounce:
-				n.ba_checker.Set(blockannounce.Header.Hash(), uint16(peerID))
-				// success!
-			default:
-				log.Warn(module, "runBlockAnnouncement: channel full", "peerID", peerID, "headerHash", blockannounce.Header.Hash().String_short())
-				// you could also drop oldest, backpressure, or track drops here
-			}
+	for {
+		raw, err := receiveQuicBytes(ctx, stream, n.id, code)
+		if err != nil {
+			log.Trace(module, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
+			return
+		}
+
+		var ann JAMSNP_BlockAnnounce
+		if err := ann.FromBytes(raw); err != nil {
+			log.Trace(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
+			return
+		}
+
+		h := ann.Header.Hash()
+		//log.Info(module, "runBlockAnnouncement received", "peerID", peerID, "slot", ann.Header.Slot, "h", h)
+		n.peersInfo[peerID].AddKnownHash(h)
+		go n.broadcast(ctx, ann)
+
+		if _, exists := n.block_tree.GetBlockNode(h); exists {
+			continue
+		}
+
+		select {
+		case n.blockAnnouncementsCh <- ann:
+			n.ba_checker.Set(h, peerID)
+		default:
+			log.Warn(module, "runBlockAnnouncement: channel full",
+				"peerID", peerID,
+				"headerHash", h.String_short(),
+			)
 		}
 	}
 }
