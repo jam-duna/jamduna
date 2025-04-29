@@ -8,6 +8,7 @@ const (
 	Network                     = "2xlarge"
 	TotalValidators             = 342 // V: The total number of validators.
 	TotalCores                  = 114 // C: The total number of cores.
+	RecoveryThreshold           = 114 // R: The recovery threshold, which is the number of validators required to recover from a failure.
 	TicketEntriesPerValidator   = 2   // N: The number of ticket entries per validator.
 	EpochLength                 = 300 // E: The length of an epoch in timeslots.
 	TicketSubmissionEndSlot     = 250 // Y: The number of slots into an epoch at which ticket-submission ends.

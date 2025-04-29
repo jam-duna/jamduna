@@ -22,6 +22,7 @@ const (
 	EntropySize               = 4
 	IETFSignatureLen          = 96
 	VRFOutputLen              = 32
+	GFPointsPerPage           = 2052
 )
 
 // loaded via tags
@@ -40,6 +41,7 @@ const (
 	ECPieceSize                 = configs.ECPieceSize
 	NumECPiecesPerSegment       = configs.NumECPiecesPerSegment
 	PreimageExpiryPeriod        = configs.PreimageExpiryPeriod
+	RecoveryThreshold           = configs.RecoveryThreshold
 )
 
 const (

@@ -46,6 +46,9 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 // fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA.
 func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	spec := g.Report.AvailabilitySpec
+	coredIdx := g.Report.CoreIndex
+	vIdx := n.id
+	shardIdx := ComputeShardIndex(coredIdx, vIdx) // shardIdx != validatorIdx
 
 	const maxRetries = 3
 	var bundleShard []byte
@@ -56,39 +59,42 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		ramdamguarantor := rand0.Intn(len(g.Signatures))
 		guarantor = g.Signatures[ramdamguarantor].ValidatorIndex
-		bundleShard, exportedShards, encodedPath, err = n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, n.id)
+
+		bundleShard, exportedShards, encodedPath, err = n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, shardIdx)
 		if err == nil {
 			break
 		}
 		log.Warn(debugDA, "assureData: SendFullShardRequest attempt failed",
+			"coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx,
 			"attempt", attempt, "n", n.String(), "erasureRoot", spec.ErasureRoot,
 			"guarantor", guarantor, "err", err)
 	}
 
 	if err != nil {
 		log.Error(debugDA, "assureData: SendFullShardRequest failed after retries",
+			"coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx,
 			"n", n.String(), "erasureRoot", spec.ErasureRoot,
 			"guarantor", guarantor, "err", err)
 		return fmt.Errorf("SendFullShardRequest (after retries): %w", err)
 	}
 
 	// CRITICAL: verify justification matches the erasure root before storage
-	verified, err := VerifyFullShard(spec.ErasureRoot, n.id, bundleShard, exportedShards, encodedPath)
+	verified, err := VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
 	if err != nil {
-		log.Error(debugDA, "assureData: VerifyFullShard error", "n", n.String(), "err", err)
+		log.Error(debugDA, "assureData: VerifyFullShard error", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("VerifyFullShard: %w", err)
 	}
 	if !verified {
-		log.Error(debugDA, "assureData: VerifyFullShard failed", "n", n.String(), "verified", false)
+		log.Error(debugDA, "assureData: VerifyFullShard failed", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "verified", false)
 		return fmt.Errorf("VerifyFullShard: failed verification")
 	}
 
-	if err := n.StoreFullShard_Assurer(spec.ErasureRoot, n.id, bundleShard, exportedShards, encodedPath); err != nil {
+	if err := n.StoreFullShard_Assurer(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath); err != nil {
 		return fmt.Errorf("StoreFullShard_Assurer: %w", err)
 	}
 
 	if err := n.StoreWorkReport(g.Report); err != nil {
-		log.Error(debugDA, "assureData: StoreWorkReport failed", "n", n.String(), "err", err)
+		log.Error(debugDA, "assureData: StoreWorkReport failed", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("StoreWorkReport: %w", err)
 	}
 

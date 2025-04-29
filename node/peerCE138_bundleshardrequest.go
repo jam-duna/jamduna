@@ -63,7 +63,7 @@ func (p *Peer) SendBundleShardRequest(
 	}
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
-		log.Trace(debugDA, "SendBundleShardRequest - sending error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
+		log.Info(debugDA, "SendBundleShardRequest - sending error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		return nil, common.Hash{}, nil, fmt.Errorf("sendQuicBytes[CE138]: %w", err)
 	}
 

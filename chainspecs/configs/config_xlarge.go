@@ -8,6 +8,7 @@ const (
 	Network                     = "xlarge"
 	TotalValidators             = 108 // V: The total number of validators.
 	TotalCores                  = 36  // C: The total number of cores.
+	RecoveryThreshold           = 36
 	TicketEntriesPerValidator   = 3   // N: The number of ticket entries per validator.
 	EpochLength                 = 150 // E: The length of an epoch in timeslots.
 	TicketSubmissionEndSlot     = 125 // Y: The number of slots into an epoch at which ticket-submission ends.

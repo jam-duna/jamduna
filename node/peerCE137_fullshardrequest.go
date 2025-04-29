@@ -125,7 +125,6 @@ func (p *Peer) SendFullShardRequest(
 }
 
 // guarantor receives CE137 request from assurer by erasureRoot and shard index
-// guarantor receives CE137 request from assurer by erasureRoot and shard index
 func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
 

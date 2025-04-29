@@ -1574,8 +1574,10 @@ func (n *Node) extendChain(ctx context.Context) error {
 	if n.block_tree == nil {
 		return nil
 	}
-
+	start := time.Now()
 	n.statedbMutex.Lock()
+	mutexElapsed := common.ElapsedStr(start)
+
 	latestStateDB := n.statedb
 	if latestStateDB.Block == nil {
 		n.statedbMutex.Unlock()
@@ -1585,6 +1587,7 @@ func (n *Node) extendChain(ctx context.Context) error {
 	// if current block tree is forked, we need to apply from the common ancestor
 	currNode, ok := n.block_tree.GetBlockNode(currentHash)
 	if len(n.block_tree.GetLeafs()) > 1 {
+
 		leafs := n.block_tree.GetLeafs()
 		leafs_slice := make([]*types.BT_Node, 0)
 		for _, leaf := range leafs {
@@ -1597,6 +1600,7 @@ func (n *Node) extendChain(ctx context.Context) error {
 			currNode = n.block_tree.GetCommonAncestor(leafs_slice[0], leafs_slice[1])
 		}
 	}
+	blocktreeElapsed := common.ElapsedStr(start)
 	n.statedbMutex.Unlock()
 
 	if !ok {
@@ -1622,6 +1626,12 @@ func (n *Node) extendChain(ctx context.Context) error {
 		log.Error(module, "SyncState", "applyChildren", err, "header", header.Hash().String_short(), "slot", header.Slot, "author", header.AuthorIndex)
 		return err
 	}
+	applyBlockElapsed := common.ElapsedStr(start)
+	log.Debug(debugBlock, "extendChain internal elapsed", "n", n.String(),
+		"mutexElapsed", mutexElapsed,
+		"blocktreeElapsed", blocktreeElapsed,
+		"applyBlockElapsed", applyBlockElapsed,
+	)
 	return nil
 }
 
@@ -1850,25 +1860,26 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 	for _, p := range proofpages {
 		allsegmentindices = append(allsegmentindices, si.WorkReport.AvailabilitySpec.ExportedSegmentLength+p)
 	}
-	for i := range types.TotalValidators {
-		requests_original[i] = CE139_request{
+	for validatorIdx := range types.TotalValidators {
+		requests_original[validatorIdx] = CE139_request{
 			ErasureRoot:    si.WorkReport.AvailabilitySpec.ErasureRoot,
 			SegmentIndices: allsegmentindices,
-			ShardIndex:     uint16(i),
+			CoreIndex:      si.WorkReport.CoreIndex,
+			ShardIndex:     ComputeShardIndex(si.WorkReport.CoreIndex, uint16(validatorIdx)),
 		}
 	}
 	requests := make(map[uint16]interface{})
-	for i, req := range requests_original {
-		requests[uint16(i)] = req
+	for validatorIdx, req := range requests_original {
+		requests[uint16(validatorIdx)] = req
 	}
-	responses, err := n.makeRequests(requests, types.ECPieceSize/2, SmallTimeout, LargeTimeout)
+	responses, err := n.makeRequests(requests, types.RecoveryThreshold, SmallTimeout, LargeTimeout)
 	if err != nil {
 		fmt.Printf("Error in fetching import segments By ErasureRoot: %v\n", err)
 		return segments, justifications, err
 	}
 
-	shards := make([][]byte, types.TotalCores)
-	indexes := make([]uint32, types.TotalCores)
+	shards := make([][]byte, types.RecoveryThreshold)
+	indexes := make([]uint32, types.RecoveryThreshold)
 	numShards := 0
 	for _, resp := range responses {
 		daResp, ok := resp.(CE139_response)
@@ -1946,31 +1957,33 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	erasureRoot common.Hash,
 	blength uint32,
 	segmentRootLookup types.SegmentRootLookup,
+	coreIndex uint16,
 ) (types.WorkPackageBundle, error) {
 	// Prepare requests to validators
 	requestsOriginal := make([]CE138_request, types.TotalValidators)
-	for i := range requestsOriginal {
-		requestsOriginal[i] = CE138_request{
+	for validatorIdx := range requestsOriginal {
+		requestsOriginal[validatorIdx] = CE138_request{
 			ErasureRoot: erasureRoot,
-			ShardIndex:  uint16(i),
+			CoreIndex:   coreIndex,
+			ShardIndex:  ComputeShardIndex(coreIndex, uint16(validatorIdx)),
 		}
 	}
 
 	requests := make(map[uint16]interface{}, len(requestsOriginal))
-	for i, req := range requestsOriginal {
-		requests[uint16(i)] = req
+	for validatorIdx, req := range requestsOriginal {
+		requests[uint16(validatorIdx)] = req
 	}
 
 	// Fetch shard responses
-	responses, err := n.makeRequests(requests, types.ECPieceSize/2, SmallTimeout, LargeTimeout)
+	responses, err := n.makeRequests(requests, types.RecoveryThreshold, SmallTimeout, LargeTimeout)
 	if err != nil {
 		log.Error(module, "reconstructPackageBundleSegments: makeRequests failed", "err", err)
 		return types.WorkPackageBundle{}, fmt.Errorf("makeRequests failed: %w", err)
 	}
 
 	// Collect valid bundle shards
-	bundleShards := make([][]byte, types.TotalCores)
-	indexes := make([]uint32, types.TotalCores)
+	bundleShards := make([][]byte, types.RecoveryThreshold)
+	indexes := make([]uint32, types.RecoveryThreshold)
 	numShards := 0
 	log.Debug(debugCE138, "reconstructPackageBundleSegments: numShards", "callerIdx", n.id, "numShards", numShards)
 	for _, resp := range responses {
@@ -1980,7 +1993,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 			continue
 		}
 
-		if numShards >= types.TotalCores {
+		if numShards >= types.RecoveryThreshold {
 			break
 		}
 
@@ -2006,7 +2019,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	}
 
 	// Check if enough shards were collected
-	if numShards < types.TotalCores {
+	if numShards < types.RecoveryThreshold {
 		log.Error(module, "reconstructPackageBundleSegments: insufficient valid shards", "have", numShards, "need", types.TotalCores)
 		return types.WorkPackageBundle{}, fmt.Errorf("insufficient valid shards: have %d, need %d", numShards, types.TotalCores)
 	}

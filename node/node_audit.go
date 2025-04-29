@@ -219,7 +219,7 @@ func (n *Node) runAudit() {
 					log.Trace(debugAudit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
-					log.Info(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
+					log.Debug(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 
 					newBlock := audit_statedb.Block.Copy()
 					if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
@@ -642,10 +642,10 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	n.workReportsMutex.Unlock()
 	spec := workReport.AvailabilitySpec
 	workPackageHash := spec.WorkPackageHash
-
+	coreIndex := workReport.CoreIndex
 	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
-	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup)
+	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex)
 	if err != nil {
 		log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
 		return

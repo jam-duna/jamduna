@@ -4,9 +4,11 @@
 package configs
 
 const (
-	Network                     = "small"
-	TotalValidators             = 12 // V: The total number of validators.
-	TotalCores                  = 4  // C: The total number of cores.
+	Network           = "small"
+	TotalValidators   = 12 // V: The total number of validators.
+	TotalCores        = 4  // C: The total number of cores.
+	RecoveryThreshold = 4
+
 	TicketEntriesPerValidator   = 3  // N: The number of ticket entries per validator.
 	EpochLength                 = 12 // E: The length of an epoch in timeslots.
 	TicketSubmissionEndSlot     = 10 // Y: The number of slots into an epoch at which ticket-submission ends.

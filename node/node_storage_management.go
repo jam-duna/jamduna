@@ -306,6 +306,18 @@ func SplitCompletExportToSegmentShards(concatenatedShards []byte) (segmentShards
 	return segmentShards, proofShards
 }
 
+func ComputeShardIndex(coreIdx uint16, validatorIdx uint16) (shardIndex uint16) {
+	/*
+	   i = (cR+v) mod V
+	   i: shardIdx
+	   v: validatorIdx
+	   c: coreIdx
+	   R: RecoveryThreshold
+	   V: TotalValidators
+	*/
+	return (coreIdx*types.RecoveryThreshold + validatorIdx) % types.TotalValidators
+}
+
 // Verification: CE137_FullShard
 func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, exported_segments_and_proofpageShards []byte, encodedPath []byte) (bool, error) {
 	bClub := common.Blake2Hash(bundleShard)

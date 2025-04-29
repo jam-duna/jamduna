@@ -18,6 +18,7 @@ import (
 type CE139_request struct {
 	ErasureRoot    common.Hash
 	SegmentIndices []uint16
+	CoreIndex      uint16
 	ShardIndex     uint16
 }
 
@@ -30,6 +31,7 @@ type CE139_response struct {
 
 type CE138_request struct {
 	ErasureRoot common.Hash
+	CoreIndex   uint16
 	ShardIndex  uint16
 }
 
@@ -329,7 +331,6 @@ func (n *Node) runBlocksTickets() {
 	}
 }
 
-
 func (n *Node) runReceiveBlock() {
 	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
@@ -408,7 +409,6 @@ func (n *Node) runReceiveBlock() {
 		}
 	}
 }
-
 
 func (n *Node) runWorkReports() {
 	for {
@@ -516,9 +516,12 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 	case "CE138_request":
 		req := obj.(CE138_request)
 		erasureRoot := req.ErasureRoot
+		shardIdx_self := ComputeShardIndex(req.CoreIndex, n.id)
+
+		log.Trace(debugDA, "CE138_request: abc", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
 
 		// handle selfRequesting case
-		if peerID == uint16(n.id) {
+		if req.ShardIndex == shardIdx_self {
 			log.Trace(debugDA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
 			bundleShard, sClub, encodedPath, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 			if err != nil {
@@ -526,7 +529,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 				return resp, err
 			}
 			self_response := CE138_response{
-				ShardIndex:    n.id,
+				ShardIndex:    req.ShardIndex,
 				BundleShard:   bundleShard,
 				SClub:         sClub,
 				Justification: encodedPath,
@@ -535,7 +538,8 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			return self_response, nil
 		}
 
-		peer, err := n.getPeerByIndex(peerID)
+		//peerID = req.ValidatorIndex
+		peer, err := n.getPeerByIndex(peerID) // TODO: what is this peerID??
 		if err != nil {
 			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on getPeerByIndex", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
@@ -543,7 +547,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 		log.Trace(debugDA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
 
 		startTime := time.Now()
-		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, peerID)
+		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, req.ShardIndex)
 		rtt := time.Since(startTime)
 		log.Debug(debugDA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "peerID", peerID, "rtt", rtt)
 		if err != nil {
@@ -561,16 +565,17 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 
 	case "CE139_request":
 		req := obj.(CE139_request)
-		peerID = req.ShardIndex
 		erasureRoot := req.ErasureRoot
 		segmentIndices := req.SegmentIndices
-		peer, err := n.getPeerByIndex(peerID)
+
+		log.Trace(debugDA, "CE139_request", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
+		peer, err := n.getPeerByIndex(peerID) // check
 		if err != nil {
 			return resp, err
 		}
 		// handle selfRequesting case
-		if req.ShardIndex == uint16(n.id) {
-			selected_segmentshards, selected_justifications, ok, err := n.GetSegmentShard_Assurer(erasureRoot, peerID, segmentIndices, false)
+		if req.ShardIndex == ComputeShardIndex(req.CoreIndex, n.id) {
+			selected_segmentshards, selected_justifications, ok, err := n.GetSegmentShard_Assurer(erasureRoot, req.ShardIndex, segmentIndices, false)
 			if err != nil {
 				return resp, err
 			}
@@ -580,19 +585,19 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			combined_segmentShards := bytes.Join(selected_segmentshards, nil)
 			self_response := CE139_response{
 				ErasureRoot:           erasureRoot,
-				ShardIndex:            n.id,
+				ShardIndex:            req.ShardIndex, // CHECK
 				SegmentShards:         combined_segmentShards,
 				SegmentJustifications: selected_justifications,
 			}
 			return self_response, nil
 		}
-		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(ctx, erasureRoot, peerID, segmentIndices, false)
+		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(ctx, erasureRoot, req.ShardIndex, segmentIndices, false)
 		if err != nil {
 			return resp, err
 		}
 		response := CE139_response{
 			ErasureRoot:           erasureRoot,
-			ShardIndex:            peerID,
+			ShardIndex:            req.ShardIndex,
 			SegmentShards:         segmentShards,
 			SegmentJustifications: selected_justifications,
 		}

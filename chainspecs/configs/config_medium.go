@@ -8,6 +8,7 @@ const (
 	Network                     = "medium"
 	TotalValidators             = 18 // V: The total number of validators.
 	TotalCores                  = 6  // C: The total number of cores.
+	RecoveryThreshold           = 6
 	TicketEntriesPerValidator   = 6  // N: The number of ticket entries per validator.
 	EpochLength                 = 60 // E: The length of an epoch in timeslots.
 	TicketSubmissionEndSlot     = 50 // Y: The number of slots into an epoch at which ticket-submission ends.

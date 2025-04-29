@@ -94,7 +94,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if safrole_debug {
 		err = VerifySafroleSTF(sf, &s2, blk)
 		if err != nil {
-			fmt.Sprintf("VerifySafroleSTF %v\n", err)
+			return s, fmt.Errorf("VerifySafroleSTF %v\n", err)
 		}
 	}
 
