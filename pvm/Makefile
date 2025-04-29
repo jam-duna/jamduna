@@ -87,3 +87,9 @@ pvm:
 	@clear
 	@echo "Running PVM tests..."
 	@go test -run TestPVM -tags network_test,$(TAGS)
+
+# Run PVM test without coverage
+revm:
+	@clear
+	@echo "Running Revm tests..."
+	@go test -timeout=1h -run TestRevm -tags network_test,$(TAGS)

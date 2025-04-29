@@ -1429,45 +1429,119 @@ func (vm *VM) hostExport() {
 }
 
 func (vm *VM) hostManifest() {
-	var manifest []uint32
-	for pageIndex, page := range vm.Ram.Pages {
-		m := uint32(0)
-		if page.Access.Accessed && page.Access.Dirty {
-			m = uint32(pageIndex) | 0xC0000000
-		} else if page.Access.Accessed {
-			// it must be imported
-			m = uint32(pageIndex) | 0x80000000
-		} else if page.Access.Dirty {
-			// it must be exported
-			m = uint32(pageIndex) | 0x40000000
+	n, _ := vm.ReadRegister(7)
+	mode, _ := vm.ReadRegister(8)
+	s, _ := vm.ReadRegister(9)
+	z, _ := vm.ReadRegister(10)
+	page_id, _ := vm.ReadRegister(11)
+
+	m, ok := vm.RefineM_map[uint32(n)]
+	if !ok {
+		vm.WriteRegister(7, WHO)
+		vm.HostResultCode = WHO
+		return
+	}
+
+	if m.U.Pages == nil {
+		vm.WriteRegister(7, NONE)
+		vm.HostResultCode = NONE
+		return
+	}
+
+	switch mode {
+	case 0:
+		// reset manifest
+		for _, page := range m.U.Pages {
+			page.Access.Accessed = false
+			page.Access.Dirty = false
 		}
-		manifest = append(manifest, m)
-	}
-	sort.Slice(manifest, func(i, j int) bool { return manifest[i] < manifest[j] })
-	manifestBytes := make([]byte, 4*len(manifest))
-	for i, m := range manifest {
-		binary.LittleEndian.PutUint32(manifestBytes[i*4:], m)
-	}
-	o, _ := vm.ReadRegister(7)
-	z, _ := vm.ReadRegister(8) // cap on the size of the manifest  (3072*4)
-	if z%4 != 0 {
-		//  should be a multiple of 4 though!
+		vm.WriteRegister(7, OK)
+		vm.HostResultCode = OK
+		return
+	case 1:
+		// get manifest
+		var manifest []uint32
+		for pageIndex, page := range m.U.Pages {
+			m := uint32(0)
+			if page.Access.Dirty {
+				// m = uint32(pageIndex) | 0xC0000000
+				m = uint32(pageIndex)
+				manifest = append(manifest, m)
+			}
+		}
+		sort.Slice(manifest, func(i, j int) bool { return manifest[i] < manifest[j] })
+		manifestBytes := make([]byte, 4*len(manifest))
+		for i, m := range manifest {
+			binary.LittleEndian.PutUint32(manifestBytes[i*4:], m)
+		}
+
+		if z%4 != 0 {
+			//  should be a multiple of 4 though!
+			vm.WriteRegister(7, HUH)
+			vm.HostResultCode = HUH
+			return
+		}
+		if z < uint64(len(manifestBytes)) {
+			manifestBytes = manifestBytes[:z]
+		}
+		// write manifestBytes bytes to vm
+		errCode := vm.Ram.WriteRAMBytes(uint32(s), manifestBytes[:])
+		if errCode != OK {
+			vm.terminated = true
+			vm.ResultCode = types.PVM_PANIC
+			return
+		}
+		vm.WriteRegister(7, uint64(len(manifestBytes)))
+		vm.HostResultCode = OK
+
+	case 2:
+		// check whether page_id is dirty
+		page, ok := m.U.Pages[uint32(page_id)]
+		if !ok {
+			vm.WriteRegister(7, HUH)
+			vm.HostResultCode = HUH
+			return
+		}
+
+		if page.Access.Dirty {
+			vm.WriteRegister(7, OK)
+			vm.HostResultCode = OK
+		} else {
+			vm.WriteRegister(7, NONE)
+			vm.HostResultCode = NONE
+		}
+		return
+	case 3:
+		// check whether page_id is all zero
+		page, ok := m.U.Pages[uint32(page_id)]
+		if !ok {
+			vm.WriteRegister(7, HUH)
+			vm.HostResultCode = HUH
+			return
+		}
+
+		if page.Access.Inaccessible {
+			vm.WriteRegister(7, HUH)
+			vm.HostResultCode = HUH
+			return
+		} else {
+			for _, page_byte := range page.Value {
+				if page_byte != 0 {
+					vm.WriteRegister(7, NONE)
+					vm.HostResultCode = NONE
+					return
+				}
+			}
+			vm.WriteRegister(7, OK)
+			vm.HostResultCode = OK
+		}
+		return
+	default:
+		// unknown mode
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
 		return
 	}
-	if z < uint64(len(manifestBytes)) {
-		manifestBytes = manifestBytes[:z]
-	}
-	// write manifestBytes bytes to vm
-	errCode := vm.Ram.WriteRAMBytes(uint32(o), manifestBytes[:])
-	if errCode != OK {
-		vm.terminated = true
-		vm.ResultCode = types.PVM_PANIC
-		return
-	}
-	vm.WriteRegister(7, uint64(len(manifestBytes)))
-	vm.HostResultCode = OK
 	return
 }
 

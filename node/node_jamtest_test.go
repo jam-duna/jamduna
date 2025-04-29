@@ -170,6 +170,12 @@ func TestGameOfLife(t *testing.T) {
 	jamtest(t, "game_of_life", targetN)
 }
 
+func TestRevm(t *testing.T) {
+	const targetN = 10
+	fmt.Printf("revm targetNum: %v\n", targetN)
+	jamtest(t, "revm", targetN)
+}
+
 // This is just fib with malicious nodes
 func TestFibDisputes(t *testing.T) {
 	targetN := TargetedN_Fib

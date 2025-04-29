@@ -35,11 +35,13 @@ type JNode interface {
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
 	GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error)
+	GetSegmentsByRequestedHash(requestedHashes common.Hash) (raw_segments [][]byte, ExportedSegmentLength uint16, err error)
 }
 
 var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
+var manifest = flag.Bool("manifest", false, "manifest")
 
 const (
 	webServicePort = 8079
@@ -215,9 +217,15 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		serviceNames = []string{"corevm", "auth_copy"}
 		//log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
 	case "game_of_life":
-		serviceNames = []string{"game_of_life", "auth_copy"}
+		if *manifest {
+			serviceNames = []string{"game_of_life_manifest", "auth_copy"}
+		} else {
+			serviceNames = []string{"game_of_life", "auth_copy"}
+		}
 	case "auth_copy":
 		serviceNames = []string{"auth_copy"}
+	case "revm":
+		serviceNames = []string{"revm_test", "auth_copy"}
 	default:
 		serviceNames = []string{"auth_copy", "fib"}
 	}
@@ -421,7 +429,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		//targetN := 100
 		fib2(bNode, testServices, targetN)
 	case "game_of_life":
-		game_of_life(bNode, testServices)
+		game_of_life(bNode, testServices, *manifest)
 	case "megatron":
 		megatron(bNode, testServices, targetN)
 	case "auth_copy":
@@ -444,7 +452,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		scaled_balances(bNode, testServices, targetN_mint, targetN_transfer)
 	case "blake2b":
 		blake2b(bNode, testServices)
-
+	case "revm":
+		revm(bNode, testServices)
 	}
 }
 

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/bits"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
@@ -826,42 +826,12 @@ func DecodeProgram_pure_pvm_blob(p []byte) *Program {
 
 }
 
-// func Floor(x int64) int64 {
-// 	if x < 0 {
-// 		return x - 1
-// 	}
-// 	return x
-// }
-
-func FloorDiv(a, b int64) int64 {
-	q := a / b
-	r := a % b
-
-	if r != 0 && (a^b) < 0 {
-		q--
-	}
-	return q
-}
-
-func FloorDivBig(a, b *big.Int) *big.Int {
-	var quotient, remainder big.Int
-	quotient.QuoRem(a, b, &remainder)
-	if remainder.Sign() != 0 && a.Sign() < 0 {
-		quotient.Sub(&quotient, big.NewInt(1))
-	}
-	return &quotient
-}
-
 func CelingDevide(a, b uint32) uint32 {
 	return (a + b - 1) / b
 }
 
 func P_func(x uint32) uint32 {
 	return Z_P * CelingDevide(x, Z_P)
-}
-
-func Q_func(x uint32) uint32 {
-	return Z_Q * CelingDevide(x, Z_Q)
 }
 
 func Z_func(x uint32) uint32 {
@@ -875,7 +845,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 		argument_data_a = []byte{0}
 	}
 
-	condition := uint64(5*Z_Z+Q_func(vm.o_size)+Q_func(vm.w_size+vm.z*Z_P)+Q_func(vm.s)+Z_I) <= uint64((1 << 32))
+	condition := uint64(5*Z_Z+Z_func(vm.o_size)+Z_func(vm.w_size+vm.z*Z_P)+Z_func(vm.s)+Z_I) <= uint64((1 << 32))
 	if condition {
 		// set up the initial values and access mode for the RAM
 		var page_index, page_length uint32
@@ -901,7 +871,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 
 		page_index = (2*Z_Z + Z_func(vm.o_size)) / PageSize
 		page_length = CelingDevide(vm.w_size, PageSize)
-		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
+		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
 
 		// 2. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode)
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
@@ -910,19 +880,19 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 
 		page_index = (2*Z_Z + Z_func(vm.o_size) + vm.w_size) / PageSize
 		page_length = CelingDevide(P_func(vm.w_size)+vm.z*Z_P-vm.w_size, PageSize)
-		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
+		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
 
 		// 3. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
 		page_index = ((1 << 32) - 2*Z_Z - Z_I - P_func(vm.s)) / PageSize
 		page_length = CelingDevide(P_func(vm.s), PageSize)
-		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
+		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
 
 		// 4. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
 		page_index = ((1 << 32) - Z_Z - Z_I) / PageSize
 		page_length = CelingDevide(uint32(len(argument_data_a)), PageSize)
-		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: true}
+		access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
 		// 5. Set Page Index %d and Page Length %d with Access Mode %v\n", page_index, page_length, access_mode
 		vm.Ram.SetPageAccess(page_index, page_length, access_mode)
 
@@ -1087,6 +1057,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 
 	xs, _ = vm.X.GetX_s()
 	r, res = vm.getArgumentOutputs()
+
 	return r, res, xs
 }
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
@@ -1349,6 +1320,14 @@ func (vm *VM) step() error {
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
 	// startPC := vm.pc
 	//beforeGas := vm.Gas
+	// if vm.pc >= 14981 && vm.pc <= 15176 {
+	// 	fmt.Printf("pc %d opcode %d reg %v\n", vm.pc, opcode, vm.ReadRegisters())
+	// }
+	// if vm.Opcodemap == nil {
+	// 	vm.Opcodemap = make(map[byte]uint64)
+	// }
+	// vm.Opcodemap[instr] += 1
+	// fmt.Printf("PVM PC: %d Opcodemap: %v\n", vm.pc, vm.Opcodemap)
 	switch instr {
 	case TRAP:
 		log.Debug(vm.logging, "TERMINATED", "service", string(vm.ServiceMetadata))
@@ -1502,20 +1481,6 @@ func reverseBytes(b []byte) []byte {
 	}
 	return b
 }
-
-// skip calculates the skip distance based on the opcode
-// func skip(opcode byte) uint32 {
-// 	switch opcode {
-// 	case JUMP, LOAD_IMM_JUMP, LOAD_IMM_JUMP_IND:
-// 		return uint32(1)
-// 	case BRANCH_EQ, BRANCH_NE, BRANCH_GE_U, BRANCH_GE_S, BRANCH_LT_U, BRANCH_LT_S:
-// 		return uint32(2)
-// 	case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_U_IMM, BRANCH_LE_S_IMM, BRANCH_GE_U_IMM, BRANCH_GE_S_IMM, BRANCH_GT_U_IMM, BRANCH_GT_S_IMM:
-// 		return uint32(3)
-// 	default:
-// 		return uint32(0)
-// 	}
-// }
 
 // skip function calculates the distance to the next instruction
 func skip(pc uint64, bitmask string) uint64 {
@@ -1879,7 +1844,34 @@ func (vm *VM) moveReg(operands []byte) {
 }
 
 func (vm *VM) sbrk(valueA uint64) uint64 {
-	// TODO
+	if valueA == 0 {
+		return uint64(2*Z_Z + Z_func(vm.o_size))
+	}
+	h := (2*Z_Z + Z_func(vm.o_size)) / Z_P
+	num_of_page := CelingDevide(uint32(valueA), Z_P)
+
+	ids := make([]uint32, 0)
+	for id, page := range vm.Ram.Pages {
+		if page.Access.Writable && !page.Access.Readable && id >= h {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	needed := int(num_of_page)
+	runLen := 0
+	for i := 0; i < len(ids); i++ {
+		if i > 0 && ids[i] == ids[i-1]+1 {
+			runLen++
+		} else {
+			runLen = 1
+		}
+		if runLen >= needed {
+			startPage := ids[i-needed+1] * 4096
+			return uint64(startPage)
+		}
+	}
+
 	log.Debug(vm.logging, "sbrk", "valueA", valueA)
 	return 0
 }
@@ -2163,32 +2155,31 @@ func (vm *VM) aluImm(opcode byte, operands []byte) {
 	case MUL_IMM_64:
 		result = (valueB * vx)
 	case NEG_ADD_IMM_64:
-		result = vx - valueB + maxUint64 + 1
+		result = vx - valueB
 	case SHLO_L_IMM_ALT_64:
 		result = vx * (1 << (valueB % 64))
 	case SHLO_R_IMM_ALT_64:
 		result = vx / (1 << (valueB % 64))
 	case ROT_R_64_IMM:
-		b_valueB := B_encode(valueB)
 		shift := int(vx % 64)
-		b_valueA := b_valueB[64-shift:] + b_valueB[:64-shift]
-		result = x_encode(B_decode(b_valueA), 8)
+		bits64 := B_encode(valueB, 8)
+		rot := bits64[shift:] + bits64[:shift]
+		result = B_decode(rot)
 	case ROT_R_64_IMM_ALT:
-		b_vx := B_encode(vx)
 		shift := int(valueB % 64)
-		b_valueA := b_vx[64-shift:] + b_vx[:64-shift]
-		result = x_encode(B_decode(b_valueA), 8)
+		bits64 := B_encode(vx, 8)
+		rot := bits64[shift:] + bits64[:shift]
+		result = B_decode(rot)
 	case ROT_R_32_IMM:
-		b_valueB := B_encode(valueB)[32:]
 		shift := int(vx % 32)
-		b_valueA := b_valueB[32-shift:] + b_valueB[:32-shift]
-		result = x_encode(B_decode(b_valueA), 4)
+		bits32 := B_encode(valueB, 4)
+		rot := bits32[shift:] + bits32[:shift]
+		result = x_encode(B_decode(rot), 4)
 	case ROT_R_32_IMM_ALT:
-		b_vx := B_encode(vx)[32:]
 		shift := int(valueB % 32)
-		b_valueA := b_vx[32-shift:] + b_vx[:32-shift]
-		result = x_encode(B_decode(b_valueA), 4)
-
+		bits32 := B_encode(vx, 4)
+		rot := bits32[shift:] + bits32[:shift]
+		result = x_encode(B_decode(rot), 4)
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
@@ -2255,14 +2246,14 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) {
 	var result uint64
 	switch opcode {
 	case SHLO_R_IMM_32:
-		result = x_encode(valueB%(1<<32)/(1<<(vx%32)), 4)
+		result = x_encode((valueB%(1<<32))/(1<<(vx%32)), 4)
 	case SHLO_L_IMM_32:
-		result = x_encode(valueB*(1<<(vx%32))%(1<<32), 4)
+		result = x_encode((valueB*(1<<(vx%32)))%(1<<32), 4)
 	case SHAR_R_IMM_32:
-		numerator := z_encode(valueB%(1<<32), 4)
-		denominator := int64(1 << (vx % 32))
-		floorQuotient := FloorDiv(numerator, denominator)
-		result = z_decode(floorQuotient, 8)
+		q := new(big.Int).SetInt64(z_encode(valueB%(1<<32), 4))
+		mod := new(big.Int).Lsh(big.NewInt(1), uint(vx%32))
+		q.Div(q, mod)
+		result = z_decode(q.Int64(), 8)
 	case NEG_ADD_IMM_32:
 		result = x_encode((vx+uint64(1<<32)-valueB)%uint64(1<<32), 4)
 	case SET_GT_U_IMM:
@@ -2282,20 +2273,27 @@ func (vm *VM) shiftImm(opcode byte, operands []byte) {
 	case SHLO_R_IMM_ALT_32:
 		result = x_encode((vx%(1<<32))/(1<<(valueB%32)), 4)
 	case SHAR_R_IMM_ALT_32:
-		numerator := z_encode(vx%(1<<32), 4)
-		denominator := int64(1 << (valueB % 32))
-		floorQuotient := FloorDiv(numerator, denominator)
-		result = z_decode(floorQuotient, 8)
+		q := new(big.Int).SetInt64(z_encode(vx%(1<<32), 4))
+		mod := new(big.Int).Lsh(big.NewInt(1), uint(valueB%32))
+		q.Div(q, mod)
+		result = z_decode(q.Int64(), 8)
 	case SHAR_R_IMM_64:
-		numerator := z_encode(valueB, 8)
-		denominator := int64(1 << (vx % 64))
-		floorQuotient := FloorDiv(numerator, denominator)
-		result = z_decode(floorQuotient, 8)
+		// q := new(big.Int).SetInt64(z_encode(valueB, 8))
+		// mod := new(big.Int).Lsh(big.NewInt(1), uint(vx%64))
+		// q.Div(q, mod)
+		// result = z_decode(q.Int64(), 8)
+		q := new(big.Int).SetInt64(z_encode(valueB, 8))
+		q.Rsh(q, uint(vx&63))
+		result = z_decode(q.Int64(), 8)
 	case SHAR_R_IMM_ALT_64:
-		numerator := z_encode(vx, 8)
-		denominator := int64(1 << (valueB % 64))
-		floorQuotient := FloorDiv(numerator, denominator)
-		result = z_decode(floorQuotient, 8)
+		// q := new(big.Int).SetInt64(z_encode(vx, 8))
+		// mod := new(big.Int).Lsh(big.NewInt(1), uint(valueB%64))
+		// q.Div(q, mod)
+		// result = z_decode(q.Int64(), 8)
+
+		q := new(big.Int).SetInt64(z_encode(vx, 8))
+		q.Rsh(q, uint(valueB&63))
+		result = z_decode(q.Int64(), 8)
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
@@ -2328,15 +2326,26 @@ func z_decode(a int64, n uint32) uint64 {
 	return result.Uint64()
 }
 
-// GP.0.5.4-A.9
-func B_encode(n uint64) string {
-	return fmt.Sprintf("%064b", n)
+func B_encode(x uint64, n uint32) string {
+	bits := make([]byte, int(8*n))
+	for i := range bits {
+		if (x>>uint(i))&1 == 1 {
+			bits[i] = '1'
+		} else {
+			bits[i] = '0'
+		}
+	}
+	return string(bits)
 }
 
-// GP.0.5.4-A.10
 func B_decode(s string) uint64 {
-	n, _ := strconv.ParseUint(s, 2, 64)
-	return n
+	var x uint64
+	for i, c := range []byte(s) {
+		if c == '1' && i < 64 {
+			x |= 1 << uint(i)
+		}
+	}
+	return x
 }
 
 // GP_.0.3.8(224)
@@ -2469,7 +2478,7 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 	case SUB_32:
 		result = x_encode((valueA+(1<<32)-(valueB%(1<<32)))%(1<<32), 4)
 	case SUB_64:
-		result = valueA + maxUint64 - valueB + 1
+		result = valueA - valueB
 	case AND:
 		result = valueA & valueB
 	case XOR:
@@ -2487,11 +2496,12 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 		res.Rsh(res, 64)
 		result = z_decode(res.Int64(), 8)
 	case MUL_UPPER_U_U:
-		A := new(big.Int).SetUint64(valueA)
-		B := new(big.Int).SetUint64(valueB)
-		res := new(big.Int).Mul(A, B)
-		res.Rsh(res, 64)
-		result = res.Uint64()
+		// A := new(big.Int).SetUint64(valueA)
+		// B := new(big.Int).SetUint64(valueB)
+		// res := new(big.Int).Mul(A, B)
+		// res.Rsh(res, 64)
+		// result = res.Uint64()
+		result, _ = bits.Mul64(valueA, valueB)
 	case MUL_UPPER_S_U:
 		A := new(big.Int).SetInt64(z_encode(valueA, 8))
 		B := new(big.Int).SetUint64(valueB)
@@ -2579,63 +2589,51 @@ func (vm *VM) aluReg(opcode byte, operands []byte) {
 			result = 0
 		}
 	case SET_LT_S:
-		if int64(valueA) < int64(valueB) {
+		if z_encode(valueA, 8) < z_encode(valueB, 8) {
 			result = 1
 		} else {
 			result = 0
 		}
-
 	case SHLO_L_32:
-		result = x_encode(valueA*(1<<(valueB%32))%(1<<32), 4)
+		result = x_encode((valueA*(1<<(valueB%32)))%(1<<32), 4)
 	case SHLO_L_64:
-		result = valueA * (1 << (valueB % 64))
+		// result = valueA * (1 << (valueB % 64))
+		result = valueA << (valueB & 63)
 	case SHLO_R_32:
 		result = x_encode((valueA%(1<<32))/(1<<(valueB%32)), 4)
 	case SHLO_R_64:
-		result = valueA / (1 << (valueB % 64))
+		// result = valueA / (1 << (valueB % 64))
+		result = valueA >> (valueB & 63)
 	case SHAR_R_32:
-		numerator := z_encode(valueA%(1<<32), 4)
-		denominator := int64(1 << (valueB % 32))
-		floorQuotient := FloorDiv(numerator, denominator)
-		result = z_decode(floorQuotient, 8)
+		q := new(big.Int).SetInt64(z_encode(valueA%(1<<32), 4))
+		mod := new(big.Int).Lsh(big.NewInt(1), uint(valueB%32))
+		q.Div(q, mod)
+		result = z_decode(q.Int64(), 8)
 	case SHAR_R_64:
-		// numerator := z_encode(valueA, 8)
-		// denominator := int64(uint64(1) << (valueB % 64))
-		// floorQuotient := FloorDiv(numerator, denominator)
-		// result = z_decode(floorQuotient, 8)
-
-		numeratorVal := z_encode(valueA, 8)
-		var bigNum big.Int
-		bigNum.SetInt64(numeratorVal)
-		shift := uint(valueB % 64)
-		var bigDen big.Int
-		bigDen.SetUint64(1)
-		bigDen.Lsh(&bigDen, shift)
-		floorQuo := FloorDivBig(&bigNum, &bigDen)
-		result = z_decode(floorQuo.Int64(), 8)
+		q := new(big.Int).SetInt64(z_encode(valueA, 8))
+		mod := new(big.Int).Lsh(big.NewInt(1), uint(valueB%64))
+		q.Div(q, mod)
+		result = z_decode(q.Int64(), 8)
 	case ROT_L_64:
-		b_valueA := B_encode(valueA)
 		shift := int(valueB % 64)
-		b_valueD := b_valueA[shift:] + b_valueA[:shift]
-		result = B_decode(b_valueD)
+		bits64 := B_encode(valueA, 8)
+		rot := bits64[64-shift:] + bits64[:64-shift]
+		result = B_decode(rot)
 	case ROT_R_64:
-		b_valueA := B_encode(valueA)
 		shift := int(valueB % 64)
-		b_valueD := b_valueA[64-shift:] + b_valueA[:64-shift]
-		result = B_decode(b_valueD)
+		bits64 := B_encode(valueA, 8)
+		rot := bits64[shift:] + bits64[:shift]
+		result = B_decode(rot)
 	case ROT_L_32:
-		full64 := B_encode(valueA)
-		b_low32 := full64[32:]
 		shift := int(valueB % 32)
-		b_rot32 := b_low32[shift:] + b_low32[:shift]
-		result = x_encode(B_decode(b_rot32), 4)
+		bits32 := B_encode(valueA, 4)
+		rot := bits32[32-shift:] + bits32[:32-shift]
+		result = x_encode(B_decode(rot), 4)
 	case ROT_R_32:
-		full64 := B_encode(valueA)
-		b_low32 := full64[32:]
 		shift := int(valueB % 32)
-		b_rot32 := b_low32[32-shift:] + b_low32[:32-shift]
-		result = x_encode(B_decode(b_rot32), 4)
-
+		bits32 := B_encode(valueA, 4)
+		rot := bits32[shift:] + bits32[:shift]
+		result = x_encode(B_decode(rot), 4)
 	case AND_INV:
 		result = valueA & (^valueB)
 	case OR_INV:
@@ -2732,50 +2730,19 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Register(opcode byte, operands 
 	switch opcode {
 	case SBRK:
 		result = vm.sbrk(valueA)
-
 	case COUNT_SET_BITS_64:
-		b_valueA := B_encode(valueA)
-		count := strings.Count(b_valueA, "1")
-		result = uint64(count)
+		result = uint64(bits.OnesCount64(valueA))
 	case COUNT_SET_BITS_32:
-		b_full64 := B_encode(valueA)
-		b_low32 := b_full64[32:]
-		count := strings.Count(b_low32, "1")
-		result = uint64(count)
+		result = uint64(bits.OnesCount32(uint32(valueA)))
 	case LEADING_ZERO_BITS_64:
-		b_valueA := B_encode(valueA)
-		idx := strings.Index(b_valueA, "1")
-		if idx == -1 {
-			result = 64
-		} else {
-			result = uint64(idx)
-		}
+		result = uint64(bits.LeadingZeros64(valueA))
 	case LEADING_ZERO_BITS_32:
-		b_full64 := B_encode(valueA)
-		b_low32 := b_full64[32:]
-		idx := strings.Index(b_low32, "1")
-		if idx == -1 {
-			result = 32
-		} else {
-			result = uint64(idx)
-		}
+		result = uint64(bits.LeadingZeros32(uint32(valueA)))
+
 	case TRAILING_ZERO_BITS_64:
-		b_valueA := B_encode(valueA)
-		idx := strings.LastIndex(b_valueA, "1")
-		if idx == -1 {
-			result = 64
-		} else {
-			result = uint64(63 - idx)
-		}
+		result = uint64(bits.TrailingZeros64(valueA))
 	case TRAILING_ZERO_BITS_32:
-		b_full64 := B_encode(valueA)
-		b_low32 := b_full64[32:]
-		idx := strings.LastIndex(b_low32, "1")
-		if idx == -1 {
-			result = 32
-		} else {
-			result = uint64(31 - idx)
-		}
+		result = uint64(bits.TrailingZeros32(uint32(valueA)))
 	case SIGN_EXTEND_8:
 		result = z_decode(z_encode(valueA%(1<<8), 1), 8)
 	case SIGN_EXTEND_16:
@@ -2783,7 +2750,7 @@ func (vm *VM) Instructions_with_Arguments_of_Two_Register(opcode byte, operands 
 	case ZERO_EXTEND_16:
 		result = valueA % (1 << 16)
 	case REVERSE_BYTES:
-		result = types.DecodeE_l(reverseBytes(types.E_l(valueA, 8)))
+		result = bits.ReverseBytes64(valueA)
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true

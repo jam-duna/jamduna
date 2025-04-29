@@ -662,6 +662,10 @@ func (c *NodeClient) GetSegments(importedSegments []types.ImportSegment) (raw_se
 	return raw_segments, nil
 }
 
+func (c *NodeClient) GetSegmentsByRequestedHash(requestedHash common.Hash) (raw_segments [][]byte, ExportedSegmentLength uint16, err error) {
+	return nil, 0, nil
+}
+
 func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, error) {
 	// Convert the segment index to a string
 	segmentIndexStr := strconv.FormatUint(uint64(segmentIndex), 10)

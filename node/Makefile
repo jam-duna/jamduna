@@ -6,6 +6,7 @@ TargetN            ?= 911
 JCE_MANUAL         ?= true
 JAM_NODE    	   ?= true
 JAM_LOCAL_CLIENT   ?= false
+MANIFEST           ?= false
 
 # Conditionally set -targetN, or empty if TargetN=-1
 TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))
@@ -32,10 +33,10 @@ fib2L :
 
 game_of_life :
 	@echo "Running TestGameOfLife$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
-	@echo "go test -timeout $(TIMEOUT) -v -run TestGameOfLife -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)"
+	@echo "go test -timeout $(TIMEOUT) -v -run TestGameOfLife -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) -manifest=$(MANIFEST)"
 	@go test -timeout $(TIMEOUT) -v -run TestGameOfLife \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)
+	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) -manifest=$(MANIFEST)
 
 auth_copy:
 	@echo "Running TestAuthCopy$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
@@ -49,6 +50,13 @@ megatron:
 	go test -timeout $(TIMEOUT) -v -run TestMegatron \
 	  -tags "network_test,$(TAGS)" \
 	  -targetN=$$TARGET_N \
+	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)
+
+revm :
+	@echo "Running TestRevm$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestRevm -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)"
+	@go test -timeout $(TIMEOUT) -v -run TestRevm \
+	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)
 
 # local only test [fallback, safrole, disputes]

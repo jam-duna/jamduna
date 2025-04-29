@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -52,8 +55,8 @@ func pvm_test(tc TestCase) (error, int) {
 
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
-	metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, c, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte(metadata))
+	// metadata, c := types.SplitMetadataAndCode(tc.Code)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
@@ -186,6 +189,39 @@ func TestPVM(t *testing.T) {
 	}
 	// show the match rate
 	fmt.Printf("Match rate: %v/%v\n", count-total_mismatch, count)
+}
+
+func TestRevm(t *testing.T) {
+	log.InitLogger("info")
+	fp := "../services/revm_test.pvm"
+	raw_code, err := os.ReadFile(fp)
+	if err != nil {
+		t.Fatalf("Failed to read file %s: %v", fp, err)
+		return
+	}
+	fmt.Printf("Read %d bytes from %s\n", len(raw_code), fp)
+
+	initial_regs := make([]uint64, 13)
+	initial_pc := uint64(0)
+	hostENV := NewMockHostEnv()
+	metadata := "revm_test"
+	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
+
+	a := make([]byte, 0)
+	pvm.Gas = int64(9999999999999999)
+
+	start := time.Now()
+
+	Standard_Program_Initialization(pvm, a)
+
+	// pvm.Ram.DebugStatus()
+
+	fmt.Printf("PVM start execution...\n")
+	pvm.Execute(types.EntryPointRefine, false)
+
+	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
+	elapsed := time.Since(start)
+	fmt.Printf("Execution took %s\n", elapsed)
 }
 
 // Helper function to compare two integer slices

@@ -21,13 +21,17 @@ func flatten(data [][]byte) []byte {
 	return result
 }
 
-func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
+func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest bool) {
 
 	ws_push := StartGameOfLifeServer("localhost:80", "./game_of_life.html")
 
 	log.Info(module, "Game of Life START")
 
 	service0 := testServices["game_of_life"]
+	if manifest {
+		service0 = testServices["game_of_life_manifest"]
+	}
+
 	service_authcopy := testServices["auth_copy"]
 
 	service0_child_code, _ := getServices([]string{"game_of_life_child"}, false)
@@ -56,12 +60,12 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 
 	extrinsics = append(extrinsics, extrinsic)
 	prevWorkPackageHash := common.Hash{}
-
+	next_import_cnt := 0
 	for step_n := 0; step_n <= 300000; step_n++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		export_count := uint16(0)
 		if step_n > 1 {
-			for i := 0; i < 9; i++ {
+			for i := 0; i < next_import_cnt; i++ {
 				importedSegment := types.ImportSegment{
 					RequestedHash: prevWorkPackageHash,
 					Index:         uint16(i),
@@ -144,16 +148,27 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService) {
 				log.Info(module, "GAME OF LIFE CHILD LOADED")
 			}
 		} else {
-			vm_export, err := n1.GetSegments(importedSegments)
+			exports, Export_segments_count, err := n1.GetSegmentsByRequestedHash(workPackageHash)
+			next_import_cnt = int(Export_segments_count)
+			vm_export := make([][]byte, export_count)
 			if err == nil {
 				stepBytes := make([]byte, 4)
 				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
+
+				for i := range vm_export {
+					vm_export[i] = make([]byte, 4104)
+				}
+
+				for _, export := range exports {
+					order := binary.LittleEndian.Uint32(export[4:8]) % 48 // first page id
+					vm_export[order] = export[:]
+				}
+
 				out := append(stepBytes, flatten(vm_export)...)
 				if true { // does not work on 2nd run
 					ws_push(out)
 				}
 			}
-
 		}
 		prevWorkPackageHash = workPackageHash
 	}

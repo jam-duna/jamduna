@@ -825,6 +825,30 @@ func (n *Node) GetSegments(importedSegments []types.ImportSegment) (raw_segments
 	return raw_segments, nil
 }
 
+func (n *Node) GetSegmentsByRequestedHash(RequestedHash common.Hash) ([][]byte, uint16, error) {
+
+	si := n.WorkReportSearch(RequestedHash)
+	ExportedSegmentLength := si.WorkReport.AvailabilitySpec.ExportedSegmentLength
+	if si == nil {
+		return nil, 0, fmt.Errorf("WorkReportSearch(%s) not found", RequestedHash)
+	}
+
+	importedSegments := make([]types.ImportSegment, 0)
+	for i := 0; i < int(ExportedSegmentLength); i++ {
+		importedSegment := types.ImportSegment{
+			RequestedHash: RequestedHash,
+			Index:         uint16(i),
+		}
+		importedSegments = append(importedSegments, importedSegment)
+	}
+
+	raw_segments, err := n.GetSegments(importedSegments)
+	if err != nil {
+		return nil, 0, fmt.Errorf("GetSegments failed: %v", err)
+	}
+	return raw_segments, ExportedSegmentLength, nil
+}
+
 func (n *Node) GetService(serviceIndex uint32) (sa *types.ServiceAccount, ok bool, err error) {
 	return n.getState().GetService(serviceIndex)
 }

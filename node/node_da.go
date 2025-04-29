@@ -326,6 +326,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
 			log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments), "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
+			expectedSegmentCnt = len(exported_segments)
 		}
 		if expectedSegmentCnt != 0 {
 			for i := 0; i < expectedSegmentCnt; i++ {
@@ -345,7 +346,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			Result:              output,
 			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
-			NumExportedSegments: uint(workItem.ExportCount),
+			NumExportedSegments: uint(expectedSegmentCnt),
 			NumExtrinsics:       uint(len(package_bundle.ExtrinsicData)),
 			NumBytesExtrinsics:  uint(z),
 		}
