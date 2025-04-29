@@ -609,6 +609,9 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 
+		states := time.NewTicker(6 * time.Second)
+		defer states.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -619,6 +622,11 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 					if bytes.Compare(img, preimage) == 0 {
 						return
 					}
+					return
+				}
+			case <-states.C:
+				_, _, _, err := c.GetServicePreimage(serviceIndex, preimageHash)
+				if err == nil {
 					return
 				}
 			}

@@ -21,7 +21,7 @@ func flatten(data [][]byte) []byte {
 	return result
 }
 
-func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest bool) {
+func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest bool) error {
 
 	ws_push := StartGameOfLifeServer("localhost:80", "./game_of_life.html")
 
@@ -127,17 +127,12 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
-		var err error
-		var workPackageHash common.Hash
-		workPackageHash, err = n1.SubmitAndWaitForWorkPackage(ctx, wpr)
+		hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
 		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
-			if step_n > 0 {
-				step_n--
-			}
-			continue
+			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
+			return err
 		}
-
+		workPackageHash := hashes[0]
 		if step_n == 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
@@ -172,4 +167,5 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 		}
 		prevWorkPackageHash = workPackageHash
 	}
+	return nil
 }

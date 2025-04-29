@@ -10,34 +10,33 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-
 	"github.com/colorfulnotion/jam/types"
-
-	_ "net/http/pprof"
 )
 
 func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB START", "targetN", targetN)
 	service0 := testServices["fib"]
-	service_authcopy := testServices["auth_copy"]
+	serviceAuth := testServices["auth_copy"]
 
-	prevWorkPackageHash := common.Hash{}
+	var prevWP common.Hash
 	for fibN := 1; fibN <= targetN; fibN++ {
-		importedSegments := make([]types.ImportSegment, 0)
+		imported := []types.ImportSegment{}
 		if fibN > 1 {
-			importedSegment := types.ImportSegment{
-				RequestedHash: prevWorkPackageHash,
+			imported = append(imported, types.ImportSegment{
+				RequestedHash: prevWP,
 				Index:         0,
-			}
-			importedSegments = append(importedSegments, importedSegment)
+			})
 		}
+
+		// payload = uint32(fibN)
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
-		workPackage := types.WorkPackage{
+
+		wp := types.WorkPackage{
 			AuthCodeHost:          0,
-			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			Authorization:         nil, // null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
+			ParameterizationBlob:  nil,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,
@@ -45,107 +44,96 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					Payload:            payload,
 					RefineGasLimit:     5678,
 					AccumulateGasLimit: 9876,
-					ImportedSegments:   importedSegments,
+					ImportedSegments:   imported,
 					ExportCount:        1,
 				},
 				{
-					Service:            service_authcopy.ServiceCode,
-					CodeHash:           service_authcopy.CodeHash,
-					Payload:            []byte{},
+					Service:            serviceAuth.ServiceCode,
+					CodeHash:           serviceAuth.CodeHash,
+					Payload:            nil,
 					RefineGasLimit:     5678,
 					AccumulateGasLimit: 9876,
-					ImportedSegments:   make([]types.ImportSegment, 0),
+					ImportedSegments:   nil,
 					ExportCount:        0,
 				},
 			},
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("FIB(%d)", fibN),
-			CoreIndex:       1,
-			WorkPackage:     workPackage,
+			CoreIndex:       0,
+			WorkPackage:     wp,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
 
-		workPackageHashes, err := n1.SubmitAndWaitForWorkPackages(ctx, []*WorkPackageRequest{wpr})
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
+		hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+		cancel()
 		if err != nil {
-			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
+			log.Error(module, "SubmitAndWaitForWorkPackages ERR", "err", err)
+			return
 		}
-		prevWorkPackageHash = workPackageHashes[0]
+		prevWP = hashes[0]
+
 		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
-		service_account_byte, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
-		log.Info(module, wpr.Identifier, "result", fmt.Sprintf("%x", service_account_byte))
+		data, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
+		log.Info(module, wpr.Identifier, "result", fmt.Sprintf("%x", data))
 	}
 }
 
-func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) {
+func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) error {
 	log.Info(module, "FIB2 START")
 
-	jam_key := []byte("jam")
-	// jam_key_hash := common.Blake2Hash(jam_key)
-	// jam_key_length := uint32(len(jam_key))
-
+	jamKey := []byte("jam")
 	service0 := testServices["corevm"]
-	service_authcopy := testServices["auth_copy"]
-	fib2_child_code, _ := getServices([]string{"corevm_child"}, false)
-	fib2_child_codehash := fib2_child_code["corevm_child"].CodeHash
+	serviceAuth := testServices["auth_copy"]
 
-	fib2_child_code_length := uint32(len(fib2_child_code["corevm_child"].Code))
-	fib2_child_code_length_bytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(fib2_child_code_length_bytes, fib2_child_code_length)
+	childSvc, _ := getServices([]string{"corevm_child"}, false)
+	childCodeHash := childSvc["corevm_child"].CodeHash
+	childCodeLen := uint32(len(childSvc["corevm_child"].Code))
+	childLenBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(childLenBytes, childCodeLen)
 
-	prevWorkPackageHash := common.Hash{}
+	prevWP := common.Hash{}
 
-	// Generate the extrinsic
+	// prepare extrinsics for child loader
 	extrinsics := types.ExtrinsicsBlobs{}
-
-	extrinsic := make([]byte, 0)
-	extrinsic = append(extrinsic, fib2_child_codehash.Bytes()...)
-	extrinsic = append(extrinsic, fib2_child_code_length_bytes...)
-
-	extrinsic_hash := common.Blake2Hash(extrinsic)
-	extrinsic_len := uint32(len(extrinsic))
-
-	// Put the extrinsic hash and length into the work item extrinsic
-	work_item_extrinsic := make([]types.WorkItemExtrinsic, 0)
-	work_item_extrinsic = append(work_item_extrinsic, types.WorkItemExtrinsic{
-		Hash: extrinsic_hash,
-		Len:  extrinsic_len,
-	})
-
-	extrinsics = append(extrinsics, extrinsic)
+	ext := append(childCodeHash.Bytes(), childLenBytes...)
+	extrinsics = append(extrinsics, ext)
+	wiExt := []types.WorkItemExtrinsic{{
+		Hash: common.Blake2Hash(ext),
+		Len:  uint32(len(ext)),
+	}}
 
 	for fibN := -1; fibN <= targetN; fibN++ {
-		importedSegments := make([]types.ImportSegment, 0)
+		// build imported segments
+		imported := []types.ImportSegment{}
 		if fibN > 0 {
-			for i := range fibN {
-				importedSegment := types.ImportSegment{
-					RequestedHash: prevWorkPackageHash,
+			for i := 0; i < fibN; i++ {
+				imported = append(imported, types.ImportSegment{
+					RequestedHash: prevWP,
 					Index:         uint16(i),
-				}
-				//fmt.Printf("fibN=%d ImportedSegment %d (%v, %d)\n", fibN, i, prevWorkPackageHash, i)
-				importedSegments = append(importedSegments, importedSegment)
+				})
 			}
 		}
+
+		// build payload
 		var payload []byte
 		if fibN >= 0 {
-			for range fibN + 2 {
+			for i := 0; i < fibN+2; i++ {
 				tmp := make([]byte, 4)
 				binary.LittleEndian.PutUint32(tmp, uint32(fibN))
 				payload = append(payload, tmp...)
-
-				tmp = make([]byte, 4)
 				binary.LittleEndian.PutUint32(tmp, uint32(1)) // function id
 				payload = append(payload, tmp...)
 			}
 		}
-		workPackage := types.WorkPackage{
+
+		wp := types.WorkPackage{
 			AuthCodeHost:          0,
-			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			Authorization:         nil, // null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
+			ParameterizationBlob:  nil,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,
@@ -153,69 +141,68 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					Payload:            payload,
 					RefineGasLimit:     56789,
 					AccumulateGasLimit: 98765,
-					ImportedSegments:   importedSegments,
-					Extrinsics:         work_item_extrinsic,
+					ImportedSegments:   imported,
+					Extrinsics:         wiExt,
 					ExportCount:        uint16(fibN + 1),
 				},
 				{
-					Service:            service_authcopy.ServiceCode,
-					CodeHash:           service_authcopy.CodeHash,
-					Payload:            []byte{},
+					Service:            serviceAuth.ServiceCode,
+					CodeHash:           serviceAuth.CodeHash,
+					Payload:            nil,
 					RefineGasLimit:     56789,
 					AccumulateGasLimit: 98765,
-					ImportedSegments:   make([]types.ImportSegment, 0),
+					ImportedSegments:   nil,
 					ExportCount:        0,
 				},
 			},
 		}
 
-		var fibN_string string
-		if fibN == -1 {
-			fibN_string = "init"
-		} else {
-			fibN_string = fmt.Sprintf("%d", fibN)
+		label := "init"
+		if fibN >= 0 {
+			label = fmt.Sprintf("%d", fibN)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-		defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
 		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("FIB2(%s)", fibN_string),
+			Identifier:      fmt.Sprintf("FIB2(%s)", label),
 			CoreIndex:       1,
-			WorkPackage:     workPackage,
+			WorkPackage:     wp,
 			ExtrinsicsBlobs: extrinsics,
 		}
 
-		workPackageHashes, err := n1.SubmitAndWaitForWorkPackages(ctx, []*WorkPackageRequest{wpr})
+		hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+		cancel()
 		if err != nil {
-			fmt.Printf("SendWorkPackageSubmission ERR %v\n", err)
+			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
+			return err
 		}
+		prevWP = hashes[0]
 
-		prevWorkPackageHash = workPackageHashes[0]
-		keys := []byte{0, 1, 2, 5, 6, 7, 8, 9}
-		for _, key := range keys {
+		// inspect storage keys [0,1,2,5,6,7,8,9]
+		for _, key := range []byte{0, 1, 2, 5, 6, 7, 8, 9} {
 			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
-			service_account_byte, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
-			log.Info(module, fmt.Sprintf("Fib2-(%s) result with key %d", fibN_string, key), "result", fmt.Sprintf("%x", service_account_byte))
+			data, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
+			log.Info(module,
+				fmt.Sprintf("Fib2-(%s) result key %d", label, key),
+				"result", fmt.Sprintf("%x", data),
+			)
 		}
 
-		if fibN == 3 || fibN == 6 {
-			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-			defer cancel()
-			err = n1.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, jam_key)
-			if err != nil {
-				log.Error(module, "SubmitAndWaitForPreimage", "err", err)
-			}
-		}
-
-		if fibN == -1 {
-			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-			defer cancel()
-			err = n1.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, fib2_child_code["corevm_child"].Code)
-			if err != nil {
+		// occasionally load preimages
+		switch fibN {
+		case 3, 6:
+			ctx2, cancel2 := context.WithTimeout(context.Background(), RefineTimeout)
+			_ = n1.SubmitAndWaitForPreimage(ctx2, service0.ServiceCode, jamKey)
+			cancel2()
+		case -1:
+			ctx2, cancel2 := context.WithTimeout(context.Background(), RefineTimeout)
+			if err := n1.SubmitAndWaitForPreimage(ctx2, service0.ServiceCode, childSvc["corevm_child"].Code); err != nil {
 				log.Error(module, "SubmitAndWaitForPreimage", "err", err)
 			} else {
 				log.Info(module, "COREVM CHILD LOADED")
 			}
+			cancel2()
 		}
 	}
+	return nil
 }

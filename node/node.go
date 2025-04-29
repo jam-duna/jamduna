@@ -893,6 +893,28 @@ func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32
 	}
 }
 
+const (
+	maxRobustTries = 4
+)
+
+// RobustSubmitAndWaitForWorkPackages will retry SubmitAndWaitForWorkPackages up to 4 times
+func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*WorkPackageRequest) ([]common.Hash, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRobustTries; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		defer cancel()
+
+		hashes, err := n.SubmitAndWaitForWorkPackages(ctx, reqs)
+		if err == nil {
+			return hashes, nil
+		}
+		lastErr = err
+		log.Warn(module, "RobustSubmitAndWaitForWorkPackages", "attempt", attempt, "err", err)
+		// small backoff between retries
+		time.Sleep(2 * time.Second)
+	}
+	return nil, fmt.Errorf("all retries failed after %d attempts: %w", maxRobustTries, lastErr)
+}
 func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
 	workPackageHashes := make([]common.Hash, len(reqs))
 	accumulated := make(map[common.Hash]bool)

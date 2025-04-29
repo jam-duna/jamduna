@@ -10,6 +10,7 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -29,7 +30,7 @@ func makeWorkPackageRequest(coreIndex uint16, identifier string, prerequisites [
 	}
 }
 
-func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int) {
+func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int) error {
 	serviceFib := testServices["fib"]
 	serviceTrib := testServices["tribonacci"]
 	serviceMeg := testServices["megatron"]
@@ -101,10 +102,10 @@ func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int)
 		defer cancel()
 
 		wprs := []*WorkPackageRequest{wprFibTrib, wprMeg}
-		hashes, err := n1.SubmitAndWaitForWorkPackages(ctx, wprs)
+		hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, wprs)
 		if err != nil {
-			fmt.Printf("SubmitAndWaitForWorkPackages error: %v\n", err)
-			continue
+			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
+			return err
 		}
 		workPackageHashes = hashes
 
@@ -121,4 +122,5 @@ func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int)
 		printServiceOutput(serviceTrib, "trib")
 		printServiceOutput(serviceMeg, "meg")
 	}
+	return nil
 }

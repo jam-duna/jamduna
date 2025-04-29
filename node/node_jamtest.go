@@ -374,7 +374,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
 
-		_, err := bNode.SubmitAndWaitForWorkPackage(ctx, wpr)
+		_, err := RobustSubmitAndWaitForWorkPackages(ctx, bNode, []*WorkPackageRequest{wpr})
 		if err != nil {
 			t.Fatalf("SendWorkPackageSubmission ERR %v\n", err)
 		}
