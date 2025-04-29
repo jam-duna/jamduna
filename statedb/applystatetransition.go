@@ -142,7 +142,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
 	accumulateStats := make(map[uint32]*accumulateStatistics)
 
-	n, t, b, U, err := s.OuterAccumulate(ctx, gas, accumulate_input_wr, o, f)
+	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
 	if err != nil {
 		return s, err
 	}

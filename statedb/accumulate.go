@@ -2,10 +2,8 @@ package statedb
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"sort"
-	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -261,7 +259,7 @@ tant deferred-transfers and accumulation-output pairings:
 */
 // eq 173
 // ∆+
-func (s *StateDB) OuterAccumulate(ctx context.Context, g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment, GasUsage []Usage, err error) {
+func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment, GasUsage []Usage) { // not really sure i here , the max meaning. use uint32 for now
 	var gas_tmp uint64
 	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
@@ -289,15 +287,12 @@ func (s *StateDB) OuterAccumulate(ctx context.Context, g uint64, w []types.WorkR
 	if i >= uint64(len(w)) { // if i >= len(w), then all work reports are accumulated
 		i = uint64(len(w))
 	}
-	g_star, t_star, b_star, U, err := s.ParallelizedAccumulate(ctx, o, w[0:i], f) // parallelized accumulation the 0 to i work reports // parallelized accumulation the 0 to i work reports
-	if err != nil {
-		log.Error(s.Authoring, "ParallelizedAccumulate error", "error", err)
-		return
-	}
+	g_star, t_star, b_star, U := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports // parallelized accumulation the 0 to i work reports
+
 	if i >= uint64(len(w)) { // no more reports
-		return i, t_star, b_star, U, nil
+		return i, t_star, b_star, U
 	}
-	j, outputT, outputB, GasUsage, err := s.OuterAccumulate(ctx, g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
+	j, outputT, outputB, GasUsage := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
 	num = i + j
 
 	output_t = append(outputT, t_star...)
@@ -324,136 +319,92 @@ privileged always-accumulate services, into a tuple of the total gas utilized in
 */
 // the parallelized accumulation function ∆*
 // eq 174
-func (s *StateDB) ParallelizedAccumulate(
-	ctx context.Context,
-	o *types.PartialState,
-	w []types.WorkReport,
-	f map[uint32]uint32,
-) (outputU uint64, outputT []types.DeferredTransfer, outputB []BeefyCommitment, gasUsage []Usage, err error) {
-	if o == nil {
-		err = fmt.Errorf("partial state is nil")
-		return
-	}
-
-	serviceSet := make(map[uint32]struct{})
+func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32) (output_u uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment, GasUsage []Usage) {
+	GasUsage = make([]Usage, 0)
+	services := make([]uint32, 0)
 	for _, workReport := range w {
-		for _, result := range workReport.Results {
-			serviceSet[result.ServiceID] = struct{}{}
+		for _, workResult := range workReport.Results {
+			services = append(services, workResult.ServiceID)
 		}
 	}
+	output_u = 0
+	// get services from f key
 	for k := range f {
-		serviceSet[k] = struct{}{}
+		services = append(services, k)
 	}
-	services := make([]uint32, 0, len(serviceSet))
-	for service := range serviceSet {
-		services = append(services, service)
-	}
-
-	var (
-		mu          sync.Mutex
-		wg          sync.WaitGroup
-		maxParallel = 8
-		sem         = make(chan struct{}, maxParallel)
-		errOnce     sync.Once
-		cancelErr   error
-	)
-
-	gasUsage = make([]Usage, 0, len(services))
-	outputT = make([]types.DeferredTransfer, 0)
-	outputB = make([]BeefyCommitment, 0)
-
+	// remove duplicates
+	services = UniqueUint32Slice(services)
 	for _, service := range services {
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-			return
-		default:
+		// this is parallelizable
+		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service)
+		output_u += U
+		empty := common.Hash{}
+		GasUsage = append(GasUsage, Usage{
+			Service: service,
+			Gas:     U,
+		})
+		if B == empty {
+
+		} else {
+			output_b = append(output_b, BeefyCommitment{
+				Service:    service,
+				Commitment: B,
+			})
+		}
+		for s, sa := range XY.U.D {
+			if exceptional {
+				if sa.Checkpointed {
+					sa.Dirty = true
+					o.D[s] = sa
+				}
+			} else {
+				sa.Dirty = true
+				o.D[s] = sa
+			}
+		}
+		// ASSIGN
+		if s.JamState.PrivilegedServiceIndices.Kai_a == service {
+			o.QueueWorkReport = XY.U.QueueWorkReport
+		}
+		// VALIDATE
+		if s.JamState.PrivilegedServiceIndices.Kai_v == service {
+			o.UpcomingValidators = XY.U.UpcomingValidators
+		}
+		// BLESS
+		if s.JamState.PrivilegedServiceIndices.Kai_m == service {
+			o.PrivilegedState.Kai_a = XY.U.PrivilegedState.Kai_a
+			o.PrivilegedState.Kai_v = XY.U.PrivilegedState.Kai_v
+			o.PrivilegedState.Kai_m = XY.U.PrivilegedState.Kai_m
+			for k, v := range XY.U.PrivilegedState.Kai_g {
+				o.PrivilegedState.Kai_g[k] = v
+			}
 		}
 
-		wg.Add(1)
-		sem <- struct{}{}
+		output_t = append(output_t, XY.T...)
 
-		go func(service uint32) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			select {
-			case <-ctx.Done():
-				errOnce.Do(func() { cancelErr = ctx.Err() })
-				return
-			default:
-			}
-
-			B, U, xy, exceptional := s.SingleAccumulate(o, w, f, service)
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			outputU += U
-			gasUsage = append(gasUsage, Usage{
-				Service: service,
-				Gas:     U,
-			})
-
-			if B != (common.Hash{}) {
-				outputB = append(outputB, BeefyCommitment{
-					Service:    service,
-					Commitment: B,
-				})
-			}
-
-			for sKey, sa := range xy.U.D {
-				if exceptional && !sa.Checkpointed {
-					continue
-				}
-				sa.Dirty = true
-				o.D[sKey] = sa
-			}
-
-			switch service {
-			case s.JamState.PrivilegedServiceIndices.Kai_a:
-				o.QueueWorkReport = xy.U.QueueWorkReport
-			case s.JamState.PrivilegedServiceIndices.Kai_v:
-				o.UpcomingValidators = xy.U.UpcomingValidators
-			case s.JamState.PrivilegedServiceIndices.Kai_m:
-				o.PrivilegedState.Kai_a = xy.U.PrivilegedState.Kai_a
-				o.PrivilegedState.Kai_v = xy.U.PrivilegedState.Kai_v
-				o.PrivilegedState.Kai_m = xy.U.PrivilegedState.Kai_m
-				if o.PrivilegedState.Kai_g == nil {
-					o.PrivilegedState.Kai_g = make(map[uint32]uint64)
-				}
-				for k, v := range xy.U.PrivilegedState.Kai_g {
-					o.PrivilegedState.Kai_g[k] = v
+		// apply p
+		for _, p := range XY.P {
+			ServiceIndex := p.ServiceIndex
+			P_data := p.P_data
+			if ServiceIndex == service {
+				sa, ok := o.GetService(ServiceIndex)
+				if ok {
+					lookup_ok, X_s_l := sa.ReadLookup(common.Blake2Hash(P_data), uint32(len(P_data)), s)
+					if lookup_ok && len(X_s_l) == 0 {
+						sa.WriteLookup(common.Blake2Hash(P_data), uint32(len(P_data)), []uint32{s.JamState.SafroleState.Timeslot})
+						sa.WritePreimage(common.Blake2Hash(P_data), P_data)
+						sa.Dirty = true
+					}
 				}
 			}
-
-			outputT = append(outputT, xy.T...)
-
-			for _, p := range xy.P {
-				if p.ServiceIndex != service {
-					continue
-				}
-				sa, ok := o.GetService(p.ServiceIndex)
-				if !ok {
-					continue
-				}
-				hash := common.Blake2Hash(p.P_data)
-				lookupOK, lookup := sa.ReadLookup(hash, uint32(len(p.P_data)), s)
-				if lookupOK && len(lookup) == 0 {
-					sa.WriteLookup(hash, uint32(len(p.P_data)), []uint32{s.JamState.SafroleState.Timeslot})
-					sa.WritePreimage(hash, p.P_data)
-					sa.Dirty = true
-				}
-			}
-		}(service)
+		}
 	}
 
-	wg.Wait()
+	// s ∈ K(d) ∖ s
+	/*s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_m)
+	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_a)
+	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_v) */
 
-	// If cancellation was triggered inside workers
-	if cancelErr != nil {
-		err = cancelErr
-	}
 	return
 }
 
@@ -573,15 +524,14 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if !ok {
 		serviceAccount, ok, err = sd.GetService(s)
 		if err != nil || !ok {
-			// TODO
-			return
+			// how did we even get here
+			panic("Unknown service")
 		}
 	}
 	xContext := sd.NewXContext(o, s, serviceAccount)
 	ok, code := serviceAccount.ReadPreimage(codeHash, sd)
 	if !ok {
-		// TODO
-		return
+		panic("Could not read blob")
 	}
 
 	//(B.8) start point
