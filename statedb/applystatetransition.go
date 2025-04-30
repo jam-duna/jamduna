@@ -203,7 +203,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
 
 	// tally core statistics + service statistics -- the newly available work reports and incoming work reports ... along with assurances + preimages
-	//
 	s.JamState.tallyCoreStatistics(guarantees, s.AvailableWorkReport, assurances)
 	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStats)
 
@@ -365,7 +364,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	// Assurances: get the bitstring from the availability
 	// core's data is now available
 	//ρ††
-	availableWorkReport := d.ComputeAvailabilityAssignments(assurances, targetJCE)
+	availableWorkReport, num_assurances := d.ComputeAvailabilityAssignments(assurances, targetJCE)
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 

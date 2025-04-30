@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -201,7 +202,7 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 	case "assurances":
 		n.ValidatorStatistics.Current[validatorIndex].AvailabilityAssurances += cnt
 	default:
-		fmt.Println("Unknown activity:", activity)
+		log.Error(module, "tallyStatistics", "validatorIndex", validatorIndex, "cnt", cnt)
 	}
 }
 

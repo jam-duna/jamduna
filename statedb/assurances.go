@@ -29,9 +29,9 @@ func (j *JamState) CountAvailableWR(validatedAssurances []types.Assurance) ([]ui
 	return tally, num_assurances
 }
 
-func (j *JamState) ComputeAvailabilityAssignments(validatedAssurances []types.Assurance, timeslot uint32) (wr []types.WorkReport) {
+func (j *JamState) ComputeAvailabilityAssignments(validatedAssurances []types.Assurance, timeslot uint32) (wr []types.WorkReport, num_assurances map[uint16]uint16) {
 	// Count the number of available assurances for each validator on each core
-	tally, _ := j.CountAvailableWR(validatedAssurances)
+	tally, num_assurances := j.CountAvailableWR(validatedAssurances)
 	wr = make([]types.WorkReport, 0)
 	for c, available := range tally {
 		if j.AvailabilityAssignments[c] == nil {
@@ -45,7 +45,7 @@ func (j *JamState) ComputeAvailabilityAssignments(validatedAssurances []types.As
 			j.AvailabilityAssignments[c] = nil
 		}
 	}
-	return wr
+	return wr, num_assurances
 }
 
 func (s *StateDB) getWRStatus() (hasRecentWR, hasStaleWR []bool) {
