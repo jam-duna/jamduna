@@ -897,6 +897,18 @@ const (
 	maxRobustTries = 4
 )
 
+type JNode interface {
+	SetJCEManager(jceManager *ManualJCEManager) (err error)
+	GetJCEManager() (jceManager *ManualJCEManager, err error)
+	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
+	SubmitAndWaitForWorkPackages(ctx context.Context, wpr []*WorkPackageRequest) ([]common.Hash, error)
+	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
+	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
+	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
+	GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error)
+	GetSegmentsByRequestedHash(requestedHashes common.Hash) (raw_segments [][]byte, ExportedSegmentLength uint16, err error)
+}
+
 // RobustSubmitAndWaitForWorkPackages will retry SubmitAndWaitForWorkPackages up to 4 times
 func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*WorkPackageRequest) ([]common.Hash, error) {
 	var lastErr error

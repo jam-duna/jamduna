@@ -64,17 +64,10 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 func (n *Node) processGuarantee(g types.Guarantee) error {
 	// Store the guarantee in the tip's queued guarantees
 	s := n.getState()
-	err := s.ValidateSingleGuarantee(g)
+	err := s.VerifyGuaranteeBasic(g)
 	if err != nil {
-		log.Warn(debugG, "processGuarantee:ValidateSingleGuarantee", "err", err)
+		log.Warn(debugG, "processGuarantee:VerifyGuaranteeBasic", "err", err)
 		return err
-	}
-	// TODO: add tracer event
-	if n.store.SendTrace {
-		tracer := n.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] AddGuaranteeToPool", n.store.NodeID))
-		// n.UpdateGuaranteeContext(ctx)
-		defer span.End()
 	}
 
 	err = n.extrinsic_pool.AddGuaranteeToPool(g)

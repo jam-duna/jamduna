@@ -3,6 +3,7 @@ package statedb
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -80,29 +81,30 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
 	queuedGuarantees = extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
 	log.Trace(debugG, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
-	for _, guarantee := range queuedGuarantees {
-		g, err := guarantee.DeepCopy()
+	// collect and pre-validate queued guarantees
+	var valid []types.Guarantee
+	for _, q := range queuedGuarantees {
+		g, err := q.DeepCopy()
 		if err != nil {
 			continue
-		}
-		s.JamState.CheckInvalidCoreIndex()
-		err = s.Verify_Guarantee_MakeBlock(g, b, tmpState)
-		if err != nil {
-			log.Trace(debugG, "Verify_Guarantee_MakeBlock", "err", err)
-			continue
-		}
-		extrinsicData.Guarantees = append(extrinsicData.Guarantees, g)
-		select {
-		case <-ctx.Done():
-			return bl, fmt.Errorf("MakeBlock: Added Guarantee canceled")
-		default:
 		}
 
+		// per-guarantee MakeBlock checks (core index, sigs, assignment, gas, timeouts…)
+		if err := s.VerifyGuaranteeBasic(g); err != nil {
+			extrinsic_pool.RemoveOldGuarantees(g) // REVIEW
+			continue
+		}
+		valid = append(valid, g)
+		// cancellation point
+		if err := ctx.Err(); err != nil {
+			return bl, fmt.Errorf("MakeBlock: %w", err)
+		}
 	}
-	extrinsicData.Guarantees, err, _ = s.VerifyGuaranteesMakeBlock(extrinsicData.Guarantees, b)
-	if err != nil {
-		log.Trace(debugG, "VerifyGuaranteesMakeBlock", "err", err)
-	}
+	sort.Slice(valid, func(i, j int) bool {
+		return valid[i].Report.CoreIndex < valid[j].Report.CoreIndex
+	})
+	extrinsicData.Guarantees = valid
+
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()
 

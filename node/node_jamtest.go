@@ -26,18 +26,6 @@ import (
 	"time"
 )
 
-type JNode interface {
-	SetJCEManager(jceManager *ManualJCEManager) (err error)
-	GetJCEManager() (jceManager *ManualJCEManager, err error)
-	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
-	SubmitAndWaitForWorkPackages(ctx context.Context, wpr []*WorkPackageRequest) ([]common.Hash, error)
-	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
-	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
-	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
-	GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error)
-	GetSegmentsByRequestedHash(requestedHashes common.Hash) (raw_segments [][]byte, ExportedSegmentLength uint16, err error)
-}
-
 var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")

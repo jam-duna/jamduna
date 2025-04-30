@@ -143,9 +143,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	accumulateStats := make(map[uint32]*accumulateStatistics)
 
 	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
-	if err != nil {
-		return s, err
-	}
+
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
 	tau := s.GetTimeslot() // τ′
@@ -372,7 +370,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 
 	// Guarantees
-	err = s.Verify_Guarantees(ctx)
+	err = s.VerifyGuarantees(ctx)
 	if err != nil {
 		return
 	}
