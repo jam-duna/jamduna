@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -66,6 +67,9 @@ func (n *Node) processGuarantee(g types.Guarantee) error {
 	s := n.getState()
 	err := s.VerifyGuaranteeBasic(g, s.Block.TimeSlot())
 	if err != nil {
+		if !statedb.AcceptableGuaranteeError(err) {
+			return err
+		}
 		log.Warn(debugG, "processGuarantee:VerifyGuaranteeBasic", "err", err)
 		return err
 	}

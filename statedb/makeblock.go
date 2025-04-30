@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -92,14 +91,15 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 
 		// per-guarantee MakeBlock checks (core index, sigs, assignment, gas, timeouts…)
 		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
-			if err == jamerrors.ErrGFutureReportSlot || err == jamerrors.ErrGCoreEngaged {
-				// don't remove from pool in these cases!
+			if AcceptableGuaranteeError(err) {
+				// don't remove from pool if ErrGFutureReportSlot, ErrGCoreEngaged
 			} else {
 				extrinsic_pool.RemoveOldGuarantees(g)
 			}
 			continue
+		} else {
+			valid = append(valid, g)
 		}
-		valid = append(valid, g)
 		// cancellation point
 		if err := ctx.Err(); err != nil {
 			return bl, fmt.Errorf("MakeBlock: %w", err)
@@ -126,6 +126,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 		if !ok && !ok2 {
 			p_w[wph] = true       // unique by wph
 			p_c[coreIndex] = true // unique by coreindex
+
 			final = append(final, g)
 		} else {
 			extrinsic_pool.RemoveOldGuarantees(g)

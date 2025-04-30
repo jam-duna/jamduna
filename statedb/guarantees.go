@@ -48,6 +48,14 @@ func (s *JamState) SetRhoByWorkReport(core uint16, report types.WorkReport, slot
 	s.AvailabilityAssignments[int(core)] = &Rho_state{WorkReport: report, Timeslot: slot}
 }
 
+// acceptableGuaranteeError categorizes errors into "acceptable" vs "not" -- if something is acceptable, it could be in the pool *temporarily*  being invalid and later be valid and error free
+func AcceptableGuaranteeError(err error) bool {
+	if err == jamerrors.ErrGFutureReportSlot || err == jamerrors.ErrGCoreEngaged {
+		return true
+	}
+	return false
+}
+
 // VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
 func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) error {
 	// common validations
