@@ -109,6 +109,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	// inter-dependency checks among guarantees
 	var final []types.Guarantee
 	p_w := make(map[common.Hash]bool)
+	p_c := make(map[uint16]bool)
 	for _, g := range valid {
 		if err := s.checkRecentWorkPackage(g, valid); err != nil {
 			extrinsic_pool.RemoveOldGuarantees(g)
@@ -118,9 +119,13 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 			extrinsic_pool.RemoveOldGuarantees(g)
 			continue
 		}
-		_, ok := p_w[g.Report.GetWorkPackageHash()]
-		if !ok {
-			p_w[g.Report.GetWorkPackageHash()] = true
+		wph := g.Report.GetWorkPackageHash()
+		coreIndex := g.Report.CoreIndex
+		_, ok := p_w[wph]
+		_, ok2 := p_c[coreIndex]
+		if !ok && !ok2 {
+			p_w[wph] = true       // unique by wph
+			p_c[coreIndex] = true // unique by coreindex
 			final = append(final, g)
 		} else {
 			extrinsic_pool.RemoveOldGuarantees(g)
@@ -129,7 +134,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	sort.Slice(final, func(i, j int) bool {
 		return final[i].Report.CoreIndex < final[j].Report.CoreIndex
 	})
-	extrinsicData.Guarantees = valid
+	extrinsicData.Guarantees = final
 
 	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
 	// d := s.GetJamState()
