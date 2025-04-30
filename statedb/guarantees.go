@@ -48,50 +48,8 @@ func (s *JamState) SetRhoByWorkReport(core uint16, report types.WorkReport, slot
 	s.AvailabilityAssignments[int(core)] = &Rho_state{WorkReport: report, Timeslot: slot}
 }
 
-// VerifyGuarantees runs full validation on all guarantees in the block.
-func (s *StateDB) VerifyGuarantees(ctx context.Context) error {
-	// ensure global sort order
-	if err := CheckSortedGuarantees(s.Block.Extrinsic.Guarantees); err != nil {
-		return err
-	}
-
-	// per-guarantee basic+history checks
-	for _, g := range s.Block.Extrinsic.Guarantees {
-		if err := s.VerifyGuaranteeBasic(g); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("VerifyGuarantees canceled")
-		default:
-		}
-	}
-
-	// length constraint
-	if err := s.checkLength(); err != nil {
-		return err
-	}
-
-	// inter-dependency checks among guarantees
-	for _, g := range s.Block.Extrinsic.Guarantees {
-		if err := s.checkRecentWorkPackage(g, s.Block.Extrinsic.Guarantees); err != nil {
-			return err
-		}
-		if err := s.checkPrereq(g, s.Block.Extrinsic.Guarantees); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("VerifyGuarantees canceled")
-		default:
-		}
-	}
-
-	return nil
-}
-
 // VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
-func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee) error {
+func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) error {
 	// common validations
 	if err := s.checkServicesExist(g); err != nil {
 		return err
@@ -121,10 +79,10 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee) error {
 	}
 	if s.Block != nil {
 		// assignment to core
-		if err := s.checkAssignment(g, s.Block.TimeSlot()); err != nil {
+		if err := s.checkAssignment(g, targetJCE); err != nil {
 			return err
 		}
-		if err := js.checkReportTimeOut(g, s.Block.TimeSlot()); err != nil {
+		if err := js.checkReportTimeOut(g, targetJCE); err != nil {
 			return err
 		}
 	}
@@ -534,14 +492,11 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarante
 		return nil
 	}
 
-	// Combine the present block and the recent blocks
-	presentBlockSegmentRootLookup := getPresentBlock(s)
 	if len(s.JamState.RecentBlocks) == 0 {
-		fmt.Printf("Error s.JamState.RecentBlocks is nil, must have recentblock into it!\n")
 		return nil
 	}
-	log.Trace(debugG, "checkRecentWorkPackage:presentBlockSegmentRootLookup", "presentBlockSegmentRootLookup", presentBlockSegmentRootLookup, "currentSegmentRootLookUp", currentSegmentRootLookUp)
-
+	// Combine the present block and the recent blocks
+	presentBlockSegmentRootLookup := getPresentBlock(s)
 	// Check presentBlockHash2Hash include currentHash2Hash or not
 	segmentLookUpIncluded := make([]bool, len(currentSegmentRootLookUp))
 	for i, currentSegmentRootLookup := range currentSegmentRootLookUp {

@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -90,8 +91,12 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 		}
 
 		// per-guarantee MakeBlock checks (core index, sigs, assignment, gas, timeouts…)
-		if err := s.VerifyGuaranteeBasic(g); err != nil {
-			extrinsic_pool.RemoveOldGuarantees(g) // REVIEW
+		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
+			if err == jamerrors.ErrGFutureReportSlot || err == jamerrors.ErrGCoreEngaged {
+				// don't remove from pool in these cases!
+			} else {
+				extrinsic_pool.RemoveOldGuarantees(g)
+			}
 			continue
 		}
 		valid = append(valid, g)
@@ -100,8 +105,29 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 			return bl, fmt.Errorf("MakeBlock: %w", err)
 		}
 	}
-	sort.Slice(valid, func(i, j int) bool {
-		return valid[i].Report.CoreIndex < valid[j].Report.CoreIndex
+
+	// inter-dependency checks among guarantees
+	var final []types.Guarantee
+	p_w := make(map[common.Hash]bool)
+	for _, g := range valid {
+		if err := s.checkRecentWorkPackage(g, valid); err != nil {
+			extrinsic_pool.RemoveOldGuarantees(g)
+			continue
+		}
+		if err := s.checkPrereq(g, valid); err != nil {
+			extrinsic_pool.RemoveOldGuarantees(g)
+			continue
+		}
+		_, ok := p_w[g.Report.GetWorkPackageHash()]
+		if !ok {
+			p_w[g.Report.GetWorkPackageHash()] = true
+			final = append(final, g)
+		} else {
+			extrinsic_pool.RemoveOldGuarantees(g)
+		}
+	}
+	sort.Slice(final, func(i, j int) bool {
+		return final[i].Report.CoreIndex < final[j].Report.CoreIndex
 	})
 	extrinsicData.Guarantees = valid
 

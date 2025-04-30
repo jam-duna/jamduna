@@ -64,7 +64,7 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 func (n *Node) processGuarantee(g types.Guarantee) error {
 	// Store the guarantee in the tip's queued guarantees
 	s := n.getState()
-	err := s.VerifyGuaranteeBasic(g)
+	err := s.VerifyGuaranteeBasic(g, s.Block.TimeSlot())
 	if err != nil {
 		log.Warn(debugG, "processGuarantee:VerifyGuaranteeBasic", "err", err)
 		return err

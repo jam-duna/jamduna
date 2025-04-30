@@ -369,10 +369,32 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 
-	// Guarantees
-	err = s.VerifyGuarantees(ctx)
-	if err != nil {
-		return
+	// Guarantees checks
+	for _, g := range guarantees {
+		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// ensure global sort order  (sorted in makeblock)
+	if err := CheckSortedGuarantees(guarantees); err != nil {
+		return nil, nil, err
+	}
+
+	// length constraint (makeblock ensure unique wps -- CHECK)
+	if err := s.checkLength(); err != nil {
+		return nil, nil, err
+
+	}
+
+	// inter-dependency checks among guarantees
+	for _, g := range guarantees {
+		if err := s.checkRecentWorkPackage(g, guarantees); err != nil {
+			return nil, nil, err
+		}
+		if err := s.checkPrereq(g, guarantees); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	num_reports, err = d.ProcessGuarantees(ctx, guarantees)
