@@ -93,3 +93,13 @@ revm:
 	@clear
 	@echo "Running Revm tests..."
 	@go test -timeout=1h -run TestRevm -tags network_test,$(TAGS)
+
+doom:
+	@clear
+	@echo "Running Doom tests..."
+	@go test -timeout=1h -run TestDoom -tags network_test,$(TAGS)
+
+hello_world:
+	@clear
+	@echo "Running Hello-Wrold tests..."
+	@go test -timeout=1h -run TestHelloWorld -tags network_test,$(TAGS)

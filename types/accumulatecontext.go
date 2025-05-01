@@ -185,6 +185,47 @@ type AccumulateOperandElements struct {
 	D Result      `json:"D"` // d
 }
 
+func (a AccumulateOperandElements) Encode() []byte {
+	hBytes, err := Encode(a.H)
+	if err != nil {
+		return nil
+	}
+	eBytes, err := Encode(a.E)
+	if err != nil {
+		return nil
+	}
+	aBytes, err := Encode(a.A)
+	if err != nil {
+		return nil
+	}
+	oBytes, err := Encode(a.O)
+	if err != nil {
+		return nil
+	}
+	yBytes, err := Encode(a.Y)
+	if err != nil {
+		return nil
+	}
+	// for GP 0.6.5
+	gBytes := E(a.G)
+
+	dBytes, err := Encode(a.D)
+	if err != nil {
+		return nil
+	}
+
+	var out []byte
+	out = append(out, hBytes...)
+	out = append(out, eBytes...)
+	out = append(out, aBytes...)
+	out = append(out, oBytes...)
+	out = append(out, yBytes...)
+	out = append(out, gBytes...)
+	out = append(out, dBytes...)
+
+	return out
+}
+
 func (a *DeferredTransfer) Bytes() []byte {
 	enc, err := Encode(a)
 	if err != nil {

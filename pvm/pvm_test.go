@@ -224,6 +224,72 @@ func TestRevm(t *testing.T) {
 	fmt.Printf("Execution took %s\n", elapsed)
 }
 
+func TestDoom(t *testing.T) {
+	log.InitLogger("info")
+	fp := "../services/doom.pvm"
+	raw_code, err := os.ReadFile(fp)
+	if err != nil {
+		t.Fatalf("Failed to read file %s: %v", fp, err)
+		return
+	}
+	fmt.Printf("Read %d bytes from %s\n", len(raw_code), fp)
+
+	initial_regs := make([]uint64, 13)
+	initial_pc := uint64(0)
+	hostENV := NewMockHostEnv()
+	metadata := "revm_test"
+	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
+
+	a := make([]byte, 0)
+	pvm.Gas = int64(9999999999999999)
+
+	start := time.Now()
+
+	Standard_Program_Initialization(pvm, a)
+
+	// pvm.Ram.DebugStatus()
+
+	fmt.Printf("PVM start execution...\n")
+	pvm.Execute(types.EntryPointRefine, false)
+
+	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
+	elapsed := time.Since(start)
+	fmt.Printf("Execution took %s\n", elapsed)
+}
+
+func TestHelloWorld(t *testing.T) {
+	log.InitLogger("info")
+	fp := "../services/hello_world.pvm"
+	raw_code, err := os.ReadFile(fp)
+	if err != nil {
+		t.Fatalf("Failed to read file %s: %v", fp, err)
+		return
+	}
+	fmt.Printf("Read %d bytes from %s\n", len(raw_code), fp)
+
+	initial_regs := make([]uint64, 13)
+	initial_pc := uint64(0)
+	hostENV := NewMockHostEnv()
+	metadata := "revm_test"
+	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
+
+	a := make([]byte, 0)
+	pvm.Gas = int64(9999999999999999)
+
+	start := time.Now()
+
+	Standard_Program_Initialization(pvm, a)
+
+	// pvm.Ram.DebugStatus()
+
+	fmt.Printf("PVM start execution...\n")
+	pvm.Execute(types.EntryPointRefine, false)
+
+	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
+	elapsed := time.Since(start)
+	fmt.Printf("Execution took %s\n", elapsed)
+}
+
 // Helper function to compare two integer slices
 func equalIntSlices(a, b []uint64) bool {
 	if len(a) != len(b) {
