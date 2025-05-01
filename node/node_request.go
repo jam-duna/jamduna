@@ -12,6 +12,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -435,7 +436,11 @@ func (n *Node) runGuarantees() {
 		case guarantee := <-n.guaranteesCh:
 			err := n.processGuarantee(guarantee)
 			if err != nil {
-				log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+				if statedb.AcceptableGuaranteeError(err) {
+					log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+				} else {
+					log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+				}
 			}
 		}
 	}

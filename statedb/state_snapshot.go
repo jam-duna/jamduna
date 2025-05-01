@@ -1,8 +1,11 @@
 package statedb
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
@@ -47,10 +50,10 @@ type StateSnapshot struct {
 }
 
 type KeyVal struct {
-	Key        []byte `json:"k"`
-	Value      []byte `json:"v"`
-	StructType string `json:"struct_type,omitempty"`
-	Metadata   string `json:"meta,omitempty"`
+	Key        []byte `json:"key"`
+	Value      []byte `json:"value"`
+	StructType string `json:"type,omitempty"`
+	Metadata   string `json:"metadata,omitempty"`
 }
 
 type KeyVals []KeyVal
@@ -60,6 +63,14 @@ type KeyValMap map[common.Hash][]byte
 type StateSnapshotRaw struct {
 	StateRoot common.Hash `json:"state_root"`
 	KeyVals   KeyVals     `json:"keyvals"`
+}
+
+// kvAlias type for davxy traces
+type kvAlias struct {
+	Key        string `json:"key"`
+	Value      string `json:"value"`
+	StructType string `json:"type,omitempty"`
+	Metadata   string `json:"metadata,omitempty"`
 }
 
 func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
@@ -150,28 +161,48 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 }
 
 func (kv KeyVal) MarshalJSON() ([]byte, error) {
-	hexStrings := [4]string{
-		common.HexString(kv.Key),
-		common.HexString(kv.Value),
-		kv.StructType,
-		kv.Metadata,
+	aux := kvAlias{
+		Key:        common.HexString(kv.Key[0:31]), // 31 byte keys
+		Value:      common.HexString(kv.Value),
+		StructType: kv.StructType,
+		Metadata:   kv.Metadata,
 	}
-	return json.Marshal(hexStrings)
+	return json.Marshal(aux)
 }
 
 func (kv *KeyVal) UnmarshalJSON(data []byte) error {
-	var hexStrings [4]string
-	if err := json.Unmarshal(data, &hexStrings); err != nil {
+	var aux kvAlias
+	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 
-	keyBytes := common.Hex2Bytes(hexStrings[0])
-	kv.Key = keyBytes
-	valueBytes := common.Hex2Bytes(hexStrings[1])
-	kv.Value = valueBytes
-	kv.StructType = hexStrings[2]
-	kv.Metadata = hexStrings[3]
+	// strip "0x"
+	keyHex := strings.TrimPrefix(aux.Key, "0x")
+	valHex := strings.TrimPrefix(aux.Value, "0x")
 
+	// decode
+	rawKey, err := hex.DecodeString(keyHex)
+	if err != nil {
+		return fmt.Errorf("invalid hex in key %q: %w", aux.Key, err)
+	}
+
+	switch len(rawKey) {
+	case 32:
+		kv.Key = rawKey[:31]
+	case 31:
+		kv.Key = rawKey
+	default:
+		return fmt.Errorf("invalid key length: expected 31 or 32 bytes, got %d", len(rawKey))
+	}
+
+	rawVal, err := hex.DecodeString(valHex)
+	if err != nil {
+		return fmt.Errorf("invalid hex in value %q: %w", aux.Value, err)
+	}
+	kv.Value = rawVal
+
+	kv.StructType = aux.StructType
+	kv.Metadata = aux.Metadata
 	return nil
 }
 

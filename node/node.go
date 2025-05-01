@@ -2327,6 +2327,9 @@ func (n *Node) runFasterJCE() {
 				currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
 				n.SetCurrJCE(currJCE)
 				// do something with it
+			} else {
+				n.GenerateTickets(prevJCE)
+				n.BroadcastTickets(prevJCE)
 			}
 		case <-blockTicker.C:
 			prevJCE := n.GetCurrJCE()
@@ -2338,8 +2341,16 @@ func (n *Node) runFasterJCE() {
 }
 
 func (n *Node) runJCEManually() {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
+		case <-ticker.C:
+			prevJCE := n.GetCurrJCE()
+			if prevJCE >= types.EpochLength && prevJCE < types.EpochLength*2 {
+				n.GenerateTickets(prevJCE)
+				n.BroadcastTickets(prevJCE)
+			}
 		case newJCE := <-n.new_timeslot_chan:
 			time.Sleep(1500 * time.Millisecond)
 			n.SetCurrJCE(newJCE)
@@ -2400,12 +2411,12 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 		currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(stateslot)
 		_, realPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
 
-		if currEpoch > 0 && (realPhase == 0 || realPhase == types.EpochLength-1) {
+		if currEpoch > 0 && (realPhase == 0 || realPhase == types.EpochLength) {
 			// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
+			//log.Info(module, "enable ticket generation", "currJCE", currJCE, "currEpoch", currEpoch, "realPhase", realPhase)
 			n.GenerateTickets(stateslot)
 			n.BroadcastTickets(stateslot)
 		}
-
 	}
 
 }
@@ -2494,6 +2505,7 @@ func (n *Node) runAuthoring() {
 				n.author_status = "authorized"
 				continue
 			}
+			lastAuthorizableJCE = currJCE
 			if currJCE%types.EpochLength == 1 {
 				slotMap := n.statedb.GetSafrole().GetGonnaAuthorSlot(currJCE, n.credential.BandersnatchPub.Hash(), ticketIDs)
 				slotMapjson, err := json.Marshal(slotMap)
@@ -2537,13 +2549,11 @@ func (n *Node) runAuthoring() {
 			newStateDB := result.newStateDB
 
 			if !isAuthorizedBlockBuilder {
-				lastAuthorizableJCE = currJCE
 				log.Trace(debugBlock, "runAuthoring: Not Authorized", "n", n.String(), "JCE", currJCE)
 				n.author_status = "not authoring"
 				continue
 			}
 
-			lastAuthorizableJCE = currJCE
 			log.Debug(debugBlock, "runAuthoring: Authoring Block", "n", n.String(), "JCE", currJCE)
 			n.author_status = "authoring"
 			if newStateDB == nil {

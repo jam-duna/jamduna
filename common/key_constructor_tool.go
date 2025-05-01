@@ -55,7 +55,7 @@ func ComputeC_is(s uint32) Hash {
 }
 
 func ComputeC_sh(s uint32, h0 Hash) Hash {
-	// (s,h) ↦ [n0, h0, n1, h1, n2, h2, n3, h3, h4, h5, ... , h27]
+	// (s,h) ↦ [n0, h0, n1, h1, n2, h2, n3, h3, h4, h5, ... , h26, 0] -- the last 0 is NEW
 	h := h0.Bytes()
 
 	// n0, h0, n1, h1, n2, h2, n3, h3
@@ -66,7 +66,7 @@ func ComputeC_sh(s uint32, h0 Hash) Hash {
 	}
 
 	// h4..h7
-	copy(stateKey[8:32], h[4:28])
+	copy(stateKey[8:31], h[4:27])
 	return BytesToHash(stateKey[:])
 }
 

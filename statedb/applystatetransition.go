@@ -240,7 +240,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	accumulationRoot := common.Hash(tree.Root())
 	if len(leaves) > 0 {
-		log.Debug(log.GeneralAuthoring, "BEEFY accumulation root", "r", accumulationRoot)
+		log.Debug(s.Authoring, "BEEFY accumulation root", "r", accumulationRoot)
 	}
 	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
 	s.ApplyStateRecentHistory(blk, &(accumulationRoot))

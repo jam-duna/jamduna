@@ -501,6 +501,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		if err != nil {
 			log.Crit(debugSDB, "GetAllKeyValues", "err", err)
 		}
+
 		metaValue := ""
 		metaValues := make([]string, 2)
 		switch {
@@ -567,9 +568,8 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		default:
 			metaValueBytes, ok, err := t.LevelDBGet(metaKeyBytes)
 			if err != nil || !ok {
-				log.Error(module, "GetAllKeyValues: LevelDBGet", "err", err)
-			}
-			if metaValueBytes != nil {
+
+			} else if metaValueBytes != nil {
 				metaValueDecode, _, err := types.Decode(metaValueBytes, reflect.TypeOf(""))
 				if err != nil {
 					log.Error(module, "GetAllKeyValues: Decode", "err", err)
@@ -620,7 +620,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		}
 
 		keyVal := KeyVal{
-			Key:        realKey,
+			Key:        realKey, 
 			Value:      realValue,
 			StructType: metaValues[0],
 			Metadata:   metaValues[1],
@@ -691,9 +691,12 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 
 func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Hash {
 	for _, kv := range snapshotRaw.KeyVals {
-		s.trie.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
+		k := make([]byte, 32)
+		copy(k[:], kv.Key[:])
+		k[31] = 0 // pad the last byte to 0
+		s.trie.SetRawKeyVal(common.Hash(k), kv.Value)
 		if kv.Metadata != "" {
-			metaKey := fmt.Sprintf("meta_%x", kv.Key)
+			metaKey := fmt.Sprintf("meta_%x", kv.Key) // this should be 31 bytes now
 			metaKeyBytes, err := types.Encode(metaKey)
 			if err != nil {
 				log.Error(module, "UpdateAllTrieStateRaw:Encode", "err", err)
@@ -917,7 +920,7 @@ func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
 func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady(currJCE)
 	if !genesisReady {
-		log.Warn(module, "ProcessState:GenesisNotReady", "currJCE", currJCE)
+		//log.Warn(module, "ProcessState:GenesisNotReady", "currJCE", currJCE)
 		return false, nil, nil, nil
 	}
 	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady(currJCE)

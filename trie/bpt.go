@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	debug = "trie"
+	debug        = "trie"
+	stateKeySize = 32 // the "actual" size is 31 but we use common.Hash with the 32 byte being 0 INCLUDING IN METADATA right now
 )
 
 type KeyVal struct {
@@ -711,7 +712,7 @@ func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 }
 
 func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
-	stateKey := make([]byte, 32)
+	stateKey := make([]byte, stateKeySize)
 
 	switch _stateIdentifier {
 	case C1:

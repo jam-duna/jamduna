@@ -3,8 +3,10 @@ package statedb
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"math/rand"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/colorfulnotion/jam/log"
@@ -88,11 +90,12 @@ func testSTF(t *testing.T, filename string, content string) {
 		}
 		t.Errorf("❌ [%s] Test failed: %v", filename, err)
 	}
+	fmt.Printf("PostState.StateRoot %s matches\n", stf.PostState.StateRoot)
 }
 
 func TestStateTransitionSingle(t *testing.T) {
 	filename := "1_007.json"
-	content, err := ioutil.ReadFile(filename)
+	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
@@ -102,6 +105,50 @@ func TestStateTransitionSingle(t *testing.T) {
 	log.EnableModule(log.StateDBMonitoring)
 
 	testSTF(t, filename, string(content))
+}
+
+// demonstrate random STF testing
+func testSTFDir(t *testing.T, dir string) {
+	t.Helper()
+	log.InitLogger("debug")
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("failed to read dir %s: %v", dir, err)
+	}
+
+	// filter for the JSON files we care about
+	var files []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if name == "00000000.json" {
+			continue
+		}
+		files = append(files, filepath.Join(dir, name))
+	}
+	rand.Shuffle(len(files), func(i, j int) {
+		files[i], files[j] = files[j], files[i]
+	})
+
+	// run testSTF
+	for _, path := range files {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read file %s: %v", path, err)
+		}
+		testSTF(t, filepath.Base(path), string(content))
+	}
+}
+
+func TestTraces(t *testing.T) {
+	testSTFDir(t, "../jamtestvectors/traces/fallback")
+	testSTFDir(t, "../jamtestvectors/traces/safrole")
 }
 
 func TestCompareJson(t *testing.T) {

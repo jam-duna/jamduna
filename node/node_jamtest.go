@@ -116,7 +116,7 @@ func GenerateRandomBasePort() uint16 {
 func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
 	GenesisStateFile, GenesisBlockFile := GetGenesisFile(network)
-	log.InitLogger("trace")
+	log.InitLogger("debug")
 
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
 
@@ -310,8 +310,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		bNode = nodes[1]
 	}
 
-	//log.EnableModule(log.PvmAuthoring)
-	//log.EnableModule(log.FirstGuarantorOrAuditor)
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule(log.GeneralAuthoring)
 
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
