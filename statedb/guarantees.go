@@ -50,7 +50,7 @@ func (s *JamState) SetRhoByWorkReport(core uint16, report types.WorkReport, slot
 
 // acceptableGuaranteeError categorizes errors into "acceptable" vs "not" -- if something is acceptable, it could be in the pool *temporarily*  being invalid and later be valid and error free
 func AcceptableGuaranteeError(err error) bool {
-	if err == jamerrors.ErrGFutureReportSlot || err == jamerrors.ErrGCoreEngaged {
+	if err == jamerrors.ErrGFutureReportSlot || err == jamerrors.ErrGCoreEngaged || err == jamerrors.ErrGWrongAssignment {
 		return true
 	}
 	return false

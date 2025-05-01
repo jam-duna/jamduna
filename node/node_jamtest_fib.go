@@ -17,6 +17,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB START", "targetN", targetN)
 	service0 := testServices["fib"]
 	serviceAuth := testServices["auth_copy"]
+	coreIdx := uint16(0)
 
 	var prevWP common.Hash
 	for fibN := 1; fibN <= targetN; fibN++ {
@@ -61,7 +62,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("FIB(%d)", fibN),
-			CoreIndex:       0,
+			CoreIndex:       coreIdx,
 			WorkPackage:     wp,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
@@ -87,6 +88,7 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) err
 	jamKey := []byte("jam")
 	service0 := testServices["corevm"]
 	serviceAuth := testServices["auth_copy"]
+	coreIdx := uint16(1)
 
 	childSvc, _ := getServices([]string{"corevm_child"}, false)
 	childCodeHash := childSvc["corevm_child"].CodeHash
@@ -165,7 +167,7 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) err
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("FIB2(%s)", label),
-			CoreIndex:       1,
+			CoreIndex:       coreIdx,
 			WorkPackage:     wp,
 			ExtrinsicsBlobs: extrinsics,
 		}

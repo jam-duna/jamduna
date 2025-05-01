@@ -923,8 +923,12 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady(currJCE)
 	if timeSlotReady {
 		// Time to propose block if authorized
-		sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
-		isAuthorizedBlockBuilder, ticketID, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
+		sf0, err := s.GetPosteriorSafroleEntropy(targetJCE) // always be hit
+		if err != nil {
+			return false, nil, nil, err
+		}
+		isAuthorizedBlockBuilder, ticketID, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
+		currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
 		if isAuthorizedBlockBuilder {
 			// Add MakeBlock span
 			// if s.sdb.SendTrace {
@@ -937,7 +941,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 
 			proposedBlk, err := s.MakeBlock(ctx, credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
-				log.Error(module, "ProcessState:MakeBlock", "err", err)
+				log.Error(module, "ProcessState:MakeBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
 			// Add ApplyStateTransitionFromBlock span
@@ -954,27 +958,33 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				_, span := tracer.Start(s.sdb.BlockContext, fmt.Sprintf("[N%d] ProcessState -> ApplyStateTransitionFromBlock", s.sdb.NodeID), tags)
 				// oldState.sdbs.UpdateBlockContext(ctx)
 				defer span.End()
-			}*/
-
-			newStateDB, err := ApplyStateTransitionFromBlock(s, ctx, proposedBlk, nil)
+			}
+			*/
+			var used_entropy common.Hash // to avoid jump epoch
+			if proposedBlk.EpochMark() != nil {
+				used_entropy = proposedBlk.EpochMark().TicketsEntropy
+			} else {
+				used_entropy = s.GetSafrole().Entropy[2]
+			}
+			valid_tickets := extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
+			newStateDB, err := ApplyStateTransitionFromBlock(s, ctx, proposedBlk, valid_tickets) // shawn to check.. valid_tickets was nil here before
 			if err != nil {
-				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "err", err)
+				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
-			currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
 			mode := "safrole"
 			if sf0.GetEpochT() == 0 {
 				mode = "fallback"
 			}
-			log.Info(module, "proposeBlock", "mode", mode, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
+			log.Info(module, "proposeBlock", "mode", mode, "s.ID", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}
-		log.Trace(module, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
+		log.Debug(log.BlockMonitoring, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticket", len(ticketIDs), "isAuthorizedBlockBuilder", isAuthorizedBlockBuilder)
 		return false, nil, nil, nil
 	}
 	//waiting for block ... potentially submit ticket here
-	log.Debug(module, "ProcessState:NotAuthorizedBlockBuilder", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
+	log.Debug(log.BlockMonitoring, "ProcessState:NotAuthorizedBlockBuilder", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
 	return false, nil, nil, nil
 }
 
@@ -1114,8 +1124,11 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	validatorIdx = h.AuthorIndex
 
 	// ValidateTicketTransition
-	sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
-
+	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
+	if err != nil {
+		log.Error(module, "GetPosteriorSafroleEntropy", "err", err)
+		return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: GetPosteriorSafroleEntropy")
+	}
 	// author_idx is the K' so we use the sf_tmp
 	signing_validator := sf0.GetCurrValidator(int(validatorIdx))
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
@@ -1162,8 +1175,11 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 	header.ExtrinsicHash = newBlock.Extrinsic.Hash()
 
 	// Validate ticket transition
-	sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
-
+	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
+	if err != nil {
+		log.Error(module, "GetPosteriorSafroleEntropy", "err", err)
+		return nil, fmt.Errorf("SealBlockWithEntropy Failed: GetPosteriorSafroleEntropy")
+	}
 	// Prepare a container to store all intermediate values for debugging / auditing
 	material := &SealBlockMaterial{
 		BlockAuthorPub:  fmt.Sprintf("%x", blockAuthorPub[:]),
@@ -1272,8 +1288,11 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 func (s *StateDB) ValidateVRFSealInput(ticketID common.Hash, targetJCE uint32) (bool, error) {
 
 	// ValidateTicketTransition
-	sf0 := s.GetPosteriorSafroleEntropy(targetJCE)
-
+	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
+	if err != nil {
+		log.Error(module, "GetPosteriorSafroleEntropy", "err", err)
+		return false, fmt.Errorf("ValidateVRFSealInput Failed: GetPosteriorSafroleEntropy")
+	}
 	if sf0.GetEpochT() == 0 {
 		return true, nil
 	}

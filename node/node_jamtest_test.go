@@ -38,6 +38,35 @@ const (
 
 var targetNum = flag.Int("targetN", -1, "targetN")
 
+func initPProf(t *testing.T) {
+	// CPU profile
+	cpuF, err := os.Create("cpu.pprof")
+	if err != nil {
+		t.Fatalf("could not create cpu profile: %v", err)
+	}
+	if err := pprof.StartCPUProfile(cpuF); err != nil {
+		t.Fatalf("could not start cpu profile: %v", err)
+	}
+	// ensure we stop CPU profiling and close file
+	t.Cleanup(func() {
+		pprof.StopCPUProfile()
+		cpuF.Close()
+	})
+
+	// heap profile
+	memF, err := os.Create("mem.pprof")
+	if err != nil {
+		t.Fatalf("could not create mem profile: %v", err)
+	}
+	// write heap at end
+	t.Cleanup(func() {
+		if err := pprof.WriteHeapProfile(memF); err != nil {
+			t.Fatalf("could not write heap profile: %v", err)
+		}
+		memF.Close()
+	})
+}
+
 // IMPORTANT:
 // THIS FILE IS THE DEPLOYER FOR JAM TEST
 // DONT PUT ANY INTERNAL TEST LOGIC HERE. KEEP IT SIMPLE!
@@ -51,6 +80,7 @@ func TestSafrole(t *testing.T) {
 }
 
 func TestFib(t *testing.T) {
+	initPProf(t)
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -59,6 +89,7 @@ func TestFib(t *testing.T) {
 }
 
 func TestFib2(t *testing.T) {
+	initPProf(t)
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -74,32 +105,7 @@ func TestAuthCopy(t *testing.T) {
 	jamtest(t, "auth_copy", targetN)
 }
 func TestMegatron(t *testing.T) {
-	// Open file to save CPU Profile
-	//fmt.Printf("prereq_test: %v\n", *prereq_test)
-	//fmt.Printf("authoring_log: %v\n", *authoring_log)
-
-	cpuProfile, err := os.Create("cpu.pprof")
-	if err != nil {
-		t.Fatalf("Unable to create CPU Profile file: %v", err)
-	}
-	defer cpuProfile.Close()
-	// Start CPU Profile
-	if err := pprof.StartCPUProfile(cpuProfile); err != nil {
-		t.Fatalf("Unable to start CPU Profile: %v", err)
-	}
-	defer pprof.StopCPUProfile() // Stop profiling after test completion
-
-	// Generate memory Profile
-	memProfile, err := os.Create("mem.pprof")
-	if err != nil {
-		t.Fatalf("Unable to create memory Profile file: %v", err)
-	}
-	defer memProfile.Close()
-
-	if err := pprof.WriteHeapProfile(memProfile); err != nil {
-		t.Fatalf("Unable to write memory Profile: %v", err)
-	}
-
+	initPProf(t)
 	targetN := TargetedN_Mega_S
 	if *targetNum > 0 {
 		targetN = *targetNum

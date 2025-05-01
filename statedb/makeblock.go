@@ -172,7 +172,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 
 		} else {
-			next_n2 := s.JamState.SafroleState.GetNextN2()
+			next_n2 := s.JamState.SafroleState.GetNextN2() // !!!! Shawn to check: this is n1 when phase = 11
 			tmp_accumulator := make([]types.TicketBody, len(s.JamState.SafroleState.NextEpochTicketsAccumulator))
 			copy(tmp_accumulator, s.JamState.SafroleState.NextEpochTicketsAccumulator)
 			// remove the tickets that already in state from the pool
@@ -180,8 +180,8 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 				extrinsic_pool.RemoveTicketFromPool(ticket.Id, next_n2)
 			}
 			// get the clean tickets out from the pool
-			tickets := extrinsic_pool.GetTicketsFromPool(next_n2)
-			SortTicketsById(tickets) // first include the better id
+			tickets := extrinsic_pool.GetTicketsFromPool(next_n2) // Shawn to check the the next_n2 here correct?
+			SortTicketsById(tickets)                              // first include the better id
 			if len(tickets) > types.MaxTicketsPerExtrinsic {
 				tickets = tickets[:types.MaxTicketsPerExtrinsic]
 			}
@@ -203,6 +203,8 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 				}
 				if TicketInTmpAccumulator(ticketID, tmp_accumulator) {
 					extrinsicData.Tickets = append(extrinsicData.Tickets, t)
+					// shawn to check: should we remove tickets here after inclusion? so that even if tickets are "bad" - they wont get proposed repeatedly
+					//extrinsic_pool.RemoveTicketFromPool(ticketID, next_n2)
 				} else {
 					extrinsic_pool.RemoveTicketFromPool(ticketID, next_n2)
 				}

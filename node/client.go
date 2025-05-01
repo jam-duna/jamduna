@@ -462,6 +462,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 
 func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
 	workPackageHashes := make([]common.Hash, len(reqs))
+	workPackageLastStatus := make(map[common.Hash]string)
 
 	identifierToIndex := make(map[string]int)
 	// Initialize refine context and identifier map
@@ -495,6 +496,8 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 	for i, req := range reqs {
 		hash := req.WorkPackage.Hash()
 		workPackageHashes[i] = hash
+		workPackageLastStatus[hash] = "pending"
+
 		c.Subscribe(SubWorkPackage, map[string]interface{}{
 			"hash": fmt.Sprintf("%s", hash),
 		})
@@ -502,6 +505,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			log.Warn(module, "Failed to submit work package", "identifier", req.Identifier, "err", err)
 			return workPackageHashes, err
 		}
+		workPackageLastStatus[hash] = "submitted"
 		log.Info(module, "Subscribe", "id", req.Identifier, "h", hash, "core", req.CoreIndex, "prereqids", req.Prerequisites, "h", req.WorkPackage.RefineContext.Prerequisites)
 	}
 
@@ -509,7 +513,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	states := time.NewTicker(6 * time.Second)
+	states := time.NewTicker(types.SecondsPerSlot * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -524,7 +528,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 					for _, ah := range state.AccumulationHistory {
 						for _, h := range ah.WorkPackageHash {
 							if workPackageHash == h {
-								log.Info(module, fmt.Sprintf("Work package %s accumulated", workPackageHash.Hex()))
+								log.Info(module, "Work package accumulated", "hash", workPackageHash.Hex())
 								numacc++
 							}
 						}
@@ -540,10 +544,15 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			for _, workPackageHash := range workPackageHashes {
 				if status, ok := c.WorkPackage[workPackageHash]; ok {
 					if status == "accumulated" {
-						log.Info(module, fmt.Sprintf("Work package %s", status), "hash", workPackageHash.Hex())
+						log.Info(module, "Work package accumulated", "hash", workPackageHash.Hex())
 						numacc++
+					} else if status == "guaranteed" {
+						if workPackageLastStatus[workPackageHash] == "submitted" {
+							workPackageLastStatus[workPackageHash] = "guaranteed"
+							log.Info(module, "Work package guaranteed", "hash", workPackageHash.Hex())
+						}
 					} else {
-						log.Info(module, fmt.Sprintf("Work package %s", status), "hash", workPackageHash.Hex())
+						log.Info(module, fmt.Sprintf("Work package status:%s", status), "hash", workPackageHash.Hex())
 					}
 				}
 			}

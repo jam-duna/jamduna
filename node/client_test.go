@@ -60,10 +60,10 @@ func TestCommands(t *testing.T) {
 	defer client.Close()
 	// client.BroadcastCommand([]string{"SetFlag", "audit", "true"}, []int{5})
 	// client.BroadcastCommand([]string{"SetFlag", "audit", "false"}, []int{5})
-	client.BroadcastCommand([]string{"SetFlag", "ticket_send", "true"}, []int{})
+	// client.BroadcastCommand([]string{"SetFlag", "ticket_send", "true"}, []int{})
 	// client.BroadcastCommand([]string{"SetLog", log.GeneralAuthoring, "true"}, []int{})
 	// client.SendCommand([]string{"StackTrace"}, 1)
-	// client.SendCommand([]string{"GetNodeStatus"}, 3)
+	client.SendCommand([]string{"GetNodeStatus"}, 3)
 
 }
 

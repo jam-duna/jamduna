@@ -131,7 +131,6 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 			*res = fmt.Sprintf("Error marshalling node status: %s", err)
 		}
 		*res = string(nodeStatusJson)
-
 	default:
 		*res = fmt.Sprintf("Unknown command %s", command)
 		return fmt.Errorf("Unknown command %s", command)
@@ -932,7 +931,6 @@ func (j *Jam) Decode(req []string, res *string) error {
 
 // server ========================================
 func (n *Node) StartRPCServer(validatorIndex int) {
-	n.NodeContent.nodeSelf = n
 	n.NodeContent.startRPCServerImpl(validatorIndex)
 }
 

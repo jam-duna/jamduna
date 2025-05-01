@@ -180,24 +180,30 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 	headerHash := blockAnnouncement.Header.HeaderHash()
 	parentHash := blockAnnouncement.Header.ParentHeaderHash
 	var mode int
+	const (
+		OneBlockMode     = 0
+		AllBlocksMode    = 1
+		MiddleBlocksMode = 2
+	)
 	var num uint32
 	if _, ok := n.block_tree.GetBlockNode(parentHash); ok {
-		mode = 0
+		mode = OneBlockMode
 	} else if len(n.block_tree.TreeMap) == 1 {
-		mode = 1
+		mode = AllBlocksMode
 	} else {
 		finalized_block := n.block_tree.GetLastFinalizedBlock()
 		finalized_block_slot := finalized_block.Block.Header.Slot
 		if finalized_block_slot < blockAnnouncement.Header.Slot {
 			num = blockAnnouncement.Header.Slot - finalized_block_slot
-			mode = 2
+			mode = MiddleBlocksMode
 		} else {
 			return nil, errors.New("block announcement is too old")
 		}
 	}
 	var lastErr error
 	var blocksRaw []types.Block
-	for attempt := 1; attempt <= 3; attempt++ {
+	maxAttempts := 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Respect cancellation early
 		select {
 		case <-ctx.Done():
@@ -209,17 +215,15 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		attemptCtx, cancel := context.WithTimeout(ctx, NormalTimeout)
 		defer cancel()
 		switch mode {
-		case 0:
+		case OneBlockMode:
 			blocksRaw, lastErr = p.GetOneBlock(headerHash, attemptCtx)
-		case 1:
+		case AllBlocksMode:
 			blocksRaw, lastErr = p.GetAllBlocks(headerHash, attemptCtx)
-			log.Warn(log.BlockMonitoring, "GetAllBlocks", "blockHash", headerHash, "blocksRaw", len(blocksRaw), "isSync", false)
+			log.Warn(log.BlockMonitoring, "GetAllBlocks", "attempt", attempt, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
 			n.SetIsSync(false, "no blocks")
-		case 2:
+		case MiddleBlocksMode:
 			blocksRaw, lastErr = p.GetMiddleBlocks(headerHash, num, attemptCtx)
-			log.Warn(log.BlockMonitoring, "GetMiddleBlocks",
-				"num", num,
-				"blockHash", headerHash, "blocksRaw", blocksRaw, "isSync", false)
+			log.Warn(log.BlockMonitoring, "GetMiddleBlocks", "attempt", attempt, "num", num, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
 			n.SetIsSync(false, "behind others")
 		default:
 			return nil, fmt.Errorf("invalid mode %d", mode)
@@ -250,9 +254,9 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 			break
 		}
 
-		if attempt == 3 {
-			log.Warn(module, "SendBlockRequest failed after 3 attempts", "blockHash", headerHash, "lastErr", lastErr)
-			return nil, fmt.Errorf("SendBlockRequest failed after 3 attempts: %w", lastErr)
+		if attempt == maxAttempts {
+			log.Warn(module, "SendBlockRequest failed after 3 attempts", "mode", mode, "blockHash", headerHash, "lastErr", lastErr)
+			return nil, fmt.Errorf("SendBlockRequest failed after 3 attempts with mode=%v: %w", mode, lastErr)
 		}
 	}
 	for i := len(blocksRaw) - 1; i >= 0; i-- {
@@ -352,6 +356,8 @@ func (n *Node) runReceiveBlock() {
 			}
 			if latest_block == nil || received_blk_slot > latest_block.Slot {
 				n.SetLatestBlockInfo(&newinfo, "latest block")
+			} else {
+				continue //once it's enough, we don't need to process it;
 			}
 			start := time.Now()
 			blockCtx, cancel := context.WithTimeout(context.Background(), SmallTimeout)

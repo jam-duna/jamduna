@@ -310,7 +310,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		bNode = nodes[1]
 	}
 
-	log.EnableModule(log.PvmAuthoring)
+	//log.EnableModule(log.PvmAuthoring)
 	//log.EnableModule(log.FirstGuarantorOrAuditor)
 
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")

@@ -188,7 +188,7 @@ func (n *Node) cleanUseless(header_hash common.Hash) {
 	return
 }
 
-func (n *Node) runAudit() {
+func (n *Node) runAuditAnnouncementJudgement() {
 	for {
 		select {
 		case announcement := <-n.announcementsCh:
@@ -201,6 +201,13 @@ func (n *Node) runAudit() {
 			if err != nil {
 				fmt.Printf("%s processJudgement: %v\n", n.String(), err)
 			}
+		}
+	}
+}
+
+func (n *Node) runAudit() {
+	for {
+		select {
 		case audit_statedb := <-n.auditingCh:
 			go func(audit_statedb *statedb.StateDB) {
 				headerHash := audit_statedb.GetHeaderHash()
@@ -219,8 +226,8 @@ func (n *Node) runAudit() {
 					log.Trace(debugAudit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
-					log.Debug(debugAudit, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
-
+					log.Debug(debugBlock, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
+					// sourabh don't disable until it's stable I need this to tell if the audit is running
 					newBlock := audit_statedb.Block.Copy()
 					if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
 						n.StartGrandpa(newBlock.Copy())

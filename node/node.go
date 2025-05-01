@@ -16,6 +16,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base32"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -337,7 +338,7 @@ func (n *Node) GetLatestBlockInfo() *JAMSNP_BlockInfo {
 func (n *Node) SetLatestBlockInfo(block *JAMSNP_BlockInfo, where string) {
 	// n.latest_block_mutex.Lock()
 	// defer n.latest_block_mutex.Unlock()
-	log.Debug(debugBlock, "SetLatestBlockInfo", "n", n.String(), "block_hash", block.HeaderHash.Hex(), "where", where)
+	log.Debug(debugBlock, "SetLatestBlockInfo", "n", n.String(), "slot", block.Slot, "block_hash", block.HeaderHash.Hex(), "where", where)
 	n.latest_block = block
 	return
 }
@@ -488,6 +489,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 		connectedPeers: make(map[uint16]bool),
 	}
+	node.NodeContent.nodeSelf = node
 	block := statedb.NewBlockFromFile(genesisBlockFile)
 	node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
 		Parent:    nil,
@@ -690,6 +692,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		if Audit {
 			node.AuditFlag = true
 			go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+			go node.runAuditAnnouncementJudgement()
 		} else {
 			node.AuditFlag = false
 		}
@@ -1545,12 +1548,12 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 				tranche := a.Announcement.Tranche
 				if tranche == 0 {
 					if err := peer.SendAuditAnnouncement(ctx, a.Announcement, a.EvidenceTranche0); err != nil {
-						log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
+						log.Warn(debugStream, "SendAuditAnnouncement", "n", n.String(), "tranche0", tranche, "err", err)
 						return
 					}
 				} else {
 					if err := peer.SendAuditAnnouncement(ctx, a.Announcement, a.EvidenceTrancheN); err != nil {
-						log.Error(debugStream, "SendAuditAnnouncement", "n", n.String(), "err", err)
+						log.Warn(debugStream, "SendAuditAnnouncement", "n", n.String(), "tranche", tranche, "err", err)
 						return
 					}
 				}
@@ -1644,6 +1647,7 @@ func (n *Node) extendChain(ctx context.Context) error {
 	latestStateDB := n.statedb
 	if latestStateDB.Block == nil {
 		n.statedbMutex.Unlock()
+		log.Warn(debugBlock, "extendChain", "SyncState", "latestStateDB.Block is nil")
 		return nil
 	}
 	currentHash := latestStateDB.Block.Header.Hash()
@@ -1680,7 +1684,6 @@ func (n *Node) extendChain(ctx context.Context) error {
 				return fmt.Errorf("extendChain: ApplyFirstBlock failed: %w", err)
 			}
 		}
-		return nil
 	}
 
 	// Traverse and apply all descendants
@@ -1700,6 +1703,7 @@ func (n *Node) extendChain(ctx context.Context) error {
 
 func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node) error {
 	for _, child := range node.Children {
+		start := time.Now()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -1711,6 +1715,13 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 		}
 		if err := n.applyChildrenRecursively(ctx, child); err != nil {
 			return err
+		}
+		applyChildrenElapsed := common.ElapsedStr(start)
+		if applyChildrenElapsed > 1*time.Second {
+			log.Debug(debugBlock, "applyChildrenRecursively elapsed", "n", n.String(),
+				"child", child.Block.Header.Hash().String_short(),
+				"applyChildrenElapsed", applyChildrenElapsed,
+			)
 		}
 	}
 	return nil
@@ -1724,29 +1735,28 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// 	}
 	// }
 	// 1. Prepare recovered state from parent
+	start := time.Now()
 	recoveredStateDB := n.statedb.Copy()
 	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
+	recoveredStateDB.UnsetPosteriorEntropy()
 	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
 	recoveredStateDB.Block = nextBlock
+	recoverElapsed := common.ElapsedStr(start)
 	var used_entropy common.Hash
 	if nextBlock.EpochMark() != nil {
 		used_entropy = nextBlock.EpochMark().TicketsEntropy
 	} else {
 		used_entropy = recoveredStateDB.GetSafrole().Entropy[2]
 	}
+	start = time.Now()
 	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
 	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, valid_tickets)
+	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
-	log.Debug(log.BlockMonitoring, "Applied Block", "n", n.String(),
-		"p", nextBlock.Header.ParentHeaderHash.String_short(),
-		"->block", nextBlock.Header.Hash().String_short(),
-		"slot", nextBlock.Header.Slot,
-		"stateRoot", newStateDB.StateRoot.String_short(),
-		"author", nextBlock.Header.AuthorIndex,
-	)
+	start = time.Now()
 	// newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
@@ -1754,7 +1764,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 
 	// 2. Update services for new state
 	n.updateServiceMap(newStateDB, nextBlock)
-
+	updateServiceElapsed := common.ElapsedStr(start)
 	// 3. Async write of debug state — optionally cancelable
 	go func() {
 		st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
@@ -1776,11 +1786,12 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 			log.Error(module, "writeDebug: Snapshot", "err", err)
 		}
 	}()
-
+	start = time.Now()
 	// 4. Extend the chain
 	n.addStateDB(newStateDB)
-
+	addStateDBElapsed := common.ElapsedStr(start)
 	// 5. Finalization logic
+	start = time.Now()
 	n.statedbMapMutex.Lock()
 	defer n.statedbMapMutex.Unlock()
 	mini_peers := 2
@@ -1820,10 +1831,24 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		log.Info(debugStream, "ApplyBlock: latest_block not equal to nextBlock", "n", n.String(), "latest_block", latest_block_info.HeaderHash.String_short(), "nextBlock", nextBlock.Header.Hash().String_short())
 	}
 	nextBlockNode.Applied = true
-
+	log.Debug(log.BlockMonitoring, "Applied Block", "n", n.String(),
+		"p", nextBlock.Header.ParentHeaderHash.String_short(),
+		"->block", nextBlock.Header.Hash().String_short(),
+		"slot", nextBlock.Header.Slot,
+		"stateRoot", newStateDB.StateRoot.String_short(),
+		"author", nextBlock.Header.AuthorIndex,
+	)
 	// 6. Cleanup used extrinsics
 	isClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 	n.extrinsic_pool.RemoveUsedExtrinsicFromPool(nextBlock, n.statedb.GetSafrole().Entropy[2], isClosed)
+	finalElapsed := common.ElapsedStr(start)
+	log.Debug(debugBlock, "ApplyBlock elapsed", "n", n.String(),
+		"recoverElapsed", recoverElapsed,
+		"stateTransitionElapsed", stateTransitionElapsed,
+		"updateServiceElapsed", updateServiceElapsed,
+		"addStateDBElapsed", addStateDBElapsed,
+		"finalElapsed", finalElapsed,
+	)
 	return nil
 }
 
@@ -2389,11 +2414,11 @@ func (n *Node) SetCompletedJCE(completedCurrJCE uint32) {
 	n.completedJCEMutex.Lock()
 	defer n.completedJCEMutex.Unlock()
 	prevCompletedJCE := n.completedJCE
-	if (prevCompletedJCE >= 0) && (prevCompletedJCE > completedCurrJCE) {
+	if (prevCompletedJCE > 0) && (prevCompletedJCE > completedCurrJCE) && n.jceMode != JCEDefault {
 		log.Error(module, "Invalid JCE: currJCE is less than previous JCE", "prevCompletedJCE", prevCompletedJCE, "completedCurrJCE", completedCurrJCE)
 		return
 	}
-	//fmt.Printf("Node %d: Update completed CurrJCE %d\n", n.id, completedCurrJCE)
+	//fmt.Printf("Node %d: Update completed JCE %d\n", n.id, completedCurrJCE)
 	n.completedJCE = completedCurrJCE
 }
 
@@ -2461,18 +2486,22 @@ func (n *Node) runAuthoring() {
 			}
 
 			currJCE := n.GetCurrJCE()
+
 			_, currPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
-
-			ticketIDs, err := n.GetSelfTicketsIDs(currPhase)
-			if err != nil {
-				fmt.Printf("runAuthoring: GetSelfTicketsIDs error: %v\n", err)
-			}
-
+			epochChange := n.statedb.GetSafrole().EpochChanged(currJCE)
+			ticketIDs, _ := n.GetSelfTicketsIDs(currPhase, epochChange)
 			if currJCE == lastAuthorizableJCE {
 				n.author_status = "authorized"
 				continue
 			}
-
+			if currJCE%types.EpochLength == 1 {
+				slotMap := n.statedb.GetSafrole().GetGonnaAuthorSlot(currJCE, n.credential.BandersnatchPub.Hash(), ticketIDs)
+				slotMapjson, err := json.Marshal(slotMap)
+				if err != nil {
+					log.Error(module, "runAuthoring: Marshal error", "err", err)
+				}
+				log.Debug(debugBlock, "runAuthoring: Gonna Author Slot", "n", n.String(), "slotMap", string(slotMapjson))
+			}
 			makeblock_start := time.Now()
 
 			type processResult struct {
@@ -2543,6 +2572,7 @@ func (n *Node) runAuthoring() {
 			}
 			nodee.Applied = true
 			n.broadcast(context.Background(), *newBlock)
+			log.Debug(module, "runAuthoring: broadcast", "n", n.String(), "slot", newBlock.Header.Slot)
 			go func() {
 				timeslot := newStateDB.GetSafrole().Timeslot
 				if err := n.writeDebug(newBlock, timeslot); err != nil {

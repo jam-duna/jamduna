@@ -66,6 +66,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// TODO - 4.12 - Dispute
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	sf := s.GetSafrole()
+	// Shawn to check: should it be sf0 here?
 	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
 	s2, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {

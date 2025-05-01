@@ -10,18 +10,21 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *Node) GetSelfTicketsIDs(currPhase uint32) ([]common.Hash, error) {
+func (n *Node) GetSelfTicketsIDs(currPhase uint32, isEpochChanged bool) ([]common.Hash, error) {
 	n.ticketsMutex.Lock()
 	defer n.ticketsMutex.Unlock()
 	ticketsId := make([]common.Hash, 0)
 	usedEntropy := n.statedb.GetSafrole().Entropy[3]
-	if currPhase == 0 {
+	if isEpochChanged {
 		usedEntropy = n.statedb.GetSafrole().Entropy[2]
 	}
 	for _, ticketbucket := range n.selfTickets[usedEntropy] {
 		//pre-calculated ticket id
 		ID := ticketbucket.TicketID
 		ticketsId = append(ticketsId, ID)
+	}
+	if len(ticketsId) == 0 {
+		return nil, fmt.Errorf("no tickets found")
 	}
 	return ticketsId, nil
 }

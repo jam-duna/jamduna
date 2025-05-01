@@ -81,7 +81,7 @@ func (s *StateDB) CalculateAssignments(slot uint32) (PreviousGuarantorAssignment
 
 	// uses (a) entropy[2] and timeslot to update s.GuarantorAssignments
 	//sf_tmp, _, _ := s.GetSafrole().SafroleTmpTransition(slot)
-	sf_tmp := s.GetPosteriorSafroleEntropy(slot) // Not sure ...
+	sf_tmp, _ := s.GetPosteriorSafroleEntropy(slot) // Not sure ...
 	assignments := make([]types.GuarantorAssignment, 0)
 	entropy := sf_tmp.Entropy[2]
 	t := slot

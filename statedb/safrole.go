@@ -102,6 +102,10 @@ type TicketEnvelope struct {
 
 type Entropy [types.EntropySize]common.Hash
 
+func (e Entropy) String() string {
+	return fmt.Sprintf("Entropy: n0=%v | n1=%v n2=%v | n3=%v", e[0], e[1], e[2], e[3])
+}
+
 type SafroleState struct {
 	Id             uint16 `json:"Id"`
 	EpochFirstSlot uint32 `json:"EpochFirstSlot"`
@@ -562,15 +566,15 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 		if err == nil {
 			return common.BytesToHash(ticket_id), nil
 		} else {
-			// fmt.Printf("ERR %v\n", err)
-			// fmt.Printf("target_epoch_randomness: %v\n", targetEpochRandomness)
-			// fmt.Printf("attempt: %d\n", t.Attempt)
-			// fmt.Printf("ticket_signature: %x\n", t.Signature)
+			fmt.Printf("ERR %v\n", err)
+			fmt.Printf("target_epoch_randomness: %v\n", targetEpochRandomness)
+			fmt.Printf("attempt: %d\n", t.Attempt)
+			fmt.Printf("ticket_signature: %x\n", t.Signature)
 		}
 	}
 
 	ticketID, _ := t.TicketID()
-	fmt.Printf("Failed to validate ticket %s\n", ticketID.String())
+	fmt.Printf("Failed to validate ticket %s | %s\n", ticketID.String(), t.String())
 	return common.Hash{}, jamerrors.ErrTBadRingProof
 }
 
@@ -720,28 +724,68 @@ func (s *SafroleState) GetEpochT() int {
 }
 
 // eq 59
-func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub common.Hash, ticketIDs []common.Hash) (bool, common.Hash, uint8) {
+func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub common.Hash, ticketIDs []common.Hash) (bool, common.Hash, uint8, string) {
 
 	_, currPhase := s.EpochAndPhase(slot_index)
 	//TicketsOrKeys
 	t_or_k := s.TicketsOrKeys
+	var mode string
 	if len(t_or_k.Tickets) == types.EpochLength {
+		mode = "tickets"
 		winning_ticket_id := s.GetPrimaryWinningTicket(slot_index)
 		for _, ticketID := range ticketIDs {
 			if ticketID == winning_ticket_id.Id {
-
-				return true, ticketID, winning_ticket_id.Attempt
+				return true, ticketID, winning_ticket_id.Attempt, "safrole author"
 			}
 		}
 		// should not reach here if the ticket is valid
-	} else {
+	} else if len(t_or_k.Keys) > 0 {
 		//fallback mode
+		mode = "keys"
 		fallback_validator := s.GetFallbackValidator(currPhase)
 		if fallback_validator == bandersnatchPub {
-			return true, common.Hash{}, 0
+			return true, common.Hash{}, 0, "fallback author"
+		}
+	} else {
+		log.Warn(module, "no way hit here", "slot_index", slot_index, "bandersnatchPub", bandersnatchPub.String(), "currPhase", currPhase, "t_or_k.Tickets", len(t_or_k.Tickets), "t_or_k.Keys", len(t_or_k.Keys))
+		if mode == "tickets" {
+			tickets_json, _ := json.Marshal(t_or_k.Tickets)
+			log.Warn(module, "no way hit here", "tickets_json", string(tickets_json))
+		} else if mode == "keys" {
+			keys_json, _ := json.Marshal(t_or_k.Keys)
+			log.Warn(module, "no way hit here", "keys_json", string(keys_json))
+		}
+		return false, common.Hash{}, 0, "no way hit here"
+	}
+	return false, common.Hash{}, 0, "not authorized"
+}
+
+func (s *SafroleState) GetGonnaAuthorSlot(first_slot_index uint32, bandersnatchPub common.Hash, ticketIDs []common.Hash) map[uint32]common.Hash {
+
+	//TicketsOrKeys
+	slotMap := make(map[uint32]common.Hash)
+	t_or_k := s.TicketsOrKeys
+	first_slot_index = first_slot_index - 1
+	if len(t_or_k.Tickets) == types.EpochLength {
+		for i := 0; i < types.EpochLength; i++ {
+			winning_ticket_id := s.GetPrimaryWinningTicket(first_slot_index + uint32(i))
+			for _, ticketID := range ticketIDs {
+				if ticketID == winning_ticket_id.Id {
+					slotMap[first_slot_index+uint32(i)] = ticketID
+				}
+			}
+			// should not reach here if the ticket is valid
+		}
+	} else {
+		//fallback mode
+		for i := 0; i < types.EpochLength; i++ {
+			fallback_validator := s.GetFallbackValidator(uint32(i))
+			if fallback_validator == bandersnatchPub {
+				slotMap[first_slot_index+uint32(i)] = common.Hash{}
+			}
 		}
 	}
-	return false, common.Hash{}, 0
+	return slotMap
 }
 
 func (s *SafroleState) CheckTimeSlotReady(currJCE uint32) (uint32, bool) {
@@ -834,6 +878,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 
 	ticketBodies, err := s.ValidateSaforle(tickets, targetJCE, header, validated_tickets)
 	if err != nil {
+		fmt.Printf("ApplyStateTransitionTickets ValidateSafrole len(E_T)=%d | len(validated_tickets)=%d. Err=%v", len(tickets), len(validated_tickets), err)
 		return *s, err
 	}
 
@@ -872,15 +917,23 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 	return s2, nil
 }
 
-func (s *StateDB) GetPosteriorSafroleEntropy(targetJCE uint32) *SafroleState {
+func (s *StateDB) GetPosteriorSafroleEntropy(targetJCE uint32) (*SafroleState, error) {
 	epochChanged := s.GetSafrole().EpochChanged(targetJCE)
-	if s.posteriorSafroleEntropy != nil && !epochChanged {
-		return s.posteriorSafroleEntropy
-	}
+	// if s.posteriorSafroleEntropy != nil && !epochChanged {
+	// 	return s.posteriorSafroleEntropy
+	// }
 	sf := s.GetSafrole()
-	simulated_posteriorSafroleEntropy, _, _ := sf.SimulatePostiorEntropy(targetJCE)
+	simulated_posteriorSafroleEntropy, _, err := sf.SimulatePostiorEntropy(targetJCE)
+	if err != nil {
+		return nil, fmt.Errorf("GetPosteriorSafroleEntropy SimulatePostiorEntropy %v", err)
+	}
 	s.posteriorSafroleEntropy = simulated_posteriorSafroleEntropy
-	return simulated_posteriorSafroleEntropy
+	log.Debug(log.BlockMonitoring, "GetPosteriorSafroleEntropy", "epochChanged", epochChanged, "s.JCE", s.JamState.SafroleState.Timeslot, "targetJCE", targetJCE, "entropy", simulated_posteriorSafroleEntropy.Entropy.String())
+	return simulated_posteriorSafroleEntropy, nil
+}
+
+func (s *StateDB) UnsetPosteriorEntropy() {
+	s.posteriorSafroleEntropy = nil
 }
 
 func (s *SafroleState) EpochChanged(targetJCE uint32) bool {
@@ -891,13 +944,8 @@ func (s *SafroleState) EpochChanged(targetJCE uint32) bool {
 
 // (6.23) Simulate a Detached PostiorEntropy for Block Signing and Verification
 func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 *SafroleState, epochAdvanced bool, err error) {
-	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
-	currEpoch, _ := s.EpochAndPhase(targetJCE)
-	epochAdvanced = false
-	if currEpoch > prevEpoch {
-		// New Epoch e' > e
-		epochAdvanced = true
-	}
+
+	epochAdvanced = s.EpochChanged(targetJCE)
 	s2 = s.Copy()
 	// here we set the sealer authority
 	if epochAdvanced {

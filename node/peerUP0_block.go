@@ -335,14 +335,14 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 // runBlockAnnouncement loops reading announcements, non-blocking into the channel.
 func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 	if stream == nil {
-		log.Warn(module, "runBlockAnnouncement", "peerID", peerID, "err", "nil stream")
+		log.Warn(debugBlock, "runBlockAnnouncement", "peerID", peerID, "err", "nil stream")
 		return
 	}
 	defer func() {
 		n.UP0_streamMu.Lock()
 		delete(n.UP0_stream, peerID)
 		n.UP0_streamMu.Unlock()
-		log.Trace(module, "runBlockAnnouncement cleanup", "peerID", peerID)
+		log.Trace(debugBlock, "runBlockAnnouncement cleanup", "peerID", peerID)
 	}()
 
 	code := uint8(UP0_BlockAnnouncement)
