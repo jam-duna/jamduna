@@ -15,6 +15,25 @@ type TrancheAnnouncement struct {
 	AnnouncementBucket map[uint32]*AnnounceBucket
 }
 
+func (ta *TrancheAnnouncement) Clone() *TrancheAnnouncement {
+	ta.Lock()
+	defer ta.Unlock()
+
+	clone := &TrancheAnnouncement{
+		AnnouncementBucket: make(map[uint32]*AnnounceBucket, len(ta.AnnouncementBucket)),
+	}
+
+	for k, v := range ta.AnnouncementBucket {
+		if v != nil {
+			clone.AnnouncementBucket[k] = v.Clone() // assumes AnnounceBucket has a Clone method
+		} else {
+			clone.AnnouncementBucket[k] = nil
+		}
+	}
+
+	return clone
+}
+
 func (T *TrancheAnnouncement) PutAnnouncement(a Announcement) error {
 	T.Lock()
 	defer T.Unlock()
@@ -133,6 +152,32 @@ type AnnounceBucket struct {
 	Tranche            uint32                         //?
 	Announcements      map[common.Hash][]Announcement `json:"reports"`
 	KnownAnnouncements map[common.Hash]bool           // use identifier to filter duplicate A
+}
+
+func (ab *AnnounceBucket) Clone() *AnnounceBucket {
+	ab.Lock()
+	defer ab.Unlock()
+
+	// Deep copy of Announcements map
+	announcementsCopy := make(map[common.Hash][]Announcement, len(ab.Announcements))
+	for k, v := range ab.Announcements {
+		// Copy the slice of announcements
+		sliceCopy := make([]Announcement, len(v))
+		copy(sliceCopy, v)
+		announcementsCopy[k] = sliceCopy
+	}
+
+	// Deep copy of KnownAnnouncements map
+	knownCopy := make(map[common.Hash]bool, len(ab.KnownAnnouncements))
+	for k, v := range ab.KnownAnnouncements {
+		knownCopy[k] = v
+	}
+
+	return &AnnounceBucket{
+		Tranche:            ab.Tranche,
+		Announcements:      announcementsCopy,
+		KnownAnnouncements: knownCopy,
+	}
 }
 
 func (W *AnnounceBucket) GetLen(w common.Hash) int {

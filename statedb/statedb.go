@@ -620,7 +620,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 		}
 
 		keyVal := KeyVal{
-			Key:        realKey, 
+			Key:        realKey,
 			Value:      realValue,
 			StructType: metaValues[0],
 			Metadata:   metaValues[1],

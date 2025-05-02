@@ -455,7 +455,12 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			log.Warn(debugAudit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "has made announcement", "hash", announcement.Hash().String_short())
 			return a0, nil
 		} else if !hasmade {
-			n.announcementsCh <- announcement
+			select {
+			case n.announcementsCh <- announcement:
+			// sent successfully
+			default:
+				log.Warn(debugAudit, "Announce: announcementsCh full, dropping announcement")
+			}
 			var announcementWithProof JAMSNPAuditAnnouncementWithProof
 			workReports := make([]JAMSNPAuditAnnouncementReport, 0)
 			for _, w := range announcement.Selected_WorkReport {
@@ -497,7 +502,13 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	announcement, err := n.MakeAnnouncement(headerHash, tranche, an)
 	n.updateKnownWorkReportMapping(announcement)
 
-	n.announcementsCh <- announcement
+	select {
+	case n.announcementsCh <- announcement:
+		// sent successfully
+	default:
+		log.Warn(debugAudit, "announcementsCh full")
+	}
+
 	if err != nil {
 		return nil, err
 	} else {
@@ -835,43 +846,62 @@ func (n *Node) MakeJudgement(workreport types.WorkReport, auditPass bool) (judge
 // thus we can check if there is someone absent
 func (n *Node) processAnnouncement(announcement types.Announcement) error {
 	headerHash := announcement.HeaderHash
+
 	if !n.checkTrancheAnnouncement(headerHash) {
 		n.waitingAnnouncementsMutex.Lock()
 		defer n.waitingAnnouncementsMutex.Unlock()
-		if announcement.Tranche != 0 {
-			return fmt.Errorf("No way header %v not found for auditing statedb", announcement.HeaderHash)
+
+		// Still not found after acquiring the lock?
+		if !n.checkTrancheAnnouncement(headerHash) {
+			if announcement.Tranche != 0 {
+				return fmt.Errorf("No way header %v not found for auditing statedb", headerHash)
+			}
+			n.waitingAnnouncements = append(n.waitingAnnouncements, announcement)
+			return nil
 		}
-		n.waitingAnnouncements = append(n.waitingAnnouncements, announcement)
-		return nil
 	}
+
 	s, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] auditingDB not found %v \n", n.String(), headerHash)
+		fmt.Printf("%s [audit:processAnnouncement] auditingDB not found %v\n", n.String(), headerHash)
 		return err
 	}
 
 	index := int(announcement.ValidatorIndex)
 	pubkey := s.GetSafrole().GetCurrValidator(index).Ed25519
 
-	err = announcement.Verify(pubkey)
-	if err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] announcement(%v) not verified %v \n", n.String(), announcement.Hash(), headerHash)
+	if err := announcement.Verify(pubkey); err != nil {
+		fmt.Printf("%s [audit:processAnnouncement] announcement(%v) not verified %v\n", n.String(), announcement.Hash(), headerHash)
 		return err
 	}
+
 	n.updateKnownWorkReportMapping(announcement)
+
+	// Lock just around the read-modify-write section for announcementMap
+	var trancheAnnouncement *types.TrancheAnnouncement
 	n.announcementMapMutex.Lock()
-	trancheAnnouncement, err := n.getTrancheAnnouncement(headerHash)
+	trancheAnnouncement, err = n.getTrancheAnnouncement(headerHash)
+	if err == nil {
+		// Make a copy before unlocking if PutAnnouncement mutates it
+		trancheAnnouncement = trancheAnnouncement.Clone()
+	}
 	n.announcementMapMutex.Unlock()
+
 	if err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement not found %v \n", n.String(), headerHash)
+		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement not found %v\n", n.String(), headerHash)
 		return err
 	}
-	err = trancheAnnouncement.PutAnnouncement(announcement)
-	if err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement.PutAnnouncement failed %v \n", n.String(), headerHash)
+
+	if err := trancheAnnouncement.PutAnnouncement(announcement); err != nil {
+		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement.PutAnnouncement failed %v\n", n.String(), headerHash)
 		return err
 	}
+
+	// Safe update with lock
+	n.announcementMapMutex.Lock()
 	n.updateTrancheAnnouncement(headerHash, trancheAnnouncement)
+	n.announcementMapMutex.Unlock()
+
 	return nil
 }
 
