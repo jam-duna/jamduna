@@ -55,34 +55,57 @@ func compareKeyVals(p0 []KeyVal, p1 []KeyVal) {
 
 type DiffState struct {
 	Prestate          []byte
-	PoststateCompared []byte
-	Poststate         []byte
+	ActualPostState   []byte
+	ExpectedPostState []byte
+	ActualMeta        string
+	ExpectedMeta      string
 }
 
-func compareKeyValsWithOutput(org []KeyVal, p0 []KeyVal, p1 []KeyVal) (diffs map[string]DiffState) {
-	if len(p0) != len(p1) {
-		fmt.Printf("len pre %d != len post %d\n", len(p0), len(p1))
+func (d DiffState) String() string {
+	return types.ToJSONHex(d)
+}
+
+func compareKeyValsWithOutput(prestate, actual, expected []KeyVal) map[string]DiffState {
+	// build maps: key → bytes and key → metadata
+	kv_pre, _ := makemap(prestate)
+	kv_actual, meta_actual := makemap(actual)
+	kv_expected, meta_expected := makemap(expected)
+
+	diffs := make(map[string]DiffState)
+
+	// collect the union of all keys
+	allKeys := make(map[common.Hash]struct{})
+	for k := range kv_actual {
+		allKeys[k] = struct{}{}
 	}
-	diffs = make(map[string]DiffState)
-	kvog, _ := makemap(org)
-	kv0, m0 := makemap(p0)
-	kv1, _ := makemap(p1)
+	for k := range kv_expected {
+		allKeys[k] = struct{}{}
+	}
 
-	for k0, v0 := range kv0 {
-		v_og := kvog[k0]
-		v1 := kv1[k0]
+	for k := range allKeys {
+		v_actual, actual_found := kv_actual[k]
+		v_expected, expected_found := kv_expected[k]
 
-		if !common.CompareBytes(v0, v1) {
-			metaKey := fmt.Sprintf("meta_%v", k0)
-			metaData0 := m0[metaKey]
-			diffs[metaData0] = DiffState{
-				Prestate:          v_og,
-				PoststateCompared: v0,
-				Poststate:         v1,
-			}
-
+		// if both present and equal, skip
+		if actual_found && expected_found && bytes.Equal(v_actual, v_expected) {
+			continue
 		}
+
+		// pick a human‐readable diff key from metadata, else hex
+		metaKey := "meta_" + k.Hex() // or k.String()
+		m_actual := meta_actual[metaKey]
+		m_expected := meta_expected[metaKey]
+
+		diffState := DiffState{
+			Prestate:          kv_pre[k], // from your original map
+			ActualPostState:   v_actual,  // p0 value, or nil if !ok0
+			ActualMeta:        m_actual,
+			ExpectedPostState: v_expected, // p1 value, or nil if !ok1
+			ExpectedMeta:      m_expected,
+		}
+		diffs[k.Hex()] = diffState
 	}
+
 	return diffs
 }
 
@@ -90,7 +113,9 @@ func makemap(p []KeyVal) (map[common.Hash][]byte, map[string]string) {
 	kvMap := make(map[common.Hash][]byte)
 	metaMap := make(map[string]string)
 	for _, kvs := range p {
-		k := common.BytesToHash(kvs.Key)
+		keyBytes := make([]byte, 32)
+		copy(keyBytes, kvs.Key) // pad one extra byte !!!
+		k := common.BytesToHash(keyBytes)
 		v := kvs.Value
 		kvMap[k] = v
 		metaKey := fmt.Sprintf("meta_%v", k)
@@ -154,13 +179,25 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil)
 	if err != nil {
+		fmt.Printf("!!! ApplyStateTransitionFromBlock error: %v\n", err)
 		return nil, err
 	}
 	if st.PostState.StateRoot == s1.StateRoot {
 		return nil, nil
 	}
+	// s1 is the ACTUAL stf output
+	// st.PostState.KeyVals is the EXPECTED stf output
 
-	return compareKeyValsWithOutput(st.PreState.KeyVals, s1.GetAllKeyValues(), st.PostState.KeyVals), fmt.Errorf("mismatch")
+	post_actual := s1.GetAllKeyValues()
+	post_expected := st.PostState.KeyVals
+	if len(post_actual) != len(post_expected) {
+		fmt.Printf("len post_actual %d != len post_expected %d\n", len(post_actual), len(post_expected))
+		//fmt.Printf("post_actual\n%v\n", KeyVals(post_actual).String())
+		//fmt.Printf("post_expected\n%v\n", KeyVals(post_expected).String())
+	}
+	diffs = compareKeyValsWithOutput(st.PreState.KeyVals, post_actual, post_expected)
+	fmt.Printf("diffs len=%d\n", len(diffs))
+	return diffs, fmt.Errorf("mismatch")
 }
 
 // ValidateSTF validates the state transition function output: error number and diffs[error discription][diff]

@@ -1123,6 +1123,8 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 			vm.hostCall = false
 			vm.terminated = false
 			log.Debug(vm.logging, vm.Str(""), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+		} else {
+			vm.Gas = vm.Gas - 1
 		}
 		stepn++
 	}

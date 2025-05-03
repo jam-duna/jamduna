@@ -666,7 +666,7 @@ func (vm *VM) hostTransfer() {
 
 // Gas Service
 func (vm *VM) hostGas() {
-	vm.WriteRegister(7, uint64(vm.Gas))
+	vm.WriteRegister(7, uint64(vm.Gas-10)) // its gas remaining AFTER the host call
 	vm.HostResultCode = OK
 }
 

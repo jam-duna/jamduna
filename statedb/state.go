@@ -307,6 +307,9 @@ func (a Psi_state) MarshalJSON() ([]byte, error) {
 }
 
 func StateDecodeToJson(encodedBytes []byte, state string) (string, error) {
+	if len(encodedBytes) == 0 {
+		return "", fmt.Errorf("encodedBytes is empty")
+	}
 	var decodedStruct interface{}
 	var err error
 	switch state {

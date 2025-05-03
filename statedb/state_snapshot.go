@@ -160,6 +160,18 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 	return &snapshotRaw
 }
 
+func (kvs KeyVals) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]KeyVal(kvs))
+}
+
+func (kvs KeyVals) String() string {
+	b, err := kvs.MarshalJSON()
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
 func (kv KeyVal) MarshalJSON() ([]byte, error) {
 	aux := kvAlias{
 		Key:        common.HexString(kv.Key[0:31]), // 31 byte keys

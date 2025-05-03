@@ -625,6 +625,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 			StructType: metaValues[0],
 			Metadata:   metaValues[1],
 		}
+		//fmt.Printf("~~~key: %x, structType: %s, metadata: %s\n", keyVal.Key, keyVal.StructType, keyVal.Metadata)
 		tmpKeyVals = append(tmpKeyVals, keyVal)
 	}
 	sortedKeyVals := sortKeyValsByKey(tmpKeyVals)

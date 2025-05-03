@@ -6,16 +6,86 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/nsf/jsondiff"
+
+	"github.com/yudai/gojsondiff"
+	"github.com/yudai/gojsondiff/formatter"
 )
 
 var update_from_git = false
+
+const (
+	colorReset = "\033[0m"
+	colorRed   = "\033[31m"
+	colorGreen = "\033[32m"
+)
+
+// printHexDiff prints two byte slices as hex, highlighting any mismatched byte in red.
+func printHexDiff(label string, exp, act []byte) {
+	// Print the “Expected” line
+	fmt.Printf("%-10s | Expected: 0x", label)
+	max := len(exp)
+	if len(act) > max {
+		max = len(act)
+	}
+	for i := 0; i < max; i++ {
+		var b byte
+		var match bool
+		if i < len(exp) {
+			b = exp[i]
+			if i < len(act) && exp[i] == act[i] {
+				match = true
+			}
+		}
+		hex := fmt.Sprintf("%02x", b)
+		if !match {
+			fmt.Print(colorRed, hex, colorReset)
+		} else {
+			fmt.Print(hex)
+		}
+	}
+	fmt.Println()
+
+	// Print the “Actual” line
+	fmt.Printf("%-10s | Actual:   0x", label)
+	for i := 0; i < max; i++ {
+		var b byte
+		var match bool
+		if i < len(act) {
+			b = act[i]
+			if i < len(exp) && exp[i] == act[i] {
+				match = true
+			}
+		}
+		hex := fmt.Sprintf("%02x", b)
+		if !match {
+			fmt.Print(colorRed, hex, colorReset)
+		} else {
+			fmt.Print(hex)
+		}
+	}
+	fmt.Println()
+}
+
+func printColoredJSONDiff(diffStr string) {
+	for _, line := range strings.Split(diffStr, "\n") {
+		switch {
+		case strings.HasPrefix(line, "-"):
+			fmt.Println(colorRed + line + colorReset)
+		case strings.HasPrefix(line, "+"):
+			fmt.Println(colorGreen + line + colorReset)
+		default:
+			fmt.Println(line)
+		}
+	}
+}
 
 func initStorage(testDir string) (*storage.StateDBStorage, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
@@ -32,8 +102,47 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 	return sdb_storage, nil
 
 }
+func SortDiffKeys(keys []string) {
+	sort.Slice(keys, func(i, j int) bool {
+		strip := func(k string) string {
+			return strings.TrimSuffix(k, "|")
+		}
+
+		ti := strip(keys[i])
+		tj := strip(keys[j])
+
+		// attempt to parse c<digits>
+		var (
+			ni, nj     int
+			errI, errJ error
+		)
+		if len(ti) > 1 && ti[0] == 'c' {
+			ni, errI = strconv.Atoi(ti[1:])
+		}
+		if len(tj) > 1 && tj[0] == 'c' {
+			nj, errJ = strconv.Atoi(tj[1:])
+		}
+
+		switch {
+		// both are c<integer>: compare numerically
+		case errI == nil && errJ == nil:
+			return ni < nj
+		// only i is c<integer>: i comes first
+		case errI == nil:
+			return true
+		// only j is c<integer>: j comes first
+		case errJ == nil:
+			return false
+		// neither: fallback to lexical on full key
+		default:
+			return keys[i] < keys[j]
+		}
+	})
+}
+
 func testSTF(t *testing.T, filename string, content string) {
 	t.Helper()
+	// 1) setup
 	testDir := "/tmp/test_locala"
 	test_storage, err := initStorage(testDir)
 	if err != nil {
@@ -45,52 +154,85 @@ func testSTF(t *testing.T, filename string, content string) {
 	fmt.Printf("🔍 Testing file: %s\n", filename)
 	fmt.Println("---------------------------------")
 
+	// 2) parse the STF
 	var stf StateTransition
-	err = json.Unmarshal([]byte(content), &stf)
-	if err != nil {
+	if err := json.Unmarshal([]byte(content), &stf); err != nil {
 		t.Errorf("❌ [%s] Failed to read JSON file: %v", filename, err)
 		return
 	}
 
+	// 3) do the state transition check
 	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil)
-	if err != nil {
-		for key, value := range diffs {
-			// so the key return will be c3|
-			// want to be C3
-			state_key := key[:len(key)-1]
-			fmt.Printf("========================================\n")
-			fmt.Printf("file:%s\n", filename)
-			fmt.Printf("\033[34mState Key:%s\033[0m\n", state_key)
-			fmt.Printf("Block:%s\n", stf.Block.String())
-			fmt.Printf("Val0 (PreState):%x\n", value.Prestate)
-			fmt.Printf("Val0 (our):%x\n", value.PoststateCompared)
-			fmt.Printf("Val1 (their):%x\n", value.Poststate)
-			pre_state_json, err := StateDecodeToJson(value.Prestate, state_key)
-			if err != nil {
-				t.Errorf("❌ [%s] Failed to decode JSON file: %v", filename, err)
-				return
-			}
-			fmt.Printf("PreState JSON:%s\n", pre_state_json)
-			val_0_json, err := StateDecodeToJson(value.PoststateCompared, state_key)
-			if err != nil {
-				t.Errorf("❌ [%s] Failed to decode JSON file: %v", filename, err)
-				return
-			}
-			val_1_json, err := StateDecodeToJson(value.Poststate, state_key)
-			if err != nil {
-				t.Errorf("❌ [%s] Failed to decode JSON file: %v", filename, err)
-				return
-			}
-			opts := jsondiff.DefaultJSONOptions()
-			diff, diffStr := jsondiff.Compare([]byte(val_0_json), []byte(val_1_json), &opts)
-			if diff != jsondiff.FullMatch {
-				fmt.Printf("Diff: %s\n", diffStr)
-			}
-			fmt.Printf("========================================\n")
-		}
-		t.Errorf("❌ [%s] Test failed: %v", filename, err)
+	if err == nil {
+		fmt.Printf("PostState.StateRoot %s matches\n", stf.PostState.StateRoot)
+		return
 	}
-	fmt.Printf("PostState.StateRoot %s matches\n", stf.PostState.StateRoot)
+
+	// 4) collect & custom-sort the keys
+	keys := make([]string, 0, len(diffs))
+	for k := range diffs {
+		keys = append(keys, k)
+	}
+	SortDiffKeys(keys) // your helper that orders c1…cN first, then the rest
+	fmt.Printf("Diff on %d keys: %v\n", len(keys), keys)
+
+	// 5) walk each diff
+	for _, key := range keys {
+		val := diffs[key]
+
+		// human‐friendly name
+		stateType := "unknown"
+		if m := strings.TrimSuffix(val.ActualMeta, "|"); m != "" {
+			stateType = m
+		}
+
+		fmt.Println(strings.Repeat("=", 40))
+		fmt.Printf("file: %s\n", filename)
+		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key)
+
+		// raw‐byte diff
+		fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
+		printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
+
+		// JSON diff, if we know the struct type
+		if stateType != "unknown" {
+			fmt.Printf("------ %s JSON DIFF ------\n", stateType)
+
+			expJSON, _ := StateDecodeToJson(val.ExpectedPostState, stateType)
+			actJSON, _ := StateDecodeToJson(val.ActualPostState, stateType)
+
+			differ := gojsondiff.New()
+			delta, err := differ.Compare([]byte(expJSON), []byte(actJSON))
+			if err != nil {
+				fmt.Printf("  (error diffing JSON: %v)\n", err)
+			} else if delta.Modified() {
+				// unmarshal for the formatter
+				var leftObj, rightObj interface{}
+				_ = json.Unmarshal([]byte(expJSON), &leftObj)
+				_ = json.Unmarshal([]byte(actJSON), &rightObj)
+
+				cfg := formatter.AsciiFormatterConfig{
+					ShowArrayIndex: true,
+					Coloring:       true, // ANSI red/green text only
+				}
+				asciiFmt := formatter.NewAsciiFormatter(leftObj, cfg)
+				asciiDiff, err := asciiFmt.Format(delta)
+				if err != nil {
+					fmt.Printf("  (error formatting diff: %v)\n", err)
+				} else {
+					fmt.Println(asciiDiff)
+				}
+			} else {
+				fmt.Printf("  %s JSON fully matched ✅\n", stateType)
+			}
+
+			fmt.Printf("------ %s JSON DONE ------\n", stateType)
+		}
+
+		fmt.Println(strings.Repeat("=", 40))
+	}
+	// finally fail the test
+	t.Errorf("❌ [%s] Test failed: %v", filename, err)
 }
 
 func TestStateTransitionSingle(t *testing.T) {
@@ -132,10 +274,11 @@ func testSTFDir(t *testing.T, dir string) {
 		}
 		files = append(files, filepath.Join(dir, name))
 	}
-	rand.Shuffle(len(files), func(i, j int) {
-		files[i], files[j] = files[j], files[i]
-	})
-
+	if false {
+		rand.Shuffle(len(files), func(i, j int) {
+			files[i], files[j] = files[j], files[i]
+		})
+	}
 	// run testSTF
 	for _, path := range files {
 		content, err := os.ReadFile(path)
@@ -147,8 +290,9 @@ func testSTFDir(t *testing.T, dir string) {
 }
 
 func TestTraces(t *testing.T) {
-	testSTFDir(t, "../jamtestvectors/traces/fallback")
-	testSTFDir(t, "../jamtestvectors/traces/safrole")
+	testSTFDir(t, "../jamtestvectors/traces/reports-l0")
+	//testSTFDir(t, "../jamtestvectors/traces/fallback")
+	//testSTFDir(t, "../jamtestvectors/traces/safrole")
 }
 
 func TestCompareJson(t *testing.T) {
