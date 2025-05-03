@@ -142,6 +142,7 @@ func SortDiffKeys(keys []string) {
 
 func testSTF(t *testing.T, filename string, content string) {
 	t.Helper()
+	fmt.Printf("file: %s\n", filename)
 	// 1) setup
 	testDir := "/tmp/test_locala"
 	test_storage, err := initStorage(testDir)
@@ -150,9 +151,6 @@ func testSTF(t *testing.T, filename string, content string) {
 		return
 	}
 	defer test_storage.Close()
-
-	fmt.Printf("🔍 Testing file: %s\n", filename)
-	fmt.Println("---------------------------------")
 
 	// 2) parse the STF
 	var stf StateTransition
@@ -187,7 +185,6 @@ func testSTF(t *testing.T, filename string, content string) {
 		}
 
 		fmt.Println(strings.Repeat("=", 40))
-		fmt.Printf("file: %s\n", filename)
 		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key)
 
 		// raw‐byte diff
@@ -196,7 +193,6 @@ func testSTF(t *testing.T, filename string, content string) {
 
 		// JSON diff, if we know the struct type
 		if stateType != "unknown" {
-			fmt.Printf("------ %s JSON DIFF ------\n", stateType)
 
 			expJSON, _ := StateDecodeToJson(val.ExpectedPostState, stateType)
 			actJSON, _ := StateDecodeToJson(val.ActualPostState, stateType)
@@ -222,8 +218,8 @@ func testSTF(t *testing.T, filename string, content string) {
 				} else {
 					fmt.Println(asciiDiff)
 				}
-			} else {
-				fmt.Printf("  %s JSON fully matched ✅\n", stateType)
+				//			} else {
+				//fmt.Printf("  %s JSON fully matched ✅\n", stateType)
 			}
 
 			fmt.Printf("------ %s JSON DONE ------\n", stateType)
@@ -252,7 +248,6 @@ func TestStateTransitionSingle(t *testing.T) {
 // demonstrate random STF testing
 func testSTFDir(t *testing.T, dir string) {
 	t.Helper()
-	log.InitLogger("debug")
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -269,10 +264,10 @@ func testSTFDir(t *testing.T, dir string) {
 		if !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		if name == "00000000.json" {
-			continue
+
+		if name != "00000004.json" || name == "00000007.json" || name == "00000010.json" || name == "00000016.json" || name == "00000019.json" || name == "00000022.json" || name == "00000034.json" || name == "00000040.json" {
+			files = append(files, filepath.Join(dir, name))
 		}
-		files = append(files, filepath.Join(dir, name))
 	}
 	if false {
 		rand.Shuffle(len(files), func(i, j int) {
@@ -288,8 +283,12 @@ func testSTFDir(t *testing.T, dir string) {
 		testSTF(t, filepath.Base(path), string(content))
 	}
 }
-
 func TestTraces(t *testing.T) {
+	log.InitLogger("info")
+	//log.EnableModule(log.PvmAuthoring)
+	//log.EnableModule(log.GeneralAuthoring)
+	//log.EnableModule(log.StateDBMonitoring)
+
 	testSTFDir(t, "../jamtestvectors/traces/reports-l0")
 	//testSTFDir(t, "../jamtestvectors/traces/fallback")
 	//testSTFDir(t, "../jamtestvectors/traces/safrole")

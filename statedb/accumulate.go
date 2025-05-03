@@ -503,7 +503,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 				o := types.AccumulateOperandElements{
 					H: workReport.AvailabilitySpec.WorkPackageHash,
 					E: workReport.AvailabilitySpec.ExportedSegmentRoot,
-					G: workResult.Gas, // REVIEW closely
+					G: workResult.Gas,
 					A: workReport.AuthorizerHash,
 					O: workReport.AuthOutput,
 					Y: workResult.PayloadHash,

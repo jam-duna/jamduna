@@ -82,7 +82,7 @@ type ServiceStatistics struct {
 	TransferGasUsed          uint `json:"on_transfers_gas_used"` //t
 }
 
-func (v ValidatorStatistics) Encode() []byte {
+func (v *ValidatorStatistics) Encode() []byte {
 	trueStatistics := TrueStatistics{}
 	trueStatistics.Current = v.Current
 	trueStatistics.Last = v.Last
@@ -99,7 +99,7 @@ func (v ValidatorStatistics) Encode() []byte {
 	return encoded
 }
 
-func (v ValidatorStatistics) Decode(data []byte) (interface{}, uint32) {
+func (v *ValidatorStatistics) Decode(data []byte) (interface{}, uint32) {
 	decoded, dataLen, err := Decode(data, reflect.TypeOf(TrueStatistics{}))
 	if err != nil {
 		return nil, 0
@@ -113,7 +113,7 @@ func (v ValidatorStatistics) Decode(data []byte) (interface{}, uint32) {
 	for _, v := range trueStatistics.ServiceStatics {
 		recoveredStats.ServiceStatistics[uint32(v.ServiceIndex)] = v.ServiceStatistics
 	}
-	return &recoveredStats, dataLen
+	return recoveredStats, dataLen
 }
 
 func (v *ValidatorStatistics) UnmarshalJSON(data []byte) error {
@@ -131,7 +131,7 @@ func (v *ValidatorStatistics) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (v ValidatorStatistics) MarshalJSON() ([]byte, error) {
+func (v *ValidatorStatistics) MarshalJSON() ([]byte, error) {
 	trueStatistics := TrueStatistics{}
 	trueStatistics.Current = v.Current
 	trueStatistics.Last = v.Last
@@ -144,7 +144,14 @@ func (v ValidatorStatistics) MarshalJSON() ([]byte, error) {
 	return json.Marshal(trueStatistics)
 }
 
-func (v *ValidatorStatistics) String() string {
+func (v *TrueStatistics) String() string {
+	return ToJSON(v)
+}
 
+func (v *ValidatorStatistics) String() string {
+	return ToJSON(v)
+}
+
+func (v *ServiceStatistics) String() string {
 	return ToJSON(v)
 }

@@ -312,6 +312,7 @@ func StateDecodeToJson(encodedBytes []byte, state string) (string, error) {
 	}
 	var decodedStruct interface{}
 	var err error
+
 	switch state {
 	case "c1":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.TotalCores][]common.Hash{}))
@@ -344,9 +345,11 @@ func StateDecodeToJson(encodedBytes []byte, state string) (string, error) {
 	case "c13":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.ValidatorStatistics{}))
 	case "c14":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.ValidatorStatistics{}))
 	case "c15":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength]types.AccumulationHistory{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf([types.EpochLength][]types.AccumulationQueue{}))
+	default:
+		//fmt.Printf("StateDecodeToJson unk [%s]\n", state)
 	}
 	if err != nil {
 		return "", err

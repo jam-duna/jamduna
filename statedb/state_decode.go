@@ -7,26 +7,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-/*
-const (
-	C1  = "CoreAuthPool"
-	C2  = "AuthQueue"
-	C3  = "RecentBlocks"
-	C4  = "safroleState"
-	C5  = "PastJudgements"
-	C6  = "Entropy"
-	C7  = "NextEpochValidatorKeys"
-	C8  = "CurrentValidatorKeys"
-	C9  = "PriorEpochValidatorKeys"
-	C10 = "PendingReports"
-	C11 = "MostRecentBlockTimeslot"
-	C12 = "PrivilegedServiceIndices"
-	C13 = "ActiveValidator"
-	C14 = "AccumulationQueue"
-	C15 = "AccumulationHistory"
-)
-*/
-
 // C1 CoreAuthPool
 func (n *JamState) SetAuthPool(authPoolByte []byte) {
 	if len(authPoolByte) == 0 {
@@ -327,10 +307,12 @@ func (n *JamState) SetPi(piByte []byte) {
 		return
 	}
 	statistics, _, err := types.Decode(piByte, reflect.TypeOf(types.ValidatorStatistics{}))
+
 	if err != nil {
 		return
 	}
-	n.ValidatorStatistics = *(statistics.(*types.ValidatorStatistics))
+	stats := statistics.(types.ValidatorStatistics)
+	n.ValidatorStatistics = *stats.Copy()
 }
 
 // C14 AccumulateQueue

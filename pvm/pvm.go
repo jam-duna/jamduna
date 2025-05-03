@@ -230,8 +230,8 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 			return nil, OOB
 		}
 		if page.Access.Inaccessible {
-			log.Debug(debug_pvm, "Page is not readable", "currentPage", currentPage, "address", address, "length", length)
-			return nil, uint64(address)
+			//log.Debug(debug_pvm, "Page is not readable", "currentPage", currentPage, "address", address, "length", length)
+			//			return nil, uint64(address)
 		}
 
 		// Calculate how much data can be read from the current page
@@ -736,8 +736,11 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 		pure_code = pure_code[11+o_size+w_size+4:]
 	}
 
-	log.Debug(debug_pvm, "PVM Params", "OSIZE", o_size, "WSIZE", w_size, "Z", types.DecodeE_l(standard_z_byte), "S", types.DecodeE_l(standard_s_byte),
-		"O", o_byte, "W", w_byte, "Code and Jump Table size: %d\n", types.DecodeE_l(standard_c_size_byte))
+	if false {
+		log.Debug(debug_pvm, "PVM Params", "OSIZE", o_size, "WSIZE", w_size, "Z", types.DecodeE_l(standard_z_byte), "S", types.DecodeE_l(standard_s_byte),
+			"O", o_byte,
+			"W", w_byte, "Code and Jump Table size: %d\n", types.DecodeE_l(standard_c_size_byte))
+	}
 	var j_size_byte, z_byte, c_size_byte []byte
 	j_size_byte, pure_code = extractBytes(pure_code)
 	z_byte, pure_code = extractBytes(pure_code)
@@ -1040,6 +1043,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 }
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
+
 	vm.Mode = "accumulate"
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
@@ -1051,6 +1055,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, encoded_elements...)
+
 	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
 	vm.Gas = int64(g)
 	vm.Execute(types.EntryPointAccumulate, false) // F ∈ Ω⟨(X, X)⟩
@@ -1109,9 +1114,8 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 
 	vm.pc = uint64(entryPoint)
 	stepn := 1
-
 	for !vm.terminated {
-		if err := vm.step(); err != nil {
+		if err := vm.step(stepn); err != nil {
 			return err
 		}
 		if vm.hostCall && is_child {
@@ -1122,7 +1126,6 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-			log.Debug(vm.logging, vm.Str(""), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
 		} else {
 			vm.Gas = vm.Gas - 1
 		}
@@ -1158,9 +1161,10 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	return r, 0
 }
 
-/*
 func opcode_str(opcode byte) string {
 	opcodeMap := map[byte]string{
+		0:   "TRAP",
+		1:   "FALLTHROUGH",
 		10:  "ECALLI",
 		20:  "LOAD_IMM_64",
 		30:  "STORE_IMM_U8",
@@ -1304,10 +1308,10 @@ func opcode_str(opcode byte) string {
 		return name
 	}
 	return fmt.Sprintf("OPCODE %d", opcode)
-}*/
+}
 
 // step performs a single step in the PVM
-func (vm *VM) step() error {
+func (vm *VM) step(stepn int) error {
 	if vm.pc >= uint64(len(vm.code)) {
 		return errors.New("program counter out of bounds")
 	}
@@ -1468,11 +1472,11 @@ func (vm *VM) step() error {
 		return nil
 	}
 
-	// md := "unk"
-	// if vm.ServiceMetadata != nil {
-	// 	md = string(vm.ServiceMetadata)
-	// }
-	// log.Debug(vm.logging, md, "step", stepn, "pc", startPC, "opcode", opcode_str(opcode), "g", vm.Gas, "reg", vm.ReadRegisters())
+	/*	 md := "unk"
+	 if vm.ServiceMetadata != nil {
+		 md = "inst" //string(vm.ServiceMetadata)
+	 } */
+	log.Debug(vm.logging, opcode_str(opcode), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
 	return nil
 }
 

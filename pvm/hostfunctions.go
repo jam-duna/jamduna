@@ -234,7 +234,7 @@ func (vm *VM) chargeGas(host_fn int) {
 	}
 
 	vm.Gas = beforeGas - int64(chargedGas)
-	log.Debug(vm.logging, vm.Str(exp), "reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
+	log.Debug(vm.logging, exp, "reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
 }
 
 // InvokeHostCall handles host calls
@@ -379,8 +379,11 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 // Information-on-Service
 func (vm *VM) hostInfo() {
 	omega_7, _ := vm.ReadRegister(7)
-
-	t, errCode := vm.getXUDS(omega_7)
+	fetch := omega_7
+	if fetch == NONE {
+		fetch = uint64(vm.Service_index)
+	}
+	t, errCode := vm.getXUDS(fetch)
 	if errCode != OK {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
@@ -530,6 +533,7 @@ func new_check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
 
 // New service
 func (vm *VM) hostNew() {
+
 	xContext := vm.X
 	xs, _ := xContext.GetX_s()
 

@@ -589,7 +589,7 @@ func SplitMetadataAndCode(data []byte) (service_name string, code []byte) {
 	metadata_length_byte, remaining := extractBytes(data)
 	metadata_length, _ := DecodeE(metadata_length_byte)
 
-	if metadata_length < 32 && uint64(len(remaining)) > metadata_length { // REVIEW: first condition
+	if uint64(len(remaining)) > metadata_length { // metadata_length < 32 &&
 		code = remaining[metadata_length:]
 		service_name = string(remaining[:metadata_length])
 	} else {

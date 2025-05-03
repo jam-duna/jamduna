@@ -108,8 +108,10 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
 func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 	// old reports aren’t allowed
-	prevSlot := ts - (ts % types.ValidatorCoreRotationPeriod) - types.ValidatorCoreRotationPeriod
-	if g.Slot < prevSlot {
+	diff := int64(ts) - int64(g.Slot)
+
+	if diff > int64(ts%types.ValidatorCoreRotationPeriod+types.ValidatorCoreRotationPeriod) {
+		fmt.Printf("checkAssignment: diff: %d\n", diff)
 		return jamerrors.ErrGReportEpochBeforeLast
 	}
 
