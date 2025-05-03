@@ -159,6 +159,10 @@ func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkRepo
 func (s *StateDB) GetAnnouncementWithoutJtrue(A *types.AnnounceBucket, J *types.JudgeBucket, W_hash common.Hash) ([]types.Announcement, int) {
 	count := 0
 	var announcements = make([]types.Announcement, 0)
+	A.Lock()
+	defer A.Unlock()
+	J.RLock()
+	defer J.RUnlock()
 	for _, a := range A.Announcements[W_hash] {
 		var tmp types.Judgement
 		for _, j := range J.Judgements[W_hash] {
@@ -292,6 +296,8 @@ func (a *StateDB) IsReportAudited(A *types.AnnounceBucket, J *types.JudgeBucket,
 	_, length := a.GetAnnouncementWithoutJtrue(A, J, W_hash)
 	if length == 0 {
 		//double check no invalid
+		J.RLock()
+		defer J.RUnlock()
 		for _, j := range J.Judgements[W_hash] {
 			if !j.Judge {
 				return false
@@ -309,6 +315,8 @@ func (s *StateDB) IsReportAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBuc
 	_, length := s.GetAnnouncementWithoutJtrue(A, J, W_hash)
 	if length == 0 {
 		//double check no invalid
+		J.RLock()
+		defer J.RUnlock()
 		for _, j := range J.Judgements[W_hash] {
 			if j.Judge != true {
 				return fmt.Errorf("Validator[%d] said false /n", j.Validator)

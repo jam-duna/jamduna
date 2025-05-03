@@ -735,8 +735,11 @@ func (n *Node) CheckBlockAudited(headerHash common.Hash, tranche uint32) (bool, 
 	isBlockAudited := auditing_statedb.IsBlockAudited(announcementBucket, judgment_bucket)
 
 	for _, w := range auditing_statedb.AvailableWorkReport {
-		log.Trace(debugAudit, "CheckBlockAudited", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "len announcementBucket", len(announcementBucket.Announcements[w.Hash()]),
-			"len judgment_bucket", len(judgment_bucket.Judgements[w.Hash()]))
+		log.Trace(debugAudit, "CheckBlockAudited", "n", n.String(),
+			"ts", auditing_statedb.Block.TimeSlot(),
+			"len announcementBucket", announcementBucket.GetLen(w.Hash()),
+			"len judgment_bucket", judgment_bucket.GetLen(w.Hash()),
+		)
 	}
 	// try to form disputes if not audited
 
@@ -850,15 +853,12 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 	if !n.checkTrancheAnnouncement(headerHash) {
 		n.waitingAnnouncementsMutex.Lock()
 		defer n.waitingAnnouncementsMutex.Unlock()
-
-		// Still not found after acquiring the lock?
-		if !n.checkTrancheAnnouncement(headerHash) {
-			if announcement.Tranche != 0 {
-				return fmt.Errorf("No way header %v not found for auditing statedb", headerHash)
-			}
-			n.waitingAnnouncements = append(n.waitingAnnouncements, announcement)
-			return nil
+		if announcement.Tranche != 0 {
+			// means we enter this too late, no need to audit
+			return fmt.Errorf("No way header %v not found for auditing statedb", headerHash)
 		}
+		n.waitingAnnouncements = append(n.waitingAnnouncements, announcement)
+		return nil
 	}
 
 	s, err := n.getAuditingStateDB(headerHash)
@@ -896,12 +896,7 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement.PutAnnouncement failed %v\n", n.String(), headerHash)
 		return err
 	}
-
-	// Safe update with lock
-	n.announcementMapMutex.Lock()
 	n.updateTrancheAnnouncement(headerHash, trancheAnnouncement)
-	n.announcementMapMutex.Unlock()
-
 	return nil
 }
 

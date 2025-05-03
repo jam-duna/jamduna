@@ -227,8 +227,9 @@ func (J *JudgeBucket) GetWonkeyJudgement(W common.Hash) []Judgement {
 			trueCount++
 		}
 	}
-
-	return judgements[:ValidatorsSuperMajority]
+	judgements_copy := make([]Judgement, ValidatorsSuperMajority)
+	copy(judgements_copy, judgements[:ValidatorsSuperMajority])
+	return judgements_copy
 }
 
 func (j *Judgement) Bytes() []byte {
