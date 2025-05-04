@@ -60,6 +60,10 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "❗ Program crashed with panic: %v\n", r)
+			// Print the stack trace
+			buf := make([]byte, 1<<20)
+			stackSize := runtime.Stack(buf, true)
+			fmt.Printf("Stack trace:\n%s\n", buf[:stackSize])
 			os.Exit(2)
 		}
 	}()
@@ -167,6 +171,7 @@ func main() {
 		os.Exit(1)
 	}
 	n.SetServiceDir("/services")
+	n.WriteDebugFlag = false
 	storage, err := n.GetStorage()
 	defer storage.Close()
 	if err != nil {

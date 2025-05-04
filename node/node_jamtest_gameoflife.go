@@ -22,7 +22,7 @@ func flatten(data [][]byte) []byte {
 }
 
 func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest bool) error {
-
+	coreIdx := 0
 	ws_push := StartGameOfLifeServer("localhost:80", "./game_of_life.html")
 
 	log.Info(module, "Game of Life START")
@@ -123,7 +123,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("Game_of_life(%d)", step_n),
-			CoreIndex:       0,
+			CoreIndex:       uint16(coreIdx),
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}

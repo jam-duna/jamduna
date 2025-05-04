@@ -11,6 +11,7 @@ import (
 )
 
 // make block generate block prior to state execution
+// TODO: include extrinsic data update
 func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecret, targetJCE uint32, ticketID common.Hash, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)

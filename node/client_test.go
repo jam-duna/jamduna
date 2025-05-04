@@ -49,7 +49,7 @@ func TestClient(t *testing.T) {
 
 func TestCommands(t *testing.T) {
 	flag.Parse()
-	local := false
+	local := true
 	addresses, wsUrl := GetAddresses(local)
 
 	//coreIndex := uint16(0)
@@ -61,9 +61,9 @@ func TestCommands(t *testing.T) {
 	// client.BroadcastCommand([]string{"SetFlag", "audit", "true"}, []int{5})
 	// client.BroadcastCommand([]string{"SetFlag", "audit", "false"}, []int{5})
 	// client.BroadcastCommand([]string{"SetFlag", "ticket_send", "true"}, []int{})
-	// client.BroadcastCommand([]string{"SetLog", log.GeneralAuthoring, "true"}, []int{})
+	client.BroadcastCommand([]string{"SetLog", debugAudit, "true"}, []int{0, 1, 2, 3, 4})
 	// client.SendCommand([]string{"StackTrace"}, 1)
-	client.SendCommand([]string{"GetNodeStatus"}, 3)
+	// client.SendCommand([]string{"GetNodeStatus"}, 3)
 
 }
 

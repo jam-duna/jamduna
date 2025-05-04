@@ -223,7 +223,7 @@ func (n *Node) runAudit() {
 				log.Debug(debugAudit, "runAudit: initAudit done", "n", n.String())
 				err = n.Audit(headerHash)
 				if err != nil {
-					log.Trace(debugAudit, "Audit Failed", "err", err)
+					log.Error(debugAudit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
 					log.Debug(debugBlock, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())

@@ -18,7 +18,7 @@ currentJCE-UP0LowerBound<= currentJCE <=currentJCE+UP0UpperBound
 6s delay <= now() <= 30s delay
 */
 const (
-	UP0LowerBound = 2
+	UP0LowerBound = 5
 	UP0UpperBound = 15
 )
 
@@ -163,7 +163,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 			n.UP0_streamMu.Lock()
 			delete(n.UP0_stream, uint16(p.PeerID))
 			n.UP0_streamMu.Unlock()
-			return nil, fmt.Errorf("peer connection is nil")
+			return nil, fmt.Errorf("peer %d connection is nil", p.PeerID)
 		} else {
 			conn = p.conn
 		}
@@ -369,7 +369,11 @@ func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		if _, exists := n.block_tree.GetBlockNode(h); exists {
 			continue
 		}
-
+		received_blk_slot := ann.Header.Slot
+		if !n.ValidateJCE(received_blk_slot) {
+			// Block announcement is outside of reasonable bound
+			continue
+		}
 		select {
 		case n.blockAnnouncementsCh <- ann:
 			n.ba_checker.Set(h, peerID)

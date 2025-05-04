@@ -35,6 +35,7 @@ const (
 	debugP                = "p_mod"
 	debugAudit            = "ad_mode"
 	saveSealBlockMaterial = false
+	blockAuthoringChaos   = false // turn off for production (or publication of traces)
 )
 
 type StateDB struct {
@@ -948,6 +949,13 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				log.Error(module, "ProcessState:MakeBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
+
+			if blockAuthoringChaos {
+				if noAuthoring := SimulateBlockAuthoringInterruption(proposedBlk); noAuthoring {
+					return true, nil, nil, fmt.Errorf("Simulated Interruption: Block @ %v not proposed", currJCE)
+				}
+			}
+
 			// Add ApplyStateTransitionFromBlock span
 			/*if s.sdb.Tp != nil && s.sdb.BlockContext != nil && s.sdb.SendTrace {
 				tracer := s.sdb.Tp.Tracer("NodeTracer")

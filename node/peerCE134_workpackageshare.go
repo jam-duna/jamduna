@@ -353,7 +353,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 
 	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
 	if err != nil {
-		fmt.Printf("%s error executing work package bundle: %v. pvm_elapsed=%d\n", n.String(), err, pvmElapsed)
+		log.Warn(module, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	}
 

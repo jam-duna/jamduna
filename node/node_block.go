@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -19,26 +20,27 @@ func (p *Peer) GetOneBlock(headerHash common.Hash, ctx context.Context) ([]types
 	return blocksRaw, lastErr
 }
 
-func (p *Peer) GetMiddleBlocks(headerhash common.Hash, count uint32, ctx context.Context) ([]types.Block, error) {
-	blocksRaw, lastErr := p.SendBlockRequest(ctx, headerhash, 1, count)
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	if len(blocksRaw) == 0 {
-		return nil, fmt.Errorf("no blocks received")
-	}
-	return blocksRaw, lastErr
-}
+const maxBlockCount = 100
 
-func (p *Peer) GetAllBlocks(headerhash common.Hash, ctx context.Context) ([]types.Block, error) {
-	blocksRaw, lastErr := p.SendBlockRequest(ctx, headerhash, 1, 1<<32-1)
-	if lastErr != nil {
-		return nil, lastErr
+func (p *Peer) GetMultiBlocks(latest_genesis_headerhash common.Hash, ctx context.Context) ([]types.Block, error) {
+	var currentHash common.Hash
+	currentHash = latest_genesis_headerhash
+	blocks := make([]types.Block, 0)
+	for {
+		block_ctx, blockCancel := context.WithTimeout(ctx, MediumTimeout)
+		blocksRaw, lastErr := p.SendBlockRequest(block_ctx, currentHash, 0, maxBlockCount)
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		blocks = append(blocks, blocksRaw...)
+		if len(blocksRaw) < maxBlockCount {
+			break
+		}
+		blockCancel()
+		log.Info(debugBlock, "GetMultiBlocks", "blocksRaw", len(blocksRaw), "currentHash", currentHash)
+		currentHash = blocksRaw[len(blocksRaw)-1].Header.Hash()
 	}
-	if len(blocksRaw) == 0 {
-		return nil, fmt.Errorf("no blocks received")
-	}
-	return blocksRaw, lastErr
+	return blocks, nil
 }
 
 func (n *Node) CanProposeFirstBlock() bool {

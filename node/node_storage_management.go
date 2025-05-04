@@ -55,6 +55,42 @@ func (n *NodeContent) StoreBlock(blk *types.Block, id uint16, debug bool) error 
 	return nil
 }
 
+const block_key_string = "blk_finalized"
+
+func (n *NodeContent) StoreFinalizedBlock(blk *types.Block) error {
+	// from block, derive blockHash & headerHash
+	s, err := n.GetStorage()
+	if err != nil {
+		fmt.Printf("Error getting storage: %v\n", err)
+		return err
+	}
+	err = s.WriteRawKV([]byte(block_key_string), blk.Bytes())
+	return err
+}
+
+func (n *NodeContent) GetFinalizedBlock() (*types.Block, bool, error) {
+	s, err := n.GetStorage()
+	if err != nil {
+		fmt.Printf("Error getting storage: %v\n", err)
+		return nil, false, err
+	}
+	encodedblk, ok, err := s.ReadRawKV([]byte(block_key_string))
+	if err != nil {
+		fmt.Printf("Error reading block: %v\n", err)
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
+	if err != nil {
+		fmt.Printf("Error decoding block: %v\n", err)
+		return nil, false, err
+	}
+	b := blk.(types.Block)
+	return &b, true, nil
+}
+
 func stripPrefix(key []byte, prefix []byte) ([]byte, error) {
 	// Check if the key starts with the childPrefix
 	if !bytes.HasPrefix(key, prefix) {

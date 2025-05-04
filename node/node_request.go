@@ -180,6 +180,9 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 
 	headerHash := blockAnnouncement.Header.HeaderHash()
 	parentHash := blockAnnouncement.Header.ParentHeaderHash
+	latst_finalized_block := n.block_tree.GetLastFinalizedBlock()
+	last_finalized_block_header_hash := latst_finalized_block.Block.Header.Hash()
+
 	var mode int
 	const (
 		OneBlockMode     = 0
@@ -213,23 +216,28 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		}
 
 		// Small timeout context per attempt
-		attemptCtx, cancel := context.WithTimeout(ctx, NormalTimeout)
-		defer cancel()
+
 		switch mode {
+		// TODO: send request multiple times
 		case OneBlockMode:
+			attemptCtx, cancel := context.WithTimeout(ctx, NormalTimeout)
 			blocksRaw, lastErr = p.GetOneBlock(headerHash, attemptCtx)
+			cancel()
 		case AllBlocksMode:
-			blocksRaw, lastErr = p.GetAllBlocks(headerHash, attemptCtx)
+			attemptCtx, cancel := context.WithTimeout(ctx, VeryLargeTimeout)
+			blocksRaw, lastErr = p.GetMultiBlocks(last_finalized_block_header_hash, attemptCtx)
+			cancel()
 			log.Warn(log.BlockMonitoring, "GetAllBlocks", "attempt", attempt, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
 			n.SetIsSync(false, "no blocks")
 		case MiddleBlocksMode:
-			blocksRaw, lastErr = p.GetMiddleBlocks(headerHash, num, attemptCtx)
+			attemptCtx, cancel := context.WithTimeout(ctx, VeryLargeTimeout)
+			blocksRaw, lastErr = p.GetMultiBlocks(last_finalized_block_header_hash, attemptCtx)
+			cancel()
 			log.Warn(log.BlockMonitoring, "GetMiddleBlocks", "attempt", attempt, "num", num, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
 			n.SetIsSync(false, "behind others")
 		default:
 			return nil, fmt.Errorf("invalid mode %d", mode)
 		}
-		cancel()
 
 		if lastErr == nil && len(blocksRaw) > 0 {
 			if attempt > 1 {
@@ -260,7 +268,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 			return nil, fmt.Errorf("SendBlockRequest failed after 3 attempts with mode=%v: %w", mode, lastErr)
 		}
 	}
-	for i := len(blocksRaw) - 1; i >= 0; i-- {
+	for i := 0; i < len(blocksRaw); i++ {
 		block := &blocksRaw[i]
 		err := n.processBlock(block)
 		if err != nil {
@@ -346,10 +354,6 @@ func (n *Node) runReceiveBlock() {
 			// SmallTimeout to processBlockAnnouncement
 			received_blk_hash := blockAnnouncement.Header.Hash()
 			received_blk_slot := blockAnnouncement.Header.Slot
-			if !n.ValidateJCE(received_blk_slot) {
-				// Block announcement is outside of reasonable bound
-				continue
-			}
 			latest_block := n.GetLatestBlockInfo()
 			newinfo := JAMSNP_BlockInfo{
 				HeaderHash: received_blk_hash,
@@ -361,7 +365,13 @@ func (n *Node) runReceiveBlock() {
 				continue //once it's enough, we don't need to process it;
 			}
 			start := time.Now()
-			blockCtx, cancel := context.WithTimeout(context.Background(), SmallTimeout)
+			var timeout time.Duration
+			if n.GetIsSync() {
+				timeout = SmallTimeout
+			} else {
+				timeout = VeryLargeTimeout
+			}
+			blockCtx, cancel := context.WithTimeout(context.Background(), timeout) // use very large timeout tmply since we have 30 blocks to catch up
 			blocks, err := n.processBlockAnnouncement(blockCtx, blockAnnouncement)
 			cancel()
 			processBlockAnnouncementElapsed := common.ElapsedStr(start)
@@ -404,6 +414,16 @@ func (n *Node) runReceiveBlock() {
 			if GrandpaEasy {
 				n.block_tree.EasyFinalization()
 			}
+			go func() {
+				latst_finalized_block := n.block_tree.GetLastFinalizedBlock()
+				block := latst_finalized_block.Block
+				if block != nil {
+					err := n.StoreFinalizedBlock(block)
+					if err != nil {
+						log.Warn(debugBlock, "runReceiveBlock: StoreFinalizedBlock failed", "n", n.String(), "err", err)
+					}
+				}
+			}()
 			cancel()
 		case <-pulseTicker.C:
 			// MediumTimeout to extend the chain
@@ -434,12 +454,14 @@ func (n *Node) runGuarantees() {
 	for {
 		select {
 		case guarantee := <-n.guaranteesCh:
-			err := n.processGuarantee(guarantee)
-			if err != nil {
-				if statedb.AcceptableGuaranteeError(err) {
-					log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
-				} else {
-					log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+			if n.GetIsSync() {
+				err := n.processGuarantee(guarantee)
+				if err != nil {
+					if statedb.AcceptableGuaranteeError(err) {
+						log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+					} else {
+						log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+					}
 				}
 			}
 		}

@@ -474,7 +474,7 @@ func auth_copy(n1 JNode, testServices map[string]*types.TestService, targetN int
 		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("Auth(%d)", fibN),
-			CoreIndex:       0,
+			CoreIndex:       1,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}

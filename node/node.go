@@ -6,8 +6,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"math"
 	"net/rpc"
+	"runtime/pprof"
 
 	"sync/atomic"
 
@@ -313,6 +313,7 @@ type Node struct {
 
 	stop_receive_blk    chan string
 	restart_receive_blk chan string
+	WriteDebugFlag      bool
 }
 
 func (n *Node) GetIsSync() bool {
@@ -488,32 +489,38 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		dataDir: dataDir,
 
 		connectedPeers: make(map[uint16]bool),
+		WriteDebugFlag: true,
 	}
 	node.NodeContent.nodeSelf = node
 	block := statedb.NewBlockFromFile(genesisBlockFile)
-	node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
-		Parent:    nil,
-		Block:     block,
-		Height:    0,
-		Finalized: true,
-		Applied:   true,
-	})
-	old_blocks := make([]types.Block, 0)
-	old_blocks, ok, err := node.BlocksLookup(block.Header.Hash(), 0, math.MaxUint32)
-	if err != nil || !ok {
-		log.Error(module, "fetchBlocks", "err", err)
+	err = node.StoreBlock(block, id, false)
+	if err != nil {
+		log.Error(module, "StoreBlock", "err", err)
 		return nil, err
 	}
-	if len(old_blocks) > 0 {
-		node.SetIsSync(false, "catching up")
-		log.Info(log.BlockMonitoring, "fetchBlocks", "old_blocks", len(old_blocks), "blockHash", block.Header.Hash().Hex())
-		for _, b := range old_blocks {
-			err := node.block_tree.AddBlock(&b)
-			if err != nil {
-				log.Error(module, "AddBlock", "err", err)
-				return nil, err
-			}
-		}
+	finalizedBlock, FinalizedOk, err := node.GetFinalizedBlock()
+	if err != nil || !FinalizedOk || block == nil {
+		log.Warn(module, "GetFinalizedBlock", "err", err)
+		log.Info(module, "NewBlockTree", "block_hash", block.Header.HeaderHash().Hex())
+		node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
+			Parent:    nil,
+			Block:     block,
+			Height:    0,
+			Finalized: true,
+			Applied:   true,
+		})
+	} else if block != nil {
+		log.Info(module, "NewBlockTree", "block_hash", finalizedBlock.Header.HeaderHash().Hex())
+		node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
+			Parent:    nil,
+			Block:     finalizedBlock,
+			Height:    0,
+			Finalized: true,
+			Applied:   true,
+		})
+	} else {
+		log.Error(module, "GetFinalizedBlock", "err", err)
+		return nil, err
 	}
 	node.commitHash = common.GetCommitHash()
 	fmt.Printf("[N%v] running on buildV: %s\n", id, node.GetBuild())
@@ -616,18 +623,23 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 	for validatorIndex, p := range startPeerList {
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
-
-		if validatorIndex != id && len(old_blocks) > 0 {
+		if validatorIndex != id && FinalizedOk {
 			_, err = node.peersInfo[validatorIndex].GetOrInitBlockAnnouncementStream(context.Background())
 			if err != nil {
 				log.Error(module, "GetOrInitBlockAnnouncementStream", "err", err)
-				return nil, err
 			}
 		}
 	}
 	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
 	_statedb.Block = block
 	_statedb.HeaderHash = block.Header.Hash()
+	if FinalizedOk {
+		recoveredStateDB := _statedb.Copy()
+		recoveredStateDB.RecoverJamState(finalizedBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
+		recoveredStateDB.UnsetPosteriorEntropy()
+		recoveredStateDB.StateRoot = finalizedBlock.Header.ParentStateRoot
+		recoveredStateDB.Block = finalizedBlock.Copy()
+	}
 	genesisBlockHash = block.Header.Hash()
 	if err == nil {
 		_statedb.SetID(uint16(id))
@@ -655,29 +667,40 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		node.statedb.GetSafrole().NextValidators = validators
 		node.statedb.GetSafrole().CurrValidators = validators
 	}
-
-	if len(old_blocks) > 0 {
-		// also prune the block tree
-
-		for i := 0; i < len(old_blocks)-1; i++ {
-			block_node, ok := node.block_tree.GetBlockNode(old_blocks[i].Header.Hash())
-			if ok {
-				block_node.Applied = true
-				log.Info(module, "runReceiveBlock: applied", "n", node.String(), "block_hash", old_blocks[i].Header.Hash())
-			}
-			node.statedb.Block = &old_blocks[i]
-		}
-		err = node.extendChain(context.Background())
-		if err != nil {
-			log.Error(module, "extendChain", "err", err)
-		} else {
-			log.Info(module, "extendChain", "blockHash", node.statedb.HeaderHash.Hex())
-		}
-		useless_header_hashes := node.block_tree.PruneBlockTree(64)
-		go node.Clean(useless_header_hashes)
-	}
 	if id == 5 {
 		node.SetIsSync(false, "I am node 5") // node 5 can't produce the first block
+	} else if FinalizedOk {
+		node.SetIsSync(false, "I was restarted")
+	}
+	if !node.GetIsSync() {
+		ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
+		defer cancel()
+		randomselectedPeer := rand0.Intn(len(node.peersInfo))
+		for randomselectedPeer == int(id) {
+			randomselectedPeer = rand0.Intn(len(node.peersInfo))
+		}
+		peer := node.peersInfo[uint16(randomselectedPeer)]
+		last_finalized := node.block_tree.GetLastFinalizedBlock()
+		block_header_hash := last_finalized.Block.Header.HeaderHash()
+		blocks, err := peer.GetMultiBlocks(block_header_hash, ctx)
+		if err != nil {
+			log.Error(module, "GetMultiBlocks", "err", err, "hash", block_header_hash)
+			return nil, err
+		}
+		if len(blocks) == 0 {
+			log.Error(module, "GetMultiBlocks", "blocks", blocks)
+			return nil, fmt.Errorf("GetMultiBlocks: no blocks")
+		}
+		for _, block := range blocks {
+			err := node.processBlock(&block)
+			if err != nil {
+				log.Error(module, "processBlock", "err", err)
+				return nil, err
+			}
+			log.Info(module, "newNode:processBlock", "block_hash", block.Header.HeaderHash().Hex())
+		}
+		log.Info(module, "newNode:extendChain", "block_hash", blocks[len(blocks)-1].Header.HeaderHash().Hex())
+		node.extendChain(ctx)
 	}
 	if nodeType != ValidatorDAFlag {
 		go node.runAuthoring()
@@ -1284,17 +1307,21 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 		}
 		n.statedb = _statedb
 		n.statedbMap[headerHash] = _statedb
+		log.Debug(debugBlock, "addStateDBAA", "statedb", n.statedb.GetHeaderHash().Hex())
 		return nil
 	}
 	if _statedb.GetBlock() == nil {
 		return fmt.Errorf("addStateDB: NO BLOCK")
 	}
-	if n.statedb.GetBlock() == nil {
-		return fmt.Errorf("addStateDB: NO BLOCK")
-	}
-	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() && _statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash() {
+	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() { // not nessary  && _statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash()
+		if !(_statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash()) {
+			log.Warn(debugBlock, "addStateDB Warning:newStateDB's Parent is not current StateDB", "statedb", _statedb.GetHeaderHash().Hex(), "statedb2", n.statedb.GetHeaderHash().Hex())
+		}
 		n.statedb = _statedb
 		n.statedbMap[_statedb.GetHeaderHash()] = _statedb
+		log.Debug(debugBlock, "addStateDB", "statedb", n.statedb.GetHeaderHash().Hex())
+	} else {
+		log.Warn(debugBlock, "addStateDB", "statedb", _statedb.GetHeaderHash().Hex(), "statedb2", n.statedb.GetHeaderHash().Hex())
 	}
 	return nil
 }
@@ -1650,7 +1677,7 @@ func (n *Node) extendChain(ctx context.Context) error {
 		log.Warn(debugBlock, "extendChain", "SyncState", "latestStateDB.Block is nil")
 		return nil
 	}
-	currentHash := latestStateDB.Block.Header.Hash()
+	currentHash := n.block_tree.GetLastFinalizedBlock().Block.Header.Hash()
 	// if current block tree is forked, we need to apply from the common ancestor
 	currNode, ok := n.block_tree.GetBlockNode(currentHash)
 	if len(n.block_tree.GetLeafs()) > 1 {
@@ -1708,6 +1735,9 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 			return ctx.Err()
 		}
 		if child.Applied {
+			if err := n.applyChildrenRecursively(ctx, child); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := n.ApplyBlock(ctx, child); err != nil {
@@ -1737,11 +1767,12 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// 1. Prepare recovered state from parent
 	start := time.Now()
 	recoveredStateDB := n.statedb.Copy()
-	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
+	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
 	recoveredStateDB.UnsetPosteriorEntropy()
 	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
 	recoveredStateDB.Block = nextBlock
-	recoverElapsed := common.ElapsedStr(start)
+	recoverElapsed := time.Since(start)
+
 	var used_entropy common.Hash
 	if nextBlock.EpochMark() != nil {
 		used_entropy = nextBlock.EpochMark().TicketsEntropy
@@ -1772,6 +1803,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		// Optional: Respect ctx cancel
 		select {
 		case <-ctx.Done():
+			// log.Warn(module, "ApplyBlock: context canceled, skipping debug write")
 			return
 		default:
 		}
@@ -1788,7 +1820,11 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}()
 	start = time.Now()
 	// 4. Extend the chain
-	n.addStateDB(newStateDB)
+	err = n.addStateDB(newStateDB)
+	if err != nil {
+		log.Error(debugBlock, "ApplyBlock: addStateDB failed", "n", n.String(), "err", err)
+		return fmt.Errorf("addStateDB failed: %w", err)
+	}
 	addStateDBElapsed := common.ElapsedStr(start)
 	// 5. Finalization logic
 	start = time.Now()
@@ -1796,6 +1832,17 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	defer n.statedbMapMutex.Unlock()
 	mini_peers := 2
 	latest_block_info := n.GetLatestBlockInfo()
+	nextBlockNode.Applied = true
+	log.Debug(log.BlockMonitoring, "Applied Block", "n", n.String(),
+		"p", nextBlock.Header.ParentHeaderHash.String_short(),
+		"->block", nextBlock.Header.Hash().String_short(),
+		"slot", nextBlock.Header.Slot,
+		"stateRoot", newStateDB.StateRoot.String_short(),
+		"author", nextBlock.Header.AuthorIndex,
+	)
+	if newStateDB.GetSafrole().GetTimeSlot() != nextBlock.Header.Slot {
+		panic("ApplyBlock: TimeSlot mismatch")
+	}
 	if latest_block_info == nil {
 		log.Info(debugBlock, "ApplyBlock: latest_block_info is nil", "n", n.String())
 		return nil
@@ -1822,6 +1869,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 			if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
 				select {
 				case n.auditingCh <- snap.Copy():
+					log.Debug(debugAudit, "ApplyBlock: auditingCh", "n", n.String(), "slot", nextBlock.Header.Slot)
 				default:
 					log.Warn(module, "auditingCh full, skipping audit")
 				}
@@ -1830,14 +1878,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	} else {
 		log.Info(debugStream, "ApplyBlock: latest_block not equal to nextBlock", "n", n.String(), "latest_block", latest_block_info.HeaderHash.String_short(), "nextBlock", nextBlock.Header.Hash().String_short())
 	}
-	nextBlockNode.Applied = true
-	log.Debug(log.BlockMonitoring, "Applied Block", "n", n.String(),
-		"p", nextBlock.Header.ParentHeaderHash.String_short(),
-		"->block", nextBlock.Header.Hash().String_short(),
-		"slot", nextBlock.Header.Slot,
-		"stateRoot", newStateDB.StateRoot.String_short(),
-		"author", nextBlock.Header.AuthorIndex,
-	)
+
 	// 6. Cleanup used extrinsics
 	isClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 	n.extrinsic_pool.RemoveUsedExtrinsicFromPool(nextBlock, n.statedb.GetSafrole().Entropy[2], isClosed)
@@ -1849,8 +1890,32 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		"addStateDBElapsed", addStateDBElapsed,
 		"finalElapsed", finalElapsed,
 	)
+
+	if recoverElapsed > 500*time.Millisecond || stateTransitionElapsed > 500*time.Millisecond || updateServiceElapsed > 500*time.Millisecond || addStateDBElapsed > 500*time.Millisecond || finalElapsed > 500*time.Millisecond {
+		if !cpu_flag {
+			cpu_flag = true
+			go func() {
+				log.Info(module, "CPU profile START!!!!!", "n", n.String())
+				f, err := os.Create("/tmp/recover_slow_cpu.pprof")
+				if err != nil {
+					log.Warn(module, "Create CPU profile", "err", err)
+					return
+				}
+				defer f.Close()
+
+				if err := pprof.StartCPUProfile(f); err != nil {
+					log.Warn(module, "Start CPU profile", "err", err)
+					return
+				}
+				time.Sleep(5 * time.Minute)
+				pprof.StopCPUProfile()
+			}()
+		}
+	}
 	return nil
 }
+
+var cpu_flag = false
 
 func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.StateDB) error {
 	if n.hub != nil {
@@ -2241,6 +2306,9 @@ func (n *Node) SetSendTickets(sendTickets bool) {
 }
 
 func (n *Node) writeDebug(obj interface{}, timeslot uint32) error {
+	if !n.WriteDebugFlag {
+		return nil
+	}
 	l := storage.LogMessage{
 		Payload:  obj,
 		Timeslot: timeslot,
@@ -2403,7 +2471,11 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	if n.jce_timestamp == nil {
 		n.jce_timestamp = make(map[uint32]time.Time)
 	}
-	n.jce_timestamp[currJCE] = time.Now()
+	if n.epoch0Timestamp != 0 {
+		n.jce_timestamp[currJCE] = time.Now()
+	} else {
+		n.jce_timestamp[currJCE] = time.Unix(int64(n.GetSlotTimestamp(currJCE)), 0)
+	}
 	n.jce_timestamp_mutex.Unlock()
 
 	if n.sendTickets {
@@ -2495,6 +2567,10 @@ func (n *Node) runAuthoring() {
 				n.author_status = "not sync"
 				continue
 			}
+			if n.GetLatestBlockInfo() != nil && n.statedb.HeaderHash != n.GetLatestBlockInfo().HeaderHash {
+				log.Debug(module, "runAuthoring: HeaderHash not equal", "n", n.String(), "statedb.HeaderHash", n.statedb.HeaderHash.String_short(), "latestBlockInfo.HeaderHash", n.GetLatestBlockInfo().HeaderHash.String_short())
+				continue
+			}
 
 			currJCE := n.GetCurrJCE()
 
@@ -2532,6 +2608,7 @@ func (n *Node) runAuthoring() {
 					log.Error(module, "ProcessState", "err", err)
 					return processResult{}, err
 				}
+
 				elapsed := time.Since(stProcessState)
 				if elapsed > time.Second {
 					log.Info(module, "ProcessState", "isAuthorized", isAuthorized, "elapsed", elapsed)

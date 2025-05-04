@@ -928,7 +928,7 @@ func (s *StateDB) GetPosteriorSafroleEntropy(targetJCE uint32) (*SafroleState, e
 		return nil, fmt.Errorf("GetPosteriorSafroleEntropy SimulatePostiorEntropy %v", err)
 	}
 	s.posteriorSafroleEntropy = simulated_posteriorSafroleEntropy
-	log.Trace(log.BlockMonitoring, "GetPosteriorSafroleEntropy", "epochChanged", epochChanged, "s.JCE", s.JamState.SafroleState.Timeslot, "targetJCE", targetJCE, "entropy", simulated_posteriorSafroleEntropy.Entropy.String())
+	log.Debug(module, "GetPosteriorSafroleEntropy", "epochChanged", epochChanged, "s.JCE", s.JamState.SafroleState.Timeslot, "targetJCE", targetJCE, "entropy", simulated_posteriorSafroleEntropy.Entropy.String())
 	return simulated_posteriorSafroleEntropy, nil
 }
 

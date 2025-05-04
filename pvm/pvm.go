@@ -1476,7 +1476,8 @@ func (vm *VM) step(stepn int) error {
 	 if vm.ServiceMetadata != nil {
 		 md = "inst" //string(vm.ServiceMetadata)
 	 } */
-	log.Debug(vm.logging, opcode_str(opcode), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+	// avoid this: this is expensive
+	// log.Debug(vm.logging, opcode_str(opcode), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
 	return nil
 }
 
