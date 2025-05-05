@@ -43,7 +43,7 @@ type SubscriptionRequest struct {
 // Broadcasters for each subscription type
 // subscribeBestBlock - Subscribe to updates of the head of the "best" chain, as returned by bestBlock.
 // subscribeFinalizedBlock - Subscribe to updates of the latest finalized block, as returned by finalizedBlock.
-func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFinalized bool) (err error) {
+func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.Block, sdb *statedb.StateDB, isFinalized bool) (err error) {
 	var data []byte
 	update := sdb.GetStateUpdates()
 	for client := range h.clients {
@@ -53,8 +53,8 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 			payload := types.WSPayload{
 				Method: req.Method,
 				Result: types.SubBlockResult{
-					BlockHash:  block.Hash(),
-					HeaderHash: block.Header.Hash(),
+					BlockHash:  BestBlock.Hash(),
+					HeaderHash: BestBlock.Header.Hash(),
 				},
 			}
 			data, err = json.Marshal(payload)
@@ -65,8 +65,8 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 			payload := types.WSPayload{
 				Method: req.Method,
 				Result: types.SubBlockResult{
-					BlockHash:  block.Hash(),
-					HeaderHash: block.Header.Hash(),
+					BlockHash:  FinalizedBlock.Hash(),
+					HeaderHash: FinalizedBlock.Header.Hash(),
 				},
 			}
 			data, err = json.Marshal(payload)
@@ -77,7 +77,7 @@ func (h *Hub) ReceiveLatestBlock(block *types.Block, sdb *statedb.StateDB, isFin
 			payload := types.WSPayload{
 				Method: req.Method,
 				Result: types.SubStatisticsResult{
-					HeaderHash: block.Header.Hash(),
+					HeaderHash: BestBlock.Header.Hash(),
 					Statistics: sdb.JamState.ValidatorStatistics,
 				},
 			}

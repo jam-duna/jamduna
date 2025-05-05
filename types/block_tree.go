@@ -15,8 +15,10 @@ type BT_Node struct {
 	Height                 int
 	VotesWeight            uint64
 	Cumulative_VotseWeight uint64
-	Finalized              bool
-	Applied                bool
+
+	Applied   bool
+	Audited   bool
+	Finalized bool
 }
 
 func (root *BT_Node) Copy() (*BT_Node, map[common.Hash]*BT_Node, map[common.Hash]*BT_Node) {
@@ -472,6 +474,26 @@ func (bt *BlockTree) GetLastFinalizedBlock() *BT_Node {
 	return node
 }
 
+func (bt *BlockTree) GetLastAuditedBlock() *BT_Node {
+	bt.Mutex.RLock()
+	defer bt.Mutex.RUnlock()
+	//if the block get audited, it will be a chain
+	//so we can start from the root node
+	node := bt.Root
+	audited := true
+	for audited {
+		audited = false
+		for _, child := range node.Children {
+			if child.Audited {
+				node = child
+				audited = true
+				break
+			}
+		}
+	}
+	return node
+}
+
 func (bt *BlockTree) GetDescendingBlocks(blockHash common.Hash) ([]*BT_Node, []common.Hash, error) {
 	bt.Mutex.RLock()
 	defer bt.Mutex.RUnlock()
@@ -566,7 +588,7 @@ func (bt *BlockTree) FindGhost(startHash common.Hash, threshold uint64) (*BT_Nod
 		currentDepth := entry.depth
 
 		// Check if the current node satisfies the condition
-		if currentNode.Cumulative_VotseWeight >= threshold {
+		if currentNode.Cumulative_VotseWeight >= threshold && currentNode.Audited && currentNode.Applied {
 			if currentDepth > maxDepth || (currentDepth == maxDepth && currentNode.Block.TimeSlot() > maxSlot) {
 				resultNode = currentNode
 				maxDepth = currentDepth

@@ -1902,7 +1902,11 @@ var cpu_flag = false
 
 func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.StateDB) error {
 	if n.hub != nil {
-		go n.hub.ReceiveLatestBlock(b, sdb, false)
+		finalizedBlockNode := n.block_tree.GetLastFinalizedBlock()
+		finalizedBlock := finalizedBlockNode.Block
+		bestBlockNode := n.block_tree.GetLastAuditedBlock()
+		bestBlock := bestBlockNode.Block
+		go n.hub.ReceiveLatestBlock(finalizedBlock, bestBlock, sdb, false)
 	}
 	assureStart := time.Now()
 

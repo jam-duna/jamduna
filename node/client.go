@@ -151,9 +151,20 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			log.Warn(module, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
 			return err
 		}
+		// fmt.Printf("Best block: %s\n", result.BlockHash)
 		c.HeaderHash = common.Hex2Hash(result.HeaderHash)
 
 		go c.GetState(result.HeaderHash)
+	case SubFinalizedBlock:
+		var result struct {
+			BlockHash  string `json:"blockHash"`
+			HeaderHash string `json:"headerHash"`
+		}
+		if err := json.Unmarshal(envelope.Result, &result); err != nil {
+			log.Warn(module, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
+			return err
+		}
+		// fmt.Printf("Finalized block: %s\n", result.BlockHash)
 
 	case SubStatistics:
 		var payload struct {

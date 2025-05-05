@@ -229,6 +229,12 @@ func (n *Node) runAudit() {
 					log.Debug(debugBlock, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 					// sourabh don't disable until it's stable I need this to tell if the audit is running
 					newBlock := audit_statedb.Block.Copy()
+					blockNode, ok := n.block_tree.GetBlockNode(newBlock.Header.HeaderHash())
+					if ok {
+						blockNode.Audited = true // for best block
+					} else {
+						log.Error(debugAudit, "runAudit: blockNode not found", "n", n.String(), "headerHash", headerHash)
+					}
 					if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
 						n.StartGrandpa(newBlock.Copy())
 					}

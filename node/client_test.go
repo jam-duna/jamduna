@@ -26,21 +26,28 @@ func TestClient(t *testing.T) {
 	addresses, wsUrl := GetAddresses(local)
 	//coreIndex := uint16(0)
 
-	client, err := NewNodeClient(addresses, wsUrl[3])
+	client, err := NewNodeClient(addresses, wsUrl[0])
 	if err != nil {
 		t.Fatalf("Error: %s", err)
 	}
 	defer client.Close()
 
-	err = client.ConnectWebSocket(wsUrl[3])
+	err = client.ConnectWebSocket(wsUrl[0])
 	if err != nil {
 		fmt.Println("WebSocket connection failed:", err)
 		return
 	}
+	err = client.Subscribe(SubBestBlock, nil)
+	if err != nil {
+		t.Fatalf("Subscription failed: %s", err)
+	}
+	err = client.Subscribe(SubFinalizedBlock, nil)
+	if err != nil {
+		t.Fatalf("Subscription failed: %s", err)
+	}
+	for {
 
-	state, err := client.GetState("latest")
-	fmt.Printf(state.String())
-
+	}
 	// switch testMode {
 	// default:
 	// 	t.Fatalf("Invalid mode: %s", testMode)
