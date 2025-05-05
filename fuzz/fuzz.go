@@ -109,11 +109,7 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 		if strings.HasSuffix(file.Name(), ".bin") {
 			file_idx++
 			// Extract epoch and phase from filename `${epoch}_${phase}.bin`
-			parts := strings.Split(strings.TrimSuffix(file.Name(), ".bin"), "_")
-			if len(parts) != 2 {
-				log.Printf("Invalid block filename format: %s\n", file.Name())
-				continue
-			}
+			// parts := strings.Split(strings.TrimSuffix(file.Name(), ".bin"), "_")
 
 			// Read the st file
 			stPath := filepath.Join(state_transitions_dir, file.Name())

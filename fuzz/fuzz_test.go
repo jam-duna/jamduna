@@ -72,6 +72,13 @@ func testFuzz(t *testing.T, Base_Dir string, modes []string, stfs []*statedb.Sta
 	sdb_storage.Close()
 }
 
+func testFuzzGeneric(t *testing.T) {
+	stfs, _ := readSTF(Base_Dir, STF_Generic, t)
+	//mode_list := []string{STF_Safrole, STF_Assurances}
+	mode_list := []string{STF_Safrole}
+	testFuzz(t, Base_Dir, mode_list, stfs)
+}
+
 func testFuzzSafrole(t *testing.T) {
 	stfs, _ := readSTF(Base_Dir, STF_Safrole, t)
 	testFuzz(t, Base_Dir, []string{STF_Safrole}, stfs)
@@ -107,7 +114,8 @@ func testFuzzAll(t *testing.T) {
 func TestFuzz(t *testing.T) {
 	//testFuzzAll(t)
 	testFuzzAssurances(t)
-	testFuzzSafrole(t)
+	testFuzzGeneric(t)
+	//testFuzzSafrole(t)
 	//testFuzzReports(t)
 	//testFuzzDisputes(t)
 }
@@ -129,7 +137,9 @@ func WriteLog(baseDir string, fuzz_mode string, jamErrorIdentifier string, epoch
 			return fmt.Errorf("Error creating %v directory: %v\n", fuzz_mode, err)
 		}
 	}
-	path := fmt.Sprintf("%s/%v_%03d_%v", structDir, epoch, phase, jamErrorIdentifier)
+	//path := fmt.Sprintf("%s/%v_%03d_%v", structDir, epoch, phase, jamErrorIdentifier)
+	timeSlot := epoch*types.EpochLength + phase
+	path := fmt.Sprintf("%s/%08d_%v", structDir, timeSlot, jamErrorIdentifier)
 	if obj != nil {
 		types.SaveObject(path, obj)
 		fmt.Printf("Saved %v to %v\n", fuzz_mode, path)

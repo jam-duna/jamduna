@@ -99,6 +99,7 @@ run_single_test() {
 test_pairs=(
   "megatron orderedaccumulation"
   "fib2 assurances"
+  "game_of_life generic"
 )
 
 processed_modes=""

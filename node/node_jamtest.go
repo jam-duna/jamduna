@@ -259,8 +259,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		if jam == "safrole" || jam == "fallback" {
 			JCEMode = JCEFast
 		}
-		JCEMode = JCEFast
-		
+		JCEMode = JCEFast //MK:TODO. bring back faster mode. This seems extremely slow
+
 		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
 		if err != nil {
 			log.Crit(module, "Error setting up nodes", "err", err)
@@ -424,7 +424,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		//targetN := 100
 		fib2(bNode, testServices, 10)
 	case "game_of_life":
-		game_of_life(bNode, testServices, *manifest)
+		//targetN := 20
+		game_of_life(bNode, testServices, targetN, *manifest)
 	case "megatron":
 		megatron(bNode, testServices, 5)
 	case "auth_copy":

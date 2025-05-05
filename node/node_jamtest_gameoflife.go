@@ -21,9 +21,12 @@ func flatten(data [][]byte) []byte {
 	return result
 }
 
-func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest bool) error {
+func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN int, manifest bool) error {
 	coreIdx := 0
-	ws_push := StartGameOfLifeServer("localhost:80", "./game_of_life.html")
+	maxTargetN := targetN     // was 300000
+	game_of_life_port := 8080 //was 80
+	game_of_life_addr := fmt.Sprintf("localhost:%d", game_of_life_port)
+	ws_push := StartGameOfLifeServer(game_of_life_addr, "./game_of_life.html")
 
 	log.Info(module, "Game of Life START")
 
@@ -61,10 +64,10 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 	extrinsics = append(extrinsics, extrinsic)
 	prevWorkPackageHash := common.Hash{}
 	next_import_cnt := 0
-	for step_n := 0; step_n <= 300000; step_n++ {
+	for game_of_life_n := 0; game_of_life_n <= maxTargetN; game_of_life_n++ {
 		importedSegments := make([]types.ImportSegment, 0)
 		export_count := uint16(0)
-		if step_n > 1 {
+		if game_of_life_n > 1 {
 			for i := 0; i < next_import_cnt; i++ {
 				importedSegment := types.ImportSegment{
 					RequestedHash: prevWorkPackageHash,
@@ -74,10 +77,10 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 			}
 		}
 		var payload []byte
-		if step_n > 0 {
+		if game_of_life_n > 0 {
 			payload = make([]byte, 0, 12)
 			tmp := make([]byte, 4)
-			binary.LittleEndian.PutUint32(tmp, uint32(step_n))
+			binary.LittleEndian.PutUint32(tmp, uint32(game_of_life_n))
 			payload = append(payload, tmp...)
 
 			binary.LittleEndian.PutUint32(tmp, uint32(10)) // num_of_gliders
@@ -122,7 +125,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
 		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("Game_of_life(%d)", step_n),
+			Identifier:      fmt.Sprintf("Game_of_life(%d)", game_of_life_n),
 			CoreIndex:       uint16(coreIdx),
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
@@ -133,7 +136,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 			return err
 		}
 		workPackageHash := hashes[0]
-		if step_n == 0 {
+		if game_of_life_n == 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
 			err = n1.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, service0_child_code["game_of_life_child"].Code)
@@ -148,7 +151,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, manifest
 			vm_export := make([][]byte, export_count)
 			if err == nil {
 				stepBytes := make([]byte, 4)
-				binary.LittleEndian.PutUint32(stepBytes, uint32(step_n*10))
+				binary.LittleEndian.PutUint32(stepBytes, uint32(game_of_life_n*10))
 
 				for i := range vm_export {
 					vm_export[i] = make([]byte, 4104)

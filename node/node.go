@@ -2323,7 +2323,8 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 
 	if msgType != "unknown" {
 		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
-		path := fmt.Sprintf("%s/%v_%03d", structDir, epoch, phase)
+		//path := fmt.Sprintf("%s/%v_%03d", structDir, epoch, phase)
+		path := fmt.Sprintf("%s/%08d", structDir, timeSlot)
 		if epoch == 0 && phase == 0 {
 			path = fmt.Sprintf("%s/genesis", structDir)
 		}
