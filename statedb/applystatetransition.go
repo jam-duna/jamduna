@@ -18,7 +18,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
-		fmt.Printf("Apply Block %v\n", blk.Header.Hash())
+		//fmt.Printf("Apply Block %v\n", blk.Header.Hash())
 		return s, fmt.Errorf("ParentStateRoot does not match")
 	}
 	old_timeslot := s.GetSafrole().Timeslot

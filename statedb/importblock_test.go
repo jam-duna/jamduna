@@ -164,7 +164,7 @@ func testSTF(t *testing.T, filename string, content string) {
 			return
 		}
 	}
-	fmt.Printf("STF: %s\n", stf.String())
+	//fmt.Printf("STF: %s\n", stf.String())
 
 	// 3) do the state transition check
 	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil)
@@ -268,11 +268,11 @@ func testSTFDir(t *testing.T, dir string) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".bin") {
+		if !strings.HasSuffix(name, ".json") {
 			continue
 		}
 
-		if name != "00000000.bin" {
+		if name != "00000000.json" {
 			files = append(files, filepath.Join(dir, name))
 		}
 	}
@@ -296,9 +296,10 @@ func TestTraces(t *testing.T) {
 	//log.EnableModule(log.GeneralAuthoring)
 	//log.EnableModule(log.StateDBMonitoring)
 
+	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
 	//testSTFDir(t, "../jamtestvectors/traces/reports-l0")
-	//testSTFDir(t, "../jamtestvectors/traces/fallback")
-	testSTFDir(t, "../jamtestvectors/traces/safrole")
+	testSTFDir(t, "../jamtestvectors/traces/fallback")
+	//testSTFDir(t, "../jamtestvectors/traces/safrole")
 }
 
 func TestCompareJson(t *testing.T) {

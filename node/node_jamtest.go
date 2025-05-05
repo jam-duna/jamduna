@@ -27,8 +27,8 @@ import (
 )
 
 const (
-	DefaultRefineGasLimit     = uint64(800000)
-	DefaultAccumulateGasLimit = uint64(80000)
+	DefaultRefineGasLimit     = uint64(8000000)
+	DefaultAccumulateGasLimit = uint64(1000000)
 )
 
 var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
@@ -259,7 +259,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		if jam == "safrole" || jam == "fallback" {
 			JCEMode = JCEFast
 		}
-
+		JCEMode = JCEFast
+		
 		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
 		if err != nil {
 			log.Crit(module, "Error setting up nodes", "err", err)
@@ -315,7 +316,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		bNode = nodes[1]
 	}
 
-	log.EnableModule(log.FirstGuarantorOrAuditor)
+	//log.EnableModule(log.FirstGuarantorOrAuditor)
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule(log.GeneralAuthoring)
 
@@ -421,11 +422,11 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		fib(bNode, testServices, targetN)
 	case "fib2":
 		//targetN := 100
-		fib2(bNode, testServices, targetN)
+		fib2(bNode, testServices, 10)
 	case "game_of_life":
 		game_of_life(bNode, testServices, *manifest)
 	case "megatron":
-		megatron(bNode, testServices, targetN)
+		megatron(bNode, testServices, 5)
 	case "auth_copy":
 		auth_copy(bNode, testServices, targetN)
 

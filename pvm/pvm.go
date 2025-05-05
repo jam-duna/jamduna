@@ -419,6 +419,8 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 		}
 		stepn++
 	}
+	// vm.Mode = ...
+	// vm.Gas = types.IsAuthorizedGasAllocation
 	// log.Debug(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {

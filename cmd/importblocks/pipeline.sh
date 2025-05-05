@@ -21,10 +21,10 @@ echo -e "${GREEN}STEP 1: Generate TestVectors${NC}"
 # STEP 3: Zipping Data folders & Fuzzed folders
 # ---------------------------------------
 #echo -e "${GREEN}STEP 3: Zipping 'Data' & 'Fuzzed' folders${NC}"
-#./data_fuzz_zipper.sh
+./data_fuzz_zipper.sh
 
 # ---------------------------------------
 # STEP 4: Copying over to jamtestnet
 # ---------------------------------------
 #echo -e "${GREEN}STEP 4: Copying over to jamtestnet${NC}"
-#./moving_to_jamtestnet.sh
+./moving_to_jamtestnet.sh

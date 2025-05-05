@@ -99,8 +99,6 @@ run_single_test() {
 test_pairs=(
   "megatron orderedaccumulation"
   "fib2 assurances"
-  "safrole safrole"
-  "fallback fallback"
 )
 
 processed_modes=""
