@@ -2,17 +2,21 @@
 package pvm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -224,9 +228,19 @@ func TestRevm(t *testing.T) {
 	fmt.Printf("Execution took %s\n", elapsed)
 }
 
-func TestDoom(t *testing.T) {
+func TestHelloWorld(t *testing.T) {
+	// f, err := os.Create("cpu.pprof")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	// pprof.StartCPUProfile(f)
+	// defer func() {
+	// 	pprof.StopCPUProfile()
+	// 	f.Close()
+	// }()
+
 	log.InitLogger("info")
-	fp := "../services/doom.pvm"
+	fp := "../services/hello_world.pvm"
 	raw_code, err := os.ReadFile(fp)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", fp, err)
@@ -237,7 +251,7 @@ func TestDoom(t *testing.T) {
 	initial_regs := make([]uint64, 13)
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
-	metadata := "revm_test"
+	metadata := "hello_world"
 	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
 
 	a := make([]byte, 0)
@@ -257,9 +271,21 @@ func TestDoom(t *testing.T) {
 	fmt.Printf("Execution took %s\n", elapsed)
 }
 
-func TestHelloWorld(t *testing.T) {
+func TestDoom(t *testing.T) {
+	// f, err := os.Create("cpu.pprof")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	// pprof.StartCPUProfile(f)
+	// defer func() {
+	// 	pprof.StopCPUProfile()
+	// 	f.Close()
+	// }()
+
 	log.InitLogger("info")
-	fp := "../services/hello_world.pvm"
+	fp := "../services/doom_self_playing.pvm"
+	// fp := "../services/doom_w_input_100_steps_.pvm"
+
 	raw_code, err := os.ReadFile(fp)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", fp, err)
@@ -270,8 +296,13 @@ func TestHelloWorld(t *testing.T) {
 	initial_regs := make([]uint64, 13)
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
-	metadata := "revm_test"
+	metadata := "doom"
 	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
+
+	if err := pvm.attachFrameServer("127.0.0.1:80", "./index.html"); err != nil {
+		t.Fatalf("frame server error: %v", err)
+	}
+	defer pvm.CloseFrameServer()
 
 	a := make([]byte, 0)
 	pvm.Gas = int64(9999999999999999)
@@ -288,6 +319,103 @@ func TestHelloWorld(t *testing.T) {
 	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
 	elapsed := time.Since(start)
 	fmt.Printf("Execution took %s\n", elapsed)
+
+	// time.Sleep(10 * time.Second)
+	// frame, _ := os.ReadFile("./frame_00010.bin")
+
+	// pvm.SetFrame(frame)
+	// os.WriteFile("./pvm_frame.bin", frame, 0644)
+}
+
+func (vm *VM) attachFrameServer(addr, htmlPath string) error {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+	var (
+		connMu sync.Mutex
+		wsConn *websocket.Conn
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, htmlPath)
+	})
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			fmt.Println("upgrade error:", err)
+			return
+		}
+		fmt.Println("WS client connected")
+
+		connMu.Lock()
+		if wsConn != nil {
+			wsConn.Close()
+		}
+		wsConn = c
+		connMu.Unlock()
+
+		c.SetCloseHandler(func(code int, text string) error {
+			fmt.Printf("WS closed: %d %s\n", code, text)
+			connMu.Lock()
+			if wsConn == c {
+				wsConn = nil
+			}
+			connMu.Unlock()
+			return nil
+		})
+	})
+
+	srv := &http.Server{Addr: addr, Handler: mux}
+	go func() {
+		fmt.Println("Viewer server listening on", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Println("ListenAndServe:", err)
+		}
+	}()
+
+	vm.pushFrame = func(data []byte) {
+		connMu.Lock()
+		defer connMu.Unlock()
+		if wsConn != nil {
+			if err := wsConn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+				fmt.Println("WS write error:", err)
+				wsConn.Close()
+				wsConn = nil
+			}
+		}
+	}
+
+	vm.stopFrameServer = func() {
+		connMu.Lock()
+		if wsConn != nil {
+			wsConn.Close()
+		}
+		connMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		fmt.Println("Viewer server shut down")
+	}
+
+	return nil
+}
+
+func (vm *VM) SetFrame(b []byte) {
+	if vm.pushFrame != nil {
+		vm.pushFrame(b)
+	}
+}
+
+func (vm *VM) CloseFrameServer() {
+	if vm.stopFrameServer != nil {
+		vm.stopFrameServer()
+	}
 }
 
 // Helper function to compare two integer slices

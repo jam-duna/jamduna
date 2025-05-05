@@ -1,0 +1,126 @@
+package pvm
+
+import (
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/types"
+)
+
+func (vm *VM) SetServiceIndex(index uint32) {
+	vm.Service_index = index
+}
+
+func (vm *VM) GetServiceIndex() uint32 {
+	return vm.Service_index
+}
+
+func (vm *VM) SetCore(coreIndex uint16) {
+	vm.CoreIndex = coreIndex
+}
+
+// input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
+func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
+	vm.Mode = "refine"
+
+	workitem := workPackage.WorkItems[workitemIndex]
+
+	a := common.Uint32ToBytes(workitem.Service)
+	encoded_workitem_payload, _ := types.Encode(workitem.Payload)
+	a = append(a, encoded_workitem_payload...)
+	a = append(a, workPackage.Hash().Bytes()...)
+
+	encoded_workPackage_RefineContext, _ := types.Encode(workPackage.RefineContext)
+	a = append(a, encoded_workPackage_RefineContext...)
+	encoded_p_a, _ := types.Encode(p_a)
+	a = append(a, encoded_p_a...)
+
+	vm.WorkItemIndex = workitemIndex
+	vm.Gas = int64(workitem.RefineGasLimit)
+	vm.WorkPackage = workPackage
+
+	// Sourabh , William pls validate this
+	vm.Authorization = authorization.Ok
+	//===================================
+	vm.Extrinsics = extrinsics
+	vm.Imports = importsegments
+
+	Standard_Program_Initialization(vm, a) // eq 264/265
+	vm.Execute(types.EntryPointRefine, false)
+	r, res = vm.getArgumentOutputs()
+
+	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r, "pc", vm.pc, "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
+
+	exportedSegments = vm.Exports
+	return r, res, exportedSegments
+}
+
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
+
+	vm.Mode = "accumulate"
+	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
+	vm.Y = X.Clone()
+
+	input_bytes := make([]byte, 0)
+	t_bytes := common.Uint32ToBytes(t)
+	s_bytes := common.Uint32ToBytes(s)
+	encoded_elements, _ := types.Encode(elements)
+	input_bytes = append(input_bytes, t_bytes...)
+	input_bytes = append(input_bytes, s_bytes...)
+	input_bytes = append(input_bytes, encoded_elements...)
+
+	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
+	vm.Gas = int64(g)
+	vm.Execute(types.EntryPointAccumulate, false) // F ∈ Ω⟨(X, X)⟩
+
+	xs, _ = vm.X.GetX_s()
+	r, res = vm.getArgumentOutputs()
+
+	return r, res, xs
+}
+func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
+	vm.Mode = "transfer"
+	// a = E(t)   take transfer memos t and encode them
+	vm.ServiceAccount = service_account
+
+	Standard_Program_Initialization(vm, arguments) // eq 264/265
+	vm.Execute(types.EntryPointOnTransfer, false)
+	// return vm.getArgumentOutputs()
+	r.Err = vm.ResultCode
+	r.Ok = []byte{}
+	return r, 0
+}
+
+// E(p, c)
+func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
+	vm.Mode = "authorization"
+	a := p.Bytes()
+	a = append(a, common.Uint16ToBytes(c)...)
+	// vm.setArgumentInputs(a)
+	vm.Gas = types.IsAuthorizedGasAllocation
+	Standard_Program_Initialization(vm, a) // eq 264/265
+	vm.Execute(types.EntryPointAuthorization, false)
+	r, _ = vm.getArgumentOutputs()
+	return r
+}
+
+func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
+	if vm.ResultCode == types.PVM_OOG {
+		r.Err = types.RESULT_OOG
+		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
+		return r, 0
+	}
+	o, _ := vm.ReadRegister(7)
+	l, _ := vm.ReadRegister(8)
+	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
+	if vm.ResultCode == types.RESULT_OK && res == 0 {
+		r.Ok = output
+		return r, res
+	}
+	if vm.ResultCode == types.RESULT_OK && res != 0 {
+		r.Ok = []byte{}
+		return r, res
+	}
+	r.Err = types.RESULT_PANIC
+	log.Debug(vm.logging, "getArgumentOutputs - PANIC", "service", string(vm.ServiceMetadata))
+	return r, 0
+}

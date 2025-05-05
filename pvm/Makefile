@@ -97,7 +97,7 @@ revm:
 doom:
 	@clear
 	@echo "Running Doom tests..."
-	@go test -timeout=1h -run TestDoom -tags network_test,$(TAGS)
+	@go test -timeout=24h -run TestDoom -tags network_test,$(TAGS)
 
 hello_world:
 	@clear

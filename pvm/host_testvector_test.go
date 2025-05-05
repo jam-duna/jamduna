@@ -1392,7 +1392,7 @@ func ConvertToRefineM_mapForTest(refineM_map map[uint32]*RefineM) map[uint32]*Re
 		}
 
 		for page_addr, page := range v.U.Pages {
-			RAMForTest.Pages[page_addr] = &PageForTest{
+			RAMForTest.Pages[uint32(page_addr)] = &PageForTest{
 				Value:  page.Value,
 				Access: page.Access,
 			}

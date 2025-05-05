@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"sort"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -463,7 +463,7 @@ func (vm *VM) hostBless() {
 // Assign Core x_c[i]
 func (vm *VM) hostAssign() {
 	core, _ := vm.ReadRegister(7)
-	if core >= numCores {
+	if core >= types.TotalCores {
 		vm.WriteRegister(7, CORE)
 		vm.HostResultCode = CORE
 		log.Debug(vm.logging, vm.Str("ASSIGN CORE"), "c", core)
@@ -995,7 +995,7 @@ func (vm *VM) hostInvoke() {
 		Z:       program.Z,
 		J:       program.J,
 		code:    program.Code,
-		bitmask: program.K,
+		bitmask: []byte(program.K),
 
 		pc:       m_n.I,
 		Gas:      int64(g),
@@ -1398,6 +1398,8 @@ func (vm *VM) hostHistoricalLookup() {
 	}
 }
 
+var lastFrameTime time.Time
+
 // Export segment host-call
 func (vm *VM) hostExport() {
 	p, _ := vm.ReadRegister(7) // a0 = 7
@@ -1409,6 +1411,29 @@ func (vm *VM) hostExport() {
 	if errCode != OK {
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
+		return
+	}
+
+	if vm.pushFrame != nil {
+		vm.Exports = append(vm.Exports, x)
+
+		if z != types.SegmentSize {
+			frame := bytes.Join(vm.Exports, nil)
+			now := time.Now()
+
+			if !lastFrameTime.IsZero() {
+				fmt.Printf("Push frame %d bytes (interval: %v)\n", len(frame), now.Sub(lastFrameTime))
+			} else {
+				fmt.Printf("Push frame %d bytes (first)\n", len(frame))
+			}
+			lastFrameTime = now
+
+			vm.pushFrame(frame)
+			vm.Exports = vm.Exports[:0]
+		}
+
+		vm.WriteRegister(7, OK)
+		vm.HostResultCode = OK
 		return
 	}
 
@@ -1435,8 +1460,8 @@ func (vm *VM) hostExport() {
 func (vm *VM) hostManifest() {
 	n, _ := vm.ReadRegister(7)
 	mode, _ := vm.ReadRegister(8)
-	s, _ := vm.ReadRegister(9)
-	z, _ := vm.ReadRegister(10)
+	// s, _ := vm.ReadRegister(9)
+	// z, _ := vm.ReadRegister(10)
 	page_id, _ := vm.ReadRegister(11)
 
 	m, ok := vm.RefineM_map[uint32(n)]
@@ -1453,76 +1478,76 @@ func (vm *VM) hostManifest() {
 	}
 
 	switch mode {
-	case 0:
-		// reset manifest
-		for _, page := range m.U.Pages {
-			page.Access.Accessed = false
-			page.Access.Dirty = false
-		}
-		vm.WriteRegister(7, OK)
-		vm.HostResultCode = OK
-		return
-	case 1:
-		// get manifest
-		var manifest []uint32
-		for pageIndex, page := range m.U.Pages {
-			m := uint32(0)
-			if page.Access.Dirty {
-				// m = uint32(pageIndex) | 0xC0000000
-				m = uint32(pageIndex)
-				manifest = append(manifest, m)
-			}
-		}
-		sort.Slice(manifest, func(i, j int) bool { return manifest[i] < manifest[j] })
-		manifestBytes := make([]byte, 4*len(manifest))
-		for i, m := range manifest {
-			binary.LittleEndian.PutUint32(manifestBytes[i*4:], m)
-		}
+	// case 0:
+	// 	// reset manifest
+	// 	for _, page := range m.U.Pages {
+	// 		page.Access.Accessed = false
+	// 		page.Access.Dirty = false
+	// 	}
+	// 	vm.WriteRegister(7, OK)
+	// 	vm.HostResultCode = OK
+	// 	return
+	// case 1:
+	// 	// get manifest
+	// 	var manifest []uint32
+	// 	for pageIndex, page := range m.U.Pages {
+	// 		m := uint32(0)
+	// 		if page.Access.Dirty {
+	// 			// m = uint32(pageIndex) | 0xC0000000
+	// 			m = uint32(pageIndex)
+	// 			manifest = append(manifest, m)
+	// 		}
+	// 	}
+	// 	sort.Slice(manifest, func(i, j int) bool { return manifest[i] < manifest[j] })
+	// 	manifestBytes := make([]byte, 4*len(manifest))
+	// 	for i, m := range manifest {
+	// 		binary.LittleEndian.PutUint32(manifestBytes[i*4:], m)
+	// 	}
 
-		if z%4 != 0 {
-			//  should be a multiple of 4 though!
-			vm.WriteRegister(7, HUH)
-			vm.HostResultCode = HUH
-			return
-		}
-		if z < uint64(len(manifestBytes)) {
-			manifestBytes = manifestBytes[:z]
-		}
-		// write manifestBytes bytes to vm
-		errCode := vm.Ram.WriteRAMBytes(uint32(s), manifestBytes[:])
-		if errCode != OK {
-			vm.terminated = true
-			vm.ResultCode = types.PVM_PANIC
-			return
-		}
-		vm.WriteRegister(7, uint64(len(manifestBytes)))
-		vm.HostResultCode = OK
+	// 	if z%4 != 0 {
+	// 		//  should be a multiple of 4 though!
+	// 		vm.WriteRegister(7, HUH)
+	// 		vm.HostResultCode = HUH
+	// 		return
+	// 	}
+	// 	if z < uint64(len(manifestBytes)) {
+	// 		manifestBytes = manifestBytes[:z]
+	// 	}
+	// 	// write manifestBytes bytes to vm
+	// 	errCode := vm.Ram.WriteRAMBytes(uint32(s), manifestBytes[:])
+	// 	if errCode != OK {
+	// 		vm.terminated = true
+	// 		vm.ResultCode = types.PVM_PANIC
+	// 		return
+	// 	}
+	// 	vm.WriteRegister(7, uint64(len(manifestBytes)))
+	// 	vm.HostResultCode = OK
 
-	case 2:
-		// check whether page_id is dirty
-		page, ok := m.U.Pages[uint32(page_id)]
-		if !ok {
-			vm.WriteRegister(7, HUH)
-			vm.HostResultCode = HUH
-			return
-		}
+	// case 2:
+	// 	// check whether page_id is dirty
+	// 	page, ok := m.U.Pages[uint32(page_id)]
+	// 	if !ok {
+	// 		vm.WriteRegister(7, HUH)
+	// 		vm.HostResultCode = HUH
+	// 		return
+	// 	}
 
-		if page.Access.Dirty {
-			vm.WriteRegister(7, OK)
-			vm.HostResultCode = OK
-		} else {
-			vm.WriteRegister(7, NONE)
-			vm.HostResultCode = NONE
-		}
-		return
+	// 	if page.Access.Dirty {
+	// 		vm.WriteRegister(7, OK)
+	// 		vm.HostResultCode = OK
+	// 	} else {
+	// 		vm.WriteRegister(7, NONE)
+	// 		vm.HostResultCode = NONE
+	// 	}
+	// 	return
 	case 3:
 		// check whether page_id is all zero
-		page, ok := m.U.Pages[uint32(page_id)]
-		if !ok {
-			vm.WriteRegister(7, HUH)
-			vm.HostResultCode = HUH
-			return
-		}
+		page := m.U.Pages[uint32(page_id)]
+		// if !ok {
+		// 	vm.WriteRegister(7, HUH)
+		// 	vm.HostResultCode = HUH
+		// 	return
+		// }
 
 		if page.Access.Inaccessible {
 			vm.WriteRegister(7, HUH)
@@ -1546,7 +1571,6 @@ func (vm *VM) hostManifest() {
 		vm.HostResultCode = HUH
 		return
 	}
-	return
 }
 
 func (vm *VM) hostMachine() {
