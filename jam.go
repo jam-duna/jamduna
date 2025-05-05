@@ -102,7 +102,7 @@ func main() {
 	log.InitLogger("debug")
 	log.EnableModule(log.BlockMonitoring)
 
-	config.GenesisState, config.GenesisBlock = node.GetGenesisFile(network)
+	config.GenesisState = node.GetGenesisFile(network)
 	// If help is requested, print usage and exit
 	if help {
 		fmt.Println("Usage: jam [options]")
@@ -165,7 +165,7 @@ func main() {
 	epoch0Timestamp := statedb.NewEpoch0Timestamp("jam", start_time)
 	fmt.Printf("Epoch0Timestamp: %d\n", epoch0Timestamp)
 	// Set up peers and node
-	n, err := node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, config.GenesisBlock, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
+	n, err := node.NewNode(uint16(validatorIndex), secrets[validatorIndex], config.GenesisState, epoch0Timestamp, peers, peerList, config.DataDir, config.Port)
 	if err != nil {
 		fmt.Printf("New Node Err:%s", err.Error())
 		os.Exit(1)

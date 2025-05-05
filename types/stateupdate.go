@@ -1,13 +1,17 @@
 package types
 
 import (
+	"encoding/json"
+	"sort"
+	"strconv"
+
 	"github.com/colorfulnotion/jam/common"
 )
 
 type StateUpdate struct {
-	WorkPackageUpdates map[common.Hash]*SubWorkPackageResult // workpackage hash
-	ServiceUpdates     map[uint32]*ServiceUpdate
-	ForgetPreimages    map[uint32]common.Hash
+	WorkPackageUpdates map[common.Hash]*SubWorkPackageResult `json:"-"`
+	ServiceUpdates     map[uint32]*ServiceUpdate             `json:"services,omitempty"`
+	ForgetPreimages    map[uint32]common.Hash                `json:"-"`
 }
 
 func NewStateUpdate() *StateUpdate {
@@ -17,15 +21,19 @@ func NewStateUpdate() *StateUpdate {
 	}
 }
 
+func (su *StateUpdate) String() string {
+	return ToJSON(su)
+}
+
 func (su *StateUpdate) GetServiceUpdates() map[uint32]*ServiceUpdate {
 	return su.ServiceUpdates
 }
 
 type ServiceUpdate struct {
-	ServiceInfo     *SubServiceInfoResult
-	ServiceValue    map[common.Hash]*SubServiceValueResult    // storage key
-	ServicePreimage map[common.Hash]*SubServicePreimageResult // preimage hash
-	ServiceRequest  map[common.Hash]*SubServiceRequestResult  // preimage hash
+	ServiceInfo     *SubServiceInfoResult                     `json:"info"`
+	ServiceValue    map[common.Hash]*SubServiceValueResult    `json:"value"`
+	ServicePreimage map[common.Hash]*SubServicePreimageResult `json:"preimage"`
+	ServiceRequest  map[common.Hash]*SubServiceRequestResult  `json:"request"`
 }
 
 func NewServiceUpdate(s uint32) *ServiceUpdate {
@@ -35,6 +43,103 @@ func NewServiceUpdate(s uint32) *ServiceUpdate {
 		ServicePreimage: make(map[common.Hash]*SubServicePreimageResult),
 		ServiceRequest:  make(map[common.Hash]*SubServiceRequestResult),
 	}
+}
+
+// MarshalJSON for StateUpdate — emits a bare array of svcJSON
+func (s *StateUpdate) MarshalJSON() ([]byte, error) {
+	// local JSON‐shapes
+	type valueJSON struct {
+		Hash  common.Hash `json:"hash"`
+		Key   string      `json:"key"`
+		Value string      `json:"value"`
+	}
+	type preimageJSON struct {
+		Hash common.Hash `json:"hash"`
+		Len  int         `json:"len"`
+	}
+	type requestJSON struct {
+		Key string `json:"key"`
+	}
+	type svcJSON struct {
+		ServiceID string          `json:"serviceID"`
+		Info      *ServiceAccount `json:"info,omitempty"`
+		Value     []valueJSON     `json:"value,omitempty"`
+		Preimage  []preimageJSON  `json:"preimage,omitempty"`
+		Request   []requestJSON   `json:"request,omitempty"`
+	}
+
+	// 1) sort outer service IDs
+	ids := make([]int, 0, len(s.ServiceUpdates))
+	for sid := range s.ServiceUpdates {
+		ids = append(ids, int(sid))
+	}
+	sort.Ints(ids)
+
+	// 2) build each svcJSON, dropping any empty slices
+	out := make([]svcJSON, 0, len(ids))
+	for _, sid := range ids {
+		upd := s.ServiceUpdates[uint32(sid)]
+		e := svcJSON{ServiceID: strconv.Itoa(sid)}
+
+		if upd.ServiceInfo != nil {
+			e.Info = &upd.ServiceInfo.Info
+		}
+
+		if len(upd.ServiceValue) > 0 {
+			ks := make([]string, 0, len(upd.ServiceValue))
+			byKS := make(map[string]*SubServiceValueResult, len(upd.ServiceValue))
+			for h, v := range upd.ServiceValue {
+				k := h.String()
+				ks = append(ks, k)
+				byKS[k] = v
+			}
+			sort.Strings(ks)
+
+			buf := make([]valueJSON, 0, len(ks))
+			for _, k := range ks {
+				v := byKS[k]
+				buf = append(buf, valueJSON{Key: v.Key, Hash: v.Hash, Value: v.Value})
+			}
+			e.Value = buf
+		}
+
+		if len(upd.ServicePreimage) > 0 {
+			ks := make([]string, 0, len(upd.ServicePreimage))
+			byKS := make(map[string]*SubServicePreimageResult, len(upd.ServicePreimage))
+			for h, v := range upd.ServicePreimage {
+				k := h.String()
+				ks = append(ks, k)
+				byKS[k] = v
+			}
+			sort.Strings(ks)
+
+			buf := make([]preimageJSON, 0, len(ks))
+			for _, k := range ks {
+				v := byKS[k]
+				buf = append(buf, preimageJSON{Hash: v.Hash, Len: len(v.Preimage)})
+			}
+			e.Preimage = buf
+		}
+
+		if len(upd.ServiceRequest) > 0 {
+			ks := make([]string, 0, len(upd.ServiceRequest))
+			for h := range upd.ServiceRequest {
+				ks = append(ks, h.String())
+			}
+			sort.Strings(ks)
+
+			buf := make([]requestJSON, 0, len(ks))
+			for _, k := range ks {
+				buf = append(buf, requestJSON{Key: k})
+			}
+			e.Request = buf
+		}
+
+		out = append(out, e)
+	}
+
+	// 3) marshal the slice directly
+	return json.Marshal(out)
 }
 
 type WSPayload struct {

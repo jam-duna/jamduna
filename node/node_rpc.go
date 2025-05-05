@@ -235,7 +235,7 @@ func (j *Jam) BeefyRoot(req []string, res *string) error {
 		return fmt.Errorf("state not found for header hash %s", headerHash.String())
 	}
 
-	recentBlocks := sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).RecentBlocks
+	recentBlocks := sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, nil).RecentBlocks
 	if len(recentBlocks) > 0 {
 		*res = recentBlocks[len(recentBlocks)-1].String()
 		return nil
@@ -392,7 +392,7 @@ func (j *Jam) State(req []string, res *string) error {
 	if !ok {
 		return fmt.Errorf("state not found for header hash %s", headerHash.String())
 	}
-	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).String()
+	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, sdb.GetStateUpdates()).String()
 	return nil
 }
 
@@ -427,7 +427,7 @@ func (j *Jam) Statistics(req []string, res *string) error {
 	if !ok {
 		return fmt.Errorf("state not found for header hash %s", headerHash.String())
 	}
-	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).ValidatorStatistics.String()
+	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, nil).ValidatorStatistics.String()
 	return nil
 }
 
@@ -436,7 +436,7 @@ func (j *Jam) GetLatestState(req []string, res *string) error {
 		return fmt.Errorf("Invalid number of arguments")
 	}
 	sdb := j.statedb
-	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}).String()
+	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, sdb.GetStateUpdates()).String()
 	return nil
 }
 

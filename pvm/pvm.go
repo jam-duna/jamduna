@@ -1026,6 +1026,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.WorkItemIndex = workitemIndex
 	vm.Gas = int64(workitem.RefineGasLimit)
 	vm.WorkPackage = workPackage
+
 	// Sourabh , William pls validate this
 	vm.Authorization = authorization.Ok
 	//===================================
@@ -1080,9 +1081,11 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 
 // E(p, c)
 func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
+	vm.Mode = "authorization"
 	a := p.Bytes()
 	a = append(a, common.Uint16ToBytes(c)...)
 	// vm.setArgumentInputs(a)
+	vm.Gas = types.IsAuthorizedGasAllocation
 	Standard_Program_Initialization(vm, a) // eq 264/265
 	vm.Execute(types.EntryPointAuthorization, false)
 	r, _ = vm.getArgumentOutputs()
@@ -1477,7 +1480,9 @@ func (vm *VM) step(stepn int) error {
 		 md = "inst" //string(vm.ServiceMetadata)
 	 } */
 	// avoid this: this is expensive
-	// log.Debug(vm.logging, opcode_str(opcode), "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+	if stepn%100 == 0 && vm.Gas < 100 {
+		log.Debug(vm.logging, opcode_str(opcode), "mode", vm.Mode, "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+	}
 	return nil
 }
 

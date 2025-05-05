@@ -292,7 +292,7 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 	var aggregatedErrors []error
 	var mutatedSTFs []statedb.StateTransition
 	block := stf.Block
-	sdb, err := statedb.NewStateDBFromSnapshotRaw(store, &stf.PreState)
+	sdb, err := statedb.NewStateDBFromStateTransition(store, stf)
 	if err != nil {
 		return 0, 0, 0, nil, nil
 	}
@@ -336,7 +336,6 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 	oValid, oValidatorIdx, oValidatorPub, err := oStatedbCopy.VerifyBlockHeader(oBlockCopy)
 	if !oValid || err != nil || oBlockCopy.Header.AuthorIndex != oValidatorIdx {
 		panic(fmt.Sprintf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex))
-		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
 	if len(aggregatedErrors) == 0 {
@@ -384,7 +383,6 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 				mValid, mValidatorIdx, mValidatorPub, err := statedbCopy.VerifyBlockHeader(mSealedBlk)
 				if !mValid || err != nil {
 					panic(fmt.Sprintf("mutated block failed seal entropy test failed: %v |  mValidatorIdx=%v | mValidatorPub=%v | err: %v\n", mValid, mValidatorIdx, mValidatorPub, err))
-					continue
 				}
 
 				if mValidatorIdx != oValidatorIdx && mSealedBlk.TimeSlot() == oBlockCopy.TimeSlot() {
@@ -529,7 +527,7 @@ func lowlevelTrieInit(db *storage.StateDBStorage, snapshotRaw *statedb.StateSnap
 	expectedRoot := snapshotRaw.StateRoot
 	tree := trie.NewMerkleTree(nil, db)
 	for _, kv := range snapshotRaw.KeyVals {
-		tree.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
+		tree.SetRawKeyVal(kv.Key, kv.Value)
 	}
 	actualRoot := tree.GetRoot()
 	if (expectedRoot != common.Hash{}) && expectedRoot != actualRoot {

@@ -1,8 +1,9 @@
 package trie
 
 import (
-	"github.com/colorfulnotion/jam/common"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 // Recent History Test
@@ -15,18 +16,18 @@ func TestMMRAppend(t *testing.T) {
 	a5 := common.HexToHash("0x658b919f734bd39262c10589aa1afc657471d902a6a361c044f78de17d660bc6")
 
 	expected := []MMR{
-		MMR{
+		{
 			Peaks: []*common.Hash{
 				&(a1),
 			},
 		},
-		MMR{
+		{
 			Peaks: []*common.Hash{
 				nil,
 				&(a2),
 			},
 		},
-		MMR{
+		{
 			Peaks: []*common.Hash{
 				nil,
 				nil,
@@ -34,7 +35,7 @@ func TestMMRAppend(t *testing.T) {
 				&(a3),
 			},
 		},
-		MMR{
+		{
 			Peaks: []*common.Hash{
 				&(a4),
 				nil,

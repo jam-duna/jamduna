@@ -394,8 +394,8 @@ func main() {
 			for key, diff := range diffs {
 				errorsArr = append(errorsArr, map[string]interface{}{
 					"title": fmt.Sprintf("%s", key),
-					"left":  fmt.Sprintf("%x", diff.Poststate),
-					"right": fmt.Sprintf("%x", diff.PoststateCompared),
+					"left":  fmt.Sprintf("%x", diff.ActualPostState),
+					"right": fmt.Sprintf("%x", diff.ExpectedPostState),
 				})
 			}
 			w.WriteHeader(http.StatusBadRequest)

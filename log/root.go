@@ -152,7 +152,6 @@ func Error(module string, msg string, ctx ...interface{}) {
 
 func Crit(module string, msg string, ctx ...interface{}) {
 	Root().Write(LevelCrit, module, msg, ctx...)
-	// os.Exit(1)
 }
 
 func RecordLogs() {

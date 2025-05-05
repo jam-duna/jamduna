@@ -12,10 +12,7 @@ import (
 
 	"math"
 	"os"
-	"reflect"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
@@ -239,97 +236,8 @@ func (s *StateDB) GetStateUpdates() *types.StateUpdate {
 func (s *StateDB) SetJamState(jamState *JamState) {
 	s.JamState = jamState
 }
-func (s *StateDB) RecoverJamStateWithError(stateRoot common.Hash) error {
-	// Now read C1.....C15 from the trie and put it back into JamState
-	//t := s.GetTrie()
-	t := s.CopyTrieState(stateRoot)
-
-	coreAuthPoolEncode, err := t.GetState(C1)
-	if err != nil {
-		return fmt.Errorf("error reading C1 CoreAuthPool from trie: %w", err)
-	}
-	authQueueEncode, err := t.GetState(C2)
-	if err != nil {
-		return fmt.Errorf("error reading C2 AuthQueue from trie: %w", err)
-	}
-	recentBlocksEncode, err := t.GetState(C3)
-	if err != nil {
-		return fmt.Errorf("error reading C3 RecentBlocks from trie: %w", err)
-	}
-	safroleStateEncode, err := t.GetState(C4)
-	if err != nil {
-		return fmt.Errorf("error reading C4 SafroleState from trie: %w", err)
-	}
-	disputeStateEncode, err := t.GetState(C5)
-	if err != nil {
-		return fmt.Errorf("error reading C5 DisputeState from trie: %w", err)
-	}
-	entropyEncode, err := t.GetState(C6)
-	if err != nil {
-		return fmt.Errorf("error reading C6 Entropy from trie: %w", err)
-	}
-	DesignedEpochValidatorsEncode, err := t.GetState(C7)
-	if err != nil {
-		return fmt.Errorf("error reading C7 NextEpochValidators from trie: %w", err)
-	}
-	currEpochValidatorsEncode, err := t.GetState(C8)
-	if err != nil {
-		return fmt.Errorf("error reading C8 CurrentEpochValidators from trie: %w", err)
-	}
-	priorEpochValidatorEncode, err := t.GetState(C9)
-	if err != nil {
-		return fmt.Errorf("error reading C9 PriorEpochValidators from trie: %w", err)
-	}
-	rhoEncode, err := t.GetState(C10)
-	if err != nil {
-		return fmt.Errorf("error reading C10 Rho from trie: %w", err)
-	}
-	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
-	if err != nil {
-		return fmt.Errorf("error reading C11 MostRecentBlockTimeSlot from trie: %w", err)
-	}
-	privilegedServiceIndicesEncode, err := t.GetState(C12)
-	if err != nil {
-		return fmt.Errorf("error reading C12 PrivilegedServiceIndices from trie: %w", err)
-	}
-	piEncode, err := t.GetState(C13)
-	if err != nil {
-		return fmt.Errorf("error reading C13 ActiveValidator from trie: %w", err)
-	}
-	accunulateQueueEncode, err := t.GetState(C14)
-	if err != nil {
-		return fmt.Errorf("error reading C14 accunulateQueue from trie: %w", err)
-	}
-	accunulateHistoryEncode, err := t.GetState(C15)
-	if err != nil {
-		return fmt.Errorf("error reading C15 accunulateHistory from trie: %w", err)
-	}
-	//Decode(authQueueEncode) -> AuthorizationQueue
-	//set AuthorizationQueue back to JamState
-
-	d := s.GetJamState()
-	d.SetAuthPool(coreAuthPoolEncode)
-	d.SetAuthQueue(authQueueEncode)
-	d.SetRecentBlocks(recentBlocksEncode)
-	d.SetSafroleState(safroleStateEncode)
-	d.SetPsi(disputeStateEncode)
-	d.SetEntropy(entropyEncode)
-	d.SetDesignedValidators(DesignedEpochValidatorsEncode)
-	d.SetCurrEpochValidators(currEpochValidatorsEncode)
-	d.SetPriorEpochValidators(priorEpochValidatorEncode)
-	d.SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotEncode)
-	d.SetRho(rhoEncode)
-
-	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
-	d.SetPi(piEncode)
-	d.SetAccumulateQueue(accunulateQueueEncode)
-	d.SetAccumulateHistory(accunulateHistoryEncode)
-	s.SetJamState(d)
-	return err
-}
 func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	// Now read C1.....C15 from the trie and put it back into JamState
-	//t := s.GetTrie()
 	t := s.CopyTrieState(stateRoot)
 
 	coreAuthPoolEncode, err := t.GetState(C1)
@@ -384,11 +292,11 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	if err != nil {
 		log.Crit(debugSDB, "Error reading C13 ActiveValidator from trie: %v\n", err)
 	}
-	accunulateQueueEncode, err := t.GetState(C14)
+	accumulateQueueEncode, err := t.GetState(C14)
 	if err != nil {
 		log.Crit(debugSDB, "Error reading C14 accunulateQueue from trie: %v\n", err)
 	}
-	accunulateHistoryEncode, err := t.GetState(C15)
+	accumulateHistoryEncode, err := t.GetState(C15)
 	if err != nil {
 		log.Crit(debugSDB, "Error reading C15 accunulateHistory from trie: %v\n", err)
 	}
@@ -410,8 +318,8 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 
 	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
 	d.SetPi(piEncode)
-	d.SetAccumulateQueue(accunulateQueueEncode)
-	d.SetAccumulateHistory(accunulateHistoryEncode)
+	d.SetAccumulateQueue(accumulateQueueEncode)
+	d.SetAccumulateHistory(accumulateHistoryEncode)
 	s.SetJamState(d)
 
 	// Because we have safrolestate as internal state, JamState is NOT enough.
@@ -482,6 +390,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	return updated_root
 }
 
+// THIS DOES A FULL SCAN OF THE TRIE AND IS SLOW
 func (s *StateDB) GetAllKeyValues() []KeyVal {
 	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
 	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
@@ -493,158 +402,33 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 	for _, keyValue := range foundKeyVal {
 		fetchRealKey := t.GetRealKey(keyValue.Key, keyValue.Value)
 		realValue := make([]byte, len(keyValue.Value))
-		realKey := make([]byte, 32)
-		copy(realKey, fetchRealKey)
+		var realKey [31]byte
+		copy(realKey[:], fetchRealKey)
 		copy(realValue, keyValue.Value)
-
-		metaKey := fmt.Sprintf("meta_%x", realKey)
-		metaKeyBytes, err := types.Encode(metaKey)
-		if err != nil {
-			log.Crit(debugSDB, "GetAllKeyValues", "err", err)
-		}
-
-		metaValue := ""
-		metaValues := make([]string, 2)
-		switch {
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0100000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c1"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0200000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c2"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0300000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c3"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0400000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c4"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0500000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c5"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0600000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c6"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0700000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c7"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0800000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c8"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0900000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c9"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0A00000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c10"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0B00000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c11"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0C00000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c12"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0D00000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c13"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0E00000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c14"
-			metaValues[1] = ""
-
-		case common.CompareBytes(realKey, common.Hex2Bytes("0x0F00000000000000000000000000000000000000000000000000000000000000")):
-			metaValues[0] = "c15"
-			metaValues[1] = ""
-
-		default:
-			metaValueBytes, ok, err := t.LevelDBGet(metaKeyBytes)
-			if err != nil || !ok {
-
-			} else if metaValueBytes != nil {
-				metaValueDecode, _, err := types.Decode(metaValueBytes, reflect.TypeOf(""))
-				if err != nil {
-					log.Error(module, "GetAllKeyValues: Decode", "err", err)
-				}
-				metaValue = metaValueDecode.(string)
-				metaValues = strings.SplitN(metaValue, "|", 4)
-				for len(metaValues) < 2 {
-					metaValues = append(metaValues, "")
-				}
-				switch metaValues[0] {
-				case "account_storage":
-					// take the realValue, decode it => append |vlen=%d
-					if len(metaValues) > 2 {
-						metaValues[1] += "|" + metaValues[2]
-					}
-					break
-				case "account_lookup":
-					// take the realValue, decode it => append t=%s tlen=%d
-					if len(metaValues) > 2 {
-						timeslots := trie.BytesToTimeSlots(realValue)
-						tstr := fmt.Sprintf("|t=%v tlen=%d", timeslots, len(timeslots))
-						metaValues[1] += "|" + metaValues[2] + tstr
-					}
-					break
-				case "service_account":
-					if len(metaValues[1]) >= 2 {
-						sValues := strings.SplitN(metaValues[1], "=", 2)
-						if len(sValues) > 1 {
-							sStr := sValues[1]
-							s, err := strconv.ParseUint(sStr, 10, 32)
-							if err == nil {
-								acctState, _ := types.AccountStateFromBytes(uint32(s), realValue)
-								// take the realValue, decode it
-								metaValues[1] += fmt.Sprintf("|c=%s b=%d g=%d m=%d l=%d i=%d|clen=32", acctState.CodeHash, acctState.Balance, acctState.GasLimitG, acctState.GasLimitM, acctState.StorageSize, acctState.NumStorageItems)
-							}
-						}
-					}
-					break
-				case "account_preimage":
-					// nothing to do
-					if len(metaValues) > 2 {
-						metaValues[1] += "|" + metaValues[2] + fmt.Sprintf("|plen=%d", len(realValue))
-					}
-					break
-				}
-
-			}
-		}
-
 		keyVal := KeyVal{
-			Key:        realKey,
-			Value:      realValue,
-			StructType: metaValues[0],
-			Metadata:   metaValues[1],
+			Key:   realKey,
+			Value: realValue,
 		}
 		//fmt.Printf("~~~key: %x, structType: %s, metadata: %s\n", keyVal.Key, keyVal.StructType, keyVal.Metadata)
 		tmpKeyVals = append(tmpKeyVals, keyVal)
 	}
+
 	sortedKeyVals := sortKeyValsByKey(tmpKeyVals)
 	return sortedKeyVals
 }
 
 func sortKeyValsByKey(tmpKeyVals []KeyVal) []KeyVal {
 	sort.Slice(tmpKeyVals, func(i, j int) bool {
-		return bytes.Compare(tmpKeyVals[i].Key, tmpKeyVals[j].Key) < 0
+		return bytes.Compare(tmpKeyVals[i].Key[:], tmpKeyVals[j].Key[:]) < 0
 	})
 	return tmpKeyVals
 }
 
-func (s *StateDB) CompareStateRoot(genesis KeyVals, parentStateRoot common.Hash) (bool, error) {
+func (s *StateDB) CompareStateRoot(genesis []KeyVal, parentStateRoot common.Hash) (bool, error) {
 	parent_root := s.StateRoot
 	newTrie := trie.NewMerkleTree(nil, s.sdb)
 	for _, kv := range genesis {
-		newTrie.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
+		newTrie.SetRawKeyVal(kv.Key, kv.Value)
 	}
 	new_root := newTrie.GetRoot()
 	if !common.CompareBytes(parent_root[:], new_root[:]) {
@@ -672,7 +456,7 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	verify := true
 
 	for _, kv := range snapshotRaw.KeyVals {
-		t.SetRawKeyVal(common.Hash(kv.Key), kv.Value)
+		t.SetRawKeyVal(kv.Key, kv.Value)
 	}
 	updated_root := t.GetRoot()
 
@@ -693,23 +477,7 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 
 func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Hash {
 	for _, kv := range snapshotRaw.KeyVals {
-		k := make([]byte, 32)
-		copy(k[:], kv.Key[:])
-		k[31] = 0 // pad the last byte to 0
-		s.trie.SetRawKeyVal(common.Hash(k), kv.Value)
-		if kv.Metadata != "" {
-			metaKey := fmt.Sprintf("meta_%x", kv.Key) // this should be 31 bytes now
-			metaKeyBytes, err := types.Encode(metaKey)
-			if err != nil {
-				log.Error(module, "UpdateAllTrieStateRaw:Encode", "err", err)
-			}
-			metaData := fmt.Sprintf("%s|%s", kv.StructType, kv.Metadata)
-			metaValueBytes, err := types.Encode(metaData)
-			if err != nil {
-				log.Error(module, "UpdateAllTrieStateRaw:Encode", "err", err)
-			}
-			s.sdb.WriteRawKV(metaKeyBytes, metaValueBytes)
-		}
+		s.trie.SetRawKeyVal(kv.Key, kv.Value)
 	}
 
 	return s.trie.GetRoot()

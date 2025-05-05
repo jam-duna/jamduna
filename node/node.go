@@ -51,7 +51,9 @@ const (
 )
 const (
 	module = log.NodeMonitoring // General Node Ops
-	// TODO: put into flags within "log" package?
+
+	enableInit = false
+
 	debugCE138   = "ce138"                  // CE138
 	debugDA      = log.DAMonitoring         // DA
 	debugSeg     = log.SegmentMonitoring    // Segment
@@ -101,14 +103,9 @@ var auth_code_hash_hash = common.Blake2Hash(auth_code_hash[:])  //pa
 var bootstrap_auth_codehash = auth_code_hash
 
 var test_prereq = false // Test Prerequisites Enabled
-const (
-	ValidatorFlag   = "VALIDATOR"
-	ValidatorDAFlag = "VALIDATOR&DA"
-)
 
 type NodeContent struct {
 	id                   uint16
-	node_type            string
 	node_name            string
 	AuditFlag            bool
 	command_chan         chan string
@@ -418,23 +415,19 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func GetGenesisFile(network string) (string, string) {
-	return fmt.Sprintf("/chainspecs/traces/genesis-%s.json", network), fmt.Sprintf("/chainspecs/blocks/genesis-%s.bin", network)
+func GetGenesisFile(network string) string {
+	return fmt.Sprintf("/chainspecs/%s-00000000.json", network)
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, flag string, jceMode string) (*Node, error) {
-	return newNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, flag, dataDir, port, jceMode)
+func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+	return newNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
 }
 
-func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorFlag, JCEDefault)
+func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
 }
 
-func NewNodeDA(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisStateFile, genesisBlockFile, epoch0Timestamp, peers, peerList, dataDir, port, ValidatorDAFlag, JCEDefault)
-}
-
-func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, genesisBlockFile string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, nodeType string, dataDir string, port int, jceMode string) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	//log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 
@@ -460,7 +453,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),
-		nodeType:    nodeType,
 
 		auditingMap:     make(map[common.Hash]*statedb.StateDB),
 		announcementMap: make(map[common.Hash]*types.TrancheAnnouncement),
@@ -492,16 +484,24 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		WriteDebugFlag: true,
 	}
 	node.NodeContent.nodeSelf = node
-	block := statedb.NewBlockFromFile(genesisBlockFile)
+	_statedb, err := statedb.NewStateDBFromStateTransitionFile(node.store, genesisStateFile)
+	if err != nil {
+		return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
+	}
+	block := _statedb.Block
+	if block == nil {
+		return nil, fmt.Errorf("NewStateDBFromStateTransition block is nil")
+	}
+
 	err = node.StoreBlock(block, id, false)
 	if err != nil {
 		log.Error(module, "StoreBlock", "err", err)
 		return nil, err
 	}
 	finalizedBlock, FinalizedOk, err := node.GetFinalizedBlock()
-	if err != nil || !FinalizedOk || block == nil {
-		log.Warn(module, "GetFinalizedBlock", "err", err)
-		log.Info(module, "NewBlockTree", "block_hash", block.Header.HeaderHash().Hex())
+	if err != nil || !FinalizedOk {
+		FinalizedOk = true
+		log.Info(module, "GetFinalizedBlock", "block_hash", block.Header.HeaderHash().Hex())
 		node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
 			Parent:    nil,
 			Block:     block,
@@ -509,7 +509,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			Finalized: true,
 			Applied:   true,
 		})
-	} else if block != nil {
+	} else {
 		log.Info(module, "NewBlockTree", "block_hash", finalizedBlock.Header.HeaderHash().Hex())
 		node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
 			Parent:    nil,
@@ -518,9 +518,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			Finalized: true,
 			Applied:   true,
 		})
-	} else {
-		log.Error(module, "GetFinalizedBlock", "err", err)
-		return nil, err
 	}
 	node.commitHash = common.GetCommitHash()
 	fmt.Printf("[N%v] running on buildV: %s\n", id, node.GetBuild())
@@ -623,17 +620,19 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 	for validatorIndex, p := range startPeerList {
 		node.peersInfo[validatorIndex] = NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
-		if validatorIndex != id && FinalizedOk {
-			_, err = node.peersInfo[validatorIndex].GetOrInitBlockAnnouncementStream(context.Background())
-			if err != nil {
-				log.Error(module, "GetOrInitBlockAnnouncementStream", "err", err)
+		// DISABLED FOR NOW
+		if enableInit {
+			if validatorIndex != id && FinalizedOk {
+				_, err = node.peersInfo[validatorIndex].GetOrInitBlockAnnouncementStream(context.Background())
+				if err != nil {
+					log.Error(module, "GetOrInitBlockAnnouncementStream", "err", err)
+				}
 			}
 		}
 	}
-	_statedb, err := statedb.NewStateDBFromSnapshotRawFile(node.store, genesisStateFile)
-	_statedb.Block = block
 	_statedb.HeaderHash = block.Header.Hash()
 	if FinalizedOk {
+		finalizedBlock = block
 		recoveredStateDB := _statedb.Copy()
 		recoveredStateDB.RecoverJamState(finalizedBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
 		recoveredStateDB.UnsetPosteriorEntropy()
@@ -644,7 +643,6 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	if err == nil {
 		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)
-		node.StoreBlock(block, id, false)
 	} else {
 		fmt.Printf("NewGenesisStateDB ERR %v\n", err)
 		return nil, err
@@ -659,20 +657,9 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 
 	node.setValidatorCredential(credential)
 	node.epoch0Timestamp = epoch0Timestamp
-	if nodeType == ValidatorDAFlag {
-		validators, _, err := generateValidatorNetwork()
-		if err != nil {
-			return nil, err
-		}
-		node.statedb.GetSafrole().NextValidators = validators
-		node.statedb.GetSafrole().CurrValidators = validators
-	}
-	if id == 5 {
-		node.SetIsSync(false, "I am node 5") // node 5 can't produce the first block
-	} else if FinalizedOk {
-		node.SetIsSync(false, "I was restarted")
-	}
-	if !node.GetIsSync() {
+
+	// DISABLED FOR NOW
+	if enableInit && !node.GetIsSync() {
 		ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 		defer cancel()
 		randomselectedPeer := rand0.Intn(len(node.peersInfo))
@@ -702,36 +689,35 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		log.Info(module, "newNode:extendChain", "block_hash", blocks[len(blocks)-1].Header.HeaderHash().Hex())
 		node.extendChain(ctx)
 	}
-	if nodeType != ValidatorDAFlag {
-		go node.runAuthoring()
-		go node.runGuarantees()
-		go node.runAssurances()
-		go node.runWorkReports()
-		go node.runBlocksTickets()
-		go node.runReceiveBlock()
-		go node.StartRPCServer(int(id))
-		go node.RunRPCCommand()
-		go node.runWPQueue()
-		if Audit {
-			node.AuditFlag = true
-			go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
-			go node.runAuditAnnouncementJudgement()
-		} else {
-			node.AuditFlag = false
-		}
-		host_name, _ := os.Hostname()
-		if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
-			wg := &sync.WaitGroup{}
-			wg.Add(1)
-			go node.runJamWeb(context.Background(), wg, uint16(10800)+id, port)
-			go func() {
-				wg.Wait()
-				log.Info("jamweb", "Node 0", "shutdown complete")
-			}()
-		}
-		node.jceMode = jceMode
-		node.runJCE()
+
+	go node.runAuthoring()
+	go node.runGuarantees()
+	go node.runAssurances()
+	go node.runWorkReports()
+	go node.runBlocksTickets()
+	go node.runReceiveBlock()
+	go node.StartRPCServer(int(id))
+	go node.RunRPCCommand()
+	go node.runWPQueue()
+	if Audit {
+		node.AuditFlag = true
+		go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
+		go node.runAuditAnnouncementJudgement()
+	} else {
+		node.AuditFlag = false
 	}
+	host_name, _ := os.Hostname()
+	if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go node.runJamWeb(context.Background(), wg, uint16(10800)+id, port)
+		go func() {
+			wg.Wait()
+			log.Info("jamweb", "Node 0", "shutdown complete")
+		}()
+	}
+	node.jceMode = jceMode
+	node.runJCE()
 
 	return node, nil
 }
@@ -1811,10 +1797,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		if err := n.writeDebug(st, nextBlock.TimeSlot()); err != nil {
 			log.Error(module, "writeDebug: StateTransition", "err", err)
 		}
-		if err := n.writeDebug(nextBlock, nextBlock.TimeSlot()); err != nil {
-			log.Error(module, "writeDebug: Block", "err", err)
-		}
-		if err := n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState), nextBlock.TimeSlot()); err != nil {
+		if err := n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState, newStateDB.GetStateUpdates()), nextBlock.TimeSlot()); err != nil {
 			log.Error(module, "writeDebug: Snapshot", "err", err)
 		}
 	}()
@@ -2560,9 +2543,7 @@ func (n *Node) runAuthoring() {
 	for {
 		select {
 		case <-tickerPulse.C:
-			if n.GetNodeType() != ValidatorFlag && n.GetNodeType() != ValidatorDAFlag {
-				return
-			}
+
 			if !n.GetIsSync() {
 				n.author_status = "not sync"
 				continue
@@ -2662,9 +2643,6 @@ func (n *Node) runAuthoring() {
 			log.Debug(module, "runAuthoring: broadcast", "n", n.String(), "slot", newBlock.Header.Slot)
 			go func() {
 				timeslot := newStateDB.GetSafrole().Timeslot
-				if err := n.writeDebug(newBlock, timeslot); err != nil {
-					log.Error(module, "runAuthoring:writeDebug", "err", err)
-				}
 				s := n.statedb
 				allStates := s.GetAllKeyValues()
 				ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
@@ -2680,7 +2658,7 @@ func (n *Node) runAuthoring() {
 						log.Crit(module, "runAuthoring:CheckStateTransition", "err", err)
 					}
 				}
-				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState)), timeslot); err != nil {
+				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState), newStateDB.GetStateUpdates()), timeslot); err != nil {
 					log.Error(module, "runAuthoring:writeDebug", "err", err)
 				}
 			}()

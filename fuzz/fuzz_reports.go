@@ -265,7 +265,7 @@ func fuzzBlockGDuplicateGuarantors(block *types.Block) error {
 	// swap  2 signatures
 	i := rand.Intn(len(g.Signatures))
 	j := (i + 1) % len(g.Signatures)
-	g.Signatures[i], g.Signatures[j] = g.Signatures[i], g.Signatures[j]
+	g.Signatures[i], g.Signatures[j] = g.Signatures[j], g.Signatures[i]
 	return nil
 }
 

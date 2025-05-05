@@ -102,16 +102,17 @@ func handleStateTransitionChallenge(sdb_storage *storage.StateDBStorage) http.Ha
 			http.Error(w, "Failed to read request body", http.StatusBadRequest)
 			return
 		}
-		var stc statedb.StateTransitionChallenge
+		// Having a separate type "StateTransitionChallenge" as StateTransition without a post state is not useful.
+		var stc statedb.StateTransition
 		contentType := r.Header.Get("Content-Type")
-		decoded, err := decodeData(contentType, bodyBytes, reflect.TypeOf(statedb.StateTransitionChallenge{}))
+		decoded, err := decodeData(contentType, bodyBytes, reflect.TypeOf(statedb.StateTransition{}))
 		if err != nil {
 			http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
 			return
 		}
-		stc, ok := decoded.(statedb.StateTransitionChallenge)
+		stc, ok := decoded.(statedb.StateTransition)
 		if !ok {
-			http.Error(w, "Failed to type assert to StateTransitionChallenge", http.StatusInternalServerError)
+			http.Error(w, "Failed to type assert to StateTransition", http.StatusInternalServerError)
 			return
 		}
 		ok, postStateSnapshotRaw, jamErr, _ := statedb.ComputeStateTransition(sdb_storage, &stc)

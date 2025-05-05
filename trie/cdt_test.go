@@ -122,7 +122,6 @@ func testJustify0(t *testing.T, tree *CDMerkleTree, segments [][]byte) {
 func testVerifyCDTJustificationX(t *testing.T, tree *CDMerkleTree, segments [][]byte) {
 	if (tree == nil) || (len(segments) == 0) {
 		return
-		t.Fatalf("Invalid tree or segments")
 	}
 	segmentLen := len(segments)
 	globalRoot := tree.Root()

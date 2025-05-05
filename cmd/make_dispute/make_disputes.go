@@ -75,7 +75,7 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	dispute_stf = nil
 	// Check if the state transition is disputable
 	block := stf.Block
-	prestate, err := statedb.NewStateDBFromSnapshotRaw(store, &stf.PreState)
+	prestate, err := statedb.NewStateDBFromStateTransition(store, stf)
 	if err != nil {
 		return disputable, err, dispute_stf
 	}
@@ -230,13 +230,6 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 		return false, fmt.Errorf("ApplyStateTransitionFromBlock Error:%v", err), nil
 	}
 
-	errornum, diffs := statedb.ValidateSTF(dispute_prestate, *dispute_block, dispute_poststate)
-	if errornum > 0 {
-		for error_dis, diff := range diffs {
-			fmt.Printf("ERR %v, diff:%v\n", error_dis, diff)
-		}
-		return false, fmt.Errorf("ValidateSTF Error:%v", errornum), nil
-	}
 	dispute_stf = node.BuildStateTransitionStruct(dispute_prestate, dispute_block, dispute_poststate)
 	return disputable, nil, dispute_stf
 }

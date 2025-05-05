@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,18 +75,18 @@ func printHexDiff(label string, exp, act []byte) {
 	fmt.Println()
 }
 
-func printColoredJSONDiff(diffStr string) {
-	for _, line := range strings.Split(diffStr, "\n") {
-		switch {
-		case strings.HasPrefix(line, "-"):
-			fmt.Println(colorRed + line + colorReset)
-		case strings.HasPrefix(line, "+"):
-			fmt.Println(colorGreen + line + colorReset)
-		default:
-			fmt.Println(line)
-		}
-	}
-}
+// func printColoredJSONDiff(diffStr string) {
+// 	for _, line := range strings.Split(diffStr, "\n") {
+// 		switch {
+// 		case strings.HasPrefix(line, "-"):
+// 			fmt.Println(colorRed + line + colorReset)
+// 		case strings.HasPrefix(line, "+"):
+// 			fmt.Println(colorGreen + line + colorReset)
+// 		default:
+// 			fmt.Println(line)
+// 		}
+// 	}
+// }
 
 func initStorage(testDir string) (*storage.StateDBStorage, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
@@ -154,10 +155,16 @@ func testSTF(t *testing.T, filename string, content string) {
 
 	// 2) parse the STF
 	var stf StateTransition
-	if err := json.Unmarshal([]byte(content), &stf); err != nil {
-		t.Errorf("❌ [%s] Failed to read JSON file: %v", filename, err)
-		return
+	if strings.Contains(filename, ".bin") {
+		stf0, _, _ := types.Decode([]byte(content), reflect.TypeOf(StateTransition{}))
+		stf = stf0.(StateTransition)
+	} else {
+		if err := json.Unmarshal([]byte(content), &stf); err != nil {
+			t.Errorf("❌ [%s] Failed to read JSON file: %v", filename, err)
+			return
+		}
 	}
+	fmt.Printf("STF: %s\n", stf.String())
 
 	// 3) do the state transition check
 	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil)
@@ -261,11 +268,11 @@ func testSTFDir(t *testing.T, dir string) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".json") {
+		if !strings.HasSuffix(name, ".bin") {
 			continue
 		}
 
-		if name != "00000004.json" || name == "00000007.json" || name == "00000010.json" || name == "00000016.json" || name == "00000019.json" || name == "00000022.json" || name == "00000034.json" || name == "00000040.json" {
+		if name != "00000000.bin" {
 			files = append(files, filepath.Join(dir, name))
 		}
 	}
@@ -289,9 +296,9 @@ func TestTraces(t *testing.T) {
 	//log.EnableModule(log.GeneralAuthoring)
 	//log.EnableModule(log.StateDBMonitoring)
 
-	testSTFDir(t, "../jamtestvectors/traces/reports-l0")
+	//testSTFDir(t, "../jamtestvectors/traces/reports-l0")
 	//testSTFDir(t, "../jamtestvectors/traces/fallback")
-	//testSTFDir(t, "../jamtestvectors/traces/safrole")
+	testSTFDir(t, "../jamtestvectors/traces/safrole")
 }
 
 func TestCompareJson(t *testing.T) {
@@ -305,81 +312,4 @@ func TestCompareJson(t *testing.T) {
 	}
 	diff := CompareJSON(testdata1, testdata2)
 	fmt.Print(diff)
-}
-
-func TestStateTranistionForPublish(t *testing.T) {
-	testDir := "/tmp/test_local"
-	test_storage, err := initStorage(testDir)
-	if err != nil {
-		t.Errorf("❌ Error initializing storage: %v", err)
-		return
-	}
-	defer test_storage.Close()
-	//../cmd/importblocks/data/orderedaccumulation/state_transitions
-	// read til ../cmd/importblocks/data
-	// and get the mode "orderedaccumulation"
-	// and get the state_transitions and read all the json file
-
-	data_dir := "../cmd/importblocks/data"
-	mode_dirs, err := os.ReadDir(data_dir)
-	if err != nil {
-		t.Errorf("❌ Error reading directory: %v", err)
-		return
-	}
-	for _, mode_dir := range mode_dirs {
-		if !mode_dir.IsDir() {
-			continue
-		}
-		mode_dir_path := fmt.Sprintf("%s/%s", data_dir, mode_dir.Name())
-		mode_dir_path = fmt.Sprintf("%s/state_transitions", mode_dir_path)
-		data_files, err := os.ReadDir(mode_dir_path)
-		if err != nil {
-			t.Errorf("❌ Error reading directory: %v", err)
-			return
-		}
-
-		for _, file := range data_files {
-			// check if the file is a json file
-			if file.IsDir() || file.Name()[len(file.Name())-5:] != ".json" {
-				continue
-			}
-
-			filepath := fmt.Sprintf("%s/%s", mode_dir_path, file.Name())
-			StateTransitionCheckForFile(t, filepath, test_storage)
-		}
-	}
-}
-
-func StateTransitionCheckForFile(t *testing.T, file string, storage *storage.StateDBStorage) {
-	t.Helper()
-	var stf StateTransition
-	data, err := os.ReadFile(file)
-	if err != nil {
-		t.Errorf("❌ Failed to read JSON file: %v", err)
-		return
-	}
-	err = json.Unmarshal(data, &stf)
-	if err != nil {
-		t.Errorf("❌ Failed to read JSON file: %v", err)
-		return
-	}
-	s0, err := NewStateDBFromSnapshotRaw(storage, &(stf.PreState))
-	if err != nil {
-		t.Errorf("❌ Failed to create StateDB from snapshot: %v", err)
-		return
-	}
-	s1, err := NewStateDBFromSnapshotRaw(storage, &(stf.PostState))
-	if err != nil {
-		t.Errorf("❌ Failed to create StateDB from snapshot: %v", err)
-		return
-	}
-	errornum, diffs := ValidateSTF(s0, stf.Block, s1)
-	if errornum > 0 {
-		t.Errorf("❌ [%s] Test failed: %v", file, errornum)
-		fmt.Printf("ErrorNum:%d\n", errornum)
-	}
-	for key, value := range diffs {
-		fmt.Printf("File %s,error %s =========\n", file, key)
-		fmt.Printf("%s", value)
-	}
 }

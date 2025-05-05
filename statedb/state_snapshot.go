@@ -31,38 +31,34 @@ var orderedStateList = []string{
 
 // C1 - C15
 type StateSnapshot struct {
-	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`    // c1
-	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"`   // c2
-	RecentBlocks             RecentBlocks                                 `json:"beta"`     // c3
-	Gamma                    SafroleBasicState                            `json:"gamma"`    // c4
-	Disputes                 Psi_state                                    `json:"psi"`      // c5
-	Entropy                  Entropy                                      `json:"eta"`      // c6
-	NextValidators           types.Validators                             `json:"iota"`     // c7
-	CurrValidators           types.Validators                             `json:"kappa"`    // c8
-	PrevValidators           types.Validators                             `json:"lambda"`   // c9
-	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`      // c10
-	Timeslot                 uint32                                       `json:"tau"`      // c11
-	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`      // c12
-	ValidatorStatistics      types.ValidatorStatistics                    `json:"pi"`       // c13
-	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`    // c14 Accumulation Queue
-	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`       // c15 Accumulation History
-	ServiceAccounts          []*SAccount                                  `json:"accounts"` // service accounts
+	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`             // c1
+	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"`            // c2
+	RecentBlocks             RecentBlocks                                 `json:"beta"`              // c3
+	Gamma                    SafroleBasicState                            `json:"gamma"`             // c4
+	Disputes                 Psi_state                                    `json:"psi"`               // c5
+	Entropy                  Entropy                                      `json:"eta"`               // c6
+	NextValidators           types.Validators                             `json:"iota"`              // c7
+	CurrValidators           types.Validators                             `json:"kappa"`             // c8
+	PrevValidators           types.Validators                             `json:"lambda"`            // c9
+	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`               // c10
+	Timeslot                 uint32                                       `json:"tau"`               // c11
+	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`               // c12
+	ValidatorStatistics      types.ValidatorStatistics                    `json:"pi"`                // c13
+	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`             // c14 Accumulation Queue
+	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`                // c15 Accumulation History
+	StateUpdates             *types.StateUpdate                           `json:"updates,omitempty"` // service updates
 }
 
 type KeyVal struct {
-	Key        []byte `json:"key"`
-	Value      []byte `json:"value"`
-	StructType string `json:"type,omitempty"`
-	Metadata   string `json:"metadata,omitempty"`
+	Key   [31]byte `json:"key"`
+	Value []byte   `json:"value"`
 }
-
-type KeyVals []KeyVal
 
 type KeyValMap map[common.Hash][]byte
 
 type StateSnapshotRaw struct {
 	StateRoot common.Hash `json:"state_root"`
-	KeyVals   KeyVals     `json:"keyvals"`
+	KeyVals   []KeyVal    `json:"keyvals"`
 }
 
 // kvAlias type for davxy traces
@@ -76,25 +72,7 @@ type kvAlias struct {
 func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 	//convert this from our struct format into this keyval format..
 
-	/*
-		t.SetState(C1, coreAuthPoolEncode)
-		t.SetState(C2, authQueueEncode)
-		t.SetState(C3, recentBlocksEncode)
-		t.SetState(C4, safroleStateEncode)
-		t.SetState(C5, disputeState)
-		t.SetState(C6, entropyEncode)
-		t.SetState(C7, nextEpochValidatorsEncode)
-		t.SetState(C8, currEpochValidatorsEncode)
-		t.SetState(C9, priorEpochValidatorEncode)
-		t.SetState(C10, rhoEncode)
-		t.SetState(C11, mostRecentBlockTimeSlotEncode)
-		t.SetState(C12, privilegedServiceIndicesEncode)
-		t.SetState(C13, piEncode)
-		t.SetState(C14, accumulateQueueEncode)
-		t.SetState(C15, accumulateHistoryEncode)
-	*/
-
-	keyValList := make(KeyVals, 0)
+	keyValList := make([]KeyVal, 0)
 
 	for _, _stateIdentifier := range orderedStateList {
 		stateKey := make([]byte, 32)
@@ -149,7 +127,7 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 
 		}
 		kv := KeyVal{}
-		kv.Key = stateKey
+		copy(kv.Key[:], stateKey[:])
 		kv.Value = stateVal
 		keyValList = append(keyValList, kv)
 	}
@@ -160,24 +138,10 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 	return &snapshotRaw
 }
 
-func (kvs KeyVals) MarshalJSON() ([]byte, error) {
-	return json.Marshal([]KeyVal(kvs))
-}
-
-func (kvs KeyVals) String() string {
-	b, err := kvs.MarshalJSON()
-	if err != nil {
-		return "[]"
-	}
-	return string(b)
-}
-
 func (kv KeyVal) MarshalJSON() ([]byte, error) {
 	aux := kvAlias{
-		Key:        common.HexString(kv.Key[0:31]), // 31 byte keys
-		Value:      common.HexString(kv.Value),
-		StructType: kv.StructType,
-		Metadata:   kv.Metadata,
+		Key:   common.HexString(kv.Key[0:31]), // 31 byte keys
+		Value: common.HexString(kv.Value),
 	}
 	return json.Marshal(aux)
 }
@@ -199,10 +163,8 @@ func (kv *KeyVal) UnmarshalJSON(data []byte) error {
 	}
 
 	switch len(rawKey) {
-	case 32:
-		kv.Key = rawKey[:31]
 	case 31:
-		kv.Key = rawKey
+		copy(kv.Key[:], rawKey[:])
 	default:
 		return fmt.Errorf("invalid key length: expected 31 or 32 bytes, got %d", len(rawKey))
 	}
@@ -213,8 +175,6 @@ func (kv *KeyVal) UnmarshalJSON(data []byte) error {
 	}
 	kv.Value = rawVal
 
-	kv.StructType = aux.StructType
-	kv.Metadata = aux.Metadata
 	return nil
 }
 
@@ -278,7 +238,7 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 	return &sn
 }
 
-func (n *JamState) Snapshot(state *StateSnapshotRaw) *StateSnapshot {
+func (n *JamState) Snapshot(state *StateSnapshotRaw, stateUpdates *types.StateUpdate) *StateSnapshot {
 	original := n.SafroleState
 	copied := &StateSnapshot{
 		AuthorizationsPool:       n.AuthorizationsPool,                                  // C1
@@ -296,7 +256,7 @@ func (n *JamState) Snapshot(state *StateSnapshotRaw) *StateSnapshot {
 		ValidatorStatistics:      n.ValidatorStatistics,                                 // C13
 		AccumulationQueue:        n.AccumulationQueue,                                   // C14
 		AccumulationHistory:      n.AccumulationHistory,                                 // C15
-		ServiceAccounts:          getServiceAccounts(state.KeyVals),
+		StateUpdates:             stateUpdates,                                          // service updates
 	}
 	copy(copied.Entropy[:], original.Entropy[:])
 	copy(copied.PrevValidators, original.PrevValidators)
@@ -305,6 +265,7 @@ func (n *JamState) Snapshot(state *StateSnapshotRaw) *StateSnapshot {
 	for j := 0; j < types.TotalValidators; j++ {
 		copied.ValidatorStatistics.Current[j] = n.ValidatorStatistics.Current[j]
 		copied.ValidatorStatistics.Last[j] = n.ValidatorStatistics.Last[j]
+		// CHECK
 	}
 	return copied
 }

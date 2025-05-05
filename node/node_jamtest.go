@@ -26,6 +26,11 @@ import (
 	"time"
 )
 
+const (
+	DefaultRefineGasLimit     = uint64(800000)
+	DefaultAccumulateGasLimit = uint64(80000)
+)
+
 var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
@@ -115,7 +120,7 @@ func GenerateRandomBasePort() uint16 {
 
 func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) {
 	network := types.Network
-	GenesisStateFile, GenesisBlockFile := GetGenesisFile(network)
+	GenesisStateFile := GetGenesisFile(network)
 	log.InitLogger("debug")
 
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
@@ -126,7 +131,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, GenesisBlockFile, epoch0Timestamp, peers, peerList, ValidatorFlag, nodePaths[i], int(basePort)+i, jceMode)
+		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
 			return nil, err
 		}
@@ -257,7 +262,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
 		if err != nil {
-			log.Crit(module, "Error setting up nodes: %v")
+			log.Crit(module, "Error setting up nodes", "err", err)
 			return
 		}
 
@@ -310,6 +315,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		bNode = nodes[1]
 	}
 
+	log.EnableModule(log.FirstGuarantorOrAuditor)
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule(log.GeneralAuthoring)
 
@@ -346,8 +352,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 					Service:            bootstrapService,
 					CodeHash:           bootstrapCodeHash,
 					Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     DefaultRefineGasLimit,
+					AccumulateGasLimit: DefaultAccumulateGasLimit,
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        0,
 				},
@@ -462,8 +468,8 @@ func auth_copy(n1 JNode, testServices map[string]*types.TestService, targetN int
 					Service:            service_authcopy.ServiceCode,
 					CodeHash:           service_authcopy.CodeHash,
 					Payload:            []byte{},
-					RefineGasLimit:     5678,
-					AccumulateGasLimit: 9876,
+					RefineGasLimit:     DefaultRefineGasLimit,
+					AccumulateGasLimit: DefaultAccumulateGasLimit,
 					ImportedSegments:   make([]types.ImportSegment, 0),
 					ExportCount:        0,
 				},

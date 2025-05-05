@@ -312,7 +312,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestModifyGenesis(t *testing.T) {
-	dirPath := "../chainspecs/rawkv/"
+	dirPath := "../chainspecs/tiny-00000000.json"
 	files, err := ioutil.ReadDir(dirPath)
 	if err != nil {
 		t.Fatalf("Failed to read directory: %v", err)

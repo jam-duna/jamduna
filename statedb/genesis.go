@@ -1,13 +1,10 @@
 package statedb
 
 import (
-	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
 
 	//"io/ioutil"
 	"os"
@@ -20,7 +17,6 @@ import (
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/google/go-cmp/cmp"
 )
 
 // 6.4.1 Startup parameters
@@ -161,56 +157,55 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	}
 	statedb.JamState = j
 	statedb.StateRoot = statedb.UpdateTrieState()
-	statefn := common.GetFilePath(fmt.Sprintf("chainspecs/state_snapshots/genesis-%s", network))
-	blockfn := common.GetFilePath(fmt.Sprintf("chainspecs/blocks/genesis-%s", network))
 
-	trace := StateSnapshotRaw{
-		StateRoot: statedb.StateRoot,
-		KeyVals:   statedb.GetAllKeyValues(),
-	}
-	types.SaveObject(statefn, statedb.JamState.Snapshot(&trace))
-	b := types.Block{
-		Header: types.BlockHeader{
-			ParentHeaderHash: common.Hash{},
-			ParentStateRoot:  common.Hash{},
-			Slot:             0,
-			ExtrinsicHash:    common.Hash{},
-			EpochMark: &types.EpochMark{
-				Entropy:        common.Hash{},
-				TicketsEntropy: common.Hash{},
-				Validators:     validatorshashes,
-			},
-			//TicketsMark: types.TicketsMark{},
-			//OffendersMark: [],
-			AuthorIndex: 65535,
+	trace := StateTransition{
+		PreState: StateSnapshotRaw{
+			StateRoot: common.Hash{},
+			KeyVals:   make([]KeyVal, 0),
 		},
-		Extrinsic: types.ExtrinsicData{
-			Tickets:    make([]types.Ticket, 0),
-			Preimages:  make([]types.Preimages, 0),
-			Guarantees: make([]types.Guarantee, 0),
-			Assurances: make([]types.Assurance, 0),
-			Disputes: types.Dispute{
-				Verdict: make([]types.Verdict, 0),
-				Culprit: make([]types.Culprit, 0),
-				Fault:   make([]types.Fault, 0),
+		Block: types.Block{
+			Header: types.BlockHeader{
+				ParentHeaderHash: common.Hash{},
+				ParentStateRoot:  common.Hash{},
+				Slot:             0,
+				ExtrinsicHash:    common.Hash{},
+				EpochMark: &types.EpochMark{
+					Entropy:        common.Hash{},
+					TicketsEntropy: common.Hash{},
+					Validators:     validatorshashes,
+				},
+				//TicketsMark: types.TicketsMark{},
+				//OffendersMark: [],
+				AuthorIndex: 65535,
+			},
+			Extrinsic: types.ExtrinsicData{
+				Tickets:    make([]types.Ticket, 0),
+				Preimages:  make([]types.Preimages, 0),
+				Guarantees: make([]types.Guarantee, 0),
+				Assurances: make([]types.Assurance, 0),
+				Disputes: types.Dispute{
+					Verdict: make([]types.Verdict, 0),
+					Culprit: make([]types.Culprit, 0),
+					Fault:   make([]types.Fault, 0),
+				},
 			},
 		},
+		PostState: StateSnapshotRaw{
+			StateRoot: statedb.StateRoot,
+			KeyVals:   statedb.GetAllKeyValues(),
+		},
 	}
-	statedb.Block = &b
+	b := &trace.Block
+	statedb.Block = b
 
-	blockfn = common.GetFilePath(fmt.Sprintf("chainspecs/blocks/genesis-%s", network))
-	fmt.Printf("Genesis %s: %s\n", blockfn, b.String())
 	fmt.Printf("Genesis Header Hash: %s\n", b.Header.Hash().String())
-	types.SaveObject(blockfn, b)
 
-	outfn = common.GetFilePath(fmt.Sprintf("chainspecs/traces/genesis-%s", network))
-	types.SaveObject(outfn, trace)
+	rawOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.json", network))
+	rawBinOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.bin", network))
 
-	rawOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/rawkv/genesis-%s.json", network))
-	rawBinOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/rawkv/genesis-%s.bin", network))
-	rawByte, err := trace.CustomMarshalJSON()
-	rawCodec, err := trace.CustomCodecEncode()
-	err = os.WriteFile(rawOutfn, rawByte, 0644)
+	rawByte := trace.ToJSON()
+	rawCodec, err := types.Encode(trace)
+	err = os.WriteFile(rawOutfn, []byte(rawByte), 0644)
 	if err != nil {
 		return rawOutfn, fmt.Errorf("Error writing rawOut file: %v\n", err)
 	}
@@ -218,77 +213,8 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	if err != nil {
 		return rawBinOutfn, fmt.Errorf("Error writing rawBinOut file: %v\n", err)
 	}
-	types.SaveObject(outfn, trace)
 
 	return
-}
-
-func (s StateSnapshotRaw) CustomMarshalJSON() ([]byte, error) {
-	type SnapshotOutput struct {
-		Input  map[string]string `json:"input"`
-		Output string            `json:"output"`
-	}
-
-	// Build the map of key->value from s.KeyVals.
-	inputMap := make(map[string]string)
-	for _, kv := range s.KeyVals {
-		keyHex := hex.EncodeToString(kv.Key)
-		valHex := hex.EncodeToString(kv.Value)
-		inputMap[keyHex] = valHex
-	}
-
-	stateRootHex := hex.EncodeToString(s.StateRoot[:]) // strip 0x
-
-	output := SnapshotOutput{
-		Input:  inputMap,
-		Output: stateRootHex,
-	}
-
-	outputs := make([]SnapshotOutput, 1)
-	outputs[0] = output
-	return json.MarshalIndent(outputs, "", "  ")
-}
-
-type KeyVal_custom struct {
-	Key common.Hash
-	Val []byte
-}
-type SnapshotOutput_custum struct {
-	Input  []KeyVal_custom `json:"input"`
-	Output common.Hash     `json:"output"`
-}
-
-func (s *StateSnapshotRaw) CustomCodecEncode() ([]byte, error) {
-
-	input := make([]KeyVal_custom, 0)
-	for _, kv := range s.KeyVals {
-		if len(kv.Key) != 32 {
-			return nil, fmt.Errorf("Key %x length is not 32 bytes", kv.Key)
-		}
-		key := common.BytesToHash(kv.Key)
-		input = append(input, KeyVal_custom{Key: key, Val: kv.Value})
-	}
-	// sort it by key
-	sort.Slice(input, func(i, j int) bool {
-		return bytes.Compare(input[i].Key.Bytes(), input[j].Key.Bytes()) < 0
-	})
-	output := SnapshotOutput_custum{
-		Input:  input,
-		Output: s.StateRoot,
-	}
-	bytes, err := types.Encode(output)
-	decoded, _, err := types.Decode(bytes, reflect.TypeOf(SnapshotOutput_custum{}))
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	}
-	// transform it back to the original struct
-	// see if it is the same
-	outputdecoded := decoded.(SnapshotOutput_custum)
-	if !reflect.DeepEqual(output, outputdecoded) {
-		diff := cmp.Diff(output, outputdecoded)
-		fmt.Printf("Diff: %s\n", diff)
-	}
-	return bytes, err
 }
 
 func NewBlockFromFile(blockfilename string) *types.Block {
@@ -306,30 +232,30 @@ func NewBlockFromFile(blockfilename string) *types.Block {
 	return &b
 }
 
-func NewStateDBFromSnapshotRawFile(sdb *storage.StateDBStorage, statefilename string) (statedb *StateDB, err error) {
+func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, statefilename string) (statedb *StateDB, err error) {
 	fn := common.GetFilePath(statefilename)
 	snapshotRawBytes, err := os.ReadFile(fn)
 	if err != nil {
 		return statedb, err
 	}
-	var stateSnapshotRaw StateSnapshotRaw
-	err = json.Unmarshal(snapshotRawBytes, &stateSnapshotRaw)
+	var statetransition StateTransition
+	err = json.Unmarshal(snapshotRawBytes, &statetransition)
 	if err != nil {
+		log.Crit(module, "Error unmarshalling state snapshot raw file", "error", err)
 		return statedb, err
 	}
-	return NewStateDBFromSnapshotRaw(sdb, &stateSnapshotRaw)
+	return NewStateDBFromStateTransition(sdb, &statetransition)
 }
 
-func NewStateDBFromSnapshotRaw(sdb *storage.StateDBStorage, stateSnapshotRaw *StateSnapshotRaw) (statedb *StateDB, err error) {
+func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return statedb, err
 	}
-	statedb.Block = nil
-	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(*stateSnapshotRaw)
+	statedb.Block = &(statetransition.Block)
+	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // NOTE: not the pre-state
 	statedb.JamState = NewJamState()
 	statedb.RecoverJamState(statedb.StateRoot)
-
 	return statedb, nil
 }
 

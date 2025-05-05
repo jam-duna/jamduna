@@ -431,7 +431,7 @@ func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
 		}, nil
 	}
 
-	if value != nil || !compareBytes(value, zeroHash) {
+	if !compareBytes(value, zeroHash) {
 		return t.levelDBGetBranch(nodeHash)
 	} else {
 		return &Node{
@@ -513,6 +513,7 @@ func (t *MerkleTree) PrintTree(node *Node, level int) {
 }
 
 // maximum size: The total encoded length of the response
+// TODO: this should accept 31 byte keys and return 31 byte keys
 func (t *MerkleTree) GetStateByRange(starKey []byte, endKey []byte, maxSize uint32) (foundKeyVal []types.StateKeyValue, boundaryNode [][]byte, err error) {
 	foundKeyVal = make([]types.StateKeyValue, 0)
 	currenSize := uint32(0)
@@ -669,8 +670,8 @@ func (t *MerkleTree) printTree(node *Node, level int) {
 	}
 }
 
-func (t *MerkleTree) SetRawKeyVal(key common.Hash, value []byte) {
-	t.Insert(key.Bytes(), value)
+func (t *MerkleTree) SetRawKeyVal(key [31]byte, value []byte) {
+	t.Insert(key[:], value)
 }
 
 func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
@@ -993,7 +994,9 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
 }
 
 // Insert fixed-length hashed key with value for the BPT
-func (t *MerkleTree) Insert(key, value []byte) {
+func (t *MerkleTree) Insert(key31 []byte, value []byte) {
+	key := make([]byte, 32);
+	copy(key[:], key31[:])
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
 		encodedLeaf := leaf(key, value)
@@ -1376,21 +1379,6 @@ func (t *MerkleTree) collectRemainingNodes(node *Node, deleteKey []byte, nodes *
 	// Recursively collect from left and right subtrees
 	t.collectRemainingNodes(node.Left, deleteKey, nodes)
 	t.collectRemainingNodes(node.Right, deleteKey, nodes)
-}
-
-func isBranchNode(value []byte) bool {
-	// Implement logic to determine if a node is a branch node
-	return len(value) == 64 && value[0] != 0 && value[1] != 0
-}
-
-// Implement "¬"
-func falseBytes(data []byte) []byte {
-	result := make([]byte, len(data))
-	for i := 0; i < len(data); i++ {
-		result[i] = 0xFF - data[i]
-		// result[i] = ^data[i]
-	}
-	return result
 }
 
 // compareBytes compares two Tries

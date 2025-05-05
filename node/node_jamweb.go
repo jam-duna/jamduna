@@ -537,7 +537,7 @@ func (n *NodeContent) RunApplyBlockAndWeb(ctx context.Context, blockDataDir stri
 			log.Crit(debugWeb, "Unmarshal error", err)
 			continue
 		}
-		newStateDB, err := statedb.NewStateDBFromSnapshotRaw(storage, &stf.PostState)
+		newStateDB, err := statedb.NewStateDBFromStateTransition(storage, &stf)
 		if err != nil {
 			log.Crit(debugWeb, "StateDB init error", err)
 			continue

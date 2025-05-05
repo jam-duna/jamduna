@@ -28,6 +28,7 @@ func (p *Peer) GetMultiBlocks(latest_genesis_headerhash common.Hash, ctx context
 	blocks := make([]types.Block, 0)
 	for {
 		block_ctx, blockCancel := context.WithTimeout(ctx, MediumTimeout)
+		defer blockCancel() // check if this is the right place to cancel
 		blocksRaw, lastErr := p.SendBlockRequest(block_ctx, currentHash, 0, maxBlockCount)
 		if lastErr != nil {
 			return nil, lastErr
@@ -36,7 +37,6 @@ func (p *Peer) GetMultiBlocks(latest_genesis_headerhash common.Hash, ctx context
 		if len(blocksRaw) < maxBlockCount {
 			break
 		}
-		blockCancel()
 		log.Info(debugBlock, "GetMultiBlocks", "blocksRaw", len(blocksRaw), "currentHash", currentHash)
 		currentHash = blocksRaw[len(blocksRaw)-1].Header.Hash()
 	}

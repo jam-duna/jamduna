@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -254,8 +253,4 @@ func (r *FlagRegistry) validateNoConflict() {
 			log.Fatalf("DuplicateFlags: -%s & --%s", f.short, f.long)
 		}
 	}
-}
-
-func isZeroValue(v interface{}) bool {
-	return reflect.DeepEqual(v, reflect.Zero(reflect.TypeOf(v)).Interface())
 }

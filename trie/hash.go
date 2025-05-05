@@ -13,11 +13,6 @@ func BytesToHash(data []byte) common.Hash {
 	return common.BytesToHash(data[:])
 }
 
-func createHash() hash.Hash {
-	h, _ := blake2b.New256(nil)
-	return h
-}
-
 var EMPTYHASH = make([]byte, 32)
 
 // compareHashes compares two byte slices for equality

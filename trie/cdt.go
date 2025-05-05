@@ -389,24 +389,6 @@ func (mt *CDMerkleTree) GenerateLocalLeavesX(pageIndex int, x int) (hashedLeaves
 	return hashedLeaves, nil
 }
 
-func computeMerkleRoot(hashes [][]byte) []byte {
-	if len(hashes) == 0 {
-		return nil
-	}
-	for len(hashes) > 1 {
-		nextLevel := [][]byte{}
-		for i := 0; i < len(hashes); i += 2 {
-			if i+1 < len(hashes) {
-				nextLevel = append(nextLevel, computeNode(append(hashes[i], hashes[i+1]...)))
-			} else {
-				nextLevel = append(nextLevel, hashes[i])
-			}
-		}
-		hashes = nextLevel
-	}
-	return hashes[0]
-}
-
 func findParent(root, node *CDTNode) *CDTNode {
 	if root == nil || root == node {
 		return nil
@@ -429,55 +411,6 @@ func findSibling(parent, node *CDTNode) *CDTNode {
 		return parent.Right
 	}
 	return parent.Left
-}
-
-func computePageProofHashes(leafHashes [][]byte) [][]byte {
-	if len(leafHashes) == 0 {
-		return nil
-	}
-
-	var treeLevels [][][]byte
-	treeLevels = append(treeLevels, leafHashes)
-
-	for len(treeLevels[len(treeLevels)-1]) > 1 {
-		currentLevel := treeLevels[len(treeLevels)-1]
-		var nextLevel [][]byte
-		for i := 0; i < len(currentLevel); i += 2 {
-			left := currentLevel[i]
-			right := currentLevel[i+1]
-			parent := computeNode(append(left, right...))
-			nextLevel = append(nextLevel, parent)
-		}
-		treeLevels = append(treeLevels, nextLevel)
-	}
-	// printNodePageProof(treeLevels, len(treeLevels)-1, 0, "")
-
-	var allHashes [][]byte
-	for _, level := range treeLevels {
-		for _, h := range level {
-			allHashes = append(allHashes, h)
-		}
-	}
-	return allHashes
-}
-
-func printNodePageProof(treeLevels [][][]byte, level, index int, indent string) {
-	var label string
-	switch {
-	case level == len(treeLevels)-1:
-		label = "Root"
-	case level == 0:
-		label = "Leaf"
-	default:
-		label = "Branch"
-	}
-
-	fmt.Printf("%s%s 0x%x\n", indent, label, treeLevels[level][index])
-
-	if level > 0 {
-		printNodePageProof(treeLevels, level-1, index*2, indent+"  ")
-		printNodePageProof(treeLevels, level-1, index*2+1, indent+"  ")
-	}
 }
 
 // generatePageProof creates paged proofs from segments
