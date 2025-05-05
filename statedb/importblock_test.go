@@ -254,6 +254,7 @@ func TestStateTransitionSingle(t *testing.T) {
 
 // demonstrate random STF testing
 func testSTFDir(t *testing.T, dir string) {
+	t.Logf("Testing directory: %s\n", dir)
 	t.Helper()
 
 	entries, err := os.ReadDir(dir)
@@ -272,7 +273,7 @@ func testSTFDir(t *testing.T, dir string) {
 			continue
 		}
 
-		if name != "00000000.json" {
+		if name != "00000000.json" && name != "00000000.bin" {
 			files = append(files, filepath.Join(dir, name))
 		}
 	}
@@ -297,9 +298,9 @@ func TestTraces(t *testing.T) {
 	//log.EnableModule(log.StateDBMonitoring)
 
 	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
-	//testSTFDir(t, "../jamtestvectors/traces/reports-l0")
 	testSTFDir(t, "../jamtestvectors/traces/fallback")
-	//testSTFDir(t, "../jamtestvectors/traces/safrole")
+	testSTFDir(t, "../jamtestvectors/traces/safrole")
+	testSTFDir(t, "../jamtestvectors/traces/reports-l0")
 }
 
 func TestCompareJson(t *testing.T) {

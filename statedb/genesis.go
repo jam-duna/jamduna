@@ -247,13 +247,24 @@ func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, statefilenam
 	return NewStateDBFromStateTransition(sdb, &statetransition)
 }
 
+func IsGenesisSTF(statetransition *StateTransition) bool {
+	if (statetransition != nil && statetransition.PreState.StateRoot == common.Hash{} && statetransition.Block.Header.Slot == 0 && statetransition.Block.Header.ParentStateRoot == common.Hash{}) {
+		return true
+	}
+	return false
+}
+
 func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return statedb, err
 	}
 	statedb.Block = &(statetransition.Block)
-	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // NOTE: not the pre-state
+	isGenesis := IsGenesisSTF(statetransition)
+	if isGenesis {
+		statetransition.PreState = statetransition.PostState // Allow genesis stf to use poststate as prestate for first non-genesis block
+	}
+	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
 	statedb.JamState = NewJamState()
 	statedb.RecoverJamState(statedb.StateRoot)
 	return statedb, nil

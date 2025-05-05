@@ -970,7 +970,9 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 
 		ids := make([]uint32, 0)
 		for id, page := range vm.Ram.Pages {
-			if page.Access.Writable && !page.Access.Readable && uint32(id) >= h {
+			// TODO: william to check
+			//log.Warn(vm.logging, "WILLAIM TO CHECK PAGE NIL", "id", id, "page", page)
+			if page != nil && page.Access.Writable && !page.Access.Readable && uint32(id) >= h {
 				ids = append(ids, uint32(id))
 			}
 		}
