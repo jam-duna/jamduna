@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -114,6 +115,16 @@ func (n *Node) updateKnownWorkReportMapping(announcement types.Announcement) {
 	return
 }
 
+func (n *Node) updateKnownWorkReportMappingFromWorkReports(reports []types.WorkReport, headerHash common.Hash) {
+	n.judgementWRMapMutex.Lock()
+	defer n.judgementWRMapMutex.Unlock()
+	for _, report := range reports {
+		reportHash := report.Hash()
+		n.judgementWRMap[reportHash] = headerHash
+	}
+	return
+}
+
 func (n *Node) getJudgementBucket(headerHash common.Hash) (*types.JudgeBucket, error) {
 	n.judgementMapMutex.Lock()
 	defer n.judgementMapMutex.Unlock()
@@ -134,7 +145,7 @@ func (n *Node) getHeadHashFromWorkReportHash(workReportHash common.Hash) (common
 	return headerHash, nil
 }
 
-func (n *Node) cleanWaitingAJ() {
+func (n *Node) cleanWaitingAJ(headerHash common.Hash, workReports []types.WorkReport) {
 	n.waitingAnnouncementsMutex.Lock()
 	n.waitingJudgementsMutex.Lock()
 	defer n.waitingAnnouncementsMutex.Unlock()
@@ -142,40 +153,45 @@ func (n *Node) cleanWaitingAJ() {
 
 	waitingAnnouncements := n.waitingAnnouncements
 	waitingJudgements := n.waitingJudgements
-
-	for _, a := range waitingAnnouncements {
-		log.Trace(debugAudit, "sending waitingAnnouncements AGAIN", "n", n.String(), "a", a.Hash())
-		select {
-		case n.announcementsCh <- a:
-			// sent successfully
-		default:
-			log.Warn(debugAudit, "cleanWaitingAJ: announcementsCh full, dropping announcement",
-				"n", n.String(), "hash", a.Hash().String_short())
+	if waitingAnnouncements != nil {
+		for _, a := range waitingAnnouncements[headerHash] {
+			log.Trace(debugAudit, "sending waitingAnnouncements AGAIN", "n", n.String(), "a", a.Hash())
+			select {
+			case n.announcementsCh <- a:
+				log.Debug(debugAudit, "cleanWaitingAJ: sent waiting announcement", "n", n.String(), "validator", a.ValidatorIndex)
+			default:
+				log.Warn(debugAudit, "cleanWaitingAJ: announcementsCh full, dropping announcement",
+					"n", n.String(), "hash", a.Hash().String_short())
+			}
 		}
+		n.waitingAnnouncements[headerHash] = make([]types.Announcement, 0)
 	}
-
-	for _, j := range waitingJudgements {
-		log.Trace(debugAudit, "sending waitingJudgements AGAIN", "n", n.String(), "j", j.Hash())
-		select {
-		case n.judgementsCh <- j:
-			// sent successfully
-		default:
-			log.Warn(debugAudit, "cleanWaitingAJ: judgementsCh full, dropping judgement",
-				"n", n.String(), "hash", j.Hash().String_short())
+	if waitingJudgements != nil {
+		for _, w := range workReports {
+			for _, j := range waitingJudgements[w.Hash()] {
+				log.Trace(debugAudit, "sending waitingJudgements AGAIN", "n", n.String(), "j", j.Hash())
+				select {
+				case n.judgementsCh <- j:
+					log.Debug(debugAudit, "cleanWaitingAJ: sent waiting judgement", "n", n.String(), "validator", j.Validator)
+				default:
+					log.Warn(debugAudit, "cleanWaitingAJ: judgementsCh full, dropping judgement",
+						"n", n.String(), "hash", j.Hash().String_short())
+				}
+			}
+			n.waitingJudgements[w.Hash()] = make([]types.Judgement, 0)
 		}
-	}
 
-	n.waitingAnnouncements = make([]types.Announcement, 0)
-	n.waitingJudgements = make([]types.Judgement, 0)
+	}
 }
 
-func (n *Node) cleanUseless(header_hash common.Hash) {
+func (n *Node) cleanUselessAudit(header_hash common.Hash) {
 	n.announcementMapMutex.Lock()
 	n.judgementMapMutex.Lock()
 	n.auditingMapMutex.Lock()
 	defer n.announcementMapMutex.Unlock()
 	defer n.judgementMapMutex.Unlock()
 	defer n.auditingMapMutex.Unlock()
+
 	if _, exists := n.announcementMap[header_hash]; exists {
 		delete(n.announcementMap, header_hash)
 	}
@@ -185,6 +201,18 @@ func (n *Node) cleanUseless(header_hash common.Hash) {
 	if _, exists := n.auditingMap[header_hash]; exists {
 		delete(n.auditingMap, header_hash)
 	}
+
+	n.waitingAnnouncementsMutex.Lock()
+	n.waitingJudgementsMutex.Lock()
+	defer n.waitingAnnouncementsMutex.Unlock()
+	defer n.waitingJudgementsMutex.Unlock()
+
+	if _, exists := n.waitingAnnouncements[header_hash]; exists {
+		delete(n.waitingAnnouncements, header_hash)
+	}
+	if _, exists := n.waitingJudgements[header_hash]; exists {
+		delete(n.waitingJudgements, header_hash)
+	}
 	return
 }
 
@@ -192,20 +220,23 @@ func (n *Node) runAuditAnnouncementJudgement() {
 	for {
 		select {
 		case announcement := <-n.announcementsCh:
+			log.Debug(debugAudit, "runAuditAnnouncementJudgement: announcement", "n", n.String(), "validator", announcement.ValidatorIndex)
 			err := n.processAnnouncement(announcement)
 			if err != nil {
-				fmt.Printf("%s processAnnouncement: %v\n", n.String(), err)
+				log.Warn(debugAudit, "processAnnouncement", "err", err)
 			}
 		case judgement := <-n.judgementsCh:
+			log.Debug(debugAudit, "runAuditAnnouncementJudgement: judgement", "n", n.String(), "validator", judgement.Validator)
 			err := n.processJudgement(judgement)
 			if err != nil {
-				fmt.Printf("%s processJudgement: %v\n", n.String(), err)
+				log.Warn(debugAudit, "processJudgement", "err", err)
 			}
 		}
 	}
 }
 
 func (n *Node) runAudit() {
+	// log.EnableModule(debugAudit)
 	for {
 		select {
 		case audit_statedb := <-n.auditingCh:
@@ -217,10 +248,9 @@ func (n *Node) runAudit() {
 				if err != nil {
 					log.Error(debugAudit, "addAuditingStateDB", "err", err)
 				}
-				n.cleanWaitingAJ()
-				log.Debug(debugAudit, "runAudit: cleanWaitingAJ done", "n", n.String())
 				n.initAudit(headerHash)
-				log.Debug(debugAudit, "runAudit: initAudit done", "n", n.String())
+				n.cleanWaitingAJ(audit_statedb.HeaderHash, audit_statedb.AvailableWorkReport)
+				n.updateKnownWorkReportMappingFromWorkReports(audit_statedb.AvailableWorkReport, headerHash)
 				err = n.Audit(headerHash)
 				if err != nil {
 					log.Error(debugAudit, "Audit Failed", "err", err)
@@ -239,7 +269,7 @@ func (n *Node) runAudit() {
 						n.StartGrandpa(newBlock.Copy())
 					}
 					time.Sleep(10 * time.Second) // remove it after audited
-					n.cleanUseless(headerHash)
+
 				}
 			}(audit_statedb)
 		}
@@ -274,6 +304,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 	for !done {
 		select {
 		case <-paulseTicker.C:
+			n.cleanWaitingAJ(headerHash, auditing_statedb.AvailableWorkReport)
 			auditing_statedb, err := n.getAuditingStateDB(headerHash)
 			if err != nil {
 				return err
@@ -339,7 +370,7 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	if err != nil {
 		return err
 	}
-	log.Debug(debugAudit, "Tranche, start audit", "n", n.String(), auditing_statedb.Block.TimeSlot(), tranche)
+	log.Debug(debugAudit, "Tranche, start audit", "n", n.String(), "slot", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 	// normal behavior
 	switch n.AuditNodeType {
 	case "normal":
@@ -442,6 +473,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	if tranche == 0 {
 		banderSnatchSecret := bandersnatch.BanderSnatchSecret(n.GetBandersnatchSecret())
 		a0, s0, err := s.Select_a0(banderSnatchSecret)
+
 		for _, w := range a0 {
 			log.Trace(debugAudit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "wph", w.WorkReport.Hash())
 		}
@@ -467,7 +499,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			default:
 				log.Warn(debugAudit, "Announce: announcementsCh full, dropping announcement")
 			}
-			var announcementWithProof JAMSNPAuditAnnouncementWithProof
+			announcementWithProof := JAMSNPAuditAnnouncementWithProof{}
 			workReports := make([]JAMSNPAuditAnnouncementReport, 0)
 			for _, w := range announcement.Selected_WorkReport {
 				workReports = append(workReports, JAMSNPAuditAnnouncementReport{
@@ -482,6 +514,9 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 				Signature:  announcement.Signature,
 			}
 			announcementWithProof.EvidenceTranche0 = Tranche0Evidence(s0)
+			if len(s0) >= 4 && binary.BigEndian.Uint32(s0[0:4]) == 0 {
+				panic(fmt.Errorf("tranche0 evidence is empty in Announce"))
+			}
 			for _, w := range a0 {
 				log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash())
 			}
@@ -496,11 +531,6 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	if err != nil {
 		return nil, err
 	}
-	currJCE := n.GetCurrJCE()
-	n.jce_timestamp_mutex.Lock()
-	start_point := n.jce_timestamp[currJCE]
-	n.jce_timestamp_mutex.Unlock()
-	tranche = auditing_statedb.GetTranche(start_point)
 	an, no_show_a, _, sn, err := auditing_statedb.Select_an(banderSnatchSecret, prev_bucket, judgment_bucket, tranche)
 	if err != nil {
 		return nil, err
@@ -518,7 +548,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	if err != nil {
 		return nil, err
 	} else {
-		var announcementWithProof JAMSNPAuditAnnouncementWithProof
+		announcementWithProof := JAMSNPAuditAnnouncementWithProof{}
 		workReports := make([]JAMSNPAuditAnnouncementReport, 0)
 		for _, w := range announcement.Selected_WorkReport {
 			workReports = append(workReports, JAMSNPAuditAnnouncementReport{
@@ -633,6 +663,7 @@ func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelec
 
 // auditWorkReport reconstructs the bundle from C assurers, verifies the bundle, and executes the work package
 func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Hash) (judgement types.Judgement, err error) {
+	start := time.Now()
 	judgement = types.Judgement{}
 
 	judgment_bucket, err := n.getJudgementBucket(headerHash)
@@ -700,7 +731,8 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	}
 
 	judgement, err = n.MakeJudgement(workReport, auditPass)
-
+	elapse := common.ElapsedStr(start)
+	log.Debug(debugBlock, "auditWorkReport", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "start time", start, "pvmElapsed", pvmElapsed, "total judge elapse", elapse)
 	return
 }
 
@@ -741,7 +773,7 @@ func (n *Node) CheckBlockAudited(headerHash common.Hash, tranche uint32) (bool, 
 	isBlockAudited := auditing_statedb.IsBlockAudited(announcementBucket, judgment_bucket)
 
 	for _, w := range auditing_statedb.AvailableWorkReport {
-		log.Trace(debugAudit, "CheckBlockAudited", "n", n.String(),
+		log.Debug(debugBlock, "CheckBlockAudited", "n", n.String(),
 			"ts", auditing_statedb.Block.TimeSlot(),
 			"len announcementBucket", announcementBucket.GetLen(w.Hash()),
 			"len judgment_bucket", judgment_bucket.GetLen(w.Hash()),
@@ -855,7 +887,13 @@ func (n *Node) MakeJudgement(workreport types.WorkReport, auditPass bool) (judge
 // thus we can check if there is someone absent
 func (n *Node) processAnnouncement(announcement types.Announcement) error {
 	headerHash := announcement.HeaderHash
-
+	index := int(announcement.ValidatorIndex)
+	s, err := n.getAuditingStateDB(headerHash)
+	if err != nil {
+		fmt.Printf("%s [audit:processAnnouncement] auditingDB not found %v\n", n.String(), headerHash)
+		return err
+	}
+	pubkey := s.GetSafrole().GetCurrValidator(index).Ed25519
 	if !n.checkTrancheAnnouncement(headerHash) {
 		n.waitingAnnouncementsMutex.Lock()
 		defer n.waitingAnnouncementsMutex.Unlock()
@@ -863,21 +901,17 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 			// means we enter this too late, no need to audit
 			return fmt.Errorf("No way header %v not found for auditing statedb", headerHash)
 		}
-		n.waitingAnnouncements = append(n.waitingAnnouncements, announcement)
+		if n.waitingAnnouncements == nil {
+			n.waitingAnnouncements = make(map[common.Hash][]types.Announcement)
+		}
+		n.waitingAnnouncements[headerHash] = append(n.waitingAnnouncements[headerHash], announcement)
+		log.Debug(debugAudit, "processAnnouncement waitingAnnouncements", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
 		return nil
 	}
 
-	s, err := n.getAuditingStateDB(headerHash)
-	if err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] auditingDB not found %v\n", n.String(), headerHash)
-		return err
-	}
-
-	index := int(announcement.ValidatorIndex)
-	pubkey := s.GetSafrole().GetCurrValidator(index).Ed25519
-
+	log.Debug(debugAudit, "processAnnouncement", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
 	if err := announcement.Verify(pubkey); err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] announcement(%v) not verified %v\n", n.String(), announcement.Hash(), headerHash)
+		log.Warn(debugAudit, "processAnnouncement: announcement.Verify failed", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
 		return err
 	}
 
@@ -911,18 +945,18 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 // if it's full set, we should check if there is a bad judgement
 // if so, we should make a dispute extrinsic by checking we have the judgement or not
 func (n *Node) processJudgement(judgement types.Judgement) error {
-	header, err := n.getHeadHashFromWorkReportHash(judgement.WorkReportHash)
-	if !n.checkTrancheAnnouncement(header) || err != nil {
+	headerHash, err := n.getHeadHashFromWorkReportHash(judgement.WorkReportHash)
+	if !n.checkTrancheAnnouncement(headerHash) || err != nil {
 		n.waitingJudgementsMutex.Lock()
 		defer n.waitingJudgementsMutex.Unlock()
-		n.waitingJudgements = append(n.waitingJudgements, judgement)
+		if n.waitingJudgements == nil {
+			n.waitingJudgements = make(map[common.Hash][]types.Judgement)
+		}
+		log.Debug(debugAudit, "processJudgement waitingJudgements", "n", n.String(), "validator", judgement.Validator, "judgement.WorkReportHash", judgement.WorkReportHash.String_short())
+		n.waitingJudgements[judgement.WorkReportHash] = append(n.waitingJudgements[judgement.WorkReportHash], judgement)
 		return nil
 	}
-
-	headerHash, err := n.getHeadHashFromWorkReportHash(judgement.WorkReportHash)
-	if err != nil {
-		return err
-	}
+	log.Debug(debugAudit, "processJudgement", "n", n.String(), "validator", judgement.Validator, "headerHash", headerHash.String_short())
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
 		return err

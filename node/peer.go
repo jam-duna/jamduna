@@ -271,7 +271,6 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			return err
 		}
 	}*/
-
 	// Read message type (1 byte)
 	msgTypeBytes := make([]byte, 1)
 	if _, err := io.ReadFull(stream, msgTypeBytes); err != nil {

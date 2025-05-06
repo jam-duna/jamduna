@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"net/rpc"
+	"runtime"
 	"runtime/pprof"
 
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base32"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -197,6 +199,9 @@ func (n *Node) Clean(block_hashes []common.Hash) {
 			delete(n.statedbMap, block_hash)
 		}
 		n.ba_checker.Clear(block_hash)
+
+		// audit
+		n.cleanUselessAudit(block_hash)
 	}
 	n.statedbMapMutex.Unlock()
 
@@ -216,6 +221,7 @@ func (n *Node) Clean(block_hashes []common.Hash) {
 		}
 	}
 	n.ticketsMutex.Unlock()
+
 }
 
 type Node struct {
@@ -276,9 +282,9 @@ type Node struct {
 	grandpaPrimaryMessageCh   chan grandpa.VoteMessage
 	grandpaCommitMessageCh    chan grandpa.CommitMessage
 
-	waitingAnnouncements      []types.Announcement
+	waitingAnnouncements      map[common.Hash][]types.Announcement
 	waitingAnnouncementsMutex sync.Mutex
-	waitingJudgements         []types.Judgement
+	waitingJudgements         map[common.Hash][]types.Judgement
 	waitingJudgementsMutex    sync.Mutex
 
 	nodeType string
@@ -1425,6 +1431,22 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Error(module, "Recovered from panic in QUIC stream handler", "err", r)
+					// save stack info to /tmp/panic.txt
+					buf := make([]byte, 1<<16)
+					n := runtime.Stack(buf, true)
+					// if file is not exist, create it
+					f, err := os.OpenFile("/tmp/panic.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err != nil {
+						log.Error(module, "Failed to open /tmp/panic.txt", "err", err)
+						return
+					}
+					defer f.Close()
+					_, err = f.Write(buf[:n])
+					if err != nil {
+						log.Error(module, "Failed to write to /tmp/panic.txt", "err", err)
+						return
+					}
+
 				}
 				atomic.AddInt64(&n.totalIncomingStreams, -1)
 			}()
@@ -1434,7 +1456,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 			err := n.DispatchIncomingQUICStream(streamCtx, stream, validatorIndex)
 			if err != nil {
-				log.Debug(debugDA, "DispatchIncomingQUICStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
+				log.Warn(debugDA, "DispatchIncomingQUICStream", "n", n.id, "validatorIndex", validatorIndex, "err", err)
 			}
 
 		}(stream)
@@ -1559,7 +1581,12 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
 				tranche := a.Announcement.Tranche
+				log.Debug(debugAudit, "SendAuditAnnouncement", "n", n.String(), "tranche", tranche, "peerID", peerID)
 				if tranche == 0 {
+					s0 := a.EvidenceTranche0
+					if len(s0) >= 4 && binary.BigEndian.Uint32(s0[0:4]) == 0 {
+						panic(fmt.Errorf("tranche0 evidence is empty in Announce"))
+					}
 					if err := peer.SendAuditAnnouncement(ctx, a.Announcement, a.EvidenceTranche0); err != nil {
 						log.Warn(debugStream, "SendAuditAnnouncement", "n", n.String(), "tranche0", tranche, "err", err)
 						return
@@ -1573,10 +1600,10 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
-				if !isGridNeighbor(id, n.id) || p.IsKnownHash(j.WorkReportHash) {
+				if !isGridNeighbor(id, n.id) || p.IsKnownHash(j.Hash()) {
 					return
 				}
-				p.AddKnownHash(j.WorkReportHash)
+				p.AddKnownHash(j.Hash())
 				epoch := uint32(0) // Wrong!
 				if err := peer.SendJudgmentPublication(ctx, epoch, j); err != nil {
 					log.Warn(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)

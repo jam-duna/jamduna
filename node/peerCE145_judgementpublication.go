@@ -121,7 +121,7 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 		WorkReportHash: j.WorkReportHash,
 	}
 	copy(req.Signature[:], j.Signature[:])
-	p.AddKnownHash(j.WorkReportHash)
+	p.AddKnownHash(j.Hash())
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
@@ -158,7 +158,7 @@ func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, ms
 	}
 	copy(judgement.Signature[:], jp.Signature[:])
 
-	n.peersInfo[peerID].AddKnownHash(judgement.WorkReportHash)
+	n.peersInfo[peerID].AddKnownHash(judgement.Hash())
 	go n.broadcast(ctx, judgement)
 
 	select {
