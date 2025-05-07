@@ -11,11 +11,10 @@ require (
 	github.com/ethereum/go-ethereum v1.14.5
 	github.com/go-echarts/go-echarts/v2 v2.4.3
 	github.com/go-git/go-git/v5 v5.14.0
-	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/holiman/uint256 v1.2.4
 	github.com/nsf/jsondiff v0.0.0-20230430225905-43f6cf3098c1
-	github.com/quic-go/quic-go v0.50.0
+	github.com/quic-go/quic-go v0.51.0
 	github.com/stretchr/testify v1.10.0
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/xlab/treeprint v1.2.0
@@ -25,6 +24,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.34.0
 	go.opentelemetry.io/otel/trace v1.34.0
 	golang.org/x/crypto v0.36.0
+	golang.org/x/example/hello v0.0.0-20250425154744-f8bc3a00c468
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 )
 
@@ -81,7 +81,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
-	golang.org/x/example/hello v0.0.0-20250425154744-f8bc3a00c468 // indirect
 	golang.org/x/mod v0.24.0 // indirect
 	golang.org/x/net v0.37.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
