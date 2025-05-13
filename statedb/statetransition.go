@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
@@ -162,7 +163,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	return fmt.Errorf("mismatch")
 }
 
-func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32) (diffs map[string]DiffState, err error) {
+func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
 	s0, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
@@ -187,6 +188,46 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		fmt.Printf("len post_actual %d != len post_expected %d\n", len(post_actual), len(post_expected))
 		//fmt.Printf("post_actual\n%v\n", KeyVals(post_actual).String())
 		//fmt.Printf("post_expected\n%v\n", KeyVals(post_expected).String())
+	}
+	if len(writeFile) > 0 && writeFile[0] != "" {
+		// write the output to a file
+		var stateTransition StateTransition
+		stateTransition.PreState = st.PreState
+		stateTransition.Block = st.Block
+		stateTransition.PostState = StateSnapshotRaw{
+			StateRoot: s1.StateRoot,
+			KeyVals:   post_actual,
+		}
+		fmt.Printf("writing JAMDUNA's output to %s\n", writeFile[0])
+		// if the dir does not exist, create it
+		if _, err := os.Stat(writeFile[0]); os.IsNotExist(err) {
+			err := os.MkdirAll(writeFile[0], os.ModePerm)
+			if err != nil {
+				fmt.Printf("Error creating directory: %v\n", err)
+				return nil, err
+			}
+		}
+		// create the file
+		fileName := fmt.Sprintf("%s/%s", writeFile[0], "post_state.json")
+		file, err := os.Create(fileName)
+		if err != nil {
+			fmt.Printf("Error creating file: %v\n", err)
+			return nil, err
+		}
+		defer file.Close()
+		// write the output to the file
+		jsonOutput, err := json.MarshalIndent(stateTransition, "", "  ")
+		if err != nil {
+			fmt.Printf("Error marshalling JSON: %v\n", err)
+			return nil, err
+		}
+		_, err = file.Write(jsonOutput)
+		if err != nil {
+			fmt.Printf("Error writing to file: %v\n", err)
+			return nil, err
+		}
+		fmt.Printf("Output written to %s\n", fileName)
+
 	}
 	diffs = compareKeyValsWithOutput(st.PreState.KeyVals, post_actual, post_expected)
 	fmt.Printf("diffs len=%d\n", len(diffs))

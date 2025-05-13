@@ -84,6 +84,8 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	log.Trace(debugG, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
 	// collect and pre-validate queued guarantees
 	var valid []types.Guarantee
+	tmpstatedb := s.Copy()
+	tmpstatedb.JamState = tmpState // use the tmp state (updated rho) to validate guarantees, which can avoid the core engaged error but still validated state transition
 	for _, q := range queuedGuarantees {
 		g, err := q.DeepCopy()
 		if err != nil {
@@ -91,7 +93,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 		}
 
 		// per-guarantee MakeBlock checks (core index, sigs, assignment, gas, timeouts…)
-		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
+		if err := tmpstatedb.VerifyGuaranteeBasic(g, targetJCE); err != nil {
 			if AcceptableGuaranteeError(err) {
 				// don't remove from pool if ErrGFutureReportSlot, ErrGCoreEngaged
 			} else {
@@ -173,7 +175,8 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 
 		} else {
-			next_n2 := s.JamState.SafroleState.GetNextN2() // !!!! Shawn to check: this is n1 when phase = 11
+			// get the ticket from the pool by using the next_n2 entropy
+			next_n2 := s.JamState.SafroleState.GetNextN2(targetJCE) // !!!! Shawn to check: this is n1 when phase = 11
 			tmp_accumulator := make([]types.TicketBody, len(s.JamState.SafroleState.NextEpochTicketsAccumulator))
 			copy(tmp_accumulator, s.JamState.SafroleState.NextEpochTicketsAccumulator)
 			// remove the tickets that already in state from the pool

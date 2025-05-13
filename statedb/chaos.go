@@ -18,13 +18,13 @@ func SimulateBlockAuthoringInterruption(blk *types.Block) (authoring_supressed b
 	switch {
 	case phase == 0:
 		caseStr = "first_phase"
-		pNot = 0.1
+		pNot = 0.2
 	case phase > 0 && phase < types.TicketSubmissionEndSlot:
 		caseStr = "ticket_submission_phase"
-		pNot = 0.1
+		pNot = 0.2
 	case phase > types.TicketSubmissionEndSlot && phase < types.EpochLength-1:
 		caseStr = "submission_closed_phase"
-		pNot = 0.1
+		pNot = 0.3
 	default:
 		pNot = 0
 	}

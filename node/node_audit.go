@@ -587,6 +587,10 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 				}
 			}
 		}
+		if len(evidenceSn) == 0 {
+			log.Warn(debugAudit, "tranche evidence is empty in Announce")
+			return nil, nil
+		}
 		announcementWithProof.EvidenceTrancheN = evidenceSn
 		go n.broadcast(context.TODO(), announcementWithProof)
 

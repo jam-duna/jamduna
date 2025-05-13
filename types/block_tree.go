@@ -199,7 +199,7 @@ func (bt *BlockTree) AddBlock(newBlock *Block) error {
 
 	parentNode, ok := bt.TreeMap[newBlock.GetParentHeaderHash()]
 	if !ok {
-		return fmt.Errorf("parent of block %v not found", newBlock.Header.Hash())
+		return fmt.Errorf("parent of block %v not found , parent = %v", newBlock.Header.Hash(), newBlock.GetParentHeaderHash())
 	}
 	_, ok = bt.TreeMap[newBlock.Header.Hash()]
 	if ok {

@@ -274,6 +274,12 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 		bandersnatchPub := validator.Bandersnatch
 		for _, evidence := range evidenceSN {
 			signature := evidence.Signature
+			if len(evidence.NoShows) == 0 {
+				return fmt.Errorf("onAuditAnnouncement: no shows are empty")
+			}
+			if len(evidence.NoShows[0].Reports) == 0 {
+				return fmt.Errorf("onAuditAnnouncement: no shows reports are empty")
+			}
 			workreportHash := evidence.NoShows[0].Reports[0].WorkReportHash
 			ok, err := audit_statedb.Verify_sn(bandersnatch.BanderSnatchKey(bandersnatchPub[:]), workreportHash, signature[:], uint32(newReq.Tranche))
 			if err != nil {

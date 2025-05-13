@@ -23,6 +23,30 @@ import (
 
 // CreateGenesisState generates the StateDB object and genesis statedb
 func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, epochFirstSlot uint64, network string) (outfn string, err error) {
+
+	rawOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.json", network))
+	rawBinOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.bin", network))
+
+	trace, err := MakeGenesisStateTransition(sdb, chainSpec, epochFirstSlot, network)
+	if err != nil {
+		return rawOutfn, fmt.Errorf("Error creating genesis state transition: %v\n", err)
+	}
+	rawByte := trace.ToJSON()
+	rawCodec, err := types.Encode(trace)
+	err = os.WriteFile(rawOutfn, []byte(rawByte), 0644)
+	if err != nil {
+		return rawOutfn, fmt.Errorf("Error writing rawOut file: %v\n", err)
+	}
+	err = os.WriteFile(rawBinOutfn, rawCodec, 0644)
+	if err != nil {
+		return rawBinOutfn, fmt.Errorf("Error writing rawBinOut file: %v\n", err)
+	}
+
+	return
+}
+
+// TODO: Can GenerateStateTransition without the chainspecs files
+func MakeGenesisStateTransition(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, epochFirstSlot uint64, network string) (trace *StateTransition, err error) {
 	statedb, err := newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return
@@ -39,7 +63,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 
 		v, err0 := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, "")
 		if err0 != nil {
-			return outfn, err0
+			return nil, err0
 		}
 		var vpub types.Validator
 		copy(vpub.Bandersnatch[:], v.BandersnatchPub[:])
@@ -105,7 +129,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
 	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
 	if err0 != nil {
-		return outfn, err
+		return nil, err0
 	}
 	auth_code := AuthorizeCode{
 		PackageMetaData:   []byte("bootstrap"),
@@ -113,7 +137,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	}
 	auth_code_encoded_bytes, err := auth_code.Encode()
 	if err != nil {
-		return outfn, err
+		return nil, err
 	}
 	auth_code_hash := common.Blake2Hash(auth_code_encoded_bytes) //pu
 	auth_code_hash_hash := common.Blake2Hash(auth_code_hash[:])  //pa
@@ -126,7 +150,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 
 		code, err0 := types.ReadCodeWithMetadata(service.FileName, service.ServiceName)
 		if err0 != nil {
-			return outfn, err
+			return nil, err
 		}
 
 		var balance uint64 = uint64(10000000000)
@@ -158,7 +182,7 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 	statedb.JamState = j
 	statedb.StateRoot = statedb.UpdateTrieState()
 
-	trace := StateTransition{
+	trace = &StateTransition{
 		PreState: StateSnapshotRaw{
 			StateRoot: common.Hash{},
 			KeyVals:   make([]KeyVal, 0),
@@ -195,28 +219,13 @@ func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, 
 			KeyVals:   statedb.GetAllKeyValues(),
 		},
 	}
-	b := &trace.Block
-	statedb.Block = b
+
+	b := trace.Block
+	statedb.Block = &b
 
 	fmt.Printf("Genesis Header Hash: %s\n", b.Header.Hash().String())
-
-	rawOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.json", network))
-	rawBinOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.bin", network))
-
-	rawByte := trace.ToJSON()
-	rawCodec, err := types.Encode(trace)
-	err = os.WriteFile(rawOutfn, []byte(rawByte), 0644)
-	if err != nil {
-		return rawOutfn, fmt.Errorf("Error writing rawOut file: %v\n", err)
-	}
-	err = os.WriteFile(rawBinOutfn, rawCodec, 0644)
-	if err != nil {
-		return rawBinOutfn, fmt.Errorf("Error writing rawBinOut file: %v\n", err)
-	}
-
-	return
+	return trace, nil
 }
-
 func NewBlockFromFile(blockfilename string) *types.Block {
 	fn := common.GetFilePath(blockfilename)
 	expectedCodec, err := os.ReadFile(fn)
@@ -332,10 +341,6 @@ func NewEpoch0Timestamp(test_name ...string) uint64 {
 		return uint64(starting)
 	} else if test_name[0] == "jam" {
 
-		epoch0Timestampint64 := common.JceStart.Unix()
-		epoch0Timestamp := uint64(epoch0Timestampint64)
-		fmt.Printf("JAM start now: %v\n", common.JceStart)
-		fmt.Printf("JAM start Timestamp: %v\n", epoch0Timestamp)
 		return 0
 	} else {
 		now := time.Now().Unix()
@@ -413,7 +418,6 @@ func generateSeedSet(ringSize int) ([][]byte, error) {
 	}
 	return ringSet, nil
 }
-
 func GenerateValidatorSecretSet(numNodes int) ([]types.Validator, []types.ValidatorSecret, error) {
 
 	seeds, _ := generateSeedSet(numNodes)

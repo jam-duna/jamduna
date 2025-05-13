@@ -1,61 +1,187 @@
 OUTPUT_DIR := bin
-BINARY := jam
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
 SRC := jam.go
 NETWORK  ?= tiny
+net-spec_FILE ?= chainspecs/tiny-00000000.json
+chainspec_FILE ?= chainspec.json
 NUM_NODES ?= 6
-DEFAULT_PORT ?= 9800
-SINGLE_NODE_PORT ?= 9805
+DEFAULT_PORT ?= 40000
+SINGLE_NODE_PORT ?= 40005
 BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-JAM_START_TIME ?= $(shell date -d "5 seconds" +"%Y-%m-%d %H:%M:%S")
+JAM_start-time ?= $(shell \
+	if date --version >/dev/null 2>&1; then \
+		date -d "5 seconds" "+%Y-%m-%d %H:%M:%S"; \
+	else \
+		date -v+5S "+%Y-%m-%d %H:%M:%S"; \
+	fi)
 RAW_HOSTS_FILE ?= hosts.txt
 HOSTS_FILE := ../$(RAW_HOSTS_FILE)
+
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+
+GIT_TAG := $(shell git describe --tags --abbrev=0)
+GIT_COMMIT := $(shell git rev-parse --short HEAD)
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Linker flags to strip symbols and embed version info
+GO_LDFLAGS := -s -w \
+  -X 'main.Version=$(GIT_TAG)' \
+  -X 'main.Commit=$(GIT_COMMIT)' \
+  -X 'main.BuildTime=$(BUILD_TIME)'
+
+ifeq ($(UNAME_S),Linux)
+  ifeq ($(UNAME_M),x86_64)
+    BINARY := jamduna-linux-amd64
+  else ifeq ($(UNAME_M),aarch64)
+    BINARY := jamduna-linux-arm64
+  endif
+else ifeq ($(UNAME_S),Darwin)
+  ifeq ($(UNAME_M),x86_64)
+    BINARY := jamduna-mac-amd64
+  else ifeq ($(UNAME_M),arm64)
+    BINARY := jamduna-mac-arm64
+  endif
+endif
+
 
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
 jam_with_ffi_build: ffi_force
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
-	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) .
+	go build -tags="$(NETWORK) cgo" -o $(OUTPUT_DIR)/$(BINARY) .
 jam:
 	@echo "Building JAM... $(NETWORK)"
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) .
 
+# ANSI color codes
+GREEN=\033[0;32m
+YELLOW=\033[1;33m
+RESET=\033[0m
+
+define build_with_status
+	@echo "Building $(1)..."
+	@$(2) && echo "$(GREEN)✓ Done: $(1)$(RESET)" || echo "$(YELLOW)⚠ Failed to build: $(1)$(RESET)"
+endef
+
+static_jam_linux_amd64:
+	@echo "Building JamDuna binary for Linux (x86_64)..."
+	$(call build_with_status,static_jam_linux_amd64,\
+	GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
+	go build -tags "$(NETWORK) cgo" \
+	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
+	-o $(OUTPUT_DIR)/jamduna-linux-amd64 . && strip $(OUTPUT_DIR)/jamduna-linux-amd64 2>/dev/null)
+
+static_jam_linux_arm64:
+	@echo "Building JamDuna binary for Linux (aarch64)..."
+	$(call build_with_status,static_jam_linux_arm64,\
+	GOOS=linux GOARCH=arm64 CC=aarch64-linux-musl-gcc CGO_ENABLED=1 \
+	go build -tags "$(NETWORK) cgo" \
+	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
+	-o $(OUTPUT_DIR)/jamduna-linux-arm64 . && strip $(OUTPUT_DIR)/jamduna-linux-arm64 2>/dev/null)
+
+static_jam_darwin_amd64:
+	@echo "Building JamDuna binary for macOS (x86_64)..."
+	$(call build_with_status,static_jam_darwin_amd64,\
+	GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
+	go build -tags "$(NETWORK) cgo" \
+	-ldflags "$(GO_LDFLAGS)" \
+	-o $(OUTPUT_DIR)/jamduna-mac-amd64 . && strip -x $(OUTPUT_DIR)/jamduna-mac-amd64)
+
+static_jam_darwin_arm64:
+	@echo "Building JamDuna binary for macOS (aarch64)..."
+	$(call build_with_status,static_jam_darwin_arm64,\
+	CGO_ENABLED=1 CC=clang \
+	go build -tags "$(NETWORK) cgo" \
+	-ldflags "$(GO_LDFLAGS)" \
+	-o $(OUTPUT_DIR)/jamduna-mac-arm64 . && strip -x $(OUTPUT_DIR)/jamduna-mac-arm64)
+	
+static_jam_windows_amd64:
+	@echo "Building JamDuna binary for Windows AMD64..."
+	$(call build_with_status,static_jam_windows_amd64,\
+	GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 \
+	go build -tags "$(NETWORK) cgo" \
+	-ldflags "$(GO_LDFLAGS)" \
+	-o $(OUTPUT_DIR)/jamduna-windows-amd64.exe . && x86_64-w64-mingw32-strip $(OUTPUT_DIR)/jamduna-windows-amd64.exe)
+
+static_jam_all:
+	@echo "Building static JAM for available platforms..."
+
+	# Always build Linux x86_64
+	@$(MAKE) static_jam_linux_amd64
+
+	# Build Linux ARM64 only if compiler exists or on ARM host
+	@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
+	  $(MAKE) static_jam_linux_arm64; \
+	else \
+	  echo "⚠ Skipping Linux ARM64 (no aarch64-linux-musl-gcc)"; \
+	fi
+
+	# Build macOS binaries only on macOS
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+	  $(MAKE) static_jam_darwin_amd64; \
+	  $(MAKE) static_jam_darwin_arm64; \
+	else \
+	  echo "⚠ Skipping macOS targets (not on Darwin)"; \
+	fi
+
+	# Build Windows AMD64 if mingw compiler exists
+	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+	  echo "⚠ Skipping Windows AMD64 (no x86_64-w64-mingw32-gcc) for now"; \
+	else \
+	  echo "⚠ Skipping Windows AMD64 (no x86_64-w64-mingw32-gcc)"; \
+	fi
+	
 tiny: jam reset_remote_nodes
 	ansible-playbook -u root -i $(HOSTS_FILE) -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml 
 
 jam_clean:
 	@echo "Cleaning all jam data directories under ~/.jam..."
-	@rm -rf ${HOME}/.jam/jam-*
+	@rm -rf ${HOME}/.jamduna/jam-*
 	@echo "Done."
 
 run_parallel_jam:
-	@mkdir -p logs 
-	@echo "Starting $(NUM_NODES) instances of bin/jam..."
-	@seq 0 $(shell echo $$(($(NUM_NODES) - 1))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); bin/jam -net_spec $(NETWORK) -port $$PORT -start_time "$(JAM_START_TIME)"; echo "Instance {} finished with port $$PORT"' sh
-	@echo "All instances started."
+	@mkdir -p logs
+	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
+	@for i in $$(seq 0 $$(($(NUM_NODES) - 1))); do \
+		PORT=$$(($(DEFAULT_PORT) + $$i)); \
+		V_IDX=$$i; \
+		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
+		$(OUTPUT_DIR)/$(BINARY) run \
+			--net-spec "$(net-spec_FILE)" \
+			--port $$PORT \
+			--dev-validator $$V_IDX \
+			--start-time "$(JAM_start-time)" & \
+	done; \
+	wait
+	@echo "✅ All instances started and running in parallel."
+
+
 
 run_localclient_jam: jam_clean run_parallel_jam
 run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
 
 run_single_node:
 	@echo "Starting single node JAM instance..."
-	@echo "Starting bin/jam... with network $(NETWORK) port $(SINGLE_NODE_PORT) start_time $(JAM_START_TIME)"
-	@$(OUTPUT_DIR)/$(BINARY) -net_spec $(NETWORK) -port $(SINGLE_NODE_PORT) -start_time "$(JAM_START_TIME)"
+	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_start-time)"
+	@$(OUTPUT_DIR)/$(BINARY) run --chain /home/shawn/Desktop/colorfulnotion/jam/chainspec.json --port $(SINGLE_NODE_PORT) --start-time "$(JAM_start-time)"
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
 	@mkdir -p logs 
-	@echo "Starting $(NUM_NODES) instances of bin/jam..."
-	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); bin/jam -net_spec $(NETWORK) -port $$PORT -start_time "$(JAM_START_TIME)"; echo "Instance {} finished with port $$PORT"' sh
+	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY)..."
+	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); $(OUTPUT_DIR)/$(BINARY) -net-spec $(net-spec_FILE) -port $$PORT -start-time "$(JAM_start-time)"; echo "Instance {} finished with port $$PORT"' sh
 	@echo "All instances started."
 kill_parallel_jam:
-	@echo "Killing all instances of bin/jam..."
-	@pgrep -f "bin/jam"
-	@pkill -f "bin/jam"
+	@echo "Killing all instances of $(OUTPUT_DIR)/$(BINARY)..."
+	@pgrep -f "$(OUTPUT_DIR)/$(BINARY)"
+	@pkill -f "$(OUTPUT_DIR)/$(BINARY)"
 	@echo "All instances killed."
 run_jam:
-	@echo "Starting bin/jam... with network $(NETWORK) port $(DEFAULT_PORT) start_time $(JAM_START_TIME)"
-	@$(OUTPUT_DIR)/$(BINARY) -net_spec $(NETWORK) -port $(DEFAULT_PORT) -start_time "$(JAM_START_TIME)"
+	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(DEFAULT_PORT) start-time $(JAM_start-time)"
+	@$(OUTPUT_DIR)/$(BINARY) -net-spec $(net-spec_FILE) -port $(DEFAULT_PORT) -start-time "$(JAM_start-time)"
 	@echo "Instance started."
 
 # env setup for remote nodes
@@ -81,12 +207,6 @@ reset_remote_nodes:
 	@echo "Resetting JAM on all remote nodes..."
 	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
 	@echo "All remote nodes reset."
-# run jam.go on remote nodes 
-run_jam_remote_nodes:
-	@echo "Starting run_jam on all remote nodes..."
-	@sudo /usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make jam_without_ffi_build NETWORK=$(NETWORK)'"
-	@sudo /usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'export NETWORK=$(NETWORK); export DEFAULT_PORT=$(DEFAULT_PORT); export JAM_START_TIME=\"$(shell date +'%Y-%m-%d %H:%M:%S')\"; cdj && make run_jam'"
-	@echo "All remote nodes started."
 
 da:
 	@echo "Building JAM..."
@@ -108,21 +228,41 @@ testnet:
 #clean:
 #	rm -f $(OUTPUT_DIR)/$(BINARY)
 
-# Target to build BLS FFI library
+# Target to build BLS FFI library with musl
+# TODO : everyone should run $rustup target add x86_64-unknown-linux-musl
 blslib:
-	@echo "Building BLS..."
-	@cd bls && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release
-	@echo "Built BLS library!"
-	@echo "Copying libbls.a from $(JAM_PATH)/bls/target/release/libbls.a to $(JAM_PATH)/ffi/ For Network $(NETWORK)"
-	@cp $(JAM_PATH)/bls/target/release/libbls.a $(JAM_PATH)/ffi/
+	@echo "Building BLS (static) for all platforms..."
+	@cd bls && \
+	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
+		echo "  Building for $$TARGET..."; \
+		RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET; \
+	done
+	@echo "Copying libbls.a artifacts to bls/target/release for Go linker..."
+	@cp bls/target/x86_64-unknown-linux-musl/release/libbls.a bls/target/release/libbls.linux_amd64.a || true
+	@cp bls/target/aarch64-unknown-linux-musl/release/libbls.a bls/target/release/libbls.linux_arm64.a || true
+	@cp bls/target/x86_64-apple-darwin/release/libbls.a bls/target/release/libbls.mac_amd64.a || true
+	@cp bls/target/aarch64-apple-darwin/release/libbls.a bls/target/release/libbls.mac_arm64.a || true
+	@cp bls/target/x86_64-pc-windows-gnu/release/libbls.a bls/target/release/libbls.windows_amd64.a || true
+	@mkdir -p ffi
+	@cp bls/target/release/libbls.*.a ffi/
+	@echo "All libbls.a versions prepared."
 
-# Target to build Bandersnatch FFI library
 bandersnatchlib:
-	@echo "Building Bandersnatch For Network $(NETWORK)..."
-	@cd bandersnatch && echo "Target: $$(rustc --version --verbose | grep 'host')" && cargo build --release --features "$(NETWORK)"
-	@echo "Built Bandersnatch library For Network $(NETWORK)!"
-	@echo "Copying libbandersnatch.a from $(JAM_PATH)/bandersnatch/target/release/libbandersnatch.a to $(JAM_PATH)/ffi/ For Network $(NETWORK)"
-	@cp $(JAM_PATH)/bandersnatch/target/release/libbandersnatch.a $(JAM_PATH)/ffi/
+	@echo "Building Bandersnatch for $(NETWORK) statically for all platforms..."
+	@cd bandersnatch && \
+	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
+		echo "  Building for $$TARGET..."; \
+		RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET --features "$(NETWORK)"; \
+	done
+	@mkdir -p bandersnatch/target/release
+	@cp bandersnatch/target/x86_64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.linux_amd64.a || true
+	@cp bandersnatch/target/aarch64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.linux_arm64.a || true
+	@cp bandersnatch/target/x86_64-apple-darwin/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.mac_amd64.a || true
+	@cp bandersnatch/target/aarch64-apple-darwin/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.mac_arm64.a || true
+	@cp bandersnatch/target/x86_64-pc-windows-gnu/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.windows_amd64.a || true
+	@mkdir -p ffi
+	@cp bandersnatch/target/release/libbandersnatch.*.a ffi/
+	@echo "All libbandersnatch.a versions prepared."
 
 cargo_clean:
 	@echo "Clean Up FFI libraries (BLS + Bandersnatch)!"
@@ -192,4 +332,5 @@ jamx_start:
 jamx_stop:
 	ansible-playbook -u root -i $(HOSTS_FILE)  yaml/jam_stop.yaml
 	@echo "stop on jam instances"
+
 

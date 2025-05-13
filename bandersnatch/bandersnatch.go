@@ -1,12 +1,21 @@
+//go:build cgo
+// +build cgo
+
 package bandersnatch
 
 /*
-#cgo LDFLAGS: -Ltarget/release -lbandersnatch -ldl
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.linux_amd64 -ldl
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.linux_arm64 -ldl
+#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.mac_amd64 -ldl
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.mac_arm64 -ldl
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.windows_amd64 -lws2_32
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <bandersnatch.h>
 */
 import "C"
+
 import (
 	"bytes"
 	//"crypto/ed25519"

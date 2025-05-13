@@ -131,7 +131,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
+		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, "stf", epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
 			return nil, err
 		}

@@ -125,3 +125,31 @@ warning: `bandersnatch` (lib) generated 9 warnings (run `cargo fix --lib -p band
     Finished `release` profile [optimized] target(s) in 0.07s
 Built Bandersnatch library!
 ```
+
+
+# Cross Platform Build
+```
+# For Linux (musl = static)
+rustup target add x86_64-unknown-linux-musl
+rustup target add aarch64-unknown-linux-musl
+
+# For macOS (cross-compiling from macOS to x86_64 macOS is not always default)
+rustup target add x86_64-apple-darwin
+rustup target add aarch64-apple-darwin
+
+# For Windows
+rustup target add x86_64-pc-windows-gnu
+
+# Check Installed Platforms
+rustup target list --installed
+```
+
+# JamDuna Binaries
+
+| Target Name                | GOOS     | GOARCH | Output Binary Path                 | Matches Official Binary       |
+|---------------------------|----------|--------|------------------------------------|--------------------------------|
+| `static_jam_linux_amd64`  | `linux`  | `amd64`| `bin/jamduna-linux-amd64`          | ✅ Linux (x86_64)              |
+| `static_jam_linux_arm64`  | `linux`  | `arm64`| `bin/jamduna-linux-arm64`          | ✅ Linux (aarch64)             |
+| `static_jam_darwin_amd64` | `darwin` | `amd64`| `bin/jamduna-mac-amd64`            | ✅ macOS (x86_64)              |
+| `static_jam_darwin_arm64` | `darwin` | `arm64`| `bin/jamduna-mac-arm64`            | ✅ macOS (aarch64)             |
+| `static_jam_windows_amd64`| `windows`| `amd64`| `bin/jamduna-windows-amd64.exe`    | ✅ Windows(⚠Experimental)      |

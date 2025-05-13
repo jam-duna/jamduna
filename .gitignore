@@ -2,7 +2,6 @@
 hosts.txt
 
 # build output / binaries
-/bin/
 /leveldb/
 /pvm/*.out
 cmd/jamweb/jamweb
@@ -49,3 +48,7 @@ guarantees/*.json
 
 # macOS metadata
 **/.DS_Store
+bin/jam
+bin/*
+!bin/jam*
+bin/jamduna

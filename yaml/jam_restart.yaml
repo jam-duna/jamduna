@@ -25,6 +25,7 @@
     NETWORK: "tiny"
     DEFAULT_PORT: 9900
     JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jam"
+    PEER_LIST_PATH : "/root/go/src/github.com/colorfulnotion/jam/cmd/telemetry/peerlist/jam_remote.json"
   tasks:
     - name: Kill Jam
       shell: "pkill -f '{{ JAM_PATH }}'"
@@ -61,7 +62,7 @@
         for i in $(seq 0 $(( {{ NUM_NODES }} - 1 ))); do
           PORT=$(( {{ DEFAULT_PORT }} + i ));
           echo "Starting instance $i on port $PORT..."
-          nohup {{ JAM_PATH }} -net_spec {{ NETWORK }} -port $PORT -start_time "{{ JAM_START_TIME }}" > /tmp/logs/jam_$PORT.log 2>&1 < /dev/null &
+          nohup {{ JAM_PATH }} -net_spec {{ NETWORK }} -port $PORT -peerlist {{PEER_LIST_PATH}} -start_time "{{ JAM_START_TIME }}" > /tmp/logs/jam_$PORT.log 2>&1 < /dev/null &
           PID=$!
 
           sleep 1  # Give it a second to initialize

@@ -1,12 +1,21 @@
+//go:build cgo
+// +build cgo
+
 package bls
 
 /*
-#cgo LDFLAGS: -L./target/release -lbls -ldl
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.linux_amd64 -ldl
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.linux_arm64 -ldl
+#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.mac_amd64 -ldl
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.mac_arm64 -ldl
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.windows_amd64 -lws2_32
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <bls.h>
 */
 import "C"
+
 import (
 	"errors"
 	"unsafe"

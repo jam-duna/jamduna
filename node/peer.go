@@ -121,6 +121,7 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 
 		p.conn, err = quic.DialAddr(dialCtx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
 		if err != nil {
+			log.Error(module, "DialAddr failed", "node", p.node.id, "peerID", p.PeerID, "err", err)
 			return nil, fmt.Errorf("[P%d] DialAddr failed: %w", p.PeerID, err)
 		}
 	}

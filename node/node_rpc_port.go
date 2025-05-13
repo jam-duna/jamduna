@@ -7,9 +7,9 @@ import (
 	"os"
 )
 
-const DefaultQuicPort = 9800
-const DefaultTCPPort = 11100
-const WSPort = 10800
+var DefaultQuicPort = 40000
+var DefaultTCPPort = 11100
+var WSPort = 10800
 
 func GetJAMNetwork() string {
 	if val := os.Getenv("JAM_NETWORK"); val != "" {
@@ -24,6 +24,14 @@ func GetJAMNetworkPort() int {
 	}
 	return DefaultQuicPort
 }
+
+func GetJAMNetworkWSPort() int {
+	if val := os.Getenv("JAM_NETWORK"); val != "" {
+		return WSPort
+	}
+	return WSPort
+}
+
 func GetAddresses(local bool) (addresses []string, wsUrl []string) {
 	addresses = make([]string, 6)
 	wsUrl = make([]string, 6)

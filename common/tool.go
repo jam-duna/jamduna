@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -343,4 +344,34 @@ func Elapsed(startTime time.Time) uint32 {
 
 func ElapsedStr(startTime time.Time) time.Duration {
 	return time.Since(startTime)
+}
+
+// ToIPv6PortBytes converts an IPv6 address and port to a byte slice
+func ToIPv6PortBytes(ipStr string, port uint16) ([]byte, error) {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid IP address: %s", ipStr)
+	}
+
+	ip = ip.To16()
+	if ip == nil {
+		return nil, fmt.Errorf("not a valid IPv6 address: %s", ipStr)
+	}
+
+	buf := make([]byte, 18)
+	copy(buf[:16], ip)
+	binary.LittleEndian.PutUint16(buf[16:], port)
+
+	return buf, nil
+}
+
+// ToIPv6Port converts a byte slice to an IPv6 address and port
+func ToIPv6Port(buf []byte) (string, uint16, error) {
+	if len(buf) < 18 {
+		return "", 0, fmt.Errorf("invalid byte slice length: %d", len(buf))
+	}
+	ip := net.IP(buf[:16])
+	ip_str := ip.String()
+	port := binary.LittleEndian.Uint16(buf[16:])
+	return ip_str, port, nil
 }

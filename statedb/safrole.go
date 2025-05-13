@@ -78,9 +78,9 @@ func (s *SafroleState) GetSafroleBasicState() SafroleBasicState {
 	}
 }
 
-func (s *SafroleState) GetNextN2() common.Hash {
-	_, currphase := s.EpochAndPhase(uint32(s.Timeslot))
-	if currphase == types.EpochLength-1 {
+func (s *SafroleState) GetNextN2(targetJCE uint32) common.Hash {
+	epochChanged := s.EpochChanged(targetJCE)
+	if epochChanged {
 		return s.Entropy[1]
 	}
 	return s.Entropy[2]

@@ -425,20 +425,19 @@ func GetGenesisFile(network string) string {
 	return fmt.Sprintf("/chainspecs/%s-00000000.json", network)
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
-	return newNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
+func createNode(id uint16, credential types.ValidatorSecret, genesis interface{}, genesis_type string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+	return newNode(id, credential, genesis, genesis_type, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
 }
 
-func NewNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesisStateFile, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
+func NewNode(id uint16, credential types.ValidatorSecret, genesis interface{}, genesis_type string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, genesis, genesis_type, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, genesis_type string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	//log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
-
+	log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
-	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir)
+	// fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir)
 
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	store, err := storage.NewStateDBStorage(levelDBPath)
@@ -490,9 +489,41 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		WriteDebugFlag: true,
 	}
 	node.NodeContent.nodeSelf = node
-	_statedb, err := statedb.NewStateDBFromStateTransitionFile(node.store, genesisStateFile)
-	if err != nil {
-		return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
+	var _statedb *statedb.StateDB
+	switch genesis_type {
+	case "stf":
+		if s, ok := genesis.(string); ok {
+			_statedb, err = statedb.NewStateDBFromStateTransitionFile(node.store, s)
+			if err != nil {
+				return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
+			}
+		} else {
+			return nil, fmt.Errorf("NewStateDBFromStateTransition genesis is not a string")
+		}
+
+	case "chainspec":
+		if chainspec, ok := genesis.(ChainSpec); ok {
+			stateTransition := &statedb.StateTransition{}
+			stateTransition.PreState.KeyVals = chainspec.GenesisState
+			stateTransition.PreState.StateRoot = common.Hash{}
+			stateTransition.PostState.KeyVals = chainspec.GenesisState
+			stateTransition.PostState.StateRoot = common.Hash{}
+			header, _, err := types.Decode(chainspec.GenesisHeader, reflect.TypeOf(types.BlockHeader{}))
+			if err != nil {
+				return nil, fmt.Errorf("Decode genesis header Err %v", err)
+			}
+			stateTransition.Block.Header = header.(types.BlockHeader)
+			_statedb, err = statedb.NewStateDBFromStateTransition(node.store, stateTransition)
+			if err != nil {
+				return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
+			}
+
+		} else {
+			return nil, fmt.Errorf("NewStateDBFromChainSpec genesis is not a ChainSpec")
+		}
+	default:
+		return nil, fmt.Errorf("NewStateDBFromStateTransition genesis_type is not a valid input")
+
 	}
 	block := _statedb.Block
 	if block == nil {
@@ -616,7 +647,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 		NextProtos: []string{alpn},
 	}
 	node.clientTLSConfig = clientTLS
-
+	log.Info(module, "ListenAddr", "addr", addr)
 	listener, err := quic.ListenAddr(addr, tlsConfig, GenerateQuicConfig())
 	if err != nil {
 		log.Error(module, "quic.ListenAddr", "err", err)
@@ -712,8 +743,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 	} else {
 		node.AuditFlag = false
 	}
-	host_name, _ := os.Hostname()
-	if id == 0 || (len(host_name) >= 4 && host_name[:4] == "jam-") || (len(host_name) >= 4 && host_name[:4] == "dot-") {
+	// we need to organize the /ws usage to avoid conflicts
+	if node.id == 0 {
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		go node.runJamWeb(context.Background(), wg, uint16(10800)+id, port)
@@ -722,6 +753,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesisStateFile strin
 			log.Info("jamweb", "Node 0", "shutdown complete")
 		}()
 	}
+
 	node.jceMode = jceMode
 	node.runJCE()
 
@@ -1435,7 +1467,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 					buf := make([]byte, 1<<16)
 					n := runtime.Stack(buf, true)
 					// if file is not exist, create it
-					f, err := os.OpenFile("/tmp/panic.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					f, err := os.OpenFile("/tmp/panic.txt", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 					if err != nil {
 						log.Error(module, "Failed to open /tmp/panic.txt", "err", err)
 						return

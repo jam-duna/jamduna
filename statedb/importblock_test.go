@@ -7,13 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 
 	"github.com/yudai/gojsondiff"
@@ -21,59 +18,6 @@ import (
 )
 
 var update_from_git = false
-
-const (
-	colorReset = "\033[0m"
-	colorRed   = "\033[31m"
-	colorGreen = "\033[32m"
-)
-
-// printHexDiff prints two byte slices as hex, highlighting any mismatched byte in red.
-func printHexDiff(label string, exp, act []byte) {
-	// Print the “Expected” line
-	fmt.Printf("%-10s | Expected: 0x", label)
-	max := len(exp)
-	if len(act) > max {
-		max = len(act)
-	}
-	for i := 0; i < max; i++ {
-		var b byte
-		var match bool
-		if i < len(exp) {
-			b = exp[i]
-			if i < len(act) && exp[i] == act[i] {
-				match = true
-			}
-		}
-		hex := fmt.Sprintf("%02x", b)
-		if !match {
-			fmt.Print(colorRed, hex, colorReset)
-		} else {
-			fmt.Print(hex)
-		}
-	}
-	fmt.Println()
-
-	// Print the “Actual” line
-	fmt.Printf("%-10s | Actual:   0x", label)
-	for i := 0; i < max; i++ {
-		var b byte
-		var match bool
-		if i < len(act) {
-			b = act[i]
-			if i < len(exp) && exp[i] == act[i] {
-				match = true
-			}
-		}
-		hex := fmt.Sprintf("%02x", b)
-		if !match {
-			fmt.Print(colorRed, hex, colorReset)
-		} else {
-			fmt.Print(hex)
-		}
-	}
-	fmt.Println()
-}
 
 // func printColoredJSONDiff(diffStr string) {
 // 	for _, line := range strings.Split(diffStr, "\n") {
@@ -87,59 +31,6 @@ func printHexDiff(label string, exp, act []byte) {
 // 		}
 // 	}
 // }
-
-func initStorage(testDir string) (*storage.StateDBStorage, error) {
-	if _, err := os.Stat(testDir); os.IsNotExist(err) {
-		err = os.MkdirAll(testDir, os.ModePerm)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to create directory /tmp/fuzz: %v", err)
-		}
-	}
-
-	sdb_storage, err := storage.NewStateDBStorage(testDir)
-	if err != nil {
-		return nil, fmt.Errorf("Error with storage: %v", err)
-	}
-	return sdb_storage, nil
-
-}
-func SortDiffKeys(keys []string) {
-	sort.Slice(keys, func(i, j int) bool {
-		strip := func(k string) string {
-			return strings.TrimSuffix(k, "|")
-		}
-
-		ti := strip(keys[i])
-		tj := strip(keys[j])
-
-		// attempt to parse c<digits>
-		var (
-			ni, nj     int
-			errI, errJ error
-		)
-		if len(ti) > 1 && ti[0] == 'c' {
-			ni, errI = strconv.Atoi(ti[1:])
-		}
-		if len(tj) > 1 && tj[0] == 'c' {
-			nj, errJ = strconv.Atoi(tj[1:])
-		}
-
-		switch {
-		// both are c<integer>: compare numerically
-		case errI == nil && errJ == nil:
-			return ni < nj
-		// only i is c<integer>: i comes first
-		case errI == nil:
-			return true
-		// only j is c<integer>: j comes first
-		case errJ == nil:
-			return false
-		// neither: fallback to lexical on full key
-		default:
-			return keys[i] < keys[j]
-		}
-	})
-}
 
 func testSTF(t *testing.T, filename string, content string) {
 	t.Helper()
