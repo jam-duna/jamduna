@@ -2,8 +2,8 @@ OUTPUT_DIR := bin
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 SRC := jam.go
-NETWORK  ?= tiny
-net-spec_FILE ?= chainspecs/tiny-00000000.json
+net-spec_FILE ?= tiny
+#net-spec_FILE ?= chainspecs/tiny-00000000.json
 chainspec_FILE ?= chainspec.json
 NUM_NODES ?= 6
 DEFAULT_PORT ?= 40000
@@ -49,13 +49,13 @@ endif
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
 jam_with_ffi_build: ffi_force
-	@echo "Building JAM... $(NETWORK)"
+	@echo "Building JAM...  "
 	mkdir -p $(OUTPUT_DIR)
-	go build -tags="$(NETWORK) cgo" -o $(OUTPUT_DIR)/$(BINARY) .
+	go build  -tags="cgo" -o $(OUTPUT_DIR)/$(BINARY) .
 jam:
-	@echo "Building JAM... $(NETWORK)"
+	@echo "Building JAM...  "
 	mkdir -p $(OUTPUT_DIR)
-	go build -tags=$(NETWORK) -o $(OUTPUT_DIR)/$(BINARY) .
+	go build -tags=  -o $(OUTPUT_DIR)/$(BINARY) .
 
 # ANSI color codes
 GREEN=\033[0;32m
@@ -71,7 +71,7 @@ static_jam_linux_amd64:
 	@echo "Building JamDuna binary for Linux (x86_64)..."
 	$(call build_with_status,static_jam_linux_amd64,\
 	GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
-	go build -tags "$(NETWORK) cgo" \
+	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
 	-o $(OUTPUT_DIR)/jamduna-linux-amd64 . && strip $(OUTPUT_DIR)/jamduna-linux-amd64 2>/dev/null)
 
@@ -79,7 +79,7 @@ static_jam_linux_arm64:
 	@echo "Building JamDuna binary for Linux (aarch64)..."
 	$(call build_with_status,static_jam_linux_arm64,\
 	GOOS=linux GOARCH=arm64 CC=aarch64-linux-musl-gcc CGO_ENABLED=1 \
-	go build -tags "$(NETWORK) cgo" \
+	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
 	-o $(OUTPUT_DIR)/jamduna-linux-arm64 . && strip $(OUTPUT_DIR)/jamduna-linux-arm64 2>/dev/null)
 
@@ -87,7 +87,7 @@ static_jam_darwin_amd64:
 	@echo "Building JamDuna binary for macOS (x86_64)..."
 	$(call build_with_status,static_jam_darwin_amd64,\
 	GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
-	go build -tags "$(NETWORK) cgo" \
+	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
 	-o $(OUTPUT_DIR)/jamduna-mac-amd64 . && strip -x $(OUTPUT_DIR)/jamduna-mac-amd64)
 
@@ -95,7 +95,7 @@ static_jam_darwin_arm64:
 	@echo "Building JamDuna binary for macOS (aarch64)..."
 	$(call build_with_status,static_jam_darwin_arm64,\
 	CGO_ENABLED=1 CC=clang \
-	go build -tags "$(NETWORK) cgo" \
+	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
 	-o $(OUTPUT_DIR)/jamduna-mac-arm64 . && strip -x $(OUTPUT_DIR)/jamduna-mac-arm64)
 	
@@ -103,7 +103,7 @@ static_jam_windows_amd64:
 	@echo "Building JamDuna binary for Windows AMD64..."
 	$(call build_with_status,static_jam_windows_amd64,\
 	GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 \
-	go build -tags "$(NETWORK) cgo" \
+	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
 	-o $(OUTPUT_DIR)/jamduna-windows-amd64.exe . && x86_64-w64-mingw32-strip $(OUTPUT_DIR)/jamduna-windows-amd64.exe)
 
@@ -166,7 +166,7 @@ run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
 
 run_single_node:
 	@echo "Starting single node JAM instance..."
-	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_start-time)"
+	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... port $(SINGLE_NODE_PORT) start-time $(JAM_start-time)"
 	@$(OUTPUT_DIR)/$(BINARY) run --chain /home/shawn/Desktop/colorfulnotion/jam/chainspec.json --port $(SINGLE_NODE_PORT) --start-time "$(JAM_start-time)"
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
@@ -180,7 +180,7 @@ kill_parallel_jam:
 	@pkill -f "$(OUTPUT_DIR)/$(BINARY)"
 	@echo "All instances killed."
 run_jam:
-	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(DEFAULT_PORT) start-time $(JAM_start-time)"
+	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... port $(DEFAULT_PORT) start-time $(JAM_start-time)"
 	@$(OUTPUT_DIR)/$(BINARY) -net-spec $(net-spec_FILE) -port $(DEFAULT_PORT) -start-time "$(JAM_start-time)"
 	@echo "Instance started."
 
@@ -192,8 +192,8 @@ jam_set:
 build_remote_nodes:
 	@echo "Building JAM on all remote nodes..."
 	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
-	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make bandersnatchlib NETWORK=$(NETWORK)'"
-	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make blslib NETWORK=$(NETWORK)'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make bandersnatchlib'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make blslib'"
 	@echo "All remote nodes built."
 # clean the process and delete the storage
 clean_remote_nodes:
@@ -248,11 +248,11 @@ blslib:
 	@echo "All libbls.a versions prepared."
 
 bandersnatchlib:
-	@echo "Building Bandersnatch for $(NETWORK) statically for all platforms..."
+	@echo "Building Bandersnatch for   statically for all platforms..."
 	@cd bandersnatch && \
 	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
 		echo "  Building for $$TARGET..."; \
-		RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET --features "$(NETWORK)"; \
+		RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET --features " "; \
 	done
 	@mkdir -p bandersnatch/target/release
 	@cp bandersnatch/target/x86_64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.linux_amd64.a || true

@@ -2,8 +2,6 @@ package types
 
 import (
 	"time"
-
-	"github.com/colorfulnotion/jam/chainspecs/configs"
 )
 
 const (
@@ -25,23 +23,41 @@ const (
 	GFPointsPerPage           = 2052
 )
 
-// loaded via tags
+// // loaded via tags
+// const (
+// 	Network                     = configs.Network
+// 	TotalValidators             = configs.TotalValidators
+// 	TotalCores                  = configs.TotalCores
+// 	TicketEntriesPerValidator   = configs.TicketEntriesPerValidator
+// 	EpochLength                 = configs.EpochLength
+// 	TicketSubmissionEndSlot     = configs.TicketSubmissionEndSlot
+// 	MaxTicketsPerExtrinsic      = configs.MaxTicketsPerExtrinsic
+// 	MaxAuthorizationPoolItems   = configs.MaxAuthorizationPoolItems   // O = 8: The maximum number of items in the authorizations pool.
+// 	MaxAuthorizationQueueItems  = configs.MaxAuthorizationQueueItems  // Q = 80: The maximum number of items in the authorizations queue.
+// 	ValidatorCoreRotationPeriod = configs.ValidatorCoreRotationPeriod // R = 10: The rotation period of validator-core assignments, in timeslots.
+// 	SegmentSize                 = configs.SegmentSize
+// 	ECPieceSize                 = configs.ECPieceSize
+// 	NumECPiecesPerSegment       = configs.NumECPiecesPerSegment
+// 	PreimageExpiryPeriod        = configs.PreimageExpiryPeriod
+// 	RecoveryThreshold           = configs.RecoveryThreshold
+// )
+
 const (
-	Network                     = configs.Network
-	TotalValidators             = configs.TotalValidators
-	TotalCores                  = configs.TotalCores
-	TicketEntriesPerValidator   = configs.TicketEntriesPerValidator
-	EpochLength                 = configs.EpochLength
-	TicketSubmissionEndSlot     = configs.TicketSubmissionEndSlot
-	MaxTicketsPerExtrinsic      = configs.MaxTicketsPerExtrinsic
-	MaxAuthorizationPoolItems   = configs.MaxAuthorizationPoolItems   // O = 8: The maximum number of items in the authorizations pool.
-	MaxAuthorizationQueueItems  = configs.MaxAuthorizationQueueItems  // Q = 80: The maximum number of items in the authorizations queue.
-	ValidatorCoreRotationPeriod = configs.ValidatorCoreRotationPeriod // R = 10: The rotation period of validator-core assignments, in timeslots.
-	SegmentSize                 = configs.SegmentSize
-	ECPieceSize                 = configs.ECPieceSize
-	NumECPiecesPerSegment       = configs.NumECPiecesPerSegment
-	PreimageExpiryPeriod        = configs.PreimageExpiryPeriod
-	RecoveryThreshold           = configs.RecoveryThreshold
+	Network                     = "tiny"
+	TotalValidators             = 6 // V: The total number of validators.
+	TotalCores                  = 2 // C: The total number of cores.
+	RecoveryThreshold           = 2
+	TicketEntriesPerValidator   = 3  // N: The number of ticket entries per validator.
+	EpochLength                 = 12 // E: The length of an epoch in timeslots.
+	TicketSubmissionEndSlot     = 10 // Y: The number of slots into an epoch at which ticket-submission ends.
+	MaxTicketsPerExtrinsic      = 3  // K: The maximum number of tickets which may be submitted in a single extrinsic.
+	MaxAuthorizationQueueItems  = 80 // Q: The maximum number of items in the authorizations queue.
+	MaxAuthorizationPoolItems   = 8  // O: The maximum number of items in the authorizations pool.
+	ValidatorCoreRotationPeriod = 4  // R: The rotation period of validator-core assignments, in timeslots.
+	SegmentSize                 = 4104
+	ECPieceSize                 = 4
+	NumECPiecesPerSegment       = 1026
+	PreimageExpiryPeriod        = 6
 )
 
 const (

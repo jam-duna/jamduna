@@ -230,6 +230,20 @@ func DecodeJustification(compact []byte, numECPiecesPerSegment int) ([][]byte, e
 	return path, nil
 }
 
+// Stub
+func GetFilePathForNetwork(network string) string {
+	// Use environment variable JAM_PATH, but if its not set, use
+	basePath := os.Getenv("JAM_PATH")
+	if basePath == "" {
+		basePath = "/root/go/src/github.com/colorfulnotion/jam/"
+	}
+
+	// Construct the full file path using filepath package
+
+	fileName := fmt.Sprintf("%s-%08d.json", network, 0) //tiny-00000000.json
+	return filepath.Join(basePath, "chainspecs", fileName)
+}
+
 func GetFilePath(fn string) string {
 	// Use environment variable JAM_PATH, but if its not set, use
 	basePath := os.Getenv("JAM_PATH")

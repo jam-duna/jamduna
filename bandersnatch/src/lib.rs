@@ -7,20 +7,9 @@ use bandersnatch::{
     RingProofParams, Secret,
 };
 
-#[cfg(feature = "tiny")]
+
 const RING_SIZE: usize = 6;
-#[cfg(feature = "small")]
-const RING_SIZE: usize = 24;
-#[cfg(feature = "medium")]
-const RING_SIZE: usize = 48;
-#[cfg(feature = "large")]
-const RING_SIZE: usize = 96;
-#[cfg(feature = "2xlarge")]
-const RING_SIZE: usize = 384;
-#[cfg(feature = "3xlarge")]
-const RING_SIZE: usize = 576;
-#[cfg(feature = "full")]
-const RING_SIZE: usize = 1023;
+//const RING_SIZE: usize = 1023;
 
 // This is the IETF `Prove` procedure output as described in section 2.2
 // of the Bandersnatch VRFs specification

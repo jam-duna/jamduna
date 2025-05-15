@@ -13,6 +13,7 @@ import (
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/bls"
+	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
@@ -241,10 +242,40 @@ func NewBlockFromFile(blockfilename string) *types.Block {
 	return &b
 }
 
-func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, statefilename string) (statedb *StateDB, err error) {
-	fn := common.GetFilePath(statefilename)
+// NewStateDBFromEmbedded reads the state transition file and creates a new StateDB object
+func NewStateDBFromEmbedded(sdb *storage.StateDBStorage, network, format string) (*StateDB, error) {
+	rawBytes, err := chainspecs.ReadBytes(network, format)
+	if err != nil {
+		return nil, err
+	}
+
+	var stf StateTransition
+
+	switch format {
+	case "json":
+		if err := json.Unmarshal(rawBytes, &stf); err != nil {
+			log.Crit(module, "Error parsing %v-%v", "error", network, format, err)
+			return nil, fmt.Errorf("error parsing  %v-%v", network, format)
+		}
+		return NewStateDBFromStateTransition(sdb, &stf)
+	case "bin":
+		decodedStruct, _, err := types.Decode(rawBytes, reflect.TypeOf(StateTransition{}))
+		stf, ok := decodedStruct.(StateTransition)
+		if !ok || err != nil {
+			return nil, fmt.Errorf("error parsing  %v-%v", network, format)
+		}
+		return NewStateDBFromStateTransition(sdb, &stf)
+	default:
+		return nil, fmt.Errorf("unsupported format:%v-%v", network, format)
+	}
+}
+
+func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, network string) (statedb *StateDB, err error) {
+	//fn := common.GetFilePath(statefilename) // TODO: SHWAN THIS IS NOT REAL
+	fn := common.GetFilePathForNetwork(network)
 	snapshotRawBytes, err := os.ReadFile(fn)
 	if err != nil {
+		fmt.Printf("Error reading file %s: %v\n", fn, err)
 		return statedb, err
 	}
 	var statetransition StateTransition
@@ -253,6 +284,7 @@ func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, statefilenam
 		log.Crit(module, "Error unmarshalling state snapshot raw file", "error", err)
 		return statedb, err
 	}
+	fmt.Printf("StateTransition: %s\n", statetransition.String())
 	return NewStateDBFromStateTransition(sdb, &statetransition)
 }
 

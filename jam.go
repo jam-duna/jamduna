@@ -135,32 +135,36 @@ func main() {
 		Use:   "list-keys",
 		Short: "List keys for validators",
 		Run: func(cmd *cobra.Command, args []string) {
-			// List keys for validators
-			keys_path := filepath.Join(dataPath, "keys")
-			files, err := os.ReadDir(keys_path)
+			keysPath := filepath.Join(dataPath, "keys")
+			files, err := os.ReadDir(keysPath)
 			if err != nil {
-				fmt.Printf("Error reading keys directory: %s", err)
+				fmt.Printf("Error reading keys directory: %s\n", err)
 				os.Exit(1)
 			}
-			// can be improved
+
 			for _, file := range files {
-				// read the seed file
-				seed_file := filepath.Join(keys_path, file.Name())
-				seed, err := os.ReadFile(seed_file)
+				seedFile := filepath.Join(keysPath, file.Name())
+				seed, err := os.ReadFile(seedFile)
 				if err != nil {
-					fmt.Printf("Error reading seed file: %s", err)
+					fmt.Printf("Error reading seed file: %s\n", err)
 					os.Exit(1)
 				}
 				seed = seed[:32]
-				// generate the validator from the seed
+
 				validator, err := generateSelfValidatorPubKey(seed)
 				if err != nil {
-					fmt.Printf("Error generating validator from seed: %s", err)
+					fmt.Printf("Error generating validator from seed: %s\n", err)
 					os.Exit(1)
 				}
-				fmt.Printf("file %s: %v\n", file.Name(), validator.Ed25519)
+				fmt.Println("--------------------------------------------------")
+				fmt.Printf("%-14s %s\n", "file:", file.Name())
+				fmt.Printf("%-14s %x\n", "seed:", seed)
+				fmt.Printf("%-14s %v\n", "ed25519:", validator.Ed25519)
+				fmt.Printf("%-14s %s\n", "bandersnatch:", common.BytesToHexStr(validator.Bandersnatch[:]))
+				fmt.Printf("%-14s %s\n", "bls:", common.BytesToHexStr(validator.Bls[:]))
+				fmt.Printf("%-14s %s\n", "metadata:", common.BytesToHexStr(validator.Metadata[:]))
+				fmt.Printf("%-14s %s\n\n", "dns_alt_name:", node.ToSAN(validator.Ed25519[:]))
 			}
-
 		},
 	}
 
@@ -261,11 +265,12 @@ func main() {
 			now := time.Now()
 			loc := now.Location()
 			log.InitLogger(logLevel)
-			log.EnableModule(log.BlockMonitoring)
+			//log.EnableModule(log.BlockMonitoring)
 			var peers []string
 			var peerList map[uint16]*node.Peer
 			genesis_real_file = network
 			if !chainSpecFlagSet {
+				//fmt.Printf("AAAAAA")
 
 				fmt.Printf("\033[34mGetting validator port from genesis file...\033[0m\n")
 				if genesisFileSet {
@@ -282,43 +287,26 @@ func main() {
 					is_local = true
 				}
 				fmt.Printf("Validator index: %d, is local :%v \n", validatorIndex, is_local)
-				if !strings.Contains(network, "with_metadata") {
-					fmt.Printf("\033[34mGenerating validator keys...\033[0m\n")
-					validators, secrets, err = GenerateValidatorSecretSet(types.TotalValidators, false) // there is no reference data , so we generate it
-					if err != nil {
-						fmt.Printf("Error: %s", err)
-						os.Exit(0)
-					}
-					peers, peerList, err = generatePeerNetwork(validators, Port, is_local)
-					if err != nil {
-						fmt.Printf("Error generating peer network: %s", err)
-						os.Exit(1)
-					}
-					selfSecret = secrets[validatorIndex]
-
-				} else if strings.Contains(network, "with_metadata") {
-					// get the port from the metadata
-					fmt.Printf("\033[34mGetting validator port from metadata...\033[0m\n")
-					var portUint16 uint16
-					portUint16, peerList, err = getValidatorPortFromMetadata(network, validatorIndex)
-					Port = int(portUint16)
-					if err != nil {
-						fmt.Printf("Error getting validator port from metadata: %s", err)
-						os.Exit(1)
-					}
-
-					peers = make([]string, 0)
-					for _, peer := range peerList {
-						peers = append(peers, fmt.Sprintf("%v", peer.Validator.Ed25519))
-					}
-					selfSecret = CheckValidatorInfo(validatorIndex, peerList, dataPath)
+				fmt.Printf("\033[34mGenerating validator keys...\033[0m\n")
+				validators, secrets, err = GenerateValidatorSecretSet(types.TotalValidators, true) // there is no reference data , so we generate it
+				if err != nil {
+					fmt.Printf("Error: %s", err)
+					os.Exit(0)
 				}
+				peers, peerList, err = generatePeerNetwork(validators, Port, is_local)
+				if err != nil {
+					fmt.Printf("Error generating peer network: %s", err)
+					os.Exit(1)
+				}
+				selfSecret = secrets[validatorIndex]
 
 				if is_local {
 					dataPath = filepath.Join(dataPath, "jam-"+strconv.Itoa(validatorIndex))
 				}
 
 			} else { // polkajam mode
+
+				//fmt.Printf("BBBBB")
 
 				genesisType = "chainspec"
 
@@ -430,9 +418,9 @@ func main() {
 			epoch0Timestamp := statedb.NewEpoch0Timestamp("jam", start_time)
 			// Set up peers and node
 			for i := 0; i < len(peerList); i++ {
-				fmt.Printf("Peer %d: %s, key %v\n", i, peerList[uint16(i)].PeerAddr, selfSecret.Ed25519Pub)
+				//fmt.Printf("!!! Peer %d: %s, key %v\n", i, peerList[uint16(i)].PeerAddr, peerList[uint16(i)].Validator.Ed25519)
 			}
-			fmt.Printf("Validator %d: %s\n", validatorIndex, peerList[uint16(validatorIndex)].PeerAddr)
+			//fmt.Printf("Validator %d: %s\n", validatorIndex, peerList[uint16(validatorIndex)].PeerAddr)
 
 			n, err := node.NewNode(uint16(validatorIndex), selfSecret, genesis_real_file, genesisType, epoch0Timestamp, peers, peerList, dataPath, Port)
 			if err != nil {

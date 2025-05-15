@@ -372,10 +372,14 @@ When a block is authored, we take the latest block identified by some parenthash
   we update the tip
 */
 
-func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.PrivateKey) (tls.Certificate, error) {
+func ToSAN(ed25519_pub []byte) string {
 	b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
 	san := "e" + strings.ToLower(b32.EncodeToString(ed25519_pub))
+	return san
+}
 
+func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.PrivateKey) (tls.Certificate, error) {
+	san := ToSAN(ed25519_pub)
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
@@ -435,7 +439,7 @@ func NewNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 
 func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, genesis_type string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir)
+	log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir, "genesis_type", genesis_type)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	// fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir)
 
@@ -493,7 +497,8 @@ func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 	switch genesis_type {
 	case "stf":
 		if s, ok := genesis.(string); ok {
-			_statedb, err = statedb.NewStateDBFromStateTransitionFile(node.store, s)
+			fmt.Printf("[N%v] calling NewStateDBFromStateTransitionFile genesis network %s\n", id, s)
+			_statedb, err = statedb.NewStateDBFromEmbedded(node.store, s, "json")
 			if err != nil {
 				return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
 			}
@@ -775,7 +780,7 @@ func (n *Node) runJCE() {
 		log.Error(module, "runJCE", "mode", mode, "err", fmt.Errorf("unknown mode"))
 		return
 	}
-	fmt.Printf("[N%v] runJCE %v mode\n", n.id, mode)
+	//fmt.Printf("[N%v] runJCE %v mode\n", n.id, mode)
 }
 
 func GenerateQuicConfig() *quic.Config {
