@@ -15,8 +15,8 @@ type ValidatorStatisticState struct {
 	AvailabilityAssurances uint32 `json:"assurances"`      // The number of availability assurances made by the validator.
 }
 type ValidatorStatistics struct {
-	Current           [TotalValidators]ValidatorStatisticState `json:"vals_current"`
-	Last              [TotalValidators]ValidatorStatisticState `json:"vals_last"`
+	Current           [TotalValidators]ValidatorStatisticState `json:"vals_curr_stats"`
+	Last              [TotalValidators]ValidatorStatisticState `json:"vals_last_stats"`
 	CoreStatistics    [TotalCores]CoreStatistics               `json:"cores"`
 	ServiceStatistics map[uint32]ServiceStatistics             `json:"services"`
 }
@@ -48,10 +48,10 @@ func (s *ServiceStatisticsKeyPairs) Sort() {
 }
 
 type TrueStatistics struct {
-	Current        [TotalValidators]ValidatorStatisticState `json:"vals_current"`
-	Last           [TotalValidators]ValidatorStatisticState `json:"vals_last"`
+	Current        [TotalValidators]ValidatorStatisticState `json:"vals_curr_stats"`
+	Last           [TotalValidators]ValidatorStatisticState `json:"vals_last_stats"`
 	CoreStatistics [TotalCores]CoreStatistics               `json:"cores"`
-	ServiceStatics ServiceStatisticsKeyPairs                `json:"services"`
+	ServiceStatics ServiceStatisticsKeyPairs                `json:"services,omitempty"`
 }
 
 // GP 6.4 Eq 13.6

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -16,10 +17,13 @@ type transferStatistics struct {
 	numTransfers uint
 }
 
-func (n *JamState) tallyCoreStatistics(guarantees []types.Guarantee, newlyAvailable []types.WorkReport, assurances []types.Assurance) {
+func (n *JamState) tallyCoreStatistics(guarantees []types.Guarantee, newlyAvailable []types.WorkReport, assurances []types.Assurance) error {
 	n.ValidatorStatistics.CoreStatistics = [types.TotalCores]types.CoreStatistics{}
 	for _, guarantee := range guarantees { // w - R(..)
 		g := guarantee.Report
+		if g.CoreIndex >= types.TotalCores {
+			return jamerrors.ErrGBadCoreIndex
+		}
 		cs := &(n.ValidatorStatistics.CoreStatistics[g.CoreIndex])
 		for _, v := range g.Results {
 			cs.GasUsed += v.GasUsed                         //u
@@ -44,7 +48,7 @@ func (n *JamState) tallyCoreStatistics(guarantees []types.Guarantee, newlyAvaila
 			}
 		}
 	}
-	return
+	return nil
 }
 
 func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimages []types.Preimages, accumulateStats map[uint32]*accumulateStatistics, transferStats map[uint32]*transferStatistics) {

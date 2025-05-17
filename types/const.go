@@ -43,9 +43,9 @@ const (
 // )
 
 const (
-	Network                     = "tiny"
-	TotalValidators             = 6 // V: The total number of validators.
-	TotalCores                  = 2 // C: The total number of cores.
+	Network                     = "jamduna" // "dev" (polkajam) or "jamduna"
+	TotalValidators             = 6         // V: The total number of validators.
+	TotalCores                  = 2         // C: The total number of cores.
 	RecoveryThreshold           = 2
 	TicketEntriesPerValidator   = 3  // N: The number of ticket entries per validator.
 	EpochLength                 = 12 // E: The length of an epoch in timeslots.

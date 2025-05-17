@@ -336,14 +336,14 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 
 func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok bool, preimage []byte) {
 	preimageObj, ok := s.Preimage[blobHash]
-	if preimageObj.Deleted {
-		return false, nil
-	}
 	if !ok {
 		var err error
 		preimage, ok, err = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
 		if err != nil || !ok {
 			return false, preimage
+		}
+		if s.Preimage == nil {
+			s.Preimage = make(map[common.Hash]PreimageObject)
 		}
 		s.Preimage[blobHash] = PreimageObject{
 			Accessed: true,
@@ -351,6 +351,9 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 			Preimage: preimage,
 		}
 		return true, preimage
+	}
+	if preimageObj.Deleted {
+		return false, nil
 	}
 	return true, preimageObj.Preimage
 }

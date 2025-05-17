@@ -126,7 +126,7 @@ Node -> Node
 	}
 */
 
-func (n *Node) GetBlockAnnouncementBytes(block types.Block) ([]byte, error) {
+func (n *Node) GetJAMSNPBlockAnnouncementFromHeader(header types.BlockHeader) (JAMSNP_BlockAnnounce, error) {
 	finalized := n.GetLatestFinalizedBlock()
 	var finalized_block JAMSNP_BlockInfo
 	if n.block_tree == nil {
@@ -136,16 +136,11 @@ func (n *Node) GetBlockAnnouncementBytes(block types.Block) ([]byte, error) {
 		finalized_block.HeaderHash = finalized.Header.Hash()
 		finalized_block.Slot = finalized.Header.Slot
 	}
-
 	block_announcement := JAMSNP_BlockAnnounce{
-		Header:         block.Header,
+		Header:         header,
 		FinalizedBlock: finalized_block,
 	}
-	block_announcement_bytes := block_announcement.ToBytes()
-	if block_announcement_bytes == nil {
-		return nil, fmt.Errorf("block_announcement_bytes is nil")
-	}
-	return block_announcement_bytes, nil
+	return block_announcement, nil
 }
 
 // this function is called by the node to send a block announcement to a peer
@@ -158,14 +153,21 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 	var err error
 	if conn == nil {
 		p.conn, err = quic.DialAddr(ctx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
+
 		log.Trace(debugBlock, "Dial From Up0", "peer", p.PeerID, "err", err)
+		if p.conn != nil {
+			negotiatedProto := p.conn.ConnectionState().TLS.NegotiatedProtocol
+			log.Trace(debugStream, "Client connected", "protocol", negotiatedProto)
+		}
 		if err != nil {
+			log.Error(module, "GetOrInitBlockAnnouncementStream", "err", err)
 			n.UP0_streamMu.Lock()
 			delete(n.UP0_stream, uint16(p.PeerID))
 			n.UP0_streamMu.Unlock()
 			return nil, fmt.Errorf("peer %d connection is nil", p.PeerID)
 		} else {
 			conn = p.conn
+			go p.node.nodeSelf.handleConnection(conn)
 		}
 	}
 	validator_index := p.PeerID
@@ -349,22 +351,21 @@ func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 	ctx := context.Background()
 
 	for {
-		raw, err := receiveQuicBytes(ctx, stream, n.id, code)
+		raw, err := receiveQuicBytes(ctx, stream, peerID, code)
 		if err != nil {
-			log.Trace(module, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
+			log.Error(module, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
 			return
 		}
 
 		var ann JAMSNP_BlockAnnounce
 		if err := ann.FromBytes(raw); err != nil {
-			log.Trace(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
+			log.Error(module, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
 			return
 		}
 
 		h := ann.Header.Hash()
 		//log.Info(module, "runBlockAnnouncement received", "peerID", peerID, "slot", ann.Header.Slot, "h", h)
 		n.peersInfo[peerID].AddKnownHash(h)
-		go n.broadcast(ctx, ann)
 
 		if _, exists := n.block_tree.GetBlockNode(h); exists {
 			continue

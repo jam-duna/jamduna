@@ -161,7 +161,7 @@ func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx u
 	return boundaryNode, keyvalues, true, nil
 }
 
-func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement JAMSNP_BlockAnnounce) ([]types.Block, error) {
+func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncement JAMSNP_BlockAnnounce) ([]types.Block, error) {
 	if n.store.SendTrace {
 		tracer := n.store.Tp.Tracer("NodeTracer")
 		traceCtx, span := tracer.Start(ctx, fmt.Sprintf("[N%d] processBlockAnnouncement", n.store.NodeID))
@@ -170,7 +170,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		ctx = traceCtx // Use the span context for everything that follows
 	}
 
-	validatorIndex := blockAnnouncement.Header.AuthorIndex
+	validatorIndex := np_blockAnnouncement.Header.AuthorIndex
 	p, ok := n.peersInfo[validatorIndex]
 	if !ok {
 		err := fmt.Errorf("invalid validator index %d", validatorIndex)
@@ -178,8 +178,8 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 		return nil, err
 	}
 
-	headerHash := blockAnnouncement.Header.HeaderHash()
-	parentHash := blockAnnouncement.Header.ParentHeaderHash
+	headerHash := np_blockAnnouncement.Header.HeaderHash()
+	parentHash := np_blockAnnouncement.Header.ParentHeaderHash
 	latst_finalized_block := n.block_tree.GetLastFinalizedBlock()
 	last_finalized_block_header_hash := latst_finalized_block.Block.Header.Hash()
 
@@ -197,8 +197,8 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 	} else {
 		finalized_block := n.block_tree.GetLastFinalizedBlock()
 		finalized_block_slot := finalized_block.Block.Header.Slot
-		if finalized_block_slot < blockAnnouncement.Header.Slot {
-			num = blockAnnouncement.Header.Slot - finalized_block_slot
+		if finalized_block_slot < np_blockAnnouncement.Header.Slot {
+			num = np_blockAnnouncement.Header.Slot - finalized_block_slot
 			mode = MiddleBlocksMode
 		} else {
 			return nil, errors.New("block announcement is too old")
@@ -276,27 +276,9 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, blockAnnouncement J
 			return nil, err
 		}
 	}
-	for _, peer := range n.peersInfo {
-		go func(peer *Peer) {
-			if peer.PeerID == n.id {
-				return
-			}
-			peer_id := peer.PeerID
-			if !n.ba_checker.CheckAndSet(headerHash, peer_id) {
-				up0_stream, err := peer.GetOrInitBlockAnnouncementStream(context.Background())
-				if err != nil {
-					log.Trace(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.PeerID, "err", err)
-					return
-				}
-				block_a_bytes := blockAnnouncement.ToBytes()
+	log.Debug(debugStream, "Broadcast blockAnnouncement", "n", n.String(), "blockHash", headerHash)
 
-				err = sendQuicBytes(context.Background(), up0_stream, block_a_bytes, peer_id, CE128_BlockRequest)
-				if err != nil {
-					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes (whisper)", "n", n.String(), "err", err)
-				}
-			}
-		}(peer)
-	}
+	n.broadcast(context.Background(), np_blockAnnouncement)
 	return blocksRaw, nil
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"testing"
 
+	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 
@@ -119,11 +120,14 @@ func GenerateRandomBasePort() uint16 {
 }
 
 func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) {
-	network := types.Network
-	GenesisStateFile := GetGenesisFile(network)
+	chainSpec, err := chainspecs.ReadSpec(types.Network)
+	if err != nil {
+		panic(err)
+	}
+
 	log.InitLogger("debug")
 
-	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(network, basePort)
+	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(types.Network, basePort)
 
 	if err != nil {
 		return nil, err
@@ -131,7 +135,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		node, err := newNode(uint16(i), validatorSecrets[i], GenesisStateFile, "stf", epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
+		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
 			return nil, err
 		}
@@ -251,6 +255,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 		fmt.Printf("jamtest: %s-node\n", jam)
 		basePort := GenerateRandomBasePort()
+		basePort = 40000
 
 		JCEMode := JCEDefault
 		if *jce_manual {

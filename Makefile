@@ -4,7 +4,7 @@ UNAME_M := $(shell uname -m)
 SRC := jam.go
 net-spec_FILE ?= tiny
 #net-spec_FILE ?= chainspecs/tiny-00000000.json
-chainspec_FILE ?= chainspec.json
+CHAINSPEC ?= dev
 NUM_NODES ?= 6
 DEFAULT_PORT ?= 40000
 SINGLE_NODE_PORT ?= 40005
@@ -98,7 +98,7 @@ static_jam_darwin_arm64:
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
 	-o $(OUTPUT_DIR)/jamduna-mac-arm64 . && strip -x $(OUTPUT_DIR)/jamduna-mac-arm64)
-	
+
 static_jam_windows_amd64:
 	@echo "Building JamDuna binary for Windows AMD64..."
 	$(call build_with_status,static_jam_windows_amd64,\
@@ -134,9 +134,9 @@ static_jam_all:
 	else \
 	  echo "⚠ Skipping Windows AMD64 (no x86_64-w64-mingw32-gcc)"; \
 	fi
-	
+
 tiny: jam reset_remote_nodes
-	ansible-playbook -u root -i $(HOSTS_FILE) -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml 
+	ansible-playbook -u root -i $(HOSTS_FILE) -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml
 
 jam_clean:
 	@echo "Cleaning all jam data directories under ~/.jam..."
@@ -151,8 +151,7 @@ run_parallel_jam:
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
 		$(OUTPUT_DIR)/$(BINARY) run \
-			--net-spec "$(net-spec_FILE)" \
-			--port $$PORT \
+			--chain $(CHAINSPEC) \
 			--dev-validator $$V_IDX \
 			--start-time "$(JAM_start-time)" & \
 	done; \
@@ -164,15 +163,15 @@ run_parallel_jam:
 run_localclient_jam: jam_clean run_parallel_jam
 run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
 
-run_single_node:
+run_single_node:jam_clean
 	@echo "Starting single node JAM instance..."
-	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... port $(SINGLE_NODE_PORT) start-time $(JAM_start-time)"
-	@$(OUTPUT_DIR)/$(BINARY) run --chain /home/shawn/Desktop/colorfulnotion/jam/chainspec.json --port $(SINGLE_NODE_PORT) --start-time "$(JAM_start-time)"
+	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_start-time)"
+	@$(OUTPUT_DIR)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM_start-time)" --dev-validator 5
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
-	@mkdir -p logs 
+	@mkdir -p logs
 	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY)..."
-	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); $(OUTPUT_DIR)/$(BINARY) -net-spec $(net-spec_FILE) -port $$PORT -start-time "$(JAM_start-time)"; echo "Instance {} finished with port $$PORT"' sh
+	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); $(OUTPUT_DIR)/$(BINARY) run  --chain $(CHAINSPEC) --dev-validator {}; echo "Instance {} finished with port $$PORT"' sh
 	@echo "All instances started."
 kill_parallel_jam:
 	@echo "Killing all instances of $(OUTPUT_DIR)/$(BINARY)..."
@@ -211,7 +210,7 @@ reset_remote_nodes:
 da:
 	@echo "Building JAM..."
 	mkdir -p $(OUTPUT_DIR)
-	go build -o $(OUTPUT_DIR)/da da.go 
+	go build -o $(OUTPUT_DIR)/da da.go
 jamweb:
 		@echo "Building JAM WEB..."
 		@cd jamweb && go build
@@ -274,7 +273,7 @@ cargo_clean:
 ffi_force: cargo_clean ffi
 
 # Target to build both BLS and Bandersnatch FFI libraries
-ffi: bandersnatchlib blslib  
+ffi: bandersnatchlib blslib
 	@echo "Built all FFI libraries (BLS + Bandersnatch)!"
 
 beauty:
@@ -332,5 +331,3 @@ jamx_start:
 jamx_stop:
 	ansible-playbook -u root -i $(HOSTS_FILE)  yaml/jam_stop.yaml
 	@echo "stop on jam instances"
-
-

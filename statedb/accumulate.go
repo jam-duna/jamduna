@@ -351,15 +351,19 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 				Commitment: B,
 			})
 		}
-		for s, sa := range XY.U.D {
-			if exceptional {
-				if sa.Checkpointed {
-					sa.Dirty = true
-					o.D[s] = sa
+		if XY.U != nil {
+			if XY.U.D != nil {
+				for s, sa := range XY.U.D {
+					if exceptional {
+						if sa.Checkpointed {
+							sa.Dirty = true
+							o.D[s] = sa
+						}
+					} else {
+						sa.Dirty = true
+						o.D[s] = sa
+					}
 				}
-			} else {
-				sa.Dirty = true
-				o.D[s] = sa
 			}
 		}
 		// ASSIGN
@@ -515,9 +519,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		}
 	}
 
-	// this is immutable going into NewXContext
-
-	// solution:
 	//  get serviceAccount from U.D[s] FIRST
 	var err error
 	serviceAccount, ok := o.GetService(s)
@@ -529,9 +530,12 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		}
 	}
 	xContext := sd.NewXContext(o, s, serviceAccount)
+
+	xy = xContext // if code does not exist, fallback to this
 	ok, code := serviceAccount.ReadPreimage(codeHash, sd)
 	if !ok {
-		panic("Could not read blob")
+		// CHECK
+		return
 	}
 
 	//(B.8) start point

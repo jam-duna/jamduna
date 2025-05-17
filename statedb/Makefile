@@ -24,8 +24,8 @@ STATEDB_DIR      := ../statedb
 
 safrole:
 	@echo "Running 'TestSafroleVerify' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
-	@echo "Building bandersnatch with cargo --features '$(NETWORK)'"
-	@cd $(BANDERSNATCH_DIR) && cargo build --quiet --release --features "$(NETWORK)"
+#	@echo "Building bandersnatch with cargo --features '$(NETWORK)'"
+#	@cd $(BANDERSNATCH_DIR) && cargo build --quiet --release --features "$(NETWORK)"
 
 	@echo "Now running Go tests in statedb with '-tags $(NETWORK)'"
 	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "TestSafroleVerify" -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)

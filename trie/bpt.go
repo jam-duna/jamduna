@@ -995,7 +995,7 @@ func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
 
 // Insert fixed-length hashed key with value for the BPT
 func (t *MerkleTree) Insert(key31 []byte, value []byte) {
-	key := make([]byte, 32);
+	key := make([]byte, 32)
 	copy(key[:], key31[:])
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {

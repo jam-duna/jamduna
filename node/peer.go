@@ -119,10 +119,15 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 			defer cancel()
 		}
 
-		p.conn, err = quic.DialAddr(dialCtx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
+		conn, err := quic.DialAddr(dialCtx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
 		if err != nil {
-			log.Error(module, "DialAddr failed", "node", p.node.id, "peerID", p.PeerID, "err", err)
+			if err.Error() != "Context cancelled" {
+				log.Error(module, "DialAddr failed", "node", p.node.id, "peerID", p.PeerID, "err", err)
+			}
 			return nil, fmt.Errorf("[P%d] DialAddr failed: %w", p.PeerID, err)
+		} else {
+			go p.node.nodeSelf.handleConnection(conn)
+			p.conn = conn
 		}
 	}
 
@@ -207,6 +212,7 @@ func receiveMultiple(ctx context.Context, stream quic.Stream, count int, peerID 
 		default:
 			data, err := receiveQuicBytes(ctx, stream, peerID, code)
 			if err != nil {
+				log.Warn(module, "receiveMultiple", "peerID", peerID, "err", err, "code", code)
 				return nil, fmt.Errorf("receiveQuicBytes[%d/%d]: %w", i+1, count, err)
 			}
 			results = append(results, data)
@@ -223,7 +229,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 	if useQuicDeadline {
 		if deadline, ok := ctx.Deadline(); ok {
 			if err := stream.SetReadDeadline(deadline); err != nil {
-				log.Trace(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				log.Error(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
 				return nil, err
 			}
 		}
@@ -231,17 +237,17 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 
 	// Read length prefix
 	if _, err := io.ReadFull(stream, lengthPrefix[:]); err != nil {
-		log.Trace(module, "receiveQuicBytes-length prefix", "peerID", peerID, "err", err, "code", code)
+		log.Error(module, "receiveQuicBytes-length prefix", "peerID", peerID, "err", err, "code", code)
 		return nil, err
 	}
 	msgLen := binary.LittleEndian.Uint32(lengthPrefix[:])
 	buf := make([]byte, msgLen)
 
-	/*  do we really need to do this AGAIN?? */
+	/*  do we really need to do this AGA IN?? */
 	if useQuicDeadline {
 		if deadline, ok := ctx.Deadline(); ok {
 			if err := stream.SetReadDeadline(deadline); err != nil {
-				log.Trace(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				log.Error(module, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
 				return nil, err
 			}
 		}
@@ -249,7 +255,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 
 	// Read message body
 	if _, err := io.ReadFull(stream, buf); err != nil {
-		log.Trace(module, "receiveQuicBytes-message body", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
+		log.Error(module, "receiveQuicBytes-message body", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
 		return nil, err
 	}
 

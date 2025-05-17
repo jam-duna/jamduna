@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
-	"net"
 	"reflect"
 	"runtime"
 	"runtime/pprof"
@@ -12,6 +11,7 @@ import (
 
 	"fmt"
 
+	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
@@ -53,8 +53,8 @@ func main() {
 		validatorIndex int
 		network        string
 		start_time     string
-		GenesisState   string
-		logLevel       string
+
+		logLevel string
 
 		// run flags that is not supported yet
 		pvmBackend  string
@@ -67,16 +67,11 @@ func main() {
 
 		// run variables
 		validatorIndexFlagSet bool
-		chainSpecFlagSet      bool
-		genesisFileSet        bool
 		start_timeFlagSet     bool
 
 		//run-stf flags
 		stfFile    string
 		outputFile string
-
-		genesisType       = "stf"
-		genesis_real_file interface{}
 	)
 
 	var (
@@ -163,7 +158,7 @@ func main() {
 				fmt.Printf("%-14s %s\n", "bandersnatch:", common.BytesToHexStr(validator.Bandersnatch[:]))
 				fmt.Printf("%-14s %s\n", "bls:", common.BytesToHexStr(validator.Bls[:]))
 				fmt.Printf("%-14s %s\n", "metadata:", common.BytesToHexStr(validator.Metadata[:]))
-				fmt.Printf("%-14s %s\n\n", "dns_alt_name:", node.ToSAN(validator.Ed25519[:]))
+				fmt.Printf("%-14s %s\n\n", "dns_alt_name:", common.ToSAN(validator.Ed25519[:]))
 			}
 		},
 	}
@@ -204,14 +199,45 @@ func main() {
 		},
 	}
 	// test-refine flag used
-
+	// test case : ./jam gen-spec chainspecs.json jamduna-spec.json
 	var genSpecCmd = &cobra.Command{
-		Use:   "gen-spec",
+		Use:   "gen-spec <input.json> <output.json>",
 		Short: "Generate new chain spec from the spec config",
+		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-			// Generate new chain spec from the spec config
-			fmt.Printf("not implemented yet")
-			os.Exit(1)
+			inputFile := args[0]
+			outputFile := args[1]
+
+			data, err := os.ReadFile(inputFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to read input file: %v\n", err)
+				os.Exit(1)
+			}
+
+			var devCfg chainspecs.DevConfig
+			if err := json.Unmarshal(data, &devCfg); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to unmarshal input JSON: %v\n", err)
+				os.Exit(1)
+			}
+
+			chainSpec, err := chainspecs.GenSpec(devCfg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to generate spec: %v\n", err)
+				os.Exit(1)
+			}
+
+			outBytes, err := json.MarshalIndent(chainSpec, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to marshal output JSON: %v\n", err)
+				os.Exit(1)
+			}
+
+			if err := os.WriteFile(outputFile, outBytes, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to write output file: %v\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Printf("Chain spec written to %s\n", outputFile)
 		},
 	}
 	// gen-spec flag used
@@ -224,12 +250,6 @@ func main() {
 
 			if cmd.Flags().Changed(validatorIndexFlag) {
 				validatorIndexFlagSet = true
-			}
-			if cmd.Flags().Changed(networkFlag) {
-				genesisFileSet = true
-			}
-			if cmd.Flags().Changed(chainSpecFlag) {
-				chainSpecFlagSet = true
 			}
 			if cmd.Flags().Changed(startTimeFlag) {
 				start_timeFlagSet = true
@@ -246,20 +266,15 @@ func main() {
 			if cmd.Flags().Changed(RPCPortFlag) {
 				node.WSPort = RPCPort
 			}
-			// check if the flags is invalid or not
-			if chainSpecFlagSet && genesisFileSet {
-				fmt.Println("Error: --chain and --net_spec cannot be used together.")
-				os.Exit(1)
-			}
 			// print all the flags values
 			// use yellow color
 
 			fmt.Printf("Running JAM DUNA node with the following flags:\n")
-			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, network: %s, chainSpec: %s, logLevel: %s, start_time: %s, GenesisState: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, network, chainSpec, logLevel, start_time, GenesisState)
+			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, network: %s, chainSpec: %s, logLevel: %s, start_time: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, network, chainSpec, logLevel, start_time)
 
 			var err error
 			var validators []types.Validator
-			var secrets []types.ValidatorSecret
+
 			var selfSecret types.ValidatorSecret
 			// Run the JAM DUNA node
 			now := time.Now()
@@ -268,118 +283,39 @@ func main() {
 			//log.EnableModule(log.BlockMonitoring)
 			var peers []string
 			var peerList map[uint16]*node.Peer
-			genesis_real_file = network
-			if !chainSpecFlagSet {
-				//fmt.Printf("AAAAAA")
 
-				fmt.Printf("\033[34mGetting validator port from genesis file...\033[0m\n")
-				if genesisFileSet {
-					fmt.Printf("Using genesis file: %s\n", network)
-				} else {
-					fmt.Printf("Using default genesis file: %s\n", network)
-				}
-				GenesisState = node.GetGenesisFile(network)
-
-				is_local := false
-				if !strings.Contains(network, "with_metadata") && network != "" && chainSpec == "" {
-					validatorIndex, is_local = setUserPort(Port)
-				} else {
-					is_local = true
-				}
-				fmt.Printf("Validator index: %d, is local :%v \n", validatorIndex, is_local)
-				fmt.Printf("\033[34mGenerating validator keys...\033[0m\n")
-				validators, secrets, err = GenerateValidatorSecretSet(types.TotalValidators, true) // there is no reference data , so we generate it
-				if err != nil {
-					fmt.Printf("Error: %s", err)
-					os.Exit(0)
-				}
-				peers, peerList, err = generatePeerNetwork(validators, Port, is_local)
-				if err != nil {
-					fmt.Printf("Error generating peer network: %s", err)
-					os.Exit(1)
-				}
-				selfSecret = secrets[validatorIndex]
-
-				if is_local {
-					dataPath = filepath.Join(dataPath, "jam-"+strconv.Itoa(validatorIndex))
-				}
-
-			} else { // polkajam mode
-
-				//fmt.Printf("BBBBB")
-
-				genesisType = "chainspec"
-
-				fmt.Printf("\033[34mGetting validator port from chainSpec...\033[0m\n")
-				// get peers from chainSpec json file
-				chainSpecJsonFile, err := os.Open(chainSpec)
-				if err != nil {
-					fmt.Printf("Error opening chainSpec json file: %s", err)
-					os.Exit(1)
-				}
-				defer chainSpecJsonFile.Close()
-				// unmarshal the json file
-
-				peerList = make(map[uint16]*node.Peer)
-				peers = make([]string, 0)
-				var chainSpecData node.ChainSpec
-				err = json.NewDecoder(chainSpecJsonFile).Decode(&chainSpecData)
-				if err != nil {
-					fmt.Printf("Error decoding chainSpec json file: %s", err)
-					os.Exit(1)
-				}
-				genesis_real_file = chainSpecData
-				validators, err = getValidatorFromChainSpec(chainSpecData)
-				for i, bootnode := range chainSpecData.Bootnodes {
-					parts := strings.Split(bootnode, "@")
-					if len(parts) != 2 {
-						log.Crit("invalid bootnode format", "bootnode", bootnode)
-					}
-					peerID := parts[0]
-					addr := parts[1] // e.g. 127.0.0.1:40000
-
-					ip, portStr, err := net.SplitHostPort(addr)
-					if err != nil {
-						log.Crit("invalid addr", "addr", addr, "err", err)
-					}
-
-					fmt.Printf("parsed peerID=%s, ip=%s, port=%s\n", peerID, ip, portStr)
-
-					peerList[uint16(i)] = &node.Peer{
-						PeerID:    uint16(i),
-						PeerAddr:  addr,
-						Validator: validators[i],
-					}
-				}
-				if err != nil {
-					fmt.Printf("Error unmarshalling chainSpec json file: %s", err)
-					os.Exit(1)
-				}
-				selfSecret = CheckValidatorInfo(validatorIndex, peerList, dataPath)
-				for _, peer := range peerList {
-					peers = append(peers, fmt.Sprintf("%v", peer.Validator.Ed25519))
-				}
-				if validatorIndexFlagSet {
-					self_peer := peerList[uint16(validatorIndex)]
-					//get the port from the address
-					fmt.Printf("setting validatorIndex %d to %s\n", validatorIndex, self_peer.PeerAddr)
-					_, portStr, err := net.SplitHostPort(self_peer.PeerAddr)
-					if err != nil {
-						fmt.Printf("Error converting peer address to port: %s", err)
-						os.Exit(1)
-					}
-					//stoi the port
-					Port, err = strconv.Atoi(portStr)
-					if err != nil {
-						fmt.Printf("Error converting peer address to port: %s", err)
-						os.Exit(1)
-					}
-					fmt.Printf("Port from chainSpec: %d\n", Port)
-				}
-				dataPath = filepath.Join(dataPath, "jam-"+strconv.Itoa(validatorIndex))
+			fmt.Printf("\033[34mGetting validator port from chainSpec...\033[0m\n")
+			chainSpecData, err := chainspecs.ReadSpec(chainSpec)
+			if err != nil {
+				fmt.Printf("ReadSpec ERR %s", err)
+				os.Exit(1)
 			}
+			peerList = make(map[uint16]*node.Peer)
 
-			// to make sure our genesis timestamp is not too far from javajam setup
+			validators, err = getValidatorFromChainSpec(*chainSpecData)
+			if err != nil {
+				fmt.Printf("getValidatorFromChainSpec ERR %s", err)
+				os.Exit(1)
+			}
+			for i, v := range validators {
+				peerList[uint16(i)] = &node.Peer{
+					PeerID:    uint16(i),
+					PeerAddr:  fmt.Sprintf("127.0.0.1:%d", 40000+i), // TODO: use the metadata instead, do not use bootnodes
+					Validator: v,
+				}
+			}
+			peers = make([]string, 0)
+			selfSecret = CheckValidatorInfo(validatorIndex, peerList, dataPath)
+			for _, peer := range peerList {
+				peers = append(peers, fmt.Sprintf("%v", peer.Validator.Ed25519))
+			}
+			if validatorIndexFlagSet {
+				Port = 40000 + validatorIndex // fix later with a good metadata abstraction that works
+				fmt.Printf("Port from chainSpec: %d\n", Port)
+			}
+			dataPath = filepath.Join(dataPath, "jam-"+strconv.Itoa(validatorIndex))
+
+			// to make sure our genesis timestamp is not too far from polkajam+javajam setup
 			if start_timeFlagSet {
 				for len(start_time) > 0 && (start_time[0] < '0' || start_time[0] > '9') {
 					start_time = start_time[1:]
@@ -416,13 +352,8 @@ func main() {
 				}
 			}
 			epoch0Timestamp := statedb.NewEpoch0Timestamp("jam", start_time)
-			// Set up peers and node
-			for i := 0; i < len(peerList); i++ {
-				//fmt.Printf("!!! Peer %d: %s, key %v\n", i, peerList[uint16(i)].PeerAddr, peerList[uint16(i)].Validator.Ed25519)
-			}
-			//fmt.Printf("Validator %d: %s\n", validatorIndex, peerList[uint16(validatorIndex)].PeerAddr)
 
-			n, err := node.NewNode(uint16(validatorIndex), selfSecret, genesis_real_file, genesisType, epoch0Timestamp, peers, peerList, dataPath, Port)
+			n, err := node.NewNode(uint16(validatorIndex), selfSecret, chainSpecData, epoch0Timestamp, peers, peerList, dataPath, Port)
 			if err != nil {
 				fmt.Printf("New Node Err:%s", err.Error())
 				os.Exit(1)
@@ -430,20 +361,17 @@ func main() {
 			n.SetServiceDir("/services")
 			n.WriteDebugFlag = false
 			storage, err := n.GetStorage()
-			defer storage.Close()
 			if err != nil {
 				fmt.Printf("GetStorage Err:%s", err.Error())
 				os.Exit(1)
 			}
+			defer storage.Close()
 			fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v\n", validatorIndex, selfSecret.Ed25519Pub, Port, time.Now().String(), n.GetBuild())
 			StartRuntimeMonitor(30 * time.Second)
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-
-				}
+			for range ticker.C {
+				// just do nothing ...
 			}
 		},
 	}
@@ -497,12 +425,19 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 	seedFile := filepath.Join(dataPath, fmt.Sprintf("seed_%d", validatorIndex))
 	seed, err := os.ReadFile(seedFile)
 	if err != nil {
-		fmt.Printf("Error reading seed file: %s", err)
+		fmt.Printf("Error reading seed file: %s %v", seedFile, err)
 		os.Exit(1)
 	}
 	seed = seed[:32]
 	// generate the validator from the seed
 	selfSecrets, err := statedb.InitValidatorSecret(seed, seed, seed, "")
+	if err != nil {
+		fmt.Printf("CheckValidatorInfo err %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("validatorIndex %d out of %d peers\n", validatorIndex, len(peerList))
+
 	if selfSecrets.BandersnatchPub != peerList[uint16(validatorIndex)].Validator.Bandersnatch {
 		fmt.Printf("Error: seed file does not match the metadata. %s", err)
 		os.Exit(1)
@@ -510,36 +445,6 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 	return selfSecrets
 }
 
-func generatePeerNetwork(validators []types.Validator, port int, local bool) (peers []string, peerList map[uint16]*node.Peer, err error) {
-	peerList = make(map[uint16]*node.Peer)
-	if local {
-		for i := uint16(0); i < types.TotalValidators; i++ {
-			v := validators[i]
-			baseport := node.GetJAMNetworkPort()
-			peerAddr := fmt.Sprintf("127.0.0.1:%d", baseport+int(i))
-			peer := fmt.Sprintf("%s", v.Ed25519)
-			peers = append(peers, peer)
-			peerList[i] = &node.Peer{
-				PeerID:    i,
-				PeerAddr:  peerAddr,
-				Validator: v,
-			}
-		}
-	} else {
-		for i := uint16(0); i < types.TotalValidators; i++ {
-			v := validators[i]
-			peerAddr := fmt.Sprintf("%s-%d.jamduna.org:%d", node.GetJAMNetwork(), i, port)
-			peer := fmt.Sprintf("%s", v.Ed25519)
-			peers = append(peers, peer)
-			peerList[i] = &node.Peer{
-				PeerID:    i,
-				PeerAddr:  peerAddr,
-				Validator: v,
-			}
-		}
-	}
-	return peers, peerList, nil
-}
 func GenerateValidatorSecretSet(numNodes int, save bool, dataDir ...string) ([]types.Validator, []types.ValidatorSecret, error) {
 
 	seeds, _ := generateSeedSet(numNodes)
@@ -554,7 +459,7 @@ func GenerateValidatorSecretSet(numNodes int, save bool, dataDir ...string) ([]t
 			keyDir = filepath.Join(keyDir, "keys") // store the keys in a subdir
 			// if there is no seed file, create it
 			if err := os.MkdirAll(keyDir, 0700); err != nil {
-				return validators, validatorSecrets, fmt.Errorf("Failed to create keys directory %s: %v", dataDir, err)
+				return validators, validatorSecrets, fmt.Errorf("failed to create keys directory %s: %v", dataDir, err)
 			}
 			if save {
 				seedFile := filepath.Join(keyDir, fmt.Sprintf("seed_%d", i))
@@ -563,12 +468,12 @@ func GenerateValidatorSecretSet(numNodes int, save bool, dataDir ...string) ([]t
 					// create the file
 					f, err := os.Create(seedFile)
 					if err != nil {
-						return validators, validatorSecrets, fmt.Errorf("Failed to create seed file %s", seedFile)
+						return validators, validatorSecrets, fmt.Errorf("failed to create seed file %s", seedFile)
 					}
 					// write the seed to the file
 					_, err = f.Write(seed_i)
 					if err != nil {
-						return validators, validatorSecrets, fmt.Errorf("Failed to write seed to file %s", seedFile)
+						return validators, validatorSecrets, fmt.Errorf("failed to write seed to file %s", seedFile)
 					}
 					fmt.Printf("Seed file %s created\n", seedFile)
 					f.Close()
@@ -585,51 +490,25 @@ func GenerateValidatorSecretSet(numNodes int, save bool, dataDir ...string) ([]t
 
 		validator, err := statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("Failed to init validator %v", i)
+			return validators, validatorSecrets, fmt.Errorf("failed to init validator %v", i)
 		}
 		validators[i] = validator
 
 		//bandersnatch_seed, ed25519_seed, bls_seed
 		validatorSecret, err := statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("Failed to init validator secret=%v", i)
+			return validators, validatorSecrets, fmt.Errorf("failed to init validator secret=%v", i)
 		}
 		validatorSecrets[i] = validatorSecret
 	}
 
 	return validators, validatorSecrets, nil
 }
-func setUserPort(Port int) (validator_indx int, is_local bool) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		fmt.Println("Error getting current user:", err)
-		os.Exit(1)
-	}
-	userName := hostname
-	fmt.Printf("User: %s\n", userName)
-	if userName == "rise" || userName == "jam-6" {
-		Port = node.GetJAMNetworkPort()
-		return 5, false
-	}
-	if len(userName) >= 4 && (userName[:3] == "jam" || userName[:3] == "dot") {
-		number := userName[4:]
-		intNum, err := strconv.Atoi(number)
-		if err != nil {
-			fmt.Println("Error getting the number after jam/dot:", err)
-			os.Exit(1)
-		}
-		fmt.Printf("User: %s, Number: %d\n", userName, intNum)
-		Port = node.GetJAMNetworkPort()
-		return intNum, false
-	} else {
-		return Port - node.GetJAMNetworkPort(), true
-	}
-}
 func generateSelfValidatorPubKey(seed []byte) (types.Validator, error) {
 	// Generate the validator public key from the seed
 	validator, err := statedb.InitValidator(seed, seed, seed, "")
 	if err != nil {
-		return types.Validator{}, fmt.Errorf("Failed to init validator %v", err)
+		return types.Validator{}, fmt.Errorf("failed to init validator %v", err)
 	}
 	return validator, nil
 }
@@ -710,55 +589,7 @@ func dumpHeapProfile(filename string) {
 	pprof.Lookup("heap").WriteTo(f, 0)
 }
 
-func getValidatorPortFromMetadata(network_file string, validator_idx int) (selfPort uint16, peerList map[uint16]*node.Peer, err error) {
-	// Get the metadata from the validator
-	path := node.GetGenesisFile(network_file)
-	fn := common.GetFilePath(path)
-	snapshotRawBytes, err := os.ReadFile(fn)
-	var statetransition statedb.StateTransition
-	err = json.Unmarshal(snapshotRawBytes, &statetransition)
-	if err != nil {
-		fmt.Printf("Error unmarshalling JSON: %v\n", err)
-		return
-	}
-	var currValidatorRawBytes []byte
-	for _, keyval := range statetransition.PostState.KeyVals {
-		if keyval.Key[0] == 0x08 {
-			currValidatorRawBytes = keyval.Value
-			break
-		}
-	}
-	currValidatorRaw, _, err := types.Decode(currValidatorRawBytes, reflect.TypeOf(types.Validators{}))
-	if err != nil {
-		return
-	}
-	currValidators := currValidatorRaw.(types.Validators)
-	if validator_idx >= len(currValidators) {
-		fmt.Printf("Validator index %d out of range (0-%d)\n", validator_idx, len(currValidators)-1)
-		return
-	}
-	peerList = make(map[uint16]*node.Peer)
-	for i := 0; i < len(currValidators); i++ {
-		validator := currValidators[i]
-		ip_str, port, err := common.ToIPv6Port(validator.Metadata[:])
-		if err != nil {
-			fmt.Printf("Error converting metadata to IP and port: %s\n", err)
-			return 0, nil, err
-		}
-		fmt.Printf("Validator %d: IP: %s, Port: %d\n", i, ip_str, port)
-		if i == validator_idx {
-			selfPort = uint16(port)
-		}
-		peerList[uint16(i)] = &node.Peer{
-			PeerID:    uint16(i),
-			PeerAddr:  fmt.Sprintf("%s:%d", ip_str, port),
-			Validator: validator,
-		}
-	}
-	return selfPort, peerList, nil
-}
-
-func getValidatorFromChainSpec(network_file node.ChainSpec) ([]types.Validator, error) {
+func getValidatorFromChainSpec(network_file chainspecs.ChainSpec) ([]types.Validator, error) {
 	// Get the metadata from the validator
 	keyvals := network_file.GenesisState
 	currValidatorRawBytes := []byte{}

@@ -23,9 +23,17 @@ type Input struct {
 }
 
 type state struct {
-	Pi          types.TrueStatistics `json:"statistics"`
-	Tau         uint32               `json:"slot"`
-	Kappa_prime types.Validators     `json:"curr_validators"`
+	Current        [types.TotalValidators]types.ValidatorStatisticState `json:"vals_curr_stats"`
+	Last           [types.TotalValidators]types.ValidatorStatisticState `json:"vals_last_stats"`
+	CoreStatistics [types.TotalCores]types.CoreStatistics               `json:"cores"`
+	ServiceStatics types.ServiceStatisticsKeyPairs                      `json:"services,omitempty"`
+	Tau            uint32                                               `json:"slot"`
+	Kappa_prime    types.Validators                                     `json:"curr_validators"`
+}
+
+func (s *state) String() string {
+	b, _ := json.MarshalIndent(s, "", "  ")
+	return string(b)
 }
 
 type validator_statistics_test struct {

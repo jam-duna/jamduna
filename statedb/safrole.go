@@ -591,6 +591,7 @@ func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int
 		ringsetBytes := s.GetRingSet("Next")
 		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
+			//fmt.Printf("ticket_id: %x validated using entropy[%v]\n", ticket_id, i, targetEpochRandomness)
 			return common.BytesToHash(ticket_id), i, nil
 		}
 	}

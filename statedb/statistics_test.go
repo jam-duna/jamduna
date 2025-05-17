@@ -37,7 +37,8 @@ func testStaticsSTF(t *testing.T, jsonFile string) {
 	ep := extrinsic.Preimages
 
 	prestate := statisticsSTF.Prestate
-	pi := prestate.Pi
+	pi := prestate
+
 	tau := prestate.Tau
 	kappa_prime := prestate.Kappa_prime
 	jam_state := NewJamState()
@@ -86,23 +87,33 @@ func testStaticsSTF(t *testing.T, jsonFile string) {
 	JamState.tallyStatistics(uint32(authorIndex), "preimages", num_preimage)
 	JamState.tallyStatistics(uint32(authorIndex), "octets", num_octets)
 	JamState.tallyStatistics(uint32(authorIndex), "blocks", 1)
-	post_jam_pi := types.TrueStatistics{}
-	post_jam_pi.Current = JamState.ValidatorStatistics.Current
-	post_jam_pi.Last = JamState.ValidatorStatistics.Last
-	post_jam_pi.CoreStatistics = JamState.ValidatorStatistics.CoreStatistics
-	post_jam_pi.ServiceStatics = make(types.ServiceStatisticsKeyPairs, 0)
+	post_jam := state{}
+	post_jam.Tau = prestate.Tau // should be: input.Slot
+	post_jam.Current = JamState.ValidatorStatistics.Current
+	post_jam.Last = JamState.ValidatorStatistics.Last
+	post_jam.CoreStatistics = JamState.ValidatorStatistics.CoreStatistics
+	post_jam.ServiceStatics = make(types.ServiceStatisticsKeyPairs, 0)
+	post_jam.Kappa_prime = JamState.SafroleState.CurrValidators
 	for k, v := range JamState.ValidatorStatistics.ServiceStatistics {
-		post_jam_pi.ServiceStatics = append(post_jam_pi.ServiceStatics, types.ServiceStatisticsKeyPair{ServiceIndex: uint(k), ServiceStatistics: v})
+		post_jam.ServiceStatics = append(post_jam.ServiceStatics, types.ServiceStatisticsKeyPair{ServiceIndex: uint(k), ServiceStatistics: v})
 	}
 
-	poststate := statisticsSTF.Poststate
-	post_pi := poststate.Pi
+	poststate := statisticsSTF.Poststate // what we *should* get, of type "state"
+
 	// check types equality
-	if !reflect.DeepEqual(post_pi, post_jam_pi) {
-		original_diff := CompareJSON(prestate.Pi, post_pi)
-		fmt.Printf("original changes:\n%v\n", original_diff)
-		diff := CompareJSON(post_jam_pi, post_pi)
-		t.Fatalf("post_pi != post_jam_pi: %v", diff)
+	if !reflect.DeepEqual(poststate, post_jam) {
+		//original_diff := CompareJSON(prestate, poststate)
+		//fmt.Printf("original changes:\n%v\n", original_diff)
+
+		diff := CompareJSON(poststate, post_jam)
+		if diff == "JSONs are identical" {
+
+		} else {
+			fmt.Printf("=====\nDIFFERENCE %s\n", jsonFile)
+			fmt.Printf("post:\n%v\n", poststate.String())
+			fmt.Printf("post_jam:\n%v\n", post_jam.String())
+			t.Fatalf("poststate != post_jam: %v", diff)
+		}
 	}
 }
 

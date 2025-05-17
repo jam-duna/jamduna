@@ -204,7 +204,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
 
 	// tally core statistics + service statistics -- the newly available work reports and incoming work reports ... along with assurances + preimages
-	s.JamState.tallyCoreStatistics(guarantees, s.AvailableWorkReport, assurances)
+	err = s.JamState.tallyCoreStatistics(guarantees, s.AvailableWorkReport, assurances)
+	if err != nil {
+		return s, err
+	}
 	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStats)
 
 	// Update Authorization Pool alpha

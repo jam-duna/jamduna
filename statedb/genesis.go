@@ -6,55 +6,25 @@ import (
 	"fmt"
 	"reflect"
 
-	//"io/ioutil"
 	"os"
-	//"path/filepath"
 	"time"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
-// 6.4.1 Startup parameters
-
-// CreateGenesisState generates the StateDB object and genesis statedb
-func CreateGenesisState(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, epochFirstSlot uint64, network string) (outfn string, err error) {
-
-	rawOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.json", network))
-	rawBinOutfn := common.GetFilePath(fmt.Sprintf("chainspecs/%s-00000000.bin", network))
-
-	trace, err := MakeGenesisStateTransition(sdb, chainSpec, epochFirstSlot, network)
-	if err != nil {
-		return rawOutfn, fmt.Errorf("Error creating genesis state transition: %v\n", err)
-	}
-	rawByte := trace.ToJSON()
-	rawCodec, err := types.Encode(trace)
-	err = os.WriteFile(rawOutfn, []byte(rawByte), 0644)
-	if err != nil {
-		return rawOutfn, fmt.Errorf("Error writing rawOut file: %v\n", err)
-	}
-	err = os.WriteFile(rawBinOutfn, rawCodec, 0644)
-	if err != nil {
-		return rawBinOutfn, fmt.Errorf("Error writing rawBinOut file: %v\n", err)
-	}
-
-	return
-}
-
-// TODO: Can GenerateStateTransition without the chainspecs files
-func MakeGenesisStateTransition(sdb *storage.StateDBStorage, chainSpec types.ChainSpec, epochFirstSlot uint64, network string) (trace *StateTransition, err error) {
+func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint64, network string) (trace *StateTransition, err error) {
 	statedb, err := newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return
 	}
 	var validatorshashes [types.TotalValidators]types.ValidatorKeyTuple
-	validators := make(types.Validators, chainSpec.NumValidators)
-	for i := uint32(0); i < uint32(chainSpec.NumValidators); i++ {
+	validators := make(types.Validators, types.TotalValidators)
+	for i := uint32(0); i < uint32(types.TotalValidators); i++ {
 		seed := make([]byte, 32)
 
 		bandersnatch_seed, ed25519_seed, bls_seed := seed, seed, seed
@@ -242,34 +212,6 @@ func NewBlockFromFile(blockfilename string) *types.Block {
 	return &b
 }
 
-// NewStateDBFromEmbedded reads the state transition file and creates a new StateDB object
-func NewStateDBFromEmbedded(sdb *storage.StateDBStorage, network, format string) (*StateDB, error) {
-	rawBytes, err := chainspecs.ReadBytes(network, format)
-	if err != nil {
-		return nil, err
-	}
-
-	var stf StateTransition
-
-	switch format {
-	case "json":
-		if err := json.Unmarshal(rawBytes, &stf); err != nil {
-			log.Crit(module, "Error parsing %v-%v", "error", network, format, err)
-			return nil, fmt.Errorf("error parsing  %v-%v", network, format)
-		}
-		return NewStateDBFromStateTransition(sdb, &stf)
-	case "bin":
-		decodedStruct, _, err := types.Decode(rawBytes, reflect.TypeOf(StateTransition{}))
-		stf, ok := decodedStruct.(StateTransition)
-		if !ok || err != nil {
-			return nil, fmt.Errorf("error parsing  %v-%v", network, format)
-		}
-		return NewStateDBFromStateTransition(sdb, &stf)
-	default:
-		return nil, fmt.Errorf("unsupported format:%v-%v", network, format)
-	}
-}
-
 func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, network string) (statedb *StateDB, err error) {
 	//fn := common.GetFilePath(statefilename) // TODO: SHWAN THIS IS NOT REAL
 	fn := common.GetFilePathForNetwork(network)
@@ -302,10 +244,11 @@ func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition 
 	}
 	statedb.Block = &(statetransition.Block)
 	isGenesis := IsGenesisSTF(statetransition)
-	if isGenesis {
+	if isGenesis && false {
 		statetransition.PreState = statetransition.PostState // Allow genesis stf to use poststate as prestate for first non-genesis block
 	}
 	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
+	//fmt.Printf("NewStateDBFromStateTransition StateRoot: %s | isGenesis:%v\n", statedb.StateRoot.String(), isGenesis)
 	statedb.JamState = NewJamState()
 	statedb.RecoverJamState(statedb.StateRoot)
 	return statedb, nil

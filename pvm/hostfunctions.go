@@ -1793,7 +1793,7 @@ func (vm *VM) hostLog() {
 		log.Warn(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 2: // 2: User agent displays as important information
-		log.Debug(vm.logging, levelName, "m", string(messageBytes))
+		log.Info(vm.logging, levelName, "m", string(messageBytes))
 		break
 	case 3: // 3: User agent displays as helpful information
 		log.Debug(vm.logging, levelName, "m", string(messageBytes))

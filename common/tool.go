@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -388,4 +389,32 @@ func ToIPv6Port(buf []byte) (string, uint16, error) {
 	ip_str := ip.String()
 	port := binary.LittleEndian.Uint16(buf[16:])
 	return ip_str, port, nil
+}
+
+var alphabet = []byte("abcdefghijklmnopqrstuvwxyz234567")
+
+// B(n, l) = alphabet[n mod 32] ⌢ B(n/32, l-1)
+func B(n *big.Int, l int) string {
+	if l == 0 {
+		return ""
+	}
+	// mod = n % 32, div = n / 32
+	mod := new(big.Int)
+	div := new(big.Int)
+	div.DivMod(n, big.NewInt(32), mod)
+
+	ch := alphabet[mod.Int64()]
+	// prepend this digit, then recurse on div with length-1
+	return string(ch) + B(div, l-1)
+}
+
+// ToSAN(pub) reads pub as a little-endian 256-bit integer, then returns "e"+B(n,52)
+func ToSAN(pub []byte) string {
+	n := new(big.Int)
+	// Treat pub as little-endian: most significant byte is pub[len-1]
+	for i := len(pub) - 1; i >= 0; i-- {
+		n.Lsh(n, 8)
+		n.Or(n, new(big.Int).SetUint64(uint64(pub[i])))
+	}
+	return "e" + B(n, 52)
 }

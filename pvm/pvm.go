@@ -502,9 +502,9 @@ func (vm *VM) step(stepn int) error {
 		 md = "inst" //string(vm.ServiceMetadata)
 	 } */
 	// avoid this: this is expensive
-	// if stepn%100 == 0 && vm.Gas < 100 {
-	// 	log.Debug(vm.logging, opcode_str(opcode), "mode", vm.Mode, "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
-	// }
+	if stepn%1000000 == 0 {
+		log.Info(vm.logging, opcode_str(opcode), "mode", vm.Mode, "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+	}
 	return nil
 }
 

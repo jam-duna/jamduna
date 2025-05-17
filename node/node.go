@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/bls"
+	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
@@ -372,14 +373,8 @@ When a block is authored, we take the latest block identified by some parenthash
   we update the tip
 */
 
-func ToSAN(ed25519_pub []byte) string {
-	b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
-	san := "e" + strings.ToLower(b32.EncodeToString(ed25519_pub))
-	return san
-}
-
-func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.PrivateKey) (tls.Certificate, error) {
-	san := ToSAN(ed25519_pub)
+func generateSelfSignedCert(pub ed25519.PublicKey, priv ed25519.PrivateKey) (tls.Certificate, error) {
+	san := common.ToSAN(pub)
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
@@ -388,26 +383,20 @@ func generateSelfSignedCert(ed25519_pub ed25519.PublicKey, ed25519_priv ed25519.
 		NotBefore: time.Now(),
 		NotAfter:  time.Now().Add(365 * 24 * time.Hour),
 
-		KeyUsage:    x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-
 		DNSNames: []string{san},
 	}
 
-	// Create self-signed certificate
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, ed25519_pub, ed25519_priv)
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, pub, priv)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	privKeyBytes, err := x509.MarshalPKCS8PrivateKey(ed25519_priv)
+	privBytes, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-	privKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privKeyBytes})
-
-	return tls.X509KeyPair(certPEM, privKeyPEM)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
+	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
 func (n *NodeContent) String() string {
@@ -425,21 +414,17 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func GetGenesisFile(network string) string {
-	return fmt.Sprintf("/chainspecs/%s-00000000.json", network)
+func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+	return newNode(id, credential, chainspec, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, genesis interface{}, genesis_type string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
-	return newNode(id, credential, genesis, genesis_type, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
+func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, chainspec, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
 }
 
-func NewNode(id uint16, credential types.ValidatorSecret, genesis interface{}, genesis_type string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, genesis, genesis_type, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
-}
-
-func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, genesis_type string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	log.Info(module, fmt.Sprintf("[N%v]", id), "addr", addr, "dataDir", dataDir, "genesis_type", genesis_type)
+	log.Info(module, fmt.Sprintf("NewNode [N%v]", id), "spec", chainspec.ID, "addr", addr, "dataDir", dataDir)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	// fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir)
 
@@ -494,42 +479,41 @@ func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 	}
 	node.NodeContent.nodeSelf = node
 	var _statedb *statedb.StateDB
-	switch genesis_type {
-	case "stf":
-		if s, ok := genesis.(string); ok {
-			fmt.Printf("[N%v] calling NewStateDBFromStateTransitionFile genesis network %s\n", id, s)
-			_statedb, err = statedb.NewStateDBFromEmbedded(node.store, s, "json")
-			if err != nil {
-				return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
-			}
-		} else {
-			return nil, fmt.Errorf("NewStateDBFromStateTransition genesis is not a string")
-		}
 
-	case "chainspec":
-		if chainspec, ok := genesis.(ChainSpec); ok {
-			stateTransition := &statedb.StateTransition{}
-			stateTransition.PreState.KeyVals = chainspec.GenesisState
-			stateTransition.PreState.StateRoot = common.Hash{}
-			stateTransition.PostState.KeyVals = chainspec.GenesisState
-			stateTransition.PostState.StateRoot = common.Hash{}
-			header, _, err := types.Decode(chainspec.GenesisHeader, reflect.TypeOf(types.BlockHeader{}))
-			if err != nil {
-				return nil, fmt.Errorf("Decode genesis header Err %v", err)
-			}
-			stateTransition.Block.Header = header.(types.BlockHeader)
-			_statedb, err = statedb.NewStateDBFromStateTransition(node.store, stateTransition)
-			if err != nil {
-				return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
-			}
+	/*
+	   func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
+	   	statedb, err = newStateDB(sdb, common.Hash{})
+	   	if err != nil {
+	   		return statedb, err
+	   	}
+	   	statedb.Block = &(statetransition.Block)
+	   	isGenesis := IsGenesisSTF(statetransition)
+	   	if isGenesis {
+	   		statetransition.PreState = statetransition.PostState // Allow genesis stf to use poststate as prestate for first non-genesis block
+	   	}
+	   	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
+	   	statedb.JamState = NewJamState()
+	   	statedb.RecoverJamState(statedb.StateRoot)
+	   	return statedb, nil
+	   }
+	*/
 
-		} else {
-			return nil, fmt.Errorf("NewStateDBFromChainSpec genesis is not a ChainSpec")
-		}
-	default:
-		return nil, fmt.Errorf("NewStateDBFromStateTransition genesis_type is not a valid input")
-
+	stateTransition := &statedb.StateTransition{}
+	stateTransition.PreState.KeyVals = chainspec.GenesisState
+	stateTransition.PreState.StateRoot = common.Hash{}
+	stateTransition.PostState.KeyVals = chainspec.GenesisState
+	stateTransition.PostState.StateRoot = common.Hash{}
+	header, _, err := types.Decode(chainspec.GenesisHeader, reflect.TypeOf(types.BlockHeader{}))
+	if err != nil {
+		return nil, fmt.Errorf("Decode genesis header Err %v", err)
 	}
+	stateTransition.Block.Header = header.(types.BlockHeader)
+
+	_statedb, err = statedb.NewStateDBFromStateTransition(node.store, stateTransition)
+	if err != nil {
+		return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
+	}
+
 	block := _statedb.Block
 	if block == nil {
 		return nil, fmt.Errorf("NewStateDBFromStateTransition block is nil")
@@ -552,7 +536,7 @@ func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 			Applied:   true,
 		})
 	} else {
-		log.Info(module, "NewBlockTree", "block_hash", finalizedBlock.Header.HeaderHash().Hex())
+		log.Info(module, "NewBlockTree111", "block_hash", finalizedBlock.Header.HeaderHash().Hex())
 		node.NodeContent.block_tree = types.NewBlockTree(&types.BT_Node{
 			Parent:    nil,
 			Block:     finalizedBlock,
@@ -566,15 +550,20 @@ func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 
 	genesisBlockHash = block.Header.HeaderHash()
 	//jamnp-s/V/H/builder. Here V is the protocol version, 0, and H is the first 8 nibbles of the hash of the chain's genesis header, in lower-case hexadecimal.
-	alpn_builder := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4])) + "/builder"
-	alpn := "jamnp-s/0/" + strings.ToLower(hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4]))
+	x := hex.EncodeToString(block.Header.HeaderHash().Bytes()[:4])
+	alpn_builder := "jamnp-s/0/" + x + "/builder"
+	alpn := "jamnp-s/0/" + x
 
 	node.node_name = fmt.Sprintf("%s-%d", GetJAMNetwork(), id)
-
+	log.Info(module, "ALPN configuration",
+		"genesis_hash", block.Header.HeaderHash().Hex(),
+		"alpn", alpn,
+		"alpn_builder", alpn_builder,
+	)
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		ClientAuth:   tls.RequireAnyClientCert,
-		NextProtos:   []string{alpn},
+		NextProtos:   []string{alpn, alpn_builder},
 		GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) {
 			remoteAddr := info.Conn.RemoteAddr().String()
 			return &tls.Config{
@@ -600,10 +589,11 @@ func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 						log.Error(module, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "err", err)
 						return err
 					}
-					b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
-					expectedSAN := "e" + strings.ToLower(b32.EncodeToString(pubKey))
+					expectedSAN := common.ToSAN(pubKey)
 					if len(cert.DNSNames) != 1 || cert.DNSNames[0] != expectedSAN {
-						err := fmt.Errorf("SAN mismatch: expected %s, got %v", expectedSAN, cert.DNSNames)
+						dnsNameBytes := []byte(cert.DNSNames[0])
+						dnsNameHex := hex.EncodeToString(dnsNameBytes)
+						err := fmt.Errorf("SAN mismatch: expected %s %v, got %v pub key %s", expectedSAN, pubKey, cert.DNSNames, dnsNameHex)
 						log.Error(module, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "err", err)
 						return err
 					}
@@ -617,7 +607,12 @@ func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 		},
 	}
 	node.tlsConfig = tlsConfig
-
+	// put the white list to client
+	node.clientsMutex.Lock()
+	for _, p := range startPeerList {
+		node.clients[p.PeerAddr] = hex.EncodeToString(p.Validator.Ed25519[:])
+	}
+	node.clientsMutex.Unlock()
 	clientTLS := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
 		InsecureSkipVerify: true,
@@ -639,17 +634,23 @@ func newNode(id uint16, credential types.ValidatorSecret, genesis interface{}, g
 				log.Error(module, "VerifyPeerCertificate2", "err", err)
 				return err
 			}
-			b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
-			expectedSAN := "e" + strings.ToLower(b32.EncodeToString(pubKey))
+			expectedSAN := common.ToSAN(pubKey)
 			if len(cert.DNSNames) != 1 || cert.DNSNames[0] != expectedSAN {
-				err := fmt.Errorf("SAN mismatch: expected %s, got %v", expectedSAN, cert.DNSNames)
+				san := cert.DNSNames[0]
+				sanBody := san[1:] // strip the "e" prefix
+				b32 := base32.StdEncoding.WithPadding(base32.NoPadding)
+				decodedPubKey, err := b32.DecodeString(strings.ToUpper(sanBody)) // base32 expects uppercase
+				if err != nil {
+					log.Error(module, "Base32DecodeSAN", "san", san, "err", err)
+				}
+				err = fmt.Errorf("SAN mismatch: expected %s %v, got %v pub key %s", expectedSAN, pubKey, cert.DNSNames, fmt.Sprintf("%x", decodedPubKey))
 				log.Error(module, "VerifyPeerCertificate2", "pubKey", pubKey, "expectedSAN", expectedSAN, "cert.DNSNames", cert.DNSNames, "err", err)
 				return err
 			}
-			//log.Info(module, "VerifyPeerCertificate2 SUCCESS", "expectedSAN", expectedSAN, "cert.DNSNames", cert.DNSNames)
+			log.Trace(module, "VerifyPeerCertificate2 SUCCESS", "expectedSAN", expectedSAN, "cert.DNSNames", cert.DNSNames)
 			return nil
 		},
-		NextProtos: []string{alpn},
+		NextProtos: []string{alpn, alpn_builder},
 	}
 	node.clientTLSConfig = clientTLS
 	log.Info(module, "ListenAddr", "addr", addr)
@@ -1433,6 +1434,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		// see how many number from the end
 		host, _, err := net.SplitHostPort(remoteAddr)
 		if err != nil {
+			log.Warn(module, "handleConnection", "remoteAddr", remoteAddr, "host", host, "port", port)
 			return
 		}
 		newAddr := net.JoinHostPort(host, "13370")
@@ -1449,8 +1451,14 @@ func (n *Node) handleConnection(conn quic.Connection) {
 				}
 			}
 		}
+
 	} else {
 		log.Trace(module, "handleConnection - KNOWN pubkey", "validatorIndex", validatorIndex, "remoteAddr", remoteAddr, "port", port, "pubKey", pubKey)
+		if n.peersInfo[validatorIndex].conn == nil {
+			n.peersInfo[validatorIndex].connectionMu.Lock()
+			n.peersInfo[validatorIndex].conn = conn
+			n.peersInfo[validatorIndex].connectionMu.Unlock()
+		}
 	}
 
 	for {
@@ -1488,7 +1496,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 				atomic.AddInt64(&n.totalIncomingStreams, -1)
 			}()
 
-			streamCtx, cancel := context.WithTimeout(ctx, NormalTimeout)
+			streamCtx, cancel := context.WithTimeout(context.Background(), NormalTimeout)
 			defer cancel()
 
 			err := n.DispatchIncomingQUICStream(streamCtx, stream, validatorIndex)
@@ -1500,14 +1508,17 @@ func (n *Node) handleConnection(conn quic.Connection) {
 	}
 }
 
-func isGridNeighbor(id, id2 uint16) bool {
-	W := uint16(3)
+func isGridNeighbor(vIdx, vIdx2 uint16) bool {
+	W := uint16(2)
 	if types.TotalValidators > 6 {
 		if types.TotalValidators == 1023 {
 			W = uint16(31)
 		}
 	}
-	if id/W == id2/W || id%W == id2%W {
+	if sameRow := vIdx/W == vIdx2/W; sameRow {
+		return true
+	}
+	if sameCol := vIdx%W == vIdx2%W; sameCol {
 		return true
 	}
 	return false
@@ -1519,32 +1530,6 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 	objType := reflect.TypeOf(obj)
 
 	for id, p := range n.peersInfo {
-		if id >= types.TotalValidators {
-			if objType == reflect.TypeOf(types.Block{}) {
-				b := obj.(types.Block)
-				go func() { // review
-					up0_stream, err := p.GetOrInitBlockAnnouncementStream(context.Background())
-					if err != nil {
-						log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", p.PeerID, "err", err)
-						return
-					}
-					block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
-					if err != nil {
-						log.Error(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
-						return
-					}
-					err = sendQuicBytes(ctxParent, up0_stream, block_a_bytes, id, CE128_BlockRequest)
-					if err != nil {
-						n.UP0_streamMu.Lock()
-						delete(n.UP0_stream, id)
-						n.UP0_streamMu.Unlock()
-						delete(n.peersInfo, id)
-						log.Error(debugStream, "SendBlockAnnouncement:sendQuicBytes (broadcast2)", "n", n.String(), "err", err)
-					}
-				}()
-			}
-			continue
-		}
 
 		if id == n.id {
 			switch objType {
@@ -1579,10 +1564,17 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 				if err := peer.SendTicketDistribution(ctx, epoch, t, false); err != nil {
 					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
-			case reflect.TypeOf(types.Block{}):
-				b := obj.(types.Block)
+			case reflect.TypeOf(JAMSNP_BlockAnnounce{}):
+				b := obj.(JAMSNP_BlockAnnounce)
 				h := b.Header.Hash()
-				if p.IsKnownHash(h) || !isGridNeighbor(id, n.id) {
+
+				//TODO: what's the difference between block and block announcement case?
+				if !isGridNeighbor(n.id, id) {
+					log.Trace(debugStream, "Skip Block Broadcast AAAA - NOT GRID NEIGHBOR", "n(self)", n.String(), "peer.ID", id)
+					return
+				}
+
+				if p.IsKnownHash(h) || n.ba_checker.CheckAndSet(h, peerID) {
 					return
 				}
 				p.AddKnownHash(h)
@@ -1592,16 +1584,11 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 					log.Warn(debugStream, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.PeerID, "err", err)
 					return
 				}
-				block_a_bytes, err := n.GetBlockAnnouncementBytes(b)
-				if err != nil {
-					log.Warn(debugStream, "GetBlockAnnouncementBytes", "n", n.String(), "err", err)
-					return
-				}
+				block_a_bytes := b.ToBytes()
 				err = sendQuicBytes(ctx, up0_stream, block_a_bytes, peerID, UP0_BlockAnnouncement)
 				if err != nil {
 					log.Warn(debugStream, "SendBlockAnnouncement:sendQuicBytes (broadcast)", "n", n.String(), "err", err)
 				}
-				n.ba_checker.Set(b.Header.Hash(), peerID)
 
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
@@ -1637,7 +1624,11 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 
 			case reflect.TypeOf(types.Judgement{}):
 				j := obj.(types.Judgement)
-				if !isGridNeighbor(id, n.id) || p.IsKnownHash(j.Hash()) {
+				if p.IsKnownHash(j.Hash()) {
+					return
+				}
+				if !isGridNeighbor(n.id, id) {
+					log.Trace(debugStream, "Skip CE 145 Judgement Broadcast - NOT GRID NEIGHBOR", "n(self)", n.String(), "peer.ID", id)
 					return
 				}
 				p.AddKnownHash(j.Hash())
@@ -1649,7 +1640,11 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 			case reflect.TypeOf(types.PreimageAnnouncement{}):
 				announcement := obj.(types.PreimageAnnouncement)
 				h := announcement.PreimageHash
-				if !isGridNeighbor(id, n.id) || p.IsKnownHash(h) {
+				if p.IsKnownHash(h) {
+					return
+				}
+				if !isGridNeighbor(n.id, id) {
+					log.Trace(debugStream, "Skip CE 142 PreimageAnnouncement Broadcast - NOT GRID NEIGHBOR", "n(self)", n.String(), "peer.ID", id)
 					return
 				}
 				//log.Trace(module, "broadcast-PreimageAnnouncement", "h", h.String(), "n", n.String(), "peerID", peerID)
@@ -1880,7 +1875,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	mini_peers := 2
 	latest_block_info := n.GetLatestBlockInfo()
 	nextBlockNode.Applied = true
-	log.Debug(log.BlockMonitoring, "Applied Block", "n", n.String(),
+	log.Info(log.BlockMonitoring, "Applied Block", "n", n.String(),
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
 		"->block", nextBlock.Header.Hash().String_short(),
 		"slot", nextBlock.Header.Slot,
@@ -2448,8 +2443,8 @@ func (n *Node) runFasterJCE() {
 				n.SetCurrJCE(currJCE)
 				// do something with it
 			} else {
-				n.GenerateTickets(prevJCE)
-				n.BroadcastTickets(prevJCE)
+				//n.GenerateTickets(prevJCE)
+				//n.BroadcastTickets(prevJCE)
 			}
 		case <-blockTicker.C:
 			prevJCE := n.GetCurrJCE()
@@ -2708,7 +2703,12 @@ func (n *Node) runAuthoring() {
 				return
 			}
 			nodee.Applied = true
-			n.broadcast(context.Background(), *newBlock)
+			np_blockAnnouncement, err := n.GetJAMSNPBlockAnnouncementFromHeader(newBlock.Header)
+			if err != nil {
+				log.Error(module, "runAuthoring: GetJAMSNPBlockAnnouncementFromHeader", "err", err)
+				continue
+			}
+			n.broadcast(context.Background(), np_blockAnnouncement)
 			log.Debug(module, "runAuthoring: broadcast", "n", n.String(), "slot", newBlock.Header.Slot)
 			go func() {
 				timeslot := newStateDB.GetSafrole().Timeslot
