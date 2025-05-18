@@ -8,12 +8,13 @@ import (
 )
 
 const (
-	RESULT_OK       = 0
-	RESULT_OOG      = 1
-	RESULT_PANIC    = 2
-	RESULT_BAD_CODE = 3
-	RESULT_OOB      = 4
-	RESULT_FAULT    = 5
+	RESULT_OK       = 0 //if o ∈ Y
+	RESULT_OOG      = 1 //if o = ∞
+	RESULT_PANIC    = 2 //if o = ☇
+	RESULT_BAD_CODE = 3 //if o = ⊚
+	RESULT_OVERSIZE = 4 //if o = ⊖
+	RESULT_OOB      = 5 //if o = BAD
+	RESULT_FAULT    = 6 //if o = BIG
 )
 
 const (
@@ -68,10 +69,12 @@ func (R Result) Encode() []byte {
 			return []byte{2}
 		case RESULT_BAD_CODE:
 			return []byte{3}
-		case RESULT_OOB:
+		case RESULT_OVERSIZE:
 			return []byte{4}
-		case RESULT_FAULT:
+		case RESULT_OOB:
 			return []byte{5}
+		case RESULT_FAULT:
+			return []byte{6}
 		default:
 			return []byte{R.Err}
 		}

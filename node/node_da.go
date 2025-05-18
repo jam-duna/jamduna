@@ -343,12 +343,21 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
 			Gas:                 workItem.AccumulateGasLimit, // put a
-			Result:              output,
 			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
 			NumExportedSegments: uint(expectedSegmentCnt),
 			NumExtrinsics:       uint(len(package_bundle.ExtrinsicData)),
 			NumBytesExtrinsics:  uint(z),
+		}
+		if len(output.Ok)+z > types.MaxEncodedWorkReportSize {
+			result.Result.Err = types.RESULT_OVERSIZE
+			result.Result.Ok = nil
+			log.Warn(module, "executeWorkPackageBundle: Result too large", "size", len(output.Ok)+z)
+		} else if expectedSegmentCnt != len(exported_segments) {
+			result.Result.Err = types.RESULT_BAD_CODE
+			result.Result.Ok = nil
+		} else {
+			result.Result = output
 		}
 		results = append(results, result)
 
