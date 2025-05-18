@@ -318,7 +318,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onTicketDistribution(ctx, stream, msg, peerID)
+		return n.onTicketDistribution(ctx, stream, msg, peerID, msgType)
 	case CE133_WorkPackageSubmission:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)

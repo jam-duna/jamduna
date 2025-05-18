@@ -714,7 +714,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 
 			proposedBlk, err := s.MakeBlock(ctx, credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
-				log.Error(module, "ProcessState:MakeBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
+				log.Error(module, "ProcessState:MakeBlock", "author", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
 
@@ -756,7 +756,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			if sf0.GetEpochT() == 0 {
 				mode = "fallback"
 			}
-			log.Info(module, "proposeBlock", "mode", mode, "s.ID", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
+			log.Info(module, "proposeBlock", "mode", mode, "AUTHOR", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}

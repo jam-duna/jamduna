@@ -76,47 +76,48 @@ func (n *Node) IsTicketGenerated(entropy common.Hash) bool {
 	return ok
 }
 func (n *Node) BroadcastTickets(currJCE uint32) {
-	if n.sendTickets == false {
+	if !n.sendTickets {
 		return
 	}
+
 	n.ticketsMutex.Lock()
 	defer n.ticketsMutex.Unlock()
+
 	sf := n.statedb.GetSafrole()
 	currEpoch, _ := sf.EpochAndPhase(currJCE)
 	if currEpoch < 0 {
 		return
 	}
-	usingEntropy := n.statedb.GetSafrole().Entropy[2]
 
-	if n.statedb.GetSafrole().IsTicketSubmissionClosed(currJCE) {
-		usingEntropy = n.statedb.GetSafrole().Entropy[1]
+	entropy := sf.Entropy[2]
+	if sf.IsTicketSubmissionClosed(currJCE) {
+		entropy = sf.Entropy[1]
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-	defer cancel() // ensures context is released
-	tickets := n.selfTickets[usingEntropy]
-	for _, ticketbucket := range tickets {
-		ticket := ticketbucket.Ticket
-		if !*ticketbucket.IsBroadcasted {
 
-			go func() {
-				defer cancel()           // ensures context is released
-				n.broadcast(ctx, ticket) // CE131/132
-				// Telemetry of ticket
-				n.Telemetry(log.MsgTypeTicket, ticket, "elapsed", ticketbucket.ElapsedMicroseconds, "codec_encoded", types.EncodeAsHex(ticket))
-			}()
-			*ticketbucket.IsBroadcasted = true
-		} else {
-			if !*ticketbucket.IsIncluded && n.resendTickets {
-				go func() {
-					defer cancel()           // ensures context is released
-					n.broadcast(ctx, ticket) // CE131/132
-					fmt.Printf("[N%v] Broadcasted Ticket %v\n", n.id, ticket.Attempt)
-				}()
-				*ticketbucket.IsBroadcasted = true
+	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+	defer cancel()
+
+	for _, bucket := range n.selfTickets[entropy] {
+		ticket := bucket.Ticket
+		proxy, err := ticket.ProxyValidator()
+		if err != nil {
+			continue
+		}
+		shouldSend := !*bucket.IsBroadcasted || (!*bucket.IsIncluded && n.resendTickets)
+		if shouldSend {
+			if proxy == n.id {
+				n.broadcast(ctx, ticket) // we are the proxy, so just use CE132
+			} else {
+				// first step: send to proxy with CE131
+				peer := n.peersInfo[proxy]
+				epoch := n.getEpoch()
+				if err := peer.SendTicketDistribution(ctx, epoch, ticket, true); err != nil {
+					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
+				}
 			}
+			*bucket.IsBroadcasted = true
 		}
 	}
-
 }
 
 func (n *Node) CleanUpSelfTickets(currJCE uint32) {

@@ -1524,6 +1524,10 @@ func isGridNeighbor(vIdx, vIdx2 uint16) bool {
 	return false
 }
 
+func (n *Node) getEpoch() uint32 {
+	return n.statedb.GetSafrole().GetEpoch()
+}
+
 // broadcast sends the object to all peers
 // TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
 func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
@@ -1560,7 +1564,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 			switch objType {
 			case reflect.TypeOf(types.Ticket{}):
 				t := obj.(types.Ticket)
-				epoch := uint32(0)
+				epoch := n.getEpoch()
 				if err := peer.SendTicketDistribution(ctx, epoch, t, false); err != nil {
 					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
@@ -1632,7 +1636,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 					return
 				}
 				p.AddKnownHash(j.Hash())
-				epoch := uint32(0) // Wrong!
+				epoch := n.getEpoch()
 				if err := peer.SendJudgmentPublication(ctx, epoch, j); err != nil {
 					log.Warn(debugStream, "SendJudgmentPublication", "n", n.String(), "err", err)
 					return
@@ -1875,13 +1879,22 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	mini_peers := 2
 	latest_block_info := n.GetLatestBlockInfo()
 	nextBlockNode.Applied = true
-	log.Info(log.BlockMonitoring, "Applied Block", "n", n.String(),
-		"p", nextBlock.Header.ParentHeaderHash.String_short(),
-		"->block", nextBlock.Header.Hash().String_short(),
-		"slot", nextBlock.Header.Slot,
-		"stateRoot", newStateDB.StateRoot.String_short(),
+	currEpoch, currPhase := newStateDB.JamState.SafroleState.EpochAndPhase(nextBlock.Header.Slot)
+
+	mode := "safrole"
+	if newStateDB.JamState.SafroleState.GetEpochT() == 0 {
+		mode = "fallback"
+	}
+	log.Info(log.BlockMonitoring, "Applied Block", // "n", n.String(),
+		"mode", mode,
 		"author", nextBlock.Header.AuthorIndex,
+		"p", nextBlock.Header.ParentHeaderHash.String_short(),
+		"h", common.Str(nextBlock.Header.Hash()),
+		"e'", currEpoch, "m'", currPhase,
+		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
+		"blk", nextBlock.Str(),
 	)
+
 	if newStateDB.GetSafrole().GetTimeSlot() != nextBlock.Header.Slot {
 		panic("ApplyBlock: TimeSlot mismatch")
 	}
@@ -2530,9 +2543,9 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 		currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(stateslot)
 		_, realPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
 
-		if currEpoch > 0 && (realPhase == 0 || realPhase == types.EpochLength) {
+		if currEpoch > 0 && (realPhase == 5) { // } || realPhase == types.EpochLength) {
 			// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-			//log.Info(module, "enable ticket generation", "currJCE", currJCE, "currEpoch", currEpoch, "realPhase", realPhase)
+			log.Info(module, "enable ticket generation")
 			n.GenerateTickets(stateslot)
 			n.BroadcastTickets(stateslot)
 		}

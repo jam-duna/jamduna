@@ -107,7 +107,7 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	}
 
 	code := uint8(CE131_TicketDistribution)
-	if isProxy {
+	if isProxy == false {
 		code = CE132_TicketDistribution
 	}
 
@@ -124,7 +124,7 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	return nil
 }
 
-func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16, msgType uint8) error {
 	defer stream.Close()
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct
@@ -140,9 +140,24 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	if !n.GetIsSync() {
 		return nil
 	}
+	if msgType == CE131_TicketDistribution {
+		proxy, err := ticket.ProxyValidator()
+		if err != nil {
+			log.Warn(module, "CE131-invalid ticket", "err", err)
+			return err
+		} else if proxy != n.id {
+			log.Warn(module, "CE131-not proxy for the ticket", "peerid", peerID)
+			return nil
+		}
+		// we should send to everyone via CE132 now that we know the ticket id valid and that our node is the proxy
+		n.broadcast(ctx, ticket)
+		return nil
+	}
+
+	// CE132_TicketDistribution
 	select {
 	case n.ticketsCh <- ticket:
-		// successfully sent ticket
+		// received ticket, verify it
 	case <-ctx.Done():
 		return fmt.Errorf("onTicketDistribution: context cancelled while sending ticket: %w", ctx.Err())
 	default:

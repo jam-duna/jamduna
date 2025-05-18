@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -16,6 +17,15 @@ Section 6.7 - Equation 73.  Ticket Extrinsic is a *sequence* of proofs of valid 
 type Ticket struct {
 	Attempt   uint8                     `json:"attempt"`
 	Signature BandersnatchRingSignature `json:"signature"`
+}
+
+func (t Ticket) ProxyValidator() (uint16, error) {
+	ticket, err := t.TicketID()
+	if err != nil {
+		return 0, err
+	}
+	x := binary.BigEndian.Uint32(ticket.Bytes()[28:32])
+	return uint16(x % uint32(TotalValidators)), nil
 }
 
 func (t Ticket) MarshalJSON() ([]byte, error) {

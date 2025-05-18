@@ -284,7 +284,7 @@ func main() {
 			var peers []string
 			var peerList map[uint16]*node.Peer
 
-			fmt.Printf("\033[34mGetting validator port from chainSpec...\033[0m\n")
+			fmt.Printf("\033[34mRead spec %s...\033[0m\n", chainSpec)
 			chainSpecData, err := chainspecs.ReadSpec(chainSpec)
 			if err != nil {
 				fmt.Printf("ReadSpec ERR %s", err)
