@@ -158,6 +158,51 @@ run_parallel_jam:
 	wait
 	@echo "✅ All instances started and running in parallel."
 
+run_polkajam_dom: jam_clean
+	@rm -rf ${HOME}/.jamduna/jam-*
+	@bin/jamduna-linux-amd64 run --dev-validator 0 --rpc-port=19805 --chain chainspecs/polkajam-spec.json &
+	@bin/jamduna-linux-amd64 run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json &
+	sleep 4
+	@for i in 1 2 3 4; do ./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator $$i --rpc-port=$$((19800 + $$i)) & done
+
+run_jamduna_dom: jam_clean 
+	@mkdir -p logs
+	@rm -rf ${HOME}/.jamduna/jam-*
+	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
+	@for i in $$(seq 0 $$(($(NUM_NODES) - 3))); do \
+		PORT=$$(($(DEFAULT_PORT) + $$i)); \
+		V_IDX=$$i; \
+		echo ">> Starting instance $$V_IDX on port $$PORT"; \
+		$(OUTPUT_DIR)/$(BINARY) run \
+			--chain chainspecs/polkajam-spec.json \
+			--dev-validator $$V_IDX \
+			--start-time "$(JAM_start-time)" & \
+	done; \
+	sleep 4
+	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 4 --rpc-port=19804 &
+	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 5 --rpc-port=19805 &
+	wait
+	@echo "✅ All instances started and running in parallel."
+
+run_multiclient: jam_clean 
+	@mkdir -p logs
+	@rm -rf ${HOME}/.jamduna/jam-*
+	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
+	@for i in $$(seq 0 $$(($(NUM_NODES) - 4))); do \
+		PORT=$$(($(DEFAULT_PORT) + $$i)); \
+		V_IDX=$$i; \
+		echo ">> Starting instance $$V_IDX on port $$PORT"; \
+		$(OUTPUT_DIR)/$(BINARY) run \
+			--chain chainspecs/polkajam-spec.json \
+			--dev-validator $$V_IDX \
+			--start-time "$(JAM_start-time)" & \
+	done; \
+	sleep 4
+	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 3 --rpc-port=19803 &
+	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 4 --rpc-port=19804 &
+	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 5 --rpc-port=19805 &
+	wait
+	@echo "✅ All instances started and running in parallel."
 
 
 run_localclient_jam: jam_clean run_parallel_jam
