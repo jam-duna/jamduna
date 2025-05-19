@@ -2546,7 +2546,6 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 
 		if currEpoch > 0 && (realPhase == 5) { // } || realPhase == types.EpochLength) {
 			// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-			log.Info(module, "enable ticket generation")
 			n.GenerateTickets(stateslot)
 			n.BroadcastTickets(stateslot)
 		}

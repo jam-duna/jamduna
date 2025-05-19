@@ -88,8 +88,6 @@ type JAMSNPWorkPackageShare struct {
 	CoreIndex    uint16                     `json:"core"`
 	Len          uint8                      `json:"len"`
 	SegmentRoots []JAMSNPSegmentRootMapping `json:"segment_roots"`
-
-	EncodedBundle []byte `json:"bundle"`
 }
 
 func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
@@ -115,11 +113,6 @@ func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
 		if _, err := buf.Write(rootMappingBytes); err != nil {
 			return nil, err
 		}
-	}
-
-	// Serialize Bundle (dynamically sized)
-	if _, err := buf.Write(share.EncodedBundle); err != nil {
-		return nil, err
 	}
 
 	return buf.Bytes(), nil
@@ -152,12 +145,6 @@ func (share *JAMSNPWorkPackageShare) FromBytes(data []byte) error {
 			return err
 		}
 		share.SegmentRoots[i] = rootMapping
-	}
-
-	// Deserialize Bundle (dynamically sized)
-	share.EncodedBundle = make([]byte, buf.Len())
-	if _, err := buf.Read(share.EncodedBundle); err != nil {
-		return err
 	}
 
 	return nil
@@ -236,10 +223,9 @@ func (p *Peer) ShareWorkPackage(
 
 	encodedBundle := bundle.Bytes()
 	req := JAMSNPWorkPackageShare{
-		CoreIndex:     coreIndex,
-		Len:           uint8(len(segmentroots)),
-		SegmentRoots:  segmentroots,
-		EncodedBundle: encodedBundle,
+		CoreIndex:    coreIndex,
+		Len:          uint8(len(segmentroots)),
+		SegmentRoots: segmentroots,
 	}
 
 	reqBytes, err := req.ToBytes()
@@ -254,15 +240,24 @@ func (p *Peer) ShareWorkPackage(
 		err = fmt.Errorf("openStream[CE134_WorkPackageShare]: %v", streamErr)
 		return
 	}
-	defer stream.Close()
 
 	// Send request
+	// --> Core Index ++ Segment Root Mappings
 	if err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
 		return
 	}
+	// --> Work Package Bundle
+	if err = sendQuicBytes(ctx, stream, encodedBundle, p.PeerID, code); err != nil {
+		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
+		return
+	}
+
+	// --> FIN
+	stream.Close()
 
 	// Receive response
+	//<-- Work Report Hash ++ Ed25519 Signature
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
 		err = fmt.Errorf("receiveQuicBytes[CE134_WorkPackageShare]: %v", err)
@@ -309,7 +304,23 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	}
 
 	// --> Work Package Bundle
-	encodedBundle := newReq.EncodedBundle
+	// Read message length (4 bytes)
+	msgLenBytes := make([]byte, 4)
+	if _, err := io.ReadFull(stream, msgLenBytes); err != nil {
+		log.Trace(module, "DispatchIncomingQUICStream - length prefix", "err", err)
+		_ = stream.Close()
+		return err
+	}
+	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
+
+	// Read message body, which is the encoded bundle
+	encodedBundle := make([]byte, msgLen)
+	if _, err := io.ReadFull(stream, encodedBundle); err != nil {
+		stream.CancelRead(ErrCECode)
+		_ = stream.Close()
+		return err
+	}
+
 	bundle, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
 		fmt.Println("Error deserializing:", err)

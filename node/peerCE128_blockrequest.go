@@ -104,7 +104,6 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
 		log.Error(module, "CE128 SendBlockRequest:sendQuicBytes", "p", p.String(), "err", err)
-		stream.CancelWrite(ErrKeyNotFound)
 		return blocks, err
 	}
 	stream.Close()

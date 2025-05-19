@@ -140,12 +140,14 @@ func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash
 	if err != nil {
 		return nil, fmt.Errorf("openStream[CE143_PreimageRequest]: %w", err)
 	}
-	defer stream.Close()
 
+	// --> Hash
 	respBytes := preimageHash.Bytes()
 	if err := sendQuicBytes(ctx, stream, respBytes, p.PeerID, code); err != nil {
 		return nil, fmt.Errorf("sendQuicBytes[CE143_PreimageRequest]: %w", err)
 	}
+	// --> FIN
+	stream.Close()
 
 	preimage, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {

@@ -50,7 +50,6 @@ func (p *Peer) SendBundleShardRequest(
 	if err != nil {
 		return nil, common.Hash{}, nil, fmt.Errorf("openStream[CE138]: %w", err)
 	}
-	defer stream.Close()
 
 	req := &JAMSNPShardRequest{
 		ErasureRoot: erasureRoot,
@@ -59,13 +58,17 @@ func (p *Peer) SendBundleShardRequest(
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
+		stream.Close()
 		return nil, common.Hash{}, nil, fmt.Errorf("ToBytes[ShardRequest]: %w", err)
 	}
 
+	// --> Erasure Root ++ Shard Index
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		log.Trace(debugDA, "SendBundleShardRequest - sending error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		return nil, common.Hash{}, nil, fmt.Errorf("sendQuicBytes[CE138]: %w", err)
 	}
+	//--> FIN
+	stream.Close()
 
 	parts, err := receiveMultiple(ctx, stream, 2, p.PeerID, code)
 	if err != nil {

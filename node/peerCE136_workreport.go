@@ -41,11 +41,13 @@ func (p *Peer) SendWorkReportRequest(ctx context.Context, workReportHash common.
 	if err != nil {
 		return types.WorkReport{}, fmt.Errorf("openStream[CE136_WorkReportRequest]: %w", err)
 	}
-	defer stream.Close()
 
+	//--> Work Report Hash
 	if err := sendQuicBytes(ctx, stream, workReportHash.Bytes(), p.PeerID, code); err != nil {
 		return types.WorkReport{}, fmt.Errorf("sendQuicBytes[CE136_WorkReportRequest]: %w", err)
 	}
+	//--> FIN
+	stream.Close()
 
 	workReportBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {

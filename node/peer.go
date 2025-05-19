@@ -168,6 +168,7 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	// Respect context before sending
 	select {
 	case <-ctx.Done():
+		stream.Close()
 		return fmt.Errorf("sendQuicBytes: context cancelled before send: %w", ctx.Err())
 	default:
 	}
@@ -178,6 +179,7 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	_, err = stream.Write(lenBuf)
 	if err != nil {
 		log.Warn(module, "sendQuicBytes-length", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+		stream.Close()
 		return err
 	} else if code == UP0_BlockAnnouncement {
 		// remove the deadline
@@ -187,13 +189,15 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	// Respect context before sending
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("onPreimageRequest: context cancelled before send: %w", ctx.Err())
+		stream.Close()
+		return fmt.Errorf("sendQuicBytes: context cancelled before send: %w", ctx.Err())
 	default:
 	}
 
 	// Then, write the actual message to the stream
 	_, err = stream.Write(msg)
 	if err != nil {
+		stream.Close()
 		log.Warn(module, "sendQuicBytes-msg", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		return err
 	}

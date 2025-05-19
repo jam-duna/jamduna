@@ -9,7 +9,7 @@
   <button id="connect">Connect WebSocket</button>
 
   <h3>Endpoint:</h3>
-  <code>ws://dot-0.jamduna.org:10800/ws</code>
+  <code>ws://coretime.jamduna.org:19800/ws</code>
 
   <h2>subscribeFinalizedBlock</h2>
   <button id="subscribeBestBlock">Subscribe Best Block</button>
@@ -59,7 +59,7 @@
     }
 
     document.getElementById("connect").onclick = () => {
-      socket = new WebSocket("ws://dot-0.jamduna.org:10800/ws");
+      socket = new WebSocket("ws://coretime.jamduna.org:19800/ws");
 
       socket.onopen = () => console.log("WebSocket connected.");
       socket.onmessage = (event) => console.log("Received:", event.data);
@@ -68,16 +68,16 @@
     };
 
     document.getElementById("subscribeBestBlock").onclick = () => {
-      sendMessage({ method: "subscribeBestBlock" });
+      sendMessage({ "jsonrpc":"2.0", method: "subscribeBestBlock", params: [], id: 1 });
+    };
+
+    document.getElementById("subscribeStatistics").onclick = () => {
+      sendMessage({"jsonrpc":"2.0", method: "subscribeStatistics", params: [], id: 1 });
     };
 
     document.getElementById("subscribeFinalizedBlock").onclick = () => {
       const dummyHash = "0x097246bfb1819dc427e503faaa41f1cb7af52bbfbea6254498ff33a44aab1edc";
       sendMessage({ method: "subscribeFinalizedBlock", params: { headerHash: dummyHash } });
-    };
-
-    document.getElementById("subscribeStatistics").onclick = () => {
-      sendMessage({ method: "subscribeStatistics", params: {} });
     };
 
     document.getElementById("subscribeWorkPackage").onclick = () => {

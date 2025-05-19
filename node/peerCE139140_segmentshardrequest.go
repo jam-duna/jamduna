@@ -155,7 +155,6 @@ func (p *Peer) SendSegmentShardRequest(
 	if err != nil {
 		return nil, nil, fmt.Errorf("openStream[%d]: %w", code, err)
 	}
-	defer stream.Close()
 
 	req := &JAMSNPSegmentShardRequest{
 		ErasureRoot:  erasureRoot,
@@ -166,12 +165,16 @@ func (p *Peer) SendSegmentShardRequest(
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
+		stream.Close()
 		return nil, nil, fmt.Errorf("ToBytes[SegmentShardRequest]: %w", err)
 	}
 
+	// --> [Erasure Root ++ Shard Index ++ len++[Segment Index]]
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return nil, nil, fmt.Errorf("sendQuicBytes[%d]: %w", code, err)
 	}
+	// --> FIN
+	stream.Close()
 
 	// <-- [Segment Shard]
 	segmentShards, err = receiveQuicBytes(ctx, stream, p.PeerID, code)

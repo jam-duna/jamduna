@@ -98,20 +98,23 @@ func (p *Peer) SendFullShardRequest(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("openStream[CE137]: %w", err)
 	}
-	defer stream.Close()
 
+	// --> Erasure Root ++ Shard Index
 	req := &JAMSNPShardRequest{
 		ErasureRoot: erasureRoot,
 		ShardIndex:  shardIndex,
 	}
 	reqBytes, err := req.ToBytes()
 	if err != nil {
+		stream.Close()
 		return nil, nil, nil, fmt.Errorf("ToBytes[ShardRequest]: %w", err)
 	}
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return nil, nil, nil, fmt.Errorf("sendQuicBytes[CE137]: %w", err)
 	}
+	//--> FIN
+	stream.Close()
 
 	// <-- Bundle Shard
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)

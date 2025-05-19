@@ -3,7 +3,9 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"reflect"
 	"time"
 
@@ -29,9 +31,8 @@ Builder -> Guarantor
 */
 
 type JAMSNPWorkPackage struct {
-	CoreIndex   uint16                `json:"core_index"`
-	WorkPackage types.WorkPackage     `json:"work_package"`
-	Extrinsic   types.ExtrinsicsBlobs `json:"extrinsics"`
+	CoreIndex   uint16            `json:"core_index"`
+	WorkPackage types.WorkPackage `json:"work_package"`
 }
 
 // ToBytes serializes the JAMSNPWorkPackage struct into a byte array
@@ -66,26 +67,20 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 	decodedData := dd.(JAMSNPWorkPackage)
 	pkg.CoreIndex = decodedData.CoreIndex
 	pkg.WorkPackage = decodedData.WorkPackage
-	pkg.Extrinsic = decodedData.Extrinsic
 
 	return nil
 }
 
-// TODO: review
 func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, core_idx uint16) (err error) {
 	if pkg.RefineContext.LookupAnchorSlot == 1 {
 		if len(pkg.RefineContext.Prerequisites) == 0 {
 			// TODO "Prerequisite is empty"
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("failed to get self core index: %w", err)
-	}
 
 	req := JAMSNPWorkPackage{
 		CoreIndex:   core_idx,
 		WorkPackage: pkg,
-		Extrinsic:   extrinsics,
 	}
 	// Here need to setup some kind of verification for the work package
 
@@ -98,13 +93,40 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
+	//--> Core Index ++ Work Package
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
+		stream.Close()
 		return err
 	}
 
-	log.Trace(debugG, "submitted Workpackage to core", "p", p.String(), "len", len(reqBytes), "core", core_idx)
+	//--> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
+	extrinsicsBytes, err := types.Encode(extrinsics)
+	if err != nil {
+		stream.Close()
+		return err
+	}
+
+	// send length of extrinsicsBytes
+	msgLen := uint32(len(extrinsicsBytes))
+	lenBuf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lenBuf, msgLen)
+	_, err = stream.Write(lenBuf)
+	if err != nil {
+		log.Error(module, "sendWorkPackageSubmission3", "err", err)
+		stream.Close()
+		return err
+	}
+
+	_, err = stream.Write(extrinsicsBytes)
+	if err != nil {
+		log.Error(module, "sendWorkPackageSubmission4", "err", err)
+		stream.Close()
+		return err
+	}
+
+	//--> FIN
+	stream.Close()
 
 	return nil
 }
@@ -112,6 +134,7 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 
+	// --> Core Index ++ Work Package
 	var newReq JAMSNPWorkPackage
 
 	// Deserialize byte array back into the struct
@@ -119,6 +142,36 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	if err != nil {
 		log.Error(debugG, "onWorkPackageSubmission:FromBytes", "err", err)
 		return fmt.Errorf("onWorkPackageSubmission: decode failed: %w", err)
+	}
+
+	// --> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
+	// Read message length (4 bytes)
+	msgLenBytes := make([]byte, 4)
+	if _, err := io.ReadFull(stream, msgLenBytes); err != nil {
+		log.Trace(module, "DispatchIncomingQUICStream - length prefix", "err", err)
+		_ = stream.Close()
+		return err
+	}
+	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
+
+	// Read message body, which is the encoded extrinsics
+	extrinsicsBytes := make([]byte, msgLen)
+	if _, err := io.ReadFull(stream, extrinsicsBytes); err != nil {
+		log.Error(module, "onWorkPackageSubmission4", "err", err)
+		stream.CancelRead(ErrCECode)
+		_ = stream.Close()
+		return err
+	}
+	// map extrinsicsBytes to extrinsics
+	ext, _, err := types.Decode(extrinsicsBytes, reflect.TypeOf(types.ExtrinsicsBlobs{}))
+	if err != nil {
+		log.Error(module, "onWorkPackageSubmission4a", "err", err)
+		return fmt.Errorf("error in decoding data: %w", err)
+	}
+	extrinsics := ext.(types.ExtrinsicsBlobs)
+	if err != nil {
+		log.Error(module, "onWorkPackageSubmission4b", "err", err)
+		return fmt.Errorf("error in decoding data: %w", err)
 	}
 
 	s := n.statedb
@@ -146,7 +199,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
 		workPackage:        newReq.WorkPackage,
 		coreIndex:          newReq.CoreIndex,
-		extrinsics:         newReq.Extrinsic,
+		extrinsics:         extrinsics,
 		addTS:              time.Now().Unix(),
 		nextAttemptAfterTS: time.Now().Unix(),
 	})
