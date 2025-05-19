@@ -426,7 +426,8 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	log.Info(module, fmt.Sprintf("NewNode [N%v]", id), "spec", chainspec.ID, "addr", addr, "dataDir", dataDir)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
-	// fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir)
+	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir) //REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
+	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	store, err := storage.NewStateDBStorage(levelDBPath)

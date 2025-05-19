@@ -566,15 +566,14 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 		if err == nil {
 			return common.BytesToHash(ticket_id), nil
 		} else {
-			fmt.Printf("ERR %v\n", err)
-			fmt.Printf("target_epoch_randomness: %v\n", targetEpochRandomness)
-			fmt.Printf("attempt: %d\n", t.Attempt)
-			fmt.Printf("ticket_signature: %x\n", t.Signature)
+			ticketID, _ := t.TicketID()
+			log.Warn(module, "Failed to verify ticket", "ticket_id", ticketID, "attempt", t.Attempt, "target_epoch_randomness", targetEpochRandomness, "ERR", err)
+			log.Warn(module, "Failed to verify ticket", "ticket_id", ticketID, "ticket_signature", t.String())
 		}
 	}
 
-	ticketID, _ := t.TicketID()
-	fmt.Printf("Failed to validate ticket %s | %s\n", ticketID.String(), t.String())
+	//ticketID, _ := t.TicketID()
+	//fmt.Printf("Failed to validate ticket %s | %s\n", ticketID.String(), t.String())
 	return common.Hash{}, jamerrors.ErrTBadRingProof
 }
 
