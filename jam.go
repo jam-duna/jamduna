@@ -385,7 +385,7 @@ func main() {
 				os.Exit(1)
 			}
 			n.SetServiceDir("/services")
-			n.WriteDebugFlag = false
+			n.WriteDebugFlag = true
 			storage, err := n.GetStorage()
 			if err != nil {
 				fmt.Printf("GetStorage Err:%s", err.Error())

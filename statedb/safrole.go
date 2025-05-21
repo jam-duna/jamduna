@@ -57,11 +57,11 @@ func SafroleBasicStateFromBytes(data []byte) (SafroleBasicState, error) {
 }
 
 func (s *SafroleState) GetNextRingCommitment() ([]byte, error) {
-	ringsetBytes := s.GetRingSet("Next")
+	ringsetBytes, ringSize := s.GetRingSet("Next")
 	if len(ringsetBytes) == 0 {
 		return nil, fmt.Errorf("Not ready yet")
 	}
-	nextRingCommitment, err := bandersnatch.GetRingCommitment(ringsetBytes)
+	nextRingCommitment, err := bandersnatch.GetRingCommitment(ringSize, ringsetBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +445,7 @@ func (s *SafroleState) SetValidatorData(validatorsData []byte, phase string) err
 	return nil
 }
 
-func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
+func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte, ringSize int) {
 	var validatorSet []types.Validator
 	// 4 authorities[pre, curr, next, designed]
 	switch phase {
@@ -458,13 +458,14 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte) {
 	case "Designed": //N+2
 		validatorSet = s.DesignedValidators
 	}
+	ringSize = len(validatorSet)
 	pubkeys := []bandersnatch.BanderSnatchKey{}
 	for _, v := range validatorSet {
 		pubkey := bandersnatch.BanderSnatchKey(common.ConvertToSlice(v.Bandersnatch))
 		pubkeys = append(pubkeys, pubkey)
 	}
 	ringsetBytes = bandersnatch.InitRingSet(pubkeys)
-	return ringsetBytes
+	return ringsetBytes, ringSize
 }
 
 func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) ([]types.Ticket, []uint32) {
@@ -515,9 +516,9 @@ func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, ta
 	if len(s.NextValidators) == 0 {
 		return types.Ticket{}, 0, fmt.Errorf("No validators in NextValidators")
 	}
-	ringsetBytes := s.GetRingSet("Next")
+	ringsetBytes, ringSize := s.GetRingSet("Next")
 
-	signature, _, err := bandersnatch.RingVrfSign(secret, ringsetBytes, ticket_vrf_input, auxData)
+	signature, _, err := bandersnatch.RingVrfSign(ringSize, secret, ringsetBytes, ticket_vrf_input, auxData)
 	if err != nil {
 		return types.Ticket{}, 0, fmt.Errorf("signTicket failed")
 	}
@@ -552,8 +553,8 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 
 		//step 1: verify envelope's VRFSignature using ring verifier
 		//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-		ringsetBytes := s.GetRingSet("Next")
-		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
+		ringsetBytes, ringSize := s.GetRingSet("Next")
+		ticket_id, err := bandersnatch.RingVrfVerify(ringSize, ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
 			return common.BytesToHash(ticket_id), nil
 		}
@@ -561,8 +562,8 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 		//step 1: verify envelope's VRFSignature using ring verifier
 		//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-		ringsetBytes := s.GetRingSet("Next")
-		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
+		ringsetBytes, ringSize := s.GetRingSet("Next")
+		ticket_id, err := bandersnatch.RingVrfVerify(ringSize, ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
 			return common.BytesToHash(ticket_id), nil
 		} else {
@@ -587,8 +588,8 @@ func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int
 		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 		//step 1: verify envelope's VRFSignature using ring verifier
 		//RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte)
-		ringsetBytes := s.GetRingSet("Next")
-		ticket_id, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
+		ringsetBytes, ringSize := s.GetRingSet("Next")
+		ticket_id, err := bandersnatch.RingVrfVerify(ringSize, ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
 			//fmt.Printf("ticket_id: %x validated using entropy[%v]\n", ticket_id, i, targetEpochRandomness)
 			return common.BytesToHash(ticket_id), i, nil
@@ -1549,8 +1550,8 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 	for _, t := range tickets {
 		targetEpochRandomness := new_sf.Entropy[2]
 		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
-		ringsetBytes := old_sf.GetRingSet("Next")
-		_, err := bandersnatch.RingVrfVerify(ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
+		ringsetBytes, ringSize := old_sf.GetRingSet("Next")
+		_, err := bandersnatch.RingVrfVerify(ringSize, ringsetBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err != nil {
 			return fmt.Errorf("VRFSignature verification failed")
 		}

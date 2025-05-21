@@ -23,23 +23,44 @@ const (
 	GFPointsPerPage           = 2052
 )
 
-// // loaded via tags
+// loaded via tags
+/*
+const (
+	Network                     = configs.Network
+	TotalValidators             = configs.TotalValidators
+	TotalCores                  = configs.TotalCores
+	TicketEntriesPerValidator   = configs.TicketEntriesPerValidator
+	EpochLength                 = configs.EpochLength
+	TicketSubmissionEndSlot     = configs.TicketSubmissionEndSlot
+	MaxTicketsPerExtrinsic      = configs.MaxTicketsPerExtrinsic
+	MaxAuthorizationPoolItems   = configs.MaxAuthorizationPoolItems   // O = 8: The maximum number of items in the authorizations pool.
+	MaxAuthorizationQueueItems  = configs.MaxAuthorizationQueueItems  // Q = 80: The maximum number of items in the authorizations queue.
+	ValidatorCoreRotationPeriod = configs.ValidatorCoreRotationPeriod // R = 10: The rotation period of validator-core assignments, in timeslots.
+	SegmentSize                 = configs.SegmentSize
+	ECPieceSize                 = configs.ECPieceSize
+	NumECPiecesPerSegment       = configs.NumECPiecesPerSegment
+	PreimageExpiryPeriod        = configs.PreimageExpiryPeriod
+	RecoveryThreshold           = configs.RecoveryThreshold
+)
+*/
+
 // const (
-// 	Network                     = configs.Network
-// 	TotalValidators             = configs.TotalValidators
-// 	TotalCores                  = configs.TotalCores
-// 	TicketEntriesPerValidator   = configs.TicketEntriesPerValidator
-// 	EpochLength                 = configs.EpochLength
-// 	TicketSubmissionEndSlot     = configs.TicketSubmissionEndSlot
-// 	MaxTicketsPerExtrinsic      = configs.MaxTicketsPerExtrinsic
-// 	MaxAuthorizationPoolItems   = configs.MaxAuthorizationPoolItems   // O = 8: The maximum number of items in the authorizations pool.
-// 	MaxAuthorizationQueueItems  = configs.MaxAuthorizationQueueItems  // Q = 80: The maximum number of items in the authorizations queue.
-// 	ValidatorCoreRotationPeriod = configs.ValidatorCoreRotationPeriod // R = 10: The rotation period of validator-core assignments, in timeslots.
-// 	SegmentSize                 = configs.SegmentSize
-// 	ECPieceSize                 = configs.ECPieceSize
-// 	NumECPiecesPerSegment       = configs.NumECPiecesPerSegment
-// 	PreimageExpiryPeriod        = configs.PreimageExpiryPeriod
-// 	RecoveryThreshold           = configs.RecoveryThreshold
+// 	// Full testnet : Tickets only
+// 	Network                     = "full"
+// 	TotalValidators             = 1023 // V: The total number of validators.
+// 	TotalCores                  = 341  // C: The total number of cores.
+// 	TicketEntriesPerValidator   = 2    // N: The number of ticket entries per validator.
+// 	EpochLength                 = 600  // E: The length of an epoch in timeslots.
+// 	TicketSubmissionEndSlot     = 500  // Y: The number of slots into an epoch at which ticket-submission ends.
+// 	MaxTicketsPerExtrinsic      = 16   // K: The maximum number of tickets which may be submitted in a single extrinsic.
+// 	MaxAuthorizationPoolItems   = 8    // O: The maximum number of items in the authorizations pool.
+// 	MaxAuthorizationQueueItems  = 80   // Q: The maximum number of items in the authorizations queue.
+// 	ValidatorCoreRotationPeriod = 10   // R: The rotation period of validator-core assignments, in timeslots.
+
+// 	SegmentSize           = 4104  // W_G
+// 	ECPieceSize           = 684   // W_E
+// 	NumECPiecesPerSegment = 6     // W_P
+// 	PreimageExpiryPeriod  = 28800 // D
 // )
 
 const (
@@ -66,6 +87,18 @@ const (
 
 const (
 	SecondsPerEpoch = EpochLength * SecondsPerSlot
+)
+
+const (
+	ValidatorsSuperMajority = int(2*TotalValidators/3 + 1)
+	WonkyTrueThreshold      = int(TotalValidators / 3)
+	WonkyFalseThreshold     = int(TotalValidators/3 + 1)
+)
+
+// codec
+const (
+	validators_super_majority = TotalValidators*2/3 + 1
+	Avail_bitfield_bytes      = (TotalCores + 7) / 8
 )
 
 // time mode
@@ -108,12 +141,6 @@ const (
 	QuicOverallTimeout    = 10000 * time.Millisecond
 )
 
-const (
-	ValidatorsSuperMajority = int(2*TotalValidators/3 + 1)
-	WonkyTrueThreshold      = int(TotalValidators / 3)
-	WonkyFalseThreshold     = int(TotalValidators/3 + 1)
-)
-
 //X: Signing Contexts.
 
 const (
@@ -127,12 +154,6 @@ const (
 	X_U     = "jam_audit"
 	X_True  = "jam_valid"
 	X_False = "jam_invalid"
-)
-
-// codec
-const (
-	validators_super_majority = TotalValidators*2/3 + 1
-	Avail_bitfield_bytes      = (TotalCores + 7) / 8
 )
 
 // extrinsic tidy up constants

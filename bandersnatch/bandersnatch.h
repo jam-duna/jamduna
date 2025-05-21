@@ -50,6 +50,7 @@ int ring_vrf_sign(
     size_t private_key_len,
     const unsigned char* ring_set_bytes,
     size_t ring_set_len,
+    size_t ring_size,
     const unsigned char* vrf_input_data_bytes,
     size_t vrf_input_data_len,
     const unsigned char* aux_data_bytes,
@@ -66,6 +67,7 @@ int ring_vrf_sign(
 void get_ring_commitment(
     const unsigned char* ring_set_bytes,
     size_t ring_set_len,
+    size_t ring_size,
     unsigned char* commitment,
     size_t commitment_len
 );
@@ -73,6 +75,7 @@ void get_ring_commitment(
 int ring_vrf_verify(
     const unsigned char* pubkeys_bytes,
     size_t pubkeys_length,
+    size_t ring_size,
     const unsigned char* signature_bytes,
     size_t signature_len,
     const unsigned char* vrf_input_data_bytes,

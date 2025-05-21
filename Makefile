@@ -172,7 +172,7 @@ run_polkajam_all:
 
 run_polkajam_dom: jam_clean
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@bin/jamduna-linux-amd64 run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json &
+	@$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json > logs/jamduna-5.log 2>&1&
 	sleep 4
 	@for i in 0 1 2 3 4; do $(POLKAJAM_BIN) --chain chainspecs/polkajam-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) & done
 
@@ -181,7 +181,7 @@ run_jamduna_dom: jam_clean
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
 	@# validator 5 uses POLKAJAM_BIN
-	@$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 &
+	@RUST_LOG=jam_node::net=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 > logs/polkajam-5.log 2>&1&
 	@# validator 1 ~ NUM_NODES-1 use jamduna
 	@for i in $$(seq 0 $$(($(NUM_NODES) - 2))); do \
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \

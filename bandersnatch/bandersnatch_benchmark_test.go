@@ -14,11 +14,13 @@ func BenchmarkRingVRFSign_1MB(b *testing.B)  { benchmarkSingleSignRingVRF(b, 102
 func BenchmarkIETFVRFSign_10B(b *testing.B)  { benchmarkSingleSignIETFVRF(b, 10, 10) }
 func BenchmarkIETFVRFSign_100B(b *testing.B) { benchmarkSingleSignIETFVRF(b, 100, 100) }
 func BenchmarkIETFVRFSign_1MB(b *testing.B)  { benchmarkSingleSignIETFVRF(b, 1024, 1024) }
+
 func benchmarkSingleSignRingVRF(b *testing.B, aux_data_len int, vrfinput_len int) {
-	seeds := make([][]byte, 6)
-	pubKeys := make([]BanderSnatchKey, 6)
-	privateKeys := make([]BanderSnatchSecret, 6)
-	for i := 0; i < 6; i++ {
+	ringSize := 6
+	seeds := make([][]byte, ringSize)
+	pubKeys := make([]BanderSnatchKey, ringSize)
+	privateKeys := make([]BanderSnatchSecret, ringSize)
+	for i := 0; i < ringSize; i++ {
 		seeds[i] = generateRandomSeed()
 		banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
 		if err != nil {
@@ -49,7 +51,7 @@ func benchmarkSingleSignRingVRF(b *testing.B, aux_data_len int, vrfinput_len int
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, err := RingVrfSign(privateKeys[0], ringSet, vrfinput, aux_data)
+		_, _, err := RingVrfSign(ringSize, privateKeys[0], ringSet, vrfinput, aux_data)
 		if err != nil {
 			b.Fatalf("RingVrfSign failed: %v", err)
 		}
@@ -85,10 +87,11 @@ func benchmarkSingleSignIETFVRF(b *testing.B, aux_data_len int, vrfinput_len int
 	}
 }
 func BenchmarkGetRingCommitment(b *testing.B) {
-	seeds := make([][]byte, 6)
-	pubKeys := make([]BanderSnatchKey, 6)
-	privateKeys := make([]BanderSnatchSecret, 6)
-	for i := 0; i < 6; i++ {
+	ringSize := 6
+	seeds := make([][]byte, ringSize)
+	pubKeys := make([]BanderSnatchKey, ringSize)
+	privateKeys := make([]BanderSnatchSecret, ringSize)
+	for i := 0; i < ringSize; i++ {
 		seeds[i] = generateRandomSeed()
 		pubKey, err := getBanderSnatchPublicKey(seeds[i])
 		if err != nil {
@@ -107,18 +110,18 @@ func BenchmarkGetRingCommitment(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := GetRingCommitment(ringset)
+		_, err := GetRingCommitment(ringSize, ringset)
 		if err != nil {
 			b.Fatalf("GetRingCommitment failed: %v", err)
 		}
 	}
 }
 
-func getRingSignature() (signature, aux_data, vrfinput, ringset []byte, pubkey BanderSnatchKey, err error) {
-	seeds := make([][]byte, 6)
-	pubKeys := make([]BanderSnatchKey, 6)
-	privateKeys := make([]BanderSnatchSecret, 6)
-	for i := 0; i < 6; i++ {
+func getRingSignature(ringSize int) (signature, aux_data, vrfinput, ringset []byte, pubkey BanderSnatchKey, err error) {
+	seeds := make([][]byte, ringSize)
+	pubKeys := make([]BanderSnatchKey, ringSize)
+	privateKeys := make([]BanderSnatchSecret, ringSize)
+	for i := 0; i < ringSize; i++ {
 		seeds[i] = generateRandomSeed()
 		banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
 		if err != nil {
@@ -150,7 +153,7 @@ func getRingSignature() (signature, aux_data, vrfinput, ringset []byte, pubkey B
 		return nil, nil, nil, nil, pubkey, err
 	}
 
-	signature, _, err = RingVrfSign(signer_private_key, ringSet, vrfinput, aux_data)
+	signature, _, err = RingVrfSign(ringSize, signer_private_key, ringSet, vrfinput, aux_data)
 	if err != nil {
 		return nil, nil, nil, nil, pubkey, err
 	}
@@ -158,7 +161,8 @@ func getRingSignature() (signature, aux_data, vrfinput, ringset []byte, pubkey B
 }
 
 func BenchmarkVRFSignedOutput_ring(b *testing.B) {
-	signature, _, _, _, _, err := getRingSignature()
+	ringSize := 6
+	signature, _, _, _, _, err := getRingSignature(ringSize)
 	if err != nil {
 		b.Fatalf("getRingSignature failed: %v", err)
 	}
@@ -169,13 +173,14 @@ func BenchmarkVRFSignedOutput_ring(b *testing.B) {
 }
 
 func BenchmarkRingVRFVerify(b *testing.B) {
-	signature, aux_data, vrfinput, ringset, _, err := getRingSignature()
+	ringSize := 6
+	signature, aux_data, vrfinput, ringset, _, err := getRingSignature(ringSize)
 	if err != nil {
 		b.Fatalf("getRingSignature failed: %v", err)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := RingVrfVerify(ringset, signature, vrfinput, aux_data)
+		_, err := RingVrfVerify(ringSize, ringset, signature, vrfinput, aux_data)
 		if err != nil {
 			b.Fatalf("Verify failed: %v", err)
 		}

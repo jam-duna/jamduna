@@ -160,7 +160,7 @@ func InitRingSet(ringset []BanderSnatchKey) (ringsetBytes []byte) {
 
 // Anonymous Ring VRF
 // RingVRFSign is Used for tickets submission to sign ticket anonymously. Output and Ring Proof bundled together (as per section 2.2)
-func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxData []byte) ([]byte, []byte, error) {
+func RingVrfSign(ringSize int, privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxData []byte) ([]byte, []byte, error) {
 	sig := make([]byte, RingSignatureLen) // 784 bytes
 	vrfOutput := make([]byte, 32)
 	auxDataL := C.size_t(len(auxData))
@@ -177,7 +177,7 @@ func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxD
 		C.size_t(len(privateKey)),
 		(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
 		C.size_t(len(ringsetBytes)),
-		//C.size_t(proverIdx),
+		C.size_t(ringSize),
 		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
 		C.size_t(len(vrfInputData)),
 		(*C.uchar)(unsafe.Pointer(&auxDataF[0])),
@@ -186,7 +186,6 @@ func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxD
 		C.size_t(len(sig)),
 		(*C.uchar)(unsafe.Pointer(&vrfOutput[0])),
 		C.size_t(len(vrfOutput)),
-		//C.size_t(proverIdx),
 	)
 	if result != 1 {
 		return nil, nil, fmt.Errorf("failed to RingVrfSign")
@@ -195,7 +194,7 @@ func RingVrfSign(privateKey BanderSnatchSecret, ringsetBytes, vrfInputData, auxD
 }
 
 // RingVRFVerify is Used for tickets verification, and returns vrfOutput on success
-func RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte) ([]byte, error) {
+func RingVrfVerify(ringSize int, ringsetBytes []byte, signature, vrfInputData, auxData []byte) ([]byte, error) {
 	vrfOutput := make([]byte, VRFOutputLen)
 	auxDataL := C.size_t(len(auxData))
 	auxDataF := auxData
@@ -209,6 +208,7 @@ func RingVrfVerify(ringsetBytes, signature, vrfInputData, auxData []byte) ([]byt
 	result := C.ring_vrf_verify(
 		(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
 		C.size_t(len(ringsetBytes)),
+		C.size_t(ringSize),
 		(*C.uchar)(unsafe.Pointer(&signature[0])),
 		C.size_t(len(signature)),
 		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
@@ -323,7 +323,7 @@ func VRFSignedOutput(signature []byte) ([]byte, error) {
 	return vrfOutput, nil
 }
 
-func GetRingCommitment(ringsetBytes []byte) ([]byte, error) {
+func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 	if len(ringsetBytes) == 0 {
 		return []byte{}, fmt.Errorf("No ringset")
 	}
@@ -332,6 +332,7 @@ func GetRingCommitment(ringsetBytes []byte) ([]byte, error) {
 	C.get_ring_commitment(
 		(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
 		C.size_t(len(ringsetBytes)),
+		C.size_t(ringSize),
 		(*C.uchar)(unsafe.Pointer(&commitmentBytes[0])),
 		C.size_t(len(commitmentBytes)),
 	)

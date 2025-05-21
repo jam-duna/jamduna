@@ -8,7 +8,7 @@ use bandersnatch::{
 };
 
 
-const RING_SIZE: usize = 6;
+//const RING_SIZE: usize = 6;
 //const RING_SIZE: usize = 1023;
 
 // This is the IETF `Prove` procedure output as described in section 2.2
@@ -28,16 +28,12 @@ struct RingVrfSignature {
     proof: RingProof,
 }
 
-// "Static" ring context data
-fn ring_proof_params() -> &'static RingProofParams {
-    use std::sync::OnceLock;
-    static PARAMS: OnceLock<RingProofParams> = OnceLock::new();
-    PARAMS.get_or_init(|| {
-        use bandersnatch::PcsParams;
-        let buf: &[u8] = include_bytes!("../zcash-srs-2-11-uncompressed.bin");
-        let pcs_params = PcsParams::deserialize_uncompressed_unchecked(&mut &buf[..]).unwrap();
-        RingProofParams::from_pcs_params(RING_SIZE, pcs_params).unwrap()
-    })
+// Construct ring proof parameters for a given ring size
+fn ring_proof_params(ring_size: usize) -> RingProofParams {
+    use bandersnatch::PcsParams;
+    let buf: &[u8] = include_bytes!("../zcash-srs-2-11-uncompressed.bin");
+    let pcs_params = PcsParams::deserialize_uncompressed_unchecked(&mut &buf[..]).unwrap();
+    RingProofParams::from_pcs_params(ring_size, pcs_params).unwrap()
 }
 
 // Construct VRF Input Point from arbitrary data (section 1.2)
@@ -75,7 +71,7 @@ impl Prover {
         let pts: Vec<_> = self.ring.iter().map(|pk| pk.0).collect();
 
         // Proof construction
-        let params = ring_proof_params();
+        let params = ring_proof_params(self.ring.len());
         let prover_key = params.prover_key(&pts);
         let prover = params.prover(prover_key, self.prover_idx); //MK: this is using specific prover. Uestion: can we pass in ANY prover (e.g hardcoding prover0)
         let proof = self.secret.prove(input, output, aux_data, &prover);
@@ -114,7 +110,7 @@ struct Verifier {
 impl Verifier {
     fn new(ring: Vec<Public>) -> Self {
         let pts: Vec<_> = ring.iter().map(|pk| pk.0).collect();
-        let verifier_key = ring_proof_params().verifier_key(&pts);
+        let verifier_key = ring_proof_params(ring.len()).verifier_key(&pts);
         let commitment = verifier_key.commitment();
 
         Self { ring, commitment }
@@ -140,7 +136,7 @@ impl Verifier {
         let input = vrf_input_point(vrf_input_data);
         let output = signature.output;
 
-        let params = ring_proof_params();
+        let params = ring_proof_params(self.ring.len());
         let verifier_key = params.verifier_key(&self.ring.iter().map(|pk| pk.0).collect::<Vec<_>>());
         let verifier = params.verifier(verifier_key);
 
@@ -469,6 +465,7 @@ pub extern "C" fn ring_vrf_sign(
     private_key_len: usize,
     ring_set_bytes: *const c_uchar,
     ring_set_len: usize,
+    ring_size: usize,
     vrf_input_data_bytes: *const c_uchar,
     vrf_input_data_len: usize,
     aux_data_bytes: *const c_uchar,
@@ -502,9 +499,9 @@ pub extern "C" fn ring_vrf_sign(
     // Deserialize the ring set from the provided bytes
     let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
     let mut ring_set: Vec<Public> = Vec::new();
-    let _params = ring_proof_params();
+    let _params = ring_proof_params(ring_size);
     let  padding_point = Public::from(RingProofParams::padding_point());
-    for i in 0..(ring_set_len / 32) {
+    for i in 0..ring_size {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
             padding_point.clone()
@@ -689,6 +686,7 @@ fn ietf_vrf_verify_iml(
 pub extern "C" fn get_ring_commitment(
     ring_set_bytes: *const c_uchar,
     ring_set_len: usize,
+    ring_size: usize,
     commitment: *mut c_uchar,
     commitment_len: usize,
 ) {
@@ -699,9 +697,9 @@ pub extern "C" fn get_ring_commitment(
     // Deserialize the ring set from the provided bytes
     let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
     let mut ring_set: Vec<Public> = Vec::new();
-    let _params = ring_proof_params();
+    let _params = ring_proof_params(ring_size);
     let  padding_point = Public::from(RingProofParams::padding_point());
-    for i in 0..(ring_set_len / 32) {
+    for i in 0..ring_size {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
             padding_point.clone()
@@ -746,6 +744,7 @@ pub extern "C" fn get_ring_commitment(
 pub extern "C" fn ring_vrf_verify(
     pubkeys_bytes: *const c_uchar,
     pubkeys_length: usize,
+    ring_size: usize,
     signature_bytes: *const c_uchar,
     signature_hex_len: usize,
     vrf_input_data_bytes: *const c_uchar,
@@ -782,10 +781,10 @@ pub extern "C" fn ring_vrf_verify(
     */
     // Assuming each pubkey is 32 bytes, split the pubkeys slice into individual pubkeys
     let mut ring_set: Vec<Public> = Vec::new();
-    let _params = ring_proof_params();
+    let _params = ring_proof_params(ring_size);
     let  padding_point = Public::from(RingProofParams::padding_point());
     let pubkeys_slice = unsafe { slice::from_raw_parts(pubkeys_bytes, pubkeys_length) };
-    for i in 0..(pubkeys_length / 32) {
+    for i in 0..ring_size {
         let pubkey_bytes = &pubkeys_slice[i * 32..(i + 1) * 32];
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
             padding_point.clone()
@@ -976,12 +975,13 @@ mod tests {
         use ark_serialize::CanonicalDeserialize;
         use hex;
 
+        let ring_size = 6;
         const SEED_SIZE: usize = 32;
         const SECRET_SIZE: usize = 32;
 
-        // Step 1: Generate RING_SIZE private keys
+        // Step 1: Generate ring_size private keys
         let mut seeds: Vec<[u8; SEED_SIZE]> = Vec::new();
-        for _i in 0..RING_SIZE {
+        for _i in 0..ring_size {
             let mut seed = [0u8; SEED_SIZE];
             for (i, byte) in seed.iter_mut().enumerate() {
                 *byte = i as u8;
@@ -1055,6 +1055,7 @@ mod tests {
             private_keys[prover_idx].len(),
             ring_set_bytes.as_ptr(),
             ring_set_bytes.len(),
+            ring_size,
             vrf_input_data.as_ptr(),
             vrf_input_data.len(),
             aux_data.as_ptr(),
@@ -1074,6 +1075,7 @@ mod tests {
         let result = ring_vrf_verify(
             ring_set_bytes.as_ptr(),
             ring_set_bytes.len(),
+            ring_size,
             signature.as_ptr(),
             signature.len(),
             vrf_input_data.as_ptr(),
@@ -1146,9 +1148,10 @@ mod tests {
 
     #[test]
     fn test_ring_commitment() {
-        // Step 1: Generate RING_SIZE private keys
+        let ring_size = 6;
+        // Step 1: Generate ring_size private keys
         let mut seeds: Vec<[u8; SEED_SIZE]> = Vec::new();
-        for _i in 0..RING_SIZE {
+        for _i in 0..ring_size {
             let mut seed = [0u8; SEED_SIZE];
             for (i, byte) in seed.iter_mut().enumerate() {
                 *byte = i as u8;
@@ -1210,6 +1213,7 @@ mod tests {
         get_ring_commitment(
             ring_set_bytes.as_ptr(),
             ring_set_bytes.len(),
+            ring_size,
             commitment.as_mut_ptr(),
             commitment.len(),
         );

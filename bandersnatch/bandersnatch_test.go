@@ -22,12 +22,13 @@ func generateRandomSeed() []byte {
 }
 
 func TestVRFOperations(t *testing.T) {
-	// Generate 6 different random seeds
-	fmt.Println("TestVRFOperations: Generating 6 random seeds")
-	seeds := make([][]byte, 6)
-	pubKeys := make([]BanderSnatchKey, 6)
-	privateKeys := make([]BanderSnatchSecret, 6)
-	for i := 0; i < 6; i++ {
+	// Generate different random seeds
+	ringSize := 6
+	fmt.Printf("TestVRFOperations: Generating %v random seeds\n", ringSize)
+	seeds := make([][]byte, ringSize)
+	pubKeys := make([]BanderSnatchKey, ringSize)
+	privateKeys := make([]BanderSnatchSecret, ringSize)
+	for i := 0; i < ringSize; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
 		/*
@@ -93,7 +94,7 @@ func TestVRFOperations(t *testing.T) {
 	fmt.Printf("IETF VRF Outputs MATCH!\n")
 
 	// Sign the data with Ring VRF using the third private key
-	ringSignature, ringvrfOutput, err := RingVrfSign(privateKeys[proverIdx], ringSet, vrfInputData, auxData)
+	ringSignature, ringvrfOutput, err := RingVrfSign(ringSize, privateKeys[proverIdx], ringSet, vrfInputData, auxData)
 	if err != nil {
 		t.Fatalf("RingVrfSign failed: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestVRFOperations(t *testing.T) {
 	fmt.Printf("TestVRFOperations Ring Recovered VRFOutput: %x\n", ringRecoveredVRFOutput)
 
 	// Verify the Ring VRF signature
-	ringVrfOutput, err := RingVrfVerify(ringSet, ringSignature, vrfInputData, auxData)
+	ringVrfOutput, err := RingVrfVerify(ringSize, ringSet, ringSignature, vrfInputData, auxData)
 	if err != nil {
 		t.Fatalf("RingVrfVerify failed: %v", err)
 	}
@@ -132,12 +133,13 @@ func TestVRFOperations(t *testing.T) {
 }
 
 func TestVRFOperationsPaddingPoint(t *testing.T) {
-	// Generate 6 different random seeds
-	fmt.Println("TestVRFOperations: Generating 6 random seeds")
-	seeds := make([][]byte, 6)
-	pubKeys := make([]BanderSnatchKey, 6)
-	privateKeys := make([]BanderSnatchSecret, 6)
-	for i := 0; i < 6; i++ {
+	// Generate different random seeds
+	ringSize := 6
+	fmt.Printf("TestVRFOperations: Generating %v random seeds\n", ringSize)
+	seeds := make([][]byte, ringSize)
+	pubKeys := make([]BanderSnatchKey, ringSize)
+	privateKeys := make([]BanderSnatchSecret, ringSize)
+	for i := 0; i < ringSize; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
 		/*
@@ -179,7 +181,7 @@ func TestVRFOperationsPaddingPoint(t *testing.T) {
 	// Use the third private key to sign the data with IETF VRF
 
 	// Sign the data with Ring VRF using the third private key
-	ringSignature, ringvrfOutput, err := RingVrfSign(privateKeys[proverIdx], ringSet, vrfInputData, auxData)
+	ringSignature, ringvrfOutput, err := RingVrfSign(ringSize, privateKeys[proverIdx], ringSet, vrfInputData, auxData)
 	if err != nil {
 		fmt.Printf("err = %v\n", err)
 	}
@@ -192,7 +194,7 @@ func TestVRFOperationsPaddingPoint(t *testing.T) {
 	// fmt.Printf("TestVRFOperations Ring Recovered VRFOutput: %x\n", ringRecoveredVRFOutput)
 
 	// // Verify the Ring VRF signature
-	// ringVrfOutput, err := RingVrfVerify(ringSet, ringSignature, vrfInputData, auxData)
+	// ringVrfOutput, err := RingVrfVerify(ringSize, ringSet, ringSignature, vrfInputData, auxData)
 	// if err != nil {
 	// 	t.Fatalf("RingVrfVerify failed: %v", err)
 	// }
@@ -238,16 +240,17 @@ func getRandomInt(max int) int {
 }
 
 func TestVRFOperationsSimulation(t *testing.T) {
-	// Generate 6 different random seeds
-	fmt.Println("TestVRFOperations: Generating 6 random seeds")
+	// Generate different random seeds
+	ringSize := 6
+	fmt.Printf("TestVRFOperations: Generating %v random seeds\n", ringSize)
 
 	// Perform N iterations
 	iterationCnt := 100
-	for i := 0; i < iterationCnt; i++ {
-		seeds := make([][]byte, 6)
-		pubKeys := make([]BanderSnatchKey, 6)
-		privateKeys := make([]BanderSnatchSecret, 6)
-		for i := 0; i < 6; i++ {
+	for i := ringSize; i < iterationCnt; i++ {
+		seeds := make([][]byte, ringSize)
+		pubKeys := make([]BanderSnatchKey, ringSize)
+		privateKeys := make([]BanderSnatchSecret, ringSize)
+		for i := 0; i < ringSize; i++ {
 			seeds[i] = generateRandomSeed()
 			fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
 			banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
@@ -281,7 +284,7 @@ func TestVRFOperationsSimulation(t *testing.T) {
 		}
 		fmt.Printf("IetfVrfSign -- VRFOutput: %x Signature: %x (%d bytes)\n", ietfvrfOutput, IETFsignature, len(IETFsignature))
 		// Sign the data with Ring VRF
-		ringSignature, ringvrfOutput, err := RingVrfSign(privateKeys[proverIdx], ringSet, vrfInputData, auxData)
+		ringSignature, ringvrfOutput, err := RingVrfSign(ringSize, privateKeys[proverIdx], ringSet, vrfInputData, auxData)
 		if err != nil {
 			fmt.Printf("RingVrfSign failed: %v\n", err)
 			continue
@@ -327,7 +330,7 @@ func TestVRFOperationsSimulation(t *testing.T) {
 				// vrfInputData error
 				// resign on Ring VRF
 				isExpectingError = true
-				ringSignature, ringvrfOutput, err = RingVrfSign(privateKeys[proverIdx], ringSet, introduceError(vrfInputData), auxData)
+				ringSignature, ringvrfOutput, err = RingVrfSign(ringSize, privateKeys[proverIdx], ringSet, introduceError(vrfInputData), auxData)
 				if err != nil {
 					t.Fatalf("RingVrfSign failed: %v", err)
 				}
@@ -353,7 +356,7 @@ func TestVRFOperationsSimulation(t *testing.T) {
 				if !bytes.Equal(ietfvrfOutput, vrfIETF) {
 					fmt.Printf("IETF vrfoutput is not equal when we change the aux data\n")
 				}
-				_, vrfRing, err := RingVrfSign(privateKeys[proverIdx], ringSet, vrfInputData, ramdomAuxData)
+				_, vrfRing, err := RingVrfSign(ringSize, privateKeys[proverIdx], ringSet, vrfInputData, ramdomAuxData)
 				if err != nil {
 					t.Fatalf("RingVrfSign failed: %v", err)
 				}
@@ -410,7 +413,7 @@ func TestVRFOperationsSimulation(t *testing.T) {
 		fmt.Printf("Ring Recovered VRFOutput: %x\n", ringRecoveredVRFOutput)
 
 		// Verify the Ring VRF signature
-		ringVrfOutput, ErrRingVerify := RingVrfVerify(ringSet, ringSignature, vrfInputData, auxData)
+		ringVrfOutput, ErrRingVerify := RingVrfVerify(ringSize, ringSet, ringSignature, vrfInputData, auxData)
 		fmt.Printf("Ring VRF Output: %x\n", ringVrfOutput)
 		var ErrVRFoutput error
 		if !bytes.Equal(ietfvrfOutput, ringVrfOutput) {
@@ -438,12 +441,13 @@ func TestVRFOperationsSimulation(t *testing.T) {
 }
 
 func TestRingCommitment(t *testing.T) {
-	// Generate 6 different random seeds
+	// Generate n different random seeds
 	fmt.Println("TestRingCommitment: Generating 6 random seeds")
-	seeds := make([][]byte, 6)
-	pubKeys := make([]BanderSnatchKey, 6)
-	privateKeys := make([]BanderSnatchSecret, 6)
-	for i := 0; i < 6; i++ {
+	ringSize := 6
+	seeds := make([][]byte, ringSize)
+	pubKeys := make([]BanderSnatchKey, ringSize)
+	privateKeys := make([]BanderSnatchSecret, ringSize)
+	for i := 0; i < ringSize; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestRingCommitment seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
 		pubKey, err := getBanderSnatchPublicKey(seeds[i])
@@ -465,11 +469,11 @@ func TestRingCommitment(t *testing.T) {
 		ringSet = append(ringSet, pubKey.Bytes()...)
 	}
 	invalidRingSet := append(extraByte, ringSet...)
-	ringCommitment, err := GetRingCommitment(ringSet)
+	ringCommitment, err := GetRingCommitment(ringSize, ringSet)
 	if err != nil {
 		t.Fatalf("RingCommitment failed: %v", err)
 	}
-	inValidRingCommitment, err := GetRingCommitment(invalidRingSet)
+	inValidRingCommitment, err := GetRingCommitment(ringSize, invalidRingSet)
 	if err == nil {
 		t.Fatalf("invalidRingSet(len=%v) should fail RingCommitment %v\n", len(inValidRingCommitment), inValidRingCommitment)
 	}
@@ -478,11 +482,13 @@ func TestRingCommitment(t *testing.T) {
 }
 
 func TestVRFSign(t *testing.T) {
-	// Generate 6 different random seeds
-	seeds := make([][]byte, 6)
-	pubKeys := make([]BanderSnatchKey, 6)
-	privateKeys := make([]BanderSnatchSecret, 6)
-	for i := 0; i < 6; i++ {
+	// Generate different random seeds
+	ringSize := 6
+	fmt.Printf("TestVRFSign: Generating %v random seeds\n", ringSize)
+	seeds := make([][]byte, ringSize)
+	pubKeys := make([]BanderSnatchKey, ringSize)
+	privateKeys := make([]BanderSnatchSecret, ringSize)
+	for i := 0; i < ringSize; i++ {
 		seeds[i] = generateRandomSeed()
 		fmt.Printf("TestVRFOperations seed %d: %s\n", i, hex.EncodeToString(seeds[i]))
 		banderSnatch_pub, banderSnatch_priv, err := InitBanderSnatchKey(seeds[i])
@@ -510,7 +516,7 @@ func TestVRFSign(t *testing.T) {
 	// Sign the data with Ring VRF
 	for i := 0; i < 10; i++ {
 		// Sign the data with Ring VRF using the third private key
-		ringSignature, ringvrfOutput, err := RingVrfSign(privateKeys[proverIdx], ringSet, vrfInputData, auxData)
+		ringSignature, ringvrfOutput, err := RingVrfSign(ringSize, privateKeys[proverIdx], ringSet, vrfInputData, auxData)
 		if err != nil {
 			fmt.Printf("RingVrfSign failed: %v\n", err)
 			continue
