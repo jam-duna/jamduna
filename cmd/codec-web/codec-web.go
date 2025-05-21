@@ -31,6 +31,14 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var block types.Block
 		err = json.Unmarshal(input, &block)
 		obj = block
+	case "Header":
+		var header types.BlockHeader
+		err = json.Unmarshal(input, &header)
+		obj = header
+	case "Extrinsic":
+		var extrinsic types.ExtrinsicData
+		err = json.Unmarshal(input, &extrinsic)
+		obj = extrinsic
 	case "Ticket":
 		var ticket types.Ticket
 		err = json.Unmarshal(input, &ticket)
@@ -187,6 +195,10 @@ func decodeapi(objectType, input string) (string, error) {
 	switch objectType {
 	case "Block":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Block{}))
+	case "Header":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.BlockHeader{}))
+	case "Extrinsic":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.ExtrinsicData{}))
 	case "Ticket":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Ticket{}))
 	case "Guarantee":

@@ -51,7 +51,7 @@ func GetBlockFromAuthInput(input AuthInput) *types.Block {
 	for _, r := range input.Reports {
 		eg = append(eg, types.Guarantee{
 			Report: types.WorkReport{
-				CoreIndex:      r.CoreIndex,
+				CoreIndex:      uint(r.CoreIndex),
 				AuthorizerHash: r.AuthorizerHash,
 			},
 			Slot: input.Slot,

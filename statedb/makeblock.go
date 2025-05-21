@@ -123,7 +123,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 			continue
 		}
 		wph := g.Report.GetWorkPackageHash()
-		coreIndex := g.Report.CoreIndex
+		coreIndex := uint16(g.Report.CoreIndex)
 		_, ok := p_w[wph]
 		_, ok2 := p_c[coreIndex]
 		if !ok && !ok2 {

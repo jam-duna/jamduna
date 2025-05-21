@@ -112,7 +112,7 @@ func (ep *ExtrinsicPool) AddGuaranteeToPool(guarantee Guarantee) error {
 	if _, exists := ep.queuedGuarantees[guarantee.Slot]; !exists {
 		ep.queuedGuarantees[guarantee.Slot] = make(map[uint16]*Guarantee)
 	}
-	ep.queuedGuarantees[guarantee.Slot][guarantee.Report.CoreIndex] = &guarantee
+	ep.queuedGuarantees[guarantee.Slot][uint16(guarantee.Report.CoreIndex)] = &guarantee
 	return nil // Success
 }
 
@@ -152,7 +152,7 @@ func (ep *ExtrinsicPool) RemoveOldGuarantees(guarantee Guarantee) error {
 	ep.guaranteeMutex.Lock()
 	defer ep.guaranteeMutex.Unlock()
 	if slotMap, exists := ep.queuedGuarantees[guarantee.Slot]; exists {
-		delete(slotMap, guarantee.Report.CoreIndex)
+		delete(slotMap, uint16(guarantee.Report.CoreIndex))
 		if len(slotMap) == 0 {
 			delete(ep.queuedGuarantees, guarantee.Slot)
 		}

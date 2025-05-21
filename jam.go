@@ -242,6 +242,23 @@ func main() {
 	}
 	// gen-spec flag used
 
+	// test case : ./jam print-spec chainspecs.json
+	var printSpecCmd = &cobra.Command{
+		Use:   "print-spec <input.json>",
+		Short: "Generate new chain spec from the spec config",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			inputFile := args[0]
+			chainSpecData, err := chainspecs.ReadSpec(inputFile)
+			if err != nil {
+				fmt.Printf("ReadSpec ERR %s", err)
+				os.Exit(1)
+			}
+			node.PrintSpec(chainSpecData)
+		},
+	}
+	// gen-spec flag used
+
 	// run node command
 	var runCmd = &cobra.Command{
 		Use:   "run",
@@ -280,7 +297,9 @@ func main() {
 			now := time.Now()
 			loc := now.Location()
 			log.InitLogger(logLevel)
-			//log.EnableModule(log.BlockMonitoring)
+			log.EnableModule(log.PvmAuthoring)
+			log.EnableModule(log.FirstGuarantorOrAuditor)
+			log.EnableModule(log.GeneralAuthoring)
 			var peers []string
 			var peerList map[uint16]*node.Peer
 
@@ -298,9 +317,16 @@ func main() {
 				os.Exit(1)
 			}
 			for i, v := range validators {
+				ip_addr, port, err := common.MetadataToAddress(v.Metadata[:])
+				peerAddr := fmt.Sprintf("127.0.0.1:%d", 40000+i)
+				if err == nil {
+					peerAddr = fmt.Sprintf("%s:%d", ip_addr, port)
+				} else {
+					fmt.Printf("Error extracting metadata: %s, using default setting...\n", err)
+				}
 				peerList[uint16(i)] = &node.Peer{
 					PeerID:    uint16(i),
-					PeerAddr:  fmt.Sprintf("127.0.0.1:%d", 40000+i), // TODO: use the metadata instead, do not use bootnodes
+					PeerAddr:  peerAddr,
 					Validator: v,
 				}
 			}
@@ -404,6 +430,8 @@ func main() {
 	rootCmd.AddCommand(runCmdSTF)
 	rootCmd.AddCommand(testRefineCmd)
 	rootCmd.AddCommand(genSpecCmd)
+	rootCmd.AddCommand(printSpecCmd)
+
 	// parse the persistent flags (Global flags)
 	rootCmd.PersistentFlags().Parse(os.Args[1:])
 	if version {
@@ -430,7 +458,7 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 	}
 	seed = seed[:32]
 	// generate the validator from the seed
-	selfSecrets, err := statedb.InitValidatorSecret(seed, seed, seed, "")
+	selfSecrets, err := statedb.InitValidatorSecret(seed, seed, seed, []byte{})
 	if err != nil {
 		fmt.Printf("CheckValidatorInfo err %v\n", err)
 		os.Exit(1)
@@ -485,7 +513,7 @@ func GenerateValidatorSecretSet(numNodes int, save bool, dataDir ...string) ([]t
 		bandersnatch_seed := seed_i
 		ed25519_seed := seed_i
 		bls_seed := seed_i
-		metadata := ""
+		metadata := []byte{}
 		//metadata, _ := generateMetadata(i) // this is NOT used by other teams. somehow we agreed on empty metadata for now
 
 		validator, err := statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
@@ -506,7 +534,7 @@ func GenerateValidatorSecretSet(numNodes int, save bool, dataDir ...string) ([]t
 }
 func generateSelfValidatorPubKey(seed []byte) (types.Validator, error) {
 	// Generate the validator public key from the seed
-	validator, err := statedb.InitValidator(seed, seed, seed, "")
+	validator, err := statedb.InitValidator(seed, seed, seed, []byte{})
 	if err != nil {
 		return types.Validator{}, fmt.Errorf("failed to init validator %v", err)
 	}
@@ -606,6 +634,7 @@ func getValidatorFromChainSpec(network_file chainspecs.ChainSpec) ([]types.Valid
 	currValidators := currValidatorRaw.(types.Validators)
 	return currValidators, nil
 }
+
 func flagDescription(main string, options map[string]string) string {
 	var b strings.Builder
 	b.WriteString(main + "\nPossible values:\n")

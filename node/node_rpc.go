@@ -690,7 +690,7 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	log.RecordLogs()
 	log.EnableModule(log.FirstGuarantorOrAuditor)
 
-	workReport2, _, wr_pvm_elapsed, err := j.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, true)
+	workReport2, _, wr_pvm_elapsed, err := j.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, true)
 	if err != nil {
 		return err
 	}

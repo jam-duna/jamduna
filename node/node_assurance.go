@@ -48,7 +48,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	spec := g.Report.AvailabilitySpec
 	coredIdx := g.Report.CoreIndex
 	vIdx := n.id
-	shardIdx := ComputeShardIndex(coredIdx, vIdx) // shardIdx != validatorIdx
+	shardIdx := ComputeShardIndex(uint16(coredIdx), vIdx) // shardIdx != validatorIdx
 
 	const maxRetries = 3
 	var bundleShard []byte
@@ -62,10 +62,15 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 
 		bundleShard, exportedShards, encodedPath, err = n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, shardIdx)
 		if err == nil {
+			log.Info(debugDA, "assureData: SendFullShardRequest success",
+				"coreIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx,
+				"erasureRoot", spec.ErasureRoot,
+				"guarantor", guarantor,
+				"bundleShard", fmt.Sprintf("%x", bundleShard))
 			break
 		}
 		log.Warn(debugDA, "assureData: SendFullShardRequest attempt failed",
-			"coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx,
+			"coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx,
 			"attempt", attempt, "n", n.String(), "erasureRoot", spec.ErasureRoot,
 			"guarantor", guarantor, "err", err)
 	}

@@ -45,7 +45,7 @@ type SegmentRootLookupHistory []SegmentRootLookupItemHistory
 type WorkReport struct {
 	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
 	RefineContext     RefineContext         `json:"context"`
-	CoreIndex         uint16                `json:"core_index"`
+	CoreIndex         uint                  `json:"core_index"` // MK check coreIndex
 	AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 	AuthOutput        []byte                `json:"auth_output"`
 	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
@@ -114,7 +114,7 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 	var s struct {
 		AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
 		RefineContext     RefineContext         `json:"context"`
-		CoreIndex         uint16                `json:"core_index"`
+		CoreIndex         uint                  `json:"core_index"` // MK check coreIndex
 		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 		AuthOutput        string                `json:"auth_output"`
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
@@ -139,7 +139,7 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
 		RefineContext     RefineContext         `json:"context"`
-		CoreIndex         uint16                `json:"core_index"`
+		CoreIndex         uint                  `json:"core_index"` // MK check coreIndex
 		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
 		AuthOutput        string                `json:"auth_output"`
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`

@@ -378,7 +378,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	workReport := types.WorkReport{
 		AvailabilitySpec:  *spec,
 		RefineContext:     workPackage.RefineContext,
-		CoreIndex:         workPackageCoreIndex,
+		CoreIndex:         uint(workPackageCoreIndex),
 		AuthorizerHash:    p_a,
 		AuthOutput:        r.Ok,
 		SegmentRootLookup: segmentRootLookup,

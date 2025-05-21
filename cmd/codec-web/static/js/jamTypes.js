@@ -3,6 +3,8 @@ const jamTypes = [
     {value: "SC", label: "PreState & Block"},
     {value: "JamState", label: "Snapshot / Genesis (C1-C15)"},
     {value: "Block", label: "Block"},
+    {value: "Header", label: "Header"},
+    {value: "Extrinsic", label: "Extrinsic"},
     {value: "Ticket", label: "Ticket"},
     {value: "Guarantee", label: "Guarantee"},
     {value: "Assurance", label: "Assurance"},

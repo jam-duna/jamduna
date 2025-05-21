@@ -165,7 +165,7 @@ func fuzzBlockGBadCoreIndex(block *types.Block) error {
 	if g == nil {
 		return nil
 	}
-	g.Report.CoreIndex = uint16(types.TotalCores + rand.Intn(10))
+	g.Report.CoreIndex = uint(types.TotalCores + rand.Intn(10))
 	return jamerrors.ErrGBadCoreIndex
 }
 
@@ -512,7 +512,7 @@ func fuzzBlockGCoreWithoutAuthorizer(block *types.Block, s *statedb.StateDB) err
 	if !anyEmptyCore {
 		return nil
 	}
-	g.Report.CoreIndex = uint16(emptyCores[rand.Intn(len(emptyCores))])
+	g.Report.CoreIndex = uint(emptyCores[rand.Intn(len(emptyCores))])
 
 	return jamerrors.ErrGCoreWithoutAuthorizer
 }

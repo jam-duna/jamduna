@@ -17,7 +17,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint64, network string) (trace *StateTransition, err error) {
+func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint64, network string, addresses []string) (trace *StateTransition, err error) {
 	statedb, err := newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return
@@ -31,8 +31,14 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 		for j := 0; j < 8; j++ {
 			binary.LittleEndian.PutUint32(seed[j*4:], i)
 		}
-
-		v, err0 := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, "")
+		metadata := make([]byte, 0)
+		if len(addresses) == types.TotalValidators {
+			metadata, err = common.AddressToMetadata(addresses[i])
+			if err != nil {
+				return nil, err
+			}
+		}
+		v, err0 := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err0 != nil {
 			return nil, err0
 		}
@@ -332,7 +338,7 @@ func NewEpoch0Timestamp(test_name ...string) uint64 {
 	}
 }
 
-func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata string) (types.Validator, error) {
+func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata []byte) (types.Validator, error) {
 	validator := types.Validator{}
 	banderSnatch_pub, _, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
@@ -349,12 +355,12 @@ func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata st
 
 	validator.Ed25519 = ed25519_pub
 	copy(validator.Bandersnatch[:], banderSnatch_pub.Bytes())
-	copy(validator.Metadata[:], []byte(metadata))
+	copy(validator.Metadata[:], metadata)
 	copy(validator.Bls[:], bls_pub.Bytes())
 	return validator, nil
 }
 
-func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata string) (types.ValidatorSecret, error) {
+func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata []byte) (types.ValidatorSecret, error) {
 	validatorSecret := types.ValidatorSecret{}
 	banderSnatch_pub, banderSnatch_priv, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
@@ -378,7 +384,7 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metad
 	copy(validatorSecret.BlsSecret[:], bls_priv.Bytes())
 	copy(validatorSecret.BlsPub[:], bls_pub.Bytes())
 
-	copy(validatorSecret.Metadata[:], []byte(metadata))
+	copy(validatorSecret.Metadata[:], metadata)
 	return validatorSecret, nil
 }
 
@@ -405,7 +411,7 @@ func GenerateValidatorSecretSet(numNodes int) ([]types.Validator, []types.Valida
 		bandersnatch_seed := seed_i
 		ed25519_seed := seed_i
 		bls_seed := seed_i
-		metadata := ""
+		metadata := []byte{}
 		//metadata, _ := generateMetadata(i) // this is NOT used by other teams. somehow we agreed on empty metadata for now
 
 		validator, err := InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)

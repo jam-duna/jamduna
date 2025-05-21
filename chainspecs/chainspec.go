@@ -108,19 +108,21 @@ type DevConfig struct {
 	GenesisValidators []GenesisValidator `json:"genesis_validators"`
 }
 type GenesisValidator struct {
-	PeerID       string `json:"peer_id"`
-	Bandersnatch string `json:"bandersnatch"`
-	NetAddr      string `json:"net_addr"`
+	PeerID  string `json:"peer_id"`
+	Ed25519 string `json:"ed25519"`
+	NetAddr string `json:"net_addr"`
 }
 
 func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {
 	chainSpec = &ChainSpec{
 		ID: dev.ID,
 	}
+	address := make([]string, 0)
 	for _, validator := range dev.GenesisValidators {
 		// use the validator's Bandersnatch pubkey and prepend with the SAN
-		bootnode := fmt.Sprintf("%s@%s", common.ToSAN(common.FromHex(validator.Bandersnatch)), validator.NetAddr)
+		bootnode := fmt.Sprintf("%s@%s", common.ToSAN(common.FromHex(validator.Ed25519)), validator.NetAddr)
 		chainSpec.Bootnodes = append(chainSpec.Bootnodes, bootnode)
+		address = append(address, validator.NetAddr)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "genesis-*")
@@ -133,8 +135,7 @@ func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {
 	if err != nil {
 		return chainSpec, err
 	}
-
-	trace, err := statedb.MakeGenesisStateTransition(sdb, 0, "tiny")
+	trace, err := statedb.MakeGenesisStateTransition(sdb, 0, "tiny", address)
 	if err != nil {
 		return chainSpec, err
 	}

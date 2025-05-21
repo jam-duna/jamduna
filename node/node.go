@@ -74,7 +74,7 @@ const (
 	quicAddr     = "127.0.0.1:%d"
 	Grandpa      = false
 	GrandpaEasy  = true
-	Audit        = true
+	Audit        = false
 	revalidate   = false // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
@@ -418,6 +418,30 @@ func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspe
 	return newNode(id, credential, chainspec, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
 }
 
+func PrintSpec(chainspec *chainspecs.ChainSpec) error {
+	levelDBPath := fmt.Sprintf("/tmp/xxx")
+	store, err := storage.NewStateDBStorage(levelDBPath)
+	if err != nil {
+		return err
+	}
+	stateTransition := &statedb.StateTransition{}
+	stateTransition.PreState.KeyVals = chainspec.GenesisState
+	stateTransition.PreState.StateRoot = common.Hash{}
+	stateTransition.PostState.KeyVals = chainspec.GenesisState
+	stateTransition.PostState.StateRoot = common.Hash{}
+	header, _, err := types.Decode(chainspec.GenesisHeader, reflect.TypeOf(types.BlockHeader{}))
+	if err != nil {
+		return err
+	}
+	stateTransition.Block.Header = header.(types.BlockHeader)
+
+	_statedb, err := statedb.NewStateDBFromStateTransition(store, stateTransition)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Spec: %s\n", _statedb.JamState.String())
+	return nil
+}
 func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
 	return createNode(id, credential, chainspec, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
 }
@@ -2077,8 +2101,8 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		requests_original[validatorIdx] = CE139_request{
 			ErasureRoot:    si.WorkReport.AvailabilitySpec.ErasureRoot,
 			SegmentIndices: allsegmentindices,
-			CoreIndex:      si.WorkReport.CoreIndex,
-			ShardIndex:     ComputeShardIndex(si.WorkReport.CoreIndex, uint16(validatorIdx)),
+			CoreIndex:      uint16(si.WorkReport.CoreIndex),
+			ShardIndex:     ComputeShardIndex(uint16(si.WorkReport.CoreIndex), uint16(validatorIdx)),
 		}
 	}
 	requests := make(map[uint16]interface{})
@@ -2170,15 +2194,15 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	erasureRoot common.Hash,
 	blength uint32,
 	segmentRootLookup types.SegmentRootLookup,
-	coreIndex uint16,
+	coreIndex uint,
 ) (types.WorkPackageBundle, error) {
 	// Prepare requests to validators
 	requestsOriginal := make([]CE138_request, types.TotalValidators)
 	for validatorIdx := range requestsOriginal {
 		requestsOriginal[validatorIdx] = CE138_request{
 			ErasureRoot: erasureRoot,
-			CoreIndex:   coreIndex,
-			ShardIndex:  ComputeShardIndex(coreIndex, uint16(validatorIdx)),
+			CoreIndex:   uint16(coreIndex),
+			ShardIndex:  ComputeShardIndex(uint16(coreIndex), uint16(validatorIdx)),
 		}
 	}
 
@@ -2532,9 +2556,10 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	if n.jce_timestamp == nil {
 		n.jce_timestamp = make(map[uint32]time.Time)
 	}
+	// for non-normal-jce case
 	if n.epoch0Timestamp != 0 {
 		n.jce_timestamp[currJCE] = time.Now()
-	} else {
+	} else { // for normal-jce case
 		n.jce_timestamp[currJCE] = time.Unix(int64(n.GetSlotTimestamp(currJCE)), 0)
 	}
 	n.jce_timestamp_mutex.Unlock()

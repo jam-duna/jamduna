@@ -1,11 +1,12 @@
 # ignore custom hosts file
 hosts.txt
-
+*/target/*
 # build output / binaries
 /leveldb/
 /pvm/*.out
 cmd/jamweb/jamweb
 cmd/codec-web/codec-web
+*/target
 
 # node directories & artifacts
 node/data/
@@ -54,3 +55,4 @@ bin/*
 bin/jamduna
 /bin
 cmd/.DS_Store
+/release

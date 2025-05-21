@@ -113,7 +113,7 @@ func WorkReportToSelection(W []types.WorkReport) []types.WorkReportSelection {
 	for _, w := range W {
 		selections = append(selections, types.WorkReportSelection{
 			WorkReport: w,
-			Core:       w.CoreIndex,
+			Core:       uint16(w.CoreIndex),
 		})
 	}
 	return selections

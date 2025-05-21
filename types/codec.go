@@ -397,6 +397,9 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 		if len(data) < int(length+l) {
 			return nil, 0, fmt.Errorf("data length insufficient for slice length")
 		}
+		if item_len > 10000000 {
+			return nil, 0, fmt.Errorf("item_len too large %d", item_len)
+		}
 		v.Set(reflect.MakeSlice(t, int(item_len), int(item_len)))
 		length += l
 		for i := 0; i < int(item_len); i++ {
@@ -426,7 +429,7 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			if len(data[length:]) < 1 {
-				return nil, 0, fmt.Errorf("data length insufficient for struct field")
+				return nil, 0, fmt.Errorf("data length insufficient for struct field: %s", v.Type().Field(i).Name)
 			}
 			elem, l, err := Decode(data[length:], v.Field(i).Type())
 			if err != nil {
@@ -509,6 +512,17 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 
 	}
 	return v.Interface(), length, nil
+}
+
+func DecodeWithRemainder(data []byte, t reflect.Type) (value interface{}, remainder []byte, err error) {
+	val, used, err := Decode(data, t)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(data) < int(used) {
+		return nil, nil, fmt.Errorf("data length smaller than used bytes")
+	}
+	return val, data[used:], nil
 }
 
 func SaveObject(path string, obj interface{}) error {

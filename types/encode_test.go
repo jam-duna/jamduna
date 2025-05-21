@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestCodecSingleTest(t *testing.T) {
+func TestSingleCodecTest(t *testing.T) {
 	jsonstring := `{
         "vals_current": [
             {

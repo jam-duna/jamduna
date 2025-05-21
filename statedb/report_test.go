@@ -341,7 +341,7 @@ func TestGuaranteeProduction(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		guarantees[i] = types.Guarantee{
 			Report: types.WorkReport{
-				CoreIndex: uint16(i % 2),
+				CoreIndex: uint(i % 2),
 			},
 			Slot: uint32(i),
 		}

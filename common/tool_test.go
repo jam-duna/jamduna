@@ -46,3 +46,30 @@ func TestJustificationEncodeDecode(t *testing.T) {
 		fmt.Printf("decoded_text: %x\n", decoded_text)
 	}
 }
+
+func TestMetadataUsage(t *testing.T) {
+	addrs := []string{
+		"127.0.0.1:9900",         // IPv4
+		"[::1]:9900",             // loopback IPv6
+		"[2001:db8::dead]:30333", // normal IPv6
+	}
+
+	for _, addr := range addrs {
+		addr := addr
+		t.Run("encode_"+addr, func(t *testing.T) {
+			t.Parallel()
+
+			meta, err := AddressToMetadata(addr)
+			if err != nil {
+				t.Fatalf("❌ Failed to encode %s: %v", addr, err)
+			}
+			fmt.Printf("✅ Encoded %s → %x\n", addr, meta)
+
+			decodedAddr, port, err := MetadataToAddress(meta)
+			if err != nil {
+				t.Fatalf("❌ Failed to decode metadata %x: %v", meta, err)
+			}
+			fmt.Printf("✅ Decoded %x → %s:%d\n", meta, decodedAddr, port)
+		})
+	}
+}

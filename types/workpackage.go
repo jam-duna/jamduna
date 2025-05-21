@@ -3,8 +3,10 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 /*
@@ -108,10 +110,111 @@ func (b *WorkPackageBundle) Package() WorkPackage {
 	return b.WorkPackage
 }
 
+func DecodeBundle(remaining []byte) (*WorkPackageBundle, uint32, error) {
+	if len(remaining) < 1 {
+		return nil, uint32(len(remaining)), fmt.Errorf("encoded bundle is empty")
+	}
+	// Decode the work package
+	workPackage, length, err := Decode(remaining, reflect.TypeOf(WorkPackage{}))
+	if err != nil {
+		return nil, length, err
+	}
+	remaining = remaining[length:]
+	fmt.Printf("remaining length after work package decode: %d\n", len(remaining))
+	wp := workPackage.(WorkPackage)
+	// Create a new WorkPackageBundle
+	bundle := &WorkPackageBundle{
+		WorkPackage:       wp,
+		ExtrinsicData:     make(ExtrinsicsBlobs, 0),
+		ImportSegmentData: make([][][]byte, len(wp.WorkItems)),
+		Justification:     make([][][]common.Hash, len(wp.WorkItems)),
+	}
+	// Decode the extrinsic data using *work items*
+	for _, wpItem := range wp.WorkItems {
+		extrinsics := wpItem.Extrinsics
+		if len(extrinsics) == 0 {
+			continue
+		}
+		for _, x := range extrinsics {
+			h := x.Hash
+			l := x.Len
+			ext := remaining[:l]
+			if h != common.Blake2Hash(ext) {
+				log.Warn("extrinsic hash mismatch", "expected", h, "got", common.Blake2Hash(ext))
+			}
+			if len(remaining) < int(l) {
+				return nil, length, fmt.Errorf("not enough data for extrinsic %s", h)
+			}
+			bundle.ExtrinsicData = append(bundle.ExtrinsicData, remaining[:l])
+			length += uint32(l)
+			remaining = remaining[l:]
+		}
+	}
+
+	// Decode the imported segment data using *work items*
+	for j, wpItem := range wp.WorkItems {
+		importedSegments := wpItem.ImportedSegments
+		if len(importedSegments) == 0 {
+			continue
+		}
+		bundle.ImportSegmentData[j] = make([][]byte, len(importedSegments))
+		for imp_segment_idx, i := range importedSegments {
+			s := remaining[:SegmentSize]
+			h := common.Blake2Hash(s)
+			if h != i.RequestedHash {
+				log.Warn("imported segment hash mismatch", "expected", i.RequestedHash, "got", h)
+			}
+			bundle.ImportSegmentData[j][imp_segment_idx] = s
+			length += SegmentSize
+			remaining = remaining[SegmentSize:]
+		}
+	}
+
+	// Decode the justification data using *work items*
+	for j, wpItem := range wp.WorkItems {
+		importedSegments := wpItem.ImportedSegments
+		if len(importedSegments) == 0 {
+			continue
+		}
+		bundle.Justification[j] = make([][]common.Hash, len(importedSegments))
+		for imp_segment_idx, _ := range importedSegments {
+			justification, l0, err := Decode(remaining, reflect.TypeOf([]common.Hash{}))
+			if err != nil {
+				return nil, length, err
+			}
+			bundle.Justification[j][imp_segment_idx] = justification.([]common.Hash)
+			length += l0
+			remaining = remaining[l0:]
+		}
+	}
+	return bundle, length, nil
+}
+
 func (b *WorkPackageBundle) Bytes() []byte {
-	encode, err := Encode(b)
+	encode, err := Encode(b.WorkPackage)
 	if err != nil {
 		return nil
+	}
+	// Append the extrinsic data
+	for _, extrinsic := range b.ExtrinsicData {
+		encode = append(encode, extrinsic...)
+	}
+	// Append the import segment data
+	for _, wpItemSegments := range b.ImportSegmentData {
+		for _, segment := range wpItemSegments {
+			encode = append(encode, segment...)
+		}
+	}
+	// Append the justification data
+	for _, wpItemJustifications := range b.Justification {
+		for _, seg_justification := range wpItemJustifications {
+			// Encode each justification
+			sj, err := Encode(seg_justification)
+			if err != nil {
+				return nil
+			}
+			encode = append(encode, sj...)
+		}
 	}
 	return encode
 }

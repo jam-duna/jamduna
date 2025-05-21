@@ -690,7 +690,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 			fmt.Printf("coreBroadcast Error: %v\n", err)
 			return
 		}
-		if wr.AvailabilitySpec.ErasureRoot == workReport.AvailabilitySpec.ErasureRoot && wr.CoreIndex == core {
+		if wr.AvailabilitySpec.ErasureRoot == workReport.AvailabilitySpec.ErasureRoot && wr.CoreIndex == uint(core) {
 			n.workReportsMutex.Unlock()
 			judgement, err = n.MakeJudgement(workReport, true)
 
@@ -714,7 +714,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		return
 	}
 
-	wr, _, pvmElapsed, err := n.executeWorkPackageBundle(workReport.CoreIndex, workPackageBundle, workReport.SegmentRootLookup, false)
+	wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, false)
 	if err != nil {
 		return
 	}

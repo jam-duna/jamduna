@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -189,7 +188,6 @@ func (response *JAMSNPWorkPackageShareResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-// TODO: REVIEW
 func (p *Peer) ShareWorkPackage(
 	ctx context.Context,
 	coreIndex uint16,
@@ -244,12 +242,12 @@ func (p *Peer) ShareWorkPackage(
 	// Send request
 	// --> Core Index ++ Segment Root Mappings
 	if err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
-		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
+		err = fmt.Errorf("sendQuicBytes1[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 	// --> Work Package Bundle
 	if err = sendQuicBytes(ctx, stream, encodedBundle, p.PeerID, code); err != nil {
-		err = fmt.Errorf("sendQuicBytes[CE134_WorkPackageShare]: %v", err)
+		err = fmt.Errorf("sendQuicBytes2[CE134_WorkPackageShare]: %v", err)
 		return
 	}
 
@@ -320,14 +318,13 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		_ = stream.Close()
 		return err
 	}
-
-	bundle, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
+	bp, leng, err := types.DecodeBundle(encodedBundle)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
-		return fmt.Errorf("onWorkPackageShare: decode bundle: %w", err)
+		return fmt.Errorf("onWorkPackageShare: decode bundle: %w\nencodedBundle data:\n%x", err, encodedBundle)
 	}
 	wpCoreIndex := newReq.CoreIndex
-	bp := bundle.(types.WorkPackageBundle)
+	log.Info(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "workpackageBytes", fmt.Sprintf("%x", bp.Bytes()), "len", leng)
 
 	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {
@@ -344,9 +341,8 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("onWorkPackageShare: context cancelled before VerifyBundle")
 	default:
 	}
-
 	// Since the bundle is not trusted, do a VerifyBundle first
-	verified, err := n.VerifyBundle(&bp, received_segmentRootLookup)
+	verified, err := n.VerifyBundle(bp, received_segmentRootLookup)
 	if !verified {
 		log.Warn(module, "VerifyBundle failure", "node", n.id, "verified", verified)
 		// TODO: reconstruct the segments
@@ -362,7 +358,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, bp, received_segmentRootLookup, false)
+	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, *bp, received_segmentRootLookup, false)
 	if err != nil {
 		log.Warn(module, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)

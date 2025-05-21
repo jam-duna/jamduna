@@ -497,12 +497,8 @@ func (vm *VM) step(stepn int) error {
 		return nil
 	}
 
-	/*	 md := "unk"
-	 if vm.ServiceMetadata != nil {
-		 md = "inst" //string(vm.ServiceMetadata)
-	 } */
 	// avoid this: this is expensive
-	if stepn%1000000 == 0 {
+	if stepn%100 == 0 {
 		log.Info(vm.logging, opcode_str(opcode), "mode", vm.Mode, "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
 	}
 	return nil

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"time"
 )
 
@@ -417,4 +418,58 @@ func ToSAN(pub []byte) string {
 		n.Or(n, new(big.Int).SetUint64(uint64(pub[i])))
 	}
 	return "e" + B(n, 52)
+}
+
+// metadata related code
+func AddressToMetadata(address string) ([]byte, error) {
+	ipStr, portStr, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to split host and port: %v", err)
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid IP: %v", ipStr)
+	}
+	if ip == nil {
+		return nil, fmt.Errorf("IP is not a valid 16-byte address: %v", ipStr)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 0 || port > 65535 {
+		return nil, fmt.Errorf("invalid port: %v", portStr)
+	}
+	metadata := make([]byte, 18)
+	copy(metadata[:16], ip)
+	binary.LittleEndian.PutUint16(metadata[16:], uint16(port))
+
+	return metadata, nil
+}
+func MetadataToAddress(metadata []byte) (ipAddr string, port int, err error) {
+	//The validators' IP-layer endpoints are given as IPv6/port combinations, to be found in the first 18 bytes of validator metadata
+	//with the first 16 bytes being the IPv6 address and the latter 2 being a little endian representation of the port.
+
+	// first we check the metadata length
+	if len(metadata) < 18 {
+		return "", 0, fmt.Errorf("metadata length is too short")
+	}
+
+	allZero := true
+	for _, b := range metadata[:18] {
+		if b != 0 {
+			allZero = false
+			break
+		}
+	}
+
+	if allZero {
+		return "", 0, fmt.Errorf("metadata is all zero")
+	}
+
+	ip_bytes := metadata[:16]
+	port_bytes := metadata[16:18]
+
+	ip := net.IP(ip_bytes)
+	ipAddr = ip.String()
+	port = int(binary.LittleEndian.Uint16(port_bytes))
+
+	return ipAddr, port, nil
 }

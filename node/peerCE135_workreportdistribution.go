@@ -38,14 +38,21 @@ Guarantor -> Validator
 */
 
 type JAMSNPWorkReport struct {
+	WorkReport  types.WorkReport            `json:"work_report"`
 	Slot        uint32                      `json:"slot"`
 	Len         uint8                       `json:"len"`
 	Credentials []types.GuaranteeCredential `json:"guarantee"`
-	WorkReport  types.WorkReport            `json:"work_report"`
 }
 
 func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
+	// Serialize WorkReport
+	WR := wr.WorkReport
+	workReportBytes := WR.Bytes()
+	if _, err := buf.Write(workReportBytes); err != nil {
+		return nil, err
+	}
+
 
 	// Serialize Slot (4 bytes)
 	if err := binary.Write(buf, binary.LittleEndian, wr.Slot); err != nil {
@@ -66,16 +73,17 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 			return nil, err
 		}
 	}
-	// Serialize WorkReport
-	WR := wr.WorkReport
-	workReportBytes := WR.Bytes()
-	if _, err := buf.Write(workReportBytes); err != nil {
-		return nil, err
-	}
+
 	return buf.Bytes(), nil
 }
 
 func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
+
+	workReportRaw, data, err := types.DecodeWithRemainder(data, reflect.TypeOf(types.WorkReport{}))
+	if err != nil {
+		return fmt.Errorf("WorkReport Decode Error: %v", err)
+	}
+	wr.WorkReport = workReportRaw.(types.WorkReport)
 	buf := bytes.NewReader(data)
 	// Deserialize Slot (4 bytes)
 	if err := binary.Read(buf, binary.LittleEndian, &wr.Slot); err != nil {
@@ -87,11 +95,11 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 		return fmt.Errorf("Error deserializing Len: %v", err)
 	}
 	wr.Len = lenByte
-
 	// Deserialize Credentials (dynamically sized)
 	wr.Credentials = make([]types.GuaranteeCredential, wr.Len)
 	for i := 0; i < int(wr.Len); i++ {
 		var cred types.GuaranteeCredential
+
 		credData := make([]byte, 66) // VERIFIED 66 bytes for GuaranteeCredential
 		if _, err := io.ReadFull(buf, credData); err != nil {
 			return fmt.Errorf("Error reading GuaranteeCredential: %v", err)
@@ -102,17 +110,6 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 		wr.Credentials[i] = cred
 	}
 
-	// Deserialize WorkReport (assuming it knows its own length)
-	workReportBytes := make([]byte, buf.Len()) // Read remaining bytes for WorkReport
-	if _, err := io.ReadFull(buf, workReportBytes); err != nil {
-		return fmt.Errorf("Error reading WorkReport: %v", err)
-	}
-
-	workReportRaw, _, err := types.Decode(workReportBytes, reflect.TypeOf(types.WorkReport{}))
-	if err != nil {
-		return fmt.Errorf("WorkReport Decode Error: %v", err)
-	}
-	wr.WorkReport = workReportRaw.(types.WorkReport)
 	return nil
 }
 
@@ -158,7 +155,6 @@ func (p *Peer) SendWorkReportDistribution(
 
 func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
-
 	var newReq JAMSNPWorkReport
 	if err := newReq.FromBytes(msg); err != nil {
 		log.Error(debugG, "onWorkReportDistribution", "err", err)
@@ -181,9 +177,10 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Trace(debugG, "onWorkReportDistribution incoming Guarantee from Core on slot",
+	log.Info(module, "onWorkReportDistribution incoming Guarantee from Core on slot",
 		"n", n.String(),
-		"workReport", workReport.GetWorkPackageHash().String_short(),
+		"workPackageHash", workReport.GetWorkPackageHash(),
+		"workReport", workReport.String(),
 		"guarantee.Slot", guarantee.Slot,
 	)
 

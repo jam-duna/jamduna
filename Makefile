@@ -23,8 +23,11 @@ UNAME_M := $(shell uname -m)
 
 GIT_TAG := $(shell git describe --tags --abbrev=0)
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
+GIT_FULL_COMMIT   := $(shell git rev-parse HEAD)
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
+
+POLKAJAM_BIN ?= bin/polkajam
 # Linker flags to strip symbols and embed version info
 GO_LDFLAGS := -s -w \
   -X 'main.Version=$(GIT_TAG)' \
@@ -158,29 +161,38 @@ run_parallel_jam:
 	wait
 	@echo "✅ All instances started and running in parallel."
 
+run_polkajam_all:
+	@mkdir -p logs
+	@for i in $$(seq 0 $$(($(NUM_NODES) - 1))); do \
+		PORT=$$(($(DEFAULT_PORT) + $$i)); \
+		V_IDX=$$i; \
+		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
+		$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
+	done; \
+
 run_polkajam_dom: jam_clean
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@bin/jamduna-linux-amd64 run --dev-validator 0 --rpc-port=19805 --chain chainspecs/polkajam-spec.json &
 	@bin/jamduna-linux-amd64 run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json &
 	sleep 4
-	@for i in 1 2 3 4; do ./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator $$i --rpc-port=$$((19800 + $$i)) & done
+	@for i in 0 1 2 3 4; do $(POLKAJAM_BIN) --chain chainspecs/polkajam-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) & done
 
 run_jamduna_dom: jam_clean 
 	@mkdir -p logs
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
-	@for i in $$(seq 0 $$(($(NUM_NODES) - 3))); do \
+	@# validator 5 uses POLKAJAM_BIN
+	@$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 &
+	@# validator 1 ~ NUM_NODES-1 use jamduna
+	@for i in $$(seq 0 $$(($(NUM_NODES) - 2))); do \
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
-		echo ">> Starting instance $$V_IDX on port $$PORT"; \
+		echo ">> Starting validator $$V_IDX on port $$PORT"; \
 		$(OUTPUT_DIR)/$(BINARY) run \
-			--chain chainspecs/polkajam-spec.json \
+			--chain chainspecs/jamduna-spec.json \
 			--dev-validator $$V_IDX \
-			--start-time "$(JAM_start-time)" & \
+			--start-time "$(JAM_start-time)" \
+			--rpc-port=$$PORT & \
 	done; \
-	sleep 4
-	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 4 --rpc-port=19804 &
-	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 5 --rpc-port=19805 &
 	wait
 	@echo "✅ All instances started and running in parallel."
 
@@ -193,14 +205,14 @@ run_multiclient: jam_clean
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT"; \
 		$(OUTPUT_DIR)/$(BINARY) run \
-			--chain chainspecs/polkajam-spec.json \
+			--chain chainspecs/jamduna-spec.json \
 			--dev-validator $$V_IDX \
 			--start-time "$(JAM_start-time)" & \
 	done; \
 	sleep 4
-	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 3 --rpc-port=19803 &
-	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 4 --rpc-port=19804 &
-	./polkajam --temp --chain chainspecs/polkajam-spec.json --parameters tiny run --dev-validator 5 --rpc-port=19805 &
+	$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 3 --rpc-port=19803 &
+	$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 4 --rpc-port=19804 &
+	$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 &
 	wait
 	@echo "✅ All instances started and running in parallel."
 
@@ -211,7 +223,7 @@ run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
 run_single_node:jam_clean
 	@echo "Starting single node JAM instance..."
 	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_start-time)"
-	@$(OUTPUT_DIR)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM_start-time)" --dev-validator 5
+	@$(OUTPUT_DIR)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM-start-time)" --dev-validator 5
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
 	@mkdir -p logs
@@ -224,8 +236,8 @@ kill_parallel_jam:
 	@pkill -f "$(OUTPUT_DIR)/$(BINARY)"
 	@echo "All instances killed."
 run_jam:
-	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... port $(DEFAULT_PORT) start-time $(JAM_start-time)"
-	@$(OUTPUT_DIR)/$(BINARY) -net-spec $(net-spec_FILE) -port $(DEFAULT_PORT) -start-time "$(JAM_start-time)"
+	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... port $(DEFAULT_PORT) start-time $(JAM-start-time)"
+	@$(OUTPUT_DIR)/$(BINARY) -net-spec $(net-spec_FILE) -port $(DEFAULT_PORT) -start-time "$(JAM-start-time)"
 	@echo "Instance started."
 
 # env setup for remote nodes
@@ -376,3 +388,24 @@ jamx_start:
 jamx_stop:
 	ansible-playbook -u root -i $(HOSTS_FILE)  yaml/jam_stop.yaml
 	@echo "stop on jam instances"
+
+# ----------------------------------------
+# Release: build all binaries and package
+PLATFORMS := linux-amd64 linux-arm64 mac-amd64 mac-arm64
+BIN_NAME   := jamduna
+BIN_DIR    := bin
+RELEASE_DIR:= release
+
+jam_tar: 
+	@echo "Packaging binaries for commit $(GIT_FULL_COMMIT)..."
+	@mkdir -p $(RELEASE_DIR)/$(GIT_COMMIT)
+	@for plat in $(PLATFORMS); do \
+	  echo "  → $$plat"; \
+	  tar czf $(RELEASE_DIR)/$(GIT_COMMIT)/$(BIN_NAME)_$(GIT_FULL_COMMIT)_$$plat.tgz \
+	    -C $(BIN_DIR) $(BIN_NAME)-$$plat; \
+	done
+	@echo
+	@echo "Release artifacts here:"
+	@tree $(RELEASE_DIR)/$(GIT_COMMIT)
+release: static_jam_all jam_tar
+# ----------------------------------------

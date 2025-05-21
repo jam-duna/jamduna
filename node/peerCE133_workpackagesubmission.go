@@ -133,17 +133,16 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 
 func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
-
 	// --> Core Index ++ Work Package
 	var newReq JAMSNPWorkPackage
-
+	log.Info(debugG, "onWorkPackageSubmission", "msg", len(msg))
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		log.Error(debugG, "onWorkPackageSubmission:FromBytes", "err", err)
 		return fmt.Errorf("onWorkPackageSubmission: decode failed: %w", err)
 	}
-
+	log.Info(debugG, "onWorkPackageSubmission", "workpackage", newReq.WorkPackage.Hash(), "workpackageBytes", fmt.Sprintf("%x", newReq.WorkPackage.Bytes()))
 	// --> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
