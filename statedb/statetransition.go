@@ -198,17 +198,10 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 			StateRoot: s1.StateRoot,
 			KeyVals:   post_actual,
 		}
-		fmt.Printf("writing JAMDUNA's output to %s\n", writeFile[0])
-		// if the dir does not exist, create it
-		if _, err := os.Stat(writeFile[0]); os.IsNotExist(err) {
-			err := os.MkdirAll(writeFile[0], os.ModePerm)
-			if err != nil {
-				fmt.Printf("Error creating directory: %v\n", err)
-				return nil, err
-			}
-		}
+		fmt.Printf("writing post-state to %s\n", writeFile[0])
+
 		// create the file
-		fileName := fmt.Sprintf("%s/%s", writeFile[0], "post_state.json")
+		fileName := fmt.Sprintf("%s", writeFile[0])
 		file, err := os.Create(fileName)
 		if err != nil {
 			fmt.Printf("Error creating file: %v\n", err)
@@ -230,7 +223,6 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 
 	}
 	diffs = compareKeyValsWithOutput(st.PreState.KeyVals, post_actual, post_expected)
-	fmt.Printf("diffs len=%d\n", len(diffs))
 	return diffs, fmt.Errorf("mismatch")
 }
 

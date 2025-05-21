@@ -1,6 +1,7 @@
 package pvm
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -24,6 +25,10 @@ const (
 	Z_Q = (1 << 16)
 	Z_I = (1 << 24)
 	Z_Z = (1 << 16)
+)
+
+var (
+	PvmLogging = false
 )
 
 type VM struct {
@@ -498,10 +503,34 @@ func (vm *VM) step(stepn int) error {
 	}
 
 	// avoid this: this is expensive
-	if stepn%100 == 0 {
-		log.Info(vm.logging, opcode_str(opcode), "mode", vm.Mode, "step", stepn, "pc", vm.pc, "g", vm.Gas, "reg", vm.ReadRegisters())
+	if PvmLogging {
+
+		sample := StepSample{
+			Mode: vm.Mode,
+			Step: stepn,
+			PC:   vm.pc,
+			Gas:  vm.Gas,
+			Op:   opcode_str(opcode),
+			Reg:  vm.ReadRegisters(),
+		}
+
+		if jsonLine, err := json.Marshal(sample); err == nil {
+			fmt.Println(string(jsonLine))
+		} else {
+			log.Warn(vm.logging, "failed to marshal step sample", "err", err)
+		}
+
 	}
 	return nil
+}
+
+type StepSample struct {
+	Op   string   `json:"op"`
+	Mode string   `json:"mode"`
+	Step int      `json:"step"`
+	PC   uint64   `json:"pc"`
+	Gas  int64    `json:"gas"`
+	Reg  []uint64 `json:"reg"`
 }
 
 // skip function calculates the distance to the next instruction

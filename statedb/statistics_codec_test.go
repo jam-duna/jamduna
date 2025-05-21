@@ -42,6 +42,7 @@ type validator_statistics_test struct {
 	Poststate state `json:"post_state"`
 }
 
+// outdated but still useful, ignore for now
 func TestCodecStatistics(t *testing.T) {
 	testCases := []struct {
 		jsonFile     string

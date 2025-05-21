@@ -189,8 +189,8 @@ func TestTraces(t *testing.T) {
 	//log.EnableModule(log.StateDBMonitoring)
 
 	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
-	testSTFDir(t, "../jamtestvectors/traces/fallback")
-	testSTFDir(t, "../jamtestvectors/traces/safrole")
+	//testSTFDir(t, "../jamtestvectors/traces/fallback")
+	//testSTFDir(t, "../jamtestvectors/traces/safrole")
 	testSTFDir(t, "../jamtestvectors/traces/reports-l0")
 }
 

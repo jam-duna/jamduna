@@ -10,6 +10,7 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/jamerrors"
 )
 
 /*
@@ -163,7 +164,7 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 		}
 	}
 	if numErrors > 0 {
-		return fmt.Errorf("%s", "invalid signature")
+		return jamerrors.ErrGBadSignature
 	}
 	return nil
 }

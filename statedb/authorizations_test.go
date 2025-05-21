@@ -142,11 +142,14 @@ func TestVerifyAuths(t *testing.T) {
 	}
 
 	for _, tc := range tesecase {
-		err := VerifyAuths(tc, nil)
-		if err != nil {
-			t.Fatalf("failed: %v", err)
-		} else {
-			fmt.Printf("\033[32mTest case %v passed\033[0m\n", tc)
-		}
+		tc := tc // capture range variable
+		t.Run(tc, func(t *testing.T) {
+			err := VerifyAuths(tc, nil)
+			if err != nil {
+				t.Fatalf("failed: %v", err)
+			} else {
+				fmt.Printf("\033[32mTest case %v passed\033[0m\n", tc)
+			}
+		})
 	}
 }

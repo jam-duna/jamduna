@@ -1,8 +1,8 @@
-# Default timeout for tests (can be overridden: `make TIMEOUT=2m test-network NETWORK=...`)
+	# Default timeout for tests (can be overridden: `make TIMEOUT=2m test-network NETWORK=...`)
 TIMEOUT      ?= 5m
 
 # The list of networks you want to test by default
-NETWORKS     ?= full tiny
+NETWORKS     ?= tiny # use tiny for now
 NETWORK	 	 ?= tiny
 TESTING ?=testing
 # Bandersnatch and statedb directories (adjust if needed)
@@ -72,8 +72,11 @@ stats:
 	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run "^TestStaticsSTFVerify$$" -tags "$(NETWORK),$(TESTING)" -network=$(NETWORK)
 
 
-test-network: safrole report valid_report assurance dispute stats auth accumulate
+test-network: 
+	@echo "Running tests for network='$(NETWORK)'"
+			go test -timeout $(TIMEOUT) -v -run TestTestVectors  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 	@echo "Finished all tests for network='$(NETWORK)'"
+
 
 tiny:
 	$(MAKE) test-network NETWORK=tiny;

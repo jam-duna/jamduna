@@ -65,7 +65,7 @@ func (s *StateDB) getWRStatus() (hasRecentWR, hasStaleWR []bool) {
 
 func (s *StateDB) checkAssurance(a types.Assurance, anchor common.Hash, validators types.Validators, hasRecentWR, hasStaleWR []bool) error {
 	if a.Anchor != anchor {
-		return fmt.Errorf("a.Anchor=%v p=%v err=%v", a.Anchor, s.ParentHeaderHash, jamerrors.ErrABadParentHash)
+		return jamerrors.ErrABadParentHash
 	}
 	if int(a.ValidatorIndex) >= len(validators) {
 		return jamerrors.ErrABadValidatorIndex
@@ -108,6 +108,9 @@ func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Ass
 	// check sorting by validatorIndex
 	var prevIndex uint16
 	for i, a := range assurances {
+		if err := s.checkAssurance(a, anchor, validators, hasRecentWR, hasStaleWR); err != nil {
+			return err
+		}
 		if i > 0 {
 			if a.ValidatorIndex == prevIndex {
 				return jamerrors.ErrADuplicateAssurer
@@ -117,19 +120,12 @@ func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Ass
 			}
 		}
 		prevIndex = a.ValidatorIndex
-	}
-
-	for _, a := range assurances {
-		if err := s.checkAssurance(a, anchor, validators, hasRecentWR, hasStaleWR); err != nil {
-			return err
-		}
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("ValidateAssurances canceled")
 		default:
 		}
 	}
-
 	return nil
 }
 

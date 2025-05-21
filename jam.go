@@ -15,6 +15,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/spf13/cobra"
@@ -39,12 +40,11 @@ func main() {
 	}
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	var (
-		help         bool
-		configPath   string
-		temp         bool
-		version      bool
-		pvm_output   string
-		pvm_sampling int
+		help       bool
+		configPath string
+		temp       bool
+		version    bool
+
 		//run flags
 		dataPath       string
 		chainSpec      string
@@ -68,23 +68,13 @@ func main() {
 		// run variables
 		validatorIndexFlagSet bool
 		start_timeFlagSet     bool
-
-		//run-stf flags
-		stfFile    string
-		outputFile string
 	)
 
 	var (
-		helpFlag         = "help"
-		logLevelFlag     = "log-level"
-		tempFlag         = "temp"
-		versionFlag      = "version"
-		pvm_outputFlag   = "pvm-output"
-		pvm_samplingFlag = "pvm-sampling"
-
-		// run-stf flags
-		stfFileFlag    = "intput-file"
-		outputFileFlag = "output-file"
+		helpFlag     = "help"
+		logLevelFlag = "log-level"
+		tempFlag     = "temp"
+		versionFlag  = "version"
 
 		// run flags
 		dataPathFlag       = "data-path"
@@ -109,8 +99,7 @@ func main() {
 	rootCmd.PersistentFlags().BoolVarP(&temp, tempFlag, "t", false, "Use a temporary data directory, removed on exit. Conflicts with data-path")
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "Path to the config file")
 	rootCmd.PersistentFlags().BoolVarP(&version, versionFlag, "v", false, "Prints the version of the program.")
-	rootCmd.PersistentFlags().StringVar(&pvm_output, pvm_outputFlag, "", "For both test-refine and test-stf, generates JSONNL separated execution trace with {step, pc, g, r} params")
-	rootCmd.PersistentFlags().IntVarP(&pvm_sampling, pvm_samplingFlag, "s", 1, "If --pvm-output is supplied, only outputs a line when step % pvm-sampling is 0 (default 1)")
+
 	//gen-keys
 	var genKeysCmd = &cobra.Command{
 		Use:   "gen-keys",
@@ -164,30 +153,28 @@ func main() {
 	}
 
 	var runCmdSTF = &cobra.Command{
-		Use:   "test-stf",
+		Use:   "test-stf <input.json>",
+		Args:  cobra.ExactArgs(1),
 		Short: "Run the STF Validation",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Run the STF Validation
-			if stfFile == "" {
-				fmt.Println("Error: --file-path is required.")
-				os.Exit(1)
-			}
-			// run the stf validation
+			stfFile := args[0]
+			outputFile := "poststate.json"
+			pvm.PvmLogging = true
+			log.InitLogger("debug")
+			log.EnableModule(log.PvmAuthoring)
+			log.EnableModule(log.PvmValidating)
+			log.EnableModule(log.GeneralAuthoring)
+			log.EnableModule(log.GeneralValidating)
 			_, err := statedb.ValidateStateTransitionFile(stfFile, dataPath, outputFile)
 			if err != nil {
-				fmt.Printf("Error running STF Validation: %s", err)
+				fmt.Printf("Error running STF Validation: %s\n", err)
 				os.Exit(1)
-			} else {
-				fmt.Printf("\033[32mSTF Validation passed.File:%s\033[0m\n ", stfFile)
 			}
-
 		},
 	}
 
 	// test-stf flag used
-	runCmdSTF.Flags().StringVarP(&stfFile, stfFileFlag, "f", "", "Specifies the path to the STF file.")
 	runCmdSTF.Flags().StringVarP(&dataPath, dataPathFlag, "d", filepath.Join(os.Getenv("HOME"), ".jamduna"), "Specifies the directory for the blockchain, keystore, and other data.")
-	runCmdSTF.Flags().StringVarP(&outputFile, outputFileFlag, "o", "", "Specifies the output file for the STF validation.")
 
 	var testRefineCmd = &cobra.Command{
 		Use:   "test-refine",

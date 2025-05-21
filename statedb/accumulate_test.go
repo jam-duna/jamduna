@@ -64,8 +64,9 @@ type TmpAccount struct {
 }
 
 type Data struct {
-	Service ServiceData `json:"service"`
-	Images  []CodeImage `json:"preimages"`
+	Service        ServiceData   `json:"service"`
+	Images         []CodeImage   `json:"preimages"`
+	ServiceStorage []TmpKeyValue `json:"storage"`
 }
 
 type ServiceData struct {
@@ -81,6 +82,35 @@ type CodeImage struct {
 	PreimageHash common.Hash `json:"hash"`
 	Blob         Blob        `json:"blob"`
 }
+
+type TmpKeyValue struct {
+	KeyBytes []byte `json:"key"`
+	Value    []byte `json:"value"`
+}
+
+func (t *TmpKeyValue) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}{
+		Key:   common.Bytes2Hex(t.KeyBytes),
+		Value: common.Bytes2Hex(t.Value),
+	})
+}
+
+func (t *TmpKeyValue) UnmarshalJSON(data []byte) error {
+	var tmp struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	t.KeyBytes = common.FromHex(tmp.Key)
+	t.Value = common.FromHex(tmp.Value)
+	return nil
+}
+
 type Blob struct {
 	byte []byte
 }
@@ -144,25 +174,25 @@ func TestAccumulateSTF(t *testing.T) {
 			continue
 		}
 		json_file_path := fmt.Sprintf("%s/%s", json_dir, json_file.Name())
-		// read the json file
-		jsonData, err := os.ReadFile(json_file_path)
-		if err != nil {
-			t.Errorf("failed to read JSON file: %v", err)
-			continue
-		}
-		var testCase AccumulateTestCase
-		err = json.Unmarshal(jsonData, &testCase)
-		if err != nil {
-			t.Errorf("failed to parse JSON file: %v", err)
-			continue
-		}
-		// run the test case
-		err = AccumulateSTF(json_file.Name(), testCase)
-		if err != nil {
-			fmt.Printf("\033[31mAccumulateSTF FAIL: %s, %s\033[0m\n", json_file.Name(), err)
-		} else {
-			fmt.Printf("\033[32mAccumulateSTF PASS: %s\033[0m\n", json_file.Name())
-		}
+		t.Run(json_file.Name(), func(t *testing.T) {
+			jsonData, err := os.ReadFile(json_file_path)
+			if err != nil {
+				t.Errorf("failed to read JSON file: %v", err)
+				return
+			}
+			var testCase AccumulateTestCase
+			err = json.Unmarshal(jsonData, &testCase)
+			if err != nil {
+				t.Errorf("failed to parse JSON file: %v", err)
+				return
+			}
+			err = AccumulateSTF(json_file.Name(), testCase)
+			if err != nil {
+				t.Errorf("AccumulateSTF FAIL: %s, %s", json_file.Name(), err)
+			} else {
+				fmt.Printf("\033[32mAccumulateSTF PASS: %s\033[0m\n", json_file.Name())
+			}
+		})
 	}
 }
 
@@ -180,7 +210,7 @@ func TestSingleAccumulateSTF(t *testing.T) {
 	testAccumulateSTF(filepath, testCase, t)
 }
 
-func (j *JamState) GetStateFromAccumulateState(state AccumulateState) (services map[uint32]*types.ServiceAccount, codes map[uint32][]byte) {
+func (j *JamState) GetStateFromAccumulateState(state AccumulateState) (services map[uint32]*types.ServiceAccount, codes map[uint32][]byte, storage map[uint32]TmpKeyValue) {
 	j.SafroleState.Timeslot = state.Slot
 	for i := range state.AccumulationQueue {
 		j.AccumulationQueue[i] = state.AccumulationQueue[i]
@@ -194,6 +224,7 @@ func (j *JamState) GetStateFromAccumulateState(state AccumulateState) (services 
 	// skip previlege state for now
 	services = make(map[uint32]*types.ServiceAccount)
 	codes = make(map[uint32][]byte)
+	storage = make(map[uint32]TmpKeyValue)
 	for _, account := range state.Accounts {
 		key := account.Index
 		data := account.Data
@@ -212,8 +243,16 @@ func (j *JamState) GetStateFromAccumulateState(state AccumulateState) (services 
 				codes[key] = image.Blob.byte
 			}
 		}
+
+		for _, storageItem := range account.Data.ServiceStorage {
+			// create a new TmpKeyValue
+			storage[key] = TmpKeyValue{
+				KeyBytes: storageItem.KeyBytes,
+				Value:    storageItem.Value,
+			}
+		}
 	}
-	return services, codes
+	return services, codes, storage
 }
 
 func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.T) {
@@ -235,11 +274,13 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	post_state := NewJamState()
 	db.JamState = state
 	// write state to the jam state
-	services, codes := db.JamState.GetStateFromAccumulateState(TestCase.PreState)
+
+	//TODO
+	services, codes, _ := db.JamState.GetStateFromAccumulateState(TestCase.PreState)
 	// post_services, post_codes := post_state.GetStateFromAccumulateState(TestCase.PostState)
 	s := db
 	o := s.JamState.newPartialState()
-	post_state.GetStateFromAccumulateState(TestCase.PostState)
+
 	for key, service := range services {
 		// write the service to the db
 		_, err := db.writeAccount(service)
@@ -248,6 +289,14 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		}
 		// write code to the db
 		db.WriteServicePreimageBlob(key, codes[key])
+	}
+
+	//post state here
+	p_services, p_codes, p_stroage := post_state.GetStateFromAccumulateState(TestCase.PostState)
+	for key, service := range p_services {
+		fmt.Printf("key: %d, service: %v\n", key, service)
+		fmt.Printf("key: %d, code: %x\n", key, p_codes[key])
+		fmt.Printf("key: %d, storage: %v\n", key, p_stroage[key])
 	}
 	var f map[uint32]uint32
 	s.JamState.SafroleState.Timeslot = TestCase.Input.Slot
@@ -353,9 +402,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	o := s.JamState.newPartialState()
 	// write state to the jam state
 	//fmt.Printf("TestAccumulateSTF %s\n", testname)
-	services, codes := db.JamState.GetStateFromAccumulateState(TestCase.PreState)
-	// post_services, post_codes := post_state.GetStateFromAccumulateState(TestCase.PostState)
-	post_state.GetStateFromAccumulateState(TestCase.PostState)
+	services, codes, _ := db.JamState.GetStateFromAccumulateState(TestCase.PreState)
 	for key, service := range services {
 		// write the service to the db
 		o.D[key] = service
@@ -366,6 +413,9 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 		// write code to the db
 		db.WriteServicePreimageBlob(key, codes[key])
 	}
+
+	//post state here
+	_, _, p_stroage := post_state.GetStateFromAccumulateState(TestCase.PostState)
 	var f map[uint32]uint32
 	s.JamState.SafroleState.Timeslot = TestCase.Input.Slot
 	var g uint64 = 1000000000000000000
@@ -397,6 +447,32 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	}
 	if !reflect.DeepEqual(newJam.AccumulationQueue, post_state.AccumulationQueue) {
 		return fmt.Errorf("STF FAIL: AccumulationQueue does not match")
+	}
+	checkStorage := false
+	if checkStorage {
+		for _, service := range o.D {
+			service_idx := service.ServiceIndex
+			key := p_stroage[service_idx].KeyBytes
+			key_bytes := make([]byte, 32)
+			copy(key_bytes, key)
+			key_hash := common.BytesToHash(key_bytes)
+			storage, ok, err := s.ReadServiceStorage(service_idx, key_hash)
+			if !ok || err != nil {
+				return fmt.Errorf("STF FAIL: ReadServiceStorage failed")
+			}
+			if len(storage) != 0 {
+				// compare the storage with the expected storage
+				expected_storage := p_stroage[service_idx].Value
+				if len(expected_storage) != len(storage) {
+					return fmt.Errorf("STF FAIL: Storage size does not match")
+				}
+				for i := 0; i < len(storage); i++ {
+					if storage[i] != expected_storage[i] {
+						return fmt.Errorf("STF FAIL: Storage does not match")
+					}
+				}
+			}
+		}
 	}
 	return nil
 }

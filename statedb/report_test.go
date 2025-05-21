@@ -207,27 +207,57 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	db.Block.Extrinsic.Guarantees = report.Input.Guarantee
 	db.RotateGuarantors()
 
-	//TODO: check this
-	// err = db.Verify_Guarantees()
-	// if err != nil && exceptErr == nil {
-	// 	fmt.Printf(report.Input.Guarantee[0].Report.String())
-	// 	return fmt.Errorf("Reports FAIL: failed to verify guarantee: %v", err)
-	// }
-	// if err == nil && exceptErr != nil {
-	// 	return fmt.Errorf("Reports FAIL: Expected have error:%v", exceptErr)
-	// }
-	// if err != nil && exceptErr != nil {
-	// 	//check error prefix vs json file name
-	// 	// read string until the first '-'
-	// 	// if the prefix is not the same as the json file name, return error
-	// 	// if the prefix is the same as the json file name, return nil
-	// 	if err == exceptErr {
-	// 		return nil
-	// 	} else {
-	// 		return fmt.Errorf("Reports FAIL: Expected error: %v, but get %v\n", exceptErr, err)
-	// 	}
-	// }
+	// Guarantees checks
+	guarantees := db.Block.Extrinsic.Guarantees
+	targetJCE := uint32(report.Input.Slot)
+	s := db
+	errors := make([]error, 0)
+	for _, g := range guarantees {
+		if e := s.VerifyGuaranteeBasic(g, targetJCE); e != nil {
+			errors = append(errors, e)
+		}
+	}
 
+	if e := CheckSortedGuarantees(guarantees); e != nil {
+		errors = append(errors, e)
+	}
+
+	if e := s.checkLength(); e != nil && err == nil {
+		errors = append(errors, e)
+	}
+
+	for _, g := range guarantees {
+		if e := s.checkRecentWorkPackage(g, guarantees); e != nil && err == nil {
+			errors = append(errors, e)
+		}
+		if e := s.checkPrereq(g, guarantees); e != nil && err == nil {
+			errors = append(errors, e)
+		}
+	}
+
+	if len(errors) > 0 && exceptErr == nil {
+		fmt.Printf(report.Input.Guarantee[0].Report.String())
+		return fmt.Errorf("Reports FAIL: failed to verify guarantee: %v", errors)
+	}
+	if len(errors) == 0 && exceptErr != nil {
+		return fmt.Errorf("Reports FAIL: Expected have error:%v", exceptErr)
+	}
+
+	for _, err := range errors {
+
+		if err != nil && exceptErr != nil {
+			//check error prefix vs json file name
+			// read string until the first '-'
+			// if the prefix is not the same as the json file name, return error
+			// if the prefix is the same as the json file name, return nil
+			if err == exceptErr {
+				return nil
+			}
+		}
+	}
+	if len(errors) > 0 {
+		return fmt.Errorf("Reports FAIL: Expected error: %v, but get %v\n", exceptErr, errors)
+	}
 	post_state := NewJamState()
 	post_state.GetStateFromReportState(report.PostState)
 	db.JamState.ProcessGuarantees(context.TODO(), db.Block.Guarantees())

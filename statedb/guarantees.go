@@ -71,13 +71,7 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 
 	// validator index uniqueness and sorting
 	if err := CheckSortedSignatures(g); err != nil {
-		return jamerrors.ErrGDuplicateGuarantors
-	}
-
-	// signature verification against current or previous validator set
-	validators := s.chooseValidatorSet(g.Slot)
-	if err := g.Verify(validators); err != nil {
-		return jamerrors.ErrGBadSignature
+		return err
 	}
 
 	// pending or timeout checks on JamState
@@ -100,6 +94,12 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 		if err := fn(g); err != nil {
 			return err
 		}
+	}
+
+	// signature verification against current or previous validator set
+	validators := s.chooseValidatorSet(g.Slot)
+	if err := g.Verify(validators); err != nil {
+		return err
 	}
 
 	return nil
@@ -164,6 +164,9 @@ func CheckSortedGuarantees(gs []types.Guarantee) error {
 func CheckSortedSignatures(g types.Guarantee) error {
 	s := g.Signatures
 	for i := 1; i < len(s); i++ {
+		if s[i].ValidatorIndex >= types.TotalValidators {
+			return jamerrors.ErrGBadValidatorIndex
+		}
 		if s[i-1].ValidatorIndex >= s[i].ValidatorIndex {
 			return jamerrors.ErrGDuplicateGuarantors
 		}

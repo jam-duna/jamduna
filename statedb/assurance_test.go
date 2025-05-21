@@ -4,6 +4,7 @@
 package statedb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -81,12 +82,10 @@ func VerifyAssurances(jsonFile string, exceptErr error) error {
 	db.Block.Header.ParentHeaderHash = testCase.Input.ParentHash
 	db.Block.Header.Slot = uint32(testCase.Input.Slot)
 	db.ParentHeaderHash = testCase.Input.ParentHash
-
-	// TODO: check this
-	// err = db.ValidateAssurancesWithSig(ctx.TODO(), db.Block.Extrinsic.Assurances)
-	// if err != exceptErr {
-	// 	return fmt.Errorf("expected error %v, got %v", exceptErr, err)
-	// }
+	err = db.ValidateAssurances(context.Background(), db.Block.Extrinsic.Assurances, db.ParentHeaderHash)
+	if err != exceptErr {
+		return fmt.Errorf("expected error %v, got %v", exceptErr, err)
+	}
 	return nil
 }
 
@@ -137,6 +136,7 @@ func TestVerifyAssurance(t *testing.T) {
 		t.Run(tc.jsonFile, func(t *testing.T) {
 			err := VerifyAssurances(tc.jsonFile, tc.exceptErr)
 			if err != nil {
+				fmt.Printf("\033[31mAssurance Test case %s failed: %v\033[0m\n", tc.jsonFile, err)
 				t.Fatalf("failed to validate assurance: %v", err)
 			} else {
 				fmt.Printf("\033[32mAssurance Test case %s passed\033[0m\n", tc.jsonFile)

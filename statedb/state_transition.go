@@ -131,7 +131,7 @@ func ValidateStateTransitionFile(filename string, storageDir string, outputDir s
 	// 1) read the file
 	content, err := os.ReadFile(filename)
 	if err != nil {
-		return false, fmt.Errorf("❌ [%s] Error reading file: %v", filename, err)
+		return false, fmt.Errorf(" [%s] Error reading file: %v", filename, err)
 	}
 
 	// 2) parse the STF
@@ -216,7 +216,7 @@ func ValidateStateTransitionFile(filename string, storageDir string, outputDir s
 		fmt.Println(strings.Repeat("=", 40))
 	}
 	if len(diffs) > 0 {
-		return true, fmt.Errorf("❌ [%s] State transition failed with %d diffs", filename, len(diffs))
+		return true, fmt.Errorf("[%s] State transition failed with %d diffs", filename, len(diffs))
 	}
 	return false, nil
 }
