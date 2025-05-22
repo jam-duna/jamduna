@@ -59,6 +59,12 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var workPackage types.WorkPackage
 		err = json.Unmarshal(input, &workPackage)
 		obj = workPackage
+	case "WorkPackageBundle":
+		var workPackageBundle types.WorkPackageBundle
+		err = json.Unmarshal(input, &workPackageBundle)
+		encode := workPackageBundle.Encode()
+		fmt.Printf("!!!%v encode(len:%v)=%x\n", objectType, len(encode), encode)
+		obj = workPackageBundle
 	case "WorkItem":
 		var workItem types.WorkItem
 		err = json.Unmarshal(input, &workItem)
@@ -213,6 +219,9 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Judgement{}))
 	case "WorkPackage":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkPackage{}))
+	case "WorkPackageBundle":
+		//decodedStruct, _, err = types.DecodeBundle(encodedBytes)
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkPackageBundle{}))
 	case "WorkResult":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkResult{}))
 	case "WorkReport":

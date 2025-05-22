@@ -18,26 +18,16 @@ A work item includes: (See Equation 175)
   - $e$, the number of data segments exported by this work item
 */
 
-type ExtrinsicsBlobs [][]byte
-
 // WorkItem represents a work item.
 type WorkItem struct {
-	// s: the identifier of the service to which it relates
-	Service uint32 `json:"service"`
-	// c: the code hash of the service at the time of reporting
-	CodeHash common.Hash `json:"code_hash"`
-	// y: a payload blob
-	Payload []byte `json:"payload"`
-	// g: a refine gas limit
-	RefineGasLimit uint64 `json:"refine_gas_limit"`
-	// a: an accumulate gas limit
-	AccumulateGasLimit uint64 `json:"accumulate_gas_limit"`
-	// i: a sequence of imported data segments
-	ImportedSegments []ImportSegment `json:"import_segments"`
-	// x: extrinsic
-	Extrinsics []WorkItemExtrinsic `json:"extrinsic"`
-	// ExtrinsicsBlobs ExtrinsicsBlobs     `json:"extrinsics"`
-	ExportCount uint16 `json:"export_count"`
+	Service            uint32              `json:"service"`              // s: the identifier of the service to which it relates
+	CodeHash           common.Hash         `json:"code_hash"`            // c: the code hash of the service at the time of reporting
+	Payload            []byte              `json:"payload"`              // y: a payload blob
+	RefineGasLimit     uint64              `json:"refine_gas_limit"`     // g: a refine gas limit
+	AccumulateGasLimit uint64              `json:"accumulate_gas_limit"` // a: an accumulate gas limit
+	ImportedSegments   []ImportSegment     `json:"import_segments"`      // i: a sequence of imported data segments
+	Extrinsics         []WorkItemExtrinsic `json:"extrinsic"`            // x: extrinsic
+	ExportCount        uint16              `json:"export_count"`
 }
 
 // 0.6.2 14.5
@@ -67,22 +57,6 @@ type WorkItemExtrinsic struct {
 type Segment struct {
 	Data []byte
 }
-
-func (E ExtrinsicsBlobs) Bytes() []byte {
-	encode, err := Encode(E)
-	if err != nil {
-		return nil
-	}
-	return encode
-}
-
-// func (E ExtrinsicsBlobs) Encode() []byte {
-// 	return []byte{}
-// }
-
-// func (E ExtrinsicsBlobs) Decode(data []byte) (interface{}, uint32) {
-// 	return nil, 0
-// }
 
 func (a *WorkItem) UnmarshalJSON(data []byte) error {
 	var s struct {

@@ -2,11 +2,8 @@ package types
 
 import (
 	"encoding/json"
-	"fmt"
-	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 /*
@@ -33,195 +30,6 @@ type WorkPackage struct {
 	RefineContext RefineContext `json:"context"`
 	// $w$ - a sequence of work items
 	WorkItems []WorkItem `json:"items"`
-}
-
-// WorkPackageBundle represents a work package.
-type WorkPackageBundle struct {
-	WorkPackage       WorkPackage       `json:"work_package"`    // P: workPackage
-	ExtrinsicData     ExtrinsicsBlobs   `json:"extrinsics"`      // X: extrinsic data for some workitem argument w
-	ImportSegmentData [][][]byte        `json:"import_segments"` // M: import segment data, previouslly called m (each of segment is size of W_G)
-	Justification     [][][]common.Hash `json:"justifications"`  // J: justifications of segment data build using CDT
-}
-
-func (b *WorkPackageBundle) Validate() error {
-	//0.6.2 14.2
-	work_package := b.WorkPackage
-	if len(work_package.WorkItems) < 1 {
-		return fmt.Errorf("WorkPackageBundle must have at least one WorkItem")
-	}
-	if len(work_package.WorkItems) > MaxWorkItemsPerPackage {
-		return fmt.Errorf("WorkPackageBundle has too many WorkItems")
-	}
-	// 0.6.3 14.4
-	total_exports := 0
-	total_imports := 0
-	total_extrinsics := 0
-	for _, work_item := range work_package.WorkItems {
-		total_exports += int(work_item.ExportCount)
-		total_imports += len(work_item.ImportedSegments)
-		total_extrinsics += len(work_item.Extrinsics)
-	}
-	if total_exports > MaxExports {
-		return fmt.Errorf("WorkPackageBundle has too many exports")
-	}
-	if total_imports > MaxImports {
-		return fmt.Errorf("WorkPackageBundle has too many imports")
-	}
-	//0.6.3 added maximum extrinsics
-	if total_extrinsics > ExtrinsicMaximumPerPackage {
-		return fmt.Errorf("WorkPackageBundle has too many extrinsics")
-	}
-	// 0.6.2 14.5
-	data_lens := 0
-	data_lens += len(work_package.Authorization)
-	data_lens += len(work_package.ParameterizationBlob)
-	for _, work_item := range work_package.WorkItems {
-		data_lens += work_item.GetTotalDataLength()
-	}
-	if data_lens > MaxEncodedWorkPackageSize {
-		return fmt.Errorf("WorkPackageBundle has too much data")
-	}
-	// 0.6.2 14.6
-	Gas_a := uint64(0)
-	Gas_r := uint64(0)
-	for _, work_item := range work_package.WorkItems {
-		Gas_a += work_item.AccumulateGasLimit
-		Gas_r += work_item.RefineGasLimit
-	}
-	if Gas_a > AccumulationGasAllocation {
-		return fmt.Errorf("WorkPackageBundle has too much accumulate gas")
-	}
-	if Gas_r > RefineGasAllocation {
-		return fmt.Errorf("WorkPackageBundle has too much refine gas")
-	}
-	return nil
-}
-
-func (b *WorkPackageBundle) String() string {
-	jsonByte, _ := json.Marshal(b)
-	return string(jsonByte)
-}
-
-func (b *WorkPackageBundle) PackageHash() common.Hash {
-	return b.WorkPackage.Hash()
-}
-
-func (b *WorkPackageBundle) Package() WorkPackage {
-	return b.WorkPackage
-}
-
-func DecodeBundle(remaining []byte) (*WorkPackageBundle, uint32, error) {
-	if len(remaining) < 1 {
-		return nil, uint32(len(remaining)), fmt.Errorf("encoded bundle is empty")
-	}
-	// Decode the work package
-	workPackage, length, err := Decode(remaining, reflect.TypeOf(WorkPackage{}))
-	if err != nil {
-		return nil, length, err
-	}
-	remaining = remaining[length:]
-	fmt.Printf("remaining length after work package decode: %d\n", len(remaining))
-	wp := workPackage.(WorkPackage)
-	// Create a new WorkPackageBundle
-	bundle := &WorkPackageBundle{
-		WorkPackage:       wp,
-		ExtrinsicData:     make(ExtrinsicsBlobs, 0),
-		ImportSegmentData: make([][][]byte, len(wp.WorkItems)),
-		Justification:     make([][][]common.Hash, len(wp.WorkItems)),
-	}
-	// Decode the extrinsic data using *work items*
-	for _, wpItem := range wp.WorkItems {
-		extrinsics := wpItem.Extrinsics
-		if len(extrinsics) == 0 {
-			continue
-		}
-		for _, x := range extrinsics {
-			h := x.Hash
-			l := x.Len
-			ext := remaining[:l]
-			if h != common.Blake2Hash(ext) {
-				log.Warn("extrinsic hash mismatch", "expected", h, "got", common.Blake2Hash(ext))
-			}
-			if len(remaining) < int(l) {
-				return nil, length, fmt.Errorf("not enough data for extrinsic %s", h)
-			}
-			bundle.ExtrinsicData = append(bundle.ExtrinsicData, remaining[:l])
-			length += uint32(l)
-			remaining = remaining[l:]
-		}
-	}
-
-	// Decode the imported segment data using *work items*
-	for j, wpItem := range wp.WorkItems {
-		importedSegments := wpItem.ImportedSegments
-		if len(importedSegments) == 0 {
-			continue
-		}
-		bundle.ImportSegmentData[j] = make([][]byte, len(importedSegments))
-		for imp_segment_idx, i := range importedSegments {
-			s := remaining[:SegmentSize]
-			h := common.Blake2Hash(s)
-			if h != i.RequestedHash {
-				log.Warn("imported segment hash mismatch", "expected", i.RequestedHash, "got", h)
-			}
-			bundle.ImportSegmentData[j][imp_segment_idx] = s
-			length += SegmentSize
-			remaining = remaining[SegmentSize:]
-		}
-	}
-
-	// Decode the justification data using *work items*
-	for j, wpItem := range wp.WorkItems {
-		importedSegments := wpItem.ImportedSegments
-		if len(importedSegments) == 0 {
-			continue
-		}
-		bundle.Justification[j] = make([][]common.Hash, len(importedSegments))
-		for imp_segment_idx, _ := range importedSegments {
-			justification, l0, err := Decode(remaining, reflect.TypeOf([]common.Hash{}))
-			if err != nil {
-				return nil, length, err
-			}
-			bundle.Justification[j][imp_segment_idx] = justification.([]common.Hash)
-			length += l0
-			remaining = remaining[l0:]
-		}
-	}
-	return bundle, length, nil
-}
-
-func (b *WorkPackageBundle) Bytes() []byte {
-	encode, err := Encode(b.WorkPackage)
-	if err != nil {
-		return nil
-	}
-	// Append the extrinsic data
-	for _, extrinsic := range b.ExtrinsicData {
-		encode = append(encode, extrinsic...)
-	}
-	// Append the import segment data
-	for _, wpItemSegments := range b.ImportSegmentData {
-		for _, segment := range wpItemSegments {
-			encode = append(encode, segment...)
-		}
-	}
-	// Append the justification data
-	for _, wpItemJustifications := range b.Justification {
-		for _, seg_justification := range wpItemJustifications {
-			// Encode each justification
-			sj, err := Encode(seg_justification)
-			if err != nil {
-				return nil
-			}
-			encode = append(encode, sj...)
-		}
-	}
-	return encode
-}
-
-type Authorizer struct {
-	CodeHash common.Hash `json:"code_hash"`
-	Params   []byte      `json:"params"`
 }
 
 func (a *WorkPackage) String() string {
@@ -269,21 +77,6 @@ func (a *WorkPackage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *Authorizer) UnmarshalJSON(data []byte) error {
-	var s struct {
-		CodeHash common.Hash `json:"code_hash"`
-		Params   string      `json:"params"`
-	}
-	err := json.Unmarshal(data, &s)
-	if err != nil {
-		return err
-	}
-	a.CodeHash = s.CodeHash
-	a.Params = common.FromHex(s.Params)
-
-	return nil
-}
-
 func (a WorkPackage) MarshalJSON() ([]byte, error) {
 	// Convert Authorization from []byte to hex string
 	authorization := common.HexString(a.Authorization)
@@ -303,15 +96,5 @@ func (a WorkPackage) MarshalJSON() ([]byte, error) {
 		},
 		RefineContext: a.RefineContext,
 		WorkItems:     a.WorkItems,
-	})
-}
-
-func (a Authorizer) MarshalJSON() ([]byte, error) {
-	return json.Marshal(&struct {
-		CodeHash common.Hash `json:"code_hash"`
-		Params   string      `json:"params"`
-	}{
-		CodeHash: a.CodeHash,
-		Params:   common.HexString(a.Params),
 	})
 }

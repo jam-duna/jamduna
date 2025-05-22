@@ -318,13 +318,17 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		_ = stream.Close()
 		return err
 	}
-	bp, leng, err := types.DecodeBundle(encodedBundle)
+
+	bp, _, err := types.DecodeBundle(encodedBundle)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
 		return fmt.Errorf("onWorkPackageShare: decode bundle: %w\nencodedBundle data:\n%x", err, encodedBundle)
 	}
+
 	wpCoreIndex := newReq.CoreIndex
-	log.Info(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "workpackageBytes", fmt.Sprintf("%x", bp.Bytes()), "len", leng)
+	log.Info(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "bundle_Len", len(encodedBundle))
+	log.Debug(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "workPackageBundleBytes", fmt.Sprintf("0x%x", bp.Bytes()))
+	log.Debug(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "workPackageBundle", bp.String())
 
 	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {

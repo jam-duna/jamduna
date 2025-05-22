@@ -11,6 +11,7 @@ const jamTypes = [
     {value: "Preimages", label: "Preimages"},
     {value: "WorkItem", label: "WorkItem"},
     {value: "WorkPackage", label: "WorkPackage"},
+    {value: "WorkPackageBundle", label: "WorkPackageBundle"},
     {value: "WorkReport", label: "WorkReport"},
     {value: "WorkResult", label: "WorkResult"},
     {value: "Judgement", label: "Judgement"},
