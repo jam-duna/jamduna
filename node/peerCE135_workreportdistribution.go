@@ -9,6 +9,8 @@ import (
 
 	"reflect"
 
+	"github.com/colorfulnotion/jam/bls"
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -52,7 +54,6 @@ func (wr *JAMSNPWorkReport) ToBytes() ([]byte, error) {
 	if _, err := buf.Write(workReportBytes); err != nil {
 		return nil, err
 	}
-
 
 	// Serialize Slot (4 bytes)
 	if err := binary.Write(buf, binary.LittleEndian, wr.Slot); err != nil {
@@ -153,7 +154,11 @@ func (p *Peer) SendWorkReportDistribution(
 	return nil
 }
 
-func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte) error {
+const (
+	attemptReconstruction = true
+)
+
+func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
 	var newReq JAMSNPWorkReport
 	if err := newReq.FromBytes(msg); err != nil {
@@ -166,6 +171,38 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		Report:     workReport,
 		Slot:       newReq.Slot,
 		Signatures: newReq.Credentials,
+	}
+
+	if attemptReconstruction {
+		bundleShards := make([][]byte, types.TotalValidators)
+		numShards := 2
+		indexes := make([]uint32, types.TotalValidators)
+		startIdx := 2
+		for i := startIdx; i < startIdx+numShards; i++ {
+			p, ok := n.peersInfo[peerID]
+			if ok {
+				bundleShard, _, _, err := p.SendFullShardRequest(context.TODO(), workReport.AvailabilitySpec.ErasureRoot, uint16(i))
+				if err != nil {
+					log.Error(module, "onWorkReportDistribution SendFullShardRequest ERR", "err", err)
+					continue
+				}
+				log.Info(module, "onWorkReportDistribution SendFullShardRequest SUCC", "i", i, "len(bundleShard)", len(bundleShard))
+				bundleShards[i] = bundleShard
+				indexes[i] = uint32(i)
+			}
+		}
+		// Attempt to decode the full bundle
+		encodedBundle, err := bls.Decode(bundleShards[:numShards], types.TotalValidators, indexes[:numShards], int(workReport.AvailabilitySpec.BundleLength))
+		if err != nil {
+			log.Error(module, "onWorkReportDistribution bls.Decode ERR", "err", err)
+		} else {
+			// Check if the decoded bundle matches the original work package hash
+			if workReport.GetWorkPackageHash() != common.Blake2Hash(encodedBundle) {
+				log.Warn(module, "onWorkReportDistribution", "err", "decoded bundle does not match original work package hash")
+			} else {
+				log.Info(module, "onWorkReportDistribution", "msg", "decoded bundle matches original work package hash")
+			}
+		}
 	}
 
 	select {

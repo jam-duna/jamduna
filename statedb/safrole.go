@@ -919,7 +919,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 }
 
 func (s *StateDB) GetPosteriorSafroleEntropy(targetJCE uint32) (*SafroleState, error) {
-	epochChanged := s.GetSafrole().EpochChanged(targetJCE)
+	//epochChanged := s.GetSafrole().EpochChanged(targetJCE)
 	// if s.posteriorSafroleEntropy != nil && !epochChanged {
 	// 	return s.posteriorSafroleEntropy
 	// }
@@ -929,7 +929,7 @@ func (s *StateDB) GetPosteriorSafroleEntropy(targetJCE uint32) (*SafroleState, e
 		return nil, fmt.Errorf("GetPosteriorSafroleEntropy SimulatePostiorEntropy %v", err)
 	}
 	s.posteriorSafroleEntropy = simulated_posteriorSafroleEntropy
-	log.Debug(module, "GetPosteriorSafroleEntropy", "epochChanged", epochChanged, "s.JCE", s.JamState.SafroleState.Timeslot, "targetJCE", targetJCE, "entropy", simulated_posteriorSafroleEntropy.Entropy.String())
+	//log.Debug(module, "GetPosteriorSafroleEntropy", "epochChanged", epochChanged, "s.JCE", s.JamState.SafroleState.Timeslot, "targetJCE", targetJCE, "entropy", simulated_posteriorSafroleEntropy.Entropy.String())
 	return simulated_posteriorSafroleEntropy, nil
 }
 

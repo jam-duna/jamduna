@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-	"sort"
+	"strings"
 
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -71,6 +71,8 @@ type VM struct {
 	s      uint32
 	o_byte []byte
 	w_byte []byte
+
+	heap_pointer uint32
 
 	// Refine argument
 	RefineM_map        map[uint32]*RefineM
@@ -174,6 +176,7 @@ func extractBytes(input []byte) ([]byte, []byte) {
 
 func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, []byte) {
 	pure := p
+	// see A.37
 	o_size := types.DecodeE_l(pure[:3])
 	w_size := types.DecodeE_l(pure[3:6])
 	z_val := types.DecodeE_l(pure[6:8])
@@ -198,7 +201,7 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 	if offset+4 <= uint64(len(pure)) {
 		offset += 4 // skip standard_c_size_byte
 	}
-
+	fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d\n", o_size, w_size, z_val, s_val)
 	return decodeCorePart(pure[offset:]), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
 }
 
@@ -246,16 +249,16 @@ func decodeCorePart(p []byte) *Program {
 	}
 }
 
-func CelingDevide(a, b uint32) uint32 {
+func CeilingDivide(a, b uint32) uint32 {
 	return (a + b - 1) / b
 }
 
 func P_func(x uint32) uint32 {
-	return Z_P * CelingDevide(x, Z_P)
+	return Z_P * CeilingDivide(x, Z_P)
 }
 
 func Z_func(x uint32) uint32 {
-	return Z_Z * CelingDevide(x, Z_Z)
+	return Z_Z * CeilingDivide(x, Z_Z)
 }
 
 func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
@@ -283,7 +286,7 @@ func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
 	)
 
 	setAccess := func(addr, length uint32, access AccessMode) {
-		vm.Ram.SetPageAccess(addr/PageSize, CelingDevide(length, PageSize), access)
+		vm.Ram.SetPageAccess(addr/PageSize, CeilingDivide(length, PageSize), access)
 	}
 
 	// o_byte
@@ -355,6 +358,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		hostenv:         hostENV, //check if we need this
 		Exports:         make([][]byte, 0),
 		Service_index:   service_index,
+		heap_pointer:    2*Z_Z + Z_func(o_size) + Z_P,
 		o_size:          o_size,
 		w_size:          w_size,
 		z:               z,
@@ -409,6 +413,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	stepn := 1
 	for !vm.terminated {
 		if err := vm.step(stepn); err != nil {
+			fmt.Println("Error in step:", err)
 			return err
 		}
 		if vm.hostCall && is_child {
@@ -424,6 +429,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 		}
 		stepn++
 	}
+	fmt.Println("terminated\n")
 	// vm.Mode = ...
 	// vm.Gas = types.IsAuthorizedGasAllocation
 	// log.Debug(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)
@@ -439,7 +445,7 @@ func (vm *VM) step(stepn int) error {
 	if vm.pc >= uint64(len(vm.code)) {
 		return errors.New("program counter out of bounds")
 	}
-
+	this_step_pc := vm.pc
 	opcode := vm.code[vm.pc]
 
 	len_operands := vm.skip(vm.pc)
@@ -495,30 +501,19 @@ func (vm *VM) step(stepn int) error {
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
+
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
-		// log.Debug(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
+		log.Warn(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
 		return nil
 	}
 
 	// avoid this: this is expensive
 	if PvmLogging {
-
-		sample := StepSample{
-			Mode: vm.Mode,
-			Step: stepn,
-			PC:   vm.pc,
-			Gas:  vm.Gas,
-			Op:   opcode_str(opcode),
-			Reg:  vm.ReadRegisters(),
-		}
-
-		if jsonLine, err := json.Marshal(sample); err == nil {
-			fmt.Println(string(jsonLine))
-		} else {
-			log.Warn(vm.logging, "failed to marshal step sample", "err", err)
-		}
+		registersJSON, _ := json.Marshal(vm.ReadRegisters())
+		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", ", ")
+		fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, this_step_pc, vm.Gas, prettyJSON)
 
 	}
 	return nil
@@ -987,35 +982,24 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 		result, _ = vm.ReadRegister(registerIndexA)
 	case SBRK:
 		if valueA == 0 {
-			vm.WriteRegister(registerIndexD, uint64(2*Z_Z+Z_func(vm.o_size)))
+			// The guest wants to know the current heap pointer.
+			//fmt.Printf("SBRK0 - r%d=%d\n", registerIndexD, vm.heap_pointer)
+			vm.WriteRegister(registerIndexD, uint64(vm.heap_pointer))
 			return
 		}
-		h := (2*Z_Z + Z_func(vm.o_size)) / Z_P
-		num_of_page := CelingDevide(uint32(valueA), Z_P)
-
-		ids := make([]uint32, 0)
-		for id, page := range vm.Ram.Pages {
-			// TODO: william to check
-			//log.Warn(vm.logging, "WILLAIM TO CHECK PAGE NIL", "id", id, "page", page)
-			if page != nil && page.Access.Writable && !page.Access.Readable && uint32(id) >= h {
-				ids = append(ids, uint32(id))
-			}
+		// The guest wants to allocate.
+		next_page_boundary := P_func(vm.heap_pointer)
+		if uint64(vm.heap_pointer)+valueA > uint64(next_page_boundary) {
+			fin := P_func(uint32(uint64(vm.heap_pointer) + valueA))
+			idx := next_page_boundary / Z_P
+			idx2 := fin / Z_P
+			vm.Ram.SetPageAccess(idx, idx2-idx, AccessMode{Inaccessible: false, Writable: true, Readable: true})
 		}
-		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-		needed := int(num_of_page)
-		runLen := 0
-		for i := 0; i < len(ids); i++ {
-			if i > 0 && ids[i] == ids[i-1]+1 {
-				runLen++
-			} else {
-				runLen = 1
-			}
-			if runLen >= needed {
-				vm.WriteRegister(registerIndexD, uint64(ids[i-needed+1]*4096))
-				return
-			}
-		}
-		result = 0
+		result = uint64(vm.heap_pointer)
+		vm.heap_pointer += uint32(valueA)
+		// The guest wants to know the current heap pointer.
+		//fmt.Printf("SBRK1 - r%d=%d\n", registerIndexD, vm.heap_pointer)
+		break
 	case COUNT_SET_BITS_64:
 		result = uint64(bits.OnesCount64(valueA))
 	case COUNT_SET_BITS_32:

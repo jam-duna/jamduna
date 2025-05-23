@@ -188,6 +188,24 @@ const (
 	C15 = "AccumulationHistory"
 )
 
+var StateKeyMap = map[byte]string{
+	0x01: "c1",
+	0x02: "c2",
+	0x03: "c3",
+	0x04: "c4",
+	0x05: "c5",
+	0x06: "c6",
+	0x07: "c7",
+	0x08: "c8",
+	0x09: "c9",
+	0x0A: "c10",
+	0x0B: "c11",
+	0x0C: "c12",
+	0x0D: "c13",
+	0x0E: "c14",
+	0x0F: "c15",
+}
+
 // Initial services
 const (
 	BootstrapServiceCode  = 0

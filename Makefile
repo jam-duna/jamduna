@@ -172,9 +172,11 @@ run_polkajam_all:
 
 run_polkajam_dom: jam_clean
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json > logs/jamduna-5.log 2>&1&
+	$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json >logs/jamduna-5.log 2>&1 &
 	sleep 4
-	@for i in 0 1 2 3 4; do $(POLKAJAM_BIN) --chain chainspecs/polkajam-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) & done
+	@for i in 0 1 2 3 4; do \
+	RUST_LOG=polkavm=trace $(POLKAJAM_BIN) --chain chainspecs/polkajam-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+	done
 
 run_jamduna_dom: jam_clean 
 	@mkdir -p logs

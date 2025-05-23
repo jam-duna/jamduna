@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
 
 	"github.com/yudai/gojsondiff"
@@ -80,6 +82,15 @@ func testSTF(t *testing.T, filename string, content string) {
 		stateType := "unknown"
 		if m := strings.TrimSuffix(val.ActualMeta, "|"); m != "" {
 			stateType = m
+		} else {
+			keyFirstByte := common.FromHex(key)[0]
+			stateTypeTmp, ok := StateKeyMap[keyFirstByte]
+			if !ok {
+				stateType = "unknown"
+			} else {
+				stateType = stateTypeTmp
+			}
+
 		}
 
 		fmt.Println(strings.Repeat("=", 40))
@@ -130,13 +141,15 @@ func testSTF(t *testing.T, filename string, content string) {
 }
 
 func TestStateTransitionSingle(t *testing.T) {
-	filename := "1_007.json"
+	filename := "00000013.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
 	log.InitLogger("trace")
+	pvm.PvmLogging = true
 	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule(log.PvmValidating)
 	log.EnableModule(log.GeneralAuthoring)
 	log.EnableModule(log.StateDBMonitoring)
 

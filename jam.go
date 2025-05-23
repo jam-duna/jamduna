@@ -95,7 +95,7 @@ func main() {
 		telemetryFlag   = "telemetry"
 	)
 	rootCmd.PersistentFlags().BoolVarP(&help, helpFlag, "h", false, "Displays help information about the commands and flags.")
-	rootCmd.PersistentFlags().StringVarP(&logLevel, logLevelFlag, "l", "debug", "Log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().StringVarP(&logLevel, logLevelFlag, "l", "trace", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().BoolVarP(&temp, tempFlag, "t", false, "Use a temporary data directory, removed on exit. Conflicts with data-path")
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "Path to the config file")
 	rootCmd.PersistentFlags().BoolVarP(&version, versionFlag, "v", false, "Prints the version of the program.")

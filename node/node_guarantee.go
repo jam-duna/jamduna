@@ -299,6 +299,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		} else {
 			log.Warn(debugG, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(),
 				"selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
+			log.Warn(debugG, "our reports", "n", n.String(), "selfWorkReport", guarantee.Report.String())
 		}
 	}
 

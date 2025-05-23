@@ -246,7 +246,6 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, fmt.Errorf("Out of gas\n")
 	}
 	vm.chargeGas(host_fn)
-
 	switch host_fn {
 	case GAS:
 		vm.hostGas()
@@ -387,21 +386,20 @@ func (vm *VM) hostInfo() {
 	if errCode != OK {
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
-		log.Debug(vm.logging, vm.Str("INFO NONE"), "s", omega_7)
+		log.Info(vm.logging, "INFO NONE", "s", omega_7)
 		return
 	}
 	bo, _ := vm.ReadRegister(8)
 
 	var buf bytes.Buffer
-
-	elements := []interface{}{t.CodeHash, t.Balance, t.ComputeThreshold(), t.GasLimitG, t.GasLimitM, t.NumStorageItems, t.StorageSize}
-
+	// check this
+	elements := []interface{}{t.CodeHash, uint(t.Balance), uint(t.ComputeThreshold()), uint(t.GasLimitG), uint(t.GasLimitM), uint(t.NumStorageItems), uint(t.StorageSize)}
 	for _, elem := range elements {
 		encoded, err := types.Encode(elem)
 		if err != nil {
 			vm.WriteRegister(7, NONE)
 			vm.HostResultCode = NONE
-			log.Debug(vm.logging, vm.Str("INFO NONE"), "s", omega_7)
+			log.Info(vm.logging, "INFO NONE", "s", omega_7)
 			return
 		}
 		buf.Write(encoded)
@@ -414,7 +412,7 @@ func (vm *VM) hostInfo() {
 		vm.ResultCode = types.PVM_PANIC
 		return
 	}
-	log.Debug(vm.logging, vm.Str("INFO OK"), "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements), "bytes", fmt.Sprintf("%x", m))
+	log.Info(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements), "bytes", fmt.Sprintf("%x", m))
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -1144,7 +1142,11 @@ func (vm *VM) hostRead() {
 	if a == nil {
 		a, _ = vm.getXUDS(omega_7)
 	}
-
+	if a == nil {
+		// DOES NOT MAKE SENSE
+		vm.HostResultCode = NONE
+		return
+	}
 	ko, _ := vm.ReadRegister(8)
 	kz, _ := vm.ReadRegister(9)
 	bo, _ := vm.ReadRegister(10)

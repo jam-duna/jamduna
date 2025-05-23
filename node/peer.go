@@ -332,7 +332,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE134_WorkPackageShare:
 		return n.onWorkPackageShare(ctx, stream, msg)
 	case CE135_WorkReportDistribution:
-		return n.onWorkReportDistribution(ctx, stream, msg)
+		return n.onWorkReportDistribution(ctx, stream, msg, peerID)
 	case CE136_WorkReportRequest:
 		return n.onWorkReportRequest(ctx, stream, msg)
 	case CE137_FullShardRequest:
