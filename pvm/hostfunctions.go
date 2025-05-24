@@ -1138,6 +1138,10 @@ func (vm *VM) hostRead() {
 	var a *types.ServiceAccount
 	if omega_7 == uint64(vm.Service_index) || omega_7 == maxUint64 {
 		a = vm.ServiceAccount
+		if a == nil {
+			a, _ = vm.getXUDS(uint64(vm.Service_index))
+			// should we set above from the outside?
+		}
 	}
 	if a == nil {
 		a, _ = vm.getXUDS(omega_7)
@@ -1191,6 +1195,7 @@ func (vm *VM) hostWrite() {
 	if err_k != OK {
 		vm.terminated = true
 		vm.ResultCode = types.PVM_PANIC
+		log.Error(vm.logging, vm.Str("WRITE RAM"), "err", err_k)
 		return
 	}
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
@@ -1198,7 +1203,7 @@ func (vm *VM) hostWrite() {
 	if a_t > a.Balance {
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		log.Debug(vm.logging, vm.Str("WRITE FULL"), "a_t", a_t, "balance", a.Balance)
+		log.Error(vm.logging, vm.Str("WRITE FULL"), "a_t", a_t, "balance", a.Balance)
 		return
 	}
 
@@ -1215,7 +1220,6 @@ func (vm *VM) hostWrite() {
 		}
 		l = uint64(len(v))
 	}
-
 	a.WriteStorage(a.ServiceIndex, mu_k, k, v)
 	vm.HostResultCode = OK
 	val_len := uint64(len(v))

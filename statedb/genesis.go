@@ -255,6 +255,9 @@ func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition 
 	}
 	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
 	//fmt.Printf("NewStateDBFromStateTransition StateRoot: %s | isGenesis:%v\n", statedb.StateRoot.String(), isGenesis)
+	if statedb.StateRoot != statetransition.Block.Header.ParentStateRoot {
+		return nil, fmt.Errorf("StateRoot %s != ParentStateRoot %s", statedb.StateRoot.String(), statetransition.Block.Header.ParentStateRoot.String())
+	}
 	statedb.JamState = NewJamState()
 	statedb.RecoverJamState(statedb.StateRoot)
 	return statedb, nil

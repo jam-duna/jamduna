@@ -424,9 +424,9 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 			vm.terminated = false
-		} else {
-			vm.Gas = vm.Gas - 1
 		}
+		vm.Gas = vm.Gas - 1 // remove the else
+
 		stepn++
 	}
 	fmt.Println("terminated\n")
@@ -436,6 +436,8 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
+	} else {
+		fmt.Printf("VM terminated with ResultCode: %d\n", vm.ResultCode)
 	}
 	return nil
 }
