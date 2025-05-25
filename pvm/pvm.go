@@ -72,8 +72,6 @@ type VM struct {
 	o_byte []byte
 	w_byte []byte
 
-	heap_pointer uint32
-
 	// Refine argument
 	RefineM_map        map[uint32]*RefineM
 	Exports            [][]byte
@@ -112,15 +110,15 @@ type Program struct {
 }
 
 const (
-	NONE = (1 << 64) - 1 // 2^32 - 1
-	WHAT = (1 << 64) - 2 // 2^32 - 2
-	OOB  = (1 << 64) - 3 // 2^32 - 3
-	WHO  = (1 << 64) - 4 // 2^32 - 4
-	FULL = (1 << 64) - 5 // 2^32 - 5
-	CORE = (1 << 64) - 6 // 2^32 - 6
-	CASH = (1 << 64) - 7 // 2^32 - 7
-	LOW  = (1 << 64) - 8 // 2^32 - 8
-	HUH  = (1 << 64) - 9 // 2^32 - 9
+	NONE = (1 << 64) - 1 // 2^32 - 1 15
+	WHAT = (1 << 64) - 2 // 2^32 - 2 14
+	OOB  = (1 << 64) - 3 // 2^32 - 3 13
+	WHO  = (1 << 64) - 4 // 2^32 - 4 12
+	FULL = (1 << 64) - 5 // 2^32 - 5 11
+	CORE = (1 << 64) - 6 // 2^32 - 6 10
+	CASH = (1 << 64) - 7 // 2^32 - 7 9
+	LOW  = (1 << 64) - 8 // 2^32 - 8 8
+	HUH  = (1 << 64) - 9 // 2^32 - 9 7
 	OK   = 0             // 0
 )
 
@@ -261,67 +259,45 @@ func Z_func(x uint32) uint32 {
 	return Z_Z * CeilingDivide(x, Z_Z)
 }
 
-func Standard_Program_Initialization(vm *VM, argument_data_a []byte) {
+func (vm *VM) Standard_Program_Initialization(argument_data_a []byte) {
 	if len(argument_data_a) == 0 {
 		argument_data_a = []byte{0}
 	}
 
-	z_o := Z_func(vm.o_size)
 	z_w := Z_func(vm.w_size + vm.z*Z_P)
-	z_s := Z_func(vm.s)
-	p_w := P_func(vm.w_size)
-	p_s := P_func(vm.s)
-	argLen := uint32(len(argument_data_a))
-	p_arg := P_func(argLen)
 
+	//p_w := P_func(vm.w_size)
+	//p_arg := P_func(argLen)
+
+	// o_byte
+	vm.Ram.WriteRAMBytes(Z_Z, vm.o_byte)
+	fmt.Printf("Copied o_byte (%d bytes) to RAM at address %d\n", len(vm.o_byte), Z_Z)
+
+	// w_byte
+	z_o := Z_func(vm.o_size)
+	w_addr := 2*Z_Z + z_o
+	vm.Ram.WriteRAMBytes(w_addr, vm.w_byte)
+	fmt.Printf("Copied w_byte (len %d) to RAM at address %d\n", len(vm.w_byte), w_addr)
+
+	// stack
+	//s_addr := uint32(0xFFFFFFFF) - 2*Z_Z - Z_I -  P_func(vm.s) + 1
+
+	// argument
+	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
+	vm.Ram.WriteRAMBytes(argAddr, argument_data_a)
+	fmt.Printf("Copied argument_data_a (len %d) to RAM at address %d\n", len(argument_data_a), argAddr)
+	z_s := Z_func(vm.s)
 	requiredMemory := uint32(5*Z_Z + z_o + z_w + z_s + Z_I)
 	if requiredMemory > math.MaxUint32 {
 		log.Error(vm.logging, "Standard Program Initialization Error")
 		return
 	}
 
-	var (
-		readOnly  = AccessMode{Inaccessible: false, Writable: false, Readable: true}
-		writeOnly = AccessMode{Inaccessible: false, Writable: true, Readable: false}
-	)
-
-	setAccess := func(addr, length uint32, access AccessMode) {
-		vm.Ram.SetPageAccess(addr/PageSize, CeilingDivide(length, PageSize), access)
-	}
-
-	// o_byte
-	setAccess(Z_Z, vm.o_size, writeOnly)
-	vm.Ram.WriteRAMBytes(Z_Z, vm.o_byte)
-	setAccess(Z_Z, vm.o_size, readOnly)
-
-	// o_byte padding
-	setAccess(Z_Z+vm.o_size, P_func(vm.o_size)-vm.o_size, readOnly)
-
-	// w_byte
-	w_addr := 2*Z_Z + z_o
-	setAccess(w_addr, vm.w_size, writeOnly)
-	vm.Ram.WriteRAMBytes(w_addr, vm.w_byte)
-
-	// w_byte padding
-	setAccess(w_addr+vm.w_size, p_w+vm.z*Z_P-vm.w_size, writeOnly)
-
-	// stack
-	s_addr := uint32(0xFFFFFFFF) - 2*Z_Z - Z_I - p_s + 1
-	setAccess(s_addr, p_s, writeOnly)
-
-	// argument
-	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-	setAccess(argAddr, argLen, writeOnly)
-	vm.Ram.WriteRAMBytes(argAddr, argument_data_a)
-	setAccess(argAddr, argLen, readOnly)
-
-	// remaining
-	setAccess(argAddr+argLen, p_arg-argLen, readOnly)
-
 	vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
 	vm.WriteRegister(1, uint64(0xFFFFFFFF-2*Z_Z-Z_I+1))
 	vm.WriteRegister(7, uint64(argAddr))
-	vm.WriteRegister(8, uint64(argLen))
+	vm.WriteRegister(8, uint64(uint32(len(argument_data_a))))
+
 }
 
 // NewVM initializes a new VM with a given program
@@ -354,11 +330,9 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		bitmask:         []byte(p.K),
 		register:        make([]uint64, regSize),
 		pc:              initialPC,
-		Ram:             NewRAM(),
 		hostenv:         hostENV, //check if we need this
 		Exports:         make([][]byte, 0),
 		Service_index:   service_index,
-		heap_pointer:    2*Z_Z + Z_func(o_size) + Z_P,
 		o_size:          o_size,
 		w_size:          w_size,
 		z:               z,
@@ -369,6 +343,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		CoreIndex:       2048,
 	}
 	copy(vm.register, initialRegs)
+	vm.Ram = NewRAM(o_size, w_size, s, 10000) // TODO: adjust the last parameter based on the actual size needed
 	return vm
 }
 
@@ -376,14 +351,6 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.Hos
 	// strip metadata
 	metadata, c := types.SplitMetadataAndCode(code)
 	return NewVM(serviceIndex, c, []uint64{}, i, hostENV, true, []byte(metadata))
-}
-
-func NewVMFortest(hostENV types.HostEnv) *VM {
-	return &VM{
-		register: make([]uint64, regSize),
-		hostenv:  hostENV,
-		Ram:      NewRAM(),
-	}
 }
 
 // Execute runs the program until it terminates
@@ -429,7 +396,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 
 		stepn++
 	}
-	fmt.Println("terminated\n")
+	fmt.Println("terminated")
 	// vm.Mode = ...
 	// vm.Gas = types.IsAuthorizedGasAllocation
 	// log.Debug(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)
@@ -447,7 +414,7 @@ func (vm *VM) step(stepn int) error {
 	if vm.pc >= uint64(len(vm.code)) {
 		return errors.New("program counter out of bounds")
 	}
-	this_step_pc := vm.pc
+	//this_step_pc := vm.pc
 	opcode := vm.code[vm.pc]
 
 	len_operands := vm.skip(vm.pc)
@@ -490,6 +457,7 @@ func (vm *VM) step(stepn int) error {
 			vm.pc += 1 + len_operands
 		}
 	case 120 <= opcode && opcode <= 161: // A.5.10 Two Registers and One Immediate
+		//fmt.Printf("OPCODE %d\n", opcode)
 		vm.HandleTwoRegsOneImm(opcode, operands)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
@@ -515,8 +483,8 @@ func (vm *VM) step(stepn int) error {
 	if PvmLogging {
 		registersJSON, _ := json.Marshal(vm.ReadRegisters())
 		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", ", ")
-		fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, this_step_pc, vm.Gas, prettyJSON)
-
+		//fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, this_step_pc, vm.Gas, prettyJSON)
+		fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
 	}
 	return nil
 }
@@ -596,18 +564,18 @@ func z_encode(a uint64, n uint32) int64 {
 	return int64(a<<shift) >> shift
 }
 
-func z_decode(a int64, n uint32) uint64 {
-	if n == 0 || n > 8 {
-		return 0
-	}
-	var mask uint64
-	if n == 8 {
-		mask = ^uint64(0)
-	} else {
-		mask = (uint64(1) << (8 * n)) - 1
-	}
-	return uint64(a) & mask
-}
+// func z_decode(a int64, n uint32) uint64 {
+// 	if n == 0 || n > 8 {
+// 		return 0
+// 	}
+// 	var mask uint64
+// 	if n == 8 {
+// 		mask = ^uint64(0)
+// 	} else {
+// 		mask = (uint64(1) << (8 * n)) - 1
+// 	}
+// 	return uint64(a) & mask
+// }
 
 func x_encode(x uint64, n uint32) uint64 {
 	if n == 0 || n > 8 {
@@ -931,6 +899,8 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 		}
 	case BRANCH_GE_U_IMM:
 		if valueA >= vx {
+			//  --- BRANCH_GE_U_IMM value=13, vx=10
+			//fmt.Printf(" --- BRANCH_GE_U_IMM value=%d, vx=%d\n", valueA, vx)
 			vm.branch(vy, true)
 		} else {
 			vm.pc += uint64(1 + len(operands))
@@ -984,24 +954,30 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 		result, _ = vm.ReadRegister(registerIndexA)
 	case SBRK:
 		if valueA == 0 {
-			// The guest wants to know the current heap pointer.
-			//fmt.Printf("SBRK0 - r%d=%d\n", registerIndexD, vm.heap_pointer)
-			vm.WriteRegister(registerIndexD, uint64(vm.heap_pointer))
+			// The guest is querying the current heap pointer
+			vm.WriteRegister(registerIndexD, uint64(vm.Ram.current_heap_pointer))
 			return
 		}
-		// The guest wants to allocate.
-		next_page_boundary := P_func(vm.heap_pointer)
-		if uint64(vm.heap_pointer)+valueA > uint64(next_page_boundary) {
-			fin := P_func(uint32(uint64(vm.heap_pointer) + valueA))
-			idx := next_page_boundary / Z_P
-			idx2 := fin / Z_P
-			vm.Ram.SetPageAccess(idx, idx2-idx, AccessMode{Inaccessible: false, Writable: true, Readable: true})
+
+		// Record current heap pointer to return
+		result = uint64(vm.Ram.current_heap_pointer)
+
+		next_page_boundary := P_func(vm.Ram.current_heap_pointer)
+		new_heap_pointer := uint64(vm.Ram.current_heap_pointer) + valueA
+
+		if new_heap_pointer > uint64(next_page_boundary) {
+			final_boundary := P_func(uint32(new_heap_pointer))
+			idx_start := next_page_boundary / Z_P
+			idx_end := final_boundary / Z_P
+			page_count := idx_end - idx_start
+
+			vm.Ram.allocatePages(idx_start, page_count)
 		}
-		result = uint64(vm.heap_pointer)
-		vm.heap_pointer += uint32(valueA)
-		// The guest wants to know the current heap pointer.
-		//fmt.Printf("SBRK1 - r%d=%d\n", registerIndexD, vm.heap_pointer)
+
+		// Advance the heap
+		vm.Ram.current_heap_pointer = uint32(new_heap_pointer)
 		break
+
 	case COUNT_SET_BITS_64:
 		result = uint64(bits.OnesCount64(valueA))
 	case COUNT_SET_BITS_32:
@@ -1049,6 +1025,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 
 	addr := uint32(valueB) + uint32(vx)
 	var result uint64
+
 	switch opcode {
 	case STORE_IND_U8:
 		errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(valueA))})
@@ -1057,6 +1034,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
+		//fmt.Printf("**** opcode STORE_IND_U8 addr=%x value=%d\n", addr, uint8(valueA))
 		return
 	case STORE_IND_U16:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<16), 2))
@@ -1065,6 +1043,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
+		//fmt.Printf("**** opcode STORE_IND_U16 addr=%x value=%d\n", addr, types.E_l(valueA%(1<<16), 2))
 		return
 	case STORE_IND_U32:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<32), 4))
@@ -1073,6 +1052,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
+		//fmt.Printf("**** opcode STORE_IND_U32 addr=%x value=%d\n", addr, types.E_l(valueA%(1<<32), 4))
 		return
 	case STORE_IND_U64:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
@@ -1081,6 +1061,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
+		//fmt.Printf("**** opcode STORE_IND_U64 addr=%x value=%d\n", addr, types.E_l(uint64(valueA), 8))
 		return
 	case LOAD_IND_U8:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
@@ -1090,7 +1071,16 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
+		// Ours 13
+		// LOAD_IND_U8 3883 75818 Registers:[2266, 4278056448, 32, 32, 200963, 201009, 1, 4278056520, 201009, 1, 4278056520, 5, 40]
+		// **** opcode LOAD_IND_U8 registerIndexA=11 value=5 addr=31131
+		// JavaJAM:
+		// LOAD_IND_U8 3883 75818 Registers:[2266, 4278056448, 32, 32, 200963, 201009, 1, 4278056520, 201009, 1, 4278056520, 194, 40]
+
 		result = uint64(value[0])
+		if addr < 10000000 {
+			//	fmt.Printf("**** opcode LOAD_IND_U8 registerIndexA=%d value=%d addr=%x\n", registerIndexA, result, addr)
+		}
 	case LOAD_IND_I8:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
 		if errCode != OK {

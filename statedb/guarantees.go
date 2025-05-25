@@ -312,8 +312,7 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 			return nil
 		}
 	}
-	// ****** TEMPORARY SOLUTION ******
-	return nil
+
 	if !anchor {
 		log.Warn(debugG, "checkRecentBlock:anchor not in recent blocks", "refine.Anchor", refine.Anchor)
 		return jamerrors.ErrGAnchorNotRecent

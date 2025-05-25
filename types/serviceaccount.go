@@ -283,8 +283,8 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 // Convert the ServiceAccount to a human-readable string.
 func (s *ServiceAccount) String() string {
 	// Initial account information
-	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%v, G=%v M=%v L=%v, I=%v [Mutable: %v]\n",
-		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems, s.Mutable)
+	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%d (%x), G=%v M=%v L=%v, I=%v [Mutable: %v]\n",
+		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems, s.Mutable)
 
 	// Lookup entries
 	str2 := ""
@@ -314,9 +314,11 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 	hk := common.Compute_storageKey_internal(rawK)
 	storageObj, ok := s.Storage[hk]
 	if storageObj.Deleted {
+		fmt.Printf("ReadStorage hk=%s DEL\n", hk)
 		return false, nil
 	}
 	if ok {
+		fmt.Printf("ReadStorage hk=%s FOUND\n", hk)
 		return true, storageObj.Value
 	}
 	var err error
@@ -331,6 +333,7 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 		Value:    v,
 		RawKey:   rawK,
 	}
+	fmt.Printf("ReadStorage hk=%s NEW STORAGEOBJ v=%x\n", hk, v)
 	return true, v
 }
 

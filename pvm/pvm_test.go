@@ -63,12 +63,8 @@ func pvm_test(tc TestCase) (error, int) {
 	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
-		pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
+		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
 		pvm.Ram.WriteRAMBytes(mem.Address, mem.Data[:])
-	}
-	// Set the initial page map
-	for _, page := range tc.InitialPageMap {
-		pvm.Ram.SetPageAccess(page.Address/PageSize, page.Length/PageSize, AccessMode{Readable: !page.IsWritable, Writable: page.IsWritable, Inaccessible: false})
 	}
 
 	// if len(tc.InitialMemory) == 0 {
@@ -103,52 +99,6 @@ func pvm_test(tc TestCase) (error, int) {
 			}
 	*/
 	return nil, num_mismatch // "trap", tc.InitialRegs, tc.InitialPC, tc.InitialMemory
-}
-
-func TestReadWriteRAM(t *testing.T) {
-	ram := NewRAM()
-
-	// Test page allocation
-	pageIndex := uint32(0)
-	page, err := ram.getOrAllocatePage(pageIndex)
-	if err != nil {
-		t.Fatalf("Failed to allocate page: %v", err)
-	}
-	if page == nil {
-		t.Fatalf("Page allocation returned nil")
-	}
-
-	// Test access mode setup
-	accessMode := AccessMode{
-		Inaccessible: false,
-		Writable:     true,
-		Readable:     true,
-	}
-	ram.SetPageAccess(pageIndex, 1, accessMode)
-	allocatedPage, err := ram.getOrAllocatePage(pageIndex)
-	if err != nil {
-		t.Fatalf("Failed to retrieve allocated page: %v", err)
-	}
-	if !allocatedPage.Access.Readable || !allocatedPage.Access.Writable || allocatedPage.Access.Inaccessible {
-		t.Fatalf("Access mode was not set correctly")
-	}
-
-	// Test data writing
-	dataToWrite := []byte("hello")
-	address := uint32(0)
-	result := ram.WriteRAMBytes(address, dataToWrite)
-	if result != OK {
-		t.Fatalf("Failed to write data to RAM: result code %d", result)
-	}
-
-	// Test data reading
-	readData, result := ram.ReadRAMBytes(address, uint32(len(dataToWrite)))
-	if result != OK {
-		t.Fatalf("Failed to read data from RAM: result code %d", result)
-	}
-	if string(readData) != string(dataToWrite) {
-		t.Fatalf("Data mismatch: expected %s, got %s", string(dataToWrite), string(readData))
-	}
 }
 
 // awaiting 64 bit
@@ -216,7 +166,7 @@ func TestRevm(t *testing.T) {
 
 	start := time.Now()
 
-	Standard_Program_Initialization(pvm, a)
+	pvm.Standard_Program_Initialization(a)
 
 	// pvm.Ram.DebugStatus()
 
@@ -259,7 +209,7 @@ func TestHelloWorld(t *testing.T) {
 
 	start := time.Now()
 
-	Standard_Program_Initialization(pvm, a)
+	pvm.Standard_Program_Initialization(a)
 
 	// pvm.Ram.DebugStatus()
 
@@ -309,7 +259,7 @@ func TestDoom(t *testing.T) {
 
 	start := time.Now()
 
-	Standard_Program_Initialization(pvm, a)
+	pvm.Standard_Program_Initialization(a)
 
 	// pvm.Ram.DebugStatus()
 

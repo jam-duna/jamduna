@@ -44,7 +44,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
 
-	Standard_Program_Initialization(vm, a) // eq 264/265
+	vm.Standard_Program_Initialization(a) // eq 264/265
 	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
 
@@ -69,11 +69,18 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes = append(input_bytes, encoded_elements...)
 	//fmt.Printf("len(elements)=%d input_bytes: %d byte - %x\n", len(elements), len(input_bytes), input_bytes)
 
-	Standard_Program_Initialization(vm, input_bytes) // eq 264/265
+	vm.Standard_Program_Initialization(input_bytes) // eq 264/265
 	vm.Gas = int64(g)
+	// (*ServiceAccount, bool, error)
+	x_s, ok, err := vm.hostenv.GetService(X.S)
+	if !ok || err != nil {
+		// TODO
+		panic(222)
+	}
+	x_s.Mutable = true
+	vm.X.U.D[s] = x_s
+	vm.ServiceAccount = x_s
 	vm.Execute(types.EntryPointAccumulate, false) // F ∈ Ω⟨(X, X)⟩
-
-	xs, _ = vm.X.GetX_s()
 	r, res = vm.getArgumentOutputs()
 
 	return r, res, xs
@@ -83,7 +90,7 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	// a = E(t)   take transfer memos t and encode them
 	vm.ServiceAccount = service_account
 
-	Standard_Program_Initialization(vm, arguments) // eq 264/265
+	vm.Standard_Program_Initialization(arguments) // eq 264/265
 	vm.Execute(types.EntryPointOnTransfer, false)
 	// return vm.getArgumentOutputs()
 	r.Err = vm.ResultCode
@@ -98,7 +105,7 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	a = append(a, common.Uint16ToBytes(c)...)
 	// vm.setArgumentInputs(a)
 	vm.Gas = types.IsAuthorizedGasAllocation
-	Standard_Program_Initialization(vm, a) // eq 264/265
+	vm.Standard_Program_Initialization(a) // eq 264/265
 	vm.Execute(types.EntryPointAuthorization, false)
 	r, _ = vm.getArgumentOutputs()
 	return r

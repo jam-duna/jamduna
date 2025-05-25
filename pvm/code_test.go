@@ -17,7 +17,7 @@ func TestCodeCompile(t *testing.T) {
 		t.Fatalf("failed to read code file: %v", err)
 	}
 	vm := NewVMFromCode(0, code, 0, nil)
-	Standard_Program_Initialization(vm, nil) // eq 264/265
+	vm.Standard_Program_Initialization(nil) // eq 264/265
 	vm.Execute(types.EntryPointRefine, false)
 	r, _ := vm.getArgumentOutputs()
 	fmt.Printf("result: %v\n", r)

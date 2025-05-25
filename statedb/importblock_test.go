@@ -148,9 +148,8 @@ func TestStateTransitionSingle(t *testing.T) {
 		    importblock_test.go:208: ❌ [00000025.json] Test failed: mismatch 10627 vs 9910
 		    importblock_test.go:208: ❌ [00000035.json] Test failed: mismatch 33590 vs 32544
 		    importblock_test.go:208: ❌ [00000037.json] Test failed: mismatch 10627 vs 9910
-		    importblock_test.go:208: ❌ [00000041.json] Test failed: mismatch 99998 vs 1000000
 	*/
-	filename := "../jamtestvectors/traces/reports-l0/00000041.json"
+	filename := "../jamtestvectors/traces/reports-l0/00000019.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)

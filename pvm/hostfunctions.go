@@ -234,7 +234,7 @@ func (vm *VM) chargeGas(host_fn int) {
 	}
 
 	vm.Gas = beforeGas - int64(chargedGas)
-	log.Debug(vm.logging, exp, "reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
+	log.Info(vm.logging, exp, "chargegas reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
 }
 
 // InvokeHostCall handles host calls
@@ -246,6 +246,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, fmt.Errorf("Out of gas\n")
 	}
 	vm.chargeGas(host_fn)
+
 	switch host_fn {
 	case GAS:
 		vm.hostGas()
@@ -378,10 +379,13 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 // Information-on-Service
 func (vm *VM) hostInfo() {
 	omega_7, _ := vm.ReadRegister(7)
-	fetch := omega_7
-	if fetch == NONE {
+	var fetch uint64
+	if omega_7 == NONE {
 		fetch = uint64(vm.Service_index)
+	} else {
+		fetch = omega_7
 	}
+	log.Info("XXXX", "INFO XXX", "s", fmt.Sprintf("%d", fetch))
 	t, errCode := vm.getXUDS(fetch)
 	if errCode != OK {
 		vm.WriteRegister(7, NONE)
@@ -392,8 +396,9 @@ func (vm *VM) hostInfo() {
 	bo, _ := vm.ReadRegister(8)
 
 	var buf bytes.Buffer
-	// check this
-	elements := []interface{}{t.CodeHash, uint(t.Balance), uint(t.ComputeThreshold()), uint(t.GasLimitG), uint(t.GasLimitM), uint(t.NumStorageItems), uint(t.StorageSize)}
+	log.Info("XXX", "hostInfo", "s", omega_7, "bo", bo, "t", t, "t.Balance", t.Balance, "t.ComputeThreshold()", t.ComputeThreshold(), "t.GasLimitG", t.GasLimitG, "t.GasLimitM", t.GasLimitM, "t.NumStorageItems", t.NumStorageItems, "t.StorageSize", t.StorageSize)
+	elements := []interface{}{t.CodeHash, uint(t.Balance), uint(t.ComputeThreshold()),
+		uint(t.GasLimitG), uint(t.GasLimitM), uint(t.NumStorageItems), uint(t.StorageSize)}
 	for _, elem := range elements {
 		encoded, err := types.Encode(elem)
 		if err != nil {
@@ -402,6 +407,7 @@ func (vm *VM) hostInfo() {
 			log.Info(vm.logging, "INFO NONE", "s", omega_7)
 			return
 		}
+		//fmt.Printf("INFO %d %x\n", i, encoded)
 		buf.Write(encoded)
 	}
 
@@ -551,7 +557,7 @@ func (vm *VM) hostNew() {
 	if xs.Balance < x_s_t {
 		vm.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH //balance insufficient
-		log.Debug(vm.logging, vm.Str("NEW CASH xs.Balance < x_s_t"), "xs.Balance", xs.Balance, "x_s_t", x_s_t)
+		log.Info(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t)
 		return
 	}
 
@@ -583,7 +589,7 @@ func (vm *VM) hostNew() {
 	xContext.U.D[xi] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
 	vm.WriteRegister(7, uint64(xi))
 	vm.HostResultCode = OK
-	log.Debug(vm.logging, vm.Str("NEW OK"), "SERVICE", fmt.Sprintf("%d", xi), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
+	log.Info(vm.logging, "hostNew: NEW OK", "SERVICE", fmt.Sprintf("%d", xi), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 }
 
 // Upgrade service
@@ -1117,6 +1123,7 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 	var err error
 	s := uint32(serviceindex)
 	if serviceindex == maxUint64 || uint32(serviceindex) == vm.X.S {
+		fmt.Printf("getXUDS: serviceindexS %d %s\n", serviceindex, vm.X.U.D[s].String())
 		return vm.X.U.D[s], OK
 	}
 	a, ok = vm.X.U.D[s]
@@ -1125,6 +1132,7 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 		if err != nil || !ok {
 			return nil, NONE
 		}
+		fmt.Printf("getXUDS: serviceindexA %d %s\n", serviceindex, a.String())
 		vm.X.U.D[s] = a
 	}
 	return a, OK
@@ -1134,22 +1142,21 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 func (vm *VM) hostRead() {
 	// Assume that all ram can be read and written
 	omega_7, _ := vm.ReadRegister(7)
-
+	s_star := omega_7
 	var a *types.ServiceAccount
-	if omega_7 == uint64(vm.Service_index) || omega_7 == maxUint64 {
+	var errCode uint64
+	if omega_7 == maxUint64 {
+		s_star = uint64(vm.Service_index)
+	}
+	if s_star == uint64(vm.Service_index) {
 		a = vm.ServiceAccount
-		if a == nil {
-			a, _ = vm.getXUDS(uint64(vm.Service_index))
-			// should we set above from the outside?
+	} else {
+		a, errCode = vm.getXUDS(s_star)
+		if errCode != OK {
+			vm.WriteRegister(7, NONE)
+			vm.HostResultCode = NONE
+			return
 		}
-	}
-	if a == nil {
-		a, _ = vm.getXUDS(omega_7)
-	}
-	if a == nil {
-		// DOES NOT MAKE SENSE
-		vm.HostResultCode = NONE
-		return
 	}
 	ko, _ := vm.ReadRegister(8)
 	kz, _ := vm.ReadRegister(9)
@@ -1165,13 +1172,13 @@ func (vm *VM) hostRead() {
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
 	ok, val := a.ReadStorage(mu_k, k, vm.hostenv)
 
-	if !ok {
+	if !ok { // || true
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
-		log.Debug(vm.logging, vm.Str("READ NONE"), "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
+		log.Info(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
 		return
 	}
-	log.Debug(vm.logging, vm.Str("READ OK"), "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
+	log.Info(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
 	lenval := uint64(len(val))
 	f = min(f, lenval)
 	l = min(l, lenval-f)
@@ -1195,7 +1202,7 @@ func (vm *VM) hostWrite() {
 	if err_k != OK {
 		vm.terminated = true
 		vm.ResultCode = types.PVM_PANIC
-		log.Error(vm.logging, vm.Str("WRITE RAM"), "err", err_k)
+		log.Error(vm.logging, "hostWrite: WRITE RAM", "err", err_k)
 		return
 	}
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
@@ -1203,7 +1210,7 @@ func (vm *VM) hostWrite() {
 	if a_t > a.Balance {
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		log.Error(vm.logging, vm.Str("WRITE FULL"), "a_t", a_t, "balance", a.Balance)
+		log.Error(vm.logging, "hostWrite: WRITE FULL", "a_t", a_t, "balance", a.Balance)
 		return
 	}
 
@@ -1227,7 +1234,7 @@ func (vm *VM) hostWrite() {
 		if val_len > 0 {
 			a.NumStorageItems++
 			a.StorageSize += (32 + val_len)
-			log.Debug(vm.logging, vm.Str("WRITE NONE"), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Info(vm.logging, "hostWrite: WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		}
 		vm.WriteRegister(7, NONE)
 	} else {
@@ -1240,17 +1247,17 @@ func (vm *VM) hostWrite() {
 			a.StorageSize -= (32 + prev_l)
 			l = uint64(prev_l) // this should not be NONE
 			vm.WriteRegister(7, l)
-			log.Debug(vm.logging, vm.Str("WRITE (as DELETE) NONE "), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Info(vm.logging, "hostWrite: WRITE (as DELETE) NONE ", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		} else {
 			// write
 			a.StorageSize += val_len
 			a.StorageSize -= prev_l
 			l = prev_l
 			vm.WriteRegister(7, l)
-			log.Debug(vm.logging, vm.Str("WRITE OK"), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Info(vm.logging, "hostWrite: WRITE OK", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("%x", oldValue))
 		}
 	}
-	log.Debug(vm.logging, vm.Str("WRITE storage"), "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
+	log.Info(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
 // Solicit preimage
@@ -1464,119 +1471,7 @@ func (vm *VM) hostExport() {
 }
 
 func (vm *VM) hostManifest() {
-	n, _ := vm.ReadRegister(7)
-	mode, _ := vm.ReadRegister(8)
-	// s, _ := vm.ReadRegister(9)
-	// z, _ := vm.ReadRegister(10)
-	page_id, _ := vm.ReadRegister(11)
 
-	m, ok := vm.RefineM_map[uint32(n)]
-	if !ok {
-		vm.WriteRegister(7, WHO)
-		vm.HostResultCode = WHO
-		return
-	}
-
-	if m.U.Pages == nil {
-		vm.WriteRegister(7, NONE)
-		vm.HostResultCode = NONE
-		return
-	}
-
-	switch mode {
-	// case 0:
-	// 	// reset manifest
-	// 	for _, page := range m.U.Pages {
-	// 		page.Access.Accessed = false
-	// 		page.Access.Dirty = false
-	// 	}
-	// 	vm.WriteRegister(7, OK)
-	// 	vm.HostResultCode = OK
-	// 	return
-	// case 1:
-	// 	// get manifest
-	// 	var manifest []uint32
-	// 	for pageIndex, page := range m.U.Pages {
-	// 		m := uint32(0)
-	// 		if page.Access.Dirty {
-	// 			// m = uint32(pageIndex) | 0xC0000000
-	// 			m = uint32(pageIndex)
-	// 			manifest = append(manifest, m)
-	// 		}
-	// 	}
-	// 	sort.Slice(manifest, func(i, j int) bool { return manifest[i] < manifest[j] })
-	// 	manifestBytes := make([]byte, 4*len(manifest))
-	// 	for i, m := range manifest {
-	// 		binary.LittleEndian.PutUint32(manifestBytes[i*4:], m)
-	// 	}
-
-	// 	if z%4 != 0 {
-	// 		//  should be a multiple of 4 though!
-	// 		vm.WriteRegister(7, HUH)
-	// 		vm.HostResultCode = HUH
-	// 		return
-	// 	}
-	// 	if z < uint64(len(manifestBytes)) {
-	// 		manifestBytes = manifestBytes[:z]
-	// 	}
-	// 	// write manifestBytes bytes to vm
-	// 	errCode := vm.Ram.WriteRAMBytes(uint32(s), manifestBytes[:])
-	// 	if errCode != OK {
-	// 		vm.terminated = true
-	// 		vm.ResultCode = types.PVM_PANIC
-	// 		return
-	// 	}
-	// 	vm.WriteRegister(7, uint64(len(manifestBytes)))
-	// 	vm.HostResultCode = OK
-
-	// case 2:
-	// 	// check whether page_id is dirty
-	// 	page, ok := m.U.Pages[uint32(page_id)]
-	// 	if !ok {
-	// 		vm.WriteRegister(7, HUH)
-	// 		vm.HostResultCode = HUH
-	// 		return
-	// 	}
-
-	// 	if page.Access.Dirty {
-	// 		vm.WriteRegister(7, OK)
-	// 		vm.HostResultCode = OK
-	// 	} else {
-	// 		vm.WriteRegister(7, NONE)
-	// 		vm.HostResultCode = NONE
-	// 	}
-	// 	return
-	case 3:
-		// check whether page_id is all zero
-		page := m.U.Pages[uint32(page_id)]
-		// if !ok {
-		// 	vm.WriteRegister(7, HUH)
-		// 	vm.HostResultCode = HUH
-		// 	return
-		// }
-
-		if page.Access.Inaccessible {
-			vm.WriteRegister(7, HUH)
-			vm.HostResultCode = HUH
-			return
-		} else {
-			for _, page_byte := range page.Value {
-				if page_byte != 0 {
-					vm.WriteRegister(7, NONE)
-					vm.HostResultCode = NONE
-					return
-				}
-			}
-			vm.WriteRegister(7, OK)
-			vm.HostResultCode = OK
-		}
-		return
-	default:
-		// unknown mode
-		vm.WriteRegister(7, HUH)
-		vm.HostResultCode = HUH
-		return
-	}
 }
 
 func (vm *VM) hostMachine() {
@@ -1602,11 +1497,11 @@ func (vm *VM) hostMachine() {
 		}
 	}
 
-	u := NewRAM()
+	// TODO: u := NewRAM()
 
 	vm.RefineM_map[min_n] = &RefineM{
 		P: p,
-		U: u,
+		//	U: u,
 		I: i,
 	}
 
@@ -1704,25 +1599,8 @@ func (vm *VM) hostVoid() {
 		return
 	}
 
-	for _, page := range m.U.Pages {
-		if page.Access.Inaccessible {
-			vm.WriteRegister(7, HUH)
-			vm.HostResultCode = HUH
-			return
-		}
-	}
-	var access_mode AccessMode
-
-	// set page access to writable to write [0,0,0,....] to the page
-	access_mode = AccessMode{Inaccessible: false, Writable: true, Readable: false}
-	_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
-
 	// write [0,0,0,....] to the page
-	_ = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, 0))
-
-	// set page access to inaccessible
-	access_mode = AccessMode{Inaccessible: true, Writable: false, Readable: false}
-	_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
+	_ = m.U.WriteRAMBytes(uint32(p)*Z_P, make([]byte, 0))
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -1743,10 +1621,10 @@ func (vm *VM) hostZero() {
 		vm.HostResultCode = WHO
 		return
 	}
-	access_mode := AccessMode{Inaccessible: false, Writable: true, Readable: false}
-	_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
+	//access_mode := AccessMode{Inaccessible: false, Writable: true, Readable: false}
+	//_ = m.U.SetPageAccess(uint32(p), uint32(c), access_mode)
 
-	_ = m.U.WriteRAMBytes(uint32(p)*PageSize, make([]byte, PageSize))
+	_ = m.U.WriteRAMBytes(uint32(p)*Z_P, make([]byte, Z_P))
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -1789,7 +1667,7 @@ func (vm *VM) hostLog() {
 		return
 	}
 	levelName := getLogLevelName(level, vm.CoreIndex, string(vm.ServiceMetadata))
-
+	levelName = ""
 	vm.HostResultCode = OK
 	switch level {
 	case 0: // 0: User agent displays as fatal error
