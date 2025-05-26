@@ -23,7 +23,7 @@ type RAM struct {
 	output  []byte
 }
 
-func NewRAM(o_size uint32, w_size uint32, p_s uint32, a_size uint32) *RAM {
+func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 	// read-only
 	ro_data_address := uint32(Z_Z)
 	ro_data_address_end := ro_data_address + o_size
@@ -38,9 +38,10 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32, a_size uint32) *RAM {
 	stack_address_end := stack_address + p_s
 
 	// output
-	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I
-	output_end := output_address + a_size
-
+	a_size := uint32(Z_Z + Z_I - 1)
+	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
+	output_end := uint32(0xFFFFFFFF)
+	fmt.Printf("output_address %x output_end %x\n", output_address, output_end)
 	return &RAM{
 		stack_address:        stack_address,
 		stack_address_end:    stack_address_end,
@@ -98,7 +99,8 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.stack_address && end <= ram.stack_address_end {
 		offset := address - ram.stack_address
 		if offset+length > uint32(len(ram.stack)) {
-			panic(fmt.Sprintf("stack read overflow: offset=%d len=%d cap=%d", offset, length, len(ram.stack)))
+			panic(fmt.Sprintf("stack read overflow: address %x ram.stack_address %x offset=%d len=%d cap=%d (range: %x to %x)",
+				address, ram.stack_address, offset, length, len(ram.stack), ram.stack_address, ram.stack_address_end))
 		}
 		return ram.stack[offset : offset+length], OK
 	}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 
+	"slices"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 )
@@ -40,9 +42,9 @@ type ServiceAccount struct {
 	Checkpointed bool `json:"-"`
 	Dirty        bool `json:"-"`
 
-	Storage  map[common.Hash]StorageObject  `json:"-"` // arbitrary_k -> v. if v=[]byte. use as delete
-	Lookup   map[common.Hash]LookupObject   `json:"-"` // (h,l) -> anchor
-	Preimage map[common.Hash]PreimageObject `json:"-"` // H(p)  -> p
+	Storage  map[common.Hash]*StorageObject  `json:"-"` // arbitrary_k -> v. if v=[]byte. use as delete
+	Lookup   map[common.Hash]*LookupObject   `json:"-"` // (h,l) -> anchor
+	Preimage map[common.Hash]*PreimageObject `json:"-"` // H(p)  -> p
 }
 
 func (s *ServiceAccount) Clone() *ServiceAccount {
@@ -61,22 +63,17 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 		Mutable:         s.Mutable, // should ALLOW_MUTABLE explicitly... check??
 	}
 
-	// Clone the Storage map
-	clone.Storage = make(map[common.Hash]StorageObject, len(s.Storage))
+	clone.Storage = make(map[common.Hash]*StorageObject, len(s.Storage))
 	for k, v := range s.Storage {
-		clone.Storage[k] = v.Clone() // Assuming StorageObject has a Clone method
+		clone.Storage[k] = v.Clone()
 	}
-
-	// Clone the Lookup map
-	clone.Lookup = make(map[common.Hash]LookupObject, len(s.Lookup))
+	clone.Lookup = make(map[common.Hash]*LookupObject, len(s.Lookup))
 	for k, v := range s.Lookup {
-		clone.Lookup[k] = v.Clone() // Assuming LookupObject has a Clone method
+		clone.Lookup[k] = v.Clone()
 	}
-
-	// Clone the Preimage map
-	clone.Preimage = make(map[common.Hash]PreimageObject, len(s.Preimage))
+	clone.Preimage = make(map[common.Hash]*PreimageObject, len(s.Preimage))
 	for k, v := range s.Preimage {
-		clone.Preimage[k] = v.Clone() // Assuming PreimageObject has a Clone method
+		clone.Preimage[k] = v.Clone()
 	}
 
 	return &clone
@@ -91,15 +88,17 @@ type StorageObject struct {
 	RawKey   common.Hash `json:"rawkey"` // rawKey
 }
 
-func (o StorageObject) Clone() StorageObject {
+func (o *StorageObject) String() string {
+	return fmt.Sprintf("Value: [%x] Deleted: %v", o.Value, o.Deleted)
+}
+func (o *StorageObject) Clone() *StorageObject {
 	// Deep copy the Key+Value slice
 	keyCopy := make([]byte, len(o.Key))
 	copy(keyCopy, o.Key)
 	valueCopy := make([]byte, len(o.Value))
 	copy(valueCopy, o.Value)
 
-	return StorageObject{
-
+	return &StorageObject{
 		Accessed: o.Accessed,
 		Deleted:  o.Deleted,
 		Dirty:    o.Dirty,
@@ -117,12 +116,12 @@ type LookupObject struct {
 	T        []uint32 `json:"t"` // t
 }
 
-func (o LookupObject) Clone() LookupObject {
+func (o *LookupObject) Clone() *LookupObject {
 	// Deep copy the T slice
 	tCopy := make([]uint32, len(o.T))
 	copy(tCopy, o.T)
 
-	return LookupObject{
+	return &LookupObject{
 		Deleted: o.Deleted,
 		Dirty:   o.Dirty,
 		Z:       o.Z,
@@ -137,12 +136,12 @@ type PreimageObject struct {
 	Preimage []byte `json:"preimage"` // p
 }
 
-func (o PreimageObject) Clone() PreimageObject {
+func (o *PreimageObject) Clone() *PreimageObject {
 	// Deep copy the Preimage slice
 	preimageCopy := make([]byte, len(o.Preimage))
 	copy(preimageCopy, o.Preimage)
 
-	return PreimageObject{
+	return &PreimageObject{
 		Accessed: o.Accessed,
 		Deleted:  o.Deleted,
 		Dirty:    o.Dirty,
@@ -273,9 +272,9 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 		NumStorageItems: acctState.NumStorageItems,
 		Mutable:         false, // THIS THE DEFAULT
 		// Initialize maps to avoid nil reference errors
-		Storage:  make(map[common.Hash]StorageObject),
-		Lookup:   make(map[common.Hash]LookupObject),
-		Preimage: make(map[common.Hash]PreimageObject),
+		Storage:  make(map[common.Hash]*StorageObject),
+		Lookup:   make(map[common.Hash]*LookupObject),
+		Preimage: make(map[common.Hash]*PreimageObject),
 	}
 	return serviceAccount, nil
 }
@@ -301,7 +300,7 @@ func (s *ServiceAccount) String() string {
 	// Storage entries
 	str4 := ""
 	for h, lo := range s.Storage {
-		str4 += fmt.Sprintf("  Storage: %v => %v\n", h, lo)
+		str4 += fmt.Sprintf("  Storage: %v => %v\n", h, lo.String())
 	}
 	return str + str2 + str3 + str4
 }
@@ -313,12 +312,12 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 	serviceIndex := s.ServiceIndex
 	hk := common.Compute_storageKey_internal(rawK)
 	storageObj, ok := s.Storage[hk]
-	if storageObj.Deleted {
-		fmt.Printf("ReadStorage hk=%s DEL\n", hk)
-		return false, nil
-	}
 	if ok {
 		fmt.Printf("ReadStorage hk=%s FOUND\n", hk)
+		if storageObj.Deleted {
+			fmt.Printf("ReadStorage hk=%s DEL\n", hk)
+			return false, nil
+		}
 		return true, storageObj.Value
 	}
 	var err error
@@ -326,18 +325,15 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 	if err != nil || !ok {
 		return false, nil
 	}
-	s.Storage[hk] = StorageObject{
-		Accessed: true,
-		Dirty:    false,
-		Key:      mu_k,
-		Value:    v,
-		RawKey:   rawK,
-	}
 	fmt.Printf("ReadStorage hk=%s NEW STORAGEOBJ v=%x\n", hk, v)
 	return true, v
 }
 
 func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok bool, preimage []byte) {
+	if s.Preimage == nil {
+		s.Preimage = make(map[common.Hash]*PreimageObject)
+	}
+
 	preimageObj, ok := s.Preimage[blobHash]
 	if !ok {
 		var err error
@@ -346,9 +342,9 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 			return false, preimage
 		}
 		if s.Preimage == nil {
-			s.Preimage = make(map[common.Hash]PreimageObject)
+			s.Preimage = make(map[common.Hash]*PreimageObject)
 		}
-		s.Preimage[blobHash] = PreimageObject{
+		s.Preimage[blobHash] = &PreimageObject{
 			Accessed: true,
 			Dirty:    false,
 			Preimage: preimage,
@@ -372,7 +368,7 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 		if err != nil || !ok {
 			return ok, anchor_timeslot
 		}
-		s.Lookup[blobHash] = LookupObject{
+		s.Lookup[blobHash] = &LookupObject{
 			Accessed: true,
 			Dirty:    false,
 			Z:        z,
@@ -446,34 +442,33 @@ func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 }
 
 func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK common.Hash, val []byte) {
-	log.Trace("serviceAccount", "WriteStorage", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
+	log.Info("serviceAccount", "WriteStorage", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
 	if s.Mutable == false {
 		log.Crit(log.PvmAuthoring, "WriteStorage Mutable Err: Called WriteStorage on immutable ServiceAccount", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
 	}
-	// k for original raw key, hk for hash key
-	// serviceIndex := s.ServiceIndex
+
 	hk := common.Compute_storageKey_internal(rawK)
 	s.Dirty = true
+
 	storeObj, exists := s.Storage[hk]
-	// Use the Accessed flag here if already exists
 	if exists {
-		s.Storage[hk] = StorageObject{
-			Accessed: storeObj.Accessed,
-			Dirty:    true,
-			Deleted:  len(val) == 0,
-			Key:      mu_k,
-			Value:    val,
-			RawKey:   rawK,
-		}
+		storeObj.Accessed = true
+		storeObj.Dirty = true
+		storeObj.Deleted = (len(val) == 0)
+		storeObj.Key = slices.Clone(mu_k)  // copy
+		storeObj.Value = slices.Clone(val) // copy
+		storeObj.RawKey = rawK
+		fmt.Printf("HOSTWRITE: EXISTS %s\n", s.String())
 	} else {
-		s.Storage[hk] = StorageObject{
+		s.Storage[hk] = &StorageObject{
 			Accessed: false,
 			Dirty:    true,
 			Deleted:  len(val) == 0,
-			Key:      mu_k,
-			Value:    val,
+			Key:      slices.Clone(mu_k), // copy of mu_k
+			Value:    slices.Clone(val),  // copy of val
 			RawKey:   rawK,
 		}
+		fmt.Printf("HOSTWRITE: NEWLY %s %v\n", s.String(), s.Storage)
 	}
 }
 
@@ -484,14 +479,14 @@ func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 
 	o, exists := s.Preimage[blobHash]
 	if exists {
-		s.Preimage[blobHash] = PreimageObject{
+		s.Preimage[blobHash] = &PreimageObject{
 			Accessed: o.Accessed,
 			Dirty:    true,
 			Deleted:  len(preimage) == 0,
 			Preimage: preimage,
 		}
 	} else {
-		s.Preimage[blobHash] = PreimageObject{
+		s.Preimage[blobHash] = &PreimageObject{
 			Accessed: false,
 			Dirty:    true,
 			Deleted:  len(preimage) == 0,
@@ -509,7 +504,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 	s.Dirty = true
 	o, exists := s.Lookup[blobHash]
 	if exists {
-		s.Lookup[blobHash] = LookupObject{
+		s.Lookup[blobHash] = &LookupObject{
 			Accessed: o.Accessed,
 			Dirty:    true,
 			Deleted:  time_slots == nil,
@@ -518,7 +513,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 		}
 		return
 	}
-	s.Lookup[blobHash] = LookupObject{
+	s.Lookup[blobHash] = &LookupObject{
 		Accessed: false,
 		Dirty:    true,
 		Deleted:  time_slots == nil,
@@ -530,15 +525,14 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 func (s *ServiceAccount) ComputeThreshold() uint64 {
 	return BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
 }
-
 func (s *ServiceAccount) MarshalJSON() ([]byte, error) {
 	type Alias ServiceAccount
 	return json.Marshal(&struct {
 		*Alias
-		CodeHash string                    `json:"code_hash"`
-		Storage  map[string]StorageObject  `json:"-"`
-		Lookup   map[string]LookupObject   `json:"-"`
-		Preimage map[string]PreimageObject `json:"-"`
+		CodeHash string                     `json:"code_hash"`
+		Storage  map[string]*StorageObject  `json:"storage"`
+		Lookup   map[string]*LookupObject   `json:"lookup"`
+		Preimage map[string]*PreimageObject `json:"preimage"`
 	}{
 		Alias:    (*Alias)(s),
 		CodeHash: s.CodeHash.Hex(),
@@ -552,10 +546,10 @@ func (s *ServiceAccount) UnmarshalJSON(data []byte) error {
 	type Alias ServiceAccount
 	aux := &struct {
 		*Alias
-		CodeHash string                    `json:"code_hash"`
-		Storage  map[string]StorageObject  `json:"-"`
-		Lookup   map[string]LookupObject   `json:"-"`
-		Preimage map[string]PreimageObject `json:"-"`
+		CodeHash string                     `json:"code_hash"`
+		Storage  map[string]*StorageObject  `json:"storage"`
+		Lookup   map[string]*LookupObject   `json:"lookup"`
+		Preimage map[string]*PreimageObject `json:"preimage"`
 	}{
 		Alias: (*Alias)(s),
 	}
@@ -569,16 +563,16 @@ func (s *ServiceAccount) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func convertHashMapToStringMap[T any](input map[common.Hash]T) map[string]T {
-	output := make(map[string]T, len(input))
+func convertHashMapToStringMap[T any](input map[common.Hash]*T) map[string]*T {
+	output := make(map[string]*T, len(input))
 	for k, v := range input {
 		output[k.Hex()] = v
 	}
 	return output
 }
 
-func convertStringMapToHashMap[T any](input map[string]T) map[common.Hash]T {
-	output := make(map[common.Hash]T, len(input))
+func convertStringMapToHashMap[T any](input map[string]*T) map[common.Hash]*T {
+	output := make(map[common.Hash]*T, len(input))
 	for k, v := range input {
 		output[common.HexToHash(k)] = v
 	}

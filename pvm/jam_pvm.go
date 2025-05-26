@@ -1,6 +1,8 @@
 package pvm
 
 import (
+	"fmt"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -67,7 +69,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, encoded_elements...)
-	//fmt.Printf("len(elements)=%d input_bytes: %d byte - %x\n", len(elements), len(input_bytes), input_bytes)
+	fmt.Printf("%d bytes = %x\n", len(input_bytes), input_bytes)
 
 	vm.Standard_Program_Initialization(input_bytes) // eq 264/265
 	vm.Gas = int64(g)
@@ -83,7 +85,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.Execute(types.EntryPointAccumulate, false) // F ∈ Ω⟨(X, X)⟩
 	r, res = vm.getArgumentOutputs()
 
-	return r, res, xs
+	return r, res, x_s
 }
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
 	vm.Mode = "transfer"
@@ -117,7 +119,7 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
-	o, _ := vm.ReadRegister(7)
+	o := 0xFFFFFFFF - Z_Z - Z_I + 1
 	l, _ := vm.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
 	if vm.ResultCode == types.RESULT_OK && res == 0 {

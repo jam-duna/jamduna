@@ -343,7 +343,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		CoreIndex:       2048,
 	}
 	copy(vm.register, initialRegs)
-	vm.Ram = NewRAM(o_size, w_size, s, 10000) // TODO: adjust the last parameter based on the actual size needed
+	vm.Ram = NewRAM(o_size, w_size, s)
 	return vm
 }
 
