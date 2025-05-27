@@ -313,9 +313,7 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 	hk := common.Compute_storageKey_internal(rawK)
 	storageObj, ok := s.Storage[hk]
 	if ok {
-		fmt.Printf("ReadStorage hk=%s FOUND\n", hk)
 		if storageObj.Deleted {
-			fmt.Printf("ReadStorage hk=%s DEL\n", hk)
 			return false, nil
 		}
 		return true, storageObj.Value
@@ -325,7 +323,6 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 	if err != nil || !ok {
 		return false, nil
 	}
-	fmt.Printf("ReadStorage hk=%s NEW STORAGEOBJ v=%x\n", hk, v)
 	return true, v
 }
 
@@ -442,7 +439,6 @@ func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 }
 
 func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK common.Hash, val []byte) {
-	log.Info("serviceAccount", "WriteStorage", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
 	if s.Mutable == false {
 		log.Crit(log.PvmAuthoring, "WriteStorage Mutable Err: Called WriteStorage on immutable ServiceAccount", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
 	}
@@ -458,7 +454,6 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK com
 		storeObj.Key = slices.Clone(mu_k)  // copy
 		storeObj.Value = slices.Clone(val) // copy
 		storeObj.RawKey = rawK
-		fmt.Printf("HOSTWRITE: EXISTS %s\n", s.String())
 	} else {
 		s.Storage[hk] = &StorageObject{
 			Accessed: false,
@@ -468,7 +463,6 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK com
 			Value:    slices.Clone(val),  // copy of val
 			RawKey:   rawK,
 		}
-		fmt.Printf("HOSTWRITE: NEWLY %s %v\n", s.String(), s.Storage)
 	}
 }
 

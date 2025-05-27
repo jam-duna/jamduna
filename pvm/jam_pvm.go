@@ -1,8 +1,6 @@
 package pvm
 
 import (
-	"fmt"
-
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -69,7 +67,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, encoded_elements...)
-	fmt.Printf("%d bytes = %x\n", len(input_bytes), input_bytes)
 
 	vm.Standard_Program_Initialization(input_bytes) // eq 264/265
 	vm.Gas = int64(g)

@@ -199,7 +199,7 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 	if offset+4 <= uint64(len(pure)) {
 		offset += 4 // skip standard_c_size_byte
 	}
-	fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d\n", o_size, w_size, z_val, s_val)
+	//fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d\n", o_size, w_size, z_val, s_val)
 	return decodeCorePart(pure[offset:]), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
 }
 
@@ -271,13 +271,13 @@ func (vm *VM) Standard_Program_Initialization(argument_data_a []byte) {
 
 	// o_byte
 	vm.Ram.WriteRAMBytes(Z_Z, vm.o_byte)
-	fmt.Printf("Copied o_byte (%d bytes) to RAM at address %d\n", len(vm.o_byte), Z_Z)
+	//fmt.Printf("Copied o_byte (%d bytes) to RAM at address %d\n", len(vm.o_byte), Z_Z)
 
 	// w_byte
 	z_o := Z_func(vm.o_size)
 	w_addr := 2*Z_Z + z_o
 	vm.Ram.WriteRAMBytes(w_addr, vm.w_byte)
-	fmt.Printf("Copied w_byte (len %d) to RAM at address %d\n", len(vm.w_byte), w_addr)
+	//fmt.Printf("Copied w_byte (len %d) to RAM at address %d\n", len(vm.w_byte), w_addr)
 
 	// stack
 	//s_addr := uint32(0xFFFFFFFF) - 2*Z_Z - Z_I -  P_func(vm.s) + 1
@@ -285,7 +285,7 @@ func (vm *VM) Standard_Program_Initialization(argument_data_a []byte) {
 	// argument
 	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
 	vm.Ram.WriteRAMBytes(argAddr, argument_data_a)
-	fmt.Printf("Copied argument_data_a (len %d) to RAM at address %d\n", len(argument_data_a), argAddr)
+	//fmt.Printf("Copied argument_data_a (len %d) to RAM at address %d\n", len(argument_data_a), argAddr)
 	z_s := Z_func(vm.s)
 	requiredMemory := uint32(5*Z_Z + z_o + z_w + z_s + Z_I)
 	if requiredMemory > math.MaxUint32 {
@@ -396,7 +396,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 
 		stepn++
 	}
-	fmt.Println("terminated")
+
 	// vm.Mode = ...
 	// vm.Gas = types.IsAuthorizedGasAllocation
 	// log.Debug(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)

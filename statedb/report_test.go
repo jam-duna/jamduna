@@ -73,9 +73,9 @@ func ServiceToSeviceAccount(s []ServiceItem) map[uint32]*types.ServiceAccount {
 			StorageSize:     value.Service.CodeSize,
 			NumStorageItems: value.Service.Items,
 			Mutable:         true,
-			Storage:         make(map[common.Hash]types.StorageObject),
-			Lookup:          make(map[common.Hash]types.LookupObject),
-			Preimage:        make(map[common.Hash]types.PreimageObject),
+			Storage:         make(map[common.Hash]*types.StorageObject),
+			Lookup:          make(map[common.Hash]*types.LookupObject),
+			Preimage:        make(map[common.Hash]*types.PreimageObject),
 		}
 		result[value.ServiceID].WriteLookup(value.Service.CodeHash, value.Service.Items, []uint32{})
 	}

@@ -234,7 +234,7 @@ func (vm *VM) chargeGas(host_fn int) {
 	}
 
 	vm.Gas = beforeGas - int64(chargedGas)
-	log.Info(vm.logging, exp, "chargegas reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
+	log.Info(vm.logging, exp, "reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
 }
 
 // InvokeHostCall handles host calls
@@ -385,7 +385,6 @@ func (vm *VM) hostInfo() {
 	} else {
 		fetch = omega_7
 	}
-	log.Info("XXXX", "INFO XXX", "s", fmt.Sprintf("%d", fetch))
 	t, errCode := vm.getXUDS(fetch)
 	if errCode != OK {
 		vm.WriteRegister(7, NONE)
@@ -396,7 +395,6 @@ func (vm *VM) hostInfo() {
 	bo, _ := vm.ReadRegister(8)
 
 	var buf bytes.Buffer
-	log.Info("XXX", "hostInfo", "s", omega_7, "bo", bo, "t", t, "t.Balance", t.Balance, "t.ComputeThreshold()", t.ComputeThreshold(), "t.GasLimitG", t.GasLimitG, "t.GasLimitM", t.GasLimitM, "t.NumStorageItems", t.NumStorageItems, "t.StorageSize", t.StorageSize)
 	elements := []interface{}{t.CodeHash, uint(t.Balance), uint(t.ComputeThreshold()),
 		uint(t.GasLimitG), uint(t.GasLimitM), uint(t.NumStorageItems), uint(t.StorageSize)}
 	for _, elem := range elements {
@@ -1123,7 +1121,6 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 	var err error
 	s := uint32(serviceindex)
 	if serviceindex == maxUint64 || uint32(serviceindex) == vm.X.S {
-		fmt.Printf("getXUDS: serviceindexS %d %s\n", serviceindex, vm.X.U.D[s].String())
 		return vm.X.U.D[s], OK
 	}
 	a, ok = vm.X.U.D[s]
@@ -1132,7 +1129,6 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 		if err != nil || !ok {
 			return nil, NONE
 		}
-		fmt.Printf("getXUDS: serviceindexA %d %s\n", serviceindex, a.String())
 		vm.X.U.D[s] = a
 	}
 	return a, OK
@@ -1184,7 +1180,7 @@ func (vm *VM) hostRead() {
 	l = min(l, lenval-f)
 	// TODO: check for OOB case again using o, f + l
 	vm.Ram.WriteRAMBytes(uint32(bo), val[f:])
-	vm.WriteRegister(7, l)
+	vm.WriteRegister(7, lenval)
 }
 
 // Write Storage
@@ -1202,7 +1198,7 @@ func (vm *VM) hostWrite() {
 	if err_k != OK {
 		vm.terminated = true
 		vm.ResultCode = types.PVM_PANIC
-		log.Error(vm.logging, "hostWrite: WRITE RAM", "err", err_k)
+		log.Error(vm.logging, "WRITE RAM", "err", err_k)
 		return
 	}
 	k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
@@ -1210,7 +1206,7 @@ func (vm *VM) hostWrite() {
 	if a_t > a.Balance {
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		log.Error(vm.logging, "hostWrite: WRITE FULL", "a_t", a_t, "balance", a.Balance)
+		log.Error(vm.logging, "WRITE FULL", "a_t", a_t, "balance", a.Balance)
 		return
 	}
 
@@ -1234,7 +1230,7 @@ func (vm *VM) hostWrite() {
 		if val_len > 0 {
 			a.NumStorageItems++
 			a.StorageSize += (32 + val_len)
-			log.Info(vm.logging, "hostWrite: WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Info(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		}
 		vm.WriteRegister(7, NONE)
 	} else {
@@ -1247,17 +1243,17 @@ func (vm *VM) hostWrite() {
 			a.StorageSize -= (32 + prev_l)
 			l = uint64(prev_l) // this should not be NONE
 			vm.WriteRegister(7, l)
-			log.Info(vm.logging, "hostWrite: WRITE (as DELETE) NONE ", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Debug(vm.logging, "WRITE (as DELETE) NONE ", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		} else {
 			// write
 			a.StorageSize += val_len
 			a.StorageSize -= prev_l
 			l = prev_l
 			vm.WriteRegister(7, l)
-			log.Info(vm.logging, "hostWrite: WRITE OK", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("%x", oldValue))
+			log.Debug(vm.logging, "WRITE OK", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("%x", oldValue))
 		}
 	}
-	log.Info(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
+	log.Debug(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
 // Solicit preimage

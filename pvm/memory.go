@@ -41,7 +41,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 	a_size := uint32(Z_Z + Z_I - 1)
 	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
 	output_end := uint32(0xFFFFFFFF)
-	fmt.Printf("output_address %x output_end %x\n", output_address, output_end)
+
 	return &RAM{
 		stack_address:        stack_address,
 		stack_address_end:    stack_address_end,
