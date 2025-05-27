@@ -2,9 +2,7 @@ OUTPUT_DIR := bin
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 SRC := jam.go
-net-spec_FILE ?= tiny
-#net-spec_FILE ?= chainspecs/tiny-00000000.json
-CHAINSPEC ?= jamduna
+CHAINSPEC ?= chainspecs/jamduna-spec.json
 NUM_NODES ?= 6
 DEFAULT_PORT ?= 40000
 SINGLE_NODE_PORT ?= 40005
@@ -20,8 +18,7 @@ HOSTS_FILE := ../$(RAW_HOSTS_FILE)
 
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
-
-GIT_TAG := $(shell git describe --tags --abbrev=0)
+GIT_TAG := $(shell git describe --tags --abbrev=0 | awk -F. '{printf "%d.%d.%d.%d\n", $$1, $$2, $$3, $$4 + 1}')
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 GIT_FULL_COMMIT   := $(shell git rev-parse HEAD)
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -34,20 +31,7 @@ GO_LDFLAGS := -s -w \
   -X 'main.Commit=$(GIT_COMMIT)' \
   -X 'main.BuildTime=$(BUILD_TIME)'
 
-ifeq ($(UNAME_S),Linux)
-  ifeq ($(UNAME_M),x86_64)
-    BINARY := jamduna-linux-amd64
-  else ifeq ($(UNAME_M),aarch64)
-    BINARY := jamduna-linux-arm64
-  endif
-else ifeq ($(UNAME_S),Darwin)
-  ifeq ($(UNAME_M),x86_64)
-    BINARY := jamduna-mac-amd64
-  else ifeq ($(UNAME_M),arm64)
-    BINARY := jamduna-mac-arm64
-  endif
-endif
-#BINARY := jamduna
+BINARY := jamduna
 
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
@@ -76,7 +60,7 @@ static_jam_linux_amd64:
 	GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
-	-o $(OUTPUT_DIR)/jamduna-linux-amd64 . && strip $(OUTPUT_DIR)/jamduna-linux-amd64 2>/dev/null)
+	-o $(OUTPUT_DIR)/linux-amd64/$(BINARY) . && strip $(OUTPUT_DIR)/linux-amd64/jamduna 2>/dev/null)
 
 static_jam_linux_arm64:
 	@echo "Building JamDuna binary for Linux (aarch64)..."
@@ -84,7 +68,7 @@ static_jam_linux_arm64:
 	GOOS=linux GOARCH=arm64 CC=aarch64-linux-musl-gcc CGO_ENABLED=1 \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
-	-o $(OUTPUT_DIR)/jamduna-linux-arm64 . && strip $(OUTPUT_DIR)/jamduna-linux-arm64 2>/dev/null)
+	-o $(OUTPUT_DIR)/linux-arm64/$(BINARY) . && strip $(OUTPUT_DIR)/linux-arm64/jamduna 2>/dev/null)
 
 static_jam_darwin_amd64:
 	@echo "Building JamDuna binary for macOS (x86_64)..."
@@ -92,7 +76,7 @@ static_jam_darwin_amd64:
 	GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
-	-o $(OUTPUT_DIR)/jamduna-mac-amd64 . && strip -x $(OUTPUT_DIR)/jamduna-mac-amd64)
+	-o $(OUTPUT_DIR)/mac-amd64/$(BINARY) . && strip -x $(OUTPUT_DIR)/mac-amd64/jamduna)
 
 static_jam_darwin_arm64:
 	@echo "Building JamDuna binary for macOS (aarch64)..."
@@ -100,15 +84,7 @@ static_jam_darwin_arm64:
 	CGO_ENABLED=1 CC=clang \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
-	-o $(OUTPUT_DIR)/jamduna-mac-arm64 . && strip -x $(OUTPUT_DIR)/jamduna-mac-arm64)
-
-static_jam_windows_amd64:
-	@echo "Building JamDuna binary for Windows AMD64..."
-	$(call build_with_status,static_jam_windows_amd64,\
-	GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 \
-	go build -tags "cgo" \
-	-ldflags "$(GO_LDFLAGS)" \
-	-o $(OUTPUT_DIR)/jamduna-windows-amd64.exe . && x86_64-w64-mingw32-strip $(OUTPUT_DIR)/jamduna-windows-amd64.exe)
+	-o $(OUTPUT_DIR)/mac-arm64/$(BINARY) . && strip -x $(OUTPUT_DIR)/mac-arm64/jamduna)
 
 static_jam_all:
 	@echo "Building static JAM for available platforms..."
@@ -167,7 +143,7 @@ run_polkajam_all:
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
-		$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
+		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
 	done; \
 
 run_polkajam_dom: jam_clean
@@ -178,19 +154,21 @@ run_polkajam_dom: jam_clean
 	RUST_LOG=polkavm=trace $(POLKAJAM_BIN) --chain chainspecs/polkajam-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
+mkt: jam jam_clean run_polkajam_dom
+
 run_jamduna_dom: jam_clean 
 	@mkdir -p logs
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
 	@# validator 5 uses POLKAJAM_BIN
-	@RUST_LOG=jam_node::net=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 > logs/polkajam-5.log 2>&1&
+	@RUST_LOG=jam_node::net=trace $(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 > logs/polkajam-5.log 2>&1&
 	@# validator 1 ~ NUM_NODES-1 use jamduna
 	@for i in $$(seq 0 $$(($(NUM_NODES) - 2))); do \
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
 		echo ">> Starting validator $$V_IDX on port $$PORT"; \
 		$(OUTPUT_DIR)/$(BINARY) run \
-			--chain chainspecs/jamduna-spec.json \
+			--chain $(CHAINSPEC) \
 			--dev-validator $$V_IDX \
 			--start-time "$(JAM_start-time)" \
 			--rpc-port=$$PORT & \
@@ -207,14 +185,14 @@ run_multiclient: jam_clean
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT"; \
 		$(OUTPUT_DIR)/$(BINARY) run \
-			--chain chainspecs/jamduna-spec.json \
+			--chain $(CHAINSPEC) \
 			--dev-validator $$V_IDX \
 			--start-time "$(JAM_start-time)" & \
 	done; \
 	sleep 4
-	$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 3 --rpc-port=19803 &
-	$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 4 --rpc-port=19804 &
-	$(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 &
+	$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 3 --rpc-port=19803 &
+	$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 4 --rpc-port=19804 &
+	$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 &
 	wait
 	@echo "✅ All instances started and running in parallel."
 
@@ -237,10 +215,7 @@ kill_parallel_jam:
 	@pgrep -f "$(OUTPUT_DIR)/$(BINARY)"
 	@pkill -f "$(OUTPUT_DIR)/$(BINARY)"
 	@echo "All instances killed."
-run_jam:
-	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... port $(DEFAULT_PORT) start-time $(JAM-start-time)"
-	@$(OUTPUT_DIR)/$(BINARY) -net-spec $(net-spec_FILE) -port $(DEFAULT_PORT) -start-time "$(JAM-start-time)"
-	@echo "Instance started."
+
 
 # env setup for remote nodes
 jam_set:
@@ -394,20 +369,23 @@ jamx_stop:
 # ----------------------------------------
 # Release: build all binaries and package
 PLATFORMS := linux-amd64 linux-arm64 mac-amd64 mac-arm64
-BIN_NAME   := jamduna
 BIN_DIR    := bin
 RELEASE_DIR:= release
 
-jam_tar: 
+jam_tar:
 	@echo "Packaging binaries for commit $(GIT_FULL_COMMIT)..."
 	@mkdir -p $(RELEASE_DIR)/$(GIT_COMMIT)
 	@for plat in $(PLATFORMS); do \
 	  echo "  → $$plat"; \
-	  tar czf $(RELEASE_DIR)/$(GIT_COMMIT)/$(BIN_NAME)_$(GIT_FULL_COMMIT)_$$plat.tgz \
-	    -C $(BIN_DIR) $(BIN_NAME)-$$plat; \
+	  mkdir -p tmp/$$plat && cp $(BIN_DIR)/$$plat/$(BINARY) tmp/$$plat/; \
+	  tar czf $(RELEASE_DIR)/$(GIT_COMMIT)/$(BINARY)_$(GIT_FULL_COMMIT)_$$plat.tgz \
+	    -C tmp $$plat; \
+	  rm -rf tmp/$$plat; \
 	done
-	@echo
-	@echo "Release artifacts here:"
-	@tree $(RELEASE_DIR)/$(GIT_COMMIT)
+	@rmdir tmp || true
+	@echo "Binaries packaged in $(RELEASE_DIR)/$(GIT_COMMIT)/"
+	@echo "To create a GitHub release, run:"
+	@echo "gh release create \"$(GIT_TAG)\" $(RELEASE_DIR)/$(GIT_COMMIT)/*.tgz --title \"Release $(GIT_TAG)\" --notes \"Release $(GIT_TAG) - commit $(GIT_FULL_COMMIT)\""
+
 release: static_jam_all jam_tar
 # ----------------------------------------

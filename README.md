@@ -1,86 +1,69 @@
-# JAM
+# jamduna
 
 *Developer*: Colorful Notion, Inc.
 *Address*: [5D58imQFuMXDTknQS2D14gDU2duiUC18MGxDnTKajjJS9F3g](https://polkadot.subscan.io/account/5D58imQFuMXDTknQS2D14gDU2duiUC18MGxDnTKajjJS9F3g)
 
-We are continuing development of [JAM](https://jam.web3.foundation/) in Go throughout 2025, with **Goals** of:
-* [waiting for formal pass mechanism] **Milestone 1: IMPORTER** -- State-transitioning conformance tests pass and can import blocks.
-* [waiting for formal pass mechanism] **Milestone 2: AUTHOR** -- Fully conformant and can produce blocks (including networking, off-chain).
-* [in progress, H1 2025] **Milestone 3: HALF-SPEED** -- Conformance and Kusama-level performance (including PVM implementation).
-* [in progress, H2 2025] **Milestone 4: FULL-SPEED** -- Conformance and Polkadot-level performance (including PVM implementation).
+### JAM Docs:
 
-## Documentation:
+[docs.jamcha.in](https://docs.jamcha.in/) | [graypaper](https://graypaper.fluffylabs.dev/#/293bf5a/348e00348e00) | [JAM-NP](https://github.com/zdave-parity/jam-np/blob/main/simple.md) |  [JAM SDK](https://hackmd.io/@polkadot/jamsdk)
 
-* [docs.jamcha.in](https://docs.jamcha.in/)
-* [graypaper](https://graypaper.fluffylabs.dev/#/293bf5a/348e00348e00)
-* [JAM Setup Service Guide](https://hackmd.io/@clw98/Hy5xvMYxJg)
-* [JAM Trustless Supercomputing Test Suite](https://hackmd.io/nk0Tr0iIQHmLm7WIXe_OoQ)
-* [JAM TestNet repo](https://github.com/jam-duna/jamtestnet/tree/main/traces/assurances/jam_duna) | [sheet](https://docs.google.com/spreadsheets/d/1ueAisCMOx7B-m_fXMLT0FXBxfVzydJyr-udE8jKwDN8/edit?gid=615049643#gid=615049643)
-* [JAM-NP](https://github.com/zdave-parity/jam-np/blob/main/simple.md)
-* [JAM SDK](https://hackmd.io/@polkadot/jamsdk)
 
-Supporting docs:
+## Quickstart Guide
 
-* [JAM DA](https://hackmd.io/NDwqmV_XTjukvCxC98kLmg?view) - Stanley
-* [Discussion topics](https://hackmd.io/2y70ehKYS3aLzKvqZPWhog?edit)
-* [RAM Model](https://hackmd.io/cAXPsZt1StWI4dbPk_UWAQ?view) - William
-* [Parent-Child VMs](https://hackmd.io/ldPJih0ISMCP6pU5aXzaWg)  - Shawn
-* [Ordered Accumulation](https://hackmd.io/jeZLW09nRse8q3t_PavyrA) - Stanley
-* [Recent History Test](https://hackmd.io/H_vBBOR-RS-r3tdpS2AHOA) - Stanley
-* [JAM0 @ Bangkok](https://hackmd.io/qA7NNyjyQIil8oSq3aafjw) - Sourabh
+```bash
+% jamduna -h
+JAM DUNA node
 
-## Building JAM
+Usage:
+  ./jamduna [command]
 
-```
-# make jam
-Building JAM...
-mkdir -p bin
-go build -o bin/jam jam.go
-```
+Available Commands:
+  gen-keys    Generate keys for validators, pls generate keys for all validators before running the node
+  gen-spec    Generate new chain spec from the spec config
+  help        Help about any command
+  list-keys   List keys for validators
+  print-spec  Generate new chain spec from the spec config
+  run         Run the JAM DUNA node
+  test-refine Run the refine test
+  test-stf    Run the STF Validation
 
-## Running JAM
+Flags:
+  -c, --config string      Path to the config file
+  -h, --help               Displays help information about the commands and flags.
+  -l, --log-level string   Log level (debug, info, warn, error) (default "trace")
+  -t, --temp               Use a temporary data directory, removed on exit. Conflicts with data-path
+  -v, --version            Prints the version of the program.
 
-```
-# bin/jam -h
-Usage: jam [options]
-  -bandersnatch string
-    	Bandersnatch Seed (only for development)
-  -bls string
-    	BLS private key (only for development)
-  -datadir string
-    	Specifies the directory for the blockchain, keystore, and other data. (default "/root/.jam")
-  -ed25519 string
-    	Ed25519 Seed (only for development)
-  -genesis string
-    	Specifies the genesis state json file.
-  -h	Displays help information about the commands and flags.
-  -metadata string
-    	Node metadata (default "Alice")
-  -port int
-    	Specifies the network listening port. (default 9900)
-  -ts int
-    	Epoch0 Unix timestamp (will override genesis config)
-  -validatorindex int
-    	Validator Index (only for development)
+Use "./jamduna [command] --help" for more information about a command.
 ```
 
-## Libraries used
+## Run a Single Local Node
 
-* [bandersnatch-vrfs-spec](https://github.com/davxy/bandersnatch-vrfs-spec) in `bandersnatch`
-* [reed-solomon-simd](https://github.com/AndersTrier/reed-solomon-simd) and [w3f-bls](https://github.com/w3f/bls) in `bls`
+```
+./jamduna run --chain chainspecs/jamduna-spec.go --dev-validator 0
+```
+
+## Launch a Local "Tiny" Testnet
+
+```bash
+rm -rf ~/.jamduna; \
+bin/jamduna gen-keys \
+for i in $(seq 0 5); do \
+  bin/jamduna run --chain chainspecs/jamduna-spec.json --dev-validator "$i"  & \
+done; \
+```
+
+## Shutdown All Local Nodes
+
+```bash
+pkill -f jamduna
+```
+
 
 ## Disclosures
 
-
 Our interactions with fellow teams concerning implementation are:
-* Public [JAM Telegram room](https://t.me/jamtestnet) wherein many JAM Implementers are sharing published blocks/state transitions
+* Public [JAM Telegram room](https://t.me/jamtestnet) wherein many JAM Implementers are sharing published blocks/state transitions and Discord room;  A few conversations with Jason @ JavaJAM to review how to participate in a [tiny testnet](https://github.com/jam-duna/jamtestnet/issues/69) 
 * Public [JAM DUNA JAM Testnet repo](https://github.com/jam-duna/jamtestnet/releases) on resolving discrepancies on published blocks/state_transitions/state_snapshot
 * [JAM0 event at Devcon 7, sponsored by Colorful Notion](https://forum.polkadot.network/t/jam0-jam-implementers-meetup-sub0-devcon-7-bangkok-nov-11-nov-16-2024/10866)
 * Public conversations with @koute concerning using polkatool over github to build our first services (see [here](https://forum.polkadot.network/t/building-jam-services-in-rust/10161))
-* Public + Private conversations with Jason @ JavaJAM to review how to participate in a [tiny testnet](https://github.com/jam-duna/jamtestnet/issues/69)
-
-
-
-
-
-

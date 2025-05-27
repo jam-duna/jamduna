@@ -322,7 +322,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		}
 	} else {
 		log.Warn(debugG, "processWPQueueItem Guarantee not enough signatures", "n", n.String(),
-			"guarantee.Signatures", guarantee.Signatures, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+			"guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		return false
 	}
 	metadata := fmt.Sprintf("role=Guarantor|numSig=%d", len(guarantee.Signatures))

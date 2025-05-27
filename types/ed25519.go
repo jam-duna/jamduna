@@ -16,6 +16,7 @@ const (
 	Ed25519PubkeySize     = 32
 	Ed25519PrivateKeySize = 64 // 32 byte seeds + 32 pub concatenated
 	Ed25519SignatureSize  = 64 // 32 byte R + 32 byte S
+	X_Ed25519_SECRET      = "jam_val_key_ed25519"
 )
 
 type Ed25519Key common.Hash
@@ -104,12 +105,14 @@ func InitEd25519Key(seed []byte) (Ed25519Key, []byte, error) {
 		return Ed25519Key{}, nil, fmt.Errorf("seed length must be %d bytes", ed25519.SeedSize)
 	}
 
-	// Generate the private key from the seed
-	ed25519_priv := ed25519.NewKeyFromSeed(seed)
-
-	// The public key is the second half of the private key
+	ed25519_secret := common.ComputeHash(append([]byte(X_Ed25519_SECRET), seed...))
+	ed25519_priv := ed25519.NewKeyFromSeed(ed25519_secret)
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
-
+	// fmt.Printf("seed: %x\n", seed)
+	// fmt.Printf("ed25519 prefix_raw: %s -> %x\n", X_Ed25519_SECRET, []byte(X_Ed25519_SECRET))
+	// fmt.Printf("blake2b(prefix, seed): %x\n", ed25519_secret)
+	// fmt.Printf("ed25519_priv: %x\n", ed25519_priv)
+	// fmt.Printf("ed25519_pub: %x\n", ed25519_pub)
 	return Ed25519Key(ed25519_pub), ed25519_priv, nil
 }
 

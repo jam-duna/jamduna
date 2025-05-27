@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"unsafe"
+
+	"github.com/colorfulnotion/jam/common"
 	//"github.com/colorfulnotion/jam/types"
 )
 
@@ -65,8 +67,12 @@ G.3: Ring for Ticket Generation
   - O (Output): 784 Bytes (RingSignature).
 */
 
-type BanderSnatchSecret [PubkeyLen]byte
-type BanderSnatchKey [SecretLen]byte
+const (
+	X_BANDERSNATCH_SEED = "jam_val_key_bandersnatch"
+)
+
+type BanderSnatchSecret [SecretLen]byte
+type BanderSnatchKey [PubkeyLen]byte
 type BandersnatchVrfSignature [IETFSignatureLen]byte
 type BandersnatchRingSignature [RingSignatureLen]byte
 
@@ -111,17 +117,25 @@ func InitBanderSnatchKey(seed []byte) (key BanderSnatchKey, secret BanderSnatchS
 		return key, secret, fmt.Errorf("seed length must be %v bytes", SeedLen)
 	}
 
+	//bandersnatch_seed := seed
+	bandersnatch_seed := common.ComputeHash(append([]byte(X_BANDERSNATCH_SEED), seed...))
+
 	// Retrieve the public key
-	banderSnatch_pub, err := getBanderSnatchPublicKey(seed)
+	banderSnatch_pub, err := getBanderSnatchPublicKey(bandersnatch_seed)
 	if err != nil {
 		return key, secret, fmt.Errorf("failed to get public key: %v", err)
 	}
 
 	// Retrieve the private key
-	banderSnatch_priv, err := getBanderSnatchPrivateKey(seed)
+	banderSnatch_priv, err := getBanderSnatchPrivateKey(bandersnatch_seed)
 	if err != nil {
 		return key, secret, fmt.Errorf("failed to get private key: %v", err)
 	}
+	// fmt.Printf("seed:%x\n", seed)
+	// fmt.Printf("bandersnatch_seed: %x\n", bandersnatch_seed)
+	// fmt.Printf("banderSnatch_pub: %x\n", banderSnatch_pub)
+	// fmt.Printf("banderSnatch_priv: %x\n", banderSnatch_priv)
+
 	return banderSnatch_pub, banderSnatch_priv, nil
 }
 

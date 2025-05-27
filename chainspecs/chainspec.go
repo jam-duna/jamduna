@@ -21,23 +21,19 @@ var networkFile = map[string]string{
 }
 
 func ReadSpec(id string) (spec *ChainSpec, err error) {
-	fmt.Printf("Reading spec for %s\n", id)
 	var data []byte
 	path, ok := networkFile[id]
 	if ok {
-		fmt.Printf("Reading spec from configFS for %s path=%v\n", id, path)
 		data, err = configFS.ReadFile(path)
 		if err != nil {
 			return spec, err
 		}
 	} else {
-		fmt.Printf("OPEN FILE %s\n", id)
 		data, err = os.ReadFile(id)
 		if err != nil {
 			return spec, err
 		}
 	}
-	//var chainSpec ChainSpec
 	if err := json.Unmarshal(data, &spec); err != nil {
 		return spec, err
 	}
@@ -115,7 +111,7 @@ type GenesisValidator struct {
 
 func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {
 	chainSpec = &ChainSpec{
-		ID: dev.ID,
+		ID: "jamduna",
 	}
 	address := make([]string, 0)
 	for _, validator := range dev.GenesisValidators {

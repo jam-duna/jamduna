@@ -81,7 +81,7 @@ func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, le
 		log.Warn(module, "VerifyWBTJustification Failure", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 		return false, recoveredRoot
 	} else {
-		log.Trace(module, "VerifyWBTJustification Success", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		log.Info(module, "VerifyWBTJustification Success", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 	}
 	return true, recoveredRoot // TEMPORARY
 }

@@ -356,12 +356,13 @@ func ComputeShardIndex(coreIdx uint16, validatorIdx uint16) (shardIndex uint16) 
 
 // Verification: CE137_FullShard
 func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, exported_segments_and_proofpageShards []byte, encodedPath []byte) (bool, error) {
-	return true, nil
+	//return true, nil
 	bClub := common.Blake2Hash(bundleShard)
 	shards := SplitBytes(exported_segments_and_proofpageShards)
 	sClub := trie.NewWellBalancedTree(shards, types.Blake2b).RootHash()
 	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
 	path, err := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
+	log.Info(debugDA, "VerifyFullShard VerifyWBTJustification START", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "bundleShard", fmt.Sprintf("%x", bundleShard), "exported_segments_and_proofpageShards", fmt.Sprintf("%x", exported_segments_and_proofpageShards), "treeLen", types.TotalValidators, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 	if err != nil {
 		return false, err
 	}
@@ -371,7 +372,7 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 			"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
-	log.Trace(debugDA, "VerifyFullShard VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
+	log.Info(debugDA, "VerifyFullShard VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
 		"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 	return true, nil
 }

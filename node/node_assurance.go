@@ -42,6 +42,31 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 	return
 }
 
+func (n *Node) FetchAllShards(g types.Guarantee) {
+	spec := g.Report.AvailabilitySpec
+	coredIdx := g.Report.CoreIndex
+	vIdx := n.id
+	ramdamguarantor := rand0.Intn(len(g.Signatures))
+	guarantor := g.Signatures[ramdamguarantor].ValidatorIndex
+	for i := 0; i < types.TotalValidators; i++ {
+		shardIdx := uint16(i)
+		bundleShard, exportedShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
+		if err == nil {
+			log.Info(debugDA, "assureData: SendFullShardRequest success",
+				"coreIdx", coredIdx,
+				"validatorIdx", vIdx,
+				"shardIdx", shardIdx,
+				"erasureRoot", spec.ErasureRoot,
+				"guarantor", guarantor,
+				"bundleShard", fmt.Sprintf("%x", bundleShard),
+				"exportedShards", fmt.Sprintf("%x", exportedShards),
+				"encodedPath", fmt.Sprintf("%x", encodedPath),
+			)
+			VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
+		}
+	}
+}
+
 // assureData, given a Guarantee with an AvailabilitySpec within a WorkReport,
 // fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA.
 func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
@@ -56,6 +81,10 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	var encodedPath []byte
 	var err error
 	var guarantor uint16
+
+	// Get All Shards
+	n.FetchAllShards(g)
+
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		ramdamguarantor := rand0.Intn(len(g.Signatures))
 		guarantor = g.Signatures[ramdamguarantor].ValidatorIndex
@@ -86,11 +115,11 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	// CRITICAL: verify justification matches the erasure root before storage
 	verified, err := VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
 	if err != nil {
-		log.Error(debugDA, "assureData: VerifyFullShard error", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
+		log.Error(debugDA, "assureData: VerifyFullShard error", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("VerifyFullShard: %w", err)
 	}
 	if !verified {
-		log.Error(debugDA, "assureData: VerifyFullShard failed", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "verified", false)
+		log.Error(debugDA, "assureData: VerifyFullShard failed", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "verified", false)
 		return fmt.Errorf("VerifyFullShard: failed verification")
 	}
 
