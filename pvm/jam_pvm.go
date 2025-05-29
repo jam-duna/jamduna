@@ -61,10 +61,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.Y = X.Clone()
 
 	input_bytes := make([]byte, 0)
-	//t_bytes := types.E(uint64(t))
-	//s_bytes := types.E(uint64(s))
-	t_bytes := common.Uint32ToBytes(t)
-	s_bytes := common.Uint32ToBytes(s)
+	t_bytes := types.E(uint64(t))
+	s_bytes := types.E(uint64(s))
 	encoded_elements, _ := types.Encode(elements)
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)

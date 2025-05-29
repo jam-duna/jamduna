@@ -69,7 +69,6 @@ G.3: Ring for Ticket Generation
 
 const (
 	X_BANDERSNATCH_SEED = "jam_val_key_bandersnatch"
-	//X_BANDERSNATCH_SEED = ""
 )
 
 type BanderSnatchSecret [SecretLen]byte

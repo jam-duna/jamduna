@@ -17,7 +17,6 @@ const (
 	Ed25519PrivateKeySize = 64 // 32 byte seeds + 32 pub concatenated
 	Ed25519SignatureSize  = 64 // 32 byte R + 32 byte S
 	X_Ed25519_SECRET      = "jam_val_key_ed25519"
-	//X_Ed25519_SECRET = ""
 )
 
 type Ed25519Key common.Hash

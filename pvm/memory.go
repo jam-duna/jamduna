@@ -31,7 +31,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 	// read-write
 	rw_data_address := uint32(2 * Z_Z)
 	rw_data_address_end := rw_data_address + Z_func(o_size)
-	current_heap_pointer := rw_data_address_end + Z_P
+	current_heap_pointer := rw_data_address_end + 1024*1024
 
 	// stack
 	stack_address := uint32(0xFFFFFFFF) - 2*Z_Z - Z_I - p_s + 1
@@ -42,7 +42,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
 	output_end := uint32(0xFFFFFFFF)
 
-	return &RAM{
+	ram := &RAM{
 		stack_address:        stack_address,
 		stack_address_end:    stack_address_end,
 		rw_data_address:      rw_data_address,
@@ -57,7 +57,15 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 		ro_data:              make([]byte, ro_data_address_end-ro_data_address),
 		output:               make([]byte, a_size),
 	}
+	log.Trace("pvm", "NewRAM", 
+		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
+		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
+		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "current_heap_pointer", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
+		"ro_data_address", fmt.Sprintf("%x", ram.ro_data_address), "ro_data_end", fmt.Sprintf("%x", ram.ro_data_address_end))
+
+	return ram
 }
+
 
 func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	length := uint32(len(data))
@@ -126,11 +134,12 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		return ram.ro_data[offset : offset+length], OK
 	}
 
-	log.Error("pvm", "invalid ReadRAMBytes", "addr", fmt.Sprintf("%x", address), "l", length,
+	log.Error("pvm", "invalid ReadRAMBytes", "addr", fmt.Sprintf("%x", address), "end", end, "l", length,
 		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
 		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
-		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "rw_data_end", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
+		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "current_heap_pointer", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
 		"ro_data_address", fmt.Sprintf("%x", ram.ro_data_address), "ro_data_end", fmt.Sprintf("%x", ram.ro_data_address_end))
+	panic(400)
 	return nil, OOB
 }
 

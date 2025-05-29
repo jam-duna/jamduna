@@ -364,11 +364,11 @@ cleancoverage:
 
 
 polkavmscp:
-	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/bootstrap/bootstrap.pvm services
-	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/megatron/megatron.pvm services
-	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/fib/fib.pvm services
-	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/tribonacci/tribonacci.pvm services
-	scp polkavm:/root/go/src/github.com/colorfulnotion/polkavm/services/corevm/corevm.pvm services
+	scp polkavm:/root/polkavm/services/bootstrap/bootstrap.pvm services
+	scp polkavm:/root/polkavm/services/megatron/megatron.pvm services
+	scp polkavm:/root/polkavm/services/fib/fib.pvm services
+	scp polkavm:/root/polkavm/services/tribonacci/tribonacci.pvm services
+	scp polkavm:/root/polkavm/services/corevm/corevm.pvm services
 
 jamx_start:
 	ansible-playbook -u root -i $(HOSTS_FILE)  yaml/jam_start.yaml
