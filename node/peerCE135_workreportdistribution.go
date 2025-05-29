@@ -155,7 +155,7 @@ func (p *Peer) SendWorkReportDistribution(
 }
 
 const (
-	attemptReconstruction = true
+	attemptReconstruction = false
 )
 
 func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
@@ -214,7 +214,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Info(module, "onWorkReportDistribution incoming Guarantee from Core on slot",
+	log.Trace(module, "onWorkReportDistribution incoming Guarantee from Core on slot",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReport", workReport.String(),

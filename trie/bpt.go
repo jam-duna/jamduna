@@ -806,11 +806,6 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
 
-	/*
-		Follow GP_0.3.5(270, 273, 274, 276, 291)
-		Process State value(timeslots), covert []uint32 to []byte
-	*/
-
 	vBytes, err := types.Encode(time_slots)
 	if err != nil {
 		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
@@ -829,6 +824,7 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	}
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, vBytes)
+
 	return nil
 }
 
@@ -906,7 +902,6 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 	if err != nil {
 		fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)
 	}
-	//fmt.Printf("SetServiceStorage(s=%d, k=%s) storageKey=%s account_storage_key=%s\n", s, k, storageKey, account_storage_key)
 	t.levelDBSet(metaKeyBytes, metaValBytes)
 	t.Insert(stateKey, storageValue)
 	return nil
@@ -923,7 +918,6 @@ func (t *MerkleTree) GetServiceStorage(s uint32, k common.Hash) ([]byte, bool, e
 	if !ok || err != nil {
 		return nil, ok, err
 	}
-	//fmt.Printf("GetServiceStorage(s=%d, k=%s) storageKey=%s account_storage_key=%s\n", s, k, storageKey, account_storage_key)
 	return value, true, nil
 }
 
@@ -932,7 +926,6 @@ func (t *MerkleTree) DeleteServiceStorage(s uint32, k common.Hash) error {
 	storageKey := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, storageKey)
 	stateKey := account_storage_key.Bytes()
-	//fmt.Printf("DeleteServiceStorage(s=%d, k=%s) storageKey=%s account_storage_key=%s\n", s, k, storageKey, account_storage_key)
 	err := t.Delete(stateKey)
 	return err
 }
@@ -973,8 +966,8 @@ func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) (err error) {
 func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []byte, ok bool, err error) {
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
-
 	stateKey := account_preimage_hash.Bytes()
+
 	value, ok, err = t.Get(stateKey)
 	if !ok || err != nil {
 		return nil, ok, err

@@ -404,7 +404,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
 	} else {
-		fmt.Printf("VM terminated with ResultCode: %d\n", vm.ResultCode)
+		//fmt.Printf("VM terminated with ResultCode: %d\n", vm.ResultCode)
 	}
 	return nil
 }

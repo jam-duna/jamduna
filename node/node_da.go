@@ -81,7 +81,7 @@ func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, le
 		log.Warn(module, "VerifyWBTJustification Failure", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 		return false, recoveredRoot
 	} else {
-		log.Info(module, "VerifyWBTJustification Success", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		log.Debug(module, "VerifyWBTJustification Success", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 	}
 	return true, recoveredRoot // TEMPORARY
 }
@@ -207,28 +207,17 @@ func (n *NodeContent) buildSClub(segments [][]byte) (sClub []common.Hash, ecChun
 	return sClub, ecChunksArr
 }
 
-func zipPairs(b []common.Hash, s []common.Hash) (pairs [][]byte) {
-	pairs = make([][]byte, len(b))
-	if len(b) != len(s) {
-		return
-	}
-	for i := 0; i < len(b); i++ {
-		pairs[i] = append(b[i].Bytes(), s[i].Bytes()...)
-	}
-	return pairs
-}
-
-func GenerateErasureTree(b []common.Hash, s []common.Hash) (*trie.WellBalancedTree, [][]byte) {
-	// Combine b and s into (work-package bundle shard hash, segment shard root) pairs
-	bundleSegmentPairs := zipPairs(b, s)
+func GenerateErasureTree(bClubs []common.Hash, sClubs []common.Hash) (*trie.WellBalancedTree, [][]byte) {
+	// Combine b♣, s♣ into 64bytes pairs
+	bundle_segment_pairs := common.BuildBundleSegmentPairs(bClubs, sClubs)
 
 	// Generate and return erasureroot
-	t := trie.NewWellBalancedTree(bundleSegmentPairs, types.Blake2b)
+	t := trie.NewWellBalancedTree(bundle_segment_pairs, types.Blake2b)
 	if debugSpec {
 		fmt.Printf("\nWBT of bclub-sclub pairs:\n")
 		t.PrintTree()
 	}
-	return t, bundleSegmentPairs
+	return t, bundle_segment_pairs
 }
 
 // MB([x∣x∈T[b♣,s♣]]) - Encode b♣ and s♣ into a matrix

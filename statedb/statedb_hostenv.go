@@ -29,6 +29,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	if sa.Dirty == false {
 		return nil, nil
 	}
+	log.Trace(module, "writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.String())
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
 	start_StorageSize := sa.StorageSize
@@ -72,7 +73,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					log.Warn(module, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
 					return
 				}
-				log.Info("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
+				log.Trace("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
 				serviceUpdate.ServiceRequest[blob_hash] = &types.SubServiceRequestResult{
 					HeaderHash: s.HeaderHash,
 					Slot:       s.GetTimeslot(),

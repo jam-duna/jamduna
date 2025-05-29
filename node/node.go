@@ -2242,7 +2242,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 
 		bClub := common.Blake2Hash(daResp.BundleShard)
 		sClub := daResp.SClub
-		leaf := append(bClub.Bytes(), sClub.Bytes()...)
+		leaf := common.BuildBundleSegment(bClub, sClub)
 		verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
 		if verified {
 			log.Debug(debugCE138, "reconstructPackageBundleSegments: shard verified", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)

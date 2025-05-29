@@ -153,7 +153,7 @@ func (s *StateDB) ValidateAddPreimage(serviceID uint32, blob []byte) (common.Has
 		log.Warn(debugSDB, "[ValidateAddPreimage:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
-		log.Trace(debugSDB, "[ValidateAddPreimage:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
+		log.Warn(debugSDB, "[ValidateAddPreimage:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
 	if len(anchors) == 1 { // we have to forget it -- check!

@@ -89,7 +89,7 @@ type StorageObject struct {
 }
 
 func (o *StorageObject) String() string {
-	return fmt.Sprintf("Value: [%x] Deleted: %v", o.Value, o.Deleted)
+	return fmt.Sprintf("Value: [%x] Deleted: %v Dirty: %v RawKey: %x Key: %x Value: %x", o.Value, o.Deleted, o.Dirty, o.RawKey, o.Key, o.Value)
 }
 func (o *StorageObject) Clone() *StorageObject {
 	// Deep copy the Key+Value slice
@@ -116,6 +116,10 @@ type LookupObject struct {
 	T        []uint32 `json:"t"` // t
 }
 
+func (o *LookupObject) String() string {
+	return fmt.Sprintf("Z: [%v] T: %v Deleted: %v Dirty: %v", o.Z, o.T, o.Deleted, o.Dirty)
+}
+
 func (o *LookupObject) Clone() *LookupObject {
 	// Deep copy the T slice
 	tCopy := make([]uint32, len(o.T))
@@ -134,6 +138,10 @@ type PreimageObject struct {
 	Deleted  bool
 	Dirty    bool
 	Preimage []byte `json:"preimage"` // p
+}
+
+func (o *PreimageObject) String() string {
+	return fmt.Sprintf("P: %v  Deleted: %v Dirty: %v", common.Blake2Hash(o.Preimage), o.Deleted, o.Dirty)
 }
 
 func (o *PreimageObject) Clone() *PreimageObject {
@@ -288,13 +296,13 @@ func (s *ServiceAccount) String() string {
 	// Lookup entries
 	str2 := ""
 	for h, lo := range s.Lookup {
-		str2 += fmt.Sprintf("  Lookup: %v => %v\n", h, lo)
+		str2 += fmt.Sprintf("  Lookup: %v => %s\n", h, lo.String())
 	}
 
 	// Preimage entries
 	str3 := ""
 	for h, lo := range s.Preimage {
-		str3 += fmt.Sprintf("  Preimage: %v => %v\n", h, lo)
+		str3 += fmt.Sprintf("  Preimage: %v => %s\n", h, lo.String())
 	}
 
 	// Storage entries
@@ -473,12 +481,10 @@ func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 
 	o, exists := s.Preimage[blobHash]
 	if exists {
-		s.Preimage[blobHash] = &PreimageObject{
-			Accessed: o.Accessed,
-			Dirty:    true,
-			Deleted:  len(preimage) == 0,
-			Preimage: preimage,
-		}
+		o.Accessed = true
+		o.Dirty = true
+		o.Deleted = len(preimage) == 0
+		o.Preimage = preimage
 	} else {
 		s.Preimage[blobHash] = &PreimageObject{
 			Accessed: false,
@@ -493,18 +499,15 @@ func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots []uint32) {
 	if s.Mutable == false {
 		log.Crit(module, "Called WriteStorage on immutable ServiceAccount")
-
 	}
 	s.Dirty = true
 	o, exists := s.Lookup[blobHash]
 	if exists {
-		s.Lookup[blobHash] = &LookupObject{
-			Accessed: o.Accessed,
-			Dirty:    true,
-			Deleted:  time_slots == nil,
-			Z:        z,
-			T:        time_slots,
-		}
+		o.Accessed = true
+		o.Dirty = true
+		o.Deleted = time_slots == nil
+		o.Z = z
+		o.T = time_slots
 		return
 	}
 	s.Lookup[blobHash] = &LookupObject{

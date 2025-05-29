@@ -31,7 +31,19 @@ GO_LDFLAGS := -s -w \
   -X 'main.Commit=$(GIT_COMMIT)' \
   -X 'main.BuildTime=$(BUILD_TIME)'
 
-BINARY := jamduna
+ifeq ($(UNAME_S),Linux)
+  ifeq ($(UNAME_M),x86_64)
+    BINARY := jamduna-linux-amd64
+  else ifeq ($(UNAME_M),aarch64)
+    BINARY := jamduna-linux-arm64
+  endif
+else ifeq ($(UNAME_S),Darwin)
+  ifeq ($(UNAME_M),x86_64)
+    BINARY := jamduna-mac-amd64
+  else ifeq ($(UNAME_M),arm64)
+    BINARY := jamduna-mac-arm64
+  endif
+endif
 
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 

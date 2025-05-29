@@ -360,9 +360,9 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	bClub := common.Blake2Hash(bundleShard)
 	shards := SplitBytes(exported_segments_and_proofpageShards)
 	sClub := trie.NewWellBalancedTree(shards, types.Blake2b).RootHash()
-	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
+	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
 	path, err := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
-	log.Info(debugDA, "VerifyFullShard VerifyWBTJustification START", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "bundleShard", fmt.Sprintf("%x", bundleShard), "exported_segments_and_proofpageShards", fmt.Sprintf("%x", exported_segments_and_proofpageShards), "treeLen", types.TotalValidators, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
+	log.Debug(debugDA, "VerifyFullShard VerifyWBTJustification START", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "bundleShard", fmt.Sprintf("%x", bundleShard), "exported_segments_and_proofpageShards", fmt.Sprintf("%x", exported_segments_and_proofpageShards), "treeLen", types.TotalValidators, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 	if err != nil {
 		return false, err
 	}
@@ -372,7 +372,7 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 			"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 		return false, fmt.Errorf("Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
-	log.Info(debugDA, "VerifyFullShard VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
+	log.Debug(debugDA, "VerifyFullShard VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
 		"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 	return true, nil
 }
@@ -384,7 +384,7 @@ func (n *Node) GetFullShard_Guarantor(erasureRoot common.Hash, shardIndex uint16
 	if err != nil {
 		return bundleShard, exported_segments_and_proofpageShards, justification, false, err
 	}
-	bundle_segment_pairs := zipPairs(bClubs, sClubs)
+	bundle_segment_pairs := common.BuildBundleSegmentPairs(bClubs, sClubs)
 	treeLen, leafHash, path, isFound := GenerateWBTJustification(erasureRoot, uint16(shardIndex), bundle_segment_pairs)
 	if !isFound {
 		return bundleShard, exported_segments_and_proofpageShards, justification, false, fmt.Errorf("Not found")
@@ -435,12 +435,12 @@ func (n *NodeContent) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex
 }
 
 // USED
-func (n *NodeContent) StoreFullShardJustification(erasureRoot common.Hash, shardIndex uint16, bClubH common.Hash, sClubH common.Hash, encodedPath []byte) {
+func (n *NodeContent) StoreFullShardJustification(erasureRoot common.Hash, shardIndex uint16, bClub common.Hash, sClub common.Hash, encodedPath []byte) {
 	// levelDB key->Val (* Required for multi validator case or CE200s)
 	// *f_erasureRoot_<erasureRoot> -> [f_erasureRoot_<shardIdx>]
 	// f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
 	f_es_key := generateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
-	bundle_segment_pair := append(bClubH.Bytes(), sClubH.Bytes()...)
+	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
 	f_es_val := append(bundle_segment_pair, encodedPath...)
 	n.WriteRawKV(f_es_key, f_es_val)
 	// log.Info(debugDA, "StoreFullShardJustification", "n", n.id, "erasureRoot", erasureRoot, "shardIndex", shardIndex, "f_es_key", f_es_key, "len(f_es_val)", len(f_es_val), "h(val)", common.Blake2Hash(f_es_val))
@@ -517,7 +517,7 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 		return false, err
 	}
 
-	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
+	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, decodedPath)
 	if !verified {
 		log.Crit(module, "VerifyBundleShard:VerifyWBTJustification VERIFICATION FAILURE", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", bundle_segment_pair, "decodedPath", fmt.Sprintf("%x", decodedPath))
@@ -576,15 +576,15 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 		return false, err
 	}
 
-	bClub := bclub_path[0]
+	bClub := common.Hash(bclub_path[0])
 	bPath := bclub_path[1:]
-	log.Trace(debugDA, "VerifySegmentShard", "bClub", bClub, "bPath", bPath)
+	log.Trace(debugDA, "VerifySegmentShard", "bClub", bClub, "bPath", fmt.Sprintf("%x", bPath))
 	//segmentLeafHash := common.ComputeLeafHash_WBT_Blake2B(segmentShard)
 
 	// Michael: please review
 	_, recovered_sClub := VerifyWBTJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentShard, bPath)
 
-	bundle_segment_pair := append(bClub, recovered_sClub.Bytes()...)
+	bundle_segment_pair := common.BuildBundleSegment(bClub, recovered_sClub)
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, fPath)
 	if !verified {
 		return false, fmt.Errorf("Segment Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)

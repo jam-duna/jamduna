@@ -61,8 +61,10 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.Y = X.Clone()
 
 	input_bytes := make([]byte, 0)
-	t_bytes := types.E(uint64(t))
-	s_bytes := types.E(uint64(s))
+	//t_bytes := types.E(uint64(t))
+	//s_bytes := types.E(uint64(s))
+	t_bytes := common.Uint32ToBytes(t)
+	s_bytes := common.Uint32ToBytes(s)
 	encoded_elements, _ := types.Encode(elements)
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
@@ -74,7 +76,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	x_s, ok, err := vm.hostenv.GetService(X.S)
 	if !ok || err != nil {
 		// TODO
-		panic(222)
+		//panic(222)
 	}
 	x_s.Mutable = true
 	vm.X.U.D[s] = x_s
@@ -116,7 +118,8 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
-	o := 0xFFFFFFFF - Z_Z - Z_I + 1
+	//o := 0xFFFFFFFF - Z_Z - Z_I + 1
+	o, _ := vm.ReadRegister(7)
 	l, _ := vm.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
 	if vm.ResultCode == types.RESULT_OK && res == 0 {

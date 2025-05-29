@@ -158,6 +158,32 @@ func ConcatenateByteSlices(slices [][]byte) []byte {
 	return result
 }
 
+func ReversedByteArray(slices [][]byte) [][]byte {
+	n := len(slices)
+	rev := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		rev[i] = slices[n-1-i]
+	}
+	return rev
+}
+
+func BuildBundleSegment(bClub Hash, sClub Hash) []byte {
+	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
+	//bundle_segment_pair := append(sClub.Bytes(), bClub.Bytes()...)
+	return bundle_segment_pair
+}
+
+func BuildBundleSegmentPairs(bClubs []Hash, sClubs []Hash) (pairs [][]byte) {
+	pairs = make([][]byte, len(bClubs))
+	if len(bClubs) != len(sClubs) {
+		return
+	}
+	for i := 0; i < len(sClubs); i++ {
+		pairs[i] = BuildBundleSegment(bClubs[i], sClubs[i])
+	}
+	return pairs
+}
+
 // Justification = [0 ++ Hash OR 1 ++ Hash ++ Hash OR 2 ++ Segment Shard] (Each discriminator is a single byte)
 func EncodeJustification(path [][]byte, numECPiecesPerSegment int) ([]byte, error) {
 	if len(path) == 0 {

@@ -53,7 +53,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 		output_address:       output_address,
 		output_end:           output_end,
 		stack:                make([]byte, p_s),
-		rw_data:              make([]byte, rw_data_address_end-rw_data_address),
+		rw_data:              make([]byte, current_heap_pointer-rw_data_address),
 		ro_data:              make([]byte, ro_data_address_end-ro_data_address),
 		output:               make([]byte, a_size),
 	}
@@ -81,6 +81,7 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 		copy(ram.ro_data[offset:], data)
 		return OK
 	default:
+		panic(400)
 		return OOB
 	}
 }
@@ -91,7 +92,8 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.output_address && end <= ram.output_end {
 		offset := address - ram.output_address
 		if offset+length > uint32(len(ram.output)) {
-			panic(fmt.Sprintf("output read overflow: offset=%d len=%d cap=%d", offset, length, len(ram.output)))
+			panic(322)
+			return nil, OOB
 		}
 		return ram.output[offset : offset+length], OK
 	}
@@ -99,8 +101,8 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.stack_address && end <= ram.stack_address_end {
 		offset := address - ram.stack_address
 		if offset+length > uint32(len(ram.stack)) {
-			panic(fmt.Sprintf("stack read overflow: address %x ram.stack_address %x offset=%d len=%d cap=%d (range: %x to %x)",
-				address, ram.stack_address, offset, length, len(ram.stack), ram.stack_address, ram.stack_address_end))
+			panic(324)
+			return nil, OOB
 		}
 		return ram.stack[offset : offset+length], OK
 	}
@@ -108,7 +110,9 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.rw_data_address && end <= Z_func(ram.current_heap_pointer) {
 		offset := address - ram.rw_data_address
 		if offset+length > uint32(len(ram.rw_data)) {
-			panic(fmt.Sprintf("rw_data read overflow: offset=%d len=%d cap=%d", offset, length, len(ram.rw_data)))
+			fmt.Printf("ADDRESS %x rw_data_address %x offset %x\n", address, ram.rw_data_address, offset)
+			panic(326)
+			return nil, OOB
 		}
 		return ram.rw_data[offset : offset+length], OK
 	}
@@ -116,12 +120,17 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.ro_data_address && end <= ram.ro_data_address_end {
 		offset := address - ram.ro_data_address
 		if offset+length > uint32(len(ram.ro_data)) {
-			panic(fmt.Sprintf("ro_data read overflow: offset=%d len=%d cap=%d", offset, length, len(ram.ro_data)))
+			panic(328)
+			return nil, OOB
 		}
 		return ram.ro_data[offset : offset+length], OK
 	}
 
-	log.Warn("ok", "invalid ReadRAMBytes", "addr", fmt.Sprintf("%x", address), "l", length)
+	log.Error("pvm", "invalid ReadRAMBytes", "addr", fmt.Sprintf("%x", address), "l", length,
+		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
+		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
+		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "rw_data_end", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
+		"ro_data_address", fmt.Sprintf("%x", ram.ro_data_address), "ro_data_end", fmt.Sprintf("%x", ram.ro_data_address_end))
 	return nil, OOB
 }
 

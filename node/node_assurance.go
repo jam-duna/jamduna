@@ -83,7 +83,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	var guarantor uint16
 
 	// Get All Shards
-	n.FetchAllShards(g)
+	//n.FetchAllShards(g)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		ramdamguarantor := rand0.Intn(len(g.Signatures))
@@ -91,7 +91,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 
 		bundleShard, exportedShards, encodedPath, err = n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, shardIdx)
 		if err == nil {
-			log.Info(debugDA, "assureData: SendFullShardRequest success",
+			log.Trace(debugDA, "assureData: SendFullShardRequest success",
 				"coreIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx,
 				"erasureRoot", spec.ErasureRoot,
 				"guarantor", guarantor,

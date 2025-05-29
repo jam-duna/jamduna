@@ -234,7 +234,7 @@ func (vm *VM) chargeGas(host_fn int) {
 	}
 
 	vm.Gas = beforeGas - int64(chargedGas)
-	log.Info(vm.logging, exp, "reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
+	log.Trace(vm.logging, exp, "reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
 }
 
 // InvokeHostCall handles host calls
@@ -587,7 +587,7 @@ func (vm *VM) hostNew() {
 	xContext.U.D[xi] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
 	vm.WriteRegister(7, uint64(xi))
 	vm.HostResultCode = OK
-	log.Info(vm.logging, "hostNew: NEW OK", "SERVICE", fmt.Sprintf("%d", xi), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
+	log.Debug(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", xi), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 }
 
 // Upgrade service
@@ -1230,7 +1230,7 @@ func (vm *VM) hostWrite() {
 		if val_len > 0 {
 			a.NumStorageItems++
 			a.StorageSize += (32 + val_len)
-			log.Info(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Debug(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		}
 		vm.WriteRegister(7, NONE)
 	} else {
