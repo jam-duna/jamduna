@@ -39,9 +39,10 @@ func generateSegmentTree(t *testing.T, numSegments int) (tree *CDMerkleTree, seg
 
 	segmentLen := len(segments)
 	treeLen := tree.Length()
+	if debugCDT {
+		t.Logf("Input segments Len: %v (Padded CDT length: %v). Root:%v\n", segmentLen, treeLen, tree.RootHash())
+	}
 
-	t.Logf("Input segments Len: %v (Padded CDT length: %v). Root:%v\n", segmentLen, treeLen, tree.RootHash())
-	//t.Logf("Segments Len: %v\n", common.FormatPaddedBytesArray(segments, 6))
 	return tree, segments
 }
 
@@ -76,16 +77,15 @@ func TestCDT(t *testing.T) {
 	}
 	for _, numSegments := range TestingSegmentsNums {
 		t.Run(fmt.Sprintf("SegmentsNum=%d", numSegments), func(t *testing.T) {
-			// Optionally run in parallel
-			// t.Parallel()
+			//t.Parallel() // Optionally run in parallel
 			cdtTree, segments := generateSegmentTree(t, numSegments)
 			t.Run("TestCDTGet", func(t *testing.T) {
 				testCDTGet(t, cdtTree, segments)
 			})
 
-			// t.Run("TestJustify0", func(t *testing.T) {
-			// 	testJustify0(t, cdtTree, segments)
-			// })
+			t.Run("TestJustify0", func(t *testing.T) {
+				testJustify0(t, cdtTree, segments)
+			})
 
 			t.Run("TestVerifyCDTJustificationX", func(t *testing.T) {
 				testVerifyCDTJustificationX(t, cdtTree, segments)
@@ -113,7 +113,7 @@ func testJustify0(t *testing.T, tree *CDMerkleTree, segments [][]byte) {
 
 		if !compareBytes(computedRoot, root) {
 			t.Errorf("Justification failed for leaf %d: expected root %s, got %s", i, common.Bytes2Hex(root), common.Bytes2Hex(computedRoot))
-		} else {
+		} else if debugCDT {
 			t.Logf("CDT Justification verified for leaf %d: %x, %v", i, root, justification)
 		}
 	}
@@ -125,7 +125,10 @@ func testVerifyCDTJustificationX(t *testing.T, tree *CDMerkleTree, segments [][]
 	}
 	segmentLen := len(segments)
 	globalRoot := tree.Root()
-	t.Logf("segmentLen=%d globalRoot=%x\n", segmentLen, globalRoot)
+	if debugCDT {
+		t.Logf("segmentLen=%d globalRoot=%x\n", segmentLen, globalRoot)
+	}
+
 	for index := 0; index < segmentLen; index++ {
 		// Index of the leaf to justify
 		pgIdx, isFixedPadding := ComputePageIdx(segmentLen, index)
@@ -163,7 +166,7 @@ func testVerifyCDTJustificationX(t *testing.T, tree *CDMerkleTree, segments [][]
 			t.Logf("localLeaves(len=%d): %v\n", len(localLeaves), localLeaves)
 			t.Logf("subTree localPageRoot: %x\n", localPageRoot)
 			t.Fatalf("Root hash mismatch: expected %x, got %x", globalRoot, derived_globalRoot_pg)
-		} else {
+		} else if debugCDT {
 			t.Logf("segmentLen=%d index=%d leafHash: %x, Verified\n", segmentLen, index, leafHash)
 		}
 	}
@@ -196,7 +199,7 @@ func testPageProof(t *testing.T, tree *CDMerkleTree, segments [][]byte) {
 	if exportedSegmentLen == 0 {
 		return
 	}
-	if bptDebug {
+	if debugBPT {
 		fmt.Printf("-------------------%d-------------------\n", exportedSegmentLen)
 	}
 
@@ -206,10 +209,14 @@ func testPageProof(t *testing.T, tree *CDMerkleTree, segments [][]byte) {
 	pagedProofs, err := GeneratePageProof(segments)
 	pageSize := 1 << PageFixedDepth
 	numPages := (len(segments) + pageSize - 1) / pageSize
-	fmt.Printf("SegmentN=%d, GeneratePageProof: numPages=%d, pageSize=%d\n", len(segments), numPages, pageSize)
-	for pgIdx, proofByte := range pagedProofs {
-		fmt.Printf("!!pagedProofs[%d] bytesize:%d, %x\n", pgIdx, len(proofByte), proofByte)
+
+	if debugBPT {
+		fmt.Printf("SegmentN=%d, GeneratePageProof: numPages=%d, pageSize=%d\n", len(segments), numPages, pageSize)
+		for pgIdx, proofByte := range pagedProofs {
+			fmt.Printf("!!pagedProofs[%d] bytesize:%d, %x\n", pgIdx, len(proofByte), proofByte)
+		}
 	}
+
 	if err != nil {
 		t.Fatalf("Failed to generate page proofs: %v", err)
 	}

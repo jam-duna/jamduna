@@ -277,6 +277,7 @@ testnet:
 # TODO : everyone should run $rustup target add x86_64-unknown-linux-musl
 blslib:
 	@echo "Building BLS (static) for all platforms..."
+	@rustup target add x86_64-unknown-linux-musl
 	@cd bls && \
 	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
 		echo "  Building for $$TARGET..."; \
@@ -294,6 +295,7 @@ blslib:
 
 bandersnatchlib:
 	@echo "Building Bandersnatch for   statically for all platforms..."
+	@rustup target add x86_64-unknown-linux-musl
 	@cd bandersnatch && \
 	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
 		echo "  Building for $$TARGET..."; \

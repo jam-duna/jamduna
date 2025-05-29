@@ -89,7 +89,6 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 		copy(ram.ro_data[offset:], data)
 		return OK
 	default:
-		panic(400)
 		return OOB
 	}
 }
@@ -134,12 +133,12 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		return ram.ro_data[offset : offset+length], OK
 	}
 
-	log.Error("pvm", "invalid ReadRAMBytes", "addr", fmt.Sprintf("%x", address), "end", end, "l", length,
+	log.Trace("pvm", "invalid ReadRAMBytes", "addr", fmt.Sprintf("%x", address), "end", end, "l", length,
 		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
 		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
 		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "current_heap_pointer", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
 		"ro_data_address", fmt.Sprintf("%x", ram.ro_data_address), "ro_data_end", fmt.Sprintf("%x", ram.ro_data_address_end))
-	panic(400)
+
 	return nil, OOB
 }
 

@@ -1315,7 +1315,7 @@ func (t *MerkleTree) Delete(key []byte) error {
 	// Find the node to delete
 	node, err := t.findNode(t.Root, key, 0)
 	if err != nil {
-		fmt.Printf("Delete: key not found: %x\n", key)
+		//fmt.Printf("Delete: key not found: %x\n", key)
 		return err
 	}
 

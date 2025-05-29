@@ -99,7 +99,7 @@ func TestCodec(t *testing.T) {
 				t.Errorf("Case %s: JSON data not equal (encode, decode)", testcase_name)
 			}
 			if test_1 && test_2 && test_3 {
-				fmt.Printf("\033[32m Passed Case %s:\033[0m\n", testcase_name)
+				//fmt.Printf("\033[32m Passed Case %s:\033[0m\n", testcase_name)
 			} else {
 				fmt.Printf("\033[31mCase %s: Failed\033[0m\n", testcase_name)
 				fmt.Printf("Expected JSON: %s\n", string(expectedJson))
@@ -163,8 +163,10 @@ func TestAccumulateHistoryJson(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	out, _ := json.Marshal(c15)
-	fmt.Printf("C15: %s\n", string(out))
+	_, err = json.Marshal(c15)
+	if err != nil {
+		t.Fatalf("Failed to decode data: %v", err)
+	}
 }
 
 func TestBundleDecode(t *testing.T) {

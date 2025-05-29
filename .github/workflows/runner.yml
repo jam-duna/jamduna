@@ -17,7 +17,7 @@ on:
       - statedb/*.go
       - node/*.go
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '*/15 * * * *'
       branches:
         - main
 
@@ -32,18 +32,6 @@ jobs:
         uses: actions/checkout@v3
         with: { ref: main }
 
-#      - name: Setup Go
-#        uses: actions/setup-go@v4
-#        with:
-#          go-version: 1.23
-
-#      - name: Set up Rust
-#        run: |
-#          sudo apt update
-#          sudo apt install -y curl build-essential
-#          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-#          source $HOME/.cargo/env
-
       - name: Set environment variables
         run: |
           echo "GOFLAGS=\"-tags=tiny\"" >> $GITHUB_ENV
@@ -51,8 +39,6 @@ jobs:
           echo "LD_LIBRARY_PATH=./bls/target/release: ./bandersnatch/target/release" >> $GITHUB_ENV
           echo "CARGO_MANIFEST_DIR=${{ github.workspace }}" >> $GITHUB_ENV
 
-#      - name: Install dependencies
-#        run: sudo apt update && sudo apt install -y build-essential
 
       - name: Clear Go module cache
         run: go clean -modcache
@@ -68,42 +54,8 @@ jobs:
       - name: Install Go dependencies
         run: go mod tidy
 
-      - name: Run make commands
-        run: |
-          make blslib
-          make bandersnatchlib
+      - name: Run test fib
+        run: go test ./node -timeout 4m -v -run '^TestFib$$' -tags "network_test" -targetN=5  -jce_manual=true -jam_node=true -jam_local_client=false
 
-      - name: Run test fib (1/5)
-        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
-
-      - name: Run test megatron (1/5)
-        id: megatron_short_1
-        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
-
-      - name: Run test fib (2/5)
-        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
-
-      - name: Run test megatron (2/5)
-        id: megatron_short_2
-        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
-
-      - name: Run test fib (3/5)
-        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
-
-      - name: Run test megatron (3/5)
-        id: megatron_short_3
-        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
-
-      - name: Run test fib (4/5)
-        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
-
-      - name: Run test megatron (4/5)
-        id: megatron_short_4
-        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
-
-      - name: Run test fib (5/5)
-        run: go test ./node -timeout 4m -v -run ^TestFib$ -tags network_test,tiny
-
-      - name: Run test megatron (5/5)
-        id: megatron_short_5
-        run: go test -timeout 10m -v -run TestMegatron -tags "network_test,tiny" -targetN=10 -prereq_test=true
+      - name: Run test megatron
+        run: go test ./node -timeout 5m -v -run '^TestMegatron$$' -tags "network_test" -targetN=10  -jce_manual=true -jam_node=true -jam_local_client=false

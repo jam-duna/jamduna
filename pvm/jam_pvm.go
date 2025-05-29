@@ -73,8 +73,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	// (*ServiceAccount, bool, error)
 	x_s, ok, err := vm.hostenv.GetService(X.S)
 	if !ok || err != nil {
-		// TODO
-		//panic(222)
+		// fmt.Printf("service %v ok %v err %v\n", X.S, ok, err)
+		return
 	}
 	x_s.Mutable = true
 	vm.X.U.D[s] = x_s

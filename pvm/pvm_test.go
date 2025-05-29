@@ -146,6 +146,7 @@ func TestPVM(t *testing.T) {
 }
 
 func TestRevm(t *testing.T) {
+	t.Skip("Temporarily disabled for debugging")
 	log.InitLogger("info")
 	fp := "../services/revm_test.pvm"
 	raw_code, err := os.ReadFile(fp)

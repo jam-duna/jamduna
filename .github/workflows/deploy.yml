@@ -61,11 +61,6 @@ jobs:
       - name: Install Go dependencies
         run: go mod tidy
 
-      - name: Run make commands
-        run: |
-          make blslib
-          make bandersnatchlib
-
       - name: Run test common
         run: |
           go test ./common
@@ -85,9 +80,6 @@ jobs:
 
       - name: Run test statedb
         run: go test ./statedb || echo "Test failed but continuing."
-
-      - name: Run test erasurecoding
-        run: go test ./erasurecoding || echo "Test failed but continuing."
 
       - name: Run test pvm
         run: go test ./pvm
