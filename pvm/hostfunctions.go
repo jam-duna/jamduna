@@ -1154,7 +1154,7 @@ func (vm *VM) hostRead() {
 	kz, _ := vm.ReadRegister(9)
 	bo, _ := vm.ReadRegister(10)
 	f, _ := vm.ReadRegister(11)
-	//l, _ := vm.ReadRegister(12)
+	l, _ := vm.ReadRegister(12)
 	mu_k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
 	if err_k != OK {
 		vm.terminated = true
@@ -1173,8 +1173,10 @@ func (vm *VM) hostRead() {
 	log.Info(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
 	lenval := uint64(len(val))
 	f = min(f, lenval)
+	l = min(l, lenval-f)
 	// TODO: check for OOB case again using o, f + l
-	vm.Ram.WriteRAMBytes(uint32(bo), val[f:])
+	//vm.Ram.WriteRAMBytes(uint32(bo), val[f:]) // [Shawn] TODO this seems wrong. should it be val[f:f+l]?
+	vm.Ram.WriteRAMBytes(uint32(bo), val[f:f+l])
 	vm.WriteRegister(7, lenval)
 }
 

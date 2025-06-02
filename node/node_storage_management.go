@@ -361,7 +361,6 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	sClub := trie.NewWellBalancedTree(shards, types.Blake2b).RootHash()
 	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
 	path, err := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
-	log.Debug(debugDA, "VerifyFullShard VerifyWBTJustification START", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "bundleShard", fmt.Sprintf("%x", bundleShard), "exported_segments_and_proofpageShards", fmt.Sprintf("%x", exported_segments_and_proofpageShards), "treeLen", types.TotalValidators, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 	if err != nil {
 		return false, err
 	}

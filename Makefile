@@ -217,6 +217,7 @@ run_multiclient: jam_clean
 	wait
 	@echo "✅ All instances started and running in parallel."
 
+run_localclient: jam kill_jam jam_clean run_5 run_1
 
 run_localclient_jam: jam_clean run_parallel_jam
 run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
@@ -236,6 +237,9 @@ kill_parallel_jam:
 	@pgrep -f "$(OUTPUT_DIR)/$(BINARY)"
 	@pkill -f "$(OUTPUT_DIR)/$(BINARY)"
 	@echo "All instances killed."
+
+kill_jam:
+	@pkill jam || true
 
 
 # env setup for remote nodes

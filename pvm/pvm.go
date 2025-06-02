@@ -290,7 +290,7 @@ func (vm *VM) Standard_Program_Initialization(argument_data_a []byte) {
 	vm.WriteRegister(7, uint64(argAddr))
 	vm.WriteRegister(8, uint64(uint32(len(argument_data_a))))
 
-	fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
+	//fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
 }
 
 // NewVM initializes a new VM with a given program

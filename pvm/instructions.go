@@ -195,7 +195,7 @@ const (
 	MIN_U         = 230
 )
 
-var PvmTrace = true
+var PvmTrace = false
 
 func branchCondSymbol(name string) string {
 	switch name {

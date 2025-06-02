@@ -1,8 +1,6 @@
 package pvm
 
 import (
-	"fmt"
-
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -32,21 +30,21 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	a := make([]byte, 0)
 	serviceBytes := types.E(uint64(workitem.Service))
 	a = append(a, serviceBytes...)
-	fmt.Printf("ExecuteRefine  s %d bytes - %x\n", len(serviceBytes), serviceBytes)
+	//fmt.Printf("ExecuteRefine  s %d bytes - %x\n", len(serviceBytes), serviceBytes)
 	encoded_workitem_payload, _ := types.Encode(workitem.Payload)
 	a = append(a, encoded_workitem_payload...) // variable number of bytes
-	fmt.Printf("ExecuteRefine  payload %d bytes - %x\n", len(encoded_workitem_payload), encoded_workitem_payload)
+	//fmt.Printf("ExecuteRefine  payload %d bytes - %x\n", len(encoded_workitem_payload), encoded_workitem_payload)
 	a = append(a, workPackage.Hash().Bytes()...) // 32
-	fmt.Printf("ExecuteRefine  workPackage %d bytes - %x\n", len(workPackage.Hash().Bytes()), workPackage.Hash().Bytes())
+	//fmt.Printf("ExecuteRefine  workPackage %d bytes - %x\n", len(workPackage.Hash().Bytes()), workPackage.Hash().Bytes())
 
 	encoded_workPackage_RefineContext, _ := types.Encode(workPackage.RefineContext)
 	a = append(a, encoded_workPackage_RefineContext...)
-	fmt.Printf("ExecuteRefine  refineContext %d bytes - %x\n", len(encoded_workPackage_RefineContext), encoded_workPackage_RefineContext)
+	//fmt.Printf("ExecuteRefine  refineContext %d bytes - %x\n", len(encoded_workPackage_RefineContext), encoded_workPackage_RefineContext)
 
 	encoded_p_a, _ := types.Encode(p_a)
-	fmt.Printf("ExecuteRefine  p_a %d bytes - %x\n", len(encoded_p_a), encoded_p_a)
+	//fmt.Printf("ExecuteRefine  p_a %d bytes - %x\n", len(encoded_p_a), encoded_p_a)
 	a = append(a, encoded_p_a...)
-	fmt.Printf("ExecuteRefine TOTAL len(a)=%d %x\n", len(a), a)
+	//fmt.Printf("ExecuteRefine TOTAL len(a)=%d %x\n", len(a), a)
 	vm.WorkItemIndex = workitemIndex
 	vm.Gas = int64(workitem.RefineGasLimit)
 	vm.WorkPackage = workPackage
@@ -61,7 +59,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.Execute(types.EntryPointRefine, false)
 	r, res = vm.getArgumentOutputs()
 
-	log.Info(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "pc", vm.pc, "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
+	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "pc", vm.pc, "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 
 	exportedSegments = vm.Exports
 	return r, res, exportedSegments
@@ -120,8 +118,8 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	a := append(p_bytes, c_bytes...)
 	a = append(a, []byte{0}...) // HACK: THIS IS NOT REALLY 6.5 compliant, its varint but we'll hack it for now to match
 	vm.Gas = types.IsAuthorizedGasAllocation
-	fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x\n", c, len(p_bytes), len(c_bytes),
-		len(a), a)
+	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x\n", c, len(p_bytes), len(c_bytes),
+	// 	len(a), a)
 	vm.Standard_Program_Initialization(a) // eq 264/265
 	vm.Execute(types.EntryPointAuthorization, false)
 	r, _ = vm.getArgumentOutputs()

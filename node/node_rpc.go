@@ -353,12 +353,14 @@ func (j *Jam) BestBlock(req []string, res *string) error {
 
 // see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks
 func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineContext {
+	// TODO: approx finality by 5 blocks
+	finalityApproxConst := 5
 	anchor := common.Hash{}
 	stateRoot := common.Hash{}
 	beefyRoot := common.Hash{}
 	s := n.statedb
-	if len(s.JamState.RecentBlocks) > 5 {
-		idx := len(s.JamState.RecentBlocks) - 5
+	if len(s.JamState.RecentBlocks) > finalityApproxConst {
+		idx := len(s.JamState.RecentBlocks) - finalityApproxConst
 		anchorBlock := s.JamState.RecentBlocks[idx]
 		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
 		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks

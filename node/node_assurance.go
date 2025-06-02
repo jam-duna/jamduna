@@ -52,7 +52,7 @@ func (n *Node) FetchAllShards(g types.Guarantee, verify bool) {
 		shardIdx := uint16(i)
 		bundleShard, exportedShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
 		if err == nil {
-			log.Info(debugDA, "assureData: SendFullShardRequest success",
+			log.Trace(debugDA, "assureData: SendFullShardRequest success",
 				"coreIdx", coredIdx,
 				"validatorIdx", vIdx,
 				"shardIdx", shardIdx,

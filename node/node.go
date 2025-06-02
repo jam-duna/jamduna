@@ -87,7 +87,7 @@ const (
 	MediumTimeout      = 10 * time.Second
 	LargeTimeout       = 12 * time.Second
 	VeryLargeTimeout   = 600 * time.Second
-	RefineTimeout      = 30 * time.Second
+	RefineTimeout      = 90 * time.Second
 	DefaultChannelSize = 200
 )
 
@@ -1201,15 +1201,16 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 	coWorkers := n.GetCoreCoWorkersPeers(coreIndex)
 	// send the work package to some other co-worker
 	for id, peer := range coWorkers {
+
 		if uint16(id) != n.id {
-			go func() {
-				err = peer.SendWorkPackageSubmission(context.Background(), wp, extrinsicsBlobs, coreIndex)
-				if err != nil {
-					log.Error(module, "SubmitWPSameCore", "err", err, "coreIndex", coreIndex)
-					return
-				}
-				log.Info(module, "SubmitWPSameCore SUBMISSION", "coreIndex", coreIndex)
-			}()
+			err = peer.SendWorkPackageSubmission(context.Background(), wp, extrinsicsBlobs, coreIndex)
+			if err != nil {
+				log.Error(module, "SubmitWPSameCore", "err", err, "coreIndex", coreIndex)
+				//return
+			}
+			log.Info(module, "SubmitWPSameCore SUBMISSION", "coreIndex", coreIndex)
+			break
+			//return
 		}
 	}
 	return nil
@@ -2153,7 +2154,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		leafHash := recoveredPageProof.LeafHashes[subTreeIdx]
 		derived_globalRoot_j0 := trie.VerifyCDTJustificationX(leafHash.Bytes(), int(segmentIndex), fullJustification, 0)
 		if common.BytesToHash(derived_globalRoot_j0) != common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]) {
-			log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "derived_globalRoot_j0", derived_globalRoot_j0)
+			log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "derived_globalRoot_j0", common.BytesToHash(derived_globalRoot_j0), "ExportedSegmentRoot", si.WorkReport.AvailabilitySpec.ExportedSegmentRoot)
 			return segments, justifications, err
 		} else {
 			log.Trace(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))

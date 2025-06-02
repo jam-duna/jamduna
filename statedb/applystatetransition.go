@@ -261,7 +261,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	log.Trace(module, "computeStateUpdates", "len(e_p)", len(blk.Extrinsic.Preimages), "len(e_g)", len(blk.Extrinsic.Guarantees), "len(ah)", len(s.JamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
 	for _, g := range blk.Extrinsic.Guarantees {
 		wph := g.Report.AvailabilitySpec.WorkPackageHash
-		log.Info(module, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
+		log.Trace(module, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,
