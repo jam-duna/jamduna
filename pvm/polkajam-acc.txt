@@ -1,0 +1,1330 @@
+TRACE polkavm::interpreter  Resolving arbitrary jump: 5
+TRACE polkavm::interpreter    -> Found start of a basic block at: 5
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [2]: 5: charge_gas
+DEBUG polkavm::interpreter    [3]: 5: jump 262
+DEBUG polkavm::interpreter  Starting execution at: 5 [2]
+TRACE polkavm::interpreter::raw_handlers  [2]: charge_gas: 1 (1000 -> 999)
+TRACE polkavm::interpreter::raw_handlers  [3]: unresolved jump 262
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [4]: 262: charge_gas
+DEBUG polkavm::interpreter    [5]: 262: sp = sp + 0xffffffffffffff50
+DEBUG polkavm::interpreter    [6]: 266: u64 [sp + 0xa8] = ra
+DEBUG polkavm::interpreter    [7]: 270: u64 [sp + 0xa0] = s0
+DEBUG polkavm::interpreter    [8]: 274: u64 [sp + 0x98] = s1
+DEBUG polkavm::interpreter    [9]: 278: a2 = 0x10000
+DEBUG polkavm::interpreter    [10]: 283: jump 661 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [4]: charge_gas: 6 (999 -> 993)
+TRACE polkavm::interpreter::raw_handlers  [5]: sp = sp + 0xffffffffffffff50
+TRACE polkavm::interpreter    sp = 0xfefdff50
+TRACE polkavm::interpreter::raw_handlers  [6]: u64 [sp + 0xa8] = ra
+TRACE polkavm::interpreter    u64 [0xfefdfff8] = ra = 0xffff0000
+TRACE polkavm::interpreter::raw_handlers  [7]: u64 [sp + 0xa0] = s0
+TRACE polkavm::interpreter    u64 [0xfefdfff0] = s0 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [8]: u64 [sp + 0x98] = s1
+TRACE polkavm::interpreter    u64 [0xfefdffe8] = s1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [9]: a2 = 0x10000
+TRACE polkavm::interpreter    a2 = 0x10000
+TRACE polkavm::interpreter::raw_handlers  [10]: jump 661 if a1 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [11]: 287: charge_gas
+DEBUG polkavm::interpreter    [12]: 287: s1 = a1
+DEBUG polkavm::interpreter    [13]: 289: a1 = i8 [a0]
+DEBUG polkavm::interpreter    [14]: 291: s0 = 0x1
+DEBUG polkavm::interpreter    [15]: 294: jump 349 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [16]: 661: charge_gas
+DEBUG polkavm::interpreter    [17]: 661: a0 = a2
+DEBUG polkavm::interpreter    [18]: 663: ra = u64 [sp + 0xa8]
+DEBUG polkavm::interpreter    [19]: 667: s0 = u64 [sp + 0xa0]
+DEBUG polkavm::interpreter    [20]: 671: s1 = u64 [sp + 0x98]
+DEBUG polkavm::interpreter    [21]: 675: sp = sp + 0xb0
+DEBUG polkavm::interpreter    [22]: 679: ret
+TRACE polkavm::interpreter::raw_handlers  [10]: jump ~16 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [11]: charge_gas: 4 (993 -> 989)
+TRACE polkavm::interpreter::raw_handlers  [12]: s1 = a1
+TRACE polkavm::interpreter    s1 = 0xaf
+TRACE polkavm::interpreter::raw_handlers  [13]: a1 = i8 [a0]
+TRACE polkavm::interpreter    a1 = i8 [0xfeff0000] = 0xffffffffffffffe0
+TRACE polkavm::interpreter::raw_handlers  [14]: s0 = 0x1
+TRACE polkavm::interpreter    s0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [15]: jump 349 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [23]: 297: charge_gas
+DEBUG polkavm::interpreter    [24]: 297: a3 = a1 & 0xff
+DEBUG polkavm::interpreter    [25]: 301: s0 = 0x2
+DEBUG polkavm::interpreter    [26]: 304: jump 349 if a3 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [27]: 349: charge_gas
+DEBUG polkavm::interpreter    [28]: 349: jump 357 if s1 >=u s0
+TRACE polkavm::interpreter::raw_handlers  [15]: jump ~27 if a1 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [23]: charge_gas: 3 (989 -> 986)
+TRACE polkavm::interpreter::raw_handlers  [24]: a3 = a1 & 0xff
+TRACE polkavm::interpreter    a3 = 0xe0
+TRACE polkavm::interpreter::raw_handlers  [25]: s0 = 0x2
+TRACE polkavm::interpreter    s0 = 0x2
+TRACE polkavm::interpreter::raw_handlers  [26]: jump 349 if a3 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [29]: 309: charge_gas
+DEBUG polkavm::interpreter    [30]: 309: s0 = 0x3
+DEBUG polkavm::interpreter    [31]: 312: jump 349 if a3 <u 224
+TRACE polkavm::interpreter::raw_handlers  [26]: jump ~27 if a3 <u 192
+TRACE polkavm::interpreter::raw_handlers  [29]: charge_gas: 2 (986 -> 984)
+TRACE polkavm::interpreter::raw_handlers  [30]: s0 = 0x3
+TRACE polkavm::interpreter    s0 = 0x3
+TRACE polkavm::interpreter::raw_handlers  [31]: jump 349 if a3 <u 224
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [32]: 317: charge_gas
+DEBUG polkavm::interpreter    [33]: 317: s0 = 0x4
+DEBUG polkavm::interpreter    [34]: 320: jump 349 if a3 <u 240
+TRACE polkavm::interpreter::raw_handlers  [31]: jump ~27 if a3 <u 224
+TRACE polkavm::interpreter::raw_handlers  [32]: charge_gas: 2 (984 -> 982)
+TRACE polkavm::interpreter::raw_handlers  [33]: s0 = 0x4
+TRACE polkavm::interpreter    s0 = 0x4
+TRACE polkavm::interpreter::raw_handlers  [34]: jump 349 if a3 <u 240
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [35]: 325: charge_gas
+DEBUG polkavm::interpreter    [36]: 325: s0 = 0x5
+DEBUG polkavm::interpreter    [37]: 328: jump 349 if a3 <u 248
+TRACE polkavm::interpreter::raw_handlers  [34]: jump ~27 if a3 <u 240
+TRACE polkavm::interpreter::raw_handlers  [27]: charge_gas: 1 (982 -> 981)
+TRACE polkavm::interpreter::raw_handlers  [28]: jump 357 if s1 >=u s0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [38]: 352: charge_gas
+DEBUG polkavm::interpreter    [39]: 352: a1 = 0
+DEBUG polkavm::interpreter    [40]: 354: jump 661
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [41]: 357: charge_gas
+DEBUG polkavm::interpreter    [42]: 357: a1 = s0
+DEBUG polkavm::interpreter    [43]: 359: u64 [sp] = a0
+DEBUG polkavm::interpreter    [44]: 361: ra = 6, jump 1289
+TRACE polkavm::interpreter::raw_handlers  [28]: jump ~41 if s1 >=u s0
+TRACE polkavm::interpreter::raw_handlers  [41]: charge_gas: 3 (981 -> 978)
+TRACE polkavm::interpreter::raw_handlers  [42]: a1 = s0
+TRACE polkavm::interpreter    a1 = 0x4
+TRACE polkavm::interpreter::raw_handlers  [43]: u64 [sp] = a0
+TRACE polkavm::interpreter    u64 [0xfefdff50] = a0 = 0xfeff0000
+TRACE polkavm::interpreter::raw_handlers  [44]: ra = 0x6
+TRACE polkavm::interpreter    ra = 0x6
+TRACE polkavm::interpreter::raw_handlers  [45]: unresolved jump 1289
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [46]: 1289: charge_gas
+DEBUG polkavm::interpreter    [47]: 1289: jump 1444 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [46]: charge_gas: 1 (978 -> 977)
+TRACE polkavm::interpreter::raw_handlers  [47]: jump 1444 if a1 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [48]: 1293: charge_gas
+DEBUG polkavm::interpreter    [49]: 1293: a2 = a0
+DEBUG polkavm::interpreter    [50]: 1295: a0 = u8 [a0]
+DEBUG polkavm::interpreter    [51]: 1297: jump 1442 if a0 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [52]: 1444: charge_gas
+DEBUG polkavm::interpreter    [53]: 1444: trap
+TRACE polkavm::interpreter::raw_handlers  [47]: jump ~52 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [48]: charge_gas: 3 (977 -> 974)
+TRACE polkavm::interpreter::raw_handlers  [49]: a2 = a0
+TRACE polkavm::interpreter    a2 = 0xfeff0000
+TRACE polkavm::interpreter::raw_handlers  [50]: a0 = u8 [a0]
+TRACE polkavm::interpreter    a0 = u8 [0xfeff0000] = 0xe0
+TRACE polkavm::interpreter::raw_handlers  [51]: jump 1442 if a0 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [54]: 1301: charge_gas
+DEBUG polkavm::interpreter    [55]: 1301: jump 1445 if a0 == 255
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [56]: 1442: charge_gas
+DEBUG polkavm::interpreter    [57]: 1442: ret
+TRACE polkavm::interpreter::raw_handlers  [51]: jump ~56 if a0 == 0
+TRACE polkavm::interpreter::raw_handlers  [54]: charge_gas: 1 (974 -> 973)
+TRACE polkavm::interpreter::raw_handlers  [55]: jump 1445 if a0 == 255
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [58]: 1307: charge_gas
+DEBUG polkavm::interpreter    [59]: 1307: a3 = sext.b a0
+DEBUG polkavm::interpreter    [60]: 1309: jump 1318 if a3 <s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [61]: 1445: charge_gas
+DEBUG polkavm::interpreter    [62]: 1445: trap
+TRACE polkavm::interpreter::raw_handlers  [55]: jump ~61 if a0 == 255
+TRACE polkavm::interpreter::raw_handlers  [58]: charge_gas: 2 (973 -> 971)
+TRACE polkavm::interpreter::raw_handlers  [59]: a3 = sext.b a0
+TRACE polkavm::interpreter    a3 = 0xffffffffffffffe0
+TRACE polkavm::interpreter::raw_handlers  [60]: jump 1318 if a3 <s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [63]: 1312: charge_gas
+DEBUG polkavm::interpreter    [64]: 1312: a3 = 0
+DEBUG polkavm::interpreter    [65]: 1314: a1 = 0
+DEBUG polkavm::interpreter    [66]: 1316: jump 1431
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [67]: 1318: charge_gas
+DEBUG polkavm::interpreter    [68]: 1318: jump 1331 if a0 >=u 192
+TRACE polkavm::interpreter::raw_handlers  [60]: jump ~67 if a3 <s 0
+TRACE polkavm::interpreter::raw_handlers  [67]: charge_gas: 1 (971 -> 970)
+TRACE polkavm::interpreter::raw_handlers  [68]: jump 1331 if a0 >=u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [69]: 1323: charge_gas
+DEBUG polkavm::interpreter    [70]: 1323: a3 = 0x1
+DEBUG polkavm::interpreter    [71]: 1326: a4 = 0xffffffffffffff80
+DEBUG polkavm::interpreter    [72]: 1329: jump 1403
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [73]: 1331: charge_gas
+DEBUG polkavm::interpreter    [74]: 1331: jump 1345 if a0 >=u 224
+TRACE polkavm::interpreter::raw_handlers  [68]: jump ~73 if a0 >=u 192
+TRACE polkavm::interpreter::raw_handlers  [73]: charge_gas: 1 (970 -> 969)
+TRACE polkavm::interpreter::raw_handlers  [74]: jump 1345 if a0 >=u 224
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [75]: 1336: charge_gas
+DEBUG polkavm::interpreter    [76]: 1336: a3 = 0x2
+DEBUG polkavm::interpreter    [77]: 1339: a4 = 0xffffffffffffff40
+DEBUG polkavm::interpreter    [78]: 1343: jump 1403
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [79]: 1345: charge_gas
+DEBUG polkavm::interpreter    [80]: 1345: jump 1359 if a0 >=u 240
+TRACE polkavm::interpreter::raw_handlers  [74]: jump ~79 if a0 >=u 224
+TRACE polkavm::interpreter::raw_handlers  [79]: charge_gas: 1 (969 -> 968)
+TRACE polkavm::interpreter::raw_handlers  [80]: jump 1359 if a0 >=u 240
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [81]: 1350: charge_gas
+DEBUG polkavm::interpreter    [82]: 1350: a3 = 0x3
+DEBUG polkavm::interpreter    [83]: 1353: a4 = 0xffffffffffffff20
+DEBUG polkavm::interpreter    [84]: 1357: jump 1403
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [85]: 1359: charge_gas
+DEBUG polkavm::interpreter    [86]: 1359: jump 1373 if a0 >=u 248
+TRACE polkavm::interpreter::raw_handlers  [80]: jump ~85 if a0 >=u 240
+TRACE polkavm::interpreter::raw_handlers  [81]: charge_gas: 3 (968 -> 965)
+TRACE polkavm::interpreter::raw_handlers  [82]: a3 = 0x3
+TRACE polkavm::interpreter    a3 = 0x3
+TRACE polkavm::interpreter::raw_handlers  [83]: a4 = 0xffffffffffffff20
+TRACE polkavm::interpreter    a4 = 0xffffffffffffff20
+TRACE polkavm::interpreter::raw_handlers  [84]: unresolved jump 1403
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [87]: 1403: charge_gas
+DEBUG polkavm::interpreter    [88]: 1403: jump 1446 if a3 >=u a1
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [87]: charge_gas: 1 (965 -> 964)
+TRACE polkavm::interpreter::raw_handlers  [88]: jump 1446 if a3 >=u a1
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [89]: 1406: charge_gas
+DEBUG polkavm::interpreter    [90]: 1406: a1 = 0
+DEBUG polkavm::interpreter    [91]: 1408: a0 = a0 + a4
+DEBUG polkavm::interpreter    [92]: 1411: a4 = a3
+DEBUG polkavm::interpreter    [93]: 1413: fallthrough
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [94]: 1446: charge_gas
+DEBUG polkavm::interpreter    [95]: 1446: trap
+TRACE polkavm::interpreter::raw_handlers  [88]: jump ~94 if a3 >=u a1
+TRACE polkavm::interpreter::raw_handlers  [89]: charge_gas: 4 (964 -> 960)
+TRACE polkavm::interpreter::raw_handlers  [90]: a1 = 0
+TRACE polkavm::interpreter    a1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [91]: a0 = a0 + a4
+TRACE polkavm::interpreter    a0 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [92]: a4 = a3
+TRACE polkavm::interpreter    a4 = 0x3
+TRACE polkavm::interpreter::raw_handlers  [93]: unresolved fallthrough 1414
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [96]: 1414: charge_gas
+DEBUG polkavm::interpreter    [97]: 1414: a5 = a2 + a4
+DEBUG polkavm::interpreter    [98]: 1417: a5 = u8 [a5]
+DEBUG polkavm::interpreter    [99]: 1419: a1 = a1 << 0x8
+DEBUG polkavm::interpreter    [100]: 1422: a4 = a4 + 0xffffffffffffffff
+DEBUG polkavm::interpreter    [101]: 1425: a1 = a1 | a5
+DEBUG polkavm::interpreter    [102]: 1428: jump 1414 if a4 != 0
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [96]: charge_gas: 6 (960 -> 954)
+TRACE polkavm::interpreter::raw_handlers  [97]: a5 = a2 + a4
+TRACE polkavm::interpreter    a5 = 0xfeff0003
+TRACE polkavm::interpreter::raw_handlers  [98]: a5 = u8 [a5]
+TRACE polkavm::interpreter    a5 = u8 [0xfeff0003] = 0x21
+TRACE polkavm::interpreter::raw_handlers  [99]: a1 = a1 << 0x8
+TRACE polkavm::interpreter    a1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [100]: a4 = a4 + 0xffffffffffffffff
+TRACE polkavm::interpreter    a4 = 0x2
+TRACE polkavm::interpreter::raw_handlers  [101]: a1 = a1 | a5
+TRACE polkavm::interpreter    a1 = 0x21
+TRACE polkavm::interpreter::raw_handlers  [102]: jump 1414 if a4 != 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [103]: 1431: charge_gas
+DEBUG polkavm::interpreter    [104]: 1431: i32 a2 = a3 << 0x3
+DEBUG polkavm::interpreter    [105]: 1434: a0 = a0 << a2
+DEBUG polkavm::interpreter    [106]: 1437: a0 = a0 + a1
+DEBUG polkavm::interpreter    [107]: 1440: ret
+TRACE polkavm::interpreter::raw_handlers  [102]: jump ~96 if a4 != 0
+TRACE polkavm::interpreter::raw_handlers  [96]: charge_gas: 6 (954 -> 948)
+TRACE polkavm::interpreter::raw_handlers  [97]: a5 = a2 + a4
+TRACE polkavm::interpreter    a5 = 0xfeff0002
+TRACE polkavm::interpreter::raw_handlers  [98]: a5 = u8 [a5]
+TRACE polkavm::interpreter    a5 = u8 [0xfeff0002] = 0x2c
+TRACE polkavm::interpreter::raw_handlers  [99]: a1 = a1 << 0x8
+TRACE polkavm::interpreter    a1 = 0x2100
+TRACE polkavm::interpreter::raw_handlers  [100]: a4 = a4 + 0xffffffffffffffff
+TRACE polkavm::interpreter    a4 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [101]: a1 = a1 | a5
+TRACE polkavm::interpreter    a1 = 0x212c
+TRACE polkavm::interpreter::raw_handlers  [102]: jump ~96 if a4 != 0
+TRACE polkavm::interpreter::raw_handlers  [96]: charge_gas: 6 (948 -> 942)
+TRACE polkavm::interpreter::raw_handlers  [97]: a5 = a2 + a4
+TRACE polkavm::interpreter    a5 = 0xfeff0001
+TRACE polkavm::interpreter::raw_handlers  [98]: a5 = u8 [a5]
+TRACE polkavm::interpreter    a5 = u8 [0xfeff0001] = 0x77
+TRACE polkavm::interpreter::raw_handlers  [99]: a1 = a1 << 0x8
+TRACE polkavm::interpreter    a1 = 0x212c00
+TRACE polkavm::interpreter::raw_handlers  [100]: a4 = a4 + 0xffffffffffffffff
+TRACE polkavm::interpreter    a4 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [101]: a1 = a1 | a5
+TRACE polkavm::interpreter    a1 = 0x212c77
+TRACE polkavm::interpreter::raw_handlers  [102]: jump ~96 if a4 != 0
+TRACE polkavm::interpreter::raw_handlers  [103]: charge_gas: 4 (942 -> 938)
+TRACE polkavm::interpreter::raw_handlers  [104]: i32 a2 = a3 << 0x3
+TRACE polkavm::interpreter    a2 = 0x18
+TRACE polkavm::interpreter::raw_handlers  [105]: a0 = a0 << a2
+TRACE polkavm::interpreter    a0 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [106]: a0 = a0 + a1
+TRACE polkavm::interpreter    a0 = 0x212c77
+TRACE polkavm::interpreter::raw_handlers  [107]: ret
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [108]: 366: charge_gas
+DEBUG polkavm::interpreter    [109]: 366: jump 653 if s1 == s0
+TRACE polkavm::interpreter  Indirect jump to dynamic address 6: 108
+TRACE polkavm::interpreter::raw_handlers  [108]: charge_gas: 1 (938 -> 937)
+TRACE polkavm::interpreter::raw_handlers  [109]: jump 653 if s1 == s0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [110]: 370: charge_gas
+DEBUG polkavm::interpreter    [111]: 370: a0 = u64 [sp]
+DEBUG polkavm::interpreter    [112]: 372: a0 = a0 + s0
+DEBUG polkavm::interpreter    [113]: 375: a1 = i8 [a0]
+DEBUG polkavm::interpreter    [114]: 377: s1 = s1 - s0
+DEBUG polkavm::interpreter    [115]: 380: s0 = 0x1
+DEBUG polkavm::interpreter    [116]: 383: jump 438 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [117]: 653: charge_gas
+DEBUG polkavm::interpreter    [118]: 653: a1 = 0
+DEBUG polkavm::interpreter    [119]: 655: a2 = 0x10000
+DEBUG polkavm::interpreter    [120]: 660: fallthrough
+TRACE polkavm::interpreter::raw_handlers  [109]: jump ~117 if s1 == s0
+TRACE polkavm::interpreter::raw_handlers  [110]: charge_gas: 6 (937 -> 931)
+TRACE polkavm::interpreter::raw_handlers  [111]: a0 = u64 [sp]
+TRACE polkavm::interpreter    a0 = u64 [0xfefdff50] = 0xfeff0000
+TRACE polkavm::interpreter::raw_handlers  [112]: a0 = a0 + s0
+TRACE polkavm::interpreter    a0 = 0xfeff0004
+TRACE polkavm::interpreter::raw_handlers  [113]: a1 = i8 [a0]
+TRACE polkavm::interpreter    a1 = i8 [0xfeff0004] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [114]: s1 = s1 - s0
+TRACE polkavm::interpreter    s1 = 0xab
+TRACE polkavm::interpreter::raw_handlers  [115]: s0 = 0x1
+TRACE polkavm::interpreter    s0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [116]: jump 438 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [121]: 386: charge_gas
+DEBUG polkavm::interpreter    [122]: 386: a2 = a1 & 0xff
+DEBUG polkavm::interpreter    [123]: 390: s0 = 0x2
+DEBUG polkavm::interpreter    [124]: 393: jump 438 if a2 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [125]: 438: charge_gas
+DEBUG polkavm::interpreter    [126]: 438: jump 653 if s1 <u s0
+TRACE polkavm::interpreter::raw_handlers  [116]: jump ~125 if a1 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [125]: charge_gas: 1 (931 -> 930)
+TRACE polkavm::interpreter::raw_handlers  [126]: jump 653 if s1 <u s0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [127]: 442: charge_gas
+DEBUG polkavm::interpreter    [128]: 442: a1 = s0
+DEBUG polkavm::interpreter    [129]: 444: u64 [sp] = a0
+DEBUG polkavm::interpreter    [130]: 446: ra = 8, jump 1289
+TRACE polkavm::interpreter::raw_handlers  [126]: jump ~117 if s1 <u s0
+TRACE polkavm::interpreter::raw_handlers  [127]: charge_gas: 3 (930 -> 927)
+TRACE polkavm::interpreter::raw_handlers  [128]: a1 = s0
+TRACE polkavm::interpreter    a1 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [129]: u64 [sp] = a0
+TRACE polkavm::interpreter    u64 [0xfefdff50] = a0 = 0xfeff0004
+TRACE polkavm::interpreter::raw_handlers  [130]: ra = 0x8
+TRACE polkavm::interpreter    ra = 0x8
+TRACE polkavm::interpreter::raw_handlers  [131]: unresolved jump 1289
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [46]: charge_gas: 1 (927 -> 926)
+TRACE polkavm::interpreter::raw_handlers  [47]: jump ~52 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [48]: charge_gas: 3 (926 -> 923)
+TRACE polkavm::interpreter::raw_handlers  [49]: a2 = a0
+TRACE polkavm::interpreter    a2 = 0xfeff0004
+TRACE polkavm::interpreter::raw_handlers  [50]: a0 = u8 [a0]
+TRACE polkavm::interpreter    a0 = u8 [0xfeff0004] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [51]: jump ~56 if a0 == 0
+TRACE polkavm::interpreter::raw_handlers  [56]: charge_gas: 1 (923 -> 922)
+TRACE polkavm::interpreter::raw_handlers  [57]: ret
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [132]: 451: charge_gas
+DEBUG polkavm::interpreter    [133]: 451: a0 = u64 [sp]
+DEBUG polkavm::interpreter    [134]: 453: a0 = a0 + s0
+DEBUG polkavm::interpreter    [135]: 456: a3 = s1 - s0
+DEBUG polkavm::interpreter    [136]: 459: jump 466 if s1 != s0
+TRACE polkavm::interpreter  Indirect jump to dynamic address 8: 132
+TRACE polkavm::interpreter::raw_handlers  [132]: charge_gas: 4 (922 -> 918)
+TRACE polkavm::interpreter::raw_handlers  [133]: a0 = u64 [sp]
+TRACE polkavm::interpreter    a0 = u64 [0xfefdff50] = 0xfeff0004
+TRACE polkavm::interpreter::raw_handlers  [134]: a0 = a0 + s0
+TRACE polkavm::interpreter    a0 = 0xfeff0005
+TRACE polkavm::interpreter::raw_handlers  [135]: a3 = s1 - s0
+TRACE polkavm::interpreter    a3 = 0xaa
+TRACE polkavm::interpreter::raw_handlers  [136]: jump 466 if s1 != s0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [137]: 462: charge_gas
+DEBUG polkavm::interpreter    [138]: 462: s0 = 0
+DEBUG polkavm::interpreter    [139]: 464: jump 529
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [140]: 466: charge_gas
+DEBUG polkavm::interpreter    [141]: 466: a1 = i8 [a0]
+DEBUG polkavm::interpreter    [142]: 468: s0 = 0x1
+DEBUG polkavm::interpreter    [143]: 471: jump 526 if a1 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [136]: jump ~140 if s1 != s0
+TRACE polkavm::interpreter::raw_handlers  [140]: charge_gas: 3 (918 -> 915)
+TRACE polkavm::interpreter::raw_handlers  [141]: a1 = i8 [a0]
+TRACE polkavm::interpreter    a1 = i8 [0xfeff0005] = 0x1
+TRACE polkavm::interpreter::raw_handlers  [142]: s0 = 0x1
+TRACE polkavm::interpreter    s0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [143]: jump 526 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [144]: 474: charge_gas
+DEBUG polkavm::interpreter    [145]: 474: a2 = a1 & 0xff
+DEBUG polkavm::interpreter    [146]: 478: s0 = 0x2
+DEBUG polkavm::interpreter    [147]: 481: jump 526 if a2 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [148]: 526: charge_gas
+DEBUG polkavm::interpreter    [149]: 526: jump 653 if a3 <u s0
+TRACE polkavm::interpreter::raw_handlers  [143]: jump ~148 if a1 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [148]: charge_gas: 1 (915 -> 914)
+TRACE polkavm::interpreter::raw_handlers  [149]: jump 653 if a3 <u s0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [150]: 529: charge_gas
+DEBUG polkavm::interpreter    [151]: 529: s1 = a3
+DEBUG polkavm::interpreter    [152]: 531: u64 [sp] = a0
+DEBUG polkavm::interpreter    [153]: 533: a1 = s0
+DEBUG polkavm::interpreter    [154]: 535: ra = 10, jump 1289
+TRACE polkavm::interpreter::raw_handlers  [149]: jump ~117 if a3 <u s0
+TRACE polkavm::interpreter::raw_handlers  [150]: charge_gas: 4 (914 -> 910)
+TRACE polkavm::interpreter::raw_handlers  [151]: s1 = a3
+TRACE polkavm::interpreter    s1 = 0xaa
+TRACE polkavm::interpreter::raw_handlers  [152]: u64 [sp] = a0
+TRACE polkavm::interpreter    u64 [0xfefdff50] = a0 = 0xfeff0005
+TRACE polkavm::interpreter::raw_handlers  [153]: a1 = s0
+TRACE polkavm::interpreter    a1 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [154]: ra = 0xa
+TRACE polkavm::interpreter    ra = 0xa
+TRACE polkavm::interpreter::raw_handlers  [155]: unresolved jump 1289
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [46]: charge_gas: 1 (910 -> 909)
+TRACE polkavm::interpreter::raw_handlers  [47]: jump ~52 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [48]: charge_gas: 3 (909 -> 906)
+TRACE polkavm::interpreter::raw_handlers  [49]: a2 = a0
+TRACE polkavm::interpreter    a2 = 0xfeff0005
+TRACE polkavm::interpreter::raw_handlers  [50]: a0 = u8 [a0]
+TRACE polkavm::interpreter    a0 = u8 [0xfeff0005] = 0x1
+TRACE polkavm::interpreter::raw_handlers  [51]: jump ~56 if a0 == 0
+TRACE polkavm::interpreter::raw_handlers  [54]: charge_gas: 1 (906 -> 905)
+TRACE polkavm::interpreter::raw_handlers  [55]: jump ~61 if a0 == 255
+TRACE polkavm::interpreter::raw_handlers  [58]: charge_gas: 2 (905 -> 903)
+TRACE polkavm::interpreter::raw_handlers  [59]: a3 = sext.b a0
+TRACE polkavm::interpreter    a3 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [60]: jump ~67 if a3 <s 0
+TRACE polkavm::interpreter::raw_handlers  [63]: charge_gas: 3 (903 -> 900)
+TRACE polkavm::interpreter::raw_handlers  [64]: a3 = 0
+TRACE polkavm::interpreter    a3 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [65]: a1 = 0
+TRACE polkavm::interpreter    a1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [66]: unresolved jump 1431
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [103]: charge_gas: 4 (900 -> 896)
+TRACE polkavm::interpreter::raw_handlers  [104]: i32 a2 = a3 << 0x3
+TRACE polkavm::interpreter    a2 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [105]: a0 = a0 << a2
+TRACE polkavm::interpreter    a0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [106]: a0 = a0 + a1
+TRACE polkavm::interpreter    a0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [107]: ret
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [156]: 540: charge_gas
+DEBUG polkavm::interpreter    [157]: 540: jump 653 if a0 == 0
+TRACE polkavm::interpreter  Indirect jump to dynamic address 10: 156
+TRACE polkavm::interpreter::raw_handlers  [156]: charge_gas: 1 (896 -> 895)
+TRACE polkavm::interpreter::raw_handlers  [157]: jump 653 if a0 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [158]: 543: charge_gas
+DEBUG polkavm::interpreter    [159]: 543: a0 = maxu(s1, s0)
+DEBUG polkavm::interpreter    [160]: 546: a0 = a0 - s0
+DEBUG polkavm::interpreter    [161]: 549: a2 = 0x10000
+DEBUG polkavm::interpreter    [162]: 554: jump 352 if a0 <u 96
+TRACE polkavm::interpreter::raw_handlers  [157]: jump ~117 if a0 == 0
+TRACE polkavm::interpreter::raw_handlers  [158]: charge_gas: 4 (895 -> 891)
+TRACE polkavm::interpreter::raw_handlers  [159]: a0 = maxu(s1, s0)
+TRACE polkavm::interpreter    a0 = 0xaa
+TRACE polkavm::interpreter::raw_handlers  [160]: a0 = a0 - s0
+TRACE polkavm::interpreter    a0 = 0xa9
+TRACE polkavm::interpreter::raw_handlers  [161]: a2 = 0x10000
+TRACE polkavm::interpreter    a2 = 0x10000
+TRACE polkavm::interpreter::raw_handlers  [162]: jump 352 if a0 <u 96
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [163]: 559: charge_gas
+DEBUG polkavm::interpreter    [164]: 559: a1 = u64 [sp]
+DEBUG polkavm::interpreter    [165]: 561: s0 = s0 + a1
+DEBUG polkavm::interpreter    [166]: 564: s1 = a0 + 0xffffffffffffffa0
+DEBUG polkavm::interpreter    [167]: 567: a0 = s0 + 0x60
+DEBUG polkavm::interpreter    [168]: 570: u64 [sp] = a0
+DEBUG polkavm::interpreter    [169]: 572: jump 681 if s1 == 0
+TRACE polkavm::interpreter::raw_handlers  [162]: jump ~38 if a0 <u 96
+TRACE polkavm::interpreter::raw_handlers  [163]: charge_gas: 6 (891 -> 885)
+TRACE polkavm::interpreter::raw_handlers  [164]: a1 = u64 [sp]
+TRACE polkavm::interpreter    a1 = u64 [0xfefdff50] = 0xfeff0005
+TRACE polkavm::interpreter::raw_handlers  [165]: s0 = s0 + a1
+TRACE polkavm::interpreter    s0 = 0xfeff0006
+TRACE polkavm::interpreter::raw_handlers  [166]: s1 = a0 + 0xffffffffffffffa0
+TRACE polkavm::interpreter    s1 = 0x49
+TRACE polkavm::interpreter::raw_handlers  [167]: a0 = s0 + 0x60
+TRACE polkavm::interpreter    a0 = 0xfeff0066
+TRACE polkavm::interpreter::raw_handlers  [168]: u64 [sp] = a0
+TRACE polkavm::interpreter    u64 [0xfefdff50] = a0 = 0xfeff0066
+TRACE polkavm::interpreter::raw_handlers  [169]: jump 681 if s1 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [170]: 575: charge_gas
+DEBUG polkavm::interpreter    [171]: 575: a1 = i8 [a0]
+DEBUG polkavm::interpreter    [172]: 577: s0 = 0x1
+DEBUG polkavm::interpreter    [173]: 580: jump 635 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [174]: 681: charge_gas
+DEBUG polkavm::interpreter    [175]: 681: s0 = 0
+DEBUG polkavm::interpreter    [176]: 683: a0 = 0
+DEBUG polkavm::interpreter    [177]: 685: fallthrough
+TRACE polkavm::interpreter::raw_handlers  [169]: jump ~174 if s1 == 0
+TRACE polkavm::interpreter::raw_handlers  [170]: charge_gas: 3 (885 -> 882)
+TRACE polkavm::interpreter::raw_handlers  [171]: a1 = i8 [a0]
+TRACE polkavm::interpreter    a1 = i8 [0xfeff0066] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [172]: s0 = 0x1
+TRACE polkavm::interpreter    s0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [173]: jump 635 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [178]: 583: charge_gas
+DEBUG polkavm::interpreter    [179]: 583: a2 = a1 & 0xff
+DEBUG polkavm::interpreter    [180]: 587: s0 = 0x2
+DEBUG polkavm::interpreter    [181]: 590: jump 635 if a2 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [182]: 635: charge_gas
+DEBUG polkavm::interpreter    [183]: 635: jump 1195 if s1 <u s0
+TRACE polkavm::interpreter::raw_handlers  [173]: jump ~182 if a1 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [182]: charge_gas: 1 (882 -> 881)
+TRACE polkavm::interpreter::raw_handlers  [183]: jump 1195 if s1 <u s0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [184]: 639: charge_gas
+DEBUG polkavm::interpreter    [185]: 639: a1 = s0
+DEBUG polkavm::interpreter    [186]: 641: ra = 12, jump 1289
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [188]: 1195: charge_gas
+DEBUG polkavm::interpreter    [189]: 1195: trap
+TRACE polkavm::interpreter::raw_handlers  [183]: jump ~188 if s1 <u s0
+TRACE polkavm::interpreter::raw_handlers  [184]: charge_gas: 2 (881 -> 879)
+TRACE polkavm::interpreter::raw_handlers  [185]: a1 = s0
+TRACE polkavm::interpreter    a1 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [186]: ra = 0xc
+TRACE polkavm::interpreter    ra = 0xc
+TRACE polkavm::interpreter::raw_handlers  [187]: unresolved jump 1289
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [46]: charge_gas: 1 (879 -> 878)
+TRACE polkavm::interpreter::raw_handlers  [47]: jump ~52 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [48]: charge_gas: 3 (878 -> 875)
+TRACE polkavm::interpreter::raw_handlers  [49]: a2 = a0
+TRACE polkavm::interpreter    a2 = 0xfeff0066
+TRACE polkavm::interpreter::raw_handlers  [50]: a0 = u8 [a0]
+TRACE polkavm::interpreter    a0 = u8 [0xfeff0066] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [51]: jump ~56 if a0 == 0
+TRACE polkavm::interpreter::raw_handlers  [56]: charge_gas: 1 (875 -> 874)
+TRACE polkavm::interpreter::raw_handlers  [57]: ret
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [190]: 646: charge_gas
+DEBUG polkavm::interpreter    [191]: 646: a2 = 0x10000
+DEBUG polkavm::interpreter    [192]: 651: jump 686
+TRACE polkavm::interpreter  Indirect jump to dynamic address 12: 190
+TRACE polkavm::interpreter::raw_handlers  [190]: charge_gas: 2 (874 -> 872)
+TRACE polkavm::interpreter::raw_handlers  [191]: a2 = 0x10000
+TRACE polkavm::interpreter    a2 = 0x10000
+TRACE polkavm::interpreter::raw_handlers  [192]: unresolved jump 686
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [193]: 686: charge_gas
+DEBUG polkavm::interpreter    [194]: 686: a1 = maxu(s1, s0)
+DEBUG polkavm::interpreter    [195]: 689: a1 = a1 - s0
+DEBUG polkavm::interpreter    [196]: 692: s1 = maxu(a1, a0)
+DEBUG polkavm::interpreter    [197]: 695: s1 = s1 - a0
+DEBUG polkavm::interpreter    [198]: 698: jump 352 if s1 <u 32
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [193]: charge_gas: 5 (872 -> 867)
+TRACE polkavm::interpreter::raw_handlers  [194]: a1 = maxu(s1, s0)
+TRACE polkavm::interpreter    a1 = 0x49
+TRACE polkavm::interpreter::raw_handlers  [195]: a1 = a1 - s0
+TRACE polkavm::interpreter    a1 = 0x48
+TRACE polkavm::interpreter::raw_handlers  [196]: s1 = maxu(a1, a0)
+TRACE polkavm::interpreter    s1 = 0x48
+TRACE polkavm::interpreter::raw_handlers  [197]: s1 = s1 - a0
+TRACE polkavm::interpreter    s1 = 0x48
+TRACE polkavm::interpreter::raw_handlers  [198]: jump 352 if s1 <u 32
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [199]: 703: charge_gas
+DEBUG polkavm::interpreter    [200]: 703: a1 = u64 [sp]
+DEBUG polkavm::interpreter    [201]: 705: s0 = s0 + a1
+DEBUG polkavm::interpreter    [202]: 708: a0 = a0 + s0
+DEBUG polkavm::interpreter    [203]: 711: s1 = s1 + 0xffffffffffffffe0
+DEBUG polkavm::interpreter    [204]: 714: a0 = a0 + 0x20
+DEBUG polkavm::interpreter    [205]: 717: u64 [sp] = a0
+DEBUG polkavm::interpreter    [206]: 719: jump 800 if s1 == 0
+TRACE polkavm::interpreter::raw_handlers  [198]: jump ~38 if s1 <u 32
+TRACE polkavm::interpreter::raw_handlers  [199]: charge_gas: 7 (867 -> 860)
+TRACE polkavm::interpreter::raw_handlers  [200]: a1 = u64 [sp]
+TRACE polkavm::interpreter    a1 = u64 [0xfefdff50] = 0xfeff0066
+TRACE polkavm::interpreter::raw_handlers  [201]: s0 = s0 + a1
+TRACE polkavm::interpreter    s0 = 0xfeff0067
+TRACE polkavm::interpreter::raw_handlers  [202]: a0 = a0 + s0
+TRACE polkavm::interpreter    a0 = 0xfeff0067
+TRACE polkavm::interpreter::raw_handlers  [203]: s1 = s1 + 0xffffffffffffffe0
+TRACE polkavm::interpreter    s1 = 0x28
+TRACE polkavm::interpreter::raw_handlers  [204]: a0 = a0 + 0x20
+TRACE polkavm::interpreter    a0 = 0xfeff0087
+TRACE polkavm::interpreter::raw_handlers  [205]: u64 [sp] = a0
+TRACE polkavm::interpreter    u64 [0xfefdff50] = a0 = 0xfeff0087
+TRACE polkavm::interpreter::raw_handlers  [206]: jump 800 if s1 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [207]: 722: charge_gas
+DEBUG polkavm::interpreter    [208]: 722: a1 = i8 [a0]
+DEBUG polkavm::interpreter    [209]: 724: s0 = 0x1
+DEBUG polkavm::interpreter    [210]: 727: jump 782 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [211]: 800: charge_gas
+DEBUG polkavm::interpreter    [212]: 800: s0 = 0
+DEBUG polkavm::interpreter    [213]: 802: fallthrough
+TRACE polkavm::interpreter::raw_handlers  [206]: jump ~211 if s1 == 0
+TRACE polkavm::interpreter::raw_handlers  [207]: charge_gas: 3 (860 -> 857)
+TRACE polkavm::interpreter::raw_handlers  [208]: a1 = i8 [a0]
+TRACE polkavm::interpreter    a1 = i8 [0xfeff0087] = 0xffffffffffffff83
+TRACE polkavm::interpreter::raw_handlers  [209]: s0 = 0x1
+TRACE polkavm::interpreter    s0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [210]: jump 782 if a1 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [214]: 730: charge_gas
+DEBUG polkavm::interpreter    [215]: 730: a2 = a1 & 0xff
+DEBUG polkavm::interpreter    [216]: 734: s0 = 0x2
+DEBUG polkavm::interpreter    [217]: 737: jump 782 if a2 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [218]: 782: charge_gas
+DEBUG polkavm::interpreter    [219]: 782: jump 1195 if s1 <u s0
+TRACE polkavm::interpreter::raw_handlers  [210]: jump ~218 if a1 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [214]: charge_gas: 3 (857 -> 854)
+TRACE polkavm::interpreter::raw_handlers  [215]: a2 = a1 & 0xff
+TRACE polkavm::interpreter    a2 = 0x83
+TRACE polkavm::interpreter::raw_handlers  [216]: s0 = 0x2
+TRACE polkavm::interpreter    s0 = 0x2
+TRACE polkavm::interpreter::raw_handlers  [217]: jump 782 if a2 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [220]: 742: charge_gas
+DEBUG polkavm::interpreter    [221]: 742: s0 = 0x3
+DEBUG polkavm::interpreter    [222]: 745: jump 782 if a2 <u 224
+TRACE polkavm::interpreter::raw_handlers  [217]: jump ~218 if a2 <u 192
+TRACE polkavm::interpreter::raw_handlers  [218]: charge_gas: 1 (854 -> 853)
+TRACE polkavm::interpreter::raw_handlers  [219]: jump 1195 if s1 <u s0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [223]: 786: charge_gas
+DEBUG polkavm::interpreter    [224]: 786: a1 = s0
+DEBUG polkavm::interpreter    [225]: 788: ra = 14, jump 1289
+TRACE polkavm::interpreter::raw_handlers  [219]: jump ~188 if s1 <u s0
+TRACE polkavm::interpreter::raw_handlers  [223]: charge_gas: 2 (853 -> 851)
+TRACE polkavm::interpreter::raw_handlers  [224]: a1 = s0
+TRACE polkavm::interpreter    a1 = 0x2
+TRACE polkavm::interpreter::raw_handlers  [225]: ra = 0xe
+TRACE polkavm::interpreter    ra = 0xe
+TRACE polkavm::interpreter::raw_handlers  [226]: unresolved jump 1289
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [46]: charge_gas: 1 (851 -> 850)
+TRACE polkavm::interpreter::raw_handlers  [47]: jump ~52 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [48]: charge_gas: 3 (850 -> 847)
+TRACE polkavm::interpreter::raw_handlers  [49]: a2 = a0
+TRACE polkavm::interpreter    a2 = 0xfeff0087
+TRACE polkavm::interpreter::raw_handlers  [50]: a0 = u8 [a0]
+TRACE polkavm::interpreter    a0 = u8 [0xfeff0087] = 0x83
+TRACE polkavm::interpreter::raw_handlers  [51]: jump ~56 if a0 == 0
+TRACE polkavm::interpreter::raw_handlers  [54]: charge_gas: 1 (847 -> 846)
+TRACE polkavm::interpreter::raw_handlers  [55]: jump ~61 if a0 == 255
+TRACE polkavm::interpreter::raw_handlers  [58]: charge_gas: 2 (846 -> 844)
+TRACE polkavm::interpreter::raw_handlers  [59]: a3 = sext.b a0
+TRACE polkavm::interpreter    a3 = 0xffffffffffffff83
+TRACE polkavm::interpreter::raw_handlers  [60]: jump ~67 if a3 <s 0
+TRACE polkavm::interpreter::raw_handlers  [67]: charge_gas: 1 (844 -> 843)
+TRACE polkavm::interpreter::raw_handlers  [68]: jump ~73 if a0 >=u 192
+TRACE polkavm::interpreter::raw_handlers  [69]: charge_gas: 3 (843 -> 840)
+TRACE polkavm::interpreter::raw_handlers  [70]: a3 = 0x1
+TRACE polkavm::interpreter    a3 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [71]: a4 = 0xffffffffffffff80
+TRACE polkavm::interpreter    a4 = 0xffffffffffffff80
+TRACE polkavm::interpreter::raw_handlers  [72]: unresolved jump 1403
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [87]: charge_gas: 1 (840 -> 839)
+TRACE polkavm::interpreter::raw_handlers  [88]: jump ~94 if a3 >=u a1
+TRACE polkavm::interpreter::raw_handlers  [89]: charge_gas: 4 (839 -> 835)
+TRACE polkavm::interpreter::raw_handlers  [90]: a1 = 0
+TRACE polkavm::interpreter    a1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [91]: a0 = a0 + a4
+TRACE polkavm::interpreter    a0 = 0x3
+TRACE polkavm::interpreter::raw_handlers  [92]: a4 = a3
+TRACE polkavm::interpreter    a4 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [93]: jump ~96
+TRACE polkavm::interpreter::raw_handlers  [96]: charge_gas: 6 (835 -> 829)
+TRACE polkavm::interpreter::raw_handlers  [97]: a5 = a2 + a4
+TRACE polkavm::interpreter    a5 = 0xfeff0088
+TRACE polkavm::interpreter::raw_handlers  [98]: a5 = u8 [a5]
+TRACE polkavm::interpreter    a5 = u8 [0xfeff0088] = 0xe8
+TRACE polkavm::interpreter::raw_handlers  [99]: a1 = a1 << 0x8
+TRACE polkavm::interpreter    a1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [100]: a4 = a4 + 0xffffffffffffffff
+TRACE polkavm::interpreter    a4 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [101]: a1 = a1 | a5
+TRACE polkavm::interpreter    a1 = 0xe8
+TRACE polkavm::interpreter::raw_handlers  [102]: jump ~96 if a4 != 0
+TRACE polkavm::interpreter::raw_handlers  [103]: charge_gas: 4 (829 -> 825)
+TRACE polkavm::interpreter::raw_handlers  [104]: i32 a2 = a3 << 0x3
+TRACE polkavm::interpreter    a2 = 0x8
+TRACE polkavm::interpreter::raw_handlers  [105]: a0 = a0 << a2
+TRACE polkavm::interpreter    a0 = 0x300
+TRACE polkavm::interpreter::raw_handlers  [106]: a0 = a0 + a1
+TRACE polkavm::interpreter    a0 = 0x3e8
+TRACE polkavm::interpreter::raw_handlers  [107]: ret
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [227]: 793: charge_gas
+DEBUG polkavm::interpreter    [228]: 793: a2 = 0x10000
+DEBUG polkavm::interpreter    [229]: 798: jump 803
+TRACE polkavm::interpreter  Indirect jump to dynamic address 14: 227
+TRACE polkavm::interpreter::raw_handlers  [227]: charge_gas: 2 (825 -> 823)
+TRACE polkavm::interpreter::raw_handlers  [228]: a2 = 0x10000
+TRACE polkavm::interpreter    a2 = 0x10000
+TRACE polkavm::interpreter::raw_handlers  [229]: unresolved jump 803
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [230]: 803: charge_gas
+DEBUG polkavm::interpreter    [231]: 803: jump 352 if s0 >=u s1
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [230]: charge_gas: 1 (823 -> 822)
+TRACE polkavm::interpreter::raw_handlers  [231]: jump 352 if s0 >=u s1
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [232]: 807: charge_gas
+DEBUG polkavm::interpreter    [233]: 807: a0 = u64 [sp]
+DEBUG polkavm::interpreter    [234]: 809: a0 = a0 + s0
+DEBUG polkavm::interpreter    [235]: 812: a1 = u8 [a0]
+DEBUG polkavm::interpreter    [236]: 814: jump 823 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [231]: jump ~38 if s0 >=u s1
+TRACE polkavm::interpreter::raw_handlers  [232]: charge_gas: 4 (822 -> 818)
+TRACE polkavm::interpreter::raw_handlers  [233]: a0 = u64 [sp]
+TRACE polkavm::interpreter    a0 = u64 [0xfefdff50] = 0xfeff0087
+TRACE polkavm::interpreter::raw_handlers  [234]: a0 = a0 + s0
+TRACE polkavm::interpreter    a0 = 0xfeff0089
+TRACE polkavm::interpreter::raw_handlers  [235]: a1 = u8 [a0]
+TRACE polkavm::interpreter    a1 = u8 [0xfeff0089] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [236]: jump 823 if a1 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [237]: 817: charge_gas
+DEBUG polkavm::interpreter    [238]: 817: a1 = 0
+DEBUG polkavm::interpreter    [239]: 819: a0 = 0
+DEBUG polkavm::interpreter    [240]: 821: jump 946
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [241]: 823: charge_gas
+DEBUG polkavm::interpreter    [242]: 823: a1 = maxu(s1, s0)
+DEBUG polkavm::interpreter    [243]: 826: a1 = a1 - s0
+DEBUG polkavm::interpreter    [244]: 829: s0 = a0 + 0x1
+DEBUG polkavm::interpreter    [245]: 832: a0 = 0x1
+DEBUG polkavm::interpreter    [246]: 835: a0 = maxu(a1, a0)
+DEBUG polkavm::interpreter    [247]: 838: a2 = 0x2
+DEBUG polkavm::interpreter    [248]: 841: a3 = a0 + 0xffffffffffffffff
+DEBUG polkavm::interpreter    [249]: 844: jump 853 if a1 >=u a2
+TRACE polkavm::interpreter::raw_handlers  [236]: jump ~241 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [241]: charge_gas: 8 (818 -> 810)
+TRACE polkavm::interpreter::raw_handlers  [242]: a1 = maxu(s1, s0)
+TRACE polkavm::interpreter    a1 = 0x28
+TRACE polkavm::interpreter::raw_handlers  [243]: a1 = a1 - s0
+TRACE polkavm::interpreter    a1 = 0x26
+TRACE polkavm::interpreter::raw_handlers  [244]: s0 = a0 + 0x1
+TRACE polkavm::interpreter    s0 = 0xfeff008a
+TRACE polkavm::interpreter::raw_handlers  [245]: a0 = 0x1
+TRACE polkavm::interpreter    a0 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [246]: a0 = maxu(a1, a0)
+TRACE polkavm::interpreter    a0 = 0x26
+TRACE polkavm::interpreter::raw_handlers  [247]: a2 = 0x2
+TRACE polkavm::interpreter    a2 = 0x2
+TRACE polkavm::interpreter::raw_handlers  [248]: a3 = a0 + 0xffffffffffffffff
+TRACE polkavm::interpreter    a3 = 0x25
+TRACE polkavm::interpreter::raw_handlers  [249]: jump 853 if a1 >=u a2
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [250]: 847: charge_gas
+DEBUG polkavm::interpreter    [251]: 847: s1 = 0
+DEBUG polkavm::interpreter    [252]: 849: a1 = 0
+DEBUG polkavm::interpreter    [253]: 851: jump 933
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [254]: 853: charge_gas
+DEBUG polkavm::interpreter    [255]: 853: a0 = i8 [s0]
+DEBUG polkavm::interpreter    [256]: 855: s1 = 0x1
+DEBUG polkavm::interpreter    [257]: 858: jump 913 if a0 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [249]: jump ~254 if a1 >=u a2
+TRACE polkavm::interpreter::raw_handlers  [254]: charge_gas: 3 (810 -> 807)
+TRACE polkavm::interpreter::raw_handlers  [255]: a0 = i8 [s0]
+TRACE polkavm::interpreter    a0 = i8 [0xfeff008a] = 0x24
+TRACE polkavm::interpreter::raw_handlers  [256]: s1 = 0x1
+TRACE polkavm::interpreter    s1 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [257]: jump 913 if a0 >=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [258]: 861: charge_gas
+DEBUG polkavm::interpreter    [259]: 861: a0 = a0 & 0xff
+DEBUG polkavm::interpreter    [260]: 865: s1 = 0x2
+DEBUG polkavm::interpreter    [261]: 868: jump 913 if a0 <u 192
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [262]: 913: charge_gas
+DEBUG polkavm::interpreter    [263]: 913: u64 [sp] = a3
+DEBUG polkavm::interpreter    [264]: 915: jump 1196 if a3 <u s1
+TRACE polkavm::interpreter::raw_handlers  [257]: jump ~262 if a0 >=s 0
+TRACE polkavm::interpreter::raw_handlers  [262]: charge_gas: 2 (807 -> 805)
+TRACE polkavm::interpreter::raw_handlers  [263]: u64 [sp] = a3
+TRACE polkavm::interpreter    u64 [0xfefdff50] = a3 = 0x25
+TRACE polkavm::interpreter::raw_handlers  [264]: jump 1196 if a3 <u s1
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [265]: 919: charge_gas
+DEBUG polkavm::interpreter    [266]: 919: a0 = s0
+DEBUG polkavm::interpreter    [267]: 921: a1 = s1
+DEBUG polkavm::interpreter    [268]: 923: ra = 16, jump 1289
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [270]: 1196: charge_gas
+DEBUG polkavm::interpreter    [271]: 1196: trap
+TRACE polkavm::interpreter::raw_handlers  [264]: jump ~270 if a3 <u s1
+TRACE polkavm::interpreter::raw_handlers  [265]: charge_gas: 3 (805 -> 802)
+TRACE polkavm::interpreter::raw_handlers  [266]: a0 = s0
+TRACE polkavm::interpreter    a0 = 0xfeff008a
+TRACE polkavm::interpreter::raw_handlers  [267]: a1 = s1
+TRACE polkavm::interpreter    a1 = 0x1
+TRACE polkavm::interpreter::raw_handlers  [268]: ra = 0x10
+TRACE polkavm::interpreter    ra = 0x10
+TRACE polkavm::interpreter::raw_handlers  [269]: unresolved jump 1289
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [46]: charge_gas: 1 (802 -> 801)
+TRACE polkavm::interpreter::raw_handlers  [47]: jump ~52 if a1 == 0
+TRACE polkavm::interpreter::raw_handlers  [48]: charge_gas: 3 (801 -> 798)
+TRACE polkavm::interpreter::raw_handlers  [49]: a2 = a0
+TRACE polkavm::interpreter    a2 = 0xfeff008a
+TRACE polkavm::interpreter::raw_handlers  [50]: a0 = u8 [a0]
+TRACE polkavm::interpreter    a0 = u8 [0xfeff008a] = 0x24
+TRACE polkavm::interpreter::raw_handlers  [51]: jump ~56 if a0 == 0
+TRACE polkavm::interpreter::raw_handlers  [54]: charge_gas: 1 (798 -> 797)
+TRACE polkavm::interpreter::raw_handlers  [55]: jump ~61 if a0 == 255
+TRACE polkavm::interpreter::raw_handlers  [58]: charge_gas: 2 (797 -> 795)
+TRACE polkavm::interpreter::raw_handlers  [59]: a3 = sext.b a0
+TRACE polkavm::interpreter    a3 = 0x24
+TRACE polkavm::interpreter::raw_handlers  [60]: jump ~67 if a3 <s 0
+TRACE polkavm::interpreter::raw_handlers  [63]: charge_gas: 3 (795 -> 792)
+TRACE polkavm::interpreter::raw_handlers  [64]: a3 = 0
+TRACE polkavm::interpreter    a3 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [65]: a1 = 0
+TRACE polkavm::interpreter    a1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [66]: jump ~103
+TRACE polkavm::interpreter::raw_handlers  [103]: charge_gas: 4 (792 -> 788)
+TRACE polkavm::interpreter::raw_handlers  [104]: i32 a2 = a3 << 0x3
+TRACE polkavm::interpreter    a2 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [105]: a0 = a0 << a2
+TRACE polkavm::interpreter    a0 = 0x24
+TRACE polkavm::interpreter::raw_handlers  [106]: a0 = a0 + a1
+TRACE polkavm::interpreter    a0 = 0x24
+TRACE polkavm::interpreter::raw_handlers  [107]: ret
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [272]: 928: charge_gas
+DEBUG polkavm::interpreter    [273]: 928: a1 = a0
+DEBUG polkavm::interpreter    [274]: 930: a3 = u64 [sp]
+DEBUG polkavm::interpreter    [275]: 932: fallthrough
+TRACE polkavm::interpreter  Indirect jump to dynamic address 16: 272
+TRACE polkavm::interpreter::raw_handlers  [272]: charge_gas: 3 (788 -> 785)
+TRACE polkavm::interpreter::raw_handlers  [273]: a1 = a0
+TRACE polkavm::interpreter    a1 = 0x24
+TRACE polkavm::interpreter::raw_handlers  [274]: a3 = u64 [sp]
+TRACE polkavm::interpreter    a3 = u64 [0xfefdff50] = 0x25
+TRACE polkavm::interpreter::raw_handlers  [275]: unresolved fallthrough 933
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [276]: 933: charge_gas
+DEBUG polkavm::interpreter    [277]: 933: a0 = s0 + s1
+DEBUG polkavm::interpreter    [278]: 936: a2 = maxu(a3, s1)
+DEBUG polkavm::interpreter    [279]: 939: a2 = a2 - s1
+DEBUG polkavm::interpreter    [280]: 942: a1 = minu(a2, a1)
+DEBUG polkavm::interpreter    [281]: 945: fallthrough
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [276]: charge_gas: 5 (785 -> 780)
+TRACE polkavm::interpreter::raw_handlers  [277]: a0 = s0 + s1
+TRACE polkavm::interpreter    a0 = 0xfeff008b
+TRACE polkavm::interpreter::raw_handlers  [278]: a2 = maxu(a3, s1)
+TRACE polkavm::interpreter    a2 = 0x25
+TRACE polkavm::interpreter::raw_handlers  [279]: a2 = a2 - s1
+TRACE polkavm::interpreter    a2 = 0x24
+TRACE polkavm::interpreter::raw_handlers  [280]: a1 = minu(a2, a1)
+TRACE polkavm::interpreter    a1 = 0x24
+TRACE polkavm::interpreter::raw_handlers  [281]: unresolved fallthrough 946
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [282]: 946: charge_gas
+DEBUG polkavm::interpreter    [283]: 946: a1 = a1 + a0
+DEBUG polkavm::interpreter    [284]: 949: a1 = u32 [a1 + 0xfffffffffffffffc]
+DEBUG polkavm::interpreter    [285]: 952: a2 = 0x64
+DEBUG polkavm::interpreter    [286]: 955: a3 = 0x64
+DEBUG polkavm::interpreter    [287]: 958: ecalli 9
+DEBUG polkavm::interpreter    [288]: 960: s0 = a0
+DEBUG polkavm::interpreter    [289]: 962: u64 [sp + 0x8] = a0
+DEBUG polkavm::interpreter    [290]: 965: u32 [sp + 20] = 0
+DEBUG polkavm::interpreter    [291]: 968: a0 = sp + 0x14
+DEBUG polkavm::interpreter    [292]: 971: a1 = 0x4
+DEBUG polkavm::interpreter    [293]: 974: a2 = sp + 0x8
+DEBUG polkavm::interpreter    [294]: 977: a3 = 0x4
+DEBUG polkavm::interpreter    [295]: 980: ecalli 3
+DEBUG polkavm::interpreter    [296]: 982: a0 = sp + 0x18
+DEBUG polkavm::interpreter    [297]: 985: a2 = 0x80
+DEBUG polkavm::interpreter    [298]: 989: a1 = 0
+DEBUG polkavm::interpreter    [299]: 991: ra = 18, jump 1206
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [282]: charge_gas: 17 (780 -> 763)
+TRACE polkavm::interpreter::raw_handlers  [283]: a1 = a1 + a0
+TRACE polkavm::interpreter    a1 = 0xfeff00af
+TRACE polkavm::interpreter::raw_handlers  [284]: a1 = u32 [a1 + 0xfffffffffffffffc]
+TRACE polkavm::interpreter    a1 = u32 [0xfeff00ab] = 0x2198
+TRACE polkavm::interpreter::raw_handlers  [285]: a2 = 0x64
+TRACE polkavm::interpreter    a2 = 0x64
+TRACE polkavm::interpreter::raw_handlers  [286]: a3 = 0x64
+TRACE polkavm::interpreter    a3 = 0x64
+TRACE polkavm::interpreter::raw_handlers  [287]: ecalli 9
+TRACE polkavm::api  Interrupted: Ecalli(9)
+DEBUG polkavm::interpreter  Starting execution at: 960 [288]
+TRACE polkavm::interpreter::raw_handlers  [288]: s0 = a0
+TRACE polkavm::interpreter    s0 = 0x6f591fd7
+TRACE polkavm::interpreter::raw_handlers  [289]: u64 [sp + 0x8] = a0
+TRACE polkavm::interpreter    u64 [0xfefdff58] = a0 = 0x6f591fd7
+TRACE polkavm::interpreter::raw_handlers  [290]: u32 [sp + 20] = 0
+TRACE polkavm::interpreter    u32 [0xfefdff64] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [291]: a0 = sp + 0x14
+TRACE polkavm::interpreter    a0 = 0xfefdff64
+TRACE polkavm::interpreter::raw_handlers  [292]: a1 = 0x4
+TRACE polkavm::interpreter    a1 = 0x4
+TRACE polkavm::interpreter::raw_handlers  [293]: a2 = sp + 0x8
+TRACE polkavm::interpreter    a2 = 0xfefdff58
+TRACE polkavm::interpreter::raw_handlers  [294]: a3 = 0x4
+TRACE polkavm::interpreter    a3 = 0x4
+TRACE polkavm::interpreter::raw_handlers  [295]: ecalli 3
+TRACE polkavm::api  Interrupted: Ecalli(3)
+DEBUG polkavm::interpreter  Starting execution at: 982 [296]
+TRACE polkavm::interpreter::raw_handlers  [296]: a0 = sp + 0x18
+TRACE polkavm::interpreter    a0 = 0xfefdff68
+TRACE polkavm::interpreter::raw_handlers  [297]: a2 = 0x80
+TRACE polkavm::interpreter    a2 = 0x80
+TRACE polkavm::interpreter::raw_handlers  [298]: a1 = 0
+TRACE polkavm::interpreter    a1 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [299]: ra = 0x12
+TRACE polkavm::interpreter    ra = 0x12
+TRACE polkavm::interpreter::raw_handlers  [300]: unresolved jump 1206
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [301]: 1206: charge_gas
+DEBUG polkavm::interpreter    [302]: 1206: i32 a3 = -a0
+DEBUG polkavm::interpreter    [303]: 1208: a3 = a3 & 0x7
+DEBUG polkavm::interpreter    [304]: 1211: a4 = a0 + a3
+DEBUG polkavm::interpreter    [305]: 1214: jump 1228 if a3 == 0
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [301]: charge_gas: 4 (743 -> 739)
+TRACE polkavm::interpreter::raw_handlers  [302]: i32 a3 = -a0
+TRACE polkavm::interpreter    a3 = 0x1020098
+TRACE polkavm::interpreter::raw_handlers  [303]: a3 = a3 & 0x7
+TRACE polkavm::interpreter    a3 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [304]: a4 = a0 + a3
+TRACE polkavm::interpreter    a4 = 0xfefdff68
+TRACE polkavm::interpreter::raw_handlers  [305]: jump 1228 if a3 == 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [306]: 1217: charge_gas
+DEBUG polkavm::interpreter    [307]: 1217: a5 = a0
+DEBUG polkavm::interpreter    [308]: 1219: fallthrough
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [309]: 1228: charge_gas
+DEBUG polkavm::interpreter    [310]: 1228: t1 = a2 - a3
+DEBUG polkavm::interpreter    [311]: 1231: a5 = t1 & 0xfffffffffffffff8
+DEBUG polkavm::interpreter    [312]: 1234: a3 = a4 + a5
+DEBUG polkavm::interpreter    [313]: 1237: jump 1266 if a5 <=s 0
+TRACE polkavm::interpreter::raw_handlers  [305]: jump ~309 if a3 == 0
+TRACE polkavm::interpreter::raw_handlers  [309]: charge_gas: 4 (739 -> 735)
+TRACE polkavm::interpreter::raw_handlers  [310]: t1 = a2 - a3
+TRACE polkavm::interpreter    t1 = 0x80
+TRACE polkavm::interpreter::raw_handlers  [311]: a5 = t1 & 0xfffffffffffffff8
+TRACE polkavm::interpreter    a5 = 0x80
+TRACE polkavm::interpreter::raw_handlers  [312]: a3 = a4 + a5
+TRACE polkavm::interpreter    a3 = 0xfefdffe8
+TRACE polkavm::interpreter::raw_handlers  [313]: jump 1266 if a5 <=s 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [314]: 1240: charge_gas
+DEBUG polkavm::interpreter    [315]: 1240: t0 = a1 & 0xff
+DEBUG polkavm::interpreter    [316]: 1244: a2 = 0x101010101010101
+DEBUG polkavm::interpreter    [317]: 1254: a5 = t0 * a2
+DEBUG polkavm::interpreter    [318]: 1257: fallthrough
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [319]: 1266: charge_gas
+DEBUG polkavm::interpreter    [320]: 1266: a2 = t1 & 0x7
+DEBUG polkavm::interpreter    [321]: 1269: jump 1274 if a2 != 0
+TRACE polkavm::interpreter::raw_handlers  [313]: jump ~319 if a5 <=s 0
+TRACE polkavm::interpreter::raw_handlers  [314]: charge_gas: 4 (735 -> 731)
+TRACE polkavm::interpreter::raw_handlers  [315]: t0 = a1 & 0xff
+TRACE polkavm::interpreter    t0 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [316]: a2 = 0x101010101010101
+TRACE polkavm::interpreter    a2 = 0x101010101010101
+TRACE polkavm::interpreter::raw_handlers  [317]: a5 = t0 * a2
+TRACE polkavm::interpreter    a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [318]: unresolved fallthrough 1258
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [322]: 1258: charge_gas
+DEBUG polkavm::interpreter    [323]: 1258: u64 [a4] = a5
+DEBUG polkavm::interpreter    [324]: 1260: a4 = a4 + 0x8
+DEBUG polkavm::interpreter    [325]: 1263: jump 1258 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (731 -> 728)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdff68] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdff70
+TRACE polkavm::interpreter::raw_handlers  [325]: jump 1258 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (728 -> 725)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdff70] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdff78
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (725 -> 722)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdff78] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdff80
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (722 -> 719)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdff80] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdff88
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (719 -> 716)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdff88] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdff90
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (716 -> 713)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdff90] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdff98
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (713 -> 710)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdff98] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffa0
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (710 -> 707)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffa0] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffa8
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (707 -> 704)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffa8] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffb0
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (704 -> 701)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffb0] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffb8
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (701 -> 698)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffb8] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffc0
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (698 -> 695)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffc0] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffc8
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (695 -> 692)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffc8] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffd0
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (692 -> 689)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffd0] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffd8
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (689 -> 686)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffd8] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffe0
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [322]: charge_gas: 3 (686 -> 683)
+TRACE polkavm::interpreter::raw_handlers  [323]: u64 [a4] = a5
+TRACE polkavm::interpreter    u64 [0xfefdffe0] = a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [324]: a4 = a4 + 0x8
+TRACE polkavm::interpreter    a4 = 0xfefdffe8
+TRACE polkavm::interpreter::raw_handlers  [325]: jump ~322 if a4 <u a3
+TRACE polkavm::interpreter::raw_handlers  [319]: charge_gas: 2 (683 -> 681)
+TRACE polkavm::interpreter::raw_handlers  [320]: a2 = t1 & 0x7
+TRACE polkavm::interpreter    a2 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [321]: jump 1274 if a2 != 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [326]: 1272: charge_gas
+DEBUG polkavm::interpreter    [327]: 1272: jump 1286
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [328]: 1274: charge_gas
+DEBUG polkavm::interpreter    [329]: 1274: a2 = a2 + a3
+DEBUG polkavm::interpreter    [330]: 1277: fallthrough
+TRACE polkavm::interpreter::raw_handlers  [321]: jump ~328 if a2 != 0
+TRACE polkavm::interpreter::raw_handlers  [326]: charge_gas: 1 (681 -> 680)
+TRACE polkavm::interpreter::raw_handlers  [327]: unresolved jump 1286
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [331]: 1286: charge_gas
+DEBUG polkavm::interpreter    [332]: 1286: ret
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [331]: charge_gas: 1 (680 -> 679)
+TRACE polkavm::interpreter::raw_handlers  [332]: ret
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [333]: 996: charge_gas
+DEBUG polkavm::interpreter    [334]: 996: a1 = 0x7a120
+DEBUG polkavm::interpreter    [335]: 1001: a2 = 0x64
+DEBUG polkavm::interpreter    [336]: 1004: a3 = sp + 0x18
+DEBUG polkavm::interpreter    [337]: 1007: a0 = s0
+DEBUG polkavm::interpreter    [338]: 1009: ra = 0x14
+DEBUG polkavm::interpreter    [339]: 1012: ecalli 11
+DEBUG polkavm::interpreter    [340]: 1014: fallthrough
+TRACE polkavm::interpreter  Indirect jump to dynamic address 18: 333
+TRACE polkavm::interpreter::raw_handlers  [333]: charge_gas: 7 (679 -> 672)
+TRACE polkavm::interpreter::raw_handlers  [334]: a1 = 0x7a120
+TRACE polkavm::interpreter    a1 = 0x7a120
+TRACE polkavm::interpreter::raw_handlers  [335]: a2 = 0x64
+TRACE polkavm::interpreter    a2 = 0x64
+TRACE polkavm::interpreter::raw_handlers  [336]: a3 = sp + 0x18
+TRACE polkavm::interpreter    a3 = 0xfefdff68
+TRACE polkavm::interpreter::raw_handlers  [337]: a0 = s0
+TRACE polkavm::interpreter    a0 = 0x6f591fd7
+TRACE polkavm::interpreter::raw_handlers  [338]: ra = 0x14
+TRACE polkavm::interpreter    ra = 0x14
+TRACE polkavm::interpreter::raw_handlers  [339]: ecalli 11
+TRACE polkavm::api  Interrupted: Ecalli(11)
+DEBUG polkavm::interpreter  Starting execution at: 1014 [340]
+TRACE polkavm::interpreter::raw_handlers  [340]: unresolved fallthrough 1015
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [341]: 1015: charge_gas
+DEBUG polkavm::interpreter    [342]: 1015: a2 = 0x20010
+DEBUG polkavm::interpreter    [343]: 1020: a0 = 0x10000
+DEBUG polkavm::interpreter    [344]: 1025: a2 = a2 + a0
+DEBUG polkavm::interpreter    [345]: 1028: fallthrough
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [341]: charge_gas: 4 (562 -> 558)
+TRACE polkavm::interpreter::raw_handlers  [342]: a2 = 0x20010
+TRACE polkavm::interpreter    a2 = 0x20010
+TRACE polkavm::interpreter::raw_handlers  [343]: a0 = 0x10000
+TRACE polkavm::interpreter    a0 = 0x10000
+TRACE polkavm::interpreter::raw_handlers  [344]: a2 = a2 + a0
+TRACE polkavm::interpreter    a2 = 0x30010
+TRACE polkavm::interpreter::raw_handlers  [345]: unresolved fallthrough 1029
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [346]: 1029: charge_gas
+DEBUG polkavm::interpreter    [347]: 1029: a3 = u64 [a2]
+DEBUG polkavm::interpreter    [348]: 1031: a1 = a3 + 0x20
+DEBUG polkavm::interpreter    [349]: 1034: jump 1288 if a1 <u a3
+TRACE polkavm::interpreter::raw_handlers    -> resolved to fallthrough
+TRACE polkavm::interpreter::raw_handlers  [346]: charge_gas: 3 (558 -> 555)
+TRACE polkavm::interpreter::raw_handlers  [347]: a3 = u64 [a2]
+TRACE polkavm::interpreter    a3 = u64 [0x30010] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [348]: a1 = a3 + 0x20
+TRACE polkavm::interpreter    a1 = 0x20
+TRACE polkavm::interpreter::raw_handlers  [349]: jump 1288 if a1 <u a3
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [350]: 1038: charge_gas
+DEBUG polkavm::interpreter    [351]: 1038: a4 = a1 + 0x1
+DEBUG polkavm::interpreter    [352]: 1041: a5 = a4 <u 0x1
+DEBUG polkavm::interpreter    [353]: 1044: a4 = a0 <u a4
+DEBUG polkavm::interpreter    [354]: 1047: a4 = a4 | a5
+DEBUG polkavm::interpreter    [355]: 1050: jump 1288 if a4 != 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [356]: 1288: charge_gas
+DEBUG polkavm::interpreter    [357]: 1288: trap
+TRACE polkavm::interpreter::raw_handlers  [349]: jump ~356 if a1 <u a3
+TRACE polkavm::interpreter::raw_handlers  [350]: charge_gas: 5 (555 -> 550)
+TRACE polkavm::interpreter::raw_handlers  [351]: a4 = a1 + 0x1
+TRACE polkavm::interpreter    a4 = 0x21
+TRACE polkavm::interpreter::raw_handlers  [352]: a5 = a4 <u 0x1
+TRACE polkavm::interpreter    a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [353]: a4 = a0 <u a4
+TRACE polkavm::interpreter    a4 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [354]: a4 = a4 | a5
+TRACE polkavm::interpreter    a4 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [355]: jump 1288 if a4 != 0
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [358]: 1054: charge_gas
+DEBUG polkavm::interpreter    [359]: 1054: a4 = u64 [a2]
+DEBUG polkavm::interpreter    [360]: 1056: jump 1029 if a4 != a3
+TRACE polkavm::interpreter::raw_handlers  [355]: jump ~356 if a4 != 0
+TRACE polkavm::interpreter::raw_handlers  [358]: charge_gas: 2 (550 -> 548)
+TRACE polkavm::interpreter::raw_handlers  [359]: a4 = u64 [a2]
+TRACE polkavm::interpreter    a4 = u64 [0x30010] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [360]: jump 1029 if a4 != a3
+DEBUG polkavm::interpreter  Compiling block:
+DEBUG polkavm::interpreter    [361]: 1059: charge_gas
+DEBUG polkavm::interpreter    [362]: 1059: u64 [a2] = a1
+DEBUG polkavm::interpreter    [363]: 1061: a5 = 0
+DEBUG polkavm::interpreter    [364]: 1063: a0 = 0x30010
+DEBUG polkavm::interpreter    [365]: 1068: a2 = a0 - a1
+DEBUG polkavm::interpreter    [366]: 1071: u8 [a2 + 31] = 0
+DEBUG polkavm::interpreter    [367]: 1074: u8 [a2 + 30] = 0
+DEBUG polkavm::interpreter    [368]: 1077: u8 [a2 + 29] = 0
+DEBUG polkavm::interpreter    [369]: 1080: u8 [a2 + 28] = 0
+DEBUG polkavm::interpreter    [370]: 1083: u8 [a2 + 27] = 0
+DEBUG polkavm::interpreter    [371]: 1086: u8 [a2 + 26] = 0
+DEBUG polkavm::interpreter    [372]: 1089: u8 [a2 + 25] = 0
+DEBUG polkavm::interpreter    [373]: 1092: u8 [a2 + 24] = 0
+DEBUG polkavm::interpreter    [374]: 1095: u8 [a2 + 23] = 0
+DEBUG polkavm::interpreter    [375]: 1098: u8 [a2 + 22] = 0
+DEBUG polkavm::interpreter    [376]: 1101: u8 [a2 + 21] = 0
+DEBUG polkavm::interpreter    [377]: 1104: u8 [a2 + 20] = 0
+DEBUG polkavm::interpreter    [378]: 1107: u8 [a2 + 19] = 0
+DEBUG polkavm::interpreter    [379]: 1110: u8 [a2 + 18] = 0
+DEBUG polkavm::interpreter    [380]: 1113: u8 [a2 + 17] = 0
+DEBUG polkavm::interpreter    [381]: 1116: u8 [a2 + 16] = 0
+DEBUG polkavm::interpreter    [382]: 1119: u8 [a2 + 15] = 0
+DEBUG polkavm::interpreter    [383]: 1122: u8 [a2 + 14] = 0
+DEBUG polkavm::interpreter    [384]: 1125: u8 [a2 + 13] = 0
+DEBUG polkavm::interpreter    [385]: 1128: u8 [a2 + 12] = 0
+DEBUG polkavm::interpreter    [386]: 1131: u8 [a2 + 11] = 0
+DEBUG polkavm::interpreter    [387]: 1134: u8 [a2 + 10] = 0
+DEBUG polkavm::interpreter    [388]: 1137: u8 [a2 + 9] = 0
+DEBUG polkavm::interpreter    [389]: 1140: u8 [a2 + 8] = 0
+DEBUG polkavm::interpreter    [390]: 1143: u8 [a2 + 7] = 0
+DEBUG polkavm::interpreter    [391]: 1146: u8 [a2 + 6] = 0
+DEBUG polkavm::interpreter    [392]: 1149: u8 [a2 + 5] = 0
+DEBUG polkavm::interpreter    [393]: 1152: u8 [a2 + 4] = 0
+DEBUG polkavm::interpreter    [394]: 1155: u8 [a2 + 3] = 0
+DEBUG polkavm::interpreter    [395]: 1158: a0 = i32 [sp + 0x8]
+DEBUG polkavm::interpreter    [396]: 1161: u8 [a2 + 2] = 0
+DEBUG polkavm::interpreter    [397]: 1164: u8 [a2 + 1] = 0
+DEBUG polkavm::interpreter    [398]: 1167: u8 [a2 + 0] = 0
+DEBUG polkavm::interpreter    [399]: 1169: a1 = a0 >> 0x18
+DEBUG polkavm::interpreter    [400]: 1172: u8 [a2 + 0x3] = a1
+DEBUG polkavm::interpreter    [401]: 1175: a1 = a0 >> 0x10
+DEBUG polkavm::interpreter    [402]: 1178: u8 [a2 + 0x2] = a1
+DEBUG polkavm::interpreter    [403]: 1181: a1 = a0 >> 0x8
+DEBUG polkavm::interpreter    [404]: 1184: u8 [a2 + 0x1] = a1
+DEBUG polkavm::interpreter    [405]: 1187: u8 [a2] = a0
+DEBUG polkavm::interpreter    [406]: 1189: a1 = 0x20
+DEBUG polkavm::interpreter    [407]: 1192: jump 661
+TRACE polkavm::interpreter::raw_handlers  [360]: jump ~346 if a4 != a3
+TRACE polkavm::interpreter::raw_handlers  [361]: charge_gas: 46 (548 -> 502)
+TRACE polkavm::interpreter::raw_handlers  [362]: u64 [a2] = a1
+TRACE polkavm::interpreter    u64 [0x30010] = a1 = 0x20
+TRACE polkavm::interpreter::raw_handlers  [363]: a5 = 0
+TRACE polkavm::interpreter    a5 = 0x0
+TRACE polkavm::interpreter::raw_handlers  [364]: a0 = 0x30010
+TRACE polkavm::interpreter    a0 = 0x30010
+TRACE polkavm::interpreter::raw_handlers  [365]: a2 = a0 - a1
+TRACE polkavm::interpreter    a2 = 0x2fff0
+TRACE polkavm::interpreter::raw_handlers  [366]: u8 [a2 + 31] = 0
+TRACE polkavm::interpreter    u8 [0x3000f] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [367]: u8 [a2 + 30] = 0
+TRACE polkavm::interpreter    u8 [0x3000e] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [368]: u8 [a2 + 29] = 0
+TRACE polkavm::interpreter    u8 [0x3000d] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [369]: u8 [a2 + 28] = 0
+TRACE polkavm::interpreter    u8 [0x3000c] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [370]: u8 [a2 + 27] = 0
+TRACE polkavm::interpreter    u8 [0x3000b] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [371]: u8 [a2 + 26] = 0
+TRACE polkavm::interpreter    u8 [0x3000a] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [372]: u8 [a2 + 25] = 0
+TRACE polkavm::interpreter    u8 [0x30009] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [373]: u8 [a2 + 24] = 0
+TRACE polkavm::interpreter    u8 [0x30008] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [374]: u8 [a2 + 23] = 0
+TRACE polkavm::interpreter    u8 [0x30007] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [375]: u8 [a2 + 22] = 0
+TRACE polkavm::interpreter    u8 [0x30006] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [376]: u8 [a2 + 21] = 0
+TRACE polkavm::interpreter    u8 [0x30005] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [377]: u8 [a2 + 20] = 0
+TRACE polkavm::interpreter    u8 [0x30004] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [378]: u8 [a2 + 19] = 0
+TRACE polkavm::interpreter    u8 [0x30003] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [379]: u8 [a2 + 18] = 0
+TRACE polkavm::interpreter    u8 [0x30002] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [380]: u8 [a2 + 17] = 0
+TRACE polkavm::interpreter    u8 [0x30001] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [381]: u8 [a2 + 16] = 0
+TRACE polkavm::interpreter    u8 [0x30000] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [382]: u8 [a2 + 15] = 0
+TRACE polkavm::interpreter    u8 [0x2ffff] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [383]: u8 [a2 + 14] = 0
+TRACE polkavm::interpreter    u8 [0x2fffe] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [384]: u8 [a2 + 13] = 0
+TRACE polkavm::interpreter    u8 [0x2fffd] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [385]: u8 [a2 + 12] = 0
+TRACE polkavm::interpreter    u8 [0x2fffc] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [386]: u8 [a2 + 11] = 0
+TRACE polkavm::interpreter    u8 [0x2fffb] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [387]: u8 [a2 + 10] = 0
+TRACE polkavm::interpreter    u8 [0x2fffa] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [388]: u8 [a2 + 9] = 0
+TRACE polkavm::interpreter    u8 [0x2fff9] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [389]: u8 [a2 + 8] = 0
+TRACE polkavm::interpreter    u8 [0x2fff8] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [390]: u8 [a2 + 7] = 0
+TRACE polkavm::interpreter    u8 [0x2fff7] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [391]: u8 [a2 + 6] = 0
+TRACE polkavm::interpreter    u8 [0x2fff6] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [392]: u8 [a2 + 5] = 0
+TRACE polkavm::interpreter    u8 [0x2fff5] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [393]: u8 [a2 + 4] = 0
+TRACE polkavm::interpreter    u8 [0x2fff4] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [394]: u8 [a2 + 3] = 0
+TRACE polkavm::interpreter    u8 [0x2fff3] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [395]: a0 = i32 [sp + 0x8]
+TRACE polkavm::interpreter    a0 = i32 [0xfefdff58] = 0x6f591fd7
+TRACE polkavm::interpreter::raw_handlers  [396]: u8 [a2 + 2] = 0
+TRACE polkavm::interpreter    u8 [0x2fff2] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [397]: u8 [a2 + 1] = 0
+TRACE polkavm::interpreter    u8 [0x2fff1] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [398]: u8 [a2 + 0] = 0
+TRACE polkavm::interpreter    u8 [0x2fff0] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [399]: a1 = a0 >> 0x18
+TRACE polkavm::interpreter    a1 = 0x6f
+TRACE polkavm::interpreter::raw_handlers  [400]: u8 [a2 + 0x3] = a1
+TRACE polkavm::interpreter    u8 [0x2fff3] = a1 = 0x6f
+TRACE polkavm::interpreter::raw_handlers  [401]: a1 = a0 >> 0x10
+TRACE polkavm::interpreter    a1 = 0x6f59
+TRACE polkavm::interpreter::raw_handlers  [402]: u8 [a2 + 0x2] = a1
+TRACE polkavm::interpreter    u8 [0x2fff2] = a1 = 0x6f59
+TRACE polkavm::interpreter::raw_handlers  [403]: a1 = a0 >> 0x8
+TRACE polkavm::interpreter    a1 = 0x6f591f
+TRACE polkavm::interpreter::raw_handlers  [404]: u8 [a2 + 0x1] = a1
+TRACE polkavm::interpreter    u8 [0x2fff1] = a1 = 0x6f591f
+TRACE polkavm::interpreter::raw_handlers  [405]: u8 [a2] = a0
+TRACE polkavm::interpreter    u8 [0x2fff0] = a0 = 0x6f591fd7
+TRACE polkavm::interpreter::raw_handlers  [406]: a1 = 0x20
+TRACE polkavm::interpreter    a1 = 0x20
+TRACE polkavm::interpreter::raw_handlers  [407]: unresolved jump 661
+TRACE polkavm::interpreter::raw_handlers    -> resolved to jump
+TRACE polkavm::interpreter::raw_handlers  [16]: charge_gas: 6 (502 -> 496)
+TRACE polkavm::interpreter::raw_handlers  [17]: a0 = a2
+TRACE polkavm::interpreter    a0 = 0x2fff0
+TRACE polkavm::interpreter::raw_handlers  [18]: ra = u64 [sp + 0xa8]
+TRACE polkavm::interpreter    ra = u64 [0xfefdfff8] = 0xffff0000
+TRACE polkavm::interpreter::raw_handlers  [19]: s0 = u64 [sp + 0xa0]
+TRACE polkavm::interpreter    s0 = u64 [0xfefdfff0] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [20]: s1 = u64 [sp + 0x98]
+TRACE polkavm::interpreter    s1 = u64 [0xfefdffe8] = 0x0
+TRACE polkavm::interpreter::raw_handlers  [21]: sp = sp + 0xb0
+TRACE polkavm::interpreter    sp = 0xfefe0000
+TRACE polkavm::interpreter::raw_handlers  [22]: ret
+TRACE polkavm::api  Interrupted: Finished

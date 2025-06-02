@@ -300,7 +300,6 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		fmt.Println("Error deserializing:", err)
 		return fmt.Errorf("onWorkPackageShare: decode share message: %w", err)
 	}
-
 	// --> Work Package Bundle
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
@@ -326,9 +325,8 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	}
 
 	wpCoreIndex := newReq.CoreIndex
-	log.Info(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "bundle_Len", len(encodedBundle))
-	log.Debug(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "workPackageBundleBytes", fmt.Sprintf("0x%x", bp.Bytes()))
-	log.Debug(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "workPackageBundle", bp.String())
+	log.Info(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "bundle_Len", len(encodedBundle), "coreIndex", newReq.CoreIndex, "segmentRootsLen", newReq.Len, "msgLen", msgLen,
+		"workPackageBundleBytes", fmt.Sprintf("0x%x", bp.Bytes()), "workPackageBundle", bp.String())
 
 	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {
@@ -397,7 +395,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		WorkReportHash: guarantee.Report.Hash(),
 		Signature:      guarantee.Signatures[0].Signature,
 	}
-	log.Trace(debugG, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature)
+	log.Info(module, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature)
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {

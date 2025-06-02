@@ -2,7 +2,6 @@ package node
 
 import (
 	"bytes"
-	"container/list"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -105,8 +104,6 @@ var auth_code_hash = common.Blake2Hash(auth_code_encoded_bytes) //pu
 var auth_code_hash_hash = common.Blake2Hash(auth_code_hash[:])  //pa
 var bootstrap_auth_codehash = auth_code_hash
 
-var test_prereq = false // Test Prerequisites Enabled
-
 type NodeContent struct {
 	id                   uint16
 	node_name            string
@@ -132,16 +129,13 @@ type NodeContent struct {
 	statedbMap      map[common.Hash]*statedb.StateDB
 	statedbMapMutex sync.Mutex
 	// holds a map of the parenthash to the block
-	blocks      map[common.Hash]*types.Block
-	blocksMutex sync.Mutex
+	blocks map[common.Hash]*types.Block
+
 	// holds the tip
 	statedb      *statedb.StateDB
 	statedbMutex sync.Mutex
 	// Track the number of opened streams
-	openedStreamsMu   sync.Mutex
-	openedStreams     map[quic.Stream]struct{}
-	dataHashStreamsMu sync.Mutex
-	dataHashStreams   map[common.Hash][]quic.Stream
+	dataHashStreams map[common.Hash][]quic.Stream
 
 	workReports      map[common.Hash]types.WorkReport
 	workReportsMutex sync.Mutex
@@ -155,16 +149,12 @@ type NodeContent struct {
 
 	workPackageQueue sync.Map
 
-	chunkMap            sync.Map
-	chunkBox            map[common.Hash][][]byte
 	loaded_services_dir string
 	block_tree          *types.BlockTree
 	nodeSelf            *Node
 
 	RPC_Client        []*rpc.Client
 	new_timeslot_chan chan uint32
-
-	commitHash string
 
 	jceManagerMutex sync.Mutex
 	jceManager      *ManualJCEManager
@@ -196,9 +186,8 @@ func (n *Node) Clean(block_hashes []common.Hash) {
 	for _, block_hash := range block_hashes {
 		log.Trace(debugBlock, "runReceiveBlock: unused_blocks", "n", n.String(), "block_hash", block_hash)
 		//TOCHECK
-		if _, ok := n.statedbMap[block_hash]; ok {
-			delete(n.statedbMap, block_hash)
-		}
+		delete(n.statedbMap, block_hash)
+
 		n.ba_checker.Clear(block_hash)
 
 		// audit
@@ -227,13 +216,11 @@ func (n *Node) Clean(block_hashes []common.Hash) {
 
 type Node struct {
 	NodeContent
-	IsSync            bool
-	IsSyncMu          sync.RWMutex
-	appliedFirstBlock bool
+	IsSync   bool
+	IsSyncMu sync.RWMutex
 
 	author_status string
 
-	block_waiting list.List
 	commitHash    string
 	AuditNodeType string
 	credential    types.ValidatorSecret
@@ -291,14 +278,7 @@ type Node struct {
 	nodeType string
 	dataDir  string
 
-	// DA testing only
-	lastHash       common.Hash
-	currentHash    common.Hash
-	announcement   bool
-	announcementMu sync.RWMutex
-
 	// DA Debugging
-	totalConnections     int64
 	totalIncomingStreams int64
 	connectedPeers       map[uint16]bool
 
@@ -345,7 +325,7 @@ func (n *Node) SetLatestBlockInfo(block *JAMSNP_BlockInfo, where string) {
 	// defer n.latest_block_mutex.Unlock()
 	log.Debug(debugBlock, "SetLatestBlockInfo", "n", n.String(), "slot", block.Slot, "block_hash", block.HeaderHash.Hex(), "where", where)
 	n.latest_block = block
-	return
+
 }
 
 func GenerateWorkPackageTraceID(wp types.WorkPackage) string {
@@ -419,7 +399,7 @@ func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspe
 }
 
 func PrintSpec(chainspec *chainspecs.ChainSpec) error {
-	levelDBPath := fmt.Sprintf("/tmp/xxx")
+	levelDBPath := "/tmp/xxx"
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
 		return err
@@ -465,7 +445,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 
 	cert, err = generateSelfSignedCert(ed25519_pub, ed25519_priv)
 	if err != nil {
-		return nil, fmt.Errorf("Error generating self-signed certificate: %v", err)
+		return nil, fmt.Errorf("error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
 		NodeContent: NewNodeContent(id, ed25519_pub, store),
@@ -504,24 +484,6 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	}
 	node.NodeContent.nodeSelf = node
 	var _statedb *statedb.StateDB
-
-	/*
-	   func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
-	   	statedb, err = newStateDB(sdb, common.Hash{})
-	   	if err != nil {
-	   		return statedb, err
-	   	}
-	   	statedb.Block = &(statetransition.Block)
-	   	isGenesis := IsGenesisSTF(statetransition)
-	   	if isGenesis {
-	   		statetransition.PreState = statetransition.PostState // Allow genesis stf to use poststate as prestate for first non-genesis block
-	   	}
-	   	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
-	   	statedb.JamState = NewJamState()
-	   	statedb.RecoverJamState(statedb.StateRoot)
-	   	return statedb, nil
-	   }
-	*/
 
 	stateTransition := &statedb.StateTransition{}
 	stateTransition.PreState.KeyVals = chainspec.GenesisState
@@ -775,10 +737,10 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		node.AuditFlag = false
 	}
 	// we need to organize the /ws usage to avoid conflicts
-	if node.id == 0 {
+	if node.id == 5 { // HACK
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		go node.runJamWeb(context.Background(), wg, uint16(10800)+id, port)
+		go node.runJamWeb(context.Background(), wg, uint16(19800)+id, port) // TODO: setup default WS
 		go func() {
 			wg.Wait()
 			log.Info("jamweb", "Node 0", "shutdown complete")
@@ -909,10 +871,10 @@ func (n *Node) GetSegments(importedSegments []types.ImportSegment) (raw_segments
 func (n *Node) GetSegmentsByRequestedHash(RequestedHash common.Hash) ([][]byte, uint16, error) {
 
 	si := n.WorkReportSearch(RequestedHash)
-	ExportedSegmentLength := si.WorkReport.AvailabilitySpec.ExportedSegmentLength
 	if si == nil {
 		return nil, 0, fmt.Errorf("WorkReportSearch(%s) not found", RequestedHash)
 	}
+	ExportedSegmentLength := si.WorkReport.AvailabilitySpec.ExportedSegmentLength
 
 	importedSegments := make([]types.ImportSegment, 0)
 	for i := 0; i < int(ExportedSegmentLength); i++ {
@@ -1014,7 +976,7 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 	identifierToIndex := make(map[string]int)
 
 	// Initialize refine context and identifier map
-	refineCtx := n.statedb.GetRefineContext()
+	refineCtx := n.getRefineContext()
 	for i, req := range reqs {
 		identifierToIndex[req.Identifier] = i
 		rc := refineCtx.Clone()
@@ -1088,7 +1050,7 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 
 func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (common.Hash, error) {
 	//fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
-	wp.WorkPackage.RefineContext = n.statedb.GetRefineContext()
+	wp.WorkPackage.RefineContext = n.getRefineContext()
 	peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
 	if err := peers[rand0.Intn(len(peers))].SendWorkPackageSubmission(ctx, wp.WorkPackage, wp.ExtrinsicsBlobs, wp.CoreIndex); err != nil {
 		log.Warn(module, "SubmitAndWaitForWorkPackage", "err", err)
@@ -1202,7 +1164,7 @@ func (n *Node) GetPrevCoreIndex() (uint16, error) {
 	return 0, fmt.Errorf("core index not found")
 }
 
-func (n *Node) GetCoreIndexFromEd25519Key(key types.Ed25519Key) (uint16, error) {
+func (n *NodeContent) GetCoreIndexFromEd25519Key(key types.Ed25519Key) (uint16, error) {
 	assignments := n.statedb.GuarantorAssignments
 	for _, assignment := range assignments {
 		if assignment.Validator.GetEd25519Key() == key {
@@ -1225,18 +1187,33 @@ func (n *Node) GetCoreCoWorkers(coreIndex uint16) []types.Validator {
 	return coWorkers
 }
 
-// func (n *Node) GetCoreWorkersPeers(core uint16)(workers []Peer) {
-// 	workers = make([]Peer, 0)
-// 	for _, assignment := range n.statedb.GuarantorAssignments {
-// 		if assignment.CoreIndex == core {
-// 			peer, err := n.GetPeerInfoByEd25519(assignment.Validator.Ed25519)
-// 			if err == nil {
-// 				workers = append(workers, *peer.Clone())
-// 			}
-// 		}
-// 	}
-// 	return workers
-// }
+func (n *NodeContent) GetEd25519Key() types.Ed25519Key {
+	return n.nodeSelf.credential.Ed25519Pub
+}
+
+func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs types.ExtrinsicsBlobs) (err error) {
+	coreIndex, err := n.GetCoreIndexFromEd25519Key(n.GetEd25519Key())
+	if err != nil {
+		return err
+	}
+
+	// get the co-workers of the node
+	coWorkers := n.GetCoreCoWorkersPeers(coreIndex)
+	// send the work package to some other co-worker
+	for id, peer := range coWorkers {
+		if uint16(id) != n.id {
+			go func() {
+				err = peer.SendWorkPackageSubmission(context.Background(), wp, extrinsicsBlobs, coreIndex)
+				if err != nil {
+					log.Error(module, "SubmitWPSameCore", "err", err, "coreIndex", coreIndex)
+					return
+				}
+				log.Info(module, "SubmitWPSameCore SUBMISSION", "coreIndex", coreIndex)
+			}()
+		}
+	}
+	return nil
+}
 
 // this function will return the core workers of that core
 func (n *NodeContent) GetCoreCoWorkersPeers(core uint16) (coWorkers []*Peer) {
@@ -1328,9 +1305,9 @@ func (n *NodeContent) updateServiceMap(statedb *statedb.StateDB, b *types.Block)
 			if service.CodeHash == codeHash {
 				metadata, _ := types.SplitMetadataAndCode(p.Blob)
 				if len(metadata) > 0 {
-					summ, ok := n.servicesMap[s]
+					_, ok := n.servicesMap[s]
 					if !ok {
-						summ = &types.ServiceSummary{
+						summ := &types.ServiceSummary{
 							ServiceID:          s,
 							ServiceName:        metadata,
 							LastRefineSlot:     0,
@@ -2414,7 +2391,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	if _, err := os.Stat(structDir); os.IsNotExist(err) {
 		err := os.MkdirAll(structDir, os.ModePerm)
 		if err != nil {
-			return fmt.Errorf("Error creating %v directory: %v\n", msgType, err)
+			return fmt.Errorf("error creating %v directory: %v", msgType, err)
 		}
 	}
 
@@ -2431,14 +2408,14 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 }
 
 func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string) error {
-	dataDir = fmt.Sprintf("%s", dataDir)
+
 	structDir := fmt.Sprintf("%s/%vs", dataDir, "state_transition")
 
 	// Check if the directories exist, if not create them
 	if _, err := os.Stat(structDir); os.IsNotExist(err) {
 		err := os.MkdirAll(structDir, os.ModePerm)
 		if err != nil {
-			return fmt.Errorf("Error creating %v directory: %v\n", "state_transition", err)
+			return fmt.Errorf("error creating %v directory: %v", "state_transition", err)
 		}
 	}
 
@@ -2543,7 +2520,7 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	n.currJCEMutex.Lock()
 	defer n.currJCEMutex.Unlock()
 	prevJCE := n.currJCE
-	if (prevJCE >= 0) && (prevJCE > currJCE) {
+	if prevJCE > currJCE {
 		log.Error(module, "Invalid JCE: currJCE is less than previous JCE", "prevJCE", prevJCE, "currJCE", currJCE)
 		return
 	}

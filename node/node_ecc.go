@@ -24,7 +24,7 @@ func (n *NodeContent) ReadKV(key common.Hash) ([]byte, error) {
 	}
 	val, err := store.ReadKV(key)
 	if err != nil {
-		return []byte{}, fmt.Errorf("ReadKV K=%v not found\n", key)
+		return []byte{}, fmt.Errorf("readKV K=%v not found", key)
 	}
 	return val, nil
 }
@@ -36,7 +36,7 @@ func (n *NodeContent) WriteKV(key common.Hash, val []byte) error {
 	}
 	err = store.WriteKV(key, val)
 	if err != nil {
-		return fmt.Errorf("WriteKV K=%v|V=%x err:%v\n", key, val, err)
+		return fmt.Errorf("writeKV K=%v|V=%x err:%v", key, val, err)
 	}
 	return nil
 }
@@ -73,9 +73,9 @@ func (n *NodeContent) ReadRawKV(key []byte) ([]byte, bool, error) {
 	}
 	val, ok, err := store.ReadRawKV([]byte(key))
 	if err != nil {
-		return []byte{}, false, fmt.Errorf("ReadRawKV Err:%v", err)
+		return []byte{}, false, fmt.Errorf("readRawKV Err:%v", err)
 	} else if !ok {
-		return []byte{}, false, fmt.Errorf("ReadRawKV K=%v not found", fmt.Sprintf("%s", key))
+		return []byte{}, false, fmt.Errorf("readRawKV K=%v not found", string(key))
 	}
 	return val, true, nil
 }

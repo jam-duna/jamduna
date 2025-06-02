@@ -2,11 +2,6 @@ package pvm
 
 import "fmt"
 
-const (
-	debug_pvm  = "pvm_mod"
-	debug_host = "host_mod"
-)
-
 // Termination Instructions
 var T = map[int]struct{}{
 	TRAP:            {},

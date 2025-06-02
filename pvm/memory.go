@@ -57,7 +57,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 		ro_data:              make([]byte, ro_data_address_end-ro_data_address),
 		output:               make([]byte, a_size),
 	}
-	log.Trace("pvm", "NewRAM", 
+	log.Trace("pvm", "NewRAM",
 		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
 		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
 		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "current_heap_pointer", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
@@ -65,7 +65,6 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 
 	return ram
 }
-
 
 func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	length := uint32(len(data))
@@ -99,7 +98,6 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.output_address && end <= ram.output_end {
 		offset := address - ram.output_address
 		if offset+length > uint32(len(ram.output)) {
-			panic(322)
 			return nil, OOB
 		}
 		return ram.output[offset : offset+length], OK
@@ -108,7 +106,6 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.stack_address && end <= ram.stack_address_end {
 		offset := address - ram.stack_address
 		if offset+length > uint32(len(ram.stack)) {
-			panic(324)
 			return nil, OOB
 		}
 		return ram.stack[offset : offset+length], OK
@@ -118,7 +115,6 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		offset := address - ram.rw_data_address
 		if offset+length > uint32(len(ram.rw_data)) {
 			fmt.Printf("ADDRESS %x rw_data_address %x offset %x\n", address, ram.rw_data_address, offset)
-			panic(326)
 			return nil, OOB
 		}
 		return ram.rw_data[offset : offset+length], OK
@@ -127,7 +123,6 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.ro_data_address && end <= ram.ro_data_address_end {
 		offset := address - ram.ro_data_address
 		if offset+length > uint32(len(ram.ro_data)) {
-			panic(328)
 			return nil, OOB
 		}
 		return ram.ro_data[offset : offset+length], OK

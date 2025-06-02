@@ -190,6 +190,8 @@ func Encode(data []byte, V int) ([][]byte, error) {
 	}
 	Cores := V / 3
 	shardSize := (len(data) / Cores)
+	// TODO: address the padding to multiple of W_E
+
 	// Allocate a single Go-managed buffer for all shards
 	output := make([]byte, shardSize*V)
 	dataPtr := (*C.uchar)(unsafe.Pointer(&data[0]))

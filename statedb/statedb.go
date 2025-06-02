@@ -786,42 +786,6 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 	return false, nil, nil, nil
 }
 
-// see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks
-func (s *StateDB) GetRefineContext(prereqs ...common.Hash) types.RefineContext {
-	// A) ANCHOR -- checkRecentBlock checks if Anchor is in RecentBlocks
-	anchor := common.Hash{}
-	stateRoot := common.Hash{}
-	beefyRoot := common.Hash{}
-	if len(s.JamState.RecentBlocks) > 1 {
-		idx := len(s.JamState.RecentBlocks)/2 - 1
-		if idx < 0 {
-			idx = 0
-		}
-		if idx > len(s.JamState.RecentBlocks)-1 {
-			idx = len(s.JamState.RecentBlocks) - 1
-		}
-		anchorBlock := s.JamState.RecentBlocks[idx]
-		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
-		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks
-		beefyRoot = *(anchorBlock.B.SuperPeak()) // beefy root b must be in s.JamState.RecentBlocks
-	}
-
-	// B) LOOKUP ANCHOR -- there are NO restrictions here but we choose these to have something
-	lookupAnchorBlock := s.Block
-	lookupAnchor := lookupAnchorBlock.Header.Hash() // header hash l does NOT have to be in s.JamState.RecentBlocks
-	ts := lookupAnchorBlock.GetHeader().Slot
-	return types.RefineContext{
-		// A) ANCHOR
-		Anchor:    anchor,
-		StateRoot: stateRoot,
-		BeefyRoot: beefyRoot,
-		// B) LOOKUP ANCHOR
-		LookupAnchor:     lookupAnchor,
-		LookupAnchorSlot: ts,
-		Prerequisites:    prereqs,
-	}
-}
-
 func (s *StateDB) GetID() uint16 {
 	return s.Id
 }

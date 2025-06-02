@@ -168,8 +168,8 @@ func ReversedByteArray(slices [][]byte) [][]byte {
 }
 
 func BuildBundleSegment(bClub Hash, sClub Hash) []byte {
-	bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
-	//bundle_segment_pair := append(sClub.Bytes(), bClub.Bytes()...)
+	//bundle_segment_pair := append(bClub.Bytes(), sClub.Bytes()...)
+	bundle_segment_pair := append(sClub.Bytes(), bClub.Bytes()...)
 	return bundle_segment_pair
 }
 

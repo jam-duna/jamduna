@@ -261,7 +261,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	log.Trace(module, "computeStateUpdates", "len(e_p)", len(blk.Extrinsic.Preimages), "len(e_g)", len(blk.Extrinsic.Guarantees), "len(ah)", len(s.JamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
 	for _, g := range blk.Extrinsic.Guarantees {
 		wph := g.Report.AvailabilitySpec.WorkPackageHash
-		log.Trace(s.Authoring, "computeStateUpdates-G", "hash", wph)
+		log.Info(module, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,
@@ -269,20 +269,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 			Status:          "guaranteed",
 		}
 	}
-	/*
-		_, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE) // REVIEW
-		for _, q := range s.JamState.AccumulationQueue[currPhase] {
-			for _, wph := range q.WorkPackageHash {
-				log.Trace(s.Authoring, "ApplyStateTransitionFromBlock: SubWorkPackageResult queued", "s", 0, "hash", wph)
-				s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
-					WorkPackageHash: wph,
-					HeaderHash:      s.HeaderHash,
-					Slot:            s.GetTimeslot(),
-					Status:          "queued",
-				}
-			}
-		}
-	*/
+
 	h := s.JamState.AccumulationHistory[types.EpochLength-1]
 	for _, wph := range h.WorkPackageHash {
 		log.Trace(s.Authoring, "computeStateUpdates-A", "hash", wph)

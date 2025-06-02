@@ -47,10 +47,15 @@ endif
 
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
-jam_with_ffi_build: ffi_force
-	@echo "Building JAM...  "
-	mkdir -p $(OUTPUT_DIR)
-	go build  -tags="cgo" -o $(OUTPUT_DIR)/$(BINARY) .
+run_1:
+	@rm -rf ${HOME}/.jamduna/jam-*
+	@$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json
+
+run_5:
+	@for i in 0 1 2 3 4; do \
+		RUST_LOG=polkavm=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+	done
+
 jam:
 	@echo "Building JAM...  "
 	mkdir -p $(OUTPUT_DIR)
@@ -130,7 +135,7 @@ tiny: jam reset_remote_nodes
 	ansible-playbook -u root -i $(HOSTS_FILE) -e "MODE=immediate" /root/go/src/github.com/colorfulnotion/jam/yaml/jam_restart.yaml
 
 jam_clean:
-	@echo "Cleaning all jam data directories under ~/.jam..."
+	@echo "Cleaning all jam data directories under ~/.jamduna..."
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@echo "Done."
 
@@ -158,12 +163,16 @@ run_polkajam_all:
 		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
 	done; \
 
+
+#RUST_LOG=polkavm=trace $(POLKAJAM_BIN)
+#RUST_LOG=jam_node::net=trace
+
 run_polkajam_dom: jam_clean
 	@rm -rf ${HOME}/.jamduna/jam-*
 	$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json >logs/jamduna-5.log 2>&1 &
 	sleep 4
 	@for i in 0 1 2 3 4; do \
-	RUST_LOG=polkavm=trace $(POLKAJAM_BIN) --chain chainspecs/polkajam-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+	RUST_LOG=polkavm=trace $(POLKAJAM_BIN) --chain dev --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 mkt: jam jam_clean run_polkajam_dom

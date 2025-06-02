@@ -59,9 +59,9 @@ func AcceptableGuaranteeError(err error) bool {
 // VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
 func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) error {
 	// common validations
-	if err := s.checkServicesExist(g); err != nil {
-		return err
-	}
+	// if err := s.checkServicesExist(g); err != nil {
+	// 	return err
+	// }
 	if g.Report.CoreIndex >= types.TotalCores {
 		return jamerrors.ErrGBadCoreIndex
 	}

@@ -9,12 +9,17 @@ import (
 
 type ExtrinsicsBlobs [][]byte
 
-func (E ExtrinsicsBlobs) Bytes() []byte {
-	encode, err := Encode(E)
-	if err != nil {
-		return nil
+func (eb ExtrinsicsBlobs) Bytes() []byte {
+	n := 0
+	for _, b := range eb {
+		n += len(b)
 	}
-	return encode
+	out := make([]byte, n)
+	i := 0
+	for _, b := range eb {
+		i += copy(out[i:], b)
+	}
+	return out
 }
 
 func (e ExtrinsicsBlobs) MarshalJSON() ([]byte, error) {

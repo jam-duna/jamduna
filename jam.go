@@ -284,9 +284,14 @@ func main() {
 			now := time.Now()
 			loc := now.Location()
 			log.InitLogger(logLevel)
+			pvm.PvmLogging = true
 			log.EnableModule(log.PvmAuthoring)
+			log.EnableModule(log.PvmValidating)
 			log.EnableModule(log.FirstGuarantorOrAuditor)
+			log.EnableModule(log.OtherGuarantor)
 			log.EnableModule(log.GeneralAuthoring)
+			log.EnableModule(log.GeneralValidating)
+
 			var peers []string
 			var peerList map[uint16]*node.Peer
 
@@ -454,7 +459,7 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 	fmt.Printf("validatorIndex %d out of %d peers\n", validatorIndex, len(peerList))
 
 	if selfSecrets.BandersnatchPub != peerList[uint16(validatorIndex)].Validator.Bandersnatch {
-		fmt.Printf("Error: seed file does not match the metadata. %s", err)
+		fmt.Printf("Error: seed file does not match the metadata. self.BandersnatchPub=0x%x | peerList[%v].BandersnatchPub=0x%x", selfSecrets.BandersnatchPub, validatorIndex, peerList[uint16(validatorIndex)].Validator.Bandersnatch)
 		os.Exit(1)
 	}
 	return selfSecrets

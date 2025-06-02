@@ -128,19 +128,19 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 		j.nodeSelf.latest_block_mutex.Unlock()
 		nodeStatusJson, err := json.Marshal(nodeStatus)
 		if err != nil {
-			*res = fmt.Sprintf("Error marshalling node status: %s", err)
+			*res = fmt.Sprintf("error marshalling node status: %s", err)
 		}
 		*res = string(nodeStatusJson)
 	default:
-		*res = fmt.Sprintf("Unknown command %s", command)
-		return fmt.Errorf("Unknown command %s", command)
+		*res = fmt.Sprintf("unknown command %s", command)
+		return fmt.Errorf("unknown command %s", command)
 	}
 	return nil
 }
 
 func (j *Jam) GetAvailabilityAssignments(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	coreIdxStr := req[0]
 	codeIdx, err := strconv.ParseUint(coreIdxStr, 10, 32)
@@ -215,10 +215,10 @@ func (j *Jam) StateRoot(req []string, res *string) error {
 
 	sdb, ok := j.statedbMap[headerHash]
 	if ok {
-		*res = fmt.Sprintf("%s", sdb.StateRoot)
+		*res = sdb.StateRoot.String()
 		return nil
 	}
-	return fmt.Errorf("Unknown header hash %s", headerHash)
+	return fmt.Errorf("unknown header hash %s", headerHash)
 }
 
 // Returns the BEEFY root of the block with the given header hash, or null if this is not known.
@@ -240,7 +240,7 @@ func (j *Jam) BeefyRoot(req []string, res *string) error {
 		*res = recentBlocks[len(recentBlocks)-1].String()
 		return nil
 	}
-	return fmt.Errorf("No recent blocks")
+	return fmt.Errorf("no recent blocks")
 }
 
 func (j *Jam) Block(req []string, res *string) error {
@@ -351,6 +351,38 @@ func (j *Jam) BestBlock(req []string, res *string) error {
 	return nil
 }
 
+// see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks
+func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineContext {
+	anchor := common.Hash{}
+	stateRoot := common.Hash{}
+	beefyRoot := common.Hash{}
+	s := n.statedb
+	if len(s.JamState.RecentBlocks) > 5 {
+		idx := len(s.JamState.RecentBlocks) - 5
+		anchorBlock := s.JamState.RecentBlocks[idx]
+		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
+		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks
+		beefyRoot = *(anchorBlock.B.SuperPeak()) // beefy root b must be in s.JamState.RecentBlocks
+	}
+	sb, err := n.GetBlockByHeaderHash(anchor)
+	if err != nil {
+		log.Error(module, "getRefineContext", "error", err, "anchor", anchor.String())
+		return types.RefineContext{}
+	}
+
+	// B) LOOKUP ANCHOR
+	return types.RefineContext{
+		// A) ANCHOR
+		Anchor:    anchor,
+		StateRoot: stateRoot,
+		BeefyRoot: beefyRoot,
+		// B) LOOKUP ANCHOR
+		LookupAnchor:     anchor,
+		LookupAnchorSlot: sb.Header.Slot,
+		Prerequisites:    prereqs,
+	}
+}
+
 func (n *NodeContent) getLatestFinalizedBlockSlot() uint32 {
 	n.statedbMutex.Lock()
 	defer n.statedbMutex.Unlock()
@@ -433,7 +465,7 @@ func (j *Jam) Statistics(req []string, res *string) error {
 
 func (j *Jam) GetLatestState(req []string, res *string) error {
 	if len(req) != 0 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	sdb := j.statedb
 	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, sdb.GetStateUpdates()).String()
@@ -442,7 +474,7 @@ func (j *Jam) GetLatestState(req []string, res *string) error {
 
 func (j *Jam) ServiceInfo(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	serviceIndexStr := req[0]
 	serviceIndex, err := strconv.ParseUint(serviceIndexStr, 10, 32)
@@ -454,7 +486,7 @@ func (j *Jam) ServiceInfo(req []string, res *string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("Service not found %d", serviceIndex)
+		return fmt.Errorf("service not found %d", serviceIndex)
 	}
 	*res = service.JsonString()
 	return nil
@@ -462,7 +494,7 @@ func (j *Jam) ServiceInfo(req []string, res *string) error {
 
 func (j *Jam) Code(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	serviceIndexStr := req[0]
 	serviceIndex, err := strconv.ParseUint(serviceIndexStr, 10, 32)
@@ -504,7 +536,7 @@ func (j *Jam) Code(req []string, res *string) error {
 
 func (j *Jam) ServicePreimage(req []string, res *string) error {
 	if len(req) != 2 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	serviceIndexStr := req[0]
 	codeHashStr := req[1]
@@ -541,7 +573,7 @@ func (j *Jam) ServicePreimage(req []string, res *string) error {
 // req = [serviceIndex, preimage hash]
 func (j *Jam) ServiceRequest(req []string, res *string) error {
 	if len(req) != 3 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	serviceIndexStr := req[0]
 	codeHashStr := req[1]
@@ -573,7 +605,7 @@ func (j *Jam) ServiceRequest(req []string, res *string) error {
 // req = [serviceIndex, preimage hash]
 func (j *Jam) ServiceValue(req []string, res *string) error {
 	if len(req) != 2 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	serviceIndexStr := req[0]
 	storage_hashStr := req[1]
@@ -615,12 +647,12 @@ func (n *NodeContent) getSegments(requestedHash common.Hash, index []uint16) (se
 // GetWorkPackageByHash(workPackageHash string) -> json WorkReport
 func (j *Jam) WorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	workPackageHash := common.HexToHash(req[0])
 	si := j.WorkReportSearch(workPackageHash)
 	if si == nil {
-		return fmt.Errorf("Work Package not found")
+		return fmt.Errorf("work Package not found")
 	}
 
 	workReport := si.WorkReport
@@ -630,7 +662,7 @@ func (j *Jam) WorkPackage(req []string, res *string) error {
 
 func (j *Jam) TraceBlock(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	headerHash := common.HexToHash(req[0])
 	sblk, err := j.NodeContent.GetBlockByHeaderHash(headerHash)
@@ -672,12 +704,12 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 // AuditWorkPackageByHash(workPackageHash string) -> json WorkReport
 func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	workPackageHash := common.HexToHash(req[0])
 	si := j.WorkReportSearch(workPackageHash)
 	if si == nil {
-		return fmt.Errorf("Work Package not found")
+		return fmt.Errorf("work Package not found")
 	}
 	workReport := si.WorkReport
 	spec := workReport.AvailabilitySpec
@@ -712,7 +744,7 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 // GetSegment(requestedHash string, index int) -> hex string
 func (j *Jam) Segment(req []string, res *string) (err error) {
 	if len(req) != 2 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	requestedHash := common.HexToHash(req[0])
 
@@ -720,7 +752,7 @@ func (j *Jam) Segment(req []string, res *string) (err error) {
 	indicesStr := req[1]
 	err = json.Unmarshal([]byte(indicesStr), &index)
 	if err != nil {
-		return fmt.Errorf("Invalid index %s (must be between 0 and export_count-1)", indicesStr)
+		return fmt.Errorf("invalid index %s (must be between 0 and export_count-1)", indicesStr)
 	}
 
 	indices := make([]uint16, 1)
@@ -750,7 +782,7 @@ func (j *Jam) Segment(req []string, res *string) (err error) {
 
 func (j *Jam) SubmitPreimage(req []string, res *string) error {
 	if len(req) != 2 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	serviceIndexStr := req[0]
 	preimageStr := req[1]
@@ -785,7 +817,7 @@ func (j *Jam) FetchBlocks(req []string, res *string) error {
 		mode := req[0]
 		num, err := strconv.Atoi(req[1])
 		if err != nil {
-			return fmt.Errorf("Invalid number of arguments")
+			return fmt.Errorf("invalid number of arguments")
 		}
 		switch mode {
 		case "genesis":
@@ -817,12 +849,12 @@ func (j *Jam) FetchBlocks(req []string, res *string) error {
 		block_hash := common.HexToHash(blockhashhex)
 		num, err := strconv.Atoi(req[1])
 		if err != nil {
-			return fmt.Errorf("Invalid number of arguments")
+			return fmt.Errorf("invalid number of arguments")
 		}
 		direction := req[2]
 		direction_num, err := strconv.Atoi(direction)
 		if err != nil {
-			return fmt.Errorf("Invalid number of arguments")
+			return fmt.Errorf("invalid number of arguments")
 		}
 		blocks, err := j.nodeSelf.fetchBlocks(block_hash, uint8(direction_num), uint32(num))
 		if err != nil {
@@ -832,8 +864,8 @@ func (j *Jam) FetchBlocks(req []string, res *string) error {
 		*res = types.ToJSON(blocks)
 		return nil
 	}
-	*res = fmt.Sprintf("Invalid Request")
-	return fmt.Errorf("Invalid Request")
+	*res = "Invalid Request"
+	return fmt.Errorf("invalid Request")
 }
 
 func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
@@ -852,14 +884,28 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 	}
 
 	workPackageHash := newReq.WorkPackage.Hash()
-	j.NodeContent.workPackageQueue.Store(workPackageHash, &WPQueueItem{
-		workPackage:        newReq.WorkPackage,
-		coreIndex:          newReq.CoreIndex,
-		extrinsics:         newReq.ExtrinsicsBlobs,
-		addTS:              time.Now().Unix(),
-		nextAttemptAfterTS: time.Now().Unix(),
-	})
-	log.Info(module, "SubmitWorkPackage succ", "wph", workPackageHash)
+	if false {
+		// this will insert the work package into the queue DIRECTLY
+		go func() {
+			coreIndex, err := j.GetCoreIndexFromEd25519Key(j.GetEd25519Key())
+			if err != nil {
+				return
+			}
+
+			// receive the WP and send to 2 others via CE134
+			j.NodeContent.workPackageQueue.Store(workPackageHash, &WPQueueItem{
+				workPackage:        newReq.WorkPackage,
+				coreIndex:          coreIndex,
+				extrinsics:         newReq.ExtrinsicsBlobs,
+				addTS:              time.Now().Unix(),
+				nextAttemptAfterTS: time.Now().Unix(),
+			})
+			log.Info(module, "SubmitWorkPackage succ", "wph", workPackageHash)
+		}()
+	}
+
+	// send to another node via CE133
+	j.NodeContent.SubmitWPSameCore(newReq.WorkPackage, newReq.ExtrinsicsBlobs)
 
 	*res = "OK"
 	return nil
@@ -867,10 +913,12 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 
 func (j *Jam) GetRefineContext(req []string, res *string) error {
 	if len(req) != 0 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	// Access statedb via Node reference
-	refinecontext := j.statedb.GetRefineContext() // not sure
+	refinecontext := j.getRefineContext() // not sure
+	j.getLatestFinalizedBlockSlot()
+	fmt.Printf("JAM SERVER GetRefineContext: %s\n", refinecontext.String())
 
 	// json marshal the refine context
 	*res = refinecontext.String()
@@ -879,7 +927,7 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 
 func (j *Jam) ListServices(req []string, res *string) error {
 	if len(req) != 0 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 
 	j.servicesMutex.Lock()
@@ -900,7 +948,7 @@ func (j *Jam) ListServices(req []string, res *string) error {
 func (j *Jam) Encode(req []string, res *string) error {
 	// use encodeapi to encode the input
 	if len(req) != 2 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	objectType := req[0]
 	input := req[1]
@@ -916,7 +964,7 @@ func (j *Jam) Encode(req []string, res *string) error {
 func (j *Jam) Decode(req []string, res *string) error {
 	// use decodeapi to decode the input
 	if len(req) != 2 {
-		return fmt.Errorf("Invalid number of arguments")
+		return fmt.Errorf("invalid number of arguments")
 	}
 	objectType := req[0]
 	input := req[1]
@@ -940,6 +988,7 @@ func (n *NodeContent) startRPCServerImpl(validatorIndex int) {
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
 	address := fmt.Sprintf(":%d", DefaultTCPPort+validatorIndex)
+
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		fmt.Println("Failed to start RPC server:", err)
@@ -963,13 +1012,13 @@ func ParsePeerList(peerListMapFile string) (peerInfoMap map[uint16]*PeerInfo, er
 	peerListMapJson, err := os.Open(peerListMapFile)
 	if err != nil {
 		errStr := fmt.Sprintf("Error Open(peerListFile): %s\n", err)
-		return peerInfoMap, fmt.Errorf(errStr)
+		return peerInfoMap, errors.New(errStr)
 	}
 
 	err = json.NewDecoder(peerListMapJson).Decode(&peerInfoMap)
 	if err != nil {
 		errStr := fmt.Sprintf("Error Decode: %s\n", err)
-		return peerInfoMap, fmt.Errorf(errStr)
+		return peerInfoMap, errors.New(errStr)
 	}
 	peerListMapJson.Close()
 	return peerInfoMap, nil
@@ -1115,7 +1164,7 @@ func encodeapi(objectType string, inp string) (string, error) {
 		return common.Bytes2Hex(encodedBytes), nil
 
 	default:
-		return "", errors.New("Unknown object type")
+		return "", errors.New("unknown object type")
 	}
 
 	if err != nil {
@@ -1136,7 +1185,7 @@ func decodeapi(objectType, input string) (string, error) {
 	// Convert input hex → bytes
 	encodedBytes := common.Hex2Bytes(input)
 	if len(encodedBytes) == 0 {
-		return "", errors.New("Invalid hex input")
+		return "", errors.New("invalid hex input")
 	}
 
 	var err error
@@ -1208,7 +1257,7 @@ func decodeapi(objectType, input string) (string, error) {
 	case "ServiceAccount":
 		decodedStruct, err = types.AccountStateFromBytes(0, encodedBytes)
 	default:
-		return "", errors.New("Unknown object type")
+		return "", errors.New("unknown object type")
 	}
 
 	if err != nil {

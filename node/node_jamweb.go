@@ -58,7 +58,9 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 				},
 			}
 			data, err = json.Marshal(payload)
-			client.sendData(data)
+			if err == nil {
+				client.sendData(data)
+			}
 		}
 		if client.FinalizedBlock != nil {
 			req := client.FinalizedBlock
@@ -70,7 +72,9 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 				},
 			}
 			data, err = json.Marshal(payload)
-			client.sendData(data)
+			if err == nil {
+				client.sendData(data)
+			}
 		}
 		if client.Statistics != nil {
 			req := client.Statistics
@@ -82,7 +86,9 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 				},
 			}
 			data, err = json.Marshal(payload)
-			client.sendData(data)
+			if err == nil {
+				client.sendData(data)
+			}
 		}
 		for wph, req := range client.WorkPackages {
 			if req != nil {
@@ -95,12 +101,14 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 					Result: res,
 				}
 				data, err = json.Marshal(payload)
-				client.sendData(data)
-				if res.Status == "accumulated" {
-					log.Info(module, "WORKPACKAGE ACCUMULATED", "wph", wph, "data", string(data))
-					delete(client.WorkPackages, wph)
-				} else {
-					log.Trace(module, "WORKPACKAGE UPDATED", "wph", wph, "data", string(data))
+				if err == nil {
+					client.sendData(data)
+					if res.Status == "accumulated" {
+						log.Info(module, "WORKPACKAGE ACCUMULATED", "wph", wph, "data", string(data))
+						delete(client.WorkPackages, wph)
+					} else {
+						log.Trace(module, "WORKPACKAGE UPDATED", "wph", wph, "data", string(data))
+					}
 				}
 			}
 		}
@@ -123,7 +131,9 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 							},
 						}
 						data, err = json.Marshal(payload)
-						client.sendData(data)
+						if err == nil {
+							client.sendData(data)
+						}
 					}
 				case SubServiceValue:
 					if upd.ServiceValue == nil {
@@ -136,8 +146,10 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 								Result: v,
 							}
 							data, err = json.Marshal(payload)
-							client.sendData(data)
-							log.Info(module, SubServiceValue, "gen", string(data), "k", k, "v", v)
+							if err == nil {
+								client.sendData(data)
+								log.Info(module, SubServiceValue, "gen", string(data), "k", k, "v", v)
+							}
 						}
 					} else {
 						v, ok := upd.ServiceValue[req.hash]
@@ -149,7 +161,9 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 							Result: v,
 						}
 						data, err = json.Marshal(payload)
-						client.sendData(data)
+						if err == nil {
+							client.sendData(data)
+						}
 					}
 
 				case SubServicePreimage:
@@ -166,7 +180,9 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 						Result: res,
 					}
 					data, err = json.Marshal(payload)
-					client.sendData(data)
+					if err == nil {
+						client.sendData(data)
+					}
 
 				case SubServiceRequest:
 					if upd.ServiceRequest == nil {
@@ -181,7 +197,9 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 						Result: res,
 					}
 					data, err = json.Marshal(payload)
-					client.sendData(data)
+					if err == nil {
+						client.sendData(data)
+					}
 				}
 			}
 		}
@@ -410,22 +428,22 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 			case SubServiceInfo:
 				// Handle subscription to service info
 				c.addSubscription(serviceID, &req)
-				break
+
 			case SubServiceValue:
 				// Handle subscription to service value
 				req.hash = fetchHashAttr(&req, "hash")
 				c.addSubscription(serviceID, &req)
-				break
+
 			case SubServicePreimage:
 				// Handle subscription to service preimage
 				req.hash = fetchHashAttr(&req, "hash")
 				c.addSubscription(serviceID, &req)
-				break
+
 			case SubServiceRequest:
 				// Handle subscription to service request
 				req.hash = fetchHashAttr(&req, "hash")
 				c.addSubscription(serviceID, &req)
-				break
+
 			case SubBestBlock:
 				// Handle subscription to best block
 				req.isFinalized = false

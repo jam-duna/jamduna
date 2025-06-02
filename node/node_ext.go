@@ -86,12 +86,9 @@ func (m *ManualJCEManager) Replenish() {
 	pollTicker := time.NewTicker(100 * time.Millisecond)
 	defer pollTicker.Stop()
 
-	for {
-		select {
-		case <-pollTicker.C:
-			//fmt.Printf("Replenish: Replenishing JCEBuffer to %d.\n", UpperJCEBuffer)
-			m.JCEBuffer = UpperJCEBuffer
-		}
+	for range pollTicker.C {
+		//fmt.Printf("Replenish: Replenishing JCEBuffer to %d.\n", UpperJCEBuffer)
+		m.JCEBuffer = UpperJCEBuffer
 	}
 }
 
@@ -207,7 +204,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 		}
 	}
 
-	if m.currentRefineState == nil || len(m.currentRefineState) == 0 {
+	if len(m.currentRefineState) == 0 {
 
 		//fmt.Println("CheckReq Error: WPQueue non-empty, but currentRefineState is nil/empty. Cannot check requirements.")
 

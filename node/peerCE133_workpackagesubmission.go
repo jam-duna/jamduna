@@ -91,43 +91,30 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	code := uint8(CE133_WorkPackageSubmission)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		log.Error(module, "SendWorkPackageSubmission0", "err", err)
 		return err
 	}
 	//--> Core Index ++ Work Package
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
+		log.Error(module, "SendWorkPackageSubmission1", "err", err)
 		stream.Close()
 		return err
 	}
 
 	//--> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
-	extrinsicsBytes, err := types.Encode(extrinsics)
-	if err != nil {
-		stream.Close()
-		return err
+	var extrinsicsBytes []byte
+	if len(extrinsics) == 0 {
+		extrinsicsBytes = []byte{}
+	} else {
+		extrinsicsBytes = extrinsics.Bytes()
 	}
-
-	// send length of extrinsicsBytes
-	msgLen := uint32(len(extrinsicsBytes))
-	lenBuf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lenBuf, msgLen)
-	_, err = stream.Write(lenBuf)
-	if err != nil {
-		log.Error(module, "sendWorkPackageSubmission3", "err", err)
+	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.PeerID, code); err != nil {
+		log.Error(module, "SendWorkPackageSubmission Encode", "err", err)
 		stream.Close()
-		return err
+		return
 	}
-
-	_, err = stream.Write(extrinsicsBytes)
-	if err != nil {
-		log.Error(module, "sendWorkPackageSubmission4", "err", err)
-		stream.Close()
-		return err
-	}
-
-	//--> FIN
 	stream.Close()
-
 	return nil
 }
 

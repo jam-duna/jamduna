@@ -13,8 +13,6 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type WPQueueItem struct {
@@ -29,30 +27,27 @@ type WPQueueItem struct {
 func (n *Node) runWPQueue() {
 	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
-	for {
-		select {
-		case <-pulseTicker.C:
-			n.workPackageQueue.Range(func(key, value interface{}) bool {
-				wpItem := value.(*WPQueueItem)
-				if time.Now().Unix() >= wpItem.nextAttemptAfterTS {
-					wpItem.nextAttemptAfterTS = time.Now().Unix()
-					if n.processWPQueueItem(wpItem) {
+	for range pulseTicker.C {
+		n.workPackageQueue.Range(func(key, value interface{}) bool {
+			wpItem := value.(*WPQueueItem)
+			if time.Now().Unix() >= wpItem.nextAttemptAfterTS {
+				wpItem.nextAttemptAfterTS = time.Now().Unix()
+				if n.processWPQueueItem(wpItem) {
+					n.workPackageQueue.Delete(key)
+					return false
+				} else {
+					// allow 6 seconds between attempts, which may result in a core rotation
+					wpItem.nextAttemptAfterTS = time.Now().Unix() + types.SecondsPerSlot
+					wpItem.numFailures++
+					if wpItem.numFailures > 3 {
+						log.Warn(debugG, "runWPQueue", "n", n.String(), "numFailures", wpItem.numFailures)
 						n.workPackageQueue.Delete(key)
 						return false
-					} else {
-						// allow 6 seconds between attempts, which may result in a core rotation
-						wpItem.nextAttemptAfterTS = time.Now().Unix() + types.SecondsPerSlot
-						wpItem.numFailures++
-						if wpItem.numFailures > 3 {
-							log.Warn(debugG, "runWPQueue", "n", n.String(), "numFailures", wpItem.numFailures)
-							n.workPackageQueue.Delete(key)
-							return false
-						}
 					}
 				}
-				return true
-			})
-		}
+			}
+			return true
+		})
 	}
 }
 
@@ -68,7 +63,7 @@ func (n *Node) clearQueueUsingBlock(guarantees []types.Guarantee) {
 //	(2) uses CE139 in reconstructSegments to get all the imported segments and their justifications
 func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
 	workPackage := wpQueueItem.workPackage
-
+	segmentRootLookup = make(types.SegmentRootLookup, 0)
 	workReportSearchMap := make(map[common.Hash]*SpecIndex)
 	segmentRootLookupMap := make(map[common.Hash]common.Hash)
 	// because CE139 requires erasureroot
@@ -131,7 +126,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 		for idx, impseg := range workItem.ImportedSegments {
 			wpi := workItemErasureRootsMapping[workItemIndex][idx]
 			if wpi == nil {
-				err = fmt.Errorf("Missing segments for workItemIndex %d idx %d", workItemIndex, idx)
+				err = fmt.Errorf("missing segments for workItemIndex %d idx %d", workItemIndex, idx)
 				log.Warn(module, "buildBundle", "err", err)
 				return bundle, segmentRootLookup, err
 			}
@@ -139,7 +134,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 			receivedSegments, exists := receiveSegmentMapping[erasureRoot]
 			receivedJustifications, existJ := justificationsMapping[erasureRoot]
 			if !exists || !existJ {
-				err = fmt.Errorf("Missing segments for erasureRoot %v", erasureRoot)
+				err = fmt.Errorf("missing segments for erasureRoot %v", erasureRoot)
 				log.Error(module, "buildBundle", "err", err)
 				return bundle, segmentRootLookup, err
 			}
@@ -201,35 +196,28 @@ func saveGuaranteeDerivation(gd GuaranteeDerivation) (err error) {
 func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	var pvmElapsed uint32 // REVIEW: we seem to execute multiple times sometimes???
 
-	if n.store.SendTrace {
-		tracer := n.store.Tp.Tracer("NodeTracer")
-		// n.InitWPContext(wp)
-		tags := trace.WithAttributes(attribute.String("WorkpackageHash", common.Str(wpItem.workPackage.Hash())))
-		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] processWPQueueItem", n.store.NodeID), tags)
-		n.store.UpdateWorkPackageContext(ctx)
-		defer span.End()
-	}
 	// counting the time for this function execution
 	coreIndex := wpItem.coreIndex
 
 	// here we are a first guarantor building a bundle (imported segments, justifications, extrinsics)
 	bundle, segmentRootLookup, err := n.buildBundle(wpItem)
 	if err != nil {
-		log.Warn(debugG, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Error(module, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 
 	curr_statedb := n.statedb.Copy()
 	// reject if the work package is not for this core
 	if wpItem.coreIndex != curr_statedb.GetSelfCoreIndex() {
-		log.Trace(debugG, "processWPQueueItem -  work package is not for this core", "n", n.String(), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.coreIndex", wpItem.coreIndex, "sdb.GetSelfCoreIndex", curr_statedb.GetSelfCoreIndex(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Error(module, "processWPQueueItem -  work package is not for this core", "n", n.String(), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.coreIndex", wpItem.coreIndex, "sdb.GetSelfCoreIndex", curr_statedb.GetSelfCoreIndex(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 	err = curr_statedb.VerifyPackage(bundle)
 	if err != nil {
-		log.Warn(debugG, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Error(module, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
+	log.Info(module, "processWPQueueItem", "n", n.String(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)

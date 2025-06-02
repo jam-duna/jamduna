@@ -42,12 +42,12 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 	return
 }
 
-func (n *Node) FetchAllShards(g types.Guarantee) {
+func (n *Node) FetchAllShards(g types.Guarantee, verify bool) {
 	spec := g.Report.AvailabilitySpec
 	coredIdx := g.Report.CoreIndex
 	vIdx := n.id
-	ramdamguarantor := rand0.Intn(len(g.Signatures))
-	guarantor := g.Signatures[ramdamguarantor].ValidatorIndex
+	randomGuarantor := rand0.Intn(len(g.Signatures))
+	guarantor := g.Signatures[randomGuarantor].ValidatorIndex
 	for i := 0; i < types.TotalValidators; i++ {
 		shardIdx := uint16(i)
 		bundleShard, exportedShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
@@ -62,10 +62,14 @@ func (n *Node) FetchAllShards(g types.Guarantee) {
 				"exportedShards", fmt.Sprintf("%x", exportedShards),
 				"encodedPath", fmt.Sprintf("%x", encodedPath),
 			)
-			VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
+			if verify {
+				VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
+			}
 		}
 	}
 }
+
+const attemptReconstruction = true
 
 // assureData, given a Guarantee with an AvailabilitySpec within a WorkReport,
 // fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA.
@@ -83,7 +87,9 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	var guarantor uint16
 
 	// Get All Shards
-	//n.FetchAllShards(g)
+	if attemptReconstruction {
+		n.FetchAllShards(g, true)
+	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		ramdamguarantor := rand0.Intn(len(g.Signatures))

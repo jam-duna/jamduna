@@ -242,7 +242,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 		fmt.Printf("jamtest: %s-client (local=%v)\n", jam, *jam_local_client)
 		tcpServers, wsUrl := GetAddresses(*jam_local_client)
-		bNode, err = NewNodeClient(tcpServers, wsUrl[0])
+		bNode, err = NewNodeClient(tcpServers, wsUrl)
 		if err != nil {
 			fmt.Printf("NewNodeClient ERR %v\n", err)
 			err = fmt.Errorf("‼️ jamtest: %s-client (local=%v) Failed. Connection Problem?\n", jam, *jam_local_client)
@@ -250,7 +250,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		}
 		fmt.Printf("%s tcp:%v\n", wsUrl, tcpServers)
 		client := bNode.(*NodeClient)
-		err = client.ConnectWebSocket(wsUrl[0])
+		err = client.ConnectWebSocket(wsUrl)
 	} else { // Node
 
 		fmt.Printf("jamtest: %s-node\n", jam)
@@ -288,8 +288,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			fmt.Printf("**************************\n")
 		}
 		log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
-
-		fmt.Printf("Test PreReq: %v\n", test_prereq)
 
 		// Run the JCE updater (it will run indefinitely).
 		initialJCE := uint32(11)

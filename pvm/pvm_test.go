@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,10 +16,6 @@ import (
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
-)
-
-const (
-	show_test_case = false
 )
 
 // memory_for test
@@ -49,12 +44,12 @@ type TestCase struct {
 	ExpectedMemory []TestMemory  `json:"expected-memory"`
 }
 
-func pvm_test(tc TestCase) (error, int) {
+func pvm_test(tc TestCase) (int, error) {
 	var num_mismatch int
 	fmt.Printf("Test case: %s\n", tc.Name)
 
 	// if tc.Name != "inst_div_signed_64" {
-	// 	return nil, 0
+	// 	return 0, nil
 	// }
 
 	hostENV := NewMockHostEnv()
@@ -98,7 +93,7 @@ func pvm_test(tc TestCase) (error, int) {
 				//t.Errorf("Memory mismatch for test %s: expected %v, got %v", testCase.Name, testCase.ExpectedMemory, memory)
 			}
 	*/
-	return nil, num_mismatch // "trap", tc.InitialRegs, tc.InitialPC, tc.InitialMemory
+	return num_mismatch, nil // "trap", tc.InitialRegs, tc.InitialPC, tc.InitialMemory
 }
 
 // awaiting 64 bit
@@ -107,7 +102,7 @@ func TestPVM(t *testing.T) {
 	dir := "../jamtestvectors/pvm/programs"
 
 	// Read all files in the directory
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("Failed to read directory: %v", err)
 	}
@@ -125,7 +120,7 @@ func TestPVM(t *testing.T) {
 		}
 
 		filePath := filepath.Join(dir, file.Name())
-		data, err := ioutil.ReadFile(filePath)
+		data, err := os.ReadFile(filePath)
 		if err != nil {
 			t.Fatalf("Failed to read file %s: %v", filePath, err)
 		}
@@ -135,7 +130,7 @@ func TestPVM(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
 		}
-		err, num_mismatch = pvm_test(testCase)
+		num_mismatch, err = pvm_test(testCase)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}

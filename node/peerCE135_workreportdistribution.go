@@ -9,8 +9,6 @@ import (
 
 	"reflect"
 
-	"github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -88,12 +86,12 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 	// Deserialize Slot (4 bytes)
 	if err := binary.Read(buf, binary.LittleEndian, &wr.Slot); err != nil {
-		return fmt.Errorf("Error deserializing Slot: %v", err)
+		return fmt.Errorf("error deserializing Slot: %v", err)
 	}
 	// Deserialize Len (1 byte)
 	lenByte, err := buf.ReadByte()
 	if err != nil {
-		return fmt.Errorf("Error deserializing Len: %v", err)
+		return fmt.Errorf("error deserializing Len: %v", err)
 	}
 	wr.Len = lenByte
 	// Deserialize Credentials (dynamically sized)
@@ -103,10 +101,10 @@ func (wr *JAMSNPWorkReport) FromBytes(data []byte) error {
 
 		credData := make([]byte, 66) // VERIFIED 66 bytes for GuaranteeCredential
 		if _, err := io.ReadFull(buf, credData); err != nil {
-			return fmt.Errorf("Error reading GuaranteeCredential: %v", err)
+			return fmt.Errorf("error reading GuaranteeCredential: %v", err)
 		}
 		if err := cred.FromBytes(credData); err != nil {
-			return fmt.Errorf("Error deserializing GuaranteeCredential: %v", err)
+			return fmt.Errorf("error deserializing GuaranteeCredential: %v", err)
 		}
 		wr.Credentials[i] = cred
 	}
@@ -146,6 +144,7 @@ func (p *Peer) SendWorkReportDistribution(
 	if err != nil {
 		return fmt.Errorf("ToBytes[CE135_WorkReportDistribution]: %w", err)
 	}
+	log.Info(module, "onWorkReportDistribution OUTGOING", "workReport", wr.String())
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
@@ -153,10 +152,6 @@ func (p *Peer) SendWorkReportDistribution(
 
 	return nil
 }
-
-const (
-	attemptReconstruction = false
-)
 
 func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
@@ -173,38 +168,6 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		Signatures: newReq.Credentials,
 	}
 
-	if attemptReconstruction {
-		bundleShards := make([][]byte, types.TotalValidators)
-		numShards := 2
-		indexes := make([]uint32, types.TotalValidators)
-		startIdx := 2
-		for i := startIdx; i < startIdx+numShards; i++ {
-			p, ok := n.peersInfo[peerID]
-			if ok {
-				bundleShard, _, _, err := p.SendFullShardRequest(context.TODO(), workReport.AvailabilitySpec.ErasureRoot, uint16(i))
-				if err != nil {
-					log.Error(module, "onWorkReportDistribution SendFullShardRequest ERR", "err", err)
-					continue
-				}
-				log.Info(module, "onWorkReportDistribution SendFullShardRequest SUCC", "i", i, "len(bundleShard)", len(bundleShard))
-				bundleShards[i] = bundleShard
-				indexes[i] = uint32(i)
-			}
-		}
-		// Attempt to decode the full bundle
-		encodedBundle, err := bls.Decode(bundleShards[:numShards], types.TotalValidators, indexes[:numShards], int(workReport.AvailabilitySpec.BundleLength))
-		if err != nil {
-			log.Error(module, "onWorkReportDistribution bls.Decode ERR", "err", err)
-		} else {
-			// Check if the decoded bundle matches the original work package hash
-			if workReport.GetWorkPackageHash() != common.Blake2Hash(encodedBundle) {
-				log.Warn(module, "onWorkReportDistribution", "err", "decoded bundle does not match original work package hash")
-			} else {
-				log.Info(module, "onWorkReportDistribution", "msg", "decoded bundle matches original work package hash")
-			}
-		}
-	}
-
 	select {
 	case n.guaranteesCh <- guarantee:
 	case <-ctx.Done():
@@ -214,7 +177,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Trace(module, "onWorkReportDistribution incoming Guarantee from Core on slot",
+	log.Info(module, "onWorkReportDistribution INCOMING",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReport", workReport.String(),

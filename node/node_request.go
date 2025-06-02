@@ -253,7 +253,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 						break
 					}
 				}
-				p, ok = n.peersInfo[validatorIndex]
+				_, ok = n.peersInfo[validatorIndex]
 				if !ok {
 					err := fmt.Errorf("invalid validator index %d", validatorIndex)
 					log.Error(module, "processBlockAnnouncement", "err", err)
@@ -658,13 +658,11 @@ func (n *NodeContent) makeRequests(
 				return
 			}
 
-			select {
-			case resultsCh <- res:
-				// result sent successfully
-			case <-ctx.Done():
-				// parent canceled, don't block
+			// Send result or return if parent context is canceled
+			if ctx.Err() != nil {
 				return
 			}
+			resultsCh <- res
 		}(peerID, obj)
 	}
 

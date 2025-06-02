@@ -119,6 +119,9 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	log.EnableModule(log.FirstGuarantorOrAuditor)
 	log.EnableModule(log.GeneralAuthoring)
 	chainspec, err := chainspecs.ReadSpec("dev")
+	if err != nil {
+		t.Fatalf("Failed to read chainspec: %v", err)
+	}
 	stateTransition := &statedb.StateTransition{}
 	stateTransition.PreState.KeyVals = chainspec.GenesisState
 	stateTransition.PreState.StateRoot = common.Hash{}
@@ -131,7 +134,14 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	stateTransition.Block.Header = header.(types.BlockHeader)
 	levelDBPath := "/tmp/testdb"
 	store, err := storage.NewStateDBStorage(levelDBPath)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+
+	}
 	s, err := statedb.NewStateDBFromStateTransition(store, stateTransition)
+	if err != nil {
+		t.Fatalf("Failed to create StateDB: %v", err)
+	}
 	workPackageJson := `{
   "authorization": "0x",
   "auth_code_host": 0,
@@ -166,7 +176,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to unmarshal work package: %v", err)
 	}
-	service_index := uint32(workPackage.AuthCodeHost)
+	var service_index uint32
 	// Import Segments
 	authcode, _, authindex, err := s.GetAuthorizeCode(workPackage)
 	if err != nil {
@@ -184,7 +194,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))
 
 	var segments [][]byte
-	var results []types.WorkResult
+
 	for index, workItem := range workPackage.WorkItems {
 		// map workItem.ImportedSegments into segment
 		service_index = workItem.Service
@@ -240,7 +250,6 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			result.Result = output
 			fmt.Printf("result: %x\n", result.Result)
 		}
-		results = append(results, result)
 
 		o := types.AccumulateOperandElements{
 			H: common.Hash{},
@@ -251,6 +260,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			G: result.Gas, // REVIEW
 			D: result.Result,
 		}
-		fmt.Printf("o: %x\n", o)
+		fmt.Printf("o: %x res: %s\n", o, result.String())
 	}
+	fmt.Printf("segments count: %d\n", len(segments))
 }

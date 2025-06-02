@@ -107,7 +107,7 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	}
 
 	code := uint8(CE131_TicketDistribution)
-	if isProxy == false {
+	if !isProxy {
 		code = CE132_TicketDistribution
 	}
 

@@ -159,9 +159,9 @@ type Refine_parameters struct {
 	Export_segment       [][]byte
 	Import_segement      [][]byte
 	Export_segment_index uint32
-	service_index        uint32
-	Delta                map[uint32]uint32
-	C_t                  uint32
+	//service_index        uint32
+	Delta map[uint32]uint32
+	C_t   uint32
 }
 
 func (vm *VM) chargeGas(host_fn int) {
@@ -243,7 +243,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	if vm.Gas-g < 0 {
 		vm.ResultCode = types.PVM_OOG
-		return true, fmt.Errorf("Out of gas\n")
+		return true, fmt.Errorf("out of gas")
 	}
 	vm.chargeGas(host_fn)
 
@@ -372,7 +372,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	default:
 		vm.Gas = vm.Gas + g
-		return false, fmt.Errorf("unknown host call: %d\n", host_fn)
+		return false, fmt.Errorf("unknown host call: %d", host_fn)
 	}
 }
 
@@ -699,20 +699,17 @@ func (vm *VM) hostQuery() {
 	case 0:
 		vm.WriteRegister(7, 0)
 		vm.WriteRegister(8, 0)
-		break
 	case 1:
 		x := anchor_timeslot[0]
 		vm.WriteRegister(7, 1+(1<<32)*uint64(x))
 		vm.WriteRegister(8, 0)
 		log.Debug(vm.logging, "QUERY 1", "x", x)
-		break
 	case 2:
 		x := anchor_timeslot[0]
 		y := anchor_timeslot[1]
 		vm.WriteRegister(7, 2+(1<<32)*uint64(x))
 		vm.WriteRegister(8, uint64(y))
 		log.Debug(vm.logging, "QUERY 2", "x", x, "y", y)
-		break
 	case 3:
 		x := anchor_timeslot[0]
 		y := anchor_timeslot[1]
@@ -720,7 +717,6 @@ func (vm *VM) hostQuery() {
 		log.Debug(vm.logging, "QUERY 3", "x", x, "y", y, "z", z)
 		vm.WriteRegister(7, 3+(1<<32)*uint64(x))
 		vm.WriteRegister(8, uint64(y)+(1<<32)*uint64(z))
-		break
 	}
 	w7, _ := vm.ReadRegister(7)
 	w8, _ := vm.ReadRegister(8)
@@ -1158,7 +1154,7 @@ func (vm *VM) hostRead() {
 	kz, _ := vm.ReadRegister(9)
 	bo, _ := vm.ReadRegister(10)
 	f, _ := vm.ReadRegister(11)
-	l, _ := vm.ReadRegister(12)
+	//l, _ := vm.ReadRegister(12)
 	mu_k, err_k := vm.Ram.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
 	if err_k != OK {
 		vm.terminated = true
@@ -1177,7 +1173,6 @@ func (vm *VM) hostRead() {
 	log.Info(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
 	lenval := uint64(len(val))
 	f = min(f, lenval)
-	l = min(l, lenval-f)
 	// TODO: check for OOB case again using o, f + l
 	vm.Ram.WriteRAMBytes(uint32(bo), val[f:])
 	vm.WriteRegister(7, lenval)
@@ -1221,7 +1216,7 @@ func (vm *VM) hostWrite() {
 			vm.ResultCode = types.PVM_PANIC
 			return
 		}
-		l = uint64(len(v))
+		//l = uint64(len(v))
 	}
 	a.WriteStorage(a.ServiceIndex, mu_k, k, v)
 	vm.HostResultCode = OK
@@ -1356,8 +1351,6 @@ func (vm *VM) hostForget() {
 	vm.WriteRegister(7, HUH)
 	vm.HostResultCode = HUH
 	log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o)
-	return
-
 }
 
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
@@ -1626,7 +1619,7 @@ func (vm *VM) hostZero() {
 	vm.HostResultCode = OK
 }
 
-// func (vm *VM) hostSP1Groth16Verify()
+/*
 
 func getLogLevelName(level uint64, core uint16, serviceName string) string {
 	levelName := "UNKNOWN"
@@ -1650,7 +1643,7 @@ func getLogLevelName(level uint64, core uint16, serviceName string) string {
 	}
 	return fmt.Sprintf("%s%s#%s", levelName, coreStr, serviceName)
 }
-
+*/
 // JIP-1 https://hackmd.io/@polkadot/jip1
 func (vm *VM) hostLog() {
 	level, _ := vm.ReadRegister(7)
@@ -1667,19 +1660,14 @@ func (vm *VM) hostLog() {
 	switch level {
 	case 0: // 0: User agent displays as fatal error
 		log.Crit(vm.logging, string(messageBytes))
-		break
 	case 1: // 1: User agent displays as warning
 		log.Warn(vm.logging, string(messageBytes))
-		break
 	case 2: // 2: User agent displays as important information
 		log.Info(vm.logging, string(messageBytes))
-		break
 	case 3: // 3: User agent displays as helpful information
 		log.Debug(vm.logging, string(messageBytes))
-		break
 	case 4: // 4: User agent displays as pedantic information
 		log.Trace(vm.logging, string(messageBytes))
-		break
 	}
 }
 

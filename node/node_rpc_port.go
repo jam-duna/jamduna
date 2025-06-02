@@ -9,7 +9,7 @@ import (
 
 var DefaultQuicPort = 40000
 var DefaultTCPPort = 11100
-var WSPort = 10800
+var WSPort = 19800
 
 func GetJAMNetwork() string {
 	if val := os.Getenv("JAM_NETWORK"); val != "" {
@@ -32,19 +32,14 @@ func GetJAMNetworkWSPort() int {
 	return WSPort
 }
 
-func GetAddresses(local bool) (addresses []string, wsUrl []string) {
-	addresses = make([]string, 6)
-	wsUrl = make([]string, 6)
+func GetAddresses(local bool) (address string, wsUrl string) {
+	i := 5
 	if local {
-		for i := 0; i < 6; i++ {
-			addresses[i] = fmt.Sprintf("localhost:%d", DefaultTCPPort+i)
-			wsUrl[i] = fmt.Sprintf("ws://localhost:%d/ws", WSPort+i)
-		}
+		address = fmt.Sprintf("localhost:%d", DefaultTCPPort+i)
+		wsUrl = fmt.Sprintf("ws://127.0.0.1:%d/ws", WSPort+i)
 	} else {
-		for i := 0; i < 6; i++ {
-			addresses[i] = fmt.Sprintf("%s-%d.jamduna.org:%d", GetJAMNetwork(), i, DefaultTCPPort+i)
-			wsUrl[i] = fmt.Sprintf("ws://%s-%d.jamduna.org:%d/ws", GetJAMNetwork(), i, WSPort+i)
-		}
+		address = fmt.Sprintf("%s-%d.jamduna.org:%d", GetJAMNetwork(), i, DefaultTCPPort+i)
+		wsUrl = fmt.Sprintf("ws://%s-%d.jamduna.org:%d/ws", GetJAMNetwork(), i, WSPort+i)
 	}
-	return addresses, wsUrl
+	return
 }

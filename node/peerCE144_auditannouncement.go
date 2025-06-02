@@ -220,13 +220,13 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 			case <-ticker.C:
 				audit_statedb, ok = n.getStateDBByHeaderHash(newReq.HeaderHash)
 				if ok {
-					break
+					break // TODO: CHECK -- this does not break the for loop, it just breaks the select case
 				}
 			case <-ctx.Done():
 				return fmt.Errorf("onAuditAnnouncement: audit statedb not found for header hash %s after timeout", newReq.HeaderHash.String_short())
 			}
 			if ok {
-				break
+				break // TODO: CHECK -- this does not break the for loop, it just breaks the select case
 			}
 		}
 

@@ -27,8 +27,7 @@ type NodeClient struct {
 	//coreIndex  uint16
 	client     *rpc.Client
 	baseClient *rpc.Client
-	baseIdx    uint16
-	servers    []string
+	server     string
 
 	state   *statedb.StateSnapshot
 	muState sync.Mutex
@@ -44,8 +43,6 @@ type NodeClient struct {
 	wsurl   string
 	wsConn  *websocket.Conn // websocket connection
 	wsMutex sync.Mutex      // to protect writes
-
-	mu sync.Mutex
 }
 
 type envelope struct {
@@ -53,11 +50,11 @@ type envelope struct {
 	Result json.RawMessage `json:"result"`
 }
 
-func NewNodeClient(servers []string, wsUrl string) (*NodeClient, error) {
+func NewNodeClient(server, wsUrl string) (*NodeClient, error) {
 	log.InitLogger("debug")
-	baseclient, err := rpc.Dial("tcp", servers[0]) // TODO
+	baseclient, err := rpc.Dial("tcp", server)
 	if err != nil {
-		log.Error(module, "NewNodeClient", "endpoint", servers[0], "err", err)
+		log.Error(module, "NewNodeClient", "endpoint", server, "err", err)
 		return nil, err
 	}
 
@@ -65,7 +62,7 @@ func NewNodeClient(servers []string, wsUrl string) (*NodeClient, error) {
 		baseClient:     baseclient,
 		client:         nil,
 		wsurl:          wsUrl,
-		servers:        servers,
+		server:         server,
 		state:          nil,
 		Preimage:       make(map[common.Hash][]byte),
 		WorkPackage:    make(map[common.Hash]string),
@@ -187,7 +184,6 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			return err
 		}
 		c.ServiceInfo[payload.ServiceID] = payload.Info
-		break
 	case SubServiceValue:
 		var payload struct {
 			ServiceID  uint32      `json:"serviceID"`
@@ -202,7 +198,6 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			return err
 		}
 		c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
-		break
 
 	case SubServicePreimage:
 		var payload struct {
@@ -215,7 +210,6 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			return err
 		}
 		c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
-		break
 
 	case SubServiceRequest:
 		var payload struct {
@@ -228,7 +222,6 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			return err
 		}
 		c.ServiceRequest[payload.Hash] = payload.Timeslots
-		break
 
 	case SubWorkPackage:
 		var payload struct {
@@ -240,7 +233,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			return err
 		}
 		c.WorkPackage[payload.WorkPackageHash] = payload.Status
-		break
+
 	default:
 		log.Warn(module, "listenWebSocket: Failed to parse method", "method", envelope.Method)
 	}
@@ -254,6 +247,7 @@ func (c *NodeClient) safeWriteWebSocket(msg interface{}) error {
 	if c.wsConn == nil {
 		return fmt.Errorf("WebSocket not connected")
 	}
+	fmt.Printf("Sending WebSocket message: %v\n", msg)
 	return c.wsConn.WriteJSON(msg)
 }
 
@@ -294,9 +288,9 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 	if selected == 5 {
 		selected = idx[0]
 	}
-	client, err := rpc.Dial("tcp", c.servers[selected])
+	client, err := rpc.Dial("tcp", c.server)
 	if err != nil {
-		log.Error(module, "GetClient: Dial", "selected", selected, "c.servers[selected]", c.servers[selected], "err", err)
+		log.Error(module, "GetClient: Dial", "selected", selected, "c.server", c.server, "err", err)
 		return c.baseClient
 	}
 	c.client = client
@@ -321,7 +315,7 @@ func (c *NodeClient) CallWithRetry(method string, args interface{}, reply interf
 		if strings.Contains(err.Error(), "connection reset") || strings.Contains(err.Error(), "broken pipe") {
 			log.Warn(module, "BaseClient broken, reconnecting")
 			c.baseClient.Close()
-			c.baseClient, _ = rpc.Dial("tcp", c.servers[0])
+			c.baseClient, _ = rpc.Dial("tcp", c.server)
 		}
 
 		log.Warn(module, "CallWithRetry", "method", method, "attempt", attempt+1, "err", err)
@@ -332,7 +326,7 @@ func (c *NodeClient) CallWithRetry(method string, args interface{}, reply interf
 }
 
 func (c *NodeClient) SendCommand(command []string, nodeID int) {
-	addr := c.servers[nodeID]
+	addr := c.server
 	client, err := rpc.Dial("tcp", addr)
 	if err != nil {
 		log.Error(module, "SendCommand: Dial", "addr", addr, "err", err)
@@ -355,34 +349,20 @@ func (c *NodeClient) SendCommand(command []string, nodeID int) {
 }
 
 func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {
-	var wg sync.WaitGroup
-	for i, address := range c.servers {
-
-		wg.Add(1)
-		go func(addr string, i int) {
-			defer wg.Done()
-			for _, except := range exceptNode {
-				if i == except {
-					return
-				}
-			}
-			client, err := rpc.Dial("tcp", addr)
-			if err != nil {
-				log.Error(module, "BroadcastCommand", "addr", addr, "err", err)
-				return
-			}
-			defer client.Close()
-
-			var response string
-			err = client.Call("jam.NodeCommand", command, &response)
-			if err != nil {
-				log.Error(module, "BroadcastCommand", "addr", addr, "err", err)
-				return
-			}
-			log.Info(module, "BroadcastCommand: Response", "addr", addr, "response", response)
-		}(address, i)
+	client, err := rpc.Dial("tcp", c.server)
+	if err != nil {
+		log.Error(module, "BroadcastCommand", "addr", c.server, "err", err)
+		return
 	}
-	wg.Wait()
+	defer client.Close()
+
+	var response string
+	err = client.Call("jam.NodeCommand", command, &response)
+	if err != nil {
+		log.Error(module, "BroadcastCommand", "addr", c.server, "err", err)
+		return
+	}
+	log.Info(module, "BroadcastCommand: Response", "addr", c.server, "response", response)
 }
 
 func (c *NodeClient) Close() error {
@@ -510,7 +490,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 		workPackageLastStatus[hash] = "pending"
 
 		c.Subscribe(SubWorkPackage, map[string]interface{}{
-			"hash": fmt.Sprintf("%s", hash),
+			"hash": hash.String(),
 		})
 		if err := c.SubmitWorkPackage(req); err != nil {
 			log.Warn(module, "Failed to submit work package", "identifier", req.Identifier, "err", err)
@@ -596,7 +576,7 @@ func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *WorkPackageRequest
 			return workPackageHash, nil
 		}
 	}
-	return workPackageHash, fmt.Errorf("Timeout after maxTries %d", maxTries)
+	return workPackageHash, fmt.Errorf("timeout after maxTries %d", maxTries)
 }
 
 // PREIMAGES
@@ -623,7 +603,7 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 		defer wg.Done()
 		c.Subscribe(SubServicePreimage, map[string]interface{}{
 			"serviceID": fmt.Sprintf("%d", serviceIndex),
-			"hash":      fmt.Sprintf("%s", preimageHash),
+			"hash":      preimageHash.String(),
 		})
 
 		ticker := time.NewTicker(1 * time.Second)
@@ -639,7 +619,7 @@ func (c *NodeClient) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex 
 				return
 			case <-ticker.C:
 				if img, ok := c.Preimage[preimageHash]; ok {
-					if bytes.Compare(img, preimage) == 0 {
+					if bytes.Equal(img, preimage) {
 						return
 					}
 					return
@@ -783,11 +763,14 @@ func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok 
 
 func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName string, serviceCode []byte, serviceIDs []uint32) (newServiceIdx uint32, err error) {
 	serviceCodeHash := common.Blake2Hash(serviceCode)
+	fmt.Printf("**** NewService: serviceCodeHash: %s\n", serviceCodeHash.Hex())
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
+		log.Error(module, "NewService: ReadCodeWithMetadata", "err", err)
 		return
 	}
 	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
+	log.Info(module, "NewService: ReadCodeWithMetadata")
 	bootstrapService := uint32(statedb.BootstrapServiceCode)
 	var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
 	var auth_code = statedb.AuthorizeCode{
@@ -852,23 +835,24 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 }
 
 func (c *NodeClient) LoadServices(services []string) (new_service_map map[string]types.ServiceInfo, err error) {
-	log.Info(module, "LoadServices: NewServices", "services", services)
 	new_service_map = make(map[string]types.ServiceInfo)
 	serviceIDs := make([]uint32, 0)
 	for _, service_name := range services {
-
 		refineContext, err := c.GetRefineContext()
 		if err != nil {
+			log.Error(module, "LoadServices: GetRefineContext", "service_name", service_name, "err", err)
 			return new_service_map, err
 		}
 		service_path := fmt.Sprintf("/services/%s.pvm", service_name)
 		serviceCode, err := types.ReadCodeWithMetadata(service_path, service_name)
 		if err != nil {
+			log.Error(module, "LoadServices: ReadCodeWithMetadata", "service_name", service_name, "err", err)
 			return nil, err
 		}
 		codeHash := common.Blake2Hash(serviceCode)
 		new_serviceIdx, err := c.NewService(refineContext, service_name, serviceCode, serviceIDs)
 		if err != nil {
+			log.Error(module, "LoadServices: NewService", "service_name", service_name, "err", err)
 			return nil, err
 		}
 		new_service_map[service_name] = types.ServiceInfo{
@@ -877,7 +861,6 @@ func (c *NodeClient) LoadServices(services []string) (new_service_map map[string
 		}
 		serviceIDs = append(serviceIDs, new_serviceIdx)
 	}
-	log.Info(module, "LoadServices DONE")
 	return new_service_map, nil
 }
 
@@ -899,14 +882,14 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.H
 func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.Hash) (service_index uint32, err error) {
 	ctxWait, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": fmt.Sprintf("%s", storageKey)})
+	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": storageKey.String()})
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctxWait.Done():
-			return 0, fmt.Errorf("Timed out waiting for service value")
+			return 0, fmt.Errorf("timed out waiting for service value")
 		case <-ticker.C:
 			if value, ok := c.ServiceValue[storageKey]; ok {
 				service_index = uint32(types.DecodeE_l(value))

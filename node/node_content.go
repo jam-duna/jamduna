@@ -8,12 +8,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-const (
-	blk_sync = "block_sync"
-	blk      = "block"
-	rpc_mod  = "rpc"
-)
-
 func (n *NodeContent) GetBlockTree() *types.BlockTree {
 	return n.block_tree
 }
@@ -46,9 +40,5 @@ func IsWorkPackageInHistory(latestdb *statedb.StateDB, workPackageHash common.Ha
 		}
 	}
 	_, exists := prereqSetFromAccumulationHistory[workPackageHash]
-	if exists {
-		// TODO: REVIEW non-standard error
-		return true
-	}
-	return false
+	return exists
 }
