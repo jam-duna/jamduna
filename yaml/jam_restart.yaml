@@ -1,19 +1,14 @@
----
 - hosts: localhost
   gather_facts: false
   vars:
-    MODE: "{{ MODE | default('next_hour') }}"
+    MODE: "{{ MODE | default('immediate') }}"
+    OUTPUT_DIR: "./bin"
+    BINARY: "jamduna-linux-amd64"
   tasks:
     - name: Determine JAM_START_TIME based on mode
       set_fact:
         JAM_START_TIME: >-
-          {% if MODE == "next_hour" %}
-          {{ lookup('pipe', 'date -u -d "1 hour" +"+%Y-%m-%d %H:00:00"') }}
-          {% elif MODE == "next_2min_start" %}
-          {{ lookup('pipe', 'date -u -d "120 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
-          {% else %}
           {{ lookup('pipe', 'date -u -d "25 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
-          {% endif %}
     - name: Display JAM_START_TIME
       debug:
         var: JAM_START_TIME
@@ -21,64 +16,68 @@
 - hosts: all
   become: true
   vars:
-    NUM_NODES: 1
-    NETWORK: "tiny"
-    DEFAULT_PORT: 9900
-    JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jam"
-    PEER_LIST_PATH : "/root/go/src/github.com/colorfulnotion/jam/cmd/telemetry/peerlist/jam_remote.json"
+    OUTPUT_DIR: "./bin"                      # <--- moved here also
+    BINARY: "jamduna-linux-amd64"
+    JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jamduna-linux-amd64"
+    POLKAJAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/polkajam"
+    BASE_PORT: 19800
+    CHAIN_SPEC: "/root/go/src/github.com/colorfulnotion/jam/chainspecs/jamops-spec.json"
   tasks:
-    - name: Kill Jam
-      shell: "pkill -f '{{ JAM_PATH }}'"
+    - name: Kill existing jam processes
+      shell: "pkill -f jam"
       ignore_errors: yes
 
-    - name: Remove Jam directory
+    - name: Remove previous .jamduna data
       file:
-        path: /root/.jam
+        path: "{{ item }}"
         state: absent
+      with_fileglob:
+        - "{{ ansible_env.HOME }}/.jamduna/jam-*"
 
-    - name: Use the computed JAM_START_TIME
-      set_fact:
-        JAM_START_TIME: "{{ hostvars['localhost']['JAM_START_TIME'] }}"
-
-    - name: Display JAM_START_TIME on each host
-      debug:
-        msg: "Using JAM_START_TIME: {{ JAM_START_TIME }}"
-
-    - name: Create logs Directory
+    - name: Ensure log directory exists
       file:
         path: /tmp/logs
         state: directory
-        mode: 0755
+        mode: '0755'
 
-    - name: Copy binary jam from local to jam_hosts
+    - name: Copy binary to remote
       copy:
-        src: "{{ JAM_PATH }}"
+        src: "/root/go/src/github.com/colorfulnotion/jam/bin/jamduna-linux-amd64"
         dest: "{{ JAM_PATH }}"
         mode: '0755'
 
-    - name: Run command in Instances
+
+    - name: Start polkajam for i=0 and jamduna for i=1..5
       shell: |
-        echo "Using JAM_START_TIME: {{ JAM_START_TIME }}"
-        for i in $(seq 0 $(( {{ NUM_NODES }} - 1 ))); do
-          PORT=$(( {{ DEFAULT_PORT }} + i ));
-          echo "Starting instance $i on port $PORT..."
-          nohup {{ JAM_PATH }} -net_spec {{ NETWORK }} -port $PORT -peerlist {{PEER_LIST_PATH}} -start_time "{{ JAM_START_TIME }}" > /tmp/logs/jam_$PORT.log 2>&1 < /dev/null &
-          PID=$!
+        i=$(echo {{ inventory_hostname }} | sed 's/[^0-9]*//g')
+        PORT=$(( {{ BASE_PORT }} + i ))
 
-          sleep 1  # Give it a second to initialize
+        {{ JAM_PATH }} gen-keys
+        if [ "$i" -eq 0 ]; then
+          LOGFILE="/tmp/logs/polkajam.log"
+          CMD="{{ POLKAJAM_PATH }} --chain {{ CHAIN_SPEC }} --parameters tiny run --temp --dev-validator $i --rpc-port=$PORT"
+        else
+          LOGFILE="/tmp/logs/jamduna.log"
+          CMD="{{ JAM_PATH }} run --dev-validator $i --rpc-port=$PORT --chain {{ CHAIN_SPEC }}"
+        fi
 
-          if ! kill -0 $PID 2>/dev/null; then
-            echo "❌ Instance $i on port $PORT crashed immediately! Check /tmp/logs/jam_$PORT.log"
-          else
-            echo "✅ Instance $i started successfully with PID $PID on port $PORT."
-          fi
-        done
-        sleep 2
+        echo "Running: $CMD"
+        nohup $CMD > $LOGFILE 2>&1 < /dev/null &
+        PID=$!
+        sleep 1
+        if ! kill -0 $PID 2>/dev/null; then
+          echo "❌ Node $i failed to start — see $LOGFILE"
+          tail -n 20 $LOGFILE
+        else
+          echo "✅ Node $i started on port $PORT with PID $PID"
+        fi
+
+        sleep 1
         pgrep -a jam
       args:
         executable: /bin/bash
-    - name: Display completion Message
-      debug:
-        msg: "All instances started."
 
+    - name: Done
+      debug:
+        msg: "All JAM validators launched via Ansible."
 

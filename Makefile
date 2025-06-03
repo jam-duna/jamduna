@@ -47,6 +47,19 @@ endif
 
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet
 
+spin_localclient: jam kill_jam jam_clean spin_5 spin_0
+
+spin_5:
+	@rm -rf ${HOME}/.jamduna/jam-*
+	@for i in 1 2 3 4 5; do \
+		$(OUTPUT_DIR)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain chainspecs/jamduna-spec.json  >logs/jamduna-$$i.log 2>&1 & \
+	done
+
+spin_0:
+	@for i in 0; do \
+		RUST_LOG=polkavm=trace, jam_node=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+	done
+
 run_1:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json
@@ -162,60 +175,6 @@ run_polkajam_all:
 		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
 		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
 	done; \
-
-
-#RUST_LOG=polkavm=trace $(POLKAJAM_BIN)
-#RUST_LOG=jam_node::net=trace
-
-run_polkajam_dom: jam_clean
-	@rm -rf ${HOME}/.jamduna/jam-*
-	$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/polkajam-spec.json >logs/jamduna-5.log 2>&1 &
-	sleep 4
-	@for i in 0 1 2 3 4; do \
-	RUST_LOG=polkavm=trace $(POLKAJAM_BIN) --chain dev --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
-	done
-
-mkt: jam jam_clean run_polkajam_dom
-
-run_jamduna_dom: jam_clean 
-	@mkdir -p logs
-	@rm -rf ${HOME}/.jamduna/jam-*
-	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
-	@# validator 5 uses POLKAJAM_BIN
-	@RUST_LOG=jam_node::net=trace $(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 > logs/polkajam-5.log 2>&1&
-	@# validator 1 ~ NUM_NODES-1 use jamduna
-	@for i in $$(seq 0 $$(($(NUM_NODES) - 2))); do \
-		PORT=$$(($(DEFAULT_PORT) + $$i)); \
-		V_IDX=$$i; \
-		echo ">> Starting validator $$V_IDX on port $$PORT"; \
-		$(OUTPUT_DIR)/$(BINARY) run \
-			--chain $(CHAINSPEC) \
-			--dev-validator $$V_IDX \
-			--start-time "$(JAM_start-time)" \
-			--rpc-port=$$PORT & \
-	done; \
-	wait
-	@echo "✅ All instances started and running in parallel."
-
-run_multiclient: jam_clean 
-	@mkdir -p logs
-	@rm -rf ${HOME}/.jamduna/jam-*
-	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
-	@for i in $$(seq 0 $$(($(NUM_NODES) - 4))); do \
-		PORT=$$(($(DEFAULT_PORT) + $$i)); \
-		V_IDX=$$i; \
-		echo ">> Starting instance $$V_IDX on port $$PORT"; \
-		$(OUTPUT_DIR)/$(BINARY) run \
-			--chain $(CHAINSPEC) \
-			--dev-validator $$V_IDX \
-			--start-time "$(JAM_start-time)" & \
-	done; \
-	sleep 4
-	$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 3 --rpc-port=19803 &
-	$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 4 --rpc-port=19804 &
-	$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run --temp --dev-validator 5 --rpc-port=19805 &
-	wait
-	@echo "✅ All instances started and running in parallel."
 
 run_localclient: jam kill_jam jam_clean run_5 run_1
 

@@ -830,11 +830,11 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 
 	//TODO: (eq 156) need to make sure E_P is sorted. by what??
 	//validate (eq 156)
-	for i := 1; i < len(preimages); i++ {
-		if preimages[i].Requester <= preimages[i-1].Requester {
-			return 0, 0, fmt.Errorf(errServiceIndices)
-		}
-	}
+	// for i := 1; i < len(preimages); i++ {
+	// 	if preimages[i].Requester <= preimages[i-1].Requester {
+	// 		return 0, 0, fmt.Errorf(errServiceIndices)
+	// 	}
+	// }
 
 	for _, l := range preimages {
 		// validate eq 157

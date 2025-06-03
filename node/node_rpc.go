@@ -11,7 +11,6 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -884,31 +883,7 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 		log.Error(module, "SubmitWorkPackage", "err", err)
 		return fmt.Errorf("failed to decode WorkPackageRequest: %w", err)
 	}
-
-	workPackageHash := newReq.WorkPackage.Hash()
-	if false {
-		// this will insert the work package into the queue DIRECTLY
-		go func() {
-			coreIndex, err := j.GetCoreIndexFromEd25519Key(j.GetEd25519Key())
-			if err != nil {
-				return
-			}
-
-			// receive the WP and send to 2 others via CE134
-			j.NodeContent.workPackageQueue.Store(workPackageHash, &WPQueueItem{
-				workPackage:        newReq.WorkPackage,
-				coreIndex:          coreIndex,
-				extrinsics:         newReq.ExtrinsicsBlobs,
-				addTS:              time.Now().Unix(),
-				nextAttemptAfterTS: time.Now().Unix(),
-			})
-			log.Info(module, "SubmitWorkPackage succ", "wph", workPackageHash)
-		}()
-	}
-
-	// send to another node via CE133
 	j.NodeContent.SubmitWPSameCore(newReq.WorkPackage, newReq.ExtrinsicsBlobs)
-
 	*res = "OK"
 	return nil
 }

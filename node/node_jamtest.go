@@ -192,7 +192,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	//fmt.Printf("jamtest: jam=%s | isDisputeMode=%v | raw=%v\n", jam, isDisputeMode, jam_raw)
 
 	// Specify testServices
-	targetedFinalityDelay := 5
+	targetedFinalityDelay := 0
 	defaultDelay := time.Duration(targetedFinalityDelay*types.SecondsPerSlot) * time.Second
 	var serviceNames []string
 	switch jam {
@@ -346,7 +346,12 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	jceManager = nil
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
-		if serviceName == "auth_copy" || serviceName == "fib" {
+		if serviceName == "auth_copy" {
+			service.ServiceCode = statedb.AuthCopyServiceCode
+			continue
+		}
+		if serviceName == "fib" {
+			service.ServiceCode = statedb.FibServiceCode
 			continue
 		}
 

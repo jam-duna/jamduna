@@ -1199,10 +1199,10 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 	}
 
 	// get the co-workers of the node
+	workPackageHash := wp.Hash()
 	coWorkers := n.GetCoreCoWorkersPeers(coreIndex)
 	// send the work package to some other co-worker
 	for id, peer := range coWorkers {
-
 		if uint16(id) != n.id {
 			err = peer.SendWorkPackageSubmission(context.Background(), wp, extrinsicsBlobs, coreIndex)
 			if err != nil {
@@ -1211,7 +1211,16 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 			}
 			log.Info(module, "SubmitWPSameCore SUBMISSION", "coreIndex", coreIndex)
 			break
-			//return
+		} else {
+			n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
+				workPackage:        wp,
+				coreIndex:          coreIndex,
+				extrinsics:         extrinsicsBlobs,
+				addTS:              time.Now().Unix(),
+				nextAttemptAfterTS: time.Now().Unix(),
+			})
+			log.Info(module, "SubmitWPSameCore SUBMISSION", "coreIndex", coreIndex)
+			break
 		}
 	}
 	return nil
@@ -1907,7 +1916,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
 		"blk", nextBlock.Str(),
 	)
-	//go n.getCE129(nextBlock.Header.AuthorIndex, nextBlock.Header.Hash())
+	//	go n.getCE129(nextBlock.Header.AuthorIndex, nextBlock.Header.Hash())
 	if newStateDB.GetSafrole().GetTimeSlot() != nextBlock.Header.Slot {
 		panic("ApplyBlock: TimeSlot mismatch")
 	}

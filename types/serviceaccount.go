@@ -364,7 +364,7 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 
 func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv) (ok bool, anchor_timeslot []uint32) {
 	lookupObj, ok := s.Lookup[blobHash]
-	if lookupObj.Deleted {
+	if ok && lookupObj.Deleted {
 		return false, []uint32{}
 	}
 	if !ok {

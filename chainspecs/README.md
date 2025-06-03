@@ -4,6 +4,7 @@ Generate a spec with:
 
 ```
 bin/jamduna gen-spec chainspecs/dev-config.json chainspecs/jamduna-spec.json
+bin/jamduna gen-spec chainspecs/jamops-config.json chainspecs/jamops-spec.json
 ```
 
 

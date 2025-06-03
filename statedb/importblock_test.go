@@ -134,7 +134,7 @@ func TestTraces(t *testing.T) {
 	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
 	//testSTFDir(t, "../jamtestvectors/traces/fallback")
 	//testSTFDir(t, "../jamtestvectors/traces/safrole")
-	dir := "../jamtestvectors/traces/reports-l0"
+	dir := "../jamtestvectors/traces/reports-l1"
 	log.InitLogger("info")
 	entries, err := os.ReadDir(dir)
 	if err != nil {

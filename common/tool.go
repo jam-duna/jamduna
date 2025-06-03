@@ -446,29 +446,39 @@ func ToSAN(pub []byte) string {
 	return "e" + B(n, 52)
 }
 
-// metadata related code
 func AddressToMetadata(address string) ([]byte, error) {
 	ipStr, portStr, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to split host and port: %v", err)
 	}
+
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return nil, fmt.Errorf("invalid IP: %v", ipStr)
 	}
-	if ip == nil {
+
+	// Ensure the IP is a 16-byte representation
+	if ip.To4() != nil {
+		ip = ip.To16() // This returns the IPv6-mapped version for IPv4 addresses
+	} else {
+		ip = ip.To16()
+	}
+	if ip == nil || len(ip) != 16 {
 		return nil, fmt.Errorf("IP is not a valid 16-byte address: %v", ipStr)
 	}
+
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 0 || port > 65535 {
 		return nil, fmt.Errorf("invalid port: %v", portStr)
 	}
+
 	metadata := make([]byte, 18)
 	copy(metadata[:16], ip)
 	binary.LittleEndian.PutUint16(metadata[16:], uint16(port))
 
 	return metadata, nil
 }
+
 func MetadataToAddress(metadata []byte) (ipAddr string, port int, err error) {
 	//The validators' IP-layer endpoints are given as IPv6/port combinations, to be found in the first 18 bytes of validator metadata
 	//with the first 16 bytes being the IPv6 address and the latter 2 being a little endian representation of the port.

@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -87,7 +86,7 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 
 	mmr.Append(accumulationRoot)
-	log.Trace(s.Authoring, "BETA computation", "n", s.Id, "accumulationRoot", accumulationRoot, "mmr", (*mmr).String())
+	//log.Trace(s.Authoring, "BETA computation", "n", s.Id, "accumulationRoot", accumulationRoot, "mmr", (*mmr).String())
 	n := Beta_state{
 		Reported:   reported,          // p
 		HeaderHash: blk.Header.Hash(), // h

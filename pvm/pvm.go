@@ -1389,7 +1389,7 @@ func (vm *VM) HandleTwoRegsTwoImms(opcode byte, operands []byte) {
 
 	vm.WriteRegister(registerIndexA, vx)
 
-	fmt.Printf(" --- LOAD_IMM_JUMP jump %d\n", valueB+vy)
+	//fmt.Printf(" --- LOAD_IMM_JUMP jump %d\n", valueB+vy)
 
 	vm.djump((valueB + vy) % (1 << 32))
 }
