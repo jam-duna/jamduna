@@ -90,7 +90,7 @@ func (b WorkPackageBundle) Encode() []byte {
 
 func (b WorkPackageBundle) Decode(data []byte) (interface{}, uint32) {
 	bp, leng, _ := DecodeBundle(data)
-	return &bp, leng
+	return *bp, leng
 }
 
 func DecodeBundle(remaining []byte) (*WorkPackageBundle, uint32, error) {

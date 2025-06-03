@@ -9,6 +9,7 @@ import (
 
 	"reflect"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -181,7 +182,9 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReport", workReport.String(),
+		"workReportBytes", common.Bytes2Hex(workReport.Bytes()),
 		"workReportHash", workReport.Hash(),
+		"spec", workReport.AvailabilitySpec.String(),
 		"guarantee.Slot", guarantee.Slot,
 	)
 

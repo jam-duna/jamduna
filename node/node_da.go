@@ -59,7 +59,7 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 	erasureRoot := erasureTree.RootHash()
 	for shardIdx := 0; shardIdx < types.TotalValidators; shardIdx++ {
 		treeLen, leaf, path, _, _ := erasureTree.Trace(shardIdx)
-		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leaf, path)
+		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIdx), leaf, path, "ErasureRootDefaultJustification")
 		if !verified {
 			return shardJustifications, fmt.Errorf("verifyWBTJustification Failure")
 		}
@@ -75,13 +75,16 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 }
 
 // Verify T(s,i,H)
-func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash []byte, path [][]byte) (bool, common.Hash) {
+func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash []byte, path [][]byte, caller string) (bool, common.Hash) {
 	recoveredRoot, verified, _ := trie.VerifyWBT(treeLen, int(shardIndex), root, leafHash, path)
+	encodedPath, _ := common.EncodeJustification(path, types.NumECPiecesPerSegment)
+	reversedEncodedPath, _ := common.EncodeJustification((common.ReversedByteArray(path)), types.NumECPiecesPerSegment)
 	if root != recoveredRoot {
-		log.Warn(module, "VerifyWBTJustification Failure", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		log.Warn(module, "VerifyWBTJustification Failure", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		log.Warn(module, "VerifyWBTJustification Failure", "caller", caller, "shardIdx", shardIndex, "Expected", root, "encodedPath", common.Bytes2String(encodedPath), "reversedEncodedPath", common.Bytes2String(reversedEncodedPath))
 		return false, recoveredRoot
 	}
-	log.Debug(module, "VerifyWBTJustification Success", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+	log.Info(module, "VerifyWBTJustification Success", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 	return true, recoveredRoot
 }
 
@@ -361,7 +364,16 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(debugG, "executeWorkPackageBundle OUT", "workreporthash", common.Str(workReport.Hash()), "workReport", workReport.String())
+	log.Info(debugG, "executeWorkPackageBundle OUT",
+		"n", n.String(),
+		"workPackageHash", workReport.GetWorkPackageHash(),
+		"workReport", workReport.String(),
+		"workReportBytes", common.Bytes2Hex(workReport.Bytes()),
+		"workReportHash", workReport.Hash(),
+		"spec", workReport.AvailabilitySpec.String(),
+		//"guarantee.Slot", guarantee.Slot,
+		//"segments", common.FormatPaddedBytesArray(segments, 20),
+	)
 	n.StoreMeta_Guarantor(spec, d)
 	pvmElapsed := common.Elapsed(pvmStart)
 	if firstGuarantorOrAuditor {

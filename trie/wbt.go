@@ -130,14 +130,16 @@ func (tree *WellBalancedTree) Trace(index int) (int, []byte, [][]byte, bool, err
 		}
 		current = parent
 	}
-	return treeLen, leafHash, path, true, nil
+	reversedPath := common.ReversedByteArray(path) //quick hack to be consistent with polkajam's format
+	return treeLen, leafHash, reversedPath, true, nil
 }
 
 // Verify merges the leaf and siblings using directions from top->down, then reversing them bottom->up.
-func VerifyWBT(treeLen int, index int, root common.Hash, leafHash []byte, path [][]byte) (common.Hash, bool, error) {
+func VerifyWBT(treeLen int, index int, root common.Hash, leafHash []byte, reversedPath [][]byte) (common.Hash, bool, error) {
 	if index < 0 || index >= treeLen {
 		return common.Hash{}, false, errors.New("index out of range")
 	}
+	path := common.ReversedByteArray(reversedPath) //quick hack to be consistent with polkajam's format
 	levels := len(path)
 	dirs := computeDirectionsForIndex(index, treeLen, levels)
 	reverseInts(dirs)
