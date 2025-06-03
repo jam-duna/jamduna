@@ -145,7 +145,7 @@ func (p *Peer) SendWorkReportDistribution(
 	if err != nil {
 		return fmt.Errorf("ToBytes[CE135_WorkReportDistribution]: %w", err)
 	}
-	log.Info(debugG, "onWorkReportDistribution OUTGOING", "workReport", wr.String())
+	log.Trace(debugG, "onWorkReportDistribution OUTGOING", "workReport", wr.String())
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
@@ -178,7 +178,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Info(debugG, "onWorkReportDistribution INCOMING",
+	log.Trace(debugG, "onWorkReportDistribution INCOMING",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReport", workReport.String(),

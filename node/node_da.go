@@ -84,7 +84,7 @@ func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, le
 		log.Warn(module, "VerifyWBTJustification Failure", "caller", caller, "shardIdx", shardIndex, "Expected", root, "encodedPath", common.Bytes2String(encodedPath), "reversedEncodedPath", common.Bytes2String(reversedEncodedPath))
 		return false, recoveredRoot
 	}
-	log.Info(module, "VerifyWBTJustification Success", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+	log.Trace(module, "VerifyWBTJustification Success", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 	return true, recoveredRoot
 }
 
@@ -299,6 +299,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
 			pvmFailedElapsed := common.Elapsed(pvmStart)
+			panic(111)
 			return work_report, d, pvmFailedElapsed, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
@@ -364,7 +365,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(debugG, "executeWorkPackageBundle OUT",
+	log.Trace(debugG, "executeWorkPackageBundle OUT",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReport", workReport.String(),

@@ -47,25 +47,26 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 func (n *Node) FetchAllBundleAndSegmentShards(spec types.AvailabilitySpecifier, verify bool) {
 	// Auditor -> Assurer CE138
 	for i := range types.TotalValidators {
-		shardIdx := uint16(i)
-		//bundleShard []byte, sClub common.Hash, encodedPath []byte, err error
-		bundleShard, sClub, encodedPath, err := n.peersInfo[shardIdx].SendBundleShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
-		if err == nil {
-			log.Info(debugDA, "FetchAllBundleAndSegmentShards: SendBundleShardRequest success",
-				"shardIdx", shardIdx,
-				"erasureRoot", spec.ErasureRoot,
-				"bundleShard", fmt.Sprintf("%x", bundleShard),
-				"sClub", sClub,
-				"encodedPath", fmt.Sprintf("%x", encodedPath),
-			)
-			if verify {
-				VerifyBundleShard(spec.ErasureRoot, shardIdx, bundleShard, sClub, encodedPath)
+		go func(shardIdx uint16) {
+			//bundleShard []byte, sClub common.Hash, encodedPath []byte, err error
+			bundleShard, sClub, encodedPath, err := n.peersInfo[shardIdx].SendBundleShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
+			if err == nil {
+				log.Info(debugDA, "FetchAllBundleAndSegmentShards: SendBundleShardRequest success",
+					"shardIdx", shardIdx,
+					"erasureRoot", spec.ErasureRoot,
+					"bundleShard", fmt.Sprintf("%x", bundleShard),
+					"sClub", sClub,
+					"encodedPath", fmt.Sprintf("%x", encodedPath),
+				)
+				if verify {
+					VerifyBundleShard(spec.ErasureRoot, shardIdx, bundleShard, sClub, encodedPath)
+				}
+			} else {
+				log.Warn(debugDA, "FetchAllBundleAndSegmentShards: SendBundleShardRequest failed",
+					"shardIdx", shardIdx,
+					"err", err)
 			}
-		} else {
-			log.Warn(debugDA, "FetchAllBundleAndSegmentShards: SendBundleShardRequest failed",
-				"shardIdx", shardIdx,
-				"err", err)
-		}
+		}(uint16(i))
 	}
 	segmentsPerPageProof := uint16(64) // TODO: make this a constant
 	allsegmentindices := make([]uint16, spec.ExportedSegmentLength)
@@ -112,7 +113,7 @@ func (n *Node) FetchAllFullShards(g types.Guarantee, verify bool) {
 		shardIdx := uint16(i)
 		bundleShard, exportedShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
 		if err == nil {
-			log.Info(debugDA, "assureData: SendFullShardRequest success",
+			log.Trace(debugDA, "assureData: SendFullShardRequest success",
 				"coreIdx", coredIdx,
 				"validatorIdx", vIdx,
 				"shardIdx", shardIdx,

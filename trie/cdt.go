@@ -319,7 +319,7 @@ func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, xDepth int) ([]comm
 }
 
 func VerifyCDTJustificationX(leafHash []byte, index int, justification []common.Hash, x_depth int) []byte {
-	debugCDT := true
+	debugCDT := false
 	if debugCDT {
 		fmt.Printf("VerifyCDTJustificationX:\n")
 		fmt.Printf("  Starting hash: 0x%x\n", leafHash)

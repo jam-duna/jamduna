@@ -74,7 +74,7 @@ const (
 	Grandpa      = false
 	GrandpaEasy  = true
 	Audit        = false
-	CE138_test   = true
+	CE138_test   = false
 	revalidate   = false // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
@@ -1780,6 +1780,15 @@ func (n *Node) extendChain(ctx context.Context) error {
 	)
 	return nil
 }
+func (n *Node) getCE129(nodeIndex uint16, headerHash common.Hash) {
+	var startKey [31]byte
+	var endKey [31]byte
+	for i := range 31 {
+		startKey[i] = 0x00
+		endKey[i] = 0xff
+	}
+	n.peersInfo[nodeIndex].SendStateRequest(context.TODO(), headerHash, startKey, endKey, 10000000)
+}
 
 func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node) error {
 	for _, child := range node.Children {
@@ -1898,7 +1907,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
 		"blk", nextBlock.Str(),
 	)
-
+	//go n.getCE129(nextBlock.Header.AuthorIndex, nextBlock.Header.Hash())
 	if newStateDB.GetSafrole().GetTimeSlot() != nextBlock.Header.Slot {
 		panic("ApplyBlock: TimeSlot mismatch")
 	}
@@ -1940,6 +1949,9 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 				spec := workReport.AvailabilitySpec
 				coreIndex := workReport.CoreIndex
 				workPackageHash := spec.WorkPackageHash
+
+				n.FetchAllBundleAndSegmentShards(spec, false)
+
 				workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex)
 				if err != nil {
 					log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
@@ -2195,7 +2207,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 			log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "derived_globalRoot_j0", common.BytesToHash(derived_globalRoot_j0), "ExportedSegmentRoot", si.WorkReport.AvailabilitySpec.ExportedSegmentRoot)
 			return segments, justifications, err
 		} else {
-			log.Info(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))
+			log.Debug(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))
 		}
 		justifications[i] = fullJustification
 	}
@@ -2239,7 +2251,6 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	bundleShards := make([][]byte, types.RecoveryThreshold)
 	indexes := make([]uint32, types.RecoveryThreshold)
 	numShards := 0
-	log.Info(debugCE138, "reconstructPackageBundleSegments: numShards", "callerIdx", n.id, "numShards", numShards)
 	for _, resp := range responses {
 		daResp, ok := resp.(CE138_response)
 		if !ok {
@@ -2269,7 +2280,10 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 		} else {
 			log.Warn(module, "reconstructPackageBundleSegments: shard verification failed", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
 		}
-
+		log.Debug(module, "reconstructPackageBundleSegments: shard received", "shardIndex", daResp.ShardIndex, "bundleShard", fmt.Sprintf("%x", daResp.BundleShard))
+		bundleShards[numShards] = daResp.BundleShard
+		indexes[numShards] = uint32(daResp.ShardIndex)
+		numShards++
 	}
 
 	// Check if enough shards were collected

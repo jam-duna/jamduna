@@ -162,7 +162,7 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 			fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
 			fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
 		} else {
-			fmt.Printf("[guarantee:Verify] reportHash: %v; OK signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
+			//fmt.Printf("[guarantee:Verify] reportHash: %v; OK signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
 		}
 	}
 	if numErrors > 0 {

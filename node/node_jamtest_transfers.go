@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
 
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
@@ -24,7 +25,7 @@ func transfer(n1 JNode, testServices map[string]*types.TestService, transferNum 
 	service1 := testServices["transfer_1"]
 	service_authcopy := testServices["auth_copy"]
 	auth_copy_item := types.WorkItem{
-		Service:            service_authcopy.ServiceCode,
+		Service:            statedb.AuthCopyServiceCode,
 		CodeHash:           service_authcopy.CodeHash,
 		Payload:            []byte{},
 		RefineGasLimit:     DefaultRefineGasLimit,

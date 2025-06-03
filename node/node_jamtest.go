@@ -346,6 +346,10 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	jceManager = nil
 	var previous_service_idx uint32
 	for serviceName, service := range testServices {
+		if serviceName == "auth_copy" || serviceName == "fib" {
+			continue
+		}
+
 		// set up service using the Bootstrap service
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),

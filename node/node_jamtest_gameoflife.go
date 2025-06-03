@@ -10,6 +10,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -111,7 +112,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 					ExportCount:        export_count,
 				},
 				{
-					Service:            service_authcopy.ServiceCode,
+					Service:            statedb.AuthCopyServiceCode,
 					CodeHash:           service_authcopy.CodeHash,
 					Payload:            []byte{},
 					RefineGasLimit:     DefaultRefineGasLimit,

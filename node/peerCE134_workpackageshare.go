@@ -325,7 +325,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	}
 
 	wpCoreIndex := newReq.CoreIndex
-	log.Info(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "bundle_Len", len(encodedBundle), "coreIndex", newReq.CoreIndex, "segmentRootsLen", newReq.Len, "msgLen", msgLen,
+	log.Trace(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "bundle_Len", len(encodedBundle), "coreIndex", newReq.CoreIndex, "segmentRootsLen", newReq.Len, "msgLen", msgLen,
 		"workPackageBundleBytes", fmt.Sprintf("0x%x", bp.Bytes()), "workPackageBundle", bp.String())
 
 	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)

@@ -102,6 +102,16 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			FileName:    BootstrapServiceFile,
 			ServiceName: "bootstrap",
 		},
+		{
+			ServiceCode: FibServiceCode,
+			FileName:    FibServiceFile,
+			ServiceName: "fib",
+		},
+		{
+			ServiceCode: AuthCopyServiceCode,
+			FileName:    AuthCopyServiceFile,
+			ServiceName: "auth_copy",
+		},
 	}
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
 	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
@@ -120,10 +130,6 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 	auth_code_hash_hash := common.Blake2Hash(auth_code_hash[:])  //pa
 	auth_code_len := uint32(len(auth_code_encoded_bytes))
 	for _, service := range services {
-		if service.ServiceCode != 0 {
-			// only Bootstrap
-			continue
-		}
 
 		code, err0 := types.ReadCodeWithMetadata(service.FileName, service.ServiceName)
 		if err0 != nil {
@@ -134,20 +140,38 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 		codeHash := common.Blake2Hash(code)
 		codeLen := uint32(len(code)) // z
 		bootStrapAnchor := []uint32{0}
-		bootstrapServiceAccount := types.ServiceAccount{
-			CodeHash:        codeHash,
-			Balance:         balance,
-			GasLimitG:       100,
-			GasLimitM:       100,
-			StorageSize:     uint64(81*2 + codeLen + auth_code_len), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
-			NumStorageItems: 2*2 + 0,                                //a_i = 2⋅∣al∣+∣as∣
-		}
+		if service.ServiceCode == BootstrapServiceCode {
+			bootstrapServiceAccount := types.ServiceAccount{
+				CodeHash:        codeHash,
+				Balance:         balance,
+				GasLimitG:       100,
+				GasLimitM:       100,
+				StorageSize:     uint64(81*2 + codeLen + auth_code_len), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+				NumStorageItems: 2*2 + 0,                                //a_i = 2⋅∣al∣+∣as∣
+			}
 
-		statedb.WriteServicePreimageBlob(service.ServiceCode, code)
-		statedb.WriteServicePreimageBlob(service.ServiceCode, auth_code_encoded_bytes)
-		statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
-		statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
-		statedb.WriteServicePreimageLookup(service.ServiceCode, auth_code_hash, auth_code_len, bootStrapAnchor)
+			statedb.WriteServicePreimageBlob(service.ServiceCode, code)
+			statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
+
+			statedb.WriteServicePreimageBlob(service.ServiceCode, auth_code_encoded_bytes)
+			statedb.WriteServicePreimageLookup(service.ServiceCode, auth_code_hash, auth_code_len, bootStrapAnchor)
+
+			statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
+		} else {
+			sa := types.ServiceAccount{
+				CodeHash:        codeHash,
+				Balance:         balance,
+				GasLimitG:       100,
+				GasLimitM:       100,
+				StorageSize:     uint64(81*1 + codeLen), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+				NumStorageItems: 2*1 + 0,                //a_i = 2⋅∣al∣+∣as∣
+			}
+
+			statedb.WriteServicePreimageBlob(service.ServiceCode, code)
+			statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
+
+			statedb.writeService(service.ServiceCode, &sa)
+		}
 	}
 	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a
 	fmt.Printf("Bootstrap AuthorizationCodeHash: %v\n", auth_code_hash)  //p_u

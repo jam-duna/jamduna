@@ -692,10 +692,6 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	workPackageHash := spec.WorkPackageHash
 	coreIndex := workReport.CoreIndex
 
-	if attemptReconstruction {
-		n.FetchAllBundleAndSegmentShards(spec, false)
-	}
-
 	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
 	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex)

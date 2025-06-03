@@ -10,6 +10,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -40,7 +41,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			ParameterizationBlob:  nil,
 			WorkItems: []types.WorkItem{
 				{
-					Service:            service0.ServiceCode,
+					Service:            statedb.FibServiceCode,
 					CodeHash:           service0.CodeHash,
 					Payload:            payload,
 					RefineGasLimit:     DefaultRefineGasLimit,
@@ -49,7 +50,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					ExportCount:        1,
 				},
 				{
-					Service:            serviceAuth.ServiceCode,
+					Service:            statedb.AuthCopyServiceCode,
 					CodeHash:           serviceAuth.CodeHash,
 					Payload:            nil,
 					RefineGasLimit:     DefaultRefineGasLimit,
@@ -76,8 +77,8 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 		prevWP = hashes[0]
 
-		k := common.ServiceStorageKey(service0.ServiceCode, []byte{0})
-		data, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
+		k := common.ServiceStorageKey(statedb.FibServiceCode, []byte{0})
+		data, _, _ := n1.GetServiceStorage(statedb.FibServiceCode, k)
 		log.Info(module, wpr.Identifier, "result", fmt.Sprintf("%x", data))
 	}
 }

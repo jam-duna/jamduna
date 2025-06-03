@@ -128,17 +128,24 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
+	if err != nil {
+		return err
+	}
+	stream.Close()
+
+	parts, err := receiveMultiple(ctx, stream, 3, p.PeerID, code)
 	if err != nil {
 		return err
 	}
 
 	//<-- [Boundary Node]
-	// TODO
+	boundaryNode := parts[0]
 	//<-- [Key ++ Value]
-	// TODO
-
+	keyVal := parts[1]
+	log.Info(module, "SendStateRequest: received boundary node and key-value pairs",
+		"boundaryNodeLength", len(boundaryNode), "keyValLength", len(keyVal))
+	fmt.Printf("SendStateRequest: %x\n", keyVal)
 	return nil
 }
 

@@ -212,6 +212,12 @@ const (
 	BootstrapServiceCode  = 0
 	BootstrapServiceFile  = "/services/bootstrap.pvm"
 	BootStrapNullAuthFile = "/services/null_authorizer.pvm"
+
+	FibServiceCode = 10
+	FibServiceFile = "/services/fib.pvm"
+
+	AuthCopyServiceCode = 20
+	AuthCopyServiceFile = "/services/auth_copy.pvm"
 )
 
 func (s *StateDB) GetHeaderHash() common.Hash {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -52,7 +53,7 @@ func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int)
 		// Work Package: fib and tribonacci (core 0)
 		wprFibTrib := makeWorkPackageRequest(0, "fibtrib", nil, types.ExtrinsicsBlobs{}, []types.WorkItem{
 			{
-				Service:            serviceFib.ServiceCode,
+				Service:            statedb.FibServiceCode,
 				CodeHash:           serviceFib.CodeHash,
 				Payload:            input,
 				RefineGasLimit:     DefaultRefineGasLimit,
@@ -88,7 +89,7 @@ func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int)
 				ExportCount:        0,
 			},
 			{
-				Service:            serviceAuthCopy.ServiceCode,
+				Service:            statedb.AuthCopyServiceCode,
 				CodeHash:           serviceAuthCopy.CodeHash,
 				Payload:            nil,
 				RefineGasLimit:     DefaultRefineGasLimit,
