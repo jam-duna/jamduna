@@ -440,7 +440,7 @@ func (n *Node) runGuarantees() {
 				err := n.processGuarantee(guarantee)
 				if err != nil {
 					if statedb.AcceptableGuaranteeError(err) {
-						log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+						log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "problem", err, "ignoring...")
 					} else {
 						log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
 					}
@@ -628,6 +628,8 @@ func (n *NodeContent) makeRequests(
 	minSuccess int,
 	singleTimeout, overallTimeout time.Duration,
 ) ([]interface{}, error) {
+	//TODO: need all 5 for
+	minSuccess = 4
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
 

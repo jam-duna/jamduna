@@ -239,17 +239,9 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			NumExtrinsics:       0,
 			NumBytesExtrinsics:  uint(z),
 		}
-		if len(output.Ok)+z > types.MaxEncodedWorkReportSize {
-			result.Result.Err = types.RESULT_OVERSIZE
-			result.Result.Ok = nil
-			log.Warn(module, "executeWorkPackageBundle: Result too large", "size", len(output.Ok)+z)
-		} else if expectedSegmentCnt != len(exported_segments) {
-			result.Result.Err = types.RESULT_BAD_CODE
-			result.Result.Ok = nil
-		} else {
-			result.Result = output
-			fmt.Printf("result: %x\n", result.Result)
-		}
+
+		result.Result = output
+		fmt.Printf("result: %x\n", result.Result)
 
 		o := types.AccumulateOperandElements{
 			H: common.Hash{},

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	debugSpec = true
+	debugSpec = false
 )
 
 type AvailabilitySpecifierDerivation struct {
@@ -78,12 +78,10 @@ func ErasureRootDefaultJustification(b []common.Hash, s []common.Hash) (shardJus
 func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, leafHash []byte, path [][]byte) (bool, common.Hash) {
 	recoveredRoot, verified, _ := trie.VerifyWBT(treeLen, int(shardIndex), root, leafHash, path)
 	if root != recoveredRoot {
-		// [TODO] Michael -- TEMPORARY return true
-		//log.Warn(module, "VerifyWBTJustification Failure", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
-		return true, recoveredRoot
-	} else {
-		log.Debug(module, "VerifyWBTJustification Success", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		log.Warn(module, "VerifyWBTJustification Failure", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		return false, recoveredRoot
 	}
+	log.Debug(module, "VerifyWBTJustification Success", "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 	return true, recoveredRoot
 }
 
@@ -336,16 +334,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			NumExtrinsics:       uint(len(package_bundle.ExtrinsicData)),
 			NumBytesExtrinsics:  uint(z),
 		}
-		if len(output.Ok)+z > types.MaxEncodedWorkReportSize {
-			result.Result.Err = types.RESULT_OVERSIZE
-			result.Result.Ok = nil
-			log.Warn(module, "executeWorkPackageBundle: Result too large", "size", len(output.Ok)+z)
-		} else if expectedSegmentCnt != len(exported_segments) {
-			result.Result.Err = types.RESULT_BAD_CODE
-			result.Result.Ok = nil
-		} else {
-			result.Result = output
-		}
+		result.Result = output
 		results = append(results, result)
 
 		o := types.AccumulateOperandElements{
@@ -372,7 +361,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Debug(debugG, "executeWorkPackageBundle", "workreporthash", common.Str(workReport.Hash()), "workReport", workReport.String())
+	log.Info(debugG, "executeWorkPackageBundle OUT", "workreporthash", common.Str(workReport.Hash()), "workReport", workReport.String())
 	n.StoreMeta_Guarantor(spec, d)
 	pvmElapsed := common.Elapsed(pvmStart)
 	if firstGuarantorOrAuditor {

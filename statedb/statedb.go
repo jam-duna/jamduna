@@ -3,6 +3,7 @@ package statedb
 import (
 	"bytes"
 	"context"
+	"reflect"
 
 	"encoding/binary"
 	"encoding/hex"
@@ -928,6 +929,19 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 		log.Error(module, "IetfVrfVerify", "err", err)
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_v Verification")
 	}
+
+	extrinsicHash := bl.Header.ExtrinsicHash
+	if !reflect.DeepEqual(extrinsicHash, bl.Extrinsic.Hash()) {
+		log.Error(module, "VerifyBlockHeader:ExtrinsicHashMismatch",
+			"extrinsicHash", common.BytesToHexStr(extrinsicHash[:]),
+			"bl.Extrinsic.Hash()", common.BytesToHexStr(bl.Extrinsic.Hash()),
+			"block_author_ietf_pub", common.BytesToHexStr(block_author_ietf_pub[:]),
+			"validatorIdx", validatorIdx)
+		log.Error(module, "VerifyBlockHeader:ExtrinsicHashMismatch",
+			"guarantees[0]", bl.Extrinsic.Guarantees[0].String())
+		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: ExtrinsicHash Mismatch")
+	}
+
 	return true, validatorIdx, block_author_ietf_pub, nil
 }
 

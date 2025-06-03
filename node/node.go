@@ -74,6 +74,7 @@ const (
 	Grandpa      = false
 	GrandpaEasy  = true
 	Audit        = false
+	CE138_test   = true
 	revalidate   = false // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
@@ -1933,6 +1934,43 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 				}
 			}
 		}
+
+		if CE138_test {
+			for _, workReport := range n.statedb.AvailableWorkReport {
+				spec := workReport.AvailabilitySpec
+				coreIndex := workReport.CoreIndex
+				workPackageHash := spec.WorkPackageHash
+				workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex)
+				if err != nil {
+					log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
+					continue
+				}
+				if workPackageBundle.PackageHash() != workPackageHash {
+					log.Error(debugAudit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
+					continue
+				}
+				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, false)
+				if err != nil {
+					log.Error(debugAudit, "auditWorkReport:executeWorkPackageBundle", "err", err)
+					continue
+				}
+				if reflect.DeepEqual(wr, workReport) {
+					log.Info(debugDA, "reconstructPackageBundleSegments: WorkReport matches", "n", n.String(),
+						"coreIndex", coreIndex,
+						"workPackageHash", workPackageHash.String_short(),
+						"pvmElapsed", pvmElapsed,
+						"workReport", workReport.Hash())
+				} else {
+					log.Error(debugDA, "reconstructPackageBundleSegments: WorkReport mismatch", "n", n.String(),
+						"coreIndex", coreIndex,
+						"workPackageHash", workPackageHash.String_short(),
+						"pvmElapsed", pvmElapsed,
+						"workReport", workReport.Hash(),
+					)
+
+				}
+			}
+		}
 	} else {
 		log.Info(debugStream, "ApplyBlock: latest_block not equal to nextBlock", "n", n.String(), "latest_block", latest_block_info.HeaderHash.String_short(), "nextBlock", nextBlock.Header.Hash().String_short())
 	}
@@ -2157,7 +2195,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 			log.Error(debugDA, "cdttree:VerifyCDTJustificationX", "derived_globalRoot_j0", common.BytesToHash(derived_globalRoot_j0), "ExportedSegmentRoot", si.WorkReport.AvailabilitySpec.ExportedSegmentRoot)
 			return segments, justifications, err
 		} else {
-			log.Trace(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))
+			log.Info(debugDA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))
 		}
 		justifications[i] = fullJustification
 	}
@@ -2174,6 +2212,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	segmentRootLookup types.SegmentRootLookup,
 	coreIndex uint,
 ) (types.WorkPackageBundle, error) {
+
 	// Prepare requests to validators
 	requestsOriginal := make([]CE138_request, types.TotalValidators)
 	for validatorIdx := range requestsOriginal {
@@ -2200,7 +2239,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	bundleShards := make([][]byte, types.RecoveryThreshold)
 	indexes := make([]uint32, types.RecoveryThreshold)
 	numShards := 0
-	log.Debug(debugCE138, "reconstructPackageBundleSegments: numShards", "callerIdx", n.id, "numShards", numShards)
+	log.Info(debugCE138, "reconstructPackageBundleSegments: numShards", "callerIdx", n.id, "numShards", numShards)
 	for _, resp := range responses {
 		daResp, ok := resp.(CE138_response)
 		if !ok {
@@ -2223,9 +2262,9 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 		leaf := common.BuildBundleSegment(bClub, sClub)
 		verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath)
 		if verified {
-			log.Debug(debugCE138, "reconstructPackageBundleSegments: shard verified", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
 			bundleShards[numShards] = daResp.BundleShard
 			indexes[numShards] = uint32(daResp.ShardIndex)
+			log.Info(module, "reconstructPackageBundleSegments: shard verified", "len", len(daResp.BundleShard), "shardIndex", daResp.ShardIndex, "bundleShard", fmt.Sprintf("%x", daResp.BundleShard))
 			numShards++
 		} else {
 			log.Warn(module, "reconstructPackageBundleSegments: shard verification failed", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
@@ -2247,7 +2286,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 		return types.WorkPackageBundle{}, fmt.Errorf("decode failed: %w", err)
 	}
 
-	log.Debug(debugCE138, "reconstructPackageBundleSegments: Decoding bundle2", "callerIdx", n.id, "shardIndex", indexes[:numShards], "encodedBundle", common.Blake2Hash(encodedBundle))
+	log.Info(debugCE138, "reconstructPackageBundleSegments: bundle EC decoded", "shards", indexes[:numShards], "encodedBundle", fmt.Sprintf("%x", encodedBundle))
 	workPackageBundleRaw, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
 		log.Error(module, "reconstructPackageBundleSegments: Decode into WorkPackageBundle failed", "err", err)

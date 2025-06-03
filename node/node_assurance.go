@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	rand0 "math/rand"
+	"slices"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -42,7 +43,66 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 	return
 }
 
-func (n *Node) FetchAllShards(g types.Guarantee, verify bool) {
+// upon audit, this does CE138 AND CE139 calls to ALL Assurers
+func (n *Node) FetchAllBundleAndSegmentShards(spec types.AvailabilitySpecifier, verify bool) {
+	// Auditor -> Assurer CE138
+	for i := range types.TotalValidators {
+		shardIdx := uint16(i)
+		//bundleShard []byte, sClub common.Hash, encodedPath []byte, err error
+		bundleShard, sClub, encodedPath, err := n.peersInfo[shardIdx].SendBundleShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
+		if err == nil {
+			log.Info(debugDA, "FetchAllBundleAndSegmentShards: SendBundleShardRequest success",
+				"shardIdx", shardIdx,
+				"erasureRoot", spec.ErasureRoot,
+				"bundleShard", fmt.Sprintf("%x", bundleShard),
+				"sClub", sClub,
+				"encodedPath", fmt.Sprintf("%x", encodedPath),
+			)
+			if verify {
+				VerifyBundleShard(spec.ErasureRoot, shardIdx, bundleShard, sClub, encodedPath)
+			}
+		} else {
+			log.Warn(debugDA, "FetchAllBundleAndSegmentShards: SendBundleShardRequest failed",
+				"shardIdx", shardIdx,
+				"err", err)
+		}
+	}
+	segmentsPerPageProof := uint16(64) // TODO: make this a constant
+	allsegmentindices := make([]uint16, spec.ExportedSegmentLength)
+	proofpages := make([]uint16, 0)
+	for i := range spec.ExportedSegmentLength {
+		allsegmentindices[i] = i
+		p := i / segmentsPerPageProof
+		if !slices.Contains(proofpages, p) {
+			proofpages = append(proofpages, p)
+		}
+	}
+	for _, p := range proofpages {
+		allsegmentindices = append(allsegmentindices, spec.ExportedSegmentLength+p)
+	}
+	// Guarantor -> Assurer CE139
+	if spec.ExportedSegmentLength > 0 {
+		for i := range types.TotalValidators {
+			shardIdx := uint16(i)
+			// segmentShards []byte, justifications [][]byte, err error
+			segmentShards, _, err := n.peersInfo[shardIdx].SendSegmentShardRequest(context.TODO(), spec.ErasureRoot, shardIdx, allsegmentindices, verify)
+			if err == nil {
+				log.Info(debugDA, "assureData: SendSegmentShardRequest success",
+					"shardIdx", shardIdx,
+					"erasureRoot", spec.ErasureRoot,
+					"segmentShards", fmt.Sprintf("%x", segmentShards),
+				)
+			} else {
+				log.Warn(debugDA, "assureData: SendSegmentShardRequest failed",
+					"shardIdx", shardIdx,
+					"err", err)
+			}
+		}
+	}
+}
+
+// Assurer -> Guarantor
+func (n *Node) FetchAllFullShards(g types.Guarantee, verify bool) {
 	spec := g.Report.AvailabilitySpec
 	coredIdx := g.Report.CoreIndex
 	vIdx := n.id
@@ -88,7 +148,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 
 	// Get All Shards
 	if attemptReconstruction {
-		n.FetchAllShards(g, true)
+		n.FetchAllFullShards(g, true)
 	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {

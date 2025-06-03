@@ -473,7 +473,7 @@ func (vm *VM) step(stepn int) error {
 	}
 
 	// avoid this: this is expensive
-	if PvmLogging {
+	if PvmLogging && false {
 		registersJSON, _ := json.Marshal(vm.ReadRegisters())
 		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", ", ")
 		fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)

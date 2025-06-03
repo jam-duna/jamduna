@@ -157,10 +157,12 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 		validatorKey := CurrV[i.ValidatorIndex].GetEd25519Key()
 		if !Ed25519Verify(validatorKey, signtext, i.Signature) {
 			numErrors++
-			fmt.Printf("[guarantee:Verify] ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
+			fmt.Printf("[guarantee:Verify] reportHash: %v; ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
 			fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
 			fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
 			fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
+		} else {
+			fmt.Printf("[guarantee:Verify] reportHash: %v; OK signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
 		}
 	}
 	if numErrors > 0 {

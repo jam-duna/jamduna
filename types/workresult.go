@@ -8,13 +8,12 @@ import (
 )
 
 const (
-	RESULT_OK       = 0 //if o ∈ Y
-	RESULT_OOG      = 1 //if o = ∞
-	RESULT_PANIC    = 2 //if o = ☇
-	RESULT_BAD_CODE = 3 //if o = ⊚
-	RESULT_OVERSIZE = 4 //if o = ⊖
-	RESULT_OOB      = 5 //if o = BAD
-	RESULT_FAULT    = 6 //if o = BIG
+	RESULT_OK         = 0
+	RESULT_OOG        = 1
+	RESULT_PANIC      = 2
+	RESULT_BAD_EXPORT = 3
+	RESULT_BAD        = 4
+	RESULT_BIG        = 5
 )
 
 const (
@@ -67,14 +66,12 @@ func (R Result) Encode() []byte {
 			return []byte{1}
 		case RESULT_PANIC:
 			return []byte{2}
-		case RESULT_BAD_CODE:
+		case RESULT_BAD_EXPORT:
 			return []byte{3}
-		case RESULT_OVERSIZE:
+		case RESULT_BAD:
 			return []byte{4}
-		case RESULT_OOB:
+		case RESULT_BIG:
 			return []byte{5}
-		case RESULT_FAULT:
-			return []byte{6}
 		default:
 			return []byte{R.Err}
 		}
@@ -106,17 +103,17 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 	case 3:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_BAD_CODE,
+			Err: RESULT_BAD_EXPORT,
 		}, length
 	case 4:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_OOB,
+			Err: RESULT_BAD,
 		}, length
 	case 5:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_FAULT,
+			Err: RESULT_BIG,
 		}, length
 	default:
 		return Result{
@@ -159,16 +156,22 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 			Err: RESULT_PANIC,
 		}
 	}
+	if _, ok := s.Result["bad-exports"]; ok {
+		result = Result{
+			Ok:  nil,
+			Err: RESULT_BAD_EXPORT,
+		}
+	}
 	if _, ok := s.Result["bad-code"]; ok {
 		result = Result{
 			Ok:  nil,
-			Err: RESULT_BAD_CODE,
+			Err: RESULT_BAD,
 		}
 	}
 	if _, ok := s.Result["code-oversize"]; ok {
 		result = Result{
 			Ok:  nil,
-			Err: RESULT_OOB,
+			Err: RESULT_BIG,
 		}
 	}
 
@@ -201,11 +204,15 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 			result = map[string]interface{}{
 				"panic": nil,
 			}
-		case RESULT_BAD_CODE:
+		case RESULT_BAD_EXPORT:
+			result = map[string]interface{}{
+				"bad-exports": nil,
+			}
+		case RESULT_BAD:
 			result = map[string]interface{}{
 				"bad-code": nil,
 			}
-		case RESULT_OOB:
+		case RESULT_BIG:
 			result = map[string]interface{}{
 				"code-oversize": nil,
 			}
@@ -240,5 +247,5 @@ func (a *WorkResult) String() string {
 	return ToJSON(a)
 }
 func (a *Result) String() string {
-	return ToJSON(a)
+	return ToJSONHex(a)
 }

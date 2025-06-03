@@ -192,7 +192,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	//fmt.Printf("jamtest: jam=%s | isDisputeMode=%v | raw=%v\n", jam, isDisputeMode, jam_raw)
 
 	// Specify testServices
-	targetedFinalityDelay := 6
+	targetedFinalityDelay := 5
 	defaultDelay := time.Duration(targetedFinalityDelay*types.SecondsPerSlot) * time.Second
 	var serviceNames []string
 	switch jam {
