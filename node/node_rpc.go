@@ -130,6 +130,17 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 			*res = fmt.Sprintf("error marshalling node status: %s", err)
 		}
 		*res = string(nodeStatusJson)
+	case "GetConnections":
+		for _, peer := range j.nodeSelf.peersInfo {
+			peer.connectionMu.Lock()
+			defer peer.connectionMu.Unlock()
+			if peer.conn != nil {
+				*res += fmt.Sprintf("Peer ID: %d, peerAddress :%s\n", peer.PeerID, peer.PeerAddr)
+			} else {
+				*res += fmt.Sprintf("Peer ID: %d, peerAddress :%s (not connected)\n", peer.PeerID, peer.PeerAddr)
+			}
+		}
+
 	default:
 		*res = fmt.Sprintf("unknown command %s", command)
 		return fmt.Errorf("unknown command %s", command)

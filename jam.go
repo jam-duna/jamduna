@@ -291,7 +291,8 @@ func main() {
 			log.EnableModule(log.OtherGuarantor)
 			log.EnableModule(log.GeneralAuthoring)
 			log.EnableModule(log.GeneralValidating)
-
+			// log.EnableModule(log.NodeMonitoring)
+			// log.EnableModule(log.BlockMonitoring)
 			var peers []string
 			var peerList map[uint16]*node.Peer
 

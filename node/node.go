@@ -2778,7 +2778,8 @@ func (n *Node) runAuthoring() {
 			n.author_status = "authoring:broadcasting"
 			nodee, ok := n.block_tree.GetBlockNode(newBlock.Header.Hash())
 			if !ok {
-				return
+				log.Warn(module, "runAuthoring: GetBlockNode not found", "hash", newBlock.Header.Hash().String_short(), "n", n.String())
+				continue
 			}
 			nodee.Applied = true
 			np_blockAnnouncement, err := n.GetJAMSNPBlockAnnouncementFromHeader(newBlock.Header)
