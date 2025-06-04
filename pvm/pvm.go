@@ -473,10 +473,11 @@ func (vm *VM) step(stepn int) error {
 	}
 
 	// avoid this: this is expensive
-	if PvmLogging && false {
+	if PvmLogging {
 		registersJSON, _ := json.Marshal(vm.ReadRegisters())
-		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", ", ")
-		fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
+		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", " ")
+		//fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
+		fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
 		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
 	}
 	return nil
@@ -1217,7 +1218,10 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		}
 		result = types.DecodeE_l(value)
 		dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64(addr), result, 64, false)
-	case ADD_IMM_32, ADD_IMM_64:
+	case ADD_IMM_32:
+		result = (valueB + vx) % (1 << 32)
+		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
+	case ADD_IMM_64:
 		result = valueB + vx
 		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
 	case AND_IMM:
@@ -1229,7 +1233,10 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case OR_IMM:
 		result = valueB | vx
 		dumpBinOp("|", registerIndexA, registerIndexB, vx, result)
-	case MUL_IMM_32, MUL_IMM_64:
+	case MUL_IMM_32:
+		result = (valueB * vx) % (1 << 32)
+		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
+	case MUL_IMM_64:
 		result = valueB * vx
 		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
 	case SET_LT_U_IMM:
@@ -1244,13 +1251,22 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case SET_GT_S_IMM:
 		result = boolToUint(int64(valueB) > int64(vx))
 		dumpCmpOp("s>", registerIndexA, registerIndexB, vx, result)
-	case NEG_ADD_IMM_32, NEG_ADD_IMM_64:
+	case NEG_ADD_IMM_32:
+		result = (vx - valueB) % (1 << 32)
+		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
+	case NEG_ADD_IMM_64:
 		result = vx - valueB
 		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
-	case SHLO_L_IMM_32, SHLO_L_IMM_64:
+	case SHLO_L_IMM_32:
+		result = valueB << (vx & 63) % (1 << 32)
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
+	case SHLO_L_IMM_64:
 		result = valueB << (vx & 63)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
-	case SHLO_R_IMM_32, SHLO_R_IMM_64:
+	case SHLO_R_IMM_32:
+		result = valueB >> (vx & 63) % (1 << 32)
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	case SHLO_R_IMM_64:
 		result = valueB >> (vx & 63)
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHAR_R_IMM_32:
@@ -1259,10 +1275,16 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case SHAR_R_IMM_64:
 		result = uint64(int64(valueB) >> (vx & 63))
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	case SHLO_L_IMM_ALT_32, SHLO_L_IMM_ALT_64:
+	case SHLO_L_IMM_ALT_32:
+		result = vx << (valueB & 63) % (1 << 32)
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
+	case SHLO_L_IMM_ALT_64:
 		result = vx << (valueB & 63)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
-	case SHLO_R_IMM_ALT_32, SHLO_R_IMM_ALT_64:
+	case SHLO_R_IMM_ALT_32:
+		result = vx >> (valueB & 63) % (1 << 32)
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	case SHLO_R_IMM_ALT_64:
 		result = vx >> (valueB & 63)
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHAR_R_IMM_ALT_64:

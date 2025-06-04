@@ -416,7 +416,7 @@ func (vm *VM) hostInfo() {
 		vm.ResultCode = types.PVM_PANIC
 		return
 	}
-	log.Info(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements), "bytes", fmt.Sprintf("%x", m))
+	log.Debug(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements), "bytes", fmt.Sprintf("%x", m))
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -1273,7 +1273,7 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{})
 		xs.NumStorageItems += 2
 		xs.StorageSize += 81 + uint64(z)
-		log.Info(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{})
+		log.Debug(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{})
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
@@ -1283,19 +1283,19 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l)
 		vm.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		log.Info(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
+		log.Debug(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
 		return
 	}
 	if len(X_s_l) == 2 { // [x, y] => [x, y, t]
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
-		log.Info(vm.logging, "SOLICIT OK BBB", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		log.Debug(vm.logging, "SOLICIT OK BBB", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
 	} else {
 		vm.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Info(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
+		log.Debug(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
 		return
 	}
 }
@@ -1330,7 +1330,7 @@ func (vm *VM) hostForget() {
 		// storage accounting
 		x_s.NumStorageItems -= 2
 		x_s.StorageSize -= 81 + uint64(z)
-		log.Info(vm.logging, "FORGET OK1", "h", account_lookuphash, "z", z)
+		log.Debug(vm.logging, "FORGET OK1", "h", account_lookuphash, "z", z)
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
@@ -1339,7 +1339,7 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...)) // [x, t]
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
-		log.Info(vm.logging, "FORGET OK2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		log.Debug(vm.logging, "FORGET OK2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		return
 	} else if len(X_s_l) == 3 && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) {
 		// [x,y,w] => [w, t] where y is the current time, the time we are forgetting
@@ -1347,7 +1347,7 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l) // [w, t]
 		vm.WriteRegister(7, OK)
 		vm.HostResultCode = OK
-		log.Info(vm.logging, "FORGET OK3", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
+		log.Debug(vm.logging, "FORGET OK3", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
 		return
 	}
 	vm.WriteRegister(7, HUH)

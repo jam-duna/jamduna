@@ -121,7 +121,8 @@ func handleDiffs(filename string, diffs map[string]DiffState) {
 }
 
 func TestStateTransitionSingle(t *testing.T) {
-	filename := "../jamtestvectors/traces/reports-l0/00000013.json"
+
+	filename := "../jamtestvectors/traces/reports-l1/00000009.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
