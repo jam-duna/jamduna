@@ -310,7 +310,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(pvmContext)
-		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_a)
+		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_u)
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
@@ -365,7 +365,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Trace(debugG, "executeWorkPackageBundle OUT",
+	log.Info(debugG, "executeWorkPackageBundle OUT",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReport", workReport.String(),
