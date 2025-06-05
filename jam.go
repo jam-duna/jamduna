@@ -284,7 +284,7 @@ func main() {
 			now := time.Now()
 			loc := now.Location()
 			log.InitLogger(logLevel)
-			pvm.PvmLogging = true
+			pvm.PvmLogging = false
 			log.EnableModule(log.PvmAuthoring)
 			log.EnableModule(log.PvmValidating)
 			log.EnableModule(log.FirstGuarantorOrAuditor)

@@ -66,7 +66,7 @@ run_1:
 
 run_5:
 	@for i in 0 1 2 3 4; do \
-		RUST_LOG=polkavm=trace, jam_node=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=jam_node=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 jam:
@@ -176,8 +176,7 @@ run_polkajam_all:
 		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
 	done; \
 
-run_localclient: jam kill_jam jam_clean run_5 run_1
-
+run_localclient: jam kill jam_clean run_5 run_1
 run_localclient_jam: jam_clean run_parallel_jam
 run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
 
@@ -197,7 +196,8 @@ kill_parallel_jam:
 	@pkill -f "$(OUTPUT_DIR)/$(BINARY)"
 	@echo "All instances killed."
 
-kill_jam:
+kill:
+	@echo "Kill Jam Binaries(if any)..."
 	@pkill jam || true
 
 

@@ -75,6 +75,7 @@ const (
 	GrandpaEasy  = true
 	Audit        = false
 	CE138_test   = false
+	CE129_test   = false // turn on for testing CE129
 	revalidate   = false // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
@@ -1916,7 +1917,11 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
 		"blk", nextBlock.Str(),
 	)
-	//	go n.getCE129(nextBlock.Header.AuthorIndex, nextBlock.Header.Hash())
+
+	if CE129_test {
+		go n.getCE129(nextBlock.Header.AuthorIndex, nextBlock.Header.Hash())
+	}
+
 	if newStateDB.GetSafrole().GetTimeSlot() != nextBlock.Header.Slot {
 		panic("ApplyBlock: TimeSlot mismatch")
 	}
@@ -1954,14 +1959,51 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		}
 
 		if CE138_test {
+			fmt.Printf("CE138_test: START\n")
 			for _, workReport := range n.statedb.AvailableWorkReport {
 				spec := workReport.AvailabilitySpec
 				coreIndex := workReport.CoreIndex
 				workPackageHash := spec.WorkPackageHash
 
-				n.FetchAllBundleAndSegmentShards(spec, false)
+				workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex, spec.ExportedSegmentLength)
+				if err != nil {
+					log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
+					continue
+				}
+				if workPackageBundle.PackageHash() != workPackageHash {
+					log.Error(debugAudit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
+					continue
+				}
+				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, false)
+				if err != nil {
+					log.Error(debugAudit, "auditWorkReport:executeWorkPackageBundle", "err", err)
+					continue
+				}
+				if reflect.DeepEqual(wr, workReport) {
+					log.Info(debugDA, "reconstructPackageBundleSegments: WorkReport matches", "n", n.String(),
+						"coreIndex", coreIndex,
+						"workPackageHash", workPackageHash.String_short(),
+						"pvmElapsed", pvmElapsed,
+						"workReport", workReport.Hash())
+				} else {
+					log.Error(debugDA, "reconstructPackageBundleSegments: WorkReport mismatch", "n", n.String(),
+						"coreIndex", coreIndex,
+						"workPackageHash", workPackageHash.String_short(),
+						"pvmElapsed", pvmElapsed,
+						"workReport", workReport.Hash(),
+					)
 
-				workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex)
+				}
+			}
+		}
+
+		if CE138_test && false {
+			for _, workReport := range n.statedb.AvailableWorkReport {
+				spec := workReport.AvailabilitySpec
+				coreIndex := workReport.CoreIndex
+				workPackageHash := spec.WorkPackageHash
+
+				workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex, spec.ExportedSegmentLength)
 				if err != nil {
 					log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
 					continue
@@ -2227,12 +2269,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 }
 
 // HERE we are in a AUDITING situation, if verification fails, we can still execute the work package by using CE140?
-func (n *NodeContent) reconstructPackageBundleSegments(
-	erasureRoot common.Hash,
-	blength uint32,
-	segmentRootLookup types.SegmentRootLookup,
-	coreIndex uint,
-) (types.WorkPackageBundle, error) {
+func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32, segmentRootLookup types.SegmentRootLookup, coreIndex uint, exportedSegmentLength uint16) (types.WorkPackageBundle, error) {
 
 	// Prepare requests to validators
 	requestsOriginal := make([]CE138_request, types.TotalValidators)
@@ -2248,6 +2285,8 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 	for validatorIdx, req := range requestsOriginal {
 		requests[uint16(validatorIdx)] = req
 	}
+	// calling fetchall
+	n.FetchAllBundleAndSegmentShards(uint16(coreIndex), erasureRoot, exportedSegmentLength, true)
 
 	// Fetch shard responses
 	responses, err := n.makeRequests(requests, types.RecoveryThreshold, SmallTimeout, LargeTimeout)
@@ -2284,15 +2323,12 @@ func (n *NodeContent) reconstructPackageBundleSegments(
 		if verified {
 			bundleShards[numShards] = daResp.BundleShard
 			indexes[numShards] = uint32(daResp.ShardIndex)
-			log.Info(module, "reconstructPackageBundleSegments: shard verified", "len", len(daResp.BundleShard), "shardIndex", daResp.ShardIndex, "bundleShard", fmt.Sprintf("%x", daResp.BundleShard))
 			numShards++
+			log.Info(module, "reconstructPackageBundleSegments: shard verified", "len", len(daResp.BundleShard), "shardIndex", daResp.ShardIndex, "bundleShard", fmt.Sprintf("%x", daResp.BundleShard))
 		} else {
 			log.Warn(module, "reconstructPackageBundleSegments: shard verification failed", "callerIdx", n.id, "shardIndex", daResp.ShardIndex)
 		}
 		log.Debug(module, "reconstructPackageBundleSegments: shard received", "shardIndex", daResp.ShardIndex, "bundleShard", fmt.Sprintf("%x", daResp.BundleShard))
-		bundleShards[numShards] = daResp.BundleShard
-		indexes[numShards] = uint32(daResp.ShardIndex)
-		numShards++
 	}
 
 	// Check if enough shards were collected

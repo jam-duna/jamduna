@@ -370,7 +370,7 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 			"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 		return false, fmt.Errorf("justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
-	log.Trace(debugDA, "VerifyFullShard VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
+	log.Info(debugDA, "VerifyFullShard VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
 		"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
 	return true, nil
 }
@@ -518,10 +518,10 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
 	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, decodedPath, "VerifyBundleShard")
 	if !verified {
-		log.Crit(module, "VerifyBundleShard:VerifyWBTJustification VERIFICATION FAILURE", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", bundle_segment_pair, "decodedPath", fmt.Sprintf("%x", decodedPath))
+		log.Crit(module, "VerifyBundleShard:VerifyWBTJustification VERIFICATION FAILURE", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", common.Bytes2Hex(bundle_segment_pair), "decodedPath", fmt.Sprintf("%x", decodedPath))
 		return false, fmt.Errorf("justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	} else {
-		log.Trace(module, "VerifyBundleShard:VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "decodedPath", fmt.Sprintf("%x", decodedPath))
+		log.Info(module, "VerifyBundleShard:VerifyWBTJustification VERIFIED", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", common.Bytes2Hex(bundle_segment_pair), "decodedPath", fmt.Sprintf("%x", decodedPath))
 	}
 	return true, nil
 }

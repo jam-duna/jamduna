@@ -80,8 +80,8 @@ func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, le
 	encodedPath, _ := common.EncodeJustification(path, types.NumECPiecesPerSegment)
 	reversedEncodedPath, _ := common.EncodeJustification((common.ReversedByteArray(path)), types.NumECPiecesPerSegment)
 	if root != recoveredRoot {
-		log.Warn(module, "VerifyWBTJustification Failure", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
-		log.Warn(module, "VerifyWBTJustification Failure", "caller", caller, "shardIdx", shardIndex, "Expected", root, "encodedPath", common.Bytes2String(encodedPath), "reversedEncodedPath", common.Bytes2String(reversedEncodedPath))
+		log.Warn(module, "VerifyWBTJustification Failure Part.A", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		log.Warn(module, "VerifyWBTJustification Failure Part.B", "caller", caller, "shardIdx", shardIndex, "Expected", root, "encodedPath", common.Bytes2String(encodedPath), "reversedEncodedPath", common.Bytes2String(reversedEncodedPath))
 		return false, recoveredRoot
 	}
 	log.Trace(module, "VerifyWBTJustification Success", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
@@ -365,13 +365,25 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(debugG, "executeWorkPackageBundle OUT",
+	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING SPEC"),
 		"n", n.String(),
-		"workPackageHash", workReport.GetWorkPackageHash(),
-		"workReport", workReport.String(),
-		"workReportBytes", common.Bytes2Hex(workReport.Bytes()),
+		//"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
+	)
+	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING REPORT"),
+		"n", n.String(),
+		//"workPackageHash", workReport.GetWorkPackageHash(),
+		"workReportHash", workReport.Hash(),
+		"workReport", workReport.String(),
+	)
+
+	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING REPORT BYTES"),
+		"n", n.String(),
+		"workPackageHash", workReport.GetWorkPackageHash(),
+		"workReportHash", workReport.Hash(),
+		"workReportBytesLen", len(workReport.Bytes()),
+		"workReportBytes", common.Bytes2Hex(workReport.Bytes()),
 		//"guarantee.Slot", guarantee.Slot,
 		//"segments", common.FormatPaddedBytesArray(segments, 20),
 	)

@@ -264,3 +264,16 @@ func ComputeEncodedProofSize(shardIdx int, numShards int, leafSize int) (proofSi
 	proofSize = totalPathLength + totalRawDataSizeSum
 	return proofSize
 }
+
+func SplitBytes(data []byte) [][]byte {
+	chunkSize := types.NumECPiecesPerSegment * 2
+	var chunks [][]byte
+	for i := 0; i < len(data); i += chunkSize {
+		end := i + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		chunks = append(chunks, data[i:end])
+	}
+	return chunks
+}

@@ -86,9 +86,8 @@ func (p *Peer) SendBundleShardRequest(
 		return nil, common.Hash{}, nil, fmt.Errorf("DecodeJustification failed or too short")
 	}
 
-	sClub = common.BytesToHash(sclubJustification[0])
-	pathJustification := sclubJustification[1:]
-
+	sClub = common.BytesToHash(sclubJustification[len(sclubJustification)-1]) // last element in the CE138 justification is the SClub
+	pathJustification := sclubJustification[:len(sclubJustification)-1]       // the rest is the path justification without the last element
 	encodedPath, err = common.EncodeJustification(pathJustification, types.NumECPiecesPerSegment)
 	if err != nil {
 		return nil, common.Hash{}, nil, fmt.Errorf("EncodeJustification[path] failed: %w", err)
@@ -101,6 +100,7 @@ func (p *Peer) SendBundleShardRequest(
 
 	return bundleShard, sClub, encodedPath, nil
 }
+
 func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
 
@@ -136,7 +136,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 
 	// Build and send justification
 	pathJustification, _ := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
-	sclubJustification := append([][]byte{sClub.Bytes()}, pathJustification...)
+	sclubJustification := append(pathJustification, [][]byte{sClub.Bytes()}...) // last element in the CE138 justification is the SClub
 
 	encodedJustification, err := common.EncodeJustification(sclubJustification, types.NumECPiecesPerSegment)
 	if err != nil {

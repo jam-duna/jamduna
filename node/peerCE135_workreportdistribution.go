@@ -178,14 +178,29 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(debugG, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Info(debugG, "onWorkReportDistribution INCOMING",
+	log.Info(debugG, fmt.Sprintf("onWorkReportDistribution INCOMING SPEC"),
 		"n", n.String(),
-		"workPackageHash", workReport.GetWorkPackageHash(),
-		"workReport", workReport.String(),
-		"workReportBytes", common.Bytes2Hex(workReport.Bytes()),
+		//"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
 		"guarantee.Slot", guarantee.Slot,
+	)
+
+	log.Info(debugG, fmt.Sprintf("onWorkReportDistribution INCOMING REPORT"),
+		"n", n.String(),
+		//"workPackageHash", workReport.GetWorkPackageHash(),
+		"workReportHash", workReport.Hash(),
+		"workReport", workReport.String(),
+	)
+
+	log.Info(debugG, fmt.Sprintf("onWorkReportDistribution INCOMING REPORT BYTES"),
+		"n", n.String(),
+		"workPackageHash", workReport.GetWorkPackageHash(),
+		"workReportHash", workReport.Hash(),
+		"workReportBytesLen", len(workReport.Bytes()),
+		"workReportBytes", common.Bytes2Hex(workReport.Bytes()),
+		//"guarantee.Slot", guarantee.Slot,
+		//"segments", common.FormatPaddedBytesArray(segments, 20),
 	)
 
 	select {

@@ -20,17 +20,21 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	serviceAuth := testServices["auth_copy"]
 	coreIdx := uint16(0)
 
-	var prevWP common.Hash
-	for fibN := 1; fibN <= targetN; fibN++ {
+	// 10 => 25 cases from TestCDT to have fib generate that many exported segments and capture the data
+	var TestingSegmentsNums = []int{2, 3, 5, 10, 31, 32, 33, 63, 64, 65} // , 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
+
+	//var prevWP common.Hash
+	for _, fibN := range TestingSegmentsNums {
 		imported := []types.ImportSegment{}
+		prevWP := common.Hash{}
+		/* disabled for now since polkajam doesn't support importing segments
 		if fibN > 1 {
 			imported = append(imported, types.ImportSegment{
 				RequestedHash: prevWP,
 				Index:         0,
 			})
 		}
-
-		// payload = uint32(fibN)
+		*/
 		payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(payload, uint32(fibN))
 
@@ -47,7 +51,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					RefineGasLimit:     DefaultRefineGasLimit,
 					AccumulateGasLimit: DefaultAccumulateGasLimit,
 					ImportedSegments:   imported,
-					ExportCount:        1,
+					ExportCount:        uint16(fibN),
 				},
 				{
 					Service:            statedb.AuthCopyServiceCode,
@@ -76,7 +80,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			return
 		}
 		prevWP = hashes[0]
-
+		fmt.Printf("FIB(%d) WORK PACKAGE HASH: %s\n", fibN, prevWP)
 		k := common.ServiceStorageKey(statedb.FibServiceCode, []byte{0})
 		data, _, _ := n1.GetServiceStorage(statedb.FibServiceCode, k)
 		log.Info(module, wpr.Identifier, "result", fmt.Sprintf("%x", data))

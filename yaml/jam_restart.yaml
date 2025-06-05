@@ -7,8 +7,8 @@
   tasks:
     - name: Determine JAM_START_TIME for `at` (25 seconds later, UTC)
       set_fact:
-        JAM_START_TIME: "{{ lookup('pipe', 'date -u -d \"25 seconds\" +\"%H:%M %Y-%m-%d\"') }}"
-
+        JAM_START_TIME: >-
+          {{ lookup('pipe', 'date -u -d "25 seconds" +"+%Y-%m-%d %H:%M:%S"') }}
     - name: Display JAM_START_TIME
       debug:
         var: JAM_START_TIME
@@ -17,7 +17,7 @@
   become: true
   gather_facts: false
   vars:
-    OUTPUT_DIR: "./bin"
+    OUTPUT_DIR: "./bin"                      # <--- moved here also
     BINARY: "jamduna-linux-amd64"
     JAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/jamduna-linux-amd64"
     POLKAJAM_PATH: "/root/go/src/github.com/colorfulnotion/jam/bin/polkajam"
@@ -28,21 +28,13 @@
       shell: "pkill -f jam"
       ignore_errors: yes
 
-    - name: Find jam-* directories under /root/.jamduna
-      find:
-        paths: /root/.jamduna
-        patterns: "jam-*"
-        file_type: directory
-      register: jamduna_dirs
-      ignore_errors: yes
-
-    - name: Remove jam-* directories under /root/.jamduna if any
+    - name: Remove previous .jamduna data
       file:
-        path: "{{ item.path }}"
+        path: "{{ item }}"
         state: absent
-      loop: "{{ jamduna_dirs.files }}"
-      when: jamduna_dirs.matched > 0
-        
+      with_fileglob:
+        - "{{ ansible_env.HOME }}/.jamduna/jam-*"
+
     - name: Ensure log directory exists
       file:
         path: /tmp/logs
@@ -55,25 +47,38 @@
         dest: "{{ JAM_PATH }}"
         mode: '0755'
 
-    - name: Schedule jamduna or polkajam launch using `at`
+
+    - name: Start polkajam for i=0 and jamduna for i=1..5
       shell: |
         i=$(echo {{ inventory_hostname }} | sed 's/[^0-9]*//g')
         PORT=$(( {{ BASE_PORT }} + i ))
 
         {{ JAM_PATH }} gen-keys
-
         if [ "$i" -eq 0 ]; then
           LOGFILE="/tmp/logs/polkajam.log"
           CMD="{{ POLKAJAM_PATH }} --chain {{ CHAIN_SPEC }} --parameters tiny run --temp --dev-validator $i --rpc-port=$PORT"
         else
-          LOGFILE="/tmp/logs/jamduna_$i.log"
+          LOGFILE="/tmp/logs/jamduna.log"
           CMD="{{ JAM_PATH }} run --dev-validator $i --rpc-port=$PORT --chain {{ CHAIN_SPEC }}"
         fi
 
-        echo "nohup $CMD > $LOGFILE 2>&1 &" | at "{{ hostvars['localhost']['JAM_START_TIME'] }}"
+        echo "Running: $CMD"
+        nohup $CMD > $LOGFILE 2>&1 < /dev/null &
+        PID=$!
+        sleep 1
+        if ! kill -0 $PID 2>/dev/null; then
+          echo "❌ Node $i failed to start — see $LOGFILE"
+          tail -n 20 $LOGFILE
+        else
+          echo "✅ Node $i started on port $PORT with PID $PID"
+        fi
+
+        sleep 1
+        pgrep -a jam
       args:
         executable: /bin/bash
 
     - name: Done
       debug:
-        msg: "All JAM validators scheduled to launch via 'at' at {{ hostvars['localhost']['JAM_START_TIME'] }} UTC."
+        msg: "All JAM validators launched via Ansible."
+
