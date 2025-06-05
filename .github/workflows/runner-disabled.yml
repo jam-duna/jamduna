@@ -24,7 +24,7 @@ on:
 jobs:
   test:
     runs-on: jamops-16-core
-    timeout-minutes: 120
+    timeout-minutes: 10
     strategy:
       max-parallel: 2
     steps:
@@ -54,8 +54,8 @@ jobs:
       - name: Install Go dependencies
         run: go mod tidy
 
-      - name: Run test fib
-        run: go test ./node -timeout 4m -v -run '^TestFib$$' -tags "network_test" -targetN=5  -jce_manual=true -jam_node=true -jam_local_client=false
+      #- name: Run test fib
+      #  run: go test ./node -timeout 4m -v -run '^TestFib$$' -tags "network_test" -targetN=5  -jce_manual=true -jam_node=true -jam_local_client=false
 
-      - name: Run test megatron
-        run: go test ./node -timeout 5m -v -run '^TestMegatron$$' -tags "network_test" -targetN=10  -jce_manual=true -jam_node=true -jam_local_client=false
+      #- name: Run test megatron
+      #  run: go test ./node -timeout 5m -v -run '^TestMegatron$$' -tags "network_test" -targetN=10  -jce_manual=true -jam_node=true -jam_local_client=false

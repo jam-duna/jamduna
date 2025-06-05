@@ -180,6 +180,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 
 	log.Info(debugG, fmt.Sprintf("onWorkReportDistribution INCOMING SPEC"),
 		"n", n.String(),
+		"peerID", peerID,
 		//"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),

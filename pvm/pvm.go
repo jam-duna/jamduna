@@ -1108,7 +1108,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 
 	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
-	addr := uint32(valueB) + uint32(vx)
+	addr := uint32((uint64(valueB) + vx) % (1 << 32))
 	var result uint64
 
 	switch opcode {
@@ -1156,8 +1156,10 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		result = uint64(value[0])
+		result = uint64(uint8(value[0]))
+
 		dumpLoadGeneric("LOAD_IND_U8", registerIndexA, uint64(addr), result, 8, false)
+
 	case LOAD_IND_I8:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
 		if errCode != OK {
@@ -1219,7 +1221,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = types.DecodeE_l(value)
 		dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64(addr), result, 64, false)
 	case ADD_IMM_32:
-		result = (valueB + vx) % (1 << 32)
+		result = x_encode((valueB+vx)%(1<<32), 4)
 		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
 	case ADD_IMM_64:
 		result = valueB + vx
@@ -1234,7 +1236,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = valueB | vx
 		dumpBinOp("|", registerIndexA, registerIndexB, vx, result)
 	case MUL_IMM_32:
-		result = (valueB * vx) % (1 << 32)
+		result = x_encode((valueB*vx)%(1<<32), 4)
 		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
 	case MUL_IMM_64:
 		result = valueB * vx
@@ -1252,19 +1254,19 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = boolToUint(int64(valueB) > int64(vx))
 		dumpCmpOp("s>", registerIndexA, registerIndexB, vx, result)
 	case NEG_ADD_IMM_32:
-		result = (vx - valueB) % (1 << 32)
+		result = x_encode((vx-valueB)%(1<<32), 4)
 		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
 	case NEG_ADD_IMM_64:
 		result = vx - valueB
 		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_32:
-		result = valueB << (vx & 63) % (1 << 32)
+		result = x_encode(valueB<<(vx&63)%(1<<32), 4)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_64:
 		result = valueB << (vx & 63)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_32:
-		result = valueB >> (vx & 63) % (1 << 32)
+		result = x_encode(valueB>>(vx&63)%(1<<32), 4)
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_64:
 		result = valueB >> (vx & 63)
@@ -1276,13 +1278,13 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = uint64(int64(valueB) >> (vx & 63))
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_ALT_32:
-		result = vx << (valueB & 63) % (1 << 32)
+		result = x_encode(vx<<(valueB&63)%(1<<32), 4)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_ALT_64:
 		result = vx << (valueB & 63)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_32:
-		result = vx >> (valueB & 63) % (1 << 32)
+		result = x_encode(vx>>(valueB&63)%(1<<32), 4)
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_64:
 		result = vx >> (valueB & 63)
@@ -1432,7 +1434,7 @@ func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 		result = x_encode(uint64(uint32(valueA)-uint32(valueB)), 4)
 		dumpThreeRegOp("SUB_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MUL_32:
-		result = uint64(uint32(valueA) * uint32(valueB))
+		result = x_encode(uint64(uint32(valueA)*uint32(valueB)), 4)
 		dumpThreeRegOp("MUL_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case DIV_U_32:
 		if valueB&0xFFFF_FFFF == 0 {

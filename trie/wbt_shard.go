@@ -31,6 +31,12 @@ type Bundle138Resp struct {
 	Sclub       []byte
 }
 
+type Segment139Resp struct {
+	ShardIdx       uint16
+	SegmentShards  []byte
+	Justifications [][]byte
+}
+
 // MarshalJSON custom marshaler for Full137Resp.
 func (f *Full137Resp) MarshalJSON() ([]byte, error) {
 	type Aux struct {

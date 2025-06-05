@@ -299,7 +299,6 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
 			pvmFailedElapsed := common.Elapsed(pvmStart)
-			panic(111)
 			return work_report, d, pvmFailedElapsed, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {

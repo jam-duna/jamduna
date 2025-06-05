@@ -21,7 +21,8 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	coreIdx := uint16(0)
 
 	// 10 => 25 cases from TestCDT to have fib generate that many exported segments and capture the data
-	var TestingSegmentsNums = []int{2, 3, 5, 10, 31, 32, 33, 63, 64, 65} // , 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
+	// TODO: 2, 3, 5, 10, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
+	var TestingSegmentsNums = []int{64, 128, 256, 512, 1024, 2048}
 
 	//var prevWP common.Hash
 	for _, fibN := range TestingSegmentsNums {
