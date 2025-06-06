@@ -2,6 +2,7 @@
 package pvm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -44,11 +45,11 @@ type TestCase struct {
 	ExpectedMemory []TestMemory  `json:"expected-memory"`
 }
 
-var RecompilerFlag = false // set to false to run the interpreter
+var RecompilerFlag = true // set to false to run the interpreter
 
-func pvm_test(tc TestCase) (int, error) {
+func pvm_test(tc TestCase) error {
 	var num_mismatch int
-	fmt.Printf("Test case: %s\n", tc.Name)
+	fmt.Printf("\n------\nTest case: %s\n", tc.Name)
 
 	// if tc.Name != "inst_div_signed_64" {
 	// 	return 0, nil
@@ -68,40 +69,61 @@ func pvm_test(tc TestCase) (int, error) {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
 	if RecompilerFlag {
-		err := pvm.RunRecompiler()
+		rvm, err := NewRecompilerVM(pvm)
 		if err != nil {
-			return 0, fmt.Errorf("error in recompiler: %v", err)
+			return fmt.Errorf("failed to create recompiler VM: %w", err)
 		}
+
+		for _, pm := range tc.InitialPageMap {
+			// Set the page access based on the initial page map
+			if pm.IsWritable {
+				err := rvm.SetMemAssess(pm.Address, pm.Length, PageMutable)
+				if err != nil {
+					return fmt.Errorf("failed to set memory access for address %x: %w", pm.Address, err)
+				}
+			}
+		}
+
+		for _, mem := range tc.InitialMemory {
+			// Write the initial memory contents
+			rvm.WriteMemory(mem.Address, mem.Data)
+		}
+		rvm.GetBasicBlocks()
+		if len(rvm.BasicBlocks) == 0 {
+			return fmt.Errorf("no basic blocks found")
+		}
+		fmt.Printf("RecompilerVM has %d basic blocks\n", len(rvm.BasicBlocks))
+		if err := rvm.Translate(); err != nil {
+			return fmt.Errorf("error translating bytecode: %w", err)
+		}
+		// Now we have rvm.x86Code ready, we can execute it
+		if err := rvm.ExecuteX86Code(); err != nil {
+			return fmt.Errorf("error executing x86 code: %w", err)
+		}
+		//check the memory
+		for _, mem := range tc.ExpectedMemory {
+			data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))
+			if err != nil {
+				return fmt.Errorf("failed to read memory at address %x: %w", mem.Address, err)
+			}
+			if !bytes.Equal(data, mem.Data) {
+				fmt.Printf("Memory mismatch for test %s at address %x: expected %x, got %x \n", tc.Name, mem.Address, mem.Data, data)
+				num_mismatch++
+			} else {
+				fmt.Printf("Memory match for test %s at address %x \n", tc.Name, mem.Address)
+			}
+		}
+
 	} else {
 		pvm.Execute(int(tc.InitialPC), false)
 	}
 	// Check the registers
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
-		fmt.Printf("Register match for test %s \n", tc.Name)
-	} else {
-		fmt.Printf("Register mismatch for test %s: expected %v, got %v \n", tc.Name, tc.ExpectedRegs, pvm.register)
-		num_mismatch++
+		// fmt.Printf("Register match for test %s \n", tc.Name)
+		return nil
 	}
+	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.register)
 
-	// t.Log("pvm_test")
-	/*
-		// Check the status
-			if status != testCase.ExpectedStatus {
-				//t.Errorf("Status mismatch for test %s: expected %s, got %s", testCase.Name, testCase.ExpectedStatus, status)
-			}
-
-
-			// Check the program counter
-			if pc != testCase.ExpectedPC {
-				//t.Errorf("Program counter mismatch for test %s: expected %d, got %d", testCase.Name, testCase.ExpectedPC, pc)
-			}
-
-			// Check the memory
-			if !equalInterfaceSlices(memory, testCase.ExpectedMemory) {
-				//t.Errorf("Memory mismatch for test %s: expected %v, got %v", testCase.Name, testCase.ExpectedMemory, memory)
-			}
-	*/
-	return num_mismatch, nil // "trap", tc.InitialRegs, tc.InitialPC, tc.InitialMemory
 }
 
 // awaiting 64 bit
@@ -138,7 +160,7 @@ func TestPVM(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
 		}
-		num_mismatch, err = pvm_test(testCase)
+		err = pvm_test(testCase)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}

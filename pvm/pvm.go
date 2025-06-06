@@ -8,10 +8,19 @@ import (
 	"math/bits"
 	"strings"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/example/hello/reverse" // go get golang.org/x/example/hello/reverse
 )
+
+type VirtualMachine interface {
+	Execute(entryPoint int, is_child bool) error
+	ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount)
+	ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result)
+	ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte)
+	ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64)
+}
 
 const (
 	regSize = 13
@@ -1402,6 +1411,7 @@ func (vm *VM) HandleTwoRegsTwoImms(opcode byte, operands []byte) {
 
 	vm.djump((valueB + vy) % (1 << 32))
 }
+
 func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 	registerIndexA := min(12, int(operands[0]&0x0F))
 	registerIndexB := min(12, int(operands[0]>>4))
