@@ -44,6 +44,8 @@ type TestCase struct {
 	ExpectedMemory []TestMemory  `json:"expected-memory"`
 }
 
+var RecompilerFlag = false // set to false to run the interpreter
+
 func pvm_test(tc TestCase) (int, error) {
 	var num_mismatch int
 	fmt.Printf("Test case: %s\n", tc.Name)
@@ -65,8 +67,14 @@ func pvm_test(tc TestCase) (int, error) {
 	// if len(tc.InitialMemory) == 0 {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
-
-	pvm.Execute(int(tc.InitialPC), false)
+	if RecompilerFlag {
+		err := pvm.RunRecompiler()
+		if err != nil {
+			return 0, fmt.Errorf("error in recompiler: %v", err)
+		}
+	} else {
+		pvm.Execute(int(tc.InitialPC), false)
+	}
 	// Check the registers
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
 		fmt.Printf("Register match for test %s \n", tc.Name)

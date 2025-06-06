@@ -99,6 +99,9 @@ type VM struct {
 
 	pushFrame       func([]byte)
 	stopFrameServer func()
+
+	//Basic Block
+	BasicBlocks []*BasicBlock
 }
 
 type Program struct {
@@ -373,22 +376,25 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	vm.pc = uint64(entryPoint)
 	stepn := 1
 	for !vm.terminated {
-		if err := vm.step(stepn); err != nil {
-			fmt.Println("Error in step:", err)
-			return err
-		}
-		if vm.hostCall && is_child {
-			return nil
-		}
-		// host call invocation
-		if vm.hostCall {
-			vm.InvokeHostCall(vm.host_func_id)
-			vm.hostCall = false
-			vm.terminated = false
-		}
-		vm.Gas = vm.Gas - 1 // remove the else
 
-		stepn++
+		newBlock, err := vm.compileBasicBlock(stepn)
+		if err != nil {
+			log.Error(vm.logging, "Error compiling basic block", "error", err)
+			vm.ResultCode = types.PVM_PANIC
+			vm.terminated = true
+		}
+		if newBlock != nil {
+			if err := vm.executeBasicBlock(newBlock, is_child); err != nil {
+				log.Error(vm.logging, "Error executing basic block", "error", err)
+				vm.ResultCode = types.PVM_PANIC
+				vm.terminated = true
+			}
+			vm.BasicBlocks = append(vm.BasicBlocks, newBlock)
+			if PvmLogging {
+				log.Debug(vm.logging, "New Basic Block", "service", string(vm.ServiceMetadata), "block", newBlock)
+			}
+		}
+		stepn = newBlock.EndPoint.Step + 1
 	}
 
 	// vm.Mode = ...
@@ -405,14 +411,13 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 // step performs a single step in the PVM
 func (vm *VM) step(stepn int) error {
 	if vm.pc >= uint64(len(vm.code)) {
-		return errors.New("program counter out of bounds")
+		return errors.New("program counter out of bounds pc: " + fmt.Sprint(vm.pc) + " code length: " + fmt.Sprint(len(vm.code)))
 	}
 	//this_step_pc := vm.pc
 	opcode := vm.code[vm.pc]
 
 	len_operands := vm.skip(vm.pc)
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
-
 	switch {
 	case opcode <= 1: // A.5.1 No arguments
 		vm.HandleNoArgs(opcode)
