@@ -1,8 +1,6 @@
 package pvm
 
 import (
-	"fmt"
-
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -17,9 +15,14 @@ func extractOneOffset(args []byte) (vx int64) {
 	return vx
 }
 
-// IMPLEMENT JUMP — increments the PC by a signed 32-bit offset vx
+
+// TERMINATOR: JUMP rel32 in PolkaVM — do not emit an x86 jmp here.
 func generateJumpRel32() func(inst Instruction) ([]byte, error) {
 	return func(inst Instruction) ([]byte, error) {
+		// PolkaVM runtime will advance the PC by inst.Args,
+		// then re–dispatch.  We just fall through into the
+		// standard register write-back + RET epilogue.
+/*
 		vx := extractOneOffset(inst.Args)
 		// Cast to signed 32-bit
 		disp := int32(vx)
@@ -30,10 +33,11 @@ func generateJumpRel32() func(inst Instruction) ([]byte, error) {
 		b3 := byte(disp >> 24)
 		// E9 = JMP rel32
 		return []byte{0xE9, b0, b1, b2, b3}, nil
+*/
+		return []byte{}, nil
 	}
 }
-
-// A.5.6. Instructions with Arguments of One Register & Two Immediates.
+	// A.5.6. Instructions with Arguments of One Register & Two Immediates.
 // Implements: JMP QWORD PTR [r64_reg + disp32]
 //
 //	where regIdx is the base register and vx is the signed 32-bit offset.
@@ -115,11 +119,44 @@ func generateLoadImmJump() func(inst Instruction) ([]byte, error) {
 
 func generateBranchImm(opcode byte) func(inst Instruction) ([]byte, error) {
 	return func(inst Instruction) ([]byte, error) {
-		if len(inst.Args) < 1 {
-			return nil, fmt.Errorf("op BRANCH_IMM requires 1-byte relative offset")
+		regIdx, vx, vy := extractOneRegOneImmOneOffset(inst.Args)
+		src := regInfoList[regIdx]
+		pc := inst.Pc
+		truePC := int64(inst.Pc) + vy
+		falsePC := int64(pc + 1)
+
+		var code []byte
+
+		// 1) cmp   r64_src, imm32
+		rex := byte(0x48)
+		if src.REXBit == 1 {
+			rex |= 0x01
+		} // REX.B for extended regs
+		modrm := byte(0xC0 | (0x07 << 3) | src.RegBits) // /7 = CMP
+		code = append(code, rex, 0x81, modrm)
+		code = append(code, encodeU32(uint32(vx))...) // imm32
+
+		// 2) Jcc (near, rel8) over the “true” MOVABS+RET if the condition is *false*
+		//    Short‐jump by 6 bytes (one MOVABS opcode + 8‐byte imm + RET = 10 bytes total,
+		//    but we only need to skip the MOVABS, not the RET, so rel8=10).
+		cond := opcode & 0x0F // e.g. 0x74→0x04 for JE
+		code = append(code, byte(0x70|cond), byte(10))
+
+		// 3) MOVABS R12, addrTrue; RET
+		code = append(code, 0x49, 0xBC) // REX.W|REX.B + MOVABS r12
+		for i := 0; i < 8; i++ {
+			code = append(code, byte(truePC>>(8*i)))
 		}
-		offset := inst.Args[0]
-		return []byte{opcode, offset}, nil
+		code = append(code, 0xC3) // RET
+
+		// 4) MOVABS R12, addrFalse; RET
+		code = append(code, 0x49, 0xBC)
+		for i := 0; i < 8; i++ {
+			code = append(code, byte(falsePC>>(8*i)))
+		}
+		code = append(code, 0xC3)
+
+		return code, nil
 	}
 }
 

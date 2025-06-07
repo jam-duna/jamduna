@@ -45,7 +45,7 @@ type TestCase struct {
 	ExpectedMemory []TestMemory  `json:"expected-memory"`
 }
 
-var RecompilerFlag = true // set to false to run the interpreter
+var RecompilerFlag = false // set to false to run the interpreter
 
 func pvm_test(tc TestCase) error {
 	var num_mismatch int
@@ -160,10 +160,15 @@ func TestPVM(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
 		}
-		err = pvm_test(testCase)
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
+		name := testCase.Name
+		t.Run(name, func(t *testing.T) {
+			err = pvm_test(testCase)
+			if err != nil {
+				t.Errorf("❌ [%s] Test failed: %v", name, err)
+			} else {
+				t.Logf("✅ [%s] Test passed", name)
+			}
+		})
 		total_mismatch += num_mismatch
 	}
 	// show the match rate

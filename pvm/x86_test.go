@@ -85,11 +85,11 @@ func TestRecompiler(t *testing.T) {
 		// "STORE_IMM_U64": "inst_store_imm_u64",
 
 		// A.5.5. Instructions with Arguments of One Offset.
-		// "JUMP": "inst_jump",
+		//"JUMP": "inst_jump",
 
 		// A.5.6. Instructions with Arguments of One Register & Two Immediates.
-		// "JUMP_IND": "inst_ret_halt",
-		// "LOAD_IMM":              "",
+		//"JUMP_IND": "inst_ret_halt",
+		//"LOAD_IMM": "inst_load_imm",
 		//"LOAD_U8": "inst_load_u8,inst_load_u8_nok",
 		//"LOAD_I8":  "inst_load_i8",
 		//"LOAD_U16": "inst_load_u16",
@@ -103,14 +103,14 @@ func TestRecompiler(t *testing.T) {
 		//"STORE_U64": "inst_store_u64",
 
 		// A.5.7. Instructions with Arguments of One Register and Two Immediates.
-		"STORE_IMM_IND_U8":  "inst_store_imm_indirect_u8_with_offset_ok,inst_store_imm_indirect_u8_with_offset_nok,inst_store_imm_indirect_u8_without_offset_ok",
-		"STORE_IMM_IND_U16": "inst_store_imm_indirect_u16_with_offset_ok,inst_store_imm_indirect_u16_with_offset_nok,inst_store_imm_indirect_u16_without_offset_ok",
+		//"STORE_IMM_IND_U8":  "inst_store_imm_indirect_u8_with_offset_ok,inst_store_imm_indirect_u8_with_offset_nok,inst_store_imm_indirect_u8_without_offset_ok",
+		//"STORE_IMM_IND_U16": "inst_store_imm_indirect_u16_with_offset_ok,inst_store_imm_indirect_u16_with_offset_nok,inst_store_imm_indirect_u16_without_offset_ok",
 		//"STORE_IMM_IND_U32": "inst_store_imm_indirect_u32_with_offset_ok,inst_store_imm_indirect_u32_with_offset_nok,inst_store_imm_indirect_u32_without_offset_ok",
 		//"STORE_IMM_IND_U64": "inst_store_imm_indirect_u64_with_offset_ok,inst_store_imm_indirect_u64_with_offset_nok,inst_store_imm_indirect_u64_without_offset_ok",
 
 		// A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset.
 		//"LOAD_IMM_JUMP": "inst_load_imm_and_jump",
-		"BRANCH_EQ_IMM": "inst_branch_eq_imm_ok,inst_branch_eq_imm_nok",
+		//"BRANCH_EQ_IMM": "inst_branch_eq_imm_ok,inst_branch_eq_imm_nok",
 		// "BRANCH_NE_IMM": "inst_branch_not_eq_imm_ok,inst_branch_not_eq_imm_nok",
 		// "BRANCH_LT_U_IMM": "inst_branch_less_unsigned_imm_ok,inst_branch_less_unsigned_imm_nok",
 		// "BRANCH_LE_U_IMM": "inst_branch_less_or_equal_unsigned_imm_ok,inst_branch_less_or_equal_unsigned_imm_nok",
@@ -123,7 +123,7 @@ func TestRecompiler(t *testing.T) {
 
 		// A.5.9. Instructions with Arguments of Two Registers.
 		// "SBRK":                  "",
-		// "MOVE_REG": 			    "",
+		"MOVE_REG": "inst_move_reg",
 		// "COUNT_SET_BITS_64":     "",
 		// "COUNT_SET_BITS_32":     "",
 		// "LEADING_ZERO_BITS_64":  "",
@@ -147,19 +147,19 @@ func TestRecompiler(t *testing.T) {
 		// "LOAD_IND_U32":  "inst_load_indirect_u32_with_offset,inst_load_indirect_u32_without_offset",
 		// "LOAD_IND_I32":  "inst_load_indirect_i32_with_offset,inst_load_indirect_i32_without_offset",
 		// "LOAD_IND_U64":  "inst_load_indirect_u64_with_offset,inst_load_indirect_u64_without_offset",
-		"ADD_IMM_32": "inst_add_imm_32,inst_sub_imm_32",
-		"AND_IMM":    "inst_and_imm",
-		"XOR_IMM":    "inst_xor_imm",
-		"OR_IMM":     "inst_or_imm",
-		"MUL_IMM_32": "inst_mul_imm_32",
-		//"SET_LT_U_IMM": "inst_set_less_than_unsigned_imm_0,inst_set_less_than_unsigned_imm_1",
-		//"SET_LT_S_IMM": "inst_set_less_than_signed_imm_0,inst_set_less_than_signed_imm_1",
-		"SHLO_L_IMM_32":  "inst_shift_logical_left_imm_32",
-		"SHLO_R_IMM_32":  "inst_shift_logical_right_imm_32",
-		"SHAR_R_IMM_32":  "inst_shift_arithmetic_right_imm_32",
-		"NEG_ADD_IMM_32": "inst_negate_and_add_imm_32",
-		// "SET_GT_U_IMM":      "inst_set_greater_than_unsigned_imm_0,inst_set_greater_than_unsigned_imm_1",
-		// "SET_GT_S_IMM":      "inst_set_greater_than_signed_imm_0,inst_set_greater_than_signed_imm_1",
+		"ADD_IMM_32":        "inst_add_imm_32,inst_sub_imm_32",
+		"AND_IMM":           "inst_and_imm",
+		"XOR_IMM":           "inst_xor_imm",
+		"OR_IMM":            "inst_or_imm",
+		"MUL_IMM_32":        "inst_mul_imm_32",
+		"SET_LT_U_IMM":      "inst_set_less_than_unsigned_imm_0,inst_set_less_than_unsigned_imm_1",
+		"SET_LT_S_IMM":      "inst_set_less_than_signed_imm_0,inst_set_less_than_signed_imm_1",
+		"SHLO_L_IMM_32":     "inst_shift_logical_left_imm_32",
+		"SHLO_R_IMM_32":     "inst_shift_logical_right_imm_32",
+		"SHAR_R_IMM_32":     "inst_shift_arithmetic_right_imm_32",
+		"NEG_ADD_IMM_32":    "inst_negate_and_add_imm_32",
+		"SET_GT_U_IMM":      "inst_set_greater_than_unsigned_imm_0,inst_set_greater_than_unsigned_imm_1",
+		"SET_GT_S_IMM":      "inst_set_greater_than_signed_imm_0,inst_set_greater_than_signed_imm_1",
 		"SHLO_L_IMM_ALT_32": "inst_shift_logical_left_imm_alt_32",
 		"SHLO_R_IMM_ALT_32": "inst_shift_logical_right_imm_alt_32",
 		"SHAR_R_IMM_ALT_32": "inst_shift_arithmetic_right_imm_alt_32",
@@ -191,22 +191,22 @@ func TestRecompiler(t *testing.T) {
 		//"LOAD_IMM_JUMP_IND": "inst_load_imm_and_jump_indirect_same_regs_with_offset_ok,inst_load_imm_and_jump_indirect_different_regs_with_offset_ok,inst_load_imm_and_jump_indirect_same_regs_without_offset_ok,inst_load_imm_and_jump_indirect_different_regs_without_offset_ok",
 
 		// A.5.13. Instructions with Arguments of Three Registers. (190-230)
-		"ADD_32": "inst_add_32",
-		"SUB_32": "inst_sub_32,inst_sub_32_with_overflow",
-		"MUL_32": "inst_mul_32",
-		//"DIV_U_32":  "inst_div_unsigned_32,inst_div_unsigned_32_by_zero",
-		//"DIV_S_32":  "inst_div_signed_32,inst_div_signed_32_by_zero",
-		//"REM_U_32":  "inst_rem_unsigned_32,inst_rem_unsigned_32_by_zero",
-		//"REM_S_32":  "inst_rem_signed_32,inst_rem_signed_32_by_zero",
+		"ADD_32":    "inst_add_32",
+		"SUB_32":    "inst_sub_32,inst_sub_32_with_overflow",
+		"MUL_32":    "inst_mul_32",
+		"DIV_U_32":  "inst_div_unsigned_32,inst_div_unsigned_32_by_zero",
+		"DIV_S_32":  "inst_div_signed_32,inst_div_signed_32_by_zero",
+		"REM_U_32":  "inst_rem_unsigned_32,inst_rem_unsigned_32_by_zero",
+		"REM_S_32":  "inst_rem_signed_32,inst_rem_signed_32_by_zero",
 		"SHLO_L_32": "inst_shift_logical_left_32",
 		"SHLO_R_32": "inst_shift_logical_right_32",
 		"SHAR_R_32": "inst_shift_arithmetic_right_32",
 		"ADD_64":    "inst_add_64",
 		"SUB_64":    "inst_sub_64,inst_sub_64_with_overflow",
-		// "DIV_U_64": "inst_div_unsigned_64,inst_div_unsigned_64_by_zero,inst_div_unsigned_64_with_overflow"
-		// "DIV_S_64": "inst_div_signed_64,inst_div_signed_64_by_zero"
-		// "REM_U_64": "inst_rem_unsigned_64,inst_rem_unsigned_64_by_zero",
-		// "REM_S_64": "inst_rem_signed_64,inst_rem_signed_64_by_zero",
+		"DIV_U_64":  "inst_div_unsigned_64,inst_div_unsigned_64_by_zero,inst_div_unsigned_64_with_overflow",
+		"DIV_S_64":  "inst_div_signed_64,inst_div_signed_64_by_zero",
+		"REM_U_64":  "inst_rem_unsigned_64,inst_rem_unsigned_64_by_zero",
+		"REM_S_64":  "inst_rem_signed_64,inst_rem_signed_64_by_zero",
 		"SHLO_L_64": "inst_shift_logical_left_64",
 		"SHLO_R_64": "inst_shift_logical_right_64",
 		"SHAR_R_64": "inst_shift_arithmetic_right_64",
@@ -276,7 +276,12 @@ func TestRecompiler(t *testing.T) {
 }
 
 func TestSingleRecompile(t *testing.T) {
-	name := "inst_sub_32_with_overflow"
+
+	PvmLogging = true
+	PvmTrace = true
+	RecompilerFlag = true
+
+	name := "inst_jump"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {

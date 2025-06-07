@@ -1,7 +1,5 @@
 package pvm
 
-import "fmt"
-
 // A.5.9. Instructions with Arguments of Two Registers.
 func extractTwoRegisters(args []byte) (reg1, reg2 int) {
 	reg1 = min(12, int(args[0]&0x0F))
@@ -11,11 +9,9 @@ func extractTwoRegisters(args []byte) (reg1, reg2 int) {
 
 func generateMoveReg() func(inst Instruction) ([]byte, error) {
 	return func(inst Instruction) ([]byte, error) {
-		if len(inst.Args) < 2 {
-			return nil, fmt.Errorf("MOVE_REG requires src and dst")
-		}
-		src := regInfoList[min(12, int(inst.Args[0]))]
-		dst := regInfoList[min(12, int(inst.Args[1]))]
+		dstIdx, srcIdx := extractTwoRegisters(inst.Args)
+		dst := regInfoList[dstIdx]
+		src := regInfoList[srcIdx]
 		rex := byte(0x48)
 		if src.REXBit == 1 {
 			rex |= 0x04
