@@ -8,255 +8,10 @@ import (
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm/x86_execute"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/arch/x86/x86asm"
 )
-
-type X86Reg struct {
-	Name    string
-	RegBits byte // 3-bit code for ModRM/SIB
-	REXBit  byte // 1 if register index >= 8
-}
-
-var regInfoList = []X86Reg{
-	{"rax", 0, 0}, // Commonly used as return value register
-	{"rcx", 1, 0}, // Used for loop counters or intermediates
-	{"rdx", 2, 0}, // Often paired with rax for mul/div
-	{"rbx", 3, 0},
-	{"rsi", 6, 0}, // Often used as function argument
-	{"rdi", 7, 0}, // Often used as function argument
-	{"r8", 0, 1},  // Typically function argument #5
-	{"r9", 1, 1},
-	{"r10", 2, 1},
-	{"r11", 3, 1},
-	{"r13", 5, 1},
-	{"r14", 6, 1},
-	{"r15", 7, 1},
-	// the base register for memory dump
-	{"r12", 4, 1},
-}
-
-var pvmByteCodeToX86Code = map[byte]func(Instruction) ([]byte, error){
-	// A.5.1. Instructions without Arguments
-	TRAP: func(inst Instruction) ([]byte, error) {
-		return []byte{}, nil
-	},
-	FALLTHROUGH: func(inst Instruction) ([]byte, error) {
-		return []byte{0x90}, nil
-	},
-	// A.5.2. Instructions with Arguments of One Immediate. InstructionI1
-	ECALLI: generateSyscall(),
-
-	// A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
-	LOAD_IMM_64: generateLoadImm64(),
-
-	// A.5.4. Instructions with Arguments of Two Immediates.
-	STORE_IMM_U8:  generateStoreImmU8(),
-	STORE_IMM_U16: generateStoreImmU16(),
-	STORE_IMM_U32: generateStoreImmU32(),
-	STORE_IMM_U64: generateStoreImmU64(),
-
-	// A.5.5. Instructions with Arguments of One Offset.
-	JUMP: generateJumpRel32(),
-
-	// A.5.6. Instructions with Arguments of One Register & Two Immediates.
-	JUMP_IND:  generateJumpIndirect(),
-	LOAD_IMM:  generateLoadImm32(),
-	LOAD_U8:   generateLoadU8(),
-	LOAD_I8:   generateLoadI8(),
-	LOAD_U16:  generateLoadU16(),
-	LOAD_I16:  generateLoadI16(),
-	LOAD_U32:  generateLoadU32(),
-	LOAD_I32:  generateLoadI32(),
-	LOAD_U64:  generateLoadU64(),
-	STORE_U8:  generateStoreU8(),
-	STORE_U16: generateStoreU16(),
-	STORE_U32: generateStoreU32(),
-	STORE_U64: generateStoreU64(),
-
-	// A.5.7. Instructions with Arguments of One Register & Two Immediates.
-	STORE_IMM_IND_U8:  generateStoreImmIndU8(),
-	STORE_IMM_IND_U16: generateStoreImmIndU16(),
-	STORE_IMM_IND_U32: generateStoreImmIndU32(),
-	STORE_IMM_IND_U64: generateStoreImmIndU64(),
-
-	// A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset.
-	LOAD_IMM_JUMP:   generateLoadImmJump(),
-	BRANCH_EQ_IMM:   generateBranchImm(0x74), // JE
-	BRANCH_NE_IMM:   generateBranchImm(0x75), // JNE
-	BRANCH_LT_U_IMM: generateBranchImm(0x72), // JB
-	BRANCH_LE_U_IMM: generateBranchImm(0x76), // JBE
-	BRANCH_GE_U_IMM: generateBranchImm(0x73), // JAE
-	BRANCH_GT_U_IMM: generateBranchImm(0x77), // JA
-	BRANCH_LT_S_IMM: generateBranchImm(0x7C), // JL
-	BRANCH_LE_S_IMM: generateBranchImm(0x7E), // JLE
-	BRANCH_GE_S_IMM: generateBranchImm(0x7D), // JGE
-	BRANCH_GT_S_IMM: generateBranchImm(0x7F), // JG
-
-	// A.5.9. Instructions with Arguments of Two Registers.
-	MOVE_REG:              generateMoveReg(),
-	SBRK:                  generateSyscall(),
-	COUNT_SET_BITS_64:     generateBitCount64(),
-	COUNT_SET_BITS_32:     generateBitCount32(),
-	LEADING_ZERO_BITS_64:  generateLeadingZeros64(),
-	LEADING_ZERO_BITS_32:  generateLeadingZeros32(),
-	TRAILING_ZERO_BITS_64: generateTrailingZeros64(),
-	TRAILING_ZERO_BITS_32: generateTrailingZeros32(),
-	SIGN_EXTEND_8:         generateSignExtend8(),
-	SIGN_EXTEND_16:        generateSignExtend16(),
-	ZERO_EXTEND_16:        generateZeroExtend16(),
-	REVERSE_BYTES:         generateReverseBytes64(),
-
-	// A.5.10. Instructions with Arguments of Two Registers & One Immediate.
-	STORE_IND_U8:      generateStoreIndirect(0x88, false, 1),
-	STORE_IND_U16:     generateStoreIndirect(0x89, true, 2),
-	STORE_IND_U32:     generateStoreIndirect(0x89, false, 4),
-	STORE_IND_U64:     generateStoreIndirect(0x89, false, 8),
-	LOAD_IND_U8:       generateLoadInd(0x8A, false, 1),
-	LOAD_IND_I8:       generateLoadIndSignExtend(0x0F, 0xBE, false),
-	LOAD_IND_U16:      generateLoadInd(0x8B, false, 2),
-	LOAD_IND_I16:      generateLoadIndSignExtend(0x0F, 0xBF, false),
-	LOAD_IND_U32:      generateLoadInd(0x8B, false, 4),
-	LOAD_IND_I32:      generateLoadIndSignExtend(0x63, 0x00, true),
-	LOAD_IND_U64:      generateLoadInd(0x8B, true, 8),
-	ADD_IMM_32:        generateBinaryImm32(),
-	AND_IMM:           generateImmBinaryOp64(0x81, 4),
-	XOR_IMM:           generateImmBinaryOp64(0x81, 6),
-	OR_IMM:            generateImmBinaryOp64(0x81, 1),
-	MUL_IMM_32:        generateImmMulOp32(),
-	SET_LT_U_IMM:      generateImmSetCondOp32(0x92), // SETB / below unsigned
-	SET_LT_S_IMM:      generateImmSetCondOp32(0x9C), // SETL / below signed
-	SET_GT_U_IMM:      generateImmSetCondOp32(0x97), // SETA / above unsigned
-	SET_GT_S_IMM:      generateImmSetCondOp32(0x9F), // SETG / above signed
-	SHLO_L_IMM_32:     generateImmShiftOp32(0xC1, 4, false),
-	SHLO_R_IMM_32:     generateImmShiftOp32(0xC1, 5, false),
-	SHLO_L_IMM_ALT_32: generateImmShiftOp32Alt(0xC1, 4),
-	SHLO_R_IMM_ALT_32: generateImmShiftOp32(0xC1, 5, true),
-	SHAR_R_IMM_ALT_32: generateImmShiftOp32(0xC1, 7, true),
-	NEG_ADD_IMM_32:    generateNegAddImm32(),
-	CMOV_IZ_IMM:       generateCmovIzImm(),
-	CMOV_NZ_IMM:       generateCmovIzImm(),
-	ADD_IMM_64:        generateImmBinaryOp64(0x81, 0),
-	MUL_IMM_64:        generateImmMulOp64(),
-	SHLO_L_IMM_64:     generateImmShiftOp64(0xC1, 4),
-	SHLO_R_IMM_64:     generateImmShiftOp64(0xC1, 5),
-	SHAR_R_IMM_32:     generateImmShiftOp32(0xC1, 7, false),
-	SHAR_R_IMM_64:     generateImmShiftOp64(0xC1, 7),
-	NEG_ADD_IMM_64:    generateNegAddImm64(),
-	SHLO_L_IMM_ALT_64: generateImmShiftOp64Alt(0xC1, 4),
-	SHLO_R_IMM_ALT_64: generateImmShiftOp64Alt(0xC1, 5),
-	SHAR_R_IMM_ALT_64: generateImmShiftOp64Alt(0xC1, 7),
-	ROT_R_64_IMM:      generateImmShiftOp64(0xC1, 1),
-	ROT_R_64_IMM_ALT:  generateImmShiftOp64(0xC1, 1),
-	ROT_R_32_IMM_ALT:  generateImmShiftOp32(0xC1, 1, true),
-	ROT_R_32_IMM:      generateRotateRight32Imm(),
-
-	// A.5.11. Instructions with Arguments of Two Registers & One Offset.
-	BRANCH_EQ:   generateCompareBranch(0x0F, 0x84),
-	BRANCH_NE:   generateCompareBranch(0x0F, 0x85),
-	BRANCH_LT_U: generateCompareBranch(0x0F, 0x82),
-	BRANCH_LT_S: generateCompareBranch(0x0F, 0x8C),
-	BRANCH_GE_U: generateCompareBranch(0x0F, 0x83),
-	BRANCH_GE_S: generateCompareBranch(0x0F, 0x8D),
-
-	// A.5.12. Instruction with Arguments of Two Registers and Two Immediates.
-	LOAD_IMM_JUMP_IND: generateLoadImmJumpIndirect(),
-
-	// A.5.13. Instructions with Arguments of Three Registers.
-	ADD_32:        generateBinaryOp32(0x01), // add
-	SUB_32:        generateBinaryOp32(0x29), // sub
-	MUL_32:        generateMul32(),
-	DIV_U_32:      generateDivUOp32(),
-	DIV_S_32:      generateDivSOp32(),
-	REM_U_32:      generateRemUOp32(),
-	REM_S_32:      generateRemSOp32(),
-	SHLO_L_32:     generateShiftOp32(0xD3, 4),
-	SHLO_R_32:     generateShiftOp32(0xD3, 5),
-	SHAR_R_32:     generateShiftOp32(0xD3, 7),
-	ADD_64:        generateBinaryOp64(0x01), // add
-	SUB_64:        generateBinaryOp64(0x29), // sub
-	MUL_64:        generateMul64(),          // imul
-	DIV_U_64:      generateDivUOp64(),
-	DIV_S_64:      generateDivSOp64(),
-	REM_U_64:      generateRemUOp64(),
-	REM_S_64:      generateRemSOp64(),
-	SHLO_L_64:     generateShiftOp64(0xD3, 4),
-	SHLO_R_64:     generateShiftOp64(0xD3, 5),
-	SHAR_R_64:     generateShiftOp64(0xD3, 7),
-	AND:           generateBinaryOp64(0x21),
-	XOR:           generateBinaryOp64(0x31),
-	OR:            generateBinaryOp64(0x09),
-	MUL_UPPER_S_S: generateMulUpperOp64("signed"),
-	MUL_UPPER_U_U: generateMulUpperOp64("unsigned"),
-	MUL_UPPER_S_U: generateMulUpperOp64("mixed"),
-	SET_LT_U:      generateSetCondOp64(0x92),
-	SET_LT_S:      generateSetCondOp64(0x9C),
-	CMOV_IZ:       generateCmovOp64(0x44),
-	CMOV_NZ:       generateCmovOp64(0x45),
-	ROT_L_64:      generateShiftOp64(0xD3, 0),
-	ROT_L_32:      generateShiftOp32(0xD3, 0),
-	ROT_R_64:      generateShiftOp64(0xD3, 1),
-	ROT_R_32:      generateShiftOp32(0xD3, 1),
-	AND_INV:       generateAndInvOp64(),
-	OR_INV:        generateOrInvOp64(),
-	XNOR:          generateXnorOp64(),
-	MAX:           generateCmovCmpOp64(0x4F),
-	MAX_U:         generateCmovCmpOp64(0x47),
-	MIN:           generateCmovCmpOp64(0x4C),
-	MIN_U:         generateCmovCmpOp64(0x42),
-}
-
-const BaseRegIndex = 13
-
-var BaseReg = regInfoList[13]
-
-// use store the original memory address for real memory
-// this register is used as base for register dump
-
-// encodeMovImm encodes: mov rX, imm64
-func encodeMovImm(regIdx int, imm uint64) ([]byte, error) {
-	if regIdx < 0 || regIdx >= len(regInfoList) {
-		return nil, fmt.Errorf("invalid register index: %d", regIdx)
-	}
-	reg := regInfoList[regIdx]
-	var prefix byte = 0x48
-	if reg.REXBit == 1 {
-		// For r8..r15, set RE XB
-		// since opcode B8+r low bits, high bit handled by REX.B
-		// but we need to distinguish r8..r15
-		prefix |= 0x01 // REX.B = 1
-	}
-	// opcode = B8 + low 3 bits
-	op := byte(0xB8 + reg.RegBits)
-
-	immBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(immBytes, imm)
-	return append([]byte{prefix, op}, immBytes...), nil
-}
-
-// encodeMovRegToMem encodes: mov [rBase + offset], rSrc
-func encodeMovRegToMem(srcIdx, baseIdx int, offset byte) ([]byte, error) {
-	if srcIdx < 0 || srcIdx >= len(regInfoList) || baseIdx < 0 || baseIdx >= len(regInfoList) {
-		return nil, fmt.Errorf("invalid register index")
-	}
-	src := regInfoList[srcIdx]
-	base := regInfoList[baseIdx]
-	// Build REX prefix: W=1, R=src.REXBit, B=base.REXBit
-	rex := byte(0x48)
-	if src.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	// opcode for mov r->m : 0x89
-	// ModRM: mod=01 (disp8=offset), reg=src.RegBits, rm=100 (SIB)
-	modrm := byte(0x40 | (src.RegBits << 3) | 0x4)
-	// SIB: scale=00, index=100 (no index), base=base.RegBits
-	sib := byte(0x20 | base.RegBits) // (4<<3) | base.RegBits
-
-	return []byte{rex, 0x89, modrm, sib, offset}, nil
-}
 
 type RecompilerVM struct {
 	*VM
@@ -314,43 +69,66 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 		x86Code:     nil,
 		exitCode:    nil,
 	}
-	code, err := encodeMovImm(BaseRegIndex, uint64(uintptr(unsafe.Pointer(&mem[0]))))
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode mov for BaseReg: %v", err)
-	}
+	code := encodeMovImm(BaseRegIndex, uint64(uintptr(unsafe.Pointer(&mem[0]))))
 	rvm.x86Code = append(rvm.x86Code, code...)
 	// initialize registers: mov rX, imm from vm.register
 	for i := 0; i < len(vm.register); i++ {
 		immVal := vm.register[i]
-		code, err := encodeMovImm(i, immVal)
-		if err != nil {
-			return nil, err
-		}
+		code := encodeMovImm(i, immVal)
 		fmt.Printf("Initialize %s = %d\n", regInfoList[i].Name, immVal)
 		rvm.x86Code = append(rvm.x86Code, code...)
 	}
 
 	// build exitCode: dump registers into regDumpMem
 	// first: mov r12, regDumpAddr (use r12 as base)
-	code, err = encodeMovImm(BaseRegIndex, uint64(regDumpAddr))
-	if err != nil {
-		return nil, err
-	}
+	code = encodeMovImm(BaseRegIndex, uint64(regDumpAddr))
 	rvm.exitCode = append(rvm.exitCode, code...)
 
 	// for each register, mov [r12 + i*8], rX
 	for i := 0; i < len(regInfoList); i++ {
 		off := byte(i * 8)
-		dumpInstr, err := encodeMovRegToMem(i, BaseRegIndex, off)
-		if err != nil {
-			return nil, err
-		}
+		dumpInstr := encodeMovRegToMem(i, BaseRegIndex, off)
 		rvm.exitCode = append(rvm.exitCode, dumpInstr...)
 	}
-
 	return rvm, nil
 }
 
+func (vm *RecompilerVM) Close() error {
+	var errs []error
+
+	if vm.realMemory != nil {
+		if err := syscall.Munmap(vm.realMemory); err != nil {
+			errs = append(errs, fmt.Errorf("realMemory: %w", err))
+		}
+		vm.realMemory = nil
+	}
+
+	if vm.regDumpMem != nil {
+		if err := syscall.Munmap(vm.regDumpMem); err != nil {
+			errs = append(errs, fmt.Errorf("regDumpMem: %w", err))
+		}
+		vm.regDumpMem = nil
+	}
+
+	if vm.x86Code != nil {
+		if err := syscall.Munmap(vm.x86Code); err != nil {
+			errs = append(errs, fmt.Errorf("x86Code: %w", err))
+		}
+		vm.x86Code = nil
+	}
+
+	if vm.exitCode != nil {
+		if err := syscall.Munmap(vm.exitCode); err != nil {
+			errs = append(errs, fmt.Errorf("exitCode: %w", err))
+		}
+		vm.exitCode = nil
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("Close encountered errors: %v", errs)
+	}
+	return nil
+}
 func (vm *RecompilerVM) GetBasicBlocks() {
 	// 1 block first
 	newBlock, err := vm.compileBasicBlock(0)
@@ -363,30 +141,25 @@ func (vm *RecompilerVM) GetBasicBlocks() {
 }
 
 func (vm *RecompilerVM) Translate() error {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error(vm.logging, "RecompilerVM Translate panic", "error", r)
+			vm.ResultCode = types.PVM_PANIC
+			vm.terminated = true
+		}
+	}()
+
 	for _, basic_block := range vm.BasicBlocks {
 		for _, instruction := range basic_block.Instructions {
 			opcode := instruction.Opcode
-			fmt.Printf("Translating instruction %s (%d) at pc %d\n", opcode_str(opcode), opcode, instruction.Pc)
+			fmt.Printf("Translating instruction %s (%d)\n", opcode_str(opcode), opcode)
 			if translateFunc, exists := pvmByteCodeToX86Code[opcode]; exists {
-				code, err := translateFunc(instruction)
-				if err != nil {
-					return fmt.Errorf("error translating instruction %s at pc %d: %w", opcode_str(opcode), instruction.Pc, err)
-				}
+				code := translateFunc(instruction)
+
 				vm.x86Code = append(vm.x86Code, code...)
 			} else {
-				return fmt.Errorf("unknown opcode %s at pc %d", opcode_str(opcode), instruction.Pc)
+				return fmt.Errorf("unknown opcode %s", opcode_str(opcode))
 			}
-		}
-		// translate end point
-		endPoint := basic_block.EndPoint
-		if translateFunc, exists := pvmByteCodeToX86Code[endPoint.Opcode]; exists {
-			code, err := translateFunc(endPoint)
-			if err != nil {
-				return fmt.Errorf("error translating end point instruction %s at pc %d: %w", opcode_str(endPoint.Opcode), endPoint.Pc, err)
-			}
-			vm.x86Code = append(vm.x86Code, code...)
-		} else {
-			return fmt.Errorf("unknown end point opcode %s at pc %d", opcode_str(endPoint.Opcode), endPoint.Pc)
 		}
 		fmt.Printf("%s\n", basic_block.String())
 	}
@@ -396,6 +169,7 @@ func (vm *RecompilerVM) Translate() error {
 	fmt.Printf("Generated x86 code:\n%s\n", Disassemble(vm.x86Code))
 	return nil
 }
+
 func Disassemble(code []byte) string {
 	var sb strings.Builder
 	offset := 0
@@ -422,12 +196,9 @@ func Disassemble(code []byte) string {
 
 		offset += length
 	}
-
 	return sb.String()
 }
 
-//go:noescape
-func trampoline(entry uintptr)
 func (vm *RecompilerVM) ExecuteX86Code() error {
 	x86code := vm.x86Code
 	codeAddr, err := syscall.Mmap(
@@ -445,9 +216,14 @@ func (vm *RecompilerVM) ExecuteX86Code() error {
 		return fmt.Errorf("failed to mprotect exec code: %w", err)
 	}
 
-	entry := uintptr(unsafe.Pointer(&codeAddr[0]))
-	fmt.Printf("Executing x86 code\n")
-	trampoline(entry)
+	crashed := x86_execute.ExecuteX86(x86code)
+
+	if crashed == -1 {
+		vm.ResultCode = types.PVM_PANIC
+		vm.terminated = true
+		fmt.Printf("PANIC in ExecuteX86Code\n")
+	}
+	fmt.Printf("Execution finished, dumping registers\n")
 
 	for i := 0; i < len(vm.register); i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
@@ -478,26 +254,175 @@ func (vm *VM) RunRecompiler() error {
 }
 
 // A.5.2. Instructions with Arguments of One Immediate. InstructionI1
-func generateSyscall() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		return []byte{0x0F, 0x05}, nil
+func generateSyscall(inst Instruction) []byte {
+	return []byte{0x0F, 0x05}
+}
+
+// ----------------------------------------------------------------------------
+// Map of “terminator” opcodes (the last instruction in a block) to handlers.
+// Each handler emits its own x86 bytes and returns a next‐PC.  If it returns
+// 0xFFFFFFFF, the VM harness will read r15 for the actual next‐PC.
+// ----------------------------------------------------------------------------
+var pvmByteCodeToX86CodeJumps = map[byte]func(Instruction, uint32) ([]byte, uint32){
+	JUMP:            generateJumpRel32,
+	LOAD_IMM_JUMP:   generateLoadImmJump,
+	BRANCH_EQ_IMM:   generateBranchImm(0x84),
+	BRANCH_NE_IMM:   generateBranchImm(0x85),
+	BRANCH_LT_U_IMM: generateBranchImm(0x82),
+	BRANCH_LE_U_IMM: generateBranchImm(0x86),
+	BRANCH_GE_U_IMM: generateBranchImm(0x83),
+	BRANCH_GT_U_IMM: generateBranchImm(0x87),
+	BRANCH_LT_S_IMM: generateBranchImm(0x8C),
+	BRANCH_LE_S_IMM: generateBranchImm(0x8E),
+	BRANCH_GE_S_IMM: generateBranchImm(0x8D),
+	BRANCH_GT_S_IMM: generateBranchImm(0x8F),
+
+	JUMP_IND: generateJumpIndirect,
+
+	BRANCH_EQ:   generateCompareBranch(0x0F, 0x84),
+	BRANCH_NE:   generateCompareBranch(0x0F, 0x85),
+	BRANCH_LT_U: generateCompareBranch(0x0F, 0x82),
+	BRANCH_LT_S: generateCompareBranch(0x0F, 0x8C),
+	BRANCH_GE_U: generateCompareBranch(0x0F, 0x83),
+	BRANCH_GE_S: generateCompareBranch(0x0F, 0x8D),
+
+	LOAD_IMM_JUMP_IND: generateLoadImmJumpIndirect,
+}
+
+/*
+func (vm *RecompilerVM) Translate2(bb *BasicBlock, pc uint64) ([]byte, error) {
+	x86Code := vm.startCode
+	for i, inst := range bb.Instructions {
+		op := inst.Opcode
+		// last instr → use jump‐handler
+		if i == len(bb.Instructions)-1 {
+			if fn, ok := pvmByteCodeToX86CodeJumps[op]; ok {
+				code, nextPC := fn(inst, uint32(pc))
+				x86Code = append(x86Code, code...)
+				x86Code = append(x86Code, vm.exitCode...)
+				x86Code = append(x86Code, 0xC3)
+				// TODO: inspect R15 if nextPC==0xFFFFFFFF
+				vm.pc = uint64(nextPC)
+			} else {
+				return nil, fmt.Errorf("unknown terminator %s", opcode_str(op))
+			}
+		} else {
+			// normal op → use the regular map
+			if fn, ok := pvmByteCodeToX86Code[op]; ok {
+				code := fn(inst)
+				x86Code = append(x86Code, code...)
+			} else {
+				return nil, fmt.Errorf("unknown opcode %s", opcode_str(op))
+			}
+		}
+	}
+	return x86Code, nil
+}
+*/
+// ----------------------------------------------------------------------------
+// 1) JUMP rel32 (unconditional)
+// ----------------------------------------------------------------------------
+func generateJumpRel32(inst Instruction, pc uint32) ([]byte, uint32) {
+	disp := int32(extractOneOffset(inst.Args))
+	return nil, uint32(int64(pc) + int64(disp))
+}
+
+// A.5.6. Instructions with Arguments of One Register & Two Immediates.
+//  2. JUMP_IND: indirect via memory - Implements: JMP QWORD PTR [r64_reg + disp32]
+//     where regIdx is the base register and vx is the signed 32-bit offset.
+func generateJumpIndirect(inst Instruction, pc uint32) ([]byte, uint32) {
+	regIdx, vx := extractOneReg2Imm(inst.Args)
+	src := regInfoList[regIdx]
+	// mov r15,[src+disp32]
+	rex := byte(0x48)
+	if regInfoList[15].REXBit == 1 {
+		rex |= 0x04
+	}
+	if src.REXBit == 1 {
+		rex |= 0x01
+	}
+	modrm := byte(0x80 | (regInfoList[15].RegBits << 3) | src.RegBits)
+	code := []byte{rex, 0x8B, modrm}
+	disp := int32(vx)
+	code = append(code, byte(disp), byte(disp>>8), byte(disp>>16), byte(disp>>24))
+	return code, 0xFFFFFFFF
+}
+
+// A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset.
+// LOAD_IMM_JUMP Implements: r64_dst = vx; then PC += vy (signed 32-bit relative jump)
+func generateLoadImmJump(inst Instruction, pc uint32) ([]byte, uint32) {
+	dst, vx, vy := extractOneRegOneImmOneOffset(inst.Args)
+	movDst := encodeMovImm(dst, vx)
+	disp := int32(vy)
+	return movDst, uint32(int64(pc) + int64(disp))
+}
+
+// ----------------------------------------------------------------------------
+// 4) BRANCH_?_IMM
+// ----------------------------------------------------------------------------
+func generateBranchImm(jcc byte) func(Instruction, uint32) ([]byte, uint32) {
+	return func(inst Instruction, pc uint32) ([]byte, uint32) {
+		regIdx, imm, off := extractOneRegOneImmOneOffset(inst.Args)
+		src := regInfoList[regIdx]
+		rex := byte(0x48)
+		if src.REXBit == 1 {
+			rex |= 0x01
+		}
+		code := []byte{rex, 0x81, byte(0xC0 | (7 << 3) | src.RegBits)}
+		code = append(code, encodeU32(uint32(imm))...)
+		code = append(code, 0x0F, jcc)
+		offp := len(code)
+		code = append(code, 0, 0, 0, 0)
+		disp := int32(off)
+		target := uint32(int64(pc) + int64(disp))
+		binary.LittleEndian.PutUint32(code[offp:], uint32(len(code)-(offp+4)))
+		return code, target
 	}
 }
 
-func encodeU16(v uint16) []byte {
-	buf := make([]byte, 2)
-	binary.LittleEndian.PutUint16(buf, v)
-	return buf
+// A.5.12. Instruction with Arguments of Two Registers and Two Immediates.
+// - LOAD_IMM_JUMP_IND
+func generateLoadImmJumpIndirect(inst Instruction, pc uint32) ([]byte, uint32) {
+	vx, vy, dstIdx, srcIdx := extractTwoRegsAndTwoImmediates(inst.Args)
+	movDst := encodeMovImm(dstIdx, vx)
+	src := regInfoList[srcIdx]
+	rex := byte(0x48)
+	if regInfoList[15].REXBit == 1 {
+		rex |= 0x04
+	}
+	if src.REXBit == 1 {
+		rex |= 0x01
+	}
+	modrm := byte(0x80 | (regInfoList[15].RegBits << 3) | src.RegBits)
+	code := append([]byte{}, movDst...)
+	code = append(code, rex, 0x8B, modrm)
+	disp := int32(vy)
+	code = append(code, byte(disp), byte(disp>>8), byte(disp>>16), byte(disp>>24))
+	return code, 0xFFFFFFFF
 }
 
-func encodeU32(v uint32) []byte {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, v)
-	return buf
-}
-
-func encodeU64(v uint64) []byte {
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, v)
-	return buf
+// A.5.11. Instructions with Arguments of Two Registers & One Offset.
+// 6) Two‐reg compare+branch
+func generateCompareBranch(prefix, op byte) func(Instruction, uint32) ([]byte, uint32) {
+	return func(inst Instruction, pc uint32) ([]byte, uint32) {
+		lhsIdx, rhsIdx, off := extractTwoRegsOneOffset(inst.Args)
+		lhs, rhs := regInfoList[lhsIdx], regInfoList[rhsIdx]
+		rex := byte(0x48)
+		if rhs.REXBit == 1 {
+			rex |= 0x04
+		}
+		if lhs.REXBit == 1 {
+			rex |= 0x01
+		}
+		code := []byte{rex, 0x39, byte(0xC0 | (rhs.RegBits << 3) | lhs.RegBits)}
+		code = append(code, prefix, op)
+		offp := len(code)
+		code = append(code, 0, 0, 0, 0)
+		disp := int32(off)
+		target := uint32(int64(pc) + int64(disp))
+		mov15t := encodeMovImm(15, uint64(target))
+		code = append(code, mov15t...)
+		binary.LittleEndian.PutUint32(code[offp:], uint32(len(code)-(offp+4)))
+		return code, 0xFFFFFFFF
+	}
 }

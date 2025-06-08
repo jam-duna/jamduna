@@ -100,6 +100,9 @@ func pvm_test(tc TestCase) error {
 		if err := rvm.ExecuteX86Code(); err != nil {
 			return fmt.Errorf("error executing x86 code: %w", err)
 		}
+		if rvm.ResultCode == types.PVM_PANIC && tc.ExpectedStatus == "panic" {
+			return nil // expected panic, so we return nil
+		}
 		//check the memory
 		for _, mem := range tc.ExpectedMemory {
 			data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))
@@ -107,12 +110,13 @@ func pvm_test(tc TestCase) error {
 				return fmt.Errorf("failed to read memory at address %x: %w", mem.Address, err)
 			}
 			if !bytes.Equal(data, mem.Data) {
-				fmt.Printf("Memory mismatch for test %s at address %x: expected %x, got %x \n", tc.Name, mem.Address, mem.Data, data)
 				num_mismatch++
+				return fmt.Errorf("Memory mismatch for test %s at address %x: expected %x, got %x \n", tc.Name, mem.Address, mem.Data, data)
 			} else {
 				fmt.Printf("Memory match for test %s at address %x \n", tc.Name, mem.Address)
 			}
 		}
+		rvm.Close()
 
 	} else {
 		pvm.Execute(int(tc.InitialPC), false)
@@ -122,6 +126,7 @@ func pvm_test(tc TestCase) error {
 		// fmt.Printf("Register match for test %s \n", tc.Name)
 		return nil
 	}
+
 	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.register)
 
 }

@@ -2,40 +2,24 @@ package pvm
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/colorfulnotion/jam/log"
 )
 
-func (vm *VM) compileBasicBlock(startStep int) (*BasicBlock, error) {
-	if vm.pc >= uint64(len(vm.code)) {
-		return nil, errors.New("program counter out of bounds")
-	}
-	this_step_pc := vm.pc
-	opcode := vm.code[this_step_pc]
-	len_operands := vm.skip(this_step_pc)
-	operands := vm.code[this_step_pc+1 : this_step_pc+1+len_operands]
+func (vm *VM) compileBasicBlock(startStep uint64) (*BasicBlock, error) {
+	this_step_pc := startStep
 	basicBlock := NewBasicBlock(vm.Gas)
-	if IsBasicBlockInstruction(opcode) {
-		basicBlock.AddInstruction(opcode, operands, startStep, this_step_pc)
-		return basicBlock, nil
-	} else {
-		for !IsBasicBlockInstruction(opcode) && this_step_pc < uint64(len(vm.code)) {
-			basicBlock.AddInstruction(opcode, operands, startStep, this_step_pc)
-			this_step_pc += uint64(len_operands) + 1
-			if vm.pc >= uint64(len(vm.code)) || this_step_pc >= uint64(len(vm.code)) {
-				break
-			}
-			opcode = vm.code[this_step_pc]
-			len_operands = vm.skip(this_step_pc)
-			operands = vm.code[this_step_pc+1 : this_step_pc+1+len_operands]
-		}
-		if vm.pc >= uint64(len(vm.code)) || this_step_pc >= uint64(len(vm.code)) {
-			basicBlock.AddInstruction(0, nil, startStep, this_step_pc) // Add a TRAP instruction if we reached the end of the code
-		} else {
-			basicBlock.AddInstruction(opcode, operands, startStep, this_step_pc)
+
+	for this_step_pc < uint64(len(vm.code)) {
+		opcode := vm.code[this_step_pc]
+		len_operands := vm.skip(uint64(this_step_pc))
+		operands := vm.code[this_step_pc+1 : this_step_pc+1+len_operands]
+		basicBlock.AddInstruction(opcode, operands, int(this_step_pc), this_step_pc)
+		this_step_pc += uint64(len_operands) + 1
+		if IsBasicBlockInstruction(opcode) {
+			break
 		}
 	}
 	return basicBlock, nil
@@ -46,10 +30,6 @@ func (vm *VM) executeInstruction(instruction Instruction, is_child bool) error {
 	opcode := instruction.Opcode
 	operands := instruction.Args
 	len_operands := uint64(len(operands))
-	if vm.pc != instruction.Pc {
-		log.Warn(vm.logging, "pc mismatch", "service", string(vm.ServiceMetadata), "expected_pc", vm.pc, "actual_pc", instruction.Pc)
-		return fmt.Errorf("pc mismatch: expected %d, got %d", vm.pc, instruction.Pc)
-	}
 	switch {
 	case opcode <= 1: // A.5.1 No arguments
 		vm.HandleNoArgs(opcode)
@@ -138,14 +118,10 @@ func (vm *VM) executeBasicBlock(bb *BasicBlock, is_child bool) error {
 	}
 	for _, instruction := range bb.Instructions {
 		if err := vm.executeInstruction(instruction, is_child); err != nil {
-			return fmt.Errorf("error executing instruction at pc %d: %w", instruction.Pc, err)
+			return fmt.Errorf("error executing instruction: %w", err)
 		}
 		bb.GasUsage++
 	}
-	if err := vm.executeInstruction(bb.EndPoint, is_child); err != nil {
-		return fmt.Errorf("error executing end point instruction at pc %d: %w", bb.EndPoint.Pc, err)
-	}
-	bb.GasUsage++
 	if PvmLogging {
 		fmt.Printf("Basic Block executed successfully: %s\n", bb.String())
 	}

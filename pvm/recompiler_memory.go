@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"syscall"
 	"unsafe"
-
-	"github.com/colorfulnotion/jam/types"
 )
 
 // GetMemAssess checks access rights for a memory range using mprotect probe.
@@ -117,376 +115,241 @@ func (rvm *RecompilerVM) SetMemAssess(address uint32, length uint32, access byte
 }
 
 // A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
-func generateLoadImm64() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dst := min(12, int(inst.Args[0]))
-		imm := binary.LittleEndian.Uint64(inst.Args[1:9])
-		opcode := 0xB8 + regInfoList[dst].RegBits
-		rex := byte(0x48)
-		if regInfoList[dst].REXBit == 1 {
-			rex |= 0x01
-		}
-		code := []byte{rex, opcode}
-		code = append(code, encodeU64(imm)...) // encodeU64: returns imm64 little endian
-		return code, nil
+func generateLoadImm64(inst Instruction) []byte {
+	dst := min(12, int(inst.Args[0]))
+	imm := binary.LittleEndian.Uint64(inst.Args[1:9])
+	opcode := 0xB8 + regInfoList[dst].RegBits
+	rex := byte(0x48)
+	if regInfoList[dst].REXBit == 1 {
+		rex |= 0x01
 	}
+	code := []byte{rex, opcode}
+	code = append(code, encodeU64(imm)...) // encodeU64: returns imm64 little endian
+	return code
 }
 
-func extractTwoImm(args []byte) (vx uint64, vy uint64) {
-	lx := min(4, (int(args[0])%16)/2)    // first 4 bits for length of first immediate
-	ly := min(4, max(0, len(args)-lx-1)) // remaining bits for second immediate
-	if ly == 0 {
-		ly = 1
-		args = append(args, 0)
-	}
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	vy = x_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly))
-	return
-}
+func generateStoreImmGeneric(
+	opcode byte,
+	prefix byte,
+	immBuilder func(uint64) []byte,
+) func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		disp, immVal := extractTwoImm(inst.Args)
 
-// A.5.4. Instructions with Arguments of Two Immediates.
-func generateStoreImmU8() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		vx, vy := extractTwoImm(inst.Args)
-		offset := vx
-		value := byte(vy)
-		base := BaseReg
-
+		// REX prefix (64-bit mode), only used to extend r8–r15; BaseReg REXBit=0
 		rex := byte(0x40)
-		if base.REXBit != 0 {
+		if BaseReg.REXBit != 0 {
 			rex |= 0x01
 		}
 
-		// ModRM: mod = 10 (disp32), reg = 000 (for imm8 MOV), r/m = 100 (indirect with SIB)
+		// ModRM: mod=10 (disp32), reg=000 (MOV sub-opcode), r/m=100 (SIB follows)
 		modrm := byte(0x84)
+		// SIB: scale=0 (×1), index=100 (none), base=BaseReg.RegBits
+		sib := byte(0x24 | (BaseReg.RegBits & 0x07))
 
-		// SIB: scale=0 (1x), index=100 (none), base=base.RegBits
-		sib := byte(0x24 | (base.RegBits & 0x07))
-
-		code := []byte{
-			rex,
-			0xC6,  // opcode: MOV r/m8, imm8
-			modrm, // ModRM
-			sib,   // SIB with base
-			byte(offset & 0xFF),
-			byte((offset >> 8) & 0xFF),
-			byte((offset >> 16) & 0xFF),
-			byte((offset >> 24) & 0xFF),
-			value,
+		buf := make([]byte, 0, 16)
+		if prefix != 0 {
+			buf = append(buf, prefix)
 		}
-		return code, nil
+		buf = append(buf,
+			rex,    // REX
+			opcode, // MOV r/m?, imm?
+			modrm,  // ModRM
+			sib,    // SIB
+		)
+		buf = append(buf, encodeU32(uint32(disp))...) // disp32
+		buf = append(buf, immBuilder(immVal)...)      // immediate
+		return buf
 	}
 }
 
-func generateStoreImmU16() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		addr, imm := extractTwoImm(inst.Args)
+// U64 (x86-64 does not support direct MOV [mem]-> imm64, so we split into two 32-bit writes)
+// Complete generateStoreImmU64
+func generateStoreImmU64(inst Instruction) []byte {
+	disp64, immVal := extractTwoImm(inst.Args)
+	disp := uint32(disp64)
 
-		code := []byte{0x66, 0xC7, 0x04, 0x25}
-		code = append(code, encodeU32(uint32(addr))...) // mov [abs32], imm16
-		code = append(code, encodeU16(uint16(imm))...)
-		return code, nil
-	}
-}
+	// Split into lower/higher 32 bits
+	low32, high32 := splitU64(immVal)
 
-func generateStoreImmU32() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		addr, imm := extractTwoImm(inst.Args)
-		code := []byte{0xC7, 0x04, 0x25}
-		code = append(code, encodeU32(uint32(addr))...) // mov [abs32], imm32
-		code = append(code, encodeU32(uint32(imm))...)
-		return code, nil
-	}
-}
+	// Allocate a slice with enough capacity
+	buf := make([]byte, 0, (1+1+1+1+4+4)*2)
 
-func generateStoreImmU64() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		addr, imm := extractTwoImm(inst.Args)
-		// mov rax, imm64; mov [addr], rax
-		code := []byte{0x48, 0xB8}
-		code = append(code, encodeU64(imm)...)          // mov rax, imm64
-		code = append(code, 0x48, 0xA3)                 // mov [abs32], rax
-		code = append(code, encodeU32(uint32(addr))...) // [abs32]
-		return code, nil
-	}
+	// Write lower 32 bits
+	buf = emitStoreImm32(buf, disp, low32)
+	// Write higher 32 bits, disp+4
+	buf = emitStoreImm32(buf, disp+4, high32)
+
+	return buf
 }
 
 // A.5.6. Instructions with Arguments of One Register & Two Immediates.
 
-func extractOneReg2Imm(args []byte) (reg1 uint64, vx uint64) {
-	registerIndexA := min(12, int(args[0])%16)
-	lx := min(4, max(0, len(args))-1)
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
+func generateLoadImm32(inst Instruction) []byte {
+	dstReg, imm := extractOneRegOneImm(inst.Args)
+	dst := regInfoList[dstReg]
+	rex := byte(0x40)
+	if dst.REXBit == 1 {
+		rex |= 0x01
 	}
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	return uint64(registerIndexA), vx
+	opcode := 0xB8 + dst.RegBits
+	code := []byte{rex, opcode}
+	code = append(code, encodeU32(uint32(imm))...)
+	return code
 }
 
-func generateLoadImm32() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, imm := extractOneReg2Imm(inst.Args)
+// Generic generator: load from [BaseReg+disp32] into dst, with zero-extend/sign-extend/direct load
+//
+//   - opcodes: actual opcode bytes, e.g. {0x0F,0xB6} (MOVZX r32, r/m8)
+//     or {0x8B}          (MOV r32, r/m32)
+//     or {0x63}          (MOVSXD r64, r/m32)
+//   - rexW:   whether to set REX.W=1 (64-bit operand)
+//
+// result = [ REX ][ opcodes... ][ ModRM ][ SIB ][ disp32 ]
+func generateLoadWithBase(opcodes []byte, rexW bool) func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		dstReg, disp := extractOneRegOneImm(inst.Args)
 		dst := regInfoList[dstReg]
+		base := BaseReg
+
+		// Construct REX prefix: 0100WRXB
 		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
+		if rexW {
+			rex |= 0x08 // REX.W
 		}
-		opcode := 0xB8 + dst.RegBits
-		code := []byte{rex, opcode}
-		code = append(code, encodeU32(uint32(imm))...)
-		return code, nil
+		if dst.REXBit == 1 {
+			rex |= 0x04 // REX.R extends ModRM.reg
+		}
+		if base.REXBit == 1 {
+			rex |= 0x01 // REX.B extends ModRM.r/m (base)
+		}
+
+		// ModRM: mod=10 (disp32), reg=dst.RegBits, r/m=100 (SIB follows)
+		modrm := byte(0x80 | (dst.RegBits << 3) | 0x04)
+		// SIB: scale=0 (×1), index=100(none), base=base.RegBits
+		sib := byte(0x24 | (base.RegBits & 0x07))
+
+		// disp32
+		d := uint32(disp)
+		dispBytes := []byte{
+			byte(d), byte(d >> 8),
+			byte(d >> 16), byte(d >> 24),
+		}
+
+		// Concatenate
+		buf := make([]byte, 0, 1+len(opcodes)+2+1+4)
+		buf = append(buf, rex)
+		buf = append(buf, opcodes...)
+		buf = append(buf, modrm, sib)
+		buf = append(buf, dispBytes...)
+		return buf
 	}
 }
 
-func generateLoadU8() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, addr := extractOneReg2Imm(inst.Args)
-		dst := regInfoList[dstReg]
-		// REX prefix: REX.W=0 (8-bit), REX.B if dst >= r8
+func generateStoreWithBase(opcode byte, prefix byte, rexW bool) func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		srcIdx, disp := extractOneRegOneImm(inst.Args)
+		src := regInfoList[srcIdx]
+		base := BaseReg
+
+		// REX prefix: 0100WRXB
 		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01 // REX.B
+		if rexW {
+			rex |= 0x08 // REX.W
 		}
-		// movzx r32, byte ptr [disp32]
-		// opcode = 0F B6 /r, ModRM: mod=00, reg=dst.RegBits, rm=101 (RIP-relative)
-		modrm := byte(0x00 | (dst.RegBits << 3) | 0x05)
-		// append 32-bit little-endian address
-		disp := int32(addr)
-		dispBytes := []byte{byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24)}
-		return append([]byte{rex, 0x0F, 0xB6, modrm}, dispBytes...), nil
-	}
-}
-
-func generateLoadI8() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, addr := extractOneReg2Imm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		// movsx r32, byte ptr [disp32]
-		modrm := byte(0x00 | (dst.RegBits << 3) | 0x05)
-		disp := int32(addr)
-		dispBytes := []byte{byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24)}
-		return append([]byte{rex, 0x0F, 0xBE, modrm}, dispBytes...), nil
-	}
-}
-
-func generateLoadU16() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, addr := extractOneReg2Imm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		// movzx r32, word ptr [disp32]
-		modrm := byte(0x00 | (dst.RegBits << 3) | 0x05)
-		disp := int32(addr)
-		dispBytes := []byte{byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24)}
-		return append([]byte{rex, 0x0F, 0xB7, modrm}, dispBytes...), nil
-	}
-}
-
-func generateLoadI16() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, addr := extractOneReg2Imm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		// movsx r32, word ptr [disp32]
-		modrm := byte(0x00 | (dst.RegBits << 3) | 0x05)
-		disp := int32(addr)
-		dispBytes := []byte{byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24)}
-		return append([]byte{rex, 0x0F, 0xBF, modrm}, dispBytes...), nil
-	}
-}
-
-func generateLoadU32() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, addr := extractOneReg2Imm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		// mov r32, dword ptr [disp32]
-		modrm := byte(0x00 | (dst.RegBits << 3) | 0x05)
-		disp := int32(addr)
-		dispBytes := []byte{byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24)}
-		return append([]byte{rex, 0x8B, modrm}, dispBytes...), nil
-	}
-}
-
-func generateLoadI32() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, addr := extractOneReg2Imm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x48)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		// movsxd r64, dword ptr [disp32]
-		modrm := byte(0x00 | (dst.RegBits << 3) | 0x05)
-		disp := int32(addr)
-		dispBytes := []byte{byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24)}
-		return append([]byte{rex, 0x63, modrm}, dispBytes...), nil
-	}
-}
-
-func generateLoadU64() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, addr := extractOneReg2Imm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x48)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		// mov r64, qword ptr [disp32]
-		modrm := byte(0x00 | (dst.RegBits << 3) | 0x05)
-		disp := int32(addr)
-		dispBytes := []byte{byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24)}
-		return append([]byte{rex, 0x8B, modrm}, dispBytes...), nil
-	}
-}
-
-func generateStoreU8() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		srcReg, dstReg := extractOneReg2Imm(inst.Args)
-		src := regInfoList[srcReg]
-		dst := regInfoList[dstReg]
-
-		rex := byte(0x40)
 		if src.REXBit == 1 {
-			rex |= 0x04
+			rex |= 0x04 // REX.R extends ModRM.reg
 		}
-		if dst.REXBit == 1 {
-			rex |= 0x01
+		if base.REXBit == 1 {
+			rex |= 0x01 // REX.B extends ModRM.r/m (base)
 		}
-		modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-		return []byte{rex, 0x88, modrm}, nil
+
+		// ModRM: mod=10 (disp32), reg=src.RegBits, r/m=100 (SIB follows)
+		modrm := byte(0x80 | (src.RegBits << 3) | 0x04)
+		// SIB: scale=0 (×1), index=100(none), base=base.RegBits
+		sib := byte(0x24 | (base.RegBits & 0x07))
+
+		// disp32, little-endian
+		d := uint32(disp)
+		dispBytes := []byte{
+			byte(d), byte(d >> 8),
+			byte(d >> 16), byte(d >> 24),
+		}
+
+		buf := make([]byte, 0, 1+1+2+1+4)
+		if prefix != 0 {
+			buf = append(buf, prefix)
+		}
+		buf = append(buf, rex, opcode, modrm, sib)
+		buf = append(buf, dispBytes...)
+		return buf
 	}
 }
 
-func generateStoreU16() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		srcReg, dstReg := extractOneReg2Imm(inst.Args)
-		src := regInfoList[srcReg]
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if src.REXBit == 1 {
-			rex |= 0x04
-		}
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-		return []byte{0x66, rex, 0x89, modrm}, nil // mov word ptr [dst], src
+func generateStoreImmIndU8(inst Instruction) []byte {
+	// MOV byte ptr [Base+disp], imm8
+	disp64, immVal := extractTwoImm(inst.Args) // Args = [disp, value]
+	disp := uint32(disp64)
+	buf := make([]byte, 0, 1+1+1+1+4+1) // prefix+REX+opcode+modrm+sib+disp+imm8
+
+	// REX prefix: W=0, B=BaseReg.REXBit
+	rex := byte(0x40)
+	if BaseReg.REXBit != 0 {
+		rex |= 0x01
 	}
+	buf = append(buf, rex, // REX
+		0xC6,                              // opcode for MOV r/m8, imm8
+		0x84,                              // ModRM: mod=10, reg=000, r/m=100→SIB
+		byte(0x24|(BaseReg.RegBits&0x07)), // SIB
+	)
+	buf = append(buf, encodeU32(disp)...)
+	buf = append(buf, byte(immVal&0xFF))
+	return buf
 }
 
-func generateStoreU32() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		srcReg, dstReg := extractOneReg2Imm(inst.Args)
-		src := regInfoList[srcReg]
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if src.REXBit == 1 {
-			rex |= 0x04
-		}
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-		return []byte{rex, 0x89, modrm}, nil // mov dword ptr [dst], src
+func generateStoreImmIndU16(inst Instruction) []byte {
+	// MOV word ptr [Base+disp], imm16 (0x66 prefix)
+	disp64, immVal := extractTwoImm(inst.Args)
+	disp := uint32(disp64)
+	buf := make([]byte, 0, 1+1+1+1+4+2)
+
+	// prefix 0x66 + REX.B
+	rex := byte(0x40)
+	if BaseReg.REXBit != 0 {
+		rex |= 0x01
 	}
+	buf = append(buf, 0x66, rex, 0xC7, 0x84, byte(0x24|(BaseReg.RegBits&0x07)))
+	buf = append(buf, encodeU32(disp)...)
+	buf = append(buf, encodeU16(uint16(immVal))...)
+	return buf
 }
 
-func generateStoreU64() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		srcReg, dstReg := extractOneReg2Imm(inst.Args)
-		src := regInfoList[srcReg]
-		dst := regInfoList[dstReg]
-		rex := byte(0x48)
-		if src.REXBit == 1 {
-			rex |= 0x04
-		}
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-		return []byte{rex, 0x89, modrm}, nil // mov qword ptr [dst], src
+func generateStoreImmIndU32(inst Instruction) []byte {
+	// MOV dword ptr [Base+disp], imm32
+	disp64, immVal := extractTwoImm(inst.Args)
+	disp := uint32(disp64)
+	buf := make([]byte, 0, 1+1+1+1+4+4)
+
+	// REX.B only
+	rex := byte(0x40)
+	if BaseReg.REXBit != 0 {
+		rex |= 0x01
 	}
+	buf = append(buf, rex, 0xC7, 0x84, byte(0x24|(BaseReg.RegBits&0x07)))
+	buf = append(buf, encodeU32(disp)...)
+	buf = append(buf, encodeU32(uint32(immVal))...)
+	return buf
 }
 
-// A.5.7. Instructions with Arguments of One Register & Two Immediates.
+func generateStoreImmIndU64(inst Instruction) []byte {
+	// MOV qword ptr [Base+disp], imm64
+	disp64, immVal := extractTwoImm(inst.Args)
+	disp := uint32(disp64)
 
-func extractOneRegTwoImm(args []byte) (reg1 uint64, vx uint64, vy uint64) {
-	registerIndexA := min(12, int(args[0])%16)
-	lx := min(4, (int(args[0])/16)%8)
-	ly := min(4, max(0, len(args)-lx-1))
-	if ly == 0 {
-		ly = 1
-		args = append(args, 0)
-	}
+	low, high := splitU64(immVal)
+	buf := make([]byte, 0, (1+1+1+1+4+4)*2)
 
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	vy = x_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly))
-	return uint64(registerIndexA), vx, vy
-}
-
-func generateStoreImmIndU8() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, imm, _ := extractOneRegTwoImm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | (0x00 << 3) | dst.RegBits)  // /0 encoding
-		return []byte{rex, 0xC6, modrm, uint8(imm)}, nil // mov byte ptr [dst], imm8
-	}
-}
-
-func generateStoreImmIndU16() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, imm, _ := extractOneRegTwoImm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | (0x00 << 3) | dst.RegBits)                               // /0 encoding
-		return append([]byte{0x66, rex, 0xC7, modrm}, encodeU16(uint16(imm))...), nil // mov word ptr [dst], imm16
-	}
-}
-
-func generateStoreImmIndU32() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, imm, _ := extractOneRegTwoImm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x40)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | (0x00 << 3) | dst.RegBits)
-		return append([]byte{rex, 0xC7, modrm}, encodeU32(uint32(imm))...), nil // mov dword ptr [dst], imm32
-	}
-}
-
-func generateStoreImmIndU64() func(inst Instruction) ([]byte, error) {
-	return func(inst Instruction) ([]byte, error) {
-		dstReg, imm, _ := extractOneRegTwoImm(inst.Args)
-		dst := regInfoList[dstReg]
-		rex := byte(0x48)
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | (0x00 << 3) | dst.RegBits)
-		return append([]byte{rex, 0xC7, modrm}, encodeU64(imm)...), nil // mov qword ptr [dst], imm64
-	}
+	buf = emitStoreImm32(buf, disp, low)
+	buf = emitStoreImm32(buf, disp+4, high)
+	return buf
 }
