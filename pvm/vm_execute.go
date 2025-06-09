@@ -18,7 +18,7 @@ func (vm *VM) compileBasicBlock(startStep uint64) (basicBlocks map[uint64]*Basic
 		len_operands := vm.skip(uint64(this_step_pc))
 		operands := vm.code[this_step_pc+1 : this_step_pc+1+len_operands]
 		basicBlock.AddInstruction(opcode, operands, int(this_step_pc), this_step_pc)
-		fmt.Printf("Compiling instruction: %s at pc %d with operands 0x%x\n", opcode_str(opcode), this_step_pc, operands)
+
 		if IsBasicBlockInstruction(opcode) {
 			if opcode == JUMP {
 				basicBlock.JumpType = DIRECT_JUMP
@@ -37,7 +37,6 @@ func (vm *VM) compileBasicBlock(startStep uint64) (basicBlocks map[uint64]*Basic
 				basicBlock.JumpType = INDIRECT_JUMP
 				basicBlock.IndirectSourceRegister = registerIndexB
 				basicBlock.IndirectJumpOffset = uint64(vy)
-				fmt.Printf("***** LOAD_IMM_JUMP_IND with register %d and offset %d\n", registerIndexB, vy)
 			} else if opcode >= BRANCH_EQ && opcode <= BRANCH_GE_S {
 				_, _, vx0 := extractTwoRegsOneOffset(operands)
 				basicBlock.JumpType = CONDITIONAL
@@ -52,7 +51,7 @@ func (vm *VM) compileBasicBlock(startStep uint64) (basicBlocks map[uint64]*Basic
 				basicBlock.JumpType = TRAP
 			}
 			basicBlocks[startStep] = basicBlock
-			fmt.Printf("Basic Block compiled: %d => %s\n", startStep, basicBlock.String())
+			//fmt.Printf("Basic Block compiled: %d => %s\n", startStep, basicBlock.String())
 			this_step_pc += uint64(len_operands) + 1
 			startStep = this_step_pc
 			basicBlock = NewBasicBlock(vm.Gas)
@@ -70,7 +69,7 @@ func (vm *VM) executeInstruction(instruction Instruction, is_child bool) error {
 	opcode := instruction.Opcode
 	operands := instruction.Args
 	len_operands := uint64(len(operands))
-	fmt.Printf("executeInstruction %s %v\n", opcode_str(opcode), vm.terminated)
+
 	switch {
 	case opcode <= 1: // A.5.1 No arguments
 		vm.HandleNoArgs(opcode)
@@ -143,7 +142,6 @@ func (vm *VM) executeInstruction(instruction Instruction, is_child bool) error {
 		vm.hostCall = false
 		vm.terminated = false
 	}
-	fmt.Printf("executeInstruction END %s %v\n", opcode_str(opcode), vm.terminated)
 
 	return nil
 }
@@ -170,6 +168,5 @@ func (vm *VM) executeBasicBlock(bb *BasicBlock, is_child bool) error {
 		return fmt.Errorf("gas limit exceeded: %d < %d", vm.Gas, bb.GasUsage)
 	}
 
-	fmt.Printf("%s\n", bb.String())
 	return nil
 }

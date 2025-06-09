@@ -3,6 +3,7 @@ package pvm
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -21,7 +22,6 @@ type RecompilerVM struct {
 	realMemory  []byte
 	regDumpMem  []byte  // memory region to dump registers
 	regDumpAddr uintptr // base address of regDumpMem
-	PageMap     any     // TODO: define PageMap type
 }
 
 const (
@@ -70,6 +70,7 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 		startCode:   nil,
 		exitCode:    nil,
 	}
+	// vm.Ram = rvm
 	rvm.initStartCode()
 
 	// build exitCode: dump registers into regDumpMem
@@ -133,14 +134,18 @@ func (vm *RecompilerVM) Close() error {
 	return nil
 }
 
-func (vm *RecompilerVM) Translate(bb *BasicBlock) error {
+func (vm *RecompilerVM) Translate(bb *BasicBlock) (err error) {
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM Translate panic", "error", r)
+			debug.PrintStack()
 			vm.ResultCode = types.PVM_PANIC
 			vm.terminated = true
+			err = fmt.Errorf("Translate panic: %v", r)
 		}
 	}()
+
 	vm.initStartCode()
 	vm.x86Code = vm.startCode
 	for _, instruction := range bb.Instructions {
@@ -158,9 +163,11 @@ func (vm *RecompilerVM) Translate(bb *BasicBlock) error {
 		bb.AddInstruction(TRAP, nil, 1000, 1000)
 	}
 	fmt.Printf("%s\n", bb.String())
+
 	// append exitCode, then ret
 	vm.x86Code = append(vm.x86Code, vm.exitCode...)
 	vm.x86Code = append(vm.x86Code, 0xC3) // ret
+
 	fmt.Printf("Generated x86 code:\n%s\n", Disassemble(vm.x86Code))
 	return nil
 }
@@ -194,7 +201,17 @@ func Disassemble(code []byte) string {
 	return sb.String()
 }
 
-func (vm *RecompilerVM) ExecuteX86Code() error {
+func (vm *RecompilerVM) ExecuteX86Code() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
+			debug.PrintStack()
+			vm.ResultCode = types.PVM_PANIC
+			vm.terminated = true
+			err = fmt.Errorf("ExecuteX86Code panic: %v", r)
+		}
+	}()
+
 	x86code := vm.x86Code
 	codeAddr, err := syscall.Mmap(
 		-1, 0, len(x86code),
@@ -211,9 +228,8 @@ func (vm *RecompilerVM) ExecuteX86Code() error {
 		return fmt.Errorf("failed to mprotect exec code: %w", err)
 	}
 
-	crashed := x86_execute.ExecuteX86(x86code)
-
-	if crashed == -1 {
+	crashed := x86_execute.ExecuteX86(x86code) //  vm.regDumpMem
+	if crashed == -1 {                         // || err != nil
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
 		fmt.Printf("PANIC in ExecuteX86Code\n")

@@ -47,13 +47,41 @@ type TestCase struct {
 
 var RecompilerFlag = false // set to false to run the interpreter
 
+func findBasicBlock(pc uint64, basicBlocks map[uint64]*BasicBlock) (*BasicBlock, bool) {
+	if bb, ok := basicBlocks[pc]; ok {
+		return bb, true
+	}
+	for _, bb := range basicBlocks {
+		firstInstruction := bb.Instructions[0]
+		lastInstruction := bb.Instructions[len(bb.Instructions)-1]
+		if firstInstruction.Pc <= pc && pc <= lastInstruction.Pc+uint64(len(lastInstruction.Args)) {
+			// find the first instruction that contains the pc
+			for i, inst := range bb.Instructions {
+				if inst.Pc == pc {
+					// If the instruction is not the first one, we need to create a partial block
+					if i > 0 {
+						partialBlock := &BasicBlock{
+							Instructions:           bb.Instructions[i:],
+							JumpType:               bb.JumpType,
+							TruePC:                 bb.TruePC,
+							FalsePC:                bb.FalsePC,
+							IndirectSourceRegister: bb.IndirectSourceRegister,
+							IndirectJumpOffset:     bb.IndirectJumpOffset,
+						}
+						return partialBlock, true
+					} else {
+						// If it is the first instruction, we can return the whole block
+						return bb, true
+					}
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
 func pvm_test(tc TestCase) error {
 	var num_mismatch int
-	fmt.Printf("\n------\nTest case: %s\n", tc.Name)
-
-	// if tc.Name != "inst_div_signed_64" {
-	// 	return 0, nil
-	// }
 
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
@@ -94,7 +122,7 @@ func pvm_test(tc TestCase) error {
 		done := false
 		numExecutions := 0
 		for !done {
-			bb, ok := basicBlocks[rvm.pc]
+			bb, ok := findBasicBlock(rvm.pc, basicBlocks)
 			if !ok {
 				panic("no basic block found for pc: " + fmt.Sprint(rvm.pc))
 			}
@@ -114,7 +142,7 @@ func pvm_test(tc TestCase) error {
 				rvm.pc = bb.TruePC
 				fmt.Printf("DIRECT_JUMP to pc: %d\n", rvm.pc)
 			case INDIRECT_JUMP:
-				rvm.pc = rvm.register[bb.IndirectSourceRegister] + bb.IndirectJumpOffset
+				rvm.djump(rvm.register[bb.IndirectSourceRegister] + bb.IndirectJumpOffset)
 				fmt.Printf("INDIRECT_JUMP to pc: %d\n", rvm.pc)
 			case CONDITIONAL:
 				reg15Value := rvm.register[len(rvm.register)-1]
@@ -126,17 +154,14 @@ func pvm_test(tc TestCase) error {
 					fmt.Printf("CONDITION=1 jump to pc: %d\n", rvm.pc)
 				}
 			}
-			if rvm.pc >= uint64(len(rvm.code)) {
+			if rvm.terminated || rvm.pc >= uint64(len(rvm.code)) {
 				done = true // Exit the loop if we reach the end of the code
+			} else {
+				numExecutions++
+				if numExecutions > 10 {
+					return fmt.Errorf("infinite loop detected, executed %d times", numExecutions)
+				}
 			}
-			numExecutions++
-			if numExecutions > 10 {
-				return fmt.Errorf("infinite loop detected, executed %d times", numExecutions)
-			}
-		}
-
-		if rvm.ResultCode == types.PVM_PANIC && tc.ExpectedStatus == "panic" {
-			return nil // expected panic, so we return nil
 		}
 		// check the memory
 		for _, mem := range tc.ExpectedMemory {
@@ -151,6 +176,18 @@ func pvm_test(tc TestCase) error {
 				fmt.Printf("Memory match for test %s at address %x \n", tc.Name, mem.Address)
 			}
 		}
+		for i, reg := range rvm.register {
+			if reg != tc.ExpectedRegs[i] {
+				num_mismatch++
+				return fmt.Errorf("register mismatch for test %s at index %d: expected %d, got %d", tc.Name, i, tc.ExpectedRegs[i], reg)
+			}
+		}
+		if types.ResultCodeToString[rvm.ResultCode] != tc.ExpectedStatus {
+			return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, tc.ExpectedStatus, types.ResultCodeToString[rvm.ResultCode])
+		} else {
+			fmt.Printf("Result code match for test %s: %s\n", tc.Name, types.ResultCodeToString[rvm.ResultCode])
+		}
+
 		rvm.Close()
 
 	} else {

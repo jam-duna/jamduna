@@ -1,24 +1,17 @@
 package pvm
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/bits"
+	"strings"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/example/hello/reverse" // go get golang.org/x/example/hello/reverse
 )
-
-type VirtualMachine interface {
-	Execute(entryPoint int, is_child bool) error
-	ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount)
-	ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result)
-	ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte)
-	ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64)
-}
 
 const (
 	regSize = 13
@@ -52,7 +45,7 @@ type VM struct {
 	terminated     bool
 	hostCall       bool // ̵h in GP
 	host_func_id   int  // h in GP
-	Ram            *RAM
+	Ram            RAMInterface
 	register       []uint64
 	Gas            int64
 	hostenv        types.HostEnv
@@ -360,7 +353,141 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.Hos
 // Execute runs the program until it terminates
 func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	vm.terminated = false
-	vm.Gas = 1111
+
+	// A.2 deblob
+	if vm.code == nil {
+		vm.ResultCode = types.PVM_PANIC
+		vm.terminated = true
+		return errors.New("no code to execute")
+	}
+
+	if len(vm.code) == 0 {
+		vm.ResultCode = types.PVM_PANIC
+		vm.terminated = true
+		return errors.New("no code to execute")
+	}
+
+	if len(vm.bitmask) == 0 {
+		vm.ResultCode = types.PVM_PANIC
+		vm.terminated = true
+		return errors.New("failed to decode bitmask")
+	}
+
+	vm.pc = uint64(entryPoint)
+	stepn := 1
+	for !vm.terminated {
+		if err := vm.step(stepn); err != nil {
+			return err
+		}
+		if vm.hostCall && is_child {
+			return nil
+		}
+		// host call invocation
+		if vm.hostCall {
+			vm.InvokeHostCall(vm.host_func_id)
+			vm.hostCall = false
+			vm.terminated = false
+		}
+		vm.Gas = vm.Gas - 1 // remove the else
+
+		stepn++
+	}
+
+	// vm.Mode = ...
+	// vm.Gas = types.IsAuthorizedGasAllocation
+	// if vm finished without error, set result code to OK
+	if !vm.terminated {
+		vm.ResultCode = types.RESULT_OK
+	} else if vm.ResultCode != types.RESULT_OK {
+		log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
+	}
+	return nil
+}
+
+// step performs a single step in the PVM
+func (vm *VM) step(stepn int) error {
+	if vm.pc >= uint64(len(vm.code)) {
+		return errors.New("program counter out of bounds")
+	}
+	//this_step_pc := vm.pc
+	opcode := vm.code[vm.pc]
+
+	len_operands := vm.skip(vm.pc)
+	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
+
+	switch {
+	case opcode <= 1: // A.5.1 No arguments
+		vm.HandleNoArgs(opcode)
+	case opcode == ECALLI: // A.5.2 One immediate
+		vm.HandleOneImm(opcode, operands)
+	case opcode == LOAD_IMM_64: // A.5.3 One Register and One Extended Width Immediate
+		vm.HandleOneRegOneEWImm(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
+		}
+	case 30 <= opcode && opcode <= 33: // A.5.4 Two Immediates
+		vm.HandleTwoImms(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
+		}
+	case opcode == JUMP: // A.5.5 One offset
+		vm.HandleOneOffset(opcode, operands)
+	case 50 <= opcode && opcode <= 62: // A.5.6 One Register and One Immediate
+		vm.HandleOneRegOneImm(opcode, operands)
+		if opcode != JUMP_IND {
+			if !vm.terminated {
+				vm.pc += 1 + len_operands
+			}
+		}
+	case 70 <= opcode && opcode <= 73: // A.5.7 One Register and Two Immediate
+		vm.HandleOneRegTwoImm(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
+		}
+	case 80 <= opcode && opcode <= 90: // A.5.8 One Register, One Immediate and One Offset
+		vm.HandleOneRegOneImmOneOffset(opcode, operands)
+	case 100 <= opcode && opcode <= 111: // A.5.9 Two Registers
+		vm.HandleTwoRegs(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
+		}
+	case 120 <= opcode && opcode <= 161: // A.5.10 Two Registers and One Immediate
+		//fmt.Printf("OPCODE %d\n", opcode)
+		vm.HandleTwoRegsOneImm(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
+		}
+	case 170 <= opcode && opcode <= 175: // A.5.11 Two Registers and One Offset
+		vm.HandleTwoRegsOneOffset(opcode, operands)
+	case opcode == LOAD_IMM_JUMP_IND: // A.5.12 Two Register and Two Immediate
+		vm.HandleTwoRegsTwoImms(opcode, operands)
+	case 190 <= opcode && opcode <= 230: // A.5.13 Three Registers
+		vm.HandleThreeRegs(opcode, operands)
+		if !vm.terminated {
+			vm.pc += 1 + len_operands
+		}
+
+	default:
+		vm.ResultCode = types.PVM_PANIC
+		vm.terminated = true
+		log.Warn(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
+		return nil
+	}
+
+	// avoid this: this is expensive
+	if PvmLogging {
+		registersJSON, _ := json.Marshal(vm.ReadRegisters())
+		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", " ")
+		fmt.Printf("%s: %-18s step:%6d pc:%6d g:%6d Registers:%s\n", vm.Mode, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
+		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
+		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
+	}
+	return nil
+}
+
+// Execute runs the program until it terminates
+func (vm *VM) ExecuteNew(entryPoint int, is_child bool) error {
+	vm.terminated = false
 	// A.2 deblob
 	if vm.code == nil {
 		vm.ResultCode = types.PVM_PANIC
@@ -389,7 +516,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 		if !ok {
 			panic("no basic block found for pc: " + fmt.Sprint(vm.pc))
 		}
-		fmt.Printf("Executing Basic Block at pc: %d\n", vm.pc)
+
 		vm.terminated = false
 		err := vm.executeBasicBlock(bb, is_child)
 		if err != nil {
@@ -404,7 +531,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 
 		}
 		if vm.terminated {
-			fmt.Printf("VM terminated with ResultCode: %d\n", vm.ResultCode)
+			//fmt.Printf("VM terminated with ResultCode: %d\n", vm.ResultCode)
 			done = true
 		}
 	}
@@ -907,17 +1034,16 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 	var result uint64
 	switch opcode {
 	case MOVE_REG:
-		fmt.Printf("\tMOVE_REG         %s = %s\n", reg(registerIndexD), reg(registerIndexA))
 		result, _ = vm.ReadRegister(registerIndexA)
 		dumpMov(registerIndexD, registerIndexA, result)
 	case SBRK:
 		if valueA == 0 {
-			vm.WriteRegister(registerIndexD, uint64(vm.Ram.current_heap_pointer))
+			vm.WriteRegister(registerIndexD, uint64(vm.Ram.GetCurrentHeapPointer()))
 			return
 		}
-		result = uint64(vm.Ram.current_heap_pointer)
-		next_page_boundary := P_func(vm.Ram.current_heap_pointer)
-		new_heap_pointer := uint64(vm.Ram.current_heap_pointer) + valueA
+		result = uint64(vm.Ram.GetCurrentHeapPointer())
+		next_page_boundary := P_func(vm.Ram.GetCurrentHeapPointer())
+		new_heap_pointer := uint64(vm.Ram.GetCurrentHeapPointer()) + valueA
 
 		if new_heap_pointer > uint64(next_page_boundary) {
 			final_boundary := P_func(uint32(new_heap_pointer))
@@ -927,7 +1053,7 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 
 			vm.Ram.allocatePages(idx_start, page_count)
 		}
-		vm.Ram.current_heap_pointer = uint32(new_heap_pointer)
+		vm.Ram.SetCurrentHeapPointer(uint32(new_heap_pointer))
 		dumpTwoRegs("SBRK", registerIndexD, registerIndexA, valueA, result)
 	case COUNT_SET_BITS_64:
 		result = uint64(bits.OnesCount64(valueA))

@@ -508,37 +508,42 @@ func generateImmMulOp64(inst Instruction) []byte {
 	return code
 }
 
-// Implements: dst := src + imm (32-bit)
+// Implements: dst := sign_extend( i32(src) + imm32 )
 func generateBinaryImm32(inst Instruction) []byte {
 	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstReg]
 	src := regInfoList[srcReg]
 
 	// 1) MOV r32_dst, r32_src
-	// REX.W=0, but include REX if either reg ≥ r8 for extension
-	rexMov := byte(0x40)
+	rexMov := byte(0x40) // no REX.W
 	if src.REXBit == 1 {
-		rexMov |= 0x04 // REX.R
-	}
+		rexMov |= 0x04
+	} // REX.R
 	if dst.REXBit == 1 {
-		rexMov |= 0x01 // REX.B
-	}
-	// Opcode 0x89 /r: MOV r/m32, r32
+		rexMov |= 0x01
+	} // REX.B
+	// 0x89 /r : MOV r/m32, r32
 	modrmMov := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
 	code := []byte{rexMov, 0x89, modrmMov}
 
 	// 2) ADD r32_dst, imm32
-	// REX.W=0, but include REX if dst ≥ r8
 	rexAdd := byte(0x40)
 	if dst.REXBit == 1 {
-		rexAdd |= 0x01 // REX.B
-	}
-	// Opcode 0x81 /0: ADD r/m32, imm32
+		rexAdd |= 0x01
+	} // REX.B
+	// 0x81 /0 id : ADD r/m32, imm32
 	modrmAdd := byte(0xC0 | (0 << 3) | dst.RegBits)
 	code = append(code, rexAdd, 0x81, modrmAdd)
-	// append 4-byte little-endian immediate
 	code = append(code, encodeU32(uint32(imm))...)
 
+	// 3) MOVSXD r64_dst, r/m32   ; sign-extend low 32→64
+	rexSX := byte(0x48) // REX.W
+	if dst.REXBit == 1 {
+		// set REX.R (bit2) and REX.B (bit0) so both reg-field and rm-field map to dst+8
+		rexSX |= 0x05 // 0x04|0x01
+	}
+	modrmSX := byte(0xC0 | (dst.RegBits << 3) | dst.RegBits)
+	code = append(code, rexSX, 0x63, modrmSX)
 	return code
 }
 
@@ -634,40 +639,95 @@ func generateLoadInd(
 	}
 }
 
-// Args = [srcReg, dstReg, disp?] Only the first two registers are used here, disp is represented by disp32=0
-func generateStoreIndirect(opcode byte, is16bit bool, size int) func(inst Instruction) []byte {
+func generateStoreIndirect(opcode byte, size int) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		srcReg, dstReg, _ := extractTwoRegsOneImm(inst.Args)
-		src := regInfoList[srcReg]
-		dst := regInfoList[dstReg]
+		// extract source register, destination register and displacement
+		srcIdx, dstIdx, disp64 := extractTwoRegsOneImm(inst.Args)
+		base := BaseReg
+		disp := uint32(disp64)
 
-		// 1) Optional 0x66 prefix for 16-bit operations
-		code := []byte{}
-		if is16bit {
-			code = append(code, 0x66)
+		dstInfo := regInfoList[dstIdx]
+		srcInfo := regInfoList[srcIdx]
+		dstBits, srcBits := dstInfo.RegBits, srcInfo.RegBits
+
+		var buf []byte
+
+		// For sizes < 8, preserve original dst register and apply mask
+		if size != 8 {
+			// PUSH dst
+			if srcInfo.REXBit == 1 {
+				buf = append(buf, 0x41) // REX.B
+			}
+			buf = append(buf, 0x50|srcBits)
+
+			// Compute mask for AND
+			var mask uint32
+			switch size {
+			case 1:
+				mask = 0xFF
+			case 2:
+				mask = 0xFFFF
+			case 4:
+				mask = 0xFFFFFFFF
+			}
+
+			// REX prefix for AND r/m64, imm32 (REX.W=1)
+			rexAnd := byte(0x48)
+			if srcInfo.REXBit == 1 {
+				rexAnd |= 0x01
+			}
+			buf = append(buf, rexAnd)
+
+			// AND opcode 0x81 /4 id
+			modrm := byte((3 << 6) | (4 << 3) | (srcBits & 0x07))
+			buf = append(buf, 0x81, modrm)
+			buf = append(buf,
+				byte(mask), byte(mask>>8),
+				byte(mask>>16), byte(mask>>24),
+			)
+
+			// POP dst
+			if srcInfo.REXBit == 1 {
+				buf = append(buf, 0x41)
+			}
+			buf = append(buf, 0x58|srcBits)
 		}
 
-		// 2) REX prefix: 0100WRXB
+		// MOV [base + index*1 + disp32], dst
+		// Legacy prefix for 16-bit operand size
+		if size == 2 {
+			buf = append(buf, 0x66)
+		}
+		// REX prefix: bit7 fixed=0, bit6 fixed=1
 		rex := byte(0x40)
+		// REX.W for 64-bit operand
 		if size == 8 {
-			rex |= 0x08 // REX.W
+			rex |= 0x08
 		}
-		if src.REXBit == 1 {
-			rex |= 0x04 // REX.R extends ModRM.reg
+		// REX.R, REX.X, REX.B
+		if srcInfo.REXBit == 1 {
+			rex |= 0x04
 		}
-		if dst.REXBit == 1 {
-			rex |= 0x01 // REX.B extends ModRM.r/m
+		if dstInfo.REXBit == 1 {
+			rex |= 0x02
 		}
-		code = append(code, rex)
+		if base.REXBit == 1 {
+			rex |= 0x01
+		}
+		// emit REX only if non-default
+		if rex != 0x40 {
+			buf = append(buf, rex)
+		}
+		// MOV opcode and addressing
+		buf = append(buf, opcode)
+		modrm := byte((2 << 6) | (srcBits << 3) | 0x04)
+		sib := byte((0 << 6) | (dstBits << 3) | (base.RegBits & 0x07))
+		buf = append(buf, modrm, sib)
+		buf = append(buf,
+			byte(disp), byte(disp>>8),
+			byte(disp>>16), byte(disp>>24),
+		)
 
-		// 3) opcode + ModRM
-		//    mod=10 (disp32), reg=src.RegBits, r/m=dst.RegBits
-		modrm := byte(0x80 | (src.RegBits << 3) | (dst.RegBits & 0x07))
-		code = append(code, opcode, modrm)
-
-		// 4) disp32 = 0
-		code = append(code, encodeU32(0)...)
-
-		return code
+		return buf
 	}
 }

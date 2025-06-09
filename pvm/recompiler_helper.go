@@ -2,6 +2,7 @@ package pvm
 
 import (
 	"encoding/binary"
+	"unsafe"
 )
 
 type X86Reg struct {
@@ -121,10 +122,10 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	REVERSE_BYTES:         generateReverseBytes64,
 
 	// A.5.10. Instructions with Arguments of Two Registers & One Immediate.
-	STORE_IND_U8:      generateStoreIndirect(0x88, true, 1),
-	STORE_IND_U16:     generateStoreIndirect(0x89, true, 2),
-	STORE_IND_U32:     generateStoreIndirect(0x89, false, 4),
-	STORE_IND_U64:     generateStoreIndirect(0x89, false, 8),
+	STORE_IND_U8:      generateStoreIndirect(0x88, 1),
+	STORE_IND_U16:     generateStoreIndirect(0x89, 2),
+	STORE_IND_U32:     generateStoreIndirect(0x89, 4),
+	STORE_IND_U64:     generateStoreIndirect(0x89, 8),
 	LOAD_IND_U8:       generateLoadInd(0x8A, false, 1),
 	LOAD_IND_I8:       generateLoadIndSignExtend(0x0F, 0xBE, false),
 	LOAD_IND_U16:      generateLoadInd(0x8B, false, 2),
@@ -300,4 +301,20 @@ func encodeU64(v uint64) []byte {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, v)
 	return buf
+}
+
+func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
+	code := encodeMovImm(BaseRegIndex, uint64(rvm.regDumpAddr))
+	// for each register, mov [r12 + i*8], rX
+	for i := 0; i < len(regInfoList); i++ {
+		off := byte(i * 8)
+		dumpInstr := encodeMovRegToMem(i, BaseRegIndex, off)
+		code = append(code, dumpInstr...)
+	}
+
+	if move_back {
+		// restore the base register to r12
+		code = append(code, encodeMovImm(BaseRegIndex, uint64(uintptr(unsafe.Pointer(&rvm.realMemory[0]))))...)
+	}
+	return code
 }

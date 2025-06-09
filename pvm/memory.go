@@ -6,6 +6,14 @@ import (
 	"github.com/colorfulnotion/jam/log"
 )
 
+type RAMInterface interface {
+	WriteRAMBytes(address uint32, data []byte) uint64
+	ReadRAMBytes(address uint32, length uint32) ([]byte, uint64)
+	allocatePages(startPage uint32, count uint32)
+	GetCurrentHeapPointer() uint32
+	SetCurrentHeapPointer(pointer uint32)
+}
+
 type RAM struct {
 	stack_address        uint32
 	stack_address_end    uint32
@@ -144,5 +152,25 @@ func (ram *RAM) allocatePages(startPage uint32, count uint32) {
 		newData := make([]byte, required)
 		copy(newData, ram.rw_data)
 		ram.rw_data = newData
+	}
+}
+
+func (ram *RAM) GetCurrentHeapPointer() uint32 {
+	if ram.current_heap_pointer < ram.rw_data_address_end {
+		return ram.current_heap_pointer
+	}
+	log.Error("pvm", "GetCurrentHeapPointer", "current_heap_pointer out of bounds",
+		"current_heap_pointer", fmt.Sprintf("%x", ram.current_heap_pointer),
+		"rw_data_address_end", fmt.Sprintf("%x", ram.rw_data_address_end))
+	return 0
+}
+
+func (ram *RAM) SetCurrentHeapPointer(pointer uint32) {
+	if pointer < ram.rw_data_address_end {
+		ram.current_heap_pointer = pointer
+	} else {
+		log.Error("pvm", "SetCurrentHeapPointer", "pointer out of bounds",
+			"pointer", fmt.Sprintf("%x", pointer),
+			"rw_data_address_end", fmt.Sprintf("%x", ram.rw_data_address_end))
 	}
 }

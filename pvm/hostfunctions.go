@@ -146,15 +146,15 @@ func GetHostFunctionDetails(name string) (int, []uint64) {
 }
 
 type RefineM struct {
-	P []byte `json:"P"`
-	U *RAM   `json:"U"`
-	I uint64 `json:"I"`
+	P []byte       `json:"P"`
+	U RAMInterface `json:"U"`
+	I uint64       `json:"I"`
 }
 
 // GP-0.5 B.5
 type Refine_parameters struct {
 	Gas                  uint64
-	Ram                  *RAM
+	Ram                  *RAMInterface
 	Register             []uint32
 	Machine              map[uint32]*RefineM
 	Export_segment       [][]byte
@@ -999,7 +999,7 @@ func (vm *VM) hostInvoke() {
 		pc:       m_n.I,
 		Gas:      int64(g),
 		register: m_n_reg,
-		Ram:      m_n.U,
+		// TODO: Ram:      m_n.U,
 	}
 
 	new_machine.logging = vm.logging

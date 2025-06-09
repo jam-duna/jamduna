@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"syscall"
 	"testing"
@@ -253,38 +252,24 @@ func TestRecompilerSuccess(t *testing.T) {
 		t.Fatalf("Failed to read directory: %v", err)
 	}
 	count := 0
-	num_mismatch := 0
-	// 180 tests pass, these 25 tests fail
+	mismatchs := make(map[int][]string)
+	memory_mismatch := 0
+	register_mismatch := 1
+	result_code_mismatch := 2
+	for i := 0; i < 3; i++ {
+		mismatchs[i] = make([]string, 0)
+	}
+	// 183 tests pass, these 22 tests fail
 	suppress := []string{
-		"inst_jump_indirect_misaligned_djump_with_offset_nok.json",
-		"inst_jump_indirect_misaligned_djump_without_offset_nok.json",
-		"inst_jump_indirect_with_offset_ok.json",
-		"inst_jump_indirect_without_offset_ok.json",
-		"inst_jump_indirect_invalid_djump_to_zero_nok.json",
-
-		"inst_load_imm_and_jump_indirect_different_regs_with_offset_ok.json",
-		"inst_load_imm_and_jump_indirect_different_regs_without_offset_ok.json",
-		"inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_with_offset_nok.json",
-		"inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_without_offset_nok.json",
-		"inst_load_imm_and_jump_indirect_invalid_djump_to_zero_different_regs_without_offset_nok.json",
-
-		"inst_load_imm_and_jump_indirect_same_regs_with_offset_ok.json",
-		"inst_load_imm_and_jump_indirect_same_regs_without_offset_ok.json",
-		"inst_ret_invalid.json",
-		"inst_rem_signed_32_with_overflow.json",
-		"inst_add_imm_32_with_truncation_and_sign_extension.json",
-
-		"inst_rem_signed_64_with_overflow.json",
-		"inst_store_imm_indirect_u16_with_offset_nok.json",
-		"inst_store_imm_indirect_u32_with_offset_nok.json",
-		"inst_store_imm_indirect_u64_with_offset_nok.json",
-		"inst_store_imm_indirect_u8_with_offset_nok.json",
-
-		"inst_store_indirect_u16_with_offset_nok.json",
-		"inst_store_indirect_u32_with_offset_nok.json",
-		"inst_store_indirect_u64_with_offset_nok.json",
-		"inst_store_indirect_u8_with_offset_nok.json",
-		"inst_store_u8_trap_inaccessible.json",
+		//"inst_store_imm_indirect_u16_with_offset_nok.json",
+		//"inst_store_imm_indirect_u32_with_offset_nok.json",
+		//"inst_store_imm_indirect_u64_with_offset_nok.json",
+		//"inst_store_imm_indirect_u8_with_offset_nok.json",
+		//"inst_store_indirect_u16_with_offset_nok.json",
+		//"inst_store_indirect_u32_with_offset_nok.json",
+		//"inst_store_indirect_u64_with_offset_nok.json",
+		//"inst_store_indirect_u8_with_offset_nok.json",
+		//"inst_store_u8_trap_inaccessible.json",
 	}
 
 	for _, file := range files {
@@ -310,23 +295,58 @@ func TestRecompilerSuccess(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err = pvm_test(tc)
 			if err != nil {
+				//Memory mismatch
+				//result code mismatch
+				//register mismatch
 				t.Errorf("❌ [%s] Test failed: %v", name, err)
-				num_mismatch++
+				if strings.Contains(err.Error(), "Memory mismatch") {
+					mismatchs[memory_mismatch] = append(mismatchs[memory_mismatch], name)
+				} else if strings.Contains(err.Error(), "result code mismatch") {
+					mismatchs[result_code_mismatch] = append(mismatchs[result_code_mismatch], name)
+				} else if strings.Contains(err.Error(), "register mismatch") {
+					mismatchs[register_mismatch] = append(mismatchs[register_mismatch], name)
+				} else {
+					t.Errorf("Unexpected error: %v", err)
+				}
+
 			} else {
 				t.Logf("✅ [%s] Test passed", name)
 			}
 			count++
 		})
 	}
+	fmt.Printf("Recompiler Test Summary:===========================================\n")
+	fmt.Printf("Total tests run: %d\n", count)
+	fmt.Printf("Memory mismatch: %d (%.2f%%)\n", len(mismatchs[memory_mismatch]), float64(len(mismatchs[memory_mismatch]))/float64(count)*100)
+	fmt.Printf("Register mismatch: %d (%.2f%%)\n", len(mismatchs[register_mismatch]), float64(len(mismatchs[register_mismatch]))/float64(count)*100)
+	fmt.Printf("Result code mismatch: %d (%.2f%%)\n", len(mismatchs[result_code_mismatch]), float64(len(mismatchs[result_code_mismatch]))/float64(count)*100)
+	success := count - len(mismatchs[memory_mismatch]) - len(mismatchs[register_mismatch]) - len(mismatchs[result_code_mismatch])
+	fmt.Printf("Success: %d (%.2f%%)\n", success, float64(success)/float64(count)*100)
+	for i, mismatch := range mismatchs {
+		switch i {
+		case memory_mismatch:
+			fmt.Printf("Memory Mismatches: %d\n", len(mismatch))
+
+		case register_mismatch:
+			fmt.Printf("Register Mismatches: %d\n", len(mismatch))
+
+		case result_code_mismatch:
+			fmt.Printf("Result Code Mismatches: %d\n", len(mismatch))
+		}
+		for _, name := range mismatch {
+			fmt.Printf("  - %s\n", name)
+		}
+	}
+	fmt.Printf("===================================================================\n")
 }
 
 func TestSinglePVM(t *testing.T) {
 
 	PvmLogging = true
 	PvmTrace = true
-	RecompilerFlag = false
+	RecompilerFlag = true
 
-	name := "inst_shift_arithmetic_right_imm_alt_32"
+	name := "inst_store_indirect_u16_with_offset_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -347,4 +367,62 @@ func TestSinglePVM(t *testing.T) {
 			t.Logf("✅ [%s] Test passed", name)
 		}
 	})
+}
+
+func TestHostFuncExpose(t *testing.T) {
+	PvmLogging = true
+	PvmTrace = true
+	RecompilerFlag = true
+	name := "inst_store_indirect_u16_with_offset_ok"
+	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read file %s: %v", filePath, err)
+	}
+
+	var tc TestCase
+	err = json.Unmarshal(data, &tc)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+	}
+	hostENV := NewMockHostEnv()
+	serviceAcct := uint32(0) // stub
+	// metadata, c := types.SplitMetadataAndCode(tc.Code)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	rvm, err := NewRecompilerVM(pvm)
+	if err != nil {
+		t.Fatalf("Failed to create RecompilerVM: %v", err)
+	}
+
+	for _, pm := range tc.InitialPageMap {
+		// Set the page access based on the initial page map
+		if pm.IsWritable {
+			err := rvm.SetMemAssess(pm.Address, pm.Length, PageMutable)
+			if err != nil {
+				t.Fatalf("Failed to set memory access for page %d: %v", pm.Address, err)
+			}
+		}
+	}
+
+	for _, mem := range tc.InitialMemory {
+		// Write the initial memory contents
+		rvm.WriteMemory(mem.Address, mem.Data)
+	}
+
+	rvm.initStartCode()
+	rvm.x86Code = rvm.startCode
+	panic("WIP")
+	/* ecallicode, err := rvm.EcalliCode(INFO)
+	if err != nil {
+		t.Fatalf("Failed to generate Ecalli code: %v", err)
+	}
+	rvm.x86Code = append(rvm.x86Code, ecallicode...)
+	rvm.x86Code = append(rvm.x86Code, 0xC3) // ret
+	*/
+	rvm.x86Code = []byte{}
+	fmt.Printf("Disassembled x86 code:\n%s\n", Disassemble(rvm.x86Code))
+	err = rvm.ExecuteX86Code()
+	if err != nil {
+		t.Fatalf("Failed to execute x86 code: %v", err)
+	}
 }
