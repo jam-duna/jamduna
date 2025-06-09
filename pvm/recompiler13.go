@@ -5,7 +5,7 @@ import (
 )
 
 func generateXnorOp64(inst Instruction) []byte {
-	reg1, reg2, dst := extractRegTriplet(inst.Args)
+	reg1, reg2, dst := extractThreeRegs(inst.Args)
 	src1 := regInfoList[reg1]
 	src2 := regInfoList[reg2]
 	dstReg := regInfoList[dst]
@@ -19,7 +19,7 @@ func generateXnorOp64(inst Instruction) []byte {
 }
 
 func generateOrInvOp64(inst Instruction) []byte {
-	reg1, reg2, dst := extractRegTriplet(inst.Args)
+	reg1, reg2, dst := extractThreeRegs(inst.Args)
 	src1 := regInfoList[reg1]
 	src2 := regInfoList[reg2]
 	dstReg := regInfoList[dst]
@@ -33,7 +33,7 @@ func generateOrInvOp64(inst Instruction) []byte {
 }
 
 func generateAndInvOp64(inst Instruction) []byte {
-	reg1, reg2, dst := extractRegTriplet(inst.Args)
+	reg1, reg2, dst := extractThreeRegs(inst.Args)
 	src1 := regInfoList[reg1]
 	src2 := regInfoList[reg2]
 	dstReg := regInfoList[dst]
@@ -50,7 +50,7 @@ func generateAndInvOp64(inst Instruction) []byte {
 
 // rem signed 64-bit with overflow case ⇒ result=0
 func generateRemSOp64(inst Instruction) []byte {
-	srcIdx, src2Idx, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
@@ -189,7 +189,7 @@ func generateRemSOp64(inst Instruction) []byte {
 
 // rem unsigned 64-bit with B==0 ⇒ result=A
 func generateRemUOp64(inst Instruction) []byte {
-	srcIdx, src2Idx, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
@@ -267,7 +267,7 @@ func generateRemUOp64(inst Instruction) []byte {
 }
 
 func generateRemUOp32(inst Instruction) []byte {
-	srcIdx, src2Idx, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
@@ -343,7 +343,7 @@ func generateRemUOp32(inst Instruction) []byte {
 // but if (src2 & 0xFFFFFFFF)==0 then dst = 0xFFFFFFFFFFFFFFFF.
 // Preserves RAX and RDX.
 func generateDivUOp32(inst Instruction) []byte {
-	srcIdx1, srcIdx2, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx1, srcIdx2, dstIdx := extractThreeRegs(inst.Args)
 	src1Info := regInfoList[srcIdx1]
 	src2Info := regInfoList[srcIdx2]
 	dstInfo := regInfoList[dstIdx]
@@ -429,7 +429,7 @@ func generateDivUOp32(inst Instruction) []byte {
 //	else if a==MinInt32 && b==-1 → result = uint64(a)
 //	else                 → result = uint64(int64(a/b))
 func generateDivSOp32(inst Instruction) []byte {
-	srcIdx, src2Idx, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
@@ -545,7 +545,7 @@ func generateDivSOp32(inst Instruction) []byte {
 
 // Implements a 32-bit register-register MUL (MUL_32): r32_dst = r32_src * r32_src2
 func generateMul32(inst Instruction) []byte {
-	srcIdx, srcIdx2, dstReg := extractRegTriplet(inst.Args)
+	srcIdx, srcIdx2, dstReg := extractThreeRegs(inst.Args)
 	src := regInfoList[srcIdx]
 	src2 := regInfoList[srcIdx2]
 	dst := regInfoList[dstReg]
@@ -577,7 +577,7 @@ func generateMul32(inst Instruction) []byte {
 
 // Implements a 64-bit register-register MUL (MUL_64): r64_dst = r64_src * r64_src2
 func generateMul64(inst Instruction) []byte {
-	srcIdx, srcIdx2, dstReg := extractRegTriplet(inst.Args)
+	srcIdx, srcIdx2, dstReg := extractThreeRegs(inst.Args)
 	src := regInfoList[srcIdx]
 	src2 := regInfoList[srcIdx2]
 	dst := regInfoList[dstReg]
@@ -610,7 +610,7 @@ func generateMul64(inst Instruction) []byte {
 // Performs dst = src1 <op> src2 (32-bit), then sign-extends into 64-bit dst.
 func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		reg1, reg2, dstIdx := extractRegTriplet(inst.Args)
+		reg1, reg2, dstIdx := extractThreeRegs(inst.Args)
 
 		dstReg := regInfoList[dstIdx]
 		src1Reg := regInfoList[reg1]
@@ -668,7 +668,7 @@ func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 // without leaving RCX or src2 trashed.
 func generateShiftOp64(opcode byte, regField byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		src1Idx, src2Idx, dstIdx := extractRegTriplet(inst.Args)
+		src1Idx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 		src1 := regInfoList[src1Idx]
 		src2 := regInfoList[src2Idx]
 		dst := regInfoList[dstIdx]
@@ -714,7 +714,7 @@ func generateShiftOp64(opcode byte, regField byte) func(inst Instruction) []byte
 // Implements “dst = (src1 <cond> src2) ? 1 : 0” in 64-bit registers.
 func generateSetCondOp64(cc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		reg1, reg2, dstIdx := extractRegTriplet(inst.Args)
+		reg1, reg2, dstIdx := extractThreeRegs(inst.Args)
 		src1 := regInfoList[reg1]
 		src2 := regInfoList[reg2]
 		dst := regInfoList[dstIdx]
@@ -758,7 +758,7 @@ func generateSetCondOp64(cc byte) func(inst Instruction) []byte {
 
 func generateMulUpperOp64(mode string) func(Instruction) []byte {
 	return func(inst Instruction) []byte {
-		reg1, reg2, dst := extractRegTriplet(inst.Args)
+		reg1, reg2, dst := extractThreeRegs(inst.Args)
 
 		src1 := regInfoList[reg1]
 		src2 := regInfoList[reg2]
@@ -799,7 +799,7 @@ func generateMulUpperOp64(mode string) func(Instruction) []byte {
 
 func generateBinaryOp64(opcode byte) func(Instruction) []byte {
 	return func(inst Instruction) []byte {
-		reg1, reg2, dst := extractRegTriplet(inst.Args)
+		reg1, reg2, dst := extractThreeRegs(inst.Args)
 
 		dstReg := regInfoList[dst]
 		src1Reg := regInfoList[reg1]
@@ -841,7 +841,7 @@ func generateBinaryOp64(opcode byte) func(Instruction) []byte {
 // and for SAR (regField=7) sign‐extends the 32‐bit result into 64 bits.
 func generateShiftOp32(opcode byte, regField byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		regAIdx, regBIdx, dstIdx := extractRegTriplet(inst.Args)
+		regAIdx, regBIdx, dstIdx := extractThreeRegs(inst.Args)
 		srcA := regInfoList[regAIdx]
 		srcB := regInfoList[regBIdx]
 		dst := regInfoList[dstIdx]
@@ -900,7 +900,7 @@ func generateShiftOp32(opcode byte, regField byte) func(inst Instruction) []byte
 //	else if a==MinInt64&&b==-1 → dst = uint64(a)  (no overflow wrap)
 //	else                     → dst = uint64(int64(a/b))
 func generateDivSOp64(inst Instruction) []byte {
-	srcIdx, src2Idx, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
@@ -1036,7 +1036,7 @@ func generateDivSOp64(inst Instruction) []byte {
 // DIV_U_64: dst = src1 / src2 (unsigned), but if src2==0 then dst=maxUint64.
 // Preserves RAX/RDX in r12/r13.
 func generateDivUOp64(inst Instruction) []byte {
-	srcIdx1, srcIdx2, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx1, srcIdx2, dstIdx := extractThreeRegs(inst.Args)
 	src1 := regInfoList[srcIdx1]
 	src2 := regInfoList[srcIdx2]
 	dst := regInfoList[dstIdx]
@@ -1122,7 +1122,7 @@ func generateDivUOp64(inst Instruction) []byte {
 
 // Implements REM signed: r64_dst = sign_extend(r32_src % r32_src2), with B==0 → dst=A
 func generateRemSOp32(inst Instruction) []byte {
-	srcIdx, src2Idx, dstIdx := extractRegTriplet(inst.Args)
+	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
@@ -1208,7 +1208,7 @@ func generateRemSOp32(inst Instruction) []byte {
 // Uses TEST to set ZF, then CMOVE (0x44) on that flag.
 func generateCmovOp64(cc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		srcIdxA, srcIdxB, dstIdx := extractRegTriplet(inst.Args)
+		srcIdxA, srcIdxB, dstIdx := extractThreeRegs(inst.Args)
 		srcA := regInfoList[srcIdxA]
 		srcB := regInfoList[srcIdxB]
 		dst := regInfoList[dstIdx]

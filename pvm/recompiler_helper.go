@@ -2,8 +2,6 @@ package pvm
 
 import (
 	"encoding/binary"
-
-	"github.com/colorfulnotion/jam/types"
 )
 
 type X86Reg struct {
@@ -35,9 +33,34 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	TRAP: func(inst Instruction) []byte {
 		return []byte{}
 	},
-	FALLTHROUGH: func(inst Instruction) []byte {
-		return []byte{0x90}
-	},
+	FALLTHROUGH: generateFallthrough,
+
+	// JumpType = DIRECT_JUMP
+	JUMP:          generateFallthrough, // jump is managed by the VM using the TruePC
+	LOAD_IMM_JUMP: generateLoadImmJump, // does a LoadImm in x86 side, but the jump is managed by the VM
+
+	// JumpType = INDIRECT_JUMP (all of these have some register visible upon return which is added to some JumpIndirectOffset)
+	JUMP_IND:          generateFallthrough,         // jump is managed by the VM using the JumpSourceRegister
+	LOAD_IMM_JUMP_IND: generateLoadImmJumpIndirect, // does a LoadImm in x86 side, but the jump is managed by the VM
+
+	// JumpType = CONDITIONAL (x86code sets r15 to 1 or 0, VM uses this for branching to TruePC or FalsePC)
+	BRANCH_EQ_IMM:   generateBranchImm(0x84),
+	BRANCH_NE_IMM:   generateBranchImm(0x85),
+	BRANCH_LT_U_IMM: generateBranchImm(0x82),
+	BRANCH_LE_U_IMM: generateBranchImm(0x86),
+	BRANCH_GE_U_IMM: generateBranchImm(0x83),
+	BRANCH_GT_U_IMM: generateBranchImm(0x87),
+	BRANCH_LT_S_IMM: generateBranchImm(0x8C),
+	BRANCH_LE_S_IMM: generateBranchImm(0x8E),
+	BRANCH_GE_S_IMM: generateBranchImm(0x8D),
+	BRANCH_GT_S_IMM: generateBranchImm(0x8F),
+	BRANCH_EQ:       generateCompareBranch(0x84),
+	BRANCH_NE:       generateCompareBranch(0x85),
+	BRANCH_LT_U:     generateCompareBranch(0x82),
+	BRANCH_LT_S:     generateCompareBranch(0x8C),
+	BRANCH_GE_U:     generateCompareBranch(0x83),
+	BRANCH_GE_S:     generateCompareBranch(0x8D),
+
 	// A.5.2. Instructions with Arguments of One Immediate. InstructionI1
 	ECALLI: generateSyscall,
 
@@ -277,120 +300,4 @@ func encodeU64(v uint64) []byte {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, v)
 	return buf
-}
-
-func extractTwoRegisters(args []byte) (reg1, reg2 int) {
-	reg1 = min(12, int(args[0]&0x0F))
-	reg2 = min(12, int(args[0]>>4))
-	return
-}
-
-func extractTwoImm(originalOperands []byte) (vx uint64, vy uint64) {
-	lx := min(4, int(originalOperands[0])%8)
-	ly := min(4, max(0, len(originalOperands)-lx-1))
-	if ly == 0 {
-		ly = 1
-		originalOperands = append(originalOperands, 0)
-	}
-	vx = x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))       // offset
-	vy = x_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)) // value
-
-	return
-}
-
-func extractDoublet(args []byte) (reg1, reg2 int, imm uint64) {
-	reg1 = min(12, int(args[0]&0x0F))
-	reg2 = min(12, int(args[0]>>4))
-	lx := min(4, max(0, len(args)-1))
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	imm = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	return
-}
-
-func extractOneRegOneImm(args []byte) (reg1 uint64, vx uint64) {
-	registerIndexA := min(12, int(args[0])%16)
-	lx := min(4, max(0, len(args))-1)
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	return uint64(registerIndexA), vx
-}
-
-func extractOneRegOneImmOneOffset(args []byte) (registerIndexA int, vx uint64, vy int64) {
-	registerIndexA = min(12, int(args[0])%16)
-	lx := min(4, (int(args[0]) / 16 % 8))
-	ly := min(4, max(0, len(args)-lx-1))
-	if ly == 0 {
-		ly = 1
-		args = append(args, 0)
-	}
-
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	vy = z_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly))
-	return registerIndexA, vx, vy
-}
-
-func extractTwoRegsAndTwoImmediates(operands []byte) (vx, vy uint64, registerIndexA, registerIndexB int) {
-
-	originalOperands := make([]byte, len(operands))
-	copy(originalOperands, operands)
-
-	registerIndexA = min(12, int(originalOperands[0])%16)
-	registerIndexB = min(12, int(originalOperands[0])/16)
-	lx := min(4, (int(originalOperands[1]) % 8))
-	ly := min(4, max(0, len(originalOperands)-lx-2))
-	if ly == 0 {
-		ly = 1
-		originalOperands = append(originalOperands, 0)
-	}
-
-	vx = x_encode(types.DecodeE_l(originalOperands[2:2+lx]), uint32(lx))
-	vy = x_encode(types.DecodeE_l(originalOperands[2+lx:2+lx+ly]), uint32(ly))
-	return vx, vy, registerIndexA, registerIndexB
-}
-
-func extractTwoRegsOneOffset(args []byte) (registerIndexA, registerIndexB int, vx uint64) {
-	registerIndexA = min(12, int(args[0])%16)
-	registerIndexB = min(12, int(args[0])/16)
-	lx := min(4, max(0, len(args)-1))
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	vx = uint64(z_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx)))
-	return registerIndexA, registerIndexB, vx
-}
-
-func extractRegTriplet(args []byte) (reg1, reg2, dst int) {
-	reg1 = min(12, int(args[0]&0x0F))
-	reg2 = min(12, int(args[0]>>4))
-	dst = min(12, int(args[1]))
-	return
-}
-
-// A.5.5. Instructions with Arguments of One Offset.
-func extractOneOffset(args []byte) (vx int64) {
-	lx := min(4, len(args))
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	vx = z_encode(types.DecodeE_l(args[0:lx]), uint32(lx))
-	return vx
-}
-
-func extractOneReg2Imm(args []byte) (reg1 uint64, vx uint64) {
-	registerIndexA := min(12, int(args[0])%16)
-	lx := min(4, max(0, len(args))-1)
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	return uint64(registerIndexA), vx
 }

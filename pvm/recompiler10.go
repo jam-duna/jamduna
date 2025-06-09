@@ -4,7 +4,7 @@ package pvm
 
 func generateCmovCmpOp64(cc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		regAIdx, regBIdx, imm := extractDoublet(inst.Args)
+		regAIdx, regBIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[regAIdx]  // destination register (r64_regA)
 		cond := regInfoList[regBIdx] // condition register (r64_regB)
 		tmp := regInfoList[12]       // scratch r12
@@ -53,7 +53,7 @@ func generateCmovCmpOp64(cc byte) func(inst Instruction) []byte {
 // Implements CMOV_IZ_IMM: if (r64_cond == 0) r64_dst = imm
 func generateCmovIzImm(inst Instruction) []byte {
 	// extract: dst‐index, cond‐index, imm64
-	dstIdx, condIdx, imm := extractDoublet(inst.Args)
+	dstIdx, condIdx, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstIdx]
 	cond := regInfoList[condIdx]
 
@@ -88,7 +88,7 @@ func generateCmovIzImm(inst Instruction) []byte {
 
 // Implements r32_dst = r32_src rotate_right imm8
 func generateRotateRight32Imm(inst Instruction) []byte {
-	dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+	dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstIdx]
 	src := regInfoList[srcIdx]
 
@@ -119,7 +119,7 @@ func generateRotateRight32Imm(inst Instruction) []byte {
 // Implements r64_dst = r64_src << imm8  (or >>, SAR, ROR with different subcodes)
 func generateImmShiftOp64(opcode byte, subcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstIdx]
 		src := regInfoList[srcIdx]
 
@@ -153,7 +153,7 @@ func generateImmShiftOp64(opcode byte, subcode byte) func(inst Instruction) []by
 //	subcode = 4 (SHL), 5 (SHR), 7 (SAR)
 func generateImmShiftOp64Alt(subcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstIdx]
 		src := regInfoList[srcIdx]
 
@@ -197,7 +197,7 @@ func generateImmShiftOp64Alt(subcode byte) func(inst Instruction) []byte {
 
 // Implements dst64 = imm64 - src64
 func generateNegAddImm64(inst Instruction) []byte {
-	dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+	dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstIdx]
 	src := regInfoList[srcIdx]
 
@@ -233,7 +233,7 @@ func generateNegAddImm64(inst Instruction) []byte {
 // Implements dst64 = (imm32 - src32) mod 2^64,
 // which for a 32-bit imm and 32-bit src means 64-bit wraparound.
 func generateNegAddImm32(inst Instruction) []byte {
-	dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+	dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstIdx]
 	src := regInfoList[srcIdx]
 
@@ -283,7 +283,7 @@ func generateNegAddImm32(inst Instruction) []byte {
 //   - ALT    (alt=true):   dst = imm64 op (src32&31)
 func generateImmShiftOp32Alt(subcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstIdx]
 		src := regInfoList[srcIdx]
 		var code []byte
@@ -322,7 +322,7 @@ func generateImmShiftOp32Alt(subcode byte) func(inst Instruction) []byte {
 //   - ALT    (alt=true):   r32_dst = imm op (r32_src & 31)    → MOV imm→dst + CL‐based D3 /subcode
 func generateImmShiftOp32(opcode byte, subcode byte, alt bool) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstIdx]
 		src := regInfoList[srcIdx]
 
@@ -406,7 +406,7 @@ func generateImmShiftOp32(opcode byte, subcode byte, alt bool) func(inst Instruc
 // Implements dst32 = (src32 <cond> imm32) ? 1 : 0
 func generateImmSetCondOp32(setcc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstIdx, srcIdx, imm := extractDoublet(inst.Args)
+		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 
 		dstInfo := regInfoList[dstIdx]
 		srcInfo := regInfoList[srcIdx]
@@ -448,7 +448,7 @@ func generateImmSetCondOp32(setcc byte) func(inst Instruction) []byte {
 
 // Implements dst := src * imm (32-bit immediate)
 func generateImmMulOp32(inst Instruction) []byte {
-	dstReg, srcReg, imm := extractDoublet(inst.Args)
+	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	src := regInfoList[srcReg]
 	dst := regInfoList[dstReg]
 
@@ -479,7 +479,7 @@ func generateImmMulOp32(inst Instruction) []byte {
 
 // Implements dst := src * imm (64-bit immediate)
 func generateImmMulOp64(inst Instruction) []byte {
-	dstReg, srcReg, imm := extractDoublet(inst.Args)
+	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	src := regInfoList[srcReg]
 	dst := regInfoList[dstReg]
 
@@ -510,7 +510,7 @@ func generateImmMulOp64(inst Instruction) []byte {
 
 // Implements: dst := src + imm (32-bit)
 func generateBinaryImm32(inst Instruction) []byte {
-	dstReg, srcReg, imm := extractDoublet(inst.Args)
+	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstReg]
 	src := regInfoList[srcReg]
 
@@ -545,7 +545,7 @@ func generateBinaryImm32(inst Instruction) []byte {
 // Implements a 64-bit immediate binary op (e.g. ADD_IMM_64)
 func generateImmBinaryOp64(opcode byte, subcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstReg, srcReg, imm := extractDoublet(inst.Args)
+		dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstReg]
 		src := regInfoList[srcReg]
 
@@ -579,7 +579,7 @@ func generateLoadIndSignExtend(
 	is64bit bool,
 ) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstReg, srcReg, _ := extractDoublet(inst.Args)
+		dstReg, srcReg, _ := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstReg]
 		src := regInfoList[srcReg]
 
@@ -614,7 +614,7 @@ func generateLoadInd(
 	_ int,
 ) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstReg, srcReg, _ := extractDoublet(inst.Args)
+		dstReg, srcReg, _ := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstReg]
 		src := regInfoList[srcReg]
 
@@ -637,7 +637,7 @@ func generateLoadInd(
 // Args = [srcReg, dstReg, disp?] Only the first two registers are used here, disp is represented by disp32=0
 func generateStoreIndirect(opcode byte, is16bit bool, size int) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		srcReg, dstReg, _ := extractDoublet(inst.Args)
+		srcReg, dstReg, _ := extractTwoRegsOneImm(inst.Args)
 		src := regInfoList[srcReg]
 		dst := regInfoList[dstReg]
 

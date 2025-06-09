@@ -2,16 +2,30 @@ package pvm
 
 import "fmt"
 
+const (
+	TRAP_JUMP     = 0
+	DIRECT_JUMP   = 1
+	INDIRECT_JUMP = 2
+	CONDITIONAL   = 3
+)
+
 type BasicBlock struct {
 	Instructions []Instruction
 	InitGas      int64
 	GasUsage     int64
+
+	JumpType               int
+	IndirectJumpOffset     uint64
+	IndirectSourceRegister int
+	TruePC                 uint64
+	FalsePC                uint64
 }
+
 type Instruction struct {
 	Opcode byte
 	Args   []byte
 	Step   int
-	//Pc     uint64
+	Pc     uint64
 }
 
 func NewBasicBlock(initGas int64) *BasicBlock {
@@ -27,12 +41,13 @@ func (bb *BasicBlock) AddInstruction(opcode byte, args []byte, step int, pc uint
 		Opcode: opcode,
 		Args:   args,
 		Step:   step,
+		Pc:     pc,
 	}
 	bb.Instructions = append(bb.Instructions, instruction)
 }
 
 func (i *Instruction) String() string {
-	return fmt.Sprintf("%s\n", opcode_str(i.Opcode))
+	return fmt.Sprintf("%s | ", opcode_str(i.Opcode))
 }
 func (bb *BasicBlock) String() string {
 	result := ""

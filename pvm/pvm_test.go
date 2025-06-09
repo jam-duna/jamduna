@@ -88,22 +88,57 @@ func pvm_test(tc TestCase) error {
 			// Write the initial memory contents
 			rvm.WriteMemory(mem.Address, mem.Data)
 		}
-		rvm.GetBasicBlocks()
-		if len(rvm.BasicBlocks) == 0 {
-			return fmt.Errorf("no basic blocks found")
+		rvm.pc = 0
+
+		basicBlocks := rvm.compileBasicBlock(rvm.pc)
+		done := false
+		numExecutions := 0
+		for !done {
+			bb, ok := basicBlocks[rvm.pc]
+			if !ok {
+				panic("no basic block found for pc: " + fmt.Sprint(rvm.pc))
+			}
+			fmt.Printf("----- Translating Basic Block at pc: %d\n", rvm.pc)
+			if err := rvm.Translate(bb); err != nil {
+				return fmt.Errorf("error translating bytecode: %w", err)
+			}
+			// Now we have rvm.x86Code ready, we can execute it
+			if err := rvm.ExecuteX86Code(); err != nil {
+				return fmt.Errorf("error executing x86 code: %w", err)
+			}
+
+			switch bb.JumpType {
+			case TRAP_JUMP:
+				done = true // Exit the loop if we hit a trap jump
+			case DIRECT_JUMP:
+				rvm.pc = bb.TruePC
+				fmt.Printf("DIRECT_JUMP to pc: %d\n", rvm.pc)
+			case INDIRECT_JUMP:
+				rvm.pc = rvm.register[bb.IndirectSourceRegister] + bb.IndirectJumpOffset
+				fmt.Printf("INDIRECT_JUMP to pc: %d\n", rvm.pc)
+			case CONDITIONAL:
+				reg15Value := rvm.register[len(rvm.register)-1]
+				if reg15Value == 0 {
+					rvm.pc = bb.FalsePC
+					fmt.Printf("CONDITION=0 jump to pc: %d\n", rvm.pc)
+				} else {
+					rvm.pc = bb.TruePC
+					fmt.Printf("CONDITION=1 jump to pc: %d\n", rvm.pc)
+				}
+			}
+			if rvm.pc >= uint64(len(rvm.code)) {
+				done = true // Exit the loop if we reach the end of the code
+			}
+			numExecutions++
+			if numExecutions > 10 {
+				return fmt.Errorf("infinite loop detected, executed %d times", numExecutions)
+			}
 		}
-		fmt.Printf("RecompilerVM has %d basic blocks\n", len(rvm.BasicBlocks))
-		if err := rvm.Translate(); err != nil {
-			return fmt.Errorf("error translating bytecode: %w", err)
-		}
-		// Now we have rvm.x86Code ready, we can execute it
-		if err := rvm.ExecuteX86Code(); err != nil {
-			return fmt.Errorf("error executing x86 code: %w", err)
-		}
+
 		if rvm.ResultCode == types.PVM_PANIC && tc.ExpectedStatus == "panic" {
 			return nil // expected panic, so we return nil
 		}
-		//check the memory
+		// check the memory
 		for _, mem := range tc.ExpectedMemory {
 			data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))
 			if err != nil {
@@ -145,6 +180,9 @@ func TestPVM(t *testing.T) {
 	num_mismatch := 0
 	total_mismatch := 0
 	for _, file := range files {
+		if strings.Contains(file.Name(), "riscv") {
+			continue // skip riscv tests
+		}
 		count++
 		if file.IsDir() {
 			continue

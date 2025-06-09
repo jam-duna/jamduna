@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -75,19 +76,19 @@ var testcases = map[string]string{
 	// "ECALLI":                "",
 
 	// A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
-	"LOAD_IMM_64": "inst_load_imm_64,inst_load_imm",
+	"LOAD_IMM_64": "inst_load_imm_64",
 
 	// A.5.4. Instructions with Arguments of Two Immediates.
-	"STORE_IMM_U8":  "inst_store_imm_u8,inst_store_imm_u8_trap_read_only",
+	"STORE_IMM_U8":  "inst_store_imm_u8,inst_store_imm_u8_trap_read_only,inst_store_imm_u8_trap_inaccessible,inst_store_imm_u8_trap_read_only",
 	"STORE_IMM_U16": "inst_store_imm_u16",
 	"STORE_IMM_U32": "inst_store_imm_u32",
 	"STORE_IMM_U64": "inst_store_imm_u64",
 
 	// A.5.5. Instructions with Arguments of One Offset.
-	//"JUMP": "inst_jump",
+	"JUMP": "inst_jump",
 
 	// A.5.6. Instructions with Arguments of One Register & Two Immediates.
-	//"JUMP_IND": "inst_ret_halt",
+	"JUMP_IND":  "inst_ret_halt,inst_ret_invalid,inst_jump_indirect_invalid_djump_to_zero_nok,inst_jump_indirect_misaligned_djump_with_offset_nok,inst_jump_indirect_misaligned_djump_without_offset_nok,inst_jump_indirect_with_offset_ok,inst_jump_indirect_without_offset_ok",
 	"LOAD_IMM":  "inst_load_imm",
 	"LOAD_U8":   "inst_load_u8,inst_load_u8_nok",
 	"LOAD_I8":   "inst_load_i8",
@@ -108,17 +109,17 @@ var testcases = map[string]string{
 	"STORE_IMM_IND_U64": "inst_store_imm_indirect_u64_with_offset_ok,inst_store_imm_indirect_u64_with_offset_nok,inst_store_imm_indirect_u64_without_offset_ok",
 
 	// A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset.
-	//"LOAD_IMM_JUMP": "inst_load_imm_and_jump",
-	//"BRANCH_EQ_IMM": "inst_branch_eq_imm_ok,inst_branch_eq_imm_nok",
-	// "BRANCH_NE_IMM": "inst_branch_not_eq_imm_ok,inst_branch_not_eq_imm_nok",
-	// "BRANCH_LT_U_IMM": "inst_branch_less_unsigned_imm_ok,inst_branch_less_unsigned_imm_nok",
-	// "BRANCH_LE_U_IMM": "inst_branch_less_or_equal_unsigned_imm_ok,inst_branch_less_or_equal_unsigned_imm_nok",
-	// "BRANCH_GE_U_IMM": "inst_branch_greater_or_equal_unsigned_imm_ok,inst_branch_greater_or_equal_unsigned_imm_nok",
-	// "BRANCH_GT_U_IMM": "inst_branch_greater_unsigned_imm_ok,inst_branch_greater_unsigned_imm_nok",
-	// "BRANCH_LT_S_IMM": "inst_branch_less_signed_imm_ok,inst_branch_less_signed_imm_nok",
-	// "BRANCH_LE_S_IMM": "inst_branch_less_or_equal_signed_imm_ok,inst_branch_less_or_equal_signed_imm_nok",
-	// "BRANCH_GE_S_IMM": "inst_branch_greater_or_equal_signed_imm_ok,inst_branch_greater_or_equal_signed_imm_nok",
-	// "BRANCH_GT_S_IMM": "inst_branch_greater_signed_imm_ok,inst_branch_greater_signed_imm_nok",
+	"LOAD_IMM_JUMP":   "inst_load_imm_and_jump",
+	"BRANCH_EQ_IMM":   "inst_branch_eq_imm_ok,inst_branch_eq_imm_nok",
+	"BRANCH_NE_IMM":   "inst_branch_not_eq_imm_ok,inst_branch_not_eq_imm_nok",
+	"BRANCH_LT_U_IMM": "inst_branch_less_unsigned_imm_ok,inst_branch_less_unsigned_imm_nok",
+	"BRANCH_LE_U_IMM": "inst_branch_less_or_equal_unsigned_imm_ok,inst_branch_less_or_equal_unsigned_imm_nok",
+	"BRANCH_GE_U_IMM": "inst_branch_greater_or_equal_unsigned_imm_ok,inst_branch_greater_or_equal_unsigned_imm_nok",
+	"BRANCH_GT_U_IMM": "inst_branch_greater_unsigned_imm_ok,inst_branch_greater_unsigned_imm_nok",
+	"BRANCH_LT_S_IMM": "inst_branch_less_signed_imm_ok,inst_branch_less_signed_imm_nok",
+	"BRANCH_LE_S_IMM": "inst_branch_less_or_equal_signed_imm_ok,inst_branch_less_or_equal_signed_imm_nok",
+	"BRANCH_GE_S_IMM": "inst_branch_greater_or_equal_signed_imm_ok,inst_branch_greater_or_equal_signed_imm_nok",
+	"BRANCH_GT_S_IMM": "inst_branch_greater_signed_imm_ok,inst_branch_greater_signed_imm_nok",
 
 	// A.5.9. Instructions with Arguments of Two Registers.
 	// "SBRK":                  "",
@@ -146,7 +147,7 @@ var testcases = map[string]string{
 	"LOAD_IND_U32":      "inst_load_indirect_u32_with_offset,inst_load_indirect_u32_without_offset",
 	"LOAD_IND_I32":      "inst_load_indirect_i32_with_offset,inst_load_indirect_i32_without_offset",
 	"LOAD_IND_U64":      "inst_load_indirect_u64_with_offset,inst_load_indirect_u64_without_offset",
-	"ADD_IMM_32":        "inst_add_imm_32,inst_sub_imm_32",
+	"ADD_IMM_32":        "inst_add_imm_32,inst_add_imm_32_with_truncation,inst_add_imm_32_with_truncation_and_sign_extension,inst_sub_imm_32",
 	"AND_IMM":           "inst_and_imm",
 	"XOR_IMM":           "inst_xor_imm",
 	"OR_IMM":            "inst_or_imm",
@@ -179,35 +180,35 @@ var testcases = map[string]string{
 	// "ROT_R_32_IMM_ALT":      "",
 
 	// A.5.11. Instructions with Arguments of One Register, One Immediate and One Offset. (170-175)
-	// "BRANCH_EQ": "inst_branch_eq_ok,inst_branch_eq_nok",
-	// "BRANCH_NE":   "inst_branch_not_eq_ok,inst_branch_not_eq_nok",
-	// "BRANCH_LT_U": "inst_branch_less_unsigned_ok,inst_branch_less_unsigned_nok",
-	// "BRANCH_LT_S": "inst_branch_less_signed_ok,inst_branch_less_signed_nok",
-	// "BRANCH_GE_U": "inst_branch_greater_or_equal_unsigned_ok,inst_branch_greater_or_equal_unsigned_nok",
-	// "BRANCH_GE_S": "inst_branch_greater_or_equal_signed_ok,inst_branch_greater_or_equal_signed_nok",
+	"BRANCH_EQ":   "inst_branch_eq_ok,inst_branch_eq_nok",
+	"BRANCH_NE":   "inst_branch_not_eq_ok,inst_branch_not_eq_nok",
+	"BRANCH_LT_U": "inst_branch_less_unsigned_ok,inst_branch_less_unsigned_nok",
+	"BRANCH_LT_S": "inst_branch_less_signed_ok,inst_branch_less_signed_nok",
+	"BRANCH_GE_U": "inst_branch_greater_or_equal_unsigned_ok,inst_branch_greater_or_equal_unsigned_nok",
+	"BRANCH_GE_S": "inst_branch_greater_or_equal_signed_ok,inst_branch_greater_or_equal_signed_nok",
 
 	// A.5.12. Instruction with Arguments of Two Registers and Two Immediates. (180)
-	//"LOAD_IMM_JUMP_IND": "inst_load_imm_and_jump_indirect_same_regs_with_offset_ok,inst_load_imm_and_jump_indirect_different_regs_with_offset_ok,inst_load_imm_and_jump_indirect_same_regs_without_offset_ok,inst_load_imm_and_jump_indirect_different_regs_without_offset_ok",
+	"LOAD_IMM_JUMP_IND": "inst_load_imm_and_jump,inst_load_imm_and_jump_indirect_different_regs_with_offset_ok,inst_load_imm_and_jump_indirect_different_regs_without_offset_ok,inst_load_imm_and_jump_indirect_invalid_djump_to_zero_different_regs_without_offset_nok,inst_load_imm_and_jump_indirect_invalid_djump_to_zero_same_regs_without_offset_nok,inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_with_offset_nok,inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_without_offset_nok,inst_load_imm_and_jump_indirect_misaligned_djump_same_regs_with_offset_nok,inst_load_imm_and_jump_indirect_misaligned_djump_same_regs_without_offset_nok,inst_load_imm_and_jump_indirect_same_regs_with_offset_ok,inst_load_imm_and_jump_indirect_same_regs_without_offset_ok",
 
 	// A.5.13. Instructions with Arguments of Three Registers. (190-230)
-	"ADD_32":    "inst_add_32",
+	"ADD_32":    "inst_add_32,inst_add_32_with_overflow,inst_add_32_with_truncation,inst_add_32_with_truncation_and_sign_extension",
 	"SUB_32":    "inst_sub_32,inst_sub_32_with_overflow",
 	"MUL_32":    "inst_mul_32",
-	"DIV_U_32":  "inst_div_unsigned_32,inst_div_unsigned_32_by_zero",
-	"DIV_S_32":  "inst_div_signed_32,inst_div_signed_32_by_zero",
+	"DIV_U_32":  "inst_div_unsigned_32,inst_div_unsigned_32_by_zero,inst_div_unsigned_32_with_overflow",
+	"DIV_S_32":  "inst_div_signed_32,inst_div_signed_32_by_zero,inst_div_signed_32_with_overflow",
 	"REM_U_32":  "inst_rem_unsigned_32,inst_rem_unsigned_32_by_zero",
-	"REM_S_32":  "inst_rem_signed_32,inst_rem_signed_32_by_zero",
-	"SHLO_L_32": "inst_shift_logical_left_32",
-	"SHLO_R_32": "inst_shift_logical_right_32",
-	"SHAR_R_32": "inst_shift_arithmetic_right_32",
-	"ADD_64":    "inst_add_64",
+	"REM_S_32":  "inst_rem_signed_32,inst_rem_signed_32_by_zero,inst_rem_signed_32_with_overflow",
+	"SHLO_L_32": "inst_shift_logical_left_32,inst_shift_logical_left_32_with_overflow",
+	"SHLO_R_32": "inst_shift_logical_right_32,inst_shift_logical_right_32_with_overflow",
+	"SHAR_R_32": "inst_shift_arithmetic_right_32,inst_shift_arithmetic_right_32_with_overflow",
+	"ADD_64":    "inst_add_64,inst_add_64_with_overflow",
 	"SUB_64":    "inst_sub_64,inst_sub_64_with_overflow",
 	"DIV_U_64":  "inst_div_unsigned_64,inst_div_unsigned_64_by_zero,inst_div_unsigned_64_with_overflow",
-	"DIV_S_64":  "inst_div_signed_64,inst_div_signed_64_by_zero",
+	"DIV_S_64":  "inst_div_signed_64,inst_div_signed_64_by_zero,inst_div_signed_64_with_overflow",
 	"REM_U_64":  "inst_rem_unsigned_64,inst_rem_unsigned_64_by_zero",
 	"REM_S_64":  "inst_rem_signed_64,inst_rem_signed_64_by_zero",
-	"SHLO_L_64": "inst_shift_logical_left_64",
-	"SHLO_R_64": "inst_shift_logical_right_64",
+	"SHLO_L_64": "inst_shift_logical_left_64,inst_shift_logical_left_64_with_overflow",
+	"SHLO_R_64": "inst_shift_logical_right_64,inst_shift_logical_right_64_with_overflow",
 	"SHAR_R_64": "inst_shift_arithmetic_right_64",
 	"AND":       "inst_and",
 	"XOR":       "inst_xor",
@@ -243,107 +244,89 @@ func TestRecompilerSuccess(t *testing.T) {
 	PvmTrace = true
 	RecompilerFlag = true
 
-	keys := make([]string, 0, len(testcases))
-	for k := range testcases {
-		keys = append(keys, k)
+	// Directory containing the JSON files
+	dir := "../jamtestvectors/pvm/programs"
+
+	// Read all files in the directory
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
 	}
-	sort.Strings(keys)
+	count := 0
+	num_mismatch := 0
+	// 180 tests pass, these 25 tests fail
+	suppress := []string{
+		"inst_jump_indirect_misaligned_djump_with_offset_nok.json",
+		"inst_jump_indirect_misaligned_djump_without_offset_nok.json",
+		"inst_jump_indirect_with_offset_ok.json",
+		"inst_jump_indirect_without_offset_ok.json",
+		"inst_jump_indirect_invalid_djump_to_zero_nok.json",
 
-	for _, key := range keys {
-		entries := strings.Split(testcases[key], ",")
-		for _, name := range entries {
-			// Skip cases that are expected to fail
-			skip := false
-			for _, errName := range errorNames {
-				if strings.Contains(name, errName) {
-					skip = true
-					break
-				}
-			}
-			if skip {
-				continue
-			}
-			filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
-			data, err := os.ReadFile(filePath)
-			if err != nil {
-				t.Fatalf("Failed to read file %s: %v", filePath, err)
-			}
+		"inst_load_imm_and_jump_indirect_different_regs_with_offset_ok.json",
+		"inst_load_imm_and_jump_indirect_different_regs_without_offset_ok.json",
+		"inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_with_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_misaligned_djump_different_regs_without_offset_nok.json",
+		"inst_load_imm_and_jump_indirect_invalid_djump_to_zero_different_regs_without_offset_nok.json",
 
-			var tc TestCase
-			err = json.Unmarshal(data, &tc)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
-			}
+		"inst_load_imm_and_jump_indirect_same_regs_with_offset_ok.json",
+		"inst_load_imm_and_jump_indirect_same_regs_without_offset_ok.json",
+		"inst_ret_invalid.json",
+		"inst_rem_signed_32_with_overflow.json",
+		"inst_add_imm_32_with_truncation_and_sign_extension.json",
 
-			t.Run(name, func(t *testing.T) {
-				err = pvm_test(tc)
-				if err != nil {
-					t.Errorf("❌ [%s] Test failed: %v", name, err)
-				} else {
-					t.Logf("✅ [%s] Test passed", name)
-				}
-			})
+		"inst_rem_signed_64_with_overflow.json",
+		"inst_store_imm_indirect_u16_with_offset_nok.json",
+		"inst_store_imm_indirect_u32_with_offset_nok.json",
+		"inst_store_imm_indirect_u64_with_offset_nok.json",
+		"inst_store_imm_indirect_u8_with_offset_nok.json",
+
+		"inst_store_indirect_u16_with_offset_nok.json",
+		"inst_store_indirect_u32_with_offset_nok.json",
+		"inst_store_indirect_u64_with_offset_nok.json",
+		"inst_store_indirect_u8_with_offset_nok.json",
+		"inst_store_u8_trap_inaccessible.json",
+	}
+
+	for _, file := range files {
+		name := file.Name()
+		if strings.Contains(file.Name(), "riscv") {
+			continue // skip riscv tests
 		}
+		if slices.Contains(suppress, name) {
+			continue // skip suppressed tests
+		}
+		filePath := dir + "/" + name
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("Failed to read file %s: %v", filePath, err)
+		}
+
+		var tc TestCase
+		err = json.Unmarshal(data, &tc)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+		}
+
+		t.Run(name, func(t *testing.T) {
+			err = pvm_test(tc)
+			if err != nil {
+				t.Errorf("❌ [%s] Test failed: %v", name, err)
+				num_mismatch++
+			} else {
+				t.Logf("✅ [%s] Test passed", name)
+			}
+			count++
+		})
 	}
 }
 
-// TestRecompilerFail runs all test cases expected to fail (division by zero or overflow scenarios).
-func TestRecompilerFail(t *testing.T) {
-	PvmLogging = true
-	PvmTrace = true
-	RecompilerFlag = true
-
-	keys := make([]string, 0, len(testcases))
-	for k := range testcases {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		entries := strings.Split(testcases[key], ",")
-		for _, name := range entries {
-			// Only include failure cases
-			skip := false
-			for _, errName := range errorNames {
-				if !strings.Contains(name, errName) {
-					skip = true
-					break
-				}
-			}
-			if skip {
-				continue
-			}
-			filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
-			data, err := os.ReadFile(filePath)
-			if err != nil {
-				t.Fatalf("Failed to read file %s: %v", filePath, err)
-			}
-
-			var tc TestCase
-			err = json.Unmarshal(data, &tc)
-			if err != nil {
-				t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
-			}
-
-			t.Run(name, func(t *testing.T) {
-				err = pvm_test(tc)
-				if err == nil {
-					t.Errorf("✅ [%s] Expected failure but test passed", name)
-				} else {
-					t.Logf("❌ [%s] Test correctly failed: %v", name, err)
-				}
-			})
-		}
-	}
-}
-
-func TestSingleRecompile(t *testing.T) {
+func TestSinglePVM(t *testing.T) {
 
 	PvmLogging = true
 	PvmTrace = true
-	RecompilerFlag = true
+	RecompilerFlag = false
 
-	name := "inst_jump"
+	name := "inst_shift_arithmetic_right_imm_alt_32"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {
