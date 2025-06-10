@@ -3,6 +3,7 @@ package trie
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -264,4 +265,21 @@ func (f *Full137Resp) String() string {
 func (f *Bundle138Resp) String() string {
 	b, _ := f.MarshalJSON()
 	return string(b)
+}
+
+func ParseExportedRoots(filePath string) ([]common.Hash, error) {
+	// Read the entire content of the file.
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file '%s': %w", filePath, err)
+	}
+
+	// Declare a slice of common.Hash to hold the unmarshaled data.
+	var roots []common.Hash
+
+	err = json.Unmarshal(data, &roots)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON data from '%s': %w", filePath, err)
+	}
+	return roots, nil
 }

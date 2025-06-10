@@ -906,7 +906,7 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 	// Access statedb via Node reference
 	refinecontext := j.getRefineContext() // not sure
 	j.getLatestFinalizedBlockSlot()
-	fmt.Printf("JAM SERVER GetRefineContext: %s\n", refinecontext.String())
+	//fmt.Printf("JAM SERVER GetRefineContext: %s\n", refinecontext.String())
 
 	// json marshal the refine context
 	*res = refinecontext.String()

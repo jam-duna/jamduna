@@ -171,8 +171,15 @@ func (n *Node) FetchAllFullShards(g types.Guarantee, verify bool) {
 		}
 	}
 	// save resps to fn in JSON
-	fn := fmt.Sprintf("full137resp-%d.json", g.Report.AvailabilitySpec.ExportedSegmentLength)
+	fnDir := "trie/test"
+	fnName := fmt.Sprintf("full137resp_%d.json", spec.ExportedSegmentLength)
+	fn := fmt.Sprintf("%v/%v", fnDir, fnName)
+	fmt.Printf("FetchAllFullShards: Saving responses to %s\n", fn)
 	os.WriteFile(fn, []byte(types.ToJSON(resps)), 0644)
+}
+
+func (n *Node) FetchAllInternalFullShardsForGuarantee(g types.Guarantee, verify bool) {
+
 }
 
 const attemptReconstruction = true

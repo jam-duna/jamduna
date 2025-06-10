@@ -509,3 +509,13 @@ func MetadataToAddress(metadata []byte) (ipAddr string, port int, err error) {
 
 	return ipAddr, port, nil
 }
+
+func DeepCopySegments(src [][]byte) [][]byte {
+	dst := make([][]byte, len(src))
+	for i := range src {
+		b := make([]byte, len(src[i]))
+		copy(b, src[i])
+		dst[i] = b
+	}
+	return dst
+}

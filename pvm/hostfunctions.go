@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -1442,6 +1443,7 @@ func (vm *VM) hostExport() {
 	}
 
 	x = common.PadToMultipleOfN(x, types.SegmentSize)
+	x = slices.Clone(x)
 
 	if vm.ExportSegmentIndex+uint32(len(vm.Exports)) >= W_X { // W_X
 		vm.WriteRegister(7, FULL)

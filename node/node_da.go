@@ -31,8 +31,16 @@ func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageB
 	bClubs, bEcChunks := n.buildBClub(b)
 	sClubs, sEcChunksArr := n.buildSClub(export_segments)
 
+	// for segIdx, seg := range export_segments {
+	// 	segmentHash := trie.ComputeLeaf(seg) //Blake2Hash(“leaf” || segment)
+	// 	fmt.Printf("Exported Segment %d (H=%x): %x\n", segIdx, segmentHash, seg)
+	// }
+
 	// ExportedSegmentRoot = CDT(segments)
-	cdt := trie.NewCDMerkleTree(export_segments)
+	exportedSegmentTree := trie.NewCDMerkleTree(export_segments)
+	log.Debug(debugG, "executeWorkPackageBundle", "n", n.String(), "exportedSegmentLength", len(export_segments), "exportedSegmentRoot", exportedSegmentTree.RootHash())
+	//exportedSegmentTree.PrintTree()
+	log.Debug(debugG, "executeWorkPackageBundle", "n", n.String(), "bClubs", fmt.Sprintf("%v", bClubs), "sClubs", fmt.Sprintf("%v", sClubs))
 
 	d = AvailabilitySpecifierDerivation{
 		BClubs:        bClubs,
@@ -40,12 +48,13 @@ func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageB
 		BundleChunks:  bEcChunks,
 		SegmentChunks: sEcChunksArr,
 	}
+
 	log.Debug(debugG, "executeWorkPackageBundle", "derivation", d)
 	availabilitySpecifier := types.AvailabilitySpecifier{
 		WorkPackageHash:       package_bundle.WorkPackage.Hash(),
 		BundleLength:          uint32(len(b)),
 		ErasureRoot:           generateErasureRoot(bClubs, sClubs), // u = (bClub, sClub)
-		ExportedSegmentRoot:   common.Hash(cdt.Root()),
+		ExportedSegmentRoot:   exportedSegmentTree.RootHash(),
 		ExportedSegmentLength: uint16(len(export_segments)),
 	}
 
@@ -254,7 +263,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 			global_segmentsRoot := trie.VerifyCDTJustificationX(trie.ComputeLeaf(segmentData), int(i.Index), b.Justification[itemIndex][segmentIdx], 0)
 			if !common.CompareBytes(exportedSegmentRoot[:], global_segmentsRoot) {
 				log.Warn(module, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", i.Index)
-				return false, fmt.Errorf("justification failure computedRoot %x != exportedSegmentRoot %s", exportedSegmentRoot, exportedSegmentRoot)
+				return false, fmt.Errorf("justification failure computedRoot %s != exportedSegmentRoot %s", exportedSegmentRoot, exportedSegmentRoot)
 			} else {
 				log.Trace(debugDA, "VerifyBundle: Justification Verified", "index", i.Index, "exportedSegmentRoot", exportedSegmentRoot)
 			}
@@ -319,6 +328,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		if expectedSegmentCnt != 0 {
 			for i := 0; i < expectedSegmentCnt; i++ {
 				segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
+				//fmt.Printf("!!! executeWorkPackageBundle: Exported Segment %d: %x\n", i, trie.ComputeLeaf(segment))
 				segments = append(segments, segment)
 			}
 		}
@@ -366,13 +376,11 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	}
 	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING SPEC"),
 		"n", n.String(),
-		//"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
 	)
 	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING REPORT"),
 		"n", n.String(),
-		//"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),
 		"workReport", workReport.String(),
 	)
@@ -383,8 +391,6 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		"workReportHash", workReport.Hash(),
 		"workReportBytesLen", len(workReport.Bytes()),
 		"workReportBytes", common.Bytes2Hex(workReport.Bytes()),
-		//"guarantee.Slot", guarantee.Slot,
-		//"segments", common.FormatPaddedBytesArray(segments, 20),
 	)
 	n.StoreMeta_Guarantor(spec, d)
 	pvmElapsed := common.Elapsed(pvmStart)

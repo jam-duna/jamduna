@@ -440,7 +440,7 @@ func (n *Node) runGuarantees() {
 				err := n.processGuarantee(guarantee)
 				if err != nil {
 					if statedb.AcceptableGuaranteeError(err) {
-						log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "problem", err, "ignoring...")
+						log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "problem", err, "TODO", "ignoring...")
 					} else {
 						log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
 					}

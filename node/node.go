@@ -2233,13 +2233,26 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 	// j - justifications  (14.14) J(W in I)
 
 	indicesLen := len(si.Indices)
-	pageproofs := allsegments[indicesLen:]
-	segmentsonly := allsegments[0:indicesLen]
+	pageproofs := allsegments[indicesLen:] // problematic
+	clonedProofs := make([][]byte, len(pageproofs))
+	for i := range pageproofs {
+		// allocate a fresh slice and copy
+		cloned := make([]byte, len(pageproofs[i]))
+		copy(cloned, pageproofs[i])
+		clonedProofs[i] = cloned
+	}
+	segmentsonly := allsegments[0:indicesLen] // problematic
+	clonedSegs := make([][]byte, len(segmentsonly))
+	for i := range segmentsonly {
+		cloned := make([]byte, len(segmentsonly[i]))
+		copy(cloned, segmentsonly[i])
+		clonedSegs[i] = cloned
+	}
 	justifications = make([][]common.Hash, indicesLen)
 	for i, segmentIndex := range si.Indices {
 		pageSize := 1 << trie.PageFixedDepth
 		pageIdx := int(segmentIndex) / pageSize
-		pagedProofByte := pageproofs[pageIdx]
+		pagedProofByte := clonedProofs[pageIdx]
 		// Decode the proof back to segments and verify
 		decodedData, _, err := types.Decode(pagedProofByte, reflect.TypeOf(types.PageProof{}))
 		if err != nil {
@@ -2262,10 +2275,11 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		}
 		justifications[i] = fullJustification
 	}
-	if len(segmentsonly) != indicesLen {
-		log.Error(debugDA, "reconstructSegments", "l", len(segmentsonly), "l2", len(justifications))
+	if len(clonedSegs) != indicesLen {
+		log.Error(debugDA, "reconstructSegments", "l", len(clonedSegs), "l2", len(justifications))
 	}
-	return segmentsonly, justifications, nil
+
+	return clonedSegs, justifications, nil
 }
 
 // HERE we are in a AUDITING situation, if verification fails, we can still execute the work package by using CE140?
@@ -2286,7 +2300,9 @@ func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, 
 		requests[uint16(validatorIdx)] = req
 	}
 	// calling fetchall
-	n.FetchAllBundleAndSegmentShards(uint16(coreIndex), erasureRoot, exportedSegmentLength, true)
+	if attemptReconstruction {
+		n.FetchAllBundleAndSegmentShards(uint16(coreIndex), erasureRoot, exportedSegmentLength, true)
+	}
 
 	// Fetch shard responses
 	responses, err := n.makeRequests(requests, types.RecoveryThreshold, SmallTimeout, LargeTimeout)

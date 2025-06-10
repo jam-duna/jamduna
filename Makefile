@@ -23,6 +23,8 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD)
 GIT_FULL_COMMIT   := $(shell git rev-parse HEAD)
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
+BINARY := jamduna
+
 
 POLKAJAM_BIN ?= bin/polkajam
 # Linker flags to strip symbols and embed version info
@@ -33,15 +35,15 @@ GO_LDFLAGS := -s -w \
 
 ifeq ($(UNAME_S),Linux)
   ifeq ($(UNAME_M),x86_64)
-    BINARY := jamduna-linux-amd64
+    ARCH := linux-amd64
   else ifeq ($(UNAME_M),aarch64)
-    BINARY := jamduna-linux-arm64
+    ARCH := linux-arm64
   endif
 else ifeq ($(UNAME_S),Darwin)
   ifeq ($(UNAME_M),x86_64)
-    BINARY := jamduna-mac-amd64
+    ARCH := mac-amd64
   else ifeq ($(UNAME_M),arm64)
-    BINARY := jamduna-mac-arm64
+    ARCH := mac-arm64
   endif
 endif
 
@@ -52,17 +54,17 @@ spin_localclient: jam kill_jam jam_clean spin_5 spin_0
 spin_5:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@for i in 1 2 3 4 5; do \
-		$(OUTPUT_DIR)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain chainspecs/jamduna-spec.json  >logs/jamduna-$$i.log 2>&1 & \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain chainspecs/jamduna-spec.json  >logs/jamduna-$$i.log 2>&1 & \
 	done
 
 spin_0:
 	@for i in 0; do \
-		RUST_LOG=polkavm=trace, jam_node=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 run_1:
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@$(OUTPUT_DIR)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json
 
 run_5:
 	@for i in 0 1 2 3 4; do \
@@ -72,7 +74,7 @@ run_5:
 jam:
 	@echo "Building JAM...  "
 	mkdir -p $(OUTPUT_DIR)
-	go build -tags=  -o $(OUTPUT_DIR)/$(BINARY) .
+	go build -tags=  -o $(OUTPUT_DIR)/$(ARCH)/$(BINARY) .
 
 # ANSI color codes
 GREEN=\033[0;32m
@@ -176,7 +178,7 @@ run_polkajam_all:
 		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
 	done; \
 
-run_localclient: jam kill jam_clean run_5 run_1
+run_localclient: kill jam jam_clean run_5 run_1
 run_localclient_jam: jam_clean run_parallel_jam
 run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
 

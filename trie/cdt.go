@@ -9,8 +9,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-//"golang.org/x/crypto/blake2b"
-
+// "golang.org/x/crypto/blake2b"
 var H0 = make([]byte, 32)
 var H0Hash = common.BytesToHash(H0)
 var PageFixedDepth = 6
@@ -42,6 +41,7 @@ func NewCDMerkleTree(values [][]byte) *CDMerkleTree {
 	// Padding leaves to the next power of 2
 	// Equation(E.7) in GP 0.6.2
 	paddedLeaves := values
+
 	if len(values) != 1 {
 		paddedLeaves = padLeaves(values)
 	}
@@ -66,6 +66,23 @@ func NewCDMerkleTree(values [][]byte) *CDMerkleTree {
 }
 
 // padLeaves pads the leaves to the next power of 2
+func padLeaves64(values [][]byte) [][]byte {
+	n := len(values)
+	nextPowerOfTwo := 1
+	for nextPowerOfTwo < n {
+		nextPowerOfTwo <<= 1
+	}
+	for len(values) < nextPowerOfTwo {
+		values = append(values, H0)
+	}
+	for len(values) < 64 {
+		// mathcing on polkajam
+		values = append(values, H0)
+	}
+	return values
+}
+
+// padLeaves pads the leaves to the next power of 2
 func padLeaves(values [][]byte) [][]byte {
 	n := len(values)
 	nextPowerOfTwo := 1
@@ -81,9 +98,11 @@ func padLeaves(values [][]byte) [][]byte {
 func ComputePageIdx(exportedSegmentCnt int, index int) (pgIdx int, isFixedPadding bool) {
 	pageSize := 1 << PageFixedDepth
 	pgIdx = index / pageSize
+
 	if exportedSegmentCnt > pageSize {
 		isFixedPadding = true
 	}
+
 	return pgIdx, isFixedPadding
 }
 
@@ -108,13 +127,39 @@ func padLeafHashes(nonEmptyleafHashes []common.Hash, isFixedPadding bool) []comm
 	return leafHashes
 }
 
+func padLeafHashes64(nonEmptyleafHashes []common.Hash, isFixedPadding bool) []common.Hash {
+	leafHashes := make([]common.Hash, len(nonEmptyleafHashes))
+	copy(leafHashes, nonEmptyleafHashes)
+	fixedSize := 1 << PageFixedDepth
+	if isFixedPadding {
+		for len(leafHashes) < fixedSize {
+			leafHashes = append(leafHashes, H0Hash)
+		}
+		return leafHashes
+	}
+	n := len(leafHashes)
+	nextPowerOfTwo := 1
+	for nextPowerOfTwo < n {
+		nextPowerOfTwo <<= 1
+	}
+	for len(leafHashes) < nextPowerOfTwo {
+		leafHashes = append(leafHashes, H0Hash)
+	}
+	if len(leafHashes) < 64 {
+		leafHashes = append(leafHashes, H0Hash)
+	}
+	return leafHashes
+}
+
 func NewCDTSubtree(nonEmptyleafHashes []common.Hash, isFixedPadding bool) *CDMerkleTree {
 	if len(nonEmptyleafHashes) == 0 {
 		return &CDMerkleTree{
 			root: &CDTNode{Hash: H0},
 		}
 	}
-	paddedLeafHashes := padLeafHashes(nonEmptyleafHashes, isFixedPadding)
+	paddedLeafHashes := make([]common.Hash, 0)
+
+	paddedLeafHashes = padLeafHashes(nonEmptyleafHashes, isFixedPadding)
 
 	// Creating leaf nodes WITHOUT hashing & value
 	var leaves []*CDTNode
@@ -445,13 +490,13 @@ func GeneratePageProof(segments [][]byte) (pageProofBytes [][]byte, err error) {
 		}
 		// L_PageFixedDepth ----> collection of hashedleaves within the page (excluding empty H0)
 		localHashedLeaves, err := tree.GenerateLocalLeavesX(pageIdx, PageFixedDepth)
-		// (14.10) E(↕J6(s,i),↕L6(s,i))
+		// (14.11) E(↕J6(s,i),↕L6(s,i))
 		pageProof := types.PageProof{
 			JustificationX: globalJustification,
 			LeafHashes:     localHashedLeaves,
 		}
-		pageProofByte, encodeErr := types.Encode(pageProof)
-		if encodeErr != nil {
+		pageProofByte, err := types.Encode(pageProof)
+		if err != nil {
 			return pageProofBytes, err
 		}
 		pageProofBytes[pageIdx] = pageProofByte
@@ -477,7 +522,9 @@ func PageProofToFullJustification(pageProofByte []byte, pageIdx int, subTreeIdx 
 	isFixedPadding := true
 	if pageIdx == 0 && len(recoveredPageProof.LeafHashes) != pageSize {
 		// degenerated case
-		isFixedPadding = false
+
+		isFixedPadding = false // this should be the proper behavior
+
 	}
 
 	// extract J6(s,i) from the proof

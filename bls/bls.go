@@ -212,8 +212,12 @@ func Encode(data []byte, V int) ([][]byte, error) {
 // Decode reconstructs the original data from encoded shards.
 func Decode(shards [][]byte, V int, indexes []uint32, outputSize int) ([]byte, error) {
 	Cores := V / 3
-	if len(shards) != Cores || len(shards) != len(indexes) {
-		log.Crit("bls", "Decode FAIL", "len(shards)", len(shards), "len(indexes)", len(indexes))
+	if len(shards) < Cores {
+		log.Crit("bls", "Decode FAIL", "len(shards)", len(shards), "len(indexes)", len(indexes), "V", V)
+		return nil, errors.New("shardsLen <= core(V) length")
+	}
+	if len(shards) != len(indexes) {
+		log.Crit("bls", "Decode FAIL", "len(shards)", len(shards), "len(indexes)", len(indexes), "V", V)
 		return nil, errors.New("shards and indexes length mismatch")
 	}
 	

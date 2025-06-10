@@ -71,6 +71,11 @@ func (b *WorkPackageBundle) Validate() error {
 	return nil
 }
 
+func (b *WorkPackageBundle) StringL() string {
+	jsonByte, _ := json.MarshalIndent(b, "", "  ")
+	return string(jsonByte)
+}
+
 func (b *WorkPackageBundle) String() string {
 	jsonByte, _ := json.Marshal(b)
 	return string(jsonByte)
