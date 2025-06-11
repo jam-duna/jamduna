@@ -13,6 +13,7 @@ const jamTypes = [
     {value: "WorkPackage", label: "WorkPackage"},
     {value: "WorkPackageBundle", label: "WorkPackageBundle"},
     {value: "WorkReport", label: "WorkReport"},
+    {value: "PageProof", label: "PageProof"},
     {value: "WorkResult", label: "WorkResult"},
     {value: "Judgement", label: "Judgement"},
     {value: "ServiceAccount", label: "ServiceAccount"},

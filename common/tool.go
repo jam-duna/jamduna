@@ -158,6 +158,15 @@ func ConcatenateByteSlices(slices [][]byte) []byte {
 	return result
 }
 
+func ReversedHashArray(slices []Hash) []Hash {
+	n := len(slices)
+	rev := make([]Hash, n)
+	for i := 0; i < n; i++ {
+		rev[i] = slices[n-1-i]
+	}
+	return rev
+}
+
 func ReversedByteArray(slices [][]byte) [][]byte {
 	n := len(slices)
 	rev := make([][]byte, n)

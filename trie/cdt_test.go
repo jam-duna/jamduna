@@ -69,6 +69,7 @@ func TestPageProof(t *testing.T) {
 func TestCDT(t *testing.T) {
 
 	var TestingSegmentsNums = []int{0, 1, 2, 3, 5, 10, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
+	//var TestingSegmentsNums = []int{129}
 	//var TestingSegmentsNums = []int{3072}
 
 	//var TestingSegmentsNums []int
@@ -136,20 +137,27 @@ func testVerifyCDTJustificationX(t *testing.T, tree *CDMerkleTree, segments [][]
 
 		// Get justification for the leaf
 		globalJustification, err := tree.GenerateCDTJustificationX(index, PageFixedDepth)
-		if err != nil {
+		if debugCDT {
+			t.Logf("segmentLen=%d index=%d leafHash: %x\n", segmentLen, index, leafHash)
+			t.Logf("globalJustification(len=%d): %v\n", len(globalJustification), globalJustification)
+		} else if err != nil {
 			t.Logf("segmentLen=%d index=%d leafHash: %x\n", segmentLen, index, leafHash)
 			t.Logf("globalJustification(len=%d): %v\n", len(globalJustification), globalJustification)
 			t.Fatalf("GenerateCDTJustificationX failed: %v", err)
 		}
 
 		fullJustification, err := tree.GenerateCDTJustificationX(index, 0)
+
 		if err != nil {
 			t.Fatalf("GenerateLocalJustificationX fullJustification failed: %v", err)
 		}
 		derived_globalRoot_j0 := VerifyCDTJustificationX(leafHash, index, fullJustification, 0)
 		if !compareBytes(derived_globalRoot_j0, globalRoot) {
 			t.Logf("fullJustification(len=%d): %v\n", len(fullJustification), fullJustification)
-			t.Fatalf("fullJustification Root hash mismatch: expected %x, got %x", globalRoot, derived_globalRoot_j0)
+			t.Fatalf("fullJustification Root hash mismatch: expected %x | got %x", globalRoot, derived_globalRoot_j0)
+		} else if debugCDT {
+			t.Logf("fullJustification(len=%d): %v\n", len(fullJustification), fullJustification)
+			t.Logf("OK fullJustification segmentLen=%d index=%d leafHash: %x, Verified\n", segmentLen, index, leafHash)
 		}
 
 		localLeaves, err := tree.GenerateLocalLeavesX(pgIdx, PageFixedDepth)
@@ -161,13 +169,12 @@ func testVerifyCDTJustificationX(t *testing.T, tree *CDMerkleTree, segments [][]
 
 		// Verify the justification
 		derived_globalRoot_pg := VerifyCDTJustificationX(localPageRoot, pgIdx, globalJustification, 0)
-
 		if !compareBytes(derived_globalRoot_pg, globalRoot) {
 			t.Logf("localLeaves(len=%d): %v\n", len(localLeaves), localLeaves)
 			t.Logf("subTree localPageRoot: %x\n", localPageRoot)
-			t.Fatalf("Root hash mismatch: expected %x, got %x", globalRoot, derived_globalRoot_pg)
+			t.Fatalf("Local page Root hash mismatch: expected %x, got %x", globalRoot, derived_globalRoot_pg)
 		} else if debugCDT {
-			t.Logf("segmentLen=%d index=%d leafHash: %x, Verified\n", segmentLen, index, leafHash)
+			t.Logf("Local page Root segmentLen=%d index=%d leafHash: %x, Verified\n", segmentLen, index, leafHash)
 		}
 	}
 
@@ -199,6 +206,7 @@ func testPageProof(t *testing.T, tree *CDMerkleTree, segments [][]byte) {
 	if exportedSegmentLen == 0 {
 		return
 	}
+	//debugBPT := true
 	if debugBPT {
 		fmt.Printf("-------------------%d-------------------\n", exportedSegmentLen)
 	}
@@ -244,6 +252,8 @@ func testPageProof(t *testing.T, tree *CDMerkleTree, segments [][]byte) {
 			fullJustification, err := PageProofToFullJustification(pagedProofByte, pageIdx, subTreeIdx)
 			if err != nil {
 				t.Fatalf("fullJustification len: %d, PageProofToFullJustification ERR: %v.", len(fullJustification), err)
+			} else if debugCDT {
+				t.Logf("fullJustification len: %d, fullJustification %v", len(fullJustification), fullJustification)
 			}
 			derived_globalRoot_j0 := VerifyCDTJustificationX(leafHash.Bytes(), index, fullJustification, 0)
 			if !compareBytes(derived_globalRoot_j0, globalRoot) {

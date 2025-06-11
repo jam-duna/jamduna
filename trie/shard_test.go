@@ -42,7 +42,7 @@ func ecEncode(b []byte) (shards [][]byte, err error) {
 }
 
 func Test137Batch(t *testing.T) {
-	filepath := "test/full137resp_128.json"
+	filepath := "test/full137resp_1024.json"
 	testVectors, err := parse137Resp(filepath)
 	if err != nil {
 		t.Fatalf("Failed to parse 137 trace: %v", err)
@@ -58,7 +58,7 @@ func Test137Batch(t *testing.T) {
 }
 
 func TestSegs(t *testing.T) {
-	filepath := "test/full137resp_810.json"
+	filepath := "test/full137resp_1024.json"
 	testVectors, err := parse137Resp(filepath)
 	if err != nil {
 		t.Fatalf("Failed to parse 137 trace: %v", err)

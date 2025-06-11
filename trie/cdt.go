@@ -315,7 +315,7 @@ func (mt *CDMerkleTree) Get(index int) ([]byte, error) {
 }
 
 // GP 0.6.4 (E.5)
-// GenerateCDTJustificationX returns the justification for a given index and xDepth (function J_x)
+// GenerateCDTJustificationX returns the justification from root to leaf for a given index and xDepth (function J_x)
 func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, xDepth int) ([]common.Hash, error) {
 	x := 0
 	//x := xDepth
@@ -347,7 +347,6 @@ func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, xDepth int) ([]comm
 	}
 	if xDepth == 0 {
 		// full mode
-		return justification, nil
 	} else {
 		fullJustificationLen := len(justification)
 		if fullJustificationLen <= xDepth {
@@ -359,12 +358,12 @@ func (mt *CDMerkleTree) GenerateCDTJustificationX(index int, xDepth int) ([]comm
 		//J6 := fullJustification[J_Depth:]      // global justification above the page root
 		justification = justification[xDepth:]
 	}
-
-	return justification, nil
+	reversedJustification := common.ReversedHashArray(justification)
+	return reversedJustification, nil
 }
 
-func VerifyCDTJustificationX(leafHash []byte, index int, justification []common.Hash, x_depth int) []byte {
-	debugCDT := false
+func VerifyCDTJustificationX(leafHash []byte, index int, reversedJustification []common.Hash, x_depth int) []byte {
+	justification := common.ReversedHashArray(reversedJustification)
 	if debugCDT {
 		fmt.Printf("VerifyCDTJustificationX:\n")
 		fmt.Printf("  Starting hash: 0x%x\n", leafHash)
@@ -541,8 +540,8 @@ func PageProofToFullJustification(pageProofByte []byte, pageIdx int, subTreeIdx 
 		return nil, err
 	}
 
-	// combine global and subtree justification
-	fullJustification = append(subTreeJustification, globalJustification...)
+	// combine global and subtree justification => reverse(subTreeJustification, globalJustification)
+	fullJustification = append(globalJustification, subTreeJustification...)
 
 	if debugCDT {
 		fmt.Printf("!!! decoded pagedProof[%d]: %v\n", pageIdx, recoveredPageProof)

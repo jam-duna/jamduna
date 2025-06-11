@@ -73,6 +73,10 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var workReport types.WorkReport
 		err = json.Unmarshal(input, &workReport)
 		obj = workReport
+	case "PageProof":
+		var pageProof types.PageProof
+		err = json.Unmarshal(input, &pageProof)
+		obj = pageProof
 	case "WorkResult":
 		var workResult types.WorkResult
 		err = json.Unmarshal(input, &workResult)
@@ -226,6 +230,8 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkResult{}))
 	case "WorkReport":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkReport{}))
+	case "PageProof":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.PageProof{}))
 	case "WorkItem":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkItem{}))
 	case "C1":
