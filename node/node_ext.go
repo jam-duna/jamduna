@@ -17,7 +17,6 @@ import (
 )
 
 type WorkPackageRequest struct {
-	CoreIndex       uint16                `json:"core_index"`
 	WorkPackage     types.WorkPackage     `json:"work_package"`
 	ExtrinsicsBlobs types.ExtrinsicsBlobs `json:"extrinsic_blobs"`
 	Prerequisites   []string              `json:"prerequisites,omitempty"`

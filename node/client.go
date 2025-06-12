@@ -90,7 +90,6 @@ func (c *NodeClient) ConnectWebSocket(url string) error {
 	go c.listenWebSocket()
 	return nil
 }
-
 func (c *NodeClient) listenWebSocket() {
 	reconnectDelay := time.Second
 
@@ -435,9 +434,9 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 
 	var res string
 	// Call the remote RPC method
-	err = c.GetClient(workPackageReq.CoreIndex).Call("jam.SubmitWorkPackage", req, &res)
+	err = c.GetClient().Call("jam.SubmitWorkPackage", req, &res)
 	if err != nil {
-		log.Warn(module, "SubmitWorkPackage: jam.SubmitWorkPackage", "coreIndex", workPackageReq.CoreIndex, "err", err)
+		log.Warn(module, "SubmitWorkPackage: jam.SubmitWorkPackage", "err", err)
 		return err
 	}
 	return nil
@@ -497,7 +496,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			return workPackageHashes, err
 		}
 		workPackageLastStatus[hash] = "submitted"
-		log.Info(module, "Subscribe", "id", req.Identifier, "h", hash, "core", req.CoreIndex, "prereqids", req.Prerequisites, "h", req.WorkPackage.RefineContext.Prerequisites)
+		log.Info(module, "Subscribe", "id", req.Identifier, "h", hash, "prereqids", req.Prerequisites, "h", req.WorkPackage.RefineContext.Prerequisites)
 	}
 
 	// Wait for accumulation
@@ -761,6 +760,21 @@ func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok 
 
 }
 
+func (c *NodeClient) GetWorkReport(requestedHash common.Hash) (wr *types.WorkReport, err error) {
+	var jsonStr string
+	err = c.CallWithRetry("jam.WorkReport", []string{requestedHash.Hex()}, &jsonStr)
+	if err != nil {
+		return nil, err
+	}
+
+	var workReport types.WorkReport
+	err = json.Unmarshal([]byte(jsonStr), &workReport)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal work report: %w", err)
+	}
+	return &workReport, nil
+}
+
 func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName string, serviceCode []byte, serviceIDs []uint32) (newServiceIdx uint32, err error) {
 	serviceCodeHash := common.Blake2Hash(serviceCode)
 	fmt.Printf("**** NewService: serviceCodeHash: %s\n", serviceCodeHash.Hex())
@@ -799,7 +813,6 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	}
 
 	var wpr WorkPackageRequest
-	wpr.CoreIndex = 0 // this is OK
 	wpr.WorkPackage = codeWP
 	wpr.ExtrinsicsBlobs = types.ExtrinsicsBlobs{}
 	wpHash := codeWP.Hash()

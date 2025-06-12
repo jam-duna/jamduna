@@ -89,7 +89,7 @@ const (
 	MediumTimeout      = 10 * time.Second
 	LargeTimeout       = 12 * time.Second
 	VeryLargeTimeout   = 600 * time.Second
-	RefineTimeout      = 90 * time.Second
+	RefineTimeout      = 24 * time.Second
 	DefaultChannelSize = 200
 )
 
@@ -894,6 +894,16 @@ func (n *Node) GetSegmentsByRequestedHash(RequestedHash common.Hash) ([][]byte, 
 	return raw_segments, ExportedSegmentLength, nil
 }
 
+func (n *Node) GetWorkReport(requestedHash common.Hash) (wr *types.WorkReport, err error) {
+	specIndex := n.WorkReportSearch(requestedHash)
+	if specIndex == nil {
+		return nil, fmt.Errorf("GetWorkReport: WorkReportSearch(%s) not found", requestedHash.Hex())
+	}
+	wr = &(specIndex.WorkReport)
+	log.Debug(module, "GetWorkReport", "requestedHash", requestedHash.Hex(), "wr_hash", wr.Hash().Hex())
+	return wr, nil
+}
+
 func (n *Node) GetService(serviceIndex uint32) (sa *types.ServiceAccount, ok bool, err error) {
 	return n.getState().GetService(serviceIndex)
 }
@@ -948,6 +958,7 @@ type JNode interface {
 	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
 	SubmitAndWaitForWorkPackages(ctx context.Context, wpr []*WorkPackageRequest) ([]common.Hash, error)
 	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
+	GetWorkReport(requestedHash common.Hash) (*types.WorkReport, error)
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
 	GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error)
@@ -955,7 +966,7 @@ type JNode interface {
 }
 
 // RobustSubmitAndWaitForWorkPackages will retry SubmitAndWaitForWorkPackages up to 4 times
-func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*WorkPackageRequest) ([]common.Hash, error) {
+func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*WorkPackageRequest) (*types.WorkReport, error) {
 	var lastErr error
 	for attempt := 1; attempt <= maxRobustTries; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
@@ -963,13 +974,19 @@ func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*Wo
 
 		hashes, err := n.SubmitAndWaitForWorkPackages(ctx, reqs)
 		if err == nil {
-			return hashes, nil
+			wr, err := n.GetWorkReport(hashes[0])
+			if err != nil {
+				log.Error(module, "GetWorkReport ERR", "err", err)
+				return nil, fmt.Errorf("GetWorkReport failed: %w", err)
+			}
+			return wr, nil
 		}
 		lastErr = err
 		log.Warn(module, "RobustSubmitAndWaitForWorkPackages", "attempt", attempt, "err", err)
 		// small backoff between retries
-		time.Sleep(2 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
+
 	return nil, fmt.Errorf("all retries failed after %d attempts: %w", maxRobustTries, lastErr)
 }
 func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
@@ -1010,18 +1027,8 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 
 	// Submit each work package to a random peer on the assigned core
 	for _, req := range reqs {
-		peers := n.GetCoreCoWorkersPeers(uint16(req.CoreIndex))
-		if len(peers) == 0 {
-			return workPackageHashes, fmt.Errorf("no peers available for core index %d", req.CoreIndex)
-		}
-		selectedPeer := peers[rand0.Intn(len(peers))]
-
-		if err := selectedPeer.SendWorkPackageSubmission(ctx, req.WorkPackage, req.ExtrinsicsBlobs, req.CoreIndex); err != nil {
-			log.Warn(module, "Failed to submit work package", "identifier", req.Identifier, "err", err)
-			return workPackageHashes, err
-		}
-
-		log.Info(module, "Work package submitted", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex(), "core", req.CoreIndex)
+		n.SubmitWPSameCore(req.WorkPackage, req.ExtrinsicsBlobs)
+		log.Info(module, "Work package submitted", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex())
 	}
 
 	// Wait for accumulation
@@ -1053,13 +1060,13 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (common.Hash, error) {
 	//fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
 	wp.WorkPackage.RefineContext = n.getRefineContext()
-	peers := n.GetCoreCoWorkersPeers(uint16(wp.CoreIndex))
-	if err := peers[rand0.Intn(len(peers))].SendWorkPackageSubmission(ctx, wp.WorkPackage, wp.ExtrinsicsBlobs, wp.CoreIndex); err != nil {
-		log.Warn(module, "SubmitAndWaitForWorkPackage", "err", err)
-		return common.Hash{}, err
+	err := n.SubmitWPSameCore(wp.WorkPackage, wp.ExtrinsicsBlobs)
+	if err != nil {
+		log.Error(module, "SubmitAndWaitForWorkPackage", "err", err, "id", wp.Identifier)
+		return common.Hash{}, fmt.Errorf("SubmitAndWaitForWorkPackage: %w", err)
 	}
 	workPackageHash := wp.WorkPackage.Hash()
-	log.Info(module, "SubmitAndWaitForWorkPackage SUBMITTED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex(), "coreIndex", wp.CoreIndex)
+	log.Info(module, "SubmitAndWaitForWorkPackage SUBMITTED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex())
 
 	jceManager, _ := n.GetJCEManager()
 	if jceManager != nil {
@@ -1103,7 +1110,7 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 			for i := len(accumulationHistory) - 1; i >= 0; i-- {
 				for _, h := range accumulationHistory[i].WorkPackageHash {
 					if h == workPackageHash {
-						log.Info(module, "SubmitAndWaitForWorkPackage ACCUMULATED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex(), "coreIndex", wp.CoreIndex)
+						log.Info(module, "SubmitAndWaitForWorkPackage ACCUMULATED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex())
 						return workPackageHash, nil
 					}
 				}

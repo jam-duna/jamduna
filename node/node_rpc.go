@@ -885,10 +885,6 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 		log.Info(module, "SubmitWorkPackage error", "err", req)
 		return fmt.Errorf("invalid number of arguments")
 	}
-	if !j.nodeSelf.GetIsSync() {
-		log.Info(module, "SubmitWorkPackage error", "err", "node not synced")
-		return fmt.Errorf("node not synced")
-	}
 	var newReq WorkPackageRequest
 	if err := json.Unmarshal([]byte(req[0]), &newReq); err != nil {
 		log.Error(module, "SubmitWorkPackage", "err", err)
@@ -910,6 +906,24 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 
 	// json marshal the refine context
 	*res = refinecontext.String()
+	return nil
+}
+
+func (j *Jam) WorkReport(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments")
+	}
+
+	requestedHashStr := req[0]
+	requestedHash := common.HexToHash(requestedHashStr)
+	// Access statedb via Node reference
+	wr, err := j.nodeSelf.GetWorkReport(requestedHash)
+	if err != nil {
+		return fmt.Errorf("failed to get work report: %w", err)
+	}
+
+	// json marshal the work report
+	*res = wr.String()
 	return nil
 }
 

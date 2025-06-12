@@ -23,7 +23,6 @@ func flatten(data [][]byte) []byte {
 }
 
 func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN int, manifest bool) error {
-	coreIdx := 0
 	maxTargetN := targetN     // was 300000
 	game_of_life_port := 8080 //was 80
 	game_of_life_addr := fmt.Sprintf("localhost:%d", game_of_life_port)
@@ -127,16 +126,16 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("Game_of_life(%d)", game_of_life_n),
-			CoreIndex:       uint16(coreIdx),
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: extrinsics,
 		}
-		hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
 		if err != nil {
 			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
 			return err
 		}
-		workPackageHash := hashes[0]
+		// TODO: fix this
+		workPackageHash := wr.AvailabilitySpec.WorkPackageHash
 		if game_of_life_n == 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()

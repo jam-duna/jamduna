@@ -27,6 +27,10 @@ type WPQueueItem struct {
 func (n *Node) runWPQueue() {
 	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
+	if !n.GetIsSync() {
+		return
+	}
+
 	for range pulseTicker.C {
 		n.workPackageQueue.Range(func(key, value interface{}) bool {
 			wpItem := value.(*WPQueueItem)

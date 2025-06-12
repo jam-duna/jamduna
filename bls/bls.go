@@ -220,7 +220,7 @@ func Decode(shards [][]byte, V int, indexes []uint32, outputSize int) ([]byte, e
 		log.Crit("bls", "Decode FAIL", "len(shards)", len(shards), "len(indexes)", len(indexes), "V", V)
 		return nil, errors.New("shards and indexes length mismatch")
 	}
-	
+
 	// check if any indexes are repeated
 	seen := make(map[uint32]bool, len(indexes))
 	for _, index := range indexes {

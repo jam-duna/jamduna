@@ -182,7 +182,7 @@ func (n *Node) FetchAllInternalFullShardsForGuarantee(g types.Guarantee, verify 
 
 }
 
-const attemptReconstruction = true
+const attemptReconstruction = false
 
 // assureData, given a Guarantee with an AvailabilitySpec within a WorkReport,
 // fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA.

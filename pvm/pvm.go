@@ -29,6 +29,7 @@ const (
 
 var (
 	PvmLogging = false
+	PvmTrace   = false
 )
 
 type VM struct {
@@ -392,12 +393,11 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 
 	// vm.Mode = ...
 	// vm.Gas = types.IsAuthorizedGasAllocation
-	// log.Debug(vm.logging, "PVM Complete", "service", string(vm.ServiceMetadata), "pc", vm.pc)
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
-	} else {
-		//fmt.Printf("VM terminated with ResultCode: %d\n", vm.ResultCode)
+	} else if vm.ResultCode != types.RESULT_OK {
+		log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
 	}
 	return nil
 }
@@ -476,8 +476,8 @@ func (vm *VM) step(stepn int) error {
 	if PvmLogging {
 		registersJSON, _ := json.Marshal(vm.ReadRegisters())
 		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", " ")
-		//fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
-		fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
+		fmt.Printf("%s: %-18s step:%6d pc:%6d g:%6d Registers:%s\n", vm.Mode, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
+		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
 		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
 	}
 	return nil
@@ -611,6 +611,8 @@ func (vm *VM) HandleNoArgs(opcode byte) {
 	switch opcode {
 	case TRAP:
 		vm.ResultCode = types.RESULT_PANIC
+		log.Warn(vm.logging, "TRAP encountered", "service", string(vm.ServiceMetadata), "mode", vm.Mode, "pc", vm.pc)
+
 		vm.terminated = true
 	case FALLTHROUGH:
 		vm.pc += 1
@@ -637,6 +639,7 @@ func (vm *VM) HandleOneRegOneEWImm(opcode byte, operands []byte) {
 	registerIndexA := min(12, int(originalOperands[0])%16)
 	lx := 8
 	vx := types.DecodeE_l(originalOperands[1 : 1+lx])
+	dumpLoadImm("LOAD_IMM_64", registerIndexA, uint64(vx), vx, 64, false)
 	vm.WriteRegister(registerIndexA, uint64(vx))
 }
 
@@ -703,7 +706,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		vm.djump((valueA + vx) % (1 << 32))
 	case LOAD_IMM:
 		vm.WriteRegister(registerIndexA, vx)
-		dumpLoadGeneric("LOAD_IMM", registerIndexA, uint64(addr), vx, 64, false)
+		dumpLoadImm("LOAD_IMM", registerIndexA, uint64(addr), vx, 64, false)
 	case LOAD_U8:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 1)
 		if errCode == OK {
@@ -902,6 +905,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 	switch opcode {
 	case LOAD_IMM_JUMP:
 		vm.WriteRegister(registerIndexA, vx)
+		dumpLoadImmJump("LOAD_IMM_JUMP", registerIndexA, vx)
 		vm.branch(vy, true)
 
 	case BRANCH_EQ_IMM:
@@ -1010,9 +1014,7 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 	switch opcode {
 	case MOVE_REG:
 		result, _ = vm.ReadRegister(registerIndexA)
-		if PvmTrace {
-			dumpMov(registerIndexD, registerIndexA, result)
-		}
+		dumpMov(registerIndexD, registerIndexA, result)
 	case SBRK:
 		if valueA == 0 {
 			vm.WriteRegister(registerIndexD, uint64(vm.Ram.current_heap_pointer))
@@ -1031,59 +1033,37 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 			vm.Ram.allocatePages(idx_start, page_count)
 		}
 		vm.Ram.current_heap_pointer = uint32(new_heap_pointer)
-		if PvmTrace {
-			fmt.Printf("\tSBRK             %s = sbrk(%x) = 0x%x\n", reg(registerIndexD), valueA, result)
-		}
+		dumpTwoRegs("SBRK", registerIndexD, registerIndexA, valueA, result)
 	case COUNT_SET_BITS_64:
 		result = uint64(bits.OnesCount64(valueA))
-		if PvmTrace {
-			fmt.Printf("\tCOUNT_SET_BITS_64  %s = popcnt64(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("COUNT_SET_BITS_64", registerIndexD, registerIndexA, valueA, result)
 	case COUNT_SET_BITS_32:
 		result = uint64(bits.OnesCount32(uint32(valueA)))
-		if PvmTrace {
-			fmt.Printf("\tCOUNT_SET_BITS_32  %s = popcnt32(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("COUNT_SET_BITS_32", registerIndexD, registerIndexA, valueA, result)
 	case LEADING_ZERO_BITS_64:
 		result = uint64(bits.LeadingZeros64(valueA))
-		if PvmTrace {
-			fmt.Printf("\tLZCNT64           %s = lzcnt64(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("LEADING_ZERO_BITS_64", registerIndexD, registerIndexA, valueA, result)
 	case LEADING_ZERO_BITS_32:
 		result = uint64(bits.LeadingZeros32(uint32(valueA)))
-		if PvmTrace {
-			fmt.Printf("\tLZCNT32           %s = lzcnt32(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("LEADING_ZERO_BITS_32", registerIndexD, registerIndexA, valueA, result)
 	case TRAILING_ZERO_BITS_64:
 		result = uint64(bits.TrailingZeros64(valueA))
-		if PvmTrace {
-			fmt.Printf("\tTZCNT64           %s = tzcnt64(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("TRAILING_ZERO_BITS_64", registerIndexD, registerIndexA, valueA, result)
 	case TRAILING_ZERO_BITS_32:
 		result = uint64(bits.TrailingZeros32(uint32(valueA)))
-		if PvmTrace {
-			fmt.Printf("\tTZCNT32           %s = tzcnt32(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("TRAILING_ZERO_BITS_32", registerIndexD, registerIndexA, valueA, result)
 	case SIGN_EXTEND_8:
 		result = uint64(int8(valueA & 0xFF))
-		if PvmTrace {
-			fmt.Printf("\tSIGN_EXTEND_8     %s = sext.b(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("SIGN_EXTEND_8", registerIndexD, registerIndexA, valueA, result)
 	case SIGN_EXTEND_16:
 		result = uint64(int16(valueA & 0xFFFF))
-		if PvmTrace {
-			fmt.Printf("\tSIGN_EXTEND_16    %s = sext.h(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("SIGN_EXTEND_16", registerIndexD, registerIndexA, valueA, result)
 	case ZERO_EXTEND_16:
 		result = valueA & 0xFFFF
-		if PvmTrace {
-			fmt.Printf("\tZERO_EXTEND_16    %s = zext.h(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("ZERO_EXTEND_16", registerIndexD, registerIndexA, valueA, result)
 	case REVERSE_BYTES:
 		result = bits.ReverseBytes64(valueA)
-		if PvmTrace {
-			fmt.Printf("\tREVERSE_BYTES     %s = revbytes(%s = %x) = %x\n", reg(registerIndexD), reg(registerIndexA), valueA, result)
-		}
+		dumpTwoRegs("REVERSE_BYTES", registerIndexD, registerIndexA, valueA, result)
 	default:
 		vm.ResultCode = types.PVM_PANIC
 		vm.terminated = true
@@ -1632,6 +1612,15 @@ func reg(index int) string {
 	if index == 1 {
 		return "sp"
 	}
+	if index == 2 {
+		return "t0"
+	}
+	if index == 3 {
+		return "t1"
+	}
+	if index == 4 {
+		return "t2"
+	}
 	if index == 5 {
 		return "s0"
 	}
@@ -1653,8 +1642,8 @@ func reg(index int) string {
 	if index == 11 {
 		return "a4"
 	}
-	if index == 4 {
-		return "t2"
+	if index == 12 {
+		return "a5"
 	}
 	if index < 0 || index > 15 {
 		return fmt.Sprintf("R%d", index)

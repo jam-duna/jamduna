@@ -151,7 +151,7 @@ func addChain(blk_tree *BlockTree, merge_point *BT_Node, num int, start_slot uin
 }
 
 func TestFindGhost(t *testing.T) {
-t.Skip("Temporarily disabled for debugging")
+	t.Skip("Temporarily disabled for debugging")
 	// setup a chain with two forks
 	tmp_hash := common.Hash{}
 	blockNode := &BT_Node{
@@ -228,7 +228,7 @@ func TestFindHeaviestChain(t *testing.T) {
 }
 
 func TestFindHeaviestChainTwoChain(t *testing.T) {
-t.Skip("Temporarily disabled for debugging")
+	t.Skip("Temporarily disabled for debugging")
 	// setup a chain with two forks
 	tmp_hash := common.Hash{}
 	blockNode := &BT_Node{

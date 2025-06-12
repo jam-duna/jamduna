@@ -1222,13 +1222,14 @@ func (vm *VM) hostWrite() {
 		//l = uint64(len(v))
 	}
 	a.WriteStorage(a.ServiceIndex, mu_k, k, v)
+	vm.ResultCode = OK
 	vm.HostResultCode = OK
 	val_len := uint64(len(v))
 	if !exists {
 		if val_len > 0 {
 			a.NumStorageItems++
 			a.StorageSize += (32 + val_len)
-			log.Debug(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Trace(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		}
 		vm.WriteRegister(7, NONE)
 	} else {

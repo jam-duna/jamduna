@@ -337,6 +337,10 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	for _, service := range services {
 		// this is parallelizable
 		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service)
+		if XY == nil {
+			log.Warn(module, "SingleAccumulate returned nil XContext", "service", service)
+			continue
+		}
 		output_u += U
 		empty := common.Hash{}
 		GasUsage = append(GasUsage, Usage{
@@ -513,7 +517,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					Y: workResult.PayloadHash,
 					D: workResult.Result,
 				}
-				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
+				log.Trace(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
 				p = append(p, o)
 			}
 		}
@@ -525,8 +529,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if !ok {
 		serviceAccount, ok, err = sd.GetService(s)
 		if err != nil || !ok {
-			// how did we even get here
-			panic("Unknown service")
+			log.Error(module, "GetService ERR", "ok", ok, "err", err, "s", s)
+			return
 		}
 	}
 	xContext := sd.NewXContext(o, s, serviceAccount)
@@ -545,7 +549,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		pvmContext = log.PvmAuthoring
 	}
 	vm.SetPVMContext(pvmContext)
-
 	t := sd.JamState.SafroleState.Timeslot
 	vm.Timeslot = t
 	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)

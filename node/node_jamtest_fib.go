@@ -7,66 +7,28 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
-func parseExportRoots(exportRootsStr string) []common.Hash {
-	exportedRoots := []common.Hash{}
-	for _, rootStr := range strings.Split(exportRootsStr, "|") {
-		if len(rootStr) == 0 {
-			continue
-		}
-		exportedRoot := common.HexToHash(rootStr)
-
-		exportedRoots = append(exportedRoots, exportedRoot)
-	}
-	return exportedRoots
-}
-
 func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	log.Info(module, "FIB START", "targetN", targetN)
-	fn := "../trie/test/exportedRoots.json"
-	exportedRoots, err := trie.ParseExportedRoots(fn)
-	if err != nil {
-		fmt.Printf("Error parsing exported roots: %v\n", err)
-		return
-	}
-	for i, root := range exportedRoots {
-		fmt.Printf("ExportedRoot[%d]: %s\n", i, root.Hex())
-	}
 
 	service0 := testServices["fib"]
 	serviceAuth := testServices["auth_copy"]
-	coreIdx := uint16(0)
+
 	isDry := false
-	isWithImport := true
-	//startCase := 3
-
-	// 10 => 25 cases from TestCDT to have fib generate that many exported segments and capture the data
-	// TODO: 2, 3, 5, 10, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
-	//var TestingSegmentsNums = []int{0, 1, 2, 64, 128, 256, 512, 1024, 2048}
-	var TestingSegmentsNums = []int{2, 3, 5, 10, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
-
-	//var prevWP common.Hash
-	for case_i, fibN := range TestingSegmentsNums {
+	var prevExportSegmentRoot common.Hash
+	for fibN := 1; fibN < targetN; fibN++ {
 		imported := []types.ImportSegment{}
-		requestedHash := common.Hash{} // requestedHash (via workpackageHash or ExportRoots)
-		if isWithImport {              /* disabled for now since polkajam doesn't support importing segments*/
-			if fibN > 1 && case_i > 0 {
-				finN_prev := TestingSegmentsNums[case_i-1]
-				fibN_previous_exported := exportedRoots[finN_prev]
-				requestedHash = fibN_previous_exported
-				imported = append(imported, types.ImportSegment{
-					RequestedHash: requestedHash,
-					Index:         uint16(finN_prev - 1),
-				})
-			}
+		if fibN > 1 {
+			imported = append(imported, types.ImportSegment{
+				RequestedHash: prevExportSegmentRoot,
+				Index:         0, // TODO: add variety
+			})
 		}
 
 		payload := make([]byte, 4)
@@ -100,26 +62,27 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 
 		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("FIB(%d)", fibN),
-			CoreIndex:       coreIdx,
+			Identifier: fmt.Sprintf("FIB(%d)", fibN),
+
 			WorkPackage:     wp,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
-		fmt.Printf("CASE#%d FIB(%d) WORK PACKAGE: %s. WP=%v\n", case_i, fibN, wpr.Identifier, wp.String())
 
 		if !isDry {
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-			hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+			wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
 			cancel()
 			if err != nil {
 				log.Error(module, "SubmitAndWaitForWorkPackages ERR", "err", err)
 				return
 			}
-			requestedHash = hashes[0]
-			fmt.Printf("FIB(%d) WORK PACKAGE HASH | RequestHash: %s\n", fibN, requestedHash)
+
+			prevExportSegmentRoot = wr.AvailabilitySpec.ExportedSegmentRoot
 			k := common.ServiceStorageKey(statedb.FibServiceCode, []byte{0})
 			data, _, _ := n1.GetServiceStorage(statedb.FibServiceCode, k)
-			log.Info(module, wpr.Identifier, "result", fmt.Sprintf("%x", data))
+			log.Info(module, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
+		} else {
+			log.Info(module, wpr.Identifier, "workPackageHash", wp.Hash(), "wp", wp.String())
 		}
 	}
 }
@@ -130,7 +93,6 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) err
 	jamKey := []byte("jam")
 	service0 := testServices["corevm"]
 	serviceAuth := testServices["auth_copy"]
-	coreIdx := uint16(1)
 
 	childSvc, _ := getServices([]string{"corevm_child"}, false)
 	childCodeHash := childSvc["corevm_child"].CodeHash
@@ -209,18 +171,17 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) err
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("FIB2(%s)", label),
-			CoreIndex:       coreIdx,
 			WorkPackage:     wp,
 			ExtrinsicsBlobs: extrinsics,
 		}
 
-		hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
 		cancel()
 		if err != nil {
 			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
 			return err
 		}
-		prevWP = hashes[0]
+		prevWP = wr.AvailabilitySpec.ExportedSegmentRoot
 
 		// inspect storage keys [0,1,2,5,6,7,8,9]
 		for _, key := range []byte{0, 1, 2, 5, 6, 7, 8, 9} {

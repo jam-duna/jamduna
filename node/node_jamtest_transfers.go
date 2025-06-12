@@ -33,7 +33,6 @@ func transfer(n1 JNode, testServices map[string]*types.TestService, transferNum 
 		ImportedSegments:   make([]types.ImportSegment, 0),
 		ExportCount:        0,
 	}
-	core := 0
 
 	sa0, _, _ := n1.GetService(service0.ServiceCode)
 	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa0.Balance)
@@ -132,8 +131,8 @@ func transfer(n1 JNode, testServices map[string]*types.TestService, transferNum 
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
 			n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-				WorkPackage:     wp,
-				CoreIndex:       uint16(core),
+				WorkPackage: wp,
+
 				ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 			})
 		case success := <-transferSuccessful:
@@ -173,8 +172,6 @@ func scaled_transfer(n1 JNode, testServices map[string]*types.TestService, trans
 		ImportedSegments:   make([]types.ImportSegment, 0),
 		ExportCount:        0,
 	}
-
-	core := 0
 
 	sa0, _, _ := n1.GetService(service0.ServiceCode)
 	fmt.Printf("\033[38;5;208mtransfer_0\033[0m initial balance: \033[32m%v\033[0m\n", sa0.Balance)
@@ -280,7 +277,7 @@ func scaled_transfer(n1 JNode, testServices map[string]*types.TestService, trans
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 			defer cancel()
 			n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-				CoreIndex:       uint16(core),
+
 				WorkPackage:     wp,
 				ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 			})
@@ -584,7 +581,7 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
+
 		WorkPackage:     create_asset_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -650,7 +647,6 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 		}
 
 		_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-			CoreIndex:       0,
 			WorkPackage:     mint_workPackage,
 			ExtrinsicsBlobs: extrinsicsBytes,
 		})
@@ -716,7 +712,6 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	}
 
 	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     mint_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -778,7 +773,6 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	}
 
 	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     bond_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -835,7 +829,6 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	}
 
 	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     unbond_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -897,7 +890,6 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	}
 
 	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     transfer_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -1001,7 +993,6 @@ func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targe
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     create_asset_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -1069,7 +1060,6 @@ func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targe
 	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     mint_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -1150,7 +1140,6 @@ func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targe
 	defer cancel()
 
 	_, err = n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     transfer_workPackage,
 		ExtrinsicsBlobs: extrinsicsBytes,
 	})
@@ -1274,7 +1263,6 @@ func blake2b(n1 JNode, testServices map[string]*types.TestService) {
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	_, err := n1.SubmitAndWaitForWorkPackage(ctx, &WorkPackageRequest{
-		CoreIndex:       0,
 		WorkPackage:     workPackage,
 		ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 	})

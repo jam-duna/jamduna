@@ -374,18 +374,18 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING SPEC"),
+	log.Trace(debugG, "executeWorkPackageBundle OUTGOING SPEC",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
 	)
-	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING REPORT"),
+	log.Debug(debugG, "executeWorkPackageBundle OUTGOING REPORT",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"workReport", workReport.String(),
 	)
 
-	log.Info(debugG, fmt.Sprintf("executeWorkPackageBundle OUTGOING REPORT BYTES"),
+	log.Trace(debugG, "executeWorkPackageBundle OUTGOING REPORT BYTES",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),

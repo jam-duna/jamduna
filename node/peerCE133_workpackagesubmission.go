@@ -122,7 +122,6 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	defer stream.Close()
 	// --> Core Index ++ Work Package
 	var newReq JAMSNPWorkPackage
-	log.Info(debugG, "onWorkPackageSubmission", "msg", len(msg))
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {

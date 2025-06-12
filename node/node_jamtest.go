@@ -192,7 +192,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	//fmt.Printf("jamtest: jam=%s | isDisputeMode=%v | raw=%v\n", jam, isDisputeMode, jam_raw)
 
 	// Specify testServices
-	targetedFinalityDelay := 0 // TODO: write key to levelDB for starting time slot
+	targetedFinalityDelay := 5 // TODO: write key to levelDB for starting time slot
 	defaultDelay := time.Duration(targetedFinalityDelay*types.SecondsPerSlot) * time.Second
 	var serviceNames []string
 	switch jam {
@@ -378,7 +378,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("NewService(%s, %s)", serviceName, common.Str(service.CodeHash)),
 			WorkPackage:     codeWorkPackage,
-			CoreIndex:       0,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
 
@@ -495,7 +494,6 @@ func auth_copy(n1 JNode, testServices map[string]*types.TestService, targetN int
 		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("Auth(%d)", fibN),
-			CoreIndex:       1,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}

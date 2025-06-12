@@ -1,6 +1,6 @@
 #!/bin/bash
 
-code_file=./services/fib.pvm
+code_file=./services/bootstrap.pvm
 default_balance=1000000
 jamt_bin_file=bin/jamt
 # get the hex of bytecode

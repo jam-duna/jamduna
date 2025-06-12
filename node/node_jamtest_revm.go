@@ -49,7 +49,6 @@ func revm(n1 JNode, testServices map[string]*types.TestService) {
 		defer cancel()
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("Revm(%d)", N),
-			CoreIndex:       0,
 			WorkPackage:     workPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}

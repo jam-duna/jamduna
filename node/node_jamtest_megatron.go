@@ -17,7 +17,6 @@ import (
 
 func makeWorkPackageRequest(coreIndex uint16, identifier string, prerequisites []string, extrinsics types.ExtrinsicsBlobs, workItems []types.WorkItem) *WorkPackageRequest {
 	return &WorkPackageRequest{
-		CoreIndex:       coreIndex,
 		Identifier:      identifier,
 		Prerequisites:   prerequisites,
 		ExtrinsicsBlobs: extrinsics,
@@ -103,12 +102,13 @@ func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int)
 		defer cancel()
 
 		wprs := []*WorkPackageRequest{wprFibTrib, wprMeg}
-		hashes, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, wprs)
+		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, wprs)
 		if err != nil {
 			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
 			return err
 		}
-		workPackageHashes = hashes
+		// TODO: fix this
+		workPackageHashes = []common.Hash{wr.AvailabilitySpec.WorkPackageHash}
 
 		printServiceOutput := func(service *types.TestService, label string) {
 			val, ok, err := n1.GetServiceStorage(service.ServiceCode, common.ServiceStorageKey(service.ServiceCode, []byte{0}))

@@ -112,20 +112,19 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	vm.Mode = "authorization"
 	// 0.6.6 E_2(c) only
 	// a := common.Uint16ToBytes(c)
-	// 0.6.5 E(p, c)
+	// 0.6.5 E(p_p, p, c)  (non-GP Compliant)
+	p_p, _ := types.Encode(p.ParameterizationBlob)
 	p_bytes, _ := types.Encode(p)
 	c_bytes, _ := types.Encode(uint16(c))
-	a := append(p_bytes, c_bytes...)
-	a = append(a, []byte{0}...) // HACK: THIS IS NOT REALLY 6.5 compliant, its varint but we'll hack it for now to match
+	a := append(p_p, p_bytes...)
+	a = append(a, c_bytes...)
 	vm.Gas = types.IsAuthorizedGasAllocation
-	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x\n", c, len(p_bytes), len(c_bytes),
-	// 	len(a), a)
+	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
 	vm.Standard_Program_Initialization(a) // eq 264/265
 	vm.Execute(types.EntryPointAuthorization, false)
 	r, _ = vm.getArgumentOutputs()
 	return r
 }
-
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	if vm.ResultCode == types.PVM_OOG {
 		r.Err = types.RESULT_OOG
@@ -145,6 +144,6 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		return r, res
 	}
 	r.Err = types.RESULT_PANIC
-	log.Debug(vm.logging, "getArgumentOutputs - PANIC", "service", string(vm.ServiceMetadata))
+	log.Debug(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 	return r, 0
 }

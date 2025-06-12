@@ -195,7 +195,9 @@ const (
 	MIN_U         = 230
 )
 
-var PvmTrace = false
+const (
+	prefixTrace = "TRACE polkavm::interpreter"
+)
 
 func branchCondSymbol(name string) string {
 	switch name {
@@ -224,11 +226,25 @@ func branchCondSymbol(name string) string {
 	}
 }
 
+var PvmInterpretation = false
+
 func dumpStoreGeneric(_ string, addr uint64, regOrSrc string, value uint64, bits int) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\tu%d [0x%x] = %s = 0x%x\n", bits, addr, regOrSrc, value)
+	valueStr := fmt.Sprintf("0x%x", value)
+	if valueStr == regOrSrc {
+		fmt.Printf("%s u%d [0x%x] = 0x%x\n", prefixTrace, bits, addr, value)
+	} else {
+		fmt.Printf("%s u%d [0x%x] = %s = 0x%x\n", prefixTrace, bits, addr, regOrSrc, value)
+	}
+}
+
+func dumpLoadImmJump(_ string, registerIndexA int, vx uint64) {
+	if !PvmTrace {
+		return
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(registerIndexA), vx)
 }
 
 func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
@@ -239,71 +255,99 @@ func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int
 	if signed {
 		prefix = "i"
 	}
-	fmt.Printf("\t%s = %s%d[0x%x] = 0x%x\n", reg(regA), prefix, bits, addrOrVx, value)
-	fmt.Printf("\t%s = 0x%x\n", reg(regA), value)
+	if PvmInterpretation {
+		fmt.Printf("\t%s = %s%d[0x%x] = 0x%x\n", reg(regA), prefix, bits, addrOrVx, value)
+	}
+	fmt.Printf("%s %s = %s%d [0x%x] = 0x%x\n", prefixTrace, reg(regA), prefix, bits, addrOrVx, value)
+}
+
+func dumpLoadImm(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
+	if !PvmTrace {
+		return
+	}
+	prefix := "u"
+	if signed {
+		prefix = "i"
+	}
+	if PvmInterpretation {
+		fmt.Printf("\t%s = %s%d[0x%x] = 0x%x\n", reg(regA), prefix, bits, addrOrVx, value)
+	}
+
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(regA), value)
 }
 
 func dumpMov(regD, regA int, result uint64) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\t%s = %s \n", reg(regD), reg(regA))
-	fmt.Printf("\t%s = 0x%x\n", reg(regD), result)
+	if PvmInterpretation {
+		fmt.Printf("\t%s = %s \n", reg(regD), reg(regA))
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(regD), result)
 }
 
 func dumpThreeRegOp(opname string, regD, regA, regB int, _, _, result uint64) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\t%s = %s %s %s\n", reg(regD), reg(regA), opname, reg(regB))
-	fmt.Printf("\t%s = 0x%x\n", reg(regD), result)
+	if PvmInterpretation {
+		fmt.Printf("\t%s = %s %s %s\n", reg(regD), reg(regA), opname, reg(regB))
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(regD), result)
 }
 
 func dumpBinOp(name string, regA, regB int, vx, result uint64) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\t%s = %s %s 0x%x\n", reg(regA), reg(regB), name, vx)
-	fmt.Printf("\t%s = 0x%x\n", reg(regA), result)
+	if PvmInterpretation {
+		fmt.Printf("\t%s = %s %s 0x%x\n", reg(regA), reg(regB), name, vx)
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(regA), result)
 }
 
 func dumpCmpOp(name string, regA, regB int, vx, result uint64) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\t%s = %s %s 0x%x\n", reg(regA), name, reg(regB), vx)
-	fmt.Printf("\t%s = 0x%x\n", reg(regA), result)
+	if PvmInterpretation {
+		fmt.Printf("\t%s = %s %s 0x%x\n", reg(regA), name, reg(regB), vx)
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(regA), result)
 }
 
 func dumpShiftOp(name string, regA, regB int, shift, result uint64) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\t%s = %s %s %x\n", reg(regA), reg(regB), name, shift)
-	fmt.Printf("\t%s = 0x%x\n", reg(regA), result)
+	if PvmInterpretation {
+		fmt.Printf("\t%s = %s %s %x\n", reg(regA), reg(regB), name, shift)
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(regA), result)
 }
 
 func dumpRotOp(_ string, regDst, src string, shift, result uint64) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\t%s = rotR %s by %x = %x\n", regDst, src, shift, result)
+	fmt.Printf("%s %s = rotR %s by %x = %x\n", prefixTrace, regDst, src, shift, result)
 }
 
 func dumpCmovOp(name string, regA, regB int, _, _, result uint64, _ bool) {
 	if !PvmTrace {
 		return
 	}
-
-	fmt.Printf("\t%s = if %s %s\n", reg(regA), reg(regB), name)
-	fmt.Printf("\t%s = 0x%x\n", reg(regA), result)
+	if PvmInterpretation {
+		fmt.Printf("\t%s = if %s %s\n", reg(regA), reg(regB), name)
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(regA), result)
 }
 
 func dumpJumpOffset(_ string, offset int64, pc uint64) {
 	if !PvmTrace {
 		return
 	}
-	fmt.Printf("\tjump %d\n", uint64(int64(pc)+int64(offset)))
+	fmt.Printf("*** jump %d\n", int64(int64(pc)+int64(offset)))
 }
 
 func dumpBranch(name string, regA, regB int, valueA, valueB, vx uint64, taken bool) {
@@ -311,9 +355,11 @@ func dumpBranch(name string, regA, regB int, valueA, valueB, vx uint64, taken bo
 		return
 	}
 	cond := branchCondSymbol(name)
-	fmt.Printf("\tjump %d if %s (%x) %s %s (%x)\n", vx, reg(regA), valueA, cond, reg(regB), valueB)
+	if PvmInterpretation {
+		fmt.Printf("\tjump %d if %s (%x) %s %s (%x)\n", vx, reg(regA), valueA, cond, reg(regB), valueB)
+	}
 	if taken {
-		fmt.Printf("\t*** jumped to %d\n", vx)
+		fmt.Printf("*** jumped to %d\n", vx)
 	}
 }
 
@@ -322,9 +368,11 @@ func dumpBranchImm(name string, regA int, _, vx, vy uint64, _, taken bool) {
 		return
 	}
 	cond := branchCondSymbol(name)
-	fmt.Printf("\tjump %d if %s %s 0x%x\n", vy, reg(regA), cond, vx)
+	if PvmInterpretation {
+		fmt.Printf("\tjump %d if %s %s 0x%x\n", vy, reg(regA), cond, vx)
+	}
 	if taken {
-		fmt.Printf("\t*** jumped to %d\n", vy)
+		fmt.Printf("*** jumped to %d\n", vy)
 	}
 }
 
@@ -333,4 +381,52 @@ func boolToUint(b bool) uint64 {
 		return 1
 	}
 	return 0
+}
+
+// dumpTwoRegs prints a two-register operation trace.
+// op is the opcode name (e.g. "COUNT_SET_BITS_64"), dest/src are register indices,
+// valueA is the source register value, and result is the computed result.
+func dumpTwoRegs(op string, destReg, srcReg int, valueA, result uint64) {
+	if !PvmTrace {
+		return
+	}
+
+	// map opcode to the short function name used in the dump
+	var fnName string
+	switch op {
+	case "COUNT_SET_BITS_64":
+		fnName = "popcnt64"
+	case "COUNT_SET_BITS_32":
+		fnName = "popcnt32"
+	case "LEADING_ZERO_BITS_64":
+		fnName = "lzcnt64"
+	case "LEADING_ZERO_BITS_32":
+		fnName = "lzcnt32"
+	case "TRAILING_ZERO_BITS_64":
+		fnName = "tzcnt64"
+	case "TRAILING_ZERO_BITS_32":
+		fnName = "tzcnt32"
+	case "SIGN_EXTEND_8":
+		fnName = "sext.b"
+	case "SIGN_EXTEND_16":
+		fnName = "sext.h"
+	case "ZERO_EXTEND_16":
+		fnName = "zext.h"
+	case "REVERSE_BYTES":
+		fnName = "revbytes"
+	default:
+		fnName = op
+	}
+	if PvmInterpretation {
+		fmt.Printf("\t%s  %s = %s(%s = %x) = %x\n",
+			op,
+			reg(destReg),
+			fnName,
+			reg(srcReg),
+			valueA,
+			result,
+		)
+	}
+	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(destReg), result)
+
 }
